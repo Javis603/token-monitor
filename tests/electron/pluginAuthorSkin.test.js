@@ -80,7 +80,7 @@ test('actual settings candidate and saveSettings rollback commit palette + snaps
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-preset-save-')); t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const file = path.join(dir, 'settings.json'); writePrivateJsonAtomic(file, old);
   let fail = true; const writes = [];
-  Object.assign(h, { settings: structuredClone(old), previousSettingsState: structuredClone(old), persistedSettingsSnapshot: structuredClone(old),
+  Object.assign(h, { limitContext: {}, settings: structuredClone(old), previousSettingsState: structuredClone(old), persistedSettingsSnapshot: structuredClone(old),
     cloneSettingsSnapshot: structuredClone, normalizeSyncContentState: value => value || {}, syncContentContext: value => value,
     contentRuntime: { beforeDestinationChange() {} }, ensureCredentialStore: () => ({ readDocument: () => ({}), replaceSettingsCredentials() {}, writeDocument() {} }), settingsPath: file, refreshTrayContextMenu() {}, reportCredentialStorageError() {},
     persistSettingsAndCredentials: args => persistSettingsAndCredentials({ ...args, writeSettings: (target, value) => { if (fail) throw Error('disk full'); writePrivateJsonAtomic(target, value); writes.push(structuredClone(value)); } }) });

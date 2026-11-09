@@ -17171,9 +17171,13 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
         : providerName === 'cline' && source === 'cline-signin'
           ? 'settings.cline.statusSignin'
           : null;
-    // Only the Kimi credential chain produces a 'desktop' source (the Kimi
-    // Work desktop app session picked up automatically on Windows).
-    if (source === 'desktop') return t(`settings.${providerName}.statusDesktop`);
+    // Discovery only tells us which credentials exist, not which lane supplied
+    // the quota. A Code API result stays primary even with desktop supplements.
+    if (providerName === 'kimi') {
+      if (provider.source === 'web' && provider.sourceDetail === 'app') return t('settings.kimi.statusDesktop');
+      const sourceKey = provider.source === 'api' ? 'kimiApiKeySource' : 'kimiWebAccessTokenSource';
+      source = state.settings?.[sourceKey] || source;
+    }
     return t(linkedKey || (source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`));
   }
   if (accountStatus === 'invalid') {
@@ -17462,11 +17466,12 @@ function renderExternalProviderStatus(providerName) {
     openBtn.classList.remove('hidden');
   }
   const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')
-    || (providerName === 'cline' && source === 'cline-signin');
+    || (providerName === 'cline' && source === 'cline-signin')
+    || (providerName === 'kimi' && source === 'desktop');
   if (discoveredLogin) {
     // The discovered login is not user-entered, so the override input and the
     // console link stay reachable instead of hiding behind linked. Cline's stored
-    // sign-in is the same situation as Zai's ZCode login.
+    // sign-in and Kimi's desktop session are the same situation as Zai's ZCode login.
     manualPanel.classList.remove('hidden');
     openBtn.classList.remove('hidden');
   }

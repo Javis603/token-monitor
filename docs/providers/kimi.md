@@ -109,7 +109,7 @@ default on Windows when no manual token is set.
 The app's TokenStore loads that file once at startup into memory (no file watcher), rotates the
 refresh token on every refresh, and escalates any 401/403 to `clear()` — wiping the session and
 logging the user out. That makes refresh ownership the load-bearing constraint: while
-`kimi-desktopKimi.exe` is running, the app must stay the sole refresh owner and Token Monitor is
+`kimi-desktop\Kimi.exe` is running, the app must stay the sole refresh owner and Token Monitor is
 read-only (an idle-running app past the 15-minute access-token life reports `unavailable`,
 self-healing on the app's next use); while the app is closed, Token Monitor refreshes the pair
 itself via `auth.kimi.com/api/account.gateway.v1.AuthService/RefreshToken` and writes the rotated
@@ -125,3 +125,12 @@ persists in `sharedDataDir/kimi-manual-session.json` — the pasted seed stays i
 store, the cache file is collector-owned, and every rotation rewrites it atomically. Kimi web
 credentials are single-consumer: once the widget owns a token pair, using the same account's web
 console signs that browser session out on the next refresh.
+
+Credential-save probes use the same shared data directory as collection, without inheriting other
+credentials from the process environment or saved siblings. A newly rotated manual pair stays
+staged in main until that probe is accepted and still current; its cache is committed with the
+credential before runtime refresh, and restored if the settings write fails. Rejected or
+superseded probes must not overwrite the active cache. A rotation that cannot be persisted
+reports `unavailable` rather than claiming a renewable session.
+Re-saving a cached chain with expired access does not rotate it during validation; the next
+runtime collection refreshes it after the save, so an abandoned draft cannot consume its token.

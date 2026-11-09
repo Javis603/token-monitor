@@ -647,7 +647,9 @@ async function resolveKimiManualWebSession(refreshToken, deps, errors) {
     return await (deps.kimiManualSession || ((seed) => resolveKimiManualSession(seed, {
       env: deps.env || process.env,
       ...(deps.fetch ? { fetch: deps.fetch } : {}),
-      ...(deps.dataDir ? { dataDir: deps.dataDir } : {})
+      ...(deps.dataDir ? { dataDir: deps.dataDir } : {}),
+      probe: deps.probe,
+      stageCredentialWrite: deps.stageCredentialWrite
     })))(refreshToken);
   } catch (error) {
     errors.push(error?.status ? error : Object.assign(new Error('Kimi manual token could not be refreshed'), { status: 'unavailable' }));
@@ -691,7 +693,7 @@ async function fetchKimiLimits(options = {}, deps = {}) {
   // manual seed in play the desktop store is skipped even when the session went
   // stale: both hold tokens from the same rotating chain, so silently falling
   // over would read as an account switch.
-  let desktopSession = manualSession || manualWebToken || manualSessionStale
+  let desktopSession = manualSession || manualWebToken || manualSessionStale || errors.length
     ? null
     : await resolveKimiDesktopSession(deps);
   if (desktopSession && desktopSession.refreshIsDead) desktopSession = null;

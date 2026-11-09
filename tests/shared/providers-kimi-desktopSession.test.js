@@ -382,3 +382,57 @@ test('a cache hit recomputes staleness against the current time', async () => {
   const later = await readKimiDesktopSession({ ...deps, now: () => freshNow + 30 * 60 * 1000 });
   assert.equal(later.accessIsStale, true, 'staleness must be evaluated per read, not per file version');
 });
+
+test('resolveKimiManualSession reports unavailable when a rotated pair cannot be cached', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-manual-failure-'));
+  try {
+    const seed = nextTokens(90 * 24 * 60 * 60 * 1000);
+    await assert.rejects(resolveKimiManualSession(seed.refresh_token, {
+      dataDir,
+      now: () => NOW_MS,
+      fetch: async () => refreshResponse(nextTokens(90 * 24 * 60 * 60 * 1000)),
+      writeFile: () => { throw new Error('disk full'); }
+    }), (error) => error.status === 'unavailable');
+    assert.equal(fs.existsSync(path.join(dataDir, 'kimi-manual-session.json')), false);
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('re-saving an active stale manual chain does not rotate it in the draft probe', async () => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-manual-reprobe-'));
+  try {
+    const seed = nextTokens(90 * 24 * 60 * 60 * 1000);
+    const first = {
+      access_token: jwt({ sub: 'active', exp: Math.floor(NOW_MS / 1000) + 900 }),
+      refresh_token: jwt({ sub: 'active', exp: Math.floor(NOW_MS / 1000) + 90 * 86400 })
+    };
+    await resolveKimiManualSession(seed.refresh_token, {
+      dataDir, now: () => NOW_MS, fetch: async () => refreshResponse(first)
+    });
+    const file = path.join(dataDir, 'kimi-manual-session.json');
+    const before = fs.readFileSync(file, 'utf8');
+    const later = NOW_MS + 30 * 60 * 1000;
+    const probe = await resolveKimiManualSession(seed.refresh_token, {
+      dataDir, now: () => later, probe: true,
+      stageCredentialWrite: () => assert.fail('an existing chain is not changed by a probe'),
+      fetch: async () => assert.fail('a draft must not consume the active refresh token')
+    });
+    assert.equal(probe.accessIsStale, true);
+    assert.equal(fs.readFileSync(file, 'utf8'), before);
+    // Whether the draft saves, is rejected, or is superseded, the runtime can
+    // still use the current chain exactly once on its next collection.
+    let exchanged;
+    const next = nextTokens(90 * 24 * 60 * 60 * 1000);
+    const runtime = await resolveKimiManualSession(seed.refresh_token, {
+      dataDir, now: () => later, fetch: async (_url, init) => {
+        exchanged = JSON.parse(init.body).refreshToken;
+        return refreshResponse(next);
+      }
+    });
+    assert.equal(exchanged, first.refresh_token);
+    assert.equal(runtime.refreshToken, next.refresh_token);
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});

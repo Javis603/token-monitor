@@ -238,7 +238,7 @@ test('AI limit capability labels stay compact in Chinese', () => {
   assert.equal(translate('zh-TW', 'settings.limits.capability.webApi'), 'Web/API');
   assert.equal(translate('zh-TW', 'settings.limits.capability.codingPlan'), 'Coding Plan');
   assert.equal(translate('zh-TW', 'settings.kimi.webFallback'), '選用：Kimi Web 備援');
-  assert.equal(translate('zh-TW', 'settings.kimi.step3'), '找到 access_token 並複製它的 Value；也可複製 refresh_token，它會自動續期約 90 天。');
+  assert.match(translate('zh-TW', 'settings.kimi.step3'), /refresh_token.*瀏覽器.*登出/);
   assert.equal(translate('zh-CN', 'settings.limits.capability.appMustBeOpen'), '需打开 App 或 CLI');
   assert.equal(translate('zh-CN', 'settings.limits.capability.oauthAppCli'), 'OAuth/App/CLI');
   assert.equal(translate('zh-CN', 'settings.limits.capability.manualLogin'), '手动登录');
@@ -352,4 +352,15 @@ test('Notch settings and shared labels are present in every bundled locale', () 
   }
   assert.equal(translate('zh-CN', 'settings.notch.iconRings'), '显示额度与采集状态');
   assert.equal(translate('zh-CN', 'settings.notch.summaryMode.tray'), '与菜单栏相同');
+});
+
+test('Kimi setup warns about browser session ownership and shows value-only tokens in every locale', () => {
+  const warnings = { en: /browser session out/, 'zh-TW': /瀏覽器.*登出/, 'zh-CN': /浏览器.*登出/, ko: /브라우저.*로그아웃/, ja: /ブラウザー.*ログアウト/, 'pt-BR': /sessão do navegador/ };
+  for (const locale of LANGUAGE_OPTIONS.map(option => option.value).filter(value => value !== 'auto')) {
+    const step = MESSAGES[locale]['settings.kimi.step3'];
+    assert.match(step, /access_token/, locale);
+    assert.match(step, /refresh_token/, locale);
+    assert.match(step, warnings[locale], locale);
+    assert.equal(MESSAGES[locale]['settings.kimi.webTokenPlaceholder'], 'eyJ...', locale);
+  }
 });

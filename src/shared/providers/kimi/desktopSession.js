@@ -454,11 +454,14 @@ function sessionFromTokenPair(accessToken, refreshToken, nowMs) {
 // Resolves the manually pasted refresh token into a live session, refreshing
 // and persisting the rotated pair when needed. The seed only seeds the first
 // rotation; afterwards the cache file is authoritative (refresh tokens rotate
-// on every use, so the seed goes stale by design). Never throws: failures
-// return null or surface an error carrying a provider status.
+// on every use, so the seed goes stale by design). Failures return null or
+// throw an error carrying a provider status.
 async function resolveKimiManualSession(seedRefreshToken, deps = {}) {
   const cleanSeed = String(seedRefreshToken || '').trim();
   if (!cleanSeed || !decodeJwtPayload(cleanSeed)) return null;
+  if (deps.probe && typeof deps.stageCredentialWrite !== 'function') {
+    throw Object.assign(new Error('Kimi credential probe requires a staged cache writer'), { status: 'unavailable' });
+  }
   const nowMs = (deps.now || Date.now)();
   const seedFingerprint = hashSeedFingerprint(cleanSeed);
   const cachePath = manualSessionCachePath(deps);
@@ -473,6 +476,10 @@ async function resolveKimiManualSession(seedRefreshToken, deps = {}) {
   let session = cached ? sessionFromTokenPair(cached.accessToken, cached.refreshToken, nowMs) : null;
   if (session && !session.accessIsStale && !session.refreshIsDead) return session;
   if (session?.refreshIsDead) return null;
+  // Re-saving an existing chain must not consume its refresh token during a
+  // draft probe: a rejection, superseding edit, or failed settings write can
+  // abandon that draft. Let the collector rotate after the save instead.
+  if (deps.probe && session) return session;
   const refreshTokenForExchange = (session && !session.refreshIsDead ? session.refreshToken : cleanSeed);
   let json;
   try {
@@ -490,15 +497,38 @@ async function resolveKimiManualSession(seedRefreshToken, deps = {}) {
   if (!refreshed) return null;
   const next = sessionFromTokenPair(refreshed.accessToken, refreshed.refreshToken, nowMs);
   if (!next) return null;
-  try {
-    writeFileAtomic(cachePath, JSON.stringify({
-      seed: seedFingerprint,
-      accessToken: next.accessToken,
-      refreshToken: next.refreshToken
-    }), writeFile);
-  } catch (_) {
-    // Server-side rotation already happened; without persistence the next start
-    // falls back to a stale seed, which will surface as a paste-again prompt.
+  const content = JSON.stringify({
+    seed: seedFingerprint,
+    accessToken: next.accessToken,
+    refreshToken: next.refreshToken
+  });
+  const persist = () => {
+    try {
+      fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+      writeFileAtomic(cachePath, content, writeFile);
+    } catch (cause) {
+      const unavailable = new Error('Kimi manual session rotated but could not be cached', { cause });
+      unavailable.status = 'unavailable';
+      throw unavailable;
+    }
+  };
+  if (deps.probe) {
+    // A draft may be rejected or superseded after the quota request. Stage its
+    // cache write until the same revision commits its credential, before the
+    // runtime sees that credential. Roll back if credential persistence fails.
+    deps.stageCredentialWrite(() => {
+      let previous;
+      try { previous = readFile(cachePath, 'utf8'); } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+      persist();
+      return () => {
+        if (previous !== undefined) writeFileAtomic(cachePath, previous, writeFile);
+        else fs.unlinkSync(cachePath);
+      };
+    });
+  } else {
+    persist();
   }
   return next;
 }

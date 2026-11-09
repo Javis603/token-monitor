@@ -129,11 +129,25 @@ function createCredentialCommands({ getSettings, applySettingsPatch, commitCrede
     // (Kimi's other lane) cannot answer for a bad one, and an empty env keeps
     // the same fallback from vouching through a process variable.
     const options = limitsAccountConfig(getSettings(), { env });
-    for (const field of formFields(entry)) {
-      if (field.secret && !Object.hasOwn(candidate, field.key)) options[field.key] = '';
+    for (const field of entry.fields) {
+      if (field.kind === 'credential' && !Object.hasOwn(candidate, field.key)) options[field.key] = '';
     }
     const renewed = {};
-    const deps = { ...probeDeps(renewed), env: {} };
+    const stagedWrites = [];
+    const deps = { ...probeDeps(renewed), env: {}, stageCredentialWrite: (write) => stagedWrites.push(write) };
+    // Invoked synchronously by the settings transaction after validation and
+    // revision checks, before its durable write and runtime invalidation.
+    const commitProbeWrites = () => {
+      const rollbacks = [];
+      const rollback = () => { for (const undo of rollbacks.reverse()) undo(); };
+      try {
+        for (const write of stagedWrites) rollbacks.push(write());
+      } catch (error) {
+        rollback();
+        throw error;
+      }
+      return rollback;
+    };
     let discoveredChoices;
     const selectionRequired = (choices) => {
       if (discover && renewed[discover.credential]) {
@@ -204,11 +218,11 @@ function createCredentialCommands({ getSettings, applySettingsPatch, commitCrede
     }
     const remember = accountForm(entry).rememberProbe;
     if (remember && verdict === 'valid') entry.limits[remember.fn](candidate[remember.field], provider);
-    const applied = commitCredential ? commitCredential({ providerId: entry.id, candidate, provider, values, checkedSince }) : applySettingsPatch({
+    const applied = commitCredential ? commitCredential({ providerId: entry.id, candidate, provider, values, checkedSince, commitProbeWrites }) : applySettingsPatch({
       ...candidate,
       limitProviders: providerSelectionIncluding(getSettings().limitProviders, entry.id),
       limitsEnabled: true
-    }, { provider: entry.id });
+    }, { provider: entry.id, ...(stagedWrites.length ? { commitProbeWrites } : {}) });
     pendingRenewals.delete(entry.id);
     const settings = await applied;
     return { saved: true, verdict, status, errorCode, settings, checkedSince, ...(discoveredChoices ? { choices: discoveredChoices } : {}) };

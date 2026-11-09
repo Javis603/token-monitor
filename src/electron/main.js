@@ -1032,6 +1032,7 @@ function persistStepfunTokenRenewal({ previousToken, token } = {}) {
 // Ollama answering from a cached check of a different save.
 function credentialProbeDeps(renewed = {}) {
   return electronProviderDeps({
+    dataDir: sharedDataDir(),
     claudeWebFetch: electronClaudeWebFetch,
     onClaudeWebCookieRenewed: ({ cookie }) => {
       renewed.claudeWebCookie = cookie;
@@ -8210,10 +8211,11 @@ app.whenReady().then(() => {
     // Return the latest saved selection rather than restoring an older one.
     return settingsForRenderer();
   });
-  async function applyCredentialSettingsPatch(patch, { provider }) {
+  async function applyCredentialSettingsPatch(patch, { provider, commitProbeWrites }) {
     const refreshes = [];
     applySettingsPatch(patch, undefined, {
       ensureLimitProvider: provider,
+      commitProbeWrites,
       onLimitsRefresh: (_scope, refresh) => refreshes.push(refresh)
     });
     // The write is already durable; a refresh failure must not report it as an
@@ -8499,17 +8501,20 @@ app.whenReady().then(() => {
     delete settings.edgeDrawerEnabled;
     const nextSettingsState = settings;
     settings = previousSettingsState;
+    let rollbackProbeWrites;
     try {
       // Journal the previous title context and OFF while the old connection is
       // still active. No replacement credentials/device may commit before this.
       contentRuntime.beforeDestinationChange(syncContentContext(nextSettingsState));
       nextSettingsState.syncContentState = normalizeSyncContentState(settings.syncContentState);
       settings = nextSettingsState;
+      rollbackProbeWrites = limitContext.commitProbeWrites?.();
       saveSettings({ throwOnError: true });
     } catch (error) {
       // Keep any OFF/cleanup journal already committed by the preflight.
       settings = { ...previousSettingsState,
         syncContentState: normalizeSyncContentState(persistedSettingsSnapshot?.syncContentState || settings.syncContentState) };
+      rollbackProbeWrites?.();
       throw error;
     }
     contentRuntime.invalidate();

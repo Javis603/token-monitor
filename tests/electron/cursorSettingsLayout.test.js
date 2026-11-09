@@ -1102,15 +1102,78 @@ test('Command Code generic account panel saves a cookie and opens the allowliste
   assert.equal(accountStatusProjection({ commandcodeCookie: 'private' }, {}).commandcodeCookieConfigured, true);
 });
 
+test('Kimi labels the successful quota lane rather than an unused discovered desktop session', () => {
+  const app = readRendererFile('app.js');
+  const settings = { kimiApiKeySource: 'settings', kimiWebAccessTokenSource: 'desktop' };
+  const label = (provider, source = 'desktop') => runRendererFunctions(
+    app, ['apiKeyAccountStatusText'], "apiKeyAccountStatusText('kimi', provider, true, source)", {
+      provider, source, state: { settings },
+      limitProviderPresentationApi: { apiKeyAccountStatus: () => 'linked' },
+      t: key => key
+    }
+  );
+  assert.equal(label({ status: 'ok', source: 'api' }), 'settings.kimi.statusSet');
+  // Supplemental desktop windows do not replace the primary Code API label.
+  assert.equal(label({ status: 'ok', source: 'api', sourceDetail: 'app' }), 'settings.kimi.statusSet');
+  settings.kimiApiKeySource = 'env';
+  assert.equal(label({ status: 'ok', source: 'api' }), 'settings.kimi.statusEnv');
+  assert.equal(label({ status: 'ok', source: 'web', sourceDetail: 'app' }), 'settings.kimi.statusDesktop');
+  settings.kimiWebAccessTokenSource = 'settings';
+  assert.equal(label({ status: 'ok', source: 'web' }, 'settings'), 'settings.kimi.statusSet');
+  settings.kimiWebAccessTokenSource = 'env';
+  assert.equal(label({ status: 'ok', source: 'web' }, 'env'), 'settings.kimi.statusEnv');
+});
+
+test('Kimi desktop discovery keeps override controls reachable across status rerenders', () => {
+  const app = readRendererFile('app.js');
+  const elements = new Map();
+  for (const suffix of ['AccountStatus', 'OpenBrowser', 'LogoutButton', 'RefreshButton', 'ManualPanel', 'ErrorMessage']) {
+    const classes = new Set(['hidden']);
+    elements.set(`kimi${suffix}`, {
+      classList: {
+        add: name => classes.add(name),
+        remove: name => classes.delete(name),
+        toggle: (name, force) => force ? classes.add(name) : classes.delete(name),
+        contains: name => classes.has(name)
+      },
+      textContent: ''
+    });
+  }
+  const settings = { kimiCredentialConfigured: true, kimiCredentialSource: 'desktop' };
+  let status = 'ok';
+  const render = () => runRendererFunctions(app, ['renderExternalProviderStatus'], "renderExternalProviderStatus('kimi')", {
+    externalLimitAccountConfig: { kimi: { configuredKey: 'kimiCredentialConfigured', sourceKey: 'kimiCredentialSource', pendingKey: 'kimiPendingCheckSince' } },
+    state: { settings, kimiPendingCheckSince: 0, accountPanelMessages: {} },
+    document: { getElementById: id => elements.get(id) },
+    limitAccountForm: () => null,
+    externalProviderForAccount: () => ({ status }),
+    externalProviderAccountLinked: () => status === 'ok',
+    externalProviderCheckSettled: new Set(),
+    limitProviderEnabled: () => true,
+    setCursorStatusText: () => {}, apiKeyAccountStatusText: () => '', t: key => key,
+    renderSettingsSummaries: () => {}, setExternalAccountExpanded: () => {}
+  });
+  for (status of ['ok', 'unavailable', 'ok']) {
+    render();
+    assert.equal(elements.get('kimiManualPanel').classList.contains('hidden'), false);
+    assert.equal(elements.get('kimiOpenBrowser').classList.contains('hidden'), false);
+    assert.equal(elements.get('kimiLogoutButton').classList.contains('hidden'), true);
+  }
+  settings.kimiCredentialSource = 'settings';
+  render();
+  assert.equal(elements.get('kimiManualPanel').classList.contains('hidden'), true);
+  assert.equal(elements.get('kimiLogoutButton').classList.contains('hidden'), false);
+});
+
 test('Kimi account panel makes the Code API primary and keeps Web access as a fallback', () => {
   const html = readRendererFile('index.html');
   assert.match(html, /data-i18n="settings\.kimi\.title">Kimi Account<\/span>/);
   assert.match(html, /data-i18n="settings\.kimi\.openBrowser">Open Kimi Code Console<\/button>/);
-  assert.match(html, /<div id="kimiAccountGroup"[\s\S]*?<input id="kimiApiKeyInput" type="password"[\s\S]*?data-i18n-aria-label="settings\.kimi\.apiKeyLabel"[\s\S]*?<button id="kimiApiKeySubmit"[\s\S]*?<details class="kimi-web-fallback">[\s\S]*?settings\.kimi\.step2[\s\S]*?Local Storage[\s\S]*?settings\.kimi\.step3[\s\S]*?access_token[\s\S]*?<textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off"[\s\S]*?data-i18n-aria-label="settings\.kimi\.webTokenLabel"[\s\S]*?placeholder="access_token \/ refresh_token=\.\.\."[\s\S]*?<button id="kimiWebAccessTokenSubmit"[\s\S]*data-i18n="settings\.kimi\.saveWebToken">/);
+  assert.match(html, /<div id="kimiAccountGroup"[\s\S]*?<input id="kimiApiKeyInput" type="password"[\s\S]*?data-i18n-aria-label="settings\.kimi\.apiKeyLabel"[\s\S]*?<button id="kimiApiKeySubmit"[\s\S]*?<details class="kimi-web-fallback">[\s\S]*?settings\.kimi\.step2[\s\S]*?Local Storage[\s\S]*?settings\.kimi\.step3[\s\S]*?access_token[\s\S]*?<textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off"[\s\S]*?data-i18n-aria-label="settings\.kimi\.webTokenLabel"[\s\S]*?placeholder="eyJ\.\.\."[\s\S]*?<button id="kimiWebAccessTokenSubmit"[\s\S]*data-i18n="settings\.kimi\.saveWebToken">/);
   assert.doesNotMatch(html, /kimi-auth|kimi-api-fallback/);
   assert.match(html, /settings\.kimi\.step2[\s\S]*Application\/Storage[\s\S]*Local Storage[\s\S]*www\.kimi\.com/);
-  assert.match(html, /settings\.kimi\.step3[\s\S]*Find access_token and copy its Value/);
-  assert.match(html, /<div id="kimiAccountGroup"[\s\S]*?<input id="kimiApiKeyInput" type="password"[\s\S]*?<details class="kimi-web-fallback">[\s\S]*?placeholder="access_token \/ refresh_token=\.\.\."[\s\S]*?data-i18n="settings\.kimi\.saveWebToken">/);
+  assert.match(html, /settings\.kimi\.step3[^>]*>[^<]*browser session out[^<]*<\/span>[\s\S]*settings\.kimi\.step4/);
+  assert.match(html, /<div id="kimiAccountGroup"[\s\S]*?<input id="kimiApiKeyInput" type="password"[\s\S]*?<details class="kimi-web-fallback">[\s\S]*?placeholder="eyJ\.\.\."[\s\S]*?data-i18n="settings\.kimi\.saveWebToken">/);
   const app = readRendererFile('app.js');
   const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
   // Each lane sends only its own credential through the shared save path, so

@@ -1184,3 +1184,18 @@ test('fetchKimiLimits prefers the explicit refresh-token option over the env see
   );
   assert.deepEqual(seeds, ['option-seed.body.sig']);
 });
+
+test('manual refresh errors never fall back to a different desktop account', async () => {
+  let desktopReads = 0;
+  const provider = await fetchKimiLimits({ kimiWebRefreshToken: 'rejected-seed' }, {
+    env: {},
+    kimiManualSession: async () => { throw Object.assign(new Error('rejected'), { status: 'unauthorized' }); },
+    kimiDesktopSession: async () => {
+      desktopReads += 1;
+      return { accessToken: 'other-account', userId: 'other', accessIsStale: false, refreshIsDead: false };
+    },
+    fetch: async () => webUsageResponse()
+  });
+  assert.equal(provider.status, 'unauthorized');
+  assert.equal(desktopReads, 0);
+});

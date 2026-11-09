@@ -134,7 +134,7 @@ test('actual main destination commit journals old context and OFF before saving 
     const previous = { hubUrl: 'https://old.example', secret: 'old', syncContentState: { enabled: { sessionTitles: true } } };
     const next = { hubUrl: 'https://new.example', secret: 'new', syncContentState: previous.syncContentState };
     const events = [];
-    const sandbox = vm.createContext({ settings: next, previousSettingsState: previous,
+    const sandbox = vm.createContext({ limitContext: {}, settings: next, previousSettingsState: previous,
       persistedSettingsSnapshot: previous, normalizeSyncContentState: value => structuredClone(value),
       syncContentContext: value => value,
       contentRuntime: {
