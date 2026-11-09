@@ -43,7 +43,7 @@ function applyLine(state, line, position, contextStart) {
   // An unreadable new configuration cannot leave the previous turn's badge.
   // Only inspect the bounded record prefix; never decode large tool output.
   const configuration = /"type"\s*:\s*"turn_context"/.test(line.subarray(0, 512).toString('utf8'));
-  if (configuration && position >= contextStart) state.reasoningEffort = null;
+  if (configuration && position >= contextStart) { state.reasoningEffort = null; state.latestModel = null; }
   // Metadata records are small; never decode arbitrarily large tool output.
   if (!line.length || line.length > MAX_METADATA_LINE_BYTES) return;
   let entry;
@@ -51,6 +51,7 @@ function applyLine(state, line, position, contextStart) {
   if (!entry || typeof entry !== 'object') return;
   const payload = entry.payload && typeof entry.payload === 'object' ? entry.payload : entry;
   if (entry.type === 'turn_context' && position >= contextStart) {
+    state.latestModel = typeof payload.model === 'string' ? payload.model : null;
     state.reasoningEffort = normalizeReasoningEffort(
       Object.prototype.hasOwnProperty.call(payload, 'effort') ? payload.effort : payload.reasoning_effort
     );

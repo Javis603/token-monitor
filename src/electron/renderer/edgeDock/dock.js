@@ -1607,6 +1607,7 @@ function sessionsContainer(sessions, options = {}) {
     const age = relativeAgo(session.lastUsedAt || session.startedAt);
     description.append(sessionRowsApi.sessionModelMetadataNode(document, { ...session, modelLabel }, {
       translate: t, view: limitWindowsView,
+      latestModelLabel: t('session.latestModel'),
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatBreakdownTokens
     }));

@@ -743,6 +743,10 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       if (Object.prototype.hasOwnProperty.call(session, 'promptCache')) {
         target.promptCache = session.promptCache;
       }
+      if ((Date.parse(session.lastUsedAt) || 0) >= (Date.parse(target.lastUsedAt) || 0)) {
+        if (Object.prototype.hasOwnProperty.call(session, 'latestModel')) target.latestModel = session.latestModel;
+        else if (Date.parse(session.lastUsedAt) > Date.parse(target.lastUsedAt)) target.latestModel = null;
+      }
       if (isSessionReasoningEffortClient(session.client)) {
         const freshAt = Date.parse(session.lastUsedAt) || 0;
         const retainedAt = Date.parse(target.lastUsedAt) || 0;

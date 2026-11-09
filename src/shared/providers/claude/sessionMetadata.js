@@ -225,6 +225,12 @@ function isUserPrompt(entry) {
   return asked;
 }
 
+function applyLatestModel(state, entry) {
+  if (entry.isSidechain === true || entry.isApiErrorMessage === true) return;
+  const model = entry.message?.model;
+  if (typeof model === 'string' && model.trim() && model !== '<synthetic>') state.latestModel = model;
+}
+
 function applyReasoningEffort(state, entry) {
   if (entry.isSidechain === true || entry.isApiErrorMessage === true) return;
   // A non-null per-turn override describes this response more specifically
@@ -262,6 +268,7 @@ function applyMetadataLine(state, line) {
       const candidate = cleanTitle(entry.aiTitle);
       if (candidate) state.aiTitle = candidate;
     } else if (entry?.type === 'assistant') {
+      applyLatestModel(state, entry);
       applyReasoningEffort(state, entry);
       // Claude stamps every assistant record with why it stopped. `tool_use`
       // means it paused to run tools and is still mid-turn; anything else
@@ -458,6 +465,10 @@ function applyLongLineFragments(state, lineTerminated = false) {
     // written the statement, and a record still being written yields no usage.
     const contextUsage = contextUsageFromFragments(head, tail);
     if (contextUsage) {
+      if (lineTerminated) applyLatestModel(state, {
+        ...prefix, ...metadata,
+        message: { model: contextUsage.model }
+      });
       applyContextUsage(state, contextUsage.model, contextUsage.usage);
       // Response metadata can trail large content. Use the existing bounded
       // fragments, never a second file read or a parse of the content itself.
@@ -550,6 +561,7 @@ function readSessionTitle(filePath, deps = {}) {
         aiTitle: cached.aiTitle || '',
         stopReason: cached.stopReason || '',
         userSinceStop: cached.userSinceStop === true,
+        ...(Object.hasOwn(cached, 'latestModel') ? { latestModel: cached.latestModel } : {}),
         ...(Object.hasOwn(cached, 'reasoningEffort') ? { reasoningEffort: cached.reasoningEffort } : {}),
         trailing: Buffer.isBuffer(cached.trailing) ? Buffer.from(cached.trailing) : Buffer.alloc(0),
         droppingLongLine: cached.droppingLongLine === true,
@@ -731,6 +743,7 @@ function resolveSessionMetadata(sessionIds, context) {
       ? normalizeSessionContext(index) || { contextTokens: 0, contextWindow: 0 } : undefined;
     result.set(sessionId, {
       ...meta,
+      ...(index && Object.hasOwn(index, 'latestModel') ? { latestModel: index.latestModel } : {}),
       ...(index && Object.hasOwn(index, 'reasoningEffort') ? { reasoningEffort: index.reasoningEffort } : {}),
       ...(index?.promptCacheState?.observation === undefined ? {}
         : { promptCache: index.promptCacheState.observation }),

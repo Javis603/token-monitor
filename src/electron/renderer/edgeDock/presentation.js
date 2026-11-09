@@ -287,11 +287,10 @@
         t3ThreadId: String(session.t3ThreadId || ''),
         client: normalizedId(session.client),
         // The whole model map, not just the top one: the card composes its
-        // label with the Sessions list's own sessionModelLabel(), which reads
-        // "N models" for a multi-model session — a reading this projection
-        // could not reproduce from a flattened winner.
+        // label and usage breakdown with the Sessions list's shared helpers.
         models: session.models || (session.model ? { [session.model]: finite(session.totalTokens) || 0 } : {}),
         promptCache: session.promptCache || null,
+        latestModel: session.latestModel,
         reasoningEffort: sessionLive.isSessionReasoningEffortClient(session.client) ? session.reasoningEffort || null : null,
         contextTokens: finite(session.contextTokens),
         contextWindow: finite(session.contextWindow),
@@ -362,6 +361,7 @@
         nativeSessionId: normalizedId(session.nativeSessionId), t3ThreadId: String(session.t3ThreadId || ''),
         name: sessionRowsApi.sessionTitleForDisplay(session) || String(session.projectLabel || sessionId.slice(0, 12) || '—'),
         titled: Boolean(session.title || session.projectLabel),
+        latestModel: session.latestModel,
         modelTokens: models,
         value: finite(session.totalTokens) || 0, cost: finite(session.costUsd ?? session.reportedCostUsd) || 0,
         unpricedTokens: session.unpricedTokens > 0 ? finite(session.unpricedTokens) : undefined,
