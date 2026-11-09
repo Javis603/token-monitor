@@ -50,7 +50,7 @@ function cookiePage(records) {
     return at;
   });
   const page = Buffer.alloc(cursor);
-  page.writeUInt32LE(0x00000100, 0);
+  page.writeUInt32BE(0x00000100, 0);
   page.writeUInt32LE(encoded.length, 4);
   offsets.forEach((at, index) => page.writeUInt32LE(at, 8 + index * 4));
   encoded.forEach((record, index) => record.copy(page, offsets[index]));
