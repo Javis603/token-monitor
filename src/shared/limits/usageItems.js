@@ -142,7 +142,7 @@
     const providerIds = new Set((limitProviders?.LIMIT_PROVIDER_IDS || []).map(normalizedId));
     for (const [key, raw] of Object.entries(value)) {
       const provider = normalizedId(key);
-      if (!providerIds.has(provider)) continue;
+      if (!providerIds.has(provider) && !limitProviders.isPluginLimitModuleId(provider)) continue;
       const items = hiddenItemList(raw);
       if (items.length) result[provider] = items;
     }

@@ -32,6 +32,8 @@ function resolveHomeRows(providers, settings = {}) {
     state: { stats: { limits: { providers } }, settings: { homeLimitAccountCount: 20, ...settings } },
     enabledLimitProviderSet: () => new Set(ids),
     hiddenHomeLimitProviderSet: () => new Set(),
+    desktopLimitProviders: () => ids.map(id => ({ id, label: id })),
+    desktopLimitRecords: () => providers,
     LIMIT_PROVIDERS: ids.map((id) => ({ id, label: id })),
     limitProviderOrderApi: require('../../src/electron/renderer/limits/providerOrder'),
     limitUsageItemsApi: require('../../src/shared/limits/usageItems'),

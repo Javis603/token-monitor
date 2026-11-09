@@ -51,7 +51,7 @@ const SESSION_STATE_GLYPHS = sessionLive.sessionStateMarkup({
   waiting: 'edge-dock-session-waiting'
 });
 
-const BRAND_VENDOR_COLORS = { ...clientColors };
+const BRAND_VENDOR_COLORS = { ...window.TokenMonitorUsageCharts.modelColors };
 const SVG_NS = 'http://www.w3.org/2000/svg';
 // Inset the thicker quota stroke so its outer edge stays within the 42px ring.
 const RING_RADIUS = 18.5;
@@ -235,7 +235,7 @@ function applyAppearance(payload) {
     else style.removeProperty(name);
   }
   const vendors = themePresetsApi.mergeVendorColors(BRAND_VENDOR_COLORS, appearance.vendorColors);
-  for (const vendor of Object.keys(BRAND_VENDOR_COLORS)) clientColors[vendor] = vendors[vendor];
+  window.TokenMonitorUsageCharts.applyVendorColors(vendors);
   const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(appearance);
   style.setProperty('--ui-font', interfaceFont);
   style.setProperty('--display-font', displayFont);
@@ -289,7 +289,16 @@ function readableColor(color) {
 }
 
 // The provider's own colour, as the Limits view resolves it.
+function pluginQuotaMetadata(id) {
+  return state.payload?.cells?.find(cell => cell.provider === id)?.pluginQuota
+    || state.payload?.cell?.pluginQuota
+    || state.payload?.summary?.items?.find(item => item.providerCell?.provider === id)?.providerCell.pluginQuota
+    || state.payload?.summary?.items?.find(item => item.provider === id || item.iconProvider === id)?.pluginQuota;
+}
+
 function limitProviderColor(id) {
+  const module = pluginQuotaMetadata(id);
+  if (module) return pluginViewsApi.presentationColor(module.presentation, clientColors);
   if (id === 'factory') return clientColors.droid;
   return clientColors[id] || clientColors.default;
 }
@@ -302,7 +311,7 @@ function providerColor(id) {
 }
 
 function providerLabel(id) {
-  return LIMIT_PROVIDER_LABELS[id] || CLIENT_LABELS[id] || id;
+  return pluginQuotaMetadata(id)?.label || LIMIT_PROVIDER_LABELS[id] || CLIENT_LABELS[id] || id;
 }
 
 function clientLabel(id) {
@@ -319,17 +328,21 @@ function hasMask(id) {
   probe.style.visibility = 'hidden';
   document.body.append(probe);
   const computed = getComputedStyle(probe);
-  const image = computed.webkitMaskImage || computed.maskImage || 'none';
+  const mask = computed.webkitMaskImage || computed.maskImage || 'none';
+  const image = mask !== 'none' ? mask : computed.backgroundImage;
   probe.remove();
   const supported = Boolean(id) && image !== 'none';
   maskSupport.set(id, supported);
   return supported;
 }
 
-function markNode(id, color) {
+function markNode(id, color, model = false) {
   const mark = el('span', 'edge-dock-mark');
+  const module = pluginQuotaMetadata(id);
+  if (module) { mark.classList.add('is-plugin'); mark.append(pluginViewsApi.navigationIcon(document, module, 14)); return mark; }
   if (hasMask(id)) mark.classList.add(`row-icon-${id}`);
   else mark.classList.add('is-fallback');
+  if (model) mark.classList.add('model-icon');
   if (color) mark.style.setProperty('--ring-color', color);
   return mark;
 }
@@ -513,7 +526,8 @@ function createCardWindowsView(cell = () => state.payload?.cell, forecast = () =
     codexAccounts,
     // Probed off the stylesheet the dock borrows, so the card can never disagree
     // with the page about which providers have a mark.
-    hasMark: hasMask,
+    pluginMark: id => { const module = pluginQuotaMetadata(id); return module ? pluginViewsApi.navigationIcon(document, module, 12) : null; },
+  hasMark: hasMask,
     formatAgo: relativeAgo,
     // The renderer names the intent; the main process owns the URL.
     openExternal: () => bridge.openResetForecastSource?.(),
@@ -1593,6 +1607,7 @@ function sessionsContainer(sessions, options = {}) {
     const age = relativeAgo(session.lastUsedAt || session.startedAt);
     description.append(sessionRowsApi.sessionModelMetadataNode(document, { ...session, modelLabel }, {
       translate: t, view: limitWindowsView,
+      latestModelLabel: t('session.latestModel'),
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatBreakdownTokens
     }));
@@ -1730,7 +1745,7 @@ function appendLiveRateDetails(card, cell) {
       continue;
     }
     const row = el('div', 'edge-dock-rate-model');
-    const mark = markNode(modelVendorFor(entry[0]) || 'token-monitor');
+    const mark = markNode(modelVendorFor(entry[0]) || 'token-monitor', null, true);
     mark.setAttribute('aria-hidden', 'true');
     row.append(mark, el('span', 'edge-dock-rate-model-name', entry[0]), el('span', 'edge-dock-rate-model-value', entry[1]));
     list.append(row);
@@ -1823,7 +1838,7 @@ function statCard(cell) {
     applyBarScale(fill, Math.max(0.02, entry.tokens / top));
     meter.append(fill);
     row.append(
-      markNode(entry.id, entry.color),
+      markNode(entry.id, entry.color, breakdownMode === 'models'),
       el('span', 'edge-dock-client-name', entry.name),
       el('span', 'edge-dock-client-tokens', formatBreakdownTokens(entry.tokens)),
       el('span', 'edge-dock-client-share', `${Math.round((entry.tokens / sum) * 100)}%`),
@@ -1918,67 +1933,11 @@ const stagingLayer = document.createElement('div');
 stagingLayer.className = 'edge-dock-staging';
 if (surface === 'bubble') root.append(stagingLayer);
 
-let cardSwitchMotion = null;
-
-function clearCardSwitch() {
-  const motion = cardSwitchMotion;
-  cardSwitchMotion = null;
-  if (!motion) return;
-  motion.incoming.cancel();
-  motion.outgoing.cancel();
-  motion.ghost.remove();
-}
-
-function captureCardSwitch(previous, sameCard) {
-  if (surface !== 'bubble' || !previous || prefersReducedMotion() || document.visibilityState === 'hidden') {
-    clearCardSwitch();
-    return null;
-  }
-  if (sameCard) {
-    if (!cardSwitchMotion) return null;
-    // A live reading can rebuild this card halfway through the switch. Carry
-    // the existing timeline onto its replacement instead of snapping/restarting.
-    cardSwitchMotion.elapsed = cardSwitchMotion.incoming.currentTime;
-    cardSwitchMotion.incoming.cancel();
-    return cardSwitchMotion;
-  }
-  if (cardSwitchMotion) {
-    // A rapid selection takes over immediately. Restarting from the partially
-    // transparent incoming card would discard the still-visible outgoing one.
-    clearCardSwitch();
-    return null;
-  }
-  const ghost = previous.cloneNode(true);
-  const opacity = getComputedStyle(previous).opacity;
-  const scrollTops = [...previous.querySelectorAll(CARD_SCROLL_SELECTOR)].map(list => list.scrollTop);
-  clearCardSwitch();
-  ghost.inert = true;
-  ghost.setAttribute('aria-hidden', 'true');
-  ghost.removeAttribute('id');
-  for (const node of ghost.querySelectorAll('[id]')) node.removeAttribute('id');
-  Object.assign(ghost.style, { position: 'absolute', top: '0', left: '0', pointerEvents: 'none' });
-  return { ghost, opacity, scrollTops, elapsed: 0 };
-}
-
-function animateCardSwitch(card, motion) {
-  if (!motion) return;
-  // Both readings travel together with the painted frame.
-  // Crossfade the content without scaling its text.
-  contentLayer.append(motion.ghost);
-  [...motion.ghost.querySelectorAll(CARD_SCROLL_SELECTOR)].forEach((list, index) => {
-    list.scrollTop = motion.scrollTops[index];
-  });
-  const timing = { duration: 160, easing: 'ease-in-out', fill: 'both' };
-  motion.incoming = card.animate([{ opacity: 0 }, { opacity: 1 }], timing);
-  motion.incoming.currentTime = motion.elapsed;
-  if (!motion.outgoing) {
-    motion.outgoing = motion.ghost.animate([{ opacity: motion.opacity }, { opacity: 0 }], timing);
-    motion.outgoing.finished.then(() => {
-      if (cardSwitchMotion === motion) clearCardSwitch();
-    }, () => {});
-  }
-  cardSwitchMotion = motion;
-}
+const cardSwitch = window.TokenMonitorCardSwitch.createCardSwitch({ contentLayer, scrollSelector: CARD_SCROLL_SELECTOR,
+  enabled: () => surface === 'bubble', reducedMotion: prefersReducedMotion });
+function clearCardSwitch() { cardSwitch.cancel(); }
+function captureCardSwitch(previous, sameCard, opening) { return cardSwitch.capture(previous, sameCard, opening); }
+function animateCardSwitch(card, motion) { cardSwitch.play(card, motion); }
 
 function commitCard(card, cellId) {
   const previous = contentLayer.querySelector('.edge-dock-card');
@@ -1988,7 +1947,10 @@ function commitCard(card, cellId) {
     .filter(list => !list.closest('.edge-dock-session-family'));
   const scrollTops = sameCard ? scrollLists(previous).map(list => list.scrollTop) : [];
   const focusedGroup = sameCard ? document.activeElement?.dataset?.sessionGroupKey : null;
-  const switchMotion = captureCardSwitch(previous, sameCard);
+  // The native window stays visible at zero opacity between hovers, so page
+  // visibility cannot distinguish a new opening from a continuous switch.
+  const opening = previous?.dataset.reveal !== card.dataset.reveal;
+  const switchMotion = captureCardSwitch(previous, sameCard, opening);
   const resetSnapshot = cardResetAnimator.capture(previous || contentLayer);
   contentLayer.replaceChildren(card);
   overflowText.refresh();
@@ -2073,8 +2035,17 @@ function renderBubble(payload) {
     stagingLayer.replaceChildren();
     return;
   }
+  const previous = contentLayer.querySelector('.edge-dock-card');
+  if (previous && previous.dataset.reveal !== String(payload.reveal)) {
+    // Native fade-in can start before the placement ACK reaches this page.
+    // Hide the old reading before reporting a size, even with reduced motion.
+    clearCardSwitch();
+    previous.style.visibility = 'hidden';
+  }
   const retained = cell.kind === 'plugin' && contentLayer.querySelector('.edge-dock-card-plugin:not([aria-hidden="true"])');
   if (retained && retained.dataset.pluginRef === cell.ref && retained.dataset.cellId === cell.id) {
+    retained.dataset.reveal = String(payload.reveal);
+    retained.style.visibility = '';
     retained.style.transform = contentTransform;
     const view = pluginHost?.state('edgeDock', cell.ref);
     const caption = retained.querySelector('.edge-dock-stat-caption'); if (caption) caption.textContent = view?.title || cell.ref;
@@ -2084,6 +2055,7 @@ function renderBubble(payload) {
   }
   const card = cell.kind === 'stat' ? statCard(cell) : cell.kind === 'plugin' ? pluginCard(cell) : providerCard(cell);
   card.dataset.cellId = cell.id;
+  card.dataset.reveal = String(payload.reveal);
   card.style.transform = contentTransform;
   pluginContent?.retain(cell.kind === 'plugin' ? [] : [`edgeDock.${cell.kind}.content`]);
   if (cell.kind !== 'plugin' && pluginContent?.hasTarget(`edgeDock.${cell.kind}.content`)) {

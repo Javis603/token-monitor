@@ -674,8 +674,10 @@ test('dragging onto another display moves the dock there and persists its id', a
   t.after(() => fixture.controller.stop());
   const rail = fixture.windowFor('rail');
   fixture.screen.point = { x: 1700, y: 420 };
+  assert.equal(fixture.controller.limitsVisible(), true);
 
   fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetY: 30 });
+  assert.equal(fixture.controller.limitsVisible(), true, 'the visible dragged rail keeps its quota owner');
   await new Promise((resolve) => setTimeout(resolve, 35));
   fixture.ipcMain.emit('edgeDock:dragEnd', { sender: rail.webContents });
 
@@ -2644,6 +2646,36 @@ for (const side of ['left', 'right']) {
     assert.deepEqual(card.getBounds(), canvas, 'the native canvas remains fixed');
   });
 }
+
+test('reopening a dismissed card starts a new reveal without moving from the old card', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ prefersReducedMotion: () => false });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+  const open = (cellIndex, cellId, height) => {
+    const layout = sentPayload(rail, 'rail').cellLayout;
+    fixture.screen.point = { x: rail.bounds.x + rail.bounds.width / 2,
+      y: rail.bounds.y + layout.tops[cellIndex] + layout.heights[cellIndex] / 2 };
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex });
+    const reveal = sentPayload(card, 'bubble').reveal;
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId, height });
+    assert.equal(sentPayload(card, 'bubble').reveal, reveal, 'placement acknowledgement retains the opening identity');
+    return reveal;
+  };
+  const first = open(0, 'claude', 180);
+  advance(160);
+  assert.equal(open(1, 'codex', 220), first, 'continuous switches keep their crossfade');
+  advance(720);
+  fixture.screen.point = { x: 600, y: 800 };
+  fixture.ipcMain.emit('edgeDock:dismiss', { sender: card.webContents });
+  advance(200);
+  assert.equal(card.opacity, 0);
+  const oldBounds = paintedCardBounds(card);
+  assert.notEqual(open(2, 'cursor', 300), first, 'a transparent native window is still a new opening');
+  const reopened = paintedCardBounds(card);
+  assert.notEqual(reopened.y, oldBounds.y);
+  assert.equal(reopened.height, 300, 'new geometry is placed directly before fading in');
+});
 
 test('detail card motion stops on dismissal and reduced motion switches directly', (t) => {
   const advance = mockDockClock(t);

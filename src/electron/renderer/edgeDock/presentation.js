@@ -287,11 +287,10 @@
         t3ThreadId: String(session.t3ThreadId || ''),
         client: normalizedId(session.client),
         // The whole model map, not just the top one: the card composes its
-        // label with the Sessions list's own sessionModelLabel(), which reads
-        // "N models" for a multi-model session — a reading this projection
-        // could not reproduce from a flattened winner.
+        // label and usage breakdown with the Sessions list's shared helpers.
         models: session.models || (session.model ? { [session.model]: finite(session.totalTokens) || 0 } : {}),
         promptCache: session.promptCache || null,
+        latestModel: session.latestModel,
         reasoningEffort: sessionLive.isSessionReasoningEffortClient(session.client) ? session.reasoningEffort || null : null,
         contextTokens: finite(session.contextTokens),
         contextWindow: finite(session.contextWindow),
@@ -362,6 +361,7 @@
         nativeSessionId: normalizedId(session.nativeSessionId), t3ThreadId: String(session.t3ThreadId || ''),
         name: sessionRowsApi.sessionTitleForDisplay(session) || String(session.projectLabel || sessionId.slice(0, 12) || '—'),
         titled: Boolean(session.title || session.projectLabel),
+        latestModel: session.latestModel,
         modelTokens: models,
         value: finite(session.totalTokens) || 0, cost: finite(session.costUsd ?? session.reportedCostUsd) || 0,
         unpricedTokens: session.unpricedTokens > 0 ? finite(session.unpricedTokens) : undefined,
@@ -626,6 +626,7 @@
       id,
       kind: 'provider',
       provider: id,
+      ...(options.pluginQuota ? { pluginQuota: options.pluginQuota } : {}),
       status: headline ? 'ok' : (specificMode
         ? (specificAccount?.summary.status === 'stale' ? 'stale' : 'error')
         : (accounts.some((account) => account.summary.status === 'stale') ? 'stale' : 'error')),
@@ -862,11 +863,14 @@
         // the dock on its own channel and is drawn into the cell in place.
         cells.push({ id: `plugin:${item.ref}`, kind: 'plugin', ref: item.ref });
       } else if (item.type === 'limit' && options.limitsEnabled !== false) {
+        const module = stats?.pluginLimitModules?.find(module => module.id === item.provider);
+        if (item.provider.startsWith('plugin:') && Array.isArray(stats?.pluginLimitModules) && !module) continue;
         // An explicitly chosen provider keeps its slot while it has nothing to
         // report (it renders as `--`), so the user's layout does not reshuffle
         // every time an account refreshes or signs out.
         cells.push(providerCell(item.provider, byId.get(item.provider) || [], {
           ...item,
+          pluginQuota: module ? { label: module.label, presentation: module.presentation, identityIcon: module.identityIcon } : null,
           showCodexAdditionalLimits: options.showCodexAdditionalLimits,
           subscriptionAccounts: allById.get(item.provider) || [],
           stats,

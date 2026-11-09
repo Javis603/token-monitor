@@ -729,6 +729,7 @@ test('Home text and bars use the plan text rendered by Limits account rows', () 
           state: { stats: { limits: { providers } }, settings },
           enabledLimitProviderSet: () => new Set([id]),
           hiddenHomeLimitProviderSet: () => new Set(),
+          desktopLimitProviders: () => [{ id, label: id }], desktopLimitRecords: () => providers,
           LIMIT_PROVIDERS: [{ id, label: id }],
           limitProviderOrderApi: require('../../src/electron/renderer/limits/providerOrder'),
           limitUsageItemsApi: require('../../src/shared/limits/usageItems'),

@@ -408,6 +408,7 @@ test('navigation artwork is static metadata and decode errors restore the named 
   const image = icon.querySelector('img');
   assert.equal(image.src, 'data:image/png;base64,bad');
   assert.equal(image.alt, '');
+  assert.equal(image.draggable, false, 'identity icons do not start browser image drags');
   assert.equal(image.width, 15);
   image.fire('error');
   assert.equal(icon.querySelector('img'), null);
@@ -609,7 +610,7 @@ test('shared presentation resolves live palette overrides and renders native, im
   for (const mode of ['image','mask']) {
     const data='data:image/svg+xml;base64,PHN2Zy8+';
     const node=navigationIcon(document,{presentation:{icon:{data,mode}}});
-    const img=node.querySelector('img'); assert.equal(img.src,data); img.fire('load');
+    const img=node.querySelector('img'); assert.equal(img.src,data); assert.equal(img.draggable,false); img.fire('load');
     assert.equal(Boolean(node.querySelector('img')),mode==='image');
     if(mode==='mask') assert.ok(node.children[0].style.maskImage.includes(data));
   }

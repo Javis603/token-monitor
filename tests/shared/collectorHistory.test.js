@@ -518,7 +518,7 @@ test('startCollector retains a transformed watch total until the next history ti
     assert.equal(latest.history.daily.find((day) => day.date === todayKey).tokens, 300);
     const stored = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
     assert.equal(
-      Object.values(stored.liveDays[todayKey].observations).reduce((sum, item) => sum + item.tokens, 0),
+      Object.values(stored.calendars[Intl.DateTimeFormat().resolvedOptions().timeZone].liveDays[todayKey].observations).reduce((sum, item) => sum + item.tokens, 0),
       300
     );
   } finally {
@@ -592,7 +592,7 @@ test('startCollector does not subtract a stale Dots view after the current read 
 
   const retainedTokens = () => {
     const stored = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
-    return Object.values(stored.liveDays[todayKey].observations)
+    return Object.values(stored.calendars[Intl.DateTimeFormat().resolvedOptions().timeZone].liveDays[todayKey].observations)
       .reduce((sum, item) => sum + item.tokens, 0);
   };
 
