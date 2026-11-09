@@ -11,7 +11,7 @@ Quota modules are independent of plugin views. Declare once; the desktop host ow
   "backend": "backend.cjs",
   "files": ["backend.cjs"],
   "limits": [
-    {"id": "credits", "name": "OpenAI", "capabilities": ["web"], "credentials": {"validation": true, "fields": [{"id": "sessionBearer", "label": "Platform session Bearer", "required": true}, {"id": "organization", "label": "Organization ID", "required": true}]}},
+    {"id": "credits", "name": "OpenAI", "capabilities": ["web"], "credentials": {"validation": true, "fields": [{"id": "sessionBearer", "label": "Platform session token", "required": true}, {"id": "organization", "label": "Organization ID", "required": true}]}},
     {"id": "local", "name": "Local budget", "capabilities": ["cli"], "tags": [{"en": "Team pool", "zh-TW": "團隊共享"}]}
   ]
 }
