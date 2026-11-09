@@ -10,6 +10,7 @@ const { NOTCH_METRICS, notchGeometry, notchBounds, notchPeekBounds, notchCommand
 const { EDGE_DOCK_METRICS: M, edgeDockCellLayout, edgeDockScale } = require('./edgeDock/geometry');
 const { toSvgPath, railCommands, peekCommands } = require('./renderer/edgeDock/shapes');
 const { panelContentHeight } = require('./renderer/notch/panel');
+const { projectPluginLimits } = require('./plugins/limitsPresentation');
 
 const APPEARANCE_KEYS = ['language', 'theme', 'themePreset', 'themeColors', 'vendorColors', 'interfaceFontFamily', 'displayFontFamily', 'textSize', 'glassOpacity', 'glassBlur', 'systemGlass', 'compactTokenUnits', 'currency', 'currencyRate', 'currencyRateOverride', 'currencyRatesEffective', 'showCompactTotalTokens', 'sessionContextMetric', 'tokenNumberAnimation', 'showLimitUsed', 'showCodexAdditionalLimits', 'limitProviderHiddenItems', 'maskLimitAccountEmails', 'edgeDockWarnColors', 'edgeDockRunningIndicatorEnabled', 'notchWarnColors', 'notchRunningIndicatorEnabled', 'tokenRateMode', 'contextDisplayMode'];
 function sampleStats(now) {
@@ -20,11 +21,12 @@ function sampleStats(now) {
 function shape(commands, width, height) {
   const d = toSvgPath(commands); return { d, key: d, width, height };
 }
-function buildDisplayPreview(settings, id, phase = 'closed', platform = process.platform, now = Date.now(), measuredSlots = null) {
+function buildDisplayPreview(settings, id, phase = 'closed', platform = process.platform, now = Date.now(), measuredSlots = null, pluginSnapshot) {
   if (!['edgeDock', 'notch'].includes(id) || !['closed', 'hover', 'open'].includes(phase)) return null;
   const appearance = Object.fromEntries(APPEARANCE_KEYS.filter(key => settings[key] !== undefined).map(key => [key, settings[key]]));
   appearance.reduceMotion = 'on';
-  const stats = sampleStats(now);
+  // Retained module readings/metadata are read-only; Settings never starts sampling.
+  const stats = projectPluginLimits(sampleStats(now), pluginSnapshot);
   const base = { platform, appearance, glass: false, liquidGlass: false, refreshEnabled: false, refreshable: false };
   if (id === 'edgeDock') {
     const cells = buildEdgeDockCells(stats, { ...settings, items: normalizeEdgeDockItems(settings.edgeDockItems) || undefined });

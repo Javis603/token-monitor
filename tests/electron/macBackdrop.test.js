@@ -65,7 +65,7 @@ test('floating glass previews share live tints without replacing styles or saved
     updates.push([source.macBackdrop, source.edgeDockMacBackdrop, liquidGlassTint(source), liquidGlassTint(source, 'liquid-glass-clear')]);
   };
   context = vm.createContext({
-    settings, process: { platform: 'darwin' }, normalizeLiquidGlassTint,
+    settings, syncPluginQuotaSurfaceDemand() {}, process: { platform: 'darwin' }, normalizeLiquidGlassTint,
     settingsForRenderer: () => { throw new Error('preview must not project account settings'); },
     edgeDockController: { setAppearance: read, isRunning: () => true, stop() {} },
     notchController: { setAppearance: read, isRunning: () => true },
@@ -94,7 +94,7 @@ test('frosted glass previews deliver opacity and depth to both floating renderer
     updates.push([value.glassOpacity, value.glassBlur]);
   };
   const context = vm.createContext({
-    settings, process: { platform: 'darwin' }, normalizeLiquidGlassTint,
+    settings, syncPluginQuotaSurfaceDemand() {}, process: { platform: 'darwin' }, normalizeLiquidGlassTint,
     settingsForRenderer: () => { throw new Error('preview must not project account settings'); },
     edgeDockController: { setAppearance: receive, isRunning: () => true, stop() {} },
     notchController: { setAppearance: receive, isRunning: () => true },

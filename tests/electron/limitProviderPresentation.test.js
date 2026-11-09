@@ -3241,7 +3241,7 @@ test('Kimi, Droid and MiMo limits reuse their tracked-client colors', () => {
   assert.match(app, /const color = limitProviderColor\(id\);/);
   const dockColor = vm.runInNewContext(
     `(${functionBody(dock, 'limitProviderColor', 'providerColor')})`,
-    { clientColors: { mimo: '#111111', xiaomi: '#222222', droid: '#333333', default: '#444444' } }
+    { pluginQuotaMetadata: () => null, clientColors: { mimo: '#111111', xiaomi: '#222222', droid: '#333333', default: '#444444' } }
   );
   assert.equal(dockColor('mimo'), '#111111');
   assert.equal(dockColor('factory'), '#333333');

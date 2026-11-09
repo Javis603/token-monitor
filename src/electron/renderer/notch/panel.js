@@ -395,6 +395,7 @@
       view.scrub = null; view.monthDate = null;
       releasePluginPage(view.page);
       view.page = page;
+      bridge.setLimitsDemand?.(shown && ['home', 'limits'].includes(page));
       for (const [name, pageNode] of pageNodes) {
         pageNode.classList.toggle('is-before', pageOrder.indexOf(name) < pageOrder.indexOf(page));
       }
@@ -1430,6 +1431,7 @@
       shown = true;
       payload = next;
       syncPluginPages(next?.panel?.pluginPages, next?.panel?.builtinPages, next?.panel?.pageOrder);
+      bridge.setLimitsDemand?.(['home', 'limits'].includes(view.page));
       node.classList.toggle('is-reduced-motion', prefersReducedMotion());
       if (opening) {
         view.scrub = null; view.monthDate = null;
@@ -1465,6 +1467,7 @@
     function suspend() {
       releasePluginPage(view.page);
       shown = false;
+      bridge.setLimitsDemand?.(false);
       clearTimeout(limitWheel.timer);
       Object.assign(limitWheel, { sum: 0, stepped: false, timer: null });
       settleRolls();
