@@ -13,8 +13,6 @@ const extract = name => source.match(new RegExp(`  function ${name}\\([^]*?\\n  
 function render(windows, { showLimitUsed = false, native = false, details = false, notes } = {}) {
   const context = vm.createContext({
     document: { createElement: tag => new Element(tag) },
-    presentationApi: require('../../src/electron/renderer/limits/providerPresentation'),
-    t: (key, params) => require('../../src/electron/renderer/i18n').translate('en', key, params),
     settings: () => ({ showLimitUsed }), usageItems: { hiddenUsageItemSet: () => new Set(), limitUsageItemId: () => 'credits' }, hideUsageItems() {},
     ...balance,
     windowForKind: (provider, kind) => provider.windows.find(window => window.kind === kind),

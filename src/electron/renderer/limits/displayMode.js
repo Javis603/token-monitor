@@ -31,8 +31,7 @@
   }
 
   // Trailing word for a percent limit label.
-  function limitModeSuffix(showUsed, t) {
-    if (t) return t(showUsed ? 'home.used' : 'limits.remaining');
+  function limitModeSuffix(showUsed) {
     return showUsed ? 'used' : 'left';
   }
 

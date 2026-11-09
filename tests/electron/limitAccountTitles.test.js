@@ -55,7 +55,7 @@ function titleView(maskLimitAccountEmails) {
     // the way the view receives them from its host.
     mimoProductLabel: limitWindowLabels.mimoProductLabel,
     settings: () => ({ maskLimitAccountEmails }),
-    t: (key, params) => require('../../src/electron/renderer/i18n').translate('en', key, params)
+    t: (key) => (key === 'settings.codex.personalWorkspace' ? 'Personal' : key)
   });
 }
 
@@ -140,7 +140,7 @@ test('title resolution matches between the limits panel and Home', () => {
   );
   assert.equal(
     titleView(true).limitAccountTitle('thirdparty', { accountName: 'environment' }, 0),
-    'Environment'
+    'settings.thirdparty.environment'
   );
   assert.equal(
     titleView(true).limitAccountTitle('opencode', { accountLabel: 'Zen' }, 1),

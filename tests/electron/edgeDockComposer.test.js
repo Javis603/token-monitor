@@ -10,7 +10,6 @@ const itemsApi = require('../../src/electron/renderer/edgeDock/items');
 const { limitWindowLabel, mimoProductLabel, mimoAccountGroups } = require('../../src/shared/limits/windowLabels');
 const accountIdentity = require('../../src/electron/renderer/accountIdentity');
 const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
-const { translate } = require('../../src/electron/renderer/i18n');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 
@@ -58,7 +57,7 @@ function accountChoices(provider, rows, presentationApi, settings = {}) {
     providerLabel: (id) => id, providerColor: () => '#000000', hasProviderMark: () => false,
     maskEmail: (email) => settings.maskLimitAccountEmails ? accountIdentity.maskEmailAddress(email) : email, mimoProductLabel,
     limitAccountTitle: createLimitWindowsView({ mimoProductLabel, mimoAccountGroups, accountIdentity,
-      settings: () => settings, t: (key, params) => translate('en', key, params) }).limitAccountTitle,
+      settings: () => settings }).limitAccountTitle,
     createRowDrag: () => ({ deferRender: () => false })
   });
   const all = (node) => [node, ...node.children.flatMap(all)];

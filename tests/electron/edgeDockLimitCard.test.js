@@ -210,93 +210,21 @@ function dockView(appearance = {}, overrides = {}) {
   });
 }
 
-test('Spanish limit rows translate periods, percentages, reset times and account status', () => {
-  const t = (key, params) => i18n.translate('es', key, params);
+test('adding Spanish preserves the fixed English Limits wording', () => {
+  const { translate } = require('../../src/electron/renderer/i18n');
+  const t = (key, params) => translate('es', key, params);
   const view = dockView({}, { t, currentLocale: () => 'es' });
   const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
-  for (const [label, expected] of [['Session', 'Sesión'], ['Weekly', 'Semanal'], ['5-hour', '5 horas']]) {
+  for (const label of ['Session', 'Weekly', '5-hour', 'Monthly', 'Balance']) {
     const row = view.limitWindowNode(label, { remainingPercent: 85, resetsAt }, '#fff');
-    assert.equal(row.find('limit-window-text').children[0].textContent, expected);
-    assert.ok(row.text.includes('85% restante'), row.text);
-    assert.match(row.find('limit-reset').textContent, /^Se restablece en /);
-    assert.equal(row.find('limit-window-text').children[1].dataset.limitMotionSuffix, 'restante');
+    assert.equal(row.find('limit-window-text').children[0].textContent, label);
+    assert.equal(row.find('limit-window-text').children[1].textContent, '85% left');
+    assert.match(row.find('limit-reset').textContent, /^Reset /);
   }
-  assert.equal(view.limitStatusLabel('notConfigured'), 'Sin sesión iniciada');
-  assert.match(view.limitProviderMeta({ status: 'ok', updatedAt: new Date().toISOString() }), /^Actualizado: /);
-  const balance = view.renderProviderWindows({
-    provider: 'openrouter', balance: { amount: 12, currency: 'USD', todaySpend: 1, monthSpend: 4 }, windows: []
-  }, '#fff');
-  for (const label of ['Saldo', 'Gasto', 'Hoy', 'Mes']) assert.ok(balance.text.includes(label), balance.text);
-  const resets = view.codexResetCreditsNode({ availableCount: 2, expirations: [resetsAt] });
-  assert.ok(resets.text.includes('2 restablecimientos'), resets.text);
-  assert.match(resets.attributes['aria-label'], /^Créditos de restablecimiento/);
-  assert.equal(view.codexAdditionalWindowLabel({ windowMinutes: 60 }), '1 hora');
-  assert.equal(view.codexAdditionalWindowLabel({ windowMinutes: 20_160 }), '2 semanas');
-
-  // Localized names must not change the keys used by saved visibility choices.
-  const { limitUsageItemId } = require('../../src/shared/limits/usageItems');
-  const quota = Object.freeze({ kind: 'weekly', remainingPercent: 85 });
-  const provider = { provider: 'codex', windows: [quota] };
-  const itemId = limitUsageItemId(quota, 'codex');
-  assert.deepEqual(view.limitProviderUsageItems([provider]), [{ id: itemId, label: 'Semanal' }]);
-  const hiddenView = dockView({ limitProviderHiddenItems: { codex: [itemId] } }, { t });
-  assert.equal(hiddenView.renderProviderWindows(provider, '#fff').textOf('limit-window-text').length, 0);
-});
-
-test('Spanish MiMo balance details keep the current tooltip layout and original account identity', () => {
-  const t = (key, params) => i18n.translate('es', key, params);
-  const view = dockView({}, { t, currentLocale: () => 'es' });
-  const provider = {
-    provider: 'mimo', status: 'ok', accountLabel: 'Console', accountEmail: 'alice@example.com',
-    accountName: 'Work', windows: [{ kind: 'billing', metric: 'credits', remaining: 10, currency: 'CNY' }],
-    balance: { amount: 10, currency: 'CNY', giftBalance: 5, cashBalance: 5 }
-  };
-  const card = view.renderProviderWindows(provider, '#fff');
-  const tooltip = card.find('limit-detail-tooltip');
-  assert.ok(tooltip.text.includes('Saldo promocional'), tooltip.text);
-  assert.ok(tooltip.text.includes('Saldo pagado'), tooltip.text);
-  assert.equal(card.find('limit-reset').textContent, '', 'wallet breakdown stays in the tooltip');
-  assert.equal(view.limitAccountTitle('mimo', provider, 0, [provider]), 'alice@example.com · Console');
-});
-
-test('provider window names are opaque in limit rows and visibility checklists', () => {
-  const t = (key, params) => i18n.translate('es', key, params);
-  const view = dockView({}, { t, currentLocale: () => 'es' });
-  const { limitUsageItemId } = require('../../src/shared/limits/usageItems');
-  for (const kind of ['daily', 'billing']) {
-    const window = Object.freeze({ kind, label: 'Bonus', remainingPercent: 60 });
-    const provider = { provider: 'zai', status: 'ok', windows: [window] };
-    const card = view.renderProviderWindows(provider, '#fff');
-    assert.equal(card.find('limit-window-text').children[0].textContent, 'Bonus');
-    assert.deepEqual(view.limitProviderUsageItems([provider]), [
-      { id: limitUsageItemId(window, 'zai'), label: 'Bonus' }
-    ]);
-    assert.equal(window.label, 'Bonus');
-  }
-  for (const provider of [
-    { provider: 'kimi', windows: [{ kind: 'billing', label: 'Bonus', remainingPercent: 60 }] },
-    { provider: 'codex', windows: [{ kind: 'session', label: 'Bonus', additional: true, remainingPercent: 60 }] },
-    { provider: 'thirdparty', balance: { amount: 5, currency: 'USD' },
-      windows: [{ kind: 'billing', metric: 'credits', label: 'Bonus', remaining: 5, currency: 'USD' }] },
-    { provider: 'mistral', windows: [{ kind: 'billing', metric: 'credits', label: 'Bonus', remaining: 5, currency: 'USD' }] }
-  ]) {
-    const card = view.renderProviderWindows(provider, '#fff');
-    assert.ok(card.text.includes('Bonus'), card.text);
-    assert.ok(view.limitProviderUsageItems([provider]).some(item => item.label === 'Bonus'));
-  }
-  const synthesized = view.limitWindowNode('Bonus', { remainingPercent: 60 }, '#fff');
-  assert.equal(synthesized.find('limit-window-text').children[0].textContent, 'Bonificación');
-});
-
-test('Japanese Typesafe token rows and visibility checklists use the existing token translation', () => {
-  const t = (key, params) => i18n.translate('ja', key, params);
-  const view = dockView({}, { t, currentLocale: () => 'ja' });
-  const provider = { provider: 'typesafe', status: 'ok', windows: [], balance: { amount: 5, currency: 'USD' },
-    usageSummary: { period: 'month', totalTokens: 2500, todayTokens: 500,
-      inputTokens: null, outputTokens: null, requests: null } };
-  const card = view.renderProviderWindows(provider, '#fff');
-  assert.equal(card.find('limit-spend-line').children[0].textContent, 'トークン');
-  assert.ok(view.limitProviderUsageItems([provider]).some(item => item.label === 'トークン'));
+  assert.equal(view.limitStatusLabel('notConfigured'), 'Not signed in');
+  assert.match(view.limitProviderMeta({ status: 'ok', updatedAt: new Date().toISOString() }), /^Updated /);
+  assert.equal(view.codexAdditionalWindowLabel({ windowMinutes: 60 }), '1-hour');
+  assert.ok(view.codexResetCreditsNode({ availableCount: 2 }).text.includes('2 resets'));
 });
 
 function limitsSubscriptionPool(localProviders, aggregateProviders) {

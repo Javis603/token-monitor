@@ -118,7 +118,7 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
   assert.match(limitsViewSource(), /\['All time', optionalFiniteNumber\(balance\?\.allTimeSpend\)\]/);
   assert.match(limitsViewSource(), /summaryNode\.className = 'limit-spend-summary'/);
   assert.match(limitsViewSource(), /function limitDetailInfoNode\(entries, extraClass = '', ariaLabel = ''\)/);
-  assert.match(limitsViewSource(), /function limitNoteRowNode\(\{ label, explicitLabel = false, summary = '', detailEntries = null, ariaParts = \[\] \}\)/);
+  assert.match(limitsViewSource(), /function limitNoteRowNode\(\{ label, summary = '', detailEntries = null, ariaParts = \[\] \}\)/);
   assert.match(limitsViewSource(), /tooltip\.className = \['limit-detail-tooltip', columns > 2 \? 'limit-detail-tooltip-triple' : ''\]/);
   assert.match(limitsViewSource(), /info\.tabIndex = 0/);
   // The tooltip's render-hold is page state, so the shared view calls back into
@@ -127,13 +127,13 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
   // attacher rather than by a per-row copy.
   assert.match(limitsViewSource(), /function attachLimitDetailTooltip\(wrap, tooltip\)[\s\S]*?const close = \(\) => \{[\s\S]*?tooltipHost\.release\(\);/);
   assert.match(app, /release\(\) \{\s*requestAnimationFrame\(\(\) => \{\s*if \(limitDetailTooltipShouldHoldRender\(\)\) return;/);
-  assert.match(limitsViewSource(), /entries\.map\(\(\[entryLabel, value\]\) => \[presentationApi\.limitDisplayLabel\(entryLabel, t\), formatBalanceSpendAmount\(value, balance\)\]\)/);
+  assert.match(limitsViewSource(), /entries\.map\(\(\[entryLabel, value\]\) => \[entryLabel, formatBalanceSpendAmount\(value, balance\)\]\)/);
   assert.match(limitsViewSource(), /const spendNode = providerSpendNode\(balance\)/);
   assert.match(limitsViewSource(), /function openrouterCreditsWindow\(provider\)/);
   assert.match(limitsViewSource(), /windows\.find\(\(window\) => window\?\.metric === 'credits'\)/);
   assert.match(limitsViewSource(), /windows\.find\(\(window\) => !window\?\.metric && window\?\.label === 'Credits'\)/);
   assert.match(limitsViewSource(), /const creditsWindow = openrouterCreditsWindow\(provider\)/);
-  assert.match(limitsViewSource(), /limitWindowNode\(\s*'Balance',\s*\{ \.\.\.balanceWindow, label: '' \}/);
+  assert.match(limitsViewSource(), /limitWindowNode\(\s*'Balance',\s*\{ \.\.\.balanceWindow, label: 'Balance' \}/);
   assert.match(limitsViewSource(), /\.filter\(\(window\) => window !== creditsWindow\)/);
   assert.match(limitsViewSource(), /const hasMeter = quotaWindow\?\.showMeter !== false/);
   assert.match(limitsViewSource(), /const valueOverride = hasMeter \? null : \(quotaWindow\?\.detail \|\| '—'\)/);

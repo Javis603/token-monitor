@@ -16,44 +16,6 @@
 })(typeof window !== 'undefined' ? window : null, function createLimitProviderPresentationApi(accountIdentityApi, limitWindowLabelsApi, workbuddyIdentityApi) {
   const { isMimoMembershipProduct } = limitWindowLabelsApi;
   const { isWorkbuddyPlaceholder } = workbuddyIdentityApi;
-  // Translate display labels only. Original window labels also participate in
-  // persisted visibility keys and provider-specific matching.
-  const LIMIT_DISPLAY_LABEL_KEYS = new Map([
-    ['Session', 'home.limit.session'], ['Weekly', 'home.limit.weekly'],
-    ['Daily', 'home.limit.daily'], ['Monthly', 'home.limit.monthly'],
-    ['5-hour', 'limits.window.fiveHour'], ['Balance', 'subscription.tooltip.balance'],
-    ['Spend', 'limits.label.spend'], ['Details', 'limits.label.details'],
-    ['Today', 'edgeDock.period.today'], ['Week', 'limits.label.week'],
-    ['Month', 'settings.typesafe.month'], ['All time', 'trayComposer.period.allTime'],
-    ['Quota', 'notch.quota'], ['Usage', 'settings.tools.health.usage'],
-    ['Credits', 'limits.label.credits'], ['Credit', 'limits.label.credit'],
-    ['Overage', 'limits.label.overage'], ['Monthly credits used', 'limits.label.monthlyCreditsUsed'],
-    ['Included credits', 'limits.label.includedCredits'], ['Credit balance', 'limits.label.creditBalance'],
-    ['Token quota', 'limits.label.tokenQuota'], ['Resets', 'limits.label.resets'],
-    ['Requests', 'settings.thirdparty.requests'],
-    ['Tokens', 'settings.typesafe.tokens'],
-    ['Included usage', 'limits.label.includedUsage'],
-    ['Prepaid balance', 'limits.label.prepaidBalance'],
-    ['On-demand spend', 'limits.label.onDemandSpend'],
-    ['Cursor Models', 'limits.label.cursorModels'],
-    ['Other Models', 'limits.label.otherModels'],
-    ['Overall', 'limits.label.overall'],
-    ['Team pool', 'limits.label.teamPool'],
-    ['Extra usage balance', 'limits.label.extraUsageBalance'],
-    ['Usage credits', 'limits.label.usageCredits'],
-    ['Token Spend', 'limits.label.tokenSpend'],
-    ['Bonus', 'limits.label.bonus'],
-    ['Top-up', 'limits.label.topUp']
-  ]);
-
-  // Payload labels are opaque names, even when they match a generic UI word.
-  // Callers mark those explicitly; synthesized headings use the vocabulary.
-  function limitDisplayLabel(label, t, { explicit = false } = {}) {
-    if (explicit) return label;
-    const key = LIMIT_DISPLAY_LABEL_KEYS.get(label);
-    return key ? t(key) : label;
-  }
-
   const SOURCE_LABELS = {
     oauth: 'OAuth',
     cli: 'CLI',
@@ -364,7 +326,7 @@
       .map((entry) => entry.window);
   }
 
-  function limitProviderCompactWindowLabel(providerOrId, window, visibleWindows = [], t) {
+  function limitProviderCompactWindowLabel(providerOrId, window, visibleWindows = []) {
     if (providerId(providerOrId) === 'zai' && normalizeId(window?.kind) === 'daily') {
       return String(window?.label || '').trim();
     }
@@ -373,15 +335,15 @@
     const quota = antigravityQuotaWindow(window);
     if (!labels.length || !quota || labels.some((label) => !label)) return '';
     const groups = new Set(labels);
-    if (groups.size === 1 && groups.has(quota.groupLabel)) return `${quota.groupLabel} ${t ? limitDisplayLabel(quota.windowLabel, t) : quota.windowLabel}`;
+    if (groups.size === 1 && groups.has(quota.groupLabel)) return `${quota.groupLabel} ${quota.windowLabel}`;
     return groups.size === labels.length ? quota.groupLabel : '';
   }
 
-  function limitProviderCompactWindowPeriodLabel(providerOrId, window, visibleWindows = [], t) {
+  function limitProviderCompactWindowPeriodLabel(providerOrId, window, visibleWindows = []) {
     const quota = antigravityQuotaWindow(window);
     // Single-group labels already include the period, even without reset data.
     return quota && limitProviderCompactWindowLabel(providerOrId, window, visibleWindows) === quota.groupLabel
-      ? (t ? limitDisplayLabel(quota.windowLabel, t) : quota.windowLabel)
+      ? quota.windowLabel
       : '';
   }
 
@@ -413,16 +375,10 @@
   // page and the edge dock render the same meters, and a window that says
   // "Expires" on one and "Reset" on the other is describing two different
   // products.
-  function limitBoundaryText(window, t) {
+  function limitBoundaryText(window) {
     const diffMs = limitResetRemainingMs(window?.resetsAt);
     if (diffMs === null) return '';
     const mixed = window?.boundaryKind === 'mixed';
-    if (t) {
-      const kind = window?.boundaryKind === 'expiry' ? 'expiry' : mixed ? 'mixed' : 'reset';
-      return t(`limits.boundary.${kind}${diffMs === 0 ? 'Now' : ''}`, {
-        duration: limitDurationText(diffMs)
-      });
-    }
     const prefix = window?.boundaryKind === 'expiry'
       ? 'Expires'
       : mixed
@@ -468,32 +424,26 @@
   // `tone` is what a surface decorates with; the words do not change with it.
   function limitProviderFreshness(provider, options = {}) {
     const nowMs = Number.isFinite(options.nowMs) ? options.nowMs : Date.now();
-    const t = options.t;
     const at = Date.parse(provider?.updatedAt || provider?.checkedAt || '');
     if (!Number.isFinite(at)) {
-      const text = t
-        ? t(provider?.stale ? 'settings.limits.status.stale' : 'limits.updateUnknown')
-        : provider?.stale ? 'Stale' : 'Update unknown';
-      return { text, age: '', tone: provider?.stale ? 'stale' : 'unknown' };
+      return { text: provider?.stale ? 'Stale' : 'Update unknown', age: '', tone: provider?.stale ? 'stale' : 'unknown' };
     }
     const diffMs = Math.max(0, nowMs - at);
     let age;
     if (diffMs < 45_000) {
-      age = t ? t('settings.age.justNow') : 'just now';
+      age = 'just now';
     } else {
       const minutes = Math.round(diffMs / 60000);
       if (minutes < 60) {
-        age = t ? t('settings.age.minutesAgo', { minutes }) : `${minutes}m ago`;
+        age = `${minutes}m ago`;
       } else {
         const hours = Math.round(minutes / 60);
-        age = hours < 24
-          ? (t ? t('settings.age.hoursAgo', { hours }) : `${hours}h ago`)
-          : (t ? t('settings.age.daysAgo', { days: Math.round(hours / 24) }) : `${Math.round(hours / 24)}d ago`);
+        age = hours < 24 ? `${hours}h ago` : `${Math.round(hours / 24)}d ago`;
       }
     }
     return provider?.stale
-      ? { text: `${t ? t('settings.limits.status.stale') : 'Stale'} · ${age}`, age, tone: 'stale' }
-      : { text: t ? t('limits.updated', { age }) : `Updated ${age}`, age, tone: 'ok' };
+      ? { text: `Stale · ${age}`, age, tone: 'stale' }
+      : { text: `Updated ${age}`, age, tone: 'ok' };
   }
 
   function limitProviderStatusLabel(provider = {}) {
@@ -805,7 +755,6 @@
     limitProviderProvenance,
     limitBoundaryText,
     limitDurationText,
-    limitDisplayLabel,
     limitResetRemainingMs,
     limitProviderSourceLabel,
     limitProviderStatusLabel,
