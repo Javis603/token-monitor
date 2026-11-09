@@ -208,6 +208,8 @@ function buildNotchData(stats, cells, settings, options = {}) {
     const iconProvider = output.type === 'icon' ? output.provider : output.iconProvider;
     if (iconProvider && iconProvider !== 'app') {
       const provider = limitProviderForClient(iconProvider) || iconProvider;
+      const module = stats?.pluginLimitModules?.find(module => module.id === provider);
+      if (module) output.pluginQuota = { label: module.label, presentation: module.presentation, identityIcon: module.identityIcon };
       // Reuse a configured headline first. A standalone icon uses the same
       // provider projection, independent of whether either dock is enabled.
       const cell = cells.find((entry) => entry.provider === provider) || iconCells.find((entry) => entry.provider === provider);

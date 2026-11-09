@@ -292,7 +292,8 @@ function readableColor(color) {
 function pluginQuotaMetadata(id) {
   return state.payload?.cells?.find(cell => cell.provider === id)?.pluginQuota
     || state.payload?.cell?.pluginQuota
-    || state.payload?.summary?.items?.find(item => item.providerCell?.provider === id)?.providerCell.pluginQuota;
+    || state.payload?.summary?.items?.find(item => item.providerCell?.provider === id)?.providerCell.pluginQuota
+    || state.payload?.summary?.items?.find(item => item.provider === id || item.iconProvider === id)?.pluginQuota;
 }
 
 function limitProviderColor(id) {

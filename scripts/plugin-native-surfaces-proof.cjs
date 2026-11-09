@@ -96,6 +96,14 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
     for (let n = 0; n < 50 && runtime.limitsSnapshot().providers[0].updatedAt === beforeRefresh; n++) await pause(40);
     assert.notEqual(runtime.limitsSnapshot().providers[0].updatedAt, beforeRefresh, 'native Refresh resamples the real synthetic plugin registry');
     fs.writeFileSync(path.join(evidence, 'notch-limits.png'), (await notchWin.webContents.capturePage()).toPNG());
+    const metadataOnly = require('../src/electron/plugins/limitsPresentation').projectPluginLimits({ ...stats, limits: { providers: [] } }, { modules: runtime.limitsSnapshot().modules, providers: [] });
+    const summaryOnly = require('../src/electron/notch/data').buildNotchData(metadataOnly, [], { ...dockSettings, notchSummaryMode: 'custom', notchCustomLayout: { items: [{ type: 'icon', icon: 'provider', source: { provider: 'plugin:synthetic-limits:one' } }] } });
+    assert.equal(summaryOnly.summary.items[0].providerCell, undefined);
+    notch.setData(summaryOnly); await pause(200);
+    assert.equal(await notchWin.webContents.executeJavaScript("providerLabel('plugin:synthetic-limits:one')"), 'API credits');
+    assert.equal(await notchWin.webContents.executeJavaScript("state.payload.cells.length===0 && !state.payload.summary.items[0].providerCell && !!document.querySelector('.notch-summary .edge-dock-mark.is-plugin .row-icon-codex')"), true);
+    fs.writeFileSync(path.join(evidence, 'notch-fixed-icon-no-reading.png'), (await notchWin.webContents.capturePage()).toPNG());
+    notch.setData(require('../src/electron/notch/data').buildNotchData(projected, cells, dockSettings));
     const railWin = await bySurface('rail');
     assert.equal(await railWin.webContents.executeJavaScript("document.querySelectorAll('.edge-dock-cell').length>=2"), true);
     fs.writeFileSync(path.join(evidence, 'dock-rail.png'), (await railWin.webContents.capturePage()).toPNG());
@@ -138,6 +146,6 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
     runtime.manager.setEnabled('synthetic-limits', false);
     await waitFor("state.pluginCatalog.limits.modules.length===0 && !els.floatingBubbleContent.querySelector('img')", 'visible Bubble drops disabled fixed icon');
 
-    fs.writeFileSync(path.join(evidence, 'proof.json'), JSON.stringify({ modules: cells.map(cell => cell.provider), rawStatsUntouched: true, nativeManualRefresh: true, fixedIconDisableRestore: true, nativeIconDragStarts, trayAndBubbleProviders: sourceProviders, inactiveCells: 0, surfaceCount: windows.length }, null, 2));
+    fs.writeFileSync(path.join(evidence, 'proof.json'), JSON.stringify({ modules: cells.map(cell => cell.provider), rawStatsUntouched: true, nativeManualRefresh: true, fixedIconDisableRestore: true, standaloneNotchMetadata: true, nativeIconDragStarts, trayAndBubbleProviders: sourceProviders, inactiveCells: 0, surfaceCount: windows.length }, null, 2));
   } finally { dock.stop(); notch.dispose(); runtime.demandLimits(false, 'fixture.native-refresh'); }
 };

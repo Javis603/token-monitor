@@ -39,6 +39,30 @@ test('native dock and Notch share module money, identity and presentation while 
   assert.deepEqual(dock.buildEdgeDockCells(inactive, { items: configured }), []);
   assert.equal(configured[0].provider, id, 'saved configuration is retained');
 });
+test('standalone Notch icons keep active module artwork and palette without a reading or quota demand', () => {
+  const { Element } = require('../helpers/notchPanel');
+  const document = { createElement: tag => new Element(tag, document) };
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const layout = { items: [{ type: 'icon', icon: 'provider', source: { provider: id } }] };
+  const context = vm.createContext({ state: {}, document, clientColors: { codex: '#123456', default: '#abcdef' },
+    pluginViewsApi: require('../../src/electron/renderer/pluginViews'), LIMIT_PROVIDER_LABELS: {}, CLIENT_LABELS: {}, hasMask: () => false,
+    el: (tag, name) => { const node = document.createElement(tag); node.className = name; return node; } });
+  for (const name of ['pluginQuotaMetadata', 'providerLabel', 'limitProviderColor', 'markNode']) {
+    vm.runInContext(source.match(new RegExp(`function ${name}\\([^]*?\\n}`))[0], context);
+  }
+  for (const active of [true, false, true]) {
+    const stats = projectPluginLimits({ periods: {}, limits: { providers: [] } }, { modules: active ? [moduleInfo] : [], providers: [] });
+    const payload = buildNotchData(stats, [], { notchSummaryMode: 'custom', notchCustomLayout: layout });
+    context.state.payload = payload;
+    assert.deepEqual(payload.cells, []);
+    assert.equal(tray.usesLimits(layout), false);
+    if (!active) { assert.equal(payload.summary, null); assert.equal(context.pluginQuotaMetadata(id), undefined); continue; }
+    assert.equal(payload.summary.items[0].providerCell, undefined, 'metadata must not invent a quota reading');
+    assert.equal(context.providerLabel(id), 'API pool');
+    assert.equal(context.limitProviderColor(id), '#123456');
+    assert.ok(context.markNode(id).querySelector('img').src.endsWith('/codex.svg'));
+  }
+});
 test('maximum-length module identities and hidden windows survive native surface persistence', () => {
   const longId = `plugin:${'p'.repeat(40)}:${'m'.repeat(32)}`;
   assert.equal(longId.length, 80);
