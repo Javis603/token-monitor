@@ -308,7 +308,7 @@ Qoder CN のトークン使用量は API ではなくアプリのローカルデ
 | キャッシュ使用量／セッションのキャッシュヒット率 | キャッシュ項目を提供するデータソース。例： Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | キャッシュ使用量のデータがある場合にヒット率を表示します。 |
 | キャッシュ残存時間の推定 | Claude Code | 記録されたキャッシュの種類に基づき、5 分または 1 時間と推定します。 |
 | 出力速度／トークン消費速度 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | 出力速度は `tok/s`、総トークン消費速度は `tok/min`。計測時間には待機を含む場合があります。 |
-| セッションのモデルと推論の effort | Claude Code, Codex | 最後に記録されたモデルを表示し、effort 設定は明示的な記録がある場合のみ表示します。複数モデルのセッションはモデル名に `+N` を付け、最後のモデルが不明な場合は `N models` と表示します。ホバーでトークン数と割合を確認できます。 |
+| セッションのモデルと推論の effort | Claude Code, Codex | セッションに明示的に記録されたモデルと effort 設定のみ表示します。 |
 | 推論トークン数 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
 | ターンの開始／完了検出 | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | ツールが記録したターンのシグナルを使用します。その他のツールや有効なシグナルがない場合は、最後のアクティビティから約 10 分間、実行中と推定します。 |
 | ネイティブの実行中／入力待ち状態 | Claude Code, Codex | — |
