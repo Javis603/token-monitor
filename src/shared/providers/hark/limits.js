@@ -184,11 +184,13 @@ async function fetchHarkLimits(options = {}, deps = {}) {
     });
   } catch (error) {
     const status = providerStatusFromError(error);
-    // An unconfirmed replacement must not outrank the retained session with an empty reading.
+    // A rejected new session is not a confirmed sign-out. A terminal 401 would
+    // outrank the retained reading with an empty card, so publish it as a miss.
+    const published = previous.length && status === 'unauthorized' ? 'unavailable' : status;
     provider = normalizeLimitProvider({
       ...base,
-      accountKey: previous.length && ['unavailable', 'sourceRateLimited'].includes(status) ? '' : base.accountKey,
-      status
+      accountKey: previous.length && ['unavailable', 'sourceRateLimited'].includes(published) ? '' : base.accountKey,
+      status: published
     });
   }
   // Hark exposes one selected session; omitted identities otherwise remain cached by the runtime.

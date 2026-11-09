@@ -3,6 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+const { aggregateLimits } = require('../../src/shared/limits/core');
 
 const {
   fetchHarkLimits,
@@ -239,7 +240,9 @@ test('HTTP failures recover and a new desktop session replaces its previous acco
   now += 1000;
   status = 401;
   await runtime.refresh({ provider: 'hark' }, 'settings-change');
-  assert.ok(runtime.getSnapshot().providers.some((row) => row.accountKey === rows[0].accountKey && row.windows.length === rows[0].windows.length));
+  const rejected = aggregateLimits([{ deviceId: 'local', limits: runtime.getSnapshot() }], 0, now);
+  assert.equal(rejected.providers.length, 1);
+  assert.deepEqual(rejected.providers[0].windows, rows[0].windows);
   status = 200;
   await runtime.refresh({ provider: 'hark' }, 'settings-change');
   const rotated = runtime.getSnapshot().providers;
