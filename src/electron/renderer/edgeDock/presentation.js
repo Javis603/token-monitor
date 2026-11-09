@@ -717,6 +717,26 @@
         || a.model.localeCompare(b.model));
   }
 
+  function cacheSessionRows(period) {
+    return Object.entries(period?.sessions || {})
+      .filter(([, session]) => session.sessionKind !== 'background-review')
+      .map(([key, session]) => {
+        const rate = sessionRowsApi.sessionCacheHitPercent(session);
+        if (rate === null) return null;
+        return {
+          key,
+          client: session.client,
+          title: sessionRowsApi.sessionTitleForDisplay(session)
+            || session.projectLabel || sessionRowsApi.sessionIdLabel(session.sessionId || key),
+          hit: finite(session.cacheReadTokens) || 0,
+          miss: (finite(session.inputTokens) || 0) + (finite(session.cacheWriteTokens) || 0),
+          rate
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => (b.hit + b.miss) - (a.hit + a.miss) || a.key.localeCompare(b.key));
+  }
+
   function statCell(stats, metric, options = {}) {
     if (metric === 'liveRate') {
       const sample = options.liveRate || null;
@@ -785,7 +805,8 @@
         available: rate !== null,
         hit,
         miss,
-        rate
+        rate,
+        cacheSessions: rate === null ? [] : cacheSessionRows(period)
       };
     }
     // Native periods come straight from stats; week/last7/last30 are summed from

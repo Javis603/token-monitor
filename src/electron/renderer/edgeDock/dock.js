@@ -1850,6 +1850,28 @@ function statCard(cell) {
       totals.append(reading);
     }
     card.append(totals);
+    if (cell.cacheSessions.length) {
+      const details = el('div', 'edge-dock-sessions edge-dock-cache-hit-details');
+      const sectionHead = el('div', 'edge-dock-section-head');
+      sectionHead.append(el('span', 'edge-dock-section-title', t('edgeDock.sessions')),
+        el('span', 'edge-dock-section-count', String(cell.cacheSessions.length)));
+      details.append(sectionHead);
+      const list = el('div', 'edge-dock-session-list edge-dock-cache-hit-sessions');
+      for (const session of cell.cacheSessions) {
+        const row = el('div', 'edge-dock-session');
+        const name = el('span', 'edge-dock-session-name');
+        name.append(markNode(session.client), el('span', 'sr-only', `${clientLabel(session.client)} `));
+        const title = el('span', 'edge-dock-session-title', session.title);
+        title.dataset.overflowKey = session.key;
+        overflowText.bind(title);
+        name.append(title);
+        row.append(name, el('span', 'edge-dock-session-tokens', formatCacheHitRate(session.rate)),
+          el('span', 'edge-dock-session-meta', cacheHitDetail(session)));
+        list.append(row);
+      }
+      details.append(list);
+      card.append(details);
+    }
     return card;
   }
   if (!cell.available) {
@@ -2054,13 +2076,13 @@ function commitCard(card, cellId) {
   animateCardSwitch(card, switchMotion);
 }
 
-// The period card is a summary even when the period contains dozens of tools or
-// models. Keep its natural height at six rows, but leave every row in the list so
+// The period card and cache-hit card stay compact even with many tools, models or
+// sessions. Keep their natural height at six rows, but leave every row in the list so
 // the existing overflow container can reveal the rest. Measuring the rendered
 // rows avoids baking the current font metrics and meter spacing into a second
 // magic pixel height.
 function clampBreakdownList(card) {
-  const list = card.querySelector('.edge-dock-clients');
+  const list = card.querySelector('.edge-dock-clients, .edge-dock-cache-hit-sessions');
   const rows = Array.from(list?.children || []);
   if (rows.length <= BREAKDOWN_VISIBLE_ROWS) return;
   const first = rows[0].getBoundingClientRect();

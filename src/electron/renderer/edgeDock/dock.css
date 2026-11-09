@@ -879,6 +879,7 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
 .edge-dock-cache-hit-label::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
 .edge-dock-cache-hit-reading.is-miss .edge-dock-cache-hit-label::before { background: rgba(var(--overlay-rgb), 0.22); }
 .edge-dock-cache-hit-value { font-size: 12px; }
+.edge-dock-cache-hit-details { border-top: 1px solid var(--line); padding-top: 10px; }
 
 .edge-dock-rate-figure {
   position: relative;
