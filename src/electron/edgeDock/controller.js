@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { CARD_MOVE_MS, CARD_SPRING, advanceCardFrame } = require('../cardSpring');
 const { createCardMotionDriver } = require('../cardMotion');
+const { cardCanvasBounds, createCardPointerRouting } = require('../cardCanvas');
 const { CARD_FADE_IN_MS: FADE_IN_MS, CARD_FADE_OUT_MS: FADE_OUT_MS, CARD_FRAME_MS: FADE_STEP_MS, parkedCardBounds, createCardWindowVisibility } = require('../cardWindow');
 const {
   EDGE_DOCK_METRICS,
@@ -162,7 +163,6 @@ function createEdgeDockController(deps) {
   let refreshFeedbackWindow = null;
   let drag = null;
   let bubbleFrame = null;
-  let bubblePointerMode = null;
   let bubbleMotion = null;
   let railMotion = null;
   let railMotionTimer = null;
@@ -478,17 +478,9 @@ function createEdgeDockController(deps) {
     else win.setIgnoreMouseEvents(!takesPointer);
   }
 
-  function syncBubblePointer() {
-    const win = windows.bubble;
-    if (platform !== 'darwin' || !alive(win)) return;
-    const takesPointer = visibleTargets.bubble && (rectContains(bubbleFrame, screen.getCursorScreenPoint())
-      || bubblePointerMode === 'capture' && primaryButtonDown() === true);
-    const mode = takesPointer ? 'capture' : visibleTargets.bubble ? 'forward' : 'ignore';
-    if (mode === bubblePointerMode) return;
-    bubblePointerMode = mode;
-    if (mode === 'forward') win.setIgnoreMouseEvents(true, { forward: true });
-    else win.setIgnoreMouseEvents(!takesPointer);
-  }
+  const bubblePointer = createCardPointerRouting({ platform, screen, getWindow: () => windows.bubble,
+    getFrame: () => bubbleFrame, isVisible: () => visibleTargets.bubble, primaryButtonDown });
+  function syncBubblePointer() { bubblePointer.sync(); }
 
   function setPointerOnHandle(on) {
     if (on === pointerOnHandle) return;
@@ -742,7 +734,7 @@ function createEdgeDockController(deps) {
   function destroyWindows() {
     cancelBubbleMotion();
     bubbleFrame = null;
-    bubblePointerMode = null;
+    bubblePointer.reset();
     cancelRailMotion();
     railHitPolygons = [];
     railPointerMode = null;
@@ -1152,10 +1144,7 @@ function createEdgeDockController(deps) {
 
   function paintBubble(frame, workArea, target = frame) {
     bubbleFrame = frame;
-    const canvasY = bubbleShapeFailed ? frame.y : workArea.y;
-    placeSurface('bubble', { x: frame.x, y: canvasY, width: frame.width, height: bubbleShapeFailed ? frame.height : workArea.height,
-      cardY: frame.y - canvasY, cardHeight: frame.height, tailY: frame.tailY,
-      contentY: target.y - canvasY, contentHeight: target.height });
+    placeSurface('bubble', { ...cardCanvasBounds(frame, workArea, target, bubbleShapeFailed), tailY: frame.tailY });
     syncBubblePointer();
   }
 
