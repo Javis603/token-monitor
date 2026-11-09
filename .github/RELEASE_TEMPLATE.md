@@ -4,35 +4,32 @@
 
 <!-- app-update-notes:en:start -->
 ### Added
-- **Mistral Vibe usage:** Tracks local session token usage. (#1384)
-- **Prime Agent usage:** Tracks local sessions, including RLM sub-agents. (#1390)
-- **Jcode usage:** Tracks local sessions, including reasoning tokens. (#1390)
-- **Mistral quota:** Supports API and Vibe Code subscription allowances and credit balance with manual Cookie setup. (#1387)
-- **MiniMax Code quota:** Shows points and plan quotas separately from API billing, with multiple API keys. (#1284)
-- **Plugin quotas:** Supports optional plugin modules in the native Limits page, with account setup in AI Tool Limits. (#1391)
-- **OpenAI API credits:** Adds an optional plugin for Platform credit balance and expiry, available through plugin discovery. Requires manual Platform session credentials. (#1407, #1409)
-- **Copilot CLI usage:** Supports native session-state usage alongside existing sources. (#1400)
+- **Gemini CLI usage:** Tracks local session token usage. (#1413)
 
 ### Improved
-- **Monthly tray presets:** Adds convenient monthly Tokens, estimated cost, and combined presets for the tray and floating bubble. (#1346)
-- **Edge Dock accounts:** Pins a chosen third-party API account on the sidebar while keeping other accounts in the detail card. (#1381)
-- **Edge Dock detail size:** Adjusts detail-window size independently of the sidebar. (#1406)
-- **Settings dropdowns:** Unifies pickers, with searchable long lists and font previews. (#1410)
-- **MiMo accounts:** Separates Console and Desktop headings and makes Gift/Cash balance details clearer. (#1402)
+- **Plugin quotas:** Shows declared quota modules on Home, Edge Dock, Notch Panel, Tray and Floating Bubble using native layouts. (#1419)
+- **Session models:** Shows the last-used model for Codex and Claude sessions, including historical Codex conversations. (#1423, #1434)
+- **Desktop memory:** Reduces steady-state memory use. (#1421)
+- **Plugin dropdowns:** Uses the shared dropdown style by default for eligible controls, with search in long lists. (#1412)
+- **Quota history cards:** Smooths transitions when switching accounts or quotas. (#1426)
 
 ### Fixed
-- **Live usage updates:** Keeps pricing downloads from delaying live collection on slow connections. (#1389)
-- **Quota history:** Preserves continuous trends across compatible device-source handoffs after failed refreshes. Applies to newly recorded history. (#1392)
-- **Cursor accounts:** Hides stale desktop-detected accounts after sign-out, account changes, or expired authorization. (#1348)
-- **macOS network errors:** Prevents an Uncaught Exception dialog caused by socket QoS errors. (#1398)
+- **Quota history:** Continues matching verified-account history across local, Hub and iCloud modes, including existing observations stored on this desktop. (#1424, #1427)
+- **Usage timezone:** Aligns usage periods and daily graphs with the system timezone. Existing history is not rebuilt; restart headless agents after timezone changes. (#1420)
+- **Grok history:** Keeps new quota readings continuous across recognized xAI account token rotations. Older token-based histories are not merged. (#1422)
+- **Grok quota:** Finds common CLI installations missing from the desktop launch environment's PATH. (#1415)
+- **Startup appearance:** Applies saved appearance before the first reveal, including when opening from the tray. (#1418, #1435)
+- **Edge Dock cards:** Prevents the previous card from flashing when reopening a different item. (#1411)
+- **Antigravity sync:** Keeps healthy conversations refreshing when deleted conversations are encountered, preserving their cached usage. (#1432, #1433)
+- **Plugin catalog:** Corrects repository-relative README links and shows the version selected for installation. (#1429)
 <!-- app-update-notes:en:end -->
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.88.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.88.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.88.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-Setup-0.88.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.88.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.88.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.89.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.89.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.89.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-Setup-0.89.0.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.89.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.89.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -68,36 +65,33 @@ Tokscale is bundled with this app and updated through Token Monitor releases. Se
 
 <!-- app-update-notes:zh:start -->
 ### 新增
-- **Mistral Vibe 用量：** 支持本地会话的 Tokens 用量统计。 （#1384）
-- **Prime Agent 用量：** 支持本地会话及 RLM 子代理用量统计。 （#1390）
-- **Jcode 用量：** 支持本地会话用量统计，包含推理 Tokens。 （#1390）
-- **Mistral 额度：** 支持 API 与 Vibe Code 订阅额度及余额，需手动配置 Cookie。 （#1387）
-- **MiniMax Code 额度：** 分别显示积分、套餐额度和 API 账单，支持配置多个 API 密钥。 （#1284）
-- **插件额度：** 支持在原生额度页面显示可选插件模块，并在“AI 工具额度”中配置账户。 （#1391）
-- **OpenAI API 余额：** 新增可在插件发现页安装的可选插件，显示 Platform 余额及到期时间，需手动配置 Platform 会话凭据。 （#1407、#1409）
-- **Copilot CLI 用量：** 新增原生会话数据支持，可与现有来源一同统计。 （#1400）
+- **Gemini CLI 用量：** 支持本地会话的 Tokens 用量统计。 （#1413）
 
 ### 改进
-- **托盘月度预设：** 可直接选择本月 Tokens、估算费用或两者组合，用于托盘和悬浮球。 （#1346）
-- **侧边栏账户：** 可固定显示指定第三方 API 账户，详情卡片仍保留其他账户。 （#1381）
-- **侧边栏详情大小：** 可独立调整详情窗口大小，不再受侧栏大小限制。 （#1406）
-- **设置下拉菜单：** 统一选择控件，长列表支持搜索，字体列表支持预览。 （#1410）
-- **MiMo 账户：** 分开显示 Console 与 Desktop 标题，Gift/Cash 余额明细更清晰。 （#1402）
+- **插件额度：** 可在主页、侧边栏、刘海面板、托盘和悬浮球中使用原生布局显示插件声明的额度模块。 （#1419）
+- **会话模型：** 显示 Codex 与 Claude 会话最后使用的模型，包含 Codex 历史会话。 （#1423、#1434）
+- **桌面内存：** 降低稳定运行时的内存占用。 （#1421）
+- **插件下拉菜单：** 适用的控件默认采用统一样式，长列表支持搜索。 （#1412）
+- **额度历史卡片：** 切换账户或额度时的过渡更流畅。 （#1426）
 
 ### 修复
-- **实时用量更新：** 避免慢速网络下的价格下载拖慢实时采集。 （#1389）
-- **额度历史：** 刷新失败后，在兼容的设备来源间切换时保留连续趋势。仅对新记录的历史生效。 （#1392）
-- **Cursor 账户：** 桌面端退出登录、更换账户或授权失效后，不再显示过期的自动检测账户。 （#1348）
-- **macOS 网络错误：** 修复套接字 QoS 错误可能触发未捕获异常弹窗的问题。 （#1398）
+- **额度历史：** 在本地、Hub 与 iCloud 模式间切换时延续匹配的已验证账户历史，包含本机已保存的观测记录。 （#1424、#1427）
+- **用量时区：** 用量周期与每日图表按系统时区统计。不会重建已有历史；无界面代理需在更改时区后重启。 （#1420）
+- **Grok 历史：** 已识别的 xAI 账户令牌轮换后，新额度记录保持连续。不会合并旧的令牌历史。 （#1422）
+- **Grok 额度：** 支持查找桌面启动环境 PATH 中缺失的常见 CLI 安装位置。 （#1415）
+- **启动外观：** 窗口首次显示或从托盘打开时，正确应用已保存的外观设置。 （#1418、#1435）
+- **侧边栏卡片：** 重新打开其他项目时，不再短暂闪现上一张卡片。 （#1411）
+- **Antigravity 同步：** 遇到已删除的会话时仍可刷新正常会话，并保留已删除会话的缓存用量。 （#1432、#1433）
+- **插件目录：** 修复 README 仓库相对链接，并显示实际选定的安装版本。 （#1429）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.88.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.88.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.88.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-Setup-0.88.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.88.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.88.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.89.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.89.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.89.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-Setup-0.89.0.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.89.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.89.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -128,7 +122,7 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.87.0...v0.88.0">v0.87.0...v0.88.0</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.88.0...v0.89.0">v0.88.0...v0.89.0</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -146,36 +140,33 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 
 <!-- app-update-notes:zh-TW:start -->
 ### 新增
-- **Mistral Vibe 用量：** 支援本機工作階段的 Token 用量統計。 （#1384）
-- **Prime Agent 用量：** 支援本機工作階段及 RLM 子代理用量統計。 （#1390）
-- **Jcode 用量：** 支援本機工作階段用量統計，包含推理 Token。 （#1390）
-- **Mistral 額度：** 支援 API 與 Vibe Code 訂閱額度及餘額，需手動設定 Cookie。 （#1387）
-- **MiniMax Code 額度：** 分別顯示點數、方案額度與 API 帳單，支援設定多個 API 金鑰。 （#1284）
-- **外掛額度：** 支援在原生額度頁面顯示選用的外掛模組，並在「AI 工具額度」中設定帳戶。 （#1391）
-- **OpenAI API 餘額：** 新增可於外掛探索頁安裝的選用外掛，顯示 Platform 餘額及到期時間，需手動設定 Platform 工作階段憑證。 （#1407、#1409）
-- **Copilot CLI 用量：** 新增原生工作階段資料支援，可與既有來源一同統計。 （#1400）
+- **Gemini CLI 用量：** 支援本機會話的 Token 用量統計。 （#1413）
 
 ### 改進
-- **系統匣月度預設：** 可直接選擇本月 Token、估算費用或兩者組合，用於系統匣與懸浮球。 （#1346）
-- **側邊欄帳戶：** 可固定顯示指定的第三方 API 帳戶，詳情卡片仍保留其他帳戶。 （#1381）
-- **側邊欄詳情視窗大小：** 可獨立調整詳情視窗大小，不再受側欄大小限制。 （#1406）
-- **設定下拉選單：** 統一選擇控制項，長清單支援搜尋，字型清單支援預覽。 （#1410）
-- **MiMo 帳戶：** 分開顯示 Console 與 Desktop 標題，Gift/Cash 餘額明細更清晰。 （#1402）
+- **外掛額度：** 可在主頁、側邊欄、瀏海面板、系統匣與懸浮球中，以原生版面顯示外掛宣告的額度模組。 （#1419）
+- **會話模型：** 顯示 Codex 與 Claude 會話最後使用的模型，包含 Codex 歷史會話。 （#1423、#1434）
+- **桌面記憶體：** 降低穩定運行時的記憶體用量。 （#1421）
+- **外掛下拉選單：** 適用的控制項預設採用統一樣式，長清單支援搜尋。 （#1412）
+- **額度歷史卡片：** 切換帳戶或額度時的過渡更流暢。 （#1426）
 
 ### 修復
-- **即時用量更新：** 避免慢速網路下的價格下載拖慢即時收集。 （#1389）
-- **額度歷史：** 更新失敗後，在相容的裝置來源間切換時保留連續趨勢。僅對新記錄的歷史生效。 （#1392）
-- **Cursor 帳戶：** 桌面端登出、更換帳戶或授權失效後，不再顯示過期的自動偵測帳戶。 （#1348）
-- **macOS 網路錯誤：** 修復通訊端 QoS 錯誤可能觸發未捕獲例外彈窗的問題。 （#1398）
+- **額度歷史：** 在本機、Hub 與 iCloud 模式間切換時延續相符的已驗證帳戶歷史，包含本機已儲存的觀測記錄。 （#1424、#1427）
+- **用量時區：** 用量週期與每日圖表依系統時區統計。不會重建既有歷史；無介面代理需在變更時區後重新啟動。 （#1420）
+- **Grok 歷史：** 已識別的 xAI 帳戶權杖輪替後，新額度記錄保持連續。不會合併舊的權杖歷史。 （#1422）
+- **Grok 額度：** 支援尋找桌面啟動環境 PATH 中缺少的常見 CLI 安裝位置。 （#1415）
+- **啟動外觀：** 視窗首次顯示或從系統匣開啟時，正確套用已儲存的外觀設定。 （#1418、#1435）
+- **側邊欄卡片：** 重新開啟其他項目時，不再短暫閃現上一張卡片。 （#1411）
+- **Antigravity 同步：** 遇到已刪除的會話時仍可更新正常會話，並保留已刪除會話的快取用量。 （#1432、#1433）
+- **外掛目錄：** 修復 README 儲存庫相對連結，並顯示實際選定的安裝版本。 （#1429）
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.88.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.88.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.88.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-Setup-0.88.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.88.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.88.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.89.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.89.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.89.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-Setup-0.89.0.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.89.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.89.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0.AppImage)
 
 </details>
 
@@ -188,36 +179,33 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 
 <!-- app-update-notes:ko:start -->
 ### 추가
-- **Mistral Vibe 사용량:** 로컬 세션의 토큰 사용량을 집계합니다. (#1384)
-- **Prime Agent 사용량:** RLM 하위 에이전트를 포함한 로컬 세션 사용량을 집계합니다. (#1390)
-- **Jcode 사용량:** 추론 토큰을 포함한 로컬 세션 사용량을 집계합니다. (#1390)
-- **Mistral 할당량:** Cookie를 직접 설정하면 API 및 Vibe Code 구독 한도와 크레딧 잔액을 확인할 수 있습니다. (#1387)
-- **MiniMax Code 할당량:** 포인트와 요금제 한도를 API 결제 정보와 구분해 표시하며, 여러 API 키를 지원합니다. (#1284)
-- **플러그인 할당량:** 선택한 플러그인 모듈을 기본 한도 페이지에 표시하고 AI 도구 한도에서 계정을 설정할 수 있습니다. (#1391)
-- **OpenAI API 크레딧:** 플러그인 탐색에서 설치할 수 있는 선택형 플러그인으로 Platform 잔액과 만료일을 확인합니다. Platform 세션 인증 정보를 직접 입력해야 합니다. (#1407, #1409)
-- **Copilot CLI 사용량:** 기존 소스에 더해 네이티브 세션 데이터의 사용량을 지원합니다. (#1400)
+- **Gemini CLI 사용량:** 로컬 세션의 토큰 사용량을 집계합니다. (#1413)
 
 ### 개선
-- **트레이 월간 프리셋:** 이번 달 토큰, 예상 비용 또는 두 값을 함께 표시하는 프리셋을 트레이와 플로팅 버블에서 간편하게 선택합니다. (#1346)
-- **Edge Dock 계정:** 특정 타사 API 계정을 사이드바에 고정하고 다른 계정은 상세 카드에 유지할 수 있습니다. (#1381)
-- **Edge Dock 상세 창 크기:** 사이드바와 별도로 상세 창 크기를 조절할 수 있습니다. (#1406)
-- **설정 드롭다운:** 선택 메뉴를 통일하고 긴 목록 검색과 글꼴 미리보기를 지원합니다. (#1410)
-- **MiMo 계정:** Console과 Desktop 제목을 구분하고 Gift/Cash 잔액 내역을 더 명확하게 표시합니다. (#1402)
+- **플러그인 할당량:** 선언된 할당량 모듈을 홈, 가장자리 도크, 노치 패널, 트레이와 플로팅 버블의 기본 레이아웃에 표시합니다. (#1419)
+- **세션 모델:** Codex와 Claude 세션에서 마지막으로 사용한 모델을 표시하며, 과거 Codex 대화도 지원합니다. (#1423, #1434)
+- **데스크톱 메모리:** 안정적으로 실행 중일 때의 메모리 사용량을 줄였습니다. (#1421)
+- **플러그인 드롭다운:** 지원되는 컨트롤에 공통 스타일을 기본 적용하고 긴 목록에서 검색을 제공합니다. (#1412)
+- **할당량 기록 카드:** 계정이나 할당량을 전환할 때 더 부드럽게 표시합니다. (#1426)
 
 ### 수정
-- **실시간 사용량 갱신:** 느린 연결에서 가격 다운로드가 실시간 수집을 지연시키지 않도록 수정했습니다. (#1389)
-- **할당량 기록:** 새로고침 실패 후 호환되는 기기 소스로 전환할 때 추세가 끊기지 않도록 수정했습니다. 새로 기록되는 이력에 적용됩니다. (#1392)
-- **Cursor 계정:** 데스크톱에서 로그아웃하거나 계정을 바꾸거나 인증이 만료되면 오래된 자동 감지 계정을 숨깁니다. (#1348)
-- **macOS 네트워크 오류:** 소켓 QoS 오류로 처리되지 않은 예외 대화상자가 나타나는 문제를 수정했습니다. (#1398)
+- **할당량 기록:** 로컬, Hub, iCloud 모드를 바꿔도 동일한 것으로 확인된 계정의 기록이 이어집니다. 이 데스크톱에 저장된 기존 관측 기록도 포함합니다. (#1424, #1427)
+- **사용량 시간대:** 사용량 집계 기간과 일별 그래프가 시스템 시간대를 따르도록 수정했습니다. 기존 기록은 다시 계산하지 않습니다. 시간대를 바꾼 뒤에는 헤드리스 에이전트를 다시 시작해야 합니다. (#1420)
+- **Grok 기록:** 식별된 xAI 계정의 토큰이 교체되어도 새 할당량 기록이 이어집니다. 이전 토큰별 기록은 합치지 않습니다. (#1422)
+- **Grok 할당량:** 데스크톱 실행 환경의 PATH에 없는 일반적인 CLI 설치 경로도 찾습니다. (#1415)
+- **시작 화면:** 트레이에서 열 때를 포함해 창이 처음 표시되기 전에 저장된 외관 설정을 적용합니다. (#1418, #1435)
+- **Edge Dock 카드:** 다른 항목을 다시 열 때 이전 카드가 잠깐 나타나는 문제를 수정했습니다. (#1411)
+- **Antigravity 동기화:** 삭제된 대화가 있어도 정상 대화를 갱신하고, 삭제된 대화의 캐시 사용량은 보존합니다. (#1432, #1433)
+- **플러그인 카탈로그:** README의 저장소 상대 링크를 수정하고 실제 설치할 버전을 표시합니다. (#1429)
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.88.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.88.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.88.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-Setup-0.88.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.88.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.88.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.89.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.89.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.89.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-Setup-0.89.0.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.89.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.89.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0.AppImage)
 
 </details>
 
@@ -230,36 +218,33 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 
 <!-- app-update-notes:ja:start -->
 ### 追加
-- **Mistral Vibeの使用量:** ローカルセッションのトークン使用量を集計します。 (#1384)
-- **Prime Agentの使用量:** RLMサブエージェントを含むローカルセッションの使用量を集計します。 (#1390)
-- **Jcodeの使用量:** 推論トークンを含むローカルセッションの使用量を集計します。 (#1390)
-- **Mistralの使用量上限:** Cookieを手動で設定すると、APIとVibe Codeのサブスクリプション上限およびクレジット残高を確認できます。 (#1387)
-- **MiniMax Codeの使用量上限:** ポイントとプランの上限をAPIの請求情報と分けて表示し、複数のAPIキーに対応します。 (#1284)
-- **プラグインの使用量上限:** 任意のプラグインモジュールを標準の制限ページに表示し、AIツール制限でアカウントを設定できます。 (#1391)
-- **OpenAI APIクレジット:** プラグインの検索画面から導入できる任意のプラグインで、Platformの残高と有効期限を確認できます。Platformのセッション認証情報を手動で設定する必要があります。 (#1407, #1409)
-- **Copilot CLIの使用量:** 既存のソースに加え、ネイティブのセッションデータに対応します。 (#1400)
+- **Gemini CLIの使用量:** ローカルセッションのトークン使用量に対応しました。 (#1413)
 
 ### 改善
-- **トレイの月間プリセット:** 今月のトークン、推定コスト、または両方を表示するプリセットを、トレイとフローティングバブルで手軽に選べます。 (#1346)
-- **Edge Dockのアカウント:** 特定のサードパーティAPIアカウントをサイドバーに固定し、ほかのアカウントも詳細カードに残せます。 (#1381)
-- **Edge Dockの詳細サイズ:** サイドバーとは別に詳細ウィンドウのサイズを調整できます。 (#1406)
-- **設定のドロップダウン:** 選択メニューを統一し、長いリストの検索やフォントのプレビューに対応します。 (#1410)
-- **MiMoのアカウント:** ConsoleとDesktopの見出しを分け、Gift/Cashの残高内訳を見やすくしました。 (#1402)
+- **プラグインの使用量上限:** 宣言された上限モジュールを、ホーム、エッジドック、ノッチパネル、トレイ、フローティングバブルの標準レイアウトに表示できます。 (#1419)
+- **セッションのモデル:** CodexとClaudeのセッションで最後に使用したモデルを表示します。過去のCodexの会話にも対応します。 (#1423, #1434)
+- **デスクトップのメモリ:** 安定稼働時のメモリ使用量を削減しました。 (#1421)
+- **プラグインのドロップダウン:** 対応するコントロールに共通スタイルを標準で適用し、長いリストでは検索できます。 (#1412)
+- **使用量上限の履歴カード:** アカウントや上限を切り替える際の動きを滑らかにしました。 (#1426)
 
 ### 修正
-- **リアルタイム使用量の更新:** 低速回線で価格データのダウンロードが使用量の収集を遅らせる問題を修正しました。 (#1389)
-- **使用量上限の履歴:** 更新失敗後に互換性のあるデバイスのデータソースへ切り替えても、推移が途切れないようにしました。新たに記録される履歴に適用されます。 (#1392)
-- **Cursorのアカウント:** デスクトップでのログアウト、アカウント変更、認証切れに伴い、古い自動検出アカウントを非表示にします。 (#1348)
-- **macOSのネットワークエラー:** ソケットのQoSエラーで未処理の例外ダイアログが表示される問題を修正しました。 (#1398)
+- **使用量上限の履歴:** ローカル、Hub、iCloudモードを切り替えても、同一と確認されたアカウントの履歴が続くようにしました。このデスクトップに保存済みの観測記録も引き継ぎます。 (#1424, #1427)
+- **使用量のタイムゾーン:** 集計期間と日別グラフがシステムのタイムゾーンに従うようにしました。既存の履歴は再計算しません。変更後はヘッドレスエージェントの再起動が必要です。 (#1420)
+- **Grokの履歴:** 識別できたxAIアカウントのトークンが更新されても、新しい上限記録が途切れないようにしました。古いトークン別の履歴は統合しません。 (#1422)
+- **Grokの使用量上限:** デスクトップの起動環境のPATHにない、一般的なCLIのインストール先も検出します。 (#1415)
+- **起動時の外観:** トレイから開く場合も、初めてウィンドウを表示する前に保存済みの外観設定を適用します。 (#1418, #1435)
+- **Edge Dockのカード:** 別の項目を開き直した際に、前のカードが一瞬表示される問題を修正しました。 (#1411)
+- **Antigravityの同期:** 削除済みの会話があっても正常な会話を更新し、削除済み会話の使用量キャッシュは保持します。 (#1432, #1433)
+- **プラグインカタログ:** READMEのリポジトリ相対リンクを修正し、実際にインストールするバージョンを表示します。 (#1429)
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.88.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.88.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.88.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-Setup-0.88.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.88.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.88.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.88.0/Token-Monitor-0.88.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.89.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.89.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.89.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-Setup-0.89.0.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.89.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.89.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.89.0/Token-Monitor-0.89.0.AppImage)
 
 </details>
 
