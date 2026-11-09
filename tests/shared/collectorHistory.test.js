@@ -759,3 +759,23 @@ test('a failed Dots ledger and throwing diagnostic observer do not discard nativ
   assert.equal(summary.today.costUsd, 1);
   assert.ok(diagnostics.includes('codex-local-usage-read-failed'));
 });
+
+test('failed graph scans retain archive data without claiming complete lifetime active days', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-incomplete-history-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = {
+    clients: 'claude', todayKey: '2026-06-07', dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveOptions: { path: path.join(dir, 'history.json') }
+  };
+  const initial = await collectHistoryOnce({ ...options, runGraph: async () => SAMPLE_GRAPH });
+  assert.equal(initial.summary.activeDaysComplete, true);
+  for (const codexLocalGraph of [undefined, SAMPLE_GRAPH]) {
+    const fallback = await collectHistoryOnce({ ...options, codexLocalGraph,
+      runGraph: async () => { throw new Error('fixture graph scan failed'); }
+    });
+    assert.equal(fallback.summary.activeDaysComplete, false);
+    assert.ok(fallback.daily.some(day => day.date === '2026-06-07' && day.tokens > 0));
+  }
+  const recovered = await collectHistoryOnce({ ...options, runGraph: async () => SAMPLE_GRAPH });
+  assert.equal(recovered.summary.activeDaysComplete, true);
+});

@@ -872,6 +872,7 @@ async function collectHistoryOnce(options) {
         writeEnabled: options.dailyHistoryArchiveWriteEnabled
       });
       const retained = normalizeHistory(parseGraphResult(retainedGraph), { capDays, todayKey });
+      if (failureCode === 'history-graph-failed') retained.summary.activeDaysComplete = false;
       const result = retained.daily.length || retained.monthly.length ? retained : null;
       reportStatus(failureCode === null);
       return withLocalHistory(result);
