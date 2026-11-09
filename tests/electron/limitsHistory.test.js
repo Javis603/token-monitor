@@ -2630,3 +2630,44 @@ test('a saved omission from an inactive backend cannot interrupt a healthy share
   assert.equal(entry.distribution.buckets.at(-1).uncertain, false);
   assert.equal(entry.distribution.unallocated, 0);
 });
+
+for (const canonical of [false, true]) test(`adoption preserves accepted consumption after tied source confirmations, canonical=${canonical}`, t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-adopt-tied-source-'));
+  const file = path.join(directory, 'history.sqlite'), clock = at(2, 12);
+  let db = createHistoryDatabase(file);
+  t.after(() => { db.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const id = canonical ? adoptedStream : streamA;
+  const read = stream => db.query([{ id: stream, key: 'weekly', window: { kind: 'weekly' } }],
+    { grain: 'day', day: dayKey(clock) }, clock).windows[0].distribution;
+  db.record([
+    action(at(2, 10, 15), 25, { id, source: 's1' }),
+    action(at(2, 10, 15), 25, { id, source: 's0' }),
+    action(at(2, 10, 45), 26, { id, source: 's1' }),
+    action(at(2, 10, 55), 27, { id, source: 's0' })
+  ], clock);
+  const before = read(id);
+  assert.equal(before.buckets.at(-1).value, 2);
+  if (canonical) db.record([action(at(2, 10), 25, { source: 's1' })], clock);
+  db.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA],
+    sources: ['s0', 's1'].map(source => ({ id: streamA, before: source, after: source })) }], clock);
+  assert.equal(read(adoptedStream).buckets.at(-1).value, 2);
+  assert.equal(read(adoptedStream).unallocated, before.unallocated);
+  db.close(); db = createHistoryDatabase(file);
+  db.record([action(at(2, 11), 28, { id: adoptedStream, source: 's0' })], clock);
+  assert.equal(read(adoptedStream).buckets.at(-1).value, 3);
+});
+
+test('adoption retains the saved tail owner after equal-time confirmations', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-adopt-tied-tail-'));
+  const db = createHistoryDatabase(path.join(directory, 'history.sqlite')), clock = at(2, 12);
+  t.after(() => { db.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  db.record([action(at(2, 10, 15), 25, { source: 's1' }), action(at(2, 10, 15), 25, { source: 's0' })], clock);
+  db.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA],
+    sources: ['s0', 's1'].map(source => ({ id: streamA, before: source, after: source })) }], clock);
+  db.record([action(at(2, 10, 45), 26, { id: adoptedStream, source: 's1' }),
+    action(at(2, 10, 55), 27, { id: adoptedStream, source: 's0' })], clock);
+  const entry = db.query([{ id: adoptedStream, key: 'weekly', window: { kind: 'weekly' } }],
+    { grain: 'day', day: dayKey(clock) }, clock).windows[0];
+  assert.equal(entry.distribution.buckets.at(-1).value, 2);
+  assert.equal(entry.distribution.unallocated, 0);
+});

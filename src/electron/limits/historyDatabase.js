@@ -409,7 +409,7 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
             const originalSource = row.id === tailId ? head.source
               : sql('SELECT source FROM history_run_sources WHERE run = ? ORDER BY last_at DESC LIMIT 1').get(row.id)?.source || head.source;
             const firstSource = sql('SELECT source FROM history_run_sources WHERE run = ? ORDER BY first_at LIMIT 1').get(row.id)?.source || originalSource;
-            const source = sourceFor(id, start === row.at ? firstSource : originalSource);
+            const source = sourceFor(id, start === row.at && start !== end ? firstSource : originalSource);
             const point = { ...pointOf(row), at: start, collectedDay: collectedDay(start), samples: start === end ? row.samples || 1 : 1,
               maxGap: row.max_gap || 0, uncertainBefore: start === row.at && !!row.uncertain_before };
             events.push({ stream: id, source, point });
@@ -471,6 +471,12 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
             && (span.point.value !== event.point.value || !sameCycle({ ...span.point, at: event.point.at }, event.point)))) {
             conflict(mapping.id, latest.get(mapping.id), event.point, now);
             continue;
+          }
+          // Readings already accepted by one saved stream must not acquire a
+          // new handoff guard from ambiguous equal-time source confirmations.
+          // Arbitration still applies when replay crosses saved streams.
+          if (head && ownerStream === event.stream && head.source !== event.source) {
+            sql('UPDATE streams SET source = ? WHERE id = ?').run(event.source, mapping.id);
           }
           recordActions([{ account: mapping.account, source: event.source,
             windows: [{ id: mapping.id, point: event.point }] }], now);
