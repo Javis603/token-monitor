@@ -13,6 +13,40 @@ function source(file, from, to) {
   const start = text.indexOf(from), end = text.indexOf(to, start);
   assert.ok(start >= 0 && end > start); return text.slice(start, end);
 }
+function iconDeliveryFixture(load) {
+  const id = 'plugin:synthetic-limits:credits';
+  const context = { state: { settings: {}, pluginCatalog: { limits: { modules: [] } } },
+    window: { tokenMonitor: { setTrayIcons: async () => {} }, TokenMonitorTrayProviderIcons: { trayProviderIconSources: () => ({}) } },
+    trayProviderIconDeliveryGuard: require('../../src/electron/renderer/trayProviderIcons').createTrayProviderIconDeliveryGuard(),
+    trayIconProviderIds: [], trayProviderImages: {}, trayProviderImageIds: new WeakMap(),
+    loadImage: path => path.startsWith('../../../') ? Promise.resolve({}) : load(path),
+    providerImageToPngDataUrl: () => 'bitmap', maybeUpdateBarsIcon() {}, renderFloatingBubbleContent() {} };
+  vm.createContext(context);
+  vm.runInContext(source('renderer/app.js', 'async function deliverTrayProviderIcons(', '\nfunction setAccountGroupExpanded('), context);
+  return { id, context, setIcon(data) { context.state.pluginCatalog.limits.modules = [{ id, presentation: { icon: { data } } }]; }, deliver: () => context.deliverTrayProviderIcons() };
+}
+test('plugin icon replacement failure and removal discard the previous cached image', async () => {
+  const image = {};
+  const f = iconDeliveryFixture(async path => { if (path === 'broken') throw Error('decode'); return image; });
+  f.setIcon('valid'); await f.deliver();
+  assert.equal(f.context.trayProviderImages[f.id], image);
+  f.setIcon('broken'); await f.deliver();
+  assert.equal(f.context.trayProviderImages[f.id], undefined);
+  f.setIcon('valid'); await f.deliver();
+  f.setIcon(undefined); await f.deliver();
+  assert.equal(f.context.trayProviderImages[f.id], undefined, 'an active module can remove its icon');
+  assert.ok(f.context.trayProviderImages.app, 'builtin icon delivery remains intact');
+});
+test('an obsolete failed icon delivery cannot delete a newer successfully cached image', async () => {
+  let rejectOld, started;
+  const loading = new Promise(resolve => { started = resolve; });
+  const latest = {};
+  const f = iconDeliveryFixture(path => path === 'old' ? new Promise((_, reject) => { rejectOld = reject; started(); }) : Promise.resolve(latest));
+  f.setIcon('old'); const oldDelivery = f.deliver(); await loading;
+  f.setIcon('new'); await f.deliver();
+  rejectOld(Error('late decode failure')); await oldDelivery;
+  assert.equal(f.context.trayProviderImages[f.id], latest);
+});
 test('production Dock projection removes disabled, missing and master-off views without changing saved items', () => {
   const plugin = { status: 'active', views: [{ ref, surfaces: ['edgeDock'] }] };
   const settings = { edgeDockItems: [{ type: 'plugin', ref }] }, before = JSON.stringify(settings);

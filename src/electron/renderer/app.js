@@ -16294,12 +16294,12 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
   const sources = window.TokenMonitorTrayProviderIcons.trayProviderIconSources(trayIconProviderIds);
   sources.app = '../../../assets/icons/tray-token-monitor.png';
   const modules = state.pluginCatalog?.limits?.modules || [];
-  for (const id of Object.keys(trayProviderImages)) if (id.startsWith('plugin:') && !modules.some(module => module.id === id)) delete trayProviderImages[id];
   for (const module of modules) {
     const icon = module.presentation?.icon;
     const source = icon?.data || (icon?.native ? window.TokenMonitorTrayProviderIcons.trayProviderIconSources([icon.native])[icon.native] : module.identityIcon);
     if (source) sources[module.id] = source;
   }
+  for (const id of Object.keys(trayProviderImages)) if (id.startsWith('plugin:') && !sources[id]) delete trayProviderImages[id];
   const icons = {};
   for (const [id, path] of Object.entries(sources)) {
     try {
@@ -16308,7 +16308,10 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
       trayProviderImages[id] = img;
       trayProviderImageIds.set(img, id);
       if (!id.startsWith('plugin:')) icons[id] = providerImageToPngDataUrl(img, 44, showBadge, { trayInk: true, standalone: true });
-    } catch (_) { /* skip missing */ }
+    } catch (_) {
+      if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
+      if (id.startsWith('plugin:')) delete trayProviderImages[id];
+    }
   }
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
   if (Object.keys(icons).length) await window.tokenMonitor.setTrayIcons(icons);

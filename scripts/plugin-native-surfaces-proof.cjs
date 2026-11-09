@@ -15,7 +15,11 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
   if (process.env.TM_NATIVE_HOME_BASELINE) {
     const current = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
     const functions = ['homeLimitRows', 'renderHomeLimitModule'];
-    const restore = functions.map(name => current.match(new RegExp(`function ${name}\\([^]*?\\n}`))[0]).join('\n');
+    const restore = functions.map(name => {
+      const match = current.match(new RegExp(`(?:async )?function ${name}\\([^]*?\\n}`));
+      assert.ok(match, `Missing app.js function: ${name}`);
+      return match[0];
+    }).join('\n');
     await js(fs.readFileSync(process.env.TM_NATIVE_HOME_BASELINE, 'utf8'));
     await js('renderHomeIfVisible()'); await capture('home-before.png');
     await js(restore); await js('renderHomeIfVisible()');
@@ -48,7 +52,11 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
   const mainSource = fs.readFileSync(path.join(root, 'src/electron/main.js'), 'utf8');
   const refreshContext = vm.createContext({ pluginRuntime: runtime, deviceRuntimeHandle: null, hubModeGeneration: 1, statsPushRevision: 0,
     edgeDockManualStats: null, fetchStats: async () => stats, repaintDockSurfaces() {}, console });
-  const refreshFunctions = ['refreshManualStats', 'refreshStatsFromEdgeDock'].map(name => mainSource.match(new RegExp(`(?:async )?function ${name}\\([^]*?\\n}`))[0]).join('\n');
+  const refreshFunctions = ['refreshManualStats', 'refreshStatsFromEdgeDock'].map(name => {
+    const match = mainSource.match(new RegExp(`(?:async )?function ${name}\\([^]*?\\n}`));
+    assert.ok(match, `Missing main.js function: ${name}`);
+    return match[0];
+  }).join('\n');
   vm.runInContext('let manualStatsRefreshInFlight = null;\n' + refreshFunctions, refreshContext);
   const common = { BrowserWindow: RecordingWindow, ipcMain, screen, getSettings: () => dockSettings, platform: 'darwin',
     rendererDir: path.join(root, 'src/electron/renderer'), prefersReducedMotion: () => true, primaryButtonDown: () => false, nativeGlass: () => false,
