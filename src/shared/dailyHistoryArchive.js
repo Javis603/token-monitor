@@ -248,7 +248,7 @@ function captureCalendar(existing, options, capture) {
     since: archive.activeCalendar === options.timeZone ? savedScope.since : date
   };
   archive.activeCalendar = options.timeZone;
-  const next = capture(mergeLiveDaysIntoArchive(scope, options.liveDays), scope.since);
+  const next = capture(mergeLiveDaysIntoArchive(scope, options.liveDays), scope.since, archive);
   archive.calendars = {
     ...archive.calendars,
     [options.timeZone]: { ...next, since: scope.since }
@@ -327,11 +327,18 @@ function shouldReplaceObservation(previous, incoming) {
 
 function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
   if (options.timeZone) {
-    return captureCalendar(existingArchive, options, (scope, since) => captureDailyHistoryArchive(
-      scope,
-      graphsArray(graphs).map(graph => ({ ...graph, contributions: (graph.contributions || []).filter(row => row.date >= since || scope.days[row.date] || scope.liveDays?.[row.date]) })),
-      { ...options, timeZone: undefined }
-    ));
+    return captureCalendar(existingArchive, options, (scope, since, archive) => {
+      // Preserve prior calendars' recorded dates, but still retain a newly
+      // discovered historical day before its source transcript disappears.
+      const retainedDates = new Set([archive, ...Object.values(archive.calendars || {})]
+        .flatMap(retained => [...Object.keys(retained.days), ...Object.keys(retained.liveDays || {})]));
+      const incoming = graphsArray(graphs).map(graph => ({
+        ...graph,
+        contributions: (graph.contributions || []).filter(row => row.date >= since
+          || scope.days[row.date] || scope.liveDays?.[row.date] || !retainedDates.has(row.date))
+      }));
+      return captureDailyHistoryArchive(scope, incoming, { ...options, timeZone: undefined });
+    });
   }
   const archive = normalizeDailyHistoryArchive(existingArchive);
   const reprice = options.reprice === true;

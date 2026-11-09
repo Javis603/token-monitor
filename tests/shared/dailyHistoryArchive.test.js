@@ -1228,6 +1228,45 @@ for (const legacyKind of ['graph', 'live']) {
   }
 }
 
+test('first calendar persists previously unseen historical graph days after the source disappears', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-calendar-first-history-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { path: path.join(dir, 'history.json'), todayKey: '2026-11-07', timeZone: 'Asia/Taipei' };
+  retainDailyHistory(graph('2026-11-06', [client('claude', 'opus', 100, 2, 1)]), options);
+  // Reload from disk without the source graph, as after transcript deletion
+  // or a failed graph scan. A fresh profile must retain its historical scan.
+  const visible = historyFrom(retainDailyHistory([], options), options.todayKey);
+  assert.equal(visible.daily.find(day => day.date === '2026-11-06')?.tokens, 100);
+  assert.equal(visible.daily.find(day => day.date === '2026-11-06')?.cost, 2);
+});
+
+test('late-discovered historical days persist without replacing any previously retained date', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-calendar-late-history-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'history.json');
+  const date = '2026-11-07';
+  const options = { path: file, todayKey: date, timeZone: 'Asia/Taipei' };
+  const legacy = captureDailyHistoryArchive({}, graph('2026-11-03', [client('claude', 'opus', 90, 1, 1)]));
+  fs.writeFileSync(file, JSON.stringify(legacy));
+  retainLiveDailyHistory(livePeriod(10), options);
+  retainDailyHistory(graph('2026-11-05', [client('claude', 'opus', 200, 2, 1)]), options);
+  const west = { ...options, timeZone: 'America/Los_Angeles', todayKey: '2026-11-09' };
+  retainDailyHistory({ contributions: [
+    ...graph('2026-11-03', [client('claude', 'opus', 999, 9, 1)]).contributions,
+    ...graph('2026-11-04', [client('claude', 'opus', 300, 3, 1)]).contributions,
+    ...graph('2026-11-05', [client('claude', 'opus', 999, 9, 1)]).contributions
+  ] }, west);
+  const assertSaved = (opts) => {
+    const days = historyFrom(retainDailyHistory([], opts), opts.todayKey).daily;
+    assert.equal(days.find(day => day.date === '2026-11-03')?.tokens, 90);
+    assert.equal(days.find(day => day.date === '2026-11-04')?.tokens, 300);
+    assert.equal(days.find(day => day.date === '2026-11-05')?.tokens, 200);
+  };
+  assertSaved(west);
+  assertSaved({ ...options, todayKey: '2026-11-10' });
+  assertSaved({ ...west, todayKey: '2026-11-11' });
+});
+
 test('timezone round trips never max-win across calendars and retain same-calendar maxima', () => {
   const date = '2026-11-07';
   const east = { todayKey: date, timeZone: 'Asia/Taipei' };
