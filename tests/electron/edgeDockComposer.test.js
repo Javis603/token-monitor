@@ -613,3 +613,34 @@ test('sorting or removing visible items preserves hidden module and view slots',
     assert.ok(settings.edgeDockItems.some(item => itemsApi.itemId(item) === itemsApi.itemId(hiddenModule)));
   } finally { global.document = previous; }
 });
+test('adding provider and usage items preserves the latest hidden references in Dock and Notch', () => {
+  const previous = global.document;
+  global.document = { createElement: tag => new Element(tag), activeElement: null };
+  try {
+    for (const itemsKey of ['edgeDockItems', 'notchItems']) {
+      const root = new Element('div'), hiddenModule = { type: 'limit', provider: 'plugin:sample-plugin:credits', showUsage: false };
+      const settings = { [itemsKey]: itemsKey === 'notchItems' ? [hiddenModule] : [{ type: 'plugin', ref: 'sample-plugin/card' }, hiddenModule] };
+      const composer = createEdgeDockComposer({ root, itemsKey, itemsApi, t: key => key, presentationApi: {},
+        getSettings: () => settings, getStats: () => ({}), save: patch => Object.assign(settings, patch), enabledLimitProviders: () => ['codex'],
+        pluginView: () => ({ status: 'disabled' }), moduleView: () => ({ status: 'disabled' }),
+        providerLabel: id => id, providerColor: () => '#fff', hasProviderMark: () => false,
+        createRowDrag: () => ({ deferRender: () => false }) });
+      const all = node => [node, ...node.children.flatMap(all)];
+      composer.render();
+      all(root).find(node => node.className === 'edge-dock-composer-add').listeners.click();
+      const latest = { type: 'limit', provider: 'plugin:another-plugin:credits' };
+      settings[itemsKey].push(latest); // Another settings change while the menu is open.
+      const retained = itemsApi.normalizeEdgeDockItems(settings[itemsKey]);
+      all(root).find(node => node.className === 'edge-dock-composer-menu-option').listeners.click();
+      assert.deepEqual(settings[itemsKey].slice(0, -1), retained);
+      assert.equal(settings[itemsKey].at(-1).provider, 'codex');
+      if (itemsKey === 'edgeDockItems') {
+        composer.render();
+        all(root).find(node => node.className === 'edge-dock-composer-add').listeners.click();
+        all(root).find(node => node.className === 'edge-dock-composer-menu-option').listeners.click();
+        assert.deepEqual(settings[itemsKey].slice(0, -2), retained);
+        assert.equal(settings[itemsKey].at(-1).type, 'stat');
+      }
+    }
+  } finally { global.document = previous; }
+});

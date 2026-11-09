@@ -189,7 +189,7 @@
             ui.menuOpen = false;
             ui.selected = idFor(item);
             if (item.type === 'action') void save({ [refreshKey]: true });
-            else void persist([...items.filter((entry) => entry.type !== 'action'), item]);
+            else void persist([...effectiveItems(), item]);
           });
           group.append(option);
         }
