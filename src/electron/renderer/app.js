@@ -113,6 +113,7 @@ const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   grok: 'settings.limits.connection.grok',
   kiro: 'settings.limits.connection.kiro',
   manus: 'settings.limits.connection.manus',
+  hark: 'settings.limits.connection.hark',
   muse: 'settings.limits.connection.muse',
   workbuddy: 'settings.limits.connection.workbuddy'
 };

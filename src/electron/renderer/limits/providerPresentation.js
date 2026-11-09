@@ -54,6 +54,7 @@
     alibaba: { web: 'Web' },
     stepfun: { web: 'Web' },
     manus: { local: 'Local', web: 'Web' },
+    hark: { local: 'Local', web: 'Web' },
     thirdparty: { api: 'API' }
   };
 
@@ -97,6 +98,7 @@
     stepfun: ['Coding/Token Plan', 'Web'],
     notion: ['Web', 'Manual'],
     manus: ['Auto', 'Desktop app', 'Manual'],
+    hark: ['Auto', 'Desktop app', 'Manual'],
     opendesign: ['Web', 'Manual'],
     thirdparty: ['Relay', 'API']
   };
@@ -518,7 +520,7 @@
     if (status === 'notConfigured') {
       if (providerName === 'kimi' || providerName === 'ollama') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'antigravity') return { label: 'Not set up', tone: 'setup' };
-      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'typesafe' || providerName === 'stepfun' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'alibaba' || providerName === 'ollama' || providerName === 'manus') return { label: 'Sign in', tone: 'setup' };
+      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'typesafe' || providerName === 'stepfun' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'alibaba' || providerName === 'ollama' || providerName === 'manus' || providerName === 'hark') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
       // Cline joins the key-configured family: with neither a key nor a stored
       // sign-in, the one thing this application can be told is a key (the sign-in
