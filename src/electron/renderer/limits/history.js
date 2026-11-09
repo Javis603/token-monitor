@@ -8,6 +8,10 @@
   const model = window.TokenMonitorLimitsHistoryModel;
   const i18n = window.TokenMonitorI18n;
   const $ = id => document.getElementById(id);
+  bridge.onShapeFrame(frame => {
+    $('history').style.setProperty('--card-y', `${frame.y}px`);
+    $('history').style.setProperty('--card-height', `${frame.height}px`);
+  });
   let payload = null;
   const glass = window.TokenMonitorGlassRendering;
   let material = glass.normalizeNativeMaterialState();
@@ -27,7 +31,8 @@
   let selected = '';
   let hoveredBucket = '';
   let restoreReading = () => {};
-  let contentAnimation = null;
+  const cardSwitch = window.TokenMonitorCardSwitch.createCardSwitch({ contentLayer: $('history'),
+    scrollSelector: '.quota-history-content', reducedMotion: reduceMotion });
   let animateMeasurement = false;
   const reducedMotionMedia = window.matchMedia('(prefers-reduced-motion: reduce)');
 
@@ -197,17 +202,13 @@
   }
 
   function renderContent(animate = false, opening = false) {
-    contentAnimation?.cancel();
-    contentAnimation = null;
+    const transition = cardSwitch.capture($('history-content'), !animate, opening);
     animateMeasurement = animate && !opening && !reduceMotion();
     // No outgoing snapshot: the latest account is visible before the frame moves.
     render();
     // Reopening unchanged content must also release the native show.
     scheduleSize(opening);
-    if (opening || !animate || reduceMotion()) return;
-    contentAnimation = $('history-content').animate([{ opacity: .8 }, { opacity: 1 }],
-      { duration: 150, easing: 'ease-out' });
-    contentAnimation.finished.catch(() => {});
+    cardSwitch.play($('history-content'), transition);
   }
 
   reducedMotionMedia.addEventListener('change', () => { if (reduceMotion()) renderContent(); });
@@ -217,8 +218,9 @@
     for (const bar of $('bars').children) bar.classList.remove('is-hovered');
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') bridge.close(); });
-  document.documentElement.addEventListener('pointerenter', () => bridge.enter());
-  document.documentElement.addEventListener('pointerleave', () => bridge.leave());
+  $('history').addEventListener('pointerenter', () => bridge.enter());
+  $('history').addEventListener('pointerleave', () => bridge.leave());
+  document.addEventListener('pointermove', () => bridge.pointer());
   bridge.onRender(next => {
     const accountChanged = payload?.key !== next.key || payload?.source !== next.source;
     if (next.opening === true) hoveredBucket = '';
@@ -257,6 +259,6 @@
     if (!payload) return;
     cardLayout.prepare({ renderToken: payload.renderToken, animate: animateMeasurement, reduce: reduceMotion() }, { opening, afterPaint: true });
   }
-  window.addEventListener('pagehide', () => { cardFrames.cancel(); cardLayout.cancel(); }, { once: true });
+  window.addEventListener('pagehide', () => { cardFrames.cancel(); cardLayout.cancel(); cardSwitch.cancel(); }, { once: true });
   new ResizeObserver(() => scheduleSize()).observe($('history-content'));
 })();

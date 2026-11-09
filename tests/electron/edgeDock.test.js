@@ -3467,17 +3467,19 @@ test('shape-only frames preserve the reading destination until its full payload 
 });
 
 test('whole-card transitions retain repaint progress and clean up interrupted outgoing content', async () => {
-  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const source = dock.slice(dock.indexOf('let cardSwitchMotion ='), dock.indexOf('function commitCard('));
+  const { createCardSwitch } = require('../../src/electron/renderer/cardSwitch');
   let reduced = false;
   const document = { visibilityState: 'visible' };
   const ghosts = new Set();
-  function node(opacity = '1', scroll = 0, top = 0) {
+  function node(opacity = '1', scroll = 0, top = 0, left = 0, marginLeft = 0) {
     const list = { scrollTop: scroll };
-    const value = { style: {}, opacity, attributes: {}, animations: [],
+    const value = { style: {}, opacity, offsetLeft: left, offsetTop: top, attributes: {}, animations: [],
       querySelectorAll: selector => selector === '.scroll' ? [list] : [],
-      cloneNode: () => node(opacity, 0, top),
-      getBoundingClientRect: () => ({ top, bottom: top + 120 }),
+      cloneNode: () => node(opacity, 0, top, left, marginLeft),
+      getBoundingClientRect() {
+        return { top, bottom: top + 120, left: this.style.position === 'absolute'
+          ? parseFloat(this.style.left) + parseFloat(this.style.margin ?? marginLeft) : left };
+      },
       setAttribute(name, text) { this.attributes[name] = text; },
       removeAttribute(name) { delete this.attributes[name]; },
       remove() { ghosts.delete(this); this.removed = true; },
@@ -3495,9 +3497,16 @@ test('whole-card transitions retain repaint progress and clean up interrupted ou
     };
     return value;
   }
-  const api = Function('surface', 'document', 'prefersReducedMotion', 'getComputedStyle', 'contentLayer', 'CARD_SCROLL_SELECTOR',
-    `${source}; return { captureCardSwitch, animateCardSwitch, clearCardSwitch };`)(
-    'bubble', document, () => reduced, card => ({ opacity: card.opacity }), { append: ghost => ghosts.add(ghost) }, '.scroll');
+  const shared = createCardSwitch({ contentLayer: { append: ghost => ghosts.add(ghost) }, scrollSelector: '.scroll',
+    reducedMotion: () => reduced, isHidden: () => document.visibilityState === 'hidden', readOpacity: card => card.opacity });
+  const api = { captureCardSwitch: shared.capture, animateCardSwitch: shared.play, clearCardSwitch: shared.cancel };
+  // The left sidebar's offsetLeft already includes its CSS margin-left.
+  const leftCard = node('1', 0, 0, 12, 12);
+  const leftMotion = api.captureCardSwitch(leftCard, false);
+  api.animateCardSwitch(node('1', 0, 0, 12, 12), leftMotion);
+  assert.equal(leftMotion.ghost.getBoundingClientRect().left, leftCard.getBoundingClientRect().left,
+    'an outgoing left-sidebar card must retain its screen position without counting margin twice');
+  api.clearCardSwitch();
   const first = node('1', 37), next = node();
   const motion = api.captureCardSwitch(first, false);
   api.animateCardSwitch(next, motion);
@@ -3611,13 +3620,16 @@ for (const kind of ['provider', 'stat']) {
       const reports = [];
       let mounts = 0;
       const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-      const source = dock.slice(dock.indexOf('let cardSwitchMotion ='), dock.indexOf('const bubbleSizeObserver ='));
+      const source = dock.slice(dock.indexOf('const cardSwitch ='), dock.indexOf('const bubbleSizeObserver ='));
       const pluginSource = dock.slice(dock.indexOf('function pluginCard('), dock.indexOf('const codexAccountControl ='));
       const { renderBubble } = Function('deps', `
-        const window = { TokenMonitorCardLayout: deps.cardLayoutApi };
+        const window = { TokenMonitorCardLayout: deps.cardLayoutApi, TokenMonitorCardSwitch: {
+          createCardSwitch: options => deps.cardSwitchApi.createCardSwitch({ ...options,
+            isHidden: () => false, readOpacity: () => '1' })
+        } };
         const { document, el, root, contentLayer, stagingLayer, bridge, pluginHost } = deps;
         const surface = 'bubble', CARD_SCROLL_SELECTOR = '.edge-dock-accounts, .edge-dock-session-list', BREAKDOWN_VISIBLE_ROWS = 6;
-        const prefersReducedMotion = () => false, getComputedStyle = () => ({ opacity: '1' });
+        const prefersReducedMotion = () => false;
         const overflowText = { refresh() {}, preserveReading() {} };
         const cardResetAnimator = { capture() {}, animate() {} };
         const pluginContent = null, bubbleSizeObserver = null;
@@ -3626,7 +3638,7 @@ for (const kind of ['provider', 'stat']) {
         ${pluginSource}
         ${source}
         return { renderBubble };
-      `)({ cardLayoutApi, document, el, root, contentLayer, stagingLayer,
+      `)({ cardLayoutApi, cardSwitchApi: require('../../src/electron/renderer/cardSwitch'), document, el, root, contentLayer, stagingLayer,
         bridge: { reportBubbleSize: (id, height) => reports.push({ id, height }) },
         pluginHost: { state: () => ({ title: 'Plugin reading' }), mount: body => { mounts++; body.textContent = 'Live plugin content'; } }
       });

@@ -3295,6 +3295,7 @@ function deviceRowsForPeriod() {
       clientLabels,
       clientColors,
       fallbackColor: clientColors.default,
+      latestModelLabel: t('session.latestModel'),
       unattributedLabel: t('dashboard.tooltip.unclassified')
     });
     const period = device.periods?.[state.period] || {};
@@ -3394,6 +3395,7 @@ function sessionPresentationOptions() {
     fallbackColors: fallbackModelColors,
     archivedLabel: t('session.archived'),
     subagentLabel: t('sessions.subagent'),
+    latestModelLabel: t('session.latestModel'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
     sourcePeriods: state.stats?.periods,
     grokBotSessionIds: state.stats?.grokBotSessionIds,
@@ -3402,6 +3404,7 @@ function sessionPresentationOptions() {
       name: deviceBreakdownApi.deviceLabel(localDevice), platform: localDevice.platform || '', deviceKind: localDevice.deviceKind || 'computer' } : undefined,
     subagents: {
       countLabel: (count) => t('sessions.subagentCount', { count }),
+      latestModelLabel: t('session.latestModel'),
       unattributedLabel: t('dashboard.tooltip.unclassified')
     },
     backgroundReviews: {
@@ -7086,6 +7089,7 @@ function renderHomeSessionModule(rows) {
     const metadataLabel = sessionRowsApi.sessionModelMetadataLabel(row);
     description.append(sessionRowsApi.sessionModelMetadataNode(document, { ...row, modelLabel }, {
       translate: t, view: limitWindowsView,
+      latestModelLabel: t('session.latestModel'),
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatCompact
     }));

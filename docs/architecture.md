@@ -20,6 +20,8 @@ Device collection, transforms and archives live in `src/shared/usage/`. The neig
 
 Desktop windows share one renderer process: `src/electron/main.js` enables Chromium's process-per-site mode, because each additional surface otherwise costs a renderer baseline and compositor for a small local card. Every page is the same local bundle and heavy work already runs in the usage worker, so the shared main thread carries UI work only. A renderer crash takes every window down at once; main reloads each crashed page unless it already attempted recovery within the last 30 seconds. Settings and stats are republished on load. This is a deliberate memory trade, not an isolation boundary.
 
+Sidebar and quota-history cards share a native canvas matching the work area's height, spring motion, pointer routing and content crossfade. Their painted silhouette and content move together inside that canvas, rather than resizing the native window each frame. Pointer routing uses the painted card bounds rather than the full canvas, forwarding input outside those bounds to the windows behind it. Linux and unsupported native shapes retain a rectangular-window fallback.
+
 Cloudflare deployment isolates `worker/` into its own repository. Its portable closure, `WORKER_SHARED_MODULES` in `scripts/hub-build-manifest.js`, must not import Node built-ins or anything above `worker/`. Edit the originals in `src/shared/`, then run `npm run sync:worker`; the mirrored `worker/src/shared/` files are generated and CI rejects drift.
 
 ## Desktop plugins
