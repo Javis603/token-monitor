@@ -1382,6 +1382,11 @@ function normalizeDeviceOsName(value) {
   return String(value || '').trim().slice(0, 64);
 }
 
+function historyWithAvailability(history, available) {
+  if (!history || available !== false) return history;
+  return { ...history, summary: { ...history.summary, activeDaysComplete: false } };
+}
+
 // The fields History aggregation reads from a device record, normalized exactly
 // as normalizeDeviceRecord() does. aggregateHistory() used to normalize the whole
 // record for these, which also walks every session of every period: on a long
@@ -1396,7 +1401,8 @@ function normalizeRecordHistoryFields(record, nowIso = new Date().toISOString())
     // An explicit null means History is disabled/unavailable. Preserve that
     // wire distinction; an omitted field means "no History update this tick"
     // and an object is the retained History payload.
-    fields.history = record.history === null ? null : coerceHistory(record.history);
+    fields.history = historyWithAvailability(
+      record.history === null ? null : coerceHistory(record.history), record.historyAvailable);
   }
   if (hasOwn(record, 'periodWindows')) {
     const windows = normalizePeriodWindows(record.periodWindows);
@@ -1689,6 +1695,7 @@ function mergeDeviceRecord(existing, incoming) {
   if (!hasIncomingLimits) normalizedIncoming.limits = normalizedExisting.limits;
   else normalizedIncoming.limits = mergeDeviceLimits(normalizedExisting, normalizedIncoming);
   if (!hasIncomingHistory && hasOwn(normalizedExisting, 'history')) normalizedIncoming.history = normalizedExisting.history;
+  if (hasOwn(normalizedIncoming, 'history')) normalizedIncoming.history = historyWithAvailability(normalizedIncoming.history, normalizedIncoming.historyAvailable);
   if (hasIncomingTrackedClients) {
     preserveUntrackedClientUsage(normalizedExisting, normalizedIncoming, normalizedIncoming.trackedClients || []);
   }

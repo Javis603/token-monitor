@@ -1960,3 +1960,24 @@ test('lifetime completeness rejects malformed counters and contradictory stored 
     assert.equal(api.aggregateHistory([complete, empty]).summary.activeDaysComplete, true);
   }
 });
+
+test('disabled retained History stays incomplete after re-enabling until a fresh History arrives', () => {
+  for (const api of [require('../../src/shared/usage'), require('../../worker/src/shared/usage')]) {
+    const complete = { deviceId: 'switch-history', allTime: { totalTokens: 10 }, historyAvailable: true,
+      history: { daily: [{ date: '2026-06-07', tokens: 10 }], monthly: [],
+        dailyTotals: [{ date: '2026-06-07', tokens: 10 }], summary: { activeDaysComplete: true } } };
+    const original = api.mergeSyncDeviceRecord(null, complete);
+    const disabled = api.mergeSyncDeviceRecord(original, {
+      deviceId: complete.deviceId, allTime: { totalTokens: 20 }, historyAvailable: false
+    });
+    assert.equal(disabled.history.summary.activeDaysComplete, false);
+    assert.equal(original.history.summary.activeDaysComplete, true, 'do not mutate the prior snapshot');
+    assert.deepEqual(disabled.history.daily, original.history.daily);
+    let retained = JSON.parse(JSON.stringify(disabled));
+    retained = api.mergeSyncDeviceRecord(retained, { deviceId: complete.deviceId, allTime: { totalTokens: 20 }, historyAvailable: true });
+    assert.equal(api.aggregateHistory([retained]).summary.activeDaysComplete, false);
+    assert.equal(api.aggregateHistory([{ ...original, historyAvailable: false }]).summary.activeDaysComplete, false, 'old persisted records also fail closed');
+    const refreshed = api.mergeSyncDeviceRecord(retained, complete);
+    assert.equal(api.aggregateHistory([refreshed]).summary.activeDaysComplete, true);
+  }
+});
