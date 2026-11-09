@@ -308,7 +308,7 @@ Qoder CN 的 Token 用量來自應用程式本機資料，而非 API —— 在 
 | 快取用量／會話快取命中率 | 提供快取欄位的來源，例如 Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 有快取用量資料時才顯示命中率。 |
 | 快取剩餘時間估算 | Claude Code | 依紀錄中的快取層級估算為 5 分鐘或 1 小時。 |
 | 輸出速度／Token 消耗速率 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s` 為輸出速度，`tok/min` 為總 Token 消耗速率；計時可能包含等待。 |
-| 會話模型與推理強度 | Claude Code, Codex | 顯示會話最後記錄的模型；推理強度（如 `high`、`xhigh`）僅於有明確記錄時顯示。多模型會話顯示模型名加上 `+N`，未知最後使用的模型時顯示 `N models`；懸停可查看 token 數及佔比。 |
+| 會話模型與推理強度 | Claude Code, Codex | 顯示會話最後記錄的模型；推理強度僅於有明確記錄時顯示。多模型會話顯示模型名加上 `+N`，未知最後使用的模型時顯示 `N models`；懸停可查看 token 數及佔比。 |
 | 推理 Token 數 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
 | 回合開始／完成辨識 | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | 依據工具記錄的回合訊號。其他工具或缺少有效訊號時，最後活動後約 10 分鐘內估算為執行中。 |
 | 原生執行中／等待輸入狀態 | Claude Code, Codex | — |
