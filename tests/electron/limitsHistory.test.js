@@ -240,7 +240,7 @@ test('all providers share one persisted account history when the reporting devic
     assert.equal(a.windows[0].distribution.buckets.at(-1).observations, 3, id);
     const hourly = await store.query('hub-a', row, { grain: 'hour', day: '2026-11-02' });
     assert.equal(hourly.windows[0].distribution.buckets.find(b => new Date(b.at).getHours() === 10).value, 5, id);
-    assert.equal((await store.query('hub-b', row)).windows[0].points.length, 0, id);
+    assert.deepEqual((await store.query('hub-b', row)).windows[0].points, a.windows[0].points, id);
   }
   const db = new DatabaseSync(file, { readOnly: true });
   try {
@@ -608,7 +608,7 @@ test('a failed SQLite transaction rolls back daily and detailed changes together
   assert.equal(fixture.sql('SELECT observations FROM daily')[0].observations, 2);
 });
 
-test('worker SQLite persists private hashed identities, deduplicates cached reads, and separates scope and currency', async t => {
+test('worker SQLite persists private hashed identities, deduplicates cached reads, and separates accounts and currency', async t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-worker-'));
   const file = path.join(directory, 'history.sqlite');
   const errors = [];
@@ -623,7 +623,7 @@ test('worker SQLite persists private hashed identities, deduplicates cached read
   assert.equal(data.persistent, true);
   assert.equal(segments(data.windows[0].points).length, 1);
   assert.equal(data.windows[0].distribution.buckets.at(-1).observations, 2);
-  assert.equal((await store.query('other', row)).windows[0].points.length, 0);
+  assert.deepEqual((await store.query('other', row)).windows[0].points, data.windows[0].points);
   assert.equal((await store.query('local', { ...row, accountKey: 'other' })).windows[0].points.length, 0);
   const credit = { ...row, windows: [{ kind: 'billing', metric: 'credits', remaining: 80, currency: 'USD' }] };
   await store.record('local', { providers: [credit] });
@@ -2044,5 +2044,93 @@ test('daily summaries keep the collection date when the device changes timezone'
   } finally {
     if (previousTimezone === undefined) delete process.env.TZ;
     else process.env.TZ = previousTimezone;
+  }
+});
+
+test('verified quota history survives backend changes while unverified identities remain scoped', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-modes-'));
+  const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => at(2, 12) });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  for (const [index, scope] of ['local', 'hub-a', 'hub-b', 'icloud'].entries()) {
+    await store.record(scope, { providers: [{ ...provider(at(2, 10, index * 5), 20 + index), sourceDeviceId: `device-${index}` }] });
+  }
+  for (const scope of ['local', 'hub-a', 'hub-b', 'icloud']) {
+    const result = await store.query(scope, provider(at(2, 10, 15), 23));
+    assert.deepEqual(result.windows[0].points.map(p => p.value), [20, 21, 22, 23]);
+    assert.equal(result.windows[0].distribution.buckets.at(-1).value, 3);
+  }
+  const anonymous = { ...provider(at(2, 11)), accountKey: null };
+  await store.record('local', { providers: [anonymous] });
+  assert.equal((await store.query('hub-a', anonymous)).windows[0].points.length, 0);
+  for (const change of [{ accountKey: 'different' }, { workspaceKind: 'team' }, { region: 'other' }]) {
+    assert.equal((await store.query('local', { ...provider(at(2, 11)), ...change })).windows[0].points.length, 0);
+  }
+});
+
+
+test('old backend histories remain untouched while new readings share one account timeline', async t => {
+  const { createHash } = require('node:crypto');
+  const { limitWindowKey } = require('../../src/shared/limits/usageItems');
+  const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-no-migration-'));
+  const file = path.join(directory, 'history.sqlite');
+  const row = provider(at(2, 11), 25);
+  const legacyId = hash(['local', historyAccountKey(row), limitWindowKey(row.windows[0]), 'pp']);
+  const database = createHistoryDatabase(file);
+  database.record([{ account: hash(['local', historyAccountKey(row)]), source: 'device',
+    windows: [{ id: legacyId, point: point(at(2, 10), 20, at(8, 0)) }] }], at(2, 12));
+  database.close();
+  const inspect = new DatabaseSync(file, { readOnly: true });
+  const before = ['runs', 'coverage', 'daily'].map(table => inspect.prepare(`SELECT * FROM ${table}`).all());
+  const store = createLimitsHistoryStore(file, { now: () => at(2, 12) });
+  t.after(async () => { await store.close(); inspect.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  assert.equal((await store.query('local', row)).windows[0].points.length, 0);
+  assert.deepEqual(['runs', 'coverage', 'daily'].map(table => inspect.prepare(`SELECT * FROM ${table}`).all()), before);
+  await store.record('local', { providers: [row] });
+  for (const scope of ['local', 'hub-a', 'icloud']) {
+    assert.deepEqual((await store.query(scope, row)).windows[0].points.map(p => p.value), [25]);
+  }
+  assert.deepEqual(inspect.prepare('SELECT * FROM daily WHERE stream = ?').all(legacyId), before[2]);
+});
+
+test('organization-only Claude CLI identities remain separate across backend modes', async t => {
+  const { mapClaudeCliUsageToProvider } = require('../../src/shared/providers/claude/limits');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-organization-'));
+  const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => at(2, 12) });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const row = mapClaudeCliUsageToProvider('Organization: Shared display name\nCurrent session\n20% used', {
+    now: new Date(at(2, 10)), updatedAt: new Date(at(2, 10)).toISOString()
+  });
+  assert.ok(row.accountName);
+  assert.equal(row.accountEmail, '');
+  await store.record('local', { providers: [row] });
+  assert.equal((await store.query('local', row)).windows[0].points.length, 1);
+  assert.equal((await store.query('hub-a', row)).windows[0].points.length, 0);
+});
+
+test('verified OAuth identity remains shared when Claude falls back to CLI without email', async t => {
+  const { fetchClaudeLimits } = require('../../src/shared/providers/claude/limits');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-verified-cli-'));
+  const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => at(2, 12) });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  let fallback = false;
+  const deps = { platform: 'linux', env: { CLAUDE_CODE_OAUTH_TOKEN: 'synthetic-history-token' }, providerRuntimeState: new Map(),
+    now: () => at(2, 10, fallback ? 5 : 0), isClaudeCliAuthenticated: async () => true,
+    runClaudeUsageCli: async () => 'Current session\n25% used',
+    fetch: async url => fallback ? { ok: false, status: 503 } : { ok: true, json: async () => url.includes('/profile')
+      ? { account: { uuid: 'verified-account', display_name: 'Verified name' }, organization: { uuid: 'verified-org' } }
+      : { five_hour: { utilization: 20 } } }
+  };
+  const oauth = await fetchClaudeLimits({}, deps);
+  fallback = true;
+  const cli = await fetchClaudeLimits({}, deps);
+  assert.equal(cli.source, 'cli');
+  assert.equal(cli.accountKey, oauth.accountKey);
+  assert.equal(cli.accountName, 'Verified name');
+  assert.equal(cli.accountEmail, '');
+  await store.record('local', { providers: [oauth] });
+  await store.record('hub-a', { providers: [cli] });
+  for (const scope of ['local', 'hub-a']) {
+    assert.deepEqual((await store.query(scope, cli)).windows[0].points.map(p => p.value), [20, 25]);
   }
 });

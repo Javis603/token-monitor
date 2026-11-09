@@ -237,7 +237,7 @@ test('Home limit provider settings stay compact and list only enabled providers'
   assert.match(homeLimitRows, /showHomeLimitProviderNames === true \|\| state\.settings\?\.showToolIcons === false/);
   assert.match(homeLimitRows, /`\$\{providerTitle\} · \$\{accountTitle\}`/);
   assert.match(renderHomeLimitProviderList, /enabledLimitProviderSet\(\)/);
-  assert.match(renderHomeLimitProviderList, /orderedLimitProviders\(LIMIT_PROVIDERS, homeLimitProviderOrderValue\(\)\)/);
+  assert.match(renderHomeLimitProviderList, /orderedLimitProviders\(desktopLimitProviders\(\), homeLimitProviderOrderValue\(\)\)/);
   assert.match(renderHomeLimitProviderList, /const hasCustomOrder = Boolean\(state\.settings\?\.homeLimitProviderOrder\);/);
   assert.match(renderHomeLimitProviderList, /\.filter\(\(\{ id \}\) => enabled\.has\(id\)\)/);
   assert.match(resetHomeLimitProviderOrder, /saveSettings\(\{ homeLimitProviderOrder: '' \}\)/);

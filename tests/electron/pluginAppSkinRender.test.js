@@ -17,7 +17,7 @@ function catalogHarness() {
   const calls = [], connectionRefreshes = [];
   const context = { state: {}, pluginLimitSettings: null, pluginPageDesigns: {}, isSettingsSurfaceVisible: () => true,
     preserveSettingsPanelScroll: fn => fn(), refreshPluginLimitCredentialStatuses: () => connectionRefreshes.push(context.state.pluginCatalog) };
-  for (const name of ['renderLimits', 'renderLimitProviderCheckboxes', 'render', 'renderViewSwitcher', 'renderThemePresetChips', 'renderNotchPageChoices', 'renderViewPreferences']) context[name] = () => calls.push(name);
+  for (const name of ['renderLimits', 'renderLimitProviderCheckboxes', 'render', 'renderViewSwitcher', 'renderThemePresetChips', 'renderNotchPageChoices', 'renderViewPreferences', 'syncPluginLimitsDemand', 'deliverTrayProviderIcons', 'renderHomeIfVisible', 'renderFloatingBubbleContent', 'maybeUpdateBarsIcon']) context[name] = () => calls.push(name);
   vm.createContext(context);
   vm.runInContext(`let pluginCatalogKey = '', pluginLimitReadingsKey = ''; ${extract('applyPluginCatalog')}`, context);
   return { calls, connectionRefreshes, context, apply: context.applyPluginCatalog };
@@ -33,11 +33,11 @@ test('quota readings refresh Limits and settings without rebuilding catalog UI',
   h.context.state.breakdown = 'limits'; h.apply(first); h.calls.length = 0;
   const next = structuredClone(first); next.limits.providers[0].updatedAt = '2026-01-02';
   h.apply(next);
-  assert.deepEqual(h.calls, ['renderLimits', 'renderLimitProviderCheckboxes']);
+  assert.deepEqual(h.calls, ['renderLimits', 'renderHomeIfVisible', 'renderFloatingBubbleContent', 'maybeUpdateBarsIcon', 'renderLimitProviderCheckboxes']);
   assert.equal(h.context.state.pluginCatalog, next);
   h.calls.length = 0; h.apply(structuredClone(next)); assert.deepEqual(h.calls, []);
   h.context.state.breakdown = 'home'; next.limits.providers[0].updatedAt = '2026-01-03'; h.apply(next);
-  assert.deepEqual(h.calls, ['renderLimitProviderCheckboxes']);
+  assert.deepEqual(h.calls, ['renderHomeIfVisible', 'renderFloatingBubbleContent', 'maybeUpdateBarsIcon', 'renderLimitProviderCheckboxes']);
 });
 test('identical and metric-only catalogs update state without any app redraw', () => {
   const h = catalogHarness(); h.apply(catalog()); h.calls.length = 0;

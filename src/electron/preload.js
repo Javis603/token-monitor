@@ -177,6 +177,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   expandFloatingBubble: () => ipcRenderer.invoke('floatingBubble:expand'),
   moveFloatingBubble: (delta) => ipcRenderer.invoke('floatingBubble:move', delta),
   signalContentReady: () => ipcRenderer.send('window:contentReady'),
+  signalAppearanceReady: () => ipcRenderer.send('window:appearanceReady'),
   setViewState: (patch) => ipcRenderer.send('window:viewState', patch),
   peekFloatingBubble: () => ipcRenderer.invoke('floatingBubble:peek'),
   collapseFloatingBubbleIfIdle: () => ipcRenderer.invoke('floatingBubble:collapseIfIdle'),

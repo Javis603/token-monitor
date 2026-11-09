@@ -50,6 +50,7 @@
     if (source) {
       const image = document.createElement('img');
       image.alt = ''; image.width = size; image.height = size;
+      image.draggable = false;
       image.style.objectFit = 'contain';
       image.addEventListener('error', fallback, { once: true });
       if (native || icon?.mode === 'mask') image.addEventListener('load', () => {

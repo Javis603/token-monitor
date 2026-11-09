@@ -13,10 +13,44 @@ function source(file, from, to) {
   const start = text.indexOf(from), end = text.indexOf(to, start);
   assert.ok(start >= 0 && end > start); return text.slice(start, end);
 }
+function iconDeliveryFixture(load) {
+  const id = 'plugin:synthetic-limits:credits';
+  const context = { state: { settings: {}, pluginCatalog: { limits: { modules: [] } } },
+    window: { tokenMonitor: { setTrayIcons: async () => {} }, TokenMonitorTrayProviderIcons: { trayProviderIconSources: () => ({}) } },
+    trayProviderIconDeliveryGuard: require('../../src/electron/renderer/trayProviderIcons').createTrayProviderIconDeliveryGuard(),
+    trayIconProviderIds: [], trayProviderImages: {}, trayProviderImageIds: new WeakMap(),
+    loadImage: path => path.startsWith('../../../') ? Promise.resolve({}) : load(path),
+    providerImageToPngDataUrl: () => 'bitmap', maybeUpdateBarsIcon() {}, renderFloatingBubbleContent() {} };
+  vm.createContext(context);
+  vm.runInContext(source('renderer/app.js', 'async function deliverTrayProviderIcons(', '\nfunction setAccountGroupExpanded('), context);
+  return { id, context, setIcon(data) { context.state.pluginCatalog.limits.modules = [{ id, presentation: { icon: { data } } }]; }, deliver: () => context.deliverTrayProviderIcons() };
+}
+test('plugin icon replacement failure and removal discard the previous cached image', async () => {
+  const image = {};
+  const f = iconDeliveryFixture(async path => { if (path === 'broken') throw Error('decode'); return image; });
+  f.setIcon('valid'); await f.deliver();
+  assert.equal(f.context.trayProviderImages[f.id], image);
+  f.setIcon('broken'); await f.deliver();
+  assert.equal(f.context.trayProviderImages[f.id], undefined);
+  f.setIcon('valid'); await f.deliver();
+  f.setIcon(undefined); await f.deliver();
+  assert.equal(f.context.trayProviderImages[f.id], undefined, 'an active module can remove its icon');
+  assert.ok(f.context.trayProviderImages.app, 'builtin icon delivery remains intact');
+});
+test('an obsolete failed icon delivery cannot delete a newer successfully cached image', async () => {
+  let rejectOld, started;
+  const loading = new Promise(resolve => { started = resolve; });
+  const latest = {};
+  const f = iconDeliveryFixture(path => path === 'old' ? new Promise((_, reject) => { rejectOld = reject; started(); }) : Promise.resolve(latest));
+  f.setIcon('old'); const oldDelivery = f.deliver(); await loading;
+  f.setIcon('new'); await f.deliver();
+  rejectOld(Error('late decode failure')); await oldDelivery;
+  assert.equal(f.context.trayProviderImages[f.id], latest);
+});
 test('production Dock projection removes disabled, missing and master-off views without changing saved items', () => {
   const plugin = { status: 'active', views: [{ ref, surfaces: ['edgeDock'] }] };
   const settings = { edgeDockItems: [{ type: 'plugin', ref }] }, before = JSON.stringify(settings);
-  const context = { settings, pluginRuntime: { manager: { list: () => { throw new Error('full catalog must not be described on stats push'); }, surfaceCatalog: surface => plugin.status === 'active' ? plugin.views.filter(view => view.surfaces.includes(surface)) : [] } }, buildEdgeDockCells,
+  const context = { settings, desktopQuotaStats: s => s, pluginRuntime: { manager: { list: () => { throw new Error('full catalog must not be described on stats push'); }, surfaceCatalog: surface => plugin.status === 'active' ? plugin.views.filter(view => view.surfaces.includes(surface)) : [] } }, buildEdgeDockCells,
     refreshEdgeDockDerivedPeriods() {}, refreshEdgeDockForecast() {}, syncCodexPresentationActiveAccount() {},
     edgeDockDerivedPeriods: {}, edgeDockForecastWanted: () => false, syncProvenanceActive: () => false,
     codexAccountsForRenderer: () => [], codexPresentationPendingAccountId: '', codexPresentationActiveAccountId: '',
@@ -51,9 +85,86 @@ test('production Tray bitmap omits inactive plugin placeholders and restores ena
   assert.equal(rendered.length, 1); assert.equal(layout.items[0].ref, ref);
 });
 
+test('fixed plugin quota icons disappear from native bitmaps and Notch while their saved source survives', () => {
+  const id = 'plugin:sample-plugin:credits';
+  const layout = trayLayout.normalizeTrayLayout({ items: [{ type: 'icon', icon: 'provider', source: { provider: id } }] });
+  const saved = JSON.stringify(layout), rendered = [];
+  const context = { state: { settings: {} }, localLiveCodexProvider: () => null, trayLayoutApi: trayLayout,
+    currentCurrency: () => 'USD', compactTokenDisplayOptions: () => ({}), trayProviderImages: {},
+    displayLiveTokenRateSamples: () => ({}), pluginTrayViews: () => ({}),
+    renderCustomTrayItemCanvas: item => { rendered.push(item); return { width: 20 }; },
+    document: { createElement: () => ({ getContext: () => ({ drawImage() {} }), toDataURL: () => 'bitmap' }) } };
+  vm.createContext(context);
+  vm.runInContext(source('renderer/app.js', 'function renderCustomTrayLayout(', '\nfunction barsDataUrlForMode('), context);
+  const notch = require('../../src/electron/notch/data');
+  const stats = { pluginLimitModules: [{ id, label: 'Credits' }], limits: { providers: [] } };
+  const settings = { notchSummaryMode: 'custom', notchCustomLayout: layout };
+  const assertShown = shown => {
+    rendered.length = 0;
+    assert.equal(context.renderCustomTrayLayout(stats, layout), shown ? 'bitmap' : null);
+    assert.equal(rendered.length, shown ? 1 : 0);
+    const summary = notch.buildNotchData(stats, [], settings).summary;
+    assert.equal(summary?.items?.length || 0, shown ? 1 : 0);
+    assert.equal(JSON.stringify(layout), saved);
+    assert.equal(trayLayout.usesLimits(layout), false, 'fixed icons never start quota sampling');
+  };
+  assertShown(true); // Active metadata is sufficient, with no reading or cached image.
+  stats.pluginLimitModules = []; assertShown(false); // Disabled/removed.
+  stats.pluginLimitModules = [{ id, label: 'Credits' }]; assertShown(true);
+});
+test('inactive plugin quota text, bars and stacks disappear from Tray/Bubble and Notch without deleting saved layouts', () => {
+  const id = 'plugin:sample-plugin:credits', provider = { provider: id };
+  const items = [
+    ...['percent', 'percentReset', 'reset', 'account'].map(metric => ({ type: 'text', metric, source: provider })),
+    { type: 'bars', rows: [provider] },
+    ...['percent', 'reset'].map(metric => ({ type: 'stack', metric, rows: [provider, provider] })),
+    { type: 'stack', metric: 'mixed', rows: [{ ...provider, metric: 'percent' }, { ...provider, metric: 'reset' }] }
+  ];
+  const context = { state: { settings: {} }, localLiveCodexProvider: () => null, trayLayoutApi: trayLayout,
+    currentCurrency: () => 'USD', compactTokenDisplayOptions: () => ({}), trayProviderImages: {},
+    displayLiveTokenRateSamples: () => ({}), pluginTrayViews: () => ({}), renderCustomTrayItemCanvas: () => ({ width: 20 }),
+    document: { createElement: () => ({ getContext: () => ({ drawImage() {} }), toDataURL: () => 'bitmap' }) } };
+  vm.createContext(context);
+  vm.runInContext(source('renderer/app.js', 'function renderCustomTrayLayout(', '\nfunction barsDataUrlForMode('), context);
+  const { buildNotchData } = require('../../src/electron/notch/data');
+  for (const item of items) {
+    const layout = trayLayout.normalizeTrayLayout({ items: [item] }), saved = JSON.stringify(layout);
+    const retainedReading = { provider: id, status: 'ok', windows: [{ kind: 'weekly', remainingPercent: 75, usedPercent: 25, resetsAt: '2027-01-01T00:00:00Z' }] };
+    for (const [active, providers] of [[true, []], [false, [retainedReading]], [true, [retainedReading]]]) {
+      const stats = { pluginLimitModules: active ? [{ id }] : [], limits: { providers } };
+      assert.equal(context.renderCustomTrayLayout(stats, layout), active ? 'bitmap' : null, JSON.stringify(item));
+      assert.equal(Boolean(buildNotchData(stats, [], { notchSummaryMode: 'custom', notchCustomLayout: layout }).summary), active);
+      assert.equal(JSON.stringify(layout), saved);
+    }
+  }
+});
+test('mixed custom items keep builtin placeholders and usage rows with their own measurement after an inactive quota row is removed', () => {
+  const id = 'plugin:sample-plugin:credits';
+  const stats = { pluginLimitModules: [], periods: { month: { totalTokens: 12345 } }, limits: { providers: [] } };
+  const layout = trayLayout.normalizeTrayLayout({ items: [
+    { type: 'bars', rows: [{ provider: id }, { provider: 'codex' }] },
+    { type: 'stack', metric: 'percent', rows: [{ provider: id }, { provider: 'codex' }] },
+    { type: 'stack', metric: 'mixed', rows: [{ provider: id, metric: 'percent' }, { provider: id, metric: 'tokens', period: 'month', usageScope: 'all' }] },
+    { type: 'text', metric: 'custom', text: 'Note', source: { provider: id } }
+  ] });
+  const saved = JSON.stringify(layout);
+  const resolved = trayLayout.resolveTrayLayout(layout, stats);
+  assert.equal(resolved.items[0].rows.length, 1);
+  assert.equal(resolved.items[0].rows[0].source.provider, 'codex');
+  assert.equal(resolved.items[1].rows.length, 1);
+  assert.equal(resolved.items[2].rows.length, 1);
+  assert.equal(resolved.items[3].text, 'Note');
+  const { buildNotchData } = require('../../src/electron/notch/data');
+  const summary = buildNotchData(stats, [], { notchSummaryMode: 'custom', notchCustomLayout: layout }).summary;
+  assert.equal(summary.items.length, 4);
+  assert.equal(summary.items[2].rows[0].metric, 'tokens');
+  assert.equal(summary.items[2].rows[0].measure.value, 12345);
+  assert.equal(JSON.stringify(layout), saved);
+});
+
 test('Notch stats projection reads only active surface metadata and preserves saved selections', () => {
   let available = [{ ref, title: 'CPU', icon: 'activity' }], result;
-  const context = { settings: {}, pluginRuntime: { manager: { list() { throw new Error('full catalog on stats push'); }, surfaceCatalog: surface => { assert.equal(surface, 'notch'); return available; } } },
+  const context = { settings: {}, desktopQuotaStats: s => s, pluginRuntime: { manager: { list() { throw new Error('full catalog on stats push'); }, surfaceCatalog: surface => { assert.equal(surface, 'notch'); return available; } } },
     edgeDockCellsFor: () => [], notchPanelItems: () => [], notchDataFor: () => ({ panel: { pluginPages: [ref, 'missing/view'] } }),
     notchHistory: { read: () => null }, hubModeGeneration: 0, notchController: { setData: data => { result = data; } }, scheduleSessionExpiry() {} };
   vm.createContext(context);

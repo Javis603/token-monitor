@@ -289,7 +289,16 @@ function readableColor(color) {
 }
 
 // The provider's own colour, as the Limits view resolves it.
+function pluginQuotaMetadata(id) {
+  return state.payload?.cells?.find(cell => cell.provider === id)?.pluginQuota
+    || state.payload?.cell?.pluginQuota
+    || state.payload?.summary?.items?.find(item => item.providerCell?.provider === id)?.providerCell.pluginQuota
+    || state.payload?.summary?.items?.find(item => item.provider === id || item.iconProvider === id)?.pluginQuota;
+}
+
 function limitProviderColor(id) {
+  const module = pluginQuotaMetadata(id);
+  if (module) return pluginViewsApi.presentationColor(module.presentation, clientColors);
   if (id === 'factory') return clientColors.droid;
   return clientColors[id] || clientColors.default;
 }
@@ -302,7 +311,7 @@ function providerColor(id) {
 }
 
 function providerLabel(id) {
-  return LIMIT_PROVIDER_LABELS[id] || CLIENT_LABELS[id] || id;
+  return pluginQuotaMetadata(id)?.label || LIMIT_PROVIDER_LABELS[id] || CLIENT_LABELS[id] || id;
 }
 
 function clientLabel(id) {
@@ -329,6 +338,8 @@ function hasMask(id) {
 
 function markNode(id, color, model = false) {
   const mark = el('span', 'edge-dock-mark');
+  const module = pluginQuotaMetadata(id);
+  if (module) { mark.classList.add('is-plugin'); mark.append(pluginViewsApi.navigationIcon(document, module, 14)); return mark; }
   if (hasMask(id)) mark.classList.add(`row-icon-${id}`);
   else mark.classList.add('is-fallback');
   if (model) mark.classList.add('model-icon');
@@ -515,7 +526,8 @@ function createCardWindowsView(cell = () => state.payload?.cell, forecast = () =
     codexAccounts,
     // Probed off the stylesheet the dock borrows, so the card can never disagree
     // with the page about which providers have a mark.
-    hasMark: hasMask,
+    pluginMark: id => { const module = pluginQuotaMetadata(id); return module ? pluginViewsApi.navigationIcon(document, module, 12) : null; },
+  hasMark: hasMask,
     formatAgo: relativeAgo,
     // The renderer names the intent; the main process owns the URL.
     openExternal: () => bridge.openResetForecastSource?.(),
