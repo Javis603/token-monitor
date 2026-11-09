@@ -31,6 +31,17 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
   await js("els.edgeDockComposer.scrollIntoView({block:'center'})");
   await capture('composer-active.png');
   assert.equal(await js("els.edgeDockComposer.querySelectorAll('.edge-dock-composer-mark > span').length>=3"), true, 'module/custom-view icons in composer');
+  const iconPoint = await js("(()=>{const image=els.edgeDockComposer.querySelector('.edge-dock-composer-item img');const r=image.getBoundingClientRect();window.pluginIconDragStarts=0;window.observePluginIconDrag=e=>{window.pluginIconDragStarts++;e.preventDefault()};document.addEventListener('dragstart',window.observePluginIconDrag,true);return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()");
+  win.webContents.sendInputEvent({ type: 'mouseMove', ...iconPoint });
+  win.webContents.sendInputEvent({ type: 'mouseDown', ...iconPoint, button: 'left', clickCount: 1 });
+  for (let i = 1; i <= 6; i++) {
+    win.webContents.sendInputEvent({ type: 'mouseMove', x: iconPoint.x + i * 5, y: iconPoint.y, button: 'left' });
+    await pause(20);
+  }
+  win.webContents.sendInputEvent({ type: 'mouseUp', x: iconPoint.x + 30, y: iconPoint.y, button: 'left', clickCount: 1 });
+  const nativeIconDragStarts = await js("window.pluginIconDragStarts");
+  assert.equal(nativeIconDragStarts, 0, 'plugin images must not initiate native browser drags');
+  await js("document.removeEventListener('dragstart',window.observePluginIconDrag,true)");
   const projected = require('../src/electron/plugins/limitsPresentation').projectPluginLimits(stats, runtime.limitsSnapshot());
   const dockSettings = { ...settings, edgeDockEnabled: true, edgeDockMode: 'always', edgeDockSide: 'right', edgeDockItems: [{ type: 'limit', provider: 'plugin:synthetic-limits:one' }, { type: 'limit', provider: 'plugin:synthetic-limits:two' }],
     notchEnabled: true, notchRefreshEnabled: true, notchShape: 'pill', notchSummaryMode: 'tray', trayContent: 'barsAllSessions', limitProviders: 'plugin:synthetic-limits:one,plugin:synthetic-limits:two', notchBuiltinPages: ['home', 'limits', 'sessions'], notchHoverAction: 'open', notchHoverDelayMs: 0 };
@@ -127,6 +138,6 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
     runtime.manager.setEnabled('synthetic-limits', false);
     await waitFor("state.pluginCatalog.limits.modules.length===0 && !els.floatingBubbleContent.querySelector('img')", 'visible Bubble drops disabled fixed icon');
 
-    fs.writeFileSync(path.join(evidence, 'proof.json'), JSON.stringify({ modules: cells.map(cell => cell.provider), rawStatsUntouched: true, nativeManualRefresh: true, fixedIconDisableRestore: true, trayAndBubbleProviders: sourceProviders, inactiveCells: 0, surfaceCount: windows.length }, null, 2));
+    fs.writeFileSync(path.join(evidence, 'proof.json'), JSON.stringify({ modules: cells.map(cell => cell.provider), rawStatsUntouched: true, nativeManualRefresh: true, fixedIconDisableRestore: true, nativeIconDragStarts, trayAndBubbleProviders: sourceProviders, inactiveCells: 0, surfaceCount: windows.length }, null, 2));
   } finally { dock.stop(); notch.dispose(); runtime.demandLimits(false, 'fixture.native-refresh'); }
 };
