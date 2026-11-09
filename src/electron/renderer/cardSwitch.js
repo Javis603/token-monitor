@@ -45,7 +45,8 @@
       ghost.setAttribute('aria-hidden', 'true');
       ghost.removeAttribute('id');
       for (const node of ghost.querySelectorAll('[id]')) node.removeAttribute('id');
-      Object.assign(ghost.style, { position: 'absolute', top: `${previous.offsetTop || 0}px`, left: `${previous.offsetLeft || 0}px`, pointerEvents: 'none' });
+      // offsetLeft/Top already include layout margins; do not apply them twice.
+      Object.assign(ghost.style, { position: 'absolute', top: `${previous.offsetTop || 0}px`, left: `${previous.offsetLeft || 0}px`, margin: '0', pointerEvents: 'none' });
       return { ghost, opacity, scrollTops, elapsed: 0 };
     }
 

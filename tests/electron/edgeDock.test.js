@@ -3471,12 +3471,15 @@ test('whole-card transitions retain repaint progress and clean up interrupted ou
   let reduced = false;
   const document = { visibilityState: 'visible' };
   const ghosts = new Set();
-  function node(opacity = '1', scroll = 0, top = 0) {
+  function node(opacity = '1', scroll = 0, top = 0, left = 0, marginLeft = 0) {
     const list = { scrollTop: scroll };
-    const value = { style: {}, opacity, attributes: {}, animations: [],
+    const value = { style: {}, opacity, offsetLeft: left, offsetTop: top, attributes: {}, animations: [],
       querySelectorAll: selector => selector === '.scroll' ? [list] : [],
-      cloneNode: () => node(opacity, 0, top),
-      getBoundingClientRect: () => ({ top, bottom: top + 120 }),
+      cloneNode: () => node(opacity, 0, top, left, marginLeft),
+      getBoundingClientRect() {
+        return { top, bottom: top + 120, left: this.style.position === 'absolute'
+          ? parseFloat(this.style.left) + parseFloat(this.style.margin ?? marginLeft) : left };
+      },
       setAttribute(name, text) { this.attributes[name] = text; },
       removeAttribute(name) { delete this.attributes[name]; },
       remove() { ghosts.delete(this); this.removed = true; },
@@ -3497,6 +3500,13 @@ test('whole-card transitions retain repaint progress and clean up interrupted ou
   const shared = createCardSwitch({ contentLayer: { append: ghost => ghosts.add(ghost) }, scrollSelector: '.scroll',
     reducedMotion: () => reduced, isHidden: () => document.visibilityState === 'hidden', readOpacity: card => card.opacity });
   const api = { captureCardSwitch: shared.capture, animateCardSwitch: shared.play, clearCardSwitch: shared.cancel };
+  // The left sidebar's offsetLeft already includes its CSS margin-left.
+  const leftCard = node('1', 0, 0, 12, 12);
+  const leftMotion = api.captureCardSwitch(leftCard, false);
+  api.animateCardSwitch(node('1', 0, 0, 12, 12), leftMotion);
+  assert.equal(leftMotion.ghost.getBoundingClientRect().left, leftCard.getBoundingClientRect().left,
+    'an outgoing left-sidebar card must retain its screen position without counting margin twice');
+  api.clearCardSwitch();
   const first = node('1', 37), next = node();
   const motion = api.captureCardSwitch(first, false);
   api.animateCardSwitch(next, motion);
