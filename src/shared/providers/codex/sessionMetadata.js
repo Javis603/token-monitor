@@ -263,6 +263,7 @@ function resolveSessionMetadata(sessionIds, context) {
     // A fresh turn (including an explicit unknown) wins over the catalog.
     // Age or a failed read alone must not erase this persistent setting.
     if (Object.prototype.hasOwnProperty.call(state, 'reasoningEffort')) meta.reasoningEffort = state.reasoningEffort;
+    if (Object.prototype.hasOwnProperty.call(state, 'latestModel')) meta.latestModel = state.latestModel;
     const sessionContext = deps.readCodexSessionContext ? readContext(filePath) : state.context;
     // The turn boundary rides the same tail and answers the other half of the
     // question the window cannot: whether the agent is still generating.

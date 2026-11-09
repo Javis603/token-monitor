@@ -407,7 +407,7 @@ for (const { name, settings, expected } of [
 ]) {
   test(`Home limits empty-state copy when ${name}`, () => {
     const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-    const functions = ['configuredLimitProviderSelection', 'enabledLimitProviderSet', 'homeLimitRows', 'renderHomeLimitModule']
+    const functions = ['desktopLimitProviders', 'desktopLimitRecords', 'configuredLimitProviderSelection', 'enabledLimitProviderSet', 'homeLimitRows', 'renderHomeLimitModule']
       .map((functionName) => {
         const start = source.indexOf(`function ${functionName}(`);
         assert.notEqual(start, -1, `${functionName} exists`);
@@ -460,6 +460,7 @@ test('Home keeps both MiniMax readings named and in their own units', () => {
     settings.showHomeLimitProviderNames = showHomeLimitProviderNames;
     const rows = vm.runInNewContext(`${fn}\nhomeLimitRows();`, {
       state: { settings, stats: { limits: { providers } } },
+      desktopLimitProviders: () => [{ id: 'minimax', label: 'Minimax' }], desktopLimitRecords: () => providers,
       LIMIT_PROVIDERS: [{ id: 'minimax', label: 'Minimax' }],
       clientColors: {}, enabledLimitProviderSet: () => new Set(['minimax']), hiddenHomeLimitProviderSet: () => new Set(),
       limitProviderOrderApi, limitWindowsView: view, limitProviderPresentationApi: presentation,

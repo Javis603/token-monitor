@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { customPricingPath } = require('./tokscaleConfig');
+const { catalogRevision, createPricingCatalogRefresher } = require('./pricingCatalog');
 const { senpiWatchSources } = require('./providers/senpi/paths');
 const { abortReason, throwIfAborted } = require('./abortSignal');
 const { readJson, sharedDataDir } = require('./config');
@@ -33,8 +34,10 @@ const {
   emptyPeriod,
   extractUsageBundleFromTokscale,
   extractUsageFromTokscale,
+  mergeNormalizedPeriods,
   mergePeriods,
   normalizeClientName,
+  normalizePeriod,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
@@ -620,7 +623,9 @@ function runTokscale({
   onTerminationUnconfirmed,
   customScanPaths,
   homeDir,
-  workspaces = true
+  offlinePricing = false,
+  workspaces = true,
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 }) {
   throwIfAborted(signal);
   const command = tokscaleCommand({ customScanPaths, homeDir });
@@ -639,7 +644,7 @@ function runTokscale({
   const groupBy = () => (workspaces && workspaceGroupBySupported(command.identity)
     ? TOKSCALE_WORKSPACE_GROUP_BY
     : TOKSCALE_SESSION_GROUP_BY);
-  const runArgs = (filter, grouping) => ['--json', '--client', filter, '--group-by', grouping, ...flags];
+  const runArgs = (filter, grouping) => [...(offlinePricing ? ['--offline'] : []), '--bucket-timezone', timeZone, '--json', '--client', filter, '--group-by', grouping, ...flags];
   const subprocessOptions = {
     operation: 'tokscale scan',
     terminationOptions,
@@ -675,14 +680,14 @@ function runTokscale({
   ), signal);
 }
 
-function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir }) {
+function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir, offlinePricing = false, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }) {
   throwIfAborted(signal);
   const command = tokscaleCommand({ customScanPaths, homeDir });
   const requested = tokscaleClientFilter(clients);
   if (!requested) return Promise.resolve({ contributions: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
   if (!clientFilter) return Promise.resolve({ contributions: [] });
-  const runArgs = (filter) => ['graph', '--client', filter, '--no-spinner'];
+  const runArgs = (filter) => [...(offlinePricing ? ['--offline'] : []), 'graph', '--bucket-timezone', timeZone, '--client', filter, '--no-spinner'];
   const subprocessOptions = {
     operation: 'tokscale graph',
     terminationOptions,
@@ -703,7 +708,7 @@ function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOption
 function lookupModelPricing(modelId, commandTimeoutMs = 15000) {
   const id = String(modelId || '').trim();
   if (!id) return Promise.reject(new Error('lookupModelPricing: modelId is required'));
-  return spawnTokscaleJson(['pricing', id, '--json', '--no-spinner'], commandTimeoutMs);
+  return spawnTokscaleJson(['--offline', 'pricing', id, '--json', '--no-spinner'], commandTimeoutMs);
 }
 
 // The collector's stamp and history.js's window/streak boundary have to be the same
@@ -711,6 +716,10 @@ function lookupModelPricing(modelId, commandTimeoutMs = 15000) {
 // implementation rather than two formatters free to drift. Kept under the collector's
 // own name: it is exported and reads as the stamping side at its call sites.
 const localTodayKey = localDayKey;
+
+function collectionCalendarKey(now = new Date()) {
+  return `${Intl.DateTimeFormat().resolvedOptions().timeZone}|${now.getTimezoneOffset()}`;
+}
 
 function collectionDate(now) {
   const value = typeof now === 'function' ? now() : now;
@@ -804,6 +813,10 @@ function propagateTodayProjects(today, periods, titleMetadata = {}) {
       if (Object.prototype.hasOwnProperty.call(session, 'promptCache')) {
         target.promptCache = session.promptCache;
       }
+      if ((Date.parse(session.lastUsedAt) || 0) >= (Date.parse(target.lastUsedAt) || 0)) {
+        if (Object.prototype.hasOwnProperty.call(session, 'latestModel')) target.latestModel = session.latestModel;
+        else if (Date.parse(session.lastUsedAt) > Date.parse(target.lastUsedAt)) target.latestModel = null;
+      }
       if (isSessionReasoningEffortClient(session.client)) {
         const freshAt = Date.parse(session.lastUsedAt) || 0;
         const retainedAt = Date.parse(target.lastUsedAt) || 0;
@@ -888,6 +901,7 @@ async function collectHistoryOnce(options) {
     try {
       const graphJson = await runGraph({
         clients,
+        timeZone: options.timeZone,
         commandTimeoutMs: options.commandTimeoutMs || HISTORY_TIMEOUT_MS,
         signal: options.signal
       });
@@ -916,6 +930,7 @@ async function collectHistoryOnce(options) {
         ...(options.dailyHistoryArchiveOptions || {}),
         claudeDesktopSplitEnabled: options.claudeDesktopSplitEnabled !== false,
         liveDays: options.dailyHistoryLiveDays,
+        timeZone: options.timeZone,
         pricingRevision: options.pricingRevision,
         customPricingActive: options.customPricingActive,
         todayKey,
@@ -953,6 +968,15 @@ async function collectUsageOnce(options) {
   // straddles local midnight cannot pair a day-N today scan with a day-N+1
   // window (issue #37 follow-up). Injectable for tests.
   const collectedAt = collectionDate(options.now);
+  const calendarKey = collectionCalendarKey(collectedAt);
+  const periodWindows = computePeriodWindows(collectedAt);
+  const assertCollectionCalendar = () => {
+    if (collectionCalendarKey(collectedAt) !== calendarKey
+      || (options.expectedCalendarKey && options.expectedCalendarKey !== calendarKey)) {
+      throw new Error('System timezone changed during usage collection; retry the full scan');
+    }
+  };
+  assertCollectionCalendar();
   const reportTerminationUnconfirmed = (operation) => {
     try {
       options.onDiagnosticEvent?.({
@@ -968,24 +992,32 @@ async function collectUsageOnce(options) {
   const runTokscaleScan = options.runTokscale || ((input) => runTokscale({
     ...input,
     workspaces: projectsEnabled,
+    offlinePricing: options.offlinePricing,
     customScanPaths: options.customScanPaths,
     homeDir: options.homeDir,
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
   const runTokscaleFn = async (input) => {
-    const json = await runTokscaleScan(input);
+    const json = await runTokscaleScan({ ...input, timeZone: periodWindows.timeZone });
+    assertCollectionCalendar();
     applyClaudeDesktopSplit(json, input?.clients, options);
     applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
     return json;
   };
-  const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({
+  const runGraphScan = options.runGraph || ((input) => runTokscaleGraph({
     ...input,
+    offlinePricing: options.offlinePricing,
     customScanPaths: options.customScanPaths,
     homeDir: options.homeDir,
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-graph')
   }));
+  const runGraphFn = async (input) => {
+    const graph = await runGraphScan({ ...input, timeZone: periodWindows.timeZone });
+    assertCollectionCalendar();
+    return graph;
+  };
   const collectWsl = options.collectWslUsage || collectWslUsageImpl;
   const probeWslStateFn = options.probeWslState || probeWslStateImpl;
   // Injectable only for the WSL-status gate, so tests can exercise the win32
@@ -1039,6 +1071,7 @@ async function collectUsageOnce(options) {
   const anchorUsed = Boolean(
     anchor
     && anchor.dateKey === localTodayKey(collectedAt)
+    && (!anchor.calendarKey || anchor.calendarKey === calendarKey)
     && canTargetTodayPartitions(anchor, targetClients)
   );
   // Full-scan rows are native, even when their title matches an old override.
@@ -1198,6 +1231,15 @@ async function collectUsageOnce(options) {
     propagateTodayProjects(today, Object.values(todayPartitions), { ...localSessionMetadataDeps, projectsFromToday: true });
   }
 
+  // Decoration can replace text after the scan's normalization. Today was
+  // freshly decorated even on a watch tick. Normalize broader periods only on
+  // full scans; delta merges already normalize the sessions Today touched.
+  today = normalizePeriod(today);
+  if (!anchorUsed && normalizedClients) {
+    month = normalizePeriod(month);
+    allTime = normalizePeriod(allTime);
+  }
+
   // WSL contribution (Windows only; no-op elsewhere). Full tick scans running WSL
   // homes; watch tick reuses the frozen snapshot so the Windows-only delta anchor
   // above stays exact (issue #15). Merged before deriveClientStatus so a client
@@ -1243,9 +1285,11 @@ async function collectUsageOnce(options) {
       wslDetected = wslResult.detected;
     }
   }
-  today = mergePeriods(windowsPeriods.today, wslBundle.today);
-  month = mergePeriods(windowsPeriods.month, wslBundle.month);
-  allTime = mergePeriods(windowsPeriods.allTime, wslBundle.allTime);
+  // The host periods are already normalized. Re-normalizing them here walked
+  // every retained session on each watch tick; only the WSL overlay is new.
+  today = mergeNormalizedPeriods(windowsPeriods.today, wslBundle.today);
+  month = mergeNormalizedPeriods(windowsPeriods.month, wslBundle.month);
+  allTime = mergeNormalizedPeriods(windowsPeriods.allTime, wslBundle.allTime);
   throwIfAborted(options.signal);
 
   // The renderer intentionally uses the live today period while a day is in
@@ -1262,11 +1306,12 @@ async function collectUsageOnce(options) {
         ...(options.dailyHistoryArchiveOptions || {}),
         claudeDesktopSplitEnabled: options.claudeDesktopSplitEnabled !== false,
         liveDays: dailyHistoryLiveDays,
-        todayKey: localTodayKey(collectedAt),
+        timeZone: periodWindows.timeZone,
+        todayKey: periodWindows.today.key,
         pricingRevision: options.pricingRevision,
         writeEnabled: options.dailyHistoryArchiveWriteEnabled
       });
-      dailyHistoryLiveDays = retainedLive.liveDays || {};
+      dailyHistoryLiveDays = (retainedLive.calendars?.[periodWindows.timeZone] || retainedLive).liveDays || {};
     } catch (error) {
       if (typeof options.logger === 'function') options.logger(`daily live history archive failed: ${error.message}`);
     }
@@ -1315,9 +1360,9 @@ async function collectUsageOnce(options) {
       });
       throwIfAborted(options.signal);
       if (codexLocalView.sessionKeys.length) {
-        today = mergePeriods(today, codexLocalView.today);
-        month = mergePeriods(month, codexLocalView.month);
-        allTime = mergePeriods(allTime, codexLocalView.allTime);
+        today = mergeNormalizedPeriods(today, codexLocalView.today);
+        month = mergeNormalizedPeriods(month, codexLocalView.month);
+        allTime = mergeNormalizedPeriods(allTime, codexLocalView.allTime);
       }
       options.onCodexLocalUsageComputed?.(codexLocalView);
     } catch (_error) {
@@ -1356,7 +1401,7 @@ async function collectUsageOnce(options) {
     trackedClients: normalizedClients ? normalizedClients.split(',') : [],
     clientStatus: deriveClientStatus(normalizedClients, allTime, { sourceChecks }),
     wslStatus,
-    periodWindows: computePeriodWindows(collectedAt),
+    periodWindows,
     historyAvailable: options.historyEnabled !== false,
     // Private archive hint: these three report requests finished this tick.
     sessionUsageArchiveFullScan: !anchorUsed,
@@ -1418,6 +1463,7 @@ async function collectUsageOnce(options) {
       ...(summary.nativeProjects ? { nativeProjects: summary.nativeProjects } : {})
     });
   }
+  assertCollectionCalendar();
   if (options.historyEnabled === false) {
     summary.history = null;
   } else if (options.includeHistory) {
@@ -1428,7 +1474,8 @@ async function collectUsageOnce(options) {
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
-      todayKey: localTodayKey(collectedAt),
+      timeZone: periodWindows.timeZone,
+      todayKey: periodWindows.today.key,
       runGraph: runGraphFn,
       signal: options.signal,
       dailyHistoryArchiveEnabled: options.dailyHistoryArchiveEnabled,
@@ -1442,6 +1489,7 @@ async function collectUsageOnce(options) {
       logger: options.logger
     });
     throwIfAborted(options.signal);
+    assertCollectionCalendar();
     if (history) summary.history = history;
   }
   // After history, so `lastActivityDay` can come from the daily buckets this
@@ -1470,6 +1518,7 @@ async function collectUsageOnce(options) {
   });
   // Activity is observed after scans; it must not re-date their accounting
   // snapshot if that read crosses midnight. Observations retain their own clock.
+  assertCollectionCalendar();
   const result = require('./sessionActivityProjection').materializeActivity(activitySummary);
   return result.updatedAt === summary.updatedAt ? result : { ...result, updatedAt: summary.updatedAt };
 }
@@ -1501,13 +1550,13 @@ function clientWatchCandidates(clientsCsv, options = {}) {
   if (senpiSources) options = { ...options, senpiSources };
   const byClient = {};
   for (const [client, roots] of Object.entries(clientSourceRoots(clientsCsv, options))) {
-    // The Copilot data root already keeps its `otel/` child through the
-    // matcher below. Keep that child as a diagnostic/source check, but do not
-    // hand both nested paths to chokidar or it may install two native watches
-    // over the same tree.
+    // The Copilot data root already keeps its otel and session-state children
+    // through the matcher below. Keep both as diagnostic/source checks, but do not
+    // hand overlapping parent and child paths to chokidar or it may install
+    // duplicate native watches over the same tree.
     byClient[client] = roots
       .filter((root) => (
-        !(client === 'copilot' && root.id === 'copilot-otel')
+        !(client === 'copilot' && ['copilot-otel', 'copilot-session-state'].includes(root.id))
         && !INTERVAL_ONLY_SOURCE_CHECK_IDS.has(root.id)
       ))
       .map((root) => root.dir);
@@ -1649,11 +1698,12 @@ function watchAttributionRootsForClients(clientsCsv, watchRoots = null, options 
   return attributed;
 }
 
-function clientsForWatchPath(filePath, rootsByClient) {
+function clientsForWatchPath(filePath, rootsByClient, ignoreByClient = null) {
   if (!filePath) return [];
   const resolved = path.resolve(filePath);
   const matched = [];
   for (const [client, roots] of Object.entries(rootsByClient || {})) {
+    if (ignoreByClient?.[client]?.(resolved)) continue;
     if (roots.some((root) => {
       const resolvedRoot = path.resolve(root);
       return resolved === resolvedRoot || resolved.startsWith(resolvedRoot + path.sep);
@@ -1928,6 +1978,12 @@ function watchPolicyEntries(clientsCsv, options = {}) {
 
   bound('copilot', withBasename('copilot', '.copilot'), (parts) => {
     if (parts[0] === 'otel') return false;
+    if (parts[0] === 'session-state') {
+      // Native CLI sessions can appear after the watcher starts. Keep their
+      // discovery directories and direct legacy JSONL files, but prune each
+      // session's plans, checkpoints and other non-usage content.
+      return parts.length > 2 && !(parts.length === 3 && parts[2] === 'events.jsonl');
+    }
     if (parts.length === 1) return !COPILOT_DB_WATCH_PATTERN.test(parts[0]);
     return true;
   });
@@ -1988,6 +2044,29 @@ function watchPolicyEntries(clientsCsv, options = {}) {
       return true;
     }
   );
+
+  // Prime's sessionDir may be cwd or the whole home. Its normal root sessions
+  // are direct JSONL files; RLM transcripts are artifacts/<parent>/sub-*/*.jsonl.
+  // Bound live traversal to that layout, while full Tokscale scans remain
+  // recursive. Explicit extra scan roots keep the custom-root policy below.
+  if (candidates['prime-agent']) {
+    const roots = clientSourceRoots('prime-agent', options)['prime-agent'];
+    const isTranscript = (name) => name.endsWith('.jsonl') && name !== 'rlm-subagents.jsonl';
+    bound('prime-agent', roots.filter(({ id }) => id === 'prime-agent-sessions').map(({ dir }) => dir),
+      directChildOnly(isTranscript));
+    bound('prime-agent', roots.filter(({ id }) => id === 'prime-agent-artifacts').map(({ dir }) => dir), (parts, resolved) => {
+      if (pruneDependencyTrees(parts)) return true;
+      if (parts.length === 1) {
+        try { return !fs.statSync(resolved).isDirectory(); } catch (_) {
+          // Removed parents can contain transcripts; keep their removal signal.
+          return false;
+        }
+      }
+      if (!parts[1].startsWith('sub-')) return true;
+      if (parts.length === 2) return false;
+      return parts.length !== 3 || !isTranscript(parts[2]);
+    });
+  }
 
   // Command Code recursively stores session transcripts below projects/, but
   // checkpoint streams use the same JSONL suffix and are explicitly skipped by
@@ -2321,6 +2400,7 @@ function pricingFingerprint(options = {}) {
     env: tokscaleEnvWithBlanksDropped(process.env)
   });
   const hash = createHash('sha256');
+  hash.update(JSON.stringify(catalogRevision({ env: tokscaleEnvWithBlanksDropped(process.env) })));
   hash.update(pricingPath);
   try { hash.update(fs.readFileSync(pricingPath)); }
   catch (error) { hash.update(`|file:${error.code || 'unreadable'}`); }
@@ -2384,6 +2464,7 @@ function qoderCnProjectsDirForClients(clientsCsv, options = {}) {
 function collectorAnchorTrust(saved, options = {}) {
   const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, now = new Date() } = options;
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
+  if (saved.calendarKey !== collectionCalendarKey(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
   // A flat provenance ledger cannot prove each period's project source.
   if (Object.keys(saved.catalogProjects || {}).length && !saved.catalogProjects.today) return null;
@@ -2742,6 +2823,7 @@ function startCollector(options) {
   let intervalTimer = null;
   let stopped = false;
   let activityScheduler = null;
+  let pricingRefresher = null;
   let activityWatchReady = false;
   let activityUpdate = null;
   let latestActivitySummary = null;
@@ -2850,6 +2932,7 @@ function startCollector(options) {
       if (trust) {
         anchor = {
           dateKey: saved.dateKey,
+          calendarKey: saved.calendarKey,
           sessionIdentityVersion: saved.sessionIdentityVersion,
           today: saved.today,
           month: saved.month,
@@ -2883,6 +2966,7 @@ function startCollector(options) {
       fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
       fs.writeFileSync(anchorPath, JSON.stringify({
         dateKey: anchor.dateKey,
+        calendarKey: anchor.calendarKey,
         sessionIdentityVersion: anchor.sessionIdentityVersion,
         cursorAutoModelVersion: 1,
         today: anchor.today,
@@ -2941,12 +3025,14 @@ function startCollector(options) {
     const tickStartedAt = Date.now();
     const collectedAt = collectionDate(options.now);
     const todayKey = localTodayKey(collectedAt);
+    const tickCalendarKey = collectionCalendarKey(collectedAt);
+    const timezoneChanged = Boolean(anchor && anchor.calendarKey !== tickCalendarKey);
     const tickPricingRevision = pricingFingerprint(options);
     const sessionMetadataFallback = anchor;
     const pricingChanged = tickPricingRevision !== pricingRevision;
     const tickSourceRevision = catpawSourcesFingerprint(normalizedClients, sourceOptions);
     const catpawSourcesChanged = tickSourceRevision !== sourceRevision;
-    if (pricingChanged || catpawSourcesChanged) {
+    if (pricingChanged || catpawSourcesChanged || timezoneChanged) {
       anchor = null;
       wslAnchor = null;
       wslStatusAnchor = null;
@@ -2965,7 +3051,7 @@ function startCollector(options) {
       collectedAt.getTime(),
       lastHistoryAt,
       historyIntervalMs,
-      Boolean(tickOptions.forceHistory) || localDayRolledOver || pricingChanged || catpawSourcesChanged,
+      Boolean(tickOptions.forceHistory) || localDayRolledOver || pricingChanged || catpawSourcesChanged || timezoneChanged,
       historyEnabled
     );
     if (includeHistory) {
@@ -2987,6 +3073,7 @@ function startCollector(options) {
       let catpawSourceChangeObserved = false;
       const summary = await collectUsageOnce({
         ...options,
+        offlinePricing: true,
         codexDotsVisible,
         signal: runtimeSignal,
         clients,
@@ -2997,6 +3084,7 @@ function startCollector(options) {
         agentRuntime,
         osInfo: deviceOsInfo,
         now: collectedAt,
+        expectedCalendarKey: tickCalendarKey,
         includeHistory,
         pricingRevision: tickPricingRevision,
         customPricingActive: Object.keys(readJson(options.pricingPath || customPricingPath({ env: tokscaleEnvWithBlanksDropped(process.env) }), {})?.models || {}).length > 0,
@@ -3134,6 +3222,7 @@ function startCollector(options) {
       if (!anchored && captured) {
         anchor = {
           dateKey: todayKey,
+          calendarKey: tickCalendarKey,
           sessionIdentityVersion: captured.sessionIdentityVersion,
           today: captured.windowsPeriods.today,
           month: captured.windowsPeriods.month,
@@ -3231,11 +3320,9 @@ function startCollector(options) {
       latestActivitySummary = visibleSummary;
       if (historyEnabled !== false && options.dailyHistoryArchiveEnabled) {
         try {
-          const visibleAt = visibleSummary.updatedAt || summary.updatedAt;
-          const visibleDate = visibleAt ? new Date(visibleAt) : new Date();
-          const visibleDateKey = Number.isFinite(visibleDate.getTime())
-            ? localTodayKey(visibleDate)
-            : todayKey;
+          // The scanner window owns the date, even if the OS timezone changes
+          // while the runtime awaits its archive/presentation transform.
+          const visibleDateKey = summary.periodWindows.today.key;
           const retainedToday = tickLocalView?.sessionKeys?.length
             ? applyPeriodDelta(visibleSummary.today, emptyPeriod(), tickLocalView.today)
             : visibleSummary.today;
@@ -3243,6 +3330,7 @@ function startCollector(options) {
             ...(options.dailyHistoryArchiveOptions || {}),
             claudeDesktopSplitEnabled: options.claudeDesktopSplitEnabled !== false,
             liveDays: liveDailyHistoryDays,
+            timeZone: summary.periodWindows.timeZone,
             todayKey: visibleDateKey,
             pricingRevision: tickPricingRevision,
             // Watch ticks update the in-memory maximum on every refresh, but
@@ -3254,7 +3342,7 @@ function startCollector(options) {
               ? options.dailyHistoryArchiveWriteEnabled
               : false
           });
-          liveDailyHistoryDays = retainedLive.liveDays || {};
+          liveDailyHistoryDays = (retainedLive.calendars?.[summary.periodWindows.timeZone] || retainedLive).liveDays || {};
         } catch (error) {
           log(`daily live history archive failed: ${error.message}`);
         }
@@ -3562,6 +3650,10 @@ function startCollector(options) {
       Object.entries(watchAttributionRootsForClients(clients, watchRoots, watchOptions))
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
     );
+    // Another client's policy may keep an event under a broad Prime root.
+    // Attribute it using Prime's own source policy, not the global union.
+    const attributionIgnores = rootsByClient['prime-agent']
+      ? { 'prime-agent': watchIgnoreMatcher('prime-agent', watchOptions) } : null;
     // A subset of the same roots, matched separately so a write to a client's
     // parse-local data cannot pass for a write to its self-sync source.
     const sourceSyncRootsByClient = Object.fromEntries(
@@ -3595,7 +3687,7 @@ function startCollector(options) {
       // the collector cannot re-trigger itself. See
       // SELF_WATCHED_SQLITE_SIDECAR_CLIENTS for the measured per-client evidence.
       if (isSelfWatchSqliteSidecarEvent(filePath, rootsByClient)) return;
-      const eventClients = clientsForWatchPath(filePath, attributionRootsByClient);
+      const eventClients = clientsForWatchPath(filePath, attributionRootsByClient, attributionIgnores);
       const activityClients = activityClientsForPath(filePath, activitySources);
       if (activityClients.length || eventClients.some(isSessionActivityClient)) {
         activityScheduler?.request();
@@ -3691,7 +3783,8 @@ function startCollector(options) {
     // Native watchers are an optimization, not the source of truth. Always
     // retain the hourly reconciliation path for missed events, newly created
     // client directories, WSL-only activity, and cross-day metadata refreshes.
-    const fullScanDue = lastFullScanAt === 0 || Date.now() - lastFullScanAt >= FULL_SCAN_INTERVAL_MS;
+    const calendarChanged = Boolean(anchor && anchor.calendarKey !== collectionCalendarKey(collectionDate(options.now)));
+    const fullScanDue = calendarChanged || lastFullScanAt === 0 || Date.now() - lastFullScanAt >= FULL_SCAN_INTERVAL_MS;
     // Smart mode trusts the watcher to say which clients moved. Without one it
     // is plain interval collection, or it would scan nothing but the hourly
     // reconciliation.
@@ -3768,6 +3861,7 @@ function startCollector(options) {
     stopped = true;
     runtimeAbortController.abort(new Error('collector stopped'));
     codexLocalSource?.stop();
+    pricingRefresher?.stop();
     if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
     if (intervalTimer) { clearTimeout(intervalTimer); intervalTimer = null; }
     activityScheduler?.stop();
@@ -3784,7 +3878,12 @@ function startCollector(options) {
     // test pins that startup ordering because reversing it would microtask-spin.
     if (startBarrier) return Promise.resolve(startBarrier).then(() => whenIdle());
     const usageIdle = !tickInFlight ? Promise.resolve() : new Promise((resolve) => idleWaiters.push(resolve));
-    return usageIdle.then(() => activityUpdate).then(() => stopped ? codexLocalSource?.whenIdle() : undefined);
+    return usageIdle.then(() => activityUpdate).then(async () => {
+      if (stopped) {
+        await pricingRefresher?.whenIdle();
+        await codexLocalSource?.whenIdle();
+      }
+    });
   }
 
   function getDiagnostics() {
@@ -3830,6 +3929,23 @@ function startCollector(options) {
 
   setupWatchers();
   loop();
+  // Injected scans own their pricing in tests/embedders. Production downloads
+  // run independently of usage ticks, never once per model or source event.
+  if (!options.runTokscale || options.refreshPricingCatalog) {
+    pricingRefresher = createPricingCatalogRefresher({
+      env: tokscaleEnvWithBlanksDropped(process.env),
+      refresh: options.refreshPricingCatalog || (() => spawnTokscaleJson(
+        ['pricing', 'refresh', '--json', '--no-spinner'], 120_000,
+        tokscaleCommand(), runtimeSignal, {
+          operation: 'tokscale pricing refresh',
+          terminationOptions: options.subprocessTerminationOptions
+        }
+      )),
+      onUpdate: () => runTick('pricing-change', { forceHistory: true }),
+      onError: error => log(`Pricing refresh failed; retaining cached prices: ${error.message}`)
+    }, options.pricingCatalogTimers);
+    pricingRefresher.start();
+  }
   if (options.sessionActivityPolling !== false && sessionActivityProvidersFor(trackedClients).length) {
     activityScheduler = createSessionActivityScheduler({
       refresh: pollSessionActivity,
@@ -3907,6 +4023,7 @@ module.exports = {
   clientsForWatchPath,
   clientWatchCandidates,
   computePeriodWindows,
+  collectionCalendarKey,
   collectorAnchorTrust,
   pricingFingerprint,
   configFingerprint,

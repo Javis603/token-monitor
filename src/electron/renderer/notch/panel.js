@@ -395,6 +395,7 @@
       view.scrub = null; view.monthDate = null;
       releasePluginPage(view.page);
       view.page = page;
+      bridge.setLimitsDemand?.(shown && ['home', 'limits'].includes(page));
       for (const [name, pageNode] of pageNodes) {
         pageNode.classList.toggle('is-before', pageOrder.indexOf(name) < pageOrder.indexOf(page));
       }
@@ -488,7 +489,7 @@
         if (page.startsWith(PLUGIN_PAGE_PREFIX)) {
           const icon = button.querySelector('.notch-tab-plugin-icon');
           const metadata = pluginIconMetadata(page);
-          const iconName = JSON.stringify([metadata.icon, metadata.identityIcon]);
+          const iconName = JSON.stringify([metadata.icon, metadata.identityIcon, metadata.presentation]);
           if (icon && icon.dataset.icon !== iconName && pluginViews) {
             icon.dataset.icon = iconName;
             icon.replaceChildren(pluginViews.navigationIcon(document, metadata, 15));
@@ -1080,6 +1081,7 @@
     function sessionModelMetadata(row) {
       return sessionRows.sessionModelMetadataNode(document, row, {
         translate: t, view: limitWindowsView, formatTokens: formatBreakdownTokens,
+        latestModelLabel: t('session.latestModel'),
         unattributedLabel: t('dashboard.tooltip.unclassified')
       });
     }
@@ -1430,6 +1432,7 @@
       shown = true;
       payload = next;
       syncPluginPages(next?.panel?.pluginPages, next?.panel?.builtinPages, next?.panel?.pageOrder);
+      bridge.setLimitsDemand?.(['home', 'limits'].includes(view.page));
       node.classList.toggle('is-reduced-motion', prefersReducedMotion());
       if (opening) {
         view.scrub = null; view.monthDate = null;
@@ -1465,6 +1468,7 @@
     function suspend() {
       releasePluginPage(view.page);
       shown = false;
+      bridge.setLimitsDemand?.(false);
       clearTimeout(limitWheel.timer);
       Object.assign(limitWheel, { sum: 0, stepped: false, timer: null });
       settleRolls();

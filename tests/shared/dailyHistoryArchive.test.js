@@ -924,7 +924,7 @@ test('durable reconstruction preserves client-specific reasoning output without 
 test('clearDailyHistoryArchive removes persisted data and accepts a missing file', async () => {
   let calls = 0;
   assert.equal(await clearDailyHistoryArchive(inMemoryArchiveOptions({ unlinkSync: () => { calls += 1; } })), true);
-  assert.equal(calls, 1);
+  assert.equal(calls, 2);
   assert.equal(await clearDailyHistoryArchive(inMemoryArchiveOptions({ unlinkSync: () => {
     const error = new Error('missing');
     error.code = 'ENOENT';
@@ -1175,4 +1175,222 @@ test('a Cursor graph day kept on a tied aggregate cost still fills a price only 
   assert.equal(day.perModel['cursor-grok-4.6-high'].cost, 1);
   assert.equal(day.perModel['gpt-5.5'].cost, 3);
   assert.equal(day.cost, 4);
+});
+
+test('new calendar captures leave unknown legacy history untouched, without recovery', () => {
+  const legacy = captureLiveDailyHistory({}, livePeriod(1300), { todayKey: '2026-11-07' });
+  const historical = captureDailyHistoryArchive(legacy, graph('2026-11-06', [client('claude', 'opus', 900, 1, 1)]));
+  const next = captureLiveDailyHistory(historical, livePeriod(550), { todayKey: '2026-11-07', timeZone: 'Asia/Taipei' });
+  assert.deepEqual(next.days, historical.days);
+  assert.deepEqual(next.liveDays, historical.liveDays);
+  const visible = historyFrom(graphFromDailyHistoryArchive([], next, { todayKey: '2026-11-07', timeZone: 'Asia/Taipei' }), '2026-11-07');
+  assert.equal(visible.daily.find(day => day.date === '2026-11-06').tokens, 900);
+  assert.equal(visible.daily.find(day => day.date === '2026-11-07').tokens, 1300);
+});
+
+for (const legacyKind of ['graph', 'live']) {
+  for (const firstCapture of ['graph', 'live']) {
+    test(`upgrade retains source-deleted ${legacyKind} usage through a first ${firstCapture} capture, once only`, t => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-calendar-upgrade-'));
+      t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+      const date = '2026-11-07';
+      const legacyPath = path.join(dir, 'daily-history-archive.json');
+      const legacy = legacyKind === 'graph'
+        ? captureDailyHistoryArchive({}, graph(date, [client('claude', 'opus', 100, 2, 1)]), { todayKey: date })
+        : captureLiveDailyHistory({}, livePeriod(100, 2), { todayKey: date });
+      const original = JSON.stringify(legacy);
+      fs.writeFileSync(legacyPath, original);
+      const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir }, timeZone: 'Asia/Taipei', todayKey: date };
+      const daily = (opts = options) => historyFrom(retainDailyHistory([], opts), opts.todayKey).daily;
+      const tokens = (opts = options) => daily(opts).find(day => day.date === date)?.tokens || 0;
+
+      // There are no source transcripts or session archives to rebuild this day.
+      if (firstCapture === 'graph') retainDailyHistory([], options);
+      else retainLiveDailyHistory(livePeriod(0), options);
+      assert.equal(tokens(), 100);
+      assert.equal(daily()[0].cost, 2);
+      assert.equal(fs.readFileSync(legacyPath, 'utf8'), original);
+
+      // Each call reloads the persisted calendar archive. Lower/overlapping
+      // scans retain the original maximum rather than summing the old baseline.
+      retainLiveDailyHistory(livePeriod(50, 1), options);
+      assert.equal(tokens(), 100);
+      retainLiveDailyHistory(livePeriod(150, 3), options);
+      assert.equal(tokens(), 150);
+
+      const west = { ...options, timeZone: 'America/Los_Angeles' };
+      assert.equal(tokens(west), 0, 'a second timezone must not import the legacy baseline');
+      assert.equal(tokens(), 150, 'returning to the first calendar retains its own observation');
+      retainLiveDailyHistory(livePeriod(20), { ...options, todayKey: '2026-11-08' });
+      assert.equal(tokens({ ...options, todayKey: '2026-11-08' }), 150);
+      assert.equal(tokens({ ...west, todayKey: '2026-11-08' }), 150);
+      assert.equal(fs.readFileSync(legacyPath, 'utf8'), original);
+    });
+  }
+}
+
+test('first calendar persists previously unseen historical graph days after the source disappears', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-calendar-first-history-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = { path: path.join(dir, 'history.json'), todayKey: '2026-11-07', timeZone: 'Asia/Taipei' };
+  retainDailyHistory(graph('2026-11-06', [client('claude', 'opus', 100, 2, 1)]), options);
+  // Reload from disk without the source graph, as after transcript deletion
+  // or a failed graph scan. A fresh profile must retain its historical scan.
+  const visible = historyFrom(retainDailyHistory([], options), options.todayKey);
+  assert.equal(visible.daily.find(day => day.date === '2026-11-06')?.tokens, 100);
+  assert.equal(visible.daily.find(day => day.date === '2026-11-06')?.cost, 2);
+});
+
+test('late-discovered historical days persist without replacing any previously retained date', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-calendar-late-history-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'history.json');
+  const date = '2026-11-07';
+  const options = { path: file, todayKey: date, timeZone: 'Asia/Taipei' };
+  const legacy = captureDailyHistoryArchive({}, graph('2026-11-03', [client('claude', 'opus', 90, 1, 1)]));
+  fs.writeFileSync(file, JSON.stringify(legacy));
+  retainLiveDailyHistory(livePeriod(10), options);
+  retainDailyHistory(graph('2026-11-05', [client('claude', 'opus', 200, 2, 1)]), options);
+  const west = { ...options, timeZone: 'America/Los_Angeles', todayKey: '2026-11-09' };
+  retainDailyHistory({ contributions: [
+    ...graph('2026-11-03', [client('claude', 'opus', 999, 9, 1)]).contributions,
+    ...graph('2026-11-04', [client('claude', 'opus', 300, 3, 1)]).contributions,
+    ...graph('2026-11-05', [client('claude', 'opus', 999, 9, 1)]).contributions
+  ] }, west);
+  const assertSaved = (opts) => {
+    const days = historyFrom(retainDailyHistory([], opts), opts.todayKey).daily;
+    assert.equal(days.find(day => day.date === '2026-11-03')?.tokens, 90);
+    assert.equal(days.find(day => day.date === '2026-11-04')?.tokens, 300);
+    assert.equal(days.find(day => day.date === '2026-11-05')?.tokens, 200);
+  };
+  assertSaved(west);
+  assertSaved({ ...options, todayKey: '2026-11-10' });
+  assertSaved({ ...west, todayKey: '2026-11-11' });
+});
+
+for (const legacy of [true, false]) {
+  test(`calendar merge includes active time from ${legacy ? 'legacy history' : 'another calendar'} in its summary`, () => {
+    const previous = { todayKey: '2026-11-06', ...(legacy ? {} : { timeZone: 'America/Los_Angeles' }) };
+    const options = { todayKey: '2026-11-07', timeZone: 'Asia/Taipei' };
+    let archive = captureDailyHistoryArchive({}, graph('2026-11-06', [client('claude', 'opus', 100, 1, 1)], {
+      activeTimeMs: 3_600_000
+    }), previous);
+    archive = captureLiveDailyHistory(archive, livePeriod(20), options);
+    for (const sourceTotal of [0, 7_200_000]) {
+      const timeMetrics = { totalActiveTimeMs: sourceTotal, longestContinuousMs: 0, maxConcurrentSessions: 0, sessionCount: 0 };
+      const restored = graphFromDailyHistoryArchive({ contributions: [], timeMetrics }, archive, options);
+      const history = historyFrom(restored, options.todayKey);
+      assert.equal(history.daily.find(day => day.date === '2026-11-06').activeTimeMs, 3_600_000);
+      assert.equal(history.summary.activeTimeMs, Math.max(sourceTotal, 3_600_000));
+      assert.deepEqual(restored.timeMetrics, { ...timeMetrics, totalActiveTimeMs: Math.max(sourceTotal, 3_600_000) });
+    }
+  });
+}
+
+test('timezone round trips never max-win across calendars and retain same-calendar maxima', () => {
+  const date = '2026-11-07';
+  const east = { todayKey: date, timeZone: 'Asia/Taipei' };
+  const west = { todayKey: date, timeZone: 'America/Los_Angeles' };
+  let archive = captureLiveDailyHistory({}, livePeriod(500), east);
+  archive = captureLiveDailyHistory(archive, livePeriod(1300), west);
+  archive = captureLiveDailyHistory(archive, livePeriod(550), east);
+  const tokens = options => historyFrom(graphFromDailyHistoryArchive([], archive, options), date).daily[0].tokens;
+  assert.equal(tokens(east), 550);
+  assert.equal(tokens(west), 1300);
+  archive = captureLiveDailyHistory(archive, livePeriod(400), east);
+  assert.equal(tokens(east), 550);
+  assert.equal(Object.values(archive.calendars['America/Los_Angeles'].liveDays[date].observations)[0].tokens, 1300);
+});
+
+test('calendar graph capture starts at the cutover date and preserves past archived-only observations', () => {
+  const west = { todayKey: '2026-11-07', timeZone: 'America/Los_Angeles' };
+  let archive = captureDailyHistoryArchive({}, graph('2026-11-07', [client('claude', 'opus', 1300, 1, 1)]), west);
+  const east = { todayKey: '2026-11-08', timeZone: 'Asia/Taipei' };
+  archive = captureDailyHistoryArchive(archive, {
+    contributions: [
+      ...graph('2026-11-07', [client('claude', 'opus', 2000, 2, 2)]).contributions,
+      ...graph('2026-11-08', [client('claude', 'opus', 100, 1, 1)]).contributions
+    ]
+  }, east);
+  assert.equal(archive.calendars['Asia/Taipei'].days['2026-11-07'], undefined);
+  const visible = historyFrom(graphFromDailyHistoryArchive([], archive, east), '2026-11-08');
+  assert.equal(visible.daily.find(day => day.date === '2026-11-07').tokens, 1300);
+  assert.equal(visible.daily.find(day => day.date === '2026-11-08').tokens, 100);
+  const back = { ...west, todayKey: '2026-11-09' };
+  archive = captureLiveDailyHistory(archive, livePeriod(50), back);
+  const returned = historyFrom(graphFromDailyHistoryArchive([], archive, back), '2026-11-09');
+  assert.equal(returned.daily.find(day => day.date === '2026-11-08').tokens, 100);
+});
+
+test('calendar archives survive persistence, rebase on concurrent captures and clear together', () => {
+  let stored = {};
+  const common = { todayKey: '2026-11-07', readJson: () => stored, writeJsonAtomic: (_file, value) => { stored = value; } };
+  retainLiveDailyHistory(livePeriod(1300), { ...common, timeZone: 'America/Los_Angeles' });
+  retainLiveDailyHistory(livePeriod(550), { ...common, timeZone: 'Asia/Taipei' });
+  const visible = retainDailyHistory([], { ...common, timeZone: 'Asia/Taipei' });
+  assert.equal(historyFrom(visible, common.todayKey).daily[0].tokens, 550);
+  assert.deepEqual(Object.keys(stored.calendars).sort(), ['America/Los_Angeles', 'Asia/Taipei']);
+  assert.deepEqual(normalizeDailyHistoryArchive(stored), stored);
+  retainLiveDailyHistory(livePeriod(9999), { ...common, timeZone: 'Asia/Taipei', writeEnabled: false });
+  assert.equal(historyFrom(retainDailyHistory([], { ...common, timeZone: 'Asia/Taipei' }), common.todayKey).daily[0].tokens, 550);
+});
+
+test('calendar-aware persistence never overwrites the legacy archive file', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-calendar-archive-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const legacyPath = path.join(dir, 'daily-history-archive.json');
+  const legacy = captureLiveDailyHistory({}, livePeriod(1300), { todayKey: '2026-11-06' });
+  const original = JSON.stringify(legacy, null, 2);
+  fs.writeFileSync(legacyPath, original);
+  const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir }, timeZone: 'Asia/Taipei', todayKey: '2026-11-07' };
+  retainLiveDailyHistory(livePeriod(550), options);
+  assert.equal(fs.readFileSync(legacyPath, 'utf8'), original);
+  const visible = historyFrom(retainDailyHistory([], options), options.todayKey);
+  assert.equal(visible.daily.find(day => day.date === '2026-11-06').tokens, 1300);
+  assert.equal(visible.daily.find(day => day.date === '2026-11-07').tokens, 550);
+  assert.equal(fs.existsSync(path.join(dir, 'daily-history-calendars.json')), true);
+  assert.equal(clearDailyHistoryArchive(options), true);
+  assert.equal(fs.existsSync(legacyPath), false);
+  assert.equal(fs.existsSync(path.join(dir, 'daily-history-calendars.json')), false);
+});
+
+test('calendar capture rebases on another calendar written during the read/write boundary', () => {
+  const date = '2026-11-07';
+  const west = { todayKey: date, timeZone: 'America/Los_Angeles' };
+  let stored = captureLiveDailyHistory({}, livePeriod(1300), west);
+  let reads = 0;
+  retainLiveDailyHistory(livePeriod(550), {
+    todayKey: date, timeZone: 'Asia/Taipei',
+    readJson: () => {
+      reads += 1;
+      if (reads === 2) stored = captureLiveDailyHistory(stored, livePeriod(99), { todayKey: date, timeZone: 'UTC' });
+      return stored;
+    },
+    writeJsonAtomic: (_file, value) => { stored = value; }
+  });
+  assert.deepEqual(Object.keys(stored.calendars).sort(), ['America/Los_Angeles', 'Asia/Taipei', 'UTC']);
+});
+
+test('returning to a known calendar still reprices matching earlier scoped observations', () => {
+  const west = { todayKey: '2026-11-07', timeZone: 'America/Los_Angeles' };
+  let archive = captureDailyHistoryArchive({}, graph('2026-11-07', [client('claude', 'opus', 100, 1, 1)]), west);
+  archive = captureLiveDailyHistory(archive, livePeriod(20), { todayKey: '2026-11-08', timeZone: 'Asia/Taipei' });
+  archive = captureDailyHistoryArchive(archive, graph('2026-11-07', [client('claude', 'opus', 100, 0, 1)]), { ...west, todayKey: '2026-11-09', reprice: true });
+  assert.equal(Object.values(archive.calendars['America/Los_Angeles'].days['2026-11-07'].observations)[0].cost, 0);
+});
+
+test('later calendar activations cannot change which observation a past date displays', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-calendar-selection-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'history.json');
+  const capture = (timeZone, todayKey, tokens) => retainLiveDailyHistory(livePeriod(tokens), { path: file, timeZone, todayKey });
+  const previousDay = (timeZone, todayKey) => historyFrom(retainDailyHistory([], { path: file, timeZone, todayKey }), todayKey)
+    .daily.find(day => day.date === '2026-11-07').tokens;
+  capture('Asia/Taipei', '2026-11-07', 100);
+  capture('America/Los_Angeles', '2026-11-07', 200);
+  capture('Asia/Taipei', '2026-11-09', 300);
+  assert.equal(previousDay('Asia/Taipei', '2026-11-09'), 200);
+  capture('America/Los_Angeles', '2026-11-10', 400);
+  assert.equal(previousDay('America/Los_Angeles', '2026-11-10'), 200);
+  assert.equal(previousDay('Asia/Taipei', '2026-11-10'), 200);
 });

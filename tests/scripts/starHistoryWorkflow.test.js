@@ -17,14 +17,22 @@ test('Star History runs daily and manually without per-star automation', () => {
   assert.doesNotMatch(workflow, /\*\/6/);
 });
 
-test('privileged stargazer fetch is caller-owned and uploads identity-free input', () => {
+test('read-only star history fetch is caller-owned and uploads identity-free input', () => {
   const fetchJob = workflow.slice(workflow.indexOf('  fetch:'), workflow.indexOf('  generate:'));
-  assert.match(fetchJob, /permissions:\s+contents: write/);
+  assert.match(fetchJob, /permissions:\s+contents: read/);
+  assert.doesNotMatch(fetchJob, /contents: write/);
   assert.match(fetchJob, /persist-credentials: false/);
   assert.match(fetchJob, /fetch-star-history-stargazers\.js/);
   assert.match(fetchJob, /star-history-input\/stargazers\.json/);
   assert.match(fetchJob, /artifact-id: \$\{\{ steps\.upload\.outputs\.artifact-id \}\}/);
+  assert.match(fetchJob, /star-count: \$\{\{ steps\.count\.outputs\.count \}\}/);
+  assert.match(fetchJob, /if: steps\.count\.outputs\.count != '0'/);
   assert.doesNotMatch(fetchJob, /Javis603\/star-history-action/);
+});
+
+test('zero-star repositories skip generation instead of failing', () => {
+  const generate = workflow.slice(workflow.indexOf('  generate:'), workflow.indexOf('  validate:'));
+  assert.match(generate, /if: needs\.fetch\.outputs\.star-count != '0'/);
 });
 
 test('external generation is SHA-pinned, tokenless, and has no repository permission', () => {

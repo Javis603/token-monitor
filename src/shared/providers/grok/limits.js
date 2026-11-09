@@ -15,7 +15,12 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { normalizeLimitProvider } = require('../../limits/core');
-const { cleanSecret } = require('../../limits/providerHelpers');
+const {
+  cleanSecret,
+  envValue,
+  pathDelimiterForPlatform,
+  uniqueStrings
+} = require('../../limits/providerHelpers');
 const { hashKey } = require('../../hashKey');
 const { createOutboundFetch } = require('../../outboundFetch');
 const { abortError } = require('../../probeDeadline');
@@ -455,8 +460,32 @@ function parseGrokGrpcWebBilling(data, nowMs = Date.now()) {
 }
 
 function grokRpcCommand(env = process.env, options = {}) {
-  const explicit = cleanSecret(options.grokCommand || env.GROK_CLI_PATH);
-  return explicit || 'grok';
+  return cleanSecret(options.grokCommand || envValue(env, 'GROK_CLI_PATH')) || 'grok';
+}
+
+function withGrokPathHints(env = process.env, options = {}, deps = {}) {
+  if (cleanSecret(options.grokCommand || envValue(env, 'GROK_CLI_PATH'))) return env;
+  const platform = deps.platform || options.platform || process.platform;
+  const pathApi = platform === 'win32' ? path.win32 : path.posix;
+  const delimiter = pathDelimiterForPlatform(platform);
+  // Match Node's Windows key selection, then pass only one spelling to spawn.
+  const pathKeys = Object.keys(env)
+    .filter((key) => platform === 'win32' ? key.toLowerCase() === 'path' : key === 'PATH')
+    .sort();
+  const pathKey = pathKeys[0] || 'PATH';
+  const defaultPath = platform === 'win32' ? envValue(process.env, 'PATH') : '/usr/bin:/bin';
+  const currentPath = env[pathKey] ?? defaultPath;
+  const explicitHome = deps.homeDir !== undefined ? deps.homeDir : options.homeDir;
+  const homeDir = explicitHome !== undefined ? explicitHome
+    : envValue(env, platform === 'win32' ? 'USERPROFILE' : 'HOME') || os.homedir();
+  const hints = [];
+  if (homeDir) hints.push(pathApi.join(homeDir, '.grok', 'bin'), pathApi.join(homeDir, '.local', 'bin'));
+  if (platform !== 'win32') hints.push('/opt/homebrew/bin', '/usr/local/bin');
+  const childEnv = { ...env };
+  for (const key of pathKeys) delete childEnv[key];
+  // Preserve relative and empty PATH entries; a missing PATH uses Node's default.
+  childEnv[pathKey] = [...(currentPath === undefined ? [] : [currentPath]), ...uniqueStrings(hints)].join(delimiter);
+  return childEnv;
 }
 
 function grokRpcArgs(options = {}) {
@@ -485,6 +514,7 @@ async function fetchGrokRpcBilling(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const spawnFn = deps.spawn || spawn;
   const command = grokRpcCommand(env, options);
+  const childEnv = withGrokPathHints(env, options, deps);
   const args = grokRpcArgs(options);
   const timeoutMs = Number(deps.rpcTimeoutMs || deps.fetchTimeoutMs || 5000);
   const signal = deps.signal;
@@ -559,7 +589,7 @@ async function fetchGrokRpcBilling(options = {}, deps = {}) {
 
     try {
       child = spawnFn(command, args, {
-        env,
+        env: childEnv,
         stdio: ['pipe', 'pipe', 'pipe']
       });
     } catch (error) {
@@ -611,9 +641,34 @@ async function fetchGrokRpcBilling(options = {}, deps = {}) {
 }
 
 function shouldTryGrokRpc(credential, deps = {}) {
+  // CLI auth overrides can select another account than the resolved auth.json.
+  // Web billing authenticates the exact credential used for the history key.
+  const env = deps.env || process.env;
+  if (typeof env.GROK_AUTH === 'string' && env.GROK_AUTH.trim()) return false;
   if (typeof deps.fetchRpcBilling === 'function') return true;
   return credential && !credential.wsl
     && typeof credential.source === 'string' && credential.source.startsWith('auth.json');
+}
+
+function grokAccountKey(credential) {
+  if (!credential) return '';
+  // Identity only: billing still authenticates the credential. xAI OIDC tokens
+  // rotate, but their issuer/subject pair identifies the same account. Email
+  // is display metadata, not a safe substitute for a missing subject.
+  const parts = credential.token.split('.');
+  if (parts.length === 3 && parts.every(part => /^[A-Za-z0-9_-]+$/.test(part))) {
+    try {
+      const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+      const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+      if (header && !Array.isArray(header) && typeof header.alg === 'string'
+        && header.alg.trim() && header.alg === header.alg.trim() && header.alg !== 'none'
+        && claims?.iss === 'https://auth.x.ai' && typeof claims.sub === 'string'
+        && claims.sub.trim() && claims.sub === claims.sub.trim()) {
+        return hashKey('grok', 'oidc', claims.iss, claims.sub);
+      }
+    } catch (_) { /* Unknown token formats keep their isolated legacy key. */ }
+  }
+  return hashKey('grok', credential.token);
 }
 
 function unauthorizedGrokProvider(updatedAt, source = 'web', sourceDetail = '') {
@@ -711,7 +766,7 @@ async function fetchGrokLimits(options = {}, deps = {}) {
       const windows = parseGrokBilling(rpcBody);
       return normalizeLimitProvider({
         provider: 'grok',
-        accountKey: credential ? hashKey('grok', credential.token) : '',
+        accountKey: grokAccountKey(credential),
         accountLabel: 'SuperGrok',
         accountEmail: credential?.email || '',
         source: 'rpc',
@@ -768,7 +823,7 @@ async function fetchGrokLimits(options = {}, deps = {}) {
   try {
     return normalizeLimitProvider({
       provider: 'grok',
-      accountKey: hashKey('grok', credential.token),
+      accountKey: grokAccountKey(credential),
       accountLabel: 'SuperGrok',
       accountEmail: credential.email || '',
       source: 'web',
@@ -800,6 +855,8 @@ module.exports = {
   resolveGrokCredential,
   parseGrokBilling,
   parseGrokGrpcWebBilling,
+  withGrokPathHints,
+  grokRpcCommand,
   resolveGrokFetch,
   fetchGrokRpcBilling,
   fetchGrokWebGrpcBilling,

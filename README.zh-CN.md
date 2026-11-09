@@ -30,7 +30,7 @@
 
 ## Token Monitor 是什么？
 
-一款桌面应用，实时显示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 51+ 种 AI 编程工具的 Token 用量与 AI 工具额度，具备实时多设备同步与历史使用趋势功能，并支持按工具、设备、模型、session 或项目分项显示。它出现在你目光所及之处：主窗口、MacBook 刘海、菜单栏或系统托盘、屏幕边缘、悬浮小窗，以及原生 macOS 小部件。
+一款桌面应用，实时显示 Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio 等 54+ 种 AI 编程工具的 Token 用量与 AI 工具额度，具备实时多设备同步与历史使用趋势功能，并支持按工具、设备、模型、session 或项目分项显示。它出现在你目光所及之处：主窗口、MacBook 刘海、菜单栏或系统托盘、屏幕边缘、悬浮小窗，以及原生 macOS 小部件。
 
 ## 支持的工具
 
@@ -45,6 +45,7 @@
     <img src=".github/assets/tools-icon/openclaw.png" width="40" alt="OpenClaw" title="OpenClaw" />
     <img src=".github/assets/tools-icon/cursor.png" width="40" alt="Cursor" title="Cursor" />
     <img src=".github/assets/tools-icon/antigravity.png" width="40" alt="Antigravity" title="Antigravity" />
+    <img src=".github/assets/tools-icon/gemini-cli.png" width="40" alt="Gemini CLI" title="Gemini CLI" />
     <img src=".github/assets/tools-icon/cline.png" width="40" alt="Cline" title="Cline" />
     <img src=".github/assets/tools-icon/amp.png" width="40" alt="Amp" title="Amp" />
     <img src=".github/assets/tools-icon/droid.png" width="40" alt="Factory Droid" title="Factory Droid" />
@@ -77,6 +78,8 @@
     <img src=".github/assets/tools-icon/fx.png" width="40" alt="fx" title="fx" />
     <img src=".github/assets/tools-icon/minimax.png" width="40" alt="MiniMax" title="MiniMax" />
     <img src=".github/assets/tools-icon/mistral.png" width="40" alt="Mistral Vibe" title="Mistral Vibe" />
+    <img src=".github/assets/tools-icon/prime-agent.png" width="40" alt="Prime Agent" title="Prime Agent" />
+    <img src=".github/assets/tools-icon/jcode.png" width="40" alt="Jcode" title="Jcode" />
     <img src=".github/assets/tools-icon/typesafe.png" width="40" alt="TypeSafe" title="TypeSafe" />
     <img src=".github/assets/tools-icon/openrouter.png" width="40" alt="OpenRouter" title="OpenRouter" />
     <img src=".github/assets/tools-icon/volcengine.png" width="40" alt="Volcengine" title="Volcengine" />
@@ -157,7 +160,7 @@ brew install --cask token-monitor
 
 ### 用量追踪
 
-- **实时 Token 追踪**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 40+ 种 AI 工具，每轮对话后 UI 在数秒内刷新（完整列表见上方表格）
+- **实时 Token 追踪**：Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode 等 43+ 种 AI 工具，每轮对话后 UI 在数秒内刷新（完整列表见上方表格）
 - **实时 Token 速率**：可选显示的实时读数，以 `tok/s` 显示生成速度或以 `tok/min` 显示总消耗
 - **单个 session 明细**：点进某个 session，可看每条提问的 Token 消耗，并展开查看每次回复的 Token 拆分与用到的工具（打开时才实时读取本机 transcript 或数据库，绝不同步）
 - **缓存命中统计**：点击任何工具或模型，展开查看输入 Token（缓存命中与未命中）、输出 Token 的详细分类及命中率百分比
@@ -220,6 +223,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor IDE / Cursor CLI / Grok Bot | `~/.config/tokscale/cursor-cache/`（账号层级用量导出） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.gemini/`（`antigravity/`、`antigravity-ide/`、`antigravity-backup/`、`antigravity-cli/conversations/`） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/gemini-cli.png" width="28" alt="Gemini CLI" /> | Gemini CLI | `~/.gemini/tmp/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks（`.../saoudrizwan.claude-dev/tasks/`）、`~/.cline/data/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/amp.png" width="28" alt="Amp" /> | Amp | `~/.local/share/amp/threads/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/droid.png" width="28" alt="Factory Droid" /> | Factory Droid | `~/.factory/sessions/` | ✅ | ✅ | — |
@@ -252,6 +256,8 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/fx.png" width="28" alt="fx" /> | fx | `~/.fx/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/minimax.png" width="28" alt="MiniMax" /> | MiniMax / MiniMax Code | `~/.minimax/v2/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/mistral.png" width="28" alt="Mistral" /> | Mistral Vibe | `$VIBE_HOME/logs/session/` (`~/.vibe/logs/session/`); Mistral Admin Cookie（Included API／Vibe 每月额度和点数余额） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/prime-agent.png" width="28" alt="Prime Agent" /> | Prime Agent | `~/.prime/agent/` (`sessions/`, `session-artifacts/`) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/jcode.png" width="28" alt="Jcode" /> | Jcode | `~/.jcode/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | TypeSafe Console Cookie（账单余额及根据 token 用量估算花费） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API 密钥（查询用量／密钥上限；获授权访问 credits 时显示余额，官方文档指定 Management 密钥） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key 或火山引擎 AK/SK（通过火山引擎 API 查询火山方舟 Coding Plan / Agent Plan 额度） | — | ✅ | — |
@@ -269,7 +275,8 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 
 <br>
 
-- 上表为默认路径。Token Monitor 与 Tokscale 遵循相同的环境变量覆盖：`~/.local/share/` 下的路径跟随 `$XDG_DATA_HOME`，各工具另有 `$CODEX_HOME`、`$SENPI_CODING_AGENT_DIR`、`$SENPI_CODING_AGENT_SESSION_DIR`、`$GROK_HOME`、`$HERMES_HOME`、`$GOOSE_PATH_ROOT`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME` 以及 `$CLINE_*` 系列。
+- 上表为默认路径。Token Monitor 与 Tokscale 遵循相同的环境变量覆盖：`~/.local/share/` 下的路径跟随 `$XDG_DATA_HOME`，各工具另有 `$CODEX_HOME`、`$GEMINI_CLI_HOME`、`$SENPI_CODING_AGENT_DIR`、`$SENPI_CODING_AGENT_SESSION_DIR`、`$GROK_HOME`、`$HERMES_HOME`、`$GOOSE_PATH_ROOT`、`$KIMI_CODE_HOME`、`$UNSLOTH_STUDIO_HOME`、`$LM_STUDIO_HOME`、`$DSH_HOME`、`$REASONIX_STATE_HOME`、`$REASONIX_HOME` 以及 `$CLINE_*` 系列。
+- Gemini CLI 在本机支持 `$GEMINI_CLI_HOME`；WSL 仅检测 Linux 默认的 `~/.gemini/tmp/`。新安装默认追踪；已有保存工具列表的用户须在 Settings → tools 启用。
 - Muse Code 订阅额度通过 Muse Code 1.4.13+ 的 `muse usage --json` 和现有登录读取。未提供额度或使用 API 密钥计费时，无法显示额度百分比。详见 [Muse 数据来源说明](docs/providers/muse.md)。
 - Goose 的跨日用量仍计入会话创建日；暂不支持远程 goosed 与自定义扫描路径。详见 [Goose 数据来源说明](docs/providers/goose.md)。
 - CatPaw 默认关闭，可在 Settings → tools 中启用；读取 macOS 和 Windows 上国内版与外区版助手的数据库。路径与验证边界见 [CatPaw 数据来源说明](docs/providers/catpaw.md)。
