@@ -2487,3 +2487,36 @@ for (const operation of ['record', 'query']) test(`a failed adoption does not bl
   assert.equal(inspect.prepare('SELECT count(*) AS n FROM history_adoptions').get().n, 1);
   assert.equal(inspect.prepare('SELECT value FROM runs WHERE stream = ?').get(adoptedStream).value, 20);
 });
+
+test('a first raw-only snapshot adopts the legacy percent stream before marking its allowance gap', async t => {
+  const { createHash } = require('node:crypto');
+  const { limitWindowKey } = require('../../src/shared/limits/usageItems');
+  const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-adopt-raw-first-'));
+  const file = path.join(directory, 'history.sqlite');
+  const row = (minute, remaining, limit) => ({ ...fundedProvider(at(2, 10, minute), remaining, limit), sourceDeviceId: 'a', source: 'api' });
+  const original = row(0, 80, 100), window = original.windows[0];
+  const legacy = reading => hash(['local', historyAccountKey(original), limitWindowKey(window), reading.unit, ...(reading.unit === 'pp' ? ['USD'] : [])]);
+  const readings = historyReadings(window);
+  const db = createHistoryDatabase(file);
+  db.record([{ account: hash(['local', historyAccountKey(original)]), source: hash(['a', 'api', '']),
+    windows: [readings.primary, readings.raw].map(reading => ({ id: legacy(reading),
+      point: { at: at(2, 10), ...reading, reset: Date.parse(window.resetsAt), interval: 300_000 } })) }], at(2, 12));
+  db.close();
+  const options = { now: () => at(2, 12), legacyScopes: () => ['local'] };
+  let store = createLimitsHistoryStore(file, options);
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  await store.record('local', { providers: [row(5, 77, null)] });
+  await store.close();
+  store = createLimitsHistoryStore(file, options);
+  const restored = row(10, 75, 100);
+  await store.record('local', { providers: [restored] });
+  for (const grain of ['day', 'hour']) {
+    const entry = (await store.query('local', restored, { grain, day: dayKey(at(2, 12)) })).windows[0];
+    const bucket = grain === 'day' ? entry.distribution.buckets.at(-1)
+      : entry.distribution.buckets.find(b => new Date(b.at).getHours() === 10);
+    assert.equal(bucket.value, 5);
+    assert.equal(bucket.uncertain, true);
+    assert.equal(entry.distribution.unallocated, 0);
+  }
+});

@@ -66,7 +66,11 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
     for (const provider of providers) {
       if (!portableHistoryAccount(provider)) continue;
       for (const window of provider.windows || []) {
-        for (const reading of [historyReadings(window).primary, historyReadings(window).raw].filter(Boolean)) {
+        const { primary, raw } = historyReadings(window);
+        const readings = [primary, raw].filter(Boolean);
+        // Adopt the same percentage stream that record() will interrupt.
+        if (primary && ['credits', 'spend'].includes(window.metric) && primary.unit !== 'pp') readings.push({ unit: 'pp' });
+        for (const reading of readings) {
           const scopes = [...new Set([scope, ...legacyScopes()])];
           mappings.push({ id: windowId(scope, provider, window, reading), account: accountId(scope, provider),
             legacy: scopes.map(old => windowId(old, provider, window, reading, true)),
