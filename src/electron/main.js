@@ -7959,14 +7959,12 @@ function createDashboardWindow() {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
   });
   // Only dashboard:ready may first reveal a healthy window. Slow hub history must not
-  // race a wall-clock fallback and expose the unprepared heatmap. Actual load or
-  // renderer failures discard the hidden window so the next open starts cleanly.
+  // race a wall-clock fallback and expose the unprepared heatmap. Actual load
+  // failures discard the hidden window so the next open starts cleanly.
+  // Renderer crashes use the shared app recovery handler instead.
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) return; // ERR_ABORTED is expected during reloads.
     discardFailedDashboardWindow(win, `load failed: ${errorDescription}`);
-  });
-  win.webContents.on('render-process-gone', (_event, details) => {
-    discardFailedDashboardWindow(win, `renderer stopped: ${details.reason}`);
   });
   win.on('unresponsive', () => {
     if (!win.isVisible()) discardFailedDashboardWindow(win, 'renderer became unresponsive while opening');

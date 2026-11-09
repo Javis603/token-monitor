@@ -59,38 +59,30 @@ const transform = createUsageTransform({
 // that reclaims little means the live set owns the heap, so the next threshold
 // moves above it instead of collecting on every tick.
 const GC_THRESHOLD_BYTES = 96 * 1024 * 1024;
-const GC_RECLAIM_FLOOR_BYTES = 8 * 1024 * 1024;
 const GC_MIN_INTERVAL_MS = 10_000;
-const collectGarbage = (() => {
-  try {
-    // `gc` is only injected for --expose-gc starts; enabling it here changes
-    // nothing else about V8's behaviour.
-    require('node:v8').setFlagsFromString('--expose-gc');
-    return require('node:vm').runInNewContext('gc');
-  } catch (_) {
-    return null;
-  }
-})();
 let gcThresholdBytes = GC_THRESHOLD_BYTES;
 let lastGcAt = 0;
 
 function collectDeadHeap() {
-  if (!collectGarbage) return;
   const startedAt = Date.now();
   if (startedAt - lastGcAt < GC_MIN_INTERVAL_MS) return;
   if (process.memoryUsage().heapUsed < gcThresholdBytes) return;
   lastGcAt = startedAt;
-  // Let the tick or the postMessage serialization that grew the heap finish.
-  setImmediate(() => {
-    const before = process.memoryUsage().heapUsed;
+  // Let the tick and postMessage serialization finish. A local inspector session
+  // collects this worker's isolate without changing V8 flags or opening a port.
+  setImmediate(async () => {
+    let session;
     try {
-      collectGarbage();
+      const { Session } = require('node:inspector/promises');
+      session = new Session();
+      session.connect();
+      await session.post('HeapProfiler.collectGarbage');
+      gcThresholdBytes = Math.max(GC_THRESHOLD_BYTES, process.memoryUsage().heapUsed + 32 * 1024 * 1024);
     } catch (_) {
-      // A collection failing must not take the collector down.
-      return;
+      // GC is best effort; inspector failure must not stop usage publication.
+    } finally {
+      session?.disconnect();
     }
-    const after = process.memoryUsage().heapUsed;
-    if (before - after < GC_RECLAIM_FLOOR_BYTES) gcThresholdBytes = after + 32 * 1024 * 1024;
   });
 }
 
