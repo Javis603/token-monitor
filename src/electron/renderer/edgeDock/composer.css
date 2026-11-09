@@ -321,6 +321,5 @@
   margin-left: auto;
 }
 
-.edge-dock-composer-item.is-unavailable { opacity: .45; }
-.edge-dock-composer-mark.is-plugin { display: inline-flex; background: none; }
+.edge-dock-composer-mark.is-plugin { display: inline-flex; align-items: center; justify-content: center; background: none; }
 .edge-dock-composer-mark > svg, .edge-dock-composer-mark > img, .edge-dock-composer-mark > span { width: 100%; height: 100%; }

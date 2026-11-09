@@ -554,15 +554,16 @@ test('app-wired composer preserves account edits while asynchronous settings wri
   } finally { global.document = previousDocument; }
 });
 
-test('custom plugin composer items keep their icon and are explicitly inactive after disable', () => {
+test('custom plugin composer items hide while inactive and restore without changing saved references', () => {
   const previous = global.document;
   global.document = { createElement: tag => new Element(tag), activeElement: null };
   try {
     const root = new Element('div');
     let status = 'active';
+    const settings = { edgeDockItems: [{ type: 'plugin', ref: 'sample-plugin/card' }] }, saved = JSON.stringify(settings), sizes = [];
     const composer = createEdgeDockComposer({ root, itemsApi, t: key => key, presentationApi: {},
-      getSettings: () => ({ edgeDockItems: [{ type: 'plugin', ref: 'sample-plugin/card' }] }), getStats: () => ({}), save() {},
-      pluginLabel: () => 'Custom panel', pluginView: () => ({ status }), pluginMark: () => new Element('svg'),
+      getSettings: () => settings, getStats: () => ({}), save() { assert.fail('status changes must not write settings'); },
+      pluginLabel: () => 'Custom panel', pluginView: () => ({ status }), pluginMark: (_, size) => { sizes.push(size); return new Element('svg'); },
       providerLabel: id => id, providerColor: () => '#fff', hasProviderMark: () => false,
       createRowDrag: () => ({ deferRender: () => false }) });
     const all = node => [node, ...node.children.flatMap(all)];
@@ -571,12 +572,44 @@ test('custom plugin composer items keep their icon and are explicitly inactive a
     assert.equal(button.children[0].children[0].tagName, 'SVG');
     assert.equal(button.attributes['aria-label'], 'Custom panel');
     button.listeners.click();
+    assert.ok(sizes.includes(16)); assert.ok(sizes.includes(13));
     for (const inactive of ['disabled', 'needsApproval', 'safeMode', 'crashed', 'invalid', 'pluginsOff', 'missing']) {
       status = inactive; composer.render();
       button = all(root).find(node => node.className === 'edge-dock-composer-item');
-      assert.equal(button.attributes['aria-label'], `Custom panel · settings.plugins.status.${inactive}`);
-      assert.equal(button.children[0].children[0].tagName, 'SVG');
-      assert.ok(all(root).some(node => node.className === 'settings-note' && node.textContent === `settings.plugins.status.${inactive}`));
+      assert.equal(button, undefined);
+      assert.equal(JSON.stringify(settings), saved);
     }
+    status = 'active'; composer.render();
+    assert.ok(all(root).some(node => node.className === 'edge-dock-composer-item'));
+  } finally { global.document = previous; }
+});
+test('sorting or removing visible items preserves hidden module and view slots', () => {
+  const previous = global.document;
+  global.document = { createElement: tag => new Element(tag), activeElement: null };
+  try {
+    const root = new Element('div'), hiddenView = { type: 'plugin', ref: 'sample-plugin/card' }, hiddenModule = { type: 'limit', provider: 'plugin:sample-plugin:credits' };
+    const settings = { edgeDockItems: [{ type: 'stat', metric: 'today' }, hiddenView, { type: 'limit', provider: 'codex' }, hiddenModule, { type: 'stat', metric: 'liveRate' }] };
+    let drag;
+    const composer = createEdgeDockComposer({ root, itemsApi, t: key => key, presentationApi: {},
+      getSettings: () => settings, getStats: () => ({}), save: patch => Object.assign(settings, patch),
+      pluginView: () => ({ status: 'disabled' }), moduleView: () => ({ status: 'disabled' }),
+      providerLabel: id => id, providerColor: () => '#fff', hasProviderMark: () => false,
+      createRowDrag: options => { drag = options; return { deferRender: () => false }; } });
+    const all = node => [node, ...node.children.flatMap(all)];
+    composer.render();
+    assert.equal(all(root).filter(node => node.className === 'edge-dock-composer-item').length, 3);
+    drag.persistOrder(['stat:liveRate', 'limit:codex', 'stat:today']);
+    assert.deepEqual(settings.edgeDockItems.map(itemsApi.itemId), ['stat:liveRate', 'plugin:sample-plugin/card', 'limit:codex', 'limit:plugin:sample-plugin:credits', 'stat:today']);
+    composer.render();
+    all(root).find(node => node.className === 'edge-dock-composer-item').listeners.click();
+    all(root).find(node => node.className === 'edge-dock-composer-remove').listeners.click();
+    assert.ok(settings.edgeDockItems.some(item => itemsApi.itemId(item) === itemsApi.itemId(hiddenView)));
+    assert.ok(settings.edgeDockItems.some(item => itemsApi.itemId(item) === itemsApi.itemId(hiddenModule)));
+    composer.render();
+    all(root).find(node => node.className === 'edge-dock-composer-item').listeners.click();
+    settings.edgeDockItems = settings.edgeDockItems.filter(item => itemsApi.itemId(item) !== itemsApi.itemId(hiddenView));
+    all(root).find(node => node.className === 'edge-dock-composer-remove').listeners.click();
+    assert.equal(settings.edgeDockItems.some(item => itemsApi.itemId(item) === itemsApi.itemId(hiddenView)), false, 'a stale pane must not restore an externally removed hidden reference');
+    assert.ok(settings.edgeDockItems.some(item => itemsApi.itemId(item) === itemsApi.itemId(hiddenModule)));
   } finally { global.document = previous; }
 });

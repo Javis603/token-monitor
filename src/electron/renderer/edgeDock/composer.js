@@ -123,8 +123,9 @@
       return providerLabel(item.provider);
     }
 
-    function markFor(item, className = 'edge-dock-composer-mark') {
-      const mark = el('span', className);
+    function markFor(item, { small = false } = {}) {
+      const mark = el('span', 'edge-dock-composer-mark' + (small ? ' is-small' : ''));
+      const size = small ? 13 : 16;
       if (item.type === 'action') {
         mark.classList.add('is-refresh');
         return mark;
@@ -139,11 +140,11 @@
         return mark;
       }
       if (item.type === 'plugin') {
-        const view = pluginView?.(item.ref), icon = view && pluginMark?.(view);
+        const view = pluginView?.(item.ref), icon = view && pluginMark?.(view, size);
         if (icon) { mark.classList.add('is-plugin'); mark.append(icon); } else mark.classList.add('is-fallback');
         return mark;
       }
-      const moduleIcon = moduleMark?.(item.provider);
+      const moduleIcon = moduleMark?.(item.provider, size);
       if (moduleIcon) { mark.classList.add('is-plugin'); mark.append(moduleIcon); return mark; }
       if (hasProviderMark(item.provider)) mark.classList.add(`row-icon-${item.provider}`);
       else mark.classList.add('is-fallback');
@@ -159,8 +160,7 @@
       else button.dataset.itemId = id;
       button.classList.toggle('is-selected', ui.selected === id);
       button.classList.toggle('is-stat', item.type === 'stat');
-      button.classList.toggle('is-unavailable', !itemAvailable(item));
-      button.setAttribute('aria-label', itemLabel(item) + (itemAvailable(item) ? '' : ' · ' + t(`settings.plugins.status.${itemStatus(item)}`)));
+      button.setAttribute('aria-label', itemLabel(item));
       button.setAttribute('aria-pressed', String(ui.selected === id));
       button.append(markFor(item));
       button.addEventListener('click', () => {
@@ -183,7 +183,7 @@
           const option = el('button', 'edge-dock-composer-menu-option');
           option.type = 'button';
           // Usage entries are named in full here, so their rail glyph would only repeat it.
-          if (item.type === 'limit') option.append(markFor(item, 'edge-dock-composer-mark is-small'));
+          if (item.type === 'limit') option.append(markFor(item, { small: true }));
           option.append(el('span', '', itemLabel(item)));
           option.addEventListener('click', () => {
             ui.menuOpen = false;
@@ -362,17 +362,16 @@
       }
       const id = idFor(item);
       const head = el('div', 'edge-dock-composer-detail-head');
-      head.append(markFor(item, 'edge-dock-composer-mark is-small'), el('span', 'edge-dock-composer-detail-title', itemLabel(item)));
+      head.append(markFor(item, { small: true }), el('span', 'edge-dock-composer-detail-title', itemLabel(item)));
       const remove = el('button', 'edge-dock-composer-remove', t('settings.edgeDock.remove'));
       remove.type = 'button';
       remove.addEventListener('click', () => {
         ui.selected = '';
         if (item.type === 'action') void save({ [refreshKey]: false });
-        else void persist(items.filter((entry) => entry.type !== 'action' && idFor(entry) !== id));
+        else void persist(effectiveItems().filter((entry) => idFor(entry) !== id));
       });
       head.append(remove);
       pane.append(head);
-      if (!itemAvailable(item)) pane.append(el('p', 'settings-note', t(`settings.plugins.status.${itemStatus(item)}`)));
 
       if (item.type === 'plugin') {
         pane.append(el('p', 'edge-dock-composer-hint', item.ref));
@@ -479,7 +478,8 @@
       if (!root) return;
       if (drag?.deferRender()) return;
       // Refresh is a fixed footer action; it does not freeze the automatic provider list.
-      const items = [...effectiveItems(), ...(refreshEnabled() ? [refreshItem] : [])];
+      const allItems = [...effectiveItems(), ...(refreshEnabled() ? [refreshItem] : [])];
+      const items = allItems.filter(itemAvailable);
       if (ui.selected && !items.some((item) => idFor(item) === ui.selected)) ui.selected = '';
       const selectedItem = items.find((item) => idFor(item) === ui.selected);
       // A stats tick can change token totals without changing any control here.
@@ -566,7 +566,10 @@
         }
       },
       persistOrder: (order) => {
-        void persist(itemsApi.reorderEdgeDockItems(effectiveItems(), order));
+        const items = effectiveItems();
+        const visible = itemsApi.reorderEdgeDockItems(items.filter(itemAvailable), order);
+        let index = 0;
+        void persist(items.map(item => itemAvailable(item) ? visible[index++] : item));
       },
       requestRender: () => render()
     });

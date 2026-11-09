@@ -240,7 +240,7 @@ This unpublished experimental API intentionally replaces `connection: 'openai'` 
 | Notch Limits page and summary | Module items and native quota layouts, including summary/custom bitmap sources |
 | System Tray and Floating Bubble | Existing quota presets and custom layout source/account/window pickers |
 
-Declare a module once; these surfaces use its namespaced identity, readings, icon and palette without loading an author view. Each surface keeps its native compact layout rather than reproducing every main Limits detail. Select the module in quota preferences and in the relevant surface's existing composer. Saved references and order survive plugin disable/removal; inactive entries are marked unavailable in composers and omitted from actual surfaces.
+Declare a module once; these surfaces use its namespaced identity, readings, icon and palette without loading an author view. Each surface keeps its native compact layout rather than reproducing every main Limits detail. Select the module in quota preferences and in the relevant surface's existing composer. Saved references and order survive plugin disable/removal; inactive entries are hidden from composer previews and actual surfaces, and return at their saved positions when available again. Sorting or removing visible items preserves hidden references.
 
 Visible quota surfaces share the same sampler. Home/Notch quota pages, quota summaries and Tray/Bubble quota layouts add demand; hidden surfaces, Settings and token/cost-only layouts do not. Turning off the global quota switch or the plugin stops its sampling. Existing author DOM views remain available through their declared placements; they are independent of native module items.
 

@@ -14499,9 +14499,9 @@ function createDockItemsComposer(root, itemsKey) {
       getSettings: () => Object.assign({}, state.settings, ...pendingSettingsPatches),
       getStats: () => desktopSurfaceStats(),
       pluginView: ref => (state.pluginCatalog?.plugins || []).flatMap(plugin => (plugin.views || []).map(view => ({ ...view, status: plugin.status, identityIcon: plugin.identityIcon, presentation: plugin.presentation }))).find(view => view.ref === ref),
-      pluginMark: view => window.TokenMonitorPluginViews.navigationIcon(document, view, 14),
+      pluginMark: (view, size) => window.TokenMonitorPluginViews.navigationIcon(document, view, size),
       moduleView: pluginLimitMetadata,
-      moduleMark: id => { const module = pluginLimitMetadata(id); return module ? window.TokenMonitorPluginViews.navigationIcon(document, module, 14) : null; },
+      moduleMark: (id, size) => { const module = pluginLimitMetadata(id); return module ? window.TokenMonitorPluginViews.navigationIcon(document, module, size) : null; },
       pluginLabel: (ref) => (state.pluginCatalog?.plugins || [])
         .flatMap((plugin) => plugin.views || []).find((view) => view.ref === ref)?.title || ref,
       save: (patch) => saveSettings(patch),

@@ -29,7 +29,10 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
   await js("els.edgeDockComposer.querySelector('.edge-dock-composer-item').click()");
   await pause(500);
   await js("els.edgeDockComposer.scrollIntoView({block:'center'})");
+  const savedComposerItems = await js("JSON.stringify(state.settings.edgeDockItems)");
   await capture('composer-active.png');
+  const composerIconGeometry = await js("[...els.edgeDockComposer.querySelectorAll('.edge-dock-composer-mark.is-plugin')].map(mark=>{const a=mark.getBoundingClientRect(),b=mark.firstElementChild.getBoundingClientRect();return {dx:b.x+b.width/2-a.x-a.width/2,dy:b.y+b.height/2-a.y-a.height/2,sizeDifference:b.width-a.width}})");
+  for (const box of composerIconGeometry) assert.ok(Math.abs(box.dx)<.1 && Math.abs(box.dy)<.1 && Math.abs(box.sizeDifference)<.1, JSON.stringify(box));
   assert.equal(await js("els.edgeDockComposer.querySelectorAll('.edge-dock-composer-mark > span').length>=3"), true, 'module/custom-view icons in composer');
   const iconPoint = await js("(()=>{const image=els.edgeDockComposer.querySelector('.edge-dock-composer-item img');const r=image.getBoundingClientRect();window.pluginIconDragStarts=0;window.observePluginIconDrag=e=>{window.pluginIconDragStarts++;e.preventDefault()};document.addEventListener('dragstart',window.observePluginIconDrag,true);return {x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()");
   win.webContents.sendInputEvent({ type: 'mouseMove', ...iconPoint });
@@ -130,8 +133,8 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
     await js("applyFloatingBubbleState({collapsed:false});openSettingsPanel();setSettingsSectionExpanded('window',true);pluginApi.setEnabled('synthetic-limits',false)");
     await waitFor("state.pluginCatalog.plugins.find(p=>p.id==='synthetic-limits')?.status==='disabled'", 'disabled catalog');
     await js("displaySettings.open('edgeDock');edgeDockComposer.render();els.edgeDockComposer.scrollIntoView({block:'center'});");
-    assert.equal(await js("els.edgeDockComposer.querySelectorAll('.is-unavailable').length>=3"), true);
-    await js("els.edgeDockComposer.querySelectorAll('.edge-dock-composer-item')[2].click()");
+    assert.equal(await js("els.edgeDockComposer.querySelectorAll('.edge-dock-composer-item[data-item-id]').length"), 0);
+    assert.equal(await js("JSON.stringify(state.settings.edgeDockItems)"), savedComposerItems, 'inactive saved items and order are retained');
     await capture('composer-disabled.png');
     const inactive = require('../src/electron/plugins/limitsPresentation').projectPluginLimits(stats, runtime.limitsSnapshot());
     assert.equal(require('../src/electron/renderer/edgeDock/presentation').buildEdgeDockCells(inactive, { items: dockSettings.edgeDockItems }).length, 0);
@@ -142,10 +145,13 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
     assert.equal(await js("!!els.floatingBubbleContent.querySelector('img')"), false);
     runtime.manager.setEnabled('synthetic-limits', true);
     await waitFor("state.pluginCatalog.limits.modules.length===2 && !!els.floatingBubbleContent.querySelector('img')", 'fixed Bubble icon restored');
+    await js("edgeDockComposer.render()");
+    assert.equal(await js("els.edgeDockComposer.querySelectorAll('.edge-dock-composer-item[data-item-id]').length"), 3);
+    assert.equal(await js("JSON.stringify(state.settings.edgeDockItems)"), savedComposerItems);
     assert.match(await fixedBitmap(), /^data:image\/png/);
     runtime.manager.setEnabled('synthetic-limits', false);
     await waitFor("state.pluginCatalog.limits.modules.length===0 && !els.floatingBubbleContent.querySelector('img')", 'visible Bubble drops disabled fixed icon');
 
-    fs.writeFileSync(path.join(evidence, 'proof.json'), JSON.stringify({ modules: cells.map(cell => cell.provider), rawStatsUntouched: true, nativeManualRefresh: true, fixedIconDisableRestore: true, standaloneNotchMetadata: true, nativeIconDragStarts, trayAndBubbleProviders: sourceProviders, inactiveCells: 0, surfaceCount: windows.length }, null, 2));
+    fs.writeFileSync(path.join(evidence, 'proof.json'), JSON.stringify({ modules: cells.map(cell => cell.provider), rawStatsUntouched: true, nativeManualRefresh: true, fixedIconDisableRestore: true, standaloneNotchMetadata: true, composerIconGeometry, composerDisableRestore: true, nativeIconDragStarts, trayAndBubbleProviders: sourceProviders, inactiveCells: 0, surfaceCount: windows.length }, null, 2));
   } finally { dock.stop(); notch.dispose(); runtime.demandLimits(false, 'fixture.native-refresh'); }
 };

@@ -75,10 +75,15 @@ test('composer names plugin entries and keeps remove/reorder without quota contr
  assert.deepEqual(dockState.settings.edgeDockItems.map(x=>x.ref),['system-monitor/memory','system-monitor/cpu']);
  dockRoot.querySelector('.edge-dock-composer-remove').fire('click');
  assert.deepEqual(dockState.settings.edgeDockItems,[{type:'plugin',ref:'system-monitor/memory'}]);
+ const savedCatalog=structuredClone(dockState.pluginCatalog),retained=JSON.stringify(dockState.settings.edgeDockItems);
  dockState.pluginCatalog.plugins[0].status='disabled';composer.render();
- assert.equal(dockRoot.querySelector('.edge-dock-composer-item').getAttribute('aria-label'),'Memory · Off');
+ assert.equal(dockRoot.querySelector('.edge-dock-composer-item'),null);
+ assert.equal(JSON.stringify(dockState.settings.edgeDockItems),retained);
  dockState.pluginCatalog={plugins:[]};composer.render();
- assert.equal(dockRoot.querySelector('.edge-dock-composer-item').getAttribute('aria-label'),'system-monitor/memory · Missing package');
+ assert.equal(dockRoot.querySelector('.edge-dock-composer-item'),null);
+ assert.equal(JSON.stringify(dockState.settings.edgeDockItems),retained);
+ dockState.pluginCatalog=savedCatalog;composer.render();
+ assert.equal(dockRoot.querySelector('.edge-dock-composer-item').getAttribute('aria-label'),'Memory');
 });
 
 test('Notch choices exclude inactive plugins without removing native pages', () => {
