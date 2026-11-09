@@ -99,7 +99,8 @@ function windowsFromSummary(body) {
   }
   if (plan.unlimited !== true && Array.isArray(meters.perFeature)) {
     for (const row of meters.perFeature) {
-      if (!row || typeof row !== 'object') continue;
+      // Hark's own client never treats instance meters as allowances.
+      if (!row || typeof row !== 'object' || row.meter === 'instances') continue;
       const period = row.period === 'day' || row.period === 'month' ? row.period : '';
       const kind = period === 'day' ? 'daily' : 'billing';
       const count = tokenWindow(kind, featureLabel(row.feature, period), row.countUsed, row.countLimit, row.resetsAt);

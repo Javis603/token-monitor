@@ -21,7 +21,7 @@ Quotas come from the undocumented `GET https://hark.com/api/billing/summary`. Al
 
 `meters.harkTokens` supplies the account-wide Daily ceiling and Monthly pool, including their reset times. Limits come directly from the summary; do not apply the multipliers shown by billing options. Amounts follow the shared used/remaining display setting, and reported usage may exceed the ceiling even though the bar stops at 100%.
 
-Feature allowances appear only when `meters.perFeature` supplies a positive count or token ceiling. `plan.unlimited === true` suppresses quota meters. Enabled automatic top-up with positive `spentThisPeriodMinor` adds an unmetered USD spend line. Subscription dates, scheduled changes and gift metadata do not create quota windows.
+Feature allowances appear only when `meters.perFeature` supplies a positive count or token ceiling; rows with `meter: "instances"` are not allowances, as in Hark's own client. `plan.unlimited === true` suppresses quota meters. Enabled automatic top-up with positive `spentThisPeriodMinor` adds an unmetered USD spend line. Subscription dates, scheduled changes and gift metadata do not create quota windows.
 
 ## Source precedence
 

@@ -114,7 +114,7 @@ test('unlimited and paid summaries keep the same window rules', () => {
         harkUsed: 4,
         harkLimit: 20,
         resetsAt: '2026-12-01T00:00:00Z'
-      }]
+      }, { feature: 'browser_session', meter: 'instances', period: 'day', countUsed: 1, countLimit: 2 }]
     },
     autoTopup: { enabled: true, spentThisPeriodMinor: 250 }
   });
