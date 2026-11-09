@@ -9948,7 +9948,7 @@ function syncSettingsForm() {
     applyInitialBreakdownPreference();
     // Native show precedes the visibility IPC. Keep saved appearance current
     // while hidden so the first tray/reopen frame cannot paint old fonts/title.
-    applyAppearanceSettings(state.settings);
+    applyAppearanceSettings(Object.assign({}, state.settings, ...pendingSettingsPatches, appearancePreview));
     applyVendorColorOverrides(state.settings.vendorColors);
     appliedThemeOverrides = themePresetsApi.normalizeOverrides(
       state.settings.themeColors,

@@ -465,8 +465,8 @@ test('hidden event sources prepare appearance, defer other DOM work and catch up
   assert.ok(settingsSync.indexOf('applyVendorColorOverrides(') < hiddenReturn);
   // Native show can paint before visibility IPC; appearance is the exception
   // to hidden DOM deferral, including saved title mode and font preferences.
-  assert.ok(hiddenGuard < settingsSync.indexOf('applyAppearanceSettings(state.settings)'));
-  assert.ok(settingsSync.indexOf('applyAppearanceSettings(state.settings)') < hiddenReturn);
+  assert.ok(hiddenGuard < settingsSync.indexOf('applyAppearanceSettings('));
+  assert.ok(settingsSync.indexOf('applyAppearanceSettings(') < hiddenReturn);
   for (const domCall of ['applySettingsTranslations()', 'syncPeriodTabs()']) {
     assert.ok(hiddenReturn < settingsSync.indexOf(domCall));
   }

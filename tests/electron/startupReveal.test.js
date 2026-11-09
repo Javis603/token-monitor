@@ -187,6 +187,7 @@ test('settings changed while hidden update appearance before the next native sho
   const applied = [];
   const context = vm.createContext({
     state: { settings: { titleIconOnly: true, interfaceFontFamily: 'Arial', themeColors: {} } },
+    pendingSettingsPatches: new Set(), appearancePreview: {},
     isRendererWindowHidden: () => true,
     applyInitialBreakdownPreference: () => {}, applyVendorColorOverrides: () => {},
     themePresetsApi: { normalizeOverrides: value => value },
@@ -201,6 +202,11 @@ test('settings changed while hidden update appearance before the next native sho
   assert.equal(applied[0].interfaceFontFamily, 'Arial');
   assert.equal(applied[1].titleIconOnly, false);
   assert.equal(applied[1].interfaceFontFamily, 'Georgia');
+  context.pendingSettingsPatches.add({ titleIconOnly: true, interfaceFontFamily: 'Arial' });
+  context.appearancePreview = { interfaceFontFamily: 'Verdana' };
+  vm.runInContext('syncSettingsForm();', context);
+  assert.equal(applied[2].titleIconOnly, true, 'an in-flight save takes precedence over saved settings');
+  assert.equal(applied[2].interfaceFontFamily, 'Verdana', 'the current preview takes precedence over an in-flight save');
 });
 
 test('the native window starts with saved zoom before any page-load event', () => {
