@@ -22,20 +22,27 @@
 // AppImage itself ($APPIMAGE) in packaged builds rather than process.execPath,
 // which points into the runtime's transient mount. The explicit switch prevents a relaunch loop
 // and still lets users select native Wayland.
+function switchArguments(argv) {
+  const end = argv.indexOf('--');
+  return end === -1 ? argv : argv.slice(0, end);
+}
+
 function shouldUseXWayland({ platform = process.platform, env = process.env, argv = process.argv } = {}) {
   if (platform !== 'linux') return false;
   if (!env.WAYLAND_DISPLAY) return false;
   if (!env.DISPLAY) return false;
-  return !argv.some((arg) => arg === '--ozone-platform' || arg.startsWith('--ozone-platform='));
+  return !switchArguments(argv).some((arg) => arg === '--ozone-platform' || arg.startsWith('--ozone-platform='));
 }
 
 function canPositionWindow({ platform = process.platform, env = process.env, argv = process.argv } = {}) {
-  if (platform !== 'linux' || !env.WAYLAND_DISPLAY) return true;
-  const index = argv.indexOf('--ozone-platform');
+  if (platform !== 'linux') return true;
+  const switches = switchArguments(argv);
+  const index = switches.indexOf('--ozone-platform');
   const backend = index === -1
-    ? argv.find((arg) => arg.startsWith('--ozone-platform='))?.split('=')[1]
-    : argv[index + 1];
-  return backend === 'x11';
+    ? switches.find((arg) => arg.startsWith('--ozone-platform='))?.split('=')[1]
+    : switches[index + 1];
+  if (backend === 'wayland') return false;
+  return !env.WAYLAND_DISPLAY || backend === 'x11';
 }
 
 function startWithXWayland({
@@ -55,9 +62,12 @@ function startWithXWayland({
     warn(`[display] XWayland relaunch failed: ${error.message}`);
     if (!spawned) start();
   };
+  const args = argv.slice(1);
+  const end = args.indexOf('--');
+  args.splice(end === -1 ? args.length : end, 0, '--ozone-platform=x11');
   let child;
   try {
-    child = spawn(executable, [...argv.slice(1), '--ozone-platform=x11'], {
+    child = spawn(executable, args, {
       detached: packaged,
       stdio: packaged ? 'ignore' : 'inherit'
     });

@@ -124,3 +124,20 @@ test('package entry selects the backend before loading main', () => {
   const entry = fs.readFileSync(path.join(root, pkg.main), 'utf8');
   assert.match(entry, /startWithXWayland\(\{ app, start: \(\) => require\('\.\/main'\) \}\)/);
 });
+
+test('launcher inserts its backend before the switch terminator and preserves following data', () => {
+  const { calls } = launchFixture({ argv: ['electron', '.', '--', '--ozone-platform=wayland', 'payload'] });
+  assert.deepEqual(calls, [['spawn', '/runtime/electron', ['.', '--ozone-platform=x11', '--', '--ozone-platform=wayland', 'payload'], { detached: false, stdio: 'inherit' }]]);
+});
+
+test('explicit native Wayland keeps saved coordinates without WAYLAND_DISPLAY', () => {
+  for (const argv of [['--ozone-platform=wayland'], ['--ozone-platform', 'wayland']]) {
+    assert.equal(canPositionWindow({ platform: 'linux', env: { DISPLAY: ':0' }, argv }), false);
+  }
+});
+
+test('backend-looking data after the terminator is not an effective switch', () => {
+  assert.equal(shouldUseXWayland({ platform: 'linux', env: waylandSession, argv: ['--', '--ozone-platform=wayland'] }), true);
+  assert.equal(canPositionWindow({ platform: 'linux', env: waylandSession, argv: ['--', '--ozone-platform=x11'] }), false);
+  assert.equal(canPositionWindow({ platform: 'linux', env: { DISPLAY: ':0' }, argv: ['--', '--ozone-platform=wayland'] }), true);
+});
