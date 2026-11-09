@@ -1014,7 +1014,7 @@ function oidcToken(claims, signature = 'signature') {
 async function identityReading(token, source, email = 'same@example.test', now = Date.UTC(2026, 10, 9, 9)) {
   const billing = { creditUsagePercent: 0, currentPeriod: { start: '2026-11-03T00:00:00Z', end: '2026-11-10T00:00:00Z' } };
   return fetchGrokLimits({}, {
-    env: {}, now: () => now,
+    env: {}, now: () => now, grokHome: path.join(os.tmpdir(), 'grok-identity-fixture'),
     readFileSync: () => JSON.stringify({ 'https://auth.x.ai::fixture': { key: token, email } }),
     fetchRpcBilling: async () => { if (source === 'web') throw new Error('RPC unavailable'); return billing; },
     fetch: async () => ({ status: 200, ok: true, arrayBuffer: async () => arrayBufferFrom(grpcFrame(
