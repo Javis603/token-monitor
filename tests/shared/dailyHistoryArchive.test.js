@@ -1267,6 +1267,25 @@ test('late-discovered historical days persist without replacing any previously r
   assertSaved({ ...west, todayKey: '2026-11-11' });
 });
 
+for (const legacy of [true, false]) {
+  test(`calendar merge includes active time from ${legacy ? 'legacy history' : 'another calendar'} in its summary`, () => {
+    const previous = { todayKey: '2026-11-06', ...(legacy ? {} : { timeZone: 'America/Los_Angeles' }) };
+    const options = { todayKey: '2026-11-07', timeZone: 'Asia/Taipei' };
+    let archive = captureDailyHistoryArchive({}, graph('2026-11-06', [client('claude', 'opus', 100, 1, 1)], {
+      activeTimeMs: 3_600_000
+    }), previous);
+    archive = captureLiveDailyHistory(archive, livePeriod(20), options);
+    for (const sourceTotal of [0, 7_200_000]) {
+      const timeMetrics = { totalActiveTimeMs: sourceTotal, longestContinuousMs: 0, maxConcurrentSessions: 0, sessionCount: 0 };
+      const restored = graphFromDailyHistoryArchive({ contributions: [], timeMetrics }, archive, options);
+      const history = historyFrom(restored, options.todayKey);
+      assert.equal(history.daily.find(day => day.date === '2026-11-06').activeTimeMs, 3_600_000);
+      assert.equal(history.summary.activeTimeMs, Math.max(sourceTotal, 3_600_000));
+      assert.deepEqual(restored.timeMetrics, { ...timeMetrics, totalActiveTimeMs: Math.max(sourceTotal, 3_600_000) });
+    }
+  });
+}
+
 test('timezone round trips never max-win across calendars and retain same-calendar maxima', () => {
   const date = '2026-11-07';
   const east = { todayKey: date, timeZone: 'Asia/Taipei' };

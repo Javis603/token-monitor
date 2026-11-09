@@ -687,7 +687,10 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
         if (row.date < since && normalized.selectedCalendars?.[row.date] === zone) days.set(row.date, row);
       }
     }
-    return { ...visible, contributions: [...days.values()].sort((a, b) => a.date.localeCompare(b.date)) };
+    const contributions = [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
+    const activeTimeMs = contributions.reduce((sum, day) => sum + num(day.activeTimeMs), 0);
+    const timeMetrics = graphTimeMetrics(graphs, activeTimeMs);
+    return { ...visible, contributions, ...(timeMetrics ? { timeMetrics } : {}) };
   }
   const normalizedArchive = normalizeDailyHistoryArchive(archive);
   const currentDays = observationsFromGraphs(graphs, { archive: normalizedArchive });
