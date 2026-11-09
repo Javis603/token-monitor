@@ -677,3 +677,18 @@ test('historyPreview defaults to the compact 30-day daily window', () => {
   assert.equal(preview.daily.length, 30);
   assert.equal(preview.daily[0].date, '2026-07-02');
 });
+
+test('mergeHistories accepts compact calendars larger than the engine argument limit', () => {
+  const history = {
+    daily: [], monthly: [], summary: { activeDaysComplete: true },
+    dailyTotals: [...Array.from({ length: 200000 }, () => ({})), { date: '2024-01-01', tokens: 10 }]
+  };
+  const wire = JSON.stringify({ deviceId: 'large-calendar', history });
+  assert.ok(Buffer.byteLength(wire) < require('../../src/shared/http').MAX_JSON_BODY_BYTES);
+  for (const merge of [mergeHistories, require('../../worker/src/shared/history').mergeHistories]) {
+    const result = merge([JSON.parse(wire).history]);
+    assert.equal(result.summary.activeDaysComplete, true);
+    assert.equal(result.summary.activeDays, 1);
+    assert.deepEqual(result.dailyTotals, [{ date: '2024-01-01', tokens: 10, cost: 0, activeTimeMs: 0 }]);
+  }
+});

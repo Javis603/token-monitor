@@ -534,7 +534,7 @@ function mergeMonthlyMaps(histories) {
 function mergeDailyTotalMaps(histories) {
   const days = [];
   for (const history of histories) {
-    days.push(...history.dailyTotals);
+    for (const day of history.dailyTotals) days.push(day);
   }
   return compactDailyTotals(days);
 }
