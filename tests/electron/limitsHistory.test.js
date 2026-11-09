@@ -2227,3 +2227,23 @@ for (const [readopt, competing] of [[false, false], [true, false], [true, true]]
     assert.equal(actual.unallocated, expected.unallocated);
   }
 });
+
+for (const lastMinute of [10, 70]) test(`adoption preserves a recovered source across a multi-device flat run (last minute: ${lastMinute})`, t => {
+  const reference = adoptionDatabase(t), migrated = adoptionDatabase(t);
+  for (const [db, id] of [[reference, adoptedStream], [migrated, streamA]]) {
+    db.record([action(at(2, 10), 20, { id, source: 'a' }), { account: accountA, source: 'a', failed: true },
+      action(at(2, 10, 5), 21, { id, source: 'a' })], at(2, 12));
+    for (let minute = 10; minute <= lastMinute; minute += 5) db.record([action(at(2, 10, minute), 21, { id, source: 'b' })], at(2, 12));
+    db.record([action(at(2, 10, lastMinute + 5), 22, { id, source: 'a' })], at(2, 12));
+  }
+  migrated.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA],
+    sources: [{ id: streamA, before: 'a', after: 'a' }, { id: streamA, before: 'b', after: 'b' }] }], at(2, 12));
+  for (const grain of ['day', 'hour']) {
+    const expected = adoptedDistribution(reference, grain), actual = adoptedDistribution(migrated, grain);
+    assert.deepEqual(actual.buckets.map(b => b.value), expected.buckets.map(b => b.value));
+    assert.equal(actual.unallocated, expected.unallocated);
+  }
+  const windows = migrated.query([{ id: adoptedStream, key: 'weekly', window: { kind: 'weekly' } }],
+    { grain: 'day', day: dayKey(at(2, 12)) }, at(2, 12)).windows;
+  assert.equal(windows[0].points.at(-1).value, 22);
+});

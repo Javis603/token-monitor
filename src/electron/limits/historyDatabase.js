@@ -255,7 +255,8 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           }
           const switched = !!tail && head.source !== source;
           const consistent = !tail || sameCycle(previous, point);
-          const healthy = tail && !head?.failed && point.at - tail.until <= Math.max(tail.interval, point.interval) * 2.5;
+          const healthy = tail && !head?.failed
+            && (point.coveredFrom === tail.until ? point.maxGap : point.at - tail.until) <= Math.max(tail.interval, point.interval) * 2.5;
           // Prefer continuity after an uncertain takeover or source disagreement.
           // Keep the replacement while healthy so an old observer cannot inject
           // a jump. After failure/expiry, only genuine conflicts prevent a
@@ -357,12 +358,13 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
             const end = row.part_until ?? row.until;
             const originalSource = row.id === tailId ? head.source
               : sql('SELECT source FROM history_run_sources WHERE run = ? ORDER BY last_at DESC LIMIT 1').get(row.id)?.source || head.source;
-            const source = sourceFor(id, originalSource);
+            const firstSource = sql('SELECT source FROM history_run_sources WHERE run = ? ORDER BY first_at LIMIT 1').get(row.id)?.source || originalSource;
+            const source = sourceFor(id, start === row.at ? firstSource : originalSource);
             const point = { ...pointOf(row), at: start, samples: start === end ? row.samples || 1 : 1,
               maxGap: row.max_gap || 0, uncertainBefore: start === row.at && !!row.uncertain_before };
-            events.push({ source, point });
-            if (end > start) spans.push({ source, point, until: end });
-            if (end > start) events.push({ source, point: { ...point, at: end, uncertainBefore: false, coveredFrom: start, samples: Math.max(1, row.samples - 1) } });
+            events.push({ stream: id, source, point });
+            if (end > start) spans.push({ stream: id, point, until: end });
+            if (end > start) events.push({ stream: id, source: sourceFor(id, originalSource), point: { ...point, at: end, uncertainBefore: false, coveredFrom: start, samples: Math.max(1, row.samples - 1) } });
             if (end === row.until) Object.assign(events.at(-1).point, { breakAfter: row.break_after,
               uncertainUntil: row.uncertain_until });
             if (end === row.until && row.id === tailId) {
@@ -386,6 +388,7 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
         spans.sort((a, b) => a.point.at - b.point.at);
         let spanIndex = 0;
         let active = [];
+        let ownerStream = null;
         for (const event of events) {
           active = active.filter(span => span.until >= event.point.at);
           while (spanIndex < spans.length && spans[spanIndex].point.at <= event.point.at) {
@@ -396,16 +399,16 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           // Compressed coverage proves the owner's unchanged reading across
           // this time, without inventing its intermediate observation times.
           // Detect a competing disagreement before it can become a delta.
-          if (head && head.source !== event.source && active.some(span => span.source === head.source
+          if (head && ownerStream !== event.stream && active.some(span => span.stream === ownerStream
             && (span.point.value !== event.point.value || !sameCycle({ ...span.point, at: event.point.at }, event.point)))) {
             conflict(mapping.id, latest.get(mapping.id), event.point, now);
             continue;
           }
           recordActions([{ account: mapping.account, source: event.source,
             windows: [{ id: mapping.id, point: event.point }] }], now);
-          if (event.failed !== undefined && headFor.get(mapping.id)?.source === event.source
-            && latest.get(mapping.id)?.until === event.point.at) {
-            sql('UPDATE streams SET failed = ? WHERE id = ?').run(+event.failed, mapping.id);
+          if (headFor.get(mapping.id)?.source === event.source && latest.get(mapping.id)?.until === event.point.at) {
+            ownerStream = event.stream;
+            if (event.failed !== undefined) sql('UPDATE streams SET failed = ? WHERE id = ?').run(+event.failed, mapping.id);
           }
           // A sticky source guard can outlive the conflict itself. Its saved
           // break/timestamp was replayed above; do not invent a new interruption.
