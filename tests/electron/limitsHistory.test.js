@@ -240,7 +240,7 @@ test('all providers share one persisted account history when the reporting devic
     assert.equal(a.windows[0].distribution.buckets.at(-1).observations, 3, id);
     const hourly = await store.query('hub-a', row, { grain: 'hour', day: '2026-11-02' });
     assert.equal(hourly.windows[0].distribution.buckets.find(b => new Date(b.at).getHours() === 10).value, 5, id);
-    assert.equal((await store.query('hub-b', row)).windows[0].points.length, 0, id);
+    assert.deepEqual((await store.query('hub-b', row)).windows[0].points, a.windows[0].points, id);
   }
   const db = new DatabaseSync(file, { readOnly: true });
   try {
@@ -608,7 +608,7 @@ test('a failed SQLite transaction rolls back daily and detailed changes together
   assert.equal(fixture.sql('SELECT observations FROM daily')[0].observations, 2);
 });
 
-test('worker SQLite persists private hashed identities, deduplicates cached reads, and separates scope and currency', async t => {
+test('worker SQLite persists private hashed identities, deduplicates cached reads, and separates accounts and currency', async t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-worker-'));
   const file = path.join(directory, 'history.sqlite');
   const errors = [];
@@ -623,7 +623,7 @@ test('worker SQLite persists private hashed identities, deduplicates cached read
   assert.equal(data.persistent, true);
   assert.equal(segments(data.windows[0].points).length, 1);
   assert.equal(data.windows[0].distribution.buckets.at(-1).observations, 2);
-  assert.equal((await store.query('other', row)).windows[0].points.length, 0);
+  assert.deepEqual((await store.query('other', row)).windows[0].points, data.windows[0].points);
   assert.equal((await store.query('local', { ...row, accountKey: 'other' })).windows[0].points.length, 0);
   const credit = { ...row, windows: [{ kind: 'billing', metric: 'credits', remaining: 80, currency: 'USD' }] };
   await store.record('local', { providers: [credit] });
@@ -2045,4 +2045,107 @@ test('daily summaries keep the collection date when the device changes timezone'
     if (previousTimezone === undefined) delete process.env.TZ;
     else process.env.TZ = previousTimezone;
   }
+});
+
+test('verified quota history survives backend changes while unverified identities remain scoped', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-modes-'));
+  const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => at(2, 12) });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  for (const [index, scope] of ['local', 'hub-a', 'hub-b', 'icloud'].entries()) {
+    await store.record(scope, { providers: [provider(at(2, 10, index * 5), 20 + index)] });
+  }
+  for (const scope of ['local', 'hub-a', 'hub-b', 'icloud']) {
+    const result = await store.query(scope, provider(at(2, 10, 15), 23));
+    assert.deepEqual(result.windows[0].points.map(p => p.value), [20, 21, 22, 23]);
+    assert.equal(result.windows[0].distribution.buckets.at(-1).value, 3);
+  }
+  const anonymous = { ...provider(at(2, 11)), accountKey: null };
+  await store.record('local', { providers: [anonymous] });
+  assert.equal((await store.query('hub-a', anonymous)).windows[0].points.length, 0);
+  for (const change of [{ accountKey: 'different' }, { workspaceKind: 'team' }, { region: 'other' }]) {
+    assert.equal((await store.query('local', { ...provider(at(2, 11)), ...change })).windows[0].points.length, 0);
+  }
+});
+
+test('legacy backend histories are adopted once, preserving compressed coverage and conflicting originals', async t => {
+  const { createHash } = require('node:crypto');
+  const { limitWindowKey } = require('../../src/shared/limits/usageItems');
+  const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-adoption-'));
+  const file = path.join(directory, 'history.sqlite');
+  const row = provider(at(2, 11), 25);
+  const legacyId = scope => hash([scope, historyAccountKey(row), limitWindowKey(row.windows[0]), 'pp']);
+  const db = createHistoryDatabase(file);
+  for (const [scope, time, value] of [['hub-a', at(2, 10), 20], ['hub-a', at(2, 10, 5), 20],
+    ['local', at(2, 10, 10), 25]]) {
+    db.record([{ account: hash([scope, historyAccountKey(row)]), source: 'device',
+      windows: [{ id: legacyId(scope), point: point(time, value, at(8, 0)) }] }], at(2, 12));
+  }
+  db.close();
+  const options = { now: () => at(2, 12), legacyScopes: () => ['hub-a', 'local'] };
+  let store = createLimitsHistoryStore(file, options);
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const result = await store.query('local', row);
+  assert.deepEqual(result.windows[0].points.map(p => [p.at, p.value]), [[at(2, 10), 20], [at(2, 10, 5), 20], [at(2, 10, 10), 25]]);
+  assert.equal(result.windows[0].distribution.buckets.at(-1).value, 5);
+  assert.equal(result.windows[0].distribution.buckets.at(-1).observations, 3);
+  await store.record('hub-b', { providers: [row] });
+  await store.close();
+  store = createLimitsHistoryStore(file, options);
+  assert.deepEqual((await store.query('hub-b', row)).windows[0].points.map(p => p.value), [20, 20, 25, 25]);
+  const inspect = new DatabaseSync(file, { readOnly: true });
+  try {
+    assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM history_adoptions').get().n, 2);
+    assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM streams WHERE id IN (?, ?)').get(legacyId('local'), legacyId('hub-a')).n, 2);
+    assert.equal(inspect.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
+  } finally { inspect.close(); }
+});
+
+for (const conflicting of [false, true]) {
+  test(`adoption reconciles overlapping backend snapshots without double counting (conflict: ${conflicting})`, async t => {
+    const { createHash } = require('node:crypto');
+    const { limitWindowKey } = require('../../src/shared/limits/usageItems');
+    const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-overlap-'));
+    const file = path.join(directory, 'history.sqlite');
+    const row = provider(at(2, 10, 5), 22);
+    const db = createHistoryDatabase(file);
+    for (const scope of ['local', 'hub-a']) {
+      for (const [time, value] of [[at(2, 10), 20], [at(2, 10, 5), scope === 'hub-a' && conflicting ? 90 : 22]]) {
+        db.record([{ account: hash([scope, historyAccountKey(row)]), source: 'same-device', windows: [{
+          id: hash([scope, historyAccountKey(row), limitWindowKey(row.windows[0]), 'pp']),
+          point: point(time, value, at(8, 0)) }] }], at(2, 12));
+      }
+    }
+    db.close();
+    const store = createLimitsHistoryStore(file, { now: () => at(2, 12), legacyScopes: () => ['local', 'hub-a'] });
+    t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+    const result = await store.query('local', row);
+    assert.equal(result.windows[0].distribution.buckets.at(-1).value, 2);
+    assert.deepEqual(result.windows[0].points.map(p => p.value), [20, 22]);
+    assert.equal(result.windows[0].points.at(-1).uncertainUntil != null, conflicting);
+    assert.deepEqual(await store.query('hub-a', row), result, 'adoption is idempotent');
+  });
+}
+
+test('adoption rolls back the projection and marker together when persistence fails', t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-rollback-'));
+  const file = path.join(directory, 'history.sqlite');
+  const db = createHistoryDatabase(file);
+  const inspect = new DatabaseSync(file);
+  t.after(() => { inspect.close(); db.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  for (let time = at(2, 8); time <= at(2, 11); time += 300_000) db.record([action(time, 20)], at(2, 12));
+  const query = id => db.query([{ id, key: 'weekly', window: { kind: 'weekly' } }], { grain: 'hour', day: dayKey(at(2, 12)) }, at(2, 12));
+  const before = query(streamA).windows;
+  inspect.exec("CREATE TRIGGER reject_adoption BEFORE INSERT ON history_adoptions BEGIN SELECT RAISE(ABORT, 'test failure'); END");
+  const mapping = [{ id: streamB, account: accountA, legacy: [streamA] }];
+  assert.throws(() => db.adopt(mapping, at(2, 12)), /test failure/);
+  assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM streams WHERE id = ?').get(streamB).n, 0);
+  assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM history_adoptions').get().n, 0);
+  assert.equal(inspect.prepare('SELECT SUM(samples) AS n FROM coverage').get().n, 37);
+  inspect.exec('DROP TRIGGER reject_adoption');
+  db.adopt(mapping, at(2, 12));
+  assert.equal(inspect.prepare('SELECT SUM(c.samples) AS n FROM coverage c JOIN runs r ON r.id = c.run WHERE r.stream = ?').get(streamB).n, 37);
+  assert.equal(inspect.prepare('SELECT observations FROM daily WHERE stream = ?').get(streamB).observations, 37);
+  assert.deepEqual(query(streamB).windows, before, 'compressed hourly coverage survives adoption exactly');
 });

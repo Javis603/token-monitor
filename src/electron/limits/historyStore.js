@@ -4,21 +4,23 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
 const { limitWindowKey } = require('../../shared/limits/usageItems');
-const { historyAccountKey } = require('./historyIdentity');
+const { historyAccountKey, portableHistoryAccount } = require('./historyIdentity');
 const { dayKey, historyReadings } = require('../renderer/limits/historyModel');
 
 function historyWindow(window) {
   return historyReadings(window).primary;
 }
 function digest(value) { return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
-function accountId(scope, provider) { return digest([scope, historyAccountKey(provider)]); }
-function windowId(scope, provider, window, reading) {
+function historyScope(scope, provider) { return portableHistoryAccount(provider) ? 'account-v2' : scope; }
+function accountId(scope, provider) { return digest([historyScope(scope, provider), historyAccountKey(provider)]); }
+function windowId(scope, provider, window, reading, legacy = false) {
+  if (!legacy) scope = historyScope(scope, provider);
   const identity = [scope, historyAccountKey(provider), limitWindowKey(window), reading.unit];
   if (['credits', 'spend'].includes(window.metric) && reading.unit === 'pp') identity.push(window.currency || 'credits');
   return digest(identity);
 }
 
-function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}, onChange = () => {} } = {}) {
+function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}, onChange = () => {}, legacyScopes = () => [] } = {}) {
   let worker = null;
   let sequence = 0;
   let closed = false;
@@ -51,11 +53,28 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
       worker.postMessage({ id, method, args });
     });
   }
+  function adoptions(scope, providers) {
+    const mappings = [];
+    for (const provider of providers) {
+      if (!portableHistoryAccount(provider)) continue;
+      for (const window of provider.windows || []) {
+        for (const reading of [historyReadings(window).primary, historyReadings(window).raw].filter(Boolean)) {
+          const scopes = [...new Set([scope, ...legacyScopes()])];
+          const sourceParts = [provider.sourceDeviceId || '', provider.source || '', provider.sourceDetail || ''];
+          mappings.push({ id: windowId(scope, provider, window, reading), account: accountId(scope, provider),
+            legacy: scopes.map(old => windowId(old, provider, window, reading, true)),
+            sources: scopes.map(old => ({ id: windowId(old, provider, window, reading, true),
+              before: digest(sourceParts), after: digest([old, ...sourceParts]) })) });
+        }
+      }
+    }
+    return mappings;
+  }
   async function record(scope, limits) {
     const actions = [];
     for (const provider of limits?.providers || []) {
       const account = accountId(scope, provider);
-      const source = digest([provider.sourceDeviceId || '', provider.source || '', provider.sourceDetail || '']);
+      const source = digest([...(portableHistoryAccount(provider) ? [scope] : []), provider.sourceDeviceId || '', provider.source || '', provider.sourceDetail || '']);
       if (provider.status !== 'ok' || provider.stale) { actions.push({ account, source, failed: true }); continue; }
       const at = Date.parse(provider.updatedAt);
       if (!Number.isFinite(at)) continue;
@@ -77,7 +96,7 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
       actions.push({ account, source, snapshotAt: at, windows });
     }
     if (!actions.length || closed) return;
-    try { await rpc('record', [actions, now()]); }
+    try { await rpc('record', [actions, now(), adoptions(scope, limits?.providers || [])]); }
     catch (error) { onError(error); }
     onChange();
   }
@@ -89,7 +108,7 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
       return { id: windowId(scope, provider, window, reading), key, window, provider: provider.provider,
         unit: reading.unit, balance: reading.balance };
     });
-    try { return await rpc('query', [windows, range, now()]); }
+    try { return await rpc('query', [windows, range, now(), adoptions(scope, [provider])]); }
     catch (error) {
       onError(error);
       return { persistent: false, range, windows: windows.map(({ key, window, unit, balance }) => ({ key, window, unit, balance, points: [] })) };
