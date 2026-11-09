@@ -97,6 +97,9 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
     assert.equal(await js("state.floatingBubble.collapsed && state.stats.limits.providers.length===0 && desktopLimitRecords().length===2 && desktopLimitRecords().every(row=>row.provider.startsWith('plugin:')) && !!els.floatingBubbleContent.querySelector('img')"), true);
     const bubbleRect = await js("(()=>{const r=els.floatingBubbleContent.getBoundingClientRect();return {x:Math.floor(r.x)-8,y:Math.floor(r.y)-8,width:Math.ceil(r.width)+16,height:Math.ceil(r.height)+16}})()");
     fs.writeFileSync(path.join(evidence, 'floating-bubble.png'), (await win.webContents.capturePage(bubbleRect)).toPNG());
+    const fixedLayout = { items: [{ type: 'icon', icon: 'provider', source: { provider: 'plugin:synthetic-limits:one' } }] };
+    const fixedBitmap = () => js(`renderCustomTrayLayout(desktopSurfaceStats(),${JSON.stringify(fixedLayout)})`);
+    assert.match(await fixedBitmap(), /^data:image\/png/);
     await js("applyFloatingBubbleState({collapsed:false});openSettingsPanel();setSettingsSectionExpanded('window',true);pluginApi.setEnabled('synthetic-limits',false)");
     await waitFor("state.pluginCatalog.plugins.find(p=>p.id==='synthetic-limits')?.status==='disabled'", 'disabled catalog');
     await js("displaySettings.open('edgeDock');edgeDockComposer.render();els.edgeDockComposer.scrollIntoView({block:'center'});");
@@ -105,6 +108,17 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
     await capture('composer-disabled.png');
     const inactive = require('../src/electron/plugins/limitsPresentation').projectPluginLimits(stats, runtime.limitsSnapshot());
     assert.equal(require('../src/electron/renderer/edgeDock/presentation').buildEdgeDockCells(inactive, { items: dockSettings.edgeDockItems }).length, 0);
-    fs.writeFileSync(path.join(evidence, 'proof.json'), JSON.stringify({ modules: cells.map(cell => cell.provider), rawStatsUntouched: true, nativeManualRefresh: true, trayAndBubbleProviders: sourceProviders, inactiveCells: 0, surfaceCount: windows.length }, null, 2));
+    assert.equal(await fixedBitmap(), null, 'disabled fixed icons emit no Tray/Bubble bitmap');
+    assert.equal(require('../src/electron/notch/data').buildNotchData(inactive, [], { notchSummaryMode: 'custom', notchCustomLayout: fixedLayout }).summary, null);
+    await js(`tokenMonitor.updateSettings({floatingBubbleContent:'custom',floatingBubbleCustomLayout:${JSON.stringify(fixedLayout)}})`);
+    await js("openViewFromTray('home');applyFloatingBubbleState({collapsed:true,side:'right'})");
+    assert.equal(await js("!!els.floatingBubbleContent.querySelector('img')"), false);
+    runtime.manager.setEnabled('synthetic-limits', true);
+    await waitFor("state.pluginCatalog.limits.modules.length===2 && !!els.floatingBubbleContent.querySelector('img')", 'fixed Bubble icon restored');
+    assert.match(await fixedBitmap(), /^data:image\/png/);
+    runtime.manager.setEnabled('synthetic-limits', false);
+    await waitFor("state.pluginCatalog.limits.modules.length===0 && !els.floatingBubbleContent.querySelector('img')", 'visible Bubble drops disabled fixed icon');
+
+    fs.writeFileSync(path.join(evidence, 'proof.json'), JSON.stringify({ modules: cells.map(cell => cell.provider), rawStatsUntouched: true, nativeManualRefresh: true, fixedIconDisableRestore: true, trayAndBubbleProviders: sourceProviders, inactiveCells: 0, surfaceCount: windows.length }, null, 2));
   } finally { dock.stop(); notch.dispose(); runtime.demandLimits(false, 'fixture.native-refresh'); }
 };

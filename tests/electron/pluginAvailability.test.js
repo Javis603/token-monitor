@@ -51,6 +51,34 @@ test('production Tray bitmap omits inactive plugin placeholders and restores ena
   assert.equal(rendered.length, 1); assert.equal(layout.items[0].ref, ref);
 });
 
+test('fixed plugin quota icons disappear from native bitmaps and Notch while their saved source survives', () => {
+  const id = 'plugin:sample-plugin:credits';
+  const layout = trayLayout.normalizeTrayLayout({ items: [{ type: 'icon', icon: 'provider', source: { provider: id } }] });
+  const saved = JSON.stringify(layout), rendered = [];
+  const context = { state: { settings: {} }, localLiveCodexProvider: () => null, trayLayoutApi: trayLayout,
+    currentCurrency: () => 'USD', compactTokenDisplayOptions: () => ({}), trayProviderImages: {},
+    displayLiveTokenRateSamples: () => ({}), pluginTrayViews: () => ({}),
+    renderCustomTrayItemCanvas: item => { rendered.push(item); return { width: 20 }; },
+    document: { createElement: () => ({ getContext: () => ({ drawImage() {} }), toDataURL: () => 'bitmap' }) } };
+  vm.createContext(context);
+  vm.runInContext(source('renderer/app.js', 'function renderCustomTrayLayout(', '\nfunction barsDataUrlForMode('), context);
+  const notch = require('../../src/electron/notch/data');
+  const stats = { pluginLimitModules: [{ id, label: 'Credits' }], limits: { providers: [] } };
+  const settings = { notchSummaryMode: 'custom', notchCustomLayout: layout };
+  const assertShown = shown => {
+    rendered.length = 0;
+    assert.equal(context.renderCustomTrayLayout(stats, layout), shown ? 'bitmap' : null);
+    assert.equal(rendered.length, shown ? 1 : 0);
+    const summary = notch.buildNotchData(stats, [], settings).summary;
+    assert.equal(summary?.items?.length || 0, shown ? 1 : 0);
+    assert.equal(JSON.stringify(layout), saved);
+    assert.equal(trayLayout.usesLimits(layout), false, 'fixed icons never start quota sampling');
+  };
+  assertShown(true); // Active metadata is sufficient, with no reading or cached image.
+  stats.pluginLimitModules = []; assertShown(false); // Disabled/removed.
+  stats.pluginLimitModules = [{ id, label: 'Credits' }]; assertShown(true);
+});
+
 test('Notch stats projection reads only active surface metadata and preserves saved selections', () => {
   let available = [{ ref, title: 'CPU', icon: 'activity' }], result;
   const context = { settings: {}, desktopQuotaStats: s => s, pluginRuntime: { manager: { list() { throw new Error('full catalog on stats push'); }, surfaceCatalog: surface => { assert.equal(surface, 'notch'); return available; } } },

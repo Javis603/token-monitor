@@ -13460,6 +13460,7 @@ function applyPluginCatalog(list) {
     renderViewSwitcher();
     renderThemePresetChips();
     renderNotchPageChoices();
+    renderFloatingBubbleContent();
     syncPluginLimitsDemand();
     void deliverTrayProviderIcons();
     if (isSettingsSurfaceVisible()) preserveSettingsPanelScroll(renderViewPreferences);
@@ -15804,7 +15805,7 @@ function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options
     liveTokenRateFormatter: options.liveTokenRateFormatter || ((value) => formatLiveTokenRate(value)),
     pluginViews: pluginTrayViews(layout)
   });
-  const items = resolved.items.filter(item => item.type !== 'plugin' || item.available).map((item) => (
+  const items = resolved.items.filter(item => !item.omit && (item.type !== 'plugin' || item.available)).map((item) => (
     item.type === 'text'
       && item.metric === 'account'
       && state.settings?.maskLimitAccountEmails === true
@@ -16314,6 +16315,7 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
   // Provider images may unlock a richer bars icon now that they're cached.
   maybeUpdateBarsIcon();
+  renderFloatingBubbleContent();
 }
 
 function setAccountGroupExpanded(prefix, expanded, stateKey) {

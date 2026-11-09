@@ -1053,9 +1053,11 @@
           if (item.icon === 'app') return { ...item, available: true, provider: 'app', selection: null };
           const fixedProvider = item.source.provider !== 'auto' ? item.source.provider : '';
           if (fixedProvider) {
+            const omit = fixedProvider.startsWith('plugin:') && !stats?.pluginLimitModules?.some(module => module.id === fixedProvider);
             return {
               ...item,
-              available: true,
+              available: !omit,
+              ...(omit ? { omit: true } : {}),
               provider: fixedProvider,
               selection: null
             };

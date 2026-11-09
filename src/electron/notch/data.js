@@ -223,6 +223,7 @@ function buildNotchData(stats, cells, settings, options = {}) {
       }
     }
   }
+  resolved.items = resolved.items.filter(item => !item.omit);
   return {
     cells,
     // An explicitly empty custom layout reuses the idle shell and hover target.
