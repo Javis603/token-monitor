@@ -35,7 +35,6 @@ const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/
 const { fetchMinimaxLimits } = require('../../src/shared/providers/minimax/limits');
 const minimaxTestHome = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'minimax-renderer-home-'));
 test.after(() => fs.rmSync(minimaxTestHome, { recursive: true, force: true }));
-const { windowsFromSummary } = require('../../src/shared/providers/hark/limits');
 const { parseManusCredits } = require('../../src/shared/providers/manus/limits');
 const manusCreditsFixture = require('../fixtures/manusAvailableCredits.json');
 const { fetchAntigravityLimits } = require('../../src/shared/providers/antigravity/limits');
@@ -453,27 +452,26 @@ test('Manus refresh and monthly quotas share a row before balance and hide indep
 });
 
 test('Hark daily, period, feature, and top-up rows render and hide independently', () => {
-  const { windows } = windowsFromSummary({
-    plan: { id: 'scale', name: 'hark pro³', unlimited: false },
-    meters: {
-      harkTokens: {
-        dailyUsed: 1, dailyLimit: 4, dailyResetsAt: '2026-11-10T00:00:00Z',
-        poolUsed: 2, poolLimit: 8, poolResetsAt: '2026-12-01T00:00:00Z'
-      },
-      perFeature: [{
-        feature: 'message', period: 'month', countUsed: 1, countLimit: 4,
-        harkUsed: 1, harkLimit: 4, resetsAt: '2026-12-01T00:00:00Z'
-      }]
-    },
-    autoTopup: { enabled: true, spentThisPeriodMinor: 250 }
-  });
-  const provider = normalizeLimitProvider({ provider: 'hark', status: 'ok', windows });
+  const provider = normalizeLimitProvider({ provider: 'hark', status: 'ok', windows: [
+    { kind: 'daily', label: 'Daily', used: 1, remaining: 3, limit: 4 },
+    { kind: 'billing', label: 'Monthly', used: 2, remaining: 6, limit: 8 },
+    { kind: 'billing', label: 'Monthly Messages', used: 1, limit: 4 },
+    { kind: 'billing', label: 'Monthly Messages tokens', used: 1, limit: 4 },
+    { kind: 'billing', label: 'Top-up', metric: 'spend', used: 2.5, currency: 'USD', showMeter: false }
+  ] });
   const card = dockView().renderProviderWindows(provider, '#1C1C1C');
   assert.deepEqual(
     [...card.children].map((row) => row.children[0].children[0].textContent),
     ['Daily', 'Monthly', 'Monthly Messages', 'Monthly Messages tokens', 'Top-up']
   );
+  assert.match(card.children[0].text, /3 \/ 4/);
+  assert.match(card.children[1].text, /6 \/ 8/);
+  const used = dockView({ showLimitUsed: true }).renderProviderWindows(provider, '#1C1C1C');
+  assert.match(used.children[0].text, /1 \/ 4/);
+  assert.match(used.children[1].text, /2 \/ 8/);
   assert.match(card.children[4].text, /\$2\.50 spent/);
+  const odd = dockView().renderProviderWindows({ ...provider, windows: provider.windows.slice(0, 3) }, '#1C1C1C');
+  assert.equal(odd.children[2].classList.contains('limit-window-wide'), true);
   const items = dockView().limitProviderUsageItems([provider]);
   assert.equal(items.length, 5);
   for (const item of items) {

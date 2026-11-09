@@ -192,3 +192,12 @@ test('Mistral amount details follow used/remaining mode without inventing missin
   assert.equal(text('mistral', { kind: 'billing', usedPercent: 25 }).detail, '');
   assert.equal(text('mistral', { ...quota, metric: 'credits' }).detail, '');
 });
+
+test('Hark daily and monthly pools expose the returned token pair in either display mode', () => {
+  for (const kind of ['daily', 'billing']) {
+    const window = { kind, used: 136379, remaining: 7863621, limit: 8000000 };
+    assert.equal(text('hark', window).detail, '7863621 / 8000000');
+    assert.equal(text('hark', window, true).detail, '136379 / 8000000');
+    assert.equal(text('hark', { ...window, used: 8500000, remaining: 0 }, true).detail, '8500000 / 8000000');
+  }
+});

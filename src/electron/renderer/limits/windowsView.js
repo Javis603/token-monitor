@@ -1730,12 +1730,12 @@
       const resetNode = claudeResetCreditsNode(provider.resetCredits);
       if (resetNode) windows.append(resetNode);
     } else if (provider.provider === 'hark') {
-      // Daily and the period pool are quota bars. A top-up is money already
-      // spent, so the default session/weekly branch would drop every row.
+      // The default layout only draws session/weekly quotas; Hark has daily/billing pools.
       const quotaNodes = (provider.windows || [])
         .filter((window) => window.metric !== 'spend' && (window.kind === 'daily' || window.kind === 'billing'))
-        .map((window) => limitWindowNode(providerWindowLabel(provider, window), window, color, 0.78));
-      if (quotaNodes.length === 1) quotaNodes[0].classList.add('limit-window-wide');
+        .map((window) => limitWindowNode(
+          providerWindowLabel(provider, window), window, color, 0.78, null, providerWindowText(provider, window).detail
+        ));
       windows.append(...quotaNodes);
       for (const spend of (provider.windows || []).filter((window) => window.metric === 'spend')) {
         const value = providerWindowText(provider, spend).value;
@@ -1747,6 +1747,7 @@
           ariaParts: [value]
         }), usageItems.limitUsageItemId(spend), label));
       }
+      repairWindowPairs(windows);
     } else if (provider.provider === 'manus') {
       // The refreshing allowance is a quota with a reset; the spendable total is a
       // points balance without a ceiling. The default branch renders neither a
