@@ -1,41 +1,48 @@
 ---
-summary: "Hark Pro quota from the macOS desktop session or a pasted session cookie. Account-level daily and period token pools, not a local token ledger."
+summary: "Hark account quotas from a macOS desktop session or a pasted session cookie."
 ids: [hark]
 read_when:
-  - Changing how the Hark desktop session cookie is located or read
-  - Changing Hark billing summary parsing or which windows a plan produces
-  - Debugging a Hark card that shows Sign in, unavailable, or only a plan name
+  - Changing Hark desktop session discovery or cookie handling
+  - Changing billing summary parsing or quota presentation
+  - Debugging missing Hark quotas or authentication failures
 ---
 
 # Hark
 
 ## Identity and ids
 
-`hark` is a limits-only provider. Hark does not write per-request token counts to disk, and the desktop shell does not implement billing. The account key is a hash of the session cookie, so a refresh that keeps the same token stays one account. The plan label comes from `plan.id` (`Hark Pro`, `Hark Pro 2`, `Hark Pro 3`, `Hark Pro 4`). `plan.name` uses a superscript the shared label sanitizer would delete.
+`hark` is a limits-only provider. It has no local per-request token ledger, session history or model breakdown. Account identity hashes the decoded session token, so encoded and decoded spellings share one identity; a new login can change it and replaces the previous session reading. Plan labels use `plan.id` because the superscripts in `plan.name` are removed by the shared label sanitizer.
 
 ## Data sources
 
-1. **Session.** A saved `harkCookie`, `TOKEN_MONITOR_HARK_COOKIE`, or `HARK_COOKIE` wins. A non-empty value that is not `__Secure-hark.session_token` is `unauthorized` and does not fall through to the desktop file. The value is a better-auth token (`id.base64signature`). The macOS store keeps the signature percent-encoded; a paste may be encoded or decoded, and the accepted spelling is forwarded unchanged. With no pasted value, macOS reads `~/Library/HTTPStorages/com.harklabs.hark.mac.binarycookies` for that one cookie on `hark.com`. The file is WebKit's binary cookie store, not a Chromium sqlite database. It is opened read-only and nothing is written back. Other platforms have no desktop store; paste the cookie. A missing file or cookie is `notConfigured`. A file that cannot be parsed is `unavailable`.
-2. **Quota.** `GET https://hark.com/api/billing/summary` with only that cookie. This is the Go API the desktop page calls as `billing.summary`. It is not on `/trpc`. Confirmed with one read-only request against a free account. Paid, trial, gift, store, and top-up responses use the same URL; those branches are what the shipped client reads, not a second sample.
+The macOS desktop session is `__Secure-hark.session_token` on `hark.com`, stored in `~/Library/HTTPStorages/com.harklabs.hark.mac.binarycookies`. This is WebKit's binary cookie store, not Chromium SQLite. Reads never modify it.
+
+Quotas come from the undocumented `GET https://hark.com/api/billing/summary`. Although the client calls this query `billing.summary`, `/trpc/billing.summary` does not serve it. The response has been verified against a free account; paid plans have only been exercised with synthetic responses.
+
+`meters.harkTokens` supplies the account-wide Daily ceiling and Monthly pool, including their reset times. Limits come directly from the summary; do not apply the multipliers shown by billing options. Amounts follow the shared used/remaining display setting, and reported usage may exceed the ceiling even though the bar stops at 100%.
+
+Feature allowances appear only when `meters.perFeature` supplies a positive count or token ceiling. `plan.unlimited === true` suppresses quota meters. Enabled automatic top-up with positive `spentThisPeriodMinor` adds an unmetered USD spend line. Subscription dates, scheduled changes and gift metadata do not create quota windows.
 
 ## Source precedence
 
-Pasted or environment cookie, then the macOS desktop file. A rejected paste does not continue. `401` and `403` are `unauthorized`. Anything else that is not a usable summary is `unavailable` and keeps the last good card.
+A saved `harkCookie` wins over `TOKEN_MONITOR_HARK_COOKIE`, then `HARK_COOKIE`, then desktop discovery. Other platforms support the same manual cookie but have no desktop discovery. A non-empty invalid credential or an API rejection never falls through to the desktop session. Clearing the saved cookie restores environment or desktop discovery.
 
-## Windows
+Credential forms use the shared save validation: a rejected draft is not persisted and does not replace the existing account. The rejection appears in the panel; an existing desktop reading is not used to validate the draft.
 
-`plan.unlimited === true` leaves the plan name and no meters. Otherwise `meters.harkTokens` is a Daily window (`dailyUsed` / `dailyLimit` / `dailyResetsAt`) and a Monthly window (`poolUsed` / `poolLimit` / `poolResetsAt`) when each ceiling is greater than zero. The pool is what Hark's own client labels monthly. Do not multiply a free ceiling by the 2× / 10× / 20× badges on `POST /api/billing/options`; those are prices, not the summary.
+## Credentials and transport
 
-`meters.perFeature` is empty on the free plan. A row with `countLimit` or `harkLimit` above zero becomes its own window. `autoTopup.spentThisPeriodMinor` becomes a meter-less Top-up spend line only when top-up is enabled and the amount is greater than zero. `subscription.currentPeriodEnd` is not a window.
+Accept a bare better-auth token or a Cookie header containing `__Secure-hark.session_token`. The desktop store percent-encodes its signature; a pasted token may be encoded or decoded. Validation and account identity use the decoded value, while requests forward the accepted spelling unchanged. Only this cookie is sent through the injected provider transport.
+
+A missing desktop file or session cookie is `notConfigured`; an unreadable or malformed file is `unavailable`. HTTP 401/403 are `unauthorized`, and 429 is `sourceRateLimited`. Malformed summaries and other request failures are `unavailable`, retaining the last good reading through the shared runtime. An explicit zero ceiling omits that meter; missing ceilings or invalid usage for an active meter do not count as successful readings.
 
 ## Invariants and known gaps
 
-The desktop shell has no billing code. Session renewal (`GET` then `POST /api/auth/get-session` when `needsRefresh` is set) is not replayed here. A cookie lasts about 30 days; after that the summary returns unauthorized until Hark writes a new one or the user pastes one. There is no per-request, per-model, or per-day token ledger.
+Sessions are not renewed. After expiry, the account remains unauthorized until Hark writes a current desktop cookie or the user supplies one. Browser sessions are not intercepted.
 
 ## Verification
 
 ```bash
-node --test tests/shared/harkLimits.test.js
+node --test tests/shared/harkLimits.test.js tests/shared/limitWindowText.test.js tests/electron/edgeDockLimitCard.test.js tests/electron/limitAccountPanels.test.js
 ```
 
-A signed-in Mac can confirm the live summary still has `plan` and `meters.harkTokens`. A paid account has not been sampled.
+The fixtures contain synthetic credentials. On a signed-in Mac, verify desktop discovery without pasting, compare both pools with the live summary, reject an invalid paste, then clear the override and confirm discovery resumes. Paid-plan API behavior still requires a real account sample.
