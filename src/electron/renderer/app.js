@@ -5802,9 +5802,10 @@ function turnNode(turn) {
 }
 
 let contentReadySignaled = false;
+let initialSettingsApplied = false;
 
 function signalContentReady() {
-  if (contentReadySignaled || !state.settings || !state.stats) return;
+  if (contentReadySignaled || !initialSettingsApplied || !state.settings || !state.stats) return;
   contentReadySignaled = true;
   window.tokenMonitor.signalContentReady?.();
 }
@@ -9932,11 +9933,8 @@ function syncSettingsForm() {
   }
   settingsDomSyncPending = false;
   setupLimitAccountPanels();
-  applySettingsTranslations();
   applyInitialBreakdownPreference();
-  syncPeriodTabs();
-  applyVendorColorOverrides(state.settings.vendorColors);
-  applyAppearanceSettings(state.settings);
+  applyVisibleSettingsAppearance();
   // Drives the header pin button as well as the Settings select, so it has to run
   // whenever the window is on screen — the pin button is reachable, and changes,
   // while the Settings panel is closed.
@@ -10092,6 +10090,13 @@ function syncSettingsForm() {
   modelAliasForm?.syncSettings();
   renderCursorStatus();
   displaySettings?.sync();
+}
+
+function applyVisibleSettingsAppearance() {
+  applySettingsTranslations();
+  syncPeriodTabs();
+  applyVendorColorOverrides(state.settings.vendorColors);
+  applyAppearanceSettings(state.settings);
 }
 
 function enabledClientSet() {
@@ -13644,6 +13649,18 @@ async function init() {
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
+  // Local appearance is sufficient for first reveal. Plugin discovery, sync,
+  // updater and stats queries below must not hold the window off screen.
+  if (state.windowVisible) {
+    applyVisibleSettingsAppearance();
+    initialSettingsApplied = true;
+    const signalAppearanceReady = () => window.tokenMonitor.signalAppearanceReady?.();
+    // A retained WebContentsView can be document.hidden until its native host
+    // shows. Prepare it now, without waiting on animation frames that pause while
+    // hidden. windowVisible still excludes intentionally hidden tray startup.
+    if (document.hidden) signalAppearanceReady();
+    else requestAnimationFrame(() => requestAnimationFrame(signalAppearanceReady));
+  }
   try { await pluginApi?.list(); } catch (_) {}
   syncPluginTrayDemand();
   syncContentForm?.syncSettings();
@@ -13665,6 +13682,7 @@ async function init() {
     state.settings.startAtLogin = Boolean(state.appInfo.loginItemOpenAtLogin);
   }
   syncSettingsForm();
+  initialSettingsApplied = true;
   diagnosticsPanel?.render();
   publishViewState();
   await refreshHubInfo();
