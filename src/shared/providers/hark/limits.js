@@ -181,13 +181,7 @@ async function fetchHarkLimits(options = {}, deps = {}) {
       windows: parsed.windows
     });
   } catch (error) {
-    const status = providerStatusFromError(error);
-    // An unconfirmed replacement must not outrank the retained session with an empty reading.
-    provider = normalizeLimitProvider({
-      ...base,
-      accountKey: previous.length && ['unavailable', 'sourceRateLimited'].includes(status) ? '' : base.accountKey,
-      status
-    });
+    provider = normalizeLimitProvider({ ...base, status: providerStatusFromError(error) });
   }
   // Hark exposes one selected session; omitted identities otherwise remain cached by the runtime.
   const removals = deps.probe === true || provider.status !== 'ok' ? []

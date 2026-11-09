@@ -243,6 +243,11 @@ test('HTTP failures recover and a new desktop session replaces its previous acco
   const rejected = aggregateLimits([{ deviceId: 'local', limits: runtime.getSnapshot() }], 0, now);
   const kept = rejected.providers.find((row) => row.accountKey === rows[0].accountKey);
   assert.deepEqual(kept?.windows, rows[0].windows);
+  status = 500;
+  await runtime.refresh({ provider: 'hark' }, 'settings-change');
+  const missed = runtime.getSnapshot().providers;
+  assert.ok(missed.every((row) => row.accountKey));
+  assert.deepEqual(missed.find((row) => row.accountKey === rows[0].accountKey)?.windows, rows[0].windows);
   status = 200;
   await runtime.refresh({ provider: 'hark' }, 'settings-change');
   const rotated = runtime.getSnapshot().providers;
