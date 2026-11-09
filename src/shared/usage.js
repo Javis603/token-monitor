@@ -361,6 +361,11 @@ function normalizeModelNameForClient(value, client) {
   return qualified?.[1] || normalized;
 }
 
+function normalizeLatestModel(value, client) {
+  if (typeof value !== 'string' || value.length > 256) return null;
+  return normalizeModelNameForClient(value, client);
+}
+
 function normalizeSessionId(value) {
   const raw = String(value || '').trim();
   return raw || null;
@@ -747,6 +752,11 @@ function mergeSession(target, source) {
       target.reasoningEffort = null;
     }
   }
+  if (sourceLastUsed >= targetLastUsed) {
+    if (sourceLastUsed > targetLastUsed || !hasOwn(target, 'latestModel')) {
+      if (hasOwn(source, 'latestModel') || hasOwn(target, 'latestModel')) target.latestModel = source.latestModel ?? null;
+    } else if (hasOwn(source, 'latestModel') && target.latestModel !== source.latestModel) target.latestModel = null;
+  }
   const sourceProjectId = String(source.projectId || '');
   if (!target.projectId && sourceProjectId) {
     target.projectId = sourceProjectId;
@@ -907,6 +917,7 @@ function normalizeSession(input, fallbackKey) {
   );
   session.startedAt = normalizeIsoTimestamp(firstString(input, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
+  if (hasOwn(input, 'latestModel')) session.latestModel = normalizeLatestModel(input.latestModel, client);
   if (hasOwn(input, 'promptCache')) session.promptCache = normalizePromptCache(input.promptCache);
   if (isSessionReasoningEffortClient(client) && hasOwn(input, 'reasoningEffort')) session.reasoningEffort = normalizeReasoningEffort(input.reasoningEffort);
   session.contextTokens = Math.max(0, Math.round(asNumber(input.contextTokens ?? input.context_tokens ?? 0)));
@@ -2239,6 +2250,7 @@ function deltaValue(base, fresh, anchor, key) {
   // Cache observations are snapshots, never additive accounting. Missing
   // metadata retains the base; only an explicit null clears an observation.
   if (key === 'promptCache') return fresh === undefined ? base : normalizePromptCache(fresh);
+  if (key === 'latestModel') return fresh === undefined ? base : fresh;
   if (key === 'reasoningEffort') return fresh === undefined ? base : normalizeReasoningEffort(fresh);
   if (key === 'tokenComponents') {
     // A warm tick may introduce aggregate-only fallback data. Boolean
@@ -2309,6 +2321,12 @@ function deltaValue(base, fresh, anchor, key) {
       delete result.parentSessionId;
       delete result.parentClient;
       applyParentLink(result, base?.parentSessionId ? base : fresh || {});
+      const freshModelAt = timestampMs(fresh?.lastUsedAt);
+      const retainedModelAt = timestampMs(base?.lastUsedAt);
+      if (freshModelAt < retainedModelAt) {
+        if (hasOwn(base || {}, 'latestModel')) result.latestModel = base.latestModel;
+        else delete result.latestModel;
+      } else if (!hasOwn(fresh || {}, 'latestModel') && freshModelAt > retainedModelAt) result.latestModel = null;
       // Compare before lastUsedAt is projected to the maximum: a missing
       // setting preserves only the same observation, never a newer turn.
       if (isSessionReasoningEffortClient(sample.client)) {
@@ -2348,6 +2366,7 @@ module.exports = {
   normalizeClientName,
   normalizeModelName,
   normalizeModelNameForClient,
+  normalizeLatestModel,
   normalizeDeviceRecord,
   normalizePeriod,
   projectRollupFromSessions,

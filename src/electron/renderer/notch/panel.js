@@ -1081,6 +1081,7 @@
     function sessionModelMetadata(row) {
       return sessionRows.sessionModelMetadataNode(document, row, {
         translate: t, view: limitWindowsView, formatTokens: formatBreakdownTokens,
+        latestModelLabel: t('session.latestModel'),
         unattributedLabel: t('dashboard.tooltip.unclassified')
       });
     }
