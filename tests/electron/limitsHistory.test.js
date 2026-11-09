@@ -979,6 +979,17 @@ test('Windows history uses the same fixed canvas when native window regions are 
   assert.deepEqual(f.shapes.at(-1), { y: 378, height: 300 });
 });
 
+test('a failed native region reset closes history without revealing a destroyed window', async t => {
+  const f = previewFixture(t, { nativeRegions: true });
+  f.autoMeasure = false;
+  await f.open();
+  f.window.setShape = () => { throw new Error('native region unavailable'); };
+  assert.doesNotThrow(() => f.fromPanel('resize', 360));
+  assert.equal(f.destroyed, true);
+  assert.equal(f.shown(), false);
+  assert.equal(f.frame, null);
+});
+
 test('read-only previews never request focus, even for explicit opens and close', async t => {
   const f = previewFixture(t);
   await f.open('a', true);

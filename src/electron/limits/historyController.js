@@ -365,6 +365,7 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
         y: Math.round(Math.max(workArea.y + 8, Math.min(anchor.y - 22, workArea.y + workArea.height - nextHeight - 8))) };
       placeFrame(target, animatePlacement || animate === true);
       animatePlacement = false;
+      if (!visible) return; // Native shape recovery can close the card.
       if (!presented) {
         presented = true;
         if (platform === 'darwin') {
