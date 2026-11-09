@@ -45,9 +45,9 @@ function applyLine(state, line, position, contextStart) {
   const prefix = line.subarray(0, 512).toString('utf8');
   const configuration = /"type"\s*:\s*"turn_context"/.test(prefix);
   if (configuration && position >= contextStart) state.reasoningEffort = null;
-  // Codex writes type first or after timestamp. Match only that root envelope:
+  // Codex writes type first or after timestamp and an optional root ordinal:
   // a bounded-out configuration invalidates the model; nested tool data cannot.
-  if (position >= contextStart && /^\s*\{\s*(?:"timestamp"\s*:\s*"(?:\\.|[^"\\])*"\s*,\s*)?"type"\s*:\s*"turn_context"\s*[,}]/.test(prefix)) {
+  if (position >= contextStart && /^\s*\{\s*(?:"timestamp"\s*:\s*"(?:\\.|[^"\\])*"\s*,\s*)?(?:"ordinal"\s*:\s*(?:0|[1-9]\d*)\s*,\s*)?"type"\s*:\s*"turn_context"\s*[,}]/.test(prefix)) {
     state.latestModel = null;
   }
   // Metadata records are small; never decode arbitrarily large tool output.

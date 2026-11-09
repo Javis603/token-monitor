@@ -147,17 +147,17 @@ test('explicit provider model evidence does not require a wall-clock timestamp',
   assert.equal(sessionModelLabel(period({ lastUsedAt: '' }).sessions['codex:s']), '2 models');
 });
 
-for (const timestampFirst of [false, true]) test(`oversized Codex configuration clears stale model without widening reads (timestamp first: ${timestampFirst})`, t => {
+for (const envelope of ['type-first', 'timestamp-first', 'paginated']) test(`oversized Codex configuration clears stale model without widening reads (${envelope})`, t => {
   const f = fixture(t, 'codex');
   fs.writeFileSync(f.file, line({ type: 'turn_context', payload: { model: 'older' } }));
   assert.equal(f.read().latestModel, 'older');
-  const nested = line({ timestamp: at, type: 'response_item', payload: {
+  const nested = line({ timestamp: at, ...(envelope === 'paginated' ? { ordinal: 41 } : {}), type: 'response_item', payload: {
     type: 'turn_context', model: 'nested', instructions: 'x'.repeat(100_000)
   } });
   fs.appendFileSync(f.file, nested);
   assert.equal(f.read().latestModel, 'older', 'oversized nested tool metadata is not configuration');
-  const configuration = timestampFirst
-    ? { timestamp: at, type: 'turn_context', payload: { model: 'newer', instructions: 'x'.repeat(100_000) } }
+  const configuration = envelope !== 'type-first'
+    ? { timestamp: at, ...(envelope === 'paginated' ? { ordinal: 42 } : {}), type: 'turn_context', payload: { model: 'newer', instructions: 'x'.repeat(100_000) } }
     : { type: 'turn_context', payload: { model: 'newer', instructions: 'x'.repeat(100_000) }, timestamp: at };
   const append = line(configuration);
   const before = f.bytesRead();
