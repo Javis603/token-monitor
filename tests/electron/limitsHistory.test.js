@@ -335,6 +335,32 @@ test('contradictory devices cannot fabricate resets or jumps during a healthy so
   assert.deepEqual(f.query({ grain: 'hour', day: dayKey(f.clock) }).windows[0].distribution, before);
 });
 
+for (const failed of [false, true]) {
+  test(`repeated compatible source handoffs retain same-day net changes after restart (failed: ${failed})`, t => {
+    const f = databaseFixture(t, at(6, 12));
+    const sample = (hour, minute, value, source) => action(at(6, hour, minute), value, { source, reset: at(9, 1, 57) });
+    f.record([sample(10, 0, 54, 'a'), sample(10, 5, 55, 'a')]);
+    if (failed) f.record([{ account: accountA, source: 'a', failed: true }]);
+    f.record([sample(10, failed ? 10 : 40, 56, 'b')]);
+    f.reopen();
+    if (failed) f.record([{ account: accountA, source: 'b', failed: true }]);
+    f.record([sample(failed ? 10 : 11, 15, 56, 'a')]);
+    if (failed) f.record([{ account: accountA, source: 'a', failed: true }]);
+    f.record([sample(failed ? 10 : 11, failed ? 20 : 50, 58, 'b')]);
+    f.reopen();
+    const daily = f.query().windows[0];
+    assert.equal(daily.distribution.buckets.at(-1).value, 4);
+    assert.equal(daily.distribution.unallocated, 0);
+    assert.equal(daily.distribution.buckets.at(-1).uncertain, true);
+    assert.equal(daily.distribution.resets, 0);
+    assert.deepEqual(segments(daily.points).map(s => s.map(p => p.value)), [[54, 55, 56, 56, 58]]);
+    const hourly = f.query({ grain: 'hour', day: dayKey(f.clock) }).windows[0].distribution;
+    assert.equal(hourly.buckets.find(b => new Date(b.at).getHours() === 10).value, failed ? 4 : 2);
+    assert.equal(hourly.buckets.find(b => new Date(b.at).getHours() === 11).value, failed ? null : 2);
+    assert.equal(hourly.unallocated, 0);
+  });
+}
+
 test('a compatible takeover after device disagreement keeps its conflict boundary', t => {
   const f = databaseFixture(t);
   f.record([action(at(2, 10), 78, { source: 'a' }), action(at(2, 10, 5), 80, { source: 'a' }),
@@ -352,7 +378,7 @@ test('a compatible takeover after device disagreement keeps its conflict boundar
   }
 });
 
-test('inactive device failures do not interrupt an active observer; active failures permit uncertain takeover', t => {
+test('inactive device failures do not interrupt an active observer; active failures permit compatible takeover', t => {
   const f = databaseFixture(t);
   f.record([action(at(2, 10), 20, { source: 'a' }), { account: accountA, source: 'b', failed: true },
     action(at(2, 10, 5), 22, { source: 'a' })]);
@@ -360,8 +386,11 @@ test('inactive device failures do not interrupt an active observer; active failu
   assert.equal(segments(f.query().windows[0].points).length, 1);
   f.record([{ account: accountA, source: 'a', failed: true }]);
   f.reopen();
-  f.record([action(at(2, 10, 10), 25, { source: 'b' }), action(at(2, 10, 15), 26, { source: 'b' }),
-    action(at(2, 10, 20), 90, { source: 'a' }), action(at(2, 10, 20), 27, { source: 'b' })]);
+  f.record([action(at(2, 10, 10), 25, { source: 'b' }), action(at(2, 10, 15), 26, { source: 'b' })]);
+  f.reopen();
+  f.record([action(at(2, 10, 20), 90, { source: 'a' }), action(at(2, 10, 20), 27, { source: 'b' })]);
+  assert.equal(f.query().windows[0].distribution.buckets.at(-1).value, 7);
+  f.reopen();
   for (const grain of ['day', 'hour']) {
     const data = f.query({ grain, day: dayKey(f.clock) }).windows[0].distribution;
     const bucket = grain === 'day' ? data.buckets.at(-1) : data.buckets.find(b => new Date(b.at).getHours() === 10);

@@ -19,7 +19,7 @@ function response(status, body) {
 }
 const quota = { usages: [{ scope: 'FEATURE_CODING', detail: { used: 20, limit: 100 } }] };
 
-async function fixture(t, { override = 'TOKEN_MONITOR_SHARED_DIR', quotaResponse, failSettings = false, activeStaleSeed = false } = {}) {
+async function fixture(t, { override = 'TOKEN_MONITOR_SHARED_DIR', quotaResponse, failSettings = false, activeStaleSeed = false, savedRefresh = true } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-probe-test-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const env = { [override]: root, KIMI_CODE_API_KEY: 'must-not-vouch' };
@@ -38,7 +38,7 @@ async function fixture(t, { override = 'TOKEN_MONITOR_SHARED_DIR', quotaResponse
   const oldCache = fs.readFileSync(cachePath, 'utf8');
   const seed = activeStaleSeed ? oldSeed : jwt('new-seed', 90 * 86400);
   const rotated = pair('new');
-  let settings = { kimiWebRefreshToken: oldSeed };
+  let settings = savedRefresh ? { kimiWebRefreshToken: oldSeed } : {};
   const exchanged = [];
   const api = createCredentialCommands({
     getSettings: () => settings,
@@ -86,7 +86,7 @@ for (const override of ['TOKEN_MONITOR_SHARED_DIR', 'XDG_CONFIG_HOME', 'APPDATA'
 }
 
 test('a rejected Kimi quota probe leaves the active cache unchanged', async (t) => {
-  const f = await fixture(t, { quotaResponse: () => response(401, {}) });
+  const f = await fixture(t, { savedRefresh: false, quotaResponse: () => response(401, {}) });
   const result = await f.api.saveCredential('kimi', { kimiWebAccessToken: f.seed });
   assert.equal(result.saved, false);
   assert.equal(result.verdict, 'invalid');
@@ -96,7 +96,7 @@ test('a rejected Kimi quota probe leaves the active cache unchanged', async (t) 
 test('a superseded Kimi probe cannot replace the active cache', async (t) => {
   const entered = Promise.withResolvers();
   const finish = Promise.withResolvers();
-  const f = await fixture(t, { quotaResponse: () => { entered.resolve(); return finish.promise; } });
+  const f = await fixture(t, { savedRefresh: false, quotaResponse: () => { entered.resolve(); return finish.promise; } });
   const pending = f.api.saveCredential('kimi', { kimiWebAccessToken: f.seed });
   await entered.promise;
   f.api.noteSettingsPatch({ kimiWebAccessToken: 'newer-choice' });
@@ -106,7 +106,7 @@ test('a superseded Kimi probe cannot replace the active cache', async (t) => {
 });
 
 test('a Kimi settings persistence failure rolls the staged cache back', async (t) => {
-  const f = await fixture(t, { failSettings: true });
+  const f = await fixture(t, { failSettings: true, savedRefresh: false });
   await assert.rejects(f.api.saveCredential('kimi', { kimiWebAccessToken: f.seed }), /credential storage failed/);
   assert.equal(fs.readFileSync(f.cachePath, 'utf8'), f.oldCache);
 });

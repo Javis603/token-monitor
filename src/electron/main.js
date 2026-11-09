@@ -195,6 +195,7 @@ const {
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
 const { createCredentialCommands } = require('./limits/credentialCommands');
+const { createMinimaxApiKeys } = require('./providers/minimax/apiKeys');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
 const { looksLikeKimiRefreshToken } = require('../shared/providers/kimi/desktopSession');
@@ -410,6 +411,7 @@ const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./
 const { createLatestWinsReconciler } = require('./latestWinsReconciler');
 const { createIcloudSyncStore } = require('./icloudSync');
 const { createIcloudSyncRuntime } = require('./icloudSyncRuntime');
+const { isCursorDetectedAccountCurrent } = require('../shared/providers/cursor/account');
 const {
   classifySettingsChange,
   diagnosticConfigurationFromSettings,
@@ -481,7 +483,8 @@ const {
   normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
-  normalizeEdgeDockSize
+  normalizeEdgeDockSize,
+  normalizeEdgeDockBubbleSize
 } = require('./edgeDock/geometry');
 const { buildEdgeDockCells } = require('./renderer/edgeDock/presentation');
 const edgeDockPresentationApi = require('./renderer/edgeDock/presentation');
@@ -552,7 +555,7 @@ function appWindowIcon() {
 const DEFAULT_WINDOW = { width: 340, height: 650 };
 const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
 const ZOOM_LIMITS = { min: 0.7, max: 1.6, step: 0.1 };
-const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
+const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensMonth', 'costMonth', 'bothMonth', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
 const HUB_MODE_VALUES = new Set(['local', 'client', 'host', 'icloud']);
 const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
 const COLLECTION_MODE_VALUES = new Set(['live', 'smart', 'interval']);
@@ -707,6 +710,8 @@ function defaultSettings() {
     edgeDockMacBackdrop: 'inherit',
     edgeDockWindowsBackdrop: 'inherit',
     edgeDockSize: 'medium',
+    edgeDockBubbleSize: 'inherit',
+    edgeDockBubbleCustomScale: 1,
     edgeDockCustomScale: 1,
     edgeDockSide: 'right',
     edgeDockFloatingX: null,
@@ -2138,11 +2143,11 @@ function migrateLimitProviders(value) {
   // Saved provider selections are user intent. Normalize ids, but do not expand
   // older defaults into today's full provider list because the saved shape is
   // indistinguishable from a deliberate "only these providers" choice.
-  return parseLimitProviders(value).join(',');
+  return require('./plugins/limits').desktopProviderPreference(value, parseLimitProviders);
 }
 
 function migrateLimitProviderOrder(value) {
-  return parseLimitProviders(value).join(',') || defaultLimitProviderOrder();
+  return require('./plugins/limits').desktopProviderPreference(value, parseLimitProviders) || defaultLimitProviderOrder();
 }
 
 function migrateHomeLimitProviderOrder(value) {
@@ -2874,6 +2879,8 @@ function readSettings() {
     merged.edgeDockWarnColors = parseBoolean(merged.edgeDockWarnColors, false);
     merged.edgeDockMacBackdrop = normalizeEdgeDockBackdropMode(merged.edgeDockMacBackdrop);
     merged.edgeDockWindowsBackdrop = normalizeWindowsDockBackdropMode(merged.edgeDockWindowsBackdrop);
+    merged.edgeDockBubbleSize = normalizeEdgeDockBubbleSize(merged.edgeDockBubbleSize);
+    merged.edgeDockBubbleCustomScale = normalizeEdgeDockCustomScale(merged.edgeDockBubbleCustomScale);
     merged.edgeDockSize = normalizeEdgeDockSize(merged.edgeDockSize);
     merged.edgeDockCustomScale = normalizeEdgeDockCustomScale(merged.edgeDockCustomScale);
     merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
@@ -3517,13 +3524,19 @@ function limitInvalidationKey(scope) {
     || scope?.accountLabel
     || ''
   ).trim();
-  return account ? `${provider}:${account}` : `${provider}:*`;
+  if (account) return `${provider}:${account}`;
+  return provider === 'minimax' && scope?.source === 'api' ? `${provider}:source:api` : `${provider}:*`;
 }
 
 function rememberPendingLimitInvalidation(scope, reason, options = {}) {
   const refresh = options.refresh !== false;
   const normalized = { ...scope, provider: String(scope?.provider || '').trim().toLowerCase() };
   const key = limitInvalidationKey(normalized);
+  const broad = pendingLimitInvalidations.get(`${normalized.provider}:*`);
+  if (normalized.provider === 'minimax' && normalized.source === 'api' && broad?.clear) {
+    broad.refresh ||= refresh;
+    return;
+  }
   let clear = options.clear === true || pendingLimitInvalidations.get(key)?.clear === true;
   if (key.endsWith(':*')) {
     for (const pendingKey of pendingLimitInvalidations.keys()) {
@@ -6680,7 +6693,7 @@ function ensureTray() {
           home: true,
           project: settings?.projectsEnabled !== false,
           session: true,
-          limits: settings?.limitsEnabled !== false && parseLimitProviders(settings?.limitProviders).length > 0,
+          limits: settings?.limitsEnabled !== false && migrateLimitProviders(settings?.limitProviders).length > 0,
           trends: settings?.historyEnabled !== false,
           status: true
         }
@@ -7630,29 +7643,21 @@ function loadWindowFile(target, options = {}) {
     revealWindow(target, { inactive: options.inactive === true });
   };
   const waitForContent = options.waitForContent === true;
+  const readyChannel = waitForContent ? 'window:contentReady' : 'window:appearanceReady';
   const onContentReady = (event) => {
     if (event.sender === target.webContents) reveal();
   };
   const fallbackTimer = setTimeout(reveal, 2500);
   const cleanup = () => {
     clearTimeout(fallbackTimer);
-    ipcMain.removeListener('window:contentReady', onContentReady);
+    ipcMain.removeListener(readyChannel, onContentReady);
   };
   target.once('show', cleanup);
   target.once('closed', cleanup);
-  if (waitForContent) {
-    // A recreated window paints its static "0" defaults before the renderer's
-    // async stats fetch resolves; revealing on load would flash empty content.
-    // Wait until the renderer reports it has rendered real data instead.
-    ipcMain.on('window:contentReady', onContentReady);
-    target.webContents.once('did-finish-load', () => applyZoomFactor(target));
-  } else {
-    target.once('ready-to-show', reveal);
-    target.webContents.once('did-finish-load', () => {
-      applyZoomFactor(target);
-      reveal();
-    });
-  }
+  // Startup needs the saved appearance, not stats or provider/network work.
+  // Window replacements can still wait for real content to avoid empty flashes.
+  ipcMain.on(readyChannel, onContentReady);
+  target.webContents.once('did-finish-load', () => applyZoomFactor(target));
   target.webContents.once('did-fail-load', (_event, code, description) => {
     console.log(`[window] renderer load failed: ${code} ${description}`);
     reveal();
@@ -7696,6 +7701,7 @@ function createWindow(boundsOverride, options = {}) {
     ...(process.platform === 'darwin' ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      zoomFactor: clampZoom(settings.zoomFactor),
       contextIsolation: true,
       nodeIntegration: false
     }
@@ -7785,10 +7791,9 @@ function createWindow(boundsOverride, options = {}) {
   if (!options.previousWindow) win.webContents.on('did-finish-load', () => {
     sendFloatingBubbleState();
     // Only report a window that is already on screen. A window still awaiting its
-    // reveal reports isVisible() === false, and loadWindowFile({ waitForContent })
-    // reveals it *because* the renderer painted real content — pushing "hidden"
-    // here stops that render, so the reveal could only come from the 2.5s
-    // fallback. Electron reports visibilityState 'visible' for a show:false
+    // reveal reports isVisible() === false. loadWindowFile waits for renderer
+    // appearance/content readiness; pushing "hidden" here prevents that work,
+    // leaving only the 2.5s fallback. Electron reports visibilityState 'visible' for a show:false
     // window, which is the default the renderer keeps; trayMode instead seeds the
     // hidden state through the windowHidden query flag. Keep this listener for
     // later loads too: Cmd+Shift+R retains that query flag, so a visible tray
@@ -7994,8 +7999,17 @@ async function cursorStatusValue({ discover = false } = {}) {
   }
   const disabled = new Set(normalizeCursorDisabledAccountIds(settings?.cursorDisabledAccountIds));
   const manual = new Set(normalizeCursorAccountIds(settings?.cursorManualAccountIds));
-  const safeAccounts = await Promise.all(accounts.map(async (account) => {
+  const desktop = cursorAuth.readCursorDesktopSignIn();
+  const listedAccounts = await Promise.all(accounts.map(async (account) => {
     const probeResult = await cursorProbe.probe(account.sessionToken);
+    const expired = !probeResult.ok && probeResult.error?.kind === 'unauthorized';
+    // Desktop-detected accounts follow the desktop sign-in; manual ones stay
+    // until removed. Hidden accounts keep their credentials and usage history.
+    if (!manual.has(account.id) && !isCursorDetectedAccountCurrent({
+      desktop,
+      userId: cursorAuth.canonicalCursorUserId(account.userId || account.id),
+      unauthorized: expired
+    })) return null;
     return {
       id: account.id,
       enabled: !disabled.has(account.id),
@@ -8003,10 +8017,11 @@ async function cursorStatusValue({ discover = false } = {}) {
       email: probeResult.ok ? probeResult.user?.email || '' : '',
       label: account.label || '',
       membershipType: probeResult.ok ? probeResult.usage.membershipType || '' : '',
-      expired: !probeResult.ok && probeResult.error?.kind === 'unauthorized',
+      expired,
       error: probeResult.ok ? '' : probeResult.error?.message || ''
     };
   }));
+  const safeAccounts = listedAccounts.filter(Boolean);
   return {
     loggedIn: safeAccounts.length > 0,
     accounts: safeAccounts,
@@ -8233,6 +8248,7 @@ app.whenReady().then(() => {
     patch = skinSelection.patch;
     const contentRuntime = getSyncContentRuntime();
     credentialCommands.noteSettingsPatch(patch);
+    minimaxApiKeys.noteSettingsPatch(patch);
     const previousSettingsState = settings;
     const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
     const previousClients = settings.clients;
@@ -8397,6 +8413,8 @@ app.whenReady().then(() => {
       edgeDockWarnColors: parseBoolean(patch.edgeDockWarnColors ?? settings.edgeDockWarnColors, false),
       edgeDockMacBackdrop: normalizeEdgeDockBackdropMode(patch.edgeDockMacBackdrop ?? settings.edgeDockMacBackdrop),
       edgeDockWindowsBackdrop: normalizeWindowsDockBackdropMode(patch.edgeDockWindowsBackdrop ?? settings.edgeDockWindowsBackdrop),
+      edgeDockBubbleSize: normalizeEdgeDockBubbleSize(patch.edgeDockBubbleSize ?? settings.edgeDockBubbleSize),
+      edgeDockBubbleCustomScale: normalizeEdgeDockCustomScale(patch.edgeDockBubbleCustomScale ?? settings.edgeDockBubbleCustomScale),
       edgeDockSize: normalizeEdgeDockSize(patch.edgeDockSize ?? settings.edgeDockSize),
       edgeDockCustomScale: normalizeEdgeDockCustomScale(patch.edgeDockCustomScale ?? settings.edgeDockCustomScale),
       // `null` is a real value here (back to the automatic default), so the
@@ -8421,7 +8439,7 @@ app.whenReady().then(() => {
           { currencyApi: { normalizeCurrency } }
         )
       },
-      limitProviders: patch.limitProviders !== undefined ? parseLimitProviders(patch.limitProviders).join(',') : settings.limitProviders,
+      limitProviders: patch.limitProviders !== undefined ? migrateLimitProviders(patch.limitProviders) : settings.limitProviders,
       limitProviderOrder: patch.limitProviderOrder !== undefined ? migrateLimitProviderOrder(patch.limitProviderOrder) : settings.limitProviderOrder,
       clientDisplayOrder: patch.clientDisplayOrder !== undefined ? migrateClientDisplayOrder(patch.clientDisplayOrder) : (settings.clientDisplayOrder || ''),
       hiddenClients: patch.hiddenClients !== undefined ? migrateClientSelection(patch.hiddenClients, normalizeHiddenClients) : migrateClientSelection(settings.hiddenClients, normalizeHiddenClients),
@@ -8665,6 +8683,9 @@ app.whenReady().then(() => {
     if (patch && patch.edgeDockCustomScale !== undefined && edgeDockController?.isRunning()) {
       edgeDockController.previewScale(patch.edgeDockCustomScale);
     }
+    if (patch && patch.edgeDockBubbleCustomScale !== undefined && edgeDockController?.isRunning()) {
+      edgeDockController.previewScale(patch.edgeDockBubbleCustomScale, 'bubble');
+    }
     if (patch && patch.notchCustomScale !== undefined && notchController?.isRunning()) {
       notchController.previewScale(patch.notchCustomScale);
     }
@@ -8782,6 +8803,7 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle('stats:get', async (_event, options) => {
+    if (options?.force === true && options?.feedback === true) void pluginRuntime?.refreshLimits().catch(error => console.log(`[plugins] Limits refresh failed: ${error.message}`));
     const revision = statsPushRevision;
     const fetched = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
     // A push from the same source/generation supersedes its pending read. A
@@ -9512,6 +9534,23 @@ app.whenReady().then(() => {
     void queueLimitInvalidation({ provider: 'opencode' }, 'ambient-toggle', { clear: true });
     return { ok: true };
   });
+  const minimaxApiKeys = createMinimaxApiKeys({
+    getSettings: () => settings, saveSettings,
+    probeDeps: () => electronProviderDeps({ env: {}, signal: AbortSignal.timeout(15_000) }),
+    changed: (accountKey, refresh, reason) => {
+      credentialCommands.noteSettingsPatch({ minimaxApiKey: '' });
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      void queueLimitInvalidation({ provider: 'minimax', source: 'api', accountKey }, reason, { clear: true, refresh });
+      pushSettingsToRenderer();
+    }
+  });
+  ipcMain.handle('minimax:getKeys', () => minimaxApiKeys.getKeys());
+  for (const method of ['addKey', 'removeKey']) {
+    ipcMain.handle(`minimax:${method}`, async (_event, ...args) => {
+      try { return await minimaxApiKeys[method](...args); }
+      catch (error) { return { ok: false, error: error?.message || 'Could not save MiniMax API key' }; }
+    });
+  }
   ipcMain.handle('openrouter:getProfiles', async () => {
     return {
       profiles: redactOpenRouterProfilesForRenderer(settings.openrouterProfiles || {}),
@@ -9928,6 +9967,7 @@ app.whenReady().then(() => {
   function startPluginRuntime() {
     try {
       pluginRuntime = createPluginRuntime({
+        fetchImpl: electronLimitsFetch(),
         getAppSettings: settingsForRenderer,
         electron: { app, BrowserWindow, utilityProcess: require('electron').utilityProcess, Notification, ipcMain, nativeImage, session, shell, dialog },
         userDataDir: app.getPath('userData'),

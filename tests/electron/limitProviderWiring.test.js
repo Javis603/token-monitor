@@ -99,6 +99,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     kimiWebRefreshToken: ['providers', 'kimi', 'webRefreshToken'],
     copilotApiToken: ['providers', 'copilot', 'apiToken'],
     zedCookie: ['providers', 'zed', 'cookie'],
+    mistralCookie: ['providers', 'mistral', 'cookie'],
     typesafeCookie: ['providers', 'typesafe', 'cookie'],
     stepfunToken: ['providers', 'stepfun', 'token'],
     notionCookie: ['providers', 'notion', 'cookie'],
@@ -114,6 +115,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     devinBearerToken: ['providers', 'devin', 'bearerToken'],
     deepseekApiKey: ['providers', 'deepseek', 'apiKey'],
     openrouterProfiles: ['providers', 'openrouter', 'profiles'],
+    minimaxApiProfiles: ['providers', 'minimax', 'profiles'],
     minimaxApiKey: ['providers', 'minimax', 'apiKey'],
     volcengineAccessKeyId: ['providers', 'volcengine', 'accessKeyId'],
     volcengineSecretAccessKey: ['providers', 'volcengine', 'secretAccessKey'],
@@ -167,6 +169,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     qoder: ['qoderCookie', 'qoderSite'],
     deepseek: ['deepseekApiKey'],
     devin: ['devinBearerToken', 'devinOrganization'],
+    mistral: ['mistralCookie'],
     typesafe: ['typesafeCookie'],
     stepfun: ['stepfunToken'],
     notion: ['notionCookie', 'notionWorkspaceId'],
@@ -174,7 +177,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     manus: ['manusSessionToken'],
     muse: ['museWebCookie'],
     openrouter: ['openrouterProfiles'],
-    minimax: ['minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode'],
+    minimax: ['minimaxApiProfiles', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode'],
     volcengine: [
       'volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion',
       'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion'
@@ -288,7 +291,7 @@ test('settings:update normalizes provider fields and strips separately managed a
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
     'traeCookie', 'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
-    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'kimiWebRefreshToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId', 'manusSessionToken', 'museWebCookie', 'opendesignCookie'
+    'mistralCookie', 'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'kimiWebRefreshToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId', 'manusSessionToken', 'museWebCookie', 'opendesignCookie'
   ].sort());
   for (const key of normalizedKeys) {
     const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test'
@@ -468,6 +471,17 @@ test('account projections redact secrets while preserving profile metadata and s
   assert.equal(status.clineCredentialSource, 'settings');
 });
 
+test('MiniMax profiles keep the legacy configured flag truthful', () => {
+  const profiles = accountStatusProjection({ minimaxApiProfiles: { work: { apiKey: 'saved-secret', billingMode: 'api' } } }, {});
+  assert.equal(profiles.minimaxApiKeyConfigured, true);
+  assert.equal(profiles.minimaxApiKeySource, 'settings');
+  for (const env of [{}, { MINIMAX_CODING_API_KEY: 'env-secret' }]) {
+    const disabled = accountStatusProjection({ minimaxApiProfiles: { work: { apiKey: 'saved-secret', enabled: false } } }, env);
+    assert.equal(disabled.minimaxApiKeyConfigured, false);
+    assert.equal(disabled.minimaxApiKeySource, '');
+  }
+});
+
 test('the renderer receives serializable account forms but no credential declarations', () => {
   const forms = limitAccountFormsForRenderer();
   const generated = LIMIT_PROVIDER_IDS.filter((id) => forms.some((form) => form.id === id));
@@ -591,10 +605,10 @@ test('MiniMax implicit region remains env-driven after unrelated saves and reloa
   assert.deepEqual(change.limitScopes, [{ provider: 'minimax' }]);
   assert.equal(change.usageStructural, false);
   const { settingsLimitInvalidationPlan } = require('../../src/electron/deviceRuntimeCoordinator');
-  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax' }, reason: 'settings-change', options: { clear: true } }]);
+  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax', source: 'api' }, reason: 'settings-change', options: { clear: true } }]);
 });
 
-test('MiniMax billing choice survives reload and clears only its provider quota', () => {
+test('MiniMax key billing choice survives reload and invalidates only its API source', () => {
   const { initialAccountSettings } = require('../../src/electron/limits/accountSettings');
   assert.equal(initialAccountSettings({}).minimaxBillingMode, 'token-plan');
   assert.equal(limitsConfigFromSettings({}, { env: {} }).minimaxBillingMode, 'token-plan');
@@ -611,7 +625,7 @@ test('MiniMax billing choice survives reload and clears only its provider quota'
   assert.deepEqual(change.limitScopes, [{ provider: 'minimax' }]);
   assert.equal(change.usageStructural, false);
   const { settingsLimitInvalidationPlan } = require('../../src/electron/deviceRuntimeCoordinator');
-  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax' }, reason: 'settings-change', options: { clear: true } }]);
+  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax', source: 'api' }, reason: 'settings-change', options: { clear: true } }]);
 });
 
 test('Trae credential source follows the usable credential after a malformed stored value', () => {

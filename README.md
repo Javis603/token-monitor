@@ -30,7 +30,7 @@
 
 ## What is Token Monitor?
 
-A desktop app that shows live token usage and AI Tool Limits across 49+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project. It lives wherever you look: the main window, the MacBook notch, the menu bar or system tray, the edge of the screen, a floating bubble, and native macOS widgets.
+A desktop app that shows live token usage and AI Tool Limits across 53+ AI coding tools — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio, and more — with real-time multi-device sync, historical usage trends, and breakdowns by tool, device, model, session, or project. It lives wherever you look: the main window, the MacBook notch, the menu bar or system tray, the edge of the screen, a floating bubble, and native macOS widgets.
 
 ## Supported Tools
 
@@ -44,6 +44,7 @@ Token usage, AI Tool Limits and session details from the AI coding tools and pro
     <img src=".github/assets/tools-icon/openclaw.png" width="40" alt="OpenClaw" title="OpenClaw" />
     <img src=".github/assets/tools-icon/cursor.png" width="40" alt="Cursor" title="Cursor" />
     <img src=".github/assets/tools-icon/antigravity.png" width="40" alt="Antigravity" title="Antigravity" />
+    <img src=".github/assets/tools-icon/gemini-cli.png" width="40" alt="Gemini CLI" title="Gemini CLI" />
     <img src=".github/assets/tools-icon/cline.png" width="40" alt="Cline" title="Cline" />
     <img src=".github/assets/tools-icon/amp.png" width="40" alt="Amp" title="Amp" />
     <img src=".github/assets/tools-icon/droid.png" width="40" alt="Factory Droid" title="Factory Droid" />
@@ -75,6 +76,9 @@ Token usage, AI Tool Limits and session details from the AI coding tools and pro
     <img src=".github/assets/tools-icon/devin.png" width="40" alt="Devin" title="Devin" />
     <img src=".github/assets/tools-icon/fx.png" width="40" alt="fx" title="fx" />
     <img src=".github/assets/tools-icon/minimax.png" width="40" alt="MiniMax" title="MiniMax" />
+    <img src=".github/assets/tools-icon/mistral.png" width="40" alt="Mistral Vibe" title="Mistral Vibe" />
+    <img src=".github/assets/tools-icon/prime-agent.png" width="40" alt="Prime Agent" title="Prime Agent" />
+    <img src=".github/assets/tools-icon/jcode.png" width="40" alt="Jcode" title="Jcode" />
     <img src=".github/assets/tools-icon/typesafe.png" width="40" alt="TypeSafe" title="TypeSafe" />
     <img src=".github/assets/tools-icon/openrouter.png" width="40" alt="OpenRouter" title="OpenRouter" />
     <img src=".github/assets/tools-icon/volcengine.png" width="40" alt="Volcengine" title="Volcengine" />
@@ -155,7 +159,7 @@ Launch the app to start tracking this device locally, with no hub setup required
 
 ### Tracking usage
 
-- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 38+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
+- **Live token tracking** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode, and 42+ AI tools, with the UI updating within seconds of each turn (full list in the table above)
 - **Live token rate** — an optional live readout of generation speed in `tok/s` or total burn in `tok/min`
 - **Per-session detail** — open a session to see tokens per prompt, expandable to each reply's exact token split and tools used (read on-demand from local transcripts or databases, never synced)
 - **Cache hit statistics** — click any tool or model to expand a detailed breakdown of input tokens (cache hit vs miss), output tokens, and hit-rate percentages
@@ -165,7 +169,7 @@ Launch the app to start tracking this device locally, with no hub setup required
 
 ### Limits, trends & export
 
-- **AI Tool Limits detection** — provider-specific session, daily, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 32+ providers, including multiple OpenRouter/third-party profiles and balance-style accounts (Claude credits, DeepSeek prepaid balance and spend history, third-party balances). Kimi web credentials rotate on use: once the widget owns a token pair (the desktop-app session or a pasted refresh token), using the same account's web console signs that browser session out on the next refresh
+- **AI Tool Limits detection** — provider-specific session, daily, weekly, billing, and credits windows for Claude Code, Codex, Cursor, OpenRouter, third-party APIs, GLM, Kimi, and 33+ providers, including multiple OpenRouter/third-party profiles and balance-style accounts (Claude credits, DeepSeek prepaid balance and spend history, third-party balances). Kimi web credentials rotate on use: once the widget owns a token pair (the desktop-app session or a pasted refresh token), using the same account's web console signs that browser session out on the next refresh
 - **Multiple accounts & Codex switching** — track several accounts per provider, each with its own limits; a tracked Codex account can be switched as the active local account in one click, without re-authenticating
 - **Codex reset forecast** — an optional third-party forecast below Codex limits, showing the expected reset time, the reset type (Regular or Banked), and when the window last reset
 - **Preserve deleted session usage** — many tools prune old sessions (Claude Code drops transcripts after 30 days by default), losing that history. When enabled, Token Monitor archives observed daily tool/model usage locally so the heatmap and trends survive even after the source files are gone (see [Session data retention](#session-data-retention) below)
@@ -217,6 +221,7 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor IDE / Cursor CLI / Grok Bot | `~/.config/tokscale/cursor-cache/` (account-level usage export) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.gemini/` (`antigravity/`, `antigravity-ide/`, `antigravity-backup/`, `antigravity-cli/conversations/`) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/gemini-cli.png" width="28" alt="Gemini CLI" /> | Gemini CLI | `~/.gemini/tmp/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks (`.../saoudrizwan.claude-dev/tasks/`), `~/.cline/data/sessions/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/amp.png" width="28" alt="Amp" /> | Amp | `~/.local/share/amp/threads/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/droid.png" width="28" alt="Factory Droid" /> | Factory Droid | `~/.factory/sessions/` | ✅ | ✅ | — |
@@ -248,6 +253,9 @@ Token Monitor supports token usage, account-limit checks, and session details se
 | <img src=".github/assets/tools-icon/devin.png" width="28" alt="Devin" /> | Devin CLI / Devin Desktop | `~/.local/share/devin/cli/sessions.db`, `<platform-app-data>/Devin/User/acp-events/` | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/fx.png" width="28" alt="fx" /> | fx | `~/.fx/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/minimax.png" width="28" alt="MiniMax" /> | MiniMax / MiniMax Code | `~/.minimax/v2/sessions/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/mistral.png" width="28" alt="Mistral" /> | Mistral Vibe | `$VIBE_HOME/logs/session/` (`~/.vibe/logs/session/`); Mistral Admin cookie (Included API / Vibe monthly allowance and credit balance) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/prime-agent.png" width="28" alt="Prime Agent" /> | Prime Agent | `~/.prime/agent/` (`sessions/`, `session-artifacts/`) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/jcode.png" width="28" alt="Jcode" /> | Jcode | `~/.jcode/sessions/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | TypeSafe Console Cookie (billing balance and estimated token spend via usage data) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | OpenRouter API key (usage/key limit; balance when credits access is authorized, documented for Management keys) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Ark API key or Volcengine AK/SK (Ark Coding Plan & Agent Plan quota via Volcengine API) | — | ✅ | — |
@@ -265,7 +273,8 @@ Token Monitor supports token usage, account-limit checks, and session details se
 
 <br>
 
-- Paths above are the defaults. Token Monitor follows the same environment overrides Tokscale does — `$XDG_DATA_HOME` for the `~/.local/share/` roots, and per-tool variables such as `$CODEX_HOME`, `$SENPI_CODING_AGENT_DIR`, `$SENPI_CODING_AGENT_SESSION_DIR`, `$GROK_HOME`, `$HERMES_HOME`, `$GOOSE_PATH_ROOT`, `$KIMI_CODE_HOME`, `$UNSLOTH_STUDIO_HOME`, `$LM_STUDIO_HOME`, `$DSH_HOME`, `$REASONIX_STATE_HOME`, `$REASONIX_HOME` and the `$CLINE_*` family.
+- Paths above are the defaults. Token Monitor follows the same environment overrides Tokscale does — `$XDG_DATA_HOME` for the `~/.local/share/` roots, and per-tool variables such as `$CODEX_HOME`, `$GEMINI_CLI_HOME`, `$SENPI_CODING_AGENT_DIR`, `$SENPI_CODING_AGENT_SESSION_DIR`, `$GROK_HOME`, `$HERMES_HOME`, `$GOOSE_PATH_ROOT`, `$KIMI_CODE_HOME`, `$UNSLOTH_STUDIO_HOME`, `$LM_STUDIO_HOME`, `$DSH_HOME`, `$REASONIX_STATE_HOME`, `$REASONIX_HOME` and the `$CLINE_*` family.
+- Gemini CLI supports `$GEMINI_CLI_HOME` on the host; WSL discovery checks only the default Linux `~/.gemini/tmp/`. Fresh installs track it by default; existing saved tool selections must enable it in Settings → tools.
 - Muse Code subscription limits use `muse usage --json` from Muse Code 1.4.13+ and its existing sign-in. Missing allowance and API-key billing do not provide quota percentages. See the [Muse data-source notes](docs/providers/muse.md).
 - Goose counts all session usage on its creation day, including usage on later days. Remote goosed servers and custom scan paths are not supported. See [Goose source notes](docs/providers/goose.md).
 - CatPaw is off by default; enable it in Settings → tools. It reads domestic and overseas assistant databases on macOS and Windows. See [CatPaw source notes](docs/providers/catpaw.md) for paths and verification boundaries.

@@ -51,7 +51,7 @@ const SESSION_STATE_GLYPHS = sessionLive.sessionStateMarkup({
   waiting: 'edge-dock-session-waiting'
 });
 
-const BRAND_VENDOR_COLORS = { ...clientColors };
+const BRAND_VENDOR_COLORS = { ...window.TokenMonitorUsageCharts.modelColors };
 const SVG_NS = 'http://www.w3.org/2000/svg';
 // Inset the thicker quota stroke so its outer edge stays within the 42px ring.
 const RING_RADIUS = 18.5;
@@ -235,7 +235,7 @@ function applyAppearance(payload) {
     else style.removeProperty(name);
   }
   const vendors = themePresetsApi.mergeVendorColors(BRAND_VENDOR_COLORS, appearance.vendorColors);
-  for (const vendor of Object.keys(BRAND_VENDOR_COLORS)) clientColors[vendor] = vendors[vendor];
+  window.TokenMonitorUsageCharts.applyVendorColors(vendors);
   const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(appearance);
   style.setProperty('--ui-font', interfaceFont);
   style.setProperty('--display-font', displayFont);
@@ -319,17 +319,19 @@ function hasMask(id) {
   probe.style.visibility = 'hidden';
   document.body.append(probe);
   const computed = getComputedStyle(probe);
-  const image = computed.webkitMaskImage || computed.maskImage || 'none';
+  const mask = computed.webkitMaskImage || computed.maskImage || 'none';
+  const image = mask !== 'none' ? mask : computed.backgroundImage;
   probe.remove();
   const supported = Boolean(id) && image !== 'none';
   maskSupport.set(id, supported);
   return supported;
 }
 
-function markNode(id, color) {
+function markNode(id, color, model = false) {
   const mark = el('span', 'edge-dock-mark');
   if (hasMask(id)) mark.classList.add(`row-icon-${id}`);
   else mark.classList.add('is-fallback');
+  if (model) mark.classList.add('model-icon');
   if (color) mark.style.setProperty('--ring-color', color);
   return mark;
 }
@@ -1730,7 +1732,7 @@ function appendLiveRateDetails(card, cell) {
       continue;
     }
     const row = el('div', 'edge-dock-rate-model');
-    const mark = markNode(modelVendorFor(entry[0]) || 'token-monitor');
+    const mark = markNode(modelVendorFor(entry[0]) || 'token-monitor', null, true);
     mark.setAttribute('aria-hidden', 'true');
     row.append(mark, el('span', 'edge-dock-rate-model-name', entry[0]), el('span', 'edge-dock-rate-model-value', entry[1]));
     list.append(row);
@@ -1823,7 +1825,7 @@ function statCard(cell) {
     applyBarScale(fill, Math.max(0.02, entry.tokens / top));
     meter.append(fill);
     row.append(
-      markNode(entry.id, entry.color),
+      markNode(entry.id, entry.color, breakdownMode === 'models'),
       el('span', 'edge-dock-client-name', entry.name),
       el('span', 'edge-dock-client-tokens', formatBreakdownTokens(entry.tokens)),
       el('span', 'edge-dock-client-share', `${Math.round((entry.tokens / sum) * 100)}%`),
@@ -1929,8 +1931,8 @@ function clearCardSwitch() {
   motion.ghost.remove();
 }
 
-function captureCardSwitch(previous, sameCard) {
-  if (surface !== 'bubble' || !previous || prefersReducedMotion() || document.visibilityState === 'hidden') {
+function captureCardSwitch(previous, sameCard, opening = false) {
+  if (surface !== 'bubble' || !previous || opening || prefersReducedMotion() || document.visibilityState === 'hidden') {
     clearCardSwitch();
     return null;
   }
@@ -1988,7 +1990,10 @@ function commitCard(card, cellId) {
     .filter(list => !list.closest('.edge-dock-session-family'));
   const scrollTops = sameCard ? scrollLists(previous).map(list => list.scrollTop) : [];
   const focusedGroup = sameCard ? document.activeElement?.dataset?.sessionGroupKey : null;
-  const switchMotion = captureCardSwitch(previous, sameCard);
+  // The native window stays visible at zero opacity between hovers, so page
+  // visibility cannot distinguish a new opening from a continuous switch.
+  const opening = previous?.dataset.reveal !== card.dataset.reveal;
+  const switchMotion = captureCardSwitch(previous, sameCard, opening);
   const resetSnapshot = cardResetAnimator.capture(previous || contentLayer);
   contentLayer.replaceChildren(card);
   overflowText.refresh();
@@ -2073,8 +2078,17 @@ function renderBubble(payload) {
     stagingLayer.replaceChildren();
     return;
   }
+  const previous = contentLayer.querySelector('.edge-dock-card');
+  if (previous && previous.dataset.reveal !== String(payload.reveal)) {
+    // Native fade-in can start before the placement ACK reaches this page.
+    // Hide the old reading before reporting a size, even with reduced motion.
+    clearCardSwitch();
+    previous.style.visibility = 'hidden';
+  }
   const retained = cell.kind === 'plugin' && contentLayer.querySelector('.edge-dock-card-plugin:not([aria-hidden="true"])');
   if (retained && retained.dataset.pluginRef === cell.ref && retained.dataset.cellId === cell.id) {
+    retained.dataset.reveal = String(payload.reveal);
+    retained.style.visibility = '';
     retained.style.transform = contentTransform;
     const view = pluginHost?.state('edgeDock', cell.ref);
     const caption = retained.querySelector('.edge-dock-stat-caption'); if (caption) caption.textContent = view?.title || cell.ref;
@@ -2084,6 +2098,7 @@ function renderBubble(payload) {
   }
   const card = cell.kind === 'stat' ? statCard(cell) : cell.kind === 'plugin' ? pluginCard(cell) : providerCard(cell);
   card.dataset.cellId = cell.id;
+  card.dataset.reveal = String(payload.reveal);
   card.style.transform = contentTransform;
   pluginContent?.retain(cell.kind === 'plugin' ? [] : [`edgeDock.${cell.kind}.content`]);
   if (cell.kind !== 'plugin' && pluginContent?.hasTarget(`edgeDock.${cell.kind}.content`)) {

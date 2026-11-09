@@ -10,6 +10,8 @@
   const reduceMotion = () => window.TokenMonitorMotionPreference.shouldReduceMotion(appearance.reduceMotion, reduced.matches);
   const scroll = new Map();
   const t = (key, params) => i18n.translate(locale, key, params);
+  const selects = window.TokenMonitorAppSelects.mount({document,t,fonts:window.TokenMonitorFontSettings});
+  window.addEventListener('unload', () => selects.destroy(), {once:true});
   const host = window.TokenMonitorPluginViews.createPluginViewHost({ document, window, t });
   function fail(reason) { error.hidden = false; error.textContent = window.TokenMonitorPluginViews.actionErrorMessage(reason, t); }
   function applyMotion() {

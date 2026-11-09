@@ -97,7 +97,7 @@ test('a hidden floating-bubble state update changes state without touching DOM',
         }
       },
       isRendererWindowHidden: () => true,
-      syncPluginTrayDemand() {},
+      syncPluginTrayDemand() {}, syncPluginLimitsDemand() {},
       state,
       statsRenderScheduler: { request() { scheduledRenders += 1; } }
     }
@@ -291,7 +291,7 @@ test('a stats update repaints main and the visible Settings overlay', () => {
     'renderLimitProviderCheckboxes',
     'renderToolPreferences',
     'renderWslPanel',
-    'updateOpenRouterProfilesStatus',
+    'updateOpenRouterProfilesStatus', 'updateMinimaxApiKeysStatus',
     'updateThirdPartyProfilesStatus',
     'renderDeepseekStatus',
     'renderMinimaxStatus',

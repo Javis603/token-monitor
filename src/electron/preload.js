@@ -177,6 +177,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   expandFloatingBubble: () => ipcRenderer.invoke('floatingBubble:expand'),
   moveFloatingBubble: (delta) => ipcRenderer.invoke('floatingBubble:move', delta),
   signalContentReady: () => ipcRenderer.send('window:contentReady'),
+  signalAppearanceReady: () => ipcRenderer.send('window:appearanceReady'),
   setViewState: (patch) => ipcRenderer.send('window:viewState', patch),
   peekFloatingBubble: () => ipcRenderer.invoke('floatingBubble:peek'),
   collapseFloatingBubbleIfIdle: () => ipcRenderer.invoke('floatingBubble:collapseIfIdle'),
@@ -232,6 +233,11 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     setProfileEnabled: (name, enabled) => ipcRenderer.invoke('opencode:setProfileEnabled', name, enabled),
     setAmbientEnabled: (enabled) => ipcRenderer.invoke('opencode:setAmbientEnabled', enabled)
   },
+  minimax: {
+    getKeys: () => ipcRenderer.invoke('minimax:getKeys'),
+    addKey: (key) => ipcRenderer.invoke('minimax:addKey', key),
+    removeKey: (id) => ipcRenderer.invoke('minimax:removeKey', id)
+  },
   openrouter: {
     getProfiles: () => ipcRenderer.invoke('openrouter:getProfiles'),
     saveProfile: (name, apiKey) => ipcRenderer.invoke('openrouter:saveProfile', name, apiKey),
@@ -278,6 +284,9 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   // Plugin management and the views this window draws (Home, tray bitmap).
   // Trust and installation run in main; enabled author UI executes in this page.
   plugins: {
+    limitsDemand: value => ipcRenderer.invoke('plugins:limitsDemand', value),
+    forgetCredentials: id => ipcRenderer.invoke('plugins:forgetCredentials', id),
+
     getSettings: id => pluginSettingsResult(ipcRenderer.invoke('plugins:getSettings', id)),
     updateSettings: (id, input) => pluginSettingsResult(ipcRenderer.invoke('plugins:updateSettings', id, input)),
     list: () => ipcRenderer.invoke('plugins:list'),

@@ -139,7 +139,7 @@ test('a card commits after its reported height is clamped to the work area', () 
       const card = { dataset: {}, style: {}, getBoundingClientRect: () => ({ height: measured }) };
       const renderBubble = Function('deps', `
         const window = { TokenMonitorCardLayout: deps.cardLayoutApi };
-        const { root, stagingLayer, providerCard, statCard, fitCardTotal,
+        const { root, contentLayer, stagingLayer, providerCard, statCard, fitCardTotal,
           clampBreakdownList, reserveAccountHeight, bridge, commitCard } = deps;
         let observedPluginCard = null;
         const bubbleSizeObserver = null, pluginContent = null;
@@ -148,6 +148,7 @@ test('a card commits after its reported height is clamped to the work area', () 
       `)({
         cardLayoutApi,
         root: { dataset: {}, style: { setProperty() {} }, classList: { toggle() {} } },
+        contentLayer: { querySelector: () => null },
         stagingLayer: { replaceChildren() {} },
         providerCard: () => card,
         statCard: () => card,
@@ -171,6 +172,61 @@ test('a card commits after its reported height is clamped to the work area', () 
       assert.equal(reports.length, 1, 'a placed card must not keep reporting its size');
     }
   }
+});
+
+test('reopening hides the previous reading before a delayed placement acknowledgement', () => {
+  const { Element } = require('../helpers/notchPanel');
+  const document = { createElement: tag => new Element(tag, document) };
+  const contentLayer = document.createElement('div'), stagingLayer = document.createElement('div');
+  const root = document.createElement('main'); root.append(contentLayer, stagingLayer);
+  const reports = [], switches = [];
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const commitSource = dock.slice(dock.indexOf('function commitCard('), dock.indexOf('// The period card'));
+  const renderSource = dock.slice(dock.indexOf('const bubbleLayout ='), dock.indexOf('const bubbleSizeObserver ='));
+  const renderBubble = Function('deps', `
+    const { document, root, contentLayer, stagingLayer, reports, switches } = deps;
+    const window = { TokenMonitorCardLayout: deps.cardLayoutApi };
+    const CARD_SCROLL_SELECTOR = '.scroll';
+    const overflowText = { refresh() {}, preserveReading() {} };
+    const cardResetAnimator = { capture() {}, animate() {} };
+    const clearCardSwitch = () => {};
+    const captureCardSwitch = (_old, _same, opening) => { switches.push(opening); return null; };
+    const animateCardSwitch = () => {};
+    const providerCard = cell => {
+      const node = document.createElement('section'); node.className = 'edge-dock-card';
+      node.getBoundingClientRect = () => ({ height: cell.height });
+      return node;
+    };
+    const statCard = providerCard;
+    const fitCardTotal = () => {}, clampBreakdownList = () => {}, reserveAccountHeight = () => {};
+    const bridge = { reportBubbleSize: (cellId, height) => reports.push({ cellId, height }) };
+    const pluginContent = null, bubbleSizeObserver = null;
+    let observedPluginCard = null;
+    ${commitSource}
+    ${renderSource}
+    return renderBubble;
+  `)({ document, root, contentLayer, stagingLayer, reports, switches, cardLayoutApi });
+  const today = { id: 'today', kind: 'stat', height: 180 };
+  const month = { id: 'month', kind: 'stat', height: 240 };
+  const paint = (cell, reveal, placed) => renderBubble({ side: 'right', cell, reveal, placed });
+  const placed = cell => ({ cellId: cell.id, height: cell.height });
+  paint(today, 1, placed(today));
+  const old = contentLayer.children[0];
+  // Delay the ACK: the native window can already be opaque at this point,
+  // particularly with reduced motion, so the old DOM must not be paintable.
+  paint(month, 2, placed(today));
+  assert.deepEqual(reports, [placed(month)]);
+  assert.equal(contentLayer.children[0], old, 'retain DOM until the measured size is accepted');
+  assert.equal(old.style.visibility, 'hidden', 'old content cannot flash while waiting for placement');
+  paint(month, 2, placed(month));
+  const current = contentLayer.children[0];
+  assert.equal(current.dataset.cellId, 'month');
+  assert.notEqual(current.style.visibility, 'hidden', 'the committed reading is visible');
+  assert.equal(switches.at(-1), true, 'reopening does not crossfade the hidden old reading');
+  paint(today, 2, placed(month));
+  assert.notEqual(current.style.visibility, 'hidden', 'a continuous switch keeps the current reading visible while measuring');
+  paint(today, 2, placed(today));
+  assert.equal(switches.at(-1), false, 'continuous switches retain their animation');
 });
 
 test('a no-cell payload unmounts committed and staged plugin cards and removes their header actions', async () => {
@@ -236,6 +292,8 @@ const {
   normalizeEdgeDockOffset,
   edgeDockFittingScale,
   edgeDockScale,
+  edgeDockBubbleScale,
+  normalizeEdgeDockBubbleSize,
   normalizeEdgeDockCustomScale,
   normalizeEdgeDockSide,
   normalizeEdgeDockSize,
@@ -1111,7 +1169,9 @@ test('shared card repaint preserves both account and session scroll positions in
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const source = dock.slice(dock.indexOf('function commitCard('), dock.indexOf('// The period card'));
   let previous;
-  const commit = Function('deps', `const {contentLayer, overflowText, document, cardResetAnimator, CARD_SCROLL_SELECTOR} = deps; const captureCardSwitch = () => null, animateCardSwitch = () => {}; ${source}; return commitCard;`)({
+  const openings = [];
+  const commit = Function('deps', `const {contentLayer, overflowText, document, cardResetAnimator, CARD_SCROLL_SELECTOR, openings} = deps; const captureCardSwitch = (_previous, _sameCard, opening) => { openings.push(opening); return null; }, animateCardSwitch = () => {}; ${source}; return commitCard;`)({
+    openings,
     contentLayer: { querySelector: () => previous, replaceChildren() {} },
     overflowText: { refresh() {}, preserveReading() {} },
     cardResetAnimator: { capture() {}, animate() {} },
@@ -1130,6 +1190,16 @@ test('shared card repaint preserves both account and session scroll positions in
   commit(make('claude', positions), 'claude');
   assert.equal(positions['.edge-dock-accounts'].scrollTop, 0);
   assert.equal(positions['.edge-dock-session-list'].scrollTop, 0);
+  previous.dataset.reveal = '1';
+  const reopened = make('claude', positions);
+  reopened.dataset.reveal = '2';
+  commit(reopened, 'claude');
+  assert.equal(openings.at(-1), true, 'commit suppresses the outgoing card across openings');
+  previous = reopened;
+  const switched = make('cursor', positions);
+  switched.dataset.reveal = '2';
+  commit(switched, 'cursor');
+  assert.equal(openings.at(-1), false, 'a continuous switch still animates');
 });
 
 test('a repainted card restores the scroll container it actually uses', () => {
@@ -1908,6 +1978,40 @@ test('a money-only account prints its balance on the rail without inventing a pe
   assert.equal(error.status, 'error');
   assert.equal(error.credits, null);
   assert.equal(error.remainingPercent, null);
+});
+
+test('two balance-only accounts leave the one closest to empty on the rail', () => {
+  // One cell per provider, so a money-only pair still needs a single headline.
+  // The app's account rule is "the lowest"; for a balance the lowest reading is
+  // the least money left, so the account closest to empty wins and the order the
+  // collector returned them in does not decide it.
+  const money = (name, accountKey, amount, currency = 'USD') => provider('thirdparty', {
+    accountKey,
+    accountName: name,
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: amount, currency, showMeter: false }],
+    balance: { amount, currency }
+  });
+  const build = (records) => buildEdgeDockCells({ limits: { providers: records } }, { limitProviders: 'thirdparty' })[0];
+  assert.equal(build([money('rich', 'sha256:r', 21.53), money('poor', 'sha256:p', 0.18)]).credits.amount, 0.18);
+  assert.equal(build([money('poor', 'sha256:p', 0.18), money('rich', 'sha256:r', 21.53)]).credits.amount, 0.18);
+
+  // Balances in different units share no scale, and no exchange rate reaches this
+  // projection, so those keep the collector's order rather than comparing figures
+  // that mean different things.
+  assert.equal(build([
+    money('usd', 'sha256:u', 5),
+    money('points', 'sha256:c', 900, 'CREDITS')
+  ]).credits.amount, 5);
+
+  // Money still never outranks a metered pool.
+  const quota = provider('thirdparty', {
+    accountKey: 'sha256:q',
+    windows: [{ kind: 'weekly', label: 'Weekly', remainingPercent: 80 }],
+    balance: { amount: 999, currency: 'USD' }
+  });
+  const [mixed] = buildEdgeDockCells({ limits: { providers: [money('poor', 'sha256:p', 0.18), quota] } }, { limitProviders: 'thirdparty' });
+  assert.equal(mixed.windowKind, 'weekly');
+  assert.equal(mixed.credits, null);
 });
 
 test('a pinned rail window ignores automatic exhaustion and keeps its identity across refreshes', () => {
@@ -3395,7 +3499,7 @@ test('whole-card transitions retain repaint progress and clean up interrupted ou
     `${source}; return { captureCardSwitch, animateCardSwitch, clearCardSwitch };`)(
     'bubble', document, () => reduced, card => ({ opacity: card.opacity }), { append: ghost => ghosts.add(ghost) }, '.scroll');
   const first = node('1', 37), next = node();
-  const motion = api.captureCardSwitch(first, false, next);
+  const motion = api.captureCardSwitch(first, false);
   api.animateCardSwitch(next, motion);
   assert.equal(ghosts.size, 1);
   assert.equal(motion.ghost.inert, true);
@@ -3407,7 +3511,7 @@ test('whole-card transitions retain repaint progress and clean up interrupted ou
   assert.equal(next.animations[0].timing.delay, undefined, 'both readings start together');
   const originalIncoming = motion.incoming, outgoing = motion.outgoing;
   originalIncoming.currentTime = 80;
-  const repaint = api.captureCardSwitch(next, true, node());
+  const repaint = api.captureCardSwitch(next, true);
   api.animateCardSwitch(node(), repaint);
   assert.equal(repaint, motion);
   assert.equal(repaint.incoming.currentTime, 80, 'a live repaint does not restart or snap the fade');
@@ -3415,7 +3519,7 @@ test('whole-card transitions retain repaint progress and clean up interrupted ou
   assert.equal(originalIncoming.cancelled, true);
   outgoing.finish();
   await Promise.resolve();
-  const rapid = api.captureCardSwitch(node('0.4'), false, node());
+  const rapid = api.captureCardSwitch(node('0.4'), false);
   api.animateCardSwitch(node(), rapid);
   await Promise.resolve();
   assert.equal(ghosts.size, 1, 'an older completion cannot remove the latest transition');
@@ -3425,28 +3529,37 @@ test('whole-card transitions retain repaint progress and clean up interrupted ou
   await Promise.resolve();
   assert.equal(ghosts.size, 0);
   assert.equal(rapid.incoming.cancelled, true, 'finishing releases the animation effect');
+  // Native opacity is zero between hovers, but the page stays visible.
+  // Reopening must discard the previous card instead of crossfading it back in.
+  assert.equal(document.visibilityState, 'visible');
+  assert.equal(api.captureCardSwitch(first, false, true), null, 'reopening never fades in the previous card');
+  const pendingReopen = api.captureCardSwitch(first, false);
+  api.animateCardSwitch(next, pendingReopen);
+  assert.equal(api.captureCardSwitch(next, false, true), null, 'a new opening has no outgoing card');
+  assert.equal(ghosts.size, 0);
+  assert.equal(pendingReopen.incoming.cancelled, true);
   reduced = true;
-  assert.equal(api.captureCardSwitch(first, false, next), null);
+  assert.equal(api.captureCardSwitch(first, false), null);
   reduced = false;
   document.visibilityState = 'hidden';
-  assert.equal(api.captureCardSwitch(first, false, next), null, 'reopening starts without stale outgoing content');
+  assert.equal(api.captureCardSwitch(first, false), null, 'reopening starts without stale outgoing content');
   document.visibilityState = 'visible';
   for (const top of [504, -504, 120, -120]) {
-    const pending = api.captureCardSwitch(first, false, next);
+    const pending = api.captureCardSwitch(first, false);
     api.animateCardSwitch(next, pending);
-    assert.equal(api.captureCardSwitch(next, false, node('1', 0, top)), null, 'interrupted fades hand off directly regardless of reading distance');
+    assert.equal(api.captureCardSwitch(node('1', 0, top), false), null, 'interrupted fades hand off directly regardless of reading distance');
     assert.equal(ghosts.size, 0, 'a direct switch also clears any interrupted outgoing copy');
     assert.equal(pending.incoming.cancelled, true);
   }
   for (const elapsed of [0, 16, 40]) {
     const incoming = node();
-    const pending = api.captureCardSwitch(first, false, incoming);
+    const pending = api.captureCardSwitch(first, false);
     api.animateCardSwitch(incoming, pending);
     pending.incoming.currentTime = elapsed;
     pending.outgoing.currentTime = elapsed;
     incoming.opacity = elapsed === 0 ? '0' : elapsed === 16 ? '0.0197225' : '0.129162';
     const latest = node();
-    const interrupted = api.captureCardSwitch(incoming, false, latest);
+    const interrupted = api.captureCardSwitch(incoming, false);
     assert.equal(interrupted, null, 'rapid selection displays the latest reading directly, without another fade from zero');
     api.animateCardSwitch(latest, interrupted);
     assert.equal(latest.animations.length, 0);
@@ -3548,6 +3661,10 @@ for (const kind of ['provider', 'stat']) {
       assert.equal(mounts, mounted);
       await Promise.resolve();
       assert.deepEqual(contentLayer.children, [active], 'rapid selection cancels the outgoing copy without removing the live plugin');
+      renderBubble({ side: 'right', cell: plugin, reveal: 2, placed: { cellId: plugin.id, height: 180 } });
+      assert.equal(contentLayer.children[0], active, 'reopening retains the selected plugin mount');
+      assert.notEqual(active.style.visibility, 'hidden', 'retained plugin content is restored on reopening');
+      assert.equal(mounts, mounted);
     });
   }
 }
@@ -3570,4 +3687,83 @@ test('detail tooltip flipping uses the painted card top in CSS pixels', () => {
       }
     }
   }
+});
+
+
+test('a fixed third-party headline keeps sibling accounts in the card and never switches on failure', () => {
+  const money = (accountKey, amount, extra = {}) => provider('thirdparty', {
+    accountKey, windows: [{ kind: 'billing', metric: 'credits', remaining: amount, currency: 'USD', showMeter: false }], ...extra
+  });
+  const selected = money('chosen', 21.53);
+  const sibling = money('sibling', 0.18);
+  const item = { type: 'limit', provider: 'thirdparty', accountMode: 'specific', accountKey: 'chosen' };
+  const build = (records, patch = {}) => buildEdgeDockCells({ limits: { providers: records } }, { items: [{ ...item, ...patch }] })[0];
+  const fixed = build([sibling, selected]);
+  assert.equal(fixed.credits.amount, 21.53);
+  assert.equal(fixed.remainingPercent, null);
+  assert.equal(fixed.accounts.length, 2);
+  assert.equal(build([selected, sibling], { accountMode: 'lowest' }).credits.amount, 0.18);
+  for (const status of ['unauthorized', 'unavailable']) {
+    const failed = build([sibling, { ...selected, status, windows: [] }]);
+    assert.equal(failed.status, 'error');
+    assert.equal(failed.credits, null);
+    assert.equal(failed.remainingPercent, null);
+  }
+  const stale = build([sibling, { ...selected, stale: true }]);
+  assert.equal(stale.status, 'stale');
+  assert.equal(stale.credits, null);
+  for (const records of [[sibling], []]) {
+    const missing = build(records);
+    assert.equal(missing.status, 'error');
+    assert.equal(missing.credits, null);
+  }
+  const hidden = build([selected, sibling], { hiddenAccounts: ['chosen'] });
+  assert.equal(hidden.credits, null);
+  assert.equal(hidden.accounts.length, 1);
+  assert.equal(build([money('', 99), sibling], { accountKey: '' }).credits, null);
+  assert.equal(build([selected, sibling], { accountKey: 'sibling' }).credits.amount, 0.18);
+});
+
+test('a fixed third-party account owns quota selection as well as its balance', () => {
+  const chosen = provider('thirdparty', { accountKey: 'chosen', windows: [
+    { kind: 'weekly', label: 'Weekly', remainingPercent: 80 },
+    { kind: 'billing', metric: 'credits', remaining: 20, showMeter: false }
+  ] });
+  const sibling = provider('thirdparty', { accountKey: 'sibling', windows: [{ kind: 'weekly', label: 'Weekly', remainingPercent: 5 }] });
+  const [cell] = buildEdgeDockCells({ limits: { providers: [sibling, chosen] } }, {
+    items: [{ type: 'limit', provider: 'thirdparty', accountMode: 'specific', accountKey: 'chosen' }]
+  });
+  assert.equal(cell.remainingPercent, 80);
+  assert.equal(cell.credits, null);
+  assert.equal(cell.accounts.length, 2);
+});
+
+test('third-party headline account settings survive normalization without changing other providers', () => {
+  const [item] = normalizeEdgeDockItems([{ type: 'limit', provider: 'thirdparty', accountMode: 'specific', accountKey: '  sha256:chosen  ' }]);
+  assert.equal(item.accountMode, 'specific');
+  assert.equal(item.accountKey, 'sha256:chosen');
+  assert.deepEqual(normalizeEdgeDockItems([item]), [item]);
+  const [legacy] = normalizeEdgeDockItems([{ type: 'limit', provider: 'thirdparty' }]);
+  assert.equal(legacy.accountMode, 'lowest');
+  assert.equal(legacy.accountKey, '');
+  assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'thirdparty', accountKey: {} }])[0].accountKey, '');
+  assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'thirdparty', accountKey: 'x'.repeat(201) }])[0].accountKey.length, 200);
+  const [codex, claude] = normalizeEdgeDockItems([
+    { type: 'limit', provider: 'codex', accountMode: 'specific', accountKey: 'chosen' },
+    { type: 'limit', provider: 'claude', accountMode: 'specific', accountKey: 'chosen' }
+  ]);
+  assert.equal(codex.accountMode, 'active');
+  assert.equal(claude.accountMode, 'lowest');
+  assert.equal(Object.hasOwn(codex, 'accountKey'), false);
+});
+
+test('detail size defaults to the fitted rail and validates its independent custom scale', () => {
+  assert.equal(normalizeEdgeDockBubbleSize(undefined), 'inherit');
+  assert.equal(normalizeEdgeDockBubbleSize('invalid'), 'inherit');
+  assert.equal(normalizeEdgeDockBubbleSize('custom'), 'custom');
+  assert.equal(edgeDockBubbleScale({ edgeDockSize: 'small' }), 0.85);
+  assert.equal(edgeDockBubbleScale({ edgeDockBubbleSize: 'inherit' }, 0.9), 0.9);
+  assert.equal(edgeDockBubbleScale({ edgeDockBubbleSize: 'large' }, 0.9), 1.25);
+  assert.equal(edgeDockBubbleScale({ edgeDockBubbleSize: 'custom', edgeDockBubbleCustomScale: 1.234 }), 1.25);
+  assert.equal(edgeDockBubbleScale({ edgeDockBubbleSize: 'custom', edgeDockBubbleCustomScale: 9 }), 1.5);
 });

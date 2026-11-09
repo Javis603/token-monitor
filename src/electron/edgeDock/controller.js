@@ -21,6 +21,7 @@ const {
   edgeDockRefreshBounds,
   edgeDockRefreshCorridor,
   edgeDockScale,
+  edgeDockBubbleScale,
   edgeDockTriggerBounds,
   normalizeEdgeDockCustomScale,
   normalizeEdgeDockDisplayId,
@@ -126,6 +127,7 @@ function createEdgeDockController(deps) {
   let bubblePlaced = null;
   let bubbleShapeFailed = false;
   let bubbleVisible = false;
+  let bubbleReveal = 0;
   let railVisible = false;
   let pointerOnRail = false;
   const refreshHapticTarget = Symbol('refresh');
@@ -257,6 +259,7 @@ function createEdgeDockController(deps) {
   let scaled = { key: '', scale: 1, metrics: EDGE_DOCK_METRICS };
   // A size still being dragged on the Settings slider, shown but not yet saved.
   let previewScale = null;
+  let previewBubbleScale = null;
   function requestedScale() {
     return previewScale ?? edgeDockScale(settings());
   }
@@ -273,6 +276,14 @@ function createEdgeDockController(deps) {
     return scaled.scale;
   }
 
+  function bubbleScale() {
+    return previewBubbleScale ?? edgeDockBubbleScale(settings(), dockScale());
+  }
+
+  function bubbleMetrics() {
+    return scaledEdgeDockMetrics(bubbleScale());
+  }
+
   function metrics() {
     dockScale();
     return scaled.metrics;
@@ -281,8 +292,8 @@ function createEdgeDockController(deps) {
   // The pages' zoom follows the size whenever the geometry is placed, since the
   // fitted size moves with the cells and the display as well as the setting.
   function syncPageZoom() {
-    const scale = dockScale();
     for (const surface of SURFACES) {
+      const scale = surface === 'bubble' ? bubbleScale() : dockScale();
       const win = windows[surface];
       if (alive(win) && win.webContents.getZoomFactor?.() !== scale) win.webContents.setZoomFactor(scale);
     }
@@ -290,7 +301,7 @@ function createEdgeDockController(deps) {
 
   function maxCardHeight() {
     const workArea = display()?.workArea;
-    return workArea ? Math.floor((workArea.height - EDGE_DOCK_METRICS.screenMargin * 2) / dockScale()) : null;
+    return workArea ? Math.floor((workArea.height - EDGE_DOCK_METRICS.screenMargin * 2) / bubbleScale()) : null;
   }
 
   function layout() {
@@ -302,7 +313,8 @@ function createEdgeDockController(deps) {
     const rail = edgeDockRailBounds({ workArea, side: dockSide, offset, floatingX, cellKinds: cellKinds(), metrics: m });
     const side = floatingX === null ? dockSide : rail.x + rail.width / 2 < workArea.x + workArea.width / 2 ? 'left' : 'right';
     const cardSpace = side === 'left' ? workArea.x + workArea.width - rail.x - rail.width : rail.x - workArea.x;
-    const bubbleWidth = floatingX === null ? m.bubbleWidth : Math.min(m.bubbleWidth, cardSpace - m.bubbleGap - m.bubbleTail - m.screenMargin);
+    const bm = bubbleMetrics();
+    const bubbleWidth = Math.min(bm.bubbleWidth, cardSpace - bm.bubbleGap - bm.bubbleTail - bm.screenMargin);
     const peek = edgeDockPeekBounds({ workArea, side, railBounds: rail, metrics: m });
     // The handle as drawn takes the pointer; the resting handle alone decides the
     // fast reveal, so how soon the rail opens never depends on how far the
@@ -312,7 +324,7 @@ function createEdgeDockController(deps) {
     const trigger = edgeDockTriggerBounds({ workArea, displayBounds: current.bounds, side, railBounds: rail, metrics: m });
     const zones = edgeDockHandleZones({ side, peekBounds: peek, metrics: m });
     const bubble = bubbleCell !== null
-      ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: Math.round(Math.min(bubbleHeight, maxCardHeight() ?? Infinity) * dockScale()), workArea, side, metrics: { ...m, bubbleWidth } })
+      ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: Math.round(Math.min(bubbleHeight, maxCardHeight() ?? Infinity) * bubbleScale()), workArea, side, metrics: { ...bm, bubbleWidth } })
       : null;
     const refresh = edgeDockRefreshBounds({ workArea, displayBounds: current.bounds, railBounds: rail, metrics: m });
     return { side, workArea, rail, peek, handle, restingHandle, trigger: floatingX === null ? trigger : null, wake: floatingX === null ? zones?.wake || null : null, approach: floatingX === null ? zones?.approach || null : null, bubble, bubbleWidth, refresh };
@@ -550,7 +562,7 @@ function createEdgeDockController(deps) {
     const side = layout()?.side || placement().side;
     const shapedGlass = nativeMaterial[surface] === true && glasses[surface] !== null
       && (surface !== 'peek' || peekMode === 'refresh');
-    const base = { surface, side, platform, osRelease: os.release(), appearance, glass: nativeMaterial[surface] === true, liquidGlass: shapedGlass, shape: shapes[surface], zoom: dockScale() };
+    const base = { surface, side, platform, osRelease: os.release(), appearance, glass: nativeMaterial[surface] === true, liquidGlass: shapedGlass, shape: shapes[surface], zoom: surface === 'bubble' ? bubbleScale() : dockScale() };
     if (surface === 'rail') {
       return {
         ...base,
@@ -570,7 +582,8 @@ function createEdgeDockController(deps) {
         ...base,
         cell: bubbleCell !== null ? cells[bubbleCell] || null : null,
         placed: bubblePlaced,
-        cardWidth: layout()?.bubbleWidth / dockScale(),
+        reveal: bubbleReveal,
+        cardWidth: layout()?.bubbleWidth / bubbleScale(),
         maxCardHeight: maxCardHeight()
       };
     }
@@ -601,7 +614,7 @@ function createEdgeDockController(deps) {
     const macGlass = materialKey === 'mac-glass' && surface !== 'peek';
     nativeMaterial[surface] = macMaterial;
     const win = new BrowserWindow({
-      width: surface === 'bubble' ? metrics().bubbleWidth : metrics().railWidth,
+      width: surface === 'bubble' ? bubbleMetrics().bubbleWidth : metrics().railWidth,
       height: 80,
       show: false,
       frame: false,
@@ -638,7 +651,7 @@ function createEdgeDockController(deps) {
         nodeIntegration: false,
         sandbox: true,
         backgroundThrottling: false,
-        zoomFactor: dockScale()
+        zoomFactor: surface === 'bubble' ? bubbleScale() : dockScale()
       }
     });
     if (win32 || mac) installNonActivatingInput(win);
@@ -774,7 +787,7 @@ function createEdgeDockController(deps) {
   }
 
   function commandsFor(surface, bounds, side) {
-    const m = metrics();
+    const m = surface === 'bubble' ? bubbleMetrics() : metrics();
     if (surface === 'bubble') {
       const commands = bubbleCommands({
         width: bounds.width,
@@ -1090,6 +1103,7 @@ function createEdgeDockController(deps) {
   }
 
   function showBubble(cellIndex) {
+    if (!bubbleVisible) bubbleReveal += 1;
     bubbleCell = cellIndex;
     // Reopening the card that was last shown produces the same payload as the
     // one already sent, which the render de-duplication would swallow, and then
@@ -1591,8 +1605,10 @@ function createEdgeDockController(deps) {
   return {
     // Shows a custom size while its slider is dragged; the save that follows
     // the release goes through sync(), which drops the preview.
-    previewScale(scale) {
-      previewScale = scale === null || scale === undefined ? null : normalizeEdgeDockCustomScale(scale);
+    previewScale(scale, surface = 'rail') {
+      const value = scale === null || scale === undefined ? null : normalizeEdgeDockCustomScale(scale);
+      if (surface === 'bubble') previewBubbleScale = value;
+      else previewScale = value;
       if (!running) return;
       positionRail();
       if (!railVisible) showPeek();
@@ -1601,6 +1617,7 @@ function createEdgeDockController(deps) {
     // Settings changed: start, stop, rebuild for a material change, or move.
     sync() {
       previewScale = null;
+      previewBubbleScale = null;
       if (!canUseEdgeDock(settings(), platform)) {
         if (running) stop();
         return;

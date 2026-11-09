@@ -432,7 +432,7 @@ test('collectUsageOnce ignores a stale anchor from a previous day and runs the f
   }
 });
 
-test('startCollector: watch ticks reuse the full-scan anchor, manual ticks rescan everything', async () => {
+test('startCollector: watch ticks reuse the full-scan anchor, manual ticks rescan everything', async t => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
@@ -451,8 +451,10 @@ test('startCollector: watch ticks reuse the full-scan anchor, manual ticks resca
       watchEnabled: false,
       watchDebounceMs: 10,
       historyEnabled: false,
+      pricingCatalogTimers: { setTimeout: () => 1, clearTimeout() {} },
       onUpdate: (summary, reason) => updates.push({ summary, reason })
     });
+    t.after(() => handle.stop());
 
     await waitForUpdates(updates, 1);
     const fullScans = calls.length;

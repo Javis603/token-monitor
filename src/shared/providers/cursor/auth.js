@@ -337,6 +337,22 @@ async function runCursorLogin(token, {
   });
 }
 
+// The Cursor desktop sign-in, for deciding which desktop-detected accounts are
+// current. 'unknown' when Cursor desktop has no state file here or it cannot be
+// read, so callers keep their accounts instead of hiding them.
+function readCursorDesktopSignIn(options = {}) {
+  const fsApi = options.fs || fs;
+  const hasState = cursorDesktopStateCandidates(options).some((candidate) => {
+    try { return fsApi.statSync(candidate).isFile(); } catch (_) { return false; }
+  });
+  if (!hasState) return { state: 'unknown' };
+  let accessToken;
+  try { accessToken = readCursorDesktopAccessToken(options); } catch (_) { return { state: 'unknown' }; }
+  if (!accessToken) return { state: 'signed-out' };
+  const userId = canonicalCursorUserId(extractUserId(normalizeCursorSessionToken(accessToken) || ''));
+  return userId ? { state: 'signed-in', userId } : { state: 'unknown' };
+}
+
 async function runCursorDiscover(options = {}) {
   const accessToken = readCursorDesktopAccessToken(options);
   if (!accessToken) return { discovered: false, reason: 'not-signed-in' };
@@ -414,6 +430,7 @@ module.exports = {
   normalizeCursorSessionToken,
   readActiveAccount,
   readCursorDesktopAccessToken,
+  readCursorDesktopSignIn,
   runCursorDiscover,
   runCursorLogin,
   runCursorLogout,
