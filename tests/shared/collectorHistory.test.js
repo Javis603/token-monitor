@@ -779,3 +779,26 @@ test('failed graph scans retain archive data without claiming complete lifetime 
   const recovered = await collectHistoryOnce({ ...options, runGraph: async () => SAMPLE_GRAPH });
   assert.equal(recovered.summary.activeDaysComplete, true);
 });
+
+test('archive read or write failures keep live History incomplete without losing its rows', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-history-archive-failure-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = {
+    clients: 'claude', todayKey: '2026-06-07', dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveOptions: { path: path.join(dir, 'history.json') }
+  };
+  await collectHistoryOnce({ ...options, runGraph: async () => ({ contributions: [
+    { ...SAMPLE_GRAPH.contributions[0], date: '2024-01-01' }
+  ] }) });
+  const fail = () => { throw new Error('fixture archive I/O failure'); };
+  for (const io of [{ readJson: fail }, { writeJsonAtomic: fail }]) {
+    const history = await collectHistoryOnce({ ...options, runGraph: async () => SAMPLE_GRAPH,
+      dailyHistoryArchiveOptions: { ...options.dailyHistoryArchiveOptions, ...io }
+    });
+    assert.equal(history.summary.activeDaysComplete, false);
+    assert.equal(history.daily[0].tokens, 30);
+  }
+  const recovered = await collectHistoryOnce({ ...options, runGraph: async () => SAMPLE_GRAPH });
+  assert.equal(recovered.summary.activeDaysComplete, true);
+  assert.equal(recovered.summary.activeDays, 2);
+});

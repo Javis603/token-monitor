@@ -878,6 +878,7 @@ async function collectHistoryOnce(options) {
       return withLocalHistory(result);
     } catch (error) {
       failureCode = failureCode || 'daily-history-archive-failed';
+      if (liveHistory) liveHistory.summary.activeDaysComplete = false;
       if (typeof options.logger === 'function') options.logger(`daily history archive failed: ${error.message}`);
     }
   }
