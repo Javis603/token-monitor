@@ -185,6 +185,78 @@ test('anchored tick with valid anchor runs todayOnly scan and derives month/allT
   assert.equal(summary.allTime.totalTokens, 5030, 'allTime should be derived via applyPeriodDelta');
 });
 
+test('anchor migration is computed once per stored period and skipped when there is nothing to migrate', () => {
+  const { migrateAnchorPeriod } = freshCollector();
+  const folded = {
+    ...emptyPeriod(),
+    totalTokens: 10,
+    clients: { codex: 10 },
+    models: { 'gemini-3.8-flash-high': 10 },
+    clientModels: { codex: { 'gemini-3.8-flash-high': 10 } }
+  };
+  // A period that already carries the physical key is returned untouched, so a
+  // watch tick does not re-normalize every retained session.
+  assert.equal(migrateAnchorPeriod(folded, true), folded);
+
+  const routed = {
+    ...emptyPeriod(),
+    totalTokens: 10,
+    clients: { codex: 10 },
+    models: { 'ccs-gemini/gemini-3.8-flash-high': 10 },
+    clientModels: { codex: { 'ccs-gemini/gemini-3.8-flash-high': 10 } }
+  };
+  const migrated = migrateAnchorPeriod(routed, true);
+  assert.notEqual(migrated, routed);
+  assert.equal(migrated.models['ccs-gemini/gemini-3.8-flash-high'], undefined);
+  assert.equal(migrated.models['gemini-3.8-flash-high'], 10);
+  // The second call reuses the migrated copy instead of normalizing again.
+  assert.equal(migrateAnchorPeriod(routed, true), migrated);
+});
+
+test('anchored tick folds a pre-fold CC Switch route out of the anchor periods', async () => {
+  // An anchor written before the route fold keeps the route-shaped model key in
+  // its model maps, while the fresh Today scan already reports the physical
+  // model. Applying the delta to the stored periods as they are would leave
+  // the route behind and split one model across two keys.
+  const dateKey = localTodayKey();
+  const routed = tokens => ({
+    ...emptyPeriod(),
+    totalTokens: tokens,
+    clients: { codex: tokens },
+    clientCosts: { codex: 1 },
+    models: { 'ccs-gemini/gemini-3.8-flash-high': tokens },
+    modelCosts: { 'ccs-gemini/gemini-3.8-flash-high': 1 },
+    clientModels: { codex: { 'ccs-gemini/gemini-3.8-flash-high': tokens } },
+    clientModelCosts: { codex: { 'ccs-gemini/gemini-3.8-flash-high': 1 } }
+  });
+  const anchor = {
+    dateKey,
+    today: routed(10),
+    month: routed(100),
+    allTime: routed(100)
+  };
+
+  const summary = await collectUsageOnce({
+    clients: 'codex',
+    allTimeSince: '2024-01-01',
+    commandTimeoutMs: 1000,
+    deviceId: 'dev1',
+    limitsEnabled: false,
+    historyEnabled: false,
+    todayOnlyAnchor: anchor,
+    wslAnchor: emptyWslBundle(),
+    runTokscale: async () => ({
+      entries: [{ client: 'codex', sessionId: 's1', model: 'gemini-3.8-flash-high', input: 10, output: 0, cost: 1 }]
+    }),
+    collectWslUsage: async () => ({ bundle: emptyWslBundle(), detected: [] })
+  });
+
+  assert.deepEqual({ ...summary.month.models }, { 'gemini-3.8-flash-high': 100 });
+  assert.equal(summary.month.models['ccs-gemini/gemini-3.8-flash-high'], undefined);
+  assert.deepEqual({ ...summary.month.clientModels.codex }, { 'gemini-3.8-flash-high': 100 });
+  assert.deepEqual({ ...summary.allTime.models }, { 'gemini-3.8-flash-high': 100 });
+});
+
 test('anchored tick replaces a stale anchor title with the freshly resolved rename', async () => {
   const dateKey = localTodayKey();
   const sessionKey = 'cursor:conv-1';
@@ -835,6 +907,7 @@ test('Cursor anchors from before the Auto model rename require a full scan', () 
   assert.equal(collectorAnchorTrust(anchor, options), null);
   assert.equal(collectorAnchorTrust({ ...anchor, cursorAutoModelVersion: 1 }, options).capturedAtMs, now.getTime() - 60_000);
 });
+
 
 test('flat catalog project provenance requires a full scan instead of guessing period sources', () => {
   const { collectorAnchorTrust, configFingerprint } = freshCollector();

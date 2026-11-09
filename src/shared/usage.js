@@ -985,6 +985,97 @@ function cursorAutoRawModels(source, roundTokens) {
   return totals;
 }
 
+// A stored period predates the CC Switch routing fold: its client-scoped
+// buckets still carry the route-shaped key while the global buckets do too.
+// The global map has no client attribution of its own, so the Codex share is
+// located in the client-scoped map and moved by hand. Usage under the same
+// key from another client stays where it is.
+//
+// The cost moves with the tokens, but it is not repriced: the amount is the
+// one Tokscale reported for the route, and the route keeps the price it was
+// scanned with.
+function ccSwitchRoutedClientModels(source, roundTokens) {
+  const routed = new Map();
+  for (const [client, models] of Object.entries(source || {})) {
+    if (normalizeClientName(client) !== 'codex' || !models || typeof models !== 'object') continue;
+    for (const [model, value] of Object.entries(models)) {
+      const raw = normalizeModelName(model);
+      if (!raw) continue;
+      const folded = normalizeModelNameForClient(raw, 'codex');
+      if (!folded || folded === raw) continue;
+      const next = Math.max(0, roundTokens ? Math.round(asNumber(value)) : asNumber(value));
+      const entry = routed.get(raw) || { folded, total: 0 };
+      entry.total += next;
+      routed.set(raw, entry);
+    }
+  }
+  return routed;
+}
+
+// Whether a stored period still carries CC Switch's route-shaped model key in
+// its Codex buckets. Normalizing a period walks every retained session, which
+// is far too much work for a watch tick, so the caller only migrates a period
+// that still has something to migrate.
+function periodHasCcSwitchRouteModel(period) {
+  if (!period || typeof period !== 'object') return false;
+  for (const source of [period.clientModels, period.clientModelCosts]) {
+    for (const [client, models] of Object.entries(source || {})) {
+      if (normalizeClientName(client) !== 'codex' || !models || typeof models !== 'object') continue;
+      for (const model of Object.keys(models)) {
+        if (normalizeModelNameForClient(model, 'codex') !== normalizeModelName(model)) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function reconcileCcSwitchRouteGlobalModels(period, input) {
+  for (const [raw, entry] of ccSwitchRoutedClientModels(input.clientModels, true)) {
+    const available = Math.max(0, Math.round(asNumber(period.models[raw])));
+    const moved = entry.total;
+    if (moved <= 0 || moved > available) continue;
+    const exclusive = moved === available;
+    period.models[raw] = available - moved;
+    if (period.models[raw] === 0) delete period.models[raw];
+    period.models[entry.folded] = (period.models[entry.folded] || 0) + moved;
+    if (exclusive) {
+      for (const key of [
+        'modelCacheReads',
+        'modelCacheWrites',
+        'modelOutputs',
+        'modelUnclassifiedTokens',
+        'modelUnpricedTokens'
+      ]) {
+        if (!period[key]?.[raw]) continue;
+        period[key][entry.folded] = (period[key][entry.folded] || 0) + period[key][raw];
+        delete period[key][raw];
+      }
+    } else {
+      // The key is shared with another client: keep the token split, but do not
+      // invent a cache/output split for the part that moves.
+      for (const key of ['modelCacheReads', 'modelCacheWrites', 'modelOutputs']) delete period[key][raw];
+      period.modelUnclassifiedTokens[raw] = period.models[raw];
+      period.modelUnclassifiedTokens[entry.folded] = Math.min(
+        period.models[entry.folded],
+        (period.modelUnclassifiedTokens[entry.folded] || 0) + moved
+      );
+      period.capabilities.tokenComponents = false;
+    }
+  }
+  for (const [raw, entry] of ccSwitchRoutedClientModels(input.clientModelCosts, false)) {
+    const available = asNumber(period.modelCosts[raw]);
+    if (entry.total <= 0 || entry.total > available + 1e-9) continue;
+    const moved = Math.min(entry.total, available);
+    period.modelCosts[raw] = available - moved;
+    // The global bucket and the client-scoped sum are accumulated separately,
+    // so the remainder can differ from zero by float error. A remainder that
+    // rounds to nothing is nothing: leaving the route-shaped key behind would
+    // resurrect the split this change removes.
+    if (period.modelCosts[raw] <= 1e-9) delete period.modelCosts[raw];
+    period.modelCosts[entry.folded] = (period.modelCosts[entry.folded] || 0) + moved;
+  }
+}
+
 function reconcileCursorAutoGlobalModels(period, input) {
   for (const [raw, moved] of cursorAutoRawModels(input.clientModels, true)) {
     const available = Math.max(0, Math.round(asNumber(period.models[raw])));
@@ -1022,7 +1113,11 @@ function reconcileCursorAutoGlobalModels(period, input) {
     if (requested <= 0 || requested > available + 1e-9) continue;
     const moved = Math.min(requested, available);
     period.modelCosts[raw] = available - moved;
-    if (period.modelCosts[raw] === 0) delete period.modelCosts[raw];
+    // The global bucket and the client-scoped sum are accumulated separately,
+    // so the remainder can differ from zero by float error. A remainder that
+    // rounds to nothing is nothing: leaving the route-shaped key behind would
+    // resurrect the split this change removes.
+    if (period.modelCosts[raw] <= 1e-9) delete period.modelCosts[raw];
     period.modelCosts['cursor-auto'] = (period.modelCosts['cursor-auto'] || 0) + moved;
   }
 }
@@ -1181,6 +1276,7 @@ function normalizePeriod(input, options = {}) {
     }
   }
   reconcileCursorAutoGlobalModels(period, input);
+  reconcileCcSwitchRouteGlobalModels(period, input);
   if (input.sessions && typeof input.sessions === 'object') {
     for (const [key, value] of Object.entries(input.sessions)) {
       const session = normalizeSession(sessionWithActivity(input, key, value), key);
@@ -2369,6 +2465,7 @@ module.exports = {
   normalizeLatestModel,
   normalizeDeviceRecord,
   normalizePeriod,
+  periodHasCcSwitchRouteModel,
   projectRollupFromSessions,
   stripSessionTextFromDeviceRecord,
   stripSessionTextFromPeriod

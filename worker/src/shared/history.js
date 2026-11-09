@@ -31,10 +31,36 @@ function normalizeTokscaleClientName(value) {
   return TOKSCALE_CLIENT_ALIASES.get(raw) || raw;
 }
 
+// CC Switch's aggregation (Stack) mode routes a request with a namespaced
+// model id and hands that id to the client: `ccs-<key>/<model>` for Codex,
+// where `<key>` names the stack member that serves the model.
+//
+// Codex records the configured model in every rollout, so the routing id — not
+// the model — is what lands in the ledger, and the namespace then reads as
+// part of the model's name. The physical model is what follows the namespace,
+// so report that instead: the namespace is a route, not a model, and keeping
+// it files one model twice (once under its real name, once under the route),
+// splits its history and leaves the route without a price of its own.
+//
+// Only this namespace is folded. A vendor prefix such as `moonshotai/…` names
+// the supply channel and therefore the bill, and folding it would merge two
+// separately priced rows into one; that identity is deliberately preserved.
+const CC_SWITCH_CODEX_ROUTE = /^ccs-[a-z0-9-]+\/(.+)$/;
+
+function ccSwitchRoutedCodexModel(model) {
+  const route = CC_SWITCH_CODEX_ROUTE.exec(model);
+  return route ? route[1] : null;
+}
+
 function normalizeTokscaleModelNameForClient(value, client) {
   const model = String(value ?? '').trim();
-  if (normalizeTokscaleClientName(client) === 'cursor' && /^(?:auto|default)$/i.test(model)) {
+  const clientId = normalizeTokscaleClientName(client);
+  if (clientId === 'cursor' && /^(?:auto|default)$/i.test(model)) {
     return 'cursor-auto';
+  }
+  if (clientId === 'codex') {
+    const routed = ccSwitchRoutedCodexModel(model);
+    if (routed) return routed;
   }
   return model;
 }

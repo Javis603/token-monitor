@@ -199,6 +199,24 @@ test('Cursor Auto archive observations normalize old default keys before a new g
   assert.equal(rows.find((row) => row.client === 'claude').modelId, 'default');
 });
 
+test('CC Switch aggregation routes archive under the physical model they route to', () => {
+  const date = '2026-09-27';
+  // An archive written before the routing namespace was folded still carries
+  // the id Codex recorded. It has to read back as the physical model, or the
+  // archived day keeps a second row for one model.
+  const stored = { days: { [date]: { observations: [
+    { client: 'codex', modelId: 'ccs-gemini/gemini-3.8-flash-high', tokens: 5, cost: 0.01 }
+  ] } } };
+  const incoming = graph(date, [client('codex', 'gemini-3.8-flash-high', 5, 0.01, 1)]);
+  const archive = captureDailyHistoryArchive(stored, incoming, { todayKey: '2026-09-28' });
+  const visible = graphFromDailyHistoryArchive([], archive, { todayKey: '2026-09-28' });
+  const rows = visible.contributions[0].clients;
+
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].modelId, 'gemini-3.8-flash-high');
+  assert.equal(rows[0].tokens.input, 5);
+});
+
 test('Cursor Auto archive summary moves exact model components only when attribution is unambiguous', () => {
   const date = '2026-09-27';
   const cursor = { client: 'cursor', modelId: 'default', tokens: 5, cost: 0.01 };
