@@ -12,7 +12,9 @@ function renderReadme(text, baseUrl, imageBaseUrl, repositoryBaseUrl) {
       // github.com host root. Resolve it against the README's blob base when
       // the caller supplied one; the HTTPS checks below still apply.
       const root = repositoryBaseUrl ? new URL(repositoryBaseUrl) : null;
-      const url = value.startsWith('/') && root
+      // Only single-slash paths are repository-root-relative; `//host/path`
+      // stays a protocol-relative external link.
+      const url = value.startsWith('/') && !value.startsWith('//') && root
         ? new URL(value.slice(1), root)
         : new URL(value, baseUrl || undefined);
       if (url.protocol !== 'https:' || url.username || url.password || url.href.length > 2048) return null;

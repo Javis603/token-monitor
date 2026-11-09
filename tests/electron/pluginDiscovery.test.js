@@ -82,9 +82,10 @@ test('README Markdown preserves layout, resolves relative images and cannot inje
   assert.match(result.html, /&lt;script&gt;/); assert.match(result.html, /href="https:\/\/github.com\/author\/project\/blob\/main\/docs\/guide.md"/);
 });
 test('README root-relative links resolve against the repository root, not the host root', () => {
-  const result = renderReadme('[Root](/docs/guide.md)\n\n[External](https://example.test/guide.md)', 'https://github.com/owner/project/blob/main/docs/README.md', 'https://raw.githubusercontent.com/owner/project/main/docs/README.md', 'https://github.com/owner/project/blob/main/');
+  const result = renderReadme('[Root](/docs/guide.md)\n\n[External](https://example.test/guide.md)\n\n[Network](//cdn.example.test/guide.md)', 'https://github.com/owner/project/blob/main/docs/README.md', 'https://raw.githubusercontent.com/owner/project/main/docs/README.md', 'https://github.com/owner/project/blob/main/');
   assert.match(result.html, /href="https:\/\/github\.com\/owner\/project\/blob\/main\/docs\/guide\.md"/);
   assert.match(result.html, /href="https:\/\/example\.test\/guide\.md"/);
+  assert.match(result.html, /href="https:\/\/cdn\.example\.test\/guide\.md"/);
   assert.doesNotMatch(result.html, /href="https:\/\/github\.com\/docs\/guide\.md"/);
 });
 
