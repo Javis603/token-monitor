@@ -98,12 +98,13 @@ test('latest model survives normalization, archives and exact deltas without sta
 test('label names latest model without a separator and hover retains weighted usage', () => {
   const session = row({ latestModel: 'newer' });
   assert.equal(sessionModelLabel(session), 'newer +1');
-  assert.deepEqual(sessionModelTooltipEntries(session, { latestModelLabel: '最近使用' }), [
-    ['older', '90', '90%'], ['newer (最近使用)', '10', '10%']
+  assert.deepEqual(sessionModelTooltipEntries(session, { latestModelLabel: '最後使用' }), [
+    { full: '最後使用: newer' },
+    ['older', '90', '90%'], ['newer', '10', '10%']
   ]);
   assert.equal(sessionModelLabel(row()), '2 models', 'legacy data never guesses by usage or order');
   assert.equal(sessionModelLabel(row({ latestModel: 'pre-token' })), 'pre-token +2');
-  assert.deepEqual(sessionModelTooltipEntries(row({ latestModel: 'pre-token' }))[0], { full: 'Latest used: pre-token' });
+  assert.deepEqual(sessionModelTooltipEntries(row({ latestModel: 'pre-token' }))[0], { full: 'Last used: pre-token' });
   assert.equal(sessionModelLabel({ latestModel: 'pre-token', models: {} }), 'pre-token');
 });
 
@@ -116,7 +117,7 @@ test('Sessions and Dock groups use latest main continuation while summing child 
   };
   const [group] = groupSessionRows(sessionRowsForPeriod({ sessions }));
   assert.equal(group.modelLabel, 'newer +2');
-  assert.match(group.modelTooltipEntries.find(entry => entry[0]?.startsWith('newer'))[0], /Latest used/);
+  assert.deepEqual(group.modelTooltipEntries[0], { full: 'Last used: newer' });
   const [dock] = recentSessionRows({ periods: { month: { sessions } } });
   assert.equal(sessionModelLabel(dock), 'newer +2');
 });
