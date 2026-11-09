@@ -323,9 +323,11 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
       }
   }
   function record(actions, now, mappings = []) {
-    adopt(mappings, now);
+    let adoptionFailed = false;
+    try { adopt(mappings, now); }
+    catch { adoptionFailed = true; } // The adoption transaction reports and rolls back the error.
     transaction(() => recordActions(actions, now), now);
-    saveFailed = false;
+    saveFailed = adoptionFailed;
     return { persistent: persistent && !saveFailed };
   }
   // Old IDs were one-way hashes of backend + account + quota. The caller
@@ -469,7 +471,8 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
     return observationPoints(runs);
   }
   function query(windows, range, now, mappings = []) {
-    adopt(mappings, now);
+    try { adopt(mappings, now); }
+    catch { /* The adoption transaction reports the error; retain readable shared history. */ }
     if (maintainedDay !== dayKey(now)) transaction(() => {}, now);
     const anchor = new Date(`${range.day}T23:59:59.999`).getTime();
     const viewNow = Math.min(now, anchor);

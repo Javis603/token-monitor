@@ -2460,3 +2460,30 @@ test('adoption keeps collection dates when interruption created the daily row be
   db.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA] }], clock);
   assert.deepEqual(read(adoptedStream).buckets.map(b => [b.key, b.value, b.uncertain]), before.buckets.map(b => [b.key, b.value, b.uncertain]));
 });
+
+for (const operation of ['record', 'query']) test(`a failed adoption does not block the live ${operation} path and retries safely`, t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-adoption-availability-'));
+  const file = path.join(directory, 'history.sqlite'), errors = [];
+  const db = createHistoryDatabase(file, { onError: error => errors.push(error) });
+  const inspect = new DatabaseSync(file), clock = at(2, 12);
+  t.after(() => { inspect.close(); db.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  db.record([action(at(2, 10), 20), action(at(2, 10), 30, { id: streamB, account: accountB })], clock);
+  const mappings = [{ id: adoptedStream, account: accountA, legacy: [streamA] }];
+  const windows = [{ id: streamB, key: 'weekly', window: { kind: 'weekly' } }];
+  const range = { grain: 'day', day: dayKey(clock) };
+  inspect.exec("CREATE TRIGGER reject_adoption BEFORE INSERT ON history_adoptions BEGIN SELECT RAISE(ABORT, 'adoption failure'); END");
+  const result = operation === 'record'
+    ? db.record([action(at(2, 10, 5), 35, { id: streamB, account: accountB })], clock, mappings)
+    : db.query(windows, range, clock, mappings);
+  assert.equal(result.persistent, false, 'the adoption failure remains visible');
+  const live = db.query(windows, range, clock);
+  assert.equal(live.windows[0].points.at(-1).value, operation === 'record' ? 35 : 30);
+  assert.equal(errors.length, 1);
+  assert.match(errors[0].message, /adoption failure/);
+  assert.equal(inspect.prepare('SELECT count(*) AS n FROM history_adoptions').get().n, 0);
+  assert.equal(inspect.prepare('SELECT value FROM runs WHERE stream = ?').get(streamA).value, 20);
+  inspect.exec('DROP TRIGGER reject_adoption');
+  assert.equal(db.record([action(at(2, 10, 10), 40, { id: streamB, account: accountB })], clock, mappings).persistent, true);
+  assert.equal(inspect.prepare('SELECT count(*) AS n FROM history_adoptions').get().n, 1);
+  assert.equal(inspect.prepare('SELECT value FROM runs WHERE stream = ?').get(adoptedStream).value, 20);
+});
