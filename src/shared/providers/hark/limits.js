@@ -101,7 +101,9 @@ function windowsFromSummary(body) {
     for (const row of meters.perFeature) {
       // Hark's own client never treats instance meters as allowances.
       if (!row || typeof row !== 'object' || row.meter === 'instances') continue;
-      const period = row.period === 'day' || row.period === 'month' ? row.period : '';
+      // The client only walks period day/month; anything else is not an allowance.
+      if (row.period !== 'day' && row.period !== 'month') continue;
+      const period = row.period;
       const kind = period === 'day' ? 'daily' : 'billing';
       const count = tokenWindow(kind, featureLabel(row.feature, period), row.countUsed, row.countLimit, row.resetsAt);
       const featureTokens = tokenWindow(kind, featureLabel(row.feature, period, 'tokens'), row.harkUsed, row.harkLimit, row.resetsAt);

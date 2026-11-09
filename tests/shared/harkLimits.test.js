@@ -127,6 +127,43 @@ test('unlimited and paid summaries keep the same window rules', () => {
   ]);
 });
 
+test('perFeature rows need a day or month period', () => {
+  const account = {
+    dailyUsed: 1, dailyLimit: 16, dailyResetsAt: '2026-11-10T00:00:00Z',
+    poolUsed: 2, poolLimit: 80, poolResetsAt: '2026-12-01T00:00:00Z'
+  };
+  const base = (period) => ({
+    plan: { id: 'scale', name: 'hark pro³', unlimited: false },
+    meters: {
+      harkTokens: account,
+      perFeature: [{
+        feature: 'message',
+        ...(period === undefined ? {} : { period }),
+        countUsed: 3,
+        countLimit: 10,
+        harkUsed: 4,
+        harkLimit: 20,
+        resetsAt: '2026-12-01T00:00:00Z'
+      }]
+    }
+  });
+  const featureLabels = (period) => windowsFromSummary(base(period)).windows
+    .filter((window) => window.label !== 'Daily' && window.label !== 'Monthly')
+    .map((window) => [window.kind, window.label]);
+
+  assert.deepEqual(featureLabels('day'), [
+    ['daily', 'Daily Messages'],
+    ['daily', 'Daily Messages tokens']
+  ]);
+  assert.deepEqual(featureLabels('month'), [
+    ['billing', 'Monthly Messages'],
+    ['billing', 'Monthly Messages tokens']
+  ]);
+  for (const period of ['', 'week', null, undefined]) {
+    assert.deepEqual(featureLabels(period), [], `period ${JSON.stringify(period)} must not emit feature windows`);
+  }
+});
+
 test('an incomplete summary is unavailable instead of dropping its quota bars', () => {
   for (const harkTokens of [undefined, {}, { ...FREE_SUMMARY.meters.harkTokens, dailyUsed: 'oops' }]) {
     assert.throws(() => windowsFromSummary({ ...FREE_SUMMARY, meters: { harkTokens } }),
