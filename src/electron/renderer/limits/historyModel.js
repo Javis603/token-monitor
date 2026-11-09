@@ -83,6 +83,10 @@
       const p = points[i], previous = points[i - 1];
       if (p.at > now) continue;
       const bucket = byKey.get(bucketKey(p.at, grain));
+      if (p.conflictAt != null) {
+        buckets.filter(b => b.at <= p.conflictAt && (b.end > p.at || b.key === bucketKey(p.at, grain)))
+          .forEach(b => { b.uncertain = true; });
+      }
       if (p.uncertainUntil !== null && p.uncertainUntil !== undefined) {
         buckets.filter(b => b.at <= p.uncertainUntil && b.end >= p.at).forEach(b => { b.uncertain = true; });
       }
@@ -162,17 +166,24 @@
         const point = { at: part.at, value: run.value, reset: run.reset, interval: run.interval, ...(run.basis ? { basis: run.basis } : {}),
           unit: run.unit, balance: run.balance, ...(first && run.uncertainBefore ? { uncertainBefore: true } : {}),
           ...(interrupted ? { breakBefore: true } : {}), ...(allowanceMissing ? { allowanceMissingBefore: true } : {}) };
+        // An adopted flat interval can contain an earlier source conflict and
+        // a later successful recovery. Keep uncertainty on the historical span,
+        // rather than attaching it to the recovered endpoint.
+        if (first && run.uncertainUntil != null && run.uncertainUntil >= part.at && run.uncertainUntil < run.at) {
+          point.conflictAt = run.uncertainUntil;
+        }
         points.push(point);
         if (part.until > part.at) points.push({ ...point, at: part.until, breakBefore: false,
           ...(point.uncertainBefore ? { uncertainBefore: false } : {}), ...(point.allowanceMissingBefore ? { allowanceMissingBefore: false } : {}),
-          coveredFrom: part.at, maxGap: part.maxGap, observations: part.samples - 1 });
+          coveredFrom: part.at, maxGap: part.maxGap, observations: part.samples - 1,
+          ...(point.conflictAt != null ? { conflictAt: undefined } : {}) });
         interrupted = false;
         allowanceMissing = false;
         first = false;
       }
       // A date-range query can return only an earlier portion of a flat run.
       // Attach the conflict to its actual last observation, never that cutoff.
-      if (run.uncertainUntil !== null && run.uncertainUntil !== undefined && points.at(-1)?.at === run.at) {
+      if (run.uncertainUntil !== null && run.uncertainUntil !== undefined && run.uncertainUntil >= run.at && points.at(-1)?.at === run.at) {
         points.at(-1).uncertainUntil = run.uncertainUntil;
       }
       interrupted = run.breakAfter === true;

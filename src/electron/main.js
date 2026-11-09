@@ -3245,7 +3245,14 @@ let limitsHistoryController = null;
 function getLimitsHistoryStore() {
   if (!limitsHistoryStore) limitsHistoryStore = createLimitsHistoryStore(path.join(app.getPath('userData'), 'limits-history.sqlite'), {
     onError: error => console.log(`[limits-history] ${error.message}`),
-    onChange: () => limitsHistoryController?.refresh()
+    onChange: () => limitsHistoryController?.refresh(),
+    legacyScopes: () => {
+      const urls = [...new Set(['none',
+        effectiveHubConfig({ ...settings, hubMode: 'client' }).url,
+        effectiveHubConfig({ ...settings, hubMode: 'host' }).url
+      ].filter(Boolean).map(url => String(url).replace(/\/$/, '')))];
+      return ['local', 'client', 'host', 'icloud'].flatMap(mode => urls.map(url => `${mode}|${url}`));
+    }
   });
   return limitsHistoryStore;
 }
