@@ -5,6 +5,7 @@ read_when:
   - Changing what a grok session's title, timestamps or project come from
   - Debugging a missing or mislabelled Grok session list
   - Changing Grok token accounting or throughput
+  - Changing Grok quota account identity or history persistence
 ---
 
 # Grok Build
@@ -40,7 +41,7 @@ Roughly 45% of the session directories on a busy machine are subagent sessions, 
 ## Verification
 
 ```
-node --test tests/shared/grokSessionMetadata.test.js tests/shared/mixedTimingThroughput.test.js tests/shared/history.test.js
+node --test tests/shared/grokLimits.test.js tests/shared/grokSessionMetadata.test.js tests/shared/mixedTimingThroughput.test.js tests/shared/history.test.js
 ```
 
 ## Quota account identity
