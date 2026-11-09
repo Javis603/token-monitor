@@ -464,6 +464,21 @@ test('subagents fold under their visible parent while reviews keep the global gr
   assert.equal(visible, rows.reduce((sum, row) => sum + row.value, 0), 'grouping never changes the list total');
 });
 
+test('separateClients keeps one client\'s subagents as their own rows', () => {
+  const session = (client, id, tokens, extra = {}) => ({ client, sessionId: id, totalTokens: tokens, ...extra });
+  const rows = sessionRowsForPeriod({ sessions: {
+    'hermes:main': session('hermes', 'main', 100),
+    'hermes:sub': session('hermes', 'sub', 40, { parentSessionId: 'main' }),
+    'codex:main': session('codex', 'main', 50),
+    'codex:sub': session('codex', 'sub', 10, { parentSessionId: 'main' })
+  } }, { clientLabels, clientColors, subagentLabel: 'Subagent' });
+
+  const keys = (subagents) => groupSessionRows(rows, { subagents }).map(row => row.key).sort();
+  assert.deepEqual(keys({}), ['session-group:subagents:codex:main', 'session-group:subagents:hermes:main']);
+  assert.deepEqual(keys({ separateClients: new Set(['hermes']) }),
+    ['session-group:subagents:codex:main', 'session:hermes:main', 'session:hermes:sub']);
+});
+
 test('a subagent group labels and breaks down every member model, not only the parent', () => {
   const rows = sessionRowsForPeriod({ sessions: {
     'codex:main': { client: 'codex', sessionId: 'main', totalTokens: 100, title: 'Ship it',

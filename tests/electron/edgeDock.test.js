@@ -587,6 +587,22 @@ test('Home and Dock group raw history without building session detail DTOs', () 
   }
 });
 
+test('dock cells honour the Hermes subagent merge preference like Home', () => {
+  const lastUsedAt = new Date(Date.now() - 3_600_000).toISOString();
+  const session = (id, extra = {}) => ({ client: 'hermes', sessionId: id, lastUsedAt, totalTokens: 10, ...extra });
+  const stats = { periods: { month: { sessions: {
+    'hermes:main': session('main'),
+    'hermes:sub': session('sub', { parentSessionId: 'main' })
+  } } } };
+  const items = [{ type: 'stat', metric: SESSIONS_METRIC }];
+  const subagents = { separateClients: new Set(['hermes']) };
+
+  assert.equal(buildEdgeDockCells(stats, { items })[0].sessions.length, 1);
+  const separate = buildEdgeDockCells(stats, { items, hermesMergeSubagents: false })[0].sessions;
+  assert.equal(separate.length, 2);
+  assert.equal(edgeDockPresentation.recentSessionRows(stats, 5, { subagents }).length, separate.length);
+});
+
 test('a startedAt-only session keeps its display age without becoming running', () => {
   const startedAt = new Date(Date.now() - 60_000).toISOString();
   const stats = { periods: { month: { sessions: {

@@ -736,6 +736,7 @@ function defaultSettings() {
     clients: clientsCsvForSetting(process.env.TOKEN_MONITOR_CLIENTS),
     codexDotsEnabled: process.env.TOKEN_MONITOR_CODEX_LOCAL_USAGE === '1',
     codexDotsVisible: true,
+    hermesMergeSubagents: true,
     customScanPaths: {},
     clientDisplayOrder: '',
     hiddenClients: '',
@@ -2785,6 +2786,7 @@ function readSettings() {
     }
     merged.codexDotsEnabled = parseBoolean(merged.codexDotsEnabled, false);
     merged.codexDotsVisible = parseBoolean(merged.codexDotsVisible, true);
+    merged.hermesMergeSubagents = parseBoolean(merged.hermesMergeSubagents, true);
     merged.collectionMode = normalizeCollectionMode(merged.collectionMode);
     merged.collectionIntervalMs = normalizeCollectionIntervalMs(merged.collectionIntervalMs);
     merged.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(merged.syncUploadIntervalMs);
@@ -6206,7 +6208,8 @@ function edgeDockCellsFor(visibleStats, items = settings?.edgeDockItems, options
     limitProviders: settings?.limitProviders,
     limitProviderOrder: settings?.limitProviderOrder,
     liveRate: edgeDockLiveRateSample(visibleStats),
-    tokenRateMode: settings?.tokenRateMode
+    tokenRateMode: settings?.tokenRateMode,
+    hermesMergeSubagents: settings?.hermesMergeSubagents
   });
 }
 
@@ -8332,6 +8335,7 @@ app.whenReady().then(() => {
       clients: patch.clients !== undefined ? clientsCsvForSetting(patch.clients, '') : clientsCsvForSetting(settings.clients, DEFAULT_CLIENTS),
       codexDotsEnabled: parseBoolean(patch.codexDotsEnabled ?? settings.codexDotsEnabled, false),
       codexDotsVisible: parseBoolean(patch.codexDotsVisible ?? settings.codexDotsVisible, true),
+      hermesMergeSubagents: parseBoolean(patch.hermesMergeSubagents ?? settings.hermesMergeSubagents, true),
       customScanPaths: normalizeCustomScanPaths(patch.customScanPaths ?? settings.customScanPaths),
       refreshMs: Math.max(5000, Number(patch.refreshMs ?? settings.refreshMs ?? 15000)),
       glassOpacity: Math.max(0, Math.min(100, Number(patch.glassOpacity ?? settings.glassOpacity ?? 68))),
