@@ -2052,7 +2052,7 @@ test('verified quota history survives backend changes while unverified identitie
   const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => at(2, 12) });
   t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
   for (const [index, scope] of ['local', 'hub-a', 'hub-b', 'icloud'].entries()) {
-    await store.record(scope, { providers: [provider(at(2, 10, index * 5), 20 + index)] });
+    await store.record(scope, { providers: [{ ...provider(at(2, 10, index * 5), 20 + index), sourceDeviceId: `device-${index}` }] });
   }
   for (const scope of ['local', 'hub-a', 'hub-b', 'icloud']) {
     const result = await store.query(scope, provider(at(2, 10, 15), 23));
@@ -2067,245 +2067,70 @@ test('verified quota history survives backend changes while unverified identitie
   }
 });
 
-test('legacy backend histories are adopted once, preserving compressed coverage and conflicting originals', async t => {
+
+test('old backend histories remain untouched while new readings share one account timeline', async t => {
   const { createHash } = require('node:crypto');
   const { limitWindowKey } = require('../../src/shared/limits/usageItems');
   const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-adoption-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-no-migration-'));
   const file = path.join(directory, 'history.sqlite');
   const row = provider(at(2, 11), 25);
-  const legacyId = scope => hash([scope, historyAccountKey(row), limitWindowKey(row.windows[0]), 'pp']);
-  const db = createHistoryDatabase(file);
-  for (const [scope, time, value] of [['hub-a', at(2, 10), 20], ['hub-a', at(2, 10, 5), 20],
-    ['local', at(2, 10, 10), 25]]) {
-    db.record([{ account: hash([scope, historyAccountKey(row)]), source: 'device',
-      windows: [{ id: legacyId(scope), point: point(time, value, at(8, 0)) }] }], at(2, 12));
-  }
-  db.close();
-  const options = { now: () => at(2, 12), legacyScopes: () => ['hub-a', 'local'] };
-  let store = createLimitsHistoryStore(file, options);
-  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
-  const result = await store.query('local', row);
-  assert.deepEqual(result.windows[0].points.map(p => [p.at, p.value]), [[at(2, 10), 20], [at(2, 10, 5), 20], [at(2, 10, 10), 25]]);
-  assert.equal(result.windows[0].distribution.buckets.at(-1).value, 5);
-  assert.equal(result.windows[0].distribution.buckets.at(-1).observations, 3);
-  await store.record('hub-b', { providers: [row] });
-  await store.close();
-  store = createLimitsHistoryStore(file, options);
-  assert.deepEqual((await store.query('hub-b', row)).windows[0].points.map(p => p.value), [20, 20, 25, 25]);
+  const legacyId = hash(['local', historyAccountKey(row), limitWindowKey(row.windows[0]), 'pp']);
+  const database = createHistoryDatabase(file);
+  database.record([{ account: hash(['local', historyAccountKey(row)]), source: 'device',
+    windows: [{ id: legacyId, point: point(at(2, 10), 20, at(8, 0)) }] }], at(2, 12));
+  database.close();
   const inspect = new DatabaseSync(file, { readOnly: true });
-  try {
-    assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM history_adoptions').get().n, 2);
-    assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM streams WHERE id IN (?, ?)').get(legacyId('local'), legacyId('hub-a')).n, 2);
-    assert.equal(inspect.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
-  } finally { inspect.close(); }
+  const before = ['runs', 'coverage', 'daily'].map(table => inspect.prepare(`SELECT * FROM ${table}`).all());
+  const store = createLimitsHistoryStore(file, { now: () => at(2, 12) });
+  t.after(async () => { await store.close(); inspect.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  assert.equal((await store.query('local', row)).windows[0].points.length, 0);
+  assert.deepEqual(['runs', 'coverage', 'daily'].map(table => inspect.prepare(`SELECT * FROM ${table}`).all()), before);
+  await store.record('local', { providers: [row] });
+  for (const scope of ['local', 'hub-a', 'icloud']) {
+    assert.deepEqual((await store.query(scope, row)).windows[0].points.map(p => p.value), [25]);
+  }
+  assert.deepEqual(inspect.prepare('SELECT * FROM daily WHERE stream = ?').all(legacyId), before[2]);
 });
 
-for (const conflicting of [false, true]) {
-  test(`adoption reconciles overlapping backend snapshots without double counting (conflict: ${conflicting})`, async t => {
-    const { createHash } = require('node:crypto');
-    const { limitWindowKey } = require('../../src/shared/limits/usageItems');
-    const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-overlap-'));
-    const file = path.join(directory, 'history.sqlite');
-    const row = provider(at(2, 10, 5), 22);
-    const db = createHistoryDatabase(file);
-    for (const scope of ['local', 'hub-a']) {
-      for (const [time, value] of [[at(2, 10), 20], [at(2, 10, 5), scope === 'hub-a' && conflicting ? 90 : 22]]) {
-        db.record([{ account: hash([scope, historyAccountKey(row)]), source: 'same-device', windows: [{
-          id: hash([scope, historyAccountKey(row), limitWindowKey(row.windows[0]), 'pp']),
-          point: point(time, value, at(8, 0)) }] }], at(2, 12));
-      }
-    }
-    db.close();
-    const store = createLimitsHistoryStore(file, { now: () => at(2, 12), legacyScopes: () => ['local', 'hub-a'] });
-    t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
-    const result = await store.query('local', row);
-    assert.equal(result.windows[0].distribution.buckets.at(-1).value, 2);
-    assert.deepEqual(result.windows[0].points.map(p => p.value), [20, 22]);
-    assert.equal(result.windows[0].points.at(-1).uncertainUntil != null, conflicting);
-    assert.deepEqual(await store.query('hub-a', row), result, 'adoption is idempotent');
-  });
-}
-
-test('adoption rolls back the projection and marker together when persistence fails', t => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-rollback-'));
-  const file = path.join(directory, 'history.sqlite');
-  const db = createHistoryDatabase(file);
-  const inspect = new DatabaseSync(file);
-  t.after(() => { inspect.close(); db.close(); fs.rmSync(directory, { recursive: true, force: true }); });
-  for (let time = at(2, 8); time <= at(2, 11); time += 300_000) db.record([action(time, 20)], at(2, 12));
-  const query = id => db.query([{ id, key: 'weekly', window: { kind: 'weekly' } }], { grain: 'hour', day: dayKey(at(2, 12)) }, at(2, 12));
-  const before = query(streamA).windows;
-  inspect.exec("CREATE TRIGGER reject_adoption BEFORE INSERT ON history_adoptions BEGIN SELECT RAISE(ABORT, 'test failure'); END");
-  const mapping = [{ id: streamB, account: accountA, legacy: [streamA] }];
-  assert.throws(() => db.adopt(mapping, at(2, 12)), /test failure/);
-  assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM streams WHERE id = ?').get(streamB).n, 0);
-  assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM history_adoptions').get().n, 0);
-  assert.equal(inspect.prepare('SELECT SUM(samples) AS n FROM coverage').get().n, 37);
-  inspect.exec('DROP TRIGGER reject_adoption');
-  db.adopt(mapping, at(2, 12));
-  assert.equal(inspect.prepare('SELECT SUM(c.samples) AS n FROM coverage c JOIN runs r ON r.id = c.run WHERE r.stream = ?').get(streamB).n, 37);
-  assert.equal(inspect.prepare('SELECT observations FROM daily WHERE stream = ?').get(streamB).observations, 37);
-  assert.deepEqual(query(streamB).windows, before, 'compressed hourly coverage survives adoption exactly');
-});
-
-const adoptedStream = 'e'.repeat(64);
-function adoptionDatabase(t) {
-  const db = createHistoryDatabase(':memory:');
-  t.after(() => db.close());
-  return db;
-}
-function adoptedDistribution(db, grain = 'day') {
-  return db.query([{ id: adoptedStream, key: 'weekly', window: { kind: 'weekly' } }],
-    { grain, day: dayKey(at(2, 12)) }, at(2, 12)).windows[0].distribution;
-}
-
-test('adoption detects disagreements inside overlapping compressed coverage before counting consumption', t => {
-  const reference = adoptionDatabase(t), migrated = adoptionDatabase(t);
-  for (const [minute, local, hub] of [[0, 20, 20], [5, 20, 25], [10, 20, 25]]) {
-    reference.record([action(at(2, 10, minute), local, { id: adoptedStream, source: 'local' }),
-      action(at(2, 10, minute), hub, { id: adoptedStream, source: 'hub' })], at(2, 12));
-    migrated.record([action(at(2, 10, minute), local, { source: 'local' }),
-      action(at(2, 10, minute), hub, { id: streamB, source: 'hub' })], at(2, 12));
-  }
-  migrated.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA, streamB],
-    sources: [{ id: streamA, before: 'local', after: 'local' }, { id: streamB, before: 'hub', after: 'hub' }] }], at(2, 12));
-  for (const grain of ['day', 'hour']) {
-    const expected = adoptedDistribution(reference, grain), actual = adoptedDistribution(migrated, grain);
-    assert.deepEqual(actual.buckets.map(b => b.value), expected.buckets.map(b => b.value));
-    assert.equal(actual.unallocated, expected.unallocated);
-    assert.equal(actual.resets, expected.resets);
-  }
-});
-
-test('adoption preserves ordinary failed-refresh recovery without manufacturing confirmed uncertainty', t => {
-  const reference = adoptionDatabase(t), migrated = adoptionDatabase(t);
-  for (const [db, id] of [[reference, adoptedStream], [migrated, streamA]]) {
-    db.record([action(at(2, 10), 20, { id, source: 'local' }), { account: accountA, source: 'local', failed: true }], at(2, 12));
-  }
-  migrated.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA],
-    sources: [{ id: streamA, before: 'local', after: 'local' }] }], at(2, 12));
-  for (const db of [reference, migrated]) db.record([action(at(2, 10, 5), 25, { id: adoptedStream, source: 'local' })], at(2, 12));
-  for (const grain of ['day', 'hour']) assert.deepEqual(adoptedDistribution(migrated, grain), adoptedDistribution(reference, grain));
-});
-
-test('adoption preserves origin watermarks after a confirmed empty snapshot', t => {
-  const db = adoptionDatabase(t);
-  db.record([action(at(2, 9, 50), 20, { source: 'local' }), action(at(2, 10), 20, { id: adoptedStream, source: 'local' }),
-    { account: accountA, source: 'local', snapshotAt: at(2, 10, 10), windows: [] }], at(2, 12));
-  db.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA],
-    sources: [{ id: streamA, before: 'local', after: 'local' }] }], at(2, 12));
-  const before = adoptedDistribution(db);
-  db.record([action(at(2, 10, 5), 25, { id: adoptedStream, source: 'local' })], at(2, 12));
-  assert.deepEqual(adoptedDistribution(db), before, 'cached numeric readings older than the empty snapshot stay rejected');
-});
-
-for (const [readopt, competing] of [[false, false], [true, false], [true, true]]) test(`adoption retains historical conflict without poisoning consumption after owner recovery (readopt: ${readopt}, competing: ${competing})`, t => {
-  const reference = adoptionDatabase(t), migrated = adoptionDatabase(t);
-  for (const minute of [0, 5, 10]) {
-    const local = action(at(2, 10, minute), 20, { id: adoptedStream, source: 'local' });
-    const hub = minute < 10 ? action(at(2, 10, minute), minute ? 25 : 20, { id: adoptedStream, source: 'hub' }) : null;
-    reference.record([local, ...(hub ? [hub] : [])], at(2, 12));
-    migrated.record([{ ...local, windows: local.windows.map(w => ({ ...w, id: streamA })) },
-      ...(hub ? [{ ...hub, windows: hub.windows.map(w => ({ ...w, id: streamB })) }] : [])], at(2, 12));
-  }
-  migrated.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA, streamB],
-    sources: [{ id: streamA, before: 'local', after: 'local' }, { id: streamB, before: 'hub', after: 'hub' }] }], at(2, 12));
-  if (readopt) {
-    const discovered = 'f'.repeat(64);
-    reference.record([action(at(2, 10), 20, { id: adoptedStream, source: 'hub-b' })], at(2, 12));
-    migrated.record([action(at(2, 10), 20, { id: discovered, source: 'hub-b' })], at(2, 12));
-    migrated.adopt([{ id: adoptedStream, account: accountA, legacy: [discovered],
-      sources: [{ id: discovered, before: 'hub-b', after: 'hub-b' }] }], at(2, 12));
-  }
-  if (competing) for (const db of [reference, migrated]) db.record([action(at(2, 10, 11), 22, { id: adoptedStream, source: 'other' })], at(2, 12));
-  for (const db of [reference, migrated]) db.record([action(at(2, 10, 15), 25, { id: adoptedStream, source: 'local' })], at(2, 12));
-  for (const grain of ['day', 'hour']) {
-    const expected = adoptedDistribution(reference, grain), actual = adoptedDistribution(migrated, grain);
-    assert.deepEqual(actual.buckets.map(b => [b.value, b.uncertain]), expected.buckets.map(b => [b.value, b.uncertain]));
-    assert.equal(actual.unallocated, expected.unallocated);
-  }
-});
-
-for (const lastMinute of [10, 70]) test(`adoption preserves a recovered source across a multi-device flat run (last minute: ${lastMinute})`, t => {
-  const reference = adoptionDatabase(t), migrated = adoptionDatabase(t);
-  for (const [db, id] of [[reference, adoptedStream], [migrated, streamA]]) {
-    db.record([action(at(2, 10), 20, { id, source: 'a' }), { account: accountA, source: 'a', failed: true },
-      action(at(2, 10, 5), 21, { id, source: 'a' })], at(2, 12));
-    for (let minute = 10; minute <= lastMinute; minute += 5) db.record([action(at(2, 10, minute), 21, { id, source: 'b' })], at(2, 12));
-    db.record([action(at(2, 10, lastMinute + 5), 22, { id, source: 'a' })], at(2, 12));
-  }
-  migrated.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA],
-    sources: [{ id: streamA, before: 'a', after: 'a' }, { id: streamA, before: 'b', after: 'b' }] }], at(2, 12));
-  for (const grain of ['day', 'hour']) {
-    const expected = adoptedDistribution(reference, grain), actual = adoptedDistribution(migrated, grain);
-    assert.deepEqual(actual.buckets.map(b => b.value), expected.buckets.map(b => b.value));
-    assert.equal(actual.unallocated, expected.unallocated);
-  }
-  const windows = migrated.query([{ id: adoptedStream, key: 'weekly', window: { kind: 'weekly' } }],
-    { grain: 'day', day: dayKey(at(2, 12)) }, at(2, 12)).windows;
-  assert.equal(windows[0].points.at(-1).value, 22);
-});
-
-test('Claude CLI organization labels alone cannot join histories across backends or devices', async t => {
+test('organization-only Claude CLI identities remain separate across backend modes', async t => {
   const { mapClaudeCliUsageToProvider } = require('../../src/shared/providers/claude/limits');
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-cli-label-'));
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-organization-'));
   const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => at(2, 12) });
   t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
-  const rows = [20, 50, 70].map((used, index) => ({ ...mapClaudeCliUsageToProvider(`Organization: Personal\nCurrent session\n${used}% used`, {
-    now: new Date(at(2, 10, index * 5)), updatedAt: new Date(at(2, 10, index * 5)).toISOString()
-  }), sourceDeviceId: index === 2 ? 'b' : 'a' }));
-  assert.ok(rows[0].accountKey && rows[0].accountName && !rows[0].accountEmail);
-  await store.record('local', { providers: [rows[0]] });
-  await store.record('hub', { providers: [rows[1]] });
-  await store.record('local', { providers: [rows[2]] });
-  for (const [index, row] of rows.entries()) {
-    const result = await store.query(index === 1 ? 'hub' : 'local', row);
-    assert.deepEqual(result.windows[0].points.map(p => p.value), [[20], [50], [70]][index]);
-  }
-  const context = {};
-  vmForIdentity(context);
-  for (const row of rows) assert.equal(context.TokenMonitorLimitsHistoryIdentity.historyRowKey(row), historyRowKey(row));
+  const row = mapClaudeCliUsageToProvider('Organization: Shared display name\nCurrent session\n20% used', {
+    now: new Date(at(2, 10)), updatedAt: new Date(at(2, 10)).toISOString()
+  });
+  assert.ok(row.accountName);
+  assert.equal(row.accountEmail, '');
+  await store.record('local', { providers: [row] });
+  assert.equal((await store.query('local', row)).windows[0].points.length, 1);
+  assert.equal((await store.query('hub-a', row)).windows[0].points.length, 0);
 });
 
-for (const crossDay of [false, true]) test(`recovered compressed conflicts retain uncertainty across buckets (cross day: ${crossDay})`, () => {
-  const { observationPoints, hourStart } = require('../../src/electron/renderer/limits/historyModel');
-  const start = crossDay ? at(1, 23, 55) : at(2, 9, 55);
-  const conflictAt = start + 70 * 60_000, recovery = conflictAt + 5 * 60_000;
-  const points = observationPoints([{ ...point(recovery, 20), uncertainUntil: conflictAt, breakAfter: true,
-    coverage: [[start, start, 1], [start + 300_000, start + 3600_000, 12], [start + 3900_000, recovery, 3]]
-      .map(([at, until, samples]) => ({ at, until, samples, hour: hourStart(at), maxGap: 300_000 })) }]);
-  const result = distribution(points, { grain: crossDay ? 'day' : 'hour', day: dayKey(recovery), now: recovery });
-  for (const bucket of result.buckets) {
-    const affected = bucket.at <= conflictAt && bucket.end > start;
-    assert.equal(bucket.uncertain, affected, bucket.key);
-  }
-  assert.equal(result.unallocated, 0);
-});
-
-test('adoption through another device retains the guarded owner identity for later live readings', async t => {
-  const { createHash } = require('node:crypto');
-  const { limitWindowKey } = require('../../src/shared/limits/usageItems');
-  const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-owner-alias-'));
-  const file = path.join(directory, 'history.sqlite');
-  const a = { ...provider(at(2, 10, 5), 21), sourceDeviceId: 'a', sourceDetail: 'Device A', source: 'api' };
-  const b = { ...a, updatedAt: new Date(at(2, 10)).toISOString(), sourceDeviceId: 'b', sourceDetail: 'Device B' };
-  const stream = hash(['local', historyAccountKey(a), limitWindowKey(a.windows[0]), 'pp']);
-  const account = hash(['local', historyAccountKey(a)]);
-  const oldSource = row => hash([row.sourceDeviceId, row.source, row.sourceDetail]);
-  const db = createHistoryDatabase(file);
-  db.record([action(at(2, 10), 20, { id: stream, account, source: oldSource(a), reset: at(8, 0) }),
-    action(at(2, 10), 30, { id: stream, account, source: oldSource(b), reset: at(8, 0) }),
-    action(at(2, 10, 5), 21, { id: stream, account, source: oldSource(a), reset: at(8, 0) })], at(2, 12));
-  db.close();
-  const store = createLimitsHistoryStore(file, { now: () => at(2, 12), legacyScopes: () => ['local'] });
+test('verified OAuth identity remains shared when Claude falls back to CLI without email', async t => {
+  const { fetchClaudeLimits } = require('../../src/shared/providers/claude/limits');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-verified-cli-'));
+  const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => at(2, 12) });
   t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
-  await store.query('local', b);
-  const live = { ...a, ...provider(at(2, 10, 10), 22) };
-  await store.record('local', { providers: [live] });
-  const result = await store.query('local', live);
-  assert.equal(result.windows[0].points.at(-1).value, 22);
-  assert.equal(result.windows[0].distribution.buckets.at(-1).value, 1);
+  let fallback = false;
+  const deps = { platform: 'linux', env: { CLAUDE_CODE_OAUTH_TOKEN: 'synthetic-history-token' }, providerRuntimeState: new Map(),
+    now: () => at(2, 10, fallback ? 5 : 0), isClaudeCliAuthenticated: async () => true,
+    runClaudeUsageCli: async () => 'Current session\n25% used',
+    fetch: async url => fallback ? { ok: false, status: 503 } : { ok: true, json: async () => url.includes('/profile')
+      ? { account: { uuid: 'verified-account', display_name: 'Verified name' }, organization: { uuid: 'verified-org' } }
+      : { five_hour: { utilization: 20 } } }
+  };
+  const oauth = await fetchClaudeLimits({}, deps);
+  fallback = true;
+  const cli = await fetchClaudeLimits({}, deps);
+  assert.equal(cli.source, 'cli');
+  assert.equal(cli.accountKey, oauth.accountKey);
+  assert.equal(cli.accountName, 'Verified name');
+  assert.equal(cli.accountEmail, '');
+  await store.record('local', { providers: [oauth] });
+  await store.record('hub-a', { providers: [cli] });
+  for (const scope of ['local', 'hub-a']) {
+    assert.deepEqual((await store.query(scope, cli)).windows[0].points.map(p => p.value), [20, 25]);
+  }
 });
