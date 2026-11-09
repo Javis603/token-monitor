@@ -595,6 +595,9 @@
       const dialog = el(document, 'dialog', 'plugin-catalog-dialog');
       catalogModal = dialog;
       let imageObserver = null;
+      // Show the same version the install/update action will use, including
+      // a remembered version that is still installable.
+      const version = catalogVersion(entry);
       const heading = el(document, 'header', 'plugin-catalog-dialog-head');
       heading.append(identity(entry.name, entry.author,
         entry.origin.id === 'github-discovery' ? '' : t(`plugins.origin.${entry.origin.kind}`), entry.icon, entry.identityIcon, isFeatured(entry.origin) ? entry.origin.kind : '', entry.presentation));
@@ -603,7 +606,7 @@
       const body = el(document, 'div', 'plugin-catalog-dialog-body');
       body.append(el(document, 'p', 'plugin-description', entry.description));
       const meta = el(document, 'div', 'plugin-card-meta');
-      if (entry.version) meta.append(el(document, 'span', 'plugin-version', `v${entry.version}`));
+      if (version) meta.append(el(document, 'span', 'plugin-version', `v${version}`));
       meta.append(typeLabels(entry));
       if (Number.isSafeInteger(entry.stars)) {
         const stars = el(document, 'span', 'plugin-stars', `☆ ${entry.stars.toLocaleString(getLocale())}`);
@@ -670,11 +673,11 @@
         }
       }).catch(() => { if (dialog.isConnected) readme.textContent = t('plugins.catalog.noReadme'); });
       const footer = el(document, 'footer', 'plugin-catalog-dialog-footer');
-      const selected = entry.versions?.find(v => v.version === entry.version);
+      const selected = entry.versions?.find(v => v.version === version);
       if (selected ? selected.installable : ['available', 'update'].includes(entry.status)) {
         footer.append(button(t(entry.installedVersion ? 'plugins.package.update' : 'plugins.package.install'), () => {
           dialog.close();
-          void run(async () => { activeTab = 'discover'; sourcesOpen = false; catalogReview = entry; await previewCatalog(entry, catalogVersion(entry)); return null; });
+          void run(async () => { activeTab = 'discover'; sourcesOpen = false; catalogReview = entry; await previewCatalog(entry, version); return null; });
         }, 'plugin-allow'));
       } else if (entry.status === 'repository') footer.append(el(document, 'span', 'settings-note', t('plugins.catalog.repositoryOnly')));
       else if (entry.status === 'incompatible') footer.append(el(document, 'span', 'plugin-risk', t('plugins.catalog.incompatible')));
