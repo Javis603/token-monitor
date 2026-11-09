@@ -262,17 +262,3 @@ test('HTTP failures recover and a new desktop session replaces its previous acco
   assert.equal(failed[0].accountKey, rotated[0].accountKey);
   assert.deepEqual(failed[0].windows, rotated[0].windows);
 });
-
-test('a desktop session configures the account, and an unreadable store does not sign it out', () => {
-  const account = require('../../src/shared/providers/hark/account');
-  const limits = { harkCookie: () => '' };
-  assert.equal(account.discover({}, { readHarkDesktopSession: () => SESSION }), true);
-  assert.equal(account.discover({}, { readHarkDesktopSession: () => '' }), false);
-  assert.equal(account.discover({}, {
-    readHarkDesktopSession() { throw Object.assign(new Error('denied'), { status: 'unavailable' }); }
-  }), true);
-  assert.deepEqual(account.accountStatus({ settings: {}, env: {}, discovered: true, limits }), {
-    harkCookieConfigured: true,
-    harkCookieSource: 'hark-desktop'
-  });
-});

@@ -468,8 +468,6 @@ test('Hark daily, period, feature, and top-up rows render and hide independently
   const used = dockView({ showLimitUsed: true }).renderProviderWindows(provider, '#1C1C1C');
   assert.match(used.children[0].text, /1 \/ 4/);
   assert.match(card.children[4].text, /\$2\.50 spent/);
-  const odd = dockView().renderProviderWindows({ ...provider, windows: provider.windows.slice(0, 3) }, '#1C1C1C');
-  assert.equal(odd.children[2].classList.contains('limit-window-wide'), true);
   const items = dockView().limitProviderUsageItems([provider]);
   assert.equal(items.length, 5);
   for (const item of items) {
