@@ -266,7 +266,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | StepFun Oasis-Token (Coding Plan / Token Plan 할당량) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Business/Enterprise용 Notion AI 롤링/월간 허용량; 수동 token_v2 Cookie + 명시적 워크스페이스 ID | — | ✅ | — |
 | <img src=".github/assets/tools-icon/manus.png" width="28" alt="Manus" /> | Manus | Manus 크레딧(월간 + 일일/정기 리프레시 + 잔액); 데스크톱 세션(macOS/Windows) 또는 수동 웹 세션(모든 OS) | — | ✅ | — |
-| <img src=".github/assets/tools-icon/hark.png" width="28" alt="Hark" /> | Hark | Hark Pro의 일간·기간 토큰 풀(`GET /api/billing/summary`). macOS 데스크톱 세션 또는 붙여넣은 세션 쿠키 | — | ✅ | — |
+| <img src=".github/assets/tools-icon/hark.png" width="28" alt="Hark" /> | Hark | Hark Pro의 일간·월간 토큰 풀; macOS 데스크톱 세션 또는 붙여넣은 세션 쿠키 | — | ✅ | — |
 | <img src=".github/assets/tools-icon/opendesign.png" width="28" alt="OpenDesign" /> | OpenDesign | 현재 워크스페이스의 5시간 / 주간 구독 한도; 수동 Cookie | — | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="서드파티 API" /> | 서드파티 API | New API / Sub2API 호환 계정 프리셋(호환 One API 포크 포함), New API 키 프리셋, 사용자 지정 잔액 엔드포인트 | — | ✅ | — |
 
@@ -286,7 +286,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 - Devin은 로컬 `sessions.db`에서 Devin CLI 세션을, `acp-events` ACP 로그에서 Devin Desktop 에이전트 세션을 추적합니다. 같은 세션이 양쪽에 있으면 CLI 데이터베이스가 우선입니다. Desktop 적용 범위는 연결된 ACP 에이전트에 따라 달라집니다. 로컬에 `usage_update` 이벤트를 기록하는 에이전트만 집계되며, Devin Desktop의 기본 `devin-cloud` 에이전트는 서버 측에서 계측되므로 기본 Desktop 구성에서는 Desktop 토큰이 보고되지 않습니다. 세션 제목과 프로젝트 귀속은 CLI 데이터베이스에서 가져옵니다. [Devin 데이터 소스 설명](docs/providers/devin.md)을 참고하세요.
 - Notion AI는 내부 API를 사용합니다. `token_v2` Cookie를 수동으로 붙여넣고 Business/Enterprise 워크스페이스 ID를 명시해야 합니다. 테스트 데이터로만 검증했으며 실제 응답 샘플은 없고 실제 인증 검증은 승인을 기다리고 있습니다. Cookie를 자동으로 가져오지 않으며 공개 API 호환성을 보장하지 않습니다. [Notion 데이터 소스 설명](docs/providers/notion.md)을 참고하세요.
 - Manus는 macOS/Windows 데스크톱 세션을 자동으로 읽으며 Linux를 포함한 모든 OS에서 수동 웹 세션도 지원합니다. 월간 크레딧, 리프레시 한도와 잔액은 같은 비공개 내부 API를 사용하며 호환성을 보장하지 않습니다. [Manus 데이터 소스 설명](docs/providers/manus.md)을 참고하세요.
-- Hark는 macOS에서 로그인된 데스크톱 세션을 읽거나, 모든 OS에서 세션 쿠키를 붙여넣을 수 있습니다. 한도는 계정 단위의 일간·기간 토큰 풀이며 로컬 토큰 장부가 아닙니다. [Hark 데이터 소스 설명](docs/providers/hark.md)을 참고하세요.
+- Hark는 macOS에서 로그인된 데스크톱 세션을 읽거나, 모든 OS에서 세션 쿠키를 붙여넣을 수 있습니다. 계정 단위의 일간·월간 토큰 풀을 표시합니다. [Hark 데이터 소스 설명](docs/providers/hark.md)을 참고하세요.
 - MiniMax Code는 CLI가 기록하는 로컬 세션 기록(`~/.minimax` 또는 `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR`, `~/.mavis`와 `~/.minimax-<profile>` / `~/.mavis-<profile>` 포함)과 `tokscale headless mcode`로 캡처한 실행을 읽습니다. 양쪽에 모두 있는 같은 턴은 한 번만 집계됩니다.
 
 - Command Code transcript에는 실제 토큰 수나 메시지별 모델 정보가 포함되지 않습니다. 토큰 사용량은 transcript 텍스트에서 추정되며, 모델 귀속과 추정 비용에는 각 요청에서 과거에 사용한 모델이 아니라 현재 설정된 모델이 반영될 수 있습니다.

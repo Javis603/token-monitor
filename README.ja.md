@@ -266,7 +266,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | StepFun Oasis-Token（Coding Plan／Token Plan のクォータ） | — | ✅ | — |
 | <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Business/Enterprise 向けの Notion AI ローリング／月間使用枠；手動 token_v2 Cookie + 明示的なワークスペース ID | — | ✅ | — |
 | <img src=".github/assets/tools-icon/manus.png" width="28" alt="Manus" /> | Manus | Manus クレジット（月間＋毎日／定期リフレッシュ＋残高）；デスクトップセッション（macOS／Windows）または手動 Web セッション（全 OS） | — | ✅ | — |
-| <img src=".github/assets/tools-icon/hark.png" width="28" alt="Hark" /> | Hark | Hark Pro の日次と期間トークンプール（`GET /api/billing/summary`）。macOS のデスクトップセッション、または貼り付けたセッションクッキー | — | ✅ | — |
+| <img src=".github/assets/tools-icon/hark.png" width="28" alt="Hark" /> | Hark | Hark Pro の日次と月次トークンプール。macOS のデスクトップセッション、または貼り付けたセッションクッキー | — | ✅ | — |
 | <img src=".github/assets/tools-icon/opendesign.png" width="28" alt="OpenDesign" /> | OpenDesign | 現在のワークスペースの5時間／週間サブスクリプション枠；手動 Cookie | — | ✅ | — |
 | <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="サードパーティAPI" /> | サードパーティAPI | New API / Sub2API互換アカウントプリセット（互換性のあるOne APIフォークを含む）、New APIキープリセット、カスタム残高エンドポイント | — | ✅ | — |
 
@@ -286,7 +286,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 - Devin はローカルの `sessions.db` から Devin CLI セッションを、`acp-events` ACP ログから Devin Desktop のエージェントセッションを追跡します。同じセッションが両方にある場合は CLI データベースが優先されます。Desktop の対象範囲は接続する ACP エージェントに依存します。ローカルに `usage_update` イベントを書き出すエージェントのみが集計対象で、Devin Desktop の既定の `devin-cloud` エージェントはサーバー側で計測されるため、既定の Desktop 構成では Desktop のトークンは報告されません。セッションタイトルとプロジェクト帰属は CLI データベースから取得します。詳しくは [Devin のデータソース](docs/providers/devin.md)を参照してください。
 - Notion AI は内部 API を使用します。`token_v2` Cookie の手動貼り付けと Business/Enterprise の明示的なワークスペース ID が必要です。テストデータのみで検証しており、実際のレスポンスサンプルはなく、実際の認証検証は承認待ちです。Cookie の自動取得は行わず、公開 API としての互換性は保証されません。[Notion のデータソース](docs/providers/notion.md)を参照してください。
 - Manus は macOS／Windows のデスクトップセッションを自動取得し、Linux を含む全 OS で手動 Web セッションも利用できます。月間クレジット、リフレッシュ枠、残高は同じ非公開の内部 API を使用し、互換性は保証されません。[Manus のデータソース](docs/providers/manus.md)を参照してください。
-- Hark は macOS のサインイン済みデスクトップセッションを読むか、任意の OS でセッションクッキーを貼り付けます。枠はアカウント単位の日次と期間トークンプールで、ローカルなトークン台帳ではありません。[Hark のデータソース](docs/providers/hark.md)を参照してください。
+- Hark は macOS のサインイン済みデスクトップセッションを読むか、任意の OS でセッションクッキーを貼り付けます。アカウント単位の日次と月次トークンプールを表示します。[Hark のデータソース](docs/providers/hark.md)を参照してください。
 - MiniMax Code は、CLI が書き込むローカルのセッション履歴（`~/.minimax` または `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR`、`~/.mavis` と `~/.minimax-<profile>` / `~/.mavis-<profile>` も含む）と、`tokscale headless mcode` でキャプチャした実行を読み取ります。両方にある同じターンは 1 回だけ集計されます。
 
 - Command Code の transcript には実際のトークン数やメッセージごとのモデル情報が含まれません。トークン使用量は transcript テキストから推定され、モデルの帰属と推定コストには各リクエストで過去に使用したモデルではなく、現在設定されているモデルが反映される場合があります。
