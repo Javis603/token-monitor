@@ -1184,8 +1184,49 @@ test('new calendar captures leave unknown legacy history untouched, without reco
   assert.deepEqual(next.liveDays, historical.liveDays);
   const visible = historyFrom(graphFromDailyHistoryArchive([], next, { todayKey: '2026-11-07', timeZone: 'Asia/Taipei' }), '2026-11-07');
   assert.equal(visible.daily.find(day => day.date === '2026-11-06').tokens, 900);
-  assert.equal(visible.daily.find(day => day.date === '2026-11-07').tokens, 550);
+  assert.equal(visible.daily.find(day => day.date === '2026-11-07').tokens, 1300);
 });
+
+for (const legacyKind of ['graph', 'live']) {
+  for (const firstCapture of ['graph', 'live']) {
+    test(`upgrade retains source-deleted ${legacyKind} usage through a first ${firstCapture} capture, once only`, t => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-calendar-upgrade-'));
+      t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+      const date = '2026-11-07';
+      const legacyPath = path.join(dir, 'daily-history-archive.json');
+      const legacy = legacyKind === 'graph'
+        ? captureDailyHistoryArchive({}, graph(date, [client('claude', 'opus', 100, 2, 1)]), { todayKey: date })
+        : captureLiveDailyHistory({}, livePeriod(100, 2), { todayKey: date });
+      const original = JSON.stringify(legacy);
+      fs.writeFileSync(legacyPath, original);
+      const options = { env: { TOKEN_MONITOR_SHARED_DIR: dir }, timeZone: 'Asia/Taipei', todayKey: date };
+      const daily = (opts = options) => historyFrom(retainDailyHistory([], opts), opts.todayKey).daily;
+      const tokens = (opts = options) => daily(opts).find(day => day.date === date)?.tokens || 0;
+
+      // There are no source transcripts or session archives to rebuild this day.
+      if (firstCapture === 'graph') retainDailyHistory([], options);
+      else retainLiveDailyHistory(livePeriod(0), options);
+      assert.equal(tokens(), 100);
+      assert.equal(daily()[0].cost, 2);
+      assert.equal(fs.readFileSync(legacyPath, 'utf8'), original);
+
+      // Each call reloads the persisted calendar archive. Lower/overlapping
+      // scans retain the original maximum rather than summing the old baseline.
+      retainLiveDailyHistory(livePeriod(50, 1), options);
+      assert.equal(tokens(), 100);
+      retainLiveDailyHistory(livePeriod(150, 3), options);
+      assert.equal(tokens(), 150);
+
+      const west = { ...options, timeZone: 'America/Los_Angeles' };
+      assert.equal(tokens(west), 0, 'a second timezone must not import the legacy baseline');
+      assert.equal(tokens(), 150, 'returning to the first calendar retains its own observation');
+      retainLiveDailyHistory(livePeriod(20), { ...options, todayKey: '2026-11-08' });
+      assert.equal(tokens({ ...options, todayKey: '2026-11-08' }), 150);
+      assert.equal(tokens({ ...west, todayKey: '2026-11-08' }), 150);
+      assert.equal(fs.readFileSync(legacyPath, 'utf8'), original);
+    });
+  }
+}
 
 test('timezone round trips never max-win across calendars and retain same-calendar maxima', () => {
   const date = '2026-11-07';

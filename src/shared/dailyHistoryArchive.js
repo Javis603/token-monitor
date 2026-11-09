@@ -234,9 +234,18 @@ function normalizeDailyHistoryArchive(value, includeCalendars = true) {
 function captureCalendar(existing, options, capture) {
   const archive = normalizeDailyHistoryArchive(existing);
   const savedScope = archive.calendars?.[options.timeZone];
+  // Upgrade continuity is a one-time handoff, not a timezone conversion. The
+  // legacy archive has no calendar provenance, so keep its cutover-day maximum
+  // in the first calendar only. Sources may already be deleted. Past dates stay
+  // in the untouched legacy section; later calendars start independently.
+  const firstCalendar = Object.keys(archive.calendars || {}).length === 0;
+  const date = options.todayKey;
   const scope = {
+    days: firstCalendar && archive.days[date] ? { [date]: archive.days[date] } : {},
+    liveDays: firstCalendar && archive.liveDays?.[date] ? { [date]: archive.liveDays[date] } : {},
+    ...(firstCalendar && archive.pricingRevision ? { pricingRevision: archive.pricingRevision } : {}),
     ...savedScope,
-    since: archive.activeCalendar === options.timeZone ? savedScope.since : options.todayKey
+    since: archive.activeCalendar === options.timeZone ? savedScope.since : date
   };
   archive.activeCalendar = options.timeZone;
   const next = capture(mergeLiveDaysIntoArchive(scope, options.liveDays), scope.since);
