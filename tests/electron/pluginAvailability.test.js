@@ -112,6 +112,55 @@ test('fixed plugin quota icons disappear from native bitmaps and Notch while the
   stats.pluginLimitModules = []; assertShown(false); // Disabled/removed.
   stats.pluginLimitModules = [{ id, label: 'Credits' }]; assertShown(true);
 });
+test('inactive plugin quota text, bars and stacks disappear from Tray/Bubble and Notch without deleting saved layouts', () => {
+  const id = 'plugin:sample-plugin:credits', provider = { provider: id };
+  const items = [
+    ...['percent', 'percentReset', 'reset', 'account'].map(metric => ({ type: 'text', metric, source: provider })),
+    { type: 'bars', rows: [provider] },
+    ...['percent', 'reset'].map(metric => ({ type: 'stack', metric, rows: [provider, provider] })),
+    { type: 'stack', metric: 'mixed', rows: [{ ...provider, metric: 'percent' }, { ...provider, metric: 'reset' }] }
+  ];
+  const context = { state: { settings: {} }, localLiveCodexProvider: () => null, trayLayoutApi: trayLayout,
+    currentCurrency: () => 'USD', compactTokenDisplayOptions: () => ({}), trayProviderImages: {},
+    displayLiveTokenRateSamples: () => ({}), pluginTrayViews: () => ({}), renderCustomTrayItemCanvas: () => ({ width: 20 }),
+    document: { createElement: () => ({ getContext: () => ({ drawImage() {} }), toDataURL: () => 'bitmap' }) } };
+  vm.createContext(context);
+  vm.runInContext(source('renderer/app.js', 'function renderCustomTrayLayout(', '\nfunction barsDataUrlForMode('), context);
+  const { buildNotchData } = require('../../src/electron/notch/data');
+  for (const item of items) {
+    const layout = trayLayout.normalizeTrayLayout({ items: [item] }), saved = JSON.stringify(layout);
+    const retainedReading = { provider: id, status: 'ok', windows: [{ kind: 'weekly', remainingPercent: 75, usedPercent: 25, resetsAt: '2027-01-01T00:00:00Z' }] };
+    for (const [active, providers] of [[true, []], [false, [retainedReading]], [true, [retainedReading]]]) {
+      const stats = { pluginLimitModules: active ? [{ id }] : [], limits: { providers } };
+      assert.equal(context.renderCustomTrayLayout(stats, layout), active ? 'bitmap' : null, JSON.stringify(item));
+      assert.equal(Boolean(buildNotchData(stats, [], { notchSummaryMode: 'custom', notchCustomLayout: layout }).summary), active);
+      assert.equal(JSON.stringify(layout), saved);
+    }
+  }
+});
+test('mixed custom items keep builtin placeholders and usage rows with their own measurement after an inactive quota row is removed', () => {
+  const id = 'plugin:sample-plugin:credits';
+  const stats = { pluginLimitModules: [], periods: { month: { totalTokens: 12345 } }, limits: { providers: [] } };
+  const layout = trayLayout.normalizeTrayLayout({ items: [
+    { type: 'bars', rows: [{ provider: id }, { provider: 'codex' }] },
+    { type: 'stack', metric: 'percent', rows: [{ provider: id }, { provider: 'codex' }] },
+    { type: 'stack', metric: 'mixed', rows: [{ provider: id, metric: 'percent' }, { provider: id, metric: 'tokens', period: 'month', usageScope: 'all' }] },
+    { type: 'text', metric: 'custom', text: 'Note', source: { provider: id } }
+  ] });
+  const saved = JSON.stringify(layout);
+  const resolved = trayLayout.resolveTrayLayout(layout, stats);
+  assert.equal(resolved.items[0].rows.length, 1);
+  assert.equal(resolved.items[0].rows[0].source.provider, 'codex');
+  assert.equal(resolved.items[1].rows.length, 1);
+  assert.equal(resolved.items[2].rows.length, 1);
+  assert.equal(resolved.items[3].text, 'Note');
+  const { buildNotchData } = require('../../src/electron/notch/data');
+  const summary = buildNotchData(stats, [], { notchSummaryMode: 'custom', notchCustomLayout: layout }).summary;
+  assert.equal(summary.items.length, 4);
+  assert.equal(summary.items[2].rows[0].metric, 'tokens');
+  assert.equal(summary.items[2].rows[0].measure.value, 12345);
+  assert.equal(JSON.stringify(layout), saved);
+});
 
 test('Notch stats projection reads only active surface metadata and preserves saved selections', () => {
   let available = [{ ref, title: 'CPU', icon: 'activity' }], result;

@@ -69,7 +69,7 @@ test('maximum-length module identities and hidden windows survive native surface
   assert.equal(items.normalizeEdgeDockItems([{ type: 'limit', provider: longId }])[0].provider, longId);
   const layout = tray.normalizeTrayLayout({ items: [{ type: 'text', metric: 'percent', source: { provider: longId } }] });
   assert.equal(layout.items[0].source.provider, longId);
-  assert.equal(tray.resolveTrayLayout(layout, { limits: { providers: [{ ...reading, provider: longId }] } }).items[0].available, true);
+  assert.equal(tray.resolveTrayLayout(layout, { pluginLimitModules: [{ id: longId }], limits: { providers: [{ ...reading, provider: longId }] } }).items[0].available, true);
   const usage = require('../../src/shared/limits/usageItems');
   const hidden = usage.normalizeLimitProviderHiddenItems({ [longId]: ['credits'] });
   assert.ok(hidden[longId]);

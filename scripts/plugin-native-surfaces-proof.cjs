@@ -129,7 +129,16 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
     fs.writeFileSync(path.join(evidence, 'floating-bubble.png'), (await win.webContents.capturePage(bubbleRect)).toPNG());
     const fixedLayout = { items: [{ type: 'icon', icon: 'provider', source: { provider: 'plugin:synthetic-limits:one' } }] };
     const fixedBitmap = () => js(`renderCustomTrayLayout(desktopSurfaceStats(),${JSON.stringify(fixedLayout)})`);
+    const quotaSource = { provider: 'plugin:synthetic-limits:one' };
+    const quotaLayout = { items: [
+      ...['percent', 'percentReset', 'reset', 'account'].map(metric => ({ type: 'text', metric, source: quotaSource })),
+      { type: 'bars', rows: [quotaSource] },
+      ...['percent', 'reset'].map(metric => ({ type: 'stack', metric, rows: [quotaSource, quotaSource] })),
+      { type: 'stack', metric: 'mixed', rows: [{ ...quotaSource, metric: 'percent' }, { ...quotaSource, metric: 'reset' }] }
+    ] };
+    const quotaBitmap = () => js(`renderCustomTrayLayout(desktopSurfaceStats(),${JSON.stringify(quotaLayout)})`);
     assert.match(await fixedBitmap(), /^data:image\/png/);
+    assert.match(await quotaBitmap(), /^data:image\/png/);
     await js("applyFloatingBubbleState({collapsed:false});openSettingsPanel();setSettingsSectionExpanded('window',true);pluginApi.setEnabled('synthetic-limits',false)");
     await waitFor("state.pluginCatalog.plugins.find(p=>p.id==='synthetic-limits')?.status==='disabled'", 'disabled catalog');
     await js("displaySettings.open('edgeDock');edgeDockComposer.render();els.edgeDockComposer.scrollIntoView({block:'center'});");
@@ -146,7 +155,9 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
     const inactive = require('../src/electron/plugins/limitsPresentation').projectPluginLimits(stats, runtime.limitsSnapshot());
     assert.equal(require('../src/electron/renderer/edgeDock/presentation').buildEdgeDockCells(inactive, { items: dockSettings.edgeDockItems }).length, 0);
     assert.equal(await fixedBitmap(), null, 'disabled fixed icons emit no Tray/Bubble bitmap');
+    assert.equal(await quotaBitmap(), null, 'disabled quota text and rows emit no Tray/Bubble bitmap');
     assert.equal(require('../src/electron/notch/data').buildNotchData(inactive, [], { notchSummaryMode: 'custom', notchCustomLayout: fixedLayout }).summary, null);
+    assert.equal(require('../src/electron/notch/data').buildNotchData(inactive, [], { notchSummaryMode: 'custom', notchCustomLayout: quotaLayout }).summary, null);
     await js(`tokenMonitor.updateSettings({floatingBubbleContent:'custom',floatingBubbleCustomLayout:${JSON.stringify(fixedLayout)}})`);
     await js("openViewFromTray('home');applyFloatingBubbleState({collapsed:true,side:'right'})");
     assert.equal(await js("!!els.floatingBubbleContent.querySelector('img')"), false);
@@ -156,9 +167,10 @@ module.exports = async function proof({ BrowserWindow, ipcMain, win, runtime, se
     assert.equal(await js("els.edgeDockComposer.querySelectorAll('.edge-dock-composer-item[data-item-id]').length"), 3);
     assert.equal(await js("JSON.stringify(state.settings.edgeDockItems)"), savedComposerItems);
     assert.match(await fixedBitmap(), /^data:image\/png/);
+    assert.match(await quotaBitmap(), /^data:image\/png/);
     runtime.manager.setEnabled('synthetic-limits', false);
     await waitFor("state.pluginCatalog.limits.modules.length===0 && !els.floatingBubbleContent.querySelector('img')", 'visible Bubble drops disabled fixed icon');
 
-    fs.writeFileSync(path.join(evidence, 'proof.json'), JSON.stringify({ modules: cells.map(cell => cell.provider), rawStatsUntouched: true, nativeManualRefresh: true, fixedIconDisableRestore: true, standaloneNotchMetadata: true, composerIconGeometry, composerDisableRestore: true, composerAddRetainsHidden: true, nativeIconDragStarts, trayAndBubbleProviders: sourceProviders, inactiveCells: 0, surfaceCount: windows.length }, null, 2));
+    fs.writeFileSync(path.join(evidence, 'proof.json'), JSON.stringify({ modules: cells.map(cell => cell.provider), rawStatsUntouched: true, nativeManualRefresh: true, fixedIconDisableRestore: true, quotaItemsDisableRestore: true, standaloneNotchMetadata: true, composerIconGeometry, composerDisableRestore: true, composerAddRetainsHidden: true, nativeIconDragStarts, trayAndBubbleProviders: sourceProviders, inactiveCells: 0, surfaceCount: windows.length }, null, 2));
   } finally { dock.stop(); notch.dispose(); runtime.demandLimits(false, 'fixture.native-refresh'); }
 };

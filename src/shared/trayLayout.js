@@ -969,6 +969,10 @@
     };
   }
 
+  function inactivePluginSource(source, stats) {
+    return source.provider.startsWith('plugin:') && !stats?.pluginLimitModules?.some(module => module.id === source.provider);
+  }
+
   function resolveTextItem(item, stats, options, recentProvider = null) {
     if (item.metric === 'liveTokenRate') {
       const scope = normalizeLiveRateScope(item.rateScope);
@@ -999,6 +1003,7 @@
         : formatCost(usage.value, item, options);
       return { ...item, available: true, text, provider: usage.provider };
     }
+    if (inactivePluginSource(item.source, stats)) return { ...item, available: false, omit: true, text: '--', selection: null };
     const selection = selectSource(stats, item.source, options);
     if (!selection) return { ...item, available: false, text: '--', selection: null };
     const reset = formatResetCountdown(selection.window.resetsAt, options.nowMs);
@@ -1053,7 +1058,7 @@
           if (item.icon === 'app') return { ...item, available: true, provider: 'app', selection: null };
           const fixedProvider = item.source.provider !== 'auto' ? item.source.provider : '';
           if (fixedProvider) {
-            const omit = fixedProvider.startsWith('plugin:') && !stats?.pluginLimitModules?.some(module => module.id === fixedProvider);
+            const omit = inactivePluginSource(item.source, stats);
             return {
               ...item,
               available: !omit,
@@ -1087,7 +1092,7 @@
           };
         }
         if (item.type === 'bars') {
-          const rows = item.rows.map((source) => {
+          const rows = item.rows.filter(source => !inactivePluginSource(source, stats)).map((source) => {
             const selection = selectSource(stats, source, options);
             return {
               source,
@@ -1096,7 +1101,7 @@
               selection
             };
           });
-          return { ...item, available: rows.some((row) => row.available), rows };
+          return { ...item, available: rows.some((row) => row.available), rows, ...(rows.length ? {} : { omit: true }) };
         }
         if (item.type === 'stack') {
           if (item.metric === 'custom') {
@@ -1117,6 +1122,7 @@
                 period: source.period,
                 source
               }, stats, options, recentProvider);
+              if (resolved.omit) return null;
               return {
                 source,
                 available: resolved.available,
@@ -1124,10 +1130,10 @@
                 provider: resolved.provider || null,
                 selection: resolved.selection || null
               };
-            });
-            return { ...item, available: rows.some((row) => row.available), rows };
+            }).filter(Boolean);
+            return { ...item, available: rows.some((row) => row.available), rows, ...(rows.length ? {} : { omit: true }) };
           }
-          const rows = item.rows.map((source) => {
+          const rows = item.rows.filter(source => !inactivePluginSource(source, stats)).map((source) => {
             const selection = selectSource(stats, source, options);
             const text = !selection
               ? '--'
@@ -1141,7 +1147,7 @@
               selection
             };
           });
-          return { ...item, available: rows.some((row) => row.available), rows };
+          return { ...item, available: rows.some((row) => row.available), rows, ...(rows.length ? {} : { omit: true }) };
         }
         if (item.type === 'spacer') return { ...item, available: true };
         if (item.type === 'plugin') {

@@ -217,7 +217,7 @@ function buildNotchData(stats, cells, settings, options = {}) {
     }
     if (item.type === 'stack') {
       for (let j = 0; j < output.rows.length; j += 1) {
-        const source = item.rows?.[j] || {};
+        const source = output.rows[j].source || {};
         const metric = item.metric === 'mixed' ? source.metric : item.metric;
         output.rows[j].metric = metric;
         output.rows[j].measure = numericMeasure({ ...source, metric }, output.rows[j], stats);
