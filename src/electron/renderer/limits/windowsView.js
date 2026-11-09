@@ -1729,6 +1729,24 @@
       // compact line; the ⓘ tooltip carries each grant's label and coverage.
       const resetNode = claudeResetCreditsNode(provider.resetCredits);
       if (resetNode) windows.append(resetNode);
+    } else if (provider.provider === 'hark') {
+      // Daily and the period pool are quota bars. A top-up is money already
+      // spent, so the default session/weekly branch would drop every row.
+      const quotaNodes = (provider.windows || [])
+        .filter((window) => window.metric !== 'spend' && (window.kind === 'daily' || window.kind === 'billing'))
+        .map((window) => limitWindowNode(providerWindowLabel(provider, window), window, color, 0.78));
+      if (quotaNodes.length === 1) quotaNodes[0].classList.add('limit-window-wide');
+      windows.append(...quotaNodes);
+      for (const spend of (provider.windows || []).filter((window) => window.metric === 'spend')) {
+        const value = providerWindowText(provider, spend).value;
+        if (!value) continue;
+        const label = spend.label || 'Top-up';
+        windows.append(tagUsageItem(limitNoteRowNode({
+          label,
+          summary: value,
+          ariaParts: [value]
+        }), usageItems.limitUsageItemId(spend), label));
+      }
     } else if (provider.provider === 'manus') {
       // The refreshing allowance is a quota with a reset; the spendable total is a
       // points balance without a ceiling. The default branch renders neither a

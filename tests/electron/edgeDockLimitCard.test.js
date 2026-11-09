@@ -35,6 +35,7 @@ const { fetchWorkbuddyLimits, workbuddyAccountKey } = require('../../src/shared/
 const { fetchMinimaxLimits } = require('../../src/shared/providers/minimax/limits');
 const minimaxTestHome = fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'minimax-renderer-home-'));
 test.after(() => fs.rmSync(minimaxTestHome, { recursive: true, force: true }));
+const { windowsFromSummary } = require('../../src/shared/providers/hark/limits');
 const { parseManusCredits } = require('../../src/shared/providers/manus/limits');
 const manusCreditsFixture = require('../fixtures/manusAvailableCredits.json');
 const { fetchAntigravityLimits } = require('../../src/shared/providers/antigravity/limits');
@@ -448,6 +449,36 @@ test('Manus refresh and monthly quotas share a row before balance and hide indep
       const hidden = dockView({ showLimitUsed, limitProviderHiddenItems: { manus: [item.id] } });
       assert.equal(hidden.renderProviderWindows(provider, '#429DFA').children.length, 2);
     }
+  }
+});
+
+test('Hark daily, period, feature, and top-up rows render and hide independently', () => {
+  const { windows } = windowsFromSummary({
+    plan: { id: 'scale', name: 'hark pro³', unlimited: false },
+    meters: {
+      harkTokens: {
+        dailyUsed: 1, dailyLimit: 4, dailyResetsAt: '2026-11-10T00:00:00Z',
+        poolUsed: 2, poolLimit: 8, poolResetsAt: '2026-12-01T00:00:00Z'
+      },
+      perFeature: [{
+        feature: 'message', period: 'month', countUsed: 1, countLimit: 4,
+        harkUsed: 1, harkLimit: 4, resetsAt: '2026-12-01T00:00:00Z'
+      }]
+    },
+    autoTopup: { enabled: true, spentThisPeriodMinor: 250 }
+  });
+  const provider = normalizeLimitProvider({ provider: 'hark', status: 'ok', windows });
+  const card = dockView().renderProviderWindows(provider, '#1C1C1C');
+  assert.deepEqual(
+    [...card.children].map((row) => row.children[0].children[0].textContent),
+    ['Daily', 'Monthly', 'Monthly Messages', 'Monthly Messages tokens', 'Top-up']
+  );
+  assert.match(card.children[4].text, /\$2\.50 spent/);
+  const items = dockView().limitProviderUsageItems([provider]);
+  assert.equal(items.length, 5);
+  for (const item of items) {
+    const hidden = dockView({ limitProviderHiddenItems: { hark: [item.id] } });
+    assert.equal(hidden.renderProviderWindows(provider, '#1C1C1C').children.length, 4);
   }
 });
 
