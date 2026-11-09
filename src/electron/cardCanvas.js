@@ -8,7 +8,7 @@ function maskCardMaterial(win, commands, width, height, scale) {
   return applyVibrancyMask(win, rasterizeMask(toPolygons(commands), width, height, scale), width, height);
 }
 
-// Cards move inside a display-height native canvas. Resize the canvas only
+// Cards move inside a native canvas matching the work area's height. Resize it only
 // when its width/display changes, not on each spring sample.
 function cardCanvasBounds(frame, workArea, target = frame, rectangular = false) {
   const y = rectangular ? frame.y : workArea.y;
