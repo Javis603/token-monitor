@@ -559,7 +559,8 @@ function runTokscale({
   customScanPaths,
   homeDir,
   offlinePricing = false,
-  workspaces = true
+  workspaces = true,
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 }) {
   throwIfAborted(signal);
   const command = tokscaleCommand({ customScanPaths, homeDir });
@@ -578,7 +579,7 @@ function runTokscale({
   const groupBy = () => (workspaces && workspaceGroupBySupported(command.identity)
     ? TOKSCALE_WORKSPACE_GROUP_BY
     : TOKSCALE_SESSION_GROUP_BY);
-  const runArgs = (filter, grouping) => [...(offlinePricing ? ['--offline'] : []), '--json', '--client', filter, '--group-by', grouping, ...flags];
+  const runArgs = (filter, grouping) => [...(offlinePricing ? ['--offline'] : []), '--bucket-timezone', timeZone, '--json', '--client', filter, '--group-by', grouping, ...flags];
   const subprocessOptions = {
     operation: 'tokscale scan',
     terminationOptions,
@@ -614,14 +615,14 @@ function runTokscale({
   ), signal);
 }
 
-function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir, offlinePricing = false }) {
+function runTokscaleGraph({ clients, commandTimeoutMs, signal, terminationOptions, onTerminationUnconfirmed, customScanPaths, homeDir, offlinePricing = false, timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone }) {
   throwIfAborted(signal);
   const command = tokscaleCommand({ customScanPaths, homeDir });
   const requested = tokscaleClientFilter(clients);
   if (!requested) return Promise.resolve({ contributions: [] });
   const clientFilter = applyKnownCapabilityFilter(requested, command.identity);
   if (!clientFilter) return Promise.resolve({ contributions: [] });
-  const runArgs = (filter) => [...(offlinePricing ? ['--offline'] : []), 'graph', '--client', filter, '--no-spinner'];
+  const runArgs = (filter) => [...(offlinePricing ? ['--offline'] : []), 'graph', '--bucket-timezone', timeZone, '--client', filter, '--no-spinner'];
   const subprocessOptions = {
     operation: 'tokscale graph',
     terminationOptions,
@@ -650,6 +651,10 @@ function lookupModelPricing(modelId, commandTimeoutMs = 15000) {
 // implementation rather than two formatters free to drift. Kept under the collector's
 // own name: it is exported and reads as the stamping side at its call sites.
 const localTodayKey = localDayKey;
+
+function collectionCalendarKey(now = new Date()) {
+  return `${Intl.DateTimeFormat().resolvedOptions().timeZone}|${now.getTimezoneOffset()}`;
+}
 
 function collectionDate(now) {
   const value = typeof now === 'function' ? now() : now;
@@ -831,6 +836,7 @@ async function collectHistoryOnce(options) {
     try {
       const graphJson = await runGraph({
         clients,
+        timeZone: options.timeZone,
         commandTimeoutMs: options.commandTimeoutMs || HISTORY_TIMEOUT_MS,
         signal: options.signal
       });
@@ -858,6 +864,7 @@ async function collectHistoryOnce(options) {
       const retainedGraph = retainDailyHistory(rawGraphs, {
         ...(options.dailyHistoryArchiveOptions || {}),
         liveDays: options.dailyHistoryLiveDays,
+        timeZone: options.timeZone,
         pricingRevision: options.pricingRevision,
         customPricingActive: options.customPricingActive,
         todayKey,
@@ -895,6 +902,15 @@ async function collectUsageOnce(options) {
   // straddles local midnight cannot pair a day-N today scan with a day-N+1
   // window (issue #37 follow-up). Injectable for tests.
   const collectedAt = collectionDate(options.now);
+  const calendarKey = collectionCalendarKey(collectedAt);
+  const periodWindows = computePeriodWindows(collectedAt);
+  const assertCollectionCalendar = () => {
+    if (collectionCalendarKey(collectedAt) !== calendarKey
+      || (options.expectedCalendarKey && options.expectedCalendarKey !== calendarKey)) {
+      throw new Error('System timezone changed during usage collection; retry the full scan');
+    }
+  };
+  assertCollectionCalendar();
   const reportTerminationUnconfirmed = (operation) => {
     try {
       options.onDiagnosticEvent?.({
@@ -917,11 +933,12 @@ async function collectUsageOnce(options) {
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-scan')
   }));
   const runTokscaleFn = async (input) => {
-    const json = await runTokscaleScan(input);
+    const json = await runTokscaleScan({ ...input, timeZone: periodWindows.timeZone });
+    assertCollectionCalendar();
     applyTokscaleSessionMetadata(json, { resolveProjects: projectsEnabled });
     return json;
   };
-  const runGraphFn = options.runGraph || ((input) => runTokscaleGraph({
+  const runGraphScan = options.runGraph || ((input) => runTokscaleGraph({
     ...input,
     offlinePricing: options.offlinePricing,
     customScanPaths: options.customScanPaths,
@@ -929,6 +946,11 @@ async function collectUsageOnce(options) {
     terminationOptions: options.subprocessTerminationOptions,
     onTerminationUnconfirmed: () => reportTerminationUnconfirmed('tokscale-graph')
   }));
+  const runGraphFn = async (input) => {
+    const graph = await runGraphScan({ ...input, timeZone: periodWindows.timeZone });
+    assertCollectionCalendar();
+    return graph;
+  };
   const collectWsl = options.collectWslUsage || collectWslUsageImpl;
   const probeWslStateFn = options.probeWslState || probeWslStateImpl;
   // Injectable only for the WSL-status gate, so tests can exercise the win32
@@ -979,6 +1001,7 @@ async function collectUsageOnce(options) {
   const anchorUsed = Boolean(
     anchor
     && anchor.dateKey === localTodayKey(collectedAt)
+    && (!anchor.calendarKey || anchor.calendarKey === calendarKey)
     && canTargetTodayPartitions(anchor, targetClients)
   );
   // Full-scan rows are native, even when their title matches an old override.
@@ -1208,11 +1231,12 @@ async function collectUsageOnce(options) {
       const retainedLive = retainLiveDailyHistory(today, {
         ...(options.dailyHistoryArchiveOptions || {}),
         liveDays: dailyHistoryLiveDays,
-        todayKey: localTodayKey(collectedAt),
+        timeZone: periodWindows.timeZone,
+        todayKey: periodWindows.today.key,
         pricingRevision: options.pricingRevision,
         writeEnabled: options.dailyHistoryArchiveWriteEnabled
       });
-      dailyHistoryLiveDays = retainedLive.liveDays || {};
+      dailyHistoryLiveDays = (retainedLive.calendars?.[periodWindows.timeZone] || retainedLive).liveDays || {};
     } catch (error) {
       if (typeof options.logger === 'function') options.logger(`daily live history archive failed: ${error.message}`);
     }
@@ -1302,7 +1326,7 @@ async function collectUsageOnce(options) {
     trackedClients: normalizedClients ? normalizedClients.split(',') : [],
     clientStatus: deriveClientStatus(normalizedClients, allTime, { sourceChecks }),
     wslStatus,
-    periodWindows: computePeriodWindows(collectedAt),
+    periodWindows,
     historyAvailable: options.historyEnabled !== false,
     // Private archive hint: these three report requests finished this tick.
     sessionUsageArchiveFullScan: !anchorUsed,
@@ -1364,6 +1388,7 @@ async function collectUsageOnce(options) {
       ...(summary.nativeProjects ? { nativeProjects: summary.nativeProjects } : {})
     });
   }
+  assertCollectionCalendar();
   if (options.historyEnabled === false) {
     summary.history = null;
   } else if (options.includeHistory) {
@@ -1374,7 +1399,8 @@ async function collectUsageOnce(options) {
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
       capDays: options.historyCapDays,
-      todayKey: localTodayKey(collectedAt),
+      timeZone: periodWindows.timeZone,
+      todayKey: periodWindows.today.key,
       runGraph: runGraphFn,
       signal: options.signal,
       dailyHistoryArchiveEnabled: options.dailyHistoryArchiveEnabled,
@@ -1387,6 +1413,7 @@ async function collectUsageOnce(options) {
       logger: options.logger
     });
     throwIfAborted(options.signal);
+    assertCollectionCalendar();
     if (history) summary.history = history;
   }
   // After history, so `lastActivityDay` can come from the daily buckets this
@@ -1415,6 +1442,7 @@ async function collectUsageOnce(options) {
   });
   // Activity is observed after scans; it must not re-date their accounting
   // snapshot if that read crosses midnight. Observations retain their own clock.
+  assertCollectionCalendar();
   const result = require('./sessionActivityProjection').materializeActivity(activitySummary);
   return result.updatedAt === summary.updatedAt ? result : { ...result, updatedAt: summary.updatedAt };
 }
@@ -2358,6 +2386,7 @@ function qoderCnProjectsDirForClients(clientsCsv, options = {}) {
 function collectorAnchorTrust(saved, options = {}) {
   const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, now = new Date() } = options;
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
+  if (saved.calendarKey !== collectionCalendarKey(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
   // A flat provenance ledger cannot prove each period's project source.
   if (Object.keys(saved.catalogProjects || {}).length && !saved.catalogProjects.today) return null;
@@ -2825,6 +2854,7 @@ function startCollector(options) {
       if (trust) {
         anchor = {
           dateKey: saved.dateKey,
+          calendarKey: saved.calendarKey,
           sessionIdentityVersion: saved.sessionIdentityVersion,
           today: saved.today,
           month: saved.month,
@@ -2858,6 +2888,7 @@ function startCollector(options) {
       fs.mkdirSync(path.dirname(anchorPath), { recursive: true });
       fs.writeFileSync(anchorPath, JSON.stringify({
         dateKey: anchor.dateKey,
+        calendarKey: anchor.calendarKey,
         sessionIdentityVersion: anchor.sessionIdentityVersion,
         cursorAutoModelVersion: 1,
         today: anchor.today,
@@ -2916,12 +2947,14 @@ function startCollector(options) {
     const tickStartedAt = Date.now();
     const collectedAt = collectionDate(options.now);
     const todayKey = localTodayKey(collectedAt);
+    const tickCalendarKey = collectionCalendarKey(collectedAt);
+    const timezoneChanged = Boolean(anchor && anchor.calendarKey !== tickCalendarKey);
     const tickPricingRevision = pricingFingerprint(options);
     const sessionMetadataFallback = anchor;
     const pricingChanged = tickPricingRevision !== pricingRevision;
     const tickSourceRevision = catpawSourcesFingerprint(normalizedClients, sourceOptions);
     const catpawSourcesChanged = tickSourceRevision !== sourceRevision;
-    if (pricingChanged || catpawSourcesChanged) {
+    if (pricingChanged || catpawSourcesChanged || timezoneChanged) {
       anchor = null;
       wslAnchor = null;
       wslStatusAnchor = null;
@@ -2940,7 +2973,7 @@ function startCollector(options) {
       collectedAt.getTime(),
       lastHistoryAt,
       historyIntervalMs,
-      Boolean(tickOptions.forceHistory) || localDayRolledOver || pricingChanged || catpawSourcesChanged,
+      Boolean(tickOptions.forceHistory) || localDayRolledOver || pricingChanged || catpawSourcesChanged || timezoneChanged,
       historyEnabled
     );
     if (includeHistory) {
@@ -2973,6 +3006,7 @@ function startCollector(options) {
         agentRuntime,
         osInfo: deviceOsInfo,
         now: collectedAt,
+        expectedCalendarKey: tickCalendarKey,
         includeHistory,
         pricingRevision: tickPricingRevision,
         customPricingActive: Object.keys(readJson(options.pricingPath || customPricingPath({ env: tokscaleEnvWithBlanksDropped(process.env) }), {})?.models || {}).length > 0,
@@ -3110,6 +3144,7 @@ function startCollector(options) {
       if (!anchored && captured) {
         anchor = {
           dateKey: todayKey,
+          calendarKey: tickCalendarKey,
           sessionIdentityVersion: captured.sessionIdentityVersion,
           today: captured.windowsPeriods.today,
           month: captured.windowsPeriods.month,
@@ -3207,17 +3242,16 @@ function startCollector(options) {
       latestActivitySummary = visibleSummary;
       if (historyEnabled !== false && options.dailyHistoryArchiveEnabled) {
         try {
-          const visibleAt = visibleSummary.updatedAt || summary.updatedAt;
-          const visibleDate = visibleAt ? new Date(visibleAt) : new Date();
-          const visibleDateKey = Number.isFinite(visibleDate.getTime())
-            ? localTodayKey(visibleDate)
-            : todayKey;
+          // The scanner window owns the date, even if the OS timezone changes
+          // while the runtime awaits its archive/presentation transform.
+          const visibleDateKey = summary.periodWindows.today.key;
           const retainedToday = tickLocalView?.sessionKeys?.length
             ? applyPeriodDelta(visibleSummary.today, emptyPeriod(), tickLocalView.today)
             : visibleSummary.today;
           const retainedLive = retainLiveDailyHistory(retainedToday, {
             ...(options.dailyHistoryArchiveOptions || {}),
             liveDays: liveDailyHistoryDays,
+            timeZone: summary.periodWindows.timeZone,
             todayKey: visibleDateKey,
             pricingRevision: tickPricingRevision,
             // Watch ticks update the in-memory maximum on every refresh, but
@@ -3229,7 +3263,7 @@ function startCollector(options) {
               ? options.dailyHistoryArchiveWriteEnabled
               : false
           });
-          liveDailyHistoryDays = retainedLive.liveDays || {};
+          liveDailyHistoryDays = (retainedLive.calendars?.[summary.periodWindows.timeZone] || retainedLive).liveDays || {};
         } catch (error) {
           log(`daily live history archive failed: ${error.message}`);
         }
@@ -3670,7 +3704,8 @@ function startCollector(options) {
     // Native watchers are an optimization, not the source of truth. Always
     // retain the hourly reconciliation path for missed events, newly created
     // client directories, WSL-only activity, and cross-day metadata refreshes.
-    const fullScanDue = lastFullScanAt === 0 || Date.now() - lastFullScanAt >= FULL_SCAN_INTERVAL_MS;
+    const calendarChanged = Boolean(anchor && anchor.calendarKey !== collectionCalendarKey(collectionDate(options.now)));
+    const fullScanDue = calendarChanged || lastFullScanAt === 0 || Date.now() - lastFullScanAt >= FULL_SCAN_INTERVAL_MS;
     // Smart mode trusts the watcher to say which clients moved. Without one it
     // is plain interval collection, or it would scan nothing but the hourly
     // reconciliation.
@@ -3909,6 +3944,7 @@ module.exports = {
   clientsForWatchPath,
   clientWatchCandidates,
   computePeriodWindows,
+  collectionCalendarKey,
   collectorAnchorTrust,
   pricingFingerprint,
   configFingerprint,
