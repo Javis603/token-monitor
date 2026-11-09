@@ -17,10 +17,10 @@
 // --ozone-platform-hint) are gone: Electron ignores them and forces Wayland
 // whenever WAYLAND_DISPLAY is set. Appending --ozone-platform through
 // app.commandLine is also too late for the browser process: its children get
-// the switch while the browser itself stays on Wayland. main.js therefore
+// the switch while the browser itself stays on Wayland. launch.js therefore
 // relaunches with a real argv switch before creating a window, spawning the
-// AppImage itself ($APPIMAGE) rather than process.execPath, which points into
-// the runtime's transient mount. The explicit switch prevents a relaunch loop
+// AppImage itself ($APPIMAGE) in packaged builds rather than process.execPath,
+// which points into the runtime's transient mount. The explicit switch prevents a relaunch loop
 // and still lets users select native Wayland.
 function shouldUseXWayland({ platform = process.platform, env = process.env, argv = process.argv } = {}) {
   if (platform !== 'linux') return false;
@@ -29,4 +29,52 @@ function shouldUseXWayland({ platform = process.platform, env = process.env, arg
   return !argv.some((arg) => arg === '--ozone-platform' || arg.startsWith('--ozone-platform='));
 }
 
-module.exports = { shouldUseXWayland };
+function canPositionWindow({ platform = process.platform, env = process.env, argv = process.argv } = {}) {
+  if (platform !== 'linux' || !env.WAYLAND_DISPLAY) return true;
+  const index = argv.indexOf('--ozone-platform');
+  const backend = index === -1
+    ? argv.find((arg) => arg.startsWith('--ozone-platform='))?.split('=')[1]
+    : argv[index + 1];
+  return backend === 'x11';
+}
+
+function startWithXWayland({
+  app, start,
+  spawn = require('node:child_process').spawn,
+  platform = process.platform,
+  env = process.env,
+  argv = process.argv,
+  execPath = process.execPath,
+  warn = console.warn
+}) {
+  if (!shouldUseXWayland({ platform, env, argv })) return start();
+  const packaged = app.isPackaged;
+  const executable = packaged && env.APPIMAGE ? env.APPIMAGE : execPath;
+  let spawned = false;
+  const failed = (error) => {
+    warn(`[display] XWayland relaunch failed: ${error.message}`);
+    if (!spawned) start();
+  };
+  let child;
+  try {
+    child = spawn(executable, [...argv.slice(1), '--ozone-platform=x11'], {
+      detached: packaged,
+      stdio: packaged ? 'ignore' : 'inherit'
+    });
+  } catch (error) {
+    failed(error);
+    return;
+  }
+  child.once('error', failed);
+  child.once('spawn', () => {
+    spawned = true;
+    if (packaged) {
+      child.unref();
+      app.exit(0);
+    }
+  });
+  // Keep the development command alive so npm owns the app until it finishes.
+  if (!packaged) child.once('exit', (code) => { if (spawned) app.exit(code ?? 1); });
+}
+
+module.exports = { shouldUseXWayland, canPositionWindow, startWithXWayland };

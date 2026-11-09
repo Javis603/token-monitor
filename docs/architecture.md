@@ -14,7 +14,7 @@ Contracts that cross subsystem boundaries. This guide names the owner, the invar
 
 ## Entry points and the Worker boundary
 
-The widget (`src/electron/main.js`), headless collector (`src/agent/agent.js`) and Node Hub (`src/hub/server.js`) share `src/shared/`. The Cloudflare Hub (`worker/src/index.js`) speaks the same protocol.
+The widget (`src/electron/launch.js` → `src/electron/main.js`), headless collector (`src/agent/agent.js`) and Node Hub (`src/hub/server.js`) share `src/shared/`. The Cloudflare Hub (`worker/src/index.js`) speaks the same protocol.
 
 Device collection, transforms and archives live in `src/shared/usage/`. The neighboring `src/shared/usage.js` is the Hub-core usage model, not that directory's index: `require('./usage')` resolves the file. Do not add `usage/index.js`.
 
@@ -24,7 +24,7 @@ Sidebar and quota-history cards share a native canvas matching the work area's h
 
 Cloudflare deployment isolates `worker/` into its own repository. Its portable closure, `WORKER_SHARED_MODULES` in `scripts/hub-build-manifest.js`, must not import Node built-ins or anything above `worker/`. Edit the originals in `src/shared/`, then run `npm run sync:worker`; the mirrored `worker/src/shared/` files are generated and CI rejects drift.
 
-On Linux the widget launches through XWayland. When Electron would otherwise force native Wayland, `main.js` relaunches with an explicit `--ozone-platform=x11` argv switch before creating the first window; changing `app.commandLine` is too late for the main process's Ozone selection. Native Wayland lets only the compositor place toplevel windows, so the widget could neither restore its saved position nor even learn it — `getBounds()` would report a synthesized origin and no movement event would save it. An explicit `--ozone-platform` launch switch always wins over this default and prevents a relaunch loop. On XWayland, Linux emits `move`/`resize` rather than the `moved`/`resized` events used on macOS/Windows; both event families feed the same debounced `windowBounds` save.
+On Linux Wayland sessions with `DISPLAY` available, the widget defaults to XWayland. X11 sessions and Wayland-only sessions are left unchanged. When Electron would otherwise force native Wayland, `launch.js` relaunches with an explicit `--ozone-platform=x11` argv switch before creating the first window; changing `app.commandLine` is too late for the main process's Ozone selection. Native Wayland lets only the compositor place toplevel windows, so the widget could neither restore its saved position nor even learn it — `getBounds()` would report a synthesized origin and no movement event would save it. An explicit `--ozone-platform` launch switch always wins over this default and prevents a relaunch loop. On XWayland, Linux emits `move`/`resize` rather than the `moved`/`resized` events used on macOS/Windows; both event families feed the same debounced `windowBounds` save. The launcher waits for spawn success before exiting a packaged parent; a spawn error continues normal startup on native Wayland. Only packaged builds use `$APPIMAGE`. Development launches retain inherited terminal I/O and the original process group, and the parent waits for the child to exit. Native Wayland saves dimensions without overwriting previously saved coordinates.
 
 ## Desktop plugins
 
