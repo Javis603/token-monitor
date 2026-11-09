@@ -158,7 +158,7 @@
 
   function normalizeSource(input, fallbackWindow = 'primary') {
     const source = input && typeof input === 'object' ? input : {};
-    const rawProvider = clean(source.provider, 48).toLowerCase();
+    const rawProvider = clean(source.provider, 80).toLowerCase();
     const provider = rawProvider === 'kilocode' ? 'kilo' : rawProvider;
     const accountMode = clean(source.accountMode, 24);
     const valueMode = clean(source.valueMode, 24);
@@ -643,7 +643,7 @@
   }
 
   function providerId(provider) {
-    return clean(provider?.provider, 48).toLowerCase();
+    return clean(provider?.provider, 80).toLowerCase();
   }
 
   function usableProvider(provider) {
@@ -691,7 +691,7 @@
   }
 
   function accountOptions(stats, selectedProvider) {
-    const id = clean(selectedProvider, 48).toLowerCase();
+    const id = clean(selectedProvider, 80).toLowerCase();
     const rows = providersFromStats(stats).filter((provider) => providerId(provider) === id);
     const seen = new Set();
     const options = [];
@@ -705,7 +705,7 @@
   }
 
   function windowOptions(stats, selectedProvider, accountKey = '') {
-    const id = clean(selectedProvider, 48).toLowerCase();
+    const id = clean(selectedProvider, 80).toLowerCase();
     const key = clean(accountKey);
     const seen = new Set();
     const options = [];
@@ -969,6 +969,10 @@
     };
   }
 
+  function inactivePluginSource(source, stats) {
+    return source.provider.startsWith('plugin:') && !stats?.pluginLimitModules?.some(module => module.id === source.provider);
+  }
+
   function resolveTextItem(item, stats, options, recentProvider = null) {
     if (item.metric === 'liveTokenRate') {
       const scope = normalizeLiveRateScope(item.rateScope);
@@ -999,6 +1003,7 @@
         : formatCost(usage.value, item, options);
       return { ...item, available: true, text, provider: usage.provider };
     }
+    if (inactivePluginSource(item.source, stats)) return { ...item, available: false, omit: true, text: '--', selection: null };
     const selection = selectSource(stats, item.source, options);
     if (!selection) return { ...item, available: false, text: '--', selection: null };
     const reset = formatResetCountdown(selection.window.resetsAt, options.nowMs);
@@ -1024,7 +1029,7 @@
   }
 
   function preferredRowProvider(rows, preferredIndex = 0) {
-    const providerFor = (row) => clean(row?.selection?.provider || row?.provider, 48).toLowerCase();
+    const providerFor = (row) => clean(row?.selection?.provider || row?.provider, 80).toLowerCase();
     const preferred = Array.isArray(rows) ? rows[preferredIndex] : null;
     return providerFor(preferred)
       || providerFor((rows || []).find((row) => providerFor(row)))
@@ -1053,9 +1058,11 @@
           if (item.icon === 'app') return { ...item, available: true, provider: 'app', selection: null };
           const fixedProvider = item.source.provider !== 'auto' ? item.source.provider : '';
           if (fixedProvider) {
+            const omit = inactivePluginSource(item.source, stats);
             return {
               ...item,
-              available: true,
+              available: !omit,
+              ...(omit ? { omit: true } : {}),
               provider: fixedProvider,
               selection: null
             };
@@ -1085,7 +1092,7 @@
           };
         }
         if (item.type === 'bars') {
-          const rows = item.rows.map((source) => {
+          const rows = item.rows.filter(source => !inactivePluginSource(source, stats)).map((source) => {
             const selection = selectSource(stats, source, options);
             return {
               source,
@@ -1094,7 +1101,7 @@
               selection
             };
           });
-          return { ...item, available: rows.some((row) => row.available), rows };
+          return { ...item, available: rows.some((row) => row.available), rows, ...(rows.length ? {} : { omit: true }) };
         }
         if (item.type === 'stack') {
           if (item.metric === 'custom') {
@@ -1115,6 +1122,7 @@
                 period: source.period,
                 source
               }, stats, options, recentProvider);
+              if (resolved.omit) return null;
               return {
                 source,
                 available: resolved.available,
@@ -1122,10 +1130,10 @@
                 provider: resolved.provider || null,
                 selection: resolved.selection || null
               };
-            });
-            return { ...item, available: rows.some((row) => row.available), rows };
+            }).filter(Boolean);
+            return { ...item, available: rows.some((row) => row.available), rows, ...(rows.length ? {} : { omit: true }) };
           }
-          const rows = item.rows.map((source) => {
+          const rows = item.rows.filter(source => !inactivePluginSource(source, stats)).map((source) => {
             const selection = selectSource(stats, source, options);
             const text = !selection
               ? '--'
@@ -1139,7 +1147,7 @@
               selection
             };
           });
-          return { ...item, available: rows.some((row) => row.available), rows };
+          return { ...item, available: rows.some((row) => row.available), rows, ...(rows.length ? {} : { omit: true }) };
         }
         if (item.type === 'spacer') return { ...item, available: true };
         if (item.type === 'plugin') {
@@ -1155,7 +1163,17 @@
     return normalizeTrayLayout(layout).items.filter((item) => item.type === 'plugin').map((item) => item.ref);
   }
 
+  function usesLimits(layout) {
+    const itemUsesLimits = item => item.type === 'bars'
+      || (item.type === 'icon' && item.icon === 'provider' && item.source?.provider === 'auto' && item.autoMode === 'lowestLimit')
+      || (item.type === 'text' && ['percent', 'percentReset', 'reset', 'account'].includes(item.metric))
+      || (item.type === 'stack' && (item.metric === 'mixed'
+        ? item.rows.some(row => itemUsesLimits({ ...row, type: 'text' })) : ['percent', 'reset'].includes(item.metric)));
+    return (layout?.items || []).some(itemUsesLimits);
+  }
+
   return {
+    usesLimits,
     MAX_ITEMS,
     STYLE_IDS,
     VERSION,

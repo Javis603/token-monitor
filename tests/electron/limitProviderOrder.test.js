@@ -51,6 +51,7 @@ test('default provider order follows tracked tools, named services, then third-p
     'deepseek',
     'devin',
     'minimax',
+    'mistral',
     'typesafe',
     'openrouter',
     'volcengine',
@@ -60,6 +61,7 @@ test('default provider order follows tracked tools, named services, then third-p
     'stepfun',
     'notion',
     'manus',
+    'opendesign',
     'thirdparty'
   ]);
 });

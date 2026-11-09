@@ -552,3 +552,30 @@ maybe('missing T3 stores skip candidate expansion and failed stores do not inval
     driver: 'claudeAgent', t3DbPaths: [absent, file], sqlite, invalidatedSessionIds
   }).get('native').title, 'Confirmed title');
 });
+
+maybe('a T3 title that wins over a Desktop fallback survives a later T3 read miss', (t) => {
+  const { home, v2 } = store(t);
+  const projects = path.join(home, '.claude', 'projects', 'test-project');
+  fs.mkdirSync(projects, { recursive: true });
+  fs.writeFileSync(path.join(projects, 'both.jsonl'), `${JSON.stringify({ type: 'user', message: { content: 'hi' } })}\n`);
+  const desktopStore = path.join(home, 'Library', 'Application Support', 'Claude', 'claude-code-sessions', 'account', 'org');
+  fs.mkdirSync(desktopStore, { recursive: true });
+  fs.writeFileSync(path.join(desktopStore, 'local_a.json'), JSON.stringify({ cliSessionId: 'both', title: 'Desktop title' }));
+  v2('app', 'both', 'T3 title');
+  // Each collection starts with fresh metadata and only the anchored ledger, as the collector does.
+  const ledger = { t3Titles: {}, catalogTitleSources: {} };
+  const resolve = (sqliteMod) => {
+    const result = claude.resolveSessionMetadata(new Set(['both']), {
+      home, now: new Date('2026-10-04T00:00:01Z'), metadata: new Map(),
+      deps: { scopedHome: true, claudeMetadataDeps: { sqlite: sqliteMod, cache: new Map() }, ...ledger },
+      fileSessionMetadata: (_id, _file, meta) => ({ ...meta })
+    });
+    const meta = result.get('both');
+    ledger.t3Titles = { 'claude:both': meta.t3Title || meta.catalogTitle };
+    if (meta.catalogTitleSource) ledger.catalogTitleSources = { 'claude:both': meta.catalogTitleSource };
+    return meta.title;
+  };
+
+  assert.equal(resolve(sqlite), 'T3 title');
+  assert.equal(resolve(null), 'T3 title');
+});

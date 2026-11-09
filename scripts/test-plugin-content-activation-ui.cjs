@@ -71,10 +71,10 @@ async function main() {
     await panel.refresh(); await new Promise(resolve => setTimeout(resolve, 40));
     const before = data.contentSelections[target];
     box.querySelector('[data-control-key="author-tools"]').click();
-    box.querySelector('[data-control-key="author-save"]').click(); await new Promise(resolve => setTimeout(resolve, 30));
+    await new Promise(resolve => setTimeout(resolve, 30));
     const combined = { ...preferences };
     box.querySelector('[data-control-key="author-usage"]').click();
-    box.querySelector('[data-control-key="author-save"]').click(); await new Promise(resolve => setTimeout(resolve, 30));
+    await new Promise(resolve => setTimeout(resolve, 30));
     const result = { combined, preferences: { ...preferences }, provider: data.contentSelections[target], before,
       purpose: box.querySelector('.plugin-background .settings-item-desc').textContent,
       generic: box.querySelector('.plugin-background input').getAttribute('aria-description'),

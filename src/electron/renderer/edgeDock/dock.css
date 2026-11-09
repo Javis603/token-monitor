@@ -270,6 +270,8 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   -webkit-mask: none;
   mask: none;
 }
+.edge-dock-mark.is-plugin { display: inline-flex; background: none; }
+.edge-dock-mark.is-plugin > span { width: 100% !important; height: 100% !important; }
 
 .edge-dock-value {
   font-size: 12px;

@@ -46,6 +46,12 @@ TOKEN_MONITOR_DEVICE_ID=build-server
 
 The agent reads `.env` from the checkout root, wherever it is started from.
 
+### Timezone
+
+Usage periods and daily graphs follow the agent process's system timezone. On a UTC server, set `TZ=Asia/Shanghai` (or another IANA timezone) in the agent service environment before starting it if you want that device to use a different calendar. The collector passes that timezone to its scanner even when Tokscale previously saved a different timezone. Each device retains its own day boundary; other devices are not rebucketed to the viewer's timezone.
+
+Restart the agent after changing `TZ` in its service environment. If `TZ` is unset, also restart it after changing the OS timezone: Node can cache the previous timezone and day boundary. Once the agent observes a new timezone, it performs a full rescan. Daily history is kept separately for each timezone. Previously saved daily history is preserved as recorded and is not automatically repaired.
+
 ### Title-sync state and migration
 
 Title sync is off by default and needs opt-in on both the Hub and agent. For the agent, use `TOKEN_MONITOR_SYNC_SESSION_TITLES=1` or `--sync-session-titles`. The widget's title-display setting is independent. See the [title-sync API](API.md#put-apisynctitlesdeviceid) for protocol and legacy-agent cleanup details.

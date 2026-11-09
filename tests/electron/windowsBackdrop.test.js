@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const root = path.join(__dirname, '..', '..');
 const main = fs.readFileSync(path.join(root, 'src/electron/main.js'), 'utf8');
@@ -15,13 +16,27 @@ const i18n = fs.readFileSync(path.join(rendererDir, 'i18n.js'), 'utf8');
 const {
   DEFAULT_ACCENT_ARGB,
   applyWindowsAccentBlur,
-  createAccentApi
+  createAccentApi,
+  syncWindowsBackdrop,
+  windowsBackdropFallback
 } = require('../../src/electron/windowsBackdrop');
 const { normalizeWindowsBackdropMode, normalizeWindowsDockBackdropMode } = require('../../src/electron/windowsBackdropMode');
 const {
   appearanceState,
   normalizeWindowsBackdropMode: normalizeRendererMode
 } = require('../../src/electron/renderer/windowsGlass');
+
+test('history material options follow the live main-window Windows backdrop setting', () => {
+  const source = main.slice(main.indexOf('function getLimitsHistoryController()'), main.indexOf('let statsPushSource'));
+  const settings = { windowsBackdrop: 'accent' };
+  const context = vm.createContext({ settings, BrowserWindow: {}, screen: {}, ipcMain: {}, mainWindow: {}, dashboardWindow: {},
+    limitsHistoryPayload() {}, nativeMaterialOptions: () => ({ enabled: true }), createLimitsHistoryController: options => options });
+  vm.runInContext(`let limitsHistoryController = null; ${source}`, context);
+  const controller = vm.runInContext('getLimitsHistoryController()', context);
+  assert.equal(controller.getMaterialOptions().windowsBackdrop, 'accent');
+  settings.windowsBackdrop = 'acrylic';
+  assert.equal(controller.getMaterialOptions().windowsBackdrop, 'acrylic');
+});
 
 test('Windows backdrop modes fail closed to documented Acrylic', () => {
   assert.equal(normalizeRendererMode, normalizeWindowsBackdropMode);
@@ -125,6 +140,13 @@ test('native Accent adapter enables a full blur region before applying policy an
     GradientColor: DEFAULT_ACCENT_ARGB,
     AnimationId: 0
   });
+  calls.length = 0;
+  assert.equal(api.clear(7n), true);
+  assert.deepEqual(calls.map(([name]) => name), ['accent', 'blur', 'frame']);
+  assert.equal(calls[0][1].pvData.value.AccentState, 0);
+  assert.equal(calls[1][1].dwFlags, 1);
+  assert.equal(calls[1][1].fEnable, 0);
+  assert.deepEqual(calls[2][1], { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 0, cyBottomHeight: 0 });
 });
 
 test('native Accent adapter rejects failed DWM setup before applying the Accent policy', () => {
@@ -164,15 +186,115 @@ test('native Accent adapter rejects failed DWM setup before applying the Accent 
   });
 });
 
-test('main process selects Accent at creation and falls back to Acrylic on failure', () => {
+test('Windows material preferences keep transparent document hosts instead of replacing them', () => {
   assert.match(main, /windowsBackdrop: 'acrylic',/);
   assert.match(main, /windowsBackdrop: normalizeWindowsBackdropMode\(patch\.windowsBackdrop \?\? settings\.windowsBackdrop\)/);
-  assert.match(main, /backgroundMaterial: 'acrylic'/);
-  assert.match(main, /windowsAccent && !applyWindowsAccentBlur\(win\)/);
-  assert.match(main, /win\.setBackgroundMaterial\('acrylic'\)/);
-  assert.match(main, /windowsBackdropFallback: '1'/);
-  assert.match(main, /previousWindowsBackdrop !== nextWindowsBackdrop/);
+  assert.match(main, /syncWindowsBackdrop\(mainWindow,/);
+  assert.match(main, /windowsBackdropFallback: windowsBackdropFallback\(mainWindow\)/);
+  assert.doesNotMatch(main, /previousNativeMaterial|nextNativeMaterial|replaceDashboardWindow|function rebuildWindow/);
+  assert.doesNotMatch(main, /transparent: !/);
+  assert.match(main, /dashboardWindow = win;[\s\S]*?syncWindowsBackdrop\(win, \{ enabled: nativeBlurEnabled\(\) \}\)/);
+  assert.doesNotMatch(main, /windowsBackdropChanged/);
   assert.doesNotMatch(main, /windowsLayeredBlur/);
+});
+
+function materialFixture(result = true) {
+  const calls = [];
+  const win = {
+    isDestroyed: () => false,
+    getNativeWindowHandle: () => Buffer.alloc(8),
+    setBackgroundMaterial: value => calls.push(['material', value]),
+    setBackgroundColor: value => calls.push(['color', value])
+  };
+  const api = { apply: () => { calls.push(['accent']); return result; }, clear: () => { calls.push(['clear']); return true; } };
+  return { win, calls, api, sync: settings => syncWindowsBackdrop(win, settings, { platform: 'win32', api }) };
+}
+
+test('failed Accent cleanup keeps the old transition retryable instead of caching success', () => {
+  const f = materialFixture();
+  f.sync({ mode: 'accent' });
+  f.calls.length = 0;
+  let cleaned = false;
+  f.api.clear = () => { f.calls.push(['clear']); return cleaned; };
+  const failed = f.sync({ mode: 'acrylic' });
+  assert.equal(failed.mode, 'accent');
+  assert.deepEqual(f.calls, [['clear']]);
+  cleaned = true;
+  const recovered = f.sync({ mode: 'acrylic' });
+  assert.equal(recovered.mode, 'acrylic');
+  assert.deepEqual(f.calls, [['clear'], ['clear'], ['material', 'acrylic']]);
+});
+
+test('partial Accent application keeps failed cleanup pending until a later sync succeeds', () => {
+  const f = materialFixture(false);
+  let clean = false;
+  f.api.clear = () => { f.calls.push(['clear']); return clean; };
+  const failed = f.sync({ mode: 'accent' });
+  assert.equal(failed.accentCleanupPending, true);
+  assert.equal(failed.fallback, true);
+  f.api.clear = () => { f.calls.push(['clear']); throw new Error('native cleanup unavailable'); };
+  assert.equal(f.sync({ enabled: false }).accentCleanupPending, true);
+  assert.equal(f.calls.at(-1)[0], 'clear');
+  clean = true;
+  f.api.clear = () => { f.calls.push(['clear']); return clean; };
+  const restored = f.sync({ enabled: false });
+  assert.equal(restored.mode, 'transparent');
+  assert.equal(restored.accentCleanupPending, false);
+  assert.deepEqual(f.calls.slice(-3), [['clear'], ['material', 'none'], ['color', '#00000000']]);
+});
+
+test('appearance previews preserve fallback warnings unless the supplied patch replaces the flag', () => {
+  const start = app.indexOf('  if (els.windowsBackdropNote) {', app.indexOf('function applyAppearanceSettings('));
+  const snippet = app.slice(start, app.indexOf('  els.macBackdropRow', start));
+  const classes = new Map();
+  const note = { classList: { toggle(name, enabled) { classes.set(name, enabled); } } };
+  const context = { els: { windowsBackdropNote: note }, windowsGlass: { showAccentNote: true },
+    state: { settings: { windowsBackdropFallback: true } }, settings: {}, t: key => key };
+  require('node:vm').runInNewContext(snippet, context);
+  assert.equal(note.textContent, 'settings.appearance.windowsBackdropFallback');
+  assert.equal(classes.get('hidden'), false);
+  context.settings = { windowsBackdropFallback: false };
+  require('node:vm').runInNewContext(snippet, context);
+  assert.equal(note.textContent, '');
+  assert.equal(classes.get('hidden'), true);
+});
+
+test('Acrylic and Accent switch both ways on the same window and unchanged preferences do no work', () => {
+  const f = materialFixture();
+  f.sync({ mode: 'acrylic' });
+  f.sync({ mode: 'accent' });
+  const count = f.calls.length;
+  f.sync({ mode: 'accent' });
+  assert.equal(f.calls.length, count);
+  f.sync({ mode: 'acrylic' });
+  assert.deepEqual(f.calls, [['material', 'acrylic'], ['material', 'none'], ['color', '#00000000'], ['accent'], ['clear'], ['material', 'acrylic']]);
+  assert.equal(windowsBackdropFallback(f.win), false);
+});
+
+test('partial Accent failure is cleaned up before Acrylic fallback and fallback state follows the live choice', () => {
+  const f = materialFixture(false);
+  f.sync({ mode: 'accent' });
+  assert.deepEqual(f.calls.slice(-3), [['accent'], ['clear'], ['material', 'acrylic']]);
+  assert.equal(windowsBackdropFallback(f.win), true);
+  f.sync({ mode: 'acrylic' });
+  assert.equal(windowsBackdropFallback(f.win), false);
+  const transparent = materialFixture();
+  transparent.sync({ enabled: false, mode: 'accent' });
+  assert.deepEqual(transparent.calls, [['material', 'none'], ['color', '#00000000']]);
+});
+
+test('turning system glass off clears native effects and restores desktop alpha on the same host', () => {
+  const f = materialFixture();
+  f.sync({ mode: 'acrylic' });
+  f.sync({ enabled: false });
+  f.sync({ mode: 'accent' });
+  f.sync({ enabled: false });
+  f.sync({ mode: 'acrylic' });
+  assert.deepEqual(f.calls, [
+    ['material', 'acrylic'], ['material', 'none'], ['color', '#00000000'],
+    ['material', 'none'], ['color', '#00000000'], ['accent'],
+    ['clear'], ['material', 'none'], ['color', '#00000000'], ['material', 'acrylic']
+  ]);
 });
 
 test('Windows exposes an accessible Acrylic and experimental Accent selector', () => {
@@ -183,11 +305,12 @@ test('Windows exposes an accessible Acrylic and experimental Accent selector', (
   assert.match(html, /id="windowsBackdropInput"/);
   assert.match(html, /option value="acrylic"/);
   assert.match(html, /option value="accent"/);
-  assert.match(html, /data-i18n="settings\.appearance\.windowsBackdropNote"/);
+  assert.match(html, /option value="accent"[^>]*data-select-description="settings\.appearance\.windowsBackdropNote"/);
+  assert.doesNotMatch(html, /data-i18n="settings\.appearance\.windowsBackdropNote"/);
   assert.match(html, /id="windowsBackdropNote"/);
   assert.match(html, /<script src="\.\.\/windowsBackdropMode\.js"><\/script>[\s\S]*<script src="windowsGlass\.js"><\/script>[\s\S]*<script src="app\.js"><\/script>/);
   assert.match(app, /windowsBackdropRow\?\.classList\.toggle\('hidden', !windowsGlass\.showBackdropControl\)/);
-  assert.match(app, /classList\.toggle\('hidden', !windowsGlass\.showAccentNote\)/);
+  assert.match(app, /windowsBackdropNote.classList\.toggle\('hidden', !accentFallback\)/);
   assert.doesNotMatch(app, /backdropControlDisabled/);
   assert.equal((i18n.match(/'settings\.appearance\.glassEffectSystem':/g) || []).length, 6);
   assert.equal((i18n.match(/'settings\.appearance\.glassEffectTransparent':/g) || []).length, 6);

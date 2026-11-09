@@ -27,7 +27,15 @@ installInProcessWatchHost(test);
 
 function freshCollector() {
   delete require.cache[collectorPath];
-  return require(collectorPath);
+  const collector = require(collectorPath);
+  return {
+    ...collector,
+    // These tests count usage/self-sync spawns. Catalog scheduling is covered
+    // separately, and must not consume their synthetic source-event clocks.
+    startCollector: options => collector.startCollector({
+      ...options, pricingCatalogTimers: { setTimeout: () => 1, clearTimeout() {} }
+    })
+  };
 }
 
 // realpath the base: a real os.homedir() is already canonical, but os.tmpdir()
@@ -1590,13 +1598,12 @@ test('watchPathsForClients watches only Proma data that is currently parsed', ()
   }
 });
 
-// Cursor's cache is a home-relative literal upstream and Antigravity's follows
-// TOKSCALE_CONFIG_DIR, so the two are seeded from different roots on purpose:
-// pointing the override at the Cursor dir must not be what makes Cursor detect.
+// Both caches follow TOKSCALE_CONFIG_DIR when it is configured.
 test('clientDataDirPresence still detects cursor/antigravity via their cache dirs', () => {
   const tmp = withTmpHome([path.join('.config', 'tokscale', 'cursor-cache')]);
   const configDir = path.join(tmp, 'tokscale-config');
   fs.mkdirSync(path.join(configDir, 'antigravity-cache'), { recursive: true });
+  fs.mkdirSync(path.join(configDir, 'cursor-cache'), { recursive: true });
   const originalHomedir = os.homedir;
   const previousConfigDir = process.env.TOKSCALE_CONFIG_DIR;
   // The Windows runner exports an absolute HOME, which tokscale's home_dir()

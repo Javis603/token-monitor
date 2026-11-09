@@ -87,10 +87,13 @@ test('the detail total follows the main app compact toggle and unit threshold', 
   assert.match(dock, /if \(compact\) \{[\s\S]*?el\('span', 'edge-dock-total-compact', compact\)[\s\S]*?totalRow\.append\(compactNode\)/);
 });
 
+const cardLayoutApi = require('../../src/electron/renderer/cardLayout');
+const cardMotionApi = require('../../src/electron/renderer/cardMotion');
+
 test('a long detail total shrinks beside its compact reading instead of wrapping', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const css = readRendererFile(path.join('edgeDock', 'dock.css'));
-  const source = dock.slice(dock.indexOf('function fitCardTotal('), dock.indexOf('function renderBubble(')).trim();
+  const source = dock.slice(dock.indexOf('function fitCardTotal('), dock.indexOf('const bubbleLayout =')).trim();
   const fitCardTotal = Function('getComputedStyle', `return (${source})`)((node) => (
     node.columnGap === undefined ? { fontSize: '30px' } : { columnGap: '8px' }
   ));
@@ -118,12 +121,12 @@ test('a long detail total shrinks beside its compact reading instead of wrapping
   const bubble = dock.slice(dock.indexOf('function renderBubble('));
   const freshCard = bubble.slice(bubble.indexOf('const card = cell.kind'));
   assert.ok(freshCard.indexOf('fitCardTotal(card);') >= 0);
-  assert.ok(freshCard.indexOf('fitCardTotal(card);') < freshCard.indexOf('const height = '));
+  assert.ok(freshCard.indexOf('fitCardTotal(card);') < freshCard.indexOf('bubbleLayout.prepare('));
 });
 
 test('a card commits after its reported height is clamped to the work area', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('const bubbleSizeObserver ='));
+  const source = dock.slice(dock.indexOf('const bubbleLayout ='), dock.indexOf('const bubbleSizeObserver ='));
   for (const kind of ['provider', 'stat']) {
     for (const { measured, maxCardHeight, expected } of [
       // Chromium at 175% scaling can measure a max-height: 851px card this way.
@@ -135,14 +138,17 @@ test('a card commits after its reported height is clamped to the work area', () 
       const reports = [];
       const card = { dataset: {}, style: {}, getBoundingClientRect: () => ({ height: measured }) };
       const renderBubble = Function('deps', `
-        const { root, stagingLayer, providerCard, statCard, fitCardTotal,
+        const window = { TokenMonitorCardLayout: deps.cardLayoutApi };
+        const { root, contentLayer, stagingLayer, providerCard, statCard, fitCardTotal,
           clampBreakdownList, reserveAccountHeight, bridge, commitCard } = deps;
         let observedPluginCard = null;
         const bubbleSizeObserver = null, pluginContent = null;
         ${source}
         return renderBubble;
       `)({
+        cardLayoutApi,
         root: { dataset: {}, style: { setProperty() {} }, classList: { toggle() {} } },
+        contentLayer: { querySelector: () => null },
         stagingLayer: { replaceChildren() {} },
         providerCard: () => card,
         statCard: () => card,
@@ -153,8 +159,9 @@ test('a card commits after its reported height is clamped to the work area', () 
         commitCard: (_card, cellId) => { visibleId = cellId; }
       });
       const cell = { id: `next-${kind}`, kind };
-      const payload = { side: 'right', cell, maxCardHeight };
+      const payload = { side: 'right', cell, maxCardHeight, zoom: 1.25, shape: { contentTarget: { y: 250, height: expected } } };
       renderBubble(payload);
+      assert.equal(card.style.transform, '', 'the reading follows its shared moving layer');
       assert.deepEqual(reports, [{ cellId: cell.id, height: expected }]);
       assert.equal(visibleId, 'previous-card', 'wait for the main process to place the new card');
       // Mirror the main process acknowledgement, including its height cap.
@@ -165,6 +172,61 @@ test('a card commits after its reported height is clamped to the work area', () 
       assert.equal(reports.length, 1, 'a placed card must not keep reporting its size');
     }
   }
+});
+
+test('reopening hides the previous reading before a delayed placement acknowledgement', () => {
+  const { Element } = require('../helpers/notchPanel');
+  const document = { createElement: tag => new Element(tag, document) };
+  const contentLayer = document.createElement('div'), stagingLayer = document.createElement('div');
+  const root = document.createElement('main'); root.append(contentLayer, stagingLayer);
+  const reports = [], switches = [];
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const commitSource = dock.slice(dock.indexOf('function commitCard('), dock.indexOf('// The period card'));
+  const renderSource = dock.slice(dock.indexOf('const bubbleLayout ='), dock.indexOf('const bubbleSizeObserver ='));
+  const renderBubble = Function('deps', `
+    const { document, root, contentLayer, stagingLayer, reports, switches } = deps;
+    const window = { TokenMonitorCardLayout: deps.cardLayoutApi };
+    const CARD_SCROLL_SELECTOR = '.scroll';
+    const overflowText = { refresh() {}, preserveReading() {} };
+    const cardResetAnimator = { capture() {}, animate() {} };
+    const clearCardSwitch = () => {};
+    const captureCardSwitch = (_old, _same, opening) => { switches.push(opening); return null; };
+    const animateCardSwitch = () => {};
+    const providerCard = cell => {
+      const node = document.createElement('section'); node.className = 'edge-dock-card';
+      node.getBoundingClientRect = () => ({ height: cell.height });
+      return node;
+    };
+    const statCard = providerCard;
+    const fitCardTotal = () => {}, clampBreakdownList = () => {}, reserveAccountHeight = () => {};
+    const bridge = { reportBubbleSize: (cellId, height) => reports.push({ cellId, height }) };
+    const pluginContent = null, bubbleSizeObserver = null;
+    let observedPluginCard = null;
+    ${commitSource}
+    ${renderSource}
+    return renderBubble;
+  `)({ document, root, contentLayer, stagingLayer, reports, switches, cardLayoutApi });
+  const today = { id: 'today', kind: 'stat', height: 180 };
+  const month = { id: 'month', kind: 'stat', height: 240 };
+  const paint = (cell, reveal, placed) => renderBubble({ side: 'right', cell, reveal, placed });
+  const placed = cell => ({ cellId: cell.id, height: cell.height });
+  paint(today, 1, placed(today));
+  const old = contentLayer.children[0];
+  // Delay the ACK: the native window can already be opaque at this point,
+  // particularly with reduced motion, so the old DOM must not be paintable.
+  paint(month, 2, placed(today));
+  assert.deepEqual(reports, [placed(month)]);
+  assert.equal(contentLayer.children[0], old, 'retain DOM until the measured size is accepted');
+  assert.equal(old.style.visibility, 'hidden', 'old content cannot flash while waiting for placement');
+  paint(month, 2, placed(month));
+  const current = contentLayer.children[0];
+  assert.equal(current.dataset.cellId, 'month');
+  assert.notEqual(current.style.visibility, 'hidden', 'the committed reading is visible');
+  assert.equal(switches.at(-1), true, 'reopening does not crossfade the hidden old reading');
+  paint(today, 2, placed(month));
+  assert.notEqual(current.style.visibility, 'hidden', 'a continuous switch keeps the current reading visible while measuring');
+  paint(today, 2, placed(today));
+  assert.equal(switches.at(-1), false, 'continuous switches retain their animation');
 });
 
 test('a no-cell payload unmounts committed and staged plugin cards and removes their header actions', async () => {
@@ -189,13 +251,15 @@ test('a no-cell payload unmounts committed and staged plugin cards and removes t
   }
   const retained = [], unobserved = [];
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const source = dock.slice(dock.indexOf('function renderBubble('), dock.indexOf('const bubbleSizeObserver ='));
+  const source = dock.slice(dock.indexOf('const bubbleLayout ='), dock.indexOf('const bubbleSizeObserver ='));
   const { renderBubble, observed } = Function('deps', `
+    const window = { TokenMonitorCardLayout: deps.cardLayoutApi };
     const { root, contentLayer, stagingLayer, pluginHost, pluginContent, bubbleSizeObserver } = deps;
     let observedPluginCard = deps.card;
+    const clearCardSwitch = () => {};
     ${source}
     return { renderBubble, observed: () => observedPluginCard };
-  `)({ root, contentLayer, stagingLayer, pluginHost, card: cards[1].card,
+  `)({ cardLayoutApi, root, contentLayer, stagingLayer, pluginHost, card: cards[1].card,
     pluginContent: { retain: targets => retained.push(targets) },
     bubbleSizeObserver: { unobserve: card => unobserved.push(card) } });
   renderBubble({ side: 'right', cell: null });
@@ -228,6 +292,8 @@ const {
   normalizeEdgeDockOffset,
   edgeDockFittingScale,
   edgeDockScale,
+  edgeDockBubbleScale,
+  normalizeEdgeDockBubbleSize,
   normalizeEdgeDockCustomScale,
   normalizeEdgeDockSide,
   normalizeEdgeDockSize,
@@ -1103,7 +1169,9 @@ test('shared card repaint preserves both account and session scroll positions in
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const source = dock.slice(dock.indexOf('function commitCard('), dock.indexOf('// The period card'));
   let previous;
-  const commit = Function('deps', `const {contentLayer, overflowText, document, cardResetAnimator, CARD_SCROLL_SELECTOR} = deps; ${source}; return commitCard;`)({
+  const openings = [];
+  const commit = Function('deps', `const {contentLayer, overflowText, document, cardResetAnimator, CARD_SCROLL_SELECTOR, openings} = deps; const captureCardSwitch = (_previous, _sameCard, opening) => { openings.push(opening); return null; }, animateCardSwitch = () => {}; ${source}; return commitCard;`)({
+    openings,
     contentLayer: { querySelector: () => previous, replaceChildren() {} },
     overflowText: { refresh() {}, preserveReading() {} },
     cardResetAnimator: { capture() {}, animate() {} },
@@ -1122,6 +1190,16 @@ test('shared card repaint preserves both account and session scroll positions in
   commit(make('claude', positions), 'claude');
   assert.equal(positions['.edge-dock-accounts'].scrollTop, 0);
   assert.equal(positions['.edge-dock-session-list'].scrollTop, 0);
+  previous.dataset.reveal = '1';
+  const reopened = make('claude', positions);
+  reopened.dataset.reveal = '2';
+  commit(reopened, 'claude');
+  assert.equal(openings.at(-1), true, 'commit suppresses the outgoing card across openings');
+  previous = reopened;
+  const switched = make('cursor', positions);
+  switched.dataset.reveal = '2';
+  commit(switched, 'cursor');
+  assert.equal(openings.at(-1), false, 'a continuous switch still animates');
 });
 
 test('a repainted card restores the scroll container it actually uses', () => {
@@ -1806,6 +1884,134 @@ test('the rail headline reports the pool that gates the account, not just the se
   const cells6 = buildEdgeDockCells({ limits: { providers: [legacySpend] } }, { limitProviders: 'codex' });
   assert.equal(cells6[0].remainingPercent, 80);
   assert.equal(cells6[0].windowKind, 'session');
+});
+
+test('a money-only account prints its balance on the rail without inventing a percentage', () => {
+  // A Sub2API or custom third-party account reports a balance and no quota total,
+  // so its credits window ships showMeter: false and the compact selection finds
+  // no pool. That left the rail cell an error printing `--` while the card, the
+  // tray and the Limits page all showed the balance.
+  //
+  // The money is the answer, so the cell prints it. The percentage is not: the
+  // meters exclude this window precisely because there is no denominator, which
+  // is what Claude's own collector says where it emits the window. Inferring one
+  // here would give the rail a figure no other surface agrees with, so the
+  // headline carries the window and no remaining.
+  const sub2api = provider('thirdparty', {
+    planLabel: 'Account',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 12.5, showMeter: false }],
+    balance: { amount: 12.5, currency: 'USD', monthSpend: 2.5 }
+  });
+  const [cell] = buildEdgeDockCells({ limits: { providers: [sub2api] } }, { limitProviders: 'thirdparty' });
+  assert.equal(cell.status, 'ok');
+  assert.equal(cell.windowKind, 'billing');
+  assert.deepEqual(cell.credits, { amount: 12.5, currency: 'USD' });
+  assert.equal(cell.remainingPercent, null);
+  assert.equal(cell.severityPercent, null);
+
+  // Claude's prepaid credits are the same shape and the case that matters most:
+  // an independently expiring tranche must not read as a percentage that only
+  // this one surface derived.
+  const claude = provider('claude', {
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 30, currency: 'CREDITS', showMeter: false }],
+    balance: { amount: 30, currency: 'CREDITS' }
+  });
+  const [credits] = buildEdgeDockCells({ limits: { providers: [claude] } }, { limitProviders: 'claude' });
+  assert.equal(credits.status, 'ok');
+  assert.deepEqual(credits.credits, { amount: 30, currency: 'CREDITS' });
+  assert.equal(credits.remainingPercent, null);
+
+  // A metered credits window keeps the reading it already had: OpenRouter derives
+  // a real percentage from an explicit total, and that path is untouched.
+  const metered = provider('openrouter', {
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 12.5, limit: 25, usedPercent: 50, showMeter: true }],
+    balance: { amount: 12.5, currency: 'USD' }
+  });
+  const [pct] = buildEdgeDockCells({ limits: { providers: [metered] } }, { limitProviders: 'openrouter' });
+  assert.equal(pct.remainingPercent, 50);
+  assert.deepEqual(pct.credits, { amount: 12.5, currency: 'USD' });
+
+  // Unlimited is the other money answer, and it has no amount to print.
+  const unlimited = provider('thirdparty', {
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', detail: 'Unlimited', showMeter: false }],
+    balance: { amount: null, currency: 'USD' }
+  });
+  const [blank] = buildEdgeDockCells({ limits: { providers: [unlimited] } }, { limitProviders: 'thirdparty' });
+  assert.equal(blank.credits, null);
+  assert.equal(blank.remainingPercent, null);
+
+  // A real quota pool always wins, in one account or across two: a money-only
+  // row cannot take the headline from a metered one, because it has no figure to
+  // lose the race on.
+  const mixed = provider('thirdparty', {
+    windows: [
+      { kind: 'billing', metric: 'credits', label: 'Balance', remaining: 12.5, showMeter: false },
+      { kind: 'weekly', label: 'Weekly', remainingPercent: 40 }
+    ],
+    balance: { amount: 12.5, currency: 'USD' }
+  });
+  const [quota] = buildEdgeDockCells({ limits: { providers: [mixed] } }, { limitProviders: 'thirdparty' });
+  assert.equal(quota.windowKind, 'weekly');
+  assert.equal(quota.remainingPercent, 40);
+  assert.equal(quota.credits, null);
+
+  const twoAccounts = provider('thirdparty', {
+    accountKey: 'sha256:money',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 12.5, showMeter: false }],
+    balance: { amount: 12.5, currency: 'USD' }
+  });
+  const [paired] = buildEdgeDockCells(
+    { limits: { providers: [twoAccounts, provider('thirdparty', { accountKey: 'sha256:quota', windows: [{ kind: 'weekly', label: 'Weekly', remainingPercent: 65 }] })] } },
+    { limitProviders: 'thirdparty' }
+  );
+  assert.equal(paired.windowKind, 'weekly');
+  assert.equal(paired.remainingPercent, 65);
+
+  // An account that failed to answer keeps its error cell; the fallback reads the
+  // collector's status, not just the presence of a window.
+  const failed = provider('thirdparty', {
+    status: 'unauthorized',
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 12.5, showMeter: false }],
+    balance: { amount: 12.5, currency: 'USD' }
+  });
+  const [error] = buildEdgeDockCells({ limits: { providers: [failed] } }, { limitProviders: 'thirdparty' });
+  assert.equal(error.status, 'error');
+  assert.equal(error.credits, null);
+  assert.equal(error.remainingPercent, null);
+});
+
+test('two balance-only accounts leave the one closest to empty on the rail', () => {
+  // One cell per provider, so a money-only pair still needs a single headline.
+  // The app's account rule is "the lowest"; for a balance the lowest reading is
+  // the least money left, so the account closest to empty wins and the order the
+  // collector returned them in does not decide it.
+  const money = (name, accountKey, amount, currency = 'USD') => provider('thirdparty', {
+    accountKey,
+    accountName: name,
+    windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: amount, currency, showMeter: false }],
+    balance: { amount, currency }
+  });
+  const build = (records) => buildEdgeDockCells({ limits: { providers: records } }, { limitProviders: 'thirdparty' })[0];
+  assert.equal(build([money('rich', 'sha256:r', 21.53), money('poor', 'sha256:p', 0.18)]).credits.amount, 0.18);
+  assert.equal(build([money('poor', 'sha256:p', 0.18), money('rich', 'sha256:r', 21.53)]).credits.amount, 0.18);
+
+  // Balances in different units share no scale, and no exchange rate reaches this
+  // projection, so those keep the collector's order rather than comparing figures
+  // that mean different things.
+  assert.equal(build([
+    money('usd', 'sha256:u', 5),
+    money('points', 'sha256:c', 900, 'CREDITS')
+  ]).credits.amount, 5);
+
+  // Money still never outranks a metered pool.
+  const quota = provider('thirdparty', {
+    accountKey: 'sha256:q',
+    windows: [{ kind: 'weekly', label: 'Weekly', remainingPercent: 80 }],
+    balance: { amount: 999, currency: 'USD' }
+  });
+  const [mixed] = buildEdgeDockCells({ limits: { providers: [money('poor', 'sha256:p', 0.18), quota] } }, { limitProviders: 'thirdparty' });
+  assert.equal(mixed.windowKind, 'weekly');
+  assert.equal(mixed.credits, null);
 });
 
 test('a pinned rail window ignores automatic exhaustion and keeps its identity across refreshes', () => {
@@ -2866,7 +3072,7 @@ test('provider card repaint preserves both account and session scroll and ignore
   const accounts = list(0), sessions = list(0), nested = list(0, true);
   const next = { dataset: { cellId: 'codex' }, querySelectorAll: () => [accounts, sessions, nested] };
   const commit = Function('contentLayer', 'overflowText', 'document', 'cardResetAnimator', 'CARD_SCROLL_SELECTOR',
-    `${body}\nreturn commitCard;`)(
+    `const captureCardSwitch = () => null, animateCardSwitch = () => {}; ${body}\nreturn commitCard;`)(
     { querySelector: () => previous, replaceChildren() {} },
     { refresh() {}, preserveReading() {} }, {}, { capture() {}, animate() {} }, '.scroll');
   commit(next, 'codex');
@@ -3120,6 +3326,39 @@ for (const platform of ['win32', 'darwin']) {
   });
 }
 
+for (const platform of ['win32', 'darwin']) {
+  test(`${platform} card transitions request renderer frames only on Windows`, () => {
+    const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+    const source = dock.slice(dock.indexOf('const cardFrames ='), dock.indexOf('let gesture = null;'));
+    const frames = [], callbacks = [];
+    let motion;
+    Function('bridge', 'state', 'window', `${source};`)(
+      { cardFrame: id => frames.push(id), onCardMotion: fn => { motion = fn; } },
+      { payload: { platform } },
+      { TokenMonitorCardMotion: { createCardFrameLoop: options => cardMotionApi.createCardFrameLoop({ ...options, requestFrame: fn => callbacks.push(fn) }) } }
+    );
+    motion({ motionId: 42, active: true });
+    assert.equal(callbacks.length, platform === 'win32' ? 1 : 0, 'only Windows starts a paint loop');
+    callbacks.shift()?.();
+    assert.deepEqual(frames, platform === 'win32' ? [42] : []);
+    motion({ motionId: 42, active: false });
+    callbacks.shift()?.();
+    assert.deepEqual(frames, platform === 'win32' ? [42] : []);
+    assert.equal(callbacks.length, 0, 'the native completion frame stops the loop');
+
+    motion({ motionId: 42, active: true });
+    motion({ motionId: 42, active: false });
+    motion({ motionId: 43, active: true });
+    assert.equal(callbacks.length, platform === 'win32' ? 1 : 0, 'retargeting keeps the pending paint loop');
+    callbacks.shift()?.();
+    assert.deepEqual(frames, platform === 'win32' ? [42, 43] : []);
+    assert.equal(callbacks.length, platform === 'win32' ? 1 : 0, 'the pending callback uses the new motion');
+    motion({ motionId: 43, active: false });
+    callbacks.shift()?.();
+    assert.equal(callbacks.length, 0, 'the retargeted native completion frame stops the loop');
+  });
+}
+
 for (const eventType of ['lostpointercapture', 'pointercancel']) {
   test(`${eventType} while moving the rail does not end the held native drag`, () => {
     const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
@@ -3181,4 +3420,362 @@ test('macOS rail forwards pointer reports using the existing bridge without affe
     handlers.get('mouseleave')?.();
     assert.equal(reports.length, platform === 'darwin' ? 2 : 0);
   }
+});
+
+
+test('bubble silhouette moves content and clips it in the same local coordinates', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const source = dock.slice(dock.indexOf('function updateShape('), dock.indexOf('// ---- Peek'));
+  const style = {}, nodes = [];
+  const shapeLayer = { dataset: {}, setAttribute() {}, replaceChildren() {}, append() {} };
+  const document = { createElementNS(_namespace, name) {
+    const node = { name, attributes: {}, setAttribute(key, value) { this.attributes[key] = value; }, append() {} };
+    nodes.push(node);
+    return node;
+  } };
+  const update = Function('surface', 'contentLayer', 'shapeLayer', 'document', 'SVG_NS', `${source}; return updateShape;`)(
+    'bubble', { style }, shapeLayer, document, 'svg');
+  update({ zoom: 1.25, shape: { key: 'frame-a', width: 365, height: 900, d: 'M 0 100 Z', contentBounds: { y: 100, height: 250 } } });
+  assert.equal(style.transform, 'translateY(80px)');
+  assert.equal(style.height, '');
+  assert.equal(style.clipPath, 'url(#edge-dock-card-clip)');
+  assert.equal(nodes.find(node => node.name === 'clipPath').attributes.clipPathUnits, 'userSpaceOnUse');
+  assert.equal(nodes.find(node => node.name === 'path').attributes.transform, 'translate(0 -80) scale(0.8)');
+  assert.equal(nodes.find(node => node.name === 'path').attributes.d, 'M 0 100 Z');
+  nodes.length = 0;
+  update({ zoom: 1.25, shape: { key: 'frame-b', width: 365, height: 900, d: 'M 0 150 Z', contentBounds: { y: 150, height: 300 } } });
+  assert.equal(style.transform, 'translateY(120px)', 'the complete reading follows the painted frame');
+  assert.equal(style.height, '');
+  assert.equal(nodes.find(node => node.name === 'path').attributes.d, 'M 0 150 Z');
+});
+
+test('shape-only frames preserve the reading destination until its full payload arrives', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const start = dock.indexOf('bridge.onShapeFrame?.(');
+  const source = dock.slice(start, dock.indexOf('// A repaint that no push triggers', start));
+  const first = { y: 120, height: 280 }, next = { y: 250, height: 164 };
+  const state = { payload: { cell: { id: 'claude' }, shape: { contentTarget: first } } };
+  let receive, painted;
+  Function('bridge', 'surface', 'state', 'root', 'updateShape', source)(
+    { onShapeFrame: callback => { receive = callback; } }, 'bubble', state, { dataset: {} }, payload => { painted = payload; });
+  receive({ side: 'left', shape: { key: 'moving', contentBounds: { y: 155, height: 249 }, contentTarget: next } });
+  assert.equal(painted.shape.key, 'moving');
+  assert.equal(state.payload.shape.contentTarget, first, 'an intervening self-repaint must keep the old reading at its own destination');
+  state.payload = { cell: { id: 'codex' }, shape: { contentTarget: next } };
+  receive({ side: 'left', shape: { key: 'later', contentBounds: { y: 187, height: 221 }, contentTarget: first } });
+  assert.equal(state.payload.shape.contentTarget, next);
+});
+
+test('whole-card transitions retain repaint progress and clean up interrupted outgoing content', async () => {
+  const { createCardSwitch } = require('../../src/electron/renderer/cardSwitch');
+  let reduced = false;
+  const document = { visibilityState: 'visible' };
+  const ghosts = new Set();
+  function node(opacity = '1', scroll = 0, top = 0, left = 0, marginLeft = 0) {
+    const list = { scrollTop: scroll };
+    const value = { style: {}, opacity, offsetLeft: left, offsetTop: top, attributes: {}, animations: [],
+      querySelectorAll: selector => selector === '.scroll' ? [list] : [],
+      cloneNode: () => node(opacity, 0, top, left, marginLeft),
+      getBoundingClientRect() {
+        return { top, bottom: top + 120, left: this.style.position === 'absolute'
+          ? parseFloat(this.style.left) + parseFloat(this.style.margin ?? marginLeft) : left };
+      },
+      setAttribute(name, text) { this.attributes[name] = text; },
+      removeAttribute(name) { delete this.attributes[name]; },
+      remove() { ghosts.delete(this); this.removed = true; },
+      animate(frames, timing) {
+        let resolve, reject;
+        const finished = new Promise((yes, no) => { resolve = yes; reject = no; });
+        // Browsers create the finished promise lazily; observe this eager fake.
+        finished.catch(() => {});
+        const animation = { frames, timing, currentTime: 0, finished,
+          cancel() { this.cancelled = true; reject(new Error('cancelled')); },
+          finish() { resolve(); } };
+        this.animations.push(animation);
+        return animation;
+      }
+    };
+    return value;
+  }
+  const shared = createCardSwitch({ contentLayer: { append: ghost => ghosts.add(ghost) }, scrollSelector: '.scroll',
+    reducedMotion: () => reduced, isHidden: () => document.visibilityState === 'hidden', readOpacity: card => card.opacity });
+  const api = { captureCardSwitch: shared.capture, animateCardSwitch: shared.play, clearCardSwitch: shared.cancel };
+  // The left sidebar's offsetLeft already includes its CSS margin-left.
+  const leftCard = node('1', 0, 0, 12, 12);
+  const leftMotion = api.captureCardSwitch(leftCard, false);
+  api.animateCardSwitch(node('1', 0, 0, 12, 12), leftMotion);
+  assert.equal(leftMotion.ghost.getBoundingClientRect().left, leftCard.getBoundingClientRect().left,
+    'an outgoing left-sidebar card must retain its screen position without counting margin twice');
+  api.clearCardSwitch();
+  const first = node('1', 37), next = node();
+  const motion = api.captureCardSwitch(first, false);
+  api.animateCardSwitch(next, motion);
+  assert.equal(ghosts.size, 1);
+  assert.equal(motion.ghost.inert, true);
+  assert.equal(motion.ghost.attributes['aria-hidden'], 'true');
+  assert.equal(motion.ghost.style.pointerEvents, 'none');
+  assert.equal(motion.ghost.querySelectorAll('.scroll')[0].scrollTop, 37);
+  assert.deepEqual(next.animations[0].frames, [{ opacity: 0 }, { opacity: 1 }]);
+  assert.equal(next.animations[0].timing.duration, 160);
+  assert.equal(next.animations[0].timing.delay, undefined, 'both readings start together');
+  const originalIncoming = motion.incoming, outgoing = motion.outgoing;
+  originalIncoming.currentTime = 80;
+  const repaint = api.captureCardSwitch(next, true);
+  api.animateCardSwitch(node(), repaint);
+  assert.equal(repaint, motion);
+  assert.equal(repaint.incoming.currentTime, 80, 'a live repaint does not restart or snap the fade');
+  assert.equal(repaint.outgoing, outgoing, 'the outgoing content keeps its original deadline');
+  assert.equal(originalIncoming.cancelled, true);
+  outgoing.finish();
+  await Promise.resolve();
+  const rapid = api.captureCardSwitch(node('0.4'), false);
+  api.animateCardSwitch(node(), rapid);
+  await Promise.resolve();
+  assert.equal(ghosts.size, 1, 'an older completion cannot remove the latest transition');
+  assert.equal(rapid.ghost.removed, undefined);
+  assert.equal(rapid.outgoing.frames[0].opacity, '0.4', 'a rapid switch starts from the painted opacity');
+  rapid.outgoing.finish();
+  await Promise.resolve();
+  assert.equal(ghosts.size, 0);
+  assert.equal(rapid.incoming.cancelled, true, 'finishing releases the animation effect');
+  // Native opacity is zero between hovers, but the page stays visible.
+  // Reopening must discard the previous card instead of crossfading it back in.
+  assert.equal(document.visibilityState, 'visible');
+  assert.equal(api.captureCardSwitch(first, false, true), null, 'reopening never fades in the previous card');
+  const pendingReopen = api.captureCardSwitch(first, false);
+  api.animateCardSwitch(next, pendingReopen);
+  assert.equal(api.captureCardSwitch(next, false, true), null, 'a new opening has no outgoing card');
+  assert.equal(ghosts.size, 0);
+  assert.equal(pendingReopen.incoming.cancelled, true);
+  reduced = true;
+  assert.equal(api.captureCardSwitch(first, false), null);
+  reduced = false;
+  document.visibilityState = 'hidden';
+  assert.equal(api.captureCardSwitch(first, false), null, 'reopening starts without stale outgoing content');
+  document.visibilityState = 'visible';
+  for (const top of [504, -504, 120, -120]) {
+    const pending = api.captureCardSwitch(first, false);
+    api.animateCardSwitch(next, pending);
+    assert.equal(api.captureCardSwitch(node('1', 0, top), false), null, 'interrupted fades hand off directly regardless of reading distance');
+    assert.equal(ghosts.size, 0, 'a direct switch also clears any interrupted outgoing copy');
+    assert.equal(pending.incoming.cancelled, true);
+  }
+  for (const elapsed of [0, 16, 40]) {
+    const incoming = node();
+    const pending = api.captureCardSwitch(first, false);
+    api.animateCardSwitch(incoming, pending);
+    pending.incoming.currentTime = elapsed;
+    pending.outgoing.currentTime = elapsed;
+    incoming.opacity = elapsed === 0 ? '0' : elapsed === 16 ? '0.0197225' : '0.129162';
+    const latest = node();
+    const interrupted = api.captureCardSwitch(incoming, false);
+    assert.equal(interrupted, null, 'rapid selection displays the latest reading directly, without another fade from zero');
+    api.animateCardSwitch(latest, interrupted);
+    assert.equal(latest.animations.length, 0);
+    assert.equal(ghosts.size, 0, 'interruption leaves no outgoing copy');
+    assert.equal(pending.incoming.cancelled, true);
+    assert.equal(pending.outgoing.cancelled, true);
+    await Promise.resolve();
+  }
+});
+
+for (const kind of ['provider', 'stat']) {
+  for (const acknowledgeImmediately of [false, true]) {
+    test(`switching plugin → ${kind} → plugin during the fade commits the live card (${acknowledgeImmediately ? 'placed' : 'awaiting size'})`, async () => {
+      const { Element } = require('../helpers/notchPanel');
+      class CardElement extends Element {
+        querySelectorAll(selector) {
+          const exclude = selector.match(/^(.*):not\(\[([^=]+)="([^"]+)"\]\)$/);
+          if (exclude) return super.querySelectorAll(exclude[1]).filter(node => node.getAttribute(exclude[2]) !== exclude[3]);
+          return super.querySelectorAll(selector);
+        }
+        cloneNode(deep) {
+          const clone = new CardElement(this.tagName, this.ownerDocument);
+          clone.className = this.className;
+          Object.assign(clone.dataset, this.dataset);
+          Object.assign(clone.attributes, this.attributes);
+          Object.assign(clone.style, this.style);
+          clone.value = this.value;
+          if (deep) clone.append(...this.children.map(child => child.cloneNode(true)));
+          return clone;
+        }
+        getBoundingClientRect() { return { height: this.classList.contains('edge-dock-card-plugin') ? 180 : 240 }; }
+        animate() {
+          let finish, cancel;
+          const finished = new Promise((resolve, reject) => { finish = resolve; cancel = () => reject(new Error('cancelled')); });
+          finished.catch(() => {});
+          const animation = { finished, finish, cancel, currentTime: 0 };
+          (this.animations ||= []).push(animation);
+          return animation;
+        }
+      }
+      const document = { visibilityState: 'visible', createElement: tag => new CardElement(tag, document) };
+      const el = (tag, className, text) => {
+        const node = document.createElement(tag); node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      };
+      const root = el('main', ''), contentLayer = el('div', ''), stagingLayer = el('div', '');
+      root.append(contentLayer, stagingLayer);
+      const reports = [];
+      let mounts = 0;
+      const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+      const source = dock.slice(dock.indexOf('const cardSwitch ='), dock.indexOf('const bubbleSizeObserver ='));
+      const pluginSource = dock.slice(dock.indexOf('function pluginCard('), dock.indexOf('const codexAccountControl ='));
+      const { renderBubble } = Function('deps', `
+        const window = { TokenMonitorCardLayout: deps.cardLayoutApi, TokenMonitorCardSwitch: {
+          createCardSwitch: options => deps.cardSwitchApi.createCardSwitch({ ...options,
+            isHidden: () => false, readOpacity: () => '1' })
+        } };
+        const { document, el, root, contentLayer, stagingLayer, bridge, pluginHost } = deps;
+        const surface = 'bubble', CARD_SCROLL_SELECTOR = '.edge-dock-accounts, .edge-dock-session-list', BREAKDOWN_VISIBLE_ROWS = 6;
+        const prefersReducedMotion = () => false;
+        const overflowText = { refresh() {}, preserveReading() {} };
+        const cardResetAnimator = { capture() {}, animate() {} };
+        const pluginContent = null, bubbleSizeObserver = null;
+        let observedPluginCard = null;
+        const providerCard = cell => el('section', 'edge-dock-card', cell.id), statCard = providerCard;
+        ${pluginSource}
+        ${source}
+        return { renderBubble };
+      `)({ cardLayoutApi, cardSwitchApi: require('../../src/electron/renderer/cardSwitch'), document, el, root, contentLayer, stagingLayer,
+        bridge: { reportBubbleSize: (id, height) => reports.push({ id, height }) },
+        pluginHost: { state: () => ({ title: 'Plugin reading' }), mount: body => { mounts++; body.textContent = 'Live plugin content'; } }
+      });
+      const plugin = { id: 'plugin', kind: 'plugin', ref: 'fixture/view' };
+      const other = { id: kind, kind };
+      const paint = (cell, placed) => renderBubble({ side: 'right', cell, placed });
+      paint(plugin, { cellId: plugin.id, height: 180 });
+      const original = contentLayer.children[0];
+      paint(other, { cellId: other.id, height: 240 });
+      const ghost = contentLayer.children[1];
+      assert.equal(ghost.dataset.cellId, plugin.id);
+      assert.equal(ghost.classList.contains('edge-dock-card-plugin'), true);
+      assert.equal(ghost.getAttribute('aria-hidden'), 'true');
+      assert.equal(ghost.inert, true);
+
+      paint(plugin, acknowledgeImmediately ? { cellId: plugin.id, height: 180 } : { cellId: other.id, height: 240 });
+      if (!acknowledgeImmediately) {
+        assert.equal(contentLayer.children[0].dataset.cellId, other.id, 'keep the placed card until size confirmation');
+        assert.equal(stagingLayer.children[0]?.dataset.cellId, plugin.id, 'build a real plugin card, not retain its fading clone');
+        assert.deepEqual(reports, [{ id: plugin.id, height: 180 }]);
+        paint(plugin, { cellId: plugin.id, height: 180 });
+      }
+      const active = contentLayer.children[0];
+      assert.equal(active.dataset.cellId, plugin.id, 'the selected plugin must replace the provider/stat card');
+      assert.notEqual(active, ghost);
+      assert.notEqual(active, original);
+      assert.equal(active.inert, undefined);
+      assert.ok(active.textContent.includes('Live plugin content'));
+      const mounted = mounts;
+      paint(plugin, { cellId: plugin.id, height: 180 });
+      assert.equal(contentLayer.children[0], active, 'normal live-plugin retention still preserves its mount');
+      assert.equal(mounts, mounted);
+      await Promise.resolve();
+      assert.deepEqual(contentLayer.children, [active], 'rapid selection cancels the outgoing copy without removing the live plugin');
+      renderBubble({ side: 'right', cell: plugin, reveal: 2, placed: { cellId: plugin.id, height: 180 } });
+      assert.equal(contentLayer.children[0], active, 'reopening retains the selected plugin mount');
+      assert.notEqual(active.style.visibility, 'hidden', 'retained plugin content is restored on reopening');
+      assert.equal(mounts, mounted);
+    });
+  }
+}
+
+test('detail tooltip flipping uses the painted card top in CSS pixels', () => {
+  const source = fs.readFileSync(path.join(rendererDir, 'limits/windowsView.js'), 'utf8');
+  const body = source.slice(source.indexOf('function attachLimitDetailTooltip('), source.indexOf('// Entries are rows'));
+  for (const zoom of [1, 1.25]) {
+    for (const cardY of [0, 400]) {
+      for (const triggerY of [50, 150]) {
+        const events = {}, flips = [];
+        const attach = Function('deps', 'tooltipHost', 'positionCenteredDetailTooltip', `let tooltipAnchorSeq = 0; ${body}; return attachLimitDetailTooltip;`)(
+          { tooltipTop: () => cardY / zoom }, { markOpened() {}, release() {} }, () => {});
+        const wrap = { style: { setProperty() {} }, classList: { add() {} }, isConnected: true,
+          getBoundingClientRect: () => ({ top: (cardY + triggerY) / zoom }), addEventListener: (name, fn) => { events[name] = fn; } };
+        const tooltip = { style: { setProperty() {} }, setAttribute() {}, childElementCount: 1, offsetHeight: 120 / zoom,
+          showPopover() {}, classList: { toggle: (_name, below) => flips.push(below) } };
+        attach(wrap, tooltip); events.pointerenter();
+        assert.deepEqual(flips, [triggerY < 120 + 8 * zoom]);
+      }
+    }
+  }
+});
+
+
+test('a fixed third-party headline keeps sibling accounts in the card and never switches on failure', () => {
+  const money = (accountKey, amount, extra = {}) => provider('thirdparty', {
+    accountKey, windows: [{ kind: 'billing', metric: 'credits', remaining: amount, currency: 'USD', showMeter: false }], ...extra
+  });
+  const selected = money('chosen', 21.53);
+  const sibling = money('sibling', 0.18);
+  const item = { type: 'limit', provider: 'thirdparty', accountMode: 'specific', accountKey: 'chosen' };
+  const build = (records, patch = {}) => buildEdgeDockCells({ limits: { providers: records } }, { items: [{ ...item, ...patch }] })[0];
+  const fixed = build([sibling, selected]);
+  assert.equal(fixed.credits.amount, 21.53);
+  assert.equal(fixed.remainingPercent, null);
+  assert.equal(fixed.accounts.length, 2);
+  assert.equal(build([selected, sibling], { accountMode: 'lowest' }).credits.amount, 0.18);
+  for (const status of ['unauthorized', 'unavailable']) {
+    const failed = build([sibling, { ...selected, status, windows: [] }]);
+    assert.equal(failed.status, 'error');
+    assert.equal(failed.credits, null);
+    assert.equal(failed.remainingPercent, null);
+  }
+  const stale = build([sibling, { ...selected, stale: true }]);
+  assert.equal(stale.status, 'stale');
+  assert.equal(stale.credits, null);
+  for (const records of [[sibling], []]) {
+    const missing = build(records);
+    assert.equal(missing.status, 'error');
+    assert.equal(missing.credits, null);
+  }
+  const hidden = build([selected, sibling], { hiddenAccounts: ['chosen'] });
+  assert.equal(hidden.credits, null);
+  assert.equal(hidden.accounts.length, 1);
+  assert.equal(build([money('', 99), sibling], { accountKey: '' }).credits, null);
+  assert.equal(build([selected, sibling], { accountKey: 'sibling' }).credits.amount, 0.18);
+});
+
+test('a fixed third-party account owns quota selection as well as its balance', () => {
+  const chosen = provider('thirdparty', { accountKey: 'chosen', windows: [
+    { kind: 'weekly', label: 'Weekly', remainingPercent: 80 },
+    { kind: 'billing', metric: 'credits', remaining: 20, showMeter: false }
+  ] });
+  const sibling = provider('thirdparty', { accountKey: 'sibling', windows: [{ kind: 'weekly', label: 'Weekly', remainingPercent: 5 }] });
+  const [cell] = buildEdgeDockCells({ limits: { providers: [sibling, chosen] } }, {
+    items: [{ type: 'limit', provider: 'thirdparty', accountMode: 'specific', accountKey: 'chosen' }]
+  });
+  assert.equal(cell.remainingPercent, 80);
+  assert.equal(cell.credits, null);
+  assert.equal(cell.accounts.length, 2);
+});
+
+test('third-party headline account settings survive normalization without changing other providers', () => {
+  const [item] = normalizeEdgeDockItems([{ type: 'limit', provider: 'thirdparty', accountMode: 'specific', accountKey: '  sha256:chosen  ' }]);
+  assert.equal(item.accountMode, 'specific');
+  assert.equal(item.accountKey, 'sha256:chosen');
+  assert.deepEqual(normalizeEdgeDockItems([item]), [item]);
+  const [legacy] = normalizeEdgeDockItems([{ type: 'limit', provider: 'thirdparty' }]);
+  assert.equal(legacy.accountMode, 'lowest');
+  assert.equal(legacy.accountKey, '');
+  assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'thirdparty', accountKey: {} }])[0].accountKey, '');
+  assert.equal(normalizeEdgeDockItems([{ type: 'limit', provider: 'thirdparty', accountKey: 'x'.repeat(201) }])[0].accountKey.length, 200);
+  const [codex, claude] = normalizeEdgeDockItems([
+    { type: 'limit', provider: 'codex', accountMode: 'specific', accountKey: 'chosen' },
+    { type: 'limit', provider: 'claude', accountMode: 'specific', accountKey: 'chosen' }
+  ]);
+  assert.equal(codex.accountMode, 'active');
+  assert.equal(claude.accountMode, 'lowest');
+  assert.equal(Object.hasOwn(codex, 'accountKey'), false);
+});
+
+test('detail size defaults to the fitted rail and validates its independent custom scale', () => {
+  assert.equal(normalizeEdgeDockBubbleSize(undefined), 'inherit');
+  assert.equal(normalizeEdgeDockBubbleSize('invalid'), 'inherit');
+  assert.equal(normalizeEdgeDockBubbleSize('custom'), 'custom');
+  assert.equal(edgeDockBubbleScale({ edgeDockSize: 'small' }), 0.85);
+  assert.equal(edgeDockBubbleScale({ edgeDockBubbleSize: 'inherit' }, 0.9), 0.9);
+  assert.equal(edgeDockBubbleScale({ edgeDockBubbleSize: 'large' }, 0.9), 1.25);
+  assert.equal(edgeDockBubbleScale({ edgeDockBubbleSize: 'custom', edgeDockBubbleCustomScale: 1.234 }), 1.25);
+  assert.equal(edgeDockBubbleScale({ edgeDockBubbleSize: 'custom', edgeDockBubbleCustomScale: 9 }), 1.5);
 });

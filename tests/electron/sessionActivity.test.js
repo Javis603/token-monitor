@@ -26,7 +26,7 @@ test('host and iCloud activity snapshots retain the captured local history for T
       nativeSessions: { today: {}, month: {}, allTime: {} } };
     const context = {
       settings: {}, latestStats: previous, localStats: previous, lastCollectedDevice: local, localDevice: local,
-      ownsUsageRuntime: () => true, ...syncDisplay, ...projection,
+      ownsUsageRuntime: () => true, ...syncDisplay, ...projection, ...require('../../src/electron/sessionDeviceSources'),
       snapshotLocalDevices: snapshots, rendererSnapshots: publisher.createRendererSnapshots({ source: () => mode }),
       presentationCache: publisher.createStatsPresentationCache(), allTimeSessionsCache: publisher.createStatsPresentationCache(),
       mergedLocalAllTimeSessions, projectModelAliasSessions: (_stats, sessions) => sessions,
@@ -38,6 +38,7 @@ test('host and iCloud activity snapshots retain the captured local history for T
     const pulled = context.rendererAllTimeSessions(context.latestStats);
     assert.equal(pulled['claude:past']?.totalTokens, 500, mode);
     assert.equal(pulled['claude:past']?.liveActivity?.state, 'waiting', mode);
+    assert.equal(pulled['claude:past']?.sourceDevice?.deviceId, 'local', mode);
     assert.equal(local.allTime.sessions['claude:past'].liveActivity, undefined, 'original accounting snapshot is immutable');
   }
 });
@@ -126,6 +127,7 @@ function mainActivityHarness(hubMode, externalAgent = false) {
     fetch: async () => ({ ok: true, json: async () => aggregate() }),
     modeQueue: Promise.resolve(), setLatestHubStatsCache() {},
     getSyncContentRuntime: () => ({ notifyStats() {} }), electronPresentationStats: stats => stats,
+    getLimitsHistoryStore: () => ({ record() {} }), limitsHistoryController: null,
     migrateCodexAdditionalLimits() {}, scheduleMacWidgetSnapshot() {}, updateEdgeDockCells() {}, pluginRuntime: null,
     syncCodexPresentationActiveAccount() {}, updateTrayDisplay() {}, statsHistoryRevision: () => '',
     maybeAdoptSharedSubscriptionRevision() {}, withoutSessionTitles: titles.withoutSessionTitles,

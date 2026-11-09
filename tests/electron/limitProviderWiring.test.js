@@ -98,9 +98,11 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
     copilotApiToken: ['providers', 'copilot', 'apiToken'],
     zedCookie: ['providers', 'zed', 'cookie'],
+    mistralCookie: ['providers', 'mistral', 'cookie'],
     typesafeCookie: ['providers', 'typesafe', 'cookie'],
     stepfunToken: ['providers', 'stepfun', 'token'],
     notionCookie: ['providers', 'notion', 'cookie'],
+    opendesignCookie: ['providers', 'opendesign', 'cookie'],
     manusSessionToken: ['providers', 'manus', 'sessionToken'],
     museWebCookie: ['providers', 'muse', 'webCookie'],
     commandcodeCookie: ['providers', 'commandcode', 'cookie'],
@@ -112,6 +114,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     devinBearerToken: ['providers', 'devin', 'bearerToken'],
     deepseekApiKey: ['providers', 'deepseek', 'apiKey'],
     openrouterProfiles: ['providers', 'openrouter', 'profiles'],
+    minimaxApiProfiles: ['providers', 'minimax', 'profiles'],
     minimaxApiKey: ['providers', 'minimax', 'apiKey'],
     volcengineAccessKeyId: ['providers', 'volcengine', 'accessKeyId'],
     volcengineSecretAccessKey: ['providers', 'volcengine', 'secretAccessKey'],
@@ -148,7 +151,7 @@ test('the renderer receives no credential values except the two hub secrets', ()
 
 test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refresh scopes)', () => {
   assert.deepEqual(LIMIT_PROVIDER_SETTING_KEYS, {
-    claude: ['claudeWebCookie', 'claudeWebOrganizationId'],
+    claude: ['claudeWebCookie', 'claudeWebOrganizationId', 'claudeCliFallbackEnabled'],
     codex: ['codexManagedAccounts'],
     opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
     cursor: ['cursorDisabledAccountIds'],
@@ -165,13 +168,15 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     qoder: ['qoderCookie', 'qoderSite'],
     deepseek: ['deepseekApiKey'],
     devin: ['devinBearerToken', 'devinOrganization'],
+    mistral: ['mistralCookie'],
     typesafe: ['typesafeCookie'],
     stepfun: ['stepfunToken'],
     notion: ['notionCookie', 'notionWorkspaceId'],
+    opendesign: ['opendesignCookie'],
     manus: ['manusSessionToken'],
     muse: ['museWebCookie'],
     openrouter: ['openrouterProfiles'],
-    minimax: ['minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode'],
+    minimax: ['minimaxApiProfiles', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode'],
     volcengine: [
       'volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion',
       'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion'
@@ -285,7 +290,7 @@ test('settings:update normalizes provider fields and strips separately managed a
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
     'traeCookie', 'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
-    'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId', 'manusSessionToken', 'museWebCookie'
+    'mistralCookie', 'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId', 'manusSessionToken', 'museWebCookie', 'opendesignCookie'
   ].sort());
   for (const key of normalizedKeys) {
     const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test'
@@ -335,7 +340,7 @@ test('the external URL allowlist admits exactly the provider consoles it should'
       isAllowedVerificationUrl,
       isAllowedCodexLoginUrl,
       limitProviderUrlAllowed,
-      STATUS_PAGE_HOSTS: new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname))
+      STATUS_PAGE_HOSTS: evalTopLevel(mainSource, 'const STATUS_PAGE_HOSTS = ', '\nconst diagnosticJournal', { URL, SERVICE_STATUS_PROVIDERS })
     }
   );
   const allowed = [
@@ -343,6 +348,8 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     'https://claude.ai/settings/billing',
     'https://cursor.com/settings',
     'https://www.cursor.com/settings',
+    'https://cursor.com/',
+    'https://www.cursor.com/',
     'https://cursor.com/dashboard',
     'https://www.cursor.com/dashboard',
     'https://opencode.ai/',
@@ -378,6 +385,14 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     'https://status.openai.com/',
     'https://status.cursor.com/',
     'https://status.deepseek.com/',
+    'https://www.githubstatus.com/',
+    'https://status.moonshot.cn/',
+    'https://status.minimaxi.com/',
+    'https://status.minimax.io/',
+    'https://status.opencode.ai/',
+    'https://status.zed.dev/',
+    'https://www.devinstatus.com/',
+    'https://status.factory.ai/',
     'https://github.com/junhoyeo/tokscale',
     'https://github.com/Javis603/token-monitor/releases',
     'https://www.npmjs.com/package/@tokscale/cli',
@@ -398,12 +413,12 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     } } }
   });
   cursorLogin();
-  assert.deepEqual(cursorUrls, ['https://cursor.com/dashboard']);
+  assert.deepEqual(cursorUrls, ['https://cursor.com']);
 
   const denied = [
     'https://claude.ai/',
     'https://claude.ai/login',
-    'https://cursor.com/',
+    'https://cursor.com/other',
     'https://cursor.com/dashboard-other',
     'https://cursor.com/dashboard/other',
     'https://cursor.com.evil.com/dashboard',
@@ -422,6 +437,8 @@ test('the external URL allowlist admits exactly the provider consoles it should'
     'https://bailian.console.aliyun.com/',
     'https://bailian.console.aliyun.com/us-west-1',
     'https://status.claude.com/incidents',
+    'https://www.google.com/appsstatus/dashboard',
+    'https://www.google.com/appsstatus/dashboard/other',
     'https://codex-resets.com/path',
     'https://github.com/junhoyeo',
     'https://github.com/Javis603/other-repo',
@@ -451,6 +468,17 @@ test('account projections redact secrets while preserving profile metadata and s
   const status = accountStatusProjection({ clineApiKey: 'stored' }, { CLINE_API_KEY: 'environment' });
   assert.equal(status.clineCredentialConfigured, true);
   assert.equal(status.clineCredentialSource, 'settings');
+});
+
+test('MiniMax profiles keep the legacy configured flag truthful', () => {
+  const profiles = accountStatusProjection({ minimaxApiProfiles: { work: { apiKey: 'saved-secret', billingMode: 'api' } } }, {});
+  assert.equal(profiles.minimaxApiKeyConfigured, true);
+  assert.equal(profiles.minimaxApiKeySource, 'settings');
+  for (const env of [{}, { MINIMAX_CODING_API_KEY: 'env-secret' }]) {
+    const disabled = accountStatusProjection({ minimaxApiProfiles: { work: { apiKey: 'saved-secret', enabled: false } } }, env);
+    assert.equal(disabled.minimaxApiKeyConfigured, false);
+    assert.equal(disabled.minimaxApiKeySource, '');
+  }
 });
 
 test('the renderer receives serializable account forms but no credential declarations', () => {
@@ -576,10 +604,10 @@ test('MiniMax implicit region remains env-driven after unrelated saves and reloa
   assert.deepEqual(change.limitScopes, [{ provider: 'minimax' }]);
   assert.equal(change.usageStructural, false);
   const { settingsLimitInvalidationPlan } = require('../../src/electron/deviceRuntimeCoordinator');
-  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax' }, reason: 'settings-change', options: { clear: true } }]);
+  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax', source: 'api' }, reason: 'settings-change', options: { clear: true } }]);
 });
 
-test('MiniMax billing choice survives reload and clears only its provider quota', () => {
+test('MiniMax key billing choice survives reload and invalidates only its API source', () => {
   const { initialAccountSettings } = require('../../src/electron/limits/accountSettings');
   assert.equal(initialAccountSettings({}).minimaxBillingMode, 'token-plan');
   assert.equal(limitsConfigFromSettings({}, { env: {} }).minimaxBillingMode, 'token-plan');
@@ -596,7 +624,7 @@ test('MiniMax billing choice survives reload and clears only its provider quota'
   assert.deepEqual(change.limitScopes, [{ provider: 'minimax' }]);
   assert.equal(change.usageStructural, false);
   const { settingsLimitInvalidationPlan } = require('../../src/electron/deviceRuntimeCoordinator');
-  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax' }, reason: 'settings-change', options: { clear: true } }]);
+  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax', source: 'api' }, reason: 'settings-change', options: { clear: true } }]);
 });
 
 test('Trae credential source follows the usable credential after a malformed stored value', () => {
