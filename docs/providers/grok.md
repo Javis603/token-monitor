@@ -42,3 +42,7 @@ Roughly 45% of the session directories on a busy machine are subagent sessions, 
 ```
 node --test tests/shared/grokSessionMetadata.test.js tests/shared/mixedTimingThroughput.test.js tests/shared/history.test.js
 ```
+
+## Quota account identity
+
+Grok quota history keys xAI OIDC credentials by the `https://auth.x.ai` issuer and non-empty `sub`, so token refreshes retain the same account history. Email is display metadata only: different subjects remain separate even if their emails match. Opaque tokens, unknown issuers and malformed identities retain token-based keys. Existing token-keyed history is not migrated or merged automatically.

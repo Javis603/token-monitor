@@ -646,6 +646,24 @@ function shouldTryGrokRpc(credential, deps = {}) {
     && typeof credential.source === 'string' && credential.source.startsWith('auth.json');
 }
 
+function grokAccountKey(credential) {
+  if (!credential) return '';
+  // Identity only: billing still authenticates the credential. xAI OIDC tokens
+  // rotate, but their issuer/subject pair identifies the same account. Email
+  // is display metadata, not a safe substitute for a missing subject.
+  const parts = credential.token.split('.');
+  if (parts.length === 3 && parts.every(part => /^[A-Za-z0-9_-]+$/.test(part))) {
+    try {
+      const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+      if (claims?.iss === 'https://auth.x.ai' && typeof claims.sub === 'string'
+        && claims.sub.trim() && claims.sub === claims.sub.trim()) {
+        return hashKey('grok', 'oidc', claims.iss, claims.sub);
+      }
+    } catch (_) { /* Unknown token formats keep their isolated legacy key. */ }
+  }
+  return hashKey('grok', credential.token);
+}
+
 function unauthorizedGrokProvider(updatedAt, source = 'web', sourceDetail = '') {
   return normalizeLimitProvider({
     provider: 'grok',
@@ -741,7 +759,7 @@ async function fetchGrokLimits(options = {}, deps = {}) {
       const windows = parseGrokBilling(rpcBody);
       return normalizeLimitProvider({
         provider: 'grok',
-        accountKey: credential ? hashKey('grok', credential.token) : '',
+        accountKey: grokAccountKey(credential),
         accountLabel: 'SuperGrok',
         accountEmail: credential?.email || '',
         source: 'rpc',
@@ -798,7 +816,7 @@ async function fetchGrokLimits(options = {}, deps = {}) {
   try {
     return normalizeLimitProvider({
       provider: 'grok',
-      accountKey: hashKey('grok', credential.token),
+      accountKey: grokAccountKey(credential),
       accountLabel: 'SuperGrok',
       accountEmail: credential.email || '',
       source: 'web',
