@@ -641,6 +641,10 @@ async function fetchGrokRpcBilling(options = {}, deps = {}) {
 }
 
 function shouldTryGrokRpc(credential, deps = {}) {
+  // CLI auth overrides can select another account than the resolved auth.json.
+  // Web billing authenticates the exact credential used for the history key.
+  const env = deps.env || process.env;
+  if (typeof env.GROK_AUTH === 'string' && env.GROK_AUTH.trim()) return false;
   if (typeof deps.fetchRpcBilling === 'function') return true;
   return credential && !credential.wsl
     && typeof credential.source === 'string' && credential.source.startsWith('auth.json');

@@ -46,4 +46,4 @@ node --test tests/shared/grokLimits.test.js tests/shared/grokSessionMetadata.tes
 
 ## Quota account identity
 
-Grok quota history keys xAI OIDC credentials by the `https://auth.x.ai` issuer and non-empty `sub`, so token refreshes retain the same account history. Email is display metadata only: different subjects remain separate even if their emails match. Opaque tokens, unknown issuers and malformed identities retain token-based keys. Existing token-keyed history is not migrated or merged automatically.
+Grok quota history keys xAI OIDC credentials by the `https://auth.x.ai` issuer and non-empty `sub`, so token refreshes retain the same account history. Email is display metadata only: different subjects remain separate even if their emails match. When `GROK_AUTH` overrides the CLI login, quota lookup uses web billing with the resolved credential so its account identity matches the authenticated request. Opaque tokens, unknown issuers and malformed identities retain token-based keys. Existing token-keyed history is not migrated or merged automatically.

@@ -1070,3 +1070,27 @@ for (const source of ['rpc', 'web']) {
     assert.deepEqual((await store.query('fixture', other)).windows[0].points, []);
   });
 }
+
+test('Grok CLI auth override cannot bind another RPC account to the selected OIDC identity', async () => {
+  const token = oidcToken({ iss: 'https://auth.x.ai', sub: 'selected-user' });
+  let rpcCalls = 0;
+  const row = await fetchGrokLimits({}, {
+    env: { GROK_AUTH: 'other-cli-account' },
+    grokHome: path.join(os.tmpdir(), 'grok-identity-fixture'),
+    readFileSync: () => JSON.stringify({ 'https://auth.x.ai::fixture': { key: token, email: 'selected@example.test' } }),
+    fetchRpcBilling: async () => {
+      rpcCalls++;
+      return { creditUsagePercent: 80, currentPeriod: { start: '2026-11-03T00:00:00Z', end: '2026-11-10T00:00:00Z' } };
+    },
+    fetchWebGrpcBilling: async credential => {
+      assert.equal(credential.token, token);
+      return [{ kind: 'weekly', label: 'Weekly', usedPercent: 20, remainingPercent: 80 }];
+    }
+  });
+  assert.equal(rpcCalls, 0);
+  assert.equal(row.status, 'ok');
+  assert.equal(row.source, 'web');
+  assert.equal(row.windows[0].usedPercent, 20);
+  const expected = await identityReading(token, 'web', 'selected@example.test');
+  assert.equal(row.accountKey, expected.accountKey);
+});
