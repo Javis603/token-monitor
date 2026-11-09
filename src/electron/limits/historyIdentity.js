@@ -20,7 +20,10 @@
     return !!provider.accountKey
       && !(provider.provider === 'antigravity' && !provider.accountEmail)
       && !(provider.provider === 'kiro' && provider.source === 'cli' && !provider.accountEmail)
-      && !(provider.provider === 'claude' && provider.source === 'cli' && provider.accountKey === CLAUDE_CLI_UNIDENTIFIED_KEY);
+      // CLI output can hash an organization display label without identifying
+      // its account. An opaque key plus that label alone is still ambiguous.
+      && !(provider.provider === 'claude' && provider.source === 'cli'
+        && (provider.accountKey === CLAUDE_CLI_UNIDENTIFIED_KEY || !provider.accountEmail && provider.accountName));
   }
   function historyAccountKey(provider) {
     // A reporting device is provenance, not ownership of a shared allowance.

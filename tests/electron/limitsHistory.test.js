@@ -2247,3 +2247,65 @@ for (const lastMinute of [10, 70]) test(`adoption preserves a recovered source a
     { grain: 'day', day: dayKey(at(2, 12)) }, at(2, 12)).windows;
   assert.equal(windows[0].points.at(-1).value, 22);
 });
+
+test('Claude CLI organization labels alone cannot join histories across backends or devices', async t => {
+  const { mapClaudeCliUsageToProvider } = require('../../src/shared/providers/claude/limits');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-cli-label-'));
+  const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => at(2, 12) });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const rows = [20, 50, 70].map((used, index) => ({ ...mapClaudeCliUsageToProvider(`Organization: Personal\nCurrent session\n${used}% used`, {
+    now: new Date(at(2, 10, index * 5)), updatedAt: new Date(at(2, 10, index * 5)).toISOString()
+  }), sourceDeviceId: index === 2 ? 'b' : 'a' }));
+  assert.ok(rows[0].accountKey && rows[0].accountName && !rows[0].accountEmail);
+  await store.record('local', { providers: [rows[0]] });
+  await store.record('hub', { providers: [rows[1]] });
+  await store.record('local', { providers: [rows[2]] });
+  for (const [index, row] of rows.entries()) {
+    const result = await store.query(index === 1 ? 'hub' : 'local', row);
+    assert.deepEqual(result.windows[0].points.map(p => p.value), [[20], [50], [70]][index]);
+  }
+  const context = {};
+  vmForIdentity(context);
+  for (const row of rows) assert.equal(context.TokenMonitorLimitsHistoryIdentity.historyRowKey(row), historyRowKey(row));
+});
+
+for (const crossDay of [false, true]) test(`recovered compressed conflicts retain uncertainty across buckets (cross day: ${crossDay})`, () => {
+  const { observationPoints, hourStart } = require('../../src/electron/renderer/limits/historyModel');
+  const start = crossDay ? at(1, 23, 55) : at(2, 9, 55);
+  const conflictAt = start + 70 * 60_000, recovery = conflictAt + 5 * 60_000;
+  const points = observationPoints([{ ...point(recovery, 20), uncertainUntil: conflictAt, breakAfter: true,
+    coverage: [[start, start, 1], [start + 300_000, start + 3600_000, 12], [start + 3900_000, recovery, 3]]
+      .map(([at, until, samples]) => ({ at, until, samples, hour: hourStart(at), maxGap: 300_000 })) }]);
+  const result = distribution(points, { grain: crossDay ? 'day' : 'hour', day: dayKey(recovery), now: recovery });
+  for (const bucket of result.buckets) {
+    const affected = bucket.at <= conflictAt && bucket.end > start;
+    assert.equal(bucket.uncertain, affected, bucket.key);
+  }
+  assert.equal(result.unallocated, 0);
+});
+
+test('adoption through another device retains the guarded owner identity for later live readings', async t => {
+  const { createHash } = require('node:crypto');
+  const { limitWindowKey } = require('../../src/shared/limits/usageItems');
+  const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-owner-alias-'));
+  const file = path.join(directory, 'history.sqlite');
+  const a = { ...provider(at(2, 10, 5), 21), sourceDeviceId: 'a', sourceDetail: 'Device A', source: 'api' };
+  const b = { ...a, updatedAt: new Date(at(2, 10)).toISOString(), sourceDeviceId: 'b', sourceDetail: 'Device B' };
+  const stream = hash(['local', historyAccountKey(a), limitWindowKey(a.windows[0]), 'pp']);
+  const account = hash(['local', historyAccountKey(a)]);
+  const oldSource = row => hash([row.sourceDeviceId, row.source, row.sourceDetail]);
+  const db = createHistoryDatabase(file);
+  db.record([action(at(2, 10), 20, { id: stream, account, source: oldSource(a), reset: at(8, 0) }),
+    action(at(2, 10), 30, { id: stream, account, source: oldSource(b), reset: at(8, 0) }),
+    action(at(2, 10, 5), 21, { id: stream, account, source: oldSource(a), reset: at(8, 0) })], at(2, 12));
+  db.close();
+  const store = createLimitsHistoryStore(file, { now: () => at(2, 12), legacyScopes: () => ['local'] });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  await store.query('local', b);
+  const live = { ...a, ...provider(at(2, 10, 10), 22) };
+  await store.record('local', { providers: [live] });
+  const result = await store.query('local', live);
+  assert.equal(result.windows[0].points.at(-1).value, 22);
+  assert.equal(result.windows[0].distribution.buckets.at(-1).value, 1);
+});

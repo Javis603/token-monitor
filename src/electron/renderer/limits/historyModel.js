@@ -84,8 +84,8 @@
       if (p.at > now) continue;
       const bucket = byKey.get(bucketKey(p.at, grain));
       if (p.conflictAt != null) {
-        const conflictBucket = byKey.get(bucketKey(p.conflictAt, grain));
-        if (conflictBucket) conflictBucket.uncertain = true;
+        buckets.filter(b => b.at <= p.conflictAt && (b.end > p.at || b.key === bucketKey(p.at, grain)))
+          .forEach(b => { b.uncertain = true; });
       }
       if (p.uncertainUntil !== null && p.uncertainUntil !== undefined) {
         buckets.filter(b => b.at <= p.uncertainUntil && b.end >= p.at).forEach(b => { b.uncertain = true; });

@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { createHash } = require('node:crypto');
 const { DatabaseSync } = require('node:sqlite');
 const { sameCycle, hourStart, dayKey, trendBounds, observationPoints, distribution } = require('../renderer/limits/historyModel');
 
@@ -341,7 +342,10 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
         const origins = new Map();
         const olderDays = new Map();
         function sourceFor(id, source) {
-          const alias = mapping.sources.find(entry => entry.id === id && entry.before === source);
+          const alias = mapping.sources.find(entry => entry.id === id && (entry.scope || entry.before === source));
+          // Compose backend provenance with the saved source hash, so every
+          // legacy owner maps to the same identity as its later live reading.
+          if (alias?.scope) return createHash('sha256').update(JSON.stringify([alias.scope, source])).digest('hex');
           return alias?.after || (id === mapping.id ? source : `${id}:${source}`);
         }
         for (const id of ids) {

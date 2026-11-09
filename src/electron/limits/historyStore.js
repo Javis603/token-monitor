@@ -60,11 +60,10 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
       for (const window of provider.windows || []) {
         for (const reading of [historyReadings(window).primary, historyReadings(window).raw].filter(Boolean)) {
           const scopes = [...new Set([scope, ...legacyScopes()])];
-          const sourceParts = [provider.sourceDeviceId || '', provider.source || '', provider.sourceDetail || ''];
           mappings.push({ id: windowId(scope, provider, window, reading), account: accountId(scope, provider),
             legacy: scopes.map(old => windowId(old, provider, window, reading, true)),
             sources: scopes.map(old => ({ id: windowId(old, provider, window, reading, true),
-              before: digest(sourceParts), after: digest([old, ...sourceParts]) })) });
+              scope: digest(old) })) });
         }
       }
     }
@@ -74,7 +73,8 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
     const actions = [];
     for (const provider of limits?.providers || []) {
       const account = accountId(scope, provider);
-      const source = digest([...(portableHistoryAccount(provider) ? [scope] : []), provider.sourceDeviceId || '', provider.source || '', provider.sourceDetail || '']);
+      const legacySource = digest([provider.sourceDeviceId || '', provider.source || '', provider.sourceDetail || '']);
+      const source = portableHistoryAccount(provider) ? digest([digest(scope), legacySource]) : legacySource;
       if (provider.status !== 'ok' || provider.stale) { actions.push({ account, source, failed: true }); continue; }
       const at = Date.parse(provider.updatedAt);
       if (!Number.isFinite(at)) continue;
