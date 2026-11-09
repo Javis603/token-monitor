@@ -91,7 +91,7 @@ test('latest model survives normalization, archives and exact deltas without sta
   assert.equal(period({ latestModel: {} }).sessions['codex:s'].latestModel, null);
   const archive = updateSessionUsageArchive(null, { today: fresh }, new Date(later)).archive;
   assert.equal(normalizeSessionUsageArchive(archive).sessions['codex:s'].periods.today.latestModel, 'newer');
-  const replay = applySessionUsageArchive({ today: period({ lastUsedAt: later }) }, archive, new Date(later));
+  const replay = applySessionUsageArchive({ today: period({ lastUsedAt: later }) }, archive, { now: new Date(later) });
   assert.equal(replay.today.sessions['codex:s'].latestModel, 'newer', 'same-observation read miss preserves saved model');
 });
 
@@ -119,4 +119,30 @@ test('Sessions and Dock groups use latest main continuation while summing child 
   assert.match(group.modelTooltipEntries.find(entry => entry[0]?.startsWith('newer'))[0], /Latest used/);
   const [dock] = recentSessionRows({ periods: { month: { sessions } } });
   assert.equal(sessionModelLabel(dock), 'newer +2');
+});
+
+
+test('nested tool configuration cannot replace the observed Codex model', t => {
+  const f = fixture(t, 'codex');
+  fs.writeFileSync(f.file, line({ type: 'turn_context', payload: { model: 'newer' } }));
+  assert.equal(f.read().latestModel, 'newer');
+  fs.appendFileSync(f.file, line({ type: 'response_item', payload: {
+    type: 'function_call', arguments: { type: 'turn_context', model: 'nested-tool-data' }
+  } }));
+  assert.equal(f.read().latestModel, 'newer');
+});
+
+test('a resumed newer native observation without model evidence cannot claim the archived model', () => {
+  const sessions = { 'codex:s': row({ archived: true, latestModel: 'older' }) };
+  const nativeSessions = { 'codex:s': { client: 'codex', sessionId: 's', native: true,
+    lastUsedAt: later, liveActivity: { state: 'running', observedAt: later } } };
+  const [resumed] = sessionRowsForPeriod({ sessions }, { nativeSessions, now: new Date(later) });
+  assert.equal(resumed.modelLabel, '2 models');
+  assert.equal(resumed.value, 100);
+});
+
+test('explicit provider model evidence does not require a wall-clock timestamp', () => {
+  const observed = period({ lastUsedAt: '', latestModel: 'newer' }).sessions['codex:s'];
+  assert.equal(sessionModelLabel(observed), 'newer +1');
+  assert.equal(sessionModelLabel(period({ lastUsedAt: '' }).sessions['codex:s']), '2 models');
 });
