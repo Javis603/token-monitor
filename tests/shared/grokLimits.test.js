@@ -1037,7 +1037,9 @@ for (const source of ['rpc', 'web']) {
 
   test(`Grok ${source} unknown and malformed identities retain isolated token keys`, async () => {
     const { hashKey } = require('../../src/shared/hashKey');
-    const tokens = ['opaque-token', 'a.invalid!.c', 'a.b.c', oidcToken(null), oidcToken([]),
+    const identity = oidcToken({ iss: 'https://auth.x.ai', sub: 'user-a' }).split('.').slice(1).join('.');
+    const malformedHeaders = ['a', ...[null, [], {}, { alg: null }, { alg: '' }, { alg: 'none' }].map(header => Buffer.from(JSON.stringify(header)).toString('base64url'))];
+    const tokens = [...malformedHeaders.map(header => `${header}.${identity}`), 'opaque-token', 'a.invalid!.c', 'a.b.c', oidcToken(null), oidcToken([]),
       ...[undefined, null, '', ' ', 12, {}, []].map(sub => oidcToken({ iss: 'https://auth.x.ai', sub })),
       ...[undefined, null, '', 'https://other.test', 12, {}].map(iss => oidcToken({ iss, sub: 'user-a' }))];
     for (const token of tokens) {

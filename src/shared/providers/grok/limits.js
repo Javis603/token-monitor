@@ -654,8 +654,11 @@ function grokAccountKey(credential) {
   const parts = credential.token.split('.');
   if (parts.length === 3 && parts.every(part => /^[A-Za-z0-9_-]+$/.test(part))) {
     try {
+      const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
       const claims = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
-      if (claims?.iss === 'https://auth.x.ai' && typeof claims.sub === 'string'
+      if (header && !Array.isArray(header) && typeof header.alg === 'string'
+        && header.alg.trim() && header.alg === header.alg.trim() && header.alg !== 'none'
+        && claims?.iss === 'https://auth.x.ai' && typeof claims.sub === 'string'
         && claims.sub.trim() && claims.sub === claims.sub.trim()) {
         return hashKey('grok', 'oidc', claims.iss, claims.sub);
       }
