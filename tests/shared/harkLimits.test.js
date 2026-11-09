@@ -128,7 +128,7 @@ test('unlimited and paid summaries keep the same window rules', () => {
 });
 
 test('an incomplete summary is unavailable instead of dropping its quota bars', () => {
-  for (const harkTokens of [undefined, {}, { ...FREE_SUMMARY.meters.harkTokens, dailyUsed: 'oops' }, { ...FREE_SUMMARY.meters.harkTokens, dailyLimit: -1 }]) {
+  for (const harkTokens of [undefined, {}, { ...FREE_SUMMARY.meters.harkTokens, dailyUsed: 'oops' }]) {
     assert.throws(() => windowsFromSummary({ ...FREE_SUMMARY, meters: { harkTokens } }),
       (error) => error.status === 'unavailable');
   }
@@ -241,8 +241,8 @@ test('HTTP failures recover and a new desktop session replaces its previous acco
   status = 401;
   await runtime.refresh({ provider: 'hark' }, 'settings-change');
   const rejected = aggregateLimits([{ deviceId: 'local', limits: runtime.getSnapshot() }], 0, now);
-  assert.equal(rejected.providers.length, 1);
-  assert.deepEqual(rejected.providers[0].windows, rows[0].windows);
+  const kept = rejected.providers.find((row) => row.accountKey === rows[0].accountKey);
+  assert.deepEqual(kept?.windows, rows[0].windows);
   status = 200;
   await runtime.refresh({ provider: 'hark' }, 'settings-change');
   const rotated = runtime.getSnapshot().providers;

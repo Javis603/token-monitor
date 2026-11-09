@@ -33,7 +33,7 @@ Credential forms use the shared save validation: a rejected draft is not persist
 
 Accept a bare better-auth token or a Cookie header containing `__Secure-hark.session_token`. The desktop store percent-encodes its signature; a pasted token may be encoded or decoded. Validation and account identity use the decoded value, while requests forward the accepted spelling unchanged. Only this cookie is sent through the injected provider transport.
 
-A missing desktop file or session cookie is `notConfigured`; an unreadable or malformed file is `unavailable`. HTTP 401/403 are `unauthorized`, and 429 is `sourceRateLimited`. Malformed summaries and other request failures are `unavailable`, retaining the last good reading through the shared runtime. A missing or negative Daily or Monthly ceiling makes the reading unavailable. An explicit zero ceiling omits that meter. A per-feature row without a positive ceiling is omitted and does not fail the rest of the summary. Invalid usage does not count as a successful reading. A rejected new session does not remove the previous account.
+A missing desktop file or session cookie is `notConfigured`; an unreadable or malformed file is `unavailable`. HTTP 401/403 are `unauthorized`, and 429 is `sourceRateLimited`. Malformed summaries and other request failures are `unavailable`, retaining the last good reading through the shared runtime. A missing Daily or Monthly ceiling makes the reading unavailable. A ceiling that is not positive omits that meter. A per-feature row without a positive ceiling is omitted and does not fail the rest of the summary. Invalid usage does not count as a successful reading. A rejected new session does not remove the previous account.
 
 ## Invariants and known gaps
 

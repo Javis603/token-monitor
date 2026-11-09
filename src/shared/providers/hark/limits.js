@@ -89,9 +89,7 @@ function windowsFromSummary(body) {
   const windows = [];
   const tokens = meters.harkTokens;
   if (plan.unlimited !== true) {
-    const dailyLimit = numberOrNull(tokens?.dailyLimit);
-    const poolLimit = numberOrNull(tokens?.poolLimit);
-    if (!tokens || dailyLimit === null || poolLimit === null || dailyLimit < 0 || poolLimit < 0) {
+    if (!tokens || numberOrNull(tokens.dailyLimit) === null || numberOrNull(tokens.poolLimit) === null) {
       throw errorWithStatus('unavailable', 'Hark billing summary changed');
     }
     const daily = tokenWindow('daily', 'Daily', tokens.dailyUsed, tokens.dailyLimit, tokens.dailyResetsAt);
@@ -166,7 +164,7 @@ async function fetchHarkLimits(options = {}, deps = {}) {
           Cookie: `${HARK_COOKIE_NAME}=${token}`,
           'User-Agent': BROWSER_USER_AGENT
         },
-        redirect: 'manual',
+        redirect: 'error',
         credentials: 'omit',
         signal
       });
@@ -184,13 +182,11 @@ async function fetchHarkLimits(options = {}, deps = {}) {
     });
   } catch (error) {
     const status = providerStatusFromError(error);
-    // A rejected new session is not a confirmed sign-out. A terminal 401 would
-    // outrank the retained reading with an empty card, so publish it as a miss.
-    const published = previous.length && status === 'unauthorized' ? 'unavailable' : status;
+    // An unconfirmed replacement must not outrank the retained session with an empty reading.
     provider = normalizeLimitProvider({
       ...base,
-      accountKey: previous.length && ['unavailable', 'sourceRateLimited'].includes(published) ? '' : base.accountKey,
-      status: published
+      accountKey: previous.length && ['unavailable', 'sourceRateLimited'].includes(status) ? '' : base.accountKey,
+      status
     });
   }
   // Hark exposes one selected session; omitted identities otherwise remain cached by the runtime.
