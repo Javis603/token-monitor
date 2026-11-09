@@ -4,15 +4,25 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
 const { limitWindowKey } = require('../../shared/limits/usageItems');
-const { historyAccountKey } = require('./historyIdentity');
+const { hashKey } = require('../../shared/hashKey');
+const { historyAccountKey, portableHistoryAccount: hasHistoryAccountIdentity } = require('./historyIdentity');
 const { dayKey, historyReadings } = require('../renderer/limits/historyModel');
 
 function historyWindow(window) {
   return historyReadings(window).primary;
 }
 function digest(value) { return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
-function accountId(scope, provider) { return digest([scope, historyAccountKey(provider)]); }
+function portableHistoryAccount(provider) {
+  // CLI can hash an organization label; that derived key is not an account.
+  const organizationOnly = provider.provider === 'claude' && provider.source === 'cli'
+    && !provider.accountEmail && provider.accountName
+    && provider.accountKey === hashKey('claude-cli', provider.accountName);
+  return hasHistoryAccountIdentity(provider) && !organizationOnly;
+}
+function historyScope(scope, provider) { return portableHistoryAccount(provider) ? 'account-v2' : scope; }
+function accountId(scope, provider) { return digest([historyScope(scope, provider), historyAccountKey(provider)]); }
 function windowId(scope, provider, window, reading) {
+  scope = historyScope(scope, provider);
   const identity = [scope, historyAccountKey(provider), limitWindowKey(window), reading.unit];
   if (['credits', 'spend'].includes(window.metric) && reading.unit === 'pp') identity.push(window.currency || 'credits');
   return digest(identity);
@@ -55,7 +65,7 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
     const actions = [];
     for (const provider of limits?.providers || []) {
       const account = accountId(scope, provider);
-      const source = digest([provider.sourceDeviceId || '', provider.source || '', provider.sourceDetail || '']);
+      const source = digest([...(portableHistoryAccount(provider) ? [scope] : []), provider.sourceDeviceId || '', provider.source || '', provider.sourceDetail || '']);
       if (provider.status !== 'ok' || provider.stale) { actions.push({ account, source, failed: true }); continue; }
       const at = Date.parse(provider.updatedAt);
       if (!Number.isFinite(at)) continue;
