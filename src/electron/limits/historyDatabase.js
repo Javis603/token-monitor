@@ -79,6 +79,11 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
         CREATE TABLE IF NOT EXISTS history_adoptions (
           legacy TEXT PRIMARY KEY, canonical TEXT NOT NULL
         ) WITHOUT ROWID;
+        CREATE TABLE IF NOT EXISTS history_pending_interruptions (
+          stream TEXT NOT NULL REFERENCES streams(id) ON DELETE CASCADE, source TEXT NOT NULL,
+          reason INTEGER NOT NULL, at INTEGER NOT NULL, day TEXT NOT NULL,
+          PRIMARY KEY(stream, source, reason)
+        ) WITHOUT ROWID;
         PRAGMA user_version = 1;`);
       return db;
     } catch (error) { db.close(); throw error; }
@@ -188,6 +193,7 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
       DELETE FROM streams WHERE NOT EXISTS (SELECT 1 FROM daily WHERE stream = streams.id)
       AND NOT EXISTS (SELECT 1 FROM runs WHERE stream = streams.id);`);
     database.prepare('DELETE FROM history_origins WHERE at < ?').run(retentionStart(now, 730));
+    database.prepare('DELETE FROM history_pending_interruptions WHERE at < ?').run(retentionStart(now, 730));
     database.prepare('DELETE FROM history_run_sources WHERE last_at < ?').run(detailStart);
     database.prepare(`DELETE FROM streams WHERE NOT EXISTS (SELECT 1 FROM daily WHERE stream = streams.id)
       AND NOT EXISTS (SELECT 1 FROM runs WHERE stream = streams.id AND until >= ?)`).run(retentionStart(now, 730));
@@ -322,11 +328,36 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
         }
       }
   }
+  // Window IDs cannot be recovered from an account hash alone. Keep only the
+  // first interruption of each kind for unadopted streams until a quota returns.
+  // Replay it with the readings, so a later shared owner can supersede it.
+  function rememberInterruptions(actions, mappings, now) {
+    for (const action of actions) {
+      if (!action.legacy) continue;
+      const at = action.failed ? now : action.snapshotAt;
+      if (at < retentionStart(now, 730) || at > now + 60_000) continue;
+      for (const tail of failAccount.all(action.legacy.account, action.legacy.source)) {
+        if (sql('SELECT 1 FROM history_adoptions WHERE legacy = ?').get(tail.stream)) continue;
+        const mapping = mappings.find(entry => entry.legacy.includes(tail.stream));
+        const window = mapping && action.windows?.find(entry => entry.id === mapping.id);
+        if (window && !window.point.missing) continue;
+        const origin = originFor.get(tail.stream, action.legacy.source);
+        if (!action.failed && (at <= tail.until || origin && at <= origin.at)) continue;
+        const reason = action.failed ? 0 : window ? BREAK_ALLOWANCE_MISSING : BREAK_INTERRUPTED;
+        sql(`INSERT INTO history_pending_interruptions VALUES (?, ?, ?, ?, ?)
+          ON CONFLICT(stream, source, reason) DO NOTHING`)
+          .run(tail.stream, action.legacy.source, reason, at, dayKey(at));
+      }
+    }
+  }
   function record(actions, now, mappings = []) {
     let adoptionFailed = false;
     try { adopt(mappings, now); }
     catch { adoptionFailed = true; } // The adoption transaction reports and rolls back the error.
-    transaction(() => recordActions(actions, now), now);
+    transaction(() => {
+      recordActions(actions, now);
+      rememberInterruptions(actions, mappings, now);
+    }, now);
     saveFailed = adoptionFailed;
     return { persistent: persistent && !saveFailed };
   }
@@ -391,6 +422,10 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
               events.at(-1).failed = !!head.failed;
             }
           }
+          for (const interruption of sql('SELECT * FROM history_pending_interruptions WHERE stream = ?').all(id)) {
+            events.push({ stream: id, source: sourceFor(id, interruption.source), interruption: interruption.reason,
+              point: { at: interruption.at, collectedDay: interruption.day } });
+          }
           // Detail retention cannot reconstruct older daily accounting. Keep
           // disjoint summaries; overlapping legacy summaries remain unknown.
           for (const row of dailyRows) {
@@ -417,6 +452,18 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
             if (span.until >= event.point.at) active.push(span);
           }
           const head = headFor.get(mapping.id);
+          if (event.interruption !== undefined) {
+            const tail = latest.get(mapping.id);
+            if (head?.source !== event.source || !tail) continue;
+            if (event.interruption === 0) breakRun.run(tail.id);
+            else {
+              if (event.point.at <= tail.until) continue;
+              noteOrigin.run(mapping.id, event.source, event.point.at);
+              interrupt(mapping.id, tail, event.point, now, event.interruption);
+            }
+            markFailed.run(mapping.id);
+            continue;
+          }
           // Compressed coverage proves the owner's unchanged reading across
           // this time, without inventing its intermediate observation times.
           // Detect a competing disagreement before it can become a delta.
@@ -444,7 +491,10 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(mapping.id, row.day, row.value, row.observations,
           row.uncertain, row.unallocated, row.resets, row.first_at, row.last_at, row.first_value, row.last_value);
         for (const day of uncertainDays) dailyUnknown.run(mapping.id, day);
-        for (const id of mapping.legacy) sql('INSERT INTO history_adoptions VALUES (?, ?)').run(id, mapping.id);
+        for (const id of mapping.legacy) {
+          sql('INSERT INTO history_adoptions VALUES (?, ?)').run(id, mapping.id);
+          sql('DELETE FROM history_pending_interruptions WHERE stream = ?').run(id);
+        }
       }
     }, now);
   }

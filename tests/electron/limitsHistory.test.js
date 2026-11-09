@@ -2520,3 +2520,113 @@ test('a first raw-only snapshot adopts the legacy percent stream before marking 
     assert.equal(entry.distribution.unallocated, 0);
   }
 });
+
+for (const mode of ['empty', 'omitted', 'failed', 'inactive', 'empty-then-failed', 'failed-then-empty']) test(`lazy adoption retains the first ${mode} account snapshot`, async t => {
+  const { createHash } = require('node:crypto');
+  const { limitWindowKey } = require('../../src/shared/limits/usageItems');
+  const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-adopt-account-snapshot-'));
+  const file = path.join(directory, 'history.sqlite');
+  const row = (minute, used) => ({ ...provider(at(2, 10, minute), used), sourceDeviceId: 'a', source: 'api' });
+  const original = row(0, 20);
+  const secondary = { kind: 'session', label: 'Session', usedPercent: 40, remainingPercent: 60, resetsAt: new Date(at(2, 15)).toISOString() };
+  if (mode === 'omitted') original.windows.push(secondary);
+  const db = createHistoryDatabase(file);
+  db.record([{ account: hash(['local', historyAccountKey(original)]), source: hash(['a', 'api', '']),
+    windows: original.windows.map(window => ({ id: hash(['local', historyAccountKey(original), limitWindowKey(window), 'pp']),
+      point: { at: at(2, 10), ...historyReadings(window).primary, reset: Date.parse(window.resetsAt), interval: 300_000 } })) }], at(2, 12));
+  db.close();
+  const originals = () => {
+    const inspect = new DatabaseSync(file);
+    const oldStreams = 'SELECT id FROM streams WHERE account = ?';
+    const oldRuns = `SELECT id FROM runs WHERE stream IN (${oldStreams})`;
+    try {
+      return [
+        ['streams', `id IN (${oldStreams})`], ['runs', `stream IN (${oldStreams})`],
+        ['coverage', `run IN (${oldRuns})`], ['daily', `stream IN (${oldStreams})`],
+        ['history_origins', `stream IN (${oldStreams})`], ['history_run_sources', `run IN (${oldRuns})`]
+      ].map(([table, where]) => inspect.prepare(`SELECT * FROM ${table} WHERE ${where} ORDER BY 1, 2`)
+        .all(hash(['local', historyAccountKey(original)])));
+    } finally { inspect.close(); }
+  };
+  const before = originals();
+  let clock = at(2, 10, 5);
+  const options = { now: () => clock, legacyScopes: () => ['local'] };
+  let store = createLimitsHistoryStore(file, options);
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  await store.record('local', { providers: [{ ...row(5, 20), status: mode === 'failed' || mode === 'failed-then-empty' ? 'error' : 'ok',
+    sourceDeviceId: mode === 'inactive' ? 'b' : 'a',
+    windows: mode === 'omitted' ? [{ ...secondary, usedPercent: 41, remainingPercent: 59 }] : [] }] });
+  if (mode.includes('-then-')) {
+    clock = at(2, 10, 7);
+    await store.record('local', { providers: [{ ...row(7, 20), status: mode === 'empty-then-failed' ? 'error' : 'ok', windows: [] }] });
+  }
+  assert.deepEqual(originals(), before, 'saving an interruption preserves original history rows');
+  await store.close();
+  store = createLimitsHistoryStore(file, options);
+  clock = at(2, 12);
+  const restored = row(10, 25);
+  if (mode === 'omitted') restored.windows.push({ ...secondary, usedPercent: 42, remainingPercent: 58 });
+  await store.record('local', { providers: [restored] });
+  const history = await store.query('local', restored);
+  const entry = history.windows.find(w => w.window.kind === 'weekly');
+  const bucket = entry.distribution.buckets.at(-1), confirmed = mode === 'empty' || mode === 'omitted' || mode.includes('-then-');
+  assert.equal(bucket.value, confirmed ? null : 5);
+  assert.equal(bucket.uncertain, mode !== 'inactive');
+  assert.equal(entry.distribution.unallocated, confirmed ? 5 : 0);
+  assert.equal(segments(entry.points).length, confirmed ? 2 : 1);
+  if (mode === 'omitted') {
+    const other = history.windows.find(w => w.window.kind === 'session').distribution;
+    assert.equal(other.buckets.at(-1).value, 2);
+    assert.equal(other.buckets.at(-1).uncertain, false);
+  }
+});
+
+test('a healthy replacement in the same batch is not interrupted by an inactive legacy observer', async t => {
+  const { createHash } = require('node:crypto');
+  const { limitWindowKey } = require('../../src/shared/limits/usageItems');
+  const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-adopt-batch-owner-'));
+  const file = path.join(directory, 'history.sqlite');
+  const row = (device, minute, value) => ({ ...provider(at(2, 10, minute), value), sourceDeviceId: device, source: 'api' });
+  const original = row('a', 0, 20), window = original.windows[0];
+  const db = createHistoryDatabase(file);
+  db.record([{ account: hash(['local', historyAccountKey(original)]), source: hash(['a', 'api', '']),
+    windows: [{ id: hash(['local', historyAccountKey(original), limitWindowKey(window), 'pp']),
+      point: { at: at(2, 10), ...historyReadings(window).primary, reset: Date.parse(window.resetsAt), interval: 300_000 } }] }], at(2, 12));
+  db.close();
+  const store = createLimitsHistoryStore(file, { now: () => at(2, 12) });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const active = row('b', 5, 25);
+  await store.record('local', { providers: [active, { ...row('a', 5, 20), status: 'error', windows: [] }] });
+  const entry = (await store.query('local', active)).windows[0];
+  assert.equal(entry.distribution.buckets.at(-1).value, 5);
+  assert.equal(entry.distribution.buckets.at(-1).uncertain, false);
+  assert.equal(entry.distribution.unallocated, 0);
+});
+
+test('a saved omission from an inactive backend cannot interrupt a healthy shared owner during later adoption', async t => {
+  const { createHash } = require('node:crypto');
+  const { limitWindowKey } = require('../../src/shared/limits/usageItems');
+  const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-adopt-inactive-backend-'));
+  const file = path.join(directory, 'history.sqlite');
+  const row = (device, minute, value) => ({ ...provider(at(2, 10, minute), value), sourceDeviceId: device, source: 'api' });
+  const a = row('a', 0, 20), b = row('b', 4, 25), window = a.windows[0];
+  const id = scope => hash([scope, historyAccountKey(a), limitWindowKey(window), 'pp']);
+  const db = createHistoryDatabase(file);
+  db.record([{ account: hash(['hub-a', historyAccountKey(a)]), source: hash(['a', 'api', '']),
+    windows: [{ id: id('hub-a'), point: { at: at(2, 10), ...historyReadings(window).primary, reset: Date.parse(window.resetsAt), interval: 300_000 } }] },
+  { account: hash(['account-v2', historyAccountKey(b)]), source: hash([hash('hub-b'), hash(['b', 'api', ''])]),
+    windows: [{ id: id('account-v2'), point: { at: at(2, 10, 4), ...historyReadings(b.windows[0]).primary, reset: Date.parse(window.resetsAt), interval: 300_000 } }] }], at(2, 12));
+  db.close();
+  const store = createLimitsHistoryStore(file, { now: () => at(2, 12), legacyScopes: () => ['hub-a', 'hub-b'] });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  await store.record('hub-a', { providers: [{ ...row('a', 5, 20), windows: [] }] });
+  const restored = row('a', 10, 26);
+  await store.record('hub-a', { providers: [restored] });
+  const entry = (await store.query('hub-a', restored)).windows[0];
+  assert.equal(entry.distribution.buckets.at(-1).value, 6);
+  assert.equal(entry.distribution.buckets.at(-1).uncertain, false);
+  assert.equal(entry.distribution.unallocated, 0);
+});
