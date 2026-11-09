@@ -1281,6 +1281,129 @@ test('extractUsageFromTokscale maps Cursor `default` to cursor-auto without touc
   assert.equal(period.models.default, 11);
 });
 
+test('extractUsageFromTokscale reports CC Switch aggregation routes under the physical model', () => {
+  // CC Switch's aggregation (Stack) mode routes Codex with `ccs-<key>/<model>`
+  // and Codex records the configured id in its rollout, so the routing
+  // namespace reaches the ledger as if it were part of the model's name. The
+  // physical model is what follows the namespace: one model, one row.
+  const period = extractUsageFromTokscale({
+    groupBy: 'client,session,model',
+    entries: [
+      { client: 'codex', sessionId: 'routed', model: 'ccs-gemini/gemini-3.8-flash-high', provider: 'custom', input: 5, output: 2, cost: 0.01 },
+      { client: 'codex', sessionId: 'direct', model: 'gemini-3.8-flash-high', provider: 'custom', input: 3, output: 1, cost: 0.02 }
+    ]
+  });
+
+  assert.equal(period.models['gemini-3.8-flash-high'], 11);
+  assert.equal(period.models['ccs-gemini/gemini-3.8-flash-high'], undefined);
+  assert.equal(period.clientModels.codex['gemini-3.8-flash-high'], 11);
+  assert.equal(period.modelCosts['gemini-3.8-flash-high'], 0.03);
+  assert.equal(period.sessions['codex:routed'].models['gemini-3.8-flash-high'], 7);
+  assert.equal(period.sessions['codex:direct'].models['gemini-3.8-flash-high'], 4);
+});
+
+test('a Codex session reports the physical model it ran on, not the route it took', () => {
+  // The session's own transcript records the configured id, so the model a
+  // session reports is the routing id too.
+  const period = normalizePeriod({ sessions: {
+    'codex:rollout-1': {
+      client: 'codex',
+      sessionId: 'rollout-1',
+      totalTokens: 10,
+      latestModel: 'ccs-gemini/gemini-3.8-flash-high'
+    }
+  } });
+
+  assert.equal(period.sessions['codex:rollout-1'].latestModel, 'gemini-3.8-flash-high');
+});
+
+test('normalizePeriod reconciles old CC Switch route-shaped global models using Codex attribution', () => {
+  // A period stored before the routing fold keeps the route-shaped key in its
+  // global maps, while the client-scoped rows fold onto the physical model.
+  // Both have to land on the same model, or the aggregate splits one model
+  // across two keys.
+  const old = {
+    totalTokens: 120,
+    clients: { codex: 100, claude: 20 },
+    models: { 'ccs-gemini/gemini-3.8-flash-high': 100, 'gemini-3.8-flash-high': 20 },
+    modelCosts: { 'ccs-gemini/gemini-3.8-flash-high': 1, 'gemini-3.8-flash-high': 0.2 },
+    modelCacheReads: { 'ccs-gemini/gemini-3.8-flash-high': 40 },
+    modelOutputs: { 'ccs-gemini/gemini-3.8-flash-high': 60 },
+    clientModels: {
+      codex: { 'ccs-gemini/gemini-3.8-flash-high': 100 },
+      claude: { 'gemini-3.8-flash-high': 20 }
+    },
+    clientModelCosts: { codex: { 'ccs-gemini/gemini-3.8-flash-high': 1 } }
+  };
+  const mixed = normalizePeriod(old);
+
+  assert.equal(mixed.models['gemini-3.8-flash-high'], 120);
+  assert.equal(mixed.models['ccs-gemini/gemini-3.8-flash-high'], undefined);
+  assert.equal(mixed.modelCosts['gemini-3.8-flash-high'], 1.2);
+  assert.equal(mixed.modelCosts['ccs-gemini/gemini-3.8-flash-high'], undefined);
+  assert.equal(mixed.modelCacheReads['gemini-3.8-flash-high'], 40);
+  assert.equal(mixed.modelOutputs['gemini-3.8-flash-high'], 60);
+  assert.equal(mixed.clientModels.codex['gemini-3.8-flash-high'], 100);
+  assert.equal(mixed.clientModels.claude['gemini-3.8-flash-high'], 20);
+  assert.deepEqual(normalizePeriod(mixed), mixed);
+});
+
+test('a float remainder does not leave the route-shaped cost row behind', () => {
+  // The global cost bucket and the client-scoped sum are accumulated
+  // separately, so the remainder after the move can differ from zero by float
+  // error. The route-shaped key must still be dropped.
+  const period = normalizePeriod({
+    totalTokens: 10,
+    clients: { codex: 10 },
+    modelCosts: { 'ccs-gemini/gemini-3.8-flash-high': 0.30000000000000004 },
+    clientModelCosts: { codex: { 'ccs-gemini/gemini-3.8-flash-high': 0.3 } }
+  });
+
+  assert.equal(period.modelCosts['ccs-gemini/gemini-3.8-flash-high'], undefined);
+  assert.equal(period.modelCosts['gemini-3.8-flash-high'], 0.3);
+});
+
+test('normalizePeriod keeps another client’s share of a route-shaped key in place', () => {
+  // Only Codex's share moves; usage under the same key from another client
+  // stays where it is, and the cache/output split is not invented for it.
+  const shared = normalizePeriod({
+    totalTokens: 100,
+    clients: { codex: 60, claude: 40 },
+    models: { 'ccs-gemini/gemini-3.8-flash-high': 100 },
+    modelCacheReads: { 'ccs-gemini/gemini-3.8-flash-high': 30 },
+    clientModels: {
+      codex: { 'ccs-gemini/gemini-3.8-flash-high': 60 },
+      claude: { 'ccs-gemini/gemini-3.8-flash-high': 40 }
+    }
+  });
+
+  assert.equal(shared.models['gemini-3.8-flash-high'], 60);
+  assert.equal(shared.models['ccs-gemini/gemini-3.8-flash-high'], 40);
+  assert.equal(shared.modelCacheReads['gemini-3.8-flash-high'], undefined);
+  assert.equal(shared.modelUnclassifiedTokens['gemini-3.8-flash-high'], 60);
+  assert.equal(shared.capabilities.tokenComponents, false);
+});
+
+test('a CC Switch routing namespace folds only for the client that logs it', () => {
+  // The namespace is CC Switch's, but the ledger that carries it is Codex's:
+  // another client reporting the same spelling keeps its own identity, and a
+  // vendor prefix — which names the supply channel, and therefore the bill —
+  // is never folded.
+  const period = extractUsageFromTokscale({
+    groupBy: 'client,session,model',
+    entries: [
+      { client: 'claude', sessionId: 'other', model: 'ccs-gemini/gemini-3.8-flash-high', provider: 'custom', input: 1, output: 1, cost: 0.01 },
+      { client: 'codex', sessionId: 'vendor', model: 'moonshotai/kimi-k2', provider: 'custom', input: 2, output: 1, cost: 0.02 },
+      { client: 'codex', sessionId: 'plain', model: 'kimi-k2', provider: 'custom', input: 4, output: 1, cost: 0.03 }
+    ]
+  });
+
+  assert.equal(period.models['ccs-gemini/gemini-3.8-flash-high'], 2);
+  assert.equal(period.models['moonshotai/kimi-k2'], 3);
+  assert.equal(period.models['kimi-k2'], 5);
+  assert.equal(period.models['gemini-3.8-flash-high'], undefined);
+});
+
 test('normalizePeriod reconciles old Cursor default global models using client attribution', () => {
   const old = {
     totalTokens: 10,

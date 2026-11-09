@@ -33,6 +33,7 @@ const {
   mergePeriods,
   normalizeClientName,
   normalizePeriod,
+  periodHasCcSwitchRouteModel,
   UNATTRIBUTED_USAGE_CLIENT
 } = require('./usage');
 const { collectWslUsage: collectWslUsageImpl, emptyWslBundle, probeWslState: probeWslStateImpl } = require('./wslUsage');
@@ -1077,8 +1078,16 @@ async function collectUsageOnce(options) {
           }
         }
       }
-      month = applyPeriodDelta(anchor.month, today, anchor.today);
-      allTime = applyPeriodDelta(anchor.allTime, today, anchor.today);
+      // An anchor written before the CC Switch route fold keeps the route-shaped
+      // model key in its broad-period model maps, while the fresh Today scan
+      // already uses the physical key. Applying the delta to the stored periods
+      // as they are would leave the route behind and split one model across two
+      // keys, so the stored periods are normalized first: the route folds onto
+      // the physical model before the delta is applied. For an anchor written
+      // by a build that already folds, this is a no-op.
+      const anchorToday = migrateAnchorPeriod(anchor.today, options.projectsEnabled);
+      month = applyPeriodDelta(migrateAnchorPeriod(anchor.month, options.projectsEnabled), today, anchorToday);
+      allTime = applyPeriodDelta(migrateAnchorPeriod(anchor.allTime, options.projectsEnabled), today, anchorToday);
     } else if (normalizedClients) {
       // Serial on purpose: concurrent scans triple the peak CPU/IO load, which
       // is what let the issue #15 self-trigger loop spike tokscale past 500% CPU.
@@ -2355,6 +2364,32 @@ function qoderCnProjectsDirForClients(clientsCsv, options = {}) {
 // the moment it was written, or null when that moment cannot be trusted: the
 // collector still reuses the periods then and simply forces a full scan, while
 // a seed has nothing to stand on and declines.
+// An anchor written before the CC Switch route fold keeps the route-shaped
+// model key in its broad-period model maps, while a fresh Today scan already
+// uses the physical key. Applying that delta to the stored periods would leave
+// the route behind and split one model across two keys, so the stored period
+// is normalized on the way in: the route folds onto the physical model before
+// the delta is applied.
+//
+// Normalizing walks every retained session, and a watch tick runs every few
+// seconds, so the migrated copy is computed once per stored period and reused.
+// A period that no longer carries a route key is returned untouched: the delta
+// then works on the stored period exactly as it did before.
+const migratedAnchorPeriods = new WeakMap();
+
+function migrateAnchorPeriod(period, projectsEnabled) {
+  if (!period || typeof period !== 'object') return period;
+  const cached = migratedAnchorPeriods.get(period);
+  if (cached) return cached;
+  if (!periodHasCcSwitchRouteModel(period)) {
+    migratedAnchorPeriods.set(period, period);
+    return period;
+  }
+  const migrated = normalizePeriod(period, { projectsEnabled: projectsEnabled !== false });
+  migratedAnchorPeriods.set(period, migrated);
+  return migrated;
+}
+
 function collectorAnchorTrust(saved, options = {}) {
   const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, now = new Date() } = options;
   if (!saved || saved.dateKey !== localTodayKey(now)) return null;
@@ -3910,6 +3945,7 @@ module.exports = {
   clientWatchCandidates,
   computePeriodWindows,
   collectorAnchorTrust,
+  migrateAnchorPeriod,
   pricingFingerprint,
   configFingerprint,
   qoderCnDbPathForClients,

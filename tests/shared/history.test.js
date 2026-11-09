@@ -163,6 +163,24 @@ test('Cursor Auto and default graph rows share one model without renaming other 
   assert.equal(day.tokens, 21);
 });
 
+test('CC Switch aggregation routes share one graph model with the model they route to', () => {
+  // The graph reads the same client ledger as the live periods, so a Codex
+  // rollout recorded under CC Switch's routing id has to land on the physical
+  // model there too — otherwise the trend keeps two rows for one model.
+  const rows = [
+    { client: 'codex', modelId: 'ccs-gemini/gemini-3.8-flash-high', tokens: { input: 8 }, cost: 0.02 },
+    { client: 'codex', modelId: 'gemini-3.8-flash-high', tokens: { input: 2 }, cost: 0.01 },
+    { client: 'claude', modelId: 'ccs-gemini/gemini-3.8-flash-high', tokens: { input: 4 }, cost: 0.03 }
+  ];
+  const graph = { contributions: [{ date: '2026-09-27', clients: rows }] };
+  const day = normalizeHistory(parseGraphResult(graph), { todayKey: '2026-09-28' }).daily[0];
+
+  assert.equal(day.perModel['gemini-3.8-flash-high'].tokens, 10);
+  assert.equal(day.perModel['gemini-3.8-flash-high'].cost, 0.03);
+  assert.equal(day.perModel['ccs-gemini/gemini-3.8-flash-high'].tokens, 4);
+  assert.equal(day.tokens, 14);
+});
+
 test('Cursor graph summary retains exact components after default is renamed', () => {
   const row = {
     date: '2026-09-27',
