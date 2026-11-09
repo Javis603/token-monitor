@@ -2411,83 +2411,52 @@ test('adoption through another device retains the guarded owner identity for lat
   assert.equal(result.windows[0].distribution.buckets.at(-1).value, 1);
 });
 
-for (const withLegacy of [false, true]) test(`existing account-v2 owner survives a source-encoding upgrade (legacy: ${withLegacy})`, async t => {
-  const { createHash } = require('node:crypto');
-  const { limitWindowKey } = require('../../src/shared/limits/usageItems');
-  const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-canonical-upgrade-'));
-  const file = path.join(directory, 'history.sqlite');
-  const a = { ...provider(at(2, 10, 10), 22), sourceDeviceId: 'a', source: 'api', sourceDetail: 'Device A' };
-  const b = { ...a, sourceDeviceId: 'b', sourceDetail: 'Device B' };
-  const id = scope => hash([scope, historyAccountKey(a), limitWindowKey(a.windows[0]), 'pp']);
-  const account = hash(['account-v2', historyAccountKey(a)]);
-  const originalSource = row => hash(['local', row.sourceDeviceId, row.source, row.sourceDetail]);
-  const db = createHistoryDatabase(file);
-  db.record([action(at(2, 10), 20, { id: id('account-v2'), account, source: originalSource(a), reset: at(8, 0) }),
-    action(at(2, 10), 30, { id: id('account-v2'), account, source: originalSource(b), reset: at(8, 0) }),
-    action(at(2, 10, 5), 21, { id: id('account-v2'), account, source: originalSource(a), reset: at(8, 0) })], at(2, 12));
-  if (withLegacy) db.record([action(at(2, 9, 55), 20, { id: id('hub-a'), source: 'old-hub', reset: at(8, 0) })], at(2, 12));
-  db.close();
-  const options = { now: () => at(2, 12), legacyScopes: () => ['hub-a'] };
-  let store = createLimitsHistoryStore(file, options);
-  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
-  await store.record('local', { providers: [a] });
-  assert.equal((await store.query('local', a)).windows[0].points.at(-1).value, 22);
-  await store.close();
-  store = createLimitsHistoryStore(file, options);
-  await store.record('local', { providers: [{ ...a, ...provider(at(2, 10, 15), 23) }] });
-  assert.equal((await store.query('hub-a', a)).windows[0].points.at(-1).value, 23);
+for (const interruption of ['missing', 'conflict']) test(`adoption retains daily uncertainty after a saved ${interruption}`, t => {
+  const db = adoptionDatabase(t);
+  const clock = at(2, 12);
+  db.record([action(at(2, 10), 20, { source: 'a' }), action(at(2, 10, 5), 25, { source: 'a' }),
+    interruption === 'missing' ? { account: accountA, source: 'a', snapshotAt: at(2, 10, 10), windows: [] }
+      : action(at(2, 10, 5), 40, { source: 'b' })], clock);
+  const view = id => db.query([{ id, key: 'weekly', window: { kind: 'weekly' } }], { grain: 'day', day: dayKey(clock) }, clock).windows[0].distribution;
+  const before = view(streamA);
+  assert.equal(before.buckets.at(-1).value, 5);
+  assert.equal(before.buckets.at(-1).uncertain, true);
+  db.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA] }], clock);
+  assert.deepEqual(view(adoptedStream).buckets.map(b => [b.key, b.value, b.uncertain]), before.buckets.map(b => [b.key, b.value, b.uncertain]));
 });
 
-test('upgrading account-v2 source identities retains empty-snapshot watermarks', async t => {
-  const { createHash } = require('node:crypto');
-  const { limitWindowKey } = require('../../src/shared/limits/usageItems');
-  const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-upgrade-watermark-'));
-  const file = path.join(directory, 'history.sqlite');
-  const row = { ...provider(at(2, 10, 5), 25), sourceDeviceId: 'a', source: 'api' };
-  const account = hash(['account-v2', historyAccountKey(row)]);
-  const stream = hash(['account-v2', historyAccountKey(row), limitWindowKey(row.windows[0]), 'pp']);
-  const before = hash(['local', 'a', 'api', '']);
-  const db = createHistoryDatabase(file);
-  db.record([action(at(2, 10), 20, { id: stream, account, source: before, reset: at(8, 0) }),
-    { account, source: before, snapshotAt: at(2, 10, 10), windows: [] }], at(2, 12));
-  db.close();
-  const store = createLimitsHistoryStore(file, { now: () => at(2, 12) });
-  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
-  await store.record('local', { providers: [row] });
-  assert.deepEqual((await store.query('local', row)).windows[0].points.map(p => p.value), [20]);
-  await store.record('local', { providers: [{ ...row, ...provider(at(2, 10, 15), 26) }] });
-  assert.deepEqual((await store.query('local', row)).windows[0].points.map(p => p.value), [20, 26]);
-  await store.close();
-  const inspect = new DatabaseSync(file, { readOnly: true });
-  try {
-    assert.equal(inspect.prepare('SELECT count(*) AS n FROM history_origins WHERE stream = ? AND source = ?').get(stream, before).n, 0);
-    assert.equal(inspect.prepare('SELECT count(*) AS n FROM history_run_sources WHERE source = ?').get(before).n, 0);
-    assert.equal(inspect.prepare('PRAGMA integrity_check').get().integrity_check, 'ok');
-  } finally { inspect.close(); }
-});
+for (const canonical of [false, true]) for (const timezone of ['America/Los_Angeles', 'Asia/Hong_Kong']) {
+  test(`adoption preserves collection dates after moving to ${timezone} (canonical: ${canonical})`, t => {
+    const previous = process.env.TZ;
+    t.after(() => { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; });
+    process.env.TZ = 'UTC';
+    const db = adoptionDatabase(t), clock = Date.UTC(2026, 10, 3, 12);
+    const first = timezone === 'America/Los_Angeles' ? Date.UTC(2026, 10, 2, 0, 5) : Date.UTC(2026, 10, 2, 23, 5);
+    for (const id of canonical ? [streamA, adoptedStream] : [streamA]) {
+      db.record([action(first, 20, { id, source: id }), action(first + 300_000, 25, { id, source: id })], clock);
+    }
+    const read = id => db.query([{ id, key: 'weekly', window: { kind: 'weekly' } }], { grain: 'day', day: '2026-11-03' }, clock).windows[0].distribution;
+    const before = read(streamA);
+    assert.equal(before.buckets.find(b => b.key === '2026-11-02').value, 5);
+    process.env.TZ = timezone;
+    db.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA] }], clock);
+    assert.deepEqual(read(adoptedStream).buckets.map(b => [b.key, b.value]), before.buckets.map(b => [b.key, b.value]));
+  });
+}
 
-for (const status of ['error', 'ok']) test(`account-v2 source upgrade handles an initial ${status} snapshot without windows`, async t => {
-  const { createHash } = require('node:crypto');
-  const { limitWindowKey } = require('../../src/shared/limits/usageItems');
-  const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-upgrade-empty-'));
-  const file = path.join(directory, 'history.sqlite');
-  const row = { ...provider(at(2, 10, 10), 20), sourceDeviceId: 'a', source: 'api' };
-  const account = hash(['account-v2', historyAccountKey(row)]);
-  const stream = hash(['account-v2', historyAccountKey(row), limitWindowKey(row.windows[0]), 'pp']);
-  const db = createHistoryDatabase(file);
-  db.record([action(at(2, 10), 20, { id: stream, account, source: hash(['local', 'a', 'api', '']), reset: at(8, 0) })], at(2, 12));
-  db.close();
-  const store = createLimitsHistoryStore(file, { now: () => at(2, 12) });
-  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
-  await store.record('local', { providers: [{ ...row, status, windows: [] }] });
-  const inspect = new DatabaseSync(file, { readOnly: true });
-  try {
-    const head = inspect.prepare('SELECT source, failed FROM streams WHERE id = ?').get(stream);
-    assert.equal(head.failed, 1);
-    const origin = inspect.prepare('SELECT at FROM history_origins WHERE stream = ? AND source = ?').get(stream, head.source);
-    assert.equal(origin.at, at(2, 10, status === 'ok' ? 10 : 0));
-  } finally { inspect.close(); }
+test('adoption keeps collection dates when interruption created the daily row before its first reading', t => {
+  const previous = process.env.TZ;
+  t.after(() => { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; });
+  process.env.TZ = 'UTC';
+  const db = adoptionDatabase(t), clock = Date.UTC(2026, 10, 3, 12);
+  const first = Date.UTC(2026, 10, 1, 23, 55);
+  db.record([action(first, 20, { source: 'a' }),
+    { account: accountA, source: 'a', snapshotAt: first + 300_000, windows: [] },
+    action(first + 600_000, 25, { source: 'a' }), action(first + 900_000, 30, { source: 'a' })], clock);
+  const read = id => db.query([{ id, key: 'weekly', window: { kind: 'weekly' } }], { grain: 'day', day: '2026-11-03' }, clock).windows[0].distribution;
+  const before = read(streamA);
+  assert.equal(before.buckets.find(b => b.key === '2026-11-02').value, 5);
+  process.env.TZ = 'America/Los_Angeles';
+  db.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA] }], clock);
+  assert.deepEqual(read(adoptedStream).buckets.map(b => [b.key, b.value, b.uncertain]), before.buckets.map(b => [b.key, b.value, b.uncertain]));
 });

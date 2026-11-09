@@ -65,18 +65,13 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
     const mappings = [];
     for (const provider of providers) {
       if (!portableHistoryAccount(provider)) continue;
-      const details = [provider.sourceDeviceId || '', provider.source || '', provider.sourceDetail || ''];
-      const legacySource = digest(details);
       for (const window of provider.windows || []) {
         for (const reading of [historyReadings(window).primary, historyReadings(window).raw].filter(Boolean)) {
           const scopes = [...new Set([scope, ...legacyScopes()])];
           mappings.push({ id: windowId(scope, provider, window, reading), account: accountId(scope, provider),
             legacy: scopes.map(old => windowId(old, provider, window, reading, true)),
-            sources: scopes.flatMap(old => [
-              { id: windowId(old, provider, window, reading, true), scope: digest(old) },
-              { id: windowId(scope, provider, window, reading), before: digest([old, ...details]),
-                after: digest([digest(old), legacySource]) }
-            ]) });
+            sources: scopes.map(old => ({ id: windowId(old, provider, window, reading, true),
+              scope: digest(old) })) });
         }
       }
     }
@@ -88,9 +83,7 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
       const account = accountId(scope, provider);
       const legacySource = digest([provider.sourceDeviceId || '', provider.source || '', provider.sourceDetail || '']);
       const source = portableHistoryAccount(provider) ? digest([digest(scope), legacySource]) : legacySource;
-      const previousSource = portableHistoryAccount(provider)
-        ? digest([scope, provider.sourceDeviceId || '', provider.source || '', provider.sourceDetail || '']) : source;
-      if (provider.status !== 'ok' || provider.stale) { actions.push({ account, source, previousSource, failed: true }); continue; }
+      if (provider.status !== 'ok' || provider.stale) { actions.push({ account, source, failed: true }); continue; }
       const at = Date.parse(provider.updatedAt);
       if (!Number.isFinite(at)) continue;
       const interval = Math.max(60_000, Number(limits.refreshMs) || 300_000);
@@ -108,7 +101,7 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
         }
       }
       // A successful provider result is a full snapshot, including empty windows.
-      actions.push({ account, source, previousSource, snapshotAt: at, windows });
+      actions.push({ account, source, snapshotAt: at, windows });
     }
     if (!actions.length || closed) return;
     try { await rpc('record', [actions, now(), adoptions(scope, limits?.providers || [])]); }

@@ -135,8 +135,18 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
       // Its latest successful endpoint is a recovered accounting baseline.
       uncertainUntil: run.uncertain_until < run.until ? null : run.uncertain_until };
   }
+  function markUnknownDays(stream, from, until, now) {
+    const [first, last] = [from, until].sort();
+    const start = first < dayKey(retentionStart(now, 730)) ? dayKey(retentionStart(now, 730)) : first;
+    for (const date = new Date(`${start}T12:00:00`); dayKey(date.getTime()) <= last; date.setDate(date.getDate() + 1)) {
+      dailyUnknown.run(stream, dayKey(date.getTime()));
+    }
+  }
   function noteDaily(stream, previous, point, interruption, now, ambiguous = false) {
-    const day = dayKey(point.at);
+    const day = point.collectedDay || dayKey(point.at);
+    const previousDay = previous && (point.collectedDay
+      ? sql('SELECT day FROM daily WHERE stream = ? AND last_at = ?').get(stream, previous.at)?.day : null)
+      || (previous ? dayKey(previous.at) : null);
     dailyObserve.run(stream, day, point.at, point.at, point.value, point.value);
     if (!previous) return;
     const reset = !ambiguous && !sameCycle(previous, point);
@@ -144,21 +154,19 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
     const comparable = sameCycle(previous, point) && (previous.uncertainUntil == null || allowanceRecovered);
     const gap = ambiguous || interruption || (point.coveredFrom === previous.at ? point.maxGap : point.at - previous.at) > Math.max(previous.interval, point.interval) * 2.5;
     const delta = reset || ambiguous && !sameCycle(previous, point) ? 0 : Math.max(0, point.balance ? previous.value - point.value : point.value - previous.value);
-    const crossDay = dayKey(previous.at) !== day;
+    const crossDay = previousDay !== day;
     if (!reset && (!gap || comparable || point.coveredFrom === previous.at && delta === 0 && sameCycle(previous, point)) && !crossDay) dailyValue.run(delta, stream, day);
     if (reset || gap || crossDay && delta > 0) {
-      const date = new Date(Math.max(previous.at, retentionStart(now, 730)));
-      date.setHours(0, 0, 0, 0);
-      for (; date.getTime() <= point.at; date.setDate(date.getDate() + 1)) dailyUnknown.run(stream, dayKey(date.getTime()));
+      markUnknownDays(stream, previousDay, day, now);
     }
     dailyExtra.run(!reset && (crossDay || gap && !comparable) ? delta : 0, reset ? 1 : 0, stream, day);
   }
 
   function interrupt(stream, tail, point, now, reason = BREAK_INTERRUPTED) {
     markInterruption.run(reason, point.at, tail.id);
-    const date = new Date(Math.max(tail.until, retentionStart(now, 730)));
-    date.setHours(0, 0, 0, 0);
-    for (; date.getTime() <= point.at; date.setDate(date.getDate() + 1)) dailyUnknown.run(stream, dayKey(date.getTime()));
+    const previousDay = point.collectedDay
+      ? sql('SELECT day FROM daily WHERE stream = ? AND last_at = ?').get(stream, tail.until)?.day : null;
+    markUnknownDays(stream, previousDay || dayKey(tail.until), point.collectedDay || dayKey(point.at), now);
   }
 
   function conflict(stream, tail, point, now) {
@@ -200,29 +208,9 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
       throw error;
     }
   }
-  function reconcileSource(id, before, after) {
-    const origin = originFor.get(id, before);
-    if (origin) {
-      noteOrigin.run(id, after, Math.max(origin.at, originFor.get(id, after)?.at || 0));
-      sql('DELETE FROM history_origins WHERE stream = ? AND source = ?').run(id, before);
-    }
-    sql(`INSERT INTO history_run_sources (run, source, first_at, last_at, samples)
-      SELECT h.run, ?, h.first_at, h.last_at, h.samples FROM history_run_sources h
-      JOIN runs r ON r.id = h.run WHERE r.stream = ? AND h.source = ?
-      ON CONFLICT(run, source) DO UPDATE SET
-        first_at = MIN(first_at, excluded.first_at), last_at = MAX(last_at, excluded.last_at),
-        samples = samples + excluded.samples`).run(after, id, before);
-    sql('DELETE FROM history_run_sources WHERE source = ? AND run IN (SELECT id FROM runs WHERE stream = ?)').run(before, id);
-    sql('UPDATE streams SET source = ? WHERE id = ? AND source = ?').run(after, id, before);
-  }
   function recordActions(actions, now) {
       for (const action of actions) {
         const source = action.source || '';
-        if (action.previousSource && action.previousSource !== source) {
-          for (const { id, source: owner } of sql('SELECT id, source FROM streams WHERE account = ?').all(action.account)) {
-            if (owner === action.previousSource || originFor.get(id, action.previousSource)) reconcileSource(id, action.previousSource, source);
-          }
-        }
         if (action.failed) {
           for (const row of failAccount.all(action.account, source)) {
             breakRun.run(row.id);
@@ -320,7 +308,7 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           }
           if (point.samples > 1) {
             sql('UPDATE daily SET observations = observations + ? WHERE stream = ? AND day = ?')
-              .run(point.samples - 1, id, dayKey(point.at));
+              .run(point.samples - 1, id, point.collectedDay || dayKey(point.at));
             sql('UPDATE history_run_sources SET samples = samples + ? WHERE run = ? AND source = ?')
               .run(point.samples - 1, run, source);
           }
@@ -353,23 +341,15 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
     const pending = [...groups.values()].map(mapping => ({ ...mapping, legacy: [...mapping.legacy].filter(id => id !== mapping.id
       && !sql('SELECT 1 FROM history_adoptions WHERE legacy = ?').get(id)
       && headFor.get(id)) })).filter(mapping => mapping.legacy.length);
-    const aliases = [...groups.values()].flatMap(mapping => mapping.sources
-      .filter(source => source.id === mapping.id && source.before && source.after
-        && (originFor.get(mapping.id, source.before) || headFor.get(mapping.id)?.source === source.before)));
-    if (!pending.length && !aliases.length) return;
+    if (!pending.length) return;
     transaction(() => {
-      // The first shared-history version hashed the source's raw fields.
-      // Reconcile only identities proved by the current snapshot, including
-      // watermarks and run provenance, before replay or live-owner arbitration.
-      for (const { id, before, after } of aliases) {
-        reconcileSource(id, before, after);
-      }
       for (const mapping of pending) {
         const ids = [mapping.id, ...mapping.legacy];
         const events = [];
         const spans = [];
         const origins = new Map();
         const olderDays = new Map();
+        const uncertainDays = new Set();
         function sourceFor(id, source) {
           const alias = mapping.sources.find(entry => entry.id === id && (entry.scope || entry.before === source));
           // Compose backend provenance with the saved source hash, so every
@@ -380,6 +360,10 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
         for (const id of ids) {
           const head = headFor.get(id);
           const tailId = latest.get(id)?.id;
+          const dailyRows = sql('SELECT * FROM daily WHERE stream = ? ORDER BY day').all(id);
+          // Daily summaries retain the original collection calendar even when
+          // the desktop now uses another timezone. Do not rebucket replayed points.
+          const collectedDay = at => dailyRows.find(row => row.last_at != null && at <= row.last_at && (row.first_at == null || row.first_at <= at))?.day;
           for (const origin of sql('SELECT source, at FROM history_origins WHERE stream = ?').all(id)) {
             const source = sourceFor(id, origin.source);
             origins.set(source, Math.max(origins.get(source) || 0, origin.at));
@@ -393,11 +377,11 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
               : sql('SELECT source FROM history_run_sources WHERE run = ? ORDER BY last_at DESC LIMIT 1').get(row.id)?.source || head.source;
             const firstSource = sql('SELECT source FROM history_run_sources WHERE run = ? ORDER BY first_at LIMIT 1').get(row.id)?.source || originalSource;
             const source = sourceFor(id, start === row.at ? firstSource : originalSource);
-            const point = { ...pointOf(row), at: start, samples: start === end ? row.samples || 1 : 1,
+            const point = { ...pointOf(row), at: start, collectedDay: collectedDay(start), samples: start === end ? row.samples || 1 : 1,
               maxGap: row.max_gap || 0, uncertainBefore: start === row.at && !!row.uncertain_before };
             events.push({ stream: id, source, point });
             if (end > start) spans.push({ stream: id, point, until: end });
-            if (end > start) events.push({ stream: id, source: sourceFor(id, originalSource), point: { ...point, at: end, uncertainBefore: false, coveredFrom: start, samples: Math.max(1, row.samples - 1) } });
+            if (end > start) events.push({ stream: id, source: sourceFor(id, originalSource), point: { ...point, at: end, collectedDay: collectedDay(end), uncertainBefore: false, coveredFrom: start, samples: Math.max(1, row.samples - 1) } });
             if (end === row.until) Object.assign(events.at(-1).point, { breakAfter: row.break_after,
               uncertainUntil: row.uncertain_until });
             if (end === row.until && row.id === tailId) {
@@ -407,7 +391,9 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           }
           // Detail retention cannot reconstruct older daily accounting. Keep
           // disjoint summaries; overlapping legacy summaries remain unknown.
-          for (const row of sql('SELECT * FROM daily WHERE stream = ? AND day < ?').all(id, dayKey(retentionStart(now, 180)))) {
+          for (const row of dailyRows) {
+            if (row.uncertain) uncertainDays.add(row.day);
+            if (row.day >= dayKey(retentionStart(now, 180))) continue;
             if (olderDays.has(row.day)) {
               const previous = olderDays.get(row.day);
               previous.value = null; previous.uncertain = 1;
@@ -455,6 +441,7 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           (stream, day, value, observations, uncertain, unallocated, resets, first_at, last_at, first_value, last_value)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(mapping.id, row.day, row.value, row.observations,
           row.uncertain, row.unallocated, row.resets, row.first_at, row.last_at, row.first_value, row.last_value);
+        for (const day of uncertainDays) dailyUnknown.run(mapping.id, day);
         for (const id of mapping.legacy) sql('INSERT INTO history_adoptions VALUES (?, ?)').run(id, mapping.id);
       }
     }, now);
