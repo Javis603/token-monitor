@@ -42,8 +42,14 @@ function contextFromInfo(info) {
 function applyLine(state, line, position, contextStart) {
   // An unreadable new configuration cannot leave the previous turn's badge.
   // Only inspect the bounded record prefix; never decode large tool output.
-  const configuration = /"type"\s*:\s*"turn_context"/.test(line.subarray(0, 512).toString('utf8'));
+  const prefix = line.subarray(0, 512).toString('utf8');
+  const configuration = /"type"\s*:\s*"turn_context"/.test(prefix);
   if (configuration && position >= contextStart) state.reasoningEffort = null;
+  // Codex writes type first or after timestamp. Match only that root envelope:
+  // a bounded-out configuration invalidates the model; nested tool data cannot.
+  if (position >= contextStart && /^\s*\{\s*(?:"timestamp"\s*:\s*"(?:\\.|[^"\\])*"\s*,\s*)?"type"\s*:\s*"turn_context"\s*[,}]/.test(prefix)) {
+    state.latestModel = null;
+  }
   // Metadata records are small; never decode arbitrarily large tool output.
   if (!line.length || line.length > MAX_METADATA_LINE_BYTES) return;
   let entry;

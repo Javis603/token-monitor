@@ -146,3 +146,28 @@ test('explicit provider model evidence does not require a wall-clock timestamp',
   assert.equal(sessionModelLabel(observed), 'newer +1');
   assert.equal(sessionModelLabel(period({ lastUsedAt: '' }).sessions['codex:s']), '2 models');
 });
+
+for (const timestampFirst of [false, true]) test(`oversized Codex configuration clears stale model without widening reads (timestamp first: ${timestampFirst})`, t => {
+  const f = fixture(t, 'codex');
+  fs.writeFileSync(f.file, line({ type: 'turn_context', payload: { model: 'older' } }));
+  assert.equal(f.read().latestModel, 'older');
+  const nested = line({ timestamp: at, type: 'response_item', payload: {
+    type: 'turn_context', model: 'nested', instructions: 'x'.repeat(100_000)
+  } });
+  fs.appendFileSync(f.file, nested);
+  assert.equal(f.read().latestModel, 'older', 'oversized nested tool metadata is not configuration');
+  const configuration = timestampFirst
+    ? { timestamp: at, type: 'turn_context', payload: { model: 'newer', instructions: 'x'.repeat(100_000) } }
+    : { type: 'turn_context', payload: { model: 'newer', instructions: 'x'.repeat(100_000) }, timestamp: at };
+  const append = line(configuration);
+  const before = f.bytesRead();
+  fs.appendFileSync(f.file, append);
+  assert.equal(f.read().latestModel, null, 'the skipped configuration cannot retain the preceding model');
+  assert.equal(f.bytesRead() - before, Buffer.byteLength(append), 'reads only the newly appended bytes');
+  fs.appendFileSync(f.file, line({ type: 'event_msg', payload: { type: 'token_count', info: {
+    last_token_usage: { total_tokens: 10 }, model_context_window: 100
+  } } }));
+  assert.equal(f.read().latestModel, null, 'token counters cannot restore stale model evidence');
+  fs.appendFileSync(f.file, line({ type: 'turn_context', payload: { model: 'newest' } }));
+  assert.equal(f.read().latestModel, 'newest');
+});
