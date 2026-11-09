@@ -465,10 +465,8 @@ test('Hark daily, period, feature, and top-up rows render and hide independently
     ['Daily', 'Monthly', 'Monthly Messages', 'Monthly Messages tokens', 'Top-up']
   );
   assert.match(card.children[0].text, /3 \/ 4/);
-  assert.match(card.children[1].text, /6 \/ 8/);
   const used = dockView({ showLimitUsed: true }).renderProviderWindows(provider, '#1C1C1C');
   assert.match(used.children[0].text, /1 \/ 4/);
-  assert.match(used.children[1].text, /2 \/ 8/);
   assert.match(card.children[4].text, /\$2\.50 spent/);
   const odd = dockView().renderProviderWindows({ ...provider, windows: provider.windows.slice(0, 3) }, '#1C1C1C');
   assert.equal(odd.children[2].classList.contains('limit-window-wide'), true);

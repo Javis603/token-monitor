@@ -25,8 +25,6 @@ function cString(buffer, offset) {
   return buffer.toString('utf8', offset, end);
 }
 
-// Pages and records are little-endian. The file header and page sizes are
-// big-endian. Offsets inside a record are from the start of that record.
 function readBinaryCookies(buffer) {
   if (!Buffer.isBuffer(buffer) || buffer.length < 8 || buffer.toString('ascii', 0, 4) !== 'cook') {
     throw errorWithStatus('unavailable', 'Hark cookie store could not be read');

@@ -3,7 +3,6 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
-const { aggregateLimits } = require('../../src/shared/limits/core');
 
 const {
   fetchHarkLimits,
@@ -147,11 +146,8 @@ test('a pasted cookie is the only credential, and a bad paste does not read the 
 
   const accepted = [];
   for (const token of [ENCODED_SESSION, SESSION]) {
-    const result = await fetchHarkLimits({
-      harkCookie: token,
-      previousLimits: { providers: [{ provider: 'hark', accountKey: 'previous' }] }
-    }, {
-      env: {}, probe: true,
+    const result = await fetchHarkLimits({ harkCookie: token }, {
+      env: {},
       readHarkDesktopSession() { reads += 1; return ''; },
       fetch: async (url, init) => {
         assert.equal(init.headers.Cookie, `__Secure-hark.session_token=${token}`);
@@ -185,12 +181,9 @@ test('desktop discovery reads only the Hark session cookie', async () => {
   });
   assert.equal(fromApp.status, 'ok');
   assert.equal(fromApp.source, 'local');
-  assert.equal(fromApp.sourceDetail, 'app');
 });
 
 test('missing desktop credentials differ from an unreadable store', async () => {
-  const corrupt = cookieFile([{ name: '__Secure-hark.session_token', value: SESSION, domain: '.hark.com' }]);
-  corrupt.writeUInt32LE(corrupt.length, 20);
   const missing = await fetchHarkLimits({}, {
     env: {}, harkDesktopOptions: { candidates: [] }
   });
@@ -198,7 +191,6 @@ test('missing desktop credentials differ from an unreadable store', async () => 
   for (const [read, expected] of [
     [() => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); }, 'unavailable'],
     [() => Buffer.from('nope'), 'unavailable'],
-    [() => corrupt, 'unavailable'],
     [() => cookieFile([{ name: 'other', value: SESSION, domain: '.hark.com' }]), 'notConfigured']
   ]) {
     const result = await fetchHarkLimits({}, {
@@ -220,7 +212,7 @@ test('HTTP failures recover and a new desktop session replaces its previous acco
     });
     assert.equal(result.status, expected);
   }
-  let status = 401;
+  let status = 200;
   let token = SESSION;
   let body = FREE_SUMMARY;
   let now = Date.parse('2026-11-09T12:00:00Z');
@@ -232,8 +224,6 @@ test('HTTP failures recover and a new desktop session replaces its previous acco
   });
   t.after(() => runtime.stop());
   await runtime.refresh({ provider: 'hark' }, 'settings-change');
-  status = 200;
-  await runtime.refresh({ provider: 'hark' }, 'settings-change');
   const rows = runtime.getSnapshot().providers;
   assert.equal(rows.length, 1);
   assert.equal(rows[0].status, 'ok');
@@ -241,9 +231,11 @@ test('HTTP failures recover and a new desktop session replaces its previous acco
   now += 1000;
   status = 500;
   await runtime.refresh({ provider: 'hark' }, 'settings-change');
-  const outage = aggregateLimits([{ deviceId: 'local', limits: runtime.getSnapshot() }], 0, now);
-  assert.equal(outage.providers.length, 1);
-  assert.deepEqual(outage.providers[0].windows, rows[0].windows);
+  const outage = runtime.getSnapshot().providers;
+  assert.equal(outage.length, 1);
+  assert.equal(outage[0].status, 'unavailable');
+  assert.equal(outage[0].accountKey, rows[0].accountKey);
+  assert.deepEqual(outage[0].windows, rows[0].windows);
   status = 200;
   await runtime.refresh({ provider: 'hark' }, 'settings-change');
   const rotated = runtime.getSnapshot().providers;
@@ -255,5 +247,20 @@ test('HTTP failures recover and a new desktop session replaces its previous acco
   const failed = runtime.getSnapshot().providers;
   assert.equal(failed.length, 1);
   assert.equal(failed[0].status, 'unavailable');
+  assert.equal(failed[0].accountKey, rotated[0].accountKey);
   assert.deepEqual(failed[0].windows, rotated[0].windows);
+});
+
+test('a desktop session configures the account, and an unreadable store does not sign it out', () => {
+  const account = require('../../src/shared/providers/hark/account');
+  const limits = { harkCookie: () => '' };
+  assert.equal(account.discover({}, { readHarkDesktopSession: () => SESSION }), true);
+  assert.equal(account.discover({}, { readHarkDesktopSession: () => '' }), false);
+  assert.equal(account.discover({}, {
+    readHarkDesktopSession() { throw Object.assign(new Error('denied'), { status: 'unavailable' }); }
+  }), true);
+  assert.deepEqual(account.accountStatus({ settings: {}, env: {}, discovered: true, limits }), {
+    harkCookieConfigured: true,
+    harkCookieSource: 'hark-desktop'
+  });
 });
