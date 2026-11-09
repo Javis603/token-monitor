@@ -5,6 +5,10 @@ const os = require('node:os');
 const { applyWindowsChrome } = require('../windowsChrome');
 const { syncWindowsBackdrop } = require('../windowsBackdrop');
 const { createCardMotionDriver } = require('../cardMotion');
+const { cardCanvasBounds, createCardPointerRouting, maskCardMaterial } = require('../cardCanvas');
+const { cardCommands, toPolygons } = require('../renderer/edgeDock/shapes');
+const { shapeRectsFromPolygons } = require('../edgeDock/mask');
+const { primaryButtonDown } = require('../edgeDock/pointerButtons');
 const { parkedCardBounds, createCardWindowVisibility } = require('../cardWindow');
 const { CARD_MOVE_MS, CARD_SPRING, advanceCardFrame } = require('../cardSpring');
 const motionPreference = require('../motionPreference');
@@ -26,7 +30,7 @@ function historyBounds(owner, rect, workArea, zoom = 1) {
   };
 }
 
-function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner, read, logger = console.log, setTimer = setTimeout, clearTimer = clearTimeout, getOpenMode = () => 'hover', getMaterialOptions = () => ({ enabled: false }), now = Date.now, setFrameTimer = setInterval, clearFrameTimer = clearInterval, setFadeTimer = setInterval, clearFadeTimer = clearInterval, platform = process.platform, osRelease = os.release(), syncWindowsMaterial = syncWindowsBackdrop }) {
+function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner, read, logger = console.log, setTimer = setTimeout, clearTimer = clearTimeout, getOpenMode = () => 'hover', getMaterialOptions = () => ({ enabled: false }), now = Date.now, setFrameTimer = setInterval, clearFrameTimer = clearInterval, setFadeTimer = setInterval, clearFadeTimer = clearInterval, setPointerTimer = setInterval, clearPointerTimer = clearInterval, platform = process.platform, osRelease = os.release(), syncWindowsMaterial = syncWindowsBackdrop, applyShapeMask = maskCardMaterial, readPrimaryButton = () => primaryButtonDown(platform) }) {
   let win = null;
   let owner = null;
   let key = '';
@@ -47,6 +51,13 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
   let animatePlacement = false;
   let frameMotion = null;
   let rendererReducedMotion = false;
+  let paintedFrame = null;
+  let paintedShape = null;
+  let rectangularFallback = platform === 'linux';
+  let pointerTimer = null;
+  const pointer = createCardPointerRouting({ platform, screen, getWindow: () => win,
+    getFrame: () => paintedFrame, isVisible: () => visible && presented,
+    primaryButtonDown: readPrimaryButton });
 
   const frameDriver = createCardMotionDriver({ platform, now, setTimer: setFrameTimer, clearTimer: clearFrameTimer,
     advance: advanceFrame, notify: payload => {
@@ -64,7 +75,8 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
   }
   function crossingGap(point) {
     if (!anchor || !win?.isVisible()) return false;
-    const panel = win.getBounds();
+    const panel = paintedFrame;
+    if (!panel) return false;
     const left = panel.x >= anchor.x + anchor.width ? anchor.x + anchor.width : panel.x + panel.width;
     const right = panel.x >= anchor.x + anchor.width ? panel.x : anchor.x;
     return right >= left && inside(point, { x: left, y: Math.min(anchor.y, panel.y), width: right - left,
@@ -84,25 +96,72 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     const elapsed = now() - motion.startedAt;
     const done = elapsed >= CARD_MOVE_MS || reducedMotion();
     const frame = advanceCardFrame(motion, elapsed, CARD_SPRING, done);
-    win.setBounds({ ...frame, width: Math.max(1, frame.width), height: Math.max(1, frame.height) });
+    paintFrame({ ...frame, width: Math.max(1, frame.width), height: Math.max(1, frame.height) });
     if (done) cancelFrameMotion();
   }
   function placeFrame(target, animate) {
     if (frameMotion && !reducedMotion() && Object.keys(target).every(key => frameMotion.to[key] === target[key])) return;
-    const from = win.getBounds();
+    const from = paintedFrame || target;
     const velocity = frameMotion?.velocity || {};
-    const moving = win.isVisible() && (animate || frameMotion) && !reducedMotion()
+    const moving = presented && (animate || frameMotion) && !reducedMotion()
       && Object.keys(target).some(key => from[key] !== target[key]);
     cancelFrameMotion({ preserveFrameClock: Boolean(moving && frameMotion) });
-    if (!moving) { win.setBounds(target); return; }
+    if (!moving) { paintFrame(target); return; }
     frameMotion = { keys: Object.keys(target), from, to: target, velocity: { ...velocity }, initialVelocity: velocity,
       startedAt: now(), workArea: placement.workArea };
     frameDriver.start(frameMotion);
   }
+  function materialOptions() {
+    return { ...getMaterialOptions(), ...(paintedShape ? { shape: paintedShape } : {}) };
+  }
   function syncMaterial() {
-    const options = getMaterialOptions();
-    syncNativeMaterialVisibility(win, options);
+    const options = materialOptions();
+    syncNativeMaterialVisibility(win, options, platform);
     syncWindowsMaterial(win, { enabled: options.enabled, mode: options.windowsBackdrop }, { platform });
+    if (paintedShape && getNativeMaterialState(win).type === 'vibrancy') {
+      const display = screen.getDisplayMatching(win.getBounds());
+      if (!applyShapeMask(win, paintedShape.commands, paintedShape.width, paintedShape.height, display.scaleFactor || 2)) {
+        rectangularFallback = true;
+        paintedShape = null;
+        cancelFrameMotion();
+        if (placement) paintFrame({ ...paintedFrame });
+      }
+    }
+  }
+  function paintFrame(frame) {
+    paintedFrame = frame;
+    const bounds = cardCanvasBounds(frame, placement.workArea, frame, rectangularFallback);
+    const current = win.getBounds();
+    if (['x', 'y', 'width', 'height'].some(key => current[key] !== bounds[key])) {
+      win.setBounds({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height });
+    }
+    const radius = (platform === 'win32' ? 8 : 14) * win.webContents.getZoomFactor();
+    paintedShape = rectangularFallback ? null : {
+      commands: cardCommands({ width: bounds.width, height: bounds.cardHeight, y: bounds.cardY, radius }),
+      width: bounds.width, height: bounds.height
+    };
+    if (platform === 'win32' && paintedShape) {
+      try { win.setShape(shapeRectsFromPolygons(toPolygons(paintedShape.commands), bounds.width, bounds.height)); }
+      catch (error) {
+        logger(`[limits-history] native card shape unavailable: ${error.message}`);
+        rectangularFallback = true;
+        cancelFrameMotion();
+        try { win.setShape([]); }
+        catch (resetError) {
+          logger(`[limits-history] native region reset failed: ${resetError.message}`);
+          hide();
+          win.destroy();
+          return;
+        }
+        return paintFrame({ ...frame });
+      }
+    }
+    syncMaterial();
+    // A material failure above may have selected the small rectangular fallback.
+    if (paintedFrame !== frame) return;
+    const zoom = win.webContents.getZoomFactor();
+    win.webContents.send('limitsHistory:shapeFrame', { y: bounds.cardY / zoom, height: bounds.cardHeight / zoom });
+    pointer.sync();
   }
   function send(payload, opening = false) {
     currentPayload = payload;
@@ -121,6 +180,9 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     cancelClose();
     visible = false;
     presented = false;
+    clearPointerTimer(pointerTimer);
+    pointerTimer = null;
+    pointer.sync();
     currentPayload = null;
     expectedRender = ++renderSequence;
     placement = null;
@@ -166,6 +228,10 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
   function ensureWindow() {
     if (win && !win.isDestroyed()) return win;
     ready = false;
+    paintedFrame = null;
+    paintedShape = null;
+    rectangularFallback = platform === 'linux';
+    pointer.reset();
     win = new BrowserWindow({
       width: 310, height: 420, show: false, frame: false, focusable: false,
       resizable: false, minimizable: false, maximizable: false, fullscreenable: false,
@@ -174,11 +240,15 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
       ...(platform === 'darwin' ? { type: 'panel', acceptFirstMouse: true, vibrancy: 'hud', visualEffectState: 'active' } : {}),
       webPreferences: { preload: path.join(__dirname, 'historyPreload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false }
     });
+    if (platform === 'win32' && typeof win.setShape !== 'function') rectangularFallback = true;
     applyWindowsChrome(win, { round: true });
-    attachNativeMaterialVisibility(win, getMaterialOptions);
+    attachNativeMaterialVisibility(win, materialOptions, platform);
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     win.webContents.on('will-navigate', event => event.preventDefault());
     win.webContents.on('did-finish-load', () => {
+      // A reused renderer can leave this view opaque over the native glass.
+      // Reapply the transparent surface after load, before the card is revealed.
+      if (platform === 'darwin') win.setBackgroundColor('#00000000');
       ready = true;
       if (visible && currentPayload) send(currentPayload, true);
     });
@@ -250,14 +320,14 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     const workArea = screen.getDisplayMatching(bounds).workArea;
     const target = historyBounds(bounds, rect, workArea, zoom);
     placement = { bounds: target, workArea };
-    if (opening) panel.setBounds(target);
+    if (opening) paintFrame(target);
     if (ready) send(payload, opening);
     return true;
   }
 
   function containsPoint(point) {
     if (!visible || !win?.isVisible()) return false;
-    return inside(point, win.getBounds());
+    return inside(point, paintedFrame);
   }
 
   function register() {
@@ -283,6 +353,9 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     ipcMain.on('limitsHistory:cardFrame', (event, payload) => {
       if (event.sender === win?.webContents) frameDriver.frame(payload?.motionId);
     });
+    ipcMain.on('limitsHistory:pointer', event => {
+      if (event.sender === win?.webContents) pointer.sync();
+    });
     ipcMain.on('limitsHistory:resize', (event, height, renderToken, animate, reduce) => {
       if (event.sender !== win?.webContents || !visible || !Number.isFinite(height) || renderToken !== expectedRender) return;
       rendererReducedMotion = reduce === true;
@@ -294,7 +367,10 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
       animatePlacement = false;
       if (!presented) {
         presented = true;
-        win.setIgnoreMouseEvents(false);
+        if (platform === 'darwin') {
+          pointer.sync();
+          pointerTimer = setPointerTimer(() => pointer.sync(), 50);
+        } else win.setIgnoreMouseEvents(false);
         cardVisibility.setVisible(win, true);
       }
     });

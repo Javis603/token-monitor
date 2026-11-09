@@ -513,6 +513,7 @@ const { NOTCH_BLUR_ALPHA, NOTCH_BLUR_RADIUS, NOTCH_BLUR_STRENGTH, notchBlurMask 
 const { applyProgressiveBlur } = require('./notch/macProgressiveBlur');
 const { monitorMacScrollGesture } = require('./notch/macScrollGesture');
 const { applyVibrancyMask } = require('./edgeDock/macVibrancyMask');
+const { maskCardMaterial } = require('./cardCanvas');
 const { performMacHaptic } = require('./edgeDock/macHaptics');
 const { primaryButtonDown } = require('./edgeDock/pointerButtons');
 const { preventAppActivation, setMoveToActiveSpace } = require('./macosSpaceBehavior');
@@ -6376,8 +6377,7 @@ function ensureEdgeDockController() {
     ),
     applyShapeMask: (win, commands, width, height, currentDisplay) => {
       const scale = currentDisplay?.scaleFactor || screen.getDisplayMatching?.(win.getBounds())?.scaleFactor || 2;
-      const { buffer, pixelWidth, pixelHeight } = rasterizeMask(toPolygons(commands), width, height, scale);
-      return applyVibrancyMask(win, { buffer, pixelWidth, pixelHeight }, width, height);
+      return maskCardMaterial(win, commands, width, height, scale);
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
     onWebSurfaceChanged: () => { pluginRuntime?.refreshSurfaces(); syncPluginQuotaSurfaceDemand(); },

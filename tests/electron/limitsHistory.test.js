@@ -768,7 +768,7 @@ test('read-only history rejects date navigation, discards stale reads and closes
   const shown = () => window.visible && !window.ignoreMouse;
   let renderToken;
   class FakeWindow extends EventEmitter {
-    constructor() { super(); window = this; this.destroyed = false; this.visible = false; this.webContents = new EventEmitter(); this.webContents.focus = () => {}; this.webContents.isDestroyed = () => false; this.webContents.setWindowOpenHandler = () => {}; this.webContents.setZoomFactor = () => {}; this.webContents.getZoomFactor = () => 1; this.webContents.send = (channel, payload) => { if (channel === 'limitsHistory:render') { renderToken = payload.renderToken; handlers.get('limitsHistory:resize')({ sender: this.webContents }, 420, renderToken, false, false); } }; }
+    constructor() { super(); this.bounds = { x: 0, y: 0, width: 310, height: 420 }; window = this; this.destroyed = false; this.visible = false; this.webContents = new EventEmitter(); this.webContents.focus = () => {}; this.webContents.isDestroyed = () => false; this.webContents.setWindowOpenHandler = () => {}; this.webContents.setZoomFactor = () => {}; this.webContents.getZoomFactor = () => 1; this.webContents.send = (channel, payload) => { if (channel === 'limitsHistory:render') { renderToken = payload.renderToken; handlers.get('limitsHistory:resize')({ sender: this.webContents }, 420, renderToken, false, false); } }; }
     static fromWebContents(sender) { return sender === owner.webContents ? owner : null; }
     isMinimized() { return false; }
     setVibrancy() {}
@@ -845,7 +845,7 @@ test('read-only history rejects date navigation, discards stale reads and closes
   controller.dispose();
 });
 
-function previewFixture(t, { platform = 'win32' } = {}) {
+function previewFixture(t, { platform = 'win32', nativeRegions = false } = {}) {
   const f = { pointer: { x: 1500, y: 800 }, focused: false, ownerFocused: false, mode: 'hover', timer: null, reads: [], motions: [], materials: [] };
   const owner = new EventEmitter();
   owner.webContents = { getZoomFactor: () => 1, send() {} };
@@ -856,12 +856,15 @@ function previewFixture(t, { platform = 'win32' } = {}) {
   owner.focus = () => { f.ownerFocused = true; };
   class Preview extends EventEmitter {
     constructor(options) {
-      super(); f.window = this; f.options = options; this.visible = options.show;
+      super(); this.bounds = { x: 0, y: 0, width: options.width, height: options.height };
+      if (nativeRegions) this.setShape = region => (f.regions ||= []).push(region);
+      f.window = this; f.options = options; this.visible = options.show;
       this.webContents = new EventEmitter();
       Object.assign(this.webContents, { focus: () => { throw new Error('preview must not take keyboard focus'); }, isDestroyed: () => false,
         setWindowOpenHandler() {}, setZoomFactor() {}, getZoomFactor: () => 1, send(channel, payload) {
           if (f.destroyed) throw new Error('renderer already destroyed');
           if (channel === 'limitsHistory:cardMotion') f.motions.push(payload);
+          if (channel === 'limitsHistory:shapeFrame') (f.shapes ||= []).push(payload);
           if (channel !== 'limitsHistory:render') return;
           f.lastPayload = payload;
           if (f.autoMeasure !== false) handlers.get('limitsHistory:resize')({ sender: f.window.webContents }, f.contentHeight || 420, payload.renderToken, false, false);
@@ -877,7 +880,7 @@ function previewFixture(t, { platform = 'win32' } = {}) {
     setIgnoreMouseEvents(value) { this.ignoreMouse = value; }
     isDestroyed() { return f.destroyed === true; }
     loadFile() { return Promise.resolve(); }
-    setBounds(bounds) { this.bounds = bounds; }
+    setBounds(bounds) { (f.boundsWrites ||= []).push(bounds); this.bounds = bounds; }
     getBounds() { return this.bounds; }
     isVisible() { return this.visible; }
     isFocused() { return f.focused; }
@@ -891,6 +894,8 @@ function previewFixture(t, { platform = 'win32' } = {}) {
     screen: { getDisplayMatching: () => ({ workArea: { x: 0, y: 0, width: 1600, height: 900 } }), getCursorScreenPoint: () => f.pointer },
     ipcMain: { handle: (name, fn) => handlers.set(name, fn), on: (name, fn) => handlers.set(name, fn) },
     setFadeTimer: () => 1, clearFadeTimer() {}, platform,
+    setPointerTimer: fn => { f.pointerTick = fn; return 1; }, clearPointerTimer() { f.pointerTick = null; },
+    applyShapeMask: () => f.maskFails !== true, readPrimaryButton: () => f.buttonDown === true,
     getMaterialOptions: () => f.material || { enabled: false },
     syncWindowsMaterial: (_win, options) => f.materials.push(options),
     getOpenMode: () => f.mode, now: () => f.clock || 0, setFrameTimer: fn => { f.frame = fn; return 1; }, clearFrameTimer: () => { f.frame = null; }, setTimer: fn => { f.timer = fn; return 1; }, clearTimer: () => { f.timer = null; },
@@ -910,6 +915,69 @@ function previewFixture(t, { platform = 'win32' } = {}) {
   t.after(() => f.controller.dispose());
   return f;
 }
+
+test('macOS history moves and resizes its silhouette without resizing the native canvas', async t => {
+  const f = previewFixture(t, { platform: 'darwin' });
+  await f.open();
+  assert.deepEqual(f.window.bounds, { x: 408, y: 0, width: 310, height: 900 });
+  const writes = f.boundsWrites.length;
+  f.contentHeight = 300;
+  await f.open('b', false, { x: 0, y: 350, width: 300, height: 100 });
+  assert.ok(f.frame);
+  for (const time of [80, 160, 320]) { f.clock = time; f.frame(); }
+  assert.equal(f.boundsWrites.length, writes, 'spring samples must not resize/move the native canvas');
+  assert.notEqual(f.shapes.at(-1).y, 128);
+  assert.notEqual(f.shapes.at(-1).height, 420);
+  const painted = f.shapes.at(-1);
+  await f.open('c', false, { x: 0, y: 150, width: 300, height: 100 });
+  assert.deepEqual(f.shapes.at(-1), painted, 'a rapid switch starts at the painted frame, not the canvas bounds');
+  f.clock = 1000; f.frame();
+  assert.deepEqual(f.shapes.at(-1), { y: 228, height: 300 });
+  assert.equal(f.boundsWrites.length, writes);
+  assert.equal(f.controller.containsPoint({ x: 420, y: 10 }), false, 'transparent canvas is not the card');
+  assert.equal(f.controller.containsPoint({ x: 420, y: 250 }), true);
+});
+
+test('macOS history forwards transparent canvas input and retains an active pointer press', async t => {
+  const f = previewFixture(t, { platform: 'darwin' });
+  await f.open();
+  assert.equal(f.window.ignoreMouse, true);
+  f.pointer = { x: 420, y: 200 }; f.pointerTick();
+  assert.equal(f.window.ignoreMouse, false);
+  f.buttonDown = true;
+  f.pointer = { x: 420, y: 10 }; f.pointerTick();
+  assert.equal(f.window.ignoreMouse, false, 'keep a pressed button/drag until release');
+  f.buttonDown = false; f.pointerTick();
+  assert.equal(f.window.ignoreMouse, true);
+  f.fromPanel('close');
+  assert.equal(f.pointerTick, null, 'a dismissed card has no pointer poll');
+  assert.equal(f.window.ignoreMouse, true);
+});
+
+test('a failed macOS material mask returns to a small card instead of exposing a display-height backdrop', async t => {
+  const f = previewFixture(t, { platform: 'darwin' });
+  f.material = { enabled: true, liquidGlass: false };
+  f.maskFails = true;
+  await f.open();
+  assert.deepEqual(f.window.bounds, { x: 408, y: 128, width: 310, height: 420 });
+  assert.deepEqual(f.shapes.at(-1), { y: 0, height: 420 });
+  await f.open('b', false, { x: 0, y: 200, width: 300, height: 100 });
+  f.clock = 1000; f.frame();
+  assert.deepEqual(f.window.bounds, { x: 408, y: 278, width: 310, height: 420 });
+});
+
+test('Windows history uses the same fixed canvas when native window regions are available', async t => {
+  const f = previewFixture(t, { nativeRegions: true });
+  await f.open();
+  assert.deepEqual(f.window.bounds, { x: 408, y: 0, width: 310, height: 900 });
+  assert.ok(f.regions.at(-1).every(rect => rect.y >= 128 && rect.y + rect.height <= 548));
+  const writes = f.boundsWrites.length;
+  f.contentHeight = 300;
+  await f.open('b', false, { x: 0, y: 300, width: 300, height: 100 });
+  f.clock = 1000; f.frame();
+  assert.equal(f.boundsWrites.length, writes);
+  assert.deepEqual(f.shapes.at(-1), { y: 378, height: 300 });
+});
 
 test('read-only previews never request focus, even for explicit opens and close', async t => {
   const f = previewFixture(t);
