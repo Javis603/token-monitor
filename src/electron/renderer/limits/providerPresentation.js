@@ -54,7 +54,6 @@
     alibaba: { web: 'Web' },
     stepfun: { web: 'Web' },
     manus: { local: 'Local', web: 'Web' },
-    hark: { local: 'Local', web: 'Web' },
     thirdparty: { api: 'API' }
   };
 

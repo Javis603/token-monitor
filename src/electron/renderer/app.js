@@ -17626,7 +17626,8 @@ function renderExternalProviderStatus(providerName) {
     openBtn.classList.remove('hidden');
   }
   const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')
-    || (providerName === 'cline' && source === 'cline-signin');
+    || (providerName === 'cline' && source === 'cline-signin')
+    || providerName === 'hark';
   if (discoveredLogin) {
     // The discovered login is not user-entered, so the override input and the
     // console link stay reachable instead of hiding behind linked. Cline's stored

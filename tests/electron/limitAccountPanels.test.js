@@ -715,3 +715,46 @@ test('Mistral setup renders both the allowance note and cookie-copy steps', () =
   assert.match(group.text, /ory_session_/);
   assert.ok(group.byId('mistralCookieInput'));
 });
+
+test('Hark desktop status connects without a pasted cookie and leaves the override reachable', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'hark');
+  const { group, document } = renderPanel(form);
+  let provider;
+  const { limitProviderEntry } = require('../../src/shared/limits/registry');
+  const project = (settings, discovered) => limitProviderEntry('hark').accountStatus({ settings, env: {}, discovered });
+  const state = { settings: project({}, true), accountPanelMessages: {} };
+  const context = {
+    state, document, t: translated,
+    externalLimitAccountConfig: {}, externalProviderCheckSettled: new Set(),
+    limitAccountForm: () => form, localProviderStatus: () => provider,
+    limitProviderEnabled: () => true,
+    limitProviderPresentationApi: require('../../src/electron/renderer/limits/providerPresentation'),
+    limitAccountPanelsApi: require('../../src/electron/renderer/limits/accountPanels'),
+    setCursorStatusText: (node, text) => { node.textContent = text; },
+    renderSettingsSummaries() {}, setExternalAccountExpanded() {}
+  };
+  for (const name of ['externalProviderForAccount', 'externalProviderAccountLinked', 'apiKeyAccountStatusText', 'renderExternalProviderStatus']) {
+    const start = app.indexOf(`function ${name}(`);
+    vm.runInNewContext(app.slice(start, app.indexOf('\n}\n', start) + 2), context);
+  }
+  for (const [status, text] of [
+    ['ok', 'Connected'],
+    ['unauthorized', 'Unauthorized'],
+    ['unavailable', 'Unavailable'],
+    ['notConfigured', 'Not configured']
+  ]) {
+    state.settings = project({}, status !== 'notConfigured');
+    provider = { provider: 'hark', source: 'local', sourceDetail: 'app', status };
+    context.renderExternalProviderStatus('hark');
+    assert.equal(group.byId('harkAccountStatus').textContent, text, status);
+    assert.equal(group.byId('harkManualPanel').classList.contains('hidden'), false);
+    assert.equal(group.byId('harkOpenBrowser').classList.contains('hidden'), false);
+    assert.equal(context.externalProviderAccountLinked('hark'), status === 'ok');
+  }
+  state.settings = project({ harkCookie: 'not-a-session' }, true);
+  provider = { provider: 'hark', source: 'web', sourceDetail: 'managed', status: 'unauthorized' };
+  context.renderExternalProviderStatus('hark');
+  assert.equal(group.byId('harkAccountStatus').textContent, 'Unauthorized');
+  assert.equal(context.externalProviderAccountLinked('hark'), false);
+});

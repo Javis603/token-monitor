@@ -12,12 +12,23 @@ module.exports = {
     envFallback: ['TOKEN_MONITOR_HARK_COOKIE', 'HARK_COOKIE'],
     project: 'set'
   }],
+  discover: (_env, limits) => {
+    try {
+      return Boolean(limits.readHarkDesktopSession());
+    } catch (error) {
+      return error?.status === 'unavailable';
+    }
+  },
   status: {
     credential: 'harkCookie',
     configuredKey: 'harkCookieConfigured',
     sourceKey: 'harkCookieSource',
     pendingKey: 'harkPendingCheckSince'
   },
+  accountStatus: ({ settings, env, discovered, limits }) => ({
+    harkCookieConfigured: Boolean(settings?.harkCookie || limits.harkCookie(env) || discovered),
+    harkCookieSource: settings?.harkCookie ? 'settings' : limits.harkCookie(env) ? 'env' : discovered ? 'hark-desktop' : ''
+  }),
   form: {
     field: 'harkCookie',
     input: 'textarea',
@@ -28,7 +39,8 @@ module.exports = {
     saveKey: 'settings.hark.saveToken',
     emptyKey: 'settings.hark.statusNotSet',
     failedKey: 'settings.hark.saveFailed',
-    steps: ['settings.hark.step1', 'settings.hark.step2', 'settings.hark.step3', 'settings.hark.step4'],
+    noteKey: 'settings.hark.cookieHint',
+    messages: { rejected: 'settings.hark.statusInvalid' },
     url: 'https://hark.com/'
   },
   urlPolicy: [{ hosts: ['hark.com'], exactPaths: ['/'] }]
