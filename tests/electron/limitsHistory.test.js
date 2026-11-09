@@ -2149,3 +2149,81 @@ test('adoption rolls back the projection and marker together when persistence fa
   assert.equal(inspect.prepare('SELECT observations FROM daily WHERE stream = ?').get(streamB).observations, 37);
   assert.deepEqual(query(streamB).windows, before, 'compressed hourly coverage survives adoption exactly');
 });
+
+const adoptedStream = 'e'.repeat(64);
+function adoptionDatabase(t) {
+  const db = createHistoryDatabase(':memory:');
+  t.after(() => db.close());
+  return db;
+}
+function adoptedDistribution(db, grain = 'day') {
+  return db.query([{ id: adoptedStream, key: 'weekly', window: { kind: 'weekly' } }],
+    { grain, day: dayKey(at(2, 12)) }, at(2, 12)).windows[0].distribution;
+}
+
+test('adoption detects disagreements inside overlapping compressed coverage before counting consumption', t => {
+  const reference = adoptionDatabase(t), migrated = adoptionDatabase(t);
+  for (const [minute, local, hub] of [[0, 20, 20], [5, 20, 25], [10, 20, 25]]) {
+    reference.record([action(at(2, 10, minute), local, { id: adoptedStream, source: 'local' }),
+      action(at(2, 10, minute), hub, { id: adoptedStream, source: 'hub' })], at(2, 12));
+    migrated.record([action(at(2, 10, minute), local, { source: 'local' }),
+      action(at(2, 10, minute), hub, { id: streamB, source: 'hub' })], at(2, 12));
+  }
+  migrated.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA, streamB],
+    sources: [{ id: streamA, before: 'local', after: 'local' }, { id: streamB, before: 'hub', after: 'hub' }] }], at(2, 12));
+  for (const grain of ['day', 'hour']) {
+    const expected = adoptedDistribution(reference, grain), actual = adoptedDistribution(migrated, grain);
+    assert.deepEqual(actual.buckets.map(b => b.value), expected.buckets.map(b => b.value));
+    assert.equal(actual.unallocated, expected.unallocated);
+    assert.equal(actual.resets, expected.resets);
+  }
+});
+
+test('adoption preserves ordinary failed-refresh recovery without manufacturing confirmed uncertainty', t => {
+  const reference = adoptionDatabase(t), migrated = adoptionDatabase(t);
+  for (const [db, id] of [[reference, adoptedStream], [migrated, streamA]]) {
+    db.record([action(at(2, 10), 20, { id, source: 'local' }), { account: accountA, source: 'local', failed: true }], at(2, 12));
+  }
+  migrated.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA],
+    sources: [{ id: streamA, before: 'local', after: 'local' }] }], at(2, 12));
+  for (const db of [reference, migrated]) db.record([action(at(2, 10, 5), 25, { id: adoptedStream, source: 'local' })], at(2, 12));
+  for (const grain of ['day', 'hour']) assert.deepEqual(adoptedDistribution(migrated, grain), adoptedDistribution(reference, grain));
+});
+
+test('adoption preserves origin watermarks after a confirmed empty snapshot', t => {
+  const db = adoptionDatabase(t);
+  db.record([action(at(2, 9, 50), 20, { source: 'local' }), action(at(2, 10), 20, { id: adoptedStream, source: 'local' }),
+    { account: accountA, source: 'local', snapshotAt: at(2, 10, 10), windows: [] }], at(2, 12));
+  db.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA],
+    sources: [{ id: streamA, before: 'local', after: 'local' }] }], at(2, 12));
+  const before = adoptedDistribution(db);
+  db.record([action(at(2, 10, 5), 25, { id: adoptedStream, source: 'local' })], at(2, 12));
+  assert.deepEqual(adoptedDistribution(db), before, 'cached numeric readings older than the empty snapshot stay rejected');
+});
+
+for (const [readopt, competing] of [[false, false], [true, false], [true, true]]) test(`adoption retains historical conflict without poisoning consumption after owner recovery (readopt: ${readopt}, competing: ${competing})`, t => {
+  const reference = adoptionDatabase(t), migrated = adoptionDatabase(t);
+  for (const minute of [0, 5, 10]) {
+    const local = action(at(2, 10, minute), 20, { id: adoptedStream, source: 'local' });
+    const hub = minute < 10 ? action(at(2, 10, minute), minute ? 25 : 20, { id: adoptedStream, source: 'hub' }) : null;
+    reference.record([local, ...(hub ? [hub] : [])], at(2, 12));
+    migrated.record([{ ...local, windows: local.windows.map(w => ({ ...w, id: streamA })) },
+      ...(hub ? [{ ...hub, windows: hub.windows.map(w => ({ ...w, id: streamB })) }] : [])], at(2, 12));
+  }
+  migrated.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA, streamB],
+    sources: [{ id: streamA, before: 'local', after: 'local' }, { id: streamB, before: 'hub', after: 'hub' }] }], at(2, 12));
+  if (readopt) {
+    const discovered = 'f'.repeat(64);
+    reference.record([action(at(2, 10), 20, { id: adoptedStream, source: 'hub-b' })], at(2, 12));
+    migrated.record([action(at(2, 10), 20, { id: discovered, source: 'hub-b' })], at(2, 12));
+    migrated.adopt([{ id: adoptedStream, account: accountA, legacy: [discovered],
+      sources: [{ id: discovered, before: 'hub-b', after: 'hub-b' }] }], at(2, 12));
+  }
+  if (competing) for (const db of [reference, migrated]) db.record([action(at(2, 10, 11), 22, { id: adoptedStream, source: 'other' })], at(2, 12));
+  for (const db of [reference, migrated]) db.record([action(at(2, 10, 15), 25, { id: adoptedStream, source: 'local' })], at(2, 12));
+  for (const grain of ['day', 'hour']) {
+    const expected = adoptedDistribution(reference, grain), actual = adoptedDistribution(migrated, grain);
+    assert.deepEqual(actual.buckets.map(b => [b.value, b.uncertain]), expected.buckets.map(b => [b.value, b.uncertain]));
+    assert.equal(actual.unallocated, expected.unallocated);
+  }
+});
