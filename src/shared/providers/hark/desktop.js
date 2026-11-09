@@ -6,8 +6,7 @@ const path = require('node:path');
 
 const { errorWithStatus } = require('../../limits/providerHelpers');
 
-// Hark.app is a Tauri shell. Its WebKit session is a binarycookies file, not
-// the Chromium sqlite store Manus and MiMo read.
+// Hark's macOS session uses WebKit binarycookies, not Chromium SQLite.
 const HARK_COOKIE_FILE = 'com.harklabs.hark.mac.binarycookies';
 const HARK_COOKIE_NAME = '__Secure-hark.session_token';
 const HARK_COOKIE_HOSTS = new Set(['hark.com', '.hark.com']);
@@ -20,9 +19,9 @@ function harkDesktopCookieCandidates(options = {}) {
 }
 
 function cString(buffer, offset) {
-  if (offset < 0 || offset >= buffer.length) return '';
+  if (offset < 32 || offset >= buffer.length) throw errorWithStatus('unavailable', 'Hark cookie store could not be read');
   const end = buffer.indexOf(0, offset);
-  if (end < 0) return '';
+  if (end < 0) throw errorWithStatus('unavailable', 'Hark cookie store could not be read');
   return buffer.toString('utf8', offset, end);
 }
 
@@ -52,8 +51,14 @@ function readBinaryCookies(buffer) {
     }
     for (let cookieIndex = 0; cookieIndex < count; cookieIndex += 1) {
       const recordOffset = page.readUInt32LE(8 + cookieIndex * 4);
-      if (recordOffset + 32 > page.length) continue;
-      const record = page.subarray(recordOffset);
+      if (recordOffset < 8 + count * 4 || recordOffset + 32 > page.length) {
+        throw errorWithStatus('unavailable', 'Hark cookie store could not be read');
+      }
+      const recordSize = page.readUInt32LE(recordOffset);
+      if (recordSize < 32 || recordOffset + recordSize > page.length) {
+        throw errorWithStatus('unavailable', 'Hark cookie store could not be read');
+      }
+      const record = page.subarray(recordOffset, recordOffset + recordSize);
       cookies.push({
         domain: cString(record, record.readUInt32LE(16)),
         name: cString(record, record.readUInt32LE(20)),
@@ -65,9 +70,7 @@ function readBinaryCookies(buffer) {
   return cookies;
 }
 
-// A missing store or cookie means Hark is not signed in. A store that cannot
-// be parsed keeps the last reading rather than proving a logout. Nothing is
-// written back.
+// Unreadable stores are unavailable; only a missing store/cookie means signed out.
 function readHarkDesktopSession(options = {}) {
   const fsApi = options.fs || fs;
   const candidates = options.candidates || harkDesktopCookieCandidates(options);

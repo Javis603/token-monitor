@@ -2,8 +2,9 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
+const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+const { aggregateLimits } = require('../../src/shared/limits/core');
 
-const { readBinaryCookies } = require('../../src/shared/providers/hark/desktop');
 const {
   fetchHarkLimits,
   normalizeHarkSessionToken,
@@ -31,18 +32,12 @@ const FREE_SUMMARY = {
 };
 
 function cookieFile(records) {
-  const pages = [cookiePage(records)];
-  const header = Buffer.alloc(8 + pages.length * 4);
+  const page = cookiePage(records);
+  const header = Buffer.alloc(12);
   header.write('cook', 0, 'ascii');
-  header.writeUInt32BE(pages.length, 4);
-  let offset = header.length;
-  const chunks = [header];
-  for (let index = 0; index < pages.length; index += 1) {
-    header.writeUInt32BE(pages[index].length, 8 + index * 4);
-    chunks.push(pages[index]);
-    offset += pages[index].length;
-  }
-  return Buffer.concat(chunks, offset);
+  header.writeUInt32BE(1, 4);
+  header.writeUInt32BE(page.length, 8);
+  return Buffer.concat([header, page]);
 }
 
 function cookiePage(records) {
@@ -89,12 +84,19 @@ test('a free summary is a daily window and a monthly pool', () => {
     ['daily', 'Daily', 136379, 8000000],
     ['billing', 'Monthly', 136379, 40000000]
   ]);
+  const uncapped = windowsFromSummary({ ...FREE_SUMMARY, meters: {
+    harkTokens: { ...FREE_SUMMARY.meters.harkTokens, dailyLimit: 0, poolLimit: 0 }
+  } });
+  assert.deepEqual(uncapped.windows, []);
 });
 
 test('unlimited and paid summaries keep the same window rules', () => {
   const unlimited = windowsFromSummary({
     plan: { id: 'pro', name: 'hark pro²', unlimited: true },
-    meters: { harkTokens: { dailyLimit: 1, dailyUsed: 1, poolLimit: 1, poolUsed: 1 }, perFeature: [] }
+    meters: {
+      harkTokens: { dailyLimit: 1, dailyUsed: 1, poolLimit: 1, poolUsed: 1 },
+      perFeature: [{ feature: 'message', period: 'month', countUsed: 1, countLimit: 10 }]
+    }
   });
   assert.equal(unlimited.planLabel, 'Hark Pro 2');
   assert.deepEqual(unlimited.windows, []);
@@ -125,8 +127,11 @@ test('unlimited and paid summaries keep the same window rules', () => {
   ]);
 });
 
-test('a summary without meters is unavailable', () => {
-  assert.throws(() => windowsFromSummary({ plan: { id: 'free' } }), (error) => error.status === 'unavailable');
+test('an incomplete summary is unavailable instead of dropping its quota bars', () => {
+  for (const harkTokens of [undefined, {}, { ...FREE_SUMMARY.meters.harkTokens, dailyUsed: 'oops' }]) {
+    assert.throws(() => windowsFromSummary({ ...FREE_SUMMARY, meters: { harkTokens } }),
+      (error) => error.status === 'unavailable');
+  }
 });
 
 test('a pasted cookie is the only credential, and a bad paste does not read the desktop app', async () => {
@@ -140,37 +145,38 @@ test('a pasted cookie is the only credential, and a bad paste does not read the 
   assert.equal(rejected.status, 'unauthorized');
   assert.equal(reads, 0);
 
-  const accepted = await fetchHarkLimits({ harkCookie: ENCODED_SESSION }, {
-    readHarkDesktopSession() { reads += 1; return ''; },
-    fetch: async (url, init) => {
-      assert.equal(init.headers.Cookie, `__Secure-hark.session_token=${ENCODED_SESSION}`);
-      return { ok: true, status: 200, json: async () => FREE_SUMMARY };
-    }
-  });
-  assert.equal(accepted.status, 'ok');
-  assert.equal(accepted.planLabel, 'Hark Pro');
-  assert.equal(accepted.source, 'web');
+  const accepted = [];
+  for (const token of [ENCODED_SESSION, SESSION]) {
+    const result = await fetchHarkLimits({
+      harkCookie: token,
+      previousLimits: { providers: [{ provider: 'hark', accountKey: 'previous' }] }
+    }, {
+      env: {}, probe: true,
+      readHarkDesktopSession() { reads += 1; return ''; },
+      fetch: async (url, init) => {
+        assert.equal(init.headers.Cookie, `__Secure-hark.session_token=${token}`);
+        return { ok: true, status: 200, json: async () => FREE_SUMMARY };
+      }
+    });
+    assert.equal(result.status, 'ok');
+    assert.equal(result.source, 'web');
+    accepted.push(result);
+  }
+  assert.equal(accepted[0].accountKey, accepted[1].accountKey);
   assert.equal(reads, 0);
-  assert.equal(accepted.windows.length, 2);
 });
 
 test('desktop discovery reads only the Hark session cookie', async () => {
   const file = cookieFile([
-    { name: '_ga', value: 'GA1.1.1853625455.1794216537', domain: '.hark.com' },
+    { name: '_ga', value: 'ignored-analytics', domain: '.hark.com' },
     { name: '__Secure-hark.session_token', value: ENCODED_SESSION, domain: '.hark.com' }
   ]);
-  const found = readBinaryCookies(file).find((cookie) => cookie.name === '__Secure-hark.session_token');
-  assert.equal(found.value, ENCODED_SESSION);
-  assert.throws(() => readBinaryCookies(Buffer.from('nope')), (error) => error.status === 'unavailable');
-
-  const missing = await fetchHarkLimits({}, {
-    readHarkDesktopSession() { return ''; }
-  });
-  assert.equal(missing.status, 'notConfigured');
-  assert.equal(missing.source, 'local');
-
   const fromApp = await fetchHarkLimits({}, {
-    readHarkDesktopSession() { return ENCODED_SESSION; },
+    env: {},
+    harkDesktopOptions: {
+      candidates: ['hark-fixture.binarycookies'],
+      fs: { statSync: () => ({ isFile: () => true }), readFileSync: () => file }
+    },
     fetch: async (url, init) => {
       assert.equal(url, 'https://hark.com/api/billing/summary');
       assert.equal(init.headers.Cookie, `__Secure-hark.session_token=${ENCODED_SESSION}`);
@@ -182,13 +188,72 @@ test('desktop discovery reads only the Hark session cookie', async () => {
   assert.equal(fromApp.sourceDetail, 'app');
 });
 
-test('an HTTP 401 is unauthorized and a 500 stays unavailable', async () => {
-  const unauthorized = await fetchHarkLimits({ harkCookie: SESSION }, {
-    fetch: async () => ({ ok: false, status: 401, json: async () => ({}) })
+test('missing desktop credentials differ from an unreadable store', async () => {
+  const corrupt = cookieFile([{ name: '__Secure-hark.session_token', value: SESSION, domain: '.hark.com' }]);
+  corrupt.writeUInt32LE(corrupt.length, 20);
+  const missing = await fetchHarkLimits({}, {
+    env: {}, harkDesktopOptions: { candidates: [] }
   });
-  assert.equal(unauthorized.status, 'unauthorized');
-  const unavailable = await fetchHarkLimits({ harkCookie: SESSION }, {
-    fetch: async () => ({ ok: false, status: 500, json: async () => ({}) })
+  assert.equal(missing.status, 'notConfigured');
+  for (const [read, expected] of [
+    [() => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); }, 'unavailable'],
+    [() => Buffer.from('nope'), 'unavailable'],
+    [() => corrupt, 'unavailable'],
+    [() => cookieFile([{ name: 'other', value: SESSION, domain: '.hark.com' }]), 'notConfigured']
+  ]) {
+    const result = await fetchHarkLimits({}, {
+      env: {},
+      harkDesktopOptions: {
+        candidates: ['hark-fixture.binarycookies'],
+        fs: { statSync: () => ({ isFile: () => true }), readFileSync: read }
+      },
+      fetch: async () => { assert.fail('no request without a desktop credential'); }
+    });
+    assert.equal(result.status, expected);
+  }
+});
+
+test('HTTP failures recover and a new desktop session replaces its previous account', async (t) => {
+  for (const [status, expected] of [[401, 'unauthorized'], [403, 'unauthorized'], [500, 'unavailable']]) {
+    const result = await fetchHarkLimits({ harkCookie: SESSION }, {
+      env: {}, fetch: async () => ({ ok: false, status })
+    });
+    assert.equal(result.status, expected);
+  }
+  let status = 401;
+  let token = SESSION;
+  let body = FREE_SUMMARY;
+  let now = Date.parse('2026-11-09T12:00:00Z');
+  const runtime = createLimitsRuntime({ limitProviders: ['hark'] }, {
+    autoStart: false, autoRetry: false, env: {},
+    now: () => now,
+    readHarkDesktopSession: () => token,
+    fetch: async () => ({ ok: status === 200, status, json: async () => body })
   });
-  assert.equal(unavailable.status, 'unavailable');
+  t.after(() => runtime.stop());
+  await runtime.refresh({ provider: 'hark' }, 'settings-change');
+  status = 200;
+  await runtime.refresh({ provider: 'hark' }, 'settings-change');
+  const rows = runtime.getSnapshot().providers;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].status, 'ok');
+  token = SESSION.replace(/^a/, 'c');
+  now += 1000;
+  status = 500;
+  await runtime.refresh({ provider: 'hark' }, 'settings-change');
+  const outage = aggregateLimits([{ deviceId: 'local', limits: runtime.getSnapshot() }], 0, now);
+  assert.equal(outage.providers.length, 1);
+  assert.deepEqual(outage.providers[0].windows, rows[0].windows);
+  status = 200;
+  await runtime.refresh({ provider: 'hark' }, 'settings-change');
+  const rotated = runtime.getSnapshot().providers;
+  assert.equal(rotated.length, 1);
+  assert.equal(rotated[0].status, 'ok');
+  assert.notEqual(rotated[0].accountKey, rows[0].accountKey);
+  body = { ...FREE_SUMMARY, meters: { harkTokens: {} } };
+  await runtime.refresh({ provider: 'hark' }, 'settings-change');
+  const failed = runtime.getSnapshot().providers;
+  assert.equal(failed.length, 1);
+  assert.equal(failed[0].status, 'unavailable');
+  assert.deepEqual(failed[0].windows, rotated[0].windows);
 });

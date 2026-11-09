@@ -8,19 +8,18 @@ const {
   envValue,
   errorWithStatus,
   numberOrNull,
+  providerStatusFromError,
   statusForHttp,
   toIso
 } = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
-const { readHarkDesktopSession } = require('./desktop');
+const { HARK_COOKIE_NAME, readHarkDesktopSession } = require('./desktop');
 
 const HARK_FETCH_TIMEOUT_MS = 12_000;
 const HARK_ORIGIN = 'https://hark.com';
 const HARK_SUMMARY_URL = `${HARK_ORIGIN}/api/billing/summary`;
-const HARK_COOKIE_NAME = '__Secure-hark.session_token';
-// better-auth session: an id, a dot, and a base64 signature. The desktop store
-// keeps the signature percent-encoded (`%2B`, `%2F`, `%3D`); a paste may be
-// either form. The original spelling is what gets forwarded.
+// WebKit percent-encodes better-auth signatures. Decode for validation and
+// account identity; the Cookie header must keep the accepted spelling.
 const HARK_BARE_SESSION = /^[A-Za-z0-9]{16,128}\.[A-Za-z0-9+/_-]{16,256}={0,2}$/;
 // The summary's plan.name uses a superscript the shared label sanitizer drops,
 // so the id is the stable display name.
@@ -34,7 +33,7 @@ const HARK_PLAN_LABELS = {
 function acceptHarkSessionToken(token) {
   const value = String(token || '').trim();
   if (!value || /[\u0000-\u001f\u007f;]/u.test(value)) return '';
-  let decoded = value;
+  let decoded;
   try {
     decoded = decodeURIComponent(value);
   } catch {
@@ -53,23 +52,18 @@ function normalizeHarkSessionToken(value) {
   return acceptHarkSessionToken(raw);
 }
 
-function suppliedHarkCookie(env, options = {}) {
+function harkCookie(env = process.env, options = {}) {
   return options.harkCookie
     || envValue(env, 'TOKEN_MONITOR_HARK_COOKIE')
     || envValue(env, 'HARK_COOKIE')
     || '';
 }
 
-// Registry resolve export. Returns the raw configured value; fetchHarkLimits
-// decides whether that value is a session or a rejected paste.
-function harkCookie(env = process.env, options = {}) {
-  return suppliedHarkCookie(env, options);
-}
-
 function tokenWindow(kind, label, used, limit, resetsAt) {
   const ceiling = numberOrNull(limit);
   const spent = numberOrNull(used);
-  if (ceiling === null || ceiling <= 0 || spent === null || spent < 0) return null;
+  if (ceiling === null || ceiling <= 0) return null;
+  if (spent === null || spent < 0) throw errorWithStatus('unavailable', 'Hark billing summary changed');
   return {
     kind,
     label,
@@ -86,8 +80,6 @@ function featureLabel(feature, period, suffix) {
   return [when, name, suffix].filter(Boolean).join(' ');
 }
 
-// One summary serves every plan. Unlimited accounts have no meters. A feature
-// row is absent on the free plan and present only when the server sends it.
 function windowsFromSummary(body) {
   const plan = body?.plan;
   const meters = body?.meters;
@@ -97,7 +89,7 @@ function windowsFromSummary(body) {
   const windows = [];
   const tokens = meters.harkTokens;
   if (plan.unlimited !== true) {
-    if (!tokens || typeof tokens !== 'object') {
+    if (!tokens || numberOrNull(tokens.dailyLimit) === null || numberOrNull(tokens.poolLimit) === null) {
       throw errorWithStatus('unavailable', 'Hark billing summary changed');
     }
     const daily = tokenWindow('daily', 'Daily', tokens.dailyUsed, tokens.dailyLimit, tokens.dailyResetsAt);
@@ -105,7 +97,7 @@ function windowsFromSummary(body) {
     if (daily) windows.push(daily);
     if (pool) windows.push(pool);
   }
-  if (Array.isArray(meters.perFeature)) {
+  if (plan.unlimited !== true && Array.isArray(meters.perFeature)) {
     for (const row of meters.perFeature) {
       if (!row || typeof row !== 'object') continue;
       const period = row.period === 'day' || row.period === 'month' ? row.period : '';
@@ -138,7 +130,7 @@ function windowsFromSummary(body) {
 async function fetchHarkLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
-  const supplied = suppliedHarkCookie(env, options);
+  const supplied = harkCookie(env, options);
   const base = {
     provider: 'hark',
     source: supplied ? 'web' : 'local',
@@ -155,11 +147,15 @@ async function fetchHarkLimits(options = {}, deps = {}) {
     try {
       token = normalizeHarkSessionToken((deps.readHarkDesktopSession || readHarkDesktopSession)(deps.harkDesktopOptions || {}));
     } catch (error) {
-      return normalizeLimitProvider({ ...base, status: error?.status || 'unavailable' });
+      return normalizeLimitProvider({ ...base, status: providerStatusFromError(error) });
     }
     if (!token) return normalizeLimitProvider({ ...base, status: 'notConfigured' });
   }
 
+  base.accountKey = hashKey('hark', decodeURIComponent(token));
+  const previous = (options.previousLimits?.providers || [])
+    .filter((row) => row.provider === 'hark' && row.accountKey && row.accountKey !== base.accountKey);
+  let provider;
   try {
     const body = await runWithProbeDeadline(async ({ signal }) => {
       const response = await (deps.fetch || fetch)(HARK_SUMMARY_URL, {
@@ -176,19 +172,25 @@ async function fetchHarkLimits(options = {}, deps = {}) {
       return response.json();
     }, { signal: deps.signal, deadlineMs: deps.harkFetchTimeoutMs || deps.fetchTimeoutMs || HARK_FETCH_TIMEOUT_MS });
     const parsed = windowsFromSummary(body);
-    return normalizeLimitProvider({
+    provider = normalizeLimitProvider({
       ...base,
-      accountKey: hashKey('hark', token),
       planLabel: parsed.planLabel,
       status: 'ok',
       windows: parsed.windows
     });
   } catch (error) {
-    return normalizeLimitProvider({
+    const status = providerStatusFromError(error);
+    // An unconfirmed replacement must not outrank the retained session with an empty reading.
+    provider = normalizeLimitProvider({
       ...base,
-      status: error?.status === 'timeout' ? 'unavailable' : (error?.status || 'unavailable')
+      accountKey: previous.length && ['unavailable', 'sourceRateLimited'].includes(status) ? '' : base.accountKey,
+      status
     });
   }
+  // Hark exposes one selected session; omitted identities otherwise remain cached by the runtime.
+  const removals = deps.probe === true || !['ok', 'unauthorized'].includes(provider.status) ? []
+    : previous.map((row) => ({ provider: 'hark', accountKey: row.accountKey, removed: true }));
+  return removals.length ? [provider, ...removals] : provider;
 }
 
 module.exports = {
@@ -197,6 +199,7 @@ module.exports = {
   HARK_SUMMARY_URL,
   fetchHarkLimits,
   harkCookie,
+  readHarkDesktopSession,
   normalizeHarkSessionToken,
   windowsFromSummary
 };
