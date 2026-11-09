@@ -127,7 +127,7 @@ test('unlimited and paid summaries keep the same window rules', () => {
 });
 
 test('an incomplete summary is unavailable instead of dropping its quota bars', () => {
-  for (const harkTokens of [undefined, {}, { ...FREE_SUMMARY.meters.harkTokens, dailyUsed: 'oops' }]) {
+  for (const harkTokens of [undefined, {}, { ...FREE_SUMMARY.meters.harkTokens, dailyUsed: 'oops' }, { ...FREE_SUMMARY.meters.harkTokens, dailyLimit: -1 }]) {
     assert.throws(() => windowsFromSummary({ ...FREE_SUMMARY, meters: { harkTokens } }),
       (error) => error.status === 'unavailable');
   }
@@ -227,7 +227,6 @@ test('HTTP failures recover and a new desktop session replaces its previous acco
   const rows = runtime.getSnapshot().providers;
   assert.equal(rows.length, 1);
   assert.equal(rows[0].status, 'ok');
-  token = SESSION.replace(/^a/, 'c');
   now += 1000;
   status = 500;
   await runtime.refresh({ provider: 'hark' }, 'settings-change');
@@ -236,6 +235,11 @@ test('HTTP failures recover and a new desktop session replaces its previous acco
   assert.equal(outage[0].status, 'unavailable');
   assert.equal(outage[0].accountKey, rows[0].accountKey);
   assert.deepEqual(outage[0].windows, rows[0].windows);
+  token = SESSION.replace(/^a/, 'c');
+  now += 1000;
+  status = 401;
+  await runtime.refresh({ provider: 'hark' }, 'settings-change');
+  assert.ok(runtime.getSnapshot().providers.some((row) => row.accountKey === rows[0].accountKey && row.windows.length === rows[0].windows.length));
   status = 200;
   await runtime.refresh({ provider: 'hark' }, 'settings-change');
   const rotated = runtime.getSnapshot().providers;

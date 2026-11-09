@@ -89,7 +89,9 @@ function windowsFromSummary(body) {
   const windows = [];
   const tokens = meters.harkTokens;
   if (plan.unlimited !== true) {
-    if (!tokens || numberOrNull(tokens.dailyLimit) === null || numberOrNull(tokens.poolLimit) === null) {
+    const dailyLimit = numberOrNull(tokens?.dailyLimit);
+    const poolLimit = numberOrNull(tokens?.poolLimit);
+    if (!tokens || dailyLimit === null || poolLimit === null || dailyLimit < 0 || poolLimit < 0) {
       throw errorWithStatus('unavailable', 'Hark billing summary changed');
     }
     const daily = tokenWindow('daily', 'Daily', tokens.dailyUsed, tokens.dailyLimit, tokens.dailyResetsAt);
@@ -164,6 +166,8 @@ async function fetchHarkLimits(options = {}, deps = {}) {
           Cookie: `${HARK_COOKIE_NAME}=${token}`,
           'User-Agent': BROWSER_USER_AGENT
         },
+        redirect: 'manual',
+        credentials: 'omit',
         signal
       });
       if (!response.ok) {
@@ -188,7 +192,7 @@ async function fetchHarkLimits(options = {}, deps = {}) {
     });
   }
   // Hark exposes one selected session; omitted identities otherwise remain cached by the runtime.
-  const removals = deps.probe === true || !['ok', 'unauthorized'].includes(provider.status) ? []
+  const removals = deps.probe === true || provider.status !== 'ok' ? []
     : previous.map((row) => ({ provider: 'hark', accountKey: row.accountKey, removed: true }));
   return removals.length ? [provider, ...removals] : provider;
 }

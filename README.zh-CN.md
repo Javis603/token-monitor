@@ -286,7 +286,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 - Devin 从本地 `sessions.db` 追踪 Devin CLI 会话，并从 `acp-events` ACP 日志追踪 Devin Desktop 代理会话；同一 session 两边都有数据时以 CLI 数据库为准。Desktop 的覆盖范围取决于连接的 ACP 代理：只有会在本地写入 `usage_update` 事件的代理才会计入，而 Devin Desktop 默认的 `devin-cloud` 代理在服务端计量，因此默认的 Desktop 配置不会报告 Desktop token。session 标题与项目归属取自 CLI 数据库。详见 [Devin 数据来源说明](docs/providers/devin.md)。
 - Notion AI 使用内部 API，需要手动粘贴 `token_v2` Cookie 和明确的 Business/Enterprise 工作区 ID。目前仅以测试数据验证，尚无真实响应样本，实际登录验证待批准。不会自动获取 Cookie，也不保证公开 API 兼容性。详见 [Notion 数据来源说明](docs/providers/notion.md)。
 - Manus 支持 macOS／Windows 桌面会话自动读取，所有 OS（含 Linux）也可手动输入网页会话。月度积分、刷新额度与余额使用相同的未公开内部接口，不保证兼容性。详见 [Manus 数据来源说明](docs/providers/manus.md)。
-- Hark 在 macOS 上读取已登录的桌面会话，其他系统可粘贴会话 cookie。额度是账户级的每日与周期 token 池，不是本地 token 账本。详见 [Hark 数据来源说明](docs/providers/hark.md)。
+- Hark 在 macOS 上读取已登录的桌面会话，任何系统都可以粘贴会话 cookie。额度是账户级的每日与周期 token 池，不是本地 token 账本。详见 [Hark 数据来源说明](docs/providers/hark.md)。
 - MiniMax Code 读取 CLI 写入的本地会话记录，位于 `~/.minimax` 或 `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR`（也包括 `~/.mavis` 与 `~/.minimax-<profile>` / `~/.mavis-<profile>`），并加上通过 `tokscale headless mcode` 捕获的运行；两边都有的同一轮只计一次。
 
 - Command Code transcript 不包含实际 Token 数或每条消息的模型信息。Token 用量根据 transcript 文本估算；模型归属与推算成本可能反映当前配置的模型，而不是每次请求当时实际使用的模型。
