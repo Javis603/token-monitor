@@ -308,7 +308,7 @@ Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습�
 | 캐시 사용량／세션 캐시 적중률 | 캐시 필드를 제공하는 소스. 예: Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 캐시 사용량 데이터가 있을 때 적중률을 표시합니다. |
 | 예상 캐시 잔여 시간 | Claude Code | 기록된 캐시 유형에 따라 5분 또는 1시간으로 추정합니다. |
 | 출력 속도／토큰 소비 속도 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | 출력 속도는 `tok/s`, 전체 토큰 소비 속도는 `tok/min`이며, 측정 시간에 대기가 포함될 수 있습니다. |
-| 추론 강도 설정 | Claude Code, Codex | 세션에 명시적으로 기록된 설정값만 표시합니다. |
+| 세션 모델 및 추론 강도 | Claude Code, Codex | 세션에 명시적으로 기록된 모델과 추론 강도만 표시합니다. |
 | 추론 토큰 수 | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
 | 턴 시작／완료 감지 | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | 도구가 기록한 턴 신호를 사용합니다. 기타 도구나 유효한 신호가 없는 경우 마지막 활동 후 약 10분 동안 실행 중으로 추정합니다. |
 | 네이티브 실행 중／입력 대기 상태 | Claude Code, Codex | — |
