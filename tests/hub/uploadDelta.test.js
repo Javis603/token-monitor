@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { createHub } = require('../../src/hub/server');
+const { MAX_UPLOAD_BYTES } = require('../../src/shared/uploadDelta');
 const { createSyncPayloadUploader, serializeSyncPayload } = require('../../src/shared/syncPayload');
 const { mergeSyncDeviceRecord } = require('../../src/shared/usage');
 const { summaryForUpload } = require('../fixtures/syncUpload');
@@ -164,7 +165,7 @@ test('Worker bounds chunked delta input before JSON parsing and cancels an overs
   let chunks = 0;
   const body = new ReadableStream({
     pull(controller) {
-      if (chunks++ < 3) controller.enqueue(new Uint8Array(600000));
+      if (chunks++ < 3) controller.enqueue(new Uint8Array(Math.floor(MAX_UPLOAD_BYTES / 2) + 1));
       else controller.close();
     },
     cancel() { cancelled = true; }
@@ -192,7 +193,7 @@ test('Worker bounds chunked full ingest before JSON parsing and cancels an overs
   let chunks = 0;
   const body = new ReadableStream({
     pull(controller) {
-      if (chunks++ < 3) controller.enqueue(new Uint8Array(600000));
+      if (chunks++ < 3) controller.enqueue(new Uint8Array(Math.floor(MAX_UPLOAD_BYTES / 2) + 1));
       else controller.close();
     },
     cancel() { cancelled = true; }
@@ -216,9 +217,9 @@ test('Worker bounds chunked full ingest before JSON parsing and cancels an overs
   assert.equal((await hub.device()).history.daily.length, 151);
 });
 
-test('Worker full ingest accepts exactly 1 MiB of UTF-8 and rejects one extra byte without invalidating its baseline', async t => {
+test('Worker full ingest accepts a body at the UTF-8 ceiling and rejects one extra byte without invalidating its baseline', async t => {
   const hub = await backend('Worker', t);
-  const limit = 1024 * 1024;
+  const limit = MAX_UPLOAD_BYTES;
   const payload = { ...summaryForUpload(), padding: '' };
   const paddingBytes = limit - Buffer.byteLength(JSON.stringify(payload));
   payload.padding = '字'.repeat(Math.floor(paddingBytes / 3)) + 'x'.repeat(paddingBytes % 3);

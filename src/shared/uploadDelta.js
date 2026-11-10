@@ -4,7 +4,10 @@ const { applyStatsPatch } = require('./hubDelta');
 
 const UPLOAD_HEADER = 'x-token-monitor-upload';
 const UPLOAD_VERSION = '1';
-const MAX_UPLOAD_BYTES = 1024 * 1024;
+// SQLite Durable Object storage allows 8 MB for the key and value together.
+// Stay at 2 MiB so the `dev:` key and a merged record still fit. Baseline
+// storage defaults to 16 times this value.
+const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 
 function uploadError(code, status) {
   return Object.assign(new Error(code), { code, status });

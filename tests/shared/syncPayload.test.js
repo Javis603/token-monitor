@@ -611,7 +611,8 @@ test('serializeSyncPayload omits an oversized period project rollup as a final f
 });
 
 test('postSyncPayload reports omitted session detail without changing period totals', async () => {
-  const sessions = Object.fromEntries(Array.from({ length: 2600 }, (_, index) => [
+  const sessionCount = 6000;
+  const sessions = Object.fromEntries(Array.from({ length: sessionCount }, (_, index) => [
     `claude:s${index}`,
     { client: 'claude', sessionId: `s${index}`, totalTokens: 100, lastUsedAt: `2026-07-${String((index % 28) + 1).padStart(2, '0')}T00:00:00.000Z`, projectId: 'sha256:large', projectLabel: 'x'.repeat(256), models: { opus: 100 } }
   ]));
@@ -623,14 +624,14 @@ test('postSyncPayload reports omitted session detail without changing period tot
   }, 'http://hub/api/ingest', {
     summary: {
       deviceId: 'large',
-      month: { totalTokens: 260000, sessions, projects: { large: { label: 'Large', tokens: 260000, costUsd: 0, clients: { claude: 260000 } } } },
-      allTime: { totalTokens: 260000 }
+      month: { totalTokens: sessionCount * 100, sessions, projects: { large: { label: 'Large', tokens: sessionCount * 100, costUsd: 0, clients: { claude: sessionCount * 100 } } } },
+      allTime: { totalTokens: sessionCount * 100 }
     },
     logger: (message) => logs.push(message)
   });
 
   assert.equal(response.ok, true);
-  assert.equal(posted.month.totalTokens, 260000);
+  assert.equal(posted.month.totalTokens, sessionCount * 100);
   assert.ok(Buffer.byteLength(JSON.stringify(posted), 'utf8') <= SYNC_PAYLOAD_BUDGET_BYTES);
   assert.deepEqual(posted.sessionDetailsOmitted, payload.sessionDetailsOmitted);
   assert.ok(payload.sessionDetailsOmitted.month > 0);
