@@ -96,6 +96,7 @@
     { id: 'alibaba', label: 'Alibaba Cloud', color: '#615CED', widgetColor: '#7771F4' },
     { id: 'stepfun', label: 'StepFun', color: '#000000', widgetInk: true },
     { id: 'nvidia', label: 'NVIDIA', color: '#74B71B' },
+    { id: 'thinkingmachines', label: 'Thinking Machines', color: '#000000', widgetInk: true },
     { id: 'typesafe', label: 'TypeSafe', color: '#000000', widgetInk: true },
     { id: 'notion', label: 'Notion AI', color: '#FFFFFF' },
     { id: 'manus', label: 'Manus', color: '#FFFFFF' },
