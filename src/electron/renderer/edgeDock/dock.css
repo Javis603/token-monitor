@@ -903,8 +903,10 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
   gap: 5px;
   color: var(--muted);
   font-size: 10.5px;
-  flex-shrink: 0;
+  min-width: 0;
+  max-width: 55%;
 }
+.edge-dock-rate-status > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edge-dock-rate-dot {
   width: 5px;
   height: 5px;

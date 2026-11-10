@@ -1698,7 +1698,9 @@ function liveRateChartNode(cell) {
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '-3 0 150 64');
   svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', t('edgeDock.rate.history'));
+  svg.setAttribute('aria-label', t('edgeDock.rate.history', {
+    unit: t(cell.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit')
+  }));
   const { points } = window.TokenMonitorTokenRate.liveTokenRateChart(cell.rateHistory, Date.now(), cell.rateMode);
   const baseline = document.createElementNS(SVG_NS, 'path');
   baseline.setAttribute('d', 'M0 59H144');

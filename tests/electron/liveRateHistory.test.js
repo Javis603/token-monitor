@@ -57,7 +57,7 @@ test('sparse rate charts form one consistent line with one endpoint', () => {
   const node = tag => ({ tag, attributes: {}, children: [], setAttribute(key, value) { this.attributes[key] = String(value); }, append(...children) { this.children.push(...children); } });
   const render = vm.runInNewContext(`${source}; liveRateChartNode`, {
     el: tag => node(tag), document: { createElementNS: (_, tag) => node(tag) }, SVG_NS: 'svg',
-    window: { TokenMonitorTokenRate: tokenRateApi }, Date: { now: () => 100_000 }, t: key => key
+    window: { TokenMonitorTokenRate: tokenRateApi }, Date: { now: () => 100_000 }, t: (key, params) => require('../../src/electron/renderer/i18n').translate('en', key, params)
   });
   const chart = render({ rateMode: 'speed', rateHistory: [
     { at: 1000, speed: 37, burn: 390200 },
@@ -67,6 +67,9 @@ test('sparse rate charts form one consistent line with one endpoint', () => {
     { at: 80_000, speed: 37, burn: 390200 }
   ] });
   const svg = chart.children[0];
+  assert.match(svg.attributes['aria-label'], /Up to 60.*tok\/s/);
+  const emptyBurn = render({ rateMode: 'burn', rateHistory: [] }).children[0];
+  assert.match(emptyBurn.attributes['aria-label'], /Up to 60.*TPM/);
   const dots = svg.children.filter(child => child.tag === 'circle');
   assert.equal(dots.length, 1, 'isolated old readings must not become a scatter plot');
   assert.equal(Number(dots[0].attributes.cx), 144, 'the latest sample ends at the right edge');
