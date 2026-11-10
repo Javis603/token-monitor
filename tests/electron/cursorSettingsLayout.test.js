@@ -3472,3 +3472,24 @@ test('QwenWork login reconfigures the newly enabled provider before invalidation
   assert.equal(result.ok, true);
   assert.deepEqual(calls, [['config', 'claude,qwenwork'], ['invalidate']]);
 });
+
+test('QwenWork upgrade migration preserves environment-only provider selections', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const start = main.indexOf('    if (saved.limitProviders !== undefined) {');
+  const end = main.indexOf('    if (saved.clientDisplayOrder !== undefined)', start);
+  const migration = functionBody(main, 'migrateQwenworkLimitProvider', 'migrateQwenworkHomeLimitProvider');
+  const parseLimitProviders = value => String(value || '').split(',').filter(Boolean);
+  for (const [saved, expected, pending] of [
+    [{}, 'claude', false],
+    [{ limitProviders: 'codex' }, 'codex,qwenwork', true],
+    [{ limitProviders: '' }, '', false],
+    [{ limitProviders: 'codex', limitProviderOrder: 'codex,qwenwork' }, 'codex', false]
+  ]) {
+    const context = { saved, merged: { limitProviders: 'claude', limitProviderOrder: 'claude,codex' },
+      qwenworkLimitProviderPersistPending: false, parseLimitProviders,
+      migrateLimitProviders: value => value, migrateLimitProviderOrder: value => value };
+    vm.runInNewContext(migration + main.slice(start, end), context);
+    assert.equal(context.merged.limitProviders, expected);
+    assert.equal(context.qwenworkLimitProviderPersistPending, pending);
+  }
+});

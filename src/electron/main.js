@@ -2821,7 +2821,10 @@ function readSettings() {
     if (saved.limitProviderOrder !== undefined) {
       merged.limitProviderOrder = migrateLimitProviderOrder(saved.limitProviderOrder);
     }
-    if (migrateQwenworkLimitProvider(merged, { hadSavedOrder: saved.limitProviderOrder !== undefined })) qwenworkLimitProviderPersistPending = true;
+    if (saved.limitProviders !== undefined
+      && migrateQwenworkLimitProvider(merged, { hadSavedOrder: saved.limitProviderOrder !== undefined })) {
+      qwenworkLimitProviderPersistPending = true;
+    }
     if (saved.clientDisplayOrder !== undefined) {
       merged.clientDisplayOrder = migrateClientDisplayOrder(saved.clientDisplayOrder);
     }
