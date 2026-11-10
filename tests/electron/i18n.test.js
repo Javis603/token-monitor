@@ -421,3 +421,32 @@ test('Notch settings and shared labels are present in every bundled locale', () 
   assert.equal(translate('zh-CN', 'settings.notch.iconRings'), '显示额度与采集状态');
   assert.equal(translate('zh-CN', 'settings.notch.summaryMode.tray'), '与菜单栏相同');
 });
+
+test('Spanish subscription cadence pluralizes months and years without changing other locales', () => {
+  const { cadenceText } = require('../../src/shared/subscriptionText');
+  const es = (key, params) => translate('es', key, params);
+  for (const [interval, one, many] of [['month', 'mes', 'meses'], ['year', 'año', 'años']]) {
+    assert.equal(cadenceText(es, { interval, intervalCount: 1 }), one);
+    assert.equal(cadenceText(es, { interval, intervalCount: 2 }), `2 ${many}`);
+    assert.equal(cadenceText(es, { interval, intervalCount: 12 }), `12 ${many}`);
+    for (const locale of Object.keys(MESSAGES).filter(locale => locale !== 'es')) {
+      const unit = MESSAGES[locale][`settings.subscriptions.unit${interval === 'year' ? 'Year' : 'Month'}`];
+      const expected = MESSAGES[locale]['settings.subscriptions.everyN'].replace('{count}', '2').replace('{unit}', unit);
+      assert.equal(cadenceText((key, params) => translate(locale, key, params), { interval, intervalCount: 2 }), expected, locale);
+    }
+  }
+  const params = Object.freeze({ count: 2, unit: 'mes' });
+  assert.equal(es('settings.subscriptions.everyN', params), '2 meses');
+  assert.equal(params.unit, 'mes');
+});
+
+test('Spanish quantity labels use count-neutral wording for one and multiple items', () => {
+  for (const count of [0, 1, 2]) {
+    assert.equal(translate('es', 'subscription.tooltip.months', { months: count }), `Meses: ${count}`);
+    assert.equal(translate('es', 'home.activeDays', { count }), `Días activos: ${count}`);
+    assert.equal(translate('es', 'home.activeDaysYear', { count }), `Días activos (últimos 12 meses): ${count}`);
+    for (const key of Object.keys(MESSAGES.es).filter(key => key.endsWith('.nAccounts'))) {
+      assert.equal(translate('es', key, { count }), `Cuentas: ${count}`, key);
+    }
+  }
+});

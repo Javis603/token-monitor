@@ -12414,7 +12414,7 @@
       "settings.views.configureLimits": "Configurar {name}",
       "settings.cursor.cookiePage": "Si el inicio de sesión te redirige a grok.com/dashboard, haz clic de nuevo en «Abrir panel de Cursor» para volver a cursor.com en el mismo navegador. Copia la cookie de Cursor, no una cookie de Grok.",
       "settings.cursor.cookieMissing": "Si no aparece la cookie, inicia sesión en la aplicación de escritorio de Cursor y vuelve a abrir esta sección para detectar la cuenta.",
-      "settings.minimax.nAccounts": "{count} cuentas",
+      "settings.minimax.nAccounts": "Cuentas: {count}",
       "settings.minimax.accountFallback": "Cuenta {number}",
       "settings.minimax.codeNote": "Los planes y créditos de MiniMax Code se detectan a partir de la sesión actual de este dispositivo, junto con la clave de API de abajo. La renovación automática de la sesión requiere la CLI de MiniMax Code; si no está disponible, abre MiniMax Code para actualizar tu sesión.",
       "settings.trae.cookie": "Cookie del navegador (recomendado)",
@@ -12720,7 +12720,7 @@
       "settings.workbuddy.loginCancelled": "Inicio de sesión cancelado.",
       "settings.workbuddy.notConfigured": "Detectar automáticamente",
       "settings.workbuddy.connected": "{linked}/{total} activadas",
-      "settings.workbuddy.nAccounts": "{count} cuentas",
+      "settings.workbuddy.nAccounts": "Cuentas: {count}",
       "settings.workbuddy.accountFallback": "Cuenta {number}",
       "settings.workbuddy.disabled": "Desactivada",
       "settings.workbuddy.notChecked": "Sin comprobar",
@@ -13075,7 +13075,7 @@
       "subscription.tooltip.autoRenew": "Renovación automática",
       "subscription.tooltip.autoRenewOff": "Desactivada",
       "subscription.tooltip.subscribed": "Tiempo suscrito",
-      "subscription.tooltip.months": "{months} meses",
+      "subscription.tooltip.months": "Meses: {months}",
       "subscription.tooltip.daysCount": "{days} d",
       "subscription.tooltip.notStarted": "Empieza más adelante",
       "subscription.tooltip.paidTotal": "{total} en total",
@@ -13269,8 +13269,8 @@
       "home.emptyTitle": "Inicio está vacío",
       "home.emptyBody": "Muestra módulos en Inicio para crear tu resumen.",
       "home.customize": "Personalizar Inicio",
-      "home.activeDays": "{count} días activos",
-      "home.activeDaysYear": "{count} días activos en los últimos 12 meses",
+      "home.activeDays": "Días activos: {count}",
+      "home.activeDaysYear": "Días activos (últimos 12 meses): {count}",
       "home.lastDays": "Últimos {count} días",
       "home.lastMonths": "Últimos {count} meses",
       "home.activityScroll": "Actividad de tokens de los últimos 12 meses con desplazamiento",
@@ -13366,7 +13366,7 @@
       "settings.clientDisplay.moveUp": "Subir {name} en la lista de CLI",
       "settings.clientDisplay.moveDown": "Bajar {name} en la lista de CLI",
       "settings.codex.title": "Cuentas de Codex",
-      "settings.codex.nAccounts": "{count} cuentas",
+      "settings.codex.nAccounts": "Cuentas: {count}",
       "settings.codex.description": "Inicia sesión en cada cuenta de Codex que quieras seguir. El seguimiento utiliza inicios de sesión gestionados y aislados; cambia la cuenta local de Codex desde la página Límites.",
       "settings.codex.addAccount": "Añadir cuenta",
       "settings.codex.refresh": "Actualizar",
@@ -13401,9 +13401,9 @@
       "limits.codex.activeAccountHint": "Local",
       "limits.codex.switchAccountTitle": "Usar {account} como cuenta de Codex de este dispositivo",
       "settings.mimo.title": "Cuenta de Xiaomi MiMo",
-      "settings.mimo.nAccounts": "{count} cuentas",
-      "settings.cursor.nAccounts": "{count} cuentas",
-      "settings.cline.nAccounts": "{count} cuentas",
+      "settings.mimo.nAccounts": "Cuentas: {count}",
+      "settings.cursor.nAccounts": "Cuentas: {count}",
+      "settings.cline.nAccounts": "Cuentas: {count}",
       "settings.mimo.description": "Inicia sesión en Xiaomi MiMo en tu navegador y pega la cabecera Cookie de la solicitud. Token Monitor conserva solo las cookies necesarias para las solicitudes de saldo y Token Plan.",
       "settings.mimo.desktopAccount": "MiMo Desktop",
       "settings.mimo.cookieLabel": "Cabecera Cookie",
@@ -13447,7 +13447,7 @@
       "settings.claude.organizationSelect": "Elige qué organización de Claude quieres supervisar.",
       "settings.claude.organizationUnavailable": "La organización de Claude seleccionada ya no está disponible. Elige otra.",
       "settings.claude.organizationLoadFailed": "No se han podido cargar las organizaciones de Claude. Actualiza esta cuenta para reintentarlo.",
-      "settings.claude.nAccounts": "{count} cuentas",
+      "settings.claude.nAccounts": "Cuentas: {count}",
       "settings.claude.openBrowser": "Abrir uso de Claude en el navegador",
       "settings.claude.note": "Las cuentas de Claude Web se recopilan junto con la cuenta OAuth o CLI de Claude Code detectada automáticamente. Añade cada inicio de sesión web por separado; las cookies permanecen en este dispositivo.",
       "settings.claude.updateAccount": "Actualizar inicio de sesión",
@@ -13546,7 +13546,7 @@
       "settings.opencode.connectFailed": "Ha fallado la conexión",
       "settings.opencode.saveFailedShort": "Error al guardar",
       "settings.opencode.connected": "{linked}/{total} conectadas",
-      "settings.opencode.nAccounts": "{count} cuentas",
+      "settings.opencode.nAccounts": "Cuentas: {count}",
       "settings.openrouter.title": "Cuentas de OpenRouter",
       "settings.openrouter.openBrowser": "Abrir claves de API de OpenRouter",
       "settings.openrouter.note": "Añade una clave de API de OpenRouter para ver el uso, el límite de la clave y el saldo disponible. Se admiten tanto claves normales como de la API de gestión. Las claves permanecen en este dispositivo y solo se utilizan endpoints oficiales de OpenRouter.",
@@ -13562,7 +13562,7 @@
       "settings.openrouter.invalidKey": "Clave de API no válida",
       "settings.openrouter.unavailable": "No disponible",
       "settings.openrouter.connected": "{linked}/{total} conectadas",
-      "settings.openrouter.nAccounts": "{count} cuentas",
+      "settings.openrouter.nAccounts": "Cuentas: {count}",
       "settings.openrouter.environment": "Entorno",
       "settings.openrouter.saveFailedShort": "Error al guardar",
       "settings.profiles.disabled": "Desactivada",
@@ -13642,7 +13642,7 @@
       "settings.thirdparty.missingSub2ApiToken": "Pega el token de acceso del panel desde «auth_token» en localStorage.",
       "settings.thirdparty.unavailable": "No disponible o endpoint incompatible con este tipo de consulta",
       "settings.thirdparty.connected": "{linked}/{total} conectadas",
-      "settings.thirdparty.nAccounts": "{count} cuentas",
+      "settings.thirdparty.nAccounts": "Cuentas: {count}",
       "settings.thirdparty.environment": "Entorno",
       "settings.thirdparty.saveFailedShort": "Error al guardar",
       "settings.thirdparty.unlimited": "Unlimited",
@@ -14015,7 +14015,7 @@
       "settings.limits.providerOptions": "Opciones de {provider}",
       "settings.limits.usageItems": "Elementos de uso visibles",
       "settings.limits.usageItemsRestore": "Restaurar valores predeterminados",
-      "settings.limits.usageItemUnavailable": "{item} (no comunicado ahora)",
+      "settings.limits.usageItemUnavailable": "{item} (no aparece en los datos actuales)",
       "settings.limits.connection.title": "Conexión",
       "settings.limits.connection.autoDetect": "Detectar automáticamente",
       "settings.limits.connection.antigravity": "Usa la detección RPC local automática o añade cuentas de Google para consultar cuotas mediante OAuth.",
@@ -14026,7 +14026,7 @@
       "settings.antigravity.loginStatus": "Completa el inicio de sesión en tu navegador. Token Monitor continuará automáticamente.",
       "settings.antigravity.notConfigured": "Sin configurar",
       "settings.antigravity.connected": "{linked}/{total} vinculadas",
-      "settings.antigravity.nAccounts": "{count} cuentas",
+      "settings.antigravity.nAccounts": "Cuentas: {count}",
       "settings.antigravity.accountFallback": "Cuenta {number}",
       "settings.antigravity.enabled": "Activada",
       "settings.antigravity.disabled": "Desactivada",
@@ -14199,7 +14199,7 @@
       "settings.notch.shape": "Forma de la entrada",
       "settings.notch.shape.auto": "Automática",
       "settings.notch.shape.notch": "Notch",
-      "settings.notch.shape.pill": "Píldora",
+      "settings.notch.shape.pill": "Cápsula",
       "settings.notch.showSummary": "Mostrar resumen contraído",
       "settings.notch.showSummaryNote": "Desactivado: oculta el resumen cuando está cerrado.",
       "settings.edgeDock.mode.always": "Siempre visible",
@@ -17223,8 +17223,13 @@
   function translate(locale, key, params = {}) {
     const resolved = normalizeLanguage(locale) === 'auto' ? 'en' : normalizeLanguage(locale);
     const template = MESSAGES[resolved]?.[key] ?? MESSAGES.en[key] ?? key;
+    // The subscription formatter supplies a singular unit; Spanish cadence
+    // phrases need its plural only when the interval spans multiple units.
+    const pluralUnit = resolved === 'es' && key === 'settings.subscriptions.everyN' && Number(params.count) !== 1
+      ? { mes: 'meses', año: 'años' }[params.unit] : undefined;
     return String(template).replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, name) => {
-      return params[name] === undefined || params[name] === null ? '' : String(params[name]);
+      const value = name === 'unit' ? pluralUnit ?? params[name] : params[name];
+      return value === undefined || value === null ? '' : String(value);
     });
   }
 

@@ -1105,7 +1105,7 @@
         "es": {
           "stringUnit": {
             "state": "translated",
-            "value": "%lld días activos"
+            "value": "Días activos: %lld"
           }
         },
         "zh-Hans": {
@@ -2038,7 +2038,7 @@
             "value": "%@ tokens · %lld active days"
           }
         },
-        "es": { "stringUnit": { "state": "translated", "value": "%@ tokens · %lld días activos" } },
+        "es": { "stringUnit": { "state": "translated", "value": "%@ tokens · Días activos: %lld" } },
         "zh-Hans": {
           "stringUnit": {
             "state": "translated",
