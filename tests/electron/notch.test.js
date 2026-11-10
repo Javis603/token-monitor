@@ -672,7 +672,7 @@ test('disabling only the side dock preserves the shared rate expiry timer for th
   let topRunning = true;
   const context = { settings: {}, syncPluginQuotaSurfaceDemand() {}, syncNotch() {}, canUseEdgeDock: () => false,
     edgeDockController: { stop() {} }, notchController: { isRunning: () => topRunning },
-    edgeDockRateTimer: 42, clearTimeout: (timer) => cleared.push(timer) };
+    edgeDockRateTimer: 42, edgeDockRateTracker: null, edgeDockRateContext: '', edgeDockRateHistory: require('../../src/electron/renderer/tokenRatePresentation').createLiveTokenRateHistory(), clearTimeout: (timer) => cleared.push(timer) };
   vm.runInNewContext(`${code}; syncDockSurfaces({});`, context);
   assert.deepEqual(cleared, [], 'top-only live rate must still go idle without another data push');
   assert.equal(context.edgeDockRateTimer, 42);
@@ -707,7 +707,7 @@ test('top and side reuse projection with independent ordered selections', () => 
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   const fn = source.slice(source.indexOf('function edgeDockCellsFor('), source.indexOf('function updateEdgeDockCells('));
   const settings = { edgeDockItems: [{ type: 'stat', metric: 'today' }], notchItems: [{ type: 'stat', metric: 'sessions', groupBy: 'client' }] };
-  const context = { settings, desktopQuotaStats: s => s, pluginRuntime: null, buildEdgeDockCells, refreshEdgeDockDerivedPeriods() {}, refreshEdgeDockForecast() {}, syncCodexPresentationActiveAccount() {}, edgeDockDerivedPeriods: {}, edgeDockForecastWanted: () => false, edgeDockForecast: null, syncProvenanceActive: () => false, codexAccountsForRenderer: () => [], codexPresentationPendingAccountId: null, codexPresentationActiveAccountId: null, edgeDockLiveRateSample: () => null };
+  const context = { settings, desktopQuotaStats: s => s, pluginRuntime: null, buildEdgeDockCells, refreshEdgeDockDerivedPeriods() {}, refreshEdgeDockForecast() {}, syncCodexPresentationActiveAccount() {}, edgeDockDerivedPeriods: {}, edgeDockForecastWanted: () => false, edgeDockForecast: null, syncProvenanceActive: () => false, codexAccountsForRenderer: () => [], codexPresentationPendingAccountId: null, codexPresentationActiveAccountId: null, edgeDockRateHistory: require('../../src/electron/renderer/tokenRatePresentation').createLiveTokenRateHistory(), edgeDockLiveRateSample: () => null };
   vm.createContext(context);vm.runInContext(fn, context);
   assert.equal(context.edgeDockCellsFor(stats())[0].id, 'stat:today');
   assert.equal(context.edgeDockCellsFor(stats(), settings.notchItems)[0].id, 'stat:sessions');

@@ -62,7 +62,7 @@ function fixture() {
     codexAccountsForRenderer: () => [],
     codexPresentationPendingAccountId: '',
     codexPresentationActiveAccountId: '',
-    edgeDockLiveRateSample: () => null,
+    edgeDockRateHistory: require('../../src/electron/renderer/tokenRatePresentation').createLiveTokenRateHistory(), edgeDockLiveRateSample: () => null,
     statsHistoryRevision: (stats) => stats?.historyRevision,
     injectLocalDeviceStatus: (stats) => stats,
     getSyncContentRuntime: () => ({ notifyStats() {} }),

@@ -724,6 +724,7 @@
         kind: 'stat',
         metric,
         rateDevices: sample?.devices || [],
+        rateHistory: options.liveRateHistory || [],
         rateMode: options.tokenRateMode === 'burn' ? 'burn' : 'speed',
         rate: sample ? (options.tokenRateMode === 'burn' ? sample.burn : sample.speed) : null,
         speed: sample ? finite(sample.speed) : null,
