@@ -26,7 +26,7 @@ async function until(predicate) {
   }
 }
 
-function fixture(t, { historyEnabled = true, cursorGraphFailure = false, syncFailure = false, localGate = null } = {}) {
+function fixture(t, { historyEnabled = true, cursorGraphFailure = false, syncFailure = false, localGate = null, cursorReadGate = null } = {}) {
   const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cursor-background-'));
   const collectorPath = require.resolve('../../src/shared/collector');
   delete require.cache[collectorPath];
@@ -65,6 +65,7 @@ function fixture(t, { historyEnabled = true, cursorGraphFailure = false, syncFai
       if (cursor) {
         assert.equal(input.offline, true);
         assert.equal(input.cursorLifecycleHeld, true);
+        if (cursorReadGate) await cursorReadGate.promise;
         if (cursorReadFailure) throw new Error('simulated Cursor cache read failure');
       } else {
         assert.equal(input.clients, 'codex', 'local reports must never enter the Cursor lifecycle lane');
@@ -87,6 +88,7 @@ function fixture(t, { historyEnabled = true, cursorGraphFailure = false, syncFai
   t.after(async () => {
     runtime.stop();
     localGate?.resolve();
+    cursorReadGate?.resolve();
     for (const gate of gates) gate.resolve();
     await runtime.whenIdle();
     fs.rmSync(homeDir, { recursive: true, force: true });
@@ -435,4 +437,19 @@ test('a same-day timezone change rereads every Cursor period in the new timezone
   assert.equal(latest.periodWindows.timeZone, 'UTC');
   for (const period of ['today', 'month', 'allTime']) assert.equal(latest[period].clients.cursor, 20);
   assert.deepEqual(errors, []);
+});
+
+
+test('an incomplete initial Cursor cache cannot replace retained History with native-only data', async t => {
+  const cursorReadGate = deferred();
+  const f = fixture(t, { cursorReadGate });
+  await until(() => f.updates.length > 0);
+  assert.equal(f.syncs.length, 0, 'the initial offline cache read is still pending');
+  assert.ok(f.updates.every(summary => !Object.hasOwn(summary, 'history')),
+    'revision 0 is incomplete, so native-only History must not replace the retained complete result');
+  cursorReadGate.resolve();
+  await until(() => f.updates.some(summary => summary.history?.summary.totalTokens === 22));
+  assert.equal(f.updates.at(-1).today.clients.cursor, 12);
+  assert.equal(f.updates.at(-1).history.summary.activeDaysComplete, true);
+  assert.deepEqual(f.errors, []);
 });

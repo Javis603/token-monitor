@@ -1439,7 +1439,9 @@ async function collectUsageOnce(options) {
     const history = await collectHistoryOnce({
       clients: cursorSnapshot ? withoutCursor(normalizedClients) : normalizedClients,
       cursorGraph: cursorSnapshot?.graph,
-      cursorGraphFailed: cursorSnapshot?.graphFailed,
+      // Revision 0 has no complete Cursor graph yet. Retain the previous
+      // cross-client History until the initial offline snapshot is ready.
+      cursorGraphFailed: cursorSnapshot?.revision === 0 || cursorSnapshot?.graphFailed,
       codexLocalGraph: codexLocalView?.graph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,
