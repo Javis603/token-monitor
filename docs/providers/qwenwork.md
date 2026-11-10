@@ -44,7 +44,7 @@ Requests use the injected transport, `credentials: 'omit'`, `redirect: 'error'`,
 ## Invariants and known gaps
 
 - No token components, message counts or per-session billing are reported. QwenWork does not expose them locally.
-- Upgrading installs with a saved AI Tool Limits selection seed QwenWork into that selection and a custom Home limits order once; environment-only selections are not migrated or saved by this upgrade. Removing it afterwards is respected through `qwenworkHomeLimitProviderSeeded`.
+- Upgrading installs with a non-empty saved AI Tool Limits selection seed QwenWork into that selection and a custom Home limits order once; environment-only selections are not migrated or saved by this upgrade. An explicitly empty saved selection stays empty until the user enables a provider or signs in. Removing QwenWork afterward is respected through `qwenworkHomeLimitProviderSeeded`.
 - With no stored session and no fallback token it reports `notConfigured` and performs no network request. Settings offers the browser sign-in and explains the fallback through `settings.limits.connection.qwenwork`.
 - The gateway reports percentages as fractions (`0.9893` for 98.93%). Parsing multiplies only when the value matches the raw fraction, so a genuine sub-1% percentage survives.
 - Credit resets are visible only as the plan window's `resetsAt`; a reset does not create historical token rows.
