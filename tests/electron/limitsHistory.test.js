@@ -917,25 +917,25 @@ function previewFixture(t, { platform = 'win32', nativeRegions = false } = {}) {
   return f;
 }
 
-test('macOS history moves and resizes its silhouette without resizing the native canvas', async t => {
+test('macOS history keeps its screenshot bounds fitted to the moving card', async t => {
   const f = previewFixture(t, { platform: 'darwin' });
   await f.open();
-  assert.deepEqual(f.window.bounds, { x: 408, y: 0, width: 310, height: 900 });
+  assert.deepEqual(f.window.bounds, { x: 408, y: 128, width: 310, height: 420 });
+  assert.deepEqual(f.shapes.at(-1), { y: 0, height: 420 });
   const writes = f.boundsWrites.length;
   f.contentHeight = 300;
   await f.open('b', false, { x: 0, y: 350, width: 300, height: 100 });
   assert.ok(f.frame);
   for (const time of [80, 160, 320]) { f.clock = time; f.frame(); }
-  assert.equal(f.boundsWrites.length, writes, 'spring samples must not resize/move the native canvas');
-  assert.notEqual(f.shapes.at(-1).y, 128);
-  assert.notEqual(f.shapes.at(-1).height, 420);
-  const painted = f.shapes.at(-1);
+  assert.ok(f.boundsWrites.length > writes, 'the native screenshot rectangle follows the spring');
+  assert.deepEqual(f.shapes.at(-1), { y: 0, height: f.window.bounds.height });
+  const painted = { ...f.window.bounds };
   await f.open('c', false, { x: 0, y: 150, width: 300, height: 100 });
-  assert.deepEqual(f.shapes.at(-1), painted, 'a rapid switch starts at the painted frame, not the canvas bounds');
+  assert.deepEqual(f.window.bounds, painted, 'rapid switches retarget from the painted frame');
   f.clock = 1000; f.frame();
-  assert.deepEqual(f.shapes.at(-1), { y: 228, height: 300 });
-  assert.equal(f.boundsWrites.length, writes);
-  assert.equal(f.controller.containsPoint({ x: 420, y: 10 }), false, 'transparent canvas is not the card');
+  assert.deepEqual(f.window.bounds, { x: 408, y: 228, width: 310, height: 300 });
+  assert.deepEqual(f.shapes.at(-1), { y: 0, height: 300 });
+  assert.equal(f.controller.containsPoint({ x: 420, y: 10 }), false);
   assert.equal(f.controller.containsPoint({ x: 420, y: 250 }), true);
 });
 

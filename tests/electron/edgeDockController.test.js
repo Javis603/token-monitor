@@ -2555,10 +2555,10 @@ test('macOS floating rail retains a held press before the renderer crosses its d
 });
 
 
-for (const side of ['left', 'right']) {
-  test(`detail card switches animate native geometry without delaying content (${side})`, (t) => {
+for (const platform of ['darwin', 'win32']) for (const side of ['left', 'right']) {
+  test(`detail card screenshot bounds follow the spring without delaying content (${platform}, ${side})`, (t) => {
     const advance = mockDockClock(t);
-    const fixture = createFixture({ platform: 'darwin', nativeGlass: true, prefersReducedMotion: () => false, settings: { edgeDockSide: side } });
+    const fixture = createFixture({ platform, nativeGlass: true, prefersReducedMotion: () => false, settings: { edgeDockSide: side } });
     t.after(() => fixture.controller.stop());
     const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
     const open = (cellIndex, cellId, height) => {
@@ -2569,7 +2569,8 @@ for (const side of ['left', 'right']) {
     };
     open(0, 'claude', 180);
     advance(160);
-    const from = paintedCardBounds(card), canvas = card.getBounds();
+    const from = paintedCardBounds(card);
+    assert.deepEqual(card.getBounds(), from, 'a window screenshot contains only the visible card');
     const opacity = card.opacity;
     open(2, 'cursor', 300);
     assert.deepEqual(paintedCardBounds(card), from, 'switch starts at the painted position, not the destination');
@@ -2580,13 +2581,15 @@ for (const side of ['left', 'right']) {
     const middle = paintedCardBounds(card);
     const contentTarget = card.webContents.messages.at(-1).payload.shape.contentTarget;
     assert.equal(contentTarget.height, 300, 'the content keeps its natural destination height while the outline resizes');
-    assert.notEqual(contentTarget.y, middle.y - canvas.y, 'content is not pinned to the moving top edge');
+    const destinationY = card.getBounds().y + contentTarget.y;
     advance(16);
-    assert.deepEqual(card.webContents.messages.at(-1).payload.shape.contentTarget, contentTarget, 'outline frames do not move the destination layout');
+    const nextTarget = card.webContents.messages.at(-1).payload.shape.contentTarget;
+    assert.equal(nextTarget.height, contentTarget.height, 'outline frames retain the natural content height');
+    assert.equal(card.getBounds().y + nextTarget.y, destinationY, 'the destination is relative to the moving window origin');
     const retargetFrom = paintedCardBounds(card);
     assert.ok(middle.height > from.height && middle.height < 300);
     assert.notEqual(middle.y, from.y);
-    assert.deepEqual(card.getBounds(), canvas, 'the native canvas does not move or resize while its card moves');
+    assert.deepEqual(card.getBounds(), paintedCardBounds(card), 'native screenshot bounds stay fitted during motion');
     assert.equal(card.opacity, opacity, 'no fade-out or hidden interval');
     assert.equal(card.webContents.messages.filter(m => m.channel === 'edgeDock:render').length, renders, 'animation does not rebuild content');
     assert.ok(card.webContents.messages.some(m => m.channel === 'edgeDock:shapeFrame'));
@@ -2597,7 +2600,8 @@ for (const side of ['left', 'right']) {
     const final = paintedCardBounds(card);
     assert.equal(final.height, 220);
     assert.equal(sentPayload(card, 'bubble').cell.id, 'codex');
-    assert.ok(fixture.maskWindows.length > masks, 'native material follows the animated silhouette');
+    if (platform === 'darwin') assert.ok(fixture.maskWindows.length > masks, 'native material follows the animated silhouette');
+    assert.deepEqual(card.getBounds(), final, 'settled screenshots have no transparent canvas above or below');
     const frames = card.webContents.messages.filter(m => m.channel === 'edgeDock:shapeFrame').length;
     fixture.screen.point = { x: final.x + 20, y: final.y + 20 };
     advance(160);
@@ -2627,23 +2631,23 @@ for (const side of ['left', 'right']) {
     };
     open(0);
     advance(160);
-    const canvas = card.getBounds();
     for (const next of [7, 0, 5, 2, 7]) {
       const previous = paintedCardBounds(card);
       open(next);
       assert.deepEqual(paintedCardBounds(card), previous, 'every selection starts at the current painted position');
-      const target = sentPayload(card, 'bubble').shape.contentTarget;
+      const targetY = card.getBounds().y + sentPayload(card, 'bubble').shape.contentTarget.y;
       advanceCardFrames(48);
       assert.notEqual(paintedCardBounds(card).y, previous.y, 'distant cards also move instead of jumping');
       advance(720);
-      assert.equal(paintedCardBounds(card).y, canvas.y + target.y);
+      assert.equal(paintedCardBounds(card).y, targetY);
+      assert.deepEqual(card.getBounds(), paintedCardBounds(card));
     }
     open(0);advance(32);
     const moving = paintedCardBounds(card);
     open(7);
     assert.deepEqual(paintedCardBounds(card), moving, 'rapid reversal retains position continuity');
     advance(720);
-    assert.deepEqual(card.getBounds(), canvas, 'the native canvas remains fixed');
+    assert.deepEqual(card.getBounds(), paintedCardBounds(card), 'the native window remains fitted after a reversal');
   });
 }
 
@@ -2758,7 +2762,7 @@ test('macOS card canvas forwards background clicks outside the painted card and 
   fixture.ipcMain.emit('edgeDock:pointer', { sender: card.webContents });
   assert.equal(card.ignoreMouse, false, 'the painted card accepts input');
   held = true;
-  fixture.screen.point = { x: frame.x + 30, y: card.bounds.y + 2 };
+  fixture.screen.point = { x: frame.x + 30, y: frame.y - 2 };
   fixture.ipcMain.emit('edgeDock:pointer', { sender: card.webContents });
   assert.equal(card.ignoreMouse, false, 'selection and scrollbar drags retain capture while held');
   held = false;
