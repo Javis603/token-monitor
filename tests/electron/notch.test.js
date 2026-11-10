@@ -41,6 +41,7 @@ class Window extends EventEmitter {
   isVisible() { return this.shown === true; }
   destroy() { this.destroyed = true; this.emit('closed'); }
   setOpacity(value) { this.opacity = value; }
+  setBackgroundColor(value) { this.backgroundColor = value; }
   getOpacity() { return this.opacity; }
   setIgnoreMouseEvents(value) { this.ignoreMouse = value; }
   setAlwaysOnTop() {}
@@ -112,6 +113,33 @@ function stats() {
     b: { client: 'claude', lastUsedAt: new Date().toISOString(), totalTokens: 20 }
   } } }, limits: { providers: [{ provider: 'codex', status: 'ok', accountKey: 'local', planLabel: 'Plus', windows: [{ kind: 'session', remainingPercent: 67 }] }] } };
 }
+
+test('notch clears a reused renderer background before reveal after material switches', (t) => {
+  const f = fixture(t, { notchStyle: 'black' }, { liquidGlass: () => ({ dark: true }),
+    createGlass: () => ({ update() {}, dispose() {} }) });
+  for (const style of ['vibrancy', 'liquid-glass', 'black']) {
+    const previous = notchWindow(f);
+    f.preferences.notchStyle = style;
+    f.controller.sync();
+    const win = notchWindow(f);
+    assert.notEqual(win, previous, `${style} replaces the native window`);
+    assert.equal(previous.isDestroyed(), true);
+    assert.equal(win.isVisible(), false);
+    // A shared renderer can paint an opaque canvas despite transparent:true.
+    win.backgroundColor = '#121212';
+    const show = win.showInactive.bind(win);
+    win.showInactive = () => {
+      assert.equal(win.backgroundColor, '#00000000', 'clear the canvas before showing');
+      show();
+    };
+    f.ipcMain.emit('topNotch:ready', { sender: win.webContents });
+    assert.equal(win.isVisible(), true);
+    // Reloads reuse the same window and must restore transparency as well.
+    win.backgroundColor = '#121212';
+    f.ipcMain.emit('topNotch:ready', { sender: win.webContents });
+    assert.equal(win.backgroundColor, '#00000000');
+  }
+});
 
 test('first summary is measured and committed before reveal on either screen shape', (t) => {
   for (const notched of [true, false]) {
