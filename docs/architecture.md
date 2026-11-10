@@ -81,7 +81,7 @@ The collector owns one `selfSyncThrottle.js` instance shared by provider self-sy
 
 ### WSL
 
-`src/shared/wslUsage.js` scans only running distros, serially, after checking the Windows WSL registry key; never start a stopped distro or invoke the install-prompt stub on a machine without WSL. Merge before deriving client status. WSL refreshes only on full ticks and remains frozen in `wslAnchor` between them, preserving exact native deltas; host watching does not extend into WSL.
+WSL scanning is opt-in; the widget preserves saved choices and the agent accepts `TOKEN_MONITOR_WSL_SCAN=1` or `--wslScan=true`. `src/shared/wslUsage.js` scans only running distros, serially, after checking the Windows WSL registry key; never start a stopped distro or invoke the install-prompt stub on a machine without WSL. Merge before deriving client status. WSL refreshes only on full ticks and remains frozen in `wslAnchor` between them, preserving exact native deltas; host watching does not extend into WSL.
 
 ### Subprocess lifecycle
 

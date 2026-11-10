@@ -762,7 +762,7 @@ function defaultSettings() {
     historyEnabled: true,
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
     sessionUsageArchiveEnabled: parseBoolean(process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true),
-    wslScanEnabled: parseBoolean(process.env.TOKEN_MONITOR_WSL_SCAN, true),
+    wslScanEnabled: parseBoolean(process.env.TOKEN_MONITOR_WSL_SCAN, false),
     exportAutoEnabled: false,
     exportDir: '',
     exportIntervalMs: 60 * 1000,
@@ -2794,7 +2794,7 @@ function readSettings() {
       merged.sessionUsageArchiveEnabled = parseBoolean(saved.sessionUsageArchiveEnabled, true);
     }
     if (saved.wslScanEnabled !== undefined) {
-      merged.wslScanEnabled = parseBoolean(saved.wslScanEnabled, true);
+      merged.wslScanEnabled = parseBoolean(saved.wslScanEnabled, false);
     }
     merged.codexDotsEnabled = parseBoolean(merged.codexDotsEnabled, false);
     merged.codexDotsVisible = parseBoolean(merged.codexDotsVisible, true);
@@ -8509,7 +8509,7 @@ app.whenReady().then(() => {
       projectBreakdownMode: normalizeProjectBreakdownMode(patch.projectBreakdownMode ?? settings.projectBreakdownMode),
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
       sessionUsageArchiveEnabled: parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true),
-      wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, true),
+      wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, false),
       collectionMode: normalizeCollectionMode(patch.collectionMode ?? settings.collectionMode),
       collectionIntervalMs: normalizeCollectionIntervalMs(patch.collectionIntervalMs ?? settings.collectionIntervalMs),
       syncUploadIntervalMs: normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs ?? settings.syncUploadIntervalMs),

@@ -6,7 +6,7 @@
 
 ## When this setup is needed
 
-On Windows, Token Monitor normally scans supported tools inside every running WSL distribution through `\\wsl$` and merges their usage about every five minutes. File-based sources such as Codex JSONL sessions work well with this path.
+On Windows, WSL scanning is off by default. Enable **Settings → Collection → Scan tools inside WSL** to scan supported tools inside running WSL distributions through `\\wsl$` and merge their usage about every five minutes. Scanning may increase WSL memory use. Previously saved on/off choices are preserved. File-based sources such as Codex JSONL sessions work well with this path.
 
 SQLite-backed tools such as OpenCode, Hermes, ZCode, and Antigravity store current usage in SQLite databases. A Windows process can discover those databases through `\\wsl$` while SQLite still cannot reliably coordinate locks or an active WAL across the WSL 9P boundary. Token Monitor may therefore show the tool under **Settings → Collection → WSL detection** with no usage.
 

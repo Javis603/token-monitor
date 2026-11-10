@@ -9,9 +9,54 @@ const test = require('node:test');
 
 const { aggregateLimits } = require('../../src/shared/limits/core');
 const { claudeCommandCandidates, claudeWebCookie, fetchClaudeLimits, mapClaudeCliUsageToProvider, mapClaudeUsageToProvider, normalizeClaudeWebCookieInput } = require('../../src/shared/limits/collector');
-const { listClaudeWebOrganizations, runClaudeAuthStatus, touchClaudeAuthPath } = require('../../src/shared/providers/claude/limits');
+const { listClaudeWebOrganizations, rankClaudeCredentialFiles, runClaudeAuthStatus, touchClaudeAuthPath, wslClaudeCredentialPaths } = require('../../src/shared/providers/claude/limits');
 const { claudeProbeDir } = require('../../src/shared/providers/claude/probe');
 const probeTempRoot = process.platform === 'win32' ? os.homedir() : os.tmpdir();
+
+test('Claude credential discovery probes only running WSL homes and preserves native ranking', async () => {
+  const native = 'C:\\Users\\alice\\.claude\\.credentials.json';
+  const homeRoot = '\\\\wsl$\\Ubuntu\\home';
+  const credential = `${homeRoot}\\alice\\.claude\\.credentials.json`;
+  const calls = [];
+  const candidates = await rankClaudeCredentialFiles({
+    platform: 'win32', env: {}, claudeCredentialPath: native,
+    exec: (command, args) => {
+      calls.push([command, args]);
+      return command === 'reg' ? 'Lxss' : 'Ubuntu\r\n';
+    },
+    readdirSync: (target) => {
+      assert.equal(target, homeRoot, 'must never enumerate the WSL root or stopped distributions');
+      return ['alice'];
+    },
+    stat: async (target) => {
+      assert.ok([native, credential].includes(target), 'must not probe another distribution');
+      return { mtimeMs: target === native ? 20 : 10 };
+    }
+  });
+  assert.deepEqual(candidates.map((candidate) => candidate.path), [native, credential]);
+  assert.deepEqual(calls.map(([command]) => command), ['reg', 'wsl.exe']);
+  assert.deepEqual(calls[1][1], ['--list', '--quiet', '--running']);
+});
+
+test('Claude credential discovery never reads WSL paths without a running distribution', () => {
+  for (const state of ['stopped', 'not-installed', 'query-failed', 'non-windows']) {
+    const calls = [];
+    const reads = [];
+    const paths = wslClaudeCredentialPaths({
+      platform: state === 'non-windows' ? 'linux' : 'win32',
+      exec: (command) => {
+        calls.push(command);
+        if (state === 'not-installed' || (command === 'wsl.exe' && state === 'query-failed')) throw new Error('unavailable');
+        return command === 'reg' ? 'Lxss' : '';
+      },
+      readdirSync: target => { reads.push(target); return []; }
+    });
+    assert.deepEqual(paths, []);
+    assert.deepEqual(reads, [], `must not access WSL files when ${state}`);
+    if (state === 'not-installed') assert.deepEqual(calls, ['reg']);
+    if (state === 'non-windows') assert.deepEqual(calls, []);
+  }
+});
 
 function fakeSpawnForClaudeUsage(expectedCommand = 'cmd.exe') {
   return (command, args, options) => {

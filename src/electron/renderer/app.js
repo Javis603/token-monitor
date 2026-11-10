@@ -10000,7 +10000,7 @@ function syncSettingsForm() {
         ? String(allowed.includes(value) ? value : 300000)
         : 'live';
   }
-  if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled !== false;
+  if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled === true;
   if (els.sessionUsageArchiveInput) els.sessionUsageArchiveInput.checked = state.settings.sessionUsageArchiveEnabled !== false;
   renderAutomaticAppUpdateControl();
   allTimeSessions.ensure();

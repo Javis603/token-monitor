@@ -106,6 +106,15 @@ test('the seed reports the project setting it was built under', () => {
   assert.equal(off.projectsEnabled, false);
 });
 
+test('an omitted WSL setting does not restore WSL usage or active status', () => {
+  const record = deviceRecordFromAnchor(anchorFixture({
+    wslBundle: { today: periodWith(9), month: periodWith(9), allTime: periodWith(9) },
+    wslStatus: { state: 'active', detected: ['claude'], withData: ['claude'] }
+  }), seedOptions({ wslSupported: true, wslScanEnabled: undefined }));
+  assert.equal(record.today.totalTokens, 1_000);
+  assert.deepEqual(record.wslStatus, { state: 'disabled', detected: [], withData: [] });
+});
+
 test('the cold-start seed accepts an anchor configured for Qoder CN', () => {
   const homeDir = '/tmp/token-monitor-qodercn-home';
   const cnPaths = qoderCnDataPaths({ homeDir });
