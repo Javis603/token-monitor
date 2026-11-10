@@ -766,7 +766,7 @@ test('collector patch observers receive state changes without a usage publicatio
 
 test('the existing watcher routes registry changes into activity without scheduling token scans', async (t) => {
   const { EventEmitter } = require('node:events');
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const f = fixture(t); f.write();
   const original = chokidar.watch;
   const prior = process.env.TOKEN_MONITOR_WATCH_IN_PROCESS;
