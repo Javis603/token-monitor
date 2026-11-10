@@ -104,6 +104,7 @@ const supportedToolOrder = [
   'StepFun',
   'Notion AI',
   'Manus',
+  'Hark',
   'OpenDesign',
   'Third-party APIs'
 ];
@@ -161,6 +162,7 @@ const supportedToolIdOrder = [
   'stepfun',
   'notion',
   'manus',
+  'hark',
   'opendesign',
   'thirdparty'
 ];

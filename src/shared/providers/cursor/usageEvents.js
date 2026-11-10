@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { tokscaleHomeDir } = require('../../tokscaleConfig');
+const { cursorLifecycleBusy } = require('./lifecycle');
 
 // Cursor caches follow TOKSCALE_CONFIG_DIR only; XDG_CONFIG_HOME and APPDATA
 // do not move the default home-relative cache. Removed accounts live in archive/.
@@ -79,6 +80,10 @@ function createCursorUsageEventIndex(options = {}) {
   let cached = null;
 
   return function readCursorUsageEvents() {
+    // Sync/logout may replace the cache, including a non-atomic Windows copy.
+    // Archive repair is synchronous: retain the last complete index instead
+    // of observing a partial rewrite and permanently linking a legacy row.
+    if (cursorLifecycleBusy()) return cached;
     const files = cacheFiles(options.cacheDir || cursorCacheDir(options), fsImpl);
     const signature = files.map((file) => file.signature).join('\n');
     if (cached?.signature === signature) return cached;

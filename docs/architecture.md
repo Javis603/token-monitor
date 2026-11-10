@@ -14,7 +14,7 @@ Contracts that cross subsystem boundaries. This guide names the owner, the invar
 
 ## Entry points and the Worker boundary
 
-The widget (`src/electron/main.js`), headless collector (`src/agent/agent.js`) and Node Hub (`src/hub/server.js`) share `src/shared/`. The Cloudflare Hub (`worker/src/index.js`) speaks the same protocol.
+The widget (`src/electron/launch.js` → `src/electron/main.js`), headless collector (`src/agent/agent.js`) and Node Hub (`src/hub/server.js`) share `src/shared/`. The Cloudflare Hub (`worker/src/index.js`) speaks the same protocol.
 
 Device collection, transforms and archives live in `src/shared/usage/`. The neighboring `src/shared/usage.js` is the Hub-core usage model, not that directory's index: `require('./usage')` resolves the file. Do not add `usage/index.js`.
 
@@ -23,6 +23,8 @@ Desktop windows share one renderer process: `src/electron/main.js` enables Chrom
 Sidebar and quota-history cards share a native canvas matching the work area's height, spring motion, pointer routing and content crossfade. Their painted silhouette and content move together inside that canvas, rather than resizing the native window each frame. Pointer routing uses the painted card bounds rather than the full canvas, forwarding input outside those bounds to the windows behind it. Linux and unsupported native shapes retain a rectangular-window fallback.
 
 Cloudflare deployment isolates `worker/` into its own repository. Its portable closure, `WORKER_SHARED_MODULES` in `scripts/hub-build-manifest.js`, must not import Node built-ins or anything above `worker/`. Edit the originals in `src/shared/`, then run `npm run sync:worker`; the mirrored `worker/src/shared/` files are generated and CI rejects drift.
+
+Linux Wayland sessions default to XWayland when `DISPLAY` is available so window positions can be restored; explicit `--ozone-platform` arguments take precedence. Native Wayland saves window dimensions while preserving existing saved x/y because global window positioning is unavailable.
 
 ## Desktop plugins
 
@@ -50,6 +52,7 @@ Only app, agent and packaging entry points run `ensure:tokscale`; install, Hub, 
 
 `src/shared/collector.js` owns tokscale scans and binary resolution. `clientSources.js` owns canonical host roots; `clientSourceObservations.js` derives checks and diagnostics from them, and the collector applies watch policy. Source attribution, ignore policy and exporter paths must share those roots, including through symlinks and Windows path aliases.
 
+- **Collection calendar.** Widget and agent reports explicitly use the process's system IANA timezone captured at the start of a collection, including WSL homes and History graphs. This overrides only that report's scanner settings, not Tokscale's saved submission calendar. Anchors require matching timezone and UTC offset. A change observed by the runtime triggers a full serial scan, including a conservative refresh at DST transitions. Headless agents need a restart after OS timezone changes when `TZ` is unset because Node can cache the previous timezone. Daily history is keyed by IANA timezone, so an offset-only refresh reuses the same saved history. Observations from different timezones are kept separately. Legacy daily observations and past calendar captures remain as recorded; there is no automatic repair or rebucketing of saved history.
 - **Exact accounting.** Full ticks scan today, month and allTime serially to bound CPU/IO. Watch ticks scan `--today` and use `applyPeriodDelta()` against the full-scan anchor; this is exact for append-only logs. The delta still walks every retained session. An unchanged session is re-shelled with copies of its mutable model, provider and cost maps, and the WSL or Codex overlay does not run `normalizePeriod` over that history again. Published session maps stay independent of the frozen anchor. A full scan normalizes decorated titles and project labels once before those periods become the anchor. An anchor from another date forces a full scan. Changed clients share one unioned scan, so client IDs are partition keys; preserve the [partition invariants](providers/README.md#partition-invariants).
 - **Manual refresh.** Generic settings/account `{ force: true }` refreshes await limits without starting a usage tick. Credential save/clear reuses one provider-scoped settings invalidation, including unchanged credentials, and awaits it when the runtime is ready. Account panels then read stats without another collection; their Refresh button collects only that provider. App and Edge Dock refresh retain full usage, History recovery and explicit self-sync: a Today delta cannot reconcile imported or corrected older usage in Month/All Time (#717). Tray-menu refresh explicitly requests its existing full usage scan. Structural settings and pricing changes retain their dedicated usage invalidation paths.
 - **Rate timing.** Use the familiar generation-speed label and explain its estimated timing basis in auxiliary copy. Use scanner-supplied matched timed-output buckets when present, with a compatibility estimate for older binaries; never apportion output by total-token coverage. Request performance timing and session/active-time spans have separate purposes. A parser timing change must preserve that distinction and invalidate its source cache; a new binary revision also requires fresh collector anchors. See the [throughput wire contract](API.md#post-apiingest).
@@ -76,9 +79,11 @@ Only app, agent and packaging entry points run `ensure:tokscale`; install, Hub, 
 
 The collector owns one `selfSyncThrottle.js` instance shared by provider self-syncs and supplies their binary resolver. It resets with the collector; cancellation during replacement is not a provider failure. `forceSelfSync`, `sourceSelfSync` and `todayOnly` are independent: forcing a sync must not downgrade a full scan. Keep the floor and catch-up deadline centralized. Source details belong in [Cursor](providers/cursor.md#self-sync-and-sessions) and [Antigravity](providers/antigravity.md#source-roots-and-self-sync).
 
+Continuous Cursor imports must not block local collection; local scans merge only completed snapshots and must not read a cache being replaced in the same runtime. One-shot collection retains its awaited self-sync behavior.
+
 ### WSL
 
-`src/shared/wslUsage.js` scans only running distros, serially, after checking the Windows WSL registry key; never start a stopped distro or invoke the install-prompt stub on a machine without WSL. Merge before deriving client status. WSL refreshes only on full ticks and remains frozen in `wslAnchor` between them, preserving exact native deltas; host watching does not extend into WSL.
+WSL scanning is opt-in; the widget preserves saved choices and the agent accepts `TOKEN_MONITOR_WSL_SCAN=1` or `--wslScan=true`. `src/shared/wslUsage.js` scans only running distros, serially, after checking the Windows WSL registry key; never start a stopped distro or invoke the install-prompt stub on a machine without WSL. Merge before deriving client status. WSL refreshes only on full ticks and remains frozen in `wslAnchor` between them, preserving exact native deltas; host watching does not extend into WSL.
 
 ### Subprocess lifecycle
 

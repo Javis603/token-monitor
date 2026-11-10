@@ -113,6 +113,7 @@ const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   grok: 'settings.limits.connection.grok',
   kiro: 'settings.limits.connection.kiro',
   manus: 'settings.limits.connection.manus',
+  hark: 'settings.limits.connection.hark',
   muse: 'settings.limits.connection.muse',
   workbuddy: 'settings.limits.connection.workbuddy'
 };
@@ -7451,7 +7452,9 @@ function renderHomeTrendsModule() {
   const preview = state.stats?.historyPreview || { daily: [] };
   const history = homeOverviewApi.pickHomeHistory(state.homeHistory, preview);
   const rawDaily = history.daily || [];
-  if (!historyEnabled || rawDaily.length === 0) {
+  const summary = state.stats?.historyPreview?.summary;
+  const hasLifetimeActivity = summary?.activeDaysComplete === true && summary.activeDays > 0;
+  if (!historyEnabled || (rawDaily.length === 0 && !hasLifetimeActivity)) {
     const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends');
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -7497,14 +7500,16 @@ function renderHomeTrendsModule() {
     cell: activityLayout.cell,
     gap: activityLayout.gap
   });
-  const summaryActiveDays = state.stats?.historyPreview?.summary?.activeDays;
-  const activeDaysWindow = state.settings?.homeActiveDaysWindow || 'all';
-  const displayActiveDays = activeDaysWindow === 'year'
-    ? activity.cells.filter((cell) => cell.tokens > 0).length
-    : (Number.isFinite(summaryActiveDays)
-        ? summaryActiveDays
-        : activity.cells.filter((cell) => cell.tokens > 0).length);
-  const activeDaysLabel = activeDaysWindow === 'year'
+  const activeDaysPresentation = homeOverviewApi.homeActiveDaysPresentation({
+    requestedWindow: state.settings?.homeActiveDaysWindow || 'all',
+    summary,
+    cells: activity.cells,
+    rollingComplete: state.homeHistory != null
+      && state.homeHistoryLoadedSignature === homeOverviewApi.homeHistorySignature(state.stats)
+  });
+  const activeDaysWindow = activeDaysPresentation.window;
+  const displayActiveDays = activeDaysPresentation.count;
+  const activeDaysLabel = displayActiveDays == null ? '' : activeDaysWindow === 'year'
     ? t('home.activeDaysYear', { count: displayActiveDays })
     : t('home.activeDays', { count: displayActiveDays });
   const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends', activeDaysLabel);
@@ -9946,6 +9951,9 @@ function syncHideAppIconControl(showTrayIcon, trayMode) {
 function syncSettingsForm() {
   if (isRendererWindowHidden()) {
     applyInitialBreakdownPreference();
+    // Native show precedes the visibility IPC. Keep saved appearance current
+    // while hidden so the first tray/reopen frame cannot paint old fonts/title.
+    applyAppearanceSettings(Object.assign({}, state.settings, ...pendingSettingsPatches, appearancePreview));
     applyVendorColorOverrides(state.settings.vendorColors);
     appliedThemeOverrides = themePresetsApi.normalizeOverrides(
       state.settings.themeColors,
@@ -9996,7 +10004,7 @@ function syncSettingsForm() {
         ? String(allowed.includes(value) ? value : 300000)
         : 'live';
   }
-  if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled !== false;
+  if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled === true;
   if (els.sessionUsageArchiveInput) els.sessionUsageArchiveInput.checked = state.settings.sessionUsageArchiveEnabled !== false;
   renderAutomaticAppUpdateControl();
   allTimeSessions.ensure();
@@ -13637,7 +13645,7 @@ async function init() {
       nativeMaterialRevision += 1;
       nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState(next);
       glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
-      applyAppearanceSettings(Object.assign({}, state.settings, ...pendingSettingsPatches, appearancePreview));
+      if (state.settings) applyAppearanceSettings(Object.assign({}, state.settings, ...pendingSettingsPatches, appearancePreview));
     });
   }
   const materialQueryRevision = nativeMaterialRevision;
@@ -13680,9 +13688,10 @@ async function init() {
   state.settings = await window.tokenMonitor.getSettings();
   // Local appearance is sufficient for first reveal. Plugin discovery, sync,
   // updater and stats queries below must not hold the window off screen.
+  // Tray startup also needs its saved appearance prepared before native show.
+  applyVisibleSettingsAppearance();
+  initialSettingsApplied = true;
   if (state.windowVisible) {
-    applyVisibleSettingsAppearance();
-    initialSettingsApplied = true;
     const signalAppearanceReady = () => window.tokenMonitor.signalAppearanceReady?.();
     // A retained WebContentsView can be document.hidden until its native host
     // shows. Prepare it now, without waiting on animation frames that pause while
@@ -17625,7 +17634,8 @@ function renderExternalProviderStatus(providerName) {
     openBtn.classList.remove('hidden');
   }
   const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')
-    || (providerName === 'cline' && source === 'cline-signin');
+    || (providerName === 'cline' && source === 'cline-signin')
+    || providerName === 'hark';
   if (discoveredLogin) {
     // The discovered login is not user-entered, so the override input and the
     // console link stay reachable instead of hiding behind linked. Cline's stored

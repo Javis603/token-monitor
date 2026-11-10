@@ -451,6 +451,31 @@ test('Manus refresh and monthly quotas share a row before balance and hide indep
   }
 });
 
+test('Hark daily, period, feature, and top-up rows render and hide independently', () => {
+  const provider = normalizeLimitProvider({ provider: 'hark', status: 'ok', windows: [
+    { kind: 'daily', label: 'Daily', used: 1, remaining: 3, limit: 4 },
+    { kind: 'billing', label: 'Monthly', used: 2, remaining: 6, limit: 8 },
+    { kind: 'billing', label: 'Monthly Messages', used: 1, limit: 4 },
+    { kind: 'billing', label: 'Monthly Messages tokens', used: 1, limit: 4 },
+    { kind: 'billing', label: 'Top-up', metric: 'spend', used: 2.5, currency: 'USD', showMeter: false }
+  ] });
+  const card = dockView().renderProviderWindows(provider, '#1C1C1C');
+  assert.deepEqual(
+    [...card.children].map((row) => row.children[0].children[0].textContent),
+    ['Daily', 'Monthly', 'Monthly Messages', 'Monthly Messages tokens', 'Top-up']
+  );
+  assert.match(card.children[0].text, /3 \/ 4/);
+  const used = dockView({ showLimitUsed: true }).renderProviderWindows(provider, '#1C1C1C');
+  assert.match(used.children[0].text, /1 \/ 4/);
+  assert.match(card.children[4].text, /\$2\.50 spent/);
+  const items = dockView().limitProviderUsageItems([provider]);
+  assert.equal(items.length, 5);
+  for (const item of items) {
+    const hidden = dockView({ limitProviderHiddenItems: { hark: [item.id] } });
+    assert.equal(hidden.renderProviderWindows(provider, '#1C1C1C').children.length, 4);
+  }
+});
+
 test('MiniMax API balances reach the shared Limits and dock renderer in both currencies', async () => {
   for (const [region, currency, symbol] of [['cn', 'CNY', '¥'], ['intl', 'USD', '$']]) {
     for (const amount of [98.25, 0, -1.5]) {

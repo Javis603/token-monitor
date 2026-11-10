@@ -9,7 +9,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { deviceRecordFromAnchor } = require('../../src/shared/anchorSeed');
-const { configFingerprint } = require('../../src/shared/collector');
+const { configFingerprint, collectionCalendarKey } = require('../../src/shared/collector');
 const { qoderCnDataPaths } = require('../../src/shared/providers/qodercn/paths');
 const { aggregateDevices, emptyPeriod } = require('../../src/shared/usage');
 
@@ -30,6 +30,7 @@ const NOW = new Date(2026, 7, 8, 10, 0, 0); // local 2026-08-08 10:00, UTC 02:00
 function anchorFixture(overrides = {}) {
   return {
     dateKey: '2026-08-08',
+    calendarKey: collectionCalendarKey(NOW),
     today: periodWith(1_000),
     month: periodWith(30_000),
     allTime: periodWith(900_000),
@@ -103,6 +104,15 @@ test('the seed reports the project setting it was built under', () => {
     seedOptions({ projectsEnabled: false })
   );
   assert.equal(off.projectsEnabled, false);
+});
+
+test('an omitted WSL setting does not restore WSL usage or active status', () => {
+  const record = deviceRecordFromAnchor(anchorFixture({
+    wslBundle: { today: periodWith(9), month: periodWith(9), allTime: periodWith(9) },
+    wslStatus: { state: 'active', detected: ['claude'], withData: ['claude'] }
+  }), seedOptions({ wslSupported: true, wslScanEnabled: undefined }));
+  assert.equal(record.today.totalTokens, 1_000);
+  assert.deepEqual(record.wslStatus, { state: 'disabled', detected: [], withData: [] });
 });
 
 test('the cold-start seed accepts an anchor configured for Qoder CN', () => {

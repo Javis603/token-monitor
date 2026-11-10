@@ -338,7 +338,9 @@ test('latest session models share aliases and discovery with usage and pre-token
   for (const list of [projected.periods.today.sessions, projected.nativeSessions.today,
     projectModelAliasSessions({}, sessions, { raw: 'canonical' })]) {
     assert.equal(sessionModelLabel(list.s), 'canonical +1');
-    assert.deepEqual(sessionModelTooltipEntries(list.s)[0], ['canonical (Latest used)', '90', '90%']);
+    assert.deepEqual(sessionModelTooltipEntries(list.s).slice(0, 2), [
+      { full: 'Last used: canonical' }, ['canonical', '90', '90%']
+    ]);
   }
   const native = { s: { latestModel: 'anthropic/claude-opus-5', models: {} } };
   for (const list of [projectModelAliasStats({ nativeSessions: { today: native } }, {}, { grouping: 'prefix' }).nativeSessions.today,
