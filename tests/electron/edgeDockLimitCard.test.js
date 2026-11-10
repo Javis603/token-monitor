@@ -210,6 +210,23 @@ function dockView(appearance = {}, overrides = {}) {
   });
 }
 
+test('adding Spanish preserves the fixed English Limits wording', () => {
+  const { translate } = require('../../src/electron/renderer/i18n');
+  const t = (key, params) => translate('es', key, params);
+  const view = dockView({}, { t, currentLocale: () => 'es' });
+  const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
+  for (const label of ['Session', 'Weekly', '5-hour', 'Monthly', 'Balance']) {
+    const row = view.limitWindowNode(label, { remainingPercent: 85, resetsAt }, '#fff');
+    assert.equal(row.find('limit-window-text').children[0].textContent, label);
+    assert.equal(row.find('limit-window-text').children[1].textContent, '85% left');
+    assert.match(row.find('limit-reset').textContent, /^Reset /);
+  }
+  assert.equal(view.limitStatusLabel('notConfigured'), 'Not signed in');
+  assert.match(view.limitProviderMeta({ status: 'ok', updatedAt: new Date().toISOString() }), /^Updated /);
+  assert.equal(view.codexAdditionalWindowLabel({ windowMinutes: 60 }), '1-hour');
+  assert.ok(view.codexResetCreditsNode({ availableCount: 2 }).text.includes('2 resets'));
+});
+
 function limitsSubscriptionPool(localProviders, aggregateProviders) {
   const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
   const state = { mode: 'sync', settings: { deviceId: 'local' }, stats: {
