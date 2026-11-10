@@ -284,22 +284,23 @@ async function fetchCursorLimits(options = {}, deps = {}) {
   // Electron supplies manual ownership; headless callers without that metadata
   // retain their existing saved-account behavior.
   const manual = Array.isArray(options.cursorManualAccountIds) ? new Set(options.cursorManualAccountIds) : null;
-  const providers = await Promise.all(enabledAccounts.map(async (account) => {
-    const current = (unauthorized = false) => !manual || manual.has(account.id)
+  const current = (account, unauthorized = false) => !manual || manual.has(account.id)
       || isCursorDetectedAccountCurrent({
-        // Read at each check: the desktop can switch accounts during the probe.
         desktop: (deps.readCursorDesktopSignIn || cursorAuth.readCursorDesktopSignIn)(),
         userId: cursorAuth.canonicalCursorUserId(account.userId || account.id),
         unauthorized
       });
-    // Omission would leave a retained LimitsRuntime identity behind. The marker
-    // retires only its quota row, never the stored credential or usage history.
-    const removed = { provider: 'cursor', accountKey: hashCursorAccountKey(account), removed: true };
-    if (!current()) return removed;
-    const provider = await fetchCursorAccountLimits(account, deps);
-    return current(provider.status === 'unauthorized') ? provider : removed;
-  }));
-  return providers.length === 1 ? providers[0] : providers;
+  // Omission would leave a retained LimitsRuntime identity behind. The marker
+  // retires only its quota row, never the stored credential or usage history.
+  const removed = account => ({ provider: 'cursor', accountKey: hashCursorAccountKey(account), removed: true });
+  const providers = await Promise.all(enabledAccounts.map(account => current(account)
+    ? fetchCursorAccountLimits(account, deps) : removed(account)));
+  // Recheck after every probe settles: even a completed account can become stale
+  // while a slower sibling is still fetching.
+  const rows = providers.map((provider, index) => provider.removed
+    || current(enabledAccounts[index], provider.status === 'unauthorized')
+    ? provider : removed(enabledAccounts[index]));
+  return rows.length === 1 ? rows[0] : rows;
 }
 
 module.exports = {

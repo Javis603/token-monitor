@@ -510,3 +510,31 @@ test('Cursor limits rechecks desktop ownership when an in-flight probe completes
     }
   }
 });
+
+test('Cursor limits checks ownership after a slower sibling probe finishes', async () => {
+  for (const desktopAfter of [{ state: 'signed-out' }, { state: 'signed-in', userId: 'user_OTHER' }]) {
+    const accounts = [
+      { id: 'user_AUTO', userId: 'user_AUTO', sessionToken: 'auto' },
+      { id: 'user_MANUAL', userId: 'user_MANUAL', sessionToken: 'manual' }
+    ];
+    let desktop = { state: 'signed-in', userId: 'user_AUTO' };
+    let finishManual;
+    const slowProbe = new Promise(resolve => { finishManual = resolve; });
+    const result = fetchCursorLimits({ cursorManualAccountIds: ['user_MANUAL'] }, {
+      listAccounts: () => accounts,
+      readCursorDesktopSignIn: () => desktop,
+      probe: async token => {
+        if (token === 'manual') await slowProbe;
+        return { ok: true, user: { sub: token === 'auto' ? 'user_AUTO' : 'user_MANUAL' },
+          usage: { planInfo: { isMerged: false }, autoPercent: 20 } };
+      }
+    });
+    // Let the fast account's probe and its completion microtasks finish first.
+    await new Promise(setImmediate);
+    desktop = desktopAfter;
+    finishManual();
+    const rows = await result;
+    assert.equal(rows[0].removed, true, desktopAfter.state);
+    assert.equal(rows[1].status, 'ok');
+  }
+});
