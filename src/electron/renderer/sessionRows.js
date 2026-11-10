@@ -221,13 +221,12 @@
     );
     const named = entries.filter((entry) => entry.model);
     const rows = named.map((entry) => [
-      entry.model === textValue((session?.groupRows?.[0] || session)?.latestModel)
-        ? `${entry.model} (${textValue(options.latestModelLabel) || 'Latest used'})` : entry.model,
+      entry.model,
       formatTokens(entry.tokens),
       percentLabel(denominator > 0 ? entry.tokens / denominator * 100 : 0)
     ]);
-    if (latest && !named.some(entry => entry.model === latest)) {
-      rows.unshift({ full: `${textValue(options.latestModelLabel) || 'Latest used'}: ${latest}` });
+    if (latest) {
+      rows.unshift({ full: `${textValue(options.latestModelLabel) || 'Last used'}: ${latest}` });
     }
     const unlabeled = attributed - named.reduce((sum, entry) => sum + entry.tokens, 0);
     const unattributed = unlabeled + Math.max(0, total - attributed);

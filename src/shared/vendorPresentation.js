@@ -96,9 +96,11 @@
     { id: 'alibaba', label: 'Alibaba Cloud', color: '#615CED', widgetColor: '#7771F4' },
     { id: 'stepfun', label: 'StepFun', color: '#000000', widgetInk: true },
     { id: 'nvidia', label: 'NVIDIA', color: '#74B71B' },
+    { id: 'thinkingmachines', label: 'Thinking Machines', color: '#000000', widgetInk: true },
     { id: 'typesafe', label: 'TypeSafe', color: '#000000', widgetInk: true },
     { id: 'notion', label: 'Notion AI', color: '#FFFFFF' },
     { id: 'manus', label: 'Manus', color: '#FFFFFF' },
+    { id: 'hark', label: 'Hark', color: '#1C1C1C', widgetInk: true },
     { id: 'opendesign', label: 'OpenDesign', color: '#FFFFFF' },
     { id: 'thirdparty', label: 'Third-party APIs', color: '#8090A6' },
     // Marks without a colour of their own. Factory is the limits provider for

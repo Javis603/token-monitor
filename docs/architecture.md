@@ -14,7 +14,7 @@ Contracts that cross subsystem boundaries. This guide names the owner, the invar
 
 ## Entry points and the Worker boundary
 
-The widget (`src/electron/main.js`), headless collector (`src/agent/agent.js`) and Node Hub (`src/hub/server.js`) share `src/shared/`. The Cloudflare Hub (`worker/src/index.js`) speaks the same protocol.
+The widget (`src/electron/launch.js` → `src/electron/main.js`), headless collector (`src/agent/agent.js`) and Node Hub (`src/hub/server.js`) share `src/shared/`. The Cloudflare Hub (`worker/src/index.js`) speaks the same protocol.
 
 Device collection, transforms and archives live in `src/shared/usage/`. The neighboring `src/shared/usage.js` is the Hub-core usage model, not that directory's index: `require('./usage')` resolves the file. Do not add `usage/index.js`.
 
@@ -23,6 +23,8 @@ Desktop windows share one renderer process: `src/electron/main.js` enables Chrom
 Sidebar and quota-history cards share a native canvas matching the work area's height, spring motion, pointer routing and content crossfade. Their painted silhouette and content move together inside that canvas, rather than resizing the native window each frame. Pointer routing uses the painted card bounds rather than the full canvas, forwarding input outside those bounds to the windows behind it. Linux and unsupported native shapes retain a rectangular-window fallback.
 
 Cloudflare deployment isolates `worker/` into its own repository. Its portable closure, `WORKER_SHARED_MODULES` in `scripts/hub-build-manifest.js`, must not import Node built-ins or anything above `worker/`. Edit the originals in `src/shared/`, then run `npm run sync:worker`; the mirrored `worker/src/shared/` files are generated and CI rejects drift.
+
+Linux Wayland sessions default to XWayland when `DISPLAY` is available so window positions can be restored; explicit `--ozone-platform` arguments take precedence. Native Wayland saves window dimensions while preserving existing saved x/y because global window positioning is unavailable.
 
 ## Desktop plugins
 
@@ -77,9 +79,11 @@ Only app, agent and packaging entry points run `ensure:tokscale`; install, Hub, 
 
 The collector owns one `selfSyncThrottle.js` instance shared by provider self-syncs and supplies their binary resolver. It resets with the collector; cancellation during replacement is not a provider failure. `forceSelfSync`, `sourceSelfSync` and `todayOnly` are independent: forcing a sync must not downgrade a full scan. Keep the floor and catch-up deadline centralized. Source details belong in [Cursor](providers/cursor.md#self-sync-and-sessions) and [Antigravity](providers/antigravity.md#source-roots-and-self-sync).
 
+Continuous Cursor imports must not block local collection; local scans merge only completed snapshots and must not read a cache being replaced in the same runtime. One-shot collection retains its awaited self-sync behavior.
+
 ### WSL
 
-`src/shared/wslUsage.js` scans only running distros, serially, after checking the Windows WSL registry key; never start a stopped distro or invoke the install-prompt stub on a machine without WSL. Merge before deriving client status. WSL refreshes only on full ticks and remains frozen in `wslAnchor` between them, preserving exact native deltas; host watching does not extend into WSL.
+WSL scanning is opt-in; the widget preserves saved choices and the agent accepts `TOKEN_MONITOR_WSL_SCAN=1` or `--wslScan=true`. `src/shared/wslUsage.js` scans only running distros, serially, after checking the Windows WSL registry key; never start a stopped distro or invoke the install-prompt stub on a machine without WSL. Merge before deriving client status. WSL refreshes only on full ticks and remains frozen in `wslAnchor` between them, preserving exact native deltas; host watching does not extend into WSL.
 
 ### Subprocess lifecycle
 
