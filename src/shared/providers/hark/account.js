@@ -30,18 +30,24 @@ module.exports = {
     harkCookieSource: settings?.harkCookie ? 'settings' : limits.harkCookie(env) ? 'env' : discovered ? 'hark-desktop' : ''
   }),
   form: {
-    field: 'harkCookie',
-    input: 'textarea',
     titleKey: 'settings.hark.title',
     openKey: 'settings.hark.openBrowser',
     clearKey: 'settings.hark.clearToken',
-    placeholderKey: 'settings.hark.tokenPlaceholder',
     saveKey: 'settings.hark.saveToken',
     emptyKey: 'settings.hark.statusNotSet',
     failedKey: 'settings.hark.saveFailed',
-    noteKey: 'settings.hark.cookieHint',
+    fields: [{
+      key: 'harkCookie',
+      input: 'textarea',
+      placeholderKey: 'settings.hark.tokenPlaceholder',
+      required: true
+    }],
+    manual: [
+      { steps: ['settings.hark.step1', 'settings.hark.step2', 'settings.hark.step3', 'settings.hark.step4'] },
+      { field: 'harkCookie' }
+    ],
     messages: { rejected: 'settings.hark.statusInvalid' },
-    url: 'https://hark.com/'
+    openUrl: { url: 'https://hark.com/' }
   },
   urlPolicy: [{ hosts: ['hark.com'], exactPaths: ['/'] }]
 };
