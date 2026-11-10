@@ -5,6 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { deepseekToken, parseLimitProviders, selectFundedRow, fetchDeepSeekLimits } = require('../../src/shared/limits/collector');
+const { normalizeDeepseekWebToken } = require('../../src/shared/providers/deepseek/limits');
 
 function memStoreDeps(initial = {}) {
   const box = { value: JSON.parse(JSON.stringify(initial)) };
@@ -217,4 +218,60 @@ test('fetchDeepSeekLimits bounds a body that stalls after the headers', { timeou
     })
   });
   assert.equal(r.status, 'unavailable');
+});
+
+
+test('console Search is optional, retries failures and expires at month changes', async () => {
+  let now = new Date(2026, 6, 31, 23, 50).getTime();
+  let calls = 0;
+  const options = { deepseekWebToken: 'console-token' };
+  const deps = {
+    env: { DEEPSEEK_API_KEY: 'sk-balance', TOKEN_MONITOR_DEEPSEEK_CONSOLE_TOKEN: 'env-token' },
+    now: () => now, providerRuntimeState: new Map(), ...memStoreDeps(),
+    fetch: async (url) => {
+      if (!String(url).includes('platform.deepseek.com')) return balanceResponse([{ currency: 'CNY', total_balance: '10', topped_up_balance: '10' }]);
+      const query = new URL(String(url)).searchParams;
+      calls += 1;
+      return { ok: true, json: async () => ({
+        code: 0, data: { biz_code: calls === 1 ? 1 : 0, biz_data: {
+          start: +query.get('start'), end: +query.get('end'),
+          data: [{ currency: 'CNY', function_series: [{ model: 'server-tool-search', buckets: [{ cost: 0.1 }] }] }]
+        } }
+      }) };
+    }
+  };
+  assert.equal((await fetchDeepSeekLimits({}, deps)).balance.searchSpend, undefined);
+  await fetchDeepSeekLimits(options, { ...deps, probe: true });
+  assert.equal(calls, 0);
+  const failed = await fetchDeepSeekLimits(options, deps);
+  assert.equal(failed.balance.amount, 10);
+  assert.equal(failed.balance.searchSpend, undefined);
+  const provider = await fetchDeepSeekLimits(options, deps);
+  assert.equal(provider.balance.searchSpend, 0.1);
+  assert.equal(provider.balance.monthSpend, 0);
+  await fetchDeepSeekLimits(options, deps);
+  assert.equal(calls, 2);
+  now += 20 * 60_000;
+  await fetchDeepSeekLimits(options, deps);
+  assert.equal(calls, 3);
+  assert.equal(normalizeDeepseekWebToken('Authorization: Bearer abc'), 'abc');
+  assert.equal(normalizeDeepseekWebToken('Cookie: x=y'), '');
+});
+
+test('console month boundaries stay aligned across a DST change', async (t) => {
+  const previous = process.env.TZ;
+  t.after(() => { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; });
+  process.env.TZ = 'Europe/Berlin';
+  let query;
+  await fetchDeepSeekLimits({ deepseekApiKey: 'sk-balance', deepseekWebToken: 'console-token' }, {
+    env: {}, now: () => Date.parse('2026-10-31T09:00:00+01:00'), ...memStoreDeps(),
+    fetch: async (url) => {
+      if (String(url).includes('platform.deepseek.com')) query = new URL(String(url)).searchParams;
+      return balanceResponse([{ currency: 'CNY', total_balance: '10', topped_up_balance: '10' }]);
+    }
+  });
+  const start = Number(query.get('start')), end = Number(query.get('end')), tz = Number(query.get('tz'));
+  assert.equal(end - start, 31 * 86400);
+  assert.equal((start + tz) % 86400, 0);
+  assert.equal((end + tz) % 86400, 0);
 });

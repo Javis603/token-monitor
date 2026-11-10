@@ -114,6 +114,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     qoderCookie: ['providers', 'qoder', 'cookie'],
     devinBearerToken: ['providers', 'devin', 'bearerToken'],
     deepseekApiKey: ['providers', 'deepseek', 'apiKey'],
+    deepseekWebToken: ['providers', 'deepseek', 'webToken'],
     openrouterProfiles: ['providers', 'openrouter', 'profiles'],
     minimaxApiProfiles: ['providers', 'minimax', 'profiles'],
     minimaxApiKey: ['providers', 'minimax', 'apiKey'],
@@ -167,7 +168,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     zaiteam: ['zaiTeamApiKey', 'zaiTeamOrganizationId', 'zaiTeamProjectId'],
     workbuddy: ['workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId', 'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo'],
     qoder: ['qoderCookie', 'qoderSite'],
-    deepseek: ['deepseekApiKey'],
+    deepseek: ['deepseekApiKey', 'deepseekWebToken'],
     devin: ['devinBearerToken', 'devinOrganization'],
     mistral: ['mistralCookie'],
     typesafe: ['typesafeCookie'],
@@ -247,6 +248,11 @@ test('limitsConfigFromSettings env fallbacks and precedence', () => {
   for (const key of ['deepseekApiKey', 'minimaxApiKey', 'copilotApiToken', 'factoryApiKey', 'zaiApiKey', 'kimiApiKey', 'ollamaCookie', 'commandcodeCookie', 'alibabaCookie', 'qoderCookie', 'devinBearerToken']) {
     assert.equal(noEnv[key], '', key);
   }
+  // The DeepSeek console token is device-only: an environment variable must not
+  // answer a form field the user never filled in.
+  assert.equal(limitsConfigFromSettings({}, {
+    env: { TOKEN_MONITOR_DEEPSEEK_CONSOLE_TOKEN: 'env-token', DEEPSEEK_CONSOLE_TOKEN: 'env-token-2' }
+  }).deepseekWebToken, '');
   // Non-credential defaults.
   assert.equal(config.zaiApiRegion, 'global');
   assert.equal(config.qoderSite, 'global');
@@ -285,7 +291,7 @@ test('settings:update normalizes provider fields and strips separately managed a
   const fields = LIMIT_PROVIDER_REGISTRY.flatMap(({ fields }) => fields);
   const normalizedKeys = fields.filter(({ normalize, persist }) => normalize && persist !== 'never').map(({ key }) => key);
   assert.deepEqual(normalizedKeys.sort(), [
-    'claudeWebCookie', 'claudeWebOrganizationId', 'deepseekApiKey', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode', 'copilotApiToken', 'copilotEnterpriseHost',
+    'claudeWebCookie', 'claudeWebOrganizationId', 'deepseekApiKey', 'deepseekWebToken', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode', 'copilotApiToken', 'copilotEnterpriseHost',
     'factoryApiKey', 'clineApiKey', 'zaiApiKey', 'zaiApiRegion', 'zaiTeamApiKey',
     'zaiTeamOrganizationId', 'zaiTeamProjectId', 'volcengineAccessKeyId',
     'volcengineSecretAccessKey', 'volcengineRegion', 'volcengineAgentAccessKeyId',
