@@ -872,6 +872,24 @@ function formatRate(rate) {
   return formatTokens(value);
 }
 
+function formatCacheHitRate(rate) {
+  if (!Number.isFinite(rate)) return '—';
+  const value = Math.max(0, rate);
+  const percent = (number) => number.toLocaleString(state.locale, {
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  }) + '%';
+  if (value > 0 && value < 0.1) return '<' + percent(0.1);
+  return percent(value);
+}
+
+function cacheHitDetail(cell) {
+  return t('edgeDock.cacheHit.detail', {
+    hit: formatTokens(cell.hit),
+    miss: formatTokens(cell.miss)
+  });
+}
+
 function statLabel(metric) {
   if (metric === 'liveRate') return t('edgeDock.stat.liveRate');
   if (metric === presentation.SESSIONS_METRIC) return t('edgeDock.sessions');
@@ -980,6 +998,10 @@ function statCellNode(cell) {
       const marks = runningMarksNode(cell);
       if (marks) node.append(marks);
     }
+  } else if (cell.metric === 'cacheHit') {
+    node.classList.toggle('is-idle', cell.available !== true);
+    const value = el('span', 'edge-dock-stat-value', formatCacheHitRate(cell.rate));
+    node.append(value);
   } else if (!cell.available) {
     node.classList.add('is-idle');
     node.append(el('span', 'edge-dock-stat-value', '—'));
@@ -1006,11 +1028,13 @@ function statCellNode(cell) {
   const workingTools = cell.metric === presentation.SESSIONS_METRIC
     ? runningSessionSummary(cell.sessions).clients.map((client) => clientLabel(client))
     : [];
-  const spoken = cell.metric === presentation.SESSIONS_METRIC
+  const spokenParts = cell.metric === presentation.SESSIONS_METRIC
     // The count already reads as a number in `readout`; the tools are appended only
     // when there are any, so a quiet cell does not end with an empty clause.
-    ? [statLabel(cell.metric), readout, workingTools.join(', ')].filter(Boolean).join(' ').trim()
-    : `${statLabel(cell.metric)} ${readout}`.trim();
+    ? [statLabel(cell.metric), readout, workingTools.join(', ')]
+    : [statLabel(cell.metric), readout];
+  if (cell.metric === 'cacheHit' && cell.available) spokenParts.push(cacheHitDetail(cell));
+  const spoken = spokenParts.filter(Boolean).join(' ').trim();
   node.setAttribute('aria-label', spoken);
   return node;
 }
@@ -1800,6 +1824,56 @@ function statCard(cell) {
     return card;
   }
   if (cell.metric === presentation.SESSIONS_METRIC) return sessionsCard(cell, card, head);
+  if (cell.metric === 'cacheHit') {
+    head.classList.add('is-inline');
+    head.append(el('span', 'edge-dock-card-status', t('edgeDock.period.today')));
+    limitWindowsView.setDetailTooltip(head.firstElementChild, [{ full: t('edgeDock.cacheHit.description') }]);
+    const headline = el('div', 'edge-dock-stat-headline');
+    headline.append(el('strong', '', formatCacheHitRate(cell.rate)));
+    card.append(headline);
+    if (!cell.available) {
+      card.append(el('div', 'edge-dock-note', t('edgeDock.cacheHit.unavailable')));
+      return card;
+    }
+    const bar = el('div', 'edge-dock-cache-hit-bar');
+    bar.setAttribute('role', 'img');
+    bar.setAttribute('aria-label', cacheHitDetail(cell));
+    const fill = el('div', 'edge-dock-cache-hit-fill');
+    fill.style.width = `${cell.rate}%`;
+    bar.append(fill);
+    card.append(bar);
+    const totals = el('div', 'edge-dock-cache-hit-totals');
+    for (const kind of ['hit', 'miss']) {
+      const reading = el('div', `edge-dock-cache-hit-reading is-${kind}`);
+      reading.append(el('span', 'edge-dock-cache-hit-label', t(`edgeDock.cacheHit.${kind}`)),
+        el('span', 'edge-dock-cache-hit-value', formatTokens(cell[kind])));
+      totals.append(reading);
+    }
+    card.append(totals);
+    if (cell.cacheSessions.length) {
+      const details = el('div', 'edge-dock-sessions edge-dock-cache-hit-details');
+      const sectionHead = el('div', 'edge-dock-section-head');
+      sectionHead.append(el('span', 'edge-dock-section-title', t('edgeDock.sessions')),
+        el('span', 'edge-dock-section-count', String(cell.cacheSessions.length)));
+      details.append(sectionHead);
+      const list = el('div', 'edge-dock-session-list edge-dock-cache-hit-sessions');
+      for (const session of cell.cacheSessions) {
+        const row = el('div', 'edge-dock-session');
+        const name = el('span', 'edge-dock-session-name');
+        name.append(markNode(session.client), el('span', 'sr-only', `${clientLabel(session.client)} `));
+        const title = el('span', 'edge-dock-session-title', session.title);
+        title.dataset.overflowKey = session.key;
+        overflowText.bind(title);
+        name.append(title);
+        row.append(name, el('span', 'edge-dock-session-tokens', formatCacheHitRate(session.rate)),
+          el('span', 'edge-dock-session-meta', cacheHitDetail(session)));
+        list.append(row);
+      }
+      details.append(list);
+      card.append(details);
+    }
+    return card;
+  }
   if (!cell.available) {
     card.append(el('div', 'edge-dock-note', t('edgeDock.periodUnavailable')));
     return card;
@@ -2002,13 +2076,13 @@ function commitCard(card, cellId) {
   animateCardSwitch(card, switchMotion);
 }
 
-// The period card is a summary even when the period contains dozens of tools or
-// models. Keep its natural height at six rows, but leave every row in the list so
+// The period card and cache-hit card stay compact even with many tools, models or
+// sessions. Keep their natural height at six rows, but leave every row in the list so
 // the existing overflow container can reveal the rest. Measuring the rendered
 // rows avoids baking the current font metrics and meter spacing into a second
 // magic pixel height.
 function clampBreakdownList(card) {
-  const list = card.querySelector('.edge-dock-clients');
+  const list = card.querySelector('.edge-dock-clients, .edge-dock-cache-hit-sessions');
   const rows = Array.from(list?.children || []);
   if (rows.length <= BREAKDOWN_VISIBLE_ROWS) return;
   const first = rows[0].getBoundingClientRect();
