@@ -422,3 +422,71 @@ test('fetchCursorLimits lets plan info override the sand unified flag', async ()
   assert.equal(result.windows.find((window) => window.label === 'Grok Bot')?.kind, 'weekly');
   assert.deepEqual(result.windows.map((window) => window.label), ['Cursor Models', 'Other Models', 'Grok Bot']);
 });
+
+test('Cursor limits retires switched desktop accounts from retained runtime snapshots', async (t) => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  const accounts = [
+    { id: 'user_OLD', userId: 'user_OLD', sessionToken: 'old' },
+    { id: 'user_NEW', userId: 'user_NEW', sessionToken: 'new' }
+  ];
+  let desktop = { state: 'unknown' };
+  let failure = '';
+  const calls = [];
+  const options = { cursorManualAccountIds: [] };
+  const deps = {
+    listAccounts: () => accounts,
+    readCursorDesktopSignIn: () => desktop,
+    probe: async (token) => {
+      calls.push(token);
+      if (failure) return { ok: false, error: { kind: failure } };
+      return {
+        ok: true, user: { sub: token === 'old' ? 'user_OLD' : 'user_NEW', email: `${token}@example.com` },
+        usage: { autoPercent: 20, planInfo: { isMerged: false } }
+      };
+    }
+  };
+  const seed = await fetchCursorLimits(options, deps);
+  const runtime = createLimitsRuntime({ limitProviders: ['cursor'], previousLimits: { providers: seed } }, {
+    autoStart: false, autoRetry: false,
+    probeProvider: async () => [await fetchCursorLimits(options, deps)].flat()
+  });
+  t.after(() => runtime.stop());
+  desktop = { state: 'signed-in', userId: 'user_NEW' };
+  calls.length = 0;
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  let rows = runtime.getSnapshot().providers;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].accountEmail, 'new@example.com');
+  assert.deepEqual(calls, ['new']);
+  assert.equal(JSON.stringify(rows).includes('removed'), false);
+
+  // Transient failures keep the current account and its last good usage.
+  failure = 'unavailable';
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  rows = runtime.getSnapshot().providers;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].windows.length, 1);
+
+  // A definitively rejected automatic credential leaves the quota list too.
+  failure = 'unauthorized';
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  assert.deepEqual(runtime.getSnapshot().providers, []);
+  assert.equal(accounts.length, 2); // No credential/history deletion.
+
+  // Signing in again restores the current account; signing out retires it.
+  failure = '';
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  assert.equal(runtime.getSnapshot().providers.length, 1);
+  desktop = { state: 'signed-out' };
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  assert.deepEqual(runtime.getSnapshot().providers, []);
+
+  // Manually managed accounts keep their reauthentication flow after sign-out.
+  options.cursorManualAccountIds = ['user_OLD'];
+  failure = 'unauthorized';
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  rows = runtime.getSnapshot().providers;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].accountKey, seed[0].accountKey);
+  assert.equal(rows[0].status, 'unauthorized');
+});

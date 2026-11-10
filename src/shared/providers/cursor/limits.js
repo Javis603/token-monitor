@@ -6,6 +6,7 @@
 
 const cursorAuth = require('./auth');
 const cursorProbe = require('./probe');
+const { isCursorDetectedAccountCurrent } = require('./account');
 const { hashKey } = require('../../hashKey');
 const {
   cleanPlanText,
@@ -280,7 +281,24 @@ async function fetchCursorLimits(options = {}, deps = {}) {
     .filter(Boolean));
   const enabledAccounts = accounts.filter((account) => !disabled.has(account.id));
   if (enabledAccounts.length === 0) return fetchCursorAccountLimits(null, deps);
-  const providers = await Promise.all(enabledAccounts.map((account) => fetchCursorAccountLimits(account, deps)));
+  // Electron supplies manual ownership; headless callers without that metadata
+  // retain their existing saved-account behavior.
+  const manual = Array.isArray(options.cursorManualAccountIds) ? new Set(options.cursorManualAccountIds) : null;
+  const desktop = manual ? (deps.readCursorDesktopSignIn || cursorAuth.readCursorDesktopSignIn)() : null;
+  const providers = await Promise.all(enabledAccounts.map(async (account) => {
+    const current = (unauthorized = false) => !manual || manual.has(account.id)
+      || isCursorDetectedAccountCurrent({
+        desktop,
+        userId: cursorAuth.canonicalCursorUserId(account.userId || account.id),
+        unauthorized
+      });
+    // Omission would leave a retained LimitsRuntime identity behind. The marker
+    // retires only its quota row, never the stored credential or usage history.
+    const removed = { provider: 'cursor', accountKey: hashCursorAccountKey(account), removed: true };
+    if (!current()) return removed;
+    const provider = await fetchCursorAccountLimits(account, deps);
+    return current(provider.status === 'unauthorized') ? provider : removed;
+  }));
   return providers.length === 1 ? providers[0] : providers;
 }
 
