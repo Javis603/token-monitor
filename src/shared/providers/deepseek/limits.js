@@ -71,7 +71,6 @@ function consoleMonthWindow(now) {
   };
 }
 
-// Tool fees are monthly console figures: display-only and never persisted.
 const CONSOLE_TOOL_NAMES = {
   searchSpend: ['server-tool-search', 'tool-search'],
   fetchSpend: ['server-tool-fetch', 'tool-fetch']

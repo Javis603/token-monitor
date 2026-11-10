@@ -16038,7 +16038,7 @@
       'settings.deepseek.title': 'Conta do DeepSeek',
       'settings.deepseek.apiKeyLabel': "Chave de API",
       'settings.deepseek.webTokenLabel': "Token do console (opcional)",
-      'settings.deepseek.webTokenNote': "Opcional. Adiciona a taxas de Search e Fetch deste mês do console ao tooltip de Spend; o token fica neste dispositivo. Entre em platform.deepseek.com, abra o DevTools → Network, selecione uma requisição /api/v0/ e cole o valor de Authorization.",
+      'settings.deepseek.webTokenNote': "Opcional. Adiciona as taxas de Search e Fetch deste mês do console ao tooltip de Spend; o token fica neste dispositivo. Entre em platform.deepseek.com, abra o DevTools → Network, selecione uma requisição /api/v0/ e cole o valor de Authorization.",
       'settings.deepseek.openBrowser': 'Abrir as chaves de API do DeepSeek no navegador',
       'settings.deepseek.note': 'Cole uma chave de API do DeepSeek. Ela fica neste dispositivo e é usada apenas para a API de saldo.',
       'settings.deepseek.apiKeyPlaceholder': 'sk-...',

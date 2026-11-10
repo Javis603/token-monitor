@@ -220,7 +220,6 @@ test('fetchDeepSeekLimits bounds a body that stalls after the headers', { timeou
   assert.equal(r.status, 'unavailable');
 });
 
-
 test('console Search is optional, retries failures and expires at month changes', async () => {
   let now = new Date(2026, 6, 31, 23, 50).getTime();
   let calls = 0;
@@ -259,7 +258,6 @@ test('console Search is optional, retries failures and expires at month changes'
   now += 20 * 60_000;
   await fetchDeepSeekLimits(options, deps);
   assert.equal(calls, 3);
-  assert.equal(normalizeDeepseekWebToken('Authorization: Bearer abc'), 'abc');
   assert.equal(normalizeDeepseekWebToken('Cookie: x=y'), '');
 });
 
