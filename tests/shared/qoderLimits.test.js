@@ -279,6 +279,7 @@ test('fetchQoderLimits keeps the response body read inside the deadline', async 
 // that an incomplete reading preserves previously displayed quota windows.
 for (const scenario of [
   { name: '401', status: 401, partialPersonal: true },
+  { name: '401 with inline shared quota', status: 401, partialPersonal: true, inlineShared: true },
   { name: 'missing quota', body: {} },
   { name: 'invalid quota', body: { shared_quota: { quota_summary: { used_value: 'invalid', limit_value: 50 } } } },
   { name: 'null payload', body: null },
@@ -304,7 +305,10 @@ for (const scenario of [
               { status: attempt === 1 ? 200 : scenario.status || 200 });
             }
             if (url.endsWith('/userplan')) return new Response(JSON.stringify({ plan_tier: 'PLAN_TIER_TEAM' }));
-            return new Response(JSON.stringify({ total_quota: quota(attempt === 1 ? 20 : 30, 100, attempt === 1 ? 80 : 70) }));
+            return new Response(JSON.stringify({
+              total_quota: quota(attempt === 1 ? 20 : 30, 100, attempt === 1 ? 80 : 70),
+              ...(scenario.inlineShared ? { shared_quota: quota(0, 50, 50) } : {})
+            }));
           }
         })];
       }

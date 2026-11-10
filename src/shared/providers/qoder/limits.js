@@ -168,7 +168,7 @@ function parseQoderUsage(body, sharedBody, options = {}) {
   const personal = parseSummary(quotaSummary(read(payload, 'totalQuota', 'total_quota')));
   if (!personal) throw new Error('missing totalQuota.quotaSummary');
   const shared = parseSummary(quotaSummary(
-    sharedBody === undefined
+    sharedBody === undefined && options.allowInlineShared !== false
       ? read(payload, 'sharedQuota', 'shared_quota')
       : read(sharedPayload, 'sharedQuota', 'shared_quota')
   ));
@@ -279,7 +279,10 @@ async function fetchQoderLimits(options = {}, deps = {}) {
         planResetsAt = parseQoderPlanResetAt(planBody);
       }
     } catch (_) {}
-    const usage = parseQoderUsage(body, sharedResponse.ok ? sharedBody : undefined, { planResetsAt });
+    const usage = parseQoderUsage(body, sharedResponse.ok ? sharedBody : undefined, {
+      planResetsAt,
+      allowInlineShared: sharedResponse.ok
+    });
     const result = normalizeLimitProvider({
       provider: 'qoder',
       accountKey: hashKey('qoder', cookie),
