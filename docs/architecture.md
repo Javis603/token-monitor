@@ -24,7 +24,7 @@ Sidebar and quota-history cards share a native canvas matching the work area's h
 
 Cloudflare deployment isolates `worker/` into its own repository. Its portable closure, `WORKER_SHARED_MODULES` in `scripts/hub-build-manifest.js`, must not import Node built-ins or anything above `worker/`. Edit the originals in `src/shared/`, then run `npm run sync:worker`; the mirrored `worker/src/shared/` files are generated and CI rejects drift.
 
-On Linux Wayland sessions with `DISPLAY` set, `src/electron/launch.js` defaults to XWayland so the widget can save and restore its position. Explicit `--ozone-platform` arguments take precedence; X11 sessions and sessions without `DISPLAY` are unchanged. Native Wayland cannot expose or restore global window coordinates, so it updates saved dimensions while retaining previous x/y.
+Linux Wayland sessions default to XWayland when `DISPLAY` is available so window positions can be restored; explicit `--ozone-platform` arguments take precedence. Native Wayland saves window dimensions while preserving existing saved x/y because global window positioning is unavailable.
 
 ## Desktop plugins
 
