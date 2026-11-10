@@ -166,7 +166,7 @@ Launch the app to start tracking this device locally, with no hub setup required
 - **Cache hit statistics** — click any tool or model to expand a detailed breakdown of input tokens (cache hit vs miss), output tokens, and hit-rate percentages
 - **Cost & currency** — cost alongside token counts, shown in USD, TWD, HKD, or CNY; exchange rates auto-update daily and can be manually overridden in Settings
 - **Custom scan paths** — point a tool at extra session folders when yours live outside the defaults
-- **WSL usage (Windows)** — opt in under Settings → Collection to merge file-based usage from running WSL distros about every 5 minutes; SQLite-backed tools such as OpenCode and Hermes may require a [headless agent inside WSL](docs/wsl-sqlite-setup.md)
+- **WSL usage (Windows)** — file-based usage from running WSL distros is merged about every 5 minutes; SQLite-backed tools such as OpenCode and Hermes may require a [headless agent inside WSL](docs/wsl-sqlite-setup.md)
 
 ### Limits, trends & export
 

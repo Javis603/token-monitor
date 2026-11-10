@@ -166,7 +166,7 @@ brew install --cask token-monitor
 - **快取命中統計**：點擊任何工具或模型，展開查看輸入 Token（快取命中與未命中）、輸出 Token 的詳細分類及命中率百分比
 - **成本與幣別**：Token 數量旁附帶成本；可用 USD、TWD、HKD 或 CNY 顯示，匯率每日自動更新，也可在設定中手動覆寫
 - **自訂掃描路徑**：session 不在預設位置時，可為個別工具加入額外的資料夾
-- **WSL 用量（Windows）**：預設關閉，可在設定 → 採集啟用，將執行中 WSL 發行版裡的檔案型用量約每 5 分鐘併入總量；OpenCode、Hermes 等 SQLite 來源可能需要依照[指南](docs/wsl-sqlite-setup.zh-TW.md)在 WSL 內執行 headless agent
+- **WSL 用量（Windows）**：執行中 WSL 發行版裡的檔案型用量約每 5 分鐘併入總量；OpenCode、Hermes 等 SQLite 來源可能需要依照[指南](docs/wsl-sqlite-setup.zh-TW.md)在 WSL 內執行 headless agent
 
 ### 額度、趨勢與匯出
 
