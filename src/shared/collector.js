@@ -872,11 +872,13 @@ async function collectHistoryOnce(options) {
         writeEnabled: options.dailyHistoryArchiveWriteEnabled
       });
       const retained = normalizeHistory(parseGraphResult(retainedGraph), { capDays, todayKey });
+      if (failureCode === 'history-graph-failed') retained.summary.activeDaysComplete = false;
       const result = retained.daily.length || retained.monthly.length ? retained : null;
       reportStatus(failureCode === null);
       return withLocalHistory(result);
     } catch (error) {
       failureCode = failureCode || 'daily-history-archive-failed';
+      if (liveHistory) liveHistory.summary.activeDaysComplete = false;
       if (typeof options.logger === 'function') options.logger(`daily history archive failed: ${error.message}`);
     }
   }
