@@ -295,6 +295,8 @@ test('Cursor History merge preserves uncapped lifetime statistics and native tim
   });
   assert.equal(result.summary.totalTokens, 130);
   assert.equal(result.summary.activeDays, 2);
+  assert.equal(result.summary.activeDaysComplete, true);
+  assert.equal(result.dailyTotals.length, 2, 'compact lifetime dates survive the split-source merge');
   assert.equal(result.summary.peakDayTokens, 100);
   assert.deepEqual(result.summary.timeMetrics, timeMetrics);
   assert.equal(result.daily.find(row => row.date === '2026-11-01').tokens, 30);

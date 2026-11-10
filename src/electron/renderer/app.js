@@ -7452,7 +7452,9 @@ function renderHomeTrendsModule() {
   const preview = state.stats?.historyPreview || { daily: [] };
   const history = homeOverviewApi.pickHomeHistory(state.homeHistory, preview);
   const rawDaily = history.daily || [];
-  if (!historyEnabled || rawDaily.length === 0) {
+  const summary = state.stats?.historyPreview?.summary;
+  const hasLifetimeActivity = summary?.activeDaysComplete === true && summary.activeDays > 0;
+  if (!historyEnabled || (rawDaily.length === 0 && !hasLifetimeActivity)) {
     const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends');
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -7498,14 +7500,16 @@ function renderHomeTrendsModule() {
     cell: activityLayout.cell,
     gap: activityLayout.gap
   });
-  const summaryActiveDays = state.stats?.historyPreview?.summary?.activeDays;
-  const activeDaysWindow = state.settings?.homeActiveDaysWindow || 'all';
-  const displayActiveDays = activeDaysWindow === 'year'
-    ? activity.cells.filter((cell) => cell.tokens > 0).length
-    : (Number.isFinite(summaryActiveDays)
-        ? summaryActiveDays
-        : activity.cells.filter((cell) => cell.tokens > 0).length);
-  const activeDaysLabel = activeDaysWindow === 'year'
+  const activeDaysPresentation = homeOverviewApi.homeActiveDaysPresentation({
+    requestedWindow: state.settings?.homeActiveDaysWindow || 'all',
+    summary,
+    cells: activity.cells,
+    rollingComplete: state.homeHistory != null
+      && state.homeHistoryLoadedSignature === homeOverviewApi.homeHistorySignature(state.stats)
+  });
+  const activeDaysWindow = activeDaysPresentation.window;
+  const displayActiveDays = activeDaysPresentation.count;
+  const activeDaysLabel = displayActiveDays == null ? '' : activeDaysWindow === 'year'
     ? t('home.activeDaysYear', { count: displayActiveDays })
     : t('home.activeDays', { count: displayActiveDays });
   const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends', activeDaysLabel);
