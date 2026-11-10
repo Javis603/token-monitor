@@ -71,25 +71,34 @@ function consoleMonthWindow(now) {
   };
 }
 
-async function fetchSearchSpend(token, { accountKey, currency, now }, deps) {
+// Tool fees are monthly console figures: display-only and never persisted.
+const CONSOLE_TOOL_NAMES = {
+  searchSpend: ['server-tool-search', 'tool-search'],
+  fetchSpend: ['server-tool-fetch', 'tool-fetch']
+};
+
+async function fetchToolSpends(token, { accountKey, currency, now }, deps) {
   if (!token || deps.probe) return null;
   const window = consoleMonthWindow(now);
   const state = deps.providerRuntimeState instanceof Map ? deps.providerRuntimeState : null;
-  const cacheKey = hashKey('deepseek-search', accountKey, token, currency);
+  const cacheKey = hashKey('deepseek-console', accountKey, token, currency);
   const cached = state?.get(cacheKey);
-  if (cached?.start === window.start && cached.expiresAt > now) return cached.searchSpend;
+  if (cached?.start === window.start && cached.expiresAt > now) return cached.toolSpends;
   try {
     const body = await fetchJson(`${DEEPSEEK_CONSOLE_COST_URL}?${new URLSearchParams(window)}`, { Authorization: `Bearer ${token}` }, deps);
     const data = body?.data?.biz_data;
     if (body?.code !== 0 || body?.data?.biz_code !== 0 || data?.start !== window.start || data?.end !== window.end) return null;
     const row = (data.data || []).find((item) => String(item?.currency || '').toUpperCase() === currency);
-    const series = (row?.function_series || []).find((item) => ['server-tool-search', 'tool-search'].includes(item?.model));
-    const costs = (series?.buckets || []).map((bucket) => numberOrNull(bucket?.cost));
-    if (costs.includes(null)) return null;
-    const total = costs.reduce((sum, cost) => sum + cost, 0);
-    const searchSpend = total > 0 ? total : null;
-    state?.set(cacheKey, { start: window.start, expiresAt: now + 60 * 60_000, searchSpend });
-    return searchSpend;
+    const toolSpends = {};
+    for (const [key, names] of Object.entries(CONSOLE_TOOL_NAMES)) {
+      const series = (row?.function_series || []).find((item) => names.includes(item?.model));
+      const costs = (series?.buckets || []).map((bucket) => numberOrNull(bucket?.cost));
+      if (costs.includes(null)) return null;
+      const total = costs.reduce((sum, cost) => sum + cost, 0);
+      if (total > 0) toolSpends[key] = total;
+    }
+    state?.set(cacheKey, { start: window.start, expiresAt: now + 60 * 60_000, toolSpends });
+    return Object.keys(toolSpends).length ? toolSpends : null;
   } catch {
     // Optional console failures leave the balance intact and retry next refresh.
     return null;
@@ -120,7 +129,7 @@ async function fetchDeepSeekLimits(options = {}, deps = {}) {
       { accountKey, currency: row.currency, paid: row.paid, now, storePath, legacyStorePath },
       deps
     );
-    const searchSpend = await fetchSearchSpend(options.deepseekWebToken, { accountKey, currency: row.currency, now }, deps);
+    const toolSpends = await fetchToolSpends(options.deepseekWebToken, { accountKey, currency: row.currency, now }, deps);
     return normalizeLimitProvider({
       provider: 'deepseek',
       accountKey,
@@ -146,7 +155,7 @@ async function fetchDeepSeekLimits(options = {}, deps = {}) {
         allTimeSpend: spend.allTimeSpend,
         trackingSince: spend.trackingSince,
         monthSinceTracking: spend.monthSinceTracking,
-        ...(searchSpend !== null ? { searchSpend } : {})
+        ...(toolSpends || {})
       }
     });
   } catch (error) {

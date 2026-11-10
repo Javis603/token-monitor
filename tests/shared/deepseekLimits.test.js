@@ -235,7 +235,10 @@ test('console Search is optional, retries failures and expires at month changes'
       return { ok: true, json: async () => ({
         code: 0, data: { biz_code: calls === 1 ? 1 : 0, biz_data: {
           start: +query.get('start'), end: +query.get('end'),
-          data: [{ currency: 'CNY', function_series: [{ model: 'server-tool-search', buckets: [{ cost: 0.1 }] }] }]
+          data: [{ currency: 'CNY', function_series: [
+          { model: 'server-tool-search', buckets: [{ cost: 0.1 }] },
+          { model: 'server-tool-fetch', buckets: [{ cost: 0.02 }] }
+        ] }]
         } }
       }) };
     }
@@ -248,6 +251,7 @@ test('console Search is optional, retries failures and expires at month changes'
   assert.equal(failed.balance.searchSpend, undefined);
   const provider = await fetchDeepSeekLimits(options, deps);
   assert.equal(provider.balance.searchSpend, 0.1);
+  assert.equal(provider.balance.fetchSpend, 0.02);
   assert.equal(provider.balance.monthSpend, 0);
   await fetchDeepSeekLimits(options, deps);
   assert.equal(calls, 2);

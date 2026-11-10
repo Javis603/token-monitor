@@ -629,9 +629,11 @@
     const preferredSummary = entries.filter(([label]) => label === 'Today' || label === 'Month');
     const summaryEntries = preferredSummary.length > 0 ? preferredSummary : entries.slice(0, 2);
     const formatted = entries.map(([entryLabel, value]) => [entryLabel, formatBalanceSpendAmount(value, balance)]);
-    // Display-only console sub-cost; it never joins the period sums.
+    // Display-only console sub-costs; they never join the period sums.
     const searchSpend = optionalFiniteNumber(balance?.searchSpend);
     if (searchSpend > 0) formatted.push(['Search', formatBalanceSpendAmount(searchSpend, balance)]);
+    const fetchSpend = optionalFiniteNumber(balance?.fetchSpend);
+    if (fetchSpend > 0) formatted.push(['Fetch', formatBalanceSpendAmount(fetchSpend, balance)]);
     return tagUsageItem(limitNoteRowNode({
       label: 'Spend',
       summary: summaryEntries

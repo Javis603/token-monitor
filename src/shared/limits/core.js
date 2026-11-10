@@ -242,8 +242,9 @@ function normalizeProviderBalance(input) {
   const weekSpend = numberOrNull(input.weekSpend ?? input.week_spend);
   const monthSpend = numberOrNull(input.monthSpend ?? input.month_spend);
   const allTimeSpend = numberOrNull(input.allTimeSpend ?? input.all_time_spend);
-  // Console sub-cost, excluded from local spend totals.
+  // Console sub-costs, excluded from local spend totals.
   const searchSpend = numberOrNull(input.searchSpend ?? input.search_spend);
+  const fetchSpend = numberOrNull(input.fetchSpend ?? input.fetch_spend);
   const requestCountRaw = numberOrNull(input.requestCount ?? input.request_count);
   const requestCount = requestCountRaw === null ? null : Math.max(0, Math.trunc(requestCountRaw));
   const quotaGroup = String(input.quotaGroup ?? input.quota_group ?? '').trim().slice(0, 64);
@@ -272,6 +273,7 @@ function normalizeProviderBalance(input) {
     && monthSpend === null
     && allTimeSpend === null
     && searchSpend === null
+    && fetchSpend === null
     && requestCount === null
     && !quotaGroup
     && !expiresAt
@@ -298,6 +300,7 @@ function normalizeProviderBalance(input) {
     monthSpend,
     allTimeSpend,
     ...(searchSpend !== null ? { searchSpend } : {}),
+    ...(fetchSpend !== null ? { fetchSpend } : {}),
     requestCount,
     quotaGroup,
     expiresAt,
