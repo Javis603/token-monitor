@@ -339,13 +339,6 @@
       if (hours < 24) return t('edgeDock.agoHours', { count: hours });
       return t('edgeDock.agoDays', { count: Math.round(hours / 24) });
     }
-    function duration(fromValue, nowMs = Date.now()) {
-      const ms = Date.parse(fromValue || '');
-      if (!Number.isFinite(ms)) return '';
-      const minutes = Math.max(0, Math.round((nowMs - ms) / 60000));
-      if (minutes < 60) return t('notch.durationMinutes', { minutes });
-      return t('notch.durationHours', { hours: Math.floor(minutes / 60), minutes: String(minutes % 60).padStart(2, '0') });
-    }
     function clientLabel(id) {
       return CLIENT_LABELS[id] || providerLabel(id);
     }
@@ -402,6 +395,7 @@
       view.scrub = null; view.monthDate = null;
       releasePluginPage(view.page);
       view.page = page;
+      bridge.setLimitsDemand?.(shown && ['home', 'limits'].includes(page));
       for (const [name, pageNode] of pageNodes) {
         pageNode.classList.toggle('is-before', pageOrder.indexOf(name) < pageOrder.indexOf(page));
       }
@@ -495,7 +489,7 @@
         if (page.startsWith(PLUGIN_PAGE_PREFIX)) {
           const icon = button.querySelector('.notch-tab-plugin-icon');
           const metadata = pluginIconMetadata(page);
-          const iconName = JSON.stringify([metadata.icon, metadata.identityIcon]);
+          const iconName = JSON.stringify([metadata.icon, metadata.identityIcon, metadata.presentation]);
           if (icon && icon.dataset.icon !== iconName && pluginViews) {
             icon.dataset.icon = iconName;
             icon.replaceChildren(pluginViews.navigationIcon(document, metadata, 15));
@@ -640,13 +634,8 @@
       body.append(sessionHeading(row, 'notch-now-title'));
       const meta = el('div', 'notch-now-meta');
       if (running) meta.append(wave());
-      const label = el('span');
-      if (!running && live) label.append(text('', `${t('notch.waiting')} · `));
-      label.append(text('', clientLabel(row.client)));
-      if (sessionRows.sessionModelMetadataLabel(row)) label.append(text('', ' · '), sessionModelMetadata(row));
-      const time = running ? duration(row.startedAt, nowMs) : !live ? relativeAgo(row.lastUsedAt, nowMs) : '';
-      if (time) label.append(text('', ` · ${time}`));
-      meta.append(label);
+      const time = !live ? relativeAgo(row.lastUsedAt, nowMs) : '';
+      meta.append(sessionMetaLabel(row, { running, lead: !running && live ? t('notch.waiting') : '', time }));
       const extra = (running ? waitingCount : Math.max(0, waitingCount - 1));
       if (extra > 0) meta.append(text('notch-waiting-note', t('notch.moreWaiting', { count: extra })));
       body.append(meta);
@@ -884,10 +873,20 @@
       const sub = el('div', 'notch-limit-sub');
       if (records.length > 1) {
         const shown = limitAccountTitle(entry.provider, record, records.indexOf(record), records);
-        const accountName = text('notch-limit-account', shown || t('settings.codex.nAccounts', { count: records.length }), shown);
-        accountName.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'account']);
-        overflowText.bind(accountName);
-        sub.append(accountName);
+        const minimaxFallback = entry.provider === 'minimax' && !shown
+          ? record?.source === 'oauth' ? (record.accountLabel || 'MiniMax Code')
+            : record?.source === 'api' ? t('settings.minimax.accountFallback', {
+              number: records.filter(value => value.source === 'api').indexOf(record) + 1
+            }) : ''
+          : '';
+        const title = shown || minimaxFallback || (entry.provider !== 'minimax'
+          ? t('settings.codex.nAccounts', { count: records.length }) : '');
+        if (title) {
+          const accountName = text('notch-limit-account', title, title);
+          accountName.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'account']);
+          overflowText.bind(accountName);
+          sub.append(accountName);
+        }
         if (account?.active) {
           const live = text('notch-limit-active', '✓', t('limits.codex.activeAccountHint'));
           live.setAttribute('aria-label', t('limits.codex.activeAccountHint'));
@@ -1061,7 +1060,9 @@
       const title = text(className, sessionTitle(row));
       title.dataset.overflowKey = JSON.stringify(['notch', view.page, row.key || `${row.client}:${row.sessionId}`]);
       overflowText.bind(title);
-      heading.append(mark(row.client), title);
+      // The mark is a painted mask. Say the tool beside it, out of the visual
+      // line, the same way the Edge Dock does. The meta row has no room for it.
+      heading.append(mark(row.client), text('sr-only', `${clientLabel(row.client)} `), title);
       return heading;
     }
 
@@ -1080,8 +1081,29 @@
     function sessionModelMetadata(row) {
       return sessionRows.sessionModelMetadataNode(document, row, {
         translate: t, view: limitWindowsView, formatTokens: formatBreakdownTokens,
+        latestModelLabel: t('session.latestModel'),
         unattributedLabel: t('dashboard.tooltip.unclassified')
       });
+    }
+
+    // The heading mark already names the tool. This line does not wrap, so
+    // repeating the name pushes the model, effort and cache reading off the row.
+    function sessionMetaLabel(row, { running = false, lead = '', time = '' } = {}) {
+      const label = el('span');
+      const parts = [];
+      if (lead) parts.push(text('', lead));
+      if (sessionRows.sessionModelMetadataLabel(row)) parts.push(sessionModelMetadata(row));
+      const percent = row.tokenDataUnavailable ? '' : sessionRows.cacheHitLabel(row);
+      if (percent) {
+        const reading = text('notch-session-cache-hit', `${running ? 'Cache ' : ''}${percent}`);
+        parts.push(reading);
+      }
+      if (time) parts.push(text('', time));
+      parts.forEach((part, index) => {
+        if (index) label.append(text('', ' · '));
+        label.append(part);
+      });
+      return label;
     }
 
     function activeRow(row, stateName, nowMs) {
@@ -1093,12 +1115,7 @@
       const meta = el('div', 'notch-active-meta');
       if (stateName === 'running') meta.append(wave());
       else meta.append(text('notch-pill', t('notch.waiting')));
-      const label = el('span');
-      label.append(text('', clientLabel(row.client)));
-      if (sessionRows.sessionModelMetadataLabel(row)) label.append(text('', ' · '), sessionModelMetadata(row));
-      const time = duration(row.startedAt, nowMs);
-      if (time) label.append(text('', ` · ${time}`));
-      meta.append(label);
+      meta.append(sessionMetaLabel(row, { running: stateName === 'running' }));
       body.append(meta);
       const value = el('div', 'notch-active-value');
       value.append(sessionTokens(row, 'notch-active-tokens', false));
@@ -1415,6 +1432,7 @@
       shown = true;
       payload = next;
       syncPluginPages(next?.panel?.pluginPages, next?.panel?.builtinPages, next?.panel?.pageOrder);
+      bridge.setLimitsDemand?.(['home', 'limits'].includes(view.page));
       node.classList.toggle('is-reduced-motion', prefersReducedMotion());
       if (opening) {
         view.scrub = null; view.monthDate = null;
@@ -1450,6 +1468,7 @@
     function suspend() {
       releasePluginPage(view.page);
       shown = false;
+      bridge.setLimitsDemand?.(false);
       clearTimeout(limitWheel.timer);
       Object.assign(limitWheel, { sum: 0, stepped: false, timer: null });
       settleRolls();

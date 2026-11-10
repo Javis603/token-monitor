@@ -5,6 +5,11 @@
 // source cannot be counted by a normal scan but silently skipped by an extra
 // directory scan.
 const TOKSCALE_CLIENT_GROUPS = Object.freeze({
+  // Token Monitor uses the brand id for Mistral; Tokscale names its CLI vibe.
+  mistral: Object.freeze({
+    aliases: Object.freeze(['vibe']),
+    scanIds: Object.freeze(['vibe'])
+  }),
   antigravity: Object.freeze({
     aliases: Object.freeze(['antigravity-cli', 'antigravity-extension']),
     // CLI and extension parse the same *.db format. Hand each custom root to

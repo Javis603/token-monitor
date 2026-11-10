@@ -9,6 +9,28 @@
     return (providers || []).map((provider) => String(provider?.id || '').trim().toLowerCase()).filter(Boolean);
   }
 
+  function absentPluginProviders(value, providers) {
+    const known = new Set(providerIds(providers));
+    const raw = Array.isArray(value) ? value : String(value || '').split(',');
+    return [...new Set(raw.map(id => String(id).trim().toLowerCase()).filter(id =>
+      /^plugin:[a-z0-9][a-z0-9-]{1,39}:[a-z][a-z0-9-]{0,31}$/.test(id) && !known.has(id)))];
+  }
+
+  function preserveAbsentPluginOrder(value, next, providers) {
+    const retained = new Set(absentPluginProviders(value, providers));
+    const visible = new Set(providerIds(providers));
+    const raw = Array.isArray(value) ? value : String(value || '').split(',');
+    const pending = [...next], result = [], seen = new Set();
+    for (const rawId of raw) {
+      const id = String(rawId).trim().toLowerCase();
+      if (seen.has(id)) continue;
+      seen.add(id);
+      if (retained.has(id)) result.push(id);
+      else if (visible.has(id) && pending.length) result.push(pending.shift());
+    }
+    return [...result, ...pending];
+  }
+
   function normalizeLimitProviderOrder(value, providers) {
     const known = providerIds(providers);
     const knownSet = new Set(known);
@@ -71,6 +93,8 @@
   }
 
   return {
+    absentPluginProviders,
+    preserveAbsentPluginOrder,
     moveLimitProvider,
     normalizeLimitProviderOrder,
     normalizeLimitProviderSelection,

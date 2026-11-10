@@ -441,3 +441,21 @@ test('periods, History, graph status and context each invalidate a Cursor snapsh
   }
   assert.equal(changes.length, 12);
 });
+
+
+test('a same-day timezone change invalidates the Cursor snapshot context', async t => {
+  const initial = { ...context, calendar: 'Asia/Hong_Kong|-480' };
+  const next = { ...context, calendar: 'UTC|0' };
+  let reads = 0;
+  const source = createCursorUsageSource({ context: initial, signal: new AbortController().signal,
+    sync: async () => false,
+    read: async () => snapshot(++reads)
+  });
+  t.after(() => source.stop());
+  await source.refresh({ readOnly: true });
+  assert.equal(source.contextMatches(next), false);
+  await source.ensureContext(next);
+  await source.whenIdle();
+  assert.equal(source.getSnapshot().context, next);
+  assert.equal(source.getSnapshot().today.totalTokens, 2);
+});

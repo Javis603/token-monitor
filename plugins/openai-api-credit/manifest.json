@@ -1,0 +1,150 @@
+{
+  "tmApi": 1,
+  "id": "openai-api-credit",
+  "name": {
+    "en": "OpenAI API Credits",
+    "zh-TW": "OpenAI API Credits",
+    "zh-CN": "OpenAI API Credits",
+    "ja": "OpenAI API Credits",
+    "ko": "OpenAI API Credits",
+    "pt-BR": "OpenAI API Credits"
+  },
+  "description": {
+    "en": "Read actual Platform API credit using manually supplied session credentials.",
+    "zh-TW": "使用手動提供的 Platform 登入憑證讀取實際 API 點數餘額。",
+    "zh-CN": "使用手动提供的 Platform 登录凭证读取实际 API 点数余额。",
+    "ja": "手動で入力した Platform のログイン認証情報で、実際の API クレジット残高を取得します。",
+    "ko": "직접 입력한 Platform 로그인 자격 증명으로 실제 API 크레딧 잔액을 조회합니다.",
+    "pt-BR": "Consulte o saldo real de créditos da API com credenciais de sessão do Platform inseridas manualmente."
+  },
+  "version": "0.1.0",
+  "ui": "settings.mjs",
+  "backend": "backend.cjs",
+  "files": [
+    "backend.cjs",
+    "balance.cjs",
+    "settings.mjs",
+    "i18n.mjs",
+    "LICENSE",
+    "README.md",
+    "README.zh-TW.md",
+    "README.zh-CN.md",
+    "README.ja.md",
+    "README.ko.md",
+    "README.pt-BR.md",
+    "CHANGELOG.md",
+    "CHANGELOG.zh-TW.md",
+    "CHANGELOG.zh-CN.md",
+    "CHANGELOG.ja.md",
+    "CHANGELOG.ko.md",
+    "CHANGELOG.pt-BR.md",
+    "assets/limits.png"
+  ],
+  "views": [
+    {
+      "id": "preferences",
+      "title": {
+        "en": "Balance display",
+        "zh-TW": "餘額顯示方式",
+        "zh-CN": "余额显示方式",
+        "ja": "残高の表示方法",
+        "ko": "잔액 표시 방식",
+        "pt-BR": "Exibição do saldo"
+      },
+      "surfaces": [
+        "settings"
+      ]
+    }
+  ],
+  "settings": {
+    "version": 1,
+    "fields": [
+      {
+        "id": "displayMode",
+        "type": "select",
+        "label": {
+          "en": "Balance display",
+          "zh-TW": "餘額顯示方式",
+          "zh-CN": "余额显示方式",
+          "ja": "残高の表示方法",
+          "ko": "잔액 표시 방식",
+          "pt-BR": "Exibição do saldo"
+        },
+        "default": "bar",
+        "options": [
+          {
+            "value": "bar",
+            "label": {
+              "en": "Progress bar and balance",
+              "zh-TW": "進度條及餘額",
+              "zh-CN": "进度条及余额",
+              "ja": "プログレスバーと残高",
+              "ko": "진행률 표시줄과 잔액",
+              "pt-BR": "Barra de progresso e saldo"
+            }
+          },
+          {
+            "value": "balance",
+            "label": {
+              "en": "Balance only",
+              "zh-TW": "純餘額",
+              "zh-CN": "仅余额",
+              "ja": "残高のみ",
+              "ko": "잔액만",
+              "pt-BR": "Apenas saldo"
+            }
+          }
+        ],
+        "description": {
+          "en": "The bar uses grants that still contain usable credit. When no reliable total exists, only the balance is shown.",
+          "zh-TW": "進度條只計仍有可用餘額的點數；總額資料不足時只顯示餘額。",
+          "zh-CN": "进度条仅计算仍有可用余额的点数；总额信息不足时只显示余额。",
+          "ja": "バーには利用可能な残高があるクレジットのみを含めます。総額を確認できない場合は残高のみを表示します。",
+          "ko": "표시줄에는 사용 가능한 잔액이 있는 크레딧만 포함됩니다. 총액을 확인할 수 없으면 잔액만 표시합니다.",
+          "pt-BR": "A barra considera apenas créditos com saldo utilizável. Quando não há um total confiável, apenas o saldo é exibido."
+        }
+      }
+    ]
+  },
+  "limits": [
+    {
+      "id": "credits",
+      "name": "OpenAI",
+      "capabilities": [
+        "api",
+        "web"
+      ],
+      "settingsView": "preferences",
+      "credentials": {
+        "fields": [
+          {
+            "id": "sessionBearer",
+            "label": "Platform session token",
+            "control": "input",
+            "required": true
+          },
+          {
+            "id": "organization",
+            "label": "Organization ID",
+            "control": "input",
+            "required": true
+          }
+        ],
+        "validation": true
+      }
+    }
+  ],
+  "presentation": {
+    "icon": {
+      "native": "codex"
+    },
+    "color": {
+      "palette": "codex"
+    }
+  },
+  "author": "Javis603",
+  "homepage": "https://github.com/Javis603/token-monitor",
+  "engines": {
+    "tokenMonitor": ">=0.88.0"
+  }
+}

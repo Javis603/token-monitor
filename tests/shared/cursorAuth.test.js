@@ -15,11 +15,13 @@ const {
   listAccounts,
   normalizeCursorSessionToken,
   readActiveAccount,
+  readCursorDesktopSignIn,
   runCursorDiscover,
   runCursorLogin,
   runCursorLogout,
   runCursorSync
 } = require('../../src/shared/providers/cursor/auth');
+const { isCursorDetectedAccountCurrent } = require('../../src/shared/providers/cursor/account');
 
 async function waitFor(predicate, timeoutMs = 2000) {
   const startedAt = Date.now();
@@ -522,4 +524,39 @@ test('runCursorSync kills the child and keeps the abort error when superseded', 
 
   await assert.rejects(pending, (caught) => caught === reason);
   assert.equal(killed, 1);
+});
+
+function withDesktopState(home) {
+  const dbPath = path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  fs.writeFileSync(dbPath, 'fixture');
+}
+
+test('readCursorDesktopSignIn reports the desktop user, a signed-out desktop, and unknown state', () => {
+  const { home, cleanup } = withTempHome(undefined);
+  try {
+    assert.deepEqual(readCursorDesktopSignIn({ home, platform: 'linux', sqlite: sqliteReturning('x') }), { state: 'unknown' });
+    withDesktopState(home);
+    const payload = Buffer.from(JSON.stringify({ sub: 'auth0|user_01DESKTOP' })).toString('base64url');
+    assert.deepEqual(
+      readCursorDesktopSignIn({ home, platform: 'linux', sqlite: sqliteReturning(`header.${payload}.signature`) }),
+      { state: 'signed-in', userId: 'user_01DESKTOP' }
+    );
+    assert.deepEqual(readCursorDesktopSignIn({ home, platform: 'linux', sqlite: sqliteReturning('') }), { state: 'signed-out' });
+    assert.deepEqual(readCursorDesktopSignIn({ home, platform: 'linux', sqlite: null }), { state: 'unknown' });
+    const broken = { DatabaseSync: class { constructor() { throw new Error('locked'); } } };
+    assert.deepEqual(readCursorDesktopSignIn({ home, platform: 'linux', sqlite: broken }), { state: 'unknown' });
+  } finally { cleanup(); }
+});
+
+test('desktop-detected Cursor accounts follow the desktop sign-in state', () => {
+  const signedIn = { state: 'signed-in', userId: 'user_A' };
+  assert.equal(isCursorDetectedAccountCurrent({ desktop: signedIn, userId: 'user_A' }), true);
+  assert.equal(isCursorDetectedAccountCurrent({ desktop: signedIn, userId: 'user_A', unauthorized: true }), false);
+  assert.equal(isCursorDetectedAccountCurrent({ desktop: signedIn, userId: 'user_B' }), false);
+  assert.equal(isCursorDetectedAccountCurrent({ desktop: { state: 'signed-out' }, userId: 'user_A' }), false);
+  // A temporary probe failure or an unreadable desktop state keeps the account listed.
+  assert.equal(isCursorDetectedAccountCurrent({ desktop: { state: 'unknown' }, userId: 'user_A' }), true);
+  assert.equal(isCursorDetectedAccountCurrent({ desktop: { state: 'unknown' }, userId: 'user_A', unauthorized: true }), false);
+  assert.equal(isCursorDetectedAccountCurrent({ desktop: signedIn, userId: '' }), true);
 });

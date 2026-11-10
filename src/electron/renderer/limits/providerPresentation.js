@@ -86,7 +86,8 @@
     qoder: ['Manual login', 'Web'],
     deepseek: ['Pay-as-you-go', 'API key'],
     devin: ['Manual login', 'Web'],
-    minimax: ['Token Plan', 'Pay-as-you-go', 'API key'],
+    minimax: ['Auto', 'Token Plan', 'Pay-as-you-go', 'API key'],
+    mistral: ['Web', 'Manual'],
     typesafe: ['Manual login', 'Web'],
     openrouter: ['Pay-as-you-go', 'API key'],
     volcengine: ['Auto', 'API key', 'CLI'],
@@ -96,6 +97,8 @@
     stepfun: ['Coding/Token Plan', 'Web'],
     notion: ['Web', 'Manual'],
     manus: ['Auto', 'Desktop app', 'Manual'],
+    hark: ['Auto', 'Desktop app', 'Manual'],
+    opendesign: ['Web', 'Manual'],
     thirdparty: ['Relay', 'API']
   };
 
@@ -466,6 +469,12 @@
     if (status === 'ok') return { label: isLinkedStatus(provider) ? 'Linked' : 'Live', tone: 'ok' };
     if (status === 'disabled') return { label: 'Disabled', tone: 'muted' };
     if (status === 'noSyncedData') return { label: 'No synced data', tone: 'sync' };
+    // Local OAuth recovery requires signing in, not replacing an API key.
+    if (providerName === 'minimax' && sourceId(provider) === 'oauth' && ['unauthorized', 'notConfigured'].includes(status)) {
+      return status === 'unauthorized'
+        ? { label: 'Sign in again', tone: 'setup' }
+        : { label: 'Sign in', tone: 'setup' };
+    }
     if (status === 'unauthorized') {
       if (providerName === 'kimi') return { label: 'Update credential', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Update credential', tone: 'setup' };
@@ -510,7 +519,7 @@
     if (status === 'notConfigured') {
       if (providerName === 'kimi' || providerName === 'ollama') return { label: 'Add credential', tone: 'setup' };
       if (providerName === 'antigravity') return { label: 'Not set up', tone: 'setup' };
-      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'typesafe' || providerName === 'stepfun' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'alibaba' || providerName === 'ollama' || providerName === 'manus') return { label: 'Sign in', tone: 'setup' };
+      if (providerName === 'cursor' || providerName === 'copilot' || providerName === 'zed' || providerName === 'typesafe' || providerName === 'stepfun' || providerName === 'qoder' || providerName === 'trae' || providerName === 'workbuddy' || providerName === 'commandcode' || providerName === 'alibaba' || providerName === 'ollama' || providerName === 'manus' || providerName === 'hark') return { label: 'Sign in', tone: 'setup' };
       if (providerName === 'thirdparty') return { label: 'Add credential', tone: 'setup' };
       // Cline joins the key-configured family: with neither a key nor a stored
       // sign-in, the one thing this application can be told is a key (the sign-in
@@ -626,6 +635,38 @@
     return provenance.selectedDeviceLabel || '';
   }
 
+  function pluginLimitCapabilityTags(module) {
+    const declared = new Set(module.capabilities || []);
+    const tags = module.sampling ? [{ label: 'Auto', kind: 'capability' }] : [];
+    const sourceLabels = { api: 'API', apiKey: 'API key', oauth: 'OAuth', web: 'Web', cli: 'CLI' };
+    const sources = Object.keys(sourceLabels).filter(id => declared.has(id));
+    // API key describes the API authentication; do not repeat API/API key.
+    if (sources.includes('apiKey') && sources.includes('api')) sources.splice(sources.indexOf('api'), 1);
+    if (sources.length) tags.push({ label: sources.map(id => sourceLabels[id]).join('/'), parts: sources.map(id => sourceLabels[id]),
+      ...(sources.length === 1 && sources[0] === 'apiKey' ? { key: 'settings.limits.capability.apiKey' } : {}), kind: 'capability' });
+    tags.push(...(module.tags || []).map(label => ({ label, kind: 'custom' })));
+    return tags;
+  }
+
+  // Credential state comes from the host's revision-bound verification, never
+  // from a quota reading or whether an author has mounted its settings UI.
+  function pluginLimitSettingsStatus(module, provider, enabled = true) {
+    if (!enabled || provider?.status === 'disabled') return null;
+    if (module.credentials && module.credentialState) {
+      const saved = module.credentialState;
+      const status = saved.verification !== 'unverified' ? saved.verification
+        : !saved.hasSaved ? 'notConfigured' : saved.configured ? 'configured' : 'partial';
+      return { key: `plugins.credentials.${['valid', 'verifying'].includes(status) ? '' : 'status.'}${status}`,
+        detailKey: `plugins.credentials.${status}`, tone: status === 'valid' ? 'ok' : 'setup' };
+    }
+    if (!provider) return { key: 'plugins.limits.awaitingData', tone: 'muted' };
+    if (provider.status === 'ok' && !provider.stale) return null;
+    if (provider.status === 'notConfigured') return { key: 'settings.limits.status.notSetUp', tone: 'setup' };
+    if (provider.status === 'unauthorized') return { key: module.credentials ? 'plugins.credentials.invalid' : 'settings.limits.status.error', tone: 'setup' };
+    if (provider.status === 'error') return { key: 'plugins.limits.readFailed', tone: 'warn' };
+    return limitProviderStatusLabel(provider);
+  }
+
   function limitProviderSettingsTags(providerOrId, provenance = null) {
     const tags = [];
     const provider = typeof providerOrId === 'object' && providerOrId ? providerOrId : { provider: providerOrId };
@@ -685,6 +726,10 @@
 
   function limitProviderSettingsRecord(providers, id) {
     const rows = (providers || []).filter((row) => row.provider === id);
+    if (id === 'minimax') {
+      return rows.findLast((row) => row.status === 'ok')
+        || rows.find((row) => row.source === 'api') || rows.at(-1);
+    }
     if (id !== 'mimo') return rows.at(-1);
     // Either healthy product keeps the provider connected. Otherwise prefer the
     // Console status, since Settings manages that credential rather than membership.
@@ -714,6 +759,8 @@
     limitResetRemainingMs,
     limitProviderSourceLabel,
     limitProviderStatusLabel,
+    pluginLimitCapabilityTags,
+    pluginLimitSettingsStatus,
     limitProviderSettingsTags,
     limitProviderSettingsRecord,
     thirdPartyAdapterFamily,

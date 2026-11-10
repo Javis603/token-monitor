@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const semver = require('semver');
+const { normalizePresentation } = require('../../shared/plugins/presentation');
 const { normalizeIdentityIcon } = require('../../shared/plugins/identityIcon');
 const { atomicJson } = require('./managed');
 const { ID_RE, readBounded, digest } = require('./package');
@@ -67,7 +68,7 @@ function parseIndex(bytes, publicKey) {
       return { types: normalizeTypes(v.types), version: v.version, sha256: v.sha256, url: httpsUrl(v.url), compatible: !range || semver.satisfies(HOST_VERSION, range),
         changelog: normalizeLocalized(v.changelog, 2000), engines: range || '*' };
     }).sort((a, b) => semver.rcompare(a.version, b.version));
-    return { id: entry.id, name, repository, readmePaths, description: normalizeLocalized(entry.description, 500), author: cleanText(entry.author, 100), identityIcon: normalizeIdentityIcon(entry.identityIcon), versions };
+    return { id: entry.id, name, repository, readmePaths, description: normalizeLocalized(entry.description, 500), author: cleanText(entry.author, 100), identityIcon: normalizeIdentityIcon(entry.identityIcon), presentation: normalizePresentation(entry.presentation), versions };
   });
   return { title, plugins };
 }

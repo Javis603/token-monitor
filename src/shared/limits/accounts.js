@@ -114,6 +114,7 @@ const LIMIT_PROVIDER_ACCOUNTS = Object.freeze([
   registerProvider(require('../providers/deepseek/account'), () => require('../providers/deepseek/limits')),
   registerProvider(require('../providers/devin/account'), () => require('../providers/devin/limits')),
   registerProvider(require('../providers/minimax/account'), () => require('../providers/minimax/limits')),
+  registerProvider(require('../providers/mistral/account'), () => require('../providers/mistral/limits')),
   registerProvider(require('../providers/typesafe/account'), () => require('../providers/typesafe/limits')),
   registerProvider(require('../providers/openrouter/account'), () => require('../providers/openrouter/limits')),
   registerProvider(require('../providers/volcengine/account'), () => require('../providers/volcengine/limits')),
@@ -123,6 +124,8 @@ const LIMIT_PROVIDER_ACCOUNTS = Object.freeze([
   registerProvider(require('../providers/stepfun/account'), () => require('../providers/stepfun/limits')),
   registerProvider(require('../providers/notion/account'), () => require('../providers/notion/limits')),
   registerProvider(require('../providers/manus/account'), () => require('../providers/manus/limits')),
+  registerProvider(require('../providers/hark/account'), () => require('../providers/hark/limits')),
+  registerProvider(require('../providers/opendesign/account'), () => require('../providers/opendesign/limits')),
   registerProvider(require('../providers/thirdparty/account'), () => require('../providers/thirdparty/limits'))
 ].map((decl) => Object.freeze({
   ...decl,

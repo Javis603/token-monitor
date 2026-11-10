@@ -65,6 +65,93 @@ const DSH_MODEL_CONTRACT_CASES = Object.freeze([
 // Monitor normalization are both exercised by this release gate.
 const TOKEN_CONTRACT_CASES = Object.freeze([
   {
+    client: 'gemini',
+    // 20 input - 5 cached + 4 tool = 19; thoughts stay out of output.
+    expectedRow: { model: 'gemini-3.1-pro-preview', input: 19, output: 2, cacheRead: 5, cacheWrite: 0, reasoning: 3 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 29, clientTokens: 29, clientOutputTokens: 5 },
+    expectedSession: { id: 'session-gemini-contract', totalTokens: 29, outputTokens: 5, reasoningTokens: 3 },
+    writeFixture(home) {
+      const dir = path.join(home, '.gemini', 'tmp', 'contract', 'chats');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'session-gemini-contract.json'), JSON.stringify({
+        type: 'gemini',
+        model: 'gemini-3.1-pro-preview',
+        tokens: { input: 20, output: 2, cached: 5, thoughts: 3, tool: 4, total: 29 }
+      }));
+    }
+  },
+  {
+    client: 'prime-agent',
+    expectedRow: { sessionId: 'prime-contract', model: 'claude-sonnet-4-5', input: 1000, output: 400, cacheRead: 200, cacheWrite: 50, reasoning: 0 },
+    additionalRows: [{ sessionId: 'prime-child-contract', model: 'claude-sonnet-4-5', input: 40, output: 12, cacheRead: 8, cacheWrite: 0, reasoning: 0 }],
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 1710, clientTokens: 1710, clientOutputTokens: 412 },
+    expectedSession: { id: 'prime-contract', totalTokens: 1650, outputTokens: 400, reasoningTokens: 0 },
+    writeFixture(home) {
+      const dir = path.join(home, '.prime', 'agent', 'sessions');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'root.jsonl'), [
+        { type: 'session', version: 3, id: 'prime-contract', timestamp: '2026-10-10T08:00:00Z', cwd: '/tmp/prime-contract' },
+        { type: 'message', id: 'reply', timestamp: '2026-10-10T08:01:00Z', message: {
+          role: 'assistant', provider: 'anthropic', model: 'claude-sonnet-4-5',
+          usage: { input: 1000, output: 400, cacheRead: 200, cacheWrite: 50, totalTokens: 1650 }
+        } }
+      ].map((row) => JSON.stringify(row)).join('\n') + '\n');
+      const childDir = path.join(home, '.prime', 'agent', 'session-artifacts', 'prime-contract', 'sub-deadbeef');
+      fs.mkdirSync(childDir, { recursive: true });
+      fs.writeFileSync(path.join(childDir, 'child.jsonl'), [
+        { type: 'session', version: 3, id: 'prime-child-contract', timestamp: '2026-10-10T08:00:00Z', cwd: '/tmp/prime-contract', parentSession: path.join(dir, 'root.jsonl'), rlmDepth: 1 },
+        { type: 'message', id: 'child-reply', timestamp: '2026-10-10T08:02:00Z', message: {
+          role: 'assistant', provider: 'anthropic', model: 'claude-sonnet-4-5',
+          usage: { input: 40, output: 12, cacheRead: 8, cacheWrite: 0, totalTokens: 60 }
+        } }
+      ].map((row) => JSON.stringify(row)).join('\n') + '\n');
+    }
+  },
+  {
+    client: 'jcode',
+    expectedRow: { model: 'claude-sonnet-4-5', input: 1000, output: 400, cacheRead: 200, cacheWrite: 50, reasoning: 150 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 1800, clientTokens: 1800, clientOutputTokens: 550 },
+    expectedSession: { id: 'jcode-contract', totalTokens: 1800, outputTokens: 550, reasoningTokens: 150 },
+    writeFixture(home) {
+      const dir = path.join(home, '.jcode', 'sessions');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'session_contract.json'), JSON.stringify({
+        id: 'jcode-contract', provider_key: 'anthropic', model: 'claude-sonnet-4-5', working_dir: '/tmp/jcode-contract',
+        messages: [{ id: 'reply', role: 'assistant', timestamp: '2026-10-10T08:01:00Z', token_usage: {
+          input_tokens: 600, output_tokens: 200, cache_read_input_tokens: 100, cache_creation_input_tokens: 20, reasoning_output_tokens: 100
+        } }]
+      }));
+      fs.writeFileSync(path.join(dir, 'session_contract.journal.jsonl'), JSON.stringify({
+        append_messages: [{ id: 'journal-reply', role: 'assistant', timestamp: '2026-10-10T08:02:00Z', token_usage: {
+          input_tokens: 400, output_tokens: 200, cache_read_input_tokens: 100, cache_creation_input_tokens: 30, reasoning_output_tokens: 50
+        } }]
+      }) + '\n');
+    }
+  },
+  {
+    client: 'mistral',
+    scanClient: 'vibe',
+    // Cached prompt tokens are already included in session_prompt_tokens.
+    expectedRow: { model: 'codestral-latest', input: 10000, output: 1200, cacheRead: 5000, cacheWrite: 0, reasoning: 0 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 16200, clientTokens: 16200, clientOutputTokens: 1200 },
+    expectedSession: { id: 'vibe-contract', totalTokens: 16200, outputTokens: 1200, reasoningTokens: 0 },
+    writeFixture(home) {
+      const dir = path.join(home, '.vibe', 'logs', 'session', 'session_20261010_080000_contract');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({
+        session_id: 'vibe-contract',
+        start_time: '2026-10-10T08:00:00Z',
+        end_time: '2026-10-10T08:05:00Z',
+        config: { active_model: 'codestral-latest' },
+        stats: { steps: 3, session_prompt_tokens: 15000, session_completion_tokens: 1200, session_cached_tokens: 5000 }
+      }));
+    }
+  },
+  {
     client: 'goose',
     // The total gap is inferred reasoning, not measured additive output.
     // Preserve input + output; do not inflate usage with that heuristic.
@@ -519,7 +606,8 @@ function hermeticEnv(home) {
   for (const key of [
     'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'CODEX_HOME', 'DSH_HOME', 'HERMES_HOME', 'GOOSE_PATH_ROOT',
     'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
-    'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR',
+    'VIBE_HOME', 'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR',
+    'JCODE_HOME', 'GEMINI_CLI_HOME', 'PRIME_AGENT_SESSION_DIR', 'PRIME_AGENT_CODING_AGENT_SESSION_DIR', 'PRIME_AGENT_CODING_AGENT_DIR',
     'SENPI_CODING_AGENT_DIR', 'SENPI_CODING_AGENT_SESSION_DIR'
   ]) {
     delete env[key];
@@ -565,14 +653,14 @@ function assertExpected(parsed, expected = EXPECTED) {
 
 function assertTokenContract(parsed, contract) {
   const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
-  const entry = entries[0];
-  const expectedRow = { client: contract.client, ...contract.expectedRow };
-  const mismatches = Object.entries(expectedRow).filter(([key, value]) => entry?.[key] !== value);
+  const expectedRows = [contract.expectedRow, ...(contract.additionalRows || [])]
+    .map((row) => ({ client: contract.scanClient || contract.client, ...row }));
   const explicitTotalKeys = ['totalTokens', 'total_tokens', 'totalTokenCount', 'total_token_count', 'tokens', 'tokenCount', 'token_count'];
-  const hasExplicitTotal = entry && explicitTotalKeys.some((key) => Object.hasOwn(entry, key));
-  if (entries.length !== 1 || mismatches.length > 0 || hasExplicitTotal !== contract.hasExplicitTotal) {
+  if (entries.length !== expectedRows.length || expectedRows.some((expected) => !entries.some((entry) =>
+    Object.entries(expected).every(([key, value]) => entry[key] === value))) ||
+      entries.some((entry) => explicitTotalKeys.some((key) => Object.hasOwn(entry, key)) !== contract.hasExplicitTotal)) {
     throw new Error(
-      `${contract.client} fixture mismatch — expected one row with ${JSON.stringify(expectedRow)} and ` +
+      `${contract.client} fixture mismatch — expected ${JSON.stringify(expectedRows)} and ` +
       `hasExplicitTotal=${contract.hasExplicitTotal}, got ${JSON.stringify(entries)}. ` +
       'If Tokscale changes its JSON token contract, update Token Monitor normalization and this fixture together.'
     );
@@ -815,6 +903,48 @@ function verifyCodexOutputRateContract(binPath) {
   }
 }
 
+function verifyReportTimezoneContract(binPath) {
+  const assert = require('node:assert/strict');
+  const home = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'tm-timezone-contract-'));
+  const env = hermeticEnv(home);
+  env.TZ = 'Asia/Taipei';
+  const settingsPath = path.join(env.TOKSCALE_CONFIG_DIR, 'settings.json');
+  const dir = path.join(home, '.claude', 'projects', 'timezone-contract');
+  fs.mkdirSync(dir, { recursive: true });
+  const rows = [
+    ['2026-11-06T14:00:00Z', 100],
+    ['2026-11-06T18:00:00Z', 200],
+    ['2026-11-07T10:00:00Z', 400]
+  ].map(([timestamp, input], index) => ({
+    type: 'assistant', timestamp, sessionId: 'timezone-contract', uuid: `tz-${index}`,
+    message: { id: `tz-${index}`, role: 'assistant', model: 'claude-sonnet-4-5', usage: { input_tokens: input, output_tokens: 0 } }
+  }));
+  fs.writeFileSync(path.join(dir, 'timezone-contract.jsonl'), `${rows.map(row => JSON.stringify(row)).join('\n')}\n`);
+  const run = args => {
+    const result = spawnSync(binPath, ['--offline', ...args, '--client', 'claude', '--home', home, '--no-spinner'], {
+      encoding: 'utf8', timeout: 15_000, env
+    });
+    assert.equal(result.status, 0, result.stderr || result.error?.message);
+    return JSON.parse(result.stdout);
+  };
+  try {
+    for (const pinnedZone of ['America/Los_Angeles', 'UTC']) {
+      const settings = JSON.stringify({ scanner: { bucketTimezone: pinnedZone } });
+      fs.writeFileSync(settingsPath, settings);
+      const report = ['--json', '--group-by', 'client,workspace,session,model', '--since', '2026-11-07', '--until', '2026-11-07'];
+      assert.equal(extractUsageFromTokscale(run(report)).totalTokens, 400, 'saved submission calendar remains the default');
+      // The preceding scan warms the source cache: overriding a report must also
+      // rebucket cache hits, rather than only freshly parsed records.
+      assert.equal(extractUsageFromTokscale(run(['--bucket-timezone', 'Asia/Taipei', ...report])).totalTokens, 600);
+      const graph = run(['graph', '--bucket-timezone', 'Asia/Taipei']);
+      assert.equal(graph.contributions.find(row => row.date === '2026-11-07').totals.tokens, 600);
+      assert.equal(fs.readFileSync(settingsPath, 'utf8'), settings, 'report override never rewrites the saved pin');
+    }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
 function main() {
   const manifest = loadManifest();
   const isUpstream = manifestMode(manifest) === 'upstream';
@@ -828,6 +958,7 @@ function main() {
     );
   }
 
+  verifyReportTimezoneContract(binPath);
   verifyGooseScannerContract(binPath);
   verifyCodexOutputRateContract(binPath);
 
@@ -841,7 +972,7 @@ function main() {
       assertSessionMetadata(runAgainstFixture(binPath, home, SESSION_GROUP_BY));
     }
     for (const contract of applicableTokenContracts()) {
-      assertTokenContract(runAgainstFixture(binPath, home, 'client,session,model', contract.client), contract);
+      assertTokenContract(runAgainstFixture(binPath, home, 'client,session,model', contract.scanClient || contract.client), contract);
     }
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
@@ -871,4 +1002,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { main, TOKEN_CONTRACT_CASES, DSH_MODEL_CONTRACT_CASES, applicableTokenContracts, writeFixtureHome, assertExpected, verifyGooseScannerContract, verifyCodexOutputRateContract };
+module.exports = { main, TOKEN_CONTRACT_CASES, DSH_MODEL_CONTRACT_CASES, applicableTokenContracts, writeFixtureHome, assertExpected, verifyGooseScannerContract, verifyCodexOutputRateContract, verifyReportTimezoneContract };

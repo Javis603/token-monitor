@@ -390,3 +390,47 @@ test('a native pricing replay waits for a matching Cursor snapshot before publis
   }
   assert.deepEqual(errors, []);
 });
+
+
+test('a same-day timezone change rereads every Cursor period in the new timezone', async t => {
+  const oldTimezone = process.env.TZ;
+  process.env.TZ = 'Asia/Hong_Kong';
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cursor-timezone-'));
+  const updates = [], cursorReads = [], errors = [];
+  t.mock.method(cursorAuth, 'runCursorSync', async () => ({ synced: true }));
+  delete require.cache[require.resolve('../../src/shared/collector')];
+  const { startCollector } = require('../../src/shared/collector');
+  const runtime = startCollector({
+    clients: 'codex,cursor', homeDir, env: {}, osInfo: {}, projectsEnabled: false,
+    historyEnabled: false, watchEnabled: false, intervalMs: 600000,
+    anchorPersistenceEnabled: false, wslScanEnabled: false,
+    codexLocalUsageEnabled: false, sessionActivityPolling: false,
+    now: () => new Date('2026-11-01T12:00:00Z'),
+    runTokscale: async input => {
+      const cursor = input.clients === 'cursor';
+      if (cursor) cursorReads.push(input);
+      return { entries: [{ client: input.clients, sessionId: 'session', model: 'test',
+        input: cursor ? input.timeZone === 'UTC' ? 20 : 10 : 1, output: 0, cost: 0 }] };
+    },
+    onUpdate: summary => updates.push(summary),
+    onError: error => errors.push(error)
+  });
+  t.after(async () => {
+    runtime.stop();
+    await runtime.whenIdle();
+    if (oldTimezone === undefined) delete process.env.TZ;
+    else process.env.TZ = oldTimezone;
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+  await until(() => cursorReads.length === 6 && updates.some(x => x.today.clients.cursor === 10));
+  await runtime.whenIdle();
+  const before = cursorReads.length;
+  process.env.TZ = 'UTC';
+  assert.equal(await runtime.tick('timezone-change'), true);
+  await runtime.whenIdle();
+  assert.deepEqual(cursorReads.slice(before).map(input => input.timeZone), ['UTC', 'UTC', 'UTC']);
+  const latest = updates.at(-1);
+  assert.equal(latest.periodWindows.timeZone, 'UTC');
+  for (const period of ['today', 'month', 'allTime']) assert.equal(latest[period].clients.cursor, 20);
+  assert.deepEqual(errors, []);
+});

@@ -45,7 +45,7 @@ function createCursorUsageSource({ sync, read, onChange, onError, signal, contex
   const failureCallbacks = new Set();
   const queuedFailureCallbacks = new Set();
 
-  const changedContext = (next) => next.day !== desiredContext.day || next.pricing !== desiredContext.pricing;
+  const changedContext = (next) => next.day !== desiredContext.day || next.pricing !== desiredContext.pricing || next.calendar !== desiredContext.calendar;
   async function readComplete(current, currentSignal) {
     const next = await withCursorLifecycle(() => read(current, currentSignal), { signal: currentSignal });
     throwIfAborted(currentSignal);
@@ -60,7 +60,7 @@ function createCursorUsageSource({ sync, read, onChange, onError, signal, contex
     const waiters = contextWaiters;
     contextWaiters = [];
     for (const waiter of waiters) {
-      if (waiter.context.day === current.day && waiter.context.pricing === current.pricing) waiter.resolve();
+      if (waiter.context.day === current.day && waiter.context.pricing === current.pricing && waiter.context.calendar === current.calendar) waiter.resolve();
       else waiter.reject(new Error('Cursor snapshot context superseded'));
     }
     // Even unchanged usage must publish the completed sync's health state.
@@ -168,7 +168,7 @@ function createCursorUsageSource({ sync, read, onChange, onError, signal, contex
   return {
     refresh,
     getSnapshot: () => snapshot,
-    contextMatches: next => next.day === snapshot.context.day && next.pricing === snapshot.context.pricing,
+    contextMatches: next => next.day === snapshot.context.day && next.pricing === snapshot.context.pricing && next.calendar === snapshot.context.calendar,
     readCache(next) {
       if (stopped || signal.aborted) return Promise.reject(abortReason(signal));
       readPending = true;
@@ -178,7 +178,7 @@ function createCursorUsageSource({ sync, read, onChange, onError, signal, contex
     },
     ensureContext(next) {
       if (stopped || signal.aborted) return Promise.reject(abortReason(signal));
-      if (next.day === snapshot.context.day && next.pricing === snapshot.context.pricing) return Promise.resolve();
+      if (next.day === snapshot.context.day && next.pricing === snapshot.context.pricing && next.calendar === snapshot.context.calendar) return Promise.resolve();
       const ready = new Promise((resolve, reject) => contextWaiters.push({ context: next, resolve, reject }));
       void refresh({ context: next, readOnly: true });
       return ready;

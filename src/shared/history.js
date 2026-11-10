@@ -15,7 +15,8 @@ const TOKSCALE_CLIENT_ALIASES = new Map([
   ['micode-desktop', 'mimo'],
   ['kilocode', 'kilo'],
   ['devin-cli', 'devin'],
-  ['devin-desktop', 'devin']
+  ['devin-desktop', 'devin'],
+  ['vibe', 'mistral']
 ]);
 
 // Canonical Token Monitor identity for client ids emitted by Tokscale. Keep
@@ -100,7 +101,8 @@ function normalizeTimeMetrics(value) {
 // carries that fix. On an older pin, whose `output` is already
 // reasoning-inclusive, folding reasoning back in here counts it twice.
 // Grok, Tencent Buddy and Cherry Studio chat ledgers also emit independent reasoning.
-const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'antigravity', 'codex', 'droid', 'dsh', 'grok', 'zcode', 'opencode', 'muse', 'codebuddy', 'workbuddy', 'cherrystudio', 'hermes']);
+// Gemini CLI `thoughts` are a separate additive bucket; `output` is candidates only.
+const TOKSCALE_DISJOINT_REASONING_CLIENTS = new Set([REASONIX_CLIENT, 'antigravity', 'codex', 'droid', 'dsh', 'grok', 'gemini', 'zcode', 'opencode', 'muse', 'codebuddy', 'workbuddy', 'cherrystudio', 'hermes', 'jcode']);
 
 function hasDisjointReasoning(client) {
   return TOKSCALE_DISJOINT_REASONING_CLIENTS.has(normalizeTokscaleClientName(client));

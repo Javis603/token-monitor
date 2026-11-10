@@ -23,6 +23,12 @@ contextBridge.exposeInMainWorld('tokenMonitorEdgeDock', {
     ipcRenderer.on('edgeDock:shapeFrame', listener);
     return () => ipcRenderer.removeListener('edgeDock:shapeFrame', listener);
   },
+  cardFrame: (motionId) => ipcRenderer.send('edgeDock:cardFrame', { motionId }),
+  onCardMotion: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('edgeDock:cardMotion', listener);
+    return () => ipcRenderer.removeListener('edgeDock:cardMotion', listener);
+  },
   reportBubbleSize: (cellId, height) => ipcRenderer.send('edgeDock:bubbleSize', { cellId, height }),
   dismiss: () => ipcRenderer.send('edgeDock:dismiss'),
   toggleRateMode: () => ipcRenderer.send('edgeDock:toggleRateMode'),

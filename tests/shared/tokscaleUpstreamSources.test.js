@@ -110,3 +110,21 @@ test('Kilo extension roots mirror native VS Code and remote discovery', (t) => {
   assert.equal(MARKER_CLIENTS['Library/Application Support/Code/User/globalStorage/kilocode.kilo-code/tasks'], 'kilo');
   assert.equal(MARKER_CLIENTS['AppData/Roaming/Code/User/globalStorage/kilocode.kilo-code/tasks'], 'kilo');
 });
+
+test('Vibe follows VIBE_HOME, targets its own usage partition and exposes a WSL marker', (t) => {
+  const home = fs.mkdtempSync(path.join(fs.realpathSync.native(os.tmpdir()), 'tm-vibe-roots-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const custom = path.join(home, 'custom-vibe');
+  for (const platform of ['darwin', 'linux', 'win32']) {
+    for (const override of [undefined, '', '   ', custom]) {
+      const options = { homeDir: home, platform, env: { VIBE_HOME: override } };
+      const dir = path.join(override === custom ? custom : path.join(home, '.vibe'), 'logs', 'session');
+      fs.mkdirSync(dir, { recursive: true });
+      assert.deepEqual(clientSourceRoots('mistral', options).mistral, [{ id: 'mistral-sessions', dir }]);
+      assert.deepEqual(watchPathsForClients('mistral', options), [dir]);
+      const attribution = watchAttributionRootsForClients('mistral', null, options);
+      assert.deepEqual(clientsForWatchPath(path.join(dir, 'session_contract', 'meta.json'), attribution), ['mistral']);
+    }
+  }
+  assert.equal(MARKER_CLIENTS['.vibe/logs/session'], 'mistral');
+});

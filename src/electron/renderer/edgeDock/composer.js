@@ -21,11 +21,13 @@
       save,
       providerLabel,
       pluginLabel = (ref) => ref,
+      pluginView, pluginMark, moduleView, moduleMark,
       providerColor,
       windowLabel,
       hasProviderMark,
       maskEmail,
       mimoProductLabel,
+      limitAccountTitle,
       createRowDrag,
       enabledLimitProviders,
       isWindowHidden = () => false
@@ -100,6 +102,16 @@
         });
     }
 
+    function itemStatus(item) {
+      if (item.type === 'plugin' && pluginView) return pluginView(item.ref)?.status || 'missing';
+      if (item.type === 'limit' && item.provider.startsWith('plugin:') && moduleView) return moduleView(item.provider)?.status || 'missing';
+      return 'active';
+    }
+
+    function itemAvailable(item) {
+      return itemStatus(item) === 'active';
+    }
+
     function itemLabel(item) {
       if (item.type === 'action') return t('settings.common.refresh');
       if (item.type === 'stat') {
@@ -111,8 +123,9 @@
       return providerLabel(item.provider);
     }
 
-    function markFor(item, className = 'edge-dock-composer-mark') {
-      const mark = el('span', className);
+    function markFor(item, { small = false } = {}) {
+      const mark = el('span', 'edge-dock-composer-mark' + (small ? ' is-small' : ''));
+      const size = small ? 13 : 16;
       if (item.type === 'action') {
         mark.classList.add('is-refresh');
         return mark;
@@ -127,9 +140,12 @@
         return mark;
       }
       if (item.type === 'plugin') {
-        mark.classList.add('is-fallback');
+        const view = pluginView?.(item.ref), icon = view && pluginMark?.(view, size);
+        if (icon) { mark.classList.add('is-plugin'); mark.append(icon); } else mark.classList.add('is-fallback');
         return mark;
       }
+      const moduleIcon = moduleMark?.(item.provider, size);
+      if (moduleIcon) { mark.classList.add('is-plugin'); mark.append(moduleIcon); return mark; }
       if (hasProviderMark(item.provider)) mark.classList.add(`row-icon-${item.provider}`);
       else mark.classList.add('is-fallback');
       mark.style.setProperty('--composer-color', providerColor(item.provider));
@@ -167,13 +183,13 @@
           const option = el('button', 'edge-dock-composer-menu-option');
           option.type = 'button';
           // Usage entries are named in full here, so their rail glyph would only repeat it.
-          if (item.type === 'limit') option.append(markFor(item, 'edge-dock-composer-mark is-small'));
+          if (item.type === 'limit') option.append(markFor(item, { small: true }));
           option.append(el('span', '', itemLabel(item)));
           option.addEventListener('click', () => {
             ui.menuOpen = false;
             ui.selected = idFor(item);
             if (item.type === 'action') void save({ [refreshKey]: true });
-            else void persist([...items.filter((entry) => entry.type !== 'action'), item]);
+            else void persist([...effectiveItems(), item]);
           });
           group.append(option);
         }
@@ -232,6 +248,45 @@
         options.append(label);
       }
       row.append(text, options);
+      return row;
+    }
+
+    function headlineAccountChoices(item) {
+      const hidden = new Set(item.hiddenAccounts || []);
+      return accountsFor(item.provider).filter((account) => !hidden.has(account.accountKey));
+    }
+
+    function refreshAccountPicker(select, item) {
+      const accounts = headlineAccountChoices(item);
+      const options = accounts.map((account) => {
+        const option = document.createElement('option');
+        option.value = account.accountKey;
+        option.textContent = account.accountName || maskEmail(account.accountEmail)
+          || account.planLabel || providerLabel(item.provider);
+        return option;
+      });
+      if (!accounts.some((account) => account.accountKey === item.accountKey)) {
+        const missing = document.createElement('option');
+        missing.value = item.accountKey || '';
+        missing.textContent = t('trayComposer.account.none');
+        missing.disabled = true;
+        options.unshift(missing);
+      }
+      select.replaceChildren(...options);
+      select.value = item.accountKey || '';
+    }
+
+    function accountRow(item, id) {
+      const row = el('label', 'settings-item edge-dock-composer-window');
+      row.append(el('span', 'settings-item-title', t('trayComposer.account.specificLabel')));
+      const select = document.createElement('select');
+      refreshAccountPicker(select, item);
+      select.addEventListener('change', () => { void updateItem(id, { accountKey: select.value }); });
+      select.addEventListener('blur', () => {
+        const currentItem = effectiveItems().find((entry) => itemsApi.itemId(entry) === id);
+        if (currentItem && root.contains(select)) refreshAccountPicker(select, currentItem);
+      });
+      row.append(select);
       return row;
     }
 
@@ -307,13 +362,13 @@
       }
       const id = idFor(item);
       const head = el('div', 'edge-dock-composer-detail-head');
-      head.append(markFor(item, 'edge-dock-composer-mark is-small'), el('span', 'edge-dock-composer-detail-title', itemLabel(item)));
+      head.append(markFor(item, { small: true }), el('span', 'edge-dock-composer-detail-title', itemLabel(item)));
       const remove = el('button', 'edge-dock-composer-remove', t('settings.edgeDock.remove'));
       remove.type = 'button';
       remove.addEventListener('click', () => {
         ui.selected = '';
         if (item.type === 'action') void save({ [refreshKey]: false });
-        else void persist(items.filter((entry) => entry.type !== 'action' && idFor(entry) !== id));
+        else void persist(effectiveItems().filter((entry) => idFor(entry) !== id));
       });
       head.append(remove);
       pane.append(head);
@@ -372,6 +427,20 @@
           void updateItem(id, { accountMode });
         }));
       }
+      if (!limitsOnly && item.provider === 'thirdparty') {
+        pane.append(choiceRow('settings.edgeDock.limitValue', item.accountMode, [
+          { value: 'lowest', labelKey: 'trayComposer.account.lowest' },
+          { value: 'specific', labelKey: 'trayComposer.account.specific' }
+        ], (accountMode) => {
+          const change = { accountMode };
+          if (accountMode === 'specific') {
+            const currentItem = effectiveItems().find((entry) => itemsApi.itemId(entry) === id);
+            change.accountKey = currentItem.accountKey || headlineAccountChoices(currentItem)[0]?.accountKey || '';
+          }
+          void updateItem(id, change);
+        }));
+        if (item.accountMode === 'specific') pane.append(accountRow(item, id));
+      }
       const accounts = accountsFor(item.provider);
       if (accounts.length > 1) {
         const hidden = new Set(item.hiddenAccounts || []);
@@ -391,7 +460,7 @@
           const identity = account.accountName || maskEmail(account.accountEmail);
           const product = item.provider === 'mimo' ? mimoProductLabel(account) : '';
           const name = product
-            ? [identity, product].filter(Boolean).join(' · ')
+            ? limitAccountTitle('mimo', account, accounts.indexOf(account), accounts)
             : identity || account.planLabel || providerLabel(item.provider);
           const text = el('span', 'edge-dock-composer-account-name', name);
           text.setAttribute('aria-label', name);
@@ -409,27 +478,35 @@
       if (!root) return;
       if (drag?.deferRender()) return;
       // Refresh is a fixed footer action; it does not freeze the automatic provider list.
-      const items = [...effectiveItems(), ...(refreshEnabled() ? [refreshItem] : [])];
+      const allItems = [...effectiveItems(), ...(refreshEnabled() ? [refreshItem] : [])];
+      const items = allItems.filter(itemAvailable);
       if (ui.selected && !items.some((item) => idFor(item) === ui.selected)) ui.selected = '';
       const selectedItem = items.find((item) => idFor(item) === ui.selected);
       // A stats tick can change token totals without changing any control here.
-      // Replacing the native select on every tick closes its open menu.
+      // Replacing a focused picker on every tick interrupts its selection.
       const signature = JSON.stringify({
         items,
         labels: items.map(itemLabel),
+        pluginMetadata: items.map(item => item.type === 'plugin' ? pluginView?.(item.ref) : moduleView?.(item.provider)),
         selected: ui.selected,
         menuOpen: ui.menuOpen,
         automatic: isAutomatic(),
         connected: isAutomatic() ? connectedProviders() : null,
         addable: ui.menuOpen ? enabledLimitProviders?.() : null,
         windows: selectedItem?.type === 'limit' ? windowChoices(selectedItem) : null,
-        accounts: selectedItem?.type === 'limit' ? accountsFor(selectedItem.provider).map((account) => [
-          account.accountKey, account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel
-        ]) : null,
+        accounts: selectedItem?.type === 'limit' ? accountsFor(selectedItem.provider).map((account, index, accounts) => {
+          const identity = [account.accountKey, account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel];
+          if (selectedItem.provider === 'mimo' && mimoProductLabel(account)) {
+            identity.push(limitAccountTitle('mimo', account, index, accounts));
+          }
+          return identity;
+        }) : null,
         wording: [t('settings.edgeDock.window'), t('settings.edgeDock.window.auto'), t('settings.edgeDock.window.unavailable')]
       });
       if (signature === renderedSignature && root.firstChild) return;
-      if (root.contains(document.activeElement) && document.activeElement?.tagName === 'SELECT') return;
+      if (root.contains(document.activeElement) && (document.activeElement?.tagName === 'SELECT'
+        || document.activeElement?.classList.contains('select-control-trigger'))) return;
+      if (root.querySelector('.select-control-trigger[aria-expanded="true"]')) return;
 
       const heading = el('div', 'edge-dock-composer-heading');
       heading.append(el('span', '', t(limitsOnly ? 'notch.tab.limits' : 'settings.edgeDock.items')));
@@ -489,7 +566,10 @@
         }
       },
       persistOrder: (order) => {
-        void persist(itemsApi.reorderEdgeDockItems(effectiveItems(), order));
+        const items = effectiveItems();
+        const visible = itemsApi.reorderEdgeDockItems(items.filter(itemAvailable), order);
+        let index = 0;
+        void persist(items.map(item => itemAvailable(item) ? visible[index++] : item));
       },
       requestRender: () => render()
     });

@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const { normalizeLatestModel } = require('./usage');
 const { isCompressedCodexTranscript, readCompressedCodexTranscript } = require('./providers/codex/transcript');
 const os = require('node:os');
 const { hashKey } = require('./hashKey');
@@ -514,6 +515,7 @@ function applySessionMetadata(periods, home, deps = {}) {
       if (meta.projectId) session.projectId = meta.projectId;
       if (meta.projectLabel) session.projectLabel = meta.projectLabel;
       if (meta.sessionKind) session.sessionKind = meta.sessionKind;
+      if (Object.prototype.hasOwnProperty.call(meta, 'latestModel')) session.latestModel = normalizeLatestModel(meta.latestModel, session.client);
       if (Object.prototype.hasOwnProperty.call(meta, 'promptCache')) session.promptCache = meta.promptCache;
       if (isSessionReasoningEffortClient(session.client) && Object.prototype.hasOwnProperty.call(meta, 'reasoningEffort')) {
         session.reasoningEffort = normalizeReasoningEffort(meta.reasoningEffort);

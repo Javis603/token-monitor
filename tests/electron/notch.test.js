@@ -255,7 +255,7 @@ test('top-only real provider projection updates while the side controller is abs
   const code = main.slice(start, main.indexOf('\n// Hand cells', start))
     + main.slice(main.indexOf('function pushNotchCells('), main.indexOf('// The soonest moment any sessions cell'));
   const update = vm.runInNewContext(`${code}; updateEdgeDockCells`, {
-    edgeDockController: null, notchController: controller, pluginRuntime: null,
+    desktopQuotaStats: s => s, edgeDockController: null, notchController: controller, pluginRuntime: null,
     notchPanelItems, notchWeek, notchHistory: { read: () => null }, hubModeGeneration: 0,
     settings: {}, scheduleSessionExpiry() {}, notchLastCells: [],
     edgeDockCellsFor: (value) => buildEdgeDockCells(value, { limitProviders: 'codex' }),
@@ -432,6 +432,30 @@ test('custom top layout is independent of tray layout and carries raw animation 
   assert.deepEqual(summaryLayout({ notchSummaryMode: 'custom', notchCustomLayout: layout }), trayLayout.normalizeTrayLayout(layout));
   assert.ok(data.summary.items.some((item) => item.measure?.value === 100));
   assert.equal(summaryLayout({ trayContent: 'icon' }).items.length, 1);
+});
+
+test('monthly tray presets resolve notch icons and numeric items from month stats', () => {
+  const input = { periods: {
+    today: { totalTokens: 10000, costUsd: 1, clients: { claude: 9000, codex: 1000 }, clientCosts: { claude: 0.8, codex: 0.2 } },
+    month: { totalTokens: 80000, costUsd: 16, clients: { claude: 20000, codex: 54000, hermes: 6000 }, clientCosts: { claude: 2, codex: 3, hermes: 11 } },
+    allTime: { totalTokens: 900000, costUsd: 123, clients: { claude: 100000, codex: 200000, hermes: 600000 }, clientCosts: { claude: 100, codex: 20, hermes: 3 } }
+  } };
+  const tokenItem = { metric: 'tokens', value: 80000, text: '80.0K' };
+  const costItem = { metric: 'cost', value: 16, text: '$16.00' };
+  for (const [trayContent, provider, expected] of [
+    ['tokensMonth', 'codex', [tokenItem]],
+    ['costMonth', 'hermes', [costItem]],
+    ['bothMonth', 'codex', [tokenItem, costItem]]
+  ]) {
+    const { items } = buildNotchData(input, [], { notchSummaryMode: 'tray', trayContent }).summary;
+    assert.equal(items[0].type, 'icon', trayContent);
+    assert.equal(items[0].provider, provider, trayContent);
+    assert.deepEqual(items.map(item => item.period), Array(expected.length + 1).fill('month'), trayContent);
+    assert.deepEqual(items.slice(1).map(item => ({
+      metric: item.measure?.metric, value: item.measure?.value, text: item.text
+    })), expected, trayContent);
+    assert.ok(items.every(item => item.available), trayContent);
+  }
 });
 
 // The endpoints must have equal command topology for interrupted/reversed motion.
@@ -646,7 +670,7 @@ test('disabling only the side dock preserves the shared rate expiry timer for th
   const code = source.slice(source.indexOf('function syncDockSurfaces('), source.indexOf('function refreshLimitStatsPresentation('));
   const cleared = [];
   let topRunning = true;
-  const context = { settings: {}, syncNotch() {}, canUseEdgeDock: () => false,
+  const context = { settings: {}, syncPluginQuotaSurfaceDemand() {}, syncNotch() {}, canUseEdgeDock: () => false,
     edgeDockController: { stop() {} }, notchController: { isRunning: () => topRunning },
     edgeDockRateTimer: 42, clearTimeout: (timer) => cleared.push(timer) };
   vm.runInNewContext(`${code}; syncDockSurfaces({});`, context);
@@ -683,7 +707,7 @@ test('top and side reuse projection with independent ordered selections', () => 
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   const fn = source.slice(source.indexOf('function edgeDockCellsFor('), source.indexOf('function updateEdgeDockCells('));
   const settings = { edgeDockItems: [{ type: 'stat', metric: 'today' }], notchItems: [{ type: 'stat', metric: 'sessions', groupBy: 'client' }] };
-  const context = { settings, pluginRuntime: null, buildEdgeDockCells, refreshEdgeDockDerivedPeriods() {}, refreshEdgeDockForecast() {}, syncCodexPresentationActiveAccount() {}, edgeDockDerivedPeriods: {}, edgeDockForecastWanted: () => false, edgeDockForecast: null, syncProvenanceActive: () => false, codexAccountsForRenderer: () => [], codexPresentationPendingAccountId: null, codexPresentationActiveAccountId: null, edgeDockLiveRateSample: () => null };
+  const context = { settings, desktopQuotaStats: s => s, pluginRuntime: null, buildEdgeDockCells, refreshEdgeDockDerivedPeriods() {}, refreshEdgeDockForecast() {}, syncCodexPresentationActiveAccount() {}, edgeDockDerivedPeriods: {}, edgeDockForecastWanted: () => false, edgeDockForecast: null, syncProvenanceActive: () => false, codexAccountsForRenderer: () => [], codexPresentationPendingAccountId: null, codexPresentationActiveAccountId: null, edgeDockLiveRateSample: () => null };
   vm.createContext(context);vm.runInContext(fn, context);
   assert.equal(context.edgeDockCellsFor(stats())[0].id, 'stat:today');
   assert.equal(context.edgeDockCellsFor(stats(), settings.notchItems)[0].id, 'stat:sessions');
@@ -3347,4 +3371,16 @@ test('visible collapsed Notch summary owns demand independently of the hidden pa
   n.ipcMain.emit('topNotch:dismiss', { sender: win.webContents }); await tick();
   assert.equal(scope().summaryVisible, true);
   assert.equal(runtime.manager.backendCount(), 0, 'collapse never retains panel-only demand');
+});
+
+test('native quota page demand is sender-scoped and capped by locked/closed shell visibility', (t) => {
+  const { controller, windows, ipcMain } = fixture(t, { notchSummaryEnabled: false });
+  ipcMain.emit('topNotch:limitsDemand', { sender: {} }, true);
+  assert.equal(controller.quotaVisibility().panel, false);
+  ipcMain.emit('topNotch:limitsDemand', { sender: windows[0].webContents }, true);
+  assert.equal(controller.quotaVisibility().panel, false, 'an unseen page cannot demand quota');
+  controller.setLocked(true);
+  assert.deepEqual(controller.quotaVisibility(), { panel: false, summary: false });
+  controller.dispose();
+  assert.equal(ipcMain.listenerCount('topNotch:limitsDemand'), 0);
 });

@@ -81,7 +81,7 @@ test('forecast details use the shared accessible tooltip without repeating third
   // and flips it when the window has no room below. A tooltip that positioned
   // itself would be the one clipped by the panel it scrolls in.
   assert.match(view, /function limitDetailInfoNode[\s\S]*?attachLimitDetailTooltip\(infoWrap, tooltip\);/);
-  assert.match(view, /tooltip\.classList\.toggle\('is-below', wrap\.getBoundingClientRect\(\)\.top < tooltip\.offsetHeight \+ 8\)/);
+  assert.match(view, /tooltip\.classList\.toggle\('is-below', wrap\.getBoundingClientRect\(\)\.top - top < tooltip\.offsetHeight \+ 8\)/);
   assert.match(styles, /\.limit-detail-tooltip\s*\{[^}]*position: fixed;/s);
   assert.match(styles, /\.limit-detail-tooltip:\s*popover-open\s*\{/);
   // What stays per-caller is which side it hangs from and how tightly it sets.

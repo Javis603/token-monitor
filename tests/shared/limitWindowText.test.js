@@ -79,6 +79,13 @@ test('a provider rule only touches the window kind it belongs to', () => {
   assert.equal(text('zai', { kind: 'daily', remaining: 100, limit: 200 }).detail, '100 / 200');
   assert.equal(text('zai', { kind: 'billing', limitId: 'zcode-model:x', remaining: 100, limit: 200 }).detail, '100 / 200');
 
+  // MiniMax plan percentages stay bare. Only the video count uses the detail slot.
+  assert.equal(text('minimax', { kind: 'session', label: '5h', usedPercent: 30 }).detail, '');
+  assert.equal(text('minimax', { kind: 'weekly', label: 'Weekly', usedPercent: 10 }).detail, '');
+  assert.equal(text('minimax', { kind: 'weekly', label: 'Video', used: 3, limit: 20, remaining: 17 }).detail, '17/20');
+  assert.equal(text('minimax', { kind: 'weekly', label: 'Video', used: 3, limit: 20, remaining: 17 }, true).detail, '3/20');
+  assert.equal(text('minimax', { kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624 }).detail, '');
+
   for (const id of ['kiro', 'qoder', 'zed', 'kimi']) {
     assert.equal(text(id, { kind: 'session', used: 1, limit: 4, detail: 'x' }).detail, '', id);
   }
@@ -171,4 +178,24 @@ test('both renderers paint from the shared modules, not their own copies', () =>
   for (const name of ['windowNode', 'windowGrid', 'appendWindows', 'meterNode', 'windowValueText']) {
     assert.doesNotMatch(dock, new RegExp(`function ${name}\\(`), `${name} should come from the shared view`);
   }
+});
+
+
+test('Mistral amount details follow used/remaining mode without inventing missing amounts', () => {
+  const quota = { kind: 'billing', label: 'Included Vibe Code', used: 5, limit: 150, currency: 'USD' };
+  for (const showUsed of [false, true]) {
+    assert.equal(text('mistral', quota, showUsed).detail, showUsed ? '$5.00 / $150.00' : '$145.00 / $150.00');
+  }
+  assert.equal(text('mistral', { ...quota, used: 0 }, true).detail, '$0.00 / $150.00');
+  assert.equal(text('mistral', { ...quota, used: null }).detail, '');
+  assert.equal(text('mistral', { ...quota, limit: null }).detail, '');
+  assert.equal(text('mistral', { kind: 'billing', usedPercent: 25 }).detail, '');
+  assert.equal(text('mistral', { ...quota, metric: 'credits' }).detail, '');
+});
+
+test('Hark pools follow the used/remaining setting and keep usage above the ceiling', () => {
+  const window = { kind: 'daily', used: 136379, remaining: 7863621, limit: 8000000 };
+  assert.equal(text('hark', window).detail, '7863621 / 8000000');
+  assert.equal(text('hark', window, true).detail, '136379 / 8000000');
+  assert.equal(text('hark', { ...window, used: 8500000, remaining: 0 }, true).detail, '8500000 / 8000000');
 });

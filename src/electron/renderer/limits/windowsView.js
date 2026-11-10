@@ -462,7 +462,8 @@
       if (!wrap.isConnected) return;
       tooltip.showPopover?.();
       // Measured after opening: a closed popover has no box to measure.
-      tooltip.classList.toggle('is-below', wrap.getBoundingClientRect().top < tooltip.offsetHeight + 8);
+      const top = deps.tooltipTop?.() ?? 0;
+      tooltip.classList.toggle('is-below', wrap.getBoundingClientRect().top - top < tooltip.offsetHeight + 8);
       positionCenteredDetailTooltip(tooltip);
     };
     const close = () => {
@@ -955,6 +956,63 @@
     return tagUsageItem(item, usageItems.limitUsageItemId(window), name.textContent);
   }
 
+  function quotaDetailEntries(rows) {
+    return (rows || []).map(row => [row.label, typeof row.value === 'string'
+      ? row.value : formatMoney(row.value.amount, row.value.currency)]);
+  }
+
+  function genericCreditWindowNode(provider, creditsWindow, color) {
+    const amount = creditsAmount(provider, creditsWindow);
+    if (amount === null) return null;
+    const display = creditsWindow.creditsDisplay;
+    const explicitDisplay = display === 'percent' || display === 'balance';
+    const total = creditsWindow.limit;
+    const percentDisplay = display === 'percent' && creditsWindow.showMeter !== false
+      && Number.isFinite(total) && total > 0 && amount >= 0 && amount <= total;
+    const remainingPercent = percentDisplay ? amount / total * 100 : null;
+    const displayWindow = explicitDisplay
+      ? { ...creditsWindow, showMeter: percentDisplay, remainingPercent,
+        usedPercent: percentDisplay ? 100 - remainingPercent : null }
+      : { ...creditsWindow, remainingPercent: creditsMeterPercent(provider, creditsWindow) };
+    const currency = creditsCurrency(provider, creditsWindow);
+    const detailAmount = settings()?.showLimitUsed ? total - amount : amount;
+    const balanceNode = limitWindowNode(
+      providerWindowLabel(provider, creditsWindow, 'Balance'),
+      displayWindow,
+      color,
+      0.95,
+      percentDisplay ? null : formatMoney(amount, currency),
+      percentDisplay ? `${formatMoney(detailAmount, currency)} / ${formatMoney(total, currency)}` : ''
+    );
+    balanceNode.classList.add('limit-window-wide');
+    if (!creditsWindow.resetsAt && !creditsWindow.resetDescription && !percentDisplay) balanceNode.classList.add('limit-window-no-reset');
+    return balanceNode;
+  }
+
+  function positionPluginQuotaInfo(info) {
+    if (!info) return;
+    info.classList.add('plugin-quota-info');
+    info.querySelector('.limit-detail-tooltip').classList.add('is-centered');
+  }
+
+  function pluginQuotaWindowNode(provider, window, color) {
+    const node = isCreditsWindow(window) ? genericCreditWindowNode(provider, window, color)
+      : limitWindowNode(providerWindowLabel(provider, window), window, color, window.kind === 'session' ? 0.95 : 0.68, null, window.detail);
+    if (!node) return null;
+    if (window.span !== undefined) {
+      node.dataset.limitSpan = String(window.span);
+      node.classList.toggle('limit-window-wide', window.span === 2);
+    }
+    const info = limitDetailInfoNode(quotaDetailEntries(window.infoRows));
+    if (info) {
+      positionPluginQuotaInfo(info);
+      const name = node.querySelector('.limit-window-text').children[0];
+      name.classList.add('limit-window-label');
+      name.append(info);
+    }
+    return node;
+  }
+
   // `showAllUsageItems` draws the rows the user hid as well: the settings
   // checklist is read off that render.
   function renderProviderWindows(provider, color, options = {}) {
@@ -1211,6 +1269,7 @@
       for (const quotaWindow of quotaWindows) {
         const node = limitWindowNode(providerWindowLabel(provider, quotaWindow), quotaWindow, color, 0.68);
         node.classList.add('limit-window-wide');
+        if (!quotaWindow.resetsAt && !quotaWindow.resetDescription) node.classList.add('limit-window-no-reset');
         windows.append(node);
       }
       const balance = provider.balance || null;
@@ -1220,7 +1279,7 @@
         const tokenPlan = mimoTokenPlanWindowFromBalance(balance);
         if (tokenPlan) {
           const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
-          node.classList.add('limit-window-wide');
+          node.classList.add('limit-window-wide', 'limit-window-no-reset');
           windows.append(node);
         } else if (balance?.planStatus === 'expired') {
           const node = limitWindowNode('Token Plan', { showMeter: false }, color, 0.68, t('limits.mimo.planExpired'));
@@ -1235,9 +1294,9 @@
       const giftBalance = optionalFiniteNumber(balance?.giftBalance);
       const cashBalance = optionalFiniteNumber(balance?.cashBalance);
       if (amount !== null || giftBalance !== null || cashBalance !== null) {
-        const detailParts = [];
-        if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, currency)}`);
-        if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, currency)}`);
+        const details = [];
+        if (giftBalance !== null) details.push(['Gift', formatMoney(giftBalance, currency)]);
+        if (cashBalance !== null) details.push(['Cash', formatMoney(cashBalance, currency)]);
         const balanceText = formatMoney(amount, currency) || '—';
         // Reuse the shared display-only balance meter; do not put it on the wire.
         const meterPercent = creditsMeterPercent(provider, creditsWindow);
@@ -1246,9 +1305,17 @@
           meterPercent === null ? { showMeter: false } : { remainingPercent: meterPercent },
           color,
           0.68,
-          balanceText,
-          detailParts.join(' · ')
+          balanceText
         );
+        if (details.length) {
+          const value = balanceNode.querySelector('.limit-window-text').children[1];
+          const right = document.createElement('span');
+          right.className = 'limit-spend-right';
+          value.replaceWith(right);
+          const info = limitDetailInfoNode(details);
+          info.addEventListener('click', event => event.stopPropagation());
+          right.append(value, info);
+        }
         tagUsageItem(balanceNode, 'credits', 'Balance');
         balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(balanceNode);
@@ -1662,6 +1729,25 @@
       // compact line; the ⓘ tooltip carries each grant's label and coverage.
       const resetNode = claudeResetCreditsNode(provider.resetCredits);
       if (resetNode) windows.append(resetNode);
+    } else if (provider.provider === 'hark') {
+      // The default layout only draws session/weekly quotas; Hark has daily/billing pools.
+      const quotaNodes = (provider.windows || [])
+        .filter((window) => window.metric !== 'spend' && (window.kind === 'daily' || window.kind === 'billing'))
+        .map((window) => limitWindowNode(
+          providerWindowLabel(provider, window), window, color, 0.78, null, providerWindowText(provider, window).detail
+        ));
+      windows.append(...quotaNodes);
+      for (const spend of (provider.windows || []).filter((window) => window.metric === 'spend')) {
+        const value = providerWindowText(provider, spend).value;
+        if (!value) continue;
+        const label = spend.label || 'Top-up';
+        windows.append(tagUsageItem(limitNoteRowNode({
+          label,
+          summary: value,
+          ariaParts: [value]
+        }), usageItems.limitUsageItemId(spend), label));
+      }
+      repairWindowPairs(windows);
     } else if (provider.provider === 'manus') {
       // The refreshing allowance is a quota with a reset; the spendable total is a
       // points balance without a ceiling. The default branch renders neither a
@@ -1680,6 +1766,26 @@
           summary: balanceValue,
           ariaParts: [balanceValue]
         }), 'credits', label));
+      }
+    } else if (provider.provider === 'mistral') {
+      // Keep API and Vibe allowances on separate full-width rows. The wallet
+      // has no quota denominator and must not become a percentage meter.
+      const quotaNodes = (provider.windows || [])
+        .filter((window) => !isCreditsWindow(window))
+        .map((window) => {
+          const node = limitWindowNode(
+            providerWindowLabel(provider, window), window, color, 0.78,
+            null, providerWindowText(provider, window).detail
+          );
+          node.classList.add('limit-window-wide');
+          return node;
+        });
+      windows.append(...quotaNodes);
+      for (const wallet of (provider.windows || []).filter(isCreditsWindow)) {
+        const value = creditsBalanceValue(provider, wallet);
+        if (!value) continue;
+        const label = providerWindowLabel(provider, wallet, 'Balance');
+        windows.append(tagUsageItem(limitNoteRowNode({ label, summary: value, ariaParts: [value] }), 'credits', label));
       }
     } else if (provider.provider === 'notion') {
       // Both included allowances are percentage quotas. Monthly is a billing
@@ -1719,15 +1825,42 @@
         const node = clineCreditsNode(provider, clineCredits, clineSpend);
         if (node) windows.append(node);
       }
+    } else if (provider.provider?.startsWith('plugin:')) {
+      for (const window of provider.windows || []) {
+        const node = pluginQuotaWindowNode(provider, window, color);
+        if (node) windows.append(node);
+      }
+      repairWindowPairs(windows);
+      for (const note of provider.notes || []) {
+        const summary = note.value === undefined ? '' : typeof note.value === 'string'
+          ? note.value : formatMoney(note.value.amount, note.value.currency);
+        const node = limitNoteRowNode({ label: note.label, summary,
+          detailEntries: quotaDetailEntries(note.infoRows), ariaParts: summary ? [summary] : [] });
+        positionPluginQuotaInfo(node.querySelector('.limit-detail-tooltip-wrap'));
+        windows.append(node);
+      }
     } else {
       // Default: render only the windows the provider actually has. Providers
       // that only expose a single window shouldn't leave a half-empty bar next to
       // the real one. Credits windows carry money rather than quota percentages;
       // their display meter is derived without changing the provider reading.
       const session = windowForKind(provider, 'session');
-      const weekly = windowForKind(provider, 'weekly');
-      if (session) windows.append(limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95));
-      if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
+      if (session) {
+        const node = limitWindowNode(providerWindowLabel(provider, session), session, color, 0.95);
+        if (provider.provider === 'minimax' && !session.resetsAt && !session.resetDescription) node.classList.add('limit-window-no-reset');
+        windows.append(node);
+      }
+      if (provider.provider === 'minimax') {
+        for (const weekly of windowsForKind(provider, 'weekly')) {
+          const detail = providerWindowText(provider, weekly).detail;
+          const node = limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68, null, detail);
+          if (!weekly.resetsAt && !weekly.resetDescription && !detail) node.classList.add('limit-window-no-reset');
+          windows.append(node);
+        }
+      } else {
+        const weekly = windowForKind(provider, 'weekly');
+        if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
+      }
       for (const creditsWindow of (provider.windows || []).filter(isCreditsWindow)) {
         // Muse supplies the token balance as display text; keep it ahead of the
         // monetary fallback without changing the underlying credits reading.
@@ -1745,18 +1878,12 @@
           }), usageItems.limitUsageItemId(creditsWindow), label));
           continue;
         }
-        const amount = creditsAmount(provider, creditsWindow);
-        if (amount === null) continue;
-        const balanceNode = limitWindowNode(
-          providerWindowLabel(provider, creditsWindow, 'Balance'),
-          { ...creditsWindow, remainingPercent: creditsMeterPercent(provider, creditsWindow) },
-          color,
-          0.95,
-          formatMoney(amount, creditsCurrency(provider, creditsWindow))
-        );
-        balanceNode.classList.add('limit-window-wide');
-        if (!creditsWindow.resetsAt && !creditsWindow.resetDescription) balanceNode.classList.add('limit-window-no-reset');
-        windows.append(balanceNode);
+        const balanceNode = genericCreditWindowNode(provider, creditsWindow, color);
+        if (balanceNode) windows.append(balanceNode);
+      }
+      if (provider.provider === 'minimax') {
+        const spendNode = provider.balance && providerSpendNode(provider.balance, provider);
+        if (spendNode) windows.append(spendNode);
       }
       repairWindowPairs(windows);
     }
@@ -1790,11 +1917,11 @@
   }
 
   // A run of half-width rows with an odd count leaves its last row alone on a
-  // grid row, so that row spans it.
+  // grid row, so that row spans it. An explicit plugin span keeps its width.
   function repairWindowPairs(container) {
     let run = [];
     const closeRun = () => {
-      if (run.length % 2 === 1) run.at(-1).classList.add('limit-window-wide');
+      if (run.length % 2 === 1 && run.at(-1).dataset.limitSpan !== '1') run.at(-1).classList.add('limit-window-wide');
       run = [];
     };
     for (const child of container.children) {
@@ -1837,7 +1964,8 @@
     openrouter: (provider, index) => namedApiAccountTitle(provider, index, 'openrouter'),
     thirdparty: (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty'),
     volcengine: (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers),
-    mimo: (provider, index, providers) => mimoAccountTitle(provider, index, providers)
+    mimo: (provider, index, providers) => mimoAccountTitle(provider, index, providers),
+    minimax: minimaxAccountTitle
   };
 
   // Fallback names for `provider.source`, used when the provider has no override
@@ -1857,6 +1985,9 @@
   }
 
   function limitProviderFailureLabel(provider) {
+    if (provider?.provider === 'mimo' && provider.status === 'error') {
+      return presentationApi.limitProviderStatusLabel(provider).label;
+    }
     if (provider?.provider === 'workbuddy' && provider.actionRequired === 'appSessionEncrypted') {
       return t('settings.limits.status.appSessionEncrypted');
     }
@@ -1887,6 +2018,10 @@
 
   function limitProviderPlan(provider) {
     if (provider?.status && provider.status !== 'ok' && !provider.stale) return limitProviderFailureLabel(provider);
+    if (provider?.provider === 'minimax') {
+      const plan = String(provider.planLabel || '').trim();
+      return plan ? presentationApi.limitProviderPlanDisplayLabel(provider, plan) : '';
+    }
     const mimoProduct = provider?.provider === 'mimo' ? mimoProductLabel(provider) : '';
     if (mimoProduct) {
       const plan = String(provider?.planLabel || '').trim();
@@ -1914,6 +2049,8 @@
   }
 
   function renderLimitProviderMark(id, color) {
+    const pluginMark = deps.pluginMark?.(id);
+    if (pluginMark) return pluginMark;
     const mark = document.createElement('span');
     if (hasMark(id)) {
       // .limit-icon sizes the mark, .row-icon-<id> supplies the mask: one table,
@@ -1985,6 +2122,9 @@
     const plan = document.createElement('div');
     plan.className = 'limit-plan';
     plan.textContent = limitPlanText(provider, options);
+    if (provider.provider === 'minimax' && !plan.textContent && options.planText === undefined && subscriptionForProvider(provider)) {
+      plan.textContent = t('settings.subscriptions.title');
+    }
     // A record binds to one account, so the provider-wide rollup belongs on the
     // row that stands for the provider as a whole — the header of a group, or a
     // provider's single row — and not on each member of a group, which would
@@ -2231,6 +2371,54 @@
       renderProviderWindows(provider, color)
     );
     if (id === 'codex' && !options.accountRow) appendCodexResetForecast(row);
+    if (deps.history && settings()?.limitsHistoryOpenMode !== 'off' && (provider.windows || []).some(window => (
+      !usageItems.isLimitWindowHidden(settings()?.limitProviderHiddenItems, provider.provider, window)
+      && !(provider.provider === 'codex' && settings()?.showCodexAdditionalLimits === false && window.additional === true)
+      && (typeof window.usedPercent === 'number' || window.metric === 'credits' && typeof window.remaining === 'number'
+      || window.metric === 'spend' && typeof window.used === 'number')
+    ))) {
+      const key = deps.history.key(provider);
+      const openHistory = (interactive) => {
+        if (!row.isConnected) return;
+        if (!interactive && id === 'mimo'
+          && row.querySelector('[data-usage-item="credits"] .limit-detail-tooltip-wrap:hover')) return;
+        const rect = row.getBoundingClientRect();
+        void deps.history.open(key, { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, interactive).catch(() => {});
+      };
+      let hoverTimer = null;
+      row.addEventListener('pointerenter', () => {
+        deps.history.enter(key);
+        if (settings()?.limitsHistoryOpenMode === 'click') return;
+        if (deps.history.activeKey?.()) openHistory(false);
+        else hoverTimer = setTimeout(() => openHistory(false), 160);
+      });
+      if (id === 'mimo') {
+        const detail = row.querySelector('[data-usage-item="credits"] .limit-detail-tooltip-wrap');
+        detail?.addEventListener('pointerenter', () => clearTimeout(hoverTimer));
+        detail?.addEventListener('pointerleave', () => {
+          if (settings()?.limitsHistoryOpenMode !== 'click' && row.matches(':hover')) {
+            hoverTimer = setTimeout(() => openHistory(false), 160);
+          }
+        });
+      }
+      row.addEventListener('pointerleave', () => { clearTimeout(hoverTimer); deps.history.leave(key); });
+      row.dataset.limitHistory = key;
+      row.classList.toggle('is-history-active', deps.history.activeKey?.() === key);
+      row.tabIndex = 0;
+      row.setAttribute('aria-description', t('limits.history.open'));
+      row.addEventListener('keydown', event => {
+        if (event.target !== row || !['Enter', ' '].includes(event.key)) return;
+        event.preventDefault();
+        if (event.repeat) return;
+        clearTimeout(hoverTimer); openHistory(true);
+      });
+      row.addEventListener('click', event => {
+        const clickedRow = event.target.closest('.limit-row');
+        if (clickedRow && clickedRow !== row && clickedRow.dataset?.limitLead === undefined) return;
+        if (event.target.closest('button, a, input, select, summary, [role="button"]')) return;
+        clearTimeout(hoverTimer); openHistory(true);
+      });
+    }
     return row;
   }
 
@@ -2264,6 +2452,9 @@
       }
     }),
     claude: (provider, color, { grouped }) => ({
+      options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
+    }),
+    minimax: (provider, color, { grouped }) => ({
       options: { accountTitle: true, ...(grouped ? { showIcon: false } : {}) }
     }),
     workbuddy: (provider, color, { grouped }) => ({
@@ -2387,6 +2578,30 @@
       && label !== 'Zen';
   }
 
+  function minimaxAccountGroups(providers) {
+    const groups = new Map();
+    for (const provider of providers) {
+      const code = provider.source === 'api' && providers.find(row => row.source === 'oauth'
+        && row.accountKey && provider.accountKey && row.region && row.region === provider.region
+        && provider.relatedAccountKey === row.accountKey);
+      const key = code?.accountKey || provider.accountKey || provider;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(provider);
+    }
+    // The Code row owns plan and subscription identity, so it leads its group.
+    return [...groups.values()].map((group) => group.sort(
+      (a, b) => Number(b.source === 'oauth') - Number(a.source === 'oauth')
+    ));
+  }
+
+  function minimaxAccountTitle(provider, index, providers) {
+    const groups = minimaxAccountGroups(providers);
+    if (providers.length > 1 && groups.length === 1) return '';
+    const representatives = groups.map(group => group[0]);
+    const groupIndex = groups.findIndex(group => group.includes(provider));
+    return limitAccountDefaultTitle(representatives[groupIndex], groupIndex, representatives);
+  }
+
   function limitAccountDefaultTitle(provider, index, providerEntries = [provider]) {
     return accountIdentity.accountTitleLabel(provider, providerEntries, {
       maskEmail: limitAccountEmailsMasked(),
@@ -2444,14 +2659,18 @@
     return String(provider?.accountLabel || '').trim() || limitAccountDefaultTitle(provider, index, providers);
   }
 
+  function mimoAccountRepresentatives(groups) {
+    return groups.map(group => group.find(row => row.accountEmail) || group[0]);
+  }
+
   function mimoAccountTitle(provider, index, providers) {
     const product = mimoProductLabel(provider);
     if (product) {
-      const identity = accountIdentity.accountEmailLabel(provider, providers || [provider], {
-        maskEmail: limitAccountEmailsMasked(),
-        suffix: String(provider?.accountName || '').trim()
-      }) || String(provider?.accountName || '').trim();
-      return [identity, product].filter(Boolean).join(' · ') || `Account ${index + 1}`;
+      const groups = mimoAccountGroups(providers || [provider]);
+      const representatives = mimoAccountRepresentatives(groups);
+      const groupIndex = groups.findIndex(group => group.includes(provider));
+      const identity = limitAccountDefaultTitle(representatives[groupIndex], groupIndex, representatives);
+      return `${identity} · ${product}`;
     }
     // Compatibility for rows from versions that put the product in accountName
     // and the plan in accountLabel.
@@ -2516,12 +2735,11 @@
   function appendMimoAccountProducts(list, providers, color) {
     providers.forEach((provider, index) => {
       const policy = limitAccountRowPolicy('mimo', provider, color, { grouped: true, sharedFamily: null });
-      // Readings and plan metadata identify healthy products. A status-only row
-      // needs its product title; older records fall back to the account title.
-      const statusOnly = Boolean(provider.status) && provider.status !== 'ok' && !provider.stale;
-      const title = statusOnly
-        ? (mimoProductLabel(provider) || limitAccountTitle('mimo', provider, index, providers))
-        : '';
+      // Product titles share the account heading layout; legacy failures retain their identity fallback.
+      const product = mimoProductLabel(provider);
+      const title = product === 'Console' ? 'Console' : product ? 'Desktop'
+        : provider.status && provider.status !== 'ok' && !provider.stale
+          ? limitAccountTitle('mimo', provider, index, providers) : '';
       list.append(renderLimitProviderRow('mimo', title, provider, policy.color, {
         accountRow: true,
         ...policy.options
@@ -2530,31 +2748,98 @@
   }
 
   function renderMimoProviderGroup(label, providers, color) {
+    const hidden = usageItems.hiddenUsageItemSet(settings()?.limitProviderHiddenItems, 'mimo');
     const groups = mimoAccountGroups(providers);
-    const representatives = groups.map((group) => group.find((row) => row.accountEmail) || group[0]);
-    const accountTitle = (index) => limitAccountDefaultTitle(representatives[index], index, representatives);
+    const representatives = mimoAccountRepresentatives(groups);
+    const visibleGroups = groups.map((group, index) => ({
+      index,
+      providers: group.filter(provider => {
+        if (hidden.size === 0 || provider.status !== 'ok' || provider.stale || subscriptionForProvider(provider)) return true;
+        const items = limitProviderUsageItems([provider]);
+        return items.length === 0 || items.some(item => !hidden.has(item.id));
+      })
+    })).filter(group => group.providers.length > 0);
+    const visible = visibleGroups.flatMap(group => group.providers);
+    const recorded = subscriptionsForProviderGroup('mimo', visible);
     const oneAccount = groups.length === 1;
-    const { row, list } = renderLimitProviderGroupFrame(
-      'mimo', label, providers, color, { count: oneAccount ? 0 : groups.length }
-    );
-    if (oneAccount) {
-      appendMimoAccountProducts(list, groups[0], color);
+    const { row, list, groupProvider } = renderLimitProviderGroupFrame('mimo', label, visible, color, {
+      count: oneAccount ? 0 : visibleGroups.length
+    });
+    if (visible.length === 0 && recorded.length > 0) {
+      row.children[0].replaceWith(renderLimitProviderHead('mimo', label, groupProvider, color, {
+        planText: t('settings.subscriptions.title'), hideMeta: true
+      }));
+    }
+    if (visible.length === 0 && recorded.length === 0) {
+      row.style.display = 'none';
+      return row;
+    }
+    if (oneAccount && visibleGroups.length === 1) {
+      appendMimoAccountProducts(list, visibleGroups[0].providers, color);
     } else {
-      groups.forEach((group, index) => {
+      visibleGroups.forEach(({ providers: productsForAccount, index }) => {
         const account = document.createElement('div');
         account.className = 'limit-row limit-account-row';
         const products = document.createElement('div');
         products.className = 'limit-account-list';
-        appendMimoAccountProducts(products, group, color);
-        account.append(renderLimitProviderHead('mimo', accountTitle(index), representatives[index], color, {
-          showIcon: false,
-          accountRow: true,
-          planText: '',
-          hideMeta: true
-        }), products);
+        appendMimoAccountProducts(products, productsForAccount, color);
+        account.append(renderLimitProviderHead('mimo',
+          limitAccountDefaultTitle(representatives[index], index, representatives), representatives[index], color, {
+            showIcon: false,
+            accountRow: true,
+            planText: '',
+            hideMeta: true
+          }), products);
         list.append(account);
       });
     }
+    return row;
+  }
+
+  function renderMinimaxAccount(label, providers, color, grouped = false) {
+    const [lead, ...rest] = providers;
+    const hidden = usageItems.hiddenUsageItemSet(settings()?.limitProviderHiddenItems, 'minimax');
+    const fullyHidden = (provider) => {
+      const items = limitProviderUsageItems([provider]);
+      return items.length > 0 && items.every((item) => hidden.has(item.id));
+    };
+    const leadPolicy = limitAccountRowPolicy('minimax', lead, color, { grouped, sharedFamily: null });
+    const row = renderLimitProviderRow('minimax', label, lead, color, {
+      accountRow: grouped, accountLabel: label, ...leadPolicy.options
+    });
+    if (rest.some((provider) => provider.stale)) row.classList.add('stale');
+    const lanes = [];
+    if (rest.length) {
+      const list = document.createElement('div');
+      list.className = 'limit-account-list';
+      const windows = [...row.children].find((node) => node.classList.contains('limit-windows'));
+      if (windows) {
+        const leadLane = document.createElement('div');
+        leadLane.className = 'limit-row limit-account-row';
+        // This is the lead account's own quota, not a separate history row.
+        leadLane.dataset.limitLead = '';
+        windows.remove();
+        leadLane.append(windows);
+        list.append(leadLane);
+        lanes.push({ node: leadLane, windows, provider: lead });
+      }
+      for (const provider of rest) {
+        const policy = limitAccountRowPolicy('minimax', provider, color, { grouped: true, sharedFamily: null });
+        const lane = renderLimitProviderRow('minimax', '', provider, policy.color, {
+          accountRow: true,
+          ...policy.options
+        });
+        list.append(lane);
+        lanes.push({ node: lane, windows: lane.querySelector('.limit-windows'), provider });
+      }
+      row.append(list);
+    } else {
+      const windows = [...row.children].find((node) => node.classList.contains('limit-windows'));
+      if (windows) lanes.push({ node: row, windows, provider: lead });
+    }
+    const emptied = lanes.filter(({ windows, provider }) => windows?.children.length === 0 && fullyHidden(provider));
+    if (lanes.length > 0 && emptied.length === lanes.length) return null;
+    for (const { node } of emptied) node.remove();
     return row;
   }
 
@@ -2564,6 +2849,26 @@
   // passing a different set.
   function renderLimitProviderGroup(providerId, label, providers, color) {
     if (providerId === 'mimo') return renderMimoProviderGroup(label, providers, color);
+    if (providerId === 'minimax') {
+      const groups = minimaxAccountGroups(providers);
+      if (groups.length === 1 && providers.length > 1) {
+        const account = renderMinimaxAccount(label, groups[0], color);
+        if (account) return account;
+        const { row } = renderLimitProviderGroupFrame(providerId, label, providers, color, { count: 0 });
+        row.style.display = 'none';
+        return row;
+      }
+      if (groups.some(group => group.length > 1)) {
+        const representatives = groups.map(group => group[0]);
+        const accounts = groups.map((group, index) => renderMinimaxAccount(
+          limitAccountDefaultTitle(representatives[index], index, representatives), group, color, true
+        )).filter(Boolean);
+        const { row, list } = renderLimitProviderGroupFrame(providerId, label, providers, color, { count: accounts.length });
+        accounts.forEach((account) => list.append(account));
+        if (accounts.length === 0) row.style.display = 'none';
+        return row;
+      }
+    }
     const policy = LIMIT_GROUP_POLICIES[providerId] || (() => ({}));
     const { markId, sharedFamily, forecastOnGroup } = policy(providers);
     const { row, list: accountList } = renderLimitProviderGroupFrame(
