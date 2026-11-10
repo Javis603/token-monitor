@@ -166,7 +166,7 @@ Abra o app para começar a acompanhar o uso local deste dispositivo, sem configu
 - **Estatísticas de acerto de cache** — clique em qualquer ferramenta ou modelo para expandir um detalhamento completo dos tokens de entrada (acerto no cache vs. fora do cache), tokens de saída e as porcentagens de acerto
 - **Custo e moeda** — o custo ao lado das contagens de tokens, exibido em USD, TWD, HKD ou CNY; as taxas de câmbio são atualizadas automaticamente todos os dias e podem ser alteradas manualmente nas Configurações
 - **Caminhos de verificação personalizados** — aponte uma ferramenta para pastas de sessões extras quando as suas estiverem fora dos locais padrão
-- **WSL (Windows)** — o uso baseado em arquivos de uma distro WSL em execução é detectado automaticamente e mesclado a cada 5 minutos; ferramentas com backend SQLite, como OpenCode e Hermes, podem exigir um [agente headless dentro do WSL](docs/wsl-sqlite-setup.md)
+- **WSL (Windows)** — o uso baseado em arquivos de distros WSL em execução é mesclado a cada 5 minutos; ferramentas com backend SQLite, como OpenCode e Hermes, podem exigir um [agente headless dentro do WSL](docs/wsl-sqlite-setup.md)
 
 ### Limites, tendências e exportação
 

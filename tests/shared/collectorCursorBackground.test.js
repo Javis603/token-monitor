@@ -329,6 +329,7 @@ test('isolated WSL home scans remain offline and never wait behind the host Curs
   const collection = collectUsageOnce({
     clients: 'cursor', allTimeSince: '2024-01-01', commandTimeoutMs: 1000,
     homeDir, env: {}, osInfo: {}, platform: 'win32', projectsEnabled: false, historyEnabled: false,
+    wslScanEnabled: true,
     codexLocalUsageEnabled: false, cursorSnapshot: { today: empty, month: empty, allTime: empty },
     probeWslState: () => 'ok',
     collectWslUsage: async options => {

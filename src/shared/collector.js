@@ -1223,7 +1223,7 @@ async function collectUsageOnce(options) {
   const windowsPeriods = { today, month, allTime };
   let wslBundle = emptyWslBundle();
   let wslDetected = [];
-  if (normalizedClients && options.wslScanEnabled !== false) {
+  if (normalizedClients && options.wslScanEnabled === true) {
     if (options.refreshWsl) {
       const wslResult = await collectWsl({
         clients: normalizedClients,
@@ -1296,7 +1296,7 @@ async function collectUsageOnce(options) {
   let wslStatus = null;
   if (platformValue === 'win32' && normalizedClients) {
     const reuseFrozen = !options.refreshWsl && options.wslAnchor && options.wslStatus;
-    if (options.wslScanEnabled === false) {
+    if (options.wslScanEnabled !== true) {
       wslStatus = { state: 'disabled', detected: [], withData: [] };
     } else if (reuseFrozen) {
       wslStatus = options.wslStatus;
@@ -2976,8 +2976,8 @@ function startCollector(options) {
         // the configFingerprint intentionally ignores the toggle (host periods
         // stay valid), so without this gate a warm-scan preview would briefly
         // re-merge the old WSL totals before the first full tick clears them.
-        wslAnchor = options.wslScanEnabled !== false ? (saved.wslBundle || null) : null;
-        wslStatusAnchor = options.wslScanEnabled !== false ? (saved.wslStatus || null) : null;
+        wslAnchor = options.wslScanEnabled === true ? (saved.wslBundle || null) : null;
+        wslStatusAnchor = options.wslScanEnabled === true ? (saved.wslStatus || null) : null;
         // An untrustworthy capture time leaves lastFullScanAt at 0, which forces
         // a full scan on the first interval tick (see loop()).
         if (trust.capturedAtMs !== null) lastFullScanAt = trust.capturedAtMs;

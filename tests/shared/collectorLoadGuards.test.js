@@ -4500,6 +4500,7 @@ test('hourly smart reconciliation refreshes WSL-only usage without a host event'
       limitsEnabled: false,
       historyEnabled: false,
       probeWslState: () => 'ok',
+      wslScanEnabled: true,
       collectWslUsage: async () => {
         wslCalls += 1;
         return { bundle: wslBundleWith('gemini', wslCalls === 1 ? 5 : 9), detected: ['gemini'] };
