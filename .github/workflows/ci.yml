@@ -20,11 +20,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Minimum supported Node and latest Node 24 on Linux; smoke on macOS/Windows to
-        # catch platform-specific bugs (tray on macOS, WSL/paths on Windows).
+        # Exercise the minimum Node where chokidar 6 runs, plus Node 24 on every OS.
         os: [ubuntu-latest]
         node-version: ['22.22.0', '24']
         include:
+          - os: windows-latest
+            node-version: '22.22.0'
           - os: macos-latest
             node-version: '24'
           - os: windows-latest
