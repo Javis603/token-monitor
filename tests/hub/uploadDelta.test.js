@@ -217,27 +217,29 @@ test('Worker bounds chunked full ingest before JSON parsing and cancels an overs
   assert.equal((await hub.device()).history.daily.length, 151);
 });
 
-test('Worker full ingest accepts a body at the UTF-8 ceiling and rejects one extra byte without invalidating its baseline', async t => {
-  const hub = await backend('Worker', t);
-  const limit = MAX_UPLOAD_BYTES;
-  const payload = { ...summaryForUpload(), padding: '' };
-  const paddingBytes = limit - Buffer.byteLength(JSON.stringify(payload));
-  payload.padding = '字'.repeat(Math.floor(paddingBytes / 3)) + 'x'.repeat(paddingBytes % 3);
-  const body = JSON.stringify(payload);
-  assert.equal(Buffer.byteLength(body), limit);
-  const send = value => hub.send('https://hub.invalid/api/ingest', {
-    method: 'POST', headers: { ...hub.headers, 'x-token-monitor-upload': '1' }, body: value
+for (const kind of ['Node', 'Worker']) {
+  test(`${kind} full ingest accepts a body at the UTF-8 ceiling and rejects one extra byte without invalidating its baseline`, async t => {
+    const hub = await backend(kind, t);
+    const limit = MAX_UPLOAD_BYTES;
+    const payload = { ...summaryForUpload(), padding: '' };
+    const paddingBytes = limit - Buffer.byteLength(JSON.stringify(payload));
+    payload.padding = '字'.repeat(Math.floor(paddingBytes / 3)) + 'x'.repeat(paddingBytes % 3);
+    const body = JSON.stringify(payload);
+    assert.equal(Buffer.byteLength(body), limit);
+    const send = value => hub.send('https://hub.invalid/api/ingest', {
+      method: 'POST', headers: { ...hub.headers, 'x-token-monitor-upload': '1' }, body: value
+    });
+    const first = await send(body);
+    assert.equal(first.status, 200);
+    const { upload } = await first.json();
+    const before = await hub.device();
+    const rejected = await send(`${body} `);
+    assert.equal(rejected.status, 413);
+    assert.equal((await rejected.json()).error, 'payload_too_large');
+    assert.deepEqual(await hub.device(), before);
+    const delta = await hub.request('/api/ingest/delta', {
+      deviceId: payload.deviceId, baseRevision: upload.revision, patch: []
+    });
+    assert.equal(delta.status, 200);
   });
-  const first = await send(body);
-  assert.equal(first.status, 200);
-  const { upload } = await first.json();
-  const before = await hub.device();
-  const rejected = await send(`${body} `);
-  assert.equal(rejected.status, 413);
-  assert.equal((await rejected.json()).error, 'payload_too_large');
-  assert.deepEqual(await hub.device(), before);
-  const delta = await hub.request('/api/ingest/delta', {
-    deviceId: payload.deviceId, baseRevision: upload.revision, patch: []
-  });
-  assert.equal(delta.status, 200);
-});
+}
