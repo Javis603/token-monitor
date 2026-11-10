@@ -2261,7 +2261,9 @@ function readSettings() {
     if (saved.homeLimitProviderOrder !== undefined) {
       merged.homeLimitProviderOrder = migrateHomeLimitProviderOrder(saved.homeLimitProviderOrder);
     }
-    if (migrateQwenworkHomeLimitProvider(merged)) qwenworkHomeLimitProviderPersistPending = true;
+    if (saved.limitProviders !== undefined && migrateQwenworkHomeLimitProvider(merged)) {
+      qwenworkHomeLimitProviderPersistPending = true;
+    }
     if (saved.hiddenHomeLimitProviders !== undefined) {
       merged.hiddenHomeLimitProviders = normalizeHiddenLimitProviders(saved.hiddenHomeLimitProviders);
     }
