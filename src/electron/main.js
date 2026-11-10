@@ -8336,6 +8336,8 @@ app.whenReady().then(() => {
     const previousProxyKey = JSON.stringify([settings.proxyUrl || '', settings.noProxy || '']);
     const normalizedCurrency = patch.currency !== undefined ? normalizeCurrency(patch.currency, settings.currency) : normalizeCurrency(settings.currency);
     const normalizedPatch = { ...patch, currency: normalizedCurrency };
+    // Only Cursor's explicit account lifecycle can assign manual ownership.
+    delete normalizedPatch.cursorManualAccountIds;
     delete normalizedPatch.windowMaximized;
     delete normalizedPatch.workbuddyEndpoint;
     delete normalizedPatch.workbuddyLocalAppEnabled;
@@ -9056,16 +9058,13 @@ app.whenReady().then(() => {
       const accountId = await cursorAuth.runCursorLogin(token);
       const disabled = normalizeCursorDisabledAccountIds(settings.cursorDisabledAccountIds)
         .filter((id) => id !== accountId);
-      const limitsChanged = disabled.length !== settings.cursorDisabledAccountIds.length;
       settings.cursorDisabledAccountIds = disabled;
       settings.cursorManualAccountIds = normalizeCursorAccountIds([
         ...settings.cursorManualAccountIds,
         accountId
       ]);
       saveSettings({ throwOnError: true });
-      if (limitsChanged) {
-        deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
-      }
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
       cursorStatusCache = { value: null, at: 0 };
       void queueLimitInvalidation({ provider: 'cursor' }, 'login', { clear: true });
       bestEffortTrackedUsageRefresh('cursor', { forceSync: true });
@@ -9159,13 +9158,10 @@ app.whenReady().then(() => {
       await cursorAuth.runCursorLogout({ accountId: removeId });
       const disabled = normalizeCursorDisabledAccountIds(settings.cursorDisabledAccountIds)
         .filter((id) => id !== removeId);
-      const limitsChanged = disabled.length !== settings.cursorDisabledAccountIds.length;
       settings.cursorDisabledAccountIds = disabled;
       settings.cursorManualAccountIds = [...manual].filter((id) => id !== removeId);
       saveSettings({ throwOnError: true });
-      if (limitsChanged) {
-        deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
-      }
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
       cursorStatusCache = { value: null, at: 0 };
       void queueLimitInvalidation({ provider: 'cursor' }, 'logout', { clear: true });
       bestEffortTrackedUsageRefresh('cursor', { forceSync: true });

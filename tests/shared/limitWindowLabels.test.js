@@ -22,6 +22,18 @@ test('the collector label always wins over the kind default', () => {
   assert.equal(limitWindowLabel('codex', { kind: 'session', label: '   ' }), 'Session');
 });
 
+test('Cursor included quota displays its period without renaming its stored identity', () => {
+  for (const [kind, expected] of [['weekly', 'Weekly'], ['billing', 'Monthly']]) {
+    const window = Object.freeze({ kind, label: 'Included usage' });
+    assert.equal(limitWindowLabel('cursor', window), expected);
+    assert.equal(window.label, 'Included usage');
+  }
+  assert.equal(limitWindowLabel('cursor', { kind: 'weekly', label: 'Team pool' }), 'Team pool');
+  assert.equal(limitWindowLabel('cursor', { kind: 'billing', label: 'Prepaid balance' }), 'Prepaid balance');
+  assert.equal(limitWindowLabel('cursor', { kind: 'quarterly', label: 'Included usage' }), 'Included usage');
+  assert.equal(limitWindowLabel('other', { kind: 'weekly', label: 'Included usage' }), 'Included usage');
+});
+
 test('rolling windows are named the way their vendor names them', () => {
   for (const id of ['alibaba', 'antigravity', 'cline', 'commandcode', 'kimi', 'volcengine', 'zai', 'zaiteam']) {
     assert.equal(limitWindowKindLabel(id, 'session'), '5-hour', `${id} publishes a 5-hour window`);
