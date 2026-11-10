@@ -490,3 +490,23 @@ test('Cursor limits retires switched desktop accounts from retained runtime snap
   assert.equal(rows[0].accountKey, seed[0].accountKey);
   assert.equal(rows[0].status, 'unauthorized');
 });
+
+test('Cursor limits rechecks desktop ownership when an in-flight probe completes', async () => {
+  const account = { id: 'user_CURRENT', userId: 'user_CURRENT', sessionToken: 'fixture' };
+  for (const state of [{ state: 'signed-out' }, { state: 'signed-in', userId: 'user_OTHER' }, { state: 'unknown' }]) {
+    for (const manual of [false, true]) {
+      let desktop = { state: 'signed-in', userId: account.userId };
+      const result = await fetchCursorLimits({ cursorManualAccountIds: manual ? [account.id] : [] }, {
+        listAccounts: () => [account],
+        readCursorDesktopSignIn: () => desktop,
+        probe: async () => {
+          desktop = state;
+          return { ok: true, user: { sub: account.userId }, usage: { planInfo: { isMerged: false }, autoPercent: 20 } };
+        }
+      });
+      const retired = !manual && state.state !== 'unknown';
+      assert.equal(result.removed === true, retired, `${state.state}, manual=${manual}`);
+      if (!retired) assert.equal(result.status, 'ok');
+    }
+  }
+});

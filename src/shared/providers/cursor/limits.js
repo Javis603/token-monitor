@@ -284,11 +284,11 @@ async function fetchCursorLimits(options = {}, deps = {}) {
   // Electron supplies manual ownership; headless callers without that metadata
   // retain their existing saved-account behavior.
   const manual = Array.isArray(options.cursorManualAccountIds) ? new Set(options.cursorManualAccountIds) : null;
-  const desktop = manual ? (deps.readCursorDesktopSignIn || cursorAuth.readCursorDesktopSignIn)() : null;
   const providers = await Promise.all(enabledAccounts.map(async (account) => {
     const current = (unauthorized = false) => !manual || manual.has(account.id)
       || isCursorDetectedAccountCurrent({
-        desktop,
+        // Read at each check: the desktop can switch accounts during the probe.
+        desktop: (deps.readCursorDesktopSignIn || cursorAuth.readCursorDesktopSignIn)(),
         userId: cursorAuth.canonicalCursorUserId(account.userId || account.id),
         unauthorized
       });
