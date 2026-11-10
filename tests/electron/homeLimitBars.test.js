@@ -229,7 +229,6 @@ function renderHomeWindows(windows, settings = {}, plan = '', providerId = '', l
     }),
     t: (key, params) => require('../../src/electron/renderer/i18n').translate(locale, key, params),
     formatLimitBoundary: () => 'Reset 4h',
-    limitWindowLabel: require('../../src/shared/limits/windowLabels').limitWindowLabel,
     limitProviderPresentationApi: require('../../src/electron/renderer/limits/providerPresentation')
   };
   vm.runInNewContext(`${app.slice(start, end)}; renderHomeLimitModule();`, context);
@@ -522,5 +521,17 @@ test('Home uses Cursor monthly period labels while preserving other billing labe
     const row = renderHomeWindows([window], {}, '', providerId)[0];
     assert.equal(row.children[0].children[0].textContent, expected);
     assert.equal(window.label, storedLabel);
+  }
+});
+
+
+test('Home keeps Cursor period labels localized in Spanish and Portuguese', () => {
+  for (const [locale, monthly, weekly] of [['es', 'Mensual', 'Semanal'], ['pt-BR', 'Mensal', 'Semanal']]) {
+    for (const [kind, expected] of [['billing', monthly], ['weekly', weekly]]) {
+      const window = Object.freeze({ kind, label: 'Included usage', remainingPercent: 80 });
+      const row = renderHomeWindows([window], {}, '', 'cursor', locale)[0];
+      assert.equal(row.children[0].children[0].textContent, expected, `${locale}: ${kind}`);
+      assert.equal(window.label, 'Included usage');
+    }
   }
 });
