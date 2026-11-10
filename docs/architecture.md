@@ -14,7 +14,7 @@ Contracts that cross subsystem boundaries. This guide names the owner, the invar
 
 ## Entry points and the Worker boundary
 
-The widget (`src/electron/main.js`), headless collector (`src/agent/agent.js`) and Node Hub (`src/hub/server.js`) share `src/shared/`. The Cloudflare Hub (`worker/src/index.js`) speaks the same protocol.
+The widget (`src/electron/launch.js` → `src/electron/main.js`), headless collector (`src/agent/agent.js`) and Node Hub (`src/hub/server.js`) share `src/shared/`. The Cloudflare Hub (`worker/src/index.js`) speaks the same protocol.
 
 Device collection, transforms and archives live in `src/shared/usage/`. The neighboring `src/shared/usage.js` is the Hub-core usage model, not that directory's index: `require('./usage')` resolves the file. Do not add `usage/index.js`.
 
@@ -23,6 +23,8 @@ Desktop windows share one renderer process: `src/electron/main.js` enables Chrom
 Sidebar and quota-history cards share a native canvas matching the work area's height, spring motion, pointer routing and content crossfade. Their painted silhouette and content move together inside that canvas, rather than resizing the native window each frame. Pointer routing uses the painted card bounds rather than the full canvas, forwarding input outside those bounds to the windows behind it. Linux and unsupported native shapes retain a rectangular-window fallback.
 
 Cloudflare deployment isolates `worker/` into its own repository. Its portable closure, `WORKER_SHARED_MODULES` in `scripts/hub-build-manifest.js`, must not import Node built-ins or anything above `worker/`. Edit the originals in `src/shared/`, then run `npm run sync:worker`; the mirrored `worker/src/shared/` files are generated and CI rejects drift.
+
+Linux Wayland sessions default to XWayland when `DISPLAY` is available so window positions can be restored; explicit `--ozone-platform` arguments take precedence. Native Wayland saves window dimensions while preserving existing saved x/y because global window positioning is unavailable.
 
 ## Desktop plugins
 
