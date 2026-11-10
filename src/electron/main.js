@@ -9256,6 +9256,7 @@ app.whenReady().then(() => {
       migrateQwenworkHomeLimitProvider(settings);
       settings.qwenworkSession = result.session;
       saveSettings({ throwOnError: true });
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
       pushSettingsToRenderer();
       void queueLimitInvalidation({ provider: 'qwenwork' }, 'login', { clear: true });
       return { ok: true, flowId };
