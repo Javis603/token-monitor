@@ -1057,7 +1057,9 @@
       windows.classList.add('limit-windows-cursor');
       for (const quotaWindow of provider.windows || []) {
         const text = providerWindowText(provider, quotaWindow);
-        const node = limitWindowNode(quotaWindow.label || 'Quota', quotaWindow, color, 0.68, text.value, text.detail);
+        const label = providerWindowLabel(provider, quotaWindow, 'Quota');
+        const node = limitWindowNode(label, { ...quotaWindow, label }, color, 0.68, text.value, text.detail);
+        tagUsageItem(node, usageItems.limitUsageItemId(quotaWindow), label);
         node.classList.add('limit-window-wide');
         windows.append(node);
       }
