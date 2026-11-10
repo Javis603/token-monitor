@@ -135,3 +135,6 @@ Settings → Live Activity offers Automatic and Custom. Automatic follows the ma
 Mistral Vibe, Prime Agent and Jcode retain their desktop names and vector marks in usage and system surfaces. The limits catalog includes Mistral and OpenDesign. Mistral API and Vibe grants stay on separate rows; its wallet balance has no inferred quota denominator. MiniMax `CREDITS` readings display as points without a currency prefix or exchange-rate conversion.
 
 Desktop quota-history previews and plugin quota modules are local desktop features, not Hub data endpoints. They are not exposed by this companion. Full and delta device uploads both trigger the Hub’s Live Activity publication path; the iOS client continues consuming authenticated stats and SSE.
+
+
+The companion recognizes Gemini CLI independently from the Gemini model vendor, with separate artwork, plus Hark quotas and Thinking Machines Inkling model marks. Session summaries prefer the latest recorded main-session model and retain all model token shares; aliases apply to both the scalar latest model and usage buckets. Lifetime active-day counts require the Hub’s `activeDaysComplete` flag; incomplete or unavailable lifetime counts display as unknown. Qoder personal and team pools remain separate quota rows.

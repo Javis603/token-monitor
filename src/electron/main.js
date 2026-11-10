@@ -6,6 +6,14 @@ const os = require('node:os');
 const path = require('node:path');
 const { contentSecurityPolicyForRequest } = require('./contentSecurityPolicy');
 const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences } = require('electron');
+
+// All of the app's pages are the same local bundle, and every window Chromium
+// gives its own renderer costs a process baseline plus a compositor for what is
+// often a small card. Process-per-site shares one renderer across them; heavy
+// work already runs in the usage worker, so the shared main thread carries UI
+// only. A renderer crash now takes every window down instead of one surface.
+app.commandLine.appendSwitch('process-per-site');
+
 const { createRetainedWindow, captureRetainedWindowState, restoreRetainedWindowState } = require('./retainedWindow');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
@@ -358,6 +366,7 @@ const { projectLimitStatsForDisplay } = require('./limits/statsPresentation');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidget/reloader');
 const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidget/demand');
 const linuxAutostart = require('./linuxAutostart');
+const { canPositionWindow } = require('./linuxDisplayServer');
 const { codexAccountIdForProvider, localLiveCodexProvider } = require('./renderer/accountIdentity');
 const {
   buildTrayIcon,
@@ -505,6 +514,7 @@ const { NOTCH_BLUR_ALPHA, NOTCH_BLUR_RADIUS, NOTCH_BLUR_STRENGTH, notchBlurMask 
 const { applyProgressiveBlur } = require('./notch/macProgressiveBlur');
 const { monitorMacScrollGesture } = require('./notch/macScrollGesture');
 const { applyVibrancyMask } = require('./edgeDock/macVibrancyMask');
+const { maskCardMaterial } = require('./cardCanvas');
 const { performMacHaptic } = require('./edgeDock/macHaptics');
 const { primaryButtonDown } = require('./edgeDock/pointerButtons');
 const { preventAppActivation, setMoveToActiveSpace } = require('./macosSpaceBehavior');
@@ -602,7 +612,6 @@ const recoverMacWidgetLaunchServicesRegistration = createMacWidgetLaunchServices
 
 app.setName(APP_NAME);
 if (process.platform === 'win32') app.setAppUserModelId('com.javis.tokenmonitor');
-
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.exit(0);
 
@@ -753,7 +762,7 @@ function defaultSettings() {
     historyEnabled: true,
     historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
     sessionUsageArchiveEnabled: parseBoolean(process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true),
-    wslScanEnabled: parseBoolean(process.env.TOKEN_MONITOR_WSL_SCAN, true),
+    wslScanEnabled: parseBoolean(process.env.TOKEN_MONITOR_WSL_SCAN, false),
     exportAutoEnabled: false,
     exportDir: '',
     exportIntervalMs: 60 * 1000,
@@ -2152,7 +2161,7 @@ function migrateHomeLimitProviderOrder(value) {
   const isEmpty = value === undefined || value === null || value === ''
     || (Array.isArray(value) && value.length === 0);
   if (isEmpty) return '';
-  const normalized = parseLimitProviders(value).join(',');
+  const normalized = require('./plugins/limits').desktopProviderPreference(value, parseLimitProviders);
   return normalized && normalized !== defaultLimitProviderOrder() ? normalized : '';
 }
 
@@ -2163,7 +2172,7 @@ function normalizeHiddenLimitProviders(value) {
   const hidden = [];
   for (const item of raw) {
     const id = String(item || '').trim().toLowerCase();
-    if (!known.has(id) || seen.has(id)) continue;
+    if ((!known.has(id) && !require('../shared/limits/providers').isPluginLimitModuleId(id)) || seen.has(id)) continue;
     seen.add(id);
     hidden.push(id);
   }
@@ -2228,6 +2237,7 @@ function normalizeLanguageSetting(value, fallback = 'auto') {
   if (lower === 'zh-tw' || lower.startsWith('zh-hant') || /-(tw|hk|mo)\b/i.test(raw)) return 'zh-TW';
   if (lower === 'zh-cn' || lower.startsWith('zh-hans') || /-(cn|sg|my)\b/i.test(raw)) return 'zh-CN';
   if (lower === 'pt' || lower.startsWith('pt-')) return 'pt-BR';
+  if (lower === 'es' || lower.startsWith('es-')) return 'es';
   return LANGUAGE_VALUES.has(raw) ? raw : fallback;
 }
 
@@ -2556,6 +2566,10 @@ function persistBoundsSoon() {
         previousBubble.height === next.height) return;
       settings.floatingBubbleBounds = next;
     } else {
+      if (!canPositionWindow()) {
+        next.x = prev.x;
+        next.y = prev.y;
+      }
       if (prev.x === next.x && prev.y === next.y && prev.width === next.width && prev.height === next.height) return;
       settings.windowBounds = next;
     }
@@ -2781,7 +2795,7 @@ function readSettings() {
       merged.sessionUsageArchiveEnabled = parseBoolean(saved.sessionUsageArchiveEnabled, true);
     }
     if (saved.wslScanEnabled !== undefined) {
-      merged.wslScanEnabled = parseBoolean(saved.wslScanEnabled, true);
+      merged.wslScanEnabled = parseBoolean(saved.wslScanEnabled, false);
     }
     merged.codexDotsEnabled = parseBoolean(merged.codexDotsEnabled, false);
     merged.codexDotsVisible = parseBoolean(merged.codexDotsVisible, true);
@@ -3236,7 +3250,14 @@ let limitsHistoryController = null;
 function getLimitsHistoryStore() {
   if (!limitsHistoryStore) limitsHistoryStore = createLimitsHistoryStore(path.join(app.getPath('userData'), 'limits-history.sqlite'), {
     onError: error => console.log(`[limits-history] ${error.message}`),
-    onChange: () => limitsHistoryController?.refresh()
+    onChange: () => limitsHistoryController?.refresh(),
+    legacyScopes: () => {
+      const urls = [...new Set(['none',
+        effectiveHubConfig({ ...settings, hubMode: 'client' }).url,
+        effectiveHubConfig({ ...settings, hubMode: 'host' }).url
+      ].filter(Boolean).map(url => String(url).replace(/\/$/, '')))];
+      return ['local', 'client', 'host', 'icloud'].flatMap(mode => urls.map(url => `${mode}|${url}`));
+    }
   });
   return limitsHistoryStore;
 }
@@ -5252,12 +5273,41 @@ function refreshTrayContextMenu() {
   if (typeof tray.refreshContextMenu === 'function') tray.refreshContextMenu();
 }
 
+function desktopQuotaStats(stats) {
+  return require('./plugins/limitsPresentation').projectPluginLimits(stats, pluginRuntime?.limitsSnapshot());
+}
+
+function syncPluginQuotaSurfaceDemand() {
+  if (!pluginRuntime) return;
+  const trayNeeds = settings?.showTrayIcon !== false && (['limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions'].includes(settings?.trayContent)
+    || (settings?.trayContent === 'custom' && trayLayoutApi.usesLimits(settings?.trayCustomLayout)));
+  const dockNeeds = edgeDockController?.limitsVisible?.() && (settings.edgeDockItems === null || (settings.edgeDockItems || []).some(item => item.type === 'limit'));
+  const notch = notchController?.quotaVisibility?.();
+  const summaryMode = notchSummaryMode(settings);
+  const notchNeeds = notch?.panel || (notch?.summary && (summaryMode === 'auto'
+    || (['tray', 'custom'].includes(summaryMode) && trayLayoutApi.usesLimits(notchSummaryLayout(settings)))));
+  pluginRuntime.demandLimits(Boolean(settings?.limitsEnabled !== false && (trayNeeds || dockNeeds || notchNeeds)), 'desktop.native');
+}
+
+let pluginQuotaRepaintPending = false;
+function pluginQuotaChanged() {
+  if (pluginQuotaRepaintPending) return;
+  pluginQuotaRepaintPending = true;
+  setImmediate(() => {
+    pluginQuotaRepaintPending = false;
+    syncPluginQuotaSurfaceDemand();
+    repaintDockSurfaces();
+    updateTrayDisplay();
+  });
+}
+
 function updateTrayDisplay() {
   if (!tray || tray.isDestroyed()) return;
   // Keep the exported D-Bus menu in sync (radio checks, refresh state, Codex
   // accounts) — see the Linux note in createTray().
   refreshTrayContextMenu();
-  const visibleStats = electronPresentationStats(latestStats);
+  syncPluginQuotaSurfaceDemand();
+  const visibleStats = desktopQuotaStats(electronPresentationStats(latestStats));
   const mode = settings?.trayContent || 'tokens';
   const currency = normalizeCurrency(settings?.currency);
   const compactOptions = compactTokenDisplayOptions();
@@ -5692,6 +5742,9 @@ function settingsForRenderer() {
   delete rendererSettings.icloudWriterId;
   delete rendererSettings.syncContentState;
   delete rendererSettings.pluginSkinRef;
+  // Usage retained for untracked clients: only the collector transform reads
+  // it, and it is most of the settings payload a renderer would clone and keep.
+  delete rendererSettings.archivedClientUsage;
   rendererSettings.pluginAuthorSkin = normalizePluginAuthorSkin(settings.pluginAuthorSkin);
   for (const key of rendererOmittedAccountKeys()) delete rendererSettings[key];
   return {
@@ -5917,7 +5970,7 @@ function ensureNotchController() {
     onToggleRateMode: toggleDockRateMode,
     canRefreshLimits: () => canRefreshEdgeDockStats(),
     onRefreshLimits: () => refreshStatsFromEdgeDock(),
-    onWebSurfaceChanged: () => pluginRuntime?.refreshSurfaces(),
+    onWebSurfaceChanged: () => { pluginRuntime?.refreshSurfaces(); syncPluginQuotaSurfaceDemand(); },
     installNonActivatingInput: (win) => preventAppActivation(win),
     blurAvailable: () => nativeTheme.prefersReducedTransparency !== true,
     applyBlurMask: (win, mask, display) => {
@@ -6012,6 +6065,7 @@ function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
 const EDGE_DOCK_RATE_ACTIVE_MS = 8000;
 const EDGE_DOCK_RATE_CLEAR_MS = 3 * 60 * 1000;
 let edgeDockRateTracker = null;
+const edgeDockRateHistory = tokenRateApi.createLiveTokenRateHistory();
 let edgeDockRateContext = '';
 let edgeDockRateTimer = null;
 
@@ -6037,6 +6091,7 @@ function edgeDockLiveRateSample(visibleStats) {
   edgeDockRateTimer = null;
   if (!edgeDockShowsLiveRate()) {
     edgeDockRateTracker = null;
+    edgeDockRateHistory.reset();
     edgeDockRateContext = '';
     return null;
   }
@@ -6044,7 +6099,7 @@ function edgeDockLiveRateSample(visibleStats) {
   const syncMode = tokenRateApi.isSharedSyncMode(hubMode);
   const scope = syncMode && settings?.liveTokenRateScope !== 'device' ? 'all' : 'device';
   const selection = tokenRateApi.selectLiveTokenRatePeriods(visibleStats, settings?.deviceId, hubMode, scope);
-  const context = [mode, hubMode || '', settings?.hubUrl || '', settings?.deviceId || '', scope, selection.source].join('|');
+  const context = [mode, hubMode || '', settings?.hubUrl || '', settings?.deviceId || '', settings?.clients || '', scope, selection.source].join('|');
   if (!edgeDockRateTracker) {
     edgeDockRateTracker = tokenRateApi.createLiveTokenRateGroupTracker({
       // Expiry timers subtract Date.now(), so samples must use epoch time too.
@@ -6058,12 +6113,19 @@ function edgeDockLiveRateSample(visibleStats) {
   if (context !== edgeDockRateContext) {
     edgeDockRateContext = context;
     edgeDockRateTracker.reset(selection.entries);
+    edgeDockRateHistory.reset();
   } else {
-    edgeDockRateTracker.observe(selection.entries);
+    const result = edgeDockRateTracker.observe(selection.entries);
+    if (result.changed && !result.sample) edgeDockRateHistory.reset();
+    // Only the side dock's speed card draws history. The Notch and sessions
+    // readouts share the live sample but do not create a chart demand.
+    const historyEnabled = settings?.edgeDockEnabled !== false && settings?.edgeDockItems?.some(item => item.type === 'stat' && item.metric === 'liveRate');
+    if (historyEnabled) edgeDockRateHistory.observe(result.sample);
+    else edgeDockRateHistory.reset();
   }
   // A sample goes idle and then clears without any new push; re-project then.
-  const expiresAt = edgeDockRateTracker.nextExpiryAt();
-  if (expiresAt) {
+  const expiresAt = Math.min(...[edgeDockRateTracker.nextExpiryAt(), edgeDockRateHistory.nextExpiryAt()].filter(Boolean));
+  if (Number.isFinite(expiresAt)) {
     edgeDockRateTimer = setTimeout(() => {
       edgeDockRateTimer = null;
       repaintDockSurfaces();
@@ -6186,6 +6248,7 @@ async function refreshStatsFromEdgeDock() {
 }
 
 function edgeDockCellsFor(visibleStats, items = settings?.edgeDockItems, options = {}) {
+  visibleStats = desktopQuotaStats(visibleStats);
   refreshEdgeDockDerivedPeriods(visibleStats);
   refreshEdgeDockForecast();
   syncCodexPresentationActiveAccount();
@@ -6206,6 +6269,7 @@ function edgeDockCellsFor(visibleStats, items = settings?.edgeDockItems, options
     limitProviders: settings?.limitProviders,
     limitProviderOrder: settings?.limitProviderOrder,
     liveRate: edgeDockLiveRateSample(visibleStats),
+    liveRateHistory: edgeDockRateHistory.getSamples(),
     tokenRateMode: settings?.tokenRateMode
   });
 }
@@ -6253,6 +6317,7 @@ const notchHistory = createNotchHistory({
 });
 
 function pushNotchCells(visibleStats) {
+  visibleStats = desktopQuotaStats(visibleStats);
   notchLastCells = edgeDockCellsFor(visibleStats, notchPanelItems(visibleStats, settings), { includeUnavailableAccounts: true });
   const data = notchDataFor(visibleStats, notchLastCells);
   // Tab names and icons are metadata; opening a page alone requests its data.
@@ -6334,11 +6399,10 @@ function ensureEdgeDockController() {
     ),
     applyShapeMask: (win, commands, width, height, currentDisplay) => {
       const scale = currentDisplay?.scaleFactor || screen.getDisplayMatching?.(win.getBounds())?.scaleFactor || 2;
-      const { buffer, pixelWidth, pixelHeight } = rasterizeMask(toPolygons(commands), width, height, scale);
-      return applyVibrancyMask(win, { buffer, pixelWidth, pixelHeight }, width, height);
+      return maskCardMaterial(win, commands, width, height, scale);
     },
     primaryButtonDown: () => primaryButtonDown(process.platform),
-    onWebSurfaceChanged: () => pluginRuntime?.refreshSurfaces(),
+    onWebSurfaceChanged: () => { pluginRuntime?.refreshSurfaces(); syncPluginQuotaSurfaceDemand(); },
     installNonActivatingInput: (win) => process.platform === 'darwin' ? preventAppActivation(win)
       : installWindowsNonActivatingInput(win, { logger: (message) => console.log(message) }),
     performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
@@ -6376,7 +6440,11 @@ function syncDockSurfaces(rendererSettings) {
     if (!notchController?.isRunning()) {
       if (edgeDockRateTimer) clearTimeout(edgeDockRateTimer);
       edgeDockRateTimer = null;
+      edgeDockRateTracker = null;
+      edgeDockRateContext = '';
+      edgeDockRateHistory.reset();
     }
+    syncPluginQuotaSurfaceDemand();
     return;
   }
   const controller = ensureEdgeDockController();
@@ -6392,6 +6460,7 @@ function syncDockSurfaces(rendererSettings) {
   // Now that the controller is running (sync() starts it when enabled), arm the
   // timer against the cells that were just handed over.
   scheduleSessionExpiry();
+  syncPluginQuotaSurfaceDemand();
 }
 
 function refreshLimitStatsPresentation() {
@@ -6475,6 +6544,7 @@ async function refreshFromTray() {
     refreshContextMenu: refreshTrayContextMenu,
     action: async () => {
       try {
+        void pluginRuntime?.refreshLimits().catch(error => console.log(`[plugins] Limits refresh failed: ${error.message}`));
         const stats = await fetchStats({ force: true, forceUsage: true });
         // Collector ticks normally publish their own final snapshot. Only bridge the
         // result when fetchStats returned a different object (for example, a remote hub
@@ -7063,6 +7133,7 @@ function refreshManualStats() {
   if (manualStatsRefreshInFlight?.runtime === runtime && manualStatsRefreshInFlight.generation === generation) {
     return manualStatsRefreshInFlight.promise;
   }
+  void pluginRuntime?.refreshLimits().catch(error => console.log(`[plugins] Limits refresh failed: ${error.message}`));
   const revision = statsPushRevision;
   const request = { runtime, generation, promise: null };
   request.promise = fetchStats({ force: true, forceHistory: true, forceSelfSync: true }).then((stats) => {
@@ -7641,29 +7712,21 @@ function loadWindowFile(target, options = {}) {
     revealWindow(target, { inactive: options.inactive === true });
   };
   const waitForContent = options.waitForContent === true;
+  const readyChannel = waitForContent ? 'window:contentReady' : 'window:appearanceReady';
   const onContentReady = (event) => {
     if (event.sender === target.webContents) reveal();
   };
   const fallbackTimer = setTimeout(reveal, 2500);
   const cleanup = () => {
     clearTimeout(fallbackTimer);
-    ipcMain.removeListener('window:contentReady', onContentReady);
+    ipcMain.removeListener(readyChannel, onContentReady);
   };
   target.once('show', cleanup);
   target.once('closed', cleanup);
-  if (waitForContent) {
-    // A recreated window paints its static "0" defaults before the renderer's
-    // async stats fetch resolves; revealing on load would flash empty content.
-    // Wait until the renderer reports it has rendered real data instead.
-    ipcMain.on('window:contentReady', onContentReady);
-    target.webContents.once('did-finish-load', () => applyZoomFactor(target));
-  } else {
-    target.once('ready-to-show', reveal);
-    target.webContents.once('did-finish-load', () => {
-      applyZoomFactor(target);
-      reveal();
-    });
-  }
+  // Startup needs the saved appearance, not stats or provider/network work.
+  // Window replacements can still wait for real content to avoid empty flashes.
+  ipcMain.on(readyChannel, onContentReady);
+  target.webContents.once('did-finish-load', () => applyZoomFactor(target));
   target.webContents.once('did-fail-load', (_event, code, description) => {
     console.log(`[window] renderer load failed: ${code} ${description}`);
     reveal();
@@ -7707,6 +7770,7 @@ function createWindow(boundsOverride, options = {}) {
     ...(process.platform === 'darwin' ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      zoomFactor: clampZoom(settings.zoomFactor),
       contextIsolation: true,
       nodeIntegration: false
     }
@@ -7764,8 +7828,8 @@ function createWindow(boundsOverride, options = {}) {
     }
     else if (!quitRequested) scheduleFloatingBubbleAutoCollapse();
   });
-  win.on('resized', () => { persistBoundsSoon(); syncTaskbarZOrder(); });
-  win.on('moved', () => { persistBoundsSoon(); syncTaskbarZOrder(); });
+  const onBoundsChange = () => { persistBoundsSoon(); syncTaskbarZOrder(); };
+  for (const eventName of ['resize', 'resized', 'move', 'moved']) win.on(eventName, onBoundsChange);
   win.on('show', syncTaskbarZOrder);
   win.on('restore', syncTaskbarZOrder);
   win.on('hide', stopTaskbarZOrderKeeper);
@@ -7796,10 +7860,9 @@ function createWindow(boundsOverride, options = {}) {
   if (!options.previousWindow) win.webContents.on('did-finish-load', () => {
     sendFloatingBubbleState();
     // Only report a window that is already on screen. A window still awaiting its
-    // reveal reports isVisible() === false, and loadWindowFile({ waitForContent })
-    // reveals it *because* the renderer painted real content — pushing "hidden"
-    // here stops that render, so the reveal could only come from the 2.5s
-    // fallback. Electron reports visibilityState 'visible' for a show:false
+    // reveal reports isVisible() === false. loadWindowFile waits for renderer
+    // appearance/content readiness; pushing "hidden" here prevents that work,
+    // leaving only the 2.5s fallback. Electron reports visibilityState 'visible' for a show:false
     // window, which is the default the renderer keeps; trayMode instead seeds the
     // hidden state through the windowHidden query flag. Keep this listener for
     // later loads too: Cmd+Shift+R retains that query flag, so a visible tray
@@ -7948,14 +8011,12 @@ function createDashboardWindow() {
     if (isAllowedExternalUrl(url)) shell.openExternal(url);
   });
   // Only dashboard:ready may first reveal a healthy window. Slow hub history must not
-  // race a wall-clock fallback and expose the unprepared heatmap. Actual load or
-  // renderer failures discard the hidden window so the next open starts cleanly.
+  // race a wall-clock fallback and expose the unprepared heatmap. Actual load
+  // failures discard the hidden window so the next open starts cleanly.
+  // Renderer crashes use the shared app recovery handler instead.
   win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) => {
     if (!isMainFrame || errorCode === -3) return; // ERR_ABORTED is expected during reloads.
     discardFailedDashboardWindow(win, `load failed: ${errorDescription}`);
-  });
-  win.webContents.on('render-process-gone', (_event, details) => {
-    discardFailedDashboardWindow(win, `renderer stopped: ${details.reason}`);
   });
   win.on('unresponsive', () => {
     if (!win.isVisible()) discardFailedDashboardWindow(win, 'renderer became unresponsive while opening');
@@ -8462,7 +8523,7 @@ app.whenReady().then(() => {
       projectBreakdownMode: normalizeProjectBreakdownMode(patch.projectBreakdownMode ?? settings.projectBreakdownMode),
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
       sessionUsageArchiveEnabled: parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true),
-      wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, true),
+      wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, false),
       collectionMode: normalizeCollectionMode(patch.collectionMode ?? settings.collectionMode),
       collectionIntervalMs: normalizeCollectionIntervalMs(patch.collectionIntervalMs ?? settings.collectionIntervalMs),
       syncUploadIntervalMs: normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs ?? settings.syncUploadIntervalMs),
@@ -8687,7 +8748,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('settings:displayPreview', (event, surface, phase, slots) => {
     if (event.sender !== mainWindow?.webContents) return null;
-    return require('./displayPreview').buildDisplayPreview(settingsForRenderer(), surface, phase, process.platform, Date.now(), slots);
+    return require('./displayPreview').buildDisplayPreview(settingsForRenderer(), surface, phase, process.platform, Date.now(), slots, pluginRuntime?.limitsSnapshot());
   });
   ipcMain.on('window:viewState', (_event, patch) => {
     updateRendererViewState(patch);
@@ -8797,7 +8858,6 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle('stats:get', async (_event, options) => {
-    if (options?.force === true && options?.feedback === true) void pluginRuntime?.refreshLimits().catch(error => console.log(`[plugins] Limits refresh failed: ${error.message}`));
     const revision = statsPushRevision;
     const fetched = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
     // A push from the same source/generation supersedes its pending read. A
@@ -9962,6 +10022,7 @@ app.whenReady().then(() => {
     try {
       pluginRuntime = createPluginRuntime({
         fetchImpl: electronLimitsFetch(),
+        onLimitsChanged: pluginQuotaChanged,
         getAppSettings: settingsForRenderer,
         electron: { app, BrowserWindow, utilityProcess: require('electron').utilityProcess, Notification, ipcMain, nativeImage, session, shell, dialog },
         userDataDir: app.getPath('userData'),
@@ -10043,6 +10104,24 @@ app.whenReady().then(() => {
 
 app.on('second-instance', focusExistingWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+// Every window shares one renderer, so a crash blanks them all. Main is the
+// source of truth and republishes settings and stats on load, so reload each
+// crashed page rather than leaving the widget dead. A page that crashes again
+// within the cooldown is left alone: reloading a deterministic failure would
+// only loop.
+const rendererCrashReloadAt = new Map();
+app.on('render-process-gone', (_event, contents, details) => {
+  if (quitRequested || details.reason === 'clean-exit') return;
+  if (!contents || contents.isDestroyed()) return;
+  const reloadAt = rendererCrashReloadAt.get(contents.id) || 0;
+  if (Date.now() - reloadAt < 30_000) return;
+  rendererCrashReloadAt.set(contents.id, Date.now());
+  // Let the crashed host finish tearing down before recreating the page.
+  setTimeout(() => {
+    if (contents.isDestroyed()) return;
+    try { contents.reload(); } catch (_) {}
+  }, 250);
+});
 // Every quit route (Cmd+Q, last window closed, system shutdown) lands here.
 // Drain queued quota-history writes with a bounded synchronous worker barrier,
 // then keep performQuit synchronous through to the exit. No preventDefault:

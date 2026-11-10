@@ -100,7 +100,8 @@ struct MediumUsageWidgetView: View {
                 label: $0.displayName,
                 vendorID: WidgetVendorIdentity.modelVendor(for: $0.displayName),
                 tokens: $0.totalTokens,
-                share: $0.sharePercent
+                share: $0.sharePercent,
+                isModel: true
             )
         }
     }
@@ -200,7 +201,7 @@ struct LargeDashboardWidgetView: View {
             }
         }
         return snapshot.models.map {
-            WidgetBreakdownRow(id: $0.id, label: $0.displayName, vendorID: WidgetVendorIdentity.modelVendor(for: $0.displayName), tokens: $0.totalTokens, share: $0.sharePercent)
+            WidgetBreakdownRow(id: $0.id, label: $0.displayName, vendorID: WidgetVendorIdentity.modelVendor(for: $0.displayName), tokens: $0.totalTokens, share: $0.sharePercent, isModel: true)
         }
     }
 
@@ -242,6 +243,7 @@ struct WidgetBreakdownRow: Identifiable {
     let vendorID: String
     let tokens: Int
     let share: Double
+    var isModel = false
 }
 
 struct MediumBreakdownModule: View {
@@ -283,7 +285,7 @@ struct BreakdownRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 7) {
-                WidgetVendorMark(vendorID: row.vendorID, size: 13)
+                WidgetVendorMark(vendorID: row.vendorID, size: 13, isModel: row.isModel)
                 Text(row.label)
                     .font(.caption.weight(.semibold))
                     .lineLimit(1)
@@ -298,7 +300,7 @@ struct BreakdownRow: View {
                     .foregroundStyle(.tertiary)
                     .frame(width: 30, alignment: .trailing)
             }
-            PercentageBar(value: row.share, color: vendorPalette.color(for: row.vendorID))
+            PercentageBar(value: row.share, color: vendorPalette.color(for: row.vendorID, model: row.isModel))
         }
     }
 }
@@ -324,7 +326,7 @@ struct DashboardBreakdownModule: View {
                         ForEach(visibleRows) { row in
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack(spacing: 6) {
-                                    WidgetVendorMark(vendorID: row.vendorID, size: 11)
+                                    WidgetVendorMark(vendorID: row.vendorID, size: 11, isModel: row.isModel)
                                     Text(row.label)
                                         .font(.system(size: WidgetDesignTokens.dashboardRowLabelSize, weight: .semibold))
                                         .lineLimit(1)
@@ -334,7 +336,7 @@ struct DashboardBreakdownModule: View {
                                         .monospacedDigit()
                                         .foregroundStyle(.secondary)
                                 }
-                                PercentageBar(value: row.share, color: vendorPalette.color(for: row.vendorID))
+                                PercentageBar(value: row.share, color: vendorPalette.color(for: row.vendorID, model: row.isModel))
                             }
                         }
                     }
@@ -666,14 +668,15 @@ enum WidgetVendorIdentity {
         if matches("stepfun|step-") { return "stepfun" }
         if matches("hy\\d|hunyuan") { return "hunyuan" }
         if matches("^swe[-_]|devin|cognition") { return "devin" }
+        if matches("inkling|thinking[ -]?machines") { return "thinkingmachines" }
         if matches("^big-pickle$") { return "opencode" }
         return "default"
     }
 }
 
 extension WidgetVendorPalette {
-    func color(for vendorID: String) -> Color {
-        switch ink(for: vendorID) {
+    func color(for vendorID: String, model: Bool = false) -> Color {
+        switch ink(for: vendorID, model: model) {
         case .adaptive: Color.white.opacity(0.86)
         case .hex(let hex): Color(widgetHex: hex)
         }
@@ -696,13 +699,14 @@ struct WidgetVendorMark: View {
     let vendorID: String
     let size: CGFloat
     var isMuted = false
+    var isModel = false
 
     var body: some View {
         Group {
             if let image = image {
                 Image(nsImage: image)
                     .resizable()
-                    .renderingMode(.template)
+                    .renderingMode(!isModel && vendorPalette.styles[vendorID]?.fullColor == true ? .original : .template)
                     .scaledToFit()
             } else {
                 Circle()
@@ -714,7 +718,7 @@ struct WidgetVendorMark: View {
     }
 
     private var image: NSImage? {
-        let name = vendorPalette.iconName(for: vendorID)
+        let name = vendorPalette.iconName(for: vendorID, model: isModel)
         guard let url = Bundle.main.url(forResource: name, withExtension: "svg", subdirectory: "icons") else { return nil }
         guard
             let data = try? Data(contentsOf: url),
@@ -733,7 +737,7 @@ struct WidgetVendorMark: View {
         source = source.replacingOccurrences(of: "currentColor", with: "#000000", options: .caseInsensitive)
 
         guard let normalizedData = source.data(using: .utf8), let image = NSImage(data: normalizedData) else { return nil }
-        image.isTemplate = true
+        image.isTemplate = isModel || vendorPalette.styles[vendorID]?.fullColor != true
         return image
     }
 }

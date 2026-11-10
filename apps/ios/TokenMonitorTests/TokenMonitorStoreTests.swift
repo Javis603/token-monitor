@@ -149,7 +149,7 @@ struct TokenMonitorStoreTests {
         let a = configuration("a"), b = configuration("b")
         func snapshot(_ tokens: Int, _ revision: Int) throws -> HubStats {
             try JSONDecoder().decode(HubStats.self, from: Data("""
-            {"syncSettingsRevisions":{"modelAliases":\(revision)},"periods":{"today":{"totalTokens":\(tokens),"models":{"vendor/model":\(tokens)},"modelCosts":{"vendor/model":0.00123},"modelUnpricedTokens":{"vendor/model":\(tokens / 2)},"sessions":{"one":{"models":{"vendor/model":\(tokens)},"totalTokens":\(tokens)}}}}}
+            {"syncSettingsRevisions":{"modelAliases":\(revision)},"periods":{"today":{"totalTokens":\(tokens),"models":{"vendor/model":\(tokens)},"modelCosts":{"vendor/model":0.00123},"modelUnpricedTokens":{"vendor/model":\(tokens / 2)},"sessions":{"one":{"latestModel":"vendor/latest","models":{"vendor/model":\(tokens)},"totalTokens":\(tokens)}}}}}
             """.utf8))
         }
         store.configure(a)
@@ -159,12 +159,14 @@ struct TokenMonitorStoreTests {
         try #require(await coreEventually { await client.streamCount == 1 })
         await client.send(try snapshot(20, 1), to: a)
         try #require(await coreEventually { store.currentPeriod.totalTokens == 20 })
-        await client.completeAliases(0, ModelAliasDocument(revision: 1, value: ModelAliasSettings(modelAliases: ["vendor/model": "Alias"])))
+        await client.completeAliases(0, ModelAliasDocument(revision: 1, value: ModelAliasSettings(modelAliases: ["vendor/model": "Alias", "vendor/latest": "Latest alias"])))
         try #require(await coreEventually { store.currentPeriod.models?["Alias"] == 20 })
         #expect(store.currentPeriod.modelCosts?["Alias"] == 0.00123)
         #expect(store.currentPeriod.modelEntries.first?.unpricedTokens == 10)
         #expect(store.stats?.period(.today).modelUnpricedTokens?["vendor/model"] == 10)
         #expect(store.currentPeriod.sessions?["one"]?.models?["Alias"] == 20)
+        #expect(store.currentPeriod.sessions?["one"]?.latestModel == "Latest alias")
+        #expect(store.stats?.period(.today).sessions?["one"]?.latestModel == "vendor/latest")
         #expect(store.stats?.period(.today).models?["vendor/model"] == 20)
         await client.send(try snapshot(30, 2), to: a)
         try #require(await coreEventually { await client.aliasCount == 2 })

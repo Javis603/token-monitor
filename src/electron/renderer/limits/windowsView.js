@@ -1526,8 +1526,7 @@
       }
     } else if (provider.provider === 'qoder') {
       windows.classList.add('limit-windows-qoder');
-      const credits = windowForKind(provider, 'billing');
-      if (credits) {
+      for (const credits of windowsForKind(provider, 'billing')) {
         const node = limitWindowNode(
           credits?.label || 'Credits',
           credits,
@@ -1729,6 +1728,25 @@
       // compact line; the ⓘ tooltip carries each grant's label and coverage.
       const resetNode = claudeResetCreditsNode(provider.resetCredits);
       if (resetNode) windows.append(resetNode);
+    } else if (provider.provider === 'hark') {
+      // The default layout only draws session/weekly quotas; Hark has daily/billing pools.
+      const quotaNodes = (provider.windows || [])
+        .filter((window) => window.metric !== 'spend' && (window.kind === 'daily' || window.kind === 'billing'))
+        .map((window) => limitWindowNode(
+          providerWindowLabel(provider, window), window, color, 0.78, null, providerWindowText(provider, window).detail
+        ));
+      windows.append(...quotaNodes);
+      for (const spend of (provider.windows || []).filter((window) => window.metric === 'spend')) {
+        const value = providerWindowText(provider, spend).value;
+        if (!value) continue;
+        const label = spend.label || 'Top-up';
+        windows.append(tagUsageItem(limitNoteRowNode({
+          label,
+          summary: value,
+          ariaParts: [value]
+        }), usageItems.limitUsageItemId(spend), label));
+      }
+      repairWindowPairs(windows);
     } else if (provider.provider === 'manus') {
       // The refreshing allowance is a quota with a reset; the spendable total is a
       // points balance without a ceiling. The default branch renders neither a

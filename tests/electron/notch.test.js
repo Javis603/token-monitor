@@ -255,7 +255,7 @@ test('top-only real provider projection updates while the side controller is abs
   const code = main.slice(start, main.indexOf('\n// Hand cells', start))
     + main.slice(main.indexOf('function pushNotchCells('), main.indexOf('// The soonest moment any sessions cell'));
   const update = vm.runInNewContext(`${code}; updateEdgeDockCells`, {
-    edgeDockController: null, notchController: controller, pluginRuntime: null,
+    desktopQuotaStats: s => s, edgeDockController: null, notchController: controller, pluginRuntime: null,
     notchPanelItems, notchWeek, notchHistory: { read: () => null }, hubModeGeneration: 0,
     settings: {}, scheduleSessionExpiry() {}, notchLastCells: [],
     edgeDockCellsFor: (value) => buildEdgeDockCells(value, { limitProviders: 'codex' }),
@@ -670,9 +670,9 @@ test('disabling only the side dock preserves the shared rate expiry timer for th
   const code = source.slice(source.indexOf('function syncDockSurfaces('), source.indexOf('function refreshLimitStatsPresentation('));
   const cleared = [];
   let topRunning = true;
-  const context = { settings: {}, syncNotch() {}, canUseEdgeDock: () => false,
+  const context = { settings: {}, syncPluginQuotaSurfaceDemand() {}, syncNotch() {}, canUseEdgeDock: () => false,
     edgeDockController: { stop() {} }, notchController: { isRunning: () => topRunning },
-    edgeDockRateTimer: 42, clearTimeout: (timer) => cleared.push(timer) };
+    edgeDockRateTimer: 42, edgeDockRateTracker: null, edgeDockRateContext: '', edgeDockRateHistory: require('../../src/electron/renderer/tokenRatePresentation').createLiveTokenRateHistory(), clearTimeout: (timer) => cleared.push(timer) };
   vm.runInNewContext(`${code}; syncDockSurfaces({});`, context);
   assert.deepEqual(cleared, [], 'top-only live rate must still go idle without another data push');
   assert.equal(context.edgeDockRateTimer, 42);
@@ -707,7 +707,7 @@ test('top and side reuse projection with independent ordered selections', () => 
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   const fn = source.slice(source.indexOf('function edgeDockCellsFor('), source.indexOf('function updateEdgeDockCells('));
   const settings = { edgeDockItems: [{ type: 'stat', metric: 'today' }], notchItems: [{ type: 'stat', metric: 'sessions', groupBy: 'client' }] };
-  const context = { settings, pluginRuntime: null, buildEdgeDockCells, refreshEdgeDockDerivedPeriods() {}, refreshEdgeDockForecast() {}, syncCodexPresentationActiveAccount() {}, edgeDockDerivedPeriods: {}, edgeDockForecastWanted: () => false, edgeDockForecast: null, syncProvenanceActive: () => false, codexAccountsForRenderer: () => [], codexPresentationPendingAccountId: null, codexPresentationActiveAccountId: null, edgeDockLiveRateSample: () => null };
+  const context = { settings, desktopQuotaStats: s => s, pluginRuntime: null, buildEdgeDockCells, refreshEdgeDockDerivedPeriods() {}, refreshEdgeDockForecast() {}, syncCodexPresentationActiveAccount() {}, edgeDockDerivedPeriods: {}, edgeDockForecastWanted: () => false, edgeDockForecast: null, syncProvenanceActive: () => false, codexAccountsForRenderer: () => [], codexPresentationPendingAccountId: null, codexPresentationActiveAccountId: null, edgeDockRateHistory: require('../../src/electron/renderer/tokenRatePresentation').createLiveTokenRateHistory(), edgeDockLiveRateSample: () => null };
   vm.createContext(context);vm.runInContext(fn, context);
   assert.equal(context.edgeDockCellsFor(stats())[0].id, 'stat:today');
   assert.equal(context.edgeDockCellsFor(stats(), settings.notchItems)[0].id, 'stat:sessions');
@@ -3371,4 +3371,16 @@ test('visible collapsed Notch summary owns demand independently of the hidden pa
   n.ipcMain.emit('topNotch:dismiss', { sender: win.webContents }); await tick();
   assert.equal(scope().summaryVisible, true);
   assert.equal(runtime.manager.backendCount(), 0, 'collapse never retains panel-only demand');
+});
+
+test('native quota page demand is sender-scoped and capped by locked/closed shell visibility', (t) => {
+  const { controller, windows, ipcMain } = fixture(t, { notchSummaryEnabled: false });
+  ipcMain.emit('topNotch:limitsDemand', { sender: {} }, true);
+  assert.equal(controller.quotaVisibility().panel, false);
+  ipcMain.emit('topNotch:limitsDemand', { sender: windows[0].webContents }, true);
+  assert.equal(controller.quotaVisibility().panel, false, 'an unseen page cannot demand quota');
+  controller.setLocked(true);
+  assert.deepEqual(controller.quotaVisibility(), { panel: false, summary: false });
+  controller.dispose();
+  assert.equal(ipcMain.listenerCount('topNotch:limitsDemand'), 0);
 });

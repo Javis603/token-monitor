@@ -44,6 +44,7 @@ extension UsageHistory {
                 totalTokens: 5_837_996_083,
                 totalCost: 5_025.25,
                 activeDays: Double(daily.count { ($0.tokens ?? 0) > 0 }),
+                activeDaysComplete: true,
                 currentStreak: 18,
                 longestStreak: 42,
                 peakDayTokens: daily.compactMap(\.tokens).max(),

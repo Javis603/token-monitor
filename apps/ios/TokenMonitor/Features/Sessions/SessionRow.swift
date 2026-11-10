@@ -58,7 +58,7 @@ struct SessionRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, markInset)
                 .overlay(alignment: .topLeading) {
-                    ProviderMark(provider: session.client, size: markSize)
+                    ProviderMark(provider: session.client, size: markSize, isClient: true)
                         .overlay(alignment: .bottomTrailing) {
                             switch session.activityState(at: now) {
                             case .running:
@@ -100,7 +100,7 @@ struct SessionRow: View {
         } else {
             HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(clientName).fixedSize(horizontal: true, vertical: false)
-                if !session.modelEntries.isEmpty {
+                if session.modelSummary != nil {
                     Text("·")
                     modelLabel
                 }
@@ -119,9 +119,9 @@ struct SessionRow: View {
     }
 
     @ViewBuilder private var modelLabel: some View {
-        if session.modelEntries.count > 1 {
+        if session.modelEntries.count > 1 || (session.latestModel != nil && session.modelEntries.first?.id != session.latestModel && !session.modelEntries.isEmpty) {
             Button { showsModels = true } label: {
-                Text("\(session.modelEntries.count) models").underline(color: .secondary)
+                Text(session.modelSummary ?? "").underline(color: .secondary)
             }
             .buttonStyle(.plain)
             .popover(isPresented: $showsModels) {
@@ -148,8 +148,8 @@ struct SessionRow: View {
                 .frame(idealWidth: 280, maxWidth: 280, idealHeight: 240, maxHeight: 320)
                 .presentationCompactAdaptation(.popover)
             }
-        } else if let model = session.modelEntries.first {
-            Text(model.id).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1).truncationMode(.tail)
+        } else if let label = session.modelSummary {
+            Text(label).lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 1).truncationMode(.tail)
         }
     }
 

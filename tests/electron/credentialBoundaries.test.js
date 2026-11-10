@@ -34,6 +34,7 @@ test('the main settings IPC projection hides provider secrets while retaining co
   settings.icloudWriterId = 'private-writer-id';
   settings.icloudRetiredDeviceIds = ['private-retired-device'];
   settings.syncContentState = { privateCleanupState: true };
+  settings.archivedClientUsage = { version: 1, clients: { retired: { privateSentinel: 'private-archive-sentinel' } } };
   const snapshot = structuredClone(settings);
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   const start = main.indexOf('function settingsForRenderer(');
@@ -69,6 +70,7 @@ test('the main settings IPC projection hides provider secrets while retaining co
   assert.equal(projected.icloudWriterId, undefined);
   assert.equal(projected.icloudRetiredDeviceIds, undefined);
   assert.equal(projected.syncContentState, undefined);
+  assert.equal(projected.archivedClientUsage, undefined);
   for (const form of Object.values(projected.limitAccountForms)) {
     for (const field of form.fields || []) {
       assert.equal(field.storePath, undefined);

@@ -19,7 +19,7 @@ struct SessionGroupRow: View {
     private var subagents: [SessionListEntry.Member] { entry.members.filter { !$0.isMain } }
 
     /// One merged model readout for the group, like the desktop group row's
-    /// rebuilt `modelLabel` — heaviest model or "N models" across all members.
+    /// rebuilt `modelLabel`, with the latest main model and all member usage.
     private var modelEntries: [BreakdownEntry] {
         var merged: [String: Double] = [:]
         for member in entry.members {
@@ -39,11 +39,7 @@ struct SessionGroupRow: View {
     }
 
     private var modelLabel: String? {
-        switch modelEntries.count {
-        case 0: return nil
-        case 1: return modelEntries[0].id
-        default: return String(localized: "\(modelEntries.count) models")
-        }
+        SessionUsage.modelSummary(latest: display?.latestModel, entries: modelEntries)
     }
 
     private var titled: Bool { display?.displayTitle != nil }
@@ -107,7 +103,7 @@ struct SessionGroupRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.leading, markInset)
                     .overlay(alignment: .topLeading) {
-                        ProviderMark(provider: display?.client, size: markSize)
+                        ProviderMark(provider: display?.client, size: markSize, isClient: true)
                             .overlay(alignment: .bottomTrailing) {
                                 switch groupState {
                                 case .running:

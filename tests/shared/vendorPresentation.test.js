@@ -6,6 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const {
+  CLIENT_PRESENTATION,
   DEFAULT_VENDOR_COLOR,
   MARK_IDS,
   ROW_ICON_MASKS,
@@ -74,9 +75,9 @@ test('the widget palette omits entries that restate the defaults', () => {
   assert.deepEqual(palette.hermes, { color: '#d4af37', icon: 'hermes-agent' });
 });
 
-test('one mask rule is installed per mark id', () => {
+test('each mark has one rule plus model overrides for distinct client artwork', () => {
   const rules = rowIconMaskRules('../../../assets/icons/').split('\n');
-  assert.equal(rules.length, MARK_IDS.length);
+  assert.equal(rules.length, MARK_IDS.length + Object.values(CLIENT_PRESENTATION).filter(style => style.fullColor).length);
   assert.ok(rules.includes('.row-icon-grok { -webkit-mask-image: url("../../../assets/icons/xai.svg"); mask-image: url("../../../assets/icons/xai.svg"); }'));
 });
 
@@ -87,11 +88,16 @@ test('a mask url survives an install path with parentheses', () => {
   // invalid CSS and every vendor mark degrades to a solid currentColor square.
   const base = 'file:///C:/Program%20Files%20(x86)/Token%20Monitor/resources/app.asar/assets/icons/';
   const rules = rowIconMaskRules(base).split('\n');
-  assert.equal(rules.length, MARK_IDS.length);
+  assert.equal(rules.length, MARK_IDS.length + Object.values(CLIENT_PRESENTATION).filter(style => style.fullColor).length);
   assert.ok(
     rules.includes(`.row-icon-grok { -webkit-mask-image: url("${base}xai.svg"); mask-image: url("${base}xai.svg"); }`)
   );
   for (const rule of rules) {
+    // Client artwork and its model override both keep quoted file URLs.
+    if (rule.startsWith('.row-icon-gemini')) {
+      assert.match(rule, /url\("[^"\n]+gemini(?:-cli)?\.svg"\)/);
+      continue;
+    }
     // Exactly the two quoted url() tokens, each containing no bare `)`.
     assert.match(rule, /^\.row-icon-[a-z0-9-]+ \{ -webkit-mask-image: url\("([^"\\]|\\.)*"\); mask-image: url\("([^"\\]|\\.)*"\); \}$/);
   }
@@ -114,4 +120,36 @@ test('Mistral Vibe uses the existing Mistral mark and brand colour', () => {
   assert.equal(mistral[0].color.toLowerCase(), '#fa520f');
   assert.equal(ROW_ICON_MASKS.mistral, 'mistral');
   assert.equal(trayIconFile('mistral'), 'mistral');
+});
+
+
+test('Gemini CLI overrides leave model branding, identity and stored vendor colours independent', () => {
+  const charts = require('../../src/electron/renderer/usageCharts');
+  const clients = charts.clientColors;
+  const models = charts.modelColors;
+  const original = { ...models };
+  try {
+    assert.equal(charts.modelVendorFor('gemini-3.1-pro-preview'), 'gemini');
+    assert.equal(clients.gemini, '#1E1E2E');
+    assert.equal(charts.modelColor('gemini-3.1-pro-preview'), '#4285f4');
+    assert.equal(VENDOR_LABELS.gemini, 'Gemini');
+    assert.equal(trayIconFile('gemini'), 'gemini-cli');
+    assert.equal(VENDOR_IDS.includes('gemini-cli'), false);
+    charts.applyVendorColors({ ...original, gemini: '#123456', codex: '#654321' });
+    assert.equal(charts.modelColor('gemini-3.1-pro-preview'), '#123456');
+    assert.equal(clients.gemini, '#1E1E2E');
+    assert.equal(clients.codex, '#654321');
+    assert.equal(charts.modelColor('gpt-5'), '#654321');
+    assert.equal(charts.clientColors, clients, 'existing client readers retain the same map');
+    assert.equal(charts.modelColors, models);
+  } finally {
+    charts.applyVendorColors(original);
+  }
+  const rules = rowIconMaskRules('../../../assets/icons/');
+  assert.ok(rules.includes('.row-icon-gemini { -webkit-mask-image: none;'));
+  assert.ok(rules.includes('background: url("../../../assets/icons/gemini-cli.svg")'));
+  assert.ok(rules.includes('.row-icon-gemini.model-icon { background: currentColor;'));
+  assert.deepEqual(widgetVendorPalette().gemini, {
+    icon: 'gemini-cli', ink: true, fullColor: true, modelIcon: 'gemini', modelColor: '#4285f4'
+  });
 });

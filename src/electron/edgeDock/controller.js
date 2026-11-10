@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { CARD_MOVE_MS, CARD_SPRING, advanceCardFrame } = require('../cardSpring');
 const { createCardMotionDriver } = require('../cardMotion');
+const { cardCanvasBounds, createCardPointerRouting } = require('../cardCanvas');
 const { CARD_FADE_IN_MS: FADE_IN_MS, CARD_FADE_OUT_MS: FADE_OUT_MS, CARD_FRAME_MS: FADE_STEP_MS, parkedCardBounds, createCardWindowVisibility } = require('../cardWindow');
 const {
   EDGE_DOCK_METRICS,
@@ -127,6 +128,7 @@ function createEdgeDockController(deps) {
   let bubblePlaced = null;
   let bubbleShapeFailed = false;
   let bubbleVisible = false;
+  let bubbleReveal = 0;
   let railVisible = false;
   let pointerOnRail = false;
   const refreshHapticTarget = Symbol('refresh');
@@ -161,7 +163,6 @@ function createEdgeDockController(deps) {
   let refreshFeedbackWindow = null;
   let drag = null;
   let bubbleFrame = null;
-  let bubblePointerMode = null;
   let bubbleMotion = null;
   let railMotion = null;
   let railMotionTimer = null;
@@ -477,17 +478,9 @@ function createEdgeDockController(deps) {
     else win.setIgnoreMouseEvents(!takesPointer);
   }
 
-  function syncBubblePointer() {
-    const win = windows.bubble;
-    if (platform !== 'darwin' || !alive(win)) return;
-    const takesPointer = visibleTargets.bubble && (rectContains(bubbleFrame, screen.getCursorScreenPoint())
-      || bubblePointerMode === 'capture' && primaryButtonDown() === true);
-    const mode = takesPointer ? 'capture' : visibleTargets.bubble ? 'forward' : 'ignore';
-    if (mode === bubblePointerMode) return;
-    bubblePointerMode = mode;
-    if (mode === 'forward') win.setIgnoreMouseEvents(true, { forward: true });
-    else win.setIgnoreMouseEvents(!takesPointer);
-  }
+  const bubblePointer = createCardPointerRouting({ platform, screen, getWindow: () => windows.bubble,
+    getFrame: () => bubbleFrame, isVisible: () => visibleTargets.bubble, primaryButtonDown });
+  function syncBubblePointer() { bubblePointer.sync(); }
 
   function setPointerOnHandle(on) {
     if (on === pointerOnHandle) return;
@@ -581,6 +574,7 @@ function createEdgeDockController(deps) {
         ...base,
         cell: bubbleCell !== null ? cells[bubbleCell] || null : null,
         placed: bubblePlaced,
+        reveal: bubbleReveal,
         cardWidth: layout()?.bubbleWidth / bubbleScale(),
         maxCardHeight: maxCardHeight()
       };
@@ -740,7 +734,7 @@ function createEdgeDockController(deps) {
   function destroyWindows() {
     cancelBubbleMotion();
     bubbleFrame = null;
-    bubblePointerMode = null;
+    bubblePointer.reset();
     cancelRailMotion();
     railHitPolygons = [];
     railPointerMode = null;
@@ -796,8 +790,7 @@ function createEdgeDockController(deps) {
         neck: m.bubbleNeck,
         radius: m.bubbleRadius
       });
-      // One stable canvas: translate the silhouette inside it rather than
-      // moving/resizing the native window on every animation frame.
+      // The silhouette and material use the same window-local card coordinates.
       return commands.map(command => command.map((value, index) => index > 0 && index % 2 === 0 ? value + bounds.cardY : value));
     }
     if (surface === 'peek') {
@@ -889,7 +882,7 @@ function createEdgeDockController(deps) {
           win.destroy();
           windows.bubble = createSurface('bubble', builtMaterial);
         }
-        paintBubble(layout().bubble, layout().workArea);
+        paintBubble(layout().bubble);
         return;
       }
       if (surface === 'peek' && shaped !== peekRegionClips) {
@@ -1101,6 +1094,7 @@ function createEdgeDockController(deps) {
   }
 
   function showBubble(cellIndex) {
+    if (!bubbleVisible) bubbleReveal += 1;
     bubbleCell = cellIndex;
     // Reopening the card that was last shown produces the same payload as the
     // one already sent, which the render de-duplication would swallow, and then
@@ -1147,12 +1141,9 @@ function createEdgeDockController(deps) {
     bubbleMotion = null;
   }
 
-  function paintBubble(frame, workArea, target = frame) {
+  function paintBubble(frame, target = frame) {
     bubbleFrame = frame;
-    const canvasY = bubbleShapeFailed ? frame.y : workArea.y;
-    placeSurface('bubble', { x: frame.x, y: canvasY, width: frame.width, height: bubbleShapeFailed ? frame.height : workArea.height,
-      cardY: frame.y - canvasY, cardHeight: frame.height, tailY: frame.tailY,
-      contentY: target.y - canvasY, contentHeight: target.height });
+    placeSurface('bubble', { ...cardCanvasBounds(frame, target), tailY: frame.tailY });
     syncBubblePointer();
   }
 
@@ -1163,7 +1154,7 @@ function createEdgeDockController(deps) {
     // The silhouette and its shared content layer follow one spring.
     // Rapid retargets preserve the outline's velocity.
     advanceCardFrame(motion, elapsed, cardSpring, done);
-    paintBubble(motion.frame, motion.workArea, motion.to);
+    paintBubble(motion.frame, motion.to);
     if (done) cancelBubbleMotion();
   }
 
@@ -1189,7 +1180,7 @@ function createEdgeDockController(deps) {
       bubbleMotion = motion;
       cardFrameDriver.start(motion);
     } else {
-      paintBubble(target, current.workArea);
+      paintBubble(target);
     }
     if (!bubbleVisible) {
       bubbleVisible = true;
@@ -1692,6 +1683,7 @@ function createEdgeDockController(deps) {
       for (const surface of SURFACES) render(surface);
     },
     isRunning: () => running,
+    limitsVisible: () => running && (alwaysVisible() || railVisible || bubbleVisible),
     webSurface: (host) => {
       const kind = ['rail', 'bubble'].find(key => windows[key]?.webContents === host);
       return kind ? { kind, visible: running && !drag && visibleTargets[kind] === true && (kind === 'rail' ? railVisible : bubbleVisible) } : null;

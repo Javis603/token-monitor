@@ -12,6 +12,9 @@ nonisolated enum ProviderPresentation {
         case "deepseek": "DeepSeek"
         case "minimax": "MiniMax"
         case "mistral": "Mistral"
+        case "gemini": "Gemini"
+        case "hark": "Hark"
+        case "thinkingmachines": "Thinking Machines"
         case "opendesign": "OpenDesign"
         case "prime-agent": "Prime Agent"
         case "jcode": "Jcode"
@@ -63,7 +66,7 @@ nonisolated enum ProviderPresentation {
     }
 
     static func assetName(for provider: String?) -> String {
-        WidgetPresentation.assetName(for: provider)
+        provider?.lowercased() == "gemini" ? "VendorGemini" : WidgetPresentation.assetName(for: provider)
     }
 
     /// Raw Desktop brand colors from src/shared/vendorPresentation.js.
@@ -107,7 +110,7 @@ nonisolated enum ProviderPresentation {
         case "thirdparty": rgb(0x8090a6)
         case "opencode", "cursor", "factory", "droid", "kimi", "moonshot", "grok", "xai",
              "copilot", "pi", "mimo", "micode", "xiaomi", "zai", "zaiteam", "zcode",
-             "proma", "devin", "fx", "stepfun", "typesafe", "goose", "notion", "opendesign", "prime-agent", "jcode": .primary
+             "proma", "devin", "fx", "stepfun", "typesafe", "goose", "notion", "opendesign", "prime-agent", "jcode", "hark", "thinkingmachines": .primary
         default: rgb(0x6ab4f0)
         }
     }
@@ -156,6 +159,7 @@ nonisolated enum ProviderPresentation {
         if name.contains("llama") || name.contains("meta") {
             return "meta"
         }
+        if name.contains("inkling") { return "thinkingmachines" }
         if name.contains("mistral") || name.contains("mixtral") || name.contains("codestral") {
             return "mistral"
         }

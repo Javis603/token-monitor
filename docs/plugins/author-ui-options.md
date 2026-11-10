@@ -66,6 +66,25 @@ Use any bundled CSS, DOM and canvas implementation. Optional host variables incl
 
 The renderer has no Node integration. Use `ctx.backend.call` for network/files/compute. The backend has the OS user's authority; moving a request there is not an isolation guarantee. Bundle dependencies ahead of time, include every asset in `files`, and use CSS files rather than inline script execution. See [package limits and installation](distribution-design.md#package-format).
 
+## Shared dropdowns in the desktop App
+
+Ordinary single-select elements automatically use shared dropdowns in desktop plugin settings, embedded content and detached pages. No import or opt-in is needed:
+
+```html
+<label>Display
+  <select>
+    <option value="compact">Compact</option>
+    <option value="detailed" data-tm-select-description="Show the full breakdown.">Detailed</option>
+  </select>
+</label>
+```
+
+Keep using `select.value` and `change`; inserted controls and option updates are discovered asynchronously. Localize labels and optional `data-tm-select-description` text in your plugin. Remove the source DOM on disposal; the host cleans up generated controls.
+
+To keep a control native, add `data-tm-native-select` before insertion and leave the marker unchanged for the element's lifetime. Multiple-selection and listbox-style controls stay native automatically.
+
+For custom layouts, account for the visible button beside the hidden `select`; CSS targeting only `select` will not style it. Separate Notch/Dock renderers and native tray menus are outside this integration.
+
 ## Tray actions
 
 Declare `trayMenu: [{"id":"refresh","label":"Refresh my data"}]` with a backend. Active plugins contribute native menu commands; the host invokes backend `call('tray', {id:'refresh'})` only when clicked and rechecks current enablement/declaration. Menu enumeration does not start code. Labels may be localized. Native Settings, Restart without plugins and Quit remain available; Linux exported menus refresh on plugin changes. A bitmap may contain painted text but is not a native editable control or a promise of cross-platform tray titles.

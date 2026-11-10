@@ -16,6 +16,7 @@ const fixtureDir = path.join(scratch, 'source');
 fs.mkdirSync(fixtureDir, { recursive: true });
 const fixtureManifest = {tmApi:1,id:'synthetic-limits',name:'Synthetic limits',identityIcon:nativeImage.createFromBitmap(Buffer.from([80,180,130,255,80,180,130,255,80,180,130,255,80,180,130,255]),{width:2,height:2}).toDataURL(),version:'1.0.0',backend:'backend.cjs',ui:'settings.mjs',files:['backend.cjs','settings.mjs'],views:[{id:'quota-settings',title:'Quota preferences',surfaces:['settings']}],settings:{version:1,fields:[{id:'displayMode',type:'select',label:'Display mode',default:'meter',options:[{value:'meter',label:'Percentage + balance'},{value:'balance',label:'Balance only'}]}]},limits:[{id:'one',name:'Claude',settingsView:'quota-settings',credentials:{validation:true,fields:[{id:'token',label:'Platform session Bearer',required:true},{id:'cookies',label:'Cookies',control:'textarea'}]},capabilities:['cli','oauth','web'],tags:[{en:'Team pool','zh-TW':'作者團隊池'}]},{id:'two',name:'API balance',settingsView:'quota-settings',credentials:{fields:[{id:'token',label:'Token',required:true}]},capabilities:['api','apiKey'],tags:[{en:'Custom pool','zh-TW':'作者自填池'},'Token Plan']}]};
 if(process.env.TM_PLUGIN_SETTINGS_AUTOSAVE_PROOF==='1')fixtureManifest.settings.fields.push({id:'showCost',type:'boolean',label:'顯示費用',default:false},{id:'label',type:'string',label:'顯示名稱',default:'Synthetic'},{id:'rows',type:'number',label:'列數',default:2,min:1,max:10,integer:true});
+if(process.env.TM_PLUGIN_NATIVE_SURFACES_PROOF==='1'){fixtureManifest.limits[0].name='API credits';fixtureManifest.views.push({id:'native-card',title:'Custom panel',icon:'chart',surfaces:['edgeDock']});}
 const fixtureSvg = 'data:image/svg+xml;base64,' + Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect fill="#f06b77" x="2" y="2" width="20" height="20" rx="4"/><path fill="#ffdb70" d="M7 7h10v10H7z"/><line x1="4" y1="4" x2="20" y2="20" stroke="#ffffff"/></svg>').toString('base64');
 fixtureManifest.presentation = { icon: { native: 'codex' }, color: { palette: 'codex' } };
 fixtureManifest.limits[1].presentation = { icon: { data: fixtureSvg, mode: process.env.TM_PLUGIN_SVG_MASK === '1' ? 'mask' : 'image' }, color: { hex: '#d68cf0' } };
@@ -70,6 +71,7 @@ let runtime,win;
 let packageSource=fixtureDir;
 let transportCalls=[], fixtureConsent=1, credentialConfirmations=0;
 const errors=[];
+const nativeProofSurfaces = new Map();
 const deadline=setTimeout(()=>{console.error('UI deadline',errors);app.exit(1);},45000);
 const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 function defaults() {
@@ -102,7 +104,7 @@ app.whenReady().then(async () => {
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [require('../src/electron/contentSecurityPolicy').contentSecurityPolicyForRequest(details)] } }));
   const handlers = {
     'settings:get': () => settings,
-    'settings:displayPreview': (_event, surface, phase, slots) => require('../src/electron/displayPreview').buildDisplayPreview(settings, surface, phase, process.platform, Date.now(), slots),
+    'settings:displayPreview': (_event, surface, phase, slots) => require('../src/electron/displayPreview').buildDisplayPreview(settings, surface, phase, process.platform, Date.now(), slots, runtime?.limitsSnapshot()),
     'settings:update': async (event, patch) => { const after = await runtime.beforeSettingsChange(event, patch); settings = { ...settings, ...patch }; runtime.settingsChanged(); win.webContents.send('settings:push',settings); await after(); return settings; },
     'app:getInfo': () => ({ version: 'fixture', platform: process.platform, systemUiTheme: 'dark', loginItemSupported: false }),
     'appUpdate:get': () => ({}), 'appearance:getNativeMaterial': () => null,
@@ -123,7 +125,7 @@ app.whenReady().then(async () => {
   runtime=createPluginRuntime({electron:{BrowserWindow,ipcMain,session,utilityProcess,
    dialog:{showMessageBox:async(_win,options)=>{if(options.message===require('../src/electron/renderer/i18n').translate(settings.language,'plugins.credentials.forgetConfirm'))credentialConfirmations++;return {response:fixtureConsent};},showOpenDialog:async()=>({canceled:false,filePaths:[packageSource]})}},
    fetchImpl:async(url,init)=>{transportCalls.push({url,init});return new Response('{"remaining":80}',{status:200});},userDataDir:scratch,getSettings:()=>settings,getAppSettings:()=>settings,getContext:()=>({source:'fixture'}),getLocale:()=>settings.language,
-   isMainSender:event=>event.sender===win.webContents,persistPluginStates:pluginStates=>patch({pluginStates}),
+   isMainSender:event=>event.sender===win.webContents,isSurfaceSender:(event,surface)=>nativeProofSurfaces.get(event.sender.id)===surface,surfaceContext:(event,surface)=>nativeProofSurfaces.get(event.sender.id)===surface?{visible:true,summaryVisible:true}:null,persistPluginStates:pluginStates=>patch({pluginStates}),
    persistManagementSettings:patch,applySettingsPatch:patch,env:{},log:console.log});
   await runtime.start();runtime.publishStats(stats);
   await win.loadFile(path.join(root,'src/electron/renderer/index.html'));
@@ -147,6 +149,11 @@ app.whenReady().then(async () => {
     }
     fs.writeFileSync(path.join(evidence,name),(await win.webContents.capturePage()).toPNG());
   };
+  if (process.env.TM_PLUGIN_NATIVE_SURFACES_PROOF === '1') {
+    await require('./plugin-native-surfaces-proof.cjs')({ BrowserWindow, ipcMain, win, runtime, settings, stats, root, evidence, js, waitFor, capture, nativeProofSurfaces });
+    console.log('PASS native plugin quota surfaces. Evidence:', evidence);
+    await runtime.dispose(); win.destroy(); clearTimeout(deadline); app.exit(0); return;
+  }
   if (process.env.TM_PLUGIN_SETTINGS_AUTOSAVE_PROOF === '1') {
     if(process.env.TM_PLUGIN_SETTINGS_SOURCE){
       await js(fs.readFileSync(process.env.TM_PLUGIN_SETTINGS_SOURCE,'utf8'));

@@ -4,7 +4,7 @@
 const { normalizeLimitWindow } = require('../../shared/limits/core');
 const { createLimitsRuntime } = require('../../shared/limits/runtime');
 const { windowDetails, normalizeNotes } = require('./quotaDetails');
-const MODULE_ID = /^plugin:[a-z0-9][a-z0-9-]{1,39}:[a-z][a-z0-9-]{0,31}$/;
+const { PLUGIN_LIMIT_MODULE_ID: MODULE_ID } = require('../../shared/limits/providers');
 const identity = (plugin, module) => `plugin:${plugin}:${module}`;
 function desktopProviderPreference(value, builtins) {
   const native = builtins(value), allowed = new Set(native);

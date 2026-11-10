@@ -74,6 +74,22 @@ nonisolated struct SessionUsage: Decodable, Sendable {
     var liveActivity: LiveSessionActivity? = nil
     var unpricedTokens: Double? = nil
     var reasoningEffort: String? = nil
+    var latestModel: String? = nil
+
+    /// Latest recorded main-session model, independent of usage share and liveness.
+    static func modelSummary(latest: String?, entries: [BreakdownEntry]) -> String? {
+        if let latest, !latest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let others = entries.filter { $0.id != latest }.count
+            return latest + (others > 0 ? " +\(others)" : "")
+        }
+        switch entries.count {
+        case 0: return nil
+        case 1: return entries[0].id
+        default: return String(localized: "\(entries.count) models")
+        }
+    }
+
+    var modelSummary: String? { Self.modelSummary(latest: latestModel, entries: modelEntries) }
 
     /// Persistent provider setting, independent of the context/cache leases.
     /// Matches shared/sessionLive.normalizeReasoningEffort.
@@ -248,7 +264,7 @@ nonisolated struct SessionUsage: Decodable, Sendable {
     func matches(_ query: String) -> Bool {
         let query = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return true }
-        return ([displayTitle, client, sessionId, projectLabel] + modelEntries.map { Optional($0.id) })
+        return ([displayTitle, client, sessionId, projectLabel, latestModel] + modelEntries.map { Optional($0.id) })
             .compactMap { $0 }
             .contains { $0.localizedStandardContains(query) }
     }

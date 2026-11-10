@@ -3,12 +3,20 @@ const MarkdownIt = require('markdown-it');
 const { MAX_IMAGES, repositoryImageUrl } = require('./catalogImagePolicy');
 // All markup comes from Markdown tokens with raw HTML disabled. Images never
 // receive a remote src in the renderer: only document-scoped indices cross IPC.
-function renderReadme(text, baseUrl, imageBaseUrl) {
+function renderReadme(text, baseUrl, imageBaseUrl, repositoryBaseUrl) {
   const images = [];
   const md = new MarkdownIt({ html: false, linkify: true });
   const resolve = value => {
     try {
-      const url = new URL(value, baseUrl || undefined);
+      // A root-relative Markdown link means the repository root, not the
+      // github.com host root. Resolve it against the README's blob base when
+      // the caller supplied one; the HTTPS checks below still apply.
+      const root = repositoryBaseUrl ? new URL(repositoryBaseUrl) : null;
+      // Only single-slash paths are repository-root-relative; `//host/path`
+      // stays a protocol-relative external link.
+      const url = value.startsWith('/') && !value.startsWith('//') && root
+        ? new URL(value.slice(1), root)
+        : new URL(value, baseUrl || undefined);
       if (url.protocol !== 'https:' || url.username || url.password || url.href.length > 2048) return null;
       return url.href;
     } catch { return null; }

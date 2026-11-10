@@ -92,7 +92,7 @@ private struct SessionPreviewRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.leading, markInset)
                 .overlay(alignment: .topLeading) {
-                    ProviderMark(provider: session?.client, size: markSize)
+                    ProviderMark(provider: session?.client, size: markSize, isClient: true)
                         .overlay(alignment: .bottomTrailing) {
                             switch entry.activityState(at: now) {
                             case .running:
@@ -123,11 +123,7 @@ private struct SessionPreviewRow: View {
     private var subtitle: String {
         var parts: [String] = []
         if session?.displayTitle != nil { parts.append(clientName) }
-        switch session?.modelEntries.count ?? 0 {
-        case 0: break
-        case 1: parts.append(session?.modelEntries[0].id ?? "")
-        default: parts.append(String(localized: "\(session?.modelEntries.count ?? 0) models"))
-        }
+        if let model = session?.modelSummary { parts.append(model) }
         if session?.isArchived == true { parts.append(String(localized: "Archived")) }
         if let activity {
             parts.append(activity)

@@ -78,6 +78,58 @@ function waitForUpdates(updates, count) {
   });
 }
 
+test('restart without WSL opt-in drops a persisted WSL overlay from previews and final usage', { timeout: 10000 }, async () => {
+  const anchorPath = path.join(sharedDir, 'collector-anchor.json');
+  fs.rmSync(anchorPath, { force: true });
+  const base = {
+    clients: 'claude', allTimeSince: '2024-01-01', commandTimeoutMs: 1000,
+    intervalMs: 60 * 60 * 1000, watchEnabled: false, historyEnabled: false,
+    platform: 'win32', runTokscale: hostScan, probeWslState: () => 'ok'
+  };
+  const enabledUpdates = [];
+  const enabled = startCollector({
+    ...base, wslScanEnabled: true,
+    collectWslUsage: async () => ({ bundle: wslBundle(), detected: ['claude'] }),
+    onUpdate: summary => enabledUpdates.push(summary)
+  });
+  try {
+    await waitForUpdates(enabledUpdates, 1);
+    assert.equal(enabledUpdates[0].today.totalTokens, 110);
+    assert.equal(JSON.parse(fs.readFileSync(anchorPath, 'utf8')).wslBundle.today.totalTokens, 10);
+  } finally {
+    enabled.stop();
+  }
+
+  const updates = [];
+  const previews = [];
+  const restarted = startCollector({
+    ...base,
+    collectWslUsage: () => assert.fail('restart without opt-in must not scan WSL'),
+    probeWslState: () => assert.fail('restart without opt-in must not probe WSL'),
+    onPreview: preview => previews.push(preview),
+    onUpdate: summary => updates.push(summary)
+  });
+  try {
+    await waitForUpdates(updates, 1);
+    await restarted.tick('manual');
+    await waitForUpdates(updates, 2);
+    assert.ok(previews.length > 0, 'full refresh should publish progressive previews');
+    for (const preview of previews) {
+      assert.equal(preview.today.totalTokens, 100);
+      if (preview.month) assert.equal(preview.month.totalTokens, 300);
+    }
+    for (const summary of updates) {
+      assert.equal(summary.today.totalTokens, 100);
+      assert.equal(summary.month.totalTokens, 300);
+      assert.equal(summary.allTime.totalTokens, 1000);
+      assert.equal(summary.wslStatus.state, 'disabled');
+    }
+  } finally {
+    restarted.stop();
+    fs.rmSync(anchorPath, { force: true });
+  }
+});
+
 test('warm progressive preview keeps the frozen WSL contribution in today and month', async () => {
   const previews = [];
   const updates = [];
@@ -93,6 +145,7 @@ test('warm progressive preview keeps the frozen WSL contribution in today and mo
     historyEnabled: false,
     limitsEnabled: false,
     runTokscale: hostScan,
+    wslScanEnabled: true,
     collectWslUsage: async () => ({ bundle: wslBundle(), detected: ['claude'] }),
     onPreview: (p) => previews.push(p),
     onUpdate: (summary) => updates.push(summary)

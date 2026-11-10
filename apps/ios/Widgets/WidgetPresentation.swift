@@ -18,6 +18,9 @@ nonisolated enum WidgetPresentation {
         case "deepseek": "DeepSeek"
         case "minimax": "MiniMax"
         case "mistral": "Mistral"
+        case "gemini": "Gemini CLI"
+        case "hark": "Hark"
+        case "thinkingmachines": "Thinking Machines"
         case "opendesign": "OpenDesign"
         case "prime-agent": "Prime Agent"
         case "jcode": "Jcode"
@@ -84,7 +87,9 @@ nonisolated enum WidgetPresentation {
         case "fx": "VendorFX"
         case "mcode", "minimax": "VendorMiniMax"
         case "openrouter": "VendorOpenRouter"
-        case "gemini": "VendorGemini"
+        case "gemini": "VendorGeminiCLI"
+        case "hark": "VendorHark"
+        case "thinkingmachines": "VendorThinkingMachines"
         case "qoder": "VendorQoder"
         case "deepseek": "VendorDeepSeek"
         case "xai": "VendorXAI"
@@ -138,6 +143,7 @@ nonisolated enum WidgetPresentation {
         if name.contains("qwen") {
             return "VendorQwen"
         }
+        if name.contains("inkling") { return "VendorThinkingMachines" }
         if name.contains("mistral") || name.contains("codestral") {
             return "VendorMistral"
         }

@@ -203,9 +203,11 @@ function normalizeDay(value, fallbackDate = '') {
   };
 }
 
-function normalizeDailyHistoryArchive(value) {
+function normalizeDailyHistoryArchive(value, includeCalendars = true) {
   const normalized = { version: ARCHIVE_VERSION, days: {} };
   if (typeof value?.pricingRevision === 'string') normalized.pricingRevision = value.pricingRevision;
+  if (includeCalendars && typeof value?.activeCalendar === 'string') normalized.activeCalendar = value.activeCalendar;
+  if (includeCalendars && value?.selectedCalendars) normalized.selectedCalendars = { ...value.selectedCalendars };
   const source = value?.days && typeof value.days === 'object' ? value.days : {};
   for (const [date, rawDay] of Object.entries(source)) {
     const day = normalizeDay(rawDay, date);
@@ -218,7 +220,45 @@ function normalizeDailyHistoryArchive(value) {
     if (day) liveDays[day.date] = day;
   }
   if (Object.keys(liveDays).length > 0) normalized.liveDays = liveDays;
+  if (includeCalendars && value?.calendars) {
+    normalized.calendars = Object.fromEntries(Object.entries(value.calendars).map(([zone, scope]) => [zone, {
+      ...normalizeDailyHistoryArchive(scope, false),
+      since: scope.since
+    }]));
+  }
   return normalized;
+}
+
+// Keep unknown legacy data unchanged. New observations only compete with
+// captures from the same named calendar; a timezone switch is not usage growth.
+function captureCalendar(existing, options, capture) {
+  const archive = normalizeDailyHistoryArchive(existing);
+  const savedScope = archive.calendars?.[options.timeZone];
+  // Upgrade continuity is a one-time handoff, not a timezone conversion. The
+  // legacy archive has no calendar provenance, so keep its cutover-day maximum
+  // in the first calendar only. Sources may already be deleted. Past dates stay
+  // in the untouched legacy section; later calendars start independently.
+  const firstCalendar = Object.keys(archive.calendars || {}).length === 0;
+  const date = options.todayKey;
+  const scope = {
+    days: firstCalendar && archive.days[date] ? { [date]: archive.days[date] } : {},
+    liveDays: firstCalendar && archive.liveDays?.[date] ? { [date]: archive.liveDays[date] } : {},
+    ...(firstCalendar && archive.pricingRevision ? { pricingRevision: archive.pricingRevision } : {}),
+    ...savedScope,
+    since: archive.activeCalendar === options.timeZone ? savedScope.since : date
+  };
+  archive.activeCalendar = options.timeZone;
+  const next = capture(mergeLiveDaysIntoArchive(scope, options.liveDays), scope.since, archive);
+  archive.calendars = {
+    ...archive.calendars,
+    [options.timeZone]: { ...next, since: scope.since }
+  };
+  const selectedCalendars = { ...archive.selectedCalendars };
+  for (const date of new Set([...Object.keys(next.days), ...Object.keys(next.liveDays || {})])) {
+    if (date >= scope.since || !Object.hasOwn(selectedCalendars, date)) selectedCalendars[date] = options.timeZone;
+  }
+  archive.selectedCalendars = selectedCalendars;
+  return archive;
 }
 
 function graphsArray(graphs) {
@@ -286,6 +326,20 @@ function shouldReplaceObservation(previous, incoming) {
 }
 
 function captureDailyHistoryArchive(existingArchive, graphs, options = {}) {
+  if (options.timeZone) {
+    return captureCalendar(existingArchive, options, (scope, since, archive) => {
+      // Preserve prior calendars' recorded dates, but still retain a newly
+      // discovered historical day before its source transcript disappears.
+      const retainedDates = new Set([archive, ...Object.values(archive.calendars || {})]
+        .flatMap(retained => [...Object.keys(retained.days), ...Object.keys(retained.liveDays || {})]));
+      const incoming = graphsArray(graphs).map(graph => ({
+        ...graph,
+        contributions: (graph.contributions || []).filter(row => row.date >= since
+          || scope.days[row.date] || scope.liveDays?.[row.date] || !retainedDates.has(row.date))
+      }));
+      return captureDailyHistoryArchive(scope, incoming, { ...options, timeZone: undefined });
+    });
+  }
   const archive = normalizeDailyHistoryArchive(existingArchive);
   const reprice = options.reprice === true;
   if (typeof options.pricingRevision === 'string') {
@@ -555,6 +609,9 @@ function mergeLiveDayMetadata(liveDay, previousDay) {
 }
 
 function captureLiveDailyHistory(existingArchive, period, options = {}) {
+  if (options.timeZone) {
+    return captureCalendar(existingArchive, options, scope => captureLiveDailyHistory(scope, period, { ...options, timeZone: undefined }));
+  }
   const archive = normalizeDailyHistoryArchive(existingArchive);
   const date = String(options.todayKey || '').slice(0, 10);
   if (DAY_KEY_RE.test(date) && archive.liveDays) {
@@ -613,6 +670,28 @@ function graphTimeMetrics(graphs, activeTimeMs) {
 }
 
 function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
+  if (options.timeZone) {
+    const normalized = normalizeDailyHistoryArchive(archive);
+    const scope = normalized.calendars?.[options.timeZone];
+    const since = scope?.since || options.todayKey;
+    const plainOptions = { ...options, timeZone: undefined };
+    const visible = graphFromDailyHistoryArchive(graphs, scope, plainOptions);
+    const days = new Map(visible.contributions.map(row => [row.date, row]));
+    // Past observations remain as recorded. Their selection belongs to the
+    // date's capture, not to a calendar's most recent activation.
+    for (const row of graphFromDailyHistoryArchive([], normalized, plainOptions).contributions) {
+      if (row.date < since) days.set(row.date, row);
+    }
+    for (const [zone, retained] of Object.entries(normalized.calendars || {})) {
+      for (const row of graphFromDailyHistoryArchive([], retained, plainOptions).contributions) {
+        if (row.date < since && normalized.selectedCalendars?.[row.date] === zone) days.set(row.date, row);
+      }
+    }
+    const contributions = [...days.values()].sort((a, b) => a.date.localeCompare(b.date));
+    const activeTimeMs = contributions.reduce((sum, day) => sum + num(day.activeTimeMs), 0);
+    const timeMetrics = graphTimeMetrics(graphs, activeTimeMs);
+    return { ...visible, contributions, ...(timeMetrics ? { timeMetrics } : {}) };
+  }
   const normalizedArchive = normalizeDailyHistoryArchive(archive);
   const currentDays = observationsFromGraphs(graphs, { archive: normalizedArchive });
   const todayKey = String(options.todayKey || '').slice(0, 10);
@@ -671,17 +750,36 @@ function graphFromDailyHistoryArchive(graphs, archive, options = {}) {
 }
 
 function dailyHistoryArchivePath(options = {}) {
-  return options.path || path.join(sharedDataDir(options), 'daily-history-archive.json');
+  return options.path || path.join(sharedDataDir(options), options.timeZone
+    ? 'daily-history-calendars.json' : 'daily-history-archive.json');
 }
 
 function validateDailyHistoryArchiveDocument(value, filePath) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error(`Could not parse JSON in ${filePath}: archive root must be an object`);
   }
-  for (const key of ['days', 'liveDays']) {
+  for (const key of ['days', 'liveDays', 'calendars', 'selectedCalendars']) {
     if (Object.prototype.hasOwnProperty.call(value, key)
       && (!value[key] || typeof value[key] !== 'object' || Array.isArray(value[key]))) {
       throw new Error(`Could not parse JSON in ${filePath}: ${key} must be an object`);
+    }
+  }
+  if (value.activeCalendar !== undefined && (typeof value.activeCalendar !== 'string'
+    || !Object.hasOwn(value.calendars || {}, value.activeCalendar))) {
+    throw new Error(`Could not parse JSON in ${filePath}: active calendar is missing`);
+  }
+  for (const [date, zone] of Object.entries(value.selectedCalendars || {})) {
+    if (!DAY_KEY_RE.test(date) || typeof zone !== 'string' || !Object.hasOwn(value.calendars || {}, zone)) {
+      throw new Error(`Could not parse JSON in ${filePath}: invalid calendar selection ${date}`);
+    }
+  }
+  for (const [zone, scope] of Object.entries(value.calendars || {})) {
+    if (!scope || !DAY_KEY_RE.test(scope.since) || scope.calendars) {
+      throw new Error(`Could not parse JSON in ${filePath}: invalid calendar scope ${zone}`);
+    }
+    validateDailyHistoryArchiveDocument(scope, filePath);
+    try { new Intl.DateTimeFormat('en', { timeZone: zone }); } catch (cause) {
+      throw new Error(`Could not parse JSON in ${filePath}: invalid calendar timezone ${zone}`, { cause });
     }
   }
   return value;
@@ -698,7 +796,13 @@ function readDailyHistoryArchive(options = {}) {
   try {
     content = fs.readFileSync(filePath, 'utf8');
   } catch (error) {
-    if (error?.code === 'ENOENT') return normalizeDailyHistoryArchive({});
+    if (error?.code === 'ENOENT') {
+      // The legacy file stays untouched, including when an older agent owns it.
+      // Import its observations verbatim on the first calendar-aware capture.
+      return options.timeZone && !options.path
+        ? readDailyHistoryArchive({ ...options, timeZone: undefined })
+        : normalizeDailyHistoryArchive({});
+    }
     throw error;
   }
   if (!content.trim()) {
@@ -722,13 +826,19 @@ function writeDailyHistoryArchive(archive, options = {}) {
 
 function clearDailyHistoryArchive(options = {}) {
   const unlink = options.unlinkSync || fs.unlinkSync;
-  try {
-    unlink(dailyHistoryArchivePath(options));
-    return true;
-  } catch (error) {
-    if (error?.code === 'ENOENT') return false;
-    throw error;
+  const paths = options.path
+    ? [options.path]
+    : [dailyHistoryArchivePath({ ...options, timeZone: undefined }), dailyHistoryArchivePath({ ...options, timeZone: 'UTC' })];
+  let removed = false;
+  for (const file of paths) {
+    try {
+      unlink(file);
+      removed = true;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
   }
+  return removed;
 }
 
 function mergeLiveDaysIntoArchive(existingArchive, liveDays) {
@@ -752,7 +862,7 @@ function archiveWriteEnabled(options = {}) {
 function retainDailyHistory(graphs, options = {}) {
   const previous = readDailyHistoryArchive(options);
   const capture = (archive) => captureDailyHistoryArchive(
-    mergeLiveDaysIntoArchive(archive, options.liveDays),
+    options.timeZone ? archive : mergeLiveDaysIntoArchive(archive, options.liveDays),
     graphs,
     options
   );
@@ -776,7 +886,7 @@ function retainDailyHistory(graphs, options = {}) {
 function retainLiveDailyHistory(period, options = {}) {
   const previous = readDailyHistoryArchive(options);
   const capture = (archive) => captureLiveDailyHistory(
-    mergeLiveDaysIntoArchive(archive, options.liveDays),
+    options.timeZone ? archive : mergeLiveDaysIntoArchive(archive, options.liveDays),
     period,
     options
   );

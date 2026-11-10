@@ -42,7 +42,7 @@ struct LifetimeCard: View {
             ) {
                 InsightMetricCard(
                     title: "Active days",
-                    value: summary?.activeDays.map(MetricFormatter.exactTokens) ?? "—",
+                    value: summary?.lifetimeActiveDays.map(MetricFormatter.exactTokens) ?? "—",
                     systemImage: "calendar.badge.checkmark",
                     tint: DesignTokens.accent
                 )

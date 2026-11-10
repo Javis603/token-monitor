@@ -373,7 +373,7 @@ enum ActivityPalette {
         case "thirdparty": rgb(0x8090a6)
         case "opencode", "cursor", "factory", "droid", "kimi", "moonshot", "grok", "xai",
              "copilot", "pi", "mimo", "micode", "xiaomi", "zai", "zaiteam", "zcode",
-             "proma", "devin", "fx", "stepfun", "typesafe", "opendesign", "prime-agent", "jcode": .primary
+             "proma", "devin", "fx", "stepfun", "typesafe", "opendesign", "prime-agent", "jcode", "hark", "thinkingmachines": .primary
         default: rgb(0x6ab4f0)
         }
     }

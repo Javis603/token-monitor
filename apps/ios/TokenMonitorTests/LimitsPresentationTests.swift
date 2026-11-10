@@ -25,12 +25,26 @@ struct LimitsPresentationTests {
         #expect(LimitWindowSection.make(provider: value, windows: windows)[0].rows.map(\.count) == [1, 1, 1])
     }
 
+    @Test func geminiClientAndModelUseDistinctBundledMarks() throws {
+        #expect(ClientPresentation.displayName(for: "gemini") == "Gemini CLI")
+        #expect(ProviderPresentation.displayName(for: "gemini") == "Gemini")
+        #expect(ClientPresentation.assetName(for: "gemini") == "VendorGeminiCLI")
+        #expect(WidgetPresentation.assetName(for: "gemini") == "VendorGeminiCLI")
+        #expect(WidgetPresentation.modelAssetName(for: "gemini-3-pro") == "VendorGemini")
+        #expect(ProviderPresentation.modelVendor(for: "inkling-1") == "thinkingmachines")
+        #expect(WidgetPresentation.modelAssetName(for: "inkling-1") == "VendorThinkingMachines")
+        _ = try #require(UIImage(named: "VendorGeminiCLI"))
+        #expect(LimitProviderOrder.sortedIDs(["opendesign", "hark", "manus"], order: []) == ["manus", "hark", "opendesign"])
+        let qoder = try provider(#"{"provider":"qoder","windows":[{"kind":"billing","label":"Personal credits","remainingPercent":80},{"kind":"billing","label":"Team credits","remainingPercent":20}]}"#)
+        #expect(LimitWindowSection.make(provider: qoder, windows: qoder.displayWindows)[0].rows.map(\.count) == [1, 1])
+    }
+
     // Desktop mark catalog: verify the actual compiled resources, including widgets' mapping.
-    @Test(arguments: ["opendesign","prime-agent","jcode","goose","catpaw","notion","claude","codex","opencode","hermes","openclaw","cursor","antigravity","cline","amp","droid","kimi","qwen","grok","copilot","pi","omp","zed","kilo","commandcode","mimo","muse","zcode","kiro","codebuddy","workbuddy","proma","qodercn","reasonix","dsh","cherrystudio","lmstudio","unsloth","devin","fx","mcode","openrouter","gemini","qoder","deepseek","xai","meta","mistral","moonshot","zai","zaiteam","cohere","xiaomi","minimax","doubao","hunyuan","volcengine","ollama","trae","alibaba","stepfun","nvidia","typesafe","thirdparty","factory","newapi","sub2api"])
+    @Test(arguments: ["hark","thinkingmachines","opendesign","prime-agent","jcode","goose","catpaw","notion","claude","codex","opencode","hermes","openclaw","cursor","antigravity","cline","amp","droid","kimi","qwen","grok","copilot","pi","omp","zed","kilo","commandcode","mimo","muse","zcode","kiro","codebuddy","workbuddy","proma","qodercn","reasonix","dsh","cherrystudio","lmstudio","unsloth","devin","fx","mcode","openrouter","gemini","qoder","deepseek","xai","meta","mistral","moonshot","zai","zaiteam","cohere","xiaomi","minimax","doubao","hunyuan","volcengine","ollama","trae","alibaba","stepfun","nvidia","typesafe","thirdparty","factory","newapi","sub2api"])
     func desktopProviderArtworkLoads(providerID: String) throws {
         let asset = ProviderPresentation.assetName(for: providerID)
         #expect(asset != "VendorTokenMonitor")
-        #expect(asset == WidgetPresentation.assetName(for: providerID))
+        if providerID != "gemini" { #expect(asset == WidgetPresentation.assetName(for: providerID)) }
         _ = try #require(UIImage(named: asset))
     }
 

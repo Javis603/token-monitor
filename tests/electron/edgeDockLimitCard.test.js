@@ -210,6 +210,23 @@ function dockView(appearance = {}, overrides = {}) {
   });
 }
 
+test('adding Spanish preserves the fixed English Limits wording', () => {
+  const { translate } = require('../../src/electron/renderer/i18n');
+  const t = (key, params) => translate('es', key, params);
+  const view = dockView({}, { t, currentLocale: () => 'es' });
+  const resetsAt = new Date(Date.now() + 3_600_000).toISOString();
+  for (const label of ['Session', 'Weekly', '5-hour', 'Monthly', 'Balance']) {
+    const row = view.limitWindowNode(label, { remainingPercent: 85, resetsAt }, '#fff');
+    assert.equal(row.find('limit-window-text').children[0].textContent, label);
+    assert.equal(row.find('limit-window-text').children[1].textContent, '85% left');
+    assert.match(row.find('limit-reset').textContent, /^Reset /);
+  }
+  assert.equal(view.limitStatusLabel('notConfigured'), 'Not signed in');
+  assert.match(view.limitProviderMeta({ status: 'ok', updatedAt: new Date().toISOString() }), /^Updated /);
+  assert.equal(view.codexAdditionalWindowLabel({ windowMinutes: 60 }), '1-hour');
+  assert.ok(view.codexResetCreditsNode({ availableCount: 2 }).text.includes('2 resets'));
+});
+
 function limitsSubscriptionPool(localProviders, aggregateProviders) {
   const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
   const state = { mode: 'sync', settings: { deviceId: 'local' }, stats: {
@@ -402,6 +419,35 @@ test('Notion rolling and monthly allowances render in both display modes and hid
   assert.equal(JSON.stringify(provider), before);
 });
 
+test('Qoder personal and team credits render as independent, hideable windows', () => {
+  const now = Date.now();
+  const provider = normalizeLimitProvider({
+    provider: 'qoder', status: 'ok', source: 'web',
+    windows: [
+      { kind: 'billing', label: 'Credits', used: 25, limit: 100, usedPercent: 25, remaining: 75,
+        resetsAt: new Date(now + 6 * 60 * 60 * 1000).toISOString() },
+      { kind: 'billing', label: 'Team credits', used: 10, limit: 50, usedPercent: 20, remaining: 40,
+        resetsAt: new Date(now + 30 * 24 * 60 * 60 * 1000).toISOString() }
+    ]
+  });
+  const view = dockView();
+  const card = view.renderProviderWindows(provider, '#2ADB5C');
+  assert.equal(card.children.length, 2);
+  assert.deepEqual(
+    card.children.map((row) => row.children[0].children[0].textContent),
+    ['Credits', 'Team credits']
+  );
+  assert.match(card.text, /75% left/);
+  assert.match(card.text, /80% left/);
+  const items = view.limitProviderUsageItems([provider]);
+  assert.equal(items.length, 2);
+  for (const item of items) {
+    const hidden = dockView({ limitProviderHiddenItems: { qoder: [item.id] } });
+    assert.equal(hidden.renderProviderWindows(provider, '#2ADB5C').children.length, 1);
+    assert.deepEqual(hidden.limitProviderUsageItems([provider]), items);
+  }
+});
+
 test('Manus daily refresh credits and credits balance render in both display modes and hide independently', () => {
   const nextRefreshTime = new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString();
   const { windows } = parseManusCredits({ ...manusCreditsFixture, nextRefreshTime });
@@ -448,6 +494,31 @@ test('Manus refresh and monthly quotas share a row before balance and hide indep
       const hidden = dockView({ showLimitUsed, limitProviderHiddenItems: { manus: [item.id] } });
       assert.equal(hidden.renderProviderWindows(provider, '#429DFA').children.length, 2);
     }
+  }
+});
+
+test('Hark daily, period, feature, and top-up rows render and hide independently', () => {
+  const provider = normalizeLimitProvider({ provider: 'hark', status: 'ok', windows: [
+    { kind: 'daily', label: 'Daily', used: 1, remaining: 3, limit: 4 },
+    { kind: 'billing', label: 'Monthly', used: 2, remaining: 6, limit: 8 },
+    { kind: 'billing', label: 'Monthly Messages', used: 1, limit: 4 },
+    { kind: 'billing', label: 'Monthly Messages tokens', used: 1, limit: 4 },
+    { kind: 'billing', label: 'Top-up', metric: 'spend', used: 2.5, currency: 'USD', showMeter: false }
+  ] });
+  const card = dockView().renderProviderWindows(provider, '#1C1C1C');
+  assert.deepEqual(
+    [...card.children].map((row) => row.children[0].children[0].textContent),
+    ['Daily', 'Monthly', 'Monthly Messages', 'Monthly Messages tokens', 'Top-up']
+  );
+  assert.match(card.children[0].text, /3 \/ 4/);
+  const used = dockView({ showLimitUsed: true }).renderProviderWindows(provider, '#1C1C1C');
+  assert.match(used.children[0].text, /1 \/ 4/);
+  assert.match(card.children[4].text, /\$2\.50 spent/);
+  const items = dockView().limitProviderUsageItems([provider]);
+  assert.equal(items.length, 5);
+  for (const item of items) {
+    const hidden = dockView({ limitProviderHiddenItems: { hark: [item.id] } });
+    assert.equal(hidden.renderProviderWindows(provider, '#1C1C1C').children.length, 4);
   }
 });
 
@@ -640,6 +711,7 @@ test('Home text and bars use the plan text rendered by Limits account rows', () 
           state: { stats: { limits: { providers } }, settings },
           enabledLimitProviderSet: () => new Set([id]),
           hiddenHomeLimitProviderSet: () => new Set(),
+          desktopLimitProviders: () => [{ id, label: id }], desktopLimitRecords: () => providers,
           LIMIT_PROVIDERS: [{ id, label: id }],
           limitProviderOrderApi: require('../../src/electron/renderer/limits/providerOrder'),
           limitUsageItemsApi: require('../../src/shared/limits/usageItems'),
