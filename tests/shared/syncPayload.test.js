@@ -670,3 +670,36 @@ test('acknowledged History omission does not reintroduce compact daily totals', 
   assert.equal(Object.hasOwn(payload, 'history'), false);
   assert.equal(summary.history.dailyTotals.length, 1);
 });
+
+test('new daily totals never evict legacy detail that already fits the sync budget', () => {
+  const summary = {
+    deviceId: 'calendar-priority',
+    today: { totalTokens: 10, sessions: { keep: { client: 'claude', sessionId: 'keep', totalTokens: 10 } },
+      modelThroughput: { model: { timedTokens: 10, timedOutputTokens: 5, timedDurationMs: 1000 } } },
+    month: { totalTokens: 20, sessions: { keep: { client: 'claude', sessionId: 'month', totalTokens: 20 } } },
+    allTime: { totalTokens: 30, projects: { keep: { label: 'x'.repeat(12000), tokens: 30, clients: { claude: 30 } } } },
+    history: { daily: [{ date: '2026-11-09', tokens: 10, outputTokens: 5, tokenComponentsAvailable: true }],
+      monthly: [], summary: { activeDaysComplete: true } }
+  };
+  const legacy = serializeSyncPayload(summary);
+  const maxBytes = legacy.bytes + 128;
+  summary.history.dailyTotals = Array.from({ length: 40 }, (_, i) => ({
+    date: new Date(Date.UTC(2026, 0, i + 1)).toISOString().slice(0, 10), tokens: 10, cost: 0.01, activeTimeMs: 1000
+  }));
+  const original = structuredClone(summary);
+  const result = serializeSyncPayload(summary, { maxBytes });
+  assert.ok(result.bytes <= maxBytes);
+  for (const name of ['today', 'month', 'allTime']) assert.deepEqual(result.payload[name], legacy.payload[name]);
+  assert.deepEqual(result.payload.history.daily, legacy.payload.history.daily);
+  assert.equal(result.payload.history.dailyTotals, undefined);
+  assert.equal(result.payload.history.dailyTotalsOmitted, 40);
+  assert.equal(result.payload.history.summary.activeDaysComplete, false);
+  assert.deepEqual(summary, original);
+
+  const reduced = serializeSyncPayload(summary, { maxBytes: 500 });
+  assert.ok(reduced.bytes <= 500);
+  assert.equal(reduced.payload.history.dailyTotals, undefined, 'later rebuilds must not restore omitted totals');
+  assert.equal(reduced.payload.history.dailyTotalsOmitted, 40);
+  assert.equal(reduced.payload.history.summary.activeDaysComplete, false);
+  assert.equal(reduced.payload.allTimeProjectsOmitted, true, 'legacy reduction still applies when necessary');
+});

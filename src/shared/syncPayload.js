@@ -182,6 +182,7 @@ function sessionsWithoutReasonix(sessions) {
 
 function buildSyncPayload(summary, {
   omitHistory = false,
+  omitDailyTotals = false,
   omitAllTimeProjects = false,
   omitHistoryTokenComponents = false,
   omitModelThroughput = false,
@@ -255,6 +256,7 @@ function buildSyncPayload(summary, {
       if (payload[period]) delete payload[period].modelThroughput;
     }
   }
+  if (omitDailyTotals) omitHistoryDailyTotals(payload);
   return payload;
 }
 
@@ -283,6 +285,13 @@ function serializeSyncPayload(summary, options = {}) {
     return { payload, body, bytes: body ? Buffer.byteLength(body, 'utf8') : 0 };
   }
   let body = JSON.stringify(payload);
+  if (Buffer.byteLength(body, 'utf8') > maxBytes && Array.isArray(payload.history?.dailyTotals)) {
+    // The additive calendar must not evict detail that fit before it existed.
+    // Keep this option across later rebuilds if legacy reductions are also needed.
+    buildOptions.omitDailyTotals = true;
+    payload = buildSyncPayload(summary, buildOptions);
+    body = JSON.stringify(payload);
+  }
   if (Buffer.byteLength(body, 'utf8') > maxBytes
     && ['today', 'month', 'allTime'].some((period) => payload[period]?.modelThroughput)) {
     // Optional live attribution must never evict aggregate usage or session detail.
@@ -315,9 +324,6 @@ function serializeSyncPayload(summary, options = {}) {
       body = JSON.stringify(payload);
       if (Buffer.byteLength(body, 'utf8') <= maxBytes) break;
     }
-  }
-  if (Buffer.byteLength(body, 'utf8') > maxBytes && omitHistoryDailyTotals(payload)) {
-    body = JSON.stringify(payload);
   }
   return { payload, body, bytes: Buffer.byteLength(body, 'utf8') };
 }
