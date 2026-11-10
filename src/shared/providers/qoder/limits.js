@@ -168,8 +168,11 @@ function parseQoderUsage(body, sharedBody, options = {}) {
   const personal = parseSummary(quotaSummary(read(payload, 'totalQuota', 'total_quota')));
   if (!personal) throw new Error('missing totalQuota.quotaSummary');
   const shared = parseSummary(quotaSummary(
-    read(sharedPayload, 'sharedQuota', 'shared_quota') ?? read(payload, 'sharedQuota', 'shared_quota')
+    sharedBody === undefined
+      ? read(payload, 'sharedQuota', 'shared_quota')
+      : read(sharedPayload, 'sharedQuota', 'shared_quota')
   ));
+  if (sharedBody !== undefined && !shared) throw new Error('missing sharedQuota.quotaSummary');
   // Personal and team allowances are independent pools with their own resets,
   // so they stay separate windows the user can show or hide independently. A
   // zero-limit allowance is omitted rather than drawn as "100% remaining".
@@ -249,8 +252,8 @@ async function fetchQoderLimits(options = {}, deps = {}) {
     );
     // A personal account has no organization to report, and a shared-endpoint
     // rejection must not discard a personal allowance that just succeeded.
-    // Without a personal allowance there is no safe zero to publish, so report
-    // "unavailable" and let the runtime retain the last-good shared window.
+    // A partial personal result tells the runtime to retain absent team windows.
+    // Without a personal allowance, report unavailable to retain last-good data.
     const sharedStatus = sharedResponse.status;
     if (!sharedResponse.ok && sharedStatus !== 403 && sharedStatus !== 404) {
       const personalPayload = body?.data && typeof body.data === 'object' ? body.data : body;
@@ -276,8 +279,8 @@ async function fetchQoderLimits(options = {}, deps = {}) {
         planResetsAt = parseQoderPlanResetAt(planBody);
       }
     } catch (_) {}
-    const usage = parseQoderUsage(body, sharedBody, { planResetsAt });
-    return normalizeLimitProvider({
+    const usage = parseQoderUsage(body, sharedResponse.ok ? sharedBody : undefined, { planResetsAt });
+    const result = normalizeLimitProvider({
       provider: 'qoder',
       accountKey: hashKey('qoder', cookie),
       accountLabel,
@@ -287,6 +290,10 @@ async function fetchQoderLimits(options = {}, deps = {}) {
       windows: usage.windows,
       region: site === 'cn' ? 'cn' : 'global'
     });
+    // Internal runtime metadata is consumed before normalization/publication.
+    // Retained windows keep their old timestamp and make the row unavailable.
+    if (sharedStatus === 401) result.invalidateCachedWindowLabels = [];
+    return result;
   } catch (error) {
     return normalizeLimitProvider({
       provider: 'qoder',

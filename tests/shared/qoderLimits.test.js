@@ -55,7 +55,7 @@ test('parseQoderUsage emits personal and team credits as separate windows', () =
       }
     },
     nextResetAt: '2026-08-01T00:00:00Z'
-  }, null, { planResetsAt: '2026-09-01T00:00:00.000Z' });
+  }, undefined, { planResetsAt: '2026-09-01T00:00:00.000Z' });
 
   assert.deepEqual(
     usage.windows.map(({ label, used, limit, remaining, resetsAt }) => ({
@@ -274,3 +274,61 @@ test('fetchQoderLimits keeps the response body read inside the deadline', async 
   assert.equal(provider.status, 'unavailable');
   assert.equal(signal.aborted, true);
 });
+
+// Exercise provider results through the runtime: a single fetch cannot prove
+// that an incomplete reading preserves previously displayed quota windows.
+for (const scenario of [
+  { name: '401', status: 401, partialPersonal: true },
+  { name: 'missing quota', body: {} },
+  { name: 'invalid quota', body: { shared_quota: { quota_summary: { used_value: 'invalid', limit_value: 50 } } } },
+  { name: 'null payload', body: null },
+  { name: 'explicit zero quota', body: { shared_quota: quota(0, 0, 0) }, clearsTeam: true },
+  { name: 'personal-only account', status: 404, clearsTeam: true }
+]) {
+  test(`Qoder runtime handles ${scenario.name} after a successful team reading`, async () => {
+    const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+    let attempt = 0;
+    let clock = Date.parse('2026-11-01T00:00:00Z');
+    const runtime = createLimitsRuntime({ limitProviders: ['qoder'] }, {
+      autoStart: false,
+      now: () => clock,
+      probeProvider: async () => {
+        attempt += 1;
+        return [await fetchQoderLimits({ qoderCookie: QODER_TEST_COOKIE }, {
+          env: {},
+          now: () => clock,
+          fetch: async (url) => {
+            if (url.includes('/organization-shared-usages/')) {
+              return new Response(JSON.stringify(attempt === 1
+                ? { shared_quota: quota(10, 50, 40) } : scenario.body ?? null),
+              { status: attempt === 1 ? 200 : scenario.status || 200 });
+            }
+            if (url.endsWith('/userplan')) return new Response(JSON.stringify({ plan_tier: 'PLAN_TIER_TEAM' }));
+            return new Response(JSON.stringify({ total_quota: quota(attempt === 1 ? 20 : 30, 100, attempt === 1 ? 80 : 70) }));
+          }
+        })];
+      }
+    });
+    try {
+      await runtime.refresh({ provider: 'qoder' }, 'credential-edit');
+      const before = runtime.getSnapshot().providers[0];
+      assert.deepEqual(before.windows.map((window) => window.label), ['Credits', 'Team credits']);
+      clock += 60_000;
+      await runtime.refresh({ provider: 'qoder' }, 'credential-edit');
+      const after = runtime.getSnapshot().providers[0];
+      assert.equal(after.status, scenario.clearsTeam ? 'ok' : 'unavailable');
+      assert.equal(after.updatedAt, scenario.clearsTeam ? new Date(clock).toISOString() : before.updatedAt);
+      assert.equal(after.windows.find((window) => window.label === 'Credits').used,
+        scenario.partialPersonal || scenario.clearsTeam ? 30 : 20);
+      if (scenario.clearsTeam) {
+        assert.deepEqual(after.windows.map((window) => window.label), ['Credits']);
+      } else {
+        assert.deepEqual(after.windows.find((window) => window.label === 'Team credits'),
+          before.windows.find((window) => window.label === 'Team credits'));
+      }
+      assert.equal(Object.hasOwn(after, 'invalidateCachedWindowLabels'), false);
+    } finally {
+      runtime.stop();
+    }
+  });
+}
