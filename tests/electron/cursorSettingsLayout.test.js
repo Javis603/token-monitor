@@ -3512,3 +3512,16 @@ test('QwenWork Home upgrade does not save environment-only selections', () => {
     assert.equal(context.merged.qwenworkHomeLimitProviderSeeded === true, hasSavedSelection);
   }
 });
+
+test('QwenWork sign-in re-enables limits only when adding the sole provider', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  for (const [selection, expectedEnabled] of [['', true], ['claude', false]]) {
+    const settings = { limitsEnabled: false, limitProviders: selection, limitProviderOrder: '' };
+    runMainFunction(main, 'ensureQwenworkLimitProviderEnabled', 'migrateQwenworkLimitProvider',
+      'ensureQwenworkLimitProviderEnabled(settings)', {
+        settings, parseLimitProviders: value => String(value || '').split(',').filter(Boolean)
+      });
+    assert.equal(settings.limitsEnabled, expectedEnabled);
+    assert.equal(settings.limitProviders, selection ? 'claude,qwenwork' : 'qwenwork');
+  }
+});

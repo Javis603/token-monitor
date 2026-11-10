@@ -2180,6 +2180,10 @@ function ensureQwenworkLimitProviderEnabled(settings) {
   const providers = parseLimitProviders(settings.limitProviders);
   const order = parseLimitProviders(settings.limitProviderOrder);
   let changed = false;
+  if (settings.limitsEnabled === false && providers.length === 0) {
+    settings.limitsEnabled = true;
+    changed = true;
+  }
   if (!providers.includes('qwenwork')) {
     providers.push('qwenwork');
     settings.limitProviders = providers.join(',');
