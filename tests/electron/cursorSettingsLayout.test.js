@@ -1933,45 +1933,6 @@ test('main settings migration preserves explicit AI limit provider selections', 
   );
 });
 
-test('a pre-QwenWork provider selection gains QwenWork once, without re-enabling it after a disable', () => {
-  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
-  const parseLimitProviders = (value) => {
-    const known = new Set(['claude', 'codex', 'cursor', 'zai', 'qoder', 'qwenwork', 'deepseek']);
-    return String(value || '').split(',').map((item) => item.trim().toLowerCase()).filter((item, index, list) => (
-      known.has(item) && list.indexOf(item) === index
-    ));
-  };
-  const settings = {
-    limitProviders: 'claude,codex,cursor,zai,qoder',
-    limitProviderOrder: 'codex,zai,qoder,deepseek'
-  };
-  assert.equal(runMainFunction(main, 'migrateQwenworkLimitProvider', 'migrateLimitProviderOrder',
-    'migrateQwenworkLimitProvider(settings)', { parseLimitProviders, settings }), true);
-  assert.equal(settings.limitProviders, 'claude,codex,cursor,zai,qoder,qwenwork');
-  assert.equal(settings.limitProviderOrder, 'codex,zai,qoder,qwenwork,deepseek');
-
-  const disabled = { limitProviders: 'claude,codex', limitProviderOrder: 'claude,codex,qwenwork' };
-  assert.equal(runMainFunction(main, 'migrateQwenworkLimitProvider', 'migrateLimitProviderOrder',
-    'migrateQwenworkLimitProvider(disabled)', { parseLimitProviders, disabled }), false);
-  assert.equal(disabled.limitProviders, 'claude,codex');
-
-  const afterLogin = { limitProviders: 'claude,codex', limitProviderOrder: 'claude,codex,qwenwork' };
-  assert.equal(runMainFunction(main, 'ensureQwenworkLimitProviderEnabled', 'migrateQwenworkLimitProvider',
-    'ensureQwenworkLimitProviderEnabled(afterLogin)', { parseLimitProviders, afterLogin }), true);
-  assert.equal(afterLogin.limitProviders, 'claude,codex,qwenwork');
-
-  const home = { limitProviders: 'claude,qwenwork', homeLimitProviderOrder: 'claude,zai', hiddenHomeLimitProviders: '' };
-  assert.equal(runMainFunction(main, 'migrateQwenworkHomeLimitProvider', 'migrateLimitProviderOrder',
-    'migrateQwenworkHomeLimitProvider(home)', { parseLimitProviders, home }), true);
-  assert.equal(home.homeLimitProviderOrder, 'claude,zai,qwenwork');
-  assert.equal(home.qwenworkHomeLimitProviderSeeded, true);
-
-  home.homeLimitProviderOrder = 'claude,zai';
-  assert.equal(runMainFunction(main, 'migrateQwenworkHomeLimitProvider', 'migrateLimitProviderOrder',
-    'migrateQwenworkHomeLimitProvider(home)', { parseLimitProviders, home }), false);
-  assert.equal(home.homeLimitProviderOrder, 'claude,zai');
-});
-
 test('active Codex account labels are always shown for multi-account limits rows', () => {
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   const app = readRendererFile('app.js');
@@ -3453,7 +3414,7 @@ test('QwenWork login reconfigures the newly enabled provider before invalidation
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
   const start = main.indexOf("  ipcMain.handle('qwenwork:signIn'");
   const end = main.indexOf("  ipcMain.handle('qwenwork:cancelSignIn'", start);
-  const settings = { limitProviders: 'claude' };
+  const settings = { limitsEnabled: false, limitProviders: 'claude', limitProviderOrder: 'codex,claude', homeLimitProviderOrder: 'codex' };
   const calls = [];
   let handler;
   vm.runInNewContext(main.slice(start, end), {
@@ -3462,8 +3423,8 @@ test('QwenWork login reconfigures the newly enabled provider before invalidation
     runQwenworkDeviceFlowLogin: async () => ({ session: { access: 'fixture' } }),
     qwenworkAuthBaseUrl: () => '', qwenworkBaseUrl: () => '', process: { env: {} },
     shell: { openExternal() {} }, electronLimitsFetch() {}, settings,
-    ensureQwenworkLimitProviderEnabled: value => { value.limitProviders += ',qwenwork'; },
-    migrateQwenworkHomeLimitProvider() {}, saveSettings() {}, pushSettingsToRenderer() {},
+    providerSelectionIncluding: require('../../src/electron/limits/credentialCommands').providerSelectionIncluding,
+    saveSettings() {}, pushSettingsToRenderer() {},
     deviceRuntimeHandle: { reconfigureLimits: config => calls.push(['config', config.limitProviders]) },
     electronLimitsConfig: () => ({ limitProviders: settings.limitProviders }),
     queueLimitInvalidation: () => { calls.push(['invalidate']); }
@@ -3471,57 +3432,31 @@ test('QwenWork login reconfigures the newly enabled provider before invalidation
   const result = await handler({ sender: { isDestroyed: () => false, send() {} } }, { flowId: 'fixture' });
   assert.equal(result.ok, true);
   assert.deepEqual(calls, [['config', 'claude,qwenwork'], ['invalidate']]);
+  assert.equal(settings.limitsEnabled, true);
+  assert.equal(settings.limitProviderOrder, 'codex,claude');
+  assert.equal(settings.homeLimitProviderOrder, 'codex');
 });
 
-test('QwenWork upgrade migration preserves environment-only provider selections', () => {
-  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
-  const start = main.indexOf('    if (saved.limitProviders !== undefined) {');
-  const end = main.indexOf('    if (saved.clientDisplayOrder !== undefined)', start);
-  const migration = functionBody(main, 'migrateQwenworkLimitProvider', 'migrateQwenworkHomeLimitProvider');
-  const parseLimitProviders = value => String(value || '').split(',').filter(Boolean);
-  for (const [saved, expected, pending] of [
-    [{}, 'claude', false],
-    [{ limitProviders: 'codex' }, 'codex,qwenwork', true],
-    [{ limitProviders: '' }, '', false],
-    [{ limitProviders: 'codex', limitProviderOrder: 'codex,qwenwork' }, 'codex', false]
-  ]) {
-    const context = { saved, merged: { limitProviders: 'claude', limitProviderOrder: 'claude,codex' },
-      qwenworkLimitProviderPersistPending: false, parseLimitProviders,
-      migrateLimitProviders: value => value, migrateLimitProviderOrder: value => value };
-    vm.runInNewContext(migration + main.slice(start, end), context);
-    assert.equal(context.merged.limitProviders, expected);
-    assert.equal(context.qwenworkLimitProviderPersistPending, pending);
-  }
-});
 
-test('QwenWork Home upgrade does not save environment-only selections', () => {
-  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
-  const start = main.indexOf('    if (saved.homeLimitProviderOrder !== undefined) {');
-  const end = main.indexOf('    if (saved.hiddenHomeLimitProviders !== undefined)', start);
-  const migration = functionBody(main, 'migrateQwenworkHomeLimitProvider', 'migrateLimitProviderOrder');
-  for (const hasSavedSelection of [false, true]) {
-    const saved = { homeLimitProviderOrder: 'claude' };
-    if (hasSavedSelection) saved.limitProviders = 'claude,qwenwork';
-    const context = { saved, merged: { limitProviders: 'claude,qwenwork' },
-      qwenworkHomeLimitProviderPersistPending: false,
-      parseLimitProviders: value => String(value || '').split(',').filter(Boolean),
-      migrateHomeLimitProviderOrder: value => value };
-    vm.runInNewContext(migration + main.slice(start, end), context);
-    assert.equal(context.qwenworkHomeLimitProviderPersistPending, hasSavedSelection);
-    assert.equal(context.merged.homeLimitProviderOrder, hasSavedSelection ? 'claude,qwenwork' : 'claude');
-    assert.equal(context.merged.qwenworkHomeLimitProviderSeeded === true, hasSavedSelection);
-  }
-});
 
-test('QwenWork sign-in re-enables limits only when adding the sole provider', () => {
+test('QwenWork upgrade leaves saved selections and custom orders alone', () => {
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
-  for (const [selection, expectedEnabled] of [['', true], ['claude', false]]) {
-    const settings = { limitsEnabled: false, limitProviders: selection, limitProviderOrder: '' };
-    runMainFunction(main, 'ensureQwenworkLimitProviderEnabled', 'migrateQwenworkLimitProvider',
-      'ensureQwenworkLimitProviderEnabled(settings)', {
-        settings, parseLimitProviders: value => String(value || '').split(',').filter(Boolean)
-      });
-    assert.equal(settings.limitsEnabled, expectedEnabled);
-    assert.equal(settings.limitProviders, selection ? 'claude,qwenwork' : 'qwenwork');
+  const selectionStart = main.indexOf('    if (saved.limitProviders !== undefined) {');
+  const selectionEnd = main.indexOf('    if (saved.clientDisplayOrder !== undefined)', selectionStart);
+  const homeStart = main.indexOf('    if (saved.homeLimitProviderOrder !== undefined) {');
+  const homeEnd = main.indexOf('    if (saved.hiddenHomeLimitProviders !== undefined)', homeStart);
+  for (const selection of [undefined, '', 'claude,codex']) {
+    const saved = { limitProviderOrder: 'codex,claude', homeLimitProviderOrder: 'claude' };
+    if (selection !== undefined) saved.limitProviders = selection;
+    const merged = { limitProviders: 'codex' };
+    const context = { saved, merged,
+      migrateLimitProviders: value => value, migrateLimitProviderOrder: value => value,
+      migrateHomeLimitProviderOrder: value => value,
+      migrateQwenworkLimitProvider: () => { throw new Error('upgrade must preserve provider selection'); },
+      migrateQwenworkHomeLimitProvider: () => { throw new Error('upgrade must preserve Home order'); } };
+    vm.runInNewContext(main.slice(selectionStart, selectionEnd) + main.slice(homeStart, homeEnd), context);
+    assert.equal(merged.limitProviders, selection === undefined ? 'codex' : selection);
+    assert.equal(merged.limitProviderOrder, 'codex,claude');
+    assert.equal(merged.homeLimitProviderOrder, 'claude');
   }
 });

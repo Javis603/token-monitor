@@ -202,7 +202,7 @@ const {
   redactThirdPartyProfilesForRenderer,
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
-const { createCredentialCommands } = require('./limits/credentialCommands');
+const { createCredentialCommands, providerSelectionIncluding } = require('./limits/credentialCommands');
 const { createMinimaxApiKeys } = require('./providers/minimax/apiKeys');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
@@ -595,8 +595,6 @@ let initialLimitProvidersPending = false;
 // settings are written through saveSettings() after the window exists, so the flag
 // carries the decision from the read to that first save.
 let seededClientSplitsPending = false;
-let qwenworkLimitProviderPersistPending = false;
-let qwenworkHomeLimitProviderPersistPending = false;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let credentialStorageErrorShown = false;
@@ -2171,64 +2169,6 @@ function migrateLimitProviders(value) {
   return require('./plugins/limits').desktopProviderPreference(value, parseLimitProviders);
 }
 
-// A saved provider selection predates QwenWork, so it cannot have deliberately
-// excluded it. Seed the new provider once for upgrading installs; a later
-// disable leaves qwenwork in limitProviderOrder, which keeps this migration
-// from re-enabling it on every launch.
-function ensureQwenworkLimitProviderEnabled(settings) {
-  if (!settings || typeof settings !== 'object') return false;
-  const providers = parseLimitProviders(settings.limitProviders);
-  const order = parseLimitProviders(settings.limitProviderOrder);
-  let changed = false;
-  if (settings.limitsEnabled === false && providers.length === 0) {
-    settings.limitsEnabled = true;
-    changed = true;
-  }
-  if (!providers.includes('qwenwork')) {
-    providers.push('qwenwork');
-    settings.limitProviders = providers.join(',');
-    changed = true;
-  }
-  if (!order.includes('qwenwork')) {
-    const nextOrder = [...order];
-    const qoder = nextOrder.indexOf('qoder');
-    if (qoder >= 0) nextOrder.splice(qoder + 1, 0, 'qwenwork');
-    else nextOrder.push('qwenwork');
-    settings.limitProviderOrder = nextOrder.join(',');
-    changed = true;
-  }
-  return changed;
-}
-
-function migrateQwenworkLimitProvider(settings, { hadSavedOrder = true } = {}) {
-  if (!settings || typeof settings !== 'object') return false;
-  const providers = parseLimitProviders(settings.limitProviders);
-  const order = parseLimitProviders(settings.limitProviderOrder);
-  if (!providers.length || providers.includes('qwenwork')) return false;
-  if (hadSavedOrder && order.includes('qwenwork')) return false;
-  settings.limitProviders = [...providers, 'qwenwork'].join(',');
-  const nextOrder = [...order];
-  const qoder = nextOrder.indexOf('qoder');
-  if (qoder >= 0) nextOrder.splice(qoder + 1, 0, 'qwenwork');
-  else nextOrder.push('qwenwork');
-  if (nextOrder.length) settings.limitProviderOrder = nextOrder.join(',');
-  return true;
-}
-
-// The Home/tray limits card keeps its own provider subset. A pre-QwenWork
-// subset cannot have excluded it deliberately, so append it once and remember
-// that this install has made the decision; removing it later sticks.
-function migrateQwenworkHomeLimitProvider(settings) {
-  if (!settings || typeof settings !== 'object' || settings.qwenworkHomeLimitProviderSeeded === true) return false;
-  if (!parseLimitProviders(settings.limitProviders).includes('qwenwork')) return false;
-  const order = parseLimitProviders(settings.homeLimitProviderOrder);
-  settings.qwenworkHomeLimitProviderSeeded = true;
-  if (!order.length || order.includes('qwenwork')) return true;
-  if (String(settings.hiddenHomeLimitProviders || '').split(',').map((value) => value.trim()).includes('qwenwork')) return true;
-  settings.homeLimitProviderOrder = [...order, 'qwenwork'].join(',');
-  return true;
-}
-
 function migrateLimitProviderOrder(value) {
   return require('./plugins/limits').desktopProviderPreference(value, parseLimitProviders) || defaultLimitProviderOrder();
 }
@@ -2394,14 +2334,6 @@ function ensureSettingsLoaded() {
   // losing the tracked client.
   if (seededClientSplitsPending) {
     seededClientSplitsPending = false;
-    saveSettings();
-  }
-  if (qwenworkLimitProviderPersistPending) {
-    qwenworkLimitProviderPersistPending = false;
-    saveSettings();
-  }
-  if (qwenworkHomeLimitProviderPersistPending) {
-    qwenworkHomeLimitProviderPersistPending = false;
     saveSettings();
   }
   rendererViewState = normalizeInitialRendererViewState(settings.lastViewState, rendererViewState);
@@ -2825,10 +2757,6 @@ function readSettings() {
     if (saved.limitProviderOrder !== undefined) {
       merged.limitProviderOrder = migrateLimitProviderOrder(saved.limitProviderOrder);
     }
-    if (saved.limitProviders !== undefined
-      && migrateQwenworkLimitProvider(merged, { hadSavedOrder: saved.limitProviderOrder !== undefined })) {
-      qwenworkLimitProviderPersistPending = true;
-    }
     if (saved.clientDisplayOrder !== undefined) {
       merged.clientDisplayOrder = migrateClientDisplayOrder(saved.clientDisplayOrder);
     }
@@ -2865,9 +2793,6 @@ function readSettings() {
     merged.automaticAppUpdates = parseBoolean(merged.automaticAppUpdates, false);
     if (saved.homeLimitProviderOrder !== undefined) {
       merged.homeLimitProviderOrder = migrateHomeLimitProviderOrder(saved.homeLimitProviderOrder);
-    }
-    if (saved.limitProviders !== undefined && migrateQwenworkHomeLimitProvider(merged)) {
-      qwenworkHomeLimitProviderPersistPending = true;
     }
     if (saved.hiddenHomeLimitProviders !== undefined) {
       merged.hiddenHomeLimitProviders = normalizeHiddenLimitProviders(saved.hiddenHomeLimitProviders);
@@ -10080,8 +10005,8 @@ app.whenReady().then(() => {
       if (qwenworkLoginController !== controller) {
         return { ok: false, error: 'QwenWork sign-in cancelled.', flowId };
       }
-      ensureQwenworkLimitProviderEnabled(settings);
-      migrateQwenworkHomeLimitProvider(settings);
+      settings.limitProviders = providerSelectionIncluding(settings.limitProviders, 'qwenwork');
+      settings.limitsEnabled = true;
       settings.qwenworkSession = result.session;
       saveSettings({ throwOnError: true });
       deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
