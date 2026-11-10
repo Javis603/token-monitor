@@ -8,13 +8,12 @@ function maskCardMaterial(win, commands, width, height, scale) {
   return applyVibrancyMask(win, rasterizeMask(toPolygons(commands), width, height, scale), width, height);
 }
 
-// Cards move inside a native canvas matching the work area's height. Resize it only
-// when its width/display changes, not on each spring sample.
-function cardCanvasBounds(frame, workArea, target = frame, rectangular = false) {
-  const y = rectangular ? frame.y : workArea.y;
-  return { x: frame.x, y, width: frame.width, height: rectangular ? frame.height : workArea.height,
-    cardY: frame.y - y, cardHeight: frame.height,
-    contentY: target.y - y, contentHeight: target.height };
+// Window screenshots and window pickers use native bounds, including transparent
+// pixels. Keep the host fitted to the painted card throughout its spring motion.
+function cardCanvasBounds(frame, target = frame) {
+  return { x: frame.x, y: frame.y, width: frame.width, height: frame.height,
+    cardY: 0, cardHeight: frame.height,
+    contentY: target.y - frame.y, contentHeight: target.height };
 }
 
 function createCardPointerRouting({ platform, screen, getWindow, getFrame, isVisible, primaryButtonDown = () => false }) {
