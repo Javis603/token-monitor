@@ -476,18 +476,10 @@
       },
       {
         "revision": 119,
-        "buildId": "sha256:33a0942d4517d582f4cf856de9a35046a930d1797e9fed2852e3e28d716d5778"
+        "buildId": "sha256:3a2579c66b6ee5d634fdc80f5ed15bae6b4372ae7552404a81150cb0afcf6c5c"
       },
       {
         "revision": 120,
-        "buildId": "sha256:99ddaca1fa0d27d2dcf44928ecf18998d33e113158ef460c42a74d61d7df3367"
-      },
-      {
-        "revision": 121,
-        "buildId": "sha256:3750011722a55fd7e7a1414024e8b8d8a263aab11da67bb38c4adb438ea3e58b"
-      },
-      {
-        "revision": 122,
         "buildId": "sha256:5a591bdc9f3fbb14c1548a29cc0b5adfdcf5427ecdf8c3da461755e574c75132"
       }
     ],

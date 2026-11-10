@@ -129,7 +129,8 @@ async function fetchDeepSeekLimits(options = {}, deps = {}) {
       { accountKey, currency: row.currency, paid: row.paid, now, storePath, legacyStorePath },
       deps
     );
-    const toolSpends = await fetchToolSpends(options.deepseekWebToken, { accountKey, currency: row.currency, now }, deps);
+    const webToken = normalizeDeepseekWebToken(options.deepseekWebToken);
+    const toolSpends = await fetchToolSpends(webToken, { accountKey, currency: row.currency, now }, deps);
     return normalizeLimitProvider({
       provider: 'deepseek',
       accountKey,

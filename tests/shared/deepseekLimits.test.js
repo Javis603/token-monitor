@@ -224,12 +224,13 @@ test('fetchDeepSeekLimits bounds a body that stalls after the headers', { timeou
 test('console Search is optional, retries failures and expires at month changes', async () => {
   let now = new Date(2026, 6, 31, 23, 50).getTime();
   let calls = 0;
-  const options = { deepseekWebToken: 'console-token' };
+  const options = { deepseekWebToken: 'Authorization: Bearer console-token' };
   const deps = {
     env: { DEEPSEEK_API_KEY: 'sk-balance', TOKEN_MONITOR_DEEPSEEK_CONSOLE_TOKEN: 'env-token' },
     now: () => now, providerRuntimeState: new Map(), ...memStoreDeps(),
-    fetch: async (url) => {
-      if (!String(url).includes('platform.deepseek.com')) return balanceResponse([{ currency: 'CNY', total_balance: '10', topped_up_balance: '10' }]);
+    fetch: async (url, init) => {
+      if (new URL(url).hostname !== 'platform.deepseek.com') return balanceResponse([{ currency: 'CNY', total_balance: '10', topped_up_balance: '10' }]);
+      assert.equal(init.headers.Authorization, 'Bearer console-token');
       const query = new URL(String(url)).searchParams;
       calls += 1;
       return { ok: true, json: async () => ({
@@ -270,7 +271,7 @@ test('console month boundaries stay aligned across a DST change', async (t) => {
   await fetchDeepSeekLimits({ deepseekApiKey: 'sk-balance', deepseekWebToken: 'console-token' }, {
     env: {}, now: () => Date.parse('2026-10-31T09:00:00+01:00'), ...memStoreDeps(),
     fetch: async (url) => {
-      if (String(url).includes('platform.deepseek.com')) query = new URL(String(url)).searchParams;
+      if (new URL(url).hostname === 'platform.deepseek.com') query = new URL(url).searchParams;
       return balanceResponse([{ currency: 'CNY', total_balance: '10', topped_up_balance: '10' }]);
     }
   });
