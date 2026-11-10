@@ -6774,7 +6774,7 @@ function homeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
   if (compactLabel) return compactLabel;
   if (window?.kind === 'billing') {
     const label = String(window?.label || '').trim();
-    if (label) return label;
+    if (label) return limitWindowLabel(providerId, window);
   }
   const key = {
     session: 'home.limit.session',

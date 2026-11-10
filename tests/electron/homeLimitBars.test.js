@@ -229,6 +229,7 @@ function renderHomeWindows(windows, settings = {}, plan = '', providerId = '', l
     }),
     t: (key, params) => require('../../src/electron/renderer/i18n').translate(locale, key, params),
     formatLimitBoundary: () => 'Reset 4h',
+    limitWindowLabel: require('../../src/shared/limits/windowLabels').limitWindowLabel,
     limitProviderPresentationApi: require('../../src/electron/renderer/limits/providerPresentation')
   };
   vm.runInNewContext(`${app.slice(start, end)}; renderHomeLimitModule();`, context);
@@ -505,4 +506,21 @@ test('Home displays separate WorkBuddy accounts unless quota totals are explicit
   assert.equal(combined[0].windows[0].remaining, 240);
   const partial = [providers[0], providers[1], { ...providers[2], status: 'unavailable', windows: [] }];
   assert.equal(resolveHomeRows(partial, { workbuddyQuotaTotalEnabled: true }).length, 2);
+});
+
+
+test('Home uses Cursor monthly period labels while preserving other billing labels', () => {
+  for (const [providerId, kind, storedLabel, expected] of [
+    ['cursor', 'billing', 'Included usage', 'Monthly'],
+    ['cursor', 'weekly', 'Included usage', 'Weekly'],
+    ['cursor', 'billing', 'Team pool', 'Team pool'],
+    ['cursor', 'billing', 'Prepaid balance', 'Prepaid balance'],
+    ['cursor', 'billing', '', 'Billing'],
+    ['copilot', 'billing', 'Premium requests', 'Premium requests']
+  ]) {
+    const window = Object.freeze({ kind, label: storedLabel, remainingPercent: 80 });
+    const row = renderHomeWindows([window], {}, '', providerId)[0];
+    assert.equal(row.children[0].children[0].textContent, expected);
+    assert.equal(window.label, storedLabel);
+  }
 });
