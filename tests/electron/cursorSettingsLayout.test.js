@@ -3493,3 +3493,22 @@ test('QwenWork upgrade migration preserves environment-only provider selections'
     assert.equal(context.qwenworkLimitProviderPersistPending, pending);
   }
 });
+
+test('QwenWork Home upgrade does not save environment-only selections', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const start = main.indexOf('    if (saved.homeLimitProviderOrder !== undefined) {');
+  const end = main.indexOf('    if (saved.hiddenHomeLimitProviders !== undefined)', start);
+  const migration = functionBody(main, 'migrateQwenworkHomeLimitProvider', 'migrateLimitProviderOrder');
+  for (const hasSavedSelection of [false, true]) {
+    const saved = { homeLimitProviderOrder: 'claude' };
+    if (hasSavedSelection) saved.limitProviders = 'claude,qwenwork';
+    const context = { saved, merged: { limitProviders: 'claude,qwenwork' },
+      qwenworkHomeLimitProviderPersistPending: false,
+      parseLimitProviders: value => String(value || '').split(',').filter(Boolean),
+      migrateHomeLimitProviderOrder: value => value };
+    vm.runInNewContext(migration + main.slice(start, end), context);
+    assert.equal(context.qwenworkHomeLimitProviderPersistPending, hasSavedSelection);
+    assert.equal(context.merged.homeLimitProviderOrder, hasSavedSelection ? 'claude,qwenwork' : 'claude');
+    assert.equal(context.merged.qwenworkHomeLimitProviderSeeded === true, hasSavedSelection);
+  }
+});
