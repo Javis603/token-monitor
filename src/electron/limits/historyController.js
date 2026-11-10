@@ -131,7 +131,7 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
   }
   function paintFrame(frame) {
     paintedFrame = frame;
-    const bounds = cardCanvasBounds(frame, placement.workArea, frame, rectangularFallback);
+    const bounds = cardCanvasBounds(frame);
     const current = win.getBounds();
     if (['x', 'y', 'width', 'height'].some(key => current[key] !== bounds[key])) {
       win.setBounds({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height });
