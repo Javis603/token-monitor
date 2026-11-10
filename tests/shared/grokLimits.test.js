@@ -2,6 +2,7 @@
 
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
+const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -12,6 +13,8 @@ const {
   GROK_WEB_BILLING_GRPC_URL,
   resolveGrokHome,
   resolveGrokCredential,
+  withGrokPathHints,
+  grokRpcCommand,
   isRetryableNetworkError,
   validateGrokGrpcStatus
 } = require('../../src/shared/providers/grok/limits');
@@ -43,9 +46,9 @@ test('isRetryableNetworkError classifies transient undici failures only', () => 
   assert.equal(isRetryableNetworkError(new Error('invalid proxy URL')), false);
 });
 
-function fakeGrokRpcSpawn(assertArgs = ['agent', 'stdio']) {
+function fakeGrokRpcSpawn(assertArgs = ['agent', 'stdio'], assertCommand = 'grok') {
   return (command, args) => {
-    assert.equal(command, 'grok');
+    assert.equal(command, assertCommand);
     assert.deepEqual(args, assertArgs);
     const child = new EventEmitter();
     child.stdout = new PassThrough();
@@ -385,14 +388,179 @@ test('parseGrokBilling throws when monthly window cannot be built', () => {
   assert.throws(() => parseGrokBilling(body), /no monthly quota/);
 });
 
+test('grokRpcCommand honours explicit commands without changing their environment', () => {
+  const env = { GROK_CLI_PATH: ' "/env/grok" ', PATH: '/original/bin' };
+  assert.equal(grokRpcCommand(env, { grokCommand: ' "/opt/custom/grok" ' }), '/opt/custom/grok');
+  assert.equal(grokRpcCommand(env), '/env/grok');
+  assert.strictEqual(withGrokPathHints(env), env);
+  const customEnv = {};
+  assert.strictEqual(withGrokPathHints(customEnv, { grokCommand: '/custom/grok' }), customEnv);
+});
+
+test('withGrokPathHints appends install directories without rewriting the original PATH', () => {
+  const env = { PATH: './tools::/dir with spaces:/usr/bin:', HOME: '/Users/alice' };
+  const result = withGrokPathHints(env, {}, { platform: 'darwin' });
+  assert.equal(result.PATH, env.PATH + ':/Users/alice/.grok/bin:/Users/alice/.local/bin:/opt/homebrew/bin:/usr/local/bin');
+  assert.deepEqual(env, { PATH: './tools::/dir with spaces:/usr/bin:', HOME: '/Users/alice' });
+});
+
+test('withGrokPathHints distinguishes missing PATH from an intentionally empty PATH', () => {
+  const deps = { platform: 'darwin', homeDir: '/Users/alice' };
+  assert.equal(withGrokPathHints({}, {}, deps).PATH,
+    '/usr/bin:/bin:/Users/alice/.grok/bin:/Users/alice/.local/bin:/opt/homebrew/bin:/usr/local/bin');
+  assert.equal(withGrokPathHints({ PATH: '' }, {}, deps).PATH,
+    ':/Users/alice/.grok/bin:/Users/alice/.local/bin:/opt/homebrew/bin:/usr/local/bin');
+});
+
+test('withGrokPathHints uses native home rules with an OS fallback and explicit test homes', () => {
+  const env = { HOME: '/home/alice', USERPROFILE: '/other/home' };
+  assert.equal(withGrokPathHints(env, {}, { platform: 'linux' }).PATH,
+    '/usr/bin:/bin:/home/alice/.grok/bin:/home/alice/.local/bin:/opt/homebrew/bin:/usr/local/bin');
+  const pathApi = process.platform === 'win32' ? path.win32 : path.posix;
+  const pathKey = Object.keys(withGrokPathHints({})).find((key) => key.toLowerCase() === 'path');
+  assert.ok(withGrokPathHints({})[pathKey].split(path.delimiter).includes(pathApi.join(os.homedir(), '.grok', 'bin')));
+  assert.ok(withGrokPathHints({}, { homeDir: '/options' }, { platform: 'linux', homeDir: '/deps' }).PATH.includes('/deps/.grok/bin'));
+});
+
+test('withGrokPathHints preserves one Windows Path key and prioritizes USERPROFILE over HOME', () => {
+  const env = { Path: 'D:\\Tools', USERPROFILE: 'C:\\Users\\alice', HOME: 'D:\\MSYSHome' };
+  const result = withGrokPathHints(env, {}, { platform: 'win32' });
+  assert.equal(result.Path, 'D:\\Tools;C:\\Users\\alice\\.grok\\bin;C:\\Users\\alice\\.local\\bin');
+  assert.equal(Object.hasOwn(result, 'PATH'), false);
+  const duplicate = withGrokPathHints({ ...env, PATH: 'C:\\First' }, {}, { platform: 'win32' });
+  assert.deepEqual(Object.keys(duplicate).filter((key) => key.toLowerCase() === 'path'), ['PATH']);
+  assert.ok(duplicate.PATH.startsWith('C:\\First;'));
+  assert.deepEqual(env, { Path: 'D:\\Tools', USERPROFILE: 'C:\\Users\\alice', HOME: 'D:\\MSYSHome' });
+});
+
+test('withGrokPathHints preserves Windows inherited PATH when a custom env omits it', () => {
+  const inheritedKey = Object.keys(process.env).find((key) => key.toLowerCase() === 'path');
+  const inherited = inheritedKey === undefined ? undefined : process.env[inheritedKey];
+  const result = withGrokPathHints({}, {}, { platform: 'win32', homeDir: 'C:\\Users\\alice' });
+  assert.equal(result.PATH, [...(inherited === undefined ? [] : [inherited]),
+    'C:\\Users\\alice\\.grok\\bin', 'C:\\Users\\alice\\.local\\bin'].join(';'));
+});
+
 test('fetchGrokRpcBilling speaks Grok agent stdio x.ai/billing JSON-RPC', async () => {
   const body = await fetchGrokRpcBilling({}, {
     env: {},
+    homeDir: '',
     spawn: fakeGrokRpcSpawn(),
     rpcTimeoutMs: 100
   });
   assert.equal(body.monthlyLimit.val, 10000);
   assert.equal(body.usage.totalUsed.val, 4200);
+});
+
+function createNativeGrokRpcFixture(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-rpc-path-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const script = path.join(root, 'billing.cjs');
+  fs.writeFileSync(script, `
+    const readline = require('node:readline');
+    readline.createInterface({ input: process.stdin }).on('line', (line) => {
+      const request = JSON.parse(line);
+      const result = request.method === 'initialize' ? {} : {
+        executable: process.execPath,
+        rpcArgs: process.argv.slice(2),
+        monthlyLimit: { val: 10000 }, usage: { totalUsed: { val: 4200 } }
+      };
+      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\\n');
+    });
+  `);
+  function install(directory) {
+    fs.mkdirSync(directory, { recursive: true });
+    const executable = path.join(directory, process.platform === 'win32' ? 'grok.exe' : 'grok');
+    fs.copyFileSync(process.execPath, executable, fs.constants.COPYFILE_FICLONE);
+    return fs.realpathSync(executable);
+  }
+  async function run(pathValue, options = {}, extraEnv = {}) {
+    const env = { ...process.env, HOME: root, USERPROFILE: root };
+    for (const key of Object.keys(env)) {
+      if (key.toLowerCase() === 'path' || key === 'GROK_CLI_PATH') delete env[key];
+    }
+    if (pathValue !== undefined) env[process.platform === 'win32' ? 'Path' : 'PATH'] = pathValue;
+    Object.assign(env, extraEnv);
+    let closed;
+    try {
+      return await fetchGrokRpcBilling({ grokRpcArgs: [script, 'fixture'], ...options }, {
+        env,
+        rpcTimeoutMs: 5000,
+        spawn: (command, args, init) => {
+          const child = spawn(command, args, { ...init, cwd: root });
+          closed = new Promise((resolve) => child.once('close', resolve));
+          return child;
+        }
+      });
+    } finally {
+      await closed;
+    }
+  }
+  return { root, install, run };
+}
+
+test('fetchGrokRpcBilling resolves a real native CLI through the child PATH', async (t) => {
+  const fixture = createNativeGrokRpcFixture(t);
+  const homeCli = fixture.install(path.join(fixture.root, '.grok', 'bin'));
+  const originalDir = path.join(fixture.root, 'original tools');
+  const originalCli = fixture.install(originalDir);
+  const customCli = fixture.install(path.join(fixture.root, 'custom tools'));
+  const cwdCli = process.platform === 'win32' ? null : fixture.install(fixture.root);
+
+  await t.test('GUI PATH omits the installed CLI', async () => {
+    const body = await fixture.run(path.join(fixture.root, 'missing'));
+    assert.equal(body.executable, homeCli);
+    assert.deepEqual(body.rpcArgs, ['fixture']);
+    assert.equal(body.usage.totalUsed.val, 4200);
+  });
+  await t.test('original PATH wins over the home installation', async () => {
+    assert.equal((await fixture.run(originalDir)).executable, originalCli);
+  });
+  await t.test('relative PATH keeps its precedence', async () => {
+    assert.equal((await fixture.run(path.relative(fixture.root, originalDir))).executable, originalCli);
+  });
+  await t.test('explicit options command overrides the environment and PATH', async () => {
+    assert.equal((await fixture.run(originalDir, { grokCommand: customCli }, { GROK_CLI_PATH: homeCli })).executable, customCli);
+  });
+  await t.test('GROK_CLI_PATH overrides PATH', async () => {
+    assert.equal((await fixture.run(originalDir, {}, { GROK_CLI_PATH: customCli })).executable, customCli);
+  });
+  await t.test('Windows spawn receives one PATH key and uses USERPROFILE', {
+    skip: process.platform !== 'win32' && 'Windows native executable lookup'
+  }, async () => {
+    assert.equal((await fixture.run(path.dirname(homeCli), {}, { PATH: originalDir })).executable, originalCli);
+    assert.equal((await fixture.run(path.join(fixture.root, 'missing'), {}, {
+      HOME: path.join(fixture.root, 'other-home')
+    })).executable, homeCli);
+  });
+  await t.test('missing PATH does not introduce a current-directory search on POSIX', {
+    skip: process.platform === 'win32' && 'Windows natively searches the current directory'
+  }, async () => {
+    assert.equal((await fixture.run(undefined)).executable, homeCli);
+  });
+  await t.test('explicitly empty PATH retains current-directory search on POSIX', {
+    skip: process.platform === 'win32' && 'POSIX empty PATH semantics'
+  }, async () => {
+    assert.equal((await fixture.run('')).executable, cwdCli);
+  });
+  await t.test('a CLI symlink on PATH remains usable on POSIX', {
+    skip: process.platform === 'win32' && 'POSIX symlink fixture'
+  }, async () => {
+    const links = path.join(fixture.root, 'links');
+    fs.mkdirSync(links);
+    fs.symlinkSync(originalCli, path.join(links, 'grok'));
+    assert.equal((await fixture.run(links)).executable, originalCli);
+  });
+  await t.test('non-executable files and directories do not block a later CLI on POSIX', {
+    skip: process.platform === 'win32' && 'POSIX executable permissions'
+  }, async () => {
+    const blocked = path.join(fixture.root, 'blocked');
+    const directory = path.join(fixture.root, 'directory');
+    fs.mkdirSync(blocked);
+    fs.writeFileSync(path.join(blocked, 'grok'), 'not executable', { mode: 0o644 });
+    fs.mkdirSync(path.join(directory, 'grok'), { recursive: true });
+    assert.equal((await fixture.run([blocked, directory, originalDir].join(path.delimiter))).executable, originalCli);
+  });
 });
 
 test('fetchGrokRpcBilling kills the CLI when the parent signal aborts', async () => {
@@ -837,4 +1005,92 @@ test('fetchGrokLimits returns notConfigured when real ~/.grok/auth.json has no u
     { env: {}, grokHome: path.join(os.tmpdir(), 'grok-definitely-missing-' + Date.now() + '-' + Math.random()) }
   );
   assert.equal(r.status, 'notConfigured');
+});
+
+function oidcToken(claims, signature = 'signature') {
+  return `${Buffer.from(JSON.stringify({ alg: 'RS256' })).toString('base64url')}.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.${signature}`;
+}
+
+async function identityReading(token, source, email = 'same@example.test', now = Date.UTC(2026, 10, 9, 9)) {
+  const billing = { creditUsagePercent: 0, currentPeriod: { start: '2026-11-03T00:00:00Z', end: '2026-11-10T00:00:00Z' } };
+  return fetchGrokLimits({}, {
+    env: {}, now: () => now, grokHome: path.join(os.tmpdir(), 'grok-identity-fixture'),
+    readFileSync: () => JSON.stringify({ 'https://auth.x.ai::fixture': { key: token, email } }),
+    fetchRpcBilling: async () => { if (source === 'web') throw new Error('RPC unavailable'); return billing; },
+    fetch: async () => ({ status: 200, ok: true, arrayBuffer: async () => arrayBufferFrom(grpcFrame(
+      billingCycleProtobufPayload({ usedPercent: 0, startEpoch: Date.UTC(2026, 10, 3) / 1000, endEpoch: Date.UTC(2026, 10, 10) / 1000 })
+    )) })
+  });
+}
+
+for (const source of ['rpc', 'web']) {
+  test(`Grok ${source} identity survives OIDC rotation and separates subjects sharing an email`, async () => {
+    const claims = { iss: 'https://auth.x.ai', sub: 'user-a', iat: 1, jti: 'first' };
+    const first = await identityReading(oidcToken(claims), source);
+    const rotated = await identityReading(oidcToken({ ...claims, iat: 2, jti: 'second' }, 'rotated'), source, 'renamed@example.test');
+    const other = await identityReading(oidcToken({ ...claims, sub: 'user-b' }), source);
+    assert.equal(first.status, 'ok');
+    assert.equal(first.source, source);
+    assert.equal(rotated.accountKey, first.accountKey);
+    assert.notEqual(other.accountKey, first.accountKey);
+  });
+
+  test(`Grok ${source} unknown and malformed identities retain isolated token keys`, async () => {
+    const { hashKey } = require('../../src/shared/hashKey');
+    const identity = oidcToken({ iss: 'https://auth.x.ai', sub: 'user-a' }).split('.').slice(1).join('.');
+    const malformedHeaders = ['a', ...[null, [], {}, { alg: null }, { alg: '' }, { alg: 'none' }].map(header => Buffer.from(JSON.stringify(header)).toString('base64url'))];
+    const tokens = [...malformedHeaders.map(header => `${header}.${identity}`), 'opaque-token', 'a.invalid!.c', 'a.b.c', oidcToken(null), oidcToken([]),
+      ...[undefined, null, '', ' ', 12, {}, []].map(sub => oidcToken({ iss: 'https://auth.x.ai', sub })),
+      ...[undefined, null, '', 'https://other.test', 12, {}].map(iss => oidcToken({ iss, sub: 'user-a' }))];
+    for (const token of tokens) {
+      const row = await identityReading(token, source);
+      assert.equal(row.accountKey, hashKey('grok', token));
+    }
+  });
+
+  test(`Grok ${source} rotated records keep one SQLite history segment at 100% remaining`, async t => {
+    const { createLimitsHistoryStore } = require('../../src/electron/limits/historyStore');
+    const { segments } = require('../../src/electron/renderer/limits/historyModel');
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-identity-'));
+    const start = Date.UTC(2026, 10, 9, 9);
+    const errors = [];
+    const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => start + 300000, onError: e => errors.push(e) });
+    t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+    let latest;
+    for (let i = 0; i < 2; i++) {
+      latest = await identityReading(oidcToken({ iss: 'https://auth.x.ai', sub: 'user-a', iat: i }), source, '', start + i * 300000);
+      await store.record('fixture', { providers: [latest] });
+    }
+    const result = await store.query('fixture', latest);
+    assert.equal(result.persistent, true);
+    assert.deepEqual(errors, []);
+    assert.deepEqual(segments(result.windows[0].points).map(run => run.map(p => [p.at, 100 - p.value])),
+      [[[start, 100], [start + 300000, 100]]]);
+    const other = await identityReading(oidcToken({ iss: 'https://auth.x.ai', sub: 'user-b' }), source, '', start + 300000);
+    assert.deepEqual((await store.query('fixture', other)).windows[0].points, []);
+  });
+}
+
+test('Grok CLI auth override cannot bind another RPC account to the selected OIDC identity', async () => {
+  const token = oidcToken({ iss: 'https://auth.x.ai', sub: 'selected-user' });
+  let rpcCalls = 0;
+  const row = await fetchGrokLimits({}, {
+    env: { GROK_AUTH: 'other-cli-account' },
+    grokHome: path.join(os.tmpdir(), 'grok-identity-fixture'),
+    readFileSync: () => JSON.stringify({ 'https://auth.x.ai::fixture': { key: token, email: 'selected@example.test' } }),
+    fetchRpcBilling: async () => {
+      rpcCalls++;
+      return { creditUsagePercent: 80, currentPeriod: { start: '2026-11-03T00:00:00Z', end: '2026-11-10T00:00:00Z' } };
+    },
+    fetchWebGrpcBilling: async credential => {
+      assert.equal(credential.token, token);
+      return [{ kind: 'weekly', label: 'Weekly', usedPercent: 20, remainingPercent: 80 }];
+    }
+  });
+  assert.equal(rpcCalls, 0);
+  assert.equal(row.status, 'ok');
+  assert.equal(row.source, 'web');
+  assert.equal(row.windows[0].usedPercent, 20);
+  const expected = await identityReading(token, 'web', 'selected@example.test');
+  assert.equal(row.accountKey, expected.accountKey);
 });

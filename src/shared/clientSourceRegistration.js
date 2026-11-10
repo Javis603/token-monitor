@@ -42,9 +42,12 @@ const SOURCE_MARKERS = [
   { marker: '.qwen/projects', client: 'qwen', hostCheckId: 'qwen-projects' },
   { marker: '.grok/sessions', client: 'grok' },
   { marker: '.copilot/otel', client: 'copilot' },
+  { marker: '.copilot/session-state', client: 'copilot' },
   // The CLI parse-local root belongs to the tracked Antigravity umbrella id.
   { marker: '.gemini/antigravity-cli/conversations', client: 'antigravity' },
   { marker: '.gemini/antigravity/conversations', client: 'antigravity' },
+  // Default Linux home only. Host paths resolve GEMINI_CLI_HOME in clientSources.js.
+  { marker: '.gemini/tmp', client: 'gemini' },
   { marker: '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks', client: 'cline' },
   { marker: '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks', client: 'cline' },
   { marker: '.local/share/amp/threads', client: 'amp' },

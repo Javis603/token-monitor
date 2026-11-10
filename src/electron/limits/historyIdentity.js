@@ -16,14 +16,17 @@
       provider.sourceDetail || '', provider.sourceDeviceId || ''
     ]);
   }
+  function portableHistoryAccount(provider) {
+    return !!provider.accountKey
+      && !(provider.provider === 'antigravity' && !provider.accountEmail)
+      && !(provider.provider === 'kiro' && provider.source === 'cli' && !provider.accountEmail)
+      && !(provider.provider === 'claude' && provider.source === 'cli' && provider.accountKey === CLAUDE_CLI_UNIDENTIFIED_KEY);
+  }
   function historyAccountKey(provider) {
     // A reporting device is provenance, not ownership of a shared allowance.
     // Keep authoritative account/workspace and product variants distinct. A
     // display name alone cannot prove that two devices signed into one account.
-    const anonymous = !provider.accountKey
-      || provider.provider === 'antigravity' && !provider.accountEmail
-      || provider.provider === 'kiro' && provider.source === 'cli' && !provider.accountEmail
-      || provider.provider === 'claude' && provider.source === 'cli' && provider.accountKey === CLAUDE_CLI_UNIDENTIFIED_KEY;
+    const anonymous = !portableHistoryAccount(provider);
     return JSON.stringify([
       provider.provider, provider.adapterId || '',
       provider.accountKey || [provider.accountEmail || '', provider.accountName || ''],
@@ -32,5 +35,5 @@
       ...(anonymous ? ['unverified', provider.sourceDeviceId || '', provider.sourceDetail || ''] : [])
     ]);
   }
-  return { historyAccountKey, historyRowKey };
+  return { historyAccountKey, historyRowKey, portableHistoryAccount };
 });

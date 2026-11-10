@@ -6,6 +6,26 @@ const path = require('node:path');
 const os = require('node:os');
 const { runtimeFixture } = require('../helpers/trustedPlugin');
 const tick = () => new Promise(setImmediate);
+test('main quota demand is released on reload and destruction, independently of other subscribers', async t => {
+  const source = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-quota-lifecycle-'));
+  t.after(() => fs.rmSync(source, {recursive:true,force:true}));
+  fs.cpSync(path.resolve(__dirname, '../fixtures/trusted-plugin'), source, {recursive:true});
+  const file = path.join(source,'manifest.json'), manifest = JSON.parse(fs.readFileSync(file));
+  manifest.limits = [{id:'quota',name:'Quota'}]; fs.writeFileSync(file,JSON.stringify(manifest));
+  const f = await runtimeFixture(t,{sourceDirectory:source,initialSettings:{limitProviders:'plugin:trusted-fixture:quota'}});
+  await f.install(); await f.invoke('plugins:setEnabled',{id:'trusted-fixture',enabled:true});
+  const sampling = () => f.invoke('plugins:list').limits.modules[0].sampling;
+  f.invoke('plugins:limitsDemand',true); assert.equal(sampling(),true);
+  f.send(f.notch,'notch',[]);
+  f.notch.webContents.emit('did-start-navigation',{},'',false,true);
+  f.notch.destroy(); assert.equal(sampling(),true,'another subscriber cannot release main demand');
+  f.main.webContents.emit('did-start-navigation',{},'',false,false);
+  f.main.webContents.emit('did-start-navigation',{},'',true,true);
+  assert.equal(sampling(),true,'subframe and in-place navigation retain main demand');
+  f.main.webContents.reload(); assert.equal(sampling(),false);
+  f.invoke('plugins:limitsDemand',true); assert.equal(sampling(),true);
+  f.main.destroy(); assert.equal(sampling(),false);
+});
 test('bubble-only bitmap demand stops on native hide; system Tray demand survives it', async t => {
   const f = await runtimeFixture(t); await f.install(); await f.invoke('plugins:setEnabled', {id:'trusted-fixture',enabled:true});
   const layout = {items:[{id:'plugin',type:'plugin',ref:'trusted-fixture/panel'}]};

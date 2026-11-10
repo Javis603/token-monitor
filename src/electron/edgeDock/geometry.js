@@ -125,6 +125,18 @@ function edgeDockScale(settings = {}) {
   return size === 'custom' ? normalizeEdgeDockCustomScale(settings?.edgeDockCustomScale) : EDGE_DOCK_SIZES[size];
 }
 
+// Missing/older settings retain the rail's fitted scale.
+function normalizeEdgeDockBubbleSize(value) {
+  return value === 'inherit' || Object.hasOwn(EDGE_DOCK_SIZES, value) ? value : 'inherit';
+}
+
+function edgeDockBubbleScale(settings = {}, railScale = edgeDockScale(settings)) {
+  const size = normalizeEdgeDockBubbleSize(settings.edgeDockBubbleSize);
+  return size === 'inherit' ? railScale : edgeDockScale({
+    edgeDockSize: size, edgeDockCustomScale: settings.edgeDockBubbleCustomScale
+  });
+}
+
 // Measured from the pointer's side rather than the dock's, so they stay put
 // whatever size the dock is drawn at: a larger dock should not open from
 // further away, nor a smaller one become harder to reach.
@@ -592,6 +604,8 @@ module.exports = {
   edgeDockRefreshBounds,
   edgeDockRefreshCorridor,
   edgeDockScale,
+  edgeDockBubbleScale,
+  normalizeEdgeDockBubbleSize,
   edgeDockTriggerBounds,
   normalizeEdgeDockCustomScale,
   normalizeEdgeDockDisplayId,

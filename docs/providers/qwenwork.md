@@ -1,5 +1,5 @@
 ---
-summary: "QwenWork plan credits read from the QwenWork gateway, with an automatic magpie or environment bearer token."
+summary: "QwenWork plan credits read from the QwenWork gateway, with browser sign-in and magpie or environment token fallbacks."
 ids: [qwenwork]
 read_when:
   - Changing the QwenWork limits provider, its token discovery or its credit windows

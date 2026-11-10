@@ -80,7 +80,7 @@ function functionBodyBeforeMarker(source, name, marker) {
 
 function runMainFunction(source, name, nextName, expression, context = {}) {
   const body = functionBody(source, name, nextName);
-  return vm.runInNewContext(`${body}\n${expression}`, context);
+  return vm.runInNewContext(`${body}\n${expression}`, { require: id => { assert.equal(id, './plugins/limits'); return require('../../src/electron/plugins/limits'); }, ...context });
 }
 
 function runRendererFunctions(source, names, expression, context = {}) {
@@ -870,7 +870,7 @@ test('API key account entries share styling and Copilot uses the folded token en
     }
   }
 
-  assert.match(css, /\.thirdparty-field :is\(input, select\)\s*\{[\s\S]*?font-size: 0\.75rem;/);
+  assert.match(css, /\.thirdparty-field :is\(input, select, \.select-control-trigger\)\s*\{[\s\S]*?font-size: 0\.75rem;/);
 });
 
 test('Copilot account panel provides GitHub sign-in plus manual token fallback', () => {
@@ -1994,11 +1994,12 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   assert.match(controls, /data-i18n="settings\.collection\.cadence"/);
   assert.match(controls, /value="live"/);
   assert.match(controls, /value="smart"[\s\S]*data-i18n="settings\.collection\.mode\.smart"/);
-  assert.match(i18n, /'settings\.collection\.modeDesc': 'Smart mode collects after agent activity, with an hourly reconciliation; fixed intervals turn off file watching\.'/);
+  assert.match(i18n, /"settings\.collection\.mode\.smartDesc": "Collect after agent activity, with hourly reconciliation\."/);
   assert.match(controls, /<option value="300000"/);
   assert.match(controls, /<option value="900000"/);
   assert.match(controls, /<option value="1800000"/);
-  assert.match(controls, /id="collectionCadenceNote"[\s\S]*hidden/);
+  for (const mode of ['live', 'smart', 'interval']) assert.ok(controls.includes(`data-select-description="settings.collection.mode.${mode}Desc"`));
+  assert.doesNotMatch(controls, /id="collectionCadenceNote"/);
   assert.doesNotMatch(controls, /<option value="3600000"/);
   assert.doesNotMatch(controls, /id="collectionModeInput"/);
   assert.doesNotMatch(controls, /id="collectionIntervalInput"/);
@@ -2006,7 +2007,7 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   const app = readRendererFile('app.js');
   const syncBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
   assert.match(syncBody, /collectionCadenceInput/);
-  assert.match(syncBody, /collectionCadenceNote[\s\S]*\.hidden\s*=/);
+  assert.doesNotMatch(syncBody, /collectionCadenceNote/);
 
   const listenerSlice = app.slice(
     app.indexOf("els.collectionCadenceInput?.addEventListener('change'"),
@@ -2847,7 +2848,7 @@ test('WorkBuddy Electron fetch adapter forwards parsed response JSON', () => {
 test('main settings migrateLimitProviders normalizes without expanding old defaults', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const body = functionBody(main, 'migrateLimitProviders', 'migrateLimitProviderOrder');
-  assert.match(body, /return parseLimitProviders\(value\)\.join/);
+  assert.match(body, /desktopProviderPreference\(value, parseLimitProviders\)/);
   assert.doesNotMatch(body, /preMimoDefault|legacyDefault.*return defaultLimitProviders/);
 });
 
@@ -3410,4 +3411,17 @@ test('MiMo settings reuses the shared sign-in status for rejected accounts', () 
   providers = [{ provider: 'mimo', accountKey: 'a', sourceDetail: 'managed', status: 'ok' }];
   render();
   assert.equal([...list.children[0].walk()].find((node) => node.className === 'managed-account-info').textContent, 'Console');
+});
+
+
+test('QwenWork account refresh targets only QwenWork', async () => {
+  const app = readRendererFile('app.js');
+  const match = app.match(/document\.getElementById\('qwenworkRefreshButton'\)\.addEventListener\('click', (.*?)\);/);
+  assert.ok(match);
+  const calls = [];
+  const handler = vm.runInNewContext(`(${match[1]})`, {
+    refreshLimitProviderQuota: async (provider) => calls.push(provider)
+  });
+  await handler();
+  assert.deepEqual(calls, ['qwenwork']);
 });

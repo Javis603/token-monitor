@@ -120,7 +120,7 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     watchTriggersCollection: context.watchTriggersCollection !== false,
     intervalRequiresActivity: Boolean(context.intervalRequiresActivity),
     watchDebounceMs: Number(context.watchDebounceMs || 1500),
-    wslScanEnabled: settings.wslScanEnabled !== false,
+    wslScanEnabled: settings.wslScanEnabled === true,
     onError: context.onError,
     logger: context.logger
   };

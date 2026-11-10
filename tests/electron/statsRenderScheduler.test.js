@@ -97,7 +97,7 @@ test('a hidden floating-bubble state update changes state without touching DOM',
         }
       },
       isRendererWindowHidden: () => true,
-      syncPluginTrayDemand() {},
+      syncPluginTrayDemand() {}, syncPluginLimitsDemand() {},
       state,
       statsRenderScheduler: { request() { scheduledRenders += 1; } }
     }
@@ -440,7 +440,7 @@ test('a direct main render defers only while the window is hidden', () => {
   assert.equal(scheduled, 1);
 });
 
-test('hidden event sources defer DOM work and visible surfaces catch up', () => {
+test('hidden event sources prepare appearance, defer other DOM work and catch up when visible', () => {
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   const settingsPush = app.match(/window\.tokenMonitor\.onSettingsPush\?\.\(\(next\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
   const hubPush = app.match(/window\.tokenMonitor\.onHubPush\?\.\(\(payload\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
@@ -464,7 +464,11 @@ test('hidden event sources defer DOM work and visible surfaces catch up', () => 
   assert.ok(settingsSync.indexOf('applyInitialBreakdownPreference()') < hiddenReturn);
   assert.ok(hiddenGuard < settingsSync.indexOf('applyVendorColorOverrides('));
   assert.ok(settingsSync.indexOf('applyVendorColorOverrides(') < hiddenReturn);
-  for (const domCall of ['applySettingsTranslations()', 'syncPeriodTabs()', 'applyAppearanceSettings(']) {
+  // Native show can paint before visibility IPC; appearance is the exception
+  // to hidden DOM deferral, including saved title mode and font preferences.
+  assert.ok(hiddenGuard < settingsSync.indexOf('applyAppearanceSettings('));
+  assert.ok(settingsSync.indexOf('applyAppearanceSettings(') < hiddenReturn);
+  for (const domCall of ['applySettingsTranslations()', 'syncPeriodTabs()']) {
     assert.ok(hiddenReturn < settingsSync.indexOf(domCall));
   }
   assert.match(settingsSync, /if \(isRendererWindowHidden\(\)\) \{[\s\S]*settingsDomSyncPending = true;[\s\S]*return;/);

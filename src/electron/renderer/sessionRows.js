@@ -53,7 +53,7 @@
     const node = document.createElement('span');
     node.className = 'session-model-metadata';
     const modelLabel = row?.modelLabel ?? sessionModelLabel(row);
-    const entries = row?.modelTooltipEntries ?? sessionModelTooltipEntries(row, options);
+    const entries = row?.modelTooltipEntries ?? sessionModelTooltipEntries(row, { latestModelLabel: translate('session.latestModel'), ...options });
     if (modelLabel) {
       const model = document.createElement('span');
       model.className = 'session-models';
@@ -188,12 +188,17 @@
       .filter(([, value]) => finiteNumber(value) > 0)
       .map(([model]) => model)
       .sort();
+    const latest = textValue((session?.groupRows?.[0] || session)?.latestModel);
+    if (latest) {
+      const others = models.filter(model => model !== latest).length;
+      return `${latest}${others ? ` +${others}` : ''}`;
+    }
     if (models.length === 0) return '';
     if (models.length === 1) return models[0];
     return `${models.length} models`;
   }
 
-  // The rows a "N models" label opens on hover: every model behind the count,
+  // The rows a session model label opens on hover: every model behind the count,
   // heaviest first, with its tokens and share of the session. A session can
   // hold tokens no model claimed (a log written before the model field
   // existed, say), so the remainder is reported as one last row rather than
@@ -202,7 +207,8 @@
     const entries = Object.entries(session?.models || {})
       .map(([model, tokens]) => ({ model: String(model || ''), tokens: finiteNumber(tokens) }))
       .filter((entry) => entry.tokens > 0);
-    if (entries.length < 2) return [];
+    const latest = textValue((session?.groupRows?.[0] || session)?.latestModel);
+    if (entries.length < 2 && (!latest || entries.every(entry => entry.model === latest))) return [];
     entries.sort((a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model));
     const total = finiteNumber(session?.totalTokens);
     const attributed = entries.reduce((sum, entry) => sum + entry.tokens, 0);
@@ -219,6 +225,9 @@
       formatTokens(entry.tokens),
       percentLabel(denominator > 0 ? entry.tokens / denominator * 100 : 0)
     ]);
+    if (latest) {
+      rows.unshift({ full: `${textValue(options.latestModelLabel) || 'Last used'}: ${latest}` });
+    }
     const unlabeled = attributed - named.reduce((sum, entry) => sum + entry.tokens, 0);
     const unattributed = unlabeled + Math.max(0, total - attributed);
     if (unattributed > 0) {
@@ -490,7 +499,7 @@
       name: titleParts.join(' · '),
       modelLabel,
       modelTooltipEntries: sessionModelTooltipEntries(session, {
-        unattributedLabel: options.unattributedLabel
+        unattributedLabel: options.unattributedLabel, latestModelLabel: options.latestModelLabel
       }),
       subtitle: subtitleParts.join(' · '),
       activitySummary: subtitleParts.join(' · '),
@@ -502,6 +511,7 @@
       // window so the reading survives the turn ending, and the dock's card
       // calls the same function so the two cannot disagree.
       context: sessionContextForRow(session, now),
+      latestModel: session.latestModel,
       reasoningEffort: session.reasoningEffort,
       detail: sessionIdLabel(session?.sessionId || key),
       value,
@@ -553,6 +563,7 @@
         if (sessionLive.isArchivedSession(session) && native?.client === session.client
           && native.sessionId === session.sessionId && ['running', 'waiting'].includes(sessionActivityState(native, now))) {
           session = { ...session, archived: false, deleted: false, sourceDeleted: false,
+            latestModel: native.latestModel ?? null,
             lastUsedAt: native.lastUsedAt, liveActivity: native.liveActivity,
             turnEnded: native.turnEnded, waitingForInput: native.waitingForInput,
             ...(sessionLive.isSessionReasoningEffortClient(session.client) ? { reasoningEffort: native.reasoningEffort ?? null } : {}) };
@@ -590,7 +601,7 @@
           name: sessionTitle || titleParts.join(' · '),
           modelLabel,
           modelTooltipEntries: sessionModelTooltipEntries(session, {
-            unattributedLabel: options.unattributedLabel
+            unattributedLabel: options.unattributedLabel, latestModelLabel: options.latestModelLabel
           }),
           subtitle: (sessionTitle ? titleParts : activityParts).join(' · '),
           activity: sessionTitle ? activityParts.join(' · ') : undefined,
@@ -610,6 +621,7 @@
           running: running || undefined,
           activityState,
           context: sessionContextForRow(session, now),
+          latestModel: session.latestModel,
           reasoningEffort: session.reasoningEffort,
           contextSnapshot: !archived ? sessionLive.sessionContextRow(session) : undefined,
           promptCache: sessionLive.sessionPromptCacheForRow(session, now),
@@ -760,7 +772,7 @@
         models[model] = (models[model] || 0) + finiteNumber(tokens);
       }
     }
-    const group = { client: parent.client, models, totalTokens: value };
+    const group = { client: parent.client, models, totalTokens: value, latestModel: main[0].latestModel };
     const modelLabel = sessionModelLabel(group);
     const display = main[0];
     const titleParts = [display.clientLabel || display.client, modelLabel, sessionReasoningEffortForRow(display)].filter(Boolean).join(' · ');
@@ -799,7 +811,7 @@
       name: display.titled ? display.name : titleParts,
       modelLabel,
       modelTooltipEntries: options.includeModelTooltip === false ? []
-        : sessionModelTooltipEntries(group, { unattributedLabel: options.unattributedLabel }),
+        : sessionModelTooltipEntries(group, { unattributedLabel: options.unattributedLabel, latestModelLabel: options.latestModelLabel }),
       modelTokens: models,
       // Keep the tool/model reading order; the renderer reserves space for the
       // count while the preceding text can shrink in a narrow window.

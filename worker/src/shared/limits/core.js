@@ -665,6 +665,9 @@ function providerCollapseKey(provider) {
       // Manus keys hash the account's user id from its session, so the same
       // account hashes identically on every device.
       || provider.provider === 'manus'
+      // Hark keys hash the decoded session token, so the same cookie matches
+      // on every device. A second cookie is another session.
+      || provider.provider === 'hark'
       // Volcengine's accountKey comes from the AK/SK and region, so it is the
       // same on every platform. Two keys mean the Coding/Agent plan split, not
       // one account hashed twice.

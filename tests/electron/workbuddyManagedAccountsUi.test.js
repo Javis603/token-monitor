@@ -371,7 +371,8 @@ test('Home sends the complete source readings through the shared WorkBuddy colla
   vm.runInNewContext(`${source}\nhomeLimitRows();`, {
     state: { settings: {}, stats: { limits: { providers: members } } },
     enabledLimitProviderSet: () => new Set(['workbuddy']), hiddenHomeLimitProviderSet: () => new Set(),
-    LIMIT_PROVIDERS: [], clientColors: {},
+    desktopLimitProviders: () => [{ id: 'workbuddy', label: 'WorkBuddy' }], desktopLimitRecords: () => members,
+  LIMIT_PROVIDERS: [], clientColors: {},
     limitProviderOrderApi: { orderedLimitProviders: () => [] },
     limitUsageItemsApi: { isLimitWindowHidden: () => false },
     limitProviderPresentationApi: presentation,

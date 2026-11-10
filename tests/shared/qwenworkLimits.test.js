@@ -240,3 +240,9 @@ test('A rejected refresh keeps the provider unauthorized instead of retrying the
   assert.equal(d.calls.length, 1);
   assert.equal(new URL(d.calls[0].url).pathname, '/api/v1/deviceToken/refresh');
 });
+
+
+test('A tiny computed allowance percentage is not interpreted as a gateway fraction', () => {
+  const parsed = parseQwenworkQuota({ user_quota: { total: 46000, used: 0.1 } });
+  assert.ok(Math.abs(parsed.windows[0].usedPercent - (0.1 / 46000) * 100) < 1e-12);
+});

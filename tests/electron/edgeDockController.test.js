@@ -674,8 +674,10 @@ test('dragging onto another display moves the dock there and persists its id', a
   t.after(() => fixture.controller.stop());
   const rail = fixture.windowFor('rail');
   fixture.screen.point = { x: 1700, y: 420 };
+  assert.equal(fixture.controller.limitsVisible(), true);
 
   fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetY: 30 });
+  assert.equal(fixture.controller.limitsVisible(), true, 'the visible dragged rail keeps its quota owner');
   await new Promise((resolve) => setTimeout(resolve, 35));
   fixture.ipcMain.emit('edgeDock:dragEnd', { sender: rail.webContents });
 
@@ -717,6 +719,56 @@ test('the dock size scales its windows and zooms their pages to match', (t) => {
   assert.equal(rail.webContents.getZoomFactor(), 1);
   assert.equal(sentPayload(rail, 'rail').zoom, 1);
 });
+
+test('detail size is independent of the rail, previews live and restores inheritance', (t) => {
+  const fixture = createFixture({ settings: { edgeDockSize: 'small', edgeDockBubbleSize: 'large' } });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail');
+  const bubble = fixture.windowFor('bubble');
+  const railBounds = { ...rail.bounds };
+  assert.equal(rail.options.webPreferences.zoomFactor, 0.85);
+  assert.equal(bubble.options.webPreferences.zoomFactor, 1.25);
+  fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 1 });
+  fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'codex', height: 180 });
+  assert.equal(paintedCardBounds(bubble).height, 225);
+  assert.equal(paintedCardBounds(bubble).width, scaledEdgeDockMetrics(1.25).bubbleWidth + scaledEdgeDockMetrics(1.25).bubbleTail);
+  assert.equal(sentPayload(bubble, 'bubble').maxCardHeight, Math.floor((860 - EDGE_DOCK_METRICS.screenMargin * 2) / 1.25));
+
+  fixture.controller.previewScale(1.5, 'bubble');
+  assert.equal(bubble.webContents.getZoomFactor(), 1.5);
+  assert.equal(paintedCardBounds(bubble).height, 270);
+  assert.deepEqual(rail.bounds, railBounds, 'detail previews never resize or move the rail');
+  fixture.controller.sync();
+  assert.equal(bubble.webContents.getZoomFactor(), 1.25, 'sync discards the unsaved preview');
+
+  fixture.settings.edgeDockBubbleSize = 'custom';
+  fixture.settings.edgeDockBubbleCustomScale = 1.4;
+  fixture.controller.sync();
+  assert.equal(bubble.webContents.getZoomFactor(), 1.4);
+  fixture.settings.edgeDockSize = 'large';
+  fixture.controller.sync();
+  assert.equal(bubble.webContents.getZoomFactor(), 1.4, 'rail changes leave an explicit detail size alone');
+  fixture.settings.edgeDockBubbleSize = 'inherit';
+  fixture.controller.sync();
+  assert.equal(bubble.webContents.getZoomFactor(), rail.webContents.getZoomFactor());
+  assert.equal(fixture.settings.edgeDockBubbleCustomScale, 1.4, 'the custom value survives presets and inheritance');
+});
+
+for (const side of ['left', 'right']) {
+  test(`large details stay on screen next to a small floating ${side} rail`, (t) => {
+    const fixture = createFixture({ settings: { edgeDockSize: 'small', edgeDockBubbleSize: 'custom', edgeDockBubbleCustomScale: 1.5, edgeDockFloatingX: side === 'left' ? 0.4 : 0.6 } });
+    t.after(() => fixture.controller.stop());
+    const rail = fixture.windowFor('rail'), bubble = fixture.windowFor('bubble');
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 2 });
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'cursor', height: 1000 });
+    const card = paintedCardBounds(bubble);
+    const area = fixture.screen.displays[0].workArea;
+    assert.ok(card.x >= area.x && card.x + card.width <= area.x + area.width);
+    assert.ok(card.y >= area.y && card.y + card.height <= area.y + area.height);
+    assert.equal(bubble.webContents.getZoomFactor(), 1.5);
+    assert.equal(rail.webContents.getZoomFactor(), 0.85);
+  });
+}
 
 test('a larger dock that would not fit the display zooms to the size it is drawn at', (t) => {
   const fixture = createFixture({
@@ -2594,6 +2646,36 @@ for (const side of ['left', 'right']) {
     assert.deepEqual(card.getBounds(), canvas, 'the native canvas remains fixed');
   });
 }
+
+test('reopening a dismissed card starts a new reveal without moving from the old card', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ prefersReducedMotion: () => false });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+  const open = (cellIndex, cellId, height) => {
+    const layout = sentPayload(rail, 'rail').cellLayout;
+    fixture.screen.point = { x: rail.bounds.x + rail.bounds.width / 2,
+      y: rail.bounds.y + layout.tops[cellIndex] + layout.heights[cellIndex] / 2 };
+    fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex });
+    const reveal = sentPayload(card, 'bubble').reveal;
+    fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: card.webContents }, { cellId, height });
+    assert.equal(sentPayload(card, 'bubble').reveal, reveal, 'placement acknowledgement retains the opening identity');
+    return reveal;
+  };
+  const first = open(0, 'claude', 180);
+  advance(160);
+  assert.equal(open(1, 'codex', 220), first, 'continuous switches keep their crossfade');
+  advance(720);
+  fixture.screen.point = { x: 600, y: 800 };
+  fixture.ipcMain.emit('edgeDock:dismiss', { sender: card.webContents });
+  advance(200);
+  assert.equal(card.opacity, 0);
+  const oldBounds = paintedCardBounds(card);
+  assert.notEqual(open(2, 'cursor', 300), first, 'a transparent native window is still a new opening');
+  const reopened = paintedCardBounds(card);
+  assert.notEqual(reopened.y, oldBounds.y);
+  assert.equal(reopened.height, 300, 'new geometry is placed directly before fading in');
+});
 
 test('detail card motion stops on dismissal and reduced motion switches directly', (t) => {
   const advance = mockDockClock(t);

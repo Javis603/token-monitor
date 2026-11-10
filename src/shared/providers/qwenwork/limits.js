@@ -129,7 +129,7 @@ function creditAllowance(raw, name) {
   let usedPercent = explicitPercent === null ? (used / total) * 100 : explicitPercent;
   // The gateway reports 0.9893 for 98.93%. Multiply only when the value
   // matches the raw fraction; a genuine sub-1% percentage stays as reported.
-  if (usedPercent >= 0 && usedPercent <= 1 && Math.abs(usedPercent - (used / total)) < 0.001) {
+  if (explicitPercent !== null && usedPercent >= 0 && usedPercent <= 1 && Math.abs(usedPercent - (used / total)) < 0.001) {
     usedPercent *= 100;
   }
   return {
