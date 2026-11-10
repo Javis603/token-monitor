@@ -1693,18 +1693,48 @@ function providerUsageNode(usage) {
   return node;
 }
 
-// Live rate: the selected measure as the headline, the other measure (and the
-// device count, when several contribute) on one line beneath. Whether the
-// figure is live sits as a small status in the header, where a card's state
-// label (like a plan) already lives. Pressing the figure switches tok/s and
-// TPM, the same toggle as the widget's own rate readout.
+function liveRateChartNode(cell) {
+  const chart = el('div', 'edge-dock-rate-chart');
+  const svg = document.createElementNS(SVG_NS, 'svg');
+  svg.setAttribute('viewBox', '-3 0 150 64');
+  svg.setAttribute('role', 'img');
+  svg.setAttribute('aria-label', t('edgeDock.rate.history', {
+    unit: t(cell.rateMode === 'burn' ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit')
+  }));
+  const { points } = window.TokenMonitorTokenRate.liveTokenRateChart(cell.rateHistory, Date.now(), cell.rateMode);
+  const baseline = document.createElementNS(SVG_NS, 'path');
+  baseline.setAttribute('d', 'M0 59H144');
+  baseline.setAttribute('class', 'edge-dock-rate-chart-baseline');
+  svg.append(baseline);
+  if (points.length > 1) {
+    const path = document.createElementNS(SVG_NS, 'path');
+    path.setAttribute('d', points.map((p, i) => `${i ? 'L' : 'M'}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' '));
+    svg.append(path);
+  }
+  const latest = points.at(-1);
+  if (latest) {
+    const dot = document.createElementNS(SVG_NS, 'circle');
+    dot.setAttribute('cx', latest.x);
+    dot.setAttribute('cy', latest.y);
+    dot.setAttribute('r', '2');
+    svg.append(dot);
+  }
+  chart.append(svg);
+  return chart;
+}
+
+// Selected measure and recent sample trend, with model/device detail underneath.
+// Pressing the figure retains the existing tok/s ↔ TPM toggle.
 function appendLiveRate(card, head, cell) {
   const hasSample = cell.rate !== null && cell.rate !== undefined;
   const burnMode = cell.rateMode === 'burn';
 
   const status = el('span', 'edge-dock-rate-status');
-  status.classList.toggle('is-live', hasSample && !cell.idle);
-  status.append(el('span', 'edge-dock-rate-dot'), el('span', '', t(!hasSample ? 'edgeDock.rate.noSample' : cell.idle ? 'edgeDock.rate.idle' : 'edgeDock.rate.live')));
+  const live = hasSample && !cell.idle;
+  status.classList.toggle('is-live', live);
+  const dot = el('span', 'edge-dock-rate-dot');
+  dot.setAttribute('aria-hidden', 'true');
+  status.append(dot, el('span', '', t(!hasSample ? 'edgeDock.rate.noSample' : live ? 'edgeDock.rate.live' : 'edgeDock.rate.idle')));
   head.append(status);
 
   const headline = el('div', 'edge-dock-stat-headline edge-dock-rate-headline');
@@ -1725,9 +1755,15 @@ function appendLiveRate(card, head, cell) {
   if (hasSample && other !== null && other !== undefined) {
     secondary.push(`≈ ${formatRate(other)} ${t(burnMode ? 'edgeDock.rate.speedUnit' : 'edgeDock.rate.burnUnit')}`);
   }
-  if (cell.deviceCount > 1) secondary.push(t('edgeDock.rate.devices', { count: cell.deviceCount }));
+  // Named device groups already describe the scope. Keep a count only when
+  // some contributing devices lack model attribution and cannot be listed.
+  if (cell.deviceCount > 1 && cell.rateDevices.length < cell.deviceCount) secondary.push(t('edgeDock.rate.devices', { count: cell.deviceCount }));
   if (secondary.length) headline.append(el('span', '', secondary.join(' · ')));
-  card.append(headline);
+  const overview = el('div', 'edge-dock-rate-overview');
+  overview.classList.toggle('is-idle', !hasSample || cell.idle);
+  overview.classList.toggle('is-burn', burnMode);
+  overview.append(headline, liveRateChartNode(cell));
+  card.append(overview);
   appendLiveRateDetails(card, cell);
 }
 
