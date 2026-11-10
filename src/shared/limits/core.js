@@ -1123,7 +1123,7 @@ function publicLimits(limits) {
     }) => {
       if (!provider.balance) return provider;
       // Keep account grouping and detailed billing data off the public surface.
-      const { quotaGroup, tranches, searchSpend, ...publicBalance } = provider.balance;
+      const { quotaGroup, tranches, searchSpend, fetchSpend, ...publicBalance } = provider.balance;
       return { ...provider, balance: publicBalance };
     })
   };

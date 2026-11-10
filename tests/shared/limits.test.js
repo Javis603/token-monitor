@@ -2125,3 +2125,11 @@ test('MiniMax sync retains stale accounts independently of refreshed sources and
     }
   }
 });
+
+test('public stats strip both console tool fees', () => {
+  const { publicLimits } = require('../../src/shared/limits/core');
+  const out = publicLimits({ providers: [{ provider: 'deepseek', balance: { amount: 1, currency: 'CNY', searchSpend: 0.1, fetchSpend: 0.2, quotaGroup: 'x' } }] });
+  assert.equal(out.providers[0].balance.searchSpend, undefined);
+  assert.equal(out.providers[0].balance.fetchSpend, undefined);
+  assert.equal(out.providers[0].balance.amount, 1);
+});
