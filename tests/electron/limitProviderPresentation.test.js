@@ -3635,6 +3635,7 @@ test('switching to another edit preserves its form values during a canceled clos
       matchProviderAccount: () => account,
       amountUnits: (subscription) => subscription.amountMinor / 100
     },
+    currencyApi: { normalizeCurrency: (value) => value || 'USD', fractionDigitsFor: () => 2 },
     subscriptionAccountChoices: () => [],
     subscriptionAccountValue: () => 'acct-b',
     renderSubscriptionPickers() {},
@@ -4246,7 +4247,11 @@ test('elapsed subscription time never reads as zero months', () => {
       }),
       today,
       subscriptionApi,
-      currencyApi: { normalizeCurrency: () => 'USD', CURRENCY_RATES: { USD: { symbol: '$' } } },
+      currencyApi: {
+        normalizeCurrency: () => 'USD',
+        CURRENCY_RATES: { USD: { symbol: '$' } },
+        fractionDigitsFor: () => 2
+      },
       t: (key, vars) => `${key}|${JSON.stringify(vars || {})}`
     }
   );

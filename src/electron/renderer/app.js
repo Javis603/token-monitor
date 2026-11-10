@@ -4259,6 +4259,19 @@ function seedSubscriptionPlanName() {
   input.value = subscriptionSuggestedPlanName(subscriptionSelectedAccount());
 }
 
+// The money inputs are typed in the record's own currency, so their precision
+// follows the selected unit: won has no sub-unit, the other supported currencies
+// carry cents. Without this the form keeps inviting two decimals for KRW.
+function syncSubscriptionAmountPrecision() {
+  const code = currencyApi.normalizeCurrency(els.subscriptionCurrencyInput?.value);
+  const digits = currencyApi.fractionDigitsFor(1000, code);
+  for (const input of [els.subscriptionAmountInput, els.subscriptionTopUpAmountInput]) {
+    if (!input) continue;
+    input.step = digits === 0 ? '1' : `0.${'0'.repeat(digits - 1)}1`;
+    input.placeholder = digits === 0 ? '0' : `0.${'0'.repeat(digits)}`;
+  }
+}
+
 // A top-up is not a subscription with different words on it — it is a ledger of
 // irregular payments — so the form swaps whole field groups rather than
 // relabelling one set. Both groups live in the markup with their own data-i18n,
@@ -4275,6 +4288,7 @@ function setSubscriptionFormMode() {
     slot.append(els.subscriptionCurrencyInput);
   }
   renderSubscriptionTopUpEntries();
+  syncSubscriptionAmountPrecision();
   setSubscriptionRenewalFieldMode();
 }
 
@@ -4333,7 +4347,6 @@ function renderSubscriptionTopUpEntries() {
     return;
   }
   const code = currencyApi.normalizeCurrency(els.subscriptionCurrencyInput?.value);
-  const symbol = currencyApi.CURRENCY_RATES[code]?.symbol || `${code} `;
   for (const entry of entries) {
     const row = document.createElement('div');
     row.className = 'subscription-topup-row';
@@ -4342,7 +4355,7 @@ function renderSubscriptionTopUpEntries() {
     date.textContent = subscriptionText.dateText(currentLocale(), entry.date);
     const amount = document.createElement('span');
     amount.className = 'subscription-topup-amount';
-    amount.textContent = `${symbol}${(entry.amountMinor / 100).toFixed(2)}`;
+    amount.textContent = subscriptionText.minorText(currencyApi, code, entry.amountMinor);
     // Armed the same way as the record rows above: a mis-click here silently
     // rewrites the month total the ledger exists to report, and the entry cannot
     // be recovered from anywhere else.
@@ -14118,7 +14131,10 @@ for (const input of els.subscriptionKindInputs || []) {
 }
 // The ledger prints its amounts in the picked currency, so it has to redraw when
 // that changes.
-els.subscriptionCurrencyInput?.addEventListener('change', renderSubscriptionTopUpEntries);
+els.subscriptionCurrencyInput?.addEventListener('change', () => {
+  syncSubscriptionAmountPrecision();
+  renderSubscriptionTopUpEntries();
+});
 els.subscriptionTopUpAddButton?.addEventListener('click', addSubscriptionTopUpEntry);
 els.subscriptionSubmit?.addEventListener('click', submitSubscription);
 els.subscriptionCancelEdit?.addEventListener('click', () => closeSubscriptionEditor());

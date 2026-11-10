@@ -7,16 +7,18 @@ const {
   CURRENCY_CODES,
   convertUsd,
   formatCurrencyFromUsd,
+  fractionDigitsFor,
   normalizeCurrency,
   configureRates,
   resolveEffectiveRates
 } = require('../../src/shared/currency');
 
 test('currency options keep USD as the default first option', () => {
-  assert.deepEqual(CURRENCY_CODES, ['USD', 'TWD', 'HKD', 'CNY']);
+  assert.deepEqual(CURRENCY_CODES, ['USD', 'TWD', 'HKD', 'CNY', 'KRW']);
   assert.equal(normalizeCurrency(), 'USD');
   assert.equal(normalizeCurrency(''), 'USD');
   assert.equal(normalizeCurrency('twd'), 'TWD');
+  assert.equal(normalizeCurrency('krw'), 'KRW');
   assert.equal(normalizeCurrency('jpy'), 'USD');
 });
 
@@ -26,6 +28,7 @@ test('converts USD costs into supported display currencies (built-in defaults)',
   assert.equal(convertUsd(1, 'TWD'), 31.5);
   assert.equal(convertUsd(1, 'HKD'), 7.8);
   assert.equal(convertUsd(1, 'CNY'), 6.8);
+  assert.equal(convertUsd(1, 'KRW'), 1380);
 });
 
 test('formats converted costs with unambiguous symbols (built-in defaults)', () => {
@@ -34,6 +37,16 @@ test('formats converted costs with unambiguous symbols (built-in defaults)', () 
   assert.equal(formatCurrencyFromUsd(1, 'TWD'), 'NT$31.50');
   assert.equal(formatCurrencyFromUsd(1, 'HKD'), 'HK$7.80');
   assert.equal(formatCurrencyFromUsd(1, 'CNY'), '¥6.80');
+  // The won has no sub-unit, so a converted cost carries no decimals.
+  assert.equal(formatCurrencyFromUsd(1, 'KRW'), '₩1380');
+});
+
+test('fractionDigitsFor keeps won whole and the other currencies in cents', () => {
+  assert.equal(fractionDigitsFor(1380, 'KRW'), 0);
+  assert.equal(fractionDigitsFor(0.5, 'KRW'), 0);
+  assert.equal(fractionDigitsFor(31.5, 'TWD'), 2);
+  assert.equal(fractionDigitsFor(10, 'USD'), 2);
+  assert.equal(fractionDigitsFor(1, 'USD'), 4);
 });
 
 test('configureRates overlays active rates and null resets to defaults', () => {

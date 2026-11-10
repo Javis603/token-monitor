@@ -164,7 +164,7 @@ brew install --cask token-monitor
 - **实时 Token 速率**：可选显示的实时读数，以 `tok/s` 显示生成速度或以 `tok/min` 显示总消耗
 - **单个 session 明细**：点进某个 session，可看每条提问的 Token 消耗，并展开查看每次回复的 Token 拆分与用到的工具（打开时才实时读取本机 transcript 或数据库，绝不同步）
 - **缓存命中统计**：点击任何工具或模型，展开查看输入 Token（缓存命中与未命中）、输出 Token 的详细分类及命中率百分比
-- **成本与币别**：Token 数量旁附带成本；可用 USD、TWD、HKD 或 CNY 显示，汇率每日自动更新，也可在设置中手动覆写
+- **成本与币别**：Token 数量旁附带成本；可用 USD、TWD、HKD、CNY 或 KRW 显示，汇率每日自动更新，也可在设置中手动覆写
 - **自定义扫描路径**：session 不在默认位置时，可为个别工具加入额外的文件夹
 - **WSL 用量（Windows）**：运行中 WSL 发行版里的文件型用量约每 5 分钟并入总量；OpenCode、Hermes 等 SQLite 来源可能需要按照[指南](docs/wsl-sqlite-setup.zh-CN.md)在 WSL 内运行 headless agent
 
