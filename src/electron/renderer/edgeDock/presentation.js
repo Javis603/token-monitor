@@ -794,9 +794,7 @@
       const period = stats?.periods?.today || null;
       const { cacheRead: hit, cacheMiss: miss } = periodRanges.tokenComponentBreakdown(period || {});
       const measured = hit + miss;
-      const cacheReported = period?.capabilities?.tokenComponents === true
-        || hit > 0 || (finite(period?.cacheWriteTokens) || 0) > 0;
-      const rate = cacheReported && measured > 0 ? hit / measured * 100 : null;
+      const rate = measured > 0 ? hit / measured * 100 : null;
       return {
         id: `stat:${metric}`,
         kind: 'stat',

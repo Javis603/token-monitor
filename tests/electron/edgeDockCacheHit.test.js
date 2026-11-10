@@ -9,6 +9,7 @@ const items = require(path.join(rendererDir, 'edgeDock', 'items'));
 const presentation = require(path.join(rendererDir, 'edgeDock', 'presentation'));
 const fixedPeriodRanges = require(path.join(rendererDir, 'fixedPeriodRanges'));
 const { LANGUAGE_OPTIONS, MESSAGES } = require(path.join(rendererDir, 'i18n'));
+const { normalizePeriod, addPeriodInto } = require('../../src/shared/usage');
 
 function cacheCell(today, otherPeriods = {}) {
   return presentation.buildEdgeDockCells({ periods: { ...otherPeriods, today } }, {
@@ -40,7 +41,7 @@ test('cacheHit excludes unclassified tokens and output from the measured input',
 });
 
 test('cacheHit remains unavailable for missing, total-only, empty and output-only readings', () => {
-  for (const today of [undefined, { totalTokens: 300 },
+  for (const today of [undefined, normalizePeriod({ totalTokens: 300 }),
     { totalTokens: 0, capabilities: { tokenComponents: true } },
     { totalTokens: 300, outputTokens: 300, capabilities: { tokenComponents: true } }]) {
     const cell = cacheCell(today);
@@ -53,6 +54,19 @@ test('cacheHit distinguishes measured zero hits from missing telemetry', () => {
   const cell = cacheCell({
     totalTokens: 300, outputTokens: 100, capabilities: { tokenComponents: true }
   });
+  assert.equal(cell.available, true);
+  assert.equal(cell.hit, 0);
+  assert.equal(cell.miss, 200);
+  assert.equal(cell.rate, 0);
+});
+
+test('cacheHit retains measured zero hits when unknown usage joins the period', () => {
+  const today = normalizePeriod({ totalTokens: 300, inputTokens: 200,
+    outputTokens: 100, capabilities: { tokenComponents: true } });
+  assert.equal(cacheCell(today).rate, 0);
+  addPeriodInto(today, normalizePeriod({ totalTokens: 500 }));
+  assert.equal(today.capabilities.tokenComponents, false);
+  const cell = cacheCell(today);
   assert.equal(cell.available, true);
   assert.equal(cell.hit, 0);
   assert.equal(cell.miss, 200);
