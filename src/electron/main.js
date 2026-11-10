@@ -926,12 +926,9 @@ function electronUsageConfig(errorPrefix) {
     // No watchUsePolling on purpose. The widget states no preference so the
     // shared default in resolveWatchUsePolling() governs and the widget cannot
     // drift from the headless agent, which has never passed one. That default
-    // is native events on every platform: chokidar 4 dropped the bundled
-    // fsevents backend, so every platform now watches through the same
-    // per-directory fs.watch path, and the earlier attempt that observed missed
-    // events ran on the chokidar 3 backend that no longer exists. Where the
-    // kernel cannot supply watch descriptors the collector degrades to polling
-    // by itself; TOKEN_MONITOR_WATCH_POLLING overrides in both directions.
+    // is native events on every platform. Where the kernel cannot supply watch
+    // descriptors the collector degrades to polling by itself;
+    // TOKEN_MONITOR_WATCH_POLLING overrides in both directions.
     watchTriggersCollection: collectorWatchTriggersCollection(),
     intervalRequiresActivity: collectorIntervalRequiresActivity(),
     watchDebounceMs: 1500,

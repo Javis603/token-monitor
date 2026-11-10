@@ -20,10 +20,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Both supported Node versions on Linux; latest-Node smoke on macOS/Windows to
+        # Minimum supported Node and latest Node 24 on Linux; smoke on macOS/Windows to
         # catch platform-specific bugs (tray on macOS, WSL/paths on Windows).
         os: [ubuntu-latest]
-        node-version: ['22', '24']
+        node-version: ['22.22.0', '24']
         include:
           - os: macos-latest
             node-version: '24'

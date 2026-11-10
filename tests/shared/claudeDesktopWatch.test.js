@@ -5,7 +5,7 @@ const test = require('node:test');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const chokidar = require('chokidar');
+const chokidar = require('../../src/shared/fileWatcher');
 const { openWatch, watchIgnoreMatcher } = require('../../src/shared/collector');
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
 

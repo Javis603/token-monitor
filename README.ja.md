@@ -384,7 +384,7 @@ npx wrangler deploy
 
 ### Headless agent
 
-サーバー、SSH ホスト、WSL 内など、AI ツールは使うがデスクトップウィジェットを動かさないマシンでは headless agent を実行します。そのマシンの使用量を収集して hub（オプション A、B、C）に送信します。Node.js 22.15+ と git が必要です。
+サーバー、SSH ホスト、WSL 内など、AI ツールは使うがデスクトップウィジェットを動かさないマシンでは headless agent を実行します。そのマシンの使用量を収集して hub（オプション A、B、C）に送信します。Node.js 22.22+ と git が必要です。
 
 ```bash
 git clone https://github.com/Javis603/token-monitor.git
@@ -408,7 +408,7 @@ npm run agent                     # 常駐実行
 
 ## ソースからビルド
 
-自分でインストーラーをビルドする場合は、**対象 OS** 上で Node.js 22.15+ を使用してください（electron-builder は macOS `.dmg` と Windows `.exe` のクロスビルド不可）。
+自分でインストーラーをビルドする場合は、**対象 OS** 上で Node.js 22.22+ を使用してください（electron-builder は macOS `.dmg` と Windows `.exe` のクロスビルド不可）。
 
 ```bash
 npm install

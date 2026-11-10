@@ -1,10 +1,9 @@
 'use strict';
 
-// Worker half of the watch host. chokidar's close() walks every watched entry
-// and its cost is superlinear in that count, so running it on the thread that
-// owns the collector froze the UI for about a second on every runtime restart.
+// Watcher half of the host. Keep watcher lifecycle and filesystem work away
+// from the thread that owns collection and the UI.
 //
-// This worker is the only place a chokidar instance ever exists. The production
+// This worker hosts the normal chokidar instance. The production
 // owner recycles the whole worker on a collector replacement so its native
 // allocation high-water is released. A defensive in-worker reconfigure still
 // closes and awaits the previous watcher before opening the next, so descriptors
@@ -15,7 +14,7 @@
 // keep in sync.
 
 const { parentPort, workerData } = require('node:worker_threads');
-const chokidar = require('chokidar');
+const chokidar = require('./fileWatcher');
 
 // Production forks this module as a child process (see watcherHost.js); a
 // worker thread can still host it through the coordinator's Worker seam. Both

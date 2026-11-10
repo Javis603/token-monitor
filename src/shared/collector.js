@@ -2471,7 +2471,7 @@ const WATCH_MAX_WAIT_MS = 5000;
 // entry point so the widget and the headless agent cannot drift apart.
 // Tri-state on purpose: unset must fall through to the caller's value, which
 // is why parseBoolean's fallback semantics don't fit. The default is native on
-// every platform — chokidar 4 has no per-platform backend left to differ on,
+// every platform; chokidar selects the native backend for that platform,
 // and the failure cases it cannot cover are handled by the watch-descriptor
 // fallback below rather than by pre-emptively polling everywhere.
 //
@@ -2575,7 +2575,7 @@ function watchEntriesExceed(dirs, ignored, limit) {
 
 // chokidar reads CHOKIDAR_USEPOLLING after the options it is handed and lets it
 // win, so the polling mode it actually runs can differ from the one we asked
-// for. Parsed exactly as chokidar 4 parses it; undefined when unset.
+// for. Parsed as chokidar parses it; undefined when unset.
 function chokidarPollingEnv(env = process.env) {
   const raw = env.CHOKIDAR_USEPOLLING;
   if (raw === undefined) return undefined;

@@ -15,13 +15,13 @@ Headless agent 就是拿掉介面的小工具採集器。它掃描本機上的 A
 
 ## 前置需求
 
-- Node.js 22.15.0 或更新版本，以及 npm 和 git。
+- Node.js 22.22.0 或更新版本，以及 npm 和 git。
 - 一個 agent 連得到的 hub：小工具內建 hub、Node hub 或 Cloudflare Worker（見[多裝置同步](../README.zh-TW.md#多裝置同步)），並準備好它的 URL 與共享密鑰。
 
 ## 安裝
 
 ```bash
-node --version   # 必須是 v22.15.0 或更新
+node --version   # 必須是 v22.22.0 或更新
 git clone https://github.com/Javis603/token-monitor.git
 cd token-monitor
 npm ci
