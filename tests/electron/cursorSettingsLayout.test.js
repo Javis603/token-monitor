@@ -3425,3 +3425,48 @@ test('QwenWork account refresh targets only QwenWork', async () => {
   await handler();
   assert.deepEqual(calls, ['qwenwork']);
 });
+
+
+test('QwenWork fallback accounts can start and cancel a stored browser sign-in', () => {
+  const source = functionBody(readRendererFile('app.js'), 'renderQwenworkStatus', 'renderOpenCodeProfiles');
+  for (const sourceId of ['environment', 'magpie', 'settings']) {
+    const hidden = new Map();
+    const state = { qwenworkSignInBusy: false, qwenworkSignInCancelable: false, settings: { qwenworkSessionConfigured: true, qwenworkSessionSource: sourceId } };
+    const render = vm.runInNewContext(`${source}\nrenderQwenworkStatus`, {
+      document: { getElementById: id => ({ classList: { toggle: (name, value) => hidden.set(id, value) } }) },
+      state, limitProviderEnabled: () => true, qwenworkAccountLinked: () => true,
+      qwenworkProviderStatus: () => ({ status: 'ok' }), qwenworkAccountStatusText: () => '',
+      accountShellApi: { render() {} }, renderSettingsSummaries() {}
+    });
+    render();
+    assert.equal(hidden.get('qwenworkSignInButton'), sourceId === 'settings');
+    state.qwenworkSignInBusy = true;
+    state.qwenworkSignInCancelable = true;
+    render();
+    assert.equal(hidden.get('qwenworkCancelSignInButton'), false);
+  }
+});
+
+test('QwenWork login reconfigures the newly enabled provider before invalidation', async () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const start = main.indexOf("  ipcMain.handle('qwenwork:signIn'");
+  const end = main.indexOf("  ipcMain.handle('qwenwork:cancelSignIn'", start);
+  const settings = { limitProviders: 'claude' };
+  const calls = [];
+  let handler;
+  vm.runInNewContext(main.slice(start, end), {
+    ipcMain: { handle: (_name, fn) => { handler = fn; } },
+    qwenworkLoginController: null, qwenworkLoginFlowId: '', AbortController,
+    runQwenworkDeviceFlowLogin: async () => ({ session: { access: 'fixture' } }),
+    qwenworkAuthBaseUrl: () => '', qwenworkBaseUrl: () => '', process: { env: {} },
+    shell: { openExternal() {} }, electronLimitsFetch() {}, settings,
+    ensureQwenworkLimitProviderEnabled: value => { value.limitProviders += ',qwenwork'; },
+    migrateQwenworkHomeLimitProvider() {}, saveSettings() {}, pushSettingsToRenderer() {},
+    deviceRuntimeHandle: { reconfigureLimits: config => calls.push(['config', config.limitProviders]) },
+    electronLimitsConfig: () => ({ limitProviders: settings.limitProviders }),
+    queueLimitInvalidation: () => { calls.push(['invalidate']); }
+  });
+  const result = await handler({ sender: { isDestroyed: () => false, send() {} } }, { flowId: 'fixture' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, [['config', 'claude,qwenwork'], ['invalidate']]);
+});

@@ -17766,7 +17766,7 @@ function renderQwenworkStatus() {
   const configured = Boolean(state.settings?.qwenworkSessionConfigured);
   const source = state.settings?.qwenworkSessionSource || '';
   const enabled = limitProviderEnabled('qwenwork');
-  const linked = qwenworkAccountLinked();
+  const linked = source === 'settings' && qwenworkAccountLinked();
   accountShellApi.render({
     status: statusEl,
     statusText: qwenworkAccountStatusText(qwenworkProviderStatus(), configured, source, enabled),
@@ -17776,7 +17776,7 @@ function renderQwenworkStatus() {
     progressText: state.qwenworkLoginStatus
   });
   signInBtn.classList.toggle('hidden', linked || state.qwenworkSignInBusy);
-  cancelBtn.classList.toggle('hidden', !state.qwenworkSignInBusy || !state.qwenworkSignInCancelable || linked);
+  cancelBtn.classList.toggle('hidden', !state.qwenworkSignInBusy || !state.qwenworkSignInCancelable);
   logoutBtn.classList.toggle('hidden', !configured || source !== 'settings' || state.qwenworkSignInBusy);
   refreshBtn.classList.toggle('hidden', !configured || state.qwenworkSignInBusy);
   renderSettingsSummaries();

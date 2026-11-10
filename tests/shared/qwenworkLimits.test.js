@@ -246,3 +246,13 @@ test('A tiny computed allowance percentage is not interpreted as a gateway fract
   const parsed = parseQwenworkQuota({ user_quota: { total: 46000, used: 0.1 } });
   assert.ok(Math.abs(parsed.windows[0].usedPercent - (0.1 / 46000) * 100) < 1e-12);
 });
+
+
+test('A rate-limited session refresh preserves sourceRateLimited', async () => {
+  const d = deps(() => response({}, 429));
+  const result = await fetchQwenworkLimits({
+    qwenworkSession: { access: 'old-access', refresh: 'old-refresh', expiresAt: 1 }
+  }, d);
+  assert.equal(result.status, 'sourceRateLimited');
+  assert.equal(d.calls.length, 1);
+});

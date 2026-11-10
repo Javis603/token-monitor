@@ -263,7 +263,8 @@ async function fetchQwenworkLimits(options = {}, deps = {}) {
         // could report a different account's quota under this row.
         return normalizeLimitProvider({
           ...base,
-          status: error?.status === 'unauthorized' ? 'unauthorized' : 'unavailable',
+          status: error?.status === 'unauthorized' || error?.status === 'sourceRateLimited'
+            ? error.status : 'unavailable',
           windows: []
         });
       }

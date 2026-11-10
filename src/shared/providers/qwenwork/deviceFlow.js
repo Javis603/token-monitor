@@ -90,7 +90,7 @@ async function requestJson(url, init, deps = {}) {
   const onAbort = () => controller?.abort();
   externalSignal?.addEventListener?.('abort', onAbort);
   try {
-    const response = await fetchImpl(url, { ...init, ...(controller ? { signal: controller.signal } : {}) });
+    const response = await fetchImpl(url, { ...init, credentials: 'omit', redirect: 'error', ...(controller ? { signal: controller.signal } : {}) });
     if (externalSignal?.aborted) throw errorWithStatus('cancelled', 'QwenWork sign-in cancelled');
     if (response.status === 401 || response.status === 403) {
       throw errorWithStatus('unauthorized', `QwenWork rejected the request (HTTP ${response.status})`);

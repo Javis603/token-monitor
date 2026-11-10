@@ -71,6 +71,8 @@ test('The device sign-in opens the browser, retries pending polls and returns a 
     assert.ok(new URL(url).searchParams.get('verifier'));
     assert.ok(new URL(url).searchParams.get('nonce'));
     assert.equal(init.method, 'GET');
+    assert.equal(init.credentials, 'omit');
+    assert.equal(init.redirect, 'error');
     assert.equal(init.headers.Host, undefined);
   }
   assert.deepEqual(statuses.map((status) => status.phase), ['authorize', 'polling', 'success']);
@@ -101,6 +103,8 @@ test('A refresh rotates the access and refresh tokens without dropping the devic
   assert.equal(calls.length, 1);
   assert.equal(new URL(calls[0].url).pathname, '/api/v1/deviceToken/refresh');
   assert.equal(calls[0].init.method, 'POST');
+  assert.equal(calls[0].init.credentials, 'omit');
+  assert.equal(calls[0].init.redirect, 'error');
   assert.deepEqual(JSON.parse(calls[0].init.body), { refresh_token: 'old-refresh', target: 'c' });
 });
 
