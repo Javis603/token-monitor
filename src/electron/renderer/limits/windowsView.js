@@ -2133,11 +2133,20 @@
 
   // Called only once the row's spinner has cleared, so the hold is counted
   // from the moment the reason first shows, not from when the request settled
-  // under a spinner still serving its minimum.
+  // under a spinner still serving its minimum. A failure not shown well past
+  // that minimum (a hold's length of slack for late timers) is stale: its row
+  // was replaced unseen (the dock swaps cards), or a newer probe kept it
+  // spinning and now answers for it.
   function limitRowFailure(key, now) {
     const failure = refreshFailures.get(key);
     if (!failure) return null;
-    if (failure.until === null) failure.until = now + FAILURE_HOLD_MS;
+    if (failure.until === null) {
+      if (now - failure.settledAt > SPIN_MIN_MS + FAILURE_HOLD_MS) {
+        refreshFailures.delete(key);
+        return null;
+      }
+      failure.until = now + FAILURE_HOLD_MS;
+    }
     if (now >= failure.until) {
       refreshFailures.delete(key);
       return null;
@@ -2214,7 +2223,7 @@
         .then((result) => result, () => ({ ok: false, reason: 'failed' }))
         .then((result) => {
           if (result?.ok === false) {
-            refreshFailures.set(key, { reason: result.reason || 'failed', until: null });
+            refreshFailures.set(key, { reason: result.reason || 'failed', settledAt: Date.now(), until: null });
           }
         })
         .finally(() => {

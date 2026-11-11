@@ -159,7 +159,8 @@ function dockView(appearance = {}, overrides = {}) {
         return element;
       },
       createTextNode: (value) => ({ textContent: String(value), children: [] }),
-      querySelectorAll: (selector) => drawn.filter((element) => element.classNames.has(selector.replace(/^\./, '')))
+      querySelectorAll: (selector) => drawn.filter((element) => !element.detached
+        && element.classNames.has(selector.replace(/^\./, '')))
     },
     t: (key, params) => i18n.translate('en', key, params),
     settings: () => settings,
@@ -346,6 +347,18 @@ test('a row refresh that brings nothing back says why, then returns to normal', 
   await new Promise(setImmediate);
   t.mock.timers.tick(800);
   assert.equal(button.classList.contains('is-refresh-error'), false);
+
+  // A failure nobody saw (the dock replaced the card before it settled) is
+  // dropped rather than waiting for the next card to show it, possibly long
+  // after a newer refresh succeeded.
+  answer = { ok: false, reason: 'failed' };
+  button.listeners.pointerdown({ button: 0, preventDefault() {} });
+  button.detached = true;
+  await new Promise(setImmediate);
+  t.mock.timers.tick(60_000);
+  const later = view.renderLimitProviderSolo('kimi', 'Kimi', row, '#fff');
+  assert.equal(later.find('limit-refresh-status').textContent, '');
+  assert.equal(later.find('limit-refresh-button').classList.contains('is-refresh-error'), false);
 });
 
 test('a background probe spins only the rows it is for, and only once it is not a blink', (t) => {
