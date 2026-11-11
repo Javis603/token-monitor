@@ -618,3 +618,37 @@ test('shared presentation resolves live palette overrides and renders native, im
   fallback.querySelector('img').fire('error'); assert.equal(fallback.querySelector('img').src,'data:image/png;base64,fallback');
   fallback.querySelector('img').fire('error'); assert.ok(fallback.querySelector('path'));
 });
+
+test('unattended update inspection checks host settings without loading author code', async () => {
+  let lifecycle, editing = true;
+  const host = createHost({ document: {}, window: {}, bridge: { onLifecycle(callback) { lifecycle = callback; } },
+    services: { updatesBlocked: ids => editing && ids.includes('fixture') }, importModule: () => assert.fail('inspection must not load code') });
+  assert.deepEqual(await lifecycle({ action: 'inspect-update', ids: ['fixture'] }), { blocked: true });
+  assert.deepEqual(await lifecycle({ action: 'inspect-update', ids: ['another'] }), { blocked: false });
+  editing = false;
+  assert.deepEqual(await lifecycle({ action: 'inspect-update', ids: ['fixture'] }), { blocked: false });
+  await host.dispose();
+});
+
+for (const reason of ['draft', 'settings']) test(`automatic release rechecks ${reason} after pending updates settle`, async () => {
+  const document = dom(), node = document.createElement('div'); document.body.append(node);
+  let lifecycle, finish, editing = false, disposals = 0;
+  const host = createHost({ document, window: {}, bridge: { onLifecycle(callback) { lifecycle = callback; } },
+    services: { updatesBlocked: () => editing }, importModule: async () => ({ mount(container) {
+      const input = document.createElement('input'); container.append(input);
+      return { hasUnsavedChanges: () => Boolean(input.value),
+        update: () => new Promise(resolve => { finish = resolve; }), dispose() { disposals++; container.replaceChildren(); } };
+    } }) });
+  await host.mount(node, descriptor); const input = node.children[0];
+  assert.equal((await lifecycle({ action: 'inspect', ids: ['fixture'] })).unsaved, false);
+  host.setVisibility(node, false);
+  const releasing = lifecycle({ action: 'release', ids: ['fixture'], automatic: true });
+  await new Promise(setImmediate);
+  if (reason === 'draft') input.value = 'new draft'; else editing = true;
+  finish();
+  assert.equal((await releasing).deferred, true);
+  assert.equal(disposals, 0); assert.equal(node.children[0], input);
+  await lifecycle({ action: 'resume', ids: ['fixture'] });
+  assert.equal((await lifecycle({ action: 'inspect', ids: ['fixture'] })).loaded, true);
+  await host.dispose();
+});

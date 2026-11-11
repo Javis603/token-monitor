@@ -13550,6 +13550,7 @@ pluginViewHost = pluginViewsApi && pluginBridge ? pluginViewsApi.createPluginVie
   t,
   services: {
     app: window.tokenMonitor,
+    updatesBlocked: ids => pluginSettingsPanel?.blocksUpdate(ids) === true,
     native: {
       quota: limitWindowsView,
       credentials: call => window.TokenMonitorPluginCredentials.create({ document, call, t, localize: value => window.TokenMonitorPluginLocalized.localize(value, state.settings?.language),
@@ -13678,6 +13679,7 @@ pluginApi = pluginBridge ? {
   catalogDetails: (source, id) => pluginBridge.catalogDetails(source, id),
   closeCatalogDetails: () => pluginBridge.closeCatalogDetails(),
   catalogReadmeImage: (documentId, index) => pluginBridge.catalogReadmeImage(documentId, index),
+  configureUpdates: async (id, value) => applyPluginCatalogUpdates(await pluginBridge.configureUpdates(id, value)),
   catalogPreview: (source, id, version) => pluginBridge.catalogPreview(source, id, version),
   addSource: async input => applyPluginCatalogUpdates(await pluginBridge.addSource(input)),
   refreshSource: async id => applyPluginCatalogUpdates(await pluginBridge.refreshSource(id)),
