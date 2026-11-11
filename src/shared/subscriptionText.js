@@ -39,8 +39,17 @@
     return currencyApi.CURRENCY_RATES[code]?.symbol || `${code} `;
   }
 
+  function unitsText(currencyApi, currency, units) {
+    return `${symbolFor(currencyApi, currency)}${units.toFixed(currencyApi.currencyFractionDigits(currency))}`;
+  }
+
+  // Stored amounts are integer hundredths.
+  function minorText(currencyApi, currency, amountMinor) {
+    return unitsText(currencyApi, currency, amountMinor / 100);
+  }
+
   function amountText(currencyApi, subscription) {
-    return `${symbolFor(currencyApi, subscription?.currency)}${subscriptionApi.amountUnits(subscription).toFixed(2)}`;
+    return unitsText(currencyApi, subscription?.currency, subscriptionApi.amountUnits(subscription));
   }
 
   function cadenceText(t, subscription) {
@@ -109,13 +118,13 @@
     const elapsed = months >= 1
       ? t('subscription.tooltip.months', { months })
       : t('subscription.tooltip.daysCount', { days: Math.max(0, daysSinceStart || 0) });
-    const paid = subscriptionApi.paidToDateMinor(subscription, today) / 100;
-    return `${elapsed} · ${t('subscription.tooltip.paidTotal', { total: `${symbolFor(currencyApi, subscription.currency)}${paid.toFixed(2)}` })}`;
+    const paid = subscriptionApi.paidToDateMinor(subscription, today);
+    return `${elapsed} · ${t('subscription.tooltip.paidTotal', { total: minorText(currencyApi, subscription.currency, paid) })}`;
   }
 
   // A top-up is stored in minor units, like every amount the record holds.
   function topUpMinorText(currencyApi, subscription, amountMinor) {
-    return `${symbolFor(currencyApi, subscription?.currency)}${(amountMinor / 100).toFixed(2)}`;
+    return minorText(currencyApi, subscription?.currency, amountMinor);
   }
 
   return {
@@ -125,6 +134,7 @@
     daysText,
     elapsedText,
     localDate,
+    minorText,
     priceText,
     providerLabel,
     shortDateText,

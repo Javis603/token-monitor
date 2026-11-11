@@ -455,6 +455,32 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         )
     }
 
+    func testWonBalancesAndQuotaWindowsUseWholeWon() {
+        for amount in [1380.25, 0] {
+            let expected = amount == 0 ? "₩0" : "₩1380"
+            let balance = WidgetQuotaProvider(
+                instanceId: "deepseek-single",
+                provider: "deepseek",
+                status: "ok",
+                updatedAt: nil,
+                windows: [],
+                balance: WidgetQuotaBalance(amount: amount, currency: "KRW")
+            )
+            let credits = WidgetLimitWindow(
+                kind: "billing", remainingPercent: nil, resetsAt: nil,
+                metric: "credits", showMeter: false, remaining: amount, currency: "KRW"
+            )
+            let spend = WidgetLimitWindow(
+                kind: "billing", remainingPercent: nil, resetsAt: nil,
+                metric: "spend", showMeter: false, used: amount, currency: "krw"
+            )
+
+            XCTAssertEqual(WidgetFormat.quotaValue(balance), "\(expected) left")
+            XCTAssertEqual(WidgetFormat.windowValue(credits), expected)
+            XCTAssertEqual(WidgetFormat.windowValue(spend), expected)
+        }
+    }
+
     func testQuotaWindowValuePreservesCurrencyAndSpendSemantics() {
         let usd = WidgetLimitWindow(
             kind: "billing", remainingPercent: nil, resetsAt: nil,

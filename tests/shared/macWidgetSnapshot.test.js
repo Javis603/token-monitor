@@ -349,6 +349,17 @@ test('merges model display-name collisions before calculating shares', () => {
   assert.match(snapshot.periods.day.models[0].id, /^model-/);
 });
 
+test('preserves KRW provider balances independently of the selected display currency', () => {
+  const snapshot = buildSnapshot({
+    limits: { providers: [
+      { provider: 'deepseek', status: 'ok', balance: { amount: 1380.25, currency: ' krw ' }, windows: [] }
+    ] }
+  }, { now: NOW, presentation: { currencyCode: 'USD' } });
+
+  assert.equal(snapshot.presentation.currencyCode, 'USD');
+  assert.deepEqual(snapshot.quota[0].balance, { amount: 1380.25, currency: 'KRW' });
+});
+
 test('preserves a zero balance and omits missing, non-finite, or unsupported balances', () => {
   const snapshot = buildSnapshot({
     limits: { providers: [
