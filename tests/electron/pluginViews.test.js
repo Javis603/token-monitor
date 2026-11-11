@@ -665,3 +665,21 @@ test('automatic deferral does not conceal an existing author cleanup failure', a
   await assert.rejects(lifecycle({ action: 'release', ids: ['fixture'], automatic: true }), /known cleanup failure/);
   await host.dispose();
 });
+
+
+test('automatic lifecycle holds native settings lock until resume completes', async () => {
+  const document = dom(), node = document.createElement('div'); document.body.append(node);
+  let lifecycle, locked = false, unlock;
+  const host = createHost({ document, window: {}, bridge: { onLifecycle(callback) { lifecycle = callback; } },
+    services: { setUpdatingPlugins(ids, active) {
+      assert.deepEqual(ids, ['fixture']);
+      if (active) locked = true;
+      else return new Promise(resolve => { unlock = () => { locked = false; resolve(); }; });
+    } }, importModule: async () => ({ mount() { return {}; } }) });
+  await host.mount(node, descriptor);
+  await lifecycle({ action: 'release', ids: ['fixture'], automatic: true });
+  assert.equal(locked, true);
+  const resuming = lifecycle({ action: 'resume', ids: ['fixture'] });
+  assert.equal(locked, true); unlock(); await resuming;
+  assert.equal(locked, false); await host.dispose();
+});

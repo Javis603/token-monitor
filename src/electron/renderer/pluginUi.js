@@ -240,6 +240,7 @@
       // Inspection is an earlier IPC round trip. Input or settings edits can
       // arrive while other hosts or author jobs settle; do not discard them.
       if (automatic && (hasUnsavedChanges(ids) || services.updatesBlocked?.(ids) === true)) return { deferred: true };
+      if (automatic) services.setUpdatingPlugins?.(ids, true);
       for (const [container, record] of mounts) if (ids.includes(record.descriptor.pluginId)) unmount(container);
       for (const id of ids) while (jobs.has(id)) await Promise.all([...jobs.get(id)]);
       for (const [key, promise] of modules) {
@@ -259,7 +260,11 @@
       if (action === 'inspect-update') return { blocked: services.updatesBlocked?.(ids) === true };
       if (action === 'inspect') return { loaded: [...modules.keys()].some(key => ids.some(id => key.startsWith(id + ':'))), unsaved: hasUnsavedChanges(ids, content) };
       if (action === 'release') return await release(ids, automatic) || {};
-      if (action === 'resume') { for (const id of ids) if (!failures.has(id)) blocked.delete(id); return {}; }
+      if (action === 'resume') {
+        await services.setUpdatingPlugins?.(ids, false);
+        for (const id of ids) if (!failures.has(id)) blocked.delete(id);
+        return {};
+      }
       throw new Error('Unknown plugin lifecycle operation');
     });
     return { mount, unmount, release,

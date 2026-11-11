@@ -13551,6 +13551,7 @@ pluginViewHost = pluginViewsApi && pluginBridge ? pluginViewsApi.createPluginVie
   services: {
     app: window.tokenMonitor,
     updatesBlocked: ids => pluginSettingsPanel?.blocksUpdate(ids) === true,
+    setUpdatingPlugins: (ids, updating) => pluginSettingsPanel?.setUpdatingPlugins(ids, updating),
     native: {
       quota: limitWindowsView,
       credentials: call => window.TokenMonitorPluginCredentials.create({ document, call, t, localize: value => window.TokenMonitorPluginLocalized.localize(value, state.settings?.language),

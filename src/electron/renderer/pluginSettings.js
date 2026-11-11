@@ -135,6 +135,7 @@
     const sourceDraft = { url: '', publicKey: '' };
     const chosenVersions = new Map();
     const updatedVersions = new Map();
+    const updatingPlugins = new Set();
     const detailState = new Map();
     const authorSettings = new Map();
     const settingsIdentities = new Map(), settingsMounts = new Map();
@@ -378,7 +379,7 @@
     }
 
     function updatePlugin(entry, version = entry.version, control = null) {
-      if (busy) return;
+      if (busy || updatingPlugins.has(entry.id)) return;
       if (control) control.textContent = t('plugins.catalog.updating');
       void run(async () => {
         requireSavedAuthorSettings(entry.id);
@@ -1000,6 +1001,7 @@
     }
 
     function openPlugin(id, placements = false) {
+      if (updatingPlugins.has(id)) return;
       if (!selectedPluginId) installedPosition = rememberPosition();
       selectedPluginId = id; diagnostics = false; render();
       const target = (placements && content.querySelector('.plugin-views')) || content.querySelector('.plugin-back');
@@ -1057,7 +1059,10 @@
       const footer = el(document, 'div', 'plugin-card-footer');
       if (plugin.recoveryRequired) {
         card.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.packageRecoveryNote')));
-        footer.append(button(t('plugins.trusted.reloadNow'), () => void run(() => api.recover(plugin.id), `plugin:${plugin.id}`), 'plugin-recover plugin-update-action'));
+        footer.append(button(t('plugins.trusted.reloadNow'), () => void run(() => {
+          for (const id of authorSettings.keys()) requireSavedAuthorSettings(id);
+          return api.recover(plugin.id);
+        }, `plugin:${plugin.id}`), 'plugin-recover plugin-update-action'));
       }
       const exceptional = !['active', 'disabled'].includes(plugin.status);
 
@@ -1085,11 +1090,13 @@
         openPlugin(plugin.id);
       }, 'plugin-manage');
       manage.setAttribute('aria-label', t('plugins.ui.manageNamed', { name: plugin.name }));
+      manage.disabled = busy || updatingPlugins.has(plugin.id);
       if (plugin.status === 'crashed') footer.append(button(t('settings.plugins.restart'), () => void run(() => api.restart(plugin.id)), 'plugin-restart plugin-inline-action'));
       const update = catalogData?.entries.find(entry => entry.id === plugin.id && entry.status === 'update' && entry.origin.id === plugin.installation?.origin.id);
       if (update) {
         card.append(updateNotes(update, update.version));
-        footer.append(button(t('plugins.catalog.updateTo', { version: update.version }), event => updatePlugin(update, update.version, event.currentTarget), 'plugin-update-action'));
+        const action = button(t('plugins.catalog.updateTo', { version: update.version }), event => updatePlugin(update, update.version, event.currentTarget), 'plugin-update-action');
+        action.disabled = busy || updatingPlugins.has(plugin.id); footer.append(action);
       }
       footer.append(manage); card.append(footer);
       if (updatedVersions.get(plugin.id) === plugin.version) {
@@ -1591,6 +1598,17 @@
         return list.enabled ? t('settings.summary.plugins', { active, total: list.plugins.length }) : t('settings.summary.off');
       },
       list: () => list,
+      setUpdatingPlugins(ids, updating) {
+        if (updating) { for (const id of ids) updatingPlugins.add(id); render(); return; }
+        // Keep entry points locked until their descriptors reflect the committed
+        // or restored revision, so opening an editor cannot inherit a stale revision.
+        return Promise.all([api.list(), api.catalog?.()]).then(([next, catalog]) => {
+          if (disposed) return;
+          list = next; if (catalog) catalogData = catalog;
+          for (const id of ids) updatingPlugins.delete(id);
+          render();
+        });
+      },
       blocksUpdate: ids => busy || ids.some(id => selectedPluginId === id || packagePreview?.id === id || authorSettings.get(id)?.editor?.hasUnsavedChanges()),
       // Consent and logs are interaction state: a background push must not
       // close an open consent panel the user is reading.
