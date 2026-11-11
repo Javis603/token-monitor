@@ -1822,6 +1822,13 @@ test('shared spend presentation preserves zeroes and omits missing periods', () 
   assert.deepEqual(missingWeek.detailEntries.map(([label]) => label), ['Today', 'Month', 'All time']);
   assert.equal(missingWeek.ariaParts.some((part) => part.startsWith('Week ')), false);
 
+  // Console fees join the tooltip without changing the local Today/Month totals.
+  const consoleFees = runProviderSpendNode(app, { currency: 'CNY', todaySpend: 0, monthSpend: 2.5, searchSpend: 0.3, fetchSpend: 0.02 });
+  assert.equal(consoleFees.summary, 'Today CNY 0.00 · Month CNY 2.50');
+  assert.deepEqual(consoleFees.detailEntries, [
+    ['Today', 'CNY 0.00'], ['Month', 'CNY 2.50'], ['Search', 'CNY 0.30'], ['Fetch', 'CNY 0.02']
+  ]);
+
 });
 
 test('TypeSafe row mirrors the Spend row with token totals and keeps the month breakdown in the tooltip', () => {

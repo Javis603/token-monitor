@@ -636,13 +636,15 @@
     const preferredSummary = entries.filter(([label]) => label === 'Today' || label === 'Month');
     const summaryEntries = preferredSummary.length > 0 ? preferredSummary : entries.slice(0, 2);
     const formatted = entries.map(([entryLabel, value]) => [entryLabel, formatBalanceSpendAmount(value, balance)]);
+    if (balance?.searchSpend > 0) formatted.push(['Search', formatBalanceSpendAmount(balance.searchSpend, balance)]);
+    if (balance?.fetchSpend > 0) formatted.push(['Fetch', formatBalanceSpendAmount(balance.fetchSpend, balance)]);
     return tagUsageItem(limitNoteRowNode({
       label: 'Spend',
       summary: summaryEntries
         .map(([label, value]) => `${label} ${formatBalanceSpendAmount(value, balance)}`)
         .join(' · '),
       // Only worth a tooltip when it would say more than the summary already does.
-      detailEntries: entries.length > summaryEntries.length ? formatted : null,
+      detailEntries: formatted.length > summaryEntries.length ? formatted : null,
       ariaParts: formatted.map(([entryLabel, value]) => `${entryLabel} ${value}`)
     }), 'spend', 'Spend');
   }

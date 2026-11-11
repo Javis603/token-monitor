@@ -16,6 +16,7 @@ const {
   errorWithStatus,
   fetchJson,
   nowIso,
+  numberOrNull,
   providerStatusFromError
 } = require('../../limits/providerHelpers');
 
@@ -48,6 +49,57 @@ function selectFundedRow(rows) {
 }
 
 const DEEPSEEK_BALANCE_URL = 'https://api.deepseek.com/user/balance';
+// Private console endpoint: needs a signed-in session token, read for the current month only.
+const DEEPSEEK_CONSOLE_COST_URL = 'https://platform.deepseek.com/api/v0/usage/by_api_key/cost';
+
+// Accept a bare or pasted Authorization token; reject anything that is not one.
+function normalizeDeepseekWebToken(value) {
+  const raw = cleanSecret(value).replace(/^authorization\s*:\s*/iu, '').replace(/^bearer\s+/iu, '').trim();
+  return /[\u0000-\u001f\u007f;\s]/u.test(raw) ? '' : raw;
+}
+
+const CONSOLE_TOOL_NAMES = {
+  searchSpend: ['server-tool-search', 'tool-search'],
+  fetchSpend: ['server-tool-fetch', 'tool-fetch']
+};
+
+async function fetchToolSpends(token, { accountKey, currency, now }, deps) {
+  if (!token || deps.probe) return null;
+  const date = new Date(now);
+  const tz = -date.getTimezoneOffset() * 60;
+  // Both boundaries use one fixed console offset, including across DST changes.
+  const window = {
+    start: Date.UTC(date.getFullYear(), date.getMonth(), 1) / 1000 - tz,
+    end: Date.UTC(date.getFullYear(), date.getMonth(), date.getDate() + 1) / 1000 - tz,
+    tz
+  };
+  const state = deps.providerRuntimeState instanceof Map ? deps.providerRuntimeState : null;
+  const cacheKey = hashKey('deepseek-console', accountKey, token, currency);
+  const cached = state?.get(cacheKey);
+  if (cached?.start === window.start && cached.expiresAt > now) return cached.toolSpends;
+  try {
+    const body = await fetchJson(`${DEEPSEEK_CONSOLE_COST_URL}?${new URLSearchParams(window)}`, { Authorization: `Bearer ${token}` }, deps);
+    const data = body?.data?.biz_data;
+    if (body?.code !== 0 || body?.data?.biz_code !== 0 || data?.start !== window.start || data?.end !== window.end) return null;
+    const row = (data.data || []).find((item) => String(item?.currency || '').toUpperCase() === currency);
+    const lists = [row?.series, row?.function_series].filter(Array.isArray);
+    if (!lists.length) return null;
+    const list = lists.flat();
+    const toolSpends = {};
+    for (const [key, names] of Object.entries(CONSOLE_TOOL_NAMES)) {
+      const costs = list.filter((item) => names.includes(item?.model))
+        .flatMap((item) => item.buckets.map((bucket) => numberOrNull(bucket?.cost)));
+      if (costs.includes(null)) return null;
+      const total = costs.reduce((sum, cost) => sum + cost, 0);
+      if (total > 0) toolSpends[key] = total;
+    }
+    state?.set(cacheKey, { start: window.start, expiresAt: now + 60 * 60_000, toolSpends });
+    return toolSpends;
+  } catch {
+    // Optional console failures leave the balance intact and retry next refresh.
+    return null;
+  }
+}
 
 async function fetchDeepSeekLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
@@ -73,6 +125,8 @@ async function fetchDeepSeekLimits(options = {}, deps = {}) {
       { accountKey, currency: row.currency, paid: row.paid, now, storePath, legacyStorePath },
       deps
     );
+    const webToken = normalizeDeepseekWebToken(options.deepseekWebToken);
+    const toolSpends = await fetchToolSpends(webToken, { accountKey, currency: row.currency, now }, deps);
     return normalizeLimitProvider({
       provider: 'deepseek',
       accountKey,
@@ -97,7 +151,8 @@ async function fetchDeepSeekLimits(options = {}, deps = {}) {
         monthSpend: spend.monthSpend,
         allTimeSpend: spend.allTimeSpend,
         trackingSince: spend.trackingSince,
-        monthSinceTracking: spend.monthSinceTracking
+        monthSinceTracking: spend.monthSinceTracking,
+        ...(toolSpends || {})
       }
     });
   } catch (error) {
@@ -114,5 +169,6 @@ async function fetchDeepSeekLimits(options = {}, deps = {}) {
 module.exports = {
   deepseekToken,
   fetchDeepSeekLimits,
+  normalizeDeepseekWebToken,
   selectFundedRow
 };

@@ -242,6 +242,8 @@ function normalizeProviderBalance(input) {
   const weekSpend = numberOrNull(input.weekSpend ?? input.week_spend);
   const monthSpend = numberOrNull(input.monthSpend ?? input.month_spend);
   const allTimeSpend = numberOrNull(input.allTimeSpend ?? input.all_time_spend);
+  const searchSpend = numberOrNull(input.searchSpend ?? input.search_spend);
+  const fetchSpend = numberOrNull(input.fetchSpend ?? input.fetch_spend);
   const requestCountRaw = numberOrNull(input.requestCount ?? input.request_count);
   const requestCount = requestCountRaw === null ? null : Math.max(0, Math.trunc(requestCountRaw));
   const quotaGroup = String(input.quotaGroup ?? input.quota_group ?? '').trim().slice(0, 64);
@@ -269,6 +271,8 @@ function normalizeProviderBalance(input) {
     && weekSpend === null
     && monthSpend === null
     && allTimeSpend === null
+    && searchSpend === null
+    && fetchSpend === null
     && requestCount === null
     && !quotaGroup
     && !expiresAt
@@ -294,6 +298,8 @@ function normalizeProviderBalance(input) {
     weekSpend,
     monthSpend,
     allTimeSpend,
+    ...(searchSpend !== null ? { searchSpend } : {}),
+    ...(fetchSpend !== null ? { fetchSpend } : {}),
     requestCount,
     quotaGroup,
     expiresAt,
@@ -1117,7 +1123,7 @@ function publicLimits(limits) {
       if (!provider.balance) return provider;
       // `tranches` carries per-grant amounts and expiry dates — billing detail
       // with no public value, dropped alongside the custom group label.
-      const { quotaGroup, tranches, ...publicBalance } = provider.balance;
+      const { quotaGroup, tranches, searchSpend, fetchSpend, ...publicBalance } = provider.balance;
       return { ...provider, balance: publicBalance };
     })
   };
