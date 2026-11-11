@@ -67,6 +67,25 @@ test('rail money compacts through the shared helper so it follows the token unit
   assert.equal(western(72.697), 'HK$567'); // sub-10k keeps the fixed-digit path
 });
 
+test('rail cost respects whole-currency precision and preserves catalogue prefixes', () => {
+  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
+  const source = dock.slice(dock.indexOf('function formatRailCost('), dock.indexOf('function statShortLabel(')).trim();
+  const currency = require('../../src/shared/currency');
+  const compactMoney = require('../../src/shared/compactMoney');
+  currency.configureRates(null);
+  for (const [code, value, expected] of [
+    ['JPY', 0.1, 'JP¥16'], ['KRW', 0.01, '₩14'], ['CHF', 10, 'CHF 8.20'],
+    ['USD', 0.1, '$0.10'], ['HKD', 10, 'HK$78.0'],
+    ['CNY', 10, '¥68.0'], ['TWD', 10, 'NT$315']
+  ]) {
+    const format = Function('appearance', 'state', 'currencyApi', 'compactMoneyApi', 'return (' + source + ')')(
+      () => ({ currency: code }), { locale: 'en' }, currency, compactMoney
+    );
+    assert.equal(format(value), expected, code);
+    assert.equal(format(value, 1), '—', code);
+  }
+});
+
 test('the detail total follows the main app compact toggle and unit threshold', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');

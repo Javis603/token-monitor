@@ -664,6 +664,8 @@ function createEdgeDockController(deps) {
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     win.webContents.on('will-navigate', (event) => event.preventDefault());
     win.webContents.on('did-finish-load', () => {
+      // Shared renderers can retain an opaque canvas despite transparent:true.
+      if (mac) win.setBackgroundColor('#00000000');
       ready[surface] = true;
       lastSent[surface] = '';
       render(surface);
@@ -1349,6 +1351,7 @@ function createEdgeDockController(deps) {
     ipcMain.on('edgeDock:ready', (event) => {
       const surface = surfaceFor(event.sender);
       if (!surface) return;
+      if (platform === 'darwin') windows[surface].setBackgroundColor('#00000000');
       ready[surface] = true;
       render(surface);
     });

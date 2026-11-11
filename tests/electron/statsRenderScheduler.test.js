@@ -257,7 +257,7 @@ test('leaving Settings no longer needs a catch-up repaint', () => {
 test('stats-derived Settings rows refresh behind an open panel', () => {
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   const renderBody = app.slice(
-    app.indexOf('function renderAppContent() {'),
+    app.indexOf('function renderAppContent('),
     app.indexOf('\nfunction setStatus(')
   );
   const archiveBody = app.slice(
@@ -276,7 +276,7 @@ test('stats-derived Settings rows refresh behind an open panel', () => {
   assert.match(archiveBody, /sessionRowsApi\.archivedSessionCount\(state\.stats\)/);
   assert.doesNotMatch(archiveBody, /isSettingsSurfaceVisible|isSettingsPanelOpen/);
   assert.match(renderBody, /renderSessionUsageArchiveStatus\(\);/);
-  assert.match(app, /function render\(\) \{\n {2}renderAppContent\(\);/);
+  assert.match(app, /function render\(\{ fromSearch = false \} = \{\}\) \{\n {2}renderAppContent\(\{ fromSearch \}\);/);
   assert.doesNotMatch(renderBody, /isSettingsSurfaceVisible|isSettingsPanelOpen/);
   assert.doesNotMatch(surfaceBody, /isSettingsPanelOpen/);
 });

@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { createHub } = require('../../src/hub/server');
+const { MAX_UPLOAD_BYTES } = require('../../src/shared/uploadDelta');
 const { createSyncPayloadUploader, serializeSyncPayload } = require('../../src/shared/syncPayload');
 const { mergeSyncDeviceRecord } = require('../../src/shared/usage');
 const { summaryForUpload } = require('../fixtures/syncUpload');
@@ -164,7 +165,7 @@ test('Worker bounds chunked delta input before JSON parsing and cancels an overs
   let chunks = 0;
   const body = new ReadableStream({
     pull(controller) {
-      if (chunks++ < 3) controller.enqueue(new Uint8Array(600000));
+      if (chunks++ < 3) controller.enqueue(new Uint8Array(Math.floor(MAX_UPLOAD_BYTES / 2) + 1));
       else controller.close();
     },
     cancel() { cancelled = true; }
@@ -192,7 +193,7 @@ test('Worker bounds chunked full ingest before JSON parsing and cancels an overs
   let chunks = 0;
   const body = new ReadableStream({
     pull(controller) {
-      if (chunks++ < 3) controller.enqueue(new Uint8Array(600000));
+      if (chunks++ < 3) controller.enqueue(new Uint8Array(Math.floor(MAX_UPLOAD_BYTES / 2) + 1));
       else controller.close();
     },
     cancel() { cancelled = true; }
@@ -216,27 +217,119 @@ test('Worker bounds chunked full ingest before JSON parsing and cancels an overs
   assert.equal((await hub.device()).history.daily.length, 151);
 });
 
-test('Worker full ingest accepts exactly 1 MiB of UTF-8 and rejects one extra byte without invalidating its baseline', async t => {
-  const hub = await backend('Worker', t);
-  const limit = 1024 * 1024;
-  const payload = { ...summaryForUpload(), padding: '' };
-  const paddingBytes = limit - Buffer.byteLength(JSON.stringify(payload));
-  payload.padding = '字'.repeat(Math.floor(paddingBytes / 3)) + 'x'.repeat(paddingBytes % 3);
-  const body = JSON.stringify(payload);
-  assert.equal(Buffer.byteLength(body), limit);
-  const send = value => hub.send('https://hub.invalid/api/ingest', {
-    method: 'POST', headers: { ...hub.headers, 'x-token-monitor-upload': '1' }, body: value
+for (const kind of ['Node', 'Worker']) {
+  test(`${kind} full ingest accepts a body at the UTF-8 ceiling and rejects one extra byte without invalidating its baseline`, async t => {
+    const hub = await backend(kind, t);
+    const limit = MAX_UPLOAD_BYTES;
+    const payload = { ...summaryForUpload(), padding: '' };
+    const paddingBytes = limit - Buffer.byteLength(JSON.stringify(payload));
+    payload.padding = '字'.repeat(Math.floor(paddingBytes / 3)) + 'x'.repeat(paddingBytes % 3);
+    const body = JSON.stringify(payload);
+    assert.equal(Buffer.byteLength(body), limit);
+    const send = value => hub.send('https://hub.invalid/api/ingest', {
+      method: 'POST', headers: { ...hub.headers, 'x-token-monitor-upload': '1' }, body: value
+    });
+    const first = await send(body);
+    assert.equal(first.status, 200);
+    const { upload } = await first.json();
+    const before = await hub.device();
+    const rejected = await send(`${body} `);
+    assert.equal(rejected.status, 413);
+    assert.equal((await rejected.json()).error, 'payload_too_large');
+    assert.deepEqual(await hub.device(), before);
+    const delta = await hub.request('/api/ingest/delta', {
+      deviceId: payload.deviceId, baseRevision: upload.revision, patch: []
+    });
+    assert.equal(delta.status, 200);
   });
-  const first = await send(body);
-  assert.equal(first.status, 200);
-  const { upload } = await first.json();
+}
+
+test('Worker rejects a merged record above its storage budget without writing the device', async t => {
+  const hub = await backend('Worker', t);
+  const payload = (count) => {
+    const base = summaryForUpload();
+    const sessions = Object.fromEntries(Array.from({ length: count }, (_, index) => [
+      `c:s${index}`,
+      { client: 'c', sessionId: `s${index}`, totalTokens: 1 }
+    ]));
+    return {
+      ...base,
+      month: { ...base.month, sessions, totalTokens: count, clients: { c: count } }
+    };
+  };
+  const send = body => hub.send('https://hub.invalid/api/ingest', {
+    method: 'POST', headers: hub.headers, body
+  });
+
+  const dense = payload(30000);
+  assert.ok(Buffer.byteLength(JSON.stringify(dense)) <= MAX_UPLOAD_BYTES);
+  const rejected = await send(JSON.stringify(dense));
+  assert.equal(rejected.status, 413);
+  assert.equal((await rejected.json()).error, 'payload_too_large');
+  assert.equal(await hub.device(), undefined);
+
+  const reduced = payload(15000);
+  const accepted = await send(JSON.stringify(reduced));
+  assert.equal(accepted.status, 200);
+  assert.equal(Object.keys((await hub.device()).periods.month.sessions).length, 15000);
+});
+
+test('Worker counts the storage key against the Durable Object budget', async t => {
+  const hub = await backend('Worker', t);
+  const deviceId = 'd'.repeat(1200000);
+  const payload = client => {
+    const base = summaryForUpload({ sessions: 0 });
+    const sessions = Object.fromEntries(Array.from({ length: 4500 }, (_, index) => [
+      `${client}:s${index}`,
+      { client, sessionId: `s${index}`, totalTokens: 1 }
+    ]));
+    return {
+      ...base,
+      deviceId,
+      trackedClients: [client],
+      month: { ...base.month, sessions, totalTokens: 4500, clients: { [client]: 4500 } }
+    };
+  };
+  const send = body => hub.send('https://hub.invalid/api/ingest', {
+    method: 'POST', headers: hub.headers, body
+  });
+
+  for (const client of ['claude', 'codex']) {
+    const accepted = await send(JSON.stringify(payload(client)));
+    assert.equal(accepted.status, 200);
+  }
   const before = await hub.device();
-  const rejected = await send(`${body} `);
+  assert.equal(Object.keys(before.periods.month.sessions).length, 9000);
+
+  const rejected = await send(JSON.stringify(payload('gemini')));
   assert.equal(rejected.status, 413);
   assert.equal((await rejected.json()).error, 'payload_too_large');
   assert.deepEqual(await hub.device(), before);
-  const delta = await hub.request('/api/ingest/delta', {
-    deviceId: payload.deviceId, baseRevision: upload.revision, patch: []
+});
+
+test('Worker keeps a delta baseline usable after rejecting an oversized reconstruction', async t => {
+  const hub = await backend('Worker', t);
+  const seeded = await hub.request('/api/ingest', {
+    ...summaryForUpload(),
+    padding: 'x'.repeat(1900000)
+  }, 'POST', { 'x-token-monitor-upload': '1' });
+  assert.equal(seeded.status, 200);
+  const { upload } = await seeded.json();
+  const before = await hub.device();
+  const envelope = { deviceId: 'bandwidth-fixture', baseRevision: upload.revision };
+
+  const rejected = await hub.request('/api/ingest/delta', {
+    ...envelope,
+    patch: [{ op: 'add', path: '/extra', value: 'y'.repeat(200000) }]
   });
-  assert.equal(delta.status, 200);
+  assert.equal(rejected.status, 413);
+  assert.equal((await rejected.json()).error, 'payload_too_large');
+  assert.deepEqual(await hub.device(), before);
+
+  const accepted = await hub.request('/api/ingest/delta', {
+    ...envelope,
+    patch: [{ op: 'replace', path: '/today/totalTokens', value: 1 }]
+  });
+  assert.equal(accepted.status, 200);
+  assert.equal((await hub.device()).periods.today.totalTokens, 1);
 });

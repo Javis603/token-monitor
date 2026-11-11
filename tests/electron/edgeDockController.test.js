@@ -66,6 +66,7 @@ class FakeBrowserWindow extends EventEmitter {
   getOpacity() { return this.opacity; }
   getBounds() { return { ...this.bounds }; }
   setOpacity(value) { this.opacity = value; this.opacityChanges.push(value); }
+  setBackgroundColor(value) { this.backgroundColor = value; }
   setIgnoreMouseEvents(value, options) { this.ignoreMouse = value; this.forwardMouse = value === true && options?.forward === true; }
   showInactive() { this.visible = true; this.zOrderCalls.push('showInactive'); this.orderFront(); }
   moveTop() { this.zOrderCalls.push('moveTop'); this.orderFront(); }
@@ -224,6 +225,29 @@ function createFixture(options = {}) {
   };
   return { controller, hapticCalls, haptics, ipcMain, powerMonitor, maskWindows, placements, screen, settings, windowFor, paintPeek };
 }
+
+test('macOS dock clears reused renderer backgrounds on both readiness paths after material switches', (t) => {
+  let liquid = false;
+  const fixture = createFixture({ platform: 'darwin', load: false,
+    settings: { edgeDockMacBackdrop: 'transparent' },
+    liquidGlass: () => liquid ? { dark: true } : null,
+    createGlass: () => ({ update() {}, dispose() {} }) });
+  t.after(() => fixture.controller.stop());
+  for (const style of ['vibrancy', 'liquid-glass', 'transparent']) {
+    liquid = style === 'liquid-glass';
+    fixture.settings.edgeDockMacBackdrop = style;
+    fixture.controller.sync();
+    for (const surface of ['peek', 'rail', 'bubble']) {
+      const win = fixture.windowFor(surface);
+      win.backgroundColor = '#121212';
+      fixture.ipcMain.emit('edgeDock:ready', { sender: win.webContents });
+      assert.equal(win.backgroundColor, '#00000000', `${style}/${surface} renderer ready`);
+      win.backgroundColor = '#121212';
+      win.webContents.emit('did-finish-load');
+      assert.equal(win.backgroundColor, '#00000000', `${style}/${surface} load/reload`);
+    }
+  }
+});
 
 test('Windows Edge Dock installs non-activating input on every surface, including rebuilt windows', (t) => {
   const installed = [];
