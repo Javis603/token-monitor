@@ -11,6 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { appVersion } = require('../../appVersion');
 const { normalizeLimitProvider } = require('../../limits/core');
+const { rowMatchesScope } = require('../../limits/accountScope');
 const { abortError } = require('../../probeDeadline');
 const {
   codexAccountKey,
@@ -1404,13 +1405,19 @@ async function fetchCodexLimits(options = {}, deps = {}) {
   // A scoped refresh of the live row reads whichever account is signed in now.
   // If that is no longer the account the scope names, its reading belongs to
   // another identity, and the runtime would file it under the scoped one.
-  const liveInScope = (live) => !scope?.accountKey || live?.accountKey === scope.accountKey;
+  // Instead the scoped row is reported unavailable, as a provider-wide poll
+  // reports an identity that no longer answers; only an account key names an
+  // existing row precisely enough to mark.
+  const liveInScope = (live) => !scope || rowMatchesScope(live, scope);
+  const scopedLiveGone = () => (scope?.accountKey ? [normalizeLimitProvider({
+    provider: 'codex', accountKey: scope.accountKey, status: 'unavailable', updatedAt: nowIso(nowMs), windows: []
+  })] : []);
   // Single live account: keep the original single-provider shape (and error
   // propagation) so a signed-out/not-configured state surfaces as before.
   if (managedAccounts.length === 0) {
     if (!includeLiveAccount) return [];
     const live = await fetchLiveCodexAccount(deps, nowMs);
-    return liveInScope(live) ? live : [];
+    return liveInScope(live) ? live : scopedLiveGone();
   }
 
   const providers = [];
@@ -1428,13 +1435,14 @@ async function fetchCodexLimits(options = {}, deps = {}) {
   // stays visible alongside managed accounts — adding a managed account never
   // hides the login you are actually using. Best-effort: a signed-out/Keychain-
   // only live account just drops out, leaving the managed accounts.
+  let liveRejected = false;
   if (includeLiveAccount) {
     try {
       const live = await fetchLiveCodexAccount(deps, nowMs, managedAccounts);
       if (liveInScope(live)) {
         providers.push(live);
         markSeen(live);
-      }
+      } else liveRejected = true;
     } catch (_) {}
   }
   for (const account of managedAccounts) {
@@ -1442,6 +1450,10 @@ async function fetchCodexLimits(options = {}, deps = {}) {
     if (alreadySeen(provider)) continue;
     providers.push(provider);
     markSeen(provider);
+  }
+  // A managed account with the scoped key still answers for that row.
+  if (liveRejected && !providers.some((provider) => provider.accountKey === scope.accountKey)) {
+    providers.push(...scopedLiveGone());
   }
   return providers;
 }
