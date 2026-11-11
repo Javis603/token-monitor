@@ -192,9 +192,10 @@ test('hiding Sessions hides its toolbar after resolving the replacement view', (
   const state = {breakdown:'session',openSession:null};
   let hidden = false;
   const render = Function('state', 'els', 'visibleStatsSurface', 'statsRenderScheduler', 'ensureBreakdownVisible',
+    'syncSessionSearchChrome',
     `${app.slice(start,end)}\n}; return renderAppContent;`)(state,
     {sessionToolFilter:{classList:{add(name){hidden=name==='hidden';}}}},
-    ()=>'main', {request(){}}, ()=>{state.breakdown='tool';});
+    ()=>'main', {request(){}}, ()=>{state.breakdown='tool';}, ()=>{});
   render();
   assert.equal(state.breakdown,'tool');
   assert.equal(hidden,true);

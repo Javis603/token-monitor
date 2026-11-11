@@ -3549,6 +3549,51 @@ html.is-windows .settings-panel select option {
 }
 .cost { margin-top: var(--total-cost-gap); color: var(--readable-muted); font-size: 0.75rem; }
 .cost { display: flex; align-items: center; gap: 3px; }
+.total-cost-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: var(--total-cost-gap);
+}
+.total-cost-row .cost {
+  min-width: 0;
+  margin-top: 0;
+}
+.session-search-toggle {
+  display: grid;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  margin: -7px -4px -7px 0;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.session-search-toggle:hover,
+.session-search-toggle:active {
+  background: rgba(var(--overlay-rgb), 0.08);
+  color: var(--text);
+}
+.session-search-toggle.is-active { color: var(--accent); }
+.session-search-toggle:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.32);
+  outline-offset: 1px;
+  color: var(--text);
+}
+.session-search-toggle-icon {
+  width: 13px;
+  height: 13px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/search.svg") center / contain no-repeat;
+  mask: url("icons/actions/search.svg") center / contain no-repeat;
+}
 .usage-cost-value { white-space: nowrap; }
 .usage-cost-info.limit-detail-tooltip-wrap {
   width: 11px;
@@ -4251,6 +4296,150 @@ html.is-windows .settings-panel select option {
   flex: 0 0 24px;
   align-items: center;
   justify-content: center;
+}
+.session-search-host {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 4px;
+  height: 0;
+  overflow: hidden;
+  /* The closed host keeps its flex slot at zero height; -4px block margins
+     cancel both shell gaps so the session list keeps its usual spacing. */
+  margin-block: -4px;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    height 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin-block 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 140ms ease-out;
+}
+.session-search-host.is-open {
+  height: 30px;
+  margin-block: -8px 4px;
+  opacity: 1;
+  pointer-events: auto;
+}
+.session-search {
+  display: flex;
+  height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 0 9px;
+  border: 1px solid rgba(var(--line-rgb), 0.22);
+  border-radius: 8px;
+  background: rgba(var(--sunken-rgb), 0.34);
+}
+.session-search:focus-within {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.1);
+}
+:root[data-reduce-motion="on"] .session-search-host { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .session-search-host { transition: none; }
+}
+.session-search-field-icon {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+  background: var(--muted);
+  -webkit-mask: url("icons/actions/search.svg") center / contain no-repeat;
+  mask: url("icons/actions/search.svg") center / contain no-repeat;
+}
+.session-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.6875rem;
+}
+.session-search-input::placeholder { color: var(--muted); }
+.session-search-input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.session-search-clear {
+  display: grid;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.session-search-clear:hover {
+  background: rgba(var(--overlay-rgb), 0.08);
+  color: var(--text);
+}
+.session-search-clear:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.32);
+  outline-offset: -1px;
+  color: var(--text);
+}
+.session-search-clear-icon {
+  position: relative;
+  display: block;
+  width: 8px;
+  height: 8px;
+}
+.session-search-clear-icon::before,
+.session-search-clear-icon::after {
+  position: absolute;
+  top: calc(50% - 0.5px);
+  left: 0;
+  width: 8px;
+  height: 1px;
+  border-radius: 1px;
+  background: currentColor;
+  content: '';
+}
+.session-search-clear-icon::before { transform: rotate(45deg); }
+.session-search-clear-icon::after { transform: rotate(-45deg); }
+.session-search-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.session-search-empty {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 14px 2px;
+  color: var(--muted);
+}
+.session-search-empty-text {
+  margin: 0;
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+.session-search-empty-clear {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgba(var(--accent-rgb), 0.24);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.625rem;
+  cursor: pointer;
+}
+.session-search-empty-clear:hover { background: rgba(var(--accent-rgb), 0.08); }
+.session-search-empty-clear:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.32);
+  outline-offset: 1px;
 }
 .session-tool-filter {
   position: relative;

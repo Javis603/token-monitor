@@ -10,6 +10,7 @@
     const contents = new WeakMap();
     const offsets = new WeakMap();
     let refreshFrame = 0;
+    let pendingUpdates = null;
     function distanceFor(element) {
       const content = contents.get(element);
       return Math.max(0, (content ? content.getBoundingClientRect().width : element.scrollWidth) - element.clientWidth);
@@ -28,25 +29,50 @@
       motion.duration = Math.max(240, Math.abs(distance - motion.from) * 10);
       if (!motion.frameId) motion.frameId = window.requestAnimationFrame(motion.step);
     }
-    function update(element) {
+    function prepare(element) {
       element.classList.toggle('is-overflow-enabled', enabled(element));
       // Reduced motion keeps the full text manually scrollable, without asking
       // Chromium to create an OS tooltip that can outlive a floating window.
       element.classList.toggle('is-overflow-static', prefersReducedMotion());
       element.removeAttribute('title');
+    }
+    function measure(element) {
       const distance = distanceFor(element);
       const offset = Math.min(offsets.get(element) || 0, distance);
+      return { element, distance, offset, scrollLeft: element.scrollLeft };
+    }
+    function apply({ element, distance, offset, scrollLeft }) {
       move(element, offset);
       element.classList.toggle('has-overflow-fade', enabled(element)
-        && distance - offset - element.scrollLeft > 1);
+        && distance - offset - scrollLeft > 1);
       const motion = motions.get(element);
       if (motion && motion.startedAt !== null && motion.distance !== distance) animate(motion, distance);
+    }
+    function update(element) {
+      if (pendingUpdates) {
+        pendingUpdates.add(element);
+        return;
+      }
+      prepare(element);
+      apply(measure(element));
+    }
+    function batch(callback) {
+      if (pendingUpdates) return callback();
+      pendingUpdates = new Set();
+      try {
+        return callback();
+      } finally {
+        const elements = [...pendingUpdates];
+        pendingUpdates = null;
+        elements.forEach(prepare);
+        elements.map(measure).forEach(apply);
+      }
     }
     function refresh() {
       if (refreshFrame) return;
       refreshFrame = window.requestAnimationFrame(() => {
         refreshFrame = 0;
-        document.querySelectorAll('.fade-overflow').forEach(update);
+        batch(() => document.querySelectorAll('.fade-overflow').forEach(update));
       });
     }
     function stop(element) {
@@ -115,7 +141,7 @@
       });
       refresh();
     }
-    function setText(element, value) {
+    function writeText(element, value) {
       const text = value || '';
       if (element.textContent === text) {
         refresh();
@@ -123,8 +149,16 @@
       }
       stop(element);
       (contents.get(element) || element).textContent = text;
-      update(element);
+      prepare(element);
+      if (pendingUpdates) {
+        pendingUpdates.add(element);
+      } else {
+        apply(measure(element));
+      }
       refresh();
+    }
+    function setText(element, value) {
+      return batch(() => writeText(element, value));
     }
     function preserveReading(previous, next) {
       const replacements = new Map(Array.from(next.querySelectorAll('.fade-overflow'))
@@ -161,7 +195,7 @@
     if (typeof window.ResizeObserver === 'function') {
       new window.ResizeObserver(refresh).observe(document.body);
     }
-    return { bind, setText, refresh, stop, update, preserveReading };
+    return { bind, setText, refresh, stop, update, batch, preserveReading };
   }
   return { create };
 });

@@ -19,6 +19,7 @@
   const sessionContextForRow = sessionLive.sessionContextForRow;
   const isGrokBotSession = sessionLive.isGrokBotSession;
   const fallbackColors = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];
+  const sessionSearchHaystackCache = new WeakMap();
 
   function setSessionTooltip(node, context, promptCache, translate, view) {
     const entries = [];
@@ -45,6 +46,44 @@
     if (!keepClient && text === client) return '';
     if (!keepClient && client && text.startsWith(`${client} · `)) return text.slice(client.length + 3);
     return text;
+  }
+
+  // Search covers the labels a row prints, including every folded subagent's
+  // title and identity, so a child session stays findable under its parent.
+  function sessionSearchHaystack(row) {
+    const cacheable = row !== null && typeof row === 'object';
+    if (cacheable) {
+      const cached = sessionSearchHaystackCache.get(row);
+      if (cached !== undefined) return cached;
+    }
+    const fields = ['name', 'title', 'detail', 'subtitle', 'subtitleIdentity', 'activity',
+      'activitySummary', 'client', 'clientLabel', 'modelLabel', 'groupDetail', 'subagentLabel',
+      'archivedLabel'];
+    const members = Array.isArray(row?.groupRows) && row.groupRows.length > 0 ? row.groupRows : [row];
+    const values = [];
+    for (const member of members) {
+      for (const field of fields) {
+        const value = textValue(member?.[field]);
+        if (value) values.push(value);
+      }
+    }
+    for (const field of fields) {
+      const value = textValue(row?.[field]);
+      if (value) values.push(value);
+    }
+    const haystack = values.join('\n').toLocaleLowerCase();
+    if (cacheable) sessionSearchHaystackCache.set(row, haystack);
+    return haystack;
+  }
+
+  function filterSessionRows(rows, query) {
+    const list = Array.isArray(rows) ? rows : [];
+    const terms = textValue(query).toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return list;
+    return list.filter((row) => {
+      const haystack = sessionSearchHaystack(row);
+      return terms.every((term) => haystack.includes(term));
+    });
   }
 
   // Shared by full session rows and compact Home/Dock/Notch rows. Settings
@@ -921,6 +960,7 @@
     applyBreakdownRowSemantics,
     archivedSessionCount,
     compactSessionTime,
+    filterSessionRows,
     groupBackgroundReviewRows,
     groupSessionRows,
     groupSubagentRows,

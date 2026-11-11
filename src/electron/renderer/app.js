@@ -388,6 +388,9 @@ state.periodMenuOpen = false;
 state.sessionToolFilter = '';
 state.sessionPage = 0;
 state.sessionPagerSignature = '';
+state.sessionSearchOpen = false;
+state.sessionSearchQuery = '';
+state.sessionRowsCache = null;
 let directBreakdownOverride = null;
 state.projectSettingsExpanded = false;
 state.sessionSettingsExpanded = false;
@@ -411,6 +414,11 @@ const els = {
   subscriptionList: document.getElementById('subscriptionList'), subscriptionAddForm: document.getElementById('subscriptionAddForm'), subscriptionAddToggle: document.getElementById('subscriptionAddToggle'), subscriptionAddDetails: document.getElementById('subscriptionAddDetails'), subscriptionProviderInput: document.getElementById('subscriptionProviderInput'), subscriptionAccountInput: document.getElementById('subscriptionAccountInput'), subscriptionPlanNameInput: document.getElementById('subscriptionPlanNameInput'), subscriptionAmountInput: document.getElementById('subscriptionAmountInput'), subscriptionCurrencyInput: document.getElementById('subscriptionCurrencyInput'), subscriptionIntervalCountInput: document.getElementById('subscriptionIntervalCountInput'), subscriptionIntervalInput: document.getElementById('subscriptionIntervalInput'), subscriptionStartDateInput: document.getElementById('subscriptionStartDateInput'), subscriptionAutoRenewInput: document.getElementById('subscriptionAutoRenewInput'), subscriptionNextRenewalInput: document.getElementById('subscriptionNextRenewalInput'), subscriptionNote: document.getElementById('subscriptionNote'), subscriptionOrphanNotice: document.getElementById('subscriptionOrphanNotice'), subscriptionOrphanText: document.getElementById('subscriptionOrphanText'), subscriptionOrphanAdopt: document.getElementById('subscriptionOrphanAdopt'), subscriptionOrphanDiscard: document.getElementById('subscriptionOrphanDiscard'), subscriptionSyncError: document.getElementById('subscriptionSyncError'), subscriptionNextRenewalLabel: document.getElementById('subscriptionNextRenewalLabel'), subscriptionNextRenewalNote: document.getElementById('subscriptionNextRenewalNote'), subscriptionSubmit: document.getElementById('subscriptionSubmit'), subscriptionCancelEdit: document.getElementById('subscriptionCancelEdit'), subscriptionTotalRow: document.getElementById('subscriptionTotalRow'), subscriptionErrorMessage: document.getElementById('subscriptionErrorMessage'), subscriptionPlanFields: document.getElementById('subscriptionPlanFields'), subscriptionTopUpFields: document.getElementById('subscriptionTopUpFields'), subscriptionTopUpList: document.getElementById('subscriptionTopUpList'), subscriptionTopUpDateInput: document.getElementById('subscriptionTopUpDateInput'), subscriptionTopUpAmountInput: document.getElementById('subscriptionTopUpAmountInput'), subscriptionTopUpAddButton: document.getElementById('subscriptionTopUpAddButton'), subscriptionAmountRow: document.getElementById('subscriptionAmountRow'), subscriptionTopUpHeadingRow: document.getElementById('subscriptionTopUpHeadingRow'), subscriptionKindInputs: [...document.querySelectorAll('input[name="subscriptionKind"]')]
 };
 Object.assign(els, {
+  sessionSearchToggle: document.getElementById('sessionSearchToggle'),
+  sessionSearchHost: document.getElementById('sessionSearchHost'),
+  sessionSearchInput: document.getElementById('sessionSearchInput'),
+  sessionSearchClear: document.getElementById('sessionSearchClear'),
+  sessionSearchStatus: document.getElementById('sessionSearchStatus'),
   glassInputNote: document.getElementById('glassInputNote'),
   backgroundImageOpacityRow: document.getElementById('backgroundImageOpacityRow'),
   backgroundImageOpacityInput: document.getElementById('backgroundImageOpacityInput'),
@@ -3099,6 +3107,83 @@ function sessionToolClients(row) {
   return [row.client, ...(row.groupRows || []).map(member => member.client)].filter(Boolean);
 }
 
+function sessionSearchQuery() {
+  return String(state.sessionSearchQuery || '').trim();
+}
+
+function setSessionSearchStatus(query, count) {
+  if (!els.sessionSearchStatus) return;
+  const text = query
+    ? t('sessions.searchResults', { count })
+    : '';
+  if (els.sessionSearchStatus.textContent !== text) els.sessionSearchStatus.textContent = text;
+}
+
+function syncSessionSearchChrome() {
+  const visible = state.breakdown === 'session' && !state.openSession;
+  const open = visible && state.sessionSearchOpen;
+  els.sessionSearchToggle?.classList.toggle('hidden', !visible);
+  els.sessionSearchToggle?.classList.toggle('is-active', open);
+  els.sessionSearchToggle?.setAttribute('aria-expanded', String(open));
+  els.sessionSearchHost?.classList.toggle('hidden', !visible);
+  els.sessionSearchHost?.classList.toggle('is-open', open);
+  if (els.sessionSearchHost) {
+    els.sessionSearchHost.inert = !open;
+    els.sessionSearchHost.setAttribute('aria-hidden', String(!open));
+  }
+  if (!sessionSearchComposing && els.sessionSearchInput && els.sessionSearchInput.value !== state.sessionSearchQuery) {
+    els.sessionSearchInput.value = state.sessionSearchQuery;
+  }
+  els.sessionSearchClear?.classList.toggle('hidden', !state.sessionSearchQuery);
+  if (!open) setSessionSearchStatus('', 0);
+}
+
+function setSessionSearchOpen(open, { focus = false } = {}) {
+  const next = Boolean(open);
+  if (next !== state.sessionSearchOpen) {
+    state.sessionSearchOpen = next;
+    if (!next) state.sessionSearchQuery = '';
+    state.sessionPage = 0;
+    state.rowSignature = '';
+    syncSessionSearchChrome();
+  }
+  if (next && focus) els.sessionSearchInput?.focus({ preventScroll: true });
+}
+
+function updateSessionSearchQuery(value) {
+  const next = String(value || '');
+  if (next === state.sessionSearchQuery) return;
+  state.sessionSearchQuery = next;
+  state.sessionPage = 0;
+  const cache = state.sessionRowsCache;
+  if (state.breakdown === 'session' && cache?.stats === state.stats && cache?.period === state.period) {
+    syncSessionSearchChrome();
+    const incompleteHint = sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)
+      ? 'sessions.incomplete' : '';
+    overflowText.batch(() => renderRows(cache.rows, { incompleteHint, fromSearch: true }));
+    return;
+  }
+  render();
+}
+
+function sessionSearchEmptyNode(query) {
+  const empty = document.createElement('div');
+  empty.className = 'session-search-empty';
+  const text = document.createElement('p');
+  text.className = 'session-search-empty-text';
+  text.textContent = t('sessions.searchNoResults', { query });
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.className = 'session-search-empty-clear';
+  clear.textContent = t('sessions.searchClear');
+  clear.addEventListener('click', () => {
+    updateSessionSearchQuery('');
+    els.sessionSearchInput?.focus({ preventScroll: true });
+  });
+  empty.append(text, clear);
+  return empty;
+}
+
 // Filter only the session list; shared projections also feed Home and details.
 function renderSessionToolFilter(rows) {
   const host = els.sessionToolFilter;
@@ -3149,19 +3234,36 @@ function renderSessionToolFilter(rows) {
   return state.sessionToolFilter ? rows.filter(row => sessionToolClients(row).includes(state.sessionToolFilter)) : rows;
 }
 
-function renderRows(rows, { incompleteHint = '' } = {}) {
+function renderRows(rows, { incompleteHint = '', fromSearch = false } = {}) {
   if (sessionTooltipShouldHoldRender()) return;
-  if (state.breakdown === 'session') rows = renderSessionToolFilter(rows);
-  if (rows.length === 0 && !incompleteHint) {
+  const searchQuery = state.breakdown === 'session' ? sessionSearchQuery() : '';
+  if (state.breakdown === 'session') {
+    rows = fromSearch
+      ? state.sessionToolFilter ? rows.filter(row => sessionToolClients(row).includes(state.sessionToolFilter)) : rows
+      : renderSessionToolFilter(rows);
+    rows = sessionRowsApi.filterSessionRows(rows, searchQuery);
+  }
+  const searchEmpty = Boolean(searchQuery && rows.length === 0);
+  if (rows.length === 0 && (!incompleteHint || searchEmpty)) {
     els.breakdown.replaceChildren();
+    if (incompleteHint) {
+      const hint = document.createElement('p');
+      hint.className = 'breakdown-incomplete-hint';
+      hint.setAttribute('role', 'status');
+      hint.textContent = t(incompleteHint);
+      els.breakdown.append(hint);
+    }
+    if (searchEmpty) els.breakdown.append(sessionSearchEmptyNode(searchQuery));
     renderSessionPager(null);
     state.rowSignature = '';
     renderProjectBreakdownFooter();
+    setSessionSearchStatus(searchQuery, 0);
     return;
   }
   const page = breakdownPage(rows, { breakdown: state.breakdown, page: state.sessionPage });
   state.sessionPage = page.page;
   renderSessionPager(page);
+  setSessionSearchStatus(searchQuery, page.total);
   const visibleRows = page.rows;
   const max = barScaleMax(rows);
   const hintText = incompleteHint ? t(incompleteHint) : '';
@@ -3198,7 +3300,7 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
   const rowsChanged = structureChanged || visibleRows.some((row) => (
     rowRenderFingerprints.get(existing.get(row.key)) !== nextFingerprints.get(row.key)
   ));
-  const liveMotionSnapshot = rowsChanged && !state.periodMotionActive && !state.animateBarsFromZero
+  const liveMotionSnapshot = rowsChanged && !fromSearch && !state.periodMotionActive && !state.animateBarsFromZero
     ? captureBreakdownMotion()
     : null;
   if (structureChanged) {
@@ -3220,14 +3322,16 @@ function renderRows(rows, { incompleteHint = '' } = {}) {
   const current = new Map(Array.from(els.breakdown.children)
     .filter((child) => !child.classList.contains('breakdown-incomplete-hint'))
     .map((child) => [child.dataset.key, child]));
-  for (const rowData of visibleRows) {
-    const row = current.get(rowData.key);
-    if (!row) continue;
-    const fingerprint = nextFingerprints.get(rowData.key);
-    if (rowRenderFingerprints.get(row) === fingerprint) continue;
-    updateRow(row, { ...rowData, barValue: rowData.barValue ?? rowData.value, max });
-    rowRenderFingerprints.set(row, fingerprint);
-  }
+  overflowText.batch(() => {
+    for (const rowData of visibleRows) {
+      const row = current.get(rowData.key);
+      if (!row) continue;
+      const fingerprint = nextFingerprints.get(rowData.key);
+      if (rowRenderFingerprints.get(row) === fingerprint) continue;
+      updateRow(row, { ...rowData, barValue: rowData.barValue ?? rowData.value, max });
+      rowRenderFingerprints.set(row, fingerprint);
+    }
+  });
   renderToolDetailFooter();
   renderProjectBreakdownFooter();
   if (liveMotionSnapshot) animateBreakdownFrom(liveMotionSnapshot, { duration: 600 });
@@ -5481,6 +5585,8 @@ function sessionDetailBack() {
 
 function renderSessionDetail({ detail, loading, error, preserveScroll = false } = {}) {
   els.sessionToolFilter.classList.add('hidden');
+  els.sessionSearchHost?.classList.add('hidden');
+  els.sessionSearchToggle?.classList.add('hidden');
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
@@ -5701,6 +5807,8 @@ function sessionGroupRunNode(row, max, parent) {
 
 function renderSessionGroupDetail(request) {
   els.sessionToolFilter.classList.add('hidden');
+  els.sessionSearchHost?.classList.add('hidden');
+  els.sessionSearchToggle?.classList.add('hidden');
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
@@ -6395,6 +6503,7 @@ function hidePeriodContentForMessage(message) {
   els.trendsPanel.classList.add('hidden');
   els.sessionDetail.classList.add('hidden');
   els.sessionDetailHead.classList.add('hidden');
+  els.sessionSearchHost?.classList.add('hidden');
   renderSessionPager(null);
 }
 
@@ -7050,7 +7159,9 @@ function scheduleSessionStatusRepaint(period, incompleteHint = '') {
   sessionStatusRepaintTimer = setTimeout(() => {
     sessionStatusRepaintTimer = null;
     if (visibleStatsSurface() !== 'main' || state.breakdown !== 'session' || state.openSession) return;
-    renderRows(sessionRowsForPeriod(period), { incompleteHint });
+    const rows = sessionRowsForPeriod(period);
+    state.sessionRowsCache = { stats: state.stats, period: state.period, rows };
+    renderRows(rows, { incompleteHint });
     scheduleSessionStatusRepaint(period, incompleteHint);
   }, Math.min(60_000, Math.max(1_000, next - now + 50)));
 }
@@ -7770,6 +7881,7 @@ function renderAppContent() {
     return;
   }
   ensureBreakdownVisible();
+  syncSessionSearchChrome();
   if (state.breakdown !== 'session' || state.openSession) els.sessionToolFilter.classList.add('hidden');
   const pluginPage = pluginMainPages?.render(pluginPageOptions(), state.breakdown) || false;
   els.shell.classList.toggle('plugin-page-mode', pluginPage);
@@ -7778,7 +7890,7 @@ function renderAppContent() {
     cancelNumberAnimation();
     state.openSession = null;
     for (const panel of [els.homePanel, els.breakdown, els.limitsPanel, els.trendsPanel, els.serviceStatusPanel,
-      els.sessionDetail, els.sessionDetailHead, els.sessionPagerHost, els.toolDetailFooter, els.projectBreakdownFooter, els.fixedPeriodMessage, els.viewBackRow]) panel?.classList.add('hidden');
+      els.sessionDetail, els.sessionDetailHead, els.sessionPagerHost, els.sessionSearchHost, els.toolDetailFooter, els.projectBreakdownFooter, els.fixedPeriodMessage, els.viewBackRow]) panel?.classList.add('hidden');
     els.shell.classList.remove('home-mode', 'session-mode');
     renderViewSwitcher(); signalContentReady();
     return;
@@ -7816,6 +7928,8 @@ function renderAppContent() {
   const { fixedUnavailable, detailUnavailable } = periodContentAvailability();
   if (fixedUnavailable || detailUnavailable) {
     els.sessionToolFilter.classList.add('hidden');
+    els.sessionSearchToggle.classList.add('hidden');
+    els.sessionSearchHost.classList.add('hidden');
     cancelNumberAnimation();
     els.totalTokens.textContent = fixedUnavailable ? '—' : formatNumber(Number(period.totalTokens || 0));
     updateTotalCompact(fixedUnavailable ? 0 : Number(period.totalTokens || 0));
@@ -7860,6 +7974,7 @@ function renderAppContent() {
   if (!state.refreshBusy && !state.refreshFeedbackTimer) setRefreshButtonState('idle');
   els.shell.classList.toggle('session-mode', state.breakdown === 'session');
   els.shell.classList.toggle('home-mode', state.breakdown === 'home');
+  syncSessionSearchChrome();
   if (state.breakdown !== 'session' || state.openSession) els.sessionPagerHost.classList.add('hidden');
   els.viewBackRow?.classList.toggle('hidden', state.breakdown === 'home' || !state.homeReturnVisible);
   // Leaving Home only CSS-hides the panel, so its heatmap scroller never sees a
@@ -7927,6 +8042,9 @@ function renderAppContent() {
     els.trendsPanel.classList.add('hidden');
     els.breakdown.classList.remove('hidden');
     const rows = rowsForPeriod(period);
+    state.sessionRowsCache = state.breakdown === 'session'
+      ? { stats: state.stats, period: state.period, rows }
+      : null;
     let incompleteHint = '';
     if (state.breakdown === 'project' && projectRowsApi.projectBreakdownIncomplete(state.stats, state.period)) {
       incompleteHint = 'projects.incomplete';
@@ -8163,6 +8281,10 @@ function setBreakdown(breakdown, options = {}) {
   }
   state.homeReturnVisible = options.fromHome === true && state.breakdown === 'home' && next !== 'home';
   state.breakdown = next;
+  if (next !== 'session') {
+    state.sessionSearchOpen = false;
+    state.sessionSearchQuery = '';
+  }
   syncPluginLimitsDemand();
   state.sessionPage = 0;
   state.rowSignature = '';
@@ -14353,6 +14475,43 @@ for (const input of els.reduceMotionInputs || []) {
   });
 }
 els.liveDotInput.addEventListener('change', saveAppearanceFromControls);
+els.sessionSearchToggle?.addEventListener('click', () => {
+  const open = !state.sessionSearchOpen;
+  setSessionSearchOpen(open, { focus: open });
+  render();
+});
+let sessionSearchComposing = false;
+els.sessionSearchInput?.addEventListener('compositionstart', () => {
+  sessionSearchComposing = true;
+});
+els.sessionSearchInput?.addEventListener('compositionend', () => {
+  sessionSearchComposing = false;
+  updateSessionSearchQuery(els.sessionSearchInput.value);
+});
+els.sessionSearchInput?.addEventListener('input', (event) => {
+  if (sessionSearchComposing || event.isComposing) return;
+  updateSessionSearchQuery(els.sessionSearchInput.value);
+});
+els.sessionSearchInput?.addEventListener('search', () => {
+  updateSessionSearchQuery(els.sessionSearchInput.value);
+});
+els.sessionSearchClear?.addEventListener('click', () => {
+  updateSessionSearchQuery('');
+  els.sessionSearchInput?.focus({ preventScroll: true });
+});
+els.sessionSearchInput?.addEventListener('keydown', (event) => {
+  if (event.key !== 'Escape' || event.isComposing) return;
+  event.preventDefault();
+  event.stopPropagation();
+  if (sessionSearchQuery()) {
+    updateSessionSearchQuery('');
+    els.sessionSearchInput?.focus({ preventScroll: true });
+    return;
+  }
+  setSessionSearchOpen(false);
+  render();
+  els.sessionSearchToggle?.focus({ preventScroll: true });
+});
 els.sessionToolFilterItems.addEventListener('scroll', updateSessionToolScrollButtons, { passive: true });
 els.sessionToolPrevious.addEventListener('click', () => scrollSessionTools(-1));
 els.sessionToolNext.addEventListener('click', () => scrollSessionTools(1));
