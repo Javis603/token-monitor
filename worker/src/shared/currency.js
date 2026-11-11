@@ -66,6 +66,10 @@
     return Number((amount * activeRates[code]).toFixed(6));
   }
 
+  function currencyFractionDigits(currency) {
+    return normalizeCurrency(currency) === 'KRW' ? 0 : 2;
+  }
+
   function fractionDigitsFor(amount, currency) {
     const code = normalizeCurrency(currency);
     // Zero-decimal display currency. A converted cost in won reads ₩1380, and a
@@ -87,7 +91,7 @@
     CURRENCY_RATES,
     convertUsd,
     formatCurrencyFromUsd,
-    fractionDigitsFor,
+    currencyFractionDigits,
     normalizeCurrency,
     configureRates,
     resolveEffectiveRates

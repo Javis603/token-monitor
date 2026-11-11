@@ -4263,8 +4263,7 @@ function seedSubscriptionPlanName() {
 // follows the selected unit: won has no sub-unit, the other supported currencies
 // carry cents. Without this the form keeps inviting two decimals for KRW.
 function syncSubscriptionAmountPrecision() {
-  const code = currencyApi.normalizeCurrency(els.subscriptionCurrencyInput?.value);
-  const digits = currencyApi.fractionDigitsFor(1000, code);
+  const digits = currencyApi.currencyFractionDigits(els.subscriptionCurrencyInput?.value);
   for (const input of [els.subscriptionAmountInput, els.subscriptionTopUpAmountInput]) {
     if (!input) continue;
     input.step = digits === 0 ? '1' : `0.${'0'.repeat(digits - 1)}1`;
@@ -4403,6 +4402,10 @@ function addSubscriptionTopUpEntry() {
     setSubscriptionError(t('settings.subscriptions.errorAmount'));
     return;
   }
+  if (els.subscriptionCurrencyInput?.value === 'KRW' && !Number.isInteger(amount)) {
+    setSubscriptionError(t('settings.subscriptions.errorWholeWon'));
+    return;
+  }
   // Normalized on the way in, not on the way out: normalizeTopUps() mints an id
   // for any entry lacking one, so leaving raw entries in state re-minted every
   // id on every render and the delete button never matched the row it was on.
@@ -4516,6 +4519,7 @@ async function submitSubscription() {
   const providerId = String(els.subscriptionProviderInput?.value || '').trim();
   const accountValue = String(els.subscriptionAccountInput?.value || '').trim();
   const amount = Number(els.subscriptionAmountInput?.value);
+  const currency = String(els.subscriptionCurrencyInput?.value || 'USD');
   const startDate = String(els.subscriptionStartDateInput?.value || '').trim();
   const autoRenew = els.subscriptionAutoRenewInput?.checked !== false;
   const renewalDate = String(els.subscriptionNextRenewalInput?.value || '').trim();
@@ -4531,9 +4535,17 @@ async function submitSubscription() {
       setSubscriptionError(t('settings.subscriptions.errorTopUpEntries'));
       return;
     }
+    if (currency === 'KRW' && topUps.some((entry) => entry.amountMinor % 100 !== 0)) {
+      setSubscriptionError(t('settings.subscriptions.errorWholeWon'));
+      return;
+    }
   } else {
     if (!Number.isFinite(amount) || amount <= 0) {
       setSubscriptionError(t('settings.subscriptions.errorAmount'));
+      return;
+    }
+    if (currency === 'KRW' && !Number.isInteger(amount)) {
+      setSubscriptionError(t('settings.subscriptions.errorWholeWon'));
       return;
     }
     if (!startDate) {
@@ -4574,7 +4586,7 @@ async function submitSubscription() {
     binding: account ? subscriptionApi.bindingFromAccount(account) : editing?.binding,
     planName: String(els.subscriptionPlanNameInput?.value || '').trim(),
     amountMinor: Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) : 0,
-    currency: String(els.subscriptionCurrencyInput?.value || 'USD'),
+    currency,
     interval: String(els.subscriptionIntervalInput?.value || 'month'),
     intervalCount: Number(els.subscriptionIntervalCountInput?.value) || 1,
     // Each kind keeps only its own anchor, so switching kind on an existing

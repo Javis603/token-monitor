@@ -7,7 +7,7 @@ const {
   CURRENCY_CODES,
   convertUsd,
   formatCurrencyFromUsd,
-  fractionDigitsFor,
+  currencyFractionDigits,
   normalizeCurrency,
   configureRates,
   resolveEffectiveRates
@@ -41,12 +41,11 @@ test('formats converted costs with unambiguous symbols (built-in defaults)', () 
   assert.equal(formatCurrencyFromUsd(1, 'KRW'), '₩1380');
 });
 
-test('fractionDigitsFor keeps won whole and the other currencies in cents', () => {
-  assert.equal(fractionDigitsFor(1380, 'KRW'), 0);
-  assert.equal(fractionDigitsFor(0.5, 'KRW'), 0);
-  assert.equal(fractionDigitsFor(31.5, 'TWD'), 2);
-  assert.equal(fractionDigitsFor(10, 'USD'), 2);
-  assert.equal(fractionDigitsFor(1, 'USD'), 4);
+test('recorded amounts use whole won and two decimal places for other currencies', () => {
+  assert.equal(currencyFractionDigits('krw'), 0);
+  for (const code of ['USD', 'TWD', 'HKD', 'CNY']) {
+    assert.equal(currencyFractionDigits(code), 2);
+  }
 });
 
 test('configureRates overlays active rates and null resets to defaults', () => {

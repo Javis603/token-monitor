@@ -39,10 +39,8 @@
     return currencyApi.CURRENCY_RATES[code]?.symbol || `${code} `;
   }
 
-  // Which decimals an amount renders with is the currency table's decision, not
-  // this module's: won has no sub-unit, the others keep cents.
   function unitsText(currencyApi, currency, units) {
-    return `${symbolFor(currencyApi, currency)}${units.toFixed(currencyApi.fractionDigitsFor(units, currency))}`;
+    return `${symbolFor(currencyApi, currency)}${units.toFixed(currencyApi.currencyFractionDigits(currency))}`;
   }
 
   // Stored amounts are integer hundredths.
