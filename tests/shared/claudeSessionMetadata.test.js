@@ -223,6 +223,56 @@ test('readSessionTurnEnded follows the newest stop_reason, and tool_use is not a
   assert.equal(readSessionTitle(both.file, { cache }), 'Shared pass');
 });
 
+test('readSessionTurnEnded does not treat a local slash command like /compact as a new turn', (t) => {
+  // Claude Desktop has no live registry, so a manual /compact is read from the
+  // transcript alone. The client writes the command and its output as plain
+  // user records after the summary, and no response follows: counting them as
+  // prompts left the session running until the recency window expired.
+  const { readSessionTurnEnded } = require('../../src/shared/providers/claude/sessionMetadata');
+  const assistant = (stop) => JSON.stringify({ type: 'assistant', message: { id: `msg_${stop}`, stop_reason: stop } });
+  const user = (content, extra = {}) => JSON.stringify({ type: 'user', ...extra, message: { role: 'user', content } });
+  const caveat = user('<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request, and its output goes straight to the user.</local-command-caveat>', { isMeta: true });
+  const compactCommand = user('<command-name>/compact</command-name>\n            <command-message>compact</command-message>\n            <command-args></command-args>');
+  const compacted = user('<local-command-stdout>Compacted </local-command-stdout>');
+  const manualCompact = [
+    assistant('end_turn'),
+    JSON.stringify({ type: 'system', subtype: 'compact_boundary', compactMetadata: { trigger: 'manual' } }),
+    user('This session is being continued from a previous conversation.', { isCompactSummary: true, isVisibleInTranscriptOnly: true }),
+    caveat,
+    compactCommand,
+    compacted,
+    JSON.stringify({ type: 'attachment' })
+  ];
+  const compact = fixture(manualCompact);
+  t.after(() => fs.rmSync(compact.dir, { recursive: true, force: true }));
+  const cache = new Map();
+  assert.equal(readSessionTurnEnded(compact.file, { cache }), true, 'a local command does not reopen the finished turn');
+
+  // The caveat covers only the command it introduces; a later prompt still starts a turn.
+  fs.appendFileSync(compact.file, `${user('next thing')}\n`);
+  assert.equal(readSessionTurnEnded(compact.file, { cache }), false);
+
+  // Without a caveat the command was sent to the model (a prompt command such
+  // as /goal is followed by its expansion and a response), so it is a prompt.
+  const promptCommand = fixture([assistant('end_turn'), user('<command-name>/goal</command-name>\n<command-message>goal</command-message>\n<command-args>ship it</command-args>')]);
+  t.after(() => fs.rmSync(promptCommand.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(promptCommand.file, { cache: new Map() }), false);
+
+  // An append-only resume can stop between the caveat and the command it introduces.
+  const split = fixture(manualCompact.slice(0, 4));
+  t.after(() => fs.rmSync(split.dir, { recursive: true, force: true }));
+  const splitCache = new Map();
+  assert.equal(readSessionTurnEnded(split.file, { cache: splitCache }), true);
+  fs.appendFileSync(split.file, `${compactCommand}\n${compacted}\n`);
+  assert.equal(readSessionTurnEnded(split.file, { cache: splitCache }), true, 'the caveat survives the append resume');
+
+  // The oversized path agrees with the ordinary parser on local command output.
+  const bigOutput = fixture([assistant('end_turn'), caveat, user('<command-name>/context</command-name>'),
+    user(`<local-command-stdout>${'z'.repeat(300 * 1024)}</local-command-stdout>`)]);
+  t.after(() => fs.rmSync(bigOutput.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(bigOutput.file, { cache: new Map() }), true, 'oversized command output is not a prompt');
+});
+
 test('Claude session context uses the latest API input occupancy and model capacity', (t) => {
   const assistant = ({ model, input, write, read, output = 0 }) => JSON.stringify({
     type: 'assistant',
