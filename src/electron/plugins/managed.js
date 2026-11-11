@@ -205,6 +205,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, cred
           await manager.beginMutation(id); began = true;
           // No await between this recheck and settings persistence.
           checkContent?.(getSettings());
+          options.beforeCommit?.();
           const target = path.join(userDir, id), stage = path.join(txDir, 'stage');
           const hadTarget = hasTarget(target);
           let current = null;
@@ -319,7 +320,7 @@ function createManagedPlugins({ root, userDir, dataDir, settingsDir = null, cred
       if (item.baseline !== JSON.stringify(registry[item.pkg.manifest.id] || null)) throw new Error('installed version changed; preview again');
       assertInstallable(item.pkg, item.origin);
       return transact(item.pkg.manifest.id, registry[item.pkg.manifest.id] ? 'update' : 'install', item.pkg, item.origin, {
-        trustUpdate: options.trustUpdate === true, trustInstall: options.trustInstall === true, initialSetup: options.initialSetup, beforeEnable: options.beforeEnable, withLifecycle: options.withLifecycle,
+        trustUpdate: options.trustUpdate === true, trustInstall: options.trustInstall === true, initialSetup: options.initialSetup, beforeEnable: options.beforeEnable, beforeCommit: options.beforeCommit, withLifecycle: options.withLifecycle,
         consumePreview() {
           if (previews.get(token) !== item || item.expires < now()) throw new Error('package preview expired; select the package again');
           previews.delete(token);
