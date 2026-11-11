@@ -536,6 +536,54 @@ const {
   coerceHistory, deviceHistoryRevision, historyPreview, historyRevision
 } = require('../../src/shared/history');
 
+function completeLegacyHistory() {
+  return {
+    daily: [{ date: '2024-01-01', tokens: 100 }, { date: '2026-06-07', tokens: 10 }],
+    monthly: [{ month: '2024-01', tokens: 100 }, { month: '2026-06', tokens: 10 }],
+    summary: { totalTokens: 110, activeDays: 2 }
+  };
+}
+
+test('aggregateHistory recovers complete legacy dates before re-capping stale devices', () => {
+  const { aggregateHistory } = require('../../src/shared/usage');
+  const legacy = completeLegacyHistory();
+  const before = structuredClone(legacy);
+  const current = normalizeHistory({ contributions: [{ date: '2024-01-01', tokens: 50 }] }, {
+    todayKey: '2026-06-07'
+  });
+  const result = aggregateHistory([
+    { deviceId: 'old', history: legacy, historyAvailable: true },
+    { deviceId: 'new', history: current, historyAvailable: true }
+  ], { todayKey: '2026-06-07' });
+  assert.equal(result.summary.activeDaysComplete, true);
+  assert.equal(result.summary.activeDays, 2);
+  assert.equal(result.dailyTotals[0].tokens, 150);
+  assert.deepEqual(result.daily.map((day) => day.date), ['2026-06-07']);
+  assert.deepEqual(legacy, before);
+});
+
+test('legacy recovery requires matching lifetime, monthly and daily token coverage', () => {
+  const changes = [
+    (h) => { h.daily.pop(); },
+    (h) => { h.summary.totalTokens = 111; },
+    (h) => { h.summary.activeDays = 3; },
+    (h) => { h.monthly[0].tokens = 99; h.monthly[1].tokens = 11; },
+    (h) => { h.summary.activeDaysComplete = false; },
+    (h) => { h.dailyTotalsOmitted = 2; },
+    (h) => { h.dailyTotals = []; },
+    (h) => { h.daily[0].tokens = -100; },
+    (h) => { h.daily[0].date = 'invalid'; }
+  ];
+  for (const change of changes) {
+    const history = completeLegacyHistory();
+    change(history);
+    assert.notEqual(coerceHistory(history).summary.activeDaysComplete, true);
+  }
+  const { aggregateHistory } = require('../../src/shared/usage');
+  const result = aggregateHistory([{ history: completeLegacyHistory(), historyAvailable: false }]);
+  assert.equal(result.summary.activeDaysComplete, false);
+});
+
 test('mergeHistories deduplicates all-time active dates outside the rolling window', () => {
   const dev1 = normalizeHistory(parseGraphResult(graphFromDays([
     { date: '2024-01-01', tokens: 100, cost: 5, activeTimeMs: 60000 },

@@ -418,7 +418,7 @@ Clients with stream v2 or without a supported header receive complete `stats` ev
 
 ## `GET /api/history`
 
-Returns the authenticated aggregate History. The detailed `daily` tier remains capped to the rolling 370-day window. When every usage-contributing stored device provides complete compact history, `dailyTotals` contains all observed dates merged across devices and `summary.activeDaysComplete` is `true`; otherwise `dailyTotals` is omitted and the flag is `false`.
+Returns the authenticated aggregate History. The detailed `daily` tier remains capped to the rolling 370-day window. When every usage-contributing stored device provides complete compact history, `dailyTotals` contains all observed dates merged across devices and `summary.activeDaysComplete` is `true`; otherwise `dailyTotals` is omitted and the flag is `false`. Legacy records without completeness metadata can also contribute complete history when their retained daily dates exactly account for the lifetime token and active-day totals and match every monthly token total. Explicitly incomplete or omitted compact history is never inferred complete this way.
 
 ## `GET /api/devices`
 

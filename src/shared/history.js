@@ -583,6 +583,45 @@ function mergeHistories(histories, options = {}) {
   };
 }
 
+// Old producers kept lifetime summaries/monthly totals but only a rolling daily
+// tier. Recover dates only when that retained tier accounts for every token and
+// active day. Never override a newer producer's explicit incomplete/omitted state.
+function recoverLegacyDailyTotals(history) {
+  if (Object.hasOwn(history.summary, 'activeDaysComplete')
+    || Object.hasOwn(history, 'dailyTotals') || Object.hasOwn(history, 'dailyTotalsOmitted')) return;
+  const { totalTokens, activeDays } = history.summary;
+  if (!Number.isSafeInteger(totalTokens) || totalTokens <= 0
+    || !Number.isSafeInteger(activeDays) || activeDays <= 0) return;
+  const dates = new Set();
+  const dailyMonths = new Map();
+  let dailyTokens = 0;
+  let count = 0;
+  for (const day of history.daily) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day?.date)
+      || !Number.isFinite(Date.parse(`${day.date}T00:00:00Z`))
+      || new Date(`${day.date}T00:00:00Z`).toISOString().slice(0, 10) !== day.date
+      || dates.has(day.date) || !Number.isSafeInteger(day.tokens) || day.tokens < 0) return;
+    dates.add(day.date);
+    dailyTokens += day.tokens;
+    if (day.tokens > 0) count++;
+    const month = day.date.slice(0, 7);
+    dailyMonths.set(month, (dailyMonths.get(month) || 0) + day.tokens);
+  }
+  if (dailyTokens !== totalTokens || count !== activeDays) return;
+  const months = new Set();
+  let monthlyTokens = 0;
+  for (const month of history.monthly) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month?.month) || months.has(month.month)
+      || !Number.isSafeInteger(month.tokens) || month.tokens < 0
+      || month.tokens !== (dailyMonths.get(month.month) || 0)) return;
+    months.add(month.month);
+    monthlyTokens += month.tokens;
+  }
+  if (monthlyTokens !== totalTokens) return;
+  history.dailyTotals = compactDailyTotals(history.daily);
+  history.summary = { ...history.summary, activeDaysComplete: true };
+}
+
 // Defensively normalize arbitrary wire JSON to the { daily, monthly, summary } shape.
 function coerceHistory(raw) {
   const src = raw && typeof raw === 'object' ? raw : {};
@@ -593,6 +632,7 @@ function coerceHistory(raw) {
   };
   if (Array.isArray(src.dailyTotals)) history.dailyTotals = src.dailyTotals;
   if (Number.isFinite(src.dailyTotalsOmitted)) history.dailyTotalsOmitted = src.dailyTotalsOmitted;
+  recoverLegacyDailyTotals(history);
   return history;
 }
 
