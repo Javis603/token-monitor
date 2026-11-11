@@ -9992,6 +9992,9 @@ app.whenReady().then(() => {
   ipcMain.on('dashboard:ready', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || win !== dashboardWindow || win.isDestroyed()) return;
+    // A shared renderer can retain an opaque canvas over the native material.
+    // Restore transparency after load, before revealing the prepared Dashboard.
+    if (process.platform === 'darwin') win.setBackgroundColor('#00000000');
     dashboardWindowReady = true;
     showDashboardWindow(win);
   });

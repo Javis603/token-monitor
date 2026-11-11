@@ -19,7 +19,7 @@ function dashboardFunction(name, endMarker, context) {
   return new vm.Script(`${body}\n${name};`).runInNewContext(context);
 }
 
-function dashboardWindowFixture() {
+function dashboardWindowFixture(platform = 'win32') {
   const windows = [];
   const handlers = new Map();
   class Window extends EventEmitter {
@@ -40,6 +40,7 @@ function dashboardWindowFixture() {
     hide() { this.visible = false; this.calls.push('hide'); }
     show() { this.visible = true; this.calls.push('show'); }
     focus() { this.calls.push('focus'); }
+    setBackgroundColor(color) { this.calls.push(['background', color]); }
     restore() { this.minimized = false; this.calls.push('restore'); }
     loadFile() { this.calls.push('load'); return Promise.resolve(); }
     destroy() { this.destroyed = true; this.emit('closed'); }
@@ -47,7 +48,7 @@ function dashboardWindowFixture() {
   }
   const context = vm.createContext({
     dashboardWindow: null, dashboardWindowReady: false,
-    BrowserWindow: Window, process: { platform: 'win32' }, path, __dirname: rootDir,
+    BrowserWindow: Window, process: { platform }, path, __dirname: rootDir,
     appWindowIcon: () => ({}), applyWindowsChrome() {}, syncWindowsBackdrop() {},
     nativeBlurEnabled: () => false, attachNativeMaterialVisibility() {},
     syncNativeMaterialVisibility() {}, nativeMaterialOptions: () => ({}), settings: {},
@@ -72,6 +73,19 @@ function dashboardWindowFixture() {
     }
   };
 }
+
+test('macOS Dashboard restores its transparent canvas before reveal and after reload', () => {
+  const f = dashboardWindowFixture('darwin');
+  const win = f.open();
+  f.ready({ webContents: {} });
+  assert.deepEqual(win.calls, ['load']);
+  f.ready(win);
+  assert.deepEqual(win.calls, ['load', ['background', '#00000000'], 'show', 'focus']);
+  win.calls.length = 0;
+  f.crash(win);
+  f.ready(win);
+  assert.deepEqual(win.calls, ['reload', ['background', '#00000000'], 'show', 'focus']);
+});
 
 test('a shared renderer crash reloads the existing Dashboard and a repeat crash is bounded', () => {
   const f = dashboardWindowFixture();
