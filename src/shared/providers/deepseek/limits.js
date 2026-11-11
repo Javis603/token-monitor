@@ -82,10 +82,9 @@ async function fetchToolSpends(token, { accountKey, currency, now }, deps) {
     const data = body?.data?.biz_data;
     if (body?.code !== 0 || body?.data?.biz_code !== 0 || data?.start !== window.start || data?.end !== window.end) return null;
     const row = (data.data || []).find((item) => String(item?.currency || '').toUpperCase() === currency);
-    // Prefer a non-empty `series` over `function_series`; a row with neither is malformed.
     const lists = [row?.series, row?.function_series].filter(Array.isArray);
     if (!lists.length) return null;
-    const list = lists.find((items) => items.length) || [];
+    const list = lists.flat();
     const toolSpends = {};
     for (const [key, names] of Object.entries(CONSOLE_TOOL_NAMES)) {
       const costs = list.filter((item) => names.includes(item?.model))
