@@ -1,60 +1,60 @@
 {
   "mode": "override",
-  "modeNote": "\"override\": ensure-vendored-tokscale.js swaps in the pinned fork build described below, and the two verify-vendored-tokscale*.js gates run against it. \"upstream\": ensure-vendored-tokscale.js no-ops (no download or replacement) and the plain npm-installed tokscale is authoritative — but both verify-vendored-tokscale*.js gates keep running, now against that npm-installed binary, so CI still fails if it doesn't actually cover DEFAULT_CLIENTS or regressed DSH parsing. `override` remains required while Token Monitor depends on downstream functionality the installed upstream release does not provide. The upstream scanner and DSH patches may be retired once equivalent fixes ship officially; the session/workspace reporting capability is a persistent Token Monitor requirement, so flipping to `upstream` is correct only when an official release provides an equivalent report surface. Without it the collector still runs (the scan falls back to `client,session,model` and the file-reading resolvers answer), but scan-backed session timestamps and project attribution narrow to the clients that have a resolver. The pin fields (commit/releaseTag/platforms) stay in place either way, so flipping back to \"override\" for a future upstream lag is editing this file again rather than re-adding infrastructure; baseVersion is not one of them — it tracks the installed dependency in both modes (see baseVersionNote). While the client catalog has forkOnly clients (CatPaw, Qoder CN), \"upstream\" fails verify-vendored-tokscale-clients.js by design: no upstream release parses them, and failing closed beats silently reporting zero usage for them.",
+  "modeNote": "\"override\": ensure-vendored-tokscale.js swaps in the pinned fork build described below, and the two verify-vendored-tokscale*.js gates run against it. \"upstream\": ensure-vendored-tokscale.js no-ops (no download or replacement) and the plain npm-installed tokscale is authoritative — but both verify-vendored-tokscale*.js gates keep running, now against that npm-installed binary, so CI still fails if it doesn't actually cover DEFAULT_CLIENTS or regressed DSH parsing. `override` remains required while Token Monitor depends on downstream functionality the installed upstream release does not provide. The upstream scanner and DSH patches may be retired once equivalent fixes ship officially; the session/workspace reporting capability is a persistent Token Monitor requirement, so flipping to `upstream` is correct only when an official release provides an equivalent report surface. Without it the collector still runs (the scan falls back to `client,session,model` and the file-reading resolvers answer), but scan-backed session timestamps and project attribution narrow to the clients that have a resolver. The pin fields (commit/releaseTag/platforms) stay in place either way, so flipping back to \"override\" for a future upstream lag is editing this file again rather than re-adding infrastructure; baseVersion is not one of them — it tracks the installed dependency in both modes (see baseVersionNote). While the client catalog has forkOnly clients (CatPaw, Qoder CN), \"upstream\" fails verify-vendored-tokscale-clients.js by design: the upstream binary does not accept those fork-owned client ids, and failing closed beats silently reporting zero usage for them.",
   "upstream": "junhoyeo/tokscale",
   "fork": "Javis603/tokscale",
-  "commit": "53e7e094fe39c63bf34e4cac1f0ea32f2ceb32c2",
-  "commitTitle": "fix(cache): avoid waking WSL during cache maintenance",
+  "commit": "2a0d6adc3c72efcbeff7bacd722b0abf2d241f52",
+  "commitTitle": "fix(qoder): reconcile request copies and preserve token buckets",
   "baseVersion": "4.22.0",
   "baseVersionNote": "The npm-installed @tokscale/cli-<platform> package version this manifest is aligned with. It tracks the dependency in BOTH modes, and two gates enforce that: ensure-vendored-tokscale.js refuses to swap under \"override\" when the installed package reports something else, and verify-vendored-tokscale-release.js (plus its real-manifest test, so npm run verify catches it too) rejects any manifest whose baseVersion disagrees with @tokscale/cli optionalDependencies. So a tokscale bump always has to touch this file — either pin a new build or flip the mode — instead of silently leaving a stale override in place.",
   "releaseRepo": "Javis603/tokscale",
-  "releaseTag": "token-monitor-53e7e094",
-  "reason": "Retains the fork's session/workspace reports, parent links, performance timing, custom-price authority and fork-only clients on the 4.22.0 npm baseline. Aligns native parsing with upstream b0991187, including Antigravity protobuf token corrections, BB mirror deduplication, OMP routing attribution and Kimi K3.1 Pro pricing. Qoder international and CN share upstream transcript parsing with independent source partitions and reported tokens only; CN retains legacy SQLite, released session identities, bounded reads, cache fallback and inclusive-input accounting. Native Windows reports leave unrelated WSL source-cache paths unprobed. Explicit WSL --home scans may prune missing non-retained sources only within the selected home, while Claude history is filtered by requested roots before source existence probes. Parser/cache migrations preserve compatible released cache data without requiring a cache reset. The subsequent upstream 4.22.0 tag adds website changes and version metadata, with no native Rust source changes beyond this frozen target.",
+  "releaseTag": "token-monitor-2a0d6adc",
+  "reason": "Retains the fork's session/workspace reports, parent links, performance timing, custom-price authority and fork-only clients on the 4.22.0 npm baseline. Aligns native parsing with upstream b0991187, including Antigravity protobuf token corrections, BB mirror deduplication, OMP routing attribution and Kimi K3.1 Pro pricing. Qoder international and CN share upstream transcript parsing with independent source partitions and reported tokens only; CN retains legacy SQLite, released session identities, bounded reads, cache fallback and inclusive-input accounting. Native Windows reports leave unrelated WSL source-cache paths unprobed. Explicit WSL --home scans may prune missing non-retained sources only within the selected home, while Claude history is filtered by requested roots before source existence probes. Parser/cache migrations preserve compatible released cache data without requiring a cache reset. The subsequent upstream 4.22.0 tag adds website changes and version metadata, with no native Rust source changes beyond this frozen target. Qoder request copies reconcile completed counters and Gemini inclusive prompts before cache splitting; independent reasoning remains an additive reported bucket.",
   "platforms": {
     "android-arm64": {
       "package": "@tokscale/cli-android-arm64",
       "asset": "tokscale-android-arm64",
-      "sha256": "23257a9d25d470c3baac50a435ede45c5e9855aef18756a6ef0a5e11e9c11649"
+      "sha256": "38fa85c7874c3b8a2da44c956856225ae23fe19599ea68bba8a35d48b0494d25"
     },
     "darwin-arm64": {
       "package": "@tokscale/cli-darwin-arm64",
       "asset": "tokscale-darwin-arm64",
-      "sha256": "f1544ec72fa5b67dd417a9f1ef8ac2caa8ce8fccafbdfc60235480b8d6a0c9c6"
+      "sha256": "1761b2416c9640a928ad5178b8805f590c152384f6d7c80ff4b5a1085a0f1b86"
     },
     "darwin-x64": {
       "package": "@tokscale/cli-darwin-x64",
       "asset": "tokscale-darwin-x64",
-      "sha256": "d15bb88c3c37b4c63ea459dc68ee47be905a53ea664a00ed02b3d9f49af6be56"
+      "sha256": "7646d7dd1f5e7beb07f0916504a63db07ad8d25aaf2d4948236f57640eb3dba6"
     },
     "linux-arm64": {
       "package": "@tokscale/cli-linux-arm64-gnu",
       "asset": "tokscale-linux-arm64",
-      "sha256": "8595a8cb6e008d1c87f18599630b69ab7592e4a120a9f7a7df7b4cc00ccc4755"
+      "sha256": "5b86e14e7354754824e2291e10ddab9bc6c386b8333462b193d4514eaec36715"
     },
     "linux-arm64-musl": {
       "package": "@tokscale/cli-linux-arm64-musl",
       "asset": "tokscale-linux-arm64-musl",
-      "sha256": "244fb0b5c8438c291d72d6a361c17eada80aefa25696128262593e9bbf243f00"
+      "sha256": "33a9cdf720c1ec38fb854bcbd6caafe2175dac1792e0ea3322efad447cb26cb0"
     },
     "linux-x64": {
       "package": "@tokscale/cli-linux-x64-gnu",
       "asset": "tokscale-linux-x64",
-      "sha256": "6c907d20f9f5c4a74874dda467d28ee4264d9925ef63b53ad47d950c2c17ea32"
+      "sha256": "5e13709503490a18fc4f8fab95367c8aa33d2dacdcad5fe216bbbe729c8c29cc"
     },
     "linux-x64-musl": {
       "package": "@tokscale/cli-linux-x64-musl",
       "asset": "tokscale-linux-x64-musl",
-      "sha256": "75b4bdff38570beb4bec058cde80343f42e6c035d7ffeb2aa3be18d175fb74eb"
+      "sha256": "d559caa7f41937ff377c841c009a37c4c4fbe7cf920706a0cad89664c034d196"
     },
     "win32-arm64": {
       "package": "@tokscale/cli-win32-arm64-msvc",
       "asset": "tokscale-win32-arm64.exe",
-      "sha256": "2d0978a6b1ffc5c428e15aa0eea80c21105d8a72b7382751916625c5eae84064"
+      "sha256": "06118eeb6d25183141ef79388828fe9a9c0ebf23c4e0080392ca9ed394513e78"
     },
     "win32-x64": {
       "package": "@tokscale/cli-win32-x64-msvc",
       "asset": "tokscale-win32-x64.exe",
-      "sha256": "a9802d296041551a16a2e22ff3ea8ba1a545d19d66e314658e7735626caa8c9f"
+      "sha256": "58d177fa58a9dd924e2ef16ff377597dd2f2eaf47c323b6b70e1b378105f64d9"
     }
   }
 }

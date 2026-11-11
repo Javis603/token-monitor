@@ -396,40 +396,38 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
   },
   {
     client: 'qoder',
-    expectedRow: { model: 'claude-sonnet-4-6', input: 1000, output: 120, cacheRead: 600, cacheWrite: 0, reasoning: 0 },
+    expectedRow: { model: 'claude-sonnet-4-6', input: 1060, output: 140, cacheRead: 640, cacheWrite: 0, reasoning: 70 },
     hasExplicitTotal: false,
-    expectedPeriod: { totalTokens: 1720, clientTokens: 1720, clientOutputTokens: 120 },
-    expectedSession: { id: 'global-qsess-1', totalTokens: 1720, outputTokens: 120, reasoningTokens: 0 },
+    expectedPeriod: { totalTokens: 1910, clientTokens: 1910, clientOutputTokens: 210 },
+    expectedSession: { id: 'global-qsess-1', totalTokens: 1910, outputTokens: 210, reasoningTokens: 70 },
     writeFixture(home) {
       const dir = path.join(home, '.qoder', 'projects', 'ws');
       fs.mkdirSync(dir, { recursive: true });
-      const message = { type: 'assistant', sessionId: 'global-qsess-1', cwd: '/tmp/qoder-global-workspace', timestamp: '2026-09-18T10:00:00Z', message: { id: 'global-m1', model: 'claude-sonnet-4-6', usage: { input_tokens: 1000, cache_read_input_tokens: 600, output_tokens: 120 } } };
-      fs.writeFileSync(path.join(dir, 'tm-contract.jsonl'), `${JSON.stringify(message)}\n`);
+      const message = { type: 'assistant', sessionId: 'global-qsess-1', cwd: '/tmp/qoder-global-workspace', timestamp: '2026-09-18T10:00:00Z', message: { id: 'global-m1', model: 'claude-sonnet-4-6', usage: { input_tokens: 1000, cache_read_input_tokens: 600, output_tokens: 120, thinking_tokens: 60 } } };
+      const gemini = { ...message, message: { ...message.message, id: 'global-m2', usage: { promptTokenCount: 100, cachedContentTokenCount: 40, candidatesTokenCount: 20, thoughtsTokenCount: 10, totalTokenCount: 130 } } };
+      const stale = { ...message, message: { ...message.message, usage: { input_tokens: 1000, cache_read_input_tokens: 600, output_tokens: 2 } } };
+      const staleGemini = { ...gemini, message: { ...gemini.message, usage: { promptTokenCount: 100, candidatesTokenCount: 2, totalTokenCount: 102 } } };
+      fs.writeFileSync(path.join(dir, 'a-stale.jsonl'), `${JSON.stringify(stale)}\n${JSON.stringify(staleGemini)}\n`);
+      fs.writeFileSync(path.join(dir, 'tm-contract.jsonl'), `${JSON.stringify(message)}\n${JSON.stringify(gemini)}\n`);
     }
   },
   {
-    // Fork-only client (crates/tokscale-core/src/token_monitor/qodercn.rs):
-    // JSONL input_tokens includes the cached prefix, which is split out into
-    // cacheRead, and the qoder-custom-<profile>/ prefix is stripped.
+    // CN Anthropic input includes cache reads; Gemini promptTokenCount is
+    // split exactly once. Both formats emit disjoint reasoning tokens.
     client: 'qodercn',
-    expectedRow: { model: 'openai/gpt-5', input: 400, output: 120, cacheRead: 600, cacheWrite: 0, reasoning: 0 },
+    expectedRow: { model: 'openai/gpt-5', input: 460, output: 140, cacheRead: 640, cacheWrite: 0, reasoning: 70 },
     hasExplicitTotal: false,
-    expectedPeriod: { totalTokens: 1120, clientTokens: 1120, clientOutputTokens: 120 },
-    expectedSession: { id: QODER_CN_SESSION_ID, totalTokens: 1120, outputTokens: 120, reasoningTokens: 0 },
+    expectedPeriod: { totalTokens: 1310, clientTokens: 1310, clientOutputTokens: 210 },
+    expectedSession: { id: QODER_CN_SESSION_ID, totalTokens: 1310, outputTokens: 210, reasoningTokens: 70 },
     writeFixture(home) {
       const dir = path.join(home, '.qoder-cn', 'projects', 'ws');
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, 'tm-contract.jsonl'), `${JSON.stringify({
-        type: 'assistant',
-        sessionId: 'qsess-1',
-        cwd: '/tmp/qoder-workspace',
-        timestamp: '2026-09-18T10:00:00Z',
-        message: {
-          id: 'm1',
-          model: 'qoder-custom-abc/openai/gpt-5',
-          usage: { input_tokens: 1000, cache_read_input_tokens: 600, output_tokens: 120 }
-        }
-      })}\n`);
+      const message = {
+        type: 'assistant', sessionId: 'qsess-1', cwd: '/tmp/qoder-workspace', timestamp: '2026-09-18T10:00:00Z',
+        message: { id: 'm1', model: 'qoder-custom-abc/openai/gpt-5', usage: { input_tokens: 1000, cache_read_input_tokens: 600, output_tokens: 120, thinking_tokens: 60 } }
+      };
+      const gemini = { ...message, message: { ...message.message, id: 'm2', usage: { promptTokenCount: 100, cachedContentTokenCount: 40, candidatesTokenCount: 20, thoughtsTokenCount: 10, totalTokenCount: 130 } } };
+      fs.writeFileSync(path.join(dir, 'tm-contract.jsonl'), `${JSON.stringify(message)}\n${JSON.stringify(gemini)}\n`);
     }
   },
   {
@@ -985,7 +983,9 @@ function main() {
       assertSessionMetadata(runAgainstFixture(binPath, home, SESSION_GROUP_BY));
     }
     for (const contract of applicableTokenContracts()) {
-      assertTokenContract(runAgainstFixture(binPath, home, 'client,session,model', contract.scanClient || contract.client), contract);
+      for (let scan = 0; scan < (['qoder', 'qodercn'].includes(contract.client) ? 2 : 1); scan += 1) {
+        assertTokenContract(runAgainstFixture(binPath, home, 'client,session,model', contract.scanClient || contract.client), contract);
+      }
     }
   } finally {
     fs.rmSync(home, { recursive: true, force: true });

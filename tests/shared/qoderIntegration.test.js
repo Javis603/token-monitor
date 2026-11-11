@@ -33,3 +33,24 @@ test('Qoder is opt-in and a moved international root invalidates its anchor', ()
   assert.notEqual(fingerprint('qoder', '/first'), fingerprint('qoder', '/second'));
   assert.equal(fingerprint('codex', '/first'), fingerprint('codex', '/second'));
 });
+
+test('Qoder disjoint reasoning closes period, session and history token totals', () => {
+  const { extractUsageFromTokscale } = require('../../src/shared/usage');
+  const { parseGraphResult } = require('../../src/shared/history');
+  for (const client of ['qoder', 'qodercn']) {
+    const row = { client, session: 'reasoning-session', model: 'gemini-2.5-pro', input: 60, cacheRead: 40, output: 20, reasoning: 10,
+      performance: { timedTokens: 130, timedOutputTokens: 20, timedReasoningTokens: 10, totalDurationMs: 1000 } };
+    const period = extractUsageFromTokscale({ entries: [row] });
+    assert.equal(period.totalTokens, 130, client);
+    assert.equal(period.outputTokens, 30, client);
+    assert.equal(period.timedOutputTokens, 30, client);
+    const session = Object.values(period.sessions)[0];
+    assert.equal(session.totalTokens, 130, client);
+    assert.equal(session.outputTokens, 30, client);
+    assert.equal(session.reasoningTokens, 10, client);
+    const graph = parseGraphResult({ contributions: [{ date: '2026-11-11', clients: [{ client, modelId: row.model, tokens: row }] }] });
+    assert.equal(graph.contributions[0].tokens, 130, client);
+    assert.equal(graph.contributions[0].outputTokens, 30, client);
+    assert.equal(extractUsageFromTokscale({ entries: [{ ...row, totalTokens: 130 }] }).totalTokens, 130, client);
+  }
+});
