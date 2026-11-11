@@ -243,3 +243,33 @@ for (const kind of ['Node', 'Worker']) {
     assert.equal(delta.status, 200);
   });
 }
+
+test('Worker rejects a merged record above its storage budget without writing the device', async t => {
+  const hub = await backend('Worker', t);
+  const payload = (count) => {
+    const base = summaryForUpload();
+    const sessions = Object.fromEntries(Array.from({ length: count }, (_, index) => [
+      `c:s${index}`,
+      { client: 'c', sessionId: `s${index}`, totalTokens: 1 }
+    ]));
+    return {
+      ...base,
+      month: { ...base.month, sessions, totalTokens: count, clients: { c: count } }
+    };
+  };
+  const send = body => hub.send('https://hub.invalid/api/ingest', {
+    method: 'POST', headers: hub.headers, body
+  });
+
+  const dense = payload(30000);
+  assert.ok(Buffer.byteLength(JSON.stringify(dense)) <= MAX_UPLOAD_BYTES);
+  const rejected = await send(JSON.stringify(dense));
+  assert.equal(rejected.status, 413);
+  assert.equal((await rejected.json()).error, 'payload_too_large');
+  assert.equal(await hub.device(), undefined);
+
+  const reduced = payload(15000);
+  const accepted = await send(JSON.stringify(reduced));
+  assert.equal(accepted.status, 200);
+  assert.equal(Object.keys((await hub.device()).periods.month.sessions).length, 15000);
+});
