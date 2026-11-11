@@ -27,9 +27,9 @@ const WRITER_FILE_RE = /^writer-([a-f0-9]{64})\.json$/;
 const MAX_DEVICE_ID_LENGTH = 512;
 const MAX_WRITER_ID_LENGTH = 512;
 
-// The sync payload is already reduced below the Hub's one-megabyte request
-// limit. Keeping the document cap at that limit leaves room for the device
-// envelope and avoids making a valid Hub payload impossible to persist here.
+// The sync payload is already reduced below the Hub request limit. Keeping
+// the document cap at that limit leaves room for the device envelope and
+// avoids making a valid Hub payload impossible to persist here.
 const MAX_ICLOUD_DOCUMENT_BYTES = MAX_JSON_BODY_BYTES;
 // The local ledger may also hold one pending subscription snapshot for recovery.
 const MAX_REVISION_LEDGER_BYTES = 2 * MAX_JSON_BODY_BYTES;
