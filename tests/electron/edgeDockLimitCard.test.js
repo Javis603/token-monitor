@@ -148,10 +148,19 @@ function balancedCall(source, opening) {
 // back), and gets the real one for everything it does not name.
 function dockView(appearance = {}, overrides = {}) {
   const settings = { showLimitUsed: false, claudePrepaidBalanceEnabled: true, ...appearance };
+  // Everything a test draws counts as on screen; the view finds its row
+  // buttons through the document rather than keeping its own list of them.
+  const drawn = [];
   return createLimitWindowsView({
     document: {
-      createElement: (tagName) => new FakeElement(tagName),
-      createTextNode: (value) => ({ textContent: String(value), children: [] })
+      createElement: (tagName) => {
+        const element = new FakeElement(tagName);
+        drawn.push(element);
+        return element;
+      },
+      createTextNode: (value) => ({ textContent: String(value), children: [] }),
+      querySelectorAll: (selector) => drawn.filter((element) => !element.detached
+        && element.classNames.has(selector.replace(/^\./, '')))
     },
     t: (key, params) => i18n.translate('en', key, params),
     settings: () => settings,
@@ -225,6 +234,198 @@ test('adding Spanish preserves the fixed English Limits wording', () => {
   assert.match(view.limitProviderMeta({ status: 'ok', updatedAt: new Date().toISOString() }), /^Updated /);
   assert.equal(view.codexAdditionalWindowLabel({ windowMinutes: 60 }), '1-hour');
   assert.ok(view.codexResetCreditsNode({ availableCount: 2 }).text.includes('2 resets'));
+});
+
+test('a row refresh button is drawn only for a host that can refresh limits', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
+  const at = new Date().toISOString();
+  const accounts = ['a', 'b'].map((id) => ({
+    provider: 'codex', accountKey: `key-${id}`, accountEmail: `${id}@example.com`, status: 'ok', updatedAt: at,
+    windows: [{ kind: 'weekly', label: 'Weekly', usedPercent: 40 }]
+  }));
+  // A surface whose bridge cannot refresh (the notch) draws no button.
+  assert.equal(dockView().renderLimitProviderGroup('codex', 'Codex', accounts, '#fff')
+    .find('limit-refresh-button'), null);
+
+  const refreshed = [];
+  let finish;
+  const view = dockView({}, { accountRefresh: {
+    available: (provider) => provider.provider === 'codex',
+    probes: () => [],
+    refresh: (provider) => {
+      refreshed.push(provider.accountKey);
+      return new Promise((resolve) => { finish = resolve; });
+    }
+  } });
+  const group = view.renderLimitProviderGroup('codex', 'Codex', accounts, '#fff');
+  const buttons = [...group.walk()].filter((node) => node.classNames.has('limit-refresh-button'));
+  // One per account row; the group header has no "Updated" line to sit on.
+  assert.equal(buttons.length, 2);
+  // Each is named after its own row, so a screen reader can tell them apart.
+  const names = buttons.map((button) => button.getAttribute('aria-label'));
+  assert.ok(names.every((name) => name.startsWith('Refresh ') && name.length > 'Refresh '.length));
+  assert.notEqual(names[0], names[1]);
+  assert.match(buttons[0].parent.text, /^Updated /);
+  // A press activates, so a repaint between press and release cannot swallow
+  // it; the press's own trailing click must not fire it a second time.
+  let prevented = false;
+  buttons[1].listeners.pointerdown({ button: 0, preventDefault() { prevented = true; } });
+  assert.ok(prevented);
+  buttons[1].listeners.click({ detail: 1 });
+  // A click answers at once, without the background delay.
+  assert.ok(buttons[1].classList.contains('is-refreshing'));
+  await new Promise(setImmediate);
+  assert.deepEqual(refreshed, ['key-b']);
+  // A second activation while it shows is ignored (here from the keyboard,
+  // whose synthesized click reports detail 0).
+  buttons[1].listeners.click({ detail: 0 });
+  await new Promise(setImmediate);
+  assert.deepEqual(refreshed, ['key-b']);
+
+  // The list repaints on a timer; a row still being refreshed keeps its spinner.
+  const repainted = view.renderLimitProviderSolo('codex', 'Codex', accounts[1], '#fff');
+  assert.ok(repainted.find('limit-refresh-button').classList.contains('is-refreshing'));
+  // A fast answer still shows long enough to be read, then stops on its own.
+  t.mock.timers.tick(100);
+  finish({ ok: true });
+  await new Promise(setImmediate);
+  assert.ok(buttons[1].classList.contains('is-refreshing'));
+  t.mock.timers.tick(700);
+  assert.equal(buttons[1].classList.contains('is-refreshing'), false);
+  assert.equal(buttons[1].getAttribute('aria-disabled'), 'false');
+});
+
+test('a row refresh that brings nothing back says why, then returns to normal', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
+  const row = {
+    provider: 'kimi', accountKey: 'k', status: 'ok', updatedAt: new Date().toISOString(),
+    windows: [{ kind: 'weekly', label: 'Weekly', usedPercent: 40 }]
+  };
+  let answer = { ok: false, reason: 'cooldown', retryAt: '' };
+  const view = dockView({}, { accountRefresh: {
+    available: () => true, probes: () => [], refresh: async () => answer
+  } });
+  const head = view.renderLimitProviderSolo('kimi', 'Kimi', row, '#fff');
+  const button = head.find('limit-refresh-button');
+  const status = head.find('limit-refresh-status');
+  // A polite live region from the start, so the reason is announced when it lands.
+  assert.equal(status.getAttribute('role'), 'status');
+  assert.equal(status.textContent, '');
+
+  button.listeners.pointerdown({ button: 0, preventDefault() {} });
+  await new Promise(setImmediate);
+  // Still spinning out its minimum; the reason waits for the spinner.
+  assert.ok(button.classList.contains('is-refreshing'));
+  assert.equal(status.textContent, '');
+  t.mock.timers.tick(800);
+  assert.equal(button.classList.contains('is-refreshing'), false);
+  assert.ok(button.classList.contains('is-refresh-error'));
+  assert.ok(button.classList.contains('is-refresh-cooldown'));
+  assert.equal(status.textContent, 'Cooling down, try later');
+  // A repaint keeps saying it.
+  const repainted = view.renderLimitProviderSolo('kimi', 'Kimi', row, '#fff');
+  assert.equal(repainted.find('limit-refresh-status').textContent, 'Cooling down, try later');
+  // The hold counts from when the reason appeared, not from when the request
+  // settled under the spinner's minimum.
+  t.mock.timers.tick(3999);
+  assert.equal(status.textContent, 'Cooling down, try later');
+  t.mock.timers.tick(1);
+  assert.equal(button.classList.contains('is-refresh-error'), false);
+  assert.equal(status.textContent, '');
+
+  // A thrown request reads as a failure; a retry clears the last reason at once.
+  answer = Promise.reject(new Error('offline'));
+  answer.catch(() => {});
+  button.listeners.pointerdown({ button: 0, preventDefault() {} });
+  await new Promise(setImmediate);
+  t.mock.timers.tick(800);
+  assert.equal(status.textContent, 'Refresh failed');
+  assert.equal(button.classList.contains('is-refresh-cooldown'), false);
+  answer = { ok: true };
+  button.listeners.pointerdown({ button: 0, preventDefault() {} });
+  assert.equal(status.textContent, '');
+  await new Promise(setImmediate);
+  t.mock.timers.tick(800);
+  assert.equal(button.classList.contains('is-refresh-error'), false);
+
+  // A failure nobody saw (the dock replaced the card before it settled) is
+  // dropped rather than waiting for the next card to show it, possibly long
+  // after a newer refresh succeeded.
+  answer = { ok: false, reason: 'failed' };
+  button.listeners.pointerdown({ button: 0, preventDefault() {} });
+  button.detached = true;
+  await new Promise(setImmediate);
+  t.mock.timers.tick(60_000);
+  const later = view.renderLimitProviderSolo('kimi', 'Kimi', row, '#fff');
+  assert.equal(later.find('limit-refresh-status').textContent, '');
+  assert.equal(later.find('limit-refresh-button').classList.contains('is-refresh-error'), false);
+});
+
+test('a background probe spins only the rows it is for, and only once it is not a blink', (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
+  const at = new Date().toISOString();
+  const accounts = ['a', 'b'].map((id) => ({
+    provider: 'codex', accountKey: `key-${id}`, accountEmail: `${id}@example.com`, status: 'ok', updatedAt: at,
+    windows: [{ kind: 'weekly', label: 'Weekly', usedPercent: 40 }]
+  }));
+  let probes = [];
+  const view = dockView({}, { accountRefresh: {
+    available: () => true, probes: () => probes, refresh: async () => {}
+  } });
+  const group = view.renderLimitProviderGroup('codex', 'Codex', accounts, '#fff');
+  const buttons = [...group.walk()].filter((node) => node.classNames.has('limit-refresh-button'));
+  const spinning = () => buttons.map((button) => button.classList.contains('is-refreshing'));
+
+  // A probe that answers quickly never shows at all.
+  probes = [{ provider: 'codex', account: null }];
+  view.syncLimitRefreshButtons();
+  t.mock.timers.tick(300);
+  probes = [];
+  view.syncLimitRefreshButtons();
+  t.mock.timers.tick(1000);
+  assert.deepEqual(spinning(), [false, false]);
+
+  // A slower one appears after the delay, for its own account only.
+  probes = [{ provider: 'codex', account: { field: 'email', value: 'a@example.com' } }];
+  view.syncLimitRefreshButtons();
+  assert.deepEqual(spinning(), [false, false]);
+  t.mock.timers.tick(400);
+  assert.deepEqual(spinning(), [true, false]);
+  // Ending just after it appeared still holds the minimum.
+  t.mock.timers.tick(100);
+  probes = [];
+  view.syncLimitRefreshButtons();
+  assert.deepEqual(spinning(), [true, false]);
+  t.mock.timers.tick(700);
+  assert.deepEqual(spinning(), [false, false]);
+
+  // Another provider's probe leaves these rows alone.
+  probes = [{ provider: 'claude', account: null }];
+  view.syncLimitRefreshButtons();
+  t.mock.timers.tick(1000);
+  assert.deepEqual(spinning(), [false, false]);
+});
+
+test('a row synced from another device draws no refresh button', () => {
+  const view = dockView({ showLimitSource: true, provenanceContext: {
+    localDeviceId: 'here', syncActive: true,
+    devices: [{ deviceId: 'here', name: 'Here' }, { deviceId: 'there', name: 'There' }]
+  } }, { accountRefresh: { available: () => true, probes: () => [], refresh: async () => {} } });
+  const row = (sourceDeviceId) => view.renderLimitProviderSolo('claude', 'Claude', {
+    provider: 'claude', accountKey: 'k', status: 'ok', updatedAt: new Date().toISOString(), sourceDeviceId,
+    windows: [{ kind: 'session', label: 'Session', usedPercent: 10 }]
+  }, '#fff');
+  assert.ok(row('here').find('limit-refresh-button'));
+  assert.equal(row('there').find('limit-refresh-button'), null);
+});
+
+test('the dock card wires the row refresh through its own narrow bridge', () => {
+  const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const wiring = balancedCall(dock, 'accountRefresh: {');
+  assert.match(wiring, /bridge\.refreshLimitAccount/);
+  assert.match(wiring, /LIMIT_PROVIDER_IDS\.includes/);
+  const preload = fs.readFileSync(path.join(root, 'src/electron/edgeDock/preload.js'), 'utf8');
+  assert.match(preload, /refreshLimitAccount: \(provider, account\) => ipcRenderer\.invoke\('edgeDock:refreshLimitAccount'/);
 });
 
 function limitsSubscriptionPool(localProviders, aggregateProviders) {

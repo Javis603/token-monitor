@@ -246,7 +246,7 @@ test('StepFun setup copy points to its button, request header and save action', 
   assert.equal(steps.length, 4);
   assert.match(i18n.translate('zh-TW', steps[0]), /使用上方按鈕/);
   assert.match(i18n.translate('en', steps[0]), /button above/);
-  assert.match(i18n.translate('en', steps[1][0]), /DevTools \(F12 or Cmd\+Opt\+I\) -> Network/);
+  assert.match(i18n.translate('en', steps[1][0]), /DevTools \(F12\) -> Network/);
   assert.match(group.text, /QueryStepPlanRateLimit/);
   assert.match(i18n.translate('en', steps[2]), /Headers -> Request Headers.*Oasis-Token/);
   assert.match(i18n.translate('zh-TW', steps[3]), /儲存 token/);
@@ -694,7 +694,7 @@ test('OpenDesign renders all four Cookie setup steps before its input, like Type
 test('OpenDesign Cookie instructions match the existing browser, DevTools and request-header flow', () => {
   const t = (key) => i18n.translate('en', 'settings.opendesign.' + key);
   assert.match(t('step1'), /browser \(button above\).*sign in.*workspace/);
-  assert.match(t('step2'), /DevTools \(F12 or Cmd\+Opt\+I\) -> Network.*subscription usage.*reload/);
+  assert.match(t('step2'), /DevTools \(F12\) -> Network.*subscription usage.*reload/);
   assert.match(t('step3After'), /full Cookie value from Headers -> Request Headers/);
   assert.match(t('step4'), /click Save cookie/);
 });

@@ -94,6 +94,11 @@ function createEdgeDockController(deps) {
     onSwitchCodexAccount,
     canRefreshLimits = () => false,
     onRefreshLimits,
+    // A quota row's own refresh button on the card: (providerId, account).
+    onRefreshLimitAccount,
+    // The limits probes in flight, so the card's rows can spin for a refresh
+    // they did not start; re-sent to a card window when it (re)loads.
+    limitProbes = () => [],
     onOpenResetForecastSource,
     performHaptic = () => false,
     // (display) => whether another app is full screen on that display.
@@ -1354,6 +1359,7 @@ function createEdgeDockController(deps) {
       if (platform === 'darwin') windows[surface].setBackgroundColor('#00000000');
       ready[surface] = true;
       render(surface);
+      if (surface === 'bubble') send('bubble', 'edgeDock:limitProbes', limitProbes());
     });
     // Clicks no longer pin the rail: that state had no clear meaning next to
     // the always-visible mode, and its only trace was an unexplained bar. A
@@ -1487,6 +1493,18 @@ function createEdgeDockController(deps) {
         return { ok: false, error: error?.message || 'Switch failed' };
       }
     });
+    // A quota row's refresh button. The renderer names the row's provider and
+    // account; the main process decides what that may narrow the probe to.
+    ipcMain.removeHandler('edgeDock:refreshLimitAccount');
+    ipcMain.handle('edgeDock:refreshLimitAccount', async (event, payload) => {
+      if (surfaceFor(event.sender) !== 'bubble' || !onRefreshLimitAccount) return { ok: false, error: 'Unknown surface' };
+      try {
+        return await onRefreshLimitAccount(payload?.provider, payload?.account);
+      } catch (error) {
+        logger(`[edge-dock] limits account refresh failed: ${error.message}`);
+        return { ok: false, error: error?.message || 'Refresh failed' };
+      }
+    });
     // The forecast row on the card is the Limits page's row, link and all. The
     // renderer reports the intent rather than a URL, so the dock's bridge stays
     // a list of named actions instead of gaining a general "open anything" verb.
@@ -1594,6 +1612,9 @@ function createEdgeDockController(deps) {
   }
 
   return {
+    setLimitProbes(probes) {
+      if (running) send('bubble', 'edgeDock:limitProbes', probes);
+    },
     // Shows a custom size while its slider is dragged; the save that follows
     // the release goes through sync(), which drops the preview.
     previewScale(scale, surface = 'rail') {

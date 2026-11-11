@@ -761,7 +761,7 @@ function compactTokenDisplayOptions() {
 }
 
 function t(key, params) {
-  return i18n.translate(currentLocale(), key, params);
+  return i18n.translate(currentLocale(), key, params, state.appInfo?.platform);
 }
 
 const codexAccountControl = codexAccountControlApi.createCodexAccountControl({
@@ -807,7 +807,7 @@ function translatedLimitProviderTag(tagInfo) {
 
 function applySettingsTranslations() {
   if (els.languageInput) els.languageInput.value = currentLanguage();
-  i18n.applyTranslations(document, currentLocale());
+  i18n.applyTranslations(document, currentLocale(), state.appInfo?.platform);
   setThirdPartyAdapterFields();
   setSubscriptionFormMode();
   diagnosticsPanel?.render();
@@ -4844,6 +4844,9 @@ document.addEventListener('keydown', event => {
   window.tokenMonitor.limits.closeHistory();
 }, true);
 
+// Probes the limits runtime is running right now, whoever started them.
+let limitProbes = [];
+
 const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsView({
   document,
   history: window.tokenMonitor?.limits?.openHistory ? {
@@ -4933,8 +4936,28 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   // matcher refuses to heal their tooltips onto another observed account.
   subscriptionAccounts: () => limitProvidersForSubscriptions(),
   monthClientCosts: () => state.stats?.periods?.month?.clientCosts,
-  resetForecast: () => ({ busy: state.codexResetForecastBusy, forecast: state.codexResetForecast })
+  resetForecast: () => ({ busy: state.codexResetForecastBusy, forecast: state.codexResetForecast }),
+  accountRefresh: {
+    available: (provider) => LIMIT_PROVIDER_IDS.includes(provider?.provider)
+      && typeof window.tokenMonitor?.limits?.refresh === 'function',
+    probes: () => limitProbes,
+    refresh: refreshLimitAccount
+  }
 });
+
+function setLimitProbes(probes) {
+  limitProbes = Array.isArray(probes) ? probes : [];
+  limitWindowsView.syncLimitRefreshButtons();
+}
+let limitProbesPushed = false;
+window.tokenMonitor?.limits?.onProbes?.((probes) => {
+  limitProbesPushed = true;
+  setLimitProbes(probes);
+});
+// The probes already running when this page loaded; a push that arrived first is newer.
+void window.tokenMonitor?.limits?.probes?.().then((probes) => {
+  if (!limitProbesPushed) setLimitProbes(probes);
+}, () => {});
 
 const {
   codexResetForecastExpired,
@@ -8883,7 +8906,7 @@ function syncWindowShortcutStatus() {
   if (!note || !value) return;
   const shortcut = normalizeWindowToggleShortcutValue(state.settings?.windowToggleShortcut);
   // The value pill doubles as the record button, so its empty state is the action ("Record"), not "Off".
-  const display = windowShortcutApi.formatWindowToggleShortcut(shortcut, t('settings.shortcut.record'));
+  const display = windowShortcutApi.formatWindowToggleShortcut(shortcut, t('settings.shortcut.record'), state.appInfo?.platform);
   const status = state.settings?.windowToggleShortcutStatus?.state || (shortcut ? 'unregistered' : 'off');
   value.classList.toggle('recording', state.recordingWindowShortcut);
   value.textContent = state.recordingWindowShortcut ? t('settings.shortcut.recording') : display;
@@ -10227,11 +10250,9 @@ function syncSettingsForm() {
     els.startAtLoginInput.checked = Boolean(state.settings.startAtLogin && state.appInfo?.loginItemSupported);
   }
   if (els.startupNote) {
-    els.startupNote.textContent = !state.appInfo?.loginItemSupported
-      ? t('settings.startup.available')
-      : state.appInfo?.platform === 'linux'
-        ? t('settings.startup.appimageNote')
-        : t('settings.startup.launchAtSignIn');
+    els.startupNote.textContent = t(state.appInfo?.loginItemSupported
+      ? 'settings.startup.launchAtSignIn'
+      : 'settings.startup.available');
   }
   els.glassInput.value = String(state.settings.glassOpacity ?? 68);
   for (const [key, mode] of nativeGlassTintSettings) {
@@ -12703,6 +12724,25 @@ async function submitAccountCredential(button, id, values, options) {
   }
 }
 
+// A quota row's own refresh. The result says whether anything new is coming,
+// so the row can tell the user when it is not.
+async function refreshLimitAccount(provider) {
+  let result;
+  try {
+    result = await window.tokenMonitor.limits.refresh(provider.provider, {
+      accountKey: provider.accountKey,
+      accountEmail: provider.accountEmail,
+      accountName: provider.accountName,
+      accountLabel: provider.accountLabel,
+      sourceDetail: provider.sourceDetail
+    });
+  } catch (_) {
+    result = { ok: false, reason: 'failed' };
+  }
+  await refreshStats();
+  return result;
+}
+
 async function refreshLimitProviderQuota(providerName) {
   try {
     await window.tokenMonitor.limits?.refresh?.(providerName);
@@ -13552,6 +13592,8 @@ pluginViewHost = pluginViewsApi && pluginBridge ? pluginViewsApi.createPluginVie
   t,
   services: {
     app: window.tokenMonitor,
+    updatesBlocked: ids => pluginSettingsPanel?.blocksUpdate(ids) === true,
+    setUpdatingPlugins: (ids, updating) => pluginSettingsPanel?.setUpdatingPlugins(ids, updating),
     native: {
       quota: limitWindowsView,
       credentials: call => window.TokenMonitorPluginCredentials.create({ document, call, t, localize: value => window.TokenMonitorPluginLocalized.localize(value, state.settings?.language),
@@ -13676,10 +13718,12 @@ pluginApi = pluginBridge ? {
   getSettings: id => pluginBridge.getSettings(id),
   updateSettings: (id, input) => pluginBridge.updateSettings(id, input),
   catalog: async () => applyPluginCatalogUpdates(await pluginBridge.catalog()),
+  recover: async id => applyPluginCatalog(await pluginBridge.recover(id)),
   discoverCatalog: async force => applyPluginCatalogUpdates(await pluginBridge.discoverCatalog(force)),
   catalogDetails: (source, id) => pluginBridge.catalogDetails(source, id),
   closeCatalogDetails: () => pluginBridge.closeCatalogDetails(),
   catalogReadmeImage: (documentId, index) => pluginBridge.catalogReadmeImage(documentId, index),
+  configureUpdates: async (id, value) => applyPluginCatalogUpdates(await pluginBridge.configureUpdates(id, value)),
   catalogPreview: (source, id, version) => pluginBridge.catalogPreview(source, id, version),
   addSource: async input => applyPluginCatalogUpdates(await pluginBridge.addSource(input)),
   refreshSource: async id => applyPluginCatalogUpdates(await pluginBridge.refreshSource(id)),

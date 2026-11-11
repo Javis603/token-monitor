@@ -11,7 +11,7 @@ const { createPluginRuntime, registerPluginScheme } = require('../src/electron/p
 const root = path.resolve(__dirname, '..');
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-trusted-app-'));
 const evidence = process.env.TM_PLUGIN_EVIDENCE || scratch;
-if (process.env.TM_WINDOW_FOCUS_ONLY === '1') app.setPath('userData', scratch);
+if (process.env.TM_WINDOW_FOCUS_ONLY === '1' || process.env.TM_PLUGIN_UPDATE_FLOW === '1') app.setPath('userData', scratch);
 const pageKeys = ['home', 'tool', 'device', 'model', 'project', 'session', 'status', 'limits', 'trends'];
 const fixtureDir = path.join(scratch, 'author-source');
 fs.cpSync(path.join(root, 'tests/fixtures/trusted-plugin'), fixtureDir, { recursive: true });
@@ -163,7 +163,34 @@ app.whenReady().then(async () => {
   const demandListener = (event, { surface, refs }) => pluginCalls.push({ channel: 'plugins:demand', frameUrl: event.senderFrame?.url, surface, refs });
   ipcMain.on('plugins:demand', demandListener);
   const toggleDialogs = [], toggleResponses = []; let toggleResponse = 1, selectedDirectory = fixtureDir;
-  runtime = createPluginRuntime({ electron: { BrowserWindow, ipcMain: pluginIpc, session, utilityProcess,
+  const updateFlow = process.env.TM_PLUGIN_UPDATE_FLOW === '1';
+  const updateVersions = new Map([['trusted-fixture', '1.0.0'], ['third-fixture', '1.0.0']]);
+  const maintainerSource = require('../src/electron/plugins/maintainerSources')[0];
+  const thirdSourceUrl = 'https://third.example/catalog.json';
+  const updatePackages = new Map();
+  if (updateFlow) {
+    const { packageDirectory } = require('../src/electron/plugins/package');
+    const original = JSON.parse(packageDirectory(fixtureDir).bytes);
+    for (const id of updateVersions.keys()) for (const version of ['1.0.0', '1.1.0']) {
+      const pkg = structuredClone(original);
+      Object.assign(pkg.manifest, { id, version, author: 'ExampleDev' });
+      updatePackages.set(`${id}/${version}`, Buffer.from(JSON.stringify(pkg)));
+    }
+  }
+  const updateSession = updateFlow ? { defaultSession: session.defaultSession, fromPartition: () => ({ fetch: async url => {
+    const id = url === maintainerSource.url ? 'trusted-fixture' : url === thirdSourceUrl ? 'third-fixture' : null;
+    if (id) {
+      const version = updateVersions.get(id), base = id === 'third-fixture' ? 'https://third.example' : 'https://community.example';
+      const sha256 = require('../src/electron/plugins/package').digest(updatePackages.get(`${id}/${version}`));
+      return new Response(JSON.stringify({ format: 1, title: 'Fixture catalog', plugins: [{ id, name: 'Update fixture', author: 'ExampleDev', versions: [
+        { version, url: `${base}/${id}/${version}`, sha256, changelog: '直接顯示的更新說明。' }
+      ] }] }));
+    }
+    const parsed = new URL(url), pkg = updatePackages.get(parsed.pathname.slice(1));
+    if (pkg) return new Response(pkg);
+    return new Response(JSON.stringify({ format: 1, title: 'Empty fixture catalog', plugins: [] }));
+  } }) } : session;
+  runtime = createPluginRuntime({ electron: { BrowserWindow, ipcMain: pluginIpc, session: updateSession, utilityProcess,
     dialog: { showMessageBox: async (_owner, options) => { toggleDialogs.push(options); return { response: toggleResponses.length ? toggleResponses.shift() : toggleResponse }; }, showOpenDialog: async () => ({ canceled: false, filePaths: [selectedDirectory] }) } },
     userDataDir: scratch, getSettings: () => settings, getAppSettings: () => settings, getContext: () => ({ source: 'fixture' }), getLocale: () => 'zh-TW',
     isMainSender: event => event.sender === win.webContents, persistPluginStates: pluginStates => patch({ pluginStates }), persistManagementSettings: patch,
@@ -181,6 +208,60 @@ app.whenReady().then(async () => {
   fs.writeFileSync(path.join(evidence, 'comparison-native.png'), (await capture()).toPNG());
   await js("openViewFromTray('home')");
   console.log('PASS actual App renderer initialized without plugin work');
+  if (updateFlow) {
+    await js("pluginApi.discoverCatalog(true)");
+    const custom = await js(`pluginApi.addSource({url:${JSON.stringify(thirdSourceUrl)}})`);
+    const thirdSource = custom.sources.find(source => source.url === thirdSourceUrl).id;
+    await js("els.settingsButton.click();document.querySelector('[data-settings-section=plugins]').click()");
+    await waitFor("document.querySelector('#pluginSettingsList [data-tab=installed]')", 'plugin management');
+    for (const [id, sourceId, third] of [['trusted-fixture', maintainerSource.id, false], ['third-fixture', thirdSource, true]]) {
+      await js(`pluginApi.catalogPreview(${JSON.stringify(sourceId)},${JSON.stringify(id)},'1.0.0').then(preview=>pluginApi.install(preview.token,{trustInstall:true}))`);
+      updateVersions.set(id, '1.1.0');
+      await js(`pluginApi.refreshSource(${JSON.stringify(sourceId)}).then(()=>pluginSettingsPanel.refresh())`);
+      const card = `[data-plugin-id="${id}"]`;
+      await waitFor(`document.querySelector('${card} .plugin-update-action')`, 'available update');
+      assert.equal(await js(`Boolean(document.querySelector('${card} .plugin-update-note')?.getClientRects().length)`), true);
+      if (third) assert.equal(await js(`document.querySelector('${card} .plugin-source').textContent`), 'ExampleDev第三方 · 未經審核');
+      await js(`document.querySelector('${card}').scrollIntoView({block:'center',behavior:'instant'})`);
+      fs.writeFileSync(path.join(evidence, `update-${id}-before.png`), (await capture()).toPNG());
+      const dialogs = toggleDialogs.length;
+      await js(`document.querySelector('${card} .plugin-update-action').click()`);
+      if (third) {
+        await waitFor("document.querySelector('.plugin-package-preview .plugin-allow')", 'single trust review');
+        assert.equal(await js("Boolean(document.querySelector('dialog.plugin-catalog-dialog'))"), false);
+        assert.equal(await js("Boolean(document.querySelector('.plugin-package-preview .plugin-update-notes'))"), true);
+        await js("document.querySelector('.plugin-package-preview').scrollIntoView({block:'center',behavior:'instant'})");
+        fs.writeFileSync(path.join(evidence, 'update-third-party-review.png'), (await capture()).toPNG());
+        await js("document.querySelector('.plugin-package-preview .plugin-allow').click()");
+      }
+      await waitFor(`state.pluginCatalog.plugins.find(p=>p.id==='${id}')?.version==='1.1.0'`, 'updated package revision');
+      await waitFor("document.querySelector('#pluginSettingsList')?.getAttribute('aria-busy')==='false'", 'update action completed');
+      assert.equal(toggleDialogs.length, dialogs, 'no redundant confirmation for clean UI');
+      assert.equal(runtime.manager.list().plugins.find(plugin => plugin.id === id).trusted, true);
+      assert.equal(await js("Boolean(document.querySelector('.plugin-package-preview,dialog.plugin-catalog-dialog'))"), false);
+      await js(`document.querySelector('${card}').scrollIntoView({block:'center',behavior:'instant'})`);
+      fs.writeFileSync(path.join(evidence, `update-${id}-after.png`), (await capture()).toPNG());
+      console.log(`PASS actual App ${third ? 'third-party two-click' : 'community one-click'} verified catalog update, visible notes and retained trust`);
+    }
+    await js("pluginApi.place('third-fixture/panel','page',true);els.settingsButton.click();openViewFromTray('plugin:third-fixture/panel')");
+    await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]')", 'author UI before cleanup failure');
+    await js("globalThis.fixtureCleanupFailure=true");
+    toggleResponses.push(0);
+    await js("pluginApi.setEnabled('third-fixture',false)");
+    await js("els.settingsButton.click();pluginSettingsPanel.refresh()");
+    await waitFor("document.querySelector('[data-plugin-id=\"third-fixture\"] .plugin-recover')", 'explicit recovery action');
+    assert.equal(settings.pluginStates['third-fixture'].enabled, false);
+    await js("document.querySelector('.plugin-recover').scrollIntoView({block:'center',behavior:'instant'})");
+    fs.writeFileSync(path.join(evidence, 'update-recovery-action.png'), (await capture()).toPNG());
+    const reloaded = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
+    await js("document.querySelector('.plugin-recover').click()");
+    await reloaded;
+    await waitFor("state.pluginCatalog?.plugins?.find(p=>p.id==='third-fixture')?.recoveryRequired===false", 'recovered host');
+    assert.equal(settings.pluginStates['third-fixture'].enabled, false);
+    console.log('PASS actual App explicit lifecycle recovery reloads the affected host without changing plugin enablement');
+    assertConsoleClean(['Intentional fixture cleanup failure']); clearTimeout(deadline);
+    await runtime.dispose(); runtime = null; win.destroy(); app.exit(0); return;
+  }
   if (process.env.TM_PREVIEWS_ONLY === '1') {
     const baseline = process.env.TM_EXPECT_BASELINE === '1';
     const results = [];

@@ -769,7 +769,7 @@ test('DeepSeek uses the generic form and MiniMax keys use the shared account she
   const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
   const forms = limitAccountFormsForRenderer();
   const expectedFields = {
-    deepseek: [['deepseekApiKey', 'password']]
+    deepseek: [['deepseekApiKey', 'password'], ['deepseekWebToken', 'password']]
   };
   for (const id of ['deepseek']) {
     assert.doesNotMatch(html, new RegExp(`id="${id}(AccountGroup|ManualPanel|ApiKeyInput)"`), id);

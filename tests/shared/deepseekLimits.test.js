@@ -218,3 +218,61 @@ test('fetchDeepSeekLimits bounds a body that stalls after the headers', { timeou
   });
   assert.equal(r.status, 'unavailable');
 });
+
+test('console Search is optional, retries failures and expires at month changes', async () => {
+  let now = new Date(2026, 6, 31, 23, 50).getTime();
+  let calls = 0;
+  let consoleRow = {
+    series: [
+      { model: 'tool-search', buckets: [{ cost: '1' }] },
+      { model: 'tool-search', buckets: [{ cost: 2 }] },
+      { model: 'tool-fetch', buckets: [{ cost: 0.02 }] },
+      { model: 'deepseek-chat', buckets: [{ cost: 9 }] }
+    ]
+  };
+  const options = { deepseekWebToken: 'Authorization: Bearer console-token' };
+  const deps = {
+    env: { DEEPSEEK_API_KEY: 'sk-balance' },
+    now: () => now, providerRuntimeState: new Map(), ...memStoreDeps(),
+    fetch: async (url, init) => {
+      if (new URL(url).hostname !== 'platform.deepseek.com') return balanceResponse([{ currency: 'CNY', total_balance: '10', topped_up_balance: '10' }]);
+      assert.equal(init.headers.Authorization, 'Bearer console-token');
+      const query = new URL(String(url)).searchParams;
+      calls += 1;
+      return { ok: true, json: async () => ({
+        code: 0, data: { biz_code: calls === 1 ? 1 : 0, biz_data: {
+          start: +query.get('start'), end: +query.get('end'),
+          data: [{ currency: 'CNY', ...consoleRow }]
+        } }
+      }) };
+    }
+  };
+  const failed = await fetchDeepSeekLimits(options, deps);
+  assert.equal(failed.balance.amount, 10);
+  assert.equal(failed.balance.searchSpend, undefined);
+  const provider = await fetchDeepSeekLimits(options, deps);
+  assert.equal(provider.balance.searchSpend, 3);
+  assert.equal(provider.balance.fetchSpend, 0.02);
+  assert.equal(provider.balance.monthSpend, 0);
+  await fetchDeepSeekLimits(options, deps);
+  assert.equal(calls, 2);
+  // A new month bypasses the cached total; an empty `series` falls back to `function_series`.
+  now += 20 * 60_000;
+  consoleRow = { series: [], function_series: [{ model: 'server-tool-search', buckets: [{ cost: 0.4 }] }] };
+  assert.equal((await fetchDeepSeekLimits(options, deps)).balance.searchSpend, 0.4);
+});
+
+test('console month query starts at local midnight in a non-hour offset', async (t) => {
+  const previous = process.env.TZ;
+  t.after(() => { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; });
+  process.env.TZ = 'Asia/Kolkata';
+  let query;
+  await fetchDeepSeekLimits({ deepseekApiKey: 'sk-balance', deepseekWebToken: 'console-token' }, {
+    env: {}, now: () => Date.parse('2026-11-01T00:15:00+05:30'), ...memStoreDeps(),
+    fetch: async (url) => {
+      if (new URL(url).hostname === 'platform.deepseek.com') query = new URL(url).searchParams;
+      return balanceResponse([{ currency: 'CNY', total_balance: '10', topped_up_balance: '10' }]);
+    }
+  });
+  assert.equal(Number(query.get('start')), Date.parse('2026-11-01T00:00:00+05:30') / 1000);
+});
