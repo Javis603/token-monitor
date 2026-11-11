@@ -106,6 +106,23 @@ test('Spanish is selectable and updates text, accessible names and placeholders'
   assert.equal(translate('es', 'sessions.backToWithTitle', { title: 'Proyecto', destination: 'Inicio' }), 'Proyecto — Volver a Inicio');
 });
 
+test('Language choices use endonyms in every locale', () => {
+  const endonyms = {
+    en: 'English',
+    'zh-TW': '繁體中文',
+    'zh-CN': '简体中文',
+    ko: '한국어',
+    ja: '日本語',
+    'pt-BR': 'Português (Brasil)',
+    es: 'Español'
+  };
+  for (const option of LANGUAGE_OPTIONS.filter((entry) => entry.value !== 'auto')) {
+    for (const locale of Object.keys(MESSAGES)) {
+      assert.equal(MESSAGES[locale][option.labelKey], endonyms[option.value], `${locale} ${option.value}`);
+    }
+  }
+});
+
 test('WSL SQLite recovery guidance is localized without English fallback', () => {
   for (const locale of LANGUAGE_OPTIONS.map((option) => option.value).filter((value) => value !== 'auto')) {
     assert.ok(MESSAGES[locale]['settings.collection.wslPanel.sqliteHelp'], locale);
