@@ -126,8 +126,14 @@ test('a shared long-cycle overlay retrieves earlier points for short quota windo
       window: { kind: 'billing', windowMinutes: 43200, resetsAt: new Date(now + day).toISOString() } }
   ];
   const database = createHistoryDatabase(fixture.file);
-  t.after(() => database.close());
-  const session = database.query(entries, { grain: 'day', day: dayKey(now) }, now).windows[0];
+  // Close here: the fixture's own after-hook removes the directory, and a
+  // second open handle would make that removal fail on Windows.
+  let session;
+  try {
+    session = database.query(entries, { grain: 'day', day: dayKey(now) }, now).windows[0];
+  } finally {
+    database.close();
+  }
   assert.deepEqual(session.points.map(point => point.value), [20]);
   assert.deepEqual(session.recentPoints.map(point => point.value), [15, 20]);
 });
