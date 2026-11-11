@@ -13,6 +13,9 @@
 //   {
 //     id: 'zed',
 //     fetch: 'fetchZedLimits',  // limits.js export the collector calls
+//     accountRefresh: true,     // optional: fetch honors an account-scoped
+//                               // limitRefreshScope, returning only that
+//                               // account's row (see limitAccountRefreshScope)
 //     fields: [ ... ],          // settings keys this provider owns
 //     status: { ... },          // optional: renderer account-status projection
 //     accountStatus(input, limits), // optional: custom status projection
@@ -189,9 +192,31 @@ function limitProviderUrlAllowed(hostname, pathname, providerId = '') {
   return false;
 }
 
+// The refresh scope for one rendered limits row. LimitsRuntime files every row
+// an account-scoped probe returns under that one identity, so the scope may
+// only name an account when the provider's fetch filters by it, and only by
+// its account key: providers' name- or email-only paths can fall back to
+// reading every account. Anything else refreshes the whole provider instead.
+function limitAccountRefreshScope(provider, row = {}) {
+  const text = (value) => (typeof value === 'string' ? value.trim() : '');
+  const scope = { provider };
+  if (!limitAccountDeclaration(provider)?.accountRefresh) return scope;
+  const account = {
+    accountKey: text(row.accountKey),
+    accountEmail: text(row.accountEmail).toLowerCase(),
+    accountName: text(row.accountName),
+    accountLabel: text(row.accountLabel),
+    sourceDetail: text(row.sourceDetail)
+  };
+  if (!account.accountKey) return scope;
+  for (const [key, value] of Object.entries(account)) if (value) scope[key] = value;
+  return scope;
+}
+
 module.exports = {
   LIMIT_PROVIDER_ACCOUNTS,
   limitAccountDeclaration,
+  limitAccountRefreshScope,
   limitAccountField,
   limitProviderSettingKeys,
   limitProviderUrlAllowed,

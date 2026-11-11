@@ -5,6 +5,7 @@
 module.exports = {
   id: 'claude',
   fetch: 'fetchClaudeAccountsLimits',
+  accountRefresh: true,
   fields: [
     {
       key: 'claudeManagedAccounts',

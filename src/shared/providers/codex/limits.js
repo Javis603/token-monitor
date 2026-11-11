@@ -11,6 +11,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { appVersion } = require('../../appVersion');
 const { normalizeLimitProvider } = require('../../limits/core');
+const { rowMatchesScope } = require('../../limits/accountScope');
 const { abortError } = require('../../probeDeadline');
 const {
   codexAccountKey,
@@ -1401,10 +1402,19 @@ async function fetchCodexLimits(options = {}, deps = {}) {
       includeLiveAccount = includeLiveAccount && readLiveCodexIdentity(deps).accountKey === scope.accountKey;
     }
   }
+  // A scoped refresh of the live row reads whichever account is signed in now.
+  // If that is no longer the account the scope names, its reading belongs to
+  // another identity, and the runtime would file it under the scoped one, so
+  // it is dropped. Nothing is returned in its place: a retryable status here
+  // would put the whole provider into backoff, retrying an account that is
+  // gone. The next provider-wide poll marks the missing identity unavailable.
+  const liveInScope = (live) => !scope || rowMatchesScope(live, scope);
   // Single live account: keep the original single-provider shape (and error
   // propagation) so a signed-out/not-configured state surfaces as before.
   if (managedAccounts.length === 0) {
-    return includeLiveAccount ? fetchLiveCodexAccount(deps, nowMs) : [];
+    if (!includeLiveAccount) return [];
+    const live = await fetchLiveCodexAccount(deps, nowMs);
+    return liveInScope(live) ? live : [];
   }
 
   const providers = [];
@@ -1425,8 +1435,10 @@ async function fetchCodexLimits(options = {}, deps = {}) {
   if (includeLiveAccount) {
     try {
       const live = await fetchLiveCodexAccount(deps, nowMs, managedAccounts);
-      providers.push(live);
-      markSeen(live);
+      if (liveInScope(live)) {
+        providers.push(live);
+        markSeen(live);
+      }
     } catch (_) {}
   }
   for (const account of managedAccounts) {

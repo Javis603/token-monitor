@@ -171,6 +171,27 @@ test('different account scopes stay independent inside one provider lane', async
   runtime.stop();
 });
 
+test('probe events list every probe in flight by the account it is for', async () => {
+  const events = [];
+  const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, runtimeDeps({
+    onEvent: (event) => events.push(event),
+    probeProvider: async () => [providerRow('kimi', 'account', 'Kimi')]
+  }));
+
+  await runtime.refresh({ provider: 'kimi', accountKey: 'Key-1', credential: 'secret-cookie' }, 'credential-edit');
+  await runtime.refresh({ provider: 'kimi' }, 'manual');
+
+  const probes = events.map((event) => [event.type, event.probes]);
+  assert.deepEqual(probes, [
+    ['probe-start', [{ provider: 'kimi', account: { field: 'accountKey', value: 'key-1' } }]],
+    ['probe-finish', []],
+    ['probe-start', [{ provider: 'kimi', account: null }]],
+    ['probe-finish', []]
+  ]);
+  assert.ok(!JSON.stringify(events).includes('secret-cookie'));
+  runtime.stop();
+});
+
 test('diagnostic events expose queue state without leaking scoped credentials', async () => {
   const events = [];
   const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, runtimeDeps({
@@ -354,6 +375,42 @@ test('a fast provider publishes before a slower provider finishes', async () => 
   await refresh;
   assert.deepEqual(runtime.getSnapshot().providers.map((row) => row.provider).sort(), ['claude', 'kimi']);
   runtime.stop();
+});
+
+test('a quota row refresh during a cooldown or a failed probe reports why nothing new is coming', async () => {
+  const { limitRefreshOutcome } = require('../../src/electron/deviceRuntimeCoordinator');
+  const clock = fakeClock(10_000);
+  let mode = 'rate-limited';
+  const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, runtimeDeps({
+    now: clock.now,
+    setTimeout: clock.setTimeout,
+    clearTimeout: clock.clearTimeout,
+    random: () => 0,
+    probeProvider: async (_provider, _config, context) => {
+      if (mode === 'throws') throw new Error('socket hang up');
+      if (mode === 'rate-limited') {
+        context.onRetryAfter(30_000);
+        return [{ provider: 'kimi', status: 'sourceRateLimited', windows: [] }];
+      }
+      return [providerRow('kimi', 'account', 'Kimi')];
+    }
+  }));
+
+  await runtime.refresh({ provider: 'kimi' }, 'interval');
+  // The row button's reason does not bypass a provider's Retry-After.
+  assert.deepEqual(limitRefreshOutcome(await runtime.refresh({ provider: 'kimi', accountKey: 'account' }, 'account-panel')), {
+    ok: false, reason: 'cooldown', retryAt: new Date(40_000).toISOString()
+  });
+  clock.advance(30_000);
+  mode = 'ok';
+  await waitFor(() => runtime.getSnapshot().providers.some((row) => row.status === 'ok'), 'cooldown retry');
+  assert.deepEqual(limitRefreshOutcome(await runtime.refresh({ provider: 'kimi', accountKey: 'account' }, 'account-panel')), { ok: true });
+  mode = 'throws';
+  const failed = limitRefreshOutcome(await runtime.refresh({ provider: 'kimi', accountKey: 'account' }, 'account-panel'));
+  assert.equal(failed.ok, false);
+  assert.equal(failed.reason, 'failed');
+  runtime.stop();
+  assert.deepEqual(limitRefreshOutcome(false), { ok: false, reason: 'unavailable' });
 });
 
 test('Retry-After defers the provider retry and manual refresh does not bypass it', async () => {

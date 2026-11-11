@@ -25,6 +25,7 @@ const {
   recordLimitsUrgencyAttempt
 } = require('./burnRate');
 const { runWithProbeDeadline } = require('../probeDeadline');
+const { accountIdentityDescriptor, probeAccount, rowMatchesScope } = require('./accountScope');
 const {
   DEFAULT_LIMITS_RETRY_BASE_MS,
   DEFAULT_LIMITS_RETRY_MAX_MS,
@@ -79,37 +80,8 @@ function privateCredentialDigest(provider, value) {
   return crypto.createHash('sha256').update(`${provider}\0${value}`).digest('hex').slice(0, 24);
 }
 
-function accountIdentityDescriptor(value) {
-  for (const [name, raw] of [
-    ['accountKey', value?.accountKey],
-    ['id', value?.accountId ?? value?.managedAccountId ?? value?.id],
-    ['email', value?.accountEmail ?? value?.email],
-    ['name', value?.accountName ?? value?.name],
-    ['label', value?.accountLabel]
-  ]) {
-    const normalized = clean(raw).toLowerCase();
-    if (normalized) return { name, value: normalized, part: `${name}:${normalized}` };
-  }
-  return null;
-}
-
 function accountIdentityPart(value) {
   return accountIdentityDescriptor(value)?.part || '';
-}
-
-function accountIdentityField(value, name) {
-  if (name === 'accountKey') return value?.accountKey;
-  if (name === 'id') return value?.accountId ?? value?.managedAccountId ?? value?.id;
-  if (name === 'email') return value?.accountEmail ?? value?.email;
-  if (name === 'name') return value?.accountName ?? value?.name;
-  if (name === 'label') return value?.accountLabel;
-  return '';
-}
-
-function rowMatchesScope(row, scope) {
-  const descriptor = accountIdentityDescriptor(scope);
-  if (!descriptor) return false;
-  return clean(accountIdentityField(row, descriptor.name)).toLowerCase() === descriptor.value;
 }
 
 function credentialIdentityPart(provider, value) {
@@ -236,6 +208,17 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     if (!intent || intent.settled) return;
     intent.settled = true;
     intent.resolve(result);
+  }
+
+  // Every probe in flight, whole rather than as a delta, so an observer that
+  // missed an event (or outlived a stopped runtime) is corrected by the next.
+  function activeProbes() {
+    const probes = [];
+    for (const lane of lanes.values()) {
+      const intent = lane.active?.intent;
+      if (intent) probes.push({ provider: lane.provider, account: intent.accountScoped ? probeAccount(intent.scope) : null });
+    }
+    return probes;
   }
 
   function emitEvent(type, provider, detail = {}) {
@@ -720,7 +703,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       expectedIdentityKeys: [...lane.identities.keys()]
     };
     lane.active = { intent, controller, dispatch };
-    emitEvent('probe-start', lane.provider, { reason: intent.reason });
+    emitEvent('probe-start', lane.provider, { reason: intent.reason, probes: activeProbes() });
     let reportedRetryAfterMs = null;
     try {
       const resolved = deps.resolveConfigSnapshot
@@ -760,7 +743,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       finishIntent(intent, { superseded: !committed, error, snapshot: getSnapshot() });
     } finally {
       if (lane.active?.intent === intent) lane.active = null;
-      emitEvent('probe-finish', lane.provider, { reason: intent.reason });
+      emitEvent('probe-finish', lane.provider, { reason: intent.reason, probes: activeProbes() });
     }
   }
 
