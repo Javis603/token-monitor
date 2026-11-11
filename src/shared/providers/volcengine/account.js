@@ -6,6 +6,7 @@ const normalizeVolcengineRegion = (value) => String(value || '').trim().toLowerC
 module.exports = {
   id: 'volcengine',
   fetch: 'fetchVolcengineLimits',
+  accountRefresh: true,
   fields: [
     {
       key: 'volcengineAccessKeyId',

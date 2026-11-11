@@ -4,6 +4,7 @@
 module.exports = {
   id: 'thirdparty',
   fetch: 'fetchThirdPartyLimits',
+  accountRefresh: true,
   fields: [
     {
       key: 'thirdPartyProfiles',

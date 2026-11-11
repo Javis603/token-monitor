@@ -4,6 +4,7 @@
 module.exports = {
   id: 'openrouter',
   fetch: 'fetchOpenRouterLimits',
+  accountRefresh: true,
   fields: [
     {
       key: 'openrouterProfiles',

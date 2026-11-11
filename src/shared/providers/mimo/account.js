@@ -4,6 +4,7 @@
 module.exports = {
   id: 'mimo',
   fetch: 'fetchMimoLimits',
+  accountRefresh: true,
   fields: [
     {
       key: 'mimoManagedAccounts',

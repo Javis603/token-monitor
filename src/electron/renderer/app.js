@@ -4844,6 +4844,9 @@ document.addEventListener('keydown', event => {
   window.tokenMonitor.limits.closeHistory();
 }, true);
 
+// Probes the limits runtime is running right now, whoever started them.
+let limitProbes = [];
+
 const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsView({
   document,
   history: window.tokenMonitor?.limits?.openHistory ? {
@@ -4933,8 +4936,28 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   // matcher refuses to heal their tooltips onto another observed account.
   subscriptionAccounts: () => limitProvidersForSubscriptions(),
   monthClientCosts: () => state.stats?.periods?.month?.clientCosts,
-  resetForecast: () => ({ busy: state.codexResetForecastBusy, forecast: state.codexResetForecast })
+  resetForecast: () => ({ busy: state.codexResetForecastBusy, forecast: state.codexResetForecast }),
+  accountRefresh: {
+    available: (provider) => LIMIT_PROVIDER_IDS.includes(provider?.provider)
+      && typeof window.tokenMonitor?.limits?.refresh === 'function',
+    probes: () => limitProbes,
+    refresh: refreshLimitAccount
+  }
 });
+
+function setLimitProbes(probes) {
+  limitProbes = Array.isArray(probes) ? probes : [];
+  limitWindowsView.syncLimitRefreshButtons();
+}
+let limitProbesPushed = false;
+window.tokenMonitor?.limits?.onProbes?.((probes) => {
+  limitProbesPushed = true;
+  setLimitProbes(probes);
+});
+// The probes already running when this page loaded; a push that arrived first is newer.
+void window.tokenMonitor?.limits?.probes?.().then((probes) => {
+  if (!limitProbesPushed) setLimitProbes(probes);
+}, () => {});
 
 const {
   codexResetForecastExpired,
@@ -12699,6 +12722,25 @@ async function submitAccountCredential(button, id, values, options) {
     button.disabled = false;
     button.textContent = label;
   }
+}
+
+// A quota row's own refresh. The result says whether anything new is coming,
+// so the row can tell the user when it is not.
+async function refreshLimitAccount(provider) {
+  let result;
+  try {
+    result = await window.tokenMonitor.limits.refresh(provider.provider, {
+      accountKey: provider.accountKey,
+      accountEmail: provider.accountEmail,
+      accountName: provider.accountName,
+      accountLabel: provider.accountLabel,
+      sourceDetail: provider.sourceDetail
+    });
+  } catch (_) {
+    result = { ok: false, reason: 'failed' };
+  }
+  await refreshStats();
+  return result;
 }
 
 async function refreshLimitProviderQuota(providerName) {

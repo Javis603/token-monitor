@@ -8,6 +8,7 @@
 module.exports = {
   id: 'workbuddy',
   fetch: 'fetchWorkbuddyLimits',
+  accountRefresh: true,
   fields: [
     { key: 'workbuddyManagedAccounts', kind: 'managed', contextOverride: true, persist: 'never', initial: [], watch: false, rendererOmit: true },
     { key: 'workbuddyAccessToken', kind: 'credential', persist: 'never', rendererOmit: true, initial: null, config: false },

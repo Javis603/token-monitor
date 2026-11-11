@@ -4,6 +4,7 @@
 module.exports = {
   id: 'minimax',
   fetch: 'fetchMinimaxLimits',
+  accountRefresh: true,
   fields: [
     { key: 'minimaxApiProfiles', kind: 'profiles',
       storePath: ['providers', 'minimax', 'profiles'], configDefault: {}, persist: 'never' },

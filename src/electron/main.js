@@ -187,7 +187,7 @@ const {
   runCodexLogin
 } = require('../shared/limits/collector');
 const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
-const { limitProviderUrlAllowed } = require('../shared/limits/accounts');
+const { limitAccountRefreshScope, limitProviderUrlAllowed } = require('../shared/limits/accounts');
 const { normalizeLimitProviderHiddenItems } = require('../shared/limits/usageItems');
 const {
   accountFieldProjection,
@@ -438,6 +438,7 @@ const {
 const {
   canRefreshUsageRuntime,
   drainPendingUsageClientRefreshes: drainPendingUsageClientRefreshQueue,
+  limitRefreshOutcome,
   runLimitInvalidation,
   runManualDeviceRefresh,
   settingsLimitInvalidationPlan
@@ -1082,8 +1083,42 @@ function electronLimitsDeps() {
     onAntigravityCredentialsRenewed: persistAntigravityCredentialsRenewal,
     resolveWorkbuddyManagedCredential: (account, options) => workbuddyAccountService().resolveCredential(account, options),
     onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal,
-    onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey
+    onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey,
+    onEvent: (event) => {
+      if (event?.type === 'probe-start' || event?.type === 'probe-finish') publishLimitProbes(event.probes);
+    }
   };
+}
+
+// One provider's quota, or one account's where the provider can narrow to it:
+// the settings panel's refresh and a quota row's own button, on any surface.
+// The rows repaint from the limits update the probe publishes; the answer says
+// whether one is coming (limitRefreshOutcome).
+async function refreshLimitProvider(providerId, account) {
+  const provider = String(providerId || '').trim();
+  const parsed = parseLimitProviders(provider);
+  if (parsed.length !== 1 || parsed[0] !== provider) return { ok: false, reason: 'unavailable', error: 'unknown provider' };
+  if (!deviceRuntimeHandle) return { ok: false, reason: 'unavailable', error: 'limits runtime is not ready' };
+  const scope = account && typeof account === 'object'
+    ? limitAccountRefreshScope(provider, account)
+    : { provider };
+  try {
+    return limitRefreshOutcome(await runLimitInvalidation(deviceRuntimeHandle, scope, 'account-panel', { clear: false }));
+  } catch (error) {
+    return { ok: false, reason: 'failed', error: error?.message || String(error) };
+  }
+}
+
+// The limits probes running right now, for the quota rows' refresh buttons to
+// show a background refresh as well as one the user started.
+let limitProbes = [];
+function publishLimitProbes(probes) {
+  limitProbes = Array.isArray(probes) ? probes : [];
+  edgeDockController?.setLimitProbes(limitProbes);
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.webContents.send('limits:probes', limitProbes);
+  } catch (_) {}
 }
 
 
@@ -4524,6 +4559,8 @@ function stopSyncCollector(options = {}) {
   usageRuntimeReconciler.setActiveKey(null);
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
+  // A stopped runtime's probes finish unobserved.
+  if (limitProbes.length) publishLimitProbes([]);
 }
 
 async function stopIcloudRuntime() {
@@ -5374,6 +5411,8 @@ function stopLocalCollector(options = {}) {
   usageRuntimeReconciler.setActiveKey(null);
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
+  // A stopped runtime's probes finish unobserved.
+  if (limitProbes.length) publishLimitProbes([]);
   localDevice = null;
   localStats = null;
 }
@@ -6412,6 +6451,8 @@ function ensureEdgeDockController() {
     onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
     canRefreshLimits: () => canRefreshEdgeDockStats(),
     onRefreshLimits: () => refreshStatsFromEdgeDock(),
+    onRefreshLimitAccount: (providerId, account) => refreshLimitProvider(providerId, account),
+    limitProbes: () => limitProbes,
     onOpenResetForecastSource: () => {
       if (isAllowedExternalUrl(CODEX_RESET_FORECAST_SOURCE_URL)) void shell.openExternal(CODEX_RESET_FORECAST_SOURCE_URL);
     },
@@ -9082,19 +9123,11 @@ app.whenReady().then(() => {
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
   ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));
   // Explicit panel refreshes collect only their provider. Save and clear reuse
-  // the refresh scheduled by the credential settings write above.
-  ipcMain.handle('limits:refresh', async (_event, providerId) => {
-    const provider = String(providerId || '').trim();
-    const parsed = parseLimitProviders(provider);
-    if (parsed.length !== 1 || parsed[0] !== provider) return { ok: false, error: 'unknown provider' };
-    if (!deviceRuntimeHandle) return { ok: false, error: 'limits runtime is not ready' };
-    try {
-      await runLimitInvalidation(deviceRuntimeHandle, { provider }, 'account-panel', { clear: false });
-      return { ok: true };
-    } catch (error) {
-      return { ok: false, error: error?.message || String(error) };
-    }
-  });
+  // the refresh scheduled by the credential settings write above. A quota row's
+  // own refresh button also names its account, which narrows the probe to that
+  // account where the provider supports it.
+  ipcMain.handle('limits:probes', () => limitProbes);
+  ipcMain.handle('limits:refresh', (_event, providerId, account) => refreshLimitProvider(providerId, account));
   ipcMain.handle('opencode:saveCookie', async (_event, raw) => {
     const cookie = opencodeWeb.sanitizeCookieHeader(raw, '__Host-console_session');
     if (!cookie) {

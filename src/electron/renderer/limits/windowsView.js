@@ -39,11 +39,12 @@
   const node = typeof module === 'object' && module.exports;
   const api = factory(
     node ? require('../../../shared/limits/providers') : root?.TokenMonitorLimitProviders,
-    node ? require('../../../shared/limits/usageItems') : root?.TokenMonitorLimitUsageItems
+    node ? require('../../../shared/limits/usageItems') : root?.TokenMonitorLimitUsageItems,
+    node ? require('../../../shared/limits/accountScope') : root?.TokenMonitorLimitAccountScope
   );
   if (node) module.exports = api;
   if (root) root.TokenMonitorLimitWindowsView = api;
-})(typeof window !== 'undefined' ? window : globalThis, function createLimitWindowsViewApi(limitProviders, usageItems) {
+})(typeof window !== 'undefined' ? window : globalThis, function createLimitWindowsViewApi(limitProviders, usageItems, accountScope) {
   function createLimitWindowsView(deps) {
     const {
       t,
@@ -101,7 +102,12 @@
       // `{ enabled, busy, forecast }` — the Codex reset forecast as this host
       // currently holds it, read at paint time because the widget refreshes it
       // on its own timer.
-      resetForecast = () => ({ busy: false, forecast: null })
+      resetForecast = () => ({ busy: false, forecast: null }),
+      // `{ available(provider), probes(), refresh(provider) }` — a host that can
+      // refresh limits puts a button on each row's "Updated" line. `probes()` is
+      // the limits runtime's probes in flight, so a refresh the user did not
+      // start spins the row too. A surface without one draws no button.
+      accountRefresh = null
     } = deps;
     const document = deps.document || globalThis.document;
 
@@ -2064,6 +2070,159 @@
     return mark;
   }
 
+  // Rows whose own button is waiting on the host, keyed like the rows' motion
+  // keys so the spinner survives the list's periodic repaint.
+  const pendingAccountRefreshes = new Set();
+  // Each drawn button's row and status line, so a probe starting or finishing
+  // can update them in place instead of waiting for the list's next repaint.
+  const refreshButtonRows = new WeakMap();
+  const refreshButtonStatus = new WeakMap();
+  const refreshButtons = new Set();
+
+  function limitRowRefreshing(provider) {
+    if (pendingAccountRefreshes.has(motion.providerKey(provider))) return true;
+    return (accountRefresh.probes() || []).some((probe) => accountScope.probeCoversRow(probe, provider));
+  }
+
+  // Most probes answer in a few hundred milliseconds, so following them
+  // exactly flashes a spinner the eye cannot read, and a background poll
+  // blinks rows the user never touched. The usual spin-delay remedy: a
+  // background refresh shows only once it has outlasted SPIN_DELAY_MS, and a
+  // spinner once shown — at once, for a click — stays at least SPIN_MIN_MS.
+  const SPIN_DELAY_MS = 400;
+  const SPIN_MIN_MS = 800;
+  // How long a click that brought nothing back says so before the row
+  // returns to its plain "Updated" line.
+  const FAILURE_HOLD_MS = 4000;
+  // Per row key: when its refresh began and when its spinner appeared.
+  const spinStates = new Map();
+  // Per row key: why the user's last refresh brought nothing back, and until when to say so.
+  const refreshFailures = new Map();
+  let syncTimer = null;
+  let syncTimerAt = Infinity;
+
+  function scheduleButtonSync(at) {
+    if (at >= syncTimerAt) return;
+    if (syncTimer !== null) clearTimeout(syncTimer);
+    syncTimerAt = at;
+    syncTimer = setTimeout(() => {
+      syncTimer = null;
+      syncTimerAt = Infinity;
+      syncLimitRefreshButtons();
+    }, Math.max(0, at - Date.now()));
+  }
+
+  function limitRowSpinning(key, provider, now) {
+    let spin = spinStates.get(key);
+    if (limitRowRefreshing(provider)) {
+      if (!spin) spinStates.set(key, spin = { since: now, shownAt: null });
+      if (spin.shownAt === null && pendingAccountRefreshes.has(key)) spin.shownAt = now;
+      if (spin.shownAt === null) {
+        if (now - spin.since >= SPIN_DELAY_MS) spin.shownAt = now;
+        else scheduleButtonSync(spin.since + SPIN_DELAY_MS);
+      }
+      return spin.shownAt !== null;
+    }
+    if (spin?.shownAt != null && now - spin.shownAt < SPIN_MIN_MS) {
+      scheduleButtonSync(spin.shownAt + SPIN_MIN_MS);
+      return true;
+    }
+    spinStates.delete(key);
+    return false;
+  }
+
+  function limitRowFailure(key, now) {
+    const failure = refreshFailures.get(key);
+    if (!failure) return null;
+    if (now >= failure.until) {
+      refreshFailures.delete(key);
+      return null;
+    }
+    scheduleButtonSync(failure.until);
+    return failure;
+  }
+
+  const FAILURE_KEYS = {
+    cooldown: 'limits.refreshAccountCooldown',
+    failed: 'limits.refreshAccountFailed',
+    unavailable: 'limits.refreshAccountFailed'
+  };
+
+  function syncLimitRefreshButton(button) {
+    const provider = refreshButtonRows.get(button);
+    if (!provider) return;
+    const key = motion.providerKey(provider);
+    const now = Date.now();
+    const busy = limitRowSpinning(key, provider, now);
+    // A spinner is newer news than a failure, so it wins while it shows.
+    const failure = busy ? null : limitRowFailure(key, now);
+    button.classList.toggle('is-refreshing', busy);
+    button.classList.toggle('is-refresh-error', Boolean(failure));
+    button.classList.toggle('is-refresh-cooldown', failure?.reason === 'cooldown');
+    // Not `disabled`: that would drop keyboard focus out from under the user.
+    button.setAttribute('aria-disabled', String(busy));
+    const status = refreshButtonStatus.get(button);
+    if (status) {
+      const text = failure ? t(FAILURE_KEYS[failure.reason] || FAILURE_KEYS.failed) : '';
+      if (status.textContent !== text) status.textContent = text;
+    }
+  }
+
+  // Every button still on screen. A repaint replaces the rows, so buttons the
+  // DOM has let go of are dropped here rather than tracked.
+  function syncLimitRefreshButtons() {
+    for (const button of refreshButtons) {
+      if (button.isConnected === false) refreshButtons.delete(button);
+      else syncLimitRefreshButton(button);
+    }
+  }
+
+  // The button and the status line that reports a click that came back empty.
+  // The status line is a polite live region from the moment it is drawn, so a
+  // screen reader hears the failure the sighted user sees.
+  function limitRefreshControl(provider) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'limit-refresh-button';
+    button.setAttribute('aria-label', t('limits.refreshAccount'));
+    const icon = document.createElement('span');
+    icon.className = 'limit-refresh-icon';
+    icon.setAttribute('aria-hidden', 'true');
+    button.append(icon);
+    const status = document.createElement('span');
+    status.className = 'limit-refresh-status';
+    status.setAttribute('role', 'status');
+    refreshButtonRows.set(button, provider);
+    refreshButtonStatus.set(button, status);
+    refreshButtons.add(button);
+    syncLimitRefreshButton(button);
+    button.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const key = motion.providerKey(provider);
+      // The spinner is the row's state, not the request's: a click while it
+      // still shows (a refresh in flight, or one just settled) does nothing.
+      if (pendingAccountRefreshes.has(key) || button.classList.contains('is-refreshing')) return;
+      refreshFailures.delete(key);
+      pendingAccountRefreshes.add(key);
+      syncLimitRefreshButton(button);
+      void Promise.resolve()
+        .then(() => accountRefresh.refresh(provider))
+        .then((result) => result, () => ({ ok: false, reason: 'failed' }))
+        .then((result) => {
+          if (result?.ok === false) {
+            refreshFailures.set(key, { reason: result.reason || 'failed', until: Date.now() + FAILURE_HOLD_MS });
+          }
+        })
+        .finally(() => {
+          pendingAccountRefreshes.delete(key);
+          // The row may have been repainted meanwhile; settle whichever button
+          // stands for it now.
+          syncLimitRefreshButtons();
+        });
+    });
+    return [button, status];
+  }
+
   function renderLimitProviderHead(id, label, provider, color, options = {}) {
     const head = document.createElement('div');
     head.className = 'limit-head';
@@ -2117,7 +2276,17 @@
       // group, where it's each subrow's title (options.accountTitle) — not here.
       if (provider.status === 'ok' || provider.stale) metaParts.push(limitProviderMeta(provider, provenance));
       const metaText = metaParts.filter(Boolean).join(' · ');
-      if (metaText) meta.append(document.createTextNode(metaText));
+      // A reading synced from another device can only be refreshed there.
+      const refreshControl = metaText && accountRefresh?.available(provider) && !provenance.selectedIsRemote
+        ? limitRefreshControl(provider)
+        : null;
+      if (refreshControl) {
+        const text = document.createElement('span');
+        text.className = 'limit-meta-text';
+        text.textContent = metaText;
+        meta.classList.add('has-refresh');
+        meta.append(text, ...refreshControl);
+      } else if (metaText) meta.append(document.createTextNode(metaText));
       titleBlock.append(meta);
     }
     const plan = document.createElement('div');
@@ -3272,6 +3441,7 @@
     renderLimitProviderMark,
     renderLimitProviderRow,
     renderLimitProviderSolo,
+    syncLimitRefreshButtons,
     claudeBalanceNode,
     codexAdditionalWindowLabel,
     codexResetCreditsNode,

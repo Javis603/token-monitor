@@ -5095,6 +5095,81 @@ html.is-windows .settings-panel select option {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.limit-meta.has-refresh {
+  display: flex;
+  align-items: center;
+  /* One monospace space, as if the icon were the next word of the line. */
+  gap: 0.6em;
+  overflow: visible;
+}
+.limit-meta-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Sized in the meta line's own em so it reads as part of that text: the icon's
+   ink sits a little under cap height and its stroke near the font's. It takes its space
+   whether or not it shows, so revealing it on hover never shifts the line; the
+   negative margin keeps the line's height. */
+.limit-refresh-button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 1.4em;
+  height: 1.4em;
+  margin: -0.2em -0.2em;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms cubic-bezier(0.25, 1, 0.5, 1), color 120ms cubic-bezier(0.25, 1, 0.5, 1);
+}
+.limit-row:hover > .limit-head .limit-refresh-button,
+.limit-refresh-button:focus-visible,
+.limit-refresh-button.is-refreshing {
+  opacity: 1;
+  pointer-events: auto;
+}
+.limit-refresh-button:hover { color: var(--text); }
+.limit-refresh-button.is-refreshing { cursor: default; }
+/* A click that brought nothing back stays visible, tinted, beside its reason,
+   so the button does not look like it silently did nothing. A cooldown is the
+   provider asking for patience rather than a fault, so it takes the warning
+   tone. */
+.limit-meta.has-refresh { --limit-refresh-failure: var(--red); }
+.limit-meta.has-refresh:has(.is-refresh-cooldown) { --limit-refresh-failure: var(--orange); }
+.limit-refresh-button.is-refresh-error {
+  opacity: 1;
+  pointer-events: auto;
+  color: var(--limit-refresh-failure);
+}
+.limit-refresh-status {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--limit-refresh-failure);
+  text-overflow: ellipsis;
+}
+.limit-refresh-icon {
+  width: 0.85em;
+  height: 0.85em;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/rotate-cw.svg") center / contain no-repeat;
+  mask: url("icons/actions/rotate-cw.svg") center / contain no-repeat;
+}
+.limit-refresh-button.is-refreshing .limit-refresh-icon {
+  -webkit-mask-image: url("icons/actions/spinner.svg");
+  mask-image: url("icons/actions/spinner.svg");
+}
+.limit-refresh-button:active:not(.is-refreshing) .limit-refresh-icon { transform: scale(0.88); }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .limit-refresh-button { transition-duration: 0.01ms; }
+}
 .limit-plan {
   flex: 0 0 auto;
   max-width: 42%;

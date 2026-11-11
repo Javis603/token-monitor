@@ -4,6 +4,7 @@
 module.exports = {
   id: 'opencode',
   fetch: 'fetchOpenCodeLimits',
+  accountRefresh: true,
   fields: [
     {
       key: 'opencodeCookie',

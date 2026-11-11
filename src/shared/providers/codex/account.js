@@ -4,6 +4,7 @@
 module.exports = {
   id: 'codex',
   fetch: 'fetchCodexLimits',
+  accountRefresh: true,
   fields: [
     {
       key: 'codexManagedAccounts',
