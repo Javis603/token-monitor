@@ -194,8 +194,9 @@ function limitProviderUrlAllowed(hostname, pathname, providerId = '') {
 
 // The refresh scope for one rendered limits row. LimitsRuntime files every row
 // an account-scoped probe returns under that one identity, so the scope may
-// only name an account when the provider's fetch filters by it; anything else
-// (or a row with no strong identity) refreshes the whole provider instead.
+// only name an account when the provider's fetch filters by it, and only by
+// its account key: providers' name- or email-only paths can fall back to
+// reading every account. Anything else refreshes the whole provider instead.
 function limitAccountRefreshScope(provider, row = {}) {
   const text = (value) => (typeof value === 'string' ? value.trim() : '');
   const scope = { provider };
@@ -207,7 +208,7 @@ function limitAccountRefreshScope(provider, row = {}) {
     accountLabel: text(row.accountLabel),
     sourceDetail: text(row.sourceDetail)
   };
-  if (!account.accountKey && !account.accountEmail && !account.accountName) return scope;
+  if (!account.accountKey) return scope;
   for (const [key, value] of Object.entries(account)) if (value) scope[key] = value;
   return scope;
 }

@@ -20,8 +20,10 @@ test('a row refresh names the account only where the provider filters by it', ()
   // Cursor's probe ignores the scope and answers for every account, which the
   // runtime would file under the one scoped identity.
   assert.deepEqual(limitAccountRefreshScope('cursor', row), { provider: 'cursor' });
-  // A label alone is not an identity the runtime may narrow on.
+  // Only an account key names one account precisely enough: a provider's
+  // name- or email-only path can fall back to reading every account.
   assert.deepEqual(limitAccountRefreshScope('codex', { accountLabel: 'Pro' }), { provider: 'codex' });
+  assert.deepEqual(limitAccountRefreshScope('minimax', { accountName: 'Work', accountEmail: 'a@b.c' }), { provider: 'minimax' });
   assert.deepEqual(limitAccountRefreshScope('codex', { accountKey: 42 }), { provider: 'codex' });
 });
 
@@ -33,7 +35,9 @@ test('providers with a source that answers for every account refresh as a whole'
   // matcher never computes: narrowing would file another account's row under
   // the clicked one, replace a healthy reading with notConfigured, or probe
   // nothing.
-  for (const provider of ['volcengine', 'antigravity', 'opencode', 'workbuddy']) {
+  // MiMo's desktop fallback answers with an unattributed placeholder whatever
+  // the scope names.
+  for (const provider of ['volcengine', 'antigravity', 'opencode', 'workbuddy', 'mimo']) {
     assert.deepEqual(limitAccountRefreshScope(provider, { accountKey: 'k', accountName: 'Work' }), { provider });
   }
 });
