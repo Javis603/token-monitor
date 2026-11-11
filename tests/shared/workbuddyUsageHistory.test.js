@@ -7,6 +7,7 @@ const { recordWorkbuddyUsage } = require('../../src/shared/providers/workbuddy/u
 const {
   WORKBUDDY_USAGE_MAX_PAGES,
   WORKBUDDY_USAGE_PAGE_SIZE,
+  dailySpendSeries,
   fetchWorkbuddyUsageSpend,
   parseRecordTime,
   summarizeUsageRecords,
@@ -203,4 +204,31 @@ test('recordWorkbuddyUsage: an unreadable response omits the Spend fields', asyn
   assert.equal(await recordWorkbuddyUsage(async () => null, now), null);
   assert.equal(await recordWorkbuddyUsage(async () => ({ data: {} }), now), null);
   assert.equal(await recordWorkbuddyUsage(async () => ({ data: { rows: 'invalid' } }), now), null);
+});
+
+test('dailySpendSeries: zero-filled days and credit sums by local day', () => {
+  const now = at(2026, 10, 21, 16);
+  const series = dailySpendSeries([
+    { requestTime: at(2026, 10, 21, 9), credit: 10 },
+    { requestTime: at(2026, 10, 21, 11), credit: 2.5 },
+    { requestTime: at(2026, 10, 19, 9), credit: 7 },
+    { requestTime: at(2026, 9, 1, 9), credit: 99 },
+    { requestTime: 'not a date', credit: 5 },
+    { credit: 3 }
+  ], now, 5);
+  assert.equal(Object.keys(series).length, 5);
+  assert.equal(series['2026-10-21'], 12.5);
+  assert.equal(series['2026-10-20'], 0);
+  assert.equal(series['2026-10-19'], 7);
+  // A row outside the requested window is not attributed to a day in it.
+  assert.equal(series['2026-10-17'], 0);
+});
+
+test('fetchWorkbuddyUsageSpend: the paged read also returns a daily series', async () => {
+  const now = at(2026, 10, 21);
+  const spend = await fetchWorkbuddyUsageSpend(async () => ({
+    data: { data: [{ requestTime: now - 1_000, credit: 4 }] }
+  }), now);
+  assert.equal(spend.daily['2026-10-21'], 4);
+  assert.equal(Object.keys(spend.daily).length, 31);
 });

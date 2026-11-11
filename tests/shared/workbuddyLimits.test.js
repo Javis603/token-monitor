@@ -291,6 +291,11 @@ test('fetchWorkbuddyLimits sums Credits spend from the per-request billing ledge
   assert.equal(provider.balance.weekSpend, 117.17);
   // No All-time: the ledger window is capped at 31 days by the API.
   assert.equal(provider.balance.allTimeSpend, null);
+  // The same ledger read also produces the official absolute balance curve.
+  assert.equal(provider.balance.officialSeries.points.length, 14);
+  assert.equal(provider.balance.officialSeries.points.at(-1).balance, 76);
+  assert.equal(provider.balance.officialSeries.points.at(-1).kind, 'exact');
+  assert.equal(provider.balance.officialSeries.inferredDays, 13);
 });
 
 test('fetchWorkbuddyLimits probe checks a credential without reading the spend ledger', async () => {
@@ -328,6 +333,7 @@ test('fetchWorkbuddyLimits probe checks a credential without reading the spend l
   // credential, not a Spend observation.
   assert.equal(provider.status, 'ok');
   assert.equal(provider.balance.amount, 76);
+  assert.equal(provider.balance.officialSeries, undefined);
   assert.equal(provider.balance.todaySpend, null);
   assert.deepEqual(requests, [`${WORKBUDDY_DEFAULT_ENDPOINT}/v2/billing/meter/get-user-resource`]);
 });

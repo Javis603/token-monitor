@@ -6,6 +6,8 @@ const { cleanSecret, numberOrNull } = require('../../limits/providerHelpers');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 const { recordWorkbuddyUsage } = require('./usageHistory');
 const { WORKBUDDY_USAGE_PATH } = require('./usageRecords');
+const { recordAnchor } = require('./balanceAnchors');
+const { buildOfficialSeries } = require('./historySeries');
 
 const WORKBUDDY_FETCH_TIMEOUT_MS = 12_000;
 const WORKBUDDY_ACCOUNT_CONCURRENCY = 4;
@@ -523,6 +525,22 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
       } finally {
         clearTimeout(ledgerTimer);
       }
+      const { dailySpend, ...spendFields } = tracked || {};
+      let officialSeries = null;
+      if (usage.window && !deps.probe && dailySpend) {
+        try {
+          const anchors = await recordAnchor(
+            { accountKey: resolvedAccountKey, remaining: usage.remaining, now }, deps);
+          if (anchors) {
+            officialSeries = buildOfficialSeries({
+              anchors, dailySpend, currentRemaining: usage.remaining, now
+            });
+          }
+        } catch (_) {
+          // The anchor cache is enrichment: a failed write must not fail the row.
+          officialSeries = null;
+        }
+      }
       return row('ok', {
         accountKey: resolvedAccountKey,
         windows: usage.window ? [usage.window] : [],
@@ -530,7 +548,8 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
           balance: {
             amount: usage.remaining,
             currency: 'CREDITS',
-            ...(tracked || {})
+            ...spendFields,
+            ...(officialSeries ? { officialSeries } : {})
           }
         } : {})
       });

@@ -230,6 +230,38 @@ function normalizeBalanceTranches(input) {
   return tranches;
 }
 
+// A provider-reported absolute balance series for the quota-history curve.
+// Bounded and strictly typed: it crosses the device wire, so a malformed or
+// oversized payload must be dropped rather than trusted by the renderer.
+function normalizeOfficialSeries(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+  const rawPoints = Array.isArray(input.points) ? input.points : [];
+  if (!rawPoints.length || rawPoints.length > 14) return null;
+  const points = [];
+  for (const raw of rawPoints) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+    const day = String(raw.day || '');
+    const at = Number(raw.at);
+    const balance = Number(raw.balance);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day) || !Number.isFinite(at)
+      || !Number.isFinite(balance) || balance < 0) return null;
+    points.push({
+      day,
+      at,
+      balance,
+      kind: raw.kind === 'exact' ? 'exact' : 'inferred',
+      uncertain: raw.uncertain === true
+    });
+  }
+  const unattributed = Number(input.unattributed);
+  const inferredDays = Number(input.inferredDays);
+  return {
+    points,
+    unattributed: Number.isFinite(unattributed) && unattributed > 0 ? unattributed : 0,
+    inferredDays: Number.isFinite(inferredDays) ? Math.max(0, Math.trunc(inferredDays)) : 0
+  };
+}
+
 function normalizeProviderBalance(input) {
   if (!input || typeof input !== 'object') return null;
   const amount = numberOrNull(input.amount ?? input.balance ?? input.accountBalance ?? input.account_balance);
@@ -265,6 +297,7 @@ function normalizeProviderBalance(input) {
   const todayUsageBasis = String(input.todayUsageBasis ?? input.today_usage_basis ?? '').trim().slice(0, 64);
   const snapshotDate = normalizeDateText(input.snapshotDate ?? input.snapshot_date ?? input.date);
   const tranches = normalizeBalanceTranches(input);
+  const officialSeries = normalizeOfficialSeries(input.officialSeries ?? input.official_series);
   if (
     amount === null
     && !currency
@@ -289,6 +322,7 @@ function normalizeProviderBalance(input) {
     && !todayUsageBasis
     && !snapshotDate
     && tranches.length === 0
+    && officialSeries === null
   ) return null;
   return {
     amount,
@@ -313,7 +347,8 @@ function normalizeProviderBalance(input) {
     latestModelUsageDate,
     todayUsageBasis,
     snapshotDate,
-    ...(tranches.length > 0 ? { tranches } : {})
+    ...(tranches.length > 0 ? { tranches } : {}),
+    ...(officialSeries ? { officialSeries } : {})
   };
 }
 

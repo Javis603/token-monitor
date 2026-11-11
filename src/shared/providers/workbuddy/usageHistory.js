@@ -51,7 +51,10 @@ async function recordWorkbuddyUsage(post, now, signal = null) {
       // A month whose first day falls outside the window is a floor, not a
       // total; `monthSinceTracking` marks it, the same partial-coverage signal
       // DeepSeek and Z.ai emit.
-      monthSinceTracking: !spend.monthFullyCovered
+      monthSinceTracking: !spend.monthFullyCovered,
+      // Consumed by limits.js to build the official balance series; never
+      // published on the balance itself.
+      dailySpend: spend.daily
     };
   } catch (_) {
     return null;

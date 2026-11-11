@@ -3293,6 +3293,7 @@ async function limitsHistoryPayload(key) {
     provider: provider.provider,
     label: historyProviderCatalog.find(entry => entry.id === provider.provider)?.label || provider.provider,
     account: account || provider.accountName || provider.accountLabel || '',
+    officialSeries: provider.balance?.officialSeries || null,
     updatedAt: provider.updatedAt,
     locale: trayMenuLocale(), colors: settings?.themeColors, textScale: fontSettingsApi.textScaleForSize(settings?.textSize),
     color: palette[colorId] || palette.default,

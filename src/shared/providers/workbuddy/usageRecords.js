@@ -145,6 +145,27 @@ function summarizeUsageRecords(rows, now) {
   };
 }
 
+/**
+ * Aggregate ledger rows into a daily credit series over the last `days` local
+ * days. Days without rows are zero-filled so the curve is evenly spaced, and
+ * every figure comes from a provider-reported row rather than a local sample.
+ */
+function dailySpendSeries(rows, now, days = 31) {
+  const span = Number.isFinite(Number(days)) ? Math.max(1, Math.min(31, Math.trunc(Number(days)))) : 31;
+  const from = startOfLocalDay(now) - (span - 1) * 24 * 60 * 60 * 1000;
+  const series = {};
+  for (let i = 0; i < span; i += 1) series[localDayKey(from + i * 24 * 60 * 60 * 1000)] = 0;
+  for (const row of Array.isArray(rows) ? rows : []) {
+    const at = parseRecordTime(row?.requestTime ?? row?.RequestTime ?? row?.createdAt);
+    const credit = recordCredit(row);
+    if (at === null || credit === null) continue;
+    const key = localDayKey(at);
+    if (Object.hasOwn(series, key)) series[key] += credit;
+  }
+  for (const key of Object.keys(series)) series[key] = round2(series[key]);
+  return series;
+}
+
 function usageRequestBody(now) {
   const windowStart = new Date(now - WORKBUDDY_USAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   return {
@@ -188,7 +209,12 @@ async function fetchWorkbuddyUsageSpend(post, now, signal = null) {
   // first day is inside that window; near the start of a long month the Month
   // figure is a floor, not a total.
   const monthFullyCovered = startOfLocalMonth(now) >= startOfLocalDay(now - WORKBUDDY_USAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
-  return { ...summarizeUsageRecords(records, now), truncated, monthFullyCovered };
+  return {
+    ...summarizeUsageRecords(records, now),
+    daily: dailySpendSeries(records, now, WORKBUDDY_USAGE_WINDOW_DAYS),
+    truncated,
+    monthFullyCovered
+  };
 }
 
 module.exports = {
@@ -196,6 +222,7 @@ module.exports = {
   WORKBUDDY_USAGE_PAGE_SIZE,
   WORKBUDDY_USAGE_PATH,
   WORKBUDDY_USAGE_WINDOW_DAYS,
+  dailySpendSeries,
   fetchWorkbuddyUsageSpend,
   formatUsageDateTime,
   localDayKey,
