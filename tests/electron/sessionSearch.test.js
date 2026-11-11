@@ -126,7 +126,7 @@ test('background renders preserve IME composition until the completed query is c
   let renders = 0;
   const sync = Function('state', 'els', 't', 'render',
     `${app.slice(start, end)}\n${app.slice(handlersStart, handlersEnd)}\nreturn syncSessionSearchChrome;`)(
-    state, { sessionSearchInput: input }, key => key, () => { renders++; }
+    state, { sessionSearchInput: input, breakdown: { scrollTop: 0 } }, key => key, () => { renders++; }
   );
 
   handlers.compositionstart();
@@ -160,7 +160,7 @@ test('typing after a session-status repaint uses the refreshed projection cache'
   let timer;
   const rendered = [];
   const dependencies = {
-    state, Date,
+    state, Date, els: { breakdown: { scrollTop: 120 } },
     window: { TokenMonitorSessionLive: {
       nextSessionStatusChangeAt: () => timer ? 0 : Date.now() + 1000
     } },
@@ -185,6 +185,7 @@ test('typing after a session-status repaint uses the refreshed projection cache'
   assert.equal(rendered[1], freshRows);
   assert.equal(rendered[1][0].running, false);
   assert.equal(rendered[1][0].context, undefined);
+  assert.equal(dependencies.els.breakdown.scrollTop, 0);
 });
 
 test('typing filters the cached session rows instead of rebuilding the projection', () => {
@@ -197,10 +198,11 @@ test('typing filters the cached session rows instead of rebuilding the projectio
     breakdown: 'session', stats, period: 'today', sessionSearchQuery: '',
     sessionPage: 2, rowSignature: 'previous', sessionRowsCache: { stats, period: 'today', rows }
   };
+  const els = { breakdown: { scrollTop: 240 } };
   const calls = [];
-  const update = Function('state', 'sessionRowsApi', 'syncSessionSearchChrome', 'renderRows', 'render', 'overflowText',
+  const update = Function('state', 'els', 'sessionRowsApi', 'syncSessionSearchChrome', 'renderRows', 'render', 'overflowText',
     `${app.slice(start, end)}\nreturn updateSessionSearchQuery;`)(
-    state,
+    state, els,
     { sessionBreakdownIncomplete: () => false },
     () => calls.push('sync'),
     (nextRows, options) => calls.push(['rows', nextRows, options]),
@@ -213,6 +215,7 @@ test('typing filters the cached session rows instead of rebuilding the projectio
   assert.equal(state.sessionSearchQuery, 'review');
   assert.equal(state.sessionPage, 0);
   assert.equal(state.rowSignature, 'previous');
+  assert.equal(els.breakdown.scrollTop, 0);
 });
 
 test('typing without a valid projection forwards search intent through the full render', () => {
@@ -223,14 +226,16 @@ test('typing without a valid projection forwards search intent through the full 
   const renderEnd = app.indexOf('\nfunction renderAppContent(', renderStart);
   const state = { breakdown: 'session', stats: {}, period: 'today', sessionSearchQuery: '',
     sessionPage: 2, sessionRowsCache: { stats: {}, period: 'today', rows: [] } };
+  const els = { breakdown: { scrollTop: 180 } };
   const calls = [];
-  const update = Function('state', 'renderAppContent', 'pluginViewHost', 'pluginContent',
+  const update = Function('state', 'els', 'renderAppContent', 'pluginViewHost', 'pluginContent',
     `${app.slice(updateStart, updateEnd)}\n${app.slice(renderStart, renderEnd)}\nreturn updateSessionSearchQuery;`)(
-    state, options => calls.push(options), null, null
+    state, els, options => calls.push(options), null, null
   );
   update('review');
   assert.deepEqual(calls, [{ fromSearch: true }]);
   assert.equal(state.sessionPage, 0);
+  assert.equal(els.breakdown.scrollTop, 0);
 });
 
 test('the search field expands and collapses with reduced-motion support', () => {

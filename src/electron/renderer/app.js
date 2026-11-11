@@ -3155,6 +3155,7 @@ function updateSessionSearchQuery(value) {
   if (next === state.sessionSearchQuery) return;
   state.sessionSearchQuery = next;
   state.sessionPage = 0;
+  els.breakdown.scrollTop = 0;
   const cache = state.sessionRowsCache;
   if (state.breakdown === 'session' && cache?.stats === state.stats && cache?.period === state.period) {
     syncSessionSearchChrome();
