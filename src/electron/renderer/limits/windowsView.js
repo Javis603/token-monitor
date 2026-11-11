@@ -2131,9 +2131,13 @@
     return false;
   }
 
+  // Called only once the row's spinner has cleared, so the hold is counted
+  // from the moment the reason first shows, not from when the request settled
+  // under a spinner still serving its minimum.
   function limitRowFailure(key, now) {
     const failure = refreshFailures.get(key);
     if (!failure) return null;
+    if (failure.until === null) failure.until = now + FAILURE_HOLD_MS;
     if (now >= failure.until) {
       refreshFailures.delete(key);
       return null;
@@ -2178,11 +2182,12 @@
   // The button and the status line that reports a click that came back empty.
   // The status line is a polite live region from the moment it is drawn, so a
   // screen reader hears the failure the sighted user sees.
-  function limitRefreshControl(provider) {
+  function limitRefreshControl(provider, name) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'limit-refresh-button';
-    button.setAttribute('aria-label', t('limits.refreshAccount'));
+    // Named after the row it sits on, so a group's buttons can be told apart.
+    button.setAttribute('aria-label', t('limits.refreshAccount', { name }));
     const icon = document.createElement('span');
     icon.className = 'limit-refresh-icon';
     icon.setAttribute('aria-hidden', 'true');
@@ -2209,7 +2214,7 @@
         .then((result) => result, () => ({ ok: false, reason: 'failed' }))
         .then((result) => {
           if (result?.ok === false) {
-            refreshFailures.set(key, { reason: result.reason || 'failed', until: Date.now() + FAILURE_HOLD_MS });
+            refreshFailures.set(key, { reason: result.reason || 'failed', until: null });
           }
         })
         .finally(() => {
@@ -2277,7 +2282,7 @@
       const metaText = metaParts.filter(Boolean).join(' · ');
       // A reading synced from another device can only be refreshed there.
       const refreshControl = metaText && accountRefresh?.available(provider) && !provenance.selectedIsRemote
-        ? limitRefreshControl(provider)
+        ? limitRefreshControl(provider, titleText || limitProviders.LIMIT_PROVIDER_LABELS?.[provider.provider] || provider.provider)
         : null;
       if (refreshControl) {
         const text = document.createElement('span');

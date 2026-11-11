@@ -5137,6 +5137,9 @@ html.is-windows .settings-panel select option {
   pointer-events: auto;
 }
 .limit-refresh-button:hover { color: var(--text); }
+/* The shared button reset drops focus outlines, and hover already reveals the
+   button, so keyboard focus needs a mark of its own: the limit rows' style. */
+.limit-refresh-button:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
 .limit-refresh-button.is-refreshing { cursor: default; }
 /* A click that brought nothing back stays visible, tinted, beside its reason,
    so the button does not look like it silently did nothing. A cooldown is the

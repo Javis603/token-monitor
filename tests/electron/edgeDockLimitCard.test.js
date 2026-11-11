@@ -260,7 +260,10 @@ test('a row refresh button is drawn only for a host that can refresh limits', as
   const buttons = [...group.walk()].filter((node) => node.classNames.has('limit-refresh-button'));
   // One per account row; the group header has no "Updated" line to sit on.
   assert.equal(buttons.length, 2);
-  assert.equal(buttons[0].getAttribute('aria-label'), 'Refresh this account');
+  // Each is named after its own row, so a screen reader can tell them apart.
+  const names = buttons.map((button) => button.getAttribute('aria-label'));
+  assert.ok(names.every((name) => name.startsWith('Refresh ') && name.length > 'Refresh '.length));
+  assert.notEqual(names[0], names[1]);
   assert.match(buttons[0].parent.text, /^Updated /);
   // A press activates, so a repaint between press and release cannot swallow
   // it; the press's own trailing click must not fire it a second time.
@@ -321,7 +324,11 @@ test('a row refresh that brings nothing back says why, then returns to normal', 
   // A repaint keeps saying it.
   const repainted = view.renderLimitProviderSolo('kimi', 'Kimi', row, '#fff');
   assert.equal(repainted.find('limit-refresh-status').textContent, 'Cooling down, try later');
-  t.mock.timers.tick(4000);
+  // The hold counts from when the reason appeared, not from when the request
+  // settled under the spinner's minimum.
+  t.mock.timers.tick(3999);
+  assert.equal(status.textContent, 'Cooling down, try later');
+  t.mock.timers.tick(1);
   assert.equal(button.classList.contains('is-refresh-error'), false);
   assert.equal(status.textContent, '');
 
