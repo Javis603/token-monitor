@@ -213,13 +213,13 @@ Session device labels are a desktop presentation projection resolved from the ca
 
 ## Platform-specific copy
 
-Copy that names OS-specific UI (menu bar vs system tray, Dock vs taskbar, Cmd vs Ctrl) must not list every platform in one string. `renderer/i18n.js` resolves `key@<process.platform>` before `key`, then the same two keys in English, so a variant is added only where a platform differs.
+Copy that names OS-specific UI (menu bar vs system tray, Dock vs taskbar, Cmd vs Ctrl) must not list every platform in one string. `src/electron/renderer/i18n.js` resolves `key@<process.platform>` before `key`, then the same two keys in English, so a variant is added only where a platform differs.
 
 - **Base entry.** The base `key` is the general (non-macOS) wording and the fallback for platforms without a variant or before `appInfo` loads. Add a `key@darwin`, `key@win32` or `key@linux` entry only for platforms that read differently.
 - **Every locale.** Variants exist in every locale with the base's placeholders; `tests/electron/i18n.test.js` enforces both.
-- **Resolution.** `t()` and `applyTranslations()` in `app.js` pass `state.appInfo.platform`; other windows that call `i18n.translate()` without a platform get the base entry. Do not branch on the platform in the renderer to choose between two keys of the same message.
-- **Shared placeholders.** `PLATFORM_PARAMS` in `i18n.js` supplies values that depend only on the platform, such as `{devtoolsKeys}` for the many browser-DevTools setup steps. Callers may still pass their own value.
-- **Shortcuts.** Accelerators are stored portably (`CommandOrControl`, `Alt`); `formatWindowToggleShortcut(shortcut, offLabel, platform)` renders them as Cmd/Option on macOS and Ctrl/Alt elsewhere.
+- **Resolution.** `t()` and `applyTranslations()` in `src/electron/renderer/app.js` pass `state.appInfo.platform`; other windows that call `i18n.translate()` without a platform get the base entry. Do not branch on the platform in the renderer to choose between two keys of the same message.
+- **Shared placeholders.** `PLATFORM_PARAMS` in `src/electron/renderer/i18n.js` supplies values that depend only on the platform, such as `{devtoolsKeys}` for the many browser-DevTools setup steps. Callers may still pass their own value.
+- **Shortcuts.** Accelerators are stored portably (`CommandOrControl`, `Alt`); `formatWindowToggleShortcut(shortcut, offLabel, platform)` in `src/electron/windowShortcut.js` renders them as Cmd/Option on macOS and Ctrl/Alt elsewhere.
 
 ## Data flow contract
 
