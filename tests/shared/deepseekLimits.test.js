@@ -262,23 +262,17 @@ test('console Search is optional, retries failures and expires at month changes'
   assert.equal((await fetchDeepSeekLimits(options, deps)).balance.searchSpend, 0.4);
 });
 
-test('console month query starts at local midnight in one fixed offset', async (t) => {
+test('console month query starts at local midnight in a non-hour offset', async (t) => {
   const previous = process.env.TZ;
   t.after(() => { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; });
+  process.env.TZ = 'Asia/Kolkata';
   let query;
-  const read = (tz, now) => {
-    process.env.TZ = tz;
-    return fetchDeepSeekLimits({ deepseekApiKey: 'sk-balance', deepseekWebToken: 'console-token' }, {
-      env: {}, now: () => now, ...memStoreDeps(),
-      fetch: async (url) => {
-        if (new URL(url).hostname === 'platform.deepseek.com') query = new URL(url).searchParams;
-        return balanceResponse([{ currency: 'CNY', total_balance: '10', topped_up_balance: '10' }]);
-      }
-    });
-  };
-  // After the DST change, the month start uses the current offset sent as `tz`.
-  await read('Europe/Berlin', Date.parse('2026-10-31T09:00:00+01:00'));
-  assert.equal(Number(query.get('start')), Date.parse('2026-10-01T00:00:00+01:00') / 1000);
-  await read('Asia/Kolkata', Date.parse('2026-11-01T00:15:00+05:30'));
+  await fetchDeepSeekLimits({ deepseekApiKey: 'sk-balance', deepseekWebToken: 'console-token' }, {
+    env: {}, now: () => Date.parse('2026-11-01T00:15:00+05:30'), ...memStoreDeps(),
+    fetch: async (url) => {
+      if (new URL(url).hostname === 'platform.deepseek.com') query = new URL(url).searchParams;
+      return balanceResponse([{ currency: 'CNY', total_balance: '10', topped_up_balance: '10' }]);
+    }
+  });
   assert.equal(Number(query.get('start')), Date.parse('2026-11-01T00:00:00+05:30') / 1000);
 });

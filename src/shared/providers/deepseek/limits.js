@@ -49,25 +49,13 @@ function selectFundedRow(rows) {
 }
 
 const DEEPSEEK_BALANCE_URL = 'https://api.deepseek.com/user/balance';
-// Console usage is not public API: it needs a signed-in session and exposes at
-// most 31 days, so it only enriches the current month's display.
+// Private console endpoint: needs a signed-in session token, read for the current month only.
 const DEEPSEEK_CONSOLE_COST_URL = 'https://platform.deepseek.com/api/v0/usage/by_api_key/cost';
 
 // Accept a bare or pasted Authorization token; reject anything that is not one.
 function normalizeDeepseekWebToken(value) {
   const raw = cleanSecret(value).replace(/^authorization\s*:\s*/iu, '').replace(/^bearer\s+/iu, '').trim();
   return /[\u0000-\u001f\u007f;\s]/u.test(raw) ? '' : raw;
-}
-
-// Both boundaries use one fixed console offset, including across DST changes.
-function consoleMonthWindow(now) {
-  const date = new Date(now);
-  const tz = -date.getTimezoneOffset() * 60;
-  return {
-    start: Date.UTC(date.getFullYear(), date.getMonth(), 1) / 1000 - tz,
-    end: Date.UTC(date.getFullYear(), date.getMonth(), date.getDate() + 1) / 1000 - tz,
-    tz
-  };
 }
 
 const CONSOLE_TOOL_NAMES = {
@@ -77,7 +65,14 @@ const CONSOLE_TOOL_NAMES = {
 
 async function fetchToolSpends(token, { accountKey, currency, now }, deps) {
   if (!token || deps.probe) return null;
-  const window = consoleMonthWindow(now);
+  const date = new Date(now);
+  const tz = -date.getTimezoneOffset() * 60;
+  // Both boundaries use one fixed console offset, including across DST changes.
+  const window = {
+    start: Date.UTC(date.getFullYear(), date.getMonth(), 1) / 1000 - tz,
+    end: Date.UTC(date.getFullYear(), date.getMonth(), date.getDate() + 1) / 1000 - tz,
+    tz
+  };
   const state = deps.providerRuntimeState instanceof Map ? deps.providerRuntimeState : null;
   const cacheKey = hashKey('deepseek-console', accountKey, token, currency);
   const cached = state?.get(cacheKey);

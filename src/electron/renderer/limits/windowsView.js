@@ -629,10 +629,8 @@
     const preferredSummary = entries.filter(([label]) => label === 'Today' || label === 'Month');
     const summaryEntries = preferredSummary.length > 0 ? preferredSummary : entries.slice(0, 2);
     const formatted = entries.map(([entryLabel, value]) => [entryLabel, formatBalanceSpendAmount(value, balance)]);
-    const searchSpend = optionalFiniteNumber(balance?.searchSpend);
-    if (searchSpend > 0) formatted.push(['Search', formatBalanceSpendAmount(searchSpend, balance)]);
-    const fetchSpend = optionalFiniteNumber(balance?.fetchSpend);
-    if (fetchSpend > 0) formatted.push(['Fetch', formatBalanceSpendAmount(fetchSpend, balance)]);
+    if (balance?.searchSpend > 0) formatted.push(['Search', formatBalanceSpendAmount(balance.searchSpend, balance)]);
+    if (balance?.fetchSpend > 0) formatted.push(['Fetch', formatBalanceSpendAmount(balance.fetchSpend, balance)]);
     return tagUsageItem(limitNoteRowNode({
       label: 'Spend',
       summary: summaryEntries

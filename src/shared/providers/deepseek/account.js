@@ -33,7 +33,7 @@ module.exports = {
     emptyKey: 'settings.deepseek.statusNotSet',
     failedKey: 'settings.deepseek.saveFailed',
     fields: [
-      { key: 'deepseekApiKey', input: 'password', labelKey: 'settings.deepseek.apiKeyLabel', placeholderKey: 'settings.deepseek.apiKeyPlaceholder', required: true },
+      { key: 'deepseekApiKey', input: 'password', placeholderKey: 'settings.deepseek.apiKeyPlaceholder', required: true },
       { key: 'deepseekWebToken', input: 'password', labelKey: 'settings.deepseek.webTokenLabel' }
     ],
     manual: [
