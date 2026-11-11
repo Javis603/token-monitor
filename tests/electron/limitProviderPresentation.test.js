@@ -3243,7 +3243,7 @@ test('Kimi, Droid and MiMo limits reuse their tracked-client colors', () => {
   assert.match(app, /const color = limitProviderColor\(id\);/);
   const dockColor = vm.runInNewContext(
     `(${functionBody(dock, 'limitProviderColor', 'providerColor')})`,
-    { clientColors: { mimo: '#111111', xiaomi: '#222222', droid: '#333333', default: '#444444' } }
+    { pluginQuotaMetadata: () => null, clientColors: { mimo: '#111111', xiaomi: '#222222', droid: '#333333', default: '#444444' } }
   );
   assert.equal(dockColor('mimo'), '#111111');
   assert.equal(dockColor('factory'), '#333333');
@@ -3637,6 +3637,7 @@ test('switching to another edit preserves its form values during a canceled clos
       matchProviderAccount: () => account,
       amountUnits: (subscription) => subscription.amountMinor / 100
     },
+    currencyApi: { normalizeCurrency: (value) => value || 'USD', currencyFractionDigits: () => 2 },
     subscriptionAccountChoices: () => [],
     subscriptionAccountValue: () => 'acct-b',
     renderSubscriptionPickers() {},
@@ -4232,6 +4233,82 @@ test('the subscription card carries no heading of its own', () => {
   assert.doesNotMatch(readRendererFile('i18n.js'), /'subscription\.tooltip\.(topUp)?[Tt]itle'/);
 });
 
+test('recorded subscription prices, paid totals and top-ups use fixed currency precision', () => {
+  const currencyApi = require('../../src/shared/currency');
+  const text = require('../../src/shared/subscriptionText');
+  const t = (key, vars) => vars?.total ?? key;
+  for (const [currency, amountMinor, expected] of [
+    ['USD', 500, '$5.00'],
+    ['TWD', 50, 'NT$0.50'],
+    ['KRW', 1500000, '₩15000']
+  ]) {
+    const startDate = '2026-07-08';
+    const subscription = { currency, amountMinor, startDate, interval: 'month' };
+    assert.equal(text.priceText(t, currencyApi, subscription), `${expected} / settings.subscriptions.unitMonth`);
+    assert.ok(text.elapsedText(t, currencyApi, subscription, startDate).endsWith(` · ${expected}`));
+    assert.equal(text.topUpMinorText(currencyApi, subscription, amountMinor), expected);
+  }
+});
+
+test('KRW form rejects fractional plans, new top-ups and existing top-ups after a currency switch', async () => {
+  const app = readRendererFile('app.js');
+  const add = functionBody(app, 'addSubscriptionTopUpEntry', 'setSubscriptionDateBound');
+  const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
+  const state = { subscriptionTopUps: [] };
+  const els = {
+    subscriptionProviderInput: { value: 'codex' },
+    subscriptionAccountInput: { value: 'acct-1' },
+    subscriptionCurrencyInput: { value: 'KRW' },
+    subscriptionAmountInput: { value: '0.49' },
+    subscriptionStartDateInput: { value: '2026-07-08' },
+    subscriptionTopUpAmountInput: { value: '0.49' },
+    subscriptionTopUpDateInput: { value: '2026-07-08' }
+  };
+  let error;
+  let isTopUp = false;
+  const context = vm.createContext({
+    els, state,
+    subscriptionApi: require('../../src/shared/subscriptionDisplay'),
+    subscriptionFormTopUps: () => state.subscriptionTopUps,
+    subscriptionFormIsTopUp: () => isTopUp,
+    subscriptionAccountChoices: () => [],
+    subscriptionList: () => [],
+    subscriptionForAccount: () => null,
+    currencyApi: require('../../src/shared/currency'),
+    saveSubscriptions: () => assert.fail('fractional won reached the save boundary'),
+    setSubscriptionError: (message) => { error = message; },
+    renderSubscriptionTopUpEntries() {},
+    t: (key) => key
+  });
+  vm.runInContext(`${add}\nasync ${submit}`, context);
+  const addEntry = () => vm.runInContext('addSubscriptionTopUpEntry()', context);
+  const save = () => vm.runInContext('submitSubscription()', context);
+  const wholeWon = 'settings.subscriptions.errorWholeWon';
+
+  await save();
+  assert.equal(error, wholeWon);
+  error = '';
+  addEntry();
+  assert.equal(error, wholeWon);
+  assert.equal(state.subscriptionTopUps.length, 0);
+
+  els.subscriptionCurrencyInput.value = 'USD';
+  addEntry();
+  assert.equal(error, '');
+  assert.equal(state.subscriptionTopUps[0].amountMinor, 49);
+  els.subscriptionCurrencyInput.value = 'KRW';
+  isTopUp = true;
+  await save();
+  assert.equal(error, wholeWon);
+
+  state.subscriptionTopUps = [];
+  els.subscriptionTopUpAmountInput.value = '15000';
+  els.subscriptionTopUpDateInput.value = '2026-07-08';
+  addEntry();
+  assert.equal(error, '');
+  assert.equal(state.subscriptionTopUps[0].amountMinor, 1500000);
+});
+
 test('elapsed subscription time never reads as zero months', () => {
   const subscriptionApi = require('../../src/shared/subscriptionDisplay');
   // The wording lives in src/shared/subscriptionText.js now, so the settings
@@ -4248,7 +4325,11 @@ test('elapsed subscription time never reads as zero months', () => {
       }),
       today,
       subscriptionApi,
-      currencyApi: { normalizeCurrency: () => 'USD', CURRENCY_RATES: { USD: { symbol: '$' } } },
+      currencyApi: {
+        normalizeCurrency: () => 'USD',
+        CURRENCY_RATES: { USD: { symbol: '$' } },
+        currencyFractionDigits: () => 2
+      },
       t: (key, vars) => `${key}|${JSON.stringify(vars || {})}`
     }
   );

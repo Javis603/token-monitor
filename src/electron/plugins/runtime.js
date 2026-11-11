@@ -60,6 +60,7 @@ function createPluginRuntime({
   isSurfaceSender = () => false,
   surfaceContext = () => null,
   placementContext = () => ({}),
+  onLimitsChanged = () => {},
   log = (message) => console.log(message),
   hostActions = {},
   fetchImpl,
@@ -185,7 +186,7 @@ function createPluginRuntime({
       } catch { return { verification: 'unavailable' }; }
     },
     onReading: (id, moduleId, schema, savedRevision, reading) => { if (schema && reading.status === 'unauthorized') validation.reject(id, moduleId, schema, savedRevision); },
-    cancelModule: (id, moduleId) => network.cancelPlugin(id, moduleId), changed: () => { for (const subscriber of subscribers.values()) if (!subscriber.webContents.isDestroyed()) subscriber.webContents.send('plugins:changed'); } });
+    cancelModule: (id, moduleId) => network.cancelPlugin(id, moduleId), changed: () => { onLimitsChanged(); for (const subscriber of subscribers.values()) if (!subscriber.webContents.isDestroyed()) subscriber.webContents.send('plugins:changed'); } });
   const mime = name => ({ js: 'text/javascript', mjs: 'text/javascript', css: 'text/css', svg: 'image/svg+xml', png: 'image/png', jpg: 'image/jpeg', woff2: 'font/woff2' }[name.split('.').pop()] || 'application/octet-stream');
   const protocol = session.defaultSession.protocol;
   protocol.handle('tm-plugin', request => {
@@ -310,6 +311,7 @@ function createPluginRuntime({
     network.cancelInactive();
     validation.reconcile();
     limits.reconcile();
+    onLimitsChanged();
     for (const id of businessReaders) if (!manager.active(id)) {
       businessData.revoke(id); businessReaders.delete(id);
     }
@@ -804,6 +806,8 @@ function createPluginRuntime({
     },
     manager,
     refreshLimits: () => limits.refresh(null, 'manual'),
+    limitsSnapshot: () => ({ modules: limits.catalog(), providers: limits.records() }),
+    demandLimits: (active, owner) => limits.demand(active, owner),
     trayMenu: () => manager.trayMenu(),
     trayAction(id, action) {
       if (!manager.trayMenu().some(item => item.pluginId === id && item.id === action)) return Promise.reject(new Error('Plugin Tray action is unavailable'));

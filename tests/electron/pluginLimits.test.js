@@ -128,3 +128,19 @@ test('quota demand cancellation aborts only that module host transport', async t
   service.demand(false);assert.deepEqual(cancelled,[['sample-plugin','one']]);
   finish({status:'ok',windows:[]});await new Promise(setImmediate);assert.deepEqual(service.records(),[]);
 });
+test('desktop and main quota owners share one lane and release independently', async t => {
+  const id = 'plugin:sample-plugin:one';
+  let calls = 0;
+  const manager = { list: () => ({ plugins: [{ id: 'sample-plugin', status: 'active', revision: 'a', limits: [{ id: 'one', name: 'One' }] }] }),
+    call: async () => { calls++; return { status: 'ok', windows: [{ kind: 'weekly', remainingPercent: 65 }] }; } };
+  const service = createPluginLimits({ manager, getSettings: () => ({ limitProviders: id }), changed() {} });
+  t.after(() => service.dispose());
+  service.demand(true); service.demand(true, 'desktop.native');
+  for (let n = 0; n < 30 && !service.records().length; n++) await new Promise(setImmediate);
+  assert.equal(calls, 1);
+  service.demand(false);
+  assert.equal(service.catalog()[0].sampling, true, 'closing the widget keeps the visible desktop owner');
+  assert.equal(calls, 1, 'owner changes do not launch another collection');
+  service.demand(false, 'desktop.native');
+  assert.equal(service.catalog()[0].sampling, false);
+});

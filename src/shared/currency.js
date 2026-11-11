@@ -9,7 +9,9 @@
     USD: Object.freeze({ code: 'USD', symbol: '$', rate: 1 }),
     TWD: Object.freeze({ code: 'TWD', symbol: 'NT$', rate: 31.5 }),
     HKD: Object.freeze({ code: 'HKD', symbol: 'HK$', rate: 7.8 }),
-    CNY: Object.freeze({ code: 'CNY', symbol: '¥', rate: 6.8 })
+    CNY: Object.freeze({ code: 'CNY', symbol: '¥', rate: 6.8 }),
+    // The won has no sub-unit in everyday use; fractionDigitsFor() renders it whole.
+    KRW: Object.freeze({ code: 'KRW', symbol: '₩', rate: 1380 })
   });
   const CURRENCY_CODES = Object.freeze(Object.keys(CURRENCY_RATES));
 
@@ -61,8 +63,16 @@
     return Number((amount * activeRates[code]).toFixed(6));
   }
 
+  function currencyFractionDigits(currency) {
+    return normalizeCurrency(currency) === 'KRW' ? 0 : 2;
+  }
+
   function fractionDigitsFor(amount, currency) {
-    if (normalizeCurrency(currency) === 'USD') return Math.abs(amount) >= 10 ? 2 : 4;
+    const code = normalizeCurrency(currency);
+    // Zero-decimal display currency. A converted cost in won reads ₩1380, and a
+    // subscription entered in won keeps the whole amount the user typed.
+    if (code === 'KRW') return 0;
+    if (code === 'USD') return Math.abs(amount) >= 10 ? 2 : 4;
     return Math.abs(amount) >= 1 ? 2 : 4;
   }
 
@@ -78,6 +88,7 @@
     CURRENCY_RATES,
     convertUsd,
     formatCurrencyFromUsd,
+    currencyFractionDigits,
     normalizeCurrency,
     configureRates,
     resolveEffectiveRates

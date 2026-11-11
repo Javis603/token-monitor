@@ -53,13 +53,13 @@ const SESSION_TEXT_KEYS = [
 ];
 const GUI_SECRET_LIMIT_PROVIDERS = new Set(['copilot', 'deepseek', 'factory', 'minimax']);
 
-function asNumber(value) {
+function asNumber(value, fallback = 0) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   if (typeof value === 'string' && value.trim() !== '') {
     const parsed = Number(value.replace(/[$,]/g, ''));
     if (Number.isFinite(parsed)) return parsed;
   }
-  return 0;
+  return fallback;
 }
 
 function firstNumber(obj, keys) {
@@ -359,6 +359,11 @@ function normalizeModelNameForClient(value, client) {
   if (!normalized || normalizeClientName(client) !== REASONIX_CLIENT) return normalized;
   const qualified = normalized.match(/^(?:deepseek|deepseek-flash)\/(.+)$/);
   return qualified?.[1] || normalized;
+}
+
+function normalizeLatestModel(value, client) {
+  if (typeof value !== 'string' || value.length > 256) return null;
+  return normalizeModelNameForClient(value, client);
 }
 
 function normalizeSessionId(value) {
@@ -747,6 +752,11 @@ function mergeSession(target, source) {
       target.reasoningEffort = null;
     }
   }
+  if (sourceLastUsed >= targetLastUsed) {
+    if (sourceLastUsed > targetLastUsed || !hasOwn(target, 'latestModel')) {
+      if (hasOwn(source, 'latestModel') || hasOwn(target, 'latestModel')) target.latestModel = source.latestModel ?? null;
+    } else if (hasOwn(source, 'latestModel') && target.latestModel !== source.latestModel) target.latestModel = null;
+  }
   const sourceProjectId = String(source.projectId || '');
   if (!target.projectId && sourceProjectId) {
     target.projectId = sourceProjectId;
@@ -907,6 +917,7 @@ function normalizeSession(input, fallbackKey) {
   );
   session.startedAt = normalizeIsoTimestamp(firstString(input, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(input, LAST_USED_AT_KEYS));
+  if (hasOwn(input, 'latestModel')) session.latestModel = normalizeLatestModel(input.latestModel, client);
   if (hasOwn(input, 'promptCache')) session.promptCache = normalizePromptCache(input.promptCache);
   if (isSessionReasoningEffortClient(client) && hasOwn(input, 'reasoningEffort')) session.reasoningEffort = normalizeReasoningEffort(input.reasoningEffort);
   session.contextTokens = Math.max(0, Math.round(asNumber(input.contextTokens ?? input.context_tokens ?? 0)));
@@ -1368,6 +1379,11 @@ function normalizeDeviceOsName(value) {
   return String(value || '').trim().slice(0, 64);
 }
 
+function historyWithAvailability(history, available) {
+  if (!history || available !== false) return history;
+  return { ...history, summary: { ...history.summary, activeDaysComplete: false } };
+}
+
 // The fields History aggregation reads from a device record, normalized exactly
 // as normalizeDeviceRecord() does. aggregateHistory() used to normalize the whole
 // record for these, which also walks every session of every period: on a long
@@ -1382,7 +1398,8 @@ function normalizeRecordHistoryFields(record, nowIso = new Date().toISOString())
     // An explicit null means History is disabled/unavailable. Preserve that
     // wire distinction; an omitted field means "no History update this tick"
     // and an object is the retained History payload.
-    fields.history = record.history === null ? null : coerceHistory(record.history);
+    fields.history = historyWithAvailability(
+      record.history === null ? null : coerceHistory(record.history), record.historyAvailable);
   }
   if (hasOwn(record, 'periodWindows')) {
     const windows = normalizePeriodWindows(record.periodWindows);
@@ -1433,6 +1450,11 @@ function normalizeDeviceRecord(record) {
   if (hasOwn(historyFields, 'historyAvailable')) normalized.historyAvailable = historyFields.historyAvailable;
   if (hasOwn(historyFields, 'history')) normalized.history = historyFields.history;
   if (hasOwn(historyFields, 'periodWindows')) normalized.periodWindows = historyFields.periodWindows;
+  const allTime = record.allTime || record.periods?.allTime;
+  if (record.allTimeTokensUnavailable === true
+    || !Number.isFinite(asNumber(allTime?.totalTokens ?? allTime?.total_tokens, NaN))) {
+    normalized.allTimeTokensUnavailable = true;
+  }
   for (const periodName of PERIODS) {
     normalized.periods[periodName] = normalizePeriod(record[periodName] || record.periods?.[periodName], {
       projectsEnabled: normalized.projectsEnabled !== false
@@ -1638,6 +1660,8 @@ function mergeDeviceRecord(existing, incoming) {
   }
   if (incoming?.limitsOnly === true) {
     normalizedIncoming.periods = normalizedExisting.periods;
+    delete normalizedIncoming.allTimeTokensUnavailable;
+    if (normalizedExisting.allTimeTokensUnavailable === true) normalizedIncoming.allTimeTokensUnavailable = true;
     // The three attribution fields describe the usage this branch is carrying
     // forward, so they have to travel with it. Scoped to `limitsOnly` on
     // purpose: a full update from an agent too old to send them is stating that
@@ -1668,6 +1692,7 @@ function mergeDeviceRecord(existing, incoming) {
   if (!hasIncomingLimits) normalizedIncoming.limits = normalizedExisting.limits;
   else normalizedIncoming.limits = mergeDeviceLimits(normalizedExisting, normalizedIncoming);
   if (!hasIncomingHistory && hasOwn(normalizedExisting, 'history')) normalizedIncoming.history = normalizedExisting.history;
+  if (hasOwn(normalizedIncoming, 'history')) normalizedIncoming.history = historyWithAvailability(normalizedIncoming.history, normalizedIncoming.historyAvailable);
   if (hasIncomingTrackedClients) {
     preserveUntrackedClientUsage(normalizedExisting, normalizedIncoming, normalizedIncoming.trackedClients || []);
   }
@@ -1798,7 +1823,32 @@ function aggregateHistory(devices, options = {}) {
   let reportedToday = '';
   for (const record of devices) {
     const normalized = normalizeRecordHistoryFields(record);
-    if (!hasOwn(normalized, 'history') || normalized.history === null) continue;
+    const allTime = record.allTime || record.periods?.allTime;
+    let totalTokens = record.allTimeTokensUnavailable === true
+      ? NaN : asNumber(allTime?.totalTokens ?? allTime?.total_tokens, NaN);
+    // Older stored records may have defaulted a missing lifetime counter to zero.
+    if (totalTokens === 0 && ['today', 'month'].some((name) => {
+      const period = record[name] || record.periods?.[name];
+      return asNumber(period?.totalTokens ?? period?.total_tokens) > 0;
+    })) totalTokens = NaN;
+    if (!hasOwn(normalized, 'history') || normalized.history === null) {
+      // A legacy/history-disabled device with unknown or positive usage may own active
+      // dates absent from the histories we can merge. Include an incomplete
+      // sentinel so mixed-version hubs never advertise an exact lifetime count.
+      if (!Number.isFinite(totalTokens) || Math.round(totalTokens) > 0) {
+        histories.push({ daily: [], monthly: [], summary: { activeDaysComplete: false } });
+      }
+      continue;
+    }
+    // A confirmed zero-usage legacy record cannot own any missing active dates.
+    // Missing counters or any retained history evidence still fail closed.
+    const history = normalized.history;
+    if (history.summary.activeDaysComplete !== true
+      && totalTokens === 0
+      && history.daily.length === 0 && history.monthly.length === 0
+      && !history.dailyTotals?.length && !history.dailyTotalsOmitted
+      && asNumber(history.summary.activeDays) === 0
+      && asNumber(history.summary.totalTokens) === 0) continue;
     histories.push(normalized.history);
     if (!normalized.history.daily.length) continue;
     const reported = calendarDayKey(normalized.periodWindows?.today?.key);
@@ -2239,6 +2289,7 @@ function deltaValue(base, fresh, anchor, key) {
   // Cache observations are snapshots, never additive accounting. Missing
   // metadata retains the base; only an explicit null clears an observation.
   if (key === 'promptCache') return fresh === undefined ? base : normalizePromptCache(fresh);
+  if (key === 'latestModel') return fresh === undefined ? base : fresh;
   if (key === 'reasoningEffort') return fresh === undefined ? base : normalizeReasoningEffort(fresh);
   if (key === 'tokenComponents') {
     // A warm tick may introduce aggregate-only fallback data. Boolean
@@ -2309,6 +2360,12 @@ function deltaValue(base, fresh, anchor, key) {
       delete result.parentSessionId;
       delete result.parentClient;
       applyParentLink(result, base?.parentSessionId ? base : fresh || {});
+      const freshModelAt = timestampMs(fresh?.lastUsedAt);
+      const retainedModelAt = timestampMs(base?.lastUsedAt);
+      if (freshModelAt < retainedModelAt) {
+        if (hasOwn(base || {}, 'latestModel')) result.latestModel = base.latestModel;
+        else delete result.latestModel;
+      } else if (!hasOwn(fresh || {}, 'latestModel') && freshModelAt > retainedModelAt) result.latestModel = null;
       // Compare before lastUsedAt is projected to the maximum: a missing
       // setting preserves only the same observation, never a newer turn.
       if (isSessionReasoningEffortClient(sample.client)) {
@@ -2348,6 +2405,7 @@ module.exports = {
   normalizeClientName,
   normalizeModelName,
   normalizeModelNameForClient,
+  normalizeLatestModel,
   normalizeDeviceRecord,
   normalizePeriod,
   projectRollupFromSessions,

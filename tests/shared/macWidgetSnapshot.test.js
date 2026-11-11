@@ -349,6 +349,17 @@ test('merges model display-name collisions before calculating shares', () => {
   assert.match(snapshot.periods.day.models[0].id, /^model-/);
 });
 
+test('preserves KRW provider balances independently of the selected display currency', () => {
+  const snapshot = buildSnapshot({
+    limits: { providers: [
+      { provider: 'deepseek', status: 'ok', balance: { amount: 1380.25, currency: ' krw ' }, windows: [] }
+    ] }
+  }, { now: NOW, presentation: { currencyCode: 'USD' } });
+
+  assert.equal(snapshot.presentation.currencyCode, 'USD');
+  assert.deepEqual(snapshot.quota[0].balance, { amount: 1380.25, currency: 'KRW' });
+});
+
 test('preserves a zero balance and omits missing, non-finite, or unsupported balances', () => {
   const snapshot = buildSnapshot({
     limits: { providers: [
@@ -927,4 +938,15 @@ test('MiMo widget rows of several accounts keep the account and product distingu
     'r***d@example.com · Renamed MiMo abcdef1 · Desktop Membership',
     'u***r@example.com · Alice MiMo abcdef1 · Console'
   ]);
+});
+
+test('Cursor widget quota labels follow the included period without renaming stored data', () => {
+  for (const [kind, label] of [['weekly', 'Weekly'], ['billing', 'Monthly']]) {
+    const window = Object.freeze({ kind, label: 'Included usage', remainingPercent: 80 });
+    const snapshot = buildSnapshot({ limits: { providers: [{
+      provider: 'cursor', status: 'ok', windows: [window]
+    }] } }, { now: NOW });
+    assert.equal(snapshot.quota[0].windows[0].label, label);
+    assert.equal(window.label, 'Included usage');
+  }
 });

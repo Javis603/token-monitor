@@ -569,7 +569,7 @@ test('a currency the app carries no rate for is refused, not rewritten', async (
     assert.match((await refused.json()).message, /EUR/);
     assert.deepEqual(hub.getSubscriptions().subscriptions, []);
 
-    for (const code of ['USD', 'TWD', 'HKD', 'CNY']) {
+    for (const code of ['USD', 'TWD', 'HKD', 'CNY', 'KRW']) {
       const ok = await put({
         subscriptions: [{ id: 'a', provider: 'codex', startDate: '2026-05-31', currency: code }],
         baseUpdatedAt: hub.getSubscriptions().updatedAt

@@ -102,6 +102,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   let materialKey = '', running = false, expanded = false, peeked = false, hoverTicked = false, locked = false;
   let capabilities = null, scrollBinding = null;
   let appearance = {}, data = { cells: [], summary: null };
+  let panelLimitsDemand = false;
   let nativeScreens = { screens: [], mainDisplayId: null }, geometryReadAt = -Infinity, geometryDirty = true;
   let geometryConfigs = new Map(), displays = [], primaryDisplay = null;
   const ignoredMouse = {};
@@ -800,6 +801,7 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
   }
 
   function destroyWindows() {
+    panelLimitsDemand = false;
     stopScrollMonitor();
     destroyBlur();
     resetShellMotion(); refreshInFlight = null;
@@ -856,6 +858,13 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
         win.setHiddenInMissionControl?.(true); win.setOpacity(0); ignoreMouse(s, true);
         win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
         win.webContents.on('will-navigate', (event) => event.preventDefault());
+        const releaseQuota = () => {
+          if (windows[s] !== win) return;
+          panelLimitsDemand = false; ready[s] = false;
+          onWebSurfaceChanged();
+        };
+        win.webContents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => { if (!inPlace && mainFrame !== false) releaseQuota(); });
+        win.webContents.on('render-process-gone', releaseQuota);
         win.webContents.on('did-fail-load', (_event, code, message) => logger(`[top-notch] renderer failed: ${code} ${message}`));
         win.loadFile(path.join(rendererDir, 'edgeDock', 'index.html'), { query: { surface: s } })
           .catch(error => logger(`[top-notch] ${s} load failed: ${error.message}`));
@@ -879,7 +888,13 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     destroyWindows();
   }
   const handlers = {
-    'topNotch:ready': (event) => { const s = ownedSender(event.sender); if (!s) return; ready[s] = true; lastSent[s] = ''; refreshLayout(); send(s); visibility(); },
+    'topNotch:ready': (event) => {
+      const s = ownedSender(event.sender); if (!s) return;
+      // A shared renderer can leave a new or reloaded view opaque. Restore the
+      // transparent canvas after page initialization, before revealing it.
+      windows[s].setBackgroundColor('#00000000');
+      ready[s] = true; lastSent[s] = ''; refreshLayout(); send(s); visibility();
+    },
     'topNotch:frame': (event, payload) => {
       if (ownedSender(event.sender) !== 'notch' || !motion || payload?.id !== motion.id
         || !Number.isFinite(payload?.elapsed) || payload.elapsed < motion.elapsed) return;
@@ -909,6 +924,11 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     'topNotch:toggleRateMode': (event) => {
       if (!ownedSender(event.sender)) return;
       try { onToggleRateMode?.(); } catch (error) { logger(`[top-notch] rate mode toggle failed: ${error.message}`); }
+    },
+    'topNotch:limitsDemand': (event, active) => {
+      if (ownedSender(event.sender) !== 'notch' || panelLimitsDemand === (active === true)) return;
+      panelLimitsDemand = active === true;
+      onWebSurfaceChanged();
     },
     'topNotch:dismiss': (event) => { if (ownedSender(event.sender)) setExpanded(false); },
     // Forwarded moves arrive before the next cursor poll; the page sends no
@@ -940,7 +960,9 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     if (!ownedSender(event.sender)) return { ok: false, error: 'Unknown surface' };
     return onSwitchCodexAccount?.(String(payload?.accountId || '')) || { ok: false, error: 'Unavailable' };
   });
-  return { sync, stop, poll, isRunning: () => running, getCapabilities: () => capabilities,
+  return { sync, stop, poll, isRunning: () => running,
+    quotaVisibility: () => ({ panel: running && ready.notch && alive(windows.notch) && !locked && !shellHidden() && expanded && panelLimitsDemand,
+      summary: running && ready.notch && alive(windows.notch) && !locked && !shellHidden() && summaryVisible() }), getCapabilities: () => capabilities,
     webSurface: (host) => host === windows.notch?.webContents ? { kind: 'notch', visible: running && expanded && !locked && !motion && progress === 1, preparing: running && expanded && !locked && Boolean(motion),
       summaryVisible: running && ready.notch && !locked && summaryMeasured && summaryVisible() && !shellHidden() } : null,
     owns: (win) => surfaces.some((s) => win === windows[s] && alive(win)),

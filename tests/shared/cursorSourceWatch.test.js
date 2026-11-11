@@ -284,8 +284,9 @@ function runtimeFixture(t, { overlappingRoot = false } = {}) {
     },
     onUpdate: (summary, reason) => updates.push({ summary, reason })
   });
-  t.after(() => {
+  t.after(async () => {
     handle.stop();
+    await handle.whenIdle();
     chokidar.watch = originalWatch;
     cursorAuth.runCursorSync = originalSync;
     Date.now = originalNow;
@@ -293,6 +294,13 @@ function runtimeFixture(t, { overlappingRoot = false } = {}) {
   });
   return {
     ...f, handle, updates, operations,
+    async ready() {
+      await waitFor(() => syncCalls === 1 && operations.filter(op => op.kind === 'scan' && op.clients === 'cursor').length === 6);
+      await new Promise(resolve => setImmediate(resolve));
+      await handle.whenIdle();
+      updates.splice(0, Math.max(0, updates.length - 1));
+      operations.length = 0;
+    },
     event: (name, relative) => emit(name, path.join(f.roots[0], relative)),
     at: (offset) => { now = startedAt + offset; },
     failNextSync: () => { failNext = true; },
@@ -303,7 +311,7 @@ function runtimeFixture(t, { overlappingRoot = false } = {}) {
 
 test('Cursor WAL writes retain a targeted cloud-sync catch-up and exact period deltas', async (t) => {
   const f = runtimeFixture(t);
-  await waitFor(() => f.updates.length === 1);
+  await f.ready();
   assert.equal(f.syncCalls, 1);
   assert.deepEqual(f.watcherConfig.dirs, f.roots);
   assert.equal(f.watcherConfig.ignored(path.join(f.roots[0], 'extension')), true,
@@ -316,18 +324,19 @@ test('Cursor WAL writes retain a targeted cloud-sync catch-up and exact period d
   }
   await waitFor(() => f.updates.length === 2);
   assert.equal(f.syncCalls, 1, 'dense writes inside the source floor do not spam syncs');
-  assert.deepEqual(f.operations.at(-1), { kind: 'scan', clients: 'cursor', flags: ['--today'] });
+  assert.deepEqual(f.operations, [], 'a throttled event reads the stable in-memory cache without a subprocess');
   for (const period of ['today', 'month', 'allTime']) {
     assert.deepEqual(f.updates[1].summary[period], f.updates[0].summary[period],
       'a throttled source event retains the cached totals until its catch-up sync');
   }
 
   f.at(SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000);
-  await waitFor(() => f.updates.length === 3);
+  await waitFor(() => f.updates.at(-1).summary.allTime.clients.cursor === 20);
+  await f.handle.whenIdle();
   assert.equal(f.syncCalls, 2, 'the deferred event syncs without another filesystem event');
-  assert.deepEqual(f.operations.slice(-2), [
-    { kind: 'sync' }, { kind: 'scan', clients: 'cursor', flags: ['--today'] }
-  ], 'cloud sync finishes before scanning its updated cache');
+  assert.deepEqual(f.operations.filter(op => op.kind === 'scan' && op.clients === 'cursor').map(op => op.flags), [
+    ['--today'], ['--month'], ['--since', '2024-01-01']
+  ], 'cloud completion reconciles every period, including older imported usage');
   const summary = f.updates.at(-1).summary;
   for (const period of ['today', 'month', 'allTime']) {
     assert.equal(summary[period].clients.cursor, 20, period);
@@ -341,13 +350,13 @@ test('Cursor WAL writes retain a targeted cloud-sync catch-up and exact period d
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(f.operations.length, count, 'our SQLite reads cannot trigger more scans or cloud syncs');
   f.event('change', 'state.vscdb');
-  await waitFor(() => f.updates.length === 4);
+  await waitFor(() => f.updates.at(-1).summary.allTime.clients.cursor === 30);
   assert.equal(f.syncCalls, 3, 'database checkpoint writes also trigger targeted sync');
 });
 
 test('an overlapping recursive client root cannot turn extension data into a Cursor cloud-sync source', async (t) => {
   const f = runtimeFixture(t, { overlappingRoot: true });
-  await waitFor(() => f.updates.length === 1);
+  await f.ready();
   assert.equal(f.watcherConfig.ignored(path.join(f.roots[0], 'extension', 'state.vscdb')), false,
     'the recursive client still gets its input');
   f.at(SYNC_SOURCE_EVENT_MIN_INTERVAL_MS * 3);
@@ -358,7 +367,7 @@ test('an overlapping recursive client root cannot turn extension data into a Cur
 
 test('Cursor desktop titles refresh while cloud usage sync is throttled', async (t) => {
   const f = runtimeFixture(t);
-  await waitFor(() => f.updates.length === 1);
+  await f.ready();
   const db = new DatabaseSync(path.join(f.roots[0], 'state.vscdb'));
   try {
     db.exec('CREATE TABLE composerHeaders (composerId TEXT PRIMARY KEY, value TEXT)');
@@ -383,7 +392,7 @@ test('Cursor desktop titles refresh while cloud usage sync is throttled', async 
 
 test('Cursor WAL start and finish update session state inside the cloud-sync floor', async (t) => {
   const f = runtimeFixture(t);
-  await waitFor(() => f.updates.length === 1);
+  await f.ready();
   const db = new DatabaseSync(path.join(f.roots[0], 'state.vscdb'));
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value BLOB)');
@@ -412,32 +421,35 @@ test('Cursor WAL start and finish update session state inside the cloud-sync flo
 
 test('a failed Cursor source sync keeps its event on the failure backoff', async (t) => {
   const f = runtimeFixture(t);
-  await waitFor(() => f.updates.length === 1);
+  await f.ready();
   t.mock.timers.enable({ apis: ['setTimeout'] });
   f.at(SYNC_SOURCE_EVENT_MIN_INTERVAL_MS + 1000);
   f.failNextSync();
   f.event('change', 'state.vscdb-wal');
   t.mock.timers.tick(10);
-  await waitFor(() => f.updates.length === 2);
+  await waitFor(() => f.syncCalls === 2 && f.updates.length > 1
+    && f.collector.selfSyncThrottle.syncStatus('cursor').state === 'failed');
+  await f.handle.whenIdle();
   assert.equal(f.syncCalls, 2);
 
   f.at(SYNC_SOURCE_EVENT_MIN_INTERVAL_MS * 3);
+  const before = f.updates.length;
   f.event('change', 'state.vscdb-wal');
   t.mock.timers.tick(10);
-  await waitFor(() => f.updates.length === 3);
+  await waitFor(() => f.updates.length > before);
   assert.equal(f.syncCalls, 2, 'new source activity cannot bypass failure backoff');
   f.at(SYNC_MIN_INTERVAL_MS * 2);
   t.mock.timers.tick(SYNC_MIN_INTERVAL_MS);
   t.mock.timers.reset();
-  await waitFor(() => f.syncCalls === 3 && f.updates.length >= 4);
-  assert.deepEqual(f.operations.slice(-2), [
-    { kind: 'sync' }, { kind: 'scan', clients: 'cursor', flags: ['--today'] }
+  await waitFor(() => f.syncCalls === 3 && f.updates.at(-1).summary.allTime.clients.cursor === 30);
+  assert.deepEqual(f.operations.filter(op => op.kind === 'scan' && op.clients === 'cursor').slice(-3).map(op => op.flags), [
+    ['--today'], ['--month'], ['--since', '2024-01-01']
   ]);
 });
 
 test('manual Cursor refresh satisfies a pending source event and stop cancels catch-up', async (t) => {
   const f = runtimeFixture(t);
-  await waitFor(() => f.updates.length === 1);
+  await f.ready();
   f.at(SYNC_SOURCE_EVENT_MIN_INTERVAL_MS - 300);
   f.event('change', 'state.vscdb-wal');
   await waitFor(() => f.updates.length === 2);
@@ -451,4 +463,21 @@ test('manual Cursor refresh satisfies a pending source event and stop cancels ca
   f.handle.stop();
   await new Promise((resolve) => setTimeout(resolve, 50));
   assert.equal(f.syncCalls, 2, 'a stopped runtime cannot sync again');
+});
+
+test('a failed manual Cursor refresh restores the source event acknowledged before its background wait', async t => {
+  const f = runtimeFixture(t);
+  await f.ready();
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  f.at(SYNC_SOURCE_EVENT_MIN_INTERVAL_MS - 300);
+  f.event('change', 'state.vscdb-wal');
+  t.mock.timers.tick(10);
+  await waitFor(() => f.updates.length === 2);
+  f.failNextSync();
+  await f.handle.tick('manual', { forceSelfSync: ['cursor'] });
+  assert.equal(f.syncCalls, 2);
+  f.at(SYNC_MIN_INTERVAL_MS * 2);
+  t.mock.timers.tick(SYNC_MIN_INTERVAL_MS);
+  t.mock.timers.reset();
+  await waitFor(() => f.syncCalls === 3 && f.updates.at(-1).summary.allTime.clients.cursor === 30);
 });

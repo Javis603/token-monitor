@@ -113,6 +113,7 @@ const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
   grok: 'settings.limits.connection.grok',
   kiro: 'settings.limits.connection.kiro',
   manus: 'settings.limits.connection.manus',
+  hark: 'settings.limits.connection.hark',
   muse: 'settings.limits.connection.muse',
   workbuddy: 'settings.limits.connection.workbuddy'
 };
@@ -3295,6 +3296,7 @@ function deviceRowsForPeriod() {
       clientLabels,
       clientColors,
       fallbackColor: clientColors.default,
+      latestModelLabel: t('session.latestModel'),
       unattributedLabel: t('dashboard.tooltip.unclassified')
     });
     const period = device.periods?.[state.period] || {};
@@ -3394,6 +3396,7 @@ function sessionPresentationOptions() {
     fallbackColors: fallbackModelColors,
     archivedLabel: t('session.archived'),
     subagentLabel: t('sessions.subagent'),
+    latestModelLabel: t('session.latestModel'),
     unattributedLabel: t('dashboard.tooltip.unclassified'),
     sourcePeriods: state.stats?.periods,
     grokBotSessionIds: state.stats?.grokBotSessionIds,
@@ -3402,6 +3405,7 @@ function sessionPresentationOptions() {
       name: deviceBreakdownApi.deviceLabel(localDevice), platform: localDevice.platform || '', deviceKind: localDevice.deviceKind || 'computer' } : undefined,
     subagents: {
       countLabel: (count) => t('sessions.subagentCount', { count }),
+      latestModelLabel: t('session.latestModel'),
       unattributedLabel: t('dashboard.tooltip.unclassified')
     },
     backgroundReviews: {
@@ -4255,6 +4259,18 @@ function seedSubscriptionPlanName() {
   input.value = subscriptionSuggestedPlanName(subscriptionSelectedAccount());
 }
 
+// The money inputs are typed in the record's own currency, so their precision
+// follows the selected unit: won has no sub-unit, the other supported currencies
+// carry cents. Without this the form keeps inviting two decimals for KRW.
+function syncSubscriptionAmountPrecision() {
+  const digits = currencyApi.currencyFractionDigits(els.subscriptionCurrencyInput?.value);
+  for (const input of [els.subscriptionAmountInput, els.subscriptionTopUpAmountInput]) {
+    if (!input) continue;
+    input.step = digits === 0 ? '1' : `0.${'0'.repeat(digits - 1)}1`;
+    input.placeholder = digits === 0 ? '0' : `0.${'0'.repeat(digits)}`;
+  }
+}
+
 // A top-up is not a subscription with different words on it — it is a ledger of
 // irregular payments — so the form swaps whole field groups rather than
 // relabelling one set. Both groups live in the markup with their own data-i18n,
@@ -4271,6 +4287,7 @@ function setSubscriptionFormMode() {
     slot.append(els.subscriptionCurrencyInput);
   }
   renderSubscriptionTopUpEntries();
+  syncSubscriptionAmountPrecision();
   setSubscriptionRenewalFieldMode();
 }
 
@@ -4329,7 +4346,6 @@ function renderSubscriptionTopUpEntries() {
     return;
   }
   const code = currencyApi.normalizeCurrency(els.subscriptionCurrencyInput?.value);
-  const symbol = currencyApi.CURRENCY_RATES[code]?.symbol || `${code} `;
   for (const entry of entries) {
     const row = document.createElement('div');
     row.className = 'subscription-topup-row';
@@ -4338,7 +4354,7 @@ function renderSubscriptionTopUpEntries() {
     date.textContent = subscriptionText.dateText(currentLocale(), entry.date);
     const amount = document.createElement('span');
     amount.className = 'subscription-topup-amount';
-    amount.textContent = `${symbol}${(entry.amountMinor / 100).toFixed(2)}`;
+    amount.textContent = subscriptionText.minorText(currencyApi, code, entry.amountMinor);
     // Armed the same way as the record rows above: a mis-click here silently
     // rewrites the month total the ledger exists to report, and the entry cannot
     // be recovered from anywhere else.
@@ -4384,6 +4400,10 @@ function addSubscriptionTopUpEntry() {
   }
   if (!Number.isFinite(amount) || amount <= 0) {
     setSubscriptionError(t('settings.subscriptions.errorAmount'));
+    return;
+  }
+  if (els.subscriptionCurrencyInput?.value === 'KRW' && !Number.isInteger(amount)) {
+    setSubscriptionError(t('settings.subscriptions.errorWholeWon'));
     return;
   }
   // Normalized on the way in, not on the way out: normalizeTopUps() mints an id
@@ -4499,6 +4519,7 @@ async function submitSubscription() {
   const providerId = String(els.subscriptionProviderInput?.value || '').trim();
   const accountValue = String(els.subscriptionAccountInput?.value || '').trim();
   const amount = Number(els.subscriptionAmountInput?.value);
+  const currency = String(els.subscriptionCurrencyInput?.value || 'USD');
   const startDate = String(els.subscriptionStartDateInput?.value || '').trim();
   const autoRenew = els.subscriptionAutoRenewInput?.checked !== false;
   const renewalDate = String(els.subscriptionNextRenewalInput?.value || '').trim();
@@ -4514,9 +4535,17 @@ async function submitSubscription() {
       setSubscriptionError(t('settings.subscriptions.errorTopUpEntries'));
       return;
     }
+    if (currency === 'KRW' && topUps.some((entry) => entry.amountMinor % 100 !== 0)) {
+      setSubscriptionError(t('settings.subscriptions.errorWholeWon'));
+      return;
+    }
   } else {
     if (!Number.isFinite(amount) || amount <= 0) {
       setSubscriptionError(t('settings.subscriptions.errorAmount'));
+      return;
+    }
+    if (currency === 'KRW' && !Number.isInteger(amount)) {
+      setSubscriptionError(t('settings.subscriptions.errorWholeWon'));
       return;
     }
     if (!startDate) {
@@ -4557,7 +4586,7 @@ async function submitSubscription() {
     binding: account ? subscriptionApi.bindingFromAccount(account) : editing?.binding,
     planName: String(els.subscriptionPlanNameInput?.value || '').trim(),
     amountMinor: Number.isFinite(amount) && amount > 0 ? Math.round(amount * 100) : 0,
-    currency: String(els.subscriptionCurrencyInput?.value || 'USD'),
+    currency,
     interval: String(els.subscriptionIntervalInput?.value || 'month'),
     intervalCount: Number(els.subscriptionIntervalCountInput?.value) || 1,
     // Each kind keeps only its own anchor, so switching kind on an existing
@@ -4587,11 +4616,25 @@ async function submitSubscription() {
   });
 }
 
+function pluginLimitMetadata(id) {
+  const active = state.pluginCatalog?.limits?.modules?.find(module => module.id === id);
+  if (active) return { ...active, status: 'active' };
+  for (const plugin of state.pluginCatalog?.plugins || []) {
+    const module = plugin.limits?.find(module => `plugin:${plugin.id}:${module.id}` === id);
+    if (module) return { ...module, id, label: module.name, status: plugin.status, identityIcon: plugin.identityIcon, presentation: { ...plugin.presentation, ...module.presentation } };
+  }
+  return null;
+}
+
 function desktopLimitProviders() {
   return [...LIMIT_PROVIDERS, ...(state.pluginCatalog?.limits?.modules || [])];
 }
 function desktopLimitRecords() {
-  return [...(state.stats?.limits?.providers || []), ...(state.pluginCatalog?.limits?.providers || [])];
+  const modules = new Map((state.pluginCatalog?.limits?.modules || []).map(module => [module.id, module]));
+  return [...(state.stats?.limits?.providers || []), ...(state.pluginCatalog?.limits?.providers || []).filter(row => modules.has(row.provider)).map(row => ({ ...row, pluginQuota: modules.get(row.provider) }))];
+}
+function desktopSurfaceStats() {
+  return state.stats ? { ...state.stats, limits: { ...state.stats.limits, providers: desktopLimitRecords() }, pluginLimitModules: state.pluginCatalog?.limits?.modules || [] } : state.stats;
 }
 function refreshPluginLimitCredentialStatuses() {
   if (isSettingsSurfaceVisible()) pluginLimitSettings?.refreshCredentials();
@@ -6004,8 +6047,11 @@ function isRendererWindowHidden() {
 }
 
 function syncPluginLimitsDemand() {
-  void pluginBridge?.limitsDemand?.(state.breakdown === 'limits'
-    && visibleStatsSurface() === 'main' && !isSettingsPanelOpen())?.catch(error => console.warn('[plugins] Limits demand failed:', error));
+  const surface = visibleStatsSurface();
+  const home = state.breakdown === 'home' && !String(state.settings?.hiddenHomeModules || '').split(',').includes('limits');
+  const bubble = surface === 'bubble' && (['limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions'].includes(state.settings?.floatingBubbleContent)
+    || (state.settings?.floatingBubbleContent === 'custom' && trayLayoutApi.usesLimits(state.settings?.floatingBubbleCustomLayout)));
+  void pluginBridge?.limitsDemand?.(((state.breakdown === 'limits' || home) && surface === 'main' && !isSettingsPanelOpen()) || bubble)?.catch(error => console.warn('[plugins] Limits demand failed:', error));
 }
 
 function visibleStatsSurface() {
@@ -6686,7 +6732,7 @@ function homeModuleShell(kind, title, viewId, meta = '') {
 function homeLimitRows() {
   const enabled = enabledLimitProviderSet();
   const providerOrder = state.settings?.homeLimitProviderOrder || state.settings?.limitProviderOrder;
-  const providerOptions = limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, providerOrder);
+  const providerOptions = limitProviderOrderApi.orderedLimitProviders(desktopLimitProviders(), providerOrder);
   const hasConfiguredOrder = Boolean(state.settings?.homeLimitProviderOrder);
   const isWindowHidden = (providerId, window) => limitUsageItemsApi.isLimitWindowHidden(
     state.settings?.limitProviderHiddenItems, providerId, window
@@ -6694,7 +6740,7 @@ function homeLimitRows() {
   return homeOverviewApi.homeLimitAccountsForProviders({
     // Hidden rows go before the compact pick, so Antigravity's tightest window
     // per group is chosen among the ones the user still shows.
-    providers: limitWindowsView.collapseWorkbuddyAccounts(state.stats?.limits?.providers || []).map((provider) => ({
+    providers: limitWindowsView.collapseWorkbuddyAccounts(desktopLimitRecords()).map((provider) => ({
       ...provider,
       windows: limitProviderPresentationApi.limitProviderCompactWindows(
         provider,
@@ -6714,7 +6760,7 @@ function homeLimitRows() {
     accountColor: (provider, id, fallbackColor) => (
       id === 'thirdparty'
         ? limitProviderPresentationApi.thirdPartyAdapterVisual(provider, fallbackColor).color
-        : fallbackColor
+        : id.startsWith('plugin:') ? limitProviderColor(id) : fallbackColor
     ),
     accountIcon: (provider, id) => (
       id === 'thirdparty'
@@ -6753,6 +6799,7 @@ function homeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
   if (compactLabel) return compactLabel;
   if (window?.kind === 'billing') {
     const label = String(window?.label || '').trim();
+    if (providerId === 'cursor' && label === 'Included usage') return t('home.limit.monthly');
     if (label) return label;
   }
   const key = {
@@ -6774,8 +6821,8 @@ function renderHomeLimitModule() {
     empty.className = 'home-module-empty';
     const providerOrder = state.settings?.homeLimitProviderOrder || state.settings?.limitProviderOrder;
     const awaitingFirstData = homeOverviewApi.homeLimitsAwaitingFirstData({
-      providers: state.stats?.limits?.providers || [],
-      providerOptions: limitProviderOrderApi.orderedLimitProviders(LIMIT_PROVIDERS, providerOrder),
+      providers: desktopLimitRecords(),
+      providerOptions: limitProviderOrderApi.orderedLimitProviders(desktopLimitProviders(), providerOrder),
       enabledProviderIds: Array.from(enabledLimitProviderSet()),
       hiddenProviderIds: Array.from(hiddenHomeLimitProviderSet())
     });
@@ -6790,7 +6837,9 @@ function renderHomeLimitModule() {
     const account = document.createElement('div');
     account.className = 'home-limit-account-head';
     const mark = document.createElement('span');
-    applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), row.color);
+    const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === row.providerId);
+    if (pluginModule) mark.append(window.TokenMonitorPluginViews.navigationIcon(document, pluginModule, 14));
+    else applyHomeListMark(mark, iconKindFor({ key: row.iconId || row.providerId || row.key }, 'limits'), row.color);
     const name = document.createElement('span');
     name.className = 'home-list-name';
     name.textContent = row.name;
@@ -7067,6 +7116,7 @@ function renderHomeSessionModule(rows) {
     const metadataLabel = sessionRowsApi.sessionModelMetadataLabel(row);
     description.append(sessionRowsApi.sessionModelMetadataNode(document, { ...row, modelLabel }, {
       translate: t, view: limitWindowsView,
+      latestModelLabel: t('session.latestModel'),
       unattributedLabel: t('dashboard.tooltip.unclassified'),
       formatTokens: formatCompact
     }));
@@ -7428,7 +7478,9 @@ function renderHomeTrendsModule() {
   const preview = state.stats?.historyPreview || { daily: [] };
   const history = homeOverviewApi.pickHomeHistory(state.homeHistory, preview);
   const rawDaily = history.daily || [];
-  if (!historyEnabled || rawDaily.length === 0) {
+  const summary = state.stats?.historyPreview?.summary;
+  const hasLifetimeActivity = summary?.activeDaysComplete === true && summary.activeDays > 0;
+  if (!historyEnabled || (rawDaily.length === 0 && !hasLifetimeActivity)) {
     const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends');
     const empty = document.createElement('div');
     empty.className = 'home-module-empty';
@@ -7474,14 +7526,16 @@ function renderHomeTrendsModule() {
     cell: activityLayout.cell,
     gap: activityLayout.gap
   });
-  const summaryActiveDays = state.stats?.historyPreview?.summary?.activeDays;
-  const activeDaysWindow = state.settings?.homeActiveDaysWindow || 'all';
-  const displayActiveDays = activeDaysWindow === 'year'
-    ? activity.cells.filter((cell) => cell.tokens > 0).length
-    : (Number.isFinite(summaryActiveDays)
-        ? summaryActiveDays
-        : activity.cells.filter((cell) => cell.tokens > 0).length);
-  const activeDaysLabel = activeDaysWindow === 'year'
+  const activeDaysPresentation = homeOverviewApi.homeActiveDaysPresentation({
+    requestedWindow: state.settings?.homeActiveDaysWindow || 'all',
+    summary,
+    cells: activity.cells,
+    rollingComplete: state.homeHistory != null
+      && state.homeHistoryLoadedSignature === homeOverviewApi.homeHistorySignature(state.stats)
+  });
+  const activeDaysWindow = activeDaysPresentation.window;
+  const displayActiveDays = activeDaysPresentation.count;
+  const activeDaysLabel = displayActiveDays == null ? '' : activeDaysWindow === 'year'
     ? t('home.activeDaysYear', { count: displayActiveDays })
     : t('home.activeDays', { count: displayActiveDays });
   const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends', activeDaysLabel);
@@ -9923,6 +9977,9 @@ function syncHideAppIconControl(showTrayIcon, trayMode) {
 function syncSettingsForm() {
   if (isRendererWindowHidden()) {
     applyInitialBreakdownPreference();
+    // Native show precedes the visibility IPC. Keep saved appearance current
+    // while hidden so the first tray/reopen frame cannot paint old fonts/title.
+    applyAppearanceSettings(Object.assign({}, state.settings, ...pendingSettingsPatches, appearancePreview));
     applyVendorColorOverrides(state.settings.vendorColors);
     appliedThemeOverrides = themePresetsApi.normalizeOverrides(
       state.settings.themeColors,
@@ -9973,7 +10030,7 @@ function syncSettingsForm() {
         ? String(allowed.includes(value) ? value : 300000)
         : 'live';
   }
-  if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled !== false;
+  if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled === true;
   if (els.sessionUsageArchiveInput) els.sessionUsageArchiveInput.checked = state.settings.sessionUsageArchiveEnabled !== false;
   renderAutomaticAppUpdateControl();
   allTimeSessions.ensure();
@@ -10126,7 +10183,7 @@ function hiddenHomeModuleSet() {
 }
 
 function hiddenHomeLimitProviderSet() {
-  const hidden = limitProviderOrderApi.normalizeLimitProviderSelection(state.settings?.hiddenHomeLimitProviders || '', LIMIT_PROVIDERS);
+  const hidden = limitProviderOrderApi.normalizeLimitProviderSelection(state.settings?.hiddenHomeLimitProviders || '', desktopLimitProviders());
   return new Set(hidden);
 }
 
@@ -10606,7 +10663,7 @@ function renderHomeLimitProviderList() {
   const hidden = hiddenHomeLimitProviderSet();
   const enabled = enabledLimitProviderSet();
   const providers = limitProviderOrderApi
-    .orderedLimitProviders(LIMIT_PROVIDERS, homeLimitProviderOrderValue())
+    .orderedLimitProviders(desktopLimitProviders(), homeLimitProviderOrderValue())
     .filter(({ id }) => enabled.has(id));
   const hasCustomOrder = Boolean(state.settings?.homeLimitProviderOrder);
   const displayLabel = document.createElement('label');
@@ -13142,21 +13199,21 @@ async function onHomeLimitProviderVisibilityToggle(providerId) {
   const hidden = hiddenHomeLimitProviderSet();
   if (hidden.has(providerId)) hidden.delete(providerId);
   else hidden.add(providerId);
-  await saveSettings({ hiddenHomeLimitProviders: Array.from(hidden).join(',') });
+  await saveSettings({ hiddenHomeLimitProviders: [...hidden, ...limitProviderOrderApi.absentPluginProviders(state.settings?.hiddenHomeLimitProviders, desktopLimitProviders())].join(',') });
   renderHomeIfVisible();
 }
 
 async function onHomeLimitProviderMove(providerId, direction) {
-  const next = limitProviderOrderApi.moveLimitProvider(homeLimitProviderOrderValue(), LIMIT_PROVIDERS, providerId, direction);
-  await saveSettings({ homeLimitProviderOrder: next });
+  const next = limitProviderOrderApi.moveLimitProvider(homeLimitProviderOrderValue(), desktopLimitProviders(), providerId, direction);
+  await saveSettings({ homeLimitProviderOrder: limitProviderOrderApi.preserveAbsentPluginOrder(homeLimitProviderOrderValue(), next.split(','), desktopLimitProviders()).join(',') });
   renderHomeIfVisible();
 }
 
 async function onHomeLimitProviderReorder(providerId, targetIndex) {
-  const current = limitProviderOrderApi.normalizeLimitProviderOrder(homeLimitProviderOrderValue(), LIMIT_PROVIDERS).join(',');
-  const next = limitProviderOrderApi.reorderLimitProvider(homeLimitProviderOrderValue(), LIMIT_PROVIDERS, providerId, targetIndex);
+  const current = limitProviderOrderApi.normalizeLimitProviderOrder(homeLimitProviderOrderValue(), desktopLimitProviders()).join(',');
+  const next = limitProviderOrderApi.reorderLimitProvider(homeLimitProviderOrderValue(), desktopLimitProviders(), providerId, targetIndex);
   if (next === current) return;
-  await saveSettings({ homeLimitProviderOrder: next });
+  await saveSettings({ homeLimitProviderOrder: limitProviderOrderApi.preserveAbsentPluginOrder(homeLimitProviderOrderValue(), next.split(','), desktopLimitProviders()).join(',') });
   renderHomeIfVisible();
 }
 
@@ -13441,10 +13498,16 @@ function applyPluginCatalog(list) {
     renderViewSwitcher();
     renderThemePresetChips();
     renderNotchPageChoices();
+    renderFloatingBubbleContent();
+    syncPluginLimitsDemand();
+    void deliverTrayProviderIcons();
     if (isSettingsSurfaceVisible()) preserveSettingsPanelScroll(renderViewPreferences);
   } else if (readingsChanged) {
     state.limitProviderRenderSignature = '';
     if (state.breakdown === 'limits') renderLimits();
+    renderHomeIfVisible();
+    renderFloatingBubbleContent();
+    void maybeUpdateBarsIcon();
     if (isSettingsSurfaceVisible()) renderLimitProviderCheckboxes();
   }
   refreshPluginLimitCredentialStatuses();
@@ -13608,7 +13671,7 @@ async function init() {
       nativeMaterialRevision += 1;
       nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState(next);
       glassRenderingApi.applyNativeMaterialClasses(nativeMaterialState);
-      applyAppearanceSettings(Object.assign({}, state.settings, ...pendingSettingsPatches, appearancePreview));
+      if (state.settings) applyAppearanceSettings(Object.assign({}, state.settings, ...pendingSettingsPatches, appearancePreview));
     });
   }
   const materialQueryRevision = nativeMaterialRevision;
@@ -13651,9 +13714,10 @@ async function init() {
   state.settings = await window.tokenMonitor.getSettings();
   // Local appearance is sufficient for first reveal. Plugin discovery, sync,
   // updater and stats queries below must not hold the window off screen.
+  // Tray startup also needs its saved appearance prepared before native show.
+  applyVisibleSettingsAppearance();
+  initialSettingsApplied = true;
   if (state.windowVisible) {
-    applyVisibleSettingsAppearance();
-    initialSettingsApplied = true;
     const signalAppearanceReady = () => window.tokenMonitor.signalAppearanceReady?.();
     // A retained WebContentsView can be document.hidden until its native host
     // shows. Prepare it now, without waiting on animation frames that pause while
@@ -14079,7 +14143,10 @@ for (const input of els.subscriptionKindInputs || []) {
 }
 // The ledger prints its amounts in the picked currency, so it has to redraw when
 // that changes.
-els.subscriptionCurrencyInput?.addEventListener('change', renderSubscriptionTopUpEntries);
+els.subscriptionCurrencyInput?.addEventListener('change', () => {
+  syncSubscriptionAmountPrecision();
+  renderSubscriptionTopUpEntries();
+});
 els.subscriptionTopUpAddButton?.addEventListener('click', addSubscriptionTopUpEntry);
 els.subscriptionSubmit?.addEventListener('click', submitSubscription);
 els.subscriptionCancelEdit?.addEventListener('click', () => closeSubscriptionEditor());
@@ -14472,11 +14539,15 @@ function createDockItemsComposer(root, itemsKey) {
       // Compose rapid edits against the latest submitted settings, even before
       // settings:update has replied or broadcast its normalized snapshot.
       getSettings: () => Object.assign({}, state.settings, ...pendingSettingsPatches),
-      getStats: () => state.stats,
+      getStats: () => desktopSurfaceStats(),
+      pluginView: ref => (state.pluginCatalog?.plugins || []).flatMap(plugin => (plugin.views || []).map(view => ({ ...view, status: plugin.status, identityIcon: plugin.identityIcon, presentation: plugin.presentation }))).find(view => view.ref === ref),
+      pluginMark: (view, size) => window.TokenMonitorPluginViews.navigationIcon(document, view, size),
+      moduleView: pluginLimitMetadata,
+      moduleMark: (id, size) => { const module = pluginLimitMetadata(id); return module ? window.TokenMonitorPluginViews.navigationIcon(document, module, size) : null; },
       pluginLabel: (ref) => (state.pluginCatalog?.plugins || [])
         .flatMap((plugin) => plugin.views || []).find((view) => view.ref === ref)?.title || ref,
       save: (patch) => saveSettings(patch),
-      providerLabel: (id) => window.TokenMonitorLimitProviders.LIMIT_PROVIDER_LABELS[id] || id,
+      providerLabel: (id) => pluginLimitMetadata(id)?.label || desktopLimitProviders().find(provider => provider.id === id)?.label || id,
       providerColor: (id) => limitProviderColor(id),
       windowLabel: (record, quotaWindow) => record?.provider === 'codex' && quotaWindow.additional === true
         ? limitWindowsView.codexAdditionalWindowLabel(
@@ -14488,7 +14559,7 @@ function createDockItemsComposer(root, itemsKey) {
       // Offer every enabled provider in the user's limits order, including those
       // without quota data. Keep the ordering rule here rather than in the composer.
       enabledLimitProviders: () => limitProviderOrderApi
-        .orderedLimitProviders(LIMIT_PROVIDERS, state.settings?.limitProviderOrder)
+        .orderedLimitProviders(desktopLimitProviders(), state.settings?.limitProviderOrder)
         .filter(({ id }) => enabledLimitProviderSet().has(id))
         .map(({ id }) => id),
       isWindowHidden: (providerId, quotaWindow) => limitUsageItemsApi.isLimitWindowHidden(
@@ -15421,16 +15492,16 @@ function trayComposerSampleStats() {
 
 function statsForTrayComposer() {
   const sample = trayComposerSampleStats();
-  const liveProviders = state.stats?.limits?.providers;
+  const liveProviders = desktopSurfaceStats()?.limits?.providers;
   return {
     ...sample,
-    ...state.stats,
+    ...desktopSurfaceStats(),
     periods: {
       ...sample.periods,
-      ...(state.stats?.periods || {})
+      ...(desktopSurfaceStats()?.periods || {})
     },
     limits: Array.isArray(liveProviders) && liveProviders.some((provider) => provider?.status === 'ok' && !provider?.stale)
-      ? state.stats.limits
+      ? desktopSurfaceStats().limits
       : sample.limits
   };
 }
@@ -15776,7 +15847,7 @@ function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options
     liveTokenRateFormatter: options.liveTokenRateFormatter || ((value) => formatLiveTokenRate(value)),
     pluginViews: pluginTrayViews(layout)
   });
-  const items = resolved.items.filter(item => item.type !== 'plugin' || item.available).map((item) => (
+  const items = resolved.items.filter(item => !item.omit && (item.type !== 'plugin' || item.available)).map((item) => (
     item.type === 'text'
       && item.metric === 'account'
       && state.settings?.maskLimitAccountEmails === true
@@ -15799,7 +15870,7 @@ function renderCustomTrayLayout(stats, layout, height = 44, colors = {}, options
 }
 
 function barsDataUrlForMode(mode, size = 44, colors, options = {}) {
-  const stats = options.stats || state.stats;
+  const stats = options.stats || desktopSurfaceStats();
   if (mode === 'barsAllSessions') return renderAllSessionsIcon(stats, size, configuredLimitProviderOrder(), colors, options);
   const pickers = { barsSession: pickWorstSessionProvider, barsWeekly: pickWorstWeeklyProvider };
   return renderBarsIcon(stats, size, pickers[mode] || pickWorstProvider, colors, options);
@@ -15818,7 +15889,7 @@ function liveTokenRateTrayLayout() {
 function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
   if (mode === 'liveTokenRate') {
     return renderCustomTrayLayout(
-      options.stats || state.stats || statsForTrayComposer(),
+      options.stats || desktopSurfaceStats() || statsForTrayComposer(),
       liveTokenRateTrayLayout(),
       size,
       colors,
@@ -15827,7 +15898,7 @@ function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
   }
   if (mode === 'custom') {
     return renderCustomTrayLayout(
-      options.stats || state.stats || statsForTrayComposer(),
+      options.stats || desktopSurfaceStats() || statsForTrayComposer(),
       options.layout || state.settings?.trayCustomLayout,
       size,
       colors,
@@ -15838,7 +15909,7 @@ function trayDataUrlForMode(mode, size = 44, colors, options = {}) {
     );
   }
   if (mode === 'limitsAllSessions') {
-    return renderLimitSessionsIcon(options.stats || state.stats, size, configuredLimitProviderOrder(), colors, options);
+    return renderLimitSessionsIcon(options.stats || desktopSurfaceStats(), size, configuredLimitProviderOrder(), colors, options);
   }
   return barsDataUrlForMode(mode, size, colors, options);
 }
@@ -15873,7 +15944,11 @@ function trayComposerProviderIcon(provider) {
     } catch (_) {}
   }
   if (id === 'app') return '../../../assets/icons/tray-token-monitor.png';
-  return window.TokenMonitorTrayProviderIcons.trayProviderIconSources([id])[id] || '';
+  const module = pluginLimitMetadata(id);
+  const icon = module?.presentation?.icon;
+  if (icon?.data) return icon.data;
+  if (icon?.native) return window.TokenMonitorTrayProviderIcons.trayProviderIconSources([icon.native])[icon.native] || '';
+  return module?.identityIcon || window.TokenMonitorTrayProviderIcons.trayProviderIconSources([id])[id] || '';
 }
 
 function trayComposerProviderChoices(currentProviders = [], options = {}) {
@@ -15882,11 +15957,12 @@ function trayComposerProviderChoices(currentProviders = [], options = {}) {
       .map((provider) => String(provider || '').trim().toLowerCase())
       .filter((provider) => provider && provider !== 'auto')
   );
-  const available = new Set(
-    trayLayoutApi.providerOptions(state.stats || {}).map((entry) => entry.value)
-  );
+  const available = new Set([...trayLayoutApi.providerOptions(desktopSurfaceStats() || {}).map(entry => entry.value), ...(state.pluginCatalog?.limits?.modules || []).map(module => module.id)]);
   const includeAll = options.includeAll === true;
-  const catalogue = includeAll ? TRAY_ICON_PROVIDERS : LIMIT_PROVIDERS;
+  const catalogue = includeAll ? [...TRAY_ICON_PROVIDERS, ...(state.pluginCatalog?.limits?.modules || [])] : desktopLimitProviders();
+  for (const id of current) if (!catalogue.some(provider => provider.id === id) && id.startsWith('plugin:')) {
+    catalogue.push({ id, label: pluginLimitMetadata(id)?.label || id });
+  }
   return [
     {
       value: 'auto',
@@ -15906,14 +15982,14 @@ function trayComposerProviderChoices(currentProviders = [], options = {}) {
 }
 
 function trayComposerAccountChoices(provider) {
-  const stats = state.stats || {};
+  const stats = desktopSurfaceStats() || {};
   const raw = provider === 'auto'
-    ? LIMIT_PROVIDERS.flatMap((entry) => trayLayoutApi.accountOptions(stats, entry.id))
+    ? desktopLimitProviders().flatMap((entry) => trayLayoutApi.accountOptions(stats, entry.id))
     : trayLayoutApi.accountOptions(stats, provider);
   return raw.map((entry) => ({
     value: entry.value,
     label: entry.label,
-    detail: LIMIT_PROVIDERS.find((providerEntry) => providerEntry.id === entry.provider?.provider)?.label || entry.provider?.provider || '',
+    detail: desktopLimitProviders().find((providerEntry) => providerEntry.id === entry.provider?.provider)?.label || entry.provider?.provider || '',
     icon: trayComposerProviderIcon(entry.provider?.provider)
   }));
 }
@@ -15932,7 +16008,7 @@ function trayComposerSourcePreview(source) {
 
 function trayComposerWindowChoices(source) {
   const choices = trayLayoutApi.sourceWindowOptions(
-    state.stats || {},
+    desktopSurfaceStats() || {},
     source
   ).map((entry) => {
     const selectedWindow = entry.selection?.window || entry.window;
@@ -16136,7 +16212,7 @@ function createTrayComposer(surface) {
     label: t,
     onLayoutChange: (nextLayout, { commit }) => {
       state.settings[layoutKey] = trayLayoutApi.normalizeTrayLayout(nextLayout);
-      observeDisplayLiveTokenRates(state.stats);
+      observeDisplayLiveTokenRates(desktopSurfaceStats());
       if (isTray) void maybeUpdateBarsIcon({ refreshComposers: commit });
       else if (isNotch) { if (commit) refreshTrayComposers(); }
       else {
@@ -16259,20 +16335,32 @@ async function deliverTrayProviderIcons(showBadge = state.settings?.showTrayProv
   const deliveryId = trayProviderIconDeliveryGuard.begin();
   const sources = window.TokenMonitorTrayProviderIcons.trayProviderIconSources(trayIconProviderIds);
   sources.app = '../../../assets/icons/tray-token-monitor.png';
+  const modules = state.pluginCatalog?.limits?.modules || [];
+  for (const module of modules) {
+    const icon = module.presentation?.icon;
+    const source = icon?.data || (icon?.native ? window.TokenMonitorTrayProviderIcons.trayProviderIconSources([icon.native])[icon.native] : module.identityIcon);
+    if (source) sources[module.id] = source;
+  }
+  for (const id of Object.keys(trayProviderImages)) if (id.startsWith('plugin:') && !sources[id]) delete trayProviderImages[id];
   const icons = {};
   for (const [id, path] of Object.entries(sources)) {
     try {
       const img = await loadImage(path);
+      if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
       trayProviderImages[id] = img;
       trayProviderImageIds.set(img, id);
-      icons[id] = providerImageToPngDataUrl(img, 44, showBadge, { trayInk: true, standalone: true });
-    } catch (_) { /* skip missing */ }
+      if (!id.startsWith('plugin:')) icons[id] = providerImageToPngDataUrl(img, 44, showBadge, { trayInk: true, standalone: true });
+    } catch (_) {
+      if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
+      if (id.startsWith('plugin:')) delete trayProviderImages[id];
+    }
   }
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
   if (Object.keys(icons).length) await window.tokenMonitor.setTrayIcons(icons);
   if (!trayProviderIconDeliveryGuard.isCurrent(deliveryId)) return;
   // Provider images may unlock a richer bars icon now that they're cached.
   maybeUpdateBarsIcon();
+  renderFloatingBubbleContent();
 }
 
 function setAccountGroupExpanded(prefix, expanded, stateKey) {
@@ -17584,7 +17672,8 @@ function renderExternalProviderStatus(providerName) {
   }
   const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')
     || (providerName === 'cline' && source === 'cline-signin')
-    || (providerName === 'kimi' && source === 'desktop');
+    || (providerName === 'kimi' && source === 'desktop')
+    || providerName === 'hark';
   if (discoveredLogin) {
     // The discovered login is not user-entered, so the override input and the
     // console link stay reachable instead of hiding behind linked. Cline's stored
