@@ -789,6 +789,45 @@
     return windows.find((window) => window?.metric === 'credits') || null;
   }
 
+  // A local coercion rather than the injected optionalFiniteNumber: every host
+  // that renders WorkBuddy totals must be able to sum them, including ones
+  // that inject only the presentation API.
+  function spendNumber(value) {
+    if (value === null || value === undefined || value === '') return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  // The combined row keeps the per-account Spend figures: sum every period
+  // at least one account reports and stay partial while any account's figure
+  // is incomplete. Rows from a device that predates spend tracking contribute
+  // nothing rather than zeros.
+  function combinedWorkbuddyBalance(providers, remaining) {
+    const spend = {};
+    let tracked = false;
+    for (const field of ['todaySpend', 'weekSpend', 'monthSpend', 'allTimeSpend']) {
+      let sum = null;
+      for (const provider of providers) {
+        const value = spendNumber(provider?.balance?.[field]);
+        if (value === null) continue;
+        sum = (sum === null ? 0 : sum) + value;
+      }
+      if (sum !== null) {
+        spend[field] = sum;
+        tracked = true;
+      }
+    }
+    if (tracked) {
+      // The ledger reports no trackingSince: a month is partial when the 31-day
+      // window cannot reach its first day (monthSinceTracking) or when any
+      // account reports no Spend at all — that row contributes nothing to the
+      // sum, so a complete-looking total would be understated.
+      spend.monthSinceTracking = providers.some((provider) => provider?.balance?.monthSinceTracking === true
+        || spendNumber(provider?.balance?.todaySpend) === null);
+    }
+    return { amount: remaining, currency: 'CREDITS', ...(tracked ? spend : {}) };
+  }
+
   function workbuddyCombinedProvider(providers) {
     if (settings()?.workbuddyQuotaTotalEnabled !== true) return null;
     const windows = presentationApi.workbuddyCreditTotals(providers);
@@ -800,7 +839,7 @@
       accountGroup: true, groupAccounts: providers,
       updatedAt: providers.map((provider) => provider.updatedAt || '').sort()[0],
       windows,
-      balance: { amount: remaining, currency: 'CREDITS' }
+      balance: combinedWorkbuddyBalance(providers, remaining)
     };
   }
 

@@ -50,9 +50,57 @@
     return node;
   }
 
+  // WorkBuddy supplies an absolute Credits balance series built from its own
+  // billing ledger plus official balance anchors. It is evenly spaced and has
+  // no cycle basis, so draw it as one continuous line instead of feeding it
+  // through segments()/sameCycle(), which would cut it at every package change.
+  function drawOfficialTrend(series) {
+    const plot = $('trend');
+    const width = plot.getBoundingClientRect().width;
+    if (!width) return;
+    const points = series.points;
+    plot.replaceChildren();
+    plot.setAttribute('viewBox', `0 0 ${width} 80`);
+    plot.setAttribute('aria-label', `${label(current())} · official billing ledger`);
+    plot.hidden = false;
+    // Absolute Credits labels are several digits wide; keep them in their own
+    // gutter to the left of the plot instead of overlapping the curve start.
+    const left = 42, right = width - 5, top = 10, bottom = 58;
+    const start = points[0].at, end = points.at(-1).at;
+    const span = Math.max(1, end - start);
+    const X = at => left + (at - start) / span * (right - left);
+    const max = Math.max(1, ...points.map(point => point.balance)) * 1.08;
+    const Y = value => bottom - Math.max(0, value) / max * (bottom - top);
+    // Same absolute-value axis as the local sampling chart: three horizontal
+    // baselines and concrete Credits labels at the top and bottom.
+    for (const value of [max, max / 2, 0]) {
+      plot.append(svgNode('line', { x1: left, x2: right, y1: Y(value), y2: Y(value), class: 'quota-history-grid' }));
+      if (value !== max / 2) plot.append(svgNode('text', { x: left - 6, y: Y(value) + 4, 'text-anchor': 'end' }, number(Math.round(value))));
+    }
+    let d = '';
+    points.forEach((point, index) => {
+      d += `${index === 0 ? 'M' : 'L'}${X(point.at)},${Y(point.balance)}`;
+    });
+    plot.append(svgNode('path', { d, class: 'quota-history-curve' }));
+    const format = { month: 'numeric', day: 'numeric' };
+    plot.append(svgNode('text', { x: left, y: 77 }, date(start, format)));
+    plot.append(svgNode('text', { x: right, y: 77, 'text-anchor': 'end' }, date(end, format)));
+    $('guide-caption').hidden = true;
+    $('empty').hidden = true;
+    $('notice').hidden = false;
+    $('notice').textContent = `${t('notice')} · official billing ledger${series.inferredDays ? ` · ${series.inferredDays} inferred days` : ''}`;
+    $('unallocated').textContent = series.unattributed > 0
+      ? `${number(Math.round(series.unattributed))} CREDITS unattributed` : '';
+  }
+
   function drawTrend() {
     const entry = current();
     if (!entry) return;
+    const official = payload.officialSeries;
+    if (official?.points?.length && entry.window.metric === 'credits') {
+      drawOfficialTrend(official);
+      return;
+    }
     const plot = $('trend');
     const width = plot.getBoundingClientRect().width;
     if (!width) return;

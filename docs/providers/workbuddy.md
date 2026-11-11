@@ -39,6 +39,26 @@ The shared metadata scanner still skips records above 64 KiB, so oversized user 
 
 `parsePersonalUsage()` fails closed when any active package carries unusable quota data: a partial aggregate would look plausible while silently omitting a package. An account with no active package stays a configured row with zero resources instead of becoming an error.
 
+### Credits spend history
+
+Today/Week/Month Credits spend is read from the per-request billing ledger at `/billing/meter/get-user-request-usage`, not derived from a locally diffed cumulative total. The path is **unversioned**: unlike the quota actions it has no `/v2` form, and `/v2/billing/meter/get-user-request-usage` answers `404 Route Not Found`. The app-session allowlist in `localAuth.js` therefore names this path explicitly instead of deriving it from `workbuddyBillingPaths()`. Each row carries its own `requestTime` and `credit`, so `providers/workbuddy/usageRecords.js` pages the window and sums the rows into three periods: Today from local midnight, Week over the rolling seven days including today, and Month from the first of the current month.
+
+**The request window bounds every period, and the API caps it at 31 days.** A window of 31 days still answers; 32 days and beyond answer an empty ledger. The request therefore spans those 31 days rather than only the week — a week-sized window made Month sum the same rows as Week, which is indistinguishable from a bug in the row. A month whose first day falls outside the window reports a floor, flagged through `monthSinceTracking` (the same partial-coverage signal DeepSeek and Z.ai emit).
+
+That cap is also why WorkBuddy reports **no All-time Spend** figure. The longest total the API can produce is 31 days, so an "All time" row could only be that window total wearing a lifetime label. `recordWorkbuddyUsage()` omits `allTimeSpend` entirely and the shared Spend renderer draws the row from the entries a provider actually reports, so the WorkBuddy row shows Today/Week/Month while providers with a real lifetime basis keep their All-time entry.
+
+Because the provider answers with real timestamps, the figures do not depend on how often this machine observed the account: spend that happened while the collector was not running still counts, and a cycle reset or a changed package set cannot move a baseline. `docs/API.md` documents the same fields.
+
+The ledger is a paged read bounded at `WORKBUDDY_USAGE_MAX_PAGES` (50) pages of 1,000 rows — a real 3,000-row month is three requests (~5s), where 100-row pages took 30 requests (~43s); a scan that hits that bound yields no Spend fields at all instead of presenting a silently short total. The read has its own deadline well inside the account budget, so a stalled ledger resolves to `null` without turning a healthy Credits row into a timeout. A failed or refused ledger read yields no Spend fields at all — the Credits balance still publishes, because Spend is enrichment rather than a quota fact. The save-time credential probe (`deps.probe`) skips the ledger read: it is the user checking a credential they just saved, not a collection tick. The ledger request reuses the quota request's resolved credential, realms, host and transport, so a Spend figure can never be fetched with a different account's token or from the wrong realm.
+
+### Official balance curve
+
+The quota-history card's 14-day remaining-trend curve is separate from the Spend row. Local sampling alone leaves the curve broken: the history database only starts when the app first runs, days without the collector are blank, and `sameCycle()` treats every changed credit limit as a new cycle (WorkBuddy's limit is the sum of active packages, so it moves whenever a package is granted or expires).
+
+WorkBuddy therefore supplies an `officialSeries` on the balance instead. `balanceAnchors.js` stores the provider's own remaining Credits for each local day the collector ran (40-day retention, one file per account key, serialised writes). `usageRecords.js` derives a daily credit series from the same paged ledger read that produces the Spend row, so no extra request is made. `historySeries.js` joins the two: exact anchors keep their reported value; days between anchors are interpolated with the recorded daily spend; a grant, expiry or reset that makes two anchors disagree is spread linearly across the gap, flagged `uncertain`, and reported as `unattributed`. All values are absolute CREDITS — no `limit`-derived percentage — so a package change cannot distort the axis.
+
+`history.js:drawTrend()` draws this series as one continuous path and bypasses `model.segments()`/`sameCycle()` entirely; every other provider keeps the local sampling path. When the ledger is unavailable the field is absent and the card falls back to the existing local curve rather than showing an empty or fabricated chart.
+
 ### Source selection
 
 The widget keeps app-owned discovery and adds explicit managed accounts. `workbuddyDesktopSessionOnly` continues to suppress legacy settings/env tokens: a stale `.env` must not silently outrank the discovered session. Managed accounts enter a separate runtime context, with secrets resolved in main through the existing `CredentialStore`. The headless agent and CLI retain their existing `TOKEN_MONITOR_WORKBUDDY_*` path and never read widget credentials.
@@ -107,6 +127,7 @@ That distinction is the whole point: an encrypted credential is not a signed-out
 | App session reading, encryption detection, read reasons | `src/electron/providers/workbuddy/localAuth.js` |
 | Official login, refresh and managed credentials | `src/shared/providers/workbuddy/oauth.js`, `src/electron/providers/workbuddy/oauthLogin.js`, `src/electron/providers/workbuddy/managedAccounts.js`, shared `CredentialStore` |
 | Billing request and response mapping | `src/shared/providers/workbuddy/limits.js` |
+| Credits spend ledger read and period sums | `src/shared/providers/workbuddy/usageRecords.js`, `usageHistory.js` |
 | Widget lane configuration and reason plumbing | `src/electron/main.js`, `src/electron/runtimeConfig.js` |
 | Action hint bounds | `src/shared/limits/core.js`, generated `worker/src/shared/limits/core.js` |
 | Status label and localized strings | `src/electron/renderer/limits/providerPresentation.js`, `src/electron/renderer/i18n.js` |
