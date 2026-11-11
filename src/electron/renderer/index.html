@@ -67,7 +67,7 @@
                   <span class="settings-item-title" data-i18n="settings.startup.startAtLogin">Start at login</span>
                 </span>
                 <input id="startAtLoginInput" type="checkbox" />
-                <span id="startupNote" class="settings-note settings-item-desc" data-i18n="settings.startup.available">Available in packaged builds. On Linux, run the AppImage build to enable.</span>
+                <span id="startupNote" class="settings-note settings-item-desc" data-i18n="settings.startup.available">Available in packaged builds.</span>
               </label>
             </div>
             <div class="settings-subgroup maintenance-section app-update-settings">
@@ -434,7 +434,7 @@
                 </div>
               </div>
               <div class="presence-feature">
-                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.showTrayIcon">Show tray/menu bar icon</span></span><input id="showTrayIconInput" type="checkbox" /></label>
+                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.showTrayIcon">Show tray icon</span></span><input id="showTrayIconInput" type="checkbox" /></label>
                 <div id="trayIconOptions" class="presence-feature-body hidden">
                   <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.trayText">Tray text</span></span>
                     <select id="trayContentInput">
@@ -461,9 +461,9 @@
                   <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.trayProviderBadge">Show Token Monitor badge on provider icons</span></span><input id="showTrayProviderBadgeInput" type="checkbox" /></label>
                   <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.trayMode">Tray-only mode</span></span><input id="trayModeInput" type="checkbox" /></label>
                   <div id="trayOptions" class="presence-feature-body hidden">
-                    <p class="settings-note" data-i18n="settings.display.trayNote">Hide the main window; show a popover from the macOS menu bar or Windows system tray.</p>
+                    <p class="settings-note" data-i18n="settings.display.trayNote">Hide the main window; show a popover from the system tray.</p>
                   </div>
-                  <label id="hideAppIconRow" class="checkbox-label settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.hideAppIcon">Hide taskbar/Dock icon</span></span><input id="hideAppIconInput" type="checkbox" /></label>
+                  <label id="hideAppIconRow" class="checkbox-label settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.display.hideAppIcon">Hide taskbar icon</span></span><input id="hideAppIconInput" type="checkbox" /></label>
                   <div id="hideAppIconOptions" class="presence-feature-body hidden">
                     <p class="settings-note" data-i18n="settings.display.hideAppIconNote">The widget stays on the desktop; use the tray icon or the shortcut to bring it to the front.</p>
                   </div>
@@ -967,7 +967,7 @@
                       <div id="opencodeCookieFields" class="opencode-credential-fields hidden">
                         <p class="settings-note">
                           <strong>1.</strong> <span data-i18n="settings.opencode.step1Before">Open</span> <code>opencode.ai/console</code> <span data-i18n="settings.opencode.step1After">in your browser and sign in.</span><br>
-                          <strong>2.</strong> <span data-i18n="settings.opencode.step2">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -> opencode.ai.</span><br>
+                          <strong>2.</strong> <span data-i18n="settings.opencode.step2">Open DevTools (F12) -> Application/Storage -> Cookies -> opencode.ai.</span><br>
                           <strong>3.</strong> <span data-i18n="settings.opencode.step3Before">Copy the</span> <code>__Host-console_session</code> <span data-i18n="settings.opencode.step3After">value.</span><br>
                           <strong>4.</strong> <span data-i18n="settings.opencode.step4">Paste it below and click Save.</span>
                         </p>
@@ -1014,7 +1014,7 @@
                       <p class="settings-note">
                         <strong>1.</strong> <span data-i18n="settings.cursor.step1Before">Open</span> <code>cursor.com</code> <span data-i18n="settings.cursor.step1After">in your browser using “Open Cursor dashboard”, then sign in.</span><br>
                         <strong>2.</strong> <span data-i18n="settings.cursor.cookiePage">If sign-in redirects to grok.com/dashboard, click “Open Cursor dashboard” again to return to cursor.com in the same browser. Copy the Cursor cookie, not a Grok cookie.</span><br>
-                        <strong>3.</strong> <span data-i18n="settings.cursor.step2Before">Open DevTools (F12 or Cmd+Opt+I) -> Application/Storage -> Cookies -></span> cursor.com.<br>
+                        <strong>3.</strong> <span data-i18n="settings.cursor.step2Before">Open DevTools (F12) -> Application/Storage -> Cookies -></span> cursor.com.<br>
                         <strong>4.</strong> <span data-i18n="settings.cursor.step3Before">Copy the</span> <code>WorkosCursorSessionToken</code> <span data-i18n="settings.cursor.step3After">value.</span><br>
                         <strong>5.</strong> <span data-i18n="settings.cursor.step4">Paste it below and click Save.</span>
                       </p>
@@ -1073,7 +1073,7 @@
                       <p class="settings-note" data-i18n="settings.kimi.webTokenNote">Use a Kimi Web access token only to fill quota windows missing from the Code API. The token stays on this device and expires quickly.</p>
                       <p class="settings-note kimi-web-steps">
                         <strong>1.</strong> <span data-i18n="settings.kimi.step1">Open Kimi Code Console in your browser (button above) and sign in.</span><br>
-                        <strong>2.</strong> <span data-i18n="settings.kimi.step2">Open DevTools (F12 or Cmd+Opt+I) -&gt; Application/Storage -&gt; Local Storage -&gt; https://www.kimi.com.</span><br>
+                        <strong>2.</strong> <span data-i18n="settings.kimi.step2">Open DevTools (F12) -&gt; Application/Storage -&gt; Local Storage -&gt; https://www.kimi.com.</span><br>
                         <strong>3.</strong> <span data-i18n="settings.kimi.step3">Find access_token and copy its Value.</span><br>
                         <strong>4.</strong> <span data-i18n="settings.kimi.step4">Paste the value below and click Save Web token.</span>
                       </p>
@@ -1148,7 +1148,7 @@
                       </div>
                       <p class="settings-note">
                         <strong>1.</strong> <span data-i18n="settings.mimo.step1">Open the Xiaomi MiMo console in your browser (button above) and sign in.</span><br>
-                        <strong>2.</strong> <span data-i18n="settings.mimo.step2">Open DevTools (F12 or Cmd+Opt+I) -> Network, then reload the page.</span><br>
+                        <strong>2.</strong> <span data-i18n="settings.mimo.step2">Open DevTools (F12) -> Network, then reload the page.</span><br>
                         <strong>3.</strong> <span data-i18n="settings.mimo.step3Before">In Network, select</span> <code>balance</code><span data-i18n="settings.mimo.step3After">, then copy the full Cookie value from Headers -> Request Headers.</span><br>
                         <strong>4.</strong> <span data-i18n="settings.mimo.step4">Paste it below, then click Save account.</span>
                       </p>
@@ -1643,7 +1643,7 @@
                 </label>
                 <div id="hubStatusRow" class="hub-status"></div>
                 <div id="hubAddressList" class="hub-address-list"></div>
-                <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. macOS / Windows may prompt to allow incoming connections the first time. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
+                <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
                 <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
               </div>
               <div id="icloudFields" class="hub-mode-fields hidden">

@@ -75,6 +75,16 @@ test('formats recorded shortcuts for display', () => {
   assert.equal(formatWindowToggleShortcut('Control+Alt+K'), 'Ctrl+Alt/Option+K');
 });
 
+test('formats recorded shortcuts with the current platform labels', () => {
+  assert.equal(formatWindowToggleShortcut('CommandOrControl+Alt+M', 'Off', 'darwin'), 'Cmd+Option+M');
+  assert.equal(formatWindowToggleShortcut('CommandOrControl+Alt+M', 'Off', 'MacIntel'), 'Cmd+Option+M');
+  assert.equal(formatWindowToggleShortcut('CommandOrControl+Alt+M', 'Off', 'win32'), 'Ctrl+Alt+M');
+  assert.equal(formatWindowToggleShortcut('CommandOrControl+Alt+M', 'Off', 'linux'), 'Ctrl+Alt+M');
+  assert.equal(formatWindowToggleShortcut('Control+Shift+K', 'Off', 'darwin'), 'Ctrl+Shift+K');
+  assert.equal(formatWindowToggleShortcut('Super+K', 'Off', 'win32'), 'Win+K');
+  assert.equal(formatWindowToggleShortcut('Super+K', 'Off', 'linux'), 'Super+K');
+});
+
 test('maps shortcut activation to the correct window action', () => {
   assert.equal(windowToggleShortcutAction({ trayMode: true, visible: true }), 'togglePopover');
   assert.equal(windowToggleShortcutAction({ floatingBubbleCollapsed: true, visible: true }), 'expandFloatingBubble');

@@ -211,6 +211,16 @@ Session device labels are a desktop presentation projection resolved from the ca
 - **UI identity.** Device controls are keyed by Device ID within a backend/connection, never display name. A backend change resets them even if IDs recur; unrelated pushes preserve edits and pending confirmations. Client connection drafts survive settings/status pushes and panel changes until explicit cancellation or successful save without newer edits.
 - **App pickers.** Host-rendered single-select fields use the shared renderer select control; the native element remains the value/change interface. `appSelects` owns discovery and disposal of dynamic fields, while field-specific metadata stays with the app. Only the visible trigger activates a picker; labels supply its accessible name without forwarding hover or clicks. Short lists remain compact, long lists offer search, and focused account/model pickers survive background refreshes. System menus retain their own controls. Plugin content uses shared pickers by default, with an author-controlled native opt-out; see [shared dropdowns](plugins/author-ui-options.md#shared-dropdowns-in-the-desktop-app).
 
+## Platform-specific copy
+
+Copy that names OS-specific UI (menu bar vs system tray, Dock vs taskbar, Cmd vs Ctrl) must not list every platform in one string. `src/electron/renderer/i18n.js` resolves `key@<process.platform>` before `key`, then the same two keys in English, so a variant is added only where a platform differs.
+
+- **Base entry.** The base `key` is the general (non-macOS) wording and the fallback for platforms without a variant or before `appInfo` loads. Add a `key@darwin`, `key@win32` or `key@linux` entry only for platforms that read differently.
+- **Every locale.** Variants exist in every locale with the base's placeholders; `tests/electron/i18n.test.js` enforces both.
+- **Resolution.** `t()` and `applyTranslations()` in `src/electron/renderer/app.js` pass `state.appInfo.platform`; other windows that call `i18n.translate()` without a platform get the base entry. Do not branch on the platform in the renderer to choose between two keys of the same message.
+- **Shared placeholders.** `PLATFORM_PARAMS` in `src/electron/renderer/i18n.js` supplies values that depend only on the platform, such as `{devtoolsKeys}` for the many browser-DevTools setup steps. Callers may still pass their own value.
+- **Shortcuts.** Accelerators are stored portably (`CommandOrControl`, `Alt`); `formatWindowToggleShortcut(shortcut, offLabel, platform)` in `src/electron/windowShortcut.js` renders them as Cmd/Option on macOS and Ctrl/Alt elsewhere.
+
 ## Data flow contract
 
 **Node Hub persistence.** Saves are synchronous by default; opt-in batching uses a fixed first-upload deadline without delaying API/SSE updates. Snapshots use compact JSON and atomic replacement. Device deletion, subscriptions, shared settings/title policies and startup title cleanup persist immediately; preserve their rollback contracts. Failed saves retain pending data for retry. File readers can lag and abrupt termination can lose pending updates; see [configuration](configuration.md) for options and operational tradeoffs.

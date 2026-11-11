@@ -761,7 +761,7 @@ function compactTokenDisplayOptions() {
 }
 
 function t(key, params) {
-  return i18n.translate(currentLocale(), key, params);
+  return i18n.translate(currentLocale(), key, params, state.appInfo?.platform);
 }
 
 const codexAccountControl = codexAccountControlApi.createCodexAccountControl({
@@ -807,7 +807,7 @@ function translatedLimitProviderTag(tagInfo) {
 
 function applySettingsTranslations() {
   if (els.languageInput) els.languageInput.value = currentLanguage();
-  i18n.applyTranslations(document, currentLocale());
+  i18n.applyTranslations(document, currentLocale(), state.appInfo?.platform);
   setThirdPartyAdapterFields();
   setSubscriptionFormMode();
   diagnosticsPanel?.render();
@@ -8883,7 +8883,7 @@ function syncWindowShortcutStatus() {
   if (!note || !value) return;
   const shortcut = normalizeWindowToggleShortcutValue(state.settings?.windowToggleShortcut);
   // The value pill doubles as the record button, so its empty state is the action ("Record"), not "Off".
-  const display = windowShortcutApi.formatWindowToggleShortcut(shortcut, t('settings.shortcut.record'));
+  const display = windowShortcutApi.formatWindowToggleShortcut(shortcut, t('settings.shortcut.record'), state.appInfo?.platform);
   const status = state.settings?.windowToggleShortcutStatus?.state || (shortcut ? 'unregistered' : 'off');
   value.classList.toggle('recording', state.recordingWindowShortcut);
   value.textContent = state.recordingWindowShortcut ? t('settings.shortcut.recording') : display;
@@ -10227,11 +10227,9 @@ function syncSettingsForm() {
     els.startAtLoginInput.checked = Boolean(state.settings.startAtLogin && state.appInfo?.loginItemSupported);
   }
   if (els.startupNote) {
-    els.startupNote.textContent = !state.appInfo?.loginItemSupported
-      ? t('settings.startup.available')
-      : state.appInfo?.platform === 'linux'
-        ? t('settings.startup.appimageNote')
-        : t('settings.startup.launchAtSignIn');
+    els.startupNote.textContent = t(state.appInfo?.loginItemSupported
+      ? 'settings.startup.launchAtSignIn'
+      : 'settings.startup.available');
   }
   els.glassInput.value = String(state.settings.glassOpacity ?? 68);
   for (const [key, mode] of nativeGlassTintSettings) {
