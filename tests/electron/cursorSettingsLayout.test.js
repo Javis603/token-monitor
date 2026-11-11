@@ -3375,3 +3375,161 @@ test('MiMo settings reuses the shared sign-in status for rejected accounts', () 
   render();
   assert.equal([...list.children[0].walk()].find((node) => node.className === 'managed-account-info').textContent, 'Console');
 });
+
+
+test('QwenWork account refresh targets only QwenWork', async () => {
+  const app = readRendererFile('app.js');
+  const match = app.match(/document\.getElementById\('qwenworkRefreshButton'\)\.addEventListener\('click', (.*?)\);/);
+  assert.ok(match);
+  const calls = [];
+  const handler = vm.runInNewContext(`(${match[1]})`, {
+    refreshLimitProviderQuota: async (provider) => calls.push(provider)
+  });
+  await handler();
+  assert.deepEqual(calls, ['qwenwork']);
+});
+
+
+test('QwenWork fallback accounts can start and cancel a stored browser sign-in', () => {
+  const source = functionBody(readRendererFile('app.js'), 'renderQwenworkStatus', 'renderOpenCodeProfiles');
+  for (const sourceId of ['environment', 'magpie', 'settings']) {
+    const hidden = new Map();
+    const state = { qwenworkSignInBusy: false, qwenworkSignInCancelable: false, settings: { qwenworkSessionConfigured: true, qwenworkSessionSource: sourceId } };
+    const render = vm.runInNewContext(`${source}\nrenderQwenworkStatus`, {
+      document: { getElementById: id => ({ classList: { toggle: (name, value) => hidden.set(id, value) } }) },
+      state, limitProviderEnabled: () => true, qwenworkAccountLinked: () => true,
+      qwenworkProviderStatus: () => ({ status: 'ok' }), qwenworkAccountStatusText: () => '',
+      accountShellApi: { render() {} }, renderSettingsSummaries() {}
+    });
+    render();
+    assert.equal(hidden.get('qwenworkSignInButton'), sourceId === 'settings');
+    state.qwenworkSignInBusy = true;
+    state.qwenworkSignInCancelable = true;
+    render();
+    assert.equal(hidden.get('qwenworkCancelSignInButton'), false);
+  }
+});
+
+test('QwenWork login reconfigures the newly enabled provider before invalidation', async () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const start = main.indexOf("  ipcMain.handle('qwenwork:signIn'");
+  const end = main.indexOf("  ipcMain.handle('qwenwork:cancelSignIn'", start);
+  const settings = { limitsEnabled: false, limitProviders: 'claude', limitProviderOrder: 'codex,claude', homeLimitProviderOrder: 'codex' };
+  const calls = [];
+  let handler;
+  vm.runInNewContext(main.slice(start, end), {
+    ipcMain: { handle: (_name, fn) => { handler = fn; } },
+    qwenworkLoginController: null, qwenworkLoginFlowId: '', AbortController,
+    runQwenworkDeviceFlowLogin: async () => ({ session: { access: 'fixture' } }),
+    qwenworkAuthBaseUrl: () => '', qwenworkBaseUrl: () => '', process: { env: {} },
+    shell: { openExternal() {} }, electronLimitsFetch() {}, settings,
+    providerSelectionIncluding: require('../../src/electron/limits/credentialCommands').providerSelectionIncluding,
+    saveSettings() {}, pushSettingsToRenderer() {},
+    deviceRuntimeHandle: { reconfigureLimits: config => calls.push(['config', config.limitProviders]) },
+    electronLimitsConfig: () => ({ limitProviders: settings.limitProviders }),
+    queueLimitInvalidation: () => { calls.push(['invalidate']); }
+  });
+  const result = await handler({ sender: { isDestroyed: () => false, send() {} } }, { flowId: 'fixture' });
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, [['config', 'claude,qwenwork'], ['invalidate']]);
+  assert.equal(settings.limitsEnabled, true);
+  assert.equal(settings.limitProviderOrder, 'codex,claude');
+  assert.equal(settings.homeLimitProviderOrder, 'codex');
+});
+
+test('QwenWork sign-in consumes the pending first-run provider seed only after the save', async () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const start = main.indexOf("  ipcMain.handle('qwenwork:signIn'");
+  const end = main.indexOf("  ipcMain.handle('qwenwork:cancelSignIn'", start);
+  for (const [saveFails, expectedOk, expectedPending] of [[false, true, false], [true, false, true]]) {
+    const context = {
+      ipcMain: { handle: (_name, fn) => { context.handler = fn; } },
+      initialLimitProvidersPending: true, qwenworkLoginController: null, qwenworkLoginFlowId: '', AbortController,
+      runQwenworkDeviceFlowLogin: async () => ({ session: { access: 'fixture' } }),
+      qwenworkAuthBaseUrl: () => '', qwenworkBaseUrl: () => '', process: { env: {} },
+      shell: { openExternal() {} }, electronLimitsFetch() {}, settings: { limitProviders: 'claude' },
+      providerSelectionIncluding: require('../../src/electron/limits/credentialCommands').providerSelectionIncluding,
+      saveSettings: () => { if (saveFails) throw new Error('disk'); },
+      pushSettingsToRenderer() {}, deviceRuntimeHandle: null,
+      electronLimitsConfig: () => ({}), queueLimitInvalidation: () => {}
+    };
+    vm.runInNewContext(main.slice(start, end), context);
+    const result = await context.handler({ sender: { isDestroyed: () => false, send() {} } }, { flowId: 'fixture' });
+    assert.equal(result.ok, expectedOk);
+    assert.equal(context.initialLimitProvidersPending, expectedPending);
+  }
+});
+
+test('QwenWork account status reports disabled, unchecked and failed states distinctly', () => {
+  const body = functionBody(readRendererFile('app.js'), 'qwenworkAccountStatusText', 'setCopilotManualExpanded');
+  for (const [status, expected] of [
+    ['disabled', 'settings.limits.status.disabled'],
+    ['notChecked', 'settings.common.notChecked'],
+    ['error', 'settings.common.error'],
+    ['unavailable', 'settings.qwenwork.statusUnavailable']
+  ]) {
+    const text = vm.runInNewContext(`${body}\nqwenworkAccountStatusText(null, true, 'settings', true)`, {
+      t: key => key,
+      limitProviderPresentationApi: { apiKeyAccountStatus: () => status }
+    });
+    assert.equal(text, expected, status);
+  }
+});
+
+test('QwenWork cancel keeps the flow cancelable when the cancel request fails', async () => {
+  const source = readRendererFile('app.js');
+  const marker = "document.getElementById('qwenworkCancelSignInButton').addEventListener('click', async () => {";
+  const start = source.indexOf(marker);
+  assert.notEqual(start, -1, 'QwenWork cancel handler should exist');
+  const end = source.indexOf('\n    });', start);
+  const block = source.slice(start + marker.length, end);
+  for (const fails of [false, true]) {
+    const state = { qwenworkSignInFlowId: 'flow-1', qwenworkSignInBusy: true, qwenworkSignInCancelable: true,
+      qwenworkLoginStatus: 'waiting', qwenworkErrorMessage: '' };
+    const handler = vm.runInNewContext(`(async () => {${block}})()`, {
+      state,
+      t: key => key,
+      window: { tokenMonitor: { qwenwork: { cancelSignIn: async () => {
+        if (fails) throw new Error('cancel IPC failed');
+      } } } },
+      isCurrentQwenworkSignInFlow: flowId => Boolean(state.qwenworkSignInFlowId) && flowId === state.qwenworkSignInFlowId,
+      setQwenworkError: message => { state.qwenworkErrorMessage = message || ''; },
+      renderQwenworkStatus() {}
+    });
+    await handler;
+    if (fails) {
+      assert.equal(state.qwenworkSignInFlowId, 'flow-1');
+      assert.equal(state.qwenworkSignInCancelable, true);
+      assert.equal(state.qwenworkSignInBusy, true);
+      assert.match(state.qwenworkErrorMessage, /cancel IPC failed/);
+    } else {
+      assert.equal(state.qwenworkSignInFlowId, '');
+      assert.equal(state.qwenworkSignInCancelable, false);
+      assert.equal(state.qwenworkSignInBusy, false);
+    }
+  }
+});
+
+
+
+test('QwenWork upgrade leaves saved selections and custom orders alone', () => {
+  const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
+  const selectionStart = main.indexOf('    if (saved.limitProviders !== undefined) {');
+  const selectionEnd = main.indexOf('    if (saved.clientDisplayOrder !== undefined)', selectionStart);
+  const homeStart = main.indexOf('    if (saved.homeLimitProviderOrder !== undefined) {');
+  const homeEnd = main.indexOf('    if (saved.hiddenHomeLimitProviders !== undefined)', homeStart);
+  for (const selection of [undefined, '', 'claude,codex']) {
+    const saved = { limitProviderOrder: 'codex,claude', homeLimitProviderOrder: 'claude' };
+    if (selection !== undefined) saved.limitProviders = selection;
+    const merged = { limitProviders: 'codex' };
+    const context = { saved, merged,
+      migrateLimitProviders: value => value, migrateLimitProviderOrder: value => value,
+      migrateHomeLimitProviderOrder: value => value,
+      migrateQwenworkLimitProvider: () => { throw new Error('upgrade must preserve provider selection'); },
+      migrateQwenworkHomeLimitProvider: () => { throw new Error('upgrade must preserve Home order'); } };
+    vm.runInNewContext(main.slice(selectionStart, selectionEnd) + main.slice(homeStart, homeEnd), context);
+    assert.equal(merged.limitProviders, selection === undefined ? 'codex' : selection);
+    assert.equal(merged.limitProviderOrder, 'codex,claude');
+    assert.equal(merged.homeLimitProviderOrder, 'claude');
+  }
+});

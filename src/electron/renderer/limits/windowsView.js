@@ -1540,6 +1540,22 @@
         node.classList.add('limit-window-wide');
         windows.append(node);
       }
+    } else if (provider.provider === 'qwenwork') {
+      // QwenWork credits are allowance units, not money, so the window has no
+      // `credits` metric and the generic balance branch would drop it.
+      windows.classList.add('limit-windows-qwenwork');
+      for (const credits of windowsForKind(provider, 'billing')) {
+        const node = limitWindowNode(
+          credits?.label || 'Credits',
+          credits,
+          color,
+          0.68,
+          null,
+          providerWindowText(provider, credits).detail
+        );
+        node.classList.add('limit-window-wide');
+        windows.append(node);
+      }
     } else if (provider.provider === 'workbuddy' || provider.provider === 'trae') {
       const credits = windowForKind(provider, 'billing');
       const balance = provider.balance || null;

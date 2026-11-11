@@ -202,10 +202,12 @@ const {
   redactThirdPartyProfilesForRenderer,
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
-const { createCredentialCommands } = require('./limits/credentialCommands');
+const { createCredentialCommands, providerSelectionIncluding } = require('./limits/credentialCommands');
 const { createMinimaxApiKeys } = require('./providers/minimax/apiKeys');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
+const { runQwenworkDeviceFlowLogin } = require('../shared/providers/qwenwork/deviceFlow');
+const { normalizeQwenworkSession, qwenworkAuthBaseUrl, qwenworkBaseUrl } = require('../shared/providers/qwenwork/limits');
 const {
   codexAuthIdentity,
   codexAccountKey,
@@ -1036,6 +1038,17 @@ function persistStepfunTokenRenewal({ previousToken, token } = {}) {
   return true;
 }
 
+function persistQwenworkSessionRenewal({ previousSession, session } = {}) {
+  const current = normalizeQwenworkSession(settings?.qwenworkSession);
+  if (!current || !session || !previousSession) return false;
+  if (current.access !== previousSession.access
+    || current.refresh !== previousSession.refresh
+    || current.expiresAt !== previousSession.expiresAt) return false;
+  settings.qwenworkSession = session;
+  saveSettings({ throwOnError: true });
+  return true;
+}
+
 // A save-time probe gets the collector's transports but none of its write-backs:
 // a credential that has not been saved yet must not renew itself into
 // settings, so a rotation is reported into `renewed` and stored with the rest
@@ -1079,6 +1092,7 @@ function electronLimitsDeps() {
     onClaudeWebAccountResolved: (observation) => claudeAccountService().resolved(observation),
     resolveClaudeWebCredential: (account) => claudeAccountService().resolveCredential(account),
     onStepfunTokenRenewed: persistStepfunTokenRenewal,
+    onQwenworkSessionRenewed: persistQwenworkSessionRenewal,
     onAntigravityCredentialsRenewed: persistAntigravityCredentialsRenewal,
     resolveWorkbuddyManagedCredential: (account, options) => workbuddyAccountService().resolveCredential(account, options),
     onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal,
@@ -1094,6 +1108,8 @@ let codexWorkspaceSelection = null;
 let codexWorkspaceLabelHydrationPromise = null;
 let copilotLoginController = null;
 let copilotLoginFlowId = '';
+let qwenworkLoginController = null;
+let qwenworkLoginFlowId = '';
 const CODEX_WORKSPACE_LABEL_HYDRATION_CONCURRENCY = 3;
 
 // Startup label hydration is a small one-shot map. LimitsRuntime's bounded
@@ -9971,6 +9987,82 @@ app.whenReady().then(() => {
       copilotLoginController = null;
       copilotLoginFlowId = '';
     }
+    return { ok: true };
+  });
+
+  ipcMain.handle('qwenwork:signIn', async (event, request = {}) => {
+    if (qwenworkLoginController) return { ok: false, error: 'A QwenWork sign-in is already in progress.', flowId: qwenworkLoginFlowId };
+    const controller = new AbortController();
+    const flowId = String(request?.flowId || '').trim();
+    qwenworkLoginController = controller;
+    qwenworkLoginFlowId = flowId;
+    const sendStatus = (payload) => {
+      if (qwenworkLoginController !== controller) return;
+      if (!event.sender.isDestroyed()) event.sender.send('qwenwork:loginStatus', { ...payload, flowId });
+    };
+    try {
+      const result = await runQwenworkDeviceFlowLogin({
+        authBaseUrl: qwenworkAuthBaseUrl(process.env),
+        apiBaseUrl: qwenworkBaseUrl(process.env),
+        signal: controller.signal,
+        onStatus: sendStatus
+      }, {
+        openExternal: (url) => shell.openExternal(url),
+        fetch: electronLimitsFetch(),
+        signal: controller.signal
+      });
+      if (qwenworkLoginController !== controller) {
+        return { ok: false, error: 'QwenWork sign-in cancelled.', flowId };
+      }
+      settings.limitProviders = providerSelectionIncluding(settings.limitProviders, 'qwenwork');
+      settings.limitsEnabled = true;
+      settings.qwenworkSession = result.session;
+      saveSettings({ throwOnError: true });
+      // An explicit sign-in is a user selection: the first-run seed must not
+      // replace it when the first client-health summary arrives.
+      initialLimitProvidersPending = false;
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      pushSettingsToRenderer();
+      void queueLimitInvalidation({ provider: 'qwenwork' }, 'login', { clear: true });
+      return { ok: true, flowId };
+    } catch (error) {
+      if (qwenworkLoginController !== controller) {
+        return { ok: false, error: 'QwenWork sign-in cancelled.', flowId };
+      }
+      const message = error?.status === 'timedOut'
+        ? 'QwenWork sign-in timed out. Finish authorization in the browser, then try again.'
+        : error?.status === 'cancelled'
+          ? 'QwenWork sign-in cancelled.'
+          : String(error?.message || error || 'QwenWork sign-in failed.');
+      sendStatus({ phase: 'error', error: message });
+      return { ok: false, error: message, flowId };
+    } finally {
+      if (qwenworkLoginController === controller) {
+        qwenworkLoginController = null;
+        qwenworkLoginFlowId = '';
+      }
+    }
+  });
+  ipcMain.handle('qwenwork:cancelSignIn', (_event, request = {}) => {
+    const flowId = String(request?.flowId || '').trim();
+    if (flowId && qwenworkLoginFlowId && flowId !== qwenworkLoginFlowId) return { ok: true };
+    const controller = qwenworkLoginController;
+    controller?.abort();
+    if (qwenworkLoginController === controller) {
+      qwenworkLoginController = null;
+      qwenworkLoginFlowId = '';
+    }
+    return { ok: true };
+  });
+  ipcMain.handle('qwenwork:signOut', () => {
+    const controller = qwenworkLoginController;
+    qwenworkLoginController = null;
+    qwenworkLoginFlowId = '';
+    controller?.abort();
+    settings.qwenworkSession = '';
+    saveSettings({ throwOnError: true });
+    pushSettingsToRenderer();
+    void queueLimitInvalidation({ provider: 'qwenwork' }, 'logout', { clear: true });
     return { ok: true };
   });
   ipcMain.on('window:minimize', (event) => {

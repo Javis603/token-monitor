@@ -63,10 +63,12 @@
   // tokens or money (Kiro credits, Qoder credits, Zed edit predictions).
   function rawCount(window, showUsed) {
     const used = finite(window?.used);
+    const remaining = finite(window?.remaining);
     const limit = finite(window?.limit);
     if (used === null || limit === null || limit <= 0) return '';
+    const shown = showUsed ? used : (remaining === null ? limit - used : remaining);
     const trim = (n) => Number(Math.max(0, n).toFixed(2)).toString();
-    return `${trim(showUsed ? used : limit - used)}/${trim(limit)}`;
+    return `${trim(shown)}/${trim(limit)}`;
   }
 
   // "$47.42 / $70.00" from a remaining-plus-limit pair, following the display
@@ -165,7 +167,7 @@
       return result(null, rawCount(window, showUsed));
     }
 
-    if (id === 'qoder') return billing ? result(null, rawCount(window, showUsed)) : EMPTY;
+    if (id === 'qoder' || id === 'qwenwork') return billing ? result(null, rawCount(window, showUsed)) : EMPTY;
 
     if (id === 'zed') {
       if (!billing) return EMPTY;
