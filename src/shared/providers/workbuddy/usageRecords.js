@@ -152,9 +152,16 @@ function summarizeUsageRecords(rows, now) {
  */
 function dailySpendSeries(rows, now, days = 31) {
   const span = Number.isFinite(Number(days)) ? Math.max(1, Math.min(31, Math.trunc(Number(days)))) : 31;
-  const from = startOfLocalDay(now) - (span - 1) * 24 * 60 * 60 * 1000;
+  // Calendar arithmetic, not fixed 24-hour steps: after a spring-forward the
+  // offset from local midnight lands at 23:00 of the previous day, which both
+  // skips the 23-hour day and invents a key at the start of the window.
   const series = {};
-  for (let i = 0; i < span; i += 1) series[localDayKey(from + i * 24 * 60 * 60 * 1000)] = 0;
+  const end = new Date(startOfLocalDay(now));
+  for (let i = span - 1; i >= 0; i -= 1) {
+    const date = new Date(end);
+    date.setDate(date.getDate() - i);
+    series[localDayKey(date.getTime())] = 0;
+  }
   for (const row of Array.isArray(rows) ? rows : []) {
     const at = parseRecordTime(row?.requestTime ?? row?.RequestTime ?? row?.createdAt);
     const credit = recordCredit(row);
@@ -166,10 +173,17 @@ function dailySpendSeries(rows, now, days = 31) {
   return series;
 }
 
+// The window start in local calendar terms: a fixed 24-hour offset would shift
+// it by an hour across a daylight-saving boundary and drop one day from the span.
+function usageWindowStart(now) {
+  const start = new Date(startOfLocalDay(now));
+  start.setDate(start.getDate() - WORKBUDDY_USAGE_WINDOW_DAYS);
+  return start.getTime();
+}
+
 function usageRequestBody(now) {
-  const windowStart = new Date(now - WORKBUDDY_USAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
   return {
-    startTime: formatUsageDateTime(new Date(startOfLocalDay(windowStart.getTime()))),
+    startTime: formatUsageDateTime(new Date(usageWindowStart(now))),
     endTime: formatUsageDateTime(new Date(now)),
     pageNum: 1,
     pageSize: WORKBUDDY_USAGE_PAGE_SIZE
@@ -200,15 +214,20 @@ async function fetchWorkbuddyUsageSpend(post, now, signal = null) {
     if (!rows.length) break;
     records.push(...rows);
     if (expected !== null && records.length >= expected) break;
-    // A full page that is not the last allowed one means more rows may exist.
-    if (rows.length >= WORKBUDDY_USAGE_PAGE_SIZE && page < WORKBUDDY_USAGE_MAX_PAGES) continue;
-    truncated = rows.length >= WORKBUDDY_USAGE_PAGE_SIZE;
+    // A reported total is the authority on whether another page exists: a
+    // server that clamps `pageSize` answers a short page while `total` still
+    // says more rows remain, and stopping there would publish a partial sum as
+    // a complete one. The full-page heuristic only applies when `total` is
+    // absent, and either way a scan that stops short is reported as truncated.
+    const more = expected !== null || rows.length >= WORKBUDDY_USAGE_PAGE_SIZE;
+    if (more && page < WORKBUDDY_USAGE_MAX_PAGES) continue;
+    truncated = more;
     break;
   }
   // The window covers 31 days, so a calendar month is complete only while its
   // first day is inside that window; near the start of a long month the Month
   // figure is a floor, not a total.
-  const monthFullyCovered = startOfLocalMonth(now) >= startOfLocalDay(now - WORKBUDDY_USAGE_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const monthFullyCovered = startOfLocalMonth(now) >= usageWindowStart(now);
   return {
     ...summarizeUsageRecords(records, now),
     daily: dailySpendSeries(records, now, WORKBUDDY_USAGE_WINDOW_DAYS),

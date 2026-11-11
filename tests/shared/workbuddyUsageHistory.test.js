@@ -232,3 +232,46 @@ test('fetchWorkbuddyUsageSpend: the paged read also returns a daily series', asy
   assert.equal(spend.daily['2026-10-21'], 4);
   assert.equal(Object.keys(spend.daily).length, 31);
 });
+
+test('fetchWorkbuddyUsageSpend: a clamped page size keeps reading while total reports more', async () => {
+  const now = at(2026, 10, 21);
+  const pages = [];
+  const total = 250;
+  // The server accepts pageSize but clamps it to 100 rows, so every page is
+  // short. The reported total is the only signal that more rows remain.
+  const spend = await fetchWorkbuddyUsageSpend(async (body) => {
+    pages.push(body.pageNum);
+    const start = (body.pageNum - 1) * 100;
+    return {
+      data: {
+        total,
+        data: Array.from(
+          { length: Math.max(0, Math.min(100, total - start)) },
+          () => ({ requestTime: now - 1_000, credit: 1 })
+        )
+      }
+    };
+  }, now);
+  assert.deepEqual(pages, [1, 2, 3]);
+  assert.equal(spend.todaySpend, total);
+  assert.equal(spend.truncated, false);
+});
+
+test('dailySpendSeries: a spring-forward day keeps its own key', () => {
+  const previous = process.env.TZ;
+  process.env.TZ = 'America/New_York';
+  try {
+    // 2026-03-08 is 23 hours long in New York.
+    const now = new Date(2026, 2, 9, 12).getTime();
+    const series = dailySpendSeries(
+      [{ requestTime: new Date(2026, 2, 8, 12).getTime(), credit: 7 }],
+      now,
+      4
+    );
+    assert.deepEqual(Object.keys(series), ['2026-03-06', '2026-03-07', '2026-03-08', '2026-03-09']);
+    assert.equal(series['2026-03-08'], 7);
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+});

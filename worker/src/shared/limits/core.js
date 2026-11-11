@@ -1155,7 +1155,9 @@ function publicLimits(limits) {
       if (!provider.balance) return provider;
       // `tranches` carries per-grant amounts and expiry dates — billing detail
       // with no public value, dropped alongside the custom group label.
-      const { quotaGroup, tranches, ...publicBalance } = provider.balance;
+      // `officialSeries` is the per-day balance history behind the quota chart:
+      // same class of detail, so it stays on the authenticated surface only.
+      const { quotaGroup, tranches, officialSeries, ...publicBalance } = provider.balance;
       return { ...provider, balance: publicBalance };
     })
   };

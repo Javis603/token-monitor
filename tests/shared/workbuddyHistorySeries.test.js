@@ -60,6 +60,31 @@ test('all points carry absolute Credits, local-day keys and usable timestamps', 
   assert.equal(series.points.at(-1).balance, 6265.81);
 });
 
+test('a spring-forward day keeps its place in the 14-day window', () => {
+  const previous = process.env.TZ;
+  process.env.TZ = 'America/New_York';
+  try {
+    // 2026-03-08 is 23 hours long in New York: a fixed 24-hour offset would
+    // land on 23:00 of 2026-03-07 and drop 2026-03-08 from the keys entirely.
+    const dstNow = new Date(2026, 2, 9, 12).getTime();
+    const series = buildOfficialSeries({
+      anchors: {},
+      dailySpend: { '2026-03-08': 50 },
+      currentRemaining: 500,
+      now: dstNow
+    });
+    const days = series.points.map(point => point.day);
+    assert.equal(days.length, 14);
+    assert.equal(new Set(days).size, 14);
+    assert.deepEqual(days.slice(-3), ['2026-03-07', '2026-03-08', '2026-03-09']);
+    // The 23-hour day keeps its spend, so the day before it is 550, not 500.
+    assert.equal(series.points.find(point => point.day === '2026-03-07').balance, 550);
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+});
+
 test('unusable inputs yield null rather than a fabricated curve', () => {
   assert.equal(buildOfficialSeries({ currentRemaining: null, now }), null);
   assert.equal(buildOfficialSeries({ currentRemaining: 10, now: Number.NaN }), null);

@@ -527,7 +527,11 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
       }
       const { dailySpend, ...spendFields } = tracked || {};
       let officialSeries = null;
-      if (usage.window && !deps.probe && dailySpend) {
+      // An unlimited enterprise account answers `remaining: null` with a valid
+      // window; `Number(null)` is 0, which would persist a fake zero-balance
+      // anchor that the curve later reads as an exact point.
+      if (usage.window && !deps.probe && dailySpend
+        && usage.remaining !== null && usage.remaining !== undefined) {
         try {
           const anchors = await recordAnchor(
             { accountKey: resolvedAccountKey, remaining: usage.remaining, now }, deps);

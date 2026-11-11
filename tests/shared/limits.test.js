@@ -407,6 +407,29 @@ test('publicLimits preserves MiMo plan status while removing account identity', 
   assert.equal(Object.hasOwn(payload.providers[0], 'accountName'), false);
 });
 
+test('publicLimits drops the per-day balance history along with other billing detail', () => {
+  const payload = publicLimits({
+    providers: [{
+      provider: 'workbuddy',
+      status: 'ok',
+      source: 'api',
+      balance: {
+        amount: 76,
+        currency: 'CREDITS',
+        quotaGroup: 'Team',
+        tranches: [{ amount: 100, expiresAt: '2026-12-01T00:00:00.000Z' }],
+        officialSeries: { points: [{ day: '2026-11-10', balance: 76 }], unattributed: 0, inferredDays: 13 }
+      }
+    }]
+  });
+
+  const balance = payload.providers[0].balance;
+  assert.equal(balance.amount, 76);
+  assert.equal(Object.hasOwn(balance, 'officialSeries'), false);
+  assert.equal(Object.hasOwn(balance, 'tranches'), false);
+  assert.equal(Object.hasOwn(balance, 'quotaGroup'), false);
+});
+
 test('publicLimits preserves a bounded window detail for shared quota composition', () => {
   const payload = publicLimits({
     providers: [{

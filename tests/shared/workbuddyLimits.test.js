@@ -429,6 +429,31 @@ test('parseEnterpriseUsage preserves unlimited enterprise plans without inventin
   assert.equal(usage.window.resetsAt, '2026-06-01T00:00:00.000Z');
 });
 
+test('fetchWorkbuddyLimits never anchors an unlimited account that reports no remaining', async () => {
+  const anchorPath = path.join(testDataDir, 'workbuddy-balance-v1.json');
+  fs.rmSync(anchorPath, { force: true });
+  const provider = await fetchWorkbuddyLimits({}, {
+    env: {
+      TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN: 'env-token',
+      TOKEN_MONITOR_WORKBUDDY_USER_ID: 'user-123',
+      TOKEN_MONITOR_WORKBUDDY_ENTERPRISE_ID: 'enterprise-456'
+    },
+    now: () => PERSONAL_REQUEST_NOW,
+    fetch: async (url) => (String(url).endsWith(SPEND_PATH)
+      ? response({ data: { data: [{ requestTime: PERSONAL_REQUEST_NOW - 60_000, credit: 12.5 }], total: 1 } })
+      : response({ data: { limitNum: -1, credit: 40 } }))
+  });
+
+  // `Number(null)` is 0 and passes the anchor store's finite check, so an
+  // unguarded write would persist a fake zero balance that the curve later
+  // reads as an exact point once the plan becomes limited.
+  assert.equal(provider.balance.amount, null);
+  assert.equal(provider.balance.officialSeries, undefined);
+  assert.equal(fs.existsSync(anchorPath), false);
+  // The Spend row still publishes from the ledger.
+  assert.equal(provider.balance.todaySpend, 12.5);
+});
+
 test('parseEnterpriseUsage rejects a limit without a reported usage value', () => {
   assert.throws(
     () => parseEnterpriseUsage({ data: { limitNum: 100 } }),

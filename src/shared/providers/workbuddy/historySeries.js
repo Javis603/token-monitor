@@ -9,7 +9,6 @@
 
 const { localDayKey, startOfLocalDay, dayKeyToAt, round2 } = require('./balanceAnchors');
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_SERIES_DAYS = 14;
 
 /**
@@ -29,9 +28,16 @@ function buildOfficialSeries({ anchors = {}, dailySpend = {}, currentRemaining, 
   if (!Number.isFinite(remaining) || remaining < 0
     || !Number.isFinite(new Date(nowMs).getTime())) return null;
 
+  // Calendar arithmetic, not fixed 24-hour steps: a daylight-saving day is 23
+  // or 25 hours long, so subtracting `i * DAY_MS` from local midnight lands at
+  // 23:00 of the previous day after a spring-forward and drops that day's key.
   const today = startOfLocalDay(nowMs);
   const keys = [];
-  for (let i = count - 1; i >= 0; i -= 1) keys.push(localDayKey(today - i * DAY_MS));
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const date = new Date(today);
+    date.setDate(date.getDate() - i);
+    keys.push(localDayKey(date.getTime()));
+  }
 
   // Exact points: captured anchors inside the window plus today's live answer.
   const exact = {};
