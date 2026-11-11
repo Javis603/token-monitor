@@ -3,7 +3,7 @@
 const { CLIENT_LABELS } = require('./clientCatalog');
 const { KNOWN_CLIENTS } = require('./clientTracking');
 const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS, VALID_LIMIT_WINDOW_METRICS } = require('./limits/providers');
-const { limitWindowKindLabel, mimoAccountGroups, mimoProductLabel } = require('./limits/windowLabels');
+const { limitWindowKindLabel, limitWindowLabel, mimoAccountGroups, mimoProductLabel } = require('./limits/windowLabels');
 const { widgetVendorPalette } = require('./vendorPresentation');
 
 const MAC_WIDGET_SCHEMA_VERSION = 10;
@@ -164,7 +164,7 @@ function widgetWindowLabel(providerId, window, kind) {
       if (kind === 'session' && /\s+5-hour$/i.test(explicit)) return '5-hour';
       if (kind === 'weekly' && /\s+weekly$/i.test(explicit)) return 'Weekly';
     }
-    return explicit;
+    return limitWindowLabel(providerId, { kind, label: explicit });
   }
   return limitWindowKindLabel(providerId, kind);
 }
@@ -587,7 +587,7 @@ function buildPresentation(source = {}) {
     numberStyle: source.compactNumbers === false ? 'full' : 'compact',
     compactTokenUnits: source.compactTokenUnits === 'localized' ? 'localized' : 'western',
     showCost: source.showCost !== false,
-    locale: /^(?:auto|en|zh-CN|zh-TW|ko|ja|pt-BR)$/.test(locale) ? locale : 'auto',
+    locale: /^(?:auto|en|zh-CN|zh-TW|ko|ja|pt-BR|es)$/.test(locale) ? locale : 'auto',
     theme: source.theme === 'custom' ? 'custom' : 'system'
   };
 }

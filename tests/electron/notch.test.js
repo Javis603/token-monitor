@@ -41,6 +41,7 @@ class Window extends EventEmitter {
   isVisible() { return this.shown === true; }
   destroy() { this.destroyed = true; this.emit('closed'); }
   setOpacity(value) { this.opacity = value; }
+  setBackgroundColor(value) { this.backgroundColor = value; }
   getOpacity() { return this.opacity; }
   setIgnoreMouseEvents(value) { this.ignoreMouse = value; }
   setAlwaysOnTop() {}
@@ -112,6 +113,33 @@ function stats() {
     b: { client: 'claude', lastUsedAt: new Date().toISOString(), totalTokens: 20 }
   } } }, limits: { providers: [{ provider: 'codex', status: 'ok', accountKey: 'local', planLabel: 'Plus', windows: [{ kind: 'session', remainingPercent: 67 }] }] } };
 }
+
+test('notch clears a reused renderer background before reveal after material switches', (t) => {
+  const f = fixture(t, { notchStyle: 'black' }, { liquidGlass: () => ({ dark: true }),
+    createGlass: () => ({ update() {}, dispose() {} }) });
+  for (const style of ['vibrancy', 'liquid-glass', 'black']) {
+    const previous = notchWindow(f);
+    f.preferences.notchStyle = style;
+    f.controller.sync();
+    const win = notchWindow(f);
+    assert.notEqual(win, previous, `${style} replaces the native window`);
+    assert.equal(previous.isDestroyed(), true);
+    assert.equal(win.isVisible(), false);
+    // A shared renderer can paint an opaque canvas despite transparent:true.
+    win.backgroundColor = '#121212';
+    const show = win.showInactive.bind(win);
+    win.showInactive = () => {
+      assert.equal(win.backgroundColor, '#00000000', 'clear the canvas before showing');
+      show();
+    };
+    f.ipcMain.emit('topNotch:ready', { sender: win.webContents });
+    assert.equal(win.isVisible(), true);
+    // Reloads reuse the same window and must restore transparency as well.
+    win.backgroundColor = '#121212';
+    f.ipcMain.emit('topNotch:ready', { sender: win.webContents });
+    assert.equal(win.backgroundColor, '#00000000');
+  }
+});
 
 test('first summary is measured and committed before reveal on either screen shape', (t) => {
   for (const notched of [true, false]) {
@@ -672,7 +700,7 @@ test('disabling only the side dock preserves the shared rate expiry timer for th
   let topRunning = true;
   const context = { settings: {}, syncPluginQuotaSurfaceDemand() {}, syncNotch() {}, canUseEdgeDock: () => false,
     edgeDockController: { stop() {} }, notchController: { isRunning: () => topRunning },
-    edgeDockRateTimer: 42, clearTimeout: (timer) => cleared.push(timer) };
+    edgeDockRateTimer: 42, edgeDockRateTracker: null, edgeDockRateContext: '', edgeDockRateHistory: require('../../src/electron/renderer/tokenRatePresentation').createLiveTokenRateHistory(), clearTimeout: (timer) => cleared.push(timer) };
   vm.runInNewContext(`${code}; syncDockSurfaces({});`, context);
   assert.deepEqual(cleared, [], 'top-only live rate must still go idle without another data push');
   assert.equal(context.edgeDockRateTimer, 42);
@@ -707,7 +735,7 @@ test('top and side reuse projection with independent ordered selections', () => 
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   const fn = source.slice(source.indexOf('function edgeDockCellsFor('), source.indexOf('function updateEdgeDockCells('));
   const settings = { edgeDockItems: [{ type: 'stat', metric: 'today' }], notchItems: [{ type: 'stat', metric: 'sessions', groupBy: 'client' }] };
-  const context = { settings, desktopQuotaStats: s => s, pluginRuntime: null, buildEdgeDockCells, refreshEdgeDockDerivedPeriods() {}, refreshEdgeDockForecast() {}, syncCodexPresentationActiveAccount() {}, edgeDockDerivedPeriods: {}, edgeDockForecastWanted: () => false, edgeDockForecast: null, syncProvenanceActive: () => false, codexAccountsForRenderer: () => [], codexPresentationPendingAccountId: null, codexPresentationActiveAccountId: null, edgeDockLiveRateSample: () => null };
+  const context = { settings, desktopQuotaStats: s => s, pluginRuntime: null, buildEdgeDockCells, refreshEdgeDockDerivedPeriods() {}, refreshEdgeDockForecast() {}, syncCodexPresentationActiveAccount() {}, edgeDockDerivedPeriods: {}, edgeDockForecastWanted: () => false, edgeDockForecast: null, syncProvenanceActive: () => false, codexAccountsForRenderer: () => [], codexPresentationPendingAccountId: null, codexPresentationActiveAccountId: null, edgeDockRateHistory: require('../../src/electron/renderer/tokenRatePresentation').createLiveTokenRateHistory(), edgeDockLiveRateSample: () => null };
   vm.createContext(context);vm.runInContext(fn, context);
   assert.equal(context.edgeDockCellsFor(stats())[0].id, 'stat:today');
   assert.equal(context.edgeDockCellsFor(stats(), settings.notchItems)[0].id, 'stat:sessions');

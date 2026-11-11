@@ -6774,6 +6774,7 @@ function homeLimitWindowLabel(window, providerId = '', visibleWindows = []) {
   if (compactLabel) return compactLabel;
   if (window?.kind === 'billing') {
     const label = String(window?.label || '').trim();
+    if (providerId === 'cursor' && label === 'Included usage') return t('home.limit.monthly');
     if (label) return label;
   }
   const key = {

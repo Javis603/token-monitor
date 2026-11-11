@@ -888,7 +888,13 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     destroyWindows();
   }
   const handlers = {
-    'topNotch:ready': (event) => { const s = ownedSender(event.sender); if (!s) return; ready[s] = true; lastSent[s] = ''; refreshLayout(); send(s); visibility(); },
+    'topNotch:ready': (event) => {
+      const s = ownedSender(event.sender); if (!s) return;
+      // A shared renderer can leave a new or reloaded view opaque. Restore the
+      // transparent canvas after page initialization, before revealing it.
+      windows[s].setBackgroundColor('#00000000');
+      ready[s] = true; lastSent[s] = ''; refreshLayout(); send(s); visibility();
+    },
     'topNotch:frame': (event, payload) => {
       if (ownedSender(event.sender) !== 'notch' || !motion || payload?.id !== motion.id
         || !Number.isFinite(payload?.elapsed) || payload.elapsed < motion.elapsed) return;

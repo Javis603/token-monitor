@@ -917,25 +917,25 @@ function previewFixture(t, { platform = 'win32', nativeRegions = false } = {}) {
   return f;
 }
 
-test('macOS history moves and resizes its silhouette without resizing the native canvas', async t => {
+test('macOS history keeps its screenshot bounds fitted to the moving card', async t => {
   const f = previewFixture(t, { platform: 'darwin' });
   await f.open();
-  assert.deepEqual(f.window.bounds, { x: 408, y: 0, width: 310, height: 900 });
+  assert.deepEqual(f.window.bounds, { x: 408, y: 128, width: 310, height: 420 });
+  assert.deepEqual(f.shapes.at(-1), { y: 0, height: 420 });
   const writes = f.boundsWrites.length;
   f.contentHeight = 300;
   await f.open('b', false, { x: 0, y: 350, width: 300, height: 100 });
   assert.ok(f.frame);
   for (const time of [80, 160, 320]) { f.clock = time; f.frame(); }
-  assert.equal(f.boundsWrites.length, writes, 'spring samples must not resize/move the native canvas');
-  assert.notEqual(f.shapes.at(-1).y, 128);
-  assert.notEqual(f.shapes.at(-1).height, 420);
-  const painted = f.shapes.at(-1);
+  assert.ok(f.boundsWrites.length > writes, 'the native screenshot rectangle follows the spring');
+  assert.deepEqual(f.shapes.at(-1), { y: 0, height: f.window.bounds.height });
+  const painted = { ...f.window.bounds };
   await f.open('c', false, { x: 0, y: 150, width: 300, height: 100 });
-  assert.deepEqual(f.shapes.at(-1), painted, 'a rapid switch starts at the painted frame, not the canvas bounds');
+  assert.deepEqual(f.window.bounds, painted, 'rapid switches retarget from the painted frame');
   f.clock = 1000; f.frame();
-  assert.deepEqual(f.shapes.at(-1), { y: 228, height: 300 });
-  assert.equal(f.boundsWrites.length, writes);
-  assert.equal(f.controller.containsPoint({ x: 420, y: 10 }), false, 'transparent canvas is not the card');
+  assert.deepEqual(f.window.bounds, { x: 408, y: 228, width: 310, height: 300 });
+  assert.deepEqual(f.shapes.at(-1), { y: 0, height: 300 });
+  assert.equal(f.controller.containsPoint({ x: 420, y: 10 }), false);
   assert.equal(f.controller.containsPoint({ x: 420, y: 250 }), true);
 });
 
@@ -967,29 +967,35 @@ test('a failed macOS material mask returns to a small card instead of exposing a
   assert.deepEqual(f.window.bounds, { x: 408, y: 278, width: 310, height: 420 });
 });
 
-test('Windows history uses the same fixed canvas when native window regions are available', async t => {
-  const f = previewFixture(t, { nativeRegions: true });
-  await f.open();
-  assert.deepEqual(f.window.bounds, { x: 408, y: 0, width: 310, height: 900 });
-  assert.ok(f.regions.at(-1).every(rect => rect.y >= 128 && rect.y + rect.height <= 548));
-  const writes = f.boundsWrites.length;
-  f.contentHeight = 300;
-  await f.open('b', false, { x: 0, y: 300, width: 300, height: 100 });
-  f.clock = 1000; f.frame();
-  assert.equal(f.boundsWrites.length, writes);
-  assert.deepEqual(f.shapes.at(-1), { y: 378, height: 300 });
-});
-
-test('a failed native region reset closes history without revealing a destroyed window', async t => {
-  const f = previewFixture(t, { nativeRegions: true });
-  f.autoMeasure = false;
-  await f.open();
-  f.window.setShape = () => { throw new Error('native region unavailable'); };
-  assert.doesNotThrow(() => f.fromPanel('resize', 360));
-  assert.equal(f.destroyed, true);
-  assert.equal(f.shown(), false);
-  assert.equal(f.frame, null);
-});
+for (const backdrop of ['accent', 'acrylic', 'transparent']) {
+  test(`Windows ${backdrop} history keeps the native backdrop within the card even with setShape available`, async t => {
+    const f = previewFixture(t, { nativeRegions: true });
+    f.material = { enabled: backdrop !== 'transparent', windowsBackdrop: backdrop === 'transparent' ? 'accent' : backdrop };
+    await f.open();
+    assert.deepEqual(f.window.bounds, { x: 408, y: 128, width: 310, height: 420 });
+    assert.deepEqual(f.shapes.at(-1), { y: 0, height: 420 });
+    assert.equal(f.controller.containsPoint({ x: 420, y: 10 }), false);
+    f.contentHeight = 300;
+    await f.open('b', false, { x: 0, y: 300, width: 300, height: 100 });
+    f.clock = 120; f.frame();
+    assert.ok(f.window.bounds.y > 128 && f.window.bounds.y < 378);
+    assert.ok(f.window.bounds.height < 420 && f.window.bounds.height > 300);
+    assert.deepEqual(f.shapes.at(-1), { y: 0, height: f.window.bounds.height });
+    f.clock = 1000; f.frame();
+    assert.deepEqual(f.window.bounds, { x: 408, y: 378, width: 310, height: 300 });
+    assert.deepEqual(f.shapes.at(-1), { y: 0, height: 300 });
+    assert.equal(f.regions, undefined, 'DWM material must not rely on setShape clipping a taller canvas');
+    f.fromPanel('close');
+    f.contentHeight = 360;
+    await f.open('c');
+    assert.deepEqual(f.window.bounds, { x: 408, y: 128, width: 310, height: 360 });
+    assert.equal(f.shown(), true);
+    f.material = { enabled: true, windowsBackdrop: backdrop === 'accent' ? 'acrylic' : 'accent' };
+    f.controller.syncMaterial();
+    assert.equal(f.window.bounds.height, 360, 'changing material keeps the card-sized native window');
+    assert.deepEqual(f.materials.at(-1), { enabled: true, mode: f.material.windowsBackdrop });
+  });
+}
 
 test('read-only previews never request focus, even for explicit opens and close', async t => {
   const f = previewFixture(t);

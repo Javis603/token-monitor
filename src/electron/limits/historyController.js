@@ -6,8 +6,7 @@ const { applyWindowsChrome } = require('../windowsChrome');
 const { syncWindowsBackdrop } = require('../windowsBackdrop');
 const { createCardMotionDriver } = require('../cardMotion');
 const { cardCanvasBounds, createCardPointerRouting, maskCardMaterial } = require('../cardCanvas');
-const { cardCommands, toPolygons } = require('../renderer/edgeDock/shapes');
-const { shapeRectsFromPolygons } = require('../edgeDock/mask');
+const { cardCommands } = require('../renderer/edgeDock/shapes');
 const { primaryButtonDown } = require('../edgeDock/pointerButtons');
 const { parkedCardBounds, createCardWindowVisibility } = require('../cardWindow');
 const { CARD_MOVE_MS, CARD_SPRING, advanceCardFrame } = require('../cardSpring');
@@ -53,7 +52,9 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
   let rendererReducedMotion = false;
   let paintedFrame = null;
   let paintedShape = null;
-  let rectangularFallback = platform === 'linux';
+  // Keep Windows DWM backdrops on a card-sized HWND: setShape does not reliably
+  // clip the material on a tall transparent canvas. macOS masks the material itself.
+  let rectangularFallback = platform !== 'darwin';
   let pointerTimer = null;
   const pointer = createCardPointerRouting({ platform, screen, getWindow: () => win,
     getFrame: () => paintedFrame, isVisible: () => visible && presented,
@@ -130,32 +131,16 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
   }
   function paintFrame(frame) {
     paintedFrame = frame;
-    const bounds = cardCanvasBounds(frame, placement.workArea, frame, rectangularFallback);
+    const bounds = cardCanvasBounds(frame);
     const current = win.getBounds();
     if (['x', 'y', 'width', 'height'].some(key => current[key] !== bounds[key])) {
       win.setBounds({ x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height });
     }
-    const radius = (platform === 'win32' ? 8 : 14) * win.webContents.getZoomFactor();
+    const radius = 14 * win.webContents.getZoomFactor();
     paintedShape = rectangularFallback ? null : {
       commands: cardCommands({ width: bounds.width, height: bounds.cardHeight, y: bounds.cardY, radius }),
       width: bounds.width, height: bounds.height
     };
-    if (platform === 'win32' && paintedShape) {
-      try { win.setShape(shapeRectsFromPolygons(toPolygons(paintedShape.commands), bounds.width, bounds.height)); }
-      catch (error) {
-        logger(`[limits-history] native card shape unavailable: ${error.message}`);
-        rectangularFallback = true;
-        cancelFrameMotion();
-        try { win.setShape([]); }
-        catch (resetError) {
-          logger(`[limits-history] native region reset failed: ${resetError.message}`);
-          hide();
-          win.destroy();
-          return;
-        }
-        return paintFrame({ ...frame });
-      }
-    }
     syncMaterial();
     // A material failure above may have selected the small rectangular fallback.
     if (paintedFrame !== frame) return;
@@ -230,7 +215,7 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     ready = false;
     paintedFrame = null;
     paintedShape = null;
-    rectangularFallback = platform === 'linux';
+    rectangularFallback = platform !== 'darwin';
     pointer.reset();
     win = new BrowserWindow({
       width: 310, height: 420, show: false, frame: false, focusable: false,
@@ -240,7 +225,6 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
       ...(platform === 'darwin' ? { type: 'panel', acceptFirstMouse: true, vibrancy: 'hud', visualEffectState: 'active' } : {}),
       webPreferences: { preload: path.join(__dirname, 'historyPreload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false }
     });
-    if (platform === 'win32' && typeof win.setShape !== 'function') rectangularFallback = true;
     applyWindowsChrome(win, { round: true });
     attachNativeMaterialVisibility(win, materialOptions, platform);
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

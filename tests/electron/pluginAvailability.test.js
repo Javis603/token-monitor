@@ -54,7 +54,7 @@ test('production Dock projection removes disabled, missing and master-off views 
     refreshEdgeDockDerivedPeriods() {}, refreshEdgeDockForecast() {}, syncCodexPresentationActiveAccount() {},
     edgeDockDerivedPeriods: {}, edgeDockForecastWanted: () => false, syncProvenanceActive: () => false,
     codexAccountsForRenderer: () => [], codexPresentationPendingAccountId: '', codexPresentationActiveAccountId: '',
-    edgeDockLiveRateSample: () => ({}) };
+    edgeDockRateHistory: require('../../src/electron/renderer/tokenRatePresentation').createLiveTokenRateHistory(), edgeDockLiveRateSample: () => ({}) };
   vm.createContext(context);
   vm.runInContext(source('main.js', 'function edgeDockCellsFor(', '\nfunction updateEdgeDockCells('), context);
   const cells = () => context.edgeDockCellsFor({});

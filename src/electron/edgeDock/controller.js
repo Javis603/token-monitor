@@ -664,6 +664,8 @@ function createEdgeDockController(deps) {
     win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
     win.webContents.on('will-navigate', (event) => event.preventDefault());
     win.webContents.on('did-finish-load', () => {
+      // Shared renderers can retain an opaque canvas despite transparent:true.
+      if (mac) win.setBackgroundColor('#00000000');
       ready[surface] = true;
       lastSent[surface] = '';
       render(surface);
@@ -790,8 +792,7 @@ function createEdgeDockController(deps) {
         neck: m.bubbleNeck,
         radius: m.bubbleRadius
       });
-      // One stable canvas: translate the silhouette inside it rather than
-      // moving/resizing the native window on every animation frame.
+      // The silhouette and material use the same window-local card coordinates.
       return commands.map(command => command.map((value, index) => index > 0 && index % 2 === 0 ? value + bounds.cardY : value));
     }
     if (surface === 'peek') {
@@ -883,7 +884,7 @@ function createEdgeDockController(deps) {
           win.destroy();
           windows.bubble = createSurface('bubble', builtMaterial);
         }
-        paintBubble(layout().bubble, layout().workArea);
+        paintBubble(layout().bubble);
         return;
       }
       if (surface === 'peek' && shaped !== peekRegionClips) {
@@ -1142,9 +1143,9 @@ function createEdgeDockController(deps) {
     bubbleMotion = null;
   }
 
-  function paintBubble(frame, workArea, target = frame) {
+  function paintBubble(frame, target = frame) {
     bubbleFrame = frame;
-    placeSurface('bubble', { ...cardCanvasBounds(frame, workArea, target, bubbleShapeFailed), tailY: frame.tailY });
+    placeSurface('bubble', { ...cardCanvasBounds(frame, target), tailY: frame.tailY });
     syncBubblePointer();
   }
 
@@ -1155,7 +1156,7 @@ function createEdgeDockController(deps) {
     // The silhouette and its shared content layer follow one spring.
     // Rapid retargets preserve the outline's velocity.
     advanceCardFrame(motion, elapsed, cardSpring, done);
-    paintBubble(motion.frame, motion.workArea, motion.to);
+    paintBubble(motion.frame, motion.to);
     if (done) cancelBubbleMotion();
   }
 
@@ -1181,7 +1182,7 @@ function createEdgeDockController(deps) {
       bubbleMotion = motion;
       cardFrameDriver.start(motion);
     } else {
-      paintBubble(target, current.workArea);
+      paintBubble(target);
     }
     if (!bubbleVisible) {
       bubbleVisible = true;
@@ -1350,6 +1351,7 @@ function createEdgeDockController(deps) {
     ipcMain.on('edgeDock:ready', (event) => {
       const surface = surfaceFor(event.sender);
       if (!surface) return;
+      if (platform === 'darwin') windows[surface].setBackgroundColor('#00000000');
       ready[surface] = true;
       render(surface);
     });
