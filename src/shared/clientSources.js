@@ -424,6 +424,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
       ...catpaw.dbPaths.map((file) => ['catpaw-db', path.dirname(file), file])
     );
   }
+  add('qoder', ['qoder-projects', path.join(nonBlankEnvPath('QODER_CONFIG_DIR', path.join(tokscaleHome, '.qoder'), env), 'projects')]);
   // Qoder CN — legacy SQLite DB under the platform Application Support dir,
   // or the JSONL transcript tree used by current builds.
   const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform, env });

@@ -318,6 +318,7 @@ function normalizeClientName(value) {
   if (raw.includes('workbuddy')) return 'workbuddy';
   if (raw.includes('proma')) return 'proma';
   if (raw === 'catpaw') return 'catpaw';
+  if (raw === 'qoder') return 'qoder';
   if (raw.includes('qodercn') || raw === 'qoder-cn' || raw === 'qoder cn') return 'qodercn';
   if (raw.includes('reasonix')) return 'reasonix';
   if (/cherry[\s_-]*studio/.test(raw)) return 'cherrystudio';

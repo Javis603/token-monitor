@@ -84,6 +84,7 @@
     { id: 'workbuddy', label: 'WorkBuddy' },
     { id: 'proma', label: 'Proma' },
     { id: 'catpaw', label: 'CatPaw', defaultTracked: false, forkOnly: true },
+    { id: 'qoder', label: 'Qoder', defaultTracked: false },
     { id: 'qodercn', label: 'Qoder CN', defaultTracked: false, forkOnly: true },
     { id: 'reasonix', label: 'Reasonix' },
     { id: 'dsh', label: 'DeepSeek Harness' },

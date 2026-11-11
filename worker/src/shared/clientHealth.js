@@ -232,6 +232,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'prime-agent-artifacts',
   'prime-agent-sessions',
   'proma-sessions',
+  'qoder-projects',
   'qodercn-db',
   'qodercn-projects',
   REASONIX_SOURCE_CHECK_ID,

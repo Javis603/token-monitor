@@ -395,6 +395,19 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
     }
   },
   {
+    client: 'qoder',
+    expectedRow: { model: 'claude-sonnet-4-6', input: 1000, output: 120, cacheRead: 600, cacheWrite: 0, reasoning: 0 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 1720, clientTokens: 1720, clientOutputTokens: 120 },
+    expectedSession: { id: 'global-qsess-1', totalTokens: 1720, outputTokens: 120, reasoningTokens: 0 },
+    writeFixture(home) {
+      const dir = path.join(home, '.qoder', 'projects', 'ws');
+      fs.mkdirSync(dir, { recursive: true });
+      const message = { type: 'assistant', sessionId: 'global-qsess-1', cwd: '/tmp/qoder-global-workspace', timestamp: '2026-09-18T10:00:00Z', message: { id: 'global-m1', model: 'claude-sonnet-4-6', usage: { input_tokens: 1000, cache_read_input_tokens: 600, output_tokens: 120 } } };
+      fs.writeFileSync(path.join(dir, 'tm-contract.jsonl'), `${JSON.stringify(message)}\n`);
+    }
+  },
+  {
     // Fork-only client (crates/tokscale-core/src/token_monitor/qodercn.rs):
     // JSONL input_tokens includes the cached prefix, which is split out into
     // cacheRead, and the qoder-custom-<profile>/ prefix is stripped.
@@ -605,7 +618,7 @@ function hermeticEnv(home) {
   // MiniMax data-directory overrides for the fork's mcode supplement.
   for (const key of [
     'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'CODEX_HOME', 'DSH_HOME', 'HERMES_HOME', 'GOOSE_PATH_ROOT',
-    'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
+    'QODER_CONFIG_DIR', 'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
     'VIBE_HOME', 'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR',
     'JCODE_HOME', 'GEMINI_CLI_HOME', 'PRIME_AGENT_SESSION_DIR', 'PRIME_AGENT_CODING_AGENT_SESSION_DIR', 'PRIME_AGENT_CODING_AGENT_DIR',
     'SENPI_CODING_AGENT_DIR', 'SENPI_CODING_AGENT_SESSION_DIR'

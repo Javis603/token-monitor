@@ -245,7 +245,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（僅限中國版） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder/projects/**/*.jsonl` (global), `~/.qoder-cn/projects/**/*.jsonl` (CN), legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（僅限中國版） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/`（`session.jsonl`、`session.jsonl.zstd`） | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/`（`Data/Agents/.claude/projects/` V2、`.claude/projects/` legacy） | ✅ | — | — |
@@ -293,6 +293,8 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 - Cursor 快取來自 Cursor 的帳號層級用量匯出，因此涵蓋 Cursor IDE、Cursor CLI 與 Grok Bot 的用量。Token Monitor 會自動偵測 Cursor 桌面版已登入的帳號，也可在設定中手動新增。快取過期時會自動重新同步，但剛完成的 session 可能要幾分鐘才會出現在 Cursor 控制台，因此最新用量仍可能延遲顯示。
 
 - Custom 會從一個 GET 餘額端點映射數值 JSON 欄位；僅相容 OpenAI 或 Anthropic API 並不足夠。
+
+- 國際版 CLI/IDE 用量可在工具設定中啟用 **Qoder**；中國版仍為 **Qoder CN**。國際版讀取 `QODER_CONFIG_DIR/projects` 或 `~/.qoder/projects`。兩者共用 Tokscale 解析器，只統計回報的 Token，不從文字或 credits 推算；需要時在 Qoder 程序中設定 `QODER_EXPOSE_TOKEN_USAGE=1`／`QODERCN_EXPOSE_TOKEN_USAGE=1`。動態模型代號保留原值。
 
 #### Qoder CN（本機介接）
 

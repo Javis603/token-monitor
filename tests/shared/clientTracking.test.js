@@ -19,7 +19,6 @@ function readmeTrackedClientIds() {
     'hermes-agent': 'hermes',
     'gemini-cli': 'gemini',
     xai: 'grok',
-    qoder: 'qodercn',
     // The limits-only Minimax row has no usage column, so only MiniMax Code's
     // row reaches this map.
     minimax: 'mcode'
@@ -30,8 +29,8 @@ function readmeTrackedClientIds() {
     .filter((line) => line.split('|').map((cell) => cell.trim())[4] === '✅')
     .map((line) => {
       const icon = line.match(/tools-icon\/([^".]+)\.[a-z]+"/i)?.[1] || '';
-      return iconToClient[icon] || icon;
-    });
+      return icon === 'qoder' ? ['qoder', 'qodercn'] : iconToClient[icon] || icon;
+    }).flat();
 }
 
 test('clientsCsvForSetting uses defaults only for missing settings', () => {
@@ -77,7 +76,7 @@ test('KNOWN_CLIENTS is a superset of DEFAULT_CLIENTS and still includes opt-in q
 test('tracked client defaults and README share one display order', () => {
   const known = KNOWN_CLIENTS.split(',');
   assert.deepEqual(readmeTrackedClientIds(), known);
-  assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => !['catpaw', 'qodercn'].includes(client)));
+  assert.deepEqual(DEFAULT_CLIENTS.split(','), known.filter((client) => !['catpaw', 'qoder', 'qodercn'].includes(client)));
 });
 
 test('documented client CSV follows the canonical catalog order', () => {

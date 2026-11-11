@@ -2430,10 +2430,12 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qod
   // before a path was added or removed must not be reused. Empty when none are
   // configured, keeping the fingerprint (and existing anchors) stable for the
   // common case.
+  const qoderPart = normalizeClientsCsv(clientsCsv).split(',').includes('qoder')
+    ? `|qoder:${clientSourceRoots('qoder', sourceOptions).qoder[0].dir}` : '';
   const scanKey = customScanPathsFingerprint(customScanPaths);
   const scanPart = scanKey ? `|scan:${scanKey}` : '';
   const catpawPart = catpawRevision ? `|catpaw:${catpawRevision}` : '';
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${scanPart}${catpawPart}|pricing:${pricingRevision}`;
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${qoderPart}${scanPart}${catpawPart}|pricing:${pricingRevision}`;
 }
 
 function qoderCnSourcesForClients(clientsCsv, options = {}) {

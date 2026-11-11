@@ -245,7 +245,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（中国版のみ） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder/projects/**/*.jsonl` (global), `~/.qoder-cn/projects/**/*.jsonl` (CN), legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（中国版のみ） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/`（`session.jsonl`、`session.jsonl.zstd`） | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/`（`Data/Agents/.claude/projects/` V2、`.claude/projects/` legacy） | ✅ | — | — |
@@ -293,6 +293,8 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 - Cursor キャッシュは Cursor のアカウント単位の使用量エクスポートから取得されるため、Cursor IDE、Cursor CLI、および Grok Bot の使用量が対象です。Token Monitor は Cursor デスクトップアプリでログイン済みのアカウントを自動検出し、設定から手動でアカウントを追加することもできます。古いキャッシュは自動的に再同期されますが、終了直後のセッションが Cursor ダッシュボードに届くまで数分かかる場合があるため、最新の使用量の表示には引き続き遅延が生じることがあります。
 
 - Custom は1つの GET 残高エンドポイントから数値 JSON フィールドをマッピングします。OpenAI または Anthropic API 互換だけでは不十分です。
+
+- 国際版 CLI/IDE の使用量はツール設定の **Qoder** で有効にできます。中国版は引き続き **Qoder CN** です。国際版の読み取り先は `QODER_CONFIG_DIR/projects` または `~/.qoder/projects` です。両者は Tokscale パーサーを共有し、記録されたトークンのみを集計します。必要に応じて Qoder プロセスに `QODER_EXPOSE_TOKEN_USAGE=1` / `QODERCN_EXPOSE_TOKEN_USAGE=1` を設定してください。テキストや credits からの推定は行わず、動的モデルコードは記録どおりに表示します。
 
 #### Qoder CN（ローカルアダプター）
 

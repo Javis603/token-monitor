@@ -51,7 +51,7 @@ test('derived KNOWN_CLIENTS keeps the established id order', () => {
   assert.equal(KNOWN_CLIENTS, CLIENT_IDS.join(','));
   assert.equal(
     KNOWN_CLIENTS,
-    'claude,codex,opencode,hermes,openclaw,cursor,antigravity,gemini,cline,amp,droid,kimi,qwen,grok,copilot,pi,omp,senpi,goose,zed,kilo,commandcode,mimo,muse,zcode,kiro,codebuddy,workbuddy,proma,catpaw,qodercn,reasonix,dsh,cherrystudio,lmstudio,unsloth,devin,fx,mcode,mistral,prime-agent,jcode'
+    'claude,codex,opencode,hermes,openclaw,cursor,antigravity,gemini,cline,amp,droid,kimi,qwen,grok,copilot,pi,omp,senpi,goose,zed,kilo,commandcode,mimo,muse,zcode,kiro,codebuddy,workbuddy,proma,catpaw,qoder,qodercn,reasonix,dsh,cherrystudio,lmstudio,unsloth,devin,fx,mcode,mistral,prime-agent,jcode'
   );
 });
 
