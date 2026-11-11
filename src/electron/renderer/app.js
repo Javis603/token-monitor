@@ -16696,6 +16696,9 @@ function qwenworkAccountStatusText(provider, configured, source, enabled = true)
   if (accountStatus === 'notConfigured') return t('settings.qwenwork.statusNotSet');
   if (accountStatus === 'checking') return t('settings.qwenwork.statusSet');
   if (accountStatus === 'limited') return t('settings.limits.status.limited');
+  if (accountStatus === 'disabled') return t('settings.limits.status.disabled');
+  if (accountStatus === 'notChecked') return t('settings.common.notChecked');
+  if (accountStatus === 'error') return t('settings.common.error');
   return t('settings.qwenwork.statusUnavailable');
 }
 
@@ -20329,7 +20332,10 @@ function setupCursorAccountUI() {
       try {
         await window.tokenMonitor.qwenwork.cancelSignIn({ flowId });
       } catch (error) {
+        // The main process may still be polling: keep the flow and Cancel so
+        // the user can retry instead of losing the original request.
         if (isCurrentQwenworkSignInFlow(flowId)) setQwenworkError(error?.message || t('settings.qwenwork.loginFailed'));
+        return;
       }
       if (!isCurrentQwenworkSignInFlow(flowId)) return;
       state.qwenworkSignInBusy = false;

@@ -10018,6 +10018,9 @@ app.whenReady().then(() => {
       settings.limitsEnabled = true;
       settings.qwenworkSession = result.session;
       saveSettings({ throwOnError: true });
+      // An explicit sign-in is a user selection: the first-run seed must not
+      // replace it when the first client-health summary arrives.
+      initialLimitProvidersPending = false;
       deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
       pushSettingsToRenderer();
       void queueLimitInvalidation({ provider: 'qwenwork' }, 'login', { clear: true });
