@@ -247,8 +247,6 @@ function normalizeProviderBalance(input) {
   const allTimeSpend = numberOrNull(input.allTimeSpend ?? input.all_time_spend);
   const searchSpend = numberOrNull(input.searchSpend ?? input.search_spend);
   const fetchSpend = numberOrNull(input.fetchSpend ?? input.fetch_spend);
-  const toolSpendStart = numberOrNull(input.toolSpendStart ?? input.tool_spend_start);
-  const toolSpendEnd = numberOrNull(input.toolSpendEnd ?? input.tool_spend_end);
   const requestCountRaw = numberOrNull(input.requestCount ?? input.request_count);
   const requestCount = requestCountRaw === null ? null : Math.max(0, Math.trunc(requestCountRaw));
   const quotaGroup = String(input.quotaGroup ?? input.quota_group ?? '').trim().slice(0, 64);
@@ -305,7 +303,6 @@ function normalizeProviderBalance(input) {
     allTimeSpend,
     ...(searchSpend !== null ? { searchSpend } : {}),
     ...(fetchSpend !== null ? { fetchSpend } : {}),
-    ...(toolSpendStart !== null && toolSpendEnd !== null ? { toolSpendStart, toolSpendEnd } : {}),
     requestCount,
     quotaGroup,
     expiresAt,
@@ -808,24 +805,6 @@ function carryProviderBalance(winner, loser) {
   return { ...winner, balance: loser.balance, windows };
 }
 
-// One whole DeepSeek console snapshot per account, never stitched: the newest
-// eligible row (then sourceDeviceId) whose console month contains the winner.
-function applyConsoleToolSpends(winner, candidates) {
-  if (winner?.provider !== 'deepseek' || !winner.balance) return winner;
-  const at = timestampMs(winner.updatedAt);
-  const source = candidates.filter(({ stale, status, balance }) => (!stale || winner.stale)
-    && statusRank(status) >= statusRank(winner.status)
-    && balance?.currency === winner.balance.currency
-    && at >= balance.toolSpendStart * 1000 && at < balance.toolSpendEnd * 1000)
-    .sort((a, b) => timestampMs(b.updatedAt) - timestampMs(a.updatedAt)
-      || b.sourceDeviceId.localeCompare(a.sourceDeviceId))[0]?.balance;
-  const { searchSpend, fetchSpend, toolSpendStart, toolSpendEnd, ...balance } = winner.balance;
-  for (const key of ['searchSpend', 'fetchSpend', 'toolSpendStart', 'toolSpendEnd']) {
-    if (source?.[key] != null) balance[key] = source[key];
-  }
-  return { ...winner, balance };
-}
-
 // A confirmed MiniMax API/Code link is an account-level fact; do not drop it
 // when an unlinked observation of the same account and region wins.
 function carryMinimaxRelatedAccountKey(winner, loser) {
@@ -1071,7 +1050,7 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   }
 
   for (const [key, candidates] of candidatesByKey) {
-    byKey.set(key, applyConsoleToolSpends(candidates.reduce(pickBetterProvider, null), candidates));
+    byKey.set(key, candidates.reduce(pickBetterProvider, null));
   }
   for (const candidates of groupOpenCodeCandidates(openCodeCandidates)) {
     const provider = mergeOpenCodeProviderComponents(candidates);
@@ -1145,8 +1124,9 @@ function publicLimits(limits) {
       ...provider
     }) => {
       if (!provider.balance) return provider;
-      // Keep account grouping and detailed billing data off the public surface.
-      const { quotaGroup, tranches, searchSpend, fetchSpend, toolSpendStart, toolSpendEnd, ...publicBalance } = provider.balance;
+      // `tranches` carries per-grant amounts and expiry dates — billing detail
+      // with no public value, dropped alongside the custom group label.
+      const { quotaGroup, tranches, searchSpend, fetchSpend, ...publicBalance } = provider.balance;
       return { ...provider, balance: publicBalance };
     })
   };

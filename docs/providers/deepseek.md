@@ -19,7 +19,9 @@ The optional console token is a signed-in `platform.deepseek.com` Bearer token. 
 
 ## Source precedence
 
-The balance row stays authoritative when the optional console lookup fails: those failures are silent, are not cached, and leave the row unchanged. The next refresh retries the console request. A successful console result, including one with no positive fees, keeps the month window for that observation and is cached for one hour per account, token, currency, and month. Failed lookups leave no window and are not cached. Both requests use the shared fetch timeout and error handling. Rows match by currency only. When several devices report the same account, Search and Fetch come from one complete observation on the newest same-currency row whose month window still contains the winning balance's update time. A later refresh may keep a cached observation for up to an hour. A stale observation is not used when the winning row is fresh. Different-currency or different-month observations are not used, and leftover fees are dropped when no observation qualifies.
+The balance row stays authoritative when the optional console lookup fails: those failures are silent, are not cached, and leave the row unchanged. The next refresh retries the console request. A successful console result is cached for one hour per account, token, currency, and month. Both requests use the shared fetch timeout and error handling. Rows match by currency only.
+
+Search and Fetch belong to the row of the device that read them; sync uses the normal whole-row selection. A synced view shows them only when the selected row came from a device with a console token, so a fresher row from a device without one shows the balance and local spend without them. Add the token on every device that reports this account to keep them visible.
 
 ## Credentials and transport
 
@@ -29,7 +31,7 @@ Once the account is linked and `ok`, the paste fields hide. Clearing a Settings-
 
 ## Invariants and known gaps
 
-Search and Fetch fees are display-only: they are never added to the ledger, period spend fields, or meter, and the public surface strips them, along with the console month window used to merge them, with `quotaGroup`/`tranches`.
+Search and Fetch fees are display-only: they are never added to the ledger, period spend fields, or meter, and the public surface strips them with `quotaGroup`/`tranches`.
 
 ## Verification
 

@@ -2129,21 +2129,3 @@ test('MiniMax sync retains stale accounts independently of refreshed sources and
     }
   }
 });
-
-test('a fresher DeepSeek row without console fees keeps a fresh device\'s fees, not a stale one\'s', () => {
-  const nowMs = Date.parse('2026-11-11T10:05:00+08:00');
-  const device = (deviceId, updatedAt, fees) => ({ deviceId, limits: { providers: [{
-    provider: 'deepseek', accountKey: 'ds-1', status: 'ok', source: 'api', updatedAt,
-    balance: { amount: 8, currency: 'CNY', ...fees }
-  }] } });
-  const withFees = device('token', '2026-11-11T10:00:00+08:00', {
-    searchSpend: 0.3, fetchSpend: 0.1,
-    toolSpendStart: Date.parse('2026-11-01T00:00:00+08:00') / 1000,
-    toolSpendEnd: Date.parse('2026-12-01T00:00:00+08:00') / 1000
-  });
-  const fresher = device('env', '2026-11-11T10:04:00+08:00');
-  const carried = aggregateLimits([fresher, withFees], 0, nowMs).providers[0].balance;
-  assert.equal(carried.searchSpend, 0.3);
-  assert.equal(carried.fetchSpend, 0.1);
-  assert.equal(aggregateLimits([fresher, { ...withFees, stale: true }], 0, nowMs).providers[0].balance.searchSpend, undefined);
-});

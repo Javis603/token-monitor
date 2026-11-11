@@ -66,16 +66,8 @@ function consoleMonthWindow(now) {
   return {
     start: Date.UTC(date.getFullYear(), date.getMonth(), 1) / 1000 - tz,
     end: Date.UTC(date.getFullYear(), date.getMonth(), date.getDate() + 1) / 1000 - tz,
-    monthEnd: Date.UTC(date.getFullYear(), date.getMonth() + 1, 1) / 1000 - tz,
     tz
   };
-}
-
-// Prefer a non-empty `series`; an empty array must not hide `function_series`,
-// but a row with neither array is malformed rather than zero.
-function consoleSeries(row) {
-  const lists = [row?.series, row?.function_series].filter(Array.isArray);
-  return lists.length ? lists.find((list) => list.length) || [] : null;
 }
 
 const CONSOLE_TOOL_NAMES = {
@@ -91,13 +83,15 @@ async function fetchToolSpends(token, { accountKey, currency, now }, deps) {
   const cached = state?.get(cacheKey);
   if (cached?.start === window.start && cached.expiresAt > now) return cached.toolSpends;
   try {
-    const body = await fetchJson(`${DEEPSEEK_CONSOLE_COST_URL}?${new URLSearchParams({ start: window.start, end: window.end, tz: window.tz })}`, { Authorization: `Bearer ${token}` }, deps);
+    const body = await fetchJson(`${DEEPSEEK_CONSOLE_COST_URL}?${new URLSearchParams(window)}`, { Authorization: `Bearer ${token}` }, deps);
     const data = body?.data?.biz_data;
     if (body?.code !== 0 || body?.data?.biz_code !== 0 || data?.start !== window.start || data?.end !== window.end) return null;
     const row = (data.data || []).find((item) => String(item?.currency || '').toUpperCase() === currency);
-    const list = consoleSeries(row);
-    if (!list) return null;
-    const toolSpends = { toolSpendStart: window.start, toolSpendEnd: window.monthEnd };
+    // Prefer a non-empty `series` over `function_series`; a row with neither is malformed.
+    const lists = [row?.series, row?.function_series].filter(Array.isArray);
+    if (!lists.length) return null;
+    const list = lists.find((items) => items.length) || [];
+    const toolSpends = {};
     for (const [key, names] of Object.entries(CONSOLE_TOOL_NAMES)) {
       const costs = list.filter((item) => names.includes(item?.model))
         .flatMap((item) => item.buckets.map((bucket) => numberOrNull(bucket?.cost)));
