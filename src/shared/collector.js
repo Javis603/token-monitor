@@ -28,6 +28,7 @@ const {
   applyPeriodDelta,
   emptyPeriod,
   extractUsageBundleFromTokscale,
+  extractUsageFromTokscale,
   mergeNormalizedPeriods,
   mergePeriods,
   normalizeClientName,
