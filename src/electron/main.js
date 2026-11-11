@@ -52,6 +52,7 @@ const { historyRowKey } = require('./limits/historyIdentity');
 const { createLimitsHistoryController } = require('./limits/historyController');
 const { LIMIT_PROVIDER_CATALOG: historyProviderCatalog } = require('../shared/limits/providers');
 const { isLimitWindowHidden: historyWindowHidden } = require('../shared/limits/usageItems');
+const { antigravityQuotaWindowVisible: historyAntigravityWindowVisible } = require('./renderer/limits/providerPresentation');
 const { maskEmailAddress: historyMaskEmail } = require('./renderer/accountIdentity');
 const { vendorColors: historyVendorColors } = require('../shared/vendorPresentation');
 const {
@@ -3280,7 +3281,8 @@ async function limitsHistoryPayload(key) {
     return stillPresent ? undefined : null;
   }
   history.windows = history.windows.filter(entry => !historyWindowHidden(settings?.limitProviderHiddenItems, provider.provider, entry.window)
-    && !(provider.provider === 'codex' && settings?.showCodexAdditionalLimits === false && entry.window.additional === true));
+    && !(provider.provider === 'codex' && settings?.showCodexAdditionalLimits === false && entry.window.additional === true)
+    && (provider.provider !== 'antigravity' || historyAntigravityWindowVisible(entry.window)));
   if (!history.windows.length) return null;
   const email = provider.accountEmail || '';
   const account = settings?.maskLimitAccountEmails === true

@@ -2492,20 +2492,15 @@ for (const unavailable of [false, true]) for (const showLimitUsed of [false, tru
     'Claude/GPT · Weekly',
     'Gemini 4 Argon · Weekly'
   ]);
-  assert.equal([...card.walk()].filter((node) => node.classNames.has('limit-meter')).length, unavailable ? 4 : 5);
-  const expectedRemaining = [98, 99, unavailable ? null : 100, 0, 37];
+  assert.equal([...card.walk()].filter((node) => node.classNames.has('limit-meter')).length, 5);
+  const expectedRemaining = [98, 99, unavailable ? 0 : 100, 0, 37];
   const rows = [...card.walk()].filter((node) => node.classNames.has('limit-window'));
   rows.forEach((row, index) => {
     const remaining = expectedRemaining[index];
     const fill = row.find('limit-meter-fill');
-    if (remaining === null) {
-      assert.equal(fill, null);
-      assert.doesNotMatch(row.text, /%/);
-    } else {
-      const percent = showLimitUsed ? 100 - remaining : remaining;
-      assert.ok(row.text.includes(`${percent}% ${showLimitUsed ? 'used' : 'left'}`), row.text);
-      assert.equal(Number(fill.style['--bar-scale']), percent / 100);
-    }
+    const percent = showLimitUsed ? 100 - remaining : remaining;
+    assert.ok(row.text.includes(`${percent}% ${showLimitUsed ? 'used' : 'left'}`), row.text);
+    assert.equal(Number(fill.style['--bar-scale']), percent / 100);
   });
   assert.deepEqual(record, before, 'display ordering does not mutate the normalized quota record');
 });

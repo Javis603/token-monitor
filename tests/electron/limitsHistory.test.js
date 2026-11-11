@@ -112,6 +112,32 @@ test('SQLite queries use Claude semantic session bounds and retain only actual o
   assert.deepEqual(result.windows[1].points.map(p => p.at), [at(3, 9), at(3, 11)]);
 });
 
+test('a shared long-cycle overlay retrieves earlier points for short quota windows', t => {
+  const now = at(3, 12), day = 86_400_000, hour = 3_600_000;
+  const fixture = databaseFixture(t, now);
+  fixture.record([
+    action(now - 20 * day, 15, { reset: now - 20 * day + 5 * hour }),
+    action(now - hour, 20, { reset: now + 2 * hour })
+  ]);
+  const entries = [
+    { id: streamA, key: 'session', unit: 'pp', provider: 'alibaba',
+      window: { kind: 'session', windowMinutes: 300, resetsAt: new Date(now + 2 * hour).toISOString() } },
+    { id: streamB, key: 'monthly', unit: 'pp', provider: 'alibaba',
+      window: { kind: 'billing', windowMinutes: 43200, resetsAt: new Date(now + day).toISOString() } }
+  ];
+  const database = createHistoryDatabase(fixture.file);
+  // Close here: the fixture's own after-hook removes the directory, and a
+  // second open handle would make that removal fail on Windows.
+  let session;
+  try {
+    session = database.query(entries, { grain: 'day', day: dayKey(now) }, now).windows[0];
+  } finally {
+    database.close();
+  }
+  assert.deepEqual(session.points.map(point => point.value), [20]);
+  assert.deepEqual(session.recentPoints.map(point => point.value), [15, 20]);
+});
+
 test('SQLite stores one unchanged value across hours with only hourly coverage records', t => {
   const fixture = databaseFixture(t);
   const raw = [];
