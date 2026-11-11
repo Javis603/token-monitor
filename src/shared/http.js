@@ -3,8 +3,9 @@
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
 const { acceptsEncoding } = require('./hubProtocol');
+const { MAX_UPLOAD_BYTES } = require('./uploadDelta');
 
-const MAX_JSON_BODY_BYTES = 1024 * 1024;
+const MAX_JSON_BODY_BYTES = MAX_UPLOAD_BYTES;
 const JSON_COMPRESSION_MIN_BYTES = 1024;
 
 function corsHeaders(extraHeaders = {}) {

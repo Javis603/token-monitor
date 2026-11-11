@@ -11,7 +11,9 @@
 // and third-party presets take their balance heading from whichever label the
 // collector actually set. Defaulting on the wire would erase that signal.
 //
-// The collector's label always wins. What's left is naming a window that only
+// Named pools keep the collector's label. Cursor's generic Included usage is
+// displayed by its period without renaming the stored quota/history identity.
+// What's left is naming a window that only
 // declared its kind, and the one piece of per-provider knowledge that needs:
 // which vendors call the rolling window "5-hour" rather than "Session".
 (function exposeLimitWindowLabels(root, factory) {
@@ -103,6 +105,10 @@
   // for a kind nobody has named (the Limits view's "Quota" / "Usage" columns).
   function limitWindowLabel(providerId, window, fallback = '') {
     const explicit = String(window?.label || '').trim();
+    if (normalizedId(providerId) === 'cursor' && explicit === 'Included usage'
+      && ['weekly', 'billing'].includes(window?.kind)) {
+      return limitWindowKindLabel(providerId, window.kind);
+    }
     if (explicit) return explicit;
     return limitWindowKindLabel(providerId, window?.kind) || fallback;
   }

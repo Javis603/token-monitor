@@ -455,6 +455,53 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
         )
     }
 
+    func testWonBalancesAndQuotaWindowsUseWholeWon() {
+        for amount in [1380.25, 0] {
+            let expected = amount == 0 ? "₩0" : "₩1380"
+            let balance = WidgetQuotaProvider(
+                instanceId: "deepseek-single",
+                provider: "deepseek",
+                status: "ok",
+                updatedAt: nil,
+                windows: [],
+                balance: WidgetQuotaBalance(amount: amount, currency: "KRW")
+            )
+            let credits = WidgetLimitWindow(
+                kind: "billing", remainingPercent: nil, resetsAt: nil,
+                metric: "credits", showMeter: false, remaining: amount, currency: "KRW"
+            )
+            let spend = WidgetLimitWindow(
+                kind: "billing", remainingPercent: nil, resetsAt: nil,
+                metric: "spend", showMeter: false, used: amount, currency: "krw"
+            )
+
+            XCTAssertEqual(WidgetFormat.quotaValue(balance), "\(expected) left")
+            XCTAssertEqual(WidgetFormat.windowValue(credits), expected)
+            XCTAssertEqual(WidgetFormat.windowValue(spend), expected)
+        }
+    }
+
+    func testCommonCurrenciesFormatWidgetCostsAndQuotaAmounts() {
+        for (code, symbol, decimals) in [
+            ("AUD", "A$", 2), ("BRL", "R$", 2), ("CAD", "CA$", 2),
+            ("CHF", "CHF ", 2), ("EUR", "€", 2), ("GBP", "£", 2),
+            ("INR", "₹", 2), ("JPY", "JP¥", 0), ("SGD", "S$", 2)
+        ] {
+            let presentation = WidgetPresentation(
+                currencyCode: code, currencySymbol: symbol, currencyRate: 1,
+                numberStyle: "compact", compactTokenUnits: "western",
+                showCost: true, locale: "en", theme: "system"
+            )
+            let expected = symbol + (decimals == 0 ? "12" : "12.25")
+            let window = WidgetLimitWindow(
+                kind: "billing", remainingPercent: nil, resetsAt: nil,
+                metric: "credits", showMeter: false, remaining: 12.25, currency: code
+            )
+            XCTAssertEqual(WidgetFormat.cost(12.25, presentation: presentation), expected)
+            XCTAssertEqual(WidgetFormat.windowValue(window), expected)
+        }
+    }
+
     func testQuotaWindowValuePreservesCurrencyAndSpendSemantics() {
         let usd = WidgetLimitWindow(
             kind: "billing", remainingPercent: nil, resetsAt: nil,

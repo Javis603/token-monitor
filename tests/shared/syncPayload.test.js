@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { SYNC_PAYLOAD_BUDGET_BYTES, postSyncPayload, serializeSyncPayload, syncPayload } = require('../../src/shared/syncPayload');
+const { LEGACY_SYNC_PAYLOAD_BUDGET_BYTES, SYNC_PAYLOAD_BUDGET_BYTES, postSyncPayload, serializeSyncPayload, syncPayload } = require('../../src/shared/syncPayload');
 
 test('sync payload preserves optional bounded project model attribution', () => {
   const summary = {
@@ -489,6 +489,43 @@ test('postSyncPayload retries a legacy 413 when only History components can be r
   assert.equal(Object.hasOwn(bodies[1].history.daily[0], 'tokenComponentsAvailable'), false);
 });
 
+test('postSyncPayload retries a 413 within the legacy 1 MiB budget', async () => {
+  const bodies = [];
+  const responses = [
+    { status: 413, ok: false, async arrayBuffer() { return new ArrayBuffer(0); } },
+    { status: 200, ok: true }
+  ];
+  const sessionCount = 6000;
+  const sessions = Object.fromEntries(Array.from({ length: sessionCount }, (_, index) => [
+    `claude:s${index}`,
+    {
+      client: 'claude',
+      sessionId: `s${index}`,
+      totalTokens: 100,
+      lastUsedAt: `2026-07-${String((index % 28) + 1).padStart(2, '0')}T00:00:00.000Z`,
+      projectId: 'sha256:large',
+      projectLabel: 'x'.repeat(256),
+      models: { opus: 100 }
+    }
+  ]));
+  const { response, retried, payload } = await postSyncPayload(async (_url, options) => {
+    bodies.push(options.body);
+    return responses.shift();
+  }, 'http://hub/api/ingest', {
+    summary: {
+      deviceId: 'legacy-hub',
+      month: { totalTokens: sessionCount * 100, sessions },
+      allTime: { totalTokens: sessionCount * 100 }
+    }
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(retried, true);
+  assert.ok(Buffer.byteLength(bodies[0], 'utf8') > 1024 * 1024);
+  assert.ok(Buffer.byteLength(bodies[1], 'utf8') <= LEGACY_SYNC_PAYLOAD_BUDGET_BYTES);
+  assert.ok(payload.sessionDetailsOmitted.month > 0);
+});
+
 test('postSyncPayload reports the actual reduced size after budget omission', async () => {
   let postedBody = '';
   const logs = [];
@@ -611,7 +648,8 @@ test('serializeSyncPayload omits an oversized period project rollup as a final f
 });
 
 test('postSyncPayload reports omitted session detail without changing period totals', async () => {
-  const sessions = Object.fromEntries(Array.from({ length: 2600 }, (_, index) => [
+  const sessionCount = 6000;
+  const sessions = Object.fromEntries(Array.from({ length: sessionCount }, (_, index) => [
     `claude:s${index}`,
     { client: 'claude', sessionId: `s${index}`, totalTokens: 100, lastUsedAt: `2026-07-${String((index % 28) + 1).padStart(2, '0')}T00:00:00.000Z`, projectId: 'sha256:large', projectLabel: 'x'.repeat(256), models: { opus: 100 } }
   ]));
@@ -623,14 +661,14 @@ test('postSyncPayload reports omitted session detail without changing period tot
   }, 'http://hub/api/ingest', {
     summary: {
       deviceId: 'large',
-      month: { totalTokens: 260000, sessions, projects: { large: { label: 'Large', tokens: 260000, costUsd: 0, clients: { claude: 260000 } } } },
-      allTime: { totalTokens: 260000 }
+      month: { totalTokens: sessionCount * 100, sessions, projects: { large: { label: 'Large', tokens: sessionCount * 100, costUsd: 0, clients: { claude: sessionCount * 100 } } } },
+      allTime: { totalTokens: sessionCount * 100 }
     },
     logger: (message) => logs.push(message)
   });
 
   assert.equal(response.ok, true);
-  assert.equal(posted.month.totalTokens, 260000);
+  assert.equal(posted.month.totalTokens, sessionCount * 100);
   assert.ok(Buffer.byteLength(JSON.stringify(posted), 'utf8') <= SYNC_PAYLOAD_BUDGET_BYTES);
   assert.deepEqual(posted.sessionDetailsOmitted, payload.sessionDetailsOmitted);
   assert.ok(payload.sessionDetailsOmitted.month > 0);

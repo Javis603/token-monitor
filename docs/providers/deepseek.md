@@ -7,8 +7,30 @@ read_when:
 
 # DeepSeek
 
-The API key reads the public balance endpoint; `balanceHistory.js` derives Today / Week / Month / All-time spend from its drops and is the only daily history.
+## Identity and ids
 
-The optional console token is a signed-in `platform.deepseek.com` Bearer token. It reads the current month's Search and Fetch fees from the private usage endpoint into `balance.searchSpend` and `balance.fetchSpend`; only positive fees appear in the Spend tooltip. Successful results are cached for one hour per account, token, currency and month; failures retry on the next refresh. Console months use a fixed whole-hour UTC offset, rounded down from the device's current offset. There is no env lane, and the form folds once the account is linked.
+`deepseek` is a limits provider. Token Monitor does not collect DeepSeek token usage.
 
-Boundaries: both fees are display-only — never in the ledger, period spend fields or meter, and stripped from public stats. Failures are silent and leave the balance row unchanged; rows match by currency only.
+## Data sources
+
+The API key reads the public balance endpoint. `balanceHistory.js` derives Today / Week / Month / All-time spend from its drops and is the only daily history.
+
+The optional console token is a signed-in `platform.deepseek.com` Bearer token. It reads the current month's Search and Fetch fees from the private usage endpoint into `balance.searchSpend` and `balance.fetchSpend`. Only positive fees appear in the Spend tooltip, labeled Search and Fetch. Console months use a fixed whole-hour UTC offset, rounded down from the device's current offset.
+
+## Source precedence
+
+The balance row stays authoritative when the optional console lookup fails: those failures are silent, are not cached, and leave the row unchanged. The next refresh retries the console request. A successful console result is cached for one hour per account, token, currency, and month. Both requests use the shared fetch timeout and error handling. Rows match by currency only.
+
+## Credentials and transport
+
+The API key is required in the form. It can also be supplied by `DEEPSEEK_API_KEY` or `DEEPSEEK_KEY`. The console token is optional, has no environment-variable lane, and is stored only when pasted. Stored credentials stay in the shared main-process credential store on this device and are never echoed back to the renderer. Requests use the injected transport.
+
+Once the account is linked and `ok`, the paste fields hide. Clearing a Settings-stored account removes the stored API key and the console token. Adding or replacing the optional console token then means pasting the API key again with the token if wanted. There is no independent token-only update. If an environment-variable API key remains in effect, the account can stay linked, the paste fields stay hidden, and Settings has no Clear action, so the console token cannot be added from Settings.
+
+## Invariants and known gaps
+
+Search and Fetch fees are display-only: they are never added to the ledger, period spend fields, or meter, and the public surface strips them with `quotaGroup`/`tranches`.
+
+## Verification
+
+`node --test tests/shared/deepseekLimits.test.js` covers balance history, console fee mapping, the one-hour success cache, and uncached failures. The tests use fixtures, not a live endpoint. A real API key and a current console token are still needed to confirm the private usage endpoint.

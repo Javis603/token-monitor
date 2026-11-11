@@ -336,6 +336,20 @@ test('settings:update normalizes provider fields and strips separately managed a
   }
 });
 
+test('generic settings updates cannot reclassify discovered Cursor accounts as manual', () => {
+  const start = mainSource.indexOf('    const normalizedPatch = { ...patch, currency: normalizedCurrency };');
+  const end = mainSource.indexOf('    normalizeAccountPatch(patch, normalizedPatch);', start);
+  const stored = { cursorManualAccountIds: ['user_MANUAL'] };
+  const patch = { cursorManualAccountIds: ['user_STALE'], cursorDisabledAccountIds: ['user_DISABLED'] };
+  const normalized = vm.runInNewContext(`${mainSource.slice(start, end)}; normalizedPatch`, {
+    patch, normalizedCurrency: 'USD'
+  });
+  const saved = { ...stored, ...normalized };
+  assert.deepEqual(saved.cursorManualAccountIds, ['user_MANUAL']);
+  assert.deepEqual(saved.cursorDisabledAccountIds, ['user_DISABLED']);
+  assert.deepEqual(patch.cursorManualAccountIds, ['user_STALE']);
+});
+
 test('the external URL allowlist admits exactly the provider consoles it should', () => {
   const isAllowedExternalUrl = evalTopLevel(
     mainSource,

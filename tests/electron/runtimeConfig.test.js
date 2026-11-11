@@ -230,6 +230,7 @@ test('runtime config keeps usage, limits credentials, and envelope in separate i
     collectionIntervalMs: 300000,
     limitsRefreshMs: 60000,
     cursorDisabledAccountIds: [' work ', 'work', '', 'personal'],
+    cursorManualAccountIds: [' manual ', 'manual', ''],
     claudeWebCookie: 'sessionKey=settings-secret',
     kimiApiKey: 'secret',
     openrouterProfiles: { work: { apiKey: 'openrouter-secret', enabled: true } },
@@ -258,6 +259,7 @@ test('runtime config keeps usage, limits credentials, and envelope in separate i
   assert.equal(limits.claudeWebCookie, 'sessionKey=settings-secret');
   assert.equal(limits.kimiApiKey, 'secret');
   assert.deepEqual(limits.cursorDisabledAccountIds, ['work', 'personal']);
+  assert.deepEqual(limits.cursorManualAccountIds, ['manual']);
   assert.deepEqual(limits.openrouterProfiles, { work: { apiKey: 'openrouter-secret', enabled: true } });
   assert.deepEqual(limits.thirdPartyProfiles, {
     relay: {
@@ -492,6 +494,14 @@ test('Cursor account selection reconfigures limits and invalidates only the Curs
   );
   assert.equal(classification.limitsReconfigure, true);
   assert.deepEqual(classification.limitScopes, [{ provider: 'cursor' }]);
+});
+
+test('Cursor ownership metadata distinguishes desktop discovery from headless saved accounts', () => {
+  assert.equal(limitsConfigFromSettings({}, { env: {} }).cursorManualAccountIds, undefined);
+  assert.deepEqual(limitsConfigFromSettings({ cursorManualAccountIds: [] }, { env: {} }).cursorManualAccountIds, []);
+  assert.equal(classifySettingsChange(
+    { cursorManualAccountIds: [] }, { cursorManualAccountIds: ['user_MANUAL'] }
+  ).limitsReconfigure, true);
 });
 
 test('WorkBuddy provider selection reconfigures the limits runtime', () => {

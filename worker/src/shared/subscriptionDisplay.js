@@ -122,8 +122,8 @@
   }
 
   // Amounts are integer hundredths of a unit so that summing many subscriptions
-  // never accumulates float error. Every supported currency is two-decimal, so
-  // the fixed ×100 holds; see normalizeSubscriptionCurrency.
+  // never accumulates float error. The fixed ×100 storage scale applies even
+  // to currencies displayed without decimals.
   function normalizeAmountMinor(value) {
     const amount = finiteNumber(value);
     if (amount === null) return 0;
