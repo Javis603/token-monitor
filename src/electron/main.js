@@ -206,6 +206,7 @@ const { createCredentialCommands } = require('./limits/credentialCommands');
 const { createMinimaxApiKeys } = require('./providers/minimax/apiKeys');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
+const { looksLikeKimiRefreshToken } = require('../shared/providers/kimi/desktopSession');
 const {
   codexAuthIdentity,
   codexAccountKey,
@@ -1045,6 +1046,7 @@ function persistStepfunTokenRenewal({ previousToken, token } = {}) {
 // Ollama answering from a cached check of a different save.
 function credentialProbeDeps(renewed = {}) {
   return electronProviderDeps({
+    dataDir: sharedDataDir(),
     claudeWebFetch: electronClaudeWebFetch,
     onClaudeWebCookieRenewed: ({ cookie }) => {
       renewed.claudeWebCookie = cookie;
@@ -8293,10 +8295,11 @@ app.whenReady().then(() => {
     // Return the latest saved selection rather than restoring an older one.
     return settingsForRenderer();
   });
-  async function applyCredentialSettingsPatch(patch, { provider }) {
+  async function applyCredentialSettingsPatch(patch, { provider, commitProbeWrites }) {
     const refreshes = [];
     applySettingsPatch(patch, undefined, {
       ensureLimitProvider: provider,
+      commitProbeWrites,
       onLimitsRefresh: (_scope, refresh) => refreshes.push(refresh)
     });
     // The write is already durable; a refresh failure must not report it as an
@@ -8352,6 +8355,14 @@ app.whenReady().then(() => {
     // Account fields declared persist:'never' (managed account lists, profile
     // maps, workbuddy session fields) are stripped by the registry walk below.
     normalizeAccountPatch(patch, normalizedPatch);
+    // The kimi paste box accepts either token type; a refresh-classified value
+    // belongs to the self-renewing session field instead of the short-lived
+    // access-token one (registry normalize is per-key, so the routing across
+    // the two kimi fields lives here).
+    if (normalizedPatch.kimiWebAccessToken && looksLikeKimiRefreshToken(normalizedPatch.kimiWebAccessToken)) {
+      normalizedPatch.kimiWebRefreshToken = normalizedPatch.kimiWebAccessToken;
+      delete normalizedPatch.kimiWebAccessToken;
+    }
     // Subscriptions go through subscriptions:save, which knows whether this
     // device owns the list or shares it with a hub. The explicit fields further
     // down are what actually hold the line — they are applied after the spread
@@ -8579,17 +8590,20 @@ app.whenReady().then(() => {
     delete settings.edgeDrawerEnabled;
     const nextSettingsState = settings;
     settings = previousSettingsState;
+    let rollbackProbeWrites;
     try {
       // Journal the previous title context and OFF while the old connection is
       // still active. No replacement credentials/device may commit before this.
       contentRuntime.beforeDestinationChange(syncContentContext(nextSettingsState));
       nextSettingsState.syncContentState = normalizeSyncContentState(settings.syncContentState);
       settings = nextSettingsState;
+      rollbackProbeWrites = limitContext.commitProbeWrites?.();
       saveSettings({ throwOnError: true });
     } catch (error) {
       // Keep any OFF/cleanup journal already committed by the preflight.
       settings = { ...previousSettingsState,
         syncContentState: normalizeSyncContentState(persistedSettingsSnapshot?.syncContentState || settings.syncContentState) };
+      rollbackProbeWrites?.();
       throw error;
     }
     contentRuntime.invalidate();

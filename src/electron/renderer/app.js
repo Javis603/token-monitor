@@ -17367,7 +17367,8 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
   const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
   if (accountStatus === 'linked') {
     // A ZCode-discovered login is an OAuth-style link, not a pasted API key,
-    // so it reads as connected the way Zed's linked sessions do.
+    // so it reads as connected the way Zed's linked sessions do. Same idea for
+    // a Factory Droid env credential.
     const linkedKey = providerName === 'zai' && source === 'zcode-auto'
       ? 'settings.zai.statusLinked'
       : providerName === 'factory' && source === 'droid-env'
@@ -17375,6 +17376,13 @@ function apiKeyAccountStatusText(providerName, provider, configured, source, ena
         : providerName === 'cline' && source === 'cline-signin'
           ? 'settings.cline.statusSignin'
           : null;
+    // Discovery only tells us which credentials exist, not which lane supplied
+    // the quota. A Code API result stays primary even with desktop supplements.
+    if (providerName === 'kimi') {
+      if (provider.source === 'web' && provider.sourceDetail === 'app') return t('settings.kimi.statusDesktop');
+      const sourceKey = provider.source === 'api' ? 'kimiApiKeySource' : 'kimiWebAccessTokenSource';
+      source = state.settings?.[sourceKey] || source;
+    }
     return t(linkedKey || (source === 'env' ? `settings.${providerName}.statusEnv` : `settings.${providerName}.statusSet`));
   }
   if (accountStatus === 'invalid') {
@@ -17644,7 +17652,7 @@ function renderExternalProviderStatus(providerName) {
   // instead of a permanent spinner; the cutoff above still blocks the old
   // record from being read as a confirmed link.
   const statusProvider = provider || (settled && configured && enabled ? { status: 'noSyncedData' } : null);
-  const statusText = pending ? t('settings.common.checking')
+  const statusText = pending ? t(state.stats?.limits ? 'settings.common.checking' : 'settings.common.collectingBaseline')
     : apiKeyAccountStatusText(providerName, statusProvider, configured, source, enabled);
   setCursorStatusText(statusEl, providerName === 'claude' && !pending
     ? claudeAccountStatusText(statusText, enabled) : statusText);
@@ -17664,11 +17672,12 @@ function renderExternalProviderStatus(providerName) {
   }
   const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')
     || (providerName === 'cline' && source === 'cline-signin')
+    || (providerName === 'kimi' && source === 'desktop')
     || providerName === 'hark';
   if (discoveredLogin) {
     // The discovered login is not user-entered, so the override input and the
     // console link stay reachable instead of hiding behind linked. Cline's stored
-    // sign-in is the same situation as Zai's ZCode login.
+    // sign-in and Kimi's desktop session are the same situation as Zai's ZCode login.
     manualPanel.classList.remove('hidden');
     openBtn.classList.remove('hidden');
   }
