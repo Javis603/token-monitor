@@ -2195,12 +2195,9 @@ test('a scoped refresh of one live Codex row never returns the account signed in
   });
   const signedInNow = await fetchCodexLimits({}, liveDeps('b@example.com'));
   const scope = (fields) => ({ provider: 'codex', sourceDetail: 'cli', ...fields });
-  // Instead A's row is reported unavailable, as a provider-wide poll would
-  // report an identity that no longer answers; none of B's reading comes back.
-  const gone = await fetchCodexLimits({ limitRefreshScope: scope({ accountKey: 'key-for-a' }) }, liveDeps('b@example.com'));
-  assert.deepEqual(gone.map(({ accountKey, accountEmail, status, windows }) => ({ accountKey, accountEmail, status, windows })), [
-    { accountKey: 'key-for-a', accountEmail: '', status: 'unavailable', windows: [] }
-  ]);
+  // Nothing comes back instead: a retryable status would back off the whole
+  // provider for an account that is gone.
+  assert.deepEqual(await fetchCodexLimits({ limitRefreshScope: scope({ accountKey: 'key-for-a' }) }, liveDeps('b@example.com')), []);
   // A keyless scope naming A by email gets nothing rather than B's reading.
   assert.deepEqual(await fetchCodexLimits({ limitRefreshScope: scope({ accountEmail: 'a@example.com' }) }, liveDeps('b@example.com')), []);
   const same = await fetchCodexLimits({ limitRefreshScope: scope({ accountKey: signedInNow.accountKey }) }, liveDeps('b@example.com'));
