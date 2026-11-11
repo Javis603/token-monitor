@@ -2181,3 +2181,21 @@ test('LimitsRuntime compatibility snapshot probes initially and reuses the confi
   assert.equal(calls, 2);
   collector.stop();
 });
+
+test('a scoped refresh of one live Codex row never returns the account signed in now', async () => {
+  // The row was read through RPC while account A was signed in; B has signed in
+  // since. A refresh scoped to A must not hand back B, which the runtime would
+  // file under A's identity.
+  const liveDeps = (email) => ({
+    env: { PATH: '/usr/bin' },
+    readFileSync: () => JSON.stringify({ tokens: { access_token: 'access-token', account_id: `ws-${email}`,
+      id_token: makeIdToken({ email, 'https://api.openai.com/auth': { chatgpt_account_id: `ws-${email}` } }) } }),
+    readCodexUsage: async () => ({ rate_limit: { primary_window: { used_percent: 10, reset_at: 1_770_000_000, limit_window_seconds: 18_000 } } }),
+    readCodexResetCredits: async () => null
+  });
+  const signedInNow = await fetchCodexLimits({}, liveDeps('b@example.com'));
+  const scope = (accountKey) => ({ provider: 'codex', accountKey, sourceDetail: 'cli' });
+  assert.deepEqual(await fetchCodexLimits({ limitRefreshScope: scope('key-for-a') }, liveDeps('b@example.com')), []);
+  const same = await fetchCodexLimits({ limitRefreshScope: scope(signedInNow.accountKey) }, liveDeps('b@example.com'));
+  assert.equal(same.accountKey, signedInNow.accountKey);
+});
