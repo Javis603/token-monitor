@@ -20,7 +20,7 @@ function createPluginUpdates({ root, catalog, manager, managed, enabled = () => 
   function allowed(entry) {
     const plugin = manager.list().plugins.find(plugin => plugin.id === entry.id);
     return !error && enabled() && preferences.enabled && entry.status === 'update' && !semver.prerelease(entry.version)
-      && (entry.origin.kind === 'official' || entry.origin.kind === 'maintainer')
+      && (entry.origin.kind === 'official' || entry.origin.kind === 'maintainer') && !entry.origin.error
       && preferences.plugins[entry.id] !== false && plugin?.trusted === true
       && managed.describe(entry.id)?.origin.id === entry.origin.id;
   }

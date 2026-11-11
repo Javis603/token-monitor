@@ -38,6 +38,17 @@ test('safe/master-off, untrusted revisions, different origins and prereleases ne
   f.plugins[0].trusted = true; f.installed.official.origin = { id: 'another-source' };
   await updates.run(); assert.equal(f.previews.length, 0);
 });
+test('failed catalog refreshes defer only the affected source until a successful refresh', async t => {
+  const f = fixture(t), updates = createPluginUpdates(f.options);
+  f.entries[0].origin.error = 'download failed (HTTP 503)';
+  await updates.run();
+  assert.deepEqual(f.previews, ['maintainer']);
+  assert.deepEqual(f.applied, ['maintainer']);
+  f.entries[0].origin.error = '';
+  f.entries[1].status = 'installed';
+  await updates.run();
+  assert.deepEqual(f.applied, ['maintainer', 'official']);
+});
 test('new choices and lifecycle failures defer updates and discard preview tokens', async t => {
   const f = fixture(t), updates = createPluginUpdates(f.options);
   f.setFields([{ key: 'background' }]); await updates.run(); assert.deepEqual(f.applied, []);
@@ -63,10 +74,13 @@ const { runtimeFixture } = require('../helpers/trustedPlugin');
 const { packageDirectory, contentDigest, describePackage, digest } = require('../../src/electron/plugins/package');
 const { initialSetupReview } = require('../../src/electron/plugins/initialSetup');
 const source = require('../../src/electron/plugins/maintainerSources')[0];
-for (const scenario of ['enabled', 'disabled', 'unsaved', 'editing-settings', 'late-draft', 'late-settings', 'opt-out-during-release', 'opt-out-during-stop', 'cleanup-failure', 'resume-failure', 'safe-mode']) test(`runtime automatic update: ${scenario}`, async t => {
+for (const scenario of ['enabled', 'disabled', 'unsaved', 'editing-settings', 'late-draft', 'late-settings', 'opt-out-during-release', 'opt-out-during-stop', 'cleanup-failure', 'resume-failure', 'safe-mode', 'catalog-unavailable', 'catalog-invalid']) test(`runtime automatic update: ${scenario}`, async t => {
   const directory = path.resolve(__dirname, '../fixtures/trusted-plugin');
   const old = packageDirectory(directory), next = JSON.parse(old.bytes);
   next.manifest.version = '1.1.0'; const bytes = Buffer.from(JSON.stringify(next));
+  const index = JSON.stringify({ format: 1, title: 'Community fixture', plugins: [{ id: 'trusted-fixture', name: 'Fixture', versions: [{ version: '1.1.0', url: 'https://catalog.example/fixture.tmplugin', sha256: digest(bytes) }] }] });
+  const failedRefresh = scenario === 'catalog-unavailable' || scenario === 'catalog-invalid';
+  let packageRequests = 0;
   const fields = initialSetupReview({}, describePackage(old)).fields;
   let release; const download = new Promise(resolve => { release = resolve; });
   const f = await runtimeFixture(t, {
@@ -77,10 +91,16 @@ for (const scenario of ['enabled', 'disabled', 'unsaved', 'editing-settings', 'l
       fs.cpSync(directory, path.join(root, 'plugins/trusted-fixture'), { recursive: true });
       fs.mkdirSync(path.join(root, 'plugin-manager'), { recursive: true });
       fs.writeFileSync(path.join(root, 'plugin-manager/installed.json'), JSON.stringify({ 'trusted-fixture': { version: '1.0.0', sha256: old.hash, contentSha256: contentDigest(old), installedAt: 1, origin: { id: source.id, kind: 'maintainer' } } }));
+      if (failedRefresh) {
+        fs.mkdirSync(path.join(root, 'plugin-catalogs'), { recursive: true });
+        fs.writeFileSync(path.join(root, `plugin-catalogs/${source.id}.json`), JSON.stringify({ url: source.url, at: 1, bytes: Buffer.from(index).toString('base64') }));
+      }
     },
     catalogFetch: async url => {
       await download;
-      return new Response(url === source.url ? JSON.stringify({ format: 1, title: 'Community fixture', plugins: [{ id: 'trusted-fixture', name: 'Fixture', versions: [{ version: '1.1.0', url: 'https://catalog.example/fixture.tmplugin', sha256: digest(bytes) }] }] }) : bytes);
+      if (url === source.url) return scenario === 'catalog-unavailable' ? new Response('', { status: 503 }) : new Response(scenario === 'catalog-invalid' ? '{broken' : index);
+      packageRequests++;
+      return new Response(bytes);
     }
   });
   const lifecycle = [];
@@ -120,9 +140,19 @@ for (const scenario of ['enabled', 'disabled', 'unsaved', 'editing-settings', 'l
   // The fake transport and lifecycle replies complete entirely in microtasks.
   await new Promise(setImmediate); await new Promise(setImmediate);
   const plugin = f.invoke('plugins:list').plugins.find(item => item.id === 'trusted-fixture');
-  assert.equal(plugin.version, ['unsaved', 'editing-settings', 'late-draft', 'late-settings', 'opt-out-during-release', 'opt-out-during-stop', 'cleanup-failure', 'safe-mode'].includes(scenario) ? '1.0.0' : '1.1.0');
+  assert.equal(plugin.version, failedRefresh || ['unsaved', 'editing-settings', 'late-draft', 'late-settings', 'opt-out-during-release', 'opt-out-during-stop', 'cleanup-failure', 'safe-mode'].includes(scenario) ? '1.0.0' : '1.1.0');
   assert.equal(plugin.enabled, scenario !== 'disabled');
   assert.equal(f.dialogs.length, 0, 'automatic updates never prompt in the background');
+  if (failedRefresh) {
+    const entry = f.invoke('plugins:catalog').entries.find(entry => entry.id === 'trusted-fixture');
+    assert.ok(entry.origin.error);
+    assert.equal(entry.status, 'update', 'the cached update stays visible');
+    assert.equal(packageRequests, 0, 'failed refresh must not download an automatic update');
+    const preview = await f.invoke('plugins:catalogPreview', source.id, 'trusted-fixture', '1.1.0');
+    await f.invoke('plugins:install', preview.token, { trustUpdate: true });
+    assert.equal(f.invoke('plugins:list').plugins[0].version, '1.1.0', 'explicit manual updates can still use the cache');
+    assert.equal(packageRequests, 1);
+  }
   if (scenario === 'unsaved') assert.deepEqual(lifecycle, ['inspect-update', 'inspect']);
   if (scenario === 'cleanup-failure' || scenario === 'resume-failure') {
     assert.equal(plugin.recoveryRequired, true);
