@@ -209,10 +209,28 @@ test('typing filters the cached session rows instead of rebuilding the projectio
   );
 
   update('review');
-  assert.deepEqual(calls, ['sync', ['rows', rows, { incompleteHint: '', fromSearch: true }]]);
+  assert.deepEqual(calls, ['sync', ['rows', rows, { incompleteHint: '', fromSearch: true, reuseToolFilter: true }]]);
   assert.equal(state.sessionSearchQuery, 'review');
   assert.equal(state.sessionPage, 0);
   assert.equal(state.rowSignature, 'previous');
+});
+
+test('typing without a valid projection forwards search intent through the full render', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const updateStart = app.indexOf('function updateSessionSearchQuery(');
+  const updateEnd = app.indexOf('\n}', updateStart) + 2;
+  const renderStart = app.indexOf('\nfunction render(');
+  const renderEnd = app.indexOf('\nfunction renderAppContent(', renderStart);
+  const state = { breakdown: 'session', stats: {}, period: 'today', sessionSearchQuery: '',
+    sessionPage: 2, sessionRowsCache: { stats: {}, period: 'today', rows: [] } };
+  const calls = [];
+  const update = Function('state', 'renderAppContent', 'pluginViewHost', 'pluginContent',
+    `${app.slice(updateStart, updateEnd)}\n${app.slice(renderStart, renderEnd)}\nreturn updateSessionSearchQuery;`)(
+    state, options => calls.push(options), null, null
+  );
+  update('review');
+  assert.deepEqual(calls, [{ fromSearch: true }]);
+  assert.equal(state.sessionPage, 0);
 });
 
 test('the search field expands and collapses with reduced-motion support', () => {
@@ -247,15 +265,17 @@ test('search renders reuse matching rows without layout motion or rebuilding too
   };
   const noop = () => {};
   const batch = { active: false, calls: 0 };
+  let tooltipHold = false;
+  const statuses = [];
   const dependencies = {
     state, els: { breakdown }, ...policy,
-    sessionTooltipShouldHoldRender: () => false,
+    sessionTooltipShouldHoldRender: () => tooltipHold,
     sessionSearchQuery: () => state.sessionSearchQuery,
     sessionRowsApi: { filterSessionRows },
     sessionToolClients: row => [row.client, ...(row.groupRows || []).map(member => member.client)],
     renderSessionToolFilter: data => { calls.tools++; return data; },
     renderSessionPager: noop,
-    setSessionSearchStatus: noop,
+    setSessionSearchStatus: (query, count) => statuses.push({ query, count }),
     currentCurrency: () => 'USD',
     currentLocale: () => 'en',
     t: key => key,
@@ -298,10 +318,16 @@ test('search renders reuse matching rows without layout motion or rebuilding too
   assert.equal(batch.calls, 1);
   const retained = breakdown.children[0];
 
+  tooltipHold = true;
   state.sessionSearchQuery = 'review';
   state.sessionToolFilter = 'codex';
-  renderRows(data, { fromSearch: true });
+  renderRows(data);
+  assert.equal(breakdown.children.length, 3);
+  assert.equal(statuses.at(-1).query, '');
+
+  renderRows(data, { fromSearch: true, reuseToolFilter: true });
   assert.deepEqual(breakdown.children.map(row => row.dataset.key), ['review', 'group']);
+  assert.deepEqual(statuses.at(-1), { query: 'review', count: 2 });
   assert.equal(breakdown.children[0], retained);
   assert.equal(calls.capture, 1);
   assert.equal(calls.animate, 1);
@@ -311,20 +337,25 @@ test('search renders reuse matching rows without layout motion or rebuilding too
   const replacements = calls.replace;
   const updates = calls.update;
   state.sessionSearchQuery = 'REVIEW';
-  renderRows(data, { fromSearch: true });
+  renderRows(data, { fromSearch: true, reuseToolFilter: true });
   assert.equal(calls.replace, replacements);
   assert.equal(calls.update, updates);
 
   state.sessionSearchQuery = 'not found';
-  renderRows(data, { fromSearch: true });
+  renderRows(data, { fromSearch: true, reuseToolFilter: true });
   assert.equal(breakdown.children.length, 1);
   assert.equal(breakdown.children[0].query, 'not found');
   state.sessionSearchQuery = '';
   state.sessionToolFilter = '';
-  renderRows(data, { fromSearch: true });
+  renderRows(data, { fromSearch: true, reuseToolFilter: true });
   assert.equal(breakdown.children.length, 3);
   assert.equal(calls.capture, 1);
   assert.equal(calls.animate, 1);
   assert.equal(calls.tools, 1);
   assert.equal(batch.calls, 4);
+
+  renderRows(data, { fromSearch: true });
+  assert.equal(calls.tools, 2);
+  assert.equal(calls.capture, 1);
+  assert.equal(calls.animate, 1);
 });

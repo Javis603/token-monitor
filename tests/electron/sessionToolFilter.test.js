@@ -187,7 +187,7 @@ test('filter buttons keep accessible names without tooltips', () => {
 });
 
 test('hiding Sessions hides its toolbar after resolving the replacement view', () => {
-  const start = app.indexOf('function renderAppContent()');
+  const start = app.indexOf('function renderAppContent(');
   const end = app.indexOf('  const pluginPage =', start);
   const state = {breakdown:'session',openSession:null};
   let hidden = false;

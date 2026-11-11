@@ -3160,10 +3160,10 @@ function updateSessionSearchQuery(value) {
     syncSessionSearchChrome();
     const incompleteHint = sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)
       ? 'sessions.incomplete' : '';
-    overflowText.batch(() => renderRows(cache.rows, { incompleteHint, fromSearch: true }));
+    overflowText.batch(() => renderRows(cache.rows, { incompleteHint, fromSearch: true, reuseToolFilter: true }));
     return;
   }
-  render();
+  render({ fromSearch: true });
 }
 
 function sessionSearchEmptyNode(query) {
@@ -3234,11 +3234,11 @@ function renderSessionToolFilter(rows) {
   return state.sessionToolFilter ? rows.filter(row => sessionToolClients(row).includes(state.sessionToolFilter)) : rows;
 }
 
-function renderRows(rows, { incompleteHint = '', fromSearch = false } = {}) {
-  if (sessionTooltipShouldHoldRender()) return;
+function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFilter = false } = {}) {
+  if (!fromSearch && sessionTooltipShouldHoldRender()) return;
   const searchQuery = state.breakdown === 'session' ? sessionSearchQuery() : '';
   if (state.breakdown === 'session') {
-    rows = fromSearch
+    rows = reuseToolFilter
       ? state.sessionToolFilter ? rows.filter(row => sessionToolClients(row).includes(state.sessionToolFilter)) : rows
       : renderSessionToolFilter(rows);
     rows = sessionRowsApi.filterSessionRows(rows, searchQuery);
@@ -7856,8 +7856,8 @@ function periodContentAvailability() {
   };
 }
 
-function render() {
-  renderAppContent();
+function render({ fromSearch = false } = {}) {
+  renderAppContent({ fromSearch });
   // Composition supplies current native anchors/context below. Do not dispatch
   // an extra update with the previous composition options first.
   pluginViewHost?.refreshContext({ includeContent: false });
@@ -7874,7 +7874,7 @@ function render() {
   }
 
 }
-function renderAppContent() {
+function renderAppContent({ fromSearch = false } = {}) {
   const surface = visibleStatsSurface();
   if (surface !== 'main') {
     if (!surface) statsRenderScheduler.request();
@@ -8051,7 +8051,7 @@ function renderAppContent() {
     } else if (state.breakdown === 'session' && sessionRowsApi.sessionBreakdownIncomplete(state.stats, state.period)) {
       incompleteHint = 'sessions.incomplete';
     }
-    renderRows(rows, { incompleteHint });
+    renderRows(rows, { incompleteHint, fromSearch });
     if (state.breakdown === 'session') scheduleSessionStatusRepaint(period, incompleteHint);
   }
   
