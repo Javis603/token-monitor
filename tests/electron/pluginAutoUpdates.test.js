@@ -63,7 +63,7 @@ const { runtimeFixture } = require('../helpers/trustedPlugin');
 const { packageDirectory, contentDigest, describePackage, digest } = require('../../src/electron/plugins/package');
 const { initialSetupReview } = require('../../src/electron/plugins/initialSetup');
 const source = require('../../src/electron/plugins/maintainerSources')[0];
-for (const scenario of ['enabled', 'disabled', 'unsaved', 'editing-settings', 'late-draft', 'late-settings', 'safe-mode']) test(`runtime automatic update: ${scenario}`, async t => {
+for (const scenario of ['enabled', 'disabled', 'unsaved', 'editing-settings', 'late-draft', 'late-settings', 'opt-out-during-release', 'opt-out-during-stop', 'cleanup-failure', 'resume-failure', 'safe-mode']) test(`runtime automatic update: ${scenario}`, async t => {
   const directory = path.resolve(__dirname, '../fixtures/trusted-plugin');
   const old = packageDirectory(directory), next = JSON.parse(old.bytes);
   next.manifest.version = '1.1.0'; const bytes = Buffer.from(JSON.stringify(next));
@@ -106,14 +106,35 @@ for (const scenario of ['enabled', 'disabled', 'unsaved', 'editing-settings', 'l
     f.lifecycle(f.main, request => respond('main', request));
     f.lifecycle(f.notch, request => respond('notch', request));
   }
+  if (scenario === 'opt-out-during-stop') {
+    const begin = f.runtime.manager.beginMutation;
+    f.runtime.manager.beginMutation = async id => { await begin(id); f.invoke('plugins:configureUpdates', null, false); };
+  }
+  if (['opt-out-during-release', 'cleanup-failure', 'resume-failure'].includes(scenario)) f.lifecycle(f.main, request => {
+    if (request.action === 'inspect') return { loaded: true, unsaved: false };
+    if (request.action === 'release' && scenario === 'opt-out-during-release') f.invoke('plugins:configureUpdates', null, false);
+    if (request.action === 'release' && scenario === 'cleanup-failure' || request.action === 'resume' && scenario === 'resume-failure') throw Error('fixture lifecycle failure');
+    return {};
+  });
   release();
   // The fake transport and lifecycle replies complete entirely in microtasks.
   await new Promise(setImmediate); await new Promise(setImmediate);
   const plugin = f.invoke('plugins:list').plugins.find(item => item.id === 'trusted-fixture');
-  assert.equal(plugin.version, ['unsaved', 'editing-settings', 'late-draft', 'late-settings', 'safe-mode'].includes(scenario) ? '1.0.0' : '1.1.0');
+  assert.equal(plugin.version, ['unsaved', 'editing-settings', 'late-draft', 'late-settings', 'opt-out-during-release', 'opt-out-during-stop', 'cleanup-failure', 'safe-mode'].includes(scenario) ? '1.0.0' : '1.1.0');
   assert.equal(plugin.enabled, scenario !== 'disabled');
   assert.equal(f.dialogs.length, 0, 'automatic updates never prompt in the background');
   if (scenario === 'unsaved') assert.deepEqual(lifecycle, ['inspect-update', 'inspect']);
+  if (scenario === 'cleanup-failure' || scenario === 'resume-failure') {
+    assert.equal(plugin.recoveryRequired, true);
+    assert.equal(f.main.webContents.reloads, 0, 'automatic failure must not reload unrelated drafts');
+    const before = structuredClone(f.settings.pluginStates);
+    await f.invoke('plugins:recover', 'trusted-fixture');
+    await new Promise(resolve => setTimeout(resolve, 5));
+    assert.equal(f.main.webContents.reloads, 1);
+    assert.deepEqual(f.settings.pluginStates, before, 'recovery does not change enablement or trust');
+    assert.equal(f.invoke('plugins:list').plugins[0].recoveryRequired, false);
+    assert.equal(f.dialogs.length, 1);
+  }
   if (scenario === 'late-settings') assert.deepEqual(lifecycle, ['inspect-update', 'inspect', 'release', 'resume']);
   if (scenario === 'late-draft') {
     assert.deepEqual(lifecycle.filter(action => action.startsWith('main:')), ['main:inspect-update', 'main:inspect', 'main:release', 'main:resume']);

@@ -13675,6 +13675,7 @@ pluginApi = pluginBridge ? {
   getSettings: id => pluginBridge.getSettings(id),
   updateSettings: (id, input) => pluginBridge.updateSettings(id, input),
   catalog: async () => applyPluginCatalogUpdates(await pluginBridge.catalog()),
+  recover: async id => applyPluginCatalog(await pluginBridge.recover(id)),
   discoverCatalog: async force => applyPluginCatalogUpdates(await pluginBridge.discoverCatalog(force)),
   catalogDetails: (source, id) => pluginBridge.catalogDetails(source, id),
   closeCatalogDetails: () => pluginBridge.closeCatalogDetails(),

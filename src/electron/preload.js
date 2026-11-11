@@ -297,6 +297,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     openFolder: () => ipcRenderer.invoke('plugins:openFolder'),
     openPage: ref => ipcRenderer.invoke('plugins:openPage', ref),
     catalog: () => ipcRenderer.invoke('plugins:catalog'),
+    recover: id => ipcRenderer.invoke('plugins:recover', id),
     discoverCatalog: force => ipcRenderer.invoke('plugins:discoverCatalog', force === true),
     catalogDetails: (source, id) => ipcRenderer.invoke('plugins:catalogDetails', source, id),
     closeCatalogDetails: () => ipcRenderer.invoke('plugins:closeCatalogDetails'),

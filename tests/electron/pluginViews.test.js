@@ -652,3 +652,16 @@ for (const reason of ['draft', 'settings']) test(`automatic release rechecks ${r
   assert.equal((await lifecycle({ action: 'inspect', ids: ['fixture'] })).loaded, true);
   await host.dispose();
 });
+
+
+test('automatic deferral does not conceal an existing author cleanup failure', async () => {
+  const document = dom(), a = document.createElement('div'), b = document.createElement('div'); document.body.append(a, b);
+  let lifecycle;
+  const host = createHost({ document, window: {}, bridge: { onLifecycle(callback) { lifecycle = callback; } },
+    importModule: async () => ({ mount(container) { return { hasUnsavedChanges: () => container === b,
+      dispose() { if (container === a) throw Error('known cleanup failure'); } }; } }) });
+  await host.mount(a, descriptor); await host.mount(b, descriptor); host.unmount(a);
+  await new Promise(setImmediate);
+  await assert.rejects(lifecycle({ action: 'release', ids: ['fixture'], automatic: true }), /known cleanup failure/);
+  await host.dispose();
+});

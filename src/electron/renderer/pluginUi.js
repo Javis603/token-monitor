@@ -235,6 +235,8 @@
       // asynchronous update cannot recreate resources after its cleanup ran.
       // Main bounds this wait; hung author code requires renderer recovery.
       for (const id of ids) while (jobs.has(id)) await Promise.all([...jobs.get(id)]);
+      const priorErrors = ids.flatMap(id => failures.has(id) ? [`${id}: ${failures.get(id)}`] : []);
+      if (automatic && priorErrors.length) throw new Error(priorErrors.join('; '));
       // Inspection is an earlier IPC round trip. Input or settings edits can
       // arrive while other hosts or author jobs settle; do not discard them.
       if (automatic && (hasUnsavedChanges(ids) || services.updatesBlocked?.(ids) === true)) return { deferred: true };

@@ -1055,6 +1055,10 @@
         meta.append(el(document, 'span', 'plugin-version', `v${plugin.version}`), typeLabels(plugin)); card.append(meta);
       }
       const footer = el(document, 'div', 'plugin-card-footer');
+      if (plugin.recoveryRequired) {
+        card.append(el(document, 'p', 'plugin-risk', t('plugins.trusted.packageRecoveryNote')));
+        footer.append(button(t('plugins.trusted.reloadNow'), () => void run(() => api.recover(plugin.id), `plugin:${plugin.id}`), 'plugin-recover plugin-update-action'));
+      }
       const exceptional = !['active', 'disabled'].includes(plugin.status);
 
       const surfaces = SURFACE_ORDER.filter(surface => plugin.views?.some(view => view.placements?.[surface]));
@@ -1587,7 +1591,7 @@
         return list.enabled ? t('settings.summary.plugins', { active, total: list.plugins.length }) : t('settings.summary.off');
       },
       list: () => list,
-      blocksUpdate: ids => ids.some(id => selectedPluginId === id || packagePreview?.id === id || authorSettings.get(id)?.editor?.hasUnsavedChanges()),
+      blocksUpdate: ids => busy || ids.some(id => selectedPluginId === id || packagePreview?.id === id || authorSettings.get(id)?.editor?.hasUnsavedChanges()),
       // Consent and logs are interaction state: a background push must not
       // close an open consent panel the user is reading.
       isInteracting: () => activeTab === 'style' || Boolean(catalogModal || consentFor || packagePreview || operation || selectedPluginId || aboutOpen) || busy || Boolean(container.querySelector('.plugin-menu:popover-open, .plugin-location-count [role="tooltip"]:popover-open')) || container.contains(document.activeElement)

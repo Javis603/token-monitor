@@ -209,6 +209,7 @@ function createPluginRuntime({
     enabled: () => !disposed && !safeMode && getSettings().pluginsEnabled !== false, log,
     apply: (preview, check) => managed.install(preview.token, {
       trustUpdate: true,
+      beforeCommit: check,
       beforeEnable: (_plugin, plan) => { check(); return plan.values; },
       withLifecycle: (change, beforeRelease) => changePackage(null, change, [preview.id], () => { check(); beforeRelease(); }, true)
     }) });
@@ -361,6 +362,7 @@ function createPluginRuntime({
         views: [], skins: [], errors: [] });
     }
     for (const plugin of list.plugins) {
+      plugin.recoveryRequired = [...failedCleanup].some(([host, ids]) => !host.isDestroyed() && ids.has(plugin.id));
       plugin.initialSetup = initialSetupReview(settings, plugin);
       plugin.installation = managed.describe(plugin.id);
       if (plugin.installation) plugin.settingsIdentity = `${plugin.installation.sha256}:${plugin.installation.installedAt}`;
@@ -683,6 +685,12 @@ function createPluginRuntime({
       requireMain(event);
       network.cancelPlugin(String(id)); validation.invalidate(String(id));
       manager.restart(String(id));
+      return listWithPlacements();
+    });
+    handle('plugins:recover', async (event, id) => {
+      requireMain(event);
+      const finish = await resumeHosts(event, [String(id)]);
+      await finish();
       return listWithPlacements();
     });
     handle('plugins:reload', (event) => {

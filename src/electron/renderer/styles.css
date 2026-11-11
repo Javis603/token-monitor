@@ -8919,7 +8919,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-detail-heading { margin: 0; font-size: .6875rem; font-weight: 600; }
 .plugin-update-notes { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .plugin-update-notes .plugin-description { white-space: pre-line; }
-.plugin-auto-update { font-size: .75rem; line-height: 1.5; }
+.settings-panel label.plugin-auto-update { font-size: .75rem; line-height: 1.5; }
 .plugin-update-note { display: flex; flex-direction: column; gap: 4px; }
 .plugin-detail .settings-note { margin: 0; }
 .plugin-detail .plugin-views { gap: 10px; }

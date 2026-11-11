@@ -5066,7 +5066,7 @@
       "plugins.catalog.imageUnavailable": "无法加载预览",
       "plugins.catalog.updateRange": "更新内容 · v{from} → v{to}",
       "plugins.catalog.noUpdateNotes": "此更新未提供更新说明。",
-      "plugins.catalog.autoUpdate": "自动更新官方及社群插件",
+      "plugins.catalog.autoUpdate": "自动更新官方及社区插件",
       "plugins.catalog.autoUpdatePlugin": "允许自动更新此插件",
       "plugins.catalog.technicalDetails": "技术详情",
       "plugins.catalog.updating": "更新中…",

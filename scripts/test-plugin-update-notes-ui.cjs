@@ -35,18 +35,18 @@ async function main() {
   win.webContents.on('console-message', event => console.log('Renderer:', event.message));
   await win.loadFile(html);
   const translations = i18n.MESSAGES['zh-TW'];
-  const setup = async (installed, review = true, thirdParty = false) => {
+  const setup = async (installed, review = true, thirdParty = false, recovery = false) => {
     installedVersion = installed;
     await win.webContents.executeJavaScript(`(async () => {
-      window.installCalls = 0; window.installError = false; window.panel?.dispose(); document.getElementById('settings').replaceChildren();
+      window.previewGate=null;window.recoverCalls=0;window.installCalls = 0; window.installError = false; window.panel?.dispose(); document.getElementById('settings').replaceChildren();
       const data = ${JSON.stringify(catalog.list())}, installed = ${JSON.stringify(installed)}, translations = ${JSON.stringify(translations)};
       data.autoUpdate={enabled:true,plugins:{}};
       if (${thirdParty}) for (const entry of data.entries) entry.origin.kind='community';
       const t = (key, values = {}) => Object.entries(values).reduce((text, [name, value]) => text.replace('{'+name+'}', value), translations[key] || key);
       window.panel = TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:document.getElementById('settings'),t,api:{
-        list:async()=>({enabled:true,plugins:installed?[{id:'notes-fixture',name:'路由外掛',version:installed,source:'user',status:'active',enabled:true,trusted:true,views:[],installation:{origin:{id:'maintainer-notes',kind:'maintainer'}}}]:[]}),catalog:async()=>data,discoverCatalog:async()=>data,
+        list:async()=>({enabled:true,plugins:installed?[{id:'notes-fixture',name:'路由外掛',version:installed,source:'user',status:'active',enabled:true,trusted:true,recoveryRequired:${recovery},views:[],installation:{origin:{id:'maintainer-notes',kind:'maintainer'}}}]:[]}),catalog:async()=>data,discoverCatalog:async()=>data,
         catalogDetails:async()=>({html:'<h2>使用方式</h2><p>連接本機服務後，選擇要查看的路由。</p>',imageCount:0}),closeCatalogDetails:async()=>{},
-        catalogPreview:async(source,id,version)=>({id,name:'路由外掛',version,installedVersion:installed,description:'即時路由檢視',origin:{id:source,kind:${thirdParty}?'community':'maintainer'},operation:installed?'update':'install',sha256:'a'.repeat(64),token:version,initialSetup:{fields:installed && ${review}?[{key:'background',kind:'background',value:false}]:[]}}),cancelInstall:async()=>{},configureUpdates:async(id,value)=>{if(id===null)data.autoUpdate.enabled=value;else data.autoUpdate.plugins[id]=value;return data;},install:async()=>{window.installCalls++;if(window.installError)throw Error('fixture update failed');return {enabled:true,plugins:[]};}
+        catalogPreview:async(source,id,version)=>(await window.previewGate,{id,name:'路由外掛',version,installedVersion:installed,description:'即時路由檢視',origin:{id:source,kind:${thirdParty}?'community':'maintainer'},operation:installed?'update':'install',sha256:'a'.repeat(64),token:version,initialSetup:{fields:installed && ${review}?[{key:'background',kind:'background',value:false}]:[]}}),cancelInstall:async()=>{},recover:async()=>{window.recoverCalls++;return {enabled:true,plugins:[]};},configureUpdates:async(id,value)=>{if(id===null)data.autoUpdate.enabled=value;else data.autoUpdate.plugins[id]=value;return data;},install:async()=>{window.installCalls++;if(window.installError)throw Error('fixture update failed');return {enabled:true,plugins:[]};}
       }});
       await panel.refresh();document.querySelector('[data-tab="discover"]').click();
       await new Promise(resolve=>setTimeout(resolve,30));
@@ -85,7 +85,10 @@ async function main() {
   await win.webContents.executeJavaScript("document.querySelector('[data-tab=installed]').click();new Promise(resolve=>setTimeout(resolve,30))");
   await check('installed-card-shows-notes-by-default-without-preview', "Boolean(document.querySelector('.plugin-installed-card section.plugin-update-notes .plugin-update-note')?.getClientRects().length) && !document.querySelector('.plugin-installed-card .plugin-update-notes summary') && !document.querySelector('dialog')");
   await win.capturePage().then(image => fs.writeFileSync(path.join(scratch, 'installed-update-notes.png'), image.toPNG()));
+  await win.webContents.executeJavaScript("void(window.previewGate=new Promise(resolve=>{window.finishPreview=resolve;}))");
   await win.webContents.executeJavaScript("document.querySelector('.plugin-update-action').click();new Promise(resolve=>setTimeout(resolve,30))");
+  await check('manual-preview-blocks-automatic-updates', "window.installCalls===0 && panel.blocksUpdate(['notes-fixture'])===true");
+  await win.webContents.executeJavaScript("window.finishPreview();new Promise(resolve=>setTimeout(resolve,30))");
   await check('official-update-installs-once-without-introduction-or-review', "window.installCalls===1 && !document.querySelector('dialog') && !document.querySelector('.plugin-package-preview')");
   await setup('0.1.0', false, true);
   await win.webContents.executeJavaScript("document.querySelector('[data-tab=installed]').click();new Promise(resolve=>setTimeout(resolve,30))");
@@ -100,6 +103,12 @@ async function main() {
   await check('automatic-update-switch-retains-opt-out', "document.querySelector('.plugin-auto-update input')?.checked===false");
   await win.webContents.executeJavaScript("window.installError=true;document.querySelector('.plugin-update-action').click();new Promise(resolve=>setTimeout(resolve,30))");
   await check('failed-one-click-update-is-visible-and-retryable', "window.installCalls===1 && document.querySelector('.plugin-action-error')?.textContent.includes('fixture update failed') && !document.querySelector('.plugin-update-action').disabled && !document.querySelector('.plugin-package-preview')");
+  await setup('0.1.0',false,false,true);
+  await win.webContents.executeJavaScript("document.querySelector('[data-tab=installed]').click();new Promise(resolve=>setTimeout(resolve,30))");
+  await check('lifecycle-recovery-is-visible', "Boolean(document.querySelector('.plugin-installed-card .plugin-risk')) && Boolean(document.querySelector('.plugin-recover'))");
+  await win.capturePage().then(image => fs.writeFileSync(path.join(scratch, 'update-recovery.png'), image.toPNG()));
+  await win.webContents.executeJavaScript("document.querySelector('.plugin-recover').click();new Promise(resolve=>setTimeout(resolve,30))");
+  await check('lifecycle-recovery-uses-explicit-action', "window.recoverCalls===1");
   await win.webContents.executeJavaScript('panel.dispose()'); win.destroy(); catalog.dispose();
   fs.writeFileSync(path.join(scratch, 'results.json'), JSON.stringify(checks, null, 2));
   console.log('Evidence:', scratch);

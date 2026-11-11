@@ -243,7 +243,23 @@ app.whenReady().then(async () => {
       fs.writeFileSync(path.join(evidence, `update-${id}-after.png`), (await capture()).toPNG());
       console.log(`PASS actual App ${third ? 'third-party two-click' : 'community one-click'} verified catalog update, visible notes and retained trust`);
     }
-    assertConsoleClean(); clearTimeout(deadline);
+    await js("pluginApi.place('third-fixture/panel','page',true);els.settingsButton.click();openViewFromTray('plugin:third-fixture/panel')");
+    await waitFor("document.querySelector('[aria-label=\"Fixture draft\"]')", 'author UI before cleanup failure');
+    await js("globalThis.fixtureCleanupFailure=true");
+    toggleResponses.push(0);
+    await js("pluginApi.setEnabled('third-fixture',false)");
+    await js("els.settingsButton.click();pluginSettingsPanel.refresh()");
+    await waitFor("document.querySelector('[data-plugin-id=\"third-fixture\"] .plugin-recover')", 'explicit recovery action');
+    assert.equal(settings.pluginStates['third-fixture'].enabled, false);
+    await js("document.querySelector('.plugin-recover').scrollIntoView({block:'center',behavior:'instant'})");
+    fs.writeFileSync(path.join(evidence, 'update-recovery-action.png'), (await capture()).toPNG());
+    const reloaded = new Promise(resolve => win.webContents.once('did-finish-load', resolve));
+    await js("document.querySelector('.plugin-recover').click()");
+    await reloaded;
+    await waitFor("state.pluginCatalog?.plugins?.find(p=>p.id==='third-fixture')?.recoveryRequired===false", 'recovered host');
+    assert.equal(settings.pluginStates['third-fixture'].enabled, false);
+    console.log('PASS actual App explicit lifecycle recovery reloads the affected host without changing plugin enablement');
+    assertConsoleClean(['Intentional fixture cleanup failure']); clearTimeout(deadline);
     await runtime.dispose(); runtime = null; win.destroy(); app.exit(0); return;
   }
   if (process.env.TM_PREVIEWS_ONLY === '1') {
