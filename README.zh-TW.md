@@ -294,7 +294,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 
 - Custom 會從一個 GET 餘額端點映射數值 JSON 欄位；僅相容 OpenAI 或 Anthropic API 並不足夠。
 
-- 國際版 CLI/IDE 用量可在工具設定中啟用 **Qoder**；中國版仍為 **Qoder CN**。國際版讀取 `QODER_CONFIG_DIR/projects` 或 `~/.qoder/projects`。兩者共用 Tokscale 解析器，只統計回報的 Token，不從文字或 credits 推算；需要時在 Qoder 程序中設定 `QODER_EXPOSE_TOKEN_USAGE=1`／`QODERCN_EXPOSE_TOKEN_USAGE=1`。動態模型代號保留原值。
+- 國際版 CLI/IDE 用量可在工具設定中啟用 **Qoder**；中國版仍為 **Qoder CN**。國際版讀取 `QODER_CONFIG_DIR/projects` 或 `~/.qoder/projects`。兩者的 JSONL transcript 共用 Tokscale Qoder 解析器；CN 保留舊 SQLite 相容 reader。只統計回報的 Token，不從文字或 credits 推算；需要時在 Qoder 程序中設定 `QODER_EXPOSE_TOKEN_USAGE=1`／`QODERCN_EXPOSE_TOKEN_USAGE=1`。動態模型代號保留原值。
 
 #### Qoder CN（本機介接）
 
