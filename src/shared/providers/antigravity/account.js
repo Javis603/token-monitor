@@ -4,7 +4,6 @@
 module.exports = {
   id: 'antigravity',
   fetch: 'fetchAntigravityLimits',
-  accountRefresh: true,
   fields: [
     {
       key: 'antigravityManagedAccounts',

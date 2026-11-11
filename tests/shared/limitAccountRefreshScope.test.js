@@ -27,11 +27,13 @@ test('a row refresh names the account only where the provider filters by it', ()
 
 test('providers with a source that answers for every account refresh as a whole', () => {
   // Volcengine's signed API returns the Coding and Agent plans together whatever
-  // the scope, OpenCode's scoped collection leaves out its auto-detected key, and
-  // a WorkBuddy local session without a user id is keyed by an id its scoped
-  // matcher never computes: narrowing would file a sibling's row under the
-  // clicked one, replace a healthy reading with notConfigured, or probe nothing.
-  for (const provider of ['volcengine', 'opencode', 'workbuddy']) {
+  // the scope, Antigravity's local RPC answers for whichever account is signed
+  // in now, OpenCode's scoped collection leaves out its auto-detected key, and a
+  // WorkBuddy local session without a user id is keyed by an id its scoped
+  // matcher never computes: narrowing would file another account's row under
+  // the clicked one, replace a healthy reading with notConfigured, or probe
+  // nothing.
+  for (const provider of ['volcengine', 'antigravity', 'opencode', 'workbuddy']) {
     assert.deepEqual(limitAccountRefreshScope(provider, { accountKey: 'k', accountName: 'Work' }), { provider });
   }
 });

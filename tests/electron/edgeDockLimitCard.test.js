@@ -254,15 +254,19 @@ test('a row refresh button is drawn only for a host that can refresh limits', as
   assert.equal(buttons.length, 2);
   assert.equal(buttons[0].getAttribute('aria-label'), 'Refresh this account');
   assert.match(buttons[0].parent.text, /^Updated /);
-  let propagated = true;
-  buttons[1].listeners.click({ stopPropagation() { propagated = false; } });
-  assert.equal(propagated, false, 'the click must not also open the history card');
+  // A press activates, so a repaint between press and release cannot swallow
+  // it; the press's own trailing click must not fire it a second time.
+  let prevented = false;
+  buttons[1].listeners.pointerdown({ button: 0, preventDefault() { prevented = true; } });
+  assert.ok(prevented);
+  buttons[1].listeners.click({ detail: 1 });
   // A click answers at once, without the background delay.
   assert.ok(buttons[1].classList.contains('is-refreshing'));
   await new Promise(setImmediate);
   assert.deepEqual(refreshed, ['key-b']);
-  // A second click while it shows is ignored.
-  buttons[1].listeners.click({ stopPropagation() {} });
+  // A second activation while it shows is ignored (here from the keyboard,
+  // whose synthesized click reports detail 0).
+  buttons[1].listeners.click({ detail: 0 });
   await new Promise(setImmediate);
   assert.deepEqual(refreshed, ['key-b']);
 
@@ -296,7 +300,7 @@ test('a row refresh that brings nothing back says why, then returns to normal', 
   assert.equal(status.getAttribute('role'), 'status');
   assert.equal(status.textContent, '');
 
-  button.listeners.click({ stopPropagation() {} });
+  button.listeners.pointerdown({ button: 0, preventDefault() {} });
   await new Promise(setImmediate);
   // Still spinning out its minimum; the reason waits for the spinner.
   assert.ok(button.classList.contains('is-refreshing'));
@@ -316,13 +320,13 @@ test('a row refresh that brings nothing back says why, then returns to normal', 
   // A thrown request reads as a failure; a retry clears the last reason at once.
   answer = Promise.reject(new Error('offline'));
   answer.catch(() => {});
-  button.listeners.click({ stopPropagation() {} });
+  button.listeners.pointerdown({ button: 0, preventDefault() {} });
   await new Promise(setImmediate);
   t.mock.timers.tick(800);
   assert.equal(status.textContent, 'Refresh failed');
   assert.equal(button.classList.contains('is-refresh-cooldown'), false);
   answer = { ok: true };
-  button.listeners.click({ stopPropagation() {} });
+  button.listeners.pointerdown({ button: 0, preventDefault() {} });
   assert.equal(status.textContent, '');
   await new Promise(setImmediate);
   t.mock.timers.tick(800);

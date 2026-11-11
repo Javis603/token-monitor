@@ -40,11 +40,12 @@
   const api = factory(
     node ? require('../../../shared/limits/providers') : root?.TokenMonitorLimitProviders,
     node ? require('../../../shared/limits/usageItems') : root?.TokenMonitorLimitUsageItems,
-    node ? require('../../../shared/limits/accountScope') : root?.TokenMonitorLimitAccountScope
+    node ? require('../../../shared/limits/accountScope') : root?.TokenMonitorLimitAccountScope,
+    node ? require('../pressActivation') : root?.TokenMonitorPressActivation
   );
   if (node) module.exports = api;
   if (root) root.TokenMonitorLimitWindowsView = api;
-})(typeof window !== 'undefined' ? window : globalThis, function createLimitWindowsViewApi(limitProviders, usageItems, accountScope) {
+})(typeof window !== 'undefined' ? window : globalThis, function createLimitWindowsViewApi(limitProviders, usageItems, accountScope, pressActivation) {
   function createLimitWindowsView(deps) {
     const {
       t,
@@ -2196,8 +2197,10 @@
     refreshButtonStatus.set(button, status);
     refreshButtons.add(button);
     syncLimitRefreshButton(button);
-    button.addEventListener('click', (event) => {
-      event.stopPropagation();
+    // Both hosts repaint their rows on a timer and on every stats push, so a
+    // click-only button loses a press whose release lands after the repaint.
+    // The row's own click handler already ignores clicks on buttons.
+    pressActivation.activateOnPress(button, () => {
       const key = motion.providerKey(provider);
       // The spinner is the row's state, not the request's: a click while it
       // still shows (a refresh in flight, or one just settled) does nothing.
