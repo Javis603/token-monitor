@@ -487,7 +487,7 @@ Replaces the shared list.
 
 Because `updatedAt` doubles as the concurrency token, it is guaranteed to increase strictly on every accepted write: two writes landing in the same millisecond would otherwise share a token, and a third holding the older one would pass the staleness check against a document it never read.
 
-Records are re-normalized on ingest exactly as `POST /api/ingest` normalizes device records; unknown fields are dropped and malformed records are discarded rather than stored. `currency` is validated against the display currencies the app carries rates for (`USD`, `TWD`, `HKD`, `CNY`, `KRW`); a record naming anything else responds `400` and stores nothing, because coercing it would report an amount the user never entered. A successful write responds `200` with the stored document in the same shape as `GET`.
+Records are re-normalized on ingest exactly as `POST /api/ingest` normalizes device records; unknown fields are dropped and malformed records are discarded rather than stored. `currency` is validated against the display currencies the app carries rates for, listed in [the shared currency catalogue](../src/shared/currency.js); a record naming anything else responds `400` and stores nothing, because coercing it would report an amount the user never entered. A successful write responds `200` with the stored document in the same shape as `GET`.
 
 An accepted write also broadcasts stats to connected stream clients with `reason: "subscriptions"`, the same way an ingest does. That frame carries the new `subscriptionsUpdatedAt`, which is how the other devices learn their copy has been overtaken.
 

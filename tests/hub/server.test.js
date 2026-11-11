@@ -559,17 +559,17 @@ test('a currency the app carries no rate for is refused, not rewritten', async (
       headers: { 'content-type': 'application/json', authorization: 'Bearer shh' },
       body: JSON.stringify(body)
     });
-    // Coercing EUR to USD reports an amount the user never entered, and the
+    // Coercing ZAR to USD reports an amount the user never entered, and the
     // endpoint documents this as validation.
     const refused = await put({
-      subscriptions: [{ id: 'a', provider: 'codex', startDate: '2026-05-31', amountMinor: 10000, currency: 'EUR' }],
+      subscriptions: [{ id: 'a', provider: 'codex', startDate: '2026-05-31', amountMinor: 10000, currency: 'ZAR' }],
       baseUpdatedAt: ''
     });
     assert.equal(refused.status, 400);
-    assert.match((await refused.json()).message, /EUR/);
+    assert.match((await refused.json()).message, /ZAR/);
     assert.deepEqual(hub.getSubscriptions().subscriptions, []);
 
-    for (const code of ['USD', 'TWD', 'HKD', 'CNY', 'KRW']) {
+    for (const code of ['USD', 'AUD', 'BRL', 'CAD', 'CHF', 'CNY', 'EUR', 'GBP', 'HKD', 'INR', 'JPY', 'KRW', 'SGD', 'TWD']) {
       const ok = await put({
         subscriptions: [{ id: 'a', provider: 'codex', startDate: '2026-05-31', currency: code }],
         baseUpdatedAt: hub.getSubscriptions().updatedAt

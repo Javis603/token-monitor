@@ -14,12 +14,13 @@ const {
 } = require('../../src/shared/currency');
 
 test('currency options keep USD as the default first option', () => {
-  assert.deepEqual(CURRENCY_CODES, ['USD', 'TWD', 'HKD', 'CNY', 'KRW']);
+  assert.deepEqual(CURRENCY_CODES, ['USD', 'AUD', 'BRL', 'CAD', 'CHF', 'CNY', 'EUR', 'GBP', 'HKD', 'INR', 'JPY', 'KRW', 'SGD', 'TWD']);
   assert.equal(normalizeCurrency(), 'USD');
   assert.equal(normalizeCurrency(''), 'USD');
   assert.equal(normalizeCurrency('twd'), 'TWD');
   assert.equal(normalizeCurrency('krw'), 'KRW');
-  assert.equal(normalizeCurrency('jpy'), 'USD');
+  assert.equal(normalizeCurrency('jpy'), 'JPY');
+  assert.equal(normalizeCurrency('zar'), 'USD');
 });
 
 test('converts USD costs into supported display currencies (built-in defaults)', () => {
@@ -41,9 +42,10 @@ test('formats converted costs with unambiguous symbols (built-in defaults)', () 
   assert.equal(formatCurrencyFromUsd(1, 'KRW'), '₩1380');
 });
 
-test('recorded amounts use whole won and two decimal places for other currencies', () => {
+test('recorded amounts use whole yen and won and two decimals for other currencies', () => {
   assert.equal(currencyFractionDigits('krw'), 0);
-  for (const code of ['USD', 'TWD', 'HKD', 'CNY']) {
+  assert.equal(currencyFractionDigits('jpy'), 0);
+  for (const code of CURRENCY_CODES.filter(code => !['JPY', 'KRW'].includes(code))) {
     assert.equal(currencyFractionDigits(code), 2);
   }
 });
@@ -69,4 +71,27 @@ test('resolveEffectiveRates ignores non-positive / non-finite inputs', () => {
   const eff = resolveEffectiveRates({ CNY: 0 }, { CNY: NaN, TWD: -3 });
   assert.equal(eff.CNY, 6.8);   // 0 fetched + NaN override -> floor
   assert.equal(eff.TWD, 31.5);  // negative override -> floor
+});
+
+test('new currencies convert and format with distinct symbols and currency precision', () => {
+  configureRates(null);
+  for (const [code, rate, text] of [
+    ['AUD', 1.44, 'A$14.40'], ['BRL', 5.51, 'R$55.10'],
+    ['CAD', 1.41, 'CA$14.10'], ['CHF', 0.82, 'CHF 8.20'],
+    ['EUR', 0.89, '€8.90'], ['GBP', 0.74, '£7.40'],
+    ['INR', 93.62, '₹936.20'], ['JPY', 158, 'JP¥1580'], ['SGD', 1.28, 'S$12.80']
+  ]) {
+    assert.equal(convertUsd(1, code), rate);
+    assert.equal(formatCurrencyFromUsd(10, code), text);
+  }
+  configureRates({ JPY: 160 });
+  assert.equal(formatCurrencyFromUsd(1, 'JPY'), 'JP¥160');
+  configureRates(null);
+});
+
+test('Main currency selector matches the shared USD-first alphabetical order', () => {
+  const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../src/electron/renderer/index.html'), 'utf8');
+  const select = html.match(/<select id="currencyInput">([\s\S]*?)<\/select>/)[1];
+  const codes = Array.from(select.matchAll(/<option value="([A-Z]+)"/g), match => match[1]);
+  assert.deepEqual(codes, CURRENCY_CODES);
 });

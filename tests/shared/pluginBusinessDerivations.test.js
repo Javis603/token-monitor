@@ -204,7 +204,7 @@ test('missing/invalid captured calendar is explicit, and missing rates never imp
 });
 
 test('unknown currencies including CREDITS never pass through a USD fallback', () => {
-  for (const code of ['CREDITS', 'EUR', '', null]) {
+  for (const code of ['CREDITS', 'ZAR', '', null]) {
     const record = { ...topup(), currency: code };
     const derived = row(record).derived;
     assert.equal(derived.monthlyAmountUsd, null);

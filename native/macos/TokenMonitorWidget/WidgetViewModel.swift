@@ -470,8 +470,8 @@ enum WidgetFormat {
 
     static func cost(_ usd: Double, presentation: WidgetPresentation) -> String {
         let converted = usd * presentation.currencyRate
-        // The won has no sub-unit; the app rounds it to whole won too.
-        let decimals = presentation.currencyCode.uppercased() == "KRW" ? 0 : 2
+        // Yen and won costs use whole currency units, matching the app.
+        let decimals = currencyFractionDigits(presentation.currencyCode)
         return "\(presentation.currencySymbol)\(String(format: "%.\(decimals)f", converted))"
     }
 
@@ -519,11 +519,27 @@ enum WidgetFormat {
         return "—"
     }
 
+    private static func currencyFractionDigits(_ currency: String?) -> Int {
+        switch currency?.uppercased() {
+        case "JPY", "KRW": 0
+        default: 2
+        }
+    }
+
     private static func quotaAmount(_ value: Double, currency: String?) -> String {
         let code = currency?.uppercased()
-        let format = code == "KRW" ? "%.0f" : "%.2f"
+        let format = "%.\(currencyFractionDigits(code))f"
         let amount = String(format: format, locale: Locale(identifier: "en_US_POSIX"), value)
         return switch code {
+        case "AUD": "A$\(amount)"
+        case "BRL": "R$\(amount)"
+        case "CAD": "CA$\(amount)"
+        case "CHF": "CHF \(amount)"
+        case "EUR": "€\(amount)"
+        case "GBP": "£\(amount)"
+        case "INR": "₹\(amount)"
+        case "JPY": "JP¥\(amount)"
+        case "SGD": "S$\(amount)"
         case "KRW": "₩\(amount)"
         case "CNY": "¥\(amount)"
         case "USD": "$\(amount)"

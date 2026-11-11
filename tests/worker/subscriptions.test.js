@@ -148,12 +148,23 @@ test('the Worker matches the Node hub on tokens and currencies', async () => {
   assert.equal((await hub.fetch(request('PUT', { subscriptions: [], baseUpdatedAt: first.updatedAt }))).status, 409);
 
   // A currency the app carries no rate for is refused, not quietly rewritten:
-  // storing 100 EUR as 100 USD reports an amount the user never entered.
-  const euro = await hub.fetch(request('PUT', {
-    subscriptions: [{ ...RECORD, currency: 'EUR' }],
+  // storing 100 ZAR as 100 USD reports an amount the user never entered.
+  const unsupported = await hub.fetch(request('PUT', {
+    subscriptions: [{ ...RECORD, currency: 'ZAR' }],
     baseUpdatedAt: second.updatedAt
   }));
-  assert.equal(euro.status, 400);
-  assert.match((await euro.json()).message, /EUR/);
+  assert.equal(unsupported.status, 400);
+  assert.match((await unsupported.json()).message, /ZAR/);
   assert.equal((await (await hub.fetch(request('GET'))).json()).subscriptions.length, 2);
+  let revision = second.updatedAt;
+  for (const currency of ['USD', 'AUD', 'BRL', 'CAD', 'CHF', 'CNY', 'EUR', 'GBP', 'HKD', 'INR', 'JPY', 'KRW', 'SGD', 'TWD']) {
+    const response = await hub.fetch(request('PUT', {
+      subscriptions: [{ ...RECORD, currency }],
+      baseUpdatedAt: revision
+    }));
+    assert.equal(response.status, 200, currency);
+    const written = await response.json();
+    assert.equal(written.subscriptions[0].currency, currency);
+    revision = written.updatedAt;
+  }
 });

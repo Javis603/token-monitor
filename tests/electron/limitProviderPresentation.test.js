@@ -3704,7 +3704,7 @@ test('a successful subscription save defers the full render until close complete
       bindingFromAccount: () => ({ accountKey: 'acct-1' }),
       normalizeSubscription: (value) => value
     },
-    currencyApi: {},
+    currencyApi: require('../../src/shared/currency'),
     subscriptionFormTopUps: () => [],
     subscriptionFormIsTopUp: () => false,
     subscriptionAccountChoices: () => [{ value: 'acct-1', provider: account }],
@@ -4238,7 +4238,10 @@ test('recorded subscription prices, paid totals and top-ups use fixed currency p
   for (const [currency, amountMinor, expected] of [
     ['USD', 500, '$5.00'],
     ['TWD', 50, 'NT$0.50'],
-    ['KRW', 1500000, '₩15000']
+    ['KRW', 1500000, '₩15000'],
+    ['JPY', 150000, 'JP¥1500'],
+    ['EUR', 599, '€5.99'],
+    ['BRL', 1234, 'R$12.34']
   ]) {
     const startDate = '2026-07-08';
     const subscription = { currency, amountMinor, startDate, interval: 'month' };
@@ -4248,64 +4251,66 @@ test('recorded subscription prices, paid totals and top-ups use fixed currency p
   }
 });
 
-test('KRW form rejects fractional plans, new top-ups and existing top-ups after a currency switch', async () => {
-  const app = readRendererFile('app.js');
-  const add = functionBody(app, 'addSubscriptionTopUpEntry', 'setSubscriptionDateBound');
-  const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
-  const state = { subscriptionTopUps: [] };
-  const els = {
-    subscriptionProviderInput: { value: 'codex' },
-    subscriptionAccountInput: { value: 'acct-1' },
-    subscriptionCurrencyInput: { value: 'KRW' },
-    subscriptionAmountInput: { value: '0.49' },
-    subscriptionStartDateInput: { value: '2026-07-08' },
-    subscriptionTopUpAmountInput: { value: '0.49' },
-    subscriptionTopUpDateInput: { value: '2026-07-08' }
-  };
-  let error;
-  let isTopUp = false;
-  const context = vm.createContext({
-    els, state,
-    subscriptionApi: require('../../src/shared/subscriptionDisplay'),
-    subscriptionFormTopUps: () => state.subscriptionTopUps,
-    subscriptionFormIsTopUp: () => isTopUp,
-    subscriptionAccountChoices: () => [],
-    subscriptionList: () => [],
-    subscriptionForAccount: () => null,
-    currencyApi: require('../../src/shared/currency'),
-    saveSubscriptions: () => assert.fail('fractional won reached the save boundary'),
-    setSubscriptionError: (message) => { error = message; },
-    renderSubscriptionTopUpEntries() {},
-    t: (key) => key
+for (const wholeCurrency of ['JPY', 'KRW']) {
+  test(wholeCurrency + ' form rejects fractional plans, new top-ups and existing top-ups after a currency switch', async () => {
+    const app = readRendererFile('app.js');
+    const add = functionBody(app, 'addSubscriptionTopUpEntry', 'setSubscriptionDateBound');
+    const submit = functionBody(app, 'submitSubscription', 'configuredLimitProviderOrder');
+    const state = { subscriptionTopUps: [] };
+    const els = {
+      subscriptionProviderInput: { value: 'codex' },
+      subscriptionAccountInput: { value: 'acct-1' },
+      subscriptionCurrencyInput: { value: wholeCurrency },
+      subscriptionAmountInput: { value: '0.49' },
+      subscriptionStartDateInput: { value: '2026-07-08' },
+      subscriptionTopUpAmountInput: { value: '0.49' },
+      subscriptionTopUpDateInput: { value: '2026-07-08' }
+    };
+    let error;
+    let isTopUp = false;
+    const context = vm.createContext({
+      els, state,
+      subscriptionApi: require('../../src/shared/subscriptionDisplay'),
+      subscriptionFormTopUps: () => state.subscriptionTopUps,
+      subscriptionFormIsTopUp: () => isTopUp,
+      subscriptionAccountChoices: () => [],
+      subscriptionList: () => [],
+      subscriptionForAccount: () => null,
+      currencyApi: require('../../src/shared/currency'),
+      saveSubscriptions: () => assert.fail('fractional amount reached the save boundary'),
+      setSubscriptionError: (message) => { error = message; },
+      renderSubscriptionTopUpEntries() {},
+      t: (key) => key
+    });
+    vm.runInContext(`${add}\nasync ${submit}`, context);
+    const addEntry = () => vm.runInContext('addSubscriptionTopUpEntry()', context);
+    const save = () => vm.runInContext('submitSubscription()', context);
+    const wholeAmount = 'settings.subscriptions.errorWholeAmount';
+
+    await save();
+    assert.equal(error, wholeAmount);
+    error = '';
+    addEntry();
+    assert.equal(error, wholeAmount);
+    assert.equal(state.subscriptionTopUps.length, 0);
+
+    els.subscriptionCurrencyInput.value = 'USD';
+    addEntry();
+    assert.equal(error, '');
+    assert.equal(state.subscriptionTopUps[0].amountMinor, 49);
+    els.subscriptionCurrencyInput.value = wholeCurrency;
+    isTopUp = true;
+    await save();
+    assert.equal(error, wholeAmount);
+
+    state.subscriptionTopUps = [];
+    els.subscriptionTopUpAmountInput.value = '15000';
+    els.subscriptionTopUpDateInput.value = '2026-07-08';
+    addEntry();
+    assert.equal(error, '');
+    assert.equal(state.subscriptionTopUps[0].amountMinor, 1500000);
   });
-  vm.runInContext(`${add}\nasync ${submit}`, context);
-  const addEntry = () => vm.runInContext('addSubscriptionTopUpEntry()', context);
-  const save = () => vm.runInContext('submitSubscription()', context);
-  const wholeWon = 'settings.subscriptions.errorWholeWon';
-
-  await save();
-  assert.equal(error, wholeWon);
-  error = '';
-  addEntry();
-  assert.equal(error, wholeWon);
-  assert.equal(state.subscriptionTopUps.length, 0);
-
-  els.subscriptionCurrencyInput.value = 'USD';
-  addEntry();
-  assert.equal(error, '');
-  assert.equal(state.subscriptionTopUps[0].amountMinor, 49);
-  els.subscriptionCurrencyInput.value = 'KRW';
-  isTopUp = true;
-  await save();
-  assert.equal(error, wholeWon);
-
-  state.subscriptionTopUps = [];
-  els.subscriptionTopUpAmountInput.value = '15000';
-  els.subscriptionTopUpDateInput.value = '2026-07-08';
-  addEntry();
-  assert.equal(error, '');
-  assert.equal(state.subscriptionTopUps[0].amountMinor, 1500000);
-});
+}
 
 test('elapsed subscription time never reads as zero months', () => {
   const subscriptionApi = require('../../src/shared/subscriptionDisplay');

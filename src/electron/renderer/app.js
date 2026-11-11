@@ -4260,8 +4260,7 @@ function seedSubscriptionPlanName() {
 }
 
 // The money inputs are typed in the record's own currency, so their precision
-// follows the selected unit: won has no sub-unit, the other supported currencies
-// carry cents. Without this the form keeps inviting two decimals for KRW.
+// follows the selected currency's precision.
 function syncSubscriptionAmountPrecision() {
   const digits = currencyApi.currencyFractionDigits(els.subscriptionCurrencyInput?.value);
   for (const input of [els.subscriptionAmountInput, els.subscriptionTopUpAmountInput]) {
@@ -4402,8 +4401,8 @@ function addSubscriptionTopUpEntry() {
     setSubscriptionError(t('settings.subscriptions.errorAmount'));
     return;
   }
-  if (els.subscriptionCurrencyInput?.value === 'KRW' && !Number.isInteger(amount)) {
-    setSubscriptionError(t('settings.subscriptions.errorWholeWon'));
+  if (currencyApi.currencyFractionDigits(els.subscriptionCurrencyInput?.value) === 0 && !Number.isInteger(amount)) {
+    setSubscriptionError(t('settings.subscriptions.errorWholeAmount', { currency: els.subscriptionCurrencyInput?.value }));
     return;
   }
   // Normalized on the way in, not on the way out: normalizeTopUps() mints an id
@@ -4535,8 +4534,8 @@ async function submitSubscription() {
       setSubscriptionError(t('settings.subscriptions.errorTopUpEntries'));
       return;
     }
-    if (currency === 'KRW' && topUps.some((entry) => entry.amountMinor % 100 !== 0)) {
-      setSubscriptionError(t('settings.subscriptions.errorWholeWon'));
+    if (currencyApi.currencyFractionDigits(currency) === 0 && topUps.some((entry) => entry.amountMinor % 100 !== 0)) {
+      setSubscriptionError(t('settings.subscriptions.errorWholeAmount', { currency: els.subscriptionCurrencyInput?.value }));
       return;
     }
   } else {
@@ -4544,8 +4543,8 @@ async function submitSubscription() {
       setSubscriptionError(t('settings.subscriptions.errorAmount'));
       return;
     }
-    if (currency === 'KRW' && !Number.isInteger(amount)) {
-      setSubscriptionError(t('settings.subscriptions.errorWholeWon'));
+    if (currencyApi.currencyFractionDigits(currency) === 0 && !Number.isInteger(amount)) {
+      setSubscriptionError(t('settings.subscriptions.errorWholeAmount', { currency: els.subscriptionCurrencyInput?.value }));
       return;
     }
     if (!startDate) {
