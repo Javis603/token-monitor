@@ -25,6 +25,16 @@ test('a row refresh names the account only where the provider filters by it', ()
   assert.deepEqual(limitAccountRefreshScope('codex', { accountKey: 42 }), { provider: 'codex' });
 });
 
+test('providers with a source that answers for every account refresh as a whole', () => {
+  // Volcengine's signed API returns the Coding and Agent plans together whatever
+  // the scope, and OpenCode's scoped collection leaves out its auto-detected
+  // key: narrowing either would file a sibling's row under the clicked one, or
+  // replace a healthy reading with notConfigured.
+  for (const provider of ['volcengine', 'opencode']) {
+    assert.deepEqual(limitAccountRefreshScope(provider, { accountKey: 'k', accountName: 'Work' }), { provider });
+  }
+});
+
 test('every provider declaring accountRefresh reads the refresh scope in its probe', () => {
   const declared = LIMIT_PROVIDER_ACCOUNTS.filter((decl) => decl.accountRefresh).map((decl) => decl.id);
   assert.ok(declared.length > 0);
