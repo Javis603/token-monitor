@@ -154,6 +154,50 @@ test('background renders preserve IME composition until the completed query is c
   assert.equal(input.value, '中文');
 });
 
+test('opening and closing search bypass the tooltip hold', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = app.indexOf("els.sessionSearchToggle?.addEventListener('click'");
+  const end = app.indexOf("els.sessionToolFilterItems.addEventListener('scroll'", start);
+  const handlers = {};
+  const node = prefix => ({
+    addEventListener: (type, handler) => { handlers[`${prefix}:${type}`] = handler; }
+  });
+  const renders = [];
+  const state = { sessionSearchOpen: false };
+  let focused = false;
+  Function('els', 'state', 'setSessionSearchOpen', 'render', 'sessionSearchQuery', 'updateSessionSearchQuery',
+    `${app.slice(start, end)}\nreturn null;`)(
+    {
+      sessionSearchToggle: { ...node('toggle'), focus: () => { focused = true; } },
+      sessionSearchInput: node('input'),
+      sessionSearchClear: node('clear')
+    },
+    state,
+    open => { state.sessionSearchOpen = open; },
+    options => renders.push(options),
+    () => '',
+    () => {}
+  );
+
+  handlers['toggle:click']();
+  assert.deepEqual(renders.at(-1), { fromSearch: true });
+  assert.equal(state.sessionSearchOpen, true);
+  handlers['toggle:click']();
+  assert.deepEqual(renders.at(-1), { fromSearch: true });
+  assert.equal(state.sessionSearchOpen, false);
+  handlers['toggle:click']();
+  handlers['input:keydown']({
+    key: 'Escape',
+    isComposing: false,
+    preventDefault: () => {},
+    stopPropagation: () => {}
+  });
+  assert.deepEqual(renders.at(-1), { fromSearch: true });
+  assert.equal(state.sessionSearchOpen, false);
+  assert.equal(focused, true);
+  assert.equal(renders.length, 4);
+});
+
 test('typing after a session-status repaint uses the refreshed projection cache', () => {
   const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const start = app.indexOf('function scheduleSessionStatusRepaint(');

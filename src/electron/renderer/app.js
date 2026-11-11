@@ -14480,7 +14480,7 @@ els.liveDotInput.addEventListener('change', saveAppearanceFromControls);
 els.sessionSearchToggle?.addEventListener('click', () => {
   const open = !state.sessionSearchOpen;
   setSessionSearchOpen(open, { focus: open });
-  render();
+  render({ fromSearch: true });
 });
 let sessionSearchComposing = false;
 els.sessionSearchInput?.addEventListener('compositionstart', () => {
@@ -14511,7 +14511,7 @@ els.sessionSearchInput?.addEventListener('keydown', (event) => {
     return;
   }
   setSessionSearchOpen(false);
-  render();
+  render({ fromSearch: true });
   els.sessionSearchToggle?.focus({ preventScroll: true });
 });
 els.sessionToolFilterItems.addEventListener('scroll', updateSessionToolScrollButtons, { passive: true });
