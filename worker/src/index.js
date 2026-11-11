@@ -21,8 +21,8 @@ const CORS_HEADERS = {
 };
 
 // SQLite Durable Object storage allows 8 MB for the key and its value. Keep
-// headroom for the `dev:` key and the serializer's per-value overhead.
-const MAX_DEVICE_RECORD_BYTES = 7 * 1024 * 1024;
+// headroom for the serializer's per-value overhead.
+const MAX_DEVICE_STORAGE_BYTES = 7 * 1024 * 1024;
 
 function jsonResponse(status, payload, extra = {}, request = null) {
   const body = JSON.stringify(payload);
@@ -582,10 +582,14 @@ export class HubDO {
           const existing = await this.state.storage.get(`dev:${deviceId}`);
           const preserveSessionTitles = syncContent.acceptsSessionTitles(this.syncSessionTitles, policy, incoming.sessionTitleSyncGeneration);
           const next = mergeSyncDeviceRecord(existing, { ...incoming, receivedAt: new Date().toISOString() }, { preserveSessionTitles });
-          if (new TextEncoder().encode(JSON.stringify(next)).byteLength > MAX_DEVICE_RECORD_BYTES) {
+          const storageKey = `dev:${next.deviceId}`;
+          const encoder = new TextEncoder();
+          const storageBytes = encoder.encode(storageKey).byteLength
+            + encoder.encode(JSON.stringify(next)).byteLength;
+          if (storageBytes > MAX_DEVICE_STORAGE_BYTES) {
             throw Object.assign(new Error('payload_too_large'), { status: 413, code: 'payload_too_large' });
           }
-          await this.state.storage.put(`dev:${next.deviceId}`, next);
+          await this.state.storage.put(storageKey, next);
           this.uploadBaselines.forget(deviceId);
           if (delta || request.headers.get(uploadDelta.UPLOAD_HEADER) === uploadDelta.UPLOAD_VERSION) {
             upload = this.uploadBaselines.commit(deviceId, stripSessionTextFromDeviceRecord(incoming, { preserveSessionTitles }));

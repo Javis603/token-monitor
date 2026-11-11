@@ -4,8 +4,8 @@ const { applyStatsPatch } = require('./hubDelta');
 
 const UPLOAD_HEADER = 'x-token-monitor-upload';
 const UPLOAD_VERSION = '1';
-// SQLite Durable Object storage allows 8 MB for the key and value together.
-// Stay at 2 MiB so the `dev:` key and a merged record still fit. Baseline
+// Normalization can expand compact sessions several times over, so the Worker
+// also bounds the stored record against its Durable Object limit. Baseline
 // storage defaults to 16 times this value.
 const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 

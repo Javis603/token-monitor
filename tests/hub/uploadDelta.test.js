@@ -273,3 +273,63 @@ test('Worker rejects a merged record above its storage budget without writing th
   assert.equal(accepted.status, 200);
   assert.equal(Object.keys((await hub.device()).periods.month.sessions).length, 15000);
 });
+
+test('Worker counts the storage key against the Durable Object budget', async t => {
+  const hub = await backend('Worker', t);
+  const deviceId = 'd'.repeat(1200000);
+  const payload = client => {
+    const base = summaryForUpload({ sessions: 0 });
+    const sessions = Object.fromEntries(Array.from({ length: 4500 }, (_, index) => [
+      `${client}:s${index}`,
+      { client, sessionId: `s${index}`, totalTokens: 1 }
+    ]));
+    return {
+      ...base,
+      deviceId,
+      trackedClients: [client],
+      month: { ...base.month, sessions, totalTokens: 4500, clients: { [client]: 4500 } }
+    };
+  };
+  const send = body => hub.send('https://hub.invalid/api/ingest', {
+    method: 'POST', headers: hub.headers, body
+  });
+
+  for (const client of ['claude', 'codex']) {
+    const accepted = await send(JSON.stringify(payload(client)));
+    assert.equal(accepted.status, 200);
+  }
+  const before = await hub.device();
+  assert.equal(Object.keys(before.periods.month.sessions).length, 9000);
+
+  const rejected = await send(JSON.stringify(payload('gemini')));
+  assert.equal(rejected.status, 413);
+  assert.equal((await rejected.json()).error, 'payload_too_large');
+  assert.deepEqual(await hub.device(), before);
+});
+
+test('Worker keeps a delta baseline usable after rejecting an oversized reconstruction', async t => {
+  const hub = await backend('Worker', t);
+  const seeded = await hub.request('/api/ingest', {
+    ...summaryForUpload(),
+    padding: 'x'.repeat(1900000)
+  }, 'POST', { 'x-token-monitor-upload': '1' });
+  assert.equal(seeded.status, 200);
+  const { upload } = await seeded.json();
+  const before = await hub.device();
+  const envelope = { deviceId: 'bandwidth-fixture', baseRevision: upload.revision };
+
+  const rejected = await hub.request('/api/ingest/delta', {
+    ...envelope,
+    patch: [{ op: 'add', path: '/extra', value: 'y'.repeat(200000) }]
+  });
+  assert.equal(rejected.status, 413);
+  assert.equal((await rejected.json()).error, 'payload_too_large');
+  assert.deepEqual(await hub.device(), before);
+
+  const accepted = await hub.request('/api/ingest/delta', {
+    ...envelope,
+    patch: [{ op: 'replace', path: '/today/totalTokens', value: 1 }]
+  });
+  assert.equal(accepted.status, 200);
+  assert.equal((await hub.device()).periods.today.totalTokens, 1);
+});
