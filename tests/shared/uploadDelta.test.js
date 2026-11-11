@@ -1,7 +1,13 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createUploadBaselines } = require('../../src/shared/uploadDelta');
+const { MAX_JSON_BODY_BYTES } = require('../../src/shared/http');
+const { MAX_UPLOAD_BYTES, createUploadBaselines } = require('../../src/shared/uploadDelta');
+
+test('the hub JSON body ceiling matches the upload ceiling', () => {
+  assert.equal(MAX_UPLOAD_BYTES, 2 * 1024 * 1024);
+  assert.equal(MAX_JSON_BODY_BYTES, MAX_UPLOAD_BYTES);
+});
 
 test('upload baselines require an exact revision, apply atomically, and bind device identity', () => {
   const cache = createUploadBaselines();
@@ -24,7 +30,7 @@ test('upload baselines require an exact revision, apply atomically, and bind dev
 test('wire and reconstructed payload sizes are bounded; eviction and restart require full sync', () => {
   const cache = createUploadBaselines({ maxEntries: 1 });
   const ack = cache.commit('a', { deviceId: 'a' });
-  assert.throws(() => cache.prepare({ deviceId: 'a', baseRevision: ack.revision, patch: [{ op: 'add', path: '/huge', value: 'x'.repeat(1024 * 1024) }] }), { status: 413 });
+  assert.throws(() => cache.prepare({ deviceId: 'a', baseRevision: ack.revision, patch: [{ op: 'add', path: '/huge', value: 'x'.repeat(MAX_UPLOAD_BYTES) }] }), { status: 413 });
   cache.commit('b', { deviceId: 'b' });
   assert.throws(() => cache.prepare({ deviceId: 'a', baseRevision: ack.revision, patch: [] }), { status: 409 });
   const bounded = createUploadBaselines({ maxBytes: 100 });

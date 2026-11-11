@@ -422,3 +422,119 @@ test('fetchCursorLimits lets plan info override the sand unified flag', async ()
   assert.equal(result.windows.find((window) => window.label === 'Grok Bot')?.kind, 'weekly');
   assert.deepEqual(result.windows.map((window) => window.label), ['Cursor Models', 'Other Models', 'Grok Bot']);
 });
+
+test('Cursor limits retires switched desktop accounts from retained runtime snapshots', async (t) => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  const accounts = [
+    { id: 'user_OLD', userId: 'user_OLD', sessionToken: 'old' },
+    { id: 'user_NEW', userId: 'user_NEW', sessionToken: 'new' }
+  ];
+  let desktop = { state: 'unknown' };
+  let failure = '';
+  const calls = [];
+  const options = { cursorManualAccountIds: [] };
+  const deps = {
+    listAccounts: () => accounts,
+    readCursorDesktopSignIn: () => desktop,
+    probe: async (token) => {
+      calls.push(token);
+      if (failure) return { ok: false, error: { kind: failure } };
+      return {
+        ok: true, user: { sub: token === 'old' ? 'user_OLD' : 'user_NEW', email: `${token}@example.com` },
+        usage: { autoPercent: 20, planInfo: { isMerged: false } }
+      };
+    }
+  };
+  const seed = await fetchCursorLimits(options, deps);
+  const runtime = createLimitsRuntime({ limitProviders: ['cursor'], previousLimits: { providers: seed } }, {
+    autoStart: false, autoRetry: false,
+    probeProvider: async () => [await fetchCursorLimits(options, deps)].flat()
+  });
+  t.after(() => runtime.stop());
+  desktop = { state: 'signed-in', userId: 'user_NEW' };
+  calls.length = 0;
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  let rows = runtime.getSnapshot().providers;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].accountEmail, 'new@example.com');
+  assert.deepEqual(calls, ['new']);
+  assert.equal(JSON.stringify(rows).includes('removed'), false);
+
+  // Transient failures keep the current account and its last good usage.
+  failure = 'unavailable';
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  rows = runtime.getSnapshot().providers;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].windows.length, 1);
+
+  // A definitively rejected automatic credential leaves the quota list too.
+  failure = 'unauthorized';
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  assert.deepEqual(runtime.getSnapshot().providers, []);
+  assert.equal(accounts.length, 2); // No credential/history deletion.
+
+  // Signing in again restores the current account; signing out retires it.
+  failure = '';
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  assert.equal(runtime.getSnapshot().providers.length, 1);
+  desktop = { state: 'signed-out' };
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  assert.deepEqual(runtime.getSnapshot().providers, []);
+
+  // Manually managed accounts keep their reauthentication flow after sign-out.
+  options.cursorManualAccountIds = ['user_OLD'];
+  failure = 'unauthorized';
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  rows = runtime.getSnapshot().providers;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].accountKey, seed[0].accountKey);
+  assert.equal(rows[0].status, 'unauthorized');
+});
+
+test('Cursor limits rechecks desktop ownership when an in-flight probe completes', async () => {
+  const account = { id: 'user_CURRENT', userId: 'user_CURRENT', sessionToken: 'fixture' };
+  for (const state of [{ state: 'signed-out' }, { state: 'signed-in', userId: 'user_OTHER' }, { state: 'unknown' }]) {
+    for (const manual of [false, true]) {
+      let desktop = { state: 'signed-in', userId: account.userId };
+      const result = await fetchCursorLimits({ cursorManualAccountIds: manual ? [account.id] : [] }, {
+        listAccounts: () => [account],
+        readCursorDesktopSignIn: () => desktop,
+        probe: async () => {
+          desktop = state;
+          return { ok: true, user: { sub: account.userId }, usage: { planInfo: { isMerged: false }, autoPercent: 20 } };
+        }
+      });
+      const retired = !manual && state.state !== 'unknown';
+      assert.equal(result.removed === true, retired, `${state.state}, manual=${manual}`);
+      if (!retired) assert.equal(result.status, 'ok');
+    }
+  }
+});
+
+test('Cursor limits checks ownership after a slower sibling probe finishes', async () => {
+  for (const desktopAfter of [{ state: 'signed-out' }, { state: 'signed-in', userId: 'user_OTHER' }]) {
+    const accounts = [
+      { id: 'user_AUTO', userId: 'user_AUTO', sessionToken: 'auto' },
+      { id: 'user_MANUAL', userId: 'user_MANUAL', sessionToken: 'manual' }
+    ];
+    let desktop = { state: 'signed-in', userId: 'user_AUTO' };
+    let finishManual;
+    const slowProbe = new Promise(resolve => { finishManual = resolve; });
+    const result = fetchCursorLimits({ cursorManualAccountIds: ['user_MANUAL'] }, {
+      listAccounts: () => accounts,
+      readCursorDesktopSignIn: () => desktop,
+      probe: async token => {
+        if (token === 'manual') await slowProbe;
+        return { ok: true, user: { sub: token === 'auto' ? 'user_AUTO' : 'user_MANUAL' },
+          usage: { planInfo: { isMerged: false }, autoPercent: 20 } };
+      }
+    });
+    // Let the fast account's probe and its completion microtasks finish first.
+    await new Promise(setImmediate);
+    desktop = desktopAfter;
+    finishManual();
+    const rows = await result;
+    assert.equal(rows[0].removed, true, desktopAfter.state);
+    assert.equal(rows[1].status, 'ok');
+  }
+});

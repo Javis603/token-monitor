@@ -14,6 +14,7 @@ const { aggregateLimits, normalizeLimitProvider } = require('../../limits/core')
 const { abortError, runWithProbeDeadline } = require('../../probeDeadline');
 const { claudeWebAccountMetadata, normalizeClaudeManagedAccounts } = require('./webAccounts');
 const { hashKey } = require('../../hashKey');
+const { listRunningWslDistros } = require('../../wslUsage');
 const { CLAUDE_PROBE_ARGS, prepareClaudeProbeDir } = require('./probe');
 const {
   PLAN_LABEL_ALIASES,
@@ -121,19 +122,10 @@ function normalizeExpiresAt(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function listWslDistros(deps = {}) {
-  const readdirSync = deps.readdirSync || fs.readdirSync;
-  try {
-    return readdirSync('\\\\wsl$').filter((name) => name && !name.startsWith('.') && !name.includes('$'));
-  } catch (_) {
-    return [];
-  }
-}
-
 function wslClaudeCredentialPaths(deps = {}) {
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const paths = [];
-  for (const distro of listWslDistros(deps)) {
+  for (const distro of listRunningWslDistros(deps)) {
     const homeDir = `\\\\wsl$\\${distro}\\home`;
     let users;
     try { users = readdirSync(homeDir); } catch (_) { continue; }

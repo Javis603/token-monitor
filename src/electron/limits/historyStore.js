@@ -4,21 +4,31 @@ const crypto = require('node:crypto');
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
 const { limitWindowKey } = require('../../shared/limits/usageItems');
-const { historyAccountKey } = require('./historyIdentity');
+const { hashKey } = require('../../shared/hashKey');
+const { historyAccountKey, portableHistoryAccount: hasHistoryAccountIdentity } = require('./historyIdentity');
 const { dayKey, historyReadings } = require('../renderer/limits/historyModel');
 
 function historyWindow(window) {
   return historyReadings(window).primary;
 }
 function digest(value) { return crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex'); }
-function accountId(scope, provider) { return digest([scope, historyAccountKey(provider)]); }
-function windowId(scope, provider, window, reading) {
+function portableHistoryAccount(provider) {
+  // CLI can hash an organization label; that derived key is not an account.
+  const organizationOnly = provider.provider === 'claude' && provider.source === 'cli'
+    && !provider.accountEmail && provider.accountName
+    && provider.accountKey === hashKey('claude-cli', provider.accountName);
+  return hasHistoryAccountIdentity(provider) && !organizationOnly;
+}
+function historyScope(scope, provider) { return portableHistoryAccount(provider) ? 'account-v2' : scope; }
+function accountId(scope, provider) { return digest([historyScope(scope, provider), historyAccountKey(provider)]); }
+function windowId(scope, provider, window, reading, legacy = false) {
+  if (!legacy) scope = historyScope(scope, provider);
   const identity = [scope, historyAccountKey(provider), limitWindowKey(window), reading.unit];
   if (['credits', 'spend'].includes(window.metric) && reading.unit === 'pp') identity.push(window.currency || 'credits');
   return digest(identity);
 }
 
-function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}, onChange = () => {} } = {}) {
+function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}, onChange = () => {}, legacyScopes = () => [] } = {}) {
   let worker = null;
   let sequence = 0;
   let closed = false;
@@ -51,12 +61,38 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
       worker.postMessage({ id, method, args });
     });
   }
+  function adoptions(scope, providers) {
+    const mappings = [];
+    for (const provider of providers) {
+      if (!portableHistoryAccount(provider)) continue;
+      for (const window of provider.windows || []) {
+        const { primary, raw } = historyReadings(window);
+        const readings = [primary, raw].filter(Boolean);
+        // A missing percentage placeholder still identifies the same stream;
+        // adopt it before querying or recording its missing snapshot.
+        if (!primary && window.placeholder === true) readings.push({ unit: 'pp' });
+        // Adopt the same percentage stream that record() will interrupt.
+        if (primary && ['credits', 'spend'].includes(window.metric) && primary.unit !== 'pp') readings.push({ unit: 'pp' });
+        for (const reading of readings) {
+          const scopes = [...new Set([scope, ...legacyScopes()])];
+          mappings.push({ id: windowId(scope, provider, window, reading), account: accountId(scope, provider),
+            legacy: scopes.map(old => windowId(old, provider, window, reading, true)),
+            sources: scopes.map(old => ({ id: windowId(old, provider, window, reading, true),
+              scope: digest(old) })) });
+        }
+      }
+    }
+    return mappings;
+  }
   async function record(scope, limits) {
     const actions = [];
     for (const provider of limits?.providers || []) {
       const account = accountId(scope, provider);
-      const source = digest([provider.sourceDeviceId || '', provider.source || '', provider.sourceDetail || '']);
-      if (provider.status !== 'ok' || provider.stale) { actions.push({ account, source, failed: true }); continue; }
+      const legacySource = digest([provider.sourceDeviceId || '', provider.source || '', provider.sourceDetail || '']);
+      const portable = portableHistoryAccount(provider);
+      const source = portable ? digest([digest(scope), legacySource]) : legacySource;
+      const legacy = portable ? { account: digest([scope, historyAccountKey(provider)]), source: legacySource } : null;
+      if (provider.status !== 'ok' || provider.stale) { actions.push({ account, source, legacy, failed: true }); continue; }
       const at = Date.parse(provider.updatedAt);
       if (!Number.isFinite(at)) continue;
       const interval = Math.max(60_000, Number(limits.refreshMs) || 300_000);
@@ -74,10 +110,10 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
         }
       }
       // A successful provider result is a full snapshot, including empty windows.
-      actions.push({ account, source, snapshotAt: at, windows });
+      actions.push({ account, source, legacy, snapshotAt: at, windows });
     }
     if (!actions.length || closed) return;
-    try { await rpc('record', [actions, now()]); }
+    try { await rpc('record', [actions, now(), adoptions(scope, limits?.providers || [])]); }
     catch (error) { onError(error); }
     onChange();
   }
@@ -96,7 +132,7 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
       return { id: windowId(scope, provider, window, identity), key, window, provider: provider.provider,
         unit: identity.unit, balance: identity.balance, ...(!reading ? { placeholder: true } : {}) };
     }).filter(Boolean);
-    try { return await rpc('query', [windows, range, now()]); }
+    try { return await rpc('query', [windows, range, now(), adoptions(scope, [provider])]); }
     catch (error) {
       onError(error);
       return { persistent: false, range, windows: windows.map(({ key, window, unit, balance, placeholder }) => ({ key, window, unit, balance, ...(placeholder ? { placeholder } : {}), points: [] })) };

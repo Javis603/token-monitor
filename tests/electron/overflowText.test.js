@@ -64,6 +64,50 @@ function harness(distance = 7, options = {}) {
   return { api, element, node, document, window, frame, hover, frames, timers };
 }
 
+test('batched text updates measure each label once before applying overflow styles', () => {
+  const h = harness(100);
+  const second = h.node();
+  second.textContent = 'Another conversation';
+  h.api.bind(second);
+  h.frame(0);
+  const operations = [];
+  for (const [index, element] of [h.element, second].entries()) {
+    const content = element.children[0];
+    content.getBoundingClientRect = () => {
+      operations.push(`read:${index}`);
+      return { width: 300 };
+    };
+    Object.defineProperty(content.style, 'transform', {
+      set() { operations.push(`write:${index}`); }
+    });
+  }
+  h.api.batch(() => {
+    h.api.setText(h.element, 'Changed title');
+    h.api.batch(() => h.api.setText(second, 'Changed second title'));
+    h.api.update(h.element);
+    assert.equal(operations.some(operation => operation.startsWith('read:')), false);
+  });
+  assert.deepEqual(operations.filter(operation => operation.startsWith('read:')), ['read:0', 'read:1']);
+  const lastRead = operations.lastIndexOf('read:1');
+  assert.deepEqual(operations.slice(lastRead + 1), ['write:0', 'write:1']);
+  assert.equal(h.element.textContent, 'Changed title');
+  assert.equal(second.textContent, 'Changed second title');
+  assert.equal(h.element.classList.contains('has-overflow-fade'), true);
+  assert.equal(second.classList.contains('has-overflow-fade'), true);
+});
+
+test('batch cleanup preserves immediate overflow updates after a failed render', () => {
+  const h = harness(100);
+  assert.throws(() => h.api.batch(() => {
+    h.api.setText(h.element, 'Changed title');
+    throw new Error('render failed');
+  }), /render failed/);
+  assert.equal(h.element.classList.contains('has-overflow-fade'), true);
+  h.element.children[0].getBoundingClientRect = () => ({ width: 100 });
+  h.api.update(h.element);
+  assert.equal(h.element.classList.contains('has-overflow-fade'), false);
+});
+
 test('sync endpoint reuses hover reading and preserves its wrapper across settings pushes', () => {
   let reduced = false;
   const h = harness(100);

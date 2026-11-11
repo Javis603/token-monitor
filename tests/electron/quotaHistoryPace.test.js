@@ -28,3 +28,13 @@ test('quota pace compares remaining against the even-use guide in the chart dire
   assert.equal(cycleCombined.end, reset);
   assert.equal(cycleCombined.guideEntry, entries[1]);
 });
+
+test('an empty recent-points array does not hide current-cycle observations from the recent axis', () => {
+  const now = at(3, 12);
+  const window = { kind: 'weekly', resetsAt: new Date(at(6, 12)).toISOString() };
+  const entry = { window, points: [point(at(3, 11), 20)] };
+  const expected = combinedTrendBounds([entry], now, 'zai', { rangeMode: 'recent' });
+  const result = combinedTrendBounds([{ ...entry, recentPoints: [] }], now, 'zai', { rangeMode: 'recent' });
+  assert.deepEqual(result, expected);
+  assert.equal(result.start, at(3, 0));
+});

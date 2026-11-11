@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { startCollector, pricingFingerprint, configFingerprint, collectorAnchorTrust, localTodayKey } = require('../../src/shared/collector');
+const { startCollector, pricingFingerprint, configFingerprint, collectorAnchorTrust, collectionCalendarKey, localTodayKey } = require('../../src/shared/collector');
 const { deviceRecordFromAnchor } = require('../../src/shared/anchorSeed');
 const { emptyPeriod } = require('../../src/shared/usage');
 
@@ -81,7 +81,7 @@ test('both collector and cold-start seed refuse anchors after pricing or binary 
   const options = { clients: 'claude', allTimeSince: '2024-01-01', pricingPath: f.pricingPath, binaryRevision: 'fork-a', now: new Date() };
   const revision = pricingFingerprint(options);
   const saved = {
-    dateKey: localTodayKey(options.now), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod(),
+    dateKey: localTodayKey(options.now), calendarKey: collectionCalendarKey(options.now), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod(),
     configFingerprint: configFingerprint('claude', options.allTimeSince, true, '', '', null, revision),
     fullScanAt: options.now.toISOString()
   };

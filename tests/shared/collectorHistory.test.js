@@ -518,7 +518,7 @@ test('startCollector retains a transformed watch total until the next history ti
     assert.equal(latest.history.daily.find((day) => day.date === todayKey).tokens, 300);
     const stored = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
     assert.equal(
-      Object.values(stored.liveDays[todayKey].observations).reduce((sum, item) => sum + item.tokens, 0),
+      Object.values(stored.calendars[Intl.DateTimeFormat().resolvedOptions().timeZone].liveDays[todayKey].observations).reduce((sum, item) => sum + item.tokens, 0),
       300
     );
   } finally {
@@ -592,7 +592,7 @@ test('startCollector does not subtract a stale Dots view after the current read 
 
   const retainedTokens = () => {
     const stored = JSON.parse(fs.readFileSync(archivePath, 'utf8'));
-    return Object.values(stored.liveDays[todayKey].observations)
+    return Object.values(stored.calendars[Intl.DateTimeFormat().resolvedOptions().timeZone].liveDays[todayKey].observations)
       .reduce((sum, item) => sum + item.tokens, 0);
   };
 
@@ -758,4 +758,47 @@ test('a failed Dots ledger and throwing diagnostic observer do not discard nativ
   assert.equal(summary.today.totalTokens, 100);
   assert.equal(summary.today.costUsd, 1);
   assert.ok(diagnostics.includes('codex-local-usage-read-failed'));
+});
+
+test('failed graph scans retain archive data without claiming complete lifetime active days', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-incomplete-history-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = {
+    clients: 'claude', todayKey: '2026-06-07', dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveOptions: { path: path.join(dir, 'history.json') }
+  };
+  const initial = await collectHistoryOnce({ ...options, runGraph: async () => SAMPLE_GRAPH });
+  assert.equal(initial.summary.activeDaysComplete, true);
+  for (const codexLocalGraph of [undefined, SAMPLE_GRAPH]) {
+    const fallback = await collectHistoryOnce({ ...options, codexLocalGraph,
+      runGraph: async () => { throw new Error('fixture graph scan failed'); }
+    });
+    assert.equal(fallback.summary.activeDaysComplete, false);
+    assert.ok(fallback.daily.some(day => day.date === '2026-06-07' && day.tokens > 0));
+  }
+  const recovered = await collectHistoryOnce({ ...options, runGraph: async () => SAMPLE_GRAPH });
+  assert.equal(recovered.summary.activeDaysComplete, true);
+});
+
+test('archive read or write failures keep live History incomplete without losing its rows', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-history-archive-failure-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const options = {
+    clients: 'claude', todayKey: '2026-06-07', dailyHistoryArchiveEnabled: true,
+    dailyHistoryArchiveOptions: { path: path.join(dir, 'history.json') }
+  };
+  await collectHistoryOnce({ ...options, runGraph: async () => ({ contributions: [
+    { ...SAMPLE_GRAPH.contributions[0], date: '2024-01-01' }
+  ] }) });
+  const fail = () => { throw new Error('fixture archive I/O failure'); };
+  for (const io of [{ readJson: fail }, { writeJsonAtomic: fail }]) {
+    const history = await collectHistoryOnce({ ...options, runGraph: async () => SAMPLE_GRAPH,
+      dailyHistoryArchiveOptions: { ...options.dailyHistoryArchiveOptions, ...io }
+    });
+    assert.equal(history.summary.activeDaysComplete, false);
+    assert.equal(history.daily[0].tokens, 30);
+  }
+  const recovered = await collectHistoryOnce({ ...options, runGraph: async () => SAMPLE_GRAPH });
+  assert.equal(recovered.summary.activeDaysComplete, true);
+  assert.equal(recovered.summary.activeDays, 2);
 });

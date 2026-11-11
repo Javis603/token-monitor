@@ -1561,6 +1561,52 @@ test('aggregateHistory tolerates devices without history', () => {
   assert.deepEqual(merged.daily, []);
 });
 
+test('aggregateHistory fails closed when a usage-contributing device has no history', () => {
+  const merged = aggregateHistory([
+    {
+      deviceId: 'new-agent',
+      allTime: { totalTokens: 10 },
+      history: {
+        daily: [{ date: '2026-06-07', tokens: 10, cost: 1, perClient: {}, perModel: {} }],
+        dailyTotals: [{ date: '2026-06-07', tokens: 10, cost: 1, activeTimeMs: 0 }],
+        monthly: [],
+        summary: { activeDaysComplete: true }
+      }
+    },
+    {
+      deviceId: 'old-agent',
+      allTime: { totalTokens: 20 }
+    }
+  ]);
+
+  assert.equal(merged.summary.activeDaysComplete, false);
+  assert.equal('dailyTotals' in merged, false);
+});
+
+test('aggregateHistory fails closed when a usage-contributing device explicitly disables history', () => {
+  const merged = aggregateHistory([
+    {
+      deviceId: 'new-agent',
+      allTime: { totalTokens: 10 },
+      history: {
+        daily: [{ date: '2026-06-07', tokens: 10, cost: 1, perClient: {}, perModel: {} }],
+        dailyTotals: [{ date: '2026-06-07', tokens: 10, cost: 1, activeTimeMs: 0 }],
+        monthly: [],
+        summary: { activeDaysComplete: true }
+      }
+    },
+    {
+      deviceId: 'old-agent',
+      historyAvailable: false,
+      history: null,
+      allTime: { totalTokens: 20 }
+    }
+  ]);
+
+  assert.equal(merged.summary.activeDaysComplete, false);
+  assert.equal('dailyTotals' in merged, false);
+});
+
 test('carryDeviceHistory carries prior history forward when the incoming snapshot omits it', () => {
   const previous = {
     deviceId: 'm1', receivedAt: '2026-06-08T00:00:00.000Z',
@@ -1812,4 +1858,126 @@ test('aggregateDevices folds a pre-rename micode device into the mimo row', () =
   assert.equal(aggregate.periods.today.clients.mimo, 140);
   assert.equal(aggregate.periods.today.clients.micode, undefined);
   assert.equal(aggregate.periods.today.clientCosts.mimo, 2);
+});
+
+test('aggregateHistory ignores only confirmed empty legacy devices when computing completeness', () => {
+  const complete = {
+    deviceId: 'complete', allTime: { totalTokens: 30 },
+    history: {
+      daily: [{ date: '2026-06-07', tokens: 20 }],
+      dailyTotals: [{ date: '2024-01-01', tokens: 10 }, { date: '2026-06-07', tokens: 20 }],
+      monthly: [], summary: { activeDays: 2, activeDaysComplete: true }
+    }
+  };
+  for (const aggregate of [aggregateHistory, require('../../worker/src/shared/usage').aggregateHistory]) {
+    const emptyCurrent = aggregate([{ allTime: { totalTokens: 0 }, history: {
+      daily: [], monthly: [], dailyTotals: [], summary: { activeDaysComplete: true }
+    } }]);
+    assert.equal(emptyCurrent.summary.activeDaysComplete, true);
+    for (const allTime of [{ totalTokens: 0 }, { total_tokens: '0' }]) {
+      const legacy = { deviceId: 'empty', periods: { allTime }, history: { daily: [], monthly: [], summary: {} } };
+      const merged = aggregate([complete, legacy], { todayKey: '2026-06-07' });
+      assert.equal(merged.summary.activeDaysComplete, true);
+      assert.equal(merged.summary.activeDays, 2);
+    }
+    for (const legacy of [
+      {},
+      { history: null },
+      { allTime: { totalTokens: 10 }, history: { daily: [], monthly: [], summary: {} } },
+      { history: { daily: [], monthly: [], summary: {} } },
+      { allTime: { totalTokens: 0 }, history: { summary: { activeDays: 1 } } },
+      { allTime: { totalTokens: 0 }, history: { summary: { totalTokens: 10 } } },
+      { allTime: { totalTokens: 0 }, history: { monthly: [{ month: '2024-01', tokens: 10 }] } },
+      { allTime: { totalTokens: 0 }, history: { daily: [{ date: '2024-01-01', tokens: 10 }] } },
+      { allTime: { totalTokens: 0 }, history: { dailyTotalsOmitted: 500, summary: { activeDaysComplete: false } } }
+    ]) {
+      const merged = aggregate([complete, { deviceId: 'legacy', ...legacy }], { todayKey: '2026-06-07' });
+      assert.equal(merged.summary.activeDaysComplete, false, JSON.stringify(legacy));
+    }
+  }
+});
+
+test('aggregateHistory checks usage counters without traversing unrelated device detail', () => {
+  const unrelated = () => { throw new Error('History aggregation must not normalize unrelated detail'); };
+  for (const aggregate of [aggregateHistory, require('../../worker/src/shared/usage').aggregateHistory]) {
+    for (const nested of [false, true]) {
+      for (const history of [undefined, null, { daily: [], monthly: [], summary: {} }]) {
+        const allTime = { total_tokens: '20' };
+        Object.defineProperty(allTime, 'sessions', { get: unrelated });
+        Object.defineProperty(allTime, 'projects', { get: unrelated });
+        const record = { deviceId: 'legacy', history, ...(nested ? { periods: { allTime } } : { allTime }) };
+        Object.defineProperty(record, 'limits', { get: unrelated });
+        Object.defineProperty(record, 'today', { get: unrelated });
+        const merged = aggregate([record]);
+        assert.equal(merged.summary.activeDaysComplete, false);
+      }
+    }
+  }
+});
+
+test('ingress retains missing lifetime counter provenance across storage and limits-only updates', () => {
+  for (const api of [require('../../src/shared/usage'), require('../../worker/src/shared/usage')]) {
+    const complete = { deviceId: 'complete', allTime: { totalTokens: 10 }, history: {
+      daily: [], monthly: [], dailyTotals: [{ date: '2024-01-01', tokens: 10 }],
+      summary: { activeDaysComplete: true }
+    } };
+    for (const history of [undefined, null, { daily: [], monthly: [], summary: {} }]) {
+      let record = api.mergeSyncDeviceRecord(null, { deviceId: 'partial', today: { totalTokens: 5 }, history });
+      record = api.normalizeDeviceRecord(JSON.parse(JSON.stringify(record)));
+      assert.equal(api.aggregateHistory([complete, record]).summary.activeDaysComplete, false);
+      record = api.mergeSyncDeviceRecord(record, { deviceId: 'partial', limitsOnly: true, limits: { providers: [] } });
+      assert.equal(api.aggregateHistory([complete, record]).summary.activeDaysComplete, false);
+      record = api.mergeSyncDeviceRecord(record, { deviceId: 'partial', allTime: { totalTokens: 0 }, history: null });
+      assert.equal(record.allTimeTokensUnavailable, undefined);
+      record = api.mergeSyncDeviceRecord(record, { deviceId: 'partial', limitsOnly: true, limits: { providers: [] } });
+      assert.equal(api.aggregateHistory([complete, record]).summary.activeDaysComplete, true);
+    }
+  }
+});
+
+test('lifetime completeness rejects malformed counters and contradictory stored zeros', () => {
+  for (const api of [require('../../src/shared/usage'), require('../../worker/src/shared/usage')]) {
+    const complete = { deviceId: 'complete', allTime: { totalTokens: 10 }, history: {
+      daily: [], monthly: [], dailyTotals: [{ date: '2024-01-01', tokens: 10 }],
+      summary: { activeDaysComplete: true }
+    } };
+    for (const value of ['unknown', '', ' ', {}, [], false, Infinity]) {
+      const record = api.mergeSyncDeviceRecord(null, { deviceId: 'malformed', allTime: { totalTokens: value } });
+      assert.equal(record.allTimeTokensUnavailable, true, String(value));
+      assert.equal(api.aggregateHistory([complete, record]).summary.activeDaysComplete, false);
+    }
+    for (const value of [0, '0', '0.0', '1,000', 20]) {
+      const record = api.normalizeDeviceRecord({ allTime: { totalTokens: value } });
+      assert.equal(record.allTimeTokensUnavailable, undefined, String(value));
+    }
+    for (const period of ['today', 'month']) {
+      for (const history of [undefined, null, { daily: [], monthly: [], summary: {} }]) {
+        const stored = { deviceId: 'stored-legacy', periods: { allTime: { totalTokens: 0 }, [period]: { totalTokens: 5 } }, history };
+        assert.equal(api.aggregateHistory([complete, stored]).summary.activeDaysComplete, false);
+      }
+    }
+    const empty = api.normalizeDeviceRecord({ allTime: { totalTokens: '0.0' } });
+    assert.equal(api.aggregateHistory([complete, empty]).summary.activeDaysComplete, true);
+  }
+});
+
+test('disabled retained History stays incomplete after re-enabling until a fresh History arrives', () => {
+  for (const api of [require('../../src/shared/usage'), require('../../worker/src/shared/usage')]) {
+    const complete = { deviceId: 'switch-history', allTime: { totalTokens: 10 }, historyAvailable: true,
+      history: { daily: [{ date: '2026-06-07', tokens: 10 }], monthly: [],
+        dailyTotals: [{ date: '2026-06-07', tokens: 10 }], summary: { activeDaysComplete: true } } };
+    const original = api.mergeSyncDeviceRecord(null, complete);
+    const disabled = api.mergeSyncDeviceRecord(original, {
+      deviceId: complete.deviceId, allTime: { totalTokens: 20 }, historyAvailable: false
+    });
+    assert.equal(disabled.history.summary.activeDaysComplete, false);
+    assert.equal(original.history.summary.activeDaysComplete, true, 'do not mutate the prior snapshot');
+    assert.deepEqual(disabled.history.daily, original.history.daily);
+    let retained = JSON.parse(JSON.stringify(disabled));
+    retained = api.mergeSyncDeviceRecord(retained, { deviceId: complete.deviceId, allTime: { totalTokens: 20 }, historyAvailable: true });
+    assert.equal(api.aggregateHistory([retained]).summary.activeDaysComplete, false);
+    assert.equal(api.aggregateHistory([{ ...original, historyAvailable: false }]).summary.activeDaysComplete, false, 'old persisted records also fail closed');
+    const refreshed = api.mergeSyncDeviceRecord(retained, complete);
+    assert.equal(api.aggregateHistory([refreshed]).summary.activeDaysComplete, true);
+  }
 });

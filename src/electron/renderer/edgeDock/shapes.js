@@ -125,6 +125,19 @@
     return Math.round(value * 100) / 100;
   }
 
+  function cardCommands({ width, height, y = 0, radius = 14 }) {
+    const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+    return [
+      ['M', r, y], ['L', width - r, y],
+      ['C', width - r * ARC, y, width, y + r * ARC, width, y + r],
+      ['L', width, y + height - r],
+      ['C', width, y + height - r * ARC, width - r * ARC, y + height, width - r, y + height],
+      ['L', r, y + height],
+      ['C', r * ARC, y + height, 0, y + height - r * ARC, 0, y + height - r],
+      ['L', 0, y + r], ['C', 0, y + r * ARC, r * ARC, y, r, y], ['Z']
+    ];
+  }
+
   function toSvgPath(commands) {
     return commands.map(([op, ...points]) => `${op}${points.map(round).join(' ')}`).join(' ');
   }
@@ -170,6 +183,7 @@
         ['C', x - r, y - k, x - k, y - r, x, y - r], ['Z']];
     },
     bubbleCommands,
+    cardCommands,
     peekCommands,
     railCommands,
     toPolygons,

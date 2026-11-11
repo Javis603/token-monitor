@@ -1,5 +1,5 @@
 .quota-history-body { margin: 0; height: 100vh; overflow: hidden; background: transparent; color: var(--text); -webkit-app-region: no-drag; }
-#history { min-height: 0; height: 100vh; overflow: auto; scrollbar-width: none; gap: 0; padding: 12px; border: 1px solid var(--line); font-size: .6875rem; }
+#history { min-height: 0; height: var(--card-height, 100vh); transform: translateY(var(--card-y, 0px)); overflow: auto; scrollbar-width: none; gap: 0; padding: 12px; border: 1px solid var(--line); font-size: .6875rem; }
 #history .quota-history-content { flex: none; display: flex; flex-direction: column; gap: 0; }
 #history header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 3px; }
 #history h1 { flex: 0 0 auto; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .8125rem; font-weight: 600; margin: 0; }

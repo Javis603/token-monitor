@@ -157,7 +157,7 @@ test('Discord Rich Presence preserves non-catalog labels and omits unknown image
   const today = (id) => ({ periods: { today: { totalTokens: 100, costUsd: 0, clients: { [id]: 100 } } } });
   const gemini = buildPayload(today('gemini'));
   assert.equal(gemini.smallImageKey, 'gemini');
-  assert.equal(gemini.smallImageText, 'Gemini');
+  assert.equal(gemini.smallImageText, 'Gemini CLI');
   const unknown = buildPayload(today('other-client'));
   assert.equal(unknown.details, 'other-client · 100 tokens');
   assert.equal(unknown.smallImageKey, undefined);

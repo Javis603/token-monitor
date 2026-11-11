@@ -9,6 +9,10 @@
   const paintSvg = window.TokenMonitorLimitSvgPaint.paint;
   const i18n = window.TokenMonitorI18n;
   const $ = id => document.getElementById(id);
+  bridge.onShapeFrame(frame => {
+    $('history').style.setProperty('--card-y', `${frame.y}px`);
+    $('history').style.setProperty('--card-height', `${frame.height}px`);
+  });
   let payload = null;
   const glass = window.TokenMonitorGlassRendering;
   let material = glass.normalizeNativeMaterialState();
@@ -37,7 +41,8 @@
     trendRangeMode = view === 'unifiedRecent' ? 'recent' : 'cycle';
   }
   let restoreReading = () => {};
-  let contentAnimation = null;
+  const cardSwitch = window.TokenMonitorCardSwitch.createCardSwitch({ contentLayer: $('history'),
+    scrollSelector: '.quota-history-content', reducedMotion: reduceMotion });
   let animateMeasurement = false;
   const reducedMotionMedia = window.matchMedia('(prefers-reduced-motion: reduce)');
   const SERIES_PALETTE = ['var(--accent)', '#0ea5e9', '#8b5cf6', '#f59e0b'];
@@ -67,12 +72,11 @@
   }
   function withLeadingBaseline(points, start) {
     if (!points.length || points[0].at <= start) return points;
-    // The lane started full even when the first stored observation arrived
-    // later. Hold that starting level so the left side is not blank. Copy the
-    // first point's cycle identity so the synthetic point stays in its segment
-    // instead of creating a visible gap.
+    // Copy the first point's cycle identity, but not a later conflict onto the
+    // display-only baseline used to fill the beginning of the cycle.
     const first = points[0];
-    return [{ ...first, at: start, value: 0, breakBefore: false, uncertainBefore: false, allowanceMissingBefore: false }, ...points];
+    return [{ ...first, at: start, value: 0, breakBefore: false, uncertainBefore: false,
+      allowanceMissingBefore: false, uncertainUntil: undefined, conflictAt: undefined }, ...points];
   }
   function overlayEntries(primaryEntry) {
     if (!payload?.windows?.length || !primaryEntry) return [];
@@ -98,32 +102,38 @@
     const series = overlayEntries(entry);
     plot.replaceChildren();
     plot.setAttribute('viewBox', `0 0 ${width} 86`);
-    if (trendScaleMode === 'normalized') {
+    const entryBounds = model.trendBounds(entry.window, now, payload.provider);
+    const canNormalize = unit(entry) === 'pp'
+      && series.every(item => model.trendBounds(item.window, now, payload.provider).cycle);
+    if (trendScaleMode === 'normalized' && canNormalize) {
       drawNormalizedTrend(series, plot, width, now);
       return;
     }
     plot.setAttribute('aria-label', `${label(entry)} · ${$('trend-heading').textContent}`);
     const moneyAxis = unit(entry) !== 'pp';
+    const rangeMode = trendScaleMode === 'normalized' && !canNormalize ? 'recent' : trendRangeMode;
     const { start, end, cycle, guideEntry } = moneyAxis
-      ? { ...model.trendBounds(entry.window, now, payload.provider), guideEntry: entry }
-      : model.combinedTrendBounds(series, now, payload.provider, { rangeMode: trendRangeMode, primaryEntry: entry });
+      ? { ...entryBounds, guideEntry: entry }
+      : model.combinedTrendBounds(series, now, payload.provider, { rangeMode, primaryEntry: entry });
     const seriesWithPoints = series.map((item, idx) => {
-      const sourcePoints = (trendRangeMode === 'recent' || trendScaleMode === 'unified') && item.recentPoints?.length
+      const sourcePoints = (rangeMode === 'recent' || trendScaleMode === 'unified') && item.recentPoints?.length
         ? item.recentPoints : item.points;
       let shown = sourcePoints.filter(p => p.at >= start && p.at <= end);
       if (!shown.length) {
         const reading = model.historyReadings(item.window).primary;
         if (reading?.unit === 'pp') {
-          // A lane with no observation in this range (an unused model, or a
-          // history that starts after the cycle began) still has a current
-          // level. Start from full and descend to the current reading instead
-          // of omitting the series or leaving a blank beginning.
-          shown = item.window && trendScaleMode === 'unified'
-            ? [{ at: start, value: 0 }, { at: end, value: reading.value }]
-            : [{ at: start, value: reading.value }, { at: end, value: reading.value }];
+          // With a known cycle, connect its start to the current reading; do
+          // not put today's value at a future reset. An unused lane remains
+          // horizontal, as does a lane without known cycle bounds.
+          const itemBounds = model.trendBounds(item.window, now, payload.provider);
+          if (cycle && itemBounds.cycle && reading.value > 0) {
+            const from = Math.max(start, itemBounds.start);
+            shown = [{ at: from, value: 0 }, { at: Math.max(from, Math.min(end, now)), value: reading.value }];
+          } else shown = [{ at: start, value: reading.value }, { at: end, value: reading.value }];
         }
       } else if (unit(item) === 'pp' && cycle) {
-        shown = withLeadingBaseline(shown, start);
+        const itemBounds = model.trendBounds(item.window, now, payload.provider);
+        if (itemBounds.cycle) shown = withLeadingBaseline(shown, Math.max(start, itemBounds.start));
       }
       return { item, shown, color: seriesColor(idx, series.length) };
     });
@@ -216,7 +226,7 @@
         const reading = model.historyReadings(row.item.window).primary;
         if (reading?.unit === 'pp') points = [
           { at: row.bounds.start, value: 0 },
-          { at: row.bounds.end, value: reading.value }
+          { at: reading.value === 0 ? row.bounds.end : Math.max(row.bounds.start, Math.min(now, row.bounds.end)), value: reading.value }
         ];
       } else if (row.item && unit(row.item) === 'pp') {
         points = withLeadingBaseline(points, row.bounds.start);
@@ -229,23 +239,23 @@
       const strokeWidth = rows.length > 1 ? (isSelected ? 2 : 1.45) : 1.65;
       const opacity = rows.length > 1 && !isSelected ? 0.78 : 1;
       const XAt = at => X((at - row.bounds.start) / Math.max(1, row.bounds.end - row.bounds.start));
-      // The scaled view is a comparison of cycle progress, so draw one
-      // continuous path per lane. The source has already been clipped to the
-      // current cycle; splitting here again on reset/deadline changes produced
-      // the missing sections and visible breaks reported for Claude/Antigravity.
-      if (row.points.length > 1) {
-        let d = '';
-        row.points.forEach((point, index) => {
-          d += `${index === 0 ? 'M' : 'L'}${XAt(point.at)},${Y(100 - point.value)}`;
-        });
-        if (isSelected) {
-          const areaD = `${d} L${XAt(row.points.at(-1).at)},${bottom} L${XAt(row.points[0].at)},${bottom} Z`;
-          plot.append(paintSvg(svgNode('path', { d: areaD, class: 'quota-history-area' }), { fill: row.color }));
+      // Connect ordinary missing samples while retaining real cycle, allowance,
+      // and source-conflict boundaries established by the history model.
+      for (const segment of model.segments(row.points)) {
+        if (segment.length > 1) {
+          let d = '';
+          segment.forEach((point, index) => {
+            d += `${index === 0 ? 'M' : 'L'}${XAt(point.at)},${Y(100 - point.value)}`;
+          });
+          if (isSelected) {
+            const areaD = `${d} L${XAt(segment.at(-1).at)},${bottom} L${XAt(segment[0].at)},${bottom} Z`;
+            plot.append(paintSvg(svgNode('path', { d: areaD, class: 'quota-history-area' }), { fill: row.color }));
+          }
+          plot.append(paintSvg(svgNode('path', { d, class: 'quota-history-curve' }), { stroke: row.color, 'stroke-width': strokeWidth, opacity }));
+        } else {
+          const point = segment[0];
+          plot.append(paintSvg(svgNode('line', { x1: Math.max(left, XAt(point.at) - 2), x2: Math.min(right, XAt(point.at) + 2), y1: Y(100 - point.value), y2: Y(100 - point.value), class: 'quota-history-curve' }), { stroke: row.color, 'stroke-width': strokeWidth }));
         }
-        plot.append(paintSvg(svgNode('path', { d, class: 'quota-history-curve' }), { stroke: row.color, 'stroke-width': strokeWidth, opacity }));
-      } else if (row.points.length === 1) {
-        const point = row.points[0];
-        plot.append(paintSvg(svgNode('line', { x1: Math.max(left, XAt(point.at) - 2), x2: Math.min(right, XAt(point.at) + 2), y1: Y(100 - point.value), y2: Y(100 - point.value), class: 'quota-history-curve' }), { stroke: row.color, 'stroke-width': strokeWidth }));
       }
       const last = row.points.at(-1);
       if (last) plot.append(paintSvg(svgNode('circle', { cx: XAt(last.at), cy: Y(100 - last.value), r: isSelected ? 2.6 : 2, class: 'quota-history-dot' }), { fill: row.color, opacity }));
@@ -407,16 +417,21 @@
     }
     $('quota').hidden = meters.children.length > 0;
     if (!entry) return;
+    const entryBounds = model.trendBounds(entry.window, now, payload.provider);
     const hasAnyCycle = series.some(item => model.trendBounds(item.window, now, payload.provider).cycle);
+    const canNormalize = unit(entry) === 'pp'
+      && series.every(item => model.trendBounds(item.window, now, payload.provider).cycle);
+    const fallbackView = trendScaleMode === 'normalized' && !canNormalize;
+    const rangeMode = fallbackView ? 'recent' : trendRangeMode;
     const bounds = unit(entry) !== 'pp'
-      ? model.trendBounds(entry.window, now, payload.provider)
-      : model.combinedTrendBounds(series, now, payload.provider, { rangeMode: trendRangeMode, primaryEntry: entry });
+      ? entryBounds
+      : model.combinedTrendBounds(series, now, payload.provider, { rangeMode, primaryEntry: entry });
     const spent = unit(entry) !== 'pp' && entry.balance === false;
-    const normalized = trendScaleMode === 'normalized' && unit(entry) === 'pp';
+    const normalized = trendScaleMode === 'normalized' && canNormalize;
     $('trend-heading').textContent = normalized
       ? t('trendNormalized')
       : bounds.cycle ? t(spent ? 'trendSpent' : 'trend') : t(spent ? 'trendSpentRecent' : 'trendRecent', { count: 14 });
-    const view = currentTrendView();
+    const view = fallbackView ? 'unifiedRecent' : currentTrendView();
     const viewBtn = $('trend-view-btn');
     viewBtn.hidden = unit(entry) !== 'pp' || !hasAnyCycle;
     viewBtn.textContent = `${t(view === 'normalized' ? 'viewNormalized' : view === 'unifiedRecent' ? 'viewUnifiedRecent' : 'viewUnifiedCycle', { count: 14 })} ▾`;
@@ -426,6 +441,7 @@
     viewMenu.hidden = true;
     for (const option of viewMenu.querySelectorAll('[data-trend-view]')) {
       const optionView = option.dataset.trendView;
+      option.disabled = optionView === 'normalized' && !canNormalize;
       option.textContent = t(optionView === 'normalized' ? 'viewNormalized' : optionView === 'unifiedRecent' ? 'viewUnifiedRecent' : 'viewUnifiedCycle', { count: 14 });
       option.setAttribute('aria-checked', String(optionView === view));
     }
@@ -477,17 +493,13 @@
   }
 
   function renderContent(animate = false, opening = false) {
-    contentAnimation?.cancel();
-    contentAnimation = null;
+    const transition = cardSwitch.capture($('history-content'), !animate, opening);
     animateMeasurement = animate && !opening && !reduceMotion();
     // No outgoing snapshot: the latest account is visible before the frame moves.
     render();
     // Reopening unchanged content must also release the native show.
     scheduleSize(opening);
-    if (opening || !animate || reduceMotion()) return;
-    contentAnimation = $('history-content').animate([{ opacity: .8 }, { opacity: 1 }],
-      { duration: 150, easing: 'ease-out' });
-    contentAnimation.finished.catch(() => {});
+    cardSwitch.play($('history-content'), transition);
   }
 
   reducedMotionMedia.addEventListener('change', () => { if (reduceMotion()) renderContent(); });
@@ -520,8 +532,9 @@
     for (const bar of $('bars').children) bar.classList.remove('is-hovered');
   });
   document.addEventListener('keydown', event => { if (event.key === 'Escape') bridge.close(); });
-  document.documentElement.addEventListener('pointerenter', () => bridge.enter());
-  document.documentElement.addEventListener('pointerleave', () => bridge.leave());
+  $('history').addEventListener('pointerenter', () => bridge.enter());
+  $('history').addEventListener('pointerleave', () => bridge.leave());
+  document.addEventListener('pointermove', () => bridge.pointer());
   bridge.onRender(next => {
     const accountChanged = payload?.key !== next.key || payload?.source !== next.source;
     if (next.opening === true) hoveredBucket = '';
@@ -562,6 +575,6 @@
     if (!payload) return;
     cardLayout.prepare({ renderToken: payload.renderToken, animate: animateMeasurement, reduce: reduceMotion() }, { opening, afterPaint: true });
   }
-  window.addEventListener('pagehide', () => { cardFrames.cancel(); cardLayout.cancel(); }, { once: true });
+  window.addEventListener('pagehide', () => { cardFrames.cancel(); cardLayout.cancel(); cardSwitch.cancel(); }, { once: true });
   new ResizeObserver(() => scheduleSize()).observe($('history-content'));
 })();

@@ -19,8 +19,8 @@ function createCursorSelfSync({ selfSyncThrottle }) {
   async function maybeSyncCursor(clientsCsv, logger, options = {}) {
     throwIfAborted(options.signal);
     const enabled = new Set(normalizeClientsCsv(clientsCsv).split(',').filter(Boolean));
-    if (!enabled.has('cursor')) return;
-    if (!selfSyncThrottle.claim('cursor', options.minIntervalMs)) return;
+    if (!enabled.has('cursor')) return false;
+    if (!selfSyncThrottle.claim('cursor', options.minIntervalMs)) return false;
     const attempt = selfSyncThrottle.beginAttempt('cursor');
     const cancelAttempt = () => selfSyncThrottle.cancelAttempt('cursor', attempt);
     options.signal?.addEventListener('abort', cancelAttempt, { once: true });
@@ -49,6 +49,7 @@ function createCursorSelfSync({ selfSyncThrottle }) {
     } finally {
       options.signal?.removeEventListener('abort', cancelAttempt);
     }
+    return true;
   }
 
   return { maybeSyncCursor };

@@ -761,7 +761,7 @@ test('a pushed animation preference settles the current headline before the next
   api.animateTotalNumber(el, 1000, 2000, 1000);
   api.animateRowNumber(row, 100, 200, 600);
   const start = source.indexOf('function setRendererSettings(');
-  const end = source.indexOf('\nfunction render()', start);
+  const end = source.indexOf('\nfunction render(', start);
   vm.runInNewContext(`${source.slice(start, end)}\nthis.setSettings = setRendererSettings;`, context);
   context.setSettings({ tokenNumberAnimation: 'roll' });
   assert.ok(api.headlineNumberIsAnimatingTo(2000), 'matching settings leave the roll running');

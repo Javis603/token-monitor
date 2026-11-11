@@ -961,6 +961,63 @@
     return tagUsageItem(item, usageItems.limitUsageItemId(window), name.textContent);
   }
 
+  function quotaDetailEntries(rows) {
+    return (rows || []).map(row => [row.label, typeof row.value === 'string'
+      ? row.value : formatMoney(row.value.amount, row.value.currency)]);
+  }
+
+  function genericCreditWindowNode(provider, creditsWindow, color) {
+    const amount = creditsAmount(provider, creditsWindow);
+    if (amount === null) return null;
+    const display = creditsWindow.creditsDisplay;
+    const explicitDisplay = display === 'percent' || display === 'balance';
+    const total = creditsWindow.limit;
+    const percentDisplay = display === 'percent' && creditsWindow.showMeter !== false
+      && Number.isFinite(total) && total > 0 && amount >= 0 && amount <= total;
+    const remainingPercent = percentDisplay ? amount / total * 100 : null;
+    const displayWindow = explicitDisplay
+      ? { ...creditsWindow, showMeter: percentDisplay, remainingPercent,
+        usedPercent: percentDisplay ? 100 - remainingPercent : null }
+      : { ...creditsWindow, remainingPercent: creditsMeterPercent(provider, creditsWindow) };
+    const currency = creditsCurrency(provider, creditsWindow);
+    const detailAmount = settings()?.showLimitUsed ? total - amount : amount;
+    const balanceNode = limitWindowNode(
+      providerWindowLabel(provider, creditsWindow, 'Balance'),
+      displayWindow,
+      color,
+      0.95,
+      percentDisplay ? null : formatMoney(amount, currency),
+      percentDisplay ? `${formatMoney(detailAmount, currency)} / ${formatMoney(total, currency)}` : ''
+    );
+    balanceNode.classList.add('limit-window-wide');
+    if (!creditsWindow.resetsAt && !creditsWindow.resetDescription && !percentDisplay) balanceNode.classList.add('limit-window-no-reset');
+    return balanceNode;
+  }
+
+  function positionPluginQuotaInfo(info) {
+    if (!info) return;
+    info.classList.add('plugin-quota-info');
+    info.querySelector('.limit-detail-tooltip').classList.add('is-centered');
+  }
+
+  function pluginQuotaWindowNode(provider, window, color) {
+    const node = isCreditsWindow(window) ? genericCreditWindowNode(provider, window, color)
+      : limitWindowNode(providerWindowLabel(provider, window), window, color, window.kind === 'session' ? 0.95 : 0.68, null, window.detail);
+    if (!node) return null;
+    if (window.span !== undefined) {
+      node.dataset.limitSpan = String(window.span);
+      node.classList.toggle('limit-window-wide', window.span === 2);
+    }
+    const info = limitDetailInfoNode(quotaDetailEntries(window.infoRows));
+    if (info) {
+      positionPluginQuotaInfo(info);
+      const name = node.querySelector('.limit-window-text').children[0];
+      name.classList.add('limit-window-label');
+      name.append(info);
+    }
+    return node;
+  }
+
   // `showAllUsageItems` draws the rows the user hid as well: the settings
   // checklist is read off that render.
   function renderProviderWindows(provider, color, options = {}) {
@@ -1005,7 +1062,9 @@
       windows.classList.add('limit-windows-cursor');
       for (const quotaWindow of provider.windows || []) {
         const text = providerWindowText(provider, quotaWindow);
-        const node = limitWindowNode(quotaWindow.label || 'Quota', quotaWindow, color, 0.68, text.value, text.detail);
+        const label = providerWindowLabel(provider, quotaWindow, 'Quota');
+        const node = limitWindowNode(label, { ...quotaWindow, label }, color, 0.68, text.value, text.detail);
+        tagUsageItem(node, usageItems.limitUsageItemId(quotaWindow), label);
         node.classList.add('limit-window-wide');
         windows.append(node);
       }
@@ -1219,6 +1278,7 @@
       for (const quotaWindow of quotaWindows) {
         const node = limitWindowNode(providerWindowLabel(provider, quotaWindow), quotaWindow, color, 0.68);
         node.classList.add('limit-window-wide');
+        if (!quotaWindow.resetsAt && !quotaWindow.resetDescription) node.classList.add('limit-window-no-reset');
         windows.append(node);
       }
       const balance = provider.balance || null;
@@ -1228,7 +1288,7 @@
         const tokenPlan = mimoTokenPlanWindowFromBalance(balance);
         if (tokenPlan) {
           const node = limitWindowNode(tokenPlan.label || 'Token Plan', tokenPlan, color, 0.68);
-          node.classList.add('limit-window-wide');
+          node.classList.add('limit-window-wide', 'limit-window-no-reset');
           windows.append(node);
         } else if (balance?.planStatus === 'expired') {
           const node = limitWindowNode('Token Plan', { showMeter: false }, color, 0.68, t('limits.mimo.planExpired'));
@@ -1243,9 +1303,9 @@
       const giftBalance = optionalFiniteNumber(balance?.giftBalance);
       const cashBalance = optionalFiniteNumber(balance?.cashBalance);
       if (amount !== null || giftBalance !== null || cashBalance !== null) {
-        const detailParts = [];
-        if (giftBalance !== null) detailParts.push(`Gift ${formatMoney(giftBalance, currency)}`);
-        if (cashBalance !== null) detailParts.push(`Cash ${formatMoney(cashBalance, currency)}`);
+        const details = [];
+        if (giftBalance !== null) details.push(['Gift', formatMoney(giftBalance, currency)]);
+        if (cashBalance !== null) details.push(['Cash', formatMoney(cashBalance, currency)]);
         const balanceText = formatMoney(amount, currency) || '—';
         // Reuse the shared display-only balance meter; do not put it on the wire.
         const meterPercent = creditsMeterPercent(provider, creditsWindow);
@@ -1254,9 +1314,17 @@
           meterPercent === null ? { showMeter: false } : { remainingPercent: meterPercent },
           color,
           0.68,
-          balanceText,
-          detailParts.join(' · ')
+          balanceText
         );
+        if (details.length) {
+          const value = balanceNode.querySelector('.limit-window-text').children[1];
+          const right = document.createElement('span');
+          right.className = 'limit-spend-right';
+          value.replaceWith(right);
+          const info = limitDetailInfoNode(details);
+          info.addEventListener('click', event => event.stopPropagation());
+          right.append(value, info);
+        }
         tagUsageItem(balanceNode, 'credits', 'Balance');
         balanceNode.classList.add('limit-window-wide', 'limit-window-no-reset');
         windows.append(balanceNode);
@@ -1467,8 +1535,7 @@
       }
     } else if (provider.provider === 'qoder') {
       windows.classList.add('limit-windows-qoder');
-      const credits = windowForKind(provider, 'billing');
-      if (credits) {
+      for (const credits of windowsForKind(provider, 'billing')) {
         const node = limitWindowNode(
           credits?.label || 'Credits',
           credits,
@@ -1670,6 +1737,25 @@
       // compact line; the ⓘ tooltip carries each grant's label and coverage.
       const resetNode = claudeResetCreditsNode(provider.resetCredits);
       if (resetNode) windows.append(resetNode);
+    } else if (provider.provider === 'hark') {
+      // The default layout only draws session/weekly quotas; Hark has daily/billing pools.
+      const quotaNodes = (provider.windows || [])
+        .filter((window) => window.metric !== 'spend' && (window.kind === 'daily' || window.kind === 'billing'))
+        .map((window) => limitWindowNode(
+          providerWindowLabel(provider, window), window, color, 0.78, null, providerWindowText(provider, window).detail
+        ));
+      windows.append(...quotaNodes);
+      for (const spend of (provider.windows || []).filter((window) => window.metric === 'spend')) {
+        const value = providerWindowText(provider, spend).value;
+        if (!value) continue;
+        const label = spend.label || 'Top-up';
+        windows.append(tagUsageItem(limitNoteRowNode({
+          label,
+          summary: value,
+          ariaParts: [value]
+        }), usageItems.limitUsageItemId(spend), label));
+      }
+      repairWindowPairs(windows);
     } else if (provider.provider === 'manus') {
       // The refreshing allowance is a quota with a reset; the spendable total is a
       // points balance without a ceiling. The default branch renders neither a
@@ -1747,6 +1833,20 @@
         const node = clineCreditsNode(provider, clineCredits, clineSpend);
         if (node) windows.append(node);
       }
+    } else if (provider.provider?.startsWith('plugin:')) {
+      for (const window of provider.windows || []) {
+        const node = pluginQuotaWindowNode(provider, window, color);
+        if (node) windows.append(node);
+      }
+      repairWindowPairs(windows);
+      for (const note of provider.notes || []) {
+        const summary = note.value === undefined ? '' : typeof note.value === 'string'
+          ? note.value : formatMoney(note.value.amount, note.value.currency);
+        const node = limitNoteRowNode({ label: note.label, summary,
+          detailEntries: quotaDetailEntries(note.infoRows), ariaParts: summary ? [summary] : [] });
+        positionPluginQuotaInfo(node.querySelector('.limit-detail-tooltip-wrap'));
+        windows.append(node);
+      }
     } else {
       // Default: render only the windows the provider actually has. Providers
       // that only expose a single window shouldn't leave a half-empty bar next to
@@ -1786,18 +1886,8 @@
           }), usageItems.limitUsageItemId(creditsWindow), label));
           continue;
         }
-        const amount = creditsAmount(provider, creditsWindow);
-        if (amount === null) continue;
-        const balanceNode = limitWindowNode(
-          providerWindowLabel(provider, creditsWindow, 'Balance'),
-          { ...creditsWindow, remainingPercent: creditsMeterPercent(provider, creditsWindow) },
-          color,
-          0.95,
-          formatMoney(amount, creditsCurrency(provider, creditsWindow))
-        );
-        balanceNode.classList.add('limit-window-wide');
-        if (!creditsWindow.resetsAt && !creditsWindow.resetDescription) balanceNode.classList.add('limit-window-no-reset');
-        windows.append(balanceNode);
+        const balanceNode = genericCreditWindowNode(provider, creditsWindow, color);
+        if (balanceNode) windows.append(balanceNode);
       }
       if (provider.provider === 'minimax') {
         const spendNode = provider.balance && providerSpendNode(provider.balance, provider);
@@ -1835,11 +1925,11 @@
   }
 
   // A run of half-width rows with an odd count leaves its last row alone on a
-  // grid row, so that row spans it.
+  // grid row, so that row spans it. An explicit plugin span keeps its width.
   function repairWindowPairs(container) {
     let run = [];
     const closeRun = () => {
-      if (run.length % 2 === 1) run.at(-1).classList.add('limit-window-wide');
+      if (run.length % 2 === 1 && run.at(-1).dataset.limitSpan !== '1') run.at(-1).classList.add('limit-window-wide');
       run = [];
     };
     for (const child of container.children) {
@@ -1903,6 +1993,9 @@
   }
 
   function limitProviderFailureLabel(provider) {
+    if (provider?.provider === 'mimo' && provider.status === 'error') {
+      return presentationApi.limitProviderStatusLabel(provider).label;
+    }
     if (provider?.provider === 'workbuddy' && provider.actionRequired === 'appSessionEncrypted') {
       return t('settings.limits.status.appSessionEncrypted');
     }
@@ -1964,6 +2057,8 @@
   }
 
   function renderLimitProviderMark(id, color) {
+    const pluginMark = deps.pluginMark?.(id);
+    if (pluginMark) return pluginMark;
     const mark = document.createElement('span');
     if (hasMark(id)) {
       // .limit-icon sizes the mark, .row-icon-<id> supplies the mask: one table,
@@ -2287,12 +2382,15 @@
     if (deps.history && settings()?.limitsHistoryOpenMode !== 'off' && (provider.windows || []).some(window => (
       !usageItems.isLimitWindowHidden(settings()?.limitProviderHiddenItems, provider.provider, window)
       && !(provider.provider === 'codex' && settings()?.showCodexAdditionalLimits === false && window.additional === true)
-      && (typeof window.usedPercent === 'number' || window.metric === 'credits' && typeof window.remaining === 'number'
+      && (provider.provider !== 'antigravity' || presentationApi.antigravityQuotaWindowVisible(window))
+      && (window.placeholder === true || typeof window.usedPercent === 'number' || window.metric === 'credits' && typeof window.remaining === 'number'
       || window.metric === 'spend' && typeof window.used === 'number')
     ))) {
       const key = deps.history.key(provider);
       const openHistory = (interactive) => {
         if (!row.isConnected) return;
+        if (!interactive && id === 'mimo'
+          && row.querySelector('[data-usage-item="credits"] .limit-detail-tooltip-wrap:hover')) return;
         const rect = row.getBoundingClientRect();
         void deps.history.open(key, { x: rect.x, y: rect.y, width: rect.width, height: rect.height }, interactive).catch(() => {});
       };
@@ -2303,6 +2401,15 @@
         if (deps.history.activeKey?.()) openHistory(false);
         else hoverTimer = setTimeout(() => openHistory(false), 160);
       });
+      if (id === 'mimo') {
+        const detail = row.querySelector('[data-usage-item="credits"] .limit-detail-tooltip-wrap');
+        detail?.addEventListener('pointerenter', () => clearTimeout(hoverTimer));
+        detail?.addEventListener('pointerleave', () => {
+          if (settings()?.limitsHistoryOpenMode !== 'click' && row.matches(':hover')) {
+            hoverTimer = setTimeout(() => openHistory(false), 160);
+          }
+        });
+      }
       row.addEventListener('pointerleave', () => { clearTimeout(hoverTimer); deps.history.leave(key); });
       row.dataset.limitHistory = key;
       row.classList.toggle('is-history-active', deps.history.activeKey?.() === key);
@@ -2561,14 +2668,18 @@
     return String(provider?.accountLabel || '').trim() || limitAccountDefaultTitle(provider, index, providers);
   }
 
+  function mimoAccountRepresentatives(groups) {
+    return groups.map(group => group.find(row => row.accountEmail) || group[0]);
+  }
+
   function mimoAccountTitle(provider, index, providers) {
     const product = mimoProductLabel(provider);
     if (product) {
-      const identity = accountIdentity.accountEmailLabel(provider, providers || [provider], {
-        maskEmail: limitAccountEmailsMasked(),
-        suffix: String(provider?.accountName || '').trim()
-      }) || String(provider?.accountName || '').trim();
-      return [identity, product].filter(Boolean).join(' · ') || `Account ${index + 1}`;
+      const groups = mimoAccountGroups(providers || [provider]);
+      const representatives = mimoAccountRepresentatives(groups);
+      const groupIndex = groups.findIndex(group => group.includes(provider));
+      const identity = limitAccountDefaultTitle(representatives[groupIndex], groupIndex, representatives);
+      return `${identity} · ${product}`;
     }
     // Compatibility for rows from versions that put the product in accountName
     // and the plan in accountLabel.
@@ -2633,12 +2744,11 @@
   function appendMimoAccountProducts(list, providers, color) {
     providers.forEach((provider, index) => {
       const policy = limitAccountRowPolicy('mimo', provider, color, { grouped: true, sharedFamily: null });
-      // Readings and plan metadata identify healthy products. A status-only row
-      // needs its product title; older records fall back to the account title.
-      const statusOnly = Boolean(provider.status) && provider.status !== 'ok' && !provider.stale;
-      const title = statusOnly
-        ? (mimoProductLabel(provider) || limitAccountTitle('mimo', provider, index, providers))
-        : '';
+      // Product titles share the account heading layout; legacy failures retain their identity fallback.
+      const product = mimoProductLabel(provider);
+      const title = product === 'Console' ? 'Console' : product ? 'Desktop'
+        : provider.status && provider.status !== 'ok' && !provider.stale
+          ? limitAccountTitle('mimo', provider, index, providers) : '';
       list.append(renderLimitProviderRow('mimo', title, provider, policy.color, {
         accountRow: true,
         ...policy.options
@@ -2647,28 +2757,48 @@
   }
 
   function renderMimoProviderGroup(label, providers, color) {
+    const hidden = usageItems.hiddenUsageItemSet(settings()?.limitProviderHiddenItems, 'mimo');
     const groups = mimoAccountGroups(providers);
-    const representatives = groups.map((group) => group.find((row) => row.accountEmail) || group[0]);
-    const accountTitle = (index) => limitAccountDefaultTitle(representatives[index], index, representatives);
+    const representatives = mimoAccountRepresentatives(groups);
+    const visibleGroups = groups.map((group, index) => ({
+      index,
+      providers: group.filter(provider => {
+        if (hidden.size === 0 || provider.status !== 'ok' || provider.stale || subscriptionForProvider(provider)) return true;
+        const items = limitProviderUsageItems([provider]);
+        return items.length === 0 || items.some(item => !hidden.has(item.id));
+      })
+    })).filter(group => group.providers.length > 0);
+    const visible = visibleGroups.flatMap(group => group.providers);
+    const recorded = subscriptionsForProviderGroup('mimo', visible);
     const oneAccount = groups.length === 1;
-    const { row, list } = renderLimitProviderGroupFrame(
-      'mimo', label, providers, color, { count: oneAccount ? 0 : groups.length }
-    );
-    if (oneAccount) {
-      appendMimoAccountProducts(list, groups[0], color);
+    const { row, list, groupProvider } = renderLimitProviderGroupFrame('mimo', label, visible, color, {
+      count: oneAccount ? 0 : visibleGroups.length
+    });
+    if (visible.length === 0 && recorded.length > 0) {
+      row.children[0].replaceWith(renderLimitProviderHead('mimo', label, groupProvider, color, {
+        planText: t('settings.subscriptions.title'), hideMeta: true
+      }));
+    }
+    if (visible.length === 0 && recorded.length === 0) {
+      row.style.display = 'none';
+      return row;
+    }
+    if (oneAccount && visibleGroups.length === 1) {
+      appendMimoAccountProducts(list, visibleGroups[0].providers, color);
     } else {
-      groups.forEach((group, index) => {
+      visibleGroups.forEach(({ providers: productsForAccount, index }) => {
         const account = document.createElement('div');
         account.className = 'limit-row limit-account-row';
         const products = document.createElement('div');
         products.className = 'limit-account-list';
-        appendMimoAccountProducts(products, group, color);
-        account.append(renderLimitProviderHead('mimo', accountTitle(index), representatives[index], color, {
-          showIcon: false,
-          accountRow: true,
-          planText: '',
-          hideMeta: true
-        }), products);
+        appendMimoAccountProducts(products, productsForAccount, color);
+        account.append(renderLimitProviderHead('mimo',
+          limitAccountDefaultTitle(representatives[index], index, representatives), representatives[index], color, {
+            showIcon: false,
+            accountRow: true,
+            planText: '',
+            hideMeta: true
+          }), products);
         list.append(account);
       });
     }

@@ -86,11 +86,11 @@ test('Notch warning colour control defaults off and saves independently of the s
   }
 });
 
-test('collapsed content choices save sessions-only mode and describe only the selected behaviour', () => {
+test('collapsed content choices save each mode and describe its behaviour inside the option', () => {
   const f = controls('darwin', true);
   let change;
   f.els.notchSummaryModeInput = { value: '', addEventListener: (_event, handler) => { change = handler; } };
-  f.els.notchSummaryModeNote = { dataset: {} };
+  const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
   const start = app.indexOf("els.notchSummaryModeInput?.addEventListener('change'");
   vm.runInNewContext(app.slice(start, app.indexOf('els.edgeDockInput?', start)), f);
   for (const mode of ['sessions', 'tray', 'custom', 'auto']) {
@@ -99,9 +99,10 @@ test('collapsed content choices save sessions-only mode and describe only the se
     assert.deepEqual(f.patches.at(-1), { notchSummaryMode: mode });
     f.syncDockControls();
     const key = mode === 'auto' ? 'settings.notch.summaryModeNote' : `settings.notch.summaryMode.${mode}Note`;
-    assert.equal(f.els.notchSummaryModeNote.dataset.i18n, key);
-    assert.equal(f.els.notchSummaryModeNote.textContent, key);
+    assert.equal(f.els.notchSummaryModeInput.value, mode);
+    assert.ok(html.includes(`data-select-description="${key}"`));
   }
+  assert.doesNotMatch(html, /id="notchSummaryModeNote"/);
 });
 
 test('sessions is the default in settings loading, patching and the collapsed-content control', () => {
