@@ -42,7 +42,11 @@ test('providers with a source that answers for every account refresh as a whole'
   }
 });
 
-test('every provider declaring accountRefresh reads the refresh scope in its probe', () => {
+// A smoke check only: it catches a declaration on a provider that never looks
+// at the scope, not one with a path that ignores it. Volcengine, OpenCode,
+// WorkBuddy, Antigravity and MiMo all passed it while unsafe; whether every
+// source path filters is for the provider's own tests and review to show.
+test('every provider declaring accountRefresh at least reads the refresh scope', () => {
   const declared = LIMIT_PROVIDER_ACCOUNTS.filter((decl) => decl.accountRefresh).map((decl) => decl.id);
   assert.ok(declared.length > 0);
   for (const id of declared) {
