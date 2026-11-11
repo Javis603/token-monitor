@@ -164,7 +164,7 @@ Launch the app to start tracking this device locally, with no hub setup required
 - **Live token rate** — an optional live readout of generation speed in `tok/s` or total burn in `tok/min`
 - **Per-session detail** — open a session to see tokens per prompt, expandable to each reply's exact token split and tools used (read on-demand from local transcripts or databases, never synced)
 - **Cache hit statistics** — click any tool or model to expand a detailed breakdown of input tokens (cache hit vs miss), output tokens, and hit-rate percentages
-- **Cost & currency** — cost alongside token counts, shown in USD, AUD, BRL, CAD, CHF, CNY, EUR, GBP, HKD, INR, JPY, KRW, SGD, or TWD; exchange rates auto-update daily and can be manually overridden in Settings
+- **Cost & currency** — cost alongside token counts, shown in USD, CNY, TWD, HKD, KRW, JPY, BRL and other supported currencies; exchange rates auto-update daily and can be manually overridden in Settings
 - **Custom scan paths** — point a tool at extra session folders when yours live outside the defaults
 - **WSL usage (Windows)** — file-based usage from running WSL distros is merged about every 5 minutes; SQLite-backed tools such as OpenCode and Hermes may require a [headless agent inside WSL](docs/wsl-sqlite-setup.md)
 
