@@ -14,7 +14,7 @@ function okResponse(json) {
   return { ok: true, status: 200, json: async () => json };
 }
 
-const SAMPLE = { date: '2026-06-22', usd: { cny: 6.778, twd: 31.67, hkd: 7.839, jpy: 150 } };
+const SAMPLE = { date: '2026-06-22', usd: { cny: 6.778, twd: 31.67, hkd: 7.839, krw: 1382.5, jpy: 150 } };
 
 test('parseUsdRates maps known lowercase codes and forces USD=1', () => {
   const rates = parseUsdRates(SAMPLE);
@@ -22,6 +22,7 @@ test('parseUsdRates maps known lowercase codes and forces USD=1', () => {
   assert.equal(rates.CNY, 6.778);
   assert.equal(rates.TWD, 31.67);
   assert.equal(rates.HKD, 7.839);
+  assert.equal(rates.KRW, 1382.5);
   assert.ok(!('JPY' in rates)); // unknown code ignored
 });
 
@@ -31,11 +32,12 @@ test('parseUsdRates returns null on missing usd object', () => {
 });
 
 test('parseUsdRates rejects a partial payload missing supported currencies', () => {
-  // Only CNY present — TWD/HKD missing. Must NOT be accepted, otherwise the
+  // Only CNY present — TWD/HKD/KRW missing. Must NOT be accepted, otherwise the
   // missing currencies silently fall back to built-in defaults while the cache
   // is marked fresh/"live" for 24h.
   assert.equal(parseUsdRates({ date: '2026-06-22', usd: { cny: 6.778 } }), null);
-  assert.equal(parseUsdRates({ usd: { cny: 6.778, twd: 31.67 } }), null); // HKD missing
+  assert.equal(parseUsdRates({ usd: { cny: 6.778, twd: 31.67 } }), null); // HKD/KRW missing
+  assert.equal(parseUsdRates({ usd: { cny: 6.778, twd: 31.67, hkd: 7.839 } }), null); // KRW missing
 });
 
 test('fetchRates returns parsed rates from the first working source', async () => {

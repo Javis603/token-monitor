@@ -16,7 +16,7 @@ const KNOWN_LIMIT_STATUSES = new Set([
 ]);
 const KNOWN_WINDOW_KINDS = new Set(['session', 'daily', 'weekly', 'billing']);
 const KNOWN_LIMIT_BOUNDARY_KINDS = new Set(['reset', 'expiry', 'mixed']);
-const CURRENCIES = Object.freeze({ USD: '$', TWD: 'NT$', HKD: 'HK$', CNY: '¥' });
+const CURRENCIES = Object.freeze({ USD: '$', TWD: 'NT$', HKD: 'HK$', CNY: '¥', KRW: '₩' });
 
 function finiteNumber(value, fallback = 0) {
   const number = typeof value === 'number' ? value : Number(value);

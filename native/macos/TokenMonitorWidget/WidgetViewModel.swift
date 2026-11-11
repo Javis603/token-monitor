@@ -470,7 +470,9 @@ enum WidgetFormat {
 
     static func cost(_ usd: Double, presentation: WidgetPresentation) -> String {
         let converted = usd * presentation.currencyRate
-        return "\(presentation.currencySymbol)\(String(format: "%.2f", converted))"
+        // The won has no sub-unit; the app rounds it to whole won too.
+        let decimals = presentation.currencyCode.uppercased() == "KRW" ? 0 : 2
+        return "\(presentation.currencySymbol)\(String(format: "%.\(decimals)f", converted))"
     }
 
     // Only for a row the snapshot did not name. The app stamps displayName on
@@ -518,8 +520,11 @@ enum WidgetFormat {
     }
 
     private static func quotaAmount(_ value: Double, currency: String?) -> String {
-        let amount = String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), value)
-        return switch currency?.uppercased() {
+        let code = currency?.uppercased()
+        let format = code == "KRW" ? "%.0f" : "%.2f"
+        let amount = String(format: format, locale: Locale(identifier: "en_US_POSIX"), value)
+        return switch code {
+        case "KRW": "₩\(amount)"
         case "CNY": "¥\(amount)"
         case "USD": "$\(amount)"
         case "TWD": "NT$\(amount)"
