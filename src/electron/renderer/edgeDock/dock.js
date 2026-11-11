@@ -903,16 +903,15 @@ function statLabel(metric) {
 // user sees 萬/億 here too, never 億 beside K.
 function formatRailCost(value, unpricedTokens) {
   if (unpricedTokens > 0) return '—';
-  const code = appearance().currency || 'USD';
+  const code = currencyApi.normalizeCurrency(appearance().currency);
   const amount = Math.abs(currencyApi.convertUsd(value, code));
   if (amount >= 10_000) {
     return compactMoneyApi.formatCompactCurrencyFromUsd(
       Math.abs(value), code, appearance().compactTokenUnits, state.locale
     );
   }
-  const full = currencyApi.formatCurrencyFromUsd(value, code);
-  const symbol = full.replace(/[\d.,\s-]+$/, '');
-  const digits = amount >= 100 ? 0 : amount >= 10 ? 1 : 2;
+  const symbol = currencyApi.CURRENCY_RATES[code].symbol;
+  const digits = Math.min(currencyApi.currencyFractionDigits(code), amount >= 100 ? 0 : amount >= 10 ? 1 : 2);
   return `${symbol}${amount.toFixed(digits)}`;
 }
 
