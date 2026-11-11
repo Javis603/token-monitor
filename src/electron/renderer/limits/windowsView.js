@@ -30,6 +30,10 @@
 //   format*, limitFillPercent, …       the page's own number formatting
 //   tooltip                            { hasOpened(), markOpened(), release() },
 //                                      the host's render-hold bookkeeping
+//   tooltipSpace                       { request(height), release() } or null:
+//                                      this host's window is only as tall as the
+//                                      card it draws, so it grows the card while
+//                                      a tooltip is open
 //
 // The one exception to "everything arrives through deps" is the provider
 // catalog: which client a provider's tokens are recorded under is the same
@@ -101,7 +105,12 @@
       // `{ enabled, busy, forecast }` — the Codex reset forecast as this host
       // currently holds it, read at paint time because the widget refreshes it
       // on its own timer.
-      resetForecast = () => ({ busy: false, forecast: null })
+      resetForecast = () => ({ busy: false, forecast: null }),
+      // `{ request(height), release() }` or null. A host whose window is only as
+      // tall as the card it draws — the edge dock's bubble — cannot open a
+      // popover past the window, so it grows the card instead and holds the
+      // card's top edge while it does. No default: the page has the whole window
+      // to open into and does not need it.
     } = deps;
     const document = deps.document || globalThis.document;
 
@@ -445,6 +454,10 @@
   }
 
   function attachLimitDetailTooltip(wrap, tooltip) {
+    // Read the host's tooltip space through `deps` here rather than closing over
+    // a destructured local: this helper is also exercised on its own, with a
+    // stand-in `deps` that carries only what the flip decision needs.
+    const tooltipSpace = deps.tooltipSpace || null;
     // A popover has no positioned ancestor to lay out against, so it is anchored
     // to its own trigger. Anchor names are per-element and the panel draws many
     // of these, so each pair gets its own rather than a name declared in CSS.
@@ -461,13 +474,26 @@
       wrap.classList.add('has-opened');
       if (!wrap.isConnected) return;
       tooltip.showPopover?.();
+      // The card is as tall as the window here, so there is no space to open
+      // into above and none below either: ask for exactly the height the box
+      // needs under its trigger. Its width is the page's — max-content, capped
+      // by the caller's max-width — so the dock shows the same bubble the
+      // Limits page does, only in a card that grew to hold it.
+      //
+      // Asking before the flip decision matters: a host that grows the card
+      // opens it downward, and deciding from the un-grown window would put the
+      // box above the trigger first and move it below once the card had grown.
+      const grown = Boolean(tooltipSpace?.request(
+        Math.ceil(tooltip.offsetHeight + wrap.getBoundingClientRect().bottom + 14)
+      ) === true);
       // Measured after opening: a closed popover has no box to measure.
       const top = deps.tooltipTop?.() ?? 0;
-      tooltip.classList.toggle('is-below', wrap.getBoundingClientRect().top - top < tooltip.offsetHeight + 8);
+      tooltip.classList.toggle('is-below', grown || wrap.getBoundingClientRect().top - top < tooltip.offsetHeight + 8);
       positionCenteredDetailTooltip(tooltip);
     };
     const close = () => {
       tooltip.hidePopover?.();
+      tooltipSpace?.release();
       tooltipHost.release();
     };
     wrap.addEventListener('pointerenter', open);

@@ -1579,6 +1579,26 @@ test('bubble opens inward with its tail aimed at the cell, even when clamped', (
   assert.equal(tall.y + tall.tailY, top.y + m.shoulder + m.padding + m.cellHeight / 2);
 });
 
+test('a bubble growing for a tooltip keeps the top edge it is holding', () => {
+  const m = EDGE_DOCK_METRICS;
+  const rail = edgeDockRailBounds({ workArea, side: 'right', offset: 0.5, cellCount: 3 });
+  const small = edgeDockBubbleBounds({ railBounds: rail, cellIndex: 1, height: 120, workArea, side: 'right' });
+  const grown = edgeDockBubbleBounds({
+    railBounds: rail, cellIndex: 1, height: 400, workArea, side: 'right', anchorTop: small.y
+  });
+  assert.equal(grown.y, small.y, 'the card must not move while the window grows');
+  assert.equal(grown.height, 400);
+  // The tail still aims at the cell's centre now that the top edge is fixed.
+  const cellCenter = rail.y + m.shoulder + m.padding + m.cellHeight + m.cellGap + m.cellHeight / 2;
+  assert.equal(grown.y + grown.tailY, cellCenter);
+
+  // A hold that would run off the bottom of the work area is clamped instead.
+  const clamped = edgeDockBubbleBounds({
+    railBounds: rail, cellIndex: 1, height: 600, workArea, side: 'right', anchorTop: workArea.y + 400
+  });
+  assert.equal(clamped.y + clamped.height, workArea.y + workArea.height - m.screenMargin);
+});
+
 test('rail silhouette starts and ends on the screen edge and mirrors for the left', () => {
   const right = railCommands({ width: 64, height: 300, side: 'right', shoulder: 28, radius: 20 });
   assert.deepEqual(right[0], ['M', 64, 0]);
@@ -3797,4 +3817,53 @@ test('detail size defaults to the fitted rail and validates its independent cust
   assert.equal(edgeDockBubbleScale({ edgeDockBubbleSize: 'large' }, 0.9), 1.25);
   assert.equal(edgeDockBubbleScale({ edgeDockBubbleSize: 'custom', edgeDockBubbleCustomScale: 1.234 }), 1.25);
   assert.equal(edgeDockBubbleScale({ edgeDockBubbleSize: 'custom', edgeDockBubbleCustomScale: 9 }), 1.5);
+});
+
+test('only the third-party card grows the bubble window for a detail tooltip', async () => {
+  const source = fs.readFileSync(path.join(rendererDir, 'edgeDock/dock.js'), 'utf8');
+  const start = source.indexOf('const cardTooltipSpace = {');
+  const body = source.slice(start, source.indexOf('function createCardWindowsView', start));
+  const mount = (provider) => {
+    const reports = [];
+    const hovering = { value: false };
+    const card = { style: {}, getBoundingClientRect: () => ({ height: 106 }) };
+    const space = Function('state', 'contentLayer', 'bridge', `${body}; return cardTooltipSpace;`)(
+      { payload: { cell: { id: 'cell-1', provider } } },
+      { querySelector: (selector) => (selector === '.edge-dock-card' ? card : (hovering.value ? {} : null)) },
+      { reportBubbleSize: (...args) => reports.push(args) }
+    );
+    return { space, card, reports, hovering };
+  };
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 420));
+
+  const thirdparty = mount('thirdparty');
+  assert.equal(thirdparty.space.request(260), true, 'the card grows, so the box opens downward');
+  assert.equal(thirdparty.card.style.minHeight, '260px');
+  assert.deepEqual(thirdparty.reports, [['cell-1', 260, true]]);
+  // Asking for a height the card already holds must not re-place the window,
+  // and must still tell the caller it can open downward.
+  assert.equal(thirdparty.space.request(260), true);
+  assert.deepEqual(thirdparty.reports, [['cell-1', 260, true]]);
+  // The pointer is still on the trigger, so the room stays.
+  thirdparty.hovering.value = true;
+  thirdparty.space.release();
+  await settle();
+  assert.equal(thirdparty.card.style.minHeight, '260px');
+  assert.deepEqual(thirdparty.reports, [['cell-1', 260, true]]);
+  // Once it has left, the card gives the room back and keeps its top edge.
+  thirdparty.hovering.value = false;
+  await settle();
+  assert.equal(thirdparty.card.style.minHeight, '');
+  assert.deepEqual(thirdparty.reports, [['cell-1', 260, true], ['cell-1', 106, true]]);
+
+  // Every other provider card carries a tooltip that fits, so opening it must
+  // leave the window exactly the size the card reports.
+  for (const provider of ['workbuddy', 'deepseek']) {
+    const other = mount(provider);
+    assert.equal(other.space.request(260), undefined, `${provider} leaves the window alone`);
+    other.space.release();
+    await settle();
+    assert.equal(other.card.style.minHeight, undefined, `${provider} keeps the card's own height`);
+    assert.deepEqual(other.reports, [], `${provider} reports no size at all`);
+  }
 });
