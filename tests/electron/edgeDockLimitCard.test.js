@@ -148,10 +148,18 @@ function balancedCall(source, opening) {
 // back), and gets the real one for everything it does not name.
 function dockView(appearance = {}, overrides = {}) {
   const settings = { showLimitUsed: false, claudePrepaidBalanceEnabled: true, ...appearance };
+  // Everything a test draws counts as on screen; the view finds its row
+  // buttons through the document rather than keeping its own list of them.
+  const drawn = [];
   return createLimitWindowsView({
     document: {
-      createElement: (tagName) => new FakeElement(tagName),
-      createTextNode: (value) => ({ textContent: String(value), children: [] })
+      createElement: (tagName) => {
+        const element = new FakeElement(tagName);
+        drawn.push(element);
+        return element;
+      },
+      createTextNode: (value) => ({ textContent: String(value), children: [] }),
+      querySelectorAll: (selector) => drawn.filter((element) => element.classNames.has(selector.replace(/^\./, '')))
     },
     t: (key, params) => i18n.translate('en', key, params),
     settings: () => settings,

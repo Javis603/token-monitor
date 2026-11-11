@@ -2078,7 +2078,6 @@
   // can update them in place instead of waiting for the list's next repaint.
   const refreshButtonRows = new WeakMap();
   const refreshButtonStatus = new WeakMap();
-  const refreshButtons = new Set();
 
   function limitRowRefreshing(provider) {
     if (pendingAccountRefreshes.has(motion.providerKey(provider))) return true;
@@ -2169,13 +2168,11 @@
     }
   }
 
-  // Every button still on screen. A repaint replaces the rows, so buttons the
-  // DOM has let go of are dropped here rather than tracked.
-  function syncLimitRefreshButtons() {
-    for (const button of refreshButtons) {
-      if (button.isConnected === false) refreshButtons.delete(button);
-      else syncLimitRefreshButton(button);
-    }
+  // Every button on screen, read from the DOM rather than tracked: a repaint
+  // replaces the rows, and a list of the buttons drawn would keep each replaced
+  // one alive until the next sync.
+  function syncLimitRefreshButtons(root = document) {
+    for (const button of root.querySelectorAll('.limit-refresh-button')) syncLimitRefreshButton(button);
   }
 
   // The button and the status line that reports a click that came back empty.
@@ -2195,7 +2192,6 @@
     status.setAttribute('role', 'status');
     refreshButtonRows.set(button, provider);
     refreshButtonStatus.set(button, status);
-    refreshButtons.add(button);
     syncLimitRefreshButton(button);
     // Both hosts repaint their rows on a timer and on every stats push, so a
     // click-only button loses a press whose release lands after the repaint.
