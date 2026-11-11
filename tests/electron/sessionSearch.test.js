@@ -66,7 +66,8 @@ test('the search affordance is scoped to the session list and closing it clears 
     sessionSearchHost: node(),
     sessionSearchInput: node(),
     sessionSearchClear: node(),
-    sessionSearchStatus: { textContent: '' }
+    sessionSearchStatus: { textContent: '' },
+    breakdown: { scrollTop: 180 }
   };
   const state = { breakdown: 'session', openSession: null, sessionSearchOpen: false,
     sessionSearchQuery: '', sessionPage: 3, rowSignature: 'rows' };
@@ -105,9 +106,16 @@ test('the search affordance is scoped to the session list and closing it clears 
   assert.equal(els.sessionSearchInput.value, '');
   assert.equal(state.sessionPage, 0);
   assert.equal(state.rowSignature, '');
+  assert.equal(els.breakdown.scrollTop, 0);
   assert.equal(els.sessionSearchHost.classes.has('hidden'), false);
   assert.equal(els.sessionSearchHost.classes.has('is-open'), false);
   assert.equal(els.sessionSearchHost.inert, true);
+
+  els.breakdown.scrollTop = 240;
+  state.sessionPage = 2;
+  api.setSessionSearchOpen(true);
+  assert.equal(els.breakdown.scrollTop, 0);
+  assert.equal(state.sessionPage, 0);
 });
 
 test('background renders preserve IME composition until the completed query is committed', () => {

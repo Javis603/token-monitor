@@ -3144,6 +3144,7 @@ function setSessionSearchOpen(open, { focus = false } = {}) {
     state.sessionSearchOpen = next;
     if (!next) state.sessionSearchQuery = '';
     state.sessionPage = 0;
+    els.breakdown.scrollTop = 0;
     state.rowSignature = '';
     syncSessionSearchChrome();
   }
