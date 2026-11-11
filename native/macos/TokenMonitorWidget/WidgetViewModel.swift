@@ -520,8 +520,11 @@ enum WidgetFormat {
     }
 
     private static func quotaAmount(_ value: Double, currency: String?) -> String {
-        let amount = String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), value)
-        return switch currency?.uppercased() {
+        let code = currency?.uppercased()
+        let format = code == "KRW" ? "%.0f" : "%.2f"
+        let amount = String(format: format, locale: Locale(identifier: "en_US_POSIX"), value)
+        return switch code {
+        case "KRW": "₩\(amount)"
         case "CNY": "¥\(amount)"
         case "USD": "$\(amount)"
         case "TWD": "NT$\(amount)"
