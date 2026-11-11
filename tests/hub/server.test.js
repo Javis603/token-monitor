@@ -8,6 +8,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 
 const { createHub, resolveBindHost } = require('../../src/hub/server');
+const { MAX_JSON_BODY_BYTES } = require('../../src/shared/http');
 const { codexAccountKey } = require('../../src/shared/providers/codex/auth');
 
 function waitFor(predicate, timeoutMs = 1000) {
@@ -342,7 +343,7 @@ test('oversized ingest returns 413 without storing the device', async () => {
     const response = await fetch(`http://127.0.0.1:${port}/api/ingest`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ deviceId: 'oversized', padding: '🚀'.repeat(270_000) })
+      body: JSON.stringify({ deviceId: 'oversized', padding: '🚀'.repeat(Math.ceil((MAX_JSON_BODY_BYTES + 1) / 4)) })
     });
 
     assert.equal(response.status, 413);

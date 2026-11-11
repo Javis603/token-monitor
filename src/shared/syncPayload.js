@@ -11,6 +11,9 @@ const { isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuar
 
 const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;
 const SYNC_PAYLOAD_BUDGET_BYTES = MAX_JSON_BODY_BYTES - SYNC_PAYLOAD_MARGIN_BYTES;
+// Hubs deployed before the 2 MiB ceiling still enforce 1 MiB. A rejected
+// upload retries within the budget those Hubs accept.
+const LEGACY_SYNC_PAYLOAD_BUDGET_BYTES = 1024 * 1024 - SYNC_PAYLOAD_MARGIN_BYTES;
 const SYNC_HISTORY_COMPONENT_DAYS = 30;
 
 function hasOwn(object, key) {
@@ -362,6 +365,7 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, sy
   const retrySerialized = response.status === 413
     ? serializeSyncPayload(summary, {
         ...syncOptions,
+        maxBytes: LEGACY_SYNC_PAYLOAD_BUDGET_BYTES,
         omitHistoryTokenComponents: true,
         omitAllTimeProjects: true,
         omitModelThroughput: true
@@ -373,7 +377,7 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, sy
     try { await response.arrayBuffer(); } catch (_) { /* best-effort drain before retry */ }
     serialized = retrySerialized;
     if (typeof logger === 'function') {
-      logger('hub rejected the payload; retrying once without model timing detail, additive History components or all-time projects');
+      logger('hub rejected the payload; retrying once within the legacy 1 MiB budget without model timing detail, additive History components or all-time projects');
     }
     response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
   }
@@ -463,6 +467,7 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
 }
 
 module.exports = {
+  LEGACY_SYNC_PAYLOAD_BUDGET_BYTES,
   SYNC_PAYLOAD_BUDGET_BYTES,
   buildSyncPayload,
   createSyncPayloadUploader,

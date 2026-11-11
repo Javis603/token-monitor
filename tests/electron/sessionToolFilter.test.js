@@ -187,14 +187,15 @@ test('filter buttons keep accessible names without tooltips', () => {
 });
 
 test('hiding Sessions hides its toolbar after resolving the replacement view', () => {
-  const start = app.indexOf('function renderAppContent()');
+  const start = app.indexOf('function renderAppContent(');
   const end = app.indexOf('  const pluginPage =', start);
   const state = {breakdown:'session',openSession:null};
   let hidden = false;
   const render = Function('state', 'els', 'visibleStatsSurface', 'statsRenderScheduler', 'ensureBreakdownVisible',
+    'syncSessionSearchChrome',
     `${app.slice(start,end)}\n}; return renderAppContent;`)(state,
     {sessionToolFilter:{classList:{add(name){hidden=name==='hidden';}}}},
-    ()=>'main', {request(){}}, ()=>{state.breakdown='tool';});
+    ()=>'main', {request(){}}, ()=>{state.breakdown='tool';}, ()=>{});
   render();
   assert.equal(state.breakdown,'tool');
   assert.equal(hidden,true);

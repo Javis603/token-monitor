@@ -7,7 +7,10 @@ const { applyStatsPatch } = require('./hubDelta');
 
 const UPLOAD_HEADER = 'x-token-monitor-upload';
 const UPLOAD_VERSION = '1';
-const MAX_UPLOAD_BYTES = 1024 * 1024;
+// Normalization can expand compact sessions several times over, so the Worker
+// also bounds the stored record against its Durable Object limit. Baseline
+// storage defaults to 16 times this value.
+const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
 
 function uploadError(code, status) {
   return Object.assign(new Error(code), { code, status });
