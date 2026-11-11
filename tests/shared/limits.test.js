@@ -1844,7 +1844,7 @@ test('balance without tranches omits the field entirely', () => {
   assert.equal('tranches' in provider.balance, false);
 });
 
-test('public limits drop per-grant balance tranches but keep the amount', () => {
+test('public limits drop per-grant balance tranches and console tool fees but keep the amount', () => {
   const summary = publicLimits({
     providers: [{
       provider: 'claude',
@@ -1856,7 +1856,9 @@ test('public limits drop per-grant balance tranches but keep the amount', () => 
         amount: 113.44,
         currency: 'USD',
         quotaGroup: 'default',
-        tranches: [{ amount: 13.43, currency: 'USD', expiresAt: '2026-08-09T00:00:00Z' }]
+        tranches: [{ amount: 13.43, currency: 'USD', expiresAt: '2026-08-09T00:00:00Z' }],
+        searchSpend: 0.1,
+        fetchSpend: 0.2
       }
     }]
   });
@@ -1865,6 +1867,8 @@ test('public limits drop per-grant balance tranches but keep the amount', () => 
   assert.equal(balance.currency, 'USD');
   assert.equal(Object.hasOwn(balance, 'tranches'), false, 'per-grant expiry detail must stay private');
   assert.equal(Object.hasOwn(balance, 'quotaGroup'), false);
+  assert.equal(Object.hasOwn(balance, 'searchSpend'), false);
+  assert.equal(Object.hasOwn(balance, 'fetchSpend'), false);
 });
 
 function claudeDeviceRecord({ deviceId, source, agoMs, balance, nowMs }) {
@@ -2126,9 +2130,20 @@ test('MiniMax sync retains stale accounts independently of refreshed sources and
   }
 });
 
-test('public stats strip both console tool fees', () => {
-  const out = publicLimits({ providers: [{ provider: 'deepseek', balance: { amount: 1, currency: 'CNY', searchSpend: 0.1, fetchSpend: 0.2, quotaGroup: 'x' } }] });
-  assert.equal(out.providers[0].balance.searchSpend, undefined);
-  assert.equal(out.providers[0].balance.fetchSpend, undefined);
-  assert.equal(out.providers[0].balance.amount, 1);
+test('a fresher DeepSeek row without console fees keeps a fresh device\'s fees, not a stale one\'s', () => {
+  const nowMs = Date.parse('2026-11-11T10:05:00+08:00');
+  const device = (deviceId, updatedAt, fees) => ({ deviceId, limits: { providers: [{
+    provider: 'deepseek', accountKey: 'ds-1', status: 'ok', source: 'api', updatedAt,
+    balance: { amount: 8, currency: 'CNY', ...fees }
+  }] } });
+  const withFees = device('token', '2026-11-11T10:00:00+08:00', {
+    searchSpend: 0.3, fetchSpend: 0.1,
+    toolSpendStart: Date.parse('2026-11-01T00:00:00+08:00') / 1000,
+    toolSpendEnd: Date.parse('2026-12-01T00:00:00+08:00') / 1000
+  });
+  const fresher = device('env', '2026-11-11T10:04:00+08:00');
+  const carried = aggregateLimits([fresher, withFees], 0, nowMs).providers[0].balance;
+  assert.equal(carried.searchSpend, 0.3);
+  assert.equal(carried.fetchSpend, 0.1);
+  assert.equal(aggregateLimits([fresher, { ...withFees, stale: true }], 0, nowMs).providers[0].balance.searchSpend, undefined);
 });

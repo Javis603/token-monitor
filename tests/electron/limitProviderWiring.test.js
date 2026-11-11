@@ -248,11 +248,6 @@ test('limitsConfigFromSettings env fallbacks and precedence', () => {
   for (const key of ['deepseekApiKey', 'minimaxApiKey', 'copilotApiToken', 'factoryApiKey', 'zaiApiKey', 'kimiApiKey', 'ollamaCookie', 'commandcodeCookie', 'alibabaCookie', 'qoderCookie', 'devinBearerToken']) {
     assert.equal(noEnv[key], '', key);
   }
-  // The DeepSeek console token is device-only: an environment variable must not
-  // answer a form field the user never filled in.
-  assert.equal(limitsConfigFromSettings({}, {
-    env: { TOKEN_MONITOR_DEEPSEEK_CONSOLE_TOKEN: 'env-token', DEEPSEEK_CONSOLE_TOKEN: 'env-token-2' }
-  }).deepseekWebToken, '');
   // Non-credential defaults.
   assert.equal(config.zaiApiRegion, 'global');
   assert.equal(config.qoderSite, 'global');

@@ -15,11 +15,11 @@ read_when:
 
 The API key reads the public balance endpoint. `balanceHistory.js` derives Today / Week / Month / All-time spend from its drops and is the only daily history.
 
-The optional console token is a signed-in `platform.deepseek.com` Bearer token. It reads the current month's Search and Fetch fees from the private usage endpoint into `balance.searchSpend` and `balance.fetchSpend`. Only positive fees appear in the Spend tooltip, labeled Search and Fetch. Console months use a fixed whole-hour UTC offset, rounded down from the device's current offset.
+The optional console token is a signed-in `platform.deepseek.com` Bearer token. It reads the current month's Search and Fetch fees from the private usage endpoint into `balance.searchSpend` and `balance.fetchSpend`. Only positive fees appear in the Spend tooltip, labeled Search and Fetch. Console months use the device's current UTC offset, including 30- and 45-minute offsets. Official acceptance of non-hour offsets has not been live-verified.
 
 ## Source precedence
 
-The balance row stays authoritative when the optional console lookup fails: those failures are silent, are not cached, and leave the row unchanged. The next refresh retries the console request. A successful console result is cached for one hour per account, token, currency, and month. Both requests use the shared fetch timeout and error handling. Rows match by currency only.
+The balance row stays authoritative when the optional console lookup fails: those failures are silent, are not cached, and leave the row unchanged. The next refresh retries the console request. A successful console result, including one with no positive fees, keeps the month window for that observation and is cached for one hour per account, token, currency, and month. Failed lookups leave no window and are not cached. Both requests use the shared fetch timeout and error handling. Rows match by currency only. When several devices report the same account, Search and Fetch come from one complete observation on the newest same-currency row whose month window still contains the winning balance's update time. A later refresh may keep a cached observation for up to an hour. A stale observation is not used when the winning row is fresh. Different-currency or different-month observations are not used, and leftover fees are dropped when no observation qualifies.
 
 ## Credentials and transport
 
@@ -29,8 +29,8 @@ Once the account is linked and `ok`, the paste fields hide. Clearing a Settings-
 
 ## Invariants and known gaps
 
-Search and Fetch fees are display-only: they are never added to the ledger, period spend fields, or meter, and the public surface strips them with `quotaGroup`/`tranches`.
+Search and Fetch fees are display-only: they are never added to the ledger, period spend fields, or meter, and the public surface strips them, along with the console month window used to merge them, with `quotaGroup`/`tranches`.
 
 ## Verification
 
-`node --test tests/shared/deepseekLimits.test.js` covers balance history, console fee mapping, the one-hour success cache, and uncached failures. The tests use fixtures, not a live endpoint. A real API key and a current console token are still needed to confirm the private usage endpoint.
+`node --test tests/shared/deepseekLimits.test.js` covers balance history, console fee mapping, successful cache reuse, month-change invalidation, and uncached failures. The tests use fixtures, not a live endpoint. A real API key and a current console token are still needed to confirm the private usage endpoint, including non-hour time zones.
