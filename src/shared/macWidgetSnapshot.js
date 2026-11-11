@@ -1,5 +1,6 @@
 'use strict';
 
+const { CURRENCY_RATES } = require('./currency');
 const { CLIENT_LABELS } = require('./clientCatalog');
 const { KNOWN_CLIENTS } = require('./clientTracking');
 const { LIMIT_PROVIDER_IDS, LIMIT_PROVIDER_LABELS, VALID_LIMIT_WINDOW_METRICS } = require('./limits/providers');
@@ -16,7 +17,6 @@ const KNOWN_LIMIT_STATUSES = new Set([
 ]);
 const KNOWN_WINDOW_KINDS = new Set(['session', 'daily', 'weekly', 'billing']);
 const KNOWN_LIMIT_BOUNDARY_KINDS = new Set(['reset', 'expiry', 'mixed']);
-const CURRENCIES = Object.freeze({ USD: '$', TWD: 'NT$', HKD: 'HK$', CNY: '¥', KRW: '₩' });
 
 function finiteNumber(value, fallback = 0) {
   const number = typeof value === 'number' ? value : Number(value);
@@ -212,7 +212,7 @@ function buildProviderBalance(provider) {
   if (!source || typeof source !== 'object') return null;
   const amount = optionalFiniteNumber(source.amount);
   const currency = String(source.currency || '').trim().toUpperCase();
-  if (amount === null || (!Object.hasOwn(CURRENCIES, currency) && currency !== 'CREDITS')) return null;
+  if (amount === null || (!Object.hasOwn(CURRENCY_RATES, currency) && currency !== 'CREDITS')) return null;
   const allTimeSpend = optionalFiniteNumber(source.allTimeSpend);
   return {
     amount,
@@ -578,11 +578,11 @@ function buildPeriodSnapshot(stats, period, history, now) {
 
 function buildPresentation(source = {}) {
   const currencyCode = String(source.currencyCode || source.currency || 'USD').trim().toUpperCase();
-  const safeCurrency = Object.hasOwn(CURRENCIES, currencyCode) ? currencyCode : 'USD';
+  const safeCurrency = Object.hasOwn(CURRENCY_RATES, currencyCode) ? currencyCode : 'USD';
   const locale = String(source.locale || 'auto').trim();
   return {
     currencyCode: safeCurrency,
-    currencySymbol: CURRENCIES[safeCurrency],
+    currencySymbol: CURRENCY_RATES[safeCurrency].symbol,
     currencyRate: Math.max(0.000001, finiteNumber(source.currencyRate, 1)),
     numberStyle: source.compactNumbers === false ? 'full' : 'compact',
     compactTokenUnits: source.compactTokenUnits === 'localized' ? 'localized' : 'western',
