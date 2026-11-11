@@ -5149,6 +5149,8 @@ html.is-windows .settings-panel select option {
   pointer-events: auto;
   color: var(--limit-refresh-failure);
 }
+/* Empty, it stays in the DOM as the live region but takes no gap after the button. */
+.limit-refresh-status:empty { margin-left: -0.6em; }
 .limit-refresh-status {
   min-width: 0;
   overflow: hidden;
