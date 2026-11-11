@@ -799,9 +799,9 @@
   }
 
   // The combined row keeps the per-account Spend figures: sum every period
-  // at least one account reports, keep the earliest tracking start, and stay
-  // partial while any account's month is still filling in. Rows from a device
-  // that predates spend tracking contribute nothing rather than zeros.
+  // at least one account reports and stay partial while any account's figure
+  // is incomplete. Rows from a device that predates spend tracking contribute
+  // nothing rather than zeros.
   function combinedWorkbuddyBalance(providers, remaining) {
     const spend = {};
     let tracked = false;
@@ -817,21 +817,13 @@
         tracked = true;
       }
     }
-    const trackingStarts = providers
-      .map((provider) => Date.parse(provider?.balance?.trackingSince || ''))
-      .filter((ms) => Number.isFinite(ms))
-      .sort((a, b) => a - b);
-    if (trackingStarts.length > 0) {
-      spend.trackingSince = new Date(trackingStarts[0]).toISOString();
-      tracked = true;
-    }
     if (tracked) {
-      // A definite flag whenever the row carries spend: partial while any
-      // account's month is still filling in, or while any account reports no
-      // tracking at all — a row from a device that predates spend tracking
-      // contributes nothing to the sum, so the month figure is understated.
+      // The ledger reports no trackingSince: a month is partial when the 31-day
+      // window cannot reach its first day (monthSinceTracking) or when any
+      // account reports no Spend at all — that row contributes nothing to the
+      // sum, so a complete-looking total would be understated.
       spend.monthSinceTracking = providers.some((provider) => provider?.balance?.monthSinceTracking === true
-        || !Number.isFinite(Date.parse(provider?.balance?.trackingSince || '')));
+        || spendNumber(provider?.balance?.todaySpend) === null);
     }
     return { amount: remaining, currency: 'CREDITS', ...(tracked ? spend : {}) };
   }

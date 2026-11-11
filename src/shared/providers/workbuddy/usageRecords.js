@@ -18,9 +18,11 @@
 // is reported as partial instead of silently short.
 const WORKBUDDY_USAGE_WINDOW_DAYS = 31;
 
-// The ledger is a bounded read: a generous page count still terminates, and a
-// truncated scan reports itself instead of silently understating spend.
-const WORKBUDDY_USAGE_PAGE_SIZE = 100;
+// The ledger accepts a large page size: a real 3,000-row month answers in
+// three 1,000-row pages (~5s), while 100-row pages need 30 requests (~43s) and
+// would outlast the account's collection deadline. A generous page count still
+// terminates, and a truncated scan reports itself instead of understating spend.
+const WORKBUDDY_USAGE_PAGE_SIZE = 1000;
 const WORKBUDDY_USAGE_MAX_PAGES = 50;
 // Unlike the quota actions, this read lives at the UNVERSIONED path: the server
 // answers `/v2/billing/meter/get-user-request-usage` with 404 Route Not Found.
@@ -83,11 +85,18 @@ function parseRecordTime(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+// An unreadable response (a null body, or a payload with no row array) is not
+// an empty ledger: treating it as one would publish zero Spend for an account
+// whose billing rows we never saw. Only a present row array is a valid page.
 function usageRows(body) {
   const data = body?.data;
-  const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data?.rows) ? data.rows : [];
+  const rows = Array.isArray(data?.data) ? data.data : Array.isArray(data?.rows) ? data.rows : null;
   const total = Number(data?.total);
-  return { rows, total: Number.isSafeInteger(total) && total >= 0 ? total : null };
+  return {
+    rows: rows || [],
+    valid: rows !== null,
+    total: Number.isSafeInteger(total) && total >= 0 ? total : null
+  };
 }
 
 function recordCredit(row) {
@@ -152,15 +161,20 @@ function usageRequestBody(now) {
  * @param post - `(body) => Promise<body>` bound to the account's billing
  *   transport, so this module never owns credentials, hosts or realms.
  * @param now - observation time in epoch milliseconds.
- * @returns the Spend periods plus `truncated` when the page bound was reached.
+ * @param signal - optional signal from the caller's short ledger deadline;
+ *   an aborted scan yields `null` rather than a partial sum.
+ * @returns the Spend periods plus `truncated` when the page bound was reached,
+ *   or `null` when the ledger could not be read.
  */
-async function fetchWorkbuddyUsageSpend(post, now) {
+async function fetchWorkbuddyUsageSpend(post, now, signal = null) {
   const records = [];
   let truncated = false;
   let expected = null;
   for (let page = 1; page <= WORKBUDDY_USAGE_MAX_PAGES; page += 1) {
+    if (signal?.aborted) return null;
     const body = await post({ ...usageRequestBody(now), pageNum: page });
-    const { rows, total } = usageRows(body);
+    const { rows, total, valid } = usageRows(body);
+    if (!valid) return null;
     if (expected === null) expected = total;
     if (!rows.length) break;
     records.push(...rows);

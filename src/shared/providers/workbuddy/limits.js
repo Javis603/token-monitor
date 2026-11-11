@@ -11,6 +11,12 @@ const WORKBUDDY_FETCH_TIMEOUT_MS = 12_000;
 const WORKBUDDY_ACCOUNT_CONCURRENCY = 4;
 // Match the limits collector's physical bound; its cleanup grace is not work time.
 const WORKBUDDY_PROBE_BUDGET_MS = 120_000;
+// Spend is enrichment: a stalled ledger scan gets its own deadline well inside
+// the 120s account budget, so it can never turn a healthy quota row into a
+// timeout. A full 31-day ledger is ~3 paged requests (~5s); 30s covers accounts
+// with far more rows while still bounding a stalled read. The read resolves to
+// null on abort and the Credits balance stands.
+const WORKBUDDY_LEDGER_TIMEOUT_MS = 30_000;
 const WORKBUDDY_DEFAULT_ENDPOINT = 'https://copilot.tencent.com';
 const WORKBUDDY_AI_ENDPOINT = 'https://www.workbuddy.ai';
 const WORKBUDDY_PERSONAL_PATH = '/v2/billing/meter/get-user-resource';
@@ -449,7 +455,7 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
       // The ledger read shares the quota request's credentials, host, realm
       // paths and transport, so a Spend figure can never be fetched with a
       // different account's token or from a different realm.
-      const billingPost = async (paths, requestBody) => {
+      const billingPost = async (paths, requestBody, ledgerSignal = null) => {
         const token = cleanSecret(credential?.accessToken);
         const credentialDomain = cleanSecret(credential?.domain) || domain;
         if (managed && !token) throw Object.assign(new Error('WorkBuddy managed credential is missing'), { status: 'notConfigured' });
@@ -463,8 +469,11 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
           body: JSON.stringify(requestBody)
         };
         const endpoint = realm === 'ai' ? WORKBUDDY_AI_ENDPOINT : WORKBUDDY_DEFAULT_ENDPOINT;
+        // The ledger scan carries its own short signal: an aborted read cannot
+        // keep the account's quota deadline open.
+        const callDeps = ledgerSignal ? { ...requestDeps, signal: ledgerSignal } : requestDeps;
         const send = async (index) => {
-          try { return await fetchJson(`${endpoint}${paths[index]}`, init, requestDeps); }
+          try { return await fetchJson(`${endpoint}${paths[index]}`, init, callDeps); }
           catch (error) {
             if (error.httpStatus !== 404 || index === paths.length - 1) throw error;
             return send(index + 1);
@@ -499,9 +508,21 @@ async function fetchWorkbuddyAccount(options, deps, account = null, managed = fa
       // Today/Week/Month come from the per-request billing ledger, which carries
       // its own timestamps. A probe is the user checking a credential they just
       // saved, and the ledger read costs extra requests, so it is skipped there.
-      const tracked = usage.window && !deps.probe
-        ? await recordWorkbuddyUsage((requestBody) => billingPost(spendPaths, requestBody), now)
-        : null;
+      // The scan has its own short deadline: a stalled ledger must not consume
+      // the account's quota budget or turn a healthy Credits row into a timeout.
+      const ledgerController = new AbortController();
+      const ledgerTimer = setTimeout(() => ledgerController.abort(), WORKBUDDY_LEDGER_TIMEOUT_MS);
+      const ledgerSignal = AbortSignal.any([signal, ledgerController.signal]);
+      let tracked;
+      try {
+        tracked = usage.window && !deps.probe
+          ? await recordWorkbuddyUsage(
+            (requestBody) => billingPost(spendPaths, requestBody, ledgerSignal),
+            now, ledgerSignal)
+          : null;
+      } finally {
+        clearTimeout(ledgerTimer);
+      }
       return row('ok', {
         accountKey: resolvedAccountKey,
         windows: usage.window ? [usage.window] : [],

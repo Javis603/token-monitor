@@ -14,6 +14,7 @@ const {
   workbuddyAccountKey
 } = workbuddyLimits;
 const { collectLimitsOnce } = require('../../src/shared/limits/collector');
+const { WORKBUDDY_USAGE_PAGE_SIZE } = require('../../src/shared/providers/workbuddy/usageRecords');
 
 // The usage ledger defaults to the app's own data directory, which a test must
 // never write: the same isolation the archive tests make with this variable,
@@ -283,7 +284,7 @@ test('fetchWorkbuddyLimits sums Credits spend from the per-request billing ledge
   assert.equal(requests[1].init.headers.Authorization, 'Bearer fixture-access-token');
   assert.equal(requests[1].init.headers['X-User-Id'], 'user-123');
   const spendBody = JSON.parse(requests[1].init.body);
-  assert.equal(spendBody.pageSize, 100);
+  assert.equal(spendBody.pageSize, WORKBUDDY_USAGE_PAGE_SIZE);
   assert.equal(spendBody.pageNum, 1);
   assert.match(spendBody.startTime, /^\d{4}-\d{2}-\d{2} 00:00:00$/);
   assert.equal(provider.balance.todaySpend, 115.17);

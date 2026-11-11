@@ -329,7 +329,6 @@ test('WorkBuddy combined totals carry the summed per-account spend', () => {
       weekSpend: 12,
       monthSpend: 30,
       allTimeSpend: 120,
-      trackingSince: '2026-10-01T00:00:00.000Z',
       monthSinceTracking: false
     }
   }));
@@ -341,7 +340,9 @@ test('WorkBuddy combined totals carry the summed per-account spend', () => {
   assert.equal(combined.balance.weekSpend, 24);
   assert.equal(combined.balance.monthSpend, 60);
   assert.equal(combined.balance.allTimeSpend, 240);
-  assert.equal(combined.balance.trackingSince, '2026-10-01T00:00:00.000Z');
+  // The ledger emits no trackingSince; the combined row must neither inherit
+  // one nor treat its absence as an incomplete month.
+  assert.equal('trackingSince' in combined.balance, false);
   assert.equal(combined.balance.monthSinceTracking, false);
 });
 
@@ -363,7 +364,6 @@ test('WorkBuddy combined totals only sum accounts that report spend', () => {
     todaySpend: 5,
     monthSpend: 30,
     allTimeSpend: 120,
-    trackingSince: '2026-10-19T00:00:00.000Z',
     monthSinceTracking: true
   });
   // A row from a device that predates spend tracking reports no spend fields.
@@ -374,11 +374,11 @@ test('WorkBuddy combined totals only sum accounts that report spend', () => {
   assert.equal(combined.balance.todaySpend, 5);
   assert.equal(combined.balance.monthSpend, 30);
   assert.equal(combined.balance.allTimeSpend, 120);
-  assert.equal(combined.balance.trackingSince, '2026-10-19T00:00:00.000Z');
+  assert.equal('trackingSince' in combined.balance, false);
   assert.equal(combined.balance.monthSinceTracking, true);
 });
 
-test('WorkBuddy combined totals stay partial while any account reports no tracking', () => {
+test('WorkBuddy combined totals stay partial while any account reports no spend', () => {
   const now = Date.parse('2026-10-19T00:10:00Z');
   const at = new Date(now).toISOString();
   const row = (accountKey, balance) => normalizeLimitProvider({
@@ -390,15 +390,14 @@ test('WorkBuddy combined totals stay partial while any account reports no tracki
     windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }],
     ...(balance ? { balance } : {})
   });
-  // Tracking began before this month, so this row's month figure is complete —
-  // but the legacy row's spend is missing from the sum, which keeps it partial.
+  // This row's month is fully covered by the ledger window, but the legacy
+  // row's spend is missing from the sum, which keeps the combined row partial.
   const complete = row('complete', {
     amount: 80,
     currency: 'CREDITS',
     todaySpend: 5,
     monthSpend: 30,
     allTimeSpend: 120,
-    trackingSince: '2026-09-02T00:00:00.000Z',
     monthSinceTracking: false
   });
   const legacy = row('legacy', { amount: 80, currency: 'CREDITS' });
@@ -406,6 +405,29 @@ test('WorkBuddy combined totals stay partial while any account reports no tracki
 
   const combined = view.workbuddyCombinedProvider([complete, legacy]);
   assert.equal(combined.balance.monthSpend, 30);
+  assert.equal(combined.balance.monthSinceTracking, true);
+});
+
+test('WorkBuddy combined totals stay partial while any account month is incomplete', () => {
+  const at = new Date(Date.parse('2026-10-19T00:10:00Z')).toISOString();
+  const row = (accountKey, balance) => normalizeLimitProvider({
+    provider: 'workbuddy', accountKey, status: 'ok', region: 'cn', updatedAt: at,
+    windows: [{ kind: 'billing', metric: 'credits', currency: 'CREDITS', used: 20, remaining: 80, limit: 100 }],
+    balance
+  });
+  const complete = row('complete', {
+    amount: 80, currency: 'CREDITS', todaySpend: 5, weekSpend: 12, monthSpend: 30,
+    monthSinceTracking: false
+  });
+  // An account whose month starts before the ledger's 31-day window is a floor.
+  const partial = row('partial', {
+    amount: 80, currency: 'CREDITS', todaySpend: 3, weekSpend: 8, monthSpend: 20,
+    monthSinceTracking: true
+  });
+  const view = dockView({ workbuddyQuotaTotalEnabled: true }, { subscriptionAccounts: () => [complete, partial] });
+
+  const combined = view.workbuddyCombinedProvider([complete, partial]);
+  assert.equal(combined.balance.todaySpend, 8);
   assert.equal(combined.balance.monthSinceTracking, true);
 });
 

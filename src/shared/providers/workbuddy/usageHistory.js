@@ -20,18 +20,24 @@ const { fetchWorkbuddyUsageSpend } = require('./usageRecords');
  * throws or is refused yields `null`, and the caller keeps publishing the
  * Credits balance without the Spend fields.
  *
- * @param post - `(path, body) => Promise<body>`, bound to the account's billing
+ * @param post - `(body) => Promise<body>`, bound to the account's billing
  *   transport so credentials, host and realm stay in `limits.js`.
  * @param now - observation time in epoch milliseconds.
+ * @param signal - optional short-deadline signal for the ledger scan.
  * @returns the Spend fields, or `null` when the ledger could not be read.
  */
-async function recordWorkbuddyUsage(post, now) {
+async function recordWorkbuddyUsage(post, now, signal = null) {
   if (typeof post !== 'function') return null;
   const nowMs = Number(now);
   if (!Number.isFinite(nowMs) || !Number.isFinite(new Date(nowMs).getTime())) return null;
   try {
-    const spend = await fetchWorkbuddyUsageSpend(post, nowMs);
+    const spend = await fetchWorkbuddyUsageSpend(post, nowMs, signal);
     if (!spend) return null;
+    // A scan that hit its page bound cannot state a complete total: publishing
+    // a partial sum as Today/Week/Month would understate spend silently. The
+    // flag is not part of the shared balance wire contract, so the honest
+    // behaviour is to omit the Spend fields entirely.
+    if (spend.truncated) return null;
     return {
       todaySpend: spend.todaySpend,
       weekSpend: spend.weekSpend,
@@ -45,8 +51,7 @@ async function recordWorkbuddyUsage(post, now) {
       // A month whose first day falls outside the window is a floor, not a
       // total; `monthSinceTracking` marks it, the same partial-coverage signal
       // DeepSeek and Z.ai emit.
-      monthSinceTracking: !spend.monthFullyCovered,
-      ...(spend.truncated ? { spendTruncated: true } : {})
+      monthSinceTracking: !spend.monthFullyCovered
     };
   } catch (_) {
     return null;

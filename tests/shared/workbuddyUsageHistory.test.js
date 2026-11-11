@@ -6,6 +6,7 @@ const test = require('node:test');
 const { recordWorkbuddyUsage } = require('../../src/shared/providers/workbuddy/usageHistory');
 const {
   WORKBUDDY_USAGE_MAX_PAGES,
+  WORKBUDDY_USAGE_PAGE_SIZE,
   fetchWorkbuddyUsageSpend,
   parseRecordTime,
   summarizeUsageRecords,
@@ -78,7 +79,7 @@ test('usageRequestBody: the window spans the maximum the API accepts', () => {
   assert.equal(body.startTime, '2026-09-20 00:00:00');
   assert.equal(body.endTime, '2026-10-21 16:00:00');
   assert.equal(body.pageNum, 1);
-  assert.equal(body.pageSize, 100);
+  assert.equal(body.pageSize, WORKBUDDY_USAGE_PAGE_SIZE);
 });
 
 test('fetchWorkbuddyUsageSpend: Month keeps rows the week window dropped', async () => {
@@ -112,12 +113,12 @@ test('fetchWorkbuddyUsageSpend: reads every page and reports no truncation', asy
   const spend = await fetchWorkbuddyUsageSpend(async (body) => {
     pages.push(body.pageNum);
     if (body.pageNum === 1) {
-      return { data: { total: 150, data: Array.from({ length: 100 }, () => ({ requestTime: now - 1_000, credit: 1 })) } };
+      return { data: { total: WORKBUDDY_USAGE_PAGE_SIZE + 50, data: Array.from({ length: WORKBUDDY_USAGE_PAGE_SIZE }, () => ({ requestTime: now - 1_000, credit: 1 })) } };
     }
-    return { data: { total: 150, data: Array.from({ length: 50 }, () => ({ requestTime: now - 2_000, credit: 1 })) } };
+    return { data: { total: WORKBUDDY_USAGE_PAGE_SIZE + 50, data: Array.from({ length: 50 }, () => ({ requestTime: now - 2_000, credit: 1 })) } };
   }, now);
   assert.deepEqual(pages, [1, 2]);
-  assert.equal(spend.todaySpend, 150);
+  assert.equal(spend.todaySpend, WORKBUDDY_USAGE_PAGE_SIZE + 50);
   assert.equal(spend.truncated, false);
 });
 
@@ -133,11 +134,11 @@ test('fetchWorkbuddyUsageSpend: hitting the page bound reports truncation instea
   let calls = 0;
   const spend = await fetchWorkbuddyUsageSpend(async () => {
     calls += 1;
-    return { data: { data: Array.from({ length: 100 }, () => ({ requestTime: now - 1_000, credit: 0.5 })) } };
+    return { data: { data: Array.from({ length: WORKBUDDY_USAGE_PAGE_SIZE }, () => ({ requestTime: now - 1_000, credit: 0.5 })) } };
   }, now);
   assert.equal(calls, WORKBUDDY_USAGE_MAX_PAGES);
   assert.equal(spend.truncated, true);
-  assert.equal(spend.allTimeSpend, WORKBUDDY_USAGE_MAX_PAGES * 50);
+  assert.equal(spend.allTimeSpend, WORKBUDDY_USAGE_MAX_PAGES * WORKBUDDY_USAGE_PAGE_SIZE * 0.5);
 });
 
 test('recordWorkbuddyUsage: publishes Today/Week/Month and no All-time figure', async () => {
@@ -155,12 +156,14 @@ test('recordWorkbuddyUsage: publishes Today/Week/Month and no All-time figure', 
   assert.equal(tracked.spendTruncated, undefined);
 });
 
-test('recordWorkbuddyUsage: a truncated scan flags the figure', async () => {
+test('recordWorkbuddyUsage: a truncated scan publishes no Spend fields', async () => {
   const now = at(2026, 10, 21);
+  // A full page on every one of the 50 allowed pages means the sum is a floor,
+  // not a total: publishing it would silently understate spend.
   const tracked = await recordWorkbuddyUsage(async () => ({
-    data: { data: Array.from({ length: 100 }, () => ({ requestTime: now - 1_000, credit: 1 })) }
+    data: { data: Array.from({ length: WORKBUDDY_USAGE_PAGE_SIZE }, () => ({ requestTime: now - 1_000, credit: 1 })) }
   }), now);
-  assert.equal(tracked.spendTruncated, true);
+  assert.equal(tracked, null);
 });
 
 test('recordWorkbuddyUsage: an unreadable ledger yields null so the balance still publishes', async () => {
@@ -169,4 +172,35 @@ test('recordWorkbuddyUsage: an unreadable ledger yields null so the balance stil
   assert.equal(await recordWorkbuddyUsage(async () => { throw Object.assign(new Error('x'), { httpStatus: 401 }); }, now), null);
   assert.equal(await recordWorkbuddyUsage(null, now), null);
   assert.equal(await recordWorkbuddyUsage(async () => ({ data: {} }), Number.NaN), null);
+});
+
+test('fetchWorkbuddyUsageSpend: an unreadable ledger response yields null, not zero', async () => {
+  const now = at(2026, 10, 21);
+  for (const body of [null, {}, { data: {} }, { data: { rows: 'nope' } }, { data: { total: 3 } }]) {
+    assert.equal(await fetchWorkbuddyUsageSpend(async () => body, now), null);
+  }
+  // A present empty row array is a genuine zero-spend answer, not a failure.
+  const empty = await fetchWorkbuddyUsageSpend(async () => ({ data: { data: [] } }), now);
+  assert.equal(empty.todaySpend, 0);
+  assert.equal(empty.truncated, false);
+});
+
+test('fetchWorkbuddyUsageSpend: an aborted ledger signal stops the scan', async () => {
+  const now = at(2026, 10, 21);
+  const controller = new AbortController();
+  controller.abort();
+  let calls = 0;
+  const spend = await fetchWorkbuddyUsageSpend(async () => {
+    calls += 1;
+    return { data: { data: [{ requestTime: now, credit: 5 }] } };
+  }, now, controller.signal);
+  assert.equal(spend, null);
+  assert.equal(calls, 0);
+});
+
+test('recordWorkbuddyUsage: an unreadable response omits the Spend fields', async () => {
+  const now = at(2026, 10, 21);
+  assert.equal(await recordWorkbuddyUsage(async () => null, now), null);
+  assert.equal(await recordWorkbuddyUsage(async () => ({ data: {} }), now), null);
+  assert.equal(await recordWorkbuddyUsage(async () => ({ data: { rows: 'invalid' } }), now), null);
 });
