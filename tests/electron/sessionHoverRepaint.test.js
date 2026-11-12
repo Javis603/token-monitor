@@ -94,7 +94,7 @@ for (const reducedMotion of [false, true]) {
   });
 }
 
-test('Home holds a real overflowing title and only flushes deferred stats on leave', () => {
+test('Home updates immediately while a real overflowing title is being read', () => {
   const app = source('app.js');
   const classes = new Set();
   const title = {
@@ -145,7 +145,8 @@ test('Home holds a real overflowing title and only flushes deferred stats on lea
       }, querySelector: () => null
     } },
     hideHomeActivityTooltip() {}, hideTrendTooltip() {}, homeModuleIds: () => ['session'], sessionPresentationOptions: () => ({}),
-    renderHomeSessionModule: () => ({ revision: state.stats.revision }), scheduleHomeSessionRepaint() {}
+    homeDom: { reconcile: (_previous, next) => next }, updateHomeActivity() {},
+    renderHomeSessionModule: () => ({ revision: state.stats.revision, dataset: {}, classList: { contains: () => false } }), scheduleHomeSessionRepaint() {}
   };
   const setup = app.slice(app.indexOf('const overflowText ='), app.indexOf('function bindHoverMarquee('));
   vm.runInNewContext(`let homeSessionRenderPending = false;\n${setup}\n${functionSource(app, 'sessionTooltipShouldHoldRender')}\n${functionSource(app, 'renderHome')}\nglobalThis.repaint = renderHome; globalThis.bind = overflowText.bind;`, context);
@@ -156,21 +157,21 @@ test('Home holds a real overflowing title and only flushes deferred stats on lea
   context.repaint();
   state.stats = { revision: 3 };
   context.repaint();
-  assert.deepEqual(painted, []);
+  assert.deepEqual(painted, [2, 3]);
   title.mouseleave();
   frames.splice(0).forEach(callback => callback());
-  assert.deepEqual(painted, [3], 'leaving paints the most recent update, rather than losing deferred stats');
+  assert.deepEqual(painted, [2, 3], 'leaving requires no catch-up repaint');
   title.mouseenter();
   title.mouseleave();
   frames.splice(0).forEach(callback => callback());
-  assert.deepEqual(painted, [3], 'reading without deferred stats does not rebuild Home');
+  assert.deepEqual(painted, [2, 3], 'reading alone does not repaint Home');
   title.clientWidth = 200;
   title.mouseenter();
   state.stats = { revision: 4 };
   context.repaint();
   title.mouseleave();
   frames.splice(0).forEach(callback => callback());
-  assert.deepEqual(painted, [3, 4], 'a fitting title permits normal updates and no extra repaint on leave');
+  assert.deepEqual(painted, [2, 3, 4], 'fitting titles also update without a catch-up repaint');
 });
 
 test('Edge Dock title hover permits pushes and clock repaints while tooltip holds still work', () => {

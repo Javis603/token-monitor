@@ -2439,14 +2439,11 @@ document.addEventListener('pointerdown', (event) => {
   }
 });
 
-let homeSessionRenderPending = false;
 const overflowText = window.TokenMonitorOverflowText.create({
   document, window, prefersReducedMotion,
   enabled: element => !element.classList.contains('has-subagent-count')
     && Boolean(element.closest('.session-mode, .home-session-row') || element.id === 'syncConnectionEndpoint'),
   onLeave: () => requestAnimationFrame(() => {
-    if (homeSessionRenderPending && state.breakdown === 'home'
-      && visibleStatsSurface() === 'main' && state.stats) renderHome();
     // A final stats update may have been held before reading or before painting.
     // Reuse the refresh guards to catch up without waiting for another push.
     if (state.openSession?.kind === 'session') void refreshOpenSessionDetail();
@@ -4792,7 +4789,7 @@ function limitDetailTooltipShouldHoldRender() {
 }
 
 function sessionTooltipShouldHoldRender() {
-  return Boolean(document.querySelector('.home-panel:not(.hidden) .home-session-row .is-hover-reading, .home-panel:not(.hidden) .home-session-meta .limit-detail-tooltip-wrap:hover, .home-panel:not(.hidden) .home-session-meta .limit-detail-tooltip-wrap:focus-within, .row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .session-group-run .is-hover-reading, .session-group-run:focus-within, .session-group-run .limit-detail-tooltip-wrap:hover, .session-group-run .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.is-hover-reading, .detail-heading.is-hover-reading, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
+  return Boolean(document.querySelector('.row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .session-group-run .is-hover-reading, .session-group-run:focus-within, .session-group-run .limit-detail-tooltip-wrap:hover, .session-group-run .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.is-hover-reading, .detail-heading.is-hover-reading, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
 }
 
 function flushPendingLimitDetailTooltipRender() {
@@ -6802,17 +6799,11 @@ function renderViewSwitcher({ focusMenu = false, focusDisclosure = false } = {})
 }
 
 function homeModuleShell(kind, title, viewId, meta = '') {
-  // A content outlet sits beside its native anchor. Keep that connected shell
-  // while refreshing the native fallback; retaining only author children after
-  // removing their ancestor is too late to preserve focus and scroll anchoring.
-  // Standalone plugin modules already retain their own shell by view ref.
-  const retained = kind === 'plugin' ? null : [...els.homePanel.children].find(node => node.classList.contains(`home-module-${kind}`)
-    && [node, ...node.children].some(anchor => pluginContent?.hasAnchor(anchor)));
-  const module = retained || document.createElement('section');
+  const module = document.createElement('section');
   module.className = `home-module home-module-${kind}`;
   module.setAttribute('aria-label', title);
   // Plugin modules have no detail view to jump to.
-  if (viewId && !retained) {
+  if (viewId) {
     module.tabIndex = 0;
     module.setAttribute('role', 'button');
     module.addEventListener('click', (event) => {
@@ -6851,13 +6842,6 @@ function homeModuleShell(kind, title, viewId, meta = '') {
   head.append(titleWrap, end);
   const body = document.createElement('div');
   body.className = 'home-module-body';
-  if (retained) {
-    const nativeHead = module.querySelector('.home-module-head');
-    const nativeBody = module.querySelector('.home-module-body');
-    nativeHead.replaceChildren(...head.childNodes);
-    nativeBody.replaceChildren();
-    return { module, body: nativeBody };
-  }
   module.append(head, body);
   return { module, body };
 }
@@ -6967,6 +6951,7 @@ function renderHomeLimitModule() {
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-limit-account';
+    item.dataset.key = row.key;
     const account = document.createElement('div');
     account.className = 'home-limit-account-head';
     const mark = document.createElement('span');
@@ -6989,6 +6974,7 @@ function renderHomeLimitModule() {
     for (const window of row.windows) {
       const metric = document.createElement('div');
       metric.className = 'home-limit-window';
+      metric.dataset.key = `${window.kind}:${window.label || ''}`;
       if (window.fullWidth) metric.classList.add('home-limit-window-wide');
       const line = document.createElement('div');
       line.className = 'home-limit-window-line';
@@ -7063,6 +7049,7 @@ function renderHomeModelModule(period) {
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-list-row home-model-row';
+    item.dataset.key = row.key;
     const mark = document.createElement('span');
     applyHomeListMark(mark, iconKindFor({ key: row.key || row.name, modelSource: row.modelSource }, 'model'), row.color);
     const name = document.createElement('span');
@@ -7102,6 +7089,7 @@ function renderHomeToolModule(period) {
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-list-row home-tool-row';
+    item.dataset.key = row.key;
     const mark = document.createElement('span');
     applyHomeListMark(mark, iconKindFor({ key: row.key }, 'tool'), row.color);
     const name = document.createElement('span');
@@ -7149,19 +7137,8 @@ function scheduleHomeSessionRepaint(rows) {
     if (visibleStatsSurface() !== 'main' || state.breakdown !== 'home') return;
     const current = els.homePanel?.querySelector('.home-module-session');
     if (!current) return;
-    const hadFocus = document.activeElement === current;
-    const hadHeadFocus = document.activeElement === current.querySelector?.('.home-module-head');
-    const focusedKey = document.activeElement?.closest?.('.home-session-row')?.dataset?.key;
     const nextRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
-    const next = renderHomeSessionModule(nextRows);
-    if (current !== next) current.replaceWith(next);
-    if (hadFocus) next.focus();
-    if (hadHeadFocus) next.querySelector('.home-module-head')?.focus({ preventScroll: true });
-    if (focusedKey) {
-      const row = [...next.querySelectorAll('.home-session-row')]
-        .find(node => node.dataset.key === focusedKey);
-      (row || next).focus({ preventScroll: true });
-    }
+    homeDom.reconcile(current, renderHomeSessionModule(nextRows));
     scheduleHomeSessionRepaint(nextRows);
   }, delay);
 }
@@ -7192,11 +7169,6 @@ function scheduleSessionStatusRepaint(period, incompleteHint = '') {
 }
 
 function renderHomeSessionModule(rows) {
-  const current = els.homePanel?.querySelector('.home-module-session');
-  if (current && sessionTooltipShouldHoldRender()) {
-    homeSessionRenderPending = true;
-    return current;
-  }
   rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
   const runningCount = window.TokenMonitorEdgeDockPresentation.runningSessionSummary(rows).count;
   const meta = runningCount > 0 ? t('home.runningSessions', { count: runningCount }) : '';
@@ -7290,6 +7262,7 @@ function renderHomeDeviceModule() {
   for (const row of rows) {
     const item = document.createElement('div');
     item.className = 'home-list-row home-device-row';
+    item.dataset.key = row.key;
     if (row.isStale) {
       item.classList.add('is-stale');
       item.setAttribute('aria-description', t('home.staleDevice'));
@@ -7486,16 +7459,10 @@ function setupHomeActivityHover(scroller) {
     scheduleSpotlight();
   };
 
-  const hide = ({ clearHover = true, concealTooltip = true } = {}) => {
-    if (clearHover) {
-      state.homeActivityHoverPoint = null;
-      state.homeActivityHoverDate = '';
-    }
-    if (concealTooltip) {
-      tooltip.dataset.visible = 'false';
-      tooltip.setAttribute('aria-hidden', 'true');
-      tooltip.style.transform = 'translate(-9999px, -9999px)';
-    }
+  const hide = () => {
+    tooltip.dataset.visible = 'false';
+    tooltip.setAttribute('aria-hidden', 'true');
+    tooltip.style.transform = 'translate(-9999px, -9999px)';
     if (spotlightFrame) cancelAnimationFrame(spotlightFrame);
     spotlightFrame = 0;
     spotlightVisible = false;
@@ -7525,8 +7492,6 @@ function setupHomeActivityHover(scroller) {
       hide();
       return;
     }
-    state.homeActivityHoverPoint = { x: clientX, y: clientY };
-    state.homeActivityHoverDate = cell.dataset.d || '';
     if (activeCell !== cell) {
       activeCell?.removeAttribute('data-active');
       activeCell = cell;
@@ -7546,65 +7511,46 @@ function setupHomeActivityHover(scroller) {
   scroller.addEventListener('pointerleave', () => hide());
   scroller.addEventListener('scroll', () => {
     // Restoring the saved/right-edge position emits a delayed scroll event. It is not
-    // user intent and must not clear the hover that renderHome just reconnected.
+    // user intent and must not dismiss the active tooltip.
     if (homeActivityProgrammaticScrollers.delete(scroller)) {
-      state.homeActivityHoverRestore?.();
+      state.homeActivityTooltipUpdate?.();
       return;
     }
     hide();
   });
-  // The tooltip lives on document.body and is only dismissed by handlers on this
-  // scroller, which renderHome() throws away on every rebuild. Preserve the visible
-  // tooltip plus its semantic cell identity across that replacement, so live stats
-  // refreshes do not fade or jump it before the new cell is ready.
-  state.homeActivityHoverTeardown = ({ preserveHover = false } = {}) => hide({
-    clearHover: !preserveHover,
-    concealTooltip: !preserveHover
-  });
-  state.homeActivityHoverRestore = () => {
-    const point = state.homeActivityHoverPoint;
-    const date = state.homeActivityHoverDate;
-    if (!point || !date) return;
-    const cell = Array.from(canvas?.querySelectorAll('.heat[data-d]') || [])
-      .find((candidate) => candidate.dataset.d === date);
-    if (!cell) {
-      hide();
-      return;
-    }
-    const rect = cell.getBoundingClientRect();
-    const hitSlop = 2;
-    const stillHovered = point.x >= rect.left - hitSlop
-      && point.x <= rect.right + hitSlop
-      && point.y >= rect.top - hitSlop
-      && point.y <= rect.bottom + hitSlop;
-    if (!stillHovered) {
-      hide();
-      return;
-    }
-    showAtPoint(point.x, point.y, cell);
+  state.homeActivityHoverTeardown = hide;
+  state.homeActivityTooltipUpdate = () => {
+    if (!activeCell) return;
+    if (!activeCell.isConnected) { hide(); return; }
+    tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatCompact(Number(activeCell.dataset.t || 0));
+    moveHomeActivityTooltip(tooltip, activeCell);
   };
 }
 
-// Dismiss the body-level activity tooltip + spotlight from outside the scroller's own
-// pointer handlers. A Home rerender may preserve the active hover for the replacement
-// scroller; leaving Home clears it. Dropping both closures lets the old SVG be collected.
-function hideHomeActivityTooltip({ preserveHover = false } = {}) {
-  const teardown = state.homeActivityHoverTeardown;
-  teardown?.({ preserveHover });
-  state.homeActivityHoverTeardown = null;
-  state.homeActivityHoverRestore = null;
-  if (!preserveHover) {
-    state.homeActivityHoverPoint = null;
-    state.homeActivityHoverDate = '';
-    if (!teardown) {
-      const tooltip = document.querySelector('.home-heatmap-tooltip');
-      if (tooltip) {
-        tooltip.dataset.visible = 'false';
-        tooltip.setAttribute('aria-hidden', 'true');
-        tooltip.style.transform = 'translate(-9999px, -9999px)';
-      }
+function hideHomeActivityTooltip() {
+  state.homeActivityHoverTeardown?.();
+}
+
+const homeDom = window.TokenMonitorHomeDom.create({ nodesFor: node => pluginContent?.nodesFor(node) || [] });
+let homeActivityScroller = null;
+function updateHomeActivity() {
+  const scroller = els.homePanel.querySelector('.home-activity-scroll');
+  const reveal = () => animateHomeHistoryVisuals(scroller,
+    scroller.querySelector('.home-activity-canvas'), scroller.closest('.home-module').querySelector('.home-area-chart'));
+  if (scroller !== homeActivityScroller) {
+    hideHomeActivityTooltip();
+    state.homeActivityResizeObserver?.disconnect();
+    state.homeActivityResizeObserver = null;
+    state.homeActivityHoverTeardown = null;
+    state.homeActivityTooltipUpdate = null;
+    homeActivityScroller = scroller;
+    if (scroller) {
+      setupHomeActivityScroller(scroller, reveal);
+      setupHomeActivityHover(scroller);
     }
   }
+  if (scroller && state.animateChartsOnRender && scroller.clientWidth > 0) reveal();
+  state.homeActivityTooltipUpdate?.();
 }
 
 function renderHomeTrendsModule() {
@@ -7676,11 +7622,6 @@ function renderHomeTrendsModule() {
   const { module, body } = homeModuleShell('trends', t('home.activity'), 'trends', activeDaysLabel);
   const activityScroll = document.createElement('div');
   activityScroll.className = 'home-activity-scroll';
-  if (state.homeActivityHoverPoint && state.homeActivityHoverDate) {
-    // This replacement is being inserted directly under a stationary pointer. Keep
-    // the already-visible spotlight from replaying its hover fade on the new SVG.
-    activityScroll.classList.add('is-restoring-hover');
-  }
   activityScroll.tabIndex = 0;
   activityScroll.setAttribute('role', 'region');
   activityScroll.setAttribute('aria-label', t('home.activityScroll'));
@@ -7724,14 +7665,6 @@ function renderHomeTrendsModule() {
     dates.append(label);
   }
   body.append(activityScroll, trendHead, plot, dates);
-  setupHomeActivityScroller(activityScroll, () => {
-    // The scroller is now laid out and has its saved/right-edge position. Reconnect
-    // an active hover only after that geometry is stable; otherwise the replacement
-    // briefly resolves against the oldest (left) edge and then drops the tooltip.
-    state.homeActivityHoverRestore?.();
-    animateHomeHistoryVisuals(activityScroll, activityCanvas, chart);
-  });
-  setupHomeActivityHover(activityScroll);
   return module;
 }
 
@@ -7758,17 +7691,6 @@ function renderHomePluginModule(id) {
 
 function renderHome() {
   if (!els.homePanel) return;
-  if (sessionTooltipShouldHoldRender()) {
-    homeSessionRenderPending = true;
-    return;
-  }
-  homeSessionRenderPending = false;
-  // The previous scroller (and its ResizeObserver) is about to be replaced; drop the
-  // observer so at most one is live. Keep the active tooltip visible while the
-  // replacement heatmap reconnects it to the same date cell.
-  hideHomeActivityTooltip({ preserveHover: true });
-  state.homeActivityResizeObserver?.disconnect();
-  state.homeActivityResizeObserver = null;
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
   const moduleIds = homeModuleIds();
   if (moduleIds.includes('trends')) void loadHomeHistory();
@@ -7787,8 +7709,10 @@ function renderHome() {
     action.textContent = t('home.customize');
     action.addEventListener('click', openHomeSettings);
     empty.append(title, body, action);
-    els.homePanel.replaceChildren(empty);
-    hideHomeActivityTooltip();
+    const current = els.homePanel.querySelector('.home-empty');
+    if (current) homeDom.reconcile(current, empty);
+    else els.homePanel.replaceChildren(homeDom.reconcile(null, empty));
+    updateHomeActivity();
     return;
   }
   let sessionRows;
@@ -7804,6 +7728,12 @@ function renderHome() {
     if (homeModulePreferencesApi.isPluginModuleId(id)) return renderHomePluginModule(id);
     return renderHomeTrendsModule();
   });
+  for (let index = 0; index < nodes.length; index++) {
+    const next = nodes[index];
+    if (next.dataset.pluginRef) continue;
+    const current = [...els.homePanel.children].find(node => node.classList.contains(`home-module-${moduleIds[index]}`));
+    nodes[index] = homeDom.reconcile(current, next);
+  }
   // Reconcile siblings without detaching retained plugin controls. Collector
   // pushes must not discard focused drafts or cancel captured drawing gestures.
   // A module-level selector places author controls beside the module. Reorder
@@ -7821,17 +7751,7 @@ function renderHome() {
     if (!ordered.includes(child)) child.remove();
   }
   if (moduleIds.includes('session')) scheduleHomeSessionRepaint(sessionRows);
-  // setupHomeActivityScroller first runs while its module is detached, where
-  // scrollWidth can equal clientWidth. Apply again synchronously now that the DOM is
-  // attached, before the browser paints or hover restoration measures the new cell.
-  const activityScroller = els.homePanel.querySelector('.home-activity-scroll');
-  if (activityScroller) applyHomeActivityScroll(activityScroller);
-  if (state.homeActivityHoverRestore) state.homeActivityHoverRestore();
-  else hideHomeActivityTooltip();
-  if (activityScroller?.classList.contains('is-restoring-hover')) {
-    requestAnimationFrame(() => activityScroller.classList.remove('is-restoring-hover'));
-  }
-  // ResizeObserver repeats the scroll + hover restoration once layout fully settles.
+  updateHomeActivity();
 }
 
 let localSessionActivity = null;

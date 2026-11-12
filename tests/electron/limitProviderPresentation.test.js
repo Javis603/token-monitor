@@ -420,6 +420,7 @@ function runHomeLimitModule(rows, boundaryLabels = {}) {
   function createNode(tagName) {
     return {
       tagName,
+      dataset: {},
       className: '',
       textContent: '',
       children: [],

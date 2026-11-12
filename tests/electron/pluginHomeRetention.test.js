@@ -26,6 +26,14 @@ function fixture(t, mode = 'replace', selector = '.home-module-tool > .home-modu
   };
   const document = { createElement(tag) {
     const node = new Element(tag, document);
+    node.nodeType = 1; node.localName = tag; node.namespaceURI = 'html';
+    Object.defineProperty(node.classList, '0', { get: () => [...node.classes][0] });
+    node.attributes[Symbol.iterator] = function* () {
+      yield { name: 'class', value: node.className };
+      for (const [name, value] of Object.entries(this)) yield { name, value };
+    };
+    let textNode;
+
     node.remove = () => {
       disconnected(node);
       Element.prototype.remove.call(node);
@@ -51,7 +59,11 @@ function fixture(t, mode = 'replace', selector = '.home-module-tool > .home-modu
       child.parent = node; node.children.splice(index, 0, child);
     };
     Object.defineProperties(node, {
-      childNodes: { get: () => node.children },
+      childNodes: { get: () => {
+        if (!node.value) return node.children;
+        textNode ||= { nodeType: 3, childNodes: [], get nodeValue() { return node.value; }, set nodeValue(value) { node.value = value; } };
+        return [textNode, ...node.children];
+      } },
       isConnected: { get: () => document.body?.contains(node) || false },
       nextSibling: { get: () => node.parent?.children[node.parent.children.indexOf(node) + 1] }
     });
@@ -90,7 +102,8 @@ function fixture(t, mode = 'replace', selector = '.home-module-tool > .home-modu
       const control = document.createElement('input'); control.value = ref + ' draft'; node.append(control);
       standalone.set(ref, { node, control });
     } }, homeSessionRenderPending: false,
-    sessionTooltipShouldHoldRender: () => false, hideHomeActivityTooltip() {},
+    sessionTooltipShouldHoldRender: () => false, hideHomeActivityTooltip() {}, updateHomeActivity() {},
+    homeDom: require('../../src/electron/renderer/homeDom').create({ nodesFor: node => composition.nodesFor(node) }),
     homeModuleIds: () => modules, loadHomeHistory() {},
     homeModulePreferencesApi: { homeModuleCount: () => 5, isPluginModuleId: placements.isHomeToken },
     pluginPlacementsApi: placements,
@@ -232,6 +245,7 @@ test('Home session clock repaint never replaces a retained shell with itself', (
     document: { activeElement: null }, els: { homePanel: { querySelector: () => current } },
     visibleStatsSurface: () => 'main', homeModulePreferencesApi: { homeModuleCount: () => 5 },
     sessionPresentationOptions: () => ({}), renderHomeSessionModule: () => current,
+    homeDom: { reconcile(previous, next) { assert.equal(previous, current); assert.equal(next, current); return previous; } },
     window: { TokenMonitorEdgeDockPresentation: { recentSessionRows: () => [{}],
       nextRunningExpiryAt: () => 0, sessionMembers: rows => rows } },
     setTimeout(fn) { callback = fn; return 1; }, clearTimeout() {}
@@ -239,4 +253,19 @@ test('Home session clock repaint never replaces a retained shell with itself', (
   vm.runInContext(['stopHomeSessionRepaint', 'scheduleHomeSessionRepaint'].map(extract).join('\n'), context);
   context.scheduleHomeSessionRepaint(); callback();
   assert.equal(replacements, 0);
+});
+
+test('native Home rows and their focused names survive consecutive usage pushes', t => {
+  const f = fixture(t, 'native'); f.render();
+  const module = f.home.querySelector('.home-module-tool');
+  const row = module.querySelector('.home-tool-row');
+  const name = row.querySelector('.home-list-name'); name.focus();
+  for (const tokens of [101, 102]) {
+    f.state.stats.periods.today.clients.codex = tokens; f.render();
+    assert.equal(f.home.querySelector('.home-module-tool'), module);
+    assert.equal(module.querySelector('.home-tool-row'), row);
+    assert.equal(row.querySelector('.home-list-name'), name);
+    assert.equal(f.document.activeElement, name);
+    assert.match(row.textContent, new RegExp(String(tokens)));
+  }
 });
