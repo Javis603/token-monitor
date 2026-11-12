@@ -27,7 +27,6 @@ function fixture(t, mode = 'replace', selector = '.home-module-tool > .home-modu
   const document = { createElement(tag) {
     const node = new Element(tag, document);
     node.nodeType = 1; node.localName = tag; node.namespaceURI = 'html';
-    Object.defineProperty(node.classList, '0', { get: () => [...node.classes][0] });
     node.attributes[Symbol.iterator] = function* () {
       yield { name: 'class', value: node.className };
       for (const [name, value] of Object.entries(this)) yield { name, value };
@@ -103,7 +102,7 @@ function fixture(t, mode = 'replace', selector = '.home-module-tool > .home-modu
       standalone.set(ref, { node, control });
     } }, homeSessionRenderPending: false,
     sessionTooltipShouldHoldRender: () => false, hideHomeActivityTooltip() {}, updateHomeActivity() {},
-    homeDom: require('../../src/electron/renderer/homeDom').create({ nodesFor: node => composition.nodesFor(node) }),
+    rendererDom: require('../../src/electron/renderer/domReconcile').create({ nodesFor: node => composition.nodesFor(node) }),
     homeModuleIds: () => modules, loadHomeHistory() {},
     homeModulePreferencesApi: { homeModuleCount: () => 5, isPluginModuleId: placements.isHomeToken },
     pluginPlacementsApi: placements,
@@ -245,7 +244,7 @@ test('Home session clock repaint never replaces a retained shell with itself', (
     document: { activeElement: null }, els: { homePanel: { querySelector: () => current } },
     visibleStatsSurface: () => 'main', homeModulePreferencesApi: { homeModuleCount: () => 5 },
     sessionPresentationOptions: () => ({}), renderHomeSessionModule: () => current,
-    homeDom: { reconcile(previous, next) { assert.equal(previous, current); assert.equal(next, current); return previous; } },
+    rendererDom: { reconcile(previous, next) { assert.equal(previous, current); assert.equal(next, current); return previous; } },
     window: { TokenMonitorEdgeDockPresentation: { recentSessionRows: () => [{}],
       nextRunningExpiryAt: () => 0, sessionMembers: rows => rows } },
     setTimeout(fn) { callback = fn; return 1; }, clearTimeout() {}

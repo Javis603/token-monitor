@@ -341,7 +341,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) || (allowed === viewBreakdownValues && pluginPlacementsApi.isHomeToken(raw)) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.icloudStatus = null;
@@ -2442,12 +2442,7 @@ document.addEventListener('pointerdown', (event) => {
 const overflowText = window.TokenMonitorOverflowText.create({
   document, window, prefersReducedMotion,
   enabled: element => !element.classList.contains('has-subagent-count')
-    && Boolean(element.closest('.session-mode, .home-session-row') || element.id === 'syncConnectionEndpoint'),
-  onLeave: () => requestAnimationFrame(() => {
-    // A final stats update may have been held before reading or before painting.
-    // Reuse the refresh guards to catch up without waiting for another push.
-    if (state.openSession?.kind === 'session') void refreshOpenSessionDetail();
-  })
+    && Boolean(element.closest('.session-mode, .home-session-row') || element.id === 'syncConnectionEndpoint')
 });
 
 function bindHoverMarquee(element) { overflowText.bind(element); }
@@ -2819,7 +2814,6 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
     mark.style.background = color;
   }
   const titleEl = row.querySelector('.row-title');
-  setHoverMarqueeText(titleEl, name);
   const subtitleEl = row.querySelector('.row-subtitle');
   let subtitleTextEl = subtitleEl;
   const splitSubtitle = Boolean(subagentCountLabel);
@@ -2857,9 +2851,9 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   const hasMetadata = Boolean(modelEntries || sessionRowsApi.sessionReasoningEffortForRow(metadataRow));
   const replaceMetadata = (element, text, start) => {
     const content = element.querySelector('.overflow-text-content') || element;
-    content.replaceChildren(document.createTextNode(text.slice(0, start)),
+    rendererDom.reconcileChildren(content, [document.createTextNode(text.slice(0, start)),
       sessionRowsApi.sessionModelMetadataNode(document, metadataRow, { translate: t, view: limitWindowsView }),
-      document.createTextNode(text.slice(start + metadataLabel.length)));
+      document.createTextNode(text.slice(start + metadataLabel.length))]);
     overflowText.update(element);
   };
   const subtitleShowsModel = Boolean(!titleModelLabel && hasMetadata && metadataLabel && String(subtitleText || '').endsWith(metadataLabel));
@@ -2868,15 +2862,13 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   } else {
     setHoverMarqueeText(subtitleTextEl, subtitleText);
   }
-  if (hasMetadata && titleModelLabel && metadataLabel && String(name || '').startsWith(metadataLabel)) {
-    replaceMetadata(titleEl, name, 0);
-  }
-  if (titleEl.classList.contains('limit-detail-tooltip-wrap')) {
-    limitWindowsView.setDetailTooltip(titleEl, null);
-  }
-  if (!subtitleShowsModel && !titleModelLabel && hasMetadata && metadataLabel && String(name || '').endsWith(metadataLabel)) {
-    replaceMetadata(titleEl, name, name.length - metadataLabel.length);
-  }
+  const titleShowsModel = hasMetadata && metadataLabel && (
+    titleModelLabel ? String(name || '').startsWith(metadataLabel)
+      : !subtitleShowsModel && String(name || '').endsWith(metadataLabel)
+  );
+  if (titleEl.classList.contains('limit-detail-tooltip-wrap')) limitWindowsView.setDetailTooltip(titleEl, null);
+  if (titleShowsModel) replaceMetadata(titleEl, name, titleModelLabel ? 0 : name.length - metadataLabel.length);
+  else setHoverMarqueeText(titleEl, name);
   subtitleEl.classList.toggle('hidden', !subtitleText && !subagentCountLabel);
   // The activity line carries time, calls, cache hit and tok/s; a narrow window
   // fades and scrolls it on hover the way the title does rather than wrapping.
@@ -3234,7 +3226,6 @@ function renderSessionToolFilter(rows) {
 }
 
 function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFilter = false } = {}) {
-  if (!fromSearch && sessionTooltipShouldHoldRender()) return;
   const searchQuery = state.breakdown === 'session' ? sessionSearchQuery() : '';
   if (state.breakdown === 'session') {
     rows = reuseToolFilter
@@ -3315,7 +3306,7 @@ function renderRows(rows, { incompleteHint = '', fromSearch = false, reuseToolFi
       hint.textContent = hintText;
       nodes.unshift(hint);
     }
-    els.breakdown.replaceChildren(...nodes);
+    rendererDom.placeChildren(els.breakdown, nodes);
     state.rowSignature = signature;
   }
   const current = new Map(Array.from(els.breakdown.children)
@@ -4768,44 +4759,6 @@ function missingLimitProviderStatus() {
   return state.mode === 'sync' || String(state.settings?.hubUrl || '').trim() ? 'noSyncedData' : 'notConfigured';
 }
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-function limitDetailTooltipShouldHoldRender() {
-  if (!state.limitDetailTooltipActive || !els.limitsPanel) return false;
-  return Boolean(els.limitsPanel.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within'));
-}
-
-function sessionTooltipShouldHoldRender() {
-  return Boolean(document.querySelector('.row-context.limit-detail-tooltip-wrap:hover, .row-context.limit-detail-tooltip-wrap:focus-within, .row-label .limit-detail-tooltip-wrap:hover, .row-label .limit-detail-tooltip-wrap:focus-within, .session-group-run .is-hover-reading, .session-group-run:focus-within, .session-group-run .limit-detail-tooltip-wrap:hover, .session-group-run .limit-detail-tooltip-wrap:focus-within, .detail-ex-title.is-hover-reading, .detail-heading.is-hover-reading, .detail-ex-title.limit-detail-tooltip-wrap:hover, .detail-ex-title.limit-detail-tooltip-wrap:focus-within'));
-}
-
-function flushPendingLimitDetailTooltipRender() {
-  if (!state.limitDetailTooltipRenderPending || state.breakdown !== 'limits') return;
-  state.limitDetailTooltipRenderPending = false;
-  renderLimits();
-}
-
-
-
-
-
-
-
-
-
 const {
   creditsAmount,
   creditsCurrency,
@@ -4870,16 +4823,8 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
     hasOpened: () => state.limitDetailTooltipHasOpened,
     markOpened() {
       state.limitDetailTooltipHasOpened = true;
-      state.limitDetailTooltipActive = true;
     },
-    release() {
-      requestAnimationFrame(() => {
-        if (limitDetailTooltipShouldHoldRender()) return;
-        state.limitDetailTooltipActive = false;
-        flushPendingLimitDetailTooltipRender();
-        if (state.breakdown === 'home' || state.breakdown === 'session') render();
-      });
-    }
+    release() {}
   },
   formatCompact,
   compactTokenThreshold: () => compactTokenApi.compactTokenUnitThreshold(
@@ -5182,13 +5127,7 @@ function animateLimitResets(snapshot) {
 
 function renderLimits() {
   if (!els.limitsPanel) return;
-  const holdLimitDetailTooltipRender = limitDetailTooltipShouldHoldRender();
-  const holdCodexSwitchPopoverRender = codexAccountControl.deferRender(els.limitsPanel);
-  if (holdLimitDetailTooltipRender || holdCodexSwitchPopoverRender) {
-    if (holdLimitDetailTooltipRender) state.limitDetailTooltipRenderPending = true;
-    return;
-  }
-  state.limitDetailTooltipRenderPending = false;
+  if (codexAccountControl.deferRender(els.limitsPanel)) return;
   const limitsEnabled = state.settings?.limitsEnabled !== false;
   const enabled = enabledLimitProviderSet();
   syncPluginLimitsDemand();
@@ -5247,7 +5186,7 @@ function renderLimits() {
   const nodes = [];
   const rows = orderedProviders;
   if (rows.length === 0) {
-    els.limitsPanel.replaceChildren();
+    rendererDom.reconcileChildren(els.limitsPanel, []);
     return;
   }
   for (const { id, label } of rows) {
@@ -5264,7 +5203,8 @@ function renderLimits() {
     const provider = Array.isArray(visibleProviders) ? visibleProviders[0] : visibleProviders;
     nodes.push(renderLimitProviderSolo(id, label, provider, color));
   }
-  els.limitsPanel.replaceChildren(...nodes);
+  nodes.forEach((node, index) => { node.dataset.key = rows[index].id; });
+  rendererDom.reconcileChildren(els.limitsPanel, nodes);
   animateLimitResets(resetMotionSnapshot);
 }
 
@@ -5536,19 +5476,12 @@ function sessionDetailLiveSignature() {
 // once per click, while the session keeps accruing usage through `stats:push`
 // and the refresh timer. Without a re-read, someone who opens a session mid-run
 // watches every other surface move while this one freezes until it is reopened.
-// Re-read only when the reported usage actually changed, and never mid-hover: a
-// rebuild replaces every row node, which would kill a tooltip or focus the
-// reader is using. The next tick picks it up once the hover ends.
+// Re-read only when the reported usage actually changed. Keyed updates retain
+// the controls being read while the new transcript snapshot is applied.
 async function refreshOpenSessionDetail() {
   const request = state.openSession;
   if (request?.kind !== 'session' || !request.detail || request.detailLiveBusy) return;
-  if (visibleStatsSurface() !== 'main' || sessionTooltipShouldHoldRender()) return;
-  // Paint a held result once, then check whether usage advanced during its read.
-  // An unchanged signature still avoids another transcript read.
-  if (request.detailRenderPending) {
-    request.detailRenderPending = false;
-    renderSessionDetail({ detail: request.detail, preserveScroll: true });
-  }
+  if (visibleStatsSurface() !== 'main') return;
   const signature = sessionDetailLiveSignature();
   if (!signature || signature === request.liveSignature) return;
   const sessionCost = sessionLiveCost(sessionLiveStatsEntry(request), request.client);
@@ -5566,16 +5499,13 @@ async function refreshOpenSessionDetail() {
     request.detail = detail;
     request.liveSignature = signature;
     readSucceeded = true;
-    // The reader can start a hover while the read is in flight, so the hold is
-    // rechecked here rather than trusted from the call site.
-    if (sessionTooltipShouldHoldRender()) { request.detailRenderPending = true; return; }
     renderSessionDetail({ detail, preserveScroll: true });
   } catch (_) {
     // Keep the last good reading; the next stats tick tries again.
   } finally {
     request.detailLiveBusy = false;
-    // Leave can run while busy. A successful read checks for a final push via
-    // the same visibility/hold/signature guards; failures wait for a later retry.
+    // A successful read checks for a final push via
+    // the same visibility/signature guards; failures wait for a later retry.
     if (readSucceeded && state.openSession === request
       && sessionDetailLiveSignature() !== request.liveSignature) void refreshOpenSessionDetail();
   }
@@ -5589,9 +5519,9 @@ function toggleDetailSort() {
 function closeSessionDetail() {
   state.openSession = null;
   els.sessionDetail.classList.add('hidden');
-  els.sessionDetail.replaceChildren();
+  rendererDom.clear(els.sessionDetail);
   els.sessionDetailHead.classList.add('hidden');
-  els.sessionDetailHead.replaceChildren();
+  rendererDom.clear(els.sessionDetailHead);
   render();
 }
 
@@ -5612,21 +5542,19 @@ function renderSessionDetail({ detail, loading, error, preserveScroll = false } 
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
-  const head = els.sessionDetailHead;       // static layer — rows scroll independently below it
-  const container = els.sessionDetail;
-  container.classList.remove('session-group-list');
+  const head = document.createElement('div');       // static layer — rows scroll independently below it
+  const container = document.createElement('div');
+  els.sessionDetail.classList.remove('session-group-list');
   // Anchor the row being read: new content can grow above or below it, and
   // token sorting can reorder exchanges without changing the total height.
-  const previousScroll = preserveScroll ? captureSessionDetailScroll(container) : null;
-  // A reader who opened an exchange keeps it open; a rebuild that collapsed it
-  // would look like the page had reset itself under them.
+  const previousScroll = preserveScroll ? captureSessionDetailScroll(els.sessionDetail) : null;
+  // Preserve expansion presentation while rendering fresh exchange descriptions.
   const expandedKeys = preserveScroll
-    ? new Set([...container.children]
+    ? new Set([...els.sessionDetail.children]
       .filter((node) => node.classList.contains('expanded'))
       .map((node) => node.dataset.exchangeKey))
     : null;
-  head.replaceChildren();
-  container.replaceChildren();
+  try {
 
   head.append(sessionDetailBackButton());
 
@@ -5654,7 +5582,11 @@ function renderSessionDetail({ detail, loading, error, preserveScroll = false } 
 
   const max = Math.max(1, ...rows.map((row) => row.value));
   for (const row of rows) container.append(exchangeNode(row, max, expandedKeys?.has(row.key) === true));
-  if (previousScroll) restoreSessionDetailScroll(container, previousScroll);
+  } finally {
+    rendererDom.reconcileChildren(els.sessionDetailHead, [...head.childNodes]);
+    rendererDom.reconcileChildren(els.sessionDetail, [...container.childNodes]);
+    if (previousScroll) restoreSessionDetailScroll(els.sessionDetail, previousScroll);
+  }
 }
 
 function captureSessionDetailScroll(container) {
@@ -5733,7 +5665,7 @@ function refreshSessionDetailHeading() {
   if (state.openSession.headingSignature === sessionDetailHeadingSignature()) return;
   // Retain the body, loading/error state and sort control. Unchanged headings
   // also retain their hover-reading motion through periodic stats updates.
-  head.replaceChildren(sessionDetailBackButton(), ...Array.from(head.children).slice(1));
+  rendererDom.reconcileChildren(head, [sessionDetailBackButton(), ...Array.from(head.children).slice(1)]);
 }
 
 function sessionDetailBackLabel() {
@@ -5747,6 +5679,7 @@ function sessionDetailHeadingSignature() {
 
 function sessionDetailBackButton() {
   const back = document.createElement('button');
+  back.dataset.domKind = 'session-back';
   const title = sessionDetailTitle();
   const backLabel = sessionDetailBackLabel();
   // Every heading is built here, so the open request records what it shows.
@@ -5779,6 +5712,7 @@ function sessionDetailBackButton() {
 function sessionIdLine(idLabel) {
   const line = document.createElement('div');
   line.className = 'detail-session-id';
+  line.dataset.key = idLabel;
   const text = document.createElement('span');
   text.className = 'detail-session-id-text';
   text.textContent = idLabel;
@@ -5808,10 +5742,12 @@ function sessionGroupRunNode(row, max, parent) {
   }
   const wrap = rowTemplate(member);
   updateRow(wrap, { ...member, barValue: member.barValue ?? member.value, max });
-  // Keep the existing repaint guard for model hover and keyboard focus.
   wrap.classList.add('session-group-run');
+  window.TokenMonitorDomReconcile.data(wrap, { row, title, parent, namedGroup });
+  wrap.dataset.domKind = sessionRowsApi.sessionRowDetailAvailable(row) ? 'session-link' : 'session-static';
   if (sessionRowsApi.sessionRowDetailAvailable(row)) {
-    wrap.addEventListener('click', () => {
+    wrap.addEventListener('click', event => {
+      const { row, title, parent, namedGroup } = window.TokenMonitorDomReconcile.data(event.currentTarget);
       const sessionId = String(row.key || '').replace(/^session:[^:]+:/, '');
       openSessionDetail({
         client: row.client,
@@ -5834,16 +5770,16 @@ function renderSessionGroupDetail(request) {
   els.breakdown.classList.add('hidden');
   els.sessionDetail.classList.remove('hidden');
   els.sessionDetailHead.classList.remove('hidden');
-  const head = els.sessionDetailHead;
-  const container = els.sessionDetail;
-  head.replaceChildren();
-  container.classList.add('session-group-list');
-  container.replaceChildren();
+  const head = document.createElement('div');
+  const container = document.createElement('div');
+  els.sessionDetail.classList.add('session-group-list');
+  try {
 
   const label = request?.summary?.name || t('sessions.backgroundReviews');
   const back = document.createElement('button');
   back.type = 'button';
   back.className = 'detail-back detail-back-titled';
+  back.dataset.domKind = 'group-back';
   back.setAttribute('aria-label', t('sessions.backToWithTitle', {
     title: label, destination: t('sessions') || 'Sessions'
   }));
@@ -5893,6 +5829,11 @@ function renderSessionGroupDetail(request) {
   } else {
     for (const row of rows) container.append(sessionGroupRunNode(row, max, request));
   }
+  } finally {
+    rendererDom.reconcileChildren(els.sessionDetailHead, [...head.childNodes]);
+    rendererDom.reconcileChildren(els.sessionDetail, [...container.childNodes]);
+  }
+
 }
 
 function detailNote(text) {
@@ -5989,13 +5930,13 @@ function hideTrendTooltip() {
 
 function handleTrendsWindowBlur() {
   hideTrendTooltip();
-  const spark = els.trendsPanel.querySelector('.trends-spark');
-  if (!spark?.dataset.renderPending) return;
-  delete spark.dataset.renderPending;
-  if (state.breakdown === 'trends') renderTrends();
 }
 
 function bindTrendTooltip(spark, model, points, labelKey, metric) {
+  if (state.trendTooltipBinding?.spark === spark) {
+    state.trendTooltipBinding.update(model, points, labelKey, metric);
+    return;
+  }
   const tooltip = homeActivityTooltipEl('trends-tooltip');
   tooltip.setAttribute('aria-live', 'polite');
   tooltip.setAttribute('aria-atomic', 'true');
@@ -6003,7 +5944,7 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
   let focused = false;
   let pointerPoint = null;
   let selected = -1;
-  const bars = Array.from(spark.querySelectorAll('.spark-bar'));
+  let bars = Array.from(spark.querySelectorAll('.spark-bar'));
   const hide = () => {
     tooltip.dataset.visible = 'false';
     tooltip.setAttribute('aria-hidden', 'true');
@@ -6040,16 +5981,14 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
     position();
   };
   const select = (index) => {
-    if (index !== selected) {
-      bars[selected]?.removeAttribute('data-active');
-      selected = index;
-      const point = points[index];
-      const date = String(point[labelKey] || '');
-      const value = `${formatNumber(point[metric])} tokens`;
-      spark.setAttribute('aria-label', `${t('trends.open')} · ${date} · ${value}`);
-      tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatCompact(point[metric]);
-      tooltip.querySelector('[data-home-activity-tooltip-date]').textContent = date;
-    }
+    bars[selected]?.removeAttribute('data-active');
+    selected = index;
+    const point = points[index];
+    const date = String(point[labelKey] || '');
+    const value = `${formatNumber(point[metric])} tokens`;
+    spark.setAttribute('aria-label', `${t('trends.open')} · ${date} · ${value}`);
+    tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatCompact(point[metric]);
+    tooltip.querySelector('[data-home-activity-tooltip-date]').textContent = date;
   };
   const pointAtPointer = (event) => {
     const rect = spark.querySelector('.sparkline').getBoundingClientRect();
@@ -6074,30 +6013,25 @@ function bindTrendTooltip(spark, model, points, labelKey, metric) {
     select(index);
     show();
   });
-  const flush = () => {
-    if (!spark.dataset.renderPending) return;
-    delete spark.dataset.renderPending;
-    requestAnimationFrame(renderTrends);
-  };
-  // Keep a live refresh from replacing the focused/hovered chart mid-read.
   spark.addEventListener('pointerleave', () => {
     hovered = false;
     pointerPoint = null;
     if (focused) position(); else hide();
-    flush();
   });
-  spark.addEventListener('focusout', () => { focused = false; if (!hovered) hide(); flush(); });
+  spark.addEventListener('focusout', () => { focused = false; if (!hovered) hide(); });
+  state.trendTooltipBinding = { spark, update(nextModel, nextPoints, nextLabelKey, nextMetric) {
+    const date = points[selected]?.[labelKey];
+    bars[selected]?.removeAttribute('data-active');
+    model = nextModel; points = nextPoints; labelKey = nextLabelKey; metric = nextMetric;
+    bars = Array.from(spark.querySelectorAll('.spark-bar'));
+    const index = points.findIndex(point => point[labelKey] === date);
+    select(index < 0 ? points.length - 1 : index);
+    if (tooltip.dataset.visible === 'true') show();
+  } };
   select(points.length - 1);
 }
 
 function renderTrends() {
-  const reading = document.hasFocus()
-    && els.trendsPanel.querySelector('.trends-spark:hover, .trends-spark:focus-within');
-  if (reading) {
-    reading.dataset.renderPending = 'true';
-    return;
-  }
-  hideTrendTooltip();
   const charts = window.TokenMonitorUsageCharts;
   const previousBars = captureTrendBarMotion();
   const preview = state.stats?.historyPreview || { daily: [], monthly: [], summary: {} };
@@ -6111,7 +6045,11 @@ function renderTrends() {
   const finalPoints = state.period === 'today' ? charts.patchTodayBar(points, todayTotal) : points;
 
   if (finalPoints.length === 0) {
-    els.trendsPanel.innerHTML = `<div class="trends-empty">${t('trends.empty')}</div>`;
+    hideTrendTooltip();
+    state.trendTooltipBinding = null;
+    const empty = document.createElement('div');
+    empty.className = 'trends-empty'; empty.textContent = t('trends.empty');
+    rendererDom.reconcileChildren(els.trendsPanel, [empty]);
     return;
   }
 
@@ -6141,16 +6079,18 @@ function renderTrends() {
     .map(([k, v]) => `<div class="trends-stat"><span class="trends-stat-v">${v}</span><span class="trends-stat-k">${k}</span></div>`)
     .join('');
 
-  els.trendsPanel.innerHTML =
+  const next = document.createElement('div');
+  next.innerHTML =
     `<div class="trends-cap"><span>${rangeLabel}</span><span class="trends-open-hint" aria-label="${t('trends.open')}">↗</span></div>`
     + `<div class="trends-spark" role="button" tabindex="0" aria-label="${t('trends.open')}">${svg}</div>`
     + `<div class="trends-axis"><span>${first}</span><span>${last}</span></div>`
     + `<div class="trends-stats">${statsHtml}</div>`;
-  bindTrendTooltip(els.trendsPanel.querySelector('.trends-spark'), model, finalPoints, labelKey, metric);
-  const bars = Array.from(els.trendsPanel.querySelectorAll('.spark-bar'));
-  bars.forEach((bar, index) => {
+  Array.from(next.querySelectorAll('.spark-bar')).forEach((bar, index) => {
+    bar.dataset.key = String(finalPoints[index]?.[labelKey] || index);
     bar.dataset.motionKey = String(finalPoints[index]?.[labelKey] || index);
   });
+  rendererDom.reconcileChildren(els.trendsPanel, [...next.childNodes]);
+  bindTrendTooltip(els.trendsPanel.querySelector('.trends-spark'), model, finalPoints, labelKey, metric);
   const fromZero = state.animateChartsOnRender;
   animateTrendBarsFrom(previousBars, { fromZero });
   if (fromZero) state.animateChartsOnRender = false;
@@ -7138,7 +7078,7 @@ function scheduleHomeSessionRepaint(rows) {
     const current = els.homePanel?.querySelector('.home-module-session');
     if (!current) return;
     const nextRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
-    homeDom.reconcile(current, renderHomeSessionModule(nextRows));
+    rendererDom.reconcile(current, renderHomeSessionModule(nextRows));
     scheduleHomeSessionRepaint(nextRows);
   }, delay);
 }
@@ -7531,7 +7471,7 @@ function hideHomeActivityTooltip() {
   state.homeActivityHoverTeardown?.();
 }
 
-const homeDom = window.TokenMonitorHomeDom.create({ nodesFor: node => pluginContent?.nodesFor(node) || [] });
+const rendererDom = window.TokenMonitorDomReconcile.create({ nodesFor: node => pluginContent?.nodesFor(node) || [] });
 let homeActivityScroller = null;
 function updateHomeActivity() {
   const scroller = els.homePanel.querySelector('.home-activity-scroll');
@@ -7711,8 +7651,8 @@ function renderHome() {
     action.addEventListener('click', openHomeSettings);
     empty.append(title, body, action);
     const current = els.homePanel.querySelector('.home-empty');
-    if (current) homeDom.reconcile(current, empty);
-    else els.homePanel.replaceChildren(homeDom.reconcile(null, empty));
+    if (current) rendererDom.reconcile(current, empty);
+    else els.homePanel.replaceChildren(rendererDom.reconcile(null, empty));
     updateHomeActivity();
     return;
   }
@@ -7733,7 +7673,7 @@ function renderHome() {
     const next = nodes[index];
     if (next.dataset.pluginRef) continue;
     const current = [...els.homePanel.children].find(node => node.classList.contains(`home-module-${moduleIds[index]}`));
-    nodes[index] = homeDom.reconcile(current, next);
+    nodes[index] = rendererDom.reconcile(current, next);
   }
   // Reconcile siblings without detaching retained plugin controls. Collector
   // pushes must not discard focused drafts or cancel captured drawing gestures.
@@ -7868,7 +7808,7 @@ function renderAppContent({ fromSearch = false } = {}) {
   } else {
     state.fixedPeriodSnapshot = null;
   }
-  if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); els.sessionDetail.replaceChildren(); els.sessionDetailHead.classList.add('hidden'); els.sessionDetailHead.replaceChildren(); }
+  if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); rendererDom.clear(els.sessionDetail); els.sessionDetailHead.classList.add('hidden'); rendererDom.clear(els.sessionDetailHead); }
   if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
   const { fixedUnavailable, detailUnavailable } = periodContentAvailability();
@@ -7969,10 +7909,8 @@ function renderAppContent({ fromSearch = false } = {}) {
       const latest = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
       if (!latest) { closeSessionDetail(); return; }
       state.openSession.summary = latest;
-      // The rebuild replaces every run node, so a hovered run tooltip would die
-      // mid-read (and a keyboard focus with it); hold until it closes, as the
-      // session and home lists already do.
-      if (!sessionTooltipShouldHoldRender()) renderSessionGroupDetail(state.openSession);
+      // Update group readings while retaining the controls being read.
+      renderSessionGroupDetail(state.openSession);
     }
     refreshSessionDetailHeading();
     if (state.openSession.renderOptions) {

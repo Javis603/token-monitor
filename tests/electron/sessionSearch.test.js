@@ -1,4 +1,6 @@
 'use strict';
+// Presentation doubles delegate child commits; native fixtures exercise reconciliation.
+const rendererDom = { clear: node => node.replaceChildren(), reconcileChildren: (node, nodes) => node.replaceChildren(...nodes), placeChildren: (node, nodes) => node.replaceChildren(...nodes) };
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -212,6 +214,7 @@ test('typing after a session-status repaint uses the refreshed projection cache'
   let timer;
   const rendered = [];
   const dependencies = {
+    rendererDom,
     state, Date, els: { breakdown: { scrollTop: 120 } },
     window: { TokenMonitorSessionLive: {
       nextSessionStatusChangeAt: () => timer ? 0 : Date.now() + 1000
@@ -322,11 +325,10 @@ test('search renders reuse matching rows without layout motion or rebuilding too
   };
   const noop = () => {};
   const batch = { active: false, calls: 0 };
-  let tooltipHold = false;
   const statuses = [];
   const dependencies = {
+    rendererDom,
     state, els: { breakdown }, ...policy,
-    sessionTooltipShouldHoldRender: () => tooltipHold,
     sessionSearchQuery: () => state.sessionSearchQuery,
     sessionRowsApi: { filterSessionRows },
     sessionToolClients: row => [row.client, ...(row.groupRows || []).map(member => member.client)],
@@ -375,12 +377,8 @@ test('search renders reuse matching rows without layout motion or rebuilding too
   assert.equal(batch.calls, 1);
   const retained = breakdown.children[0];
 
-  tooltipHold = true;
   state.sessionSearchQuery = 'review';
   state.sessionToolFilter = 'codex';
-  renderRows(data);
-  assert.equal(breakdown.children.length, 3);
-  assert.equal(statuses.at(-1).query, '');
 
   renderRows(data, { fromSearch: true, reuseToolFilter: true });
   assert.deepEqual(breakdown.children.map(row => row.dataset.key), ['review', 'group']);

@@ -13,6 +13,7 @@
 })(typeof window !== 'undefined' ? window : null, function createNotchPanelApi(placements) {
   const scrollApi = (typeof module === 'object' && module.exports) ? require('./scrollGesture') : window.TokenMonitorNotchScroll;
   const { swipeDestination } = scrollApi;
+  const domApi = typeof module === 'object' && module.exports ? require('../domReconcile') : window.TokenMonitorDomReconcile;
   // Logical points inside the zoomed panel. The band shares the camera row on
   // an attached shell and becomes the first row of a capsule.
   const PANEL_METRICS = Object.freeze({ band: 34, pages: 176, gap: 6, bottom: 18, padding: 24 });
@@ -56,6 +57,7 @@
     const usageItems = window.TokenMonitorLimitUsageItems;
     const limitPresentation = window.TokenMonitorLimitProviderPresentation;
 
+    const dom = domApi.create({ nodesFor: node => pluginContent?.nodesFor(node) || [] });
     const view = { page: 'home', limitPage: 0, breakdownPeriod: 'today', scrub: null, monthDate: null };
     const node = el('div', 'notch-panel');
     const band = el('div', 'notch-band');
@@ -445,7 +447,7 @@
       for (const [page, pageNode] of pageNodes) {
         if (page === view.page) continue;
         if (page === 'sessions') captureSessionScroll(pageNode);
-        pageNode.replaceChildren();
+        dom.clear(pageNode);
         pageKeys.delete(page);
       }
     }
@@ -660,6 +662,7 @@
         const readings = quotaReadings(entry, nowMs).slice(0, 2);
         if (!readings.length) continue;
         const item = el('span', 'notch-fuel-item');
+        item.dataset.key = entry.id;
         item.setAttribute('aria-label', `${providerLabel(entry.provider)} · ${label}`);
         item.append(mark(entry.provider));
         readings.forEach((reading, index) => {
@@ -679,34 +682,40 @@
       more.dataset.focusKey = 'home:limits';
       activateOnPress(more, () => selectPage('limits'));
       function show(count) {
-        row.replaceChildren(...items.slice(0, count));
+        const target = dom.resolve(row);
+        dom.placeChildren(target, items.slice(0, count).map(dom.resolve));
         const hidden = items.length - count;
         if (hidden > 0) {
-          more.textContent = `+${hidden}`;
-          row.append(more);
+          dom.resolve(more).textContent = `+${hidden}`;
+          dom.placeChildren(target, [...target.children, dom.resolve(more)]);
         }
-        if (!row.childElementCount) row.append(text('notch-fuel-empty', t('notch.noLimits')));
+        if (!target.childElementCount) dom.placeChildren(target, [text('notch-fuel-empty', t('notch.noLimits'))]);
       }
       show(items.length);
       fitHomeFuel = () => {
-        if (!(row.clientWidth > 0)) return;
-        const focused = document.activeElement === more;
+        const target = dom.resolve(row);
+        if (!(target.clientWidth > 0)) return;
+        const focused = document.activeElement === dom.resolve(more);
         let count = items.length;
         show(count);
         // Reserve the actual +N width as well as complete provider groups.
-        while (count > 0 && row.scrollWidth > row.clientWidth) show(--count);
-        if (focused && row.contains(more)) more.focus({ preventScroll: true });
+        while (count > 0 && target.scrollWidth > target.clientWidth) show(--count);
+        if (focused && target.contains(dom.resolve(more))) dom.resolve(more).focus({ preventScroll: true });
       };
       return row;
     }
 
     function renderHome(pageNode, nowMs) {
-      const today = cell('stat:today');
+      const liveToday = cell('stat:today');
       const week = weekModel(nowMs);
+      const selected = view.scrub && week.days.find(day => day.date === view.scrub.day.date && !day.today && day.tokens !== null);
+      view.scrub = selected ? { day: selected, label: new Intl.DateTimeFormat(locale(), { weekday: 'narrow', timeZone: 'UTC' }).format(new Date(`${selected.date}T00:00:00Z`)) } : null;
+      const today = selected ? { ...selected, totalTokens: selected.tokens, available: true } : liveToday;
       const left = el('div', 'notch-home-main');
       const kicker = el('div', 'notch-kicker-row');
-      const label = text('notch-kicker', t('notch.today'));
-      const scrubDate = text('notch-scrub-date', '');
+      const label = text('notch-kicker', view.scrub ? view.scrub.label : t('notch.today'));
+      kicker.classList.toggle('is-scrubbing', Boolean(view.scrub));
+      const scrubDate = text('notch-scrub-date', selected ? `${Number(selected.date.slice(5, 7))}/${Number(selected.date.slice(8, 10))}` : '');
       kicker.append(label, scrubDate);
       const big = rolling(text('notch-big total-number', today?.available ? formatCardTokens(today.totalTokens) : '—'), 'today', today?.totalTokens);
       const cost = today?.available ? usageCost('notch-cost', today) : text('notch-cost', '');
@@ -726,6 +735,7 @@
         const column = el('button', 'notch-day');
         column.type = 'button';
         column.dataset.focusKey = `day:${day.date}`;
+        domApi.data(column, day);
         column.classList.toggle('is-today', day.today);
         column.style.setProperty('--i', index);
         const bar = el('div', 'notch-day-bar');
@@ -751,11 +761,13 @@
         // A day without data keeps a small baseline mark, so it does not read as a quiet day.
         if (day.tokens === null) column.classList.add('is-unknown');
         column.setAttribute('aria-label', `${day.date} · ${day.tokens === null ? '—' : formatTokens(day.tokens)}`);
-        column.addEventListener('pointerenter', () => {
+        column.addEventListener('pointerenter', event => {
+          const day = domApi.data(event.currentTarget);
           if (day.today || day.tokens === null) { scrub(null, day.date); return; }
           scrub({ day, label: weekday.format(new Date(`${day.date}T00:00:00Z`)) });
         });
-        column.addEventListener('focus', () => {
+        column.addEventListener('focus', event => {
+          const day = domApi.data(event.currentTarget);
           scrub(!day.today && day.tokens !== null ? { day, label: weekday.format(new Date(`${day.date}T00:00:00Z`)) } : null, day.date);
         });
         column.addEventListener('blur', () => scrub(null));
@@ -790,29 +802,13 @@
       if (!payload?.panel?.week?.available) right.classList.add('is-partial');
 
       function scrub(value, date = value?.day.date) {
-        const leaving = view.scrub && !value;
         view.scrub = value;
         view.monthDate = date || null;
-        kicker.classList.toggle('is-scrubbing', Boolean(value));
-        label.textContent = value ? value.label : t('notch.today');
-        scrubDate.textContent = value ? `${Number(value.day.date.slice(5, 7))}/${Number(value.day.date.slice(8, 10))}` : '';
-        const snapshot = captureRolls(pageNode);
-        const amount = value ? value.day.tokens : today?.totalTokens;
-        big.textContent = value ? formatCardTokens(amount) : today?.available ? formatCardTokens(amount) : '—';
-        rolling(big, 'today', amount);
-        fitBig();
-        playRolls(pageNode, snapshot);
-        const reading = value ? value.day : today?.available ? today : null;
-        const costReading = reading ? usageCost('', reading) : text('', '');
-        cost.replaceChildren(...costReading.children);
-        cost.classList.toggle('edge-dock-cost-reading', Boolean(reading));
-        monthTitle.textContent = date ? monthName.format(new Date(`${date}T00:00:00Z`))
-          : new Intl.DateTimeFormat(locale(), { month: 'long' }).format(new Date());
-        if (leaving) renderPage('home');
+        renderPage('home', { force: true });
       }
       pageNode.replaceChildren(left, right);
       function fitBig() {
-        fitTokenFigure(big, 40);
+        fitTokenFigure(dom.resolve(big), 40);
       }
       fitBig();
       fitHomeFuel();
@@ -858,11 +854,12 @@
 
     function limitColumn({ entry, account, record, records, key }, nowMs) {
       const column = el('div', 'notch-limit');
+      column.dataset.key = key;
       // The plan sits beside the name, as on the Limits view; fitLimitPlans()
       // moves it to the line below only where it would cut the name short.
       const head = el('div', 'notch-limit-head');
       const name = text('notch-limit-name', providerLabel(entry.provider));
-      name.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'name']);
+      name.dataset.key = JSON.stringify(['notch', 'limits', key, 'name']);
       overflowText.bind(name);
       head.append(mark(entry.provider), name);
       const usable = record && (record.status === 'ok' || record.stale);
@@ -883,7 +880,7 @@
           ? t('settings.codex.nAccounts', { count: records.length }) : '');
         if (title) {
           const accountName = text('notch-limit-account', title, title);
-          accountName.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'account']);
+          accountName.dataset.key = JSON.stringify(['notch', 'limits', key, 'account']);
           overflowText.bind(accountName);
           sub.append(accountName);
         }
@@ -918,12 +915,13 @@
       list.dataset.count = String(Math.max(1, readings.length + (windowCount > 1 ? 1 : 0)));
       for (const reading of readings) {
         const row = el('div', 'notch-limit-window');
+        row.dataset.key = JSON.stringify([reading.window.kind, reading.window.label]);
         const tone = appearance().notchWarnColors === true ? severity(reading.remaining) : '';
         if (tone) row.dataset.tone = tone;
         // Long labels (Antigravity's "Claude/GPT 5-hour") fade and scroll into
         // view on hover, as session titles do, instead of ending in an ellipsis.
         const label = text('notch-limit-label', windowLabels.limitWindowLabel(entry.provider, reading.window, t('notch.quota')));
-        label.dataset.overflowKey = JSON.stringify(['notch', 'limits', key, 'window', windowPage, readings.indexOf(reading)]);
+        label.dataset.key = JSON.stringify(['notch', 'limits', key, 'window', windowPage, readings.indexOf(reading)]);
         overflowText.bind(label);
         const value = el('span', 'notch-limit-value');
         const description = windowText.limitWindowText(reading.record, reading.window, { showLimitUsed: appearance().showLimitUsed, formatCompact: formatTokens });
@@ -958,8 +956,13 @@
         const more = el('button', 'notch-window-page', `${windowPage + 1} / ${windowCount}`);
         more.type = 'button';
         more.dataset.focusKey = `windows:${key}`;
+        domApi.data(more, { key, windowCount });
         more.setAttribute('aria-label', `${providerLabel(entry.provider)} · ${t('notch.pageLabel', { page: (windowPage + 1) % windowCount + 1, count: windowCount })}`);
-        activateOnPress(more, () => { windowPages.set(key, (windowPage + 1) % windowCount); renderPage('limits', { force: true }); });
+        activateOnPress(more, () => {
+          const { key, windowCount } = domApi.data(dom.resolve(more));
+          windowPages.set(key, ((windowPages.get(key) || 0) + 1) % windowCount);
+          renderPage('limits', { force: true });
+        });
         column.append(more);
       }
       return column;
@@ -981,6 +984,7 @@
       const pageCount = Math.max(1, Math.ceil(columns.length / LIMIT_COLUMNS));
       view.limitPage = Math.min(view.limitPage, pageCount - 1);
       const strip = el('div', 'notch-limits');
+      domApi.data(strip, { pageCount });
       strip.classList.toggle('is-paged', pageCount > 1);
       columns.forEach((column, index) => {
         const node = limitColumn(column, nowMs);
@@ -996,7 +1000,7 @@
       if (!columns.length) strip.append(text('notch-empty', t('notch.noLimits')));
       pageNode.replaceChildren(strip);
       fitLimitPlans = () => {
-        for (const column of strip.querySelectorAll('.notch-limit')) {
+        for (const column of dom.resolve(strip).querySelectorAll('.notch-limit')) {
           const head = column.querySelector('.notch-limit-head');
           const name = column.querySelector('.notch-limit-name');
           const chip = column.querySelector('.notch-chip');
@@ -1006,37 +1010,26 @@
         }
       };
       fitLimitPlans();
-      if (pageCount <= 1) return;
-      const pager = el('div', 'notch-pager');
-      const dots = [];
       const goTo = (index) => {
-        const page = Math.max(0, Math.min(pageCount - 1, index));
-        strip.scrollTo({ left: page * limitPageWidth(strip), behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
+        const live = dom.resolve(strip);
+        const page = Math.max(0, Math.min(domApi.data(live).pageCount - 1, index));
+        live.scrollTo({ left: page * limitPageWidth(live), behavior: prefersReducedMotion() ? 'auto' : 'smooth' });
       };
       const sync = () => {
+        const live = dom.resolve(strip);
+        const pageCount = domApi.data(live).pageCount;
         // A strip that is not laid out (the panel is closed) keeps its page.
-        const width = limitPageWidth(strip);
-        if (width > 0) view.limitPage = Math.max(0, Math.min(pageCount - 1, Math.round(strip.scrollLeft / width)));
-        dots.forEach((dot, index) => {
+        const width = limitPageWidth(live);
+        if (width > 0) view.limitPage = Math.max(0, Math.min(pageCount - 1, Math.round(live.scrollLeft / width)));
+        [...pageNodes.get('limits').querySelectorAll('.notch-pager button')].forEach((dot, index) => {
           dot.classList.toggle('is-selected', index === view.limitPage);
           dot.setAttribute('aria-pressed', String(index === view.limitPage));
         });
-        strip.classList.toggle('has-after', view.limitPage < pageCount - 1);
+        live.classList.toggle('has-after', view.limitPage < pageCount - 1);
       };
-      for (let index = 0; index < pageCount; index += 1) {
-        const dot = el('button');
-        dot.type = 'button';
-        dot.setAttribute('aria-label', t('notch.pageLabel', { page: index + 1, count: pageCount }));
-        dot.dataset.focusKey = `limits:${index}`;
-        activateOnPress(dot, () => goTo(index));
-        dots.push(dot);
-        pager.append(dot);
-      }
-      pageNode.append(pager);
-      strip.scrollLeft = view.limitPage * limitPageWidth(strip);
-      sync();
       strip.addEventListener('scroll', sync, { passive: true });
       strip.addEventListener('wheel', (event) => {
+        if (domApi.data(dom.resolve(strip)).pageCount <= 1) return;
         if (Math.abs(event.deltaX) >= Math.abs(event.deltaY)) return;
         event.preventDefault();
         clearTimeout(limitWheel.timer);
@@ -1047,6 +1040,21 @@
         limitWheel.stepped = true;
         goTo(view.limitPage + Math.sign(limitWheel.sum));
       }, { passive: false });
+      if (pageCount <= 1) return;
+      const pager = el('div', 'notch-pager');
+      for (let index = 0; index < pageCount; index += 1) {
+        const dot = el('button');
+        dot.type = 'button';
+        dot.setAttribute('aria-label', t('notch.pageLabel', { page: index + 1, count: pageCount }));
+        dot.dataset.focusKey = `limits:${index}`;
+        dot.classList.toggle('is-selected', index === view.limitPage);
+        dot.setAttribute('aria-pressed', String(index === view.limitPage));
+        activateOnPress(dot, () => goTo(index));
+        pager.append(dot);
+      }
+      pageNode.append(pager);
+      strip.scrollLeft = view.limitPage * limitPageWidth(strip);
+      sync();
     }
 
     // ---- Sessions -------------------------------------------------------------
@@ -1058,7 +1066,7 @@
     function sessionHeading(row, className) {
       const heading = el('div', 'notch-session-heading');
       const title = text(className, sessionTitle(row));
-      title.dataset.overflowKey = JSON.stringify(['notch', view.page, row.key || `${row.client}:${row.sessionId}`]);
+      title.dataset.key = JSON.stringify(['notch', view.page, row.key || `${row.client}:${row.sessionId}`]);
       overflowText.bind(title);
       // The mark is a painted mask. Say the tool beside it, out of the visual
       // line, the same way the Edge Dock does. The meta row has no room for it.
@@ -1108,6 +1116,7 @@
 
     function activeRow(row, stateName, nowMs) {
       const node = el('div', `notch-active is-${stateName}`);
+      node.dataset.key = row.key || `${row.client}:${row.sessionId}`;
       node.setAttribute('role', 'listitem');
       node.style.setProperty('--notch-accent', clientColor(row.client));
       const body = el('div', 'notch-active-body');
@@ -1165,6 +1174,7 @@
       list.dataset.focusKey = 'recent:list';
       for (const row of recent) {
         const line = el('div', 'notch-recent');
+        line.dataset.key = row.key || `${row.client}:${row.sessionId}`;
         line.setAttribute('role', 'listitem');
         const body = el('div', 'notch-recent-body');
         const meta = el('span', 'notch-recent-meta');
@@ -1201,10 +1211,12 @@
         group.append(button);
       }
       requestAnimationFrame(() => {
-        const on = group.querySelector('button.is-selected');
+        const target = dom.resolve(group);
+        const livePill = dom.resolve(pill);
+        const on = target.querySelector('button.is-selected');
         if (!on) return;
-        pill.style.width = `${on.offsetWidth}px`;
-        pill.style.transform = `translateX(${on.offsetLeft - 2}px)`;
+        livePill.style.width = `${on.offsetWidth}px`;
+        livePill.style.transform = `translateX(${on.offsetLeft - 2}px)`;
       });
       return group;
     }
@@ -1233,6 +1245,7 @@
         segment.style.flex = String(row.tokens);
         segment.style.background = color;
         segment.dataset.index = index;
+        segment.dataset.key = row.key;
         spectrum.append(segment);
         const line = el('div', 'notch-rank-row');
         line.dataset.index = index;
@@ -1247,13 +1260,15 @@
         }
         line.append(text('notch-rank-name', labelFor(row), labelFor(row)), text('notch-rank-tokens row-value', formatBreakdownTokens(row.tokens)),
           text('notch-rank-share', total > 0 ? `${Math.round(row.tokens / total * 100)}%` : ''));
-        line.addEventListener('pointerenter', () => highlight(index));
-        line.addEventListener('pointerleave', () => highlight(null));
-        line.addEventListener('focus', () => highlight(index));
-        line.addEventListener('blur', () => highlight(null));
+        line.addEventListener('pointerenter', event => highlight(event.currentTarget.closest('.notch-breakdown-column'), Number(event.currentTarget.dataset.index)));
+        line.addEventListener('pointerleave', event => highlight(event.currentTarget.closest('.notch-breakdown-column'), null));
+        line.addEventListener('focus', event => highlight(event.currentTarget.closest('.notch-breakdown-column'), Number(event.currentTarget.dataset.index)));
+        line.addEventListener('blur', event => highlight(event.currentTarget.closest('.notch-breakdown-column'), null));
         rank.append(line);
       });
-      function highlight(index) {
+      function highlight(column, index) {
+        const spectrum = column.querySelector('.notch-spectrum');
+        const rank = column.querySelector('.notch-rank');
         spectrum.classList.toggle('is-hovering', index !== null);
         rank.classList.toggle('is-hovering', index !== null);
         for (const node of [...spectrum.children, ...rank.children]) node.classList.toggle('is-highlighted', Number(node.dataset.index) === index);
@@ -1277,7 +1292,6 @@
       rule.setAttribute('aria-hidden', 'true');
       columns.append(breakdownColumn('tool', period), rule, breakdownColumn('model', period));
       pageNode.replaceChildren(head, columns);
-      fitTokenFigure(tokens, 30);
     }
 
     // ---- Shared ---------------------------------------------------------------
@@ -1311,34 +1325,33 @@
       const nowMs = Date.now();
       const key = pageKey(page, nowMs);
       if (!force && pageKeys.get(page) === key) return;
-      // Hover readings belong to the DOM they were made on; a rebuild under
-      // the pointer would otherwise drop the scrubbed day mid-gesture; a swipe
-      // likewise owns the limits strip it measured.
-      if (page === 'home' && view.scrub && !force) return;
+      // A swipe owns its measured page geometry until the gesture settles.
       if (page === 'limits' && gesture?.strip && !force) return;
       if (pageKeys.has(page)) node.classList.remove('is-entering');
       pageKeys.set(page, key);
       const pageNode = pageNodes.get(page);
-      const focused = pageNode.contains(document.activeElement) ? document.activeElement?.dataset.focusKey : null;
       const scroll = page === 'sessions' ? captureSessionScroll(pageNode) : null;
       const snapshot = page === view.page ? captureRolls(pageNode) : new Map();
-      const previous = el('div');
-      previous.append(...pageNode.children);
+      const next = el('div');
       if (page.startsWith(PLUGIN_PAGE_PREFIX)) renderPluginPage(pageNode, page.slice(PLUGIN_PAGE_PREFIX.length));
-      else if (page === 'home') renderHome(pageNode, nowMs);
-      else if (page === 'limits') renderLimits(pageNode, nowMs);
-      else if (page === 'sessions') renderSessions(pageNode, nowMs, scroll);
-      else renderBreakdown(pageNode, nowMs);
+      else if (page === 'home') renderHome(next, nowMs);
+      else if (page === 'limits') renderLimits(next, nowMs);
+      else if (page === 'sessions') renderSessions(next, nowMs, scroll);
+      else renderBreakdown(next, nowMs);
       if (!page.startsWith(PLUGIN_PAGE_PREFIX) && pluginContent?.hasTarget(`notch.${page}.content`)) {
-        const native = el('div', 'plugin-native-content'); native.append(...pageNode.childNodes); pageNode.append(native);
-        pluginContent.render(`notch.${page}.content`, native, { surface: 'notch', page, period: view.breakdownPeriod, nativeData: payload });
+        const native = el('div', 'plugin-native-content'); native.append(...next.childNodes); next.append(native);
+      }
+      if (!page.startsWith(PLUGIN_PAGE_PREFIX)) dom.reconcileChildren(pageNode, [...next.childNodes]);
+      if (!page.startsWith(PLUGIN_PAGE_PREFIX) && pluginContent?.hasTarget(`notch.${page}.content`)) {
+        pluginContent.render(`notch.${page}.content`, pageNode.querySelector('.plugin-native-content'), { surface: 'notch', page, period: view.breakdownPeriod, nativeData: payload });
       }
       pluginContent?.retain(['notch.summary.content', ...[...pageNodes.keys()].filter(key => !key.startsWith(PLUGIN_PAGE_PREFIX)).map(key => `notch.${key}.content`)]);
       pluginHost?.refreshDemand();
-      overflowText.preserveReading(previous, pageNode);
       overflowText.refresh();
       playRolls(pageNode, snapshot);
-      if (focused) [...pageNode.querySelectorAll('[data-focus-key]')].find((node) => node.dataset.focusKey === focused)?.focus({ preventScroll: true });
+      if (page === 'home') { fitTokenFigure(pageNode.querySelector('.notch-big'), 40); fitHomeFuel(); }
+      if (page === 'limits') fitLimitPlans();
+      if (page === 'breakdown') fitTokenFigure(pageNode.querySelector('.notch-breakdown-tokens'), 30);
     }
 
     function renderPluginPage(pageNode, ref) {

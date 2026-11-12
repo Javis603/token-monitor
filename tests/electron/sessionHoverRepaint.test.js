@@ -1,211 +1,83 @@
 'use strict';
-
-const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
-const vm = require('node:vm');
-const overflowTextApi = require('../../src/electron/renderer/overflowText');
+const assert = require('node:assert/strict');
+const domApi = require('../../src/electron/renderer/domReconcile');
+const { Element } = require('../helpers/notchPanel');
 
-function source(file) {
-  return fs.readFileSync(path.join(__dirname, '../../src/electron/renderer', file), 'utf8');
-}
-function functionSource(text, name) {
-  const start = text.indexOf(`function ${name}(`);
-  const end = text.indexOf('\n}', start + 1) + 2;
-  assert.ok(start >= 0 && end > start);
-  return text.slice(start, end);
-}
-
-for (const reducedMotion of [false, true]) {
-  test(`group model tooltip holds stats repaint without marquee (reduced motion: ${reducedMotion})`, () => {
-    const app = source('app.js');
-    const run = { classes: new Set(['session-group-run']), parent: null };
-    const subtitle = {
-      classes: new Set(['detail-ex-sub']), parent: run, children: [],
-      clientWidth: reducedMotion ? 50 : 300, scrollLeft: 0,
-      get childNodes() { return this.children; },
-      get textContent() { return 'Subagent · Codex · 2 models'; },
-      append(...children) { this.children = children; },
-      closest: () => run,
-      classList: {
-        add: value => subtitle.classes.add(value), remove: value => subtitle.classes.delete(value),
-        contains: value => subtitle.classes.has(value),
-        toggle: (value, enabled) => enabled ? subtitle.classes.add(value) : subtitle.classes.delete(value)
-      },
-      addEventListener(type, handler) { this[type] = handler; },
-      removeAttribute(name) { delete this[name]; }
-    };
-    const model = { classes: new Set(['session-models', 'limit-detail-tooltip-wrap']),
-      parent: subtitle, hovered: false, focusWithin: false };
-    const elements = [run, subtitle, model];
-    const matchesCompound = (element, selector) => {
-      const [classes, ...pseudos] = selector.split(':');
-      return classes.split('.').filter(Boolean).every(value => element.classes.has(value))
-        && pseudos.every(value => value === 'hover' ? element.hovered : value === 'focus-within' && element.focusWithin);
-    };
-    const matchesSelector = (element, selector) => {
-      const compounds = selector.trim().split(/\s+/);
-      if (!matchesCompound(element, compounds.pop())) return false;
-      let ancestor = element.parent;
-      while (compounds.length) {
-        const compound = compounds.pop();
-        while (ancestor && !matchesCompound(ancestor, compound)) ancestor = ancestor.parent;
-        if (!ancestor) return false;
-        ancestor = ancestor.parent;
-      }
-      return true;
-    };
-    const document = {
-      querySelector: selectors => elements.find(element => selectors.split(',').some(selector => matchesSelector(element, selector))),
-      createElement: () => ({ style: {}, append() {}, getBoundingClientRect: () => ({ width: 200 }) })
-    };
-    const overflow = overflowTextApi.create({ document, prefersReducedMotion: () => reducedMotion,
-      window: { addEventListener() {}, requestAnimationFrame: () => 1 } });
-    overflow.bind(subtitle);
-    subtitle.mouseenter();
-    assert.equal(subtitle.classes.has('is-hover-reading'), false,
-      'a fitting subtitle or reduced motion leaves the tooltip without marquee protection');
-    const hold = Function('document', `${functionSource(app, 'sessionTooltipShouldHoldRender')}; return sessionTooltipShouldHoldRender;`)(document);
-    const start = app.indexOf("    if (state.openSession.kind === 'session-group') {");
-    const end = app.indexOf('    refreshSessionDetailHeading();', start);
-    const state = { openSession: { kind: 'session-group', summary: { key: 'group', value: 1 } } };
-    let painted = state.openSession.summary;
-    const repaint = Function('state', 'period', 'sessionRowsForPeriod', 'closeSessionDetail',
-      'sessionTooltipShouldHoldRender', 'renderSessionGroupDetail', app.slice(start, end));
-    const update = value => repaint(state, value, tokens => [{ key: 'group', value: tokens }],
-      () => assert.fail('the group still exists'), hold, request => { painted = request.summary; });
-    const original = painted;
-    model.hovered = true;
-    update(2);
-    update(3);
-    assert.strictEqual(painted, original, 'hover preserves the current nodes instead of replacing the tooltip');
-    assert.equal(state.openSession.summary.value, 3, 'the latest stats still reach the open group');
-    model.hovered = false;
-    update(4);
-    assert.equal(painted.value, 4, 'the next repaint after pointer leave displays current stats');
-    model.focusWithin = true;
-    update(5);
-    assert.equal(painted.value, 4, 'keyboard reading also holds the tooltip');
-    model.focusWithin = false;
-    update(6);
-    assert.equal(painted.value, 6, 'blur permits normal repaint again');
-    subtitle.mouseleave();
-  });
+function fixture() {
+  const document = { activeElement: null };
+  const node = (key, text, className = 'row') => {
+    const element = new Element('div', document);
+    element.dataset.key = key; element.className = className; element.textContent = text;
+    return element;
+  };
+  const root = new Element('main', document);
+  return { document, node, root, dom: domApi.create() };
 }
 
-test('Home updates immediately while a real overflowing title is being read', () => {
-  const app = source('app.js');
-  const classes = new Set();
-  const title = {
-    children: [{ textContent: 'Long session title' }], style: {}, scrollLeft: 0, clientWidth: 100,
-    get childNodes() { return this.children; },
-    get textContent() { return this.children.map(child => child.textContent).join(''); },
-    append(...children) { this.children = children; },
-    closest: selector => selector === '.session-mode, .home-session-row' ? {} : null,
-    classList: {
-      add: value => classes.add(value), remove: value => classes.delete(value),
-      contains: value => classes.has(value),
-      toggle: (value, enabled) => enabled ? classes.add(value) : classes.delete(value)
-    },
-    addEventListener(type, handler) { this[type] = handler; },
-    removeAttribute(name) { delete this[name]; }
-  };
-  const document = {
-    querySelector: selector => selector.split(', ').some(part => part === '.home-panel:not(.hidden) .home-session-row .is-hover-reading')
-      && classes.has('is-hover-reading') ? title : null,
-    querySelectorAll: () => [title],
-    createElement: () => ({
-      style: {}, children: [],
-      get textContent() { return this.children.map(child => child.textContent).join(''); },
-      append(...children) { this.children = children; },
-      getBoundingClientRect: () => ({ width: 200 })
-    })
-  };
-  const frames = [];
-  const painted = [];
-  const state = { breakdown: 'home', stats: { revision: 1 } };
-  const context = {
-    homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
-    state, pluginContent: null, prefersReducedMotion: () => false, visibleStatsSurface: () => 'main',
-    requestAnimationFrame: callback => frames.push(callback),
-    document,
-    window: {
-      TokenMonitorOverflowText: overflowTextApi, TokenMonitorEdgeDockPresentation: { recentSessionRows: () => [] }, addEventListener() {},
-      requestAnimationFrame: callback => frames.push(callback),
-      setTimeout: () => 1, clearTimeout() {}
-    },
-    els: { homePanel: {
-      children: [],
-      insertBefore(module, before) {
-        const index = before ? this.children.indexOf(before) : this.children.length;
-        this.children.splice(index, 0, module); module.parentNode = this;
-        module.remove = () => { this.children.splice(this.children.indexOf(module), 1); module.parentNode = null; };
-        painted.push(module.revision);
-      }, querySelector: () => null
-    } },
-    hideHomeActivityTooltip() {}, hideTrendTooltip() {}, homeModuleIds: () => ['session'], sessionPresentationOptions: () => ({}),
-    homeDom: { reconcile: (_previous, next) => next }, updateHomeActivity() {},
-    renderHomeSessionModule: () => ({ revision: state.stats.revision, dataset: {}, classList: { contains: () => false } }), scheduleHomeSessionRepaint() {}
-  };
-  const setup = app.slice(app.indexOf('const overflowText ='), app.indexOf('function bindHoverMarquee('));
-  vm.runInNewContext(`let homeSessionRenderPending = false;\n${setup}\n${functionSource(app, 'sessionTooltipShouldHoldRender')}\n${functionSource(app, 'renderHome')}\nglobalThis.repaint = renderHome; globalThis.bind = overflowText.bind;`, context);
-  context.bind(title);
-  title.mouseenter();
-  assert.equal(classes.has('is-hover-reading'), true, 'the real helper activates the selector used by Home');
-  state.stats = { revision: 2 };
-  context.repaint();
-  state.stats = { revision: 3 };
-  context.repaint();
-  assert.deepEqual(painted, [2, 3]);
-  title.mouseleave();
-  frames.splice(0).forEach(callback => callback());
-  assert.deepEqual(painted, [2, 3], 'leaving requires no catch-up repaint');
-  title.mouseenter();
-  title.mouseleave();
-  frames.splice(0).forEach(callback => callback());
-  assert.deepEqual(painted, [2, 3], 'reading alone does not repaint Home');
-  title.clientWidth = 200;
-  title.mouseenter();
-  state.stats = { revision: 4 };
-  context.repaint();
-  title.mouseleave();
-  frames.splice(0).forEach(callback => callback());
-  assert.deepEqual(painted, [2, 3, 4], 'fitting titles also update without a catch-up repaint');
+test('keyed pushes preserve focused rows, handler state and scroll while text changes', () => {
+  const { document, node, root, dom } = fixture();
+  const row = node('session', '100');
+  dom.reconcileChildren(root, [row]); row.focus();
+  row.classList.add('is-hover-reading'); row.style.setProperty('transform', 'translateX(-12px)'); root.scrollTop = 70;
+  for (const amount of ['200', '300']) {
+    dom.reconcileChildren(root, [node('session', amount)]);
+    assert.equal(root.children[0], row); assert.equal(row.textContent, amount);
+    assert.equal(document.activeElement, row); assert.equal(root.scrollTop, 70);
+    assert.ok(row.classList.contains('is-hover-reading'));
+    assert.equal(row.style.transform, 'translateX(-12px)');
+  }
 });
 
-test('Edge Dock title hover permits pushes and clock repaints while tooltip holds still work', () => {
-  const dock = source('edgeDock/dock.js');
-  let tooltipHovered = false;
-  const painted = [];
-  const context = {
-    state: { payload: null }, surface: 'bubble', notchRenderer: null, surfaceWeb: null, limitTooltip: { active: false, pending: false },
-    contentLayer: { querySelector: selector => {
-      if (selector === '.fade-overflow:hover') return {};
-      if (selector === '.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within') {
-        return tooltipHovered ? {} : null;
-      }
-      return null;
-    } },
-    codexAccountControl: { deferRender: () => false },
-    applyAppearance() {}, updateShape() {}, scheduleSelfRepaint() {},
-    renderBubble: payload => painted.push(payload.cell.revision)
+test('ranking and selected-state changes retain logical controls, insertion/removal retires only obsolete keys', () => {
+  const { document, node, root, dom } = fixture();
+  const a = node('a', 'A'), b = node('b', 'B');
+  dom.reconcileChildren(root, [a, b]); b.focus();
+  dom.reconcileChildren(root, [node('b', 'B2', 'selected'), node('new', 'New'), node('a', 'A2')]);
+  assert.equal(root.children[0], b); assert.equal(root.children[2], a); assert.equal(document.activeElement, b);
+  dom.reconcileChildren(root, [node('b', 'B3', 'selected')]);
+  assert.equal(root.children[0], b); assert.equal(a.parentNode, null);
+});
+
+test('retained listeners read current DTOs and changed control capability installs fresh listeners', () => {
+  const { node, root, dom } = fixture();
+  const plain = node('model', 'one model'); dom.reconcileChildren(root, [plain]);
+  let value;
+  const tooltip = node('model', 'two models'); tooltip.dataset.domKind = 'tooltip';
+  domApi.data(tooltip, { tokens: 100 });
+  tooltip.addEventListener('focus', event => { value = domApi.data(event.currentTarget).tokens; });
+  dom.reconcileChildren(root, [tooltip]); assert.notEqual(root.children[0], plain);
+  const next = node('model', 'two models'); next.dataset.domKind = 'tooltip'; domApi.data(next, { tokens: 200 });
+  dom.reconcileChildren(root, [next]); tooltip.fire('focus');
+  assert.equal(root.children[0], tooltip); assert.equal(value, 200);
+  assert.equal(dom.resolve(next), tooltip, 'layout callbacks can resolve their staged node to the live node');
+});
+
+test('native updates preserve plugin outlets beside retained anchors', () => {
+  const { node, root } = fixture();
+  const anchor = node('native', '100'), outlet = node('author', 'unsaved draft');
+  const dom = domApi.create({ nodesFor: element => element === anchor ? [outlet] : [] });
+  dom.reconcileChildren(root, [anchor]); root.append(outlet);
+  dom.reconcileChildren(root, [node('native', '200')]);
+  assert.deepEqual(root.children, [anchor, outlet]); assert.equal(outlet.textContent, 'unsaved draft');
+});
+
+test('nested account, session and family scroll containers survive independently', () => {
+  const { node, root, dom } = fixture();
+  const build = amount => {
+    const accounts = node('accounts', ''), sessions = node('sessions', ''), family = node('family', '');
+    accounts.append(node('account', amount)); family.append(node('child', amount)); sessions.append(family);
+    return [accounts, sessions];
   };
-  vm.runInNewContext(`${functionSource(dock, 'limitTooltipShouldHoldRender')}\n${functionSource(dock, 'deferBubbleRender')}\n${functionSource(dock, 'render')}\n${functionSource(dock, 'repaintSelf')}\nglobalThis.repaint = render; globalThis.tick = repaintSelf;`, context);
-  context.repaint({ surface: 'bubble', cell: { revision: 1 } });
-  context.repaint({ surface: 'bubble', cell: { revision: 2 } });
-  context.tick();
-  assert.deepEqual(painted, [1, 2, 2], 'hovering a title freezes neither pushes nor expiry/countdown ticks');
-  assert.equal(context.limitTooltip.pending, false);
-  context.repaint({ surface: 'bubble', cell: { revision: 3 } });
-  assert.deepEqual(painted, [1, 2, 2, 3]);
-  context.limitTooltip.active = true;
-  tooltipHovered = true;
-  context.repaint({ surface: 'bubble', cell: { revision: 4 } });
-  context.tick();
-  assert.equal(context.limitTooltip.pending, true);
-  assert.deepEqual(painted, [1, 2, 2, 3], 'an actual open tooltip retains its existing repaint hold');
-  tooltipHovered = false;
-  context.tick();
-  assert.deepEqual(painted, [1, 2, 2, 3, 4], 'the latest payload paints when the tooltip no longer holds it');
+  dom.reconcileChildren(root, build('100'));
+  const [accounts, sessions] = root.children, family = sessions.children[0];
+  accounts.scrollTop = 25; sessions.scrollTop = 150; family.scrollTop = 60;
+  for (const amount of ['200', '300']) {
+    dom.reconcileChildren(root, build(amount));
+    assert.equal(root.children[0], accounts); assert.equal(root.children[1], sessions);
+    assert.equal(sessions.children[0], family);
+    assert.deepEqual([accounts.scrollTop, sessions.scrollTop, family.scrollTop], [25, 150, 60]);
+  }
+  dom.clear(root); assert.equal(root.children.length, 0);
+  dom.reconcileChildren(root, build('400')); assert.notEqual(root.children[0], accounts);
 });

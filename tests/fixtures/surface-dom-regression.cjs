@@ -1,0 +1,77 @@
+/* global state, surface, render, document, requestAnimationFrame, MouseEvent, PointerEvent */
+'use strict';
+(async () => {
+  const assert = (ok, message) => { if (!ok) throw new Error(message); };
+  const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  if (surface === 'rail') {
+    const cell = document.querySelector('.edge-dock-cell'); cell.tabIndex = 0; cell.focus();
+    for (let i = 0; i < 2; i++) {
+      state.payload.cells[0].totalTokens = 200 + i;
+      render(state.payload); await settle();
+      assert(document.querySelector('.edge-dock-cell') === cell, 'rail cell identity');
+      assert(document.activeElement === cell, 'rail cell focus survives pushes');
+    }
+    return 'PASS actual rail cell identity and focus';
+  }
+  const row = { key: 'codex:dom-proof', client: 'codex', sessionId: 'dom-proof', title: 'An intentionally long ongoing engineering task title for reading across updates',
+    totalTokens: 100, models: { 'gpt-5': 70, 'gpt-5-mini': 30 }, lastUsedAt: new Date().toISOString(), liveActivity: { state: 'running', observedAt: new Date().toISOString() } };
+  const rows = [row];
+  const next = { ...state.payload, appearance: { ...state.payload.appearance, reduceMotion: 'off' } };
+  if (surface === 'bubble') next.cell = { ...next.cell, metric: 'sessions', sessions: rows };
+  else next.cells = [{ id: 'stat:today', kind: 'stat', metric: 'tokens', available: true, totalTokens: 100, clients: [], models: [] }, { id: 'stat:sessions', kind: 'stat', metric: 'sessions', sessions: rows }];
+  render(next); await settle();
+  if (surface === 'notch') {
+    document.querySelector('.notch-tab[data-page="sessions"]').click(); await settle();
+  }
+  const titleSelector = surface === 'bubble' ? '.edge-dock-session-title' : '.notch-active-title';
+  const title = document.querySelector(titleSelector);
+  assert(title, `${surface} session title exists`);
+  const model = title.closest(surface === 'bubble' ? '.edge-dock-session' : '.notch-active').querySelector('.session-models');
+  assert(model, `${surface} model tooltip exists`);
+  model.focus();
+  const tooltip = model.querySelector('[popover]');
+  assert(tooltip?.matches(':popover-open'), `${surface} model tooltip opens`);
+  title.dispatchEvent(new MouseEvent('mouseenter'));
+  for (let i = 0; i < 2; i++) {
+    const before = tooltip.textContent;
+    row.totalTokens += 100; row.models['gpt-5-mini'] += 100;
+    render(next); await settle();
+    assert(document.querySelector(titleSelector) === title, `${surface} title identity`);
+    assert(document.querySelector(titleSelector).closest(surface === 'bubble' ? '.edge-dock-session' : '.notch-active').querySelector('.session-models') === model, `${surface} model identity`);
+    assert(document.activeElement === model && tooltip.matches(':popover-open'), `${surface} focused tooltip retained`);
+    assert(tooltip.textContent !== before, `${surface} focused tooltip receives live readings`);
+  }
+  assert(title.classList.contains('is-hover-reading'), `${surface} marquee retained`);
+  rows.unshift({ ...row, key: 'codex:inserted', sessionId: 'inserted', title: 'Inserted session' });
+  render(next); await settle();
+  assert(title.isConnected && document.activeElement === model, `${surface} focused session survives insertion before it`);
+  rows.reverse(); render(next); await settle();
+  assert(title.isConnected && document.activeElement === model, `${surface} focused session survives reorder`);
+  if (surface === 'notch') {
+    document.querySelector('.notch-tab[data-page="home"]').click(); await settle();
+    const day = document.querySelector('.notch-day');
+    if (day) {
+      day.dispatchEvent(new PointerEvent('pointerenter'));
+      const main = document.querySelector('.notch-home-main');
+      render(next); await settle();
+      assert(document.querySelector('.notch-home-main') === main, 'Notch Home updates without replacing a scrubbed page');
+    }
+  }
+  if (surface === 'notch') {
+    next.cells.push({ id: 'stat:month', available: true, totalTokens: 200, clients: [], models: [] });
+    render(next); document.querySelector('.notch-tab[data-page="breakdown"]').click(); await settle();
+    const group = document.querySelector('.notch-page-breakdown .notch-segmented');
+    const pill = group.querySelector('.notch-segmented-pill');
+    const before = pill.style.transform;
+    const button = group.querySelectorAll('button')[1]; button.focus(); button.click(); await settle();
+    assert(document.activeElement === button, 'Notch segmented control retains focus on selection');
+    assert(pill.style.transform !== before, 'Notch segment pill measures retained live controls');
+    const figure = document.querySelector('.notch-breakdown-tokens');
+    figure.closest('.notch-breakdown-total').style.maxWidth = '180px';
+    next.cells.find(cell => cell.id === 'stat:month').totalTokens = 123456789012;
+    render(next); await settle();
+    assert(document.querySelector('.notch-breakdown-tokens') === figure, 'Notch Breakdown figure retained');
+    assert(figure.clientWidth > 0 && parseFloat(figure.style.fontSize) < 30, `Notch Breakdown fits its mounted figure: ${JSON.stringify({ width: figure.clientWidth, scroll: figure.scrollWidth, size: figure.style.fontSize, text: figure.textContent, connected: figure.isConnected })}`);
+  }
+  return `PASS actual ${surface} title, model tooltip, focus and live pushes`;
+})()

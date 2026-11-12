@@ -37,7 +37,7 @@ for (const focus of ['module', 'heading']) test(`Home sessions repaint once at s
   (focus === 'module' ? current : current.querySelector()).focus();
   const state = { stats: {}, settings: { homeModuleCounts: { session: 9 } }, breakdown: 'home', homeSessionRepaintTimer: null };
   const { scheduleHomeSessionRepaint, stopHomeSessionRepaint } = Function(
-    'state', 'window', 'Date', 'setTimeout', 'clearTimeout', 'visibleStatsSurface', 'els', 'document', 'renderHomeSessionModule', 'sessionPresentationOptions', 'homeModulePreferencesApi', 'homeDom',
+    'state', 'window', 'Date', 'setTimeout', 'clearTimeout', 'visibleStatsSurface', 'els', 'document', 'renderHomeSessionModule', 'sessionPresentationOptions', 'homeModulePreferencesApi', 'rendererDom',
     `${source}\nreturn { scheduleHomeSessionRepaint, stopHomeSessionRepaint };`
   )(
     state,

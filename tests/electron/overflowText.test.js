@@ -1,4 +1,6 @@
 'use strict';
+// Presentation doubles delegate child commits; native fixtures exercise reconciliation.
+const rendererDom = { clear: node => node.replaceChildren(), reconcileChildren: (node, nodes) => node.replaceChildren(...nodes), placeChildren: (node, nodes) => node.replaceChildren(...nodes) };
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -125,6 +127,7 @@ test('sync endpoint reuses hover reading and preserves its wrapper across settin
   const setup = app.slice(app.indexOf('const overflowText ='), app.indexOf('// Two clicks to remove from sync settings'));
   const ui = app.slice(app.indexOf('function syncHubConnectionUi('), app.indexOf('function beginClientConnectionEdit('));
   const context = vm.createContext({
+    rendererDom,
     document, window: { ...h.window, TokenMonitorOverflowText: { create } }, els, state,
     requestAnimationFrame: h.window.requestAnimationFrame, homeSessionRenderPending: false,
     prefersReducedMotion: () => reduced, clientConnectionEditing: false, hubSaveBusy: false, hubSaveError: false,
@@ -163,7 +166,7 @@ test('sync endpoint reuses hover reading and preserves its wrapper across settin
 
 for (const className of ['detail-ex-title', 'detail-heading']) {
   for (const [midFlight, finalUpdate, earlyLeave] of [[false, false, false], [true, false, false], [true, true, false], [true, true, true]]) {
-    test(`${className} reading catches the final detail update on leave (${midFlight ? `read in flight${finalUpdate ? ', final stats update' : ''}${earlyLeave ? ', early leave' : ''}` : 'read not started'})`, async () => {
+    test(`${className} reading permits the final detail update without waiting for leave (${midFlight ? `read in flight${finalUpdate ? ', final stats update' : ''}${earlyLeave ? ', early leave' : ''}` : 'read not started'})`, async () => {
       const h = harness(400);
       h.element.classList.add(className);
       h.element.closest = () => ({});
@@ -183,7 +186,6 @@ for (const className of ['detail-ex-title', 'detail-heading']) {
       };
       const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
       const setup = app.slice(app.indexOf('const overflowText ='), app.indexOf('// Two clicks to remove from sync settings'));
-      const hold = app.slice(app.indexOf('function sessionTooltipShouldHoldRender()'), app.indexOf('function flushPendingLimitDetailTooltipRender()'));
       const detail = app.slice(app.indexOf('function applySessionDetailResult('), app.indexOf('\nfunction toggleDetailSort'));
       const renders = [];
       let reads = 0;
@@ -193,6 +195,7 @@ for (const className of ['detail-ex-title', 'detail-heading']) {
         sessions: { 'claude:s': { totalTokens: 100, costUsd: 1 } }
       } } } };
       const context = vm.createContext({
+    rendererDom,
         document, state, els: { syncConnectionEndpoint: endpoint },
         window: { ...h.window, TokenMonitorOverflowText: { create }, tokenMonitor: { getSessionDetail: async () => {
           reads += 1;
@@ -204,7 +207,7 @@ for (const className of ['detail-ex-title', 'detail-heading']) {
         visibleStatsSurface: () => 'main', isRendererWindowHidden: () => false,
         statsRenderScheduler: { request() {} }, renderSessionDetail: options => renders.push(options)
       });
-      vm.runInContext(`${setup}\n${hold}\n${detail}`, context);
+      vm.runInContext(`${setup}\n${detail}`, context);
       context.bindHoverMarquee(h.element);
       await context.openSessionDetail({ client: 'claude', sessionId: 's', sessionCost: 1 });
       h.frame(0);
@@ -216,41 +219,23 @@ for (const className of ['detail-ex-title', 'detail-heading']) {
       }
       h.hover();
       assert.equal(h.element.classList.contains('is-hover-reading'), true);
-      assert.equal(context.sessionTooltipShouldHoldRender(), true, 'the real marquee class triggers the real hold selector');
       if (midFlight) {
         if (finalUpdate) {
           state.stats.periods.today.sessions['claude:s'] = { totalTokens: 300, costUsd: 3 };
           await context.refreshOpenSessionDetail();
-          assert.equal(reads, 2, 'a final push during the held read must not start another read');
+          assert.equal(reads, 2, 'a push while busy does not overlap reads');
         }
-        if (earlyLeave) {
-          h.element.mouseleave();
-          h.frame(100);
-          await new Promise(resolve => setImmediate(resolve));
-          assert.equal(reads, 2, 'leave while busy must not start a concurrent read');
-          assert.equal(state.openSession.detailLiveBusy, true);
-          assert.equal(renders.at(-1).detail.marker, 1);
-          defer = false;
-        }
+        if (earlyLeave) { h.element.mouseleave(); h.frame(100); }
+        defer = false;
         finishRead({ found: true, marker: 2 });
         await reading;
-        if (!earlyLeave) {
-          assert.equal(state.openSession.detailRenderPending, true);
-          assert.equal(state.openSession.liveSignature, JSON.stringify([200, 2, 0]));
-        }
       } else {
         await context.refreshOpenSessionDetail();
-        assert.equal(reads, 1, 'the held update has not started a read');
-      }
-      if (!earlyLeave) {
-        assert.equal(renders.at(-1).detail.marker, 1);
-        defer = false;
-        h.element.mouseleave();
-        h.frame(100);
+        assert.equal(reads, 2, 'reading no longer defers transcript updates');
       }
       await new Promise(resolve => setImmediate(resolve));
       const finalReads = finalUpdate ? 3 : 2;
-      assert.equal(reads, finalReads, 'leave performs exactly the missing read, if any');
+      assert.equal(reads, finalReads, 'the latest push performs exactly the required reads');
       assert.equal(renders.at(-1).detail.marker, finalReads, 'the final update paints without another stats push');
       assert.equal(state.openSession.liveSignature, JSON.stringify(finalUpdate ? [300, 3, 0] : [200, 2, 0]));
       assert.equal(state.openSession.sessionCost, finalUpdate ? 3 : 2);
@@ -338,173 +323,22 @@ test('unchanged text preserves pending, active and completed hover motion', () =
 
 test('leaving before the delay cancels motion, and reduced motion keeps static overflow reading', () => {
   let reduced = false;
-  let releases = 0;
-  const h = harness(100, { prefersReducedMotion: () => reduced, onLeave: () => { releases++; } });
+  const h = harness(100, { prefersReducedMotion: () => reduced });
   h.element.mouseenter();
   h.element.mouseleave();
   assert.equal(h.timers.size, 0);
   h.frame(1000);
   assert.equal(h.element.children[0].style.transform, 'translate3d(0px, 0, 0)');
-  assert.equal(releases, 1);
   reduced = true;
   h.element.mouseenter();
   h.element.mouseleave();
   assert.equal(h.timers.size, 0);
-  assert.equal(releases, 1, 'reduced-motion hover exits do not notify a reading release');
   assert.equal(h.element.classList.contains('is-hover-reading'), false);
   assert.equal(h.element.hasAttribute('title'), false);
   assert.equal(h.element.classList.contains('is-overflow-static'), true);
 });
 
-test('fitting titles do not notify a reading release on ordinary hover exits', () => {
-  let releases = 0;
-  const h = harness(0, { onLeave: () => { releases++; } });
-  h.element.mouseenter();
-  h.element.mouseleave();
-  assert.equal(h.timers.size, 0);
-  assert.equal(releases, 0);
-});
 
-for (const phase of ['pending', 'active', 'completed']) {
-  test(`card replacement preserves ${phase} reading motion through commitCard`, () => {
-    let releases = 0;
-    const h = harness(100, { onLeave: () => { releases++; } });
-    h.element.dataset.overflowKey = 'codex:session-1';
-    const pointer = { clientX: 50, clientY: 10 };
-    if (phase === 'pending') h.element.mouseenter(pointer);
-    else {
-      h.hover(pointer);
-      h.frame(phase === 'active' ? 500 : 2200);
-    }
-    const before = h.element.children[0].style.transform;
-    const delayId = [...h.timers.keys()][0];
-    const replacement = h.node();
-    replacement.textContent = h.element.textContent;
-    replacement.dataset.overflowKey = h.element.dataset.overflowKey;
-    replacement.isConnected = false;
-    h.api.bind(replacement);
-    // A detached replacement has no text geometry until commitCard mounts it.
-    const content = replacement.children[0];
-    content.getBoundingClientRect = () => ({ width: replacement.isConnected ? 300 : 0 });
-    const previousList = { scrollTop: 37, closest: () => null };
-    const nextList = { scrollTop: 0, closest: () => null };
-    function card(title, list) {
-      return {
-        dataset: { cellId: 'sessions', breakdownMode: 'session' },
-        querySelector: () => list,
-        querySelectorAll: selector => selector === '.scroll' ? [list] : selector === '.fade-overflow'
-          || (selector === '.fade-overflow.is-hover-reading' && title.classList.contains('is-hover-reading'))
-          ? [title] : []
-      };
-    }
-    const previous = card(h.element, previousList);
-    const next = card(replacement, nextList);
-    const contentLayer = {
-      firstElementChild: previous,
-      querySelector: () => previous,
-      replaceChildren(value) {
-        assert.equal(value, next);
-        this.firstElementChild = value;
-        h.element.isConnected = false;
-        replacement.isConnected = true;
-        h.document.querySelectorAll = () => [replacement];
-      }
-    };
-    const dock = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
-    const start = dock.indexOf('function commitCard(');
-    const end = dock.indexOf('\n}', start) + 2;
-    assert.ok(start >= 0 && end > start, 'commitCard source boundaries exist');
-    const context = {
-      document: h.document,
-      captureCardSwitch: () => null, animateCardSwitch() {},
-      contentLayer, overflowText: h.api, CARD_SCROLL_SELECTOR: '.scroll',
-      cardResetAnimator: { capture: () => null, animate() {} }
-    };
-    vm.runInNewContext(`${dock.slice(start, end)}\nglobalThis.commit = commitCard;`, context);
-    context.commit(next, 'sessions');
-    assert.equal(nextList.scrollTop, 37, 'reading handoff preserves card scroll position');
-    assert.equal(content.style.transform, before);
-    assert.equal(replacement.classList.contains('is-hover-reading'), true);
-    h.element.mouseleave();
-    replacement.mouseenter(pointer);
-    assert.equal(releases, 0, 'old-node leave does not interrupt the replacement');
-    if (phase === 'pending') {
-      assert.equal(h.timers.size, 1);
-      assert.equal([...h.timers.keys()][0], delayId, 'the original delay continues');
-      const timer = h.timers.get(delayId);
-      h.timers.delete(delayId);
-      timer.callback();
-      h.frame(500);
-      assert.notEqual(content.style.transform, before);
-    } else {
-      assert.equal(h.timers.size, 0, 'mouseenter on a replacement does not restart reading');
-      h.frame(1000);
-      if (phase === 'active') assert.notEqual(content.style.transform, before);
-      else assert.equal(content.style.transform, before, 'completed reading remains at the end');
-    }
-    replacement.mouseleave();
-    assert.equal(releases, 1);
-    assert.equal(content.style.transform, 'translate3d(0px, 0, 0)');
-  });
-}
-
-test('reading handoff ignores renamed, different and moved session titles', () => {
-  for (const change of ['title', 'key', 'position', 'missing']) {
-    const h = harness(100);
-    h.element.dataset.overflowKey = 'codex:session-1';
-    if (change === 'position') h.hover({ clientX: 50, clientY: 10 });
-    else h.hover();
-    h.frame(500);
-    const replacement = h.node();
-    replacement.textContent = change === 'title' ? 'Renamed session' : h.element.textContent;
-    replacement.dataset.overflowKey = change === 'key' ? 'codex:session-2' : h.element.dataset.overflowKey;
-    h.api.bind(replacement);
-    replacement.getBoundingClientRect = () => ({ left: 0, right: 200, top: 40, bottom: 60, width: 200 });
-    h.api.preserveReading({ querySelectorAll: () => [h.element] }, {
-      querySelectorAll: () => change === 'missing' ? [] : [replacement]
-    });
-    assert.equal(replacement.classList.contains('is-hover-reading'), false);
-    assert.equal(replacement.children[0].style.transform, 'translate3d(0px, 0, 0)');
-    assert.equal(h.element.classList.contains('is-hover-reading'), false, 'failed handoff stops the old motion immediately');
-    h.element.isConnected = false;
-    h.frame(1000);
-    assert.equal(h.element.classList.contains('is-hover-reading'), false);
-  }
-});
-
-for (const phase of ['pending', 'active', 'completed']) {
-  for (const width of [180, 240, 320]) {
-    test(`${phase} reading reaches the new endpoint after replacement width changes to ${width}px`, () => {
-      const h = harness(100);
-      const pointer = { clientX: 50, clientY: 10 };
-      h.element.dataset.overflowKey = 'codex:session-1';
-      if (phase === 'pending') h.element.mouseenter(pointer);
-      else {
-        h.hover(pointer);
-        h.frame(phase === 'active' ? 500 : 2200);
-      }
-      const before = h.element.children[0].style.transform;
-      const replacement = h.node();
-      replacement.clientWidth = width;
-      replacement.dataset.overflowKey = h.element.dataset.overflowKey;
-      replacement.textContent = h.element.textContent;
-      h.api.bind(replacement);
-      h.api.preserveReading({ querySelectorAll: () => [h.element] }, { querySelectorAll: () => [replacement] });
-      h.element.isConnected = false;
-      h.document.querySelectorAll = () => [replacement];
-      if (width === 180) assert.equal(replacement.children[0].style.transform, before, 'narrowing continues from the existing offset');
-      if (phase === 'pending') {
-        const [id, timer] = [...h.timers][0];
-        h.timers.delete(id);
-        timer.callback();
-      }
-      h.frame(10_000);
-      assert.equal(replacement.children[0].style.transform, `translate3d(${-Math.max(0, 300 - width)}px, 0, 0)`);
-      assert.equal(replacement.classList.contains('has-overflow-fade'), false, 'the complete tail is visible at the new endpoint');
-      assert.equal(h.frames.size, 0, 'the animation finishes without a perpetual repaint');
-    });
-  }
-}
 
 test('static overflow reading follows reduced motion without native tooltips', () => {
   let reduced = false;
@@ -548,16 +382,7 @@ test('manual reduced-motion scrolling exposes the tail and updates its fade with
   assert.equal(h.element.hasAttribute('title'), false);
 });
 
-test('failed handoff cancels a pending delay immediately', () => {
-  const h = harness(100);
-  h.element.dataset.overflowKey = 'codex:session-1';
-  h.element.mouseenter();
-  assert.equal(h.timers.size, 1);
-  h.api.preserveReading({ querySelectorAll: () => [h.element] }, { querySelectorAll: () => [] });
-  assert.equal(h.timers.size, 0);
-  assert.equal(h.frames.size, 0);
-  assert.equal(h.element.classList.contains('is-hover-reading'), false);
-});
+
 
 test('resizing clamps the offset and detaching a hovered title stops its animation', () => {
   const h = harness(100);
@@ -589,6 +414,7 @@ test('updateRow keeps IDs for untitled sessions and moves them into Details for 
   const end = app.indexOf('function applyHomeListMark(');
   let interactive;
   const context = {
+    rendererDom,
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
@@ -657,6 +483,7 @@ test('a token and cost update through updateRow keeps the hovered title moving',
   assert.ok(start >= 0 && end > start, 'updateRow source boundaries exist in the expected order');
   const body = app.slice(start, end);
   const context = {
+    rendererDom,
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),
     setHoverMarqueeText: h.api.setText, formatNumber: String, formatCost: String,
@@ -710,6 +537,7 @@ test('actual shared row rendering keeps group availability and binds Auto Review
   };
   const bindings = [];
   const context = {
+    rendererDom,
     state: { breakdown: 'session', settings: { showToolIcons: true, deviceId: 'imac' } }, rowWidth: () => 50,
     toolIconsEnabled: value => value !== false, clientsWithIcon: new Set(['codex', 'claude']),
     deviceIconsApi: require('../../src/electron/renderer/deviceIcons'),
@@ -722,7 +550,7 @@ test('actual shared row rendering keeps group availability and binds Auto Review
       if (entries) bindings.push({ node, entries });
     } },
     sessionRowsApi: { ...rowsApi, applyBreakdownRowSemantics() {} }, t: key => key,
-    rowTemplate: makeRow, openSessionDetail() {}
+    rowTemplate: makeRow, openSessionDetail() {}, window: { TokenMonitorDomReconcile: require('../../src/electron/renderer/domReconcile') }
   };
   const update = app.slice(app.indexOf('function updateRow('), app.indexOf('function applyHomeListMark('));
   const iconKind = app.slice(app.indexOf('function iconKindFor('), app.indexOf('const LIMIT_PROVIDER_ACCOUNT_NODES ='));

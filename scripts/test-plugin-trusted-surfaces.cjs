@@ -52,9 +52,11 @@ app.whenReady().then(async () => {
     demandEvents.push({ refs, visible: windows.get('notch')?.isVisible(), backendCount: runtime.manager.backendCount() });
   });
   const js = text => main.webContents.executeJavaScript(text);
-  const preview = await js("tokenMonitor.plugins.importPackage('directory')");
-  await js(`tokenMonitor.plugins.install(${JSON.stringify(preview.token)})`);
-  await js("tokenMonitor.plugins.setEnabled('trusted-fixture',true)");
+  if (process.env.TM_DOM_REGRESSION !== '1') {
+    const preview = await js("tokenMonitor.plugins.importPackage('directory')");
+    await js(`tokenMonitor.plugins.install(${JSON.stringify(preview.token)})`);
+    await js("tokenMonitor.plugins.setEnabled('trusted-fixture',true)");
+  }
   assert.equal(runtime.manager.backendCount(), 0);
   const shape = { key: 'fixture', width: 680, height: 300, d: 'M0 0H680V300H0Z' };
   const stat = { id: 'tokens', kind: 'stat', metric: 'tokens', tokens: 125000, totalTokens: 125000, period: 'today', label: 'Tokens' };
@@ -63,6 +65,12 @@ app.whenReady().then(async () => {
   payloads.set('bubble', { surface: 'bubble', side: 'right', platform: process.platform, appearance, shape, cell: stat, maxCardHeight: 400 });
   payloads.set('notch', { surface: 'notch', platform: process.platform, appearance, shape, expanded: true,
     geometry: { notched: false, gapWidth: 0, height: 32, headerX: 0, headerWidth: 680, shoulder: 0, summaryZoom: 1 }, cells: [stat], panel: { builtinPages: ['home','limits','sessions','breakdown'], pluginPages: [] }, summary: { items: [] }, motion: { shape, progress: 1, bodyHeight: 260, headerHeight: 0, summaryHeight: 32, bodyBox: { x: 0, width: 680 } } });
+  if (process.env.TM_DOM_REGRESSION === '1') {
+    appearance.reduceMotion = 'off';
+    payloads.get('bubble').cell = { ...stat, metric: 'sessions', available: true, sessions: [{ key: 'codex:dom-proof', client: 'codex', sessionId: 'dom-proof',
+      title: 'An intentionally long ongoing engineering task title for reading across updates', totalTokens: 100,
+      models: { 'gpt-5': 70, 'gpt-5-mini': 30 }, lastUsedAt: new Date().toISOString() }] };
+  }
   const push = kind => windows.get(kind)?.webContents.send(kind === 'notch' ? 'topNotch:render' : 'edgeDock:render', payloads.get(kind));
   ipcMain.on('edgeDock:ready', event => push(surfaceOf(event.sender)));
   ipcMain.on('topNotch:ready', () => push('notch'));
@@ -84,6 +92,31 @@ app.whenReady().then(async () => {
     fs.writeFileSync(path.join(evidence, `${kind}-native.png`), (await win.webContents.capturePage()).toPNG());
   }
   assert.equal(runtime.manager.backendCount(), 0);
+  if (process.env.TM_DOM_REGRESSION === '1') {
+    for (const kind of ['rail', 'bubble', 'notch']) {
+      const win = windows.get(kind); win.focus();
+      console.log(await win.webContents.executeJavaScript(fs.readFileSync(path.join(root, 'tests/fixtures/surface-dom-regression.cjs'), 'utf8')));
+    }
+    const { buildEdgeDockCells } = require('../src/electron/renderer/edgeDock/presentation');
+    const providers = Array.from({ length: 6 }, (_, index) => ({ provider: 'codex', status: 'ok', accountKey: `quota-${index}`, accountLabel: `Account ${index}`,
+      resetCredits: { availableCount: 2, expirations: [new Date(Date.now() + 86400000).toISOString()] },
+      windows: ['session', 'weekly', 'billing', 'daily', 'monthly'].map(kind => ({ kind, label: kind, remainingPercent: 75 })) }));
+    const [quota] = buildEdgeDockCells({ limits: { providers } }, { items: [{ type: 'limit', provider: 'codex' }] });
+    quota.sessions = Array.from({ length: 12 }, (_, index) => ({ key: `codex:quota-session-${index}`, client: 'codex', sessionId: `quota-session-${index}`,
+      title: `Quota session ${index}`, totalTokens: 100, lastUsedAt: new Date().toISOString(), models: { 'gpt-5': 100 } }));
+    for (const kind of ['bubble', 'notch']) {
+      const payload = payloads.get(kind); payload.appearance = { ...appearance, reduceMotion: 'on' };
+      if (kind === 'bubble') { payload.cell = structuredClone(quota); delete payload.placed; }
+      else payload.cells = [structuredClone(quota), { id: 'stat:today', available: true, totalTokens: 100, clients: [], models: [] }, { id: 'stat:sessions', sessions: [] }];
+      const win = windows.get(kind); win.focus(); push(kind);
+      await wait(win, kind === 'bubble' ? "state.payload.cell.kind === 'provider' && Boolean(document.querySelector('.limit-detail-tooltip-trigger'))" : "state.payload.cells.some(cell=>cell.kind==='provider')", `${kind} quota payload`);
+      await pause(150);
+      console.log(await win.webContents.executeJavaScript(fs.readFileSync(path.join(root, 'tests/fixtures/quota-dom-regression.cjs'), 'utf8')));
+      fs.writeFileSync(path.join(evidence, `${kind}-dom-quotas.png`), (await win.webContents.capturePage()).toPNG());
+    }
+    assert.deepEqual(errors.filter(text => !text.includes('Electron Security Warning') && !text.includes('Autofill.')), []);
+    await runtime.dispose(); clearTimeout(deadline); for (const win of windows.values()) win.destroy(); main.destroy(); app.exit(0); return;
+  }
   if (process.env.TM_NAV_ICONS === '1') {
     await js("tokenMonitor.plugins.place('trusted-fixture/panel','notch',true)");
     const payload = payloads.get('notch');

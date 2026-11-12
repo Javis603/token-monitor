@@ -451,19 +451,8 @@ function applyBarScale(fill, scale) {
   fill.style.setProperty('--bar-scale', String(Math.max(0, Math.min(1, Number(scale) || 0))));
 }
 
-// A tooltip the pointer is inside has to survive the countdown repaint, the
-// same hold the Limits page keeps. Without it the 30-second tick replaces the
-// card out from under an open tooltip and it vanishes mid-read.
-const limitTooltip = {
-  opened: false,
-  active: false,
-  pending: false
-};
-
-function limitTooltipShouldHoldRender() {
-  if (!limitTooltip.active) return false;
-  return Boolean(contentLayer.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within'));
-}
+// Track first opening for tooltip entrance motion across retained cards.
+const limitTooltip = { opened: false };
 
 function createCardWindowsView(cell = () => state.payload?.cell, forecast = () => cardForecast) {
   return limitWindowsViewApi.createLimitWindowsView({
@@ -482,18 +471,8 @@ function createCardWindowsView(cell = () => state.payload?.cell, forecast = () =
       hasOpened: () => limitTooltip.opened,
       markOpened() {
         limitTooltip.opened = true;
-        limitTooltip.active = true;
       },
-      release() {
-        requestAnimationFrame(() => {
-          if (limitTooltipShouldHoldRender()) return;
-          limitTooltip.active = false;
-          if (!limitTooltip.pending) return;
-          limitTooltip.pending = false;
-          if (surface === 'notch' && state.payload) notchRenderer.render(state.payload);
-          else if (state.payload?.cell) renderBubble(state.payload);
-        });
-      }
+      release() {}
     },
     formatCompact: formatTokens,
     compactTokenThreshold: () => compactTokenApi.compactTokenUnitThreshold(
@@ -1333,10 +1312,13 @@ function renderRail(payload) {
   const layout = payload.cellLayout || null;
   railNode.classList.toggle('is-compact', layout?.compact === true);
   const retainedPlugins = new Map([...railNode.children].filter(node => node.dataset.pluginRef).map(node => [node.dataset.cellId, node]));
+  const ringSnapshot = captureRingResetMotion();
+  const rollSnapshot = railNumberRoll.capture(railNode);
   const nodes = [];
   (payload.cells || []).forEach((cell, index) => {
     const node = cell.kind === 'stat' ? statCellNode(cell) : cell.kind === 'plugin' ? pluginCellNode(cell, retainedPlugins.get(cell.id)?.dataset.pluginRef === cell.ref ? retainedPlugins.get(cell.id) : null) : providerCellNode(cell);
     node.dataset.cellId = cell.id;
+    node.dataset.key = cell.id;
     node.dataset.index = String(index);
     // Cells are placed on the main process's layout so hover hit-testing and
     // what is painted can never drift apart.
@@ -1345,31 +1327,23 @@ function renderRail(payload) {
       node.style.height = `${layout.heights[index]}px`;
     }
     node.classList.toggle('is-focused', payload.focusCellId === cell.id);
+    if (cell.kind !== 'plugin' && pluginContent?.hasTarget(`edgeDock.rail.${cell.kind}.content`)) {
+      const native = el('div', 'plugin-native-content'); native.append(...node.childNodes); node.append(native);
+    }
     nodes.push(node);
   });
   const providerIds = new Set((payload.cells || []).filter((cell) => cell.kind === 'provider').map((cell) => cell.id));
   for (const id of waitingRingStarts.keys()) {
     if (!providerIds.has(id)) waitingRingStarts.delete(id);
   }
-  const ringSnapshot = captureRingResetMotion();
-  const rollSnapshot = railNumberRoll.capture(railNode);
-  // Keep surviving author controls connected: re-inserting an unchanged node
-  // clears browser focus even when its input object and draft survive.
-  const keep = new Set(nodes);
-  for (const node of [...railNode.children]) if (!keep.has(node)) node.remove();
-  let cursor = railNode.firstChild;
-  for (const node of nodes) {
-    if (node !== cursor) railNode.insertBefore(node, cursor);
-    cursor = node.nextSibling;
-  }
+  const retained = cardDom.reconcileChildren(railNode, nodes);
   const targets = [];
   (payload.cells || []).forEach((cell, index) => {
     if (cell.kind === 'plugin') return;
     const target = `edgeDock.rail.${cell.kind}.content`;
     targets.push(target);
     if (!pluginContent?.hasTarget(target)) return;
-    const node = nodes[index], native = el('div', 'plugin-native-content');
-    native.append(...node.childNodes); node.append(native);
+    const native = retained[index].querySelector(':scope > .plugin-native-content');
     pluginContent.render(target, native, { surface: 'edgeDock', surfaceVariant: 'rail', targetInstance: cell.id, cell, nativeData: payload });
   });
   pluginContent?.retain(targets);
@@ -1624,7 +1598,8 @@ function sessionsContainer(sessions, options = {}) {
     // more information than the dot does.
     nameNode.append(stateMark(session, key, activityState));
     const title = el('span', 'edge-dock-session-title', name);
-    title.dataset.overflowKey = key;
+    title.dataset.key = key;
+    row.dataset.key = key;
     overflowText.bind(title);
     nameNode.append(title);
     // The glyph is decorative and its `title` only reaches pointer users, so the
@@ -1671,6 +1646,7 @@ function sessionsContainer(sessions, options = {}) {
     );
     if (session.groupRows) {
       const family = el('details', 'edge-dock-session-family');
+      family.dataset.key = key;
       const expansionKey = sessionGroupExpansionKey(key);
       family.open = expandedSessionGroups.has(expansionKey);
       row.dataset.sessionGroupKey = key;
@@ -1825,6 +1801,7 @@ function appendLiveRateDetails(card, cell) {
       continue;
     }
     const row = el('div', 'edge-dock-rate-model');
+    row.dataset.key = entry[0];
     const mark = markNode(modelVendorFor(entry[0]) || 'token-monitor', null, true);
     mark.setAttribute('aria-hidden', 'true');
     row.append(mark, el('span', 'edge-dock-rate-model-name', entry[0]), el('span', 'edge-dock-rate-model-value', entry[1]));
@@ -1879,10 +1856,11 @@ function statCard(cell) {
       const list = el('div', 'edge-dock-session-list edge-dock-cache-hit-sessions');
       for (const session of cell.cacheSessions) {
         const row = el('div', 'edge-dock-session');
+        row.dataset.key = session.key;
         const name = el('span', 'edge-dock-session-name');
         name.append(markNode(session.client), el('span', 'sr-only', `${clientLabel(session.client)} `));
         const title = el('span', 'edge-dock-session-title', session.title);
-        title.dataset.overflowKey = session.key;
+        title.dataset.key = session.key;
         overflowText.bind(title);
         name.append(title);
         row.append(name, el('span', 'edge-dock-session-tokens', formatCacheHitRate(session.rate)),
@@ -1959,6 +1937,7 @@ function statCard(cell) {
   const sum = cell.totalTokens || rows.reduce((value, row) => value + row.tokens, 0) || 1;
   for (const entry of rows) {
     const row = el('div', 'edge-dock-client');
+    row.dataset.key = entry.id;
     // The same bar as the quota meters above it, built by the same helper.
     const meter = el('div', 'limit-meter');
     meter.style.background = colorWithAlpha(entry.color, 0.16);
@@ -2032,6 +2011,7 @@ function sessionsCard(cell, card, head) {
   const grouped = el('div', 'edge-dock-accounts edge-dock-session-groups');
   for (const [client, rows] of groups) {
     const section = el('div', 'edge-dock-session-group');
+    section.dataset.key = client;
     // Its own header class rather than the shared section head: that one is a
     // two-item caption row aligned on the baseline, and a mask-drawn mark has no
     // baseline, so it floated above its label. This row centers its three parts.
@@ -2046,16 +2026,8 @@ function sessionsCard(cell, card, head) {
   return card;
 }
 
-// Cards are built in a hidden staging layer and measured there. The visible
-// card is only replaced once the main process has accepted its measured size.
-// While switching, the content layer follows the painted frame inside the
-// fixed native canvas; text remains unscaled under the moving clip.
-//
-// Both scroll containers, because which one scrolls depends on the card. Provider,
-// grouped Sessions, and period-breakdown cards scroll `.edge-dock-accounts`; the
-// ungrouped Sessions card's list is `.edge-dock-session-list`. A repaint rebuilds the
-// card, so a selector that missed the container actually in use reset that card's
-// scroll on every clock tick - yanking the reader back to the top while they read it.
+// New cards stage until the main process accepts their measured size; live
+// readings reconcile in place. Switch motion keeps text unscaled inside the clip.
 const CARD_SCROLL_SELECTOR = '.edge-dock-accounts, .edge-dock-session-list';
 
 let observedPluginCard = null;
@@ -2069,29 +2041,20 @@ function clearCardSwitch() { cardSwitch.cancel(); }
 function captureCardSwitch(previous, sameCard, opening) { return cardSwitch.capture(previous, sameCard, opening); }
 function animateCardSwitch(card, motion) { cardSwitch.play(card, motion); }
 
+const cardDom = window.TokenMonitorDomReconcile.create({ nodesFor: node => pluginContent?.nodesFor(node) || [] });
+const pendingResetSnapshots = new WeakMap();
 function commitCard(card, cellId) {
   const previous = contentLayer.querySelector('.edge-dock-card');
   const sameCard = previous?.dataset.cellId === cellId
     && previous?.dataset.breakdownMode === card.dataset.breakdownMode;
-  const scrollLists = (node) => [...node.querySelectorAll(CARD_SCROLL_SELECTOR)]
-    .filter(list => !list.closest('.edge-dock-session-family'));
-  const scrollTops = sameCard ? scrollLists(previous).map(list => list.scrollTop) : [];
-  const focusedGroup = sameCard ? document.activeElement?.dataset?.sessionGroupKey : null;
   // The native window stays visible at zero opacity between hovers, so page
   // visibility cannot distinguish a new opening from a continuous switch.
   const opening = previous?.dataset.reveal !== card.dataset.reveal;
   const switchMotion = captureCardSwitch(previous, sameCard, opening);
-  const resetSnapshot = cardResetAnimator.capture(previous || contentLayer);
-  contentLayer.replaceChildren(card);
+  const resetSnapshot = pendingResetSnapshots.get(card);
+  pendingResetSnapshots.delete(card);
+  if (previous !== card) contentLayer.replaceChildren(card);
   overflowText.refresh();
-  if (focusedGroup) {
-    const summary = [...card.querySelectorAll('summary[data-session-group-key]')]
-      .find(node => node.dataset.sessionGroupKey === focusedGroup);
-    summary?.focus({ preventScroll: true });
-  }
-  scrollLists(card).forEach((list, index) => { list.scrollTop = scrollTops[index] || 0; });
-  // Measure reading targets only after mounting and restoring their scroll position.
-  if (sameCard) overflowText.preserveReading(previous, card);
   cardResetAnimator.animate(card, resetSnapshot);
   animateCardSwitch(card, switchMotion);
 }
@@ -2119,10 +2082,10 @@ function reserveAccountHeight(card, maxHeight) {
   const native = card.querySelector(':scope > .plugin-native-content') || card;
   const accounts = native.querySelector(':scope > .edge-dock-accounts');
   if (!accounts || !native.querySelector(':scope > .edge-dock-sessions') || !(maxHeight > 0)) return;
-  const shrink = accounts.style.flexShrink;
-  accounts.style.flexShrink = '0';
-  const naturalHeight = Math.ceil(accounts.getBoundingClientRect().height);
-  accounts.style.flexShrink = shrink;
+  // Expanding a live scroller to its natural height would clamp scrollTop to
+  // zero. Read its content extent while keeping flex constraints in place.
+  accounts.style.minHeight = '';
+  const naturalHeight = Math.ceil(accounts.scrollHeight);
   if (naturalHeight > 0) accounts.style.minHeight = `${Math.min(naturalHeight, maxHeight / 2)}px`;
 }
 
@@ -2131,6 +2094,7 @@ function fitCardTotal(card, scale = 1) {
   if (!row) return;
   const number = row.querySelector('strong');
   const compact = row.querySelector('.edge-dock-total-compact');
+  number.style.fontSize = '';
   const gap = compact ? parseFloat(getComputedStyle(row).columnGap) || 0 : 0;
   const available = row.clientWidth - (compact ? compact.getBoundingClientRect().width / scale : 0) - gap;
   const natural = number.getBoundingClientRect().width / scale;
@@ -2183,7 +2147,7 @@ function renderBubble(payload) {
     bubbleLayout.prepare({ card: retained, payload });
     return;
   }
-  const card = cell.kind === 'stat' ? statCard(cell) : cell.kind === 'plugin' ? pluginCard(cell) : providerCard(cell);
+  let card = cell.kind === 'stat' ? statCard(cell) : cell.kind === 'plugin' ? pluginCard(cell) : providerCard(cell);
   card.dataset.cellId = cell.id;
   card.dataset.reveal = String(payload.reveal);
   card.style.transform = contentTransform;
@@ -2193,12 +2157,22 @@ function renderBubble(payload) {
     native.append(...card.childNodes); card.append(native);
     const target = `edgeDock.${cell.kind}.content`;
     pluginContent.retain([target]);
-    pluginContent.render(target, native, { surface: 'edgeDock', cell, nativeData: payload });
+
   }
   if (payload.maxCardHeight) card.style.maxHeight = `${payload.maxCardHeight}px`;
+  const resetSnapshot = cardResetAnimator.capture(previous || contentLayer);
+  const sameCard = previous?.dataset.cellId === card.dataset.cellId
+    && previous?.dataset.breakdownMode === card.dataset.breakdownMode
+    && previous?.dataset.reveal === card.dataset.reveal;
+  card = cardDom.reconcile(sameCard ? previous : null, card);
+  pendingResetSnapshots.set(card, resetSnapshot);
+  if (cell.kind !== 'plugin' && pluginContent?.hasTarget(`edgeDock.${cell.kind}.content`)) {
+    pluginContent.render(`edgeDock.${cell.kind}.content`, card.querySelector(':scope > .plugin-native-content'),
+      { surface: 'edgeDock', cell, nativeData: payload });
+  }
   if (observedPluginCard) bubbleSizeObserver?.unobserve(observedPluginCard);
   observedPluginCard = cell.kind === 'plugin' ? card : null;
-  stagingLayer.replaceChildren(card);
+  if (card.parentNode !== contentLayer) stagingLayer.replaceChildren(card);
   fitCardTotal(card);
   clampBreakdownList(card);
   if (observedPluginCard) bubbleSizeObserver?.observe(observedPluginCard);
@@ -2251,13 +2225,9 @@ function render(payload) {
   scheduleSelfRepaint();
 }
 
-// A repaint replaces the whole card, so it waits for whatever the pointer is
-// currently inside: an account control mid-gesture, or an open detail tooltip.
+// Account switching still owns its asynchronous native-control gesture.
 function deferBubbleRender() {
-  if (codexAccountControl.deferRender(contentLayer)) return true;
-  if (!limitTooltipShouldHoldRender()) return false;
-  limitTooltip.pending = true;
-  return true;
+  return codexAccountControl.deferRender(contentLayer);
 }
 
 bridge.onRender(render);

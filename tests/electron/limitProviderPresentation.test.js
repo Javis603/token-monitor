@@ -1448,9 +1448,6 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   // swept in the shared tooltip builder, so these assertions passed on code that
   // isn't Codex's.
   const codexResetCreditsNode = viewBody('codexResetCreditsNode', 'providerSpendEntries');
-  const limitDetailTooltipShouldHoldRender = functionBody(app, 'limitDetailTooltipShouldHoldRender', 'flushPendingLimitDetailTooltipRender');
-  const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
-
   assert.match(renderProviderWindows, /provider\.provider === 'codex'/);
   assert.match(renderProviderWindows, /const session = codexCanonicalWindow\(provider, 'session'\);/);
   assert.match(renderProviderWindows, /const weekly = codexCanonicalWindow\(provider, 'weekly'\);/);
@@ -1517,9 +1514,6 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.doesNotMatch(codexResetCreditsNode, /state\.limitDetailTooltip/);
   assert.match(codexResetCreditsNode, /formatCodexResetCreditsValue\(resetCredits\)/);
   assert.match(codexResetCreditsNode, /aria-label/);
-  assert.match(limitDetailTooltipShouldHoldRender, /state\.limitDetailTooltipActive/);
-  assert.match(renderLimits, /const holdLimitDetailTooltipRender = limitDetailTooltipShouldHoldRender\(\);/);
-  assert.match(renderLimits, /if \(holdLimitDetailTooltipRender \|\| holdCodexSwitchPopoverRender\)/);
   assert.match(styles, /\.limit-reset-credits\s*\{[^}]*min-height: 11px;[^}]*font-size: 0\.5625rem;/s);
   assert.match(styles, /\.limit-reset-credits-line\s*\{[^}]*justify-content: space-between;/s);
   assert.match(styles, /\.limit-reset-credits-expiry-group\s*\{[^}]*flex: 0 0 auto;/s);
@@ -2689,7 +2683,8 @@ test('main limits cache reuses unchanged data and repaints when token units chan
     animateCachedLimitBarsFromZero() {},
     animateLimitResets() {},
     limitProviderColor: () => '#0866FF',
-    renderLimitProviderSolo: () => ({})
+    rendererDom: { reconcileChildren: (node, nodes) => node.replaceChildren(...nodes) },
+    renderLimitProviderSolo: () => ({ dataset: {} })
   });
   vm.runInContext(source, context);
   const render = () => vm.runInContext('renderLimits()', context);
