@@ -273,6 +273,34 @@ test('readSessionTurnEnded does not treat a local slash command like /compact as
   assert.equal(readSessionTurnEnded(bigOutput.file, { cache: new Map() }), true, 'oversized command output is not a prompt');
 });
 
+test('readSessionTurnEnded treats a user interrupt as the end of the turn', (t) => {
+  // Desktop's "rewind to here" stops the running turn in the old session, then
+  // forks a new one with the same title. The old transcript ends mid tool_use
+  // with the interrupt marker, and reading that as a prompt showed both
+  // sessions running side by side.
+  const { readSessionTurnEnded } = require('../../src/shared/providers/claude/sessionMetadata');
+  const text = (value) => JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: value }] } });
+  const lines = [
+    text('ship it'),
+    JSON.stringify({ type: 'assistant', message: { id: 'msg_1', stop_reason: 'tool_use' } }),
+    JSON.stringify({ type: 'user', toolUseResult: 'User rejected tool use', message: { role: 'user', content: [{ type: 'tool_result', is_error: true, content: 'The user doesn\'t want to proceed with this tool use.' }] } }),
+    text('[Request interrupted by user for tool use]')
+  ];
+  const rewound = fixture(lines);
+  t.after(() => fs.rmSync(rewound.dir, { recursive: true, force: true }));
+  const cache = new Map();
+  assert.equal(readSessionTurnEnded(rewound.file, { cache }), true);
+
+  // A prompt after the interrupt starts the next turn as usual.
+  fs.appendFileSync(rewound.file, `${text('try again')}\n`);
+  assert.equal(readSessionTurnEnded(rewound.file, { cache }), false);
+
+  // Stopped before any response arrived: the turn is over, not still open.
+  const early = fixture([text('ship it'), text('[Request interrupted by user]')]);
+  t.after(() => fs.rmSync(early.dir, { recursive: true, force: true }));
+  assert.equal(readSessionTurnEnded(early.file, { cache: new Map() }), true);
+});
+
 test('Claude session context uses the latest API input occupancy and model capacity', (t) => {
   const assistant = ({ model, input, write, read, output = 0 }) => JSON.stringify({
     type: 'assistant',

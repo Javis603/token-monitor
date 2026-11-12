@@ -218,6 +218,18 @@ function cleanTitle(value) {
 // was sent to the model (a prompt command), so that record is a prompt.
 const LOCAL_COMMAND_CAVEAT = /^\s*<local-command-caveat>/;
 const LOCAL_COMMAND_OUTPUT = /^\s*<local-command-std(?:out|err)>/;
+// Stopping a turn — Esc, Stop, rejecting a tool call, or Desktop's "rewind to
+// here", which stops the running turn before it forks a new session — is
+// written as a user text record, never as an assistant stop reason. It ends
+// the turn rather than starting one. Same marker family Claude Code matches.
+const TURN_INTERRUPT = /^\s*\[Request interrupted by user[^\]]*\]/;
+
+function isTurnInterrupt(entry) {
+  if (entry?.type !== 'user' || entry.isMeta === true) return false;
+  const content = entry.message?.content;
+  return TURN_INTERRUPT.test(typeof content === 'string' ? content
+    : Array.isArray(content) && typeof content[0]?.text === 'string' ? content[0].text : '');
+}
 
 function isUserPrompt(entry) {
   if (entry?.isMeta === true || entry?.isCompactSummary === true) return false;
@@ -305,6 +317,10 @@ function applyMetadataLine(state, line) {
       // response. State the same absence so an old pre-compact gauge cannot
       // survive while the compacted conversation is waiting for that response.
       clearContextUsage(state);
+    } else if (isTurnInterrupt(entry)) {
+      // Any non-`tool_use` reason reads as ended; the marker is the reason.
+      state.stopReason = 'interrupted';
+      state.userSinceStop = false;
     } else if (!localCommand && isUserPrompt(entry)) {
       // A prompt accepted after the last completion means that completion no
       // longer describes the current turn: the old `end_turn` would otherwise
