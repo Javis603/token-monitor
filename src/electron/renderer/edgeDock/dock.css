@@ -270,6 +270,8 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   -webkit-mask: none;
   mask: none;
 }
+.edge-dock-mark.is-plugin { display: inline-flex; background: none; }
+.edge-dock-mark.is-plugin > span { width: 100% !important; height: 100% !important; }
 
 .edge-dock-value {
   font-size: 12px;
@@ -412,6 +414,8 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   min-width: 0;
 }
 .edge-dock-card-head .edge-dock-mark { width: 15px; height: 15px; flex: 0 0 auto; }
+.edge-dock-stat-caption.limit-detail-tooltip-wrap { display: inline-block; width: auto; height: auto; flex: 0 1 auto; }
+.edge-dock-stat-caption .limit-detail-tooltip { right: auto; left: anchor(left); }
 .edge-dock-card-head.is-breakdown {
   flex-direction: row;
   align-items: center;
@@ -861,7 +865,24 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
 }
 .edge-dock-stat-headline span { color: var(--muted); font-size: 12px; line-height: 1.2; }
 
+.edge-dock-cache-hit-bar {
+  height: 5px;
+  flex-shrink: 0;
+  overflow: hidden;
+  border-radius: 3px;
+  background: rgba(var(--overlay-rgb), 0.22);
+}
+.edge-dock-cache-hit-fill { height: 100%; background: var(--accent); }
+.edge-dock-cache-hit-totals { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.edge-dock-cache-hit-reading { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.edge-dock-cache-hit-label { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--muted); }
+.edge-dock-cache-hit-label::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+.edge-dock-cache-hit-reading.is-miss .edge-dock-cache-hit-label::before { background: rgba(var(--overlay-rgb), 0.22); }
+.edge-dock-cache-hit-value { font-size: 12px; }
+.edge-dock-cache-hit-details { border-top: 1px solid var(--line); padding-top: 10px; }
+
 .edge-dock-rate-figure {
+  position: relative;
   display: flex;
   align-items: baseline;
   gap: 6px;
@@ -879,6 +900,9 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
 }
 .edge-dock-rate-figure:hover { background: rgba(var(--overlay-rgb), 0.07); }
 .edge-dock-rate-swap {
+  position: absolute;
+  right: -12px;
+  top: 0;
   color: var(--muted);
   font-size: 12px;
   opacity: 0;
@@ -897,18 +921,36 @@ html.edge-dock-reduced-motion .edge-dock-session-context-fill { transition: none
   gap: 5px;
   color: var(--muted);
   font-size: 10.5px;
+  min-width: 0;
+  max-width: 55%;
 }
+.edge-dock-rate-status > span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .edge-dock-rate-dot {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
+  flex: 0 0 5px;
   border-radius: 50%;
-  background: rgba(var(--overlay-rgb), 0.3);
+  background: var(--muted);
+  opacity: 0.5;
 }
-.edge-dock-rate-status.is-live { color: var(--text); }
-.edge-dock-rate-status.is-live .edge-dock-rate-dot {
-  background: var(--success);
-  box-shadow: 0 0 0 3px rgba(var(--success-rgb), 0.18);
+.edge-dock-rate-status.is-live .edge-dock-rate-dot { background: var(--success); opacity: 1; }
+.edge-dock-rate-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42%;
+  align-items: center;
+  gap: 12px;
+  margin: 2px 0;
 }
+.edge-dock-rate-overview.is-idle .edge-dock-rate-headline { color: var(--muted); }
+.edge-dock-rate-overview.is-burn .edge-dock-rate-figure strong { font-size: 24px; }
+.edge-dock-rate-overview.is-burn .edge-dock-rate-unit { font-size: 11px; }
+.edge-dock-rate-chart { min-width: 0; color: color-mix(in srgb, var(--text) 65%, var(--accent)); }
+.edge-dock-rate-chart svg { display: block; width: 100%; height: 52px; overflow: visible; }
+.edge-dock-rate-chart path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; }
+.edge-dock-rate-overview.is-idle .edge-dock-rate-chart { opacity: 0.7; }
+.edge-dock-rate-chart .edge-dock-rate-chart-baseline { stroke: var(--line); stroke-width: 1; }
+.edge-dock-rate-chart circle { fill: currentColor; }
+.edge-dock-rate-figure:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 
 /* ---- Type scale ----------------------------------------------------------
    Only the card's own blocks are sized here. Its Limits rows are the view's,
@@ -998,9 +1040,6 @@ html.edge-dock-reduced-motion .edge-dock-session-dot[data-state="running"] .edge
 }
 
 .edge-dock-rate-details {
-  margin-top: 8px;
-  padding-top: 10px;
-  border-top: 1px solid rgba(var(--line-rgb), 0.16);
   gap: 8px;
 }
 .edge-dock-rate-model {

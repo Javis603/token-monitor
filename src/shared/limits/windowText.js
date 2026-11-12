@@ -182,6 +182,12 @@
       return result(null, window.detail || (compact ? counted(window, showUsed, compact) : ''));
     }
 
+    if (id === 'hark' && (kind === 'daily' || billing)) {
+      const amount = finite(showUsed ? window.used : window.remaining);
+      const limit = finite(window.limit);
+      return result(null, compact && amount !== null && limit > 0 ? `${compact(amount)} / ${compact(limit)}` : '');
+    }
+
     // Kimi's single shared membership meter ships its Kimi-vs-Code composition
     // as `detail` and is the only other provider that shows one.
     if (id === 'kimi') return billing ? result(null, window.detail || '') : EMPTY;

@@ -156,7 +156,7 @@ test('session detail renders its heading before loading, errors and empty result
   context.tokenNumberAnimationApi = require('../../src/electron/tokenNumberAnimation');
   context.allTimeSessions = { invalidate: () => { invalidations += 1; }, ensure: () => { pulls += 1; } };
   const settingsStart = rendererSource.indexOf('let localSessionActivity = null;');
-  const settingsEnd = rendererSource.indexOf('\nfunction render()', settingsStart);
+  const settingsEnd = rendererSource.indexOf('\nfunction render(', settingsStart);
   assert.ok(settingsStart >= 0 && settingsEnd > settingsStart, 'renderer title settings helpers should be present');
   vm.runInNewContext(`${rendererSource.slice(settingsStart, settingsEnd)}\nglobalThis.setSettings = setRendererSettings;`, context);
   state.openSession = { kind: 'session', title: 'PRIVATE TITLE', detail: { exchanges: [{ title: 'Reply', value: 10 }] } };

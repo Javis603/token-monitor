@@ -470,7 +470,9 @@ enum WidgetFormat {
 
     static func cost(_ usd: Double, presentation: WidgetPresentation) -> String {
         let converted = usd * presentation.currencyRate
-        return "\(presentation.currencySymbol)\(String(format: "%.2f", converted))"
+        // Yen and won costs use whole currency units, matching the app.
+        let decimals = currencyFractionDigits(presentation.currencyCode)
+        return "\(presentation.currencySymbol)\(String(format: "%.\(decimals)f", converted))"
     }
 
     // Only for a row the snapshot did not name. The app stamps displayName on
@@ -517,9 +519,28 @@ enum WidgetFormat {
         return "—"
     }
 
+    private static func currencyFractionDigits(_ currency: String?) -> Int {
+        switch currency?.uppercased() {
+        case "JPY", "KRW": 0
+        default: 2
+        }
+    }
+
     private static func quotaAmount(_ value: Double, currency: String?) -> String {
-        let amount = String(format: "%.2f", locale: Locale(identifier: "en_US_POSIX"), value)
-        return switch currency?.uppercased() {
+        let code = currency?.uppercased()
+        let format = "%.\(currencyFractionDigits(code))f"
+        let amount = String(format: format, locale: Locale(identifier: "en_US_POSIX"), value)
+        return switch code {
+        case "AUD": "A$\(amount)"
+        case "BRL": "R$\(amount)"
+        case "CAD": "CA$\(amount)"
+        case "CHF": "CHF \(amount)"
+        case "EUR": "€\(amount)"
+        case "GBP": "£\(amount)"
+        case "INR": "₹\(amount)"
+        case "JPY": "JP¥\(amount)"
+        case "SGD": "S$\(amount)"
+        case "KRW": "₩\(amount)"
         case "CNY": "¥\(amount)"
         case "USD": "$\(amount)"
         case "TWD": "NT$\(amount)"

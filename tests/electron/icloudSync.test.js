@@ -805,7 +805,7 @@ test('oversized subscriptions never reserve an unrecoverable pending snapshot', 
     const first = await store.writeSubscriptions([subscription('published')]);
     const ledgerPath = store.status().revisionLedgerPath;
     const before = await fs.promises.readFile(ledgerPath, 'utf8');
-    const oversized = { ...subscription('oversized'), planName: '界'.repeat(400_000) };
+    const oversized = { ...subscription('oversized'), planName: '界'.repeat(Math.ceil((MAX_ICLOUD_DOCUMENT_BYTES + 1) / 3)) };
     assert.ok(Buffer.byteLength(JSON.stringify(oversized), 'utf8') > MAX_ICLOUD_DOCUMENT_BYTES);
     await assert.rejects(
       () => store.writeSubscriptions([oversized], { baseRevision: first.revisionToken }),

@@ -6,6 +6,7 @@
 
 const cursorAuth = require('./auth');
 const cursorProbe = require('./probe');
+const { isCursorDetectedAccountCurrent } = require('./account');
 const { hashKey } = require('../../hashKey');
 const {
   cleanPlanText,
@@ -280,8 +281,26 @@ async function fetchCursorLimits(options = {}, deps = {}) {
     .filter(Boolean));
   const enabledAccounts = accounts.filter((account) => !disabled.has(account.id));
   if (enabledAccounts.length === 0) return fetchCursorAccountLimits(null, deps);
-  const providers = await Promise.all(enabledAccounts.map((account) => fetchCursorAccountLimits(account, deps)));
-  return providers.length === 1 ? providers[0] : providers;
+  // Electron supplies manual ownership; headless callers without that metadata
+  // retain their existing saved-account behavior.
+  const manual = Array.isArray(options.cursorManualAccountIds) ? new Set(options.cursorManualAccountIds) : null;
+  const current = (account, unauthorized = false) => !manual || manual.has(account.id)
+      || isCursorDetectedAccountCurrent({
+        desktop: (deps.readCursorDesktopSignIn || cursorAuth.readCursorDesktopSignIn)(),
+        userId: cursorAuth.canonicalCursorUserId(account.userId || account.id),
+        unauthorized
+      });
+  // Omission would leave a retained LimitsRuntime identity behind. The marker
+  // retires only its quota row, never the stored credential or usage history.
+  const removed = account => ({ provider: 'cursor', accountKey: hashCursorAccountKey(account), removed: true });
+  const providers = await Promise.all(enabledAccounts.map(account => current(account)
+    ? fetchCursorAccountLimits(account, deps) : removed(account)));
+  // Recheck after every probe settles: even a completed account can become stale
+  // while a slower sibling is still fetching.
+  const rows = providers.map((provider, index) => provider.removed
+    || current(enabledAccounts[index], provider.status === 'unauthorized')
+    ? provider : removed(enabledAccounts[index]));
+  return rows.length === 1 ? rows[0] : rows;
 }
 
 module.exports = {

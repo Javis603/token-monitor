@@ -795,7 +795,8 @@ span.settings-note.settings-item-desc {
 }
 .settings-item-value strong { color: var(--text); font-weight: 600; }
 /* .settings-panel prefix outweighs the panel-wide `select { width: 100% }` default */
-.settings-panel .settings-item > select {
+.settings-panel .settings-item > select,
+.settings-panel .settings-item > .select-control-trigger {
   flex: 0 0 auto;
   width: auto;
   max-width: 58%;
@@ -3184,10 +3185,15 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   cursor: pointer;
   -webkit-app-region: no-drag;
 }
+.settings-panel .select-control-trigger { padding: 5px 9px; }
+.settings-font-input-row .select-control-trigger { width: 100%; min-width: 0; }
+.plugin-version-picker .select-control-trigger { width: auto; max-width: 100%; }
+.select-control-icon > .limit-icon { width: 14px; height: 14px; flex-basis: 14px; }
 .select-control-trigger:hover,
 .select-control-trigger[aria-expanded="true"] { border-color: var(--line-strong); background: rgba(var(--overlay-rgb), 0.08); }
 .select-control-trigger:focus-visible { outline: 2px solid rgba(var(--accent-rgb), 0.65); outline-offset: 2px; }
 .select-control-trigger:disabled { opacity: 0.5; cursor: default; }
+.select-control-trigger[aria-invalid="true"] { border-color: var(--orange); }
 .select-control-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .select-control-icon { display: flex; flex: 0 0 14px; align-items: center; justify-content: center; color: var(--muted); }
 .select-control-icon svg { width: 14px; height: 14px; }
@@ -3220,6 +3226,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   backdrop-filter: blur(28px) saturate(115%);
 }
 .select-control-popup {
+  box-sizing: border-box;
   position: fixed;
   inset: auto;
   margin: 0;
@@ -3230,12 +3237,33 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   line-height: 1.4;
   -webkit-app-region: no-drag;
 }
-.select-control-option { display: flex; min-height: 28px; align-items: flex-start; gap: 8px; padding: 7px 8px; border-radius: 5px; cursor: pointer; }
-.select-control-option > .select-control-icon { margin-top: 1px; }
-.select-control-option-text { display: grid; min-width: 0; gap: 3px; }
+.select-control-popup.has-search { overflow: hidden; }
+.select-control-search {
+  display: block;
+  box-sizing: border-box;
+  width: calc(100% - 8px);
+  margin: 4px;
+  padding: 7px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: rgba(var(--sunken-rgb), 0.48);
+  color: var(--text);
+  font: inherit;
+  outline: none;
+  -webkit-app-region: no-drag;
+}
+.select-control-search:focus-visible { border-color: var(--accent); }
+.select-control-search::placeholder { color: var(--muted); }
+.select-control-list { overflow-y: auto; overscroll-behavior: contain; }
+.select-control-empty { padding: 12px 8px; color: var(--muted); }
+.select-control-group { padding: 8px 8px 4px; color: var(--muted); font-size: .59375rem; }
+.select-control-option { display: flex; box-sizing: border-box; min-height: 26px; align-items: center; gap: 8px; padding: 4px 8px; border-radius: 5px; cursor: pointer; }
+.select-control-option.has-description { align-items: flex-start; padding-block: 6px; }
+.select-control-option.has-description > .select-control-icon { margin-top: 1px; }
+.select-control-option-text { display: grid; flex: 1; min-width: 0; gap: 3px; }
 .select-control-option-label { overflow-wrap: anywhere; }
 .select-control-description { color: var(--muted); font-size: 0.59375rem; line-height: 1.45; overflow-wrap: anywhere; }
-.select-control-annotation { margin-left: auto; align-self: center; color: var(--muted); font-size: 0.59375rem; white-space: nowrap; }
+.select-control-annotation { margin-left: auto; align-self: center; color: var(--muted); font-size: 0.59375rem; white-space: nowrap; text-align: right; }
 .select-control-option[data-highlighted="true"] { background: rgba(var(--overlay-rgb), 0.07); }
 .select-control-option[data-selected="true"] { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); }
 .select-control-option[aria-disabled="true"] { opacity: 0.5; cursor: default; }
@@ -3521,6 +3549,51 @@ html.is-windows .settings-panel select option {
 }
 .cost { margin-top: var(--total-cost-gap); color: var(--readable-muted); font-size: 0.75rem; }
 .cost { display: flex; align-items: center; gap: 3px; }
+.total-cost-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: var(--total-cost-gap);
+}
+.total-cost-row .cost {
+  min-width: 0;
+  margin-top: 0;
+}
+.session-search-toggle {
+  display: grid;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  margin: -7px -4px -7px 0;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+.session-search-toggle:hover,
+.session-search-toggle:active {
+  background: rgba(var(--overlay-rgb), 0.08);
+  color: var(--text);
+}
+.session-search-toggle.is-active { color: var(--accent); }
+.session-search-toggle:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.32);
+  outline-offset: 1px;
+  color: var(--text);
+}
+.session-search-toggle-icon {
+  width: 13px;
+  height: 13px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/search.svg") center / contain no-repeat;
+  mask: url("icons/actions/search.svg") center / contain no-repeat;
+}
 .usage-cost-value { white-space: nowrap; }
 .usage-cost-info.limit-detail-tooltip-wrap {
   width: 11px;
@@ -4223,6 +4296,150 @@ html.is-windows .settings-panel select option {
   flex: 0 0 24px;
   align-items: center;
   justify-content: center;
+}
+.session-search-host {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 4px;
+  height: 0;
+  overflow: hidden;
+  /* The closed host keeps its flex slot at zero height; -4px block margins
+     cancel both shell gaps so the session list keeps its usual spacing. */
+  margin-block: -4px;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    height 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin-block 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 140ms ease-out;
+}
+.session-search-host.is-open {
+  height: 30px;
+  margin-block: -8px 4px;
+  opacity: 1;
+  pointer-events: auto;
+}
+.session-search {
+  display: flex;
+  height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 0 9px;
+  border: 1px solid rgba(var(--line-rgb), 0.22);
+  border-radius: 8px;
+  background: rgba(var(--sunken-rgb), 0.34);
+}
+.session-search:focus-within {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  box-shadow: inset 0 0 0 2px rgba(var(--accent-rgb), 0.1);
+}
+:root[data-reduce-motion="on"] .session-search-host { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .session-search-host { transition: none; }
+}
+.session-search-field-icon {
+  flex: 0 0 12px;
+  width: 12px;
+  height: 12px;
+  background: var(--muted);
+  -webkit-mask: url("icons/actions/search.svg") center / contain no-repeat;
+  mask: url("icons/actions/search.svg") center / contain no-repeat;
+}
+.session-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 0.6875rem;
+}
+.session-search-input::placeholder { color: var(--muted); }
+.session-search-input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.session-search-clear {
+  display: grid;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.session-search-clear:hover {
+  background: rgba(var(--overlay-rgb), 0.08);
+  color: var(--text);
+}
+.session-search-clear:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.32);
+  outline-offset: -1px;
+  color: var(--text);
+}
+.session-search-clear-icon {
+  position: relative;
+  display: block;
+  width: 8px;
+  height: 8px;
+}
+.session-search-clear-icon::before,
+.session-search-clear-icon::after {
+  position: absolute;
+  top: calc(50% - 0.5px);
+  left: 0;
+  width: 8px;
+  height: 1px;
+  border-radius: 1px;
+  background: currentColor;
+  content: '';
+}
+.session-search-clear-icon::before { transform: rotate(45deg); }
+.session-search-clear-icon::after { transform: rotate(-45deg); }
+.session-search-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.session-search-empty {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 14px 2px;
+  color: var(--muted);
+}
+.session-search-empty-text {
+  margin: 0;
+  font-size: 0.6875rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+.session-search-empty-clear {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgba(var(--accent-rgb), 0.24);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 0.625rem;
+  cursor: pointer;
+}
+.session-search-empty-clear:hover { background: rgba(var(--accent-rgb), 0.08); }
+.session-search-empty-clear:focus-visible {
+  outline: 2px solid rgba(var(--accent-rgb), 0.32);
+  outline-offset: 1px;
 }
 .session-tool-filter {
   position: relative;
@@ -5249,6 +5466,8 @@ html.is-windows .limit-live-badge {
   gap: 8px;
 }
 .limit-window { display: grid; gap: 5px; min-width: 0; }
+.limit-windows > .limit-window[data-limit-span="1"] { grid-column: auto; }
+.limit-window-label { display: inline-flex; align-items: center; gap: 4px; }
 .limit-window-wide {
   grid-column: 1 / -1;
 }
@@ -5503,6 +5722,22 @@ html.is-windows .limit-live-badge {
   right: auto;
   left: calc(anchor(left) - 1px);
 }
+.plugin-quota-info .limit-detail-tooltip {
+  right: auto;
+  left: anchor(center);
+  translate: calc(-50% + var(--tooltip-shift, 0px)) 0;
+  max-width: calc(100vw - 16px);
+  grid-template-columns: minmax(0, max-content) minmax(0, max-content);
+}
+.plugin-quota-info .limit-detail-tooltip-row > span {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.plugin-quota-info .limit-detail-tooltip::after {
+  right: auto;
+  left: calc(50% - 4px - var(--tooltip-shift, 0px));
+}
 .usage-cost-info .limit-detail-tooltip {
   right: auto;
   left: anchor(center);
@@ -5621,7 +5856,7 @@ html.is-windows .limit-live-badge {
    rather than widened on the shared rule, which the other provider forms
    already lay out against. Height is pinned for the same reason the
    third-party form pins it: select and input carry different paddings. */
-.subscription-add-body :is(input:not([type="checkbox"]), select) {
+.subscription-add-body :is(input:not([type="checkbox"]), select, .select-control-trigger) {
   height: 30px;
   box-sizing: border-box;
   font-size: 0.75rem;
@@ -5638,7 +5873,7 @@ html.is-windows .limit-live-badge {
    a whole email address. Nothing gives that width a shrinkable basis by default,
    so the row overflowed and dragged the entire settings panel into a horizontal
    scroll. */
-.subscription-add-body .settings-row > :is(input, select) {
+.subscription-add-body .settings-row > :is(input, select, .select-control-trigger) {
   flex: 1 1 0;
   min-width: 0;
 }
@@ -5648,7 +5883,7 @@ html.is-windows .limit-live-badge {
 .subscription-add-body .subscription-pair-row > input {
   flex: 2 1 0;
 }
-.subscription-add-body .subscription-pair-row > select {
+.subscription-add-body .subscription-pair-row > :is(select, .select-control-trigger) {
   flex: 1 1 0;
 }
 /* Amount, cadence, and dates are separate settings rows inside one field
@@ -5677,7 +5912,7 @@ html.is-windows .limit-live-badge {
   color: var(--muted);
   font-size: 0.6875rem;
 }
-.subscription-add-body .subscription-topup-heading-row > select {
+.subscription-add-body .subscription-topup-heading-row > :is(select, .select-control-trigger) {
   flex: 0 0 auto;
   width: 6.5em;
 }
@@ -7136,7 +7371,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   color: var(--text);
   font-size: 0.6875rem;
 }
-.settings-panel .status-provider-interval select {
+.settings-panel .status-provider-interval :is(select, .select-control-trigger) {
   flex: 0 0 auto;
   width: auto;
   max-width: 58%;
@@ -7883,7 +8118,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
    .subscription-add-body: the global `button, input, select { font: inherit }`
    otherwise drops a select back to the panel's base size, and the two carry
    different paddings, so the height is pinned to keep the rows aligned. */
-.opencode-add-body .settings-row :is(input, select) {
+.opencode-add-body .settings-row :is(input, select, .select-control-trigger) {
   flex: 1;
   min-width: 0;
   height: 30px;
@@ -7900,7 +8135,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 #volcengineAgentDetails .settings-row label {
   white-space: normal;
 }
-#volcengineAgentDetails .settings-row :is(input, select) {
+#volcengineAgentDetails .settings-row :is(input, select, .select-control-trigger) {
   height: auto;
   font-size: inherit;
 }
@@ -7940,7 +8175,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   font-size: 0.625rem;
   line-height: 1.2;
 }
-.thirdparty-field :is(input, select) {
+.thirdparty-field :is(input, select, .select-control-trigger) {
   width: 100%;
   min-width: 0;
   height: 30px;
@@ -8776,13 +9011,13 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-catalog .plugin-source { border: 0; padding: 0; }
 .plugin-catalog .plugin-logs > .plugin-version-picker { margin-top: 8px; }
 .plugin-catalog .plugin-logs > .plugin-description { margin-top: 8px; }
-.plugin-catalog-search, .plugin-source-form input, .plugin-source-form textarea, .plugin-version-picker select { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 0.75rem; }
+.plugin-catalog-search, .plugin-source-form input, .plugin-source-form textarea, .plugin-version-picker :is(select, .select-control-trigger) { width: 100%; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: 0.75rem; }
 .plugin-catalog input:focus-visible, .plugin-catalog textarea:focus-visible, .plugin-catalog select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .plugin-source-form, .plugin-source-form label { display: flex; flex-direction: column; gap: 7px; font-size: 0.6875rem; }
 .plugin-source-row { padding: 10px 0; border-bottom: 1px solid var(--line); }
 .plugin-source-form { margin-top: 12px; }
 .plugin-version-picker { display: flex; align-items: center; gap: 8px; font-size: 0.6875rem; }
-.plugin-version-picker select { width: auto; min-width: 0; max-width: 100%; }
+.plugin-version-picker :is(select, .select-control-trigger) { width: auto; min-width: 0; max-width: 100%; }
 .plugin-source-form textarea { resize: vertical; }
 .plugin-catalog .plugin-source { align-self: flex-start; }
 
@@ -8832,6 +9067,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-types { display: inline-flex; flex-wrap: wrap; gap: 4px 8px; }
 .plugin-types:empty { display: none; }
 /* Feature labels use text-only hues; color-scheme follows the App theme. */
+.plugin-type-limits { color: light-dark(#34627f, #94bdd8); }
 .plugin-type-widget { color: light-dark(#34627f, #94bdd8); }
 .plugin-type-page { color: light-dark(#735687, #bca5d8); }
 .plugin-type-appearance { color: light-dark(#85601f, #d6b77d); }
@@ -8901,20 +9137,22 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 
 /* Static author preferences share the host settings controls and stay usable
    when the plugin is disabled. No styles escape this management section. */
-.plugin-author-settings .plugin-author-form { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
-.plugin-author-settings .plugin-author-field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; min-width: 0; }
-.plugin-author-settings .plugin-author-label { font-size: .75rem; font-weight: 500; overflow-wrap: anywhere; }
-.plugin-author-settings .plugin-author-input:not([type="checkbox"]) { width: 100%; min-width: 0; box-sizing: border-box; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; font-size: .75rem; }
+.plugin-author-settings .plugin-author-form { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.plugin-author-settings .plugin-author-field { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; }
+.plugin-author-settings .plugin-author-label { font-size: .6875rem; color: var(--muted); overflow-wrap: anywhere; }
+.plugin-author-settings .plugin-author-input:not([type="checkbox"]) { width: 100%; min-width: 0; box-sizing: border-box; font-size: .75rem; }
 .plugin-author-settings .plugin-author-checkbox { grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
 .plugin-author-settings .plugin-author-checkbox p { grid-column: 1 / -1; }
-.plugin-author-settings .plugin-author-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .plugin-author-settings .plugin-author-input:disabled { opacity: .5; }
 .plugin-author-settings .plugin-author-input[aria-invalid="true"] { border-color: var(--red); }
-.plugin-author-settings .plugin-author-error { margin: 0; color: var(--red); font-size: .6875rem; overflow-wrap: anywhere; }
+.plugin-author-settings .plugin-author-error { margin: 0; color: var(--red); font-size: .625rem; line-height: 1.45; overflow-wrap: anywhere; }
 .plugin-author-settings .plugin-author-status { min-height: 1.5em; overflow-wrap: anywhere; }
 .plugin-author-settings .plugin-author-actions { flex-wrap: wrap; }
 
 .plugin-author-settings .plugin-author-editor { min-width: 0; overflow: auto; }
+.plugin-credential-form { display: grid; gap: 8px; }
+.plugin-credential-summary { align-items: center; }
+.plugin-credential-summary > .settings-note, .plugin-credential-error { margin: 0; }
 /* Display settings keep mounted controls; navigation has no height animation. */
 .settings-section-details-inner > .display-settings { min-width: 0; margin-top: 0; }
 .display-settings .settings-window-group { margin-top: 0; padding-top: 0; border-top: 0; }
@@ -9033,3 +9271,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-catalog-readme table { display: block; overflow: auto; border-collapse: collapse; }
 .plugin-catalog-readme th, .plugin-catalog-readme td { padding: 6px; border: 1px solid var(--line); }
 .plugin-catalog-readme a { color: var(--accent); }
+
+.plugin-author-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.plugin-author-heading .plugin-detail-heading { margin: 0; }

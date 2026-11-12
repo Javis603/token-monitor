@@ -3,7 +3,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { SYNC_PAYLOAD_BUDGET_BYTES, postSyncPayload, serializeSyncPayload, syncPayload } = require('../../src/shared/syncPayload');
+const { LEGACY_SYNC_PAYLOAD_BUDGET_BYTES, SYNC_PAYLOAD_BUDGET_BYTES, postSyncPayload, serializeSyncPayload, syncPayload } = require('../../src/shared/syncPayload');
 
 test('sync payload preserves optional bounded project model attribution', () => {
   const summary = {
@@ -138,7 +138,11 @@ test('syncPayload bounds uploads by omitting all-time sessions', () => {
       models: { opus: 30 },
       sessions: { old: { totalTokens: 30 } }
     },
-    history: { daily: [{ date: '2026-07-11', totalTokens: 10 }] },
+    history: {
+      daily: [{ date: '2026-07-11', totalTokens: 10 }],
+      dailyTotals: [{ date: '2025-01-01', tokens: 10, cost: 1, activeTimeMs: 1000 }],
+      summary: { activeDays: 1, activeDaysComplete: true }
+    },
     limits: { providers: [] }
   };
 
@@ -326,6 +330,35 @@ test('serializeSyncPayload keeps payload reductions monotonic across components 
   assert.equal(Object.hasOwn(compact.payload.history.daily[0].perClient['client-0'], 'cacheReadTokens'), false);
 });
 
+test('serializeSyncPayload omits oversized all-time daily totals and marks history incomplete', () => {
+  const dailyTotals = Array.from({ length: 40 }, (_, index) => ({
+    date: new Date(Date.UTC(2026, 0, index + 1)).toISOString().slice(0, 10),
+    tokens: 1000 + index,
+    cost: index / 10,
+    activeTimeMs: index * 1000
+  }));
+  const summary = {
+    deviceId: 'large-calendar',
+    today: { totalTokens: 10 },
+    month: { totalTokens: 20 },
+    allTime: { totalTokens: 30 },
+    history: {
+      daily: dailyTotals.slice(-2),
+      dailyTotals,
+      summary: { activeDays: 40, activeDaysComplete: true }
+    }
+  };
+
+  const { payload, bytes } = serializeSyncPayload(summary, { maxBytes: 500 });
+
+  assert.ok(bytes <= 500, `expected ${bytes} bytes to fit the test budget`);
+  assert.equal(Object.hasOwn(payload.history, 'dailyTotals'), false);
+  assert.equal(payload.history.dailyTotalsOmitted, 40);
+  assert.equal(payload.history.summary.activeDaysComplete, false);
+  assert.equal(summary.history.dailyTotals.length, 40);
+  assert.equal(summary.history.summary.activeDaysComplete, true);
+});
+
 test('syncPayload strips recomputable projects and keeps bounded all-time projects', () => {
   const summary = {
     today: { sessions: { a: { totalTokens: 1 } }, projects: { today: { tokens: 1 } } },
@@ -456,6 +489,43 @@ test('postSyncPayload retries a legacy 413 when only History components can be r
   assert.equal(Object.hasOwn(bodies[1].history.daily[0], 'tokenComponentsAvailable'), false);
 });
 
+test('postSyncPayload retries a 413 within the legacy 1 MiB budget', async () => {
+  const bodies = [];
+  const responses = [
+    { status: 413, ok: false, async arrayBuffer() { return new ArrayBuffer(0); } },
+    { status: 200, ok: true }
+  ];
+  const sessionCount = 6000;
+  const sessions = Object.fromEntries(Array.from({ length: sessionCount }, (_, index) => [
+    `claude:s${index}`,
+    {
+      client: 'claude',
+      sessionId: `s${index}`,
+      totalTokens: 100,
+      lastUsedAt: `2026-07-${String((index % 28) + 1).padStart(2, '0')}T00:00:00.000Z`,
+      projectId: 'sha256:large',
+      projectLabel: 'x'.repeat(256),
+      models: { opus: 100 }
+    }
+  ]));
+  const { response, retried, payload } = await postSyncPayload(async (_url, options) => {
+    bodies.push(options.body);
+    return responses.shift();
+  }, 'http://hub/api/ingest', {
+    summary: {
+      deviceId: 'legacy-hub',
+      month: { totalTokens: sessionCount * 100, sessions },
+      allTime: { totalTokens: sessionCount * 100 }
+    }
+  });
+
+  assert.equal(response.status, 200);
+  assert.equal(retried, true);
+  assert.ok(Buffer.byteLength(bodies[0], 'utf8') > 1024 * 1024);
+  assert.ok(Buffer.byteLength(bodies[1], 'utf8') <= LEGACY_SYNC_PAYLOAD_BUDGET_BYTES);
+  assert.ok(payload.sessionDetailsOmitted.month > 0);
+});
+
 test('postSyncPayload reports the actual reduced size after budget omission', async () => {
   let postedBody = '';
   const logs = [];
@@ -578,7 +648,8 @@ test('serializeSyncPayload omits an oversized period project rollup as a final f
 });
 
 test('postSyncPayload reports omitted session detail without changing period totals', async () => {
-  const sessions = Object.fromEntries(Array.from({ length: 2600 }, (_, index) => [
+  const sessionCount = 6000;
+  const sessions = Object.fromEntries(Array.from({ length: sessionCount }, (_, index) => [
     `claude:s${index}`,
     { client: 'claude', sessionId: `s${index}`, totalTokens: 100, lastUsedAt: `2026-07-${String((index % 28) + 1).padStart(2, '0')}T00:00:00.000Z`, projectId: 'sha256:large', projectLabel: 'x'.repeat(256), models: { opus: 100 } }
   ]));
@@ -590,14 +661,14 @@ test('postSyncPayload reports omitted session detail without changing period tot
   }, 'http://hub/api/ingest', {
     summary: {
       deviceId: 'large',
-      month: { totalTokens: 260000, sessions, projects: { large: { label: 'Large', tokens: 260000, costUsd: 0, clients: { claude: 260000 } } } },
-      allTime: { totalTokens: 260000 }
+      month: { totalTokens: sessionCount * 100, sessions, projects: { large: { label: 'Large', tokens: sessionCount * 100, costUsd: 0, clients: { claude: sessionCount * 100 } } } },
+      allTime: { totalTokens: sessionCount * 100 }
     },
     logger: (message) => logs.push(message)
   });
 
   assert.equal(response.ok, true);
-  assert.equal(posted.month.totalTokens, 260000);
+  assert.equal(posted.month.totalTokens, sessionCount * 100);
   assert.ok(Buffer.byteLength(JSON.stringify(posted), 'utf8') <= SYNC_PAYLOAD_BUDGET_BYTES);
   assert.deepEqual(posted.sessionDetailsOmitted, payload.sessionDetailsOmitted);
   assert.ok(payload.sessionDetailsOmitted.month > 0);
@@ -621,4 +692,52 @@ test('discarded allTime sessions are never accessed or cloned before text saniti
     assert.equal(Object.hasOwn(allTime, 'sessions'), true);
     assert.strictEqual(summary.periods.allTime.sessions.a, session);
   }
+});
+
+
+test('acknowledged History omission does not reintroduce compact daily totals', () => {
+  const summary = {
+    deviceId: 'acknowledged-calendar',
+    history: {
+      daily: [{ date: '2026-11-05', tokens: 10 }],
+      dailyTotals: [{ date: '2024-01-01', tokens: 10, cost: 0, activeTimeMs: 0 }],
+      summary: { activeDays: 1, activeDaysComplete: true }
+    }
+  };
+  const { payload } = serializeSyncPayload(summary, { omitHistory: true });
+  assert.equal(Object.hasOwn(payload, 'history'), false);
+  assert.equal(summary.history.dailyTotals.length, 1);
+});
+
+test('new daily totals never evict legacy detail that already fits the sync budget', () => {
+  const summary = {
+    deviceId: 'calendar-priority',
+    today: { totalTokens: 10, sessions: { keep: { client: 'claude', sessionId: 'keep', totalTokens: 10 } },
+      modelThroughput: { model: { timedTokens: 10, timedOutputTokens: 5, timedDurationMs: 1000 } } },
+    month: { totalTokens: 20, sessions: { keep: { client: 'claude', sessionId: 'month', totalTokens: 20 } } },
+    allTime: { totalTokens: 30, projects: { keep: { label: 'x'.repeat(12000), tokens: 30, clients: { claude: 30 } } } },
+    history: { daily: [{ date: '2026-11-09', tokens: 10, outputTokens: 5, tokenComponentsAvailable: true }],
+      monthly: [], summary: { activeDaysComplete: true } }
+  };
+  const legacy = serializeSyncPayload(summary);
+  const maxBytes = legacy.bytes + 128;
+  summary.history.dailyTotals = Array.from({ length: 40 }, (_, i) => ({
+    date: new Date(Date.UTC(2026, 0, i + 1)).toISOString().slice(0, 10), tokens: 10, cost: 0.01, activeTimeMs: 1000
+  }));
+  const original = structuredClone(summary);
+  const result = serializeSyncPayload(summary, { maxBytes });
+  assert.ok(result.bytes <= maxBytes);
+  for (const name of ['today', 'month', 'allTime']) assert.deepEqual(result.payload[name], legacy.payload[name]);
+  assert.deepEqual(result.payload.history.daily, legacy.payload.history.daily);
+  assert.equal(result.payload.history.dailyTotals, undefined);
+  assert.equal(result.payload.history.dailyTotalsOmitted, 40);
+  assert.equal(result.payload.history.summary.activeDaysComplete, false);
+  assert.deepEqual(summary, original);
+
+  const reduced = serializeSyncPayload(summary, { maxBytes: 500 });
+  assert.ok(reduced.bytes <= 500);
+  assert.equal(reduced.payload.history.dailyTotals, undefined, 'later rebuilds must not restore omitted totals');
+  assert.equal(reduced.payload.history.dailyTotalsOmitted, 40);
+  assert.equal(reduced.payload.history.summary.activeDaysComplete, false);
+  assert.equal(reduced.payload.allTimeProjectsOmitted, true, 'legacy reduction still applies when necessary');
 });

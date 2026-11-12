@@ -59,6 +59,7 @@ const supportedToolOrder = [
   'OpenClaw',
   'Cursor IDE / Cursor CLI / Grok Bot',
   'Antigravity',
+  'Gemini CLI',
   'Cline',
   'Amp',
   'Factory Droid',
@@ -91,6 +92,8 @@ const supportedToolOrder = [
   'fx',
   'MiniMax / MiniMax Code',
   'Mistral Vibe',
+  'Prime Agent',
+  'Jcode',
   'TypeSafe',
   'OpenRouter',
   'Volcengine',
@@ -100,6 +103,7 @@ const supportedToolOrder = [
   'StepFun',
   'Notion AI',
   'Manus',
+  'Hark',
   'OpenDesign',
   'Third-party APIs'
 ];
@@ -112,6 +116,7 @@ const supportedToolIdOrder = [
   'openclaw',
   'cursor',
   'antigravity',
+  'gemini-cli',
   'cline',
   'amp',
   'droid',
@@ -144,6 +149,8 @@ const supportedToolIdOrder = [
   'fx',
   'minimax',
   'mistral',
+  'prime-agent',
+  'jcode',
   'typesafe',
   'openrouter',
   'volcengine',
@@ -153,6 +160,7 @@ const supportedToolIdOrder = [
   'stepfun',
   'notion',
   'manus',
+  'hark',
   'opendesign',
   'thirdparty'
 ];

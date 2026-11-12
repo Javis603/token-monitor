@@ -432,7 +432,7 @@ test('collectUsageOnce ignores a stale anchor from a previous day and runs the f
   }
 });
 
-test('startCollector: watch ticks reuse the full-scan anchor, manual ticks rescan everything', async () => {
+test('startCollector: watch ticks reuse the full-scan anchor, manual ticks rescan everything', async t => {
   const childProcess = require('node:child_process');
   const originalSpawn = childProcess.spawn;
   const calls = [];
@@ -451,8 +451,10 @@ test('startCollector: watch ticks reuse the full-scan anchor, manual ticks resca
       watchEnabled: false,
       watchDebounceMs: 10,
       historyEnabled: false,
+      pricingCatalogTimers: { setTimeout: () => 1, clearTimeout() {} },
       onUpdate: (summary, reason) => updates.push({ summary, reason })
     });
+    t.after(() => handle.stop());
 
     await waitForUpdates(updates, 1);
     const fullScans = calls.length;
@@ -551,6 +553,40 @@ for (const client of ['codex', 'claude']) test(`${client} anchored effort misses
     for (const name of ['month', 'allTime']) {
       assert.equal(summary[name].sessions[`${client}:s1`].reasoningEffort, expected, `${name}: ${lastUsedAt} ${JSON.stringify(fields)} raw=${rawTimestamp}`);
       assert.equal(archive.sessions[`${client}:s1`].periods[name].reasoningEffort, expected);
+      assert.equal(summary[name].totalTokens, 50);
+    }
+  }
+});
+
+for (const client of ['codex', 'claude']) test(`${client} anchored latest-model misses preserve only the same observation through archive capture`, async () => {
+  const { collectUsageOnce, localTodayKey } = freshCollector();
+  const { emptyPeriod } = require('../../src/shared/usage');
+  const { updateSessionUsageArchive, normalizeSessionUsageArchive } = require('../../src/shared/usage/sessionUsageArchive');
+  const observedAt = new Date().toISOString();
+  const newer = new Date(Date.parse(observedAt) + 1000).toISOString();
+  const older = new Date(Date.parse(observedAt) - 1000).toISOString();
+  const makePeriod = () => ({ ...emptyPeriod(), totalTokens: 50, clients: { [client]: 50 }, sessions: {
+    [`${client}:s1`]: { client, sessionId: 's1', totalTokens: 50, lastUsedAt: observedAt, latestModel: 'older' }
+  } });
+  const cases = [
+    [observedAt, {}, 'older'], [observedAt, { latestModel: null }, null],
+    [observedAt, { latestModel: 'newer' }, 'newer'], [newer, {}, null],
+    [older, {}, 'older'], [older, { latestModel: 'newer' }, 'older']
+  ];
+  for (const rawTimestamp of [false, true]) for (const [lastUsedAt, fields, expected] of cases) {
+    const anchor = { dateKey: localTodayKey(), today: makePeriod(), month: makePeriod(), allTime: makePeriod() };
+    const saved = updateSessionUsageArchive(null, anchor, new Date(observedAt)).archive;
+    const summary = await collectUsageOnce({
+      ...baseOptions, clients: client, todayOnlyAnchor: anchor,
+      runTokscale: async () => ({ entries: [{ client, sessionId: 's1', model: 'fixture', input: 50,
+        ...(rawTimestamp ? { lastUsedAt } : {}) }] }),
+      sessionMetadataDeps: { sessionMetadataResolvers: new Map([[client, () => new Map([['s1', { lastUsedAt, ...fields }]])]]) }
+    });
+    updateSessionUsageArchive(saved, summary, new Date(newer));
+    const archive = normalizeSessionUsageArchive(saved);
+    for (const name of ['month', 'allTime']) {
+      assert.equal(summary[name].sessions[`${client}:s1`].latestModel, expected, `${name}: ${lastUsedAt} ${JSON.stringify(fields)} raw=${rawTimestamp}`);
+      assert.equal(archive.sessions[`${client}:s1`].periods[name].latestModel, expected);
       assert.equal(summary[name].totalTokens, 50);
     }
   }

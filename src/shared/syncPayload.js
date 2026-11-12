@@ -11,6 +11,9 @@ const { isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuar
 
 const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;
 const SYNC_PAYLOAD_BUDGET_BYTES = MAX_JSON_BODY_BYTES - SYNC_PAYLOAD_MARGIN_BYTES;
+// Hubs deployed before the 2 MiB ceiling still enforce 1 MiB. A rejected
+// upload retries within the budget those Hubs accept.
+const LEGACY_SYNC_PAYLOAD_BUDGET_BYTES = 1024 * 1024 - SYNC_PAYLOAD_MARGIN_BYTES;
 const SYNC_HISTORY_COMPONENT_DAYS = 30;
 
 function hasOwn(object, key) {
@@ -182,6 +185,7 @@ function sessionsWithoutReasonix(sessions) {
 
 function buildSyncPayload(summary, {
   omitHistory = false,
+  omitDailyTotals = false,
   omitAllTimeProjects = false,
   omitHistoryTokenComponents = false,
   omitModelThroughput = false,
@@ -227,6 +231,10 @@ function buildSyncPayload(summary, {
   delete payload.sessionDetailsOmitted;
   delete payload.periodProjectsOmitted;
   delete payload.codexLocalSessionKeys;
+  if (Array.isArray(payload.history?.dailyTotals)) {
+    payload.history = { ...payload.history };
+    delete payload.history.dailyTotalsOmitted;
+  }
 
   for (const periodName of ['today', 'month']) {
     const period = payload[periodName];
@@ -251,7 +259,20 @@ function buildSyncPayload(summary, {
       if (payload[period]) delete payload[period].modelThroughput;
     }
   }
+  if (omitDailyTotals) omitHistoryDailyTotals(payload);
   return payload;
+}
+
+function omitHistoryDailyTotals(payload) {
+  if (!Array.isArray(payload?.history?.dailyTotals)) return false;
+  const omitted = payload.history.dailyTotals.length;
+  payload.history = {
+    ...payload.history,
+    summary: { ...(payload.history.summary || {}), activeDaysComplete: false },
+    dailyTotalsOmitted: omitted
+  };
+  delete payload.history.dailyTotals;
+  return true;
 }
 
 function serializeSyncPayload(summary, options = {}) {
@@ -267,6 +288,13 @@ function serializeSyncPayload(summary, options = {}) {
     return { payload, body, bytes: body ? Buffer.byteLength(body, 'utf8') : 0 };
   }
   let body = JSON.stringify(payload);
+  if (Buffer.byteLength(body, 'utf8') > maxBytes && Array.isArray(payload.history?.dailyTotals)) {
+    // The additive calendar must not evict detail that fit before it existed.
+    // Keep this option across later rebuilds if legacy reductions are also needed.
+    buildOptions.omitDailyTotals = true;
+    payload = buildSyncPayload(summary, buildOptions);
+    body = JSON.stringify(payload);
+  }
   if (Buffer.byteLength(body, 'utf8') > maxBytes
     && ['today', 'month', 'allTime'].some((period) => payload[period]?.modelThroughput)) {
     // Optional live attribution must never evict aggregate usage or session detail.
@@ -330,10 +358,14 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, sy
       .join(', ');
     logger(`project detail omitted for sync (${omitted}); payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
   }
+  if (serialized.payload?.history?.dailyTotalsOmitted > 0 && typeof logger === 'function') {
+    logger(`all-time daily history omitted from sync (${serialized.payload.history.dailyTotalsOmitted} days); payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
+  }
   let response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
   const retrySerialized = response.status === 413
     ? serializeSyncPayload(summary, {
         ...syncOptions,
+        maxBytes: LEGACY_SYNC_PAYLOAD_BUDGET_BYTES,
         omitHistoryTokenComponents: true,
         omitAllTimeProjects: true,
         omitModelThroughput: true
@@ -345,7 +377,7 @@ async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, sy
     try { await response.arrayBuffer(); } catch (_) { /* best-effort drain before retry */ }
     serialized = retrySerialized;
     if (typeof logger === 'function') {
-      logger('hub rejected the payload; retrying once without model timing detail, additive History components or all-time projects');
+      logger('hub rejected the payload; retrying once within the legacy 1 MiB budget without model timing detail, additive History components or all-time projects');
     }
     response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
   }
@@ -435,6 +467,7 @@ function createSyncPayloadUploader({ now = Date.now } = {}) {
 }
 
 module.exports = {
+  LEGACY_SYNC_PAYLOAD_BUDGET_BYTES,
   SYNC_PAYLOAD_BUDGET_BYTES,
   buildSyncPayload,
   createSyncPayloadUploader,

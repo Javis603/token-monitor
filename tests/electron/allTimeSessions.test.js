@@ -190,7 +190,8 @@ test('the renderer attaches the pulled list to every stats it adopts and pulls f
   assert.match(app, /fetchSessions: \(snapshotId\) => window\.tokenMonitor\.getAllTimeSessions\(snapshotId\),\s*currentSnapshot: \(\) => state\.stats\?\.snapshot,/);
   assert.equal((app.match(/allTimeSessions\.invalidate\(\);\s*state\.stats = sessionStatsForDisplay\(allTimeSessions\.attach\(/g) || []).length, 2, 'push and refresh');
   assert.doesNotMatch(app, /state\.stats = (payload\.data\.stats|nextStats);/);
-  assert.match(app, /function render\(\) \{[\s\S]*?if \(!state\.stats\) return;\s*allTimeSessions\.ensure\(\);/);
+  assert.match(app, /function render\([^)]*\) \{\s*renderAppContent\(/);
+  assert.match(app, /function renderAppContent\([^)]*\) \{[\s\S]*?if \(!state\.stats\) return;\s*allTimeSessions\.ensure\(\);/);
   assert.match(app, /allTimeSessions\.ensure\(\);\s*renderSessionUsageArchiveStatus\(\);/, 'Settings pulls for the archived count');
 });
 

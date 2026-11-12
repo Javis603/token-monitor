@@ -179,7 +179,9 @@ test('usage replacement waits for an aborted tokscale child to close before spaw
       anchorPersistenceEnabled: false
     };
     runtime = createDeviceRuntime({ usageOptions }, {
-      createUsageRuntime: (next) => fresh.startCollector(next),
+      createUsageRuntime: (next) => fresh.startCollector({
+        ...next, pricingCatalogTimers: { setTimeout: () => 1, clearTimeout() {} }
+      }),
       createLimitsRuntime: () => ({ stop() {} })
     });
     await waitFor(() => children.length === 1);
@@ -256,7 +258,9 @@ test('usage replacement abandons its wait for a shared capability probe without 
       anchorPersistenceEnabled: false
     };
     runtime = createDeviceRuntime({ usageOptions }, {
-      createUsageRuntime: (next) => fresh.startCollector(next),
+      createUsageRuntime: (next) => fresh.startCollector({
+        ...next, pricingCatalogTimers: { setTimeout: () => 1, clearTimeout() {} }
+      }),
       createLimitsRuntime: () => ({ stop() {} })
     });
     await waitFor(() => helpChild !== null);
@@ -339,7 +343,9 @@ test('timed-out tokscale remains the replacement barrier through forced terminat
       anchorPersistenceEnabled: false
     };
     runtime = createDeviceRuntime({ usageOptions }, {
-      createUsageRuntime: (next) => fresh.startCollector(next),
+      createUsageRuntime: (next) => fresh.startCollector({
+        ...next, pricingCatalogTimers: { setTimeout: () => 1, clearTimeout() {} }
+      }),
       createLimitsRuntime: () => ({ stop() {} })
     });
     await waitFor(() => children[0]?.signals.includes('SIGTERM'));
@@ -405,7 +411,9 @@ test('unconfirmed forced termination releases the replacement barrier with a dia
       usageOptions,
       onDiagnosticEvent: (event) => diagnostics.push(event)
     }, {
-      createUsageRuntime: (next) => fresh.startCollector(next),
+      createUsageRuntime: (next) => fresh.startCollector({
+        ...next, pricingCatalogTimers: { setTimeout: () => 1, clearTimeout() {} }
+      }),
       createLimitsRuntime: () => ({ stop() {} })
     });
     await waitFor(() => children[0]?.signals.includes('SIGTERM'));
@@ -474,7 +482,7 @@ test('a self-sync cancelled by usage replacement is neutral and returns its allo
 
     const updates = [];
     replacement = startCollector({ ...options, onUpdate: (summary) => updates.push(summary) });
-    await waitFor(() => updates.length === 1);
+    await waitFor(() => updates.length > 0 && syncCalls === 2 && selfSyncThrottle.syncStatus('cursor').state === 'ok');
 
     assert.equal(syncCalls, 2, 'the cancelled claim does not block the replacement sync');
     assert.equal(selfSyncThrottle.sourceFloorMs('cursor'), SYNC_SOURCE_EVENT_MIN_INTERVAL_MS);

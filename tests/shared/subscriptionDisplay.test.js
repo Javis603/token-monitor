@@ -564,9 +564,9 @@ test('two writes in the same millisecond cannot share a concurrency token', () =
 test('a currency with no exchange rate is not silently reinterpreted as USD', () => {
   const currencyApi = require('../../src/shared/currency');
   // The hubs validate against the same set the app can actually convert; storing
-  // EUR and later valuing it as USD would misreport the recorded cost.
+  // ZAR and later valuing it as USD would misreport the recorded cost.
   const stored = subscriptions.subscriptionDocument(
-    [{ id: 'a', provider: 'codex', startDate: '2026-05-31', amountMinor: 1000, currency: 'EUR' }],
+    [{ id: 'a', provider: 'codex', startDate: '2026-05-31', amountMinor: 1000, currency: 'ZAR' }],
     { currencyApi }
   );
   assert.equal(stored.subscriptions[0].currency, 'USD');

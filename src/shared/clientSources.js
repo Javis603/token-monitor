@@ -11,6 +11,7 @@ const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/herme
 const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { catpawDataSources, nativeWindowsFolders } = require('./providers/catpaw/paths');
 const { qoderCnDataPaths } = require('./providers/qodercn/paths');
+const { primeAgentSessionRoots } = require('./providers/prime-agent/paths');
 const { MCODE_SOURCE_CHECK_ID, mcodeSessionDirs } = require('./providers/mcode/paths');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
 const { resolveDshSessionsDir, DSH_SOURCE_CHECK_ID } = require('./providers/dsh/paths');
@@ -233,6 +234,11 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // at the profile while the scan read the $HOME tree, so Amp could show
   // `detected` next to usage collected from another directory.
   const tokscaleHome = tokscaleHomeDir({ env, platform, homeDir: home });
+  add('jcode', ['jcode-sessions', path.join(nonBlankEnvPath('JCODE_HOME', path.join(tokscaleHome, '.jcode'), env), 'sessions')]);
+  if (enabled.has('prime-agent')) {
+    const [sessions, artifacts] = primeAgentSessionRoots({ homeDir: tokscaleHome, env });
+    add('prime-agent', ['prime-agent-sessions', sessions], ['prime-agent-artifacts', artifacts]);
+  }
   const xdgHome = xdgDataHome(tokscaleHome, env);
   const gooseFiles = enabled.has('goose')
     ? gooseSessionFiles({ homeDir: home, platform, env, windowsFolders: options.windowsFolders }) : [];
@@ -258,6 +264,9 @@ function clientSourceRoots(clientsCsv, options = {}) {
   add('antigravity',
     ['tokscale-antigravity-cache', path.join(tokscaleConfigRoot, 'antigravity-cache')],
     ['antigravity-extension-data', path.join(home, '.gemini', 'antigravity', 'conversations')]);
+  // Antigravity keeps its own roots under this home; do not watch `.gemini` itself.
+  const geminiHome = nonBlankEnvPath('GEMINI_CLI_HOME', path.join(tokscaleHome, '.gemini'), env);
+  add('gemini', ['gemini-sessions', path.join(geminiHome, 'tmp')]);
   // A whitespace-only KIMI_CODE_HOME counts as unset, matching tokscale: it
   // joins `sessions` onto the raw value, so a blank export would resolve to the
   // root-level /sessions and hide the real one.
@@ -291,6 +300,7 @@ function clientSourceRoots(clientsCsv, options = {}) {
   const copilotOtelRoot = path.join(home, '.copilot', 'otel');
   const copilotRoots = [
     ['copilot-otel', copilotOtelRoot],
+    ['copilot-session-state', path.join(home, '.copilot', 'session-state')],
     ['copilot-data', path.join(home, '.copilot'), path.join(home, '.copilot', 'data.db')],
     ['copilot-session-store', path.join(home, '.copilot'), path.join(home, '.copilot', 'session-store.db')],
     ...[...new Set(copilotWorkspaceRoots)].map((dir) => ['vscode-workspace-storage', dir]),

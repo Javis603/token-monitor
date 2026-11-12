@@ -64,6 +64,7 @@ const LIMITS_RECONFIGURE_KEYS = Object.freeze([
   'limitsRefreshMode',
   'limitsRefreshMs',
   'cursorDisabledAccountIds',
+  'cursorManualAccountIds',
   'opencodeLocalLimitsEnabled',
   'claudeCliFallbackEnabled'
 ]);
@@ -120,7 +121,7 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     watchTriggersCollection: context.watchTriggersCollection !== false,
     intervalRequiresActivity: Boolean(context.intervalRequiresActivity),
     watchDebounceMs: Number(context.watchDebounceMs || 1500),
-    wslScanEnabled: settings.wslScanEnabled !== false,
+    wslScanEnabled: settings.wslScanEnabled === true,
     onError: context.onError,
     logger: context.logger
   };
@@ -149,6 +150,10 @@ function limitsConfigFromSettings(settings = {}, context = {}) {
     // declared default. The workbuddy fields below stay hand-written because
     // the desktop session rewrites their lanes entirely.
     ...limitsAccountConfig(settings, context),
+    // Ownership metadata belongs to the desktop account lifecycle, not a
+    // renderer-editable credential field. Missing metadata preserves headless use.
+    cursorManualAccountIds: Array.isArray(settings.cursorManualAccountIds)
+      ? normalizeCursorAccountIds(settings.cursorManualAccountIds) : undefined,
     workbuddyLocalSessions: context.workbuddyDesktopSessionEnabled === true && Array.isArray(context.workbuddyLocalSessions)
       ? context.workbuddyLocalSessions
       : undefined,

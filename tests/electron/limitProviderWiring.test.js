@@ -104,6 +104,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     notionCookie: ['providers', 'notion', 'cookie'],
     opendesignCookie: ['providers', 'opendesign', 'cookie'],
     manusSessionToken: ['providers', 'manus', 'sessionToken'],
+    harkCookie: ['providers', 'hark', 'cookie'],
     museWebCookie: ['providers', 'muse', 'webCookie'],
     commandcodeCookie: ['providers', 'commandcode', 'cookie'],
     zaiApiKey: ['providers', 'zai', 'apiKey'],
@@ -174,6 +175,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     notion: ['notionCookie', 'notionWorkspaceId'],
     opendesign: ['opendesignCookie'],
     manus: ['manusSessionToken'],
+    hark: ['harkCookie'],
     muse: ['museWebCookie'],
     openrouter: ['openrouterProfiles'],
     minimax: ['minimaxApiProfiles', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode'],
@@ -290,7 +292,7 @@ test('settings:update normalizes provider fields and strips separately managed a
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
     'traeCookie', 'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
-    'mistralCookie', 'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId', 'manusSessionToken', 'museWebCookie', 'opendesignCookie'
+    'mistralCookie', 'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId', 'manusSessionToken', 'harkCookie', 'museWebCookie', 'opendesignCookie'
   ].sort());
   for (const key of normalizedKeys) {
     const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test'
@@ -326,6 +328,20 @@ test('settings:update normalizes provider fields and strips separately managed a
     'subscriptionsCacheHub', 'subscriptionsShared', 'subscriptionsHub', 'subscriptionsUpdatedAt']) {
     assert.match(handler, new RegExp(`delete normalizedPatch\\.${key};`), key);
   }
+});
+
+test('generic settings updates cannot reclassify discovered Cursor accounts as manual', () => {
+  const start = mainSource.indexOf('    const normalizedPatch = { ...patch, currency: normalizedCurrency };');
+  const end = mainSource.indexOf('    normalizeAccountPatch(patch, normalizedPatch);', start);
+  const stored = { cursorManualAccountIds: ['user_MANUAL'] };
+  const patch = { cursorManualAccountIds: ['user_STALE'], cursorDisabledAccountIds: ['user_DISABLED'] };
+  const normalized = vm.runInNewContext(`${mainSource.slice(start, end)}; normalizedPatch`, {
+    patch, normalizedCurrency: 'USD'
+  });
+  const saved = { ...stored, ...normalized };
+  assert.deepEqual(saved.cursorManualAccountIds, ['user_MANUAL']);
+  assert.deepEqual(saved.cursorDisabledAccountIds, ['user_DISABLED']);
+  assert.deepEqual(patch.cursorManualAccountIds, ['user_STALE']);
 });
 
 test('the external URL allowlist admits exactly the provider consoles it should', () => {

@@ -38,6 +38,91 @@ test('normalizeLanguage keeps supported choices and falls back to auto', () => {
   assert.equal(normalizeLanguage(''), 'auto');
 });
 
+test('Spanish regional variants resolve to the shared Spanish dictionary', () => {
+  for (const tag of ['es', 'es-ES', 'es-MX', 'es-AR', 'es-419', 'ES_es']) {
+    assert.equal(normalizeLanguage(tag), 'es', tag);
+    assert.equal(resolveLocale('auto', [tag, 'en-US']), 'es', tag);
+    assert.equal(resolveLocale(tag, ['en-US']), 'es', tag);
+  }
+  assert.equal(resolveLocale('auto', ['fr-FR', 'es-ES']), 'es');
+  assert.equal(resolveLocale('en', ['es-ES']), 'en');
+  assert.equal(resolveRegionalLocale(['es-MX', 'es-ES']), 'es-MX');
+  assert.equal(resolveRegionalLocale(['es_ES']), 'es-ES');
+});
+
+test('main-process language settings preserve Spanish and its regional variants', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const vm = require('node:vm');
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const start = main.indexOf('function normalizeLanguageSetting(');
+  const end = main.indexOf('\nfunction normalizeHubPort(', start);
+  assert.ok(start >= 0 && end > start);
+  const context = { LANGUAGE_VALUES: new Set(LANGUAGE_OPTIONS.map(option => option.value)) };
+  vm.runInNewContext(main.slice(start, end), context);
+  for (const tag of ['es', 'es-ES', 'es-MX', 'es-419', 'ES_es']) {
+    assert.equal(context.normalizeLanguageSetting(tag), 'es', tag);
+  }
+  assert.equal(context.normalizeLanguageSetting('unsupported', 'es'), 'es');
+});
+
+test('Spanish has exact English key and interpolation-placeholder parity', () => {
+  assert.deepEqual(Object.keys(MESSAGES.es).sort(), Object.keys(MESSAGES.en).sort());
+  const placeholders = value => [...value.matchAll(/\{([a-zA-Z0-9_]+)\}/g)]
+    .map(match => match[1]).sort();
+  for (const [key, source] of Object.entries(MESSAGES.en)) {
+    assert.ok(MESSAGES.es[key].trim(), `${key} must not be empty`);
+    assert.deepEqual(placeholders(MESSAGES.es[key]), placeholders(source), key);
+  }
+});
+
+test('Spanish is selectable and updates text, accessible names and placeholders', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/index.html'), 'utf8');
+  assert.ok(LANGUAGE_OPTIONS.some(option => option.value === 'es' && option.labelKey === 'settings.language.spanish'));
+  assert.match(html, /<option value="es" data-i18n="settings\.language\.spanish">Español<\/option>/);
+  for (const locale of Object.keys(MESSAGES)) {
+    assert.equal(MESSAGES[locale]['settings.language.spanish'], 'Español', locale);
+  }
+  const label = fakeElement({ i18n: 'settings.common.save' });
+  const accessible = fakeElement({ i18nAriaLabel: 'refreshButton.label' });
+  const input = fakeElement({ i18nPlaceholder: 'settings.sync.secretPlaceholder' });
+  const attributes = {};
+  const root = {
+    documentElement: { setAttribute: (name, value) => { attributes[name] = value; } },
+    querySelectorAll: selector => ({
+      '[data-i18n]': [label],
+      '[data-i18n-aria-label]': [accessible],
+      '[data-i18n-placeholder]': [input]
+    })[selector] || []
+  };
+  assert.equal(applyTranslations(root, 'es-ES'), 'es');
+  assert.equal(attributes.lang, 'es');
+  assert.equal(label.textContent, 'Guardar');
+  assert.equal(accessible.attributes['aria-label'], 'Actualizar estadísticas');
+  assert.equal(input.placeholder, 'Secreto compartido opcional');
+  assert.equal(translate('es', 'settings.sync.portInUse', { port: 17321 }), 'El puerto 17321 ya está en uso');
+  assert.equal(translate('es', 'sessions.backToWithTitle', { title: 'Proyecto', destination: 'Inicio' }), 'Proyecto — Volver a Inicio');
+});
+
+test('Language choices use endonyms in every locale', () => {
+  const endonyms = {
+    en: 'English',
+    'zh-TW': '繁體中文',
+    'zh-CN': '简体中文',
+    ko: '한국어',
+    ja: '日本語',
+    'pt-BR': 'Português (Brasil)',
+    es: 'Español'
+  };
+  for (const option of LANGUAGE_OPTIONS.filter((entry) => entry.value !== 'auto')) {
+    for (const locale of Object.keys(MESSAGES)) {
+      assert.equal(MESSAGES[locale][option.labelKey], endonyms[option.value], `${locale} ${option.value}`);
+    }
+  }
+});
+
 test('WSL SQLite recovery guidance is localized without English fallback', () => {
   for (const locale of LANGUAGE_OPTIONS.map((option) => option.value).filter((value) => value !== 'auto')) {
     assert.ok(MESSAGES[locale]['settings.collection.wslPanel.sqliteHelp'], locale);
@@ -214,13 +299,83 @@ test('window shortcut labels stay concise in Chinese', () => {
   assert.equal(translate('zh-TW', 'settings.display.windowShortcut'), '快捷鍵');
   assert.equal(translate('zh-TW', 'settings.shortcut.record'), '錄製');
   assert.equal(translate('zh-TW', 'settings.display.windowShortcutListening'), '按下快捷鍵，Esc 取消。');
-  assert.equal(translate('zh-TW', 'settings.display.windowShortcutInvalid'), '請搭配 Ctrl、Cmd 或 Alt。');
+  assert.equal(translate('zh-TW', 'settings.display.windowShortcutInvalid', {}, 'darwin'), '請搭配 Cmd、Ctrl 或 Option。');
+  assert.equal(translate('zh-TW', 'settings.display.windowShortcutInvalid', {}, 'win32'), '請搭配 Ctrl 或 Alt。');
   assert.equal(translate('zh-TW', 'settings.display.windowShortcutConflict', { shortcut: 'Cmd/Ctrl+Shift+M' }), '無法註冊 Cmd/Ctrl+Shift+M，可能和其他 app 衝突。');
   assert.equal(translate('zh-CN', 'settings.display.windowShortcut'), '快捷键');
   assert.equal(translate('zh-CN', 'settings.shortcut.record'), '录制');
   assert.equal(translate('zh-CN', 'settings.display.windowShortcutListening'), '按下快捷键，Esc 取消。');
-  assert.equal(translate('zh-CN', 'settings.display.windowShortcutInvalid'), '请搭配 Ctrl、Cmd 或 Alt。');
+  assert.equal(translate('zh-CN', 'settings.display.windowShortcutInvalid', {}, 'darwin'), '请搭配 Cmd、Ctrl 或 Option。');
   assert.equal(translate('zh-CN', 'settings.display.windowShortcutConflict', { shortcut: 'Cmd/Ctrl+Shift+M' }), '无法注册 Cmd/Ctrl+Shift+M，可能和其他 app 冲突。');
+});
+
+test('OS-specific copy follows the platform instead of naming every OS at once', () => {
+  assert.equal(translate('en', 'settings.display.showTrayIcon', {}, 'darwin'), 'Show menu bar icon');
+  assert.equal(translate('en', 'settings.display.showTrayIcon', {}, 'win32'), 'Show tray icon');
+  assert.equal(translate('en', 'settings.display.showTrayIcon', {}, 'linux'), 'Show tray icon');
+  assert.equal(translate('en', 'settings.display.hideAppIcon', {}, 'darwin'), 'Hide Dock icon');
+  assert.equal(translate('en', 'settings.display.hideAppIcon', {}, 'win32'), 'Hide taskbar icon');
+  assert.equal(translate('zh-TW', 'settings.displayModes.trayNote', {}, 'darwin'), '在選單列查看');
+  assert.equal(translate('zh-TW', 'settings.displayModes.trayNote', {}, 'win32'), '在系統匣查看');
+  assert.match(translate('en', 'settings.sync.hostNote', {}, 'darwin'), /macOS may prompt/);
+  assert.match(translate('en', 'settings.sync.hostNote', {}, 'win32'), /Windows may prompt/);
+  assert.doesNotMatch(translate('en', 'settings.sync.hostNote', {}, 'linux'), /prompt/);
+  assert.match(translate('en', 'settings.startup.available', {}, 'linux'), /AppImage/);
+  assert.doesNotMatch(translate('en', 'settings.startup.available', {}, 'win32'), /Linux|AppImage/);
+  assert.match(translate('en', 'settings.limits.connection.manus', {}, 'linux'), /Paste a web session/);
+  assert.doesNotMatch(translate('en', 'settings.limits.connection.manus', {}, 'win32'), /Linux/);
+  assert.match(translate('en', 'settings.limits.connection.hark', {}, 'win32'), /only read on macOS/);
+  assert.doesNotMatch(translate('en', 'settings.limits.connection.hark', {}, 'darwin'), /only/);
+});
+
+test('platform variants fall back to the base string, then to English', () => {
+  assert.equal(translate('en', 'settings.display.showTrayIcon'), MESSAGES.en['settings.display.showTrayIcon']);
+  assert.equal(translate('en', 'settings.display.windowShortcut', {}, 'darwin'), MESSAGES.en['settings.display.windowShortcut']);
+  assert.equal(translate('zh-TW', 'settings.startup.available', {}, 'linux'), MESSAGES['zh-TW']['settings.startup.available@linux']);
+  const original = MESSAGES.ja['settings.display.showTrayIcon@darwin'];
+  delete MESSAGES.ja['settings.display.showTrayIcon@darwin'];
+  try {
+    assert.equal(translate('ja', 'settings.display.showTrayIcon', {}, 'darwin'), MESSAGES.ja['settings.display.showTrayIcon']);
+  } finally {
+    MESSAGES.ja['settings.display.showTrayIcon@darwin'] = original;
+  }
+});
+
+test('platform variants exist in every locale and keep the base placeholders', () => {
+  const variantKeys = Object.keys(MESSAGES.en).filter((key) => key.includes('@'));
+  assert.ok(variantKeys.length > 0);
+  const placeholders = (value) => [...value.matchAll(/\{([a-zA-Z0-9_]+)\}/g)].map((match) => match[1]).sort();
+  for (const key of variantKeys) {
+    const base = key.slice(0, key.indexOf('@'));
+    assert.ok(['darwin', 'win32', 'linux'].includes(key.slice(key.indexOf('@') + 1)), key);
+    for (const locale of Object.keys(MESSAGES)) {
+      assert.ok(MESSAGES[locale][key]?.trim(), `${locale} ${key}`);
+      assert.deepEqual(placeholders(MESSAGES[locale][key]), placeholders(MESSAGES.en[base]), `${locale} ${key}`);
+    }
+  }
+});
+
+test('DevTools setup steps name the shortcut for the current platform', () => {
+  assert.equal(translate('en', 'settings.claude.step2', {}, 'darwin'), 'Open DevTools (Cmd+Opt+I) -> Application/Storage -> Cookies -> https://claude.ai.');
+  assert.equal(translate('en', 'settings.claude.step2', {}, 'win32'), 'Open DevTools (F12) -> Application/Storage -> Cookies -> https://claude.ai.');
+  assert.equal(translate('ja', 'settings.mimo.step2', {}, 'linux'), 'DevTools（F12）-> Networkを開き、ページを再読み込みします。');
+  for (const locale of Object.keys(MESSAGES)) {
+    for (const [key, value] of Object.entries(MESSAGES[locale])) {
+      assert.doesNotMatch(value, /F12.{0,4}(Cmd|Ctrl)/, `${locale} ${key}`);
+    }
+  }
+});
+
+test('applyTranslations resolves platform variants', () => {
+  const el = fakeElement({ i18n: 'settings.display.showTrayIcon' });
+  const root = {
+    querySelectorAll: (selector) => (selector === '[data-i18n]' ? [el] : []),
+    documentElement: { setAttribute() {} }
+  };
+  applyTranslations(root, 'en', 'darwin');
+  assert.equal(el.textContent, 'Show menu bar icon');
+  applyTranslations(root, 'en', 'win32');
+  assert.equal(el.textContent, 'Show tray icon');
 });
 
 test('AI limit capability labels stay compact in Chinese', () => {
@@ -352,4 +507,33 @@ test('Notch settings and shared labels are present in every bundled locale', () 
   }
   assert.equal(translate('zh-CN', 'settings.notch.iconRings'), '显示额度与采集状态');
   assert.equal(translate('zh-CN', 'settings.notch.summaryMode.tray'), '与菜单栏相同');
+});
+
+test('Spanish subscription cadence pluralizes months and years without changing other locales', () => {
+  const { cadenceText } = require('../../src/shared/subscriptionText');
+  const es = (key, params) => translate('es', key, params);
+  for (const [interval, one, many] of [['month', 'mes', 'meses'], ['year', 'año', 'años']]) {
+    assert.equal(cadenceText(es, { interval, intervalCount: 1 }), one);
+    assert.equal(cadenceText(es, { interval, intervalCount: 2 }), `2 ${many}`);
+    assert.equal(cadenceText(es, { interval, intervalCount: 12 }), `12 ${many}`);
+    for (const locale of Object.keys(MESSAGES).filter(locale => locale !== 'es')) {
+      const unit = MESSAGES[locale][`settings.subscriptions.unit${interval === 'year' ? 'Year' : 'Month'}`];
+      const expected = MESSAGES[locale]['settings.subscriptions.everyN'].replace('{count}', '2').replace('{unit}', unit);
+      assert.equal(cadenceText((key, params) => translate(locale, key, params), { interval, intervalCount: 2 }), expected, locale);
+    }
+  }
+  const params = Object.freeze({ count: 2, unit: 'mes' });
+  assert.equal(es('settings.subscriptions.everyN', params), '2 meses');
+  assert.equal(params.unit, 'mes');
+});
+
+test('Spanish quantity labels use count-neutral wording for one and multiple items', () => {
+  for (const count of [0, 1, 2]) {
+    assert.equal(translate('es', 'subscription.tooltip.months', { months: count }), `Meses: ${count}`);
+    assert.equal(translate('es', 'home.activeDays', { count }), `Días activos: ${count}`);
+    assert.equal(translate('es', 'home.activeDaysYear', { count }), `Días activos (últimos 12 meses): ${count}`);
+    for (const key of Object.keys(MESSAGES.es).filter(key => key.endsWith('.nAccounts'))) {
+      assert.equal(translate('es', key, { count }), `Cuentas: ${count}`, key);
+    }
+  }
 });

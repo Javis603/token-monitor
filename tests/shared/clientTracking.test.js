@@ -17,6 +17,7 @@ function readmeTrackedClientIds() {
   const iconToClient = {
     deepseek: 'dsh',
     'hermes-agent': 'hermes',
+    'gemini-cli': 'gemini',
     xai: 'grok',
     qoder: 'qodercn',
     // The limits-only Minimax row has no usage column, so only MiniMax Code's
@@ -42,7 +43,7 @@ test('clientsCsvForSetting uses defaults only for missing settings', () => {
 
 test('default tracked clients include current tokscale-supported tools', () => {
   const clients = DEFAULT_CLIENTS.split(',');
-  for (const client of ['goose', 'cline', 'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'muse', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth', 'devin', 'fx', 'mcode', 'mistral']) {
+  for (const client of ['goose', 'cline', 'amp', 'droid', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'muse', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh', 'cherrystudio', 'lmstudio', 'unsloth', 'devin', 'fx', 'mcode', 'mistral', 'prime-agent', 'jcode', 'gemini']) {
     assert.ok(clients.includes(client), `${client} should be tracked by default`);
   }
 });

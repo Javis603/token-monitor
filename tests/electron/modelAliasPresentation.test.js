@@ -326,3 +326,26 @@ test('an alias that matches nothing in the payload copies no part of the stats t
   assert.deepEqual(projected.modelAliasSourceIds, ['gpt-5.5-pro']);
   assert.ok(projected.historyRevision.startsWith('raw:aliases:'));
 });
+
+
+test('latest session models share aliases and discovery with usage and pre-token models', () => {
+  const { sessionModelLabel, sessionModelTooltipEntries } = require('../../src/electron/renderer/sessionRows');
+  const sessions = { s: { client: 'codex', sessionId: 's', totalTokens: 100,
+    latestModel: 'raw', models: { raw: 90, other: 10 } } };
+  const before = structuredClone(sessions);
+  const stats = { periods: { today: { sessions } }, nativeSessions: { today: sessions } };
+  const projected = projectModelAliasStats(stats, { raw: 'canonical' });
+  for (const list of [projected.periods.today.sessions, projected.nativeSessions.today,
+    projectModelAliasSessions({}, sessions, { raw: 'canonical' })]) {
+    assert.equal(sessionModelLabel(list.s), 'canonical +1');
+    assert.deepEqual(sessionModelTooltipEntries(list.s).slice(0, 2), [
+      { full: 'Last used: canonical' }, ['canonical', '90', '90%']
+    ]);
+  }
+  const native = { s: { latestModel: 'anthropic/claude-opus-5', models: {} } };
+  for (const list of [projectModelAliasStats({ nativeSessions: { today: native } }, {}, { grouping: 'prefix' }).nativeSessions.today,
+    projectModelAliasSessions({}, native, {}, { grouping: 'prefix' })]) {
+    assert.equal(list.s.latestModel, 'claude-opus-5', 'model discovery includes pre-token latest models');
+  }
+  assert.deepEqual(sessions, before);
+});

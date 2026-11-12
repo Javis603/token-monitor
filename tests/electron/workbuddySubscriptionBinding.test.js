@@ -40,7 +40,7 @@ function harness(live, saved, managed = []) {
   let written;
   const context = vm.createContext({
     Date, accountIdentityApi, subscriptionApi, limitProviderPresentationApi, state, els,
-    currencyApi: { CURRENCY_CODES: ['USD'], normalizeCurrency: () => 'USD' }, localDeviceLimitsProviders: () => live,
+    currencyApi: { CURRENCY_CODES: ['USD'], normalizeCurrency: () => 'USD', currencyFractionDigits: () => 2 }, localDeviceLimitsProviders: () => live,
     subscriptionText: { providerLabel: (id) => id }, document: { createElement: () => ({}) }, t: (key) => key,
     setSubscriptionFormKind() {}, setSubscriptionFormMode() {}, syncSubscriptionDateBounds() {}, positionSubscriptionEditor() {}, openSubscriptionEditor() {}, setSubscriptionError() {},
     subscriptionFormTopUps: () => [], subscriptionFormIsTopUp: () => false,

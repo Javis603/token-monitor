@@ -66,7 +66,7 @@ function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 
         changelog: localize(v.changelog, getLocale()) }));
       const history = installed.version && installed.record?.origin.id === entry.origin.id
         ? versions.filter(v => semver.gt(v.version, installed.version) && v.changelog).sort((a, b) => semver.rcompare(a.version, b.version)) : [];
-      entries.push({ id: entry.id, name: localize(entry.name, getLocale()), description: localize(entry.description, getLocale()), author: entry.author, identityIcon: entry.identityIcon,
+      entries.push({ id: entry.id, name: localize(entry.name, getLocale()), description: localize(entry.description, getLocale()), author: entry.author, identityIcon: entry.identityIcon, presentation: entry.presentation,
         repository: entry.repository, readmePaths: entry.readmePaths, types: chosen.types, origin: entry.origin, version: chosen.version, installedVersion: installed.version,
         status: !chosen.compatible ? 'incompatible' : !installed.exists ? 'available' : installed.version && installed.record?.origin.id === entry.origin.id && semver.gt(chosen.version, installed.version) ? 'update' : 'installed',
         versions: versions.map(v => ({ ...v, updateNotes: v.installable && installed.exists
@@ -113,7 +113,7 @@ function createPluginCatalog({ nativeImage, manager, managed, getLocale = () => 
       }
       const result = repository ? await github.repositoryReadme(repository, document.controller.signal, filePath) : await github.readme(id, document.controller.signal);
       if (revision !== detailRevision) throw new Error('README details are no longer current');
-      Object.assign(document, renderReadme(result.readme, result.baseUrl, result.imageBaseUrl), { baseUrl: result.imageBaseUrl });
+      Object.assign(document, renderReadme(result.readme, result.baseUrl, result.imageBaseUrl, result.repositoryBaseUrl), { baseUrl: result.imageBaseUrl });
       return { html: document.html, documentId: document.id, imageCount: document.images.length };
     },
     async readmeImage(documentId, index) {

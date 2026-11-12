@@ -23,7 +23,7 @@ test('history opening reports its size without paint callbacks; visible switches
     cancelAnimationFrame: id => frames.delete(id)
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/cardLayout.js'), 'utf8'), context);
-  vm.runInContext(`let contentAnimation = null, animateMeasurement = false;
+  vm.runInContext(`const cardSwitch = { capture: () => null, play() {}, cancel() {} }; let animateMeasurement = false;
     function render() {}
     ${content}\n${sizing}`, context);
   const paint = () => {

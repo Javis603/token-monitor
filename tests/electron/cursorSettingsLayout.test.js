@@ -80,7 +80,7 @@ function functionBodyBeforeMarker(source, name, marker) {
 
 function runMainFunction(source, name, nextName, expression, context = {}) {
   const body = functionBody(source, name, nextName);
-  return vm.runInNewContext(`${body}\n${expression}`, context);
+  return vm.runInNewContext(`${body}\n${expression}`, { require: id => { assert.equal(id, './plugins/limits'); return require('../../src/electron/plugins/limits'); }, ...context });
 }
 
 function runRendererFunctions(source, names, expression, context = {}) {
@@ -274,6 +274,11 @@ test('Cursor account discovery runs automatically without a separate refresh act
   assert.match(statusBody, /await cursorAuth\.runCursorDiscover\(\)/);
   assert.doesNotMatch(statusBody, /runCursorSync/);
   assert.match(statusBody, /managementBlocked/);
+  // Desktop-detected accounts follow the desktop sign-in; manual accounts are never hidden.
+  assert.match(statusBody, /const desktop = cursorAuth\.readCursorDesktopSignIn\(\)/);
+  assert.match(statusBody, /if \(!manual\.has\(account\.id\) && !isCursorDetectedAccountCurrent\(\{/);
+  assert.match(statusBody, /unauthorized: expired/);
+  assert.match(statusBody, /listedAccounts\.filter\(Boolean\)/);
   assert.match(main, /options\?\.discover !== true/);
   assert.doesNotMatch(main, /ipcMain\.handle\('cursor:refresh'/);
 
@@ -865,7 +870,7 @@ test('API key account entries share styling and Copilot uses the folded token en
     }
   }
 
-  assert.match(css, /\.thirdparty-field :is\(input, select\)\s*\{[\s\S]*?font-size: 0\.75rem;/);
+  assert.match(css, /\.thirdparty-field :is\(input, select, \.select-control-trigger\)\s*\{[\s\S]*?font-size: 0\.75rem;/);
 });
 
 test('Copilot account panel provides GitHub sign-in plus manual token fallback', () => {
@@ -1575,7 +1580,8 @@ test('Cline names the credential lane that went bad, not always the key field', 
     'zh-CN': '打开 Cline',
     ko: 'Cline 열기',
     ja: 'Cline を開く',
-    'pt-BR': 'Abrir o Cline'
+    'pt-BR': 'Abrir o Cline',
+    es: 'Abrir Cline'
   });
   assert.deepEqual(Object.fromEntries(Object.entries(MESSAGES).map(([locale, messages]) => [
     locale,
@@ -1586,7 +1592,8 @@ test('Cline names the credential lane that went bad, not always the key field', 
     'zh-CN': '已连接',
     ko: '연결됨',
     ja: '接続済み',
-    'pt-BR': 'Conectado'
+    'pt-BR': 'Conectado',
+    es: 'Conectada'
   });
 });
 
@@ -1950,11 +1957,12 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   assert.match(controls, /data-i18n="settings\.collection\.cadence"/);
   assert.match(controls, /value="live"/);
   assert.match(controls, /value="smart"[\s\S]*data-i18n="settings\.collection\.mode\.smart"/);
-  assert.match(i18n, /'settings\.collection\.modeDesc': 'Smart mode collects after agent activity, with an hourly reconciliation; fixed intervals turn off file watching\.'/);
+  assert.match(i18n, /"settings\.collection\.mode\.smartDesc": "Collect after agent activity, with hourly reconciliation\."/);
   assert.match(controls, /<option value="300000"/);
   assert.match(controls, /<option value="900000"/);
   assert.match(controls, /<option value="1800000"/);
-  assert.match(controls, /id="collectionCadenceNote"[\s\S]*hidden/);
+  for (const mode of ['live', 'smart', 'interval']) assert.ok(controls.includes(`data-select-description="settings.collection.mode.${mode}Desc"`));
+  assert.doesNotMatch(controls, /id="collectionCadenceNote"/);
   assert.doesNotMatch(controls, /<option value="3600000"/);
   assert.doesNotMatch(controls, /id="collectionModeInput"/);
   assert.doesNotMatch(controls, /id="collectionIntervalInput"/);
@@ -1962,7 +1970,7 @@ test('collection cadence setting is exposed in the Collection panel', () => {
   const app = readRendererFile('app.js');
   const syncBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
   assert.match(syncBody, /collectionCadenceInput/);
-  assert.match(syncBody, /collectionCadenceNote[\s\S]*\.hidden\s*=/);
+  assert.doesNotMatch(syncBody, /collectionCadenceNote/);
 
   const listenerSlice = app.slice(
     app.indexOf("els.collectionCadenceInput?.addEventListener('change'"),
@@ -2803,7 +2811,7 @@ test('WorkBuddy Electron fetch adapter forwards parsed response JSON', () => {
 test('main settings migrateLimitProviders normalizes without expanding old defaults', () => {
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const body = functionBody(main, 'migrateLimitProviders', 'migrateLimitProviderOrder');
-  assert.match(body, /return parseLimitProviders\(value\)\.join/);
+  assert.match(body, /desktopProviderPreference\(value, parseLimitProviders\)/);
   assert.doesNotMatch(body, /preMimoDefault|legacyDefault.*return defaultLimitProviders/);
 });
 

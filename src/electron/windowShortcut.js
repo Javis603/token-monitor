@@ -107,18 +107,22 @@
     return shortcut ? { action: 'record', shortcut } : { action: 'invalid', reason: 'unsupportedKey' };
   }
 
-  function formatWindowToggleShortcut(shortcut, offLabel = 'Off') {
+  // Accelerators are stored portably (CommandOrControl, Alt), so the label has
+  // to follow the platform the user is on. Without one, show both spellings.
+  function formatWindowToggleShortcut(shortcut, offLabel = 'Off', platform = '') {
     const normalized = normalizeWindowToggleShortcut(shortcut);
     if (!normalized) return offLabel;
+    const current = platform ? platformId(platform) : '';
+    const labels = {
+      CommandOrControl: !current ? 'Cmd/Ctrl' : current === 'darwin' ? 'Cmd' : 'Ctrl',
+      Command: 'Cmd',
+      Control: 'Ctrl',
+      Alt: !current ? 'Alt/Option' : current === 'darwin' ? 'Option' : 'Alt',
+      Super: current === 'win32' ? 'Win' : 'Super'
+    };
     return normalized
       .split('+')
-      .map((part) => {
-        if (part === 'CommandOrControl') return 'Cmd/Ctrl';
-        if (part === 'Command') return 'Cmd';
-        if (part === 'Control') return 'Ctrl';
-        if (part === 'Alt') return 'Alt/Option';
-        return part;
-      })
+      .map((part) => labels[part] || part)
       .join('+');
   }
 
