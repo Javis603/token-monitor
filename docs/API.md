@@ -4,7 +4,7 @@ The hub exposes a small JSON HTTP API.
 
 ## Authentication
 
-All data endpoints require the configured shared secret. `/api/health` is always unauthenticated, and the Worker can also serve `GET /api/public/stats` without a secret when `PUBLIC_STATS_ENABLED=1` (see [the Worker README](../worker/README.md)).
+Authentication requirements differ between the Node hub and the Cloudflare Worker. `/api/health` is always unauthenticated, and the Worker can also serve `GET /api/public/stats` without a secret when `PUBLIC_STATS_ENABLED=1` (see [the Worker README](../worker/README.md)); every other data endpoint requires the shared secret when the runtime has one configured.
 
 A Node hub with no secret configured (neither `TOKEN_MONITOR_SECRET` nor the `secret` CLI argument) authorizes every request but binds to loopback only, so it is not reachable from other devices. A Worker without a secret refuses every other data route with `503`.
 
@@ -54,7 +54,7 @@ Example response:
 
 ## `GET /api/public/stats`
 
-Cloudflare Worker only. Served without authentication when `PUBLIC_STATS_ENABLED=1`; otherwise responds `404`. The response is the shared aggregate with the `devices` list removed and identity-bearing fields stripped: account hashes, labels and plan fields under `limits.providers`, and project identity and session titles under `periods`. It carries no subscription version, sync-settings revisions, conversation titles or client health. See [the Worker README](../worker/README.md) for deployment settings.
+Cloudflare Worker only. Served without authentication when `PUBLIC_STATS_ENABLED=1`; otherwise responds `404`. The response is the shared aggregate with the `devices` list removed and identity-bearing fields stripped: account hashes, labels and plan fields under `limits.providers`, and project identity and session titles under `periods`. Session entries keep their `sessionId` and per-session usage totals. It carries no subscription version, sync-settings revisions, conversation titles or client health. See [the Worker README](../worker/README.md) for deployment settings.
 
 ## `POST /api/ingest`
 
