@@ -71,3 +71,20 @@ test('the seed runs before the collector and only on a cold start', () => {
   assert.match(prime, /if \(lastCollectedDevice\) return;/);
   assert.doesNotMatch(prime, /lastCollectedDevice =/);
 });
+
+test('first-scan previews are shown, over the seed when there is one, and never exported', () => {
+  const publish = functionSource('function publishColdPreview(');
+  // A collected record means the first scan has already finished.
+  assert.match(publish, /if \(lastCollectedDevice\) return;/);
+  assert.match(publish, /seedWithColdPreview\(anchorSeedDevice \|\| preview, preview\)/);
+  assert.match(publish, /sendPush\(/);
+  assert.match(publish, /skipExport: true/);
+
+  const localCollector = functionSource('function startLocalCollector()');
+  assert.match(localCollector, /onColdPreview: \(preview, meta\) => publishColdPreview\(/);
+  // The first complete record retires the seed, so a later cold runtime (a
+  // settings restart) cannot lay its previews over a stale snapshot.
+  assert.match(localCollector, /onRecord: \(summary, meta\) => \{\n\s+anchorSeedDevice = null;/);
+  assert.match(functionSource('function stopLocalCollector('), /anchorSeedDevice = null;/);
+  assert.match(functionSource('function primeLocalStatsFromAnchor('), /anchorSeedDevice = visible;/);
+});

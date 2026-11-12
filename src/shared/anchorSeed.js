@@ -15,7 +15,13 @@ const { filterReasonixSyntheticSessions } = require('./providers/reasonix/sessio
 // with startCollector so the two cannot drift: an anchor the collector is about
 // to discard would otherwise show the previous configuration's totals for a
 // minute and then drop them, which reads as a counting bug rather than a seed
-// being replaced. Seeding then adds one rule of its own, below.
+// being replaced. Seeding then adds one rule of its own, below. Unlike the
+// collector, the seed also takes an anchor from an earlier day: the record keeps
+// that day's windows, so aggregation drops a Today (and a Month) that has since
+// ended, the way it does for any device that last reported before midnight. It
+// also takes one from before a pricing or tokscale binary change (every app
+// update is one): the tokens are last-known values like the rest, and the
+// costs are the previous prices' until the first scan reprices them.
 // Returns a device record, or null when the anchor cannot be used.
 function deviceRecordFromAnchor(saved, options = {}) {
   const {
@@ -38,8 +44,10 @@ function deviceRecordFromAnchor(saved, options = {}) {
   const qoderCnSources = qoderCnSourcesForClients(clients, { homeDir, env, platform: sourcePlatform });
   const qoderCnDbPath = qoderCnDbPathOption === undefined ? qoderCnSources.dbPath : qoderCnDbPathOption;
   const qoderCnProjectsDir = qoderCnProjectsDirOption === undefined ? qoderCnSources.projectsDir : qoderCnProjectsDirOption;
-  const trust = collectorAnchorTrust(saved, { ...options, platform: sourcePlatform || process.platform, clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, now });
+  const trust = collectorAnchorTrust(saved, { ...options, platform: sourcePlatform || process.platform, clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, now, allowEarlierDay: true, allowRepricing: true });
   if (!trust) return null;
+  const anchorDay = /^(\d{4})-(\d{2})-(\d{2})$/.exec(saved.dateKey);
+  if (!anchorDay) return null;
   // The seed's own rule, and the one place it is stricter than the collector.
   // A capture time the collector cannot trust only costs it a full scan, but
   // here that timestamp becomes the record's updatedAt and the instant the
@@ -47,8 +55,8 @@ function deviceRecordFromAnchor(saved, options = {}) {
   // be presented as one taken now.
   if (trust.capturedAtMs === null) return null;
   // The anchor keeps host periods and the WSL bundle apart, the way
-  // collectUsageOnce does before summing them. Same local day is established
-  // above, so all three windows are safe to merge.
+  // collectUsageOnce does before summing them. Both were written by the same
+  // full scan, so all three windows are safe to merge.
   const wsl = wslScanEnabled === true ? saved.wslBundle : null;
   const cleanPeriod = (period) => {
     if (!period || typeof period !== 'object' || !Object.prototype.hasOwnProperty.call(period, 'sessions')) return period;
@@ -83,7 +91,9 @@ function deviceRecordFromAnchor(saved, options = {}) {
     // comparing UTC days, and anywhere ahead of UTC a local day that has not
     // rolled over in UTC yet reads as an expired window: today's tokens get
     // dropped and the card shows the zero this whole path exists to avoid.
-    periodWindows: computePeriodWindows(now),
+    // They are the anchor's own day, not now: an earlier day's Today must read
+    // as ended rather than as today's.
+    periodWindows: computePeriodWindows(new Date(Number(anchorDay[1]), Number(anchorDay[2]) - 1, Number(anchorDay[3]))),
     today: withWsl(saved.today, wsl?.today),
     month: withWsl(saved.month, wsl?.month),
     allTime: withWsl(saved.allTime, wsl?.allTime),
@@ -92,6 +102,24 @@ function deviceRecordFromAnchor(saved, options = {}) {
   };
 }
 
+// The first scan of a run publishes nothing until all three windows are in, so
+// a Today-only preview would otherwise wait behind the much slower all-time
+// scan. Each window the preview has replaces the seed's, with a window that
+// starts now, and the rest stay the seed's last known values until the complete
+// record replaces the lot. Without a seed, pass the preview as its own base.
+// Display only; the seed's windows are never summed with the preview's.
+function seedWithColdPreview(seed, preview, now = new Date()) {
+  const windows = computePeriodWindows(now);
+  const record = { ...seed, periodWindows: { ...seed.periodWindows } };
+  for (const period of ['today', 'month', 'allTime']) {
+    if (!Object.prototype.hasOwnProperty.call(preview || {}, period)) continue;
+    record[period] = preview[period];
+    if (windows[period]) record.periodWindows[period] = windows[period];
+  }
+  return record;
+}
+
 module.exports = {
-  deviceRecordFromAnchor
+  deviceRecordFromAnchor,
+  seedWithColdPreview
 };

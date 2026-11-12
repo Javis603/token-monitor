@@ -86,7 +86,14 @@ function createDeviceState(options = {}) {
   const epoch = options.epoch ?? 0;
   const envelope = normalizedEnvelope(options.envelope);
   const onRecord = typeof options.onRecord === 'function' ? options.onRecord : null;
+  const onColdPreview = typeof options.onColdPreview === 'function' ? options.onColdPreview : null;
   let usagePart = null;
+  // Previews received before the first complete baseline. Kept out of usagePart
+  // because every publish, limits-only ones included, sends usagePart, and a
+  // record is taken as complete by everything downstream (display, exports,
+  // archive capture, uploads): a Today-only part there reads as a device whose
+  // month and all-time are zero.
+  let coldUsagePart = null;
   let limitsPart = hasOwn(options, 'initialLimits') ? cloneValue(options.initialLimits) : undefined;
   // The parts as of the last publish. The parts are never mutated in place, so
   // holding them is enough to rebuild that record on demand.
@@ -122,11 +129,20 @@ function createDeviceState(options = {}) {
 
   function updateUsage(summary, reason = 'usage', meta = {}) {
     if (!accepts(meta)) return null;
-    usagePart = mergeUsagePart(usagePart, summary);
-    if (hasOwn(usagePart, 'month') && hasOwn(usagePart, 'allTime')) {
+    const cold = meta.preview === true && !hasCompleteUsageBaseline;
+    const next = mergeUsagePart(cold ? coldUsagePart : usagePart, summary);
+    if (hasOwn(next, 'month') && hasOwn(next, 'allTime')) {
       hasCompleteUsageBaseline = true;
     }
-    if (meta.preview === true && !hasCompleteUsageBaseline) return null;
+    if (cold && !hasCompleteUsageBaseline) {
+      coldUsagePart = next;
+      // Not a record, for the same reason. A caller holding last-known values
+      // for the missing windows can still show the fresh ones, unexported.
+      if (onColdPreview) onColdPreview(recordFrom({ usagePart: next, limitsPart }), { source: 'usage', reason, epoch });
+      return null;
+    }
+    coldUsagePart = null;
+    usagePart = next;
     return publish('usage', reason);
   }
 

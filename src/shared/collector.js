@@ -2430,9 +2430,23 @@ function qoderCnProjectsDirForClients(clientsCsv, options = {}) {
 // the moment it was written, or null when that moment cannot be trusted: the
 // collector still reuses the periods then and simply forces a full scan, while
 // a seed has nothing to stand on and declines.
+//
+// `allowEarlierDay` is for the seed alone. The collector derives month/allTime
+// by adding a fresh Today to the anchor's, which is only exact on the anchor's
+// own day. A seed is only shown until the first scan of this run replaces it,
+// so yesterday's snapshot still serves it; its periodWindows then let
+// aggregation drop the windows that have since ended.
+//
+// `allowRepricing` is the seed's too. The pricing revision covers the price
+// catalogs and the tokscale binary, which an app update always replaces, so
+// for the collector it rightly forces a rescan. The seed only needs the same
+// clients, sources and windows: the tokens it shows are last-known values, and
+// so are costs at the previous prices, until the first scan reprices them.
 function collectorAnchorTrust(saved, options = {}) {
   const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, now = new Date() } = options;
-  if (!saved || saved.dateKey !== localTodayKey(now)) return null;
+  if (!saved || typeof saved.dateKey !== 'string') return null;
+  const todayKey = localTodayKey(now);
+  if (saved.dateKey !== todayKey && !(options.allowEarlierDay === true && saved.dateKey < todayKey)) return null;
   if (saved.calendarKey !== collectionCalendarKey(now)) return null;
   if (!saved.today || !saved.month || !saved.allTime) return null;
   // A flat provenance ledger cannot prove each period's project source.
@@ -2440,8 +2454,14 @@ function collectorAnchorTrust(saved, options = {}) {
   // Old Cursor anchors preserve `default` in their broad-period model maps;
   // applying a new `cursor-auto` Today delta to them would split one mode.
   if (normalizeClientsCsv(clients).split(',').includes('cursor') && saved.cursorAutoModelVersion !== 1) return null;
-  const pricingRevision = options.pricingRevision ?? pricingFingerprint(options);
-  if (saved.configFingerprint !== configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, pricingRevision, options)) return null;
+  const fingerprintAt = (revision) => configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, revision, options);
+  if (saved.configFingerprint !== fingerprintAt(options.pricingRevision ?? pricingFingerprint(options))) {
+    if (options.allowRepricing !== true) return null;
+    // configFingerprint ends with the pricing revision, so everything else
+    // matches exactly when the anchor's own revision reproduces it.
+    const anchorPricing = /\|pricing:([0-9a-f]+)$/.exec(String(saved.configFingerprint || ''))?.[1];
+    if (!anchorPricing || saved.configFingerprint !== fingerprintAt(anchorPricing)) return null;
+  }
   const parsed = Date.parse(saved.fullScanAt || '');
   const capturedAtMs = Number.isFinite(parsed) && parsed <= now.getTime() ? parsed : null;
   return { capturedAtMs };

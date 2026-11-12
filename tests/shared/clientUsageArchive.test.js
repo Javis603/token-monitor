@@ -165,6 +165,26 @@ test('archived client usage is added back while the client remains untracked', (
   assert.equal(summary.allTime.totalTokens, 1200);
 });
 
+test('a record from before midnight archives only the windows still open at capture', () => {
+  // A cold-start seed from yesterday's anchor still carries yesterday's Today.
+  // The entry is dated at capture, so that window would come back as today's.
+  const record = {
+    ...deviceRecord(),
+    periodWindows: {
+      today: { key: '2026-05-29', endsAt: localDate(2026, 5, 30, 0).toISOString() },
+      month: { key: '2026-05', endsAt: localDate(2026, 6, 1, 0).toISOString() }
+    }
+  };
+  const archive = captureArchivedClientUsage({}, record, ['hermes'], localDate(2026, 5, 30, 12));
+  const summary = applyArchivedClientUsage(liveSummaryWithoutHermes(), archive, {
+    activeClients: 'codex',
+    now: localDate(2026, 5, 30, 13)
+  });
+  assert.equal(summary.today.clients.hermes, undefined);
+  assert.equal(summary.month.clients.hermes, 300);
+  assert.equal(summary.allTime.clients.hermes, 900);
+});
+
 test('archived day and month usage follow calendar boundaries', () => {
   // The day and month windows are cut at local midnight, so the three clocks
   // below are stated in local time: a `Z` noon is already the next calendar day

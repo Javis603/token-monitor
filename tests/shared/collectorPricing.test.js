@@ -75,7 +75,7 @@ test('a background catalog replacement reprices all periods and history without 
   assert.equal(updates[1].history.daily.at(-1).cost, 7);
 });
 
-test('both collector and cold-start seed refuse anchors after pricing or binary changes', t => {
+test('the collector refuses anchors after pricing or binary changes, while the cold-start seed shows them', t => {
   const f = fixture(t);
   f.setPrice(1);
   const options = { clients: 'claude', allTimeSince: '2024-01-01', pricingPath: f.pricingPath, binaryRevision: 'fork-a', now: new Date() };
@@ -90,13 +90,17 @@ test('both collector and cold-start seed refuse anchors after pricing or binary 
   f.setPrice(2);
   assert.notEqual(pricingFingerprint(options), revision);
   assert.equal(collectorAnchorTrust(saved, options), null);
-  assert.equal(deviceRecordFromAnchor(saved, options), null);
+  // Shown until the first scan, which reprices every window: the seed's costs
+  // are last-known values like its tokens. Every app update changes the binary.
+  assert.ok(deviceRecordFromAnchor(saved, options));
   f.setPrice(1);
   assert.equal(pricingFingerprint(options), revision, 'same file content restores the same price identity');
   assert.equal(collectorAnchorTrust(saved, { ...options, binaryRevision: 'fork-b' }), null);
-  assert.equal(deviceRecordFromAnchor(saved, { ...options, binaryRevision: 'fork-b' }), null);
+  assert.ok(deviceRecordFromAnchor(saved, { ...options, binaryRevision: 'fork-b' }));
   fs.unlinkSync(f.pricingPath);
   assert.equal(collectorAnchorTrust(saved, options), null, 'removing an override also invalidates prices');
+  // Everything else still has to match.
+  assert.equal(deviceRecordFromAnchor(saved, { ...options, clients: 'claude,codex' }), null);
 });
 
 test('watch reprices all windows and history after add, edit, zero, remove and restart', async t => {

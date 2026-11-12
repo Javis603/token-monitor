@@ -177,6 +177,35 @@ test('cold-start partial previews wait for a complete usage baseline', () => {
   assert.equal(emitted.length, 1);
 });
 
+test('a limits update during a cold start does not publish the held-back preview', () => {
+  // Limits probes land within seconds while all-time can take minutes. The
+  // Today-only preview must not ride out on the limits publish: downstream that
+  // record reads as a device whose month and all-time are zero.
+  const emitted = [];
+  const cold = [];
+  const state = createDeviceState({
+    onRecord: (record) => emitted.push(record),
+    onColdPreview: (record, meta) => cold.push({ record, meta })
+  });
+  state.updateUsage({ updatedAt: '2026-07-21T01:00:00.000Z', today: { totalTokens: 10 } }, 'progress', { preview: true });
+  assert.equal(state.updateLimits(limits()), null);
+  assert.equal(emitted.length, 0);
+  assert.equal(state.getSnapshot(), null);
+
+  // The observer still sees the preview, and the next one builds on it.
+  state.updateUsage({ updatedAt: '2026-07-21T01:00:01.000Z', today: { totalTokens: 11 }, month: { totalTokens: 21 } }, 'progress', { preview: true });
+  assert.equal(cold.length, 2);
+  assert.equal(cold[1].record.today.totalTokens, 11);
+  assert.equal(cold[1].record.month.totalTokens, 21);
+  assert.equal(cold[1].record.limits.providers[0].status, 'ok');
+  assert.equal(cold[1].meta.reason, 'progress');
+
+  const record = state.updateUsage(usage(), 'startup', { preview: false });
+  assert.equal(record.allTime.totalTokens, 30);
+  assert.equal(record.limits.providers[0].status, 'ok');
+  assert.equal(emitted.length, 1);
+});
+
 test('rejects stale epoch updates and stops publishing synchronously', () => {
   const emitted = [];
   const state = createDeviceState({ epoch: 4, onRecord: (record) => emitted.push(record) });
