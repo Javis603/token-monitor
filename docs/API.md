@@ -4,7 +4,9 @@ The hub exposes a small JSON HTTP API.
 
 ## Authentication
 
-All endpoints except `/api/health` require the configured shared secret.
+All data endpoints require the configured shared secret. `/api/health` is always unauthenticated, and the Worker can also serve `GET /api/public/stats` without a secret when `PUBLIC_STATS_ENABLED=1` (see [the Worker README](../worker/README.md)).
+
+A Node hub started without `TOKEN_MONITOR_SECRET` authorizes every request but binds to loopback only, so it is not reachable from other devices. A Worker without a secret refuses every data route with `503`.
 
 Prefer a header (first-party clients already do this):
 
@@ -49,6 +51,10 @@ Example response:
 ```
 
 `version` remains the legacy Hub storage/API value and is not a deployment version. `hubBuild` is the content-derived deployment identity used by Token Monitor to compare the remote Hub with the core bundled by the app. `core*` identifies shared Node/Worker aggregation logic; `runtime*` identifies the Node Hub or Cloudflare Worker adapter. Product-only version bumps do not change either build ID. This is a build marker generated from the registered source closure, not a runtime attestation: a fork that changes source without regenerating its metadata may still report the marker it started from. A health response without `hubBuild` is a legacy Hub and remains otherwise compatible; present but malformed metadata is unrecognized instead of being treated as legacy.
+
+## `GET /api/public/stats`
+
+Cloudflare Worker only. Served without authentication when `PUBLIC_STATS_ENABLED=1`; otherwise responds `404`. The response is the shared aggregate with the `devices` list removed and identity-bearing fields stripped: account hashes, labels and plan fields under `limits.providers`, and project identity and session titles under `periods`. It carries no subscription version, sync-settings revisions, conversation titles or client health. See [the Worker README](../worker/README.md) for deployment settings.
 
 ## `POST /api/ingest`
 
