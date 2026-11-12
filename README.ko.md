@@ -294,7 +294,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 
 - Custom은 하나의 GET 잔액 엔드포인트에서 숫자 JSON 필드를 매핑합니다. OpenAI 또는 Anthropic API 호환만으로는 충분하지 않습니다.
 
-- 국제판 CLI/IDE 사용량은 도구 설정에서 **Qoder**를 켜면 수집됩니다. 중국판은 **Qoder CN**으로 유지됩니다. 국제판 경로는 `QODER_CONFIG_DIR/projects` 또는 `~/.qoder/projects`입니다. 두 JSONL transcript 경로는 Tokscale의 Qoder 파서를 공유합니다. 보고된 토큰만 집계합니다. 필요하면 Qoder 프로세스에 `QODER_EXPOSE_TOKEN_USAGE=1` / `QODERCN_EXPOSE_TOKEN_USAGE=1`을 설정하세요. 텍스트나 크레딧으로 토큰을 추정하지 않으며 동적 모델 코드를 그대로 표시합니다.
+- 국제판 CLI/IDE 사용량은 도구 설정에서 **Qoder**를 켜면 수집됩니다. 중국판은 **Qoder CN**으로 유지됩니다. 국제판 경로는 `QODER_CONFIG_DIR/projects` 또는 `~/.qoder/projects`입니다. 두 JSONL transcript 경로는 Tokscale의 Qoder 파서를 공유합니다. 보고된 토큰만 집계합니다. 관리형 모델의 토큰 수를 기록하려면 해당 Qoder 프로세스에서 `QODER_EXPOSE_TOKEN_USAGE=1` / `QODERCN_EXPOSE_TOKEN_USAGE=1`을 활성화하세요. 이 변수는 기존 기록에서 누락된 토큰 수를 복구하지 않습니다. 텍스트나 크레딧으로 토큰을 추정하지 않으며 동적 모델 코드를 그대로 표시합니다.
 
 #### Qoder CN(로컬 어댑터)
 

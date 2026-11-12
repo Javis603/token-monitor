@@ -294,7 +294,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 
 - Custom は1つの GET 残高エンドポイントから数値 JSON フィールドをマッピングします。OpenAI または Anthropic API 互換だけでは不十分です。
 
-- 国際版 CLI/IDE の使用量はツール設定の **Qoder** で有効にできます。中国版は引き続き **Qoder CN** です。国際版の読み取り先は `QODER_CONFIG_DIR/projects` または `~/.qoder/projects` です。両者の JSONL transcript は Tokscale の Qoder パーサーを共有します。記録されたトークンのみを集計します。必要に応じて Qoder プロセスに `QODER_EXPOSE_TOKEN_USAGE=1` / `QODERCN_EXPOSE_TOKEN_USAGE=1` を設定してください。テキストや credits からの推定は行わず、動的モデルコードは記録どおりに表示します。
+- 国際版 CLI/IDE の使用量はツール設定の **Qoder** で有効にできます。中国版は引き続き **Qoder CN** です。国際版の読み取り先は `QODER_CONFIG_DIR/projects` または `~/.qoder/projects` です。両者の JSONL transcript は Tokscale の Qoder パーサーを共有します。記録されたトークンのみを集計します。マネージドモデルのカウンターを記録するには、対応する Qoder プロセスで `QODER_EXPOSE_TOKEN_USAGE=1` / `QODERCN_EXPOSE_TOKEN_USAGE=1` を有効にしてください。これらの変数は、既存の記録にないカウンターを復元しません。テキストや credits からの推定は行わず、動的モデルコードは記録どおりに表示します。
 
 #### Qoder CN（ローカルアダプター）
 
