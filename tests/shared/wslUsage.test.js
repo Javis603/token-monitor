@@ -465,7 +465,7 @@ test('collectWslUsage scans a Proma-only WSL home through tokscale --home', asyn
   assert.equal(bundle.today.clients.proma, 10);
 });
 
-test('collectWslUsage keeps Qoder CN and CatPaw out of WSL scans', async () => {
+test('collectWslUsage includes JSONL-only Qoder CN but excludes CatPaw', async () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const seen = [];
   const { detected } = await collectWslUsage(
@@ -483,11 +483,11 @@ test('collectWslUsage keeps Qoder CN and CatPaw out of WSL scans', async () => {
       platform: 'win32',
       exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
       readdirSync: () => ['u'],
-      existsSync: (p) => p === `${home}\\.claude\\projects`
+      existsSync: (p) => p === `${home}\\.claude\\projects` || p === `${home}\\.qoder-cn\\projects`
     }
   );
-  assert.deepEqual(detected, ['claude']);
-  assert.deepEqual(seen, ['claude', 'claude', 'claude']);
+  assert.deepEqual(detected, ['claude', 'qodercn']);
+  assert.deepEqual(seen, ['claude,qodercn', 'claude,qodercn', 'claude,qodercn']);
 });
 
 test('collectWslUsage returns empty bundle when no homes', async () => {

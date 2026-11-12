@@ -233,7 +233,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'prime-agent-sessions',
   'proma-sessions',
   'qoder-projects',
-  'qodercn-db',
+  'qodercn-db', // Accept older device snapshots; this source is no longer probed.
   'qodercn-projects',
   REASONIX_SOURCE_CHECK_ID,
   'qwen-projects',

@@ -10,7 +10,6 @@ const { claudeSessionRoots } = require('./providers/claude/paths');
 const { hermesProfileWatchDirs, resolveHermesHome } = require('./providers/hermes/profiles');
 const { kimiCodeSessionsHome, kimiWorkSessionsRoots } = require('./providers/kimi/sessionMetadata');
 const { catpawDataSources, nativeWindowsFolders } = require('./providers/catpaw/paths');
-const { qoderCnDataPaths } = require('./providers/qodercn/paths');
 const { primeAgentSessionRoots } = require('./providers/prime-agent/paths');
 const { MCODE_SOURCE_CHECK_ID, mcodeSessionDirs } = require('./providers/mcode/paths');
 const { resolveReasonixStatsDir, REASONIX_SOURCE_CHECK_ID } = require('./providers/reasonix/paths');
@@ -425,14 +424,10 @@ function clientSourceRoots(clientsCsv, options = {}) {
     );
   }
   add('qoder', ['qoder-projects', path.join(nonBlankEnvPath('QODER_CONFIG_DIR', path.join(tokscaleHome, '.qoder'), env), 'projects')]);
-  // Qoder CN — legacy SQLite DB under the platform Application Support dir,
-  // or the JSONL transcript tree used by current builds.
-  const qoderCnPaths = qoderCnDataPaths({ homeDir: home, platform, env });
-  add(
-    'qodercn',
-    ...qoderCnPaths.dbPaths.map((dbPath) => ['qodercn-db', path.dirname(dbPath), dbPath]),
-    ['qodercn-projects', qoderCnPaths.projectsDir]
-  );
+  const qoderCnConfig = String(env.QODERCN_CONFIG_DIR || '').trim();
+  const qoderCnProjects = String(env.TOKEN_MONITOR_QODER_CN_PROJECTS_PATH || '').trim();
+  add('qodercn', ['qodercn-projects', qoderCnProjects ? path.resolve(qoderCnProjects)
+    : qoderCnConfig ? path.resolve(qoderCnConfig, 'projects') : path.join(tokscaleHome, '.qoder-cn', 'projects')]);
   // MiniMax Code — upstream reads only captured `tokscale headless mcode exec`
   // streams; the fork adds the CLI and desktop runtime store from tokscale's
   // effective home (providers/mcode/paths.js). Only the default `.minimax`

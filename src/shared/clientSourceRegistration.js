@@ -101,6 +101,7 @@ const SOURCE_MARKERS = [
   { marker: '.prime/agent/sessions', client: 'prime-agent' },
   { marker: '.prime/agent/session-artifacts', client: 'prime-agent' },
   { marker: '.qoder/projects', client: 'qoder' },
+  { marker: '.qoder-cn/projects', client: 'qodercn' },
   { marker: '.jcode/sessions', client: 'jcode' },
   ...CLAUDE_DESKTOP_SOURCES
 ];

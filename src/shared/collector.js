@@ -69,7 +69,6 @@ const { normalizeReasoningEffort, isSessionReasoningEffortClient } = require('./
 const { readT3Activities } = require('./t3SessionActivity');
 const { createProcessStartBatch } = require('./processStarts');
 const { catpawDatabaseName, catpawSourcesFingerprint } = require('./providers/catpaw/paths');
-const { qoderCnDataPaths } = require('./providers/qodercn/paths');
 const { readLocalUsageView, resolveLocalUsagePricing } = require('./providers/codex/localUsage');
 const { createLocalUsageSource } = require('./providers/codex/localUsageSource');
 const {
@@ -2419,13 +2418,10 @@ function pricingFingerprint(options = {}) {
   return hash.digest('hex');
 }
 
-function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, pricingRevision = pricingFingerprint(), sourceOptions = {}, catpawRevision = catpawSourcesFingerprint(normalizeClientsCsv(clientsCsv), sourceOptions)) {
-  // Deterministic string that captures the config inputs anchor correctness
-  // depends on. When this changes, the persisted anchor is invalidated.
-  const qoderCn = String(qoderCnDbPath || '').trim();
-  const qoderCnPart = qoderCn ? `|qodercn:${path.resolve(qoderCn)}` : '';
-  const qoderCnProjects = String(qoderCnProjectsDir || '').trim();
-  const qoderCnProjectsPart = qoderCnProjects ? `|qodercnProjects:${path.resolve(qoderCnProjects)}` : '';
+function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, customScanPaths = null, pricingRevision = pricingFingerprint(), sourceOptions = {}, catpawRevision = catpawSourcesFingerprint(normalizeClientsCsv(clientsCsv), sourceOptions)) {
+  // Source changes invalidate the persisted anchor before any Today delta.
+  const qoderCnProjectsPart = normalizeClientsCsv(clientsCsv).split(',').includes('qodercn')
+    ? `|qodercnProjects:${clientSourceRoots('qodercn', sourceOptions).qodercn[0].dir}` : '';
   // Custom scan paths change which files Tokscale reads, so an anchor captured
   // before a path was added or removed must not be reused. Empty when none are
   // configured, keeping the fingerprint (and existing anchors) stable for the
@@ -2435,25 +2431,7 @@ function configFingerprint(clientsCsv, allTimeSince, projectsEnabled = true, qod
   const scanKey = customScanPathsFingerprint(customScanPaths);
   const scanPart = scanKey ? `|scan:${scanKey}` : '';
   const catpawPart = catpawRevision ? `|catpaw:${catpawRevision}` : '';
-  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnPart}${qoderCnProjectsPart}${qoderPart}${scanPart}${catpawPart}|pricing:${pricingRevision}`;
-}
-
-function qoderCnSourcesForClients(clientsCsv, options = {}) {
-  if (!normalizeClientsCsv(clientsCsv).split(',').includes('qodercn')) return { dbPath: '', projectsDir: '' };
-  const paths = qoderCnDataPaths({
-    homeDir: options.homeDir,
-    platform: options.platform || process.platform,
-    env: options.env || process.env
-  });
-  return { dbPath: paths.dbPaths[0] || '', projectsDir: paths.projectsDir || '' };
-}
-
-function qoderCnDbPathForClients(clientsCsv, options = {}) {
-  return qoderCnSourcesForClients(clientsCsv, options).dbPath;
-}
-
-function qoderCnProjectsDirForClients(clientsCsv, options = {}) {
-  return qoderCnSourcesForClients(clientsCsv, options).projectsDir;
+  return `${normalizeClientsCsv(clientsCsv)}|${allTimeSince}|projects:${projectsEnabled !== false ? 'on' : 'off'}${qoderCnProjectsPart}${qoderPart}${scanPart}${catpawPart}|pricing:${pricingRevision}`;
 }
 
 // The one place that decides whether a persisted anchor may be reused, shared by
@@ -2478,7 +2456,7 @@ function qoderCnProjectsDirForClients(clientsCsv, options = {}) {
 // clients, sources and windows: the tokens it shows are last-known values, and
 // so are costs at the previous prices, until the first scan reprices them.
 function collectorAnchorTrust(saved, options = {}) {
-  const { clients = '', allTimeSince = '', projectsEnabled = true, qoderCnDbPath = '', qoderCnProjectsDir = '', customScanPaths = null, now = new Date() } = options;
+  const { clients = '', allTimeSince = '', projectsEnabled = true, customScanPaths = null, now = new Date() } = options;
   if (!saved || typeof saved.dateKey !== 'string') return null;
   const todayKey = localTodayKey(now);
   if (saved.dateKey !== todayKey && !(options.allowEarlierDay === true && saved.dateKey < todayKey)) return null;
@@ -2489,7 +2467,7 @@ function collectorAnchorTrust(saved, options = {}) {
   // Old Cursor anchors preserve `default` in their broad-period model maps;
   // applying a new `cursor-auto` Today delta to them would split one mode.
   if (normalizeClientsCsv(clients).split(',').includes('cursor') && saved.cursorAutoModelVersion !== 1) return null;
-  const fingerprintAt = (revision) => configFingerprint(clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, revision, options);
+  const fingerprintAt = (revision) => configFingerprint(clients, allTimeSince, projectsEnabled, customScanPaths, revision, options);
   if (saved.configFingerprint !== fingerprintAt(options.pricingRevision ?? pricingFingerprint(options))) {
     if (options.allowRepricing !== true) return null;
     // configFingerprint ends with the pricing revision, so everything else
@@ -2715,7 +2693,7 @@ function watcherOptions(usePolling, ignored) {
 // adding a client to this list asserts a measurement rather than a hunch.
 // Cherry Studio, CatPaw and Goose also rewrite their wal-index on repeated read-only WAL scans.
 // Cursor's read-only desktop credential/title queries change state.vscdb-shm too.
-const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['antigravity', 'catpaw', 'cherrystudio', 'cursor', 'goose', 'qodercn', 'zcode']);
+const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['antigravity', 'catpaw', 'cherrystudio', 'cursor', 'goose', 'zcode']);
 
 function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
   // Match SQLite's wal-index suffix, not one client's database basename: ZCode's
@@ -2782,13 +2760,6 @@ function startCollector(options) {
     platform: options.platform,
     cwdDir: options.cwdDir
   };
-  const qoderCnSources = qoderCnSourcesForClients(normalizedClients, {
-    homeDir: options.homeDir,
-    platform: options.platform,
-    env: options.env
-  });
-  const qoderCnDbPath = qoderCnSources.dbPath;
-  const qoderCnProjectsDir = qoderCnSources.projectsDir;
   let tickInFlight = false;
   let idleWaiters = [];
   let tickPending = false;
@@ -3015,8 +2986,6 @@ function startCollector(options) {
         clients,
         allTimeSince,
         projectsEnabled: options.projectsEnabled,
-        qoderCnDbPath,
-        qoderCnProjectsDir,
         customScanPaths: options.customScanPaths,
         pricingRevision,
         ...sourceOptions
@@ -3074,7 +3043,7 @@ function startCollector(options) {
         ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
         ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
         ...(anchor.cursorSnapshotKey ? { cursorSnapshotKey: anchor.cursorSnapshotKey } : {}),
-        configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths, tickPricingRevision, sourceOptions, tickSourceRevision),
+        configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, options.customScanPaths, tickPricingRevision, sourceOptions, tickSourceRevision),
         fullScanAt: new Date(lastFullScanAt).toISOString()
       }));
     } catch (_) {}
@@ -4199,9 +4168,6 @@ module.exports = {
   collectorAnchorTrust,
   pricingFingerprint,
   configFingerprint,
-  qoderCnDbPathForClients,
-  qoderCnProjectsDirForClients,
-  qoderCnSourcesForClients,
   deriveClientHealth,
   deriveClientStatus,
   mergeClientActivityDays,
