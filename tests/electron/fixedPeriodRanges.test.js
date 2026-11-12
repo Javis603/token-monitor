@@ -205,6 +205,8 @@ test('billing cycle starts on the configured day and clamps to short months', ()
   assert.equal(ranges.normalizeCycleStartDay(0), 1);
   assert.equal(ranges.normalizeCycleStartDay(32), 1);
   assert.equal(ranges.normalizeCycleStartDay('9'), 9);
+  assert.equal(ranges.normalizeCycleStartDay(31.5), 1);
+  assert.equal(ranges.normalizeCycleStartDay('15.5'), 1);
   assert.equal(ranges.slotForSelection('cycle'), 'month');
   assert.equal(ranges.displayLabel('cycle'), 'CYCLE');
   assert.equal(ranges.isDerived('cycle'), true);
@@ -646,6 +648,21 @@ test('ready snapshots are reused only for the same fixed selection', () => {
 
   assert.equal(ranges.readySnapshotForSelection(snapshot, 'week'), snapshot);
   assert.equal(ranges.readySnapshotForSelection(snapshot, 'last30'), null);
+});
+
+test('a ready Billing cycle snapshot is not reused after the start day changes', () => {
+  const snapshot = ranges.fixedPeriodSnapshot('cycle', {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-08-12',
+    cycleStartDay: 10,
+    daily: [day('2026-08-12', 10)]
+  });
+
+  assert.equal(snapshot.cycleStartDay, 10);
+  assert.equal(ranges.readySnapshotForSelection(snapshot, 'cycle', { cycleStartDay: 10 }), snapshot);
+  assert.equal(ranges.readySnapshotForSelection(snapshot, 'cycle', { cycleStartDay: 5 }), null);
+  assert.deepEqual(ranges.devicesForReadySnapshot({ ...snapshot, devices: [{ deviceId: 'mac', period: {} }] }, 'cycle', { cycleStartDay: 5 }), []);
 });
 
 test('device rows come from the same ready presentation snapshot as the headline', () => {

@@ -628,8 +628,8 @@ function normalizeProjectBreakdownMode(value) {
 }
 
 function normalizeBillingCycleStartDay(value) {
-  const day = Math.trunc(Number(value));
-  return Number.isFinite(day) && day >= 1 && day <= 31 ? day : 1;
+  const day = Number(value);
+  return Number.isInteger(day) && day >= 1 && day <= 31 ? day : 1;
 }
 
 function normalizeHomeLimitAccountCount(value) {

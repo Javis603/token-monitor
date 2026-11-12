@@ -64,8 +64,8 @@
   }
 
   function normalizeCycleStartDay(value) {
-    const day = Math.trunc(Number(value));
-    return Number.isFinite(day) && day >= 1 && day <= 31 ? day : 1;
+    const day = Number(value);
+    return Number.isInteger(day) && day >= 1 && day <= 31 ? day : 1;
   }
 
   // The billing cycle starts on the same day each month; months without that
@@ -454,12 +454,17 @@
     return currentKey ? { currentKey, snapshotKey: key } : null;
   }
 
-  function readySnapshotForSelection(snapshot, selection) {
-    return snapshot?.status === 'ready' && snapshot.selection === selection ? snapshot : null;
+  // A Billing cycle snapshot also belongs to the start day it was computed
+  // for, so a changed start day never reuses the previous cycle's totals.
+  function readySnapshotForSelection(snapshot, selection, options = {}) {
+    if (snapshot?.status !== 'ready' || snapshot.selection !== selection) return null;
+    if (selection === 'cycle' && options.cycleStartDay !== undefined
+      && snapshot.cycleStartDay !== normalizeCycleStartDay(options.cycleStartDay)) return null;
+    return snapshot;
   }
 
-  function devicesForReadySnapshot(snapshot, selection) {
-    const ready = readySnapshotForSelection(snapshot, selection);
+  function devicesForReadySnapshot(snapshot, selection, options = {}) {
+    const ready = readySnapshotForSelection(snapshot, selection, options);
     return (ready?.devices || []).map((source) => ({
       ...source,
       periods: {
@@ -583,6 +588,7 @@
     return {
       status: 'ready',
       selection,
+      ...cycleStartDayIdentity(selection, options),
       reason: '',
       range,
       daily,
@@ -687,6 +693,10 @@
     return period;
   }
 
+  function cycleStartDayIdentity(selection, options = {}) {
+    return selection === 'cycle' ? { cycleStartDay: normalizeCycleStartDay(options.cycleStartDay) } : {};
+  }
+
   function fixedPeriodSnapshot(selection, options = {}) {
     if (!isDerived(selection)) return { status: 'native', selection, period: null, range: null };
     if (options.historyEnabled === false) return { status: 'unavailable', selection, reason: 'historyDisabled', period: null, range: null };
@@ -697,6 +707,7 @@
     return {
       status: 'ready',
       selection,
+      ...cycleStartDayIdentity(selection, options),
       reason: '',
       range,
       daily,

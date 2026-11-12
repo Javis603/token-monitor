@@ -67,11 +67,11 @@ test('fixed-period menu follows the glass theme and keeps labels left aligned', 
   assert.match(app, /fixedPeriodHistorySignature !== signature[\s\S]*?\|\| state\.fixedPeriodHistoryBusy\) \{[\s\S]*?void loadFixedPeriodHistory\(\);/);
   assert.match(boot, /\['today', 'month', 'week', 'last7', 'last30', 'cycle', 'allTime'\]\.includes\(period\)/);
   assert.match(app, /function fixedPeriodDevices\(\)/);
-  assert.match(app, /devicesForReadySnapshot\(state\.fixedPeriodSnapshot, state\.period\)/);
+  assert.match(app, /devicesForReadySnapshot\(state\.fixedPeriodSnapshot, state\.period, \{[\s\S]*?cycleStartDay: state\.settings\?\.billingCycleStartDay/);
   assert.match(app, /fixedPeriodSnapshotFromDevices\(state\.period, fixedPeriodSources\(\)/);
   const snapshotBuilder = app.slice(app.indexOf('function buildFixedPeriodSnapshot()'), app.indexOf('async function loadFixedPeriodHistory'));
   assert.ok(snapshotBuilder.indexOf('historyEnabled === false') < snapshotBuilder.indexOf('fixedPeriodHistoryRequested'));
-  assert.match(snapshotBuilder, /readySnapshotForSelection\([\s\S]*?state\.fixedPeriodSnapshot,[\s\S]*?state\.period/);
+  assert.match(snapshotBuilder, /readySnapshotForSelection\([\s\S]*?state\.fixedPeriodSnapshot,[\s\S]*?state\.period,[\s\S]*?cycleStartDay: state\.settings\?\.billingCycleStartDay/);
   assert.doesNotMatch(css, /\.period-menu button\s*\{/);
   assert.match(html, /id="fixedPeriodMessage"[^>]*role="status"[^>]*aria-live="polite"/);
   assert.doesNotMatch(app, /periodRange\.tokenComponentsUnavailable/);

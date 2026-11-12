@@ -3376,7 +3376,9 @@ function stableColor(value, colors) {
 
 function fixedPeriodDevices() {
   if (!fixedPeriodRangesApi.isDerived(state.period)) return state.stats?.devices || [];
-  return fixedPeriodRangesApi.devicesForReadySnapshot(state.fixedPeriodSnapshot, state.period);
+  return fixedPeriodRangesApi.devicesForReadySnapshot(state.fixedPeriodSnapshot, state.period, {
+    cycleStartDay: state.settings?.billingCycleStartDay
+  });
 }
 
 function fixedPeriodSources() {
@@ -6355,7 +6357,8 @@ function buildFixedPeriodSnapshot() {
   if (state.fixedPeriodHistoryBusy) {
     const ready = fixedPeriodRangesApi.readySnapshotForSelection(
       state.fixedPeriodSnapshot,
-      state.period
+      state.period,
+      { cycleStartDay: state.settings?.billingCycleStartDay }
     );
     return ready
       ? ready
@@ -13991,7 +13994,18 @@ els.billingCycleStartDayInput?.addEventListener('change', async () => {
     state.rowSignature = '';
     render();
   }
-  await saveSettings({ billingCycleStartDay: day });
+  try {
+    await saveSettings({ billingCycleStartDay: day });
+  } catch (_) {
+    // saveSettings already reloaded and rendered the persisted settings, but
+    // render skips a focused input. Put the persisted day back unless a newer
+    // edit has replaced the rejected value since.
+    if (els.billingCycleStartDayInput.value === String(day)) {
+      els.billingCycleStartDayInput.value = String(
+        fixedPeriodRangesApi.normalizeCycleStartDay(state.settings?.billingCycleStartDay)
+      );
+    }
+  }
 });
 
 document.addEventListener('click', (event) => {
