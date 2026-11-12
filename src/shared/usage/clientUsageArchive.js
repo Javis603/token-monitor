@@ -143,8 +143,11 @@ function captureArchivedClientUsage(existingArchive, deviceRecord, clients, capt
     for (const periodName of PERIODS) {
       // A record from before midnight (a cold-start seed, a device that last
       // reported yesterday) still carries that day's Today. The entry is dated
-      // at capture, so that window would be counted again as today's.
-      const usage = isPeriodExpired(deviceRecord, periodName, captureDate.getTime())
+      // at capture, so that window would be counted again as today's. Only a
+      // record's own local windows can say so; the UTC fallback cannot.
+      const ended = Boolean(deviceRecord.periodWindows?.[periodName]?.endsAt)
+        && isPeriodExpired(deviceRecord, periodName, captureDate.getTime());
+      const usage = ended
         ? clientUsageFromPeriod(null, client, ledgerKeys)
         : clientUsageFromPeriod(periodFor(deviceRecord, periodName), client, ledgerKeys);
       periods[periodName] = usage;

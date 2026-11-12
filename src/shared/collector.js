@@ -1063,7 +1063,7 @@ async function collectUsageOnce(options) {
   }
   const emitProgress = (periods) => {
     if (typeof options.onProgress !== 'function') return;
-    try { options.onProgress({ ...periods, updatedAt: new Date().toISOString() }); } catch (_) {}
+    try { options.onProgress({ ...periods, periodWindows, updatedAt: new Date().toISOString() }); } catch (_) {}
   };
   if (normalizedClients) {
     const selectedSyncClients = targetRequested ? targetClientsCsv : normalizedClients;
@@ -3207,6 +3207,9 @@ function startCollector(options) {
                 ...(deviceOsInfo.name ? { osName: deviceOsInfo.name } : {}),
                 ...(deviceOsInfo.version ? { osVersion: deviceOsInfo.version } : {}),
                 updatedAt: partial.updatedAt,
+                // The scan's own windows, fixed at its start: a scan that runs
+                // past midnight still reports the day it collected.
+                ...(partial.periodWindows ? { periodWindows: partial.periodWindows } : {}),
                 agentVersion, agentRuntime,
                 trackedClients: (clients || '').split(',').filter(Boolean),
                 // Merge the frozen WSL snapshot into today (as month/allTime do

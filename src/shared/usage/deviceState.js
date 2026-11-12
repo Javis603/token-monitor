@@ -149,6 +149,11 @@ function createDeviceState(options = {}) {
   function updateLimits(limits, reason = 'limits', meta = {}) {
     if (!accepts(meta)) return null;
     limitsPart = cloneValue(limits);
+    // Limits often land long before the first complete usage. They cannot ride
+    // a record yet, but the cold-preview observer can show them.
+    if (!hasCompleteUsageBaseline && onColdPreview) {
+      onColdPreview(recordFrom({ usagePart: coldUsagePart || {}, limitsPart }), { source: 'limits', reason, epoch });
+    }
     return publish('limits', reason);
   }
 

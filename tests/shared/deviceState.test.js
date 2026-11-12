@@ -192,18 +192,37 @@ test('a limits update during a cold start does not publish the held-back preview
   assert.equal(emitted.length, 0);
   assert.equal(state.getSnapshot(), null);
 
-  // The observer still sees the preview, and the next one builds on it.
-  state.updateUsage({ updatedAt: '2026-07-21T01:00:01.000Z', today: { totalTokens: 11 }, month: { totalTokens: 21 } }, 'progress', { preview: true });
+  // The observer shows the limits with the held-back usage instead.
   assert.equal(cold.length, 2);
-  assert.equal(cold[1].record.today.totalTokens, 11);
-  assert.equal(cold[1].record.month.totalTokens, 21);
+  assert.equal(cold[1].meta.source, 'limits');
+  assert.equal(cold[1].record.today.totalTokens, 10);
   assert.equal(cold[1].record.limits.providers[0].status, 'ok');
-  assert.equal(cold[1].meta.reason, 'progress');
+
+  // The next preview builds on the first and keeps the limits.
+  state.updateUsage({ updatedAt: '2026-07-21T01:00:01.000Z', today: { totalTokens: 11 }, month: { totalTokens: 21 } }, 'progress', { preview: true });
+  assert.equal(cold.length, 3);
+  assert.equal(cold[2].record.today.totalTokens, 11);
+  assert.equal(cold[2].record.month.totalTokens, 21);
+  assert.equal(cold[2].record.limits.providers[0].status, 'ok');
+  assert.equal(cold[2].meta.reason, 'progress');
 
   const record = state.updateUsage(usage(), 'startup', { preview: false });
   assert.equal(record.allTime.totalTokens, 30);
   assert.equal(record.limits.providers[0].status, 'ok');
   assert.equal(emitted.length, 1);
+  // Once complete, limits publish as records again.
+  state.updateLimits(limits('2026-07-21T01:00:09.000Z'));
+  assert.equal(cold.length, 3);
+  assert.equal(emitted.length, 2);
+});
+
+test('limits that land before any usage reach the cold-preview observer', () => {
+  const cold = [];
+  const state = createDeviceState({ onColdPreview: (record) => cold.push(record) });
+  assert.equal(state.updateLimits(limits()), null, 'still no record');
+  assert.equal(cold.length, 1);
+  assert.equal(cold[0].limits.providers[0].status, 'ok');
+  assert.equal(Object.prototype.hasOwnProperty.call(cold[0], 'today'), false);
 });
 
 test('rejects stale epoch updates and stops publishing synchronously', () => {

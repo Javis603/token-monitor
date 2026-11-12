@@ -185,6 +185,13 @@ test('a record from before midnight archives only the windows still open at capt
   assert.equal(summary.allTime.clients.hermes, 900);
 });
 
+test('a record without its own windows is archived as it is, not by a UTC guess', () => {
+  // UTC fallback would call an early-morning record east of UTC "yesterday".
+  const record = { ...deviceRecord(), updatedAt: '2026-05-29T23:00:00.000Z' };
+  const archive = captureArchivedClientUsage({}, record, ['hermes'], new Date('2026-05-30T12:00:00.000Z'));
+  assert.equal(archive.clients.hermes.periods.today.totalTokens, 100);
+});
+
 test('archived day and month usage follow calendar boundaries', () => {
   // The day and month windows are cut at local midnight, so the three clocks
   // below are stated in local time: a `Z` noon is already the next calendar day

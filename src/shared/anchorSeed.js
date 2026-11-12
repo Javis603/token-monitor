@@ -48,6 +48,14 @@ function deviceRecordFromAnchor(saved, options = {}) {
   if (!trust) return null;
   const anchorDay = /^(\d{4})-(\d{2})-(\d{2})$/.exec(saved.dateKey);
   if (!anchorDay) return null;
+  const anchorWindows = computePeriodWindows(new Date(Number(anchorDay[1]), Number(anchorDay[2]) - 1, Number(anchorDay[3])));
+  // Native views are shown per window with no date of their own, so an ended
+  // window's views are dropped here rather than left to aggregation.
+  const currentWindows = computePeriodWindows(now);
+  const ended = ['today', 'month'].filter(period => anchorWindows[period].key !== currentWindows[period].key);
+  const nativeView = view => (ended.length && view && typeof view === 'object'
+    ? { ...view, ...Object.fromEntries(ended.map(period => [period, {}])) }
+    : view);
   // The seed's own rule, and the one place it is stricter than the collector.
   // A capture time the collector cannot trust only costs it a full scan, but
   // here that timestamp becomes the record's updatedAt and the instant the
@@ -93,24 +101,26 @@ function deviceRecordFromAnchor(saved, options = {}) {
     // dropped and the card shows the zero this whole path exists to avoid.
     // They are the anchor's own day, not now: an earlier day's Today must read
     // as ended rather than as today's.
-    periodWindows: computePeriodWindows(new Date(Number(anchorDay[1]), Number(anchorDay[2]) - 1, Number(anchorDay[3]))),
+    periodWindows: anchorWindows,
     today: withWsl(saved.today, wsl?.today),
     month: withWsl(saved.month, wsl?.month),
     allTime: withWsl(saved.allTime, wsl?.allTime),
-    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeSessions') ? { nativeSessions: saved.nativeSessions } : {}),
-    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeProjects') ? { nativeProjects: saved.nativeProjects } : {})
+    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeSessions') ? { nativeSessions: nativeView(saved.nativeSessions) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeProjects') ? { nativeProjects: nativeView(saved.nativeProjects) } : {})
   };
 }
 
 // The first scan of a run publishes nothing until all three windows are in, so
 // a Today-only preview would otherwise wait behind the much slower all-time
-// scan. Each window the preview has replaces the seed's, with a window that
-// starts now, and the rest stay the seed's last known values until the complete
-// record replaces the lot. Without a seed, pass the preview as its own base.
-// Display only; the seed's windows are never summed with the preview's.
+// scan. Each window the preview has replaces the seed's, with the window the
+// scan collected it in, and the rest stay the seed's last known values until the
+// complete record replaces the lot. Limits fetched meanwhile come along. Without
+// a seed, pass the preview as its own base. Display only; the seed's windows are
+// never summed with the preview's.
 function seedWithColdPreview(seed, preview, now = new Date()) {
-  const windows = computePeriodWindows(now);
+  const windows = preview?.periodWindows || computePeriodWindows(now);
   const record = { ...seed, periodWindows: { ...seed.periodWindows } };
+  if (Object.prototype.hasOwnProperty.call(preview || {}, 'limits')) record.limits = preview.limits;
   for (const period of ['today', 'month', 'allTime']) {
     if (!Object.prototype.hasOwnProperty.call(preview || {}, period)) continue;
     record[period] = preview[period];

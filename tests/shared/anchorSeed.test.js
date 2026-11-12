@@ -332,3 +332,37 @@ test('a pricing or tokscale binary change still seeds, but nothing else that mov
   // A fingerprint without a pricing revision cannot prove the rest matches.
   assert.equal(deviceRecordFromAnchor(anchorFixture({ configFingerprint: 'claude,codex|2024-01-01|projects:on' }), seedOptions()), null);
 });
+
+test('native views of windows that have ended are dropped from an earlier-day seed', () => {
+  // The renderer shows these per window without a date of their own.
+  const nativeSessions = { today: { 'reasonix:a': { client: 'reasonix', totalTokens: 12 } }, month: { 'reasonix:a': { client: 'reasonix', totalTokens: 40 } }, allTime: { 'reasonix:a': { client: 'reasonix', totalTokens: 90 } } };
+  const nativeProjects = { today: { p: { tokens: 12 } }, month: { p: { tokens: 40 } }, allTime: { p: { tokens: 90 } } };
+
+  const yesterday = deviceRecordFromAnchor(
+    anchorFixture({ dateKey: '2026-08-07', fullScanAt: YESTERDAY_SCAN_AT, nativeSessions, nativeProjects }),
+    seedOptions()
+  );
+  assert.deepEqual(yesterday.nativeSessions.today, {});
+  assert.deepEqual(yesterday.nativeSessions.month, nativeSessions.month);
+  assert.deepEqual(yesterday.nativeProjects.today, {});
+  assert.deepEqual(yesterday.nativeProjects.allTime, nativeProjects.allTime);
+
+  const lastMonth = deviceRecordFromAnchor(
+    anchorFixture({ dateKey: '2026-07-31', fullScanAt: '2026-07-31T12:00:00.000Z', nativeSessions }),
+    seedOptions()
+  );
+  assert.deepEqual(lastMonth.nativeSessions.month, {});
+  assert.deepEqual(lastMonth.nativeSessions.allTime, nativeSessions.allTime);
+});
+
+test('a cold preview keeps the windows its scan collected in, and brings its limits', () => {
+  const seed = deviceRecordFromAnchor(anchorFixture({ dateKey: '2026-08-07', fullScanAt: YESTERDAY_SCAN_AT }), seedOptions());
+  const limits = { updatedAt: NOW.toISOString(), providers: [{ provider: 'codex', status: 'ok', windows: [] }] };
+  // A scan that started before midnight reports that day even when the preview
+  // is shown after it.
+  const scanWindows = { today: { key: '2026-08-07', endsAt: new Date(2026, 7, 8).toISOString() }, month: seed.periodWindows.month };
+  const shown = seedWithColdPreview(seed, { today: periodWith(250), periodWindows: scanWindows, limits }, NOW);
+  assert.equal(shown.periodWindows.today.key, '2026-08-07');
+  assert.deepEqual(shown.limits, limits);
+  assert.equal(aggregateDevices([shown], 0, NOW.getTime()).periods.today.totalTokens, 0);
+});
