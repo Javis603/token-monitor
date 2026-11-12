@@ -332,6 +332,20 @@ const {
   createStatsStreamReceiver
 } = require('../shared/hubProtocol');
 const { createSyncPayloadUploader, syncPayload } = require('../shared/syncPayload');
+const {
+  createHubHttpClient,
+  discoveryStatusPayload,
+  hubIdentityView,
+  hubLinkDestinationChanged,
+  linksView,
+  normalizeHubLink,
+  pairingStatusView,
+  pairingView,
+  resolveClientHubUrl
+} = require('./lanLink');
+const { createLanLinkRuntime } = require('./lanLinkRuntime');
+const { createLanBrowser } = require('./lanDiscoveryBridge');
+
 const postSyncPayload = createSyncPayloadUploader();
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
 const {
@@ -646,6 +660,7 @@ function defaultSettings() {
     // embedded hub without a fresh round of credential sharing. Falls back
     // to a random secret generated in startEmbeddedHub() if env is empty.
     hubHostSecret: process.env.TOKEN_MONITOR_SECRET || '',
+    hubLink: null,
     secret: process.env.TOKEN_MONITOR_SECRET || '',
     hubSyncSessionTitles: parseBoolean(process.env.TOKEN_MONITOR_SYNC_SESSION_TITLES, false),
     syncContentState: normalizeSyncContentState(null),
@@ -2888,6 +2903,7 @@ function readSettings() {
     merged.cursorManualAccountIds = normalizeCursorAccountIds(merged.cursorManualAccountIds);
     merged.hubHostPort = normalizeHubPort(merged.hubHostPort);
     merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
+    merged.hubLink = normalizeHubLink(merged.hubLink);
     delete merged.workbuddyEndpoint;
     merged.floatingBubbleEnabled = parseBoolean(merged.floatingBubbleEnabled ?? merged.edgeDrawerEnabled, false);
     merged.archivedClientUsage = normalizeArchivedClientUsage(merged.archivedClientUsage);
@@ -3443,6 +3459,9 @@ function getDefaultTrayIcon() {
 }
 const AGENT_PID_PATH = pidFilePath();
 let embeddedHub = null;
+let lanLinkRuntime = null;
+let clientHubHttpClient = null;
+let hubLinkLearnPromise = null;
 let embeddedHubError = null;
 let embeddedHubUnsub = null;
 let modeQueue = Promise.resolve();
@@ -3676,8 +3695,14 @@ function effectiveHubConfig(sourceSettings = settings) {
     };
   }
   if (sourceSettings?.hubMode === 'client') {
-    const url = String(sourceSettings.hubUrl || '').trim();
-    return { url: url || null, secret: sourceSettings.secret || '' };
+    // Discovery outranks the saved URL only after the runtime confirms the
+    // bound hub id at its current address. Reading the live hub list here would
+    // let a newly persisted binding move the address under an open stream
+    // without the resolved-URL path restarting it.
+    const confirmed = lanLinkRuntime ? lanLinkRuntime.resolvedUrl() : null;
+    if (confirmed) return { url: confirmed, secret: sourceSettings.secret || '' };
+    const fallback = resolveClientHubUrl(sourceSettings, []);
+    return { url: fallback.url, secret: sourceSettings.secret || '' };
   }
   return { url: null, secret: '' };
 }
@@ -3716,8 +3741,8 @@ function getHubInfo() {
 
 async function getHubBuildStatus() {
   if (settings?.hubMode !== 'client') return { status: 'notConfigured', runtime: '', hubUrl: '' };
-  const hubUrl = String(settings.hubUrl || '').trim();
-  return probeHubBuild(hubUrl);
+  const { url } = effectiveHubConfig();
+  return probeHubBuild(url);
 }
 
 async function startEmbeddedHub() {
@@ -3744,6 +3769,7 @@ async function startEmbeddedHub() {
       port,
       host: '0.0.0.0',
       secret: settings.hubHostSecret,
+      discovery: true,
       syncSessionTitles: settings.hubSyncSessionTitles === true,
       dataFile: hubDataFile(),
       logger: { error: (err) => console.log(`[hub] ${err?.message || err}`) }
@@ -3767,6 +3793,257 @@ async function stopEmbeddedHub() {
   embeddedHub = null;
   try { await handle.hub.stop(); } catch (_) {}
   sendHubPush({ type: 'stopped', info: getHubInfo() });
+}
+
+function currentLanLinkHubs() {
+  return lanLinkRuntime ? lanLinkRuntime.hubs() : [];
+}
+
+function clientHubHttp() {
+  if (!clientHubHttpClient) {
+    clientHubHttpClient = createHubHttpClient({ getConfig: () => effectiveHubConfig() });
+  }
+  return clientHubHttpClient;
+}
+
+function hubDiscoveryStatus() {
+  return discoveryStatusPayload({
+    hubs: currentLanLinkHubs(),
+    hubLink: settings?.hubLink,
+    // Host/local modes have no discovery resolution to report.
+    resolvedUrl: settings?.hubMode === 'client' ? effectiveHubConfig().url : null,
+    available: lanLinkRuntime ? lanLinkRuntime.isAvailable() : true
+  });
+}
+
+function pushHubDiscoveryStatus() {
+  sendHubPush({ type: 'discovery', ...hubDiscoveryStatus() });
+}
+
+async function pushHubBuildStatus() {
+  try {
+    const status = await getHubBuildStatus();
+    sendHubPush({ type: 'buildStatus', status });
+  } catch (_) {}
+}
+
+// The interface set changed: clear the scheduled retry so the offline stream
+// reconnects against the fresh address instead of waiting out its backoff.
+function retryOfflineStatsStream() {
+  if (settings?.hubMode !== 'client' || streamConnected) return;
+  if (sseRetryTimer) { clearTimeout(sseRetryTimer); sseRetryTimer = null; }
+  startStatsStream();
+}
+
+// Contract's resolved-URL path: the bound hub moved (or expired off the
+// network), so the stream must reconnect at the new address.
+function handleResolvedHubUrlChange() {
+  if (settings?.hubMode !== 'client') return;
+  pushHubDiscoveryStatus();
+  void pushHubBuildStatus();
+  const { url } = effectiveHubConfig();
+  if (!url) { stopStatsStream(); return; }
+  startStatsStream({ resetSnapshot: true });
+}
+
+function ensureLanLinkRuntime() {
+  if (lanLinkRuntime) return lanLinkRuntime;
+  lanLinkRuntime = createLanLinkRuntime({
+    createBrowser: (handlers) => createLanBrowser(handlers),
+    getSettings: () => settings || {},
+    onDiscoveryChange: () => pushHubDiscoveryStatus(),
+    onBoundChange: () => handleResolvedHubUrlChange(),
+    onNetworkChange: () => retryOfflineStatsStream(),
+    logger: { warn: (message) => console.log(`[lan-link] ${message}`) }
+  });
+  return lanLinkRuntime;
+}
+
+function stopLanLinkRuntime() {
+  if (!lanLinkRuntime) return;
+  lanLinkRuntime.stop();
+}
+
+// Browse while (and only while) this desktop is in client mode. Called on every
+// structural mode/connection change and once at startup.
+function syncLanLinkRuntimeForMode() {
+  if (settings?.hubMode !== 'client') {
+    stopLanLinkRuntime();
+    return;
+  }
+  const runtime = ensureLanLinkRuntime();
+  if (!runtime.isRunning()) runtime.start();
+  // startMode() already replaces the stream for a structural change; refresh
+  // the confirmed address without firing a second resolved-URL transition.
+  else runtime.recompute({ notify: false });
+}
+
+// The binding is destination metadata, so it is main-owned and main-persisted.
+function persistHubLink(link) {
+  const current = normalizeHubLink(settings?.hubLink);
+  if (!link || (current && current.id === link.id && current.name === link.name)) return false;
+  settings = { ...settings, hubLink: link };
+  try {
+    saveSettings({ throwOnError: true });
+  } catch (error) {
+    console.log(`[lan-link] could not persist the hub identity: ${error.message}`);
+    return false;
+  }
+  pushSettingsToRenderer();
+  pushHubDiscoveryStatus();
+  return true;
+}
+
+// Older hubs and Worker hubs answer 404: leave the binding alone and keep the
+// manual URL path working. Runs after a successful client-mode connect only.
+function learnHubLinkIdentity() {
+  if (settings?.hubMode !== 'client') return Promise.resolve(false);
+  if (hubLinkLearnPromise) return hubLinkLearnPromise;
+  const promise = clientHubHttp().getLink()
+    .then((result) => {
+      if (!result?.ok || !result.hub?.id) return false;
+      const link = normalizeHubLink({ id: result.hub.id, name: result.hub.name });
+      if (!link) return false;
+      // Persist only. The stream keeps its address until the discovery
+      // runtime reports a resolved-URL change, which owns the reconnect.
+      return persistHubLink(link);
+    })
+    .catch(() => false)
+    .finally(() => { if (hubLinkLearnPromise === promise) hubLinkLearnPromise = null; });
+  hubLinkLearnPromise = promise;
+  return promise;
+}
+
+function hostEmbeddedHub() {
+  return embeddedHub?.hub || null;
+}
+
+function hostHubIdentityView() {
+  const hub = hostEmbeddedHub();
+  if (hub && typeof hub.getHubIdentity === 'function') {
+    try { return hubIdentityView(hub.getHubIdentity()); } catch (_) {}
+  }
+  const info = getHubInfo();
+  return hubIdentityView({
+    id: hub?.hubId || '',
+    name: hub?.hubName || '',
+    port: info.listeningPort,
+    addresses: (info.lanAddresses || []).map((entry) => entry?.address)
+  });
+}
+
+function hostHubLinksView() {
+  const hub = hostEmbeddedHub();
+  if (!hub || typeof hub.getLinks !== 'function') return [];
+  try { return linksView(hub.getLinks()); } catch (_) { return []; }
+}
+
+function hostPairingMethodsAvailable() {
+  const hub = hostEmbeddedHub();
+  return Boolean(hub && typeof hub.startPairing === 'function' && typeof hub.pairingStatus === 'function');
+}
+
+async function startHubPairing() {
+  if (settings?.hubMode === 'host') {
+    const hub = hostEmbeddedHub();
+    if (!hub) return { ok: false, error: 'not_ready' };
+    if (hostPairingMethodsAvailable()) {
+      try {
+        const result = await hub.startPairing();
+        return {
+          ok: true,
+          pairing: pairingView(result),
+          hub: hubIdentityView(result?.hub) || hostHubIdentityView(),
+          links: hostHubLinksView()
+        };
+      } catch (error) {
+        return { ok: false, error: error?.code || 'error' };
+      }
+    }
+    // An embedded hub from an older build may expose the HTTP endpoints without
+    // the in-process methods; fall through to the loopback transport.
+  } else if (settings?.hubMode !== 'client') {
+    return { ok: false, error: 'not_shared' };
+  }
+  const result = await clientHubHttp().startPairing();
+  if (!result.ok) return result;
+  return { ok: true, pairing: result.pairing, hub: result.hub, links: [] };
+}
+
+async function getHubPairingStatus() {
+  if (settings?.hubMode === 'host') {
+    const hub = hostEmbeddedHub();
+    if (!hub) {
+      return { ok: false, error: 'not_ready', pairing: { active: false }, links: [], hub: hostHubIdentityView() };
+    }
+    if (hostPairingMethodsAvailable() && typeof hub.getLinks === 'function') {
+      let pairing = { active: false };
+      try { pairing = pairingStatusView(hub.pairingStatus()); } catch (_) {}
+      return { ok: true, pairing, links: hostHubLinksView(), hub: hostHubIdentityView() };
+    }
+  } else if (settings?.hubMode !== 'client') {
+    return { ok: false, error: 'not_shared', pairing: { active: false }, links: [], hub: null };
+  }
+  const [statusResult, linksResult, linkResult] = await Promise.all([
+    clientHubHttp().pairingStatus(),
+    clientHubHttp().listLinks(),
+    clientHubHttp().getLink()
+  ]);
+  const hub = linkResult.ok ? linkResult.hub : null;
+  if (statusResult.error === 'not_supported' && linksResult.error === 'not_supported') {
+    return { ok: false, error: 'not_supported', pairing: { active: false }, links: [], hub };
+  }
+  return {
+    ok: true,
+    pairing: statusResult.ok ? statusResult.pairing : { active: false },
+    links: linksResult.ok ? linksResult.links : [],
+    hub
+  };
+}
+
+async function cancelHubPairing() {
+  if (settings?.hubMode === 'host') {
+    const hub = hostEmbeddedHub();
+    if (!hub) return { ok: false, error: 'not_ready' };
+    if (typeof hub.cancelPairing === 'function') {
+      try { return { ok: true, cancelled: Boolean(await hub.cancelPairing()) }; } catch (_) { return { ok: false, error: 'error' }; }
+    }
+  } else if (settings?.hubMode !== 'client') {
+    return { ok: false, error: 'not_shared' };
+  }
+  return clientHubHttp().cancelPairing();
+}
+
+async function revokeHubLink(deviceId) {
+  const id = String(deviceId || '').trim();
+  if (!id) return { ok: false, error: 'invalid_device_id' };
+  if (settings?.hubMode === 'host') {
+    const hub = hostEmbeddedHub();
+    if (!hub) return { ok: false, error: 'not_ready' };
+    if (typeof hub.revokeLink === 'function') {
+      try {
+        return hub.revokeLink(id) ? { ok: true, id } : { ok: false, error: 'unknown_link', id };
+      } catch (_) {
+        return { ok: false, error: 'error', id };
+      }
+    }
+  } else if (settings?.hubMode !== 'client') {
+    return { ok: false, error: 'not_shared' };
+  }
+  return clientHubHttp().revokeLink(id);
+}
+
+function getHubDiscoveryStatus() {
+  return { ok: true, ...hubDiscoveryStatus() };
+}
+
+function startHubDiscovery() {
+  if (settings?.hubMode !== 'client') return { ok: false, error: 'not_shared', ...hubDiscoveryStatus() };
+  const runtime = ensureLanLinkRuntime();
+  if (!runtime.isRunning()) runtime.start();
+  runtime.refresh();
+  pushHubDiscoveryStatus();
+  return getHubDiscoveryStatus();
 }
 
 function isExternalAgentActive() {
@@ -4897,6 +5174,9 @@ function startHostStats() {
   // data). The in-process vs loopback distinction is internal to fetchStats.
   mode = 'sync';
   sendStatus(true);
+    // A successful connection is the trigger for identity learning; older hubs
+    // answer 404 and leave the manual URL path untouched.
+    void learnHubLinkIdentity();
   const emit = (stats, reason = 'hub') => {
     if (!hubModeRequestIsCurrent(generation, 'host', cacheIdentity)) return;
     setLatestHubStatsCache(stats, 'host', generation, cacheIdentity);
@@ -6889,6 +7169,7 @@ function startMode() {
   // awaited by the mode lane before any replacement runtime is created.
   stopLocalCollector();
   stopStatsStream();
+  stopLanLinkRuntime();
   stopHostStats();
   stopSyncCollector();
   syncStatsPublication.cancel();
@@ -7245,6 +7526,7 @@ async function fetchStats(options = {}) {
     });
   }
   setLatestHubStatsCache(stats, 'client', requestGeneration, requestHubIdentity);
+  void learnHubLinkIdentity();
   return injectLocalDeviceStatus(composeLocalSyncSummary(stats, lastCollectedDevice));
 }
 
@@ -8198,6 +8480,7 @@ app.whenReady().then(() => {
   regenerateTokscalePricing();
   if (widgetRuntimeSupported) ensureMacWidgetDemand();
   startMode();
+  syncLanLinkRuntimeForMode();
   void widgetRecovery.then((result) => {
     if (result.status !== 'completed' || widgetRecoveryAbort?.signal.aborted) return;
     const config = macWidgetConfiguration();
@@ -8224,6 +8507,12 @@ app.whenReady().then(() => {
   refreshExchangeRates();                // non-blocking: only fetches when stale
   rateRefreshTimer = setInterval(() => { refreshExchangeRates(); }, 6 * 60 * 60 * 1000);
   syncDockSurfaces();
+  ipcMain.handle('hub:pairing:start', () => startHubPairing());
+  ipcMain.handle('hub:pairing:status', () => getHubPairingStatus());
+  ipcMain.handle('hub:pairing:cancel', () => cancelHubPairing());
+  ipcMain.handle('hub:links:revoke', (_event, deviceId) => revokeHubLink(deviceId));
+  ipcMain.handle('hub:discovery:start', () => startHubDiscovery());
+  ipcMain.handle('hub:discovery:status', () => getHubDiscoveryStatus());
   ipcMain.handle('settings:get', () => settingsForRenderer());
   ipcMain.handle('appearance:getBackgroundImage', () => getBackgroundImage(app.getPath('userData')));
   ipcMain.handle('appearance:chooseBackgroundImage', async () => {
@@ -8384,6 +8673,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.workbuddyLocalAppEnabled;
     delete normalizedPatch.customModelPricing;
     delete normalizedPatch.syncContentState;
+    delete normalizedPatch.hubLink;
     delete normalizedPatch.syncContentStatus;
     delete normalizedPatch.syncContentBase;
     delete normalizedPatch.pluginStates;
@@ -8438,6 +8728,7 @@ app.whenReady().then(() => {
         : normalizeHubMode(settings.hubMode, 'local', process.platform),
       hubHostPort: patch.hubHostPort !== undefined ? normalizeHubPort(patch.hubHostPort, settings.hubHostPort) : settings.hubHostPort,
       hubHostSecret: patch.hubHostSecret !== undefined ? String(patch.hubHostSecret) : settings.hubHostSecret,
+      hubLink: normalizeHubLink(settings.hubLink),
       hubSyncSessionTitles: parseBoolean(patch.hubSyncSessionTitles ?? settings.hubSyncSessionTitles, false),
       syncContentState: normalizeSyncContentState(settings.syncContentState),
       deviceId: (patch.deviceId !== undefined ? String(patch.deviceId).trim() : settings.deviceId) || defaultDeviceId(),
@@ -8618,6 +8909,10 @@ app.whenReady().then(() => {
     settings.archivedClientUsage = normalizeArchivedClientUsage(settings.archivedClientUsage);
     if (settings.clients !== previousClients) updateArchivedClientUsage(previousClients, settings.clients);
     delete settings.edgeDrawerEnabled;
+    // The binding names exactly one destination. Any edit to sync mode, the
+    // hub URL or either secret (a regenerated shared secret included) makes it
+    // stale, so it is cleared before the change is committed.
+    if (hubLinkDestinationChanged(previousSettingsState, settings)) settings.hubLink = null;
     const nextSettingsState = settings;
     settings = previousSettingsState;
     try {
@@ -8689,6 +8984,7 @@ app.whenReady().then(() => {
         limitContext.onLimitsRefresh?.(scope, Promise.resolve({ queued: true }));
       }
       startMode();
+      syncLanLinkRuntimeForMode();
     } else if (runtimeChange.sinkStructural) {
       for (const { scope, reason, options } of limitInvalidations) {
         rememberPendingLimitInvalidation(scope, reason, options);

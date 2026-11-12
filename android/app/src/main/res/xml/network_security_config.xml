@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- The Node hub on a LAN is plain HTTP. The shared secret still travels in a header. -->
+    <base-config cleartextTrafficPermitted="true" />
+</network-security-config>

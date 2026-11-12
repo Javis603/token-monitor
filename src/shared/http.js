@@ -92,6 +92,7 @@ module.exports = {
   MAX_JSON_BODY_BYTES,
   isAuthorized,
   readJsonBody,
+  requestSecret,
   sendJson,
   sendText,
   timingSafeEqualText

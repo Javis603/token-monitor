@@ -68,6 +68,12 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   },
   getHubInfo: () => ipcRenderer.invoke('hub:getInfo'),
   getHubBuildStatus: () => ipcRenderer.invoke('hub:getBuildStatus'),
+  startHubPairing: () => ipcRenderer.invoke('hub:pairing:start'),
+  getHubPairingStatus: () => ipcRenderer.invoke('hub:pairing:status'),
+  cancelHubPairing: () => ipcRenderer.invoke('hub:pairing:cancel'),
+  revokeHubLink: (deviceId) => ipcRenderer.invoke('hub:links:revoke', deviceId),
+  startHubDiscovery: () => ipcRenderer.invoke('hub:discovery:start'),
+  getHubDiscoveryStatus: () => ipcRenderer.invoke('hub:discovery:status'),
   regenerateHubSecret: () => ipcRenderer.invoke('hub:regenerateSecret'),
   onHubPush: (callback) => {
     const listener = (_event, payload) => { try { callback(payload); } catch (_) {} };

@@ -169,6 +169,7 @@ test('sync method selects the corresponding fields without touching draft input 
   const source = functionSource('syncHubModeUi', 'renderIcloudStatus');
   for (const mode of ['local', 'client', 'host', 'icloud']) {
     const hidden = {};
+    let hubLinkPanels = 0;
     const field = id => ({ classList: { toggle(name, value) { hidden[id] = value; } } });
     const context = vm.createContext({
       syncContentForm: null,
@@ -181,13 +182,14 @@ test('sync method selects the corresponding fields without touching draft input 
       SYNC_MODE_DESCRIPTIONS: { local: 'local', client: 'client', host: 'host', icloud: 'icloud' },
       syncModeSelect: { sync() {} },
       t: key => key, renderHubStatus() {}, renderIcloudStatus() {}, renderSyncPanel() {},
-      renderHubBuildStatus() {}, syncHubConnectionUi() {}, syncHubSaveButton() {}
+      renderHubLinkPanels() { hubLinkPanels += 1; }, renderHubBuildStatus() {}, syncHubConnectionUi() {}, syncHubSaveButton() {}
     });
     vm.runInContext(source, context);
     context.syncHubModeUi();
     assert.equal(context.els.icloudModeOption.disabled, true);
     assert.equal(context.els.hubModeOptions.value, mode);
     assert.ok(context.els.syncModeDescription.textContent);
+    assert.equal(hubLinkPanels, 1, 'Pair a phone / discovery panels follow the sync method');
     for (const id of ['client', 'host', 'icloud']) {
       assert.equal(hidden[id], mode !== id);
       const node = context.els[id === 'client' ? 'hubClientFields' : id === 'host' ? 'hubHostFields' : 'icloudFields'];

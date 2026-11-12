@@ -2072,7 +2072,10 @@ function loadHubSettingsWiring(els, context) {
     ...context,
     renderHubStatus: () => {},
     renderSyncPanel: () => {},
-    renderHubBuildStatus: () => {}
+    renderHubLinkPanels: () => {},
+    renderHubBuildStatus: () => {},
+    syncHubConnectionUi: () => {},
+    syncHubSaveButton: () => {}
   };
   vm.runInNewContext(
     `${app.slice(modeStart, modeEnd)}\n${app.slice(draftStart, draftEnd)}\n${app.slice(saveStart, saveEnd)}\n${app.slice(intervalStart, intervalEnd)}`,

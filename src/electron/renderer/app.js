@@ -341,7 +341,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) || (allowed === viewBreakdownValues && pluginPlacementsApi.isHomeToken(raw)) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, limitDetailTooltipActive: false, limitDetailTooltipRenderPending: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubPairing: { mode: '', pairing: null, links: [], loaded: false }, hubDiscovery: { hubs: [], bound: null, resolvedUrl: null, discovered: false, available: true }, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.icloudStatus = null;
@@ -502,6 +502,23 @@ Object.assign(els, {
   icloudStatus: document.getElementById('icloudStatus'),
   icloudRootStatus: document.getElementById('icloudRootStatus'),
   hubBuildStatus: document.getElementById('hubBuildStatus'),
+  hubPairingSection: document.getElementById('hubPairingSection'),
+  hubPairingStart: document.getElementById('hubPairingStart'),
+  hubPairingCard: document.getElementById('hubPairingCard'),
+  hubPairingCode: document.getElementById('hubPairingCode'),
+  hubPairingCountdown: document.getElementById('hubPairingCountdown'),
+  hubPairingState: document.getElementById('hubPairingState'),
+  hubPairingCopyLink: document.getElementById('hubPairingCopyLink'),
+  hubPairingCancel: document.getElementById('hubPairingCancel'),
+  hubPairingError: document.getElementById('hubPairingError'),
+  hubLinkedDevices: document.getElementById('hubLinkedDevices'),
+  hubLinkedDeviceList: document.getElementById('hubLinkedDeviceList'),
+  syncLinkedStatus: document.getElementById('syncLinkedStatus'),
+  syncLinkedStatusText: document.getElementById('syncLinkedStatusText'),
+  syncLinkedResolvedUrl: document.getElementById('syncLinkedResolvedUrl'),
+  syncDiscoverySection: document.getElementById('syncDiscoverySection'),
+  syncDiscoveryRefresh: document.getElementById('syncDiscoveryRefresh'),
+  syncDiscoveryList: document.getElementById('syncDiscoveryList'),
   hubClientFields: document.getElementById('hubClientFields'),
   syncConnectionEditor: document.getElementById('syncConnectionEditor'),
   syncConnectionIdentity: document.getElementById('syncConnectionIdentity'),
@@ -9387,6 +9404,7 @@ function syncHubModeUi() {
   }
   syncModeSelect?.sync();
   renderSyncPanel();
+  renderHubLinkPanels();
   renderHubBuildStatus();
   syncHubConnectionUi();
   syncHubSaveButton();
@@ -9783,6 +9801,363 @@ function renderHubAddresses(addresses, port) {
     row.append(code, ifaceLabel, copy);
     els.hubAddressList.appendChild(row);
   }
+}
+
+const HUB_PAIRING_POLL_MS = 2000;
+const hubRevokeBusy = new Set();
+let hubPairingTimer = 0;
+let hubPairingPollAt = 0;
+let hubPairingBusy = false;
+let hubPairingStatusPending = false;
+let hubPairingErrorCode = '';
+
+function hubLinkPanelMode() {
+  const mode = state.settings?.hubMode;
+  return mode === 'host' || mode === 'client' ? mode : '';
+}
+
+function activeHubPairing() {
+  const pairing = state.hubPairing?.pairing;
+  if (!pairing?.code) return null;
+  const expiresAt = pairing.expiresAt ? Date.parse(pairing.expiresAt) : 0;
+  if (Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= Date.now()) return null;
+  return pairing;
+}
+
+function hubPairingErrorMessage() {
+  switch (hubPairingErrorCode) {
+    case 'not_supported': return 'settings.sync.link.unsupported';
+    case 'not_ready': return 'settings.sync.link.notReady';
+    case 'not_shared': return 'settings.sync.link.notShared';
+    case 'revoke_failed': return 'settings.sync.link.revokeFailed';
+    default: return 'settings.sync.link.pairingFailed';
+  }
+}
+
+function hubPairingCountdownText(pairing) {
+  const expiresAt = pairing?.expiresAt ? Date.parse(pairing.expiresAt) : 0;
+  if (!Number.isFinite(expiresAt) || expiresAt <= 0) return '';
+  const remaining = Math.max(0, expiresAt - Date.now());
+  const totalSeconds = Math.ceil(remaining / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return t('settings.sync.link.expiresIn', {
+    time: `${minutes}:${String(seconds).padStart(2, '0')}`
+  });
+}
+
+function hubPairingRow(link) {
+  const row = document.createElement('div');
+  row.className = 'hub-linked-device';
+  const main = document.createElement('div');
+  main.className = 'hub-linked-device-main';
+  const name = document.createElement('span');
+  name.className = 'hub-linked-device-name';
+  name.textContent = link.name || link.id;
+  const meta = document.createElement('span');
+  meta.className = 'hub-linked-device-meta';
+  const platform = link.platform && link.platform !== 'unknown' ? link.platform : '';
+  const created = link.createdAt ? new Date(link.createdAt) : null;
+  const linkedOn = created && !Number.isNaN(created.getTime())
+    ? t('settings.sync.link.deviceMeta', { date: created.toLocaleDateString(currentLocale()) })
+    : '';
+  meta.textContent = [platform, linkedOn].filter(Boolean).join(' · ');
+  main.append(name, meta);
+
+  const revoke = document.createElement('button');
+  revoke.type = 'button';
+  revoke.className = 'hub-linked-revoke';
+  revoke.textContent = t('settings.sync.link.revoke');
+  revoke.dataset.idleText = revoke.textContent;
+  revoke.dataset.confirmText = t('settings.sync.link.revokeConfirm');
+  let confirming = false;
+  const reset = () => {
+    confirming = false;
+    revoke.dataset.confirm = 'false';
+    revoke.textContent = revoke.dataset.idleText;
+  };
+  revoke.addEventListener('blur', reset);
+  revoke.addEventListener('click', async () => {
+    if (!confirming) {
+      confirming = true;
+      revoke.dataset.confirm = 'true';
+      revoke.textContent = revoke.dataset.confirmText;
+      return;
+    }
+    if (hubRevokeBusy.has(link.id)) return;
+    hubRevokeBusy.add(link.id);
+    revoke.disabled = true;
+    try {
+      const result = await window.tokenMonitor.revokeHubLink?.(link.id);
+      if (result?.ok) {
+        state.hubPairing.links = state.hubPairing.links.filter((entry) => entry.id !== link.id);
+        hubPairingErrorCode = '';
+      } else {
+        hubPairingErrorCode = 'revoke_failed';
+      }
+    } catch (_) {
+      hubPairingErrorCode = 'revoke_failed';
+    } finally {
+      hubRevokeBusy.delete(link.id);
+      renderHubPairing();
+    }
+  });
+  row.append(main, revoke);
+  return row;
+}
+
+function renderHubPairing() {
+  if (!els.hubPairingSection) return;
+  const mode = hubLinkPanelMode();
+  if (state.hubPairing.mode !== mode) {
+    state.hubPairing = { mode, pairing: null, links: [], loaded: false };
+    hubPairingErrorCode = '';
+    stopHubPairingPoll();
+  }
+  els.hubPairingSection.hidden = !mode;
+  if (!mode) {
+    stopHubPairingPoll();
+    return;
+  }
+  if (!state.hubPairing.loaded && isSettingsSurfaceVisible()) void refreshHubPairingStatus();
+  const pairing = activeHubPairing();
+  const hostReady = mode !== 'host' || state.hubInfo?.listening !== false;
+  if (els.hubPairingStart) {
+    els.hubPairingStart.hidden = Boolean(pairing);
+    els.hubPairingStart.disabled = hubPairingBusy || !hostReady || !window.tokenMonitor.startHubPairing;
+  }
+  if (els.hubPairingCard) els.hubPairingCard.hidden = !pairing;
+  if (pairing) {
+    if (els.hubPairingCode) els.hubPairingCode.textContent = pairing.code;
+    if (els.hubPairingCountdown) els.hubPairingCountdown.textContent = hubPairingCountdownText(pairing);
+    if (els.hubPairingState) els.hubPairingState.textContent = t('settings.sync.link.waiting');
+    if (els.hubPairingCopyLink) els.hubPairingCopyLink.disabled = !pairing.link || hubPairingBusy;
+    if (isSettingsSurfaceVisible()) ensureHubPairingPoll();
+  } else {
+    stopHubPairingPoll();
+  }
+  if (els.hubPairingError) {
+    els.hubPairingError.hidden = !hubPairingErrorCode;
+    els.hubPairingError.textContent = hubPairingErrorCode ? t(hubPairingErrorMessage()) : '';
+  }
+  if (els.hubLinkedDevices && els.hubLinkedDeviceList) {
+    const links = Array.isArray(state.hubPairing.links) ? state.hubPairing.links : [];
+    els.hubLinkedDevices.hidden = links.length === 0 && !state.hubPairing.loaded;
+    els.hubLinkedDeviceList.replaceChildren(...(links.length === 0
+      ? [Object.assign(document.createElement('div'), {
+        className: 'hub-linked-empty',
+        textContent: t('settings.sync.link.noDevices')
+      })]
+      : links.map(hubPairingRow)));
+  }
+}
+
+function ensureHubPairingPoll() {
+  if (hubPairingTimer) return;
+  hubPairingPollAt = Date.now() + HUB_PAIRING_POLL_MS;
+  hubPairingTimer = setInterval(() => {
+    if (!isSettingsSurfaceVisible() || !hubLinkPanelMode()) {
+      stopHubPairingPoll();
+      return;
+    }
+    if (!activeHubPairing()) {
+      stopHubPairingPoll();
+      renderHubPairing();
+      return;
+    }
+    if (Date.now() >= hubPairingPollAt) {
+      hubPairingPollAt = Date.now() + HUB_PAIRING_POLL_MS;
+      void refreshHubPairingStatus();
+    }
+    renderHubPairing();
+  }, 1000);
+}
+
+function stopHubPairingPoll() {
+  if (!hubPairingTimer) return;
+  clearInterval(hubPairingTimer);
+  hubPairingTimer = 0;
+}
+
+async function refreshHubPairingStatus() {
+  if (!hubLinkPanelMode() || !window.tokenMonitor.getHubPairingStatus) return;
+  if (hubPairingStatusPending) return;
+  hubPairingStatusPending = true;
+  try {
+    const result = await window.tokenMonitor.getHubPairingStatus();
+    if (!hubLinkPanelMode()) return;
+    state.hubPairing.loaded = true;
+    if (result?.ok) {
+      hubPairingErrorCode = '';
+      state.hubPairing.pairing = result.pairing?.active ? result.pairing : null;
+      state.hubPairing.links = Array.isArray(result.links) ? result.links : [];
+    } else {
+      hubPairingErrorCode = result?.error || 'error';
+      state.hubPairing.pairing = null;
+      state.hubPairing.links = [];
+    }
+  } catch (_) {
+    state.hubPairing.loaded = true;
+    hubPairingErrorCode = 'error';
+    state.hubPairing.pairing = null;
+  } finally {
+    hubPairingStatusPending = false;
+  }
+  renderHubPairing();
+}
+
+async function startHubPairing() {
+  if (hubPairingBusy || !hubLinkPanelMode() || !window.tokenMonitor.startHubPairing) return;
+  hubPairingBusy = true;
+  hubPairingErrorCode = '';
+  renderHubPairing();
+  try {
+    const result = await window.tokenMonitor.startHubPairing();
+    if (result?.ok) {
+      state.hubPairing.pairing = result.pairing || null;
+      state.hubPairing.links = Array.isArray(result.links) ? result.links : state.hubPairing.links;
+      state.hubPairing.loaded = true;
+    } else {
+      state.hubPairing.pairing = null;
+      hubPairingErrorCode = result?.error || 'error';
+    }
+  } catch (_) {
+    state.hubPairing.pairing = null;
+    hubPairingErrorCode = 'error';
+  } finally {
+    hubPairingBusy = false;
+    renderHubPairing();
+  }
+}
+
+async function cancelHubPairing() {
+  if (hubPairingBusy) return;
+  hubPairingBusy = true;
+  renderHubPairing();
+  try {
+    await window.tokenMonitor.cancelHubPairing?.();
+  } catch (_) { /* the session may already be gone */ }
+  hubPairingBusy = false;
+  hubPairingErrorCode = '';
+  state.hubPairing.pairing = null;
+  stopHubPairingPoll();
+  renderHubPairing();
+  void refreshHubPairingStatus();
+}
+
+function copyHubPairingLink() {
+  const pairing = activeHubPairing();
+  if (!pairing?.link) return;
+  copyToClipboard(pairing.link, els.hubPairingCopyLink);
+}
+
+function renderSyncLinkedStatus() {
+  if (!els.syncLinkedStatus) return;
+  // The discovery push carries the binding main currently holds; a settings
+  // push can trail it, and both describe the same destination.
+  const bound = state.settings?.hubMode === 'client'
+    ? (state.hubDiscovery?.bound || state.settings?.hubLink)
+    : null;
+  if (!bound?.id) {
+    els.syncLinkedStatus.hidden = true;
+    if (els.syncLinkedStatusText) els.syncLinkedStatusText.textContent = '';
+    if (els.syncLinkedResolvedUrl) els.syncLinkedResolvedUrl.textContent = '';
+    return;
+  }
+  const resolvedUrl = String(state.hubDiscovery?.resolvedUrl || '').trim();
+  els.syncLinkedStatus.hidden = false;
+  if (els.syncLinkedStatusText) {
+    els.syncLinkedStatusText.textContent = t('settings.sync.link.linkedTo', { name: bound.name || bound.id });
+  }
+  if (els.syncLinkedResolvedUrl) {
+    els.syncLinkedResolvedUrl.hidden = !resolvedUrl;
+    els.syncLinkedResolvedUrl.textContent = resolvedUrl
+      ? t('settings.sync.link.resolvedUrl', { url: resolvedUrl })
+      : '';
+  }
+}
+
+function applyDiscoveredHub(hub) {
+  if (state.settings?.hubMode !== 'client' || !hub?.url || !els.hubUrlInput) return;
+  els.hubUrlInput.value = hub.url;
+  markHubDraftDirty('hubUrl');
+  els.hubUrlInput.focus({ preventScroll: true });
+}
+
+function renderHubDiscovery() {
+  if (!els.syncDiscoverySection) return;
+  const client = state.settings?.hubMode === 'client';
+  els.syncDiscoverySection.hidden = !client;
+  if (!client) return;
+  const hubs = Array.isArray(state.hubDiscovery?.hubs) ? state.hubDiscovery.hubs : [];
+  const available = state.hubDiscovery?.available !== false;
+  const emptyText = available
+    ? t('settings.sync.discovery.empty')
+    : t('settings.sync.discovery.unavailable');
+  const children = [];
+  for (const hub of hubs) {
+    const row = document.createElement('div');
+    row.className = 'sync-discovery-row';
+    const main = document.createElement('div');
+    main.className = 'sync-discovery-main';
+    const name = document.createElement('span');
+    name.className = 'sync-discovery-name';
+    name.textContent = hub.name || hub.hubId;
+    const address = document.createElement('span');
+    address.className = 'sync-discovery-address';
+    address.textContent = hub.url || '';
+    main.append(name, address);
+    const use = document.createElement('button');
+    use.type = 'button';
+    use.className = 'sync-discovery-use';
+    use.textContent = t('settings.sync.discovery.use');
+    use.addEventListener('click', () => applyDiscoveredHub(hub));
+    row.append(main, use);
+    children.push(row);
+  }
+  if (children.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'sync-discovery-empty';
+    empty.textContent = emptyText;
+    children.push(empty);
+  }
+  els.syncDiscoveryList.replaceChildren(...children);
+}
+
+async function refreshHubDiscovery() {
+  if (state.settings?.hubMode !== 'client' || !window.tokenMonitor.startHubDiscovery) return;
+  try {
+    const result = await window.tokenMonitor.startHubDiscovery();
+    if (result?.ok) applyHubDiscoveryPayload(result);
+  } catch (_) { /* the browser keeps running; the next push updates the list */ }
+}
+
+function applyHubDiscoveryPayload(payload) {
+  if (!payload || typeof payload !== 'object') return;
+  state.hubDiscovery = {
+    hubs: Array.isArray(payload.hubs) ? payload.hubs : [],
+    bound: payload.bound || null,
+    resolvedUrl: payload.resolvedUrl || null,
+    discovered: payload.discovered === true,
+    available: payload.available !== false
+  };
+  if (isSettingsSurfaceVisible()) {
+    renderHubDiscovery();
+    renderSyncLinkedStatus();
+    if (activeHubPairing()) renderHubPairing();
+  }
+}
+
+function applyHubBuildStatusPayload(payload) {
+  if (!payload || typeof payload !== 'object') return;
+  state.hubBuildStatus = payload.status || null;
+  if (isSettingsSurfaceVisible()) renderHubBuildStatus();
+}
+
+function renderHubLinkPanels() {
+  renderHubPairing();
+  renderSyncLinkedStatus();
+  renderHubDiscovery();
 }
 
 async function copyToClipboard(text, button) {
@@ -14141,6 +14516,10 @@ els.saveSettingsButton.addEventListener('click', async () => {
   }
 });
 
+els.hubPairingStart?.addEventListener('click', () => { void startHubPairing(); });
+els.hubPairingCopyLink?.addEventListener('click', copyHubPairingLink);
+els.hubPairingCancel?.addEventListener('click', () => { void cancelHubPairing(); });
+els.syncDiscoveryRefresh?.addEventListener('click', () => { void window.tokenMonitor.startHubDiscovery?.().then((payload) => applyHubDiscoveryPayload(payload)); });
 els.syncConnectionEdit?.addEventListener('click', () => beginClientConnectionEdit({ focus: true }));
 els.syncConnectionCancel?.addEventListener('click', cancelClientConnectionEdit);
 
@@ -15167,6 +15546,8 @@ window.tokenMonitor.onFloatingBubbleState?.((payload) => {
 });
 
 window.tokenMonitor.onHubPush?.((payload) => {
+  if (payload?.type === 'discovery') { applyHubDiscoveryPayload(payload); return; }
+  if (payload?.type === 'buildStatus') { applyHubBuildStatusPayload(payload); return; }
   if (!payload?.info) return;
   state.hubInfo = payload.info;
   if (payload.info.icloud) state.icloudStatus = payload.info.icloud;
@@ -15181,14 +15562,21 @@ window.tokenMonitor.onHubPush?.((payload) => {
       els.hubSecretInput.value = payload.info.secret;
     }
   }
-  if (settingsVisible) renderHubStatus();
+  if (settingsVisible) {
+    renderHubStatus();
+    // listening flips after the hub starts; re-enable Pair a phone once ready.
+    renderHubLinkPanels();
+  }
 });
 
 function renderConnectionStatus(surface = visibleStatsSurface()) {
   if (surface !== 'main') return;
   setLiveDot(state.streamConnected);
   setStatus(statusTextFor(state.mode, state.streamConnected));
-  if (isSettingsSurfaceVisible()) renderSyncPanel();
+  if (isSettingsSurfaceVisible()) {
+    renderSyncPanel();
+    renderHubLinkPanels();
+  }
 }
 
 function renderStatsUpdate() {

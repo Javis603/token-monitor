@@ -1631,6 +1631,18 @@
                   </div>
                 </div>
                 <div id="hubBuildStatus" class="hub-status hub-build-status" role="status" hidden></div>
+                <div id="syncLinkedStatus" class="sync-linked-status" role="status" aria-live="polite" hidden>
+                  <span id="syncLinkedStatusText" class="sync-linked-status-text"></span>
+                  <code id="syncLinkedResolvedUrl" class="sync-linked-resolved-url"></code>
+                </div>
+                <div id="syncDiscoverySection" class="sync-discovery" hidden>
+                  <div class="sync-discovery-heading">
+                    <span data-i18n="settings.sync.discovery.nearby">Nearby hubs</span>
+                    <button id="syncDiscoveryRefresh" type="button" class="icon-button" aria-label="Search again" data-i18n-aria-label="settings.sync.discovery.refresh">↻</button>
+                  </div>
+                  <div id="syncDiscoveryList" class="sync-discovery-list"></div>
+                  <p class="settings-note sync-discovery-note" data-i18n="settings.sync.discovery.secretNote">Choosing a hub fills the Hub URL. You still need its shared secret.</p>
+                </div>
               </div>
               <div id="hubHostFields" class="hub-mode-fields hidden">
                 <label><span data-i18n="settings.sync.port">Port</span><input id="hubPortInput" type="number" min="1" max="65535" spellcheck="false" /></label>
@@ -1645,6 +1657,34 @@
                 <div id="hubAddressList" class="hub-address-list"></div>
                 <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
                 <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
+              </div>
+              <div id="hubPairingSection" class="hub-link-section" hidden>
+                <div class="hub-link-heading">
+                  <span class="hub-link-heading-text">
+                    <span class="settings-item-title" data-i18n="settings.sync.link.title">Pair a phone</span>
+                    <span class="settings-note" data-i18n="settings.sync.link.note">Show a 6-digit code, then enter it in the Token Monitor app on your phone. Both devices must be on the same network.</span>
+                  </span>
+                  <button id="hubPairingStart" type="button" class="sync-connection-edit" data-i18n="settings.sync.link.pairPhone">Pair a phone</button>
+                </div>
+                <div id="hubPairingCard" class="hub-pairing-card" hidden>
+                  <div class="hub-pairing-code-row">
+                    <span class="hub-pairing-code-label" data-i18n="settings.sync.link.codeLabel">Pairing code</span>
+                    <strong id="hubPairingCode" class="hub-pairing-code" aria-live="polite"></strong>
+                  </div>
+                  <div class="hub-pairing-meta">
+                    <span id="hubPairingCountdown" class="hub-pairing-countdown"></span>
+                    <span id="hubPairingState" class="hub-pairing-state" role="status" aria-live="polite"></span>
+                  </div>
+                  <div class="settings-actions hub-pairing-actions">
+                    <button id="hubPairingCopyLink" type="button" data-i18n="settings.sync.link.copyLink">Copy pairing link</button>
+                    <button id="hubPairingCancel" type="button" data-i18n="settings.common.cancel">Cancel</button>
+                  </div>
+                </div>
+                <div id="hubPairingError" class="hub-status error" role="alert" hidden></div>
+                <div id="hubLinkedDevices" class="hub-linked-devices" hidden>
+                  <div class="hub-linked-heading" data-i18n="settings.sync.link.linkedDevices">Linked devices</div>
+                  <div id="hubLinkedDeviceList" class="hub-linked-device-list"></div>
+                </div>
               </div>
               <div id="icloudFields" class="hub-mode-fields hidden">
                 <div id="icloudStatus" class="hub-status" role="status" aria-live="polite"></div>
