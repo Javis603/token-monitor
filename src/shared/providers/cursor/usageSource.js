@@ -1,5 +1,6 @@
 'use strict';
 
+const { createHash } = require('node:crypto');
 const { isDeepStrictEqual } = require('node:util');
 const { abortReason, throwIfAborted } = require('../../abortSignal');
 const { CURSOR_EXPLICIT_SYNC_TIMEOUT_MS } = require('./auth');
@@ -10,20 +11,40 @@ function emptySnapshot(context) {
     allTime: { entries: [] }, graph: null };
 }
 
-// Tokscale's scan diagnostics change on every read, including an empty cache.
-// Ignore only those fields for comparison; keep the complete raw snapshot.
+// Tokscale's scan diagnostics change on every read, including an empty cache,
+// and it lists report rows and each day's graph clients in no fixed order: two
+// reads of an unchanged cache differ only in that order. Compare rows as a set
+// and ignore the diagnostics; keep the complete raw snapshot.
+const rowSet = rows => (Array.isArray(rows) ? rows.map(row => JSON.stringify(row)).sort() : rows);
+
 function reportContent(report) {
   if (!report || typeof report !== 'object' || Array.isArray(report)) return report;
-  const content = { ...report };
+  const content = { ...report, entries: rowSet(report.entries), sessions: rowSet(report.sessions) };
   delete content.processingTimeMs;
   return content;
 }
 
 function graphContent(graph) {
-  if (!graph?.meta || typeof graph.meta !== 'object' || Array.isArray(graph.meta)) return graph;
-  const meta = { ...graph.meta };
-  delete meta.generatedAt;
-  return { ...graph, meta };
+  if (!graph || typeof graph !== 'object' || Array.isArray(graph)) return graph;
+  const content = { ...graph };
+  if (graph.meta && typeof graph.meta === 'object' && !Array.isArray(graph.meta)) {
+    content.meta = { ...graph.meta };
+    delete content.meta.generatedAt;
+  }
+  if (Array.isArray(graph.contributions)) {
+    content.contributions = graph.contributions.map(day => (day && typeof day === 'object' ? { ...day, clients: rowSet(day.clients) } : day));
+  }
+  return content;
+}
+
+// Revisions restart with the process. A persisted anchor records this instead,
+// so a restart can tell whether the cache still holds the usage it was built
+// from. Null until the first complete read.
+function snapshotUsageKey(snapshot) {
+  if (!snapshot || snapshot.revision === 0) return null;
+  const hash = createHash('sha256');
+  for (const period of ['today', 'month', 'allTime']) hash.update(`${JSON.stringify(reportContent(snapshot[period]) ?? null)}\n`);
+  return hash.digest('hex');
 }
 
 // Long cloud imports own the Cursor lane, not the collector's local scan lane.
@@ -195,4 +216,4 @@ function createCursorUsageSource({ sync, read, onChange, onError, signal, contex
   };
 }
 
-module.exports = { createCursorUsageSource };
+module.exports = { createCursorUsageSource, snapshotUsageKey };

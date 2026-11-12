@@ -454,3 +454,75 @@ test('an incomplete initial Cursor cache cannot replace retained History with na
   assert.equal(f.updates.at(-1).history.summary.activeDaysComplete, true);
   assert.deepEqual(f.errors, []);
 });
+
+test('a restart with a same-day anchor and an unchanged Cursor cache scans Today only', async t => {
+  const sharedDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cursor-restart-shared-'));
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-cursor-restart-home-'));
+  const previousShared = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = sharedDir;
+  const gates = [];
+  t.mock.method(cursorAuth, 'runCursorSync', options => withCursorLifecycle(async () => {
+    const gate = deferred();
+    gates.push(gate);
+    await gate.promise;
+    return { synced: true };
+  }, options));
+  const runtimes = [];
+  t.after(async () => {
+    for (const gate of gates) gate.resolve();
+    for (const runtime of runtimes) { runtime.stop(); await runtime.whenIdle(); }
+    if (previousShared === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = previousShared;
+    fs.rmSync(sharedDir, { recursive: true, force: true });
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+  const anchorPath = path.join(sharedDir, 'collector-anchor.json');
+  let cursorTokens = 12;
+  function start() {
+    const collectorPath = require.resolve('../../src/shared/collector');
+    delete require.cache[collectorPath];
+    const calls = [];
+    const updates = [];
+    const runtime = require(collectorPath).startCollector({
+      clients: 'codex,cursor', allTimeSince: '2024-01-01', commandTimeoutMs: 1000,
+      homeDir, env: {}, osInfo: {}, deviceId: 'test', agentVersion: 'test',
+      historyEnabled: false, projectsEnabled: false, watchEnabled: false, intervalMs: 600000,
+      wslScanEnabled: false, codexLocalUsageEnabled: false, sessionActivityPolling: false,
+      pricingCatalogTimers: { setTimeout: () => 1, clearTimeout() {} },
+      onUpdate: summary => { updates.push(summary); },
+      runTokscale: async input => {
+        calls.push({ clients: input.clients, flags: input.flags.join(' ') });
+        const cursor = input.clients === 'cursor';
+        const client = cursor ? 'cursor' : 'codex';
+        return { entries: [{ client, sessionId: `${client}-session`, model: `${client}-model`, input: cursor ? cursorTokens : 10, output: 0, cost: 0 }] };
+      }
+    });
+    runtimes.push(runtime);
+    return { runtime, calls, updates };
+  }
+
+  const first = start();
+  await until(() => fs.existsSync(anchorPath) && JSON.parse(fs.readFileSync(anchorPath, 'utf8')).cursorSnapshotKey);
+  async function stop(runtime) {
+    runtime.stop();
+    // The mocked import ignores cancellation; release it so the close barrier can settle.
+    for (const gate of gates) gate.resolve();
+    await runtime.whenIdle();
+  }
+  await stop(first.runtime);
+
+  const restarted = start();
+  await until(() => restarted.updates.length > 0);
+  await restarted.runtime.whenIdle();
+  const native = restarted.calls.filter(call => call.clients === 'codex').map(call => call.flags);
+  assert.ok(native.length > 0 && native.every(flags => flags === '--today'), `the anchor covers month and all-time: ${native}`);
+  assert.equal(restarted.updates.at(-1).allTime.clients.cursor, 12);
+  await stop(restarted.runtime);
+
+  // A cache that moved while the app was closed is still reconciled in full.
+  cursorTokens = 30;
+  const moved = start();
+  await until(() => moved.updates.some(update => update.allTime.clients.cursor === 30));
+  await moved.runtime.whenIdle();
+  assert.ok(moved.calls.some(call => call.clients === 'codex' && call.flags.includes('--since')));
+});
