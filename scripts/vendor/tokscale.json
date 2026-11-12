@@ -3,58 +3,58 @@
   "modeNote": "\"override\": ensure-vendored-tokscale.js swaps in the pinned fork build described below, and the two verify-vendored-tokscale*.js gates run against it. \"upstream\": ensure-vendored-tokscale.js no-ops (no download or replacement) and the plain npm-installed tokscale is authoritative — but both verify-vendored-tokscale*.js gates keep running, now against that npm-installed binary, so CI still fails if it doesn't actually cover DEFAULT_CLIENTS or regressed DSH parsing. `override` remains required while Token Monitor depends on downstream functionality the installed upstream release does not provide. The upstream scanner and DSH patches may be retired once equivalent fixes ship officially; the session/workspace reporting capability is a persistent Token Monitor requirement, so flipping to `upstream` is correct only when an official release provides an equivalent report surface. Without it the collector still runs (the scan falls back to `client,session,model` and the file-reading resolvers answer), but scan-backed session timestamps and project attribution narrow to the clients that have a resolver. The pin fields (commit/releaseTag/platforms) stay in place either way, so flipping back to \"override\" for a future upstream lag is editing this file again rather than re-adding infrastructure; baseVersion is not one of them — it tracks the installed dependency in both modes (see baseVersionNote). While the client catalog has forkOnly clients (CatPaw, Qoder CN), \"upstream\" fails verify-vendored-tokscale-clients.js by design: the upstream binary does not accept those fork-owned client ids, and failing closed beats silently reporting zero usage for them.",
   "upstream": "junhoyeo/tokscale",
   "fork": "Javis603/tokscale",
-  "commit": "2a0d6adc3c72efcbeff7bacd722b0abf2d241f52",
+  "commit": "f1b812662f920868543dcc9f5c93cbb1d1f2681d",
   "commitTitle": "fix(qoder): reconcile request copies and preserve token buckets",
   "baseVersion": "4.22.0",
   "baseVersionNote": "The npm-installed @tokscale/cli-<platform> package version this manifest is aligned with. It tracks the dependency in BOTH modes, and two gates enforce that: ensure-vendored-tokscale.js refuses to swap under \"override\" when the installed package reports something else, and verify-vendored-tokscale-release.js (plus its real-manifest test, so npm run verify catches it too) rejects any manifest whose baseVersion disagrees with @tokscale/cli optionalDependencies. So a tokscale bump always has to touch this file — either pin a new build or flip the mode — instead of silently leaving a stale override in place.",
   "releaseRepo": "Javis603/tokscale",
-  "releaseTag": "token-monitor-2a0d6adc",
-  "reason": "Retains the fork's session/workspace reports, parent links, performance timing, custom-price authority and fork-only clients on the 4.22.0 npm baseline. Aligns native parsing with upstream b0991187, including Antigravity protobuf token corrections, BB mirror deduplication, OMP routing attribution and Kimi K3.1 Pro pricing. Qoder international and CN share upstream transcript parsing with independent source partitions and reported tokens only; CN retains legacy SQLite, released session identities, bounded reads, cache fallback and inclusive-input accounting. Native Windows reports leave unrelated WSL source-cache paths unprobed. Explicit WSL --home scans may prune missing non-retained sources only within the selected home, while Claude history is filtered by requested roots before source existence probes. Parser/cache migrations preserve compatible released cache data without requiring a cache reset. The subsequent upstream 4.22.0 tag adds website changes and version metadata, with no native Rust source changes beyond this frozen target. Qoder request copies reconcile completed counters and Gemini inclusive prompts before cache splitting; independent reasoning remains an additive reported bucket.",
+  "releaseTag": "token-monitor-f1b81266",
+  "reason": "Retains the fork's session/workspace reports, parent links, performance timing, custom-price authority and fork-only clients on the 4.22.0 npm baseline. Aligns the fork with upstream 6bb44540 (4.22.0), including Antigravity protobuf token corrections, BB mirror deduplication, OMP routing attribution and Kimi K3.1 Pro pricing. Qoder international and CN share upstream transcript parsing with independent source partitions and reported tokens only; CN retains legacy SQLite, released session identities, bounded reads, cache fallback and inclusive-input accounting. Native Windows reports leave unrelated WSL source-cache paths unprobed. Explicit WSL --home scans may prune missing non-retained sources only within the selected home, while Claude history is filtered by requested roots before source existence probes. Parser/cache migrations preserve compatible released cache data without requiring a cache reset. This pin includes upstream 4.22.0 website changes and version metadata; native Rust sources match the prior 2a0d6adc vendor build. Qoder request copies reconcile completed counters and Gemini inclusive prompts before cache splitting; independent reasoning remains an additive reported bucket.",
   "platforms": {
     "android-arm64": {
       "package": "@tokscale/cli-android-arm64",
       "asset": "tokscale-android-arm64",
-      "sha256": "38fa85c7874c3b8a2da44c956856225ae23fe19599ea68bba8a35d48b0494d25"
+      "sha256": "b7bab5d785f380e4f77ac4c15356f8105686acb92b4191b0a6e52588fe9e898f"
     },
     "darwin-arm64": {
       "package": "@tokscale/cli-darwin-arm64",
       "asset": "tokscale-darwin-arm64",
-      "sha256": "1761b2416c9640a928ad5178b8805f590c152384f6d7c80ff4b5a1085a0f1b86"
+      "sha256": "25c68c7fc5c3b18da1458e488ae8942b41f3f9c5d483d0a220a8ef3a4f8fc3d7"
     },
     "darwin-x64": {
       "package": "@tokscale/cli-darwin-x64",
       "asset": "tokscale-darwin-x64",
-      "sha256": "7646d7dd1f5e7beb07f0916504a63db07ad8d25aaf2d4948236f57640eb3dba6"
+      "sha256": "e42fc16ce1e1b3e70c219fb15463c210076c4c887e3aac63165509409c147a49"
     },
     "linux-arm64": {
       "package": "@tokscale/cli-linux-arm64-gnu",
       "asset": "tokscale-linux-arm64",
-      "sha256": "5b86e14e7354754824e2291e10ddab9bc6c386b8333462b193d4514eaec36715"
+      "sha256": "e3e0d414869ebb33cd97871c59241b01ff46f55dabf30db37859288a97936bfb"
     },
     "linux-arm64-musl": {
       "package": "@tokscale/cli-linux-arm64-musl",
       "asset": "tokscale-linux-arm64-musl",
-      "sha256": "33a9cdf720c1ec38fb854bcbd6caafe2175dac1792e0ea3322efad447cb26cb0"
+      "sha256": "1ae42313911782978b84ca93fdeafa12e0fa7a9b3bd444086dc977834ff1955a"
     },
     "linux-x64": {
       "package": "@tokscale/cli-linux-x64-gnu",
       "asset": "tokscale-linux-x64",
-      "sha256": "5e13709503490a18fc4f8fab95367c8aa33d2dacdcad5fe216bbbe729c8c29cc"
+      "sha256": "fb9bfc2f39d82b40bd4b587110dec2ab8a6eb945d88b95e98caa2ddc9745f6c6"
     },
     "linux-x64-musl": {
       "package": "@tokscale/cli-linux-x64-musl",
       "asset": "tokscale-linux-x64-musl",
-      "sha256": "d559caa7f41937ff377c841c009a37c4c4fbe7cf920706a0cad89664c034d196"
+      "sha256": "6aa65c2c543e1e4e17586c777e8a84a479bff9a1f1044ee45f31a79cb2575d9c"
     },
     "win32-arm64": {
       "package": "@tokscale/cli-win32-arm64-msvc",
       "asset": "tokscale-win32-arm64.exe",
-      "sha256": "06118eeb6d25183141ef79388828fe9a9c0ebf23c4e0080392ca9ed394513e78"
+      "sha256": "87c404f2fae1f0058a64592900d8d1ad0018258d7b2d8f66f7e9766a45698b91"
     },
     "win32-x64": {
       "package": "@tokscale/cli-win32-x64-msvc",
       "asset": "tokscale-win32-x64.exe",
-      "sha256": "58d177fa58a9dd924e2ef16ff377597dd2f2eaf47c323b6b70e1b378105f64d9"
+      "sha256": "a61a444aa128beb121318d775dc4d5eeab7871400af9c4d4c987bf521118fdaf"
     }
   }
 }
