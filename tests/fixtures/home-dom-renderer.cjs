@@ -114,6 +114,21 @@ async function check() {
       label.blur();
     }
     sessions[0].models = { 'gpt-5': 100000 }; renderHome();
+    // A new weekly column changes content width, not the observed viewport.
+    let day = '2026-11-14';
+    window.TokenMonitorUsageCharts = { ...charts, localDayKey: () => day };
+    renderHome();
+    state.homeActivityFollowEnd = true; applyHomeActivityScroll(scroller);
+    const oldWidth = scroller.scrollWidth;
+    day = '2026-11-15'; renderHome();
+    assert.ok(scroller.scrollWidth > oldWidth, 'new week grows the heatmap');
+    assert.ok(Math.abs(scroller.scrollLeft - (scroller.scrollWidth - scroller.clientWidth)) < 1, 'following newest week stays at the right edge');
+    state.homeActivityFollowEnd = false;
+    state.homeActivityScrollLeft = 100; scroller.scrollLeft = 100;
+    day = '2026-11-22'; renderHome();
+    assert.equal(scroller.scrollLeft, 100, 'manual scrollback stays put across new weeks');
+    window.TokenMonitorUsageCharts = charts; renderHome();
+
 
     // Ranking changes and optional fields must not move focus to a different row.
     const firstTool = document.querySelector('.home-tool-row'); firstTool.tabIndex = 0; firstTool.focus();

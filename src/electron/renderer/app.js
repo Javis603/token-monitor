@@ -7549,6 +7549,7 @@ function updateHomeActivity() {
       setupHomeActivityHover(scroller);
     }
   }
+  if (scroller) applyHomeActivityScroll(scroller);
   if (scroller && state.animateChartsOnRender && scroller.clientWidth > 0) reveal();
   state.homeActivityTooltipUpdate?.();
 }
