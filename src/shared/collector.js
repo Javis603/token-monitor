@@ -3271,6 +3271,7 @@ function startCollector(options) {
         if (entry.data?.lastActivityDay) activityDaysAnchor[client] = entry.data.lastActivityDay;
       }
       if (!anchored && captured) {
+        const cursorSnapshotKey = snapshotUsageKey(tickCursorSnapshot);
         anchor = {
           dateKey: todayKey,
           calendarKey: tickCalendarKey,
@@ -3285,7 +3286,7 @@ function startCollector(options) {
           catalogProjects: captured.catalogProjects,
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
           ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {}),
-          ...(snapshotUsageKey(tickCursorSnapshot) ? { cursorSnapshotKey: snapshotUsageKey(tickCursorSnapshot) } : {})
+          ...(cursorSnapshotKey ? { cursorSnapshotKey } : {})
         };
         wslAnchor = captured.wslBundle;
         wslStatusAnchor = captured.wslStatus || null;
