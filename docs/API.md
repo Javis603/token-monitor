@@ -6,7 +6,7 @@ The hub exposes a small JSON HTTP API.
 
 All data endpoints require the configured shared secret. `/api/health` is always unauthenticated, and the Worker can also serve `GET /api/public/stats` without a secret when `PUBLIC_STATS_ENABLED=1` (see [the Worker README](../worker/README.md)).
 
-A Node hub started without `TOKEN_MONITOR_SECRET` authorizes every request but binds to loopback only, so it is not reachable from other devices. A Worker without a secret refuses every data route with `503`.
+A Node hub started without `TOKEN_MONITOR_SECRET` authorizes every request but binds to loopback only, so it is not reachable from other devices. A Worker without a secret refuses every other data route with `503`.
 
 Prefer a header (first-party clients already do this):
 
