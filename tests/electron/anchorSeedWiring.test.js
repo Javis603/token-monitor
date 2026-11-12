@@ -88,3 +88,10 @@ test('first-scan previews are shown, over the seed when there is one, and never 
   assert.match(functionSource('function stopLocalCollector('), /anchorSeedDevice = null;/);
   assert.match(functionSource('function primeLocalStatsFromAnchor('), /anchorSeedDevice = visible;/);
 });
+
+test('a client removed during the first scan is archived from the seed, never a preview', () => {
+  const update = functionSource('function updateArchivedClientUsage(');
+  // A preview's unscanned windows would be archived as zero for that client.
+  assert.match(update, /mode === 'local' && !lastCollectedDevice \? anchorSeedDevice : localArchiveSourceDevice\(\)/);
+  assert.match(update, /captureArchivedClientUsage\(archive, source, removedClients\)/);
+});

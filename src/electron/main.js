@@ -3064,7 +3064,11 @@ function updateArchivedClientUsage(previousClients, nextClients) {
   const removedClients = removedTrackedClients(previousClients, nextClients);
   let archive = pruneArchivedClientUsage(settings.archivedClientUsage, nextClients);
   if (removedClients.length > 0) {
-    archive = captureArchivedClientUsage(archive, localArchiveSourceDevice(), removedClients);
+    // Before this run's first complete record, localDevice may be a first-scan
+    // preview whose unscanned windows would archive as zero. Only the seed, or
+    // nothing, stands for the client then.
+    const source = mode === 'local' && !lastCollectedDevice ? anchorSeedDevice : localArchiveSourceDevice();
+    archive = captureArchivedClientUsage(archive, source, removedClients);
   }
   settings.archivedClientUsage = archive;
 }
