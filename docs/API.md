@@ -54,7 +54,7 @@ Example response:
 
 ## `GET /api/public/stats`
 
-Cloudflare Worker only. Served without authentication when `PUBLIC_STATS_ENABLED=1`; otherwise responds `404`. The response is the shared aggregate with the `devices` list removed and identity-bearing fields stripped: account hashes, labels and plan fields under `limits.providers`, and project identity and session titles under `periods`. Session entries keep their `sessionId` and per-session usage totals. It carries no subscription version, sync-settings revisions, conversation titles or client health. See [the Worker README](../worker/README.md) for deployment settings.
+Cloudflare Worker only. Served without authentication when `PUBLIC_STATS_ENABLED` is `1`, `true`, `yes`, or `on` (case-insensitive, surrounding whitespace ignored); otherwise responds `404`. The response is the shared aggregate with the `devices` list removed and identity-bearing fields stripped: account hashes, labels and plan fields under `limits.providers`, and project identity and session titles under `periods`. Session entries keep their `sessionId` and per-session usage totals. It carries no subscription version, sync-settings revisions, conversation titles or client health. See [the Worker README](../worker/README.md) for deployment settings.
 
 ## `POST /api/ingest`
 
