@@ -2703,6 +2703,7 @@ function startCollector(options) {
   const runtimeAbortController = new AbortController();
   const runtimeSignal = runtimeAbortController.signal;
   let startBarrier = options.startBarrier ? Promise.resolve(options.startBarrier) : null;
+  let cursorRestartRead = null;
   const trackedClients = new Set(normalizeClientsCsv(clients).split(',').filter(Boolean));
   const reasonixNativeSessionsEnabled = options.reasonixNativeSessionsEnabled === true;
   const reasonixNativeSessionCache = reasonixNativeSessionsEnabled && trackedClients.has('reasonix')
@@ -3485,7 +3486,10 @@ function startCollector(options) {
         // read schedules a tick, so a failed reconcile would otherwise loop.
         if (publishedCursorRevision === -1 && anchor?.cursorSnapshotKey
           && cursorSource.getSnapshot().revision === 0) {
-          try { await cursorSource.readCache(context); } catch (_) {}
+          // whenIdle() waits on this read: the tick has not entered tickInFlight yet.
+          const read = cursorSource.readCache(context).catch(() => {});
+          cursorRestartRead = read;
+          try { await read; } finally { if (cursorRestartRead === read) cursorRestartRead = null; }
         }
         const targets = normalizeClientsCsv(tickOptions.targetClients).split(',').filter(Boolean);
         const cursorSelected = !tickOptions.todayOnly || targets.length === 0 || targets.includes('cursor')
@@ -3974,6 +3978,9 @@ function startCollector(options) {
     // It clears startBarrier before this continuation asks again; the regression
     // test pins that startup ordering because reversing it would microtask-spin.
     if (startBarrier) return Promise.resolve(startBarrier).then(() => whenIdle());
+    // Same ordering as the barrier: the waiting tick resumes, and enters
+    // tickInFlight, before this continuation asks again.
+    if (cursorRestartRead) return cursorRestartRead.then(() => whenIdle());
     const usageIdle = !tickInFlight ? Promise.resolve() : new Promise((resolve) => idleWaiters.push(resolve));
     return usageIdle.then(() => activityUpdate).then(() => stopped
       ? Promise.all([pricingRefresher?.whenIdle(), codexLocalSource?.whenIdle(), cursorSource?.whenIdle()]) : undefined);
