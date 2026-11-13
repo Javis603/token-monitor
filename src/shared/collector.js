@@ -39,7 +39,9 @@ const { createWatcherHost } = require('./watcherHost');
 const { createSessionActivityScheduler } = require('./sessionActivityScheduler');
 const { activityWatchSources, activityClientsForPath, activityWatchIgnored } = require('./sessionActivityWatch');
 const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories, mergeDailyMaps } = require('./history');
-const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
+const {
+  graphFromDailyHistoryArchive, readDailyHistoryArchive, retainDailyHistory, retainLiveDailyHistory
+} = require('./dailyHistoryArchive');
 const {
   createSubprocessTermination,
   terminationUnconfirmedError
@@ -810,6 +812,23 @@ function normalizeHistoryIntervalMs(value) {
   return HISTORY_INTERVAL_VALUES.has(parsed) ? parsed : DEFAULT_HISTORY_INTERVAL_MS;
 }
 
+// History as the daily archive's graph gives it. Without a fresh graph the
+// archive cannot vouch for every active day, so the lifetime count is marked
+// incomplete. Null when the archive holds no days.
+function historyFromArchiveGraph(graph, { capDays, todayKey, complete }) {
+  const history = normalizeHistory(parseGraphResult(graph), { capDays, todayKey });
+  if (!complete) history.summary.activeDaysComplete = false;
+  return history.daily.length || history.monthly.length ? history : null;
+}
+
+// The archive alone, read-only, for a cold start to show until the first graph
+// lands. Capturing is the collector's job: a read here is not an observation.
+function archivedHistory({ timeZone, todayKey, capDays = HISTORY_CAP_DAYS, ...archiveOptions } = {}) {
+  const archive = readDailyHistoryArchive({ ...archiveOptions, timeZone });
+  const graph = graphFromDailyHistoryArchive([], archive, { timeZone, todayKey });
+  return historyFromArchiveGraph(graph, { capDays, todayKey, complete: false });
+}
+
 async function collectHistoryOnce(options) {
   throwIfAborted(options.signal);
   const startedAt = Date.now();
@@ -889,9 +908,9 @@ async function collectHistoryOnce(options) {
         capDays,
         writeEnabled: options.dailyHistoryArchiveWriteEnabled
       });
-      const retained = normalizeHistory(parseGraphResult(retainedGraph), { capDays, todayKey });
-      if (failureCode === 'history-graph-failed') retained.summary.activeDaysComplete = false;
-      const result = retained.daily.length || retained.monthly.length ? retained : null;
+      const result = historyFromArchiveGraph(retainedGraph, {
+        capDays, todayKey, complete: failureCode !== 'history-graph-failed'
+      });
       reportStatus(failureCode === null);
       return withLocalHistory(result);
     } catch (error) {
@@ -4147,6 +4166,7 @@ module.exports = {
   applySessionTimestamps: applySessionMetadata,
   projectIdentity,
   projectPathFromJsonl,
+  archivedHistory,
   collectHistoryOnce,
   collectUsageOnce,
   clientActivityDaysFromHistory,

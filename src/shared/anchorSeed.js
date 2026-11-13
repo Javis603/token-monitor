@@ -1,6 +1,6 @@
 'use strict';
 
-const { collectorAnchorTrust, computePeriodWindows, qoderCnSourcesForClients } = require('./collector');
+const { archivedHistory, collectorAnchorTrust, computePeriodWindows, qoderCnSourcesForClients } = require('./collector');
 const { mergePeriods } = require('./usage');
 const { filterReasonixSyntheticSessions } = require('./providers/reasonix/sessionGuard');
 
@@ -39,6 +39,9 @@ function deviceRecordFromAnchor(saved, options = {}) {
     wslSupported = false,
     hostname = '',
     platform = '',
+    historyEnabled = true,
+    dailyHistoryArchiveEnabled = false,
+    dailyHistoryArchiveOptions = {},
     now = new Date()
   } = options;
   const qoderCnSources = qoderCnSourcesForClients(clients, { homeDir, env, platform: sourcePlatform });
@@ -82,6 +85,22 @@ function deviceRecordFromAnchor(saved, options = {}) {
       ? { state: 'disabled', detected: [], withData: [] }
       : (saved.wslStatus || null);
   const at = new Date(trust.capturedAtMs).toISOString();
+  // History waits for `tokscale graph`, which runs after all three windows. The
+  // daily archive already holds every day the last graphs saw, so show that in
+  // the meantime. It is read for today's calendar, not the anchor's. An archive
+  // that cannot be read leaves History to the first scan, as before.
+  let history = null;
+  if (historyEnabled !== false && dailyHistoryArchiveEnabled === true) {
+    try {
+      history = archivedHistory({
+        ...dailyHistoryArchiveOptions,
+        timeZone: currentWindows.timeZone,
+        todayKey: currentWindows.today.key
+      });
+    } catch (_) {
+      history = null;
+    }
+  }
   return {
     ...envelope,
     hostname,
@@ -106,7 +125,8 @@ function deviceRecordFromAnchor(saved, options = {}) {
     month: withWsl(saved.month, wsl?.month),
     allTime: withWsl(saved.allTime, wsl?.allTime),
     ...(Object.prototype.hasOwnProperty.call(saved, 'nativeSessions') ? { nativeSessions: nativeView(saved.nativeSessions) } : {}),
-    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeProjects') ? { nativeProjects: nativeView(saved.nativeProjects) } : {})
+    ...(Object.prototype.hasOwnProperty.call(saved, 'nativeProjects') ? { nativeProjects: nativeView(saved.nativeProjects) } : {}),
+    ...(history ? { historyAvailable: true, history } : {})
   };
 }
 
