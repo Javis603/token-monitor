@@ -88,6 +88,10 @@ const usageOptions = {
   clients,
   allTimeSince,
   commandTimeoutMs,
+  // Preserve an explicit legacy timeout for every period unless the operator
+  // supplies the new full-history override. Unconfigured agents use its default.
+  allTimeTimeoutMs: args.allTimeTimeoutMs ?? (process.env.TOKEN_MONITOR_ALL_TIME_TIMEOUT_MS?.trim()
+    || (args.timeoutMs || process.env.TOKEN_MONITOR_TOKSCALE_TIMEOUT_MS ? commandTimeoutMs : undefined)),
   deviceId,
   agentVersion: appVersion(),
   agentRuntime: 'headless-agent',
