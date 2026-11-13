@@ -83,5 +83,25 @@
     return [...selected, ...(checked ? IDS : [])].join(',');
   }
 
-  return { IDS, isQoder, groupRows, displayPreference, expandOrder, orderCommit, trackingState, setTracked };
+  function healthDetail(editions) {
+    const groups = (type) => editions.map(({ detail }) => detail.groups.find(group => group.id === type));
+    const sources = groups('source');
+    const data = groups('data');
+    const checkedCount = sources.reduce((total, group) => total + group.checkedCount, 0);
+    const detectedCount = sources.reduce((total, group) => total + group.detectedCount, 0);
+    return {
+      groups: [
+        { ...sources[0], checkedCount, detectedCount, state: checkedCount === 0 ? 'unknown' : detectedCount > 0 ? 'detected' : 'missing', checks: sources.flatMap(group => group.checks) },
+        { id: 'collection', key: 'settings.tools.health.sync', editions: editions.map(({ id, detail }) => ({ id, collection: detail.groups.find(group => group.id === 'collection') })) },
+        { ...data[0], periods: ['today', 'month', 'allTime'].map(period => ({
+          period,
+          tokens: data.reduce((total, group) => total + group.periods.find(entry => entry.period === period).tokens, 0),
+          cost: data.reduce((total, group) => total + group.periods.find(entry => entry.period === period).cost, 0)
+        })), lastActivityDay: data.map(group => group.lastActivityDay).filter(Boolean).sort().at(-1) || '' }
+      ],
+      notes: editions.flatMap(({ id, detail }) => detail.notes.map(note => ({ ...note, clientId: id })))
+    };
+  }
+
+  return { IDS, isQoder, groupRows, displayPreference, expandOrder, orderCommit, trackingState, setTracked, healthDetail };
 });

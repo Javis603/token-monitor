@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { groupRows, displayPreference, expandOrder, orderCommit, trackingState, setTracked } = require('../../src/electron/renderer/qoderDisplay');
+const { groupRows, displayPreference, expandOrder, orderCommit, trackingState, setTracked, healthDetail } = require('../../src/electron/renderer/qoderDisplay');
 const { clientsCsvForSetting, DEFAULT_CLIENTS } = require('../../src/shared/clientTracking');
 
 test('combines visible editions without changing source rows, totals or unrelated identities', () => {
@@ -72,4 +72,27 @@ test('fresh defaults enable both but saved CN-only, empty and explicit selection
   assert.equal(setTracked('codex,qodercn', true), 'codex,qoder,qodercn');
   assert.equal(setTracked('qoder,codex,qodercn', false), 'codex');
   assert.equal(setTracked('codex,qodercn', false), 'codex');
+});
+
+test('one health panel combines edition source checks and usage while retaining per-edition collection and diagnostic identity', () => {
+  const edition = (id, tokens, state, day) => ({ id, detail: {
+    groups: [
+      { id: 'source', key: 'source', state: tokens ? 'detected' : 'missing', checkedCount: 1, detectedCount: tokens ? 1 : 0, checks: [{ id: id + '-projects', exists: tokens > 0 }] },
+      { id: 'collection', key: 'collection', state },
+      { id: 'data', key: 'data', periods: ['today', 'month', 'allTime'].map(period => ({ period, tokens, cost: tokens / 100 })), lastActivityDay: day }
+    ], notes: [{ code: 'source-missing', group: 'source', tone: 'muted' }]
+  } });
+  const source = [edition('qoder', 120, 'local', '2026-11-13'), edition('qodercn', 80, 'notTracked', '2026-11-14')];
+  const before = structuredClone(source);
+  const detail = healthDetail(source);
+  assert.deepEqual(detail.groups.map(group => group.id), ['source', 'collection', 'data']);
+  assert.equal(detail.groups[0].checkedCount, 2);
+  assert.equal(detail.groups[0].detectedCount, 2);
+  assert.deepEqual(detail.groups[0].checks.map(check => check.id), ['qoder-projects', 'qodercn-projects']);
+  assert.deepEqual(detail.groups[1].editions.map(row => [row.id, row.collection.state]), [['qoder', 'local'], ['qodercn', 'notTracked']]);
+  assert.deepEqual(detail.groups[2].periods.map(row => [row.tokens, row.cost]), [[200, 2], [200, 2], [200, 2]]);
+  assert.equal(detail.groups[2].lastActivityDay, '2026-11-14');
+  assert.deepEqual(detail.notes.map(note => note.clientId), ['qoder', 'qodercn']);
+  assert.deepEqual(source, before);
+  assert.equal(healthDetail([edition('qoder', 0, 'notTracked', ''), edition('qodercn', 0, 'notTracked', '')]).groups[0].state, 'missing');
 });

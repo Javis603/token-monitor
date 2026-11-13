@@ -9358,21 +9358,10 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-author-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .plugin-author-heading .plugin-detail-heading { margin: 0; }
 
-/* A product family is presentation only; each edition keeps its existing controls. */
-.tool-preference-row.qoder-settings-group:not(.is-filtered-out) { display: block; }
-.qoder-group-summary { display: flex; align-items: center; gap: 7px; min-height: 28px; list-style: none; cursor: pointer; }
-.qoder-group-summary::-webkit-details-marker { display: none; }
-.qoder-group-summary > input { margin: 0 2px; }
-.qoder-group-summary > .tool-preference-name { flex: 1; }
-.qoder-group-summary > .cursor-disclosure-icon { margin: 0 7px; }
-.qoder-settings-group[open] > .qoder-group-summary > .cursor-disclosure-icon { transform: rotate(-180deg); }
-.qoder-version-options { margin: 5px 0 7px 12px; padding-left: 10px; border-left: 1px solid var(--border); }
-.qoder-version-options .tool-preference-row { transform: none; }
-.qoder-separate-label { display: flex !important; align-items: center; gap: 8px; margin: 10px 0 4px; padding-top: 8px; border-top: 1px solid var(--border); }
-.qoder-separate-label input { margin: 0; }
-
-.settings-panel .qoder-group-summary > input[type="checkbox"],
-.settings-panel .qoder-separate-label > input[type="checkbox"] { width: 14px; height: 14px; min-width: 14px; flex: 0 0 14px; padding: 0; margin: 0 4px; }
-.settings-panel .qoder-separate-label { color: var(--fg); font-size: 0.6875rem; }
-.qoder-version-options { border-left-color: rgba(var(--line-rgb), 0.22); }
-.qoder-separate-label { border-top-color: rgba(var(--line-rgb), 0.22); }
+/* Qoder edition controls live directly in the standard collection section. */
+.qoder-collection-settings { display: grid; gap: 5px; }
+.qoder-edition-control { display: flex; align-items: center; gap: 5px; }
+.qoder-edition-control > .checkbox-label { flex: 1; }
+.qoder-edition-controls { display: flex; align-items: center; gap: 4px; }
+.qoder-edition-controls button { flex: 0 0 22px; }
+.qoder-collection-settings > .settings-note { margin: 0; }

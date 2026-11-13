@@ -171,7 +171,7 @@ const clientRescanStateApi = window.TokenMonitorClientRescanState;
 const serviceStatusPresentationApi = window.TokenMonitorServiceStatusPresentation;
 const clientDisplayPreferencesApi = window.TokenMonitorClientDisplayPreferences;
 const qoderDisplayApi = window.TokenMonitorQoderDisplay;
-const qoderSettingsGroupApi = window.TokenMonitorQoderSettingsGroup;
+const qoderCollectionSettingsApi = window.TokenMonitorQoderCollectionSettings;
 const settingsListFilterApi = window.TokenMonitorSettingsListFilter;
 const customPricingFormApi = window.TokenMonitorCustomPricingForm;
 const viewDisplayPreferencesApi = window.TokenMonitorViewDisplayPreferences;
@@ -356,7 +356,7 @@ state.codexResetForecastRequestedAt = 0;
 state.codexResetForecastRetryTimer = null;
 state.clientRescans = clientRescanStateApi.createClientRescanState({
   onChange: (clientId) => {
-    if (state.clientHealthExpanded === clientId) refillOpenClientHealthPanel();
+    if (state.clientHealthExpanded === clientId || (state.clientHealthExpanded === 'qoder' && qoderDisplayApi.isQoder(clientId))) refillOpenClientHealthPanel();
   }
 });
 state.toolPreferenceRenderSignature = '';
@@ -11351,7 +11351,8 @@ function localClientSources(clientId) {
   const identity = clientSourcesIdentity(clientId);
   const exactSources = exactLocalClientSources(clientId);
   const key = clientSourceCacheApi.clientSourceRequestKey(identity);
-  const pendingSources = key && state.clientSourcesKey === key;
+  const pendingSources = key && (state.clientSourcesKey === key
+    || (qoderDisplayApi.isQoder(clientId) && state.clientSourcesKey === clientSourcesPanelKey('qoder')));
   const sources = pendingSources
     ? (exactSources ?? clientSourceCacheApi.readLatestClientSources(state.clientSources, identity) ?? [])
       .map((source) => ({ ...source, exists: false, pending: true }))
@@ -11361,26 +11362,31 @@ function localClientSources(clientId) {
   return [...(sources || []), { id: 'wsl-home', dir: '', exists: true }];
 }
 
+function clientSourcesPanelIds(clientId) {
+  return clientId === 'qoder' ? qoderDisplayApi.IDS : [String(clientId || '')];
+}
+
+function clientSourcesPanelKey(clientId) {
+  const keys = clientSourcesPanelIds(clientId).map(id => clientSourceCacheApi.clientSourceRequestKey(clientSourcesIdentity(id)));
+  return keys.every(Boolean) ? (keys.length === 1 ? keys[0] : JSON.stringify(keys)) : '';
+}
+
 function loadClientSources(clientId, options = {}) {
-  const id = String(clientId || '');
-  const identity = clientSourcesIdentity(id);
-  const key = clientSourceCacheApi.clientSourceRequestKey(identity);
+  const panelId = state.clientHealthExpanded === 'qoder' && qoderDisplayApi.isQoder(clientId) ? 'qoder' : clientId;
+  const ids = clientSourcesPanelIds(panelId);
+  const identities = ids.map(clientSourcesIdentity);
+  const key = clientSourcesPanelKey(panelId);
   if (!key) return false;
   if (!options.force && state.clientSourcesKey === key) return true;
-  if (
-    !options.force
-    && clientSourceCacheApi.readClientSources(state.clientSources, identity) !== null
-  ) return false;
+  if (!options.force && identities.every(identity => clientSourceCacheApi.readClientSources(state.clientSources, identity) !== null)) return false;
   state.clientSourcesKey = key;
   const request = ++state.clientSourcesRequest;
-  void window.tokenMonitor?.clientSources?.(id).then((result) => {
-    if (!result || typeof result !== 'object') throw new TypeError('Invalid client source result');
+  void Promise.all(ids.map(id => window.tokenMonitor?.clientSources?.(id))).then((results) => {
+    if (results.some(result => !result || typeof result !== 'object')) throw new TypeError('Invalid client source result');
     if (state.clientSourcesRequest !== request || state.clientSourcesKey !== key) return;
-    clientSourceCacheApi.writeClientSources(
-      state.clientSources,
-      identity,
-      Array.isArray(result.sources) ? result.sources : []
-    );
+    for (let index = 0; index < identities.length; index += 1) {
+      clientSourceCacheApi.writeClientSources(state.clientSources, identities[index], Array.isArray(results[index].sources) ? results[index].sources : []);
+    }
     state.clientSourcesKey = '';
     refillOpenClientHealthPanel();
   }).catch(() => {
@@ -11394,7 +11400,7 @@ function loadClientSources(clientId, options = {}) {
 function refillOpenClientHealthPanel() {
   const clientId = state.clientHealthExpanded;
   if (!clientId) return;
-  const row = els.clientDisplayList?.querySelector(`.tool-preference-row:not(.qoder-settings-group)[data-client="${CSS.escape(clientId)}"]`);
+  const row = els.clientDisplayList?.querySelector(`.tool-preference-row[data-client="${CSS.escape(clientId)}"]`);
   const container = row?.querySelector(':scope > .accordion-animated-container');
   if (container) fillClientHealthPanel(container, clientId);
 }
@@ -11402,6 +11408,12 @@ function refillOpenClientHealthPanel() {
 // Everything the panel draws beyond the health record itself: the numbers the
 // app already renders elsewhere, and this machine's own paths.
 function clientHealthDetailFor(clientId) {
+  return clientId === 'qoder'
+    ? qoderDisplayApi.healthDetail(qoderDisplayApi.IDS.map(id => ({ id, detail: clientEditionHealthDetail(id) })))
+    : clientEditionHealthDetail(clientId);
+}
+
+function clientEditionHealthDetail(clientId) {
   const options = {
     usage: clientPeriodUsage(clientId),
     sources: localClientSources(clientId),
@@ -11433,7 +11445,8 @@ function patchRenderedNode(current, next) {
     const value = next.getAttribute(name);
     if (current.getAttribute(name) !== value) current.setAttribute(name, value);
   }
-  if (current instanceof HTMLInputElement && current.id.startsWith('codexDots') && current.type === 'checkbox') {
+  if (current instanceof HTMLInputElement && current.type === 'checkbox'
+    && (current.id.startsWith('codexDots') || current.id.startsWith('toolTrackEnabled-qoder') || current.id === 'qoderSeparateDisplay')) {
     current.checked = next.checked;
   }
   const currentChildren = Array.from(current.childNodes);
@@ -11575,6 +11588,24 @@ function codexDotsSettingState(key) {
   return { checked, pending };
 }
 
+function qoderCollectionControls(group) {
+  const current = Object.assign({}, state.settings, ...pendingSettingsPatches);
+  return qoderCollectionSettingsApi.create({
+    document, t, editions: group.editions, clients: current.clients,
+    separate: current.separateQoderClients === true,
+    hidden: hiddenClientSet(), pinned: pinnedClientSet(),
+    visibilityIcon, pinIcon,
+    onTrack: async (id, checked) => {
+      const clients = Object.assign({}, state.settings, ...pendingSettingsPatches).clients;
+      const selected = new Set(String(clients || '').split(',').filter(Boolean));
+      if (checked) selected.add(id); else selected.delete(id);
+      await saveSettings({ clients: [...selected].join(',') });
+    },
+    onSeparate: checked => saveSettings({ separateQoderClients: checked }),
+    onVisibility: onClientVisibilityToggle, onPin: onClientPinnedToggle
+  });
+}
+
 function clientHealthGroup(group, notes, clientId) {
   const section = document.createElement('section');
   section.className = `tool-health-group tool-health-group-${group.id}`;
@@ -11599,7 +11630,8 @@ function clientHealthGroup(group, notes, clientId) {
       const addSource = document.createElement('button');
       addSource.type = 'button';
       addSource.className = 'tool-health-source-control tool-health-source-add';
-      addSource.setAttribute('aria-label', t('settings.tools.health.addCustomSource'));
+      addSource.setAttribute('aria-label', t('settings.tools.health.addCustomSource')
+        + (clientId === 'qoder' ? ` · ${t('settings.tools.qoder.global')}` : ''));
       addSource.append(customSourceIcon('add'));
       const label = document.createElement('span');
       label.textContent = addSource.getAttribute('aria-label');
@@ -11648,7 +11680,8 @@ function clientHealthGroup(group, notes, clientId) {
     const summary = document.createElement('div');
     summary.className = 'tool-health-group-summary';
     summary.textContent = t(`settings.tools.health.sync.${group.state}`);
-    body.append(summary);
+    if (clientId === 'qoder') body.append(qoderCollectionControls(group));
+    else body.append(summary);
     if (clientId === 'codex') {
       const row = document.createElement('label');
       row.className = 'checkbox-label codex-dots-setting';
@@ -11763,7 +11796,7 @@ function clientHealthGroup(group, notes, clientId) {
   for (const note of notes) {
     const line = document.createElement('div');
     line.className = `tool-health-note-line tone-${note.tone}`;
-    line.textContent = t(`settings.tools.health.code.${note.code}`);
+    line.textContent = `${note.clientId ? (note.clientId === 'qoder' ? t('settings.tools.qoder.global') : 'CN') + ': ' : ''}${t(`settings.tools.health.code.${note.code}`)}`;
     body.append(line);
   }
   if (group.id !== 'source') section.append(heading);
@@ -11896,7 +11929,14 @@ function clientHealthPanel(detail, clientId) {
       clientId
     ));
   }
-  box.append(groups, clientHealthActions(clientId, detail));
+  box.append(groups);
+  for (const id of clientSourcesPanelIds(clientId)) {
+    const actions = clientHealthActions(id, id === clientId && clientId !== 'qoder' ? detail : clientEditionHealthDetail(id));
+    if (clientId === 'qoder') {
+      for (const button of actions.querySelectorAll('button')) button.textContent += ` · ${id === 'qoder' ? t('settings.tools.qoder.global') : 'CN'}`;
+    }
+    box.append(actions);
+  }
   return inner;
 }
 
@@ -11971,7 +12011,7 @@ function renderWslPanel() {
 // `clientDisplayOrderCommit` decides, and the patch it returns is carried from
 // the local mirror to the save rather than derived twice — the mirror writes
 // the very keys that decision reads.
-const CLIENT_PREFERENCE_DRAG_EXCLUDED = 'button:not(.tool-preference-main), input, select, textarea, a, label, .accordion-animated-container, .qoder-version-options';
+const CLIENT_PREFERENCE_DRAG_EXCLUDED = 'button:not(.tool-preference-main), input, select, textarea, a, label, .accordion-animated-container';
 
 const clientPreferenceRowDrag = rowDragControllerApi.createRowDragController({
   dragSort: verticalDragSortApi,
@@ -12016,8 +12056,10 @@ function toolPreferenceQuery() {
 // detaches them from the document for good. Both lists follow the same rule so
 // the invariant is one rule, not a per-list exception.
 function toolPreferenceRows() {
-  const clients = clientDisplayPreferencesApi.orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients);
-  const matches = settingsListFilterApi.filterListItems(clients, state.toolSearchQuery, ({ id, label }) => `${label} ${id}`);
+  const ordered = clientDisplayPreferencesApi.orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients);
+  const order = qoderDisplayApi.displayPreference(ordered.map(client => client.id).join(','), false).split(',');
+  const clients = order.map(id => KNOWN_CLIENTS.find(client => client.id === id));
+  const matches = settingsListFilterApi.filterListItems(clients, state.toolSearchQuery, ({ id, label }) => id === 'qoder' ? `Qoder Qoder CN qodercn ${t('settings.tools.qoder.global')}` : `${label} ${id}`);
   return { clients, matched: new Set(matches.map(({ id }) => id)) };
 }
 
@@ -12064,14 +12106,12 @@ function renderToolPreferencesNow() {
     localDevice(),
     state.settings?.currencyRatesEffective || null
   ]);
-  const sourceSignature = clientSourceCacheApi.clientSourceRequestKey(
-    clientSourcesIdentity(state.clientHealthExpanded)
-  );
+  const sourceSignature = clientSourcesPanelKey(state.clientHealthExpanded);
   const { clients, matched } = toolPreferenceRows();
   // Every client keeps a row; a query with no match adds the no-matches note on
   // top of them, so the short-circuit compares against what this query is
   // expected to have produced.
-  const expectedRowCount = clients.length - 1 + (matched.size ? 0 : 1);
+  const expectedRowCount = clients.length + (matched.size ? 0 : 1);
   if (
     state.toolPreferenceRenderSignature
     && state.toolPreferenceRenderSignature === renderSignature
@@ -12105,13 +12145,12 @@ function renderToolPreferencesNow() {
   const hasHiddenClients = hidden.size > 0;
   if (els.resetClientDisplayOrderButton) els.resetClientDisplayOrderButton.disabled = !hasCustomOrder && !hasPinnedClients;
   if (els.showAllClientsButton) els.showAllClientsButton.disabled = !hasHiddenClients;
-  const qoderVersionRows = [];
   for (const { id, label } of clients) {
     const row = document.createElement('div');
     row.className = 'tool-preference-row';
     row.dataset.client = id;
-    const isHidden = hidden.has(id);
-    const isPinned = pinned.has(id);
+    const isHidden = id === 'qoder' ? qoderDisplayApi.IDS.every(member => hidden.has(member)) : hidden.has(id);
+    const isPinned = id === 'qoder' ? qoderDisplayApi.IDS.some(member => pinned.has(member)) : pinned.has(id);
     row.classList.toggle('is-hidden', isHidden);
     row.classList.toggle('is-pinned', isPinned);
     row.classList.toggle('is-filtered-out', !matched.has(id));
@@ -12119,9 +12158,9 @@ function renderToolPreferencesNow() {
     labelGroup.className = 'tool-preference-label';
     const name = document.createElement('div');
     name.className = 'tool-preference-name';
-    name.textContent = id === 'qoder' ? t('settings.tools.qoder.global') : id === 'qodercn' ? 'CN' : label;
+    name.textContent = label;
     labelGroup.append(name);
-    if (enabled.has(id)) {
+    if (enabled.has(id) || (id === 'qoder' && enabled.has('qodercn'))) {
       // A tracked client with no reported status yet (first collect still running)
       // reads as "waiting for data" rather than a bare blank.
       //
@@ -12129,10 +12168,14 @@ function renderToolPreferencesNow() {
       // client whose sync broke this morning still counts yesterday's tokens and
       // would keep reporting "Tracking" — leaving the one state this whole
       // feature exists to surface invisible until the row is expanded.
-      const needsAttention = health?.clients?.[id]?.overall === 'attention';
+      const needsAttention = id === 'qoder'
+        ? qoderDisplayApi.IDS.some(member => enabled.has(member) && health?.clients?.[member]?.overall === 'attention')
+        : health?.clients?.[id]?.overall === 'attention';
       const tagInfo = needsAttention
         ? { key: 'settings.tools.status.attention', tone: 'warn' }
-        : clientStatusPresentationApi.clientStatusTag(id, clientStatus[id] || 'waiting');
+        : id === 'qoder'
+          ? { key: qoderDisplayApi.trackingState(state.settings?.clients).mixed ? 'settings.tools.qoder.partial' : 'settings.tools.qoder.all', tone: 'ok' }
+          : clientStatusPresentationApi.clientStatusTag(id, clientStatus[id] || 'waiting');
       if (tagInfo) {
         const tag = document.createElement('span');
         tag.className = `tool-status-tag tool-status-tag-${tagInfo.tone}`;
@@ -12144,12 +12187,13 @@ function renderToolPreferencesNow() {
     track.className = 'tool-preference-toggle';
     const trackInput = document.createElement('input');
     trackInput.type = 'checkbox';
-    trackInput.id = `toolTrackEnabled-${id}`;
+    trackInput.id = id === 'qoder' ? 'toolTrackGroup-qoder' : `toolTrackEnabled-${id}`;
     trackInput.dataset.client = id;
-    trackInput.dataset.preference = 'track';
-    trackInput.checked = enabled.has(id);
+    trackInput.dataset.preference = id === 'qoder' ? 'track-group' : 'track';
+    trackInput.checked = id === 'qoder' ? qoderDisplayApi.trackingState(state.settings?.clients).checked : enabled.has(id);
+    trackInput.indeterminate = id === 'qoder' && qoderDisplayApi.trackingState(state.settings?.clients).mixed;
     trackInput.setAttribute('aria-label', t('settings.tools.trackClient', { name: label }));
-    trackInput.addEventListener('change', onToolTrackingToggle);
+    trackInput.addEventListener('change', id === 'qoder' ? () => saveSettings({ clients: qoderDisplayApi.setTracked(state.settings?.clients, trackInput.checked) }) : onToolTrackingToggle);
     // The drag handle is gone, so the checkbox carries the keyboard reorder
     // shortcuts. A checkbox has no native arrow-key behaviour, so the existing
     // key bindings transfer unchanged.
@@ -12158,7 +12202,7 @@ function renderToolPreferencesNow() {
     // from the DOM, so a filter cannot corrupt it — but it would move the row
     // through positions the query has hidden, with nothing on screen to show
     // for it. Off while filtering, like the drag.
-    if (!filtering && !qoderDisplayApi.isQoder(id)) trackInput.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, 'client', id));
+    if (!filtering) trackInput.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, 'client', id));
     track.append(trackInput);
     const visibility = document.createElement('button');
     visibility.type = 'button';
@@ -12168,7 +12212,7 @@ function renderToolPreferencesNow() {
     visibility.setAttribute('aria-label', t(isHidden ? 'settings.tools.showClient' : 'settings.tools.hideClient', { name: label }));
     visibility.setAttribute('aria-pressed', String(!isHidden));
     visibility.append(visibilityIcon(isHidden));
-    visibility.addEventListener('click', () => onClientVisibilityToggle(id));
+    visibility.addEventListener('click', () => id === 'qoder' ? onQoderPreferenceToggle('hiddenClients') : onClientVisibilityToggle(id));
     const pin = document.createElement('button');
     pin.type = 'button';
     pin.id = `toolPin-${id}`;
@@ -12177,7 +12221,7 @@ function renderToolPreferencesNow() {
     pin.setAttribute('aria-label', t(isPinned ? 'settings.tools.unpinClient' : 'settings.tools.pinClient', { name: label }));
     pin.setAttribute('aria-pressed', String(isPinned));
     pin.append(pinIcon());
-    pin.addEventListener('click', () => onClientPinnedToggle(id));
+    pin.addEventListener('click', () => id === 'qoder' ? onQoderPreferenceToggle('pinnedClients') : onClientPinnedToggle(id));
     const actions = document.createElement('div');
     actions.className = 'tool-preference-actions';
     actions.append(visibility, pin);
@@ -12219,24 +12263,8 @@ function renderToolPreferencesNow() {
     }
     // Reordering is suppressed while a filter is on: the drop commits the order
     // it reads off the list, and a filtered list is only part of it.
-    if (!filtering && !qoderDisplayApi.isQoder(id)) row.addEventListener('pointerdown', (event) => clientPreferenceRowDrag.startRowDrag(event, id));
+    if (!filtering) row.addEventListener('pointerdown', (event) => clientPreferenceRowDrag.startRowDrag(event, id));
     els.clientDisplayList.appendChild(row);
-    if (qoderDisplayApi.isQoder(id)) qoderVersionRows.push(row);
-  }
-  const anchor = document.createComment('Qoder group');
-  qoderVersionRows[0].before(anchor);
-  const tracking = qoderDisplayApi.trackingState(state.settings?.clients);
-  const qoderGroup = qoderSettingsGroupApi.mount({
-    document, attention: qoderDisplayApi.IDS.some(id => enabled.has(id) && health?.clients?.[id]?.overall === 'attention'), rows: qoderVersionRows.sort((a, b) => qoderDisplayApi.IDS.indexOf(a.dataset.client) - qoderDisplayApi.IDS.indexOf(b.dataset.client)), ...tracking, separate: state.settings?.separateQoderClients === true,
-    expanded: state.qoderSettingsExpanded === true, filtering: Boolean(toolPreferenceQuery()), t,
-    onTracking: (checked) => saveSettings({ clients: qoderDisplayApi.setTracked(state.settings?.clients, checked) }),
-    onSeparate: (checked) => saveSettings({ separateQoderClients: checked }),
-    onExpanded: (open) => { state.qoderSettingsExpanded = open; }
-  });
-  anchor.replaceWith(qoderGroup);
-  if (!filtering) {
-    qoderGroup.addEventListener('pointerdown', event => clientPreferenceRowDrag.startRowDrag(event, 'qoder'));
-    qoderGroup.querySelector('#toolTrackGroup-qoder').addEventListener('keydown', event => onPreferenceOrderKeydown(event, 'client', 'qoder'));
   }
   if (!matched.size) renderSettingsListEmptyState(els.clientDisplayList);
   // Appended first and only then swapped out: replacing the list wholesale
@@ -13051,6 +13079,17 @@ async function onToolTrackingToggle() {
   // scan, and drag an all-provider limits refresh along. The extra stats pushes
   // would then repaint the whole settings panel under the pointer, which is what
   // made this checkbox stall while the eye and pin next to it did not (#471).
+}
+
+async function onQoderPreferenceToggle(key) {
+  const values = key === 'hiddenClients' ? hiddenClientSet() : pinnedClientSet();
+  const remove = key === 'hiddenClients'
+    ? qoderDisplayApi.IDS.every(id => values.has(id))
+    : qoderDisplayApi.IDS.some(id => values.has(id));
+  for (const id of qoderDisplayApi.IDS) {
+    if (remove) values.delete(id); else values.add(id);
+  }
+  await saveSettings({ [key]: [...values].join(','), ...(key === 'pinnedClients' ? { clientDisplayOrder: '' } : {}) });
 }
 
 async function onClientVisibilityToggle(clientId) {

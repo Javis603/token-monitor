@@ -66,7 +66,7 @@ test('tool diagnostics bind source values to the full health snapshot key', () =
   assert.match(identity, /clientHealthPresentationApi\.hasClientHealth\(health, id\)/);
   assert.match(exactReader, /clientSourceCacheApi\.readClientSources/);
   assert.match(reader, /state\.clientSourcesKey === key[\s\S]*readLatestClientSources/);
-  assert.match(loader, /clientSourceCacheApi\.clientSourceRequestKey\(identity\)/);
+  assert.match(loader, /clientSourcesPanelKey\(panelId\)/);
   assert.doesNotMatch(loader, /deleteClientSources/);
   assert.match(loader, /clientSourceCacheApi\.writeClientSources/);
   assert.match(loader, /catch[\s\S]*state\.clientSourcesKey = ''[\s\S]*refillOpenClientHealthPanel\(\)/);
@@ -83,7 +83,7 @@ test('tool diagnostics bind source values to the full health snapshot key', () =
   assert.match(actions, /rescan\.id = `toolHealthRescan-\$\{clientId\}`/);
   assert.match(actions, /reveal\.id = `toolHealthReveal-\$\{clientId\}`/);
   assert.match(actions, /exactLocalClientSources\(clientId\)/);
-  assert.match(panel, /clientHealthActions\(clientId, detail\)/);
+  assert.match(panel, /clientHealthActions\(id,/);
   assert.doesNotMatch(app, /clientSourceIds/);
 });
 
@@ -236,7 +236,7 @@ test('the tool list skips unchanged row renders and refreshes only open health d
 
   const localSources = functionBody(app, 'localClientSources', 'loadClientSources');
   assert.match(localSources, /exactLocalClientSources\(clientId\)/);
-  assert.match(localSources, /const pendingSources = key && state\.clientSourcesKey === key/);
+  assert.match(localSources, /const pendingSources = key && \(state\.clientSourcesKey === key/);
   assert.match(localSources, /exactSources \?\? clientSourceCacheApi\.readLatestClientSources/);
   assert.match(localSources, /exists: false, pending: true/);
 });
@@ -255,7 +255,7 @@ test('the tool preference row carries the drag transform contract', () => {
 test('a press on the tool row own controls never arms a drag', () => {
   const app = readRendererFile('app.js');
   // The checkbox sits inside a label, which is a hit target of its own.
-  assert.match(app, /const CLIENT_PREFERENCE_DRAG_EXCLUDED = 'button:not\(\.tool-preference-main\), input, select, textarea, a, label, \.accordion-animated-container, \.qoder-version-options';/);
+  assert.match(app, /const CLIENT_PREFERENCE_DRAG_EXCLUDED = 'button:not\(\.tool-preference-main\), input, select, textarea, a, label, \.accordion-animated-container';/);
   const wiring = app.slice(app.indexOf('const clientPreferenceRowDrag = '), app.indexOf('function renderToolPreferences('));
   assert.match(wiring, /dragExcluded: CLIENT_PREFERENCE_DRAG_EXCLUDED,/);
   assert.match(wiring, /rowSelector: ':scope > \.tool-preference-row\[data-client\]',/);

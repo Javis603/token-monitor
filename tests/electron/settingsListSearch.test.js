@@ -96,8 +96,8 @@ test('both toggles route through the shared merge rather than reading the DOM di
 test('neither list reorders by drag or keyboard while a filter is on', () => {
   const app = readRendererFile('app.js');
   const tools = fn(app, 'renderToolPreferencesNow');
-  assert.match(tools, /if \(!filtering && !qoderDisplayApi\.isQoder\(id\)\) row\.addEventListener\('pointerdown', \(event\) => clientPreferenceRowDrag\.startRowDrag/);
-  assert.match(tools, /if \(!filtering && !qoderDisplayApi\.isQoder\(id\)\) trackInput\.addEventListener\('keydown', \(event\) => onPreferenceOrderKeydown/);
+  assert.match(tools, /if \(!filtering\) row\.addEventListener\('pointerdown', \(event\) => clientPreferenceRowDrag\.startRowDrag/);
+  assert.match(tools, /if \(!filtering\) trackInput\.addEventListener\('keydown', \(event\) => onPreferenceOrderKeydown/);
   const limits = fn(app, 'renderLimitProviderCheckboxesNow');
   assert.match(limits, /if \(!filtering\) row\.addEventListener\('pointerdown', \(event\) => limitProviderRowDrag\.startRowDrag/);
   assert.match(limits, /if \(!filtering\) cb\.addEventListener\('keydown', \(event\) => onPreferenceOrderKeydown/);
@@ -112,7 +112,7 @@ test('both render short-circuits account for the query and the rendered row coun
   // of the two lists still rebuilds itself on every stats tick.
   const tools = fn(app, 'renderToolPreferencesNow');
   assert.match(tools, /els\.clientDisplayList\.children\.length === expectedRowCount/);
-  assert.match(tools, /const expectedRowCount = clients\.length - 1 \+ \(matched\.size \? 0 : 1\)/);
+  assert.match(tools, /const expectedRowCount = clients\.length \+ \(matched\.size \? 0 : 1\)/);
   const limits = fn(app, 'renderLimitProviderCheckboxesNow');
   assert.match(limits, /els\.limitProviderCheckboxes\.children\.length === expectedRowCount/);
   assert.match(limits, /const expectedRowCount = providers\.length \+ \(matched\.size \? 0 : 1\)/);

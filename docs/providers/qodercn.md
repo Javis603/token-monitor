@@ -52,7 +52,7 @@ The projects directory is part of the persisted-anchor fingerprint. Moving it in
 
 ## Display and defaults
 
-The desktop tool settings collect both editions in a fixed Qoder group. Each edition keeps its own tracking, source-health, visibility and pin controls. `separateQoderClients` only splits the widget tool-usage list; it never changes collection, session identities, archives or the Hub wire. The default combined row sums visible editions and their model breakdowns. Session details and historical charts keep their original client attribution.
+The desktop tool settings show one Qoder row with one standard health disclosure. Its collection section contains the international and CN tracking switches, per-edition visibility/pin controls and the separate-display switch. Source checks and usage from both editions appear directly in the same panel; there are no nested edition disclosures. `separateQoderClients` only splits the widget tool-usage list; it never changes collection, session identities, archives or the Hub wire. The default combined row sums visible editions and their model breakdowns. Session details and historical charts keep their original client attribution.
 
 Fresh installations track both editions by default. Existing saved selections, including an empty selection, remain unchanged. Older settings do not carry reliable catalog-version provenance, so an absent international id is not treated as permission to enable it. The group checkbox can explicitly enable or disable both editions.
 
