@@ -17779,6 +17779,7 @@ async function renderCopilotAccounts() {
     const readingFor = account => localProviderStatuses('copilot').find(row => account.accountKey
       ? row.accountKey === account.accountKey
       : !accounts.some(other => other.accountKey === row.accountKey));
+    const nameFor = account => account.accountName || readingFor(account)?.accountName || t('settings.copilot.title');
     const updateInfo = (account, info) => {
       info.textContent = apiKeyAccountStatusText('copilot', readingFor(account), true, account.external ? 'env' : 'settings',
         account.enabled && limitProviderEnabled('copilot'));
@@ -17795,8 +17796,14 @@ async function renderCopilotAccounts() {
       for (const row of list.children) {
         const account = accounts.find(account => account.id === row.dataset.accountId);
         if (account) {
+          const name = nameFor(account);
+          row.querySelector('.managed-account-email').textContent = name;
           const toggle = row.querySelector('.managed-account-checkbox');
-          if (toggle) toggle.checked = account.enabled;
+          if (toggle) {
+            toggle.checked = account.enabled;
+            toggle.setAttribute('aria-label', name);
+          }
+          row.querySelector('.confirming')?.setAttribute('aria-label', t('settings.profiles.deleteConfirm', { name }));
           updateInfo(account, row.querySelector('.managed-account-info'));
         }
       }
@@ -17805,8 +17812,7 @@ async function renderCopilotAccounts() {
     list.dataset.accountSignature = signature;
     list.replaceChildren();
     for (const account of accounts) {
-      const reading = readingFor(account);
-      const name = account.accountName || reading?.accountName || t('settings.copilot.title');
+      const name = nameFor(account);
       const row = document.createElement('div');
       row.className = 'managed-account-row';
       row.dataset.accountId = account.id;
@@ -17848,7 +17854,7 @@ async function renderCopilotAccounts() {
             confirming = true;
             remove.textContent = '✓';
             remove.classList.add('confirming');
-            remove.setAttribute('aria-label', t('settings.profiles.deleteConfirm', { name }));
+            remove.setAttribute('aria-label', t('settings.profiles.deleteConfirm', { name: nameFor(account) }));
             return;
           }
           return mutate(remove, () => window.tokenMonitor.copilot.removeAccount(account.id));

@@ -418,7 +418,7 @@ test('Copilot sign-in accepts the quota reading completed before its bridge resp
   assert.equal(context.copilotProviderForAccount()?.accountName, 'alice');
 });
 
-test('Copilot retained refresh buttons use the latest resolved account reading', async () => {
+test('Copilot retained rows update account names and refresh the latest resolved reading', async () => {
   const vm = require('node:vm');
   const source = require('node:fs').readFileSync(require.resolve('../../src/electron/renderer/app'), 'utf8');
   const render = source.slice(source.indexOf('async function renderCopilotAccounts()'), source.indexOf('function renderCopilotStatus()'));
@@ -428,7 +428,7 @@ test('Copilot retained refresh buttons use the latest resolved account reading',
       setAttribute() {}, addEventListener(event, handler) { this[event] = handler; },
       querySelector(selector) {
         for (const child of this.children) {
-          if (child.className === selector.slice(1)) return child;
+          if (child.className?.split(' ').includes(selector.slice(1))) return child;
           const nested = child.querySelector(selector);
           if (nested) return nested;
         }
@@ -451,8 +451,12 @@ test('Copilot retained refresh buttons use the latest resolved account reading',
     vm.runInNewContext(render, context);
     await context.renderCopilotAccounts();
     const button = list.querySelector('.managed-account-remove');
+    const label = list.querySelector('.managed-account-email');
+    assert.equal(label.textContent, 'settings.copilot.title');
     readings = [{ accountKey: 'resolved', accountName: 'alice', status: 'ok' }];
     await context.renderCopilotAccounts();
+    assert.equal(list.querySelector('.managed-account-email'), label);
+    assert.equal(label.textContent, 'alice');
     assert.equal(list.querySelector('.managed-account-remove'), button);
     await button.click();
     assert.deepEqual(refreshes, ['resolved']);
