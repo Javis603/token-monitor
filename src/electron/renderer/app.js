@@ -17270,17 +17270,12 @@ function copilotProviderForAccount() {
 
 function markCopilotTokenCheckPending() {
   state.copilotPendingCheckSince = Date.now();
-  clearCopilotProviderStatus();
 }
 
 function clearCopilotPendingCheck() {
   state.copilotPendingCheckSince = 0;
 }
 
-function clearCopilotProviderStatus() {
-  if (!Array.isArray(state.stats?.limits?.providers)) return;
-  state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== 'copilot');
-}
 
 const externalLimitAccountConfig = {
   kimi: {
@@ -17772,16 +17767,108 @@ function setVolcengineAgentExpanded(expanded) {
 }
 
 
+async function renderCopilotAccounts() {
+  if (!isSettingsSurfaceVisible()) return;
+  const list = document.getElementById('copilotAccountList');
+  if (!list) return;
+  const isCurrent = accountProfileRequests.begin('copilot');
+  try {
+    const accounts = await window.tokenMonitor.copilot.getAccounts();
+    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
+    list.replaceChildren();
+    const readings = localProviderStatuses('copilot');
+    if (accounts.length > 1 && limitProviderEnabled('copilot')) {
+      accountShellApi.render({ status: document.getElementById('copilotApiTokenStatus'),
+        statusText: t('settings.opencode.connected', {
+          linked: accounts.filter(account => account.enabled && readings.some(row => row.accountKey === account.accountKey && row.status === 'ok')).length,
+          total: accounts.length
+        }) });
+    }
+    for (const account of accounts) {
+      const reading = readings.find(row => account.accountKey ? row.accountKey === account.accountKey : accounts.length === 1);
+      const name = account.accountName || reading?.accountName || t('settings.copilot.title');
+      const row = document.createElement('div');
+      row.className = 'managed-account-row';
+      row.classList.toggle('disabled', !account.enabled);
+      const label = document.createElement('span');
+      label.className = 'managed-account-main managed-account-email';
+      if (!account.external) {
+        const toggle = document.createElement('input');
+        toggle.type = 'checkbox';
+        toggle.className = 'managed-account-checkbox';
+        toggle.checked = account.enabled;
+        toggle.setAttribute('aria-label', name);
+        toggle.addEventListener('change', () => mutate(toggle, () => window.tokenMonitor.copilot.setEnabled(account.id, toggle.checked)));
+        row.append(toggle);
+      } else {
+        row.append(document.createElement('span'));
+      }
+      label.textContent = name;
+      const actions = document.createElement('span');
+      actions.className = 'managed-account-right';
+      const info = document.createElement('span');
+      info.className = 'managed-account-info';
+      info.textContent = apiKeyAccountStatusText('copilot', reading, true, account.external ? 'env' : 'settings',
+        account.enabled && limitProviderEnabled('copilot'));
+      const refresh = document.createElement('button');
+      refresh.className = 'managed-account-remove';
+      refresh.setAttribute('aria-label', t('settings.common.refresh'));
+      refresh.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13 6a5.2 5.2 0 1 0 .2 3M13 2v4H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      refresh.disabled = !account.enabled;
+      refresh.addEventListener('click', () => mutate(refresh, async () => {
+        await window.tokenMonitor.limits.refresh('copilot', reading || account);
+        return { ok: true };
+      }));
+      actions.append(info, refresh);
+      if (!account.external) {
+        const remove = document.createElement('button');
+        remove.className = 'managed-account-remove';
+        remove.textContent = '✕';
+        remove.setAttribute('aria-label', t('settings.copilot.logout'));
+        let confirming = false;
+        remove.addEventListener('click', () => {
+          if (!confirming) {
+            confirming = true;
+            remove.textContent = '✓';
+            remove.classList.add('confirming');
+            remove.setAttribute('aria-label', t('settings.profiles.deleteConfirm', { name }));
+            return;
+          }
+          return mutate(remove, () => window.tokenMonitor.copilot.removeAccount(account.id));
+        });
+        actions.append(remove);
+      }
+      row.append(label, actions);
+      list.append(row);
+    }
+  } catch (error) {
+    if (isCurrent()) {
+      state.copilotErrorMessage = error.message;
+      accountShellApi.render({ error: document.getElementById('copilotErrorMessage'), errorText: error.message });
+    }
+  }
+  async function mutate(button, action) {
+    await accountProfileSaves.run('copilot', button, async () => {
+      try {
+        const result = await action();
+        if (!result?.ok) throw new Error(result?.error || t('settings.copilot.loginFailed'));
+        state.copilotErrorMessage = '';
+        await refreshStats();
+      } catch (error) { state.copilotErrorMessage = error.message; }
+      renderCopilotStatus();
+    });
+  }
+}
+
 function renderCopilotStatus() {
   const statusEl = document.getElementById('copilotApiTokenStatus');
   const signInBtn = document.getElementById('copilotSignInButton');
   const cancelBtn = document.getElementById('copilotCancelSignInButton');
-  const logoutBtn = document.getElementById('copilotLogoutButton');
   const refreshBtn = document.getElementById('copilotRefreshButton');
   const manualPanel = document.getElementById('copilotManualPanel');
   const loginStatusEl = document.getElementById('copilotLoginStatus');
   const errorEl = document.getElementById('copilotErrorMessage');
-  if (!statusEl || !signInBtn || !cancelBtn || !logoutBtn || !refreshBtn || !manualPanel || !loginStatusEl || !errorEl) return;
+  if (!statusEl || !signInBtn || !cancelBtn || !refreshBtn || !manualPanel || !loginStatusEl || !errorEl) return;
 
   const source = state.settings?.copilotApiTokenSource || '';
   const provider = copilotProviderForAccount();
@@ -17796,12 +17883,11 @@ function renderCopilotStatus() {
     progress: loginStatusEl,
     progressText: state.copilotLoginStatus
   });
-  manualPanel.classList.toggle('hidden', linked);
-  if (linked && state.copilotManualExpanded) setCopilotManualExpanded(false);
-  signInBtn.classList.toggle('hidden', linked || state.copilotSignInBusy);
-  cancelBtn.classList.toggle('hidden', !state.copilotSignInBusy || !state.copilotSignInCancelable || linked);
-  logoutBtn.classList.toggle('hidden', !linked || source !== 'settings');
+  manualPanel.classList.remove('hidden');
+  signInBtn.classList.toggle('hidden', state.copilotSignInBusy);
+  cancelBtn.classList.toggle('hidden', !state.copilotSignInBusy || !state.copilotSignInCancelable);
   refreshBtn.classList.toggle('hidden', !configured || (state.copilotSignInBusy && !linked));
+  void renderCopilotAccounts();
   renderSettingsSummaries();
 }
 
@@ -19968,7 +20054,10 @@ function setupCursorAccountUI() {
   }
   const copilotToggle = document.getElementById('copilotSettingsToggle');
   if (copilotToggle) {
-    copilotToggle.addEventListener('click', () => setCopilotAccountExpanded(!state.copilotAccountExpanded));
+    copilotToggle.addEventListener('click', () => {
+      setCopilotAccountExpanded(!state.copilotAccountExpanded);
+      if (state.copilotAccountExpanded) void renderCopilotAccounts();
+    });
     document.getElementById('copilotManualToggle')?.addEventListener('click', () => {
       const details = document.getElementById('copilotManualDetails');
       setCopilotManualExpanded(details?.classList.contains('hidden'));
@@ -20029,7 +20118,7 @@ function setupCursorAccountUI() {
           state.copilotAuthorizeMessage = '';
           state.copilotLoginStatus = '';
           renderCopilotStatus();
-          await refreshStats({ force: true });
+          await refreshStats();
           if (copilotAccountLinked()) setCopilotAccountExpanded(false);
         }
       } catch (err) {
@@ -20059,16 +20148,9 @@ function setupCursorAccountUI() {
       renderCopilotStatus();
     });
 
-    document.getElementById('copilotLogoutButton').addEventListener('click', async () => {
-      await saveSettings({ copilotApiToken: '' });
-      clearCopilotPendingCheck();
-      clearCopilotProviderStatus();
-      renderCopilotStatus();
-      await refreshStats({ force: true });
-    });
-
     document.getElementById('copilotRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
+      await window.tokenMonitor.limits.refresh('copilot');
+      await refreshStats();
     });
 
     document.getElementById('copilotApiTokenSubmit').addEventListener('click', async () => {
@@ -20081,10 +20163,12 @@ function setupCursorAccountUI() {
       }
       try {
         markCopilotTokenCheckPending();
-        await saveSettings({ copilotApiToken: input.value });
+        const result = await window.tokenMonitor.copilot.addAccount(input.value);
+        if (!result?.ok) throw new Error(result?.error || t('settings.copilot.loginFailed'));
+        state.settings = await window.tokenMonitor.getSettings();
         input.value = '';
         renderCopilotStatus();
-        await refreshStats({ force: true });
+        await refreshStats();
         if (copilotAccountLinked()) setCopilotAccountExpanded(false);
         else setCopilotAccountExpanded(true);
         renderCopilotStatus();

@@ -203,6 +203,7 @@ const {
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
 const { createCredentialCommands } = require('./limits/credentialCommands');
+const { createCopilotAccounts } = require('./providers/copilot/accounts');
 const { createMinimaxApiKeys } = require('./providers/minimax/apiKeys');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
@@ -9984,6 +9985,22 @@ app.whenReady().then(() => {
   ipcMain.handle('codex:removeAccount', async (_event, id) => removeCodexManagedAccount(id));
   ipcMain.handle('codex:switchSystemAccount', async (_event, id) => switchCodexSystemAccount(id));
   ipcMain.handle('codex:refreshAccountLimits', async (_event, id) => refreshCodexManagedAccountLimits(id));
+  const copilotAccounts = createCopilotAccounts({
+    getSettings: () => settings, saveSettings,
+    probeDeps: () => electronProviderDeps({ env: {}, signal: AbortSignal.timeout(15_000) }),
+    changed: () => {
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      pushSettingsToRenderer();
+      void queueLimitInvalidation({ provider: 'copilot' }, 'account-change', { clear: true });
+    }
+  });
+  ipcMain.handle('copilot:getAccounts', () => copilotAccounts.getAccounts());
+  for (const method of ['addAccount', 'removeAccount', 'setEnabled']) {
+    ipcMain.handle(`copilot:${method}`, async (_event, ...args) => {
+      try { return await copilotAccounts[method](...args); }
+      catch (error) { return { ok: false, error: error.message }; }
+    });
+  }
   ipcMain.handle('copilot:signIn', async (event, request = {}) => {
     if (copilotLoginController) return { ok: false, error: 'A GitHub Copilot sign-in is already in progress.', flowId: copilotLoginFlowId };
     const controller = new AbortController();
@@ -10007,10 +10024,7 @@ app.whenReady().then(() => {
       if (copilotLoginController !== controller) {
         return { ok: false, error: copilotLoginErrorMessage({ status: 'cancelled' }), flowId };
       }
-      settings.copilotApiToken = normalizeAccountField('copilotApiToken', result.accessToken);
-      saveSettings({ throwOnError: true });
-      pushSettingsToRenderer();
-      void queueLimitInvalidation({ provider: 'copilot' }, 'login', { clear: true });
+      await copilotAccounts.addAccount(result.accessToken, () => copilotLoginController === controller && !controller.signal.aborted);
       return { ok: true, flowId };
     } catch (error) {
       const message = copilotLoginErrorMessage(error);

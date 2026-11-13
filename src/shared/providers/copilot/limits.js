@@ -294,13 +294,81 @@ function providerStatusFromError(error) {
   return 'unavailable';
 }
 
+// Saved profiles share the credential store with other multi-token providers.
+// Keep the legacy setting as a virtual profile until the user removes it.
+function copilotProfiles(options = {}, env = {}) {
+  const profiles = Object.create(null);
+  for (const [id, value] of Object.entries(options.copilotProfiles || {})) {
+    const token = copilotToken({}, { copilotApiToken: value?.token });
+    if (!token || id === 'environment') continue;
+    profiles[id] = { token, enabled: value.enabled !== false,
+      enterpriseHost: normalizedEnterpriseHost(value.enterpriseHost || options.copilotEnterpriseHost),
+      accountKey: String(value.accountKey || hashKey('copilot', token.slice(0, 8))), accountName: String(value.accountName || '') };
+  }
+  const token = copilotToken({}, options);
+  if (token && !Object.values(profiles).some(profile => profile.token === token)) {
+    let id = 'legacy';
+    while (Object.hasOwn(profiles, id)) id += '-legacy';
+    profiles[id] = { token, enabled: true,
+      enterpriseHost: normalizedEnterpriseHost(options.copilotEnterpriseHost || env.COPILOT_ENTERPRISE_HOST || env.GITHUB_ENTERPRISE_HOST), accountKey: Object.keys(profiles).length ? hashKey('copilot', token.slice(0, 8)) : '', accountName: '' };
+  }
+  return profiles;
+}
+
+function configuredCopilotAccounts(options = {}, deps = {}) {
+  const profiles = copilotProfiles(options, deps.env || process.env);
+  const accounts = Object.entries(profiles).map(([id, profile]) => ({ id, ...profile }));
+  // Preserve the existing settings-over-environment precedence, even if disabled.
+  if (!accounts.length) {
+    const env = deps.env || process.env;
+    const token = copilotToken(env);
+    if (token) accounts.push({ id: 'environment', token, enabled: true,
+      enterpriseHost: normalizedEnterpriseHost(options.copilotEnterpriseHost || env.COPILOT_ENTERPRISE_HOST || env.GITHUB_ENTERPRISE_HOST),
+      accountKey: '', accountName: '' });
+  }
+  return accounts;
+}
+
 async function fetchCopilotLimits(options = {}, deps = {}) {
+  // Keep the original single-account return shape for existing headless callers.
+  if (!Object.keys(options.copilotProfiles || {}).length) {
+    const row = await fetchCopilotAccountLimits(options, deps);
+    const scope = options.limitRefreshScope;
+    return scope?.provider === 'copilot' && scope.accountKey && row.accountKey !== scope.accountKey ? [] : row;
+  }
+  const scope = options.limitRefreshScope?.provider === 'copilot' ? options.limitRefreshScope : null;
+  const accounts = configuredCopilotAccounts(options, deps).filter(account => account.enabled
+    && (!scope?.accountKey || account.accountKey === scope.accountKey));
+  const rows = [];
+  for (const account of accounts) {
+    rows.push(await fetchCopilotAccountLimits({ copilotApiToken: account.token,
+      copilotEnterpriseHost: account.enterpriseHost, accountKey: account.accountKey,
+      accountName: account.accountName }, deps));
+  }
+  const seen = new Set();
+  return rows.filter(row => {
+    if (scope?.accountKey && row.accountKey !== scope.accountKey) return false;
+    if (seen.has(row.accountKey)) return false;
+    seen.add(row.accountKey);
+    return true;
+  });
+}
+
+async function fetchCopilotAccountLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const nowMs = (deps.now || Date.now)();
   const updatedAt = new Date(nowMs).toISOString();
   const token = copilotToken(env, options);
   const enterpriseHost = options.copilotEnterpriseHost || env.COPILOT_ENTERPRISE_HOST || env.GITHUB_ENTERPRISE_HOST || '';
   const requestDeps = { ...deps, copilotEnterpriseHost: enterpriseHost };
+  // A legacy/environment login has no saved account metadata. Retain only its
+  // last resolved identity in the runtime, bound to the full token and host,
+  // so expiry reports against the same row without attributing a replacement
+  // credential's failure to the previous account.
+  const runtimeState = deps.providerRuntimeState;
+  const fingerprint = hashKey('copilot-credential', normalizedEnterpriseHost(enterpriseHost), token);
+  const previous = runtimeState?.get('copilot:legacy-identity');
+  const remembered = previous?.fingerprint === fingerprint ? previous : null;
 
   if (!token) {
     return normalizeLimitProvider({
@@ -319,10 +387,15 @@ async function fetchCopilotLimits(options = {}, deps = {}) {
     ]);
     const login = String(identity.login || '').trim();
     const accountSeed = login || (identity.id != null ? String(identity.id) : '');
+    if (!options.accountKey && accountSeed) {
+      runtimeState?.set('copilot:legacy-identity', {
+        fingerprint, accountKey: hashKey('copilot', accountSeed), accountName: login
+      });
+    }
     return mapCopilotUsageToProvider(usage, {
-      accountKey: hashKey('copilot', accountSeed || token.slice(0, 8)),
+      accountKey: options.accountKey || (accountSeed ? hashKey('copilot', accountSeed) : remembered?.accountKey) || hashKey('copilot', token.slice(0, 8)),
       accountLabel: displayPlanLabel(usage.copilotPlan),
-      accountName: login,
+      accountName: login || options.accountName || remembered?.accountName,
       accountEmail: '',
       updatedAt,
       source: 'api'
@@ -330,7 +403,8 @@ async function fetchCopilotLimits(options = {}, deps = {}) {
   } catch (error) {
     return normalizeLimitProvider({
       provider: 'copilot',
-      accountKey: hashKey('copilot', token.slice(0, 8)),
+      accountKey: options.accountKey || remembered?.accountKey || hashKey('copilot', token.slice(0, 8)),
+      accountName: options.accountName || remembered?.accountName || '',
       source: 'api',
       status: providerStatusFromError(error),
       updatedAt,
@@ -342,6 +416,10 @@ async function fetchCopilotLimits(options = {}, deps = {}) {
 module.exports = {
   COPILOT_DEFAULT_HOST,
   copilotToken,
+  copilotProfiles,
+  configuredCopilotAccounts,
+  fetchCopilotAccountLimits,
+  fetchGitHubIdentity,
   normalizedEnterpriseHost,
   copilotApiHost,
   copilotUsageUrl,
