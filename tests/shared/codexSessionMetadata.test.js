@@ -611,6 +611,35 @@ maybe('custom Codex scan paths contribute titles and transcripts', () => {
   assert.equal(periods.allTime.sessions[`codex:${inheritedId}`].title, 'Inherited home title');
 });
 
+maybe('primary Codex home fallback transcripts outrank additional homes', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-primary-home-'));
+  const taskHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-additional-home-'));
+  tmpDirs.push(home, taskHome);
+  const id = 'rollout-2026-11-01T10-00-00-44444444-4444-4444-8444-444444444444';
+  const entry = timestamp => `${JSON.stringify({
+    timestamp, type: 'session_meta', payload: { id: '44444444-4444-4444-8444-444444444444' }
+  })}\n`;
+  const primaryDir = path.join(home, '.codex', 'sessions', 'custom-layout');
+  const additionalDir = path.join(taskHome, 'sessions', '2026', '11', '01');
+  fs.mkdirSync(primaryDir, { recursive: true });
+  fs.mkdirSync(additionalDir, { recursive: true });
+  fs.writeFileSync(path.join(primaryDir, `${id}.jsonl`), entry('2026-11-01T10:05:00.000Z'));
+  fs.writeFileSync(path.join(additionalDir, `${id}.jsonl`), entry('2026-11-01T11:05:00.000Z'));
+
+  const periods = { allTime: { sessions: {
+    [`codex:${id}`]: { client: 'codex', sessionId: id, totalTokens: 1 }
+  } } };
+  require('../../src/shared/sessionMetadata').applySessionMetadata(periods, home, {
+    env: {},
+    customScanPaths: { codex: [taskHome] },
+    codexDeps: { sqlite },
+    readT3Meta: () => new Map(),
+    resolveProjects: false
+  });
+
+  assert.equal(periods.allTime.sessions[`codex:${id}`].lastUsedAt, '2026-11-01T10:05:00.000Z');
+});
+
 maybe('scoped homes ignore custom Codex scan paths', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-scoped-home-'));
   const taskHome = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-scoped-task-'));

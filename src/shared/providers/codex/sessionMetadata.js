@@ -209,18 +209,15 @@ function filesForSessionIds(sessionIds, { home, deps }) {
   const homeOptions = { homeDir: home, env: deps.env, useEnvRoot: !deps.scopedHome, customScanPaths: deps.customScanPaths };
   const codexHomes = [...new Set([codexHomeDir(homeOptions), ...extraCodexHomes(homeOptions)])];
   const files = new Map();
-  const missing = new Set();
-  for (const id of sessionIds) {
-    let file = '';
-    for (const codexHome of codexHomes) {
-      file = codexSessionFile(home, id, { codexHome });
-      if (file) break;
-    }
-    if (file) files.set(id, file);
-    else missing.add(id);
-  }
+  const missing = new Set(sessionIds);
   for (const codexHome of codexHomes) {
     if (missing.size === 0) break;
+    for (const id of [...missing]) {
+      const file = codexSessionFile(home, id, { codexHome });
+      if (!file) continue;
+      files.set(id, file);
+      missing.delete(id);
+    }
     for (const [id, file] of findCodexSessionFiles(codexHome, missing)) {
       files.set(id, file);
       missing.delete(id);
