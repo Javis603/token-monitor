@@ -56,6 +56,7 @@ test('WSL scans receive fork-only Proma like any other tokscale client', async (
   let wslOptions = null;
   await collectUsageOnce({
     clients: 'claude,proma',
+    env: {},
     allTimeSince: '2025-01-01',
     now: '2026-07-10T08:00:00.000Z',
     commandTimeoutMs: 1000,
