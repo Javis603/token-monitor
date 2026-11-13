@@ -12,6 +12,9 @@ const authorSource=path.join(scratch,'author-source');fs.cpSync(path.join(root,'
 const authorManifest=JSON.parse(fs.readFileSync(path.join(authorSource,'manifest.json')));
 if (process.env.TM_NAV_ICONS === '1') authorManifest.identityIcon = nativeImage.createFromBitmap(Buffer.from(Array.from({length:16*16},(_,i)=>i%16 < 8 ? [80,180,240,255] : [240,160,70,255]).flat()),{width:16,height:16}).toDataURL();
 authorManifest.views.push({id:'bitmap',surfaces:['tray']});fs.writeFileSync(path.join(authorSource,'manifest.json'),JSON.stringify(authorManifest));
+// First-use setup defaults each replace target to the plugin's content; decline
+// them so this baseline keeps native content until a selection is made explicitly.
+const declineContent=Object.fromEntries(authorManifest.views.filter(view=>view.mode==='replace').flatMap(view=>view.targets).map(target=>[`content:${target}`,null]));
 app.setPath('userData', path.join(scratch, 'profile'));
 app.commandLine.appendSwitch('host-resolver-rules', 'MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1');
 registerPluginScheme(protocol);
@@ -55,7 +58,7 @@ app.whenReady().then(async () => {
   if (process.env.TM_DOM_REGRESSION !== '1') {
     const preview = await js("tokenMonitor.plugins.importPackage('directory')");
     await js(`tokenMonitor.plugins.install(${JSON.stringify(preview.token)})`);
-    await js("tokenMonitor.plugins.setEnabled('trusted-fixture',true)");
+    await js("tokenMonitor.plugins.setEnabled('trusted-fixture',true," + JSON.stringify(declineContent) + ")");
   }
   assert.equal(runtime.manager.backendCount(), 0);
   const shape = { key: 'fixture', width: 680, height: 300, d: 'M0 0H680V300H0Z' };
