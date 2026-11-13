@@ -309,7 +309,7 @@ export class HubDO {
     this.heartbeatTimer = setInterval(() => {
       const chunk = this.encoder.encode(': hb\n\n');
       for (const client of this.sseClients) {
-        if (!client.busy) this.writeEncoded(client, chunk);
+        if (!client.pendingBytes) this.writeEncoded(client, chunk);
       }
       if (this.sseClients.size === 0 && this.heartbeatTimer) {
         clearInterval(this.heartbeatTimer);
@@ -340,30 +340,33 @@ export class HubDO {
     }
   }
 
+  // Same bound as the Node Hub: frames queue in order behind the write in
+  // flight up to SSE_BACKLOG_LIMIT_BYTES of unresolved writes; past that, the
+  // connection skips frames and resyncs once every accepted write has settled.
   writeEncoded(client, chunk) {
     if (!this.sseClients.has(client)) return false;
-    if (client.busy) {
+    const pendingBytes = client.pendingBytes || 0;
+    if (pendingBytes && (client.needsSnapshot || pendingBytes + chunk.byteLength > client.backlogLimit)) {
       client.needsSnapshot = true;
       return false;
     }
-    client.busy = true;
+    if (!pendingBytes) client.backlogLimit = chunk.byteLength + hubProtocol.SSE_BACKLOG_LIMIT_BYTES;
+    client.pendingBytes = pendingBytes + chunk.byteLength;
     let write;
     try { write = client.writer.write(chunk); }
     catch (_) { this.dropClient(client); return false; }
-    Promise.resolve(write).then(async () => {
+    Promise.resolve(write).then(() => {
       if (!this.sseClients.has(client)) return;
-      if (!client.needsSnapshot) { client.busy = false; return; }
-      // No queued frames: the pending write plus one dirty bit bounds memory.
-      // Keep busy during the read, so a concurrent broadcast cannot overtake it.
+      client.pendingBytes -= chunk.byteLength;
+      if (client.pendingBytes || !client.needsSnapshot) return;
       client.needsSnapshot = false;
+      // Resync to the baseline the last fan-out established, so the next
+      // update resumes with freshness or delta frames, not another snapshot.
       client.streamRevision = null;
-      const stats = await this.statsWithSubscriptionVersion();
-      if (!this.sseClients.has(client)) return;
-      client.busy = false;
-      this.writeEncoded(client, this.encoder.encode(hubProtocol.encodeSseEvent('stats', {
-        type: 'stats', reason: 'snapshot', stats, at: new Date().toISOString(),
-        ...(Number.isSafeInteger(client.streamRevision) ? { revision: client.streamRevision } : {})
-      })));
+      if (this.writeEncoded(client, this.encoder.encode(hubProtocol.encodeSseEvent('stats', {
+        type: 'stats', reason: 'snapshot', stats: this.lastSseStats, at: new Date().toISOString(),
+        ...(client.deltaEvents ? { revision: this.streamRevision } : {})
+      }))) && client.deltaEvents) client.streamRevision = this.streamRevision;
     }, () => this.dropClient(client)).catch(() => this.dropClient(client));
     return true;
   }

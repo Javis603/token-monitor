@@ -6,6 +6,10 @@ const HUB_RESPONSE_HEADER = 'x-token-monitor-response';
 const HUB_RESPONSE_MINIMAL = 'minimal';
 const HUB_STREAM_HEADER = 'x-token-monitor-stream';
 const HUB_STREAM_VERSION = '4';
+// Unflushed SSE output a backpressured subscriber may hold behind the frame
+// that blocked it. Small freshness and delta frames keep flowing in order while
+// a large snapshot drains; anything past this budget is coalesced into a resync.
+const SSE_BACKLOG_LIMIT_BYTES = 1024 * 1024;
 
 function headerValue(source, name) {
   const headers = source?.headers || source;
@@ -256,6 +260,7 @@ module.exports = {
   HUB_RESPONSE_MINIMAL,
   HUB_STREAM_HEADER,
   HUB_STREAM_VERSION,
+  SSE_BACKLOG_LIMIT_BYTES,
   acceptsEncoding,
   createStatsStreamReceiver,
   wantsDeltaEvents,
