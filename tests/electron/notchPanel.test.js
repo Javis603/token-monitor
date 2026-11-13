@@ -660,7 +660,7 @@ test('quiet sessions use concise age metadata and explicit empty-state copy', t 
   assert.match(f.find('notch-sessions-empty').textContent, /^No active sessionsLast active: /);
 });
 
-test('session titles use shared hover reading and hand it across live updates', t => {
+test('session titles retain the same reading node across live updates', t => {
   const f = panelFixture(t), data = payload();
   data.cells[1].sessions = [{ key: 'codex:long', client: 'codex', sessionId: 'long', title: 'A long session title',
     totalTokens: 1, lastUsedAt: new Date(Date.now()).toISOString() }];
@@ -669,8 +669,8 @@ test('session titles use shared hover reading and hand it across live updates', 
   assert.ok(f.overflowText.bound.includes(previous));
   assert.equal(previous.title, undefined, 'normal hover uses the app reader instead of a native title popup');
   data.cells[1].sessions[0].totalTokens += 1; f.panel.render(data);
-  assert.equal(f.find('notch-now-title').dataset.overflowKey, previous.dataset.overflowKey);
-  assert.equal(f.overflowText.preserved.at(-1).previous.contains(previous), true);
+  assert.equal(f.find('notch-now-title').dataset.key, previous.dataset.key);
+  assert.equal(f.find('notch-now-title'), previous);
   const current = f.find('notch-now-title'); f.panel.suspend();
   assert.ok(f.overflowText.stopped.includes(current));
 });
@@ -797,6 +797,16 @@ test('breakdown shows tools and models together and switches both to the same pe
   assert.match(f.find('notch-breakdown-model').textContent, /gemini/);
   assert.deepEqual(f.all('notch-rank-share').map(node => node.textContent), ['100%', '100%']);
   assert.equal(f.document.activeElement.attributes['aria-pressed'], 'true', 'period switching preserves keyboard focus');
+});
+
+test('Breakdown fits the retained live token figure after an update', t => {
+  const f = panelFixture(t);
+  f.panel.render(payload()); f.panel.selectPage('breakdown');
+  const figure = f.find('notch-breakdown-tokens');
+  figure.clientWidth = 100; figure.scrollWidth = 200;
+  f.panel.render(payload(200));
+  assert.equal(f.find('notch-breakdown-tokens'), figure);
+  assert.equal(figure.style.fontSize, '18px');
 });
 
 test('pointer and keyboard inspection only highlight the matching column spectrum', t => {
@@ -937,10 +947,10 @@ test('limit columns past one page scroll a page per wheel gesture and keep their
   assert.equal(strip.scrollLeft, 120);
   assert.equal(f.find('notch-pager').children[1].classList.contains('is-selected'), true);
   assert.equal(strip.classList.contains('has-after'), false);
-  // A later push rebuilds the strip on the same page.
+  // A later push updates the same strip on the same page.
   records[0].windows[0].remainingPercent = 10;
   f.panel.render({ ...payload(), cells: buildEdgeDockCells({ limits: { providers: records } }, { items: [{ type: 'limit', provider: 'codex' }] }) });
-  assert.notEqual(f.find('notch-limits'), strip);
+  assert.equal(f.find('notch-limits'), strip);
   assert.equal(f.find('notch-limits').scrollLeft, 120);
   // Horizontal swipes stay native; a new vertical gesture steps back.
   f.find('notch-limits').fire('wheel', { deltaX: 40, deltaY: 2, preventDefault: () => { prevented += 1; } });
@@ -950,6 +960,28 @@ test('limit columns past one page scroll a page per wheel gesture and keep their
   assert.equal(f.find('notch-limits').scrollLeft, 0);
 });
 
+
+test('a retained single-page limits strip gains pagination when accounts arrive', t => {
+  const f = panelFixture(t);
+  const providers = Array.from({ length: 4 }, (_, index) => ({ provider: 'codex', status: 'ok', accountKey: String(index),
+    windows: [{ kind: 'weekly', remainingPercent: 50 }] }));
+  const data = count => ({ ...payload(), cells: buildEdgeDockCells({ limits: { providers: providers.slice(0, count) } }, { items: [{ type: 'limit', provider: 'codex' }] }) });
+  f.panel.render(data(1)); f.panel.selectPage('limits');
+  const strip = f.find('notch-limits');
+  let prevented = 0;
+  const wheel = () => strip.fire('wheel', { deltaX: 0, deltaY: 30, preventDefault() { prevented++; } });
+  wheel(); assert.equal(prevented, 0, 'one page leaves vertical scrolling alone');
+  f.panel.render(data(4));
+  assert.equal(f.find('notch-limits'), strip);
+  assert.equal(f.find('notch-pager').children.length, 2);
+  wheel();
+  assert.equal(prevented, 1);
+  assert.equal(strip.scrollLeft, 120);
+  assert.equal(f.find('notch-pager').children[1].getAttribute('aria-pressed'), 'true');
+  strip.scrollLeft = 0; strip.fire('scroll');
+  assert.equal(f.panel.view.limitPage, 0);
+  assert.equal(f.find('notch-pager').children[0].getAttribute('aria-pressed'), 'true');
+});
 
 test('the first limits wheel gesture works after a quick close and reopen', t => {
   const f = panelFixture(t);
@@ -1262,15 +1294,26 @@ test('home quota groups fill the available width and resize without losing the r
     accounts: [{ record: { provider: `provider-${index}`, status: 'ok', windows: [{ kind: 'session', remainingPercent: 75 }] } }] })));
   f.panel.render(data);
   const row = f.find('notch-fuel');
+  f.window.getComputedStyle = target => {
+    for (const item of target.children) if (item.classList.contains('notch-fuel-item')) item.offsetWidth = 70;
+    return { columnGap: '12px' };
+  };
   let width = 300;
   Object.defineProperties(row, {
     clientWidth: { get: () => width },
-    scrollWidth: { get: () => row.children.reduce((sum, child) => sum + (child.classList.contains('notch-fuel-item') ? 70 : 20), 0)
-      + Math.max(0, row.children.length - 1) * 12 }
+    scrollWidth: { get: () => row.children.filter(child => !child.hidden).reduce((sum, child) => sum + (child.classList.contains('notch-fuel-item') ? 70 : 20), 0)
+      + Math.max(0, row.children.filter(child => !child.hidden).length - 1) * 12 }
   });
   f.resize();
   assert.equal(f.all('notch-fuel-item').length, 3, 'the freed caption space can hold a third complete group');
   assert.equal(f.find('notch-fuel-more').textContent, '+5');
+  const more = f.find('notch-fuel-more'); more.focus();
+  for (let i = 0; i < 2; i++) {
+    data.cells[0].totalTokens++; f.panel.render(data);
+    assert.equal(f.find('notch-fuel-more'), more);
+    assert.equal(more.hidden, false);
+    assert.equal(f.document.activeElement, more);
+  }
   assert.equal(f.find('notch-fuel-caption'), null);
   assert.equal(row.attributes['aria-label'], 'limits left');
   width = 170; f.resize();
@@ -1278,7 +1321,7 @@ test('home quota groups fill the available width and resize without losing the r
   assert.equal(f.find('notch-fuel-more').textContent, '+7');
   width = 700; f.resize();
   assert.equal(f.all('notch-fuel-item').length, 8, 'widening restores groups that were previously hidden');
-  assert.equal(f.find('notch-fuel-more'), null);
+  assert.equal(f.find('notch-fuel-more').hidden, true);
   width = 300; f.resize();
   f.find('notch-fuel-more').fire('click', { detail: 0 });
   assert.equal(f.panel.view.page, 'limits');

@@ -758,8 +758,7 @@ test('Codex system account switching is exposed from limits account rows', () =>
   // view's policy, so it reaches the Edge Dock card too.
   assert.doesNotMatch(renderLimits, /rowOptions/);
   assert.match(renderLimits, /nodes\.push\(renderLimitProviderSolo\(id, label, provider, color\)\)/);
-  assert.match(renderLimits, /const holdCodexSwitchPopoverRender = codexAccountControl\.deferRender\(els\.limitsPanel\);/);
-  assert.match(renderLimits, /holdLimitDetailTooltipRender \|\| holdCodexSwitchPopoverRender/);
+  assert.match(renderLimits, /if \(codexAccountControl\.deferRender\(els\.limitsPanel\)\) return;/);
   assert.doesNotMatch(renderLimits, /codexSwitchPopoverRenderPending/);
 });
 

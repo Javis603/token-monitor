@@ -134,12 +134,14 @@ app.whenReady().then(async () => {
   win.webContents.on('render-process-gone', (_event, details) => { console.error(details); app.exit(1); });
   session.defaultSession.webRequest.onBeforeRequest({ urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*'] }, (_details, callback) => callback({ cancel: true }));
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [require('../src/electron/contentSecurityPolicy').contentSecurityPolicyForRequest(details)] } }));
+  let domHistoryOpens = 0;
   const handlers = {
     'settings:get': () => settings,
     'settings:displayPreview': (_event, surface, phase, slots) => require('../src/electron/displayPreview').buildDisplayPreview(settings, surface, phase, process.platform, Date.now(), slots),
     'settings:update': async (event, patch) => { const after = await runtime.beforeSettingsChange(event, patch); settings = { ...settings, ...patch }; runtime.settingsChanged(); await after(); return settings; },
     'app:getInfo': () => ({ version: 'fixture', platform: process.platform, systemUiTheme: 'dark', loginItemSupported: false }),
     'appUpdate:get': () => ({}), 'appearance:getNativeMaterial': () => null,
+    'limitsHistory:open': (_event, { key }) => key === '__dom_probe__' ? domHistoryOpens : ++domHistoryOpens,
     'stats:get': () => stats, 'stream:status': () => ({ connected: true, mode: 'local' }),
     'syncContent:status': () => ({ identity: 'fixture', available: false }),
     'hub:getInfo': () => ({ mode: 'local', devices: [] }), 'hub:getBuildStatus': () => ({}),
@@ -200,6 +202,15 @@ app.whenReady().then(async () => {
   const js = source => win.webContents.executeJavaScript(source);
   const capture = async () => { await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); return win.webContents.capturePage(); };
   await waitFor("state.stats?.periods?.today?.totalTokens === 125000", 'App initialization');
+  if (process.env.TM_DOM_REGRESSION === '1') {
+    // DOM focus coverage remains available without OS desktop activation.
+    win.webContents.debugger.attach('1.3');
+    await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+    win.focus();
+    console.log(await js(fs.readFileSync(path.join(root, 'tests/fixtures/app-dom-regression.cjs'), 'utf8')));
+    assertConsoleClean();
+    await runtime.dispose(); clearTimeout(deadline); win.destroy(); app.exit(0); return;
+  }
   assert.equal(runtime.manager.backendCount(), 0);
   await pause(150);
   fs.writeFileSync(path.join(evidence, 'app-native.png'), (await capture()).toPNG());

@@ -192,6 +192,7 @@ test('Home OpenRouter credits-only success does not repeat grouped profile names
 function renderHomeWindows(windows, settings = {}, plan = '', providerId = '', locale = 'en') {
   class Element {
     constructor() {
+      this.dataset = {};
       this.children = [];
       this.style = { setProperty(name, value) { this[name] = value; } };
       this.attributes = {};

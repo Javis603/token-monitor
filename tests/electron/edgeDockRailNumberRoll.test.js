@@ -89,12 +89,36 @@ test('a key that names two readouts is ambiguous and left static', () => {
   assert.equal(rolls.length, 0);
 });
 
+test('retained readouts acquire the current monetary count formatter', () => {
+  const { Element } = require('../helpers/notchPanel');
+  const dom = require('../../src/electron/renderer/domReconcile').create();
+  for (const missing of [false, true]) {
+    const root = new Element('main', {});
+    const build = (value, format) => railNumberRollApi.mark(new Element('span', {}), 'quota', value, format);
+    const initial = build(missing ? undefined : 50, missing ? undefined : n => `${n}%`);
+    initial.textContent = missing ? '—' : '50%'; initial.dataset.rollText = initial.textContent;
+    dom.reconcileChildren(root, [initial]);
+    const counted = [];
+    const roller = railNumberRollApi.create({ mode: () => 'count', schedule() {}, animation: {
+      capture() {}, duration: 1,
+      beginCount(_node, _from, to, format) { counted.push(format(to)); return () => {}; }
+    } });
+    for (const amount of [10, 11]) {
+      const snapshot = roller.capture(root);
+      const next = build(amount, n => `$${n}`); next.textContent = `$${amount}`; next.dataset.rollText = next.textContent;
+      dom.reconcileChildren(root, [next]); roller.play(root, snapshot);
+    }
+    assert.equal(root.children[0], initial);
+    assert.equal(counted.at(-1), '$11');
+  }
+});
+
 test('the rail rolls its readouts on the shared setting, never on a reveal', () => {
   const dock = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
   const html = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/index.html'), 'utf8');
   const main = fs.readFileSync(path.join(root, 'src/electron/main.js'), 'utf8');
   const render = dock.slice(dock.indexOf('function renderRail('), dock.indexOf('let gesture = null;'));
-  assert.ok(render.indexOf('railNumberRoll.capture(railNode)') < render.indexOf('node.remove()'));
+  assert.ok(render.indexOf('railNumberRoll.capture(railNode)') < render.indexOf('cardDom.reconcileChildren(railNode, nodes)'));
   assert.match(render, /if \(!revealing && !prefersReducedMotion\(\)\)/);
   assert.match(dock, /mode: \(\) => tokenNumberAnimationApi\.normalize\(appearance\(\)\.tokenNumberAnimation\)/);
   assert.match(render, /const refilling = animateRingResets\(ringSnapshot\);[\s\S]*skip: \(node\) => refilling\.has\(node\)/,

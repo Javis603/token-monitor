@@ -70,13 +70,13 @@ function ringHarness() {
       children: [],
       textContent: '',
       animate(keyframes, options) {
-        const animation = { keyframes, options, startTime: null, playState: 'running', cancel() {} };
+        const animation = { keyframes, options, startTime: null, playState: 'running', cancel() { this.playState = 'idle'; this.oncancel?.(); } };
         this.animations.push(animation);
         return animation;
       },
-      getAnimations() { return this.animations; },
-      append(child) { this.children.push(child); },
-      remove() { this.isConnected = false; }
+      getAnimations({ subtree = false } = {}) { return [...this.animations.filter(a => a.playState === 'running'), ...(subtree ? this.children.flatMap(child => child.getAnimations({ subtree: true })) : [])]; },
+      append(child) { this.children.push(child); child.parentNode = this; },
+      remove() { this.isConnected = false; this.parentNode.children = this.parentNode.children.filter(child => child !== this); }
     };
   }
   const rail = {
@@ -120,6 +120,8 @@ function ringHarness() {
     };
     cellNode.circle = node();
     cellNode.ring = node();
+    cellNode.ring.append(cellNode.circle);
+    cellNode.ring.querySelectorAll = () => cellNode.ring.children.filter(child => child.className === 'edge-dock-ring-complete');
     cellNode.value = node();
     cellNode.value.textContent = shown === null ? '--' : `${Math.round(shown)}%`;
     cellNode.querySelector = (selector) => (
@@ -147,6 +149,67 @@ function ringHarness() {
   return { cell, refresh, frame, context, reduce: () => { reduced = true; } };
 }
 
+test('a retained percentage readout cancels its previous loop before a static update', () => {
+  for (const reduce of [false, true]) {
+    const h = ringHarness(), value = h.cell(0).value;
+    h.context.animateRingPercent(value, 0, 100, 1000);
+    h.frame(100);
+    if (reduce) h.reduce();
+    h.context.animateRingPercent(value, 20, 20, 1000);
+    h.frame(500);
+    assert.equal(value.textContent, '20%');
+  }
+});
+
+test('a non-reset render supersedes the count-up on a retained value node', () => {
+  for (const started of [false, true]) {
+    const h = ringHarness();
+    h.refresh([h.cell(5, { resetsAt: '2026-09-30' })]);
+    const current = h.refresh([h.cell(100, { resetsAt: '2026-10-01' })])[0];
+    if (started) { h.frame(100); h.frame(200); }
+    const snapshot = h.context.captureRingResetMotion();
+    current.dataset.ringRemaining = current.dataset.ringDisplay = '20';
+    current.value.textContent = '20%';
+    h.context.animateRingResets(snapshot);
+    h.frame(500);
+    assert.equal(current.value.textContent, '20%');
+    h.context.animateRingResets(h.context.captureRingResetMotion()); h.frame(600);
+    assert.equal(current.value.textContent, '20%', 'an unchanged push does not resume the superseded target');
+  }
+});
+
+test('retained rail rings resume one flare and remove it when a refill is superseded', () => {
+  for (const started of [false, true]) {
+    const h = ringHarness();
+    h.refresh([h.cell(5, { resetsAt: '2026-09-30' })]);
+    const cell = h.refresh([h.cell(100, { resetsAt: '2026-10-01' })])[0];
+    if (started) { h.frame(100); h.frame(200); }
+    const first = cell.ring.children.find(child => child.className === 'edge-dock-ring-complete');
+    h.context.animateRingResets(h.context.captureRingResetMotion()); h.frame(300);
+    const flares = cell.ring.children.filter(child => child.className === 'edge-dock-ring-complete');
+    assert.equal(flares.length, 1, 'an unchanged push never stacks completion effects');
+    if (first) assert.equal(first.isConnected, false, 'capture retires the old completion effect');
+    const snapshot = h.context.captureRingResetMotion();
+    cell.dataset.ringRemaining = cell.dataset.ringDisplay = '20'; cell.value.textContent = '20%';
+    h.context.animateRingResets(snapshot); h.frame(2000);
+    assert.equal(cell.ring.children.filter(child => child.className === 'edge-dock-ring-complete').length, 0);
+    assert.equal(cell.ring.getAnimations({ subtree: true }).length, 0);
+    assert.equal(cell.value.textContent, '20%');
+  }
+});
+
+test('reset capture preserves animations on retained running and waiting indicators', () => {
+  const h = ringHarness();
+  const cell = h.refresh([h.cell(20)])[0];
+  for (const kind of ['spinner', 'waiting']) {
+    const indicator = h.context.document.createElement('span');
+    indicator.className = `edge-dock-ring-${kind}`; cell.ring.append(indicator);
+    const animation = indicator.animate([], { duration: 1400, iterations: Infinity });
+    h.context.captureRingResetMotion();
+    assert.equal(animation.playState, 'running', `${kind} animation belongs to session activity`);
+  }
+});
+
 test('a real reset sweeps the arc, counts the figure up and lands the flare', () => {
   const h = ringHarness();
   h.refresh([h.cell(5, { resetsAt: '2026-09-30T12:00:00.000Z' })]);
@@ -158,7 +221,7 @@ test('a real reset sweeps the arc, counts the figure up and lands the flare', ()
   assert.equal(arc.options.easing, 'cubic-bezier(0.333, 0.667, 0.667, 1)');
   assert.equal(arc.keyframes[1].strokeDashoffset, '0px');
   // The flare is timed to land with the sweep, the meter glow's own lead.
-  assert.equal(after[0].ring.children[0].animations[0].options.delay, 1313);
+  assert.equal(after[0].ring.children[1].animations[0].options.delay, 1313);
   assert.equal(after[0].value.textContent, '5%');
   h.frame(1665);
   assert.equal(after[0].value.textContent, '100%');
@@ -186,7 +249,7 @@ test('a stats push mid-refill carries the arc, count and flare onto replacement 
   // Resumed coverage lands in the refresh task, not on the next frame.
   assert.equal(current[0].circle.animations.length, 1);
   assert.equal(current[0].circle.animations[0].startTime, 100);
-  assert.equal(current[0].ring.children[0].animations[0].startTime, 100);
+  assert.equal(current[0].ring.children[1].animations[0].startTime, 100);
   h.frame(816);
   // (816-100)/1565 ≈ 0.457 → eased ≈ 0.706 → 5 + 95 * 0.706 ≈ 72.
   assert.equal(current[0].value.textContent, '72%');
@@ -199,7 +262,7 @@ test('a headline that moved to another account or window is never animated as a 
     const after = h.refresh([h.cell(100, { key, resetsAt: '2026-10-01T12:00:00.000Z' })]);
     h.frame(100);
     assert.equal(after[0].circle.animations.length, 0);
-    assert.equal(after[0].ring.children.length, 0);
+    assert.equal(after[0].ring.children.length, 1, 'only the circle remains');
   }
 });
 
@@ -225,7 +288,7 @@ test('reduced motion leaves replacement rings static', () => {
   const after = h.refresh([h.cell(100, { resetsAt: '2026-10-01T12:00:00.000Z' })]);
   h.frame(100);
   assert.equal(after[0].circle.animations.length, 0);
-  assert.equal(after[0].ring.children.length, 0);
+  assert.equal(after[0].ring.children.length, 1, 'only the circle remains');
   assert.equal(after[0].value.textContent, '100%');
 });
 
@@ -234,12 +297,14 @@ test('the renderer wires the ring driver and the shared card animator', () => {
   // account and window identities the projection now carries.
   assert.match(dock, /node\.dataset\.ringMotionKey = `\$\{cell\.id\}\\0\$\{cell\.headlineAccount \|\| ''\}\\0\$\{cell\.headlineWindowKey \|\| ''\}`;/);
   assert.match(dock, /node\.dataset\.ringResetAt = cell\.resetsAt \|\| '';/);
-  assert.match(dock, /const ringSnapshot = captureRingResetMotion\(\);[\s\S]*?railNode\.insertBefore\(node, cursor\);[\s\S]*?const refilling = animateRingResets\(ringSnapshot\);/);
+  assert.match(dock, /const ringSnapshot = captureRingResetMotion\(\);[\s\S]*?cardDom\.reconcileChildren\(railNode, nodes\);[\s\S]*?const refilling = animateRingResets\(ringSnapshot\);/);
   assert.match(dock, /strokeDashoffset: `\$\{fromOffset\}px`/);
   // The card is the page's animator scoped to the card layer, bound in
   // commitCard around the same replaceChildren the refresh performs.
   assert.match(dock, /cardResetAnimator = limitResetAnimatorApi\.createLimitResetAnimator\(\{[\s\S]*?motion: limitResetMotionApi/);
-  assert.match(dock, /const resetSnapshot = cardResetAnimator\.capture\(previous \|\| contentLayer\);\s*contentLayer\.replaceChildren\(card\);[\s\S]*?cardResetAnimator\.animate\(card, resetSnapshot\);/);
+  assert.match(dock, /const resetSnapshot = cardResetAnimator\.capture\(previous \|\| contentLayer\);/);
+  assert.match(dock, /pendingResetSnapshots\.set\(card, resetSnapshot\)/);
+  assert.match(dock, /cardResetAnimator\.animate\(card, resetSnapshot\)/);
   // Reduced motion settles both halves rather than stranding a count-up.
   assert.match(dock, /if \(reduceMotion\) settleDockMotions\(\);/);
   assert.match(dock, /cardResetAnimator\.settle\(contentLayer\);/);

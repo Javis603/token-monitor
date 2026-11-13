@@ -193,6 +193,6 @@ test('Home history visuals reveal left to right only when entering the view', ()
   assert.match(app, /new ResizeObserver\(applySettledLayout\)/);
   assert.match(
     app,
-    /setupHomeActivityScroller\(activityScroll,\s*\(\)\s*=>\s*\{[\s\S]*?animateHomeHistoryVisuals\(activityScroll, activityCanvas, chart\)[\s\S]*?\}\)/
+    /setupHomeActivityScroller\(scroller, reveal\)/
   );
 });

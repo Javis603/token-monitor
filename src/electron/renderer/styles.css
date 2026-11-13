@@ -4159,10 +4159,6 @@ html.is-windows .settings-panel select option {
   pointer-events: none;
   transition: opacity 180ms ease;
 }
-.home-activity-scroll.is-restoring-hover .heat,
-.home-activity-scroll.is-restoring-hover .heat-bright-layer {
-  transition: none;
-}
 .home-activity-scroll:hover .heat-bright-layer,
 .home-activity-scroll:focus-within .heat-bright-layer {
   opacity: 1;
