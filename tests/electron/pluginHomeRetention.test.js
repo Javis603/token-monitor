@@ -125,7 +125,7 @@ function fixture(t, mode = 'replace', selector = '.home-module-tool > .home-modu
     visibleStatsSurface: () => 'main', openViewFromTray() {}, isSettingsPanelOpen: () => false,
     isRendererWindowHidden: () => false
   });
-  vm.runInContext(['homeModuleShell', 'renderHomeToolModule', 'renderHomePluginModule', 'applyHomeActivityScroll', 'renderHome', 'render'].map(extract).join('\n'), context);
+  vm.runInContext(['homeModuleShell', 'homeShareBar', 'homeShareInkColor', 'homeVendorColorsEnabled', 'homeShareVendorColor', 'homeShareColors', 'applyHomeShareMark', 'renderHomeToolModule', 'renderHomePluginModule', 'applyHomeActivityScroll', 'renderHome', 'render'].map(extract).join('\n'), context);
   return { render: () => context.render(), home, state, document, trace, mutations, navigations, standalone,
     get input() { return input; }, get container() { return container; }, get mounts() { return mounts; },
     get disposals() { return disposals; }, get latest() { return latest; },
