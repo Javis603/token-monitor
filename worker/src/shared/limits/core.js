@@ -20,7 +20,11 @@ const CODEX_TRANSIENT_WINDOW_RETENTION_MS = 10 * 60 * 1000;
 const CODEX_TRANSIENT_PROVIDER_STATUSES = new Set(['unavailable', 'error', 'rateLimited', 'sourceRateLimited']);
 const MAX_ACCOUNT_LABEL_INPUT_LENGTH = 256;
 const MAX_ACCOUNT_NAME_INPUT_LENGTH = 512;
-const MAX_OPENCODE_ACCOUNT_KEY_ALIASES = 8;
+// A provider can name one account by several keys: the key it reports today and
+// the keys a rotated credential used before it (`limits/identityInheritance`
+// decides when that rename is the same account). They travel with the row so
+// the renderer and the quota history read every name as one account.
+const MAX_ACCOUNT_KEY_ALIASES = 8;
 
 function asNumber(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -457,14 +461,14 @@ function normalizeProviderUsageSummary(input) {
   return Object.values(summary).some((value) => value !== null && value !== '') ? summary : null;
 }
 
-function normalizeOpenCodeAccountKeyAliases(values, accountKey = '') {
+function normalizeAccountKeyAliases(values, accountKey = '') {
   if (!Array.isArray(values)) return [];
   const canonical = String(accountKey || '').trim();
   return [...new Set(values
     .map((value) => String(value || '').trim())
     .filter((value) => value && value !== canonical && value.length <= 128))]
     .sort()
-    .slice(0, MAX_OPENCODE_ACCOUNT_KEY_ALIASES);
+    .slice(0, MAX_ACCOUNT_KEY_ALIASES);
 }
 
 function cursorWindowRank(window) {
@@ -490,9 +494,7 @@ function normalizeLimitProvider(input) {
   const relatedAccountKey = provider === 'minimax' && source === 'api' && typeof input.relatedAccountKey === 'string'
     && /^sha256:[a-f0-9]{64}$/.test(input.relatedAccountKey) && input.relatedAccountKey !== accountKey
     ? input.relatedAccountKey : '';
-  const accountKeyAliases = provider === 'opencode'
-    ? normalizeOpenCodeAccountKeyAliases(input.accountKeyAliases, accountKey)
-    : [];
+  const accountKeyAliases = normalizeAccountKeyAliases(input.accountKeyAliases, accountKey);
   const accountLabel = normalizeAccountLabel(input.accountLabel);
   const windows = Array.isArray(input.windows)
     ? input.windows.map(normalizeLimitWindow).filter(Boolean)
@@ -976,7 +978,7 @@ function mergeOpenCodeProviderComponents(candidates) {
     .map((provider) => String(provider.webAccountKey || '').trim())
     .filter(Boolean))].sort()[0] || '';
   const accountKey = canonicalWebAccountKey || winner.accountKey;
-  const accountKeyAliases = normalizeOpenCodeAccountKeyAliases(
+  const accountKeyAliases = normalizeAccountKeyAliases(
     candidates.flatMap(openCodeIdentityKeys),
     accountKey
   );
