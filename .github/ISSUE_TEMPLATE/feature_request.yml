@@ -1,0 +1,32 @@
+name: Feature request
+description: Describe a need or an improvement.
+body:
+  - type: markdown
+    attributes:
+      value: |
+        English or Chinese is welcome. Search open and closed issues first and link related requests below.
+        Do not include credentials or private account/session data. A request is a discussion, not a commitment to implement it.
+  - type: textarea
+    id: need
+    attributes:
+      label: What are you trying to do?
+      description: Describe the situation and why the current behavior gets in your way. Name the relevant platform or tool/provider if it matters.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired outcome
+      description: What would make this work better for you? An implementation plan is not required.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current workaround or alternatives (optional)
+      description: What have you tried, and what is still missing?
+  - type: textarea
+    id: context
+    attributes:
+      label: Related issues, examples or proposal (optional)
+      description: Include links or sanitized examples that help explain the request.
