@@ -1626,6 +1626,12 @@ function shouldKeepExistingGuiSecretProvider(existingProvider, incomingProvider,
   if (!isConfiguredLimitProvider(existingProvider)) return false;
   const existingRuntime = String(existingRecord?.agentRuntime || '').trim();
   const incomingRuntime = String(incomingRecord?.agentRuntime || '').trim();
+  // Managed Copilot profiles belong to the widget, even after headless usage
+  // uploads replace the device-level runtime stamp. The widget can still clear
+  // its own profiles explicitly.
+  if (incomingProvider.provider === 'copilot' && existingProvider.sourceDetail === 'managed') {
+    return incomingRuntime === 'headless-agent';
+  }
   return Boolean(existingRuntime && incomingRuntime && existingRuntime !== incomingRuntime);
 }
 

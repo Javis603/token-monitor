@@ -229,6 +229,7 @@ function mapCopilotUsageToProvider(usage, meta = {}) {
     accountName: meta.accountName || '',
     accountEmail: meta.accountEmail || '',
     source: meta.source || 'api',
+    sourceDetail: meta.sourceDetail || '',
     status: windows.length > 0 ? 'ok' : 'unavailable',
     updatedAt: meta.updatedAt,
     windows
@@ -342,27 +343,45 @@ function configuredCopilotAccounts(options = {}, deps = {}) {
   return accounts;
 }
 
+// Only a full provider observation may replace a provisional identity. Scoped
+// probes keep the selected row key until that observation; the runtime consumes
+// these explicit removals before publishing or syncing the remaining rows.
+function retireCopilotFallbacks(rows, accounts, options) {
+  if (options.limitRefreshScope?.provider === 'copilot' && options.limitRefreshScope.accountKey) return rows;
+  const previous = new Set((options.previousLimits?.providers || []).map(row => row.accountKey));
+  const current = new Set(rows.map(row => row.accountKey));
+  const retired = new Set(accounts.map(account => copilotAccountKey(account.token, account.enterpriseHost))
+    .filter(key => previous.has(key) && !current.has(key)));
+  return [...rows, ...[...retired].map(accountKey => ({ provider: 'copilot', accountKey, removed: true }))];
+}
+
 async function fetchCopilotLimits(options = {}, deps = {}) {
-  // Keep the original single-account return shape for existing headless callers.
-  if (!Object.keys(options.copilotProfiles || {}).length) {
-    const row = await fetchCopilotAccountLimits(options, deps);
-    const scope = options.limitRefreshScope;
-    return scope?.provider === 'copilot' && scope.accountKey && row.accountKey !== scope.accountKey ? [] : row;
-  }
   const scope = options.limitRefreshScope?.provider === 'copilot' ? options.limitRefreshScope : null;
-  const accounts = configuredCopilotAccounts(options, deps).filter(account => account.enabled
+  const configured = configuredCopilotAccounts(options, deps);
+  const scopedKey = account => scope?.accountKey === copilotAccountKey(account.token, account.enterpriseHost) ? scope.accountKey : '';
+  // Keep the original single-account return shape unless a provisional row
+  // must be retired through the runtime's internal removal marker.
+  if (!Object.keys(options.copilotProfiles || {}).length) {
+    const key = configured[0] ? scopedKey(configured[0]) : '';
+    const row = await fetchCopilotAccountLimits(key ? { ...options, accountKey: key } : options, deps);
+    if (scope?.accountKey && row.accountKey !== scope.accountKey) return [];
+    const rows = retireCopilotFallbacks([row], configured, options);
+    return rows.length === 1 ? row : rows;
+  }
+  const accounts = configured.filter(account => account.enabled
     && (!scope?.accountKey || !account.accountKey || account.accountKey === scope.accountKey));
   const rows = await Promise.all(accounts.map(account => fetchCopilotAccountLimits({
     copilotApiToken: account.token, copilotEnterpriseHost: account.enterpriseHost,
-    accountKey: account.accountKey, accountName: account.accountName
+    accountKey: account.accountKey || scopedKey(account), accountName: account.accountName, sourceDetail: 'managed'
   }, deps)));
   const seen = new Set();
-  return rows.filter(row => {
+  const selected = rows.filter(row => {
     if (scope?.accountKey && row.accountKey !== scope.accountKey) return false;
     if (seen.has(row.accountKey)) return false;
     seen.add(row.accountKey);
     return true;
   });
+  return retireCopilotFallbacks(selected, accounts, options);
 }
 
 async function fetchCopilotAccountLimits(options = {}, deps = {}) {
@@ -409,7 +428,8 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
       accountName: login || options.accountName || remembered?.accountName,
       accountEmail: '',
       updatedAt,
-      source: 'api'
+      source: 'api',
+      sourceDetail: options.sourceDetail
     });
   } catch (error) {
     if (deps.signal?.aborted) throw deps.signal.reason;
@@ -418,6 +438,7 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
       accountKey: options.accountKey || remembered?.accountKey || copilotAccountKey(token, enterpriseHost),
       accountName: options.accountName || remembered?.accountName || '',
       source: 'api',
+      sourceDetail: options.sourceDetail,
       status: providerStatusFromError(error),
       updatedAt,
       windows: []

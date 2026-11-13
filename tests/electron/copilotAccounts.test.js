@@ -274,7 +274,7 @@ test('Copilot collection keeps both accounts through Node and Worker aggregate v
   }
 });
 
-function runtimeFixture(t, env = {}) {
+function runtimeFixture(t, env = {}, initial = {}) {
   const fs = require('node:fs');
   const source = fs.readFileSync(require.resolve('../../src/electron/main'), 'utf8');
   const area = source.slice(source.indexOf('  const copilotAccounts = createCopilotAccounts('), source.indexOf("  ipcMain.handle('copilot:getAccounts'"));
@@ -282,10 +282,12 @@ function runtimeFixture(t, env = {}) {
   const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
   const { runLimitInvalidation } = require('../../src/electron/deviceRuntimeCoordinator');
   const limits = require('../../src/shared/providers/copilot/limits');
-  const settings = { limitsEnabled: true, limitProviders: 'copilot' };
+  const settings = { limitsEnabled: true, limitProviders: 'copilot', ...initial };
   const f = fixture();
   let failing = false;
-  const fetch = (url, init) => failing && init.headers.Authorization === 'token work-token'
+  let identityAvailable = true;
+  const fetch = (url, init) => !identityAvailable && !url.includes('copilot_internal')
+    ? { ok: false, status: 503 } : failing && init.headers.Authorization === 'token work-token'
     ? { ok: false, status: 503 } : f.fetch(url, init);
   const runtime = createLimitsRuntime(settings, { autoStart: false, autoRetry: false, env, fetch });
   t.after(() => runtime.stop());
@@ -300,7 +302,8 @@ function runtimeFixture(t, env = {}) {
       return pending;
     }, () => settings);
   const api = createCopilotAccounts({ getSettings: () => settings, saveSettings: () => {}, env, changed, probeDeps: () => ({ fetch }) });
-  return { api, runtime, scopes, flush: () => Promise.all(refreshes), failWork: () => { failing = true; } };
+  return { api, runtime, scopes, flush: () => Promise.all(refreshes), failWork: () => { failing = true; },
+    hideIdentity: () => { identityAvailable = false; }, showIdentity: () => { identityAvailable = true; } };
 }
 
 test('Copilot settings mutations clear only their account and preserve a failing sibling last-good reading', async t => {
@@ -366,20 +369,25 @@ test('Copilot environment readings are retired when saved accounts take preceden
   assert.deepEqual(runtime.getSnapshot().providers.map(row => row.accountName), ['alice']);
 });
 
-test('Node and Worker GUI-secret merges preserve every Copilot account from the widget', () => {
+test('Node and Worker GUI-secret merges preserve every managed Copilot account through repeated headless uploads', async () => {
+  const f = fixture();
+  await f.api.addAccount(['personal', 'managed', 'fixture'].join('-'));
+  await f.api.addAccount('work-token');
+  const providers = await fetchCopilotLimits(f.settings, { fetch: f.fetch, env: {} });
   for (const { mergeDeviceRecord } of [require('../../src/shared/usage'), require('../../worker/src/shared/usage')]) {
-    const providers = ['alice', 'bob'].map(accountName => ({ provider: 'copilot', source: 'api', status: 'ok',
-      accountKey: hashKey('copilot', accountName), accountName, windows: [{ kind: 'billing', usedPercent: 20 }] }));
-    const existing = { deviceId: 'shared', agentRuntime: 'widget', limits: { providers } };
-    const incoming = { deviceId: 'shared', agentRuntime: 'headless', limits: {
+    const existing = { deviceId: 'shared', agentRuntime: 'electron-widget', limits: { providers } };
+    const incoming = { deviceId: 'shared', agentRuntime: 'headless-agent', limits: {
       providers: [{ provider: 'copilot', status: 'notConfigured' }]
     } };
-    const merged = mergeDeviceRecord(existing, incoming);
-    assert.deepEqual(merged.limits.providers.map(row => row.accountName).sort(), ['alice', 'bob']);
-    const sameRuntime = mergeDeviceRecord(existing, { ...incoming, agentRuntime: 'widget' });
-    assert.equal(sameRuntime.limits.providers.length, 1);
-    assert.equal(sameRuntime.limits.providers[0].status, 'notConfigured');
-    const disabled = mergeDeviceRecord(existing, { ...incoming, limits: { providers: [{ provider: 'copilot', status: 'disabled' }] } });
+    let merged = existing;
+    for (let upload = 0; upload < 3; upload++) {
+      merged = mergeDeviceRecord(merged, incoming);
+      assert.deepEqual(merged.limits.providers.map(row => row.accountName).sort(), ['alice', 'bob']);
+    }
+    const cleared = mergeDeviceRecord(merged, { ...incoming, agentRuntime: 'electron-widget' });
+    assert.equal(cleared.limits.providers.length, 1);
+    assert.equal(cleared.limits.providers[0].status, 'notConfigured');
+    const disabled = mergeDeviceRecord(merged, { ...incoming, limits: { providers: [{ provider: 'copilot', status: 'disabled' }] } });
     assert.equal(disabled.limits.providers.length, 1);
     assert.equal(disabled.limits.providers[0].status, 'disabled');
   }
@@ -430,4 +438,62 @@ test('Copilot device-flow IPC carries the authorization host through a settings 
   assert.equal(result.ok, false);
   assert.match(result.error, /host changed/);
   assert.equal(f.requests.length, 0);
+});
+
+test('Copilot replaces a provisional runtime identity after GitHub identity lookup recovers', async t => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  const { aggregateLimits } = require('../../src/shared/limits/core');
+  for (const source of ['legacy', 'environment', 'legacyWithSaved']) {
+    for (const scopedRecovery of [false, true]) {
+      let identityAvailable = false;
+      const token = ['personal', 'provisional', 'fixture'].join('-');
+      const sibling = source === 'legacyWithSaved';
+      const bobKey = hashKey('copilot', 'bob');
+      const runtime = createLimitsRuntime({ limitsEnabled: true, limitProviders: 'copilot',
+        ...(source === 'environment' ? {} : { copilotApiToken: token }),
+        ...(sibling ? { copilotProfiles: { bob: { token: 'work-fixture', accountKey: bobKey, accountName: 'bob' } } } : {})
+      }, {
+        autoStart: false, autoRetry: false, env: source === 'environment' ? { COPILOT_API_TOKEN: token } : {},
+        fetch: async (url, init) => url.includes('copilot_internal') ? { ok: true, json: async () => usage }
+          : init.headers.Authorization === 'token work-fixture' ? { ok: true, json: async () => ({ login: 'bob', id: 2 }) }
+            : identityAvailable ? { ok: true, json: async () => ({ login: 'alice', id: 1 }) } : { ok: false, status: 503 }
+      });
+      t.after(() => runtime.stop());
+      await runtime.refresh({ provider: 'copilot' }, 'manual');
+      const provisional = runtime.getSnapshot().providers.find(row => row.accountKey !== bobKey);
+      assert.equal(provisional.status, 'ok');
+      identityAvailable = true;
+      if (scopedRecovery) {
+        await runtime.refresh({ provider: 'copilot', accountKey: provisional.accountKey }, 'account-refresh');
+        assert.equal(runtime.getSnapshot().providers.length, sibling ? 2 : 1);
+        assert.ok(runtime.getSnapshot().providers.some(row => row.accountKey === provisional.accountKey));
+      }
+      await runtime.refresh({ provider: 'copilot' }, 'manual');
+      const snapshot = runtime.getSnapshot();
+      assert.equal(snapshot.providers.length, sibling ? 2 : 1);
+      assert.ok(snapshot.providers.some(row => row.accountKey === hashKey('copilot', 'alice')));
+      assert.ok(!snapshot.providers.some(row => row.accountKey === provisional.accountKey));
+      if (sibling) assert.equal(snapshot.providers.find(row => row.accountKey === bobKey).windows.length, 1);
+      assert.equal(aggregateLimits([{ deviceId: 'local', limits: snapshot }]).providers.length, sibling ? 2 : 1);
+      assert.equal(JSON.stringify(snapshot).includes('removed'), false);
+    }
+  }
+});
+
+test('Copilot account operations retire a provisional row when resolving a legacy credential', async t => {
+  for (const action of ['disable', 'save']) {
+    const token = ['personal', 'operation', 'fixture'].join('-');
+    const f = runtimeFixture(t, {}, { copilotApiToken: token });
+    f.hideIdentity();
+    await f.runtime.refresh({ provider: 'copilot' }, 'manual');
+    const provisional = f.runtime.getSnapshot().providers[0].accountKey;
+    f.showIdentity();
+    if (action === 'disable') await f.api.setEnabled('legacy', false);
+    else await f.api.addAccount(token);
+    await f.flush();
+    const rows = f.runtime.getSnapshot().providers;
+    assert.equal(rows.length, action === 'disable' ? 0 : 1);
+    assert.ok(!rows.some(row => row.accountKey === provisional));
+    if (action === 'save') assert.equal(rows[0].accountKey, hashKey('copilot', 'alice'));
+  }
 });

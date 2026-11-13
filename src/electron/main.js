@@ -9996,6 +9996,15 @@ app.whenReady().then(() => {
           .filter(row => row.provider === 'copilot' && row.accountKey && !knownKeys.has(row.accountKey));
         if (legacyRows.length === 1) accountKey = legacyRows[0].accountKey;
       }
+      const resolved = Object.values(copilotLimits.copilotProfiles(settings)).find(account => account.accountKey === accountKey);
+      if (resolved) {
+        const fallbackKey = copilotLimits.copilotAccountKey(resolved.token, resolved.enterpriseHost);
+        const provisional = (deviceRuntimeHandle?.getSnapshot()?.limits?.providers || [])
+          .some(row => row.provider === 'copilot' && row.accountKey === fallbackKey);
+        if (provisional && fallbackKey !== accountKey) {
+          void queueLimitInvalidation({ provider: 'copilot', accountKey: fallbackKey }, 'identity-resolved', { clear: true, refresh: false });
+        }
+      }
       deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
       pushSettingsToRenderer();
       const scope = accountKey ? { provider: 'copilot', accountKey } : { provider: 'copilot' };
