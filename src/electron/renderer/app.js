@@ -13191,33 +13191,6 @@ async function onLimitProviderReorder(providerId, targetIndex) {
   await saveSettings({ limitProviderOrder: limitProviderOrderApi.preserveAbsentPluginOrder(state.settings?.limitProviderOrder, next.split(','), desktopLimitProviders()).join(',') });
 }
 
-async function onClientDisplayMove(clientId, direction) {
-  const pinned = pinnedClientSet();
-  const hasCustomOrder = clientDisplayPreferencesApi.hasCustomDisplayOrder(state.settings?.clientDisplayOrder);
-  if (!hasCustomOrder && pinned.has(clientId)) {
-    const nextPinned = clientDisplayPreferencesApi.movePinnedClient(state.settings?.pinnedClients, KNOWN_CLIENTS, clientId, direction);
-    if (nextPinned !== clientDisplayPreferencesApi.normalizePinnedClients(state.settings?.pinnedClients, KNOWN_CLIENTS)) await saveSettings({ pinnedClients: nextPinned });
-    return;
-  }
-  const next = clientDisplayPreferencesApi.moveClientDisplayOrder(state.settings?.clientDisplayOrder, KNOWN_CLIENTS, clientId, direction);
-  await saveSettings({ clientDisplayOrder: next, pinnedClients: '' });
-}
-
-async function onClientDisplayReorder(clientId, targetIndex) {
-  const pinned = pinnedClientSet();
-  const hasCustomOrder = clientDisplayPreferencesApi.hasCustomDisplayOrder(state.settings?.clientDisplayOrder);
-  if (!hasCustomOrder && pinned.has(clientId)) {
-    const pinnedTargetIndex = Math.max(0, Math.min(pinned.size - 1, Number(targetIndex) || 0));
-    const nextPinned = clientDisplayPreferencesApi.reorderPinnedClient(state.settings?.pinnedClients, KNOWN_CLIENTS, clientId, pinnedTargetIndex);
-    if (nextPinned !== clientDisplayPreferencesApi.normalizePinnedClients(state.settings?.pinnedClients, KNOWN_CLIENTS)) await saveSettings({ pinnedClients: nextPinned });
-    return;
-  }
-  const current = clientDisplayPreferencesApi.normalizeClientDisplayOrder(state.settings?.clientDisplayOrder, KNOWN_CLIENTS).join(',');
-  const next = clientDisplayPreferencesApi.reorderClientDisplayOrder(state.settings?.clientDisplayOrder, KNOWN_CLIENTS, clientId, targetIndex);
-  if (next === current) return;
-  await saveSettings({ clientDisplayOrder: next, pinnedClients: '' });
-}
-
 async function onViewDisplayMove(viewId, direction) {
   const next = viewDisplayPreferencesApi.moveViewDisplayOrder(effectiveViewDisplayOrderValue(), VIEW_DISPLAY_OPTIONS, viewId, direction);
   await saveSettings({ viewDisplayOrder: next });
@@ -13334,8 +13307,7 @@ async function showAllServiceProviders() {
 }
 
 async function onPreferenceReorder(kind, id, targetIndex) {
-  if (kind === 'client') await onClientDisplayReorder(id, targetIndex);
-  else if (kind === 'view') await onViewDisplayReorder(id, targetIndex);
+  if (kind === 'view') await onViewDisplayReorder(id, targetIndex);
   else if (kind === 'homeModule') await onHomeModuleReorder(id, targetIndex);
   else if (kind === 'homeLimitProvider') await onHomeLimitProviderReorder(id, targetIndex);
   else if (kind === 'statusProvider') await onServiceProviderReorder(id, targetIndex);
@@ -13359,8 +13331,7 @@ function onPreferenceOrderKeydown(event, kind, id) {
   }
   if (moves[event.key]) {
     event.preventDefault();
-    if (kind === 'client') void onClientDisplayMove(id, moves[event.key]);
-    else if (kind === 'view') void onViewDisplayMove(id, moves[event.key]);
+    if (kind === 'view') void onViewDisplayMove(id, moves[event.key]);
     else if (kind === 'homeModule') void onHomeModuleMove(id, moves[event.key]);
     else if (kind === 'homeLimitProvider') void onHomeLimitProviderMove(id, moves[event.key]);
     else if (kind === 'statusProvider') void onServiceProviderMove(id, moves[event.key]);
