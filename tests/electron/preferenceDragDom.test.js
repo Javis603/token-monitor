@@ -255,10 +255,10 @@ test('the tool preference row carries the drag transform contract', () => {
 test('a press on the tool row own controls never arms a drag', () => {
   const app = readRendererFile('app.js');
   // The checkbox sits inside a label, which is a hit target of its own.
-  assert.match(app, /const CLIENT_PREFERENCE_DRAG_EXCLUDED = 'button:not\(\.tool-preference-main\), input, select, textarea, a, label, \.accordion-animated-container';/);
+  assert.match(app, /const CLIENT_PREFERENCE_DRAG_EXCLUDED = 'button:not\(\.tool-preference-main\), input, select, textarea, a, label, \.accordion-animated-container, \.qoder-version-options';/);
   const wiring = app.slice(app.indexOf('const clientPreferenceRowDrag = '), app.indexOf('function renderToolPreferences('));
   assert.match(wiring, /dragExcluded: CLIENT_PREFERENCE_DRAG_EXCLUDED,/);
-  assert.match(wiring, /rowSelector: '\.tool-preference-row\[data-client\]',/);
+  assert.match(wiring, /rowSelector: ':scope > \.tool-preference-row\[data-client\]',/);
   assert.match(wiring, /idKey: 'client',/);
   assert.match(wiring, /preserveScroll: preserveSettingsPanelScroll,/);
   assert.match(wiring, /applyOrder: \(order\) => applyPreferenceOrder\('client', order\),/);
@@ -266,7 +266,7 @@ test('a press on the tool row own controls never arms a drag', () => {
   // The pin/order decision is made once, by the shared module, and travels from
   // the mirror to the save; onPreferenceOrderCommit would compare against the
   // value the mirror just wrote and drop it.
-  assert.match(wiring, /clientDisplayPreferencesApi\.clientDisplayOrderCommit\(order, KNOWN_CLIENTS, state\.settings\?\.clientDisplayOrder, state\.settings\?\.pinnedClients, id\)/);
+  assert.match(wiring, /clientDisplayPreferencesApi\.clientDisplayOrderCommit\(qoderDisplayApi\.expandOrder\(order\), KNOWN_CLIENTS, state\.settings\?\.clientDisplayOrder, state\.settings\?\.pinnedClients, id\)/);
   assert.match(wiring, /persistOrder: \(_order, _id, patch\) => void saveSettings\(patch\)/);
   assert.doesNotMatch(wiring, /onPreferenceOrderCommit\(/);
 });

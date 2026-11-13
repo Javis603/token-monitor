@@ -294,11 +294,11 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 
 - Custom は1つの GET 残高エンドポイントから数値 JSON フィールドをマッピングします。OpenAI または Anthropic API 互換だけでは不十分です。
 
-- 国際版 CLI/IDE の使用量はツール設定の **Qoder** で有効にできます。中国版は引き続き **Qoder CN** です。国際版の読み取り先は `QODER_CONFIG_DIR/projects` または `~/.qoder/projects` です。両者の JSONL transcript は Tokscale の Qoder パーサーを共有します。記録されたトークンのみを集計します。マネージドモデルのカウンターを記録するには、対応する Qoder プロセスで `QODER_EXPOSE_TOKEN_USAGE=1` / `QODERCN_EXPOSE_TOKEN_USAGE=1` を有効にしてください。これらの変数は、既存の記録にないカウンターを復元しません。テキストや credits からの推定は行わず、動的モデルコードは記録どおりに表示します。
+- Qoder グループで国際版と CN を個別に追跡できます。新規インストールでは両方が有効で、既存の選択は維持されます。ツール使用量は既定で合算され、バージョン別表示も選べます。国際版の読み取り先は `QODER_CONFIG_DIR/projects` または `~/.qoder/projects` です。両者の JSONL transcript は Tokscale の Qoder パーサーを共有します。記録されたトークンのみを集計します。マネージドモデルのカウンターを記録するには、対応する Qoder プロセスで `QODER_EXPOSE_TOKEN_USAGE=1` / `QODERCN_EXPOSE_TOKEN_USAGE=1` を有効にしてください。これらの変数は、既存の記録にないカウンターを復元しません。テキストや credits からの推定は行わず、動的モデルコードは記録どおりに表示します。
 
 #### Qoder CN（ローカルアダプター）
 
-Qoder CN のトークン使用量は API ではなくアプリのローカルデータから読み取ります。Settings → tools で有効化します（オプトイン、デフォルト無効）。現行版は Qoder 設定ディレクトリの `projects` JSONL（通常 `~/.qoder-cn/projects`）を読み取ります。旧 SQLite のみを使用するバージョンは収集対象外です。Token Monitor の既存の履歴ファイルは削除しません。JSONL パスの優先順位は `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`、既定値です。[Qoder のデータソース](docs/providers/qodercn.md)も参照してください。
+Qoder CN のトークン使用量は API ではなくアプリのローカルデータから読み取ります。Settings → tools の Qoder グループで個別に設定できます。現行版は Qoder 設定ディレクトリの `projects` JSONL（通常 `~/.qoder-cn/projects`）を読み取ります。旧 SQLite のみを使用するバージョンは収集対象外です。Token Monitor の既存の履歴ファイルは削除しません。JSONL パスの優先順位は `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`、既定値です。[Qoder のデータソース](docs/providers/qodercn.md)も参照してください。
 
 このローカル統合に追加ランタイムは不要です。読み取れないソースは、最後に完全に読み取れたデータを保持します。実測トークン欄がある JSONL 行だけを集計します。現行のファーストパーティープラン行は credits と context 比率だけの場合があり、信頼できるセッション単位の context window がないためトークンを推測しません。Credits は AI Tool Limits に表示され、実測トークンを持つ BYOK／カスタムモデルは通常どおり集計されます。
 </details>

@@ -294,11 +294,11 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 
 - Custom은 하나의 GET 잔액 엔드포인트에서 숫자 JSON 필드를 매핑합니다. OpenAI 또는 Anthropic API 호환만으로는 충분하지 않습니다.
 
-- 국제판 CLI/IDE 사용량은 도구 설정에서 **Qoder**를 켜면 수집됩니다. 중국판은 **Qoder CN**으로 유지됩니다. 국제판 경로는 `QODER_CONFIG_DIR/projects` 또는 `~/.qoder/projects`입니다. 두 JSONL transcript 경로는 Tokscale의 Qoder 파서를 공유합니다. 보고된 토큰만 집계합니다. 관리형 모델의 토큰 수를 기록하려면 해당 Qoder 프로세스에서 `QODER_EXPOSE_TOKEN_USAGE=1` / `QODERCN_EXPOSE_TOKEN_USAGE=1`을 활성화하세요. 이 변수는 기존 기록에서 누락된 토큰 수를 복구하지 않습니다. 텍스트나 크레딧으로 토큰을 추정하지 않으며 동적 모델 코드를 그대로 표시합니다.
+- Qoder 그룹에서 국제판과 CN을 개별 추적합니다. 새 설치는 둘 다 활성화하며 기존 선택은 유지합니다. 도구 사용량은 기본적으로 합산되며 버전별 표시를 선택할 수 있습니다. 국제판 경로는 `QODER_CONFIG_DIR/projects` 또는 `~/.qoder/projects`입니다. 두 JSONL transcript 경로는 Tokscale의 Qoder 파서를 공유합니다. 보고된 토큰만 집계합니다. 관리형 모델의 토큰 수를 기록하려면 해당 Qoder 프로세스에서 `QODER_EXPOSE_TOKEN_USAGE=1` / `QODERCN_EXPOSE_TOKEN_USAGE=1`을 활성화하세요. 이 변수는 기존 기록에서 누락된 토큰 수를 복구하지 않습니다. 텍스트나 크레딧으로 토큰을 추정하지 않으며 동적 모델 코드를 그대로 표시합니다.
 
 #### Qoder CN(로컬 어댑터)
 
-Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습니다. Settings → tools에서 활성화합니다(옵트인, 기본 꺼짐). 현재 버전은 Qoder 설정 디렉터리의 `projects` JSONL(보통 `~/.qoder-cn/projects`)을 읽습니다. 이전 SQLite만 사용하는 버전은 더 이상 수집하지 않으며, 기존 Token Monitor 기록 파일은 삭제하지 않습니다. JSONL 경로 우선순위는 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`, `QODERCN_CONFIG_DIR/projects`, 기본 경로 순입니다. [Qoder 데이터 소스 설명](docs/providers/qodercn.md)을 참고하세요.
+Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습니다. Settings → tools의 Qoder 그룹에서 개별 설정할 수 있습니다. 현재 버전은 Qoder 설정 디렉터리의 `projects` JSONL(보통 `~/.qoder-cn/projects`)을 읽습니다. 이전 SQLite만 사용하는 버전은 더 이상 수집하지 않으며, 기존 Token Monitor 기록 파일은 삭제하지 않습니다. JSONL 경로 우선순위는 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`, `QODERCN_CONFIG_DIR/projects`, 기본 경로 순입니다. [Qoder 데이터 소스 설명](docs/providers/qodercn.md)을 참고하세요.
 
 이 로컬 통합에는 추가 런타임이 필요 없습니다. 읽을 수 없는 소스는 마지막으로 완전히 읽은 데이터를 유지합니다. 실제 토큰 필드가 있는 JSONL 행만 집계합니다. 현재 자사 플랜 행은 credits와 context 비율만 기록할 수 있고 신뢰할 수 있는 세션별 context window가 없으므로 토큰을 추측하지 않습니다. Credits는 AI Tool Limits에 표시되며 실제 토큰이 있는 BYOK/사용자 지정 모델은 정상 집계됩니다.
 </details>

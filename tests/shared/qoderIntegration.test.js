@@ -24,9 +24,10 @@ test('Qoder international and CN have independent roots and scan partitions', ()
   assert.equal(MARKER_CLIENTS['.qoder/projects'], 'qoder');
 });
 
-test('Qoder is opt-in and a moved international root invalidates its anchor', () => {
+test('Qoder is default-tracked and a moved international root invalidates its anchor', () => {
   assert.ok(KNOWN_CLIENTS.split(',').includes('qoder'));
-  assert.ok(!DEFAULT_CLIENTS.split(',').includes('qoder'));
+  assert.ok(DEFAULT_CLIENTS.split(',').includes('qoder'));
+  assert.ok(DEFAULT_CLIENTS.split(',').includes('qodercn'));
   const fingerprint = (clients, root) => configFingerprint(clients, '', true, null, 'pricing', {
     homeDir: path.resolve('/qoder-fixture'), platform: 'linux', env: { QODER_CONFIG_DIR: root }
   });

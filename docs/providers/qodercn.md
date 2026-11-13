@@ -15,8 +15,8 @@ Qoder local usage and account quotas have separate registrations:
 
 | Id | Role | Unit |
 | --- | --- | --- |
-| `qoder` | opt-in tracked client for international Qoder CLI/IDE transcripts | tokens and estimated API cost |
-| `qodercn` | opt-in tracked client for local Qoder CN usage | tokens and estimated API cost |
+| `qoder` | tracked client for international Qoder CLI/IDE transcripts | tokens and estimated API cost |
+| `qodercn` | tracked client for local Qoder CN usage | tokens and estimated API cost |
 | `qoder` (limits catalog) | AI Tool Limits provider for global or CN accounts | big-model credits |
 
 Credits are quota units, not tokens. Never copy credit deltas into `qodercn` usage rows or token history.
@@ -49,6 +49,12 @@ The CN JSONL projects directory resolves in this order:
 A missing JSONL root is a valid empty source. Each transcript is fingerprinted and its native messages are cached in `<tokscale cache dir>/token-monitor/qodercn-<source-root-id>.json`. Caches are isolated per projects root, including WSL homes. Previous JSONL snapshots in `qodercn.json` are upgraded without changing session identities; retired database snapshots are discarded. Once traversal starts, directory, stat or stream failures, and the file, byte, row and line budgets, fail the whole JSONL source: the fork serves its last complete snapshot instead of publishing a partial read.
 
 The projects directory is part of the persisted-anchor fingerprint. Moving it invalidates the anchor. Anchors that included the retired database source are also invalidated before any watch delta is applied. Explicit `--home` scans ignore host environment overrides, so Qoder CN can be collected from WSL homes without recounting host usage.
+
+## Display and defaults
+
+The desktop tool settings collect both editions in a fixed Qoder group. Each edition keeps its own tracking, source-health, visibility and pin controls. `separateQoderClients` only splits the widget tool-usage list; it never changes collection, session identities, archives or the Hub wire. The default combined row sums visible editions and their model breakdowns. Session details and historical charts keep their original client attribution.
+
+Fresh installations track both editions by default. Existing saved selections, including an empty selection, remain unchanged. Older settings do not carry reliable catalog-version provenance, so an absent international id is not treated as permission to enable it. The group checkbox can explicitly enable or disable both editions.
 
 ## Credentials and transport
 

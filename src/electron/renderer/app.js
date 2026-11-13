@@ -170,6 +170,8 @@ const clientSourceCacheApi = window.TokenMonitorClientSourceCache;
 const clientRescanStateApi = window.TokenMonitorClientRescanState;
 const serviceStatusPresentationApi = window.TokenMonitorServiceStatusPresentation;
 const clientDisplayPreferencesApi = window.TokenMonitorClientDisplayPreferences;
+const qoderDisplayApi = window.TokenMonitorQoderDisplay;
+const qoderSettingsGroupApi = window.TokenMonitorQoderSettingsGroup;
 const settingsListFilterApi = window.TokenMonitorSettingsListFilter;
 const customPricingFormApi = window.TokenMonitorCustomPricingForm;
 const viewDisplayPreferencesApi = window.TokenMonitorViewDisplayPreferences;
@@ -3454,8 +3456,10 @@ function toolRowsForPeriod(period) {
   const clientRows = periodAttributionRows(period, period?.clients, period?.clientCosts, period?.clientUnpricedTokens)
     .map(({ key: client, value, cost, unpricedTokens }) => ({ key: client, unpricedTokens, name: client === usageAttributionRowsApi.UNATTRIBUTED_KEY ? t('dashboard.tooltip.unclassified') : clientLabels[client] || client, value, cost, color: clientColors[client] || clientColors.default, stale: false, cacheReadTokens: attributionComponent(period, 'clientCacheReads', client), cacheWriteTokens: attributionComponent(period, 'clientCacheWrites', client), outputTokens: attributionComponent(period, 'clientOutputs', client), unclassifiedTokens: attributionComponent(period, 'clientUnclassifiedTokens', client), modelRows: toolDetailsApi.visibleModelRowsForTool(period, client, formatCost) }));
   if (clientRows.length > 0) {
-    const usageSortedRows = clientRows.sort((a, b) => b.value - a.value);
-    return clientDisplayPreferencesApi.applyClientDisplayPreferences(usageSortedRows, state.settings?.clientDisplayOrder, state.settings?.hiddenClients, KNOWN_CLIENTS, state.settings?.pinnedClients);
+    const separate = state.settings?.separateQoderClients === true;
+    const visible = clientDisplayPreferencesApi.applyClientDisplayPreferences(clientRows, '', state.settings?.hiddenClients, KNOWN_CLIENTS, '');
+    const usageSortedRows = qoderDisplayApi.groupRows(visible, separate).sort((a, b) => b.value - a.value);
+    return clientDisplayPreferencesApi.applyClientDisplayPreferences(usageSortedRows, qoderDisplayApi.displayPreference(state.settings?.clientDisplayOrder, separate), '', KNOWN_CLIENTS, qoderDisplayApi.displayPreference(state.settings?.pinnedClients, separate));
   }
   if (Number(period?.totalTokens || 0) === 0) return [];
   return deviceRowsForPeriod();
@@ -10257,7 +10261,7 @@ function preferenceItemAttribute(kind) {
 function preferenceRows(kind) {
   const list = preferenceListForKind(kind);
   const selector = kind === 'client'
-    ? '.tool-preference-row[data-client]'
+    ? ':scope > .tool-preference-row[data-client]'
     : kind === 'view'
       ? '.view-preference-row[data-view]'
       : kind === 'statusProvider'
@@ -11967,13 +11971,13 @@ function renderWslPanel() {
 // `clientDisplayOrderCommit` decides, and the patch it returns is carried from
 // the local mirror to the save rather than derived twice — the mirror writes
 // the very keys that decision reads.
-const CLIENT_PREFERENCE_DRAG_EXCLUDED = 'button:not(.tool-preference-main), input, select, textarea, a, label, .accordion-animated-container';
+const CLIENT_PREFERENCE_DRAG_EXCLUDED = 'button:not(.tool-preference-main), input, select, textarea, a, label, .accordion-animated-container, .qoder-version-options';
 
 const clientPreferenceRowDrag = rowDragControllerApi.createRowDragController({
   dragSort: verticalDragSortApi,
   getList: () => els.clientDisplayList,
   getScrollPanel: () => els.settingsPanel,
-  rowSelector: '.tool-preference-row[data-client]',
+  rowSelector: ':scope > .tool-preference-row[data-client]',
   idKey: 'client',
   dragExcluded: CLIENT_PREFERENCE_DRAG_EXCLUDED,
   getExpanded: () => state.clientHealthExpanded,
@@ -11981,7 +11985,7 @@ const clientPreferenceRowDrag = rowDragControllerApi.createRowDragController({
   applyOrder: (order) => applyPreferenceOrder('client', order),
   preserveScroll: preserveSettingsPanelScroll,
   mirrorOrder: (order, id) => {
-    const patch = clientDisplayPreferencesApi.clientDisplayOrderCommit(order, KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients, id);
+    const patch = clientDisplayPreferencesApi.clientDisplayOrderCommit(qoderDisplayApi.expandOrder(order), KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients, id);
     state.settings = { ...state.settings, ...patch };
     return patch;
   },
@@ -12032,6 +12036,7 @@ function toolPreferenceRenderSignature() {
     settings: [
       [...enabledClientSet()].sort(),
       state.settings?.hiddenClients || '',
+      state.settings?.separateQoderClients === true,
       state.settings?.pinnedClients || '',
       state.settings?.clientDisplayOrder || '',
       state.settings?.locale || state.settings?.language || '',
@@ -12066,7 +12071,7 @@ function renderToolPreferencesNow() {
   // Every client keeps a row; a query with no match adds the no-matches note on
   // top of them, so the short-circuit compares against what this query is
   // expected to have produced.
-  const expectedRowCount = clients.length + (matched.size ? 0 : 1);
+  const expectedRowCount = clients.length - 1 + (matched.size ? 0 : 1);
   if (
     state.toolPreferenceRenderSignature
     && state.toolPreferenceRenderSignature === renderSignature
@@ -12100,6 +12105,7 @@ function renderToolPreferencesNow() {
   const hasHiddenClients = hidden.size > 0;
   if (els.resetClientDisplayOrderButton) els.resetClientDisplayOrderButton.disabled = !hasCustomOrder && !hasPinnedClients;
   if (els.showAllClientsButton) els.showAllClientsButton.disabled = !hasHiddenClients;
+  const qoderVersionRows = [];
   for (const { id, label } of clients) {
     const row = document.createElement('div');
     row.className = 'tool-preference-row';
@@ -12113,7 +12119,7 @@ function renderToolPreferencesNow() {
     labelGroup.className = 'tool-preference-label';
     const name = document.createElement('div');
     name.className = 'tool-preference-name';
-    name.textContent = label;
+    name.textContent = id === 'qoder' ? t('settings.tools.qoder.global') : id === 'qodercn' ? 'CN' : label;
     labelGroup.append(name);
     if (enabled.has(id)) {
       // A tracked client with no reported status yet (first collect still running)
@@ -12152,7 +12158,7 @@ function renderToolPreferencesNow() {
     // from the DOM, so a filter cannot corrupt it — but it would move the row
     // through positions the query has hidden, with nothing on screen to show
     // for it. Off while filtering, like the drag.
-    if (!filtering) trackInput.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, 'client', id));
+    if (!filtering && !qoderDisplayApi.isQoder(id)) trackInput.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, 'client', id));
     track.append(trackInput);
     const visibility = document.createElement('button');
     visibility.type = 'button';
@@ -12213,8 +12219,24 @@ function renderToolPreferencesNow() {
     }
     // Reordering is suppressed while a filter is on: the drop commits the order
     // it reads off the list, and a filtered list is only part of it.
-    if (!filtering) row.addEventListener('pointerdown', (event) => clientPreferenceRowDrag.startRowDrag(event, id));
+    if (!filtering && !qoderDisplayApi.isQoder(id)) row.addEventListener('pointerdown', (event) => clientPreferenceRowDrag.startRowDrag(event, id));
     els.clientDisplayList.appendChild(row);
+    if (qoderDisplayApi.isQoder(id)) qoderVersionRows.push(row);
+  }
+  const anchor = document.createComment('Qoder group');
+  qoderVersionRows[0].before(anchor);
+  const tracking = qoderDisplayApi.trackingState(state.settings?.clients);
+  const qoderGroup = qoderSettingsGroupApi.mount({
+    document, attention: qoderDisplayApi.IDS.some(id => enabled.has(id) && health?.clients?.[id]?.overall === 'attention'), rows: qoderVersionRows.sort((a, b) => qoderDisplayApi.IDS.indexOf(a.dataset.client) - qoderDisplayApi.IDS.indexOf(b.dataset.client)), ...tracking, separate: state.settings?.separateQoderClients === true,
+    expanded: state.qoderSettingsExpanded === true, filtering: Boolean(toolPreferenceQuery()), t,
+    onTracking: (checked) => saveSettings({ clients: qoderDisplayApi.setTracked(state.settings?.clients, checked) }),
+    onSeparate: (checked) => saveSettings({ separateQoderClients: checked }),
+    onExpanded: (open) => { state.qoderSettingsExpanded = open; }
+  });
+  anchor.replaceWith(qoderGroup);
+  if (!filtering) {
+    qoderGroup.addEventListener('pointerdown', event => clientPreferenceRowDrag.startRowDrag(event, 'qoder'));
+    qoderGroup.querySelector('#toolTrackGroup-qoder').addEventListener('keydown', event => onPreferenceOrderKeydown(event, 'client', 'qoder'));
   }
   if (!matched.size) renderSettingsListEmptyState(els.clientDisplayList);
   // Appended first and only then swapped out: replacing the list wholesale
@@ -13275,6 +13297,19 @@ async function onPreferenceReorder(kind, id, targetIndex) {
 
 function onPreferenceOrderKeydown(event, kind, id) {
   const moves = { ArrowUp: 'up', ArrowDown: 'down' };
+  if (kind === 'client' && ['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
+    event.preventDefault();
+    const ordered = clientDisplayPreferencesApi.orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients).map(client => client.id);
+    const order = qoderDisplayApi.displayPreference(ordered.join(','), false).split(',');
+    const from = order.indexOf(id);
+    const target = event.key === 'Home' ? 0 : event.key === 'End' ? order.length - 1 : from + (event.key === 'ArrowUp' ? -1 : 1);
+    if (from < 0 || target < 0 || target >= order.length || target === from) return;
+    order.splice(from, 1);
+    order.splice(target, 0, id);
+    const patch = clientDisplayPreferencesApi.clientDisplayOrderCommit(qoderDisplayApi.expandOrder(order), KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients, id);
+    void saveSettings(patch);
+    return;
+  }
   if (moves[event.key]) {
     event.preventDefault();
     if (kind === 'client') void onClientDisplayMove(id, moves[event.key]);
