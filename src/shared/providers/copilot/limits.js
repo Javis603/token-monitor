@@ -315,7 +315,8 @@ function copilotProfiles(options = {}, env = {}) {
   for (const [id, value] of Object.entries(options.copilotProfiles || {})) {
     const token = copilotToken({}, { copilotApiToken: value?.token });
     if (!token || id === 'environment') continue;
-    const enterpriseHost = normalizedEnterpriseHost(value.enterpriseHost || options.copilotEnterpriseHost);
+    const enterpriseHost = normalizedEnterpriseHost(value.enterpriseHost || options.copilotEnterpriseHost
+      || env.COPILOT_ENTERPRISE_HOST || env.GITHUB_ENTERPRISE_HOST);
     profiles[id] = { token, enabled: value.enabled !== false, enterpriseHost,
       accountKey: String(value.accountKey || ''), accountName: String(value.accountName || '') };
   }

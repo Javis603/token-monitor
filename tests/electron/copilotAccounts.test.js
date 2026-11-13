@@ -293,6 +293,30 @@ test('Copilot legacy checkbox migration preserves its original account key, incl
   }
 });
 
+test('Copilot migrated legacy profiles retain environment host fallback and explicit host precedence', async () => {
+  for (const variable of ['COPILOT_ENTERPRISE_HOST', 'GITHUB_ENTERPRISE_HOST']) {
+    const token = ['personal', 'host', 'fixture'].join('-');
+    const env = { [variable]: 'company.ghe.com' };
+    const f = fixture({ copilotApiToken: token }, env);
+    const original = await fetchCopilotLimits(f.settings, { fetch: f.fetch, env });
+    await f.api.setEnabled('legacy', false);
+    await f.api.setEnabled('legacy', true);
+    assert.equal(f.settings.copilotProfiles.legacy.enterpriseHost, undefined);
+    for (const addSibling of [false, true]) {
+      if (addSibling) await f.api.addAccount('work-token');
+      f.requests.length = 0;
+      const rows = await fetchCopilotLimits(f.settings, { fetch: f.fetch, env });
+      assert.equal(rows.find(row => row.accountName === 'alice').accountKey, original.accountKey);
+      assert.ok(f.requests.length > 0);
+      assert.ok(f.requests.every(request => new URL(request.url).host === 'api.company.ghe.com'));
+    }
+    f.settings.copilotEnterpriseHost = 'settings.ghe.com';
+    assert.equal(copilotProfiles(f.settings, env).legacy.enterpriseHost, 'settings.ghe.com');
+    f.settings.copilotProfiles.legacy.enterpriseHost = 'recorded.ghe.com';
+    assert.equal(copilotProfiles(f.settings, env).legacy.enterpriseHost, 'recorded.ghe.com');
+  }
+});
+
 test('Copilot collection keeps both accounts through Node and Worker aggregate views', async () => {
   const f = fixture();
   await f.api.addAccount('personal-token');
