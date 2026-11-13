@@ -39,9 +39,14 @@
     record.windows[0].remainingPercent = 100; record.windows[0].resetsAt = '2026-01-02T00:00:00Z'; push(); await settle();
     const value = document.querySelector('.edge-dock-value');
     assert(ringNumberAnimations.has(value), 'actual rail reset starts a percentage loop');
+    const ring = document.querySelector('.edge-dock-ring');
+    assert(ring.querySelectorAll('.edge-dock-ring-complete').length === 1, 'actual rail refill has one completion effect');
+    push(); await settle();
+    assert(document.querySelector('.edge-dock-ring') === ring && ring.querySelectorAll('.edge-dock-ring-complete').length === 1, 'unchanged rail refresh retains the ring without stacking flares');
     record.windows[0].remainingPercent = 20; push(); await settle();
     assert(document.querySelector('.edge-dock-value') === value && !ringNumberAnimations.has(value), 'actual non-reset rail render cancels the old percentage loop');
     assert(!document.querySelector('.edge-dock-ring-fill').getAnimations().some(animation => animation.constructor.name === 'Animation' && animation.playState === 'running'), 'non-reset rail render cancels the superseded refill arc');
+    assert(!ring.querySelector('.edge-dock-ring-complete'), 'non-reset rail render removes the superseded completion flare');
     await new Promise(resolve => setTimeout(resolve, 1800));
     assert(value.textContent === '20%', 'superseded rail loop cannot overwrite the settled current reading');
     return 'PASS actual rail cell identity and focus';

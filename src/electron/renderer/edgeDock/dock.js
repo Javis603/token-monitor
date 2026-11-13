@@ -1067,7 +1067,9 @@ function captureRingResetMotion(scope = railNode) {
     // The next render owns the reading, including non-reset updates. Valid
     // resumed motions are registered again by animateRingResets below.
     ringResetMotions.delete(circle);
-    for (const animation of circle?.getAnimations?.() || []) animation.cancel();
+    const ring = cell.querySelector('.edge-dock-ring');
+    for (const animation of ring?.getAnimations?.({ subtree: true }) || []) animation.cancel();
+    for (const flare of ring?.querySelectorAll('.edge-dock-ring-complete') || []) flare.remove();
     const value = cell.querySelector('.edge-dock-value');
     const number = ringNumberAnimations.get(value);
     if (number) cancelAnimationFrame(number.handle);
@@ -1178,8 +1180,8 @@ function animateRingResets(snapshot, scope = railNode) {
     if (!previous) continue;
     const circle = cell.querySelector('.edge-dock-ring-fill');
     const active = previous.motion;
-    // A stats push rebuilds the rail even when nothing changed. Carry the
-    // original timeline across that replacement, including its flare.
+    // Unchanged readings keep their timeline, including the flare. Fresh
+    // ownership prevents an older queued start from running on this ring too.
     if (
       active
       && circle
@@ -1188,7 +1190,7 @@ function animateRingResets(snapshot, scope = railNode) {
       && previous.resetsAt === current.resetsAt
       && (active.startedAt === null || performance.now() - active.startedAt < active.duration + RING_GLOW_MS - RING_GLOW_LEAD_MS)
     ) {
-      motions.push({ cell, circle, motion: active });
+      motions.push({ cell, circle, motion: { ...active } });
       continue;
     }
     if (!limitResetMotionApi.shouldAnimateReset(previous, current)) continue;
