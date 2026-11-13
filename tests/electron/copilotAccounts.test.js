@@ -384,3 +384,50 @@ test('Node and Worker GUI-secret merges preserve every Copilot account from the 
     assert.equal(disabled.limits.providers[0].status, 'disabled');
   }
 });
+
+test('Copilot rejects a changed authorization host before sending the new token', async () => {
+  const f = fixture({ copilotEnterpriseHost: 'company.ghe.com' });
+  await assert.rejects(f.api.addAccount('work-token', () => true, undefined, 'github.com'), /host changed/);
+  assert.equal(f.requests.length, 0);
+  assert.equal(f.api.getAccounts().length, 0);
+  // Manual token entry still uses the current host when no authorization host is supplied.
+  await f.api.addAccount('work-token');
+  assert.ok(f.requests.every(request => request.url.startsWith('https://api.company.ghe.com/')));
+});
+
+test('Copilot unresolved credentials with a shared prefix retain distinct fallback identities', async () => {
+  for (const quotaOk of [true, false]) {
+    const rows = await fetchCopilotLimits({ copilotProfiles: {
+      a: { token: 'gho_abcd-account-a' }, b: { token: 'gho_abcd-account-b' }
+    } }, { env: {}, fetch: async url => url.includes('copilot_internal') && quotaOk
+      ? { ok: true, json: async () => usage } : { ok: false, status: 401 } });
+    assert.equal(rows.length, 2);
+    assert.notEqual(rows[0].accountKey, rows[1].accountKey);
+    assert.ok(rows.every(row => row.status === (quotaOk ? 'ok' : 'unauthorized')));
+  }
+});
+
+test('Copilot device-flow IPC carries the authorization host through a settings change', async () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const source = fs.readFileSync(require.resolve('../../src/electron/main'), 'utf8');
+  const start = source.indexOf("  ipcMain.handle('copilot:signIn'");
+  const end = source.indexOf("  ipcMain.handle('copilot:cancelSignIn'", start);
+  const f = fixture({ copilotEnterpriseHost: 'github.com' });
+  let signIn;
+  vm.runInNewContext(source.slice(start, end), {
+    ipcMain: { handle: (_name, handler) => { signIn = handler; } },
+    copilotLoginController: null, copilotLoginFlowId: '', AbortController, settings: f.settings,
+    process: { env: {} }, copilotAccounts: f.api, fetch: f.fetch,
+    copilotLoginErrorMessage: error => error.message,
+    runCopilotDeviceFlowLogin: async ({ enterpriseHost }) => {
+      assert.equal(enterpriseHost, 'github.com');
+      f.settings.copilotEnterpriseHost = 'company.ghe.com';
+      return { accessToken: 'work-token' };
+    }
+  });
+  const result = await signIn({ sender: { isDestroyed: () => false, send: () => {} } }, { flowId: 'flow' });
+  assert.equal(result.ok, false);
+  assert.match(result.error, /host changed/);
+  assert.equal(f.requests.length, 0);
+});

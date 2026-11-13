@@ -30,15 +30,17 @@ function createCopilotAccounts({ getSettings, saveSettings, probeDeps, changed, 
       return limits.configuredCopilotAccounts(getSettings(), { env }).map(({ id, accountKey, accountName, enabled }) =>
         ({ id, accountKey, accountName, enabled, external: id === 'environment' }));
     },
-    addAccount(rawToken, isCurrent = () => true, signal) {
+    addAccount(rawToken, isCurrent = () => true, signal, authorizedHost) {
       return serialize(async () => {
         signal?.throwIfAborted();
         if (!isCurrent()) throw new Error('GitHub Copilot sign-in was cancelled.');
         const token = limits.copilotToken({}, { copilotApiToken: rawToken });
         if (!token) throw new Error('A GitHub Copilot token is required.');
         const settings = getSettings();
-        const enterpriseHost = limits.normalizedEnterpriseHost(settings.copilotEnterpriseHost
+        const currentHost = limits.normalizedEnterpriseHost(settings.copilotEnterpriseHost
           || env.COPILOT_ENTERPRISE_HOST || env.GITHUB_ENTERPRISE_HOST);
+        const enterpriseHost = authorizedHost === undefined ? currentHost : limits.normalizedEnterpriseHost(authorizedHost);
+        if (enterpriseHost !== currentHost) throw new Error('GitHub host changed. Please try again.');
         const probe = probeDeps();
         const signals = [probe.signal, signal].filter(Boolean);
         const deps = { ...probe, copilotEnterpriseHost: enterpriseHost,

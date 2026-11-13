@@ -10020,8 +10020,9 @@ app.whenReady().then(() => {
       if (!event.sender.isDestroyed()) event.sender.send('copilot:loginStatus', { ...payload, flowId });
     };
     try {
+      const enterpriseHost = settings?.copilotEnterpriseHost || process.env.COPILOT_ENTERPRISE_HOST || process.env.GITHUB_ENTERPRISE_HOST || '';
       const result = await runCopilotDeviceFlowLogin({
-        enterpriseHost: settings?.copilotEnterpriseHost || process.env.COPILOT_ENTERPRISE_HOST || process.env.GITHUB_ENTERPRISE_HOST || '',
+        enterpriseHost,
         signal: controller.signal,
         onStatus: sendStatus
       }, {
@@ -10032,7 +10033,7 @@ app.whenReady().then(() => {
       if (copilotLoginController !== controller) {
         return { ok: false, error: copilotLoginErrorMessage({ status: 'cancelled' }), flowId };
       }
-      await copilotAccounts.addAccount(result.accessToken, () => copilotLoginController === controller && !controller.signal.aborted, controller.signal);
+      await copilotAccounts.addAccount(result.accessToken, () => copilotLoginController === controller && !controller.signal.aborted, controller.signal, enterpriseHost);
       return { ok: true, flowId };
     } catch (error) {
       const message = copilotLoginErrorMessage(error);

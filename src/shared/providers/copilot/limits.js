@@ -404,7 +404,7 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
       });
     }
     return mapCopilotUsageToProvider(usage, {
-      accountKey: options.accountKey || (accountSeed ? copilotAccountKey(accountSeed, enterpriseHost) : remembered?.accountKey) || copilotAccountKey(token.slice(0, 8), enterpriseHost),
+      accountKey: options.accountKey || (accountSeed ? copilotAccountKey(accountSeed, enterpriseHost) : remembered?.accountKey) || copilotAccountKey(token, enterpriseHost),
       accountLabel: displayPlanLabel(usage.copilotPlan),
       accountName: login || options.accountName || remembered?.accountName,
       accountEmail: '',
@@ -415,7 +415,7 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
     if (deps.signal?.aborted) throw deps.signal.reason;
     return normalizeLimitProvider({
       provider: 'copilot',
-      accountKey: options.accountKey || remembered?.accountKey || copilotAccountKey(token.slice(0, 8), enterpriseHost),
+      accountKey: options.accountKey || remembered?.accountKey || copilotAccountKey(token, enterpriseHost),
       accountName: options.accountName || remembered?.accountName || '',
       source: 'api',
       status: providerStatusFromError(error),
