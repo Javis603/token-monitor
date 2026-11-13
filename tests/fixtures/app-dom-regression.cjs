@@ -1,4 +1,4 @@
-/* global state, els, renderLimits, renderTrends, renderSessionDetail, renderRows, updateRow, sessionRowsForPeriod, renderSessionGroupDetail, sessionRowsApi, document, PointerEvent, requestAnimationFrame */
+/* global state, els, renderLimits, renderTrends, renderSessionDetail, renderRows, updateRow, sessionRowsForPeriod, renderSessionGroupDetail, sessionRowsApi, rendererDom, document, PointerEvent, requestAnimationFrame */
 'use strict';
 (async () => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -24,6 +24,18 @@
     assert(popover.textContent !== before, 'open limits tooltip updates');
     assert(limitRow.querySelector('.limit-refresh-button') === refreshButton, 'refresh button retained');
     assert(window.TokenMonitorDomReconcile.data(refreshButton).accountLabel === `Updated ${i}`, 'retained refresh button receives current provider DTO');
+  }
+  const refreshStatus = limitRow.querySelector('.limit-refresh-status'); refreshButton.focus();
+  assert(refreshStatus.textContent === '', 'refresh live region starts empty');
+  for (const message of ['Refresh failed', 'Retry failed']) {
+    // syncLimitRefreshButton writes its asynchronous outcome via textContent.
+    refreshStatus.textContent = message;
+    for (const nextMessage of [message, message, '']) {
+      const next = refreshStatus.cloneNode(false); next.textContent = nextMessage;
+      rendererDom.reconcile(refreshStatus, next);
+      assert(refreshStatus.textContent === nextMessage, 'refresh status contains one current outcome');
+      assert(limitRow.querySelector('.limit-refresh-status') === refreshStatus && document.activeElement === refreshButton, 'refresh status and focused control survive scalar outcome updates');
+    }
   }
   const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   state.settings.reduceMotion = 'off'; state.settings.showLimitUsed = false;

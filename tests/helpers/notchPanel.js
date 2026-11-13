@@ -37,6 +37,7 @@ class Element {
   }
   get nodeValue() { return this.nodeType === 3 ? this.value : null; }
   set nodeValue(value) { this.value = value; }
+  get firstChild() { return this.childNodes[0] || null; }
   get childNodes() {
     if (this.nodeType === 3) return [];
     if (!this.value) return this.children;

@@ -95,10 +95,13 @@
     function reconcileChildren(current, nodes) {
       if (!rendered.has(current)) remember(current);
       const previous = rendered.get(current);
-      // Scalar native writers settle via textContent, replacing recorded text
-      // nodes. Use their live children without disturbing structured controls.
+      // Scalar native writers can populate an empty node or replace its text
+      // children. Adopt live output without disturbing structured controls.
       let owned = previous.children;
-      if (nodes.every(child => child.nodeType === 3) && previous.children.some(child => child.parentNode !== current)) {
+      if (nodes.every(child => child.nodeType === 3) && (
+        (!previous.children.length && current.firstChild)
+        || previous.children.some(child => child.parentNode !== current)
+      )) {
         const outlets = new Set(previous.children.flatMap(child => nodesFor(child)));
         owned = [...current.childNodes].filter(child => !outlets.has(child));
       }

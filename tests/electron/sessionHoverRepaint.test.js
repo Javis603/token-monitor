@@ -62,6 +62,27 @@ test('native updates preserve plugin outlets beside retained anchors', () => {
   assert.deepEqual(root.children, [anchor, outlet]); assert.equal(outlet.textContent, 'unsaved draft');
 });
 
+test('scalar writes into an empty snapshot reconcile once and clear without disturbing plugin siblings', () => {
+  const { document, node, root } = fixture();
+  const status = node('status', ''), outlet = node('author', 'draft');
+  const dom = domApi.create({ nodesFor: element => element === status ? [outlet] : [] });
+  dom.reconcileChildren(root, [status]); outlet.focus();
+  for (const message of ['Refresh failed', 'Try again']) {
+    // Use a real text child; the presentation double stores textContent in a
+    // separate string slot, which would hide a duplicate child insertion.
+    const text = new Element('#text', document); text.nodeValue = message;
+    status.replaceChildren(text);
+    for (let push = 0; push < 2; push++) {
+      dom.reconcileChildren(root, [node('status', message)]);
+      assert.equal(status.textContent, message);
+      assert.deepEqual(root.children, [status, outlet]);
+      assert.equal(outlet.textContent, 'draft'); assert.equal(document.activeElement, outlet);
+    }
+    dom.reconcileChildren(root, [node('status', '')]);
+    assert.equal(status.textContent, '');
+  }
+});
+
 test('nested account, session and family scroll containers survive independently', () => {
   const { node, root, dom } = fixture();
   const build = amount => {
