@@ -405,7 +405,8 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
       fs.mkdirSync(dir, { recursive: true });
       const message = { type: 'assistant', sessionId: 'global-qsess-1', cwd: '/tmp/qoder-global-workspace', timestamp: '2026-09-18T10:00:00Z', message: { id: 'global-m1', model: 'claude-sonnet-4-6', usage: { input_tokens: 1000, cache_read_input_tokens: 600, output_tokens: 120, thinking_tokens: 60 } } };
       const gemini = { ...message, message: { ...message.message, id: 'global-m2', usage: { promptTokenCount: 100, cachedContentTokenCount: 40, candidatesTokenCount: 20, thoughtsTokenCount: 10, totalTokenCount: 130 } } };
-      const stale = { ...message, message: { ...message.message, usage: { input_tokens: 1000, cache_read_input_tokens: 600, output_tokens: 2 } } };
+      const placeholder = { ...message, message: { ...message.message, model: 'auto', usage: undefined } };
+      const stale = { ...message, message: { ...message.message, model: 'auto', usage: { input_tokens: 1000, cache_read_input_tokens: 600, output_tokens: 2 } } };
       const staleGemini = { ...gemini, message: { ...gemini.message, usage: { promptTokenCount: 100, candidatesTokenCount: 2, totalTokenCount: 102 } } };
       // Candidates already include thoughts; an incomplete copy lacks that split.
       const inclusive = { ...message, message: { ...message.message, id: 'global-m3', usage: { promptTokenCount: 100, candidatesTokenCount: 30, totalTokenCount: 130 } } };
@@ -413,7 +414,7 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
       const cross = { ...inclusive, message: { ...inclusive.message, id: 'global-m4' } };
       const crossComplete = { ...complete, message: { ...complete.message, id: 'global-m4' } };
       fs.writeFileSync(path.join(dir, 'a-stale.jsonl'), `${JSON.stringify(stale)}\n${JSON.stringify(staleGemini)}\n${JSON.stringify(cross)}\n`);
-      fs.writeFileSync(path.join(dir, 'tm-contract.jsonl'), [message, gemini, inclusive, complete, crossComplete].map(row => JSON.stringify(row)).join('\n') + '\n');
+      fs.writeFileSync(path.join(dir, 'tm-contract.jsonl'), [placeholder, message, gemini, inclusive, complete, crossComplete].map(row => JSON.stringify(row)).join('\n') + '\n');
     }
   },
   {
@@ -431,12 +432,15 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
         type: 'assistant', sessionId: 'qsess-1', cwd: '/tmp/qoder-workspace', timestamp: '2026-09-18T10:00:00Z',
         message: { id: 'm1', model: 'qoder-custom-abc/openai/gpt-5', usage: { input_tokens: 1000, cache_read_input_tokens: 600, output_tokens: 120, thinking_tokens: 60 } }
       };
+      const placeholder = { ...message, message: { ...message.message, model: 'auto', usage: undefined } };
       const gemini = { ...message, message: { ...message.message, id: 'm2', usage: { promptTokenCount: 100, cachedContentTokenCount: 40, candidatesTokenCount: 20, thoughtsTokenCount: 10, totalTokenCount: 130 } } };
       const inclusive = { ...message, message: { ...message.message, id: 'm3', usage: { promptTokenCount: 100, candidatesTokenCount: 30, totalTokenCount: 130 } } };
       const complete = { ...inclusive, message: { ...inclusive.message, usage: { ...inclusive.message.usage, thoughtsTokenCount: 10 } } };
       const cross = { ...inclusive, message: { ...inclusive.message, id: 'm4' } };
       const crossComplete = { ...complete, message: { ...complete.message, id: 'm4' } };
-      fs.writeFileSync(path.join(dir, 'tm-contract.jsonl'), [message, gemini, inclusive, complete, crossComplete].map(row => JSON.stringify(row)).join('\n') + '\n');
+      fs.writeFileSync(path.join(dir, 'tm-contract.jsonl'), [placeholder, message, gemini, inclusive, complete, crossComplete].map(row => JSON.stringify(row)).join('\n') + '\n');
+      const staleCopies = [message, gemini, inclusive, cross].map(row => ({ ...row, message: { ...row.message, model: 'auto' } }));
+      fs.writeFileSync(path.join(dir, 'a-stale.jsonl'), staleCopies.map(row => JSON.stringify(row)).join('\n') + '\n');
       fs.writeFileSync(path.join(dir, 'z-fork.jsonl'), `${JSON.stringify(cross)}\n`);
     }
   },
