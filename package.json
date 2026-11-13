@@ -35,7 +35,7 @@
     "benchmark:hub-bandwidth": "node scripts/benchmark-hub-bandwidth.js",
     "lint": "eslint .",
     "verify": "npm run lint && npm test",
-    "verify:plugins": "electron scripts/test-plugin-trusted.cjs && electron scripts/test-plugin-trusted-runtime.cjs && electron scripts/test-plugin-trusted-app.cjs && electron scripts/test-plugin-trusted-surfaces.cjs"
+    "verify:plugins": "electron scripts/test-plugin-icons.cjs && electron scripts/test-plugin-trusted.cjs && electron scripts/test-plugin-trusted-runtime.cjs && electron scripts/test-plugin-trusted-app.cjs && electron scripts/test-plugin-trusted-surfaces.cjs"
   },
   "build": {
     "beforePack": "scripts/build-windows-dock.js",
