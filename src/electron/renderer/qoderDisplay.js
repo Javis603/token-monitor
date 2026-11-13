@@ -17,11 +17,13 @@
     const versions = rows.filter(row => isQoder(row.key));
     if (!versions.length) return rows;
     const group = { ...versions[0], key: 'qoder', name: label };
-    for (const field of ['value', 'cost', 'unpricedTokens', 'cacheReadTokens', 'cacheWriteTokens', 'outputTokens', 'unclassifiedTokens']) {
+    for (const field of ['value', 'cost', 'cacheReadTokens', 'cacheWriteTokens', 'outputTokens', 'unclassifiedTokens']) {
       // Missing attribution is unknown, rather than a measured zero.
       group[field] = versions.every(row => Number.isFinite(row[field]))
         ? versions.reduce((total, row) => total + row[field], 0) : undefined;
     }
+    // Attribution rows omit this field when the unpriced count is zero.
+    group.unpricedTokens = versions.reduce((total, row) => total + (row.unpricedTokens ?? 0), 0);
     group.stale = versions.some(row => row.stale);
     const models = new Map();
     for (const row of versions) {

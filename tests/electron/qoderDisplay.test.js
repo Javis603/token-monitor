@@ -28,6 +28,20 @@ test('combines visible editions without changing source rows, totals or unrelate
   assert.strictEqual(groupRows(rows, true), rows, 'separate display has no projection allocation');
 });
 
+test('fully priced editions omit unpricedTokens without erasing another edition’s unpriced warning', () => {
+  const { attributionRows, usageCostLabel } = require('../../src/electron/renderer/usageAttributionRows');
+  const rows = attributionRows({ qoder: 100, qodercn: 200 }, { qoder: 1 }, { unpricedTokens: { qodercn: 200 } });
+  assert.equal(rows[0].unpricedTokens, undefined, 'priced rows omit the optional zero field');
+  for (const versions of [rows, [...rows].reverse()]) {
+    const [combined] = groupRows(versions);
+    assert.equal(combined.value, 300);
+    assert.equal(combined.cost, 1);
+    assert.equal(combined.unpricedTokens, 200);
+    assert.equal(usageCostLabel(combined.cost, combined.unpricedTokens, value => `$${value}`, String, 'unpriced'), '$1 + 200 unpriced');
+  }
+  assert.equal(groupRows(attributionRows({ qoder: 100, qodercn: 200 }, { qoder: 1, qodercn: 2 }))[0].unpricedTokens, 0);
+});
+
 test('a hidden edition is excluded before grouping; CN-only displays as Qoder without inventing usage', () => {
   const { applyClientDisplayPreferences } = require('../../src/electron/renderer/clientDisplayPreferences');
   const clients = [{ id: 'qoder' }, { id: 'qodercn' }];
