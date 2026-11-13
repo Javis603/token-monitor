@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { createDeviceState } = require('../../src/shared/usage/deviceState');
+const { seedWithColdPreview } = require('../../src/shared/anchorSeed');
+const { isPeriodExpired } = require('../../src/shared/usage');
 
 function usage(updatedAt = '2026-07-21T01:00:00.000Z', extra = {}) {
   return {
@@ -160,6 +162,45 @@ test('partial usage previews carry broader periods and optional usage state', ()
   assert.equal(preview.allTimeProjectsIncomplete, true);
 });
 
+test('a partial preview applies its windows only to the periods it carries', () => {
+  // Across a month boundary the Today-stage preview brings the new month's
+  // windows while Month is still last month's total.
+  const october = {
+    timeZone: 'UTC',
+    today: { key: '2026-10-31', endsAt: '2026-11-01T00:00:00.000Z' },
+    month: { key: '2026-10', endsAt: '2026-11-01T00:00:00.000Z' }
+  };
+  const november = {
+    timeZone: 'UTC',
+    today: { key: '2026-11-01', endsAt: '2026-11-02T00:00:00.000Z' },
+    month: { key: '2026-11', endsAt: '2026-12-01T00:00:00.000Z' }
+  };
+  const state = createDeviceState();
+  state.updateUsage(usage('2026-10-31T23:00:00.000Z', { periodWindows: october }), 'interval');
+  const preview = state.updateUsage({ updatedAt: '2026-11-01T00:00:05.000Z', periodWindows: november, today: { totalTokens: 3 } }, 'progress', { preview: true });
+  assert.equal(preview.today.totalTokens, 3);
+  assert.deepEqual(preview.periodWindows.today, november.today);
+  assert.equal(preview.month.totalTokens, 20);
+  assert.deepEqual(preview.periodWindows.month, october.month, 'the carried Month keeps its own window');
+
+  const monthStage = state.updateUsage({ updatedAt: '2026-11-01T00:00:20.000Z', periodWindows: november, today: { totalTokens: 3 }, month: { totalTokens: 3 } }, 'progress', { preview: true });
+  assert.deepEqual(monthStage.periodWindows.month, november.month);
+});
+
+test('a cold Today preview keeps its scan window when limits land after midnight', () => {
+  const cold = [];
+  const state = createDeviceState({ onColdPreview: (record) => cold.push(record) });
+  const windows = { timeZone: 'UTC', today: { key: '2026-11-12', endsAt: '2026-11-13T00:00:00.000Z' } };
+  state.updateUsage({ updatedAt: '2026-11-12T23:59:55.000Z', periodWindows: windows, today: { totalTokens: 250 } }, 'progress', { preview: true });
+  state.updateLimits(limits('2026-11-13T00:00:05.000Z'));
+  assert.equal(cold.length, 2);
+  assert.deepEqual(cold[1].periodWindows.today, windows.today, 'the observer can tell the usage belongs to the scan day');
+  // Shown after midnight, yesterday's 250 tokens are an ended Today, not today's.
+  const now = new Date('2026-11-13T00:00:05.000Z');
+  const shown = seedWithColdPreview({ deviceId: 'seed', periodWindows: {} }, cold[1], now);
+  assert.equal(isPeriodExpired(shown, 'today', now.getTime()), true);
+});
+
 test('cold-start partial previews wait for a complete usage baseline', () => {
   const emitted = [];
   const state = createDeviceState({ onRecord: (record) => emitted.push(record) });
@@ -175,6 +216,54 @@ test('cold-start partial previews wait for a complete usage baseline', () => {
   assert.equal(record.month.totalTokens, 20);
   assert.equal(record.allTime.totalTokens, 30);
   assert.equal(emitted.length, 1);
+});
+
+test('a limits update during a cold start does not publish the held-back preview', () => {
+  // Limits probes land within seconds while all-time can take minutes. The
+  // Today-only preview must not ride out on the limits publish: downstream that
+  // record reads as a device whose month and all-time are zero.
+  const emitted = [];
+  const cold = [];
+  const state = createDeviceState({
+    onRecord: (record) => emitted.push(record),
+    onColdPreview: (record, meta) => cold.push({ record, meta })
+  });
+  state.updateUsage({ updatedAt: '2026-07-21T01:00:00.000Z', today: { totalTokens: 10 } }, 'progress', { preview: true });
+  assert.equal(state.updateLimits(limits()), null);
+  assert.equal(emitted.length, 0);
+  assert.equal(state.getSnapshot(), null);
+
+  // The observer shows the limits with the held-back usage instead.
+  assert.equal(cold.length, 2);
+  assert.equal(cold[1].meta.source, 'limits');
+  assert.equal(cold[1].record.today.totalTokens, 10);
+  assert.equal(cold[1].record.limits.providers[0].status, 'ok');
+
+  // The next preview builds on the first and keeps the limits.
+  state.updateUsage({ updatedAt: '2026-07-21T01:00:01.000Z', today: { totalTokens: 11 }, month: { totalTokens: 21 } }, 'progress', { preview: true });
+  assert.equal(cold.length, 3);
+  assert.equal(cold[2].record.today.totalTokens, 11);
+  assert.equal(cold[2].record.month.totalTokens, 21);
+  assert.equal(cold[2].record.limits.providers[0].status, 'ok');
+  assert.equal(cold[2].meta.reason, 'progress');
+
+  const record = state.updateUsage(usage(), 'startup', { preview: false });
+  assert.equal(record.allTime.totalTokens, 30);
+  assert.equal(record.limits.providers[0].status, 'ok');
+  assert.equal(emitted.length, 1);
+  // Once complete, limits publish as records again.
+  state.updateLimits(limits('2026-07-21T01:00:09.000Z'));
+  assert.equal(cold.length, 3);
+  assert.equal(emitted.length, 2);
+});
+
+test('limits that land before any usage reach the cold-preview observer', () => {
+  const cold = [];
+  const state = createDeviceState({ onColdPreview: (record) => cold.push(record) });
+  assert.equal(state.updateLimits(limits()), null, 'still no record');
+  assert.equal(cold.length, 1);
+  assert.equal(cold[0].limits.providers[0].status, 'ok');
+  assert.equal(Object.prototype.hasOwnProperty.call(cold[0], 'today'), false);
 });
 
 test('rejects stale epoch updates and stops publishing synchronously', () => {

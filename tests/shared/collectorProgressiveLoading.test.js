@@ -53,6 +53,8 @@ test('progressive loading fires onProgress after each period scan', async () => 
   // No history or limits in partials — carryDeviceHistory contract
   assert.equal('history' in partials[0], false, 'partial must not have history key');
   assert.equal('limits' in partials[0], false, 'partial must not have limits key');
+  // The scan's own windows, so a preview shown after midnight keeps its day.
+  assert.equal(typeof partials[0].periodWindows.today.key, 'string');
   // Second partial: today + month
   assert.equal(partials[1].today.totalTokens, 105, 'second partial should still have today');
   assert.equal(partials[1].month.totalTokens, 730, 'second partial should have month tokens');
