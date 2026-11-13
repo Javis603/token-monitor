@@ -12146,6 +12146,7 @@ function renderToolPreferencesNow() {
   if (els.resetClientDisplayOrderButton) els.resetClientDisplayOrderButton.disabled = !hasCustomOrder && !hasPinnedClients;
   if (els.showAllClientsButton) els.showAllClientsButton.disabled = !hasHiddenClients;
   for (const { id, label } of clients) {
+    const qoderTracking = id === 'qoder' ? qoderDisplayApi.trackingState(Object.assign({}, state.settings, ...pendingSettingsPatches).clients) : null;
     const row = document.createElement('div');
     row.className = 'tool-preference-row';
     row.dataset.client = id;
@@ -12160,7 +12161,7 @@ function renderToolPreferencesNow() {
     name.className = 'tool-preference-name';
     name.textContent = label;
     labelGroup.append(name);
-    if (enabled.has(id) || (id === 'qoder' && enabled.has('qodercn'))) {
+    if (id === 'qoder' ? qoderTracking.checked || qoderTracking.mixed : enabled.has(id)) {
       // A tracked client with no reported status yet (first collect still running)
       // reads as "waiting for data" rather than a bare blank.
       //
@@ -12174,7 +12175,7 @@ function renderToolPreferencesNow() {
       const tagInfo = needsAttention
         ? { key: 'settings.tools.status.attention', tone: 'warn' }
         : id === 'qoder'
-          ? { key: qoderDisplayApi.trackingState(state.settings?.clients).mixed ? 'settings.tools.qoder.partial' : 'settings.tools.qoder.all', tone: 'ok' }
+          ? { key: qoderTracking.mixed ? 'settings.tools.qoder.partial' : 'settings.tools.qoder.all', tone: 'ok' }
           : clientStatusPresentationApi.clientStatusTag(id, clientStatus[id] || 'waiting');
       if (tagInfo) {
         const tag = document.createElement('span');
@@ -12190,10 +12191,10 @@ function renderToolPreferencesNow() {
     trackInput.id = id === 'qoder' ? 'toolTrackGroup-qoder' : `toolTrackEnabled-${id}`;
     trackInput.dataset.client = id;
     trackInput.dataset.preference = id === 'qoder' ? 'track-group' : 'track';
-    trackInput.checked = id === 'qoder' ? qoderDisplayApi.trackingState(state.settings?.clients).checked : enabled.has(id);
-    trackInput.indeterminate = id === 'qoder' && qoderDisplayApi.trackingState(state.settings?.clients).mixed;
+    trackInput.checked = id === 'qoder' ? qoderTracking.checked : enabled.has(id);
+    trackInput.indeterminate = id === 'qoder' && qoderTracking.mixed;
     trackInput.setAttribute('aria-label', t('settings.tools.trackClient', { name: label }));
-    trackInput.addEventListener('change', id === 'qoder' ? () => saveSettings({ clients: qoderDisplayApi.setTracked(state.settings?.clients, trackInput.checked) }) : onToolTrackingToggle);
+    trackInput.addEventListener('change', id === 'qoder' ? () => onQoderTrackingToggle(trackInput.checked) : onToolTrackingToggle);
     // The drag handle is gone, so the checkbox carries the keyboard reorder
     // shortcuts. A checkbox has no native arrow-key behaviour, so the existing
     // key bindings transfer unchanged.
@@ -13066,7 +13067,7 @@ async function onToolTrackingToggle() {
   const rendered = [...els.clientDisplayList.querySelectorAll('input[data-preference="track"]')]
     .map((cb) => [cb.dataset.client, cb.checked]);
   const checked = settingsListFilterApi.mergeRenderedSelection(
-    enabledClientSet(),
+    new Set(String(Object.assign({}, state.settings, ...pendingSettingsPatches).clients || '').split(',').filter(Boolean)),
     rendered,
     clientDisplayPreferencesApi
       .orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients)
@@ -13079,6 +13080,13 @@ async function onToolTrackingToggle() {
   // scan, and drag an all-provider limits refresh along. The extra stats pushes
   // would then repaint the whole settings panel under the pointer, which is what
   // made this checkbox stall while the eye and pin next to it did not (#471).
+}
+
+function onQoderTrackingToggle(checked) {
+  const clients = Object.assign({}, state.settings, ...pendingSettingsPatches).clients;
+  const saved = saveSettings({ clients: qoderDisplayApi.setTracked(clients, checked) });
+  if (state.clientHealthExpanded === 'qoder') refillOpenClientHealthPanel();
+  return saved;
 }
 
 async function onQoderPreferenceToggle(key) {
