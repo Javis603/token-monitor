@@ -17775,8 +17775,14 @@ async function renderCopilotAccounts() {
   try {
     const accounts = await window.tokenMonitor.copilot.getAccounts();
     if (!isCurrent() || !isSettingsSurfaceVisible()) return;
-    list.replaceChildren();
     const readings = localProviderStatuses('copilot');
+    const readingFor = account => readings.find(row => account.accountKey
+      ? row.accountKey === account.accountKey
+      : !accounts.some(other => other.accountKey === row.accountKey));
+    const updateInfo = (account, info) => {
+      info.textContent = apiKeyAccountStatusText('copilot', readingFor(account), true, account.external ? 'env' : 'settings',
+        account.enabled && limitProviderEnabled('copilot'));
+    };
     if (accounts.length > 1 && limitProviderEnabled('copilot')) {
       accountShellApi.render({ status: document.getElementById('copilotApiTokenStatus'),
         statusText: t('settings.opencode.connected', {
@@ -17784,11 +17790,22 @@ async function renderCopilotAccounts() {
           total: accounts.length
         }) });
     }
+    const signature = JSON.stringify([accounts, state.settings?.locale, state.settings?.language]);
+    if (list.dataset.accountSignature === signature) {
+      for (const row of list.children) {
+        const account = accounts.find(account => account.id === row.dataset.accountId);
+        if (account) updateInfo(account, row.querySelector('.managed-account-info'));
+      }
+      return;
+    }
+    list.dataset.accountSignature = signature;
+    list.replaceChildren();
     for (const account of accounts) {
-      const reading = readings.find(row => account.accountKey ? row.accountKey === account.accountKey : accounts.length === 1);
+      const reading = readingFor(account);
       const name = account.accountName || reading?.accountName || t('settings.copilot.title');
       const row = document.createElement('div');
       row.className = 'managed-account-row';
+      row.dataset.accountId = account.id;
       row.classList.toggle('disabled', !account.enabled);
       const label = document.createElement('span');
       label.className = 'managed-account-main managed-account-email';
@@ -17808,17 +17825,13 @@ async function renderCopilotAccounts() {
       actions.className = 'managed-account-right';
       const info = document.createElement('span');
       info.className = 'managed-account-info';
-      info.textContent = apiKeyAccountStatusText('copilot', reading, true, account.external ? 'env' : 'settings',
-        account.enabled && limitProviderEnabled('copilot'));
+      updateInfo(account, info);
       const refresh = document.createElement('button');
       refresh.className = 'managed-account-remove';
       refresh.setAttribute('aria-label', t('settings.common.refresh'));
       refresh.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13 6a5.2 5.2 0 1 0 .2 3M13 2v4H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       refresh.disabled = !account.enabled;
-      refresh.addEventListener('click', () => mutate(refresh, async () => {
-        await window.tokenMonitor.limits.refresh('copilot', reading || account);
-        return { ok: true };
-      }));
+      refresh.addEventListener('click', () => mutate(refresh, () => window.tokenMonitor.limits.refresh('copilot', reading || account)));
       actions.append(info, refresh);
       if (!account.external) {
         const remove = document.createElement('button');
@@ -20107,14 +20120,15 @@ function setupCursorAccountUI() {
       setCopilotManualExpanded(false);
       renderCopilotStatus();
       try {
+        markCopilotTokenCheckPending();
         const result = await window.tokenMonitor.copilot.signIn({ flowId });
         if (!isCurrentCopilotSignInFlow(result?.flowId || flowId)) return;
         if (!result?.ok) {
+          clearCopilotPendingCheck();
           setCopilotError(result?.error || t('settings.copilot.loginFailed'));
           setCopilotAccountExpanded(true);
         } else {
           state.copilotSignInCancelable = false;
-          markCopilotTokenCheckPending();
           state.copilotAuthorizeMessage = '';
           state.copilotLoginStatus = '';
           renderCopilotStatus();
@@ -20123,6 +20137,7 @@ function setupCursorAccountUI() {
         }
       } catch (err) {
         if (!isCurrentCopilotSignInFlow(flowId)) return;
+        clearCopilotPendingCheck();
         setCopilotError(err.message);
       } finally {
         if (isCurrentCopilotSignInFlow(flowId)) {
@@ -20139,6 +20154,7 @@ function setupCursorAccountUI() {
     document.getElementById('copilotCancelSignInButton').addEventListener('click', async () => {
       const flowId = state.copilotSignInFlowId;
       await window.tokenMonitor.copilot.cancelSignIn({ flowId });
+      clearCopilotPendingCheck();
       if (!isCurrentCopilotSignInFlow(flowId)) return;
       state.copilotSignInBusy = false;
       state.copilotSignInCancelable = false;

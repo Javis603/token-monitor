@@ -204,6 +204,7 @@ const {
 } = require('./limits/accountSettings');
 const { createCredentialCommands } = require('./limits/credentialCommands');
 const { createCopilotAccounts } = require('./providers/copilot/accounts');
+const copilotLimits = require('../shared/providers/copilot/limits');
 const { createMinimaxApiKeys } = require('./providers/minimax/apiKeys');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
@@ -9988,17 +9989,24 @@ app.whenReady().then(() => {
   const copilotAccounts = createCopilotAccounts({
     getSettings: () => settings, saveSettings,
     probeDeps: () => electronProviderDeps({ env: {}, signal: AbortSignal.timeout(15_000) }),
-    changed: () => {
+    changed: (accountKey, refresh) => {
+      if (!accountKey) {
+        const knownKeys = new Set(Object.values(copilotLimits.copilotProfiles(settings)).map(account => account.accountKey).filter(Boolean));
+        const legacyRows = (deviceRuntimeHandle?.getSnapshot()?.limits?.providers || [])
+          .filter(row => row.provider === 'copilot' && row.accountKey && !knownKeys.has(row.accountKey));
+        if (legacyRows.length === 1) accountKey = legacyRows[0].accountKey;
+      }
       deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
       pushSettingsToRenderer();
-      void queueLimitInvalidation({ provider: 'copilot' }, 'account-change', { clear: true });
+      const scope = accountKey ? { provider: 'copilot', accountKey } : { provider: 'copilot' };
+      void queueLimitInvalidation(scope, 'account-change', { clear: Boolean(accountKey), refresh });
     }
   });
   ipcMain.handle('copilot:getAccounts', () => copilotAccounts.getAccounts());
   for (const method of ['addAccount', 'removeAccount', 'setEnabled']) {
     ipcMain.handle(`copilot:${method}`, async (_event, ...args) => {
       try { return await copilotAccounts[method](...args); }
-      catch (error) { return { ok: false, error: error.message }; }
+      catch (_) { return { ok: false, error: 'Could not update GitHub Copilot account. Please try again.' }; }
     });
   }
   ipcMain.handle('copilot:signIn', async (event, request = {}) => {
@@ -10024,7 +10032,7 @@ app.whenReady().then(() => {
       if (copilotLoginController !== controller) {
         return { ok: false, error: copilotLoginErrorMessage({ status: 'cancelled' }), flowId };
       }
-      await copilotAccounts.addAccount(result.accessToken, () => copilotLoginController === controller && !controller.signal.aborted);
+      await copilotAccounts.addAccount(result.accessToken, () => copilotLoginController === controller && !controller.signal.aborted, controller.signal);
       return { ok: true, flowId };
     } catch (error) {
       const message = copilotLoginErrorMessage(error);

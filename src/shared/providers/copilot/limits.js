@@ -37,6 +37,15 @@ function normalizedEnterpriseHost(raw) {
   return host.replace(/^\.+|\.+$/g, '').toLowerCase() || COPILOT_DEFAULT_HOST;
 }
 
+// Preserve github.com identities used by existing subscriptions and history;
+// other GitHub installations have their own namespace.
+function copilotAccountKey(seed, host) {
+  const normalizedHost = normalizedEnterpriseHost(host);
+  return normalizedHost === COPILOT_DEFAULT_HOST
+    ? hashKey('copilot', seed)
+    : hashKey('copilot', normalizedHost, seed);
+}
+
 function copilotApiHost(enterpriseHost) {
   const host = normalizedEnterpriseHost(enterpriseHost);
   if (host === COPILOT_DEFAULT_HOST) return 'api.github.com';
@@ -232,7 +241,10 @@ async function fetchJson(url, headers, deps = {}) {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    const response = await fetchFn(url, { headers, ...(controller ? { signal: controller.signal } : {}) });
+    const signals = [deps.signal, controller?.signal].filter(Boolean);
+    const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
+    signal?.throwIfAborted();
+    const response = await fetchFn(url, { headers, ...(signal ? { signal } : {}) });
     if (!response.ok) {
       const status = response.status === 401 || response.status === 403
         ? 'unauthorized'
@@ -243,6 +255,7 @@ async function fetchJson(url, headers, deps = {}) {
     }
     return await response.json();
   } catch (error) {
+    if (deps.signal?.aborted) throw deps.signal.reason;
     if (error?.name === 'AbortError') throw errorWithStatus('unavailable', `${url} timed out`);
     throw error;
   } finally {
@@ -301,16 +314,16 @@ function copilotProfiles(options = {}, env = {}) {
   for (const [id, value] of Object.entries(options.copilotProfiles || {})) {
     const token = copilotToken({}, { copilotApiToken: value?.token });
     if (!token || id === 'environment') continue;
-    profiles[id] = { token, enabled: value.enabled !== false,
-      enterpriseHost: normalizedEnterpriseHost(value.enterpriseHost || options.copilotEnterpriseHost),
-      accountKey: String(value.accountKey || hashKey('copilot', token.slice(0, 8))), accountName: String(value.accountName || '') };
+    const enterpriseHost = normalizedEnterpriseHost(value.enterpriseHost || options.copilotEnterpriseHost);
+    profiles[id] = { token, enabled: value.enabled !== false, enterpriseHost,
+      accountKey: String(value.accountKey || ''), accountName: String(value.accountName || '') };
   }
   const token = copilotToken({}, options);
   if (token && !Object.values(profiles).some(profile => profile.token === token)) {
     let id = 'legacy';
     while (Object.hasOwn(profiles, id)) id += '-legacy';
-    profiles[id] = { token, enabled: true,
-      enterpriseHost: normalizedEnterpriseHost(options.copilotEnterpriseHost || env.COPILOT_ENTERPRISE_HOST || env.GITHUB_ENTERPRISE_HOST), accountKey: Object.keys(profiles).length ? hashKey('copilot', token.slice(0, 8)) : '', accountName: '' };
+    const enterpriseHost = normalizedEnterpriseHost(options.copilotEnterpriseHost || env.COPILOT_ENTERPRISE_HOST || env.GITHUB_ENTERPRISE_HOST);
+    profiles[id] = { token, enabled: true, enterpriseHost, accountKey: '', accountName: '' };
   }
   return profiles;
 }
@@ -338,13 +351,11 @@ async function fetchCopilotLimits(options = {}, deps = {}) {
   }
   const scope = options.limitRefreshScope?.provider === 'copilot' ? options.limitRefreshScope : null;
   const accounts = configuredCopilotAccounts(options, deps).filter(account => account.enabled
-    && (!scope?.accountKey || account.accountKey === scope.accountKey));
-  const rows = [];
-  for (const account of accounts) {
-    rows.push(await fetchCopilotAccountLimits({ copilotApiToken: account.token,
-      copilotEnterpriseHost: account.enterpriseHost, accountKey: account.accountKey,
-      accountName: account.accountName }, deps));
-  }
+    && (!scope?.accountKey || !account.accountKey || account.accountKey === scope.accountKey));
+  const rows = await Promise.all(accounts.map(account => fetchCopilotAccountLimits({
+    copilotApiToken: account.token, copilotEnterpriseHost: account.enterpriseHost,
+    accountKey: account.accountKey, accountName: account.accountName
+  }, deps)));
   const seen = new Set();
   return rows.filter(row => {
     if (scope?.accountKey && row.accountKey !== scope.accountKey) return false;
@@ -389,11 +400,11 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
     const accountSeed = login || (identity.id != null ? String(identity.id) : '');
     if (!options.accountKey && accountSeed) {
       runtimeState?.set('copilot:legacy-identity', {
-        fingerprint, accountKey: hashKey('copilot', accountSeed), accountName: login
+        fingerprint, accountKey: copilotAccountKey(accountSeed, enterpriseHost), accountName: login
       });
     }
     return mapCopilotUsageToProvider(usage, {
-      accountKey: options.accountKey || (accountSeed ? hashKey('copilot', accountSeed) : remembered?.accountKey) || hashKey('copilot', token.slice(0, 8)),
+      accountKey: options.accountKey || (accountSeed ? copilotAccountKey(accountSeed, enterpriseHost) : remembered?.accountKey) || copilotAccountKey(token.slice(0, 8), enterpriseHost),
       accountLabel: displayPlanLabel(usage.copilotPlan),
       accountName: login || options.accountName || remembered?.accountName,
       accountEmail: '',
@@ -401,9 +412,10 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
       source: 'api'
     });
   } catch (error) {
+    if (deps.signal?.aborted) throw deps.signal.reason;
     return normalizeLimitProvider({
       provider: 'copilot',
-      accountKey: options.accountKey || remembered?.accountKey || hashKey('copilot', token.slice(0, 8)),
+      accountKey: options.accountKey || remembered?.accountKey || copilotAccountKey(token.slice(0, 8), enterpriseHost),
       accountName: options.accountName || remembered?.accountName || '',
       source: 'api',
       status: providerStatusFromError(error),
@@ -416,6 +428,7 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
 module.exports = {
   COPILOT_DEFAULT_HOST,
   copilotToken,
+  copilotAccountKey,
   copilotProfiles,
   configuredCopilotAccounts,
   fetchCopilotAccountLimits,
