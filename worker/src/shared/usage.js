@@ -2393,6 +2393,7 @@ module.exports = {
   PERIODS,
   UNATTRIBUTED_USAGE_CLIENT,
   addPeriodInto,
+  isPeriodExpired,
   aggregateDevices,
   aggregateHistory,
   applyPeriodDelta,

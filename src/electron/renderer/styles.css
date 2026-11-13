@@ -4159,10 +4159,6 @@ html.is-windows .settings-panel select option {
   pointer-events: none;
   transition: opacity 180ms ease;
 }
-.home-activity-scroll.is-restoring-hover .heat,
-.home-activity-scroll.is-restoring-hover .heat-bright-layer {
-  transition: none;
-}
 .home-activity-scroll:hover .heat-bright-layer,
 .home-activity-scroll:focus-within .heat-bright-layer {
   opacity: 1;
@@ -9201,6 +9197,10 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-more-icon { display: block; width: 16px; height: 16px; background: currentColor; mask: url("icons/actions/ellipsis.svg") center / contain no-repeat; }
 .plugin-menu .plugin-global-switch { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 5px 7px 9px; margin: 0 0 4px; border-bottom: 1px solid var(--line); color: var(--text); font-size: .6875rem; cursor: pointer; }
 .plugin-global-switch > span { min-width: 0; }
+
+/* The settings switch metrics would inset this row differently from the master switch above it. */
+.settings-panel .plugin-menu label.plugin-auto-update { gap: 16px; padding: 5px 7px; margin: 0; min-height: 28px; font-size: .6875rem; line-height: 1.4; }
+.plugin-menu label.plugin-auto-update > span { min-width: 0; }
 
 /* Wrapped Notch chips use the same drag controller as the other settings lists. */
 .notch-page-chips.is-reordering { overflow-anchor: none; }

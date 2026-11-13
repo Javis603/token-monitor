@@ -96,6 +96,8 @@
     if (modelLabel) {
       const model = document.createElement('span');
       model.className = 'session-models';
+      // Plain labels and tooltip controls have different listener lifecycles.
+      model.setAttribute('data-key', entries.length > 1 ? 'models-tooltip' : 'model-label');
       model.textContent = modelLabel;
       if (entries.length > 1) view.setDetailTooltip(model, entries);
       node.append(model);

@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { createCursorUsageSource } = require('../../src/shared/providers/cursor/usageSource');
+const { createCursorUsageSource, snapshotUsageKey } = require('../../src/shared/providers/cursor/usageSource');
 const { createCursorSelfSync } = require('../../src/shared/providers/cursor/selfSync');
 const cursorAuth = require('../../src/shared/providers/cursor/auth');
 const { createSelfSyncThrottle } = require('../../src/shared/selfSyncThrottle');
@@ -240,6 +240,24 @@ test('a sync requested immediately after the offline-ready barrier is not swallo
   assert.equal(source.getSnapshot().context, nextContext);
 });
 
+test('a sync requested at any point after a cache read is never swallowed by the finishing read', async t => {
+  // The collector's restart tick resumes from readCache() some microtasks after
+  // the read; whichever turn that lands in, its request must start an import.
+  for (let hops = 0; hops <= 8; hops++) {
+    const syncs = [];
+    const source = createCursorUsageSource({ context, signal: new AbortController().signal,
+      sync: async () => { syncs.push(hops); return true; },
+      read: async () => snapshot()
+    });
+    t.after(() => source.stop());
+    let ready = source.readCache(context);
+    for (let i = 0; i < hops; i++) ready = ready.then(value => value);
+    await ready;
+    await source.refresh({ minIntervalMs: 0 });
+    assert.equal(syncs.length, 1, `sync swallowed ${hops} microtask hops after the read`);
+  }
+});
+
 test('source events during an import coalesce into one later sync without overlapping the first', async t => {
   const gate = deferred();
   const controller = new AbortController();
@@ -411,6 +429,39 @@ test('identical complete snapshots retain their revision while completing refres
   assert.equal(initial.today.processingTimeMs, 1, 'comparison does not mutate the raw reports');
   assert.equal(initial.graph.meta.generatedAt, new Date(1).toISOString());
   assert.deepEqual(changes, [true, false, false, false], 'completion still publishes current sync health');
+});
+
+test('rows tokscale lists in a different order are the same snapshot', async () => {
+  // Real reads of an unchanged Cursor cache: same rows, different order, both in
+  // reports and in each History day's clients. Order must not read as new data,
+  // or every sync completion reconciles every period.
+  const rows = [
+    { client: 'cursor', sessionId: 'a', model: 'm', input: 1 },
+    { client: 'cursor', sessionId: 'b', model: 'm', input: 2 }
+  ];
+  const day = clients => ({ contributions: [{ date: context.day, clients }] });
+  let reads = 0;
+  const changes = [];
+  const source = createCursorUsageSource({ context, signal: new AbortController().signal,
+    sync: async () => true,
+    read: async () => {
+      const ordered = reads++ % 2 ? [...rows].reverse() : rows;
+      const report = () => ({ entries: ordered, sessions: ordered, totalInput: 3 });
+      return { today: report(), month: report(), allTime: report(), graph: day(ordered) };
+    },
+    onChange: change => changes.push(change?.changed)
+  });
+  assert.equal(await source.refresh(), true);
+  const first = source.getSnapshot();
+  const key = snapshotUsageKey(first);
+  await source.readCache({ ...context });
+  await source.whenIdle();
+  assert.equal(reads, 3);
+  assert.equal(source.getSnapshot(), first);
+  assert.deepEqual(changes, [true, false, false]);
+  assert.equal(snapshotUsageKey({ ...first, today: { ...first.today, entries: [...rows].reverse() } }), key);
+  assert.notEqual(snapshotUsageKey({ ...first, today: { ...first.today, entries: [rows[0]] } }), key);
+  assert.equal(snapshotUsageKey({ revision: 0 }), null, 'no key before the first complete read');
 });
 
 test('periods, History, graph status and context each invalidate a Cursor snapshot', async () => {

@@ -72,7 +72,8 @@ test('stats repaint refreshes the open group by identity and retires a removed g
   repaint(state, period(80), rowsForPeriod, close, () => false, request => { rendered = request; });
   assert.equal(rendered.summary.key, key);
   assert.equal(rendered.summary.value, 80);
-  repaint(state, period(100), rowsForPeriod, close, () => true, () => assert.fail('hover holds repaint'));
+  repaint(state, period(100), rowsForPeriod, close, () => true, request => { rendered = request; });
+  assert.equal(rendered.summary.value, 100, 'hover no longer postpones group updates');
   assert.equal(state.openSession.summary.value, 100);
   repaint(state, period(0), rowsForPeriod, close, () => false, () => assert.fail('removed group must close'));
   assert.equal(closed, true);
@@ -133,16 +134,7 @@ test('historical bot evidence refreshes in Today and Month without opening TOTAL
   assert.equal(needed(), true);
 });
 
-test('group hover reading and keyboard focus hold the refresh for every detail line', () => {
-  const start = source.indexOf('function sessionTooltipShouldHoldRender()');
-  const end = source.indexOf('function flushPendingLimitDetailTooltipRender', start);
-  for (const selector of ['.session-group-run .is-hover-reading', '.session-group-run:focus-within']) {
-    const held = Function('document', `${source.slice(start, end)}; return sessionTooltipShouldHoldRender();`)({
-      querySelector: selectors => selectors.split(', ').includes(selector) ? {} : null
-    });
-    assert.equal(held, true, selector);
-  }
-});
+
 
 
 test('conflicting absent parents split a shared native identity into stable independently navigable groups', () => {

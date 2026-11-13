@@ -154,7 +154,7 @@ const {
   antigravitySyncLockPath,
   repairAntigravitySyncLock
 } = require('../shared/providers/antigravity/selfSync');
-const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
+const { deviceRecordFromAnchor, seedWithColdPreview } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
 const { actionWindowForEvent, activateWindowAction, handoffWindow, showWindow } = require('./windowLifecycle');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
@@ -3064,7 +3064,11 @@ function updateArchivedClientUsage(previousClients, nextClients) {
   const removedClients = removedTrackedClients(previousClients, nextClients);
   let archive = pruneArchivedClientUsage(settings.archivedClientUsage, nextClients);
   if (removedClients.length > 0) {
-    archive = captureArchivedClientUsage(archive, localArchiveSourceDevice(), removedClients);
+    // Before this run's first complete record, localDevice may be a first-scan
+    // preview whose unscanned windows would archive as zero. Only the seed, or
+    // nothing, stands for the client then.
+    const source = mode === 'local' && !lastCollectedDevice ? anchorSeedDevice : localArchiveSourceDevice();
+    archive = captureArchivedClientUsage(archive, source, removedClients);
   }
   settings.archivedClientUsage = archive;
 }
@@ -3266,6 +3270,9 @@ const usageRuntimeReconciler = createLatestWinsReconciler({
 });
 let localDevice = null;
 let localStats = null;
+// The cold-start seed as projected, kept until this run's first complete record
+// so each preview of the first scan is laid over it rather than over the last.
+let anchorSeedDevice = null;
 let sseAbortController = null;
 let sseRetryTimer = null;
 let streamConnected = false;
@@ -5415,6 +5422,7 @@ function stopLocalCollector(options = {}) {
   if (limitProbes.length) publishLimitProbes([]);
   localDevice = null;
   localStats = null;
+  anchorSeedDevice = null;
 }
 
 // Show the last full scan's totals while the first one of this run is still
@@ -5456,6 +5464,7 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
     sendStatus(false, { reason: `session-archive:${error.message}` });
     return;
   }
+  anchorSeedDevice = visible;
   localDevice = visible;
   localStats = withHistoryPreview(aggregateDevices([visible], 0), [visible]);
   // Through the normal publisher, not straight to the renderer: the tray reads
@@ -5469,6 +5478,21 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
     event: 'stats',
     data: { type: 'stats', reason: 'anchor', stats: localStats, at: deviceRecord.receivedAt }
   }, { skipExport: true, deferToRenderer: true, widgetProducerOwner });
+}
+
+// The first scan holds its record back until all-time is in, which on a long
+// history is minutes after Today was ready. Show each window as it lands, over
+// the seed's last known values when there is one. Display only: nothing here is
+// exported, because a record missing windows reads as zero wherever it lands.
+function publishColdPreview(preview, reason, widgetProducerOwner) {
+  if (lastCollectedDevice) return;
+  const device = seedWithColdPreview(anchorSeedDevice || preview, preview);
+  localDevice = device;
+  localStats = withHistoryPreview(aggregateDevices([device], 0), [device]);
+  sendPush({
+    event: 'stats',
+    data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() }
+  }, { skipExport: true, widgetProducerOwner });
 }
 
 function startLocalCollector() {
@@ -5488,7 +5512,9 @@ function startLocalCollector() {
     usageOptions,
     progressive: true,
     onSessionActivity: publishLocalSessionActivity,
+    onColdPreview: (preview, meta) => publishColdPreview(preview, meta.reason, widgetProducerOwner),
     onRecord: (summary, meta) => {
+      anchorSeedDevice = null;
       seedInitialLimitProviders(summary);
       const reason = meta.reason;
       const visibleSummary = summary;

@@ -7,8 +7,24 @@ const fs = require('node:fs');
 class Element {
   constructor(tag = 'div', document) {
     this.tagName = tag.toUpperCase(); this.ownerDocument = document;
-    this.children = []; this.dataset = {}; this.attributes = {}; this.listeners = {};
+    this.children = []; this.attributes = {}; this.listeners = {};
+    const attrName = key => 'data-' + key.replace(/[A-Z]/g, letter => '-' + letter.toLowerCase());
+    this.dataset = new Proxy({}, {
+      set: (target, key, value) => { target[key] = String(value); this.attributes[attrName(key)] = String(value); return true; },
+      deleteProperty: (target, key) => { delete target[key]; delete this.attributes[attrName(key)]; return true; }
+    });
     this.style = { setProperty(key, value) { this[key] = value; } };
+    this.nodeType = tag === '#text' ? 3 : 1;
+    this.localName = tag; this.namespaceURI = 'html';
+    const node = this;
+    Object.defineProperty(this.attributes, Symbol.iterator, { configurable: true, writable: true, value: function* () {
+      yield { name: 'class', value: node.className };
+      for (const [name, value] of Object.entries(this)) if (name !== 'class') yield { name, value };
+    } });
+    this.style.getPropertyValue = key => this.style[key] || '';
+    this.style.getPropertyPriority = () => '';
+    this.style.removeProperty = key => { delete this.style[key]; };
+    this.style[Symbol.iterator] = function* () { for (const key of Object.keys(this)) if (typeof this[key] !== 'function') yield key; };
     this.classes = new Set();
     this.scrollLeft = 0; this.offsetWidth = 0; this.clientWidth = 0;
     this.classList = {
@@ -17,6 +33,38 @@ class Element {
       contains: name => this.classes.has(name),
       toggle: (name, on = !this.classes.has(name)) => on ? this.classes.add(name) : this.classes.delete(name)
     };
+    Object.defineProperty(this.classList, '0', { get: () => [...this.classes][0] });
+  }
+  get nodeValue() { return this.nodeType === 3 ? this.value : null; }
+  set nodeValue(value) { this.value = value; }
+  get firstChild() { return this.childNodes[0] || null; }
+  get childNodes() {
+    if (this.nodeType === 3) return [];
+    if (!this.value) return this.children;
+    this._textNode ||= {
+      owner: this, nodeType: 3, childNodes: [],
+      get nodeValue() { return this.owner.value; },
+      set nodeValue(value) { this.owner.value = value; },
+      get parentNode() { return this.owner; },
+      remove() { this.owner.value = ''; }
+    };
+    return [this._textNode, ...this.children];
+  }
+  insertBefore(child, before) {
+    if (child === before) return;
+    if (child.owner) {
+      const value = child.nodeValue; child.owner.value = '';
+      child.owner = this; this.value = value; this._textNode = child; return;
+    }
+    child.remove();
+    const index = before ? this.children.indexOf(before) : this.children.length;
+    this.children.splice(Math.max(0, index), 0, child); child.parent = this;
+  }
+  moveBefore(child, before) {
+    if (child === before) return;
+    child.parent.children.splice(child.parent.children.indexOf(child), 1);
+    const index = before ? this.children.indexOf(before) : this.children.length;
+    this.children.splice(Math.max(0, index), 0, child); child.parent = this;
   }
   set className(value) { this.classes = new Set(String(value).split(' ').filter(Boolean)); }
   get className() { return [...this.classes].join(' '); }
@@ -31,11 +79,11 @@ class Element {
   }
   remove() { if (this.parent) this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; }
   replaceChildren(...nodes) { this.children.forEach(node => { node.parent = null; }); this.children = []; this.append(...nodes); }
-  setAttribute(key, value) { this.attributes[key] = String(value); if (key === 'class') this.className = value; }
+  setAttribute(key, value) { this.attributes[key] = String(value); if (key === 'class') this.className = value; if (key.startsWith('data-')) this.dataset[key.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = value; }
   getAttribute(key) { return this.attributes[key]; }
-  removeAttribute(key) { delete this.attributes[key]; }
+  removeAttribute(key) { delete this.attributes[key]; if (key.startsWith('data-')) delete this.dataset[key.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())]; }
   addEventListener(name, fn) { (this.listeners[name] ||= []).push(fn); }
-  fire(name, event = {}) { for (const fn of this.listeners[name] || []) fn(event); }
+  fire(name, event = {}) { event.currentTarget ||= this; event.target ||= this; for (const fn of this.listeners[name] || []) fn(event); }
   scrollTo({ left }) { this.scrollLeft = left; this.fire('scroll'); }
   // Every child is laid out 40 units after the previous one.
   get parentNode() { return this.parent || null; }
@@ -53,6 +101,7 @@ class Element {
     this.ownerDocument.activeElement = this; this.fire('focus');
   }
   querySelectorAll(selector) {
+    if (selector.includes(' ')) { const [parent, ...rest] = selector.split(' '); return this.querySelectorAll(parent).flatMap(node => node.querySelectorAll(rest.join(' '))); }
     const match = node => selector === '[data-roll-key]:not([data-pv-roll])'
       ? Object.hasOwn(node.dataset, 'rollKey') && !Object.hasOwn(node.dataset, 'pvRoll')
       : selector[0] === '.' ? node.classes.has(selector.slice(1))
@@ -139,8 +188,10 @@ function panelFixture(t, settings = {}, { viaRenderer = false, pluginHost = null
     limitWindowsView: {
       // Like the real one, the tooltip names its entries as the element's label.
       setDetailTooltip(node, entries, options) {
-        node.tooltipEntries = entries;
-        node.tooltipOptions = options;
+        node.setAttribute('data-test-tooltip', JSON.stringify(entries));
+        node.setAttribute('data-test-tooltip-options', JSON.stringify(options));
+        Object.defineProperty(node, 'tooltipEntries', { configurable: true, get: () => JSON.parse(node.getAttribute('data-test-tooltip')) });
+        Object.defineProperty(node, 'tooltipOptions', { configurable: true, get: () => JSON.parse(node.getAttribute('data-test-tooltip-options')) });
         node.setAttribute('aria-label', entries.map(entry => Array.isArray(entry) ? entry.join(': ') : entry.full).join(', '));
       },
       limitAccountPlan: (...args) => plans.limitAccountPlan(...args),
@@ -181,7 +232,7 @@ function panelFixture(t, settings = {}, { viaRenderer = false, pluginHost = null
     } finally { global.ResizeObserver = previousObserver; }
   } else panel = createNotchPanel(deps);
   t.after(pageHide);
-  return { panel, document, state, settings, rolls, settled, el, overflowText, pageHide,
+  return { panel, document, window, state, settings, rolls, settled, el, overflowText, pageHide,
     scroll: record => scrollListener?.(record),
     get scrollSubscribed() { return scrollListener !== null; },
     resize: () => resizeObservers.forEach(observer => { if (observer.node) observer.callback(); }),

@@ -37,7 +37,7 @@ for (const focus of ['module', 'heading']) test(`Home sessions repaint once at s
   (focus === 'module' ? current : current.querySelector()).focus();
   const state = { stats: {}, settings: { homeModuleCounts: { session: 9 } }, breakdown: 'home', homeSessionRepaintTimer: null };
   const { scheduleHomeSessionRepaint, stopHomeSessionRepaint } = Function(
-    'state', 'window', 'Date', 'setTimeout', 'clearTimeout', 'visibleStatsSurface', 'els', 'document', 'renderHomeSessionModule', 'sessionPresentationOptions', 'homeModulePreferencesApi',
+    'state', 'window', 'Date', 'setTimeout', 'clearTimeout', 'visibleStatsSurface', 'els', 'document', 'renderHomeSessionModule', 'sessionPresentationOptions', 'homeModulePreferencesApi', 'rendererDom',
     `${source}\nreturn { scheduleHomeSessionRepaint, stopHomeSessionRepaint };`
   )(
     state,
@@ -58,7 +58,8 @@ for (const focus of ['module', 'heading']) test(`Home sessions repaint once at s
     document,
     () => node(rows.filter((row) => sessionLive.sessionActivityState(row, now) === 'running').length),
     () => ({}),
-    require('../../src/electron/renderer/homeModulePreferences')
+    require('../../src/electron/renderer/homeModulePreferences'),
+    { reconcile(previous, next) { previous.runningCount = next.runningCount; counts.push(next.runningCount); return previous; } }
   );
 
   function fireNext() {
