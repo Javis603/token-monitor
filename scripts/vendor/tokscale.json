@@ -3,13 +3,13 @@
   "modeNote": "\"override\": ensure-vendored-tokscale.js swaps in the pinned fork build described below, and the two verify-vendored-tokscale*.js gates run against it. \"upstream\": ensure-vendored-tokscale.js no-ops (no download or replacement) and the plain npm-installed tokscale is authoritative \u2014 but both verify-vendored-tokscale*.js gates keep running, now against that npm-installed binary, so CI still fails if it doesn't actually cover DEFAULT_CLIENTS or regressed DSH parsing. `override` remains required while Token Monitor depends on downstream functionality the installed upstream release does not provide. The upstream scanner and DSH patches may be retired once equivalent fixes ship officially; the session/workspace reporting capability is a persistent Token Monitor requirement, so flipping to `upstream` is correct only when an official release provides an equivalent report surface. Without it the collector still runs (the scan falls back to `client,session,model` and the file-reading resolvers answer), but scan-backed session timestamps and project attribution narrow to the clients that have a resolver. The pin fields (commit/releaseTag/platforms) stay in place either way, so flipping back to \"override\" for a future upstream lag is editing this file again rather than re-adding infrastructure; baseVersion is not one of them \u2014 it tracks the installed dependency in both modes (see baseVersionNote). While the client catalog has forkOnly clients (CatPaw, Qoder CN), \"upstream\" fails verify-vendored-tokscale-clients.js by design: the upstream binary does not accept those fork-owned client ids, and failing closed beats silently reporting zero usage for them.",
   "upstream": "junhoyeo/tokscale",
   "fork": "Javis603/tokscale",
-  "commit": "a2f016b70d4122ad94ef25b9fe4823a0e1e140d8",
-  "commitTitle": "refactor(qodercn): retire legacy SQLite usage collection",
+  "commit": "4a4e147015d56bd0787ff898e314a43f6afbff5d",
+  "commitTitle": "fix(cache): avoid waking WSL during cache maintenance",
   "baseVersion": "4.22.0",
   "baseVersionNote": "The npm-installed @tokscale/cli-<platform> package version this manifest is aligned with. It tracks the dependency in BOTH modes, and two gates enforce that: ensure-vendored-tokscale.js refuses to swap under \"override\" when the installed package reports something else, and verify-vendored-tokscale-release.js (plus its real-manifest test, so npm run verify catches it too) rejects any manifest whose baseVersion disagrees with @tokscale/cli optionalDependencies. So a tokscale bump always has to touch this file \u2014 either pin a new build or flip the mode \u2014 instead of silently leaving a stale override in place.",
   "releaseRepo": "Javis603/tokscale",
-  "releaseTag": "token-monitor-a2f016b7",
-  "reason": "Retains the fork's session/workspace reports, parent links, performance timing, custom-price authority and fork-only clients on the 4.22.0 npm baseline, based on upstream 6bb44540. Includes Antigravity protobuf token corrections, BB mirror deduplication, OMP routing attribution and Kimi K3.1 Pro pricing. International Qoder and Qoder CN share upstream transcript assembly and request reconciliation, with independent opt-in source partitions and reported tokens only. Completed counters and Gemini inclusive prompts reconcile before cache splitting; reported reasoning remains additive. The CN adapter preserves released JSONL session identities, inclusive-input normalization, bounded reads and last-complete-read fallback while retiring legacy SQLite collection and its database override. JSONL cache snapshots migrate into per-source-root caches; explicit --home scans ignore host overrides, permitting isolated CN WSL collection. Retired database anchors require a fresh scan. User databases and archive files are not deleted. Existing fork source-cache and Claude history boundaries remain intact.",
+  "releaseTag": "token-monitor-4a4e1470",
+  "reason": "Retains the fork's session/workspace reports, parent links, performance timing, custom-price authority and fork-only clients on the 4.22.0 npm baseline, based on upstream 6bb44540. Includes Antigravity protobuf token corrections, BB mirror deduplication, OMP routing attribution and Kimi K3.1 Pro pricing. International Qoder and Qoder CN share upstream transcript assembly and request reconciliation, with independent opt-in source partitions and reported tokens only. Completed counters and Gemini inclusive prompts reconcile before cache splitting; reported reasoning remains additive. The CN adapter preserves released JSONL session identities, inclusive-input normalization, bounded reads and last-complete-read fallback while retiring legacy SQLite collection and its database override. JSONL cache snapshots migrate into per-source-root caches; explicit --home scans ignore host overrides, permitting isolated CN WSL collection. Retired database anchors require a fresh scan. User databases and archive files are not deleted. Existing fork source-cache and Claude history boundaries remain intact. Consolidates all Qoder downstream changes into one commit at position 5; the final source tree is identical to a2f016b7.",
   "platforms": {
     "android-arm64": {
       "package": "@tokscale/cli-android-arm64",
@@ -49,12 +49,12 @@
     "win32-arm64": {
       "package": "@tokscale/cli-win32-arm64-msvc",
       "asset": "tokscale-win32-arm64.exe",
-      "sha256": "36da0a1b3786a8aa6031f24779c7c5f43f7cb1a743c596a2ce94e45e15f40b2f"
+      "sha256": "62ac58c4d3bfb9b947365684e8f3ae6ef91ff5bae42c5898fc221504d65ca246"
     },
     "win32-x64": {
       "package": "@tokscale/cli-win32-x64-msvc",
       "asset": "tokscale-win32-x64.exe",
-      "sha256": "e8ea71a5d683b77b16962356aad6e8280144f1ad0036936b1ceb7b411fb800ed"
+      "sha256": "15fe51e5e45791fb80e421443a77761c04a2ae5a1c1930d0fa9c530caa72f834"
     }
   }
 }
