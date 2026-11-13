@@ -1,5 +1,6 @@
 name: Feature request
 description: Describe a need or an improvement.
+labels: ["enhancement"]
 body:
   - type: markdown
     attributes:

@@ -5,6 +5,7 @@ Bug reports, feature requests, documentation improvements and focused fixes are 
 ## Start with the right place
 
 - Search [open and closed issues](https://github.com/Javis603/token-monitor/issues?q=is%3Aissue) and [pull requests](https://github.com/Javis603/token-monitor/pulls?q=is%3Apr) before opening a new one. Similar symptoms alone do not establish the same cause.
+- Ask usage and setup questions in [Discussions Q&A](https://github.com/Javis603/token-monitor/discussions/categories/q-a).
 - Use the [issue forms](https://github.com/Javis603/token-monitor/issues/new/choose) for a bug or feature request. Share minimal, sanitized evidence, not full logs, settings, databases or conversations.
 - For suspected vulnerabilities, follow [SECURITY.md](SECURITY.md); do not post exploit details or secrets in a public issue.
 - Discuss substantial new features, architecture changes or new dependencies/tooling before investing in implementation. A small, focused fix does not need a separate issue first. Discussion does not guarantee acceptance or a release date.
@@ -15,7 +16,7 @@ Keep unrelated fixes or app-wide changes in separate pull requests so each chang
 
 [AGENTS.md](AGENTS.md) is the shared engineering guide for people and coding agents: setup commands, runtime requirements, architecture boundaries, commit/PR conventions and validation. Read the guidance relevant to your change rather than duplicating it here.
 
-Keep token usage, session metadata/activity, and account limits distinct. For an integration, use the [provider notes](docs/providers/README.md), especially the [tracked-client](docs/providers/README.md#adding-a-tracked-client) and [limits-provider](docs/providers/README.md#adding-a-limits-provider) checklists. Fork-only token readers belong in the tokscale fork and reach the App through its vendor pin; do not add a second parser here. Verify the pinned binary's buckets and the App's normalized totals, including cache/reasoning and duplicate-source behavior where relevant.
+To add or change a tool integration, start with the [provider notes](docs/providers/README.md): the [tracked-client](docs/providers/README.md#adding-a-tracked-client) checklist covers token usage, and the [limits-provider](docs/providers/README.md#adding-a-limits-provider) checklist covers account quotas and balances.
 
 ## Open a pull request
 

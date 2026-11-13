@@ -480,7 +480,7 @@ O Token Monitor processa os registros de uso localmente e não envia analytics n
 
 ## Contribuindo
 
-Issues e PRs são bem-vindos. As convenções do projeto, as notas de arquitetura e a referência de comandos ficam em [AGENTS.md](AGENTS.md) — escritos para agentes de programação, mas que também servem de guia para quem quer contribuir.
+Issues e PRs são bem-vindos. Comece pelo [CONTRIBUTING.md](CONTRIBUTING.md); as convenções do projeto, as notas de arquitetura e a referência de comandos ficam em [AGENTS.md](AGENTS.md).
 
 ## Agradecimentos
 

@@ -1,12 +1,10 @@
 # Security policy
 
-> DRAFT — not ready to publish. The maintainer must confirm a working private reporting channel before this policy and the issue-form security link are published. No reporting address or private-reporting availability has been verified for this draft.
-
 ## Reporting a vulnerability
 
-**Private reporting channel: pending maintainer confirmation.** Do not open a public issue containing exploit details, credentials or private user data. This draft does not establish a working reporting route.
+Report suspected vulnerabilities privately through [GitHub private vulnerability reporting](https://github.com/Javis603/token-monitor/security/advisories/new). Do not open a public issue, discussion or pull request containing exploit details, credentials or private user data.
 
-When a private channel is confirmed, a useful report includes:
+A useful report includes:
 
 - The Token Monitor version/build or source commit, OS and affected component (desktop App, headless agent, Hub, Worker or integration).
 - The impact, prerequisites and a minimal reproduction using test accounts/data you control.
@@ -19,7 +17,7 @@ Test only systems and accounts you own or have permission to test. Avoid accessi
 
 Reports should concern Token Monitor or its bundled dependencies. Issues solely in a third-party service should go to that service's security channel; explain any Token Monitor-specific exposure separately.
 
-**Supported-version policy: pending maintainer confirmation.** This draft does not promise backports, response deadlines, fix dates or rewards.
+Security fixes are made on the main branch and shipped in the next release; earlier releases are not patched. Update to the latest release to receive fixes. This policy does not promise response deadlines, fix dates or rewards.
 
 ## Data privacy
 

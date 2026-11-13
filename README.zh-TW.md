@@ -485,7 +485,7 @@ Token Monitor 會在本機處理使用紀錄，不會向專案維護者傳送分
 
 ## 參與貢獻
 
-歡迎提交 Issue 和 PR。專案規範、架構說明和指令參考都在 [AGENTS.md](AGENTS.md) 中——它是為編碼代理撰寫的，但同樣可以作為貢獻者指南。
+歡迎提交 Issue 和 PR。請先閱讀 [CONTRIBUTING.md](CONTRIBUTING.md)；專案規範、架構說明和指令參考都在 [AGENTS.md](AGENTS.md) 中。
 
 ## 致謝
 

@@ -1,5 +1,6 @@
 name: Bug report
 description: Report unexpected behavior in Token Monitor.
+labels: ["bug"]
 body:
   - type: markdown
     attributes:
@@ -11,7 +12,7 @@ body:
     id: version
     attributes:
       label: Token Monitor version
-      description: App version or source commit; say unknown if you cannot find it.
+      description: Shown under Settings → About Token Monitor, or the source commit if you run from source; say unknown if you cannot find it.
     validations:
       required: true
   - type: input
@@ -30,15 +31,33 @@ body:
         - AI Tool Limits (account quota or balance)
         - Session details or activity
         - UI or window behavior
+        - Install, update or packaging
         - Sync, Hub or headless agent
         - Other / not sure
     validations:
       required: true
   - type: textarea
-    id: behavior
+    id: steps
     attributes:
-      label: What happened?
-      description: What did you expect, and what happened instead? Include steps to reproduce, how often it happens, and how long you waited if loading is involved. Separate observations from a suspected cause.
+      label: Steps to reproduce
+      description: The smallest sequence that shows the problem, and how often it happens. Write "not reproducible on demand" if it only happens occasionally.
+      placeholder: |
+        1. Open …
+        2. Click …
+        3. Wait … seconds
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead, including how long you waited if loading is involved. Separate what you observed from any suspected cause.
     validations:
       required: true
   - type: textarea
