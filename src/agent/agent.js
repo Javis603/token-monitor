@@ -53,6 +53,7 @@ const clients = seedAgentClients(clientsCsvForSetting(args.clients ?? process.en
 });
 const allTimeSince = String(args.since || args.allTimeSince || process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01');
 const commandTimeoutMs = Number(args.timeoutMs || process.env.TOKEN_MONITOR_TOKSCALE_TIMEOUT_MS || 120 * 1000);
+const allTimeTimeoutArg = typeof args.allTimeTimeoutMs === 'string' ? Number(args.allTimeTimeoutMs) : NaN;
 const limitsEnabled = parseBoolean(args.limits ?? args.limitsEnabled ?? process.env.TOKEN_MONITOR_LIMITS_ENABLED, true);
 const limitProviders = parseLimitProviders(args.limitProviders ?? process.env.TOKEN_MONITOR_LIMIT_PROVIDERS).join(',');
 const limitsRefreshMs = normalizeLimitsRefreshMs(args.limitsRefreshMs || process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS);
@@ -90,7 +91,8 @@ const usageOptions = {
   commandTimeoutMs,
   // Preserve an explicit legacy timeout for every period unless the operator
   // supplies the new full-history override. Unconfigured agents use its default.
-  allTimeTimeoutMs: args.allTimeTimeoutMs ?? (process.env.TOKEN_MONITOR_ALL_TIME_TIMEOUT_MS?.trim()
+  allTimeTimeoutMs: (Number.isFinite(allTimeTimeoutArg) && allTimeTimeoutArg > 0 ? allTimeTimeoutArg : undefined)
+    ?? (process.env.TOKEN_MONITOR_ALL_TIME_TIMEOUT_MS?.trim()
     || (args.timeoutMs || process.env.TOKEN_MONITOR_TOKSCALE_TIMEOUT_MS ? commandTimeoutMs : undefined)),
   deviceId,
   agentVersion: appVersion(),
