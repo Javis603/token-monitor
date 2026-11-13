@@ -40,7 +40,9 @@ const { createWatcherHost } = require('./watcherHost');
 const { createSessionActivityScheduler } = require('./sessionActivityScheduler');
 const { activityWatchSources, activityClientsForPath, activityWatchIgnored } = require('./sessionActivityWatch');
 const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories, mergeDailyMaps } = require('./history');
-const { retainDailyHistory, retainLiveDailyHistory } = require('./dailyHistoryArchive');
+const {
+  graphFromDailyHistoryArchive, readDailyHistoryArchive, retainDailyHistory, retainLiveDailyHistory
+} = require('./dailyHistoryArchive');
 const {
   createSubprocessTermination,
   terminationUnconfirmedError
@@ -819,6 +821,23 @@ function normalizeHistoryIntervalMs(value) {
   return HISTORY_INTERVAL_VALUES.has(parsed) ? parsed : DEFAULT_HISTORY_INTERVAL_MS;
 }
 
+// History as the daily archive's graph gives it. Without a fresh graph the
+// archive cannot vouch for every active day, so the lifetime count is marked
+// incomplete. Null when the archive holds no days.
+function historyFromArchiveGraph(graph, { capDays, todayKey, complete }) {
+  const history = normalizeHistory(parseGraphResult(graph), { capDays, todayKey });
+  if (!complete) history.summary.activeDaysComplete = false;
+  return history.daily.length || history.monthly.length ? history : null;
+}
+
+// The archive alone, read-only, for a cold start to show until the first graph
+// lands. Capturing is the collector's job: a read here is not an observation.
+function archivedHistory({ timeZone, todayKey, capDays = HISTORY_CAP_DAYS, ...archiveOptions } = {}) {
+  const archive = readDailyHistoryArchive({ ...archiveOptions, timeZone });
+  const graph = graphFromDailyHistoryArchive([], archive, { timeZone, todayKey });
+  return historyFromArchiveGraph(graph, { capDays, todayKey, complete: false });
+}
+
 async function collectHistoryOnce(options) {
   throwIfAborted(options.signal);
   const startedAt = Date.now();
@@ -903,9 +922,9 @@ async function collectHistoryOnce(options) {
         capDays,
         writeEnabled: options.dailyHistoryArchiveWriteEnabled
       });
-      const retained = normalizeHistory(parseGraphResult(retainedGraph), { capDays, todayKey });
-      if (failureCode === 'history-graph-failed') retained.summary.activeDaysComplete = false;
-      const result = retained.daily.length || retained.monthly.length ? retained : null;
+      const result = historyFromArchiveGraph(retainedGraph, {
+        capDays, todayKey, complete: failureCode !== 'history-graph-failed'
+      });
       reportStatus(failureCode === null);
       return withLocalHistory(result);
     } catch (error) {
@@ -928,9 +947,21 @@ function shouldIncludeHistory(nowMs, lastHistoryAtMs, historyIntervalMs, force, 
   if (force) return true;
   return nowMs - (lastHistoryAtMs || 0) >= historyIntervalMs;
 }
+// Full-history reports can outlive the short-window budget on large archives.
+// Keep a finite, independently configurable bound; stop/replacement still aborts
+// the subprocess through the same physical-close barrier.
+function allTimeScanTimeoutMs(options) {
+  const fallback = Math.max(5 * 60 * 1000, clampTimerDelayMs(options.commandTimeoutMs, 120 * 1000));
+  return clampTimerDelayMs(
+    options.allTimeTimeoutMs ?? (options.env || process.env).TOKEN_MONITOR_ALL_TIME_TIMEOUT_MS,
+    fallback
+  );
+}
+
 async function collectUsageOnce(options) {
   throwIfAborted(options.signal);
   const { clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion = appVersion(), agentRuntime = '' } = options;
+  const allTimeTimeoutMs = allTimeScanTimeoutMs(options);
   // One snapshot, one instant: capture the clock before any tokscale scan and
   // reuse it for the today-window key and updatedAt, so a collection that
   // straddles local midnight cannot pair a day-N today scan with a day-N+1
@@ -1207,7 +1238,7 @@ async function collectUsageOnce(options) {
       month = extractScanBundle(monthJson).period;
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
       emitProgress({ today, month });
-      const allTimeJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs, signal: options.signal });
+      const allTimeJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs: allTimeTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal);
       allTime = extractScanBundle(allTimeJson).period;
     }
@@ -1283,6 +1314,7 @@ async function collectUsageOnce(options) {
         trackedClients: normalizedClients,
         allTimeSince,
         commandTimeoutMs,
+        allTimeTimeoutMs,
         signal: options.signal,
         runTokscale: runTokscaleFn,
         logger: options.logger,
@@ -1298,6 +1330,7 @@ async function collectUsageOnce(options) {
         trackedClients: normalizedClients,
         allTimeSince,
         commandTimeoutMs,
+        allTimeTimeoutMs,
         signal: options.signal,
         runTokscale: runTokscaleFn,
         logger: options.logger,
@@ -2934,7 +2967,7 @@ function startCollector(options) {
       const next = {};
       // Keep all three windows and History on one cache/account generation.
       for (const [period, flags] of [['today', ['--today']], ['month', ['--month']], ['allTime', ['--since', allTimeSince]]]) {
-        next[period] = await scan({ ...input, flags });
+        next[period] = await scan({ ...input, flags, commandTimeoutMs: period === 'allTime' ? allTimeScanTimeoutMs(options) : commandTimeoutMs });
         throwIfAborted(signal);
         applyTokscaleSessionMetadata(next[period], { resolveProjects: options.projectsEnabled !== false });
       }
@@ -4207,6 +4240,7 @@ module.exports = {
   applySessionTimestamps: applySessionMetadata,
   projectIdentity,
   projectPathFromJsonl,
+  archivedHistory,
   collectHistoryOnce,
   collectUsageOnce,
   clientActivityDaysFromHistory,

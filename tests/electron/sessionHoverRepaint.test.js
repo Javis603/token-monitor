@@ -62,6 +62,26 @@ test('native updates preserve plugin outlets beside retained anchors', () => {
   assert.deepEqual(root.children, [anchor, outlet]); assert.equal(outlet.textContent, 'unsaved draft');
 });
 
+test('self-managed icon subtrees survive async replacement and retire when their inputs change', () => {
+  const { node, root, dom } = fixture();
+  const icon = source => {
+    const host = node('icon', '');
+    host.setAttribute('data-dom-island', source);
+    host.append(node('image', source));
+    return host;
+  };
+  const first = icon('native'); dom.reconcileChildren(root, [first]);
+  const mask = node('mask', 'white'); first.replaceChildren(mask);
+  for (let i = 0; i < 3; i++) {
+    dom.reconcileChildren(root, [icon('native')]);
+    assert.equal(root.firstChild, first);
+    assert.deepEqual(first.children, [mask], 'refresh must not resurrect the discarded image');
+  }
+  const changed = icon('custom'); dom.reconcileChildren(root, [changed]);
+  assert.equal(root.firstChild, changed);
+  assert.equal(first.parentNode, null);
+});
+
 test('scalar writes into an empty snapshot reconcile once and clear without disturbing plugin siblings', () => {
   const { document, node, root } = fixture();
   const status = node('status', ''), outlet = node('author', 'draft');

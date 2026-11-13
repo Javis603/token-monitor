@@ -637,10 +637,10 @@ function isConfiguredProvider(provider) {
 }
 
 function providerCollapseKey(provider) {
-  // Known WorkBuddy and MiniMax identities survive missing credentials and
+  // Known WorkBuddy, MiniMax and Copilot identities survive missing credentials and
   // refresh-token rotation. Keep every account separate even while its login is
   // unavailable.
-  if (['workbuddy', 'minimax'].includes(provider.provider) && provider.accountKey) return providerAggregateKey(provider);
+  if (['workbuddy', 'minimax', 'copilot'].includes(provider.provider) && provider.accountKey) return providerAggregateKey(provider);
   // Antigravity account keys are portable only when a normalized Google email
   // proves the identity. Anonymous RPC fallback keys are local observations,
   // so keep the device scope established by providerAggregateKey().
@@ -1080,7 +1080,7 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
     // including an empty-source sentinel left by a provider-wide tick — is stale.
     if (candidate.provider === 'minimax' && !candidate.accountKey
       && (knownMinimaxSources.has(candidate.source) || (hasKnownMinimaxAccount && !candidate.source))) continue;
-    const knownAccount = candidate.accountKey && (candidate.provider === 'minimax'
+    const knownAccount = candidate.accountKey && (['minimax', 'copilot'].includes(candidate.provider)
       || (candidate.provider === 'workbuddy' && !isWorkbuddyPlaceholder(candidate)));
     const freshnessKey = providerFreshnessKey(candidate);
     const hasFreshObservation = providersWithFreshObservations.has(freshnessKey);

@@ -203,6 +203,8 @@ const {
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
 const { createCredentialCommands } = require('./limits/credentialCommands');
+const { createCopilotAccounts } = require('./providers/copilot/accounts');
+const copilotLimits = require('../shared/providers/copilot/limits');
 const { createMinimaxApiKeys } = require('./providers/minimax/apiKeys');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
@@ -5443,6 +5445,8 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
       customScanPaths: usageOptions.customScanPaths,
       wslScanEnabled: usageOptions.wslScanEnabled,
       wslSupported: process.platform === 'win32',
+      historyEnabled: usageOptions.historyEnabled,
+      dailyHistoryArchiveEnabled: usageOptions.dailyHistoryArchiveEnabled,
       hostname: os.hostname(),
       platform: `${process.platform}-${process.arch}`
     }
@@ -9982,6 +9986,38 @@ app.whenReady().then(() => {
   ipcMain.handle('codex:removeAccount', async (_event, id) => removeCodexManagedAccount(id));
   ipcMain.handle('codex:switchSystemAccount', async (_event, id) => switchCodexSystemAccount(id));
   ipcMain.handle('codex:refreshAccountLimits', async (_event, id) => refreshCodexManagedAccountLimits(id));
+  const copilotAccounts = createCopilotAccounts({
+    getSettings: () => settings, saveSettings,
+    probeDeps: () => electronProviderDeps({ env: {}, signal: AbortSignal.timeout(15_000) }),
+    changed: (accountKey, refresh) => {
+      if (!accountKey) {
+        const knownKeys = new Set(Object.values(copilotLimits.copilotProfiles(settings)).map(account => account.accountKey).filter(Boolean));
+        const legacyRows = (deviceRuntimeHandle?.getSnapshot()?.limits?.providers || [])
+          .filter(row => row.provider === 'copilot' && row.accountKey && !knownKeys.has(row.accountKey));
+        if (legacyRows.length === 1) accountKey = legacyRows[0].accountKey;
+      }
+      const resolved = Object.values(copilotLimits.copilotProfiles(settings)).find(account => account.accountKey === accountKey);
+      if (resolved) {
+        const fallbackKey = copilotLimits.copilotAccountKey(resolved.token, resolved.enterpriseHost);
+        const provisional = (deviceRuntimeHandle?.getSnapshot()?.limits?.providers || [])
+          .some(row => row.provider === 'copilot' && row.accountKey === fallbackKey);
+        if (provisional && fallbackKey !== accountKey) {
+          void queueLimitInvalidation({ provider: 'copilot', accountKey: fallbackKey }, 'identity-resolved', { clear: true, refresh: false });
+        }
+      }
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      pushSettingsToRenderer();
+      const scope = accountKey ? { provider: 'copilot', accountKey } : { provider: 'copilot' };
+      void queueLimitInvalidation(scope, 'account-change', { clear: Boolean(accountKey), refresh });
+    }
+  });
+  ipcMain.handle('copilot:getAccounts', () => copilotAccounts.getAccounts());
+  for (const method of ['addAccount', 'removeAccount', 'setEnabled']) {
+    ipcMain.handle(`copilot:${method}`, async (_event, ...args) => {
+      try { return await copilotAccounts[method](...args); }
+      catch (_) { return { ok: false, error: 'Could not update GitHub Copilot account. Please try again.' }; }
+    });
+  }
   ipcMain.handle('copilot:signIn', async (event, request = {}) => {
     if (copilotLoginController) return { ok: false, error: 'A GitHub Copilot sign-in is already in progress.', flowId: copilotLoginFlowId };
     const controller = new AbortController();
@@ -9993,8 +10029,9 @@ app.whenReady().then(() => {
       if (!event.sender.isDestroyed()) event.sender.send('copilot:loginStatus', { ...payload, flowId });
     };
     try {
+      const enterpriseHost = settings?.copilotEnterpriseHost || process.env.COPILOT_ENTERPRISE_HOST || process.env.GITHUB_ENTERPRISE_HOST || '';
       const result = await runCopilotDeviceFlowLogin({
-        enterpriseHost: settings?.copilotEnterpriseHost || process.env.COPILOT_ENTERPRISE_HOST || process.env.GITHUB_ENTERPRISE_HOST || '',
+        enterpriseHost,
         signal: controller.signal,
         onStatus: sendStatus
       }, {
@@ -10005,10 +10042,7 @@ app.whenReady().then(() => {
       if (copilotLoginController !== controller) {
         return { ok: false, error: copilotLoginErrorMessage({ status: 'cancelled' }), flowId };
       }
-      settings.copilotApiToken = normalizeAccountField('copilotApiToken', result.accessToken);
-      saveSettings({ throwOnError: true });
-      pushSettingsToRenderer();
-      void queueLimitInvalidation({ provider: 'copilot' }, 'login', { clear: true });
+      await copilotAccounts.addAccount(result.accessToken, () => copilotLoginController === controller && !controller.signal.aborted, controller.signal, enterpriseHost);
       return { ok: true, flowId };
     } catch (error) {
       const message = copilotLoginErrorMessage(error);

@@ -37,6 +37,15 @@ function normalizedEnterpriseHost(raw) {
   return host.replace(/^\.+|\.+$/g, '').toLowerCase() || COPILOT_DEFAULT_HOST;
 }
 
+// Preserve github.com identities used by existing subscriptions and history;
+// other GitHub installations have their own namespace.
+function copilotAccountKey(seed, host) {
+  const normalizedHost = normalizedEnterpriseHost(host);
+  return normalizedHost === COPILOT_DEFAULT_HOST
+    ? hashKey('copilot', seed)
+    : hashKey('copilot', normalizedHost, seed);
+}
+
 function copilotApiHost(enterpriseHost) {
   const host = normalizedEnterpriseHost(enterpriseHost);
   if (host === COPILOT_DEFAULT_HOST) return 'api.github.com';
@@ -220,6 +229,7 @@ function mapCopilotUsageToProvider(usage, meta = {}) {
     accountName: meta.accountName || '',
     accountEmail: meta.accountEmail || '',
     source: meta.source || 'api',
+    sourceDetail: meta.sourceDetail || '',
     status: windows.length > 0 ? 'ok' : 'unavailable',
     updatedAt: meta.updatedAt,
     windows
@@ -232,7 +242,10 @@ async function fetchJson(url, headers, deps = {}) {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    const response = await fetchFn(url, { headers, ...(controller ? { signal: controller.signal } : {}) });
+    const signals = [deps.signal, controller?.signal].filter(Boolean);
+    const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
+    signal?.throwIfAborted();
+    const response = await fetchFn(url, { headers, ...(signal ? { signal } : {}) });
     if (!response.ok) {
       const status = response.status === 401 || response.status === 403
         ? 'unauthorized'
@@ -243,6 +256,7 @@ async function fetchJson(url, headers, deps = {}) {
     }
     return await response.json();
   } catch (error) {
+    if (deps.signal?.aborted) throw deps.signal.reason;
     if (error?.name === 'AbortError') throw errorWithStatus('unavailable', `${url} timed out`);
     throw error;
   } finally {
@@ -294,13 +308,98 @@ function providerStatusFromError(error) {
   return 'unavailable';
 }
 
+// Saved profiles share the credential store with other multi-token providers.
+// Keep the legacy setting as a virtual profile until the user removes it.
+function copilotProfiles(options = {}, env = {}) {
+  const profiles = Object.create(null);
+  for (const [id, value] of Object.entries(options.copilotProfiles || {})) {
+    const token = copilotToken({}, { copilotApiToken: value?.token });
+    if (!token || id === 'environment') continue;
+    const enterpriseHost = normalizedEnterpriseHost(value.enterpriseHost || options.copilotEnterpriseHost
+      || env.COPILOT_ENTERPRISE_HOST || env.GITHUB_ENTERPRISE_HOST);
+    profiles[id] = { token, enabled: value.enabled !== false, enterpriseHost,
+      accountKey: String(value.accountKey || ''), accountName: String(value.accountName || '') };
+  }
+  const token = copilotToken({}, options);
+  if (token && !Object.values(profiles).some(profile => profile.token === token)) {
+    let id = 'legacy';
+    while (Object.hasOwn(profiles, id)) id += '-legacy';
+    const enterpriseHost = normalizedEnterpriseHost(options.copilotEnterpriseHost || env.COPILOT_ENTERPRISE_HOST || env.GITHUB_ENTERPRISE_HOST);
+    profiles[id] = { token, enabled: true, enterpriseHost, accountKey: '', accountName: '' };
+  }
+  return profiles;
+}
+
+function configuredCopilotAccounts(options = {}, deps = {}) {
+  const profiles = copilotProfiles(options, deps.env || process.env);
+  const accounts = Object.entries(profiles).map(([id, profile]) => ({ id, ...profile }));
+  // Preserve the existing settings-over-environment precedence, even if disabled.
+  if (!accounts.length) {
+    const env = deps.env || process.env;
+    const token = copilotToken(env);
+    if (token) accounts.push({ id: 'environment', token, enabled: true,
+      enterpriseHost: normalizedEnterpriseHost(options.copilotEnterpriseHost || env.COPILOT_ENTERPRISE_HOST || env.GITHUB_ENTERPRISE_HOST),
+      accountKey: '', accountName: '' });
+  }
+  return accounts;
+}
+
+// Only a full provider observation may replace a provisional identity. Scoped
+// probes keep the selected row key until that observation; the runtime consumes
+// these explicit removals before publishing or syncing the remaining rows.
+function retireCopilotFallbacks(rows, accounts, options) {
+  if (options.limitRefreshScope?.provider === 'copilot' && options.limitRefreshScope.accountKey) return rows;
+  const previous = new Set((options.previousLimits?.providers || []).map(row => row.accountKey));
+  const current = new Set(rows.map(row => row.accountKey));
+  const retired = new Set(accounts.map(account => copilotAccountKey(account.token, account.enterpriseHost))
+    .filter(key => previous.has(key) && !current.has(key)));
+  return [...rows, ...[...retired].map(accountKey => ({ provider: 'copilot', accountKey, removed: true }))];
+}
+
 async function fetchCopilotLimits(options = {}, deps = {}) {
+  const scope = options.limitRefreshScope?.provider === 'copilot' ? options.limitRefreshScope : null;
+  const configured = configuredCopilotAccounts(options, deps);
+  const scopedKey = account => scope?.accountKey === copilotAccountKey(account.token, account.enterpriseHost) ? scope.accountKey : '';
+  // Keep the original single-account return shape unless a provisional row
+  // must be retired through the runtime's internal removal marker.
+  if (!Object.keys(options.copilotProfiles || {}).length) {
+    const key = configured[0] ? scopedKey(configured[0]) : '';
+    const row = await fetchCopilotAccountLimits(key ? { ...options, accountKey: key } : options, deps);
+    if (scope?.accountKey && row.accountKey !== scope.accountKey) return [];
+    const rows = retireCopilotFallbacks([row], configured, options);
+    return rows.length === 1 ? row : rows;
+  }
+  const accounts = configured.filter(account => account.enabled
+    && (!scope?.accountKey || !account.accountKey || account.accountKey === scope.accountKey));
+  const rows = await Promise.all(accounts.map(account => fetchCopilotAccountLimits({
+    copilotApiToken: account.token, copilotEnterpriseHost: account.enterpriseHost,
+    accountKey: account.accountKey || scopedKey(account), accountName: account.accountName, sourceDetail: 'managed'
+  }, deps)));
+  const seen = new Set();
+  const selected = rows.filter(row => {
+    if (scope?.accountKey && row.accountKey !== scope.accountKey) return false;
+    if (seen.has(row.accountKey)) return false;
+    seen.add(row.accountKey);
+    return true;
+  });
+  return retireCopilotFallbacks(selected, accounts, options);
+}
+
+async function fetchCopilotAccountLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const nowMs = (deps.now || Date.now)();
   const updatedAt = new Date(nowMs).toISOString();
   const token = copilotToken(env, options);
   const enterpriseHost = options.copilotEnterpriseHost || env.COPILOT_ENTERPRISE_HOST || env.GITHUB_ENTERPRISE_HOST || '';
   const requestDeps = { ...deps, copilotEnterpriseHost: enterpriseHost };
+  // A legacy/environment login has no saved account metadata. Retain only its
+  // last resolved identity in the runtime, bound to the full token and host,
+  // so expiry reports against the same row without attributing a replacement
+  // credential's failure to the previous account.
+  const runtimeState = deps.providerRuntimeState;
+  const fingerprint = hashKey('copilot-credential', normalizedEnterpriseHost(enterpriseHost), token);
+  const previous = runtimeState?.get('copilot:legacy-identity');
+  const remembered = previous?.fingerprint === fingerprint ? previous : null;
 
   if (!token) {
     return normalizeLimitProvider({
@@ -319,19 +418,28 @@ async function fetchCopilotLimits(options = {}, deps = {}) {
     ]);
     const login = String(identity.login || '').trim();
     const accountSeed = login || (identity.id != null ? String(identity.id) : '');
+    if (!options.accountKey && accountSeed) {
+      runtimeState?.set('copilot:legacy-identity', {
+        fingerprint, accountKey: copilotAccountKey(accountSeed, enterpriseHost), accountName: login
+      });
+    }
     return mapCopilotUsageToProvider(usage, {
-      accountKey: hashKey('copilot', accountSeed || token.slice(0, 8)),
+      accountKey: options.accountKey || (accountSeed ? copilotAccountKey(accountSeed, enterpriseHost) : remembered?.accountKey) || copilotAccountKey(token, enterpriseHost),
       accountLabel: displayPlanLabel(usage.copilotPlan),
-      accountName: login,
+      accountName: login || options.accountName || remembered?.accountName,
       accountEmail: '',
       updatedAt,
-      source: 'api'
+      source: 'api',
+      sourceDetail: options.sourceDetail
     });
   } catch (error) {
+    if (deps.signal?.aborted) throw deps.signal.reason;
     return normalizeLimitProvider({
       provider: 'copilot',
-      accountKey: hashKey('copilot', token.slice(0, 8)),
+      accountKey: options.accountKey || remembered?.accountKey || copilotAccountKey(token, enterpriseHost),
+      accountName: options.accountName || remembered?.accountName || '',
       source: 'api',
+      sourceDetail: options.sourceDetail,
       status: providerStatusFromError(error),
       updatedAt,
       windows: []
@@ -342,6 +450,11 @@ async function fetchCopilotLimits(options = {}, deps = {}) {
 module.exports = {
   COPILOT_DEFAULT_HOST,
   copilotToken,
+  copilotAccountKey,
+  copilotProfiles,
+  configuredCopilotAccounts,
+  fetchCopilotAccountLimits,
+  fetchGitHubIdentity,
   normalizedEnterpriseHost,
   copilotApiHost,
   copilotUsageUrl,
