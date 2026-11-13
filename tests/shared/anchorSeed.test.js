@@ -316,7 +316,7 @@ test('without a seed, a preview stands alone with windows that start now', () =>
 
 test('a pricing or tokscale binary change still seeds, but nothing else that moved does', () => {
   const repriced = anchorFixture({
-    configFingerprint: configFingerprint(CLIENTS, ALL_TIME_SINCE, true, '', '', null, 'deadbeef')
+    configFingerprint: configFingerprint(CLIENTS, ALL_TIME_SINCE, true, null, 'deadbeef')
   });
   assert.equal(deviceRecordFromAnchor(repriced, seedOptions()).allTime.totalTokens, 900_000);
   const options = { clients: CLIENTS, allTimeSince: ALL_TIME_SINCE, projectsEnabled: true, now: NOW };
