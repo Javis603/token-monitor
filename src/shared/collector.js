@@ -3480,8 +3480,11 @@ function startCollector(options) {
         // collecting while a requested Cursor refresh owns its separate lane.
         if (!cursorSource.contextMatches(context)) await cursorSource.ensureContext(context);
         // After a restart the anchor may already hold the cached Cursor usage.
-        // Read the cache before deciding the scope; onChange adopts a match.
-        if (publishedCursorRevision === -1 && anchor?.cursorSnapshotKey) {
+        // Read the cache once before deciding the scope; onChange adopts a
+        // match. Gate on the snapshot, not on publication: every completed
+        // read schedules a tick, so a failed reconcile would otherwise loop.
+        if (publishedCursorRevision === -1 && anchor?.cursorSnapshotKey
+          && cursorSource.getSnapshot().revision === 0) {
           try { await cursorSource.readCache(context); } catch (_) {}
         }
         const targets = normalizeClientsCsv(tickOptions.targetClients).split(',').filter(Boolean);

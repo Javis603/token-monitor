@@ -461,10 +461,11 @@ test('a restart with a same-day anchor and an unchanged Cursor cache scans Today
   const previousShared = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = sharedDir;
   const gates = [];
+  let syncsComplete = false;
   t.mock.method(cursorAuth, 'runCursorSync', options => withCursorLifecycle(async () => {
     const gate = deferred();
     gates.push(gate);
-    await gate.promise;
+    if (!syncsComplete) await gate.promise;
     return { synced: true };
   }, options));
   const runtimes = [];
@@ -478,6 +479,7 @@ test('a restart with a same-day anchor and an unchanged Cursor cache scans Today
   });
   const anchorPath = path.join(sharedDir, 'collector-anchor.json');
   let cursorTokens = 12;
+  let failNativeHistory = false;
   function start() {
     const collectorPath = require.resolve('../../src/shared/collector');
     delete require.cache[collectorPath];
@@ -493,6 +495,9 @@ test('a restart with a same-day anchor and an unchanged Cursor cache scans Today
       runTokscale: async input => {
         calls.push({ clients: input.clients, flags: input.flags.join(' ') });
         const cursor = input.clients === 'cursor';
+        // A real cache read takes time; an instant one would starve the timers.
+        if (cursor) await new Promise(resolve => setTimeout(resolve, 2));
+        if (!cursor && failNativeHistory && !input.flags.includes('--today')) throw new Error('simulated native scan failure');
         const client = cursor ? 'cursor' : 'codex';
         return { entries: [{ client, sessionId: `${client}-session`, model: `${client}-model`, input: cursor ? cursorTokens : 10, output: 0, cost: 0 }] };
       }
@@ -525,4 +530,16 @@ test('a restart with a same-day anchor and an unchanged Cursor cache scans Today
   await until(() => moved.updates.some(update => update.allTime.clients.cursor === 30));
   await moved.runtime.whenIdle();
   assert.ok(moved.calls.some(call => call.clients === 'codex' && call.flags.includes('--since')));
+  await stop(moved.runtime);
+
+  // A changed cache whose full reconcile fails must wait for the next
+  // interval; the restart read must not re-arm itself from its own callback.
+  cursorTokens = 45;
+  failNativeHistory = true;
+  syncsComplete = true;
+  const failing = start();
+  await until(() => failing.calls.some(call => call.clients === 'codex' && !call.flags.includes('--today')));
+  await new Promise(resolve => setTimeout(resolve, 300));
+  const cursorReads = failing.calls.filter(call => call.clients === 'cursor').length;
+  assert.ok(cursorReads <= 6, `Cursor cache reads after a failed reconcile: ${cursorReads}`);
 });
