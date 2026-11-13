@@ -2885,6 +2885,8 @@ function startCollector(options) {
         publishedCursorRevision = cursorSource.getSnapshot().revision;
         changed = false;
       }
+      // The restart tick waiting on this read collects it next.
+      if (cursorRestartRead) return;
       if (!stopped) void runTick('cursor-cache', {
         ...(changed ? { forceHistory: true } : { todayOnly: true, targetClients: ['cursor'] }),
         cursorSnapshotRefresh: true

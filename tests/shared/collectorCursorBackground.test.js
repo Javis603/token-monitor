@@ -521,7 +521,7 @@ test('a restart with a same-day anchor and an unchanged Cursor cache scans Today
   await restarted.runtime.whenIdle();
   assert.ok(restarted.updates.length > 0, 'whenIdle resolved before the first collection');
   const native = restarted.calls.filter(call => call.clients === 'codex').map(call => call.flags);
-  assert.ok(native.length > 0 && native.every(flags => flags === '--today'), `the anchor covers month and all-time: ${native}`);
+  assert.deepEqual(native, ['--today'], 'the anchor covers month and all-time, and the restart read adds no second scan');
   assert.equal(restarted.updates.at(-1).allTime.clients.cursor, 12);
   await stop(restarted.runtime);
 
