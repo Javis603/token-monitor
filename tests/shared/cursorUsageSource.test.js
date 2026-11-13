@@ -240,6 +240,24 @@ test('a sync requested immediately after the offline-ready barrier is not swallo
   assert.equal(source.getSnapshot().context, nextContext);
 });
 
+test('a sync requested at any point after a cache read is never swallowed by the finishing read', async t => {
+  // The collector's restart tick resumes from readCache() some microtasks after
+  // the read; whichever turn that lands in, its request must start an import.
+  for (let hops = 0; hops <= 8; hops++) {
+    const syncs = [];
+    const source = createCursorUsageSource({ context, signal: new AbortController().signal,
+      sync: async () => { syncs.push(hops); return true; },
+      read: async () => snapshot()
+    });
+    t.after(() => source.stop());
+    let ready = source.readCache(context);
+    for (let i = 0; i < hops; i++) ready = ready.then(value => value);
+    await ready;
+    await source.refresh({ minIntervalMs: 0 });
+    assert.equal(syncs.length, 1, `sync swallowed ${hops} microtask hops after the read`);
+  }
+});
+
 test('source events during an import coalesce into one later sync without overlapping the first', async t => {
   const gate = deferred();
   const controller = new AbortController();

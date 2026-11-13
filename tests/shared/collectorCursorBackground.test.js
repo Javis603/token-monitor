@@ -516,9 +516,12 @@ test('a restart with a same-day anchor and an unchanged Cursor cache scans Today
   }
   await stop(first.runtime);
 
+  const syncsBeforeRestart = gates.length;
   const restarted = start();
   // whenIdle() covers the restart cache read and the tick that follows it.
   await restarted.runtime.whenIdle();
+  // The restart read must not swallow the startup Cursor import.
+  assert.equal(gates.length, syncsBeforeRestart + 1, 'the restart tick starts one Cursor import');
   assert.ok(restarted.updates.length > 0, 'whenIdle resolved before the first collection');
   const native = restarted.calls.filter(call => call.clients === 'codex').map(call => call.flags);
   assert.deepEqual(native, ['--today'], 'the anchor covers month and all-time, and the restart read adds no second scan');

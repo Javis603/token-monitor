@@ -175,6 +175,10 @@ function createCursorUsageSource({ sync, read, onChange, onError, signal, contex
         }
         first = false;
       } while (!stopped && !signal.aborted && (forcePending || readPending || syncPending));
+      // Release the lane in the same turn the loop decides to exit. A request
+      // landing after that decision would otherwise join a finished loop, and
+      // its sync would never run.
+      if (active === pending) active = null;
       return successful;
     };
     const pending = Promise.resolve().then(operation).finally(() => {
