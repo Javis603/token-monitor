@@ -49,7 +49,7 @@ const { antigravityDataRoots, createAntigravitySelfSync } = require('./providers
 const { antigravityConversationSummaryCandidates } = require('./providers/antigravity/sessionMetadata');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
-const { createCursorUsageSource } = require('./providers/cursor/usageSource');
+const { createCursorUsageSource, snapshotUsageKey } = require('./providers/cursor/usageSource');
 const { cursorDesktopWatchRoots, isCursorDesktopStateWrite } = require('./providers/cursor/desktopState');
 const {
   applySessionMetadata,
@@ -2723,6 +2723,7 @@ function startCollector(options) {
   const runtimeAbortController = new AbortController();
   const runtimeSignal = runtimeAbortController.signal;
   let startBarrier = options.startBarrier ? Promise.resolve(options.startBarrier) : null;
+  let cursorRestartRead = null;
   const trackedClients = new Set(normalizeClientsCsv(clients).split(',').filter(Boolean));
   const reasonixNativeSessionsEnabled = options.reasonixNativeSessionsEnabled === true;
   const reasonixNativeSessionCache = reasonixNativeSessionsEnabled && trackedClients.has('reasonix')
@@ -2896,6 +2897,16 @@ function startCollector(options) {
       return next;
     },
     onChange({ changed }) {
+      // The revision starts over with the process. The first read after a
+      // restart counts as published when it is the usage the anchor was built
+      // from, so a valid anchor keeps its Today-only tick.
+      if (publishedCursorRevision === -1 && anchor?.cursorSnapshotKey
+        && snapshotUsageKey(cursorSource.getSnapshot()) === anchor.cursorSnapshotKey) {
+        publishedCursorRevision = cursorSource.getSnapshot().revision;
+        changed = false;
+      }
+      // The restart tick waiting on this read collects it next.
+      if (cursorRestartRead) return;
       if (!stopped) void runTick('cursor-cache', {
         ...(changed ? { forceHistory: true } : { todayOnly: true, targetClients: ['cursor'] }),
         cursorSnapshotRefresh: true
@@ -2987,6 +2998,7 @@ function startCollector(options) {
           todayT3Titles: saved.todayT3Titles,
           catalogTitleSources: saved.catalogTitleSources,
           catalogProjects: saved.catalogProjects,
+          ...(typeof saved.cursorSnapshotKey === 'string' ? { cursorSnapshotKey: saved.cursorSnapshotKey } : {}),
           // Per-client partitions are deliberately rebuilt by the first
           // anchored all-client tick after restart. Persisted partitions
           // could be stale for clients that changed while the app was down.
@@ -3026,6 +3038,7 @@ function startCollector(options) {
         wslStatus: wslStatusAnchor,
         ...(anchor.nativeSessions ? { nativeSessions: anchor.nativeSessions } : {}),
         ...(anchor.nativeProjects ? { nativeProjects: anchor.nativeProjects } : {}),
+        ...(anchor.cursorSnapshotKey ? { cursorSnapshotKey: anchor.cursorSnapshotKey } : {}),
         configFingerprint: configFingerprint(clients, allTimeSince, options.projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, options.customScanPaths, tickPricingRevision, sourceOptions, tickSourceRevision),
         fullScanAt: new Date(lastFullScanAt).toISOString()
       }));
@@ -3285,6 +3298,7 @@ function startCollector(options) {
         if (entry.data?.lastActivityDay) activityDaysAnchor[client] = entry.data.lastActivityDay;
       }
       if (!anchored && captured) {
+        const cursorSnapshotKey = snapshotUsageKey(tickCursorSnapshot);
         anchor = {
           dateKey: todayKey,
           calendarKey: tickCalendarKey,
@@ -3298,7 +3312,8 @@ function startCollector(options) {
           catalogTitleSources: captured.catalogTitleSources,
           catalogProjects: captured.catalogProjects,
           ...(captured.nativeSessions ? { nativeSessions: captured.nativeSessions } : {}),
-          ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {})
+          ...(captured.nativeProjects ? { nativeProjects: captured.nativeProjects } : {}),
+          ...(cursorSnapshotKey ? { cursorSnapshotKey } : {})
         };
         wslAnchor = captured.wslBundle;
         wslStatusAnchor = captured.wslStatus || null;
@@ -3491,6 +3506,17 @@ function startCollector(options) {
         // Context/explicit waits are outside tickInFlight. Other tools keep
         // collecting while a requested Cursor refresh owns its separate lane.
         if (!cursorSource.contextMatches(context)) await cursorSource.ensureContext(context);
+        // After a restart the anchor may already hold the cached Cursor usage.
+        // Read the cache once before deciding the scope; onChange adopts a
+        // match. Gate on the snapshot, not on publication: every completed
+        // read schedules a tick, so a failed reconcile would otherwise loop.
+        if (publishedCursorRevision === -1 && anchor?.cursorSnapshotKey
+          && cursorSource.getSnapshot().revision === 0) {
+          // whenIdle() waits on this read: the tick has not entered tickInFlight yet.
+          const read = cursorSource.readCache(context).catch(() => {});
+          cursorRestartRead = read;
+          try { await read; } finally { if (cursorRestartRead === read) cursorRestartRead = null; }
+        }
         const targets = normalizeClientsCsv(tickOptions.targetClients).split(',').filter(Boolean);
         const cursorSelected = !tickOptions.todayOnly || targets.length === 0 || targets.includes('cursor')
           || selfSyncSelected(tickOptions.forceSelfSync, 'cursor') || selfSyncSelected(tickOptions.sourceSelfSync, 'cursor');
@@ -3978,6 +4004,9 @@ function startCollector(options) {
     // It clears startBarrier before this continuation asks again; the regression
     // test pins that startup ordering because reversing it would microtask-spin.
     if (startBarrier) return Promise.resolve(startBarrier).then(() => whenIdle());
+    // Same ordering as the barrier: the waiting tick resumes, and enters
+    // tickInFlight, before this continuation asks again.
+    if (cursorRestartRead) return cursorRestartRead.then(() => whenIdle());
     const usageIdle = !tickInFlight ? Promise.resolve() : new Promise((resolve) => idleWaiters.push(resolve));
     return usageIdle.then(() => activityUpdate).then(() => stopped
       ? Promise.all([pricingRefresher?.whenIdle(), codexLocalSource?.whenIdle(), cursorSource?.whenIdle()]) : undefined);
