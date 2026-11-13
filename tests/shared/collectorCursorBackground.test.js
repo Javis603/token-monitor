@@ -117,6 +117,8 @@ test('long Cursor import leaves Codex watch ticks live, then reconciles all peri
   const f = fixture(t);
   await until(() => f.syncs.length === 1 && f.updates.some(x => x.today.clients.cursor === 12));
   assert.equal(f.syncs[0].timeoutMs, 1830000);
+  const cursorReports = f.calls.filter(call => call.clients === 'cursor');
+  assert.deepEqual(cursorReports.slice(0, 3).map(call => call.commandTimeoutMs), [1000, 1000, 300000]);
   await f.runtime.whenIdle();
   f.setLocal(25);
   await f.runtime.tick('watch:codex', { todayOnly: true, targetClients: ['codex'] });

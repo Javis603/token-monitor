@@ -933,9 +933,21 @@ function shouldIncludeHistory(nowMs, lastHistoryAtMs, historyIntervalMs, force, 
   if (force) return true;
   return nowMs - (lastHistoryAtMs || 0) >= historyIntervalMs;
 }
+// Full-history reports can outlive the short-window budget on large archives.
+// Keep a finite, independently configurable bound; stop/replacement still aborts
+// the subprocess through the same physical-close barrier.
+function allTimeScanTimeoutMs(options) {
+  const fallback = Math.max(5 * 60 * 1000, clampTimerDelayMs(options.commandTimeoutMs, 120 * 1000));
+  return clampTimerDelayMs(
+    options.allTimeTimeoutMs ?? (options.env || process.env).TOKEN_MONITOR_ALL_TIME_TIMEOUT_MS,
+    fallback
+  );
+}
+
 async function collectUsageOnce(options) {
   throwIfAborted(options.signal);
   const { clients, allTimeSince, commandTimeoutMs, deviceId, agentVersion = appVersion(), agentRuntime = '' } = options;
+  const allTimeTimeoutMs = allTimeScanTimeoutMs(options);
   // One snapshot, one instant: capture the clock before any tokscale scan and
   // reuse it for the today-window key and updatedAt, so a collection that
   // straddles local midnight cannot pair a day-N today scan with a day-N+1
@@ -1179,7 +1191,7 @@ async function collectUsageOnce(options) {
       month = extractScanBundle(monthJson).period;
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
       emitProgress({ today, month });
-      const allTimeJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs, signal: options.signal });
+      const allTimeJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs: allTimeTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal);
       allTime = extractScanBundle(allTimeJson).period;
     }
@@ -1249,6 +1261,7 @@ async function collectUsageOnce(options) {
         trackedClients: normalizedClients,
         allTimeSince,
         commandTimeoutMs,
+        allTimeTimeoutMs,
         signal: options.signal,
         runTokscale: runTokscaleFn,
         logger: options.logger,
@@ -1264,6 +1277,7 @@ async function collectUsageOnce(options) {
         trackedClients: normalizedClients,
         allTimeSince,
         commandTimeoutMs,
+        allTimeTimeoutMs,
         signal: options.signal,
         runTokscale: runTokscaleFn,
         logger: options.logger,
@@ -2893,7 +2907,7 @@ function startCollector(options) {
       const next = {};
       // Keep all three windows and History on one cache/account generation.
       for (const [period, flags] of [['today', ['--today']], ['month', ['--month']], ['allTime', ['--since', allTimeSince]]]) {
-        next[period] = await scan({ ...input, flags });
+        next[period] = await scan({ ...input, flags, commandTimeoutMs: period === 'allTime' ? allTimeScanTimeoutMs(options) : commandTimeoutMs });
         throwIfAborted(signal);
         applyTokscaleSessionMetadata(next[period], { resolveProjects: options.projectsEnabled !== false });
       }

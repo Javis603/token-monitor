@@ -128,7 +128,7 @@ function probeWslState(deps = {}) {
 }
 
 async function collectWslUsage(options = {}, deps = {}) {
-  const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, runTokscale, logger, decoratePeriods } = options;
+  const { clients, trackedClients = clients, allTimeSince, commandTimeoutMs, allTimeTimeoutMs = commandTimeoutMs, runTokscale, logger, decoratePeriods } = options;
   const existsSync = deps.existsSync || fs.existsSync;
   const readdirSync = deps.readdirSync || fs.readdirSync;
   const bundle = emptyWslBundle();
@@ -164,7 +164,7 @@ async function collectWslUsage(options = {}, deps = {}) {
       throwIfAborted(options.signal, 'WSL usage scan aborted');
       const monthJson = await runTokscale({ clients: clientsCsv, flags: ['--month', '--home', home], commandTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal, 'WSL usage scan aborted');
-      const allTimeJson = await runTokscale({ clients: clientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs, signal: options.signal });
+      const allTimeJson = await runTokscale({ clients: clientsCsv, flags: ['--since', allTimeSince, '--home', home], commandTimeoutMs: allTimeTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal, 'WSL usage scan aborted');
       const periods = {
         today: extractUsageFromTokscale(todayJson),
