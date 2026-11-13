@@ -294,7 +294,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 
 - Custom 会从一个 GET 余额端点映射数值 JSON 字段；仅兼容 OpenAI 或 Anthropic API 并不足够。
 
-- Qoder 分组包含国际版与 CN 的独立追踪选项。全新安装默认追踪两者，已有选择保持不变；工具用量默认合并，可选择分开显示版本。国际版读取 `QODER_CONFIG_DIR/projects` 或 `~/.qoder/projects`。两者的 JSONL transcript 共用 Tokscale Qoder 解析器。仅统计报告的 Token，不从文本或 credits 推算；若要记录托管模型的 Token 计数，请在对应的 Qoder 进程中设置 `QODER_EXPOSE_TOKEN_USAGE=1`／`QODERCN_EXPOSE_TOKEN_USAGE=1`；这些变量不会补回现有记录中缺失的计数。动态模型代号保留原值。
+- Qoder 分组包含国际版与 CN 的独立追踪选项。全新安装默认追踪两者，已有选择保持不变；工具用量默认合并，可选择分开显示版本。国际版读取 `QODER_CONFIG_DIR/projects` 或 `~/.qoder/projects`。两者的 JSONL transcript 共用 Tokscale Qoder 解析器。仅统计报告的 Token，不从文本或 credits 推算；已有 Qoder CN CLI 1.1.62 使用 `QODERCN_EXPOSE_TOKEN_USAGE=1` 记录后续托管模型 Token 的报告；Qoder CN Desktop 0.3.3 则报告即使启用也未写入 Token 字段，其他客户端与版本尚未确认。此开关不会补回已有记录缺失的计数。动态模型代号保留原值。
 
 #### Qoder CN（本地适配器）
 

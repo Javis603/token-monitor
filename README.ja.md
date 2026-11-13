@@ -294,7 +294,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 
 - Custom は1つの GET 残高エンドポイントから数値 JSON フィールドをマッピングします。OpenAI または Anthropic API 互換だけでは不十分です。
 
-- Qoder グループで国際版と CN を個別に追跡できます。新規インストールでは両方が有効で、既存の選択は維持されます。ツール使用量は既定で合算され、バージョン別表示も選べます。国際版の読み取り先は `QODER_CONFIG_DIR/projects` または `~/.qoder/projects` です。両者の JSONL transcript は Tokscale の Qoder パーサーを共有します。記録されたトークンのみを集計します。マネージドモデルのカウンターを記録するには、対応する Qoder プロセスで `QODER_EXPOSE_TOKEN_USAGE=1` / `QODERCN_EXPOSE_TOKEN_USAGE=1` を有効にしてください。これらの変数は、既存の記録にないカウンターを復元しません。テキストや credits からの推定は行わず、動的モデルコードは記録どおりに表示します。
+- Qoder グループで国際版と CN を個別に追跡できます。新規インストールでは両方が有効で、既存の選択は維持されます。ツール使用量は既定で合算され、バージョン別表示も選べます。国際版の読み取り先は `QODER_CONFIG_DIR/projects` または `~/.qoder/projects` です。両者の JSONL transcript は Tokscale の Qoder パーサーを共有します。記録されたトークンのみを集計します。Qoder CN CLI 1.1.62 では `QODERCN_EXPOSE_TOKEN_USAGE=1` により以後のマネージドモデルのトークンを記録できた報告があります。Qoder CN Desktop 0.3.3 では有効にしても transcript のトークン欄が空のままと報告されており、他のクライアントやバージョンは未確認です。このスイッチは既存の記録にないカウンターを復元しません。テキストや credits からの推定は行わず、動的モデルコードは記録どおりに表示します。
 
 #### Qoder CN（ローカルアダプター）
 

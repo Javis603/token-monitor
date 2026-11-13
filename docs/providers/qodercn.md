@@ -36,6 +36,8 @@ CN JSONL `input_tokens` includes `cache_read_input_tokens`, so the adapter subtr
 
 Only rows with reported token counts enter usage. Current first-party, plan-billed rows can contain `credits` and `context_usage_ratio` while every token field is zero. The active context-window denominator is not reliably present in the observed session data and can vary per session, so a model-wide window must not be used to reconstruct tokens. The fork disables upstream character-count estimates for both Qoder lanes. Those rows remain absent from token totals; their credits belong to AI Tool Limits. BYOK/custom-model rows that contain measured token fields are counted normally.
 
+The exposure-switch evidence is version-specific: [the CLI report in #733](https://github.com/Javis603/token-monitor/issues/733) confirms future counters with `QODERCN_EXPOSE_TOKEN_USAGE=1` on Qoder CN CLI 1.1.62. Desktop 0.3.3 was reported to keep transcript token fields empty with the same switch. This does not establish the behavior of other clients or versions and does not recover masked historical records.
+
 ## Source precedence
 
 The CN JSONL projects directory resolves in this order:
