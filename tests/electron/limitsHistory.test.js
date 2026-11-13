@@ -2677,3 +2677,44 @@ test('adoption retains the saved tail owner after equal-time confirmations', t =
   assert.equal(entry.distribution.buckets.at(-1).value, 2);
   assert.equal(entry.distribution.unallocated, 0);
 });
+
+test('a rotated credential adopts the history recorded under the key it replaced', async t => {
+  const { createHash } = require('node:crypto');
+  const { limitWindowKey } = require('../../src/shared/limits/usageItems');
+  const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-identity-'));
+  const file = path.join(directory, 'history.sqlite');
+  const reset = at(22, 11);
+  const window = { kind: 'billing', label: 'Team credits', usedPercent: 63.38, remainingPercent: 36.62,
+    resetsAt: new Date(reset).toISOString() };
+  const cookieKeyed = { provider: 'qoder', source: 'web', status: 'ok', accountKey: 'sha256:cookie-hash',
+    updatedAt: new Date(at(12, 22, 34)).toISOString(), windows: [window] };
+  const userIdKeyed = { ...cookieKeyed, accountKey: 'sha256:user-id', accountKeyAliases: ['sha256:cookie-hash'],
+    updatedAt: new Date(at(12, 22, 44)).toISOString(),
+    windows: [{ ...window, usedPercent: 63.44, remainingPercent: 36.56 }] };
+  const legacyId = hash(['account-v2', historyAccountKey(cookieKeyed), limitWindowKey(window), 'pp']);
+  const canonicalId = hash(['account-v2', historyAccountKey(userIdKeyed), limitWindowKey(window), 'pp']);
+  const db = createHistoryDatabase(file);
+  for (const [time, value] of [[at(12, 22, 29), 63.35], [at(12, 22, 34), 63.38]]) {
+    db.record([{ account: hash(['account-v2', historyAccountKey(cookieKeyed)]), source: 'device',
+      windows: [{ id: legacyId, point: point(time, value, reset) }] }], at(12, 22, 35));
+  }
+  db.close();
+  const store = createLimitsHistoryStore(file, { now: () => at(12, 22, 46) });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const adopted = await store.query('local', userIdKeyed);
+  assert.deepEqual(adopted.windows[0].points.map(p => [p.at, p.value]),
+    [[at(12, 22, 29), 63.35], [at(12, 22, 34), 63.38]], 'the pre-rotation readings stay on the timeline');
+  await store.record('local', { providers: [userIdKeyed] });
+  const result = await store.query('local', userIdKeyed);
+  assert.deepEqual(result.windows[0].points.map(p => p.value), [63.35, 63.38, 63.44], 'later readings continue the adopted stream');
+  const inspect = new DatabaseSync(file, { readOnly: true });
+  try {
+    assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM history_adoptions WHERE legacy = ? AND canonical = ?')
+      .get(legacyId, canonicalId).n, 1);
+    // The legacy rows stay as a recovery archive; only their marker points at
+    // the canonical stream, so nothing is counted twice.
+    assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM streams WHERE id = ?').get(canonicalId).n, 1);
+    assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM runs WHERE stream = ?').get(legacyId).n, 2);
+  } finally { inspect.close(); }
+});

@@ -61,21 +61,39 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
       worker.postMessage({ id, method, args });
     });
   }
+  // A provider row can name one account by several keys: the key it reports
+  // now and the credential-derived keys that key replaced. Each alias is the
+  // id the same window was recorded under before the identity moved, so the
+  // alias resolves to the canonical stream instead of forking the history.
+  function identityVariants(provider) {
+    const aliases = [...new Set((Array.isArray(provider.accountKeyAliases) ? provider.accountKeyAliases : [])
+      .map(key => String(key || '').trim())
+      .filter(key => key && key !== provider.accountKey))];
+    return [provider, ...aliases.map(accountKey => ({ ...provider, accountKey, accountKeyAliases: [] }))];
+  }
   function adoptions(scope, providers) {
     const mappings = [];
     for (const provider of providers) {
       if (!portableHistoryAccount(provider)) continue;
-      for (const window of provider.windows || []) {
-        const { primary, raw } = historyReadings(window);
-        const readings = [primary, raw].filter(Boolean);
-        // Adopt the same percentage stream that record() will interrupt.
-        if (primary && ['credits', 'spend'].includes(window.metric) && primary.unit !== 'pp') readings.push({ unit: 'pp' });
-        for (const reading of readings) {
-          const scopes = [...new Set([scope, ...legacyScopes()])];
-          mappings.push({ id: windowId(scope, provider, window, reading), account: accountId(scope, provider),
-            legacy: scopes.map(old => windowId(old, provider, window, reading, true)),
-            sources: scopes.map(old => ({ id: windowId(old, provider, window, reading, true),
-              scope: digest(old) })) });
+      const scopes = [...new Set([scope, ...legacyScopes()])];
+      for (const identity of identityVariants(provider)) {
+        for (const window of provider.windows || []) {
+          const { primary, raw } = historyReadings(window);
+          const readings = [primary, raw].filter(Boolean);
+          // Adopt the same percentage stream that record() will interrupt.
+          if (primary && ['credits', 'spend'].includes(window.metric) && primary.unit !== 'pp') readings.push({ unit: 'pp' });
+          for (const reading of readings) {
+            mappings.push({ id: windowId(scope, provider, window, reading), account: accountId(scope, provider),
+              legacy: [
+                ...scopes.map(old => windowId(old, identity, window, reading, true)),
+                // An alias at the current scope is the account's own pre-alias
+                // stream: the one-way hash it was recorded under until the
+                // identity moved to the key the provider now reports.
+                ...(identity === provider ? [] : [windowId(scope, identity, window, reading)])
+              ],
+              sources: scopes.map(old => ({ id: windowId(old, identity, window, reading, true),
+                scope: digest(old) })) });
+          }
         }
       }
     }

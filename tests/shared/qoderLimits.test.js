@@ -336,3 +336,45 @@ for (const scenario of [
     }
   });
 }
+
+test('fetchQoderLimits keys the account by its server id across cookie rotations', async () => {
+  const { hashKey } = require('../../src/shared/hashKey');
+  const fetchWith = (cookie) => fetchQoderLimits({ qoderCookie: cookie }, {
+    env: {},
+    fetch: async (url) => {
+      if (url.includes('/organization-shared-usages/')) {
+        return new Response(JSON.stringify({ user_id: 'user-1', shared_quota: quota(10, 50, 40) }));
+      }
+      if (url.endsWith('/userplan')) return new Response(JSON.stringify({ plan_tier: 'PLAN_TIER_TEAMS' }));
+      return new Response(JSON.stringify({ user_id: 'user-1', total_quota: quota(25, 100, 75) }));
+    }
+  });
+  // Only the analytics/session part of the jar rotates on re-login; the account
+  // is the same, so its history streams have to stay the same as well.
+  const first = await fetchWith('qoderuid=user-1; qoder_session_cookie=first-session');
+  const second = await fetchWith('qoderuid=user-1; qoder_session_cookie=second-session');
+  assert.equal(first.accountKey, hashKey('qoder', 'user:user-1'));
+  assert.equal(second.accountKey, first.accountKey);
+  assert.deepEqual(first.accountKeyAliases, [hashKey('qoder', 'qoderuid=user-1; qoder_session_cookie=first-session')]);
+  assert.deepEqual(second.accountKeyAliases, [hashKey('qoder', 'qoderuid=user-1; qoder_session_cookie=second-session')]);
+});
+
+test('fetchQoderLimits falls back to the cookie id, then to the cookie hash', async () => {
+  const { hashKey } = require('../../src/shared/hashKey');
+  const fetchWith = (cookie, body) => fetchQoderLimits({ qoderCookie: cookie }, {
+    env: {},
+    fetch: async (url) => {
+      if (url.includes('/organization-shared-usages/')) return new Response(null, { status: 404 });
+      if (url.endsWith('/userplan')) return new Response(JSON.stringify({}));
+      return new Response(JSON.stringify({ ...body, total_quota: quota(25, 100, 75) }));
+    }
+  });
+  // A payload without the id still leaves the cookie's own qoderuid.
+  const cookieOnly = await fetchWith('qoderuid=user-2; qoder_visitor_id=visitor', {});
+  assert.equal(cookieOnly.accountKey, hashKey('qoder', 'user:user-2'));
+  assert.deepEqual(cookieOnly.accountKeyAliases, [hashKey('qoder', 'qoderuid=user-2; qoder_visitor_id=visitor')]);
+  // Without either, the whole cookie stays the identity: the historical shape.
+  const bare = await fetchWith('qoder_session_cookie=only-session', {});
+  assert.equal(bare.accountKey, hashKey('qoder', 'qoder_session_cookie=only-session'));
+  assert.equal(Object.hasOwn(bare, 'accountKeyAliases'), false);
+});
