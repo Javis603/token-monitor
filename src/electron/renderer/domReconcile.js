@@ -23,17 +23,27 @@
     const resolve = node => retainedNodes.get(node) || node;
     const attributes = node => new Map(Array.from(node.attributes, attr => [attr.name, attr.value]));
     const styles = node => new Map(Array.from(node.style || [], name => [name, [node.style.getPropertyValue(name), node.style.getPropertyPriority(name)]]));
+    function describe(node) {
+      let record = rendered.get(node);
+      if (record) return record;
+      const attrs = attributes(node);
+      // Read identity from the same renderer snapshot as the diff, rather than
+      // repeatedly crossing into live dataset/classList getters for each child.
+      const identity = attrs.get('data-key') ?? attrs.get('data-exchange-key') ?? attrs.get('data-focus-key') ?? attrs.get('data-limit-motion-key') ?? attrs.get('data-usage-item') ?? attrs.get('data-d') ?? (attrs.get('id') || undefined);
+      const slot = (attrs.get('class') || '').trim().split(/\s+/, 1)[0];
+      const key = `${node.namespaceURI}:${node.localName}:${identity === undefined ? `slot:${slot}` : `key:${identity}`}:${attrs.get('data-dom-kind') || ''}:${attrs.get('data-limit-history') || ''}`;
+      record = { attributes: attrs, styles: styles(node), children: [...node.childNodes], key };
+      rendered.set(node, record);
+      return record;
+    }
     function remember(node) {
-      if (node.nodeType === 1) rendered.set(node, { attributes: attributes(node), styles: styles(node), children: [...node.childNodes] });
+      if (node.nodeType === 1) describe(node);
       node.childNodes.forEach(remember);
       return node;
     }
     function key(node) {
       if (node.nodeType !== 1) return `#${node.nodeType}`;
-      // Explicit keys identify changing lists; the first class identifies fixed
-      // structural slots, independently of optional siblings or runtime classes.
-      const identity = node.dataset.key ?? node.dataset.exchangeKey ?? node.dataset.focusKey ?? node.dataset.limitMotionKey ?? node.dataset.usageItem ?? node.dataset.d ?? (node.id || undefined);
-      return `${node.namespaceURI}:${node.localName}:${identity === undefined ? `slot:${node.classList[0] || ''}` : `key:${identity}`}:${node.dataset.domKind || ''}:${node.dataset.limitHistory || ''}`;
+      return describe(node).key;
     }
     function patch(current, next) {
       if (current === next) return current;
@@ -44,7 +54,8 @@
       retainedNodes.set(next, current);
       if (renderData.has(next)) renderData.set(current, renderData.get(next));
       const previous = rendered.get(current);
-      const nextAttributes = attributes(next), nextStyles = styles(next);
+      const nextRecord = describe(next);
+      const nextAttributes = nextRecord.attributes, nextStyles = nextRecord.styles;
       for (const name of new Set([...previous.attributes.keys(), ...nextAttributes.keys()])) {
         const before = previous.attributes.get(name), after = nextAttributes.get(name);
         if (before === after || name === 'style') continue;
@@ -62,8 +73,8 @@
         if (after) current.style.setProperty(name, ...after);
         else current.style.removeProperty(name);
       }
-      const children = reconcileChildren(current, [...next.childNodes]);
-      rendered.set(current, { attributes: nextAttributes, styles: nextStyles, children });
+      const children = reconcileChildren(current, nextRecord.children);
+      rendered.set(current, { ...nextRecord, children });
       return current;
     }
     function placeChildren(current, children, previous = [...current.childNodes]) {
