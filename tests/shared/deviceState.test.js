@@ -4,6 +4,8 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 
 const { createDeviceState } = require('../../src/shared/usage/deviceState');
+const { seedWithColdPreview } = require('../../src/shared/anchorSeed');
+const { isPeriodExpired } = require('../../src/shared/usage');
 
 function usage(updatedAt = '2026-07-21T01:00:00.000Z', extra = {}) {
   return {
@@ -158,6 +160,45 @@ test('partial usage previews carry broader periods and optional usage state', ()
   assert.equal(preview.wslStatus.state, 'active');
   assert.equal(preview.periodWindows.today.endsAt, '2026-07-22T00:00:00.000Z');
   assert.equal(preview.allTimeProjectsIncomplete, true);
+});
+
+test('a partial preview applies its windows only to the periods it carries', () => {
+  // Across a month boundary the Today-stage preview brings the new month's
+  // windows while Month is still last month's total.
+  const october = {
+    timeZone: 'UTC',
+    today: { key: '2026-10-31', endsAt: '2026-11-01T00:00:00.000Z' },
+    month: { key: '2026-10', endsAt: '2026-11-01T00:00:00.000Z' }
+  };
+  const november = {
+    timeZone: 'UTC',
+    today: { key: '2026-11-01', endsAt: '2026-11-02T00:00:00.000Z' },
+    month: { key: '2026-11', endsAt: '2026-12-01T00:00:00.000Z' }
+  };
+  const state = createDeviceState();
+  state.updateUsage(usage('2026-10-31T23:00:00.000Z', { periodWindows: october }), 'interval');
+  const preview = state.updateUsage({ updatedAt: '2026-11-01T00:00:05.000Z', periodWindows: november, today: { totalTokens: 3 } }, 'progress', { preview: true });
+  assert.equal(preview.today.totalTokens, 3);
+  assert.deepEqual(preview.periodWindows.today, november.today);
+  assert.equal(preview.month.totalTokens, 20);
+  assert.deepEqual(preview.periodWindows.month, october.month, 'the carried Month keeps its own window');
+
+  const monthStage = state.updateUsage({ updatedAt: '2026-11-01T00:00:20.000Z', periodWindows: november, today: { totalTokens: 3 }, month: { totalTokens: 3 } }, 'progress', { preview: true });
+  assert.deepEqual(monthStage.periodWindows.month, november.month);
+});
+
+test('a cold Today preview keeps its scan window when limits land after midnight', () => {
+  const cold = [];
+  const state = createDeviceState({ onColdPreview: (record) => cold.push(record) });
+  const windows = { timeZone: 'UTC', today: { key: '2026-11-12', endsAt: '2026-11-13T00:00:00.000Z' } };
+  state.updateUsage({ updatedAt: '2026-11-12T23:59:55.000Z', periodWindows: windows, today: { totalTokens: 250 } }, 'progress', { preview: true });
+  state.updateLimits(limits('2026-11-13T00:00:05.000Z'));
+  assert.equal(cold.length, 2);
+  assert.deepEqual(cold[1].periodWindows.today, windows.today, 'the observer can tell the usage belongs to the scan day');
+  // Shown after midnight, yesterday's 250 tokens are an ended Today, not today's.
+  const now = new Date('2026-11-13T00:00:05.000Z');
+  const shown = seedWithColdPreview({ deviceId: 'seed', periodWindows: {} }, cold[1], now);
+  assert.equal(isPeriodExpired(shown, 'today', now.getTime()), true);
 });
 
 test('cold-start partial previews wait for a complete usage baseline', () => {

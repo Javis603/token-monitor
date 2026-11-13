@@ -73,6 +73,16 @@ function mergeUsagePart(previous, incoming) {
 
   const partial = !hasOwn(next, 'month') || !hasOwn(next, 'allTime');
   if (partial) {
+    // A carried period keeps the window it was collected under; only the
+    // periods this update scanned take its windows. Otherwise last month's
+    // total would read as this month's after a month boundary.
+    if (hasOwn(next, 'periodWindows') && hasOwn(previous, 'periodWindows')) {
+      const windows = { ...previous.periodWindows };
+      for (const period of ['today', 'month', 'allTime']) {
+        if (hasOwn(next, period) && next.periodWindows?.[period]) windows[period] = next.periodWindows[period];
+      }
+      next.periodWindows = windows;
+    }
     for (const field of PARTIAL_USAGE_CARRY_FIELDS) {
       if (!hasOwn(next, field) && hasOwn(previous, field)) {
         next[field] = previous[field];

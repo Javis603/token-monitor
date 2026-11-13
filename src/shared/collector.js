@@ -3208,10 +3208,9 @@ function startCollector(options) {
                 ...(deviceOsInfo.version ? { osVersion: deviceOsInfo.version } : {}),
                 updatedAt: partial.updatedAt,
                 // The scan's own windows, fixed at its start, so a scan that runs
-                // past midnight still reports the day it collected. Only once Month
-                // is scanned: before that, a warm preview carries the previous
-                // Month, which must keep the previous window.
-                ...(partial.periodWindows && partial.month ? { periodWindows: partial.periodWindows } : {}),
+                // past midnight still reports the day it collected. DeviceState
+                // applies them only to the periods this preview carries.
+                ...(partial.periodWindows ? { periodWindows: partial.periodWindows } : {}),
                 agentVersion, agentRuntime,
                 trackedClients: (clients || '').split(',').filter(Boolean),
                 // Merge the frozen WSL snapshot into today (as month/allTime do
