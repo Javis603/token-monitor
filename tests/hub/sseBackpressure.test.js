@@ -7,6 +7,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { Writable } = require('node:stream');
 const { createHub } = require('../../src/hub/server');
+const { SSE_BACKLOG_LIMIT_BYTES, createStatsStreamReceiver } = require('../../src/shared/hubProtocol');
 
 class SlowResponse extends Writable {
   constructor(blocked = false) {
@@ -75,55 +76,84 @@ function event(frame) {
   return JSON.parse(frame.match(/^data: (.+)$/m)[1]);
 }
 
-test('a blocked initial snapshot bounds the writable queue and catches up with the latest full stats', async (t) => {
-  const { hub, open, publish } = fixture(t);
-  publish(1);
-  const slow = open(true);
-  const fast = open();
-  const initialBytes = slow.writableLength;
-  assert.equal(slow.writableNeedDrain, true);
+function frameType(frame) {
+  return frame.match(/^event: (\w+)$/m)[1];
+}
 
-  publish(2);
-  publish(2);
-  publish(3);
-  publish(3);
+// Replays a connection's frames the way a widget does; every frame must apply.
+function decode(writes) {
+  const receiver = createStatsStreamReceiver();
+  let stats;
+  for (const frame of writes.filter((write) => write.startsWith('event: '))) stats = receiver.receive(frameType(frame), event(frame));
+  return stats;
+}
 
-  assert.deepEqual(fast.writes.map((frame) => event(frame).type), ['stats', 'stats', 'freshness', 'stats', 'freshness']);
-  assert.equal(slow.writes.length, 1);
-  assert.equal(slow.writableLength, initialBytes);
+// Each model entry adds about 40 bytes to a full stats frame.
+function padding(bytes) {
+  const models = {};
+  for (let index = 0; index * 40 < bytes; index += 1) models[`padding-${String(index).padStart(6, '0')}`] = { totalTokens: 1 };
+  return { deviceId: 'padding', today: { totalTokens: 1, models } };
+}
 
-  await slow.release();
-  assert.equal(slow.writes.length, 2);
-  assert.match(slow.writes[1], /^event: stats\n/);
-  assert.deepEqual(event(slow.writes[1]).stats, JSON.parse(JSON.stringify(hub.getStats())));
-  assert.equal(fast.writes.length, 5);
+for (const version of ['3', '4']) {
+  test(`stream v${version}: idle updates queue behind a large in-flight snapshot instead of forcing another`, async (t) => {
+    const { hub, open, publish } = fixture(t);
+    hub.ingest(padding(SSE_BACKLOG_LIMIT_BYTES * 1.25));
+    publish(1);
+    const res = open(true, version);
+    assert.ok(res.writableLength > SSE_BACKLOG_LIMIT_BYTES);
 
-  publish(4);
-  assert.equal(slow.writes.length, 3);
-  assert.equal(event(slow.writes[2]).stats.periods.today.totalTokens, 4);
-});
+    // Timestamp-only uploads, as from idle collectors while the snapshot drains.
+    for (let index = 0; index < 8; index += 1) publish(1);
+    if (version === '4') publish(2);
 
-test('backpressure on a later stats frame also coalesces updates until drain', async (t) => {
-  const { hub, open, publish } = fixture(t);
-  publish(1);
-  const res = open();
-  res.blocked = true;
-  publish(2);
-  const bufferedBytes = res.writableLength;
-  assert.equal(res.writableNeedDrain, true);
+    const queued = res.writes.slice(1).map(frameType);
+    assert.deepEqual(queued.slice(0, 8), Array(8).fill('freshness'));
+    if (version === '4') assert.deepEqual(queued.slice(8), ['delta']);
+    assert.ok(res.writableLength < res.writes[0].length + SSE_BACKLOG_LIMIT_BYTES);
 
-  publish(2);
-  publish(3);
-  assert.equal(res.writes.length, 2);
-  assert.equal(res.writableLength, bufferedBytes);
+    const written = res.writes.length;
+    await res.release();
+    assert.equal(res.writes.length, written, 'a connection that skipped nothing needs no resync');
+    assert.deepEqual(decode(res.writes), JSON.parse(JSON.stringify(hub.getStats())));
+  });
 
-  await res.release();
-  assert.equal(res.writes.length, 3);
-  assert.match(res.writes[2], /^event: stats\n/);
-  assert.deepEqual(event(res.writes[2]).stats, JSON.parse(JSON.stringify(hub.getStats())));
-});
+  test(`stream v${version}: a backlog past the budget is coalesced into one resync that later updates build on`, async (t) => {
+    const { hub, open, publish } = fixture(t);
+    hub.ingest(padding(SSE_BACKLOG_LIMIT_BYTES * 0.6));
+    for (const deviceId of ['x1', 'x2', 'x3']) hub.ingest({ deviceId, today: { totalTokens: 1 } });
+    publish(1);
+    const res = open(false, version);
+    await new Promise(setImmediate);
+    res.blocked = true;
 
-test('drain restores device deletions and subscription revisions made while blocked', async (t) => {
+    // Device deletion always sends a complete stats frame.
+    hub.deleteDevice('x1');
+    const limit = res.writableLength + SSE_BACKLOG_LIMIT_BYTES;
+    hub.deleteDevice('x2');
+    hub.deleteDevice('x3');
+    publish(2);
+    assert.deepEqual(res.writes.map(frameType), ['snapshot', 'stats', 'stats']);
+    assert.ok(res.writableLength <= limit);
+
+    await res.release();
+    assert.equal(res.writes.length, 4);
+    const resync = event(res.writes[3]);
+    assert.equal(frameType(res.writes[3]), 'stats');
+    assert.equal(Number.isSafeInteger(resync.revision), version === '4');
+    assert.deepEqual(resync.stats.devices.map((device) => device.deviceId).sort(), ['a', 'padding']);
+    assert.equal(resync.stats.periods.today.totalTokens, 3);
+
+    publish(2);
+    assert.equal(frameType(res.writes[4]), 'freshness');
+    if (version === '4') assert.equal(event(res.writes[4]).baseRevision, resync.revision);
+    publish(3);
+    assert.equal(frameType(res.writes[5]), version === '4' ? 'delta' : 'stats');
+    assert.deepEqual(decode(res.writes), JSON.parse(JSON.stringify(hub.getStats())));
+  });
+}
+
+test('updates queued while blocked carry device deletions and subscription revisions in order', async (t) => {
   const { hub, open, publish } = fixture(t);
   publish(1);
   const res = open(true);
@@ -131,11 +161,9 @@ test('drain restores device deletions and subscription revisions made while bloc
   hub.deleteDevice('a');
   const subscriptions = hub.setSubscriptions([], '');
   assert.notEqual(subscriptions.updatedAt, '');
-  assert.equal(res.writes.length, 1);
 
   await res.release();
-  assert.equal(res.writes.length, 2);
-  const stats = event(res.writes[1]).stats;
+  const stats = decode(res.writes);
   assert.deepEqual(stats.devices.map((device) => device.deviceId), ['b']);
   assert.equal(stats.periods.today.totalTokens, 9);
   assert.equal(stats.subscriptionsUpdatedAt, subscriptions.updatedAt);
@@ -151,7 +179,7 @@ test('draining an accepted snapshot without newer stats does not send it twice',
   assert.equal(res.writes.length, 2);
 });
 
-test('heartbeats respect backpressure and a blocked heartbeat can catch up with full stats', async (t) => {
+test('heartbeats respect backpressure while updates queue behind a blocked heartbeat', async (t) => {
   const { hub, open, publish } = fixture(t);
   publish(1);
   const res = open();
@@ -159,20 +187,18 @@ test('heartbeats respect backpressure and a blocked heartbeat can catch up with 
   t.mock.timers.tick(30000);
   assert.equal(res.writes[1], ': hb\n\n');
   assert.equal(res.writableNeedDrain, true);
-  const bufferedBytes = res.writableLength;
 
   t.mock.timers.tick(60000);
+  assert.equal(res.writes.length, 2, 'heartbeats do not accumulate behind a blocked write');
   publish(2);
   publish(2);
-  assert.equal(res.writes.length, 2);
-  assert.equal(res.writableLength, bufferedBytes);
+  assert.deepEqual(res.writes.slice(2).map(frameType), ['stats', 'freshness']);
 
   await res.release();
-  assert.equal(res.writes.length, 3);
-  assert.match(res.writes[2], /^event: stats\n/);
-  assert.deepEqual(event(res.writes[2]).stats, JSON.parse(JSON.stringify(hub.getStats())));
+  assert.equal(res.writes.length, 4);
+  assert.deepEqual(decode(res.writes), JSON.parse(JSON.stringify(hub.getStats())));
   t.mock.timers.tick(30000);
-  assert.equal(res.writes[3], ': hb\n\n');
+  assert.equal(res.writes[4], ': hb\n\n');
 });
 
 test('a throwing initial write leaves no heartbeat or drain work', async (t) => {
@@ -210,32 +236,3 @@ for (const reason of ['close', 'error', 'stop']) {
     assert.equal(res.writes.length, writes);
   });
 }
-
-
-test('v4 drain sends a full resync before resuming a revisioned delta chain', async (t) => {
-  const { createStatsStreamReceiver } = require('../../src/shared/hubProtocol');
-  const { hub, open, publish } = fixture(t);
-  publish(1);
-  // Make patches smaller than full snapshots without relying on timing fields.
-  hub.ingest({ deviceId: 'padding', today: {totalTokens: 1, sessions: Object.fromEntries(Array.from({length:100},(_,i)=>['s'+i,{totalTokens:1}]))} });
-  const res = open(false, '4');
-  const receiver = createStatsStreamReceiver();
-  publish(2);
-  res.blocked = true;
-  publish(3);
-  publish(4);
-  publish(5);
-  await res.release();
-  assert.match(res.writes.at(-1), /^event: stats/);
-  // A catch-up snapshot has no shared base revision. Bootstrap it before deltas.
-  publish(6);
-  assert.match(res.writes.at(-1), /^event: stats/);
-  publish(7);
-  assert.match(res.writes.at(-1), /^event: delta/);
-  let last;
-  for (const frame of res.writes) {
-    const type = frame.match(/^event: (.+)$/m)[1];
-    last = receiver.receive(type, event(frame));
-  }
-  assert.equal(last.periods.today.totalTokens, 8);
-});

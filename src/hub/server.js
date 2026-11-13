@@ -24,6 +24,7 @@ const {
 const { CURRENCY_CODES, normalizeCurrency } = require('../shared/currency');
 const { currentHubBuild } = require('../shared/hubBuildIdentity');
 const {
+  SSE_BACKLOG_LIMIT_BYTES,
   encodeSseEvent,
   prepareSseFanout,
   sseClientKinds,
@@ -150,15 +151,19 @@ function createHub({
   let lastSseStats = null;
   let streamRevision = 0;
 
+  // Once write() reports backpressure, later frames still queue in order behind
+  // the frame in flight, up to SSE_BACKLOG_LIMIT_BYTES. Past that budget the
+  // connection skips frames and resyncs once its transport drains.
   function writeSseFrame(client, frame) {
     if (!frame) return false;
-    if (client.blocked) {
+    if (client.blocked && (client.needsSnapshot || client.res.writableLength + frame.length > client.backlogLimit)) {
       client.needsSnapshot = true;
       return false;
     }
     try {
-      if (client.res.write(frame) === false) {
+      if (client.res.write(frame) === false && !client.blocked) {
         client.blocked = true;
+        client.backlogLimit = client.res.writableLength + SSE_BACKLOG_LIMIT_BYTES;
         client.res.once('drain', client.onDrain);
       }
       return true;
@@ -450,7 +455,7 @@ function createHub({
         'connection': 'keep-alive',
         'x-accel-buffering': 'no'
       });
-      const client = { res, freshnessEvents: wantsFreshnessEvents(req), deltaEvents: wantsDeltaEvents(req), streamRevision: null, blocked: false, needsSnapshot: false };
+      const client = { res, freshnessEvents: wantsFreshnessEvents(req), deltaEvents: wantsDeltaEvents(req), streamRevision: null, blocked: false, backlogLimit: 0, needsSnapshot: false };
       let heartbeat = null;
       client.cleanup = () => {
         clearInterval(heartbeat);
@@ -467,12 +472,14 @@ function createHub({
         client.blocked = false;
         if (!client.needsSnapshot) return;
         client.needsSnapshot = false;
-        // A skipped frame invalidates both freshness and delta baselines.
+        // Resync to the baseline the last fan-out established, so the next
+        // update resumes with freshness or delta frames, not another snapshot.
         client.streamRevision = null;
         try {
-          writeSseFrame(client, encodeSseEvent('stats', {
-            type: 'stats', reason: 'snapshot', stats: getStats(), at: new Date().toISOString()
-          }));
+          if (writeSseFrame(client, encodeSseEvent('stats', {
+            type: 'stats', reason: 'snapshot', stats: lastSseStats, at: new Date().toISOString(),
+            ...(client.deltaEvents ? { revision: streamRevision } : {})
+          })) && client.deltaEvents) client.streamRevision = streamRevision;
         } catch (_) { client.cleanup(); }
       };
       res.on('close', client.cleanup);

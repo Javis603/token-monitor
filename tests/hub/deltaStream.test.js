@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { createHub } = require('../../src/hub/server');
-const { createStatsStreamReceiver } = require('../../src/shared/hubProtocol');
+const { SSE_BACKLOG_LIMIT_BYTES, createStatsStreamReceiver } = require('../../src/shared/hubProtocol');
 const { createSseBlockReader, parseSseBlock } = require('../../src/electron/sseEventReader');
 
 const json = value => JSON.parse(JSON.stringify(value));
@@ -80,27 +80,33 @@ for(const kind of ['Node','Worker']){
   });
 }
 
-test('Worker bounds unread writes, skips heartbeat backlog, and recovers with a full latest snapshot',async t=>{
+test('Worker queues small frames behind a slow write and coalesces a backlog past the budget into a revisioned resync',async t=>{
   const worker=await import(pathToFileURL(path.resolve(__dirname,'../../worker/src/index.js')).href);
   const hub=new worker.HubDO(fakeState(),{TOKEN_MONITOR_SECRET:'shh'});
-  let latest=record(1);const snapshot=n=>({periods:{today:{totalTokens:n}},devices:[],note:'long '.repeat(1000)});
-  hub.statsWithSubscriptionVersion=async()=>snapshot(latest.today.totalTokens);
-  let release;const slowWrites=[];const fastWrites=[];
-  const slow={deltaEvents:true,freshnessEvents:true,streamRevision:null,writer:{write(chunk){slowWrites.push(new TextDecoder().decode(chunk));return new Promise(resolve=>{release=resolve;});},abort(){}}};
+  let latest=1;const note='x'.repeat(Math.ceil(SSE_BACKLOG_LIMIT_BYTES*0.6));
+  hub.statsWithSubscriptionVersion=async()=>({periods:{today:{totalTokens:latest}},devices:[],note});
+  const pending=[];const slowWrites=[];const fastWrites=[];
+  const slow={deltaEvents:true,freshnessEvents:true,streamRevision:null,writer:{write(chunk){slowWrites.push(new TextDecoder().decode(chunk));return new Promise(resolve=>{pending.push(resolve);});},abort(){}}};
   const fast={deltaEvents:true,freshnessEvents:true,streamRevision:null,writer:{write(chunk){fastWrites.push(new TextDecoder().decode(chunk));return Promise.resolve();},abort(){}}};
+  const releaseAll=async()=>{while(pending.length){pending.shift()();await flush();}};
   hub.sseClients.add(slow);hub.sseClients.add(fast);
-  t.after(()=>{for(const c of [...hub.sseClients])hub.dropClient(c);release?.();});
+  t.after(async()=>{for(const c of [...hub.sseClients])hub.dropClient(c);await releaseAll();});
+  // A large first frame stays unresolved while small deltas queue behind it.
   await hub.flushBroadcast();await flush();
-  for(let n=2;n<=30;n++){latest=record(n);await hub.flushBroadcast();await flush();}
-  assert.equal(slowWrites.length,1);assert.equal(slow.needsSnapshot,true);
-  assert.equal(fastWrites.length,30);assert.match(fastWrites.at(-1),/^event: delta/);
-  release();await flush();await flush();
-  assert.equal(slowWrites.length,2);assert.match(slowWrites[1],/^event: stats/);
-  assert.equal(JSON.parse(slowWrites[1].split('data: ')[1]).stats.periods.today.totalTokens,30);
-  release();await flush();latest=record(31);await hub.flushBroadcast();await flush();
-  assert.equal(slowWrites.length,3);assert.match(slowWrites[2],/^event: stats/);
-  release();await flush();latest=record(32);await hub.flushBroadcast();await flush();
-  assert.match(slowWrites[3],/^event: delta/);
+  for(let n=2;n<=30;n++){latest=n;await hub.flushBroadcast();await flush();}
+  assert.equal(slowWrites.length,30);assert.ok(slowWrites.slice(1).every(frame=>frame.startsWith('event: delta')));
+  await releaseAll();assert.equal(slowWrites.length,30,'a connection that skipped nothing needs no resync');
+  // Complete frames past the budget are skipped and coalesced.
+  for(let n=0;n<3;n++){await hub.broadcast('subscriptions');await flush();}
+  latest=31;await hub.flushBroadcast();await flush();
+  assert.equal(slowWrites.length,32);assert.equal(slow.needsSnapshot,true);assert.equal(fastWrites.length,34);
+  await releaseAll();
+  assert.equal(slowWrites.length,33);
+  const resync=parseSseBlock(slowWrites[32]);
+  assert.equal(resync.event,'stats');assert.equal(resync.data.stats.periods.today.totalTokens,31);assert.equal(resync.data.revision,hub.streamRevision);
+  latest=32;await hub.flushBroadcast();await flush();
+  assert.match(slowWrites[33],/^event: delta/);
+  await releaseAll();
   const r=createStatsStreamReceiver();let decoded;
   for(const frame of slowWrites){const e=parseSseBlock(frame);decoded=r.receive(e.event,e.data);}
   assert.equal(decoded.periods.today.totalTokens,32);
