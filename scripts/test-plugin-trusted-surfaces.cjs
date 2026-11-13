@@ -111,7 +111,7 @@ app.whenReady().then(async () => {
     quota.sessions = Array.from({ length: 12 }, (_, index) => ({ key: `codex:quota-session-${index}`, client: 'codex', sessionId: `quota-session-${index}`,
       title: `Quota session ${index}`, totalTokens: 100, lastUsedAt: new Date().toISOString(), models: { 'gpt-5': 100 } }));
     for (const kind of ['bubble', 'notch']) {
-      const payload = payloads.get(kind); payload.appearance = { ...appearance, reduceMotion: 'on' };
+      const payload = payloads.get(kind); payload.appearance = { ...appearance, reduceMotion: kind === 'bubble' ? 'off' : 'on' };
       if (kind === 'bubble') { payload.cell = structuredClone(quota); delete payload.placed; }
       else payload.cells = [structuredClone(quota), { id: 'stat:today', available: true, totalTokens: 100, clients: [], models: [] }, { id: 'stat:sessions', sessions: [] }];
       const win = windows.get(kind); win.focus(); push(kind);

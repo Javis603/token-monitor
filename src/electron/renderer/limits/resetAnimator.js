@@ -13,8 +13,9 @@
   const GLOW_LEAD_MS = 252;
 
   // One animator per surface that renders limit-window rows. capture() reads
-  // the outgoing DOM before a rebuild, animate() replays real refills — and
-  // carries in-flight ones — on the new nodes, and settle() snaps every
+  // the outgoing DOM and cancels its effects before an update, animate()
+  // starts real refills and explicitly resumes unchanged in-flight ones,
+  // and settle() snaps every
   // running effect to its end state (reduced-motion toggles, teardown). The
   // widget's limits panel and the edge dock's bubble card each own one so
   // this DOM stays the only way either surface plays a reset.
@@ -125,12 +126,19 @@
       for (const row of scope?.querySelectorAll('.limit-row[data-limit-motion-key]') || []) {
         for (const item of row.querySelectorAll('.limit-window[data-limit-motion-key]')) {
           const key = `${row.dataset.limitMotionKey}\0${item.dataset.limitMotionKey}`;
+          const fill = item.querySelector('.limit-meter-fill');
           const entry = {
             remainingPercent: item.dataset.limitRemainingPercent,
             displayPercent: item.dataset.limitDisplayPercent,
             resetsAt: item.dataset.limitResetAt,
-            motion: fillMotions.get(item.querySelector('.limit-meter-fill'))
+            motion: fillMotions.get(fill)
           };
+          fillMotions.delete(fill);
+          for (const animation of fill?.getAnimations({ subtree: true }) || []) animation.cancel();
+          const value = item.querySelector('[data-limit-motion-value]');
+          const number = numberAnimations.get(value);
+          if (number) cancelAnimationFrame(number.handle);
+          numberAnimations.delete(value);
           // Ambiguous identities are safer left static than animated on the
           // wrong row.
           snapshot.set(key, snapshot.has(key) ? null : entry);
@@ -154,9 +162,9 @@
           if (!previous) continue;
           const fill = item.querySelector('.limit-meter-fill');
           const active = previous.motion;
-          // A stats refresh replaces these nodes even when only updatedAt
-          // changes. Carry the original timeline across that replacement,
-          // including its glow.
+          // Unchanged readings resume their original timeline, including the
+          // glow. Copy ownership so an older queued start cannot also run on
+          // the same retained fill.
           if (
             active
             && fill
@@ -165,7 +173,7 @@
             && previous.resetsAt === current.resetsAt
             && (active.startedAt === null || performance.now() - active.startedAt < active.duration + GLOW_MS - GLOW_LEAD_MS)
           ) {
-            motions.push({ fill, item, motion: active });
+            motions.push({ fill, item, motion: { ...active } });
             continue;
           }
           if (!motion.shouldAnimateReset(previous, current)) continue;
@@ -197,7 +205,7 @@
         fillMotions.set(fill, motion);
       }
       function startMotion({ fill, item, motion }, now) {
-        if (!fill.isConnected || !item.isConnected || prefersReducedMotion()) return;
+        if (!fill.isConnected || !item.isConnected || prefersReducedMotion() || fillMotions.get(fill) !== motion) return;
         if (motion.startedAt === null) motion.startedAt = now;
         const { from, to, duration, startedAt } = motion;
         animateFillBetween(fill, from / 100, to / 100, duration, startedAt);

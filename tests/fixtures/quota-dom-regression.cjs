@@ -38,6 +38,22 @@
     if (tooltip) assert(tooltip.matches(':popover-open'), 'Dock quota tooltip stays open');
     lists.forEach((list, index) => assert(list.scrollTop === positions[index], `${surface} nested scroll retained: ${JSON.stringify({index, before:positions[index], after:list.scrollTop, height:list.clientHeight, extent:list.scrollHeight, connected:list.isConnected})}`));
   }
+  if (surface === 'bubble') {
+    const quota = records[0].record.windows[0];
+    const publishQuota = (remaining, resetsAt) => {
+      Object.assign(quota, { remainingPercent: remaining, usedPercent: 100 - remaining, resetsAt }); render(payload);
+    };
+    publishQuota(5, '2026-11-12T00:00:00Z'); await settle();
+    const value = account.querySelector('[data-limit-motion-value]'), fill = account.querySelector('.limit-meter-fill');
+    publishQuota(100, '2026-11-13T00:00:00Z'); await settle();
+    assert(fill.getAnimations().some(animation => !('animationName' in animation) && !('transitionProperty' in animation)), 'Dock quota refill really starts');
+    publishQuota(20, quota.resetsAt);
+    const expected = value.textContent;
+    assert(account.querySelector('[data-limit-motion-value]') === value && account.querySelector('.limit-meter-fill') === fill, 'Dock retains animated quota nodes');
+    assert(!fill.getAnimations({ subtree: true }).some(animation => !('animationName' in animation) && !('transitionProperty' in animation)), 'Dock cancels superseded fill and glow');
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    assert(value.textContent === expected && value.dataset.limitMotionValue === '20', 'Dock superseded quota refill cannot overwrite the fresh reading');
+  }
   if (surface === 'notch') {
     const before = focus.textContent; focus.click(); await settle();
     assert(focus.textContent !== before, 'retained quota page button advances');

@@ -1,4 +1,4 @@
-/* global state, els, renderLimits, renderTrends, renderSessionDetail, renderRows, updateRow, sessionRowsForPeriod, renderSessionGroupDetail, sessionRowsApi, document, PointerEvent */
+/* global state, els, renderLimits, renderTrends, renderSessionDetail, renderRows, updateRow, sessionRowsForPeriod, renderSessionGroupDetail, sessionRowsApi, document, PointerEvent, requestAnimationFrame */
 'use strict';
 (async () => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -25,6 +25,28 @@
     assert(limitRow.querySelector('.limit-refresh-button') === refreshButton, 'refresh button retained');
     assert(window.TokenMonitorDomReconcile.data(refreshButton).accountLabel === `Updated ${i}`, 'retained refresh button receives current provider DTO');
   }
+  const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  state.settings.reduceMotion = 'off'; state.settings.showLimitUsed = false;
+  const quota = record.windows[0];
+  const publishQuota = (remaining, resetsAt) => {
+    Object.assign(quota, { remainingPercent: remaining, usedPercent: 100 - remaining, resetsAt });
+    state.stats.limits.providers = [record]; renderLimits();
+  };
+  publishQuota(5, '2026-11-12T00:00:00Z');
+  const quotaValue = limitRow.querySelector('[data-limit-motion-value]'), quotaFill = limitRow.querySelector('.limit-meter-fill');
+  for (const switchMode of [false, true]) {
+    publishQuota(100, switchMode ? '2026-11-14T00:00:00Z' : '2026-11-13T00:00:00Z'); await settle();
+    assert(quotaFill.getAnimations().some(animation => !('animationName' in animation) && !('transitionProperty' in animation)), 'App refill really starts');
+    if (switchMode) state.settings.showLimitUsed = true;
+    publishQuota(switchMode ? 100 : 20, quota.resetsAt);
+    const expected = quotaValue.textContent;
+    assert(limitRow.querySelector('[data-limit-motion-value]') === quotaValue && limitRow.querySelector('.limit-meter-fill') === quotaFill, 'App retains animated quota nodes');
+    assert(quotaValue.dataset.limitMotionValue === (switchMode ? '0' : '20'), 'App commits the new quota presentation');
+    assert(!quotaFill.getAnimations({ subtree: true }).some(animation => !('animationName' in animation) && !('transitionProperty' in animation)), 'App cancels superseded fill and glow');
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    assert(quotaValue.textContent === expected, 'App superseded quota animation cannot overwrite a fresh reading or mode');
+  }
+  state.settings.reduceMotion = 'on'; state.settings.showLimitUsed = false;
   state.settings.limitsHistoryOpenMode = 'hover'; state.settings.limitProviders = ['mimo'];
   const mimo = { provider: 'mimo', status: 'ok', accountKey: 'mimo-dom', windows: [{ kind: 'weekly', remainingPercent: 75, usedPercent: 25 }] };
   state.stats.limits.providers = [mimo]; renderLimits();
