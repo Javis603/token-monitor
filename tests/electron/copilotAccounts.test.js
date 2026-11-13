@@ -25,11 +25,49 @@ function fixture(initial = {}, env = {}) {
   return { api, settings, fetch, requests, failSave: () => { failSave = true; } };
 }
 
+test('Copilot account mutations never probe a legacy token without a recorded host', async () => {
+  const token = ['personal', 'legacy', 'fixture'].join('-');
+  for (const copilotProfiles of [undefined, { legacy: { token, enabled: true } }]) {
+    const f = fixture({ copilotApiToken: token, copilotProfiles, copilotEnterpriseHost: 'new.ghe.com' });
+    for (const nextToken of ['work-first-token', 'work-second-token']) {
+      f.requests.length = 0;
+      await f.api.addAccount(nextToken);
+      assert.ok(f.requests.length > 0);
+      assert.ok(f.requests.every(request => request.token === nextToken));
+      assert.equal(f.settings.copilotProfiles.legacy.enterpriseHost, undefined);
+      assert.equal(f.settings.copilotProfiles.legacy.token, token);
+    }
+    f.requests.length = 0;
+    await f.api.setEnabled('legacy', false);
+    await f.api.setEnabled('legacy', true);
+    assert.deepEqual(f.requests, []);
+    assert.equal(f.settings.copilotProfiles.legacy.enterpriseHost, undefined);
+  }
+});
+
+test('Copilot legacy identity probes use only the explicitly recorded credential host', async () => {
+  const token = ['personal', 'recorded', 'fixture'].join('-');
+  const f = fixture({ copilotApiToken: token, copilotEnterpriseHost: 'new.ghe.com',
+    copilotProfiles: { legacy: { token, enterpriseHost: 'old.ghe.com' } } });
+  await f.api.addAccount('work-token');
+  const legacyRequests = f.requests.filter(request => request.token === token);
+  assert.equal(legacyRequests.length, 1);
+  assert.equal(new URL(legacyRequests[0].url).host, 'api.old.ghe.com');
+  assert.equal(f.api.getAccounts().find(account => account.id === 'legacy').accountName, 'alice');
+  assert.ok(f.requests.filter(request => request.token === 'work-token')
+    .every(request => new URL(request.url).host === 'api.new.ghe.com'));
+});
+
 test('Copilot adds multiple accounts without replacing legacy tokens, and updates duplicate identities', async () => {
   const f = fixture({ copilotApiToken: 'personal-token' });
   await f.api.addAccount('work-token');
   assert.equal(f.settings.copilotApiToken, 'personal-token');
   assert.equal(f.api.getAccounts().length, 2);
+  const rows = await fetchCopilotLimits(f.settings, { fetch: f.fetch, env: {} });
+  assert.deepEqual(rows.map(row => row.accountName).sort(), ['alice', 'bob']);
+  // Explicitly supplying the legacy token verifies its host and makes later
+  // same-account rotations safe to match without probing an unknown host.
+  await f.api.addAccount(f.settings.copilotApiToken);
   assert.deepEqual(f.api.getAccounts().map(a => a.accountName).sort(), ['alice', 'bob']);
   await f.api.addAccount('personal-new-token');
   assert.equal(f.api.getAccounts().length, 2);
@@ -66,7 +104,7 @@ test('Copilot disabling and deleting accounts preserves other accounts and provi
   await f.api.addAccount('work-token');
   f.settings.limitsEnabled = false;
   f.settings.limitProviders = '';
-  const personal = f.api.getAccounts().find(a => a.accountName === 'alice');
+  const personal = f.api.getAccounts().find(a => a.id === 'legacy');
   await f.api.setEnabled(personal.id, false);
   assert.equal(f.api.getAccounts().find(a => a.id === personal.id).enabled, false);
   const rows = await fetchCopilotLimits(f.settings, { fetch: f.fetch, env: {} });
@@ -142,6 +180,7 @@ test('Copilot legacy and environment scoped failures retain identity only for th
 
 test('Copilot keeps the same GitHub login on separate hosts as distinct accounts', async () => {
   const f = fixture({ copilotApiToken: 'personal-token', copilotEnterpriseHost: 'github.com' });
+  await f.api.addAccount(f.settings.copilotApiToken);
   await f.api.addAccount('work-token');
   const publicAccounts = f.api.getAccounts();
   f.settings.copilotEnterpriseHost = 'https://company.ghe.com/';
@@ -353,6 +392,47 @@ test('Copilot sign-in accepts the quota reading completed before its bridge resp
   vm.runInNewContext(source.slice(statusStart, statusEnd) + source.slice(start, end), context);
   await click();
   assert.equal(context.copilotProviderForAccount()?.accountName, 'alice');
+});
+
+test('Copilot retained refresh buttons use the latest resolved account reading', async () => {
+  const vm = require('node:vm');
+  const source = require('node:fs').readFileSync(require.resolve('../../src/electron/renderer/app'), 'utf8');
+  const render = source.slice(source.indexOf('async function renderCopilotAccounts()'), source.indexOf('function renderCopilotStatus()'));
+  for (const external of [false, true]) {
+    const element = () => ({ children: [], dataset: {}, classList: { add() {}, toggle() {} },
+      append(...children) { this.children.push(...children); }, replaceChildren() { this.children = []; },
+      setAttribute() {}, addEventListener(event, handler) { this[event] = handler; },
+      querySelector(selector) {
+        for (const child of this.children) {
+          if (child.className === selector.slice(1)) return child;
+          const nested = child.querySelector(selector);
+          if (nested) return nested;
+        }
+        return null;
+      } });
+    const list = element();
+    const account = { id: external ? 'environment' : 'legacy', accountKey: '', enabled: true, external };
+    let readings = [{ accountKey: 'provisional', status: 'ok' }];
+    const refreshes = [];
+    const context = { state: { settings: {} },
+      document: { getElementById: () => list, createElement: element },
+      window: { tokenMonitor: { copilot: { getAccounts: async () => [account] },
+        limits: { refresh: async (_provider, reading) => { refreshes.push(reading.accountKey); return { ok: true }; } } } },
+      isSettingsSurfaceVisible: () => true, localProviderStatuses: () => readings,
+      accountProfileRequests: { begin: () => () => true },
+      accountProfileSaves: { run: async (_provider, _button, action) => action() },
+      limitProviderEnabled: () => true, apiKeyAccountStatusText: () => '', t: key => key,
+      refreshStats: async () => {}, renderCopilotStatus: () => {}
+    };
+    vm.runInNewContext(render, context);
+    await context.renderCopilotAccounts();
+    const button = list.querySelector('.managed-account-remove');
+    readings = [{ accountKey: 'resolved', accountName: 'alice', status: 'ok' }];
+    await context.renderCopilotAccounts();
+    assert.equal(list.querySelector('.managed-account-remove'), button);
+    await button.click();
+    assert.deepEqual(refreshes, ['resolved']);
+  }
 });
 
 test('Copilot environment readings are retired when saved accounts take precedence and restored after removal', async t => {

@@ -13,6 +13,13 @@ function createCopilotAccounts({ getSettings, saveSettings, probeDeps, changed, 
   };
   function commit(profiles, { legacyToken = getSettings().copilotApiToken, activate = false, accountKey = '', refresh = true } = {}) {
     const settings = getSettings();
+    // Normalization supplies the current global host for unresolved legacy
+    // credentials. Persisting it would falsely make it a recorded token host.
+    for (const [id, profile] of Object.entries(profiles)) {
+      if (!profile.accountKey && !String(settings.copilotProfiles?.[id]?.enterpriseHost || '').trim()) {
+        delete profile.enterpriseHost;
+      }
+    }
     const hadEnvironment = limits.configuredCopilotAccounts(settings, { env }).some(account => account.id === 'environment');
     const previous = { copilotProfiles: settings.copilotProfiles, copilotApiToken: settings.copilotApiToken,
       limitsEnabled: settings.limitsEnabled, limitProviders: settings.limitProviders };
@@ -49,7 +56,9 @@ function createCopilotAccounts({ getSettings, saveSettings, probeDeps, changed, 
         const row = await limits.fetchCopilotAccountLimits({ copilotApiToken: token, copilotEnterpriseHost: enterpriseHost }, deps);
         if (row.status === 'unauthorized') throw new Error('The token does not have GitHub Copilot access.');
         const legacyToken = limits.copilotToken({}, getSettings());
-        const legacyProfile = Object.values(limits.copilotProfiles(getSettings(), env)).find(profile => profile.token === legacyToken);
+        const legacyProfile = Object.values(getSettings().copilotProfiles || {}).find(profile =>
+          limits.copilotToken({}, { copilotApiToken: profile?.token }) === legacyToken
+          && String(profile?.enterpriseHost || '').trim());
         let legacyIdentity;
         if (legacyProfile && !legacyProfile.accountName && legacyToken !== token) {
           legacyIdentity = await limits.fetchGitHubIdentity(legacyToken, { ...deps, copilotEnterpriseHost: legacyProfile.enterpriseHost }).catch(() => null);
@@ -75,22 +84,11 @@ function createCopilotAccounts({ getSettings, saveSettings, probeDeps, changed, 
       });
     },
     setEnabled(id, enabled) {
-      return serialize(async () => {
+      return serialize(() => {
         if (typeof enabled !== 'boolean') throw new Error('Invalid account state.');
         const profiles = limits.copilotProfiles(getSettings(), env);
         if (!Object.hasOwn(profiles, id)) throw new Error('Account not found.');
         const profile = profiles[id];
-        if (!profile.accountKey) {
-          // Resolve before migrating a legacy checkbox; if offline, leave its
-          // key unresolved so a later successful lookup keeps the old identity.
-          const identity = await limits.fetchGitHubIdentity(profile.token, {
-            ...probeDeps(), copilotEnterpriseHost: profile.enterpriseHost
-          }).catch(() => null);
-          if (identity) {
-            profile.accountKey = limits.copilotAccountKey(identity.login || String(identity.id), profile.enterpriseHost);
-            profile.accountName = identity.login;
-          }
-        }
         profile.enabled = enabled;
         commit(profiles, { accountKey: profile.accountKey, refresh: enabled });
         return { ok: true };

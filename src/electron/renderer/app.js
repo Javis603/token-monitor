@@ -17776,7 +17776,7 @@ async function renderCopilotAccounts() {
     const accounts = await window.tokenMonitor.copilot.getAccounts();
     if (!isCurrent() || !isSettingsSurfaceVisible()) return;
     const readings = localProviderStatuses('copilot');
-    const readingFor = account => readings.find(row => account.accountKey
+    const readingFor = account => localProviderStatuses('copilot').find(row => account.accountKey
       ? row.accountKey === account.accountKey
       : !accounts.some(other => other.accountKey === row.accountKey));
     const updateInfo = (account, info) => {
@@ -17835,7 +17835,7 @@ async function renderCopilotAccounts() {
       refresh.setAttribute('aria-label', t('settings.common.refresh'));
       refresh.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13 6a5.2 5.2 0 1 0 .2 3M13 2v4H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       refresh.disabled = !account.enabled;
-      refresh.addEventListener('click', () => mutate(refresh, () => window.tokenMonitor.limits.refresh('copilot', reading || account)));
+      refresh.addEventListener('click', () => mutate(refresh, () => window.tokenMonitor.limits.refresh('copilot', readingFor(account) || account)));
       actions.append(info, refresh);
       if (!account.external) {
         const remove = document.createElement('button');
