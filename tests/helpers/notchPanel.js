@@ -231,7 +231,7 @@ function panelFixture(t, settings = {}, { viaRenderer = false, pluginHost = null
     } finally { global.ResizeObserver = previousObserver; }
   } else panel = createNotchPanel(deps);
   t.after(pageHide);
-  return { panel, document, state, settings, rolls, settled, el, overflowText, pageHide,
+  return { panel, document, window, state, settings, rolls, settled, el, overflowText, pageHide,
     scroll: record => scrollListener?.(record),
     get scrollSubscribed() { return scrollListener !== null; },
     resize: () => resizeObservers.forEach(observer => { if (observer.node) observer.callback(); }),

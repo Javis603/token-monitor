@@ -42,6 +42,17 @@
     const before = focus.textContent; focus.click(); await settle();
     assert(focus.textContent !== before, 'retained quota page button advances');
     focus.click(); await settle(); assert(focus.textContent === before, 'retained quota page button wraps using the current page');
+    document.querySelector('.notch-tab[data-page="home"]').click(); await settle();
+    const fuel = document.querySelector('.notch-fuel'); fuel.style.maxWidth = '160px';
+    const entry = payload.cells.find(cell => cell.kind === 'provider');
+    const today = payload.cells.find(cell => cell.id === 'stat:today');
+    payload.cells = [today, ...Array.from({ length: 8 }, (_, index) => ({ ...entry, id: `fuel-${index}` }))];
+    render(payload); await settle();
+    const more = fuel.querySelector('.notch-fuel-more'); assert(more && !more.hidden, 'quota remainder really overflows'); more.focus();
+    for (let i = 0; i < 2; i++) {
+      today.totalTokens++; render(payload); await settle();
+      assert(fuel.querySelector('.notch-fuel-more') === more && document.activeElement === more, 'focused quota remainder stays connected across pushes');
+    }
   }
   return `PASS actual ${surface} quotas, control lifecycle and scroll retention`;
 })()

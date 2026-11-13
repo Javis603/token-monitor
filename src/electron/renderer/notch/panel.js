@@ -683,24 +683,26 @@
       activateOnPress(more, () => selectPage('limits'));
       function show(count) {
         const target = dom.resolve(row);
-        dom.placeChildren(target, items.slice(0, count).map(dom.resolve));
+        const children = items.slice(0, count).map(dom.resolve);
         const hidden = items.length - count;
-        if (hidden > 0) {
-          dom.resolve(more).textContent = `+${hidden}`;
-          dom.placeChildren(target, [...target.children, dom.resolve(more)]);
-        }
-        if (!target.childElementCount) dom.placeChildren(target, [text('notch-fuel-empty', t('notch.noLimits'))]);
+        const button = dom.resolve(more);
+        button.textContent = hidden > 0 ? `+${hidden}` : '';
+        button.hidden = false;
+        if (!items.length) children.push(text('notch-fuel-empty', t('notch.noLimits')));
+        // Keep the keyed control connected through staging and every fit pass.
+        dom.placeChildren(target, [...children, button]);
       }
       show(items.length);
       fitHomeFuel = () => {
         const target = dom.resolve(row);
         if (!(target.clientWidth > 0)) return;
-        const focused = document.activeElement === dom.resolve(more);
         let count = items.length;
         show(count);
+        const gap = parseFloat(window.getComputedStyle(target).columnGap) || 0;
+        const fullWidth = items.reduce((sum, item) => sum + dom.resolve(item).offsetWidth, 0) + Math.max(0, items.length - 1) * gap;
+        if (fullWidth <= target.clientWidth) { dom.resolve(more).hidden = true; return; }
         // Reserve the actual +N width as well as complete provider groups.
         while (count > 0 && target.scrollWidth > target.clientWidth) show(--count);
-        if (focused && target.contains(dom.resolve(more))) dom.resolve(more).focus({ preventScroll: true });
       };
       return row;
     }

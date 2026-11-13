@@ -147,6 +147,18 @@ function ringHarness() {
   return { cell, refresh, frame, context, reduce: () => { reduced = true; } };
 }
 
+test('a retained percentage readout cancels its previous loop before a static update', () => {
+  for (const reduce of [false, true]) {
+    const h = ringHarness(), value = h.cell(0).value;
+    h.context.animateRingPercent(value, 0, 100, 1000);
+    h.frame(100);
+    if (reduce) h.reduce();
+    h.context.animateRingPercent(value, 20, 20, 1000);
+    h.frame(500);
+    assert.equal(value.textContent, '20%');
+  }
+});
+
 test('a real reset sweeps the arc, counts the figure up and lands the flare', () => {
   const h = ringHarness();
   h.refresh([h.cell(5, { resetsAt: '2026-09-30T12:00:00.000Z' })]);

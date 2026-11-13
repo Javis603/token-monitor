@@ -1,20 +1,18 @@
 'use strict';
 
-// The rail's readouts roll their digits as the widget's numbers do. The rail is
-// rebuilt on every push, so each readout carries a key, its exact text and its
-// value: capture() reads them off the outgoing rail before it is replaced, and
-// play() rolls each replacement whose text moved, from the glyphs still on
-// screen, so a push mid-roll retargets instead of restarting.
+// Each rail readout carries its key, exact text and value. capture() settles
+// animations before the next update; play() retargets changed readings from
+// the glyphs still on screen, with the current renderer-supplied formatter.
 (function exposeEdgeDockRailNumberRoll(root, factory) {
-  const api = factory();
+  const api = factory(typeof module === 'object' && module.exports ? require('../domReconcile') : root.TokenMonitorDomReconcile);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorEdgeDockRailNumberRoll = api;
-})(typeof window !== 'undefined' ? window : null, () => {
+})(typeof window !== 'undefined' ? window : null, domApi => {
   const SELECTOR = '[data-roll-key]';
   const DIGIT = /[0-9]/;
 
   function mark(node, key, value, format) {
-    if (format) node._numberFormat = format;
+    domApi.data(node, format);
     node.dataset.rollKey = key;
     node.dataset.rollText = node.textContent;
     if (Number.isFinite(value)) node.dataset.rollValue = String(value);
@@ -57,9 +55,10 @@
         const value = Number(node.dataset.rollValue);
         const increasing = !(Number.isFinite(value) && Number.isFinite(previous.value)) || value > previous.value;
         const counting = mode() === 'count';
-        if (counting && (!Number.isFinite(previous.value) || !Number.isFinite(value) || !node._numberFormat)) continue;
+        const format = domApi.data(node);
+        if (counting && (!Number.isFinite(previous.value) || !Number.isFinite(value) || !format)) continue;
         const done = counting
-          ? animation.beginCount(node, previous.value, value, node._numberFormat, { toText: text })
+          ? animation.beginCount(node, previous.value, value, format, { toText: text })
           : animation.beginRoll(node, previous.text, text, increasing, null, previous.glyphs);
         settles.set(node, done);
         schedule(() => {

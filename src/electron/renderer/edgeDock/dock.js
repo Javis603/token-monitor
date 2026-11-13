@@ -1091,6 +1091,9 @@ function animateRingArc(circle, from, to, duration, startedAt) {
 
 function animateRingPercent(el, from, to, duration, startedAt = performance.now()) {
   if (!el) return;
+  const previous = ringNumberAnimations.get(el);
+  if (previous) cancelAnimationFrame(previous.handle);
+  ringNumberAnimations.delete(el);
   if (prefersReducedMotion() || !Number.isFinite(from) || !Number.isFinite(to) || from === to) {
     el.textContent = `${Math.round(to)}%`;
     return;
@@ -1760,12 +1763,13 @@ function appendLiveRate(card, head, cell) {
   const headline = el('div', 'edge-dock-stat-headline edge-dock-rate-headline');
   const figure = el('button', 'edge-dock-rate-figure');
   figure.type = 'button';
+  figure.dataset.rateMode = cell.rateMode;
   figure.setAttribute('aria-description', t('edgeDock.rate.switch'));
   const unit = el('span', 'edge-dock-rate-unit', t(burnMode ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit'));
   figure.append(el('strong', '', hasSample ? formatRate(cell.rate) : '—'), unit, el('span', 'edge-dock-rate-swap', '⇄'));
-  // Press-activated, not click: the card is rebuilt whenever the rate moves, and
-  // a rebuild between press and release silently swallows the click.
+  // Start the mode change on press, retaining keyboard-click activation.
   activateOnPress(figure, () => {
+    const burnMode = figure.dataset.rateMode === 'burn';
     unit.textContent = t(burnMode ? 'edgeDock.rate.speedUnit' : 'edgeDock.rate.burnUnit');
     bridge.toggleRateMode();
   });

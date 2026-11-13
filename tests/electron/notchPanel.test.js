@@ -1294,15 +1294,26 @@ test('home quota groups fill the available width and resize without losing the r
     accounts: [{ record: { provider: `provider-${index}`, status: 'ok', windows: [{ kind: 'session', remainingPercent: 75 }] } }] })));
   f.panel.render(data);
   const row = f.find('notch-fuel');
+  f.window.getComputedStyle = target => {
+    for (const item of target.children) if (item.classList.contains('notch-fuel-item')) item.offsetWidth = 70;
+    return { columnGap: '12px' };
+  };
   let width = 300;
   Object.defineProperties(row, {
     clientWidth: { get: () => width },
-    scrollWidth: { get: () => row.children.reduce((sum, child) => sum + (child.classList.contains('notch-fuel-item') ? 70 : 20), 0)
-      + Math.max(0, row.children.length - 1) * 12 }
+    scrollWidth: { get: () => row.children.filter(child => !child.hidden).reduce((sum, child) => sum + (child.classList.contains('notch-fuel-item') ? 70 : 20), 0)
+      + Math.max(0, row.children.filter(child => !child.hidden).length - 1) * 12 }
   });
   f.resize();
   assert.equal(f.all('notch-fuel-item').length, 3, 'the freed caption space can hold a third complete group');
   assert.equal(f.find('notch-fuel-more').textContent, '+5');
+  const more = f.find('notch-fuel-more'); more.focus();
+  for (let i = 0; i < 2; i++) {
+    data.cells[0].totalTokens++; f.panel.render(data);
+    assert.equal(f.find('notch-fuel-more'), more);
+    assert.equal(more.hidden, false);
+    assert.equal(f.document.activeElement, more);
+  }
   assert.equal(f.find('notch-fuel-caption'), null);
   assert.equal(row.attributes['aria-label'], 'limits left');
   width = 170; f.resize();
@@ -1310,7 +1321,7 @@ test('home quota groups fill the available width and resize without losing the r
   assert.equal(f.find('notch-fuel-more').textContent, '+7');
   width = 700; f.resize();
   assert.equal(f.all('notch-fuel-item').length, 8, 'widening restores groups that were previously hidden');
-  assert.equal(f.find('notch-fuel-more'), null);
+  assert.equal(f.find('notch-fuel-more').hidden, true);
   width = 300; f.resize();
   f.find('notch-fuel-more').fire('click', { detail: 0 });
   assert.equal(f.panel.view.page, 'limits');

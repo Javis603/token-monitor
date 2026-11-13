@@ -24,6 +24,9 @@ function harness(distance = 7, options = {}) {
       append(...children) { this.children = children; },
       prepend(...children) { this.children.unshift(...children); },
       replaceChildren(...children) { this.children = children; },
+      querySelector(selector) {
+        return this.children.find(child => child.className === selector.slice(1) || child.classList?.contains(selector.slice(1))) || null;
+      },
       getBoundingClientRect: () => ({ width: 200 + distance, left: 0, right: 200, top: 0, bottom: 20 }),
       classList: {
         add: value => classes.add(value), remove: value => classes.delete(value),
@@ -45,7 +48,7 @@ function harness(distance = 7, options = {}) {
     requestAnimationFrame(callback) { const id = ++nextId; frames.set(id, callback); return id; },
     cancelAnimationFrame: id => frames.delete(id)
   };
-  const document = { createElement: node, querySelectorAll: () => [element] };
+  const document = { createElement: node, createTextNode: text => ({ textContent: String(text) }), querySelectorAll: () => [element] };
   const api = create({ document, window, prefersReducedMotion: () => false, ...options });
   function frame(at) {
     now = at;
@@ -414,6 +417,7 @@ test('updateRow keeps IDs for untitled sessions and moves them into Details for 
   const end = app.indexOf('function applyHomeListMark(');
   let interactive;
   const context = {
+    document: h.document, overflowText: h.api,
     rendererDom,
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),
@@ -483,6 +487,7 @@ test('a token and cost update through updateRow keeps the hovered title moving',
   assert.ok(start >= 0 && end > start, 'updateRow source boundaries exist in the expected order');
   const body = app.slice(start, end);
   const context = {
+    document: h.document, overflowText: h.api,
     rendererDom,
     state: { breakdown: 'session' }, rowWidth: () => 50,
     iconKindFor: () => ({ kind: 'dot' }),

@@ -1,4 +1,4 @@
-/* global state, els, renderLimits, renderTrends, renderSessionDetail, renderRows, sessionRowsForPeriod, renderSessionGroupDetail, sessionRowsApi, document, PointerEvent */
+/* global state, els, renderLimits, renderTrends, renderSessionDetail, renderRows, updateRow, sessionRowsForPeriod, renderSessionGroupDetail, sessionRowsApi, document, PointerEvent */
 'use strict';
 (async () => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -63,6 +63,15 @@
     assert(row.querySelector('.session-models') === model, 'session metadata identity');
     assert(document.activeElement === model && modelPopover.matches(':popover-open'), 'session list focused tooltip survives');
     assert(modelPopover.textContent !== before, 'focused model tooltip gets new data');
+  }
+  const metadata = { client: 'codex', modelLabel: 'gpt', reasoningEffort: 'high' };
+  const label = sessionRowsApi.sessionModelMetadataLabel(metadata);
+  const options = { ...metadata, name: 'Test session', subtitle: `Codex · ${label}`, value: 100, max: 100, color: '#abc' };
+  for (let i = 0; i < 2; i++) {
+    updateRow(row, options);
+    updateRow(row, { ...options, subtitle: '12:00 · 2 calls', reasoningEffort: '', modelLabel: '' });
+    updateRow(row, options);
+    assert(row.querySelector('.row-subtitle').textContent === options.subtitle, 'metadata/plain/metadata transition leaves no stale plain text');
   }
   state.openSession = { kind: 'session', client: 'codex', sessionId: 'test', period: 'today', title: 'Test session' };
   const detail = { found: true, exchanges: [{ promptPreview: 'Keep my exchange open', startedAt: '2026-11-13T10:00:00Z',

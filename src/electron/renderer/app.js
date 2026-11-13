@@ -2849,6 +2849,11 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   const metadataRow = { client, modelLabel: modelLabel || '', modelTooltipEntries: modelTooltipEntries || [], reasoningEffort };
   const metadataLabel = sessionRowsApi.sessionModelMetadataLabel(metadataRow);
   const hasMetadata = Boolean(modelEntries || sessionRowsApi.sessionReasoningEffortForRow(metadataRow));
+  const replacePlain = (element, text) => {
+    const content = element.querySelector('.overflow-text-content') || element;
+    rendererDom.reconcileChildren(content, [document.createTextNode(text || '')]);
+    overflowText.update(element);
+  };
   const replaceMetadata = (element, text, start) => {
     const content = element.querySelector('.overflow-text-content') || element;
     rendererDom.reconcileChildren(content, [document.createTextNode(text.slice(0, start)),
@@ -2860,7 +2865,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   if (subtitleShowsModel) {
     replaceMetadata(subtitleTextEl, subtitleText, subtitleText.length - metadataLabel.length);
   } else {
-    setHoverMarqueeText(subtitleTextEl, subtitleText);
+    replacePlain(subtitleTextEl, subtitleText);
   }
   const titleShowsModel = hasMetadata && metadataLabel && (
     titleModelLabel ? String(name || '').startsWith(metadataLabel)
@@ -2868,7 +2873,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
   );
   if (titleEl.classList.contains('limit-detail-tooltip-wrap')) limitWindowsView.setDetailTooltip(titleEl, null);
   if (titleShowsModel) replaceMetadata(titleEl, name, titleModelLabel ? 0 : name.length - metadataLabel.length);
-  else setHoverMarqueeText(titleEl, name);
+  else replacePlain(titleEl, name);
   subtitleEl.classList.toggle('hidden', !subtitleText && !subagentCountLabel);
   // The activity line carries time, calls, cache hit and tok/s; a narrow window
   // fades and scrolls it on hover the way the title does rather than wrapping.

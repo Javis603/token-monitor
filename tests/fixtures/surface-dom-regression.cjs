@@ -1,4 +1,4 @@
-/* global state, surface, render, document, requestAnimationFrame, MouseEvent, PointerEvent */
+/* global state, surface, render, appendLiveRate, t, document, requestAnimationFrame, MouseEvent, PointerEvent */
 'use strict';
 (async () => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -72,6 +72,22 @@
     render(next); await settle();
     assert(document.querySelector('.notch-breakdown-tokens') === figure, 'Notch Breakdown figure retained');
     assert(figure.clientWidth > 0 && parseFloat(figure.style.fontSize) < 30, `Notch Breakdown fits its mounted figure: ${JSON.stringify({ width: figure.clientWidth, scroll: figure.scrollWidth, size: figure.style.fontSize, text: figure.textContent, connected: figure.isConnected })}`);
+  }
+  if (surface === 'bubble') {
+    const dom = window.TokenMonitorDomReconcile.create();
+    const build = rateMode => {
+      const card = document.createElement('section'), head = document.createElement('header'); card.append(head);
+      appendLiveRate(card, head, { rateMode, rate: 12, speed: 12, burn: 24, deviceCount: 1, rateDevices: [], rateHistory: [] });
+      return card;
+    };
+    const card = dom.reconcile(null, build('speed')); document.body.append(card);
+    const figure = card.querySelector('.edge-dock-rate-figure');
+    for (const mode of ['burn', 'speed']) {
+      dom.reconcile(card, build(mode));
+      figure.click();
+      assert(figure.querySelector('.edge-dock-rate-unit').textContent === t(mode === 'burn' ? 'edgeDock.rate.speedUnit' : 'edgeDock.rate.burnUnit'), 'retained rate toggle uses the current mode');
+    }
+    card.remove();
   }
   return `PASS actual ${surface} title, model tooltip, focus and live pushes`;
 })()
