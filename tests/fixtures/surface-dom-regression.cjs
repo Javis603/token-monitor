@@ -30,9 +30,11 @@
     }
     host.remove();
     const record = { provider: 'codex', accountKey: 'ring-loop', status: 'ok', windows: [{ kind: 'session', remainingPercent: 5, resetsAt: '2026-01-01T00:00:00Z' }] };
+    const indicatorSessions = [];
     const payload = { ...state.payload, appearance: { ...state.payload.appearance, reduceMotion: 'off' } };
     const push = () => {
       payload.cells = window.TokenMonitorEdgeDockPresentation.buildEdgeDockCells({ limits: { providers: [record] } }, { items: [{ type: 'limit', provider: 'codex' }] });
+      payload.cells[0].sessions = indicatorSessions;
       render(payload);
     };
     push(); await settle();
@@ -49,6 +51,17 @@
     assert(!ring.querySelector('.edge-dock-ring-complete'), 'non-reset rail render removes the superseded completion flare');
     await new Promise(resolve => setTimeout(resolve, 1800));
     assert(value.textContent === '20%', 'superseded rail loop cannot overwrite the settled current reading');
+    for (const activity of ['waiting', 'running']) {
+      indicatorSessions.splice(0, indicatorSessions.length, { key: 'codex:indicator', client: 'codex', sessionId: 'indicator', totalTokens: 1, lastUsedAt: new Date().toISOString(), liveActivity: { state: activity, observedAt: new Date().toISOString() } });
+      push(); await settle();
+      const selector = activity === 'waiting' ? '.edge-dock-ring-waiting' : '.edge-dock-ring-spinner';
+      const indicator = ring.querySelector(selector), animation = indicator.getAnimations().find(animation => animation.animationName);
+      assert(animation?.playState === 'running', `${activity} indicator really animates`);
+      for (let i = 0; i < 2; i++) {
+        push(); await settle();
+        assert(ring.querySelector(selector) === indicator && indicator.getAnimations().includes(animation) && animation.playState === 'running', `${activity} CSS animation survives two rail pushes`);
+      }
+    }
     return 'PASS actual rail cell identity and focus';
   }
   const row = { key: 'codex:dom-proof', client: 'codex', sessionId: 'dom-proof', title: 'An intentionally long ongoing engineering task title for reading across updates',

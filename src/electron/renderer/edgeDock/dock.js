@@ -1068,8 +1068,11 @@ function captureRingResetMotion(scope = railNode) {
     // resumed motions are registered again by animateRingResets below.
     ringResetMotions.delete(circle);
     const ring = cell.querySelector('.edge-dock-ring');
-    for (const animation of ring?.getAnimations?.({ subtree: true }) || []) animation.cancel();
-    for (const flare of ring?.querySelectorAll('.edge-dock-ring-complete') || []) flare.remove();
+    for (const animation of circle?.getAnimations?.() || []) animation.cancel();
+    for (const flare of ring?.querySelectorAll('.edge-dock-ring-complete') || []) {
+      for (const animation of flare.getAnimations()) animation.cancel();
+      flare.remove();
+    }
     const value = cell.querySelector('.edge-dock-value');
     const number = ringNumberAnimations.get(value);
     if (number) cancelAnimationFrame(number.handle);

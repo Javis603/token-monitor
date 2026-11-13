@@ -198,6 +198,18 @@ test('retained rail rings resume one flare and remove it when a refill is supers
   }
 });
 
+test('reset capture preserves animations on retained running and waiting indicators', () => {
+  const h = ringHarness();
+  const cell = h.refresh([h.cell(20)])[0];
+  for (const kind of ['spinner', 'waiting']) {
+    const indicator = h.context.document.createElement('span');
+    indicator.className = `edge-dock-ring-${kind}`; cell.ring.append(indicator);
+    const animation = indicator.animate([], { duration: 1400, iterations: Infinity });
+    h.context.captureRingResetMotion();
+    assert.equal(animation.playState, 'running', `${kind} animation belongs to session activity`);
+  }
+});
+
 test('a real reset sweeps the arc, counts the figure up and lands the flare', () => {
   const h = ringHarness();
   h.refresh([h.cell(5, { resetsAt: '2026-09-30T12:00:00.000Z' })]);
