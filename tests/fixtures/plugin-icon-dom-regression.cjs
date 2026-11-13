@@ -44,6 +44,12 @@
   const resized = push(image, 20);
   assert(resized !== bitmap && resized.style.width === '20px', 'size changes replace the icon');
   assert(push(native) !== resized, 'artwork changes replace the icon');
+  const factory = push({ presentation: { icon: { native: 'factory' } } });
+  await waitFor(() => factory.firstChild?.style.maskImage);
+  assert(factory.firstChild.className === 'row-icon-factory', 'factory uses its native class');
+  const droid = push({ presentation: { icon: { native: 'droid' } } });
+  await waitFor(() => droid.firstChild?.style.maskImage);
+  assert(droid !== factory && droid.firstChild.className === 'row-icon-droid', 'native IDs sharing artwork still update their class');
   // A broken image must still fall back after a retained refresh, then remain
   // settled rather than being resurrected on every subsequent stats push.
   for (const identityIcon of [data, 'data:image/png;base64,invalid']) {
