@@ -31,7 +31,7 @@
       // repeatedly crossing into live dataset/classList getters for each child.
       const identity = attrs.get('data-key') ?? attrs.get('data-exchange-key') ?? attrs.get('data-focus-key') ?? attrs.get('data-limit-motion-key') ?? attrs.get('data-usage-item') ?? attrs.get('data-d') ?? (attrs.get('id') || undefined);
       const slot = (attrs.get('class') || '').trim().split(/\s+/, 1)[0];
-      const key = `${node.namespaceURI}:${node.localName}:${identity === undefined ? `slot:${slot}` : `key:${identity}`}:${attrs.get('data-dom-kind') || ''}:${attrs.get('data-limit-history') || ''}`;
+      const key = `${node.namespaceURI}:${node.localName}:${identity === undefined ? `slot:${slot}` : `key:${identity}`}:${attrs.get('data-dom-kind') || ''}:${attrs.get('data-limit-history') || ''}:${attrs.get('data-dom-island') || ''}`;
       record = { attributes: attrs, styles: styles(node), children: [...node.childNodes], key };
       rendered.set(node, record);
       return record;
@@ -73,7 +73,10 @@
         if (after) current.style.setProperty(name, ...after);
         else current.style.removeProperty(name);
       }
-      const children = reconcileChildren(current, nextRecord.children);
+      // An island owns its asynchronous children and their listeners. Its
+      // identity must include every input: changed inputs replace the island.
+      const children = nextAttributes.has('data-dom-island')
+        ? previous.children : reconcileChildren(current, nextRecord.children);
       rendered.set(current, { ...nextRecord, children });
       return current;
     }
