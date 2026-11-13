@@ -890,7 +890,7 @@ test('default provider balance rendering follows the credits marker without a pr
     'MiniMax extra pools and Spend do not change the default provider policy');
 });
 
-test('Home text and bars use the plan text rendered by Limits account rows', () => {
+test('Home rows, text and bars use the plan text rendered by Limits account rows', () => {
   const window = { kind: 'weekly', remainingPercent: 40 };
   const fixtures = [
     [{ provider: 'codex', status: 'ok', planLabel: 'Plus' }],
@@ -910,7 +910,7 @@ test('Home text and bars use the plan text rendered by Limits account rows', () 
   const end = app.indexOf('function homeLimitWindowLabel(', start);
   const renderStart = app.indexOf('function renderHomeLimitModule()');
   const renderEnd = app.indexOf('function renderHomeModelModule(', renderStart);
-  for (const homeLimitDisplayMode of ['text', 'bars']) {
+  for (const homeLimitDisplayMode of ['rows', 'text', 'bars']) {
     for (const maskLimitAccountEmails of [true, false]) {
       const settings = { homeLimitDisplayMode, maskLimitAccountEmails, homeLimitAccountCount: 20 };
       const view = dockView(settings);
@@ -926,6 +926,7 @@ test('Home text and bars use the plan text rendered by Limits account rows', () 
           .map((row) => row.children[0].find('limit-plan').textContent);
         const home = vm.runInNewContext(`${app.slice(start, end)}; homeLimitRows();`, {
           state: { stats: { limits: { providers } }, settings },
+          homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
           enabledLimitProviderSet: () => new Set([id]),
           hiddenHomeLimitProviderSet: () => new Set(),
           desktopLimitProviders: () => [{ id, label: id }], desktopLimitRecords: () => providers,
@@ -949,6 +950,10 @@ test('Home text and bars use the plan text rendered by Limits account rows', () 
           applyHomeListMark() {},
           iconKindFor: () => id,
           homeLimitWindowLabel: () => 'Weekly',
+          homeLimitResetText: () => ({ text: '', full: '' }),
+          formatLimitBoundary: () => '',
+          homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
+          homeOverviewApi: require('../../src/electron/renderer/homeOverview'),
           formatHomeLimitWindowValue: () => '40% left',
           isCreditsWindow: balanceDisplay.isCreditsWindow,
           limitFillPercent: limitDisplayMode.limitFillPercent,
@@ -961,7 +966,7 @@ test('Home text and bars use the plan text rendered by Limits account rows', () 
         for (const row of body.children) {
           const plan = row.find('home-limit-plan');
           if (plan) assert.equal(plan.attributes['aria-label'], plan.textContent);
-          assert.equal(Boolean(row.find('limit-meter')), homeLimitDisplayMode === 'bars');
+          assert.equal(Boolean(row.find('limit-meter')), homeLimitDisplayMode !== 'text');
         }
       }
     }
@@ -1222,26 +1227,28 @@ test('Ollama hides spending details when that usage item is disabled and keeps s
 
 function renderHomeLimitFixture(rows) {
   const source = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
-  const functions = ['homeModuleShell', 'homeLimitWindowLabel', 'formatHomeLimitWindowValue', 'renderHomeLimitModule'].map((name) => {
+  const functions = ['homeModuleShell', 'homeVendorColorsEnabled', 'homeShareInkColor', 'homeShareVendorColor', 'homeLimitWindowLabel', 'homeLimitResetText', 'formatHomeLimitWindowValue', 'renderHomeLimitModule'].map((name) => {
     const start = source.indexOf(`function ${name}(`);
     return source.slice(start, source.indexOf('\n}\n', start) + 2);
   }).join('\n');
   const context = {
     document: { createElement: (tag) => new FakeElement(tag) }, homeLimitRows: () => rows,
     els: { homePanel: { children: [] } }, pluginContent: null,
-    state: { settings: { homeLimitDisplayMode: 'bars' } }, VIEW_ICON_CLASSES: {}, renderBreakdownChange() {},
+    state: { settings: { homeLimitDisplayMode: 'rows' } }, VIEW_ICON_CLASSES: {}, renderBreakdownChange() {},
+    homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
     t: (key) => i18n.translate('en', key), applyHomeListMark() {}, iconKindFor: () => '',
     limitWindowsView: dockView(), limitProviderPresentationApi: limitPresentationApi,
     isCreditsWindow: balanceDisplay.isCreditsWindow, formatCompactMoney: balanceDisplay.formatCompactMoney,
     currentLocale: () => 'en', formatPercent: (n) => `${n}%`,
     limitModeSuffix: limitDisplayMode.limitModeSuffix, limitFillPercent: limitDisplayMode.limitFillPercent,
-    formatLimitBoundary: () => '', optionalFiniteNumber: (n) => n == null ? null : Number(n)
+    formatLimitBoundary: () => '', optionalFiniteNumber: (n) => n == null ? null : Number(n),
+    homeOverviewApi: require('../../src/electron/renderer/homeOverview')
   };
   vm.runInNewContext(`${functions}\nthis.result = renderHomeLimitModule();`, context);
   return context.result;
 }
 
-test('Home renders Ollama included quota before balance on separate full-width rows with the shared tooltip', () => {
+test('Home renders Ollama included quota before balance on separate rows with the shared tooltip', () => {
   const { parseOllamaBalance } = require('../../src/shared/providers/ollama/limits');
   const { homeLimitAccounts } = require('../../src/electron/renderer/homeOverview');
   const parsed = parseOllamaBalance({ included: { balance_usd: 52.5, allowance_usd: 60 }, purchased: { balance_usd: 18.25 } });
@@ -1249,7 +1256,8 @@ test('Home renders Ollama included quota before balance on separate full-width r
   const result = renderHomeLimitFixture(rows);
   const readings = [...result.walk()].filter((node) => node.classNames.has('home-limit-window'));
   assert.equal(readings.length, 2);
-  assert.ok(readings.every((node) => node.classNames.has('home-limit-window-wide')));
+  assert.equal(readings[0].find('home-limit-reading-wide'), null, 'the included quota keeps its meter column');
+  assert.ok(readings[1].find('home-limit-reading-wide'), 'the wallet amount spans the meter column');
   assert.equal(readings[1].find('home-limit-window-label').textContent, 'Credit balance');
   assert.equal(readings[1].find('home-list-value').textContent, '$18.25');
   assert.equal(readings[1].find('limit-meter'), null);
@@ -1317,10 +1325,10 @@ test('Home retains standalone Ollama spending after legacy quotas when balance i
       const readings = [...result.walk()].filter((node) => node.classNames.has('home-limit-window'));
       assert.equal(readings.length, hiddenSpend ? 2 : 3);
       assert.equal(result.text.includes('$4.50'), !hiddenSpend);
-      assert.ok(readings.every((node) => node.classNames.has('home-limit-window-wide')));
       if (!hiddenSpend) {
         assert.equal(readings.at(-1).find('home-limit-window-label').textContent, 'Monthly credits used');
         assert.equal(readings.at(-1).find('limit-meter'), null);
+        assert.ok(readings.at(-1).find('home-limit-reading-wide'));
       }
     }
   }

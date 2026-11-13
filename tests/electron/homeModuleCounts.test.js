@@ -24,6 +24,7 @@ class Element {
     this.events = {};
     this.attributes = {};
     this.dataset = {};
+    this.style = { setProperty(name, value) { this[name] = value; } };
     this.classList = { add() {}, toggle() {} };
   }
   append(...children) { this.children.push(...children); }
@@ -74,9 +75,31 @@ test('Tools, Models and Devices render more than their old hardcoded caps with u
     ['renderHomeModelModule', 'homeToolSourceRows', 8],
     ['renderHomeDeviceModule', 'dailyWithHeatIntensity', 7]
   ]) {
-    vm.runInNewContext(`${source(name, next)}; ${name}(period);`, { ...context, period, homeModuleShell: () => ({ module: new Element(), body: context.body = new Element() }) });
-    assert.equal(context.body.children.length, count);
-    if (count !== 7) assert.equal(context.body.children[0].children[3].textContent, '5', 'share uses the full period total');
+    vm.runInNewContext(`${source('homeShareBar', 'renderHomeModelModule')}; ${source(name, next)}; ${name}(period);`, { ...context, period, homeModuleShell: () => ({ module: new Element(), body: context.body = new Element() }) });
+    const [first, second] = context.body.children;
+    if (name === 'renderHomeToolModule') {
+      // Tools: one bar, then one line of labels.
+      assert.equal(second.className, 'home-share-legend');
+      assert.equal(second.children.length, count);
+      assert.equal(second.children[0].children[2].textContent, '100', 'each label keeps its amount');
+      assert.equal(second.children[0].children[3].textContent, '5', 'share uses the full period total');
+    } else if (name === 'renderHomeModelModule') {
+      assert.equal(first.className, 'home-share-bar');
+      assert.equal(context.body.children.length, count + 1);
+      assert.equal(second.children[3].textContent, '5', 'share uses the full period total');
+    } else {
+      assert.equal(first.className, 'home-device-grid');
+      assert.equal(first.children.length, count);
+    }
+    if (name !== 'renderHomeDeviceModule') {
+      // Segments and list rows share an index, so hovering either lights its partner.
+      const items = name === 'renderHomeToolModule' ? second.children : context.body.children.slice(1);
+      assert.deepEqual(items.map((item) => item.dataset.shareIndex), first.children.filter((s) => s.className !== 'home-share-rest').map((s) => s.dataset.shareIndex));
+      assert.equal(items[0].dataset.shareIndex, '0');
+      const segments = first.children;
+      assert.equal(segments.at(-1).className, 'home-share-rest', 'rows past the count fold into a neutral tail');
+      assert.equal(segments[0].style.flexGrow, String(100 / 2000), 'a segment keeps its share of the period total');
+    }
   }
 });
 
@@ -178,7 +201,7 @@ test('Home sessions respect a smaller count while retaining an active session be
     window: { TokenMonitorEdgeDockPresentation: presentation, TokenMonitorSessionLive: { sessionStateMarkup: () => '' } },
     sessionPresentationOptions: () => ({}), homeModuleShell: () => ({ module: new Element(), body: context.body = new Element() }),
     applyHomeListMark() {}, iconKindFor() {}, clientColors: {}, stableColor() {}, fallbackModelColors: [], bindHoverMarquee() {},
-    formatCompact: String, homeSessionAgo: () => '', t: key => key, limitWindowsView: {},
+    formatCompact: String, homeSessionAgo: () => '', homeSessionAgoShort: () => '', t: key => key, limitWindowsView: {},
     sessionRowsApi: require('../../src/electron/renderer/sessionRows')
   };
   vm.runInNewContext(`${source('renderHomeSessionModule', 'renderHomeDeviceModule')}; renderHomeSessionModule();`, context);

@@ -28,9 +28,10 @@ const {
   homeHistorySignature,
   shouldFetchHomeHistory,
   shouldRetryHomeHistory,
-  homeHistoryFetchOutcome
+  homeHistoryFetchOutcome,
+  limitWindowPaceRemainingPercent
 } = require('../../src/electron/renderer/homeOverview');
-const { limitProviderCompactWindows } = require('../../src/electron/renderer/limits/providerPresentation');
+const { limitProviderCompactWindows, limitProviderHomeWindows } = require('../../src/electron/renderer/limits/providerPresentation');
 const limitProviderOrderApi = require('../../src/electron/renderer/limits/providerOrder');
 
 const historyWithDays = { daily: [{ date: '2026-06-01', tokens: 10, cost: 1 }], monthly: [], summary: {} };
@@ -65,8 +66,7 @@ test('Home keeps Ollama included quota before balance and folds monthly spend in
   assert.deepEqual(row.windows.map((w) => w.label), ['Included credits', 'Credit balance']);
   assert.deepEqual(row.windows[1].detailEntries, [['Monthly credits used', '$7.50']]);
   assert.equal(row.windows[1].remainingPercent, null);
-  assert.ok(row.windows.every((w) => w.fullWidth));
-  assert.equal(homeLimitAccounts([{ providerId: 'thirdparty', windows: parsed.windows }])[0].windows.length, 2);
+  assert.equal(homeLimitAccounts([{ providerId: 'thirdparty', windows: parsed.windows }])[0].windows.length, 3, 'only Ollama folds its spend into the wallet');
   const [hiddenSpend] = homeLimitAccounts([{ providerId: 'ollama', windows: parsed.windows }], 3, { isWindowHidden: (_, w) => w.metric === 'spend' });
   assert.equal(hiddenSpend.windows.length, 2);
   assert.deepEqual(hiddenSpend.windows[1].detailEntries, []);
@@ -171,8 +171,9 @@ test('Home device rows keep only the local badge and mute stale devices without 
   assert.match(match[1], /badge\.textContent = 'you'/);
   assert.match(match[1], /if \(row\.isLocal\)/);
   assert.match(match[1], /item\.classList\.add\('is-stale'\)/);
-  assert.match(match[1], /item\.append\(mark, label, value\)/);
-  assert.doesNotMatch(match[1], /home-list-aux/);
+  assert.match(match[1], /foot\.append\(badge\)/);
+  assert.match(match[1], /item\.append\(head, value, foot\)/);
+  assert.doesNotMatch(match[1], /textContent = t\('home\.staleDevice'\)/, 'a stale tile is muted, never labelled');
   assert.doesNotMatch(match[1], /t\('home\.localDevice'\)/);
   assert.doesNotMatch(match[1], /badge\.textContent = row\.isLocal \? t\('home\.localDevice'\) : t\('home\.staleDevice'\)/);
 });
@@ -210,24 +211,32 @@ test('homeLimitAccounts keeps account windows together and sorts lowest remainin
   assert.equal(rows[1].lowestRemaining, 70);
 });
 
-test('Home keeps canonical Codex quotas ahead of named additional windows', () => {
+test('Home lists named additional Codex windows after the canonical quotas', () => {
   const windows = [
+    { kind: 'session', label: 'GPT-5.3-Codex-Spark', additional: true, windowMinutes: 300, remainingPercent: 100 },
     { kind: 'session', label: '5-hour', remainingPercent: 40 },
-    { kind: 'weekly', label: 'Weekly', remainingPercent: 70 },
-    { kind: 'session', label: 'Session', limitId: 'gpt-reserve', additional: true, remainingPercent: 100 },
-    { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, remainingPercent: 100 }
+    { kind: 'weekly', label: 'GPT-5.3-Codex-Spark', additional: true, windowMinutes: 10080, remainingPercent: 90 },
+    { kind: 'weekly', label: 'Weekly', remainingPercent: 70 }
   ];
+  assert.deepEqual(limitProviderCompactWindows('codex', windows).map((window) => window.additional === true), [false, false],
+    'the compact pick other surfaces lead with keeps only the canonical windows');
   const [row] = homeLimitAccounts([{
     key: 'codex:0',
     providerId: 'codex',
     name: 'Codex',
-    windows: limitProviderCompactWindows('codex', windows)
+    windows: limitProviderHomeWindows('codex', windows)
   }]);
 
-  assert.deepEqual(row.windows.map((window) => window.label), ['5-hour', 'Weekly']);
+  assert.deepEqual(row.windows.map((window) => [window.kind, window.label, window.additional === true]), [
+    ['session', '5-hour', false],
+    ['weekly', 'Weekly', false],
+    ['session', 'GPT-5.3-Codex-Spark', true],
+    ['weekly', 'GPT-5.3-Codex-Spark', true]
+  ]);
+  assert.deepEqual(row.windows.map((window) => window.windowMinutes ?? null), [null, null, 300, 10080]);
 });
 
-test('Home keeps Volcengine 5-hour and Daily as its two compact windows', () => {
+test('Home lists every window of an account in shortest-cycle-first order', () => {
   const [row] = homeLimitAccounts([{
     key: 'volcengine:0',
     providerId: 'volcengine',
@@ -240,7 +249,30 @@ test('Home keeps Volcengine 5-hour and Daily as its two compact windows', () => 
     ]
   }]);
 
-  assert.deepEqual(row.windows.map((window) => window.kind), ['session', 'daily']);
+  assert.deepEqual(row.windows.map((window) => window.kind), ['session', 'daily', 'weekly', 'billing']);
+});
+
+test('Home pace is the time left in a rolling window over its length', () => {
+  const nowMs = Date.parse('2026-10-06T08:00:00Z');
+  const weekly = { kind: 'weekly', remainingPercent: 30, windowMinutes: 10080, resetsAt: '2026-10-09T20:00:00Z' };
+  assert.equal(limitWindowPaceRemainingPercent(weekly, nowMs), 50);
+  assert.equal(limitWindowPaceRemainingPercent({ ...weekly, boundaryKind: 'reset' }, nowMs), 50);
+  assert.equal(limitWindowPaceRemainingPercent({ ...weekly, resetsAt: '2026-10-06T08:00:00Z' }, nowMs), 0);
+  for (const window of [
+    null,
+    { ...weekly, windowMinutes: null },
+    { ...weekly, windowMinutes: 0 },
+    { ...weekly, resetsAt: null },
+    { ...weekly, resetsAt: 'not a date' },
+    { ...weekly, resetsAt: '2026-10-06T07:59:00Z' },
+    { ...weekly, resetsAt: '2026-10-20T08:00:00Z' },
+    { ...weekly, boundaryKind: 'expiry' },
+    { ...weekly, boundaryKind: 'mixed' },
+    { ...weekly, showMeter: false },
+    { ...weekly, metric: 'credits' }
+  ]) {
+    assert.equal(limitWindowPaceRemainingPercent(window, nowMs), null);
+  }
 });
 
 test('homeLimitAccounts keeps a real billing remaining percentage fallback', () => {
@@ -402,6 +434,7 @@ for (const { name, settings, expected } of [
     const body = { children: [], append(element) { this.children.push(element); } };
     vm.runInNewContext(`${functions}\nrenderHomeLimitModule();`, {
       state: { settings, stats: { limits: { providers: [] } } },
+      homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
       LIMIT_PROVIDERS: [{ id: 'claude', label: 'Claude' }],
       DEFAULT_LIMIT_PROVIDER_ORDER: 'claude',
       limitProviderOrderApi,
@@ -444,6 +477,7 @@ test('Home keeps both MiniMax readings named and in their own units', () => {
     settings.showHomeLimitProviderNames = showHomeLimitProviderNames;
     const rows = vm.runInNewContext(`${fn}\nhomeLimitRows();`, {
       state: { settings, stats: { limits: { providers } } },
+      homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
       desktopLimitProviders: () => [{ id: 'minimax', label: 'Minimax' }], desktopLimitRecords: () => providers,
       LIMIT_PROVIDERS: [{ id: 'minimax', label: 'Minimax' }],
       clientColors: {}, enabledLimitProviderSet: () => new Set(['minimax']), hiddenHomeLimitProviderSet: () => new Set(),
@@ -1238,4 +1272,19 @@ test('Home limit account keys follow account identity across provider reorder', 
   const after = homeLimitAccountsForProviders({ ...options, providers: [...accounts].reverse() });
   assert.deepEqual(before.map(row => row.key), ['codex:one', 'codex:two']);
   assert.deepEqual(after.map(row => row.key), ['codex:two', 'codex:one']);
+});
+
+test('homeLimitAccounts lists every window for the row layout and keeps the classic two-window pick', () => {
+  const account = {
+    key: 'claude:0', providerId: 'claude', name: 'Claude', color: '#d97757',
+    windows: [
+      { kind: 'weekly', remainingPercent: 70 },
+      { kind: 'session', remainingPercent: 40 },
+      { kind: 'weekly', label: 'Fable', remainingPercent: 90 }
+    ]
+  };
+  const rows = homeLimitAccounts([account]);
+  assert.equal(rows[0].windows.length, 3, 'rows show every window');
+  const classic = homeLimitAccounts([account], 3, { compact: true });
+  assert.deepEqual(classic[0].windows.map((window) => window.remainingPercent), [40, 70], 'classic layouts keep the shortest two');
 });

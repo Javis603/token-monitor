@@ -211,17 +211,22 @@ test('Home module jump icons align optically with their titles', () => {
   assert.match(cssRule(css, '.home-module-jump'), /transform:\s*translateY\(-1px\)/);
 });
 
-test('Home limit percentages use the compact Limits view typography', () => {
+test('Home limit rows share one column grid across accounts', () => {
   const css = readRendererFile('styles.css');
-  assert.match(cssRule(css, '.home-limit-window .home-list-value'), /font-size:\s*0\.625rem/);
-  assert.match(cssRule(css, '.home-limit-window .home-list-value'), /line-height:\s*1\.1/);
-});
-
-test('Home billing-only and explicit wide limit rows span the full summary width', () => {
-  const css = readRendererFile('styles.css');
-  const rule = cssRule(css, '.home-limit-window:only-child,\n.home-limit-window-wide');
-  assert.match(rule, /grid-column:\s*1 \/ -1/);
-  assert.match(rule, /max-width:\s*none/);
+  assert.match(cssRule(css, '.home-module-limits .home-module-body'), /grid-template-columns:\s*10px fit-content\(40%\) fit-content\(26%\) minmax\(28px, 1fr\) auto/);
+  assert.match(cssRule(css, '.home-limit-account'), /grid-template-columns:\s*subgrid/);
+  const rows = cssRule(css, '.home-limit-windows,\n.home-limit-window');
+  assert.match(rows, /grid-column:\s*1 \/ -1/);
+  assert.match(rows, /grid-template-columns:\s*subgrid/);
+  assert.match(cssRule(css, '.home-limit-window > .home-limit-reading-wide'), /grid-column:\s*4 \/ 6/);
+  assert.match(cssRule(css, '.home-limit-reset'), /grid-column:\s*3;[^}]*justify-self:\s*end/s);
+  // Hover reveals: every share index Home can render has a partner rule, and no fade replays on refresh.
+  for (let index = 0; index < 50; index++) assert.ok(css.includes(`.home-share-scope:has([data-share-index="${index}"]:hover) [data-share-index="${index}"]`), `partner rule ${index}`);
+  assert.match(css, /\.home-limit-account:hover \.home-limit-window:not\(\.is-low\) \.limit-meter\.home-limit-meter-mono \.limit-meter-fill/);
+  // Accounts are set apart by the Limits page's feathered hairline, softer than the module rules.
+  const divider = cssRule(css, '.home-module-limits:not(.home-module-limits-classic) .home-limit-account + .home-limit-account::before,\n.home-session-row.starts-recent::after');
+  assert.match(divider, /left:\s*0/);
+  assert.match(divider, /rgba\(var\(--line-rgb\), 0\) 0,\s*rgba\(var\(--line-rgb\), 0\.075\) 22%/);
 });
 
 test('Home limit provider settings stay compact and list only enabled providers', () => {

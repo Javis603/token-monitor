@@ -34,6 +34,8 @@ const {
   limitProviderCapabilityTags,
   limitProviderCompactWindowLabel,
   limitProviderCompactWindowPeriodLabel,
+  limitProviderHomeWindowLabel,
+  limitProviderHomeWindows,
   limitProviderCompactWindows,
   limitProviderMainDeviceLabel,
   limitProviderPlanDisplayLabel,
@@ -100,15 +102,33 @@ test('Codex additional quota display names map gpt-reserve and preserve unknown 
   assert.equal(codexAdditionalQuotaDisplayName(''), '');
 });
 
-test('compact Antigravity labels distinguish duplicate periods by model group', () => {
+test('compact Antigravity labels distinguish duplicate periods by model group (classic Home layouts)', () => {
   const windows = [
     { kind: 'session', label: 'Gemini 5-hour' },
     { kind: 'session', label: 'Claude/GPT 5-hour' }
   ];
-
   assert.equal(limitProviderCompactWindowLabel('antigravity', windows[0], windows), 'Gemini');
   assert.equal(limitProviderCompactWindowLabel('antigravity', windows[1], windows), 'Claude/GPT');
   assert.equal(limitProviderCompactWindowLabel('codex', windows[0], windows), '');
+  const single = { kind: 'weekly', label: 'Gemini Weekly', usedPercent: 25 };
+  assert.equal(limitProviderCompactWindowLabel('antigravity', single, [single]), 'Gemini Weekly');
+  assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', single, [single]), '', 'period is already in the main label');
+  const grouped = [
+    { kind: 'weekly', label: 'Gemini Weekly', usedPercent: 25 },
+    { kind: 'session', label: 'Claude/GPT 5-hour', usedPercent: 25 }
+  ];
+  assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', grouped[0], grouped), 'Weekly');
+  assert.equal(limitProviderCompactWindowLabel('antigravity', null), '');
+  assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', null), '');
+});
+
+test('Home labels name each Antigravity model group with its period', () => {
+  assert.equal(limitProviderHomeWindowLabel('antigravity', { kind: 'session', label: 'Gemini 5-hour' }), 'Gemini 5-hour');
+  assert.equal(limitProviderHomeWindowLabel('antigravity', { kind: 'weekly', label: 'Claude/GPT weekly' }), 'Claude/GPT Weekly');
+  assert.equal(limitProviderHomeWindowLabel('antigravity', { kind: 'weekly', label: 'Gemini Pro' }), 'Gemini Pro', 'a legacy pool keeps its name');
+  assert.equal(limitProviderHomeWindowLabel('zai', { kind: 'daily', label: 'GLM-5 daily' }), 'GLM-5 daily');
+  assert.equal(limitProviderHomeWindowLabel('codex', { kind: 'session', label: 'Gemini 5-hour' }), '');
+  assert.equal(limitProviderHomeWindowLabel('antigravity', null), '');
 });
 
 test('Antigravity quota presentation parses grouped period labels once', () => {
@@ -132,9 +152,6 @@ test('compact Antigravity windows surface critical weekly quotas per model group
   ];
 
   assert.deepEqual(limitProviderCompactWindows('antigravity', windows), [windows[1], windows[2]]);
-  const selected = limitProviderCompactWindows('antigravity', windows);
-  assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', selected[0], selected), 'Weekly');
-  assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', selected[1], selected), '5-hour');
 });
 
 test('compact Antigravity windows keep 5-hour primary until weekly is critical with multiple groups', () => {
@@ -162,10 +179,6 @@ test('compact Antigravity single groups retain both periods in session-first ord
       const selected = limitProviderCompactWindows({ provider: 'antigravity' }, windows);
       assert.deepEqual(selected, [session, weekly]);
       assert.deepEqual(windows, [weekly, session], 'selection does not mutate the provider');
-      for (const [window, period] of [[session, '5-hour'], [weekly, 'Weekly']]) {
-        assert.equal(limitProviderCompactWindowLabel('antigravity', window, selected), `${group} ${period}`);
-        assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', window, selected), '', 'period is already in the main label');
-      }
     }
   }
 });
@@ -185,13 +198,9 @@ test('compact Antigravity single windows keep their group and period without fil
   for (const [kind, period] of [['session', '5-hour'], ['weekly', 'Weekly']]) {
     const window = { kind, label: `Gemini ${period}`, usedPercent: 25 };
     assert.deepEqual(limitProviderCompactWindows('antigravity', [window]), [window]);
-    assert.equal(limitProviderCompactWindowLabel('antigravity', window, [window]), `Gemini ${period}`);
-    assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', window, [window]), '');
   }
   assert.deepEqual(limitProviderCompactWindows('antigravity'), []);
   assert.deepEqual(limitProviderCompactWindows('antigravity', null), null);
-  assert.equal(limitProviderCompactWindowLabel('antigravity', null), '');
-  assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', null), '');
 });
 
 test('compact Antigravity retains the two tightest groups when more than two are visible', () => {
@@ -203,8 +212,6 @@ test('compact Antigravity retains the two tightest groups when more than two are
   ];
   const selected = limitProviderCompactWindows('antigravity', windows);
   assert.deepEqual(selected, [windows[1], windows[3]]);
-  assert.equal(limitProviderCompactWindowLabel('antigravity', selected[1], selected), 'Gemini 4 Argon');
-  assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', selected[1], selected), 'Weekly');
 });
 
 test('compact Antigravity windows prefer 5-hour on ties and preserve legacy pools', () => {
@@ -248,7 +255,7 @@ test('compact Codex windows never backfill canonical lanes with additional quota
   );
 });
 
-test('compact Antigravity labels preserve legacy and mixed-payload fallbacks', () => {
+test('Antigravity legacy and mixed payloads keep their windows and own names', () => {
   const legacy = [
     { kind: 'session', label: 'Gemini Pro', usedPercent: 25 },
     { kind: 'session', label: 'Gemini Flash', usedPercent: 25 }
@@ -256,9 +263,9 @@ test('compact Antigravity labels preserve legacy and mixed-payload fallbacks', (
 
   const mixed = [{ kind: 'session', label: 'Gemini 5-hour' }, legacy[0]];
   assert.equal(limitProviderCompactWindows('antigravity', mixed), mixed);
-  assert.equal(limitProviderCompactWindowLabel('antigravity', mixed[0], mixed), '');
-  assert.equal(limitProviderCompactWindowPeriodLabel('antigravity', mixed[0], mixed), '');
-  assert.equal(limitProviderCompactWindowLabel('antigravity', legacy[0], legacy), '');
+  assert.equal(limitProviderHomeWindows('antigravity', mixed), mixed);
+  assert.equal(limitProviderHomeWindowLabel('antigravity', mixed[0]), 'Gemini 5-hour');
+  assert.equal(limitProviderHomeWindowLabel('antigravity', legacy[0]), 'Gemini Pro');
 });
 
 test('limitResetRemainingMs keeps future resets, briefly marks reset time, and expires old timestamps', () => {
@@ -416,7 +423,7 @@ test('Cursor limits render every normalized quota and format on-demand spend exp
 
 function runHomeLimitModule(rows, boundaryLabels = {}) {
   const app = readRendererFile('app.js');
-  const homeLimits = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
+  const homeLimits = functionBody(app, 'homeLimitResetText', 'renderHomeModelModule');
   function createNode(tagName) {
     return {
       tagName,
@@ -424,8 +431,13 @@ function runHomeLimitModule(rows, boundaryLabels = {}) {
       className: '',
       textContent: '',
       children: [],
-      classList: { add() {} },
+      attributes: {},
+      classList: { add() {}, remove() {}, toggle() {} },
       style: { setProperty() {} },
+      setAttribute(name, value) { this.attributes[name] = value; },
+      removeAttribute(name) { delete this.attributes[name]; },
+      addEventListener() {},
+      querySelector() { return null; },
       append(...children) { this.children.push(...children); }
     };
   }
@@ -439,19 +451,26 @@ function runHomeLimitModule(rows, boundaryLabels = {}) {
     homeLimitWindowLabel: (window) => window.label,
     formatHomeLimitWindowValue: () => '',
     formatLimitBoundary: (window) => boundaryLabels[window.resetsAt] || '',
-    limitProviderPresentationApi: { limitProviderCompactWindowPeriodLabel: () => '' },
-    limitWindowsView: createLimitWindowsView({}),
+    limitProviderPresentationApi: { limitResetRemainingMs: () => null },
+    limitWindowsView: createLimitWindowsView({ document: { createElement: createNode } }),
+    optionalFiniteNumber: (value) => value == null ? null : Number(value),
+    isCreditsWindow: () => false,
     state: { settings: {} },
+    homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
     t: (key, values) => key === 'home.reset' ? `Reset ${values.value}` : key
   };
   vm.runInNewContext(`${homeLimits}\nresult = renderHomeLimitModule();`, context);
   return body;
 }
 
+function homeLimitResetBody(source) {
+  return source.slice(0, source.indexOf('\n}\n'));
+}
+
 test('Limits and Home distinguish resets, expiries, and simultaneous boundaries', () => {
   const app = readRendererFile('app.js');
   const limitWindow = viewBody('limitWindowNode', 'renderProviderWindows');
-  const homeLimits = functionBody(app, 'renderHomeLimitModule', 'renderHomeModelModule');
+  const homeLimits = functionBody(app, 'homeLimitResetText', 'renderHomeLimitModule');
 
   // The wording lives beside the reset arithmetic it reads, so the Limits page
   // and the edge dock render the same line from the same function.
@@ -471,7 +490,9 @@ test('Limits and Home distinguish resets, expiries, and simultaneous boundaries'
   assert.equal(limitBoundaryText({ resetsAt: '' }), '');
   assert.match(app, /const formatLimitBoundary = limitProviderPresentationApi\.limitBoundaryText;/);
   assert.match(limitWindow, /window\?\.resetsAt\s*\? formatLimitBoundary\(window\)/);
-  assert.match(homeLimits, /window\.resetsAt\s*\?\s*formatLimitBoundary\(window\)/);
+  assert.match(homeLimits, /window\?\.resetsAt\s*\?\s*formatLimitBoundary\(window\)/);
+  // Home shortens every timed boundary to a countdown; the wording above stays its accessible name.
+  assert.doesNotMatch(homeLimitResetBody(homeLimits), /boundaryKind/, 'every timed boundary shortens to a countdown on Home');
   assert.doesNotMatch(app, /noActiveLimitWindow|formatResetDuration/);
 });
 
@@ -491,14 +512,15 @@ test('Home omits reset rows that have no visible reset content', () => {
     }
   ], { future: 'Reset 1h', expiry: 'Expires 7d' });
 
+  // Each row is name + reading, with a reset beside the name only when it has text.
   const metrics = body.children[0].children[1].children;
-  assert.equal(metrics[0].children.length, 1);
-  assert.equal(metrics[1].children.length, 1);
-  assert.equal(metrics[2].children.length, 2);
+  assert.equal(metrics[0].children.length, 2);
+  assert.equal(metrics[1].children.length, 2);
+  assert.equal(metrics[2].children.length, 3);
   assert.equal(metrics[2].children[1].textContent, 'Reset 1h');
-  assert.equal(metrics[3].children.length, 2);
+  assert.equal(metrics[3].children.length, 3);
   assert.equal(metrics[3].children[1].textContent, 'Expires 7d');
-  assert.equal(metrics[4].children.length, 2);
+  assert.equal(metrics[4].children.length, 3);
   assert.equal(metrics[4].children[1].textContent, 'Reset 6d 23h');
 });
 
@@ -1727,8 +1749,11 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
   const valueFormatter = functionBody(app, 'formatHomeLimitWindowValue', 'providersByLimitProviderId');
 
   assert.match(homeLabel, /if \(window\?\.kind === 'billing'\) \{/);
-  assert.match(homeLabel, /limitProviderCompactWindowLabel\(providerId, window, visibleWindows\)/);
-  assert.match(homeRows, /limitProviderCompactWindows\(\s*provider,\s*\(provider\.windows \|\| \[\]\)\.filter\(/);
+  assert.match(homeLabel, /limitProviderHomeWindowLabel\(providerId, window\)/);
+  // Hidden rows are filtered before either pick: every window for the row layout, the compact pick for the classic layouts.
+  assert.match(homeRows, /const shown = \(provider\.windows \|\| \[\]\)\.filter\(/);
+  assert.match(homeRows, /limitProviderHomeWindows\(provider, shown\)/);
+  assert.match(homeRows, /limitProviderCompactWindows\(provider, shown\)/);
   assert.match(homeLabel, /const label = String\(window\?\.label \|\| ''\)\.trim\(\);/);
   assert.match(homeLabel, /if \(label\) return label;/);
   assert.match(homeLabel, /billing: 'home\.limit\.billing'/);
@@ -1738,11 +1763,10 @@ test('Home uses explicit billing labels so Copilot Premium and Chat stay distinc
   assert.doesNotMatch(homeLabel, /kind === 'balance'/);
   assert.match(homeModule, /const showUsed = Boolean\(state\.settings\?\.showLimitUsed\);/);
   assert.match(homeModule, /value\.textContent = window\.value \|\| formatHomeLimitWindowValue\(window, showUsed\);/);
-  assert.match(homeModule, /limitProviderCompactWindowPeriodLabel\(row\.providerId, window, row\.windows\)/);
-  assert.match(homeModule, /`\$\{periodLabel\} · \$\{resetLabel\}`/);
   assert.match(valueFormatter, /if \(isCreditsWindow\(window\)\) \{/);
   assert.match(valueFormatter, /formatCompactMoney\(window\.remaining, window\.currency, state\.settings\?\.compactTokenUnits, currentLocale\(\)\)/);
-  assert.match(valueFormatter, /`\$\{formatPercent\(percent\)\} \$\{limitModeSuffix\(showUsed\)\}`/);
+  assert.match(valueFormatter, /return formatPercent\(percent\);/);
+  assert.match(homeModule, /t\(showUsed \? 'settings\.limits\.barsUsed' : 'settings\.limits\.barsRemaining'\)/, 'the heading names the reading mode once');
   assert.doesNotMatch(i18n, /home\.limit\.(balance|leftPercent|leftAmount)/);
 });
 
@@ -6101,9 +6125,8 @@ test('iCloud local seeding does not cache a result from a replaced runtime', asy
 
 test('GLM Home daily windows retain returned model names instead of the generic daily label', () => {
   const window = { kind: 'daily', label: 'arbitrary-model-name' };
-  assert.equal(limitProviderCompactWindowLabel('zai', window), window.label);
-  assert.equal(limitProviderCompactWindowPeriodLabel('zai', window), '');
-  assert.equal(limitProviderCompactWindowLabel('zaiteam', window), '');
+  assert.equal(limitProviderHomeWindowLabel('zai', window), window.label);
+  assert.equal(limitProviderHomeWindowLabel('zaiteam', window), '');
 });
 
 test('Z.ai token-pool windows print an absolute token pair through the detail slot', () => {
