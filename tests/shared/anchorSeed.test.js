@@ -366,3 +366,75 @@ test('a cold preview keeps the windows its scan collected in, and brings its lim
   assert.deepEqual(shown.limits, limits);
   assert.equal(aggregateDevices([shown], 0, NOW.getTime()).periods.today.totalTokens, 0);
 });
+
+function withArchive(callback) {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { retainDailyHistory } = require('../../src/shared/dailyHistoryArchive');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-seed-history-'));
+  const archivePath = path.join(dir, 'daily-history-calendars.json');
+  const day = (date, tokens) => ({
+    date,
+    activeTimeMs: 0,
+    clients: [{ client: 'claude', modelId: 'opus', tokens: { input: tokens, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: 1, messages: 1 }]
+  });
+  try {
+    // What the last session's graphs left behind, written the way the collector writes it.
+    retainDailyHistory([{ contributions: [day('2026-08-05', 300), day('2026-08-06', 400), day('2026-08-07', 500)] }],
+      { path: archivePath, timeZone: 'Asia/Shanghai', todayKey: '2026-08-07' });
+    return callback(archivePath, fs);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('the seed shows History from the daily archive until the first graph lands', () => {
+  withArchive((archivePath, fs) => {
+    const before = fs.readFileSync(archivePath, 'utf8');
+    const record = deviceRecordFromAnchor(anchorFixture({ dateKey: '2026-08-07' }), seedOptions({
+      dailyHistoryArchiveEnabled: true,
+      dailyHistoryArchiveOptions: { path: archivePath }
+    }));
+
+    assert.equal(record.historyAvailable, true);
+    assert.deepEqual(record.history.daily.filter(day => day.tokens > 0).map(day => [day.date, day.tokens]),
+      [['2026-08-05', 300], ['2026-08-06', 400], ['2026-08-07', 500]]);
+    // Without a fresh graph the archive cannot vouch for every active day.
+    assert.equal(record.history.summary.activeDaysComplete, false);
+    // What Trends and Home read in local mode.
+    const { aggregateHistory } = require('../../src/shared/usage');
+    assert.equal(aggregateHistory([record]).daily.reduce((sum, day) => sum + day.tokens, 0), 1_200);
+    // Read-only: a seed is not an observation.
+    assert.equal(fs.readFileSync(archivePath, 'utf8'), before);
+  });
+});
+
+test('the seed leaves History to the first scan when History or the archive is off, or the archive is unreadable', () => {
+  withArchive((archivePath, fs) => {
+    const options = { dailyHistoryArchiveOptions: { path: archivePath } };
+    for (const overrides of [
+      { ...options },
+      { ...options, dailyHistoryArchiveEnabled: true, historyEnabled: false }
+    ]) {
+      const record = deviceRecordFromAnchor(anchorFixture(), seedOptions(overrides));
+      assert.equal(Object.prototype.hasOwnProperty.call(record, 'history'), false);
+    }
+    fs.writeFileSync(archivePath, '{ not json');
+    const record = deviceRecordFromAnchor(anchorFixture(), seedOptions({ ...options, dailyHistoryArchiveEnabled: true }));
+    assert.equal(record.today.totalTokens, 1_000, 'an unreadable archive still seeds the totals');
+    assert.equal(Object.prototype.hasOwnProperty.call(record, 'history'), false);
+  });
+});
+
+test('first-scan previews keep the seeded History', () => {
+  withArchive((archivePath) => {
+    const seed = deviceRecordFromAnchor(anchorFixture(), seedOptions({
+      dailyHistoryArchiveEnabled: true,
+      dailyHistoryArchiveOptions: { path: archivePath }
+    }));
+    const record = seedWithColdPreview(seed, { today: periodWith(2_000) }, NOW);
+    assert.equal(record.today.totalTokens, 2_000);
+    assert.equal(record.history, seed.history);
+  });
+});
