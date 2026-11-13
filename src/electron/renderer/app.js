@@ -11427,7 +11427,7 @@ function clientEditionHealthDetail(clientId) {
 function sameRenderedNode(current, next) {
   if (current.nodeType !== next.nodeType) return false;
   if (current.nodeType !== Node.ELEMENT_NODE) return true;
-  if (current.tagName !== next.tagName || current.className !== next.className) return false;
+  if (current.tagName !== next.tagName || current.className !== next.className || current.id !== next.id) return false;
   const currentAction = current.dataset?.healthAction || '';
   const nextAction = next.dataset?.healthAction || '';
   return currentAction === nextAction;

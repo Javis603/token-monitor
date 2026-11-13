@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 
@@ -759,4 +760,22 @@ test('the session context gauge has its own setting, separate from AI Tool Limit
   assert.doesNotMatch(sessionList, /className = 'home-activity-settings'/);
   // The preference has to invalidate the painted rows, the way showLimitUsed does.
   assert.match(app, /sessionContextMetric: state\.settings\?\.sessionContextMetric === 'remaining' \? 'remaining' : 'used'/);
+});
+
+
+test('health reconciliation preserves control ownership when edition rows shift', () => {
+  const app = readRendererFile('app.js');
+  const context = vm.createContext({ Node: { ELEMENT_NODE: 1 } });
+  vm.runInContext(functionBody(app, 'sameRenderedNode', 'patchRenderedNode'), context);
+  const node = (id, tagName = 'INPUT') => ({ nodeType: 1, id, tagName, className: '', dataset: {} });
+  const same = (current, next) => context.sameRenderedNode(current, next);
+  for (const prefix of ['toolTrackEnabled-', 'qoderEditionVisibility-', 'qoderEditionPin-']) {
+    const tag = prefix === 'toolTrackEnabled-' ? 'INPUT' : 'BUTTON';
+    assert.equal(same(node(prefix + 'qoder', tag), node(prefix + 'qodercn', tag)), false);
+    assert.equal(same(node(prefix + 'qodercn', tag), node(prefix + 'qoder', tag)), false);
+    assert.equal(same(node(prefix + 'qodercn', tag), node(prefix + 'qodercn', tag)), true);
+  }
+  assert.equal(same(node(''), node('')), true);
+  assert.equal(same({ ...node('rescan'), dataset: { healthAction: 'rescan' } },
+    { ...node('rescan'), dataset: { healthAction: 'reveal' } }), false);
 });
