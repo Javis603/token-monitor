@@ -159,6 +159,23 @@ test('a retained percentage readout cancels its previous loop before a static up
   }
 });
 
+test('a non-reset render supersedes the count-up on a retained value node', () => {
+  for (const started of [false, true]) {
+    const h = ringHarness();
+    h.refresh([h.cell(5, { resetsAt: '2026-09-30' })]);
+    const current = h.refresh([h.cell(100, { resetsAt: '2026-10-01' })])[0];
+    if (started) { h.frame(100); h.frame(200); }
+    const snapshot = h.context.captureRingResetMotion();
+    current.dataset.ringRemaining = current.dataset.ringDisplay = '20';
+    current.value.textContent = '20%';
+    h.context.animateRingResets(snapshot);
+    h.frame(500);
+    assert.equal(current.value.textContent, '20%');
+    h.context.animateRingResets(h.context.captureRingResetMotion()); h.frame(600);
+    assert.equal(current.value.textContent, '20%', 'an unchanged push does not resume the superseded target');
+  }
+});
+
 test('a real reset sweeps the arc, counts the figure up and lands the flare', () => {
   const h = ringHarness();
   h.refresh([h.cell(5, { resetsAt: '2026-09-30T12:00:00.000Z' })]);

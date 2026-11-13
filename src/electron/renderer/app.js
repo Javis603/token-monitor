@@ -2826,7 +2826,7 @@ function updateRow(row, { name, subtitle, subtitleIdentity, subagentCountLabel, 
       const count = document.createElement('span');
       count.className = 'session-subagent-count';
       const content = subtitleEl.querySelector('.overflow-text-content') || subtitleEl;
-      content.replaceChildren(subtitleTextEl, count);
+      rendererDom.reconcileChildren(content, [subtitleTextEl, count]);
       bindHoverMarquee(subtitleTextEl);
     }
   }

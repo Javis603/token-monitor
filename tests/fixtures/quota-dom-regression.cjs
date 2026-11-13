@@ -42,6 +42,15 @@
     const before = focus.textContent; focus.click(); await settle();
     assert(focus.textContent !== before, 'retained quota page button advances');
     focus.click(); await settle(); assert(focus.textContent === before, 'retained quota page button wraps using the current page');
+    document.querySelectorAll('.notch-pager button')[1].click(); await settle();
+    const oldStrip = document.querySelector('.notch-limits'), savedLeft = oldStrip.scrollLeft;
+    assert(savedLeft > 0, 'Limits account page really scrolled');
+    document.querySelector('.notch-tab[data-page="home"]').click(); await settle();
+    payload.expanded = false; render(payload); await settle();
+    payload.expanded = true; render(payload); await settle();
+    assert(!oldStrip.isConnected, 'reopen retires hidden Limits tree');
+    document.querySelector('.notch-tab[data-page="limits"]').click(); await settle();
+    assert(Math.abs(document.querySelector('.notch-limits').scrollLeft - savedLeft) < 1, 'retired Limits page restores saved horizontal page after mounting');
     document.querySelector('.notch-tab[data-page="home"]').click(); await settle();
     const fuel = document.querySelector('.notch-fuel'); fuel.style.maxWidth = '160px';
     const entry = payload.cells.find(cell => cell.kind === 'provider');

@@ -203,6 +203,9 @@ app.whenReady().then(async () => {
   const capture = async () => { await js('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'); return win.webContents.capturePage(); };
   await waitFor("state.stats?.periods?.today?.totalTokens === 125000", 'App initialization');
   if (process.env.TM_DOM_REGRESSION === '1') {
+    // DOM focus coverage remains available without OS desktop activation.
+    win.webContents.debugger.attach('1.3');
+    await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
     win.focus();
     console.log(await js(fs.readFileSync(path.join(root, 'tests/fixtures/app-dom-regression.cjs'), 'utf8')));
     assertConsoleClean();

@@ -72,6 +72,9 @@
     updateRow(row, { ...options, subtitle: '12:00 · 2 calls', reasoningEffort: '', modelLabel: '' });
     updateRow(row, options);
     assert(row.querySelector('.row-subtitle').textContent === options.subtitle, 'metadata/plain/metadata transition leaves no stale plain text');
+    updateRow(row, { ...options, subagentCountLabel: '2 agents', subtitleIdentity: options.subtitle });
+    updateRow(row, options);
+    assert(!row.querySelector('.session-subagent-count') && row.querySelector('.row-subtitle').textContent === options.subtitle, 'split metadata subtitle toggles without stale text or counts');
   }
   state.openSession = { kind: 'session', client: 'codex', sessionId: 'test', period: 'today', title: 'Test session' };
   const detail = { found: true, exchanges: [{ promptPreview: 'Keep my exchange open', startedAt: '2026-11-13T10:00:00Z',

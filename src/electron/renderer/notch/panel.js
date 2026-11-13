@@ -1136,7 +1136,7 @@
       return node;
     }
 
-    function renderSessions(pageNode, nowMs, scroll = {}) {
+    function renderSessions(pageNode, nowMs) {
       const sessions = cell('stat:sessions')?.sessions || [];
       const states = sessions.map((row) => presentation.sessionActivityState(row, nowMs));
       // The shared session projection already orders these rows. Partition the
@@ -1194,8 +1194,6 @@
       if (!recent.length) list.append(text('notch-empty', t('notch.noSessions')));
       right.append(list);
       pageNode.replaceChildren(left, el('div', 'notch-rule'), right);
-      if (activeList) activeList.scrollTop = scroll.active || 0;
-      list.scrollTop = scroll.recent || 0;
     }
 
     // ---- Breakdown --------------------------------------------------------------
@@ -1332,18 +1330,24 @@
       if (pageKeys.has(page)) node.classList.remove('is-entering');
       pageKeys.set(page, key);
       const pageNode = pageNodes.get(page);
+      const previousLimitStrip = page === 'limits' ? pageNode.querySelector('.notch-limits') : null;
       const scroll = page === 'sessions' ? captureSessionScroll(pageNode) : null;
       const snapshot = page === view.page ? captureRolls(pageNode) : new Map();
       const next = el('div');
       if (page.startsWith(PLUGIN_PAGE_PREFIX)) renderPluginPage(pageNode, page.slice(PLUGIN_PAGE_PREFIX.length));
       else if (page === 'home') renderHome(next, nowMs);
       else if (page === 'limits') renderLimits(next, nowMs);
-      else if (page === 'sessions') renderSessions(next, nowMs, scroll);
+      else if (page === 'sessions') renderSessions(next, nowMs);
       else renderBreakdown(next, nowMs);
       if (!page.startsWith(PLUGIN_PAGE_PREFIX) && pluginContent?.hasTarget(`notch.${page}.content`)) {
         const native = el('div', 'plugin-native-content'); native.append(...next.childNodes); next.append(native);
       }
       if (!page.startsWith(PLUGIN_PAGE_PREFIX)) dom.reconcileChildren(pageNode, [...next.childNodes]);
+      if (page === 'sessions') {
+        const active = pageNode.querySelector('.notch-active-list'), recent = pageNode.querySelector('.notch-recent-list');
+        if (active) active.scrollTop = scroll.active;
+        if (recent) recent.scrollTop = scroll.recent;
+      }
       if (!page.startsWith(PLUGIN_PAGE_PREFIX) && pluginContent?.hasTarget(`notch.${page}.content`)) {
         pluginContent.render(`notch.${page}.content`, pageNode.querySelector('.plugin-native-content'), { surface: 'notch', page, period: view.breakdownPeriod, nativeData: payload });
       }
@@ -1352,7 +1356,11 @@
       overflowText.refresh();
       playRolls(pageNode, snapshot);
       if (page === 'home') { fitTokenFigure(pageNode.querySelector('.notch-big'), 40); fitHomeFuel(); }
-      if (page === 'limits') fitLimitPlans();
+      if (page === 'limits') {
+        fitLimitPlans();
+        const strip = pageNode.querySelector('.notch-limits');
+        if (strip !== previousLimitStrip) strip.scrollLeft = view.limitPage * limitPageWidth(strip);
+      }
       if (page === 'breakdown') fitTokenFigure(pageNode.querySelector('.notch-breakdown-tokens'), 30);
     }
 

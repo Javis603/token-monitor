@@ -95,8 +95,15 @@
     function reconcileChildren(current, nodes) {
       if (!rendered.has(current)) remember(current);
       const previous = rendered.get(current);
+      // Scalar native writers settle via textContent, replacing recorded text
+      // nodes. Use their live children without disturbing structured controls.
+      let owned = previous.children;
+      if (nodes.every(child => child.nodeType === 3) && previous.children.some(child => child.parentNode !== current)) {
+        const outlets = new Set(previous.children.flatMap(child => nodesFor(child)));
+        owned = [...current.childNodes].filter(child => !outlets.has(child));
+      }
       const available = new Map();
-      for (const child of previous.children) {
+      for (const child of owned) {
         const id = key(child);
         if (!available.has(id)) available.set(id, []);
         available.get(id).push(child);
@@ -106,7 +113,7 @@
         return retained ? patch(retained, child) : remember(child);
       });
       // Only remove renderer-owned nodes, never plugin siblings.
-      placeChildren(current, children, previous.children);
+      placeChildren(current, children, owned);
       rendered.set(current, { ...previous, children });
       return children;
     }

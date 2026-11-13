@@ -1,4 +1,4 @@
-/* global state, surface, render, appendLiveRate, t, document, requestAnimationFrame, MouseEvent, PointerEvent */
+/* global state, surface, render, ringNumberAnimations, appendLiveRate, t, document, requestAnimationFrame, MouseEvent, PointerEvent */
 'use strict';
 (async () => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -11,6 +11,39 @@
       assert(document.querySelector('.edge-dock-cell') === cell, 'rail cell identity');
       assert(document.activeElement === cell, 'rail cell focus survives pushes');
     }
+    const host = document.createElement('div'); document.body.append(host);
+    const readout = document.createElement('span'); readout.dataset.key = 'counter'; readout.textContent = '100';
+    const outlet = document.createElement('input'); outlet.value = 'draft';
+    const dom = window.TokenMonitorDomReconcile.create({ nodesFor: node => node === readout ? [outlet] : [] });
+    dom.reconcileChildren(host, [readout]); outlet.focus();
+    for (const mode of ['count', 'roll']) {
+      const from = Number(readout.textContent), to = from + 100;
+      const animation = window.TokenMonitorTokenNumberAnimation;
+      const done = mode === 'count' ? animation.beginCount(readout, from, to, String) : animation.beginRoll(readout, String(from), String(to), true);
+      done();
+      for (let push = 0; push < 2; push++) {
+        const next = document.createElement('span'); next.dataset.key = 'counter'; next.textContent = String(to);
+        dom.reconcileChildren(host, [next]);
+        assert(readout.textContent === String(to), `${mode} settled text stays exact across unchanged pushes`);
+        assert(host.firstChild === readout && outlet.value === 'draft' && document.activeElement === outlet, 'animation replacement keeps the readout and genuine plugin sibling');
+      }
+    }
+    host.remove();
+    const record = { provider: 'codex', accountKey: 'ring-loop', status: 'ok', windows: [{ kind: 'session', remainingPercent: 5, resetsAt: '2026-01-01T00:00:00Z' }] };
+    const payload = { ...state.payload, appearance: { ...state.payload.appearance, reduceMotion: 'off' } };
+    const push = () => {
+      payload.cells = window.TokenMonitorEdgeDockPresentation.buildEdgeDockCells({ limits: { providers: [record] } }, { items: [{ type: 'limit', provider: 'codex' }] });
+      render(payload);
+    };
+    push(); await settle();
+    record.windows[0].remainingPercent = 100; record.windows[0].resetsAt = '2026-01-02T00:00:00Z'; push(); await settle();
+    const value = document.querySelector('.edge-dock-value');
+    assert(ringNumberAnimations.has(value), 'actual rail reset starts a percentage loop');
+    record.windows[0].remainingPercent = 20; push(); await settle();
+    assert(document.querySelector('.edge-dock-value') === value && !ringNumberAnimations.has(value), 'actual non-reset rail render cancels the old percentage loop');
+    assert(!document.querySelector('.edge-dock-ring-fill').getAnimations().some(animation => animation.constructor.name === 'Animation' && animation.playState === 'running'), 'non-reset rail render cancels the superseded refill arc');
+    await new Promise(resolve => setTimeout(resolve, 1800));
+    assert(value.textContent === '20%', 'superseded rail loop cannot overwrite the settled current reading');
     return 'PASS actual rail cell identity and focus';
   }
   const row = { key: 'codex:dom-proof', client: 'codex', sessionId: 'dom-proof', title: 'An intentionally long ongoing engineering task title for reading across updates',
@@ -56,6 +89,21 @@
       render(next); await settle();
       assert(document.querySelector('.notch-home-main') === main, 'Notch Home updates without replacing a scrubbed page');
     }
+    next.appearance = { ...next.appearance, reduceMotion: 'on' };
+    next.cells.find(cell => cell.id === 'stat:sessions').sessions = [
+      ...Array.from({ length: 12 }, (_, index) => ({ ...row, key: `active-${index}`, sessionId: `active-${index}` })),
+      ...Array.from({ length: 12 }, (_, index) => ({ ...row, key: `recent-${index}`, sessionId: `recent-${index}`, liveActivity: null, lastUsedAt: '2026-10-01T00:00:00Z' }))
+    ];
+    render(next); document.querySelector('.notch-tab[data-page="sessions"]').click(); await settle();
+    const active = document.querySelector('.notch-active-list'), recent = document.querySelector('.notch-recent-list');
+    assert(active.scrollHeight > active.clientHeight && recent.scrollHeight > recent.clientHeight, 'both session lists really overflow');
+    active.scrollTop = 100; recent.scrollTop = 75;
+    document.querySelector('.notch-tab[data-page="home"]').click(); await settle();
+    next.expanded = false; render(next); await settle();
+    next.expanded = true; render(next); await settle();
+    assert(!active.isConnected && !recent.isConnected, 'reopen retires the hidden Sessions tree');
+    document.querySelector('.notch-tab[data-page="sessions"]').click(); await settle();
+    assert(document.querySelector('.notch-active-list').scrollTop === 100 && document.querySelector('.notch-recent-list').scrollTop === 75, 'retired session lists regain saved scroll after mounting');
   }
   if (surface === 'notch') {
     next.cells.push({ id: 'stat:month', available: true, totalTokens: 200, clients: [], models: [] });

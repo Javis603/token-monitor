@@ -1057,12 +1057,21 @@ function captureRingResetMotion(scope = railNode) {
   const snapshot = new Map();
   for (const cell of scope?.querySelectorAll('.edge-dock-cell[data-ring-motion-key]') || []) {
     const key = cell.dataset.ringMotionKey;
+    const circle = cell.querySelector('.edge-dock-ring-fill');
     const entry = {
       remainingPercent: cell.dataset.ringRemaining,
       displayPercent: cell.dataset.ringDisplay,
       resetsAt: cell.dataset.ringResetAt,
-      motion: ringResetMotions.get(cell.querySelector('.edge-dock-ring-fill'))
+      motion: ringResetMotions.get(circle)
     };
+    // The next render owns the reading, including non-reset updates. Valid
+    // resumed motions are registered again by animateRingResets below.
+    ringResetMotions.delete(circle);
+    for (const animation of circle?.getAnimations?.() || []) animation.cancel();
+    const value = cell.querySelector('.edge-dock-value');
+    const number = ringNumberAnimations.get(value);
+    if (number) cancelAnimationFrame(number.handle);
+    ringNumberAnimations.delete(value);
     // Ambiguous identities are safer left static than animated on the wrong cell.
     snapshot.set(key, snapshot.has(key) ? null : entry);
   }
@@ -1221,7 +1230,7 @@ function animateRingResets(snapshot, scope = railNode) {
     ringResetMotions.set(circle, motion);
   }
   function startMotion({ cell, circle, motion }, now) {
-    if (!circle.isConnected || !cell.isConnected || prefersReducedMotion()) return;
+    if (!circle.isConnected || !cell.isConnected || prefersReducedMotion() || ringResetMotions.get(circle) !== motion) return;
     if (motion.startedAt === null) motion.startedAt = now;
     const { fromRemaining, toRemaining, display, duration, startedAt } = motion;
     animateRingArc(circle, fromRemaining, toRemaining, duration, startedAt);

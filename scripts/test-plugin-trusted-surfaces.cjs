@@ -87,6 +87,12 @@ app.whenReady().then(async () => {
     windows.set(kind, win);
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) { errors.push(message); console.log(kind, message); } });
     await win.loadFile(path.join(root, 'src/electron/renderer/edgeDock/index.html'), { query: { surface: kind } });
+    if (process.env.TM_DOM_REGRESSION === '1') {
+      // Keep DOM focus events testable on a locked/background desktop. This
+      // exercises Chromium focus behavior, not OS window activation acceptance.
+      win.webContents.debugger.attach('1.3');
+      await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
+    }
     await wait(win, 'state.payload !== null', `${kind} native renderer`);
     await pause(100);
     fs.writeFileSync(path.join(evidence, `${kind}-native.png`), (await win.webContents.capturePage()).toPNG());

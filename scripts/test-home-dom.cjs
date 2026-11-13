@@ -22,6 +22,9 @@ app.whenReady().then(async () => {
   const page = path.join(scratch, 'fixture.html');
   fs.writeFileSync(page, '<!doctype html><html><head></head><body></body></html>');
   await win.loadFile(page);
+  // Exercise DOM focus independently of desktop activation on CI/locked hosts.
+  win.webContents.debugger.attach('1.3');
+  await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true });
   win.focus();
   const setup = fs.readFileSync(path.join(root, 'tests/fixtures/home-dom-renderer.cjs'), 'utf8');
   const result = await win.webContents.executeJavaScript(`(async () => { const root = ${JSON.stringify(root)}; const baseline = ${Boolean(process.env.TM_HOME_BASE)}; const assertPreservation = ${!process.env.TM_HOME_BASE || Boolean(process.env.TM_HOME_ASSERT)}; ${setup}\n${functions}\nreturn await check(); })()`);
