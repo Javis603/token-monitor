@@ -28,7 +28,7 @@ Agent 在資料庫旁邊執行 Linux 版 tokscale，再把正規化後的用量�
 
 ## 2. 在 WSL 安裝 Headless Agent
 
-Token Monitor 需要 Node.js 22.15.0 或更新版本。安裝前請先在 WSL 內檢查 Node.js 與 npm；如果 Node.js 版本過舊，請先完成升級。
+Token Monitor 需要 Node.js 22.22.0 或更新版本。安裝前請先在 WSL 內檢查 Node.js 與 npm；如果 Node.js 版本過舊，請先完成升級。
 
 ```bash
 node --version

@@ -67,7 +67,7 @@ See the [README and image requirements](publishing.md#readme-content-and-images)
 
 ## Create a community catalog
 
-Build from your plugin source directory in a Token Monitor checkout using Node 22.15 or newer:
+Build from your plugin source directory in a Token Monitor checkout using Node 22.22 or newer:
 
 ```sh
 node scripts/build-plugin-package.js /path/to/my-panel /path/to/my-panel.tmplugin

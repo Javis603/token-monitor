@@ -86,7 +86,7 @@ test('native Cursor WAL writes arrive while read-only SQLite SHM changes stay ig
   const databasePath = path.join(f.roots[0], 'state.vscdb');
   const db = new DatabaseSync(databasePath);
   db.exec('PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0; CREATE TABLE fixture (value INTEGER)');
-  const watcher = f.collector.openWatch(require('chokidar'), {
+  const watcher = f.collector.openWatch(require('../../src/shared/fileWatcher'), {
     dirs: f.roots, clients: 'cursor', cursorDesktopRoots: f.roots, usePolling: false
   });
   const events = [];
@@ -238,7 +238,7 @@ for (const scenario of ['completed', 'generating', 'windows-candidates', 'window
 
 function runtimeFixture(t, { overlappingRoot = false } = {}) {
   const f = fixture(t);
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const cursorAuth = require('../../src/shared/providers/cursor/auth');
   const originalWatch = chokidar.watch;
   const originalSync = cursorAuth.runCursorSync;

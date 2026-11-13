@@ -516,7 +516,7 @@ for (const source of ['native', 'override', 'configured-home', 'injected-env', '
     const sourceRoot = path.join('.gemini', 'antigravity');
     const tmp = withTmpHome([sourceRoot, 'catalog', path.join('.config', 'tokscale', 'antigravity-cache')]);
     const originalHome = os.homedir;
-    const chokidar = require('chokidar');
+    const chokidar = require('../../src/shared/fileWatcher');
     const originalWatch = chokidar.watch;
     let handle;
     let db;
@@ -651,7 +651,7 @@ test('Antigravity source events target its umbrella client without watching sync
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   let watchedDirs = null;
@@ -778,7 +778,7 @@ test('a catch-up that comes due mid-tick keeps its targeted scan scope', async (
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => {
@@ -901,7 +901,7 @@ test('a manual refresh satisfies a deferred source sync instead of adding one', 
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => {
@@ -989,7 +989,7 @@ test('a failed forced sync hands the source event back instead of eating it', as
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => {
@@ -1094,7 +1094,7 @@ test('a source event that keeps failing backs off to the idle cadence', async (t
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => {
@@ -1193,7 +1193,7 @@ test('an unrelated client event does not bypass a source-sync backoff', async ()
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => {
@@ -1487,7 +1487,7 @@ test('an Antigravity CLI event rescans without paying for an IDE sync', async ()
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
   delete process.env.GEMINI_CLI_HOME;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => {
@@ -3044,7 +3044,7 @@ test('a watch event during an in-flight tick re-arms the debounce instead of coa
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -3126,7 +3126,7 @@ test('live watch events scan only changed clients and preserve the other client 
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => {
@@ -3285,7 +3285,7 @@ test('smart collection uses native watching and skips idle intervals after start
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchOptions = null;
   chokidar.watch = (_dirs, options) => {
@@ -3408,7 +3408,7 @@ for (const client of ['zcode', 'cherrystudio', 'goose']) {
     fs.mkdirSync(dbDir, { recursive: true });
     const dbName = { zcode: 'db.sqlite', cherrystudio: 'cherrystudio.sqlite', goose: 'sessions.db' }[client];
 
-    const chokidar = require('chokidar');
+    const chokidar = require('../../src/shared/fileWatcher');
     const originalWatch = chokidar.watch;
     let watchHandler = null;
     chokidar.watch = () => {
@@ -3544,7 +3544,7 @@ test('smart collection coalesces watch events into one targeted interval tick', 
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -3621,7 +3621,7 @@ test('smart collection keeps events received during a scan pending', async () =>
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -3697,7 +3697,7 @@ test('smart collection retries a failed activity scan on the next interval', asy
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -3803,7 +3803,7 @@ test('watch-descriptor exhaustion degrades to polling and stays there', async ()
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   const watchOptions = [];
   const errorHandlers = [];
@@ -3882,7 +3882,7 @@ test('descriptor exhaustion over a tree too large to poll degrades to interval c
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   const watchOptions = [];
   const errorHandlers = [];
@@ -3969,7 +3969,7 @@ test('a successful watcher rebuild clears the current watcher failure', async ()
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchCalls = 0;
   chokidar.watch = () => {
@@ -4049,7 +4049,7 @@ test('watch roots reach chokidar canonicalised on Windows and untouched elsewher
   os.homedir = () => alias;
   process.env.TOKEN_MONITOR_SHARED_DIR = alias;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchedDirs = null;
   let watchOptions = null;
@@ -4125,7 +4125,7 @@ test('the ignore matcher agrees with the roots chokidar was actually handed', as
   fs.mkdirSync(hermesHome, { recursive: true });
   process.env.HERMES_HOME = hermesHome;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchedDirs = null;
   let ignored = null;
@@ -4192,7 +4192,7 @@ for (const pollingEnv of ['TOKEN_MONITOR_WATCH_POLLING', 'CHOKIDAR_USEPOLLING'])
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
   process.env[pollingEnv] = '0';
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   const watchOptions = [];
   const errorHandlers = [];
@@ -4254,7 +4254,7 @@ test('a non-descriptor watch error is logged without degrading to polling', asyn
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   const watchOptions = [];
   const errorHandlers = [];
@@ -4319,7 +4319,7 @@ test('live collection retries all clients after a failed targeted watch scan', a
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -4414,7 +4414,7 @@ test('idle smart collection still performs the hourly full reconciliation', asyn
   Date.now = () => nowMs;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   chokidar.watch = () => ({ on: () => {}, close: () => {} });
 
@@ -4472,7 +4472,7 @@ test('hourly smart reconciliation refreshes WSL-only usage without a host event'
   Date.now = () => nowMs;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   chokidar.watch = () => ({ on: () => {}, close: () => {} });
 
@@ -4538,7 +4538,7 @@ test('hourly smart reconciliation starts watching a client directory created aft
   Date.now = () => nowMs;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchCalls = 0;
   let watchHandler = null;
@@ -4610,7 +4610,7 @@ test('smart collection lets a successful manual refresh acknowledge existing act
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -4671,7 +4671,7 @@ test('smart collection acknowledges the latest activity revision after tick coal
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -5235,7 +5235,7 @@ test('the quit variant of stop() skips the watcher walk and leans on `stopped`',
   os.homedir = () => tmp;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   let closeCalls = 0;
@@ -5325,7 +5325,7 @@ test('a watch-event storm faster than the debounce still ticks within the max-wa
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({
@@ -5421,7 +5421,7 @@ test('a single watch event still waits out the debounce and does not fire early'
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
 
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const originalWatch = chokidar.watch;
   let watchHandler = null;
   chokidar.watch = () => ({

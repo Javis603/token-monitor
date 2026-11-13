@@ -15,13 +15,13 @@ A machine that already runs the widget does not need the agent: the widget contr
 
 ## Requirements
 
-- Node.js 22.15.0 or newer, plus npm and git.
+- Node.js 22.22.0 or newer, plus npm and git.
 - A running hub the agent can reach: the in-widget hub, a Node hub, or a Cloudflare Worker (see [Multi-device sync](../README.md#multi-device-sync)), with its URL and shared secret.
 
 ## Install
 
 ```bash
-node --version   # must report v22.15.0 or newer
+node --version   # must report v22.22.0 or newer
 git clone https://github.com/Javis603/token-monitor.git
 cd token-monitor
 npm ci

@@ -67,7 +67,7 @@ Only app, agent and packaging entry points run `ensure:tokscale`; install, Hub, 
 
 ### Watching
 
-`src/shared/watcherHost.js` isolates chokidar in a child process, not a worker thread, to keep descriptors and native memory out of the owner. Root replacement waits for exit; `unwatch()` does not release descriptors. The child exits on IPC disconnect. Attribution, debounce and tick decisions stay with the collector.
+`src/shared/watcherHost.js` isolates chokidar in a child process, not a worker thread, to keep descriptors and native memory out of the owner. Root replacement waits for exit to release the old process's descriptors and native allocations. macOS keeps file-level watching because its directory events defer writes to open SQLite WALs until the writer closes; Windows and Linux use chokidar 6. The child exits on IPC disconnect. Attribution, debounce and tick decisions stay with the collector.
 
 - Preserve the 3–5 s update contract: no cooldown above the debounce; mid-tick events re-arm it. `watchMaxWaitMs` bounds continuous writes, but time behind an in-flight tick does not count toward that cap.
 - Watch policies must match scanner boundaries without losing supported links, dynamic discovery or overlapping sources. See [Claude Desktop](providers/claude.md#retained-claude-desktop-usage) for its traversal rules.

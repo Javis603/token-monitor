@@ -261,7 +261,7 @@ test('Senpi Windows HOME redirects roots while scoped WSL detail ignores host ov
 test('a Senpi parent watch tick installs newly discovered child roots before the next interval', async t => {
   const { home, project, options } = fixture(t);
   const parent = header(home, project);
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const { EventEmitter } = require('node:events');
   const hosts = [];
   t.mock.method(chokidar, 'watch', dirs => {
