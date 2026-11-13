@@ -5,6 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { resolveSqlite, openDb } = require('../../sqliteReadOnly');
 const { findCodexSessionFiles, codexSessionFile } = require('../../sessionFiles');
+const { normalizeCustomScanPaths } = require('../../customScanPaths');
 const t3SessionMetadata = require('../../t3SessionMetadata');
 const { expandHomePath, t3HomeDir, discoverT3DbPaths } = t3SessionMetadata;
 const { nativeIdForFile } = require('./sessionIdentity');
@@ -52,6 +53,23 @@ function codexHomeDir(options = {}) {
   return path.join(homeDir, '.codex');
 }
 
+// Further Codex homes Tokscale reads usage from: configured custom scan paths
+// and inherited `codex:` entries in TOKSCALE_EXTRA_DIRS. A wrapper such as a
+// per-task CODEX_HOME keeps its thread database and transcripts there, so the
+// title and transcript lookups must read them after the primary home. Scoped
+// homes (WSL, remote mirrors) describe another machine and never use them.
+function extraCodexHomes(options = {}) {
+  if (options.useEnvRoot === false) return [];
+  const env = options.env || process.env;
+  const configured = normalizeCustomScanPaths(options.customScanPaths).codex || [];
+  const inherited = String(env.TOKSCALE_EXTRA_DIRS || '').split(',').map((entry) => {
+    const separator = entry.indexOf(':');
+    return separator !== -1 && entry.slice(0, separator).trim() === 'codex'
+      ? entry.slice(separator + 1).trim() : '';
+  });
+  return [...new Set([...configured, ...inherited].filter(Boolean).map((dir) => path.resolve(dir)))];
+}
+
 function versionedDbFiles(dir, deps = {}) {
   const readdirSync = deps.readdirSync || fs.readdirSync;
   let names;
@@ -68,11 +86,11 @@ function versionedDbFiles(dir, deps = {}) {
 
 function discoverDbPaths(options = {}) {
   if (Array.isArray(options.dbPaths)) return [...new Set(options.dbPaths.map(String).filter(Boolean))];
-  const root = codexHomeDir(options);
-  return [...new Set([
+  // The primary home answers first; readSessionMeta keeps the first row per id.
+  return [...new Set([codexHomeDir(options), ...extraCodexHomes(options)].flatMap((root) => [
     ...versionedDbFiles(root, options),
     ...versionedDbFiles(path.join(root, 'sqlite'), options)
-  ])];
+  ]))];
 }
 
 function isBackgroundReview(row) {
@@ -188,15 +206,26 @@ function readT3SessionMeta(sessionIds, deps = {}) {
 }
 
 function filesForSessionIds(sessionIds, { home, deps }) {
-  const codexHome = codexHomeDir({ homeDir: home, env: deps.env, useEnvRoot: !deps.scopedHome });
+  const homeOptions = { homeDir: home, env: deps.env, useEnvRoot: !deps.scopedHome, customScanPaths: deps.customScanPaths };
+  const codexHomes = [...new Set([codexHomeDir(homeOptions), ...extraCodexHomes(homeOptions)])];
   const files = new Map();
   const missing = new Set();
   for (const id of sessionIds) {
-    const file = codexSessionFile(home, id, { codexHome });
+    let file = '';
+    for (const codexHome of codexHomes) {
+      file = codexSessionFile(home, id, { codexHome });
+      if (file) break;
+    }
     if (file) files.set(id, file);
     else missing.add(id);
   }
-  for (const [id, file] of findCodexSessionFiles(codexHome, missing)) files.set(id, file);
+  for (const codexHome of codexHomes) {
+    if (missing.size === 0) break;
+    for (const [id, file] of findCodexSessionFiles(codexHome, missing)) {
+      files.set(id, file);
+      missing.delete(id);
+    }
+  }
   return files;
 }
 
@@ -222,7 +251,8 @@ function resolveSessionMetadata(sessionIds, context) {
       ...(deps.codexDeps || {}),
       titleSourceById: generatedTitleById,
       homeDir: home,
-      env: deps.env
+      env: deps.env,
+      customScanPaths: deps.customScanPaths
     }));
   for (const [sessionId, meta] of readMetadata(sessionIds)) {
     result.set(sessionId, { ...(metadata.get(`codex:${sessionId}`) || {}), ...meta });
