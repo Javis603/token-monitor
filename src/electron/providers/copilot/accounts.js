@@ -13,13 +13,17 @@ function createCopilotAccounts({ getSettings, saveSettings, probeDeps, changed, 
   };
   function commit(profiles, { legacyToken = getSettings().copilotApiToken, activate = false, accountKey = '', refresh = true } = {}) {
     const settings = getSettings();
+    const hadEnvironment = limits.configuredCopilotAccounts(settings, { env }).some(account => account.id === 'environment');
     const previous = { copilotProfiles: settings.copilotProfiles, copilotApiToken: settings.copilotApiToken,
       limitsEnabled: settings.limitsEnabled, limitProviders: settings.limitProviders };
     Object.assign(settings, { copilotProfiles: profiles, copilotApiToken: legacyToken,
       ...(activate ? { limitsEnabled: true, limitProviders: providerSelectionIncluding(settings.limitProviders, 'copilot') } : {}) });
     try { saveSettings({ throwOnError: true }); }
     catch (error) { Object.assign(settings, previous); throw error; }
+    const hasEnvironment = limits.configuredCopilotAccounts(settings, { env }).some(account => account.id === 'environment');
+    if (hadEnvironment && !hasEnvironment) changed('', false);
     changed(accountKey, refresh);
+    if (!hadEnvironment && hasEnvironment) changed('', true);
   }
   return {
     getAccounts() {

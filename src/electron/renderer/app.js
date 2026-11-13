@@ -17794,7 +17794,11 @@ async function renderCopilotAccounts() {
     if (list.dataset.accountSignature === signature) {
       for (const row of list.children) {
         const account = accounts.find(account => account.id === row.dataset.accountId);
-        if (account) updateInfo(account, row.querySelector('.managed-account-info'));
+        if (account) {
+          const toggle = row.querySelector('.managed-account-checkbox');
+          if (toggle) toggle.checked = account.enabled;
+          updateInfo(account, row.querySelector('.managed-account-info'));
+        }
       }
       return;
     }

@@ -274,7 +274,7 @@ test('Copilot collection keeps both accounts through Node and Worker aggregate v
   }
 });
 
-test('Copilot settings mutations clear only their account and preserve a failing sibling last-good reading', async t => {
+function runtimeFixture(t, env = {}) {
   const fs = require('node:fs');
   const source = fs.readFileSync(require.resolve('../../src/electron/main'), 'utf8');
   const area = source.slice(source.indexOf('  const copilotAccounts = createCopilotAccounts('), source.indexOf("  ipcMain.handle('copilot:getAccounts'"));
@@ -287,7 +287,7 @@ test('Copilot settings mutations clear only their account and preserve a failing
   let failing = false;
   const fetch = (url, init) => failing && init.headers.Authorization === 'token work-token'
     ? { ok: false, status: 503 } : f.fetch(url, init);
-  const runtime = createLimitsRuntime(settings, { autoStart: false, autoRetry: false, env: {}, fetch });
+  const runtime = createLimitsRuntime(settings, { autoStart: false, autoRetry: false, env, fetch });
   t.after(() => runtime.stop());
   const refreshes = [];
   const scopes = [];
@@ -299,17 +299,22 @@ test('Copilot settings mutations clear only their account and preserve a failing
       refreshes.push(pending);
       return pending;
     }, () => settings);
-  const api = createCopilotAccounts({ getSettings: () => settings, saveSettings: () => {}, env: {}, changed, probeDeps: () => ({ fetch }) });
+  const api = createCopilotAccounts({ getSettings: () => settings, saveSettings: () => {}, env, changed, probeDeps: () => ({ fetch }) });
+  return { api, runtime, scopes, flush: () => Promise.all(refreshes), failWork: () => { failing = true; } };
+}
+
+test('Copilot settings mutations clear only their account and preserve a failing sibling last-good reading', async t => {
+  const { api, runtime, scopes, flush, failWork } = runtimeFixture(t);
   await api.addAccount('personal-token');
-  await Promise.all(refreshes);
+  await flush();
   await api.addAccount('work-token');
-  await Promise.all(refreshes);
+  await flush();
   const alice = api.getAccounts().find(account => account.accountName === 'alice');
   const bob = api.getAccounts().find(account => account.accountName === 'bob');
   assert.equal(runtime.getSnapshot().providers.find(row => row.accountKey === bob.accountKey).windows.length, 1);
-  failing = true;
+  failWork();
   await api.removeAccount(alice.id);
-  await Promise.all(refreshes);
+  await flush();
   assert.deepEqual(scopes.at(-1), { scope: { provider: 'copilot', accountKey: alice.accountKey }, clear: true, refresh: false });
   await runtime.refresh({ provider: 'copilot' }, 'manual');
   const retained = runtime.getSnapshot().providers.find(row => row.accountKey === bob.accountKey);
@@ -345,4 +350,37 @@ test('Copilot sign-in accepts the quota reading completed before its bridge resp
   vm.runInNewContext(source.slice(statusStart, statusEnd) + source.slice(start, end), context);
   await click();
   assert.equal(context.copilotProviderForAccount()?.accountName, 'alice');
+});
+
+test('Copilot environment readings are retired when saved accounts take precedence and restored after removal', async t => {
+  const { api, runtime, flush } = runtimeFixture(t, { COPILOT_API_TOKEN: ['personal', 'environment', 'fixture'].join('-') });
+  await runtime.refresh({ provider: 'copilot' }, 'manual');
+  assert.deepEqual(runtime.getSnapshot().providers.map(row => row.accountName), ['alice']);
+  await api.addAccount('work-token');
+  await flush();
+  assert.deepEqual(runtime.getSnapshot().providers.map(row => row.accountName), ['bob']);
+  await runtime.refresh({ provider: 'copilot' }, 'manual');
+  assert.deepEqual(runtime.getSnapshot().providers.map(row => row.accountName), ['bob']);
+  await api.removeAccount(api.getAccounts()[0].id);
+  await flush();
+  assert.deepEqual(runtime.getSnapshot().providers.map(row => row.accountName), ['alice']);
+});
+
+test('Node and Worker GUI-secret merges preserve every Copilot account from the widget', () => {
+  for (const { mergeDeviceRecord } of [require('../../src/shared/usage'), require('../../worker/src/shared/usage')]) {
+    const providers = ['alice', 'bob'].map(accountName => ({ provider: 'copilot', source: 'api', status: 'ok',
+      accountKey: hashKey('copilot', accountName), accountName, windows: [{ kind: 'billing', usedPercent: 20 }] }));
+    const existing = { deviceId: 'shared', agentRuntime: 'widget', limits: { providers } };
+    const incoming = { deviceId: 'shared', agentRuntime: 'headless', limits: {
+      providers: [{ provider: 'copilot', status: 'notConfigured' }]
+    } };
+    const merged = mergeDeviceRecord(existing, incoming);
+    assert.deepEqual(merged.limits.providers.map(row => row.accountName).sort(), ['alice', 'bob']);
+    const sameRuntime = mergeDeviceRecord(existing, { ...incoming, agentRuntime: 'widget' });
+    assert.equal(sameRuntime.limits.providers.length, 1);
+    assert.equal(sameRuntime.limits.providers[0].status, 'notConfigured');
+    const disabled = mergeDeviceRecord(existing, { ...incoming, limits: { providers: [{ provider: 'copilot', status: 'disabled' }] } });
+    assert.equal(disabled.limits.providers.length, 1);
+    assert.equal(disabled.limits.providers[0].status, 'disabled');
+  }
 });
