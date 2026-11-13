@@ -20,10 +20,10 @@ const CODEX_TRANSIENT_WINDOW_RETENTION_MS = 10 * 60 * 1000;
 const CODEX_TRANSIENT_PROVIDER_STATUSES = new Set(['unavailable', 'error', 'rateLimited', 'sourceRateLimited']);
 const MAX_ACCOUNT_LABEL_INPUT_LENGTH = 256;
 const MAX_ACCOUNT_NAME_INPUT_LENGTH = 512;
-// Providers whose credential rotates while the account does not: the keys the
-// account was named by before the rotation stay on the row so the renderer and
-// the quota history read both names as one account.
-const ACCOUNT_KEY_ALIAS_PROVIDERS = new Set(['opencode', 'qoder']);
+// A provider can name one account by several keys: the key it reports today and
+// the keys a rotated credential used before it (`limits/identityInheritance`
+// decides when that rename is the same account). They travel with the row so
+// the renderer and the quota history read every name as one account.
 const MAX_ACCOUNT_KEY_ALIASES = 8;
 
 function asNumber(value) {
@@ -494,9 +494,7 @@ function normalizeLimitProvider(input) {
   const relatedAccountKey = provider === 'minimax' && source === 'api' && typeof input.relatedAccountKey === 'string'
     && /^sha256:[a-f0-9]{64}$/.test(input.relatedAccountKey) && input.relatedAccountKey !== accountKey
     ? input.relatedAccountKey : '';
-  const accountKeyAliases = ACCOUNT_KEY_ALIAS_PROVIDERS.has(provider)
-    ? normalizeAccountKeyAliases(input.accountKeyAliases, accountKey)
-    : [];
+  const accountKeyAliases = normalizeAccountKeyAliases(input.accountKeyAliases, accountKey);
   const accountLabel = normalizeAccountLabel(input.accountLabel);
   const windows = Array.isArray(input.windows)
     ? input.windows.map(normalizeLimitWindow).filter(Boolean)

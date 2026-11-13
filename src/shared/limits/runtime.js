@@ -11,6 +11,7 @@ const {
   providerPhysicalBoundMs
 } = require('./collector');
 const { normalizeLimitProvider: builtinNormalizeProvider, normalizeLimitsSummary: builtinNormalizeSummary } = require('./core');
+const { inheritedAccountKeys } = require('./identityInheritance');
 const {
   nextLimitsResetBoundary,
   pruneAttemptedResetBoundaries
@@ -601,6 +602,21 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         return row;
       })
       .filter(Boolean);
+    // A provider that derives its key from a rotating credential renames the
+    // account on every rotation. A key that arrives under a label this device
+    // already recorded inherits the keys that label used before, so the card
+    // and the quota history keep one account rather than a second one.
+    const previousRows = providerRows(lane.provider);
+    for (let index = 0; index < normalizedRows.length; index += 1) {
+      const row = normalizedRows[index];
+      const inherited = inheritedAccountKeys(row, previousRows,
+        typeof deps.identityLedger?.recall === 'function' ? deps.identityLedger.recall(row) : []).filter(Boolean);
+      const withInherited = inherited.length
+        ? normalizeLimitProvider({ ...row, accountKeyAliases: [...(row.accountKeyAliases || []), ...inherited] })
+        : null;
+      if (withInherited) normalizedRows[index] = withInherited;
+      if (typeof deps.identityLedger?.remember === 'function') deps.identityLedger.remember(withInherited || row);
+    }
     // A MiniMax API-only settings refresh shares the provider executor with Code,
     // but it does not own Code's retained identity or freshness.
     const apiOnly = lane.provider === 'minimax' && dispatch.scope.source === 'api' && !dispatch.accountScoped;

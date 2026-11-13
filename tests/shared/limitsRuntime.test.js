@@ -1603,3 +1603,50 @@ test('Muse anonymous source reset refreshes stay provider-wide without duplicate
     }
   }
 });
+
+test('a renamed account key inherits the keys its label already carries', async () => {
+  let accountKey = 'sha256:first-key';
+  let accountEmail = 'user@example.com';
+  const runtime = createLimitsRuntime({ limitProviders: ['copilot'] }, runtimeDeps({
+    probeProvider: async () => [{
+      provider: 'copilot',
+      accountKey,
+      accountEmail,
+      status: 'ok',
+      updatedAt: '2026-07-21T00:00:00.000Z',
+      windows: [{ kind: 'session', label: 'Chat', usedPercent: 12 }]
+    }]
+  }));
+  await runtime.refresh({}, 'first');
+  assert.equal(runtime.getSnapshot().providers[0].accountKeyAliases, undefined);
+
+  accountKey = 'sha256:second-key';
+  await runtime.refresh({}, 'second');
+  const renamed = runtime.getSnapshot().providers.find((row) => row.accountKey === 'sha256:second-key');
+  assert.deepEqual(renamed.accountKeyAliases, ['sha256:first-key']);
+
+  // A different account is a different history even under the same provider.
+  accountKey = 'sha256:third-key';
+  accountEmail = 'other@example.com';
+  await runtime.refresh({}, 'third');
+  const other = runtime.getSnapshot().providers.find((row) => row.accountKey === 'sha256:third-key');
+  assert.equal(other.accountKeyAliases, undefined);
+  runtime.stop();
+});
+
+test('a key remembered from a previous run is inherited without an in-process row', async () => {
+  const runtime = createLimitsRuntime({ limitProviders: ['copilot'] }, runtimeDeps({
+    identityLedger: { recall: () => ['sha256:before-restart'], remember: () => {} },
+    probeProvider: async () => [{
+      provider: 'copilot',
+      accountKey: 'sha256:now',
+      accountEmail: 'user@example.com',
+      status: 'ok',
+      updatedAt: '2026-07-21T00:00:00.000Z',
+      windows: [{ kind: 'session', label: 'Chat', usedPercent: 5 }]
+    }]
+  }));
+  await runtime.refresh({}, 'first');
+  assert.deepEqual(runtime.getSnapshot().providers[0].accountKeyAliases, ['sha256:before-restart']);
+  runtime.stop();
+});

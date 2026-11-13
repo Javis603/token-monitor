@@ -48,6 +48,7 @@ const {
 } = require('./providers/workbuddy/localAuth');
 const { createElectronLimitsFetch } = require('./limits/fetch');
 const { createLimitsHistoryStore } = require('./limits/historyStore');
+const { createIdentityLedger } = require('./limits/identityLedger');
 const { historyRowKey } = require('./limits/historyIdentity');
 const { createLimitsHistoryController } = require('./limits/historyController');
 const { LIMIT_PROVIDER_CATALOG: historyProviderCatalog } = require('../shared/limits/providers');
@@ -1061,8 +1062,23 @@ function credentialProbeDeps(renewed = {}) {
   });
 }
 
+let limitsIdentityLedger = null;
+function getLimitsIdentityLedger() {
+  if (!limitsIdentityLedger) {
+    limitsIdentityLedger = createIdentityLedger(path.join(app.getPath('userData'), 'limit-identities.json'));
+  }
+  return limitsIdentityLedger;
+}
+
 function electronLimitsDeps() {
   return {
+    // Remembers which keys each labelled account has been recorded under, so a
+    // credential rotated while the app was closed still reads as a rename
+    // rather than a new account (limits/identityLedger).
+    identityLedger: {
+      recall: (row) => getLimitsIdentityLedger().recall(row),
+      remember: (row) => getLimitsIdentityLedger().remember(row)
+    },
     fetch: electronLimitsFetch(),
     mimoExchangeFetch: ensureMimoExchangeFetch(),
     museWebFetch: ensureMimoExchangeFetch(),
