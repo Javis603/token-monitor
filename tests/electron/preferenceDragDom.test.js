@@ -266,7 +266,7 @@ test('a press on the tool row own controls never arms a drag', () => {
   // The pin/order decision is made once, by the shared module, and travels from
   // the mirror to the save; onPreferenceOrderCommit would compare against the
   // value the mirror just wrote and drop it.
-  assert.match(wiring, /clientDisplayPreferencesApi\.clientDisplayOrderCommit\(qoderDisplayApi\.expandOrder\(order\), KNOWN_CLIENTS, state\.settings\?\.clientDisplayOrder, state\.settings\?\.pinnedClients, id\)/);
+  assert.match(wiring, /qoderDisplayApi\.orderCommit\(order, KNOWN_CLIENTS, state\.settings\?\.clientDisplayOrder, state\.settings\?\.pinnedClients, id\)/);
   assert.match(wiring, /persistOrder: \(_order, _id, patch\) => void saveSettings\(patch\)/);
   assert.doesNotMatch(wiring, /onPreferenceOrderCommit\(/);
 });

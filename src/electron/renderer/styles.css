@@ -9359,7 +9359,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-author-heading .plugin-detail-heading { margin: 0; }
 
 /* A product family is presentation only; each edition keeps its existing controls. */
-.tool-preference-row.qoder-settings-group { display: block; }
+.tool-preference-row.qoder-settings-group:not(.is-filtered-out) { display: block; }
 .qoder-group-summary { display: flex; align-items: center; gap: 7px; min-height: 28px; list-style: none; cursor: pointer; }
 .qoder-group-summary::-webkit-details-marker { display: none; }
 .qoder-group-summary > input { margin: 0 2px; }

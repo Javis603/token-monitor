@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { groupRows, displayPreference, expandOrder, trackingState, setTracked } = require('../../src/electron/renderer/qoderDisplay');
+const { groupRows, displayPreference, expandOrder, orderCommit, trackingState, setTracked } = require('../../src/electron/renderer/qoderDisplay');
 const { clientsCsvForSetting, DEFAULT_CLIENTS } = require('../../src/shared/clientTracking');
 
 test('combines visible editions without changing source rows, totals or unrelated identities', () => {
@@ -46,6 +46,20 @@ test('group display preferences preserve individual settings and grouping moves 
   assert.equal(displayPreference(saved, false), 'codex,qoder,claude');
   assert.equal(displayPreference(saved, true), saved);
   assert.deepEqual(expandOrder(['codex', 'qoder', 'claude']), ['codex', 'qoder', 'qodercn', 'claude']);
+});
+
+test('reordering a pinned tool beside a CN-only pinned group preserves the original pin membership', () => {
+  const clients = ['qoder', 'qodercn', 'codex', 'claude', 'pi'].map(id => ({ id }));
+  assert.deepEqual(orderCommit(['qoder', 'claude', 'codex', 'pi'], clients, '', 'qodercn,codex,claude', 'claude'),
+    { pinnedClients: 'qodercn,claude,codex' });
+  assert.deepEqual(orderCommit(['codex', 'qoder', 'claude', 'pi'], clients, '', 'qodercn,codex,claude', 'qoder'),
+    { pinnedClients: 'codex,qodercn,claude' });
+  assert.deepEqual(orderCommit(['claude', 'qoder', 'codex', 'pi'], clients, '', 'qoder,codex,qodercn,claude', 'claude'),
+    { pinnedClients: 'claude,qoder,qodercn,codex' });
+  assert.deepEqual(orderCommit(['pi', 'qoder', 'codex', 'claude'], clients, '', 'qodercn,codex,claude', 'pi'),
+    { clientDisplayOrder: 'pi,qoder,qodercn,codex,claude', pinnedClients: '' });
+  assert.deepEqual(orderCommit(['qoder', 'pi', 'claude', 'codex'], clients, 'qoder,qodercn,codex,claude,pi', 'qodercn', 'pi'),
+    { clientDisplayOrder: 'qoder,qodercn,pi,claude,codex', pinnedClients: '' });
 });
 
 test('fresh defaults enable both but saved CN-only, empty and explicit selections are never expanded', () => {

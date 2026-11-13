@@ -11394,7 +11394,7 @@ function loadClientSources(clientId, options = {}) {
 function refillOpenClientHealthPanel() {
   const clientId = state.clientHealthExpanded;
   if (!clientId) return;
-  const row = els.clientDisplayList?.querySelector(`.tool-preference-row[data-client="${CSS.escape(clientId)}"]`);
+  const row = els.clientDisplayList?.querySelector(`.tool-preference-row:not(.qoder-settings-group)[data-client="${CSS.escape(clientId)}"]`);
   const container = row?.querySelector(':scope > .accordion-animated-container');
   if (container) fillClientHealthPanel(container, clientId);
 }
@@ -11985,7 +11985,7 @@ const clientPreferenceRowDrag = rowDragControllerApi.createRowDragController({
   applyOrder: (order) => applyPreferenceOrder('client', order),
   preserveScroll: preserveSettingsPanelScroll,
   mirrorOrder: (order, id) => {
-    const patch = clientDisplayPreferencesApi.clientDisplayOrderCommit(qoderDisplayApi.expandOrder(order), KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients, id);
+    const patch = qoderDisplayApi.orderCommit(order, KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients, id);
     state.settings = { ...state.settings, ...patch };
     return patch;
   },
@@ -13306,7 +13306,7 @@ function onPreferenceOrderKeydown(event, kind, id) {
     if (from < 0 || target < 0 || target >= order.length || target === from) return;
     order.splice(from, 1);
     order.splice(target, 0, id);
-    const patch = clientDisplayPreferencesApi.clientDisplayOrderCommit(qoderDisplayApi.expandOrder(order), KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients, id);
+    const patch = qoderDisplayApi.orderCommit(order, KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients, id);
     void saveSettings(patch);
     return;
   }

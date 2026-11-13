@@ -1,10 +1,12 @@
 'use strict';
 
 (function expose(root, factory) {
-  const api = factory();
+  const preferences = typeof module === 'object' && module.exports
+    ? require('./clientDisplayPreferences') : root.TokenMonitorClientDisplayPreferences;
+  const api = factory(preferences);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorQoderDisplay = api;
-})(typeof window !== 'undefined' ? window : null, function createQoderDisplay() {
+})(typeof window !== 'undefined' ? window : null, function createQoderDisplay(preferences) {
   const IDS = Object.freeze(['qoder', 'qodercn']);
   const isQoder = (id) => IDS.includes(id);
 
@@ -53,6 +55,24 @@
     return order.flatMap(id => id === 'qoder' ? IDS : id === 'qodercn' ? [] : [id]);
   }
 
+  function orderCommit(order, clients, orderValue, pinnedValue, clientId) {
+    const groupClients = clients.filter(client => (typeof client === 'string' ? client : client.id) !== 'qodercn');
+    const result = preferences.clientDisplayOrderCommit(
+      displayPreference(order.join(','), false).split(','), groupClients,
+      displayPreference(orderValue, false), displayPreference(pinnedValue, false),
+      clientId === 'qodercn' ? 'qoder' : clientId
+    );
+    if (result.clientDisplayOrder !== undefined) {
+      return { clientDisplayOrder: expandOrder(result.clientDisplayOrder.split(',')).join(','), pinnedClients: '' };
+    }
+    // Test the move using visible groups, then restore the original pin members.
+    // Pinning only CN must not implicitly pin international Qoder or clear pins.
+    const pinned = preferences.normalizePinnedClients(pinnedValue, clients).split(',').filter(Boolean);
+    return { pinnedClients: result.pinnedClients.split(',').flatMap(group =>
+      pinned.filter(id => (id === 'qodercn' ? 'qoder' : id) === group)
+    ).join(',') };
+  }
+
   function trackingState(clients) {
     const selected = new Set(String(clients || '').split(','));
     return { checked: IDS.every(id => selected.has(id)), mixed: IDS.some(id => selected.has(id)) && !IDS.every(id => selected.has(id)) };
@@ -63,5 +83,5 @@
     return [...selected, ...(checked ? IDS : [])].join(',');
   }
 
-  return { IDS, isQoder, groupRows, displayPreference, expandOrder, trackingState, setTracked };
+  return { IDS, isQoder, groupRows, displayPreference, expandOrder, orderCommit, trackingState, setTracked };
 });
