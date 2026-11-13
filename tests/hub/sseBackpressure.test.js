@@ -153,6 +153,21 @@ for (const version of ['3', '4']) {
   });
 }
 
+test('the backlog budget counts UTF-8 bytes, not string length', async (t) => {
+  const { hub, open, publish } = fixture(t);
+  publish(1);
+  const res = open(true);
+  const limit = res.writableLength + SSE_BACKLOG_LIMIT_BYTES;
+  const models = {};
+  for (let index = 0; index < 6000; index += 1) models[`${'模'.repeat(40)}${index}`] = { totalTokens: 1 };
+  hub.ingest({ deviceId: 'cjk', today: { totalTokens: 1, models } });
+  const json = JSON.stringify(hub.getStats());
+  assert.ok(json.length < SSE_BACKLOG_LIMIT_BYTES && Buffer.byteLength(json) > SSE_BACKLOG_LIMIT_BYTES);
+  t.mock.timers.tick(10);
+  assert.equal(res.writes.length, 1);
+  assert.ok(res.writableLength <= limit);
+});
+
 test('updates queued while blocked carry device deletions and subscription revisions in order', async (t) => {
   const { hub, open, publish } = fixture(t);
   publish(1);

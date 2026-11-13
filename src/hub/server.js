@@ -156,7 +156,7 @@ function createHub({
   // connection skips frames and resyncs once its transport drains.
   function writeSseFrame(client, frame) {
     if (!frame) return false;
-    if (client.blocked && (client.needsSnapshot || client.res.writableLength + frame.length > client.backlogLimit)) {
+    if (client.blocked && (client.needsSnapshot || client.res.writableLength + Buffer.byteLength(frame) > client.backlogLimit)) {
       client.needsSnapshot = true;
       return false;
     }
