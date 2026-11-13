@@ -8,6 +8,7 @@ const test = require('node:test');
 const {
   DEFAULT_HOME_MODULE_ORDER,
   defaultHomeModulePreferences,
+  migrateHomeLimitDisplayMode,
   moveHomeModuleOrder,
   normalizeHiddenHomeModules,
   normalizeHomeModuleOrder,
@@ -97,4 +98,24 @@ test('legacy Home settings append Sessions visibly while preserving hidden modul
   const hidden = new Set(normalizeHiddenHomeModules('tool,device', modules).split(','));
   assert.deepEqual(order.filter((id) => !hidden.has(id)), ['model', 'limits', 'trends', 'session']);
   assert.equal(normalizeHiddenHomeModules('', modules), '');
+});
+
+test('Home limits reset a layout saved before `default` existed, once', () => {
+  // Upgrade: a saved `text` may be the old default and `bars` predates the
+  // layout now recommended; both follow the recommendation from now on.
+  assert.deepEqual(migrateHomeLimitDisplayMode('text', undefined), { mode: 'default', changed: true });
+  assert.deepEqual(migrateHomeLimitDisplayMode('bars', undefined), { mode: 'default', changed: true });
+  // Fresh install: no saved file, so nothing to change or save.
+  assert.deepEqual(migrateHomeLimitDisplayMode(undefined, undefined), { mode: 'default', changed: false });
+  // A layout picked after the reset is kept.
+  assert.deepEqual(migrateHomeLimitDisplayMode('text', true), { mode: 'text', changed: false });
+  assert.deepEqual(migrateHomeLimitDisplayMode('bars', true), { mode: 'bars', changed: false });
+  assert.deepEqual(migrateHomeLimitDisplayMode('rows', true), { mode: 'rows', changed: false });
+  assert.deepEqual(migrateHomeLimitDisplayMode('bogus', true), { mode: 'default', changed: false });
+
+  // The marker must come from the saved file: the merged defaults carry it as
+  // true, which would skip the reset for every upgrading install.
+  const mainSource = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  assert.match(mainSource, /migrateHomeLimitDisplayMode\(saved\.homeLimitDisplayMode, saved\.homeLimitDisplayModeDefaulted\)/);
+  assert.match(mainSource, /homeLimitDisplayModeDefaulted: true,/);
 });
