@@ -919,6 +919,8 @@ function retainLiveDailyHistory(period, options = {}) {
   const knownLiveDays = options.liveDays || {};
   if (!archiveWriteEnabled(options) && Object.keys(knownLiveDays).length > 0) {
     const liveDays = captureLiveDays(knownLiveDays, period, options);
+    // Write-disabled callers must read only liveDays from this result; it is
+    // not a complete archive. The next writing tick rebases on the stored one.
     return options.timeZone
       ? { calendars: { [options.timeZone]: { liveDays } } }
       : { liveDays };
