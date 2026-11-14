@@ -2,13 +2,13 @@
 
 Bug reports, feature requests, documentation improvements and focused fixes are welcome. English or Chinese is fine for issues.
 
-## Start with the right place
+## Where to start
 
 - Search [open and closed issues](https://github.com/Javis603/token-monitor/issues?q=is%3Aissue) and [pull requests](https://github.com/Javis603/token-monitor/pulls?q=is%3Apr) before opening a new one. If an existing issue looks similar but your setup differs, open a new one and link it.
 - Ask usage and setup questions in [Discussions Q&A](https://github.com/Javis603/token-monitor/discussions/categories/q-a).
 - Use the [issue forms](https://github.com/Javis603/token-monitor/issues/new/choose) for a bug or feature request. Share minimal, sanitized evidence, not full logs, settings, databases or conversations.
 - For suspected vulnerabilities, follow [SECURITY.md](SECURITY.md); do not post exploit details or secrets in a public issue.
-- Discuss substantial new features, architecture changes or new dependencies/tooling before investing in implementation. A small, focused fix does not need a separate issue first. Discussion does not guarantee acceptance or a release date.
+- Open an issue to discuss substantial new features, architecture changes or new dependencies/tooling before investing in implementation. A small, focused fix does not need a separate issue first. Discussion does not guarantee acceptance or a release date.
 
 ## Make a focused change
 

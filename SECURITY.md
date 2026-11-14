@@ -15,10 +15,10 @@ Test only systems and accounts you own or have permission to test. Avoid accessi
 
 ## Scope and versions
 
-Reports should concern Token Monitor or its bundled dependencies. Issues solely in a third-party service should go to that service's security channel; explain any Token Monitor-specific exposure separately.
+Reports should concern Token Monitor or its bundled dependencies. Issues solely in a third-party service should go to that service's security channel. If the issue also exposes Token Monitor users, report that part here.
 
 Security fixes are made on the main branch and shipped in the next release; earlier releases are not patched. Update to the latest release to receive fixes. This policy does not promise response deadlines, fix dates or rewards.
 
 ## Data privacy
 
-[Privacy and data handling](docs/privacy.md) describes the app's data behavior. It is separate from this vulnerability-reporting policy.
+For what data the app reads, stores and sends, see [Privacy and data handling](docs/privacy.md).
