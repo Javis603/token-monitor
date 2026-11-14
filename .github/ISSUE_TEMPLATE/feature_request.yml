@@ -6,7 +6,7 @@ body:
     attributes:
       value: |
         English or Chinese is welcome. Search open and closed issues first and link related requests below.
-        Do not include credentials or private account/session data. A request is a discussion, not a commitment to implement it.
+        Do not include credentials, conversation content, full logs, settings files or databases; share only sanitized examples. A request is a discussion, not a commitment to implement it.
   - type: textarea
     id: need
     attributes:
