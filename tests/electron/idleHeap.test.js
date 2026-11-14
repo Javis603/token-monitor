@@ -96,24 +96,47 @@ test('a failed collection is retried on the next pass', async () => {
   assert.equal(await harness.collector.run(), true);
 });
 
-test('start installs one timer and stop clears it', async () => {
-  const timer = { unrefCalled: false, unref() { this.unrefCalled = true; } };
-  let installed = null;
-  let cleared = null;
-  let runs = 0;
+test('start installs an early check and the steady interval, and stop clears both', async () => {
+  const intervalTimer = { unrefCalled: false, unref() { this.unrefCalled = true; } };
+  const initialTimer = { unrefCalled: false, unref() { this.unrefCalled = true; } };
+  let installedInterval = null;
+  let installedInitial = null;
+  let clearedInterval = null;
+  let rendererRuns = 0;
   const collector = createIdleHeapCollector({
     isIdle: () => true,
     getHeap: () => ({ heapTotal: 0, heapUsed: 0 }),
-    collect: async () => { runs += 1; },
-    setInterval: (fn, ms) => { installed = { fn, ms }; return timer; },
-    clearInterval: (value) => { cleared = value; }
+    collectRenderers: async () => { rendererRuns += 1; },
+    setInterval: (fn, ms) => { installedInterval = { fn, ms }; return intervalTimer; },
+    clearInterval: (value) => { clearedInterval = value; },
+    setTimeout: (fn, ms) => { installedInitial = { fn, ms }; return initialTimer; },
+    clearTimeout: () => {}
   });
   collector.start();
   collector.start();
-  assert.equal(installed.ms, 5 * 60 * 1000);
-  assert.equal(timer.unrefCalled, true);
+  assert.equal(installedInitial.ms, 60 * 1000);
+  assert.equal(installedInterval.ms, 5 * 60 * 1000);
+  assert.equal(initialTimer.unrefCalled, true);
+  assert.equal(intervalTimer.unrefCalled, true);
+  installedInitial.fn();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(rendererRuns, 1, 'the first check does not wait for the interval');
   collector.stop();
-  assert.equal(cleared, timer);
+  assert.equal(clearedInterval, intervalTimer);
   assert.equal(await collector.run(), false, 'a stopped collector does not run');
-  assert.equal(runs, 0);
+  assert.equal(rendererRuns, 1);
+
+  const pendingInitial = { unref() {} };
+  let clearedPendingInitial = null;
+  const beforeFire = createIdleHeapCollector({
+    isIdle: () => true,
+    getHeap: () => ({ heapTotal: 0, heapUsed: 0 }),
+    setTimeout: () => pendingInitial,
+    clearTimeout: (value) => { clearedPendingInitial = value; },
+    setInterval: () => ({ unref() {} }),
+    clearInterval: () => {}
+  });
+  beforeFire.start();
+  beforeFire.stop();
+  assert.equal(clearedPendingInitial, pendingInitial, 'stop clears a still-pending first check');
 });

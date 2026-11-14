@@ -20,6 +20,10 @@
 const MIN_HEAP_TOTAL_BYTES = 64 * 1024 * 1024;
 const RETAINED_HEADROOM_BYTES = 32 * 1024 * 1024;
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
+// The first complete collection usually finishes well inside a minute. Check
+// once then, so the startup high-water is returned before the steady-state
+// cadence rather than lingering for five minutes.
+const DEFAULT_INITIAL_DELAY_MS = 60 * 1000;
 
 function defaultCollect() {
   const { Session } = require('node:inspector/promises');
@@ -30,13 +34,17 @@ function defaultCollect() {
 
 function createIdleHeapCollector(options = {}) {
   const intervalMs = Math.max(1000, Number(options.intervalMs) || DEFAULT_INTERVAL_MS);
+  const initialDelayMs = Math.max(0, Number(options.initialDelayMs ?? DEFAULT_INITIAL_DELAY_MS));
   const isIdle = options.isIdle || (() => true);
   const getHeap = options.getHeap || (() => process.memoryUsage());
   const collect = options.collect || defaultCollect;
   const collectRenderers = options.collectRenderers || null;
   const setIntervalFn = options.setInterval || setInterval;
   const clearIntervalFn = options.clearInterval || clearInterval;
+  const setTimeoutFn = options.setTimeout || setTimeout;
+  const clearTimeoutFn = options.clearTimeout || clearTimeout;
   let timer = null;
+  let initialTimer = null;
   let running = false;
   let stopped = false;
   let thresholdBytes = MIN_HEAP_TOTAL_BYTES;
@@ -75,13 +83,20 @@ function createIdleHeapCollector(options = {}) {
   }
 
   function start() {
-    if (timer !== null || stopped) return;
+    if (timer !== null || initialTimer !== null || stopped) return;
+    initialTimer = setTimeoutFn(() => {
+      initialTimer = null;
+      void run();
+    }, initialDelayMs);
+    initialTimer?.unref?.();
     timer = setIntervalFn(() => { void run(); }, intervalMs);
     timer?.unref?.();
   }
 
   function stop() {
     stopped = true;
+    if (initialTimer !== null) clearTimeoutFn(initialTimer);
+    initialTimer = null;
     if (timer !== null) clearIntervalFn(timer);
     timer = null;
   }
@@ -89,4 +104,4 @@ function createIdleHeapCollector(options = {}) {
   return { start, stop, run };
 }
 
-module.exports = { createIdleHeapCollector, DEFAULT_INTERVAL_MS, MIN_HEAP_TOTAL_BYTES };
+module.exports = { createIdleHeapCollector, DEFAULT_INITIAL_DELAY_MS, DEFAULT_INTERVAL_MS, MIN_HEAP_TOTAL_BYTES };
