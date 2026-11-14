@@ -40,6 +40,14 @@ test('failure detail separates what the published status collapses into unavaila
 
   assert.deepEqual(limitFailureDetail(new Error('net::ERR_PROXY_CONNECTION_FAILED')),
     { kind: 'network', code: 'ERR_PROXY_CONNECTION_FAILED' });
+  // A transport timeout is a timeout, not an outage.
+  assert.deepEqual(limitFailureDetail(new Error('net::ERR_TIMED_OUT')),
+    { kind: 'timeout', code: 'ERR_TIMED_OUT' });
+  assert.deepEqual(limitFailureDetail(withCode(new Error('connect timed out'), 'ETIMEDOUT')),
+    { kind: 'timeout', code: 'ETIMEDOUT' });
+  // A code lifted out of free text gets the same shape and length check as any
+  // other code, so an oversized one is dropped rather than printed.
+  assert.deepEqual(limitFailureDetail(new Error(`net::ERR_${'X'.repeat(60)}`)), { kind: 'error' });
   const undici = new TypeError('fetch failed', { cause: withCode(new Error('getaddrinfo'), 'ENOTFOUND') });
   assert.deepEqual(limitFailureDetail(undici), { kind: 'network', code: 'ENOTFOUND' });
   assert.deepEqual(limitFailureDetail(new SyntaxError('Unexpected token <')), { kind: 'response' });
@@ -106,6 +114,39 @@ test('runtime diagnostics name each failing Claude source', async (t) => {
   assert.deepEqual(failed.lastFailureDetail.httpStatuses, [503]);
   assert.deepEqual(failed.lastFailureDetail.networkCodes, ['ERR_CONNECTION_RESET']);
   assert.equal(JSON.stringify(failed).includes('sk-ant'), false);
+});
+
+test('a CLI fallback timeout is reported as a timeout, not a plain error', async (t) => {
+  const runtime = createLimitsRuntime({ limitProviders: ['claude'], claudeCliFallbackEnabled: true }, {
+    autoStart: false,
+    autoRetry: false,
+    env: { CLAUDE_CODE_OAUTH_TOKEN: 'fake-oauth-token' },
+    now: () => Date.parse('2026-11-14T00:00:00Z'),
+    platform: 'win32',
+    providerRuntimeState: new Map(),
+    isClaudeCliAuthenticated: () => true,
+    runClaudeUsageCli: async () => {
+      // execFile's own timeout: killed, no code.
+      const error = new Error('Command failed: claude');
+      error.killed = true;
+      error.signal = 'SIGKILL';
+      error.code = null;
+      throw error;
+    },
+    fetch: async (url) => {
+      if (url.endsWith('/api/oauth/profile')) {
+        return response(200, { account: { uuid: 'account-c', email: 'c@example.com' }, organization: { uuid: 'org-c' } });
+      }
+      if (url.includes('/api/oauth/usage')) return response(503);
+      return response(200, { five_hour: { utilization: 20 } });
+    }
+  });
+  t.after(() => runtime.stop());
+
+  await runtime.refresh({ provider: 'claude' }, 'credential-save');
+  const failures = runtime.getDiagnostics().providers[0].lastFailureDetail.failures;
+  assert.deepEqual(failures.find((entry) => entry.source === 'cli'),
+    { source: 'cli', stage: 'cli-usage', kind: 'timeout' });
 });
 
 test('a provider without its own detail still reports the HTTP errors its requests saw, until it recovers', async (t) => {

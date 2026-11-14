@@ -1558,10 +1558,18 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
     } catch (fallbackError) {
       // The OAuth error stays the published one; the CLI's own failure is
       // otherwise invisible, and it is the half a Windows report needs.
-      if (fallbackError !== error) deps.noteLimitFailure?.(fallbackError, { source: 'cli', stage: 'cli-usage' });
+      if (fallbackError !== error) deps.noteLimitFailure?.(claudeCliFailure(fallbackError), { source: 'cli', stage: 'cli-usage' });
       throw error;
     }
   }
+}
+
+// execFile reports its own timeout as a killed child with no code, so the
+// diagnostic would only see a bare `error`. Name the fact here; the published
+// status is unaffected.
+function claudeCliFailure(error) {
+  if (error && typeof error === 'object' && error.killed === true && !error.code) error.code = 'REQUEST_TIMEOUT';
+  return error;
 }
 
 function stripAnsiCodes(text) {

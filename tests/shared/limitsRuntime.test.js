@@ -1570,6 +1570,34 @@ test('clearing MiniMax API preserves a Code lane whose last good result was API'
   runtime.stop();
 });
 
+test('a MiniMax API placeholder that hides itself clears the previous failure detail', async () => {
+  let apiOutcome = 'error';
+  const runtime = createLimitsRuntime({ limitProviders: ['minimax'] }, runtimeDeps({
+    probeProvider: async (_provider, _config, context) => {
+      if (context.scope.source === 'oauth') {
+        return [{ ...providerRow('minimax', 'shared', 'MiniMax Code', { windows: [] }), source: 'oauth' }];
+      }
+      if (apiOutcome === 'error') {
+        const error = new Error('api offline');
+        error.status = 'unavailable';
+        throw error;
+      }
+      return [{ provider: 'minimax', status: 'notConfigured' }];
+    }
+  }));
+  try {
+    await runtime.refresh({ provider: 'minimax', accountKey: 'shared', source: 'oauth' }, 'login');
+    await runtime.refresh({ provider: 'minimax', source: 'api' }, 'settings-change');
+    assert.ok(runtime.getDiagnostics().providers[0].lastFailureDetail, 'the API outage is on record');
+
+    apiOutcome = 'placeholder';
+    await runtime.refresh({ provider: 'minimax', source: 'api' }, 'settings-change');
+    assert.equal(runtime.getDiagnostics().providers[0].lastFailureDetail, null);
+  } finally {
+    runtime.stop();
+  }
+});
+
 test('Muse anonymous source reset refreshes stay provider-wide without duplicate or retained identities', async () => {
   for (const sources of [['web'], ['cli', 'web']]) {
     const clock = fakeClock(Date.parse('2026-11-01T00:00:00Z'));

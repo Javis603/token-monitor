@@ -669,6 +669,9 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         // whenever a real Code account is already present.
         if ([...lane.identities.values()].some(state =>
           (state.lastAttempt?.row?.source || state.lastGood?.source) === 'oauth')) {
+          // Nothing failed here, so the previous API outage must not stay on
+          // record for a lane this dispatch does not own.
+          recordFailureDetail(lane, dispatch, attemptAt, false);
           rebuildSnapshot();
           return [];
         }

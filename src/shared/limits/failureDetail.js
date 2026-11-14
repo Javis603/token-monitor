@@ -17,6 +17,18 @@ const ERROR_CODE_PATTERN = /^[A-Z][A-Z0-9_]{1,47}$/;
 const NETWORK_CODE_PATTERN = /^(?:ECONN[A-Z]+|ENOTFOUND|EAI_[A-Z]+|ETIMEDOUT|EHOSTUNREACH|ENETUNREACH|ENETDOWN|EPIPE|EPROTO|UND_ERR_[A-Z_]+|ERR_TLS_[A-Z_]+|CERT_[A-Z_]+|UNABLE_TO_[A-Z_]+|DEPTH_ZERO_SELF_SIGNED_CERT|SELF_SIGNED_CERT_IN_CHAIN)$/;
 const TIMEOUT_CODES = new Set(['PROBE_TIMEOUT', 'REQUEST_TIMEOUT']);
 const CHALLENGE_CODES = new Set(['CLAUDE_WEB_SOURCE_CHALLENGE']);
+// A transport timeout arrives as a network code. The kind exists to tell it from
+// an outage, so it must not be swallowed by the network bucket.
+const NETWORK_TIMEOUT_CODES = new Set([
+  'ETIMEDOUT',
+  'ESOCKETTIMEDOUT',
+  'ERR_TIMED_OUT',
+  'ERR_CONNECTION_TIMED_OUT',
+  'ERR_NETWORK_TIMEOUT',
+  'UND_ERR_CONNECT_TIMEOUT',
+  'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT'
+]);
 const MAX_CAUSE_DEPTH = 3;
 
 function validStage(value) {
@@ -35,7 +47,9 @@ function validHttpStatus(value) {
 // and undici put the code on the error itself.
 function networkCode(error) {
   const chromium = String(error?.message || '').match(/net::(ERR_[A-Z0-9_]+)/);
-  if (chromium) return chromium[1];
+  // The capture comes from free text, so it gets the same length and shape check
+  // as every other code before it can reach the report.
+  if (chromium) return ERROR_CODE_PATTERN.test(chromium[1]) ? chromium[1] : '';
   const code = String(error?.code || '');
   return NETWORK_CODE_PATTERN.test(code) ? code : '';
 }
@@ -50,6 +64,7 @@ function classify(error, depth) {
   if (CHALLENGE_CODES.has(code)) return withStage({ kind: 'challenge', ...(httpStatus ? { httpStatus } : {}) });
   if (httpStatus) return withStage({ kind: 'http', httpStatus });
   const network = networkCode(error);
+  if (NETWORK_TIMEOUT_CODES.has(network)) return withStage({ kind: 'timeout', code: network });
   if (network) return withStage({ kind: 'network', code: network });
   if (error.name === 'SyntaxError') return withStage({ kind: 'response' });
   // A wrapper (undici's `fetch failed`, an identity lookup that failed) carries
