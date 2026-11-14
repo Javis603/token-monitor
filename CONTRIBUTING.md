@@ -14,7 +14,7 @@ Bug reports, feature requests, documentation improvements and focused fixes are 
 
 Keep unrelated fixes or app-wide changes in separate pull requests so each change can be reviewed and validated independently.
 
-[AGENTS.md](AGENTS.md) is the shared engineering guide for people and coding agents: setup commands, runtime requirements, architecture boundaries, commit/PR conventions and validation. Read the guidance relevant to your change rather than duplicating it here.
+[AGENTS.md](AGENTS.md) is the engineering guide for both people and coding agents. It covers setup commands, runtime requirements, architecture boundaries, commit and PR conventions, and validation. Read the sections relevant to your change.
 
 To add or change a tool integration, start with the [provider notes](docs/providers/README.md): the [tracked-client](docs/providers/README.md#adding-a-tracked-client) checklist covers token usage, and the [limits-provider](docs/providers/README.md#adding-a-limits-provider) checklist covers account quotas and balances.
 
