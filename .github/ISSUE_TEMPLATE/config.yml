@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and setup help
+    url: https://github.com/Javis603/token-monitor/discussions/categories/q-a
+    about: Ask how to configure or use Token Monitor in Discussions.

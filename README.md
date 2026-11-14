@@ -482,7 +482,7 @@ Token Monitor processes usage logs locally and sends no analytics or telemetry t
 
 ## Contributing
 
-Issues and PRs are welcome. Project conventions, architecture notes, and the command reference live in [AGENTS.md](AGENTS.md) — written for coding agents, but it doubles as the contributor guide.
+Issues and PRs are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md); project conventions, architecture notes, and the command reference live in [AGENTS.md](AGENTS.md).
 
 ## Acknowledgments
 

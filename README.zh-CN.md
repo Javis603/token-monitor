@@ -481,7 +481,7 @@ Token Monitor 在本地处理使用日志，不会向项目维护者发送分析
 
 ## 参与贡献
 
-欢迎提交 Issue 和 PR。项目规范、架构说明和命令参考都在 [AGENTS.md](AGENTS.md) 中——它是为编码代理编写的，但同样可以作为贡献者指南。
+欢迎提交 Issue 和 PR。请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)；项目规范、架构说明和命令参考都在 [AGENTS.md](AGENTS.md) 中。
 
 ## 致谢
 

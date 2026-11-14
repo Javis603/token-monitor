@@ -1,0 +1,72 @@
+name: Bug report
+description: Report unexpected behavior in Token Monitor.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        English or Chinese is welcome. Please search open and closed issues first; link anything related below.
+        For suspected security vulnerabilities, report privately as described in [SECURITY.md](https://github.com/Javis603/token-monitor/blob/main/SECURITY.md); do not post details here.
+        Remove credentials, cookies, personal paths, conversation content and other private data from all examples. Do not upload full logs, settings files or databases.
+  - type: input
+    id: version
+    attributes:
+      label: Token Monitor version
+      description: Shown under Settings → About Token Monitor, or the source commit if you run from source; say unknown if you cannot find it.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and version
+      placeholder: OS name and version, plus architecture if known (Apple silicon, Intel, x64 or arm64)
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - Token usage or history
+        - AI Tool Limits (account quota or balance)
+        - Session details or activity
+        - UI or window behavior
+        - Install, update or packaging
+        - Sync, Hub or headless agent
+        - Other / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The smallest sequence that shows the problem, and how often it happens. Write "not reproducible on demand" if it only happens occasionally.
+      placeholder: |
+        1. Open …
+        2. Click …
+        3. Wait … seconds
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead. If something never finished loading, say how long you waited. Separate what you observed from any suspected cause.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Relevant setup (optional)
+      description: The AI tool or provider involved and its version (CLI, desktop app or editor extension), how you installed Token Monitor (installer, portable or from source), and whether you use WSL, the Hub, the headless agent or custom source paths. Write paths with placeholders such as ~/project. Unknown is fine.
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and related issues (optional)
+      description: Add sanitized screenshots or a short excerpt, and link related issues. If token counts differ from another source, name that source and compare the same date range, timezone, device and filters. Never paste credentials or full session files.
