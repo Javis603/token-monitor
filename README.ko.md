@@ -247,7 +247,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`(중국판 전용) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder/projects/**/*.jsonl` (global), `~/.qoder-cn/projects/**/*.jsonl` (CN) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/` (`session.jsonl`, `session.jsonl.zstd`) | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/` (`Data/Agents/.claude/projects/` V2, `.claude/projects/` legacy) | ✅ | — | — |
@@ -296,12 +296,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 
 - Custom은 하나의 GET 잔액 엔드포인트에서 숫자 JSON 필드를 매핑합니다. OpenAI 또는 Anthropic API 호환만으로는 충분하지 않습니다.
 
-#### Qoder CN(로컬 어댑터)
-
-Qoder CN 토큰 사용량은 API가 아닌 앱의 로컬 데이터에서 읽습니다. Settings → tools에서 활성화합니다(옵트인, 기본 꺼짐). 현재 버전은 Qoder 설정 디렉터리의 `projects` JSONL(보통 `~/.qoder-cn/projects`)을, 이전 버전은 SQLite를 사용하며 Token Monitor에 포함된 tokscale이 둘 다 읽습니다. JSONL 경로 우선순위는 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`, `QODERCN_CONFIG_DIR/projects`, 기본 경로 순입니다. 이전 데이터베이스는 `TOKEN_MONITOR_QODER_CN_DB_PATH`로 재정의할 수 있습니다. [Qoder 데이터 소스 설명](docs/providers/qodercn.md)을 참고하세요.
-
-고급 로컬 통합이지만 두 형식 모두 추가 런타임이 필요 없습니다. 읽을 수 없는 소스는 마지막으로 완전히 읽은 데이터를 유지합니다. 이전 데이터베이스 세션은 경로가 아닌 프로젝트 이름만 기록하므로 프로젝트 없이 표시됩니다. 실제 토큰 필드가 있는 JSONL 행만 집계합니다. 현재 자사 플랜 행은 credits와 context 비율만 기록할 수 있고 신뢰할 수 있는 세션별 context window가 없으므로 토큰을 추측하지 않습니다. Credits는 AI Tool Limits에 표시되며 실제 토큰이 있는 BYOK/사용자 지정 모델은 정상 집계됩니다.
-
+- Qoder: "설정 → 도구"의 Qoder 그룹에서 국제판과 CN을 각각 추적할 수 있습니다. 새로 설치하면 둘 다 추적하며 기존 선택은 유지됩니다. 도구 사용량은 기본적으로 합산되며, "버전별로 표시"를 켜면 두 행으로 나뉩니다. 국제판은 `QODER_CONFIG_DIR/projects`(기본 `~/.qoder/projects`)를, CN은 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`, `QODERCN_CONFIG_DIR/projects`(기본 `~/.qoder-cn/projects`) 순으로 읽습니다. transcript에 실제로 기록된 토큰만 집계합니다. 관리형 모델에서 credits만 기록되고 토큰이 없는 행은 포함되지 않으며, 해당 credits는 AI 도구 한도에서 확인할 수 있습니다. Qoder CN CLI 1.1.62에서는 `QODERCN_EXPOSE_TOKEN_USAGE=1`을 설정하면 이후 토큰이 기록된다는 보고가 있습니다. 기존 기록은 채워지지 않습니다. `dfmodel` 같은 동적 모델 코드는 기록된 그대로 표시됩니다. 사용량을 SQLite에만 저장하는 이전 Qoder CN 버전은 더 이상 수집하지 않으며, 기존 Token Monitor 기록 파일은 유지됩니다. [Qoder 데이터 소스 설명](docs/providers/qodercn.md)을 참고하세요.
 - AI Chat Models(`vicanent.gcmp`) 토큰 사용량은 VS Code globalStorage 아래 시간별로 기록되는 usage JSONL에서 읽습니다. Settings → tools에서 활성화합니다(옵트인, 기본 꺼짐). 최종 상태가 `completed`인 기록만 집계하고 estimated 자리표시자 행은 무시하며, 기록된 캐시 토큰과 비용 추정치는 그대로 사용합니다. 이 확장이 기록한 각 요청은 GitHub Copilot 행의 데이터 소스인 VS Code 자체 `workspaceStorage/*/chatSessions/`에도 나타납니다. 둘을 동시에 활성화하면 같은 요청이 이중으로 집계되므로 둘 중 하나만 활성화하세요.
 </details>
 

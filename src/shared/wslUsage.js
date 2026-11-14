@@ -8,7 +8,7 @@ const { REASONIX_CLIENT } = require('./providers/reasonix/paths');
 const { WSL_DATA_MARKERS, MARKER_CLIENTS } = require('./clientSourceRegistration');
 const { isMcodeProfileDir } = require('./providers/mcode/paths');
 
-const WSL_EXCLUDED_CLIENTS = new Set([REASONIX_CLIENT, 'catpaw', 'qodercn']);
+const WSL_EXCLUDED_CLIENTS = new Set([REASONIX_CLIENT, 'catpaw']);
 
 const LXSS_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Lxss';
 
@@ -140,9 +140,7 @@ async function collectWslUsage(options = {}, deps = {}) {
   // Reasonix aggregate usage is supported on the host, but remains excluded
   // from WSL scans: Tokscale's Windows PathRoot::ReasonixHome conflicts with
   // the Linux-default `.reasonix/stats` path inside WSL. Native session files
-  // are local-only as well. Qoder CN is excluded for the same kind of reason:
-  // under a Windows host the fork resolves its legacy database from the host's
-  // APPDATA rather than from --home, so a WSL scan would recount host usage.
+  // are local-only as well.
   const tracked = new Set(String(trackedClients).split(',').map((c) => c.trim()).filter(Boolean));
   const clientsCsv = String(clients || '').split(',').map((c) => c.trim()).filter(Boolean)
     .filter((client) => !WSL_EXCLUDED_CLIENTS.has(client))

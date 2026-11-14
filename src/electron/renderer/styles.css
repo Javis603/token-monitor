@@ -9357,3 +9357,11 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 
 .plugin-author-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .plugin-author-heading .plugin-detail-heading { margin: 0; }
+
+/* Qoder edition controls live directly in the standard collection section. */
+.qoder-collection-settings { display: grid; gap: 5px; }
+.qoder-edition-control { display: flex; align-items: center; gap: 5px; }
+.qoder-edition-control > .checkbox-label { flex: 1; }
+.qoder-edition-controls { display: flex; align-items: center; gap: 4px; }
+.qoder-edition-controls button { flex: 0 0 22px; }
+.qoder-collection-settings > .settings-note { margin: 0; }

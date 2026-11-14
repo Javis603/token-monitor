@@ -1,6 +1,6 @@
 'use strict';
 
-const { archivedHistory, collectorAnchorTrust, computePeriodWindows, qoderCnSourcesForClients } = require('./collector');
+const { archivedHistory, collectorAnchorTrust, computePeriodWindows } = require('./collector');
 const { mergePeriods } = require('./usage');
 const { filterReasonixSyntheticSessions } = require('./providers/reasonix/sessionGuard');
 
@@ -29,11 +29,7 @@ function deviceRecordFromAnchor(saved, options = {}) {
     clients = '',
     allTimeSince = '',
     projectsEnabled = true,
-    qoderCnDbPath: qoderCnDbPathOption,
-    qoderCnProjectsDir: qoderCnProjectsDirOption,
     customScanPaths = null,
-    homeDir,
-    env,
     sourcePlatform,
     wslScanEnabled = false,
     wslSupported = false,
@@ -44,10 +40,7 @@ function deviceRecordFromAnchor(saved, options = {}) {
     dailyHistoryArchiveOptions = {},
     now = new Date()
   } = options;
-  const qoderCnSources = qoderCnSourcesForClients(clients, { homeDir, env, platform: sourcePlatform });
-  const qoderCnDbPath = qoderCnDbPathOption === undefined ? qoderCnSources.dbPath : qoderCnDbPathOption;
-  const qoderCnProjectsDir = qoderCnProjectsDirOption === undefined ? qoderCnSources.projectsDir : qoderCnProjectsDirOption;
-  const trust = collectorAnchorTrust(saved, { ...options, platform: sourcePlatform || process.platform, clients, allTimeSince, projectsEnabled, qoderCnDbPath, qoderCnProjectsDir, customScanPaths, now, allowEarlierDay: true, allowRepricing: true });
+  const trust = collectorAnchorTrust(saved, { ...options, platform: sourcePlatform || process.platform, clients, allTimeSince, projectsEnabled, customScanPaths, now, allowEarlierDay: true, allowRepricing: true });
   if (!trust) return null;
   const anchorDay = /^(\d{4})-(\d{2})-(\d{2})$/.exec(saved.dateKey);
   if (!anchorDay) return null;

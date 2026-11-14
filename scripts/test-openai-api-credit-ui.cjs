@@ -188,7 +188,10 @@ app.whenReady().then(async () => {
   await js("openViewFromTray('limits')");await waitFor(has('$83.25 / $100.00'),'actual manual backend native quota');
   assert.ok(await js(has('83% left')));
   assert.deepEqual(await js("[...document.querySelectorAll('#limitsPanel > .limit-row')].map(node=>node.querySelector('.limit-name-title').textContent)"),['Claude','OpenAI','Codex']);
-  assert.equal(await js("document.querySelectorAll('#limitsPanel button').length"),0);
+  // Native provider rows carry their own refresh control (#1456); the plugin
+  // quota row must expose no action at all.
+  assert.equal(await js("document.querySelectorAll('#limitsPanel > .limit-row:nth-child(2) button').length"),0);
+  assert.equal(await js("document.querySelectorAll('#limitsPanel > .limit-row .limit-refresh-button').length"),2,'native provider rows keep their row refresh');
   assert.equal(BrowserWindow.getAllWindows().length,1);
   await waitFor("document.querySelector('#limitsPanel > .limit-row:nth-child(2) .limit-name .row-icon-codex')",'plugin identity icon in native Limits');
   assert.equal(await js("limitProviderColor('plugin:openai-api-credit:credits')===limitProviderColor('codex')"),true,'quota uses current Codex palette');
