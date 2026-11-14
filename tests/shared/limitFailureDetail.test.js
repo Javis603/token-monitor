@@ -45,6 +45,11 @@ test('failure detail separates what the published status collapses into unavaila
     { kind: 'timeout', code: 'ERR_TIMED_OUT' });
   assert.deepEqual(limitFailureDetail(withCode(new Error('connect timed out'), 'ETIMEDOUT')),
     { kind: 'timeout', code: 'ETIMEDOUT' });
+  // Codes the network filter does not carry must still read as timeouts.
+  assert.deepEqual(limitFailureDetail(withCode(new Error('socket hang up'), 'ESOCKETTIMEDOUT')),
+    { kind: 'timeout', code: 'ESOCKETTIMEDOUT' });
+  assert.deepEqual(limitFailureDetail(withCode(new Error('timed out'), 'ERR_TIMED_OUT')),
+    { kind: 'timeout', code: 'ERR_TIMED_OUT' });
   // A code lifted out of free text gets the same shape and length check as any
   // other code, so an oversized one is dropped rather than printed.
   assert.deepEqual(limitFailureDetail(new Error(`net::ERR_${'X'.repeat(60)}`)), { kind: 'error' });

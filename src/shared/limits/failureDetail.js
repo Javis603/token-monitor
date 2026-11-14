@@ -59,7 +59,11 @@ function classify(error, depth) {
   const withStage = (detail) => (stage ? { ...detail, stage } : detail);
   if (!error || typeof error !== 'object') return withStage({ kind: 'error' });
   const code = validCode(error.code);
-  if (TIMEOUT_CODES.has(code) || error.status === 'timeout') return withStage({ kind: 'timeout' });
+  // A timeout code can arrive directly on the error or be lifted out of a
+  // Chromium message, and the second path filters codes the first one accepts.
+  if (TIMEOUT_CODES.has(code) || NETWORK_TIMEOUT_CODES.has(code) || error.status === 'timeout') {
+    return withStage(NETWORK_TIMEOUT_CODES.has(code) ? { kind: 'timeout', code } : { kind: 'timeout' });
+  }
   const httpStatus = validHttpStatus(error.httpStatus);
   if (CHALLENGE_CODES.has(code)) return withStage({ kind: 'challenge', ...(httpStatus ? { httpStatus } : {}) });
   if (httpStatus) return withStage({ kind: 'http', httpStatus });
