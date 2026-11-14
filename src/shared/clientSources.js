@@ -190,9 +190,9 @@ function claudeDesktopMsixSourceRoots({ env, platform }) {
   const localAppData = key ? String(env[key] || '').trim() : '';
   if (!localAppData || !path.isAbsolute(localAppData)) return [];
   const roots = [];
-  const addProfile = (profile, allowClaudeLeaf = false) => {
+  const addProfile = (profile, allowNonClaudeProfile = false) => {
     const name = path.basename(profile).toLowerCase();
-    if (!name.startsWith('claude_') && !(allowClaudeLeaf && name === 'claude')) return;
+    if (!allowNonClaudeProfile && !name.startsWith('claude_')) return;
     for (const lane of ['local-agent-mode-sessions', 'claude-code-sessions']) {
       const dir = path.join(profile, lane);
       if (fs.existsSync(dir)) roots.push(['claude-desktop-transcripts', dir, null, true]);
@@ -223,7 +223,9 @@ function claudeDesktopMsixSourceRoots({ env, platform }) {
         path.join(root, 'LocalState'),
         path.join(root, 'RoamingState')
       ]) {
-        addProfile(candidate, path.basename(candidate).toLowerCase() === 'claude');
+        // These are constrained children of an already validated Claude
+        // package; their names are storage lanes, not Claude profile IDs.
+        addProfile(candidate, true);
       }
       try {
         for (const nested of fs.readdirSync(root, { withFileTypes: true })) {

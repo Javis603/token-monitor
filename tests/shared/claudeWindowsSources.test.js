@@ -37,23 +37,42 @@ test('Claude MSIX discovery is disabled outside Windows and without an absolute 
   assert.deepEqual(claudeDesktopMsixSourceRoots({ env: { LOCALAPPDATA: '/tmp/local' }, platform: 'linux' }), []);
 });
 
-test('Anthropic Claude MSIX package discovers the legacy LocalCache/Roaming/Claude leaf', (t) => {
+test('Claude MSIX package discovers legacy and package-state storage roots', (t) => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-claude-msix-legacy-'));
   t.after(() => fs.rmSync(home, { recursive: true, force: true }));
   const local = path.join(home, 'LocalAppData');
-  const profile = path.join(local, 'Packages', 'AnthropicPBC.Claude_8wekyb3d8bbwe', 'LocalCache', 'Roaming', 'Claude');
-  const transcripts = path.join(profile, 'claude-code-sessions');
-  const leveldb = path.join(profile, 'IndexedDB', 'https_claude.ai_0.indexeddb.leveldb');
-  fs.mkdirSync(transcripts, { recursive: true });
-  fs.mkdirSync(leveldb, { recursive: true });
+
+  // Older Anthropic package layout stores the profile below LocalCache.
+  const legacyProfile = path.join(local, 'Packages', 'AnthropicPBC.Claude_8wekyb3d8bbwe', 'LocalCache', 'Roaming', 'Claude');
+  const legacyTranscripts = path.join(legacyProfile, 'claude-code-sessions');
+  const legacyLeveldb = path.join(legacyProfile, 'IndexedDB', 'https_claude.ai_0.indexeddb.leveldb');
+
+  // Other MSIX builds place their app data directly in package state folders.
+  const packageRoot = path.join(local, 'Packages', 'Claude_publisher');
+  const localState = path.join(packageRoot, 'LocalState');
+  const stateTranscripts = path.join(localState, 'claude-code-sessions');
+  const stateLeveldb = path.join(localState, 'IndexedDB', 'https_claude.ai_0.indexeddb.leveldb');
+  const localCache = path.join(packageRoot, 'LocalCache');
+  const cacheTranscripts = path.join(localCache, 'local-agent-mode-sessions');
+  const roamingState = path.join(packageRoot, 'RoamingState');
+  const roamingBlob = path.join(roamingState, 'IndexedDB', 'https_claude.ai_0.indexeddb.blob');
+
+  for (const dir of [
+    legacyTranscripts, legacyLeveldb, stateTranscripts, stateLeveldb,
+    cacheTranscripts, roamingBlob
+  ]) fs.mkdirSync(dir, { recursive: true });
 
   const roots = claudeDesktopMsixSourceRoots({ env: { LOCALAPPDATA: local }, platform: 'win32' });
-  assert.ok(roots.some(([, dir]) => dir === transcripts));
-  assert.ok(roots.some(([, dir]) => dir === leveldb));
+  for (const dir of [
+    legacyTranscripts, legacyLeveldb, stateTranscripts, stateLeveldb,
+    cacheTranscripts, roamingBlob
+  ]) assert.ok(roots.some(([, root]) => root === dir), `missing discovered root: ${dir}`);
 
   const registered = clientSourceRoots('claude', {
     homeDir: home, env: { LOCALAPPDATA: local }, platform: 'win32'
   }).claude;
-  assert.ok(registered.some(root => root.dir === transcripts));
-  assert.ok(registered.some(root => root.dir === leveldb));
+  for (const dir of [
+    legacyTranscripts, legacyLeveldb, stateTranscripts, stateLeveldb,
+    cacheTranscripts, roamingBlob
+  ]) assert.ok(registered.some(root => root.dir === dir), `missing registered root: ${dir}`);
 });
