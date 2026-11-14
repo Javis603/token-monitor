@@ -271,9 +271,11 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           const switched = !!tail && head.source !== source;
           const consistent = !tail || sameCycle(previous, point);
           // A disagreement concerns the cycle it was observed in. Once the
-          // established reset deadline passes, the next cycle starts unguarded,
-          // and a different observer reporting that new cycle is not a conflict.
-          const cycleEnded = !!tail && previous.reset !== null && previous.reset <= point.at;
+          // established reset deadline passes and a reading reports a later one,
+          // the next cycle starts unguarded, and a different observer reporting
+          // that new cycle is not a conflict. A stale deadline alone is not proof.
+          const cycleEnded = !!tail && previous.reset !== null && previous.reset <= point.at
+            && point.reset !== null && point.reset - previous.reset > 1000;
           const headGuard = cycleEnded ? 0 : head?.guarded;
           const disagrees = !consistent && !cycleEnded;
           const healthy = tail && !head?.failed

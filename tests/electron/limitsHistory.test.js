@@ -411,6 +411,16 @@ test('a healthy second observer that reports a new cycle first keeps measuring i
   assert.equal(f.sql('SELECT guarded FROM streams')[0].guarded, 0);
 });
 
+test('a passed deadline without a new cycle keeps an established source conflict', t => {
+  const f = databaseFixture(t, at(3, 12));
+  const stale = at(3, 0);
+  f.record([action(at(2, 23, 55), 91, { source: 'a', reset: stale }), action(stale, 92, { source: 'a', reset: stale }),
+    action(stale, 95, { source: 'b', reset: stale }), action(at(3, 0, 1), 96, { source: 'b', reset: stale }),
+    action(at(3, 0, 2), 97, { source: 'b', reset: stale }), action(at(3, 0, 3), 100, { source: 'a', reset: stale })]);
+  assert.equal(f.sql('SELECT guarded FROM streams')[0].guarded, 1);
+  assert.ok((f.query().windows[0].distribution.buckets.at(-1).value ?? 0) < 3, 'a stale deadline cannot turn the source difference into consumption');
+});
+
 test('inactive device failures do not interrupt an active observer; active failures permit compatible takeover', t => {
   const f = databaseFixture(t);
   f.record([action(at(2, 10), 20, { source: 'a' }), { account: accountA, source: 'b', failed: true },
