@@ -1934,7 +1934,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   background: rgba(var(--accent-rgb), 0.85);
 }
 .sync-device-main { display: contents; }
-.sync-device-title { grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.sync-device-title { grid-column: 2 / -1; grid-row: 1; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .sync-device-name {
   min-width: 0;
   overflow: hidden;
@@ -1959,8 +1959,8 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   overflow-wrap: anywhere;
 }
 .sync-device-side {
-  grid-column: 3;
-  grid-row: 1;
+  grid-column: 2 / -1;
+  grid-row: 3;
   align-self: center;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -1968,7 +1968,6 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   gap: 5px 8px;
   min-width: 0;
 }
-.sync-device-row.is-stale .sync-device-side { grid-column: 2 / -1; grid-row: 3; }
 .sync-device-action { display: flex; align-items: center; justify-content: flex-end; height: 0; }
 .sync-device-side .device-delete-button { align-self: center; margin-left: auto; flex-shrink: 0; }
 .sync-device-presence {
@@ -2017,10 +2016,6 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .sync-panel-link:focus-visible { color: var(--text); background: rgba(var(--overlay-rgb), 0.03); }
 .sync-panel-link-arrow::before { content: '→'; display: inline-block; transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1); }
 .sync-panel-link:hover .sync-panel-link-arrow::before { transform: translateX(2px); }
-@container (max-width: 340px) {
-  .sync-device-title { grid-column: 2 / -1; }
-  .sync-device-side { grid-column: 2 / -1; grid-row: 3; }
-}
 @container (max-width: 240px) {
   .sync-device-side { grid-template-columns: minmax(0, 1fr); }
   .sync-device-action { height: auto; }
