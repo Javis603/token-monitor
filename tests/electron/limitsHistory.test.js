@@ -2394,6 +2394,22 @@ test('a matching reading inside the accepted compressed interval cannot take it 
   assert.equal(result.unallocated, 0);
 });
 
+test('adoption applies a saved failure only after replay, like live recording', t => {
+  const reset = at(8, 0);
+  const sequence = (b = streamA) => [action(at(2, 10), 50, { source: 'a', reset }), action(at(2, 10, 5), 50, { source: 'a', reset }),
+    action(at(2, 10, 10), 2, { id: b, source: 'b', reset }), action(at(2, 10, 15), 40, { id: b, source: 'b', reset })];
+  const reference = adoptionDatabase(t), migrated = adoptionDatabase(t);
+  reference.record(sequence(), at(2, 12));
+  migrated.record(sequence(streamB), at(2, 12));
+  migrated.record([{ account: accountA, source: 'a', failed: true }], at(2, 12));
+  migrated.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA, streamB],
+    sources: [{ id: streamA, before: 'a', after: 'a' }, { id: streamB, before: 'b', after: 'b' }] }], at(2, 12));
+  const live = reference.query([{ id: streamA, key: 'weekly', window: { kind: 'weekly' } }], { grain: 'day', day: dayKey(at(2, 12)) }, at(2, 12)).windows[0].distribution;
+  const adopted = adoptedDistribution(migrated);
+  assert.deepEqual([adopted.buckets.at(-1).value, adopted.unallocated], [live.buckets.at(-1).value, live.unallocated]);
+  assert.equal(adopted.buckets.at(-1).value, 0);
+});
+
 test('adoption detects disagreements inside overlapping compressed coverage before counting consumption', t => {
   const reference = adoptionDatabase(t), migrated = adoptionDatabase(t);
   for (const [minute, local, hub] of [[0, 20, 20], [5, 20, 25], [10, 20, 25]]) {

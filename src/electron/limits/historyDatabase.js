@@ -331,7 +331,8 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
             else sql(`UPDATE runs SET break_after = break_after | ?,
               uncertain_until = MAX(COALESCE(uncertain_until, ?), ?) WHERE id = ?`)
               .run(point.breakAfter, point.uncertainUntil, point.uncertainUntil, run);
-            markFailed.run(id);
+            // Adoption replays this saved break; the owner's failure state is
+            // restored only after replay, since the failure itself is undated.
           }
         }
       }
@@ -452,6 +453,7 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
         let spanIndex = 0;
         let active = [];
         let ownerStream = null;
+        let ownerFailed;
         for (const event of events) {
           active = active.filter(span => span.until >= event.point.at);
           while (spanIndex < spans.length && spans[spanIndex].point.at <= event.point.at) {
@@ -485,9 +487,11 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
             windows: [{ id: mapping.id, point: event.point }] }], now);
           if (headFor.get(mapping.id)?.source === event.source && latest.get(mapping.id)?.until === event.point.at) {
             ownerStream = event.stream;
-            if (event.failed !== undefined) sql('UPDATE streams SET failed = ? WHERE id = ?').run(+event.failed, mapping.id);
+            ownerFailed = event.failed;
           }
         }
+        // A saved failure has no time of its own; it applies only after replay.
+        if (ownerFailed !== undefined) sql('UPDATE streams SET failed = ? WHERE id = ?').run(+ownerFailed, mapping.id);
         streamInsert.run(mapping.id, mapping.account);
         for (const [source, at] of origins) {
           if (at > (originFor.get(mapping.id, source)?.at || 0)) noteOrigin.run(mapping.id, source, at);
