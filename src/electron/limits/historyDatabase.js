@@ -275,20 +275,21 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           // and a different observer reporting that new cycle is not a conflict.
           const cycleEnded = !!tail && previous.reset !== null && previous.reset <= point.at;
           const headGuard = cycleEnded ? 0 : head?.guarded;
+          const disagrees = !consistent && !cycleEnded;
           const healthy = tail && !head?.failed
             && (point.coveredFrom === tail.until ? point.maxGap : point.at - tail.until) <= Math.max(tail.interval, point.interval) * 2.5;
           // Prefer continuity after an uncertain takeover or source disagreement.
           // Keep the replacement while healthy so an old observer cannot inject
           // a jump. After failure/expiry, only genuine conflicts prevent a
           // compatible handoff from establishing same-bucket net consumption.
-          if (switched && healthy && (headGuard || !consistent)) {
+          if (switched && healthy && (headGuard || disagrees)) {
             // Omitted allowance metadata cannot establish a conflicting quota pool.
-            if (!consistent && !missingBasisOnly && !cycleEnded) conflict(id, tail, point, now);
+            if (disagrees && !missingBasisOnly) conflict(id, tail, point, now);
             continue;
           }
           const basisChanged = !!tail && (tail.basis || '') !== (point.basis || '');
-          const ambiguous = point.uncertainBefore || basisChanged || switched && (headGuard === GUARD_CONFLICT || !consistent || !healthy);
-          const guarded = headGuard === GUARD_CONFLICT || basisChanged || switched && !consistent && !cycleEnded
+          const ambiguous = point.uncertainBefore || basisChanged || switched && (headGuard === GUARD_CONFLICT || disagrees || !healthy);
+          const guarded = headGuard === GUARD_CONFLICT || basisChanged || switched && disagrees
             ? GUARD_CONFLICT : headGuard || (ambiguous ? GUARD_PREFERRED : 0);
           if (switched && headGuard === GUARD_CONFLICT) {
             // An established disagreement still blocks a compatible-looking

@@ -398,9 +398,18 @@ for (const [conflictFirst, atDeadline] of [[true, false], [false, false], [true,
     const today = entry.distribution.buckets.at(-1);
     assert.equal(today.value, 3, 'compatible handoffs in the new cycle are measured consumption');
     assert.equal(f.sql('SELECT unallocated FROM daily WHERE day = ?', dayKey(at(3, 12)))[0].unallocated, 0);
-    assert.deepEqual(segments(entry.points.filter(p => p.at > at(3, 0))).map(s => s.map(p => p.value)), [[0, 1, 2, 3]]);
+    assert.deepEqual(segments(entry.points.filter(p => p.at > at(3, 0))).map(s => s.map(p => p.value)), [[0, 0, 1, 2, 3]]);
   });
 }
+
+test('a healthy second observer that reports a new cycle first keeps measuring it', t => {
+  const f = databaseFixture(t, at(3, 12));
+  const sample = (time, value, source, reset) => action(time, value, { source, reset });
+  f.record([sample(at(2, 23, 50), 91, 'a', at(3, 0)), sample(at(3, 0, 1), 0, 'b', at(10, 0)),
+    sample(at(3, 0, 4), 1, 'b', at(10, 0)), sample(at(3, 0, 9), 2, 'b', at(10, 0))]);
+  assert.equal(f.query().windows[0].distribution.buckets.at(-1).value, 2);
+  assert.equal(f.sql('SELECT guarded FROM streams')[0].guarded, 0);
+});
 
 test('inactive device failures do not interrupt an active observer; active failures permit compatible takeover', t => {
   const f = databaseFixture(t);
