@@ -57,16 +57,16 @@ body:
     id: actual
     attributes:
       label: Actual behavior
-      description: What happened instead, including how long you waited if loading is involved. Separate what you observed from any suspected cause.
+      description: What happened instead. If something never finished loading, say how long you waited. Separate what you observed from any suspected cause.
     validations:
       required: true
   - type: textarea
     id: context
     attributes:
-      label: Relevant setup (if applicable)
-      description: Name the AI tool/provider and its version, CLI/Desktop/extension, and any WSL, headless, Hub or custom data-root setup. If relevant, include official installer/portable/source build and the build host/target. Describe paths with placeholders, not personal directory names. Unknown is fine.
+      label: Relevant setup (optional)
+      description: The AI tool or provider involved and its version (CLI, desktop app or editor extension), how you installed Token Monitor (installer, portable or from source), and whether you use WSL, the Hub, the headless agent or custom source paths. Write paths with placeholders such as ~/project. Unknown is fine.
   - type: textarea
     id: evidence
     attributes:
       label: Evidence and related issues (optional)
-      description: Add sanitized screenshots or a small redacted example, and links to related issues. For usage mismatches, compare the same date range, timezone, device and filters; state the comparison source and any known input/output/cache/reasoning breakdown. Never paste credentials or full session files.
+      description: Add sanitized screenshots or a short excerpt, and link related issues. If token counts differ from another source, name that source and compare the same date range, timezone, device and filters. Never paste credentials or full session files.
