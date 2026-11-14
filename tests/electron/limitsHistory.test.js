@@ -467,6 +467,28 @@ test('rounding readings keep their observer current for another device\'s missin
   assert.equal(result.unallocated, 0);
 });
 
+test('the owner\'s rounding reading after a failed refresh keeps it current for a missing reading', t => {
+  const f = databaseFixture(t);
+  const reset = at(8, 0);
+  const missing = action(at(2, 10, 7), 0, { source: 'b', reset });
+  missing.windows[0].point = { at: at(2, 10, 7), interval: 300_000, missing: true };
+  f.record([action(at(2, 10), 50, { source: 'a', reset }), { account: accountA, source: 'a', failed: true },
+    action(at(2, 10, 5), 49.9, { source: 'a', reset }), missing, action(at(2, 10, 10), 51, { source: 'a', reset })]);
+  const result = f.query().windows[0].distribution;
+  assert.equal(result.buckets.at(-1).value, 1);
+  assert.equal(result.unallocated, 0);
+});
+
+test('a failed owner does not hold back another observer\'s contradiction', t => {
+  const f = databaseFixture(t);
+  const reset = at(8, 0);
+  f.record([action(at(2, 10), 50, { source: 'a', reset }), { account: accountA, source: 'a', failed: true },
+    action(at(2, 10, 5), 2, { source: 'b', reset }), action(at(2, 10, 10), 3, { source: 'b', reset })]);
+  const entry = f.query().windows[0];
+  assert.deepEqual(entry.points.map(p => p.value), [50, 2, 3]);
+  assert.equal(entry.distribution.buckets.at(-1).value, 1);
+});
+
 test('a sub-point dip within one deadline is rounding jitter, not a reset', t => {
   const f = databaseFixture(t);
   f.record([action(at(2, 10), 2.04, { source: 'a', reset: at(8, 0) }), action(at(2, 10, 5), 1.08, { source: 'a', reset: at(8, 0) }),

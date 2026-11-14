@@ -262,10 +262,11 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           const switched = !!tail && head.source !== source;
           const consistent = !tail || sameCycle(previous, point);
           // The observer that wrote the timeline is current while it keeps
-          // reporting, even when its readings add nothing (such as rounding).
-          // Other observers' rejected readings never keep it current.
+          // reporting without a failed refresh, even when its readings add
+          // nothing (such as rounding). Other observers' rejected readings never
+          // keep it current.
           const ownerSeen = tail && head.source !== source ? originFor.get(id, head.source)?.at : null;
-          const current = ownerSeen != null && point.at - ownerSeen <= Math.max(tail.interval, point.interval) * 2.5;
+          const current = ownerSeen != null && !head.failed && point.at - ownerSeen <= Math.max(tail.interval, point.interval) * 2.5;
           // Another observer's reading without the allowance adds nothing while
           // the merged series is current. Missing metadata, or its return, is
           // never a disagreement.
@@ -281,7 +282,11 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
             // Within one advertised deadline, a used percentage dipping by less
             // than a point is rounding jitter or a stale observer, not a reset.
             if (point.reset !== null && point.unit === 'pp' && previous.value - point.value < JITTER_PP
-              && sameCycle(previous, { ...point, value: previous.value })) continue;
+              && sameCycle(previous, { ...point, value: previous.value })) {
+              // The owner's own rounding reading still proves it is reporting.
+              if (!switched) setHead.run(source, id);
+              continue;
+            }
             // Deadlines only move forward, so a later one is a new or rolling
             // window from any observer. Anything else another observer
             // contradicts (a drop, a refill or an earlier deadline) is stale while
