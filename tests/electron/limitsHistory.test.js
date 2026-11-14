@@ -2380,6 +2380,18 @@ function adoptedDistribution(db, grain = 'day') {
     { grain, day: dayKey(at(2, 12)) }, at(2, 12)).windows[0].distribution;
 }
 
+test('adoption keeps a failure from a pending interruption', t => {
+  const db = adoptionDatabase(t);
+  const reset = at(8, 0);
+  db.record([action(at(2, 10), 50, { source: 'a', reset })], at(2, 10));
+  db.record([{ account: accountB, source: 'live', failed: true, legacy: { account: accountA, source: 'a' } }], at(2, 10, 5));
+  db.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA], sources: [{ id: streamA, before: 'a', after: 'a' }] }], at(2, 10, 5));
+  db.record([action(at(2, 10, 6), 2, { id: adoptedStream, source: 'b', reset }), action(at(2, 10, 11), 3, { id: adoptedStream, source: 'b', reset })], at(2, 12));
+  const entry = db.query([{ id: adoptedStream, key: 'weekly', window: { kind: 'weekly' } }], { grain: 'day', day: dayKey(at(2, 12)) }, at(2, 12)).windows[0];
+  assert.deepEqual(entry.points.map(p => p.value), [50, 2, 3]);
+  assert.equal(entry.distribution.buckets.at(-1).value, 1);
+});
+
 test('a matching reading inside the accepted compressed interval cannot take it over during adoption', t => {
   const migrated = adoptionDatabase(t);
   const actions = [];

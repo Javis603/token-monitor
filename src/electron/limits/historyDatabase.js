@@ -490,8 +490,9 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
             ownerFailed = event.failed;
           }
         }
-        // A saved failure has no time of its own; it applies only after replay.
-        if (ownerFailed !== undefined) sql('UPDATE streams SET failed = ? WHERE id = ?').run(+ownerFailed, mapping.id);
+        // A saved failure has no time of its own; it applies only after replay
+        // and never clears a failure that a replayed interruption established.
+        if (ownerFailed) markFailed.run(mapping.id);
         streamInsert.run(mapping.id, mapping.account);
         for (const [source, at] of origins) {
           if (at > (originFor.get(mapping.id, source)?.at || 0)) noteOrigin.run(mapping.id, source, at);
