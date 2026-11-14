@@ -67,7 +67,7 @@ Only app, agent and packaging entry points run `ensure:tokscale`; install, Hub, 
 
 ### Watching
 
-`src/shared/watcherHost.js` isolates chokidar in a child process, not a worker thread, to keep descriptors and native memory out of the owner. Root replacement waits for exit; `unwatch()` does not release descriptors. The child exits on IPC disconnect. Attribution, debounce and tick decisions stay with the collector.
+`src/shared/watcherHost.js` isolates chokidar in a child process, not a worker thread, to keep descriptors and native memory out of the owner. Root replacement waits for exit; `unwatch()` does not release descriptors. The child exits on IPC disconnect. Attribution, debounce and tick decisions stay with the collector. The child imports only `src/shared/watchPolicy.js`; importing `collector.js` there would pull the collection graph into a process that evaluates path predicates.
 
 - Preserve the 3–5 s update contract: no cooldown above the debounce; mid-tick events re-arm it. `watchMaxWaitMs` bounds continuous writes, but time behind an in-flight tick does not count toward that cap.
 - Watch policies must match scanner boundaries without losing supported links, dynamic discovery or overlapping sources. The shared watcher retains the union of overlapping sources, while collection and self-sync attribution apply each client's own policy. See [Claude Desktop](providers/claude.md#retained-claude-desktop-usage) for its traversal rules.

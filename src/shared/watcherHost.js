@@ -115,7 +115,7 @@ function createInProcessWatcherHost(config = {}, handlers = {}) {
   // Required lazily so a worker-hosted run never loads chokidar on the owning
   // thread, and so the collector's tests can still swap chokidar.watch.
   const chokidar = require('chokidar');
-  const { openWatch, WATCH_REFUSAL_CODES } = require('./collector');
+  const { openWatch, WATCH_REFUSAL_CODES } = require('./watchPolicy');
   let watcher;
   try {
     watcher = openWatch(chokidar, config);
