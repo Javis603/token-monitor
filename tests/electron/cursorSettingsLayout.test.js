@@ -2627,6 +2627,7 @@ test('remote Hub build status is wired as a separate localized sync hint', () =>
 test('main settings normalize collection cadence and replace only usage when it changes', () => {
   const main = readAccountOwnersAndMain();
   const collector = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'collector.js'), 'utf8');
+  const watchPolicy = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'watchPolicy.js'), 'utf8');
   assert.match(main, /function normalizeCollectionMode/);
   assert.match(main, /function normalizeCollectionIntervalMs/);
   assert.match(main, /COLLECTION_MODE_VALUES = new Set\(\[[^\]]*'smart'/);
@@ -2654,7 +2655,7 @@ test('main settings normalize collection cadence and replace only usage when it 
   assert.doesNotMatch(usageConfig, /^\s*watchUsePolling:/m);
   assert.doesNotMatch(main, /function collectorWatchUsePolling/);
   assert.match(collector, /const watchUsePolling = resolveWatchUsePolling\(options\.watchUsePolling\)/);
-  assert.match(collector, /function resolveWatchUsePolling[\s\S]*?TOKEN_MONITOR_WATCH_POLLING/);
+  assert.match(watchPolicy, /function resolveWatchUsePolling[\s\S]*?TOKEN_MONITOR_WATCH_POLLING/);
   assert.match(main, /function collectorIntervalRequiresActivity[\s\S]*?=== 'smart'/);
 
   const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), main.indexOf("ipcMain.handle('appearance:preview'"));
