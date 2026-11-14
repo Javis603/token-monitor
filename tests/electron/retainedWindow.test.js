@@ -93,9 +93,15 @@ test('a show whose page never paints is revealed by the fallback, and obsolete h
   await Promise.resolve();
   assert.deepEqual(old.opacities, [0, 1], 'a paint after the fallback reveal must not reveal again');
   assert.equal(reveals, 1);
-  f.create({ width: 400, height: 600, show: true }, old);
+  old.emit('hide');
   old.emit('show');
-  assert.deepEqual(old.opacities, [0, 1], 'a transferred page belongs to its new host');
+  f.create({ width: 400, height: 600, show: true }, old);
+  paint();
+  await Promise.resolve();
+  assert.deepEqual(old.opacities, [0, 1, 0, 0], 'a paint after the page moved hosts must not reveal the old host');
+  old.emit('hide');
+  old.emit('show');
+  assert.deepEqual(old.opacities, [0, 1, 0, 0], 'a transferred page belongs to its new host');
 });
 
 function fixture() {

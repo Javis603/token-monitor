@@ -61,7 +61,7 @@ function createRetainedWindow({ BaseWindow, WebContentsView }, options, previous
     let settled = false;
     const reveal = () => {
       clearTimeout(timer);
-      if (settled || epoch !== revealEpoch || win.isDestroyed()) return;
+      if (settled || epoch !== revealEpoch || entry.owner !== win || win.isDestroyed()) return;
       settled = true;
       beforeReveal?.(win);
       win.setOpacity(1);
