@@ -431,6 +431,17 @@ test('a reset after another observer\'s baseline lets the returning observer cou
   assert.equal(result.unallocated, 0);
 });
 
+test('rounding readings keep their observer current for another device\'s contradiction', t => {
+  const f = databaseFixture(t);
+  const reset = at(8, 0);
+  f.record([action(at(2, 10), 50, { source: 'a', reset }), action(at(2, 10, 5), 49.9, { source: 'a', reset }),
+    action(at(2, 10, 10), 49.9, { source: 'a', reset }), action(at(2, 10, 15), 49.9, { source: 'a', reset }),
+    action(at(2, 10, 16), 0, { source: 'b', reset }), action(at(2, 10, 20), 50.1, { source: 'a', reset })]);
+  const entry = f.query().windows[0];
+  assert.deepEqual(entry.points.map(p => p.value), [50, 50.1]);
+  assert.ok(Math.abs(entry.distribution.buckets.at(-1).value - 0.1) < 1e-9);
+});
+
 test('a sub-point dip within one deadline is rounding jitter, not a reset', t => {
   const f = databaseFixture(t);
   f.record([action(at(2, 10), 2.04, { source: 'a', reset: at(8, 0) }), action(at(2, 10, 5), 1.08, { source: 'a', reset: at(8, 0) }),
@@ -2321,6 +2332,20 @@ function adoptedDistribution(db, grain = 'day') {
   return db.query([{ id: adoptedStream, key: 'weekly', window: { kind: 'weekly' } }],
     { grain, day: dayKey(at(2, 12)) }, at(2, 12)).windows[0].distribution;
 }
+
+test('a matching reading inside the accepted compressed interval cannot take it over during adoption', t => {
+  const migrated = adoptionDatabase(t);
+  const actions = [];
+  for (let minute = 0; minute <= 30; minute += 5) actions.push(action(at(2, 10, minute), 20, { source: 'a' }));
+  actions.push(action(at(2, 10, 35), 21, { source: 'a' }));
+  actions.push(action(at(2, 10, 5), 20, { id: streamB, source: 'b' }), action(at(2, 10, 10), 22, { id: streamB, source: 'b' }));
+  migrated.record(actions, at(2, 12));
+  migrated.adopt([{ id: adoptedStream, account: accountA, legacy: [streamA, streamB],
+    sources: [{ id: streamA, before: 'a', after: 'a' }, { id: streamB, before: 'b', after: 'b' }] }], at(2, 12));
+  const result = adoptedDistribution(migrated);
+  assert.equal(result.buckets.at(-1).value, 1);
+  assert.equal(result.unallocated, 0);
+});
 
 test('adoption detects disagreements inside overlapping compressed coverage before counting consumption', t => {
   const reference = adoptionDatabase(t), migrated = adoptionDatabase(t);

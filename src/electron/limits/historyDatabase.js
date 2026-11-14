@@ -124,6 +124,7 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
   const breakRun = sql(`UPDATE runs SET break_after = break_after | ${BREAK_INTERRUPTED} WHERE id = ?`);
   const markInterruption = sql('UPDATE runs SET break_after = break_after | ?, uncertain_until = MAX(COALESCE(uncertain_until, until), ?) WHERE id = ?');
   const markFailed = sql('UPDATE streams SET failed = 1 WHERE id = ?');
+  const lastOtherObservation = sql('SELECT MAX(at) AS at FROM history_origins WHERE stream = ? AND source <> ?');
   const ambiguousStart = sql('UPDATE runs SET uncertain_before = 1 WHERE id = ?');
   const basisInsert = sql('INSERT INTO run_basis VALUES (?, ?)');
   const failAccount = sql(`SELECT r.id, r.until, s.id AS stream FROM streams s
@@ -259,7 +260,10 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           }
           const switched = !!tail && head.source !== source;
           const consistent = !tail || sameCycle(previous, point);
-          const current = !!tail && point.at - tail.until <= Math.max(tail.interval, point.interval) * 2.5;
+          // Another observer is current while it keeps reporting, even when its
+          // readings add nothing (such as rounding), so use its last observation.
+          const otherSeen = tail && lastOtherObservation.get(id, source)?.at;
+          const current = !!tail && otherSeen != null && point.at - otherSeen <= Math.max(tail.interval, point.interval) * 2.5;
           // Another observer's reading without the allowance adds nothing while
           // the merged series is current. Missing metadata, or its return, is
           // never a disagreement.
@@ -462,9 +466,9 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           }
           // Compressed coverage proves the accepted stream's unchanged reading
           // across this time, without its intermediate observation times. Like
-          // any same-time reading, a different value at that time adds nothing.
-          if (ownerStream !== null && ownerStream !== event.stream && active.some(span => span.stream === ownerStream
-            && (span.point.value !== event.point.value || !sameCycle({ ...span.point, at: event.point.at }, event.point)))) continue;
+          // any same-time reading, another stream's reading inside it adds
+          // nothing, and cannot take the interval over.
+          if (ownerStream !== null && ownerStream !== event.stream && active.some(span => span.stream === ownerStream)) continue;
           // Readings already accepted by one saved stream keep its source, so
           // equal-time confirmations replayed from it are not another observer.
           if (head && ownerStream === event.stream && head.source !== event.source) {
