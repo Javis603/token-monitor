@@ -30,7 +30,7 @@
 
 ## Token Monitor とは
 
-Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 54+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップアプリです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。メインウィンドウ、MacBook のノッチ、メニューバーやシステムトレイ、画面の端、フローティングバブル、ネイティブ macOS ウィジェットなど、目に入るあらゆる場所で確認できます。
+Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 55+ 種類の AI コーディングツールのリアルタイムトークン使用量と AI ツール制限を表示するデスクトップアプリです。複数デバイス間のリアルタイム同期、使用履歴トレンド、ツール・デバイス・モデル・セッション・プロジェクト別の内訳表示に対応しています。メインウィンドウ、MacBook のノッチ、メニューバーやシステムトレイ、画面の端、フローティングバブル、ネイティブ macOS ウィジェットなど、目に入るあらゆる場所で確認できます。
 
 ## 対応ツール
 
@@ -52,6 +52,7 @@ Claude Code、Codex、Cursor、GitHub Copilot、Cherry Studio など 54+ 種類�
     <img src=".github/assets/tools-icon/qwen.png" width="40" alt="Qwen" title="Qwen" />
     <img src=".github/assets/tools-icon/xai.png" width="40" alt="Grok Build" title="Grok Build" />
     <img src=".github/assets/tools-icon/copilot.png" width="40" alt="GitHub Copilot" title="GitHub Copilot" />
+    <img src=".github/assets/tools-icon/gcmp.png" width="40" alt="AI Chat Models" title="AI Chat Models" />
     <img src=".github/assets/tools-icon/pi.png" width="40" alt="Pi" title="Pi" />
     <img src=".github/assets/tools-icon/omp.png" width="40" alt="Oh My Pi" title="Oh My Pi" />
     <img src=".github/assets/tools-icon/senpi.png" width="40" alt="OmO Native" title="OmO Native" />
@@ -160,7 +161,7 @@ brew install --cask token-monitor
 
 ### 使用量の追跡
 
-- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 42+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
+- **リアルタイムトークン追跡** — Claude Code、Codex、Cursor、GitHub Copilot、Antigravity、OpenCode など 43+ 種類の AI ツール、各ターンから数秒以内に UI 更新（全リストは上の表を参照）
 - **リアルタイムトークンレート** — 生成速度を `tok/s`、総消費を `tok/min` で表示する任意のライブ表示
 - **セッション別詳細** — セッションを開くとプロンプトごとのトークン、各応答のトークン分割・使用ツールまで展開（ローカル transcript/DB を必要時のみ読み込み、同期しない）
 - **キャッシュヒット統計** — ツール・モデルをクリックすると入力トークン（キャッシュ hit/miss）、出力トークン、ヒット率の詳細
@@ -230,6 +231,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `~/.grok/`（`sessions/`、`logs/unified.jsonl`） | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`、`~/.copilot/`（`otel/`、`data.db`、`session-store.db`） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/gcmp.png" width="28" alt="AI Chat Models" /> | AI Chat Models | VS Code `globalStorage/vicanent.gcmp/usages/` の 1 時間ごとの JSONL（AI Chat Models 拡張経由の Copilot Chat 利用、オプトイン） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/senpi.png" width="28" alt="OmO Native" /> | OmO Native | `~/.omo/agent/sessions/`, `~/.senpi/agent/sessions/`, `~/.omo/senpi-task/children/`, `<project>/.omo/senpi-task/children/` | ✅ | — | ✅ |
@@ -295,6 +297,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 - Custom は1つの GET 残高エンドポイントから数値 JSON フィールドをマッピングします。OpenAI または Anthropic API 互換だけでは不十分です。
 
 - Qoder：「設定 → ツール」の Qoder グループで、国際版と CN を個別に追跡できます。新規インストールでは両方を追跡し、既存の選択は維持されます。ツール使用量は既定で合算され、「バージョン別に表示」をオンにすると 2 行に分かれます。国際版は `QODER_CONFIG_DIR/projects`（既定 `~/.qoder/projects`）を、CN は `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`（既定 `~/.qoder-cn/projects`）の順に読み取ります。transcript に実際に記録されたトークンだけを集計します。マネージドモデルで credits のみ記録されトークンがない行は含まれず、その credits は AI ツール制限で確認できます。Qoder CN CLI 1.1.62 では `QODERCN_EXPOSE_TOKEN_USAGE=1` を設定すると以後のトークンが記録されたという報告があります。既存の記録は補完されません。`dfmodel` などの動的モデルコードは記録どおりに表示されます。使用量を SQLite にのみ保存する旧版 Qoder CN は収集対象外で、Token Monitor の既存の履歴ファイルは保持されます。[Qoder のデータソース](docs/providers/qodercn.md)も参照してください。
+- AI Chat Models（`vicanent.gcmp`）のトークン使用量は、VS Code globalStorage 下に 1 時間ごとに書き込まれる usage JSONL から読み取ります。Settings → tools で有効化します（オプトイン、デフォルト無効）。最終ステータスが `completed` の記録のみを集計し、estimated のプレースホルダー行は無視します。記録済みのキャッシュトークンとコスト推定値はそのまま使用します。この拡張が記録した各リクエストは、GitHub Copilot 行のデータソースである VS Code 自身の `workspaceStorage/*/chatSessions/` にも現れます。両方を同時に有効化すると同じリクエストが二重に集計されるため、どちらか一方のみを有効にしてください。
 </details>
 
 ### 追加機能の対応状況

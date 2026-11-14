@@ -30,7 +30,7 @@
 
 ## Token Monitor란?
 
-Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 54개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 앱입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다. 메인 창, MacBook 노치, 메뉴 막대나 시스템 트레이, 화면 가장자리, 플로팅 버블, 네이티브 macOS 위젯 등 시선이 닿는 곳 어디서나 확인할 수 있습니다.
+Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 55개 이상의 AI 코딩 도구의 실시간 토큰 사용량과 AI 도구 한도를 보여 주는 데스크톱 앱입니다. 여러 기기 간 실시간 동기화, 사용 추세 기록, 도구·기기·모델·세션·프로젝트별 분류 보기를 지원합니다. 메인 창, MacBook 노치, 메뉴 막대나 시스템 트레이, 화면 가장자리, 플로팅 버블, 네이티브 macOS 위젯 등 시선이 닿는 곳 어디서나 확인할 수 있습니다.
 
 ## 지원 도구
 
@@ -52,6 +52,7 @@ Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio 등 54개 이상의 AI
     <img src=".github/assets/tools-icon/qwen.png" width="40" alt="Qwen" title="Qwen" />
     <img src=".github/assets/tools-icon/xai.png" width="40" alt="Grok Build" title="Grok Build" />
     <img src=".github/assets/tools-icon/copilot.png" width="40" alt="GitHub Copilot" title="GitHub Copilot" />
+    <img src=".github/assets/tools-icon/gcmp.png" width="40" alt="AI Chat Models" title="AI Chat Models" />
     <img src=".github/assets/tools-icon/pi.png" width="40" alt="Pi" title="Pi" />
     <img src=".github/assets/tools-icon/omp.png" width="40" alt="Oh My Pi" title="Oh My Pi" />
     <img src=".github/assets/tools-icon/senpi.png" width="40" alt="OmO Native" title="OmO Native" />
@@ -160,7 +161,7 @@ brew install --cask token-monitor
 
 ### 사용량 추적
 
-- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 42개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
+- **실시간 토큰 추적** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode 등 43개 이상의 AI 도구, 턴당 수 초 내 UI 갱신 (전체 목록은 위 표 참고)
 - **실시간 토큰 속도** — 생성 속도를 `tok/s`로, 총 소모를 `tok/min`으로 보여주는 선택형 실시간 표시
 - **세션별 상세** — 세션을 열면 프롬프트별 토큰, 응답별 토큰 분할·사용 도구까지 확장 (로컬 transcript/DB를 필요할 때만 읽으며 동기화하지 않음)
 - **캐시 히트 통계** — 도구·모델 클릭 시 입력 토큰(캐시 hit/miss), 출력 토큰, 히트율 상세
@@ -230,6 +231,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 | <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `~/.grok/` (`sessions/`, `logs/unified.jsonl`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`, `~/.copilot/` (`otel/`, `data.db`, `session-store.db`) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/gcmp.png" width="28" alt="AI Chat Models" /> | AI Chat Models | VS Code `globalStorage/vicanent.gcmp/usages/` 시간별 JSONL(AI Chat Models 확장을 통한 Copilot Chat 사용량, 옵트인) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/senpi.png" width="28" alt="OmO Native" /> | OmO Native | `~/.omo/agent/sessions/`, `~/.senpi/agent/sessions/`, `~/.omo/senpi-task/children/`, `<project>/.omo/senpi-task/children/` | ✅ | — | ✅ |
@@ -295,6 +297,7 @@ Token Monitor는 **토큰 사용량**, **계정 한도**, **세션 상세**를 �
 - Custom은 하나의 GET 잔액 엔드포인트에서 숫자 JSON 필드를 매핑합니다. OpenAI 또는 Anthropic API 호환만으로는 충분하지 않습니다.
 
 - Qoder: "설정 → 도구"의 Qoder 그룹에서 국제판과 CN을 각각 추적할 수 있습니다. 새로 설치하면 둘 다 추적하며 기존 선택은 유지됩니다. 도구 사용량은 기본적으로 합산되며, "버전별로 표시"를 켜면 두 행으로 나뉩니다. 국제판은 `QODER_CONFIG_DIR/projects`(기본 `~/.qoder/projects`)를, CN은 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`, `QODERCN_CONFIG_DIR/projects`(기본 `~/.qoder-cn/projects`) 순으로 읽습니다. transcript에 실제로 기록된 토큰만 집계합니다. 관리형 모델에서 credits만 기록되고 토큰이 없는 행은 포함되지 않으며, 해당 credits는 AI 도구 한도에서 확인할 수 있습니다. Qoder CN CLI 1.1.62에서는 `QODERCN_EXPOSE_TOKEN_USAGE=1`을 설정하면 이후 토큰이 기록된다는 보고가 있습니다. 기존 기록은 채워지지 않습니다. `dfmodel` 같은 동적 모델 코드는 기록된 그대로 표시됩니다. 사용량을 SQLite에만 저장하는 이전 Qoder CN 버전은 더 이상 수집하지 않으며, 기존 Token Monitor 기록 파일은 유지됩니다. [Qoder 데이터 소스 설명](docs/providers/qodercn.md)을 참고하세요.
+- AI Chat Models(`vicanent.gcmp`) 토큰 사용량은 VS Code globalStorage 아래 시간별로 기록되는 usage JSONL에서 읽습니다. Settings → tools에서 활성화합니다(옵트인, 기본 꺼짐). 최종 상태가 `completed`인 기록만 집계하고 estimated 자리표시자 행은 무시하며, 기록된 캐시 토큰과 비용 추정치는 그대로 사용합니다. 이 확장이 기록한 각 요청은 GitHub Copilot 행의 데이터 소스인 VS Code 자체 `workspaceStorage/*/chatSessions/`에도 나타납니다. 둘을 동시에 활성화하면 같은 요청이 이중으로 집계되므로 둘 중 하나만 활성화하세요.
 </details>
 
 ### 추가 기능 지원

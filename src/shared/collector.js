@@ -12,7 +12,7 @@ const { abortReason, throwIfAborted } = require('./abortSignal');
 const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
-const { FORK_ONLY_CLIENT_IDS } = require('./clientCatalog');
+const { FORK_ONLY_CLIENT_IDS, LOCALLY_PARSED_CLIENT_IDS } = require('./clientCatalog');
 const { antigravityCliDataDir, canonicalWatchPath, canonicalWatchFilePath, cherryStudioTranscriptRoots, clientSourceRoots, copilotExporterWatch } = require('./clientSources');
 const { clientDiagnosticRoots, clientSourceChecks, dirExists, visibleDiagnosticRoots } = require('./clientSourceObservations');
 const {
@@ -28,6 +28,7 @@ const {
   applyPeriodDelta,
   emptyPeriod,
   extractUsageBundleFromTokscale,
+  extractUsageFromTokscale,
   mergeNormalizedPeriods,
   mergePeriods,
   normalizeClientName,
@@ -71,6 +72,11 @@ const { createProcessStartBatch } = require('./processStarts');
 const { catpawDatabaseName, catpawSourcesFingerprint } = require('./providers/catpaw/paths');
 const { readLocalUsageView, resolveLocalUsagePricing } = require('./providers/codex/localUsage');
 const { createLocalUsageSource } = require('./providers/codex/localUsageSource');
+const {
+  buildGcmpHistoryGraph,
+  buildGcmpPeriods,
+  collectGcmpRows
+} = require('./providers/gcmp/usage');
 const {
   createReasonixNativeSessionCache,
   isReasonixNativeSessionPath,
@@ -438,6 +444,9 @@ function tokscaleClientFilter(clients) {
   const ordered = [];
   const seen = new Set();
   for (const id of String(clients ?? '').split(',').map((value) => value.trim()).filter(Boolean)) {
+    // In-process adapters (locallyParsed) never enter a tokscale scan: no build
+    // accepts their ids and an unknown --client value takes the whole scan down.
+    if (LOCALLY_PARSED_CLIENT_IDS.includes(id)) continue;
     for (const scanId of tokscaleScanClientIds(id)) {
       if (!seen.has(scanId)) { seen.add(scanId); ordered.push(scanId); }
     }
@@ -885,6 +894,11 @@ async function collectHistoryOnce(options) {
       ...(graphs[0]?.timeMetrics ? { timeMetrics: graphs[0].timeMetrics } : {})
     }, { capDays, todayKey });
   }
+  if (options.gcmpGraph) {
+    rawGraphs.push(options.gcmpGraph);
+    const gcmpHistory = normalizeHistory(parseGraphResult(options.gcmpGraph), { capDays, todayKey });
+    liveHistory = liveHistory ? mergeHistories([liveHistory, gcmpHistory], { todayKey }) : gcmpHistory;
+  }
   // Keep the supplemental ledger out of generic history retention too: a
   // retained maximum would survive when a native rollout replaces this thread.
   const withLocalHistory = (history) => {
@@ -1059,6 +1073,7 @@ async function collectUsageOnce(options) {
     // applySessionMetadata skips the expensive path read per session, not per tick.
     { ...localSessionMetadataDeps, retryMisses, deferT3SessionParents, resolveProjects: projectsEnabled }
   );
+  const includesGcmp = normalizedClients.split(',').includes('gcmp');
   const trackedClientSet = new Set(normalizedClients.split(',').filter(Boolean));
   const targetClients = [...new Set(normalizeClientsCsv(options.targetClients).split(',').filter((client) => trackedClientSet.has(client)))];
   const targetRequested = targetClients.length > 0;
@@ -1076,6 +1091,8 @@ async function collectUsageOnce(options) {
     && (!anchor.calendarKey || anchor.calendarKey === calendarKey)
     && canTargetTodayPartitions(anchor, targetClients)
   );
+  let gcmpPeriods = null;
+  let gcmpRows = null;
   // Full-scan rows are native, even when their title matches an old override.
   // Retain their fallback through the progressive metadata passes this tick.
   if (!anchorUsed) localSessionMetadataDeps.scanTitleFallbacks = new WeakMap();
@@ -1118,6 +1135,21 @@ async function collectUsageOnce(options) {
       onFailure: options.onSelfSyncFailed
     });
     throwIfAborted(options.signal);
+    if (includesGcmp && (!targetRequested || targetClients.includes('gcmp'))) {
+      try {
+        const gcmpSinceMs = anchorUsed ? new Date(collectedAt.getFullYear(), collectedAt.getMonth(), collectedAt.getDate()).getTime() : undefined;
+        gcmpRows = collectGcmpRows({ homeDir: options.homeDir, logger: options.logger, sinceMs: gcmpSinceMs });
+        const gcmpJson = buildGcmpPeriods({ now: collectedAt, allTimeSince, rows: gcmpRows });
+        gcmpPeriods = {
+          today: extractUsageFromTokscale(gcmpJson.today),
+          month: extractUsageFromTokscale(gcmpJson.month),
+          allTime: extractUsageFromTokscale(gcmpJson.allTime)
+        };
+      } catch (err) {
+        if (typeof options.logger === 'function') options.logger(`gcmp parse failed: ${err.message}`);
+        gcmpPeriods = null;
+      }
+    }
     throwIfAborted(options.signal);
     if (anchorUsed) {
       // Anchored tick (watch-triggered): every tokscale period scan costs the
@@ -1160,6 +1192,21 @@ async function collectUsageOnce(options) {
           // Empty tokscale output uses the unattributed fallback shape. Keep the
           // anchor's real unattributed partition while clearing the target.
           delete freshPartitions[UNATTRIBUTED_USAGE_CLIENT];
+        }
+      }
+      if (gcmpPeriods) freshPartitions.gcmp = gcmpPeriods.today;
+      if (!useTargetedPartitions) {
+        // The fallback rebuilds every Tokscale partition, but in-process
+        // adapters do not participate in that scan. Preserve any adapter that
+        // this tick did not refresh instead of treating its absence as empty.
+        for (const client of LOCALLY_PARSED_CLIENT_IDS) {
+          if (
+            !targetClientSet.has(client)
+            && !Object.prototype.hasOwnProperty.call(freshPartitions, client)
+            && anchor.todayPartitions?.[client]
+          ) {
+            freshPartitions[client] = anchor.todayPartitions[client];
+          }
         }
       }
       todayPartitions = useTargetedPartitions
@@ -1223,6 +1270,12 @@ async function collectUsageOnce(options) {
       sessionIdentitiesComplete = applyT3SessionParents({ today, month, allTime }, options.homeDir || os.homedir(), localSessionMetadataDeps, targets);
     } else {
       sessionIdentitiesComplete = decorateLocalPeriods({ today, month, allTime }, { retryMisses: true });
+    }
+    if (gcmpPeriods && !anchorUsed) {
+      today = mergePeriods(today, gcmpPeriods.today);
+      month = mergePeriods(month, gcmpPeriods.month);
+      allTime = mergePeriods(allTime, gcmpPeriods.allTime);
+      todayPartitions = { ...(todayPartitions || {}), gcmp: gcmpPeriods.today };
     }
     todayPartitions = completeTodayPartitions(todayPartitions, normalizedClients);
     // Partition metadata is internal but must remain as complete as the public
@@ -1474,6 +1527,13 @@ async function collectUsageOnce(options) {
       // Revision 0 has no complete Cursor graph yet. Retain the previous
       // cross-client History until the initial offline snapshot is ready.
       cursorGraphFailed: cursorSnapshot?.revision === 0 || cursorSnapshot?.graphFailed,
+      gcmpGraph: includesGcmp
+        ? buildGcmpHistoryGraph({
+          // Anchored ticks read only since local midnight, so the graph needs
+          // its own full read.
+          rows: (!anchorUsed && gcmpRows) ? gcmpRows : collectGcmpRows({ homeDir: options.homeDir, logger: options.logger })
+        })
+        : null,
       codexLocalGraph: codexLocalView?.graph || null,
       historyEnabled: options.historyEnabled,
       commandTimeoutMs: options.historyTimeoutMs,

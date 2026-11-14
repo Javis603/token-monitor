@@ -205,6 +205,7 @@ const CLIENT_SOURCE_CHECK_IDS = Object.freeze([
   'droid-sessions',
   DSH_SOURCE_CHECK_ID,
   'fx-sessions',
+  'gcmp-usages',
   'gemini-sessions',
   'goose-db',
   'grok-sessions',

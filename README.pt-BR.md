@@ -30,7 +30,7 @@
 
 ## O que é o Token Monitor?
 
-Um app de desktop que mostra o uso de tokens ao vivo e os Limites de Ferramentas de IA em 54+ ferramentas de programação com IA — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio e muitas outras — com sincronização multidispositivo em tempo real, tendências de uso histórico e detalhamentos por ferramenta, dispositivo, modelo, sessão ou projeto. Ele aparece onde você estiver olhando: a janela principal, o notch do MacBook, a barra de menus ou a bandeja do sistema, a borda da tela, uma bolha flutuante e widgets nativos do macOS.
+Um app de desktop que mostra o uso de tokens ao vivo e os Limites de Ferramentas de IA em 55+ ferramentas de programação com IA — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio e muitas outras — com sincronização multidispositivo em tempo real, tendências de uso histórico e detalhamentos por ferramenta, dispositivo, modelo, sessão ou projeto. Ele aparece onde você estiver olhando: a janela principal, o notch do MacBook, a barra de menus ou a bandeja do sistema, a borda da tela, uma bolha flutuante e widgets nativos do macOS.
 
 ## Ferramentas suportadas
 
@@ -52,6 +52,7 @@ Uso de tokens, limites de ferramentas de IA e detalhes de sessão das ferramenta
     <img src=".github/assets/tools-icon/qwen.png" width="40" alt="Qwen" title="Qwen" />
     <img src=".github/assets/tools-icon/xai.png" width="40" alt="Grok Build" title="Grok Build" />
     <img src=".github/assets/tools-icon/copilot.png" width="40" alt="GitHub Copilot" title="GitHub Copilot" />
+    <img src=".github/assets/tools-icon/gcmp.png" width="40" alt="AI Chat Models" title="AI Chat Models" />
     <img src=".github/assets/tools-icon/pi.png" width="40" alt="Pi" title="Pi" />
     <img src=".github/assets/tools-icon/omp.png" width="40" alt="Oh My Pi" title="Oh My Pi" />
     <img src=".github/assets/tools-icon/senpi.png" width="40" alt="OmO Native" title="OmO Native" />
@@ -160,7 +161,7 @@ Abra o app para começar a acompanhar o uso local deste dispositivo, sem configu
 
 ### Acompanhamento de uso
 
-- **Rastreamento de tokens ao vivo** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode e 42+ ferramentas de IA, com a interface atualizando poucos segundos após cada turno (lista completa na tabela acima)
+- **Rastreamento de tokens ao vivo** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode e 43+ ferramentas de IA, com a interface atualizando poucos segundos após cada turno (lista completa na tabela acima)
 - **Taxa de tokens ao vivo** — uma leitura opcional da velocidade de geração em `tok/s` ou do consumo total em `tok/min`
 - **Detalhes por sessão** — abra uma sessão para ver os tokens por prompt, expansível até a divisão exata de tokens de cada resposta e as ferramentas usadas (lido sob demanda de transcrições ou bancos locais, nunca sincronizado)
 - **Estatísticas de acerto de cache** — clique em qualquer ferramenta ou modelo para expandir um detalhamento completo dos tokens de entrada (acerto no cache vs. fora do cache), tokens de saída e as porcentagens de acerto
@@ -230,6 +231,7 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 | <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `~/.grok/` (`sessions/`, `logs/unified.jsonl`) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`, `~/.copilot/` (`otel/`, `data.db`, `session-store.db`) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/gcmp.png" width="28" alt="AI Chat Models" /> | AI Chat Models | VS Code `globalStorage/vicanent.gcmp/usages/` em JSONL por hora (Copilot Chat pela extensão AI Chat Models; opt-in) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | ✅ |
 | <img src=".github/assets/tools-icon/senpi.png" width="28" alt="OmO Native" /> | OmO Native | `~/.omo/agent/sessions/`, `~/.senpi/agent/sessions/`, `~/.omo/senpi-task/children/`, `<project>/.omo/senpi-task/children/` | ✅ | — | ✅ |
@@ -294,6 +296,7 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 
 - O mapeamento personalizado associa campos JSON numéricos de um único endpoint GET de saldo; compatibilidade apenas com OpenAI ou Anthropic não é suficiente.
 - Qoder: o grupo Qoder em Configurações → ferramentas monitora as versões internacional e CN de forma independente. Novas instalações monitoram ambas; as escolhas existentes são preservadas. A lista de uso das ferramentas combina as duas, a menos que **Mostrar versões separadamente** esteja ativado. Os transcripts internacionais são lidos de `QODER_CONFIG_DIR/projects` (padrão `~/.qoder/projects`); os do CN, de `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH` e, depois, `QODERCN_CONFIG_DIR/projects` (padrão `~/.qoder-cn/projects`). Apenas as contagens de tokens registradas nos transcripts são contadas: linhas de modelos gerenciados que registram créditos sem tokens ficam de fora, e esses créditos continuam nos Limites de ferramentas de IA. Há relatos de que o Qoder CN CLI 1.1.62 registra contadores futuros com `QODERCN_EXPOSE_TOKEN_USAGE=1`; registros existentes não são preenchidos. Códigos dinâmicos de modelo, como `dfmodel`, aparecem como foram registrados. Versões antigas do Qoder CN que guardavam o uso apenas em SQLite não são mais coletadas; os arquivos de histórico existentes do Token Monitor são mantidos. Veja as [notas da origem do Qoder](docs/providers/qodercn.md).
+- O AI Chat Models (`vicanent.gcmp`) lê o uso de tokens do JSONL por hora gravado pela extensão em `globalStorage` do VS Code — ative-o em Configurações → tools (opt-in, desativado por padrão). Apenas registros com status final `completed` são contados; linhas estimadas são ignoradas, e os tokens em cache e as estimativas de custo registrados são usados diretamente. Cada requisição registrada também aparece no `workspaceStorage/*/chatSessions/` do próprio VS Code, que a linha do GitHub Copilot conta. Ative um ou outro, nunca ambos, ou as mesmas requisições serão contadas duas vezes.
 </details>
 
 ### Suporte a recursos adicionais
