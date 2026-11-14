@@ -393,7 +393,10 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
         const olderDays = new Map();
         const uncertainDays = new Set();
         function sourceFor(id, source) {
-          const alias = mapping.sources.find(entry => entry.id === id && (entry.scope || entry.before === source));
+          const alias = mapping.sources.find(entry => entry.id === id && (entry.keep || entry.scope || entry.before === source));
+          // An earlier key of the same portable account was recorded under the
+          // same portable source identities, so its owners carry over unchanged.
+          if (alias?.keep) return source;
           // Compose backend provenance with the saved source hash, so every
           // legacy owner maps to the same identity as its later live reading.
           if (alias?.scope) return createHash('sha256').update(JSON.stringify([alias.scope, source])).digest('hex');

@@ -2842,9 +2842,12 @@ test('a rotated credential adopts the history recorded under the key it replaced
     windows: [{ ...window, usedPercent: 63.44, remainingPercent: 36.56 }] };
   const legacyId = hash(['account-v2', historyAccountKey(cookieKeyed), limitWindowKey(window), 'pp']);
   const canonicalId = hash(['account-v2', historyAccountKey(userIdKeyed), limitWindowKey(window), 'pp']);
+  // The live source of a portable account: the backend scope composed with the
+  // reporting device, identical before and after the key moved.
+  const liveSource = hash([hash('local'), hash(['', 'web', ''])]);
   const db = createHistoryDatabase(file);
   for (const [time, value] of [[at(12, 22, 29), 63.35], [at(12, 22, 34), 63.38]]) {
-    db.record([{ account: hash(['account-v2', historyAccountKey(cookieKeyed)]), source: 'device',
+    db.record([{ account: hash(['account-v2', historyAccountKey(cookieKeyed)]), source: liveSource,
       windows: [{ id: legacyId, point: point(time, value, reset) }] }], at(12, 22, 35));
   }
   db.close();
@@ -2864,5 +2867,9 @@ test('a rotated credential adopts the history recorded under the key it replaced
     // the canonical stream, so nothing is counted twice.
     assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM streams WHERE id = ?').get(canonicalId).n, 1);
     assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM runs WHERE stream = ?').get(legacyId).n, 2);
+    // The adopted readings keep the device's own source, so the next live
+    // reading or failure from that device owns the adopted tail.
+    assert.deepEqual(inspect.prepare(`SELECT DISTINCT s.source FROM history_run_sources s
+      JOIN runs r ON r.id = s.run WHERE r.stream = ?`).all(canonicalId).map(row => row.source), [liveSource]);
   } finally { inspect.close(); }
 });

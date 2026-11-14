@@ -60,11 +60,13 @@ function qoderCookieUserId(cookie) {
   return '';
 }
 
-function qoderAccountIdentity(body, sharedBody, cookie) {
+// The two sites are separate services with their own quota pools, so the same
+// id on each names a different account.
+function qoderAccountIdentity(body, sharedBody, cookie, site) {
   const cookieKey = hashKey('qoder', cookie);
   const userId = qoderPayloadUserId(body) || qoderPayloadUserId(sharedBody) || qoderCookieUserId(cookie);
   if (!userId) return { accountKey: cookieKey, accountKeyAliases: [] };
-  const accountKey = hashKey('qoder', `user:${userId}`);
+  const accountKey = hashKey('qoder', site, `user:${userId}`);
   return { accountKey, accountKeyAliases: accountKey === cookieKey ? [] : [cookieKey] };
 }
 
@@ -315,7 +317,7 @@ async function fetchQoderLimits(options = {}, deps = {}) {
       planResetsAt,
       allowInlineShared: sharedResponse.ok
     });
-    const identity = qoderAccountIdentity(body, sharedResponse.ok ? sharedBody : undefined, cookie);
+    const identity = qoderAccountIdentity(body, sharedResponse.ok ? sharedBody : undefined, cookie, site);
     const result = normalizeLimitProvider({
       provider: 'qoder',
       accountKey: identity.accountKey,

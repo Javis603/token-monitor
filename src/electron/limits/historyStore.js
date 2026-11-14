@@ -91,8 +91,10 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
                 // identity moved to the key the provider now reports.
                 ...(identity === provider ? [] : [windowId(scope, identity, window, reading)])
               ],
-              sources: scopes.map(old => ({ id: windowId(old, identity, window, reading, true),
-                scope: digest(old) })) });
+              sources: [
+                ...scopes.map(old => ({ id: windowId(old, identity, window, reading, true), scope: digest(old) })),
+                ...(identity === provider ? [] : [{ id: windowId(scope, identity, window, reading), keep: true }])
+              ] });
           }
         }
       }

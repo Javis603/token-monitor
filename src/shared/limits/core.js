@@ -17,10 +17,9 @@ const CODEX_TRANSIENT_WINDOW_RETENTION_MS = 10 * 60 * 1000;
 const CODEX_TRANSIENT_PROVIDER_STATUSES = new Set(['unavailable', 'error', 'rateLimited', 'sourceRateLimited']);
 const MAX_ACCOUNT_LABEL_INPUT_LENGTH = 256;
 const MAX_ACCOUNT_NAME_INPUT_LENGTH = 512;
-// A provider can name one account by several keys: the key it reports today and
-// the keys a rotated credential used before it (`limits/identityInheritance`
-// decides when that rename is the same account). They travel with the row so
-// the renderer and the quota history read every name as one account.
+// A provider can name one account by several keys: the stable key it reports
+// today and the credential-derived keys it reported before. They travel with
+// the row so the renderer and the quota history read every name as one account.
 const MAX_ACCOUNT_KEY_ALIASES = 8;
 
 function asNumber(value) {
