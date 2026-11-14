@@ -76,6 +76,7 @@ function fixture() {
     pluginRuntime: null,
     updateTrayDisplay() {},
     mainWindow: null,
+    mainWindowStatsPushWanted: () => true,
     dashboardWindow: null,
     maybeAdoptSharedSubscriptionRevision() {},
     console: { log() {} }

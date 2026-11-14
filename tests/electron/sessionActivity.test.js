@@ -133,6 +133,7 @@ function mainActivityHarness(hubMode, externalAgent = false) {
     syncCodexPresentationActiveAccount() {}, updateTrayDisplay() {}, statsHistoryRevision: () => '',
     maybeAdoptSharedSubscriptionRevision() {}, withoutSessionTitles: titles.withoutSessionTitles,
     mainWindow: { isDestroyed: () => false, webContents: { send: (_topic, payload) => pushes.push(payload) } },
+    mainWindowStatsPushWanted: () => true,
     dashboardWindow: null,
     ipcMain: { handle: (channel, handler) => { if (channel === 'stats:get') get = handler; } }
   };
