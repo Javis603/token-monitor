@@ -442,6 +442,17 @@ test('rounding readings keep their observer current for another device\'s contra
   assert.ok(Math.abs(entry.distribution.buckets.at(-1).value - 0.1) < 1e-9);
 });
 
+test('rejected replacement observers cannot keep each other current', t => {
+  const f = databaseFixture(t);
+  const reset = at(8, 0);
+  const actions = [action(at(2, 10), 50, { source: 'a', reset })];
+  for (let minute = 5; minute <= 30; minute += 5) actions.push(action(at(2, 10, minute), 0, { source: minute % 10 ? 'b' : 'c', reset }));
+  f.record(actions);
+  const points = f.query().windows[0].points;
+  assert.deepEqual([...new Set(points.map(p => p.value))], [50, 0]);
+  assert.equal(points[1].at, at(2, 10, 15), 'the silent observer stops holding the timeline after the sampling gap');
+});
+
 test('a sub-point dip within one deadline is rounding jitter, not a reset', t => {
   const f = databaseFixture(t);
   f.record([action(at(2, 10), 2.04, { source: 'a', reset: at(8, 0) }), action(at(2, 10, 5), 1.08, { source: 'a', reset: at(8, 0) }),

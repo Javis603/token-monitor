@@ -124,7 +124,6 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
   const breakRun = sql(`UPDATE runs SET break_after = break_after | ${BREAK_INTERRUPTED} WHERE id = ?`);
   const markInterruption = sql('UPDATE runs SET break_after = break_after | ?, uncertain_until = MAX(COALESCE(uncertain_until, until), ?) WHERE id = ?');
   const markFailed = sql('UPDATE streams SET failed = 1 WHERE id = ?');
-  const lastOtherObservation = sql('SELECT MAX(at) AS at FROM history_origins WHERE stream = ? AND source <> ?');
   const ambiguousStart = sql('UPDATE runs SET uncertain_before = 1 WHERE id = ?');
   const basisInsert = sql('INSERT INTO run_basis VALUES (?, ?)');
   const failAccount = sql(`SELECT r.id, r.until, s.id AS stream FROM streams s
@@ -260,10 +259,11 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           }
           const switched = !!tail && head.source !== source;
           const consistent = !tail || sameCycle(previous, point);
-          // Another observer is current while it keeps reporting, even when its
-          // readings add nothing (such as rounding), so use its last observation.
-          const otherSeen = tail && lastOtherObservation.get(id, source)?.at;
-          const current = !!tail && otherSeen != null && point.at - otherSeen <= Math.max(tail.interval, point.interval) * 2.5;
+          // The observer that wrote the timeline is current while it keeps
+          // reporting, even when its readings add nothing (such as rounding).
+          // Other observers' rejected readings never keep it current.
+          const ownerSeen = tail && head.source !== source ? originFor.get(id, head.source)?.at : null;
+          const current = ownerSeen != null && point.at - ownerSeen <= Math.max(tail.interval, point.interval) * 2.5;
           // Another observer's reading without the allowance adds nothing while
           // the merged series is current. Missing metadata, or its return, is
           // never a disagreement.
