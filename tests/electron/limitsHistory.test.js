@@ -379,6 +379,28 @@ test('a compatible takeover after device disagreement keeps its conflict boundar
   }
 });
 
+for (const conflictFirst of [true, false]) {
+  test(`a quota reset releases the source conflict guard for the new cycle (earlier disagreement: ${conflictFirst})`, t => {
+    const f = databaseFixture(t, at(3, 12));
+    const sample = (time, value, source, reset) => action(time, value, { source, reset });
+    const oldReset = at(3, 0), newReset = at(10, 0);
+    f.record([sample(at(2, 23, 45), 90, 'a', oldReset), sample(at(2, 23, 50), 91, 'a', oldReset)]);
+    if (conflictFirst) f.record([sample(at(2, 23, 50), 95, 'b', oldReset)]);
+    // Another healthy observer may see the new cycle first; the reset is not a disagreement.
+    f.record([sample(at(3, 0, 1), 0, 'b', newReset), sample(at(3, 0, 2), 0, 'a', newReset),
+      sample(at(3, 0, 7), 1, 'a', newReset)]);
+    assert.equal(f.sql('SELECT guarded FROM streams')[0].guarded, 0);
+    f.record([{ account: accountA, source: 'a', failed: true }, sample(at(3, 0, 12), 2, 'b', newReset),
+      sample(at(3, 0, 17), 3, 'b', newReset)]);
+    f.reopen();
+    const entry = f.query().windows[0];
+    const today = entry.distribution.buckets.at(-1);
+    assert.equal(today.value, 3, 'compatible handoffs in the new cycle are measured consumption');
+    assert.equal(f.sql('SELECT unallocated FROM daily WHERE day = ?', dayKey(at(3, 12)))[0].unallocated, 0);
+    assert.deepEqual(segments(entry.points.filter(p => p.at >= at(3, 0))).map(s => s.map(p => p.value)), [[0, 1, 2, 3]]);
+  });
+}
+
 test('inactive device failures do not interrupt an active observer; active failures permit compatible takeover', t => {
   const f = databaseFixture(t);
   f.record([action(at(2, 10), 20, { source: 'a' }), { account: accountA, source: 'b', failed: true },

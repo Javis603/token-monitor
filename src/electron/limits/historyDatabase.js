@@ -270,22 +270,27 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           }
           const switched = !!tail && head.source !== source;
           const consistent = !tail || sameCycle(previous, point);
+          // A disagreement concerns the cycle it was observed in. Once the
+          // established reset deadline passes, the next cycle starts unguarded,
+          // and a different observer reporting that new cycle is not a conflict.
+          const cycleEnded = !!tail && previous.reset !== null && previous.reset > previous.at && previous.reset <= point.at;
+          const headGuard = cycleEnded ? 0 : head?.guarded;
           const healthy = tail && !head?.failed
             && (point.coveredFrom === tail.until ? point.maxGap : point.at - tail.until) <= Math.max(tail.interval, point.interval) * 2.5;
           // Prefer continuity after an uncertain takeover or source disagreement.
           // Keep the replacement while healthy so an old observer cannot inject
           // a jump. After failure/expiry, only genuine conflicts prevent a
           // compatible handoff from establishing same-bucket net consumption.
-          if (switched && healthy && (head.guarded || !consistent)) {
+          if (switched && healthy && (headGuard || !consistent)) {
             // Omitted allowance metadata cannot establish a conflicting quota pool.
-            if (!consistent && !missingBasisOnly) conflict(id, tail, point, now);
+            if (!consistent && !missingBasisOnly && !cycleEnded) conflict(id, tail, point, now);
             continue;
           }
           const basisChanged = !!tail && (tail.basis || '') !== (point.basis || '');
-          const ambiguous = point.uncertainBefore || basisChanged || switched && (head.guarded === GUARD_CONFLICT || !consistent || !healthy);
-          const guarded = head?.guarded === GUARD_CONFLICT || basisChanged || switched && !consistent
-            ? GUARD_CONFLICT : head?.guarded || (ambiguous ? GUARD_PREFERRED : 0);
-          if (switched && head.guarded === GUARD_CONFLICT) {
+          const ambiguous = point.uncertainBefore || basisChanged || switched && (headGuard === GUARD_CONFLICT || !consistent || !healthy);
+          const guarded = headGuard === GUARD_CONFLICT || basisChanged || switched && !consistent && !cycleEnded
+            ? GUARD_CONFLICT : headGuard || (ambiguous ? GUARD_PREFERRED : 0);
+          if (switched && headGuard === GUARD_CONFLICT) {
             // An established disagreement still blocks a compatible-looking
             // replacement from turning the source difference into consumption.
             interrupt(id, tail, point, now);
