@@ -674,8 +674,11 @@ function captureLiveDailyHistory(existingArchive, period, options = {}) {
       if (liveDate > date) delete archive.liveDays[liveDate];
     }
   }
-  const selected = captureLiveDay(archive.liveDays?.[date], period, options);
-  if (selected) archive.liveDays = { ...(archive.liveDays || {}), [date]: selected };
+  const previous = archive.liveDays?.[date];
+  const selected = captureLiveDay(previous, period, options);
+  if (selected && selected !== previous) {
+    archive.liveDays = { ...(archive.liveDays || {}), [date]: selected };
+  }
   return archive;
 }
 
