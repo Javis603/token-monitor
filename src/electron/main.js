@@ -6,7 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { contentSecurityPolicyForRequest } = require('./contentSecurityPolicy');
 const { initializeHubProfiles, hubProfilesForRenderer, prepareHubProfilePatch } = require('./hubProfiles');
-const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences } = require('electron');
+const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences, webContents } = require('electron');
 const v8 = require('node:v8');
 
 // V8 sizes the young generation for throughput, not for a background widget:
@@ -15,11 +15,13 @@ const v8 = require('node:v8');
 // scan burst. 8 MiB is still ample for this UI and the collector's short-lived
 // records, and it cuts that reservation to 16 MiB per isolate. Set it before
 // the usage worker is created; renderers and utility processes read the switch.
-const YOUNG_GENERATION_FLAG = '--max-semi-space-size=8';
-v8.setFlagsFromString(YOUNG_GENERATION_FLAG);
-if (!app.commandLine.getSwitchValue('js-flags')) {
-  app.commandLine.appendSwitch('js-flags', YOUNG_GENERATION_FLAG);
-}
+// `--expose-gc` lets the idle collector ask a renderer to return its own
+// committed heap; page scripts already run arbitrary local and plugin code.
+const MAIN_V8_FLAGS = '--max-semi-space-size=8';
+const RENDERER_JS_FLAGS = `${MAIN_V8_FLAGS} --expose-gc`;
+v8.setFlagsFromString(MAIN_V8_FLAGS);
+const existingJsFlags = app.commandLine.getSwitchValue('js-flags').trim();
+app.commandLine.appendSwitch('js-flags', existingJsFlags ? `${existingJsFlags} ${RENDERER_JS_FLAGS}` : RENDERER_JS_FLAGS);
 
 // All of the app's pages are the same local bundle, and every window Chromium
 // gives its own renderer costs a process baseline plus a compositor for what is
@@ -1524,6 +1526,32 @@ function syncPluginWindowVisibility(win) {
 function sendMainWindowVisibility(win = mainWindow) {
   if (!win || win !== mainWindow || win.isDestroyed() || win.webContents.isDestroyed()) return;
   win.webContents.send('window:visibility', win.isVisible() && !win.isMinimized());
+}
+
+// Every local page shares one renderer process, but a split process or a
+// DevTools window must not be collected twice. `gc` comes from the js-flags
+// switch; a page that did not load it simply reports false.
+const IDLE_RENDERER_GC_TIMEOUT_MS = 5000;
+function collectIdleRendererHeaps() {
+  const seen = new Set();
+  const jobs = [];
+  for (const contents of webContents.getAllWebContents()) {
+    if (!contents || contents.isDestroyed()) continue;
+    let key = null;
+    try { key = contents.getOSProcessId(); } catch (_) {}
+    if (key === null) key = `contents:${contents.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    jobs.push(new Promise((resolve) => {
+      const timer = setTimeout(resolve, IDLE_RENDERER_GC_TIMEOUT_MS);
+      timer.unref?.();
+      contents.executeJavaScript('typeof gc === "function" ? gc() : false', true).then(
+        () => { clearTimeout(timer); resolve(); },
+        () => { clearTimeout(timer); resolve(); }
+      );
+    }));
+  }
+  return Promise.all(jobs);
 }
 
 function stopFloatingBubbleAutoCollapseTimer() {
@@ -7348,7 +7376,8 @@ app.whenReady().then(() => {
   idleHeapCollector = createIdleHeapCollector({
     // A full collection pauses the main thread, so leave a focused window
     // completely alone; the timer checks again on its next pass.
-    isIdle: () => !quitRequested && BrowserWindow.getFocusedWindow() === null
+    isIdle: () => !quitRequested && BrowserWindow.getFocusedWindow() === null,
+    collectRenderers: collectIdleRendererHeaps
   });
   idleHeapCollector.start();
   syncLoginItemSettingFromOs();

@@ -47,6 +47,41 @@ test('a focused window defers collection', async () => {
   assert.equal(harness.collections(), 0);
 });
 
+test('renderers are collected on an idle pass even when main has little committed', async () => {
+  let rendererRuns = 0;
+  const collector = createIdleHeapCollector({
+    isIdle: () => true,
+    getHeap: () => ({ heapTotal: 1, heapUsed: 1 }),
+    collect: async () => { throw new Error('main must stay untouched'); },
+    collectRenderers: async () => { rendererRuns += 1; }
+  });
+  assert.equal(await collector.run(), false);
+  assert.equal(rendererRuns, 1);
+});
+
+test('renderers wait for the same idle gate as main', async () => {
+  let rendererRuns = 0;
+  const collector = createIdleHeapCollector({
+    isIdle: () => false,
+    getHeap: () => ({ heapTotal: 0, heapUsed: 0 }),
+    collectRenderers: async () => { rendererRuns += 1; }
+  });
+  assert.equal(await collector.run(), false);
+  assert.equal(rendererRuns, 0);
+});
+
+test('a renderer failure does not block the next pass', async () => {
+  let attempts = 0;
+  const collector = createIdleHeapCollector({
+    isIdle: () => true,
+    getHeap: () => ({ heapTotal: 0, heapUsed: 0 }),
+    collectRenderers: async () => { attempts += 1; throw new Error('renderer gone'); }
+  });
+  assert.equal(await collector.run(), false);
+  assert.equal(await collector.run(), false);
+  assert.equal(attempts, 2);
+});
+
 test('a failed collection is retried on the next pass', async () => {
   let fail = true;
   const harness = collectorFor({ heapTotal: 120 * MiB, heapUsed: 56 * MiB }, {

@@ -12,6 +12,10 @@
 // A full collection blocks the main thread for tens of milliseconds. That is
 // why it only runs when no window has focus, and why a collection that reclaims
 // little raises the next threshold instead of repeating every tick.
+//
+// Renderers keep their own committed heap and expose `gc` through the app's
+// js-flags switch. Theirs is independent of main's: the option runs on every
+// idle pass, while main itself only collects above its threshold.
 
 const MIN_HEAP_TOTAL_BYTES = 64 * 1024 * 1024;
 const RETAINED_HEADROOM_BYTES = 32 * 1024 * 1024;
@@ -29,6 +33,7 @@ function createIdleHeapCollector(options = {}) {
   const isIdle = options.isIdle || (() => true);
   const getHeap = options.getHeap || (() => process.memoryUsage());
   const collect = options.collect || defaultCollect;
+  const collectRenderers = options.collectRenderers || null;
   const setIntervalFn = options.setInterval || setInterval;
   const clearIntervalFn = options.clearInterval || clearInterval;
   let timer = null;
@@ -39,17 +44,31 @@ function createIdleHeapCollector(options = {}) {
   async function run() {
     if (stopped || running) return false;
     if (!isIdle()) return false;
-    if (getHeap().heapTotal < thresholdBytes) return false;
+    const collectMain = getHeap().heapTotal >= thresholdBytes;
+    if (!collectMain && !collectRenderers) return false;
     running = true;
+    let collected = false;
     try {
-      await collect();
-      const retained = getHeap().heapUsed;
-      thresholdBytes = Math.max(MIN_HEAP_TOTAL_BYTES, retained + RETAINED_HEADROOM_BYTES);
-      return true;
-    } catch (_) {
-      // Heap collection is best effort; an inspector failure must not affect
-      // the widget or make the next check impossible.
-      return false;
+      if (collectMain) {
+        try {
+          await collect();
+          const retained = getHeap().heapUsed;
+          thresholdBytes = Math.max(MIN_HEAP_TOTAL_BYTES, retained + RETAINED_HEADROOM_BYTES);
+          collected = true;
+        } catch (_) {
+          // Heap collection is best effort; an inspector failure must not
+          // affect the widget or make the next check impossible.
+        }
+      }
+      if (collectRenderers) {
+        try {
+          await collectRenderers();
+        } catch (_) {
+          // A renderer that is gone or unresponsive is skipped; the next idle
+          // pass asks the remaining processes again.
+        }
+      }
+      return collected;
     } finally {
       running = false;
     }
