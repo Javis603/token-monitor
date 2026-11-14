@@ -1,6 +1,6 @@
 'use strict';
 
-const { PERIODS, normalizeClientName, normalizePeriod } = require('../usage');
+const { PERIODS, isPeriodExpired, normalizeClientName, normalizePeriod } = require('../usage');
 const { normalizeTokscaleModelNameForClient } = require('../history');
 const {
   CLIENT_IDENTITY_GENERATION, CLIENT_IDENTITY_SPLITS, isPreSplitEntry
@@ -141,7 +141,15 @@ function captureArchivedClientUsage(existingArchive, deviceRecord, clients, capt
     const periods = {};
     let includesUsage = false;
     for (const periodName of PERIODS) {
-      const usage = clientUsageFromPeriod(periodFor(deviceRecord, periodName), client, ledgerKeys);
+      // A record from before midnight (a cold-start seed, a device that last
+      // reported yesterday) still carries that day's Today. The entry is dated
+      // at capture, so that window would be counted again as today's. Only a
+      // record's own local windows can say so; the UTC fallback cannot.
+      const ended = Boolean(deviceRecord.periodWindows?.[periodName]?.endsAt)
+        && isPeriodExpired(deviceRecord, periodName, captureDate.getTime());
+      const usage = ended
+        ? clientUsageFromPeriod(null, client, ledgerKeys)
+        : clientUsageFromPeriod(periodFor(deviceRecord, periodName), client, ledgerKeys);
       periods[periodName] = usage;
       includesUsage = includesUsage || hasUsage(usage);
     }

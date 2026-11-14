@@ -21,13 +21,13 @@ function harness({ used = false } = {}) {
       children: [],
       textContent: '',
       animate(keyframes, options) {
-        const animation = { keyframes, options, startTime: null, playState: 'running', cancel() {} };
+        const animation = { keyframes, options, startTime: null, playState: 'running', cancel() { this.playState = 'idle'; this.oncancel?.(); } };
         this.animations.push(animation);
         return animation;
       },
-      getAnimations() { return this.animations; },
-      append(child) { this.children.push(child); },
-      remove() { this.isConnected = false; }
+      getAnimations({ subtree = false } = {}) { return [...this.animations.filter(a => a.playState === 'running'), ...(subtree ? this.children.flatMap(child => child.getAnimations({ subtree: true })) : [])]; },
+      append(child) { this.children.push(child); child.parentNode = this; },
+      remove() { this.isConnected = false; this.parentNode.children = this.parentNode.children.filter(child => child !== this); }
     };
   }
   const panel = { rows: [], querySelectorAll() { return this.rows; } };
@@ -78,9 +78,66 @@ function harness({ used = false } = {}) {
     animator.animate(panel, snapshot);
     return items;
   }
+  function retain(remaining, { used: showUsed = used } = {}) {
+    const snapshot = animator.capture(panel);
+    const item = panel.rows[0].items[1];
+    item.dataset.limitRemainingPercent = String(remaining);
+    item.dataset.limitDisplayPercent = String(showUsed ? 100 - remaining : remaining);
+    item.value.dataset.limitMotionSuffix = showUsed ? 'used' : 'left';
+    item.value.textContent = `${item.dataset.limitDisplayPercent}% ${item.value.dataset.limitMotionSuffix}`;
+    animator.animate(panel, snapshot);
+    return item;
+  }
   replace([77, 0], { resetsAt: '2026-09-30' });
-  return { animator, frame, panel, refresh, reduce: () => { reduced = true; } };
+  return { animator, frame, panel, refresh, retain, reduce: () => { reduced = true; } };
 }
+
+test('non-reset readings cancel active and queued refills on retained quota nodes', () => {
+  for (const started of [false, true]) {
+    const h = harness();
+    const item = h.refresh()[1];
+    if (started) { h.frame(100); h.frame(700); }
+    assert.equal(h.retain(20), item);
+    h.frame(800); h.frame(2500);
+    assert.equal(item.value.textContent, '20% left');
+    assert.equal(item.fill.getAnimations({ subtree: true }).length, 0);
+    h.retain(20); h.frame(2600);
+    assert.equal(item.value.textContent, '20% left', 'an unchanged push cannot revive a superseded target');
+  }
+});
+
+test('switching display mode cancels the retained quota refill and its old suffix', () => {
+  const h = harness();
+  const item = h.refresh()[1];
+  h.frame(100); h.frame(700);
+  h.retain(100, { used: true });
+  h.frame(2500);
+  assert.equal(item.value.textContent, '0% used');
+  assert.equal(item.fill.getAnimations({ subtree: true }).length, 0);
+});
+
+test('unchanged retained quota nodes resume one effect on the original timeline', () => {
+  const h = harness();
+  const item = h.refresh()[1];
+  h.frame(100); h.frame(1200);
+  h.retain(100);
+  assert.equal(item.value.textContent, '90% left');
+  const effects = item.fill.getAnimations({ subtree: true });
+  assert.equal(effects.length, 2, 'one fill and one completion glow');
+  assert.ok(effects.every(effect => effect.startTime === 100));
+  h.frame(1700);
+  assert.equal(item.value.textContent, '100% left');
+});
+
+test('an unchanged push before the first frame starts only the current retained refill', () => {
+  const h = harness();
+  const item = h.refresh()[1];
+  h.retain(100);
+  h.frame(100);
+  assert.equal(item.fill.getAnimations({ subtree: true }).length, 2);
+  h.frame(1700);
+  assert.equal(item.value.textContent, '100% left');
+});
 
 test('a mid-refill stats refresh keeps the original bar, counter and glow timeline', () => {
   const h = harness();

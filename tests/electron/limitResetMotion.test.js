@@ -116,7 +116,7 @@ test('renderer wires reset motion before app boot and respects reduced motion', 
   assert.ok(html.indexOf('<script src="limits/resetAnimator.js"></script>') < html.indexOf('<script src="app.js"></script>'));
   assert.match(app, /createLimitResetAnimator\(\{[\s\S]*?motion: limitResetMotionApi/);
   assert.match(app, /const resetMotionSnapshot = captureLimitResetMotion\(\);/);
-  assert.match(app, /els\.limitsPanel\.replaceChildren\(\.\.\.nodes\);\s*animateLimitResets\(resetMotionSnapshot\);/);
+  assert.match(app, /rendererDom\.reconcileChildren\(els\.limitsPanel, nodes\);\s*animateLimitResets\(resetMotionSnapshot\);/);
   assert.match(animator, /motion\.shouldAnimateReset\(previous, current\)/);
   assert.match(animator, /previous\.displayPercent === ''/);
   assert.match(animator, /const duration = motion\.durationMs\(from, to\);/);

@@ -273,7 +273,10 @@ test('device versions get their own line rather than competing with sync status'
   const metaRule = css.match(/\.sync-device-meta-text\s*\{([^}]+)\}/)?.[1];
   assert.ok(metaRule);
   assert.doesNotMatch(metaRule, /text-overflow:\s*ellipsis|white-space:\s*nowrap/);
-  assert.match(css, /@container\s*\(max-width:\s*340px\)/);
+  // Status sits on its own third row at every width, so online and offline rows line up.
+  assert.match(css.match(/\.sync-device-side\s*\{([^}]+)\}/)?.[1], /grid-column:\s*2 \/ -1;\s*grid-row:\s*3/);
+  assert.match(css.match(/\.sync-device-title\s*\{([^}]+)\}/)?.[1], /grid-column:\s*2 \/ -1/);
+  assert.doesNotMatch(css, /@container\s*\(max-width:\s*340px\)/);
 });
 
 test('empty device list refreshes when the runtime starts syncing', () => {

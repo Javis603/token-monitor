@@ -1,4 +1,6 @@
 'use strict';
+// Presentation doubles delegate child commits; native fixtures exercise reconciliation.
+const rendererDom = { clear: node => node.replaceChildren(), reconcileChildren: (node, nodes) => node.replaceChildren(...nodes), placeChildren: (node, nodes) => node.replaceChildren(...nodes) };
 
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -63,6 +65,7 @@ test('session detail renders its heading before loading, errors and empty result
   const end = rendererSource.indexOf('function sessionGroupRunNode(', start);
   let render;
   const context = {
+    rendererDom,
     els, state, document: { createElement: element, querySelectorAll: () => [els.sessionDetailHead.querySelector('.detail-heading')].filter(Boolean) }, window: { addEventListener() {} }, t: (key, params) => translate('en', key, params),
     sessionDetailBack() { state.backClicked = true; },
     detailNote: text => ({ textContent: text }),
@@ -441,6 +444,7 @@ function sessionDetailHarness(getSessionDetail) {
   const renders = [];
   const state = { period: 'today', openSession: null };
   const context = {
+    rendererDom,
     state,
     visibleStatsSurface: () => 'main',
     isRendererWindowHidden: () => false,
@@ -622,10 +626,10 @@ for (const scenario of ['catch-up', 'hover', 'unchanged', 'hidden', 'closed', 'r
     else initialRead.resolve(scenario === 'initial failure' ? { found: false, error: 'read-failed' } : { found: true, marker: 100 });
     await opening;
     await new Promise(resolve => setImmediate(resolve));
-    const shouldCatchUp = ['catch-up', 'catch-up failure', 'catch-up rejection'].includes(scenario);
+    const shouldCatchUp = ['catch-up', 'hover', 'catch-up failure', 'catch-up rejection'].includes(scenario);
     assert.equal(reads, shouldCatchUp ? 2 : 1);
     if (shouldCatchUp) {
-      const succeeded = scenario === 'catch-up';
+      const succeeded = scenario === 'catch-up' || scenario === 'hover';
       assert.equal(request.detail.marker, succeeded ? 200 : 100);
       assert.equal(request.liveSignature, JSON.stringify(succeeded ? [200, 2, 0] : [100, 1, 0]));
       assert.equal(request.detailLiveBusy, false);
@@ -634,7 +638,7 @@ for (const scenario of ['catch-up', 'hover', 'unchanged', 'hidden', 'closed', 'r
       assert.equal(reads, 2, 'a failed catch-up does not spin');
     }
     if (scenario === 'closed' || scenario === 'replaced') assert.equal(renders.length, 1, 'stale initial reads cannot paint');
-    if (scenario === 'hover' || scenario === 'hidden') {
+    if (scenario === 'hidden') {
       context.sessionTooltipShouldHoldRender = () => false;
       context.visibleStatsSurface = () => 'main';
       await refreshOpenSessionDetail(); // Existing leave/visibility catch-up, not a stats tick.
@@ -644,7 +648,7 @@ for (const scenario of ['catch-up', 'hover', 'unchanged', 'hidden', 'closed', 'r
   });
 }
 
-test('an open session detail re-reads only when its usage moved, and never mid-hover', async () => {
+test('an open session detail re-reads only when its usage moved, including while a label is being read', async () => {
   const requests = [];
   const pending = [];
   let holdRead = false;              // defer the next getSessionDetail by hand
@@ -681,7 +685,7 @@ test('an open session detail re-reads only when its usage moved, and never mid-h
   state.stats.periods.today.sessions['claude:s'] = { client: 'claude', totalTokens: 400, costUsd: 2 };
   context.sessionTooltipShouldHoldRender = () => true;
   await refreshOpenSessionDetail();
-  assert.equal(requests.length, 2, 'a held tooltip defers the rebuild');
+  assert.equal(requests.length, 3, 'hover does not defer an in-place update');
   context.sessionTooltipShouldHoldRender = () => false;
   await refreshOpenSessionDetail();
   assert.equal(requests.length, 3);
@@ -696,7 +700,7 @@ test('an open session detail re-reads only when its usage moved, and never mid-h
   await inFlight;
   holdRead = false;
   assert.equal(state.openSession.detail.marker, 4, 'the read still lands');
-  assert.equal(renders.at(-1).detail.marker, 3, 'but the paint waits for the hover to end');
+  assert.equal(renders.at(-1).detail.marker, 4, 'the paint also lands during hover');
   context.sessionTooltipShouldHoldRender = () => false;
   await refreshOpenSessionDetail();
   assert.equal(requests.length, 4, 'the deferred paint does not read again');
@@ -801,7 +805,7 @@ test('live detail anchors the visible turn across growth and exchange reordering
     children: [], scrollTop: 0, clientTop: 0,
     classList: { add() {}, remove() {} },
     getBoundingClientRect: () => ({ top: 20 }),
-    replaceChildren() { this.children = []; this.scrollTop = 0; },
+    replaceChildren(...nodes) { this.children = nodes; this.scrollTop = 0; },
     append(node) { this.children.push(node); }
   };
   function exchangeNode(row, max, expanded) {
@@ -829,10 +833,11 @@ test('live detail anchors the visible turn across growth and exchange reordering
     return exchange;
   }
   const context = {
+    rendererDom,
     els: { sessionToolFilter: {classList: container.classList}, breakdown: { classList: container.classList }, sessionDetail: container,
       sessionDetailHead: { classList: container.classList, replaceChildren() {}, append() {} } },
     state: { detailSort: 'time', openSession: {} },
-    document: { createElement: () => ({ addEventListener() {} }) },
+    document: { createElement: () => ({ children: [], get childNodes() { return this.children; }, append(...nodes) { this.children.push(...nodes); }, addEventListener() {} }) },
     t: () => '', sessionDetailBackButton: () => ({}), toggleDetailSort() {},
     sessionRowsApi: { sessionDetailIdLabel: () => '' },
     sessionDetailApi: { exchangeRows: detail => detail.exchanges }, exchangeNode

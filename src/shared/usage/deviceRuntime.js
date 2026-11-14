@@ -35,6 +35,23 @@ function createDeviceRuntime(options = {}, deps = {}) {
     ...(Object.prototype.hasOwnProperty.call(options, 'initialLimits')
       ? { initialLimits: options.initialLimits }
       : {}),
+    // Only when someone listens: each call copies the partial record.
+    ...(typeof options.onColdPreview === 'function'
+      ? {
+          onColdPreview(record, meta) {
+            if (!active) return;
+            try {
+              options.onColdPreview(record, meta);
+            } catch (error) {
+              try {
+                options.onError?.(error, 'cold-preview');
+              } catch {
+                // Optional observers must never block the delivery path.
+              }
+            }
+          }
+        }
+      : {}),
     onRecord(record, meta) {
       if (!active) return;
       try {

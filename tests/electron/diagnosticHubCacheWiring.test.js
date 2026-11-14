@@ -41,7 +41,7 @@ test('late Hub responses cannot replace the active mode cache', () => {
   assert.match(stream[1], /hubModeRequestIsCurrent\(generation, 'client', cacheIdentity\)/);
   assert.match(
     stream[1],
-    /const \{ value, done \} = await reader\.read\(\);\s*if \(!hubModeRequestIsCurrent\(generation, 'client', cacheIdentity\)\) return;\s*if \(done\) break;/
+    /const \{ value, done \} = await reader\.read\(\);\s*if \(controller !== sseAbortController \|\| !hubModeRequestIsCurrent\(generation, 'client', cacheIdentity\)\) return;\s*controller\.signal\.throwIfAborted\(\);\s*if \(done\) break;/
   );
   assert.match(
     fetchStats[1],

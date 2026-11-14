@@ -56,6 +56,7 @@ test('WSL scans receive fork-only Proma like any other tokscale client', async (
   let wslOptions = null;
   await collectUsageOnce({
     clients: 'claude,proma',
+    env: {},
     allTimeSince: '2025-01-01',
     now: '2026-07-10T08:00:00.000Z',
     commandTimeoutMs: 1000,
@@ -67,6 +68,8 @@ test('WSL scans receive fork-only Proma like any other tokscale client', async (
       return { bundle: { today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() }, detected: [] };
     }
   });
+  assert.equal(wslOptions.commandTimeoutMs, 1000);
+  assert.equal(wslOptions.allTimeTimeoutMs, 300000);
   assert.equal(wslOptions.clients, 'claude,proma');
   assert.equal(wslOptions.trackedClients, 'claude,proma');
 });

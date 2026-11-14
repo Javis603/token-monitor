@@ -162,54 +162,32 @@ test('Trends and Home reuse the same tooltip layout with separate instances and 
   assert.equal(home.getAttribute('aria-hidden'), 'true');
 });
 
-test('Trends defers live replacement while reading and flushes on pointer leave or blur', () => {
-  const { spark, renders } = fixture();
-  const render = source.slice(source.indexOf('function renderTrends('), source.indexOf('function viewLabelById('));
-  const context = { document: { hasFocus: () => true }, els: { trendsPanel: { querySelector: () => spark } } };
-  vm.runInNewContext(`${render}\nrenderTrends();`, context);
-  assert.equal(spark.dataset.renderPending, 'true');
-  spark.fire('pointerleave');
-  assert.equal(renders(), 1);
-  assert.equal(spark.dataset.renderPending, undefined);
-  spark.fire('pointerleave');
-  assert.equal(renders(), 1);
-  context.renderTrends(); spark.fire('focusout');
-  assert.equal(renders(), 2);
+test('retained Trends bindings update readings and keyboard navigation across two pushes', () => {
+  const { spark, context, tooltip } = fixture();
+  spark.fire('focusin');
+  const listenerCount = Object.values(spark.handlers).flat().length;
+  for (let i = 1; i <= 2; i++) {
+    const points = [{ date: '2026-10-22', tokens: 10 * i }, { date: '2026-10-23', tokens: 100 * i }];
+    context.bindTrendTooltip(spark, charts.sparklinePreview(points, { width: 300, gap: 0.3 }), points, 'date', 'tokens');
+    assert.equal(tooltip.dataset.visible, 'true');
+    assert.equal(tooltip.textContent, `${100 * i}tokens2026-10-23`);
+    assert.equal(Object.values(spark.handlers).flat().length, listenerCount);
+    spark.fire('keydown', { key: 'Home', preventDefault() {} });
+    assert.equal(tooltip.textContent, `${10 * i}tokens2026-10-22`);
+    spark.fire('keydown', { key: 'End', preventDefault() {} });
+  }
 });
 
-test('Trends refreshes an unfocused hovered chart and resumes reading deferral on focus', () => {
-  const spark = new Element();
-  const panel = { querySelector: () => spark, innerHTML: 'old chart' };
-  let focused = false;
-  const context = {
-    document: { hasFocus: () => focused }, els: { trendsPanel: panel },
-    window: { TokenMonitorUsageCharts: charts }, state: { period: 'month', stats: {} },
-    captureTrendBarMotion: () => [], fixedPeriodRangesApi: { isDerived: () => false },
-    hideTrendTooltip() {}, t: key => key
-  };
-  const render = source.slice(source.indexOf('function renderTrends('), source.indexOf('function viewLabelById('));
-  vm.runInNewContext(`${render}\nrenderTrends();`, context);
-  assert.equal(spark.dataset.renderPending, undefined);
-  assert.match(panel.innerHTML, /trends-empty/);
-  focused = true;
-  panel.innerHTML = 'current chart';
-  context.renderTrends();
-  assert.equal(spark.dataset.renderPending, 'true');
-  assert.equal(panel.innerHTML, 'current chart');
-});
-
-test('window blur hides Trends details and flushes a pending update without pointer leave', () => {
+test('window blur hides Trends details without a delayed repaint', () => {
   const { spark, context, tooltip, renders } = fixture();
   context.state.breakdown = 'trends';
   context.els = { trendsPanel: { querySelector: () => spark } };
   spark.fire('pointerenter', { clientX: 130, clientY: 200 });
-  spark.dataset.renderPending = 'true';
   // Use the handler actually registered on window, rather than a chart focusout.
   const handler = source.match(/window\.addEventListener\('blur', (\w+)\);/)[1];
   context[handler]();
   assert.equal(tooltip.dataset.visible, 'false');
-  assert.equal(spark.dataset.renderPending, undefined);
-  assert.equal(renders(), 1);
+  assert.equal(renders(), 0);
   context[handler]();
-  assert.equal(renders(), 1);
+  assert.equal(renders(), 0);
 });

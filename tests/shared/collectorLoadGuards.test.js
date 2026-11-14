@@ -3345,18 +3345,15 @@ test('smart collection uses native watching and skips idle intervals after start
 // idle time rewrote it 0 times in 40s.
 test('self-watch db-shm events are ignored for every client whose scan recreates the sidecar', () => {
   const { isSelfWatchSqliteSidecarEvent } = freshCollector();
-  const qoderRoot = path.join(os.tmpdir(), 'QoderCN', 'db');
   const zcodeRoot = path.join(os.tmpdir(), 'zcode', 'cli', 'db');
   const antigravityRoot = path.join(os.tmpdir(), '.gemini', 'antigravity');
   const antigravityConversation = path.join(antigravityRoot, 'conversations');
   const cherryRoot = path.join(os.tmpdir(), 'CherryStudio', 'Data');
-  const roots = { antigravity: [antigravityRoot], cherrystudio: [cherryRoot], qodercn: [qoderRoot], zcode: [zcodeRoot] };
+  const roots = { antigravity: [antigravityRoot], cherrystudio: [cherryRoot], zcode: [zcodeRoot] };
 
-  // Each client keeps its own database basename: Qoder CN names it local.db,
-  // ZCode names it db.sqlite, Antigravity names one per conversation, below its
-  // watch root.
+  // Each SQLite client keeps its own database basename; Antigravity names
+  // one per conversation below its watch root.
   for (const [root, base] of [
-    [qoderRoot, 'local.db'],
     [zcodeRoot, 'db.sqlite'],
     [antigravityConversation, '1f17ba78-fe78-4ed6-9f69-07387625fdad.db'],
     [cherryRoot, 'cherrystudio.sqlite']
@@ -3479,14 +3476,13 @@ for (const client of ['zcode', 'cherrystudio', 'goose']) {
   });
 }
 
-test('collector does not reuse a persisted anchor after the Qoder CN DB path changes', async () => {
+test('collector does not reuse a persisted anchor with a retired Qoder CN database source', async () => {
   const tmp = withTmpHome([]);
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
-  const originalQoderCnDbPath = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+  const previousDbOverride = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
   const oldDbPath = path.join(tmp, 'old', 'local.db');
-  const newDbPath = path.join(tmp, 'new', 'local.db');
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
-  process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = newDbPath;
+  process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = oldDbPath;
 
   const initialCollector = freshCollector();
   const oldQoderCnPeriod = emptyPeriod();
@@ -3494,10 +3490,12 @@ test('collector does not reuse a persisted anchor after the Qoder CN DB path cha
   oldQoderCnPeriod.clients = { qodercn: 9 };
   fs.writeFileSync(path.join(tmp, 'collector-anchor.json'), JSON.stringify({
     dateKey: initialCollector.localTodayKey(),
+    calendarKey: initialCollector.collectionCalendarKey(),
+    sessionIdentityVersion: 2,
     today: emptyPeriod(),
     month: oldQoderCnPeriod,
     allTime: oldQoderCnPeriod,
-    configFingerprint: initialCollector.configFingerprint('claude,qodercn', '2024-01-01', true, oldDbPath, initialCollector.qoderCnProjectsDirForClients('claude,qodercn')),
+    configFingerprint: `claude,qodercn|2024-01-01|projects:on|qodercn:${path.resolve(oldDbPath)}|qodercnProjects:${path.resolve(initialCollector.clientSourceRoots('qodercn').qodercn.find(root => root.id === 'qodercn-projects').dir)}|pricing:${initialCollector.pricingFingerprint()}`,
     fullScanAt: new Date(Date.now() - 5 * 60 * 1000).toISOString()
   }));
 
@@ -3527,8 +3525,8 @@ test('collector does not reuse a persisted anchor after the Qoder CN DB path cha
     if (handle) handle.stop();
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
-    if (originalQoderCnDbPath === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
-    else process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = originalQoderCnDbPath;
+    if (previousDbOverride === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+    else process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = previousDbOverride;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }

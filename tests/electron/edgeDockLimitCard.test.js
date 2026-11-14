@@ -295,6 +295,22 @@ test('a row refresh button is drawn only for a host that can refresh limits', as
   assert.equal(buttons[1].getAttribute('aria-disabled'), 'false');
 });
 
+test('a retained refresh control uses its current account metadata', async (t) => {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
+  const provider = { provider: 'codex', accountKey: 'stable', accountLabel: 'Before', status: 'ok', windows: [] };
+  let refreshed;
+  const view = dockView({}, { accountRefresh: {
+    available: () => true, probes: () => [],
+    refresh: async row => { refreshed = row; return { ok: true }; }
+  } });
+  const button = view.renderLimitProviderSolo('codex', 'Codex', provider, '#fff').find('limit-refresh-button');
+  const current = { ...provider, accountLabel: 'After' };
+  require('../../src/electron/renderer/domReconcile').data(button, current);
+  button.listeners.click({ detail: 0 });
+  await new Promise(setImmediate);
+  assert.equal(refreshed, current);
+});
+
 test('a row refresh that brings nothing back says why, then returns to normal', async (t) => {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: 0 });
   const row = {
@@ -2919,7 +2935,7 @@ test('WorkBuddy groups count accounts and retain failures without repeating the 
 
 
 
-test('EdgeDock render hold preserves account gestures and open tooltips', () => {
+test('EdgeDock defers account gestures without holding tooltip updates', () => {
   const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
   const start = source.indexOf('function deferBubbleRender(');
   const end = source.indexOf('bridge.onRender(render);', start);
@@ -2933,8 +2949,7 @@ test('EdgeDock render hold preserves account gestures and open tooltips', () => 
   accountHeld = true;
   assert.equal(context.deferBubbleRender(), true, 'an in-progress account gesture keeps its DOM');
   accountHeld = false; tooltipHeld = true;
-  assert.equal(context.deferBubbleRender(), true, 'an open tooltip holds the update');
-  assert.equal(context.limitTooltip.pending, true);
+  assert.equal(context.deferBubbleRender(), false, 'an open tooltip permits in-place updates');
   tooltipHeld = false;
   assert.equal(context.deferBubbleRender(), false, 'closing the tooltip releases the update');
 });

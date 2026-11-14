@@ -56,4 +56,15 @@ function restoreWindowViewState({ afterPaint = true, restoreViewport = true, rel
   });
 }
 
-module.exports = { captureWindowViewState, restoreWindowViewState };
+// Resolves once a frame painted while visible has reached the screen. The
+// native host's opacity applies a frame sooner than the page's content does.
+function afterVisiblePaint() {
+  const { document, requestAnimationFrame } = globalThis;
+  return new Promise(resolve => {
+    const paint = () => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    if (document.visibilityState === 'visible') paint();
+    else document.addEventListener('visibilitychange', paint, { once: true });
+  });
+}
+
+module.exports = { afterVisiblePaint, captureWindowViewState, restoreWindowViewState };

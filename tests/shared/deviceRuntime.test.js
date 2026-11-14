@@ -129,6 +129,47 @@ test('progressive cold-start previews wait for the first complete usage record',
   assert.equal(records[0].record.allTime.totalTokens, 5);
 });
 
+test('held-back cold previews reach the cold-preview observer, not the record path', () => {
+  const cold = [];
+  const { records, usageOptions } = harness({
+    progressive: true,
+    sink: { enqueue: (record) => records.push({ record, sunk: true }) },
+    onColdPreview: (record, meta) => cold.push({ record, meta })
+  });
+  usageOptions.onPreview({ updatedAt: 'preview-time', today: { totalTokens: 2 } }, 'progress');
+  usageOptions.onPreview({ updatedAt: 'preview-time', today: { totalTokens: 2 }, month: { totalTokens: 9 } }, 'progress');
+
+  assert.equal(records.length, 0, 'neither published nor handed to the sink');
+  assert.equal(cold.length, 2);
+  assert.equal(cold[0].record.deviceId, 'device-1');
+  assert.equal(cold[0].record.today.totalTokens, 2);
+  assert.equal(Object.prototype.hasOwnProperty.call(cold[0].record, 'month'), false);
+  assert.equal(cold[1].record.month.totalTokens, 9);
+  assert.equal(cold[1].meta.reason, 'progress');
+
+  usageOptions.onUpdate({
+    updatedAt: 'usage-time',
+    today: { totalTokens: 3 },
+    month: { totalTokens: 4 },
+    allTime: { totalTokens: 5 }
+  }, 'startup');
+  usageOptions.onPreview({ updatedAt: 'preview-time-2', today: { totalTokens: 6 } }, 'progress');
+  // Warm previews publish as records again; the observer is for cold ones.
+  assert.equal(cold.length, 2);
+  assert.equal(records.filter(entry => !entry.sunk).at(-1).record.today.totalTokens, 6);
+});
+
+test('a throwing cold-preview observer is reported, not thrown into the collector', () => {
+  const errors = [];
+  const { usageOptions } = harness({
+    progressive: true,
+    onColdPreview: () => { throw new Error('observer failed'); },
+    onError: (error, reason) => errors.push(reason)
+  });
+  assert.doesNotThrow(() => usageOptions.onPreview({ updatedAt: 'preview-time', today: { totalTokens: 2 } }, 'progress'));
+  assert.deepEqual(errors, ['cold-preview']);
+});
+
 test('a throwing record observer cannot block the ordered sink', () => {
   const error = new Error('observer failed');
   const delivered = [];

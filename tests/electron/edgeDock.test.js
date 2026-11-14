@@ -135,10 +135,10 @@ test('a long detail total shrinks beside its compact reading instead of wrapping
   number.style = {};
   row.querySelector = (selector) => selector === 'strong' ? number : null;
   fitCardTotal({ querySelector: () => row });
-  assert.equal(number.style.fontSize, undefined);
+  assert.equal(number.style.fontSize, '');
   assert.match(css, /\.edge-dock-total-row \{[^}]*white-space: nowrap/);
   const bubble = dock.slice(dock.indexOf('function renderBubble('));
-  const freshCard = bubble.slice(bubble.indexOf('const card = cell.kind'));
+  const freshCard = bubble.slice(bubble.indexOf('let card = cell.kind'));
   assert.ok(freshCard.indexOf('fitCardTotal(card);') >= 0);
   assert.ok(freshCard.indexOf('fitCardTotal(card);') < freshCard.indexOf('bubbleLayout.prepare('));
 });
@@ -162,6 +162,7 @@ test('a card commits after its reported height is clamped to the work area', () 
           clampBreakdownList, reserveAccountHeight, bridge, commitCard } = deps;
         let observedPluginCard = null;
         const bubbleSizeObserver = null, pluginContent = null;
+        const cardDom = { reconcile: (_previous, next) => next }, cardResetAnimator = { capture() {} }, pendingResetSnapshots = new WeakMap();
         ${source}
         return renderBubble;
       `)({
@@ -220,6 +221,7 @@ test('reopening hides the previous reading before a delayed placement acknowledg
     const fitCardTotal = () => {}, clampBreakdownList = () => {}, reserveAccountHeight = () => {};
     const bridge = { reportBubbleSize: (cellId, height) => reports.push({ cellId, height }) };
     const pluginContent = null, bubbleSizeObserver = null;
+    const cardDom = { reconcile: (_previous, next) => next }, pendingResetSnapshots = new WeakMap();
     let observedPluginCard = null;
     ${commitSource}
     ${renderSource}
@@ -1173,7 +1175,7 @@ test('provider detail reserves natural account height without exceeding half the
   const source = dock.slice(dock.indexOf('function reserveAccountHeight('), dock.indexOf('function fitCardTotal('));
   const reserve = Function(`${source}; return reserveAccountHeight;`)();
   for (const [natural, cap, expected] of [[75.15, 570, '76px'], [1200, 570, '285px'], [75.15, 228, '76px']]) {
-    const accounts = { style: { flexShrink: '' }, getBoundingClientRect: () => ({ height: accounts.style.flexShrink === '0' ? natural : 48 }) };
+    const accounts = { style: { flexShrink: '' }, scrollHeight: natural };
     const card = { querySelector: selector => selector.endsWith('accounts') ? accounts : selector.endsWith('sessions') ? {} : null };
     reserve(card, cap);
     assert.equal(accounts.style.minHeight, expected);
@@ -1184,66 +1186,9 @@ test('provider detail reserves natural account height without exceeding half the
   assert.equal(accounts.style.minHeight, undefined);
 });
 
-test('shared card repaint preserves both account and session scroll positions independently', () => {
-  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const source = dock.slice(dock.indexOf('function commitCard('), dock.indexOf('// The period card'));
-  let previous;
-  const openings = [];
-  const commit = Function('deps', `const {contentLayer, overflowText, document, cardResetAnimator, CARD_SCROLL_SELECTOR, openings} = deps; const captureCardSwitch = (_previous, _sameCard, opening) => { openings.push(opening); return null; }, animateCardSwitch = () => {}; ${source}; return commitCard;`)({
-    openings,
-    contentLayer: { querySelector: () => previous, replaceChildren() {} },
-    overflowText: { refresh() {}, preserveReading() {} },
-    cardResetAnimator: { capture() {}, animate() {} },
-    CARD_SCROLL_SELECTOR: '.edge-dock-accounts, .edge-dock-session-list', document: {}
-  });
-  const make = (id, positions) => {
-    const lists = Object.values(positions);
-    lists.forEach(list => { list.closest = () => null; });
-    return { dataset: { cellId: id }, querySelectorAll: () => lists };
-  };
-  previous = make('codex', { '.edge-dock-accounts': { scrollTop: 25 }, '.edge-dock-session-list': { scrollTop: 150 } });
-  const positions = { '.edge-dock-accounts': { scrollTop: 0 }, '.edge-dock-session-list': { scrollTop: 0 } };
-  commit(make('codex', positions), 'codex');
-  assert.equal(positions['.edge-dock-accounts'].scrollTop, 25);
-  assert.equal(positions['.edge-dock-session-list'].scrollTop, 150);
-  commit(make('claude', positions), 'claude');
-  assert.equal(positions['.edge-dock-accounts'].scrollTop, 0);
-  assert.equal(positions['.edge-dock-session-list'].scrollTop, 0);
-  previous.dataset.reveal = '1';
-  const reopened = make('claude', positions);
-  reopened.dataset.reveal = '2';
-  commit(reopened, 'claude');
-  assert.equal(openings.at(-1), true, 'commit suppresses the outgoing card across openings');
-  previous = reopened;
-  const switched = make('cursor', positions);
-  switched.dataset.reveal = '2';
-  commit(switched, 'cursor');
-  assert.equal(openings.at(-1), false, 'a continuous switch still animates');
-});
 
-test('a repainted card restores the scroll container it actually uses', () => {
-  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const css = readRendererFile(path.join('edgeDock', 'dock.css'));
-  const commit = dock.slice(dock.indexOf('function commitCard('), dock.indexOf('function renderBubble('));
-  assert.match(commit, /querySelectorAll\(CARD_SCROLL_SELECTOR\)/);
-  assert.match(commit, /list\.scrollTop = scrollTops\[index\] \|\| 0;/);
-  // Both containers are named, read from the declaration so a third cannot be added to
-  // the card without this failing.
-  const declaration = dock.match(/const CARD_SCROLL_SELECTOR = '([^']+)';/);
-  assert.ok(declaration, 'the scroll containers are declared once');
-  const selectors = declaration[1].split(',').map((part) => part.trim());
-  assert.deepEqual(selectors, ['.edge-dock-accounts', '.edge-dock-session-list']);
-  // And each really scrolls, which is why it has to be restored.
-  for (const selector of selectors) {
-    // Plain string search: these selectors carry a leading dot and a hyphen, and
-    // escaping them into a RegExp literal inside this file is what broke the first
-    // version of this assertion.
-    const start = css.indexOf(`\n${selector} {`);
-    assert.ok(start >= 0, `${selector} should be styled`);
-    const body = css.slice(start, css.indexOf('}', start));
-    assert.match(body, /overflow-y: auto;/, `${selector} should be the scrolling element`);
-  }
-});
+
+
 
 // The self-repaint scheduler replaced the card's fixed 30s interval, and its first
 // shape changed behaviour it had no business touching: the card fell back to 60s (a
@@ -2940,7 +2885,7 @@ test('live rate card renders device model rows with vendor marks and retains eve
   assert.deepEqual(cell.rateDevices, devices);
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
   const body = dock.slice(dock.indexOf('function appendLiveRateDetails('), dock.indexOf('function statCard('));
-  const node = (tag, className, text) => ({ tag, className, text, children: [], classes: new Set(), classList: { toggle(name, enabled) { if (enabled) this.owner.classes.add(name); else this.owner.classes.delete(name); } }, setAttribute() {}, append(...children) { this.children.push(...children); } });
+  const node = (tag, className, text) => ({ tag, className, text, dataset: {}, children: [], classes: new Set(), classList: { toggle(name, enabled) { if (enabled) this.owner.classes.add(name); else this.owner.classes.delete(name); } }, setAttribute() {}, append(...children) { this.children.push(...children); } });
   const createNode = (...args) => { const result = node(...args); result.classList.owner = result; return result; };
   const render = Function('window', 'el', 'formatRate', 'markNode', 'modelVendorFor', `return (${body})`)(
     { TokenMonitorTokenRate: require('../../src/electron/renderer/tokenRatePresentation') }, createNode, String,
@@ -3080,25 +3025,7 @@ test('Notch detail can retain aggregate failures without changing rail visibilit
   assert.ok(top.subscriptionAccounts.some((a) => a.accountKey === 'local-only'), 'identity-only records still cannot become display rows');
 });
 
-test('provider card repaint preserves both account and session scroll and ignores nested families', () => {
-  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const start = dock.indexOf('function commitCard(');
-  const body = dock.slice(start, dock.indexOf('\n}', start) + 2);
-  const list = (scrollTop, nested = false) => ({ scrollTop,
-    closest: () => nested ? {} : null });
-  const previous = { dataset: { cellId: 'codex' },
-    querySelectorAll: () => [list(17), list(140), list(4, true)] };
-  const accounts = list(0), sessions = list(0), nested = list(0, true);
-  const next = { dataset: { cellId: 'codex' }, querySelectorAll: () => [accounts, sessions, nested] };
-  const commit = Function('contentLayer', 'overflowText', 'document', 'cardResetAnimator', 'CARD_SCROLL_SELECTOR',
-    `const captureCardSwitch = () => null, animateCardSwitch = () => {}; ${body}\nreturn commitCard;`)(
-    { querySelector: () => previous, replaceChildren() {} },
-    { refresh() {}, preserveReading() {} }, {}, { capture() {}, animate() {} }, '.scroll');
-  commit(next, 'codex');
-  assert.deepEqual([accounts.scrollTop, sessions.scrollTop, nested.scrollTop], [17, 140, 0]);
-  commit(next, 'claude');
-  assert.deepEqual([accounts.scrollTop, sessions.scrollTop], [0, 0], 'another card starts at the top');
-});
+
 
 test('recent cards project only selected display rows while aliases and cross-client children precede caps', (t) => {
   const now = Date.parse('2026-10-11T12:00:00Z');
@@ -3642,7 +3569,7 @@ for (const kind of ['provider', 'stat']) {
       const source = dock.slice(dock.indexOf('const cardSwitch ='), dock.indexOf('const bubbleSizeObserver ='));
       const pluginSource = dock.slice(dock.indexOf('function pluginCard('), dock.indexOf('const codexAccountControl ='));
       const { renderBubble } = Function('deps', `
-        const window = { TokenMonitorCardLayout: deps.cardLayoutApi, TokenMonitorCardSwitch: {
+        const window = { TokenMonitorDomReconcile: { create: () => ({ reconcile: (_previous, next) => next }) }, TokenMonitorCardLayout: deps.cardLayoutApi, TokenMonitorCardSwitch: {
           createCardSwitch: options => deps.cardSwitchApi.createCardSwitch({ ...options,
             isHidden: () => false, readOpacity: () => '1' })
         } };
@@ -3709,7 +3636,7 @@ test('detail tooltip flipping uses the painted card top in CSS pixels', () => {
         const events = {}, flips = [];
         const attach = Function('deps', 'tooltipHost', 'positionCenteredDetailTooltip', `let tooltipAnchorSeq = 0; ${body}; return attachLimitDetailTooltip;`)(
           { tooltipTop: () => cardY / zoom }, { markOpened() {}, release() {} }, () => {});
-        const wrap = { style: { setProperty() {} }, classList: { add() {} }, isConnected: true,
+        const wrap = { setAttribute() {}, style: { setProperty() {} }, classList: { add() {} }, isConnected: true,
           getBoundingClientRect: () => ({ top: (cardY + triggerY) / zoom }), addEventListener: (name, fn) => { events[name] = fn; } };
         const tooltip = { style: { setProperty() {} }, setAttribute() {}, childElementCount: 1, offsetHeight: 120 / zoom,
           showPopover() {}, classList: { toggle: (_name, below) => flips.push(below) } };

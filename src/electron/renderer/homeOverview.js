@@ -271,7 +271,7 @@
       const providerEntries = byId.get(id) || [];
       providerEntries.forEach((provider, index) => {
         accounts.push({
-          key: `${id}:${index}`,
+          key: `${id}:${provider.accountKey || provider.workspaceAccountId || provider.providerAccountId || index}`,
           providerId: id,
           name: typeof accountName === 'function' ? accountName(provider, index, providerEntries) : label,
           plan: typeof accountPlan === 'function' ? accountPlan(provider, index, providerEntries) : '',

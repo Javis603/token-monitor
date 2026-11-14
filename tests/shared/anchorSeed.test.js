@@ -8,9 +8,8 @@ process.env.TZ = 'Asia/Shanghai';
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { deviceRecordFromAnchor } = require('../../src/shared/anchorSeed');
-const { configFingerprint, collectionCalendarKey } = require('../../src/shared/collector');
-const { qoderCnDataPaths } = require('../../src/shared/providers/qodercn/paths');
+const { deviceRecordFromAnchor, seedWithColdPreview } = require('../../src/shared/anchorSeed');
+const { collectorAnchorTrust, configFingerprint, collectionCalendarKey } = require('../../src/shared/collector');
 const { aggregateDevices, emptyPeriod } = require('../../src/shared/usage');
 
 const CLIENTS = 'claude,codex';
@@ -115,30 +114,26 @@ test('an omitted WSL setting does not restore WSL usage or active status', () =>
   assert.deepEqual(record.wslStatus, { state: 'disabled', detected: [], withData: [] });
 });
 
-test('the cold-start seed accepts an anchor configured for Qoder CN', () => {
+test('the cold-start seed accepts a JSONL-only Qoder CN anchor', () => {
   const homeDir = '/tmp/token-monitor-qodercn-home';
-  const cnPaths = qoderCnDataPaths({ homeDir });
   const clients = 'claude,qodercn';
+  const options = { clients, homeDir, env: {} };
   const anchor = anchorFixture({
-    configFingerprint: configFingerprint(clients, ALL_TIME_SINCE, true, cnPaths.dbPaths[0], cnPaths.projectsDir)
+    configFingerprint: configFingerprint(clients, ALL_TIME_SINCE, true, null, undefined, options)
   });
-
-  const record = deviceRecordFromAnchor(anchor, seedOptions({ clients, homeDir }));
+  const record = deviceRecordFromAnchor(anchor, seedOptions(options));
   assert.equal(record.today.totalTokens, 1_000);
   assert.deepEqual(record.trackedClients, ['claude', 'qodercn']);
 });
 
-test('the seed refuses a Qoder CN anchor that predates the JSONL source', () => {
-  // A DB-only fingerprint cannot cover transcript usage: reusing it would show
-  // month/allTime from before the storage migration while only today's JSONL
-  // is scanned. The projects dir must be part of the trusted fingerprint.
+test('the seed refuses a Qoder CN anchor that includes the retired SQLite source', () => {
   const homeDir = '/tmp/token-monitor-qodercn-home';
-  const cnPaths = qoderCnDataPaths({ homeDir });
   const clients = 'claude,qodercn';
-  const legacyAnchor = anchorFixture({
-    configFingerprint: configFingerprint(clients, ALL_TIME_SINCE, true, cnPaths.dbPaths[0])
-  });
-  assert.equal(deviceRecordFromAnchor(legacyAnchor, seedOptions({ clients, homeDir })), null);
+  const options = { clients, homeDir, env: {} };
+  const fingerprint = configFingerprint(clients, ALL_TIME_SINCE, true, null, undefined, options)
+    .replace('|qodercnProjects:', '|qodercn:/retired/local.db|qodercnProjects:');
+  const legacyAnchor = anchorFixture({ configFingerprint: fingerprint });
+  assert.equal(deviceRecordFromAnchor(legacyAnchor, seedOptions(options)), null);
 });
 
 test('the seed carries local-only native Reasonix views when the anchor has them', () => {
@@ -161,10 +156,88 @@ test('the seed removes legacy Reasonix stats paths from ordinary period sessions
   assert.deepEqual(record.month.sessions, {});
 });
 
-test('an anchor from another local day is refused', () => {
-  assert.equal(deviceRecordFromAnchor(anchorFixture({ dateKey: '2026-08-07' }), seedOptions()), null);
+test('an unusable anchor is refused', () => {
   assert.equal(deviceRecordFromAnchor(null, seedOptions()), null);
   assert.equal(deviceRecordFromAnchor(anchorFixture({ month: null }), seedOptions()), null);
+  // From a later day than now: a clock that went backwards, not a snapshot.
+  assert.equal(deviceRecordFromAnchor(anchorFixture({ dateKey: '2026-08-09' }), seedOptions()), null);
+  assert.equal(deviceRecordFromAnchor(anchorFixture({ dateKey: 'yesterday' }), seedOptions()), null);
+});
+
+// Local 2026-08-07 20:00: the last full scan before the app was closed.
+const YESTERDAY_SCAN_AT = '2026-08-07T12:00:00.000Z';
+
+test('an anchor from an earlier day seeds, and only the windows still open count', () => {
+  const record = deviceRecordFromAnchor(
+    anchorFixture({ dateKey: '2026-08-07', fullScanAt: YESTERDAY_SCAN_AT }),
+    seedOptions()
+  );
+  assert.equal(record.updatedAt, YESTERDAY_SCAN_AT);
+  // The anchor's own day, so yesterday's Today cannot pass for today's.
+  assert.equal(record.periodWindows.today.key, '2026-08-07');
+
+  const seeded = aggregateDevices([record], 0, NOW.getTime());
+  assert.equal(seeded.periods.today.totalTokens, 0);
+  assert.equal(seeded.periods.month.totalTokens, 30_000);
+  assert.equal(seeded.periods.allTime.totalTokens, 900_000);
+});
+
+test('an anchor from an earlier month keeps only all-time', () => {
+  const record = deviceRecordFromAnchor(
+    anchorFixture({ dateKey: '2026-07-31', fullScanAt: '2026-07-31T12:00:00.000Z' }),
+    seedOptions()
+  );
+  const seeded = aggregateDevices([record], 0, NOW.getTime());
+  assert.equal(seeded.periods.today.totalTokens, 0);
+  assert.equal(seeded.periods.month.totalTokens, 0);
+  assert.equal(seeded.periods.allTime.totalTokens, 900_000);
+});
+
+test('the collector itself still refuses an anchor from an earlier day', () => {
+  // It adds a fresh Today to the anchor's month and all-time, which is only
+  // exact on the anchor's own day. The seed opts in; nothing else does.
+  const anchor = anchorFixture({ dateKey: '2026-08-07', fullScanAt: YESTERDAY_SCAN_AT });
+  const options = { clients: CLIENTS, allTimeSince: ALL_TIME_SINCE, projectsEnabled: true, now: NOW };
+  assert.equal(collectorAnchorTrust(anchor, options), null);
+  assert.ok(collectorAnchorTrust(anchor, { ...options, allowEarlierDay: true }));
+});
+
+test('first-scan previews replace the windows they carry and keep the seed for the rest', () => {
+  const seed = deviceRecordFromAnchor(
+    anchorFixture({ dateKey: '2026-08-07', fullScanAt: YESTERDAY_SCAN_AT }),
+    seedOptions()
+  );
+
+  const todayOnly = seedWithColdPreview(seed, { deviceId: 'device-a', today: periodWith(250) }, NOW);
+  assert.equal(todayOnly.periodWindows.today.key, '2026-08-08');
+  // Still the seed's: the preview has not scanned month yet.
+  assert.equal(todayOnly.periodWindows.month.key, '2026-08');
+  assert.equal(todayOnly.updatedAt, YESTERDAY_SCAN_AT);
+  let shown = aggregateDevices([todayOnly], 0, NOW.getTime());
+  assert.equal(shown.periods.today.totalTokens, 250);
+  assert.equal(shown.periods.month.totalTokens, 30_000);
+  assert.equal(shown.periods.allTime.totalTokens, 900_000);
+
+  const withMonth = seedWithColdPreview(seed, { today: periodWith(250), month: periodWith(41_000) }, NOW);
+  shown = aggregateDevices([withMonth], 0, NOW.getTime());
+  assert.equal(shown.periods.month.totalTokens, 41_000);
+  assert.equal(shown.periods.allTime.totalTokens, 900_000);
+
+  // Composed onto a copy; the seed stays what the next preview is laid over.
+  assert.equal(seed.today.totalTokens, 1_000);
+  assert.equal(seed.periodWindows.today.key, '2026-08-07');
+});
+
+test('a fresh month window replaces an ended one from an earlier month', () => {
+  const seed = deviceRecordFromAnchor(
+    anchorFixture({ dateKey: '2026-07-31', fullScanAt: '2026-07-31T12:00:00.000Z' }),
+    seedOptions()
+  );
+  const shown = aggregateDevices([
+    seedWithColdPreview(seed, { today: periodWith(250), month: periodWith(3_000) }, NOW)
+  ], 0, NOW.getTime());
+  assert.equal(shown.periods.today.totalTokens, 250);
+  assert.equal(shown.periods.month.totalTokens, 3_000);
 });
 
 test('an anchor whose capture time cannot be trusted is refused', () => {
@@ -229,4 +302,134 @@ test('the seeded totals survive aggregation once the UTC day has rolled over', (
   delete withoutWindows.periodWindows;
   const bare = aggregateDevices([withoutWindows], 0, NOW.getTime());
   assert.equal(bare.periods.today.totalTokens, 0, 'guards the fallback this test exists for');
+});
+
+test('without a seed, a preview stands alone with windows that start now', () => {
+  const preview = { deviceId: 'device-a', updatedAt: NOW.toISOString(), today: periodWith(250) };
+  const shown = seedWithColdPreview(preview, preview, NOW);
+  assert.equal(shown.periodWindows.today.key, '2026-08-08');
+  const aggregate = aggregateDevices([shown], 0, NOW.getTime());
+  assert.equal(aggregate.periods.today.totalTokens, 250);
+  assert.equal(aggregate.periods.allTime.totalTokens, 0);
+});
+
+
+test('a pricing or tokscale binary change still seeds, but nothing else that moved does', () => {
+  const repriced = anchorFixture({
+    configFingerprint: configFingerprint(CLIENTS, ALL_TIME_SINCE, true, null, 'deadbeef')
+  });
+  assert.equal(deviceRecordFromAnchor(repriced, seedOptions()).allTime.totalTokens, 900_000);
+  const options = { clients: CLIENTS, allTimeSince: ALL_TIME_SINCE, projectsEnabled: true, now: NOW };
+  assert.equal(collectorAnchorTrust(repriced, options), null, 'the collector itself rescans');
+
+  assert.equal(deviceRecordFromAnchor(repriced, seedOptions({ clients: 'claude' })), null);
+  assert.equal(deviceRecordFromAnchor(repriced, seedOptions({ projectsEnabled: false })), null);
+  // A fingerprint without a pricing revision cannot prove the rest matches.
+  assert.equal(deviceRecordFromAnchor(anchorFixture({ configFingerprint: 'claude,codex|2024-01-01|projects:on' }), seedOptions()), null);
+});
+
+test('native views of windows that have ended are dropped from an earlier-day seed', () => {
+  // The renderer shows these per window without a date of their own.
+  const nativeSessions = { today: { 'reasonix:a': { client: 'reasonix', totalTokens: 12 } }, month: { 'reasonix:a': { client: 'reasonix', totalTokens: 40 } }, allTime: { 'reasonix:a': { client: 'reasonix', totalTokens: 90 } } };
+  const nativeProjects = { today: { p: { tokens: 12 } }, month: { p: { tokens: 40 } }, allTime: { p: { tokens: 90 } } };
+
+  const yesterday = deviceRecordFromAnchor(
+    anchorFixture({ dateKey: '2026-08-07', fullScanAt: YESTERDAY_SCAN_AT, nativeSessions, nativeProjects }),
+    seedOptions()
+  );
+  assert.deepEqual(yesterday.nativeSessions.today, {});
+  assert.deepEqual(yesterday.nativeSessions.month, nativeSessions.month);
+  assert.deepEqual(yesterday.nativeProjects.today, {});
+  assert.deepEqual(yesterday.nativeProjects.allTime, nativeProjects.allTime);
+
+  const lastMonth = deviceRecordFromAnchor(
+    anchorFixture({ dateKey: '2026-07-31', fullScanAt: '2026-07-31T12:00:00.000Z', nativeSessions }),
+    seedOptions()
+  );
+  assert.deepEqual(lastMonth.nativeSessions.month, {});
+  assert.deepEqual(lastMonth.nativeSessions.allTime, nativeSessions.allTime);
+});
+
+test('a cold preview keeps the windows its scan collected in, and brings its limits', () => {
+  const seed = deviceRecordFromAnchor(anchorFixture({ dateKey: '2026-08-07', fullScanAt: YESTERDAY_SCAN_AT }), seedOptions());
+  const limits = { updatedAt: NOW.toISOString(), providers: [{ provider: 'codex', status: 'ok', windows: [] }] };
+  // A scan that started before midnight reports that day even when the preview
+  // is shown after it.
+  const scanWindows = { today: { key: '2026-08-07', endsAt: new Date(2026, 7, 8).toISOString() }, month: seed.periodWindows.month };
+  const shown = seedWithColdPreview(seed, { today: periodWith(250), periodWindows: scanWindows, limits }, NOW);
+  assert.equal(shown.periodWindows.today.key, '2026-08-07');
+  assert.deepEqual(shown.limits, limits);
+  assert.equal(aggregateDevices([shown], 0, NOW.getTime()).periods.today.totalTokens, 0);
+});
+
+function withArchive(callback) {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { retainDailyHistory } = require('../../src/shared/dailyHistoryArchive');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-seed-history-'));
+  const archivePath = path.join(dir, 'daily-history-calendars.json');
+  const day = (date, tokens) => ({
+    date,
+    activeTimeMs: 0,
+    clients: [{ client: 'claude', modelId: 'opus', tokens: { input: tokens, output: 0, cacheRead: 0, cacheWrite: 0, reasoning: 0 }, cost: 1, messages: 1 }]
+  });
+  try {
+    // What the last session's graphs left behind, written the way the collector writes it.
+    retainDailyHistory([{ contributions: [day('2026-08-05', 300), day('2026-08-06', 400), day('2026-08-07', 500)] }],
+      { path: archivePath, timeZone: 'Asia/Shanghai', todayKey: '2026-08-07' });
+    return callback(archivePath, fs);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('the seed shows History from the daily archive until the first graph lands', () => {
+  withArchive((archivePath, fs) => {
+    const before = fs.readFileSync(archivePath, 'utf8');
+    const record = deviceRecordFromAnchor(anchorFixture({ dateKey: '2026-08-07' }), seedOptions({
+      dailyHistoryArchiveEnabled: true,
+      dailyHistoryArchiveOptions: { path: archivePath }
+    }));
+
+    assert.equal(record.historyAvailable, true);
+    assert.deepEqual(record.history.daily.filter(day => day.tokens > 0).map(day => [day.date, day.tokens]),
+      [['2026-08-05', 300], ['2026-08-06', 400], ['2026-08-07', 500]]);
+    // Without a fresh graph the archive cannot vouch for every active day.
+    assert.equal(record.history.summary.activeDaysComplete, false);
+    // What Trends and Home read in local mode.
+    const { aggregateHistory } = require('../../src/shared/usage');
+    assert.equal(aggregateHistory([record]).daily.reduce((sum, day) => sum + day.tokens, 0), 1_200);
+    // Read-only: a seed is not an observation.
+    assert.equal(fs.readFileSync(archivePath, 'utf8'), before);
+  });
+});
+
+test('the seed leaves History to the first scan when History or the archive is off, or the archive is unreadable', () => {
+  withArchive((archivePath, fs) => {
+    const options = { dailyHistoryArchiveOptions: { path: archivePath } };
+    for (const overrides of [
+      { ...options },
+      { ...options, dailyHistoryArchiveEnabled: true, historyEnabled: false }
+    ]) {
+      const record = deviceRecordFromAnchor(anchorFixture(), seedOptions(overrides));
+      assert.equal(Object.prototype.hasOwnProperty.call(record, 'history'), false);
+    }
+    fs.writeFileSync(archivePath, '{ not json');
+    const record = deviceRecordFromAnchor(anchorFixture(), seedOptions({ ...options, dailyHistoryArchiveEnabled: true }));
+    assert.equal(record.today.totalTokens, 1_000, 'an unreadable archive still seeds the totals');
+    assert.equal(Object.prototype.hasOwnProperty.call(record, 'history'), false);
+  });
+});
+
+test('first-scan previews keep the seeded History', () => {
+  withArchive((archivePath) => {
+    const seed = deviceRecordFromAnchor(anchorFixture(), seedOptions({
+      dailyHistoryArchiveEnabled: true,
+      dailyHistoryArchiveOptions: { path: archivePath }
+    }));
+    const record = seedWithColdPreview(seed, { today: periodWith(2_000) }, NOW);
+    assert.equal(record.today.totalTokens, 2_000);
+    assert.equal(record.history, seed.history);
+  });
 });

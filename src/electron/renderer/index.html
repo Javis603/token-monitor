@@ -1096,10 +1096,10 @@
                 </span>
               </button>
               <div id="copilotSettingsDetails" class="cursor-settings-details hidden">
+                <div id="copilotAccountList" class="managed-account-list"></div>
                 <div class="settings-actions">
                   <button id="copilotSignInButton" data-i18n="settings.copilot.signIn">Sign in with GitHub</button>
                   <button id="copilotCancelSignInButton" class="hidden" data-i18n="settings.common.cancel">Cancel</button>
-                  <button id="copilotLogoutButton" class="hidden" data-i18n="settings.copilot.logout">Sign out</button>
                   <button id="copilotRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
                 </div>
                 <pre id="copilotLoginStatus" class="codex-login-output hidden" role="status" aria-live="polite"></pre>
@@ -1848,6 +1848,7 @@
     <script src="../../shared/limits/accountScope.js"></script>
     <script src="../../shared/limits/windowText.js"></script>
     <script src="../limits/historyIdentity.js"></script>
+    <script src="domReconcile.js"></script>
     <script src="pressActivation.js"></script>
     <script src="limits/windowsView.js"></script>
     <script src="trayBars.js"></script>
@@ -1877,6 +1878,8 @@
     <script src="serviceStatusPresentation.js"></script>
     <script src="serviceStatusProviderPreferences.js"></script>
     <script src="clientDisplayPreferences.js"></script>
+    <script src="qoderDisplay.js"></script>
+    <script src="qoderCollectionSettings.js"></script>
     <script src="settingsListFilter.js"></script>
     <script src="viewDisplayPreferences.js"></script>
     <script src="homeModulePreferences.js"></script>

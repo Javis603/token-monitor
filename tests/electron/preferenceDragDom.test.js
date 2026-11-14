@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 
@@ -66,7 +67,7 @@ test('tool diagnostics bind source values to the full health snapshot key', () =
   assert.match(identity, /clientHealthPresentationApi\.hasClientHealth\(health, id\)/);
   assert.match(exactReader, /clientSourceCacheApi\.readClientSources/);
   assert.match(reader, /state\.clientSourcesKey === key[\s\S]*readLatestClientSources/);
-  assert.match(loader, /clientSourceCacheApi\.clientSourceRequestKey\(identity\)/);
+  assert.match(loader, /clientSourcesPanelKey\(panelId\)/);
   assert.doesNotMatch(loader, /deleteClientSources/);
   assert.match(loader, /clientSourceCacheApi\.writeClientSources/);
   assert.match(loader, /catch[\s\S]*state\.clientSourcesKey = ''[\s\S]*refillOpenClientHealthPanel\(\)/);
@@ -83,7 +84,7 @@ test('tool diagnostics bind source values to the full health snapshot key', () =
   assert.match(actions, /rescan\.id = `toolHealthRescan-\$\{clientId\}`/);
   assert.match(actions, /reveal\.id = `toolHealthReveal-\$\{clientId\}`/);
   assert.match(actions, /exactLocalClientSources\(clientId\)/);
-  assert.match(panel, /clientHealthActions\(clientId, detail\)/);
+  assert.match(panel, /clientHealthActions\(id,/);
   assert.doesNotMatch(app, /clientSourceIds/);
 });
 
@@ -236,7 +237,7 @@ test('the tool list skips unchanged row renders and refreshes only open health d
 
   const localSources = functionBody(app, 'localClientSources', 'loadClientSources');
   assert.match(localSources, /exactLocalClientSources\(clientId\)/);
-  assert.match(localSources, /const pendingSources = key && state\.clientSourcesKey === key/);
+  assert.match(localSources, /const pendingSources = key && \(state\.clientSourcesKey === key/);
   assert.match(localSources, /exactSources \?\? clientSourceCacheApi\.readLatestClientSources/);
   assert.match(localSources, /exists: false, pending: true/);
 });
@@ -258,7 +259,7 @@ test('a press on the tool row own controls never arms a drag', () => {
   assert.match(app, /const CLIENT_PREFERENCE_DRAG_EXCLUDED = 'button:not\(\.tool-preference-main\), input, select, textarea, a, label, \.accordion-animated-container';/);
   const wiring = app.slice(app.indexOf('const clientPreferenceRowDrag = '), app.indexOf('function renderToolPreferences('));
   assert.match(wiring, /dragExcluded: CLIENT_PREFERENCE_DRAG_EXCLUDED,/);
-  assert.match(wiring, /rowSelector: '\.tool-preference-row\[data-client\]',/);
+  assert.match(wiring, /rowSelector: ':scope > \.tool-preference-row\[data-client\]',/);
   assert.match(wiring, /idKey: 'client',/);
   assert.match(wiring, /preserveScroll: preserveSettingsPanelScroll,/);
   assert.match(wiring, /applyOrder: \(order\) => applyPreferenceOrder\('client', order\),/);
@@ -266,7 +267,7 @@ test('a press on the tool row own controls never arms a drag', () => {
   // The pin/order decision is made once, by the shared module, and travels from
   // the mirror to the save; onPreferenceOrderCommit would compare against the
   // value the mirror just wrote and drop it.
-  assert.match(wiring, /clientDisplayPreferencesApi\.clientDisplayOrderCommit\(order, KNOWN_CLIENTS, state\.settings\?\.clientDisplayOrder, state\.settings\?\.pinnedClients, id\)/);
+  assert.match(wiring, /qoderDisplayApi\.orderCommit\(order, KNOWN_CLIENTS, state\.settings\?\.clientDisplayOrder, state\.settings\?\.pinnedClients, id\)/);
   assert.match(wiring, /persistOrder: \(_order, _id, patch\) => void saveSettings\(patch\)/);
   assert.doesNotMatch(wiring, /onPreferenceOrderCommit\(/);
 });
@@ -759,4 +760,48 @@ test('the session context gauge has its own setting, separate from AI Tool Limit
   assert.doesNotMatch(sessionList, /className = 'home-activity-settings'/);
   // The preference has to invalidate the painted rows, the way showLimitUsed does.
   assert.match(app, /sessionContextMetric: state\.settings\?\.sessionContextMetric === 'remaining' \? 'remaining' : 'used'/);
+});
+
+
+test('health reconciliation preserves control ownership when edition rows shift', () => {
+  const app = readRendererFile('app.js');
+  const context = vm.createContext({ Node: { ELEMENT_NODE: 1 } });
+  vm.runInContext(functionBody(app, 'sameRenderedNode', 'patchRenderedNode'), context);
+  const node = (id, tagName = 'INPUT') => ({ nodeType: 1, id, tagName, className: '', dataset: {} });
+  const same = (current, next) => context.sameRenderedNode(current, next);
+  for (const prefix of ['toolTrackEnabled-', 'qoderEditionVisibility-', 'qoderEditionPin-']) {
+    const tag = prefix === 'toolTrackEnabled-' ? 'INPUT' : 'BUTTON';
+    assert.equal(same(node(prefix + 'qoder', tag), node(prefix + 'qodercn', tag)), false);
+    assert.equal(same(node(prefix + 'qodercn', tag), node(prefix + 'qoder', tag)), false);
+    assert.equal(same(node(prefix + 'qodercn', tag), node(prefix + 'qodercn', tag)), true);
+  }
+  assert.equal(same(node(''), node('')), true);
+  assert.equal(same({ ...node('rescan'), dataset: { healthAction: 'rescan' } },
+    { ...node('rescan'), dataset: { healthAction: 'reveal' } }), false);
+});
+
+
+test('client keyboard moves keep pinned groups inside the pinned block', () => {
+  const app = readRendererFile('app.js');
+  const saves = [];
+  const state = { settings: { pinnedClients: 'codex,claude', clientDisplayOrder: '' } };
+  const context = vm.createContext({
+    state, KNOWN_CLIENTS: ['codex','claude','qoder','qodercn'].map(id => ({ id })),
+    clientDisplayPreferencesApi: require('../../src/electron/renderer/clientDisplayPreferences'),
+    qoderDisplayApi: require('../../src/electron/renderer/qoderDisplay'),
+    pinnedClientSet: () => new Set(state.settings.pinnedClients.split(',')),
+    saveSettings: patch => { saves.push(JSON.parse(JSON.stringify(patch))); }
+  });
+  vm.runInContext(functionBody(app, 'onPreferenceOrderKeydown', 'resetClientDisplayOrder').replace(/async\s*$/, ''), context);
+  const move = (id, key) => context.onPreferenceOrderKeydown({ key, preventDefault() {} }, 'client', id);
+  move('codex', 'End');
+  assert.deepEqual(saves.pop(), { pinnedClients: 'claude,codex' });
+  move('claude', 'ArrowDown');
+  assert.equal(saves.length, 0);
+  state.settings.pinnedClients = 'qodercn,codex,claude';
+  move('qoder', 'End');
+  assert.deepEqual(saves.pop(), { pinnedClients: 'codex,claude,qodercn' });
+  state.settings.clientDisplayOrder = 'codex,claude,qoder,qodercn';
+  move('codex', 'End');
+  assert.deepEqual(saves.pop(), { clientDisplayOrder: 'claude,qoder,qodercn,codex', pinnedClients: '' });
 });

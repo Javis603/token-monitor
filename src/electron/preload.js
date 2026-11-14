@@ -279,6 +279,10 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     }
   },
   copilot: {
+    getAccounts: () => ipcRenderer.invoke('copilot:getAccounts'),
+    addAccount: (token) => ipcRenderer.invoke('copilot:addAccount', token),
+    removeAccount: (id) => ipcRenderer.invoke('copilot:removeAccount', id),
+    setEnabled: (id, enabled) => ipcRenderer.invoke('copilot:setEnabled', id, enabled),
     signIn: (options = {}) => ipcRenderer.invoke('copilot:signIn', options),
     cancelSignIn: (options = {}) => ipcRenderer.invoke('copilot:cancelSignIn', options),
     onLoginStatus: (callback) => {
