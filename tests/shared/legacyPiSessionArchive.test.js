@@ -97,19 +97,24 @@ test('reconciliation persists across capture, SQLite reload, previews and lost s
   fs.writeFileSync(legacyPath, JSON.stringify(legacyArchive()));
   const store = createSessionUsageArchiveStore({ databasePath, path: legacyPath, homeDir });
   const transform = createUsageTransform({ store, getSettings: () => ({ clients: 'pi,omp' }) });
-  t.after(() => store.close());
-  assertOnlyParent(transform.transform(summary([session('omp', 'parent')])));
-  assert.equal(store.read(AT).sessions['pi:fork'].supersededBy, 'omp:parent');
-  assert.equal(store.read(AT).sessions['omp:parent'].clientIdentityGeneration, CLIENT_IDENTITY_GENERATION);
-  store.release();
-  fs.rmSync(root, { recursive: true });
-  const reloaded = store.read(AT);
-  assert.equal(reloaded.sessions['pi:fork'].supersededBy, 'omp:parent');
-  assertOnlyParent(transform.transform(summary([session('omp', 'parent')])));
-  // Both sessions are now source-deleted. Replay the retained OMP observation
-  // once, including when no complete live scan is available for a preview.
-  assertOnlyParent(transform.project(summary([], false), reloaded, AT));
-  assertOnlyParent(transform.transform(summary([], false)));
+  // Close before the fixture's after-hook removes the home: Windows cannot
+  // delete an open SQLite file.
+  try {
+    assertOnlyParent(transform.transform(summary([session('omp', 'parent')])));
+    assert.equal(store.read(AT).sessions['pi:fork'].supersededBy, 'omp:parent');
+    assert.equal(store.read(AT).sessions['omp:parent'].clientIdentityGeneration, CLIENT_IDENTITY_GENERATION);
+    store.release();
+    fs.rmSync(root, { recursive: true });
+    const reloaded = store.read(AT);
+    assert.equal(reloaded.sessions['pi:fork'].supersededBy, 'omp:parent');
+    assertOnlyParent(transform.transform(summary([session('omp', 'parent')])));
+    // Both sessions are now source-deleted. Replay the retained OMP observation
+    // once, including when no complete live scan is available for a preview.
+    assertOnlyParent(transform.project(summary([], false), reloaded, AT));
+    assertOnlyParent(transform.transform(summary([], false)));
+  } finally {
+    store.close();
+  }
 });
 
 for (const scenario of ['missing-parent', 'missing-parent-file', 'missing-fork', 'wrong-header', 'outside-root', 'post-split', 'watch', 'partial', 'live-pi', 'older-scan']) {
