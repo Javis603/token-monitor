@@ -5574,7 +5574,21 @@ async function startStatsStream(options = {}) {
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats/stream`;
   const controller = new AbortController();
   sseAbortController = controller;
+  let activityTimer = null;
+  let timedOut = false;
+  // Hubs send a heartbeat every 30s. Bound both opening the request and waiting
+  // for bytes, since a half-open connection may never report an error or EOF.
+  function armActivityTimeout(delayMs) {
+    clearTimeout(activityTimer);
+    activityTimer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, delayMs);
+    activityTimer.unref?.();
+  }
+  controller.signal.addEventListener('abort', () => clearTimeout(activityTimer), { once: true });
   try {
+    armActivityTimeout(15_000);
     const response = await fetch(url, {
       headers: {
         accept: 'text/event-stream',
@@ -5583,22 +5597,27 @@ async function startStatsStream(options = {}) {
       },
       signal: controller.signal
     });
-    if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+    if (controller !== sseAbortController || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+    controller.signal.throwIfAborted();
     if (!response.ok || !response.body) {
       sendStatus(false, classifyStreamFailure({ status: response.status }));
       scheduleStreamRetry();
       return;
     }
+    armActivityTimeout(90_000);
     sendStatus(true);
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     const blocks = createSseBlockReader();
     const streamSnapshot = createStatsStreamReceiver();
     for (;;) {
-      if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+      if (controller !== sseAbortController || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
       const { value, done } = await reader.read();
-      if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+      if (controller !== sseAbortController || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+      controller.signal.throwIfAborted();
       if (done) break;
+      // Count comments and partial frames too: large snapshots may span reads.
+      if (value.byteLength) armActivityTimeout(90_000);
       for (const block of blocks.push(decoder.decode(value, { stream: true }))) {
         const parsed = parseSseBlock(block);
         if (parsed) {
@@ -5616,14 +5635,17 @@ async function startStatsStream(options = {}) {
         }
       }
     }
-    if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+    if (controller !== sseAbortController || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
     sendStatus(false, classifyStreamFailure({ eof: true }));
     scheduleStreamRetry();
   } catch (error) {
-    if (controller.signal.aborted || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
-    controller.abort();
-    sendStatus(false, classifyStreamFailure({ errorCode: error?.cause?.code || error?.code, message: error?.message }));
+    if ((controller.signal.aborted && !timedOut) || controller !== sseAbortController
+      || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+    sendStatus(false, classifyStreamFailure({ errorCode: timedOut ? 'ETIMEDOUT' : error?.cause?.code || error?.code, message: error?.message }));
     scheduleStreamRetry();
+  } finally {
+    clearTimeout(activityTimer);
+    controller.abort();
   }
 }
 
