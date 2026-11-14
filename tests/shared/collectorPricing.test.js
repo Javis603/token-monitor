@@ -82,7 +82,7 @@ test('the collector refuses anchors after pricing or binary changes, while the c
   const revision = pricingFingerprint(options);
   const saved = {
     dateKey: localTodayKey(options.now), calendarKey: collectionCalendarKey(options.now), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod(),
-    configFingerprint: configFingerprint('claude', options.allTimeSince, true, '', '', null, revision),
+    configFingerprint: configFingerprint('claude', options.allTimeSince, true, null, revision),
     fullScanAt: options.now.toISOString()
   };
   assert.ok(collectorAnchorTrust(saved, options));

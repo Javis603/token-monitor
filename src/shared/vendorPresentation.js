@@ -63,6 +63,7 @@
     { id: 'workbuddy', color: '#0DC8A5' },
     { id: 'proma', color: '#000000', widgetInk: true },
     { id: 'catpaw', color: '#00FFA2' },
+    { id: 'qoder', color: '#2ADB5C' },
     { id: 'qodercn', color: '#2ADB5C' },
     { id: 'reasonix', color: '#4d6bfe' },
     { id: 'dsh', color: '#4d6bfe' },
@@ -78,7 +79,6 @@
     // Not tracked clients: model vendors and limits providers. A vendor shares
     // the colour of the client it names (moonshot/kimi, zai/zaiteam, xai/grok).
     { id: 'openrouter', label: 'OpenRouter', color: '#6566F1' },
-    { id: 'qoder', label: 'Qoder', color: '#2ADB5C' },
     { id: 'deepseek', label: 'DeepSeek', color: '#4d6bfe' },
     { id: 'xai', label: 'xAI', color: '#000000', mask: 'grok', widgetInk: true },
     { id: 'meta', label: 'Meta', color: '#1d65c1', widgetColor: '#4385DB' },

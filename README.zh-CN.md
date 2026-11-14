@@ -245,7 +245,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`、`~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（仅限中国版） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder/projects/**/*.jsonl` (global), `~/.qoder-cn/projects/**/*.jsonl` (CN) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/`（`session.jsonl`、`session.jsonl.zstd`） | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/`（`Data/Agents/.claude/projects/` V2、`.claude/projects/` legacy） | ✅ | — | — |
@@ -294,11 +294,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 
 - Custom 会从一个 GET 余额端点映射数值 JSON 字段；仅兼容 OpenAI 或 Anthropic API 并不足够。
 
-#### Qoder CN（本地适配器）
-
-Qoder CN 的 Token 用量来自应用本地数据，而非 API —— 在 Settings → tools 中启用（可选，默认关闭）。当前版本使用 Qoder 配置目录下的 `projects` JSONL 记录（通常为 `~/.qoder-cn/projects`），旧版本使用 SQLite；Token Monitor 内置的 tokscale 会同时读取两者。JSONL 路径优先使用 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`，其次为 `QODERCN_CONFIG_DIR/projects`，最后使用默认路径；旧数据库可用 `TOKEN_MONITOR_QODER_CN_DB_PATH` 覆盖。详见 [Qoder 数据来源说明](docs/providers/qodercn.md)。
-
-这是高级本地集成，但两种格式都无需额外运行时。无法读取的来源会保留上一次完整读取的数据。旧数据库的会话只记录项目名称而非路径，因此不会显示所属项目。只统计记录了真实 Token 字段的 JSONL 行；当前第一方套餐模型可能只有 credits 和上下文占用比例，缺少可靠的会话级 context window，因此不会猜测 Token。Credits 仍会显示在 AI Tool Limits，带真实 Token 的 BYOK／自定义模型会正常统计。
+- Qoder：在「设置 → 工具」的 Qoder 分组中可分别追踪国际版与 CN。全新安装默认追踪两者，已有选择保持不变。工具用量默认合并显示，开启「分开显示版本」后会分成两行。国际版读取 `QODER_CONFIG_DIR/projects`（默认 `~/.qoder/projects`）；CN 依次读取 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`（默认 `~/.qoder-cn/projects`）。只统计 transcript 中实际记录的 Token：托管模型只记录 credits、没有 Token 的记录不会计入，这些 credits 仍可在 AI 工具额度中查看。有报告指出 Qoder CN CLI 1.1.62 设置 `QODERCN_EXPOSE_TOKEN_USAGE=1` 后会记录之后的 Token；已有记录不会补回。`dfmodel` 等动态模型代号会按原样显示。只把用量存在 SQLite 的旧版 Qoder CN 不再采集，Token Monitor 已有的历史文件会保留。详见 [Qoder 数据来源说明](docs/providers/qodercn.md)。
 </details>
 
 ### 其他功能支持

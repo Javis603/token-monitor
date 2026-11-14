@@ -750,6 +750,7 @@ function defaultSettings() {
     codexDotsVisible: true,
     customScanPaths: {},
     clientDisplayOrder: '',
+    separateQoderClients: false,
     hiddenClients: '',
     pinnedClients: '',
     viewDisplayOrder: '',
@@ -2733,6 +2734,7 @@ function readSettings() {
     if (!saved.secret && defaults.secret) delete saved.secret;
     const merged = { ...defaults, ...saved, ...storedCredentials };
     merged.clients = clientsCsvForSetting(merged.clients);
+    merged.separateQoderClients = parseBoolean(merged.separateQoderClients, false);
     // A client identity split (see clientIdentitySplits.js) is not a new tool:
     // the user tracking its parent was already counting it, so the split has to
     // be seeded or their usage drops. `seededClientSplits` makes that a one-time
@@ -8573,6 +8575,7 @@ app.whenReady().then(() => {
       limitProviders: patch.limitProviders !== undefined ? migrateLimitProviders(patch.limitProviders) : settings.limitProviders,
       limitProviderOrder: patch.limitProviderOrder !== undefined ? migrateLimitProviderOrder(patch.limitProviderOrder) : settings.limitProviderOrder,
       clientDisplayOrder: patch.clientDisplayOrder !== undefined ? migrateClientDisplayOrder(patch.clientDisplayOrder) : (settings.clientDisplayOrder || ''),
+      separateQoderClients: parseBoolean(patch.separateQoderClients ?? settings.separateQoderClients, false),
       hiddenClients: patch.hiddenClients !== undefined ? migrateClientSelection(patch.hiddenClients, normalizeHiddenClients) : migrateClientSelection(settings.hiddenClients, normalizeHiddenClients),
       pinnedClients: patch.pinnedClients !== undefined ? migrateClientSelection(patch.pinnedClients, normalizePinnedClients) : migrateClientSelection(settings.pinnedClients, normalizePinnedClients),
       viewDisplayOrder: patch.viewDisplayOrder !== undefined ? migrateViewDisplayOrder(patch.viewDisplayOrder) : (settings.viewDisplayOrder || ''),

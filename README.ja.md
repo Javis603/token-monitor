@@ -245,7 +245,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 | <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
-| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder-cn/projects/**/*.jsonl`, legacy `<platform-app-data>/QoderCN/SharedClientCache/cache/db/local.db`（中国版のみ） | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder/projects/**/*.jsonl` (global), `~/.qoder-cn/projects/**/*.jsonl` (CN) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/`（`stats/`、`sessions/`、`projects/*/sessions/`） | ✅ | — | — |
 | <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/`（`session.jsonl`、`session.jsonl.zstd`） | ✅ | ✅ | ✅ |
 | <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/`（`Data/Agents/.claude/projects/` V2、`.claude/projects/` legacy） | ✅ | — | — |
@@ -294,11 +294,7 @@ Token Monitor は **トークン使用量**、**アカウント制限**、**セ�
 
 - Custom は1つの GET 残高エンドポイントから数値 JSON フィールドをマッピングします。OpenAI または Anthropic API 互換だけでは不十分です。
 
-#### Qoder CN（ローカルアダプター）
-
-Qoder CN のトークン使用量は API ではなくアプリのローカルデータから読み取ります。Settings → tools で有効化します（オプトイン、デフォルト無効）。現行版は Qoder 設定ディレクトリの `projects` JSONL（通常 `~/.qoder-cn/projects`）、旧版は SQLite を使用し、Token Monitor 同梱の tokscale が両方を読み取ります。JSONL パスの優先順位は `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`、既定値です。旧データベースは `TOKEN_MONITOR_QODER_CN_DB_PATH` で上書きできます。[Qoder のデータソース](docs/providers/qodercn.md)も参照してください。
-
-これは高度なローカル統合ですが、どちらの形式にも追加ランタイムは不要です。読み取れないソースは、最後に完全に読み取れたデータを保持します。旧データベースのセッションはパスではなくプロジェクト名だけを記録するため、プロジェクトなしで表示されます。実測トークン欄がある JSONL 行だけを集計します。現行のファーストパーティープラン行は credits と context 比率だけの場合があり、信頼できるセッション単位の context window がないためトークンを推測しません。Credits は AI Tool Limits に表示され、実測トークンを持つ BYOK／カスタムモデルは通常どおり集計されます。
+- Qoder：「設定 → ツール」の Qoder グループで、国際版と CN を個別に追跡できます。新規インストールでは両方を追跡し、既存の選択は維持されます。ツール使用量は既定で合算され、「バージョン別に表示」をオンにすると 2 行に分かれます。国際版は `QODER_CONFIG_DIR/projects`（既定 `~/.qoder/projects`）を、CN は `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`（既定 `~/.qoder-cn/projects`）の順に読み取ります。transcript に実際に記録されたトークンだけを集計します。マネージドモデルで credits のみ記録されトークンがない行は含まれず、その credits は AI ツール制限で確認できます。Qoder CN CLI 1.1.62 では `QODERCN_EXPOSE_TOKEN_USAGE=1` を設定すると以後のトークンが記録されたという報告があります。既存の記録は補完されません。`dfmodel` などの動的モデルコードは記録どおりに表示されます。使用量を SQLite にのみ保存する旧版 Qoder CN は収集対象外で、Token Monitor の既存の履歴ファイルは保持されます。[Qoder のデータソース](docs/providers/qodercn.md)も参照してください。
 </details>
 
 ### 追加機能の対応状況

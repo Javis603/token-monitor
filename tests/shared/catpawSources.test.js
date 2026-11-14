@@ -151,7 +151,7 @@ test('account database additions and removals invalidate persisted and cold-star
   const options = { ...f.options, clients: 'catpaw', allTimeSince: '2024-01-01', pricingRevision: 'fixed', now: new Date() };
   const saved = {
     dateKey: localTodayKey(options.now), calendarKey: collectionCalendarKey(options.now), today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod(),
-    configFingerprint: configFingerprint('catpaw', options.allTimeSince, true, '', '', null, 'fixed', options),
+    configFingerprint: configFingerprint('catpaw', options.allTimeSince, true, null, 'fixed', options),
     fullScanAt: options.now.toISOString()
   };
   assert.ok(collectorAnchorTrust(saved, options));
@@ -160,7 +160,7 @@ test('account database additions and removals invalidate persisted and cold-star
   fs.writeFileSync(f.account('added'), '');
   assert.equal(collectorAnchorTrust(saved, options), null);
   assert.equal(deviceRecordFromAnchor(saved, seedOptions), null);
-  saved.configFingerprint = configFingerprint('catpaw', options.allTimeSince, true, '', '', null, 'fixed', options);
+  saved.configFingerprint = configFingerprint('catpaw', options.allTimeSince, true, null, 'fixed', options);
   fs.unlinkSync(f.account('added'));
   assert.equal(collectorAnchorTrust(saved, options), null);
 });
