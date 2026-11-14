@@ -8203,11 +8203,16 @@ function renderBreakdownChange(breakdown, options = {}) {
 }
 
 function restartTimer() {
-  if (state.refreshTimer) clearInterval(state.refreshTimer);
   const interval = state.streamConnected
     ? 5 * 60 * 1000
     : Number(state.settings?.refreshMs || 15000);
-  state.refreshTimer = setInterval(refreshStats, interval);
+  // Local pushes can arrive every few seconds. Keep the existing deadline so
+  // they cannot indefinitely postpone the fallback read from the Hub.
+  if (state.refreshTimer && state.refreshTimerIntervalMs === interval) return;
+  if (state.refreshTimer) clearInterval(state.refreshTimer);
+  state.refreshTimerIntervalMs = interval;
+  // Only this periodic fallback may reuse fresh stream data instead of downloading.
+  state.refreshTimer = setInterval(() => refreshStats({ streamCache: true }), interval);
 }
 
 function clamp(value, min, max) {

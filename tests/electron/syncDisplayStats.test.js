@@ -497,7 +497,7 @@ test('stats that were never summarised are already complete', () => {
 test('main publishes summaries and exports their completions', () => {
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   assert.doesNotMatch(main, /composeLocalSyncStats\(/, 'every composition main publishes is a summary');
-  assert.equal((main.match(/composeLocalSyncSummary\(/g) || []).length, 2, 'the publish and stats:get');
+  assert.equal((main.match(/composeLocalSyncSummary\(/g) || []).length, 3, 'the publish, stats:get and its fresh-stream reuse');
   assert.equal((main.match(/composeLocalOnlySummary\(/g) || []).length, 1, 'the local collector publish');
   assert.doesNotMatch(main, /aggregateDevices\(\[localDevice\], 0\)/, 'local mode publishes a summary too');
   assert.match(main, /writeExportTo\(settings\.exportDir, completeLocalSyncStats\(payload\.data\.stats\)\.periods/);

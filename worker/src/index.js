@@ -306,24 +306,36 @@ export class HubDO {
 
   ensureHeartbeat() {
     if (this.heartbeatTimer || this.sseClients.size === 0) return;
-    this.heartbeatTimer = setInterval(() => {
-      const chunk = this.encoder.encode(': hb\n\n');
-      for (const client of this.sseClients) {
-        if (!client.pendingBytes) this.writeEncoded(client, chunk);
-      }
-      if (this.sseClients.size === 0 && this.heartbeatTimer) {
-        clearInterval(this.heartbeatTimer);
-        this.heartbeatTimer = null;
+    let pending = false;
+    this.heartbeatTimer = setInterval(async () => {
+      if (pending) return;
+      pending = true;
+      const generation = this.sseGeneration;
+      try {
+        // A replaced DO can keep its old timer/response alive without receiving
+        // new ingests. Storage access checks ownership before a heartbeat can
+        // keep those orphaned streams looking healthy. This key is never written.
+        await this.state.storage.get('sse-liveness', { noCache: true });
+        if (generation !== this.sseGeneration) return;
+        const chunk = this.encoder.encode(': hb\n\n');
+        for (const client of this.sseClients) {
+          if (!client.pendingBytes) this.writeEncoded(client, chunk);
+        }
+      } catch (error) {
+        if (generation === this.sseGeneration) {
+          for (const client of this.sseClients) this.dropClient(client, error);
+        }
+      } finally {
+        pending = false;
       }
     }, 30000);
   }
 
-  dropClient(client) {
+  dropClient(client, error = null) {
     this.sseClients.delete(client);
     client.onDrop?.();
     try {
-      const stop = client.writer.close;
-      Promise.resolve(stop?.call(client.writer)).catch(() => {});
+      Promise.resolve(error ? client.writer.abort?.(error) : client.writer.close?.()).catch(() => {});
     } catch (_) {}
     if (this.sseClients.size === 0 && this.heartbeatTimer) {
       clearInterval(this.heartbeatTimer);
