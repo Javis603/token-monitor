@@ -184,6 +184,55 @@ function clineCliSessionRoot(home) {
 // paths contain the user's home directory and never leave this process, so a
 // health record carries the id instead — CLIENT_SOURCE_CHECK_IDS in
 // clientHealth.js is the allowlist every id here must appear in.
+function claudeDesktopMsixSourceRoots({ env, platform }) {
+  if (platform !== 'win32') return [];
+  const key = Object.keys(env || {}).find(name => name.toLowerCase() === 'localappdata');
+  const localAppData = key ? String(env[key] || '').trim() : '';
+  if (!localAppData || !path.isAbsolute(localAppData)) return [];
+  const roots = [];
+  const addProfile = (profile) => {
+    if (!path.basename(profile).toLowerCase().startsWith('claude_')) return;
+    for (const lane of ['local-agent-mode-sessions', 'claude-code-sessions']) {
+      const dir = path.join(profile, lane);
+      if (fs.existsSync(dir)) roots.push(['claude-desktop-transcripts', dir, null, true]);
+    }
+    const indexedDb = path.join(profile, 'IndexedDB');
+    if (fs.existsSync(indexedDb)) {
+      for (const extension of ['leveldb', 'blob']) {
+        const dir = path.join(indexedDb, `https_claude.ai_0.indexeddb.${extension}`);
+        if (fs.existsSync(dir)) roots.push(['claude-desktop-cache', dir, null, true]);
+      }
+    }
+  };
+  const claudeData = path.join(localAppData, 'Claude-Data');
+  try {
+    for (const entry of fs.readdirSync(claudeData, { withFileTypes: true })) {
+      if (entry.isDirectory()) addProfile(path.join(claudeData, entry.name));
+    }
+  } catch (_) {}
+  const packages = path.join(localAppData, 'Packages');
+  try {
+    for (const entry of fs.readdirSync(packages, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !entry.name.toLowerCase().includes('claude')) continue;
+      const root = path.join(packages, entry.name);
+      addProfile(root);
+      for (const child of ['LocalCache', 'LocalState', 'RoamingState']) addProfile(path.join(root, child));
+      try {
+        for (const nested of fs.readdirSync(root, { withFileTypes: true })) {
+          if (nested.isDirectory()) addProfile(path.join(root, nested.name));
+        }
+      } catch (_) {}
+    }
+  } catch (_) {}
+  const seen = new Set();
+  return roots.filter(([, dir]) => {
+    const key = path.resolve(dir).toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function clientSourceRoots(clientsCsv, options = {}) {
   const home = options.homeDir || os.homedir();
   const platform = options.platform || process.platform;
@@ -204,7 +253,8 @@ function clientSourceRoots(clientsCsv, options = {}) {
   const claudeRoots = claudeSessionRoots({ homeDir: home });
   add('claude', ['claude-projects', claudeRoots.projects], ['claude-transcripts', claudeRoots.transcripts],
     ...simpleHostSourceRoots('claude', tokscaleHomeDir({ env, platform, homeDir: home }))
-      .map(([id, dir]) => [id, dir, null, true]));
+      .map(([id, dir]) => [id, dir, null, true]),
+    ...claudeDesktopMsixSourceRoots({ env, platform }));
   const codexHome = nonBlankEnvPath('CODEX_HOME', path.join(home, '.codex'));
   add(
     'codex',
@@ -563,6 +613,7 @@ module.exports = {
   canonicalWatchPath,
   canonicalWatchFilePath,
   cherryStudioTranscriptRoots,
+  claudeDesktopMsixSourceRoots,
   clientSourceRoots,
   copilotExporterWatch
 };
