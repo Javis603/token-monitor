@@ -227,6 +227,29 @@ test('a provider without its own detail still reports the HTTP errors its reques
   assert.equal(recovered.lastFailureDetail, null);
 });
 
+test('accounts failing the same way share one entry, so another source still fits', async (t) => {
+  const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, {
+    autoStart: false, autoRetry: false, cleanupGraceMs: 0, providerPhysicalBoundMs: () => 1000,
+    providerFetchers: {
+      kimi: async (_options, deps) => {
+        const shared = errorWithStatus('unavailable', 'account quota failed');
+        shared.httpStatus = 503;
+        for (let index = 0; index < 4; index += 1) deps.noteLimitFailure?.(shared, { source: 'web' });
+        const oauth = errorWithStatus('unavailable', 'oauth quota failed');
+        oauth.httpStatus = 502;
+        deps.noteLimitFailure?.(oauth, { source: 'oauth' });
+        throw shared;
+      }
+    }
+  });
+  t.after(() => runtime.stop());
+  await runtime.refresh({ provider: 'kimi' }, 'credential-save');
+  assert.deepEqual(runtime.getDiagnostics().providers[0].lastFailureDetail.failures, [
+    { source: 'web', kind: 'http', httpStatus: 503 },
+    { source: 'oauth', kind: 'http', httpStatus: 502 }
+  ]);
+});
+
 test('a missing credential is not reported as a failure detail', async (t) => {
   const runtime = createLimitsRuntime({ limitProviders: ['kimi'] }, {
     autoStart: false, autoRetry: false, cleanupGraceMs: 0, providerPhysicalBoundMs: () => 1000,

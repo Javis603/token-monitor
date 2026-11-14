@@ -218,7 +218,11 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     // then with it (the provider that caught it). Keep the entry that says more.
     const sameCause = (entry) => ['stage', 'kind', 'httpStatus', 'code']
       .every((field) => entry[field] === detail[field]);
-    const index = dispatch.failures.findIndex((entry) => sameCause(entry) && (!entry.source || !detail.source));
+    // Two accounts failing the same way are one cause; only different sources
+    // earn separate entries, unless one of them has no source at all.
+    const mergeable = (entry) => sameCause(entry)
+      && (!entry.source || !detail.source || entry.source === detail.source);
+    const index = dispatch.failures.findIndex(mergeable);
     if (index !== -1) {
       const existing = dispatch.failures[index];
       if (!existing.source && detail.source) dispatch.failures[index] = detail;
