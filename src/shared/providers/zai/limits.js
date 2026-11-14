@@ -302,6 +302,27 @@ async function fetchJson(url, key, deps = {}) {
   }, { signal: deps.signal, deadlineMs });
 }
 
+// The console-key lane and the ZCode mirror lane can both answer quota for the
+// same underlying plan window, and a partial failure on either side (say the
+// weekly bucket missing from one response) leaves the shared window appearing
+// twice in the merged list — observed live as a limits row reading
+// "Session 9% / Session 9%". Collapse identical windows (same kind, label,
+// reset instant and usage) so a lane hiccup cannot double-render a row; two
+// genuinely distinct buckets always differ in at least one of those fields.
+function dedupeZaiWindows(windows) {
+  const seen = new Set();
+  const out = [];
+  for (const window of windows || []) {
+    const identity = [window?.kind, window?.label, window?.resetsAt, window?.usedPercent]
+      .map((value) => String(value ?? '\u0000'))
+      .join('\u0000');
+    if (seen.has(identity)) continue;
+    seen.add(identity);
+    out.push(window);
+  }
+  return out;
+}
+
 // Three independent account pools feed one GLM row, in parallel: the paid
 // subscription quota (console key), the cash balance (console key), and the
 // ZCode Start/Weekend plan buckets (local ZCode login). A pool only renders
@@ -479,7 +500,7 @@ async function fetchZaiLimits(options = {}, deps = {}) {
   const [keyResult, planResult] = await Promise.allSettled([keyLane, planLane]);
 
   const lanes = [keyResult, planResult].filter((result) => result.status === 'fulfilled');
-  const windows = lanes.flatMap((result) => result.value.windows);
+  const windows = dedupeZaiWindows(lanes.flatMap((result) => result.value.windows));
   const accountKey = lanes.map((result) => result.value.accountKey).filter(Boolean)[0] || '';
   const accountLabel = lanes.map((result) => result.value.plan).filter(Boolean)[0] || '';
   // Errors affect status, never the data from a healthy request. The user's
@@ -843,6 +864,7 @@ module.exports = {
   zaiDashboardUrl,
   parseZaiUsage,
   parseZcodeStartPlanBalances,
+  dedupeZaiWindows,
   fetchZaiLimits,
   // Shared with the team provider: the same BigModel gateways answer with the
   // same HTTP 200 body envelopes, so the classification lives in one place.
