@@ -10,8 +10,9 @@
 // no such boundary, so it checks on a slow idle timer instead.
 //
 // A full collection blocks the main thread for tens of milliseconds. That is
-// why it only runs when no window has focus, and why a collection that reclaims
-// little raises the next threshold instead of repeating every tick.
+// why it only runs when no window has focus and the system has seen no input for
+// a few seconds, and why a collection that reclaims little raises the next
+// threshold instead of repeating every tick.
 //
 // Renderers keep their own committed heap and expose `gc` through the app's
 // js-flags switch. Theirs is independent of main's: the option runs on every
