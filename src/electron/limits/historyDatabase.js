@@ -273,7 +273,7 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           // A disagreement concerns the cycle it was observed in. Once the
           // established reset deadline passes, the next cycle starts unguarded,
           // and a different observer reporting that new cycle is not a conflict.
-          const cycleEnded = !!tail && previous.reset !== null && previous.reset > previous.at && previous.reset <= point.at;
+          const cycleEnded = !!tail && previous.reset !== null && previous.reset <= point.at;
           const headGuard = cycleEnded ? 0 : head?.guarded;
           const healthy = tail && !head?.failed
             && (point.coveredFrom === tail.until ? point.maxGap : point.at - tail.until) <= Math.max(tail.interval, point.interval) * 2.5;
