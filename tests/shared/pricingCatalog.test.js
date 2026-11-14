@@ -125,40 +125,43 @@ test('freshness reuses a stat-verified catalog timestamp instead of re-reading t
   const names = ['litellm', 'openrouter', 'models-dev'];
   for (const name of names) f.write(name);
   const originalReadFileSync = fs.readFileSync;
-  const originalOpenSync = fs.openSync;
-  let fullReads = 0;
-  let prefixReads = 0;
+  let reads = 0;
   fs.readFileSync = function readFileSync(file, ...args) {
-    if (String(file).includes(`${path.sep}cache${path.sep}pricing-`)) fullReads += 1;
+    if (String(file).includes(`${path.sep}cache${path.sep}pricing-`)) reads += 1;
     return originalReadFileSync.call(this, file, ...args);
   };
-  fs.openSync = function openSync(file, ...args) {
-    if (String(file).includes(`${path.sep}cache${path.sep}pricing-`)) prefixReads += 1;
-    return originalOpenSync.call(this, file, ...args);
-  };
-  t.after(() => {
-    fs.readFileSync = originalReadFileSync;
-    fs.openSync = originalOpenSync;
-  });
+  t.after(() => { fs.readFileSync = originalReadFileSync; });
 
   const options = { env: f.env };
   assert.equal(catalogsFresh(options, f.timers.now()), true);
-  assert.equal(prefixReads, 3, 'the first check reads a bounded prefix from each catalog');
-  assert.equal(fullReads, 0, 'a standard catalog never needs the full-file parse');
+  assert.equal(reads, 3, 'the first check parses each catalog once');
   assert.equal(catalogsFresh(options, f.timers.now()), true);
-  assert.equal(prefixReads, 3, 'unchanged files are answered from the cached timestamp');
+  assert.equal(reads, 3, 'unchanged files are answered from the cached timestamp');
 
   f.advance(3_600_001);
   assert.equal(catalogsFresh(options, f.timers.now()), false);
-  assert.equal(prefixReads, 3, 'expiry by time alone does not re-read the files');
+  assert.equal(reads, 3, 'expiry by time alone does not re-read the files');
 
   fs.appendFileSync(path.join(f.env.TOKSCALE_CONFIG_DIR, 'cache', 'pricing-litellm.json'), ' ');
   assert.equal(catalogsFresh(options, f.timers.now()), false);
-  assert.equal(prefixReads, 4, 'a replaced file is inspected again');
-  assert.equal(fullReads, 0, 'the prefix fallback was not needed');
+  assert.equal(reads, 4, 'a replaced file is parsed again');
 });
 
-test('an unexpected catalog layout falls back to the full parse', t => {
+test('freshness rejects a malformed catalog even when its timestamp prefix is valid', t => {
+  const cases = [
+    ['litellm', '{"timestamp":10000,"data":{'],
+    ['openrouter', `${JSON.stringify({ timestamp: 10000, data: {} })}garbage`],
+    ['models-dev', `\uFEFF${JSON.stringify({ timestamp: 10000, data: {} })}`]
+  ];
+  for (const [name, contents] of cases) {
+    const f = fixture(t);
+    for (const file of ['litellm', 'openrouter', 'models-dev']) f.write(file);
+    fs.writeFileSync(path.join(f.env.TOKSCALE_CONFIG_DIR, 'cache', `pricing-${name}.json`), contents);
+    assert.equal(catalogsFresh({ env: f.env }, f.timers.now()), false, `${name} must not be reported fresh`);
+  }
+});
+
+test('a catalog with data before its timestamp is still understood', t => {
   const f = fixture(t);
   for (const name of ['litellm', 'openrouter', 'models-dev']) {
     fs.writeFileSync(
@@ -175,5 +178,5 @@ test('an unexpected catalog layout falls back to the full parse', t => {
   t.after(() => { fs.readFileSync = originalReadFileSync; });
 
   assert.equal(catalogsFresh({ env: f.env }, f.timers.now()), true);
-  assert.equal(fullReads, 3, 'a layout without the leading timestamp is still understood');
+  assert.equal(fullReads, 3, 'the layout is parsed once per catalog');
 });
