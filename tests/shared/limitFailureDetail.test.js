@@ -155,6 +155,20 @@ test('a CLI fallback timeout is reported as a timeout, not a plain error', async
     { source: 'cli', stage: 'cli-usage', kind: 'timeout' });
 });
 
+test('a process timeout carries the diagnostic timeout code', async () => {
+  const { runProcessText } = require('../../src/shared/limits/providerHelpers');
+  const { EventEmitter } = require('node:events');
+  const neverExits = () => Object.assign(new EventEmitter(), {
+    stdout: new EventEmitter(),
+    stderr: new EventEmitter(),
+    kill() { return true; }
+  });
+  const error = await runProcessText('claude', ['--version'], { spawn: neverExits, timeoutMs: 5 })
+    .catch((thrown) => thrown);
+  assert.equal(error.status, 'unavailable');
+  assert.deepEqual(limitFailureDetail(error), { kind: 'timeout' });
+});
+
 test('a cold-start OAuth failure names its source', async (t) => {
   const runtime = createLimitsRuntime({ limitProviders: ['claude'], claudeCliFallbackEnabled: false }, {
     autoStart: false,

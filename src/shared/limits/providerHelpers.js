@@ -166,7 +166,9 @@ function runProcessText(command, args = [], options = {}) {
     };
     const timer = setTimeout(() => {
       stopChild();
-      finish(reject, errorWithStatus('unavailable', `${command} timed out`));
+      // Same `unavailable` status as any other failed probe; the code is what
+      // lets the diagnostic report name a process timeout.
+      finish(reject, requestTimeoutError(`${command} timed out`));
     }, timeoutMs);
     child.stdout?.on('data', (chunk) => { stdout += chunk.toString(); });
     child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
