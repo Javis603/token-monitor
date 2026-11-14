@@ -7408,6 +7408,19 @@ async function getDashboardHistory(options = {}) {
 // accepts before 'ready'.
 registerPluginScheme(protocol);
 
+function appIsIdleForHeapCollection() {
+  if (quitRequested || BrowserWindow.getFocusedWindow() !== null) return false;
+  // A full collection pauses main for tens of milliseconds. Require a short
+  // break in system input as well as app focus, so it cannot land in the middle
+  // of a hover, drag or animation the user is watching.
+  try {
+    if (typeof powerMonitor.getSystemIdleTime !== 'function') return true;
+    return powerMonitor.getSystemIdleTime() >= 5;
+  } catch (_) {
+    return true;
+  }
+}
+
 app.whenReady().then(() => {
   ensureSettingsLoaded();
   powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
@@ -7453,9 +7466,7 @@ app.whenReady().then(() => {
   applyMacActivationPolicy();
   createWindow();
   idleHeapCollector = createIdleHeapCollector({
-    // A full collection pauses the main thread, so leave a focused window
-    // completely alone; the timer checks again on its next pass.
-    isIdle: () => !quitRequested && BrowserWindow.getFocusedWindow() === null,
+    isIdle: appIsIdleForHeapCollection,
     collectRenderers: collectIdleRendererHeaps
   });
   idleHeapCollector.start();
