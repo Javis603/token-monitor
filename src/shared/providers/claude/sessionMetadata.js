@@ -211,10 +211,30 @@ function cleanTitle(value) {
 // Only a real prompt starts a new turn, so only it may retire the previous
 // completion — treating a tool_result as one would mark every working session
 // as finished, which is the same mistake `tool_use` guards against.
+//
+// Local slash commands (`/compact`, `/model`) run in the client and get no
+// response. Claude Code introduces each with a meta caveat, then writes the
+// command and its output as plain user records. Without a caveat the command
+// was sent to the model (a prompt command), so that record is a prompt.
+const LOCAL_COMMAND_CAVEAT = /^\s*<local-command-caveat>/;
+const LOCAL_COMMAND_OUTPUT = /^\s*<local-command-std(?:out|err)>/;
+// Stopping a turn — Esc, Stop, rejecting a tool call, or Desktop's "rewind to
+// here", which stops the running turn before it forks a new session — is
+// written as a user text record, never as an assistant stop reason. It ends
+// the turn rather than starting one. Same marker family Claude Code matches.
+const TURN_INTERRUPT = /^\s*\[Request interrupted by user[^\]]*\]/;
+
+function isTurnInterrupt(entry) {
+  if (entry?.type !== 'user' || entry.isMeta === true) return false;
+  const content = entry.message?.content;
+  return TURN_INTERRUPT.test(typeof content === 'string' ? content
+    : Array.isArray(content) && typeof content[0]?.text === 'string' ? content[0].text : '');
+}
+
 function isUserPrompt(entry) {
   if (entry?.isMeta === true || entry?.isCompactSummary === true) return false;
   const content = entry?.message?.content;
-  if (typeof content === 'string') return content.trim().length > 0;
+  if (typeof content === 'string') return content.trim().length > 0 && !LOCAL_COMMAND_OUTPUT.test(content);
   if (!Array.isArray(content)) return false;
   let asked = false;
   for (const block of content) {
@@ -261,6 +281,12 @@ function applyMetadataLine(state, line) {
   try {
     const entry = JSON.parse(line.toString('utf8'));
     applyPromptCacheEntry(state.promptCacheState, entry, 'claude');
+    // A caveat covers only the next message record: the command it introduces.
+    const localCommand = state.localCommandCaveat === true;
+    if (entry?.type === 'user' || entry?.type === 'assistant') {
+      state.localCommandCaveat = entry.isMeta === true && typeof entry.message?.content === 'string'
+        && LOCAL_COMMAND_CAVEAT.test(entry.message.content);
+    }
     if (entry?.type === 'custom-title') {
       const candidate = cleanTitle(entry.customTitle);
       if (candidate) state.customTitle = candidate;
@@ -291,7 +317,11 @@ function applyMetadataLine(state, line) {
       // response. State the same absence so an old pre-compact gauge cannot
       // survive while the compacted conversation is waiting for that response.
       clearContextUsage(state);
-    } else if (isUserPrompt(entry)) {
+    } else if (isTurnInterrupt(entry)) {
+      // Any non-`tool_use` reason reads as ended; the marker is the reason.
+      state.stopReason = 'interrupted';
+      state.userSinceStop = false;
+    } else if (!localCommand && isUserPrompt(entry)) {
       // A prompt accepted after the last completion means that completion no
       // longer describes the current turn: the old `end_turn` would otherwise
       // latch, and the session would read as finished while the new turn is
@@ -388,6 +418,7 @@ function emptyIndex() {
     aiTitle: '',
     stopReason: '',
     userSinceStop: false,
+    localCommandCaveat: false,
     trailing: Buffer.alloc(0),
     droppingLongLine: false,
     longLineHead: Buffer.alloc(0),
@@ -438,6 +469,9 @@ function applyLongLineFragments(state, lineTerminated = false) {
   state.longLineHead = Buffer.alloc(0);
   state.longLineTail = Buffer.alloc(0);
   const kind = oversizedRecordKind(head, tail);
+  // A caveat is never this large, but like any message record this consumes one.
+  const localCommand = state.localCommandCaveat === true;
+  if (kind) state.localCommandCaveat = false;
   if (kind === 'assistant') {
     // Effort only uses terminated JSONL records on this bounded path. Keep
     // prior effort at EOF rather than scanning discarded content for closure.
@@ -511,6 +545,7 @@ function applyLongLineFragments(state, lineTerminated = false) {
     state.promptCacheState.previousMessage = '';
     return;
   }
+  if (localCommand) return;
   // This has to agree with what isUserPrompt() accepts, or the same record is a
   // prompt when it fits in one line and not one when it does not. That function
   // takes a plain string content as a real prompt, so this path does too; the
@@ -524,7 +559,7 @@ function applyLongLineFragments(state, lineTerminated = false) {
   // written is matched on the bytes that have arrived.
   const asString = /^"content"\s*:\s*"([^"]*)/.exec(after);
   if (asString) {
-    if (asString[1].trim().length > 0) {
+    if (asString[1].trim().length > 0 && !LOCAL_COMMAND_OUTPUT.test(asString[1])) {
       state.userSinceStop = true;
       if (lineTerminated && !/"isSidechain"\s*:\s*true/.test(flags)) state.reasoningEffort = null;
     }
@@ -564,6 +599,7 @@ function readSessionTitle(filePath, deps = {}) {
         aiTitle: cached.aiTitle || '',
         stopReason: cached.stopReason || '',
         userSinceStop: cached.userSinceStop === true,
+        localCommandCaveat: cached.localCommandCaveat === true,
         ...(Object.hasOwn(cached, 'latestModel') ? { latestModel: cached.latestModel } : {}),
         ...(Object.hasOwn(cached, 'reasoningEffort') ? { reasoningEffort: cached.reasoningEffort } : {}),
         trailing: Buffer.isBuffer(cached.trailing) ? Buffer.from(cached.trailing) : Buffer.alloc(0),
