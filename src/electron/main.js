@@ -2290,6 +2290,8 @@ function createElectronUsageRuntime(options) {
   return latestUsageHost;
 }
 
+let macDockIconApplied = false;
+
 function applyMacActivationPolicy(state = {}) {
   if (process.platform !== 'darwin') return;
   const mainWindowVisible = state.mainWindowVisible !== undefined
@@ -2302,8 +2304,18 @@ function applyMacActivationPolicy(state = {}) {
     try { app.setActivationPolicy(mode); } catch (_) {}
   }
   if (!app.dock) return;
-  if (mode === 'accessory') app.dock.hide();
-  else app.dock.show();
+  if (mode === 'accessory') {
+    app.dock.hide();
+    return;
+  }
+  app.dock.show();
+  // The 1024px app icon is only decoded when a Dock tile can show it. Doing
+  // this unconditionally at startup cost about 32 MB of CGImage in accessory
+  // mode, where the Dock is hidden and nothing reads the artwork.
+  if (!macDockIconApplied) {
+    app.dock.setIcon(APP_ICON_PATH);
+    macDockIconApplied = true;
+  }
 }
 
 function applyMacSpaceBehavior(trayMode = Boolean(settings?.trayMode)) {
@@ -7329,7 +7341,6 @@ async function getDashboardHistory(options = {}) {
 registerPluginScheme(protocol);
 
 app.whenReady().then(() => {
-  if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
   ensureSettingsLoaded();
   powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
   powerMonitor.on('unlock-screen', () => notchController?.setLocked(false));
