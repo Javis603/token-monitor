@@ -14,9 +14,10 @@
     ['monthly', 4]
   ]);
 
-  // Where a window sorts among an account's compact readings: the shortest
-  // cycle first. Antigravity keeps its model-group order. The Notch Panel's
-  // limit columns lead with the same pair Home shows.
+  // Where a window sorts among an account's readings: the shortest cycle
+  // first. Antigravity keeps its model-group order. Home lists every window in
+  // this order; the Notch Panel leads its limit columns with the compact pick
+  // sorted the same way.
   function compactWindowRank(providerId, window) {
     if (String(providerId || '').trim().toLowerCase() === 'antigravity') return 0;
     return windowPriority.get(String(window?.kind || '').trim().toLowerCase()) ?? 10;
@@ -91,6 +92,8 @@
     return windows;
   }
 
+  // The classic layouts' pick: at most two windows per account, the shortest
+  // cycles first, with Ollama's wallet and spend reshaped onto full-width rows.
   function compactAccountWindows(providerId, windows) {
     if (providerId !== 'ollama') return windows.slice(0, 2);
     const wallet = windows.find((window) => window.metric === 'credits' && window.showMeter === false);
@@ -109,10 +112,44 @@
     ].map((window) => ({ ...window, fullWidth: true }));
   }
 
+  // Home lists every window an account reports. Ollama is the one reshaping:
+  // its monthly spend is a note on the wallet, so it folds into the wallet's
+  // tooltip instead of taking a row of its own, or closes the list without one.
+  function homeAccountWindows(providerId, windows) {
+    if (providerId !== 'ollama') return windows;
+    const wallet = windows.find((window) => window.metric === 'credits' && window.showMeter === false);
+    const spend = windows.find((window) => window.metric === 'spend' && window.showMeter === false);
+    if (!wallet) return spend ? [...windows.filter((window) => window !== spend), spend] : windows;
+    return windows
+      .filter((window) => window !== spend)
+      .map((window) => window === wallet
+        ? { ...wallet, resetDescription: '', detailEntries: [
+            ...(spend?.value ? [[spend.label, spend.value]] : []),
+            ...(wallet.resetDescription ? [{ full: wallet.resetDescription }] : [])
+          ] }
+        : window);
+  }
+
+  // Where an even burn through the window would leave the remaining share now:
+  // the time left until the reset over the window's length. Only a rolling
+  // window with a known length and a reset (not an expiry) has such a pace.
+  function limitWindowPaceRemainingPercent(window, nowMs = Date.now()) {
+    if (!window || window.showMeter === false || window.metric === 'credits') return null;
+    if (window.boundaryKind && window.boundaryKind !== 'reset') return null;
+    const minutes = finiteNumber(window.windowMinutes);
+    const resetMs = window.resetsAt ? new Date(window.resetsAt).getTime() : NaN;
+    const now = Number(nowMs);
+    if (minutes == null || minutes <= 0 || !Number.isFinite(resetMs) || !Number.isFinite(now)) return null;
+    const leftMs = resetMs - now;
+    const durationMs = minutes * 60_000;
+    if (leftMs < 0 || leftMs > durationMs) return null;
+    return clampPercent((leftMs / durationMs) * 100);
+  }
+
   // `isWindowHidden(providerId, window)` drops the rows the user unchecked on
   // the provider's usage-item list. It runs after the MiMo plan is synthesized,
   // so hiding the plan hides the placeholder built from the balance as well.
-  function homeLimitAccounts(accounts, limit = 3, { sort = 'remaining', isWindowHidden = null } = {}) {
+  function homeLimitAccounts(accounts, limit = 3, { sort = 'remaining', isWindowHidden = null, compact = false } = {}) {
     return (accounts || [])
       .map((account, index) => {
         const providerId = String(account?.providerId || '').trim().toLowerCase();
@@ -135,6 +172,8 @@
               currency: credits ? balanceDisplay.creditsCurrency(account, window) : '',
               resetsAt: window.resetsAt,
               ...(window.boundaryKind ? { boundaryKind: window.boundaryKind } : {}),
+              ...(finiteNumber(window.windowMinutes) != null ? { windowMinutes: finiteNumber(window.windowMinutes) } : {}),
+              ...(window.additional === true ? { additional: true } : {}),
               resetDescription: window.resetDescription || '',
               value: window.value || (window.metric === 'spend' && window.showMeter === false && finiteNumber(window.used) !== null
                 ? balanceDisplay.formatMoney(window.used, window.currency) : ''),
@@ -148,10 +187,17 @@
             || window.planStatus === 'expired'
             || window.value
             || (window.metric === 'credits' && (window.remaining != null || window.detail)))
-          .sort((a, b) => compactWindowRank(providerId, a) - compactWindowRank(providerId, b) || a.index - b.index);
-        const compactWindows = compactAccountWindows(providerId, windows)
+          // A provider's own windows lead; named extras (Codex's additional
+          // model quotas) follow them in the same shortest-cycle-first order.
+          .sort((a, b) => (compact ? 0 : Number(Boolean(a.additional)) - Number(Boolean(b.additional)))
+            || compactWindowRank(providerId, a) - compactWindowRank(providerId, b)
+            || a.index - b.index);
+        const shownWindows = (compact ? compactAccountWindows(providerId, windows) : homeAccountWindows(providerId, windows))
           .map(({ index: _index, ...window }) => window);
-        if (compactWindows.length === 0) return null;
+        if (shownWindows.length === 0) return null;
+        // Codex and Claude reset credits: how many full resets the account can
+        // still spend, the same count the Limits card's "N resets" line shows.
+        const resetCount = Math.max(0, Math.floor(finiteNumber(account.resetCredits?.availableCount) || 0));
         return {
           key: account.key || String(index),
           providerId: account.providerId || '',
@@ -159,8 +205,9 @@
           name: account.name || '',
           plan: account.plan || '',
           color: account.color || '',
-          lowestRemaining: Math.min(...compactWindows.map((window) => window.remainingPercent ?? 100)),
-          windows: compactWindows,
+          lowestRemaining: Math.min(...shownWindows.map((window) => window.remainingPercent ?? 100)),
+          ...(resetCount > 0 ? { resetCount } : {}),
+          windows: shownWindows,
           index
         };
       })
@@ -259,7 +306,8 @@
     accountPlan,
     accountColor,
     accountIcon,
-    isWindowHidden = null
+    isWindowHidden = null,
+    compact = false
   } = {}) {
     const enabled = new Set((enabledProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
     const hidden = new Set((hiddenProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
@@ -280,11 +328,12 @@
             : (colors[id] || colors.default || ''),
           iconId: typeof accountIcon === 'function' ? accountIcon(provider, id) : id,
           windows: provider.windows || [],
-          balance: provider.balance || null
+          balance: provider.balance || null,
+          resetCredits: provider.resetCredits || null
         });
       });
     }
-    return homeLimitAccounts(accounts, limit, { sort, isWindowHidden });
+    return homeLimitAccounts(accounts, limit, { sort, isWindowHidden, compact });
   }
 
   // True when at least one enabled, unhidden limit provider has no entry yet in
@@ -544,6 +593,7 @@
     homeActivityScrollTarget,
     homeActivityScrollRecord,
     homeActiveDaysPresentation,
+    limitWindowPaceRemainingPercent,
     remainingPercent,
     usedPercent
   };

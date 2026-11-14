@@ -181,7 +181,7 @@ test('Home session rows expose named states and keep idle marks decorative', () 
   const context = {
     document, t, els: { homePanel: { querySelector: () => null } }, state: { settings: {} },
     homeModuleShell: () => ({ module, body }), applyHomeListMark() {}, iconKindFor: () => 'codex',
-    clientColors: { codex: 'blue' }, bindHoverMarquee() {}, formatCompact: String, homeSessionAgo: () => '',
+    clientColors: { codex: 'blue' }, bindHoverMarquee() {}, formatCompact: String, homeSessionAgo: () => '', homeSessionAgoShort: () => '',
     limitWindowsView: {}, sessionRowsApi: require('../../src/electron/renderer/sessionRows'),
     window: {
       TokenMonitorSessionLive: require('../../src/shared/sessionLive'),
@@ -204,6 +204,48 @@ test('Home session rows expose named states and keep idle marks decorative', () 
   assert.equal(marks[3].getAttribute('aria-hidden'), 'true');
   assert.equal(marks[3].getAttribute('role'), null);
   assert.equal(marks[3].getAttribute('aria-label'), null);
+});
+
+test('Home sessions lead with live work, label both groups and keep finished ones to one line', () => {
+  const body = new Element();
+  const module = new Element();
+  module.append(body);
+  const context = {
+    document, t, els: { homePanel: { querySelector: () => null } }, state: { settings: {} },
+    homeModuleShell: () => ({ module, body }), applyHomeListMark() {}, iconKindFor: () => 'codex',
+    clientColors: { codex: 'blue' }, bindHoverMarquee() {}, formatCompact: String, homeSessionAgo: () => '', homeSessionAgoShort: () => '',
+    limitWindowsView: {}, sessionRowsApi: require('../../src/electron/renderer/sessionRows'),
+    window: {
+      TokenMonitorSessionLive: require('../../src/shared/sessionLive'),
+      TokenMonitorEdgeDockPresentation: {
+        sessionActivityState: row => row.activityState, runningSessionSummary: () => ({ count: 1 })
+      }
+    }
+  };
+  vm.runInNewContext(section(app, 'renderHomeSessionModule', 'renderHomeDeviceModule'), context);
+  const render = (states) => {
+    body.children = [];
+    context.renderHomeSessionModule(states.map(activityState => ({ key: activityState, client: 'codex', activityState })));
+    return body.children;
+  };
+  const rows = render(['idle', 'running', 'ended', 'waiting']);
+  assert.deepEqual(rows.map(row => row.dataset.key), ['running', 'waiting', 'idle', 'ended'], 'live sessions lead, each group keeps its order');
+  assert.deepEqual(rows.map(row => row.dataset.groupLabel), [t('session.running'), undefined, t('session.recent'), undefined]);
+  for (const row of rows.slice(0, 2)) {
+    assert.ok(!row.className.includes('is-compact'));
+    assert.ok(row.children.some(child => child.className === 'home-session-meta'), 'live rows keep their details');
+  }
+  for (const row of rows.slice(2)) {
+    assert.ok(row.className.includes('is-compact'));
+    assert.equal(row.children.some(child => child.className === 'home-session-meta'), false);
+    assert.equal(row.children.at(-2).className, 'home-list-aux home-session-ago', 'one line of title, age and amount');
+    assert.equal(row.children.at(-1).className, 'home-list-value', 'the amount stays last, aligned with live rows');
+  }
+  assert.ok(rows[2].classes.has('starts-recent'));
+  // A single group needs no headings.
+  for (const states of [['running', 'waiting'], ['idle', 'ended']]) {
+    assert.deepEqual(render(states).map(row => row.dataset.groupLabel), [undefined, undefined]);
+  }
 });
 
 test('subscription cost descriptions stay accessible without adding visible disclaimer text', () => {

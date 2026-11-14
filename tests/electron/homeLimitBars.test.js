@@ -29,6 +29,7 @@ function resolveHomeRows(providers, settings = {}) {
   const end = app.indexOf('function homeLimitWindowLabel(', start);
   return vm.runInNewContext(`${app.slice(start, end)}; homeLimitRows();`, {
     state: { stats: { limits: { providers } }, settings: { homeLimitAccountCount: 20, ...settings } },
+    homeModulePreferencesApi: preferences,
     enabledLimitProviderSet: () => new Set(ids),
     hiddenHomeLimitProviderSet: () => new Set(),
     desktopLimitProviders: () => ids.map(id => ({ id, label: id })),
@@ -103,7 +104,7 @@ test('Home grouped legacy OpenCode profiles retain explicit plan labels', () => 
     assert.equal(rows[0].name, 'Work profile');
     assert.equal(rows[0].plan, planLabel.trim());
     assert.equal(rows[1].plan, '');
-    for (const homeLimitDisplayMode of ['text', 'bars']) {
+    for (const homeLimitDisplayMode of ['rows']) {
       const metric = renderHomeWindow(rows[0].windows[0], { homeLimitDisplayMode }, rows[0].plan);
       assert.equal(metric.accountHead.children[2].textContent, planLabel.trim());
     }
@@ -127,7 +128,7 @@ test('Home legacy OpenCode groups retain recovery status for non-stale errors', 
         ]);
         const plan = stale ? planLabel : recovery;
         assert.equal(rows[0].plan, plan);
-        for (const homeLimitDisplayMode of ['text', 'bars']) {
+        for (const homeLimitDisplayMode of ['rows']) {
           const head = renderHomeWindow(windows[0], { homeLimitDisplayMode }, rows[0].plan).accountHead;
           if (plan) assert.equal(head.children[2].textContent, plan);
           else assert.equal(head.children.length, 2);
@@ -139,7 +140,7 @@ test('Home legacy OpenCode groups retain recovery status for non-stale errors', 
 
 test('Home Cursor plans never expose email identities with masking enabled or disabled', () => {
   const window = { kind: 'monthly', remainingPercent: 40 };
-  for (const homeLimitDisplayMode of ['text', 'bars']) {
+  for (const homeLimitDisplayMode of ['rows']) {
     for (const maskLimitAccountEmails of [true, false]) {
       const settings = { homeLimitDisplayMode, maskLimitAccountEmails };
       const rows = resolveHomeRows(['alice@example.com', 'bob@example.com'].map((email) => ({
@@ -180,7 +181,7 @@ test('Home OpenRouter credits-only success does not repeat grouped profile names
   }
   const rows = resolveHomeRows(providers);
   assert.deepEqual(rows.map((row) => [row.name, row.plan]), [['Work', ''], ['Personal', '']]);
-  for (const homeLimitDisplayMode of ['text', 'bars']) {
+  for (const homeLimitDisplayMode of ['rows']) {
     const head = renderHomeWindow(rows[0].windows[0], { homeLimitDisplayMode }, rows[0].plan).accountHead;
     assert.equal(head.children.length, 2);
   }
@@ -189,7 +190,7 @@ test('Home OpenRouter credits-only success does not repeat grouped profile names
   assert.equal(solo.plan, 'Work');
 });
 
-function renderHomeWindows(windows, settings = {}, plan = '', providerId = '', locale = 'en') {
+function renderHomeWindows(windows, settings = {}, plan = '', providerId = '', locale = 'en', nowMs = Date.parse('2026-10-06T08:00:00Z'), rowExtra = {}) {
   class Element {
     constructor() {
       this.dataset = {};
@@ -199,11 +200,17 @@ function renderHomeWindows(windows, settings = {}, plan = '', providerId = '', l
       this.classList = {
         values: new Set(),
         add(name) { this.values.add(name); },
+        remove(name) { this.values.delete(name); },
+        toggle(name, on) { if (on) this.values.add(name); else this.values.delete(name); },
         contains(name) { return this.values.has(name); }
       };
+      this.listeners = {};
     }
     append(...children) { this.children.push(...children); }
     setAttribute(name, value) { this.attributes[name] = value; }
+    removeAttribute(name) { delete this.attributes[name]; if (name === 'tabindex') delete this.tabIndex; }
+    addEventListener(name, handler) { (this.listeners[name] ||= []).push(handler); }
+    querySelector() { return null; }
   }
   const document = { createElement: () => new Element() };
   const module = new Element();
@@ -216,7 +223,7 @@ function renderHomeWindows(windows, settings = {}, plan = '', providerId = '', l
     state: { settings },
     homeModulePreferencesApi: preferences,
     homeModuleShell: () => ({ module, body }),
-    homeLimitRows: () => [{ name: providerId || 'Claude', providerId, plan, color: '#d97757', windows }],
+    homeLimitRows: () => [{ name: providerId || 'Claude', providerId, plan, color: '#d97757', windows, ...rowExtra }],
     applyHomeListMark() {},
     iconKindFor: () => 'claude',
     formatHomeLimitWindowValue: () => 'value',
@@ -230,20 +237,36 @@ function renderHomeWindows(windows, settings = {}, plan = '', providerId = '', l
     }),
     t: (key, params) => require('../../src/electron/renderer/i18n').translate(locale, key, params),
     formatLimitBoundary: () => 'Reset 4h',
-    limitProviderPresentationApi: require('../../src/electron/renderer/limits/providerPresentation')
+    formatPercent: (value) => `${value}%`,
+    homeOverviewApi: require('../../src/electron/renderer/homeOverview'),
+    limitProviderPresentationApi: require('../../src/electron/renderer/limits/providerPresentation'),
+    Date: { now: () => nowMs }
   };
   vm.runInNewContext(`${app.slice(start, end)}; renderHomeLimitModule();`, context);
   return body.children[0].children[1].children.map((metric) => {
     metric.accountHead = body.children[0].children[0];
+    metric.legend = body.children.find((child) => child.className === 'home-limit-pace-legend') || null;
     return metric;
   });
+}
+
+// A Home window row: label, optional meter track, reading, reset — in order.
+function homeRowParts(metric) {
+  const byClass = (name) => metric.children.find((child) => String(child.className).split(' ').includes(name)) || null;
+  return {
+    label: metric.children[0],
+    track: byClass('home-limit-track'),
+    reading: byClass('home-limit-window-value') || byClass('home-list-value'),
+    value: byClass('home-limit-window-value')?.children[0] || byClass('home-list-value'),
+    reset: byClass('home-limit-reset')
+  };
 }
 
 function renderHomeWindow(window, settings = {}, plan = '') {
   return renderHomeWindows([window], settings, plan)[0];
 }
 
-test('Home Antigravity uses both periods after a model group is removed or hidden', () => {
+test('Home lists every Antigravity model-group window under its group and period', () => {
   const { limitUsageItemId } = require('../../src/shared/limits/usageItems');
   const windows = [
     { kind: 'session', label: 'Gemini 5-hour', usedPercent: 25, resetDescription: '4h' },
@@ -252,27 +275,36 @@ test('Home Antigravity uses both periods after a model group is removed or hidde
     { kind: 'weekly', label: 'Claude/GPT weekly', usedPercent: 30 }
   ];
   const hiddenGroup = windows.slice(2).map((window) => limitUsageItemId(window, 'antigravity'));
-  for (const homeLimitDisplayMode of ['text', 'bars']) {
-    for (const locale of Object.keys(require('../../src/electron/renderer/i18n').MESSAGES)) {
+  const { translate, MESSAGES } = require('../../src/electron/renderer/i18n');
+  for (const homeLimitDisplayMode of ['rows']) {
+    for (const locale of Object.keys(MESSAGES)) {
       for (const hidden of [false, true]) {
         const settings = { homeLimitDisplayMode, limitProviderHiddenItems: hidden ? { antigravity: hiddenGroup } : {} };
         const rows = resolveHomeRows([{ provider: 'antigravity', status: 'ok', windows: hidden ? windows : windows.slice(0, 2) }], settings);
         assert.deepEqual(rows[0].windows.map((window) => window.label), ['Gemini 5-hour', 'Gemini weekly']);
         const metrics = renderHomeWindows(rows[0].windows, settings, '', 'antigravity', locale);
-        assert.deepEqual(metrics.map((metric) => metric.children[0].children[0].textContent), ['Gemini 5-hour', 'Gemini Weekly']);
-        const { translate } = require('../../src/electron/renderer/i18n');
-        assert.deepEqual(metrics.map((metric) => metric.children.at(-1).textContent), [
+        assert.deepEqual(metrics.map((metric) => homeRowParts(metric).label.textContent), ['Gemini 5-hour', 'Gemini Weekly']);
+        assert.deepEqual(metrics.map((metric) => homeRowParts(metric).reset.textContent), [
           translate(locale, 'home.reset', { value: '4h' }),
           translate(locale, 'home.reset', { value: '6d' })
         ], 'reset text stays translated without repeating the period');
       }
     }
   }
-  const dualRows = resolveHomeRows([{ provider: 'antigravity', status: 'ok', windows }]);
-  assert.deepEqual(dualRows[0].windows.map((window) => window.label), ['Gemini weekly', 'Claude/GPT 5-hour']);
-  const dualMetrics = renderHomeWindows(dualRows[0].windows, {}, '', 'antigravity');
-  assert.equal(dualMetrics[0].children[0].children[0].textContent, 'Gemini');
-  assert.equal(dualMetrics[0].children.at(-1).textContent, 'Weekly · Reset 6d');
+  const allRows = resolveHomeRows([{ provider: 'antigravity', status: 'ok', windows }]);
+  assert.deepEqual(allRows[0].windows.map((window) => window.label), windows.map((window) => window.label));
+  const allMetrics = renderHomeWindows(allRows[0].windows, {}, '', 'antigravity');
+  assert.deepEqual(allMetrics.map((metric) => homeRowParts(metric).label.textContent),
+    ['Gemini 5-hour', 'Gemini Weekly', 'Claude/GPT 5-hour', 'Claude/GPT Weekly']);
+  assert.deepEqual(allMetrics.map((metric) => homeRowParts(metric).reset?.textContent ?? null), ['Reset 4h', 'Reset 6d', null, null],
+    'a window without reset information draws no reset cell');
+  const legacy = resolveHomeRows([{ provider: 'antigravity', status: 'ok', windows: [
+    { kind: 'weekly', label: 'Gemini Pro', usedPercent: 10 },
+    { kind: 'weekly', label: 'Claude', usedPercent: 20 },
+    { kind: 'weekly', label: 'Gemini Flash', usedPercent: null, showMeter: false }
+  ] }]);
+  assert.deepEqual(renderHomeWindows(legacy[0].windows, {}, '', 'antigravity').map((metric) => homeRowParts(metric).label.textContent),
+    ['Gemini Pro', 'Claude'], 'legacy pools keep their own names and an unmeasured pool stays hidden');
 });
 
 test('Home Antigravity preserves lone-window labels and omits missing or hidden usage', () => {
@@ -282,7 +314,7 @@ test('Home Antigravity preserves lone-window labels and omits missing or hidden 
   for (const window of [session, weekly]) {
     const other = window === session ? weekly : session;
     const missing = { ...other, remainingPercent: null, usedPercent: null };
-    for (const homeLimitDisplayMode of ['text', 'bars']) {
+    for (const homeLimitDisplayMode of ['rows']) {
       for (const [windows, settings] of [
         [[window], {}],
         [[missing, window], {}],
@@ -291,8 +323,8 @@ test('Home Antigravity preserves lone-window labels and omits missing or hidden 
         const rows = resolveHomeRows([{ provider: 'antigravity', status: 'ok', windows }], settings);
         assert.equal(rows[0].windows.length, 1);
         const metrics = renderHomeWindows(rows[0].windows, { ...settings, homeLimitDisplayMode }, '', 'antigravity');
-        assert.equal(metrics[0].children[0].children[0].textContent, window === session ? 'Gemini 5-hour' : 'Gemini Weekly');
-        assert.equal(metrics[0].children.length, homeLimitDisplayMode === 'bars' ? 2 : 1, 'period does not depend on reset data');
+        assert.equal(homeRowParts(metrics[0]).label.textContent, window === session ? 'Gemini 5-hour' : 'Gemini Weekly', 'period does not depend on reset data');
+        assert.ok(homeRowParts(metrics[0]).track);
       }
     }
   }
@@ -304,7 +336,7 @@ test('Home Antigravity preserves lone-window labels and omits missing or hidden 
 });
 
 test('Home shows the plan on the account heading in both modes and omits unknown plans', () => {
-  for (const homeLimitDisplayMode of ['text', 'bars']) {
+  for (const homeLimitDisplayMode of ['rows']) {
     const known = renderHomeWindow({ remainingPercent: 88 }, { homeLimitDisplayMode }, 'Pro 200');
     assert.equal(known.accountHead.children[2].className, 'home-limit-plan');
     assert.equal(known.accountHead.children[2].textContent, 'Pro 200');
@@ -314,32 +346,139 @@ test('Home shows the plan on the account heading in both modes and omits unknown
   }
 });
 
-test('Home low-limit highlighting is independent of display mode and remains opt-in', () => {
-  for (const homeLimitDisplayMode of ['text', 'bars']) {
-    for (const [remainingPercent, expected] of [[50, ''], [49, 'home-limit-value-low'], [20, 'home-limit-value-low'], [19, 'home-limit-value-critical'], [0, 'home-limit-value-critical']]) {
-      for (const showHomeLimitBars of [true, false]) {
-        const metric = renderHomeWindow({ remainingPercent }, { homeLimitDisplayMode, showHomeLimitBars });
-        const value = metric.children[0].children[1];
-        for (const className of ['home-limit-value-low', 'home-limit-value-critical']) {
-          assert.equal(value.classList.contains(className), showHomeLimitBars && expected === className);
-        }
+test('Home low-limit highlighting is opt-in with vendor colours and in monochrome', () => {
+  // Vendor colours: the opt-in highlight, critical under 20%, low under 50%.
+  for (const [remainingPercent, expected] of [[50, ''], [49, 'home-limit-value-low'], [20, 'home-limit-value-low'], [19, 'home-limit-value-critical'], [0, 'home-limit-value-critical']]) {
+    for (const showHomeLimitBars of [true, false]) {
+      const metric = renderHomeWindow({ remainingPercent }, { homeLimitDisplayMode: 'rows', homeVendorColors: true, showHomeLimitBars });
+      const { value } = homeRowParts(metric);
+      for (const className of ['home-limit-value-low', 'home-limit-value-critical']) {
+        assert.equal(value.classList.contains(className), showHomeLimitBars && expected === className);
       }
+      assert.equal(metric.classList.contains('is-exhausted'), showHomeLimitBars && remainingPercent === 0, 'an exhausted reset is marked only with highlighting on');
     }
+  }
+  // Monochrome (the default): with the opt-in, red only when exhausted and amber under 20%.
+  for (const [remainingPercent, critical, low] of [[50, false, false], [20, false, false], [19, false, true], [1, false, true], [0, true, false]]) {
+    for (const showHomeLimitBars of [true, false]) {
+      const metric = renderHomeWindow({ remainingPercent }, { homeLimitDisplayMode: 'rows', showHomeLimitBars });
+      const { value, track } = homeRowParts(metric);
+      assert.equal(value.classList.contains('home-limit-value-critical'), showHomeLimitBars && critical, `${remainingPercent}% critical`);
+      assert.equal(value.classList.contains('home-limit-value-low'), showHomeLimitBars && low, `${remainingPercent}% low`);
+      assert.equal(metric.classList.contains('is-exhausted'), showHomeLimitBars && critical);
+      assert.equal(metric.classList.contains('is-low'), showHomeLimitBars && low);
+      assert.equal(value.style['--home-limit-accent'], undefined, 'monochrome never tints a reading with the vendor colour');
+      assert.ok(track.children[0].classList.contains('home-limit-meter-mono'));
+    }
+  }
+  const vendor = renderHomeWindow({ remainingPercent: 40 }, { homeLimitDisplayMode: 'rows', homeVendorColors: true });
+  assert.ok(!homeRowParts(vendor).track.children[0].classList.contains('home-limit-meter-mono'));
+});
+
+test('Home rows put each window on one row of label, reset, meter and reading; text and bars keep the classic layouts', () => {
+  const window = { remainingPercent: 88, showMeter: true, resetsAt: '2026-10-06T12:00:00Z' };
+  for (const mode of [undefined, 'invalid', 'default']) {
+    assert.ok(homeRowParts(renderHomeWindow(window, { homeLimitDisplayMode: mode })).track, 'rows are the default layout');
+  }
+  // The classic layouts: the reading beside the label, then the meter (bars only), then the reset.
+  const text = renderHomeWindow(window, { homeLimitDisplayMode: 'text' });
+  assert.deepEqual(text.children.map((child) => child.className), ['home-limit-window-line', 'home-limit-reset']);
+  assert.equal(text.children[1].textContent, 'Reset 4h');
+  const bars = renderHomeWindow(window, { homeLimitDisplayMode: 'bars' });
+  assert.deepEqual(bars.children.map((child) => child.className), ['home-limit-window-line', 'limit-meter', 'home-limit-reset']);
+  assert.deepEqual(bars.children[0].children.map((child) => child.className), ['home-limit-window-label', 'home-list-value']);
+  const metric = renderHomeWindow(window, { homeLimitDisplayMode: 'rows' });
+  assert.deepEqual(metric.children.map((child) => child.className), ['home-limit-window-label', 'home-limit-reset', 'home-limit-track', 'home-list-value'],
+    'the reset sits beside the name');
+  const meter = metric.children[2].children[0];
+  assert.equal(meter.children[0].style['--bar-scale'], '0.88');
+  assert.equal(meter.children[0].style.background, '#d97757');
+  assert.equal(meter.attributes['aria-hidden'], 'true');
+  assert.equal(metric.children[2].children.length, 1, 'no pace tick without a window length');
+  assert.equal(metric.children[1].textContent, '4h 0m', 'the reset is a countdown');
+  assert.equal(metric.children[1].attributes['aria-label'], 'Reset 4h', 'the full boundary stays the accessible name');
+  assert.equal(metric.legend, null, 'Home never adds a standing pace caption');
+  assert.equal(homeRowParts(metric).track.attributes['aria-description'], undefined, 'no pace description without a tick');
+  const expiry = renderHomeWindow({ ...window, boundaryKind: 'expiry' }, { homeLimitDisplayMode: 'rows' });
+  assert.equal(homeRowParts(expiry).reset.textContent, '4h 0m', 'an expiry counts down like a reset on Home');
+  assert.equal(homeRowParts(expiry).reset.attributes['aria-label'], 'Reset 4h', 'its own wording stays the accessible name');
+});
+
+test('Home pace explanation is translated in every locale', () => {
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  for (const [locale, messages] of Object.entries(MESSAGES)) {
+    for (const key of ['home.limitPace.remaining', 'home.limitPace.used']) assert.ok(messages[key], `${locale}: ${key}`);
   }
 });
 
-test('Home text and bar modes preserve text and reset information', () => {
-  const window = { remainingPercent: 88, showMeter: true, resetsAt: '2026-10-06T12:00:00Z' };
-  for (const mode of [undefined, 'text', 'invalid']) {
-    const metric = renderHomeWindow(window, { homeLimitDisplayMode: mode });
-    assert.deepEqual(metric.children.map((child) => child.className), ['home-limit-window-line', 'home-limit-reset']);
+test('Home bars mark where an even pace through the window would be', () => {
+  const nowMs = Date.parse('2026-10-06T08:00:00Z');
+  const fiveHour = { kind: 'session', remainingPercent: 10, windowMinutes: 300, resetsAt: '2026-10-06T09:00:00Z' };
+  const { translate } = require('../../src/electron/renderer/i18n');
+  for (const [showLimitUsed, position, key] of [
+    [false, '20%', 'home.limitPace.remaining'],
+    [true, '80%', 'home.limitPace.used']
+  ]) {
+    const metric = renderHomeWindows([fiveHour], { homeLimitDisplayMode: 'rows', showLimitUsed }, '', '', 'en', nowMs)[0];
+    const tick = homeRowParts(metric).track.children[1];
+    assert.equal(tick.className, 'home-limit-pace');
+    assert.equal(tick.style['--home-limit-pace'], position);
+    assert.equal(tick.attributes['aria-hidden'], 'true');
+    assert.equal(homeRowParts(metric).track.attributes['aria-description'], translate('en', key), 'the bar describes the tick to assistive tech');
+    assert.equal(metric.legend, null, 'no standing caption under the card');
   }
-  const metric = renderHomeWindow(window, { homeLimitDisplayMode: 'bars' });
-  assert.deepEqual(metric.children.map((child) => child.className), ['home-limit-window-line', 'limit-meter', 'home-limit-reset']);
-  assert.equal(metric.children[1].children[0].style['--bar-scale'], '0.88');
-  assert.equal(metric.children[1].children[0].style.background, '#d97757');
-  assert.equal(metric.children[1].attributes['aria-hidden'], 'true');
-  assert.equal(metric.children[2].textContent, 'Reset 4h');
+  for (const [window, settings] of [
+    [fiveHour, { homeLimitDisplayMode: 'text' }],
+    [fiveHour, { homeLimitDisplayMode: 'bars' }],
+    [{ ...fiveHour, boundaryKind: 'expiry' }, { homeLimitDisplayMode: 'rows' }],
+    [{ ...fiveHour, windowMinutes: undefined }, { homeLimitDisplayMode: 'rows' }],
+    [{ ...fiveHour, metric: 'credits', remaining: 4 }, { homeLimitDisplayMode: 'rows' }],
+    [{ ...fiveHour, value: '$4' }, { homeLimitDisplayMode: 'rows' }]
+  ]) {
+    const metric = renderHomeWindows([window], settings, '', '', 'en', nowMs)[0];
+    const { track } = homeRowParts(metric);
+    assert.ok(!track || track.children.length === 1, 'no tick without a meter, a rolling length, or for fixed amounts');
+    assert.equal(metric.legend, null);
+  }
+});
+
+test('Home shows spare Codex and Claude resets beside the account name', () => {
+  const windows = [{ kind: 'weekly', remainingPercent: 40 }];
+  for (const provider of ['codex', 'claude']) {
+    const record = { provider, status: 'ok', windows, resetCredits: { availableCount: 2, nextExpiresAt: null } };
+    assert.equal(resolveHomeRows([record])[0].resetCount, 2);
+    assert.equal(resolveHomeRows([{ ...record, resetCredits: { availableCount: 0, nextExpiresAt: null } }])[0].resetCount, undefined);
+    assert.equal(resolveHomeRows([record], { limitProviderHiddenItems: { [provider]: ['resets'] } })[0].resetCount, undefined,
+      'hiding the Resets usage item hides the count on Home too');
+  }
+  const { translate } = require('../../src/electron/renderer/i18n');
+  for (const homeLimitDisplayMode of ['rows']) {
+    const head = renderHomeWindows(windows, { homeLimitDisplayMode }, 'Max', 'claude', 'zh-TW', undefined, { resetCount: 2 })[0].accountHead;
+    assert.equal(head.children[1].className, 'home-limit-account-title');
+    const [name, resets] = head.children[1].children;
+    assert.equal(name.textContent, 'claude');
+    assert.equal(resets.className, 'home-limit-resets');
+    assert.equal(resets.attributes['aria-label'], translate('zh-TW', 'home.limitResets', { count: 2 }), 'the full phrase stays the accessible name');
+    assert.deepEqual(resets.children.map((child) => child.className), ['home-limit-resets-icon', 'home-limit-resets-count']);
+    assert.equal(resets.children[1].textContent, '2');
+    assert.equal(resets.children[0].attributes['aria-hidden'], 'true');
+    assert.equal(head.children[2].className, 'home-limit-plan', 'the plan keeps its place');
+  }
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  for (const [locale, messages] of Object.entries(MESSAGES)) assert.match(messages['home.limitResets'], /\{count\}/, locale);
+});
+
+test('Home dims untouched windows and names a second window of the same period', () => {
+  const metrics = renderHomeWindows([
+    { kind: 'weekly', label: '', remainingPercent: 100 },
+    { kind: 'weekly', label: 'Fable', remainingPercent: 60 },
+    { kind: 'session', label: '5-hour', remainingPercent: 40 },
+    { kind: 'billing', metric: 'credits', remaining: 4, remainingPercent: 100 }
+  ], { homeLimitDisplayMode: 'rows' }, '', 'claude');
+  assert.deepEqual(metrics.map((metric) => homeRowParts(metric).label.textContent), ['Weekly', 'Fable Weekly', 'Session', 'Billing']);
+  assert.deepEqual(metrics.map((metric) => metric.classList.contains('is-untouched')), [true, false, false, false]);
+  assert.equal(renderHomeWindows([{ kind: 'weekly', label: 'Fable', remainingPercent: 60 }], {}, '', 'claude')
+    .map((metric) => homeRowParts(metric).label.textContent)[0], 'Weekly', 'a lone window keeps the plain period');
 });
 
 test('Home meters flip percentage usage but retain remaining money and fixed values', () => {
@@ -350,8 +489,8 @@ test('Home meters flip percentage usage but retain remaining money and fixed val
     [{ remainingPercent: 0 }, '1'],
     [{ remainingPercent: 100 }, '0']
   ]) {
-    const metric = renderHomeWindow(window, { homeLimitDisplayMode: 'bars', showLimitUsed: true });
-    assert.equal(metric.children[1].children[0].style['--bar-scale'], expected);
+    const metric = renderHomeWindow(window, { homeLimitDisplayMode: 'rows', showLimitUsed: true });
+    assert.equal(homeRowParts(metric).track.children[0].children[0].style['--bar-scale'], expected);
   }
 });
 
@@ -363,30 +502,48 @@ test('Home bars do not invent percentages for unknown, unlimited or non-meter wi
     { remainingPercent: null, planStatus: 'expired', showMeter: false },
     { remainingPercent: 80, showMeter: false }
   ]) {
-    assert.equal(renderHomeWindow(window, { homeLimitDisplayMode: 'bars' }).children.length, 1);
+    assert.equal(homeRowParts(renderHomeWindow(window, { homeLimitDisplayMode: 'rows' })).track, null);
   }
-  const empty = renderHomeWindow({ remainingPercent: 0 }, { homeLimitDisplayMode: 'bars' });
-  assert.equal(empty.children[1].children[0].style['--bar-scale'], '0');
+  const empty = renderHomeWindow({ remainingPercent: 0 }, { homeLimitDisplayMode: 'rows' });
+  assert.equal(homeRowParts(empty).track.children[0].children[0].style['--bar-scale'], '0');
 });
 
 test('Home display mode persists separately from low-limit highlighting and is translated', () => {
   const main = read('src/electron/main.js');
   const app = read('src/electron/renderer/app.js');
-  assert.match(main, /homeLimitDisplayMode: 'text'/);
-  assert.match(main, /merged\.homeLimitDisplayMode = normalizeHomeLimitDisplayMode\(merged\.homeLimitDisplayMode\)/);
+  assert.match(main, /homeLimitDisplayMode: 'default',/);
+  assert.match(main, /merged\.homeLimitDisplayMode = homeLimitDisplay\.mode;/);
   assert.match(main, /homeLimitDisplayMode: normalizeHomeLimitDisplayMode\(patch\.homeLimitDisplayMode \?\? settings\.homeLimitDisplayMode\)/);
   assert.match(app, /saveSettings\(\{ homeLimitDisplayMode: displayInput\.value \}\)/);
-  assert.equal(preferences.normalizeHomeLimitDisplayMode('bars'), 'bars');
-  assert.equal(preferences.normalizeHomeLimitDisplayMode('invalid'), 'text');
+  // The select stores `default` itself, so picking it keeps following the recommendation.
+  assert.match(app, /displayInput\.value = homeModulePreferencesApi\.normalizeHomeLimitDisplayMode\(/);
+  assert.match(app, /for \(const mode of \['default', 'text', 'bars'\]\)/);
+  for (const mode of ['rows', 'text', 'bars', 'default']) assert.equal(preferences.normalizeHomeLimitDisplayMode(mode), mode);
+  assert.equal(preferences.normalizeHomeLimitDisplayMode('invalid'), 'default');
+  assert.equal(preferences.normalizeHomeLimitDisplayMode(undefined), 'default');
+  // `default` shows the recommended layout; a picked layout is shown as picked.
+  assert.equal(preferences.resolveHomeLimitDisplayMode('default'), 'rows');
+  assert.equal(preferences.resolveHomeLimitDisplayMode(undefined), 'rows');
+  assert.equal(preferences.resolveHomeLimitDisplayMode('rows'), 'rows');
+  assert.equal(preferences.resolveHomeLimitDisplayMode('text'), 'text');
+  assert.equal(preferences.resolveHomeLimitDisplayMode('bars'), 'bars');
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
   for (const messages of Object.values(MESSAGES)) {
-    for (const suffix of ['', '.text', '.bars']) assert.ok(messages[`settings.home.limitDisplayMode${suffix}`]);
+    for (const suffix of ['', '.default', '.text', '.bars']) assert.ok(messages[`settings.home.limitDisplayMode${suffix}`]);
   }
 });
 
-test('Home low-limit indicators are opt-in and persist through the settings boundary', () => {
+test('Home low-limit indicators and vendor colours persist through the settings boundary', () => {
   const main = read('src/electron/main.js');
   const app = read('src/electron/renderer/app.js');
+
+  assert.match(main, /homeVendorColors:\s*false/);
+  assert.match(main, /merged\.homeVendorColors = parseBoolean\(merged\.homeVendorColors, false\)/);
+  assert.match(main, /homeVendorColors:\s*parseBoolean\(patch\.homeVendorColors \?\? settings\.homeVendorColors, false\)/);
+  assert.match(app, /saveSettings\(\{ homeVendorColors: event\.target\.checked \}\)/);
+  assert.match(read('src/electron/renderer/index.html'), /id="homeVendorColorsInput"/);
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  for (const messages of Object.values(MESSAGES)) assert.ok(messages['settings.home.vendorColors']);
 
   assert.match(main, /showHomeLimitBars:\s*false/);
   assert.match(main, /merged\.showHomeLimitBars = parseBoolean\(merged\.showHomeLimitBars, false\)/);
@@ -403,17 +560,17 @@ test('Home highlights only low and critical remaining limits', () => {
   const view = read('src/electron/renderer/limits/windowsView.js');
   assert.match(view, /function limitMeterNode\(color, percent, tone = 1\)/);
   assert.match(view, /const meter = limitMeterNode\(color, fillPercent, tone\)/);
-  assert.match(app, /state\.settings\?\.showHomeLimitBars === true && window\.remainingPercent != null/);
-  assert.match(app, /remainingPercent < 20/);
+  assert.match(app, /const highlightLow = state\.settings\?\.showHomeLimitBars === true;/);
+  assert.match(app, /if \(highlightLow && remainingPercent != null\)/);
+  assert.match(app, /clamped < 20/);
   assert.match(app, /value\.classList\.add\('home-limit-value-critical'\)/);
-  assert.match(app, /remainingPercent < 50/);
+  assert.match(app, /clamped < 50/);
   assert.match(app, /value\.classList\.add\('home-limit-value-low'\)/);
-  assert.match(app, /line\.append\(label, value\)/);
   assert.doesNotMatch(app, /'home-limit-meter'/);
   assert.match(css, /\.home-limit-value-low\s*\{[^}]*--home-limit-accent/s);
   assert.match(css, /\.home-limit-value-critical\s*\{[^}]*color:\s*var\(--red\)/s);
   assert.doesNotMatch(css, /\.home-limit-value-critical\s*\{[^}]*display:\s*inline-flex/s);
-  assert.match(css, /\.home-limit-value-critical::before\s*\{[^}]*width:\s*4px;[^}]*height:\s*4px;/s);
+  assert.doesNotMatch(css, /\.home-limit-value-critical::before/, 'colour alone marks a critical reading; no dot before it');
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.limit-meter-fill,[\s\S]*?\.tab-indicator\s*\{[^}]*transition:\s*none;/);
 });
 
@@ -520,7 +677,7 @@ test('Home uses Cursor monthly period labels while preserving other billing labe
   ]) {
     const window = Object.freeze({ kind, label: storedLabel, remainingPercent: 80 });
     const row = renderHomeWindows([window], {}, '', providerId)[0];
-    assert.equal(row.children[0].children[0].textContent, expected);
+    assert.equal(homeRowParts(row).label.textContent, expected);
     assert.equal(window.label, storedLabel);
   }
 });
@@ -531,7 +688,7 @@ test('Home keeps Cursor period labels localized in Spanish and Portuguese', () =
     for (const [kind, expected] of [['billing', monthly], ['weekly', weekly]]) {
       const window = Object.freeze({ kind, label: 'Included usage', remainingPercent: 80 });
       const row = renderHomeWindows([window], {}, '', 'cursor', locale)[0];
-      assert.equal(row.children[0].children[0].textContent, expected, `${locale}: ${kind}`);
+      assert.equal(homeRowParts(row).label.textContent, expected, `${locale}: ${kind}`);
       assert.equal(window.label, 'Included usage');
     }
   }
