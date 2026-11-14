@@ -234,7 +234,9 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
             const tail = latest.get(id);
             if (tail && point.at > tail.until) {
               const head = headFor.get(id);
-              const healthy = !head.failed && point.at - tail.until <= Math.max(tail.interval, point.interval) * 2.5;
+              // As for readings, the owner stays current through ignored rounding readings.
+              const ownerSeen = Math.max(tail.until, originFor.get(id, head.source)?.at || 0);
+              const healthy = !head.failed && point.at - ownerSeen <= Math.max(tail.interval, point.interval) * 2.5;
               if (head.source !== source && healthy) continue;
               noteOrigin.run(id, source, point.at);
               interrupt(id, tail, point, now, BREAK_ALLOWANCE_MISSING);

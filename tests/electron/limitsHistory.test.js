@@ -453,6 +453,20 @@ test('rejected replacement observers cannot keep each other current', t => {
   assert.equal(points[1].at, at(2, 10, 15), 'the silent observer stops holding the timeline after the sampling gap');
 });
 
+test('rounding readings keep their observer current for another device\'s missing reading', t => {
+  const f = databaseFixture(t);
+  const reset = at(8, 0);
+  const actions = [action(at(2, 10), 50, { source: 'a', reset })];
+  for (let minute = 5; minute <= 20; minute += 5) actions.push(action(at(2, 10, minute), 49.9, { source: 'a', reset }));
+  const missing = action(at(2, 10, 21), 0, { source: 'b', reset });
+  missing.windows[0].point = { at: at(2, 10, 21), interval: 300_000, missing: true };
+  actions.push(missing, { account: accountA, source: 'b', failed: true }, action(at(2, 10, 25), 51, { source: 'a', reset }));
+  f.record(actions);
+  const result = f.query().windows[0].distribution;
+  assert.equal(result.buckets.at(-1).value, 1);
+  assert.equal(result.unallocated, 0);
+});
+
 test('a sub-point dip within one deadline is rounding jitter, not a reset', t => {
   const f = databaseFixture(t);
   f.record([action(at(2, 10), 2.04, { source: 'a', reset: at(8, 0) }), action(at(2, 10, 5), 1.08, { source: 'a', reset: at(8, 0) }),
