@@ -26,7 +26,9 @@ const {
   edgeDockTriggerBounds,
   normalizeEdgeDockCustomScale,
   normalizeEdgeDockDisplayId,
+  isHorizontalEdgeDockSide,
   normalizeEdgeDockFloatingX,
+  normalizeEdgeDockFloatingY,
   normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
@@ -188,6 +190,8 @@ function createEdgeDockController(deps) {
   }
 
   function alwaysVisible() {
+    if (isHorizontalEdgeDockSide(placement().side)) return true;
+    if (placement().floatingY !== null) return true;
     if (placement().floatingX !== null) return true;
     const mode = normalizeEdgeDockMode(settings().edgeDockMode);
     return mode === 'always' || (mode === 'alwaysExceptFullScreen' && !fullScreen);
@@ -241,6 +245,7 @@ function createEdgeDockController(deps) {
       side: normalizeEdgeDockSide(current.edgeDockSide),
       offset: normalizeEdgeDockOffset(current.edgeDockOffset),
       floatingX: normalizeEdgeDockFloatingX(current.edgeDockFloatingX),
+    floatingY: normalizeEdgeDockFloatingY(current.edgeDockFloatingY),
       displayId: normalizeEdgeDockDisplayId(current.edgeDockDisplayId)
     };
   }
@@ -312,14 +317,20 @@ function createEdgeDockController(deps) {
   function layout() {
     const current = display();
     if (!current) return null;
-    const { side: dockSide, offset, floatingX } = placement();
+    const { side: dockSide, offset, floatingX, floatingY } = placement();
     const workArea = current.workArea;
     const m = metrics();
-    const rail = edgeDockRailBounds({ workArea, side: dockSide, offset, floatingX, cellKinds: cellKinds(), metrics: m });
-    const side = floatingX === null ? dockSide : rail.x + rail.width / 2 < workArea.x + workArea.width / 2 ? 'left' : 'right';
+    const rail = edgeDockRailBounds({ workArea, side: dockSide, offset, floatingX, floatingY, cellKinds: cellKinds(), metrics: m });
+    const horizontal = isHorizontalEdgeDockSide(dockSide);
+    const side = horizontal ? dockSide
+      : floatingX === null ? dockSide : rail.x + rail.width / 2 < workArea.x + workArea.width / 2 ? 'left' : 'right';
     const cardSpace = side === 'left' ? workArea.x + workArea.width - rail.x - rail.width : rail.x - workArea.x;
     const bm = bubbleMetrics();
-    const bubbleWidth = Math.min(bm.bubbleWidth, cardSpace - bm.bubbleGap - bm.bubbleTail - bm.screenMargin);
+    // A top bar has no side corridor to hang the card from: the card sits under
+    // the cell, so its width comes from the work area instead.
+    const bubbleWidth = horizontal
+      ? Math.min(bm.bubbleWidth, workArea.width - bm.screenMargin * 2)
+      : Math.min(bm.bubbleWidth, cardSpace - bm.bubbleGap - bm.bubbleTail - bm.screenMargin);
     const peek = edgeDockPeekBounds({ workArea, side, railBounds: rail, metrics: m });
     // The handle as drawn takes the pointer; the resting handle alone decides the
     // fast reveal, so how soon the rail opens never depends on how far the
@@ -332,6 +343,10 @@ function createEdgeDockController(deps) {
       ? edgeDockBubbleBounds({ railBounds: rail, cellIndex: bubbleCell, height: Math.round(Math.min(bubbleHeight, maxCardHeight() ?? Infinity) * bubbleScale()), workArea, side, metrics: { ...bm, bubbleWidth } })
       : null;
     const refresh = edgeDockRefreshBounds({ workArea, displayBounds: current.bounds, railBounds: rail, metrics: m });
+    if (horizontal) {
+      // No handle, no edge strip, no wake zone: the bar is on screen permanently.
+      return { side, workArea, rail, peek: null, handle: null, restingHandle: null, trigger: null, wake: null, approach: null, bubble, bubbleWidth, refresh, horizontal: true };
+    }
     return { side, workArea, rail, peek, handle, restingHandle, trigger: floatingX === null ? trigger : null, wake: floatingX === null ? zones?.wake || null : null, approach: floatingX === null ? zones?.approach || null : null, bubble, bubbleWidth, refresh };
   }
 
@@ -552,6 +567,9 @@ function createEdgeDockController(deps) {
     const scale = dockScale();
     if (scale === 1) return layout;
     const toPage = (values) => values.map((value) => value / scale);
+    if (layout.horizontal) {
+      return { ...layout, lefts: toPage(layout.lefts), widths: toPage(layout.widths), length: layout.length / scale };
+    }
     return { ...layout, tops: toPage(layout.tops), heights: toPage(layout.heights), length: layout.length / scale };
   }
 
@@ -794,6 +812,7 @@ function createEdgeDockController(deps) {
         side,
         tail: m.bubbleTail,
         tailY: bounds.tailY,
+        tailX: bounds.tailX,
         neck: m.bubbleNeck,
         radius: m.bubbleRadius
       });
@@ -910,7 +929,10 @@ function createEdgeDockController(deps) {
   }
 
   function railMorphProgress() {
-    const target = placement().floatingX === null ? 0 : 1;
+    const placed = placement();
+    // The axis that can be off its edge: vertical for a side rail, height for a bar.
+    const free = isHorizontalEdgeDockSide(placed.side) ? placed.floatingY : placed.floatingX;
+    const target = free === null ? 0 : 1;
     return railMotion ? railMotion.from + (target - railMotion.from) * railMotionEase() : target;
   }
 
@@ -1293,7 +1315,7 @@ function createEdgeDockController(deps) {
     }
   }
 
-  function followDrag(point, current) {
+  function followDrag(point, current, final = false) {
     let targetDisplay;
     try { targetDisplay = screen.getDisplayNearestPoint?.(point) || display(); } catch (_) { targetDisplay = display(); }
     // Sized for the display the rail is landing on, which can fit a different
@@ -1307,7 +1329,9 @@ function createEdgeDockController(deps) {
       grabOffsetX: drag.grabOffsetX * scale,
       grabOffsetY: drag.grabOffsetY * scale,
       cellKinds: cellKinds(),
-      metrics: scaledEdgeDockMetrics(scale)
+      metrics: scaledEdgeDockMetrics(scale),
+      currentSide: placement().side,
+      final
     });
     if (!next) return;
     next.displayId = normalizeEdgeDockDisplayId(targetDisplay?.id);
@@ -1334,7 +1358,7 @@ function createEdgeDockController(deps) {
   function handleDragEnd({ cancelled = false } = {}) {
     if (!drag) return;
     const current = layout();
-    if (!cancelled && current) followDrag(screen.getCursorScreenPoint(), current);
+    if (!cancelled && current) followDrag(screen.getCursorScreenPoint(), current, true);
     const gestureId = drag.gestureId;
     const final = cancelled ? null : placementOverride;
     drag = null;

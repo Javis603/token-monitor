@@ -1328,6 +1328,7 @@ function renderRail(payload) {
   }
   const layout = payload.cellLayout || null;
   railNode.classList.toggle('is-compact', layout?.compact === true);
+  railNode.classList.toggle('is-horizontal', layout?.horizontal === true);
   const retainedPlugins = new Map([...railNode.children].filter(node => node.dataset.pluginRef).map(node => [node.dataset.cellId, node]));
   const ringSnapshot = captureRingResetMotion();
   const rollSnapshot = railNumberRoll.capture(railNode);
@@ -1338,8 +1339,12 @@ function renderRail(payload) {
     node.dataset.key = cell.id;
     node.dataset.index = String(index);
     // Cells are placed on the main process's layout so hover hit-testing and
-    // what is painted can never drift apart.
-    if (layout) {
+    // what is painted can never drift apart. A horizontal bar carries its
+    // cells across instead of down.
+    if (layout?.horizontal) {
+      node.style.left = `${layout.lefts[index]}px`;
+      node.style.width = `${layout.widths[index]}px`;
+    } else if (layout) {
       node.style.top = `${layout.tops[index]}px`;
       node.style.height = `${layout.heights[index]}px`;
     }

@@ -7,7 +7,7 @@ const { notchPanelItems } = require('./notch/panel');
 const { buildEdgeDockCells } = require('./renderer/edgeDock/presentation');
 const { normalizeEdgeDockItems } = require('./renderer/edgeDock/items');
 const { NOTCH_METRICS, notchGeometry, notchBounds, notchPeekBounds, notchCommands, translateCommands } = require('./notch/geometry');
-const { EDGE_DOCK_METRICS: M, edgeDockCellLayout, edgeDockScale } = require('./edgeDock/geometry');
+const { EDGE_DOCK_METRICS: M, edgeDockCellLayout, edgeDockCellLayoutHorizontal, edgeDockScale } = require('./edgeDock/geometry');
 const { toSvgPath, railCommands, peekCommands } = require('./renderer/edgeDock/shapes');
 const { panelContentHeight } = require('./renderer/notch/panel');
 const { projectPluginLimits } = require('./plugins/limitsPresentation');
@@ -30,10 +30,19 @@ function buildDisplayPreview(settings, id, phase = 'closed', platform = process.
   const base = { platform, appearance, glass: false, liquidGlass: false, refreshEnabled: false, refreshable: false };
   if (id === 'edgeDock') {
     const cells = buildEdgeDockCells(stats, { ...settings, items: normalizeEdgeDockItems(settings.edgeDockItems) || undefined });
-    const side = settings.edgeDockSide === 'left' ? 'left' : 'right';
-    const layout = edgeDockCellLayout({ height: 900 }, cells.map(cell => cell.kind));
-    const opened = phase === 'open';
-    const width = opened ? M.railWidth : M.peekWidth, height = opened ? layout.length : M.peekLength;
+    // The sample follows the real placement, so a top or bottom bar is drawn as
+    // a row rather than as a side rail the user never picked.
+    const dockSide = settings.edgeDockSide;
+    const side = ['left', 'top', 'bottom'].includes(dockSide) ? dockSide : 'right';
+    const horizontal = side === 'top' || side === 'bottom';
+    const kinds = cells.map(cell => cell.kind);
+    // A horizontal bar has no collapsed handle to show, so it is always drawn whole.
+    const opened = horizontal || phase === 'open';
+    const layout = horizontal
+      ? edgeDockCellLayoutHorizontal({ width: 1440 }, kinds)
+      : edgeDockCellLayout({ height: 900 }, kinds);
+    const width = opened ? (horizontal ? layout.length : M.railWidth) : M.peekWidth;
+    const height = opened ? (horizontal ? M.topThickness : layout.length) : M.peekLength;
     const commands = opened ? railCommands({ width, height, side, shoulder: M.shoulder, radius: M.railRadius })
       : peekCommands({ width, height, side, handleWidth: M.handleWidth, handleLength: M.handleLength });
     return { width, height, scale: edgeDockScale(settings), align: side,

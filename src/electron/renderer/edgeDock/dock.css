@@ -147,7 +147,36 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   inset: 0;
   cursor: default;
 }
+/* Horizontal (top) bar: cells run along the row and their left/width come from
+   the main process's row layout, so hit-testing and paint stay in step. */
+.edge-dock-rail.is-horizontal .edge-dock-cell {
+  top: 6px;
+  bottom: 6px;
+  height: auto;
+  left: auto;
+  right: auto;
+}
 .edge-dock-rail.is-dragging { cursor: grabbing; }
+/* The top bar is short, so a quota cell reads across: mark on the left, value
+   beside it. Stat cells keep their stacked label because they carry two lines. */
+.edge-dock-rail.is-horizontal .edge-dock-cell:not(.edge-dock-cell-stat):not(.edge-dock-cell-rate) {
+  flex-direction: row;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 2px;
+}
+.edge-dock-rail.is-horizontal .edge-dock-cell:not(.edge-dock-cell-stat):not(.edge-dock-cell-rate) .edge-dock-value {
+  white-space: nowrap;
+}
+/* Same type metrics as the side rail: a stat cell keeps its 56px height, centred
+   in the taller bar, so its two lines sit exactly where they do vertically. */
+.edge-dock-rail.is-horizontal .edge-dock-cell-stat {
+  top: 50%;
+  bottom: auto;
+  height: 56px;
+  margin-top: -28px;
+}
 
 
 .edge-dock-cell {
