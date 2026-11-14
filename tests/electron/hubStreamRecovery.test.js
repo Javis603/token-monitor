@@ -179,7 +179,7 @@ test('frequent local pushes cannot postpone the background Hub read', async () =
   let reads = 0;
   const state = { streamConnected: true, settings: { hubMode: 'client' }, period: 'today' };
   const context = {
-    state, window: { tokenMonitor: { onStatsPush: fn => { push = fn; } } },
+    assert, state, window: { tokenMonitor: { onStatsPush: fn => { push = fn; } } },
     allTimeSessions: { invalidate() {}, attach: stats => stats }, sessionStatsForDisplay: stats => stats,
     observeLiveTokenRate() {}, observeDisplayLiveTokenRates() {}, applyCodexActiveAccountFromStats() {},
     fixedPeriodRangesApi: { isDerived: () => false }, statsRenderScheduler: { request() {} },
@@ -189,7 +189,7 @@ test('frequent local pushes cannot postpone the background Hub read', async () =
       return id;
     },
     clearInterval: time.clearTimeout,
-    refreshStats() { reads++; }
+    refreshStats(options) { reads++; assert.equal(options?.streamCache, true); }
   };
   vm.runInNewContext(timerSource + '\n' + pushSource + '\nrestartTimer();', context);
   for (let i = 0; i < 60; i++) {
@@ -222,4 +222,31 @@ test('background reads change frequency on disconnect, reconnect and refresh set
   state.streamConnected = true;
   context.restartTimer();
   assert.deepEqual([...intervals.values()], [300000]);
+});
+
+test('the periodic fallback reuses fresh stream data and downloads only when it has gone quiet', async () => {
+  const fetchSource = main.slice(main.indexOf('async function fetchStats('), main.indexOf('\nfunction managedPricingSidecarPath('));
+  let downloads = 0;
+  const cached = { devices: [{ deviceId: 'remote' }], marker: 'stream' };
+  const context = vm.createContext({
+    hubModeGeneration: 1, settings: { hubMode: 'client' }, mode: 'sync', streamConnected: true,
+    latestHubStatsReceivedAt: new Date().toISOString(), lastCollectedDevice: null, HUB_STREAM_CACHE_FRESH_MS: 5 * 60 * 1000,
+    Date, Boolean, currentHubStatsIdentity: () => 'client|hub', ownsUsageRuntime: () => false,
+    effectiveHubConfig: () => ({ url: 'https://hub.invalid', secret: 's' }),
+    currentHubStatsCache: () => cached, hubModeRequestIsCurrent: () => true, setLatestHubStatsCache() {},
+    composeLocalSyncSummary: stats => stats, injectLocalDeviceStatus: stats => stats,
+    async fetch() { downloads++; return { ok: true, json: async () => ({ devices: [], marker: 'rest' }) }; }
+  });
+  vm.runInContext(fetchSource, context);
+  const fallback = { streamCache: true };
+  assert.equal((await context.fetchStats(fallback)).marker, 'stream');
+  assert.equal(downloads, 0, 'fresh stream data needs no full download');
+  assert.equal((await context.fetchStats()).marker, 'rest', 'other reads, such as deletion checks, still read the Hub');
+  assert.equal((await context.fetchStats({ force: true })).marker, 'rest', 'manual refresh still reads the Hub');
+  context.latestHubStatsReceivedAt = new Date(Date.now() - 5 * 60 * 1000 - 1).toISOString();
+  assert.equal((await context.fetchStats(fallback)).marker, 'rest', 'quiet stream data falls back to the Hub');
+  context.latestHubStatsReceivedAt = new Date().toISOString();
+  context.streamConnected = false;
+  assert.equal((await context.fetchStats(fallback)).marker, 'rest', 'a disconnected stream falls back to the Hub');
+  assert.equal(downloads, 4);
 });

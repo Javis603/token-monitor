@@ -3284,6 +3284,8 @@ let streamFailure = null;
 let lastCollectedDevice = null;
 let latestHubStats = null;
 let latestHubStatsReceivedAt = null;
+// Matches the renderer's connected-stream fallback interval.
+const HUB_STREAM_CACHE_FRESH_MS = 5 * 60 * 1000;
 let latestHubStatsSource = 'none';
 let latestHubStatsGeneration = null;
 let latestHubStatsIdentity = null;
@@ -7281,6 +7283,15 @@ async function fetchStats(options = {}) {
   }
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return withHistoryPreview(aggregateDevices([], 0), []);
+  // A connected stream keeps this cache current. The renderer's periodic
+  // fallback only needs a full download once stream data has gone quiet. Other
+  // reads, such as deletion eligibility checks, always read the Hub.
+  if (options?.streamCache === true && streamConnected) {
+    const cached = currentHubStatsCache();
+    if (cached && Date.now() - Date.parse(latestHubStatsReceivedAt) < HUB_STREAM_CACHE_FRESH_MS) {
+      return injectLocalDeviceStatus(composeLocalSyncSummary(cached, lastCollectedDevice));
+    }
+  }
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
   const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);

@@ -8211,7 +8211,8 @@ function restartTimer() {
   if (state.refreshTimer && state.refreshTimerIntervalMs === interval) return;
   if (state.refreshTimer) clearInterval(state.refreshTimer);
   state.refreshTimerIntervalMs = interval;
-  state.refreshTimer = setInterval(refreshStats, interval);
+  // Only this periodic fallback may reuse fresh stream data instead of downloading.
+  state.refreshTimer = setInterval(() => refreshStats({ streamCache: true }), interval);
 }
 
 function clamp(value, min, max) {
