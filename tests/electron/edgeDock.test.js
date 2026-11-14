@@ -1357,7 +1357,10 @@ test('edge dock is opt-in and limited to macOS and Windows', () => {
 
 test('placement settings normalize to a known side and a 0..1 offset', () => {
   assert.equal(normalizeEdgeDockSide('left'), 'left');
-  assert.equal(normalizeEdgeDockSide('top'), 'right');
+  assert.equal(normalizeEdgeDockSide('top'), 'top');
+  assert.equal(normalizeEdgeDockSide('bottom'), 'bottom');
+  // Anything else still falls back to the right edge.
+  assert.equal(normalizeEdgeDockSide('middle'), 'right');
   assert.equal(normalizeEdgeDockOffset(null), 0.3);
   assert.equal(normalizeEdgeDockOffset('0.5'), 0.5);
   assert.equal(normalizeEdgeDockOffset(4), 1);
@@ -1594,7 +1597,15 @@ test('dropping a dragged rail picks the nearer side and a normalized offset', ()
   assert.ok(placement.offset > 0 && placement.offset < 1);
   const back = edgeDockRailBounds({ workArea, side: placement.side, offset: placement.offset, cellCount: 2 });
   assert.ok(Math.abs(back.y - 470) <= 1);
-  assert.equal(edgeDockPlacementForDrop({ workArea, pointer: { x: 1400, y: 0 }, grabOffsetY: 0, cellCount: 2 }).offset, 0);
+  // Reaching the top edge turns the rail into a horizontal bar along it, so the
+  // offset is measured across the bar rather than down the column.
+  const toTop = edgeDockPlacementForDrop({ workArea, pointer: { x: 1400, y: 0 }, grabOffsetY: 0, cellCount: 2 });
+  assert.equal(toTop.side, 'top');
+  assert.equal(toTop.floatingY, null);
+  assert.equal(toTop.offset, 1);
+  // Away from the top and bottom edges a vertical drag still lands on a side.
+  const side = edgeDockPlacementForDrop({ workArea, pointer: { x: 100, y: 500 }, grabOffsetY: 30, cellCount: 2 });
+  assert.equal(side.side, 'left');
 });
 
 test('intent: a brief touch of the edge does not reveal; a dwell does', () => {

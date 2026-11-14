@@ -28,9 +28,28 @@
   // than floating next to it. Drawn for the right edge and mirrored for the left.
   // The first and last points sit on the screen edge; `open: true` drops the
   // closing segment so an outline is never stroked along the display edge.
-  function railCommands({ width, height, side = 'right', shoulder, radius, open = false, floating = false, floatingProgress = floating ? 1 : 0 }) {
+  function railCommands({ width, height, side = 'right', shoulder, radius, inset = shoulder, open = false, floating = false, floatingProgress = floating ? 1 : 0 }) {
     const w = width;
     const h = height;
+    // A horizontal bar is the side rail lying on its long edge, so build the
+    // vertical shape at the transposed size and rotate its points. One geometry,
+    // two orientations: shoulders, capsule morph and outlines stay in step.
+    if (side === 'top' || side === 'bottom') {
+      // Keep the side rail's shoulder-to-thickness proportion (28 on 64), so the
+      // bar bends exactly as much as the rail it is turned from.
+      const flare = Math.max(shoulder, Math.round(h * 0.44));
+      const vertical = railCommands({ width: h, height: w, side: 'right', shoulder: flare, inset: shoulder, radius, open: true, floatingProgress });
+      const shape = vertical.map(([op, ...points]) => {
+        if (op === 'Z') return ['Z'];
+        const turned = [op];
+        for (let i = 0; i < points.length; i += 2) {
+          turned.push(points[i + 1], side === 'top' ? h - points[i] : points[i]);
+        }
+        return turned;
+      });
+      if (!open) shape.push(['Z']);
+      return shape;
+    }
     const s = Math.max(0, Math.min(shoulder, h / 2));
     const spread = Math.min(w * 0.53, w - radius);
     const r = Math.max(0, Math.min(radius, (h - 2 * s) / 2, w - spread));
@@ -47,16 +66,20 @@
     // Keep the cells exactly where they are in the attached rail. Its shoulders
     // become transparent rather than becoming extra padding inside the capsule.
     // Matching command topology lets native masks and SVG share the same morph.
-    const cap = Math.min(w / 2, (h - 2 * s) / 2);
+    // The floating capsule is inset by the plain shoulder, never by the attached
+    // shape's flare: a long flare would otherwise pull the ends past the cells
+    // that sit near them and clip the last one.
+    const si = Math.max(0, Math.min(inset, h / 2));
+    const cap = Math.min(w / 2, (h - 2 * si) / 2);
     const capsule = [
-      ['M', w, s + cap],
-      ['C', w, s + cap * ARC, w - cap * ARC, s, w - cap, s],
-      ['L', cap, s],
-      ['C', cap * ARC, s, 0, s + cap * ARC, 0, s + cap],
-      ['L', 0, h - s - cap],
-      ['C', 0, h - s - cap * ARC, cap * ARC, h - s, cap, h - s],
-      ['L', w - cap, h - s],
-      ['C', w - cap * ARC, h - s, w, h - s - cap * ARC, w, h - s - cap]
+      ['M', w, si + cap],
+      ['C', w, si + cap * ARC, w - cap * ARC, si, w - cap, si],
+      ['L', cap, si],
+      ['C', cap * ARC, si, 0, si + cap * ARC, 0, si + cap],
+      ['L', 0, h - si - cap],
+      ['C', 0, h - si - cap * ARC, cap * ARC, h - si, cap, h - si],
+      ['L', w - cap, h - si],
+      ['C', w - cap * ARC, h - si, w, h - si - cap * ARC, w, h - si - cap]
     ];
     const progress = Math.max(0, Math.min(1, floatingProgress));
     if (progress > 0) {
@@ -93,7 +116,52 @@
   // A rounded card with a broad-necked tail pointing at the rail. `tailY` is the
   // tip's offset from the top; it is clamped so the neck never runs into a
   // corner. Drawn with the tail on the right and mirrored for a left rail.
-  function bubbleCommands({ width, height, side = 'right', tail, tailY, neck, radius }) {
+  function bubbleCommands({ width, height, side = 'right', tail, tailY, tailX, neck, radius }) {
+    if (side === 'top' || side === 'bottom') {
+      // Horizontal bar: the window carries the tail as well as the card. A bar
+      // above the card (top) points up from the card's top edge; a bar below it
+      // (bottom) points down from the card's bottom edge.
+      const tw = width;
+      const tt = Math.max(0, Number(tail) || 0);
+      // The window carries the tail, so the card is the window minus the tip.
+      const ch = Math.max(0, height - tt);
+      const tr = Math.max(0, Math.min(radius, ch / 2, tw / 2));
+      const tn = Math.max(0, Math.min(neck, tw / 2 - tr));
+      const tip = Math.max(tr + tn, Math.min(tw - tr - tn, Number(tailX) || tw / 2));
+      const tk = tr * ARC;
+      if (side === 'top') {
+        const top = tt;
+        return [
+          ['M', tip - tn, top],
+          ['L', tip, 0],
+          ['L', tip + tn, top],
+          ['L', tw - tr, top],
+          ['C', tw - tk, top, tw, top + tk, tw, top + tr],
+          ['L', tw, top + ch - tr],
+          ['C', tw, top + ch - tk, tw - tk, top + ch, tw - tr, top + ch],
+          ['L', tr, top + ch],
+          ['C', tk, top + ch, 0, top + ch - tk, 0, top + ch - tr],
+          ['L', 0, top + tr],
+          ['C', 0, top + tk, tk, top, tr, top],
+          ['Z']
+        ];
+      }
+      return [
+        ['M', tr, 0],
+        ['L', tw - tr, 0],
+        ['C', tw - tk, 0, tw, tk, tw, tr],
+        ['L', tw, ch - tr],
+        ['C', tw, ch - tk, tw - tk, ch, tw - tr, ch],
+        ['L', tip + tn, ch],
+        ['L', tip, ch + tt],
+        ['L', tip - tn, ch],
+        ['L', tr, ch],
+        ['C', tk, ch, 0, ch - tk, 0, ch - tr],
+        ['L', 0, tr],
+        ['C', 0, tk, tk, 0, tr, 0],
+        ['Z']
+      ];
+    }
     const bw = width - tail;
     // Leave the point inside the BrowserWindow. A tip exactly on its outer edge
     // clips half of the antialiased outline and leaves a notch on both Chromium

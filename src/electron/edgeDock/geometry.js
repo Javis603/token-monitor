@@ -4,7 +4,7 @@
 // touches Electron, so the whole interaction contract is testable under
 // node:test; edgeDock.js owns the windows and feeds this module cursor reads.
 
-const EDGE_DOCK_SIDES = Object.freeze(['right', 'left']);
+const EDGE_DOCK_SIDES = Object.freeze(['right', 'left', 'top', 'bottom']);
 const EDGE_DOCK_DEFAULT_OFFSET = 0.3;
 
 // Rail metrics in DIPs. The rail renderer lays cells out on the same numbers,
@@ -57,7 +57,16 @@ const EDGE_DOCK_METRICS = Object.freeze({
   bubbleRadius: 18,
   bubbleGap: 4,
   triggerDepth: 2,
-  screenMargin: 8
+  screenMargin: 8,
+  // Horizontal (top) rail: a row of cells along the top edge instead of a
+  // column against a side edge. The bar is one cell tall plus the rail's own
+  // padding, and each cell takes a square-ish footprint so its content reads
+  // unchanged when it is laid out sideways.
+  topStatWidth: 66,
+  // Quota cells put the number beside the mark instead of under it: 42px mark,
+  // a 6px gap and up to four characters of value, plus the cell's own padding.
+  topProviderWidth: 96,
+  topThickness: 82
 });
 
 const EDGE_DOCK_TIMING = Object.freeze({
@@ -98,10 +107,14 @@ function normalizeEdgeDockOffset(value) {
 
 // Null keeps the legacy edge placement. A fraction of the available horizontal
 // travel survives resolution, scale and display changes without going offscreen.
+// null means "glued to its edge"; a fraction parks the rail that far along the
+// free axis (horizontal for the side rails, vertical for the top and bottom bars).
 function normalizeEdgeDockFloatingX(value) {
   if (value === null || value === undefined || value === '' || typeof value !== 'number' || !Number.isFinite(value)) return null;
   return Math.max(0, Math.min(1, value));
 }
+
+const normalizeEdgeDockFloatingY = normalizeEdgeDockFloatingX;
 
 // The dock's size: three presets, or a scale of the user's own kept separately
 // so switching to a preset and back does not lose it.
@@ -196,24 +209,84 @@ function naturalHeight(kind, metrics, compact) {
   return compact ? metrics.minCellHeight : metrics.cellHeight;
 }
 
-// Heights and offsets of every cell, in the rail's own coordinates. Cells use
-// their full height when everything fits and the compact density otherwise;
-// past that the rail is clipped by the work area rather than shrunk further.
-function edgeDockCellLayout(workArea, cellKinds, metrics = EDGE_DOCK_METRICS) {
-  const kinds = cellKindsFrom(cellKinds);
-  const chrome = metrics.shoulder * 2 + metrics.padding * 2;
-  const measure = (compact) => kinds.reduce((sum, kind) => sum + naturalHeight(kind, metrics, compact), 0)
-    + Math.max(0, kinds.length - 1) * metrics.cellGap;
-  const available = workArea ? workArea.height - metrics.screenMargin * 2 - chrome : Infinity;
-  const compact = measure(false) > available;
-  const heights = kinds.map((kind) => naturalHeight(kind, metrics, compact));
-  const tops = [];
-  let cursor = metrics.shoulder + metrics.padding;
-  for (const height of heights) {
-    tops.push(cursor);
-    cursor += height + metrics.cellGap;
+// One axis of cells, in the rail's own coordinates: how big each cell is and
+// where it starts. Cells keep their full size when everything fits and step
+// down to the compact density otherwise; past that the rail is clipped by the
+// work area rather than shrunk again.
+function isHorizontalEdgeDockSide(side) {
+  const normalized = normalizeEdgeDockSide(side);
+  return normalized === 'top' || normalized === 'bottom';
+}
+
+// How far a horizontal bar's shoulder reaches in from each end. Kept next to the
+// shape builder's own rule so the cells and the outline agree. A bar glued to an
+// edge tapers over that long shoulder; a floating capsule only rounds off, so it
+// keeps the plain padding and does not leave two wide empty ends.
+// The side rail's shoulder is 28px on a 64px body, so a horizontal bar keeps the
+// same proportion instead of stretching into a long swoosh: same curve, same
+// weight, whichever edge it sits on.
+const EDGE_DOCK_SHOULDER_RATIO = 0.44;
+
+function edgeDockHorizontalShoulder(metrics = EDGE_DOCK_METRICS) {
+  return Math.max(metrics.shoulder, Math.round(metrics.topThickness * EDGE_DOCK_SHOULDER_RATIO));
+}
+
+function edgeDockHorizontalPad(floatingY, metrics = EDGE_DOCK_METRICS) {
+  return floatingY === null || floatingY === undefined
+    ? edgeDockHorizontalShoulder(metrics)
+    : metrics.shoulder;
+}
+
+function cellRun(kinds, sizeFor, extent, metrics, endPad = metrics.shoulder, fit = false) {
+  const chrome = endPad * 2 + metrics.padding * 2;
+  const gapTotal = Math.max(0, kinds.length - 1) * metrics.cellGap;
+  const measure = (compact) => kinds.reduce((sum, kind) => sum + sizeFor(kind, compact), 0) + gapTotal;
+  const compact = measure(false) > extent - chrome;
+  let sizes = kinds.map((kind) => sizeFor(kind, compact));
+  // A row that still does not fit has to give somewhere. Shrinking every cell by
+  // the same factor keeps the padding and lets the outline keep wrapping the
+  // whole run, instead of clipping the last cells off the end of the bar.
+  const room = extent - chrome - gapTotal;
+  const used = measure(compact) - gapTotal;
+  if (fit && room > 0 && used > room) {
+    const scale = room / used;
+    sizes = sizes.map((size) => Math.max(40, Math.round(size * scale)));
   }
-  return { kinds, heights, tops, compact, length: chrome + measure(compact) };
+  const offsets = [];
+  let cursor = endPad + metrics.padding;
+  for (const size of sizes) {
+    offsets.push(cursor);
+    cursor += size + metrics.cellGap;
+  }
+  return { kinds, sizes, offsets, compact, length: chrome + measure(compact) };
+}
+
+function edgeDockCellLayout(workArea, cellKinds, metrics = EDGE_DOCK_METRICS) {
+  const run = cellRun(
+    cellKindsFrom(cellKinds),
+    (kind, compact) => naturalHeight(kind, metrics, compact),
+    workArea ? workArea.height - metrics.screenMargin * 2 : Infinity,
+    metrics
+  );
+  return { kinds: run.kinds, heights: run.sizes, tops: run.offsets, compact: run.compact, length: run.length };
+}
+
+// A top or bottom bar is the same run laid along the other axis: quota cells
+// are wide enough to read as a row, stat cells keep their narrow footprint.
+function edgeDockCellLayoutHorizontal(workArea, cellKinds, metrics = EDGE_DOCK_METRICS, pad = null) {
+  // The ends of a horizontal bar taper over a shoulder that is longer than the
+  // side rail's, so the run keeps that much clear at both ends. Otherwise the
+  // first and last cells sit on the taper and their icons poke out of it.
+  const endPad = pad === null ? edgeDockHorizontalShoulder(metrics) : pad;
+  const run = cellRun(
+    cellKindsFrom(cellKinds),
+    (kind, compact) => Math.round((kind === 'stat' ? metrics.topStatWidth : metrics.topProviderWidth) * (compact ? 0.9 : 1)),
+    workArea ? workArea.width - metrics.screenMargin * 2 : Infinity,
+    metrics,
+    endPad,
+    true
+  );
+  return { kinds: run.kinds, widths: run.sizes, lefts: run.offsets, compact: run.compact, horizontal: true, length: run.length };
 }
 
 // The strip between the card and the rail, as tall as the card. Crossing it
@@ -262,8 +335,36 @@ function railTop(workArea, length, offset, metrics = EDGE_DOCK_METRICS) {
   return Math.round(minY + travel * normalizeEdgeDockOffset(offset));
 }
 
-function edgeDockRailBounds({ workArea, side, offset, floatingX = null, cellCount, cellKinds, metrics = EDGE_DOCK_METRICS }) {
+// The row a horizontal bar needs: its cells, its width on screen, and where it
+// starts for a 0..1 offset. Placement and dragging both go through here, so a
+// drag preview can never disagree with where the bar lands.
+function edgeDockRowBounds(workArea, cellKinds, metrics, pad, offset) {
+  const row = edgeDockCellLayoutHorizontal(workArea, cellKinds, metrics, pad);
+  const width = Math.min(row.length, Math.max(0, workArea.width - metrics.screenMargin * 2));
+  const travel = Math.max(0, workArea.width - width);
+  return { row, width, x: Math.round(workArea.x + travel * normalizeEdgeDockOffset(offset)) };
+}
+
+function edgeDockRailBounds({ workArea, side, offset, floatingX = null, floatingY = null, cellCount, cellKinds, metrics = EDGE_DOCK_METRICS }) {
   if (!workArea) return null;
+  const dockSide = normalizeEdgeDockSide(side);
+  if (isHorizontalEdgeDockSide(dockSide)) {
+    const floatY = normalizeEdgeDockFloatingY(floatingY);
+    const row = edgeDockRowBounds(workArea, cellKindsFrom(cellKinds, cellCount), metrics,
+      edgeDockHorizontalPad(floatingY, metrics), offset);
+    const travelY = Math.max(0, workArea.height - metrics.topThickness);
+    return {
+      x: row.x,
+      y: floatY !== null
+        ? Math.round(workArea.y + travelY * floatY)
+        : dockSide === 'top'
+          ? Math.round(workArea.y)
+          : Math.round(workArea.y + workArea.height - metrics.topThickness),
+      width: row.width,
+      height: metrics.topThickness,
+      cells: row.row
+    };
+  }
   const cells = edgeDockCellLayout(workArea, cellKindsFrom(cellKinds, cellCount), metrics);
   const length = Math.min(cells.length, Math.max(0, workArea.height - metrics.screenMargin * 2));
   const x = floatingX !== null
@@ -276,6 +377,9 @@ function edgeDockRailBounds({ workArea, side, offset, floatingX = null, cellCoun
 
 function edgeDockPeekBounds({ workArea, side, railBounds, metrics = EDGE_DOCK_METRICS }) {
   if (!workArea || !railBounds) return null;
+  // A top bar has no edge to reach for: it is always on screen, so there is no
+  // peek handle to find and no trigger strip to cross.
+  if (isHorizontalEdgeDockSide(side)) return null;
   const x = normalizeEdgeDockSide(side) === 'left'
     ? workArea.x
     : workArea.x + workArea.width - metrics.peekWidth;
@@ -336,6 +440,7 @@ function edgeDockRefreshCorridor(rail, button) {
 // the whole region the rail will occupy, not only the small peek handle.
 function edgeDockTriggerBounds({ workArea, displayBounds, side, railBounds, metrics = EDGE_DOCK_METRICS }) {
   if (!workArea || !railBounds) return null;
+  if (isHorizontalEdgeDockSide(side)) return null;
   const display = displayBounds || workArea;
   if (normalizeEdgeDockSide(side) === 'left') {
     const x = display.x;
@@ -349,6 +454,19 @@ function edgeDockTriggerBounds({ workArea, displayBounds, side, railBounds, metr
 
 function edgeDockCellAt(point, railBounds, cellCount, metrics = EDGE_DOCK_METRICS) {
   if (!rectContains(railBounds, point)) return null;
+  const rowLayout = railBounds.cells;
+  if (rowLayout && Array.isArray(rowLayout.lefts)) {
+    // A horizontal bar is hit-tested across its length instead of its height,
+    // and the pointer has to be on the row rather than on the bar's padding.
+    const centerY = railBounds.y + railBounds.height / 2;
+    if (Math.abs(point.y - centerY) > metrics.hitRadius) return null;
+    const localX = point.x - railBounds.x;
+    const rowCount = Math.min(cellCount, rowLayout.lefts.length);
+    for (let index = 0; index < rowCount; index += 1) {
+      if (localX >= rowLayout.lefts[index] && localX < rowLayout.lefts[index] + rowLayout.widths[index] + metrics.cellGap) return index;
+    }
+    return null;
+  }
   // Only the column around the marks counts. The rail runs flush to the screen
   // edge, and a pointer parked against that edge is not pointing at a ring.
   const centerX = railBounds.x + railBounds.width / 2;
@@ -366,6 +484,36 @@ function edgeDockCellAt(point, railBounds, cellCount, metrics = EDGE_DOCK_METRIC
 
 function edgeDockBubbleBounds({ railBounds, cellIndex, height, workArea, side, metrics = EDGE_DOCK_METRICS }) {
   if (!railBounds || !workArea || !Number.isInteger(cellIndex)) return null;
+  const rowLayout = railBounds.cells;
+  const edgeSide = normalizeEdgeDockSide(side);
+  if (isHorizontalEdgeDockSide(edgeSide) && rowLayout && Array.isArray(rowLayout.lefts)) {
+    // The card hangs off the bar on the side away from the edge, tail pointing
+    // back at the cell that opened it.
+    const cardWidth = Math.max(80, Math.round(Number(metrics.bubbleWidth) || 0));
+    const left = railBounds.x + (rowLayout.lefts[cellIndex] ?? 0);
+    const cellWidth = rowLayout.widths[cellIndex] ?? metrics.topProviderWidth;
+    const center = left + cellWidth / 2;
+    const margin = metrics.screenMargin;
+    const tail = Math.max(0, Number(metrics.bubbleTail) || 0);
+    const gap = Math.max(0, Number(metrics.bubbleGap) || 0);
+    const x = Math.round(Math.max(workArea.x + margin,
+      Math.min(workArea.x + workArea.width - cardWidth - margin, center - cardWidth / 2)));
+    const space = edgeSide === 'top'
+      ? workArea.y + workArea.height - margin - (railBounds.y + railBounds.height + gap) - tail
+      : (railBounds.y - gap) - (workArea.y + margin) - tail;
+    const cardHeight = Math.max(60, Math.min(Math.round(Number(height) || 0), Math.max(60, space)));
+    const y = edgeSide === 'top'
+      ? railBounds.y + railBounds.height + gap
+      : railBounds.y - gap - tail - cardHeight;
+    return {
+      x,
+      y: Math.round(y),
+      width: cardWidth,
+      height: cardHeight + tail,
+      cardHeight,
+      tailX: Math.round(center - x)
+    };
+  }
   const bubbleHeight = Math.max(40, Math.round(Number(height) || 0));
   const layout = railBounds.cells || edgeDockCellLayout(null, cellKindsFrom(null, cellIndex + 1), metrics);
   const top = layout.tops[cellIndex] ?? layout.tops[layout.tops.length - 1];
@@ -385,8 +533,61 @@ function edgeDockBubbleBounds({ railBounds, cellIndex, height, workArea, side, m
 
 // Snap only near an edge; elsewhere keep both axes free. The horizontal grab
 // point is in DIPs, like grabOffsetY, so dragging never recentres the rail.
-function edgeDockPlacementForDrop({ workArea, pointer, metrics = EDGE_DOCK_METRICS, grabOffsetX = metrics.railWidth / 2, grabOffsetY, cellCount, cellKinds }) {
+function edgeDockPlacementForDrop({ workArea, pointer, metrics = EDGE_DOCK_METRICS, grabOffsetX = metrics.railWidth / 2, grabOffsetY, cellCount, cellKinds, currentSide = null, final = false }) {
   if (!workArea || !pointer) return null;
+  // A bar that is already horizontal keeps its orientation for the whole drag:
+  // it slides along the edge it is attached to and only swaps edges when the
+  // pointer reaches the other one. Turning it into a side rail mid-drag is what
+  // made a short upward nudge snap the bar vertical.
+  const horizontalNow = currentSide === 'top' || currentSide === 'bottom';
+  const edgeSnap = 24;
+  const toTop = pointer.y - workArea.y;
+  const toBottom = workArea.y + workArea.height - pointer.y;
+  // Reaching a side edge still turns the bar back into a side rail: only a drag
+  // that stays away from all three other edges holds the horizontal pose.
+  const toLeft = pointer.x - workArea.x;
+  const toRight = workArea.x + workArea.width - pointer.x;
+  const nearSideEdge = toLeft <= edgeSnap || toRight <= edgeSnap;
+  // Where the grab point puts the bar's left edge, for a row of the given padding.
+  const rowOffset = (pad) => {
+    const width = edgeDockRowBounds(workArea, cellKindsFrom(cellKinds, cellCount), metrics, pad, 0.5).width;
+    const travel = Math.max(0, workArea.width - width);
+    const grab = Number(grabOffsetX);
+    const leftEdge = pointer.x - (Number.isFinite(grab) ? grab : width / 2);
+    return normalizeEdgeDockOffset(travel > 0 ? (leftEdge - workArea.x) / travel : 0.5);
+  };
+  const shoulder = edgeDockHorizontalShoulder(metrics);
+  // While the pointer is down the bar rides with it, so the drag never lags behind
+  // the hand. Only on release does a bar that ended up near an edge snap onto it,
+  // which is what keeps a sideways slide from silently turning into a detach.
+  const glueBand = Math.max(edgeSnap, Math.round(metrics.topThickness * 1.5));
+  if (horizontalNow && !nearSideEdge) {
+    // Against an edge it glues there; anywhere else it floats at the pointer's
+    // height, still horizontal, so a drag up or down actually moves the bar.
+    if (toTop <= edgeSnap) return { side: 'top', offset: rowOffset(shoulder), floatingX: null, floatingY: null };
+    if (toBottom <= edgeSnap) return { side: 'bottom', offset: rowOffset(shoulder), floatingX: null, floatingY: null };
+    if (final) {
+      if (toTop <= glueBand) return { side: 'top', offset: rowOffset(shoulder), floatingX: null, floatingY: null };
+      if (toBottom <= glueBand) return { side: 'bottom', offset: rowOffset(shoulder), floatingX: null, floatingY: null };
+    }
+    const grabY = Number(grabOffsetY);
+    const topEdge = pointer.y - (Number.isFinite(grabY) ? grabY : 0);
+    const travelY = Math.max(0, workArea.height - metrics.topThickness);
+    return {
+      side: currentSide,
+      offset: rowOffset(metrics.shoulder),
+      floatingX: null,
+      floatingY: Math.max(0, Math.min(1, travelY > 0 ? (topEdge - workArea.y) / travelY : 0.5))
+    };
+  }
+  if (toTop <= edgeSnap || toBottom <= edgeSnap) {
+    return {
+      side: toTop <= toBottom ? 'top' : 'bottom',
+      offset: rowOffset(shoulder),
+      floatingX: null,
+      floatingY: null
+    };
+  }
   const side = pointer.x < workArea.x + workArea.width / 2 ? 'left' : 'right';
   const length = Math.min(
     edgeDockCellLayout(workArea, cellKindsFrom(cellKinds, cellCount), metrics).length,
@@ -593,8 +794,12 @@ module.exports = {
   edgeDockBubbleBounds,
   edgeDockCellAt,
   edgeDockCellLayout,
+  edgeDockCellLayoutHorizontal,
+  edgeDockHorizontalPad,
+  edgeDockHorizontalShoulder,
   edgeDockCorridorBounds,
   edgeDockFittingScale,
+  isHorizontalEdgeDockSide,
   edgeDockHandleBounds,
   edgeDockHandleZones,
   edgeDockPeekBounds,
@@ -610,6 +815,7 @@ module.exports = {
   normalizeEdgeDockCustomScale,
   normalizeEdgeDockDisplayId,
   normalizeEdgeDockFloatingX,
+  normalizeEdgeDockFloatingY,
   normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,

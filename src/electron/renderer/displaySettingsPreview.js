@@ -13,13 +13,19 @@
       if (!entry.data || !entry.frame || entry.stage.clientWidth <= 0) return;
       const { width, height, previewHeight = height, scale: size = 1, align } = entry.data;
       // One fixed scene scale for the notch so changing its size remains visible.
+      // Both edge-dock orientations are drawn at the same scale, measured on the
+      // sample's long side, so a top or bottom bar does not dwarf the side rail
+      // it sits next to in the same panel.
       const scale = entry.surface === 'notch' ? Math.min(1, entry.stage.clientWidth / 740)
-        : Math.min(.9 * size, 220 / height);
+        : Math.min(.9 * size, 220 / Math.max(width, height), entry.stage.clientWidth / width);
       const frame = entry.frame;
       frame.style.width = `${width}px`; frame.style.height = `${height}px`;
       frame.style.transform = `scale(${scale})`;
       frame.style.left = `${align === 'left' ? 0 : align === 'right' ? entry.stage.clientWidth - width * scale : (entry.stage.clientWidth - width * scale) / 2}px`;
-      frame.style.top = entry.surface === 'edgeDock' ? `${(entry.stage.clientHeight - height * scale) / 2}px` : '0';
+      frame.style.top = entry.surface !== 'edgeDock' ? '0'
+        : align === 'top' ? '0'
+          : align === 'bottom' ? `${entry.stage.clientHeight - height * scale}px`
+            : `${(entry.stage.clientHeight - height * scale) / 2}px`;
       if (entry.surface === 'notch') entry.stage.style.height = `${Math.max(40, Math.ceil(previewHeight * scale) + 6)}px`;
     }
     function request(entry, slots) {
