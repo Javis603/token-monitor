@@ -260,6 +260,11 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           const previous = pointOf(tail);
           const missingBasisOnly = !!previous?.basis && !point.basis
             && sameCycle(previous, { ...point, basis: previous.basis });
+          // A reading whose own deadline has already passed, from a cycle
+          // before the established one, is a late report of that old cycle,
+          // not a disagreement about the current one.
+          if (tail && previous.reset !== null && point.reset !== null
+            && previous.reset - point.reset > 1000 && point.reset <= point.at) continue;
           if (tail && point.at <= tail.until) {
             if (point.at === tail.until) {
               if (head.source !== source && missingBasisOnly && tail.value === point.value) continue;

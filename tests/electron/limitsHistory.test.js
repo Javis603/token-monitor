@@ -411,6 +411,30 @@ test('a healthy second observer that reports a new cycle first keeps measuring i
   assert.equal(f.sql('SELECT guarded FROM streams')[0].guarded, 0);
 });
 
+for (const sameTime of [false, true]) {
+  test(`a late old-cycle reading cannot guard the new cycle another observer started (same timestamp: ${sameTime})`, t => {
+    const f = databaseFixture(t, at(3, 12));
+    const sample = (time, value, source, reset) => action(time, value, { source, reset });
+    const oldReset = at(3, 0), newReset = at(10, 0);
+    f.record([sample(at(2, 23, 50), 91, 'a', oldReset), sample(at(3, 0, 1), 0, 'b', newReset)]);
+    // The provider can still return the passed deadline to a lagging device.
+    f.record([sample(sameTime ? at(3, 0, 1) : at(3, 0, 2), 92, 'a', oldReset)]);
+    f.record([sample(at(3, 0, 3), 1, 'b', newReset), sample(at(3, 0, 8), 2, 'b', newReset), sample(at(3, 0, 13), 3, 'b', newReset)]);
+    assert.equal(f.sql('SELECT guarded FROM streams')[0].guarded, 0);
+    const entry = f.query().windows[0];
+    assert.equal(entry.distribution.buckets.at(-1).value, 3);
+    assert.deepEqual(segments(entry.points.filter(p => p.at > at(3, 0))).map(s => s.map(p => p.value)), [[0, 1, 2, 3]]);
+  });
+}
+
+test('conflicting deadlines within the new cycle still guard the stream', t => {
+  const f = databaseFixture(t, at(3, 12));
+  const sample = (time, value, source, reset) => action(time, value, { source, reset });
+  f.record([sample(at(2, 23, 50), 91, 'a', at(3, 0)), sample(at(3, 0, 1), 0, 'b', at(10, 0)),
+    sample(at(3, 0, 2), 40, 'a', at(10, 1))]);
+  assert.equal(f.sql('SELECT guarded FROM streams')[0].guarded, 1);
+});
+
 test('a passed deadline without a new cycle keeps an established source conflict', t => {
   const f = databaseFixture(t, at(3, 12));
   const stale = at(3, 0);
