@@ -49,14 +49,34 @@ test('a focused window defers collection', async () => {
 
 test('renderers are collected on an idle pass even when main has little committed', async () => {
   let rendererRuns = 0;
+  let mainRuns = 0;
   const collector = createIdleHeapCollector({
     isIdle: () => true,
     getHeap: () => ({ heapTotal: 1, heapUsed: 1 }),
-    collect: async () => { throw new Error('main must stay untouched'); },
+    collect: async () => { mainRuns += 1; throw new Error('main must stay untouched'); },
     collectRenderers: async () => { rendererRuns += 1; }
   });
   assert.equal(await collector.run(), false);
+  assert.equal(mainRuns, 0, 'a small committed heap is not collected');
   assert.equal(rendererRuns, 1);
+});
+
+test('stopping during an in-flight main collection skips the renderer pass', async () => {
+  let finishMain;
+  let rendererRuns = 0;
+  const collector = createIdleHeapCollector({
+    isIdle: () => true,
+    getHeap: () => ({ heapTotal: 120 * MiB, heapUsed: 56 * MiB }),
+    collect: () => new Promise((resolve) => { finishMain = resolve; }),
+    collectRenderers: async () => { rendererRuns += 1; }
+  });
+  const running = collector.run();
+  collector.stop();
+  finishMain();
+  assert.equal(await running, true);
+  assert.equal(rendererRuns, 0, 'a stopped collector does not start the renderer pass');
+  assert.equal(await collector.run(), false);
+  assert.equal(rendererRuns, 0);
 });
 
 test('renderers wait for the same idle gate as main', async () => {

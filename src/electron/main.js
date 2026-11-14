@@ -10,16 +10,16 @@ const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, glob
 const v8 = require('node:v8');
 
 // V8 sizes the young generation for throughput, not for a background widget:
-// Electron starts with a 32 MiB semi-space, so each isolate (main, the usage
-// worker and every renderer) reserves 64 MiB of new space and keeps it after a
-// scan burst. 8 MiB is still ample for this UI and the collector's short-lived
-// records, and it cuts that reservation to 16 MiB per isolate. Set it before
-// the usage worker is created; renderers and utility processes read the switch.
-// `--expose-gc` lets the idle collector ask a renderer to return its own
-// committed heap; page scripts already run arbitrary local and plugin code.
-const MAIN_V8_FLAGS = '--max-semi-space-size=8';
-const RENDERER_JS_FLAGS = `${MAIN_V8_FLAGS} --expose-gc`;
-v8.setFlagsFromString(MAIN_V8_FLAGS);
+// Electron starts with a 32 MiB semi-space. Renderers receive an 8 MiB cap via
+// js-flags, and the usage worker inherits the same cap when V8 creates that
+// isolate later. The main isolate already exists when this module runs, so V8
+// has configured its heap; setFlagsFromString cannot shrink its young
+// generation and this must not claim otherwise. `--expose-gc` lets the idle
+// collector ask a renderer to return its own committed heap; page scripts
+// already run arbitrary local and plugin code.
+const YOUNG_GENERATION_FLAG = '--max-semi-space-size=8';
+const RENDERER_JS_FLAGS = `${YOUNG_GENERATION_FLAG} --expose-gc`;
+v8.setFlagsFromString(YOUNG_GENERATION_FLAG);
 const existingJsFlags = app.commandLine.getSwitchValue('js-flags').trim();
 app.commandLine.appendSwitch('js-flags', existingJsFlags ? `${existingJsFlags} ${RENDERER_JS_FLAGS}` : RENDERER_JS_FLAGS);
 
@@ -1570,6 +1570,13 @@ function sendMainWindowVisibility(win = mainWindow) {
 // switch; a page that did not load it simply reports false.
 const IDLE_RENDERER_GC_TIMEOUT_MS = 5000;
 function collectIdleRendererHeaps() {
+  // The renderer pass is for hidden surfaces. A full collection can pause a
+  // visible page for tens of milliseconds, so leave every visible window
+  // (including the dashboard, dock and retained BaseWindow hosts) to Chromium.
+  for (const win of BaseWindow.getAllWindows()) {
+    if (!win || win.isDestroyed()) continue;
+    if (win.isVisible() && !win.isMinimized()) return Promise.resolve();
+  }
   const seen = new Set();
   const jobs = [];
   for (const contents of webContents.getAllWebContents()) {
@@ -4490,15 +4497,19 @@ function publishLocalSessionActivity(patch) {
 // push that lands mid-load is already covered by the refreshStats() the renderer
 // runs on init, so deferring every one of them would only queue a listener per
 // frame against a slow load and then replay a burst of superseded stats.
-function mainWindowStatsPushWanted() {
-  if (!mainWindow || mainWindow.isDestroyed()) return false;
-  if (mainWindow.isVisible() && !mainWindow.isMinimized()) return true;
+function rendererHiddenStatsNeeded() {
   return rendererNeedsStatsWhileHidden({
     trayContent: settings?.trayContent,
     showTrayIcon: settings?.showTrayIcon !== false,
     floatingBubbleEnabled: settings?.floatingBubbleEnabled === true,
     floatingBubbleCollapsed: floatingBubbleState.collapsed === true
   });
+}
+
+function mainWindowStatsPushWanted() {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (mainWindow.isVisible() && !mainWindow.isMinimized()) return true;
+  return rendererHiddenStatsNeeded();
 }
 
 function sendPush(payload, options = {}) {
@@ -5794,8 +5805,9 @@ function syncDockSurfaces(rendererSettings) {
   syncPluginQuotaSurfaceDemand();
 }
 
-function sendStatsPresentationToRenderer() {
-  if (!latestStats || !mainWindow || mainWindow.isDestroyed() || !mainWindowStatsPushWanted()) return false;
+function sendStatsPresentationToRenderer(options = {}) {
+  if (!latestStats || !mainWindow || mainWindow.isDestroyed()) return false;
+  if (options.force !== true && !mainWindowStatsPushWanted()) return false;
   const visibleStats = electronPresentationStats(latestStats);
   try {
     mainWindow.webContents.send('stats:push', {
@@ -5904,6 +5916,11 @@ function setTrayContentFromMenu(value) {
   settings.trayContent = next;
   saveSettings();
   updateTrayDisplay();
+  const hidden = !mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMinimized();
+  // A generated tray icon is composed from the renderer's last stats. When the
+  // window is hidden, deliver the current snapshot before the settings push so
+  // the first icon is not rendered from a stale reading.
+  if (hidden && rendererHiddenStatsNeeded()) sendStatsPresentationToRenderer({ force: true });
   pushSettingsToRenderer();
 }
 
@@ -5960,6 +5977,9 @@ function setWindowPresentationFromMenu(value) {
 
 function openSettingsFromTray(section) {
   focusExistingWindow();
+  // The tray action can render before the reveal sync's snapshot lands; send
+  // the current presentation first so the first paint is not stale.
+  sendStatsPresentationToRenderer({ force: true });
   sendMainWindowEvent('settings:open', section === 'notch' ? 'notch' : undefined);
 }
 
@@ -5967,6 +5987,8 @@ function openViewFromTray(viewId) {
   const normalized = String(viewId || '').trim().toLowerCase();
   if (!TRAY_OPEN_VIEW_IDS.has(normalized)) return;
   focusExistingWindow();
+  // Same first-paint protection as openSettingsFromTray.
+  sendStatsPresentationToRenderer({ force: true });
   sendMainWindowEvent('view:open', normalized);
 }
 
@@ -7408,8 +7430,18 @@ async function getDashboardHistory(options = {}) {
 // accepts before 'ready'.
 registerPluginScheme(protocol);
 
+function focusedAppWindow() {
+  try {
+    if (typeof BaseWindow.getFocusedWindow === 'function') {
+      const focused = BaseWindow.getFocusedWindow();
+      if (focused) return focused;
+    }
+  } catch (_) {}
+  return BrowserWindow.getFocusedWindow();
+}
+
 function appIsIdleForHeapCollection() {
-  if (quitRequested || BrowserWindow.getFocusedWindow() !== null) return false;
+  if (quitRequested || focusedAppWindow() !== null) return false;
   // A full collection pauses main for tens of milliseconds. Require a short
   // break in system input as well as app focus, so it cannot land in the middle
   // of a hover, drag or animation the user is watching.

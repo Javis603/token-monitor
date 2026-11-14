@@ -15,8 +15,9 @@
 // threshold instead of repeating every tick.
 //
 // Renderers keep their own committed heap and expose `gc` through the app's
-// js-flags switch. Theirs is independent of main's: the option runs on every
-// idle pass, while main itself only collects above its threshold.
+// js-flags switch. Theirs is independent of main's threshold; the app's callback
+// runs it on every idle pass, but that callback leaves a visible window alone.
+// Main itself only collects above its threshold.
 
 const MIN_HEAP_TOTAL_BYTES = 64 * 1024 * 1024;
 const RETAINED_HEADROOM_BYTES = 32 * 1024 * 1024;
@@ -69,6 +70,7 @@ function createIdleHeapCollector(options = {}) {
           // affect the widget or make the next check impossible.
         }
       }
+      if (stopped) return collected;
       if (collectRenderers) {
         try {
           await collectRenderers();
