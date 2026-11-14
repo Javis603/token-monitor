@@ -977,11 +977,12 @@ async function collectUsageOnce(options) {
   const cursorSnapshot = options.cursorSnapshot;
   const withoutCursor = (value) => normalizeClientsCsv(value).split(',').filter(client => client !== 'cursor').join(',');
   const cursorReports = new WeakMap();
-  const extractScanBundle = json => {
+  const extractScanBundle = (json, { partitions = true } = {}) => {
     const cursor = cursorReports.get(json);
-    if (!cursor) return extractUsageBundleFromTokscale(json);
-    const native = extractUsageBundleFromTokscale(json.native);
-    const remote = extractUsageBundleFromTokscale(cursor);
+    if (!cursor) return extractUsageBundleFromTokscale(json, { partitions });
+    const native = extractUsageBundleFromTokscale(json.native, { partitions });
+    const remote = extractUsageBundleFromTokscale(cursor, { partitions });
+    if (!partitions) return { period: mergePeriods(native.period, remote.period) };
     const byClient = { ...native.byClient };
     for (const [client, period] of Object.entries(remote.byClient)) {
       byClient[client] = byClient[client] ? mergePeriods(byClient[client], period) : period;
@@ -1188,12 +1189,12 @@ async function collectUsageOnce(options) {
       emitProgress({ today });
       const monthJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--month'], commandTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal);
-      month = extractScanBundle(monthJson).period;
+      month = extractScanBundle(monthJson, { partitions: false }).period;
       if (typeof options.onProgress === 'function') decorateLocalPeriods({ today, month });
       emitProgress({ today, month });
       const allTimeJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--since', allTimeSince], commandTimeoutMs: allTimeTimeoutMs, signal: options.signal });
       throwIfAborted(options.signal);
-      allTime = extractScanBundle(allTimeJson).period;
+      allTime = extractScanBundle(allTimeJson, { partitions: false }).period;
     }
     // Always decorate: session timestamps drive the recency sort regardless of the
     // Projects opt-out (issue #182). decorateLocalPeriods gates only project identity
