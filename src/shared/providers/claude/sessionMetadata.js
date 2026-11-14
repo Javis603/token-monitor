@@ -27,6 +27,10 @@ const MAX_METADATA_LINE_BYTES = 64 * 1024;
 const LONG_LINE_HEAD_BYTES = 64 * 1024;
 const LONG_LINE_TAIL_BYTES = 8 * 1024;
 const titleCache = new Map();
+// Each entry can retain up to ~72 KiB of boundary buffers. Bound the cache the
+// same way the Codex session index is bounded; an evicted title is re-read from
+// the file on its next use, so only cost, never correctness, is affected.
+const TITLE_CACHE_MAX_ENTRIES = 512;
 // Provenance of the winning title in the shared catalog-title ledger.
 const DESKTOP_TITLE_SOURCE = 'claude-desktop';
 const T3_TITLE_SOURCE = 't3';
@@ -587,6 +591,9 @@ function readSessionTitle(filePath, deps = {}) {
     fd = fsApi.openSync(file, 'r');
     scanRange(fd, start, stat.size - start, index, fsApi);
     const title = index.customTitle || index.aiTitle;
+    if (cache.size >= TITLE_CACHE_MAX_ENTRIES && !cache.has(file)) {
+      cache.delete(cache.keys().next().value);
+    }
     cache.set(file, {
       ...index,
       identity,

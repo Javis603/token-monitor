@@ -832,6 +832,18 @@ test('Claude session metadata prefers a persisted custom title', (t) => {
   assert.equal(readSessionTitle(file), 'My own title');
 });
 
+test('Claude session metadata bounds the title cache and evicts the oldest entry', (t) => {
+  const { dir, file } = fixture([JSON.stringify({ type: 'ai-title', aiTitle: 'Bounded' })]);
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const cache = new Map();
+  for (let i = 0; i < 512; i++) cache.set(`/missing/${i}`, { title: 'old' });
+
+  assert.equal(readSessionTitle(file, { cache }), 'Bounded');
+  assert.equal(cache.size, 512, 'the cache keeps its bound');
+  assert.equal(cache.has('/missing/0'), false, 'the oldest entry is evicted');
+  assert.equal(cache.has(file), true, 'the newest entry is retained');
+});
+
 test('Claude session metadata invalidates a cached miss when the transcript grows', (t) => {
   const { dir, file } = fixture([JSON.stringify({ type: 'user' })]);
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
