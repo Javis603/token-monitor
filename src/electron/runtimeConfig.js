@@ -12,6 +12,7 @@ const { normalizeCustomScanPaths } = require('../shared/customScanPaths');
 const { limitProviderSettingKeys } = require('../shared/limits/accounts');
 const { normalizeCursorAccountIds } = require('../shared/providers/cursor/account');
 const { limitsAccountConfig } = require('./limits/accountSettings');
+const { networkProxySource } = require('./networkProxy');
 
 const DEFAULT_ALL_TIME_SINCE = '2024-01-01';
 
@@ -215,7 +216,9 @@ function diagnosticConfigurationFromSettings(settings = {}, context = {}) {
       context.syncUploadIntervalMs ?? settings.syncUploadIntervalMs
     ),
     limitsRefreshMode: limits.limitsRefreshMode,
-    limitsRefreshMs: limits.limitsRefreshMs
+    limitsRefreshMs: limits.limitsRefreshMs,
+    networkProxySource: networkProxySource(settings, context.limits?.env),
+    claudeCliFallbackEnabled: limits.claudeCliFallbackEnabled
   };
 }
 
