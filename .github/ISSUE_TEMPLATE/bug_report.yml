@@ -19,7 +19,7 @@ body:
     id: platform
     attributes:
       label: OS and version
-      placeholder: e.g. Windows 11, macOS 15, Ubuntu 24.04; include architecture if known
+      placeholder: OS name and version, plus architecture if known (Apple silicon, Intel, x64 or arm64)
     validations:
       required: true
   - type: dropdown
