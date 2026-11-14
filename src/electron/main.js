@@ -525,7 +525,7 @@ const {
   normalizeWindowsBackdropMode,
   normalizeWindowsDockBackdropMode
 } = require('./windowsBackdropMode');
-const { syncWindowsBackdrop, windowsBackdropFallback } = require('./windowsBackdrop');
+const { refreshWindowsBackdrop, syncWindowsBackdrop, windowsBackdropFallback } = require('./windowsBackdrop');
 const {
   isLiquidGlassBackdrop,
   liquidGlassStyle,
@@ -7849,7 +7849,9 @@ function createWindow(boundsOverride, options = {}) {
     }
   };
   const win = process.platform === 'win32'
-    ? createRetainedWindow({ BaseWindow, WebContentsView }, windowOptions, options.previousWindow)
+    ? createRetainedWindow({ BaseWindow, WebContentsView }, windowOptions, options.previousWindow, {
+      beforeReveal: refreshWindowsBackdrop
+    })
     : new BrowserWindow(windowOptions);
   mainWindow = win;
   mainWindowChrome = { collapsedFloatingBubble };

@@ -179,6 +179,18 @@ function syncWindowsBackdrop(win, { enabled = true, mode = 'acrylic' } = {}, opt
   return state;
 }
 
+// A BaseWindow host draws its Acrylic as an opaque grey fill after being shown
+// (or after its predecessor is destroyed) until the material is applied again.
+function refreshWindowsBackdrop(win, options = {}) {
+  if ((options.platform || process.platform) !== 'win32' || !win || win.isDestroyed?.()) return false;
+  const state = windowStates.get(win);
+  if (state?.mode !== 'acrylic' && state?.fallback !== true) return false;
+  win.setBackgroundMaterial('none');
+  win.setBackgroundColor('#00000000');
+  win.setBackgroundMaterial('acrylic');
+  return true;
+}
+
 function windowsBackdropFallback(win) {
   return windowStates.get(win)?.fallback === true;
 }
@@ -187,6 +199,7 @@ module.exports = {
   DEFAULT_ACCENT_ARGB,
   applyWindowsAccentBlur,
   createAccentApi,
+  refreshWindowsBackdrop,
   syncWindowsBackdrop,
   windowsBackdropFallback
 };

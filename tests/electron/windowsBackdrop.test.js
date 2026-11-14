@@ -17,6 +17,7 @@ const {
   DEFAULT_ACCENT_ARGB,
   applyWindowsAccentBlur,
   createAccentApi,
+  refreshWindowsBackdrop,
   syncWindowsBackdrop,
   windowsBackdropFallback
 } = require('../../src/electron/windowsBackdrop');
@@ -325,4 +326,29 @@ test('experimental Accent mode uses the shared glass surface treatment', () => {
   assert.doesNotMatch(app, /windows-accent-backdrop/);
   assert.doesNotMatch(css, /windows-accent-backdrop/);
   assert.match(html, /id="windowsBackdropNote"[^>]*class="[^"]*hidden"/);
+});
+
+test('showing a host re-applies Acrylic only where Acrylic is the applied material', () => {
+  const refresh = f => refreshWindowsBackdrop(f.win, { platform: 'win32' });
+  const acrylic = materialFixture();
+  acrylic.sync({ mode: 'acrylic' });
+  acrylic.calls.length = 0;
+  assert.equal(refresh(acrylic), true);
+  assert.deepEqual(acrylic.calls, [['material', 'none'], ['color', '#00000000'], ['material', 'acrylic']]);
+
+  const fallback = materialFixture(false);
+  fallback.sync({ mode: 'accent' });
+  fallback.calls.length = 0;
+  assert.equal(refresh(fallback), true, 'an Accent fallback is drawn with Acrylic');
+
+  for (const settings of [{ mode: 'accent' }, { enabled: false }]) {
+    const f = materialFixture();
+    f.sync(settings);
+    f.calls.length = 0;
+    assert.equal(refresh(f), false);
+    assert.deepEqual(f.calls, []);
+  }
+  const unsynced = materialFixture();
+  assert.equal(refresh(unsynced), false);
+  assert.equal(refreshWindowsBackdrop(acrylic.win, { platform: 'darwin' }), false);
 });
