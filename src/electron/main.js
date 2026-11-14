@@ -7,6 +7,19 @@ const path = require('node:path');
 const { contentSecurityPolicyForRequest } = require('./contentSecurityPolicy');
 const { initializeHubProfiles, hubProfilesForRenderer, prepareHubProfilePatch } = require('./hubProfiles');
 const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences } = require('electron');
+const v8 = require('node:v8');
+
+// V8 sizes the young generation for throughput, not for a background widget:
+// Electron starts with a 32 MiB semi-space, so each isolate (main, the usage
+// worker and every renderer) reserves 64 MiB of new space and keeps it after a
+// scan burst. 8 MiB is still ample for this UI and the collector's short-lived
+// records, and it cuts that reservation to 16 MiB per isolate. Set it before
+// the usage worker is created; renderers and utility processes read the switch.
+const YOUNG_GENERATION_FLAG = '--max-semi-space-size=8';
+v8.setFlagsFromString(YOUNG_GENERATION_FLAG);
+if (!app.commandLine.getSwitchValue('js-flags')) {
+  app.commandLine.appendSwitch('js-flags', YOUNG_GENERATION_FLAG);
+}
 
 // All of the app's pages are the same local bundle, and every window Chromium
 // gives its own renderer costs a process baseline plus a compositor for what is
@@ -16,6 +29,7 @@ const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, glob
 app.commandLine.appendSwitch('process-per-site');
 
 const { createRetainedWindow, captureRetainedWindowState, restoreRetainedWindowState } = require('./retainedWindow');
+const { createIdleHeapCollector } = require('./idleHeap');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
 const { CredentialStore, credentialSettingsForRenderer, hasCredentialSettings, persistSettingsAndCredentials, stripCredentialSettings, writePrivateJsonAtomic } = require('../shared/credentialStore');
@@ -6235,6 +6249,7 @@ function disposePluginRuntime() {
 }
 
 let quitRequested = false;
+let idleHeapCollector = null;
 let quitInProgress = false;
 // Owned by the update-install guard below and by nothing else: electron-updater
 // restarts the process itself, so the exit has to stand down or the install
@@ -7330,6 +7345,12 @@ app.whenReady().then(() => {
   });
   applyMacActivationPolicy();
   createWindow();
+  idleHeapCollector = createIdleHeapCollector({
+    // A full collection pauses the main thread, so leave a focused window
+    // completely alone; the timer checks again on its next pass.
+    isIdle: () => !quitRequested && BrowserWindow.getFocusedWindow() === null
+  });
+  idleHeapCollector.start();
   syncLoginItemSettingFromOs();
   configureWindowToggleShortcut();
   // The retired in-app npm updater kept upstream tokscale builds here; the
@@ -8627,6 +8648,7 @@ app.on('render-process-gone', (_event, contents, details) => {
 // taking the quit over would cancel an OS-initiated logout or restart on macOS.
 app.on('before-quit', () => {
   quitRequested = true;
+  idleHeapCollector?.stop();
   limitsHistoryController?.dispose();
   limitsHistoryStore?.closeSync();
   // An updater can abort this quit; subsequent reads need an open store.

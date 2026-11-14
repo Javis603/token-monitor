@@ -1,0 +1,84 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+const { createIdleHeapCollector, MIN_HEAP_TOTAL_BYTES } = require('../../src/electron/idleHeap');
+
+const MiB = 1024 * 1024;
+
+function collectorFor(initial, options = {}) {
+  let heap = initial;
+  let collections = 0;
+  const collector = createIdleHeapCollector({
+    isIdle: () => true,
+    getHeap: () => heap,
+    collect: async () => {
+      collections += 1;
+      heap = options.afterCollect ? options.afterCollect(heap) : { heapTotal: 48 * MiB, heapUsed: 40 * MiB };
+    },
+    ...options.overrides
+  });
+  return { collector, collections: () => collections, setHeap: (next) => { heap = next; } };
+}
+
+test('an idle collector leaves a small committed heap alone', async () => {
+  const harness = collectorFor({ heapTotal: MIN_HEAP_TOTAL_BYTES - 1, heapUsed: 20 * MiB });
+  assert.equal(await harness.collector.run(), false);
+  assert.equal(harness.collections(), 0);
+});
+
+test('a large committed heap is collected and raises the next threshold', async () => {
+  const harness = collectorFor({ heapTotal: 120 * MiB, heapUsed: 56 * MiB });
+  assert.equal(await harness.collector.run(), true);
+  assert.equal(harness.collections(), 1);
+
+  // The retained set after collection sets a 72 MiB threshold (40 + 32).
+  harness.setHeap({ heapTotal: 70 * MiB, heapUsed: 60 * MiB });
+  assert.equal(await harness.collector.run(), false, 'a heap near the retained set is not collected again');
+  harness.setHeap({ heapTotal: 80 * MiB, heapUsed: 70 * MiB });
+  assert.equal(await harness.collector.run(), true, 'growth past the retained headroom is collected');
+});
+
+test('a focused window defers collection', async () => {
+  const harness = collectorFor({ heapTotal: 120 * MiB, heapUsed: 56 * MiB }, {
+    overrides: { isIdle: () => false }
+  });
+  assert.equal(await harness.collector.run(), false);
+  assert.equal(harness.collections(), 0);
+});
+
+test('a failed collection is retried on the next pass', async () => {
+  let fail = true;
+  const harness = collectorFor({ heapTotal: 120 * MiB, heapUsed: 56 * MiB }, {
+    overrides: {
+      collect: async () => {
+        if (fail) throw new Error('inspector unavailable');
+      }
+    }
+  });
+  assert.equal(await harness.collector.run(), false);
+  fail = false;
+  assert.equal(await harness.collector.run(), true);
+});
+
+test('start installs one timer and stop clears it', async () => {
+  const timer = { unrefCalled: false, unref() { this.unrefCalled = true; } };
+  let installed = null;
+  let cleared = null;
+  let runs = 0;
+  const collector = createIdleHeapCollector({
+    isIdle: () => true,
+    getHeap: () => ({ heapTotal: 0, heapUsed: 0 }),
+    collect: async () => { runs += 1; },
+    setInterval: (fn, ms) => { installed = { fn, ms }; return timer; },
+    clearInterval: (value) => { cleared = value; }
+  });
+  collector.start();
+  collector.start();
+  assert.equal(installed.ms, 5 * 60 * 1000);
+  assert.equal(timer.unrefCalled, true);
+  collector.stop();
+  assert.equal(cleared, timer);
+  assert.equal(await collector.run(), false, 'a stopped collector does not run');
+  assert.equal(runs, 0);
+});
