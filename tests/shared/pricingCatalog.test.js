@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { catalogRevision, createPricingCatalogRefresher } = require('../../src/shared/pricingCatalog');
+const { catalogRevision, catalogsFresh, createPricingCatalogRefresher } = require('../../src/shared/pricingCatalog');
 
 function fixture(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-price-refresh-'));
@@ -118,4 +118,62 @@ test('Windows catalog freshness and revisions follow the native roaming folder d
   f.fire();
   await refresher.whenIdle();
   assert.equal(downloads, 0, 'fresh native catalogs must not trigger a download from a mismatched APPDATA path');
+});
+
+test('freshness reuses a stat-verified catalog timestamp instead of re-reading the files', t => {
+  const f = fixture(t);
+  const names = ['litellm', 'openrouter', 'models-dev'];
+  for (const name of names) f.write(name);
+  const originalReadFileSync = fs.readFileSync;
+  const originalOpenSync = fs.openSync;
+  let fullReads = 0;
+  let prefixReads = 0;
+  fs.readFileSync = function readFileSync(file, ...args) {
+    if (String(file).includes(`${path.sep}cache${path.sep}pricing-`)) fullReads += 1;
+    return originalReadFileSync.call(this, file, ...args);
+  };
+  fs.openSync = function openSync(file, ...args) {
+    if (String(file).includes(`${path.sep}cache${path.sep}pricing-`)) prefixReads += 1;
+    return originalOpenSync.call(this, file, ...args);
+  };
+  t.after(() => {
+    fs.readFileSync = originalReadFileSync;
+    fs.openSync = originalOpenSync;
+  });
+
+  const options = { env: f.env };
+  assert.equal(catalogsFresh(options, f.timers.now()), true);
+  assert.equal(prefixReads, 3, 'the first check reads a bounded prefix from each catalog');
+  assert.equal(fullReads, 0, 'a standard catalog never needs the full-file parse');
+  assert.equal(catalogsFresh(options, f.timers.now()), true);
+  assert.equal(prefixReads, 3, 'unchanged files are answered from the cached timestamp');
+
+  f.advance(3_600_001);
+  assert.equal(catalogsFresh(options, f.timers.now()), false);
+  assert.equal(prefixReads, 3, 'expiry by time alone does not re-read the files');
+
+  fs.appendFileSync(path.join(f.env.TOKSCALE_CONFIG_DIR, 'cache', 'pricing-litellm.json'), ' ');
+  assert.equal(catalogsFresh(options, f.timers.now()), false);
+  assert.equal(prefixReads, 4, 'a replaced file is inspected again');
+  assert.equal(fullReads, 0, 'the prefix fallback was not needed');
+});
+
+test('an unexpected catalog layout falls back to the full parse', t => {
+  const f = fixture(t);
+  for (const name of ['litellm', 'openrouter', 'models-dev']) {
+    fs.writeFileSync(
+      path.join(f.env.TOKSCALE_CONFIG_DIR, 'cache', `pricing-${name}.json`),
+      JSON.stringify({ data: {}, timestamp: f.timers.now() / 1000 })
+    );
+  }
+  const originalReadFileSync = fs.readFileSync;
+  let fullReads = 0;
+  fs.readFileSync = function readFileSync(file, ...args) {
+    if (String(file).includes(`${path.sep}cache${path.sep}pricing-`)) fullReads += 1;
+    return originalReadFileSync.call(this, file, ...args);
+  };
+  t.after(() => { fs.readFileSync = originalReadFileSync; });
+
+  assert.equal(catalogsFresh({ env: f.env }, f.timers.now()), true);
+  assert.equal(fullReads, 3, 'a layout without the leading timestamp is still understood');
 });

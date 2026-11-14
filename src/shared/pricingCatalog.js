@@ -6,6 +6,30 @@ const { tokscaleConfigDir } = require('./tokscaleConfig');
 
 const CATALOG_FILES = ['pricing-litellm.json', 'pricing-openrouter.json', 'pricing-models-dev.json'];
 const FRESH_MS = 60 * 60 * 1000;
+// Catalogs are large (tens of MB together). The refresher only needs their
+// timestamp, so remember the parsed value until the file identity on disk
+// changes instead of re-reading and re-parsing every check.
+const catalogFreshness = new Map();
+// Every catalog writer emits `{"timestamp":…,"data":{…}}`, so the fields the
+// freshness check needs are in the first few bytes. Reading a bounded prefix
+// avoids turning a 9 MB catalog into a V8 object graph just to read one number.
+const CATALOG_PREFIX_BYTES = 4096;
+const CATALOG_TIMESTAMP_PREFIX = /^\s*\{\s*"timestamp"\s*:\s*(-?\d+(?:\.\d+)?)\s*,\s*"data"\s*:\s*\{/;
+
+function catalogTimestampFromPrefix(file) {
+  const prefix = Buffer.alloc(CATALOG_PREFIX_BYTES);
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    const read = fs.readSync(fd, prefix, 0, prefix.length, 0);
+    const match = CATALOG_TIMESTAMP_PREFIX.exec(prefix.toString('utf8', 0, read));
+    if (!match) return null;
+    const timestamp = Number(match[1]);
+    return Number.isFinite(timestamp) ? timestamp : null;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+}
 
 function catalogPaths(options = {}) {
   return CATALOG_FILES.map(name => path.join(tokscaleConfigDir(options), 'cache', name));
@@ -25,10 +49,33 @@ function catalogRevision(options = {}) {
 function catalogsFresh(options, now) {
   return catalogPaths(options).every(file => {
     try {
-      const value = JSON.parse(fs.readFileSync(file, 'utf8'));
-      return value.data && Number.isFinite(value.timestamp)
-        && value.timestamp * 1000 <= now && now - value.timestamp * 1000 < FRESH_MS;
-    } catch (_) { return false; }
+      const stat = fs.statSync(file);
+      const key = [stat.size, stat.mtimeMs, stat.ctimeMs].join(':');
+      const cached = catalogFreshness.get(file);
+      let timestamp;
+      if (cached?.key === key) {
+        timestamp = cached.timestamp;
+      } else {
+        timestamp = catalogTimestampFromPrefix(file);
+        if (timestamp === null) {
+          // An unexpected layout keeps the full parse as the correctness
+          // fallback; it can still be cached by the same file identity.
+          const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+          if (!value?.data || !Number.isFinite(value.timestamp)) {
+            catalogFreshness.delete(file);
+            return false;
+          }
+          timestamp = value.timestamp;
+        }
+        catalogFreshness.set(file, { key, timestamp });
+      }
+      return timestamp * 1000 <= now && now - timestamp * 1000 < FRESH_MS;
+    } catch (_) {
+      // A missing or unreadable file cannot stay cached: the next check must
+      // see a replacement that appears between calls.
+      catalogFreshness.delete(file);
+      return false;
+    }
   });
 }
 
@@ -78,4 +125,4 @@ function createPricingCatalogRefresher(options, timers = {}) {
   };
 }
 
-module.exports = { catalogRevision, createPricingCatalogRefresher };
+module.exports = { catalogRevision, catalogsFresh, createPricingCatalogRefresher };
