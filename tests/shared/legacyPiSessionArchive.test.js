@@ -48,11 +48,15 @@ function fixture(t, parentReference = 'parent') {
   const root = path.join(homeDir, '.omp', 'agent', 'sessions', 'bucket');
   fs.mkdirSync(root, { recursive: true });
   const parent = path.join(root, '2026-11-02T10-00-00_parent.jsonl');
-  const fork = path.join(root, '2026-11-02T11-00-00_fork.jsonl');
+  // A `/tan` fork is task-named under its parent's directory; its id is only in the header.
+  const fork = parentReference === 'task'
+    ? path.join(root, '2026-11-02T10-00-00_parent', 'Tan-test.jsonl')
+    : path.join(root, '2026-11-02T11-00-00_fork.jsonl');
+  fs.mkdirSync(path.dirname(fork), { recursive: true });
   fs.writeFileSync(parent, JSON.stringify({ type: 'session', id: 'parent' }) + '\n');
   fs.writeFileSync(fork, [
     JSON.stringify({ type: 'title', title: 'synthetic' }),
-    JSON.stringify({ type: 'session', id: 'fork', parentSession: parentReference === 'path' ? parent : parentReference })
+    JSON.stringify({ type: 'session', id: 'fork', parentSession: parentReference === 'path' ? parent : 'parent' })
   ].join('\n') + '\n');
   return { homeDir, root, parent, fork };
 }
@@ -65,7 +69,7 @@ function assertOnlyParent(visible) {
   }
 }
 
-for (const parentReference of ['parent', 'path']) {
+for (const parentReference of ['parent', 'path', 'task']) {
   test(`pre-split Pi fork with an OMP parent ${parentReference} is not replayed`, t => {
     const { homeDir } = fixture(t, parentReference);
     const archive = legacyArchive();

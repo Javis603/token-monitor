@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { findTimestampedSessionFiles, isSafeSessionId } = require('../../sessionFiles');
 const { resolveOmpSessionsDir } = require('./paths');
-const { readOmpSessionHeader } = require('./subagents');
+const { findOmpSubagentSessionFiles, readOmpSessionHeader } = require('./subagents');
 
 // An OMP fork can disappear from a complete usage report when every response
 // was already counted in its parent. Only resolve local OMP identities here;
@@ -12,6 +12,8 @@ const { readOmpSessionHeader } = require('./subagents');
 function resolveOmpForkParents(sessionIds, liveSessions, options = {}) {
   const root = resolveOmpSessionsDir({ homeDir: options.homeDir || os.homedir() });
   const files = findTimestampedSessionFiles(root, sessionIds);
+  const unnamed = sessionIds.filter(id => !files.has(id));
+  for (const [id, file] of findOmpSubagentSessionFiles(root, unnamed)) files.set(id, file);
   const headers = new Map();
   const parentIds = new Set();
   for (const [id, file] of files) {

@@ -38,29 +38,27 @@ function readOmpSessionHeader(filePath, fsApi = fs) {
   return null;
 }
 
-function findOmpSubagentSessionFile(root, sessionId, options = {}) {
+// Task-named transcripts (subagents, `/tan` forks) carry their id only in the
+// header. One walk serves every wanted id.
+function findOmpSubagentSessionFiles(root, sessionIds, options = {}) {
   const rootDir = String(root || '');
-  if (!rootDir) return '';
+  const wanted = new Set(sessionIds);
+  const found = new Map();
+  if (!rootDir || wanted.size === 0) return found;
   const fsApi = options.fs || fs;
-  let found = '';
 
   function walk(dir, depth) {
-    if (found) return;
+    if (found.size >= wanted.size) return;
     let entries;
     try { entries = fsApi.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
     for (const entry of entries) {
-      if (found) return;
+      if (found.size >= wanted.size) return;
       const filePath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
         walk(filePath, depth + 1);
-      } else if (
-        depth >= 2
-        && entry.isFile()
-        && entry.name.endsWith('.jsonl')
-        && readOmpSessionHeader(filePath, fsApi)?.id === sessionId
-      ) {
-        found = filePath;
-        return;
+      } else if (depth >= 2 && entry.isFile() && entry.name.endsWith('.jsonl')) {
+        const id = readOmpSessionHeader(filePath, fsApi)?.id;
+        if (wanted.has(id) && !found.has(id)) found.set(id, filePath);
       }
     }
   }
@@ -69,4 +67,8 @@ function findOmpSubagentSessionFile(root, sessionId, options = {}) {
   return found;
 }
 
-module.exports = { findOmpSubagentSessionFile, readOmpSessionHeader };
+function findOmpSubagentSessionFile(root, sessionId, options = {}) {
+  return findOmpSubagentSessionFiles(root, [sessionId], options).get(sessionId) || '';
+}
+
+module.exports = { findOmpSubagentSessionFile, findOmpSubagentSessionFiles, readOmpSessionHeader };
