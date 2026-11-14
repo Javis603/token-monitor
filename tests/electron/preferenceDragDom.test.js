@@ -779,3 +779,29 @@ test('health reconciliation preserves control ownership when edition rows shift'
   assert.equal(same({ ...node('rescan'), dataset: { healthAction: 'rescan' } },
     { ...node('rescan'), dataset: { healthAction: 'reveal' } }), false);
 });
+
+
+test('client keyboard moves keep pinned groups inside the pinned block', () => {
+  const app = readRendererFile('app.js');
+  const saves = [];
+  const state = { settings: { pinnedClients: 'codex,claude', clientDisplayOrder: '' } };
+  const context = vm.createContext({
+    state, KNOWN_CLIENTS: ['codex','claude','qoder','qodercn'].map(id => ({ id })),
+    clientDisplayPreferencesApi: require('../../src/electron/renderer/clientDisplayPreferences'),
+    qoderDisplayApi: require('../../src/electron/renderer/qoderDisplay'),
+    pinnedClientSet: () => new Set(state.settings.pinnedClients.split(',')),
+    saveSettings: patch => { saves.push(JSON.parse(JSON.stringify(patch))); }
+  });
+  vm.runInContext(functionBody(app, 'onPreferenceOrderKeydown', 'resetClientDisplayOrder').replace(/async\s*$/, ''), context);
+  const move = (id, key) => context.onPreferenceOrderKeydown({ key, preventDefault() {} }, 'client', id);
+  move('codex', 'End');
+  assert.deepEqual(saves.pop(), { pinnedClients: 'claude,codex' });
+  move('claude', 'ArrowDown');
+  assert.equal(saves.length, 0);
+  state.settings.pinnedClients = 'qodercn,codex,claude';
+  move('qoder', 'End');
+  assert.deepEqual(saves.pop(), { pinnedClients: 'codex,claude,qodercn' });
+  state.settings.clientDisplayOrder = 'codex,claude,qoder,qodercn';
+  move('codex', 'End');
+  assert.deepEqual(saves.pop(), { clientDisplayOrder: 'claude,qoder,qodercn,codex', pinnedClients: '' });
+});

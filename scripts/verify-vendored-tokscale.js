@@ -396,10 +396,10 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
   },
   {
     client: 'qoder',
-    expectedRow: { model: 'claude-sonnet-4-6', input: 1260, output: 180, cacheRead: 640, cacheWrite: 0, reasoning: 90 },
+    expectedRow: { model: 'claude-sonnet-4-6', input: 1660, output: 200, cacheRead: 1240, cacheWrite: 0, reasoning: 90 },
     hasExplicitTotal: false,
-    expectedPeriod: { totalTokens: 2170, clientTokens: 2170, clientOutputTokens: 270 },
-    expectedSession: { id: 'global-qsess-1', totalTokens: 2170, outputTokens: 270, reasoningTokens: 90 },
+    expectedPeriod: { totalTokens: 3190, clientTokens: 3190, clientOutputTokens: 290 },
+    expectedSession: { id: 'global-qsess-1', totalTokens: 3190, outputTokens: 290, reasoningTokens: 90 },
     writeFixture(home) {
       const dir = path.join(home, '.qoder', 'projects', 'ws');
       fs.mkdirSync(dir, { recursive: true });
@@ -413,8 +413,10 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
       const complete = { ...inclusive, message: { ...inclusive.message, usage: { ...inclusive.message.usage, thoughtsTokenCount: 10 } } };
       const cross = { ...inclusive, message: { ...inclusive.message, id: 'global-m4' } };
       const crossComplete = { ...complete, message: { ...complete.message, id: 'global-m4' } };
-      fs.writeFileSync(path.join(dir, 'a-stale.jsonl'), `${JSON.stringify(stale)}\n${JSON.stringify(staleGemini)}\n${JSON.stringify(cross)}\n`);
-      fs.writeFileSync(path.join(dir, 'tm-contract.jsonl'), [placeholder, message, gemini, inclusive, complete, crossComplete].map(row => JSON.stringify(row)).join('\n') + '\n');
+      const unsplit = { ...message, message: { ...message.message, id: 'global-m5', usage: { input_tokens: 1000, output_tokens: 20 } } };
+      const split = { ...unsplit, message: { ...unsplit.message, usage: { input_tokens: 400, cache_read_input_tokens: 600, output_tokens: 20 } } };
+      fs.writeFileSync(path.join(dir, 'a-stale.jsonl'), `${JSON.stringify(stale)}\n${JSON.stringify(staleGemini)}\n${JSON.stringify(cross)}\n${JSON.stringify(unsplit)}\n`);
+      fs.writeFileSync(path.join(dir, 'tm-contract.jsonl'), [placeholder, message, gemini, inclusive, complete, crossComplete, split].map(row => JSON.stringify(row)).join('\n') + '\n');
     }
   },
   {
@@ -610,7 +612,7 @@ function hermeticEnv(home) {
     ...process.env,
     HOME: home,
     USERPROFILE: home, // Windows equivalent of HOME for path resolution
-    APPDATA: path.join(home, 'AppData', 'Roaming'), // Qoder CN's database root on Windows
+    APPDATA: path.join(home, 'AppData', 'Roaming'), // Isolate Windows application-data roots.
     XDG_CONFIG_HOME: path.join(home, '.config'),
     XDG_DATA_HOME: path.join(home, '.local', 'share'),
     XDG_CACHE_HOME: path.join(home, '.cache'),

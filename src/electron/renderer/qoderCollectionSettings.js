@@ -5,7 +5,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorQoderCollectionSettings = api;
 })(typeof window !== 'undefined' ? window : null, function createQoderCollectionSettings() {
-  function create({ document, t, editions, clients, separate, hidden, pinned, visibilityIcon, pinIcon, onTrack, onSeparate, onVisibility, onPin }) {
+  function create({ document, t, editions, clients, separate, hidden, pinned, visibilityIcon, pinIcon, onTrack, onSeparate, onVisibility, onPin, formatTime }) {
     const container = document.createElement('div');
     container.className = 'qoder-collection-settings';
     const tracked = new Set(String(clients || '').split(','));
@@ -59,7 +59,18 @@
       };
       actions.append(action('visibility', hidden.has(id), visibilityIcon(hidden.has(id)), onVisibility), action('pin', pinned.has(id), pinIcon(), onPin));
       line.append(track, actions);
-      container.append(line);
+      const editionRow = document.createElement('div');
+      editionRow.className = 'qoder-edition';
+      editionRow.append(line);
+      for (const [field, key] of [['lastAttemptAt', 'settings.tools.health.lastAttempt'], ['lastSuccessAt', 'settings.tools.health.lastSuccess']]) {
+        const stamp = edition.collection[field];
+        if (!stamp) continue;
+        const meta = document.createElement('div');
+        meta.className = 'tool-health-group-meta';
+        meta.textContent = t(key, { time: formatTime(stamp) });
+        editionRow.append(meta);
+      }
+      container.append(editionRow);
     }
     container.append(toggle('qoderSeparateDisplay', t('settings.tools.qoder.separate'), separate, onSeparate));
     const hint = document.createElement('p');

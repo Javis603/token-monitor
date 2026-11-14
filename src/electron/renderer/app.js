@@ -11602,7 +11602,8 @@ function qoderCollectionControls(group) {
       await saveSettings({ clients: [...selected].join(',') });
     },
     onSeparate: checked => saveSettings({ separateQoderClients: checked }),
-    onVisibility: onClientVisibilityToggle, onPin: onClientPinnedToggle
+    onVisibility: onClientVisibilityToggle, onPin: onClientPinnedToggle,
+    formatTime: stamp => formatAgo(Math.max(0, Date.now() - (Date.parse(stamp) || Date.now())))
   });
 }
 
@@ -13321,7 +13322,11 @@ function onPreferenceOrderKeydown(event, kind, id) {
     const ordered = clientDisplayPreferencesApi.orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients).map(client => client.id);
     const order = qoderDisplayApi.displayPreference(ordered.join(','), false).split(',');
     const from = order.indexOf(id);
-    const target = event.key === 'Home' ? 0 : event.key === 'End' ? order.length - 1 : from + (event.key === 'ArrowUp' ? -1 : 1);
+    let target = event.key === 'Home' ? 0 : event.key === 'End' ? order.length - 1 : from + (event.key === 'ArrowUp' ? -1 : 1);
+    const pinned = qoderDisplayApi.displayPreference([...pinnedClientSet()].join(','), false).split(',').filter(Boolean);
+    if (!clientDisplayPreferencesApi.hasCustomDisplayOrder(state.settings?.clientDisplayOrder) && pinned.includes(id)) {
+      target = Math.max(0, Math.min(pinned.length - 1, target));
+    }
     if (from < 0 || target < 0 || target >= order.length || target === from) return;
     order.splice(from, 1);
     order.splice(target, 0, id);
