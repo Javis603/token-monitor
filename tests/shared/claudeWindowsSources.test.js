@@ -36,3 +36,24 @@ test('Claude MSIX discovery is disabled outside Windows and without an absolute 
   assert.deepEqual(claudeDesktopMsixSourceRoots({ env: { LOCALAPPDATA: 'relative' }, platform: 'win32' }), []);
   assert.deepEqual(claudeDesktopMsixSourceRoots({ env: { LOCALAPPDATA: '/tmp/local' }, platform: 'linux' }), []);
 });
+
+test('Anthropic Claude MSIX package discovers the legacy LocalCache/Roaming/Claude leaf', (t) => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-claude-msix-legacy-'));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const local = path.join(home, 'LocalAppData');
+  const profile = path.join(local, 'Packages', 'AnthropicPBC.Claude_8wekyb3d8bbwe', 'LocalCache', 'Roaming', 'Claude');
+  const transcripts = path.join(profile, 'claude-code-sessions');
+  const leveldb = path.join(profile, 'IndexedDB', 'https_claude.ai_0.indexeddb.leveldb');
+  fs.mkdirSync(transcripts, { recursive: true });
+  fs.mkdirSync(leveldb, { recursive: true });
+
+  const roots = claudeDesktopMsixSourceRoots({ env: { LOCALAPPDATA: local }, platform: 'win32' });
+  assert.ok(roots.some(([, dir]) => dir === transcripts));
+  assert.ok(roots.some(([, dir]) => dir === leveldb));
+
+  const registered = clientSourceRoots('claude', {
+    homeDir: home, env: { LOCALAPPDATA: local }, platform: 'win32'
+  }).claude;
+  assert.ok(registered.some(root => root.dir === transcripts));
+  assert.ok(registered.some(root => root.dir === leveldb));
+});

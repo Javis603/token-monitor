@@ -190,8 +190,9 @@ function claudeDesktopMsixSourceRoots({ env, platform }) {
   const localAppData = key ? String(env[key] || '').trim() : '';
   if (!localAppData || !path.isAbsolute(localAppData)) return [];
   const roots = [];
-  const addProfile = (profile) => {
-    if (!path.basename(profile).toLowerCase().startsWith('claude_')) return;
+  const addProfile = (profile, allowClaudeLeaf = false) => {
+    const name = path.basename(profile).toLowerCase();
+    if (!name.startsWith('claude_') && !(allowClaudeLeaf && name === 'claude')) return;
     for (const lane of ['local-agent-mode-sessions', 'claude-code-sessions']) {
       const dir = path.join(profile, lane);
       if (fs.existsSync(dir)) roots.push(['claude-desktop-transcripts', dir, null, true]);
@@ -215,8 +216,15 @@ function claudeDesktopMsixSourceRoots({ env, platform }) {
     for (const entry of fs.readdirSync(packages, { withFileTypes: true })) {
       if (!entry.isDirectory() || !entry.name.toLowerCase().includes('claude')) continue;
       const root = path.join(packages, entry.name);
-      addProfile(root);
-      for (const child of ['LocalCache', 'LocalState', 'RoamingState']) addProfile(path.join(root, child));
+      for (const candidate of [
+        root,
+        path.join(root, 'LocalCache'),
+        path.join(root, 'LocalCache', 'Roaming', 'Claude'),
+        path.join(root, 'LocalState'),
+        path.join(root, 'RoamingState')
+      ]) {
+        addProfile(candidate, path.basename(candidate).toLowerCase() === 'claude');
+      }
       try {
         for (const nested of fs.readdirSync(root, { withFileTypes: true })) {
           if (nested.isDirectory()) addProfile(path.join(root, nested.name));
