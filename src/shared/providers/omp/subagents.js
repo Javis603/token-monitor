@@ -6,13 +6,13 @@ const path = require('node:path');
 const FIRST_READ_BYTES = 64 * 1024;
 const MAX_SCAN_LINES = 8;
 
-function sessionHeaderMatches(filePath, sessionId, fsApi) {
+function readOmpSessionHeader(filePath, fsApi = fs) {
   let fd;
   try {
     fd = fsApi.openSync(filePath, 'r');
     const buffer = Buffer.alloc(FIRST_READ_BYTES);
     const bytesRead = fsApi.readSync(fd, buffer, 0, buffer.length, 0);
-    if (bytesRead <= 0) return false;
+    if (bytesRead <= 0) return null;
     const chunk = buffer.subarray(0, bytesRead);
     let start = 0;
     let lines = 0;
@@ -24,18 +24,18 @@ function sessionHeaderMatches(filePath, sessionId, fsApi) {
       if (raw.length === 0) continue;
       lines += 1;
       let record;
-      try { record = JSON.parse(raw.toString('utf8')); } catch (_) { return false; }
+      try { record = JSON.parse(raw.toString('utf8')); } catch (_) { return null; }
       if (record?.type === 'title') continue;
-      if (record?.type === 'session') return String(record.id) === sessionId;
+      if (record?.type === 'session') return typeof record.id === 'string' ? record : null;
     }
   } catch (_) {
-    return false;
+    return null;
   } finally {
     if (fd !== undefined) {
       try { fsApi.closeSync(fd); } catch (_) {}
     }
   }
-  return false;
+  return null;
 }
 
 function findOmpSubagentSessionFile(root, sessionId, options = {}) {
@@ -57,7 +57,7 @@ function findOmpSubagentSessionFile(root, sessionId, options = {}) {
         depth >= 2
         && entry.isFile()
         && entry.name.endsWith('.jsonl')
-        && sessionHeaderMatches(filePath, sessionId, fsApi)
+        && readOmpSessionHeader(filePath, fsApi)?.id === sessionId
       ) {
         found = filePath;
         return;
@@ -69,4 +69,4 @@ function findOmpSubagentSessionFile(root, sessionId, options = {}) {
   return found;
 }
 
-module.exports = { findOmpSubagentSessionFile };
+module.exports = { findOmpSubagentSessionFile, readOmpSessionHeader };
