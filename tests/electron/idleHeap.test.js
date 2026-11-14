@@ -115,7 +115,7 @@ test('start installs an early check and the steady interval, and stop clears bot
   collector.start();
   collector.start();
   assert.equal(installedInitial.ms, 60 * 1000);
-  assert.equal(installedInterval.ms, 5 * 60 * 1000);
+  assert.equal(installedInterval.ms, 2 * 60 * 1000);
   assert.equal(initialTimer.unrefCalled, true);
   assert.equal(intervalTimer.unrefCalled, true);
   installedInitial.fn();

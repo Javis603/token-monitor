@@ -19,7 +19,7 @@
 
 const MIN_HEAP_TOTAL_BYTES = 64 * 1024 * 1024;
 const RETAINED_HEADROOM_BYTES = 32 * 1024 * 1024;
-const DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
+const DEFAULT_INTERVAL_MS = 2 * 60 * 1000;
 // The first complete collection usually finishes well inside a minute. Check
 // once then, so the startup high-water is returned before the steady-state
 // cadence rather than lingering for five minutes.
