@@ -208,11 +208,19 @@ async function fetchJson(url, headers, deps = {}, options = {}) {
     }
     return await response.json();
   } catch (error) {
-    if (error?.name === 'AbortError') throw errorWithStatus('unavailable', `${url} timed out`);
+    if (error?.name === 'AbortError') throw requestTimeoutError(`${url} timed out`);
     throw error;
   } finally {
     if (timer) clearTimeout(timer);
   }
+}
+
+// Still `unavailable` to the runtime; the code only lets the diagnostic report
+// tell a timeout from an outage.
+function requestTimeoutError(message) {
+  const error = errorWithStatus('unavailable', message);
+  error.code = 'REQUEST_TIMEOUT';
+  return error;
 }
 
 function pathDelimiterForPlatform(platform = process.platform) {
@@ -250,6 +258,7 @@ module.exports = {
   pathDelimiterForPlatform,
   planLabelFromParts,
   providerStatusFromError,
+  requestTimeoutError,
   runProcessText,
   statusForHttp,
   toIso,

@@ -221,7 +221,8 @@ test('diagnostic events expose queue state without leaking scoped credentials', 
     retryAt: null,
     lastAttemptAt: diagnostics.providers[0].lastAttemptAt,
     lastSuccessAt: '2026-07-21T00:00:00.000Z',
-    lastFailureCode: null
+    lastFailureCode: null,
+    lastFailureDetail: null
   });
   assert.match(diagnostics.providers[0].lastAttemptAt, /^\d{4}-\d{2}-\d{2}T/);
   runtime.stop();

@@ -28,9 +28,11 @@ const {
   pathApiForPlatform,
   pathDelimiterForPlatform,
   planLabelFromParts,
+  requestTimeoutError,
   runProcessText,
   uniqueStrings
 } = require('../../limits/providerHelpers');
+const { limitStage } = require('../../limits/failureDetail');
 
 const CLAUDE_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const CLAUDE_PROFILE_URL = 'https://api.anthropic.com/api/oauth/profile';
@@ -612,7 +614,9 @@ async function refreshClaudeAccessToken(refreshToken, deps = {}) {
     if (!response.ok) {
       const status = response.status === 400 || response.status === 401 ? 'unauthorized'
         : response.status === 429 ? 'sourceRateLimited' : 'unavailable';
-      throw errorWithStatus(status, `oauth/token returned ${response.status}`);
+      const error = errorWithStatus(status, `oauth/token returned ${response.status}`);
+      error.httpStatus = response.status;
+      throw error;
     }
     const json = await response.json();
     const nowMs = (deps.now || Date.now)();
@@ -623,7 +627,7 @@ async function refreshClaudeAccessToken(refreshToken, deps = {}) {
       expiresAt: nowMs + lifetimeSec * 1000
     };
   } catch (error) {
-    if (error?.name === 'AbortError') throw errorWithStatus('unavailable', 'oauth/token timed out');
+    if (error?.name === 'AbortError') throw requestTimeoutError('oauth/token timed out');
     throw error;
   } finally {
     if (timer) clearTimeout(timer);
@@ -666,7 +670,7 @@ function callClaudeUsage(accessToken, deps = {}) {
     authorization: `Bearer ${accessToken}`,
     'anthropic-beta': 'oauth-2025-04-20',
     'user-agent': CLAUDE_CLI_USER_AGENT
-  }, deps);
+  }, deps).catch(limitStage('oauth-usage'));
 }
 
 function callClaudeProfile(accessToken, deps = {}) {
@@ -674,7 +678,7 @@ function callClaudeProfile(accessToken, deps = {}) {
     accept: 'application/json',
     authorization: `Bearer ${accessToken}`,
     'user-agent': TOKEN_MONITOR_USER_AGENT
-  }, deps);
+  }, deps).catch(limitStage('oauth-profile'));
 }
 
 function claudeWebOrganizations(body) {
@@ -1152,9 +1156,9 @@ async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
       deps.logger?.(`[limits] Claude Web session renewal could not be persisted: ${error.message}`);
     }
   };
-  const fetchWebJson = (url) => fetchClaudeWebJson(url, session.headers(), deps, {
+  const fetchWebJson = (url, stage) => fetchClaudeWebJson(url, session.headers(), deps, {
     onResponse: observeResponse
-  });
+  }).catch(limitStage(stage));
   const fingerprint = claudeWebIdentityFingerprint(cookie);
   const selectedId = normalizeClaudeWebOrganizationId(options.claudeWebOrganizationId);
   let context = claudeCachedIdentity(fingerprint, deps);
@@ -1162,16 +1166,17 @@ async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
   let usage;
   if (!context) {
     const stale = claudeCachedIdentity(fingerprint, deps, { allowStale: true });
-    const organizationsBody = await fetchWebJson(`${baseUrl}/api/organizations`);
+    const organizationsBody = await fetchWebJson(`${baseUrl}/api/organizations`, 'web-organizations');
     const organizations = claudeWebOrganizations(organizationsBody);
     const organization = selectClaudeWebOrganization(organizations, selectedId);
     const organizationId = claudeWebOrganizationId(organization);
     if (!organizationId) throw errorWithStatus('unavailable', 'Claude Web organization not found');
     usage = await fetchWebJson(
-      `${baseUrl}/api/organizations/${encodeURIComponent(organizationId)}/usage?${CLAUDE_RESET_GRANTS_QUERY}`
+      `${baseUrl}/api/organizations/${encodeURIComponent(organizationId)}/usage?${CLAUDE_RESET_GRANTS_QUERY}`,
+      'web-usage'
     );
     try {
-      const accountBody = await fetchWebJson(`${baseUrl}/api/account`);
+      const accountBody = await fetchWebJson(`${baseUrl}/api/account`, 'web-account');
       context = cacheClaudeIdentity(fingerprint, {
         organizationId,
         selectedOrganizationId: selectedId,
@@ -1190,7 +1195,8 @@ async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
     }
   } else {
     usage = await fetchWebJson(
-      `${baseUrl}/api/organizations/${encodeURIComponent(context.organizationId)}/usage?${CLAUDE_RESET_GRANTS_QUERY}`
+      `${baseUrl}/api/organizations/${encodeURIComponent(context.organizationId)}/usage?${CLAUDE_RESET_GRANTS_QUERY}`,
+      'web-usage'
     );
   }
   const renewedCookie = session.cookie();
@@ -1214,7 +1220,8 @@ async function fetchClaudeWebLimits(cookie, deps = {}, options = {}) {
   if (wantsPrepaid && !cachedPrepaid) {
     try {
       const prepaid = await fetchWebJson(
-        `${baseUrl}/api/organizations/${encodeURIComponent(context.organizationId)}/prepaid/credits`
+        `${baseUrl}/api/organizations/${encodeURIComponent(context.organizationId)}/prepaid/credits`,
+        'web-prepaid'
       );
       balance = cacheClaudePrepaid(prepaidKey, claudePrepaidBalance(prepaid), deps);
     } catch (error) {
@@ -1339,11 +1346,14 @@ async function delegatedClaudeRefresh(currentCredentials, deps = {}, options = {
 
 async function refreshClaudeCredentials(currentCredentials, deps = {}, options = {}) {
   const platform = deps.platform || process.platform;
-  if (platform === 'darwin') return delegatedClaudeRefresh(currentCredentials, deps, options);
+  if (platform === 'darwin') {
+    return delegatedClaudeRefresh(currentCredentials, deps, options).catch(limitStage('oauth-refresh'));
+  }
   if (!currentCredentials.refreshToken) {
     throw errorWithStatus('unauthorized', 'No refresh token available');
   }
-  const refreshed = await refreshClaudeAccessToken(currentCredentials.refreshToken, deps);
+  const refreshed = await refreshClaudeAccessToken(currentCredentials.refreshToken, deps)
+    .catch(limitStage('oauth-refresh'));
   await persistClaudeRefresh(currentCredentials, refreshed, deps);
   return { ...currentCredentials, ...refreshed };
 }
@@ -1394,6 +1404,7 @@ async function fetchClaudeAccountsLimits(options = {}, deps = {}) {
         }), { signal: deps.signal, deadlineMs: deps.claudeAccountTimeoutMs || 45000 });
     } catch (error) {
       if (deps.signal?.aborted) throw abortError(deps.signal);
+      deps.noteLimitFailure?.(error, { source: 'web' });
       const cached = claudeCachedIdentity(claudeWebIdentityFingerprint(renewedCookies.get(account.cookie) || account.cookie), deps, { allowStale: true });
       const identity = cached?.selectedOrganizationId === account.organizationId ? cached.identity : null;
       row = normalizeLimitProvider({
@@ -1431,6 +1442,7 @@ async function fetchClaudeAccountsLimits(options = {}, deps = {}) {
     }
   } catch (error) {
     if (deps.signal?.aborted) throw abortError(deps.signal);
+    deps.noteLimitFailure?.(error, { source: 'oauth' });
     local = { provider: 'claude', status: error?.status || 'unavailable', windows: [] };
     rows.push(local);
   }
@@ -1477,7 +1489,7 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
   if (webCookie) return fetchClaudeWebLimits(webCookie, deps, options);
   let oauthIdentity = null;
   try {
-    let credentials = await readClaudeCredentials(deps);
+    let credentials = await readClaudeCredentials(deps).catch(limitStage('credentials'));
     oauthIdentity = claudeCachedIdentity(
       claudeOauthIdentityFingerprint(credentials),
       deps,
@@ -1543,7 +1555,10 @@ async function fetchClaudeLimits(options = {}, deps = {}) {
         accountEmail: oauthIdentity.accountEmail,
         accountName: oauthIdentity.accountName
       };
-    } catch (_) {
+    } catch (fallbackError) {
+      // The OAuth error stays the published one; the CLI's own failure is
+      // otherwise invisible, and it is the half a Windows report needs.
+      if (fallbackError !== error) deps.noteLimitFailure?.(fallbackError, { source: 'cli', stage: 'cli-usage' });
       throw error;
     }
   }

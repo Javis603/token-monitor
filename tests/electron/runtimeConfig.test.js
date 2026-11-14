@@ -198,9 +198,22 @@ test('diagnostic configuration projects effective normalized values without cred
     wslScanEnabled: false,
     syncUploadIntervalMs: 20 * 60 * 1000,
     limitsRefreshMode: 'fixed',
-    limitsRefreshMs: 5 * 60 * 1000
+    limitsRefreshMs: 5 * 60 * 1000,
+    networkProxySource: 'system',
+    claudeCliFallbackEnabled: true
   });
   assert.equal(JSON.stringify(configuration).includes('secret'), false);
+});
+
+test('diagnostic configuration names the proxy source without its URL', () => {
+  const context = { limits: { env: { HTTPS_PROXY: 'http://user:env-secret@proxy.example:8080' } } };
+  const fromEnv = diagnosticConfigurationFromSettings({ claudeCliFallbackEnabled: false }, context);
+  assert.equal(fromEnv.networkProxySource, 'environment');
+  assert.equal(fromEnv.claudeCliFallbackEnabled, false);
+  const fromSetting = diagnosticConfigurationFromSettings({ proxyUrl: 'http://proxy.example:3128' }, context);
+  assert.equal(fromSetting.networkProxySource, 'setting');
+  assert.equal(JSON.stringify([fromEnv, fromSetting]).includes('secret'), false);
+  assert.equal(JSON.stringify([fromEnv, fromSetting]).includes('proxy.example'), false);
 });
 
 test('diagnostic configuration preserves a custom all-time date and false flags', () => {

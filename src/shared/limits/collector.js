@@ -167,11 +167,20 @@ function createProbeFetch(fetchFn, context = {}, deps = {}) {
   return async (url, init = {}) => {
     const signals = [context.signal, init.signal].filter(Boolean);
     const signal = signals.length > 1 ? AbortSignal.any(signals) : signals[0];
-    const response = await fetchFn(url, {
-      ...init,
-      ...(signal ? { signal } : {})
-    });
+    let response;
+    try {
+      response = await fetchFn(url, {
+        ...init,
+        ...(signal ? { signal } : {})
+      });
+    } catch (error) {
+      // Observed here because a provider often rethrows its own error without
+      // the transport cause; the diagnostic report keeps only network codes.
+      context.onTransportError?.(error);
+      throw error;
+    }
     if (Number(response?.status) >= 400) {
+      context.onHttpStatus?.(Number(response.status));
       const retryAfterMs = parseRetryAfterHeader(
         response?.headers?.get?.('retry-after'),
         (deps.now || Date.now)()
@@ -199,10 +208,14 @@ async function probeLimitProvider(provider, options = {}, context = {}, deps = {
     const result = await fetcher(options, {
       ...deps,
       fetch: createProbeFetch(resolveProviderFetch(provider, deps), { ...context, signal }, deps),
-      signal
+      signal,
+      // Diagnostic-only: a provider that turns a caught failure into a row
+      // (one account of several, a fallback source) reports the cause here.
+      ...(context.onFailure ? { noteLimitFailure: context.onFailure } : {})
     });
     return (Array.isArray(result) ? result : [result]).filter(Boolean);
   } catch (error) {
+    context.onFailure?.(error);
     return [statusProvider(provider, providerStatusFromError(error), nowIso(nowMs))];
   }
 }
