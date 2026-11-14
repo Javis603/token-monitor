@@ -17,6 +17,10 @@ const { hasKnownSession, nativeSessionsForPeriod, activityEntries, rememberProje
 
 const RENEW_INTERVAL_MS = 10_000;
 const MAX_RECORD_BYTES = 64 * 1024;
+// Activity refreshes run every few seconds per live session, so a fresh record
+// buffer per read turned into a steady allocator stream with no live owner.
+// Reads are synchronous and the parsed record never retains the buffer.
+const RECORD_BUFFER = Buffer.alloc(MAX_RECORD_BYTES + 1);
 
 function readRegistryRecord(file) {
   let fd;
@@ -24,7 +28,7 @@ function readRegistryRecord(file) {
     fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
     const stat = fs.fstatSync(fd);
     if (!stat.isFile() || stat.size > MAX_RECORD_BYTES) return null;
-    const buffer = Buffer.alloc(MAX_RECORD_BYTES + 1);
+    const buffer = RECORD_BUFFER;
     const bytes = fs.readSync(fd, buffer, 0, buffer.length, 0);
     return bytes <= MAX_RECORD_BYTES ? JSON.parse(buffer.toString('utf8', 0, bytes)) : null;
   } finally {
