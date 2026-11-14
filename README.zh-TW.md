@@ -294,13 +294,7 @@ Token Monitor 對 Token 用量、帳戶額度與 session 明細分別支援：
 
 - Custom 會從一個 GET 餘額端點映射數值 JSON 欄位；僅相容 OpenAI 或 Anthropic API 並不足夠。
 
-- Qoder 群組包含國際版與 CN 的獨立追蹤選項。全新安裝預設追蹤兩者，既有選擇保持不變；工具用量預設合併，可選擇分開顯示版本。國際版讀取 `QODER_CONFIG_DIR/projects` 或 `~/.qoder/projects`。兩者的 JSONL transcript 共用 Tokscale Qoder 解析器。只統計回報的 Token，不從文字或 credits 推算；已有 Qoder CN CLI 1.1.62 使用 `QODERCN_EXPOSE_TOKEN_USAGE=1` 記錄後續託管模型 Token 的回報；Qoder CN Desktop 0.3.3 則回報即使啟用也未寫入 Token 欄位，其他客戶端與版本尚未確認。此開關不會補回既有紀錄缺失的計數。動態模型代號保留原值。
-
-#### Qoder CN（本機介接）
-
-Qoder CN 的 Token 用量來自應用程式本機資料，而非 API —— 可在 Settings → tools 的 Qoder 群組內獨立控制。目前版本使用 Qoder 設定目錄內的 `projects` JSONL 記錄（通常為 `~/.qoder-cn/projects`）。不再採集僅使用舊 SQLite 的版本，不會刪除 Token Monitor 現有歷史檔案。JSONL 路徑依序使用 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`、預設路徑。詳見 [Qoder 資料來源說明](docs/providers/qodercn.md)。
-
-此本機整合不需要額外執行環境。無法讀取的來源會保留上一次完整讀取的資料。只統計有實際 Token 欄位的 JSONL 記錄；目前第一方方案模型可能只有 credits 與 context 使用比例，欠缺可靠的每 session context window，因此不會猜測 Token。Credits 仍會顯示於 AI Tool Limits，含實際 Token 的 BYOK／自訂模型會正常統計。
+- Qoder：在「設定 → 工具」的 Qoder 群組中可分別追蹤國際版與 CN。全新安裝預設追蹤兩者，既有選擇保持不變。工具用量預設合併顯示，開啟「分開顯示版本」後會分成兩行。國際版讀取 `QODER_CONFIG_DIR/projects`（預設 `~/.qoder/projects`）；CN 依序讀取 `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH`、`QODERCN_CONFIG_DIR/projects`（預設 `~/.qoder-cn/projects`）。只統計 transcript 中實際記錄的 Token：託管模型只記錄 credits、沒有 Token 的記錄不會計入，這些 credits 仍可在 AI 工具額度中查看。有回報指出 Qoder CN CLI 1.1.62 設定 `QODERCN_EXPOSE_TOKEN_USAGE=1` 後會記錄之後的 Token；既有記錄不會補回。`dfmodel` 等動態模型代號會照原樣顯示。只把用量存在 SQLite 的舊版 Qoder CN 不再採集，Token Monitor 既有的歷史檔案會保留。詳見 [Qoder 資料來源說明](docs/providers/qodercn.md)。
 </details>
 
 ### 其他功能支援
