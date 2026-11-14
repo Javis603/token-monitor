@@ -74,6 +74,9 @@ function classify(error, depth) {
     if (inner.kind !== 'error' || inner.code) {
       return { ...inner, ...(stage || inner.stage ? { stage: stage || inner.stage } : {}) };
     }
+    // An uncoded wrapper keeps its own kind, but the step its cause failed in
+    // is still the more useful half of the answer.
+    if (inner.stage) return { kind: 'error', ...(code ? { code } : {}), stage: stage || inner.stage };
   }
   return withStage({ kind: 'error', ...(code ? { code } : {}) });
 }

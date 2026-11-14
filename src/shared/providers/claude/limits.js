@@ -1373,7 +1373,11 @@ async function fetchClaudeAccountsLimits(options = {}, deps = {}) {
   const matchesScope = (row) => !scopeField
     || String(row?.[scopeField] || '').toLowerCase() === String(scope[scopeField]).toLowerCase();
   if (!scopeField && !scopeId && !web.length && !options.previousLimits?.providers?.some((row) => row.provider === 'claude')) {
-    return fetchClaudeLimits({ ...options, claudeWebCookie: '' }, deps);
+    // This lane is the OAuth/CLI one, so a cold-start failure belongs to it.
+    return fetchClaudeLimits({ ...options, claudeWebCookie: '' }, deps).catch((error) => {
+      deps.noteLimitFailure?.(error, { source: 'oauth' });
+      throw error;
+    });
   }
   const rows = [];
   const retainedCreditKeys = new Set();

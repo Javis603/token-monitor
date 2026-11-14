@@ -214,8 +214,17 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
   // Diagnostic detail is gathered per dispatch and kept only for the latest
   // committed attempt, so a recovered provider stops reporting an old cause.
   function addFailureDetail(dispatch, detail) {
-    const key = JSON.stringify(detail);
-    if (!dispatch.failures.some((entry) => JSON.stringify(entry) === key)) dispatch.failures.push(detail);
+    // The same cause can arrive first without its source (the thrown error) and
+    // then with it (the provider that caught it). Keep the entry that says more.
+    const sameCause = (entry) => ['stage', 'kind', 'httpStatus', 'code']
+      .every((field) => entry[field] === detail[field]);
+    const index = dispatch.failures.findIndex((entry) => sameCause(entry) && (!entry.source || !detail.source));
+    if (index !== -1) {
+      const existing = dispatch.failures[index];
+      if (!existing.source && detail.source) dispatch.failures[index] = detail;
+      return;
+    }
+    dispatch.failures.push(detail);
   }
 
   function noteFailure(dispatch, error, meta) {

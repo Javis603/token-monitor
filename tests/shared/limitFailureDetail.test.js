@@ -65,6 +65,12 @@ test('failure detail keeps the innermost stage and never treats file errors as n
 
   assert.deepEqual(limitFailureDetail(withCode(new Error('open /Users/someone/.claude'), 'EACCES')),
     { kind: 'error', code: 'EACCES' });
+  // A wrapper with no code of its own keeps its kind, but not at the cost of the
+  // step its cause failed in.
+  const wrappedUncoded = withCode(errorWithStatus('unavailable', 'identity lookup failed'), 'CLAUDE_IDENTITY_UNAVAILABLE');
+  wrappedUncoded.cause = Object.assign(new Error('profile unavailable'), { limitStage: 'oauth-profile' });
+  assert.deepEqual(limitFailureDetail(wrappedUncoded),
+    { stage: 'oauth-profile', kind: 'error', code: 'CLAUDE_IDENTITY_UNAVAILABLE' });
   assert.deepEqual(limitFailureDetail(new Error('https://claude.ai/api/organizations/org-secret returned weird')),
     { kind: 'error' });
   assert.deepEqual(limitFailureDetail(new Error('x'), { source: 'Not A Source!', stage: 'cli-usage' }),
@@ -147,6 +153,29 @@ test('a CLI fallback timeout is reported as a timeout, not a plain error', async
   const failures = runtime.getDiagnostics().providers[0].lastFailureDetail.failures;
   assert.deepEqual(failures.find((entry) => entry.source === 'cli'),
     { source: 'cli', stage: 'cli-usage', kind: 'timeout' });
+});
+
+test('a cold-start OAuth failure names its source', async (t) => {
+  const runtime = createLimitsRuntime({ limitProviders: ['claude'], claudeCliFallbackEnabled: false }, {
+    autoStart: false,
+    autoRetry: false,
+    env: { CLAUDE_CODE_OAUTH_TOKEN: 'fake-oauth-token' },
+    now: () => Date.parse('2026-11-14T00:00:00Z'),
+    platform: 'linux',
+    providerRuntimeState: new Map(),
+    fetch: async (url) => {
+      if (url.endsWith('/api/oauth/profile')) {
+        return response(200, { account: { uuid: 'account-c', email: 'c@example.com' }, organization: { uuid: 'org-c' } });
+      }
+      if (url.includes('/api/oauth/usage')) return response(503);
+      return response(200, { five_hour: { utilization: 20 } });
+    }
+  });
+  t.after(() => runtime.stop());
+
+  await runtime.refresh({ provider: 'claude' }, 'credential-save');
+  assert.deepEqual(runtime.getDiagnostics().providers[0].lastFailureDetail.failures,
+    [{ source: 'oauth', stage: 'oauth-usage', kind: 'http', httpStatus: 503 }]);
 });
 
 test('a provider without its own detail still reports the HTTP errors its requests saw, until it recovers', async (t) => {
