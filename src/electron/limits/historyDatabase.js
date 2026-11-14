@@ -10,12 +10,8 @@ const { sameCycle, hourStart, dayKey, trendBounds, observationPoints, distributi
 // curve even when the same interval also lost its allowance.
 const BREAK_INTERRUPTED = 1;
 const BREAK_ALLOWANCE_MISSING = 2;
-
-// Persisted guarded values: legacy 1 remains a genuine conflict, including
-// old ambiguous histories we cannot safely reclassify. Preference alone keeps
-// a healthy replacement in charge without making its next handoff a conflict.
-const GUARD_CONFLICT = 1;
-const GUARD_PREFERRED = 2;
+// Providers round used percentages; observers can disagree by under a point.
+const JITTER_PP = 1;
 
 function retentionStart(now, days) {
   const date = new Date(now);
@@ -117,8 +113,9 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
   const dailyUnknown = sql(`INSERT INTO daily(stream, day, uncertain) VALUES (?, ?, 1)
     ON CONFLICT(stream, day) DO UPDATE SET uncertain = 1`);
   const dailyExtra = sql('UPDATE daily SET unallocated = unallocated + ?, resets = resets + ? WHERE stream = ? AND day = ?');
-  const headFor = sql('SELECT source, guarded, failed FROM streams WHERE id = ?');
-  const setHead = sql('UPDATE streams SET source = ?, guarded = ?, failed = 0 WHERE id = ?');
+  const headFor = sql('SELECT source, failed FROM streams WHERE id = ?');
+  // streams.guarded is a retired column: observers are merged by observation time.
+  const setHead = sql('UPDATE streams SET source = ?, guarded = 0, failed = 0 WHERE id = ?');
   const originFor = sql('SELECT at FROM history_origins WHERE stream = ? AND source = ?');
   const noteOrigin = sql(`INSERT INTO history_origins VALUES (?, ?, ?)
     ON CONFLICT(stream, source) DO UPDATE SET at = excluded.at`);
@@ -127,7 +124,6 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
   const breakRun = sql(`UPDATE runs SET break_after = break_after | ${BREAK_INTERRUPTED} WHERE id = ?`);
   const markInterruption = sql('UPDATE runs SET break_after = break_after | ?, uncertain_until = MAX(COALESCE(uncertain_until, until), ?) WHERE id = ?');
   const markFailed = sql('UPDATE streams SET failed = 1 WHERE id = ?');
-  const guardHead = sql(`UPDATE streams SET guarded = ${GUARD_CONFLICT} WHERE id = ?`);
   const ambiguousStart = sql('UPDATE runs SET uncertain_before = 1 WHERE id = ?');
   const basisInsert = sql('INSERT INTO run_basis VALUES (?, ?)');
   const failAccount = sql(`SELECT r.id, r.until, s.id AS stream FROM streams s
@@ -172,11 +168,6 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
     const previousDay = point.collectedDay
       ? sql('SELECT day FROM daily WHERE stream = ? AND last_at = ?').get(stream, tail.until)?.day : null;
     markUnknownDays(stream, previousDay || dayKey(tail.until), point.collectedDay || dayKey(point.at), now);
-  }
-
-  function conflict(stream, tail, point, now) {
-    guardHead.run(stream);
-    interrupt(stream, tail, point, now);
   }
 
   function prune(now) {
@@ -248,7 +239,7 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
               noteOrigin.run(id, source, point.at);
               interrupt(id, tail, point, now, BREAK_ALLOWANCE_MISSING);
               // The accepted replacement owns subsequent missing/failure reports.
-              setHead.run(source, head.guarded, id);
+              setHead.run(source, id);
               markFailed.run(id);
             }
             continue;
@@ -260,38 +251,44 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
           const previous = pointOf(tail);
           const missingBasisOnly = !!previous?.basis && !point.basis
             && sameCycle(previous, { ...point, basis: previous.basis });
+          // Every observer reads the same upstream quota. Merge them by
+          // observation time: an older or same-time reading adds nothing.
           if (tail && point.at <= tail.until) {
-            if (point.at === tail.until) {
-              if (head.source !== source && missingBasisOnly && tail.value === point.value) continue;
-              if (tail.value !== point.value || !sameCycle(previous, point)) conflict(id, tail, point, now);
-              else noteSource.run(tail.id, source, point.at, point.at);
-            }
+            if (point.at === tail.until && tail.value === point.value && sameCycle(previous, point)) noteSource.run(tail.id, source, point.at, point.at);
             continue;
           }
           const switched = !!tail && head.source !== source;
           const consistent = !tail || sameCycle(previous, point);
-          const healthy = tail && !head?.failed
-            && (point.coveredFrom === tail.until ? point.maxGap : point.at - tail.until) <= Math.max(tail.interval, point.interval) * 2.5;
-          // Prefer continuity after an uncertain takeover or source disagreement.
-          // Keep the replacement while healthy so an old observer cannot inject
-          // a jump. After failure/expiry, only genuine conflicts prevent a
-          // compatible handoff from establishing same-bucket net consumption.
-          if (switched && healthy && (head.guarded || !consistent)) {
-            // Omitted allowance metadata cannot establish a conflicting quota pool.
-            if (!consistent && !missingBasisOnly) conflict(id, tail, point, now);
-            continue;
+          const current = !!tail && point.at - tail.until <= Math.max(tail.interval, point.interval) * 2.5;
+          // Another observer's reading without the allowance adds nothing while
+          // the merged series is current. Missing metadata, or its return, is
+          // never a disagreement.
+          if (switched && current && missingBasisOnly) continue;
+          const basisReturned = !!tail && !previous.basis && !!point.basis
+            && sameCycle({ ...previous, basis: point.basis }, point);
+          let baseline = false;
+          if (tail && !consistent && !missingBasisOnly && !basisReturned) {
+            // A lagging observer may still report a cycle whose deadline has
+            // already passed: that is a late report, not a new cycle.
+            if (previous.reset !== null && point.reset !== null
+              && previous.reset - point.reset > 1000 && point.reset <= point.at) continue;
+            // Within one advertised deadline, a used percentage dipping by less
+            // than a point is rounding jitter or a stale observer, not a reset.
+            if (point.reset !== null && point.unit === 'pp' && previous.value - point.value < JITTER_PP
+              && sameCycle(previous, { ...point, value: previous.value })) continue;
+            // Deadlines only move forward, so a later one is a new or rolling
+            // window from any observer. Anything else another observer
+            // contradicts (a drop, a refill or an earlier deadline) is stale while
+            // the merged series is still current; once that goes silent, it
+            // starts an uncertain baseline.
+            const laterDeadline = previous.reset !== null && point.reset !== null && point.reset - previous.reset > 1000;
+            if (switched && !laterDeadline) {
+              if (current) continue;
+              baseline = true;
+            }
           }
           const basisChanged = !!tail && (tail.basis || '') !== (point.basis || '');
-          const ambiguous = point.uncertainBefore || basisChanged || switched && (head.guarded === GUARD_CONFLICT || !consistent || !healthy);
-          const guarded = head?.guarded === GUARD_CONFLICT || basisChanged || switched && !consistent
-            ? GUARD_CONFLICT : head?.guarded || (ambiguous ? GUARD_PREFERRED : 0);
-          if (switched && head.guarded === GUARD_CONFLICT) {
-            // An established disagreement still blocks a compatible-looking
-            // replacement from turning the source difference into consumption.
-            interrupt(id, tail, point, now);
-            tail.break_after |= BREAK_INTERRUPTED;
-            previous.uncertainUntil = point.at;
-          }
+          const ambiguous = point.uncertainBefore || basisChanged || baseline;
           noteDaily(id, previous, point, tail?.break_after || 0, now, ambiguous);
           let run;
           // Adoption can prove the owner's flat interval remained observed
@@ -306,7 +303,7 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
             if (ambiguous) ambiguousStart.run(run);
           }
           noteSource.run(run, source, point.at, point.at);
-          setHead.run(source, +guarded, id);
+          setHead.run(source, id);
           if (point.at >= retentionStart(now, 180)) {
             cover.run(run, hourStart(point.at), point.at, point.at, point.coveredFrom !== undefined ? point.maxGap : previous ? point.at - previous.at : 0);
             if (point.samples > 1 || point.maxGap) sql('UPDATE coverage SET samples = samples + ?, max_gap = MAX(max_gap, ?) WHERE run = ? AND hour = ?')
@@ -418,7 +415,6 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
             if (end === row.until) Object.assign(events.at(-1).point, { breakAfter: row.break_after,
               uncertainUntil: row.uncertain_until });
             if (end === row.until && row.id === tailId) {
-              events.at(-1).conflict = head.guarded === GUARD_CONFLICT;
               events.at(-1).failed = !!head.failed;
             }
           }
@@ -464,17 +460,13 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
             markFailed.run(mapping.id);
             continue;
           }
-          // Compressed coverage proves the owner's unchanged reading across
-          // this time, without inventing its intermediate observation times.
-          // Detect a competing disagreement before it can become a delta.
-          if (head && ownerStream !== event.stream && active.some(span => span.stream === ownerStream
-            && (span.point.value !== event.point.value || !sameCycle({ ...span.point, at: event.point.at }, event.point)))) {
-            conflict(mapping.id, latest.get(mapping.id), event.point, now);
-            continue;
-          }
-          // Readings already accepted by one saved stream must not acquire a
-          // new handoff guard from ambiguous equal-time source confirmations.
-          // Arbitration still applies when replay crosses saved streams.
+          // Compressed coverage proves the accepted stream's unchanged reading
+          // across this time, without its intermediate observation times. Like
+          // any same-time reading, a different value at that time adds nothing.
+          if (ownerStream !== null && ownerStream !== event.stream && active.some(span => span.stream === ownerStream
+            && (span.point.value !== event.point.value || !sameCycle({ ...span.point, at: event.point.at }, event.point)))) continue;
+          // Readings already accepted by one saved stream keep its source, so
+          // equal-time confirmations replayed from it are not another observer.
           if (head && ownerStream === event.stream && head.source !== event.source) {
             sql('UPDATE streams SET source = ? WHERE id = ?').run(event.source, mapping.id);
           }
@@ -484,9 +476,6 @@ function createHistoryDatabase(filePath, { onError = () => {} } = {}) {
             ownerStream = event.stream;
             if (event.failed !== undefined) sql('UPDATE streams SET failed = ? WHERE id = ?').run(+event.failed, mapping.id);
           }
-          // A sticky source guard can outlive the conflict itself. Its saved
-          // break/timestamp was replayed above; do not invent a new interruption.
-          if (event.conflict && headFor.get(mapping.id)) guardHead.run(mapping.id);
         }
         streamInsert.run(mapping.id, mapping.account);
         for (const [source, at] of origins) {
