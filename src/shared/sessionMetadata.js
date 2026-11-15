@@ -194,16 +194,22 @@ function normalizeProjectPath(value) {
   return windows ? normalized.toLowerCase() : normalized;
 }
 
+// One spelling per path: the resolver remembers worktrees by it, so a trailing
+// slash or backslashes must not make a second key for the same directory.
+function spellProjectPath(value) {
+  const spelled = String(value || '').trim().replace(/\\/g, '/');
+  const normalized = normalizeProjectPath(spelled);
+  const root = normalized === '/' || /^[a-z]:\/$/i.test(normalized);
+  return { spelled: root ? spelled : spelled.replace(/\/+$/, ''), normalized, root };
+}
+
 // A directory's project is its repository: linked worktrees resolve to the
 // repository they were created from instead of naming a project each.
 function projectIdentity(value) {
-  const directory = normalizeProjectPath(value) ? resolveProjectRoot(String(value).trim()) : value;
-  const normalized = normalizeProjectPath(directory);
-  if (!normalized) return {};
-  const root = normalized === '/' || /^[a-z]:\/$/i.test(normalized);
-  let displayPath = String(directory || '').trim().replace(/\\/g, '/');
-  if (!root) displayPath = displayPath.replace(/\/+$/, '');
-  const label = root ? (normalized === '/' ? '/' : `${normalized[0].toUpperCase()}:\\`) : displayPath.split('/').pop();
+  const typed = spellProjectPath(value);
+  if (!typed.normalized) return {};
+  const { spelled, normalized, root } = spellProjectPath(resolveProjectRoot(typed.spelled));
+  const label = root ? (normalized === '/' ? '/' : `${normalized[0].toUpperCase()}:\\`) : spelled.split('/').pop();
   return { projectId: hashKey('project', normalized), projectLabel: label };
 }
 

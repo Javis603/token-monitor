@@ -103,3 +103,32 @@ test('projectIdentity gives a worktree and its repository one project', (t) => {
   assert.deepEqual(Object.keys(rollup), ['app']);
   assert.equal(rollup.app.tokens, 150);
 });
+
+test('a path reused by another repository\'s worktree follows the live checkout', (t) => {
+  const { root, main, worktree, cacheFile } = repoWithWorktree(t);
+  const other = path.join(root, 'other');
+  fs.mkdirSync(other);
+  git(other, 'init', '-q', '-b', 'main');
+  git(other, 'commit', '-q', '--allow-empty', '-m', 'init');
+  const resolve = createProjectRootResolver({ cacheFile: () => cacheFile });
+  assert.equal(resolve(worktree), main);
+
+  git(main, 'worktree', 'remove', '--force', worktree);
+  git(other, 'worktree', 'add', '-q', '-b', 'reused', worktree);
+  assert.equal(resolve(worktree), other);
+});
+
+test('a deleted worktree still groups when a later session spells its path differently', (t) => {
+  const { root, main, worktree } = repoWithWorktree(t);
+  const previous = process.env.TOKEN_MONITOR_SHARED_DIR;
+  process.env.TOKEN_MONITOR_SHARED_DIR = path.join(root, 'shared');
+  t.after(() => {
+    if (previous === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
+    else process.env.TOKEN_MONITOR_SHARED_DIR = previous;
+  });
+  const repo = projectIdentity(main);
+  assert.deepEqual(projectIdentity(worktree), repo);
+
+  git(main, 'worktree', 'remove', '--force', worktree);
+  assert.deepEqual(projectIdentity(`${worktree}/`), repo);
+});

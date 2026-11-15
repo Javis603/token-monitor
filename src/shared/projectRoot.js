@@ -38,7 +38,6 @@ function linkedWorktreeRoot(dir) {
 }
 
 function createProjectRootResolver({ cacheFile = () => path.join(sharedDataDir(), 'project-roots.json') } = {}) {
-  const resolved = new Map();
   let remembered = null;
 
   function loadRemembered() {
@@ -64,12 +63,8 @@ function createProjectRootResolver({ cacheFile = () => path.join(sharedDataDir()
 
   return function resolveProjectRoot(dir) {
     if (!dir) return dir;
-    if (resolved.has(dir)) return resolved.get(dir);
     const live = linkedWorktreeRoot(dir);
     if (!live.known) return loadRemembered().get(dir) || dir;
-    // An unresolved directory is not cached: it may be created, or a pruned
-    // worktree's git dir restored, later.
-    resolved.set(dir, live.root);
     if (live.root !== dir) remember(dir, live.root);
     return live.root;
   };
