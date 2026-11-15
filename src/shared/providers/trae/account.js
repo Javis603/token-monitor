@@ -1,6 +1,8 @@
+// @ts-check
 'use strict';
 
 // Trae CN limits account wiring. Leaf module: no requires.
+/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
 module.exports = {
   id: 'trae',
   fetch: 'fetchTraeLimits',

@@ -1,6 +1,8 @@
+// @ts-check
 'use strict';
 
 // Qoder limits account wiring. Leaf module: no requires.
+/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
 module.exports = {
   id: 'qoder',
   fetch: 'fetchQoderLimits',

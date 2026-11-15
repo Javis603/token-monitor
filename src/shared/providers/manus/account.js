@@ -1,6 +1,8 @@
+// @ts-check
 'use strict';
 
 // Leaf declaration: shared credential storage and forms bind these names.
+/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
 module.exports = {
   id: 'manus',
   fetch: 'fetchManusLimits',

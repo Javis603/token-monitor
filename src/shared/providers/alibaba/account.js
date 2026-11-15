@@ -1,6 +1,8 @@
+// @ts-check
 'use strict';
 
 // Alibaba Cloud limits account wiring. Leaf module: no requires.
+/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
 module.exports = {
   id: 'alibaba',
   fetch: 'fetchAlibabaLimits',

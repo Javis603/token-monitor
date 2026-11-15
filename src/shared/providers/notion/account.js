@@ -1,6 +1,8 @@
+// @ts-check
 'use strict';
 
 // Manual-only account declaration. Leaf module: no requires.
+/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
 module.exports = {
   id: 'notion',
   fetch: 'fetchNotionLimits',

@@ -1,8 +1,11 @@
+// @ts-check
 'use strict';
 
 // Volcengine limits account wiring. Leaf module: no requires.
+/** @param {unknown} value */
 const normalizeVolcengineRegion = (value) => String(value || '').trim().toLowerCase();
 
+/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
 module.exports = {
   id: 'volcengine',
   fetch: 'fetchVolcengineLimits',

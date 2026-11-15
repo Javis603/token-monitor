@@ -1,6 +1,8 @@
+// @ts-check
 'use strict';
 
 // Account declarations must remain require-free for renderer-safe projection.
+/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
 module.exports = {
   id: 'minimax',
   fetch: 'fetchMinimaxLimits',
@@ -48,7 +50,7 @@ module.exports = {
     const accounts = limits.configuredMinimaxAccounts(settings, { env });
     return {
       minimaxApiKeyConfigured: accounts.length > 0,
-      minimaxApiKeySource: accounts.some(account => account.name !== 'environment') ? 'settings' : accounts.length ? 'env' : ''
+      minimaxApiKeySource: accounts.some(/** @param {{name: string}} account */ account => account.name !== 'environment') ? 'settings' : accounts.length ? 'env' : ''
     };
   },
   form: {

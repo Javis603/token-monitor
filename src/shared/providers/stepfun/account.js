@@ -1,5 +1,7 @@
+// @ts-check
 'use strict';
 
+/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
 module.exports = {
   id: 'stepfun',
   fetch: 'fetchStepfunLimits',

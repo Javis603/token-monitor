@@ -1,6 +1,8 @@
+// @ts-check
 'use strict';
 
 // Z.ai / GLM limits account wiring. Leaf module: no requires.
+/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
 module.exports = {
   id: 'zai',
   fetch: 'fetchZaiLimits',

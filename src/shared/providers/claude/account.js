@@ -1,7 +1,9 @@
+// @ts-check
 'use strict';
 
 // Claude limits account wiring. Leaf module: no requires — see
 // src/shared/limits/accounts.js for the field schema.
+/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
 module.exports = {
   id: 'claude',
   fetch: 'fetchClaudeAccountsLimits',

@@ -1,6 +1,8 @@
+// @ts-check
 'use strict';
 
 // GLM Team limits account wiring. Leaf module: no requires.
+/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
 module.exports = {
   id: 'zaiteam',
   fetch: 'fetchZaiTeamLimits',

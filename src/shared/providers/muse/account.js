@@ -1,6 +1,8 @@
+// @ts-check
 'use strict';
 
 // Leaf declaration: credential storage reads this without loading the probe.
+/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
 module.exports = {
   id: 'muse',
   fetch: 'fetchMuseLimits',
