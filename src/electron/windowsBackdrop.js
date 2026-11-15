@@ -1,10 +1,12 @@
 'use strict';
 
-// Electron's documented Windows Acrylic uses DWMWA_SYSTEMBACKDROP_TYPE. The
+// Electron's documented Windows materials use DWMWA_SYSTEMBACKDROP_TYPE. The
 // alternate Accent mode deliberately uses the AccentBlurBehind recipe:
 // DwmEnableBlurBehindWindow plus the undocumented
 // SetWindowCompositionAttribute(WCA_ACCENT_POLICY) API. Keep every call lazy
 // and best-effort so an unsupported Windows build can fall back to Acrylic.
+
+const { normalizeWindowsBackdropMode } = require('./windowsBackdropMode');
 
 const DEFAULT_ACCENT_ARGB = 0x3a232323;
 
@@ -140,7 +142,7 @@ function applyWindowsAccentBlur(win, options = {}) {
 
 function syncWindowsBackdrop(win, { enabled = true, mode = 'acrylic' } = {}, options = {}) {
   if ((options.platform || process.platform) !== 'win32' || !win || win.isDestroyed?.()) return;
-  const wanted = !enabled ? 'transparent' : mode === 'accent' ? 'accent' : 'acrylic';
+  const wanted = !enabled ? 'transparent' : normalizeWindowsBackdropMode(mode);
   const previous = windowStates.get(win);
   if (previous?.mode === wanted && !previous.accentCleanupPending) return previous;
   const api = options.api || (wanted === 'accent' || previous?.mode === 'accent' || previous?.accentCleanupPending ? loadAccentApi() : null);
@@ -166,8 +168,9 @@ function syncWindowsBackdrop(win, { enabled = true, mode = 'acrylic' } = {}, opt
       console.warn('[window] AccentBlurBehind unavailable; falling back to Acrylic');
       fallback = true;
     }
-  } else if (wanted === 'acrylic') {
-    win.setBackgroundMaterial('acrylic');
+  } else if (wanted !== 'transparent') {
+    // Electron calls the Windows Mica Alt backdrop "tabbed".
+    win.setBackgroundMaterial(wanted === 'mica-alt' ? 'tabbed' : wanted);
   } else {
     win.setBackgroundMaterial('none');
     // Removing a material resets Electron's background. The host is created

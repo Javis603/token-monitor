@@ -1100,7 +1100,7 @@ test('a failed macOS material mask returns to a small card instead of exposing a
   assert.deepEqual(f.window.bounds, { x: 408, y: 278, width: 310, height: 420 });
 });
 
-for (const backdrop of ['accent', 'acrylic', 'transparent']) {
+for (const backdrop of ['accent', 'acrylic', 'mica', 'mica-alt', 'transparent']) {
   test(`Windows ${backdrop} history keeps the native backdrop within the card even with setShape available`, async t => {
     const f = previewFixture(t, { nativeRegions: true });
     f.material = { enabled: backdrop !== 'transparent', windowsBackdrop: backdrop === 'transparent' ? 'accent' : backdrop };

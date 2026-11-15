@@ -34,19 +34,22 @@ test('history material options follow the live main-window Windows backdrop sett
     limitsHistoryPayload() {}, nativeMaterialOptions: () => ({ enabled: true }), createLimitsHistoryController: options => options });
   vm.runInContext(`let limitsHistoryController = null; ${source}`, context);
   const controller = vm.runInContext('getLimitsHistoryController()', context);
-  assert.equal(controller.getMaterialOptions().windowsBackdrop, 'accent');
-  settings.windowsBackdrop = 'acrylic';
-  assert.equal(controller.getMaterialOptions().windowsBackdrop, 'acrylic');
+  for (const mode of ['accent', 'acrylic', 'mica', 'mica-alt']) {
+    settings.windowsBackdrop = mode;
+    assert.equal(controller.getMaterialOptions().windowsBackdrop, mode);
+  }
 });
 
 test('Windows backdrop modes fail closed to documented Acrylic', () => {
   assert.equal(normalizeRendererMode, normalizeWindowsBackdropMode);
-  for (const value of [undefined, null, '', 'mica', 'ACRYLIC']) {
+  for (const value of [undefined, null, '', 'tabbed', 'MICA', 'ACRYLIC']) {
     assert.equal(normalizeWindowsBackdropMode(value), 'acrylic');
     assert.equal(normalizeRendererMode(value), 'acrylic');
   }
-  assert.equal(normalizeWindowsBackdropMode('accent'), 'accent');
-  assert.equal(normalizeRendererMode('accent'), 'accent');
+  for (const value of ['acrylic', 'accent', 'mica', 'mica-alt']) {
+    assert.equal(normalizeWindowsBackdropMode(value), value);
+    assert.equal(normalizeRendererMode(value), value);
+  }
 });
 
 test('Windows dock material preserves native glass by default and only accepts its own supported modes', () => {
@@ -270,6 +273,47 @@ test('Acrylic and Accent switch both ways on the same window and unchanged prefe
   f.sync({ mode: 'acrylic' });
   assert.deepEqual(f.calls, [['material', 'acrylic'], ['material', 'none'], ['color', '#00000000'], ['accent'], ['clear'], ['material', 'acrylic']]);
   assert.equal(windowsBackdropFallback(f.win), false);
+});
+
+for (const [mode, material] of [['mica', 'mica'], ['mica-alt', 'tabbed']]) {
+  test(`${mode} switches on the same host, clears Accent, and restores transparent alpha`, () => {
+    const f = materialFixture();
+    f.sync({ mode: 'accent' });
+    f.calls.length = 0;
+    assert.equal(f.sync({ mode }).mode, mode);
+    assert.deepEqual(f.calls, [['clear'], ['material', material]]);
+    f.calls.length = 0;
+    f.sync({ mode });
+    assert.deepEqual(f.calls, []);
+    assert.equal(windowsBackdropFallback(f.win), false);
+    f.sync({ enabled: false, mode });
+    assert.deepEqual(f.calls, [['material', 'none'], ['color', '#00000000']]);
+    f.calls.length = 0;
+    f.sync({ mode });
+    f.sync({ mode: 'accent' });
+    assert.deepEqual(f.calls, [['material', material], ['material', 'none'], ['color', '#00000000'], ['accent']]);
+  });
+
+  test(`${mode} reaches the renderer without an Accent warning`, () => {
+    assert.deepEqual(appearanceState({ systemGlass: true, windowsBackdrop: mode }, { isWindows: true }), {
+      showBackdropControl: true, showAccentNote: false, backdropMode: mode
+    });
+  });
+}
+
+test('system materials switch directly between Acrylic, Mica and Mica Alt', () => {
+  const f = materialFixture();
+  for (const mode of ['acrylic', 'mica', 'mica-alt', 'mica', 'acrylic']) f.sync({ mode });
+  assert.deepEqual(f.calls, ['acrylic', 'mica', 'tabbed', 'mica', 'acrylic'].map(value => ['material', value]));
+});
+
+test('Mica choices include translated descriptions in every language', () => {
+  for (const mode of ['mica', 'mica-alt']) {
+    assert.match(html, new RegExp(`option value="${mode}"[^>]*data-select-description="settings\\.appearance\\.windowsBackdropMicaNote"`));
+  }
+  for (const key of ['windowsBackdropMica', 'windowsBackdropMicaAlt', 'windowsBackdropMicaNote']) {
+    assert.equal([...i18n.matchAll(new RegExp(`['"]settings\\.appearance\\.${key}['"]:`, 'g'))].length, 7);
+  }
 });
 
 test('partial Accent failure is cleaned up before Acrylic fallback and fallback state follows the live choice', () => {
