@@ -7483,16 +7483,19 @@ function focusedAppWindow() {
 
 let idleTimeZeroChecks = 0;
 let idleTimeZeroLogged = false;
+let idleTimeScreenLocked = false;
 
-function noteIdleTimeZero() {
-  if (process.platform !== 'linux' || idleTimeZeroLogged) return;
+function noteIdleTimeZero(locked = idleTimeScreenLocked) {
+  // An active user in another app also reports 0. Only zeros observed while
+  // the screen is locked prove the platform is not advancing idle time.
+  if (process.platform !== 'linux' || idleTimeZeroLogged || !locked) return;
   idleTimeZeroChecks += 1;
   if (idleTimeZeroChecks < 3) return;
   idleTimeZeroLogged = true;
   // Some Wayland/XWayland sessions report 0 forever. That silently disables
   // every idle collection; say so once instead of letting the optimization
   // look enabled while it never runs.
-  console.warn('[idle-heap] powerMonitor.getSystemIdleTime() has stayed 0 on three consecutive idle checks; idle heap collection will not run on this Linux session');
+  console.warn('[idle-heap] powerMonitor.getSystemIdleTime() has stayed 0 on three consecutive idle checks while the screen was locked; idle heap collection will not run on this Linux session');
 }
 
 function appIsIdleForHeapCollection() {
@@ -7516,8 +7519,16 @@ function appIsIdleForHeapCollection() {
 
 app.whenReady().then(() => {
   ensureSettingsLoaded();
-  powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
-  powerMonitor.on('unlock-screen', () => notchController?.setLocked(false));
+  powerMonitor.on('lock-screen', () => {
+    idleTimeScreenLocked = true;
+    idleTimeZeroChecks = 0;
+    notchController?.setLocked(true);
+  });
+  powerMonitor.on('unlock-screen', () => {
+    idleTimeScreenLocked = false;
+    idleTimeZeroChecks = 0;
+    notchController?.setLocked(false);
+  });
   void sessionProxy.apply();
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose

@@ -21,47 +21,47 @@ function gate(platform, idleSeconds) {
     focusedAppWindow: () => null,
     powerMonitor: { getSystemIdleTime: () => idleSeconds }
   };
-  vm.runInNewContext(`${source}\nthis.appIsIdleForHeapCollection = appIsIdleForHeapCollection;`, context);
-  return { isIdle: context.appIsIdleForHeapCollection, warnings };
+  vm.runInNewContext(`${source}\nthis.appIsIdleForHeapCollection = appIsIdleForHeapCollection; this.noteIdleTimeZero = noteIdleTimeZero;`, context);
+  return { isIdle: context.appIsIdleForHeapCollection, noteIdleTimeZero: context.noteIdleTimeZero, powerMonitor: context.powerMonitor, warnings };
 }
 
-test('a Linux session that reports zero idle time logs once after three checks', () => {
+test('ordinary active zero idle time stays silent', () => {
   const { isIdle, warnings } = gate('linux', 0);
-  assert.equal(isIdle(), false);
-  assert.equal(isIdle(), false);
-  assert.equal(warnings.length, 0, 'a single zero can be real user input');
-  assert.equal(isIdle(), false);
+  for (let i = 0; i < 5; i++) assert.equal(isIdle(), false);
+  assert.equal(warnings.length, 0, 'input in another app also reports zero');
+});
+
+test('a locked Linux screen that reports zero idle time logs once after three checks', () => {
+  const { noteIdleTimeZero, warnings } = gate('linux', 0);
+  noteIdleTimeZero(true);
+  noteIdleTimeZero(true);
+  assert.equal(warnings.length, 0, 'two checks are not enough');
+  noteIdleTimeZero(true);
   assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /stayed 0 on three consecutive idle checks/);
-  assert.equal(isIdle(), false);
+  assert.match(warnings[0], /while the screen was locked/);
+  noteIdleTimeZero(true);
   assert.equal(warnings.length, 1, 'the diagnostic is one-time');
 });
 
 test('real idle time resets the zero counter and allows collection', () => {
   let idle = 0;
-  const warnings = [];
-  const context = {
-    process: { platform: 'linux' },
-    console: { warn: (...args) => warnings.push(args.join(' ')) },
-    quitRequested: false,
-    focusedAppWindow: () => null,
-    powerMonitor: { getSystemIdleTime: () => idle }
-  };
-  vm.runInNewContext(`${source}\nthis.appIsIdleForHeapCollection = appIsIdleForHeapCollection;`, context);
-  assert.equal(context.appIsIdleForHeapCollection(), false);
-  assert.equal(context.appIsIdleForHeapCollection(), false);
+  const g = gate('linux', 0);
+  g.noteIdleTimeZero(true);
+  g.noteIdleTimeZero(true);
   idle = 10;
-  assert.equal(context.appIsIdleForHeapCollection(), true);
+  g.powerMonitor.getSystemIdleTime = () => idle;
+  assert.equal(g.isIdle(), true);
   idle = 0;
-  assert.equal(context.appIsIdleForHeapCollection(), false);
-  assert.equal(context.appIsIdleForHeapCollection(), false);
-  assert.equal(warnings.length, 0, 'two zeros after a reset are not enough');
-  assert.equal(context.appIsIdleForHeapCollection(), false);
-  assert.equal(warnings.length, 1);
+  g.powerMonitor.getSystemIdleTime = () => idle;
+  g.noteIdleTimeZero(true);
+  g.noteIdleTimeZero(true);
+  assert.equal(g.warnings.length, 0, 'two zeros after a reset are not enough');
+  g.noteIdleTimeZero(true);
+  assert.equal(g.warnings.length, 1);
 });
 
 test('non-Linux zero idle time stays silent', () => {
-  const { isIdle, warnings } = gate('darwin', 0);
-  for (let i = 0; i < 4; i++) assert.equal(isIdle(), false);
+  const { noteIdleTimeZero, warnings } = gate('darwin', 0);
+  for (let i = 0; i < 4; i++) noteIdleTimeZero(true);
   assert.equal(warnings.length, 0);
 });
