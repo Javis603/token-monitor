@@ -17,6 +17,11 @@ const MAX_REMOTE_GROUPS_IN_REPORT = 16;
 const MAX_JOURNAL_EVENTS_IN_REPORT = 20;
 const MAX_SOURCE_CHECKS_IN_REPORT = 8;
 const MAX_TEXT_LENGTH = 256;
+const MAX_LIMIT_FAILURE_ENTRIES = 4;
+const LIMIT_FAILURE_KINDS = new Set([
+  'http', 'challenge', 'timeout', 'network', 'response', 'error', 'not-returned', 'stale-windows'
+]);
+const NETWORK_PROXY_SOURCES = new Set(['setting', 'environment', 'system', 'invalid']);
 
 const CLIENT_STATES = new Set(['healthy', 'waiting', 'attention', 'unavailable', 'unknown']);
 const COLLECTION_STATES = new Set(['direct', 'idle', 'pending', 'ok', 'failed', 'unknown']);
@@ -325,10 +330,45 @@ function projectLimitsDiagnostics(diagnostics = {}) {
         retryAt: isoTimestamp(provider?.retryAt) || 'none',
         lastAttemptAt: isoTimestamp(provider?.lastAttemptAt),
         lastSuccessAt,
-        failureCode: failure || 'none'
+        failureCode: failure || 'none',
+        ...(failure ? { failureDetail: sanitizeLimitFailureDetail(provider?.lastFailureDetail) } : {})
       };
     })
   };
+}
+
+// The runtime builds these from enums, HTTP statuses and platform error codes;
+// they are re-validated here because the report is the redaction boundary.
+function sanitizeLimitFailureDetail(detail) {
+  if (!detail || typeof detail !== 'object') return null;
+  const list = (value, sanitize) => (Array.isArray(value) ? value : [])
+    .slice(0, MAX_LIMIT_FAILURE_ENTRIES).map(sanitize).filter((entry) => entry !== null);
+  return {
+    at: isoTimestamp(detail.at),
+    failures: list(detail.failures, (entry) => {
+      const kind = LIMIT_FAILURE_KINDS.has(entry?.kind) ? entry.kind : null;
+      if (!kind) return null;
+      const httpStatus = httpErrorStatus(entry.httpStatus);
+      const code = platformErrorCode(entry.code);
+      return {
+        ...(entry.source ? { source: identifier(entry.source) } : {}),
+        ...(entry.stage ? { stage: identifier(entry.stage) } : {}),
+        kind,
+        ...(httpStatus ? { httpStatus } : {}),
+        ...(code ? { code } : {})
+      };
+    }),
+    httpStatuses: list(detail.httpStatuses, (value) => httpErrorStatus(value)),
+    networkCodes: list(detail.networkCodes, (value) => platformErrorCode(value))
+  };
+}
+
+function httpErrorStatus(value) {
+  return Number.isInteger(value) && value >= 100 && value <= 599 ? value : null;
+}
+
+function platformErrorCode(value) {
+  return typeof value === 'string' && /^[A-Z][A-Z0-9_]{1,47}$/.test(value) ? value : null;
 }
 
 function isNotConfiguredFailure(value) {
@@ -675,7 +715,12 @@ function deriveDiagnosticFindings(snapshot, nowMs = Date.now()) {
   for (const provider of limits.providers || []) {
     const failureCode = provider.failureCode || provider.lastFailureCode;
     if (!isNoFailureCode(failureCode) && !isNotConfiguredFailure(failureCode)) {
-      add({ code: 'limits-provider-failed', provider: provider.provider });
+      const detailCode = limitFailureKind(provider.lastFailureDetail || provider.failureDetail);
+      add({
+        code: 'limits-provider-failed',
+        provider: provider.provider,
+        ...(detailCode ? { detailCode } : {})
+      });
     }
   }
   if (workload.sessionArchiveEnabled !== false
@@ -684,6 +729,13 @@ function deriveDiagnosticFindings(snapshot, nowMs = Date.now()) {
     add({ code: 'storage-archive-write-failed', detailCode: workload.lastSessionArchiveFailureCode });
   }
   return findings;
+}
+
+// The finding says which provider failed; the kind is what tells a challenge
+// from an outage at a glance. Stages and statuses stay in the provider block.
+function limitFailureKind(detail) {
+  const entries = Array.isArray(detail?.failures) ? detail.failures : [];
+  return entries.map((entry) => entry?.kind).find((kind) => LIMIT_FAILURE_KINDS.has(kind)) || null;
 }
 
 function sanitizeDiagnosticSnapshot(input = {}) {
@@ -740,7 +792,12 @@ function sanitizeDiagnosticSnapshot(input = {}) {
       wslScanEnabled: booleanOrUnknown(configuration.wslScanEnabled),
       syncUploadIntervalMs: integer(configuration.syncUploadIntervalMs, null),
       limitsRefreshMode: text(configuration.limitsRefreshMode, 'unknown', 16),
-      limitsRefreshMs: integer(configuration.limitsRefreshMs, null)
+      limitsRefreshMs: integer(configuration.limitsRefreshMs, null),
+      // Where provider traffic is routed from, never the proxy URL itself.
+      networkProxySource: NETWORK_PROXY_SOURCES.has(configuration.networkProxySource)
+        ? configuration.networkProxySource
+        : 'unknown',
+      claudeCliFallbackEnabled: booleanOrUnknown(configuration.claudeCliFallbackEnabled)
     },
     topology: {
       hubMode: text(topology.hubMode),
@@ -870,8 +927,26 @@ function formatProvider(provider) {
     line('retryAt', provider.retryAt, '    '),
     line('lastAttemptAt', provider.lastAttemptAt, '    '),
     line('lastSuccessAt', provider.lastSuccessAt, '    '),
-    line('failureCode', provider.failureCode, '    ')
+    line('failureCode', provider.failureCode, '    '),
+    ...formatLimitFailureDetail(provider.failureDetail)
   ].join('\n');
+}
+
+function formatLimitFailureDetail(detail) {
+  if (!detail) return [];
+  const lines = [line('failureDetailAt', detail.at, '    ')];
+  if (detail.failures.length) {
+    lines.push('    failures:');
+    for (const entry of detail.failures) {
+      lines.push(`      - ${['source', 'stage', 'kind', 'httpStatus', 'code']
+        .filter((key) => entry[key] !== undefined)
+        .map((key) => `${key}=${entry[key]}`)
+        .join(' ')}`);
+    }
+  }
+  if (detail.httpStatuses.length) lines.push(line('observedHttpErrors', detail.httpStatuses.join(', '), '    '));
+  if (detail.networkCodes.length) lines.push(line('observedNetworkErrors', detail.networkCodes.join(', '), '    '));
+  return lines;
 }
 
 function formatRemoteGroup(group) {
@@ -996,7 +1071,7 @@ function renderReport(snapshot, selected) {
   lines.push(section('Limits', limitLines));
 
   const findingLines = snapshot.findings.length > 0
-    ? snapshot.findings.map((finding) => `- ${finding.code}${finding.client ? ` client=${finding.client}` : ''}${finding.provider ? ` provider=${finding.provider}` : ''}`)
+    ? snapshot.findings.map((finding) => `- ${finding.code}${finding.client ? ` client=${finding.client}` : ''}${finding.provider ? ` provider=${finding.provider}` : ''}${finding.detailCode ? ` detail=${finding.detailCode}` : ''}`)
     : ['- none'];
   lines.push(section('Findings', findingLines));
 
