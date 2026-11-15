@@ -48,7 +48,6 @@ function collectWithTimeout(session, timeoutMs = DEFAULT_COLLECT_TIMEOUT_MS) {
     timer = setTimeout(() => {
       reject(new Error(`idle heap collection timed out after ${timeoutMs}ms`));
     }, timeoutMs);
-    timer.unref?.();
   });
   return Promise.race([collection, timeout]).finally(() => {
     clearTimeout(timer);
