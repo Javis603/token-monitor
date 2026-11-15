@@ -1,5 +1,9 @@
 import SwiftUI
 
+extension EnvironmentValues {
+    @Entry var tokenUnits: TokenUnits = .automatic
+}
+
 nonisolated enum WidgetPresentation {
     static let accent = Color(
         red: 115 / 255,
@@ -135,9 +139,9 @@ nonisolated enum WidgetPresentation {
         return "VendorTokenMonitor"
     }
 
-    static func tokens(_ value: Double, locale: Locale = .autoupdatingCurrent) -> String {
+    static func tokens(_ value: Double, locale: Locale = .autoupdatingCurrent, units: TokenUnits = .automatic) -> String {
         guard value.isFinite, value >= 0 else { return "—" }
-        return value.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(locale))
+        return value.formatted(.number.notation(.compactName).precision(.fractionLength(0...1)).locale(units.locale(fallback: locale)))
     }
 
     static func currencyFromUSD(_ value: Double, displayCode: String, locale: Locale = .autoupdatingCurrent,

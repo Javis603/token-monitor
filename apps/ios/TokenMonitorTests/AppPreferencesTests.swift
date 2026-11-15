@@ -4,6 +4,34 @@ import Testing
 
 @MainActor
 struct AppPreferencesTests {
+    @Test func tokenUnitsPersistLocallyAndReachWidgets() throws {
+        let suite = "TokenUnits-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        let directory = FileManager.default.temporaryDirectory.appending(path: suite)
+        defer {
+            defaults.removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let store = SharedSnapshotStore(fileURL: directory.appending(path: "snapshot.json"))
+        let preferences = AppPreferences(defaults: defaults, snapshotStore: store)
+        #expect(preferences.tokenUnits == .automatic)
+        for units in [TokenUnits.english, .chinese, .automatic] {
+            preferences.tokenUnits = units
+            #expect(try store.load().preferences.tokenUnits == units)
+            #expect(AppPreferences(defaults: defaults, snapshotStore: store).tokenUnits == units)
+        }
+        let encoded = try JSONEncoder().encode(TokenMonitorSharedPayload.Preferences.default)
+        var oldPayload = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        oldPayload.removeValue(forKey: "tokenUnits")
+        let legacy = try JSONDecoder().decode(TokenMonitorSharedPayload.Preferences.self,
+            from: JSONSerialization.data(withJSONObject: oldPayload))
+        #expect(legacy.tokenUnits == .automatic)
+        oldPayload["tokenUnits"] = "future"
+        let future = try JSONDecoder().decode(TokenMonitorSharedPayload.Preferences.self,
+            from: JSONSerialization.data(withJSONObject: oldPayload))
+        #expect(future.tokenUnits == .automatic)
+    }
+
     @Test
     func defaultsHomeLimitCountToThreeAndClampsEdits() {
         let suiteName = "AppPreferencesTests-\(UUID().uuidString)"

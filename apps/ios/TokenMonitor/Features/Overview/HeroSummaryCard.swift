@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct HeroSummaryCard: View {
+    @Environment(\.tokenUnits) private var tokenUnits
+    @Environment(\.locale) private var tokenLocale
     @Environment(AppPreferences.self) private var preferences
     @Environment(TokenMonitorStore.self) private var store
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -40,7 +42,7 @@ struct HeroSummaryCard: View {
                 metricsLayout {
                     cacheHitMetric
                     let messages = store.currentHistory.messageCount(for: store.selectedPeriod)
-                    metric("Messages", value: messages.map(MetricFormatter.tokens),
+                    metric("Messages", value: messages.map { MetricFormatter.tokens($0, units: tokenUnits, locale: tokenLocale) },
                            accessibleValue: messages.map(MetricFormatter.exactTokens))
                     metric("Average speed", value: period.averageOutputTokensPerSecond.map {
                         $0.formatted(.number.precision(.fractionLength(0...1))) + " tok/s"

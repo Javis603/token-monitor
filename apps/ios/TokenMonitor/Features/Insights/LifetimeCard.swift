@@ -3,6 +3,8 @@ import SwiftUI
 /// Lifetime card: total tokens + cost up top, a tight 3×2 stat grid, then the
 /// favourite model when the Hub reports one.
 struct LifetimeCard: View {
+    @Environment(\.tokenUnits) private var tokenUnits
+    @Environment(\.locale) private var tokenLocale
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.locale) private var locale
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -19,7 +21,7 @@ struct LifetimeCard: View {
             topLayout {
                 headlineStat(
                     "Total tokens",
-                    value: summary?.totalTokens.map(MetricFormatter.tokens) ?? "—"
+                    value: summary?.totalTokens.map { MetricFormatter.tokens($0, units: tokenUnits, locale: tokenLocale) } ?? "—"
                 )
                 headlineStat(
                     "Total cost",
@@ -72,13 +74,13 @@ struct LifetimeCard: View {
                 )
                 InsightMetricCard(
                     title: "Messages",
-                    value: summary?.messages.map(MetricFormatter.tokens) ?? "—",
+                    value: summary?.messages.map { MetricFormatter.tokens($0, units: tokenUnits, locale: tokenLocale) } ?? "—",
                     systemImage: "bubble.left.and.bubble.right.fill",
                     tint: .purple
                 )
                 InsightMetricCard(
                     title: "Peak day",
-                    value: summary?.peakDayTokens.map(MetricFormatter.tokens) ?? "—",
+                    value: summary?.peakDayTokens.map { MetricFormatter.tokens($0, units: tokenUnits, locale: tokenLocale) } ?? "—",
                     systemImage: "chart.line.uptrend.xyaxis",
                     tint: .orange
                 )

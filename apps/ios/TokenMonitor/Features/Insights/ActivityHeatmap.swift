@@ -5,6 +5,8 @@ import UIKit
 /// you can scrub, and a Less → More legend. The model comes from the caller so
 /// the section header can report the same active-day count.
 struct ActivityHeatmap: View {
+    @Environment(\.tokenUnits) private var tokenUnits
+    @Environment(\.locale) private var tokenLocale
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.locale) private var locale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -105,7 +107,7 @@ struct ActivityHeatmap: View {
             )
         ]
         if cell.tokens.isFinite {
-            parts.append(String(localized: "\(MetricFormatter.tokens(cell.tokens)) tokens"))
+            parts.append(String(localized: "\(MetricFormatter.tokens(cell.tokens, units: tokenUnits, locale: tokenLocale)) tokens"))
         }
         if cell.cost.isFinite {
             parts.append(

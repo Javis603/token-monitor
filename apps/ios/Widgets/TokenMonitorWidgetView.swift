@@ -53,6 +53,7 @@ struct TokenMonitorWidgetView: View {
         .foregroundStyle(inkColors.primary)
         .widgetURL(destination)
         .environment(\.locale, entry.locale)
+        .environment(\.tokenUnits, entry.preferences.tokenUnits)
     }
 
     @ViewBuilder private var widgetContent: some View {

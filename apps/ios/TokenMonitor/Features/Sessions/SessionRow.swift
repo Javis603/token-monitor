@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct SessionRow: View {
+    @Environment(\.tokenUnits) private var tokenUnits
+    @Environment(\.locale) private var tokenLocale
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let session: SessionUsage
@@ -85,7 +87,7 @@ struct SessionRow: View {
     }
 
     private var clientName: String { ClientPresentation.displayName(for: session.client ?? "unknown") }
-    private var activity: String { session.activitySummary(now: now) }
+    private var activity: String { session.activitySummary(now: now, tokenUnits: tokenUnits, tokenLocale: tokenLocale) }
 
     @ViewBuilder private var identity: some View {
         if dynamicTypeSize.isAccessibilitySize {
@@ -175,7 +177,7 @@ extension SessionUsage {
     /// The "archived · subagent · time · calls · cache hit · tok/s" metadata
     /// line — desktop's `activityParts` in sessionRows.js, shared by the
     /// session row and the group row that quotes its display session.
-    func activitySummary(now: Date) -> String {
+    func activitySummary(now: Date, tokenUnits: TokenUnits = .automatic, tokenLocale: Locale = .autoupdatingCurrent) -> String {
         var parts: [String] = []
         if isArchived { parts.append(String(localized: "Archived")) }
         if isSubagent { parts.append(String(localized: "Subagent")) }
@@ -192,7 +194,7 @@ extension SessionUsage {
             parts.append(percent > 0 && percent < 1 ? "<1%" : MetricFormatter.percent(percent))
         }
         if measuredTokens != nil, let speed = outputTokensPerSecond, speed.rounded() > 0 {
-            parts.append("\(MetricFormatter.tokens(speed.rounded())) tok/s")
+            parts.append("\(MetricFormatter.tokens(speed.rounded(), units: tokenUnits, locale: tokenLocale)) tok/s")
         }
         return parts.joined(separator: " · ")
     }

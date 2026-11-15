@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct BreakdownItem: View {
+    @Environment(\.tokenUnits) private var tokenUnits
+    @Environment(\.locale) private var tokenLocale
     let kind: BreakdownKind
     let entry: BreakdownEntry
     let total: Double
@@ -31,7 +33,7 @@ struct BreakdownItem: View {
                     }
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
                 VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 2) {
-                    Text(showsCost ? MetricFormatter.exactTokens(entry.value) : MetricFormatter.tokens(entry.value))
+                    Text(showsCost ? MetricFormatter.exactTokens(entry.value) : MetricFormatter.tokens(entry.value, units: tokenUnits, locale: tokenLocale))
                         .font(DesignTokens.rowValue)
                     if showsCost {
                         Text(MetricFormatter.compactUsageCost(entry.cost, unpricedTokens: entry.unpricedTokens,

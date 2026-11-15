@@ -134,6 +134,8 @@ struct InsightsView: View {
 }
 
 private struct MonthlyHistoryCard: View {
+    @Environment(\.tokenUnits) private var tokenUnits
+    @Environment(\.locale) private var tokenLocale
     @Environment(\.locale) private var locale
 
     let months: [HistoryMonth]
@@ -169,7 +171,7 @@ private struct MonthlyHistoryCard: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
-                Text(month.tokens.map(MetricFormatter.tokens) ?? "—")
+                Text(month.tokens.map { MetricFormatter.tokens($0, units: tokenUnits, locale: tokenLocale) } ?? "—")
                     .bold()
                     .monospacedDigit()
                 Text(month.cost.map {

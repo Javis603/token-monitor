@@ -5,6 +5,8 @@ import SwiftUI
 /// lists mains (continuations of the header conversation) then subagents —
 /// the same sections the desktop group page shows.
 struct SessionGroupRow: View {
+    @Environment(\.tokenUnits) private var tokenUnits
+    @Environment(\.locale) private var tokenLocale
     let entry: SessionListEntry
     let maximum: Double
     let now: Date
@@ -58,7 +60,7 @@ struct SessionGroupRow: View {
     /// the same strings the desktop group row puts in `subtitle`, with the
     /// count underlined like the "N models" affordance since it expands.
     private var subtitleBase: String {
-        titled ? identity : (display?.activitySummary(now: now) ?? "")
+        titled ? identity : (display?.activitySummary(now: now, tokenUnits: tokenUnits, tokenLocale: tokenLocale) ?? "")
     }
 
     private var hasSubtitle: Bool { !subtitleBase.isEmpty || entry.subagentCount > 0 }
@@ -75,7 +77,7 @@ struct SessionGroupRow: View {
     /// A titled group still prints its display session's activity line, the
     /// same metadata a plain row carries — desktop keeps `display.activity`.
     private var activity: String? {
-        titled ? display?.activitySummary(now: now) : nil
+        titled ? display?.activitySummary(now: now, tokenUnits: tokenUnits, tokenLocale: tokenLocale) : nil
     }
 
     var body: some View {

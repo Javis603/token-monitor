@@ -154,6 +154,8 @@ struct WidgetEmptyState: View {
 /// history neutral ink at 0.22, a measured zero a 2pt stub at ink 0.18, and
 /// an absent day a lighter stub at 0.07 — missing never reads as zero.
 struct WidgetDailyBars: View {
+    @Environment(\.locale) private var tokenLocale
+    @Environment(\.tokenUnits) private var tokenUnits
     @Environment(\.widgetInk) private var ink
     let bars: [WidgetActivityModel.Bar]
     var height: CGFloat = 28
@@ -195,7 +197,7 @@ struct WidgetDailyBars: View {
         return String(
             format: String(localized: "Last %lld days, peak %@"),
             Int64(bars.count),
-            WidgetPresentation.tokens(peak)
+            WidgetPresentation.tokens(peak, locale: tokenLocale, units: tokenUnits)
         )
     }
 }
@@ -258,6 +260,7 @@ struct WidgetStat: View {
 
 /// Icon + name + compact value; provider artwork desaturates in accented mode.
 struct WidgetBreakdownRow: View {
+    @Environment(\.tokenUnits) private var tokenUnits
     @Environment(\.widgetInk) private var ink
     let item: TokenMonitorSharedPayload.Breakdown
     let models: Bool
@@ -278,7 +281,7 @@ struct WidgetBreakdownRow: View {
                 Text(verbatim: models ? item.id : WidgetPresentation.displayName(for: item.id))
                     .lineLimit(1)
                 Spacer(minLength: 4)
-                Text(verbatim: WidgetPresentation.tokens(item.value, locale: locale))
+                Text(verbatim: WidgetPresentation.tokens(item.value, locale: locale, units: tokenUnits))
                     .monospacedDigit()
                     .foregroundStyle(ink.secondary)
                     .lineLimit(1)
@@ -389,6 +392,7 @@ struct WidgetWindowColumn: View {
 /// week. Desktop heat levels use accent 0.18/0.45/0.80/1.0; a measured zero is
 /// ink 0.10, absent 0.05, and future cells are not drawn.
 struct WidgetActivityGrid: View {
+    @Environment(\.tokenUnits) private var tokenUnits
     @Environment(\.widgetInk) private var ink
     let grid: WidgetActivityModel.Grid
     let cell: CGFloat
@@ -465,7 +469,7 @@ struct WidgetActivityGrid: View {
             format: String(localized: "Last %lld weeks, %lld active days, peak %@"),
             Int64(grid.columns.count),
             Int64(grid.activeDays),
-            WidgetPresentation.tokens(grid.peak, locale: locale)
+            WidgetPresentation.tokens(grid.peak, locale: locale, units: tokenUnits)
         )
     }
 }

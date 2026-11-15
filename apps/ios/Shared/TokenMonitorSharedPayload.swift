@@ -1,5 +1,24 @@
 import Foundation
 
+nonisolated enum TokenUnits: String, CaseIterable, Codable, Identifiable, Sendable {
+    case automatic, english, chinese
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .automatic: "Follow language"
+        case .english: "K / M / B"
+        case .chinese: "万 / 亿"
+        }
+    }
+    func locale(fallback: Locale) -> Locale {
+        switch self {
+        case .automatic: fallback
+        case .english: Locale(identifier: "en_US")
+        case .chinese: Locale(identifier: "zh_CN")
+        }
+    }
+}
+
 nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
     static let currentVersion = 1
 
@@ -119,6 +138,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
         var liveActivityEnabled: Bool
         var liveLayout: LiveActivityLayout
         var currencyCode: String?
+        var tokenUnits: TokenUnits
         var languageCode: String?
         var limitProviderOrder: [String]?
         var hiddenLimitProviders: [String]?
@@ -136,6 +156,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             liveActivityEnabled: Bool = false,
             liveLayout: LiveActivityLayout = LiveActivityLayout(),
             currencyCode: String? = "USD",
+            tokenUnits: TokenUnits = .automatic,
             languageCode: String? = "auto",
             limitProviderOrder: [String]? = nil,
             hiddenLimitProviders: [String]? = nil
@@ -152,6 +173,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             self.liveActivityEnabled = liveActivityEnabled
             self.liveLayout = liveLayout
             self.currencyCode = currencyCode
+            self.tokenUnits = tokenUnits
             self.languageCode = languageCode
             self.limitProviderOrder = limitProviderOrder
             self.hiddenLimitProviders = hiddenLimitProviders
@@ -173,6 +195,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
                 liveLayout: (try? container.decodeIfPresent(LiveActivityLayout.self, forKey: .liveLayout))
                     ?? LiveActivityLayout(),
                 currencyCode: try container.decodeIfPresent(String.self, forKey: .currencyCode) ?? "USD",
+                tokenUnits: TokenUnits(rawValue: try container.decodeIfPresent(String.self, forKey: .tokenUnits) ?? "") ?? .automatic,
                 languageCode: try container.decodeIfPresent(String.self, forKey: .languageCode) ?? "auto",
                 limitProviderOrder: try container.decodeIfPresent([String].self, forKey: .limitProviderOrder),
                 hiddenLimitProviders: try container.decodeIfPresent([String].self, forKey: .hiddenLimitProviders)
@@ -193,6 +216,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             try container.encode(liveActivityEnabled, forKey: .liveActivityEnabled)
             try container.encode(liveLayout, forKey: .liveLayout)
             try container.encodeIfPresent(currencyCode, forKey: .currencyCode)
+            try container.encode(tokenUnits.rawValue, forKey: .tokenUnits)
             try container.encodeIfPresent(languageCode, forKey: .languageCode)
             try container.encodeIfPresent(limitProviderOrder, forKey: .limitProviderOrder)
             try container.encodeIfPresent(hiddenLimitProviders, forKey: .hiddenLimitProviders)
@@ -211,6 +235,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             case liveActivityEnabled
             case liveLayout
             case currencyCode
+            case tokenUnits
             case languageCode
             case limitProviderOrder
             case hiddenLimitProviders

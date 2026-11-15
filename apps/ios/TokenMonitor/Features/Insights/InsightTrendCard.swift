@@ -4,6 +4,8 @@ import SwiftUI
 /// range peak trailing, and the smooth area chart. `compact` (Overview) fixes
 /// it to tokens over 30 days with no pickers.
 struct InsightTrendCard: View {
+    @Environment(\.tokenUnits) private var tokenUnits
+    @Environment(\.locale) private var tokenLocale
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.locale) private var locale
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -196,7 +198,7 @@ struct InsightTrendCard: View {
 
     private func formatted(_ value: Double, unpricedTokens: Double? = nil) -> String {
         activeMetric == .tokens
-            ? MetricFormatter.tokens(value)
+            ? MetricFormatter.tokens(value, units: tokenUnits, locale: tokenLocale)
             : MetricFormatter.historyCostFromUSD(value, unpricedTokens: unpricedTokens, currency: preferences.currency)
     }
 }

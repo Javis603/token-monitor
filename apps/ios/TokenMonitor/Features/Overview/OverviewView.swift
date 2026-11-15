@@ -257,6 +257,8 @@ struct OverviewView: View {
 }
 
 private struct LiveSpeedBadge: View {
+    @Environment(\.tokenUnits) private var tokenUnits
+    @Environment(\.locale) private var tokenLocale
     let reading: LiveTokenRateTracker.Reading?
 
     private var value: String {
@@ -269,7 +271,7 @@ private struct LiveSpeedBadge: View {
         let rounded = rate.rounded()
         return rounded < 10_000
             ? MetricFormatter.exactTokens(rounded)
-            : MetricFormatter.tokens(rounded)
+            : MetricFormatter.tokens(rounded, units: tokenUnits, locale: tokenLocale)
     }
 
     var body: some View {
