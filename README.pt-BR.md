@@ -379,7 +379,7 @@ Em cada Mac com login no mesmo Apple ID, escolha **iCloud Drive** em Configuraç
 
 ### Agente headless
 
-Execute o agente headless em servidores, hosts SSH ou dentro do WSL — em qualquer lugar onde você usa ferramentas de IA sem o widget de desktop. Ele coleta o uso dessa máquina e o envia ao seu hub (Opção A, B ou C). Requer Node.js 22.15+ e git.
+Execute o agente headless em servidores, hosts SSH ou dentro do WSL — em qualquer lugar onde você usa ferramentas de IA sem o widget de desktop. Ele coleta o uso dessa máquina e o envia ao seu hub (Opção A, B ou C). Requer Node.js 22.22+ e git.
 
 ```bash
 git clone https://github.com/Javis603/token-monitor.git
@@ -403,7 +403,7 @@ O estado do app fica no diretório de dados do usuário do sistema — apague-o 
 
 ## Compilar a partir do código
 
-Para compilar o seu próprio instalador, use Node.js 22.15+ no SO **de destino** (o electron-builder não consegue gerar um `.dmg` do macOS no Windows, nem o contrário).
+Para compilar o seu próprio instalador, use Node.js 22.22+ no SO **de destino** (o electron-builder não consegue gerar um `.dmg` do macOS no Windows, nem o contrário).
 
 ```bash
 npm install

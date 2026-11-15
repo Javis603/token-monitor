@@ -70,7 +70,7 @@ class FakeWorker extends EventEmitter {
 FakeWorker.instances = [];
 
 function stubChokidar() {
-  const chokidar = require('chokidar');
+  const chokidar = require('../../src/shared/fileWatcher');
   const original = chokidar.watch;
   const built = [];
   chokidar.watch = (dirs, options) => {

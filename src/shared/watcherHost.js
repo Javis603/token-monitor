@@ -2,30 +2,17 @@
 
 // Where the file watcher physically runs.
 //
-// chokidar's close() is synchronous on the calling thread and superlinear in
-// watched-directory count (measured on a real tree: ~1.1s for 548 dirs, ~12s
-// for 1820). Every tracked-client change rewrites the watch roots, so on the
-// owning thread that teardown froze the widget for about a second per toggle.
-//
-// The worker is a forked child process rather than a worker thread, because a
-// thread shares the owner's descriptor table. On macOS chokidar holds one
-// descriptor per watched file, and once those fill every number below
-// OPEN_MAX (10240) the pipes for the next child are numbered above it and
-// posix_spawn rejects them: every tokscale spawn then fails with EBADF
-// (issue #520). A child process keeps those descriptors, and the watcher's
-// native allocations, out of the owner's process entirely.
+// A forked child keeps watcher descriptors and native allocations out of the
+// collector's process. Recycling that child on root replacement releases its
+// allocation high-water as well as the old watcher, without blocking the owner.
 //
 // One worker at a time per coordinator. A collector restart terminates that
 // worker and waits for its exit before applying the latest replacement config.
-// This preserves the invariant the synchronous close used to provide — the old
-// watcher is fully gone before a new one starts — while also releasing the
+// This keeps the old watcher fully gone before a new one starts, releasing the
 // worker's V8/libuv/native allocation high-water. Spawning the replacement
 // before exit would overlap two descriptor sets, and on Linux the inotify budget
 // is per-user and shared with editors, so the overlap could trip the exhaustion
 // fallback, which is deliberately sticky for the process.
-//
-// unwatch() is not an alternative for incremental root edits: it stops event
-// delivery but retains the descriptors (verified: 2613 fds before and after).
 //
 // The in-process implementation is a real fallback, not dead code. A worker can
 // fail asynchronously (a missing or broken module only surfaces as 'error' and
@@ -114,7 +101,7 @@ function inProcessRequested(env = process.env) {
 function createInProcessWatcherHost(config = {}, handlers = {}) {
   // Required lazily so a worker-hosted run never loads chokidar on the owning
   // thread, and so the collector's tests can still swap chokidar.watch.
-  const chokidar = require('chokidar');
+  const chokidar = require('./fileWatcher');
   const { openWatch, WATCH_REFUSAL_CODES } = require('./collector');
   let watcher;
   try {

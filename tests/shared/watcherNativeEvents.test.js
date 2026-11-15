@@ -20,7 +20,7 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const chokidar = require('chokidar');
+const chokidar = require('../../src/shared/fileWatcher');
 
 const { watcherOptions, watchIgnoreMatcher } = require('../../src/shared/collector');
 const { installSourceEnvGuard } = require('../helpers/sourceEnv');
@@ -201,6 +201,41 @@ test('native file events reach a watcher on this platform', async () => {
       `expected an event for session.jsonl, got ${JSON.stringify(events)}`
     );
   } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('native watcher reports size-only writes while the writing handle stays open', {
+  skip: process.platform === 'darwin' ? 'macOS retains file-level watching for open SQLite WALs' : false
+}, async () => {
+  const dir = withTmpDir();
+  const file = path.join(dir, 'session.jsonl');
+  const mtime = new Date('2000-01-01T00:00:00Z');
+  const atime = new Date('2000-01-02T00:00:00Z');
+  fs.writeFileSync(file, '{"tokens":1}\n');
+  fs.utimesSync(file, atime, mtime);
+  const fd = fs.openSync(file, 'r+');
+  try {
+    await watchAndCollect(dir, async ({ waitForEvent }) => {
+      for (const operation of ['append', 'truncate']) {
+        const observed = waitForEvent(
+          (event, filePath) => event === 'change' && samePath(filePath, file),
+          `a size-only ${operation}`
+        );
+        const before = fs.fstatSync(fd);
+        if (operation === 'append') fs.writeSync(fd, '{"tokens":2}\n', before.size);
+        else fs.ftruncateSync(fd, 0);
+        // Reproduce Windows' deferred mtime before yielding to native callbacks.
+        fs.futimesSync(fd, atime, mtime);
+        const after = fs.fstatSync(fd);
+        assert.notEqual(after.size, before.size);
+        assert.equal(after.mtimeMs, before.mtimeMs);
+        assert.ok(after.atimeMs > after.mtimeMs);
+        await observed;
+      }
+    });
+  } finally {
+    fs.closeSync(fd);
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
