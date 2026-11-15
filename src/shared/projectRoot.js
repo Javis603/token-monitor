@@ -47,25 +47,27 @@ function createProjectRootResolver({ cacheFile = () => path.join(sharedDataDir()
     return remembered;
   }
 
-  function remember(dir, root) {
+  function remember(key, root) {
     const map = loadRemembered();
-    if (map.get(dir) === root) return;
+    if (map.get(key) === root) return;
     // Another process may have recorded worktrees since this one loaded.
     const onDisk = readJson(cacheFile(), null);
-    for (const [key, value] of Object.entries(onDisk && typeof onDisk === 'object' ? onDisk : {})) {
-      if (typeof value === 'string' && !map.has(key)) map.set(key, value);
+    for (const [saved, value] of Object.entries(onDisk && typeof onDisk === 'object' ? onDisk : {})) {
+      if (typeof value === 'string' && !map.has(saved)) map.set(saved, value);
     }
-    map.delete(dir);
-    map.set(dir, root);
+    map.delete(key);
+    map.set(key, root);
     while (map.size > MAX_REMEMBERED) map.delete(map.keys().next().value);
     try { writeJsonAtomic(cacheFile(), Object.fromEntries(map), 0); } catch (_) { /* history grouping degrades; usage is unaffected */ }
   }
 
-  return function resolveProjectRoot(dir) {
+  // `key` names the directory in the remembered mappings. It defaults to the
+  // path itself; a caller whose filesystem ignores case passes a folded one.
+  return function resolveProjectRoot(dir, key = dir) {
     if (!dir) return dir;
     const live = linkedWorktreeRoot(dir);
-    if (!live.known) return loadRemembered().get(dir) || dir;
-    if (live.root !== dir) remember(dir, live.root);
+    if (!live.known) return loadRemembered().get(key) || dir;
+    if (live.root !== dir) remember(key, live.root);
     return live.root;
   };
 }

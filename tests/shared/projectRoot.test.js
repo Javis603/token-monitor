@@ -133,3 +133,14 @@ test('a deleted worktree still groups when a later session spells its path diffe
   git(main, 'worktree', 'remove', '--force', worktree);
   assert.deepEqual(projectIdentity(`${worktree}/`), repo);
 });
+
+test('remembered worktrees are found again under the key the caller folds the path to', (t) => {
+  const { main, worktree, cacheFile } = repoWithWorktree(t);
+  const resolve = createProjectRootResolver({ cacheFile: () => cacheFile });
+  const key = worktree.toLowerCase();
+  assert.equal(resolve(worktree, key), main);
+
+  git(main, 'worktree', 'remove', '--force', worktree);
+  // A case-insensitive filesystem would reach the same directory through any casing.
+  assert.equal(resolve(worktree.toUpperCase(), key), main);
+});

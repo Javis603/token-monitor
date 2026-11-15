@@ -208,7 +208,7 @@ function spellProjectPath(value) {
 function projectIdentity(value) {
   const typed = spellProjectPath(value);
   if (!typed.normalized) return {};
-  const { spelled, normalized, root } = spellProjectPath(resolveProjectRoot(typed.spelled));
+  const { spelled, normalized, root } = spellProjectPath(resolveProjectRoot(typed.spelled, typed.normalized));
   const label = root ? (normalized === '/' ? '/' : `${normalized[0].toUpperCase()}:\\`) : spelled.split('/').pop();
   return { projectId: hashKey('project', normalized), projectLabel: label };
 }
