@@ -12,25 +12,66 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorStatsDelta = api;
 })(typeof window !== 'undefined' ? window : null, function createStatsDeltaApi() {
+  const hashState = { h1: 0, h2: 0 };
+  const numberView = new DataView(new ArrayBuffer(8));
+
+  function feedCode(code) {
+    hashState.h1 = Math.imul(hashState.h1 ^ code, 0x01000193) >>> 0;
+    hashState.h2 = Math.imul(hashState.h2 ^ code, 0x85ebca6b) >>> 0;
+  }
+
+  function feedString(text) {
+    for (let i = 0; i < text.length; i += 1) feedCode(text.charCodeAt(i));
+    feedCode(0);
+  }
+
+  function feedNumber(value) {
+    numberView.setFloat64(0, value);
+    feedCode(numberView.getUint32(0));
+    feedCode(numberView.getUint32(4));
+  }
+
+  // Hash the row in place instead of JSON.stringify-ing it: a visible widget
+  // pushes every few seconds, and allocating a ~2 MB string tree on the main
+  // thread was itself a heap-churn source. The tags keep values of different
+  // types distinct; object key order is whatever the immutable row has.
+  function hashValue(value, depth) {
+    if (depth > 20) throw new Error('stats row too deep');
+    if (value === null) { feedCode(0x6e); return; }
+    const type = typeof value;
+    if (type === 'number') { feedCode(0x64); feedNumber(value); return; }
+    if (type === 'string') { feedCode(0x73); feedString(value); return; }
+    if (type === 'boolean') { feedCode(value ? 0x74 : 0x66); return; }
+    if (type === 'undefined') { feedCode(0x75); return; }
+    if (type === 'bigint') { feedCode(0x62); feedString(value.toString()); return; }
+    if (Array.isArray(value)) {
+      feedCode(0x61);
+      feedNumber(value.length);
+      for (const item of value) hashValue(item, depth + 1);
+      return;
+    }
+    if (type === 'object') {
+      feedCode(0x6f);
+      const keys = Object.keys(value);
+      feedNumber(keys.length);
+      for (const key of keys) {
+        feedString(key);
+        hashValue(value[key], depth + 1);
+      }
+      return;
+    }
+    feedCode(0x78);
+  }
+
   function hashRow(row) {
-    let text;
+    hashState.h1 = 0x811c9dc5;
+    hashState.h2 = 0x9e3779b9;
     try {
-      text = JSON.stringify(row);
+      hashValue(row, 0);
     } catch (_) {
       return null;
     }
-    if (typeof text !== 'string') return null;
-    // Two independent 32-bit FNV-style accumulators: sessions can be numerous,
-    // and a 64-bit fingerprint makes an accidental miss negligible. A row that
-    // cannot be stringified is always sent rather than silently skipped.
-    let h1 = 0x811c9dc5;
-    let h2 = 0x9e3779b9;
-    for (let i = 0; i < text.length; i += 1) {
-      const code = text.charCodeAt(i);
-      h1 = Math.imul(h1 ^ code, 0x01000193) >>> 0;
-      h2 = Math.imul(h2 ^ code, 0x85ebca6b) >>> 0;
-    }
-    return `${h1.toString(36)}:${h2.toString(36)}`;
+    return `${hashState.h1.toString(36)}:${hashState.h2.toString(36)}`;
   }
 
   function fingerprintStats(stats) {
