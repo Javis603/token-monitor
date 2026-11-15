@@ -52,8 +52,10 @@
   const hover = quotaFill.getAnimations().find(animation => animation.transitionProperty === 'filter');
   assert(hover, 'App quota hover really transitions');
   hover.pause(); hover.currentTime = 40;
+  record.updatedAt = '2026-11-16T10:00:01Z';
   renderLimits(); await settle();
-  assert(hover.playState === 'paused' && hover.currentTime === 40, 'App unchanged refresh preserves the hover timeline');
+  assert(limitRow.querySelector('.limit-meter-fill') === quotaFill, 'App data refresh retains the hovered quota fill');
+  assert(hover.playState === 'paused' && hover.currentTime === 40, 'App data refresh preserves the hover timeline');
   hover.finish(); limitRow.classList.remove('is-history-active');
   for (const switchMode of [false, true]) {
     publishQuota(100, switchMode ? '2026-11-14T00:00:00Z' : '2026-11-13T00:00:00Z'); await settle();
