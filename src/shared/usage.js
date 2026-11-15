@@ -1643,19 +1643,26 @@ function mergeDeviceLimits(existingRecord, incomingRecord) {
     const key = limitProviderMergeKey(provider);
     if (key) existingByKey.set(key, provider);
   }
-  return {
-    ...incomingLimits,
-    providers: incomingLimits.providers.flatMap((provider) => {
-      if (provider.provider === 'copilot' && provider.status === 'notConfigured') {
-        const retained = existingLimits.providers.filter(existing => existing.provider === 'copilot'
-          && shouldKeepExistingGuiSecretProvider(existing, provider, existingRecord, incomingRecord));
-        if (retained.length) return retained;
+  const retainedProviders = new Set();
+  const providers = incomingLimits.providers.flatMap((provider) => {
+    if (GUI_SECRET_LIMIT_PROVIDERS.has(provider.provider) && provider.status === 'notConfigured') {
+      // Several placeholders for one provider must not each restore the accounts.
+      if (retainedProviders.has(provider.provider)) return [];
+      const retained = existingLimits.providers.filter(existing => existing.provider === provider.provider
+        && shouldKeepExistingGuiSecretProvider(existing, provider, existingRecord, incomingRecord));
+      if (retained.length) {
+        retainedProviders.add(provider.provider);
+        return retained;
       }
-      const existing = existingByKey.get(limitProviderMergeKey(provider));
-      if (shouldKeepExistingGuiSecretProvider(existing, provider, existingRecord, incomingRecord)) return existing;
-      return provider;
-    })
-  };
+    }
+    const existing = existingByKey.get(limitProviderMergeKey(provider));
+    if (shouldKeepExistingGuiSecretProvider(existing, provider, existingRecord, incomingRecord)) return existing;
+    return provider;
+  });
+  // A credential-less runtime cannot revoke the signal for accounts it keeps.
+  const multiAccountProviders = [...(incomingLimits.multiAccountProviders || []),
+    ...(existingLimits.multiAccountProviders || []).filter(id => retainedProviders.has(id))];
+  return normalizeLimitsSummary({ ...incomingLimits, multiAccountProviders, providers });
 }
 
 function mergeDeviceRecord(existing, incoming) {

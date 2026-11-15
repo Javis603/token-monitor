@@ -181,3 +181,31 @@ test('Worker authenticated stats expose the effective staleness threshold', asyn
   // And the version is not on the shape the public route is built from.
   assert.equal('subscriptionsUpdatedAt' in await hub.getStats(), false);
 });
+
+test('Worker retains the device multi-account signal through ingest but omits it from public stats', async () => {
+  const worker = await import(pathToFileURL(path.resolve(__dirname, '../../worker/src/index.js')).href);
+  const stored = new Map();
+  const hub = new worker.HubDO({ storage: {
+    async get(key) { return stored.get(key); },
+    async put(key, value) { stored.set(key, value); },
+    async list({ prefix }) { return new Map([...stored].filter(([key]) => key.startsWith(prefix))); }
+  } }, { TOKEN_MONITOR_SECRET: 'secret', PUBLIC_STATS_ENABLED: '1' });
+  const response = await hub.fetch(new Request('https://example.com/api/ingest', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer secret' },
+    body: JSON.stringify({ deviceId: 'multi-device', limits: {
+      multiAccountProviders: ['deepseek', 'unknown', 'deepseek'],
+      providers: ['a', 'b'].map(accountKey => ({ provider: 'deepseek', accountKey, status: 'ok' }))
+    } })
+  }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(stored.get('dev:multi-device').limits.multiAccountProviders, ['deepseek']);
+  const authenticated = await hub.statsWithSubscriptionVersion();
+  assert.deepEqual(authenticated.devices[0].limits.multiAccountProviders, ['deepseek']);
+  assert.equal(authenticated.limits.providers.length, 2);
+  const publicResponse = await hub.fetch(new Request('https://example.com/api/public/stats'));
+  assert.equal(publicResponse.status, 200);
+  const payload = await publicResponse.json();
+  assert.equal(payload.limits.providers.length, 2);
+  assert.doesNotMatch(JSON.stringify(payload), /multiAccountProviders|accountKey/);
+});
