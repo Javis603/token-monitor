@@ -39,6 +39,7 @@ function linkedWorktreeRoot(dir) {
 
 function createProjectRootResolver({ cacheFile = () => path.join(sharedDataDir(), 'project-roots.json') } = {}) {
   let remembered = null;
+  let unsaved = false;
 
   function loadRemembered() {
     if (remembered) return remembered;
@@ -49,7 +50,7 @@ function createProjectRootResolver({ cacheFile = () => path.join(sharedDataDir()
 
   function remember(key, root) {
     const map = loadRemembered();
-    if (map.get(key) === root) return;
+    if (map.get(key) === root && !unsaved) return;
     // Another process may have recorded worktrees since this one loaded.
     const onDisk = readJson(cacheFile(), null);
     for (const [saved, value] of Object.entries(onDisk && typeof onDisk === 'object' ? onDisk : {})) {
@@ -58,7 +59,13 @@ function createProjectRootResolver({ cacheFile = () => path.join(sharedDataDir()
     map.delete(key);
     map.set(key, root);
     while (map.size > MAX_REMEMBERED) map.delete(map.keys().next().value);
-    try { writeJsonAtomic(cacheFile(), Object.fromEntries(map), 0); } catch (_) { /* history grouping degrades; usage is unaffected */ }
+    try {
+      writeJsonAtomic(cacheFile(), Object.fromEntries(map), 0);
+      unsaved = false;
+    } catch (_) {
+      // Usage is unaffected; the next resolve of any worktree retries the write.
+      unsaved = true;
+    }
   }
 
   // `key` names the directory in the remembered mappings. It defaults to the

@@ -144,3 +144,20 @@ test('remembered worktrees are found again under the key the caller folds the pa
   // A case-insensitive filesystem would reach the same directory through any casing.
   assert.equal(resolve(worktree.toUpperCase(), key), main);
 });
+
+test('a mapping whose write failed is written by a later resolve', (t) => {
+  const { root, main, worktree } = repoWithWorktree(t);
+  const blocker = path.join(root, 'blocker');
+  fs.writeFileSync(blocker, '');
+  // A file where the directory should be makes the first write fail.
+  let cacheFile = path.join(blocker, 'project-roots.json');
+  const resolve = createProjectRootResolver({ cacheFile: () => cacheFile });
+  const warn = console.warn;
+  console.warn = () => {};
+  t.after(() => { console.warn = warn; });
+  assert.equal(resolve(worktree), main);
+
+  cacheFile = path.join(root, 'project-roots.json');
+  assert.equal(resolve(worktree), main);
+  assert.deepEqual(JSON.parse(fs.readFileSync(cacheFile, 'utf8')), { [worktree]: main });
+});
