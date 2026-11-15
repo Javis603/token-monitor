@@ -112,8 +112,6 @@
  * @property {(deps: AccountValues, limits: AccountLimits) => any} [resolveFetch]
  * @property {string[]} [extraSettingKeys] Non-field keys that scope refresh (such as feature toggles).
  * @property {AccountForm} [form]
- * @property {(input?: {desktop?: {state: string, userId?: string}, userId?: string, unauthorized?: boolean}) => boolean} [isCursorDetectedAccountCurrent] Cursor account lifecycle helper consumed by main and the limits probe.
- * @property {(value: unknown) => string[]} [normalizeCursorAccountIds] Cursor helper re-exported by runtimeConfig.
  */
 
 // A provider registers here and nowhere else: its account leaf, plus a lazy

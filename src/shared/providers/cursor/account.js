@@ -23,8 +23,7 @@ function isCursorDetectedAccountCurrent({ desktop, userId = '', unauthorized = f
   return true;
 }
 
-/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration & {isCursorDetectedAccountCurrent: typeof isCursorDetectedAccountCurrent, normalizeCursorAccountIds: typeof normalizeCursorAccountIds}} */ ({
   id: 'cursor',
   fetch: 'fetchCursorLimits',
   fields: [
@@ -41,4 +40,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['cursor.com', 'www.cursor.com'], pathPrefixes: ['/settings'], exactPaths: ['/', '/dashboard'] }
   ]
-};
+});

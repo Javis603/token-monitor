@@ -2,8 +2,7 @@
 'use strict';
 
 // Alibaba Cloud limits account wiring. Leaf module: no requires.
-/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'alibaba',
   fetch: 'fetchAlibabaLimits',
   fields: [
@@ -108,4 +107,4 @@ module.exports = {
     { hosts: ['bailian.console.aliyun.com'], pathPrefixes: ['/cn-beijing'] },
     { hosts: ['modelstudio.console.alibabacloud.com'], pathPrefixes: ['/ap-southeast-1'] }
   ]
-};
+});

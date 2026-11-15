@@ -2,8 +2,7 @@
 'use strict';
 
 // Command Code limits account wiring. Leaf module: no requires.
-/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'commandcode',
   fetch: 'fetchCommandcodeLimits',
   fields: [
@@ -43,4 +42,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['commandcode.ai', 'www.commandcode.ai'] }
   ]
-};
+});

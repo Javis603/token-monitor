@@ -5,10 +5,9 @@
 // Grok has no settings-backed credential: it authenticates through the local
 // X account material its limits module knows how to find, and it gets no
 // settings panel.
-/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'grok',
   fetch: 'fetchGrokLimits',
   fields: [],
   resolveFetch: (deps, limits) => limits.resolveGrokFetch(deps)
-};
+});

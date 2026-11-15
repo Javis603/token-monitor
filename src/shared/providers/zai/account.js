@@ -2,8 +2,7 @@
 'use strict';
 
 // Z.ai / GLM limits account wiring. Leaf module: no requires.
-/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'zai',
   fetch: 'fetchZaiLimits',
   fields: [
@@ -92,4 +91,4 @@ module.exports = {
     { hosts: ['z.ai', 'www.z.ai'] },
     { hosts: ['bigmodel.cn', 'www.bigmodel.cn'] }
   ]
-};
+});

@@ -2,8 +2,7 @@
 'use strict';
 
 // TypeSafe limits account wiring. Leaf module: no requires.
-/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'typesafe',
   fetch: 'fetchTypesafeLimits',
   fields: [
@@ -43,4 +42,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['console.typesafe.ai'], exactPaths: ['/settings/billing'] }
   ]
-};
+});

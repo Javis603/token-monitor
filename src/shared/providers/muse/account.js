@@ -2,8 +2,7 @@
 'use strict';
 
 // Leaf declaration: credential storage reads this without loading the probe.
-/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'muse',
   fetch: 'fetchMuseLimits',
   fields: [{
@@ -29,4 +28,4 @@ module.exports = {
     openUrl: { url: 'https://muse.ai/?settings_tab=general' }
   },
   urlPolicy: [{ hosts: ['muse.ai'] }]
-};
+});

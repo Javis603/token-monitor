@@ -2,8 +2,7 @@
 'use strict';
 
 // Account declarations must remain require-free for renderer-safe projection.
-/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'minimax',
   fetch: 'fetchMinimaxLimits',
   accountRefresh: true,
@@ -65,4 +64,4 @@ module.exports = {
     { hosts: ['platform.minimaxi.com'] },
     { hosts: ['platform.minimax.io'] }
   ]
-};
+});

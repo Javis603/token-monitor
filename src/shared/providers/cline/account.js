@@ -2,8 +2,7 @@
 'use strict';
 
 // Cline limits account wiring. Leaf module: no requires.
-/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'cline',
   fetch: 'fetchClineLimits',
   fields: [
@@ -48,4 +47,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['app.cline.bot'], pathPrefixes: ['/dashboard'] }
   ]
-};
+});

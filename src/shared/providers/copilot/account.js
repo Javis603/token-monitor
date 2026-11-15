@@ -2,8 +2,7 @@
 'use strict';
 
 // GitHub Copilot limits account wiring. Leaf module: no requires.
-/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'copilot',
   fetch: 'fetchCopilotLimits',
   accountRefresh: true,
@@ -35,4 +34,4 @@ module.exports = {
     configuredKey: 'copilotApiTokenConfigured',
     sourceKey: 'copilotApiTokenSource'
   }
-};
+});

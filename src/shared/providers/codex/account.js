@@ -2,8 +2,7 @@
 'use strict';
 
 // Codex limits account wiring. Leaf module: no requires.
-/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'codex',
   fetch: 'fetchCodexLimits',
   accountRefresh: true,
@@ -19,4 +18,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['codex-resets.com'], exactPaths: ['', '/'] }
   ]
-};
+});

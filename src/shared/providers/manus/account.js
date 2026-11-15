@@ -2,8 +2,7 @@
 'use strict';
 
 // Leaf declaration: shared credential storage and forms bind these names.
-/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'manus',
   fetch: 'fetchManusLimits',
   fields: [{
@@ -35,4 +34,4 @@ module.exports = {
     url: 'https://manus.im/'
   },
   urlPolicy: [{ hosts: ['manus.im'], exactPaths: ['/'] }]
-};
+});

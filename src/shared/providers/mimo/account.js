@@ -2,8 +2,7 @@
 'use strict';
 
 // Xiaomi MiMo limits account wiring. Leaf module: no requires.
-/** @satisfies {import('../../limits/accounts').AccountDeclaration} */
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'mimo',
   fetch: 'fetchMimoLimits',
   fields: [
@@ -15,4 +14,4 @@ module.exports = {
       initial: []
     }
   ]
-};
+});
