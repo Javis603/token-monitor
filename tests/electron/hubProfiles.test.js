@@ -116,3 +116,23 @@ test('switching Hubs drops the previous Hub\'s device cleanup, editing in place 
   assert.equal(Object.hasOwn(prepareHubProfilePatch(settings,
     { hubUrl: 'http://home.tail.example:17321/', deviceId: 'renamed-laptop' }), 'lastPostedDeviceId'), false);
 });
+
+test('returning to client mode reconnects as the active Hub after another mode changed the Device ID', () => {
+  const home = addHome(legacy());
+  const hosted = { ...home, hubMode: 'host', deviceId: 'host-laptop', lastPostedDeviceId: 'host-laptop' };
+  const patch = prepareHubProfilePatch(hosted, { hubMode: 'client' });
+  assert.equal(patch.hubUrl, 'http://home.tail.example:17321');
+  assert.equal(patch.secret, 'home-secret');
+  assert.equal(patch.deviceId, 'home-laptop');
+  assert.equal(patch.activeHubProfileId, home.activeHubProfileId);
+  assert.equal(patch.lastPostedDeviceId, '');
+  assert.equal(prepareHubProfilePatch({ ...home, lastPostedDeviceId: 'home-laptop' }, { hubMode: 'host' }).lastPostedDeviceId, '');
+});
+
+test('equivalent Hub URLs keep the Device ID cleanup', () => {
+  const settings = { ...addHome(legacy()), lastPostedDeviceId: 'home-laptop' };
+  const patch = prepareHubProfilePatch(settings, { hubUrl: 'HTTP://HOME.TAIL.EXAMPLE:17321/', deviceId: 'renamed-laptop' });
+  assert.equal(Object.hasOwn(patch, 'lastPostedDeviceId'), false);
+  const https = { ...legacy(), lastPostedDeviceId: 'laptop' };
+  assert.equal(Object.hasOwn(prepareHubProfilePatch(https, { hubUrl: 'https://WORKER.example:443/', deviceId: 'x' }), 'lastPostedDeviceId'), false);
+});

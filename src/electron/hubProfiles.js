@@ -78,16 +78,32 @@ function prepareHubProfilePatch(settings, input) {
       activeId = profile.id;
       Object.assign(patch, { hubUrl, secret: profile.secret, deviceId: profile.deviceId });
     }
+  } else if (patch.hubMode === 'client' && settings.hubMode !== 'client') {
+    // Another mode may have changed the shared Device ID; returning to client
+    // mode reconnects as the active Hub's own saved identity.
+    const active = profiles.find(profile => profile.id === activeId);
+    if (active) {
+      touched = true;
+      Object.assign(patch, { hubUrl: active.hubUrl, secret: active.secret, deviceId: active.deviceId });
+    }
+  }
+  // lastPostedDeviceId names a device on the previous destination (the hosted
+  // Hub in host mode, the connected Hub in client mode); cleaning it up on a
+  // different one could delete an unrelated device there.
+  const hubBase = value => {
+    const text = String(value || '').trim();
+    try {
+      const url = new URL(text);
+      return `${url.origin}${url.pathname.replace(/\/$/, '')}`;
+    } catch (_) { return text.replace(/\/$/, ''); }
+  };
+  if ((patch.hubMode !== undefined && patch.hubMode !== settings.hubMode)
+    || (touched && hubBase(patch.hubUrl ?? settings.hubUrl) !== hubBase(settings.hubUrl))) {
+    patch.lastPostedDeviceId = '';
   }
   // Untouched patches stay as sent: some settings commands (plugin skins) must
   // arrive as standalone patches.
   if (!touched) return patch;
-  // lastPostedDeviceId names a device on the previous Hub; cleaning it up on a
-  // different Hub could delete an unrelated device there.
-  const hubBase = value => String(value || '').trim().replace(/\/$/, '');
-  if (hubBase(patch.hubUrl ?? settings.hubUrl) !== hubBase(settings.hubUrl)) {
-    patch.lastPostedDeviceId = '';
-  }
   return { ...patch, hubProfiles: profiles, activeHubProfileId: activeId };
 }
 
