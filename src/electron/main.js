@@ -1569,13 +1569,27 @@ function sendMainWindowVisibility(win = mainWindow) {
 // DevTools window must not be collected twice. `gc` comes from the js-flags
 // switch; a page that did not load it simply reports false.
 const IDLE_RENDERER_GC_TIMEOUT_MS = 5000;
+function windowShowsRendererContent(win) {
+  if (!win || win.isDestroyed() || !win.isVisible() || win.isMinimized()) return false;
+  try {
+    // Edge-dock and history cards are shown once and then faded to opacity 0
+    // instead of hidden, so isVisible() alone would keep the renderer pass off
+    // forever after a card was opened. Only content the user can see blocks it.
+    if (typeof win.getOpacity === 'function') return win.getOpacity() > 0;
+  } catch (_) {
+    // If opacity cannot be read, assume the window is showing content.
+    return true;
+  }
+  return true;
+}
+
 function collectIdleRendererHeaps() {
   // The renderer pass is for hidden surfaces. A full collection can pause a
-  // visible page for tens of milliseconds, so leave every visible window
-  // (including the dashboard, dock and retained BaseWindow hosts) to Chromium.
+  // window showing content for tens of milliseconds, so leave those windows
+  // (dashboard, dock, history cards at opacity > 0, retained BaseWindow hosts)
+  // to Chromium.
   for (const win of BaseWindow.getAllWindows()) {
-    if (!win || win.isDestroyed()) continue;
-    if (win.isVisible() && !win.isMinimized()) return Promise.resolve();
+    if (windowShowsRendererContent(win)) return Promise.resolve();
   }
   const seen = new Set();
   const jobs = [];
