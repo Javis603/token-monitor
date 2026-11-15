@@ -89,6 +89,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
   assert.deepEqual(CREDENTIAL_SETTING_PATHS, {
     hubHostSecret: ['hub', 'hostSecret'],
     secret: ['hub', 'clientSecret'],
+    hubProfiles: ['hub', 'profiles'],
     claudeWebCookie: ['providers', 'claude', 'webCookie'],
     opencodeCookie: ['providers', 'opencode', 'cookie'],
     opencodeProfiles: ['providers', 'opencode', 'profiles'],
@@ -135,7 +136,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
 
 test('every provider credential path lives under providers/<id>', () => {
   for (const [key, segments] of Object.entries(CREDENTIAL_SETTING_PATHS)) {
-    if (key === 'hubHostSecret' || key === 'secret') continue;
+    if (key === 'hubHostSecret' || key === 'secret' || key === 'hubProfiles') continue;
     assert.equal(segments[0], 'providers', key);
     assert.equal(segments.length, 3, key);
   }

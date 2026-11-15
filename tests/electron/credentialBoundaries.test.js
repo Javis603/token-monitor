@@ -7,6 +7,7 @@ const test = require('node:test');
 const vm = require('node:vm');
 const { normalizePluginAuthorSkin } = require('../../src/electron/plugins/runtime');
 const { networkProxySource } = require('../../src/electron/networkProxy');
+const { hubProfilesForRenderer } = require('../../src/electron/hubProfiles');
 const { CREDENTIAL_SETTING_PATHS, credentialSettingsForRenderer } = require('../../src/shared/credentialStore');
 const {
   accountFieldProjection,
@@ -22,7 +23,9 @@ test('the main settings IPC projection hides provider secrets while retaining co
     if (key === 'hubHostSecret' || key === 'secret') continue;
     const value = `private-${key}-sentinel`;
     secrets.push(value);
-    settings[key] = key.endsWith('Profiles')
+    settings[key] = key === 'hubProfiles'
+      ? [{ id: 'home', name: 'Home', hubUrl: 'https://home.example/private?token=hidden', secret: value, deviceId: 'laptop' }]
+      : key.endsWith('Profiles')
       ? { work: { enabled: true, cookie: value, apiKey: value, accessToken: value, futureSecret: value } }
       : value;
   }
@@ -46,7 +49,7 @@ test('the main settings IPC projection hides provider secrets while retaining co
   // no source map and deliberately receives no credit against main.js coverage.
   const project = vm.runInNewContext(`${main.slice(start, end)}; settingsForRenderer`, {
     settings, mainWindow: null, windowsBackdropFallback: () => false,
-    networkProxySource, normalizePluginAuthorSkin, credentialSettingsForRenderer, accountFieldProjection, accountStatusProjection,
+    networkProxySource, normalizePluginAuthorSkin, credentialSettingsForRenderer, hubProfilesForRenderer, accountFieldProjection, accountStatusProjection,
     limitAccountFormsForRenderer, rendererOmittedAccountKeys, process: { env: {} },
     getSyncContentRuntime: () => ({ status: () => ({ enabled: {} }) }),
     trayMenuLocale: () => 'en', effectiveSubscriptions: () => [], subscriptionsAreShared: () => false,
@@ -62,6 +65,7 @@ test('the main settings IPC projection hides provider secrets while retaining co
   for (const secret of secrets) assert.ok(!encoded.includes(secret), secret);
   assert.equal(projected.hubHostSecret, settings.hubHostSecret);
   assert.equal(projected.secret, settings.secret);
+  assert.deepEqual(projected.hubProfiles, [{ id: 'home', name: 'Home', endpoint: 'home.example' }]);
   assert.equal(projected.deepseekApiKeyConfigured, true);
   assert.equal(projected.deepseekApiKey, '');
   assert.equal(projected.opencodeProfiles.work.cookie, 'set');

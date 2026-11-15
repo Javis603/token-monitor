@@ -174,7 +174,7 @@ test('sync method selects the corresponding fields without touching draft input 
       syncContentForm: null,
       state: { settings: { hubMode: mode }, appInfo: { platform: 'win32' } },
       els: {
-        hubModeOptions: {}, syncModeDescription: {}, icloudModeOption: {},
+        hubModeOptions: {}, icloudModeOption: {},
         hubClientFields: field('client'), hubHostFields: field('host'), icloudFields: field('icloud'),
         hubSecretInput: {}, hubUrlInput: { value: 'https://draft.test' }, secretInput: { value: 'draft' }
       },
@@ -187,7 +187,6 @@ test('sync method selects the corresponding fields without touching draft input 
     context.syncHubModeUi();
     assert.equal(context.els.icloudModeOption.disabled, true);
     assert.equal(context.els.hubModeOptions.value, mode);
-    assert.ok(context.els.syncModeDescription.textContent);
     for (const id of ['client', 'host', 'icloud']) {
       assert.equal(hidden[id], mode !== id);
       const node = context.els[id === 'client' ? 'hubClientFields' : id === 'host' ? 'hubHostFields' : 'icloudFields'];

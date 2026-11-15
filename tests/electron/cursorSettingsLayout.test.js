@@ -2679,7 +2679,7 @@ test('remote Hub build status is wired as a separate localized sync hint', () =>
   assert.match(app, /getHubBuildStatus/);
   assert.match(app, /function renderHubBuildStatus\(\)/);
   assert.doesNotMatch(app, /await refreshHubBuildStatus\(\)/);
-  assert.equal([...app.matchAll(/void refreshHubBuildStatus\(\)/g)].length, 5);
+  assert.equal([...app.matchAll(/void refreshHubBuildStatus\(\)/g)].length, 6);
   const refreshBody = functionBody(app, 'refreshHubBuildStatus', 'syncPeriodTabs');
   assert.match(refreshBody, /const request = \+\+hubBuildStatusRequest/);
   assert.equal([...refreshBody.matchAll(/request !== hubBuildStatusRequest/g)].length, 2);
