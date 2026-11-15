@@ -89,6 +89,29 @@ test('an unchanged snapshot needs no row upserts and still applies', () => {
   assert.deepEqual(applied, next);
 });
 
+test('a period with no row changes keeps its previous session map', () => {
+  const previous = stats(1, 7, {
+    today: period(10, { 'claude:a': row('a', 10) }),
+    month: period(10, { 'claude:a': row('a', 10) }),
+    allTimeSessions: { 'claude:a': row('a', 100), 'claude:b': row('b', 200) }
+  });
+  const next = stats(2, 7, {
+    today: period(10, { 'claude:a': row('a', 10) }),
+    month: period(10, { 'claude:a': row('a', 10) })
+  });
+  const applied = applyStatsDelta(previous, buildStatsDelta(fingerprintStats(previous), next).delta);
+  assert.deepEqual(applied, {
+    ...next,
+    periods: {
+      ...next.periods,
+      allTime: { ...next.periods.allTime, sessions: previous.periods.allTime.sessions }
+    }
+  });
+  assert.equal(applied.periods.allTime.sessions, previous.periods.allTime.sessions);
+  assert.equal(applied.periods.today.sessions, previous.periods.today.sessions);
+  assert.equal(applied.periods.month.sessions, previous.periods.month.sessions);
+});
+
 test('fields removed by a full snapshot are removed by a delta too', () => {
   const previous = stats(1, 7, {
     today: period(10, { 'claude:a': row('a', 10) }),

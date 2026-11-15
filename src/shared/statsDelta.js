@@ -141,13 +141,23 @@
       const previousPeriod = current.periods?.[period];
       const changes = delta.sessions?.[period];
       if (previousPeriod && typeof previousPeriod === 'object') {
-        const sessions = { ...(previousPeriod.sessions || {}) };
-        if (changes) {
-          for (const key of changes.remove || []) delete sessions[key];
-          for (const [key, row] of Object.entries(changes.upsert || {})) sessions[key] = row;
+        const remove = changes?.remove;
+        const upsert = changes?.upsert;
+        const upsertKeys = upsert ? Object.keys(upsert) : [];
+        if (remove?.length || upsertKeys.length) {
+          const sessions = { ...(previousPeriod.sessions || {}) };
+          for (const key of remove || []) delete sessions[key];
+          for (const key of upsertKeys) sessions[key] = upsert[key];
+          periods[period] = { ...summary, sessions };
+        } else if (previousPeriod.sessions !== undefined) {
+          // No row changes: reuse the map. Cloning the all-time table on every
+          // push would allocate a large tree only for the caller to discard it.
+          periods[period] = { ...summary, sessions: previousPeriod.sessions };
+        } else if (changes) {
+          periods[period] = { ...summary, sessions: {} };
+        } else {
+          periods[period] = summary;
         }
-        periods[period] = (previousPeriod.sessions !== undefined || changes)
-          ? { ...summary, sessions } : summary;
       } else if (changes) {
         periods[period] = { ...summary, sessions: { ...(changes.upsert || {}) } };
       } else {
