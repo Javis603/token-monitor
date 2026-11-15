@@ -49,6 +49,17 @@ test('expansion updates accessibility and follows the provider row', () => {
   assert.deepEqual(changes, [true, false]);
 });
 
+test('error text renders as a warning tone without the error color', () => {
+  const error = node();
+  render({ error, errorText: 'Saved, but period spend is missing', errorTone: 'warning' });
+  assert.equal(error.classList.contains('hidden'), false);
+  assert.equal(error.classList.contains('warning'), true);
+  assert.equal(error.classList.contains('error'), false);
+  render({ error, errorText: 'Rejected' });
+  assert.equal(error.classList.contains('warning'), false);
+  assert.equal(error.classList.contains('error'), true);
+});
+
 test('profile saves prevent same-provider reentry and restore controls on rejection', async () => {
   const guard = createBusyGuard();
   const button = node();

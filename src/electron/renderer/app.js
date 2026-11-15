@@ -17,17 +17,20 @@ const accountProfileRequests = accountShellApi.createRequestGuard();
 const accountProfileStatuses = accountShellApi.createRequestGuard();
 const accountProfileSaves = accountShellApi.createBusyGuard();
 const accountShellErrors = Object.create(null);
+const accountShellErrorTones = Object.create(null);
 let syncContentForm = null;
 
-function setAccountShellError(id, message) {
+function setAccountShellError(id, message, tone = 'error') {
   accountShellErrors[id] = message || '';
+  accountShellErrorTones[id] = tone;
   renderAccountShellError(id);
 }
 
 function renderAccountShellError(id) {
   accountShellApi.render({
     error: document.getElementById(`${id}ErrorMessage`),
-    errorText: accountShellErrors[id] || ''
+    errorText: accountShellErrors[id] || '',
+    errorTone: accountShellErrorTones[id] || 'error'
   });
 }
 const { clientColors, fallbackModelColors, modelVendorFor, modelColor } = window.TokenMonitorUsageCharts;
@@ -18799,6 +18802,8 @@ function thirdPartyProfileErrorText(result, adapter = '') {
   if (result?.errorCode === 'invalidCredential' && adapter === 'sub2api') {
     return t('settings.thirdparty.sub2ApiCredentialRejected');
   }
+  if (result?.errorCode === 'newApiLegacyTokenRetired') return t('settings.thirdparty.legacyTokenRetired');
+  if (result?.errorCode === 'newApiScopeDenied') return t('settings.thirdparty.scopeDenied');
   if (result?.errorCode === 'invalidEndpointPath') return t('settings.thirdparty.invalidEndpointPath');
   if (result?.errorCode === 'invalidAuthMode') return t('settings.thirdparty.invalidAuthMode');
   if (result?.errorCode === 'invalidJsonPath') return t('settings.thirdparty.invalidJsonPath');
@@ -20013,6 +20018,11 @@ function setupCursorAccountUI() {
         currencyInput.value = 'USD';
         divisorInput.value = '1';
         renderThirdPartyProfiles();
+        setAccountShellError(
+          'thirdparty',
+          result.warning === 'newApiMissingUsageScope' ? t('settings.thirdparty.missingUsageScope') : '',
+          result.warning ? 'warning' : 'error'
+        );
         await refreshStats({ force: true });
       } else {
         setAccountShellError('thirdparty', thirdPartyProfileErrorText(result, adapter));

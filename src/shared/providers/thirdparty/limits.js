@@ -29,6 +29,7 @@ const SUB2API_ME_PATH = '/api/v1/auth/me';
 const SUB2API_REFRESH_PATH = '/api/v1/auth/refresh';
 const SUB2API_USAGE_STATS_PATH = '/api/v1/usage/stats?period=month';
 const SUB2API_DASHBOARD_STATS_PATH = '/api/v1/usage/dashboard/stats';
+const ERROR_BODY_DEADLINE_MS = 1_000;
 const DEFAULT_CUSTOM_ENDPOINT_PATH = '/user/balance';
 const DEFAULT_CUSTOM_CURRENCY = 'USD';
 const DEFAULT_CUSTOM_DIVISOR = 1;
@@ -738,9 +739,64 @@ async function requestJson(url, options = {}, deps = {}) {
     const error = new Error(`Third-party API request failed (${response?.status || 'unknown'})`);
     error.status = statusForHttp(Number(response?.status));
     error.statusCode = Number(response?.status) || null;
+    const code = await upstreamErrorCode(response);
+    if (code) error.code = code;
     throw error;
   }
   return response.json();
+}
+
+// New API answers authorization failures with a bounded JSON body that carries
+// a stable code. The code is what tells a retired legacy token from a token
+// that is simply missing a scope; the status alone cannot. Read at most an
+// error envelope into memory, whether or not a proxy preserved Content-Length.
+function cancelResponseBody(body) {
+  // Releasing the stream must not wait for a transport whose cancel never settles.
+  try {
+    Promise.resolve(body?.cancel?.()).catch(() => {});
+  } catch (_) {}
+}
+
+async function upstreamErrorCode(response) {
+  const declared = Number(response?.headers?.get?.('content-length'));
+  if (Number.isFinite(declared) && declared > 4096) {
+    cancelResponseBody(response?.body);
+    return '';
+  }
+  const reader = response?.body?.getReader?.();
+  if (!reader) {
+    cancelResponseBody(response?.body);
+    return '';
+  }
+  let text = '';
+  let timer = null;
+  try {
+    const decoder = new TextDecoder();
+    let size = 0;
+    const stalled = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('error body read timed out')), ERROR_BODY_DEADLINE_MS);
+    });
+    while (size < 4096) {
+      const { value, done } = await Promise.race([reader.read(), stalled]);
+      if (done) break;
+      const chunk = value.subarray(0, 4096 - size);
+      size += chunk.byteLength;
+      text += decoder.decode(chunk, { stream: true });
+    }
+    text += decoder.decode();
+  } catch (_) {
+    return '';
+  } finally {
+    clearTimeout(timer);
+    cancelResponseBody(reader);
+  }
+  try {
+    const body = JSON.parse(text);
+    const code = typeof body?.code === 'string' ? body.code : '';
+    return /^[A-Z][A-Z0-9_]{0,63}$/u.test(code) ? code : '';
+  } catch (_) {
+    return '';
+  }
 }
 
 async function fetchOptionalEnrichments(account, adapter, deps) {
@@ -762,11 +818,18 @@ async function fetchOptionalEnrichments(account, adapter, deps) {
         )
         : await fetchValue(deps);
       return [key, value];
-    } catch (_) {
+    } catch (error) {
+      // Optional periods stay best-effort. A save probe can still report why
+      // the dashboard was unavailable without rejecting the balance.
+      if (isAccessTokenError(error)) deps.onEnrichmentAccessTokenError?.(error);
       return null;
     }
   }));
   return Object.fromEntries(results.filter(Boolean));
+}
+
+function isAccessTokenError(error) {
+  return typeof error?.code === 'string' && error.code.startsWith('ACCESS_TOKEN_');
 }
 
 function normalizeThirdPartyProfile(profile = {}) {
@@ -887,6 +950,9 @@ async function fetchThirdPartyAccount(account, deps = {}) {
   } catch (error) {
     quotaError = error;
   }
+  // A recognized token refusal is terminal. Surface it before waiting on the
+  // status or enrichment requests, whose own timeout must not replace it.
+  if (deps.surfaceAccessTokenErrors === true && isAccessTokenError(quotaError)) throw quotaError;
   const statusResponse = await statusPromise;
   const enrichmentPayloads = renewedCredentials
     ? await fetchOptionalEnrichments({ ...account, ...renewedCredentials }, adapter, deps)
