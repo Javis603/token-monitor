@@ -113,4 +113,6 @@ test('switching Hubs drops the previous Hub\'s device cleanup, editing in place 
   const worker = settings.hubProfiles.find(profile => profile.hubUrl === 'https://worker.example');
   assert.equal(prepareHubProfilePatch(settings, { hubProfileAction: { type: 'select', id: worker.id } }).lastPostedDeviceId, '');
   assert.equal(Object.hasOwn(prepareHubProfilePatch(settings, { deviceId: 'renamed-laptop' }), 'lastPostedDeviceId'), false);
+  assert.equal(Object.hasOwn(prepareHubProfilePatch(settings,
+    { hubUrl: 'http://home.tail.example:17321/', deviceId: 'renamed-laptop' }), 'lastPostedDeviceId'), false);
 });

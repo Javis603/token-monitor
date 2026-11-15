@@ -9975,6 +9975,9 @@ function hubDraftValuesFromInputs() {
   const values = {};
   for (const [field, inputId] of HUB_DRAFT_FIELDS) {
     if (field === 'hubHostPort' && state.settings?.hubMode !== 'host') continue;
+    // The client URL and secret only apply to (and are only visible in) client
+    // mode; another mode's Save must not apply a pending client draft.
+    if ((field === 'hubUrl' || field === 'secret') && state.settings?.hubMode !== 'client') continue;
     const input = els[inputId];
     if (!input) continue;
     values[field] = normalizeHubDraftValue(field, input.value, state.settings?.[field]);
@@ -9986,6 +9989,9 @@ function hubDraftValuesFromSettings() {
   const values = {};
   for (const [field] of HUB_DRAFT_FIELDS) {
     if (field === 'hubHostPort' && state.settings?.hubMode !== 'host') continue;
+    // The client URL and secret only apply to (and are only visible in) client
+    // mode; another mode's Save must not apply a pending client draft.
+    if ((field === 'hubUrl' || field === 'secret') && state.settings?.hubMode !== 'client') continue;
     values[field] = normalizeHubDraftValue(field, state.settings?.[field]);
   }
   return values;
@@ -14108,8 +14114,10 @@ els.saveSettingsButton.addEventListener('click', async () => {
       hubSaveError = true;
       return;
     }
-    hubProfileAdding = false;
-    hubProfileNameDraft = null;
+    if (patch.hubProfileAction) {
+      hubProfileAdding = false;
+      hubProfileNameDraft = null;
+    }
     reconcileHubDraftsAfterSave(submittedHubFields, submittedHubRevisions);
     finishClientConnectionSave(submittedHubRevisions, submittedEditRevision);
     await refreshHubInfo();

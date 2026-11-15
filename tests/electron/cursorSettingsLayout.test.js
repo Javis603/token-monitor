@@ -2341,8 +2341,6 @@ test('Host Hub invalid ports preserve the persisted port when another field save
   await els.saveSettingsButton.dispatch('click');
 
   assert.deepEqual(patches, [{
-    hubUrl: '',
-    secret: '',
     deviceId: 'draft-device',
     hubHostPort: 18000
   }]);
@@ -2586,8 +2584,6 @@ test('Host Hub port draft survives settings rehydration and saves with Hub field
 
   await els.saveSettingsButton.dispatch('click');
   assert.deepEqual(patches, [{
-    hubUrl: '',
-    secret: '',
     deviceId: 'saved-device',
     hubHostPort: 18000
   }]);
@@ -2656,8 +2652,6 @@ test('Host Hub port draft survives leaving and returning to Host mode', async ()
 
   await els.saveSettingsButton.dispatch('click');
   assert.deepEqual(patches, [{
-    hubUrl: '',
-    secret: '',
     deviceId: 'saved-device',
     hubHostPort: 18000
   }]);

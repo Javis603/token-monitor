@@ -84,7 +84,8 @@ function prepareHubProfilePatch(settings, input) {
   if (!touched) return patch;
   // lastPostedDeviceId names a device on the previous Hub; cleaning it up on a
   // different Hub could delete an unrelated device there.
-  if (String(patch.hubUrl ?? settings.hubUrl ?? '').trim() !== String(settings.hubUrl || '').trim()) {
+  const hubBase = value => String(value || '').trim().replace(/\/$/, '');
+  if (hubBase(patch.hubUrl ?? settings.hubUrl) !== hubBase(settings.hubUrl)) {
     patch.lastPostedDeviceId = '';
   }
   return { ...patch, hubProfiles: profiles, activeHubProfileId: activeId };
