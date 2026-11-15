@@ -17920,6 +17920,7 @@ function renderExternalProviderStatus(providerName) {
   }
   const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')
     || (providerName === 'cline' && source === 'cline-signin')
+    || cliAccount
     || providerName === 'hark';
   if (discoveredLogin) {
     // The discovered login is not user-entered, so the override input and the

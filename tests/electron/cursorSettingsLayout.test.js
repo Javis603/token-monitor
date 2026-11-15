@@ -3368,3 +3368,33 @@ test('MiMo settings reuses the shared sign-in status for rejected accounts', () 
   render();
   assert.equal([...list.children[0].walk()].find((node) => node.className === 'managed-account-info').textContent, 'Console');
 });
+
+test('Alibaba CLI readings keep saved Cookie setup reachable while web readings stay linked', () => {
+  const app = readRendererFile('app.js');
+  for (const source of ['cli', 'web']) {
+    const elements = new Map();
+    for (const suffix of ['AccountStatus', 'OpenBrowser', 'LogoutButton', 'RefreshButton', 'ManualPanel', 'ErrorMessage']) {
+      const classes = new Set();
+      elements.set(`alibaba${suffix}`, { textContent: '', classList: {
+        add: name => classes.add(name), remove: name => classes.delete(name),
+        toggle: (name, force) => force ? classes.add(name) : classes.delete(name),
+        contains: name => classes.has(name)
+      } });
+    }
+    runRendererFunctions(app, ['renderExternalProviderStatus'], "renderExternalProviderStatus('alibaba')", {
+      externalLimitAccountConfig: {},
+      limitAccountForm: () => ({ status: { configuredKey: 'alibabaCookieConfigured', sourceKey: 'alibabaCookieSource', pendingKey: 'alibabaPendingCheckSince' } }),
+      limitAccountPanelsApi: { syncCredentialFields() {} },
+      state: { settings: { alibabaCookieConfigured: true, alibabaCookieSource: 'settings' }, accountPanelMessages: {} },
+      document: { getElementById: id => elements.get(id) || null },
+      externalProviderForAccount: () => ({ provider: 'alibaba', source, status: 'ok' }),
+      externalProviderAccountLinked: () => true,
+      externalProviderCheckSettled: new Set(), limitProviderEnabled: () => true,
+      setCursorStatusText() {}, apiKeyAccountStatusText: () => '', t: key => key,
+      renderSettingsSummaries() {}, setExternalAccountExpanded() {}
+    });
+    assert.equal(elements.get('alibabaManualPanel').classList.contains('hidden'), source === 'web');
+    assert.equal(elements.get('alibabaOpenBrowser').classList.contains('hidden'), source === 'web');
+    assert.equal(elements.get('alibabaLogoutButton').classList.contains('hidden'), false);
+  }
+});

@@ -93,7 +93,7 @@
     volcengine: ['Auto', 'API key', 'CLI'],
     ollama: ['Manual login', 'API/Web'],
     trae: ['Manual login', 'Web'],
-    alibaba: ['Token Plan', 'Web'],
+    alibaba: ['Token Plan', 'CLI', 'Web'],
     stepfun: ['Coding/Token Plan', 'Web'],
     notion: ['Web', 'Manual'],
     manus: ['Auto', 'Desktop app', 'Manual'],

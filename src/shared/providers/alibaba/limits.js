@@ -36,6 +36,7 @@ const { throwIfAborted } = require('../../abortSignal');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const { fetchBailianCLI, validatePersonalCLIUsage } = require('./cli');
 const { accountIdentityDescriptor } = require('../../limits/accountScope');
+const { providerStatusFromError } = require('../../limits/providerHelpers');
 
 const ALIBABA_FETCH_TIMEOUT_MS = 20_000;
 const ALIBABA_SEC_TOKEN_TIMEOUT_MS = 10_000;
@@ -964,7 +965,7 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
       if (deps.signal?.aborted || error?.name === 'AbortError') throw error;
       deps.noteLimitFailure?.(error, { source: 'cli' });
       if (!cookieHeader) return [normalizeLimitProvider({
-        provider: 'alibaba', source: 'cli', status: 'unavailable', updatedAt,
+        provider: 'alibaba', source: 'cli', status: providerStatusFromError(error), updatedAt,
         windows: [], region: variantId,
         ...(variant.personal ? { workspaceKind: 'personal' } : {})
       })];

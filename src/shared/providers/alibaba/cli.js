@@ -54,7 +54,11 @@ function runBailian(command, args, env, timeout, deps) {
     }, (error, stdout) => {
       deps.signal?.removeEventListener('abort', onAbort);
       if (deps.signal?.aborted) return reject(abortError(deps.signal));
-      if (error) return reject(error);
+      if (error) {
+        // Bailian's documented ExitCode.AUTH is 3 (missing/expired credentials).
+        if (error.code === 3) error.status = 'notConfigured';
+        return reject(error);
+      }
       resolve(stdout);
     });
     child.stdin?.end();
@@ -95,7 +99,8 @@ async function fetchBailianCLI(variant, deps = {}) {
   if (variant.personal) {
     return { usageText: await run(['console', 'call', '--api',
       'zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage', '--data', '{}',
-      '--console-region', variant.regionId, '--console-site', variant.personalConsoleSite, '--output', 'json']) };
+      '--console-region', variant.regionId, '--console-site',
+      variant.id === 'cn-personal' ? 'domestic' : 'international', '--output', 'json']) };
   }
 
   const now = (deps.now || Date.now)();

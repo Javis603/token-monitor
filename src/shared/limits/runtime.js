@@ -691,12 +691,10 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       } else lane.identities.clear();
     }
 
+    let removeAnonymous = false;
     for (const removal of removals) {
       let identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
-      // A healthy replacement may explicitly retire the anonymous slot. Failed
-      // or account-scoped probes cannot use it to erase provider-wide state.
-      if (identityKey === `${lane.provider}:*`
-        && (dispatch.accountScoped || !normalizedRows.some(row => row.status === 'ok'))) continue;
+      if (identityKey === `${lane.provider}:*`) { removeAnonymous = true; continue; }
       if (dispatch.accountScoped && identityKey !== dispatch.identityKey) continue;
       if (apiOnly && !belongsToApi(identityKey)) continue;
       if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
@@ -730,6 +728,14 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       // Marks the row as measurable by this runtime, so a persisted seed for a
       // provider that has not answered yet can never become a burn baseline.
       if (committedRow.status === 'ok') markLimitsProbeSuccess(burnState, committedRow);
+    }
+
+    // Retire anonymous state only after its healthy replacement actually commits;
+    // a result invalidated by a concurrent account clear cannot replace it.
+    if (removeAnonymous && !dispatch.accountScoped && committedRows.some(row => row.status === 'ok')
+      && accountRevisionStillCurrent(lane, `${lane.provider}:*`, dispatch)) {
+      represented.add(`${lane.provider}:*`);
+      lane.identities.delete(`${lane.provider}:*`);
     }
 
     if (!dispatch.accountScoped && !genericTerminal) {

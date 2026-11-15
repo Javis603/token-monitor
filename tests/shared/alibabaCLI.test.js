@@ -57,7 +57,7 @@ test('Alibaba Personal CLI works without a cookie and reads monthly usage in the
     assert.deepEqual(deps.calls[0].args, ['console', 'call', '--api',
       'zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage', '--data', '{}', '--console-region',
       alibabaVariantConfig(variant).regionId, '--console-site',
-      alibabaVariantConfig(variant).personalConsoleSite, '--output', 'json']);
+      variant === 'cn-personal' ? 'domestic' : 'international', '--output', 'json']);
   }
 });
 
@@ -178,6 +178,9 @@ test('Bailian subprocess executes JSON quota commands and stops on cancellation'
     const [row] = await fetchAlibabaLimits({ alibabaVariant: 'cn-personal' }, deps);
     assert.equal(row.source, 'cli');
     assert.equal(row.windows[0].usedPercent, 40);
+    writeFileSync(executable, `#!${process.execPath}\nprocess.exit(3);\n`);
+    const [signedOut] = await fetchAlibabaLimits({ alibabaVariant: 'cn-personal' }, deps);
+    assert.equal(signedOut.status, 'notConfigured');
     writeFileSync(executable, `#!${process.execPath}\nsetInterval(() => {}, 1000);\n`);
     const controller = new AbortController();
     const promise = fetchAlibabaLimits({ alibabaVariant: 'cn-personal', alibabaCookie: 'a=b' },
@@ -237,7 +240,10 @@ test('Alibaba source switches retire previous Cookie and CLI identities in the r
   }] } }, { autoStart: false, autoRetry: false, now: () => now,
     probeProvider: (_provider, options, context) => fetchAlibabaLimits(options, { ...deps, signal: context.signal }) });
   try {
-    await runtime.refresh({ provider: 'alibaba' }, 'manual');
+    const { limitAccountRefreshScope } = require('../../src/shared/limits/accounts');
+    const scope = limitAccountRefreshScope('alibaba', { accountKey: 'old-cookie-account' });
+    assert.deepEqual(scope, { provider: 'alibaba' });
+    await runtime.refresh(scope, 'manual');
     const rows = runtime.getSnapshot().providers;
     assert.equal(rows.length, 1);
     assert.equal(rows[0].source, 'cli');
@@ -274,4 +280,16 @@ test('Alibaba CLI recovery replaces anonymous failures and empty Cookie subscrip
       assert.equal(rows[0].windows[0].usedPercent, 70);
     } finally { runtime.stop(); }
   }
+});
+
+
+test('Alibaba CLI authentication errors stay distinct from unavailable quota', async () => {
+  for (const code of [3, 6]) {
+    const deps = cliDeps(() => { throw Object.assign(new Error('CLI failed'), { code }); });
+    const [row] = await fetchAlibabaLimits({ alibabaVariant: 'cn-personal' }, deps);
+    assert.equal(row.status, code === 3 ? 'notConfigured' : 'unavailable');
+  }
+  const [row] = await fetchAlibabaLimits({ alibabaVariant: 'cn-personal' },
+    cliDeps(() => ({ Success: false, Code: 'Login.NotLogined', Message: 'login required' })));
+  assert.equal(row.status, 'unauthorized');
 });

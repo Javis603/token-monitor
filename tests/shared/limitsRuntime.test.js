@@ -1652,3 +1652,25 @@ test('anonymous removal markers cannot erase provider-wide state on failed or ac
     } finally { runtime.stop(); }
   }
 });
+
+
+test('anonymous quota remains when its successful replacement was cleared during the probe', async () => {
+  const job = deferred();
+  let started = false;
+  const runtime = createLimitsRuntime({ limitProviders: ['kimi'], previousLimits: { providers: [{
+    provider: 'kimi', source: 'api', status: 'ok', updatedAt: new Date().toISOString(),
+    windows: [{ kind: 'session', usedPercent: 25 }]
+  }] } }, runtimeDeps({ probeProvider: async () => { started = true; return job.promise; } }));
+  try {
+    const pending = runtime.refresh({ provider: 'kimi' }, 'manual');
+    await waitFor(() => started);
+    runtime.clear({ provider: 'kimi', accountKey: 'A' });
+    job.resolve([providerRow('kimi', 'A', 'Account A'), { provider: 'kimi', removed: true }]);
+    await pending;
+    const rows = runtime.getSnapshot().providers;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].accountKey, '');
+    assert.equal(rows[0].status, 'unavailable');
+    assert.equal(rows[0].windows[0].usedPercent, 25);
+  } finally { runtime.stop(); }
+});
