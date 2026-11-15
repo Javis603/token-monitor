@@ -1,0 +1,22 @@
+{
+  "compilerOptions": {
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": false,
+    "strict": true,
+    "module": "node20",
+    "moduleResolution": "node16",
+    "target": "ES2023",
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/**/*.js"
+  ],
+  "exclude": [
+    "worker",
+    "tmp",
+    "node_modules",
+    "dist",
+    "build"
+  ]
+}

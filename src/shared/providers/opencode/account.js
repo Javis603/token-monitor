@@ -1,7 +1,8 @@
+// @ts-check
 'use strict';
 
 // OpenCode limits account wiring. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'opencode',
   fetch: 'fetchOpenCodeLimits',
   fields: [
@@ -26,4 +27,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['opencode.ai', 'www.opencode.ai'] }
   ]
-};
+});

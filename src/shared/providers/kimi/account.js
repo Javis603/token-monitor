@@ -1,7 +1,8 @@
+// @ts-check
 'use strict';
 
 // Kimi limits account wiring. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'kimi',
   fetch: 'fetchKimiLimits',
   fields: [
@@ -52,4 +53,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['kimi.com', 'www.kimi.com'], pathPrefixes: ['/code'] }
   ]
-};
+});

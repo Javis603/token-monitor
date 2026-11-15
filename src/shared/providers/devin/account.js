@@ -1,7 +1,8 @@
+// @ts-check
 'use strict';
 
 // Devin limits account wiring. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'devin',
   fetch: 'fetchDevinLimits',
   fields: [
@@ -78,4 +79,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['app.devin.ai'], pathPrefixes: ['/settings/usage'] }
   ]
-};
+});
