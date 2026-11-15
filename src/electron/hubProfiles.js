@@ -13,12 +13,19 @@ function initializeHubProfiles(settings) {
     && typeof profile.deviceId === 'string') : [];
   let activeHubProfileId = hubProfiles.some(profile => profile.id === settings.activeHubProfileId)
     ? settings.activeHubProfileId : '';
-  // Preserve the existing connection on upgrade, including env-configured Hubs.
-  if (!hubProfiles.length && String(settings.hubUrl || '').trim()) {
-    const id = randomUUID();
-    hubProfiles.push({ id, name: endpoint(settings.hubUrl), hubUrl: settings.hubUrl,
-      secret: settings.secret || '', deviceId: settings.deviceId });
-    activeHubProfileId = id;
+  // The live connection is the truth: on upgrade (including env-configured Hubs)
+  // or when the active id no longer resolves, adopt the profile that matches it,
+  // or save it as a new one.
+  if (!activeHubProfileId && String(settings.hubUrl || '').trim()) {
+    const current = hubProfiles.find(profile => profile.hubUrl === settings.hubUrl
+      && profile.secret === (settings.secret || '') && profile.deviceId === settings.deviceId);
+    if (current) activeHubProfileId = current.id;
+    else {
+      const id = randomUUID();
+      hubProfiles.push({ id, name: endpoint(settings.hubUrl), hubUrl: settings.hubUrl,
+        secret: settings.secret || '', deviceId: settings.deviceId });
+      activeHubProfileId = id;
+    }
   }
   return { hubProfiles, activeHubProfileId };
 }

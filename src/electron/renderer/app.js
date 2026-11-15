@@ -14189,6 +14189,9 @@ els.hubModeOptions.addEventListener('change', async (event) => {
     syncHubModeUi();
     return;
   }
+  // A failed save belongs to the mode it was made in.
+  hubSaveError = false;
+  syncHubConnectionUi();
   await saveSettings({ hubMode: target.value });
   await refreshHubInfo();
   void refreshHubBuildStatus();

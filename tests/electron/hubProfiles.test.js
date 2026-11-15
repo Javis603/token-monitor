@@ -98,3 +98,12 @@ test('a patch that does not touch the Hub connection passes through unchanged', 
   const skinOnly = { pluginSkin: { pluginId: 'fixture', skinId: 'dark' } };
   assert.deepEqual(prepareHubProfilePatch(settings, skinOnly), skinOnly);
 });
+
+test('a stale active id is repaired from the live connection', () => {
+  const settings = addHome(legacy());
+  const homeId = settings.activeHubProfileId;
+  assert.equal(initializeHubProfiles({ ...settings, activeHubProfileId: 'missing' }).activeHubProfileId, homeId);
+  const moved = initializeHubProfiles({ ...settings, activeHubProfileId: '', hubUrl: 'https://other.example' });
+  assert.equal(moved.hubProfiles.length, 3);
+  assert.equal(moved.hubProfiles.find(profile => profile.id === moved.activeHubProfileId).hubUrl, 'https://other.example');
+});
