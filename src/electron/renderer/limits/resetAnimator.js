@@ -39,10 +39,13 @@
       || ((handle) => globalThis.cancelAnimationFrame(handle));
     const numberAnimations = new Map();
     const fillMotions = new WeakMap();
+    const fillAnimations = new WeakMap();
+    const completionAnimations = new WeakMap();
 
     function animateFillBetween(fill, fromScale, toScale, duration, startedAt) {
       if (!fill?.animate) return;
-      for (const animation of fill.getAnimations()) animation.cancel();
+      fillAnimations.get(fill)?.cancel();
+      fillAnimations.delete(fill);
       if (Math.abs(toScale - fromScale) < 0.001) return;
       const animation = fill.animate([
         { transform: `scaleX(${fromScale})` },
@@ -52,6 +55,7 @@
         easing: EASING,
         fill: 'backwards'
       });
+      fillAnimations.set(fill, animation);
       if (startedAt !== null) animation.startTime = startedAt;
     }
 
@@ -100,6 +104,7 @@
 
     function animateCompletion(fill, duration, startedAt = null) {
       if (!fill?.animate || prefersReducedMotion()) return;
+      completionAnimations.get(fill)?.cancel();
       const highlight = document.createElement('span');
       highlight.className = 'limit-meter-completion';
       fill.append(highlight);
@@ -119,6 +124,7 @@
       const removeHighlight = () => highlight.remove();
       animation.onfinish = removeHighlight;
       animation.oncancel = removeHighlight;
+      completionAnimations.set(fill, animation);
     }
 
     function capture(scope) {
@@ -134,7 +140,11 @@
             motion: fillMotions.get(fill)
           };
           fillMotions.delete(fill);
-          for (const animation of fill?.getAnimations({ subtree: true }) || []) animation.cancel();
+          // Retire only refill effects; CSS owns hover and live quota transitions.
+          fillAnimations.get(fill)?.cancel();
+          fillAnimations.delete(fill);
+          completionAnimations.get(fill)?.cancel();
+          completionAnimations.delete(fill);
           const value = item.querySelector('[data-limit-motion-value]');
           const number = numberAnimations.get(value);
           if (number) cancelAnimationFrame(number.handle);
