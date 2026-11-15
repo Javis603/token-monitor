@@ -2825,3 +2825,70 @@ test('adoption retains the saved tail owner after equal-time confirmations', t =
   assert.equal(entry.distribution.buckets.at(-1).value, 2);
   assert.equal(entry.distribution.unallocated, 0);
 });
+
+test('a rotated credential adopts the history recorded under the key it replaced', async t => {
+  const { createHash } = require('node:crypto');
+  const { limitWindowKey } = require('../../src/shared/limits/usageItems');
+  const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-identity-'));
+  const file = path.join(directory, 'history.sqlite');
+  const reset = at(22, 11);
+  const window = { kind: 'billing', label: 'Team credits', usedPercent: 63.38, remainingPercent: 36.62,
+    resetsAt: new Date(reset).toISOString() };
+  const cookieKeyed = { provider: 'qoder', source: 'web', status: 'ok', accountKey: 'sha256:cookie-hash',
+    updatedAt: new Date(at(12, 22, 34)).toISOString(), windows: [window] };
+  const userIdKeyed = { ...cookieKeyed, accountKey: 'sha256:user-id', accountKeyAliases: ['sha256:cookie-hash'],
+    updatedAt: new Date(at(12, 22, 44)).toISOString(),
+    windows: [{ ...window, usedPercent: 63.44, remainingPercent: 36.56 }] };
+  const legacyId = hash(['account-v2', historyAccountKey(cookieKeyed), limitWindowKey(window), 'pp']);
+  const canonicalId = hash(['account-v2', historyAccountKey(userIdKeyed), limitWindowKey(window), 'pp']);
+  // The live source of a portable account: the backend scope composed with the
+  // reporting device, identical before and after the key moved.
+  const liveSource = hash([hash('local'), hash(['', 'web', ''])]);
+  const db = createHistoryDatabase(file);
+  for (const [time, value] of [[at(12, 22, 29), 63.35], [at(12, 22, 34), 63.38]]) {
+    db.record([{ account: hash(['account-v2', historyAccountKey(cookieKeyed)]), source: liveSource,
+      windows: [{ id: legacyId, point: point(time, value, reset) }] }], at(12, 22, 35));
+  }
+  db.close();
+  const store = createLimitsHistoryStore(file, { now: () => at(12, 22, 46) });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const adopted = await store.query('local', userIdKeyed);
+  assert.deepEqual(adopted.windows[0].points.map(p => [p.at, p.value]),
+    [[at(12, 22, 29), 63.35], [at(12, 22, 34), 63.38]], 'the pre-rotation readings stay on the timeline');
+  await store.record('local', { providers: [userIdKeyed] });
+  const result = await store.query('local', userIdKeyed);
+  assert.deepEqual(result.windows[0].points.map(p => p.value), [63.35, 63.38, 63.44], 'later readings continue the adopted stream');
+  const inspect = new DatabaseSync(file, { readOnly: true });
+  try {
+    assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM history_adoptions WHERE legacy = ? AND canonical = ?')
+      .get(legacyId, canonicalId).n, 1);
+    // The legacy rows stay as a recovery archive; only their marker points at
+    // the canonical stream, so nothing is counted twice.
+    assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM streams WHERE id = ?').get(canonicalId).n, 1);
+    assert.equal(inspect.prepare('SELECT COUNT(*) AS n FROM runs WHERE stream = ?').get(legacyId).n, 2);
+    // The adopted readings keep the device's own source, so the next live
+    // reading or failure from that device owns the adopted tail.
+    assert.deepEqual(inspect.prepare(`SELECT DISTINCT s.source FROM history_run_sources s
+      JOIN runs r ON r.id = s.run WHERE r.stream = ?`).all(canonicalId).map(row => row.source), [liveSource]);
+  } finally { inspect.close(); }
+});
+
+test('live OpenCode aliases keep their own history', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-opencode-alias-'));
+  const file = path.join(directory, 'history.sqlite');
+  const reset = at(22, 11);
+  const window = { kind: 'monthly', label: 'Monthly', usedPercent: 20, remainingPercent: 80,
+    resetsAt: new Date(reset).toISOString() };
+  // An API-only device reports the account under the key the web row aliases.
+  const apiOnly = { provider: 'opencode', source: 'api', status: 'ok', accountKey: 'sha256:api-key',
+    updatedAt: new Date(at(12, 10)).toISOString(), windows: [window] };
+  const workspace = { ...apiOnly, source: 'web', accountKey: 'sha256:workspace', accountKeyAliases: ['sha256:api-key'],
+    updatedAt: new Date(at(12, 10, 5)).toISOString(), windows: [{ ...window, usedPercent: 21, remainingPercent: 79 }] };
+  const store = createLimitsHistoryStore(file, { now: () => at(12, 10, 6) });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  await store.record('local', { providers: [apiOnly] });
+  await store.record('local', { providers: [workspace] });
+  assert.deepEqual((await store.query('local', workspace)).windows[0].points.map(p => p.value), [21]);
+  assert.deepEqual((await store.query('local', apiOnly)).windows[0].points.map(p => p.value), [20]);
+});
