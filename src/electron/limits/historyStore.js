@@ -65,7 +65,11 @@ function createLimitsHistoryStore(filePath, { now = Date.now, onError = () => {}
   // now and the credential-derived keys that key replaced. Each alias is the
   // id the same window was recorded under before the identity moved, so the
   // alias resolves to the canonical stream instead of forking the history.
+  // Adoption is one-way, so it only fits retired keys. OpenCode's aliases are
+  // still live identities (an API-only device keeps reporting under one), and
+  // their histories stay separate.
   function identityVariants(provider) {
+    if (provider.provider === 'opencode') return [provider];
     const aliases = [...new Set((Array.isArray(provider.accountKeyAliases) ? provider.accountKeyAliases : [])
       .map(key => String(key || '').trim())
       .filter(key => key && key !== provider.accountKey))];

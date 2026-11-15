@@ -2873,3 +2873,22 @@ test('a rotated credential adopts the history recorded under the key it replaced
       JOIN runs r ON r.id = s.run WHERE r.stream = ?`).all(canonicalId).map(row => row.source), [liveSource]);
   } finally { inspect.close(); }
 });
+
+test('live OpenCode aliases keep their own history', async t => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-opencode-alias-'));
+  const file = path.join(directory, 'history.sqlite');
+  const reset = at(22, 11);
+  const window = { kind: 'monthly', label: 'Monthly', usedPercent: 20, remainingPercent: 80,
+    resetsAt: new Date(reset).toISOString() };
+  // An API-only device reports the account under the key the web row aliases.
+  const apiOnly = { provider: 'opencode', source: 'api', status: 'ok', accountKey: 'sha256:api-key',
+    updatedAt: new Date(at(12, 10)).toISOString(), windows: [window] };
+  const workspace = { ...apiOnly, source: 'web', accountKey: 'sha256:workspace', accountKeyAliases: ['sha256:api-key'],
+    updatedAt: new Date(at(12, 10, 5)).toISOString(), windows: [{ ...window, usedPercent: 21, remainingPercent: 79 }] };
+  const store = createLimitsHistoryStore(file, { now: () => at(12, 10, 6) });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  await store.record('local', { providers: [apiOnly] });
+  await store.record('local', { providers: [workspace] });
+  assert.deepEqual((await store.query('local', workspace)).windows[0].points.map(p => p.value), [21]);
+  assert.deepEqual((await store.query('local', apiOnly)).windows[0].points.map(p => p.value), [20]);
+});
