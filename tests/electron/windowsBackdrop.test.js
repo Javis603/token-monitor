@@ -390,13 +390,24 @@ test('experimental Accent mode uses the shared glass surface treatment', () => {
   assert.match(html, /id="windowsBackdropNote"[^>]*class="[^"]*hidden"/);
 });
 
-test('showing a host re-applies Acrylic only where Acrylic is the applied material', () => {
+test('showing a host re-applies its actual system material', () => {
   const refresh = f => refreshWindowsBackdrop(f.win, { platform: 'win32' });
   const acrylic = materialFixture();
   acrylic.sync({ mode: 'acrylic' });
   acrylic.calls.length = 0;
   assert.equal(refresh(acrylic), true);
   assert.deepEqual(acrylic.calls, [['material', 'none'], ['color', '#00000000'], ['material', 'acrylic']]);
+
+  for (const [mode, material] of [['mica', 'mica'], ['mica-alt', 'tabbed']]) {
+    const f = materialFixture();
+    f.sync({ mode });
+    f.calls.length = 0;
+    assert.equal(refresh(f), true);
+    assert.deepEqual(f.calls, [['material', 'none'], ['color', '#00000000'], ['material', material]]);
+    f.calls.length = 0;
+    f.sync({ mode });
+    assert.deepEqual(f.calls, [], 'reveal refresh preserves the cached preference');
+  }
 
   const fallback = materialFixture(false);
   fallback.sync({ mode: 'accent' });

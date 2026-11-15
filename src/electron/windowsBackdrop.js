@@ -187,15 +187,17 @@ function syncWindowsBackdrop(win, { enabled = true, mode = 'acrylic' } = {}, opt
   return state;
 }
 
-// A BaseWindow host draws its Acrylic as an opaque grey fill after being shown
+// A BaseWindow host draws its system material as an opaque grey fill after being shown
 // (or after its predecessor is destroyed) until the material is applied again.
 function refreshWindowsBackdrop(win, options = {}) {
   if ((options.platform || process.platform) !== 'win32' || !win || win.isDestroyed?.()) return false;
   const state = windowStates.get(win);
-  if (state?.mode !== 'acrylic' && state?.fallback !== true) return false;
+  const material = state?.fallback === true ? 'acrylic'
+    : state?.mode === 'mica-alt' ? 'tabbed' : state?.mode;
+  if (!['acrylic', 'mica', 'tabbed'].includes(material)) return false;
   win.setBackgroundMaterial('none');
   win.setBackgroundColor('#00000000');
-  win.setBackgroundMaterial('acrylic');
+  win.setBackgroundMaterial(material);
   return true;
 }
 
