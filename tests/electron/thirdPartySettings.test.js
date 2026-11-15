@@ -108,7 +108,7 @@ test('third-party credentials stay local while renderer metadata is redacted', (
   assert.match(main, /ipcMain\.handle\('thirdparty:renameProfile'/);
   assert.match(main, /ipcMain\.handle\('thirdparty:setProfileEnabled'/);
   assert.match(main, /thirdPartyLimits\.fetchThirdPartyAccount\(\{ name, \.\.\.profile \}/);
-  assert.match(main, /rethrowQuotaError: true/);
+  assert.match(main, /surfaceAccessTokenErrors: true/);
   assert.match(main, /'ACCESS_TOKEN_LEGACY_RETIRED'\) return 'newApiLegacyTokenRetired'/);
   assert.match(main, /'ACCESS_TOKEN_SCOPE_DENIED'\) return 'newApiScopeDenied'/);
   assert.match(main, /thirdPartyLimits\.CUSTOM_BALANCE_ADAPTER/);

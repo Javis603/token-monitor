@@ -53,23 +53,15 @@ function response(status, body) {
   };
 }
 
-function errorResponse(status, code) {
-  const body = JSON.stringify({ success: false, code, message: 'rejected' });
-  return {
-    ok: false,
-    status,
-    headers: { get: (name) => (name === 'content-length' ? String(Buffer.byteLength(body)) : null) },
-    text: async () => body
-  };
-}
-
-function streamedErrorResponse(status, code) {
+function errorResponse(status, code, declaredLength = true) {
   const bytes = new TextEncoder().encode(JSON.stringify({ success: false, code, message: 'rejected' }));
   let sent = false;
   return {
     ok: false,
     status,
-    headers: { get: () => null },
+    headers: {
+      get: (name) => (declaredLength && name === 'content-length' ? String(bytes.byteLength) : null)
+    },
     body: {
       getReader: () => ({
         read: async () => {
@@ -81,6 +73,10 @@ function streamedErrorResponse(status, code) {
       })
     }
   };
+}
+
+function streamedErrorResponse(status, code) {
+  return errorResponse(status, code, false);
 }
 
 function fixtureTimezone(t, zone = 'UTC') {
@@ -1378,7 +1374,7 @@ test('New API save probes surface retired legacy tokens and missing scopes', asy
         enabled: true
       }, {
         env: {},
-        rethrowQuotaError: true,
+        surfaceAccessTokenErrors: true,
         now: () => Date.parse('2026-07-24T08:00:00Z'),
         fetch: async (url) => {
           const parsed = new URL(url);
@@ -1406,6 +1402,45 @@ test('New API save probes surface retired legacy tokens and missing scopes', asy
   // A reverse proxy can drop Content-Length while keeping the same envelope.
   const chunked = await failureFor(401, 'ACCESS_TOKEN_LEGACY_RETIRED', streamedErrorResponse);
   assert.equal(chunked.code, 'ACCESS_TOKEN_LEGACY_RETIRED');
+});
+
+test('New API save probes surface a token that cannot read the usage dashboard', async () => {
+  const account = {
+    name: 'production',
+    adapter: NEWAPI_ACCOUNT_ADAPTER,
+    baseUrl: 'https://api.example.com',
+    accessToken: 'nap_token',
+    enabled: true
+  };
+  const fetch = async (url) => {
+    const parsed = new URL(url);
+    if (parsed.pathname.endsWith(NEWAPI_STATUS_PATH)) {
+      return response(200, { data: { quota_per_unit: DEFAULT_QUOTA_PER_UNIT } });
+    }
+    if (parsed.pathname.endsWith(NEWAPI_ACCOUNT_PATH)) {
+      return response(200, {
+        success: true,
+        data: { quota: 25_000_000, used_quota: 5_000_000, request_count: 12 }
+      });
+    }
+    return errorResponse(403, 'ACCESS_TOKEN_SCOPE_DENIED');
+  };
+  const now = () => Date.parse('2026-07-24T08:00:00Z');
+
+  await assert.rejects(
+    fetchThirdPartyAccount(account, { env: {}, now, fetch, surfaceAccessTokenErrors: true }),
+    (error) => error.code === 'ACCESS_TOKEN_SCOPE_DENIED'
+  );
+
+  // Normal collection keeps the balance and treats every period as optional.
+  const [provider] = await fetchThirdPartyLimits({ thirdPartyProfiles: { production: account } }, {
+    env: {},
+    now,
+    fetch
+  });
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.balance.amount, 50);
+  assert.equal(provider.balance.todaySpend, null);
 });
 
 test('configured accounts deduplicate exact adapter identities but keep distinct modes', () => {

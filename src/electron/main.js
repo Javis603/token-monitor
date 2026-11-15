@@ -9869,7 +9869,7 @@ app.whenReady().then(() => {
       const provider = await thirdPartyLimits.fetchThirdPartyAccount({ name, ...profile }, electronProviderDeps({
         env: process.env,
         signal: AbortSignal.timeout(15_000),
-        rethrowQuotaError: true
+        surfaceAccessTokenErrors: true
       }));
       if (provider?.status !== 'ok') {
         return {

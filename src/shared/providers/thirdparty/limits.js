@@ -751,28 +751,33 @@ async function requestJson(url, options = {}, deps = {}) {
 // error envelope into memory, whether or not a proxy preserved Content-Length.
 async function upstreamErrorCode(response) {
   const declared = Number(response?.headers?.get?.('content-length'));
-  if (Number.isFinite(declared) && declared > 4096) return '';
+  if (Number.isFinite(declared) && declared > 4096) {
+    try { await response?.body?.cancel?.(); } catch (_) {}
+    return '';
+  }
+  const reader = response?.body?.getReader?.();
+  if (!reader) {
+    try { await response?.body?.cancel?.(); } catch (_) {}
+    return '';
+  }
   let text = '';
   try {
-    const reader = response?.body?.getReader?.();
-    if (reader) {
-      const decoder = new TextDecoder();
-      let size = 0;
-      while (size < 4096) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        const chunk = value.subarray(0, 4096 - size);
-        size += chunk.byteLength;
-        text += decoder.decode(chunk, { stream: true });
-      }
-      text += decoder.decode();
-      try { await reader.cancel(); } catch (_) {}
-    } else if (typeof response?.text === 'function') {
-      text = await response.text();
-      if (text.length > 4096) return '';
-    } else {
-      return '';
+    const decoder = new TextDecoder();
+    let size = 0;
+    while (size < 4096) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      const chunk = value.subarray(0, 4096 - size);
+      size += chunk.byteLength;
+      text += decoder.decode(chunk, { stream: true });
     }
+    text += decoder.decode();
+  } catch (_) {
+    return '';
+  } finally {
+    try { await reader.cancel(); } catch (_) {}
+  }
+  try {
     const body = JSON.parse(text);
     const code = typeof body?.code === 'string' ? body.code : '';
     return /^[A-Z][A-Z0-9_]{0,63}$/u.test(code) ? code : '';
@@ -800,11 +805,18 @@ async function fetchOptionalEnrichments(account, adapter, deps) {
         )
         : await fetchValue(deps);
       return [key, value];
-    } catch (_) {
+    } catch (error) {
+      // A save probe has to say why the token cannot read the dashboard;
+      // collection keeps every optional period best-effort.
+      if (deps.surfaceAccessTokenErrors === true && isAccessTokenError(error)) throw error;
       return null;
     }
   }));
   return Object.fromEntries(results.filter(Boolean));
+}
+
+function isAccessTokenError(error) {
+  return typeof error?.code === 'string' && error.code.startsWith('ACCESS_TOKEN_');
 }
 
 function normalizeThirdPartyProfile(profile = {}) {
@@ -914,7 +926,13 @@ async function fetchThirdPartyAccount(account, deps = {}) {
         (reason) => ({ fulfilled: false, reason })
       )
     : Promise.resolve(null);
-  const enrichmentPromise = fetchOptionalEnrichments(account, adapter, deps);
+  // Settle enrichment early so a save probe can rethrow a refusal without
+  // leaving the promise unhandled while the balance request is in flight.
+  const settleEnrichments = (promise) => promise.then(
+    (payloads) => ({ payloads }),
+    (error) => ({ error })
+  );
+  const enrichmentPromise = settleEnrichments(fetchOptionalEnrichments(account, adapter, deps));
   let quotaResultPayload = null;
   let renewedCredentials = null;
   let quotaError = null;
@@ -926,9 +944,11 @@ async function fetchThirdPartyAccount(account, deps = {}) {
     quotaError = error;
   }
   const statusResponse = await statusPromise;
-  const enrichmentPayloads = renewedCredentials
-    ? await fetchOptionalEnrichments({ ...account, ...renewedCredentials }, adapter, deps)
+  const enrichment = renewedCredentials
+    ? await settleEnrichments(fetchOptionalEnrichments({ ...account, ...renewedCredentials }, adapter, deps))
     : await enrichmentPromise;
+  if (enrichment.error) throw enrichment.error;
+  const enrichmentPayloads = enrichment.payloads;
   if (deps.signal?.aborted) {
     throw deps.signal.reason || Object.assign(new Error('Third-party API request aborted'), { name: 'AbortError' });
   }
@@ -944,7 +964,7 @@ async function fetchThirdPartyAccount(account, deps = {}) {
     updatedAt
   };
   if (quotaError) {
-    if (deps.rethrowQuotaError === true) throw quotaError;
+    if (deps.surfaceAccessTokenErrors === true && isAccessTokenError(quotaError)) throw quotaError;
     return normalizeLimitProvider({
       ...common,
       status: quotaError.status || 'unavailable',
