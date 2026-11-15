@@ -693,7 +693,10 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
 
     for (const removal of removals) {
       let identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
-      if (identityKey === `${lane.provider}:*`) continue;
+      // A healthy replacement may explicitly retire the anonymous slot. Failed
+      // or account-scoped probes cannot use it to erase provider-wide state.
+      if (identityKey === `${lane.provider}:*`
+        && (dispatch.accountScoped || !normalizedRows.some(row => row.status === 'ok'))) continue;
       if (dispatch.accountScoped && identityKey !== dispatch.identityKey) continue;
       if (apiOnly && !belongsToApi(identityKey)) continue;
       if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;

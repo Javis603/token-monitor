@@ -1632,3 +1632,23 @@ test('Muse anonymous source reset refreshes stay provider-wide without duplicate
     }
   }
 });
+
+test('anonymous removal markers cannot erase provider-wide state on failed or account-scoped probes', async () => {
+  for (const accountScoped of [false, true]) {
+    const runtime = createLimitsRuntime({ limitProviders: ['kimi'], previousLimits: { providers: [{
+      provider: 'kimi', source: 'api', status: 'unavailable', updatedAt: new Date().toISOString(), windows: []
+    }] } }, runtimeDeps({
+      probeProvider: async () => [
+        providerRow('kimi', 'A', 'Account A', { status: accountScoped ? 'ok' : 'unavailable' }),
+        { provider: 'kimi', removed: true }
+      ]
+    }));
+    try {
+      await runtime.refresh(accountScoped ? { provider: 'kimi', accountKey: 'A' } : { provider: 'kimi' }, 'manual');
+      const rows = runtime.getSnapshot().providers;
+      assert.equal(rows.length, 2);
+      assert.ok(rows.some(row => !row.accountKey && row.status === 'unavailable'));
+      assert.equal(JSON.stringify(rows).includes('removed'), false);
+    } finally { runtime.stop(); }
+  }
+});

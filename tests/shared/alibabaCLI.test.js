@@ -253,3 +253,25 @@ test('Alibaba source switches retire previous Cookie and CLI identities in the r
     assert.equal(fallbackRows[0].windows[0].usedPercent, 75);
   } finally { runtime.stop(); }
 });
+
+test('Alibaba CLI recovery replaces anonymous failures and empty Cookie subscriptions', async () => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  for (const previous of [
+    { source: 'cli', status: 'unavailable' },
+    { source: 'web', status: 'ok' }
+  ]) {
+    const deps = cliDeps(() => page([seat('a')]));
+    const runtime = createLimitsRuntime({ limitProviders: ['alibaba'], previousLimits: { providers: [{
+      provider: 'alibaba', ...previous, region: 'cn', updatedAt: new Date(now - 1000).toISOString(), windows: []
+    }] } }, { autoStart: false, autoRetry: false, now: () => now,
+      probeProvider: (_provider, options, context) => fetchAlibabaLimits(options, { ...deps, signal: context.signal }) });
+    try {
+      await runtime.refresh({ provider: 'alibaba' }, 'manual');
+      const rows = runtime.getSnapshot().providers;
+      assert.equal(rows.length, 1, JSON.stringify(previous));
+      assert.equal(rows[0].source, 'cli');
+      assert.equal(rows[0].status, 'ok');
+      assert.equal(rows[0].windows[0].usedPercent, 70);
+    } finally { runtime.stop(); }
+  }
+});

@@ -924,8 +924,7 @@ function selectedAlibabaResult(provider, options, deps) {
   // Never copy that label into the cross-device account key.
   const identity = accountIdentityDescriptor(provider)?.part;
   const removals = (options.previousLimits?.providers || [])
-    .filter(row => row.provider === 'alibaba' && accountIdentityDescriptor(row)
-      && accountIdentityDescriptor(row).part !== identity)
+    .filter(row => row.provider === 'alibaba' && accountIdentityDescriptor(row)?.part !== identity)
     .map(row => ({ provider: 'alibaba', accountKey: row.accountKey,
       accountName: row.accountName, accountEmail: row.accountEmail, accountLabel: row.accountLabel, removed: true }));
   return [provider, ...removals];
