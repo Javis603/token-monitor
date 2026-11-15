@@ -47,11 +47,17 @@ function fixture(t, parentReference = 'parent') {
   t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
   const root = path.join(homeDir, '.omp', 'agent', 'sessions', 'bucket');
   fs.mkdirSync(root, { recursive: true });
-  const parent = path.join(root, '2026-11-02T10-00-00_parent.jsonl');
-  // A `/tan` fork is task-named under its parent's directory; its id is only in the header.
+  // A `/tan` fork is task-named under its parent's directory; its id is only in
+  // the header. `task-parent` nests one inside another task-named transcript.
+  const parent = parentReference === 'task-parent'
+    ? path.join(root, '2026-11-02T09-00-00_main', 'Tan-parent.jsonl')
+    : path.join(root, '2026-11-02T10-00-00_parent.jsonl');
   const fork = parentReference === 'task'
     ? path.join(root, '2026-11-02T10-00-00_parent', 'Tan-test.jsonl')
-    : path.join(root, '2026-11-02T11-00-00_fork.jsonl');
+    : parentReference === 'task-parent'
+      ? path.join(root, '2026-11-02T09-00-00_main', 'Tan-parent', 'Tan-fork.jsonl')
+      : path.join(root, '2026-11-02T11-00-00_fork.jsonl');
+  fs.mkdirSync(path.dirname(parent), { recursive: true });
   fs.mkdirSync(path.dirname(fork), { recursive: true });
   fs.writeFileSync(parent, JSON.stringify({ type: 'session', id: 'parent' }) + '\n');
   fs.writeFileSync(fork, [
@@ -69,7 +75,7 @@ function assertOnlyParent(visible) {
   }
 }
 
-for (const parentReference of ['parent', 'path', 'task']) {
+for (const parentReference of ['parent', 'path', 'task', 'task-parent']) {
   test(`pre-split Pi fork with an OMP parent ${parentReference} is not replayed`, t => {
     const { homeDir } = fixture(t, parentReference);
     const archive = legacyArchive();

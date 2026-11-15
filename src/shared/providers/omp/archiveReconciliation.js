@@ -6,14 +6,21 @@ const { findTimestampedSessionFiles, isSafeSessionId } = require('../../sessionF
 const { resolveOmpSessionsDir } = require('./paths');
 const { findOmpSubagentSessionFiles, readOmpSessionHeader } = require('./subagents');
 
+// Timestamped transcripts carry their id in the file name; task-named ones
+// (`/tan`, subagents) only in their header, so look those up by walking.
+function findOmpSessionFiles(root, sessionIds) {
+  const files = findTimestampedSessionFiles(root, sessionIds);
+  const unnamed = [...sessionIds].filter(id => !files.has(id));
+  for (const [id, file] of findOmpSubagentSessionFiles(root, unnamed)) files.set(id, file);
+  return files;
+}
+
 // An OMP fork can disappear from a complete usage report when every response
 // was already counted in its parent. Only resolve local OMP identities here;
 // absence by itself says nothing about deleted or untracked Pi history.
 function resolveOmpForkParents(sessionIds, liveSessions, options = {}) {
   const root = resolveOmpSessionsDir({ homeDir: options.homeDir || os.homedir() });
-  const files = findTimestampedSessionFiles(root, sessionIds);
-  const unnamed = sessionIds.filter(id => !files.has(id));
-  for (const [id, file] of findOmpSubagentSessionFiles(root, unnamed)) files.set(id, file);
+  const files = findOmpSessionFiles(root, sessionIds);
   const headers = new Map();
   const parentIds = new Set();
   for (const [id, file] of files) {
@@ -24,7 +31,7 @@ function resolveOmpForkParents(sessionIds, liveSessions, options = {}) {
       parentIds.add(header.parentSession);
     }
   }
-  const parentFiles = findTimestampedSessionFiles(root, parentIds);
+  const parentFiles = findOmpSessionFiles(root, parentIds);
   const parents = new Map();
   for (const [id, header] of headers) {
     // OMP versions write either the parent's id or its transcript path. A path
