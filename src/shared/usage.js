@@ -1644,11 +1644,15 @@ function mergeDeviceLimits(existingRecord, incomingRecord) {
     if (key) existingByKey.set(key, provider);
   }
   const retainedProviders = new Set();
+  // An account the incoming summary reports itself is not restored beside it.
+  const incomingAccounts = new Set(incomingLimits.providers.filter(provider => provider.accountKey)
+    .map(provider => `${provider.provider}:${provider.accountKey}`));
   const providers = incomingLimits.providers.flatMap((provider) => {
     if (GUI_SECRET_LIMIT_PROVIDERS.has(provider.provider) && provider.status === 'notConfigured') {
       // Several placeholders for one provider must not each restore the accounts.
       if (retainedProviders.has(provider.provider)) return [];
       const retained = existingLimits.providers.filter(existing => existing.provider === provider.provider
+        && !incomingAccounts.has(`${existing.provider}:${existing.accountKey}`)
         && shouldKeepExistingGuiSecretProvider(existing, provider, existingRecord, incomingRecord));
       if (retained.length) {
         retainedProviders.add(provider.provider);

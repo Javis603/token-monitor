@@ -126,3 +126,15 @@ test('the signal keeps keyed inactive accounts and drops keyless hints for accou
   delete devices[0].limits.multiAccountProviders;
   assert.deepEqual(aggregateLimits(devices, 0, now).providers.map(p => p.accountKey), ['', 'W1']);
 });
+
+test('an account the incoming summary reports itself is not restored beside it', () => {
+  const existing = { deviceId: 'a', agentRuntime: 'electron-widget', limits: {
+    providers: [row('A1', { provider: 'minimax' }), row('A2', { provider: 'minimax' })]
+  } };
+  const incoming = { deviceId: 'a', agentRuntime: 'headless-agent', limits: { providers: [
+    row('A1', { provider: 'minimax', source: 'oauth' }),
+    row('', { provider: 'minimax', status: 'notConfigured', source: 'api' })
+  ] } };
+  assert.deepEqual(mergeDeviceRecord(existing, incoming).limits.providers.map(p => [p.accountKey, p.source]),
+    [['A1', 'oauth'], ['A2', 'api']]);
+});
