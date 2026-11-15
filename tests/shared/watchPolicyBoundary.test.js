@@ -14,7 +14,7 @@ test('the watcher child imports the watch policy, not the collection graph', () 
 test('loading the watch policy does not pull collector, usage, history or core session metadata', () => {
   require('../../src/shared/watchPolicy');
   const loaded = Object.keys(require.cache).filter((file) => (
-    /src\/shared\/(collector|usage|history|sessionMetadata)\.js$/.test(file)
+    /src\/shared\/(collector|usage|history|sessionMetadata)\.js$/.test(file.replace(/\\/g, '/'))
   ));
   assert.deepEqual(loaded, [], 'watch policy must stay independent of the collection graph');
 });
