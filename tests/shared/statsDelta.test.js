@@ -89,6 +89,30 @@ test('an unchanged snapshot needs no row upserts and still applies', () => {
   assert.deepEqual(applied, next);
 });
 
+test('fields removed by a full snapshot are removed by a delta too', () => {
+  const previous = stats(1, 7, {
+    today: period(10, { 'claude:a': row('a', 10) }),
+    month: period(10, { 'claude:a': row('a', 10) })
+  });
+  const current = {
+    ...previous,
+    nativeSessions: { today: { old: row('old', 5) } },
+    nativeProjects: { today: { old: { totalTokens: 5 } } },
+    localRecentUsageActivity: { old: true },
+    sessionDetailsOmitted: { month: true },
+    periodProjectsOmitted: { month: true }
+  };
+  const next = stats(2, 7, {
+    today: period(5, { 'claude:a': row('a', 5) }),
+    month: period(5, { 'claude:a': row('a', 5) })
+  });
+  const applied = applyStatsDelta(current, buildStatsDelta(fingerprintStats(current), next).delta);
+  assert.deepEqual(applied, next);
+  for (const key of ['nativeSessions', 'nativeProjects', 'localRecentUsageActivity', 'sessionDetailsOmitted', 'periodProjectsOmitted']) {
+    assert.equal(Object.hasOwn(applied, key), false, key);
+  }
+});
+
 test('empty session maps survive a delta', () => {
   const previous = stats(1, 7, {
     today: period(0, {}),

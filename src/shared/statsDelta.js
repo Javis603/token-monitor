@@ -154,7 +154,7 @@
         periods[period] = summary;
       }
     }
-    return { ...current, ...delta.stats, snapshot: delta.snapshot, periods };
+    return { ...delta.stats, snapshot: delta.snapshot, periods };
   }
 
   return { applyStatsDelta, buildStatsDelta, fingerprintStats };
