@@ -5,6 +5,7 @@ const { normalizeLatestModel } = require('./usage');
 const { isCompressedCodexTranscript, readCompressedCodexTranscript } = require('./providers/codex/transcript');
 const os = require('node:os');
 const { hashKey } = require('./hashKey');
+const { resolveProjectRoot } = require('./projectRoot');
 const { normalizeSessionContext } = require('./sessionContext');
 const { normalizeReasoningEffort, isSessionReasoningEffortClient } = require('./sessionLive');
 const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
@@ -193,11 +194,14 @@ function normalizeProjectPath(value) {
   return windows ? normalized.toLowerCase() : normalized;
 }
 
+// A directory's project is its repository: linked worktrees resolve to the
+// repository they were created from instead of naming a project each.
 function projectIdentity(value) {
-  const normalized = normalizeProjectPath(value);
+  const directory = normalizeProjectPath(value) ? resolveProjectRoot(String(value).trim()) : value;
+  const normalized = normalizeProjectPath(directory);
   if (!normalized) return {};
   const root = normalized === '/' || /^[a-z]:\/$/i.test(normalized);
-  let displayPath = String(value || '').trim().replace(/\\/g, '/');
+  let displayPath = String(directory || '').trim().replace(/\\/g, '/');
   if (!root) displayPath = displayPath.replace(/\/+$/, '');
   const label = root ? (normalized === '/' ? '/' : `${normalized[0].toUpperCase()}:\\`) : displayPath.split('/').pop();
   return { projectId: hashKey('project', normalized), projectLabel: label };
