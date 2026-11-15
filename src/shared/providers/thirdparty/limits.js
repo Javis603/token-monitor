@@ -29,6 +29,7 @@ const SUB2API_ME_PATH = '/api/v1/auth/me';
 const SUB2API_REFRESH_PATH = '/api/v1/auth/refresh';
 const SUB2API_USAGE_STATS_PATH = '/api/v1/usage/stats?period=month';
 const SUB2API_DASHBOARD_STATS_PATH = '/api/v1/usage/dashboard/stats';
+const ERROR_BODY_DEADLINE_MS = 1_000;
 const DEFAULT_CUSTOM_ENDPOINT_PATH = '/user/balance';
 const DEFAULT_CUSTOM_CURRENCY = 'USD';
 const DEFAULT_CUSTOM_DIVISOR = 1;
@@ -761,11 +762,15 @@ async function upstreamErrorCode(response) {
     return '';
   }
   let text = '';
+  let timer = null;
   try {
     const decoder = new TextDecoder();
     let size = 0;
+    const stalled = new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('error body read timed out')), ERROR_BODY_DEADLINE_MS);
+    });
     while (size < 4096) {
-      const { value, done } = await reader.read();
+      const { value, done } = await Promise.race([reader.read(), stalled]);
       if (done) break;
       const chunk = value.subarray(0, 4096 - size);
       size += chunk.byteLength;
@@ -775,6 +780,7 @@ async function upstreamErrorCode(response) {
   } catch (_) {
     return '';
   } finally {
+    clearTimeout(timer);
     try { await reader.cancel(); } catch (_) {}
   }
   try {

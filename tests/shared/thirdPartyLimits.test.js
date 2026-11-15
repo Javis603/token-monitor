@@ -1443,6 +1443,34 @@ test('New API save probes surface a token that cannot read the usage dashboard',
   assert.equal(provider.balance.todaySpend, null);
 });
 
+test('New API error bodies cannot consume the save budget when the stream stalls', async () => {
+  const stalled = {
+    ok: false,
+    status: 401,
+    headers: { get: (name) => (name === 'content-length' ? '64' : null) },
+    body: {
+      getReader: () => ({ read: () => new Promise(() => {}), cancel: async () => {} })
+    }
+  };
+  const [provider] = await fetchThirdPartyLimits({
+    thirdPartyProfiles: {
+      production: {
+        adapter: NEWAPI_ACCOUNT_ADAPTER,
+        baseUrl: 'https://api.example.com',
+        accessToken: 'nap_token'
+      }
+    }
+  }, {
+    env: {},
+    signal: AbortSignal.timeout(5000),
+    fetch: async (url) => (new URL(url).pathname.endsWith(NEWAPI_STATUS_PATH)
+      ? response(200, { data: { quota_per_unit: DEFAULT_QUOTA_PER_UNIT } })
+      : stalled)
+  });
+
+  assert.equal(provider.status, 'unauthorized');
+});
+
 test('configured accounts deduplicate exact adapter identities but keep distinct modes', () => {
   const accounts = configuredAccounts({
     thirdPartyProfiles: {
