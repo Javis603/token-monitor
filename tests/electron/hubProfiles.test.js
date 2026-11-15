@@ -107,3 +107,10 @@ test('a stale active id is repaired from the live connection', () => {
   assert.equal(moved.hubProfiles.length, 3);
   assert.equal(moved.hubProfiles.find(profile => profile.id === moved.activeHubProfileId).hubUrl, 'https://other.example');
 });
+
+test('switching Hubs drops the previous Hub\'s device cleanup, editing in place keeps it', () => {
+  const settings = { ...addHome(legacy()), lastPostedDeviceId: 'home-laptop' };
+  const worker = settings.hubProfiles.find(profile => profile.hubUrl === 'https://worker.example');
+  assert.equal(prepareHubProfilePatch(settings, { hubProfileAction: { type: 'select', id: worker.id } }).lastPostedDeviceId, '');
+  assert.equal(Object.hasOwn(prepareHubProfilePatch(settings, { deviceId: 'renamed-laptop' }), 'lastPostedDeviceId'), false);
+});

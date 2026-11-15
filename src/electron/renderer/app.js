@@ -9794,6 +9794,7 @@ function syncHubConnectionUi() {
   const focusedEditor = els.syncConnectionEditor.contains(document.activeElement)
     || els.syncDeviceSettings.contains(document.activeElement);
   els.syncConnectionEdit.hidden = !client || editing;
+  els.syncConnectionEdit.disabled = hubSaveBusy;
   if (client && !editing && focusedEditor && isSettingsSurfaceVisible()) {
     els.syncConnectionEdit.focus({ preventScroll: true });
   }
@@ -14122,7 +14123,10 @@ els.saveSettingsButton.addEventListener('click', async () => {
   }
 });
 
-els.syncConnectionEdit?.addEventListener('click', () => beginClientConnectionEdit({ focus: true }));
+// While a Hub switch is in flight the fields still hold the previous Hub.
+els.syncConnectionEdit?.addEventListener('click', () => {
+  if (!hubSaveBusy) beginClientConnectionEdit({ focus: true });
+});
 els.syncConnectionCancel?.addEventListener('click', cancelClientConnectionEdit);
 
 els.hubProfileNameInput?.addEventListener('input', () => {

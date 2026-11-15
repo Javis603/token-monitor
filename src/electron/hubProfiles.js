@@ -81,7 +81,13 @@ function prepareHubProfilePatch(settings, input) {
   }
   // Untouched patches stay as sent: some settings commands (plugin skins) must
   // arrive as standalone patches.
-  return touched ? { ...patch, hubProfiles: profiles, activeHubProfileId: activeId } : patch;
+  if (!touched) return patch;
+  // lastPostedDeviceId names a device on the previous Hub; cleaning it up on a
+  // different Hub could delete an unrelated device there.
+  if (String(patch.hubUrl ?? settings.hubUrl ?? '').trim() !== String(settings.hubUrl || '').trim()) {
+    patch.lastPostedDeviceId = '';
+  }
+  return { ...patch, hubProfiles: profiles, activeHubProfileId: activeId };
 }
 
 module.exports = { initializeHubProfiles, hubProfilesForRenderer, prepareHubProfilePatch };
