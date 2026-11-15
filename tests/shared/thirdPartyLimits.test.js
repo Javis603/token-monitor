@@ -1404,7 +1404,7 @@ test('New API save probes surface retired legacy tokens and missing scopes', asy
   assert.equal(chunked.code, 'ACCESS_TOKEN_LEGACY_RETIRED');
 });
 
-test('New API save probes surface a token that cannot read the usage dashboard', async (t) => {
+test('New API save probes warn about a token that cannot read the usage dashboard', async (t) => {
   fixtureTimezone(t);
   const account = {
     name: 'production',
@@ -1427,11 +1427,20 @@ test('New API save probes surface a token that cannot read the usage dashboard',
     return errorResponse(403, 'ACCESS_TOKEN_SCOPE_DENIED');
   };
   const now = () => Date.parse('2026-07-24T08:00:00Z');
+  const enrichmentErrors = [];
 
-  await assert.rejects(
-    fetchThirdPartyAccount(account, { env: {}, now, fetch, surfaceAccessTokenErrors: true }),
-    (error) => error.code === 'ACCESS_TOKEN_SCOPE_DENIED'
-  );
+  const saved = await fetchThirdPartyAccount(account, {
+    env: {},
+    now,
+    fetch,
+    surfaceAccessTokenErrors: true,
+    onEnrichmentAccessTokenError: (error) => enrichmentErrors.push(error)
+  });
+  assert.equal(saved.status, 'ok');
+  assert.equal(saved.balance.amount, 50);
+  assert.equal(saved.balance.todaySpend, null);
+  assert.ok(enrichmentErrors.length > 0);
+  assert.ok(enrichmentErrors.every((error) => error.code === 'ACCESS_TOKEN_SCOPE_DENIED'));
 
   // Normal collection keeps the balance and treats every period as optional.
   const [provider] = await fetchThirdPartyLimits({ thirdPartyProfiles: { production: account } }, {

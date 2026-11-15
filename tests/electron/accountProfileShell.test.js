@@ -50,7 +50,8 @@ function minimaxPanelHarness() {
   const api = { getKeys: async () => [], addKey: async () => ({ ok: true }) };
   let providers = [], enabled = true;
   const context = {
-    state, accountShellApi, accountShellErrors: {}, accountProfileRequests: accountShellApi.createRequestGuard(),
+    state, accountShellApi, accountShellErrors: {}, accountShellErrorTones: {},
+    accountProfileRequests: accountShellApi.createRequestGuard(),
     accountProfileSaves: accountShellApi.createBusyGuard(),
     limitProviderPresentationApi: require('../../src/electron/renderer/limits/providerPresentation'),
     translatedLimitProviderTag: tag => tag?.label || '',
@@ -207,6 +208,7 @@ function namedProfilesHarness() {
     accountProfileRequests: accountShellApi.createRequestGuard(),
     accountShellApi,
     accountShellErrors: { openrouter: 'Failed to rename' },
+    accountShellErrorTones: Object.create(null),
     isSettingsSurfaceVisible: () => visible,
     renderSettingsSummaries: () => { summaryRenders += 1; },
     t: (key) => key,
@@ -282,7 +284,7 @@ test('profile list isolates providers and ignores stale failures and hidden resp
 });
 
 test('Cursor retires a failed manual login message when status is refreshed', async () => {
-  const errors = { textContent: '', classList: { toggle(name, hidden) { this.hidden = hidden; } } };
+  const errors = { textContent: '', classList: { hidden: false, toggle(name, value) { if (name === 'hidden') this.hidden = value; } } };
   const statusPill = { textContent: '', title: '' };
   const accountList = { children: [], replaceChildren() { this.children = []; }, append(node) { this.children.push(node); } };
   const manualInput = { value: 'bad session' };
@@ -300,6 +302,7 @@ test('Cursor retires a failed manual login message when status is refreshed', as
     state,
     accountShellApi,
     accountShellErrors: Object.create(null),
+    accountShellErrorTones: Object.create(null),
     accountProfileSaves: accountShellApi.createBusyGuard(),
     isSettingsSurfaceVisible: () => true,
     setCursorStatusText: (element, value) => { element.textContent = value; element.title = value; },

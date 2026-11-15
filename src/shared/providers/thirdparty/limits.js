@@ -812,9 +812,9 @@ async function fetchOptionalEnrichments(account, adapter, deps) {
         : await fetchValue(deps);
       return [key, value];
     } catch (error) {
-      // A save probe has to say why the token cannot read the dashboard;
-      // collection keeps every optional period best-effort.
-      if (deps.surfaceAccessTokenErrors === true && isAccessTokenError(error)) throw error;
+      // Optional periods stay best-effort. A save probe can still report why
+      // the dashboard was unavailable without rejecting the balance.
+      if (isAccessTokenError(error)) deps.onEnrichmentAccessTokenError?.(error);
       return null;
     }
   }));
@@ -932,13 +932,7 @@ async function fetchThirdPartyAccount(account, deps = {}) {
         (reason) => ({ fulfilled: false, reason })
       )
     : Promise.resolve(null);
-  // Settle enrichment early so a save probe can rethrow a refusal without
-  // leaving the promise unhandled while the balance request is in flight.
-  const settleEnrichments = (promise) => promise.then(
-    (payloads) => ({ payloads }),
-    (error) => ({ error })
-  );
-  const enrichmentPromise = settleEnrichments(fetchOptionalEnrichments(account, adapter, deps));
+  const enrichmentPromise = fetchOptionalEnrichments(account, adapter, deps);
   let quotaResultPayload = null;
   let renewedCredentials = null;
   let quotaError = null;
@@ -953,11 +947,9 @@ async function fetchThirdPartyAccount(account, deps = {}) {
   // status or enrichment requests, whose own timeout must not replace it.
   if (deps.surfaceAccessTokenErrors === true && isAccessTokenError(quotaError)) throw quotaError;
   const statusResponse = await statusPromise;
-  const enrichment = renewedCredentials
-    ? await settleEnrichments(fetchOptionalEnrichments({ ...account, ...renewedCredentials }, adapter, deps))
+  const enrichmentPayloads = renewedCredentials
+    ? await fetchOptionalEnrichments({ ...account, ...renewedCredentials }, adapter, deps)
     : await enrichmentPromise;
-  if (enrichment.error) throw enrichment.error;
-  const enrichmentPayloads = enrichment.payloads;
   if (deps.signal?.aborted) {
     throw deps.signal.reason || Object.assign(new Error('Third-party API request aborted'), { name: 'AbortError' });
   }

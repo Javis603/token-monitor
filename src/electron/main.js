@@ -9865,11 +9865,15 @@ app.whenReady().then(() => {
       enabled: true
     });
     if (!profile) return { ok: false, errorCode: 'invalidCredential' };
+    let enrichmentAccessTokenError = null;
     try {
       const provider = await thirdPartyLimits.fetchThirdPartyAccount({ name, ...profile }, electronProviderDeps({
         env: process.env,
         signal: AbortSignal.timeout(15_000),
-        surfaceAccessTokenErrors: true
+        surfaceAccessTokenErrors: true,
+        onEnrichmentAccessTokenError: (error) => {
+          enrichmentAccessTokenError ||= error;
+        }
       }));
       if (provider?.status !== 'ok') {
         return {
@@ -9884,7 +9888,12 @@ app.whenReady().then(() => {
       };
       saveSettings({ throwOnError: true });
       void queueLimitInvalidation({ provider: 'thirdparty', accountName: name }, 'profile-save');
-      return { ok: true };
+      return {
+        ok: true,
+        ...(enrichmentAccessTokenError?.code === 'ACCESS_TOKEN_SCOPE_DENIED'
+          ? { warning: 'newApiMissingUsageScope' }
+          : {})
+      };
     } catch (error) {
       return { ok: false, errorCode: thirdPartySaveErrorCode(error) };
     }
