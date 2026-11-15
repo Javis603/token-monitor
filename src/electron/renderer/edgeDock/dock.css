@@ -169,13 +169,10 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
 .edge-dock-rail.is-horizontal .edge-dock-cell:not(.edge-dock-cell-stat):not(.edge-dock-cell-rate) .edge-dock-value {
   white-space: nowrap;
 }
-/* Same type metrics as the side rail: a stat cell keeps its 56px height, centred
-   in the taller bar, so its two lines sit exactly where they do vertically. */
+/* Every cell fills the bar's inner height, so a stat cell's two lines sit where
+   they do in the vertical rail instead of floating in a taller box. */
 .edge-dock-rail.is-horizontal .edge-dock-cell-stat {
-  top: 50%;
-  bottom: auto;
-  height: 56px;
-  margin-top: -28px;
+  height: auto;
 }
 
 

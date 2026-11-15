@@ -70,6 +70,9 @@ const EDGE_DOCK_METRICS = Object.freeze({
   // Quota cells put the number beside the mark instead of under it: 42px mark,
   // a 6px gap and up to four characters of value, plus the cell's own padding.
   topProviderWidth: 96,
+  // A bar is exactly as thick as the side rail is wide, so it reads as the same
+  // strip turned ninety degrees and no metric has to be invented twice.
+  topThickness: 64
 });
 
 const EDGE_DOCK_TIMING = Object.freeze({
