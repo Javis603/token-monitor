@@ -7,6 +7,7 @@
 // and best-effort so an unsupported Windows build can fall back to Acrylic.
 
 const { normalizeWindowsBackdropMode } = require('./windowsBackdropMode');
+const os = require('node:os');
 
 const DEFAULT_ACCENT_ARGB = 0x3a232323;
 
@@ -142,7 +143,11 @@ function applyWindowsAccentBlur(win, options = {}) {
 
 function syncWindowsBackdrop(win, { enabled = true, mode = 'acrylic' } = {}, options = {}) {
   if ((options.platform || process.platform) !== 'win32' || !win || win.isDestroyed?.()) return;
-  const wanted = !enabled ? 'transparent' : normalizeWindowsBackdropMode(mode);
+  let wanted = !enabled ? 'transparent' : normalizeWindowsBackdropMode(mode);
+  // Preserve the saved preference, but use the existing Acrylic path on builds
+  // where Electron cannot apply Mica (Windows 11 22H2 starts at build 22621).
+  if ((wanted === 'mica' || wanted === 'mica-alt')
+      && !(Number((options.release || os.release()).split('.')[2]) >= 22621)) wanted = 'acrylic';
   const previous = windowStates.get(win);
   if (previous?.mode === wanted && !previous.accentCleanupPending) return previous;
   const api = options.api || (wanted === 'accent' || previous?.mode === 'accent' || previous?.accentCleanupPending ? loadAccentApi() : null);

@@ -202,7 +202,7 @@ test('Windows material preferences keep transparent document hosts instead of re
   assert.doesNotMatch(main, /windowsLayeredBlur/);
 });
 
-function materialFixture(result = true) {
+function materialFixture(result = true, release = '10.0.22621') {
   const calls = [];
   const win = {
     isDestroyed: () => false,
@@ -211,7 +211,7 @@ function materialFixture(result = true) {
     setBackgroundColor: value => calls.push(['color', value])
   };
   const api = { apply: () => { calls.push(['accent']); return result; }, clear: () => { calls.push(['clear']); return true; } };
-  return { win, calls, api, sync: settings => syncWindowsBackdrop(win, settings, { platform: 'win32', api }) };
+  return { win, calls, api, sync: settings => syncWindowsBackdrop(win, settings, { platform: 'win32', release, api }) };
 }
 
 test('failed Accent cleanup keeps the old transition retryable instead of caching success', () => {
@@ -276,6 +276,24 @@ test('Acrylic and Accent switch both ways on the same window and unchanged prefe
 });
 
 for (const [mode, material] of [['mica', 'mica'], ['mica-alt', 'tabbed']]) {
+  test(`${mode} uses the existing Acrylic path before Windows 11 22H2`, () => {
+    for (const release of ['10.0.19045', '10.0.22000', '10.0.22620']) {
+      const f = materialFixture(true, release);
+      f.sync({ mode: 'accent' });
+      f.calls.length = 0;
+      assert.equal(f.sync({ mode }).mode, 'acrylic');
+      assert.deepEqual(f.calls, [['clear'], ['material', 'acrylic']]);
+      f.calls.length = 0;
+      f.sync({ mode });
+      assert.deepEqual(f.calls, []);
+      assert.equal(refreshWindowsBackdrop(f.win, { platform: 'win32' }), true);
+      assert.equal(normalizeWindowsBackdropMode(mode), mode, 'the saved preference remains valid');
+    }
+    const supported = materialFixture(true, '10.0.26300');
+    assert.equal(supported.sync({ mode }).mode, mode);
+    assert.deepEqual(supported.calls, [['material', material]]);
+  });
+
   test(`${mode} switches on the same host, clears Accent, and restores transparent alpha`, () => {
     const f = materialFixture();
     f.sync({ mode: 'accent' });
