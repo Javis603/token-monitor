@@ -15826,12 +15826,29 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     return;
   }
   const wasStreamConnected = state.streamConnected;
+  let incomingStats = null;
   if (payload.event === 'status') {
     state.streamConnected = Boolean(payload.data?.connected);
     if (payload.data?.mode) state.mode = payload.data.mode;
     if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
     state.streamFailure = state.streamConnected ? null : (payload.data?.reason ? { reason: payload.data.reason, detail: payload.data.detail ?? null } : state.streamFailure);
-  } else if (payload.data?.stats) {
+  } else {
+    if (payload.data?.stats) {
+      incomingStats = payload.data.stats;
+    } else if (payload.data?.statsDelta) {
+      incomingStats = window.TokenMonitorStatsDelta?.applyStatsDelta(state.stats, payload.data.statsDelta) || null;
+      if (!incomingStats) {
+        // The base snapshot is gone (reload, Hub switch or a lost push). Fetch
+        // one full tree instead of applying a delta to an unrelated state.
+        if (!state.statsDeltaResyncPending) {
+          state.statsDeltaResyncPending = true;
+          void refreshStats().catch(() => {}).finally(() => { state.statsDeltaResyncPending = false; });
+        }
+        return;
+      }
+    } else {
+      return;
+    }
     // Local overlays and adopted reads update data independently of the
     // Hub SSE transport. Preserve its current Offline/error state until a
     // real stream status or remote stats event proves the connection changed.
@@ -15842,7 +15859,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     if (payload.data?.mode) state.mode = payload.data.mode;
     if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
     allTimeSessions.invalidate();
-    state.stats = sessionStatsForDisplay(allTimeSessions.attach(payload.data.stats));
+    state.stats = sessionStatsForDisplay(allTimeSessions.attach(incomingStats));
     observeLiveTokenRate(state.stats);
     observeDisplayLiveTokenRates(state.stats);
     applyCodexActiveAccountFromStats();
@@ -15850,8 +15867,6 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     // AGENTS.md collector notes), so only the final push can retire the
     // "just turned trends on" loading state without a flash back to empty.
     if (payload.data?.reason !== 'progress') state.trendsActivating = false;
-  } else {
-    return;
   }
   if (payload.event === 'status') {
     if (isRendererWindowHidden()) statsRenderScheduler.request();
@@ -15861,7 +15876,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     void refreshHubBuildStatus();
     void syncContentForm?.refresh();
   }
-  if (payload.data?.stats) {
+  if (incomingStats) {
     if (fixedPeriodRangesApi.isDerived(state.period)) {
       // Keep the currently rendered range stable while a new History revision is
       // fetched; repaint once with the coherent snapshot instead of flashing an

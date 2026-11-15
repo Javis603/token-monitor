@@ -377,6 +377,7 @@ const {
   rendererStats
 } = require('./statsPublisher');
 const { rendererNeedsStatsWhileHidden } = require('./statsPushPolicy');
+const { buildStatsDelta, fingerprintStats } = require('../shared/statsDelta');
 const { withoutSessionTitleStats, withoutSessionTitles } = require('./sessionTitleDisplay');
 const { createSseBlockReader, parseSseBlock } = require('./sseEventReader');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
@@ -2614,6 +2615,9 @@ function getLimitsHistoryController() {
 }
 let statsPushSource = null;
 let statsPushRevision = 0;
+// The renderer's current session rows, as hashes. A fingerprint keeps the base
+// for a delta without retaining a second full stats tree in main.
+let lastRendererStatsFingerprint = null;
 let macWidgetSnapshotController = null;
 let macWidgetDemand = null;
 let macWidgetPublicationReady = false;
@@ -4530,6 +4534,7 @@ function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
   const wantsRenderer = options.deferToRenderer === true || mainWindowStatsPushWanted();
   let rendererPayload = payload;
+  let rendererFingerprint = null;
   if (payload?.data?.stats) {
     payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
@@ -4547,10 +4552,21 @@ function sendPush(payload, options = {}) {
     limitsHistoryController?.refresh();
     migrateCodexAdditionalLimits(visibleStats);
     if (wantsRenderer) {
-      rendererPayload = {
-        ...payload,
-        data: { ...payload.data, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
-      };
+      const copy = rendererSnapshots.stamp(latestStats, rendererStats(visibleStats));
+      const allowDelta = options.deferToRenderer !== true
+        && payload.data.reason !== 'read'
+        && payload.data.reason !== 'presentation';
+      const built = allowDelta
+        ? buildStatsDelta(lastRendererStatsFingerprint, copy)
+        : { delta: null, fingerprint: fingerprintStats(copy) };
+      rendererFingerprint = built.fingerprint;
+      if (built.delta) {
+        const data = { ...payload.data };
+        delete data.stats;
+        rendererPayload = { ...payload, data: { ...data, statsDelta: built.delta } };
+      } else {
+        rendererPayload = { ...payload, data: { ...payload.data, stats: copy } };
+      }
     }
     scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
     pluginRuntime?.publishStats(visibleStats, latestStats);
@@ -4569,11 +4585,17 @@ function sendPush(payload, options = {}) {
     // walk the numbers backwards until the next push.
     const deferred = payload?.data?.stats;
     sendMainWindowEvent('stats:push', rendererPayload, () => !deferred || latestStats === deferred);
+    if (rendererFingerprint) lastRendererStatsFingerprint = rendererFingerprint;
   } else if (mainWindow && !mainWindow.isDestroyed()) {
     // Status and activity patches stay small and keep the hidden window's
     // connection/activity state current. A full snapshot is the expensive one.
     if (!payload?.data?.stats || wantsRenderer) {
-      try { mainWindow.webContents.send('stats:push', rendererPayload); } catch (_) {}
+      try {
+        mainWindow.webContents.send('stats:push', rendererPayload);
+        if (rendererFingerprint) lastRendererStatsFingerprint = rendererFingerprint;
+      } catch (_) {
+        lastRendererStatsFingerprint = null;
+      }
     }
   }
   if (payload?.data?.stats) {
@@ -5823,13 +5845,17 @@ function sendStatsPresentationToRenderer(options = {}) {
   if (!latestStats || !mainWindow || mainWindow.isDestroyed()) return false;
   if (options.force !== true && !mainWindowStatsPushWanted()) return false;
   const visibleStats = electronPresentationStats(latestStats);
+  const copy = rendererSnapshots.stamp(latestStats, rendererStats(visibleStats));
   try {
     mainWindow.webContents.send('stats:push', {
       event: 'stats',
-      data: { type: 'stats', reason: 'presentation', mode, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
+      data: { type: 'stats', reason: 'presentation', mode, stats: copy }
     });
+    const fingerprint = fingerprintStats(copy);
+    if (fingerprint) lastRendererStatsFingerprint = fingerprint;
     return true;
   } catch (_) {
+    lastRendererStatsFingerprint = null;
     return false;
   }
 }
@@ -7249,6 +7275,7 @@ function createWindow(boundsOverride, options = {}) {
   win.on('minimize', () => syncPluginWindowVisibility(win));
   win.on('restore', () => syncPluginWindowVisibility(win));
   if (!options.previousWindow) win.webContents.on('did-finish-load', () => {
+    if (win === mainWindow) lastRendererStatsFingerprint = null;
     sendFloatingBubbleState();
     // Only report a window that is already on screen. A window still awaiting its
     // reveal reports isVisible() === false. loadWindowFile waits for renderer
@@ -8346,7 +8373,7 @@ app.whenReady().then(() => {
     updateTrayDisplay();
     return true;
   });
-  ipcMain.handle('stats:get', async (_event, options) => {
+  ipcMain.handle('stats:get', async (event, options) => {
     const revision = statsPushRevision;
     const fetched = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
     // A push from the same source/generation supersedes its pending read. A
@@ -8361,7 +8388,12 @@ app.whenReady().then(() => {
     // The stream normally carries the stamp, but it is precisely when the stream
     // is down that this read is the only thing still arriving from the hub.
     maybeAdoptSharedSubscriptionRevision(stats);
-    return rendererSnapshots.stamp(stats, rendererStats(electronPresentationStats(stats)));
+    const copy = rendererSnapshots.stamp(stats, rendererStats(electronPresentationStats(stats)));
+    if (event?.sender && mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents) {
+      const fingerprint = fingerprintStats(copy);
+      if (fingerprint) lastRendererStatsFingerprint = fingerprint;
+    }
+    return copy;
   });
   ipcMain.handle('devices:delete', async (_event, deviceId) => {
     try {
@@ -8816,6 +8848,7 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 // only loop.
 const rendererCrashReloadAt = new Map();
 app.on('render-process-gone', (_event, contents, details) => {
+  if (mainWindow && contents === mainWindow.webContents) lastRendererStatsFingerprint = null;
   if (quitRequested || details.reason === 'clean-exit') return;
   if (!contents || contents.isDestroyed()) return;
   const reloadAt = rendererCrashReloadAt.get(contents.id) || 0;
