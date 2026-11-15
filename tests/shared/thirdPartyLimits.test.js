@@ -24,6 +24,7 @@ const {
   THIRD_PARTY_ENV_ACCOUNT_NAME,
   configuredAccounts,
   customBalanceQuota,
+  fetchThirdPartyAccount,
   fetchThirdPartyLimits,
   newapiAccessToken,
   newapiApiKey,
@@ -49,6 +50,36 @@ function response(status, body) {
     status,
     json: async () => body,
     headers: { get: () => null }
+  };
+}
+
+function errorResponse(status, code) {
+  const body = JSON.stringify({ success: false, code, message: 'rejected' });
+  return {
+    ok: false,
+    status,
+    headers: { get: (name) => (name === 'content-length' ? String(Buffer.byteLength(body)) : null) },
+    text: async () => body
+  };
+}
+
+function streamedErrorResponse(status, code) {
+  const bytes = new TextEncoder().encode(JSON.stringify({ success: false, code, message: 'rejected' }));
+  let sent = false;
+  return {
+    ok: false,
+    status,
+    headers: { get: () => null },
+    body: {
+      getReader: () => ({
+        read: async () => {
+          if (sent) return { done: true };
+          sent = true;
+          return { done: false, value: bytes };
+        },
+        cancel: async () => {}
+      })
+    }
   };
 }
 
@@ -1334,6 +1365,47 @@ test('invalid or unauthorized adapter responses fail closed', async () => {
     { data: { remaining: [12] } },
     { divisor: 1, remainingPath: 'data.remaining' }
   ), null);
+});
+
+test('New API save probes surface retired legacy tokens and missing scopes', async () => {
+  const failureFor = async (status, code, errorBody = errorResponse) => {
+    try {
+      await fetchThirdPartyAccount({
+        name: 'production',
+        adapter: NEWAPI_ACCOUNT_ADAPTER,
+        baseUrl: 'https://api.example.com',
+        accessToken: 'nap_token',
+        enabled: true
+      }, {
+        env: {},
+        rethrowQuotaError: true,
+        now: () => Date.parse('2026-07-24T08:00:00Z'),
+        fetch: async (url) => {
+          const parsed = new URL(url);
+          if (parsed.pathname.endsWith(NEWAPI_STATUS_PATH)) {
+            return response(200, { data: { quota_per_unit: DEFAULT_QUOTA_PER_UNIT } });
+          }
+          if (parsed.pathname.endsWith(NEWAPI_ACCOUNT_PATH)) return errorBody(status, code);
+          return response(200, { data: [] });
+        }
+      });
+    } catch (error) {
+      return error;
+    }
+    assert.fail('expected the New API quota error to be rethrown');
+  };
+
+  const retired = await failureFor(401, 'ACCESS_TOKEN_LEGACY_RETIRED');
+  assert.equal(retired.status, 'unauthorized');
+  assert.equal(retired.code, 'ACCESS_TOKEN_LEGACY_RETIRED');
+
+  const denied = await failureFor(403, 'ACCESS_TOKEN_SCOPE_DENIED');
+  assert.equal(denied.status, 'unauthorized');
+  assert.equal(denied.code, 'ACCESS_TOKEN_SCOPE_DENIED');
+
+  // A reverse proxy can drop Content-Length while keeping the same envelope.
+  const chunked = await failureFor(401, 'ACCESS_TOKEN_LEGACY_RETIRED', streamedErrorResponse);
+  assert.equal(chunked.code, 'ACCESS_TOKEN_LEGACY_RETIRED');
 });
 
 test('configured accounts deduplicate exact adapter identities but keep distinct modes', () => {

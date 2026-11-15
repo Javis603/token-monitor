@@ -10,6 +10,12 @@ read_when:
 
 `src/shared/providers/thirdparty/limits.js` owns account, token, Sub2API and custom balance adapters. All requests use the injected outbound transport. Credentials remain in the main-process credential store; standalone collection uses its configured environment/profile inputs.
 
+## New API access tokens
+
+Account mode authenticates with a named New API access token (`nap_` followed by 43 base62 characters) created under Security & Access. Upstream `v1.0.0-rc.41` removed the single dashboard token and the `/api/user/token*` endpoints; the legacy `users.access_token` stays valid for 30 days after an instance first boots that version, then answers 401 `ACCESS_TOKEN_LEGACY_RETIRED`. Existing profiles must be updated with a new token before that deadline. The separate model API key used by token mode is unaffected.
+
+The token needs `profile:read` for `/api/user/self` (balance, group, request count) and `usage:read` for `/api/data/self` (Today/Week/Month spend). Grant both for a complete reading; without `usage:read` the account still saves with its balance but has no period spend. New API ignores `New-Api-User` during authentication, so the User ID field is optional and remains useful only for older One API forks that still read it.
+
 ## New API dashboard spend
 
 Account mode optionally reads `/api/data/self` for Today, the rolling week (today plus six previous local dates), and the local calendar month. These use the same `quota_per_unit` as the account balance. Token mode does not query this dashboard.

@@ -18799,6 +18799,8 @@ function thirdPartyProfileErrorText(result, adapter = '') {
   if (result?.errorCode === 'invalidCredential' && adapter === 'sub2api') {
     return t('settings.thirdparty.sub2ApiCredentialRejected');
   }
+  if (result?.errorCode === 'newApiLegacyTokenRetired') return t('settings.thirdparty.legacyTokenRetired');
+  if (result?.errorCode === 'newApiScopeDenied') return t('settings.thirdparty.scopeDenied');
   if (result?.errorCode === 'invalidEndpointPath') return t('settings.thirdparty.invalidEndpointPath');
   if (result?.errorCode === 'invalidAuthMode') return t('settings.thirdparty.invalidAuthMode');
   if (result?.errorCode === 'invalidJsonPath') return t('settings.thirdparty.invalidJsonPath');

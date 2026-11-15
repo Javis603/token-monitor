@@ -5804,6 +5804,12 @@ function thirdPartyProfileWithCanonicalIdentity(profile, provider) {
   });
 }
 
+function thirdPartySaveErrorCode(error) {
+  if (error?.code === 'ACCESS_TOKEN_LEGACY_RETIRED') return 'newApiLegacyTokenRetired';
+  if (error?.code === 'ACCESS_TOKEN_SCOPE_DENIED') return 'newApiScopeDenied';
+  return error?.status === 'unauthorized' ? 'invalidCredential' : 'unavailable';
+}
+
 // The command carries identity only. Resolve at commit time, after any IPC
 // awaits, and persist the host-declared palette and finite tokens together.
 function preparePluginSkinSettings(patch, current, runtime) {
@@ -9862,7 +9868,8 @@ app.whenReady().then(() => {
     try {
       const provider = await thirdPartyLimits.fetchThirdPartyAccount({ name, ...profile }, electronProviderDeps({
         env: process.env,
-        signal: AbortSignal.timeout(15_000)
+        signal: AbortSignal.timeout(15_000),
+        rethrowQuotaError: true
       }));
       if (provider?.status !== 'ok') {
         return {
@@ -9878,8 +9885,8 @@ app.whenReady().then(() => {
       saveSettings({ throwOnError: true });
       void queueLimitInvalidation({ provider: 'thirdparty', accountName: name }, 'profile-save');
       return { ok: true };
-    } catch (_) {
-      return { ok: false, errorCode: 'unavailable' };
+    } catch (error) {
+      return { ok: false, errorCode: thirdPartySaveErrorCode(error) };
     }
   });
   ipcMain.handle('thirdparty:deleteProfile', async (_event, rawName) => {

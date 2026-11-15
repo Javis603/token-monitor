@@ -738,9 +738,47 @@ async function requestJson(url, options = {}, deps = {}) {
     const error = new Error(`Third-party API request failed (${response?.status || 'unknown'})`);
     error.status = statusForHttp(Number(response?.status));
     error.statusCode = Number(response?.status) || null;
+    const code = await upstreamErrorCode(response);
+    if (code) error.code = code;
     throw error;
   }
   return response.json();
+}
+
+// New API answers authorization failures with a bounded JSON body that carries
+// a stable code. The code is what tells a retired legacy token from a token
+// that is simply missing a scope; the status alone cannot. Read at most an
+// error envelope into memory, whether or not a proxy preserved Content-Length.
+async function upstreamErrorCode(response) {
+  const declared = Number(response?.headers?.get?.('content-length'));
+  if (Number.isFinite(declared) && declared > 4096) return '';
+  let text = '';
+  try {
+    const reader = response?.body?.getReader?.();
+    if (reader) {
+      const decoder = new TextDecoder();
+      let size = 0;
+      while (size < 4096) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const chunk = value.subarray(0, 4096 - size);
+        size += chunk.byteLength;
+        text += decoder.decode(chunk, { stream: true });
+      }
+      text += decoder.decode();
+      try { await reader.cancel(); } catch (_) {}
+    } else if (typeof response?.text === 'function') {
+      text = await response.text();
+      if (text.length > 4096) return '';
+    } else {
+      return '';
+    }
+    const body = JSON.parse(text);
+    const code = typeof body?.code === 'string' ? body.code : '';
+    return /^[A-Z][A-Z0-9_]{0,63}$/u.test(code) ? code : '';
+  } catch (_) {
+    return '';
+  }
 }
 
 async function fetchOptionalEnrichments(account, adapter, deps) {
@@ -906,6 +944,7 @@ async function fetchThirdPartyAccount(account, deps = {}) {
     updatedAt
   };
   if (quotaError) {
+    if (deps.rethrowQuotaError === true) throw quotaError;
     return normalizeLimitProvider({
       ...common,
       status: quotaError.status || 'unavailable',
