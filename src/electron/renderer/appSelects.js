@@ -19,7 +19,8 @@
         searchLabel: () => t('trayComposer.search'),
         emptyLabel: () => t('settings.search.noMatches'),
         minPopupWidth: models ? 260 : 0,
-        align: 'end',
+        // The Hub picker is a left-aligned line inside the sync status card.
+        align: select.id === 'hubProfileSelect' ? 'start' : 'end',
         getOptionMeta(option) {
           const descriptionKey = option.dataset.selectDescription;
           const font = /^(interfaceFontPreset|displayFontPreset)$/.test(select.id);

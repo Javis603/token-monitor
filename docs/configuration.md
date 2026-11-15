@@ -28,7 +28,7 @@ Currency selection is independent of the interface language. Currency menus keep
 
 On supported macOS versions, Clear keeps its sharp glass appearance when focus changes and uses a dark tint to reduce the pale wash and keep text legible. Tinted Regular glass also keeps its tint consistent between focused windows and nonactivating Dock/Notch panels; untinted Regular retains its existing appearance. Glass opacity, depth, and native tint sliders preview on the floating surfaces while dragging, using each surface's selected glass style; values are saved on release.
 
-On Windows, switching Acrylic / Accent Blur, System / Transparent, or the Edge Dock material preserves the open interface. Collapsing and expanding the floating bubble also keeps the same page, including its current view and unfinished input.
+On Windows, switching Acrylic / Accent Blur / Mica / Mica Alt, System / Transparent, or the Edge Dock material preserves the open interface. Mica and Mica Alt require Windows 11 22H2 or later (older builds use the existing Acrylic path while retaining the selected preference); they use an opaque, wallpaper-tinted background rather than showing the windows behind the widget. Mica Alt has stronger wallpaper tinting. The widget and quota-history windows use the selected style; the Dashboard keeps Acrylic, and the Edge Dock uses its separate material setting. Collapsing and expanding the floating bubble also keeps the same page, including its current view and unfinished input.
 
 Opening an already-open Dashboard brings its existing window forward without reloading or resetting its selected view. Restoring it refreshes history in place; its first opening still waits for the initial data before showing.
 

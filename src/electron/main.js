@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const { contentSecurityPolicyForRequest } = require('./contentSecurityPolicy');
+const { initializeHubProfiles, hubProfilesForRenderer, prepareHubProfilePatch } = require('./hubProfiles');
 const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences } = require('electron');
 
 // All of the app's pages are the same local bundle, and every window Chromium
@@ -642,6 +643,8 @@ function defaultSettings() {
   return {
     hubMode: envHubUrl ? 'client' : 'local',
     hubUrl: envHubUrl,
+    hubProfiles: [],
+    activeHubProfileId: '',
     hubHostPort: Math.max(1, Math.min(65535, Number(process.env.TOKEN_MONITOR_PORT) || HUB_DEFAULT_PORT)),
     // Default to TOKEN_MONITOR_SECRET so agents that already trust this env
     // value (matching what the CLI hub uses) can connect to the widget's
@@ -2733,6 +2736,7 @@ function readSettings() {
     const storedCredentials = loadCredentialSettings(saved);
     if (!saved.secret && defaults.secret) delete saved.secret;
     const merged = { ...defaults, ...saved, ...storedCredentials };
+    Object.assign(merged, initializeHubProfiles(merged));
     merged.clients = clientsCsvForSetting(merged.clients);
     merged.separateQoderClients = parseBoolean(merged.separateQoderClients, false);
     // A client identity split (see clientIdentitySplits.js) is not a new tool:
@@ -5849,6 +5853,7 @@ function settingsForRenderer() {
     locale: trayMenuLocale(),
     deviceIconScope: currentHubIdentity() || 'local',
     ...redactedCredentials,
+    hubProfiles: hubProfilesForRenderer(settings),
     // On a hub the shared list is the truth; settings.subscriptions is only the
     // last-known cache behind it.
     subscriptions: effectiveSubscriptions(),
@@ -8418,6 +8423,7 @@ app.whenReady().then(() => {
   // The settings:update body, named so a credential save persists through the
   // exact same normalization, runtime reconfigure and limit invalidation.
   function applySettingsPatch(patch, onDotsVisibilityRefresh = () => {}, limitContext = {}) {
+    patch = prepareHubProfilePatch(settings, patch);
     const skinSelection = preparePluginSkinSettings(patch, settings, pluginRuntime);
     patch = skinSelection.patch;
     const contentRuntime = getSyncContentRuntime();
