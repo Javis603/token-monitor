@@ -51,7 +51,7 @@
     volcengine: { api: 'API', cli: 'arkcli' },
     ollama: { api: 'API', web: 'Web' },
     trae: { api: 'Web' },
-    alibaba: { web: 'Web' },
+    alibaba: { cli: 'CLI', web: 'Web' },
     stepfun: { web: 'Web' },
     manus: { local: 'Local', web: 'Web' },
     thirdparty: { api: 'API' }
