@@ -1404,7 +1404,8 @@ test('New API save probes surface retired legacy tokens and missing scopes', asy
   assert.equal(chunked.code, 'ACCESS_TOKEN_LEGACY_RETIRED');
 });
 
-test('New API save probes surface a token that cannot read the usage dashboard', async () => {
+test('New API save probes surface a token that cannot read the usage dashboard', async (t) => {
+  fixtureTimezone(t);
   const account = {
     name: 'production',
     adapter: NEWAPI_ACCOUNT_ADAPTER,
