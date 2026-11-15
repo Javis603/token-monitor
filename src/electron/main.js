@@ -7454,6 +7454,20 @@ function focusedAppWindow() {
   return BrowserWindow.getFocusedWindow();
 }
 
+let idleTimeZeroChecks = 0;
+let idleTimeZeroLogged = false;
+
+function noteIdleTimeZero() {
+  if (process.platform !== 'linux' || idleTimeZeroLogged) return;
+  idleTimeZeroChecks += 1;
+  if (idleTimeZeroChecks < 3) return;
+  idleTimeZeroLogged = true;
+  // Some Wayland/XWayland sessions report 0 forever. That silently disables
+  // every idle collection; say so once instead of letting the optimization
+  // look enabled while it never runs.
+  console.warn('[idle-heap] powerMonitor.getSystemIdleTime() has stayed 0 on three consecutive idle checks; idle heap collection will not run on this Linux session');
+}
+
 function appIsIdleForHeapCollection() {
   if (quitRequested || focusedAppWindow() !== null) return false;
   // A full collection pauses main for tens of milliseconds. Require a short
@@ -7461,7 +7475,13 @@ function appIsIdleForHeapCollection() {
   // of a hover, drag or animation the user is watching.
   try {
     if (typeof powerMonitor.getSystemIdleTime !== 'function') return true;
-    return powerMonitor.getSystemIdleTime() >= 5;
+    const idleSeconds = powerMonitor.getSystemIdleTime();
+    if (idleSeconds <= 0) {
+      noteIdleTimeZero();
+      return false;
+    }
+    idleTimeZeroChecks = 0;
+    return idleSeconds >= 5;
   } catch (_) {
     return true;
   }

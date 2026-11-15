@@ -26,12 +26,44 @@ const DEFAULT_INTERVAL_MS = 2 * 60 * 1000;
 // once then, so the startup high-water is returned before the steady-state
 // cadence rather than lingering for five minutes.
 const DEFAULT_INITIAL_DELAY_MS = 60 * 1000;
+// A hung inspector session would otherwise leave `running` true forever and
+// stop every later pass. Main collection is cheap; ten seconds is already far
+// beyond a healthy collection.
+const DEFAULT_COLLECT_TIMEOUT_MS = 10 * 1000;
+// After this many consecutive main-pass failures, stop asking a broken
+// inspector to collect. Renderer collection is independent and keeps running.
+const MAX_CONSECUTIVE_MAIN_FAILURES = 3;
 
-function defaultCollect() {
+function collectWithTimeout(session, timeoutMs = DEFAULT_COLLECT_TIMEOUT_MS) {
+  // Start the post first: if the session is already unusable it throws here,
+  // before a timeout timer exists to reject an unobserved promise.
+  let collection;
+  try {
+    collection = session.post('HeapProfiler.collectGarbage');
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`idle heap collection timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    timer.unref?.();
+  });
+  return Promise.race([collection, timeout]).finally(() => {
+    clearTimeout(timer);
+  });
+}
+
+async function defaultCollect() {
   const { Session } = require('node:inspector/promises');
   const session = new Session();
   session.connect();
-  return session.post('HeapProfiler.collectGarbage').finally(() => session.disconnect());
+  try {
+    await collectWithTimeout(session);
+  } finally {
+    try { session.disconnect(); } catch (_) {}
+  }
 }
 
 function createIdleHeapCollector(options = {}) {
@@ -41,6 +73,7 @@ function createIdleHeapCollector(options = {}) {
   const getHeap = options.getHeap || (() => process.memoryUsage());
   const collect = options.collect || defaultCollect;
   const collectRenderers = options.collectRenderers || null;
+  const log = options.log || ((message) => console.warn(message));
   const setIntervalFn = options.setInterval || setInterval;
   const clearIntervalFn = options.clearInterval || clearInterval;
   const setTimeoutFn = options.setTimeout || setTimeout;
@@ -50,11 +83,13 @@ function createIdleHeapCollector(options = {}) {
   let running = false;
   let stopped = false;
   let thresholdBytes = MIN_HEAP_TOTAL_BYTES;
+  let mainFailures = 0;
+  let mainDisabled = false;
 
   async function run() {
     if (stopped || running) return false;
     if (!isIdle()) return false;
-    const collectMain = getHeap().heapTotal >= thresholdBytes;
+    const collectMain = !mainDisabled && getHeap().heapTotal >= thresholdBytes;
     if (!collectMain && !collectRenderers) return false;
     running = true;
     let collected = false;
@@ -65,9 +100,17 @@ function createIdleHeapCollector(options = {}) {
           const retained = getHeap().heapUsed;
           thresholdBytes = Math.max(MIN_HEAP_TOTAL_BYTES, retained + RETAINED_HEADROOM_BYTES);
           collected = true;
-        } catch (_) {
+          mainFailures = 0;
+        } catch (error) {
           // Heap collection is best effort; an inspector failure must not
           // affect the widget or make the next check impossible.
+          mainFailures += 1;
+          if (mainFailures >= MAX_CONSECUTIVE_MAIN_FAILURES && !mainDisabled) {
+            mainDisabled = true;
+            try {
+              log(`[idle-heap] main heap collection disabled after ${mainFailures} consecutive failures: ${error?.message || error}`);
+            } catch (_) {}
+          }
         }
       }
       if (stopped) return collected;
@@ -107,4 +150,11 @@ function createIdleHeapCollector(options = {}) {
   return { start, stop, run };
 }
 
-module.exports = { createIdleHeapCollector, DEFAULT_INITIAL_DELAY_MS, DEFAULT_INTERVAL_MS, MIN_HEAP_TOTAL_BYTES };
+module.exports = {
+  collectWithTimeout,
+  createIdleHeapCollector,
+  DEFAULT_COLLECT_TIMEOUT_MS,
+  DEFAULT_INITIAL_DELAY_MS,
+  DEFAULT_INTERVAL_MS,
+  MIN_HEAP_TOTAL_BYTES
+};

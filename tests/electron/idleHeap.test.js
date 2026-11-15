@@ -2,7 +2,7 @@
 
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { createIdleHeapCollector, MIN_HEAP_TOTAL_BYTES } = require('../../src/electron/idleHeap');
+const { collectWithTimeout, createIdleHeapCollector, MIN_HEAP_TOTAL_BYTES } = require('../../src/electron/idleHeap');
 
 const MiB = 1024 * 1024;
 
@@ -159,4 +159,58 @@ test('start installs an early check and the steady interval, and stop clears bot
   beforeFire.start();
   beforeFire.stop();
   assert.equal(clearedPendingInitial, pendingInitial, 'stop clears a still-pending first check');
+});
+
+
+test('a hung inspector collection times out', async () => {
+  const session = { post: () => new Promise(() => {}) };
+  await assert.rejects(collectWithTimeout(session, 10), /timed out after 10ms/);
+});
+
+test('a normal inspector collection resolves', async () => {
+  const session = { post: () => Promise.resolve() };
+  await collectWithTimeout(session, 50);
+});
+
+test('a synchronous inspector error rejects without starting a timeout promise', async () => {
+  const session = { post: () => { throw new Error('not connected'); } };
+  await assert.rejects(collectWithTimeout(session, 50), /not connected/);
+});
+
+test('three consecutive main failures disable the main pass but keep renderer collection', async () => {
+  let mainRuns = 0;
+  let rendererRuns = 0;
+  const logs = [];
+  const collector = createIdleHeapCollector({
+    isIdle: () => true,
+    getHeap: () => ({ heapTotal: 120 * MiB, heapUsed: 56 * MiB }),
+    collect: async () => { mainRuns += 1; throw new Error('inspector hung'); },
+    collectRenderers: async () => { rendererRuns += 1; },
+    log: (message) => logs.push(message)
+  });
+  for (let i = 0; i < 3; i++) assert.equal(await collector.run(), false);
+  assert.equal(mainRuns, 3);
+  assert.equal(rendererRuns, 3);
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /disabled after 3 consecutive failures: inspector hung/);
+  assert.equal(await collector.run(), false);
+  assert.equal(mainRuns, 3, 'the broken main pass is not retried');
+  assert.equal(rendererRuns, 4, 'renderer collection is independent');
+});
+
+test('a successful main collection resets the consecutive failure count', async () => {
+  let mainRuns = 0;
+  const logs = [];
+  const collector = createIdleHeapCollector({
+    isIdle: () => true,
+    getHeap: () => ({ heapTotal: 120 * MiB, heapUsed: 56 * MiB }),
+    collect: async () => { mainRuns += 1; if (mainRuns < 3) throw new Error('transient'); },
+    log: (message) => logs.push(message)
+  });
+  assert.equal(await collector.run(), false);
+  assert.equal(await collector.run(), false);
+  assert.equal(await collector.run(), true);
+  assert.equal(await collector.run(), true);
+  assert.equal(mainRuns, 4);
+  assert.equal(logs.length, 0);
 });
