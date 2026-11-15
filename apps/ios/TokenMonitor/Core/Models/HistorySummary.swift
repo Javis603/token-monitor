@@ -5,6 +5,11 @@ nonisolated struct HistorySummary: Decodable, Sendable {
     let totalCost: Double?
     var unpricedTokens: Double? = nil
     let activeDays: Double?
+    var activeDaysComplete: Bool? = nil
+
+    var lifetimeActiveDays: Double? {
+        activeDaysComplete == true ? activeDays : nil
+    }
     let currentStreak: Double?
     let longestStreak: Double?
     let peakDayTokens: Double?

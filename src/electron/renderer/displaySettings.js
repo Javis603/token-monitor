@@ -13,7 +13,7 @@
   ];
   const CATEGORY_IDS = {
     interaction: ['notchHideSummaryInFullScreenInput', 'edgeDockModeLabel', 'notchHoverActionLabel', 'notchHoverDelayRow', 'notchHapticInput', 'edgeDockHapticInput', 'floatingBubbleTriggerRow', 'notchSwipeGesturesInput', 'trayModeInput', 'trayOptions', 'hideAppIconRow', 'hideAppIconOptions'],
-    appearance: ['edgeDockSideLabel', 'edgeDockSizeLabel', 'edgeDockCustomScaleRow', 'notchSizeLabel', 'notchCustomScaleRow', 'notchShapeLabel', 'notchStyleInput', 'edgeDockMacBackdropRow', 'edgeDockWindowsBackdropRow', 'notchProgressiveBlurInput']
+    appearance: ['edgeDockSideLabel', 'edgeDockSizeLabel', 'edgeDockCustomScaleRow', 'edgeDockBubbleSizeLabel', 'edgeDockBubbleCustomScaleRow', 'notchSizeLabel', 'notchCustomScaleRow', 'notchShapeLabel', 'notchStyleInput', 'edgeDockMacBackdropRow', 'edgeDockWindowsBackdropRow', 'notchProgressiveBlurInput']
   };
   function create({ document, root, scrollPanel, t, platform, settings = () => ({}), preview, cancelScroll }) {
     if (!root) return null;

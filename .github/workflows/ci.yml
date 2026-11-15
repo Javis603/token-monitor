@@ -84,10 +84,12 @@ jobs:
           cache: npm
       - run: npm ci
       - name: Run the suite at several UTC offsets
+        # Overlap I/O and real timer waits inside each suite without adding
+        # runners or running multiple timezone suites simultaneously.
         run: |
           for tz in Asia/Ho_Chi_Minh Asia/Kathmandu Pacific/Chatham America/Los_Angeles Pacific/Honolulu Pacific/Pago_Pago Pacific/Kiritimati; do
             echo "::group::TZ=$tz"
-            TZ="$tz" npm test
+            TZ="$tz" node --test --test-concurrency=8 "tests/**/*.test.js"
             echo "::endgroup::"
           done
 

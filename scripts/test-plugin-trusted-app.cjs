@@ -441,7 +441,7 @@ app.whenReady().then(async () => {
       // the production main blur callback, not the renderer blur event.
       context.win=win;context.suppressNextBlurHide=false;context.quitRequested=false;
       context.nudgeTaskbarZOrder=()=>{};context.scheduleFloatingBubbleAutoCollapse=()=>{};
-      vm.runInContext(source.slice(source.indexOf("  win.on('blur', () => {"),source.indexOf("  win.on('resized',",source.indexOf("  win.on('blur', () => {"))),context);
+      vm.runInContext(source.slice(source.indexOf("  win.on('blur', () => {"),source.indexOf("  const onBoundsChange =",source.indexOf("  win.on('blur', () => {"))),context);
       const other = new BrowserWindow({show:false,width:240,height:140,webPreferences:{sandbox:true}});
       try {
         await other.loadURL('data:text/html,<p>Isolated focus departure</p>');

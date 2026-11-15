@@ -59,6 +59,7 @@ const supportedToolOrder = [
   'OpenClaw',
   'Cursor IDE / Cursor CLI / Grok Bot',
   'Antigravity',
+  'Gemini CLI',
   'Cline',
   'Amp',
   'Factory Droid',
@@ -74,7 +75,7 @@ const supportedToolOrder = [
   'Kilo',
   'Command Code',
   'MiMo Code / MiMo Desktop',
-  'Muse Code',
+  'Muse / Muse Code',
   'ZCode / GLM',
   'Kiro',
   'CodeBuddy',
@@ -90,6 +91,9 @@ const supportedToolOrder = [
   'Devin CLI / Devin Desktop',
   'fx',
   'MiniMax / MiniMax Code',
+  'Mistral Vibe',
+  'Prime Agent',
+  'Jcode',
   'TypeSafe',
   'OpenRouter',
   'Volcengine',
@@ -98,6 +102,9 @@ const supportedToolOrder = [
   'Alibaba Cloud',
   'StepFun',
   'Notion AI',
+  'Manus',
+  'Hark',
+  'OpenDesign',
   'Third-party APIs'
 ];
 
@@ -109,6 +116,7 @@ const supportedToolIdOrder = [
   'openclaw',
   'cursor',
   'antigravity',
+  'gemini-cli',
   'cline',
   'amp',
   'droid',
@@ -140,6 +148,9 @@ const supportedToolIdOrder = [
   'devin',
   'fx',
   'minimax',
+  'mistral',
+  'prime-agent',
+  'jcode',
   'typesafe',
   'openrouter',
   'volcengine',
@@ -148,6 +159,9 @@ const supportedToolIdOrder = [
   'alibaba',
   'stepfun',
   'notion',
+  'manus',
+  'hark',
+  'opendesign',
   'thirdparty'
 ];
 

@@ -3,15 +3,17 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { tokscaleHomeDir } = require('../../tokscaleConfig');
+const { cursorLifecycleBusy } = require('./lifecycle');
 
-// Tokscale's Cursor JSON cache holds every usage event with its millisecond
-// timestamp, its tokens and the conversation it belongs to, which is exactly
-// what a legacy CSV row lacks. Tokscale reads `<home>/.config/tokscale/
-// cursor-cache` regardless of TOKSCALE_CONFIG_DIR (see clientSourceRoots in
-// clientSources.js), and moves a removed account's cache into its `archive/`.
+// Cursor caches follow TOKSCALE_CONFIG_DIR only; XDG_CONFIG_HOME and APPDATA
+// do not move the default home-relative cache. Removed accounts live in archive/.
 
 function cursorCacheDir(options = {}) {
-  return path.join(tokscaleHomeDir(options), '.config', 'tokscale', 'cursor-cache');
+  const env = options.env || process.env;
+  const override = env.TOKSCALE_CONFIG_DIR;
+  const config = typeof override === 'string' && override.trim()
+    ? override : path.join(tokscaleHomeDir(options), '.config', 'tokscale');
+  return path.join(config, 'cursor-cache');
 }
 
 // tokscale `account_id_from_cursor_cache_path`, for the live cache files only.
@@ -78,6 +80,10 @@ function createCursorUsageEventIndex(options = {}) {
   let cached = null;
 
   return function readCursorUsageEvents() {
+    // Sync/logout may replace the cache, including a non-atomic Windows copy.
+    // Archive repair is synchronous: retain the last complete index instead
+    // of observing a partial rewrite and permanently linking a legacy row.
+    if (cursorLifecycleBusy()) return cached;
     const files = cacheFiles(options.cacheDir || cursorCacheDir(options), fsImpl);
     const signature = files.map((file) => file.signature).join('\n');
     if (cached?.signature === signature) return cached;

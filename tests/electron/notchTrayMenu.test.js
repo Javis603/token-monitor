@@ -107,7 +107,7 @@ test('Notch Settings command reaches the renderer through the registered preload
     window: rendererWindow,
     els: { settingsPanel: element(), shell: element(), notchFeature: { scrollIntoView: () => events.push('scroll') }, notchInput: { focus: () => events.push('focus') } },
     displaySettings: { open: id => events.push(['display', id]) },
-    state: {}, syncSettingsForm: () => events.push('sync'), ensureServiceStatusTicker() {},
+    syncPluginLimitsDemand() {}, state: {}, syncSettingsForm: () => events.push('sync'), ensureServiceStatusTicker() {},
     setSettingsSectionExpanded: (...args) => events.push(args),
     setSettingsAccordionExpanded: (...args) => events.push(args.at(-1)),
     requestAnimationFrame: callback => callback()

@@ -116,7 +116,7 @@ final class TokenMonitorStore {
         guard let stats else { displayPeriods = [:]; return }
         let allPeriods = Array((stats.periods ?? [:]).values) + (stats.devices ?? []).flatMap { Array(($0.periods ?? [:]).values) }
         let modelIDs = allPeriods.flatMap { period in
-            Array((period.models ?? [:]).keys) + (period.sessions ?? [:]).values.flatMap { Array(($0.models ?? [:]).keys) }
+            Array((period.models ?? [:]).keys) + (period.sessions ?? [:]).values.flatMap { Array(($0.models ?? [:]).keys) + [$0.latestModel].compactMap { $0 } }
         }
         let botIDs = SessionListEntry.grokBotIDs(stats.periods ?? [:], authoritative: stats.grokBotSessionIds)
         let resolver = modelAliases.resolver(modelIDs: modelIDs)
@@ -130,6 +130,7 @@ final class TokenMonitorStore {
                 if session.client == "cursor" {
                     result.grokBotSession = session.isGrokBot(key: key) || botIDs.contains(session.identityKey(fallback: key))
                 }
+                result.latestModel = session.latestModel.map { resolver[$0] ?? $0 }
                 result.models = ModelAliasSettings.fold(session.models, using: resolver)
                 return (key, result)
             }.reduce(into: [String: SessionUsage]()) { $0[$1.0] = $1.1 }

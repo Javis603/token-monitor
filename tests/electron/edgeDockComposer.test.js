@@ -7,7 +7,9 @@ const test = require('node:test');
 
 const { addableLimitProviders, createEdgeDockComposer } = require('../../src/electron/renderer/edgeDock/composer');
 const itemsApi = require('../../src/electron/renderer/edgeDock/items');
-const { limitWindowLabel, mimoProductLabel } = require('../../src/shared/limits/windowLabels');
+const { limitWindowLabel, mimoProductLabel, mimoAccountGroups } = require('../../src/shared/limits/windowLabels');
+const accountIdentity = require('../../src/electron/renderer/accountIdentity');
+const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
 
@@ -19,7 +21,7 @@ class Element {
     this.listeners = {};
     this.dataset = {};
     this.style = { setProperty() {} };
-    this.classList = { toggle() {}, add() {} };
+    this.classList = { toggle() {}, add() {}, contains: name => (this.className || '').split(' ').includes(name) };
   }
   append(...children) {
     for (const child of children) {
@@ -33,17 +35,29 @@ class Element {
   setAttribute(name, value) { (this.attributes ||= {})[name] = value; }
   getAttribute(name) { return this.attributes?.[name]; }
   contains(node) { return this === node || this.children.some((child) => child.contains(node)); }
+  querySelector(selector) {
+    const matches = node => selector === '.select-control-trigger[aria-expanded="true"]'
+      && node.classList.contains('select-control-trigger') && node.getAttribute('aria-expanded') === 'true';
+    for (const child of this.children) {
+      if (matches(child)) return child;
+      const match = child.querySelector(selector);
+      if (match) return match;
+    }
+    return null;
+  }
 }
 
-function accountChoices(provider, rows, presentationApi) {
+function accountChoices(provider, rows, presentationApi, settings = {}) {
   const root = new Element('div');
   const composer = createEdgeDockComposer({
     root, itemsApi, t: (key) => key,
     presentationApi,
-    getSettings: () => ({ edgeDockItems: [{ type: 'limit', provider }] }),
+    getSettings: () => ({ ...settings, edgeDockItems: [{ type: 'limit', provider }] }),
     getStats: () => ({ limits: { providers: rows } }), save: () => {},
     providerLabel: (id) => id, providerColor: () => '#000000', hasProviderMark: () => false,
-    maskEmail: (email) => email, mimoProductLabel,
+    maskEmail: (email) => settings.maskLimitAccountEmails ? accountIdentity.maskEmailAddress(email) : email, mimoProductLabel,
+    limitAccountTitle: createLimitWindowsView({ mimoProductLabel, mimoAccountGroups, accountIdentity,
+      settings: () => settings }).limitAccountTitle,
     createRowDrag: () => ({ deferRender: () => false })
   });
   const all = (node) => [node, ...node.children.flatMap(all)];
@@ -67,7 +81,7 @@ test('dock account choices distinguish MiMo products without changing sibling pr
     assert.deepEqual(labels('mimo', [
       { provider: 'mimo', accountKey: 'console', accountLabel: 'Console', planLabel: 'Pay-as-you-go' },
       { provider: 'mimo', accountKey: 'membership', accountLabel: 'Desktop Membership', planLabel: 'Pro' }
-    ]), ['Console', 'Desktop Membership']);
+    ]), ['Account 1 · Console', 'Account 2 · Desktop Membership']);
     assert.deepEqual(labels('codex', [
       { provider: 'codex', accountKey: 'a', accountName: 'Account A', accountLabel: 'Console' },
       { provider: 'codex', accountKey: 'b', accountName: 'Account B' }
@@ -81,7 +95,7 @@ test('dock account choices distinguish MiMo products without changing sibling pr
   }
 });
 
-test('a MiMo product label change repaints its account choices', () => {
+test('MiMo account choices repaint when product labels or account identity change', () => {
   const previousDocument = global.document;
   global.document = { createElement: (tag) => new Element(tag), activeElement: null };
   try {
@@ -91,6 +105,16 @@ test('a MiMo product label change repaints its account choices', () => {
     rows[1].accountLabel = 'Desktop Membership';
     composer.render();
     assert.deepEqual(names(), ['MiMo abcdef1', 'MiMo abcdef1 · Desktop Membership']);
+    const maskedRows = [
+      { provider: 'mimo', accountKey: 'sha256:aaaaaa', accountEmail: 'james@example.com', accountLabel: 'Console' },
+      { provider: 'mimo', accountKey: 'sha256:bbbbbb', accountEmail: 'jones@example.com', accountLabel: 'Console' }
+    ];
+    const masked = accountChoices('mimo', maskedRows, {}, { maskLimitAccountEmails: true });
+    assert.equal(new Set(masked.names()).size, 2);
+    maskedRows[1].accountEmail = maskedRows[0].accountEmail;
+    masked.composer.render();
+    assert.equal(new Set(masked.names()).size, 1);
+    assert.ok(masked.names().every(name => !/james@|jones@/.test(name)));
   } finally {
     global.document = previousDocument;
   }
@@ -248,7 +272,7 @@ test('the add menu offers all enabled providers in one limits section', () => {
 test('the composer is handed the enabled providers in the user\'s limits order', () => {
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   assert.match(app, /enabledLimitProviders: \(\) => limitProviderOrderApi/);
-  assert.match(app, /\.orderedLimitProviders\(LIMIT_PROVIDERS, state\.settings\?\.limitProviderOrder\)/);
+  assert.match(app, /\.orderedLimitProviders\(desktopLimitProviders\(\), state\.settings\?\.limitProviderOrder\)/);
   assert.match(app, /\.filter\(\(\{ id \}\) => enabledLimitProviderSet\(\)\.has\(id\)\)/);
 });
 
@@ -405,5 +429,218 @@ test('Notch refresh action uses the shared composer without changing side settin
     find('edge-dock-composer-remove').listeners.click();
     assert.deepEqual(saves.at(-1), { notchRefreshEnabled: false });
     assert.equal(settings.edgeDockRefreshEnabled, true);
+  } finally { global.document = previous; }
+});
+
+test('third-party headline controls persist a specific account independently of card visibility', () => {
+  const previousDocument = global.document;
+  global.document = { createElement: (tag) => new Element(tag), activeElement: null };
+  try {
+    const root = new Element('div');
+    const settings = { edgeDockItems: [{ type: 'limit', provider: 'thirdparty', hiddenAccounts: ['c'] }] };
+    let rows = ['a', 'b', 'c'].map((accountKey) => ({ provider: 'thirdparty', accountKey, accountName: `Account ${accountKey}` }));
+    const saves = [];
+    const composer = createEdgeDockComposer({
+      root, itemsApi, t: (key) => key, presentationApi: {},
+      getSettings: () => settings, getStats: () => ({ limits: { providers: rows } }),
+      save: (patch) => { saves.push(patch); Object.assign(settings, patch); composer.render(); },
+      providerLabel: (id) => id, providerColor: () => '#fff', hasProviderMark: () => false,
+      maskEmail: (email) => email, createRowDrag: () => ({ deferRender: () => false })
+    });
+    const all = (node) => [node, ...node.children.flatMap(all)];
+    const radio = (value) => all(root).find((node) => node.type === 'radio' && node.value === value);
+    const chooseMode = (value) => { const input = radio(value); input.checked = true; input.listeners.change(); };
+    const accountPicker = () => all(root).find((node) => node.tagName === 'LABEL'
+      && node.children[0]?.textContent === 'trayComposer.account.specificLabel').children[1];
+    composer.render();
+    all(root).find((node) => node.className === 'edge-dock-composer-item').listeners.click();
+    assert.equal(radio('lowest').checked, true);
+    chooseMode('specific');
+    assert.equal(settings.edgeDockItems[0].accountKey, 'a');
+    assert.deepEqual(accountPicker().children.map((option) => option.value), ['a', 'b']);
+    let select = accountPicker();
+    global.document.activeElement = select;
+    select.value = 'b';
+    select.listeners.change();
+    global.document.activeElement = null;
+    select.listeners.blur();
+    assert.equal(settings.edgeDockItems[0].accountKey, 'b');
+    assert.deepEqual(settings.edgeDockItems[0].hiddenAccounts, ['c']);
+    assert.equal(all(root).filter((node) => node.className === 'edge-dock-composer-account-name').length, 3);
+    chooseMode('lowest');
+    chooseMode('specific');
+    assert.equal(accountPicker().value, 'b', 'mode changes retain the explicit account');
+    select = accountPicker();
+    global.document.activeElement = select;
+    rows = rows.filter((row) => row.accountKey !== 'b');
+    composer.render();
+    assert.equal(accountPicker(), select, 'stats refresh keeps the native picker attached while focused');
+    global.document.activeElement = null;
+    select.listeners.blur();
+    assert.equal(select.value, 'b');
+    assert.equal(select.children.find((option) => option.value === 'b').disabled, true);
+    assert.equal(select.children.find((option) => option.value === 'b').textContent, 'trayComposer.account.none');
+    assert.equal(saves.at(-1).edgeDockItems[0].accountKey, 'b', 'missing account never persists a sibling fallback');
+  } finally {
+    global.document = previousDocument;
+  }
+});
+
+test('app-wired composer preserves account edits while asynchronous settings writes are pending', async () => {
+  const previousDocument = global.document;
+  global.document = { createElement: (tag) => new Element(tag), activeElement: null };
+  try {
+    const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+    const factory = app.slice(app.indexOf('function createDockItemsComposer('), app.indexOf('\nconst edgeDockComposer ='));
+    const saveSource = app.slice(app.indexOf('async function saveSettings('), app.indexOf('\n// The resolved settings of a write'));
+    const state = { settings: { edgeDockItems: [{ type: 'limit', provider: 'thirdparty', accountMode: 'specific', accountKey: 'a' }] },
+      stats: { limits: { providers: ['a', 'b'].map((accountKey) => ({ provider: 'thirdparty', accountKey, accountName: accountKey })) } } };
+    const pendingSettingsPatches = new Set();
+    const writes = [];
+    const api = { updateSettings: (patch) => new Promise((resolve) => { writes.push({ patch, resolve }); }) };
+    const save = Function('window', 'state', 'pendingSettingsPatches', 'setSyncContentEditError', 'appearancePreview',
+      'syncContentForm', 'applyPersistedSettings', `${saveSource}; return saveSettings;`)(
+      { tokenMonitor: api }, state, pendingSettingsPatches, () => {}, {}, null,
+      (next) => { state.settings = next; }
+    );
+    let settingsReader;
+    const saveTasks = [];
+    const window = {
+      TokenMonitorEdgeDockComposer: { createEdgeDockComposer: (deps) => {
+        settingsReader = deps.getSettings;
+        return createEdgeDockComposer({ ...deps, save: (patch) => {
+          const task = deps.save(patch); saveTasks.push(task); return task;
+        } });
+      } },
+      TokenMonitorEdgeDockItems: itemsApi, TokenMonitorEdgeDockPresentation: {},
+      TokenMonitorLimitProviders: { LIMIT_PROVIDER_LABELS: { thirdparty: 'Third-party APIs' } }
+    };
+    const root = new Element('div');
+    const create = Function('window', 'state', 'pendingSettingsPatches', 't', 'saveSettings', 'mimoProductLabel', 'limitAccountTitle',
+      'rowDragControllerApi', 'verticalDragSortApi', 'preserveSettingsPanelScroll', 'limitMarksWithIcon',
+      'limitProviderColor', 'desktopSurfaceStats', 'pluginLimitMetadata', 'desktopLimitProviders', `${factory}; return createDockItemsComposer;`)(
+      window, state, pendingSettingsPatches, (key) => key, save, () => '', () => '',
+      { createRowDragController: () => ({ deferRender: () => false }) }, {}, (fn) => fn(), new Set(), () => '#fff', () => state.stats, () => null, () => []
+    );
+    const composer = create(root, 'edgeDockItems');
+    const all = (node) => [node, ...node.children.flatMap(all)];
+    const chooseMode = (value) => {
+      const input = all(root).find((node) => node.type === 'radio' && node.value === value);
+      input.checked = true; input.listeners.change();
+    };
+    composer.render();
+    all(root).find((node) => node.className === 'edge-dock-composer-item').listeners.click();
+    const select = all(root).find((node) => node.tagName === 'LABEL'
+      && node.children[0]?.textContent === 'trayComposer.account.specificLabel').children[1];
+    global.document.activeElement = select;
+    select.value = 'b'; select.listeners.change();
+    global.document.activeElement = null; select.listeners.blur();
+    chooseMode('lowest');
+    chooseMode('specific');
+    assert.equal(state.settings.edgeDockItems[0].accountKey, 'a', 'IPC replies are still delayed');
+    assert.deepEqual(writes.map(({ patch }) => [patch.edgeDockItems[0].accountMode, patch.edgeDockItems[0].accountKey]), [
+      ['specific', 'b'], ['lowest', 'b'], ['specific', 'b']
+    ]);
+    // A push/ack for the first write must not hide the newer pending mode.
+    writes[0].resolve({ ...state.settings, ...writes[0].patch }); await saveTasks[0];
+    assert.equal(settingsReader().edgeDockItems[0].accountMode, 'specific');
+    writes[1].resolve({ ...state.settings, ...writes[1].patch }); await saveTasks[1];
+    assert.equal(settingsReader().edgeDockItems[0].accountMode, 'specific');
+    writes[2].resolve({ ...state.settings, ...writes[2].patch }); await saveTasks[2];
+    assert.equal(state.settings.edgeDockItems[0].accountKey, 'b');
+    assert.equal(pendingSettingsPatches.size, 0);
+    state.settings = { ...state.settings, edgeDockItems: [{ type: 'limit', provider: 'thirdparty', accountMode: 'lowest', accountKey: 'external' }] };
+    assert.equal(settingsReader().edgeDockItems[0].accountKey, 'external', 'settled writes do not mask later settings');
+  } finally { global.document = previousDocument; }
+});
+
+test('custom plugin composer items hide while inactive and restore without changing saved references', () => {
+  const previous = global.document;
+  global.document = { createElement: tag => new Element(tag), activeElement: null };
+  try {
+    const root = new Element('div');
+    let status = 'active';
+    const settings = { edgeDockItems: [{ type: 'plugin', ref: 'sample-plugin/card' }] }, saved = JSON.stringify(settings), sizes = [];
+    const composer = createEdgeDockComposer({ root, itemsApi, t: key => key, presentationApi: {},
+      getSettings: () => settings, getStats: () => ({}), save() { assert.fail('status changes must not write settings'); },
+      pluginLabel: () => 'Custom panel', pluginView: () => ({ status }), pluginMark: (_, size) => { sizes.push(size); return new Element('svg'); },
+      providerLabel: id => id, providerColor: () => '#fff', hasProviderMark: () => false,
+      createRowDrag: () => ({ deferRender: () => false }) });
+    const all = node => [node, ...node.children.flatMap(all)];
+    composer.render();
+    let button = all(root).find(node => node.className === 'edge-dock-composer-item');
+    assert.equal(button.children[0].children[0].tagName, 'SVG');
+    assert.equal(button.attributes['aria-label'], 'Custom panel');
+    button.listeners.click();
+    assert.ok(sizes.includes(16)); assert.ok(sizes.includes(13));
+    for (const inactive of ['disabled', 'needsApproval', 'safeMode', 'crashed', 'invalid', 'pluginsOff', 'missing']) {
+      status = inactive; composer.render();
+      button = all(root).find(node => node.className === 'edge-dock-composer-item');
+      assert.equal(button, undefined);
+      assert.equal(JSON.stringify(settings), saved);
+    }
+    status = 'active'; composer.render();
+    assert.ok(all(root).some(node => node.className === 'edge-dock-composer-item'));
+  } finally { global.document = previous; }
+});
+test('sorting or removing visible items preserves hidden module and view slots', () => {
+  const previous = global.document;
+  global.document = { createElement: tag => new Element(tag), activeElement: null };
+  try {
+    const root = new Element('div'), hiddenView = { type: 'plugin', ref: 'sample-plugin/card' }, hiddenModule = { type: 'limit', provider: 'plugin:sample-plugin:credits' };
+    const settings = { edgeDockItems: [{ type: 'stat', metric: 'today' }, hiddenView, { type: 'limit', provider: 'codex' }, hiddenModule, { type: 'stat', metric: 'liveRate' }] };
+    let drag;
+    const composer = createEdgeDockComposer({ root, itemsApi, t: key => key, presentationApi: {},
+      getSettings: () => settings, getStats: () => ({}), save: patch => Object.assign(settings, patch),
+      pluginView: () => ({ status: 'disabled' }), moduleView: () => ({ status: 'disabled' }),
+      providerLabel: id => id, providerColor: () => '#fff', hasProviderMark: () => false,
+      createRowDrag: options => { drag = options; return { deferRender: () => false }; } });
+    const all = node => [node, ...node.children.flatMap(all)];
+    composer.render();
+    assert.equal(all(root).filter(node => node.className === 'edge-dock-composer-item').length, 3);
+    drag.persistOrder(['stat:liveRate', 'limit:codex', 'stat:today']);
+    assert.deepEqual(settings.edgeDockItems.map(itemsApi.itemId), ['stat:liveRate', 'plugin:sample-plugin/card', 'limit:codex', 'limit:plugin:sample-plugin:credits', 'stat:today']);
+    composer.render();
+    all(root).find(node => node.className === 'edge-dock-composer-item').listeners.click();
+    all(root).find(node => node.className === 'edge-dock-composer-remove').listeners.click();
+    assert.ok(settings.edgeDockItems.some(item => itemsApi.itemId(item) === itemsApi.itemId(hiddenView)));
+    assert.ok(settings.edgeDockItems.some(item => itemsApi.itemId(item) === itemsApi.itemId(hiddenModule)));
+    composer.render();
+    all(root).find(node => node.className === 'edge-dock-composer-item').listeners.click();
+    settings.edgeDockItems = settings.edgeDockItems.filter(item => itemsApi.itemId(item) !== itemsApi.itemId(hiddenView));
+    all(root).find(node => node.className === 'edge-dock-composer-remove').listeners.click();
+    assert.equal(settings.edgeDockItems.some(item => itemsApi.itemId(item) === itemsApi.itemId(hiddenView)), false, 'a stale pane must not restore an externally removed hidden reference');
+    assert.ok(settings.edgeDockItems.some(item => itemsApi.itemId(item) === itemsApi.itemId(hiddenModule)));
+  } finally { global.document = previous; }
+});
+test('adding provider and usage items preserves the latest hidden references in Dock and Notch', () => {
+  const previous = global.document;
+  global.document = { createElement: tag => new Element(tag), activeElement: null };
+  try {
+    for (const itemsKey of ['edgeDockItems', 'notchItems']) {
+      const root = new Element('div'), hiddenModule = { type: 'limit', provider: 'plugin:sample-plugin:credits', showUsage: false };
+      const settings = { [itemsKey]: itemsKey === 'notchItems' ? [hiddenModule] : [{ type: 'plugin', ref: 'sample-plugin/card' }, hiddenModule] };
+      const composer = createEdgeDockComposer({ root, itemsKey, itemsApi, t: key => key, presentationApi: {},
+        getSettings: () => settings, getStats: () => ({}), save: patch => Object.assign(settings, patch), enabledLimitProviders: () => ['codex'],
+        pluginView: () => ({ status: 'disabled' }), moduleView: () => ({ status: 'disabled' }),
+        providerLabel: id => id, providerColor: () => '#fff', hasProviderMark: () => false,
+        createRowDrag: () => ({ deferRender: () => false }) });
+      const all = node => [node, ...node.children.flatMap(all)];
+      composer.render();
+      all(root).find(node => node.className === 'edge-dock-composer-add').listeners.click();
+      const latest = { type: 'limit', provider: 'plugin:another-plugin:credits' };
+      settings[itemsKey].push(latest); // Another settings change while the menu is open.
+      const retained = itemsApi.normalizeEdgeDockItems(settings[itemsKey]);
+      all(root).find(node => node.className === 'edge-dock-composer-menu-option').listeners.click();
+      assert.deepEqual(settings[itemsKey].slice(0, -1), retained);
+      assert.equal(settings[itemsKey].at(-1).provider, 'codex');
+      if (itemsKey === 'edgeDockItems') {
+        composer.render();
+        all(root).find(node => node.className === 'edge-dock-composer-add').listeners.click();
+        all(root).find(node => node.className === 'edge-dock-composer-menu-option').listeners.click();
+        assert.deepEqual(settings[itemsKey].slice(0, -2), retained);
+        assert.equal(settings[itemsKey].at(-1).type, 'stat');
+      }
+    }
   } finally { global.document = previous; }
 });

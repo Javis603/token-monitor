@@ -132,9 +132,9 @@ nonisolated struct LimitProvider: Decodable, Identifiable, Sendable {
         if let percent = window.effectiveRemainingPercent {
             return percent
         }
-        // Ollama wallet credits have no quota denominator. Keep existing
+        // Wallet credits have no quota denominator. Keep existing
         // inferred top-up meters for other balance providers (e.g. Sub2API).
-        if normalizedProviderID == "ollama", window.showMeter == false { return nil }
+        if ["ollama", "mistral"].contains(normalizedProviderID), window.showMeter == false { return nil }
         let amount = window.remaining ?? balance?.amount
         guard let amount else {
             return nil
@@ -145,6 +145,24 @@ nonisolated struct LimitProvider: Decodable, Identifiable, Sendable {
         }
         let spend = max(0, balance?.monthSpend ?? 0)
         return min(100, max(0, funds / (funds + spend) * 100))
+    }
+
+    func windowDetail(for window: LimitWindow) -> String? {
+        let currency = window.currency ?? balance?.currency ?? "USD"
+        if normalizedProviderID == "minimax", window.kind == "weekly", window.label == "Video",
+           let used = window.used, let limit = window.limit {
+            return "\(max(0, limit - used).formatted(.number.precision(.fractionLength(0...2)))) / \(limit.formatted(.number.precision(.fractionLength(0...2))))"
+        }
+        guard window.kind == "billing", let limit = window.limit, limit > 0 else { return nil }
+        let amount: Double?
+        switch normalizedProviderID {
+        case "commandcode": amount = window.remaining
+        case "zed": amount = window.limitId == "zed.edit-predictions" ? nil : window.used
+        case "mistral": amount = window.isCredits ? nil : window.used.map { max(0, limit - $0) }
+        default: amount = nil
+        }
+        guard let amount else { return nil }
+        return "\(MetricFormatter.currency(amount, code: currency)) / \(MetricFormatter.currency(limit, code: currency))"
     }
 
     /// Desktop `limitProviderPlanDisplayLabel`: capitalize, and drop the

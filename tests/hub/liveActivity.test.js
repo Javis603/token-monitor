@@ -268,3 +268,29 @@ test('Hub restart restores Live Activity pushes and flushes batched usage on sto
     fs.rmSync(dataFile, { force: true });
   }
 });
+
+
+test('Node delta ingest advances upload revision and pushes reconstructed usage', async () => {
+  const dataFile = tempDataFile();
+  const pushes = [];
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'secret', dataFile,
+    apns: { enabled: true, minIntervalMs: 0, async send(_token, state) { pushes.push(state); return { sent: true }; } } });
+  try {
+    await hub.start();
+    hub.registerLiveActivity(registration('delta-activity'));
+    const url = `http://127.0.0.1:${hub.server.address().port}`;
+    const headers = { authorization: 'Bearer secret', 'content-type': 'application/json', 'x-token-monitor-upload': '1', 'x-token-monitor-response': 'minimal' };
+    const post = (route, payload) => fetch(url + route, { method: 'POST', headers, body: JSON.stringify(payload) });
+    const full = await (await post('/api/ingest', { deviceId: 'device', periods: { today: { totalTokens: 100 } } })).json();
+    assert.ok(full.upload.revision);
+    await waitFor(() => pushes.some(state => state.usage.today.tokens === 100));
+    const delta = await post('/api/ingest/delta', { deviceId: 'device', baseRevision: full.upload.revision,
+      patch: [{ op: 'replace', path: '/periods/today/totalTokens', value: 250 }] });
+    assert.equal(delta.status, 200);
+    assert.notEqual((await delta.json()).upload.revision, full.upload.revision);
+    await waitFor(() => pushes.some(state => state.usage.today.tokens === 250));
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});

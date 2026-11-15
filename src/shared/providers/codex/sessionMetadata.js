@@ -10,6 +10,7 @@ const { expandHomePath, t3HomeDir, discoverT3DbPaths } = t3SessionMetadata;
 const { nativeIdForFile } = require('./sessionIdentity');
 const { shouldReadSessionContext } = require('../../sessionContext');
 const { normalizeReasoningEffort } = require('../../sessionLive');
+const { normalizeLatestModel } = require('../../usage');
 const { readCodexSessionState, readCodexSessionContext, readCodexTurnEnded } = require('./sessionContext');
 
 const TITLE_MAX_CODE_POINTS = 96;
@@ -133,7 +134,7 @@ function readSessionMeta(sessionIds, deps = {}) {
       db = openDb(dbPath, sqliteMod);
       const columns = new Set(db.prepare('PRAGMA table_info(threads)').all().map((column) => String(column.name)));
       if (!columns.has('id')) continue;
-      const fields = ['name', 'title', 'thread_source', 'source', 'reasoning_effort'];
+      const fields = ['name', 'title', 'thread_source', 'source', 'model', 'reasoning_effort'];
       for (let offset = 0; offset < candidateIds.length; offset += QUERY_CHUNK_SIZE) {
         const chunk = candidateIds.slice(offset, offset + QUERY_CHUNK_SIZE).filter((id) => !metaByThreadId.has(id));
         if (chunk.length === 0) continue;
@@ -148,10 +149,12 @@ function readSessionMeta(sessionIds, deps = {}) {
             continue;
           }
           const title = titleForRow(row);
+          const latestModel = normalizeLatestModel(row.model, 'codex');
           const reasoningEffort = normalizeReasoningEffort(row.reasoning_effort);
-          if (!title && !reasoningEffort) continue;
+          if (!title && !latestModel && !reasoningEffort) continue;
           metaByThreadId.set(id, {
             ...(title ? { title } : {}),
+            ...(latestModel ? { latestModel } : {}),
             ...(reasoningEffort ? { reasoningEffort } : {})
           });
           if (isGeneratedTitle(row)) generatedTitleIds.add(id);
@@ -263,6 +266,7 @@ function resolveSessionMetadata(sessionIds, context) {
     // A fresh turn (including an explicit unknown) wins over the catalog.
     // Age or a failed read alone must not erase this persistent setting.
     if (Object.prototype.hasOwnProperty.call(state, 'reasoningEffort')) meta.reasoningEffort = state.reasoningEffort;
+    if (Object.prototype.hasOwnProperty.call(state, 'latestModel')) meta.latestModel = state.latestModel;
     const sessionContext = deps.readCodexSessionContext ? readContext(filePath) : state.context;
     // The turn boundary rides the same tail and answers the other half of the
     // question the window cannot: whether the agent is still generating.

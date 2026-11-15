@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const {
   USAGE_STRUCTURAL_KEYS,
@@ -37,6 +38,27 @@ test('Cursor account metadata ids are trimmed, deduplicated, and bounded', () =>
     normalizeCursorAccountIds([' work ', 'work', '', 'personal', 'x'.repeat(257)]),
     ['work', 'personal']
   );
+});
+
+test('WSL scanning defaults off and preserves explicit saved choices', () => {
+  assert.equal(usageConfigFromSettings({}).wslScanEnabled, false);
+  assert.equal(usageConfigFromSettings({ wslScanEnabled: false }).wslScanEnabled, false);
+  assert.equal(usageConfigFromSettings({ wslScanEnabled: true }).wslScanEnabled, true);
+});
+
+test('the headless agent defaults WSL scanning off and honors env and CLI opt-in', () => {
+  const agent = fs.readFileSync(path.resolve(__dirname, '../../src/agent/agent.js'), 'utf8');
+  const declaration = agent.match(/^const wslScanEnabled = .+;$/m)?.[0];
+  assert.ok(declaration, 'agent entry point must resolve the WSL usage option');
+  const { parseArgs } = require('../../src/shared/config');
+  const { parseBoolean } = require('../../src/shared/limits/providerHelpers');
+  const resolve = (argv, env = {}) => vm.runInNewContext(`${declaration}\nwslScanEnabled`, {
+    args: parseArgs(argv), process: { env }, parseBoolean
+  });
+  assert.equal(resolve([]), false);
+  assert.equal(resolve([], { TOKEN_MONITOR_WSL_SCAN: '1' }), true);
+  assert.equal(resolve(['--wslScan=true'], { TOKEN_MONITOR_WSL_SCAN: '0' }), true);
+  assert.equal(resolve(['--wslScan=false'], { TOKEN_MONITOR_WSL_SCAN: '1' }), false);
 });
 
 function fingerprintContext(settings) {
@@ -108,13 +130,13 @@ test('usage config fingerprint dedupes raw settings with the same effective runt
     historyEnabled: true,
     sessionUsageArchiveEnabled: true,
     projectsEnabled: true,
-    wslScanEnabled: true
+    wslScanEnabled: false
   }, smartContext);
 
   assert.equal(
     usageConfigFingerprint(omittedDefaults),
     usageConfigFingerprint(explicitDefaults),
-    'smart mode ignores raw intervals and explicit true defaults'
+    'smart mode ignores raw intervals and explicit defaults'
   );
   assert.notEqual(
     usageConfigFingerprint(explicitDefaults),
@@ -614,4 +636,18 @@ test('WorkBuddy managed field is private and owned by the managed service', () =
   assert.equal(Object.hasOwn(normalized, 'workbuddyManagedAccounts'), false);
   assert.ok(rendererOmittedAccountKeys().includes('workbuddyManagedAccounts'));
   assert.equal(require('../../src/electron/runtimeConfig').LIMIT_PROVIDER_SETTING_KEYS.workbuddy.includes('workbuddyManagedAccounts'), false);
+});
+
+
+test('Claude CLI fallback defaults on and toggling it reconfigures only Claude limits', () => {
+  assert.equal(limitsConfigFromSettings({}).claudeCliFallbackEnabled, true);
+  for (const enabled of [false, true]) {
+    const settings = { claudeCliFallbackEnabled: enabled };
+    assert.equal(limitsConfigFromSettings(settings).claudeCliFallbackEnabled, enabled);
+    const change = classifySettingsChange({ claudeCliFallbackEnabled: !enabled }, settings);
+    assert.equal(change.limitsReconfigure, true);
+    assert.deepEqual(change.limitScopes, [{ provider: 'claude', preserveReadings: true }]);
+    assert.equal(change.usageStructural, false);
+    assert.equal(change.modeStructural, false);
+  }
 });

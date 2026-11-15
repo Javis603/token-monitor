@@ -4,6 +4,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const { normalizeLimitProvider } = require('../../src/shared/limits/core');
 const vm = require('node:vm');
 
 const {
@@ -19,6 +20,7 @@ const {
   homeActivityWheelRoute,
   homeActivityScrollTarget,
   homeActivityScrollRecord,
+  homeActiveDaysPresentation,
   homeTrendSummary,
   pickHomeHistory,
   patchDailyToday,
@@ -108,6 +110,33 @@ test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
   assert.match(rule(css, '.home-activity-tooltip'), /background:\s*rgba\(var\(--panel-rgb\), 0\.58\)/);
   assert.match(rule(css, '.home-activity-tooltip'), /backdrop-filter:\s*blur\(10px\) saturate\(120%\)/);
   assert.match(rule(css, '.home-activity-canvas .heat-month'), /fill:\s*rgba\(var\(--line-rgb\), 0\.5\)/);
+});
+
+test('Home uses exact all-time active days only when aggregation is complete', () => {
+  const cells = [{ tokens: 10 }, { tokens: 0 }, { tokens: 20 }];
+  assert.deepEqual(homeActiveDaysPresentation({
+    requestedWindow: 'all',
+    summary: { activeDays: 450, activeDaysComplete: true },
+    cells
+  }), { window: 'all', count: 450 });
+  assert.deepEqual(homeActiveDaysPresentation({
+    requestedWindow: 'all',
+    summary: { activeDays: 450, activeDaysComplete: false },
+    cells
+  }), { window: 'year', count: 2 });
+  assert.deepEqual(homeActiveDaysPresentation({
+    requestedWindow: 'all',
+    summary: { activeDays: 450 },
+    cells
+  }), { window: 'year', count: 2 });
+});
+
+test('Home keeps an explicit 12-month active-days selection', () => {
+  assert.deepEqual(homeActiveDaysPresentation({
+    requestedWindow: 'year',
+    summary: { activeDays: 450, activeDaysComplete: true },
+    cells: [{ tokens: 10 }, { tokens: 0 }]
+  }), { window: 'year', count: 1 });
 });
 
 test('Home module selection is independent from main view preferences', () => {
@@ -406,7 +435,7 @@ for (const { name, settings, expected } of [
 ]) {
   test(`Home limits empty-state copy when ${name}`, () => {
     const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-    const functions = ['configuredLimitProviderSelection', 'enabledLimitProviderSet', 'homeLimitRows', 'renderHomeLimitModule']
+    const functions = ['desktopLimitProviders', 'desktopLimitRecords', 'configuredLimitProviderSelection', 'enabledLimitProviderSet', 'homeLimitRows', 'renderHomeLimitModule']
       .map((functionName) => {
         const start = source.indexOf(`function ${functionName}(`);
         assert.notEqual(start, -1, `${functionName} exists`);
@@ -435,6 +464,44 @@ for (const { name, settings, expected } of [
     assert.equal(body.children[0].textContent, expected);
   });
 }
+
+test('Home keeps both MiniMax readings named and in their own units', () => {
+  const presentation = require('../../src/electron/renderer/limits/providerPresentation');
+  const settings = { homeLimitAccountCount: 12 };
+  const view = require('../../src/electron/renderer/limits/windowsView').createLimitWindowsView({
+    presentation,
+    accountIdentity: require('../../src/electron/renderer/accountIdentity'),
+    settings: () => settings
+  });
+  const codeKey = `sha256:${'a'.repeat(64)}`;
+  const apiKey = `sha256:${'b'.repeat(64)}`;
+  const providers = [
+    { provider: 'minimax', source: 'oauth', status: 'ok', region: 'cn', accountKey: codeKey, accountLabel: 'MiniMax Code',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Credits', remaining: 4624, currency: 'CREDITS' }] },
+    { provider: 'minimax', source: 'api', status: 'ok', region: 'cn', accountKey: apiKey, relatedAccountKey: codeKey, accountLabel: 'Pay-as-you-go',
+      windows: [{ kind: 'billing', metric: 'credits', label: 'Balance', remaining: 14.97, currency: 'CNY' }] }
+  ].map(normalizeLimitProvider);
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = source.indexOf('function homeLimitRows(');
+  const fn = source.slice(start, source.indexOf('\n}\n', start) + 2);
+  for (const showHomeLimitProviderNames of [false, true]) {
+    settings.showHomeLimitProviderNames = showHomeLimitProviderNames;
+    const rows = vm.runInNewContext(`${fn}\nhomeLimitRows();`, {
+      state: { settings, stats: { limits: { providers } } },
+      desktopLimitProviders: () => [{ id: 'minimax', label: 'Minimax' }], desktopLimitRecords: () => providers,
+      LIMIT_PROVIDERS: [{ id: 'minimax', label: 'Minimax' }],
+      clientColors: {}, enabledLimitProviderSet: () => new Set(['minimax']), hiddenHomeLimitProviderSet: () => new Set(),
+      limitProviderOrderApi, limitWindowsView: view, limitProviderPresentationApi: presentation,
+      limitUsageItemsApi: require('../../src/shared/limits/usageItems'),
+      limitAccountTitle: (...args) => view.limitAccountTitle(...args),
+      homeOverviewApi: { homeLimitAccountsForProviders }
+    });
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows.map(row => row.name), ['Minimax', 'Minimax']);
+    assert.deepEqual(new Set(Array.from(rows, row => `${row.windows[0].remaining}:${row.windows[0].currency}`)),
+      new Set(['4624:CREDITS', '14.97:CNY']));
+  }
+});
 
 test('homeLimitAccountsForProviders includes MiMo Token Plan status and balance', () => {
   const rows = homeLimitAccountsForProviders({
@@ -1158,4 +1225,51 @@ test('Home drops the rows unchecked on a provider\'s usage-item list, MiMo\'s sy
   const byProvider = Object.fromEntries(rows.map((row) => [row.providerId, row.windows.map((window) => window.label)]));
   assert.deepEqual(byProvider.claude, ['Session']);
   assert.deepEqual(byProvider.mimo, ['Balance']);
+});
+
+test('Home withholds a year count until full history is available', () => {
+  assert.deepEqual(homeActiveDaysPresentation({
+    summary: { activeDays: 450, activeDaysComplete: false },
+    cells: [{ tokens: 10 }], rollingComplete: false
+  }), { window: 'year', count: null });
+  assert.deepEqual(homeActiveDaysPresentation({
+    summary: { activeDays: 450, activeDaysComplete: true },
+    cells: [], rollingComplete: false
+  }), { window: 'all', count: 450 });
+});
+
+test('Home renders lifetime-only activity and never labels the preview as a full year', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = app.indexOf('function renderHomeTrendsModule()');
+  const end = app.indexOf('  const activityScroll =', start);
+  const renderHeader = `${app.slice(start, end)}return module;\n}`;
+  const overview = require('../../src/electron/renderer/homeOverview');
+  const charts = require('../../src/electron/renderer/usageCharts');
+  const context = {
+    window: { TokenMonitorUsageCharts: charts }, homeOverviewApi: overview,
+    dailyWithHeatIntensity: rows => rows,
+    document: { createElement: () => ({ append() {} }) },
+    t: (key, vars) => vars ? `${key}:${vars.count}` : key,
+    homeModuleShell: (_id, _title, _settings, label = '') => ({ module: { label }, body: { append() {} } })
+  };
+  const state = context.state = {
+    settings: {}, stats: { historyRevision: 'current', historyPreview: {
+      daily: [], summary: { activeDays: 42, activeDaysComplete: true }
+    } }
+  };
+  vm.createContext(context);
+  vm.runInContext(renderHeader, context);
+  const render = () => vm.runInContext('renderHomeTrendsModule()', context).label;
+  assert.equal(render(), 'home.activeDays:42');
+  state.stats.historyPreview = {
+    daily: [{ date: charts.localDayKey(), tokens: 10 }],
+    summary: { activeDays: 42, activeDaysComplete: false }
+  };
+  assert.equal(render(), '', 'preview alone cannot prove the annual count');
+  state.homeHistory = { daily: state.stats.historyPreview.daily };
+  state.homeHistoryLoadedSignature = 'old';
+  assert.equal(render(), '', 'an older full-history response is not current evidence');
+  state.homeHistoryLoadedSignature = 'current';
+  state.stats.periods = { today: { totalTokens: 10 } };
+  assert.equal(render(), 'home.activeDaysYear:1');
 });

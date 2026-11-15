@@ -6,8 +6,46 @@ const test = require('node:test');
 const {
   affectedComponentNames,
   agoBucket,
-  statusHeadline
+  statusHeadline,
+  localizeProvider
 } = require('../../src/electron/renderer/serviceStatusPresentation');
+
+test('DeepSeek selects simplified Chinese only for zh-CN and English for all other app locales', () => {
+  const source = {
+    id: 'deepseek',
+    incidentTitle: 'DeepSeek 网页/API 部分中断（DeepSeek Web/API Partially Unavailable）',
+    description: 'Partial Service Outage',
+    componentIssues: [
+      { name: 'DeepSeek V4.1 Flash API服务(API Service)', status: 'partial_outage' },
+      { name: '对话服务(Chatservice)', status: 'partial_outage' }
+    ]
+  };
+  const chinese = localizeProvider(source, 'zh-CN');
+  assert.equal(statusHeadline(chinese), 'DeepSeek 网页/API 部分中断');
+  assert.equal(chinese.description, '部分服务中断');
+  assert.deepEqual(affectedComponentNames(chinese.componentIssues).all, ['DeepSeek V4.1 Flash API服务', '对话服务']);
+  for (const locale of ['en', 'zh-TW', 'ja', 'ko', 'pt-BR']) {
+    const english = localizeProvider(source, locale);
+    assert.equal(statusHeadline(english), 'DeepSeek Web/API Partially Unavailable', locale);
+    assert.deepEqual(affectedComponentNames(english.componentIssues).all, ['DeepSeek V4.1 Flash API Service', 'Chatservice'], locale);
+    assert.equal(english.componentIssues[0].status, 'partial_outage');
+  }
+  // Reusing the same cached snapshot on a language switch must not mutate it.
+  assert.equal(localizeProvider(source, 'zh-CN').incidentTitle, chinese.incidentTitle);
+  assert.match(source.incidentTitle, /（/);
+  assert.match(source.componentIssues[0].name, /\(API Service\)/);
+});
+
+test('DeepSeek language follows auto resolution and preserves unpaired source text', () => {
+  const i18n = require('../../src/electron/renderer/i18n');
+  const source = { id: 'deepseek', incidentTitle: '搜索服务异常（Search service error）', description: 'Degraded Performance', componentIssues: [] };
+  assert.equal(localizeProvider(source, i18n.resolveLocale('auto', ['zh-CN'])).incidentTitle, '搜索服务异常');
+  assert.equal(localizeProvider(source, i18n.resolveLocale('auto', ['zh-HK'])).incidentTitle, 'Search service error');
+  assert.equal(localizeProvider({ ...source, incidentTitle: 'New incident without paired translation' }, 'zh-CN').incidentTitle, 'New incident without paired translation');
+  assert.equal(localizeProvider({ ...source, incidentTitle: '' }, 'zh-CN').description, '服务性能下降');
+  const other = { ...source, id: 'claude' };
+  assert.equal(localizeProvider(other, 'zh-CN'), other);
+});
 
 test('affectedComponentNames splits names into a visible slice and overflow count', () => {
   const issues = [

@@ -28,7 +28,7 @@
   // than floating next to it. Drawn for the right edge and mirrored for the left.
   // The first and last points sit on the screen edge; `open: true` drops the
   // closing segment so an outline is never stroked along the display edge.
-  function railCommands({ width, height, side = 'right', shoulder, radius, open = false }) {
+  function railCommands({ width, height, side = 'right', shoulder, radius, open = false, floating = false, floatingProgress = floating ? 1 : 0 }) {
     const w = width;
     const h = height;
     const s = Math.max(0, Math.min(shoulder, h / 2));
@@ -44,7 +44,27 @@
       ['L', w - spread, h - s],
       ['C', w - w * 0.25, h - s, w, h - s * 0.76, w, h]
     ];
-    if (!open) commands.push(['Z']);
+    // Keep the cells exactly where they are in the attached rail. Its shoulders
+    // become transparent rather than becoming extra padding inside the capsule.
+    // Matching command topology lets native masks and SVG share the same morph.
+    const cap = Math.min(w / 2, (h - 2 * s) / 2);
+    const capsule = [
+      ['M', w, s + cap],
+      ['C', w, s + cap * ARC, w - cap * ARC, s, w - cap, s],
+      ['L', cap, s],
+      ['C', cap * ARC, s, 0, s + cap * ARC, 0, s + cap],
+      ['L', 0, h - s - cap],
+      ['C', 0, h - s - cap * ARC, cap * ARC, h - s, cap, h - s],
+      ['L', w - cap, h - s],
+      ['C', w - cap * ARC, h - s, w, h - s - cap * ARC, w, h - s - cap]
+    ];
+    const progress = Math.max(0, Math.min(1, floatingProgress));
+    if (progress > 0) {
+      for (let i = 0; i < commands.length; i += 1) {
+        for (let j = 1; j < commands[i].length; j += 1) commands[i][j] += (capsule[i][j] - commands[i][j]) * progress;
+      }
+    }
+    if (!open || progress > 0) commands.push(['Z']);
     return side === 'left' ? mirrorX(commands, w) : commands;
   }
 
@@ -105,6 +125,19 @@
     return Math.round(value * 100) / 100;
   }
 
+  function cardCommands({ width, height, y = 0, radius = 14 }) {
+    const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+    return [
+      ['M', r, y], ['L', width - r, y],
+      ['C', width - r * ARC, y, width, y + r * ARC, width, y + r],
+      ['L', width, y + height - r],
+      ['C', width, y + height - r * ARC, width - r * ARC, y + height, width - r, y + height],
+      ['L', r, y + height],
+      ['C', r * ARC, y + height, 0, y + height - r * ARC, 0, y + height - r],
+      ['L', 0, y + r], ['C', 0, y + r * ARC, r * ARC, y, r, y], ['Z']
+    ];
+  }
+
   function toSvgPath(commands) {
     return commands.map(([op, ...points]) => `${op}${points.map(round).join(' ')}`).join(' ');
   }
@@ -150,6 +183,7 @@
         ['C', x - r, y - k, x - k, y - r, x, y - r], ['Z']];
     },
     bubbleCommands,
+    cardCommands,
     peekCommands,
     railCommands,
     toPolygons,

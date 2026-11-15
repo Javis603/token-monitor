@@ -18,6 +18,7 @@ test("canonical document links stay local while implementation links keep reposi
   assert.equal(referenceHref('author-ui-options.md#original-content-targets', references[0].source), 'plugin-ui-reference.html#original-content-targets');
   assert.equal(referenceHref('../../src/shared/plugins/manifest.js', references[0].source), 'https://github.com/Javis603/token-monitor/blob/main/src/shared/plugins/manifest.js');
   assert.equal(referenceHref('author-data-settings.md#plugin-settings', references[0].source), 'plugin-data-reference.html#plugin-settings');
+  assert.equal(referenceHref('author-data-resources.md#live-token-rate', references[0].source), 'plugin-resources-reference.html#live-token-rate');
   assert.equal(referenceHref('publishing.md', references[0].source), 'plugin-publishing-reference.html');
   assert.equal(referenceHref('validation.md#author-self-check', references[0].source), 'plugin-testing-reference.html#author-self-check');
   assert.equal(referenceHref('//external.test', references[0].source), null);
@@ -292,7 +293,7 @@ test("legacy tutorial redirects reach real sections for every supported language
       const article = html.match(new RegExp(`<article[^>]*lang="${lang}"[^>]*>([\\s\\S]*?)</article>`))[1];
       assert.ok(article.includes('plugin-distribution-reference.html#create-a-community-catalog'));
       if (page === 'plugin-quickstart') {
-        for (const link of ['plugin-data-reference.html#live-updates-with-cleanup', 'plugin-data-reference.html#plugin-settings', 'plugin-testing-reference.html#author-self-check', 'plugin-publishing-reference.html']) {
+        for (const link of ['plugin-data-reference.html#live-updates-with-cleanup', 'plugin-data-reference.html#plugin-settings', 'plugin-resources-reference.html#live-token-rate', 'plugin-testing-reference.html#author-self-check', 'plugin-publishing-reference.html']) {
           assert.ok(article.includes(`href="${link}"`), `${lang}: ${link}`);
         }
       }

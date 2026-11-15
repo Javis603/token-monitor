@@ -31,8 +31,9 @@ function fixture(t) {
   fs.mkdirSync(root, { recursive: true });
   const file = path.join(root, 'rollout-2026-10-08T12-00-00-test.jsonl');
   const cache = new Map();
-  const write = (lines) => fs.writeFileSync(file, lines.join('\n') + '\n');
-  const append = (...lines) => fs.appendFileSync(file, lines.join('\n') + '\n');
+  const stamp = () => fs.utimesSync(file, new Date(now), new Date(now));
+  const write = (lines) => { fs.writeFileSync(file, lines.join('\n') + '\n'); stamp(); };
+  const append = (...lines) => { fs.appendFileSync(file, lines.join('\n') + '\n'); stamp(); };
   const read = () => readCodexSessionState(file, { cache });
   return { home, file, id: path.basename(file, '.jsonl'), cache, write, append, read };
 }
@@ -97,7 +98,7 @@ test('Codex metadata carries a question and its resolution into every period', (
   const periods = Object.fromEntries(['today', 'month', 'allTime'].map((name) =>
     [name, { sessions: { [key]: session({ sessionId: f.id, waitingForInput: false }) } }]));
   const enrich = () => applySessionMetadata(periods, f.home, {
-    now: Date.now(), env: {}, resolveProjects: false
+    now, env: {}, resolveProjects: false
   });
   enrich();
   for (const p of Object.values(periods)) assert.equal(p.sessions[key].waitingForInput, true);
@@ -107,23 +108,25 @@ test('Codex metadata carries a question and its resolution into every period', (
 });
 
 test('a Codex warm watch tick carries question resolution into month and allTime', async (t) => {
+  t.mock.method(Date, 'now', () => now);
   const f = fixture(t);
   const { collectUsageOnce } = require('../../src/shared/collector');
   const { localDayKey } = require('../../src/shared/history');
   const key = 'codex:' + f.id;
   f.write([event('task_started'), question()]);
   const options = {
+    now: new Date(now),
     clients: 'codex', allTimeSince: '2024-01-01', deviceId: 'waiting-test', agentVersion: 'test',
     homeDir: f.home, env: {}, projectsEnabled: false, limitsEnabled: false, historyEnabled: false,
     codexLocalUsageEnabled: false, anchorPersistenceEnabled: false,
-    runTokscale: async () => ({ entries: [{ client: 'codex', sessionId: f.id, model: 'gpt-6-luna', input: 100, output: 0, cost: 0 }] }),
+    runTokscale: async () => ({ entries: [{ client: 'codex', sessionId: f.id, lastUsedAt: new Date(now).toISOString(), model: 'gpt-6-luna', input: 100, output: 0, cost: 0 }] }),
     collectWslUsage: async () => ({ bundle: { today: {}, month: {}, allTime: {} }, detected: [] })
   };
   const full = await collectUsageOnce(options);
   for (const name of ['today', 'month', 'allTime']) assert.equal(full[name].sessions[key].waitingForInput, true);
   f.append(answer());
   const warm = await collectUsageOnce({ ...options, todayOnlyAnchor: {
-    dateKey: localDayKey(new Date()), today: full.today, month: full.month,
+    dateKey: localDayKey(new Date(now)), today: full.today, month: full.month,
     allTime: full.allTime, todayPartitions: { codex: full.today }
   } });
   for (const name of ['today', 'month', 'allTime']) {

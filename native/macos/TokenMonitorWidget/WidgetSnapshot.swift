@@ -329,20 +329,29 @@ struct WidgetVendorStyle: Decodable, Equatable {
     let color: String?
     let ink: Bool
     let icon: String?
+    let fullColor: Bool
+    let modelIcon: String?
+    let modelColor: String?
 
-    init(color: String? = nil, ink: Bool = false, icon: String? = nil) {
+    init(color: String? = nil, ink: Bool = false, icon: String? = nil, fullColor: Bool = false, modelIcon: String? = nil, modelColor: String? = nil) {
         self.color = color
         self.ink = ink
         self.icon = icon
+        self.fullColor = fullColor
+        self.modelIcon = modelIcon
+        self.modelColor = modelColor
     }
 
-    private enum CodingKeys: String, CodingKey { case color, ink, icon }
+    private enum CodingKeys: String, CodingKey { case color, ink, icon, fullColor, modelIcon, modelColor }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         color = c.optionalString(.color)
         ink = (try? c.decodeIfPresent(Bool.self, forKey: .ink)) ?? false
         icon = c.optionalString(.icon)
+        fullColor = (try? c.decodeIfPresent(Bool.self, forKey: .fullColor)) ?? false
+        modelIcon = c.optionalString(.modelIcon)
+        modelColor = c.optionalString(.modelColor)
     }
 }
 
@@ -358,14 +367,16 @@ struct WidgetVendorPalette: Equatable {
 
     let styles: [String: WidgetVendorStyle]
 
-    func ink(for vendorID: String) -> Ink {
+    func ink(for vendorID: String, model: Bool = false) -> Ink {
         let style = styles[vendorID.lowercased()]
+        if model, let color = style?.modelColor { return .hex(color) }
         if style?.ink == true { return .adaptive }
         return .hex(style?.color ?? styles["default"]?.color ?? "#6AB4F0")
     }
 
-    func iconName(for vendorID: String) -> String {
-        styles[vendorID.lowercased()]?.icon ?? vendorID.lowercased()
+    func iconName(for vendorID: String, model: Bool = false) -> String {
+        let style = styles[vendorID.lowercased()]
+        return (model ? style?.modelIcon : nil) ?? style?.icon ?? vendorID.lowercased()
     }
 }
 

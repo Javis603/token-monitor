@@ -1,0 +1,74 @@
+{
+  "sourceLanguage": "en",
+  "strings": {
+    "Custom": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Custom"
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自訂"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "自定义"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "カスタム"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "사용자 지정"
+          }
+        }
+      }
+    },
+    "Shows active sessions first, low quota alerts next, and today's usage when idle.": {
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Shows active sessions first, low quota alerts next, and today's usage when idle."
+          }
+        },
+        "zh-Hant": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "優先顯示進行中或等待輸入的工作，其次提醒偏低額度，閒置時顯示今日用量。"
+          }
+        },
+        "zh-Hans": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "优先显示进行中或等待输入的工作，其次提醒偏低额度，空闲时显示今日用量。"
+          }
+        },
+        "ja": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "実行中・入力待ちのセッション、残量の少ない上限、待機中は今日の使用量の順に表示します。"
+          }
+        },
+        "ko": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "실행 중이거나 입력을 기다리는 세션, 낮은 잔여 한도, 대기 중에는 오늘 사용량을 표시합니다。"
+          }
+        }
+      }
+    }
+  },
+  "version": "1.0"
+}

@@ -106,6 +106,27 @@ test('Regular and Clear update in place while older macOS and reduced transparen
   assert.equal(creations, 1);
 });
 
+test('retained card shapes reach Liquid Glass in the same update and HUD masks survive first reveal', () => {
+  const win = fakeWindow();
+  const shape = { commands: [['M', 0, 100], ['L', 300, 100], ['L', 300, 400], ['Z']], width: 300, height: 900 };
+  const updates = [], creations = [];
+  const deps = { osRelease: '25.0.0', createGlass(_win, options) {
+    creations.push(options);
+    return { update: value => updates.push(value), dispose() {} };
+  } };
+  syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: true, shape }, 'darwin', deps);
+  const next = { ...shape, commands: [['M', 0, 200], ['L', 300, 200], ['L', 300, 500], ['Z']] };
+  syncNativeMaterialVisibility(win, { enabled: true, liquidGlass: true, shape: next }, 'darwin', deps);
+  assert.deepEqual(creations, [{ shaped: true }]);
+  assert.equal(updates.at(-1).shape, next);
+  syncNativeMaterialVisibility(win, { enabled: true, shape: next }, 'darwin', deps);
+  const materials = [...win.materials];
+  assert.equal(materials.at(-1), 'hud', 'install material while hidden so the owner can mask it before showing');
+  win.setVisible(true);
+  syncNativeMaterialVisibility(win, { enabled: true, shape: next }, 'darwin', deps);
+  assert.deepEqual(win.materials, materials, 'show must not recreate the masked HUD container');
+});
+
 test('failed native initialization reports the fallback instead of claiming Liquid Glass', (t) => {
   t.mock.method(console, 'warn', () => {});
   const win = fakeWindow();

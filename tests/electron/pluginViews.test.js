@@ -408,6 +408,7 @@ test('navigation artwork is static metadata and decode errors restore the named 
   const image = icon.querySelector('img');
   assert.equal(image.src, 'data:image/png;base64,bad');
   assert.equal(image.alt, '');
+  assert.equal(image.draggable, false, 'identity icons do not start browser image drags');
   assert.equal(image.width, 15);
   image.fire('error');
   assert.equal(icon.querySelector('img'), null);
@@ -575,3 +576,45 @@ for (const initiallyHidden of [true, false]) {
     content.dispose();
   });
 }
+test('offscreen author quota views stay invisible through context repaint', async () => {
+  const { createPluginViewHost } = require('../../src/electron/renderer/pluginViews');
+  const document = dom(); document.addEventListener = document.removeEventListener = () => {};
+  let intersection, frame; const paints = [];
+  const window = { requestAnimationFrame: fn => { frame = fn; return 1; }, cancelAnimationFrame() {},
+    IntersectionObserver: class { constructor(callback) { intersection = callback; } observe() {} disconnect() {} },
+    TokenMonitorPluginUi: { createHost: () => ({ mount(_node, _value, context) { paints.push(context.visible); }, unmount() {}, sweep() {}, setVisibility() {}, dispose() {} }) } };
+  const host = createPluginViewHost({ document, window });
+  host.update({ surface: 'settings', views: { [descriptor.ref]: descriptor } });
+  const node = document.createElement('div'); node.style.removeProperty = () => {}; node.getClientRects = () => [{}]; document.body.append(node);
+  host.mount(node, descriptor.ref, 'settings', { isVisible: () => true });
+  intersection([{ target: node, isIntersecting: false }]); frame();
+  host.refreshContext(); assert.equal(paints.at(-1), false);
+  intersection([{ target: node, isIntersecting: true }]); frame();
+  host.refreshContext(); assert.equal(paints.at(-1), true);
+  await host.dispose();
+});
+
+
+test('shared presentation resolves live palette overrides and renders native, image and mask artwork', () => {
+  const document = dom(); document.createElementNS = (_namespace, tag) => document.createElement(tag);
+  const {navigationIcon,presentationColor} = require('../../src/electron/renderer/pluginViews');
+  const palette={codex:'#49a3b0',default:'#aaaaaa'};
+  assert.equal(presentationColor({color:{palette:'codex'}},palette),'#49a3b0');
+  palette.codex='#123456';
+  assert.equal(presentationColor({color:{palette:'codex'}},palette),'#123456');
+  assert.equal(presentationColor({color:{hex:'#abcdef'}},palette),'#abcdef');
+  assert.equal(presentationColor({},palette),'#aaaaaa');
+  const native=navigationIcon(document,{presentation:{icon:{native:'codex'}}});
+  const probe=native.querySelector('img'); assert.ok(probe.src.endsWith('/codex.svg')); probe.fire('load');
+  const mark=native.children[0]; assert.equal(mark.className,'row-icon-codex'); assert.equal(mark.style.backgroundColor,'currentColor'); assert.ok(mark.style.maskImage.includes('/codex.svg'));
+  for (const mode of ['image','mask']) {
+    const data='data:image/svg+xml;base64,PHN2Zy8+';
+    const node=navigationIcon(document,{presentation:{icon:{data,mode}}});
+    const img=node.querySelector('img'); assert.equal(img.src,data); assert.equal(img.draggable,false); img.fire('load');
+    assert.equal(Boolean(node.querySelector('img')),mode==='image');
+    if(mode==='mask') assert.ok(node.children[0].style.maskImage.includes(data));
+  }
+  const fallback=navigationIcon(document,{identityIcon:'data:image/png;base64,fallback',presentation:{icon:{native:'codex'}}});
+  fallback.querySelector('img').fire('error'); assert.equal(fallback.querySelector('img').src,'data:image/png;base64,fallback');
+  fallback.querySelector('img').fire('error'); assert.ok(fallback.querySelector('path'));
+});

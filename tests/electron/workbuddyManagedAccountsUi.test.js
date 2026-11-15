@@ -92,7 +92,7 @@ test('visible Settings follows quota pushes and defers hidden updates without po
   h.state.stats = { limits: { providers: [] }, devices: [] };
   for (const name of ['renderConnectionStatus', 'render', 'renderCodexAccounts', 'renderMimoStatus',
     'renderSettingsSummaries', 'renderLimitProviderCheckboxes', 'renderToolPreferences', 'renderWslPanel',
-    'updateOpenRouterProfilesStatus', 'updateThirdPartyProfilesStatus', 'renderExternalProviderStatus',
+    'updateOpenRouterProfilesStatus', 'updateMinimaxApiKeysStatus', 'updateThirdPartyProfilesStatus', 'renderExternalProviderStatus',
     'renderCopilotStatus', 'signalContentReady']) h.context[name] = () => {};
   let settingsVisible = true, hidden = false;
   h.context.visibleStatsSurface = () => hidden ? null : 'main';
@@ -371,7 +371,8 @@ test('Home sends the complete source readings through the shared WorkBuddy colla
   vm.runInNewContext(`${source}\nhomeLimitRows();`, {
     state: { settings: {}, stats: { limits: { providers: members } } },
     enabledLimitProviderSet: () => new Set(['workbuddy']), hiddenHomeLimitProviderSet: () => new Set(),
-    LIMIT_PROVIDERS: [], clientColors: {},
+    desktopLimitProviders: () => [{ id: 'workbuddy', label: 'WorkBuddy' }], desktopLimitRecords: () => members,
+  LIMIT_PROVIDERS: [], clientColors: {},
     limitProviderOrderApi: { orderedLimitProviders: () => [] },
     limitUsageItemsApi: { isLimitWindowHidden: () => false },
     limitProviderPresentationApi: presentation,

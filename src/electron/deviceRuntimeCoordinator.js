@@ -5,10 +5,12 @@ function settingsLimitInvalidationPlan(runtimeChange = {}, ensureProvider = '') 
   if (ensureProvider && !scopes.some((scope) => scope.provider === ensureProvider)) {
     scopes.push({ provider: ensureProvider });
   }
-  return scopes.map((scope) => ({
-    scope,
+  return scopes.map(({ preserveReadings, ...scope }) => ({
+    // MiniMax API and Muse Web settings do not own their local CLI logins.
+    scope: scope.provider === 'minimax' ? { ...scope, source: 'api' }
+      : scope.provider === 'muse' ? { ...scope, source: 'web' } : scope,
     reason: 'settings-change',
-    options: { clear: true }
+    options: { clear: preserveReadings !== true }
   }));
 }
 

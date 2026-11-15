@@ -140,7 +140,10 @@ test('font controls live inside Appearance advanced customization', () => {
   assert.match(advanced, /id="interfaceFontCustomRow"/);
   assert.match(advanced, /id="displayFontCustomRow"/);
   assert.match(advanced, /data-i18n="settings\.appearance\.fontDisplay">Display font<\/label>/);
-  assert.match(advanced, /data-i18n="settings\.appearance\.fontNote"/);
+  for (const preset of ['App', 'System', 'Mono', 'Follow', 'Custom']) {
+    assert.ok(advanced.includes(`data-select-description="settings.appearance.fontPreset${preset}Desc"`));
+  }
+  assert.doesNotMatch(advanced, /fontSettingsNote/);
 });
 
 test('font settings wiring keeps renderer defaults concrete and technical monospace roles intact', () => {

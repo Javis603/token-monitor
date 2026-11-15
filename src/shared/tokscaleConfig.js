@@ -2,6 +2,7 @@
 
 const os = require('node:os');
 const path = require('node:path');
+const { nativeWindowsFolders } = require('./windowsKnownFolders');
 
 // Mirror tokscale-core get_config_dir() (tmp/tokscale/crates/tokscale-core/src/paths.rs)
 // so the file we write is the exact file the spawned tokscale reads — on every
@@ -39,9 +40,10 @@ function tokscaleConfigDir(options = {}) {
   if (platform === 'darwin') return path.join(homeDir, '.config', 'tokscale');
 
   if (platform === 'win32') {
-    const appData = (typeof env.APPDATA === 'string' && env.APPDATA.length > 0)
+    const native = options.windowsFolders || nativeWindowsFolders();
+    const appData = native.roaming || ((typeof env.APPDATA === 'string' && env.APPDATA.length > 0)
       ? env.APPDATA
-      : path.join(homeDir, 'AppData', 'Roaming');
+      : path.join(homeDir, 'AppData', 'Roaming'));
     return path.join(appData, 'tokscale');
   }
 

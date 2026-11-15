@@ -78,12 +78,13 @@ nonisolated struct SessionListEntry: Identifiable, Sendable {
         activity: [String: LiveSessionActivity]? = nil,
         query: String = "",
         grokBotIDs: Set<String> = [],
+        includeZeroUsage: Bool = false,
         now: Date = .now
     ) -> [SessionListEntry] {
         let ordered = sessions.filter { key, value in
             // Same session partition as desktop; background runs are source-tagged, never title-guessed.
             !(value.client == "reasonix" && key.contains("reasonix-stats:")) &&
-            value.measuredTokens != 0 && (value.matches(query)
+            (includeZeroUsage || value.measuredTokens != 0) && (value.matches(query)
                 || (value.isBackgroundReview && "Codex Auto Review".localizedStandardContains(query))
                 || ((value.isGrokBot(key: key) || (value.client == "cursor" && grokBotIDs.contains(value.identityKey(fallback: key))))
                     && "Grok Bot".localizedStandardContains(query)))

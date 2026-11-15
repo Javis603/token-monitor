@@ -82,8 +82,11 @@ struct LiveActivityCustomizerView: View {
             VStack(spacing: DesignTokens.sectionSpacing) {
                 stage
                 controls
-                gallery
-                dataControls
+                presentationMode
+                if preferences.liveLayout.mode == .custom {
+                    gallery
+                    dataControls
+                }
             }
             .padding(.horizontal, DesignTokens.screenPadding)
             .padding(.bottom, 32)
@@ -120,6 +123,22 @@ struct LiveActivityCustomizerView: View {
         Binding(get: { preferences.liveLayout }, set: { preferences.liveLayout = $0 })
     }
 
+    private var presentationMode: some View {
+        SurfaceCard {
+            VStack(alignment: .leading, spacing: 12) {
+                Picker("Presentation", selection: layout.mode) {
+                    Text("Automatic").tag(LiveActivityLayout.Mode.automatic)
+                    Text("Custom", tableName: "ActivityAutomation").tag(LiveActivityLayout.Mode.custom)
+                }
+                .pickerStyle(.segmented)
+                if preferences.liveLayout.mode == .automatic {
+                    Text("Shows active sessions first, low quota alerts next, and today's usage when idle.", tableName: "ActivityAutomation")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
     private var selectedSlot: LiveActivityLayout.Slot {
         slot == .leading ? preferences.liveLayout.compactLeading : preferences.liveLayout.compactTrailing
     }
@@ -132,6 +151,11 @@ struct LiveActivityCustomizerView: View {
             snapshot: previewSnapshot(),
             preferences: preferences.sharedPreferences
         )
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--sample-live-single") {
+            state.agents = .init(running: 1, clients: ["codex"])
+        }
+        #endif
         if store.stats == nil, state.agents.running == 0 {
             state.agents = .init(running: 2, clients: ["claude", "codex"])
         }
@@ -245,7 +269,7 @@ struct LiveActivityCustomizerView: View {
         VStack(spacing: 18) {
             compactIsland(context)
                 .padding(.top, Device.islandTop)
-            if selectedSlot.style != .none {
+            if preferences.liveLayout.mode == .custom && selectedSlot.style != .none {
                 editPill(deletes: true)
             }
         }
@@ -254,15 +278,23 @@ struct LiveActivityCustomizerView: View {
 
     private func compactIsland(_ context: ActivityContext) -> some View {
         HStack(spacing: 0) {
-            slotButton(.leading, context: context)
-            Color.clear.frame(width: Device.sensorWidth)
-            slotButton(.trailing, context: context)
+            if preferences.liveLayout.mode == .automatic {
+                ActivityCompactItemView(context: context, slot: context.layout.compactLeading).padding(.horizontal, 12)
+                Color.clear.frame(width: Device.sensorWidth)
+                ActivityCompactItemView(context: context, slot: context.layout.compactTrailing).padding(.horizontal, 12)
+            } else {
+                slotButton(.leading, context: context)
+                Color.clear.frame(width: Device.sensorWidth)
+                slotButton(.trailing, context: context)
+            }
         }
         .frame(height: Device.islandHeight)
         .foregroundStyle(.white)
         .background(.black, in: Capsule())
         .overlay(alignment: slot == .leading ? .leading : .trailing) {
-            SlotArc(trailing: slot == .trailing, islandHeight: Device.islandHeight)
+            if preferences.liveLayout.mode == .custom {
+                SlotArc(trailing: slot == .trailing, islandHeight: Device.islandHeight)
+            }
         }
         .animation(stageAnimation, value: slot)
     }
@@ -632,7 +664,7 @@ struct LiveActivityCustomizerView: View {
             case .providerIcon: return SourceNeeds(provider: true)
             case .tokens, .cost: return SourceNeeds(usage: true, period: true)
             case .speed: return SourceNeeds(period: true)
-            case .appIcon, .agents, .none: return SourceNeeds()
+            case .appIcon, .agents, .agentIcons, .activity, .none: return SourceNeeds()
             }
         case .minimal:
             return layout.minimal == .providerIcon ? SourceNeeds(provider: true) : SourceNeeds(quota: true)
@@ -942,6 +974,8 @@ extension LiveActivityLayout.CompactStyle {
         case .cost: "Cost"
         case .speed: "Speed"
         case .agents: "Running sessions"
+        case .agentIcons: "Tools"
+        case .activity: "Activity"
         case .none: "Empty"
         }
     }
@@ -950,6 +984,7 @@ extension LiveActivityLayout.CompactStyle {
 extension LiveActivityLayout.MinimalStyle {
     var title: LocalizedStringKey {
         switch self {
+        case .appIcon: "App icon"
         case .appRing: "Σ ring"
         case .ring: "Quota ring"
         case .percent: "Percentage"

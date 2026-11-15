@@ -91,7 +91,8 @@ function senpiTopology(home, env, options) {
     : path.join(home, '.senpi', 'agent', 'sessions');
   const roots = [
     ['senpi-sessions', sessions],
-    ['senpi-omo-sessions', path.join(home, '.omo', 'agent', 'sessions')]
+    ['senpi-omo-sessions', path.join(home, '.omo', 'agent', 'sessions')],
+    ['senpi-omo-memory', path.join(home, '.omo', 'memory')]
   ];
   const extra = nonBlank(env.SENPI_CODING_AGENT_SESSION_DIR);
   const projects = new Set([home]);
@@ -113,6 +114,13 @@ function senpiTopology(home, env, options) {
     taskDirs.add(path.join(taskDir || path.join(project, '.omo/senpi-task'), 'children'));
     configFiles.push(...['omo.jsonc', 'omo.json'].map(name => path.join(project, '.omo', name)));
   }
+  const homeProjects = path.join(home, '.omo', 'agent', 'projects');
+  let entries;
+  try { entries = fs.readdirSync(homeProjects); } catch (_) { entries = []; }
+  for (const name of entries) {
+    const children = path.join(homeProjects, name, 'senpi-task', 'children');
+    if (isDirectory(children)) taskDirs.add(children);
+  }
   // Stable ordering avoids rebuilding the host when directory enumeration order changes.
   roots.push(...[...taskDirs].sort().map(dir => ['senpi-task-children', dir]));
   if (extra) roots.push(['senpi-sessions', extra]);
@@ -129,7 +137,8 @@ function senpiWatchSources(options = {}) {
   const { roots, configFiles } = senpiTopology(home, env, options);
   const targets = [
     ...roots.map(([, dir]) => ({ path: dir, recursive: true })),
-    ...configFiles.map(file => ({ path: file, recursive: false }))
+    ...configFiles.map(file => ({ path: file, recursive: false })),
+    { path: path.join(home, '.omo', 'agent', 'projects'), projectChildren: true }
   ];
   const dirs = new Set();
   for (const target of targets) {

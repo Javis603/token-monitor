@@ -2,9 +2,12 @@
 const semver = require('semver');
 const { normalizeSettings } = require('./settings');
 const { normalizeIdentityIcon } = require('./identityIcon');
+const { normalizePresentation } = require('./presentation');
 const { normalizeAppearance } = require('./appearance');
+const { normalizeCredentials, isPortableCredentialId } = require('./credentials');
 const { normalizeLocalized, cleanText } = require('./localized');
 const API_MAJOR = 1;
+const LIMIT_CAPABILITY_IDS = Object.freeze(['api', 'apiKey', 'oauth', 'web', 'cli']);
 const ID_RE = /^[a-z0-9][a-z0-9-]{1,39}$/;
 const SURFACES = Object.freeze(['home', 'page', 'notch', 'edgeDock', 'tray', 'settings']);
 const SKIN_COLOR_KEYS = Object.freeze(['accent', 'chart', 'bg', 'text', 'muted']);
@@ -102,8 +105,29 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
     if (!backend || !isObject(item) || typeof item.id !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(item.id) || menuIds.has(item.id) || !label) { fail('invalid Tray menu item or missing backend'); continue; }
     menuIds.add(item.id); trayMenu.push({ id: item.id, label });
   }
-  let settings, identityIcon;
-  try { settings = normalizeSettings(raw.settings); identityIcon = normalizeIdentityIcon(raw.identityIcon); } catch (error) { fail(error.message); }
+  const limits = [], limitIds = new Set();
+  if (raw.limits !== undefined && (!Array.isArray(raw.limits) || raw.limits.length > 16)) fail('limits must contain at most 16 modules');
+  for (const entry of Array.isArray(raw.limits) ? raw.limits : []) {
+    const title = normalizeLocalized(entry?.name, 48);
+    if (!backend || !entry || typeof entry.id !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(entry.id) || limitIds.has(entry.id) || !title
+      || entry.connection !== undefined) { fail('invalid limits module'); continue; }
+    const settingsView = entry.settingsView ?? null;
+    if (settingsView !== null && (typeof settingsView !== 'string' || !views.some(view => view.id === settingsView && view.surfaces.includes('settings')))) { fail('limits settingsView must reference a declared settings view'); continue; }
+    const declared = entry.capabilities ?? [];
+    if (!Array.isArray(declared) || declared.some(id => !LIMIT_CAPABILITY_IDS.includes(id)) || new Set(declared).size !== declared.length) { fail('invalid limits capabilities'); continue; }
+    const rawTags = entry.tags ?? [];
+    if (!Array.isArray(rawTags) || rawTags.length > 2) { fail('limits tags must contain at most 2 labels'); continue; }
+    const tags = rawTags.map(value => normalizeLocalized(value, 256));
+    if (tags.some(tag => !tag || Object.values(tag).some(text => [...text].length > 16))) { fail('limits tags must be nonempty localized labels of at most 16 characters'); continue; }
+    let credentials, presentation;
+    try { credentials = normalizeCredentials(entry.credentials); presentation = normalizePresentation(entry.presentation); } catch (error) { fail(error.message); continue; }
+    if (credentials && (!isPortableCredentialId(raw.id) || !isPortableCredentialId(entry.id))) { fail('credential plugin and module IDs must not be Windows device names'); continue; }
+    limitIds.add(entry.id);
+    limits.push({ id: entry.id, name: title, credentials, presentation,
+      capabilities: LIMIT_CAPABILITY_IDS.filter(id => declared.includes(id)), tags, settingsView });
+  }
+  let settings, identityIcon, presentation;
+  try { settings = normalizeSettings(raw.settings); identityIcon = normalizeIdentityIcon(raw.identityIcon); presentation = normalizePresentation(raw.presentation); } catch (error) { fail(error.message); }
   const skins = normalizeSkins(raw.skins, errors);
   if (!ui && !backend && !skins.length) fail('plugin must provide ui, backend or skins');
   if (raw.background !== undefined && typeof raw.background !== 'boolean') fail('background must be boolean');
@@ -125,9 +149,9 @@ function normalizeManifest(raw, { source = 'user' } = {}) {
   const defaults = Object.freeze({ content: Object.freeze(content), background: initial.background === true, skin: initial.skin ?? null });
   if (errors.length) return { ok: false, manifest: null, errors };
   return { ok: true, errors, manifest: Object.freeze({ id: raw.id, version: raw.version, apiMajor: API_MAJOR, source,
-    name, category, description: normalizeLocalized(raw.description, 240), author: cleanText(raw.author, 80),
+    name, category, limits: Object.freeze(limits), description: normalizeLocalized(raw.description, 240), author: cleanText(raw.author, 80),
     homepage: typeof raw.homepage === 'string' && /^https:\/\//.test(raw.homepage) ? raw.homepage.slice(0, 300) : '',
     ui, backend, files: Object.freeze([...files]), css: Object.freeze([...css]), views: Object.freeze(views),
-    skins: Object.freeze(skins), trayMenu: Object.freeze(trayMenu), settings, identityIcon, defaults, background: raw.background === true, backgroundDescription }) };
+    skins: Object.freeze(skins), trayMenu: Object.freeze(trayMenu), settings, identityIcon, presentation, defaults, background: raw.background === true, backgroundDescription }) };
 }
-module.exports = { API_MAJOR, ID_RE, SURFACES, SKIN_COLOR_KEYS, apiMajor, filePath, normalizeManifest };
+module.exports = { LIMIT_CAPABILITY_IDS, API_MAJOR, ID_RE, SURFACES, SKIN_COLOR_KEYS, apiMajor, filePath, normalizeManifest };

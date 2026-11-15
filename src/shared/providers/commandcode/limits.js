@@ -300,6 +300,7 @@ function parseCommandcodeSubscription(body) {
       ?? ''
     ).trim(),
     status: String(body.data.status || '').trim().toLowerCase(),
+    currentPeriodStart: toIso(body.data.currentPeriodStart ?? body.data.current_period_start),
     currentPeriodEnd: toIso(body.data.currentPeriodEnd ?? body.data.current_period_end)
   };
 }
@@ -367,7 +368,8 @@ function trustedMonthlyAllowance(plan, { monthlyRemaining, fiveHourCap, weeklyCa
 // the grant resets with the billing cycle, top-ups never expire. They ship as
 // two `credits` windows so an exhausted grant cannot read as "out of money"
 // while purchased credits are still funding requests.
-function billingWindows({ monthlyRemaining, purchasedCredits, limit, periodEnd }) {
+function billingWindows({ monthlyRemaining, purchasedCredits, limit, periodStart, periodEnd }) {
+  const duration = Date.parse(periodEnd) - Date.parse(periodStart);
   const windows = [{
     kind: 'billing',
     metric: 'credits',
@@ -376,6 +378,7 @@ function billingWindows({ monthlyRemaining, purchasedCredits, limit, periodEnd }
     ...(limit ? { limit, used: Math.max(0, Math.min(limit, limit - monthlyRemaining)) } : {}),
     currency: 'USD',
     resetsAt: periodEnd,
+    ...(duration > 0 ? { windowMinutes: duration / 60_000 } : {}),
     // Without a plan allowance there is no denominator, and an empty bar would
     // read as an exhausted grant. Show the money and no meter instead.
     showMeter: Boolean(limit)
@@ -446,6 +449,7 @@ async function fetchCommandcodeLimits(options = {}, deps = {}) {
           fiveHourCap: credits.fiveHour?.limit ?? null,
           weeklyCap: credits.weekly?.limit ?? null
         }),
+        periodStart: subscription?.currentPeriodStart || null,
         periodEnd: subscription?.currentPeriodEnd || null
       })
     ].filter(Boolean);

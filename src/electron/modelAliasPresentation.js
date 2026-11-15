@@ -70,6 +70,7 @@ function addClientModelIds(modelIds, value) {
 function collectUsageModelIds(value, modelIds = new Set()) {
   if (!value || typeof value !== 'object') return modelIds;
   addModelId(modelIds, value.model);
+  addModelId(modelIds, value.latestModel);
   for (const field of MODEL_MAP_FIELDS) addModelMapIds(modelIds, value[field]);
   addModelMapIds(modelIds, value.modelThroughput);
   for (const field of ['clientModels', 'clientModelCosts', 'clientModelUnpricedTokens']) addClientModelIds(modelIds, value[field]);
@@ -167,11 +168,12 @@ const USAGE_PROJECTIONS = [
 function projectUsage(value, resolve) {
   if (!value || typeof value !== 'object') return value;
   let result = value;
-  if (typeof value.model === 'string') {
-    const model = resolve(value.model);
-    if (model !== value.model) {
-      result = { ...value };
-      result.model = model;
+  for (const field of ['model', 'latestModel']) {
+    if (typeof value[field] !== 'string') continue;
+    const model = resolve(value[field]);
+    if (model !== value[field]) {
+      if (result === value) result = { ...value };
+      result[field] = model;
     }
   }
   for (let i = 0; i < USAGE_PROJECTIONS.length; i += 1) {
@@ -344,11 +346,21 @@ function projectHistory(history, resolve, semantics) {
 function aliasPlan(modelIds, aliases, grouping) {
   const explicit = normalizeModelAliases(aliases);
   const automatic = inferModelAliases(modelIds, grouping);
+  const resolve = createModelAliasResolver(explicit, modelIds, grouping);
+  // Session/model maps repeat the same names throughout a projection. Discard
+  // these results with the plan so every new snapshot/settings gets a fresh one.
+  const resolved = new Map();
   return {
     explicit,
     automatic,
     active: Object.keys(explicit).length > 0 || Object.keys(automatic).length > 0,
-    resolve: createModelAliasResolver(explicit, modelIds, grouping)
+    resolve(model) {
+      const hit = resolved.get(model);
+      if (hit !== undefined) return hit;
+      const result = resolve(model);
+      resolved.set(model, result);
+      return result;
+    }
   };
 }
 

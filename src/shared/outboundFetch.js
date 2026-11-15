@@ -107,7 +107,13 @@ function createOutboundFetch(env = process.env, deps = {}) {
 
 /** Clear cached ProxyAgents (tests / hot env proxy changes). */
 function resetOutboundFetchCache() {
+  const closing = [];
+  for (const { agent } of agentCache.values()) {
+    if (typeof agent?.destroy !== 'function') continue;
+    try { closing.push(agent.destroy()); } catch (_) { /* already destroyed */ }
+  }
   agentCache.clear();
+  return Promise.allSettled(closing);
 }
 
 module.exports = {

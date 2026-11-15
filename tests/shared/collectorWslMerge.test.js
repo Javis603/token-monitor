@@ -3,8 +3,22 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 
-const { collectUsageOnce, localTodayKey } = require('../../src/shared/collector');
+const { collectUsageOnce: collectUsage, localTodayKey } = require('../../src/shared/collector');
 const { emptyPeriod } = require('../../src/shared/usage');
+
+// These cases exercise the optional WSL path; callers must opt in explicitly.
+const collectUsageOnce = (options) => collectUsage({ wslScanEnabled: true, ...options });
+
+test('omitting the WSL setting skips discovery and ignores a saved WSL anchor', async () => {
+  const summary = await collectUsage({
+    clients: 'claude,gemini', platform: 'win32', limitsEnabled: false,
+    runTokscale: windowsTokscale, wslAnchor: bundleWith(9), refreshWsl: true,
+    collectWslUsage: () => { assert.fail('must not scan WSL without opt-in'); },
+    probeWslState: () => { assert.fail('must not probe WSL without opt-in'); }
+  });
+  assert.equal(summary.today.totalTokens, 20);
+  assert.deepEqual(summary.wslStatus, { state: 'disabled', detected: [], withData: [] });
+});
 
 function bundleWith(clientTokens) {
   const mk = () => { const p = emptyPeriod(); p.totalTokens = clientTokens; p.clients = { gemini: clientTokens }; return p; };

@@ -34,13 +34,13 @@ function summaryLayout(settings, stats, picks = trayQuotaPicks(stats, settings))
   if (mode === 'custom') return trayLayout.normalizeTrayLayout(settings.trayCustomLayout);
   const make = (style, id) => trayLayout.createTrayLayoutItem(style, { idFactory: () => id });
   const icon = make(['icon', 'liveTokenRate'].includes(mode) ? 'appIcon' : 'providerIcon', 'notch-icon');
-  icon.autoMode = ['tokens', 'tokensAll', 'both', 'bothAll'].includes(mode) ? 'tokens'
-    : ['cost', 'costAll'].includes(mode) ? 'cost' : 'lowestLimit';
-  icon.period = mode.endsWith('All') ? 'allTime' : 'today';
+  icon.autoMode = ['tokens', 'tokensMonth', 'tokensAll', 'both', 'bothMonth', 'bothAll'].includes(mode) ? 'tokens'
+    : ['cost', 'costMonth', 'costAll'].includes(mode) ? 'cost' : 'lowestLimit';
+  icon.period = mode.endsWith('All') ? 'allTime' : mode.endsWith('Month') ? 'month' : 'today';
   const items = [icon];
-  const period = mode.endsWith('All') ? 'allTime' : 'today';
-  if (['tokens', 'tokensAll', 'both', 'bothAll'].includes(mode)) items.push({ ...make('tokens', 'notch-tokens'), period });
-  if (['cost', 'costAll', 'both', 'bothAll'].includes(mode)) items.push({ ...make('cost', 'notch-cost'), period, costFormat: 'full', costDecimals: 'auto' });
+  const period = mode.endsWith('All') ? 'allTime' : mode.endsWith('Month') ? 'month' : 'today';
+  if (['tokens', 'tokensMonth', 'tokensAll', 'both', 'bothMonth', 'bothAll'].includes(mode)) items.push({ ...make('tokens', 'notch-tokens'), period });
+  if (['cost', 'costMonth', 'costAll', 'both', 'bothMonth', 'bothAll'].includes(mode)) items.push({ ...make('cost', 'notch-cost'), period, costFormat: 'full', costDecimals: 'auto' });
   if (mode === 'liveTokenRate') items.push(make('liveTokenRate', 'notch-rate'));
   if (picks) {
     if (picks.length) icon.source.provider = picks[0].provider;
@@ -208,6 +208,8 @@ function buildNotchData(stats, cells, settings, options = {}) {
     const iconProvider = output.type === 'icon' ? output.provider : output.iconProvider;
     if (iconProvider && iconProvider !== 'app') {
       const provider = limitProviderForClient(iconProvider) || iconProvider;
+      const module = stats?.pluginLimitModules?.find(module => module.id === provider);
+      if (module) output.pluginQuota = { label: module.label, presentation: module.presentation, identityIcon: module.identityIcon };
       // Reuse a configured headline first. A standalone icon uses the same
       // provider projection, independent of whether either dock is enabled.
       const cell = cells.find((entry) => entry.provider === provider) || iconCells.find((entry) => entry.provider === provider);
@@ -215,7 +217,7 @@ function buildNotchData(stats, cells, settings, options = {}) {
     }
     if (item.type === 'stack') {
       for (let j = 0; j < output.rows.length; j += 1) {
-        const source = item.rows?.[j] || {};
+        const source = output.rows[j].source || {};
         const metric = item.metric === 'mixed' ? source.metric : item.metric;
         output.rows[j].metric = metric;
         output.rows[j].measure = numericMeasure({ ...source, metric }, output.rows[j], stats);
@@ -223,6 +225,7 @@ function buildNotchData(stats, cells, settings, options = {}) {
       }
     }
   }
+  resolved.items = resolved.items.filter(item => !item.omit);
   return {
     cells,
     // An explicitly empty custom layout reuses the idle shell and hover target.

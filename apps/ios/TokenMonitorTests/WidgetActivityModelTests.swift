@@ -182,7 +182,8 @@ struct WidgetActivityModelTests {
             month: today,
             allTime: today,
             limits: [],
-            activity: history
+            activity: history,
+            todayDate: key(0)
         )
         return TokenMonitorWidgetEntry(
             date: .now,
@@ -258,13 +259,25 @@ extension WidgetActivityModelTests {
 
 
 extension WidgetActivityModelTests {
+    @Test func unknownReportDayLeavesHistoryUntouched() throws {
+        let now = try #require(WidgetActivityModel.localDay(for: "2026-10-22"))
+        let usage = TokenMonitorSharedPayload.Usage(tokens: 100, cost: 1, cacheReadTokens: 0, outputTokens: 0, tools: [], models: [])
+        let history = [day("2026-10-21", 50)]
+        let snapshot = TokenMonitorSharedPayload.Snapshot(updatedAt: now, today: usage, month: usage,
+            allTime: usage, limits: [], activity: history)
+        let entry = TokenMonitorWidgetEntry(date: now, snapshot: snapshot, preferences: .default,
+            content: "activity", period: "today", providerID: nil, showsCost: false, showsUpdateTime: true, ink: .recommended)
+        #expect(entry.days == history)
+    }
+
     @Test func cachedReportNeverMovesIntoTheNextCalendarDay() throws {
         let before = try #require(WidgetActivityModel.localDay(for: "2026-10-21"))
         let after = try #require(WidgetActivityModel.localDay(for: "2026-10-22"))
         let usage = TokenMonitorSharedPayload.Usage(tokens: 100, cost: 1, cacheReadTokens: 0, outputTokens: 0, tools: [], models: [])
-        // Older caches have no todayDate: their original timestamp remains the fallback.
+        // The report keeps its explicit Hub day even when rendered the next day.
         let snapshot = TokenMonitorSharedPayload.Snapshot(updatedAt: before, today: usage, month: usage,
-            allTime: usage, limits: [], activity: [.init(date: "2026-10-21", tokens: 100, cost: 1)])
+            allTime: usage, limits: [], activity: [.init(date: "2026-10-21", tokens: 100, cost: 1)],
+            todayDate: "2026-10-21")
         let entry = TokenMonitorWidgetEntry(date: after, snapshot: snapshot, preferences: .default,
             content: "activity", period: "today", providerID: nil, showsCost: false, showsUpdateTime: true, ink: .recommended)
         #expect(entry.days.count == 1)

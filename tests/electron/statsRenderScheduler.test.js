@@ -97,7 +97,7 @@ test('a hidden floating-bubble state update changes state without touching DOM',
         }
       },
       isRendererWindowHidden: () => true,
-      syncPluginTrayDemand() {},
+      syncPluginTrayDemand() {}, syncPluginLimitsDemand() {},
       state,
       statsRenderScheduler: { request() { scheduledRenders += 1; } }
     }
@@ -160,7 +160,7 @@ test('renderer wires visibility scheduling without deferring tray icon updates',
   assert.match(app, /document\.addEventListener\('visibilitychange', handleWindowVisibilityChange\)/);
   assert.match(visibilityListener, /cancelTokenRateBoost\(\)/);
   assert.match(visibilityListener, /!isRendererWindowHidden\(\)[\s\S]*hubBuildStatusRefreshDue\(\)[\s\S]*refreshHubBuildStatus\(\)/);
-  assert.match(visibilityListener, /const settingsVisible = isSettingsSurfaceVisible\(\);[\s\S]*if \(settingsVisible \|\| settingsDomSyncPending\) syncSettingsForm\(\);[\s\S]*statsRenderScheduler\.flush\(\)/);
+  assert.match(visibilityListener, /const settingsVisible = isSettingsSurfaceVisible\(\);[\s\S]*if \(settingsDomSyncPending \|\| \(settingsVisible && !isNativeWindowTransfer\(\)\)\) syncSettingsForm\(\);[\s\S]*statsRenderScheduler\.flush\(\)/);
   assert.doesNotMatch(visibilityListener, /statsRenderScheduler\.clear\(\)/);
   assert.match(app, /isHidden: isRendererWindowHidden/);
   assert.match(app, /onWindowVisibilityPush\?\.\(\(visible\) => \{/);
@@ -198,7 +198,7 @@ test('native visibility is resynced after every renderer load without blocking t
   // The listener must also survive Cmd+Shift+R: tray-mode URLs retain
   // windowHidden=1, so a visible reloaded renderer needs the native truth again.
   assert.match(visibilityHooks, /win\.webContents\.on\('did-finish-load'/);
-  assert.match(visibilityHooks, /if \(win\.isVisible\(\)\) sendMainWindowVisibility\(win\);/);
+  assert.match(visibilityHooks, /if \(mainWindow\?\.isVisible\(\)\) sendMainWindowVisibility\(mainWindow\);/);
   assert.doesNotMatch(visibilityHooks, /^\s*sendMainWindowVisibility\(win\);/m);
 });
 
@@ -210,7 +210,7 @@ test('a window revealed straight into Settings still reports painted content', (
   );
   // Settings is an overlay, so revealing into it must flush the pending main
   // repaint as well as syncing the visible form and reporting painted content.
-  assert.match(visibilityHandler, /if \(settingsVisible \|\| settingsDomSyncPending\) syncSettingsForm\(\);/);
+  assert.match(visibilityHandler, /if \(settingsDomSyncPending \|\| \(settingsVisible && !isNativeWindowTransfer\(\)\)\) syncSettingsForm\(\);/);
   assert.match(visibilityHandler, /statsRenderScheduler\.flush\(\);/);
   assert.match(visibilityHandler, /if \(settingsVisible\) \{[\s\S]*signalContentReady\(\);/);
   assert.doesNotMatch(visibilityHandler, /statsRenderScheduler\.clear\(\)/);
@@ -291,7 +291,7 @@ test('a stats update repaints main and the visible Settings overlay', () => {
     'renderLimitProviderCheckboxes',
     'renderToolPreferences',
     'renderWslPanel',
-    'updateOpenRouterProfilesStatus',
+    'updateOpenRouterProfilesStatus', 'updateMinimaxApiKeysStatus',
     'updateThirdPartyProfilesStatus',
     'renderDeepseekStatus',
     'renderMinimaxStatus',
@@ -439,7 +439,7 @@ test('a direct main render defers only while the window is hidden', () => {
   assert.equal(scheduled, 1);
 });
 
-test('hidden event sources defer DOM work and visible surfaces catch up', () => {
+test('hidden event sources prepare appearance, defer other DOM work and catch up when visible', () => {
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   const settingsPush = app.match(/window\.tokenMonitor\.onSettingsPush\?\.\(\(next\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
   const hubPush = app.match(/window\.tokenMonitor\.onHubPush\?\.\(\(payload\) => \{[\s\S]*?\n\}\);/)?.[0] || '';
@@ -457,18 +457,22 @@ test('hidden event sources defer DOM work and visible surfaces catch up', () => 
   assert.doesNotMatch(statsPush, /\b(?:setLiveDot|setStatus|renderSyncPanel)\(/);
   assert.match(statsPush, /if \(isRendererWindowHidden\(\)\) statsRenderScheduler\.request\(\);[\s\S]*else renderConnectionStatus\(\);/);
   assert.match(statsRender, /renderConnectionStatus\(surface\)/);
-  assert.match(bubbleState, /if \(isSettingsPanelOpen\(\)\) syncSettingsForm\(\);[\s\S]*renderStatsUpdate\(\)/);
+  assert.match(bubbleState, /if \(isSettingsPanelOpen\(\) && !isNativeWindowTransfer\(\)\) syncSettingsForm\(\);[\s\S]*renderStatsUpdate\(\)/);
   assert.doesNotMatch(bubbleState, /renderConnectionStatus\('settings'\)/);
   assert.ok(hiddenGuard < settingsSync.indexOf('applyInitialBreakdownPreference()'));
   assert.ok(settingsSync.indexOf('applyInitialBreakdownPreference()') < hiddenReturn);
   assert.ok(hiddenGuard < settingsSync.indexOf('applyVendorColorOverrides('));
   assert.ok(settingsSync.indexOf('applyVendorColorOverrides(') < hiddenReturn);
-  for (const domCall of ['applySettingsTranslations()', 'syncPeriodTabs()', 'applyAppearanceSettings(']) {
+  // Native show can paint before visibility IPC; appearance is the exception
+  // to hidden DOM deferral, including saved title mode and font preferences.
+  assert.ok(hiddenGuard < settingsSync.indexOf('applyAppearanceSettings('));
+  assert.ok(settingsSync.indexOf('applyAppearanceSettings(') < hiddenReturn);
+  for (const domCall of ['applySettingsTranslations()', 'syncPeriodTabs()']) {
     assert.ok(hiddenReturn < settingsSync.indexOf(domCall));
   }
   assert.match(settingsSync, /if \(isRendererWindowHidden\(\)\) \{[\s\S]*settingsDomSyncPending = true;[\s\S]*return;/);
   assert.match(visibilityHandler, /else applyFloatingBubbleState\(state\.floatingBubble, \{ renderContent: false \}\);/);
-  assert.match(visibilityHandler, /if \(settingsVisible \|\| settingsDomSyncPending\) syncSettingsForm\(\);[\s\S]*statsRenderScheduler\.flush\(\);/);
+  assert.match(visibilityHandler, /if \(settingsDomSyncPending \|\| \(settingsVisible && !isNativeWindowTransfer\(\)\)\) syncSettingsForm\(\);[\s\S]*statsRenderScheduler\.flush\(\);/);
 });
 
 test('all stats refreshes use visibility-aware rendering', () => {

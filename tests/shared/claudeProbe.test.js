@@ -388,9 +388,12 @@ time.sleep(30)
   assert.equal(result.windows[0].remainingPercent, 65);
 });
 
-test('PTY trust selection waits for a complete menu and selected Yes before confirming', { skip: !hasPython }, async t => {
+test('PTY trust selection waits for a complete menu and selected Yes before confirming', { skip: !hasPython, concurrency: 4 }, async t => {
+  // Each case owns its temp home, probe directory and child processes. Overlap
+  // their real terminal waits without changing timing guards or assertions.
+  const cases = [];
   for (const mode of ['default-no', 'default-yes', 'fragmented', 'paused-after-menu', 'paused-during-guard', 'premature-input', 'slow-start', 'no-color-env', 'trusted']) {
-    for (const command of ['slow-start', 'no-color-env', 'paused-after-menu', 'premature-input'].includes(mode) ? ['status'] : ['usage', 'status']) await t.test(`${mode}: /${command}`, async t => {
+    for (const command of ['slow-start', 'no-color-env', 'paused-after-menu', 'premature-input'].includes(mode) ? ['status'] : ['usage', 'status']) cases.push(t.test(`${mode}: /${command}`, async t => {
       const f = fixture(t);
       const fake = path.join(f.root, 'trust-menu.py');
       const receipt = path.join(f.root, 'trust.json');
@@ -525,8 +528,9 @@ time.sleep(10)
       const trustKeys = mode === 'trusted' ? [] : mode === 'default-yes' ? ['\r'] : ['\x1b[B', '\r'];
       assert.deepEqual(observed.keys.slice(0, trustKeys.length), trustKeys);
       assert.equal(observed.keys.slice(trustKeys.length).join('').trim(), `/${command}`);
-    });
+    }));
   }
+  await Promise.all(cases);
 });
 
 test('an incomplete trust menu times out without receiving Enter or a slash command', { skip: !hasPython }, async t => {

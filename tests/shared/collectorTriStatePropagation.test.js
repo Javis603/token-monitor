@@ -20,6 +20,8 @@ const { collectUsageOnce } = require('../../src/shared/collector');
 const { localDayKey } = require('../../src/shared/history');
 
 const KEY = 'dsh:session-prop';
+const NOW = new Date('2026-10-08T12:00:00Z');
+test.beforeEach(t => t.mock.method(Date, 'now', () => NOW.getTime()));
 
 function makeHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-tri-state-'));
@@ -30,10 +32,12 @@ function makeHome() {
 
 function write(file, events) {
   fs.writeFileSync(file, `${events.map((e) => JSON.stringify({ type: e.type, seq: 1, time: 1, data: e.data })).join('\n')}\n`);
+  fs.utimesSync(file, NOW, NOW);
 }
 
 function options(home, extra = {}) {
   return {
+    now: NOW,
     clients: 'dsh',
     allTimeSince: '2024-01-01',
     commandTimeoutMs: 5000,
@@ -42,7 +46,7 @@ function options(home, extra = {}) {
     limitsEnabled: false,
     historyEnabled: false,
     homeDir: home,
-    runTokscale: async () => ({ entries: [{ client: 'dsh', sessionId: 'session-prop', model: 'deepseek-v4-flash', input: 10, output: 5, cost: 0.001 }] }),
+    runTokscale: async () => ({ entries: [{ client: 'dsh', sessionId: 'session-prop', lastUsedAt: NOW.toISOString(), model: 'deepseek-v4-flash', input: 10, output: 5, cost: 0.001 }] }),
     collectWslUsage: async () => ({ bundle: { today: {}, month: {}, allTime: {} }, detected: [] }),
     ...extra
   };
@@ -53,7 +57,7 @@ function options(home, extra = {}) {
 // flags: --today alone rather than --today/--month/--since.
 function anchorFrom(full) {
   return {
-    dateKey: localDayKey(new Date()),
+    dateKey: localDayKey(NOW),
     today: full.today,
     month: full.month,
     allTime: full.allTime,

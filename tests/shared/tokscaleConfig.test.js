@@ -29,16 +29,16 @@ test('macOS forces $HOME/.config/tokscale', () => {
   );
 });
 
-test('Windows uses %APPDATA%\\tokscale (Roaming), not .config', () => {
+test('Windows uses APPDATA only when the native folder is unavailable', () => {
   assert.equal(
-    tokscaleConfigDir({ platform: 'win32', homeDir: 'C:\\Users\\u', env: { APPDATA: 'C:\\Users\\u\\AppData\\Roaming' } }),
+    tokscaleConfigDir({ platform: 'win32', windowsFolders: {}, homeDir: 'C:\\Users\\u', env: { APPDATA: 'C:\\Users\\u\\AppData\\Roaming' } }),
     path.join('C:\\Users\\u\\AppData\\Roaming', 'tokscale')
   );
 });
 
 test('Windows falls back to <home>/AppData/Roaming when APPDATA unset', () => {
   assert.equal(
-    tokscaleConfigDir({ platform: 'win32', homeDir: 'C:\\Users\\u', env: {} }),
+    tokscaleConfigDir({ platform: 'win32', windowsFolders: {}, homeDir: 'C:\\Users\\u', env: {} }),
     path.join('C:\\Users\\u', 'AppData', 'Roaming', 'tokscale')
   );
 });
@@ -78,4 +78,24 @@ test('customPricingPath appends the filename', () => {
     customPricingPath({ platform: 'darwin', homeDir: '/Users/u', env: {} }),
     path.join('/Users/u', '.config', 'tokscale', 'custom-pricing.json')
   );
+});
+
+// Tokscale uses dirs::config_dir(), which resolves the native roaming folder
+// on Windows independently of APPDATA or redirected HOME.
+test('Windows native roaming folder wins over APPDATA and HOME', () => {
+  const options = {
+    platform: 'win32', homeDir: 'C:\\Users\\u',
+    windowsFolders: { roaming: 'D:\\Roaming' },
+    env: { APPDATA: 'Z:\\wrong', HOME: 'Z:\\other' }
+  };
+  assert.equal(tokscaleConfigDir(options), path.join('D:\\Roaming', 'tokscale'));
+  assert.equal(customPricingPath(options), path.join('D:\\Roaming', 'tokscale', 'custom-pricing.json'));
+  assert.equal(tokscaleConfigDir({ ...options, env: { ...options.env, TOKSCALE_CONFIG_DIR: 'Z:\\explicit' } }), 'Z:\\explicit');
+});
+
+test('native Windows config ignores an independent APPDATA override', { skip: process.platform !== 'win32' }, () => {
+  const { readWindowsFolders } = require('../../src/shared/providers/catpaw/paths');
+  const native = readWindowsFolders();
+  assert.ok(path.win32.isAbsolute(native.roaming));
+  assert.equal(tokscaleConfigDir({ env: { APPDATA: 'Z:\\tm-wrong-roaming' } }), path.join(native.roaming, 'tokscale'));
 });

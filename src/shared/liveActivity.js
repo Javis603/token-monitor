@@ -10,7 +10,8 @@
 const { creditsMeterPercent } = require('./limits/balanceDisplay');
 const { LIMIT_PROVIDER_IDS } = require('./limits/providers');
 const { limitWindowLabel } = require('./limits/windowLabels');
-const { RUNNING_WINDOW_MS, sessionActivityState, liveActivityExpiryAt } = require('./sessionLive');
+const { RUNNING_WINDOW_MS, sessionActivityState, liveActivityExpiryAt, isArchivedSession, isGrokBotSession,
+  sessionWithActivity, sessionGroupingPlan } = require('./sessionLive');
 
 // Leave room for the APNs envelope and the fixed Activity attributes.
 const MAX_CONTENT_STATE_BYTES = 3500;
@@ -83,7 +84,7 @@ function normalizeLiveActivityRegistration(input) {
 
 function providerWindowRemaining(provider, window) {
   if (window?.metric === 'credits') return creditsMeterPercent(provider, window, {
-    inferBalance: provider?.provider !== 'ollama' || window.showMeter !== false
+    inferBalance: !['ollama', 'mistral'].includes(provider?.provider) || window.showMeter !== false
   });
   const explicit = asNumber(window?.remainingPercent);
   if (explicit !== null) return clamp(explicit, 0, 100);
@@ -320,20 +321,55 @@ function liveRecent(stats) {
   return { client, today: share('today'), month: share('month') };
 }
 
-function runningSessions(stats, nowMs) {
-  return sessionEntries(stats)
-    .filter((session) => sessionActivityState(session, nowMs) === 'running')
-    .map((session) => ({ client: normalizedProvider(session?.client), lastMs: timestampMs(session?.lastUsedAt) }))
-    .sort((left, right) => right.lastMs - left.lastMs);
+// Match the desktop's complete accounting source set before conversation grouping.
+// Local-only nativeSessions cannot be supplied by a remote Hub.
+function activitySessionRows(stats, nowMs) {
+  const records = new Map();
+  for (const periodKey of ['month', 'today']) {
+    const period = stats?.periods?.[periodKey];
+    for (const [key, value] of Object.entries(period?.sessions || {})) {
+      const previous = records.get(key);
+      if (previous && (!isArchivedSession(previous) || isArchivedSession(value))) continue;
+      if (value?.sessionKind === 'background-review') continue;
+      if (!Number.isFinite(Date.parse(value?.lastUsedAt || value?.startedAt || ''))) continue;
+      records.set(key, sessionWithActivity(period, key, value, nowMs));
+    }
+  }
+  const botIDs = new Set(stats?.grokBotSessionIds || []);
+  return [...records].map(([key, value]) => {
+    const client = normalizedProvider(value.client);
+    const grokBot = isGrokBotSession({ ...value, client }, key)
+      || (client === 'cursor' && botIDs.has(String(value.sessionId || '').trim() || key.replace(/^cursor:/, '')));
+    const session = { ...value, client, ...(grokBot ? { grokBotSession: true } : {}) };
+    const parent = String(value.parentSessionId || '').trim();
+    const parentClient = normalizedProvider(value.parentClient || client);
+    return { key: `session:${key}`, kind: 'session', client, grokBot, session,
+      nativeSessionId: String(value.nativeSessionId || '').trim().toLowerCase(),
+      t3ThreadId: String(value.t3ThreadId || ''),
+      parentKey: parent && (parentClient !== client || parent !== value.sessionId)
+        ? `session:${parentClient}:${parent}` : undefined };
+  });
 }
 
-// Running agents, most recent first. Clients are distinct ids for the marks;
-// `running` counts sessions, so two Claude sessions read as 2.
+// Count a conversation once when any member runs; waiting wins only if none
+// runs. The desktop and push path resolve the same canonical grouping graph.
 function liveAgents(stats, nowMs) {
-  const running = runningSessions(stats, nowMs);
-  const clients = [...new Set(running.map((session) => session.client).filter(Boolean))]
-    .slice(0, MAX_AGENT_CLIENTS);
-  return { running: running.length, clients };
+  const rows = activitySessionRows(stats, nowMs);
+  const { children, grouped } = sessionGroupingPlan(rows);
+  const bots = rows.filter(row => row.grokBot);
+  const groups = rows.filter(row => !row.grokBot && !grouped.has(row.key))
+    .map(row => [row, ...(children.get(row.key) || [])]);
+  if (bots.length) groups.push(bots);
+  const state = group => group.some(row => sessionActivityState(row.session, nowMs) === 'running') ? 'running'
+    : group.some(row => sessionActivityState(row.session, nowMs) === 'waiting') ? 'waiting' : 'idle';
+  const last = group => Math.max(...group.map(row => timestampMs(row.session.lastUsedAt || row.session.startedAt) || 0));
+  groups.sort((a, b) => last(b) - last(a));
+  const running = groups.filter(group => state(group) === 'running');
+  const waiting = groups.filter(group => state(group) === 'waiting');
+  const clients = [...new Set([...waiting.flatMap(group => group.filter(row => sessionActivityState(row.session, nowMs) === 'waiting')),
+    ...running.flatMap(group => group.filter(row => sessionActivityState(row.session, nowMs) === 'running'))]
+    .map(row => row.client).filter(Boolean))].slice(0, MAX_AGENT_CLIENTS);
+  return { running: running.length, clients, ...(waiting.length ? { waiting: waiting.length } : {}) };
 }
 
 // When the running count next changes on its own. A session that goes quiet

@@ -1430,3 +1430,119 @@ test('transient status (unavailable) preserves lastGood windows so stale data is
   assert.equal(row.windows[0].usedPercent, 20);
   runtime.stop();
 });
+
+test('MiniMax API-only dispatch reaches the collector without changing other probe scopes', async () => {
+  const seen = [];
+  const runtime = createLimitsRuntime({ limitProviders: ['minimax', 'claude'] }, runtimeDeps({
+    autoRetry: false,
+    probeProvider: async (provider, config) => {
+      seen.push([provider, config.limitRefreshScope]);
+      return [];
+    }
+  }));
+  try {
+    await runtime.refresh({ provider: 'minimax' }, 'manual');
+    await runtime.refresh({ provider: 'minimax', source: 'api' }, 'settings-change');
+    await runtime.refresh({ provider: 'claude', source: 'web' }, 'manual');
+    await runtime.refresh({ provider: 'claude', accountKey: 'work' }, 'account-state');
+    assert.deepEqual(seen, [
+      ['minimax', undefined],
+      ['minimax', { provider: 'minimax', source: 'api' }],
+      ['claude', undefined],
+      ['claude', { provider: 'claude', accountKey: 'work' }]
+    ]);
+  } finally {
+    runtime.stop();
+  }
+});
+
+test('MiniMax API-only refresh leaves Code identities unchanged across outcomes', async () => {
+  const code = { ...providerRow('minimax', 'code-A', 'MiniMax Code'), source: 'oauth' };
+  const api = providerRow('minimax', 'api-A', 'Pay-as-you-go');
+  for (const outcome of ['throw', 'api-only', 'not-configured', 'transient']) {
+    const runtime = createLimitsRuntime({ limitProviders: ['minimax'] }, runtimeDeps({
+      autoRetry: false,
+      probeProvider: async (_provider, _config, context) => {
+        if (context.scope.source !== 'api') return [code, api];
+        if (outcome === 'throw') {
+          const error = new Error('API offline');
+          error.status = 'unavailable';
+          throw error;
+        }
+        if (outcome === 'api-only') return [api];
+        return [{ provider: 'minimax', source: 'api', status: outcome === 'transient'
+          ? 'unavailable' : 'notConfigured', windows: [] }];
+      }
+    }));
+    try {
+      await runtime.refresh({ provider: 'minimax' }, 'manual');
+      await runtime.refresh({ provider: 'minimax', source: 'api' }, 'settings-change');
+      for (const afterClear of [false, true]) {
+        if (afterClear) runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
+        const retained = runtime.getSnapshot().providers.find(row => row.accountKey === 'code-A');
+        assert.equal(retained?.status, 'ok', `${outcome} / clear=${afterClear}`);
+        assert.equal(retained?.source, 'oauth', outcome);
+        assert.equal(retained?.windows[0]?.usedPercent, 20, outcome);
+      }
+    } finally {
+      runtime.stop();
+    }
+  }
+});
+
+test('clearing MiniMax API preserves a Code lane whose last good result was API', async () => {
+  const row = providerRow('minimax', 'shared', 'MiniMax Code', { windows: [] });
+  const runtime = createLimitsRuntime({ limitProviders: ['minimax'] }, runtimeDeps({
+    autoRetry: false,
+    probeProvider: async (_provider, _config, context) => {
+      if (context.scope.source === 'oauth') {
+        const error = new Error('offline');
+        error.status = 'unavailable';
+        throw error;
+      }
+      return [row];
+    }
+  }));
+  await runtime.refresh({ provider: 'minimax', accountKey: 'shared', source: 'api' }, 'manual');
+  await runtime.refresh({ provider: 'minimax', accountKey: 'shared', source: 'oauth' }, 'login');
+  runtime.clear({ provider: 'minimax', source: 'api' }, 'settings-change');
+  const [retained] = runtime.getSnapshot().providers;
+  assert.equal(retained.accountKey, 'shared');
+  assert.equal(retained.status, 'unavailable');
+  runtime.stop();
+});
+
+test('Muse anonymous source reset refreshes stay provider-wide without duplicate or retained identities', async () => {
+  for (const sources of [['web'], ['cli', 'web']]) {
+    const clock = fakeClock(Date.parse('2026-11-01T00:00:00Z'));
+    const reset = new Date(clock.now() + 1000).toISOString();
+    const calls = [];
+    let hasWeb = true;
+    const runtime = createLimitsRuntime({ limitProviders: ['muse'], limitsRefreshMs: 60_000 }, runtimeDeps({
+      autoStart: true, now: clock.now, setTimeout: clock.setTimeout, clearTimeout: clock.clearTimeout,
+      probeProvider: async (_provider, _config, context) => {
+        calls.push(context);
+        return sources.map((source) => source === 'web' && !hasWeb
+          ? { provider: 'muse', source, removed: true }
+          : { provider: 'muse', source, status: 'ok', accountLabel: source === 'web' ? 'Muse (Meta)' : '',
+            updatedAt: new Date(clock.now()).toISOString(), windows: [{ kind: 'weekly', usedPercent: calls.length, resetsAt: reset }] });
+      }
+    }));
+    try {
+      await waitFor(() => runtime.getSnapshot().providers.length === sources.length, 'Muse startup');
+      clock.advance(31_000);
+      await waitFor(() => calls.length >= 2, 'Muse reset dispatch');
+      await waitFor(() => runtime.getSnapshot().providers.some((row) => row.updatedAt === new Date(clock.now()).toISOString()), 'Muse reset commit');
+      assert.equal(runtime.getSnapshot().providers.length, sources.length);
+      assert.deepEqual(calls[1].scope, { provider: 'muse' });
+      assert.equal(calls.length, 2, 'simultaneous anonymous boundaries need one full-provider refresh');
+      await runtime.refresh({ provider: 'muse', accountLabel: 'Muse (Meta)' }, 'manual');
+      assert.equal(runtime.getSnapshot().providers.length, sources.length);
+      hasWeb = false;
+      await runtime.refresh({ provider: 'muse' }, 'credential-save');
+      assert.deepEqual(runtime.getSnapshot().providers.map((row) => row.source), sources.filter((source) => source !== 'web'));
+    } finally {
+      runtime.stop();
+    }
+  }
+});

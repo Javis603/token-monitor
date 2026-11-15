@@ -14,6 +14,7 @@ function fixture(t) {
   const source = path.join(root, 'source'), target = path.join(root, 'dist'), plugin = path.join(source, 'plugins/quota-alerts');
   fs.mkdirSync(path.dirname(plugin), { recursive: true });
   fs.cpSync(path.resolve(__dirname, '../../plugins/quota-alerts'), plugin, { recursive: true });
+  fs.cpSync(path.resolve(__dirname, '../../plugins/openai-api-credit'), path.join(source, 'plugins/openai-api-credit'), { recursive: true });
   let sequence = 0;
   function build(version = '0.1.0') {
     const file = path.join(plugin, 'manifest.json'), manifest = JSON.parse(fs.readFileSync(file));
@@ -31,7 +32,7 @@ function fixture(t) {
 
 test('build uses the actual manifest, package parser, automation label and all localized packaged notes', t => {
   const f = fixture(t), built = f.build(), entry = built.index.plugins[0], version = entry.versions[0];
-  assert.equal(built.index.plugins.length, 1);
+  assert.equal(built.index.plugins.length, 2);
   const bytes = fs.readFileSync(built.file), pkg = parsePackage(bytes, { checkCompatibility: false });
   parseIndex(fs.readFileSync(path.join(built.output, 'catalog.json')));
   assert.equal(version.sha256, digest(bytes));
@@ -142,4 +143,25 @@ test('release notes select the packaged version and reject missing, duplicate or
   assert.throws(() => packageChangelog(files, '0.1.0'), /1–2000/);
   delete files['CHANGELOG.md'];
   assert.throws(() => packageChangelog(files, '0.1.0'), /Missing/);
+});
+
+test('official distribution includes OpenAI with its native presentation and package metadata', t => {
+  const f = fixture(t), built = f.build();
+  const entry = built.index.plugins.find(plugin => plugin.id === 'openai-api-credit');
+  assert.ok(entry, 'OpenAI must be in the official publication list');
+  const version = entry.versions[0], file = path.join(built.output, 'openai-api-credit-0.1.0.tmplugin');
+  const pkg = parsePackage(fs.readFileSync(file), { checkCompatibility: false });
+  assert.equal(version.sha256, pkg.hash);
+  assert.equal(version.engines.tokenMonitor, '>=0.88.0');
+  assert.deepEqual(version.types, ['limits']);
+  assert.deepEqual(entry.presentation, pkg.manifest.presentation);
+  assert.deepEqual(entry.presentation, { icon: { native: 'codex' }, color: { palette: 'codex' } });
+  const parsed = parseIndex(fs.readFileSync(path.join(built.output, 'catalog.json')));
+  assert.ok(parsed);
+  for (const [locale, name] of Object.entries(CHANGELOG_FILES)) {
+    assert.ok(version.changelog[locale]);
+    assert.equal(entry.readmePaths[locale], `plugins/openai-api-credit/${name.replace('CHANGELOG', 'README')}`);
+    assert.ok(pkg.files[name.replace('CHANGELOG', 'README')]);
+  }
+  assert.ok(pkg.files['assets/limits.png']);
 });

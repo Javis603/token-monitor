@@ -223,3 +223,8 @@ test('main.js keeps tray and collapsed windows off the normal window state path'
   assert.match(enterTray, /suspendWindowMaximized\(mainWindow\)[\s\S]*setWindowMaximizable\(mainWindow, false\)/);
   assert.match(exitTray, /setWindowMaximizable\(mainWindow, true\)[\s\S]*restoreWindowMaximized\(mainWindow, settings\)/);
 });
+
+test('main.js persists both Linux and macOS/Windows bounds event names', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  assert.match(main, /for \(const eventName of \['resize', 'resized', 'move', 'moved'\]\) win\.on\(eventName, onBoundsChange\)/);
+});

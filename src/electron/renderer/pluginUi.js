@@ -38,7 +38,7 @@
     }
     function load(descriptor) {
       if (disposed || blocked.has(descriptor.pluginId)) return Promise.reject(new Error('Plugin UI is disabled'));
-      const key = `${descriptor.pluginId}:${descriptor.revision}`;
+      const key = `${descriptor.pluginId}:${descriptor.revision}:${descriptor.nativeCredentials ? descriptor.ref : 'author'}`;
       if (!modules.has(key)) modules.set(key, (async () => {
         // Register ownership before importing author code, including pending activation.
         bridge.uiLoading?.(descriptor.pluginId);
@@ -82,6 +82,7 @@
           onDispose(fn) { cleanup.push(fn); },
           asset: name => new URL(name, descriptor.entry).href
         };
+        if (services.native?.credentials) ctx.native = { ...services.native, credentials: services.native.credentials(ctx.host.call) };
         const off = bridge.subscribe?.(descriptor.pluginId, value => {
           latestData = value;
           for (const fn of listeners) { try { fn(value); } catch (error) { onError(error, descriptor); } }
@@ -92,7 +93,7 @@
           document.head.append(link); cleanup.push(() => link.remove());
         }
         try {
-          const module = await importModule(descriptor.entry);
+          const module = descriptor.nativeCredentials ? { activate: () => ({ mount: (container, context) => ctx.native.credentials.mount(container, { moduleId: context.moduleId }) }) } : await importModule(descriptor.entry);
           const instance = module.activate ? await module.activate(ctx) : module;
           if (typeof instance?.mount !== 'function' && typeof instance?.renderTray !== 'function') throw new Error('Plugin UI must implement mount or renderTray');
           cleanup.push(() => instance.dispose?.());
@@ -265,7 +266,7 @@
       load,
       renderTray(descriptor, canvas, context) {
         if (blocked.has(descriptor.pluginId) || disposed) return false;
-        const key = `${descriptor.pluginId}:${descriptor.revision}`;
+        const key = `${descriptor.pluginId}:${descriptor.revision}:${descriptor.nativeCredentials ? descriptor.ref : 'author'}`;
         const loaded = modules.get(key)?.loaded;
         if (!loaded) { void load(descriptor).catch(onError); return false; }
         if (loaded.trayFailed || typeof loaded.instance.renderTray !== 'function') return false;

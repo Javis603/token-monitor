@@ -53,6 +53,34 @@ test('each shared host directory discovers and attributes a WSL-only home', asyn
   }
 });
 
+test('native-only Copilot WSL home is discovered and its usage is collected', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\alice';
+  const marker = require('node:path').win32.join(home, '.copilot', 'session-state');
+  const deps = {
+    platform: 'win32',
+    exec: (cmd) => cmd === 'reg' ? 'Lxss' : 'Ubuntu\n',
+    readdirSync: (dir) => dir === '\\\\wsl$\\Ubuntu\\home' ? ['alice'] : [],
+    existsSync: (value) => value === marker
+  };
+  assert.deepEqual(homeHasData(home, deps.existsSync, deps.readdirSync), ['copilot']);
+  assert.deepEqual(wslUsageHomes(deps), [home]);
+  const calls = [];
+  const { bundle, detected } = await collectWslUsage({
+    clients: 'copilot',
+    runTokscale: async (args) => {
+      calls.push(args);
+      return { entries: [{ client: 'copilot', model: 'gpt-5', inputTokens: 75, outputTokens: 25 }] };
+    }
+  }, deps);
+  assert.deepEqual(detected, ['copilot']);
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every(args => args.clients === 'copilot' && args.flags.includes(home)));
+  for (const period of ['today', 'month', 'allTime']) {
+    assert.equal(bundle[period].totalTokens, 100);
+    assert.equal(bundle[period].clients.copilot, 100);
+  }
+});
+
 test('homeHasData maps an alternate-root marker to its client id', () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const present = new Set([`${home}\\.kimi-code\\sessions`]);

@@ -224,12 +224,13 @@ test('a backwards clock step cannot strand a self-sync behind its own stamp', as
   }
 });
 
-test('refreshClient cursor runs one targeted today scan without rebuilding the runtime', async () => {
+test('refreshClient cursor reconciles all imported periods without rebuilding the runtime', async () => {
   const originalReadActiveAccount = cursorAuth.readActiveAccount;
   const originalRunCursorSync = cursorAuth.runCursorSync;
   const flags = [];
   const scannedClients = [];
   let syncCalls = 0;
+  let imported = false;
   cursorAuth.readActiveAccount = () => ({ accountId: 'cursor-test' });
   cursorAuth.runCursorSync = async () => { syncCalls += 1; };
   const updates = [];
@@ -245,22 +246,32 @@ test('refreshClient cursor runs one targeted today scan without rebuilding the r
     runTokscale: async ({ clients, flags: scanFlags }) => {
       scannedClients.push(clients);
       flags.push(scanFlags);
+      if (clients === 'cursor' && imported) {
+        const input = scanFlags.includes('--today') ? 10 : scanFlags.includes('--month') ? 20 : 30;
+        return { entries: [{ client: 'cursor', model: 'test-model', input, output: 0, cost: 0 }] };
+      }
       return emptyTokscaleResult();
     },
     onUpdate: (summary, reason) => updates.push({ summary, reason })
   });
 
   try {
-    await waitFor(() => updates.length >= 1);
+    await waitFor(() => scannedClients.filter(client => client === 'cursor').length >= 3);
+    await new Promise(resolve => setImmediate(resolve));
+    await runtime.whenIdle();
     const callsAfterStartup = flags.length;
-    await runtime.refreshClient('cursor', { forceSync: true });
-    assert.equal(flags.length, callsAfterStartup + 1);
-    assert.deepEqual(flags.at(-1), ['--today']);
-    assert.equal(scannedClients.at(-1), 'cursor');
-    assert.equal(updates.at(-1).reason, 'client:cursor');
-    assert.ok(syncCalls >= 1);
+    const syncsAfterStartup = syncCalls;
+    imported = true;
+    assert.equal(await runtime.refreshClient('cursor', { forceSync: true }), true);
+    const cursorFlags = flags.slice(callsAfterStartup).filter((_flags, i) => scannedClients[callsAfterStartup + i] === 'cursor');
+    assert.deepEqual(cursorFlags, [['--today'], ['--month'], ['--since', '2024-01-01']]);
+    assert.equal(updates.at(-1).summary.today.clients.cursor, 10);
+    assert.equal(updates.at(-1).summary.month.clients.cursor, 20);
+    assert.equal(updates.at(-1).summary.allTime.clients.cursor, 30);
+    assert.equal(syncCalls, syncsAfterStartup + 1);
   } finally {
     runtime.stop();
+    await runtime.whenIdle();
     cursorAuth.readActiveAccount = originalReadActiveAccount;
     cursorAuth.runCursorSync = originalRunCursorSync;
   }
@@ -321,7 +332,7 @@ test('coalesced targeted refreshes preserve the union of their clients', async (
   const updates = [];
   let gate = null;
   const runtime = startCollector({
-    clients: 'claude,cursor',
+    clients: 'claude,codex',
     allTimeSince: '2024-01-01',
     commandTimeoutMs: 1000,
     deviceId: 'usage-runtime',
@@ -342,16 +353,16 @@ test('coalesced targeted refreshes preserve the union of their clients', async (
     gate = { promise: new Promise((resolve) => { release = resolve; }) };
     const held = runtime.tick('held', { todayOnly: true, targetClients: ['claude'] });
     await waitFor(() => scans.at(-1)?.flags?.[0] === '--today');
-    const cursor = runtime.refreshClient('cursor');
+    const codex = runtime.refreshClient('codex');
     const claude = runtime.refreshClient('claude');
     gate = null;
     release();
-    const results = await Promise.all([held, cursor, claude]);
+    const results = await Promise.all([held, codex, claude]);
 
     assert.deepEqual(results, [true, true, true]);
     assert.deepEqual(scans.slice(-2), [
-      { clients: 'cursor,claude', flags: ['--today'] },
-      { clients: 'claude,cursor', flags: ['--today'] }
+      { clients: 'codex,claude', flags: ['--today'] },
+      { clients: 'claude,codex', flags: ['--today'] }
     ]);
     assert.equal(updates.at(-1).reason, 'coalesced');
   } finally {
@@ -364,7 +375,7 @@ test('coalesced targeted refresh reports the replay failure', async () => {
   const updates = [];
   let gate = null;
   const runtime = startCollector({
-    clients: 'claude,cursor',
+    clients: 'claude,codex',
     allTimeSince: '2024-01-01',
     commandTimeoutMs: 1000,
     deviceId: 'usage-runtime',
@@ -374,7 +385,7 @@ test('coalesced targeted refresh reports the replay failure', async () => {
     runTokscale: async ({ clients, flags }) => {
       scans.push({ clients, flags });
       if (gate) await gate.promise;
-      if (clients === 'cursor') {
+      if (clients === 'codex') {
         throw new Error('scan failed');
       }
       return emptyTokscaleResult();
@@ -389,13 +400,13 @@ test('coalesced targeted refresh reports the replay failure', async () => {
     gate = { promise: new Promise((resolve) => { release = resolve; }) };
     const held = runtime.tick('held', { todayOnly: true, targetClients: ['claude'] });
     await waitFor(() => scans.at(-1)?.flags?.[0] === '--today');
-    const cursor = runtime.refreshClient('cursor');
+    const codex = runtime.refreshClient('codex');
     gate = null;
     release();
 
     assert.equal(await held, true);
-    assert.equal(await cursor, false);
-    assert.deepEqual(scans.at(-1), { clients: 'cursor', flags: ['--today'] });
+    assert.equal(await codex, false);
+    assert.deepEqual(scans.at(-1), { clients: 'codex', flags: ['--today'] });
   } finally {
     runtime.stop();
   }

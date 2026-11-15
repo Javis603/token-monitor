@@ -55,9 +55,8 @@
       });
       function refresh(blurred = false) {
         translate();
-        // Native select popups close when options are replaced. Apply pending
-        // choices on blur so live collection does not interrupt a selection.
-        if (busy || (!blurred && document.activeElement === select) || optionsKey === currentOptionsKey()) return;
+        // Keep live collection from replacing choices while the picker is used.
+        if (busy || (!blurred && (document.defaultView?.TokenMonitorSelectControl?.isFocused(select) || document.activeElement === select)) || optionsKey === currentOptionsKey()) return;
         const draft = input.value;
         const manual = select.value === '__manual__';
         populate(value(), manual);

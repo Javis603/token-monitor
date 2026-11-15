@@ -74,12 +74,14 @@ function hasSessionUsage(session) {
 
 // A title/catalog miss on an unchanged observation is not a new turn. Keep
 // its saved setting, but never fill an explicit clear or a newer observation.
-function sessionWithRetainedEffort(session, previous) {
-  if (!isSessionReasoningEffortClient(session.client) || Object.hasOwn(session, 'reasoningEffort')
-    || !previous || !Object.hasOwn(previous, 'reasoningEffort')) return session;
+function sessionWithRetainedSettings(session, previous) {
   const timestamp = Date.parse(session.lastUsedAt);
-  if (!Number.isFinite(timestamp) || timestamp !== Date.parse(previous.lastUsedAt)) return session;
-  return { ...session, reasoningEffort: previous.reasoningEffort };
+  if (!previous || !Number.isFinite(timestamp) || timestamp !== Date.parse(previous.lastUsedAt)) return session;
+  const retained = {};
+  for (const field of ['latestModel', ...(isSessionReasoningEffortClient(session.client) ? ['reasoningEffort'] : [])]) {
+    if (!Object.hasOwn(session, field) && Object.hasOwn(previous, field)) retained[field] = previous[field];
+  }
+  return Object.keys(retained).length ? { ...session, ...retained } : session;
 }
 
 function normalizeSessionUsageArchive(value) {
@@ -238,7 +240,7 @@ function updateSessionUsageArchive(existingArchive, deviceRecord, capturedAt = n
       const archiveKey = sessionKey(observation.client, observation.sessionId);
       if (!archiveKey) continue;
       if (sourceArchivedKeys.has(archiveKey)) continue;
-      const session = sessionWithRetainedEffort(observation, archive.sessions[archiveKey]?.periods?.[periodName]);
+      const session = sessionWithRetainedSettings(observation, archive.sessions[archiveKey]?.periods?.[periodName]);
       // An empty Today scan can leave zero rows in broader anchor deltas.
       // Only a still-identified Today row proves a watch zero was observed.
       if (watchToday && periodName !== 'today' && !hasUsage && !watchToday.sessions?.[archiveKey]) continue;
@@ -459,7 +461,7 @@ function applySessionUsageArchive(summary, archive, options = {}) {
       const period = targetFor(periodName);
       const key = sessionKey(session.client || entry.client, session.sessionId || entry.sessionId) || archiveKey;
       if (period.sessions[key]) {
-        period.sessions[key] = sessionWithRetainedEffort(period.sessions[key], session);
+        period.sessions[key] = sessionWithRetainedSettings(period.sessions[key], session);
         continue;
       }
       const selectionKey = `${periodName}:${key}`;

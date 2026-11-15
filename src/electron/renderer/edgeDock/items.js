@@ -7,8 +7,9 @@
 // `edgeDockItems` is either null — the automatic default, which follows the
 // connected limit providers — or an ordered list the user composed:
 //   { type: 'limit', provider, hiddenAccounts: [accountKey], showUsage,
-//     accountMode: 'active' | 'lowest', windowKey: '' | limitWindowKey(window) }
-//   { type: 'stat', metric }   metric: a usage period, 'liveRate', or 'sessions'
+//     accountMode: 'active' | 'lowest' | 'specific', accountKey?, windowKey: '' | limitWindowKey(window) }
+//   { type: 'stat', metric }   metric: a usage period, 'liveRate', 'sessions',
+//                              or 'cacheHit'
 //                              ('sessions' additionally carries runningOnly
 //                              and groupBy; see normalizeItem)
 //   { type: 'plugin', ref }    a plugin view (`<pluginId>/<viewId>`); kept when
@@ -32,7 +33,7 @@
   // than of a usage period: it is the one item that lists work every client can
   // answer for, including the clients that have no limits provider at all.
   const SESSIONS_METRIC = 'sessions';
-  const STAT_METRICS = Object.freeze([...USAGE_PERIODS, 'liveRate', SESSIONS_METRIC]);
+  const STAT_METRICS = Object.freeze([...USAGE_PERIODS, 'liveRate', SESSIONS_METRIC, 'cacheHit']);
   const STAT_METRIC_SET = new Set(STAT_METRICS);
   // Earlier development builds split tokens and cost into separate metrics.
   const LEGACY_METRICS = Object.freeze({
@@ -91,7 +92,7 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
     }
     if (raw.type === 'limit') {
       const provider = normalizedId(raw.provider);
-      if (!provider || (PROVIDER_IDS.size && !PROVIDER_IDS.has(provider))) return null;
+      if (!provider || (PROVIDER_IDS.size && !PROVIDER_IDS.has(provider) && !limitProviders.isPluginLimitModuleId(provider))) return null;
       const hiddenAccounts = Array.isArray(raw.hiddenAccounts)
         ? [...new Set(raw.hiddenAccounts.map((key) => String(key || '').trim()).filter((key) => key && key.length <= 200))]
           .slice(0, MAX_HIDDEN_ACCOUNTS)
@@ -106,7 +107,11 @@ const SESSION_CELL_DETAILS = Object.freeze(['clients', 'rate']);
         // Codex has a meaningful local "current account", so its glance value
         // follows that account unless the user explicitly asks for the tightest
         // visible account. Other providers have no local-login identity.
-        accountMode: provider === 'codex' && raw.accountMode !== 'lowest' ? 'active' : 'lowest'
+        accountMode: provider === 'thirdparty' && raw.accountMode === 'specific'
+          ? 'specific'
+          : provider === 'codex' && raw.accountMode !== 'lowest' ? 'active' : 'lowest',
+        ...(provider === 'thirdparty' ? { accountKey: typeof raw.accountKey === 'string'
+          ? raw.accountKey.trim().slice(0, 200) : '' } : {})
       };
     }
     if (raw.type === 'stat') {

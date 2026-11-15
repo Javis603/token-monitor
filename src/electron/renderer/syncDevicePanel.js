@@ -41,6 +41,7 @@
           name: deviceBreakdownApi.deviceLabel(device),
           hostname: String(device.hostname || '').trim(),
           platform: String(device.platform || ''),
+          deviceKind: device.deviceKind || 'computer',
           osName: String(device.osName || ''),
           osVersion: String(device.osVersion || ''),
           agentVersion: String(device.agentVersion || '').trim(),

@@ -12,6 +12,33 @@ const {
 
 const aliases = { 'anthropic/claude-opus-5': 'claude-opus-5' };
 
+test('projection results follow each alias policy without retaining another plan', () => {
+  const model = 'vendor/GPT.X';
+  const stats = { periods: { today: { models: { [model]: 10 } } } };
+  const sessions = { one: { model, models: { [model]: 10 } } };
+  const history = { daily: [{ date: '2026-10-31', perModel: { [model]: { tokens: 10 } } }] };
+  const before = JSON.stringify([stats, sessions, history]);
+  const project = [
+    (aliases, grouping) => projectModelAliasStats(stats, aliases, { grouping }).periods.today.models,
+    (aliases, grouping) => projectModelAliasSessions(stats, sessions, aliases, { grouping }).one.models,
+    (aliases, grouping) => projectModelAliasHistory(history, aliases, { grouping }).daily[0].perModel
+  ];
+  const policies = [
+    [{ [model]: 'first' }, 'off', 'first'],
+    [{ [model]: 'second' }, 'off', 'second'],
+    [{}, 'off', model],
+    [{}, 'prefix', 'GPT.X'],
+    [{}, 'off', model],
+    [{ [model]: 'first' }, 'off', 'first']
+  ];
+  for (const projection of project) {
+    for (const [aliases, grouping, expected] of policies) {
+      assert.deepEqual(Object.keys(projection(aliases, grouping)), [expected]);
+    }
+  }
+  assert.equal(JSON.stringify([stats, sessions, history]), before);
+});
+
 for (const labels of [['__proto__', 'app'], ['app', '__proto__']]) {
   for (const aliasedProject of labels) {
     test(`project aliases retain reserved rollup keys with ${labels.join(', ')} and ${aliasedProject} aliased`, () => {
@@ -298,4 +325,27 @@ test('an alias that matches nothing in the payload copies no part of the stats t
   assert.notStrictEqual(projected, stats);
   assert.deepEqual(projected.modelAliasSourceIds, ['gpt-5.5-pro']);
   assert.ok(projected.historyRevision.startsWith('raw:aliases:'));
+});
+
+
+test('latest session models share aliases and discovery with usage and pre-token models', () => {
+  const { sessionModelLabel, sessionModelTooltipEntries } = require('../../src/electron/renderer/sessionRows');
+  const sessions = { s: { client: 'codex', sessionId: 's', totalTokens: 100,
+    latestModel: 'raw', models: { raw: 90, other: 10 } } };
+  const before = structuredClone(sessions);
+  const stats = { periods: { today: { sessions } }, nativeSessions: { today: sessions } };
+  const projected = projectModelAliasStats(stats, { raw: 'canonical' });
+  for (const list of [projected.periods.today.sessions, projected.nativeSessions.today,
+    projectModelAliasSessions({}, sessions, { raw: 'canonical' })]) {
+    assert.equal(sessionModelLabel(list.s), 'canonical +1');
+    assert.deepEqual(sessionModelTooltipEntries(list.s).slice(0, 2), [
+      { full: 'Last used: canonical' }, ['canonical', '90', '90%']
+    ]);
+  }
+  const native = { s: { latestModel: 'anthropic/claude-opus-5', models: {} } };
+  for (const list of [projectModelAliasStats({ nativeSessions: { today: native } }, {}, { grouping: 'prefix' }).nativeSessions.today,
+    projectModelAliasSessions({}, native, {}, { grouping: 'prefix' })]) {
+    assert.equal(list.s.latestModel, 'claude-opus-5', 'model discovery includes pre-token latest models');
+  }
+  assert.deepEqual(sessions, before);
 });

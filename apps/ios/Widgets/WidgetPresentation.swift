@@ -21,6 +21,13 @@ nonisolated enum WidgetPresentation {
         case "openrouter": "OpenRouter"
         case "deepseek": "DeepSeek"
         case "minimax": "MiniMax"
+        case "mistral": "Mistral"
+        case "gemini": "Gemini CLI"
+        case "hark": "Hark"
+        case "thinkingmachines": "Thinking Machines"
+        case "opendesign": "OpenDesign"
+        case "prime-agent": "Prime Agent"
+        case "jcode": "Jcode"
         case "mimo": "MiMo"
         case "grok": "Grok"
         case "copilot": "GitHub Copilot"
@@ -33,7 +40,8 @@ nonisolated enum WidgetPresentation {
         case "goose": "Goose"
         case "catpaw": "CatPaw"
         case "notion": "Notion AI"
-        case "muse": "Muse Code"
+        case "manus": "Manus"
+        case "muse": "Muse"
         case "senpi": "OmO Native"
         default: providerID?.capitalized ?? "Provider"
         }
@@ -62,6 +70,7 @@ nonisolated enum WidgetPresentation {
         case "goose": "VendorGoose"
         case "catpaw": "VendorCatPaw"
         case "notion": "VendorNotion"
+        case "manus": "VendorManus"
         case "zed": "VendorZed"
         case "kilo", "kilocode": "VendorKiloCode"
         case "commandcode": "VendorCommandCode"
@@ -82,11 +91,16 @@ nonisolated enum WidgetPresentation {
         case "fx": "VendorFX"
         case "mcode", "minimax": "VendorMiniMax"
         case "openrouter": "VendorOpenRouter"
-        case "gemini": "VendorGemini"
+        case "gemini": "VendorGeminiCLI"
+        case "hark": "VendorHark"
+        case "thinkingmachines": "VendorThinkingMachines"
         case "qoder": "VendorQoder"
         case "deepseek": "VendorDeepSeek"
         case "xai": "VendorXAI"
         case "mistral": "VendorMistral"
+        case "opendesign": "VendorOpenDesign"
+        case "prime-agent": "VendorPrimeAgent"
+        case "jcode": "VendorJcode"
         case "moonshot": "VendorMoonshot"
         case "cohere": "VendorCohere"
         case "doubao": "VendorDoubao"
@@ -133,6 +147,7 @@ nonisolated enum WidgetPresentation {
         if name.contains("qwen") {
             return "VendorQwen"
         }
+        if name.contains("inkling") { return "VendorThinkingMachines" }
         if name.contains("mistral") || name.contains("codestral") {
             return "VendorMistral"
         }
@@ -154,6 +169,9 @@ nonisolated enum WidgetPresentation {
                          compact: Bool = false) -> String {
         guard value.isFinite else { return "—" }
         let source = sourceCode.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if source == "CREDITS" {
+            return value.formatted(.number.precision(.fractionLength(2)).locale(locale))
+        }
         let display = displayCode.uppercased()
         // Match the fixed display rates used by AppCurrency and the Hub.
         let rates: [String: Double] = ["USD": 1, "TWD": 31.5, "HKD": 7.8, "CNY": 6.8]

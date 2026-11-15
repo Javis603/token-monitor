@@ -4,12 +4,14 @@ These are plugin `ctx` methods, not the [Hub HTTP API](../API.md). Use them from
 
 ## Read a snapshot
 
+See the [resource fields and coverage reference](author-data-resources.md) for what each resource returns, how to distinguish unavailable measurements from zero, and which data is not exposed. A subscription keeps snapshots current; it does not turn cumulative counters into a token-by-token stream.
+
 `await ctx.data.query(query)` reads captured data for the App's selected source. It does not probe providers or start another collector. The host defaults `version` to `1`; callers need not supply it.
 
 | Query option | Contract |
 | --- | --- |
-| `resource` | Required: `usage`, `models`, `tools`, `devices`, `projects`, `sessions`, `history`, `limits`, `subscriptions`, `status` |
-| `period` | `today` (default), `month`, `allTime` |
+| `resource` | Required: `usage`, `models`, `tools`, `devices`, `projects`, `sessions`, `history`, `limits`, `subscriptions`, `status`, `liveRate` |
+| `period` | `today` (default), `month`, `allTime`; `liveRate` accepts only `today` |
 | `filter` | Optional string-valued filters; see below. Use returned opaque IDs, not raw host IDs. |
 | `sort` | `{field, direction}`; default `id` / `asc`. Fields: `id`, `totalTokens`, `knownUsd`, `updatedAt`, `lastUsedAt`, `date`, `label`; direction `asc` or `desc`. Choose a field meaningful for the resource. |
 | `page` | `{limit, cursor?}`; default limit 100, range 1–500. Omit cursor for the first page. |
@@ -19,7 +21,7 @@ Supported filter keys (values are strings of at most 256 characters):
 
 | Resource | Filters |
 | --- | --- |
-| `usage`, `status` | `id`, `deviceId` |
+| `usage`, `status`, `liveRate` | `id`, `deviceId` |
 | `models` | `id`, `deviceId`, `model`, `search` |
 | `tools` | `id`, `deviceId`, `client`, `model`, `search` |
 | `devices` | `id`, `deviceId`, `search` |
@@ -120,7 +122,9 @@ Add this top-level `settings` member to the quickstart manifest (keep its UI and
 }
 ```
 
-This creates a native form that works even with plugin code disabled. A custom `settings` view is optional and executes trusted UI only when enabled.
+This creates a native form that works even with plugin code disabled. Switches and selects save immediately; text and number fields save when editing finishes (focus leaves the control or Enter). Writes are serialized per plugin without blocking other controls. Inputs and newer edits remain intact during pending saves and ordinary status updates. Only changed/completed fields are sent. Storage failures expose Retry save and Reload to discard the draft; validation failures show field errors with Reload to discard the draft; users can also correct the value or Restore defaults. Revision conflicts stop further automatic writes until the user explicitly reloads saved values. Plugin reload and package changes wait for completed saves and require pending drafts to be saved or explicitly discarded before replacing the editor. Restore defaults is a secondary menu action and applies immediately. This changes ordinary preferences only; credential submission remains explicit.
+
+A custom `settings` view is optional and executes trusted UI only when enabled.
 
 Each field needs a unique `id`, `type`, `label` and valid `default`; `description` is optional. Labels/descriptions may be strings or locale maps. There are at most 64 fields. IDs start with an ASCII letter, then letters, digits, `_` or `-`, up to 64 characters; prototype-reserved names are rejected.
 
@@ -162,4 +166,4 @@ Load the editor with `const current = await ctx.host.call('settings.get')` insid
 
 `settings.update` patches declared fields only. A stale revision/schema rejects with `settings-conflict`; invalid fields reject with `invalid-settings-values`; a newer stored schema rejects with `settings-newer-schema`. Display failure feedback and reload deliberately before retrying; do not assume custom Error properties survive renderer IPC. `settings.get` also rejects if no schema is declared or the store cannot be read.
 
-Increase `settings.version` when changing the schema. Optional declarative renames use `migrations: [{fromVersion:1, renames:{oldName:'newName'}}]` in a higher-version schema. Removed/unknown stored keys are retained privately for compatibility, not writable through the patch API. Rollback restores code, not arbitrary backend data migrations. This JSON preference store is not a secret vault; keep credential handling in a trusted backend and disclose its storage/access.
+Increase `settings.version` when changing the schema. Optional declarative renames use `migrations: [{fromVersion:1, renames:{oldName:'newName'}}]` in a higher-version schema. Removed/unknown stored keys are retained privately for compatibility, not writable through the patch API. Rollback restores code, not arbitrary backend data migrations. This ordinary preference store is not for secrets. Quota modules use the [host-managed credential API](author-limits.md#manual-credential-contract), including its renderer presence/revision projection and backend-only saved-value reads.

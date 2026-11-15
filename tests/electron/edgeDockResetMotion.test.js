@@ -239,7 +239,7 @@ test('the renderer wires the ring driver and the shared card animator', () => {
   // The card is the page's animator scoped to the card layer, bound in
   // commitCard around the same replaceChildren the refresh performs.
   assert.match(dock, /cardResetAnimator = limitResetAnimatorApi\.createLimitResetAnimator\(\{[\s\S]*?motion: limitResetMotionApi/);
-  assert.match(dock, /const resetSnapshot = cardResetAnimator\.capture\(contentLayer\);\s*contentLayer\.replaceChildren\(card\);[\s\S]*?cardResetAnimator\.animate\(card, resetSnapshot\);/);
+  assert.match(dock, /const resetSnapshot = cardResetAnimator\.capture\(previous \|\| contentLayer\);\s*contentLayer\.replaceChildren\(card\);[\s\S]*?cardResetAnimator\.animate\(card, resetSnapshot\);/);
   // Reduced motion settles both halves rather than stranding a count-up.
   assert.match(dock, /if \(reduceMotion\) settleDockMotions\(\);/);
   assert.match(dock, /cardResetAnimator\.settle\(contentLayer\);/);

@@ -1076,3 +1076,52 @@ test('attributed ticks retain a consistent unattributed remainder only until its
   now = 8200;
   assert.equal(tracker.getSample().idle, true);
 });
+
+test('five-minute rate history records fresh samples only and outlives the headline', () => {
+  let now = 1_000;
+  const history = tokenRateApi.createLiveTokenRateHistory({ now: () => now });
+  const sample = { revision: 1, sampledAt: now, speed: 32, burn: 600_000, idle: false };
+  history.observe(sample);
+  now += 1_000;
+  history.observe(sample); // Repaint / repeated snapshot is not a new reading.
+  history.observe({ ...sample, idle: true });
+  history.observe(null);
+  assert.equal(history.getSamples().length, 1);
+  now = 181_000;
+  assert.equal(history.getSamples().length, 1, 'three-minute headline expiry keeps the chart');
+  now = 301_001;
+  assert.deepEqual(history.getSamples(), []);
+});
+
+test('rate history resets its revision baseline with the monitored source', () => {
+  const history = tokenRateApi.createLiveTokenRateHistory({ now: () => 1_000 });
+  history.observe({ revision: 1, sampledAt: 1_000, speed: 32, burn: 600_000 });
+  history.reset();
+  assert.deepEqual(history.getSamples(), []);
+  history.observe({ revision: 1, sampledAt: 1_000, speed: 40, burn: 700_000 });
+  assert.equal(history.getSamples()[0].speed, 40);
+});
+
+test('rate chart spaces recent samples evenly, expires old readings and supports TPM', () => {
+  const samples = [
+    { at: 1_000, speed: 20, burn: 600 },
+    { at: 6_000, speed: 40, burn: 1_200 },
+    { at: 30_000, speed: 10, burn: 300 }
+  ];
+  const chart = tokenRateApi.liveTokenRateChart(samples, 301_000, 'speed');
+  assert.deepEqual(chart.points.map(point => point.x), [0, 72, 144]);
+  assert.equal(chart.peak, 40);
+  assert.equal(tokenRateApi.liveTokenRateChart(samples, 301_000, 'burn').peak, 1_200);
+  assert.deepEqual(tokenRateApi.liveTokenRateChart(samples, 331_001, 'speed').points, []);
+  assert.equal(tokenRateApi.liveTokenRateChart([samples[2]], 301_000, 'speed').points[0].x, 144);
+});
+
+test('rate chart draws only the latest 60 samples without discarding retained history', () => {
+  const samples = Array.from({ length: 70 }, (_, i) => ({ at: i * 1000, speed: i < 10 ? 9999 : i, burn: i * 60 }));
+  const chart = tokenRateApi.liveTokenRateChart(samples, 100_000, 'speed');
+  assert.equal(chart.points.length, 60);
+  assert.equal(chart.peak, 69, 'older points do not affect the displayed scale');
+  assert.equal(chart.points[0].x, 0);
+  assert.equal(chart.points.at(-1).x, 144);
+  assert.equal(samples.length, 70, 'drawing does not truncate the five-minute history');
+});

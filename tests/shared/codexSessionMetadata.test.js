@@ -104,8 +104,8 @@ maybe('reads persisted display titles and classifies guardian reviews without ex
 
   assert.deepEqual(result.get('named'), { title: '繼續目前工作' });
   assert.equal(result.has('fallback'), false);
-  assert.equal(result.has('review-model'), false);
-  assert.equal(result.has('review-user'), false);
+  assert.deepEqual(result.get('review-model'), { latestModel: 'codex-auto-review' });
+  assert.deepEqual(result.get('review-user'), { latestModel: 'codex-auto-review' });
   assert.deepEqual(result.get('review-source'), { sessionKind: 'background-review' });
   assert.deepEqual(result.get('review-json-source'), { sessionKind: 'background-review' });
 });
@@ -304,6 +304,74 @@ maybe('title queries also return persisted effort for historical and untitled se
     env: {}, codexDeps: { dbPaths: [file], sqlite }, readT3Meta: () => new Map(), resolveProjects: false
   });
   assert.equal(periods.allTime.sessions['codex:old'].reasoningEffort, 'high');
+});
+
+maybe('the existing catalog query returns normalized models, including model-only sessions', () => {
+  const file = makeDb([
+    { id: 'named', name: 'Conversation', model: ' GPT-6.1-SOL ', effort: 'high' },
+    { id: 'model-only', model: 'deepseek-v4.1-flash' },
+    { id: 'blank', model: '   ' },
+    { id: 'oversized', model: 'x'.repeat(257) }
+  ]);
+  const queries = [];
+  class DatabaseSync extends sqlite.DatabaseSync {
+    prepare(sql) { queries.push(sql); return super.prepare(sql); }
+  }
+  const rows = metadata.readSessionMeta(['named', 'model-only', 'blank', 'oversized'], {
+    dbPaths: [file], sqlite: { DatabaseSync }
+  });
+  assert.deepEqual(rows.get('named'), { title: 'Conversation', latestModel: 'gpt-6.1-sol', reasoningEffort: 'high' });
+  assert.deepEqual(rows.get('model-only'), { latestModel: 'deepseek-v4.1-flash' });
+  assert.equal(rows.has('blank'), false);
+  assert.equal(rows.has('oversized'), false);
+  assert.equal(queries.filter(sql => /FROM threads/.test(sql)).length, 1, 'model and effort share the existing batched query');
+});
+
+maybe('historical and long Codex sessions use catalog models without widening transcript reads', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'codex-model-catalog-'));
+  tmpDirs.push(home);
+  const nativeId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  const id = `rollout-2026-11-09T10-00-00-${nativeId}`;
+  const dir = path.join(home, '.codex', 'sessions', '2026', '11', '09');
+  fs.mkdirSync(dir, { recursive: true });
+  const transcript = path.join(dir, `${id}.jsonl`);
+  const at = Date.parse('2026-11-09T10:00:00Z');
+  const line = entry => JSON.stringify(entry) + '\n';
+  fs.writeFileSync(transcript, line({ type: 'session_meta', payload: { id: nativeId } })
+    + line({ type: 'turn_context', payload: { model: 'deepseek-v4.1-flash', effort: 'high' } })
+    + line({ type: 'response_item', payload: { text: 'x'.repeat(2 * 1024 * 1024) } })
+    + line({ type: 'event_msg', payload: { type: 'task_complete' } }));
+  fs.utimesSync(transcript, new Date(at), new Date(at));
+  const file = makeDb([{ id: nativeId, model: 'deepseek-v4.1-flash', effort: 'high' }]);
+  let bytesRead = 0;
+  const codexDeps = { dbPaths: [file], sqlite, cache: new Map(), fs: {
+    ...fs, readSync(...args) { const n = fs.readSync(...args); bytesRead += n; return n; }
+  } };
+  const { applySessionMetadata } = require('../../src/shared/sessionMetadata');
+  const { sessionModelLabel } = require('../../src/electron/renderer/sessionRows');
+  const collect = now => {
+    const periods = { month: { sessions: { [`codex:${id}`]: {
+      client: 'codex', sessionId: id, totalTokens: 100,
+      models: { 'gpt-6.1-sol': 90, 'deepseek-v4.1-flash': 10 }
+    } } } };
+    applySessionMetadata(periods, home, { now, env: {}, codexDeps, readT3Meta: () => new Map(), resolveProjects: false });
+    return periods.month.sessions[`codex:${id}`];
+  };
+  const historical = collect(at + 60 * 60 * 1000);
+  assert.equal(historical.latestModel, 'deepseek-v4.1-flash');
+  assert.equal(historical.reasoningEffort, 'high');
+  assert.equal(sessionModelLabel(historical), 'deepseek-v4.1-flash +1');
+  assert.equal(bytesRead, 0, 'historical metadata does not invoke the context reader');
+  assert.equal(collect(at + 1000).latestModel, 'deepseek-v4.1-flash');
+  assert.equal(bytesRead, 1024 * 1024, 'cold context read keeps its existing one-MiB budget');
+  assert.equal(collect(at + 1000).latestModel, 'deepseek-v4.1-flash');
+  assert.equal(bytesRead, 1024 * 1024, 'unchanged context reuses the index');
+  fs.appendFileSync(transcript, line({ type: 'turn_context', payload: { model: 'newer', effort: 'xhigh' } }));
+  const recent = collect(at + 1000);
+  assert.equal(recent.latestModel, 'newer', 'observed recent configuration overrides the catalog');
+  assert.equal(recent.reasoningEffort, 'xhigh');
+  fs.appendFileSync(transcript, line({ type: 'turn_context', payload: {} }));
+  assert.equal(collect(at + 1000).latestModel, null, 'explicit unknown configuration cannot restore the catalog model');
 });
 
 test('the default T3 discovery covers every installed and dev state layout', () => {

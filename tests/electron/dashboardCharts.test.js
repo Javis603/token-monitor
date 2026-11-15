@@ -94,6 +94,15 @@ test('modelVendorFor maps families and modelColor falls back deterministically',
   assert.equal(modelVendorFor('hy3'), 'hunyuan');
   assert.equal(modelVendorFor('hy4-preview'), 'hunyuan');
   assert.equal(modelVendorFor('hunyuan-t1'), 'hunyuan');
+  // Thinking Machines Lab: bare Inkling ids, the OpenRouter vendor prefix, and
+  // the spaced form — while a `-thinking` suffix alone must not match.
+  assert.equal(modelVendorFor('inkling'), 'thinkingmachines');
+  assert.equal(modelVendorFor('inkling-small'), 'thinkingmachines');
+  assert.equal(modelVendorFor('inkling-2-small'), 'thinkingmachines');
+  assert.equal(modelVendorFor('thinkingmachines/inkling'), 'thinkingmachines');
+  assert.equal(modelVendorFor('thinking-machines/inkling'), 'thinkingmachines');
+  assert.equal(modelVendorFor('acme-thinking'), null); // a `-thinking` suffix alone must not match
+  assert.equal(modelColor('inkling-2-small'), clientColors.thinkingmachines);
   assert.equal(modelColor('claude-opus'), clientColors.claude);
   assert.equal(modelColor('hy3'), clientColors.hunyuan);
   assert.equal(modelColor('totally-unknown'), modelColor('totally-unknown')); // stable

@@ -2,7 +2,7 @@
 const path = require('node:path');
 
 // One process per demanded plugin, shared by all its renderer occurrences.
-function createPluginBackends({ fork, hostCall, onData = () => {}, onError = () => {}, log = () => {}, startupTimeoutMs = 15000, callTimeoutMs = 60000 }) {
+function createPluginBackends({ fork, hostCall, onStop = () => {}, onData = () => {}, onError = () => {}, log = () => {}, startupTimeoutMs = 15000, callTimeoutMs = 60000 }) {
   const records = new Map(), closing = new Map();
   let sequence = 0;
   function fail(record, error) {
@@ -46,6 +46,7 @@ function createPluginBackends({ fork, hostCall, onData = () => {}, onError = () 
       }
     });
     child.once('exit', code => {
+      if (!record.stopped) onStop(id);
       record.resolveExit();
       clearTimeout(record.stopTimer);
       if (records.get(id) === record) records.delete(id);
@@ -59,7 +60,7 @@ function createPluginBackends({ fork, hostCall, onData = () => {}, onError = () 
     if (!record) return closing.get(id);
     closing.set(id, record.exited);
     void record.exited.then(() => { if (closing.get(id) === record.exited) closing.delete(id); });
-    records.delete(id); record.stopped = true;
+    records.delete(id); record.stopped = true; onStop(id);
     fail(record, new Error('Plugin backend stopped'));
     try { record.child.postMessage({ type: 'stop' }); } catch { record.child.kill(); }
     record.stopTimer = setTimeout(() => record.child.kill(), 500);

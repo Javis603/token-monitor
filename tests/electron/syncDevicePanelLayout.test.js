@@ -23,6 +23,8 @@ class Element {
     this.dataset = {};
   }
   append(...children) { children.forEach(child => { child.parentElement = this; this.children.push(child); }); }
+  prepend(...children) { children.forEach(child => { child.parentElement = this; }); this.children.unshift(...children); }
+  addEventListener() {}
   replaceChildren(...children) { this.children = []; this.append(...children); }
   querySelectorAll(selector) {
     return this.children.flatMap(child => [
@@ -131,9 +133,9 @@ test('select and navigation popups share their regular and native glass surface'
   assert.match(rule(selected), /color:\s*var\(--accent\)/);
   assert.equal(rule(selected).trim().replace(/\s+/g, ' '), rule('.view-switcher-menu-item.is-current').trim().replace(/\s+/g, ' '));
   assert.match(rule(highlighted), /0\.07/);
-  assert.ok(css.indexOf(selected) > css.indexOf(highlighted), 'selection wins when the same row is highlighted');
+  assert.ok(css.indexOf(`${selected} {`) > css.indexOf(`${highlighted} {`), 'selection wins when the same row is highlighted');
   assert.match(rule('.view-switcher-menu-item.is-current'), /0\.12/);
-  assert.doesNotMatch(css, /\.select-control-option\[data-selected="true"\]::after/);
+  assert.doesNotMatch(css, /\.select-control-option(?:\[data-selected="true"\])?::after/);
 });
 
 test('device rows are static and status spacing does not depend on a removal button', () => {
@@ -235,8 +237,10 @@ test('closing sync settings or navigating away cancels the active picker', () =>
 });
 
 test('device versions get their own line rather than competing with sync status', () => {
+  const document = { createElement: () => { const element = new Element(); element.ownerDocument = document; return element; } };
   const context = vm.createContext({
-    document: { createElement: () => new Element() },
+    document,
+    state: { settings: {} }, deviceIconsApi: require('../../src/electron/renderer/deviceIcons'),
     window: { tokenMonitor: { deleteDevice() {} } },
     osIconFor: () => 'windows',
     t: key => key,

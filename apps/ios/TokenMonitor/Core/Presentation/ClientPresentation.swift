@@ -11,16 +11,19 @@ nonisolated enum ClientPresentation {
         case "opencode": "OpenCode"
         case "copilot": "GitHub Copilot"
         case "micode": "MiMo Code"
+        case "muse": "Muse Code"
+        case "mistral": "Mistral Vibe"
+        case "gemini": "Gemini CLI"
         case "grok": "Grok Build"
         default: ProviderPresentation.displayName(for: client)
         }
     }
 
     static func assetName(for client: String) -> String {
-        ProviderPresentation.assetName(for: client)
+        client.lowercased() == "gemini" ? "VendorGeminiCLI" : ProviderPresentation.assetName(for: client)
     }
 
     static func color(for client: String) -> Color {
-        ProviderPresentation.color(for: client)
+        client.lowercased() == "gemini" ? .primary : ProviderPresentation.color(for: client)
     }
 }

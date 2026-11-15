@@ -4,8 +4,10 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 
 const trayLayoutApi = require('../../src/shared/trayLayout');
+const trayTextApi = require('../../src/shared/trayText');
 const {
   accountModeSourcePatch,
   costDisplayPatch,
@@ -518,6 +520,55 @@ test('a non-custom surface previews the real tray image behind a Customize butto
   assert.equal(content.classList.contains('is-menubar'), true);
   assert.equal(content.children[0].className, 'tray-composer-menubar-generated');
   assert.equal(content.children[0].src, 'data:image/png;base64,GENERATED');
+});
+
+test('monthly composer previews render the month provider and matching token or cost title', () => {
+  const stats = { periods: {
+    today: { totalTokens: 10000, costUsd: 1, clients: { claude: 9000, codex: 1000 }, clientCosts: { claude: 0.8, codex: 0.2 } },
+    month: { totalTokens: 80000, costUsd: 16, clients: { claude: 20000, codex: 54000, hermes: 6000 }, clientCosts: { claude: 2, codex: 3, hermes: 11 } },
+    allTime: { totalTokens: 900000, costUsd: 123, clients: { claude: 100000, codex: 200000, hermes: 600000 }, clientCosts: { claude: 100, codex: 20, hermes: 3 } }
+  } };
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = source.indexOf('function trayPreviewUsageIconId(');
+  const end = source.indexOf('function activateTrayComposer(', start);
+  assert.ok(start >= 0 && end > start, 'renderer preview function boundaries exist');
+  const rendered = [];
+  const state = { settings: {}, appInfo: { platform: 'darwin' } };
+  const preview = vm.runInNewContext(`${source.slice(start, end)}; trayComposerPreview`, {
+    state,
+    window: { TokenMonitorTrayText: trayTextApi },
+    trayProviderImages: { claude: {}, codex: {}, hermes: {} },
+    statsForTrayComposer: () => stats,
+    floatingBubbleGeneratedColors: () => ({ text: '#ffffff' }),
+    currentCurrency: () => 'USD',
+    compactTokenDisplayOptions: () => ({}),
+    renderCustomTrayItemCanvas(item) {
+      rendered.push({ ...item });
+      return { width: 44 };
+    },
+    document: {
+      createElement(tag) {
+        assert.equal(tag, 'canvas');
+        return {
+          getContext: () => ({ drawImage() {} }),
+          toDataURL: () => 'data:image/png;base64,MONTHLY'
+        };
+      }
+    }
+  });
+  for (const [mode, provider, text] of [
+    ['tokensMonth', 'codex', '80.0K'],
+    ['costMonth', 'hermes', '$16.00'],
+    ['bothMonth', 'codex', '80.0K · $16.00']
+  ]) {
+    state.settings.trayContent = mode;
+    rendered.length = 0;
+    assert.equal(preview('tray').src, 'data:image/png;base64,MONTHLY', mode);
+    assert.deepEqual(rendered, [
+      { type: 'icon', provider },
+      { type: 'text', text, fontStyle: 'normal' }
+    ], mode);
+  }
 });
 
 test('the preview falls back from a rendered image to text to the app mark', () => {

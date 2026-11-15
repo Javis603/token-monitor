@@ -394,6 +394,20 @@ test('anonymous Muse accounts are scoped to their source device', () => {
   assert.deepEqual(devicesOf(dedupeAccounts(frozen)), ['a', 'b']);
 });
 
+test('Muse web dedupes across devices without changing CLI device identity', () => {
+  const cli = { provider: 'muse', source: 'cli', status: 'ok', sourceDeviceId: 'a' };
+  const remoteCli = { ...cli, sourceDeviceId: 'b' };
+  const web = { ...cli, source: 'web' };
+  const remoteWeb = { ...web, sourceDeviceId: 'b' };
+  assert.deepEqual(dedupeAccounts([cli, web, remoteCli, remoteWeb]), [cli, web, remoteCli]);
+  assert.deepEqual(dedupeAccounts([remoteWeb, web]), [remoteWeb], 'caller priority matches other anonymous providers');
+  assert.equal(sameAccount(cli, remoteCli), false);
+  assert.equal(sameAccount(web, remoteWeb), true);
+  assert.equal(sameAccount(web, { ...web, sourceDeviceId: '' }), true);
+  assert.equal(sameAccount(cli, web), false);
+  assert.equal(sameAccount(web, cli), false);
+});
+
 test('local Muse rows are stamped with their device id on copies only', () => {
   const localMuse = { provider: 'muse', accountKey: '', status: 'ok' };
   const localCodex = { provider: 'codex', accountKey: 'k', status: 'ok' };

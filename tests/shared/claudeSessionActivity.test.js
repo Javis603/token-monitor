@@ -320,6 +320,7 @@ test('Linux registry validates machine, PID namespace, PID and proc start ticks'
 });
 
 test('Linux dead registry owners clear Waiting even when their start ticks are retained', { skip: process.platform === 'win32' }, async t => {
+  t.mock.method(Date, 'now', () => now + 60_000);
   const f = linuxFixture(t); f.writeLinux();
   const key = 'claude:test-session';
   for (const state of ['Z', 'X', 'x']) {
@@ -350,7 +351,8 @@ test('Linux live PID registry fixture matches this process on Linux CI', { skip:
   assert.deepEqual(reading.get('test-session'), { state: 'running', observedAt: new Date(now).toISOString() });
 });
 
-test('activity applies to every period, renews without token changes, and explicitly clears missing evidence', () => {
+test('activity applies to every period, renews without token changes, and explicitly clears missing evidence', (t) => {
+  t.mock.method(Date, 'now', () => now + 60_000);
   const original = Object.fromEntries(['today', 'month', 'allTime'].map(name =>
     [name, { sessions: { 'claude:test-session': session() } }]));
   let summary = original;
@@ -373,7 +375,8 @@ test('activity applies to every period, renews without token changes, and explic
   assert.equal(original.today.sessions['claude:test-session'].liveActivity.state, 'waiting');
 });
 
-test('unchanged polling keeps object identity and changed observations share the accounting maps', () => {
+test('unchanged polling keeps object identity and changed observations share the accounting maps', (t) => {
+  t.mock.method(Date, 'now', () => now + 60_000);
   const row = session();
   const codex = { ...session(), client: 'codex', sessionId: 'codex-session' };
   const summary = { today: { totalTokens: 200, sessions: { claude: row, codex } }, month: usage.emptyPeriod() };
@@ -406,7 +409,8 @@ test('explicit activity overrides transcript recency but expires, clears and res
   assert.equal(live.nextSessionStatusChangeAt([session()], now), now + live.LIVE_ACTIVITY_TTL_MS);
 });
 
-test('normalization strips private fields and merging follows the activity clock independently of token time', () => {
+test('normalization strips private fields and merging follows the activity clock independently of token time', (t) => {
+  t.mock.method(Date, 'now', () => now + 60_000);
   const old = session('waiting', { liveActivity: { state: 'waiting', observedAt: new Date(now).toISOString(), pid: 1234, waitingFor: 'private' } });
   const fresh = session('unknown', { liveActivity: { state: 'unknown', observedAt: new Date(now + 1000).toISOString() } });
   const period = (row) => usage.normalizePeriod({ sessions: { 'claude:test-session': row } });
@@ -586,6 +590,7 @@ function t3Fixture(f) {
 }
 
 test('T3 terminal runs yield to native Claude registry and expire without renewing idle', async t => {
+  t.mock.method(Date, 'now', () => now + 60_000);
   const f = fixture(t); const db = t3Fixture(f); f.write({ status: 'busy' });
   const completedAt = new Date(now - 1000).toISOString();
   db.prepare("UPDATE orchestration_v2_projection_runs SET status = 'cancelled', completed_at = ?, requested_at = ?")
@@ -629,6 +634,7 @@ test('T3 Claude formal waiting supersedes registry and resolves without transcri
 });
 
 test('a late T3 Claude message answer clears newer waiting through projection and patches', async t => {
+  t.mock.method(Date, 'now', () => now + 60_000);
   const f = fixture(t); const db = t3Fixture(f);
   db.prepare("UPDATE orchestration_v2_projection_runs SET status = 'completed', completed_at = ?")
     .run(new Date(now).toISOString());

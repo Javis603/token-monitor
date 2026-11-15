@@ -54,6 +54,9 @@ function createLocalUsageSource(options = {}, deps = {}) {
   const threads = new Map();
   const pending = new Map();
   const subscribing = new Set();
+  // Resume loads a live thread, not just a passive usage subscription. Keep
+  // per-thread retry deadlines across socket reconnects to avoid recovery loops.
+  const resumeRetries = new Map();
   let executorIds = new Set();
   let connection = null;
   let context = null;
@@ -115,12 +118,26 @@ function createLocalUsageSource(options = {}, deps = {}) {
     });
   }
 
+  async function unsubscribe(threadId, current) {
+    const entry = threads.get(threadId);
+    if (!entry || entry.retiring || stopped || connection !== current) return;
+    entry.retiring = true;
+    try {
+      await request('thread/unsubscribe', { threadId });
+      if (connection === current && threads.get(threadId) === entry) threads.delete(threadId);
+    } catch (_) {
+      // If explicit cleanup fails, closing this connection releases its listeners.
+      if (connection === current) disconnect('local-usage-unsubscribe-failed');
+    }
+  }
+
   async function subscribe(thread, current) {
+    if (stopped || connection !== current) return;
     const local = localThreadEnvironment(thread, executorIds);
     if (!local) {
       if (thread?.id && threads.has(thread.id)) {
-        threads.delete(thread.id);
         if (store.updateThread(hashAccountKey(context.accountId), thread.id, { nativeBacked: Boolean(thread.path) })) changed();
+        await unsubscribe(thread.id, current);
       }
       return;
     }
@@ -131,25 +148,49 @@ function createLocalUsageSource(options = {}, deps = {}) {
       if (store.updateThread(hashAccountKey(context.accountId), thread.id, {
         title: String(thread.name || '').trim(), turnEnded: thread.status?.type === 'idle'
       })) changed();
+      // Normal idle completion is not failed recovery. A later active turn can
+      // attach immediately even if this subscription only received its baseline.
+      if (thread.status?.type === 'idle' && previous.resumed && !previous.disconnected) resumeRetries.delete(thread.id);
+      if (thread.status?.type !== 'active' || previous.disconnected) await unsubscribe(thread.id, current);
       return;
     }
+    // Missing/unknown status must not wake a stored thread either. Polling will
+    // discover it if actual work makes it active later.
+    if (thread.status?.type !== 'active') return;
     if (subscribing.has(thread.id)) return;
+    const retry = resumeRetries.get(thread.id);
+    if (retry && Date.now() < retry.at) return;
+    const attempts = Math.min((retry?.attempts || 0) + 1, 5);
+    const attemptRetry = { attempts, at: Date.now() + Math.min(300000, 30000 * 2 ** (attempts - 1)) };
+    resumeRetries.set(thread.id, attemptRetry);
     subscribing.add(thread.id);
     // Install metadata before resume: the server can notify while its reply
     // is in flight. No turn/configuration/approval request is ever sent.
     threads.set(thread.id, { thread, local, baselinePending: true, turnModels: new Map() });
     try {
       await request('thread/resume', { threadId: thread.id, excludeTurns: true });
+      if (connection === current) {
+        const entry = threads.get(thread.id);
+        if (entry) entry.resumed = true;
+      }
     } catch (_) {
-      if (connection === current) threads.delete(thread.id);
+      // A timeout can arrive after the server attached the listener.
+      if (connection === current) {
+        // Completion can precede the reply and clear the deadline. A failed
+        // resume still needs its backoff, even if the turn happened to finish.
+        if (!resumeRetries.has(thread.id)) resumeRetries.set(thread.id, attemptRetry);
+        await unsubscribe(thread.id, current);
+      }
     } finally {
-      subscribing.delete(thread.id);
+      if (connection === current) subscribing.delete(thread.id);
     }
   }
 
   async function discover(current) {
     let cursor = null;
     const cursors = new Set();
+    const existing = [...threads.keys()];
+    const seen = new Set();
     do {
       const page = await request('thread/list', {
         archived: false, limit: 100, sortKey: 'updated_at', sortDirection: 'desc',
@@ -157,6 +198,15 @@ function createLocalUsageSource(options = {}, deps = {}) {
       });
       if (stopped || connection !== current) return;
       const candidates = Array.isArray(page.data) ? page.data : [];
+      for (const thread of candidates) {
+        if (typeof thread?.id !== 'string') continue;
+        seen.add(thread.id);
+        // Invalidate nonlocal metadata for the whole page before cleanup can
+        // block the worker pool. The notification ownership guard then rejects
+        // even queued entries, while subscribe still releases each listener.
+        const entry = threads.get(thread.id);
+        if (entry && !localThreadEnvironment(thread, executorIds)) entry.thread = thread;
+      }
       let index = 0;
       await Promise.all(Array.from({ length: Math.min(4, candidates.length) }, async () => {
         while (!stopped && connection === current && index < candidates.length) {
@@ -168,6 +218,10 @@ function createLocalUsageSource(options = {}, deps = {}) {
       if (cursor && cursors.has(cursor)) throw new Error('Codex local usage invalid pagination');
       if (cursor) cursors.add(cursor);
     } while (cursor);
+    for (const id of existing) if (!seen.has(id)) await unsubscribe(id, current);
+    if (connection === current) {
+      for (const id of resumeRetries.keys()) if (!seen.has(id) && !threads.has(id)) resumeRetries.delete(id);
+    }
   }
 
   function notification(message, current) {
@@ -177,7 +231,7 @@ function createLocalUsageSource(options = {}, deps = {}) {
       return;
     }
     const entry = threads.get(params.threadId);
-    if (!entry || !localThreadEnvironment(entry.thread, executorIds)) return;
+    if (!entry || entry.retiring || entry.disconnected || !localThreadEnvironment(entry.thread, executorIds)) return;
     const accountKey = hashAccountKey(context.accountId);
     const turnId = params.turnId || params.turn?.id;
     // The desktop schema's Turn has no model. Thread.model and resume.model
@@ -189,30 +243,42 @@ function createLocalUsageSource(options = {}, deps = {}) {
       if (entry.turnModels.size > 32) entry.turnModels.delete(entry.turnModels.keys().next().value);
     }
     if (message.method === 'thread/tokenUsage/updated') {
+      const total = usageCounters(params.tokenUsage?.total);
+      const last = usageCounters(params.tokenUsage?.last);
+      // Match the store's initial acceptance contract before consuming the
+      // baseline; valid individual counters can still be inconsistent together.
+      if (!turnId || !total || !last || Object.keys(last).some((key) => last[key] > total[key])) return;
       if (shouldYield() || !store.claimObserver(owner)) { disconnect(); store.releaseObserver(owner); return; }
       if (store.observe({
         accountKey, thread: { ...entry.thread, model: entry.turnModels.get(turnId) || 'unknown' }, ...entry.local, turnId,
         tokenUsage: params.tokenUsage, baselineOnly: entry.baselinePending, now: now()
       })) {
+        resumeRetries.delete(params.threadId);
         lastUsageAt = now().toISOString();
         changed();
       }
-      // A malformed notification must not consume the reconnect baseline.
-      if (usageCounters(params.tokenUsage?.total)
-        && usageCounters(params.tokenUsage?.last)) entry.baselinePending = false;
+      entry.baselinePending = false;
     } else if (message.method === 'turn/started' || message.method === 'turn/completed') {
       const ended = message.method === 'turn/completed';
       entry.thread.status = { type: ended ? 'idle' : 'active' };
+      if (ended) resumeRetries.delete(params.threadId);
       if (store.updateThread(accountKey, params.threadId, { turnEnded: ended })) changed();
     } else if (message.method === 'thread/name/updated') {
       entry.thread.name = params.threadName || '';
       if (store.updateThread(accountKey, params.threadId, { title: entry.thread.name })) changed();
     } else if (message.method === 'thread/environment/disconnected') {
-      if (params.environmentId === entry.local.environmentId) threads.delete(params.threadId);
+      if (params.environmentId === entry.local.environmentId) {
+        entry.disconnected = true;
+        const retry = resumeRetries.get(params.threadId);
+        resumeRetries.set(params.threadId, {
+          attempts: retry?.attempts || 0, at: Math.max(retry?.at || 0, Date.now() + 30000)
+        });
+      }
     }
   }
 
   function connect(next) {
+    if (context?.accountId !== next.accountId) resumeRetries.clear();
     context = next;
     state = 'connecting';
     const current = makeSocket(next);

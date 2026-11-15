@@ -168,7 +168,9 @@ async function main() {
     catalog.entries[0].version='2.0.0';await panel.refresh();
     click('plugins.package.install');await tick();
     check('card-reentry-retains-selected-old-version-and-preview',box.querySelector('.plugin-version-picker select').value==='1.0.0'&&box.querySelector('.plugin-package-preview .plugin-version').textContent==='1.0.0'&&calls.at(-1)[1]==='1.0.0');
-    click('plugins.ui.backCatalog');await tick();box.querySelector('.plugin-catalog-title').click();await tick();box.querySelector('dialog .plugin-allow').click();await tick();
+    click('plugins.ui.backCatalog');await tick();box.querySelector('.plugin-catalog-title').click();await tick();
+    check('detail-shows-remembered-version-before-install',box.querySelector('dialog .plugin-version')?.textContent==='v1.0.0');
+    box.querySelector('dialog .plugin-allow').click();await tick();
     check('detail-reentry-retains-selected-old-version-and-preview',box.querySelector('.plugin-version-picker select').value==='1.0.0'&&box.querySelector('.plugin-package-preview .plugin-version').textContent==='1.0.0');
     click('plugins.ui.backCatalog');await tick();catalog.entries[0].versions[0].installable=false;await panel.refresh();click('plugins.package.install');await tick();
     check('unavailable-remembered-version-falls-back-to-current-installable-version',box.querySelector('.plugin-version-picker select').value==='2.0.0'&&box.querySelector('.plugin-package-preview .plugin-version').textContent==='2.0.0');

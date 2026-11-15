@@ -52,7 +52,7 @@ struct TokenMonitorWidgetEntry: TimelineEntry {
               today.tokens.isFinite, today.tokens >= 0,
               today.tokensKnown != false else { return days }
         guard let snapshot, snapshot.updatedAt > .distantPast else { return days }
-        let key = snapshot.todayDate ?? WidgetActivityModel.dayKey(for: snapshot.updatedAt)
+        let key = snapshot.todayDate
         guard WidgetActivityModel.localDay(for: key) != nil,
               key <= WidgetActivityModel.dayKey(for: date) else { return days }
         let cost = today.cost.isFinite
@@ -282,7 +282,8 @@ extension TokenMonitorWidgetEntry {
                 ]
             )
         ],
-        activity: sampleActivity()
+        activity: sampleActivity(),
+        todayDate: WidgetActivityModel.dayKey(for: .now)
     )
 
     static var placeholder: TokenMonitorWidgetEntry {

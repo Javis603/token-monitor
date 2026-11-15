@@ -19,7 +19,7 @@ function normalizePluginStates(value) {
   return result;
 }
 function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLocale = () => 'en', authorSettings, safeMode = false,
-  fork, hostCall = async () => { throw new Error('Unknown host operation'); }, log = () => {} }) {
+  fork, onBackendStopped = () => {}, hostCall = async () => { throw new Error('Unknown host operation'); }, log = () => {} }) {
   const plugins = new Map(), demands = new Map(), changes = new Set(), views = new Set(), listeners = new Set();
   const mutating = new Set();
   let disposed = false, hostContext = {};
@@ -33,7 +33,7 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
     if (plugin.logs.length > 100) plugin.logs.shift();
     log(`[plugins:${id}] ${message}`);
   }
-  const backends = createPluginBackends({ fork,
+  const backends = createPluginBackends({ fork, onStop: onBackendStopped,
     hostCall: (id, method, args) => { if (!active(plugins.get(id))) throw new Error('Plugin is disabled'); return hostCall(id, method, args); },
     onData(id, value) {
       const plugin = plugins.get(id);
@@ -99,7 +99,7 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
   }
   function descriptor(plugin, view) {
     const base = `tm-plugin://${plugin.id}/${plugin.revision}/`;
-    return { ...view, identityIcon: plugin.manifest.identityIcon, title: localize(view.title, getLocale()), pluginId: plugin.id, ref: `${plugin.id}/${view.id}`,
+    return { ...view, identityIcon: plugin.manifest.identityIcon, presentation: plugin.manifest.presentation, title: localize(view.title, getLocale()), pluginId: plugin.id, ref: `${plugin.id}/${view.id}`,
       contentOrder: Object.fromEntries((view.targets || []).map(target => {
         const orders = getSettings().pluginContentOrder || {};
         const index = (Object.hasOwn(orders, target) ? orders[target] : []).indexOf(`${plugin.id}/${view.id}`);
@@ -118,9 +118,9 @@ function createPluginManager({ userDir, dataDir, getSettings, saveStates, getLoc
     const base = { id: plugin.id, source: 'user', status: status(plugin), enabled: state?.enabled === true, errors: plugin.errors, name: plugin.id };
     if (!m) return base;
     return { ...base, name: localize(m.name, getLocale()), version: m.version, description: localize(m.description, getLocale()),
-      author: m.author, homepage: m.homepage, identityIcon: m.identityIcon, types: pluginTypes(m), trustedCode: true, trusted: state?.trustedRevision === plugin.revision,
+      author: m.author, homepage: m.homepage, identityIcon: m.identityIcon, presentation: m.presentation, types: pluginTypes(m), trustedCode: true, trusted: state?.trustedRevision === plugin.revision,
       hasCode: Boolean(m.ui || m.backend), hasBackend: Boolean(m.backend), settings: m.settings, settingsIdentity: plugin.revision,
-      revision: plugin.revision, defaults: m.defaults, views: m.views.map(view => descriptor(plugin, view)),
+      revision: plugin.revision, defaults: m.defaults, limits: (m.limits || []).map(item => ({ ...item, name: localize(item.name, getLocale()), tags: (item.tags || []).map(tag => localize(tag, getLocale())) })), views: m.views.map(view => descriptor(plugin, view)),
       skins: m.skins.map(skin => ({ ...skin, ref: `${plugin.id}/${skin.id}`, name: localize(skin.name, getLocale()) })),
       background: { supported: Boolean(m.backend && m.background), enabled: state?.background === true, description: localize(m.backgroundDescription, getLocale()) },
       runtime: m.backend ? { state: plugin.failure ? 'error' : backends.has(plugin.id) ? 'running' : 'idle', mode: selected(plugin) ? 'visible' : 'background',

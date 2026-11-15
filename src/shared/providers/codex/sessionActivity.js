@@ -1,6 +1,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const { normalizeLatestModel } = require('../../usage');
 const path = require('node:path');
 const { resolveSqlite, openDb } = require('../../sqliteReadOnly');
 const { nativeIdForFile } = require('./sessionIdentity');
@@ -200,6 +201,7 @@ async function readSessionActivity(summary, options = {}) {
       ...metadata.get(id),
       ...(!generatedTitleIds.get(id) ? t3Metadata.get(id) : {}),
       turnEnded: state.turnEnded, waitingForInput: state.waitingForInput,
+      ...(Object.prototype.hasOwnProperty.call(state, 'latestModel') ? { latestModel: normalizeLatestModel(state.latestModel, 'codex') } : {}),
       ...(Object.prototype.hasOwnProperty.call(state, 'reasoningEffort') ? { reasoningEffort: state.reasoningEffort } : {}),
       ...(reading ? { liveActivity: reading } : {})
     };

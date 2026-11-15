@@ -1,3 +1,4 @@
+import CoreText
 import SwiftUI
 import Testing
 import WidgetKit
@@ -313,6 +314,73 @@ struct WidgetLayoutRenderTests {
 
 
 extension WidgetLayoutRenderTests {
+    @Test func automaticActivityRendersWorkAlertAndIdle() throws {
+        typealias State = TokenMonitorActivityAttributes.ContentState
+        let now = Date.now
+        for scenario in ["single", "active", "waiting", "mixed", "alert", "idle"] {
+            let state = State(updatedAt: now, usage: .init(today: .init(tokens: 45200, costUSD: 1.25), month: .init(tokens: 1000000)),
+                quotas: [.init(providerID: "codex", updatedAt: now,
+                    windows: [.init(label: "Weekly", kind: "weekly", remainingPercent: scenario == "idle" ? 50 : 5)])],
+                agents: .init(running: scenario == "single" ? 1 : (["active", "mixed"].contains(scenario) ? 2 : 0),
+                    clients: ["active", "mixed"].contains(scenario) ? ["codex", "claude", "cursor"] : ["codex"],
+                    waiting: ["waiting", "mixed"].contains(scenario) ? 1 : nil))
+            let context = ActivityContext(state: state, layout: .automatic, isStale: false, now: now)
+            let view = VStack(spacing: 24) {
+                HStack {
+                    ActivityCompactItemView(context: context, slot: context.layout.compactLeading)
+                    Spacer().frame(width: 96)
+                    ActivityCompactItemView(context: context, slot: context.layout.compactTrailing)
+                }.padding(12).background(.black, in: Capsule())
+                ActivityExpandedPreview(context: context)
+                ActivityLockScreenView(context: context)
+            }.padding(16).frame(width: 360).environment(\.colorScheme, .dark).background(.black)
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 3
+            write(try #require(renderer.uiImage), name: "automatic-\(scenario)")
+        }
+    }
+
+
+    @Test func hundredthsProduceOneDistinctWaveFramePerPair() throws {
+        let font = CTFontCreateWithName("TokenMonitorActivityWaveSmooth" as CFString, 20, nil)
+        var glyphs = Set<CGGlyph>()
+        for frame in 0..<100 {
+            let text = String(format: "%02d", frame)
+            let value = NSAttributedString(string: text, attributes: [
+                NSAttributedString.Key(kCTFontAttributeName as String): font
+            ])
+            let line = CTLineCreateWithAttributedString(value)
+            #expect(CTLineGetGlyphCount(line) == 1)
+            #expect(abs(CTLineGetTypographicBounds(line, nil, nil, nil) - 25) < 0.001)
+            let runs = CTLineGetGlyphRuns(line) as! [CTRun]
+            let run = try #require(runs.first)
+            var glyph: CGGlyph = 0
+            CTRunGetGlyphs(run, CFRange(location: 0, length: 1), &glyph)
+            glyphs.insert(glyph)
+        }
+        #expect(glyphs.count == 100)
+    }
+
+    @Test func notchWaveSymbolAndMotionFallbacks() throws {
+        let symbol = try #require(UIImage(named: "ActivityWave"))
+        #expect(symbol.isSymbolImage)
+        let font = try #require(UIFont(name: "TokenMonitorActivityWaveSmooth", size: 20))
+        #expect(font.fontName == "TokenMonitorActivityWaveSmooth")
+        for (name, stale) in [
+            ("running", false),
+            ("stale", true)
+        ] {
+            let view = ActivityWaveform(updatedAt: .now.addingTimeInterval(-5), isStale: stale, tint: ActivityPalette.quotaTint("codex"))
+                .padding(20).background(.black)
+            let renderer = ImageRenderer(content: view)
+            renderer.scale = 3
+            let image = try #require(renderer.uiImage)
+            write(image, name: "notch-wave-\(name)")
+            let bytes = try #require(image.cgImage?.dataProvider?.data) as Data
+            #expect(bytes.contains { $0 > 0 && $0 < 255 })
+        }
+    }
+
     @Test func staleQuotaRemainsVisibleInUsageAndOverviewTemplates() throws {
         typealias State = TokenMonitorActivityAttributes.ContentState
         let now = Date.now
@@ -321,7 +389,7 @@ extension WidgetLayoutRenderTests {
                            windows: [.init(label: "Weekly", kind: "weekly", remainingPercent: 40)]),
                      .init(providerID: "cursor", updatedAt: now.addingTimeInterval(-1000), stale: true,
                            windows: [.init(label: "Monthly", kind: "billing", remainingPercent: 5)])], agents: .none)
-        var layout = LiveActivityLayout()
+        var layout = LiveActivityLayout(mode: .custom)
         layout.expanded = .usage
         layout.expandedSource = .init(providerID: "cursor")
         layout.lockScreen = .overview

@@ -354,6 +354,43 @@
     return { getSample, nextExpiryAt, observe, reset };
   }
 
+  const LIVE_RATE_HISTORY_MS = 5 * 60 * 1000;
+
+  // Ephemeral display history, fed only by real matched-counter observations.
+  // Headline expiry does not erase it; source/feature changes explicitly reset it.
+  function createLiveTokenRateHistory({ now = Date.now } = {}) {
+    let samples = [];
+    let revision = null;
+    function getSamples() {
+      const cutoff = now() - LIVE_RATE_HISTORY_MS;
+      samples = samples.filter(sample => sample.at >= cutoff);
+      return samples.slice();
+    }
+    function observe(sample) {
+      getSamples();
+      if (!sample || sample.idle || sample.revision === revision) return;
+      revision = sample.revision;
+      const point = { at: sample.sampledAt, speed: sample.speed, burn: sample.burn };
+      if (samples.at(-1)?.at === point.at) samples[samples.length - 1] = point;
+      else samples.push(point);
+    }
+    function reset() { samples = []; revision = null; }
+    function nextExpiryAt() { return getSamples()[0]?.at + LIVE_RATE_HISTORY_MS + 1 || null; }
+    return { observe, getSamples, reset, nextExpiryAt };
+  }
+
+  function liveTokenRateChart(samples, now, mode) {
+    const visible = samples.filter(sample => sample.at >= now - LIVE_RATE_HISTORY_MS && sample.at <= now).slice(-60);
+    const peak = Math.max(1, ...visible.map(sample => mode === 'burn' ? sample.burn : sample.speed));
+    // This compact sparkline represents sample order, not elapsed wall time.
+    // A lone observation stays at the endpoint; never fabricate earlier points.
+    const points = visible.map((sample, index) => ({
+      x: visible.length > 1 ? index / (visible.length - 1) * 144 : 144,
+      y: 58 - (mode === 'burn' ? sample.burn : sample.speed) / peak * 48
+    }));
+    return { points, peak };
+  }
+
   function isSharedSyncMode(hubMode) {
     return hubMode === 'client' || hubMode === 'host' || hubMode === 'icloud';
   }
@@ -619,10 +656,12 @@
     TOKEN_RATE_SETTLE_MS,
     cappedTokenRate,
     createLiveTokenRateGroupTracker,
+    createLiveTokenRateHistory,
     createLiveTokenRateTracker,
     createTokenRateBoostController,
     isSharedSyncMode,
     liveTokenRateTooltipEntries,
+    liveTokenRateChart,
     positiveNumber,
     selectLiveTokenRatePeriods,
     tokenBurnPerMinute,

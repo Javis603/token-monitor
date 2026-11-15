@@ -10,7 +10,7 @@ The extension currently compiles `Widgets/WidgetHostSurface.mm` into Release. It
 
 Apple publicly supports Liquid Glass in the **system-selected Clear/Tinted appearance**, using `widgetRenderingMode`, `widgetAccentable(_:)`, image accented rendering and removable container backgrounds. That is a supported glass presentation, but it does not establish a public way to force this project's current full-color host treatment. A third-party app's appearance alone is not evidence that it uses the same private implementation.
 
-Before distribution, choose the production Widget presentation and implement it with public API. Preserve widget kind identifiers when migrating already-placed widgets. Do not merely hide a setting, disable the bridge at runtime, or disguise private selector names. Inspect the final Release binary with the verifier after the change. The existing experimental appearance has deliberately not been changed as part of preparation.
+Before distribution, choose the production Widget presentation and implement it with public API. Do not merely hide a setting, disable the bridge at runtime, or disguise private selector names. Inspect the final Release binary with the verifier after the change. The existing experimental appearance has deliberately not been changed as part of preparation.
 
 Sources: [Apple's Widget Liquid Glass guidance](https://developer.apple.com/documentation/widgetkit/optimizing-your-widget-for-accented-rendering-mode-and-liquid-glass), [App Review Guidelines §2.5.1 and TestFlight §2.2](https://developer.apple.com/app-store/review/guidelines/).
 

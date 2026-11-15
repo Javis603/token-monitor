@@ -978,7 +978,7 @@ test('Widget user-facing strings are localized in every supported language', () 
   for (const [key, entry] of Object.entries(widgetLocalization.strings)) {
     assert.deepEqual(
       Object.keys(entry.localizations).sort(),
-      ['en', 'ja', 'ko', 'pt-BR', 'zh-Hans', 'zh-Hant'],
+      ['en', 'es', 'ja', 'ko', 'pt-BR', 'zh-Hans', 'zh-Hant'],
       `missing localization for ${key}`
     );
     const formatSpecifiers = (value) => [...value.matchAll(/%(?:\d+\$)?(@|lld|%)/g)]
@@ -987,6 +987,11 @@ test('Widget user-facing strings are localized in every supported language', () 
       formatSpecifiers(entry.localizations['pt-BR'].stringUnit.value),
       formatSpecifiers(entry.localizations.en.stringUnit.value),
       `Portuguese format specifiers differ for ${key}`
+    );
+    assert.deepEqual(
+      formatSpecifiers(entry.localizations.es.stringUnit.value),
+      formatSpecifiers(entry.localizations.en.stringUnit.value),
+      `Spanish format specifiers differ for ${key}`
     );
     assert.ok(Object.values(entry.localizations).every((localization) => (
       localization.stringUnit?.state === 'translated' && localization.stringUnit.value

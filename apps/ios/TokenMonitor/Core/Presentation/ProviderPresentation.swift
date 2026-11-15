@@ -11,6 +11,13 @@ nonisolated enum ProviderPresentation {
         case "openrouter": "OpenRouter"
         case "deepseek": "DeepSeek"
         case "minimax": "MiniMax"
+        case "mistral": "Mistral"
+        case "gemini": "Gemini"
+        case "hark": "Hark"
+        case "thinkingmachines": "Thinking Machines"
+        case "opendesign": "OpenDesign"
+        case "prime-agent": "Prime Agent"
+        case "jcode": "Jcode"
         case "mimo", "micode": "Xiaomi MiMo"
         case "grok": "Grok"
         case "copilot": "GitHub Copilot"
@@ -43,7 +50,8 @@ nonisolated enum ProviderPresentation {
         case "goose": "Goose"
         case "catpaw": "CatPaw"
         case "notion": "Notion AI"
-        case "muse": "Muse Code"
+        case "manus": "Manus"
+        case "muse": "Muse"
         case "zcode": "ZCode"
         case "reasonix": "Reasonix"
         case "dsh": "DeepSeek Harness"
@@ -58,7 +66,7 @@ nonisolated enum ProviderPresentation {
     }
 
     static func assetName(for provider: String?) -> String {
-        WidgetPresentation.assetName(for: provider)
+        provider?.lowercased() == "gemini" ? "VendorGemini" : WidgetPresentation.assetName(for: provider)
     }
 
     /// Raw Desktop brand colors from src/shared/vendorPresentation.js.
@@ -102,7 +110,7 @@ nonisolated enum ProviderPresentation {
         case "thirdparty": rgb(0x8090a6)
         case "opencode", "cursor", "factory", "droid", "kimi", "moonshot", "grok", "xai",
              "copilot", "pi", "mimo", "micode", "xiaomi", "zai", "zaiteam", "zcode",
-             "proma", "devin", "fx", "stepfun", "typesafe", "goose", "notion": .primary
+             "proma", "devin", "fx", "stepfun", "typesafe", "goose", "notion", "opendesign", "prime-agent", "jcode", "hark", "thinkingmachines": .primary
         default: rgb(0x6ab4f0)
         }
     }
@@ -151,6 +159,7 @@ nonisolated enum ProviderPresentation {
         if name.contains("llama") || name.contains("meta") {
             return "meta"
         }
+        if name.contains("inkling") { return "thinkingmachines" }
         if name.contains("mistral") || name.contains("mixtral") || name.contains("codestral") {
             return "mistral"
         }

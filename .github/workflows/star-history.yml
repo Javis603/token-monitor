@@ -21,12 +21,13 @@ concurrency:
 jobs:
   fetch:
     runs-on: ubuntu-latest
-    # GitHub's stargazer listing maps collaborator access to contents: write for
-    # GITHUB_TOKEN. Keep this job caller-owned and never run the generator here.
+    # The aggregate star-history API is read-only and identity-free. Keep this
+    # job caller-owned and never run the generator here.
     permissions:
-      contents: write
+      contents: read
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      star-count: ${{ steps.count.outputs.count }}
     steps:
       - name: Checkout trusted fetcher
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
@@ -44,8 +45,25 @@ jobs:
           --repository "$GITHUB_REPOSITORY"
           --output "$INPUT_DIRECTORY/stargazers.json"
 
+      - name: Count identity-free timestamps
+        id: count
+        shell: bash
+        env:
+          INPUT_FILE: ${{ runner.temp }}/star-history-input/stargazers.json
+        run: |
+          set -euo pipefail
+          count="$(node -e '
+            const fs = require("node:fs");
+            const stars = JSON.parse(fs.readFileSync(process.env.INPUT_FILE, "utf8"));
+            if (!Array.isArray(stars)) process.exit(1);
+            process.stdout.write(String(stars.length));
+          ')"
+          [[ "$count" =~ ^[0-9]+$ ]]
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+
       - name: Upload identity-free input
         id: upload
+        if: steps.count.outputs.count != '0'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: star-history-input
@@ -55,6 +73,9 @@ jobs:
 
   generate:
     needs: fetch
+    # A repository with no stargazers has no chart to render; skip the remaining
+    # jobs instead of failing the scheduled run.
+    if: needs.fetch.outputs.star-count != '0'
     runs-on: ubuntu-latest
     permissions: {}
     outputs:

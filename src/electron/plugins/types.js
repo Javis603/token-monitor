@@ -1,6 +1,6 @@
 'use strict';
 // Display metadata only: these labels never grant permissions or enable views.
-const TYPES = Object.freeze(['widget', 'page', 'appearance', 'automation']);
+const TYPES = Object.freeze(['widget', 'page', 'appearance', 'automation', 'limits']);
 function normalizeTypes(value) {
   return TYPES.filter(type => Array.isArray(value) && value.includes(type));
 }
@@ -10,7 +10,8 @@ function pluginTypes(manifest) {
     surfaces.some(surface => ['home', 'tray', 'edgeDock', 'notch'].includes(surface)) && 'widget',
     (surfaces.includes('page') || (manifest.views || []).some(view => view.targets?.length)) && 'page',
     manifest.skins?.length > 0 && 'appearance',
-    manifest.category === 'automation' && 'automation'
+    manifest.category === 'automation' && 'automation',
+    manifest.limits?.length > 0 && 'limits'
   ].filter(Boolean);
 }
 module.exports = { normalizeTypes, pluginTypes };

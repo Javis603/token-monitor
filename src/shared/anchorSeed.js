@@ -29,7 +29,7 @@ function deviceRecordFromAnchor(saved, options = {}) {
     homeDir,
     env,
     sourcePlatform,
-    wslScanEnabled = true,
+    wslScanEnabled = false,
     wslSupported = false,
     hostname = '',
     platform = '',
@@ -49,7 +49,7 @@ function deviceRecordFromAnchor(saved, options = {}) {
   // The anchor keeps host periods and the WSL bundle apart, the way
   // collectUsageOnce does before summing them. Same local day is established
   // above, so all three windows are safe to merge.
-  const wsl = wslScanEnabled !== false ? saved.wslBundle : null;
+  const wsl = wslScanEnabled === true ? saved.wslBundle : null;
   const cleanPeriod = (period) => {
     if (!period || typeof period !== 'object' || !Object.prototype.hasOwnProperty.call(period, 'sessions')) return period;
     const sessions = filterReasonixSyntheticSessions(period.sessions);
@@ -62,7 +62,7 @@ function deviceRecordFromAnchor(saved, options = {}) {
   // and disabled are different states downstream, so the distinction is kept.
   const wslStatus = !wslSupported
     ? null
-    : wslScanEnabled === false
+    : wslScanEnabled !== true
       ? { state: 'disabled', detected: [], withData: [] }
       : (saved.wslStatus || null);
   const at = new Date(trust.capturedAtMs).toISOString();

@@ -8,12 +8,14 @@ const path = require('node:path');
 // clientSourceRoots().
 // Upstream claude_desktop::storage_roots uses these home-relative paths on
 // every OS, without APPDATA/XDG overrides. Keep WSL detection and host roots
-// together; only the retained transcript trees and conversation store are read.
-const CLAUDE_DESKTOP_SOURCES = [
+// together; the scanner reads only the retained transcript trees and conversation
+// store (Claude session titles separately read `claude-code-sessions/*/*/local_*.json`).
+const CLAUDE_DESKTOP_APP_ROOTS = [
   'Library/Application Support/Claude',
   'AppData/Roaming/Claude',
   '.config/Claude'
-].flatMap((app) => [
+];
+const CLAUDE_DESKTOP_SOURCES = CLAUDE_DESKTOP_APP_ROOTS.flatMap((app) => [
   ...['local-agent-mode-sessions', 'claude-code-sessions'].map((name) => ({
     marker: `${app}/${name}`, client: 'claude', hostCheckId: 'claude-desktop-transcripts'
   })),
@@ -40,15 +42,21 @@ const SOURCE_MARKERS = [
   { marker: '.qwen/projects', client: 'qwen', hostCheckId: 'qwen-projects' },
   { marker: '.grok/sessions', client: 'grok' },
   { marker: '.copilot/otel', client: 'copilot' },
+  { marker: '.copilot/session-state', client: 'copilot' },
   // The CLI parse-local root belongs to the tracked Antigravity umbrella id.
   { marker: '.gemini/antigravity-cli/conversations', client: 'antigravity' },
   { marker: '.gemini/antigravity/conversations', client: 'antigravity' },
+  // Default Linux home only. Host paths resolve GEMINI_CLI_HOME in clientSources.js.
+  { marker: '.gemini/tmp', client: 'gemini' },
   { marker: '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks', client: 'cline' },
   { marker: '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks', client: 'cline' },
   { marker: '.local/share/amp/threads', client: 'amp' },
   { marker: '.config/tokscale/amp-cache/threads', client: 'amp' },
   { marker: '.pi/agent/sessions', client: 'pi', hostCheckId: 'pi-sessions' },
   { marker: '.omp/agent/sessions', client: 'omp', hostCheckId: 'omp-sessions' },
+  { marker: '.omo/agent/projects', client: 'senpi' },
+  { marker: '.omo/memory', client: 'senpi', hostCheckId: 'senpi-omo-memory' },
+  { marker: '.config/Code/User/globalStorage/emptyWindowChatSessions', client: 'copilot' },
   { marker: '.omo/agent/sessions', client: 'senpi', hostCheckId: 'senpi-omo-sessions' },
   { marker: '.senpi/agent/sessions', client: 'senpi', hostCheckId: 'senpi-sessions' },
   { marker: '.omo/senpi-task', client: 'senpi', hostCheckId: 'senpi-task-children' },
@@ -89,6 +97,10 @@ const SOURCE_MARKERS = [
   { marker: '.fx/sessions', client: 'fx', hostCheckId: 'fx-sessions' },
   { marker: '.minimax/v2/sessions', client: 'mcode' },
   { marker: '.mavis/v2/sessions', client: 'mcode' },
+  { marker: '.vibe/logs/session', client: 'mistral' },
+  { marker: '.prime/agent/sessions', client: 'prime-agent' },
+  { marker: '.prime/agent/session-artifacts', client: 'prime-agent' },
+  { marker: '.jcode/sessions', client: 'jcode' },
   ...CLAUDE_DESKTOP_SOURCES
 ];
 
@@ -101,4 +113,4 @@ function simpleHostSourceRoots(client, home) {
     .map(({ marker, hostCheckId }) => [hostCheckId, path.join(home, ...marker.split('/'))]);
 }
 
-module.exports = { SOURCE_MARKERS, WSL_DATA_MARKERS, MARKER_CLIENTS, simpleHostSourceRoots };
+module.exports = { CLAUDE_DESKTOP_APP_ROOTS, SOURCE_MARKERS, WSL_DATA_MARKERS, MARKER_CLIENTS, simpleHostSourceRoots };

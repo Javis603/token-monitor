@@ -33,6 +33,12 @@
     // they are [a-z0-9-] (vendorPresentation.test.js).
     return Object.entries(vendorPresentation.ROW_ICON_MASKS).map(([id, file]) => {
       const url = `${iconBaseUrl}${file}.svg`.replace(/["\\]/g, '\\$&');
+      const client = vendorPresentation.CLIENT_PRESENTATION[id];
+      if (client?.fullColor) {
+        const clientUrl = `${iconBaseUrl}${client.icon}.svg`.replace(/["\\]/g, '\\$&');
+        return `.row-icon-${id} { -webkit-mask-image: none; mask-image: none; background: url("${clientUrl}") center / contain no-repeat; }\n`
+          + `.row-icon-${id}.model-icon { background: currentColor; -webkit-mask-image: url("${url}"); mask-image: url("${url}"); }`;
+      }
       return `.row-icon-${id} { -webkit-mask-image: url("${url}"); mask-image: url("${url}"); }`;
     }).join('\n');
   }

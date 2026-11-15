@@ -23,6 +23,8 @@ Tokscale always scans `~/.omo/agent/sessions`. It also scans `~/.senpi/agent/ses
 ~/.omo/agent/sessions/<encoded-cwd>/<timestamp>_<sessionId>.jsonl
 ~/.senpi/agent/sessions/<encoded-cwd>/<timestamp>_<sessionId>.jsonl
 ~/.omo/senpi-task/children/<task>/sessions/
+~/.omo/agent/projects/<project>-<hash>/senpi-task/children/
+~/.omo/memory/
 ```
 
 `SENPI_CODING_AGENT_DIR` replaces only the `~/.senpi/agent` root. `SENPI_CODING_AGENT_SESSION_DIR` adds one extra sessions directory. OmO itself has no environment variable for a relocated tree; tokscale reads that from `scanner.extraScanPaths.senpi` in its settings.json. On Windows, the scanner, source checks and native Session Detail use an absolute native `HOME` before the profile directory; scoped WSL lookups ignore host environment overrides.
@@ -31,13 +33,15 @@ Task children also live under each project's `.omo/senpi-task/children`. The col
 
 An absolute `task.state_dir` in `.omo/omo.jsonc` (falling back to `.omo/omo.json`) relocates children to `<state_dir>/children`. Project configuration overrides the home configuration; a project declaring an empty or relative `task` block restores that project's default layout instead of inheriting the home block. Configuration reads are bounded to 256 KiB, so an oversized file waits for interval collection through tokscale.
 
+Home-agent project discovery admits only each project’s `senpi-task/children` branch, including projects created after startup. Memory transcripts follow the home-relative `~/.omo/memory` root.
+
 Only transcript roots, configuration files and their necessary ancestor chain are admitted to the watcher. An existing project can therefore discover children created after startup without watching its dependencies or unrelated `.omo` caches. Watch ticks re-evaluate these roots as well as full ticks. An installation with no existing source ancestor below home relies on the next interval for discovery; the collector never watches the entire home or filesystem as a fallback. Polling retains the shared entry budget and interval fallback.
 
 ## Accounting
 
 Senpi documents `usage.reasoning` as a subset of `usage.output`. Tokscale parses the field and does not add it to the total. Do not put `senpi` in `TOKSCALE_DISJOINT_REASONING_CLIENTS`: that set is for clients whose JSON `reasoning` bucket is additive.
 
-Session Detail uses the shared Pi-format parser. `reasoningTokens` stays informational. A main session resolves by the `_<sessionId>.jsonl` suffix under the scan roots. A task child whose file is named for the task rather than the session id is still counted by tokscale, but Detail does not open it.
+Session Detail uses the shared Pi-format parser. `reasoningTokens` stays informational. Sessions resolve by `<sessionId>.jsonl` or the `_<sessionId>.jsonl` suffix under the scan roots. Task children named for the task and memory transcripts named `transcript.jsonl` are still counted by tokscale, but Detail does not open them when their filenames do not match the session id. Detail does not look up files by the session id in their JSON header.
 
 ## Verification
 

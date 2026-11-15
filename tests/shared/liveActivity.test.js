@@ -312,8 +312,23 @@ for (const [runtime, api] of [
     assert.equal(windows[1].remainingPercent, undefined);
     assert.equal(windows[1].creditsAmount, 20);
     assert.deepEqual(stats, before);
+    stats.limits.providers[0].provider = 'mistral';
+    assert.equal(api.buildLiveActivityContentState(stats, registration(), now).quotas[0].windows[1].remainingPercent, undefined);
     stats.limits.providers[0].provider = 'thirdparty';
     assert.equal(api.buildLiveActivityContentState(stats, registration(), now).quotas[0].windows[1].remainingPercent, 20);
+  });
+
+  test(`${runtime} automatic activity keeps waiting distinct and prioritizes its client`, () => {
+    const timestamp = new Date(now).toISOString();
+    const stats = { periods: { today: { sessions: {
+      running: { client: 'claude', lastUsedAt: timestamp, turnEnded: false },
+      waiting: { client: 'codex', lastUsedAt: timestamp, waitingForInput: true }
+    } } } };
+    const state = api.buildLiveActivityContentState(stats, registration(), now);
+    assert.equal(state.agents.running, 1);
+    assert.equal(state.agents.waiting, 1);
+    assert.deepEqual(state.agents.clients, ['codex', 'claude']);
+    assert.equal(api.buildLiveActivityContentState(stats, registration(), now + 601000).agents.waiting, undefined);
   });
 
   test(`${runtime} all stale devices override a recent source without rewriting its date`, () => {
@@ -475,5 +490,63 @@ for (const [runtime, api] of [
     assert.deepEqual(fitted.quotas.map((quota) => quota.accountKey), quotas.map((quota) => quota.accountKey));
     assert(fitted.quotas.every((quota) => quota.planLabel === undefined));
     assert(Buffer.byteLength(JSON.stringify(fitted)) <= api.MAX_CONTENT_STATE_BYTES);
+  });
+}
+
+for (const [runtime, modulePath] of [
+  ['Node', '../../src/shared/liveActivity'], ['Worker', '../../worker/src/shared/liveActivity']
+]) {
+  test(`${runtime} activity counts match macOS conversation groups, not accounting records`, () => {
+    const api = require(modulePath);
+    const presentation = require('../../src/electron/renderer/edgeDock/presentation');
+    const now = Date.now();
+    const at = new Date(now - 1000).toISOString();
+    const session = (id, extra = {}) => ({ client: 'codex', sessionId: id, totalTokens: 1,
+      lastUsedAt: at, turnEnded: false, ...extra });
+    const base = { 'codex:a': session('a'), 'codex:b': session('b'), 'codex:c': session('c'),
+      'codex:child-a': session('child-a', { parentSessionId: 'a' }),
+      'codex:child-b': session('child-b', { parentSessionId: 'b' }) };
+    const conversation = '11111111-1111-4111-8111-111111111111';
+    const cases = [
+      ['five accounting records / three conversations', { today: { sessions: base } }, 3, 0],
+      ['same T3 conversation', { today: { sessions: {
+        'codex:a': session('a', { t3ThreadId: conversation }),
+        'codex:b': session('b', { t3ThreadId: conversation }) } } }, 1, 0],
+      ['native Codex continuation', { today: { sessions: {
+        'codex:a': session('a', { nativeSessionId: conversation }),
+        'codex:b': session('b', { nativeSessionId: conversation }) } } }, 1, 0],
+      ['background reviews excluded', { today: { sessions: {
+        'codex:a': session('a'), 'codex:review': session('review', { sessionKind: 'background-review' }) } } }, 1, 0],
+      ['waiting child of running parent', { today: { sessions: {
+        'codex:a': session('a'), 'codex:child': session('child', { parentSessionId: 'a', waitingForInput: true }) } } }, 1, 0],
+      ['waiting parent and child', { today: { sessions: {
+        'codex:a': session('a', { waitingForInput: true }),
+        'codex:child': session('child', { parentSessionId: 'a', waitingForInput: true }) } } }, 0, 1],
+      ['missing parent remains independent', { today: { sessions: {
+        'codex:a': session('a'), 'codex:child': session('child', { parentSessionId: 'missing' }) } } }, 2, 0],
+      ['month source retained, accounting duplicate counted once', {
+        today: { sessions: { 'codex:a': session('a', { turnEnded: true }) } },
+        month: { sessions: { 'codex:a': session('a') } } }, 1, 0],
+      ['idle activity overlay', { today: { sessions: { 'codex:a': session('a') },
+        sessionActivity: { 'codex:a': { state: 'idle', observedAt: at } } } }, 0, 0],
+      ['zero-token accounted row', { today: { sessions: { 'codex:a': session('a', { totalTokens: 0 }) } } }, 1, 0],
+      ['Grok Bot without explicit open turn', { today: { sessions: {
+        'cursor:sand-subagent-a': { client: 'cursor', sessionId: 'sand-subagent-a', totalTokens: 1, lastUsedAt: at } } } }, 0, 0],
+      ['Grok Bot group', { today: { sessions: {
+        'cursor:sand-subagent-a': { client: 'cursor', sessionId: 'sand-subagent-a', totalTokens: 1, lastUsedAt: at, turnEnded: false },
+        'cursor:sand-subagent-b': { client: 'cursor', sessionId: 'sand-subagent-b', totalTokens: 1, lastUsedAt: at, turnEnded: false } } } }, 1, 0]
+    ];
+    for (const [name, periods, expectedRunning, expectedWaiting] of cases) {
+      const stats = { periods };
+      const original = structuredClone(stats);
+      const [cell] = presentation.buildEdgeDockCells(stats,
+        { items: [{ type: 'stat', metric: presentation.SESSIONS_METRIC }] });
+      const desktop = { running: presentation.runningSessionSummary(cell.sessions, now).count,
+        waiting: presentation.waitingSessionSummary(cell.sessions, now).count };
+      const pushed = api.buildLiveActivityContentState(stats, {}, now).agents;
+      assert.deepEqual(desktop, { running: expectedRunning, waiting: expectedWaiting }, `${name}: desktop oracle`);
+      assert.deepEqual({ running: pushed.running, waiting: pushed.waiting || 0 }, desktop, name);
+      assert.deepEqual(stats, original, `${name}: no accounting mutation`);
+    }
   });
 }

@@ -7,7 +7,7 @@ const { parseIndex } = require('../src/electron/plugins/catalogSources');
 const { pluginTypes } = require('../src/electron/plugins/types');
 
 const ROOT = path.resolve(__dirname, '..');
-const PLUGINS = Object.freeze(['quota-alerts']);
+const PLUGINS = Object.freeze(['quota-alerts', 'openai-api-credit']);
 const REPOSITORY = 'Javis603/token-monitor';
 const CHANGELOG_FILES = Object.freeze({ en: 'CHANGELOG.md', 'zh-CN': 'CHANGELOG.zh-CN.md', 'zh-TW': 'CHANGELOG.zh-TW.md',
   ko: 'CHANGELOG.ko.md', ja: 'CHANGELOG.ja.md', 'pt-BR': 'CHANGELOG.pt-BR.md' });
@@ -47,7 +47,7 @@ function buildDistribution(output, { root = ROOT, repository = REPOSITORY } = {}
       return [locale, `plugins/${id}/${readme}`];
     }));
     return { filename, bytes: pkg.bytes, entry: { id, name: m.name, description: m.description, author: m.author,
-      identityIcon: m.identityIcon, repository: `https://github.com/${repository}`, readmePaths,
+      identityIcon: m.identityIcon, ...(m.presentation ? { presentation: m.presentation } : {}), repository: `https://github.com/${repository}`, readmePaths,
       versions: [{ version: m.version, url: base + filename, sha256: pkg.hash, engines: m.engines,
         types: pluginTypes(pkg.manifest), changelog: packageChangelog(pkg.files, m.version) }] } };
   });

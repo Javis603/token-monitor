@@ -648,3 +648,53 @@ for (const point of ['settings-written', 'reloaded']) test(`default locations ro
   assert.deepEqual(f.settings, before);
   assert.equal(f.api.list().length, 0);
 });
+for(const point of ['credentials-moved','registry-written','settings-written','reloaded'])test(`uninstall rolls back only its private credentials after ${point}`,async t=>{
+ let armed=false;const f=fixture(t,phase=>{if(armed&&phase===point)throw Error('synthetic transaction failure');});
+ await f.install('1.0.0');f.args.credentialsDir=path.join(f.dir,'private-credentials');
+ const api=createManagedPlugins(f.args);api.recover();fs.mkdirSync(f.args.credentialsDir,{mode:0o700});
+ const own=path.join('test-plugin','one.json'),other=path.join('test-plugin--other','one.json');
+ for(const name of [own,other]){fs.mkdirSync(path.dirname(path.join(f.args.credentialsDir,name)),{recursive:true,mode:0o700});fs.writeFileSync(path.join(f.args.credentialsDir,name),'synthetic-private-record',{mode:0o600});}
+ armed=true;await assert.rejects(api.uninstall('test-plugin',{keepData:true}),/synthetic transaction failure/);
+ assert.equal(fs.readFileSync(path.join(f.args.credentialsDir,own),'utf8'),'synthetic-private-record');assert.ok(fs.existsSync(path.join(f.args.userDir,'test-plugin')));
+ armed=false;await api.uninstall('test-plugin',{keepData:true});assert.equal(fs.existsSync(path.join(f.args.credentialsDir,own)),false);assert.equal(fs.existsSync(path.join(f.args.credentialsDir,other)),true);
+});
+
+for(const dangling of [false,true])test(`uninstall rejects a plugin credential directory symlink without touching its target, dangling=${dangling}`,async t=>{
+ const f=fixture(t);await f.install('1.0.0');f.args.credentialsDir=path.join(f.dir,'private-credentials');
+ const api=createManagedPlugins(f.args);api.recover();fs.mkdirSync(f.args.credentialsDir,{mode:0o700});
+ const outside=path.join(f.dir,'outside-credentials'),link=path.join(f.args.credentialsDir,'test-plugin');
+ if(!dangling){fs.mkdirSync(outside,{mode:0o700});fs.writeFileSync(path.join(outside,'one.json'),'synthetic outside',{mode:0o600});}
+ fs.symlinkSync(outside,link,process.platform==='win32'?'junction':'dir');
+ await assert.rejects(api.uninstall('test-plugin',{keepData:true}),/invalid credential directory/);
+ assert.equal(fs.lstatSync(link).isSymbolicLink(),true);assert.ok(fs.existsSync(path.join(f.args.userDir,'test-plugin')));
+ if(!dangling)assert.equal(fs.readFileSync(path.join(outside,'one.json'),'utf8'),'synthetic outside');
+});
+
+for(const scenario of ['valid','backup-link','backup-dangling','destination-link','destination-dangling','destination-empty','destination-records'])test(`credential namespace recovery validates both endpoints before moving anything: ${scenario}`,async t=>{
+ const f=fixture(t);await f.install('1.0.0');
+ f.args.credentialsDir=path.join(f.dir,'private-credentials');fs.mkdirSync(f.args.credentialsDir,{mode:0o700});
+ const tx=path.join(f.args.root,'transaction'),backup=path.join(tx,'plugin-credentials'),target=path.join(f.args.credentialsDir,'test-plugin'),outside=path.join(f.dir,'outside');
+ fs.mkdirSync(tx,{mode:0o700});fs.mkdirSync(outside,{mode:0o700});fs.writeFileSync(path.join(outside,'one.json'),'synthetic outside');
+ if(scenario.startsWith('backup-'))fs.symlinkSync(scenario==='backup-dangling'?path.join(f.dir,'missing'):outside,backup,process.platform==='win32'?'junction':'dir');
+ else{fs.mkdirSync(backup,{mode:0o700});fs.writeFileSync(path.join(backup,'one.json'),'synthetic staged');}
+ if(scenario.startsWith('destination-')){
+  if(scenario==='destination-link'||scenario==='destination-dangling')fs.symlinkSync(scenario==='destination-dangling'?path.join(f.dir,'missing'):outside,target,process.platform==='win32'?'junction':'dir');
+  else{fs.mkdirSync(target);if(scenario==='destination-records')fs.writeFileSync(path.join(target,'one.json'),'synthetic current');}
+ }
+ const packageTarget=path.join(f.args.userDir,'test-plugin'),packageBackup=path.join(tx,'old');
+ fs.renameSync(packageTarget,packageBackup);
+ const journal=path.join(f.args.root,'transaction.json'),registry=JSON.parse(fs.readFileSync(path.join(f.args.root,'installed.json')));
+ fs.writeFileSync(journal,JSON.stringify({id:'test-plugin',operation:'uninstall',phase:'prepared',hadTarget:true,hadPrevious:false,settings:f.settings,registry}));
+ const recovery=createManagedPlugins(f.args);
+ if(scenario==='valid'){
+  recovery.recover();assert.equal(fs.readFileSync(path.join(target,'one.json'),'utf8'),'synthetic staged');assert.equal(fs.existsSync(journal),false);
+ }else{
+  assert.throws(()=>recovery.recover(),/credential/);
+  assert.equal(fs.existsSync(packageTarget),false,'preflight runs before package restoration');
+  assert.equal(fs.existsSync(packageBackup),true);
+  assert.equal(fs.existsSync(journal),true,'failed recovery keeps journal');assert.ok(fs.lstatSync(backup),'staged namespace stays recoverable');
+  if(scenario.startsWith('destination-'))assert.ok(fs.lstatSync(target),'existing namespace is not replaced');
+  assert.equal(fs.readFileSync(path.join(outside,'one.json'),'utf8'),'synthetic outside');
+  if(scenario==='destination-records')assert.equal(fs.readFileSync(path.join(target,'one.json'),'utf8'),'synthetic current');
+ }
+});

@@ -80,7 +80,15 @@ function createGitHubDiscovery({ root, fetchImpl, now = Date.now, enabled = fals
       if (base.protocol !== 'https:' || base.hostname !== 'raw.githubusercontent.com' || base.port || base.search || base.hash || !base.pathname.toLowerCase().startsWith(`/${id.toLowerCase()}/`) || base.username || base.password) throw new Error('Invalid README location');
       const page = new URL(raw.html_url);
       if (page.protocol !== 'https:' || page.hostname !== 'github.com' || page.port || page.username || page.password || page.search || page.hash || !page.pathname.toLowerCase().startsWith(`/${id.toLowerCase()}/blob/`)) throw new Error('Invalid README page');
-      return { readme: new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ''), baseUrl: page.href, imageBaseUrl: base.href };
+      // The page path is /<owner>/<repo>/blob/<ref>/<file>. Strip the file
+      // segments to get the ref-scoped root that root-relative README links
+      // resolve against. GitHub's API always reports the file path.
+      const fileSegments = typeof raw.path === 'string' && raw.path ? raw.path.split('/').length : 0;
+      const pageSegments = page.pathname.split('/');
+      const repositoryBaseUrl = fileSegments && pageSegments.length > fileSegments
+        ? `${page.origin}${pageSegments.slice(0, pageSegments.length - fileSegments).join('/')}/`
+        : '';
+      return { readme: new TextDecoder('utf-8', { fatal: true }).decode(bytes).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ''), baseUrl: page.href, imageBaseUrl: base.href, repositoryBaseUrl };
     },
     dispose() { disposed = true; for (const controller of controllers) controller.abort(); controllers.clear(); }
   };

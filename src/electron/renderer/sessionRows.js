@@ -16,6 +16,7 @@
     ? require('../../shared/sessionLive')
     : root?.TokenMonitorSessionLive;
   const sessionActivityState = sessionLive.sessionActivityState;
+  const sessionConversationIdentity = sessionLive.sessionConversationIdentity;
   const sessionContextForRow = sessionLive.sessionContextForRow;
   const isGrokBotSession = sessionLive.isGrokBotSession;
   const fallbackColors = ['#6ab4f0', '#cc7c5e', '#a57df0', '#49a3b0', '#f0d66a', '#f06a7b'];
@@ -39,13 +40,21 @@
     return [row?.modelLabel ?? sessionModelLabel(row), sessionReasoningEffortForRow(row)].filter(Boolean).join(' · ');
   }
 
+  function sessionSubtitleForDisplay(row, subtitle, { keepClient = false } = {}) {
+    const text = subtitle || '';
+    const client = row.clientLabel || row.client;
+    if (!keepClient && text === client) return '';
+    if (!keepClient && client && text.startsWith(`${client} · `)) return text.slice(client.length + 3);
+    return text;
+  }
+
   // Shared by full session rows and compact Home/Dock/Notch rows. Settings
   // remain visible after live metrics expire, including archived sessions.
   function sessionModelMetadataNode(document, row, { translate, view, ...options }) {
     const node = document.createElement('span');
     node.className = 'session-model-metadata';
     const modelLabel = row?.modelLabel ?? sessionModelLabel(row);
-    const entries = row?.modelTooltipEntries ?? sessionModelTooltipEntries(row, options);
+    const entries = row?.modelTooltipEntries ?? sessionModelTooltipEntries(row, { latestModelLabel: translate('session.latestModel'), ...options });
     if (modelLabel) {
       const model = document.createElement('span');
       model.className = 'session-models';
@@ -180,12 +189,17 @@
       .filter(([, value]) => finiteNumber(value) > 0)
       .map(([model]) => model)
       .sort();
+    const latest = textValue((session?.groupRows?.[0] || session)?.latestModel);
+    if (latest) {
+      const others = models.filter(model => model !== latest).length;
+      return `${latest}${others ? ` +${others}` : ''}`;
+    }
     if (models.length === 0) return '';
     if (models.length === 1) return models[0];
     return `${models.length} models`;
   }
 
-  // The rows a "N models" label opens on hover: every model behind the count,
+  // The rows a session model label opens on hover: every model behind the count,
   // heaviest first, with its tokens and share of the session. A session can
   // hold tokens no model claimed (a log written before the model field
   // existed, say), so the remainder is reported as one last row rather than
@@ -194,7 +208,8 @@
     const entries = Object.entries(session?.models || {})
       .map(([model, tokens]) => ({ model: String(model || ''), tokens: finiteNumber(tokens) }))
       .filter((entry) => entry.tokens > 0);
-    if (entries.length < 2) return [];
+    const latest = textValue((session?.groupRows?.[0] || session)?.latestModel);
+    if (entries.length < 2 && (!latest || entries.every(entry => entry.model === latest))) return [];
     entries.sort((a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model));
     const total = finiteNumber(session?.totalTokens);
     const attributed = entries.reduce((sum, entry) => sum + entry.tokens, 0);
@@ -211,6 +226,9 @@
       formatTokens(entry.tokens),
       percentLabel(denominator > 0 ? entry.tokens / denominator * 100 : 0)
     ]);
+    if (latest) {
+      rows.unshift({ full: `${textValue(options.latestModelLabel) || 'Last used'}: ${latest}` });
+    }
     const unlabeled = attributed - named.reduce((sum, entry) => sum + entry.tokens, 0);
     const unattributed = unlabeled + Math.max(0, total - attributed);
     if (unattributed > 0) {
@@ -482,7 +500,7 @@
       name: titleParts.join(' · '),
       modelLabel,
       modelTooltipEntries: sessionModelTooltipEntries(session, {
-        unattributedLabel: options.unattributedLabel
+        unattributedLabel: options.unattributedLabel, latestModelLabel: options.latestModelLabel
       }),
       subtitle: subtitleParts.join(' · '),
       activitySummary: subtitleParts.join(' · '),
@@ -494,6 +512,7 @@
       // window so the reading survives the turn ending, and the dock's card
       // calls the same function so the two cannot disagree.
       context: sessionContextForRow(session, now),
+      latestModel: session.latestModel,
       reasoningEffort: session.reasoningEffort,
       detail: sessionIdLabel(session?.sessionId || key),
       value,
@@ -508,6 +527,7 @@
       stale: false,
       client,
       clientLabel,
+      sourceDevice: session.sourceDevice || options.localSourceDevice,
       nativeSessionId: textValue(session?.nativeSessionId),
       t3ThreadId: textValue(session?.t3ThreadId),
       modelTokens: session?.models || (session?.model ? { [session.model]: value } : {}),
@@ -544,6 +564,7 @@
         if (sessionLive.isArchivedSession(session) && native?.client === session.client
           && native.sessionId === session.sessionId && ['running', 'waiting'].includes(sessionActivityState(native, now))) {
           session = { ...session, archived: false, deleted: false, sourceDeleted: false,
+            latestModel: native.latestModel ?? null,
             lastUsedAt: native.lastUsedAt, liveActivity: native.liveActivity,
             turnEnded: native.turnEnded, waitingForInput: native.waitingForInput,
             ...(sessionLive.isSessionReasoningEffortClient(session.client) ? { reasoningEffort: native.reasoningEffort ?? null } : {}) };
@@ -581,7 +602,7 @@
           name: sessionTitle || titleParts.join(' · '),
           modelLabel,
           modelTooltipEntries: sessionModelTooltipEntries(session, {
-            unattributedLabel: options.unattributedLabel
+            unattributedLabel: options.unattributedLabel, latestModelLabel: options.latestModelLabel
           }),
           subtitle: (sessionTitle ? titleParts : activityParts).join(' · '),
           activity: sessionTitle ? activityParts.join(' · ') : undefined,
@@ -601,11 +622,13 @@
           running: running || undefined,
           activityState,
           context: sessionContextForRow(session, now),
+          latestModel: session.latestModel,
           reasoningEffort: session.reasoningEffort,
           contextSnapshot: !archived ? sessionLive.sessionContextRow(session) : undefined,
           promptCache: sessionLive.sessionPromptCacheForRow(session, now),
           client,
           clientLabel,
+          sourceDevice: session.sourceDevice,
           nativeSessionId: textValue(session?.nativeSessionId),
           t3ThreadId: textValue(session?.t3ThreadId),
           titled: Boolean(sessionTitle) || undefined,
@@ -650,68 +673,8 @@
   // A child whose parent is outside the period stays a row of its own.
   function groupSubagentRows(rows, options = {}) {
     const list = Array.isArray(rows) ? rows : [];
-    const eligible = row => row?.kind === 'session' && row.backgroundReview !== true && row.grokBot !== true;
-    // Independent conversations need neither alias resolution nor parent walks.
-    // Keep the full algorithm for repeated native/app identities and any link,
-    // including missing or cross-client parents.
-    const identities = new Set();
-    let needsGrouping = false;
-    for (const row of list) {
-      if (!eligible(row)) continue;
-      const id = sessionConversationIdentity(row);
-      if (row.parentKey || identities.has(id)) { needsGrouping = true; break; }
-      identities.add(id);
-    }
-    if (!needsGrouping) return list;
-    const byKey = new Map(list.filter(eligible).map(row => [row.key, row]));
-    // A verified native conversation can have several independent accounting
-    // rollouts. Resolve links through any visible alias, without changing those
-    // keys or pretending a continuation is a delegated child.
+    const { children, grouped, conflicts, parentLinks } = sessionLive.sessionGroupingPlan(list);
     const identity = sessionConversationIdentity;
-    const aliases = new Map();
-    for (const row of byKey.values()) {
-      const id = identity(row);
-      const previous = aliases.get(id);
-      if (!previous || row.key.localeCompare(previous.key) < 0) aliases.set(id, row);
-    }
-    const parentLinks = new Map();
-    const conflicts = new Set();
-    for (const row of byKey.values()) {
-      if (!row.parentKey) continue;
-      const id = identity(row);
-      const parent = byKey.get(row.parentKey);
-      const link = parent ? identity(parent) : row.parentKey;
-      if (link === id) continue;
-      if (parentLinks.has(id) && parentLinks.get(id).link !== link) conflicts.add(id);
-      else parentLinks.set(id, { link, parentKey: row.parentKey, subagentLabel: row.subagentLabel });
-    }
-    // Contradictory relationship facts never justify collapsing identities.
-    const canonical = row => conflicts.has(identity(row)) ? row : aliases.get(identity(row));
-    const rootOf = (row) => {
-      const seen = new Set();
-      let current = canonical(row);
-      while (!seen.has(current.key)) {
-        const parentKey = conflicts.has(identity(current)) ? current.parentKey
-          : parentLinks.get(identity(current))?.parentKey;
-        if (!parentKey) break;
-        seen.add(current.key);
-        const parent = byKey.get(parentKey);
-        if (!parent) break;
-        const next = canonical(parent);
-        if (seen.has(next.key)) return canonical(row);
-        current = next;
-      }
-      return current;
-    };
-    const children = new Map();
-    const grouped = new Set();
-    for (const row of byKey.values()) {
-      const root = rootOf(row);
-      if (root.key === row.key) continue;
-      if (!children.has(root.key)) children.set(root.key, []);
-      children.get(root.key).push(row);
-      grouped.add(row.key);
-    }
     if (grouped.size === 0) return list;
     return list
       .filter(row => !grouped.has(row?.key))
@@ -722,10 +685,6 @@
   // The group row is the parent's own row with the group's totals: members are
   // disjoint sessions, so their sum is the whole group and nothing is counted
   // twice. Its id moves to the group page, where the parent is listed first.
-  function sessionConversationIdentity(row) {
-    if (row.t3ThreadId) return `t3:${row.t3ThreadId}`;
-    return row.client === 'codex' && row.nativeSessionId ? `codex:${row.nativeSessionId}` : row.key;
-  }
 
   function subagentGroupRow(parent, members, options, splitIdentity = false, rootSubagentLabel) {
     const sameConversation = row => sessionConversationIdentity(row) === sessionConversationIdentity(parent);
@@ -750,7 +709,7 @@
         models[model] = (models[model] || 0) + finiteNumber(tokens);
       }
     }
-    const group = { client: parent.client, models, totalTokens: value };
+    const group = { client: parent.client, models, totalTokens: value, latestModel: main[0].latestModel };
     const modelLabel = sessionModelLabel(group);
     const display = main[0];
     const titleParts = [display.clientLabel || display.client, modelLabel, sessionReasoningEffortForRow(display)].filter(Boolean).join(' · ');
@@ -789,7 +748,7 @@
       name: display.titled ? display.name : titleParts,
       modelLabel,
       modelTooltipEntries: options.includeModelTooltip === false ? []
-        : sessionModelTooltipEntries(group, { unattributedLabel: options.unattributedLabel }),
+        : sessionModelTooltipEntries(group, { unattributedLabel: options.unattributedLabel, latestModelLabel: options.latestModelLabel }),
       modelTokens: models,
       // Keep the tool/model reading order; the renderer reserves space for the
       // count while the preceding text can shrink in a narrow window.
@@ -894,6 +853,7 @@
     sessionStatusNode,
     sessionReasoningEffortForRow,
     sessionModelMetadataLabel,
+    sessionSubtitleForDisplay,
     sessionModelMetadataNode,
     applyBreakdownRowSemantics,
     archivedSessionCount,
@@ -907,6 +867,7 @@
     handleBreakdownRowKeydown,
     sessionBreakdownIncomplete,
     sessionCacheHitPercent,
+    cacheHitLabel,
     sessionIdLabel,
     sessionDetailIdLabel,
     sessionTitleForDisplay,

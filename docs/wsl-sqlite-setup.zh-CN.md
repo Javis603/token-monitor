@@ -6,7 +6,7 @@
 
 ## 什么时候需要这样配置
 
-Windows 版 Token Monitor 默认会通过 `\\wsl$` 扫描所有正在运行的 WSL 发行版，并约每五分钟合并一次用量。Codex JSONL session 这类文件型数据通常可以直接读取。
+Windows 版 Token Monitor 默认关闭 WSL 扫描。在 **设置 → 采集 → 扫描 WSL 里的工具** 启用后，才会通过 `\\wsl$` 扫描正在运行的 WSL 发行版，并约每五分钟合并一次用量。扫描可能增加 WSL 内存用量；已保存的开关选择会保留。Codex JSONL session 这类文件型数据通常可以直接读取。
 
 OpenCode、Hermes、ZCode 和 Antigravity 等工具的当前用量保存在 SQLite 数据库中。Windows 进程可以通过 `\\wsl$` 找到数据库，但 SQLite 无法可靠地跨 WSL 9P 边界协调文件锁和正在使用的 WAL。因此，Token Monitor 可能会在 **设置 → 采集 → WSL 检测** 里显示已找到工具，却没有用量。
 

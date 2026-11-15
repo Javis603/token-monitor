@@ -107,10 +107,12 @@ nonisolated struct TokenMonitorActivityAttributes: ActivityAttributes {
         }
 
         struct Agents: Codable, Hashable, Sendable {
-            /// Sessions currently running (the Sessions list's three-state rule).
+            /// Running conversation groups (the macOS Notch grouped-session rule).
             var running: Int
-            /// Distinct client ids of those sessions, most recent first, at most three.
+            /// Distinct active client ids, waiting first, newest per state, at most three.
             var clients: [String]
+            /// Optional for cached states and Hubs written before automatic mode.
+            var waiting: Int? = nil
 
             static let none = Agents(running: 0, clients: [])
         }
@@ -122,9 +124,12 @@ nonisolated struct TokenMonitorActivityAttributes: ActivityAttributes {
 /// Device-side Live Activity presentation, persisted in the shared app-group
 /// preferences. Like the desktop menu bar, each surface pairs an appearance
 /// with a data source; colour, type and wording follow the design system.
-/// Every field decodes leniently: a missing or unknown value falls back to its
-/// default instead of discarding the whole layout.
 nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
+    enum Mode: String, Codable, CaseIterable, Sendable {
+        case automatic, custom
+    }
+
+    var mode: Mode = .automatic
     /// Where a reading comes from, as in the desktop menu bar composer.
     struct Source: Codable, Hashable, Sendable {
         enum Automatic: String, Codable, CaseIterable, Sendable {
@@ -157,6 +162,7 @@ nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
         /// nil picks the provider's lowest-remaining account.
         var accountKey: String?
         var window: Window = .primary
+        var windowLabel: String? = nil
         var value: Value = .remaining
         var period: Period = .today
         var scope: Scope = .all
@@ -171,33 +177,15 @@ nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
             self.period = period
             self.scope = scope
         }
-
-        init(from decoder: Decoder) throws {
-            let values = try decoder.container(keyedBy: CodingKeys.self)
-            func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
-                ((try? values.decodeIfPresent(T.self, forKey: key)) ?? nil) ?? fallback
-            }
-            providerID = (try? values.decodeIfPresent(String.self, forKey: .providerID)) ?? nil
-            automatic = value(.automatic, .lowest)
-            accountKey = (try? values.decodeIfPresent(String.self, forKey: .accountKey)) ?? nil
-            window = value(.window, .primary)
-            self.value = value(.value, .remaining)
-            period = value(.period, .today)
-            scope = value(.scope, .all)
-        }
-
-        private enum CodingKeys: String, CodingKey {
-            case providerID, automatic, accountKey, window, value, period, scope
-        }
     }
 
     enum CompactStyle: String, Codable, CaseIterable, Sendable {
-        case ring, providerIcon, appIcon, percent, percentReset, reset, tokens, cost, speed, agents, none
+        case ring, providerIcon, appIcon, percent, percentReset, reset, tokens, cost, speed, agents, agentIcons, activity, none
     }
 
     /// Shown when another app's activity shares the island.
     enum MinimalStyle: String, Codable, CaseIterable, Sendable {
-        case appRing, ring, percent, providerIcon
+        case appRing, ring, percent, providerIcon, appIcon
     }
 
     enum ExpandedTemplate: String, Codable, CaseIterable, Sendable {
@@ -216,14 +204,6 @@ nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
             self.style = style
             self.source = source
         }
-
-        init(from decoder: Decoder) throws {
-            let values = try decoder.container(keyedBy: CodingKeys.self)
-            style = ((try? values.decodeIfPresent(CompactStyle.self, forKey: .style)) ?? nil) ?? .none
-            source = ((try? values.decodeIfPresent(Source.self, forKey: .source)) ?? nil) ?? Source()
-        }
-
-        private enum CodingKeys: String, CodingKey { case style, source }
     }
 
     var compactLeading = Slot(style: .ring)
@@ -235,27 +215,12 @@ nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
     var lockScreen: LockScreenTemplate = .overview
     var lockScreenSource = Source()
 
-    init() {}
-
-    init(from decoder: Decoder) throws {
-        let values = try decoder.container(keyedBy: CodingKeys.self)
-        func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
-            ((try? values.decodeIfPresent(T.self, forKey: key)) ?? nil) ?? fallback
-        }
-        let defaults = LiveActivityLayout()
-        compactLeading = value(.compactLeading, defaults.compactLeading)
-        compactTrailing = value(.compactTrailing, defaults.compactTrailing)
-        minimal = value(.minimal, defaults.minimal)
-        minimalSource = value(.minimalSource, defaults.minimalSource)
-        expanded = value(.expanded, defaults.expanded)
-        expandedSource = value(.expandedSource, defaults.expandedSource)
-        lockScreen = value(.lockScreen, defaults.lockScreen)
-        lockScreenSource = value(.lockScreenSource, defaults.lockScreenSource)
+    init(mode: Mode = .automatic) {
+        self.mode = mode
     }
 
-    private enum CodingKeys: String, CodingKey {
-        case compactLeading, compactTrailing, minimal, minimalSource
-        case expanded, expandedSource, lockScreen, lockScreenSource
+    static var automatic: Self {
+        Self()
     }
 
     private var sources: [Source] {
@@ -264,12 +229,14 @@ nonisolated struct LiveActivityLayout: Codable, Hashable, Sendable {
 
     /// Providers the layout names explicitly; the Hub sends them beside the ranked records.
     var referencedProviderIDs: [String] {
+        guard mode == .custom else { return [] }
         var ids: [String] = []
         for id in sources.compactMap(\.providerID) where !ids.contains(id) { ids.append(id) }
         return ids
     }
 
     var referencedAccountKeys: [String] {
+        guard mode == .custom else { return [] }
         var keys: [String] = []
         for key in sources.compactMap(\.accountKey) where !keys.contains(key) { keys.append(key) }
         return keys

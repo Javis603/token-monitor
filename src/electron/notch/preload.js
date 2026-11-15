@@ -10,6 +10,7 @@ function subscribe(channel, callback) {
 // Same narrow renderer contract; independent channels, never EdgeDock handlers.
 contextBridge.exposeInMainWorld('tokenMonitorEdgeDock', {
   ready: () => ipcRenderer.send('topNotch:ready'),
+  setLimitsDemand: (active) => ipcRenderer.send('topNotch:limitsDemand', active),
   reportNotchSize: (height, slots, summaryMeasurement) => ipcRenderer.send('topNotch:size', { height, slots, summaryMeasurement }),
   reportMotionFrame: (id, elapsed) => ipcRenderer.send('topNotch:frame', { id, elapsed }),
   onAnimate: (callback) => subscribe('topNotch:animate', callback),

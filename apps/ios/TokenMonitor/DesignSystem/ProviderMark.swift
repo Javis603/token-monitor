@@ -3,9 +3,10 @@ import SwiftUI
 struct ProviderMark: View {
     let provider: String?
     var size: CGFloat = 18
+    var isClient = false
 
     var body: some View {
-        Image(ProviderPresentation.assetName(for: provider))
+        Image(isClient ? ClientPresentation.assetName(for: provider ?? "") : ProviderPresentation.assetName(for: provider))
             .renderingMode(.template)
             .resizable()
             .scaledToFit()

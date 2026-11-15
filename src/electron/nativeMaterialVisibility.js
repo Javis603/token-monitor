@@ -8,7 +8,7 @@ const windows = new WeakMap();
 function entryFor(win) {
   let entry = windows.get(win);
   if (!entry) {
-    entry = { glass: null, failed: null, vibrancy: undefined, state: null };
+    entry = { glass: null, failed: null, vibrancy: undefined, state: null, shaped: false };
     windows.set(win, entry);
   }
   return entry;
@@ -38,7 +38,7 @@ function syncNativeMaterialVisibility(win, options, platform = process.platform,
   if (!win || win.isDestroyed?.() || platform !== 'darwin') return;
   const entry = entryFor(win);
   const {
-    enabled, opaque, liquidGlass = false, style = 'regular', tintOpacity, reducedTransparency: systemReduced = false, highContrast = false, dark = true, radius = 14
+    enabled, opaque, liquidGlass = false, style = 'regular', tintOpacity, reducedTransparency: systemReduced = false, highContrast = false, dark = true, radius = 14, shape
   } = typeof options === 'boolean' ? { enabled: options } : (options || {});
   // Reduce Transparency replaces only the system material. With System Glass
   // off, the CSS glass and background image stay under the user's sliders.
@@ -53,11 +53,17 @@ function syncNativeMaterialVisibility(win, options, platform = process.platform,
     win.setVibrancy(material);
     entry.vibrancy = material;
   };
+  if (entry.shaped !== Boolean(shape)) {
+    // A rectangular fallback must not retain the previous canvas path/mask.
+    if (entry.glass) disposeGlass(entry);
+    setVibrancy(null);
+    entry.shaped = Boolean(shape);
+  }
   if (wantsGlass && supported && !entry.failed) {
     try {
       setVibrancy(null);
-      if (!entry.glass) entry.glass = (deps.createGlass || createMacLiquidGlass)(win);
-      entry.glass.update({ dark, radius, style, tintOpacity });
+      if (!entry.glass) entry.glass = (deps.createGlass || createMacLiquidGlass)(win, { shaped: Boolean(shape) });
+      entry.glass.update({ dark, radius, style, tintOpacity, ...(shape ? { shape } : {}) });
     } catch (error) {
       entry.failed = error.message;
       console.warn(`[native-material] Liquid Glass unavailable: ${error.message}`);
@@ -69,7 +75,9 @@ function syncNativeMaterialVisibility(win, options, platform = process.platform,
   const type = opaque || reducedTransparency ? 'opaque'
     : !enabled ? 'transparent'
       : entry.glass ? 'liquid-glass' : 'vibrancy';
-  setVibrancy(type === 'vibrancy' && visible ? 'hud' : null);
+  // Shaped retained cards install and mask their material before first reveal,
+  // and keep that same container between opacity-only dismissals.
+  setVibrancy(type === 'vibrancy' && (visible || Boolean(shape)) ? 'hud' : null);
   const state = { type, reducedTransparency, highContrast, fallbackReason: entry.failed, liquidGlassSupported: supported };
   if (JSON.stringify(entry.state) !== JSON.stringify(state)) {
     entry.state = state;

@@ -3,6 +3,42 @@ import Testing
 @testable import TokenMonitor
 
 struct SessionUsageTests {
+    @Test func conversationUsesLatestMainModelRatherThanNewerSubagent() throws {
+        func session(_ json: String) throws -> SessionUsage {
+            try JSONDecoder().decode(SessionUsage.self, from: Data(json.utf8))
+        }
+        let sessions = [
+            "codex:old": try session(#"{"client":"codex","sessionId":"old","t3ThreadId":"thread","latestModel":"older","totalTokens":90,"lastUsedAt":"2026-11-09T10:00:00Z"}"#),
+            "codex:main": try session(#"{"client":"codex","sessionId":"main","t3ThreadId":"thread","latestModel":"current","totalTokens":10,"lastUsedAt":"2026-11-09T11:00:00Z"}"#),
+            "codex:child": try session(#"{"client":"codex","sessionId":"child","parentSessionId":"main","latestModel":"child-only","totalTokens":5,"lastUsedAt":"2026-11-09T12:00:00Z"}"#)
+        ]
+        let row = try #require(SessionListEntry.rows(sessions).first)
+        #expect(row.session?.latestModel == "current")
+        #expect(row.tokens == 105)
+    }
+
+    @Test func latestModelKeepsHistoricalModelBreakdownAndSearch() throws {
+        let session = try JSONDecoder().decode(SessionUsage.self, from: Data(#"{"client":"codex","archived":true,"latestModel":"recent","models":{"old":90,"recent":10}}"#.utf8))
+        #expect(session.modelSummary == "recent +1")
+        #expect(session.modelEntries.map(\.id) == ["old", "recent"])
+        #expect(session.matches("recent"))
+        var unknown = session
+        unknown.latestModel = nil
+        #expect(unknown.modelSummary == String(localized: "\(2) models"))
+        unknown.latestModel = "configured"
+        #expect(unknown.modelSummary == "configured +2")
+        #expect(unknown.matches("configured"))
+        let clear = try JSONDecoder().decode(SessionUsage.self, from: Data(#"{"latestModel":null,"models":{"old":1}}"#.utf8))
+        #expect(clear.modelSummary == "old")
+    }
+
+    @Test func lifetimeActiveDaysRequireCompleteHistory() throws {
+        for flag in ["true", "false", "null"] {
+            let summary = try JSONDecoder().decode(HistorySummary.self, from: Data("{\"activeDays\":900,\"activeDaysComplete\":\(flag)}".utf8))
+            #expect(summary.lifetimeActiveDays == (flag == "true" ? 900 : nil))
+        }
+    }
+
     @Test func reasoningEffortPersistsWithoutContextOrCacheAndUsesCanonicalBounds() throws {
         for client in ["codex", "claude"] {
             for effort in ["high", "xhigh", "max", "None", "custom_1", String(repeating: "a", count: 32)] {

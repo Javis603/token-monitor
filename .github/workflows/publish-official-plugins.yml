@@ -10,6 +10,7 @@ on:
       - 'src/electron/plugins/**'
       - 'src/shared/plugins/**'
       - 'tests/plugin-quota-alerts/**'
+      - 'tests/plugin-openai-api-credit/**'
       - 'tests/electron/pluginDistribution.test.js'
       - 'tests/electron/pluginOfficialSource.test.js'
       - 'tests/electron/pluginQuotaFixture.test.js'
@@ -38,7 +39,7 @@ jobs:
         env:
           PLUGIN_REPOSITORY: ${{ github.repository }}
         run: |
-          node --test --test-concurrency=2 tests/plugin-quota-alerts/*.test.js tests/electron/pluginDistribution.test.js tests/electron/pluginOfficialSource.test.js tests/electron/pluginQuotaFixture.test.js
+          node --test --test-concurrency=2 tests/plugin-quota-alerts/*.test.js tests/plugin-openai-api-credit/*.test.js tests/electron/pluginDistribution.test.js tests/electron/pluginOfficialSource.test.js tests/electron/pluginQuotaFixture.test.js
           node scripts/official-plugin-distribution.cjs build "$RUNNER_TEMP/official-plugins"
       - uses: actions/upload-artifact@v4
         with:

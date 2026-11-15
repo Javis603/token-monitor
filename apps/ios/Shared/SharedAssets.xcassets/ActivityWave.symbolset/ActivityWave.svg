@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000" viewBox="0 0 1000 1000">
+  <style>.monochrome-0 {fill:black;-sfsymbols-always-pulses:true;}
+.hierarchical-0:primary {fill:black;-sfsymbols-always-pulses:true;}
+.multicolor-0:tintColor {fill:black;-sfsymbols-always-pulses:true;}
+.monochrome-1 {fill:black;-sfsymbols-always-pulses:true;}
+.hierarchical-1:primary {fill:black;-sfsymbols-always-pulses:true;}
+.multicolor-1:tintColor {fill:black;-sfsymbols-always-pulses:true;}
+.monochrome-2 {fill:black;-sfsymbols-always-pulses:true;}
+.hierarchical-2:primary {fill:black;-sfsymbols-always-pulses:true;}
+.multicolor-2:tintColor {fill:black;-sfsymbols-always-pulses:true;}
+.monochrome-3 {fill:black;-sfsymbols-always-pulses:true;}
+.hierarchical-3:primary {fill:black;-sfsymbols-always-pulses:true;}
+.multicolor-3:tintColor {fill:black;-sfsymbols-always-pulses:true;}
+.monochrome-4 {fill:black;-sfsymbols-always-pulses:true;}
+.hierarchical-4:primary {fill:black;-sfsymbols-always-pulses:true;}
+.multicolor-4:tintColor {fill:black;-sfsymbols-always-pulses:true;}</style>
+  <g id="Notes">
+    <text id="template-version">Template v.5.0</text>
+  </g>
+  <g id="Guides" fill="none" stroke="#00AEEF">
+    <line id="Baseline-M" x1="0" x2="1000" y1="550" y2="550" />
+    <line id="Capline-M" x1="0" x2="1000" y1="450" y2="450" />
+    <line id="Baseline-L" x1="0" x2="1000" y1="550" y2="550" />
+    <line id="Capline-L" x1="0" x2="1000" y1="450" y2="450" />
+    <line id="Baseline-S" x1="0" x2="1000" y1="550" y2="550" />
+    <line id="Capline-S" x1="0" x2="1000" y1="450" y2="450" />
+    <line id="left-margin-Ultralight-S" x1="100" x2="100" y1="400" y2="600" />
+    <line id="right-margin-Ultralight-S" x1="225" x2="225" y1="400" y2="600" />
+    <line id="left-margin-Regular-S" x1="400" x2="400" y1="400" y2="600" />
+    <line id="right-margin-Regular-S" x1="525" x2="525" y1="400" y2="600" />
+    <line id="left-margin-Black-S" x1="700" x2="700" y1="400" y2="600" />
+    <line id="right-margin-Black-S" x1="825" x2="825" y1="400" y2="600" />
+  </g>
+  <g id="Symbols">
+    <g id="Ultralight-S">
+      <path class="monochrome-0 hierarchical-0:primary multicolor-0:tintColor" d="M 106.0 479.875 A 6.0 6.0 0 0 1 112.0 485.875 V 514.125 A 6.0 6.0 0 0 1 100.0 514.125 V 485.875 A 6.0 6.0 0 0 1 106.0 479.875 Z" />
+      <path class="monochrome-1 hierarchical-1:primary multicolor-1:tintColor" d="M 133.5 462.625 A 6.0 6.0 0 0 1 139.5 468.625 V 531.375 A 6.0 6.0 0 0 1 127.5 531.375 V 468.625 A 6.0 6.0 0 0 1 133.5 462.625 Z" />
+      <path class="monochrome-2 hierarchical-2:primary multicolor-2:tintColor" d="M 161.0 474.125 A 6.0 6.0 0 0 1 167.0 480.125 V 519.875 A 6.0 6.0 0 0 1 155.0 519.875 V 480.125 A 6.0 6.0 0 0 1 161.0 474.125 Z" />
+      <path class="monochrome-3 hierarchical-3:primary multicolor-3:tintColor" d="M 188.5 456.875 A 6.0 6.0 0 0 1 194.5 462.875 V 537.125 A 6.0 6.0 0 0 1 182.5 537.125 V 462.875 A 6.0 6.0 0 0 1 188.5 456.875 Z" />
+      <path class="monochrome-4 hierarchical-4:primary multicolor-4:tintColor" d="M 216.0 482.75 A 6.0 6.0 0 0 1 222.0 488.75 V 511.25 A 6.0 6.0 0 0 1 210.0 511.25 V 488.75 A 6.0 6.0 0 0 1 216.0 482.75 Z" />
+    </g>
+    <g id="Regular-S">
+      <path class="monochrome-0 hierarchical-0:primary multicolor-0:tintColor" d="M 407.5 479.875 A 7.5 7.5 0 0 1 415.0 487.375 V 512.625 A 7.5 7.5 0 0 1 400.0 512.625 V 487.375 A 7.5 7.5 0 0 1 407.5 479.875 Z" />
+      <path class="monochrome-1 hierarchical-1:primary multicolor-1:tintColor" d="M 435.0 462.625 A 7.5 7.5 0 0 1 442.5 470.125 V 529.875 A 7.5 7.5 0 0 1 427.5 529.875 V 470.125 A 7.5 7.5 0 0 1 435.0 462.625 Z" />
+      <path class="monochrome-2 hierarchical-2:primary multicolor-2:tintColor" d="M 462.5 474.125 A 7.5 7.5 0 0 1 470.0 481.625 V 518.375 A 7.5 7.5 0 0 1 455.0 518.375 V 481.625 A 7.5 7.5 0 0 1 462.5 474.125 Z" />
+      <path class="monochrome-3 hierarchical-3:primary multicolor-3:tintColor" d="M 490.0 456.875 A 7.5 7.5 0 0 1 497.5 464.375 V 535.625 A 7.5 7.5 0 0 1 482.5 535.625 V 464.375 A 7.5 7.5 0 0 1 490.0 456.875 Z" />
+      <path class="monochrome-4 hierarchical-4:primary multicolor-4:tintColor" d="M 517.5 482.75 A 7.5 7.5 0 0 1 525.0 490.25 V 509.75 A 7.5 7.5 0 0 1 510.0 509.75 V 490.25 A 7.5 7.5 0 0 1 517.5 482.75 Z" />
+    </g>
+    <g id="Black-S">
+      <path class="monochrome-0 hierarchical-0:primary multicolor-0:tintColor" d="M 709.0 479.875 A 9.0 9.0 0 0 1 718.0 488.875 V 511.125 A 9.0 9.0 0 0 1 700.0 511.125 V 488.875 A 9.0 9.0 0 0 1 709.0 479.875 Z" />
+      <path class="monochrome-1 hierarchical-1:primary multicolor-1:tintColor" d="M 736.5 462.625 A 9.0 9.0 0 0 1 745.5 471.625 V 528.375 A 9.0 9.0 0 0 1 727.5 528.375 V 471.625 A 9.0 9.0 0 0 1 736.5 462.625 Z" />
+      <path class="monochrome-2 hierarchical-2:primary multicolor-2:tintColor" d="M 764.0 474.125 A 9.0 9.0 0 0 1 773.0 483.125 V 516.875 A 9.0 9.0 0 0 1 755.0 516.875 V 483.125 A 9.0 9.0 0 0 1 764.0 474.125 Z" />
+      <path class="monochrome-3 hierarchical-3:primary multicolor-3:tintColor" d="M 791.5 456.875 A 9.0 9.0 0 0 1 800.5 465.875 V 534.125 A 9.0 9.0 0 0 1 782.5 534.125 V 465.875 A 9.0 9.0 0 0 1 791.5 456.875 Z" />
+      <path class="monochrome-4 hierarchical-4:primary multicolor-4:tintColor" d="M 819.0 482.75 A 9.0 9.0 0 0 1 828.0 491.75 V 508.25 A 9.0 9.0 0 0 1 810.0 508.25 V 491.75 A 9.0 9.0 0 0 1 819.0 482.75 Z" />
+    </g>
+  </g>
+</svg>
