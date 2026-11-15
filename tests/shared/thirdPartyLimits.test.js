@@ -1472,6 +1472,41 @@ test('New API error bodies cannot consume the save budget when the stream stalls
   assert.equal(provider.status, 'unauthorized');
 });
 
+test('New API save probes keep a token refusal when the status request stalls', async () => {
+  const signal = AbortSignal.timeout(500);
+  await assert.rejects(
+    fetchThirdPartyAccount({
+      name: 'production',
+      adapter: NEWAPI_ACCOUNT_ADAPTER,
+      baseUrl: 'https://api.example.com',
+      accessToken: 'nap_token',
+      enabled: true
+    }, {
+      env: {},
+      signal,
+      surfaceAccessTokenErrors: true,
+      fetch: async (url) => {
+        const parsed = new URL(url);
+        if (parsed.pathname.endsWith(NEWAPI_STATUS_PATH)) {
+          return {
+            ok: true,
+            status: 200,
+            headers: { get: () => null },
+            json: () => new Promise((_, reject) => {
+              signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+            })
+          };
+        }
+        if (parsed.pathname.endsWith(NEWAPI_ACCOUNT_PATH)) {
+          return errorResponse(401, 'ACCESS_TOKEN_LEGACY_RETIRED');
+        }
+        return response(200, { data: [] });
+      }
+    }),
+    (error) => error.code === 'ACCESS_TOKEN_LEGACY_RETIRED'
+  );
+});
+
 test('configured accounts deduplicate exact adapter identities but keep distinct modes', () => {
   const accounts = configuredAccounts({
     thirdPartyProfiles: {

@@ -949,6 +949,9 @@ async function fetchThirdPartyAccount(account, deps = {}) {
   } catch (error) {
     quotaError = error;
   }
+  // A recognized token refusal is terminal. Surface it before waiting on the
+  // status or enrichment requests, whose own timeout must not replace it.
+  if (deps.surfaceAccessTokenErrors === true && isAccessTokenError(quotaError)) throw quotaError;
   const statusResponse = await statusPromise;
   const enrichment = renewedCredentials
     ? await settleEnrichments(fetchOptionalEnrichments({ ...account, ...renewedCredentials }, adapter, deps))
@@ -970,7 +973,6 @@ async function fetchThirdPartyAccount(account, deps = {}) {
     updatedAt
   };
   if (quotaError) {
-    if (deps.surfaceAccessTokenErrors === true && isAccessTokenError(quotaError)) throw quotaError;
     return normalizeLimitProvider({
       ...common,
       status: quotaError.status || 'unavailable',
