@@ -192,7 +192,7 @@
         accordionRows,
         stale: false
       };
-    }).sort((a, b) => b.cost - a.cost || b.value - a.value || a.name.localeCompare(b.name));
+    }).sort((a, b) => b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
   }
 
   return { canonicalProjectKey, clientGradient, projectBreakdownIncomplete, projectRowsForPeriod };

@@ -20,7 +20,7 @@ test('projectBreakdownIncomplete flags bounded synchronized periods', () => {
   assert.equal(projectBreakdownIncomplete(stats, 'allTime'), false);
 });
 
-test('projectRowsForPeriod merges sessions by workspace and sorts by cost', () => {
+test('projectRowsForPeriod merges sessions by workspace and sorts by token usage', () => {
   const rows = projectRowsForPeriod({ sessions: {
     a: { client: 'codex', projectId: 'sha256:a', projectLabel: 'client-a', totalTokens: 100, costUsd: 2, models: { gpt: 100 } },
     b: { client: 'claude', projectId: 'sha256:a', projectLabel: 'client-a', totalTokens: 50, costUsd: 1, models: { claude: 50 } },
@@ -28,15 +28,39 @@ test('projectRowsForPeriod merges sessions by workspace and sorts by cost', () =
     d: { client: 'claude', totalTokens: 999, costUsd: 99 }
   } }, { clientLabels: { claude: 'Claude Code', codex: 'Codex' }, clientColors: { codex: '#00aabb', claude: '#cc7755' } });
   assert.equal(rows.length, 2);
-  assert.deepEqual({ key: rows[0].key, name: rows[0].name, value: rows[0].value, cost: rows[0].cost, detail: rows[0].detail }, { key: 'client-a', name: 'client-a', value: 150, cost: 3, detail: '' });
-  assert.deepEqual(rows[0].accordionRows, [
+  assert.deepEqual(rows.map((row) => row.name), ['client-b', 'client-a']);
+  const merged = rows[1];
+  assert.deepEqual({ key: merged.key, name: merged.name, value: merged.value, cost: merged.cost, detail: merged.detail }, { key: 'client-a', name: 'client-a', value: 150, cost: 3, detail: '' });
+  assert.deepEqual(merged.accordionRows, [
     { key: 'codex', name: 'Codex', value: 100, percent: 100 / 150 * 100, color: '#00aabb' },
     { key: 'claude', name: 'Claude Code', value: 50, percent: 50 / 150 * 100, color: '#cc7755' }
   ]);
-  assert.equal(rows[1].name, 'client-b');
-  assert.match(rows[0].barBackground, /^linear-gradient\(90deg, /);
-  assert.match(rows[0].barBackground, /#00aabb/);
-  assert.match(rows[0].barBackground, /#cc7755/);
+  assert.match(merged.barBackground, /^linear-gradient\(90deg, /);
+  assert.match(merged.barBackground, /#00aabb/);
+  assert.match(merged.barBackground, /#cc7755/);
+});
+
+test('project rollups rank by tokens including unpriced and native usage in both share modes', () => {
+  const period = { projects: {
+    expensive: { label: 'Expensive', tokens: 100, costUsd: 10 },
+    cheap: { label: 'Cheap', tokens: 500, costUsd: 1 },
+    unpriced: { label: 'Unpriced', tokens: 1000, costUsd: 0, unpricedTokens: 1000 },
+    beta: { label: 'Beta', tokens: 100, costUsd: 10 },
+    alpha: { label: 'Alpha', tokens: 100, costUsd: 10 }
+  } };
+  for (const shareBy of ['tool', 'model']) {
+    const rows = projectRowsForPeriod(period, {
+      shareBy,
+      nativeProjects: { cheap: { label: 'Cheap', tokens: 600, clients: { reasonix: 600 } } }
+    });
+    assert.deepEqual(rows.map(({ name, value, cost }) => ({ name, value, cost })), [
+      { name: 'Cheap', value: 1100, cost: 1 },
+      { name: 'Unpriced', value: 1000, cost: 0 },
+      { name: 'Alpha', value: 100, cost: 10 },
+      { name: 'Beta', value: 100, cost: 10 },
+      { name: 'Expensive', value: 100, cost: 10 }
+    ]);
+  }
 });
 
 test('projectRowsForPeriod prefers the bounded project rollup', () => {
