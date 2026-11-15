@@ -750,15 +750,22 @@ async function requestJson(url, options = {}, deps = {}) {
 // a stable code. The code is what tells a retired legacy token from a token
 // that is simply missing a scope; the status alone cannot. Read at most an
 // error envelope into memory, whether or not a proxy preserved Content-Length.
+function cancelResponseBody(body) {
+  // Releasing the stream must not wait for a transport whose cancel never settles.
+  try {
+    Promise.resolve(body?.cancel?.()).catch(() => {});
+  } catch (_) {}
+}
+
 async function upstreamErrorCode(response) {
   const declared = Number(response?.headers?.get?.('content-length'));
   if (Number.isFinite(declared) && declared > 4096) {
-    try { await response?.body?.cancel?.(); } catch (_) {}
+    cancelResponseBody(response?.body);
     return '';
   }
   const reader = response?.body?.getReader?.();
   if (!reader) {
-    try { await response?.body?.cancel?.(); } catch (_) {}
+    cancelResponseBody(response?.body);
     return '';
   }
   let text = '';
@@ -781,7 +788,7 @@ async function upstreamErrorCode(response) {
     return '';
   } finally {
     clearTimeout(timer);
-    try { await reader.cancel(); } catch (_) {}
+    cancelResponseBody(reader);
   }
   try {
     const body = JSON.parse(text);

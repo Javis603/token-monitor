@@ -1481,6 +1481,46 @@ test('New API error bodies cannot consume the save budget when the stream stalls
   assert.equal(provider.status, 'unauthorized');
 });
 
+test('a stalled error-body cancel does not block the refusal', async () => {
+  const stalled = {
+    ok: false,
+    status: 401,
+    headers: { get: (name) => (name === 'content-length' ? '64' : null) },
+    body: {
+      getReader: () => ({
+        read: () => new Promise(() => {}),
+        cancel: () => new Promise(() => {})
+      })
+    }
+  };
+  let timer;
+  try {
+    const provider = await Promise.race([
+      fetchThirdPartyLimits({
+        thirdPartyProfiles: {
+          production: {
+            adapter: NEWAPI_ACCOUNT_ADAPTER,
+            baseUrl: 'https://api.example.com',
+            accessToken: 'nap_token'
+          }
+        }
+      }, {
+        env: {},
+        signal: AbortSignal.timeout(5000),
+        fetch: async (url) => (new URL(url).pathname.endsWith(NEWAPI_STATUS_PATH)
+          ? response(200, { data: { quota_per_unit: DEFAULT_QUOTA_PER_UNIT } })
+          : stalled)
+      }).then(([row]) => row),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('error-body cancel blocked the refusal')), 4000);
+      })
+    ]);
+    assert.equal(provider.status, 'unauthorized');
+  } finally {
+    clearTimeout(timer);
+  }
+});
+
 test('New API save probes keep a token refusal when the status request stalls', async () => {
   const signal = AbortSignal.timeout(500);
   await assert.rejects(
