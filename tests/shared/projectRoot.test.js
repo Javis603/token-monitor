@@ -11,7 +11,8 @@ const { projectIdentity } = require('../../src/shared/sessionMetadata');
 const { projectRollupFromSessions } = require('../../src/shared/usage');
 
 function tempRoot(t) {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-project-root-')));
+  // Native realpath: git records the long form of a Windows 8.3 temp path (RUNNER~1).
+  const root = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-project-root-')));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   return root;
 }
