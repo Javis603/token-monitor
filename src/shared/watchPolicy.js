@@ -968,6 +968,7 @@ module.exports = {
   watchPathsForClients,
   watchAttributionRootsForClients,
   clientsForWatchPath,
+  isCodexHome,
   SELF_SYNCED_CLIENTS,
   watchPolicyEntries,
   watchIgnoreMatcher,

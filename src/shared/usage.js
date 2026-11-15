@@ -1334,27 +1334,23 @@ function fallbackUsagePeriod(json) {
 // the public period (month/allTime scans) pass `partitions: false` so they do not
 // allocate a second full set of session rows that is dropped immediately.
 function extractUsageBundleFromTokscale(json, options = {}) {
-  const partitions = options.partitions !== false;
+  if (options.partitions === false) return { period: extractUsageFromTokscale(json) };
   const rows = [];
   collectUsageRows(json, rows);
   if (rows.length === 0 && json && typeof json === 'object') {
     const period = fallbackUsagePeriod(json);
-    return partitions
-      ? { period, byClient: { [UNATTRIBUTED_USAGE_CLIENT]: period } }
-      : { period };
+    return { period, byClient: { [UNATTRIBUTED_USAGE_CLIENT]: period } };
   }
   const period = emptyPeriod();
-  const byClient = partitions ? Object.create(null) : null;
+  const byClient = Object.create(null);
   for (const row of rows) {
     const client = detectClient(row);
-    if (partitions) {
-      const partitionKey = client || UNATTRIBUTED_USAGE_CLIENT;
-      if (!byClient[partitionKey]) byClient[partitionKey] = emptyPeriod();
-      addUsageRowToPeriod(byClient[partitionKey], row, client);
-    }
+    const partitionKey = client || UNATTRIBUTED_USAGE_CLIENT;
+    if (!byClient[partitionKey]) byClient[partitionKey] = emptyPeriod();
+    addUsageRowToPeriod(byClient[partitionKey], row, client);
     addUsageRowToPeriod(period, row, client);
   }
-  return partitions ? { period, byClient } : { period };
+  return { period, byClient };
 }
 
 function extractUsageFromTokscale(json) {

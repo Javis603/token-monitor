@@ -13,8 +13,8 @@ const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
 const { FORK_ONLY_CLIENT_IDS } = require('./clientCatalog');
-const { antigravityCliDataDir, canonicalWatchPath, canonicalWatchFilePath, cherryStudioTranscriptRoots, clientSourceRoots, copilotExporterWatch } = require('./clientSources');
-const { clientDiagnosticRoots, clientSourceChecks, dirExists, visibleDiagnosticRoots } = require('./clientSourceObservations');
+const { canonicalWatchPath, cherryStudioTranscriptRoots, clientSourceRoots } = require('./clientSources');
+const { clientDiagnosticRoots, clientSourceChecks, visibleDiagnosticRoots } = require('./clientSourceObservations');
 const {
   CLIENT_HEALTH_VERSION,
   MAX_DIAGNOSTICS_PER_CLIENT,
@@ -47,6 +47,7 @@ const {
   watchPathsForClients,
   watchAttributionRootsForClients,
   clientsForWatchPath,
+  isCodexHome,
   isSelfWatchSqliteSidecarEvent,
   SELF_SYNCED_CLIENTS,
   resolveWatchUsePolling,
@@ -58,7 +59,7 @@ const {
   WATCH_REFUSAL_CODES
 } = require('./watchPolicy');
 const { createSessionActivityScheduler } = require('./sessionActivityScheduler');
-const { activityWatchSources, activityClientsForPath, activityWatchIgnored } = require('./sessionActivityWatch');
+const { activityWatchSources, activityClientsForPath } = require('./sessionActivityWatch');
 const { localDayKey, parseGraphResult, normalizeHistory, mergeHistories, mergeDailyMaps } = require('./history');
 const {
   graphFromDailyHistoryArchive, readDailyHistoryArchive, retainDailyHistory, retainLiveDailyHistory
@@ -68,12 +69,11 @@ const {
   terminationUnconfirmedError
 } = require('./subprocessTermination');
 const { lowerSubprocessPriority } = require('./subprocessPriority');
-const { antigravityDataRoots, createAntigravitySelfSync } = require('./providers/antigravity/selfSync');
-const { antigravityConversationSummaryCandidates } = require('./providers/antigravity/sessionMetadata');
+const { createAntigravitySelfSync } = require('./providers/antigravity/selfSync');
 const { withCursorLifecycle } = require('./providers/cursor/lifecycle');
 const { createCursorSelfSync } = require('./providers/cursor/selfSync');
 const { createCursorUsageSource, snapshotUsageKey } = require('./providers/cursor/usageSource');
-const { cursorDesktopWatchRoots, isCursorDesktopStateWrite } = require('./providers/cursor/desktopState');
+const { isCursorDesktopStateWrite } = require('./providers/cursor/desktopState');
 const {
   applySessionMetadata,
   applyT3SessionParents,
