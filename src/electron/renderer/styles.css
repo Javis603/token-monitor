@@ -1643,6 +1643,24 @@ span.settings-note.settings-item-desc {
 .sync-device-settings { display: grid; min-width: 0; gap: 8px; }
 .sync-connection-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
 .sync-connection-status { display: inline-flex; align-items: center; gap: 8px; min-height: 24px; }
+.hub-profile-picker { display: flex; min-width: 0; }
+/* Sits in the status card where the endpoint line was, so it reads as that
+   line with a disclosure rather than as another boxed field. */
+.settings-panel .hub-profile-picker .select-control-trigger {
+  width: auto;
+  max-width: 100%;
+  margin: -2px -6px;
+  padding: 2px 6px;
+  gap: 6px;
+  border-color: transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+}
+.settings-panel .hub-profile-picker .select-control-trigger:hover,
+.settings-panel .hub-profile-picker .select-control-trigger[aria-expanded="true"] { color: var(--text); background: rgba(var(--overlay-rgb), 0.06); }
+.settings-panel .hub-profile-remove { margin-left: auto; color: var(--red); }
 .sync-connection-heading .sync-connection-edit { margin-left: auto; }
 .settings-panel .sync-connection-edit,
 .settings-panel .sync-device-side .device-delete-button {
@@ -1705,7 +1723,6 @@ span.settings-note.settings-item-desc {
   transform: translateY(-50%);
   pointer-events: none;
 }
-.sync-mode-description { margin: 0 0 4px; }
 .hub-mode-fields { min-width: 0; }
 .hub-mode-fields > .accordion-animation-inner { display: grid; min-width: 0; gap: 8px; }
 .hub-secret-row { display: flex; min-width: 0; align-items: center; gap: 6px; }
