@@ -36,6 +36,40 @@ function qoderUsageUrl(site = 'global') {
   return `${qoderOrigin(site)}/api/v2/me/usages/big_model_credits`;
 }
 
+// The account's own id is the only part of a Qoder session that survives a
+// sign-in. The cookie jar is mostly analytics (`_ga`, `_fbp`, `_uetsid`) and a
+// session token that rotates, so hashing the whole jar renames the account on
+// every re-login and forks its stored quota history. Both the usage payload and
+// the `qoderuid` cookie carry the id; keep the cookie hash only as an alias for
+// readings recorded before the id was used.
+function qoderPayloadUserId(body) {
+  const payload = body?.data && typeof body.data === 'object' ? body.data : body;
+  return String(read(payload, 'userId', 'user_id') || '').trim();
+}
+
+function qoderCookieUserId(cookie) {
+  for (const part of String(cookie || '').split(';')) {
+    const index = part.indexOf('=');
+    if (index < 0 || part.slice(0, index).trim() !== 'qoderuid') continue;
+    try {
+      return decodeURIComponent(part.slice(index + 1).trim());
+    } catch (_) {
+      return part.slice(index + 1).trim();
+    }
+  }
+  return '';
+}
+
+// The two sites are separate services with their own quota pools, so the same
+// id on each names a different account.
+function qoderAccountIdentity(body, sharedBody, cookie, site) {
+  const cookieKey = hashKey('qoder', cookie);
+  const userId = qoderPayloadUserId(body) || qoderPayloadUserId(sharedBody) || qoderCookieUserId(cookie);
+  if (!userId) return { accountKey: cookieKey, accountKeyAliases: [] };
+  const accountKey = hashKey('qoder', site, `user:${userId}`);
+  return { accountKey, accountKeyAliases: accountKey === cookieKey ? [] : [cookieKey] };
+}
+
 function qoderUserPlanUrl(site = 'global') {
   return `${qoderOrigin(site)}/api/v1/me/userplan`;
 }
@@ -283,9 +317,11 @@ async function fetchQoderLimits(options = {}, deps = {}) {
       planResetsAt,
       allowInlineShared: sharedResponse.ok
     });
+    const identity = qoderAccountIdentity(body, sharedResponse.ok ? sharedBody : undefined, cookie, site);
     const result = normalizeLimitProvider({
       provider: 'qoder',
-      accountKey: hashKey('qoder', cookie),
+      accountKey: identity.accountKey,
+      ...(identity.accountKeyAliases.length ? { accountKeyAliases: identity.accountKeyAliases } : {}),
       accountLabel,
       source: 'web',
       status: 'ok',

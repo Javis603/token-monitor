@@ -8,6 +8,8 @@ const EXPECTED_FILES = ['star-history-dark.svg', 'star-history.svg', 'stars.json
 const OFFICIAL_RENDERER_REPOSITORY = 'star-history/star-history';
 const MAX_SVG_BYTES = 2 * 1024 * 1024;
 const MAX_JSON_BYTES = 10 * 1024 * 1024;
+// GitHub owner avatar URLs can return JPEG even when their path ends in .png.
+const EMBEDDED_RASTER_IMAGE = /^data:image\/(?:png|jpeg);base64,[a-z0-9+/]+=*$/i;
 const XML_NAME_UPPER = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
 const XML_NAME_LOWER = 'abcdefghijklmnopqrstuvwxyz';
 const XML_POLICY_XPATH = `concat(
@@ -137,7 +139,7 @@ const validateSvg = (filename, { repository, validateXml = validateXmlWithXmllin
   for (const match of svg.matchAll(/\b(?:href|src)\s*=\s*(["'])(.*?)\1/gi)) {
     const target = match[2];
     if (target.startsWith('#')) continue;
-    if (/^data:image\/png;base64,[a-z0-9+/]+=*$/i.test(target)) continue;
+    if (EMBEDDED_RASTER_IMAGE.test(target)) continue;
     fail(`${path.basename(filename)} contains a disallowed linked resource`);
   }
 
@@ -161,7 +163,7 @@ const validateSvg = (filename, { repository, validateXml = validateXmlWithXmllin
       && attribute('height') === '22'
       && attribute('y') === '12'
       && attribute('clip-path') === 'url(#clip-circle-title)'
-      && /^data:image\/png;base64,[a-z0-9+/]+=*$/i.test(attribute('href') || '');
+      && EMBEDDED_RASTER_IMAGE.test(attribute('href') || '');
   });
   if (titleLogos.length !== 1) {
     fail(path.basename(filename) + ' must contain exactly one embedded owner title icon');

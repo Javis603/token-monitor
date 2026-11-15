@@ -499,13 +499,16 @@ Object.assign(els, {
   trayOptions: document.getElementById('trayOptions'),
   hubModeOptions: document.getElementById('hubModeOptions'),
   icloudModeOption: document.querySelector('#hubModeOptions option[value="icloud"]'),
-  syncModeDescription: document.getElementById('syncModeDescription'),
   icloudFields: document.getElementById('icloudFields'),
   icloudStatus: document.getElementById('icloudStatus'),
   icloudRootStatus: document.getElementById('icloudRootStatus'),
   hubBuildStatus: document.getElementById('hubBuildStatus'),
   hubClientFields: document.getElementById('hubClientFields'),
   syncConnectionEditor: document.getElementById('syncConnectionEditor'),
+  hubProfileSelect: document.getElementById('hubProfileSelect'),
+  hubProfilePicker: document.getElementById('hubProfilePicker'),
+  hubProfileRemove: document.getElementById('hubProfileRemove'),
+  hubProfileNameInput: document.getElementById('hubProfileNameInput'),
   syncConnectionIdentity: document.getElementById('syncConnectionIdentity'),
   syncConnectionEndpoint: document.getElementById('syncConnectionEndpoint'),
   syncConnectionEdit: document.getElementById('syncConnectionEdit'),
@@ -8203,11 +8206,16 @@ function renderBreakdownChange(breakdown, options = {}) {
 }
 
 function restartTimer() {
-  if (state.refreshTimer) clearInterval(state.refreshTimer);
   const interval = state.streamConnected
     ? 5 * 60 * 1000
     : Number(state.settings?.refreshMs || 15000);
-  state.refreshTimer = setInterval(refreshStats, interval);
+  // Local pushes can arrive every few seconds. Keep the existing deadline so
+  // they cannot indefinitely postpone the fallback read from the Hub.
+  if (state.refreshTimer && state.refreshTimerIntervalMs === interval) return;
+  if (state.refreshTimer) clearInterval(state.refreshTimer);
+  state.refreshTimerIntervalMs = interval;
+  // Only this periodic fallback may reuse fresh stream data instead of downloading.
+  state.refreshTimer = setInterval(() => refreshStats({ streamCache: true }), interval);
 }
 
 function clamp(value, min, max) {
@@ -9236,7 +9244,6 @@ function syncHubModeUi() {
   syncContentForm?.syncSettings();
   const mode = state.settings.hubMode || 'local';
   els.hubModeOptions.value = mode;
-  if (els.syncModeDescription) els.syncModeDescription.textContent = t(SYNC_MODE_DESCRIPTIONS[mode] || SYNC_MODE_DESCRIPTIONS.local);
   const icloudSupported = state.appInfo?.platform === 'darwin';
   if (els.icloudModeOption) els.icloudModeOption.disabled = !icloudSupported;
   els.hubClientFields.classList.toggle('hidden', mode !== 'client');
@@ -9772,9 +9779,11 @@ const CLIENT_CONNECTION_FIELDS = ['hubUrl', 'secret', 'deviceId'];
 let clientConnectionEditing = false;
 let clientConnectionEditRevision = 0;
 let hubSaveError = false;
+let hubProfileAdding = false;
+let hubProfileNameDraft = null;
 
 function clientConnectionHasDraft() {
-  return CLIENT_CONNECTION_FIELDS.some(field => hubDraftDirty[field]);
+  return hubProfileAdding || hubProfileNameDraft !== null || CLIENT_CONNECTION_FIELDS.some(field => hubDraftDirty[field]);
 }
 
 function syncHubConnectionUi() {
@@ -9785,6 +9794,7 @@ function syncHubConnectionUi() {
   const focusedEditor = els.syncConnectionEditor.contains(document.activeElement)
     || els.syncDeviceSettings.contains(document.activeElement);
   els.syncConnectionEdit.hidden = !client || editing;
+  els.syncConnectionEdit.disabled = hubSaveBusy;
   if (client && !editing && focusedEditor && isSettingsSurfaceVisible()) {
     els.syncConnectionEdit.focus({ preventScroll: true });
   }
@@ -9801,6 +9811,48 @@ function syncHubConnectionUi() {
   els.syncUploadIntervalRow.inert = !client;
   els.syncConnectionSaveError.hidden = !hubSaveError;
   els.syncConnectionSaveError.textContent = hubSaveError ? t('settings.sync.saveFailed') : '';
+  syncHubProfileControls();
+}
+
+const HUB_PROFILE_ADD_VALUE = '__add__';
+
+function syncHubProfileControls() {
+  if (!els.hubProfileSelect) return;
+  const profiles = state.settings?.hubProfiles || [];
+  const activeId = state.settings?.activeHubProfileId || '';
+  const key = JSON.stringify([profiles, currentLanguage()]);
+  if (els.hubProfileSelect.dataset.profiles !== key) {
+    els.hubProfileSelect.replaceChildren();
+    for (const profile of profiles) {
+      const option = document.createElement('option');
+      option.value = profile.id;
+      option.textContent = profile.name || profile.endpoint;
+      if (profile.name && profile.name !== profile.endpoint) option.dataset.tmSelectDescription = profile.endpoint;
+      els.hubProfileSelect.append(option);
+    }
+    const add = document.createElement('option');
+    add.value = HUB_PROFILE_ADD_VALUE;
+    add.textContent = `${t('settings.sync.addHub')}…`;
+    els.hubProfileSelect.append(add);
+    els.hubProfileSelect.dataset.profiles = key;
+  }
+  els.hubProfileSelect.value = activeId;
+  const editing = clientConnectionEditing || clientConnectionHasDraft();
+  // The picker replaces the read-only status card's job of naming the Hub, so it
+  // stays out of the way while a connection is being edited or first entered.
+  els.hubProfilePicker.hidden = !profiles.length || editing;
+  // The picker already names the connection, so the status card then reports
+  // only its state instead of repeating the endpoint.
+  els.syncConnectionEndpoint.hidden = !els.hubProfilePicker.hidden;
+  els.hubProfileSelect.disabled = hubSaveBusy;
+  // Removing lives in the editor of an existing profile; the last profile is
+  // left to the sync-mode selector so the client is never left without a Hub.
+  els.hubProfileRemove.hidden = !editing || hubProfileAdding || profiles.length < 2 || !activeId;
+  els.hubProfileRemove.disabled = hubSaveBusy;
+  els.hubProfileNameInput.disabled = hubSaveBusy;
+  if (hubProfileNameDraft === null) {
+    els.hubProfileNameInput.value = profiles.find(profile => profile.id === activeId)?.name || '';
+  }
 }
 
 function beginClientConnectionEdit({ focus = false } = {}) {
@@ -9817,6 +9869,8 @@ function beginClientConnectionEdit({ focus = false } = {}) {
 
 function cancelClientConnectionEdit() {
   if (hubSaveBusy || state.settings?.hubMode !== 'client') return;
+  hubProfileAdding = false;
+  hubProfileNameDraft = null;
   clientConnectionEditing = false;
   clientConnectionEditRevision += 1;
   hubSaveError = false;
@@ -9921,6 +9975,9 @@ function hubDraftValuesFromInputs() {
   const values = {};
   for (const [field, inputId] of HUB_DRAFT_FIELDS) {
     if (field === 'hubHostPort' && state.settings?.hubMode !== 'host') continue;
+    // The client URL and secret only apply to (and are only visible in) client
+    // mode; another mode's Save must not apply a pending client draft.
+    if ((field === 'hubUrl' || field === 'secret') && state.settings?.hubMode !== 'client') continue;
     const input = els[inputId];
     if (!input) continue;
     values[field] = normalizeHubDraftValue(field, input.value, state.settings?.[field]);
@@ -9932,12 +9989,16 @@ function hubDraftValuesFromSettings() {
   const values = {};
   for (const [field] of HUB_DRAFT_FIELDS) {
     if (field === 'hubHostPort' && state.settings?.hubMode !== 'host') continue;
+    // The client URL and secret only apply to (and are only visible in) client
+    // mode; another mode's Save must not apply a pending client draft.
+    if ((field === 'hubUrl' || field === 'secret') && state.settings?.hubMode !== 'client') continue;
     values[field] = normalizeHubDraftValue(field, state.settings?.[field]);
   }
   return values;
 }
 
 function hubDraftHasChanges() {
+  if (hubProfileAdding || hubProfileNameDraft !== null) return true;
   const draft = hubDraftValuesFromInputs();
   const saved = hubDraftValuesFromSettings();
   return Object.keys(draft).some((field) => draft[field] !== saved[field]);
@@ -14037,6 +14098,9 @@ els.saveSettingsButton.addEventListener('click', async () => {
     const submittedEditRevision = clientConnectionEditRevision;
     const submittedHubFields = hubDraftValuesFromInputs();
     const patch = { ...submittedHubFields };
+    if (state.settings?.hubMode === 'client' && els.hubProfileNameInput) {
+      patch.hubProfileAction = { type: hubProfileAdding ? 'add' : 'save', name: els.hubProfileNameInput.value };
+    }
     if (Object.prototype.hasOwnProperty.call(submittedHubFields, 'hubHostPort')) {
       patch.hubHostPort = Number(submittedHubFields.hubHostPort) || 17321;
     }
@@ -14049,6 +14113,10 @@ els.saveSettingsButton.addEventListener('click', async () => {
     } catch (_) {
       hubSaveError = true;
       return;
+    }
+    if (patch.hubProfileAction) {
+      hubProfileAdding = false;
+      hubProfileNameDraft = null;
     }
     reconcileHubDraftsAfterSave(submittedHubFields, submittedHubRevisions);
     finishClientConnectionSave(submittedHubRevisions, submittedEditRevision);
@@ -14063,8 +14131,66 @@ els.saveSettingsButton.addEventListener('click', async () => {
   }
 });
 
-els.syncConnectionEdit?.addEventListener('click', () => beginClientConnectionEdit({ focus: true }));
+// While a Hub switch is in flight the fields still hold the previous Hub.
+els.syncConnectionEdit?.addEventListener('click', () => {
+  if (!hubSaveBusy) beginClientConnectionEdit({ focus: true });
+});
 els.syncConnectionCancel?.addEventListener('click', cancelClientConnectionEdit);
+
+els.hubProfileNameInput?.addEventListener('input', () => {
+  const savedName = state.settings?.hubProfiles?.find(profile => profile.id === state.settings?.activeHubProfileId)?.name || '';
+  hubProfileNameDraft = els.hubProfileNameInput.value === savedName ? null : els.hubProfileNameInput.value;
+  beginClientConnectionEdit();
+  syncHubSaveButton();
+});
+function beginHubProfileAdd() {
+  if (hubSaveBusy || clientConnectionEditing || clientConnectionHasDraft()) return;
+  hubProfileAdding = true;
+  hubProfileNameDraft = '';
+  els.hubProfileNameInput.value = '';
+  for (const field of ['hubUrl', 'secret']) {
+    const inputId = HUB_DRAFT_FIELDS.find(([name]) => name === field)[1];
+    els[inputId].value = '';
+    markHubDraftDirty(field);
+  }
+  beginClientConnectionEdit();
+  syncHubDraftFields();
+  els.hubProfileNameInput.focus({ preventScroll: true });
+}
+
+async function changeHubProfile(action) {
+  if (hubSaveBusy || clientConnectionEditing || clientConnectionHasDraft()) return;
+  hubSaveBusy = true;
+  hubSaveError = false;
+  syncHubConnectionUi();
+  syncHubSaveButton();
+  try {
+    await saveSettings({ hubProfileAction: action });
+    await refreshHubInfo();
+    void refreshHubBuildStatus();
+    await refreshStats();
+  } catch (_) {
+    hubSaveError = true;
+  } finally {
+    hubSaveBusy = false;
+    syncHubDraftFields();
+  }
+}
+els.hubProfileSelect?.addEventListener('change', () => {
+  const value = els.hubProfileSelect.value;
+  if (value === HUB_PROFILE_ADD_VALUE) {
+    els.hubProfileSelect.value = state.settings?.activeHubProfileId || '';
+    beginHubProfileAdd();
+  } else if (value !== state.settings?.activeHubProfileId) {
+    void changeHubProfile({ type: 'select', id: value });
+  }
+});
+els.hubProfileRemove?.addEventListener('click', async () => {
+  if (hubSaveBusy) return;
+  // Remove discards the open edit of the profile being removed.
+  cancelClientConnectionEdit();
+  await changeHubProfile({ type: 'delete', id: state.settings?.activeHubProfileId });
+});
 
 els.syncPanelOpenDevices?.addEventListener('click', () => openViewFromTray('device'));
 
@@ -14075,6 +14201,9 @@ els.hubModeOptions.addEventListener('change', async (event) => {
     syncHubModeUi();
     return;
   }
+  // A failed save belongs to the mode it was made in.
+  hubSaveError = false;
+  syncHubConnectionUi();
   await saveSettings({ hubMode: target.value });
   await refreshHubInfo();
   void refreshHubBuildStatus();

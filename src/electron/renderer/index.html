@@ -481,7 +481,7 @@
           <div id="appearanceSettingsDetails" class="settings-section-details hidden">
             <div class="settings-subgroup settings-appearance-group">
               <div class="settings-item"><span class="settings-item-text"><span id="windowGlassEffectLabel" class="settings-item-title" data-i18n="settings.appearance.systemGlass">Glass Backdrop</span></span><div class="inline-options" role="radiogroup" aria-labelledby="windowGlassEffectLabel"><label class="inline-option"><input type="radio" name="systemGlassOption" value="system" /><span data-i18n="settings.appearance.glassEffectSystem">System</span></label><label class="inline-option"><input type="radio" name="systemGlassOption" value="off" /><span data-i18n="settings.appearance.glassEffectTransparent">Transparent</span></label></div></div>
-              <label id="windowsBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.windowsBackdrop">Windows Glass Style</span></span><select id="windowsBackdropInput"><option value="acrylic" data-i18n="settings.appearance.windowsBackdropAcrylic">Acrylic</option><option value="accent" data-i18n="settings.appearance.windowsBackdropAccent" data-select-description="settings.appearance.windowsBackdropNote">Accent Blur (experimental)</option></select><span id="windowsBackdropNote" class="settings-note settings-item-desc hidden" role="status"></span></label>
+              <label id="windowsBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.windowsBackdrop">Windows Glass Style</span></span><select id="windowsBackdropInput"><option value="acrylic" data-i18n="settings.appearance.windowsBackdropAcrylic">Acrylic</option><option value="accent" data-i18n="settings.appearance.windowsBackdropAccent" data-select-description="settings.appearance.windowsBackdropNote">Accent Blur (experimental)</option><option value="mica" data-i18n="settings.appearance.windowsBackdropMica" data-select-description="settings.appearance.windowsBackdropMicaNote">Mica</option><option value="mica-alt" data-i18n="settings.appearance.windowsBackdropMicaAlt" data-select-description="settings.appearance.windowsBackdropMicaNote">Mica Alt</option></select><span id="windowsBackdropNote" class="settings-note settings-item-desc hidden" role="status"></span></label>
               <label id="macBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.macBackdrop">macOS Glass Style</span></span><select id="macBackdropInput"><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass (Regular)</option><option value="liquid-glass-clear" data-i18n="settings.appearance.macBackdropLiquidGlassClear">Liquid Glass (Clear)</option></select></label>
               <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.tokenNumberAnimation">Token number animation</span></span><select id="tokenNumberAnimationInput"><option value="roll" data-i18n="settings.appearance.tokenNumberAnimation.roll">Digit roll</option><option value="count" data-i18n="settings.appearance.tokenNumberAnimation.count">Count up</option></select></label>
               <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTotalTokens">Show compact token total</span></span><input id="showCompactTotalTokensInput" type="checkbox" /></label>
@@ -1579,7 +1579,7 @@
               <div class="settings-field sync-mode-field">
                 <span id="syncModeLabel" data-i18n="settings.sync.mode">Sync method</span>
                 <span class="sync-mode-select">
-                  <select id="hubModeOptions" aria-labelledby="syncModeLabel" aria-describedby="syncModeDescription">
+                  <select id="hubModeOptions" aria-labelledby="syncModeLabel">
                     <option value="local" data-i18n="settings.sync.localOnly">Local only</option>
                     <option value="client" data-i18n="settings.sync.connectHub">Connect to a hub</option>
                     <option value="host" data-i18n="settings.sync.hostHub">Host hub on this device</option>
@@ -1588,7 +1588,6 @@
                   <span class="settings-section-disclosure" aria-hidden="true"></span>
                 </span>
               </div>
-              <p id="syncModeDescription" class="settings-note sync-mode-description"></p>
               <div id="hubClientFields" class="hub-mode-fields hidden">
                 <div id="syncPanelConnection" class="sync-panel-connection" hidden>
                   <div class="sync-panel-state">
@@ -1613,6 +1612,7 @@
                       <button id="syncConnectionEdit" type="button" class="sync-connection-edit" data-i18n="settings.sync.editConnection">Change connection</button>
                     </div>
                     <div id="syncConnectionIdentity" class="sync-connection-identity">
+                      <span id="hubProfilePicker" class="hub-profile-picker" hidden><select id="hubProfileSelect" aria-label="Hub" data-i18n-aria-label="settings.sync.hubPicker"></select></span>
                       <span id="syncConnectionEndpoint"></span>
                       <span id="syncPanelBuild" class="sync-panel-build" hidden></span>
                     </div>
@@ -1621,6 +1621,7 @@
                   </div>
                 </div>
                 <div id="syncConnectionEditor" class="sync-connection-editor">
+                  <label><span data-i18n="settings.sync.hubName">Hub name</span><input id="hubProfileNameInput" type="text" maxlength="120" spellcheck="false" placeholder="Home / Worker" data-i18n-placeholder="settings.sync.hubNamePlaceholder" /></label>
                   <label><span data-i18n="settings.sync.hubUrl">Hub URL</span><input id="hubUrlInput" type="text" spellcheck="false" placeholder="http://hub-host:17321" /></label>
                   <div class="settings-field hub-secret-field">
                     <label for="secretInput" data-i18n="settings.sync.secret">Secret</label>
@@ -1656,9 +1657,10 @@
                 <div class="settings-actions">
                   <button id="saveSettingsButton" type="button" data-i18n="settings.common.save">Save</button>
                   <button id="syncConnectionCancel" type="button" data-i18n="settings.common.cancel" hidden>Cancel</button>
+                  <button id="hubProfileRemove" type="button" class="hub-profile-remove" data-i18n="settings.sync.removeHub" hidden>Remove Hub</button>
                 </div>
-                <div id="syncConnectionSaveError" class="hub-status error" role="alert" hidden></div>
               </div>
+              <div id="syncConnectionSaveError" class="hub-status error" role="alert" hidden></div>
               <div id="deviceIconLocalRow" class="settings-item"><span id="deviceIconLocalLabel" class="settings-item-text settings-field" data-i18n="devices.icon.thisDevice">This device’s icon</span><span class="device-icon-local-control"><select id="deviceIconInput" aria-labelledby="deviceIconLocalLabel"></select></span></div>
               <label id="syncUploadIntervalRow" class="sync-upload-interval-row settings-item" hidden><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.uploadInterval">Sync upload frequency</span></span>
                 <select id="syncUploadIntervalInput">
