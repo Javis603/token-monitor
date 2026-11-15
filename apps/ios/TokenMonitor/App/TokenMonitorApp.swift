@@ -68,6 +68,7 @@ struct TokenMonitorApp: App {
                 .environment(store)
                 .environment(settings)
                 .environment(preferences)
+                .environment(\.tokenUnits, preferences.tokenUnits)
                 .environment(liveActivityController)
                 .environment(\.locale, preferences.language.locale)
                 .preferredColorScheme(preferences.appearance.colorScheme)

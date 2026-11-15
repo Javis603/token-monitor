@@ -104,6 +104,13 @@ final class AppPreferences {
         didSet { persistLocalPreferences() }
     }
 
+    var tokenUnits: TokenUnits {
+        didSet {
+            persistLocalPreferences()
+            persistSharedPreferences()
+        }
+    }
+
     var currency: AppCurrency {
         didSet {
             persistLocalPreferences()
@@ -194,6 +201,7 @@ final class AppPreferences {
         )
         workbuddyQuotaTotalEnabled = defaults.bool(forKey: Keys.workbuddyQuotaTotalEnabled)
         masksAccountEmails = defaults.object(forKey: Keys.masksAccountEmails) as? Bool ?? true
+        tokenUnits = TokenUnits(rawValue: defaults.string(forKey: "tokenUnits") ?? "") ?? .automatic
         currency = AppCurrency(
             rawValue: defaults.string(forKey: Keys.currency) ?? ""
         ) ?? .usd
@@ -229,6 +237,7 @@ final class AppPreferences {
             liveActivityEnabled: liveActivityEnabled,
             liveLayout: liveLayout,
             currencyCode: currency.rawValue,
+            tokenUnits: tokenUnits,
             languageCode: language.rawValue,
             limitProviderOrder: limitProviderOrder,
             hiddenLimitProviders: hiddenLimitProviders.sorted()
@@ -242,6 +251,7 @@ final class AppPreferences {
         defaults.set(showsLiveTokenRate, forKey: Keys.showsLiveTokenRate)
         defaults.set(overviewSectionOrder, forKey: Keys.overviewSectionOrder)
         defaults.set(hiddenOverviewSections.sorted(), forKey: Keys.hiddenOverviewSections)
+        defaults.set(tokenUnits.rawValue, forKey: "tokenUnits")
         defaults.set(currency.rawValue, forKey: Keys.currency)
         defaults.set(language.rawValue, forKey: Keys.language)
         defaults.set(limitProviderOrder, forKey: Keys.limitProviderOrder)

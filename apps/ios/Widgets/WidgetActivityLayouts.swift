@@ -4,6 +4,7 @@ import WidgetKit
 /// Desktop's compact calendar cells and month captions, adapted to the
 /// widget's bounded canvas. Statistics never dictate the chart's height.
 struct WidgetActivityView: View {
+    @Environment(\.tokenUnits) private var tokenUnits
     @Environment(\.widgetInk) private var ink
     @Environment(\.dynamicTypeSize) private var typeSize
     let entry: TokenMonitorWidgetEntry
@@ -13,11 +14,11 @@ struct WidgetActivityView: View {
     private var days: [TokenMonitorSharedPayload.Day] { entry.days }
     private var todayText: String {
         guard let today = WidgetActivityModel.today(days, now: entry.date), today.tokens.isFinite else { return "—" }
-        return WidgetPresentation.tokens(today.tokens, locale: entry.locale)
+        return WidgetPresentation.tokens(today.tokens, locale: entry.locale, units: tokenUnits)
     }
     private var last7Text: String {
         guard let total = WidgetActivityModel.last7Total(days, now: entry.date) else { return "—" }
-        return WidgetPresentation.tokens(total, locale: entry.locale)
+        return WidgetPresentation.tokens(total, locale: entry.locale, units: tokenUnits)
     }
     private var streakText: String { "\(WidgetActivityModel.streak(days, now: entry.date))d" }
 

@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct DeviceRow: View {
+    @Environment(\.tokenUnits) private var tokenUnits
+    @Environment(\.locale) private var tokenLocale
     @Environment(AppPreferences.self) private var preferences
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     let device: DeviceSnapshot
@@ -32,7 +34,7 @@ struct DeviceRow: View {
                 .overlay(alignment: .topLeading) { deviceMark }
                 if !dynamicTypeSize.isAccessibilitySize { Spacer(minLength: 8) }
                 VStack(alignment: dynamicTypeSize.isAccessibilitySize ? .leading : .trailing, spacing: 2) {
-                    Text(usage.totalTokens.map { showsDetails ? MetricFormatter.exactTokens($0) : MetricFormatter.tokens($0) } ?? "—")
+                    Text(usage.totalTokens.map { showsDetails ? MetricFormatter.exactTokens($0) : MetricFormatter.tokens($0, units: tokenUnits, locale: tokenLocale) } ?? "—")
                         .font(DesignTokens.rowValue)
                     if showsDetails, let cost = usage.costUsd, cost.isFinite {
                         Text(MetricFormatter.compactUsageCost(cost, unpricedTokens: usage.unpricedTokens ?? 0,

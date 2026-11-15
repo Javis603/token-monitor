@@ -15,7 +15,7 @@ struct LimitsView: View {
                 )
                 let groups = LimitProviderGroup.grouped(providers)
                 ScrollViewReader { proxy in
-                    ScrollView {
+                    DashboardScrollView { columns in
                         LazyVStack(alignment: .leading, spacing: DesignTokens.sectionSpacing) {
                             ConnectionStatusNotice(phase: store.connectionNoticePhase, retry: refresh)
 
@@ -31,11 +31,13 @@ struct LimitsView: View {
                                 )
                                 .padding(.vertical, 50)
                             } else {
-                                ForEach(groups) { group in
-                                    SurfaceCard {
-                                        ProviderLimitCard(providers: group.accounts)
+                                DashboardCardLayout(columns: columns) {
+                                    ForEach(groups) { group in
+                                        SurfaceCard {
+                                            ProviderLimitCard(providers: group.accounts)
+                                        }
+                                        .id(group.id)
                                     }
-                                    .id(group.id)
                                 }
                             }
 

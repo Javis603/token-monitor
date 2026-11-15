@@ -17,6 +17,7 @@ typealias ActivitySource = LiveActivityLayout.Source
 struct ActivityContext {
     let state: ActivityState
     let layout: LiveActivityLayout
+    let tokenUnits: TokenUnits
     let currencyCode: String
     let locale: Locale
     let isStale: Bool
@@ -28,12 +29,14 @@ struct ActivityContext {
         state: ActivityState,
         layout: LiveActivityLayout,
         currencyCode: String = "USD",
+        tokenUnits: TokenUnits = .automatic,
         languageCode: String = "auto",
         isStale: Bool,
         now: Date = .now
     ) {
         self.state = state
         self.layout = Self.resolvedLayout(layout, state: state, isStale: isStale, now: now)
+        self.tokenUnits = tokenUnits
         self.currencyCode = currencyCode
         self.locale = Self.locale(for: languageCode)
         self.isStale = isStale
@@ -45,6 +48,7 @@ struct ActivityContext {
             state: state,
             layout: preferences.liveLayout,
             currencyCode: preferences.currencyCode ?? "USD",
+            tokenUnits: preferences.tokenUnits,
             languageCode: preferences.languageCode ?? "auto",
             isStale: isStale,
             now: now
@@ -52,9 +56,10 @@ struct ActivityContext {
     }
 
     private init(state: ActivityState, layout: LiveActivityLayout, currencyCode: String,
-                 locale: Locale, isStale: Bool, now: Date) {
+                 tokenUnits: TokenUnits, locale: Locale, isStale: Bool, now: Date) {
         self.state = state
         self.layout = layout
+        self.tokenUnits = tokenUnits
         self.currencyCode = currencyCode
         self.locale = locale
         self.isStale = isStale
@@ -124,7 +129,7 @@ struct ActivityContext {
         var layout = layout
         change(&layout)
         return ActivityContext(state: state, layout: layout, currencyCode: currencyCode,
-                               locale: locale, isStale: isStale, now: now)
+                               tokenUnits: tokenUnits, locale: locale, isStale: isStale, now: now)
     }
 
     // MARK: Resolving sources
@@ -260,7 +265,7 @@ struct ActivityContext {
     }
 
     func compactTokensText(_ usage: ActivityState.PeriodUsage) -> String {
-        WidgetPresentation.tokens(usage.tokens ?? .nan, locale: locale)
+        WidgetPresentation.tokens(usage.tokens ?? .nan, locale: locale, units: tokenUnits)
     }
 
     func costText(_ usage: ActivityState.PeriodUsage, compact: Bool = false) -> String {

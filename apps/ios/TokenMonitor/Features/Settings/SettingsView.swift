@@ -247,6 +247,15 @@ struct SettingsView: View {
                 }
             }
 
+            Picker("Token units", selection: $preferences.tokenUnits) {
+                ForEach(TokenUnits.allCases) { units in
+                    Text(LocalizedStringKey(units.title)).tag(units)
+                }
+            }
+            Text("Token units apply to the app and widgets.")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+
             Picker("Currency", selection: $preferences.currency) {
                 ForEach(AppCurrency.allCases) { currency in
                     Text(currency.displayName(locale: preferences.language.locale))

@@ -21,6 +21,10 @@ The source is available here under the repository's [MIT license](../../LICENSE)
 
 The app does not collect usage by itself: run Token Monitor Desktop or the headless agent on the machines running your tools. Remote Live Activity updates additionally require Hub APNs configuration; ordinary foreground usage/limits and cached widgets do not.
 
+## iPad dashboard layout
+
+Overview, AI Limits and Insights arrange cards in two equal columns when the iPad content viewport is at least 900 points wide and wider than it is tall. Portrait, narrower multitasking windows, iPhone and accessibility text sizes retain one column. Overview keeps the configured section order, and connection notices and footer controls remain full width. Cards follow the shortest column in the configured order, leaving no row-height gaps beneath shorter neighbors.
+
 ## Screenshots
 
 Debug sample data on an iPhone Simulator; the readings are illustrative. These are repository previews, not App Store screenshots or physical-device acceptance evidence.
@@ -124,6 +128,8 @@ AI Limits shows source-currency Today/Month spending beneath account windows whe
 Tap the live-speed reading beside the Overview brand, or open Models, to inspect model timing grouped by device. Each device retains concurrent model samples for eight seconds, uses their matched duration for its headline, and falls back to the device delta when attribution is missing or inconsistent. Device rates add across the fleet; model aliases combine matching counters for display. Missing timing has an explicit empty state.
 
 Settings → Subscriptions reads the selected Hub's shared subscription document. Records retain their original currency and billing cadence, account email masking, anchored renewal dates, cancellation boundaries and top-up history. The monthly equivalent uses the Desktop display rates and billing rules, including this calendar month's top-ups. Edit records in Desktop. The app refreshes after authenticated subscription-version changes, keeps failures distinct from an empty list, and clears records on Hub changes. No subscription write endpoint is exposed by iOS.
+
+Token abbreviations can be selected in Settings → Language & Region → Token units: Follow language (default), K / M / B, or 万 / 亿. The choice is saved on each device and shared with Home Screen widgets, Lock Screen widgets and Live Activities. Exact-count details remain unabridged.
 
 ### Automatic Live Activity
 

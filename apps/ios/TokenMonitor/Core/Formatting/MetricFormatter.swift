@@ -5,11 +5,12 @@ nonisolated enum MetricFormatter {
     /// (`100% left`, `Reset 3d 15h`) even when the rest of the UI is localized.
     static let desktopQuotaLocale = Locale(identifier: "en")
 
-    static func tokens(_ value: Double) -> String {
+    static func tokens(_ value: Double, units: TokenUnits = .automatic, locale: Locale = .autoupdatingCurrent) -> String {
         guard value.isFinite else { return "—" }
         return value.formatted(
             .number
                 .notation(.compactName)
+                .locale(units.locale(fallback: locale))
                 .precision(.fractionLength(0...1))
         )
     }

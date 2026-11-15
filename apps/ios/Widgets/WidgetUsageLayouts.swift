@@ -5,6 +5,7 @@ import WidgetKit
 /// enabled, trailing daily bars, and tool/model attribution at larger sizes.
 /// Accessibility text keeps only the main reading and its label.
 struct WidgetUsageView: View {
+    @Environment(\.tokenUnits) private var tokenUnits
     @Environment(\.widgetInk) private var ink
     @Environment(\.dynamicTypeSize) private var typeSize
     let entry: TokenMonitorWidgetEntry
@@ -17,7 +18,7 @@ struct WidgetUsageView: View {
 
     private var usage: TokenMonitorSharedPayload.Usage { entry.usage }
     private var tokensText: String {
-        WidgetPresentation.tokens(usage.tokens, locale: entry.locale)
+        WidgetPresentation.tokens(usage.tokens, locale: entry.locale, units: tokenUnits)
     }
     private var costIsKnown: Bool {
         usage.costKnown != false && usage.cost.isFinite
@@ -179,7 +180,7 @@ struct WidgetUsageView: View {
 
     private var outputText: String {
         guard usage.outputTokens.isFinite else { return "—" }
-        return WidgetPresentation.tokens(usage.outputTokens, locale: entry.locale)
+        return WidgetPresentation.tokens(usage.outputTokens, locale: entry.locale, units: tokenUnits)
     }
 
     private var speedText: String {

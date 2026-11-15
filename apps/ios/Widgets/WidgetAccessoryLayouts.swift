@@ -5,12 +5,13 @@ import WidgetKit
 /// compact readings; rectangular gets a provider's metered windows or the
 /// period's usage.
 struct WidgetAccessoryView: View {
+    @Environment(\.tokenUnits) private var tokenUnits
     let entry: TokenMonitorWidgetEntry
     let family: WidgetFamily
 
     private var usage: TokenMonitorSharedPayload.Usage { entry.usage }
     private var tokensText: String {
-        WidgetPresentation.tokens(usage.tokens, locale: entry.locale)
+        WidgetPresentation.tokens(usage.tokens, locale: entry.locale, units: tokenUnits)
     }
     private var windows: [TokenMonitorSharedPayload.LimitWindow] {
         entry.visibleLimitWindows
@@ -53,7 +54,7 @@ struct WidgetAccessoryView: View {
             } ?? "—"
         case "activity":
             return WidgetActivityModel.today(entry.days, now: entry.date)
-                .map { WidgetPresentation.tokens($0.tokens, locale: entry.locale) } ?? "—"
+                .map { WidgetPresentation.tokens($0.tokens, locale: entry.locale, units: tokenUnits) } ?? "—"
         default:
             return tokensText
         }

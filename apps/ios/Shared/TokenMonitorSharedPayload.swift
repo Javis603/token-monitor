@@ -1,5 +1,24 @@
 import Foundation
 
+nonisolated enum TokenUnits: String, CaseIterable, Codable, Identifiable, Sendable {
+    case automatic, english, chinese
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .automatic: "Follow language"
+        case .english: "K / M / B"
+        case .chinese: "万 / 亿"
+        }
+    }
+    func locale(fallback: Locale) -> Locale {
+        switch self {
+        case .automatic: fallback
+        case .english: Locale(identifier: "en_US")
+        case .chinese: Locale(identifier: "zh_CN")
+        }
+    }
+}
+
 nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
     static let currentVersion = 1
 
@@ -119,6 +138,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
         var liveActivityEnabled: Bool
         var liveLayout: LiveActivityLayout
         var currencyCode: String?
+        var tokenUnits: TokenUnits
         var languageCode: String?
         var limitProviderOrder: [String]?
         var hiddenLimitProviders: [String]?
@@ -136,6 +156,7 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             liveActivityEnabled: Bool = false,
             liveLayout: LiveActivityLayout = .automatic,
             currencyCode: String? = "USD",
+            tokenUnits: TokenUnits = .automatic,
             languageCode: String? = "auto",
             limitProviderOrder: [String]? = nil,
             hiddenLimitProviders: [String]? = nil
@@ -152,9 +173,32 @@ nonisolated struct TokenMonitorSharedPayload: Codable, Equatable, Sendable {
             self.liveActivityEnabled = liveActivityEnabled
             self.liveLayout = liveLayout
             self.currencyCode = currencyCode
+            self.tokenUnits = tokenUnits
             self.languageCode = languageCode
             self.limitProviderOrder = limitProviderOrder
             self.hiddenLimitProviders = hiddenLimitProviders
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            self.init(
+                widgetContent: try values.decode(String.self, forKey: .widgetContent),
+                widgetPeriod: try values.decode(String.self, forKey: .widgetPeriod),
+                widgetProviderID: try values.decodeIfPresent(String.self, forKey: .widgetProviderID),
+                widgetShowsCost: try values.decode(Bool.self, forKey: .widgetShowsCost),
+                widgetShowsUpdateTime: try values.decode(Bool.self, forKey: .widgetShowsUpdateTime),
+                widgetTextContrast: try values.decode(String.self, forKey: .widgetTextContrast),
+                widgetLimitLayout: try values.decode(String.self, forKey: .widgetLimitLayout),
+                widgetShowsResetTime: try values.decode(Bool.self, forKey: .widgetShowsResetTime),
+                widgetActivityLayout: try values.decode(String.self, forKey: .widgetActivityLayout),
+                liveActivityEnabled: try values.decode(Bool.self, forKey: .liveActivityEnabled),
+                liveLayout: try values.decode(LiveActivityLayout.self, forKey: .liveLayout),
+                currencyCode: try values.decodeIfPresent(String.self, forKey: .currencyCode),
+                tokenUnits: TokenUnits(rawValue: try values.decodeIfPresent(String.self, forKey: .tokenUnits) ?? "") ?? .automatic,
+                languageCode: try values.decodeIfPresent(String.self, forKey: .languageCode),
+                limitProviderOrder: try values.decodeIfPresent([String].self, forKey: .limitProviderOrder),
+                hiddenLimitProviders: try values.decodeIfPresent([String].self, forKey: .hiddenLimitProviders)
+            )
         }
 
         static let `default` = Preferences()

@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct BackgroundReviewGroupRow: View {
+    @Environment(\.tokenUnits) private var tokenUnits
+    @Environment(\.locale) private var tokenLocale
     let entry: SessionListEntry
     let maximum: Double
     let now: Date
@@ -24,7 +26,7 @@ struct BackgroundReviewGroupRow: View {
                                 let time = latest.value.lastActivity.map {
                                     $0.formatted(.dateTime.hour(.twoDigits(amPM: .omitted)).minute(.twoDigits))
                                 } ?? "—"
-                                Text("Recent \(time) · \(MetricFormatter.tokens(latest.value.measuredTokens ?? 0))")
+                                Text("Recent \(time) · \(MetricFormatter.tokens(latest.value.measuredTokens ?? 0, units: tokenUnits, locale: tokenLocale))")
                                     .font(.caption2).foregroundStyle(.secondary)
                             }
                             Group {

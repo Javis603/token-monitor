@@ -11,6 +11,21 @@ import WidgetKit
 /// `<content>-<family>-<light|dark>[-state].png`.
 @MainActor
 struct WidgetLayoutRenderTests {
+    @Test func selectedTokenUnitsChangeRenderedWidget() throws {
+        var preferences = TokenMonitorSharedPayload.Preferences.default
+        preferences.languageCode = "zh-CN"
+        preferences.tokenUnits = .english
+        let sample = entry(preferences: preferences)
+        let english = try #require(render(entry: sample, family: .systemMedium,
+            size: CGSize(width: 360, height: 170), dark: false))
+        preferences.tokenUnits = .chinese
+        let chinese = try #require(render(entry: entry(preferences: preferences), family: .systemMedium,
+            size: CGSize(width: 360, height: 170), dark: false))
+        #expect(english.pngData() != chinese.pngData())
+        write(english, name: "token-units-english")
+        write(chinese, name: "token-units-chinese")
+    }
+
     private typealias Snapshot = TokenMonitorSharedPayload.Snapshot
 
     private func entry(

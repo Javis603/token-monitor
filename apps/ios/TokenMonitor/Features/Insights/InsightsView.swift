@@ -12,47 +12,49 @@ struct InsightsView: View {
         Group {
             if store.stats != nil {
                 ScrollViewReader { proxy in
-                    ScrollView {
+                    DashboardScrollView { columns in
                         LazyVStack(alignment: .leading, spacing: DesignTokens.sectionSpacing) {
                             ConnectionStatusNotice(phase: store.connectionNoticePhase) {
                                 Task { await store.refresh() }
                             }
 
-                            section("Lifetime") {
-                                LifetimeCard(summary: store.currentHistory.summary)
-                            }
+                            DashboardCardLayout(columns: columns) {
+                                section("Lifetime") {
+                                    LifetimeCard(summary: store.currentHistory.summary)
+                                }
 
-                            VStack(alignment: .leading, spacing: DesignTokens.headerToCardSpacing) {
-                                SectionHeader("Activity")
-                                SurfaceCard {
-                                    ActivityHeatmap(
-                                        model: heatmapModel,
-                                        metric: .tokens,
+                                VStack(alignment: .leading, spacing: DesignTokens.headerToCardSpacing) {
+                                    SectionHeader("Activity")
+                                    SurfaceCard {
+                                        ActivityHeatmap(
+                                            model: heatmapModel,
+                                            metric: .tokens,
+                                            currency: preferences.currency
+                                        )
+                                    }
+                                }
+                                .onGeometryChange(for: Double.self) { proxy in
+                                    proxy.size.width
+                                } action: { width in
+                                    activityCardWidth = max(
+                                        0,
+                                        width - 2 * DesignTokens.cardPadding
+                                    )
+                                }
+
+                                section("Trend") {
+                                    InsightTrendCard(history: store.currentHistory)
+                                }
+                                .id("insights-trend")
+
+                                section("Monthly history") {
+                                    MonthlyHistoryCard(
+                                        months: store.currentHistory.monthly ?? [],
                                         currency: preferences.currency
                                     )
                                 }
+                                .id("monthly-history")
                             }
-                            .onGeometryChange(for: Double.self) { proxy in
-                                proxy.size.width
-                            } action: { width in
-                                activityCardWidth = max(
-                                    0,
-                                    width - 2 * DesignTokens.cardPadding
-                                )
-                            }
-
-                            section("Trend") {
-                                InsightTrendCard(history: store.currentHistory)
-                            }
-                            .id("insights-trend")
-
-                            section("Monthly history") {
-                                MonthlyHistoryCard(
-                                    months: store.currentHistory.monthly ?? [],
-                                    currency: preferences.currency
-                                )
-                            }
-                            .id("monthly-history")
                         }
                         .padding(.horizontal, DesignTokens.screenPadding)
                         .padding(.top, 8)
@@ -132,6 +134,8 @@ struct InsightsView: View {
 }
 
 private struct MonthlyHistoryCard: View {
+    @Environment(\.tokenUnits) private var tokenUnits
+    @Environment(\.locale) private var tokenLocale
     @Environment(\.locale) private var locale
 
     let months: [HistoryMonth]
@@ -167,7 +171,7 @@ private struct MonthlyHistoryCard: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
-                Text(month.tokens.map(MetricFormatter.tokens) ?? "—")
+                Text(month.tokens.map { MetricFormatter.tokens($0, units: tokenUnits, locale: tokenLocale) } ?? "—")
                     .bold()
                     .monospacedDigit()
                 Text(month.cost.map {

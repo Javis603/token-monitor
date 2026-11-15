@@ -4,6 +4,23 @@ import Testing
 
 @MainActor
 struct WidgetPresentationTests {
+    @Test func tokenUnitOverridesIgnoreInterfaceLanguage() {
+        for locale in [Locale(identifier: "zh_CN"), Locale(identifier: "en_US")] {
+            for (value, expected) in [(1_200.0, "1.2K"), (12_000.0, "12K"),
+                                      (1_200_000.0, "1.2M"), (1_200_000_000.0, "1.2B")] {
+                #expect(MetricFormatter.tokens(value, units: .english, locale: locale) == expected)
+                #expect(WidgetPresentation.tokens(value, locale: locale, units: .english) == expected)
+            }
+            #expect(MetricFormatter.tokens(12_000, units: .chinese, locale: locale) == "1.2万")
+            #expect(WidgetPresentation.tokens(120_000_000, locale: locale, units: .chinese) == "1.2亿")
+            #expect(WidgetPresentation.tokens(0, locale: locale, units: .english) == "0")
+        }
+        #expect(WidgetPresentation.tokens(12_000, locale: Locale(identifier: "zh_CN")) == "1.2万")
+        #expect(WidgetPresentation.tokens(.nan, units: .english) == "—")
+        #expect(MetricFormatter.tokens(.infinity, units: .chinese) == "—")
+    }
+
+
     @Test func automaticActivityFollowsWorkThenQuotaThenUsageWithoutChangingSavedSlots() throws {
         typealias State = TokenMonitorActivityAttributes.ContentState
         let now = Date.now
