@@ -838,3 +838,62 @@ test('a changed account set during drag is rendered without persisting the stale
   assert.equal(h.calls.length, 0);
   assert.equal(h.row('a'), undefined);
 }));
+
+for (const failure of ['rejected', 'thrown']) test(`failed drag save reloads the stored order after a ${failure} move`, () => withDrag(async h => {
+  h.slotSettings.qoderAccountSlots.push({ ...h.slotSettings.qoderAccountSlots[1], id: 'c', accountKey: 'kc' });
+  h.panel.update(h.service.list('qoder').accounts, []); h.layout();
+  let moves = 0;
+  h.ipc.move = async (...args) => {
+    h.calls.push(['move', ...args]);
+    if (++moves === 1) return h.service.move(...args);
+    if (failure === 'thrown') throw new Error('IPC failed');
+    return { ok: false };
+  };
+  h.ipc.list = async provider => { h.calls.push(['list', provider]); return h.service.list(provider); };
+  const order = () => h.panel.element.querySelector('.slot-list').children.filter(n => n.dataset.slotId).map(n => n.dataset.slotId);
+  h.press('c'); h.emit('pointermove', 0); h.emit('pointerup', 0);
+  assert.deepEqual(order(), ['c', 'a', 'b'], 'drop is initially optimistic');
+  await h.flush();
+  assert.deepEqual(h.service.list('qoder').accounts.map(slot => slot.id), ['a', 'c', 'b']);
+  assert.deepEqual(order(), ['a', 'c', 'b'], 'partial success is recovered from storage');
+  assert.deepEqual(h.calls.at(-1), ['list', 'qoder']);
+  assert.equal(h.panel.element.querySelector('.slot-message').textContent, t('settings.slots.failed'));
+  await h.row('c').key('ArrowUp', true);
+  assert.equal(h.calls.filter(call => call[0] === 'move').length, 3, 'reordering is unlocked after failure');
+}));
+
+for (const action of ['menu', 'Alt']) test(`pending drag save blocks ${action} moves and new drags until settlement`, () => withDrag(async h => {
+  h.panel.update(h.service.list('qoder').accounts, []); h.layout();
+  let finishMove;
+  h.ipc.move = (...args) => {
+    h.calls.push(['move', ...args]);
+    return new Promise(resolve => { finishMove = async () => resolve(await h.service.move(...args)); });
+  };
+  const attemptMove = () => action === 'menu' ? h.click(h.row('b'), 'Move down') : h.row('b').key('ArrowDown', true);
+  h.press('b'); h.emit('pointermove', 0); h.emit('pointerup', 0);
+  // The lock must also cover the paint before persistOrder enters the lane.
+  attemptMove();
+  await h.flush();
+  assert.deepEqual(h.calls, [['move', 'qoder', 'b', 'up']]);
+  for (const id of ['a', 'b']) {
+    const moves = h.row(id).querySelector('.plugin-menu').children.filter(node => ['Move up', 'Move down'].includes(node.textContent));
+    assert.ok(moves.every(node => node.disabled), 'both menu directions are disabled');
+  }
+  attemptMove();
+  h.press('a'); h.emit('pointermove', 0);
+  assert.equal(h.listeners.has('pointermove'), false, 'a pending save cannot start another drag');
+  // A push must not accidentally unlock menu actions.
+  h.panel.update(h.service.list('qoder').accounts, []);
+  attemptMove();
+  await finishMove(); await h.flush();
+  assert.deepEqual(h.calls, [['move', 'qoder', 'b', 'up']], 'no stale extra move was queued');
+  assert.deepEqual(h.service.list('qoder').accounts.map(slot => slot.id), ['b', 'a']);
+  const down = h.row('b').querySelector('.plugin-menu').children.find(node => node.textContent === 'Move down');
+  assert.equal(down.disabled, false, 'menu unlocks when the save settles');
+  h.ipc.move = async (...args) => { h.calls.push(['move', ...args]); return h.service.move(...args); };
+  await attemptMove(); await h.flush();
+  assert.deepEqual(h.service.list('qoder').accounts.map(slot => slot.id), ['a', 'b']);
+  h.layout(); h.press('a'); h.emit('pointermove', 100);
+  assert.equal(h.listeners.has('pointermove'), true, 'dragging unlocks after settlement');
+  h.emit('pointercancel', 100); await h.flush();
+}));
