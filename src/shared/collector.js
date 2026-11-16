@@ -1929,8 +1929,9 @@ function watchPolicyEntries(clientsCsv, options = {}) {
 
   const sourceRoots = (client, ...ids) => (rootsByClient[client] || [])
     .filter((root) => ids.includes(root.id)).map((root) => root.dir);
+  // Claude's parser and source fingerprint also read same-stem agent metadata.
   bound('claude', sourceRoots('claude', 'claude-projects', 'claude-transcripts'),
-    recursiveSourceFiles((name) => name.endsWith('.jsonl')));
+    recursiveSourceFiles((name) => name.endsWith('.jsonl') || name.endsWith('.meta.json')));
   bound('gemini', candidates.gemini || [],
     recursiveSourceFiles((name) => name.endsWith('.json') || name.endsWith('.jsonl')));
   bound('kilo', sourceRoots('kilo', 'kilo-db'), directChildOnly((name) => KILO_DB_WATCH_PATTERN.test(name)));
@@ -1941,9 +1942,9 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // Cline CLI reads a sibling <session>.json manifest for model and workspace.
   bound('cline', sourceRoots('cline', 'cline-cli-sessions'), recursiveSourceFiles((name) => name.endsWith('.json')));
   bound('dsh', candidates.dsh || [], recursiveSourceFiles(isDshSessionLogName));
-  // summary.json supplies titles/timestamps even though Tokscale reads updates.
+  // Rollups and model/session metadata can change without updates.jsonl growing.
   bound('grok', sourceRoots('grok', 'grok-sessions'),
-    recursiveSourceFiles((name) => name === 'updates.jsonl' || name === 'summary.json'));
+    recursiveSourceFiles((name) => ['updates.jsonl', 'summary.json', 'signals.json', 'events.jsonl'].includes(name)));
   const kiroCliFiles = recursiveSourceFiles((name) => name.endsWith('.json') || name.endsWith('.jsonl'));
   bound('kiro', sourceRoots('kiro', 'kiro-sessions'), (parts, resolved) => {
     if (parts[0] === 'cli') return parts.length > 1 && kiroCliFiles(parts, resolved);
