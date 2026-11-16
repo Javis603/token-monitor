@@ -6,6 +6,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   id: 'zaiteam',
   accountSlots: true,
   fetch: 'fetchZaiTeamLimits',
+  serverAccountKey: 'isZaiTeamServerAccountKey',
   fields: [
     {
       key: 'zaiTeamApiKey',
