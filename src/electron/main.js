@@ -207,6 +207,7 @@ const { createAccountSlotService, invalidateAccountSlotChange } = require('./lim
 const { LIMIT_PROVIDER_REGISTRY } = require('../shared/limits/registry');
 const { isProviderStale } = require('../shared/limits/core');
 const ACCOUNT_SLOT_PROVIDER_IDS = new Set(LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots).map(entry => entry.id));
+const { normalizeAccountPresentation } = require('./limits/accountPresentation');
 const { applyAccountOrder } = require('./renderer/limits/accountSlotsPanel');
 let accountSlotService;
 const { createCredentialCommands } = require('./limits/credentialCommands');
@@ -791,6 +792,7 @@ function defaultSettings() {
     modelAliases: {},
     modelAliasGrouping: 'off',
     limitsEnabled: parseBoolean(process.env.TOKEN_MONITOR_LIMITS_ENABLED, true),
+    limitAccountPresentation: {},
     limitProviders: parseLimitProviders(process.env.TOKEN_MONITOR_LIMIT_PROVIDERS).join(','),
     limitProviderOrder: defaultLimitProviderOrder(),
     homeLimitProviderOrder: '',
@@ -2757,6 +2759,7 @@ function readSettings() {
     if (!saved.secret && defaults.secret) delete saved.secret;
     const merged = { ...defaults, ...saved, ...storedCredentials };
     Object.assign(merged, initializeHubProfiles(merged));
+    merged.limitAccountPresentation = normalizeAccountPresentation(merged.limitAccountPresentation);
     merged.clients = clientsCsvForSetting(merged.clients);
     merged.separateQoderClients = parseBoolean(merged.separateQoderClients, false);
     // A client identity split (see clientIdentitySplits.js) is not a new tool:
@@ -5360,7 +5363,7 @@ function desktopQuotaStats(stats) {
     .filter(entry => entry.accountSlots)
     .map(entry => [entry.id, accountSlotService?.list(entry.id).accounts || []]));
   return { ...projected, limits: { ...projected.limits,
-    providers: applyAccountOrder(projected.limits.providers || [], slotLists, settings.deviceId) } };
+    providers: applyAccountOrder(projected.limits.providers || [], slotLists, settings.deviceId, settings.limitAccountPresentation) } };
 }
 
 function syncPluginQuotaSurfaceDemand() {
@@ -8430,6 +8433,7 @@ app.whenReady().then(() => {
       const { limitProviders, limitsEnabled, ...slotPatch } = patch;
       settings = { ...settings, ...slotPatch };
       saveSettings({ throwOnError: true });
+      if (patch.limitAccountPresentation) pushSettingsToRenderer();
       // Turning a provider on takes the ordinary settings path (selection
       // normalization, runtime start) and is published to the renderer.
       // The account is already durable here: an activation failure is reported
@@ -8456,7 +8460,7 @@ app.whenReady().then(() => {
       }
     }
   });
-  for (const operation of ['list', 'add', 'replace', 'rename', 'setEnabled', 'remove', 'move']) {
+  for (const operation of ['list', 'add', 'replace', 'rename', 'setEnabled', 'remove', 'move', 'presentation']) {
     ipcMain.handle(`limits:accountSlots:${operation}`, (_event, ...args) => accountSlotService[operation](...args));
   }
   // Resolves only once a worker-hosted transform runs with the saved settings:
@@ -8550,6 +8554,8 @@ app.whenReady().then(() => {
     delete normalizedPatch.subscriptionsOrphaned;
     delete normalizedPatch.subscriptionsCacheHub;
     delete normalizedPatch.icloudWriterId;
+    // Presentation writes use the serialized account command lane.
+    delete normalizedPatch.limitAccountPresentation;
     // Derived for the renderer from the hub document, not settings. Persisting a
     // copy would leave a key on disk that describes a hub as of whenever a form
     // was last saved, waiting to be mistaken for the real thing.

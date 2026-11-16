@@ -4,12 +4,13 @@
   const menus = typeof module !== 'undefined' ? require('../actionMenu') : root.TokenMonitorActionMenu;
   const dragController = typeof module !== 'undefined' ? require('../rowDragController') : root.TokenMonitorRowDragController;
   const dragSort = typeof module !== 'undefined' ? require('../verticalDragSort') : root.TokenMonitorVerticalDragSort;
-  const api = factory(menus, dragController, dragSort);
+  const identity = typeof module !== 'undefined' ? require('../accountIdentity') : root.TokenMonitorAccountIdentity;
+  const api = factory(menus, dragController, dragSort, identity);
   if (typeof module !== 'undefined') module.exports = api;
   if (root) root.TokenMonitorAccountSlotsPanel = api;
-})(typeof window !== 'undefined' ? window : null, function accountSlotsPanelApi(menus, dragController, dragSort) {
-  function accountName(slot, reading, t) {
-    return slot.label || reading?.accountName || reading?.accountEmail || reading?.email
+})(typeof window !== 'undefined' ? window : null, function accountSlotsPanelApi(menus, dragController, dragSort, accountIdentity) {
+  function accountName(slot, reading, t = (_key, { fingerprint }) => `Account #${fingerprint}`, presentation = {}) {
+    return slot.label || (slot.source === 'remote' ? presentation.labels?.[reading?.accountKey] : '') || reading?.accountName || reading?.accountEmail || reading?.email
       || slot.accountName || slot.accountEmail
       // The app's name is a proper noun; the phrase around it is localized.
       || (slot.sourceName ? t('settings.slots.discoveredName', { source: slot.sourceName }) : '')
@@ -21,23 +22,33 @@
     if (reading?.stale) return 'stale';
     return reading?.status === 'ok' ? 'connected' : 'unavailable';
   }
-  // Reorder only each provider's existing positions, leaving other providers and
-  // remote accounts in their original relative order. Local defaults lead.
+  // Reorder each provider's positions: local owners first, then remote preferences.
+  // Unknown remote keys retain aggregate order.
   // A reading that moved to its resolved key still lists the key it moved from,
   // so a cached slot list that predates the move keeps its owner.
   function slotOwner(slots, accountKey, readingAliases = []) {
     return slots.find(slot => slot.accountKey === accountKey)
       || slots.find(slot => slot.accountKeyAliases?.includes(accountKey))
-      || slots.find(slot => readingAliases.includes(slot.accountKey));
+      || slots.find(slot => readingAliases.includes(slot.accountKey) || slot.accountKeyAliases?.some(key => readingAliases.includes(key)));
   }
-  function applyAccountOrder(records, slotsByProvider, _localDeviceId = '') {
-    const result = [...records];
+  function applyAccountOrder(records, slotsByProvider, localDeviceId = '', presentation = {}) {
+    const result = records.map(row => {
+      const slots = slotsByProvider[row.provider];
+      if (!slots) return row;
+      const owner = slotOwner(slots, row.accountKey, row.accountKeyAliases);
+      const remote = !owner && row.sourceDeviceId && row.sourceDeviceId !== localDeviceId;
+      const name = accountName(owner || { source: remote ? 'remote' : '', fingerprint: accountIdentity.accountStableFingerprint(row).slice(0, 12) }, row, undefined, presentation[row.provider] || {});
+      return { ...row, accountName: owner ? row.accountName : name, accountDisplayName: name };
+    });
     for (const [provider, slots] of Object.entries(slotsByProvider)) {
       const positions = result.flatMap((row, index) => row.provider === provider ? [index] : []);
       const rank = row => {
         const index = slots.indexOf(slotOwner(slots, row.accountKey, row.accountKeyAliases));
         if (index >= 0) return index;
-        return slots.length;
+        if (localDeviceId && row.sourceDeviceId === localDeviceId) return slots.length;
+        const remoteIndex = row.sourceDeviceId && row.sourceDeviceId !== localDeviceId
+          ? (presentation[provider]?.order || []).indexOf(row.accountKey) : -1;
+        return slots.length + 1 + (remoteIndex < 0 ? (presentation[provider]?.order || []).length : remoteIndex);
       };
       const ordered = positions.map(index => result[index]).sort((a, b) => rank(a) - rank(b));
       positions.forEach((position, index) => { result[position] = ordered[index]; });
@@ -72,6 +83,7 @@
       : form.fields.some(field => /token/i.test(field.key)) ? 'Token' : 'Key';
     const root = make('div', 'slot-panel');
     const list = make('div', 'slot-list');
+    const remoteList = make('div', 'slot-remote-list');
     const editor = make('div', 'slot-editor hidden');
     const message = make('div', 'settings-note slot-message');
     message.setAttribute('role', 'status');
@@ -82,8 +94,15 @@
     const rows = new Map();
     let slots = [];
     let readings = [];
+    let remoteSlots = [];
+    let remoteReadings = [];
+    let presentation = {};
+    let devices = [];
+    let localDeviceId = '';
+    const deviceLabels = typeof module !== 'undefined' ? require('../deviceBreakdown') : window.TokenMonitorDeviceBreakdown;
     let operationLane = Promise.resolve();
     let dragSavePending = false;
+    let presentationPending = 0;
     // Account operations still awaiting IPC (moves, removals, pauses, saves): a
     // drag measured now would persist steps from an account list they are about
     // to change, so no drag starts until they settle.
@@ -96,6 +115,7 @@
         try {
           const result = await operation();
           if (result.ok === false) { error(); return result; }
+          if (result.presentation) presentation = result.presentation[form.id] || {};
           if (result.accounts) {
             slots = result.accounts;
             preserveScroll(render);
@@ -108,14 +128,26 @@
       return task;
     };
     const run = (operation, ...args) => {
-      // A keyboard/menu move during a live drag would race the drop's measured order.
-      if (operation === 'move' && (dragSavePending || rowDrag.isDragging())) return;
-      operationsPending++;
-      return enqueue(() => ipc[operation](form.id, ...args)).finally(() => { operationsPending--; });
+      const remote = remoteSlots.find(slot => slot.id === args[0]);
+      if (!remote) {
+        // A keyboard/menu move during a live drag would race the drop's measured order.
+        if (operation === 'move' && (dragSavePending || rowDrag.isDragging())) return;
+        operationsPending++;
+        return enqueue(() => ipc[operation](form.id, ...args)).finally(() => { operationsPending--; });
+      }
+      if (operation === 'move' && (presentationPending > 0 || rowDrag.isDragging())) return;
+      presentationPending++;
+      return enqueue(() => {
+        if (operation === 'rename') return ipc.presentation(form.id, remote.accountKey, 'rename', args[1]);
+        const order = remoteSlots.map(slot => slot.accountKey);
+        const index = order.indexOf(remote.accountKey), target = index + (args[1] === 'up' ? -1 : 1);
+        if (target >= 0 && target < order.length) [order[index], order[target]] = [order[target], order[index]];
+        return ipc.presentation(form.id, remote.accountKey, 'order', order);
+      }).finally(() => { presentationPending--; preserveScroll(render); });
     };
-    const rowDrag = dragController.createRowDragController({
+    const createDrag = remote => dragController.createRowDragController({
       dragSort,
-      getList: () => list,
+      getList: () => remote ? remoteList : list,
       getScrollPanel: () => root.closest('.settings-panel'),
       rowSelector: '.slot-row[data-slot-draggable="true"]',
       idKey: 'slotId',
@@ -123,50 +155,76 @@
       dragExcluded: 'input, select, textarea, a',
       preserveScroll,
       mirrorOrder: (order, id) => {
-        const previous = slots.filter(slot => slot.id !== 'environment').map(slot => slot.id);
+        const group = remote ? remoteAccounts() : slots;
+        const previous = group.filter(slot => slot.id !== 'environment').map(slot => slot.id);
         // A push may add/remove an account while the measured rows are frozen.
         // Let the deferred render show that new list instead of saving a stale set.
         if (previous.length !== order.length || previous.some(key => !order.includes(key))) return { steps: 0 };
         const previousSlots = slots;
         const delta = order.indexOf(id) - previous.indexOf(id);
-        const byId = new Map(slots.map(slot => [slot.id, slot]));
+        const byId = new Map(group.map(slot => [slot.id, slot]));
         let index = 0;
-        slots = slots.map(slot => slot.id === 'environment' ? slot : byId.get(order[index++]));
+        const next = group.map(slot => slot.id === 'environment' ? slot : byId.get(order[index++]));
+        const previousOrder = presentation.order;
         // Lock before the controller defers persistence until after paint.
-        dragSavePending = true;
+        if (remote) {
+          remoteSlots = next;
+          presentation = { ...presentation, order: next.map(slot => slot.accountKey) };
+          presentationPending++;
+        } else {
+          slots = next;
+          dragSavePending = true;
+        }
         preserveScroll(render);
-        return { steps: Math.abs(delta), direction: delta < 0 ? 'up' : 'down', previousSlots };
+        return { steps: Math.abs(delta), direction: delta < 0 ? 'up' : 'down', previousSlots, previousOrder,
+          remoteOrder: remote ? next.map(slot => slot.accountKey) : undefined };
       },
       applyOrder: order => {
-        for (const id of order) list.moveBefore(rows.get(id).el, add);
+        for (const id of order) (remote ? remoteList : list).moveBefore(rows.get(id).el, remote ? null : add);
       },
-      persistOrder: (_order, id, { steps, direction, previousSlots }) => void enqueue(async () => {
-        let result = { ok: true, accounts: slots };
-        let confirmed = previousSlots || slots;
-        try {
-          for (let step = 0; step < steps; step++) {
-            result = await ipc.move(form.id, id, direction);
-            if (result.ok === false) throw new Error('Account move failed');
-            confirmed = result.accounts;
+      persistOrder: (_order, id, { steps, direction, previousSlots, previousOrder, remoteOrder }) => {
+        if (remote && !steps) return;
+        return void enqueue(async () => {
+          if (remote) {
+            try {
+              const result = await ipc.presentation(form.id, rows.get(id).slot.accountKey, 'order', remoteOrder);
+              if (result.ok === false) throw new Error('Account presentation save failed');
+              return result;
+            } catch (failure) {
+              presentation = { ...presentation, order: previousOrder };
+              preserveScroll(render);
+              throw failure;
+            }
           }
-          return result;
-        } catch (failure) {
-          // Earlier steps may already be stored even if a later move fails.
-          slots = confirmed;
+          let result = { ok: true, accounts: slots };
+          let confirmed = previousSlots || slots;
           try {
-            const current = await ipc.list(form.id);
-            if (current.ok !== false) slots = current.accounts;
-          } catch (_) { /* Keep the last confirmed order if reload also fails. */ }
+            for (let step = 0; step < steps; step++) {
+              result = await ipc.move(form.id, id, direction);
+              if (result.ok === false) throw new Error('Account move failed');
+              confirmed = result.accounts;
+            }
+            return result;
+          } catch (failure) {
+            // Earlier steps may already be stored even if a later move fails.
+            slots = confirmed;
+            try {
+              const current = await ipc.list(form.id);
+              if (current.ok !== false) slots = current.accounts;
+            } catch (_) { /* Keep the last confirmed order if reload also fails. */ }
+            preserveScroll(render);
+            onChanged(slots);
+            throw failure;
+          }
+        }).finally(() => {
+          if (remote) presentationPending--; else dragSavePending = false;
           preserveScroll(render);
-          onChanged(slots);
-          throw failure;
-        }
-      }).finally(() => {
-        dragSavePending = false;
-        preserveScroll(render);
-      }),
+        });
+      },
       requestRender: () => preserveScroll(render)
     });
+    const rowDrag = createDrag(false);
+    const remoteDrag = createDrag(true);
     function closeEditor() {
       cancelLogin?.();
       cancelLogin = null;
@@ -298,9 +356,9 @@
       copy.append(name);
       el.append(grip, copy, status, actions);
       el.addEventListener('pointerdown', event => {
-        if (dragSavePending || operationsPending > 0 || id === 'environment' || editorOwner !== undefined
+        if ((item.slot.source === 'remote' ? presentationPending > 0 : dragSavePending || operationsPending > 0) || id === 'environment' || editorOwner !== undefined
           || [...rows.values()].some(row => row.editing || row.actions.querySelector('.plugin-menu').matches(':popover-open'))) return;
-        rowDrag.startRowDrag(event, id);
+        (item.slot.source === 'remote' ? remoteDrag : rowDrag).startRowDrag(event, id);
       });
       // Each row owns its rename session, so one row cannot invalidate another's.
       const item = { el, name, status, actions, editing: false, renameRevision: 0, slot: null };
@@ -365,7 +423,10 @@
         remove.className = 'menu-destructive';
         const separator = () => { const node = make('hr', 'action-menu-separator'); node.setAttribute('role', 'separator'); return node; };
         const replace = action(`replace${credentialWord}`, () => openEditor(item.slot));
-        shared.appendItems(action('rename', rename), replace, pause, separator(), up, down, separator(), remove);
+        if (id.startsWith('remote:')) {
+          shared.appendItems(action('rename', rename), up, down);
+          menu.append(localized(make('div', 'settings-note slot-remote-note'), 'settings.slots.remoteNote'));
+        } else shared.appendItems(action('rename', rename), replace, pause, separator(), up, down, separator(), remove);
         const fix = slotButton(`fix${credentialWord}`, () => openEditor(item.slot));
         fix.className = 'slot-fix plugin-inline-action';
         copy.append(fix);
@@ -393,15 +454,23 @@
     const add = slotButton('add', () => openEditor(null), { provider: label });
     add.className = 'slot-add';
     list.append(add);
+    root.insertBefore(remoteList, message);
+    function remoteAccounts() {
+      return applyAccountOrder(remoteReadings, { [form.id]: slots }, localDeviceId, { [form.id]: presentation })
+        .filter(row => row.provider === form.id && row.accountKey && row.sourceDeviceId && row.sourceDeviceId !== localDeviceId && !slotOwner(slots, row.accountKey, row.accountKeyAliases))
+        .map(row => ({ id: `remote:${row.accountKey}`, source: 'remote', accountKey: row.accountKey, label: presentation.labels?.[row.accountKey] || '', enabled: true, fingerprint: accountIdentity.accountStableFingerprint(row).slice(0, 12) }));
+    }
     function render() {
-      if (rowDrag.deferRender()) return;
-      const active = slots;
+      if (rowDrag.deferRender() || remoteDrag.deferRender()) return;
+      remoteSlots = remoteAccounts();
+      const active = [...slots, ...remoteSlots];
       for (const [id, item] of rows) if (!active.some(slot => slot.id === id)) { item.el.remove(); rows.delete(id); }
       active.forEach((slot, index) => {
         const item = rowFor(slot.id);
         item.slot = slot;
         item.el.dataset.slotDraggable = String(slot.id !== 'environment');
-        const reading = readings.find(row => slotOwner(slots, row.accountKey, row.accountKeyAliases) === slot);
+        const remote = slot.source === 'remote';
+        const reading = remote ? remoteReadings.find(row => row.accountKey === slot.accountKey) : readings.find(row => slotOwner(slots, row.accountKey, row.accountKeyAliases) === slot);
         if (!item.editing) item.name.textContent = accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') }, reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading, t);
         const status = accountStatus(slot, reading);
         item.el.classList.toggle('slot-paused', !slot.enabled);
@@ -410,8 +479,9 @@
         if (item.pause) {
           item.updateRemove();
           localized(item.pause, `settings.slots.${slot.enabled ? 'pause' : 'resume'}`);
-          item.up.disabled = dragSavePending || index === 0;
-          item.down.disabled = dragSavePending || index === active.length - 1;
+          const pending = remote ? presentationPending > 0 : dragSavePending;
+          item.up.disabled = pending || (remote ? remoteSlots.indexOf(slot) === 0 : index === 0);
+          item.down.disabled = pending || (remote ? remoteSlots.indexOf(slot) === remoteSlots.length - 1 : index === slots.length - 1);
           item.actions.classList.toggle('hidden', slot.source === 'environment');
           if (slot.source === 'discovered') { item.replace.remove(); item.remove.remove(); }
         }
@@ -425,17 +495,23 @@
           item.discoveredNote = localized(make('div', 'settings-note'), 'settings.slots.discovered', { source: slot.sourceName });
           item.el.querySelector('.plugin-menu')?.append(item.discoveredNote);
         }
-        const before = [...list.children].filter(node => node !== editor)[index];
+        if (remote) {
+          if (!item.deviceNote) { item.deviceNote = make('div', 'settings-note'); item.el.querySelector('.slot-copy').append(item.deviceNote); }
+          item.deviceNote.textContent = deviceLabels.deviceLabel(devices.find(device => device.deviceId === reading?.sourceDeviceId) || { deviceId: reading?.sourceDeviceId });
+        }
+        const parent = remote ? remoteList : list;
+        const before = [...parent.children].filter(node => node !== editor)[remote ? remoteSlots.indexOf(slot) : index];
         if (before !== item.el) {
-          if (item.el.isConnected) list.moveBefore(item.el, before || null);
-          else list.insertBefore(item.el, before || null);
+          if (item.el.isConnected) parent.moveBefore(item.el, before || null);
+          else parent.insertBefore(item.el, before || null);
         }
         item.positionMenu();
       });
       placeEditor();
     }
-    return { element: root, update(nextSlots, nextReadings) {
+    return { element: root, update(nextSlots, nextReadings, context = {}) {
       slots = nextSlots; readings = nextReadings;
+      remoteReadings = context.records || []; devices = context.devices || []; localDeviceId = context.localDeviceId || ''; presentation = context.presentation || {};
       preserveScroll(render);
     }, openEditor };
   }
