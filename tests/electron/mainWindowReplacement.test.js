@@ -37,6 +37,7 @@ function fixture(state = {}) {
     mainWindowReplacementTask: Promise.resolve(),
     captureRetainedWindowState: async () => {}, restoreRetainedWindowState: async () => {},
     windowsBackdropFallback: () => false,
+    refreshRetainedWindowsBackdrop: () => true,
     stopFloatingBubbleAutoCollapseTimer() {}, displayForBounds: () => null,
     applyNativeMaterial() {}, persistWindowBounds() {}, WINDOW_LIMITS: {},
     restoreFloatingBubbleWindow(win, bounds) { win.bounds = bounds; },
@@ -60,6 +61,10 @@ function fixture(state = {}) {
 
 test('visible host replacement retains the page and focus, including maximized restore', async () => {
   const { context, old, creations } = fixture({ focused: true });
+  const events = [];
+  const origDestroy = old.destroy.bind(old);
+  old.destroy = () => { events.push('destroyOld'); origDestroy(); };
+  context.refreshRetainedWindowsBackdrop = win => { events.push(['refresh', win === context.mainWindow]); return true; };
   context.settings.windowMaximized = true;
   await context.replaceMainWindow(old.bounds, { focus: true });
   assert.equal(creations[0].options.previousWindow, old);
@@ -67,6 +72,7 @@ test('visible host replacement retains the page and focus, including maximized r
   assert.equal(context.mainWindow.maximized, true);
   assert.equal(context.mainWindow.focused, true);
   assert.equal(old.destroyed, true);
+  assert.deepEqual(events, ['destroyOld', ['refresh', true]]);
 });
 
 test('an in-place expansion cancels a collapse awaiting viewport capture', async () => {

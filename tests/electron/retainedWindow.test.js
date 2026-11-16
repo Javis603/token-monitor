@@ -126,9 +126,10 @@ function fixture() {
       this.options = options;
       const webContents = new EventEmitter();
       Object.assign(webContents, {
-        closes: 0, focuses: 0, getTitle: () => 'Token Monitor',
+        closes: 0, focuses: 0, invalidates: 0, getTitle: () => 'Token Monitor',
         isDestroyed: () => webContents.closes > 0,
-        close: () => webContents.closes++, focus: () => webContents.focuses++
+        close: () => webContents.closes++, focus: () => webContents.focuses++,
+        invalidate: () => webContents.invalidates++
       });
       this.webContents = webContents;
       views.push(this);
@@ -180,4 +181,38 @@ test('content sizing, keyboard focus and title follow only the current owner', (
   assert.equal(win.title, 'Updated title');
   assert.equal(old.title, 'Token Monitor');
   assert.equal(page.listenerCount('page-title-updated'), 1);
+});
+
+test('late paint after fallback and restore/maximize events refresh surface without hiding the host', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const f = fixture();
+  let beforeCount = 0;
+  let afterCount = 0;
+  const win = f.create({ width: 400, height: 600, show: true }, undefined, {
+    beforeReveal: () => beforeCount++,
+    afterReveal: () => afterCount++
+  });
+  let paint;
+  win.webContents.executeJavaScript = () => new Promise(resolve => { paint = resolve; });
+  win.emit('show');
+  t.mock.timers.tick(1000);
+  assert.equal(beforeCount, 1);
+  assert.equal(afterCount, 1);
+  assert.equal(win.webContents.invalidates, 1);
+  assert.deepEqual(win.opacities, [0, 1]);
+
+  paint();
+  await Promise.resolve();
+  assert.equal(beforeCount, 1, 'late paint after fallback does not rerun beforeReveal');
+  assert.equal(afterCount, 2, 'late paint refreshes surface after fallback');
+  assert.equal(win.webContents.invalidates, 2);
+  assert.deepEqual(win.opacities, [0, 1]);
+
+  win.emit('restore');
+  win.emit('maximize');
+  win.emit('unmaximize');
+  win.emit('show');
+  assert.equal(afterCount, 6);
+  assert.equal(win.webContents.invalidates, 6);
+  assert.deepEqual(win.opacities, [0, 1]);
 });

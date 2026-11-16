@@ -74,11 +74,15 @@ test('window handoff releases the old window when the replacement is shown', () 
   const oldWindow = new FakeWindow();
   const nextWindow = new FakeWindow();
   const timers = fakeTimers();
+  const events = [];
+  const origDestroy = oldWindow.destroy.bind(oldWindow);
+  oldWindow.destroy = () => { events.push('destroyOld'); origDestroy(); };
 
   handoffWindow(oldWindow, nextWindow, {
     focus: true,
     setTimeout: timers.setTimeout,
-    clearTimeout: timers.clearTimeout
+    clearTimeout: timers.clearTimeout,
+    afterHandoff: target => events.push(['afterHandoff', target === nextWindow])
   });
 
   assert.equal(timers.scheduled.length, 1);
@@ -86,6 +90,7 @@ test('window handoff releases the old window when the replacement is shown', () 
   nextWindow.emit('show');
   assert.equal(oldWindow.destroyCalls, 1);
   assert.equal(nextWindow.focusCalls, 1);
+  assert.deepEqual(events, ['destroyOld', ['afterHandoff', true]]);
   assert.equal(timers.scheduled[0].cleared, true);
 
   timers.scheduled[0].fn();
