@@ -17617,6 +17617,7 @@ function copilotAccountStatusText(provider, configured, source, enabled = true) 
 }
 
 function apiKeyAccountStatusText(providerName, provider, configured, source, enabled = true) {
+  if (providerName === 'alibaba' && provider?.source === 'cli') source = 'cli';
   const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
   if (accountStatus === 'linked') {
     // A ZCode-discovered login is an OAuth-style link, not a pasted API key,
@@ -17881,7 +17882,8 @@ function renderExternalProviderStatus(providerName) {
   errorEl.textContent = message ? t(message.key, message.params) : '';
   errorEl.classList.toggle('hidden', !message);
   errorEl.classList.toggle('error', message?.tone !== 'notice');
-  const configured = Boolean(state.settings?.[config.configuredKey]);
+  const cliAccount = providerName === 'alibaba' && provider?.source === 'cli';
+  const configured = Boolean(state.settings?.[config.configuredKey] || cliAccount);
   const enabled = limitProviderEnabled(providerName);
   const settled = externalProviderCheckSettled.has(providerName);
   const pending = enabled && Number(state[config.pendingKey] || 0) > 0 && !settled;
@@ -17897,8 +17899,9 @@ function renderExternalProviderStatus(providerName) {
   // instead of a permanent spinner; the cutoff above still blocks the old
   // record from being read as a confirmed link.
   const statusProvider = provider || (settled && configured && enabled ? { status: 'noSyncedData' } : null);
-  const statusText = pending ? t('settings.common.checking')
+  let statusText = pending ? t('settings.common.checking')
     : apiKeyAccountStatusText(providerName, statusProvider, configured, source, enabled);
+  if (cliAccount && !pending) statusText = `CLI · ${statusText}`;
   setCursorStatusText(statusEl, providerName === 'claude' && !pending
     ? claudeAccountStatusText(statusText, enabled) : statusText);
   // A local ZCode install keeps the Z.ai row honest when unchecked: the
@@ -17917,6 +17920,7 @@ function renderExternalProviderStatus(providerName) {
   }
   const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')
     || (providerName === 'cline' && source === 'cline-signin')
+    || cliAccount
     || providerName === 'hark';
   if (discoveredLogin) {
     // The discovered login is not user-entered, so the override input and the

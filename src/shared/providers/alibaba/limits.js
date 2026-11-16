@@ -14,7 +14,7 @@
 //   cn-personal    Bailian       Personal  rolling-window API     -> reported windows
 //   intl-personal  Model Studio  Personal  rolling-window API     -> reported windows
 //
-// Auth is a console Cookie header, not an API token. The Personal variants read
+// Auth tries a configured Bailian CLI before a console Cookie header. The Personal variants read
 // their quota from a *different host* than the dashboard, so a Personal cookie
 // has to be copied from the quota request rather than from the dashboard page;
 // the settings panel says so in its numbered steps.
@@ -34,6 +34,9 @@ const { hashKey } = require('../../hashKey');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 const { throwIfAborted } = require('../../abortSignal');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
+const { fetchBailianCLI, validatePersonalCLIUsage } = require('./cli');
+const { accountIdentityDescriptor } = require('../../limits/accountScope');
+const { providerStatusFromError } = require('../../limits/providerHelpers');
 
 const ALIBABA_FETCH_TIMEOUT_MS = 20_000;
 const ALIBABA_SEC_TOKEN_TIMEOUT_MS = 10_000;
@@ -915,12 +918,60 @@ function statusRow(status, updatedAt, variantId, personal) {
   });
 }
 
+function selectedAlibabaResult(provider, options, deps) {
+  if (deps.probe) return [provider];
+  // One selected login: a successful source switch retires the previous row,
+  // including CLI readings whose only local identity was their display label.
+  // Never copy that label into the cross-device account key.
+  const identity = accountIdentityDescriptor(provider)?.part;
+  const removals = (options.previousLimits?.providers || [])
+    .filter(row => row.provider === 'alibaba' && accountIdentityDescriptor(row)?.part !== identity)
+    .map(row => ({ provider: 'alibaba', accountKey: row.accountKey,
+      accountName: row.accountName, accountEmail: row.accountEmail, accountLabel: row.accountLabel,
+      removed: true, replacementAccount: { accountKey: provider.accountKey, accountLabel: provider.accountLabel } }));
+  return [provider, ...removals];
+}
+
 async function fetchAlibabaLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
   const variantId = alibabaVariant(options, env);
   const variant = alibabaVariantConfig(variantId);
   const cookieHeader = alibabaCookie(env, options);
+
+  // A save-time probe validates the submitted cookie alone. An unrelated CLI
+  // login must never make a bad credential look valid.
+  if (!deps.probe) {
+    throwIfAborted(deps.signal);
+    try {
+      const result = await fetchBailianCLI(variant, deps);
+      if (result) {
+        let summary;
+        if (variant.personal) {
+          const payload = parseConsoleBody(result.usageText);
+          validatePersonalCLIUsage(payload);
+          summary = parsePersonalUsage(payload, null, null);
+        } else summary = result.summary;
+        const provider = normalizeLimitProvider({
+          provider: 'alibaba', source: 'cli', status: 'ok', updatedAt,
+          accountKey: summary.uid ? hashKey('alibaba', summary.uid) : '',
+          accountLabel: summary.planName, planLabel: summary.planName,
+          windows: variant.personal ? personalWindows(summary) : teamWindows(summary),
+          region: variantId,
+          ...(variant.personal ? { workspaceKind: 'personal' } : {})
+        });
+        return selectedAlibabaResult(provider, options, deps);
+      }
+    } catch (error) {
+      if (deps.signal?.aborted || error?.name === 'AbortError') throw error;
+      deps.noteLimitFailure?.(error, { source: 'cli' });
+      if (!cookieHeader) return [normalizeLimitProvider({
+        provider: 'alibaba', source: 'cli', status: providerStatusFromError(error), updatedAt,
+        windows: [], region: variantId,
+        ...(variant.personal ? { workspaceKind: 'personal' } : {})
+      })];
+    }
+  }
 
   if (!cookieHeader) return [statusRow('notConfigured', updatedAt, variantId, variant.personal)];
 
@@ -930,7 +981,7 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
 
     if (variant.personal) {
       const usage = await fetchPersonalUsage(cookieHeader, variant, secToken, deps);
-      return [normalizeLimitProvider({
+      return selectedAlibabaResult(normalizeLimitProvider({
         provider: 'alibaba',
         accountKey: usage.uid ? hashKey('alibaba', usage.uid) : '',
         accountLabel: usage.planName,
@@ -941,12 +992,12 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
         windows: personalWindows(usage),
         region: variantId,
         workspaceKind: 'personal'
-      })];
+      }), options, deps);
     }
 
     const payload = await fetchTeamSummary(cookieHeader, variant, secToken, deps);
     const summary = parseTeamSummary(payload);
-    return [normalizeLimitProvider({
+    return selectedAlibabaResult(normalizeLimitProvider({
       provider: 'alibaba',
       accountKey: summary.uid ? hashKey('alibaba', summary.uid) : '',
       accountLabel: summary.planName,
@@ -956,7 +1007,7 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
       updatedAt,
       windows: teamWindows(summary),
       region: variantId
-    })];
+    }), options, deps);
   } catch (error) {
     // An aborted refresh is not a provider outcome. Swallowing it here would
     // record a fabricated `unavailable` over the last real answer, which is the

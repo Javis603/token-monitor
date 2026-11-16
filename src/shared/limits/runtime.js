@@ -722,9 +722,12 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       } else lane.identities.clear();
     }
 
+    let removeAnonymous = false;
+    const replacementRemovals = [];
     for (const removal of removals) {
       let identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
-      if (identityKey === `${lane.provider}:*`) continue;
+      if (removal.replacementAccount) { replacementRemovals.push(removal); continue; }
+      if (identityKey === `${lane.provider}:*`) { removeAnonymous = true; continue; }
       if (dispatch.accountScoped && identityKey !== dispatch.identityKey) continue;
       if (apiOnly && !belongsToApi(identityKey)) continue;
       if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
@@ -758,6 +761,26 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       // Marks the row as measurable by this runtime, so a persisted seed for a
       // provider that has not answered yet can never become a burn baseline.
       if (committedRow.status === 'ok') markLimitsProbeSuccess(burnState, committedRow);
+    }
+
+    // Retire anonymous state only after its healthy replacement actually commits;
+    // a result invalidated by a concurrent account clear cannot replace it.
+    if (removeAnonymous && !dispatch.accountScoped && committedRows.some(row => row.status === 'ok')
+      && accountRevisionStillCurrent(lane, `${lane.provider}:*`, dispatch)) {
+      represented.add(`${lane.provider}:*`);
+      lane.identities.delete(`${lane.provider}:*`);
+    }
+
+    // Source replacement differs from confirmed account disappearance: retire
+    // the old row only when its specific replacement survived the commit fences.
+    for (const removal of replacementRemovals) {
+      const identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
+      const replacementKey = rowIdentityKey({ ...removal.replacementAccount, provider: lane.provider });
+      if (dispatch.accountScoped || !accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
+      if (apiOnly && !belongsToApi(identityKey)) continue;
+      if (!committedRows.some(row => row.status === 'ok' && rowIdentityKey(row) === replacementKey)) continue;
+      represented.add(identityKey);
+      lane.identities.delete(identityKey);
     }
 
     if (!dispatch.accountScoped && !genericTerminal) {
