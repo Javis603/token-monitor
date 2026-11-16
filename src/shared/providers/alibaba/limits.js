@@ -927,7 +927,8 @@ function selectedAlibabaResult(provider, options, deps) {
   const removals = (options.previousLimits?.providers || [])
     .filter(row => row.provider === 'alibaba' && accountIdentityDescriptor(row)?.part !== identity)
     .map(row => ({ provider: 'alibaba', accountKey: row.accountKey,
-      accountName: row.accountName, accountEmail: row.accountEmail, accountLabel: row.accountLabel, removed: true }));
+      accountName: row.accountName, accountEmail: row.accountEmail, accountLabel: row.accountLabel,
+      removed: true, replacementAccount: { accountKey: provider.accountKey, accountLabel: provider.accountLabel } }));
   return [provider, ...removals];
 }
 

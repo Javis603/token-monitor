@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { mkdtempSync, writeFileSync, chmodSync, rmSync } = require('node:fs');
+const { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { fetchAlibabaLimits, alibabaVariantConfig } = require('../../src/shared/providers/alibaba/limits');
@@ -292,4 +292,81 @@ test('Alibaba CLI authentication errors stay distinct from unavailable quota', a
   const [row] = await fetchAlibabaLimits({ alibabaVariant: 'cn-personal' },
     cliDeps(() => ({ Success: false, Code: 'Login.NotLogined', Message: 'login required' })));
   assert.equal(row.status, 'unauthorized');
+});
+
+test('Bailian Windows npm discovery runs the fixed package entry with Node, without a shell', async () => {
+  const deps = cliDeps(() => ({ per1MonthPercentage: 0.2 }));
+  deps.platform = 'win32';
+  deps.env = { PATH: 'C:\\npm;C:\\node', BAILIAN_CONFIG_DIR: 'C:\\profiles\\bailian' };
+  const entry = 'C:\\npm\\node_modules\\bailian-cli\\dist\\bailian.mjs';
+  deps.existsSync = file => ['C:\\npm\\bl.cmd', entry, 'C:\\node\\node.exe'].includes(file);
+  const [row] = await fetchAlibabaLimits({ alibabaVariant: 'cn-personal' }, deps);
+  assert.equal(row.status, 'ok');
+  assert.equal(row.source, 'cli');
+  assert.equal(deps.calls[0].command, 'C:\\node\\node.exe');
+  assert.equal(deps.calls[0].args[0], entry);
+  assert.equal(deps.calls[0].options.shell, undefined);
+  assert.equal(deps.calls[0].options.env.BAILIAN_CONFIG_DIR, 'C:\\profiles\\bailian');
+});
+
+test('Bailian config directory survives credential isolation', () => {
+  const env = cliEnvironment({ BAILIAN_CONFIG_DIR: '/custom/config', DASHSCOPE_API_KEY: 'secret',
+    BAILIAN_ACCESS_KEY_SECRET: 'secret' }, alibabaVariantConfig('cn-personal'));
+  assert.equal(env.BAILIAN_CONFIG_DIR, '/custom/config');
+  assert.equal(env.DASHSCOPE_API_KEY, undefined);
+  assert.equal(env.BAILIAN_ACCESS_KEY_SECRET, undefined);
+});
+
+test('Alibaba source replacement keeps old named quota if the new account was cleared during refresh', async () => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  let ready;
+  const started = new Promise(resolve => { ready = resolve; });
+  let complete;
+  const result = new Promise(resolve => { complete = resolve; });
+  const deps = cliDeps(() => ({ Uid: 123, per1MonthPercentage: 0.2 }));
+  const { hashKey } = require('../../src/shared/hashKey');
+  const runtime = createLimitsRuntime({ alibabaVariant: 'cn-personal', limitProviders: ['alibaba'],
+    previousLimits: { providers: [{ provider: 'alibaba', source: 'web', accountKey: 'old', status: 'ok',
+      updatedAt: new Date(now).toISOString(), windows: [{ kind: 'billing', usedPercent: 65 }] }] }
+  }, { autoStart: false, autoRetry: false, now: () => now,
+    probeProvider: async (_provider, options, context) => {
+      ready(); await result;
+      return fetchAlibabaLimits(options, { ...deps, signal: context.signal });
+    } });
+  try {
+    const pending = runtime.refresh({ provider: 'alibaba' }, 'manual');
+    await started;
+    runtime.clear({ provider: 'alibaba', accountKey: hashKey('alibaba', '123') });
+    complete(); await pending;
+    const rows = runtime.getSnapshot().providers;
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].accountKey, 'old');
+    assert.equal(rows[0].status, 'unavailable');
+    assert.equal(rows[0].windows[0].usedPercent, 65);
+  } finally { runtime.stop(); }
+});
+
+
+test('Windows npm Bailian entry executes natively with a custom config directory', { skip: process.platform !== 'win32' }, async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bailian npm & quota-'));
+  try {
+    const dist = path.join(dir, 'node_modules', 'bailian-cli', 'dist');
+    mkdirSync(dist, { recursive: true });
+    writeFileSync(path.join(dir, 'bl.cmd'), '@echo off\r\nexit /b 99\r\n');
+    writeFileSync(path.join(dist, 'bailian.mjs'), `
+      import assert from 'node:assert/strict';
+      assert.equal(process.env.BAILIAN_CONFIG_DIR, ${JSON.stringify(path.join(dir, 'custom config'))});
+      assert.equal(process.env.DASHSCOPE_API_KEY, undefined);
+      assert.ok(process.argv.includes('international'));
+      console.log(JSON.stringify({per1MonthPercentage:0.35}));
+    `);
+    const [row] = await fetchAlibabaLimits({ alibabaVariant: 'intl-personal' }, { env: {
+      PATH: [dir, path.dirname(process.execPath)].join(path.delimiter),
+      BAILIAN_CONFIG_DIR: path.join(dir, 'custom config'), DASHSCOPE_API_KEY: 'must-not-pass',
+      SystemRoot: process.env.SystemRoot
+    } });
+    assert.equal(row.status, 'ok');
+    assert.equal(row.source, 'cli');
+    assert.equal(row.windows[0].usedPercent, 35);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

@@ -11,6 +11,14 @@ const CLI_TIMEOUT_MS = 15000;
 const MAX_SEATS = 1000;
 const PAGE_SIZE = 10;
 
+function existingExecutable(file, deps) {
+  if (deps.existsSync) return deps.existsSync(file);
+  try {
+    fs.accessSync(file, fs.constants.X_OK);
+    return fs.statSync(file).isFile();
+  } catch { return false; }
+}
+
 function existingBailianCli(env, platform = process.platform, deps = {}) {
   const paths = platform === 'win32' ? path.win32 : path.posix;
   const dirs = (env.PATH || env.Path || '').split(platform === 'win32' ? ';' : ':').filter(Boolean);
@@ -18,20 +26,22 @@ function existingBailianCli(env, platform = process.platform, deps = {}) {
   if (home) dirs.push(paths.join(home, '.local', 'bin'));
   if (platform !== 'win32') dirs.push('/opt/homebrew/bin', '/usr/local/bin', '/usr/bin');
   const name = platform === 'win32' ? 'bl.exe' : 'bl';
-  return dirs.map(dir => paths.join(dir, name)).find(file => {
-    if (!paths.isAbsolute(file)) return false;
-    if (deps.existsSync) return deps.existsSync(file);
-    try {
-      fs.accessSync(file, fs.constants.X_OK);
-      return fs.statSync(file).isFile();
-    } catch { return false; }
-  }) || null;
+  for (const dir of dirs.filter(paths.isAbsolute)) {
+    const binary = paths.join(dir, name);
+    if (existingExecutable(binary, deps)) return binary;
+    if (platform === 'win32') {
+      // npm's supported global layout. Never interpret or execute shim text.
+      const entry = paths.join(dir, 'node_modules', 'bailian-cli', 'dist', 'bailian.mjs');
+      if (existingExecutable(paths.join(dir, 'bl.cmd'), deps) && existingExecutable(entry, deps)) return entry;
+    }
+  }
+  return null;
 }
 
 function cliEnvironment(env, variant) {
   // Reuse the CLI's saved login, without forwarding unrelated app credentials.
   const allowed = new Set(['PATH', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'SystemRoot',
-    'XDG_CONFIG_HOME', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ',
+    'XDG_CONFIG_HOME', 'BAILIAN_CONFIG_DIR', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ',
     'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
     'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy']);
   const result = Object.fromEntries(Object.entries(env).filter(([key]) => allowed.has(key)));
@@ -90,11 +100,21 @@ async function fetchBailianCLI(variant, deps = {}) {
   const command = existingBailianCli(env, deps.platform || process.platform, deps);
   if (!command) return null;
   const childEnv = cliEnvironment(env, variant);
+  let executable = command;
+  let prefix = [];
+  if ((deps.platform || process.platform) === 'win32' && command.endsWith('.mjs')) {
+    const npmDir = path.win32.resolve(path.win32.dirname(command), '..', '..', '..');
+    const dirs = [npmDir, ...(env.PATH || env.Path || '').split(';').filter(Boolean)];
+    executable = dirs.filter(path.win32.isAbsolute).map(dir => path.win32.join(dir, 'node.exe'))
+      .find(file => existingExecutable(file, deps));
+    if (!executable) return null;
+    prefix = [command];
+  }
   const deadline = Date.now() + CLI_TIMEOUT_MS;
   const run = args => {
     const remaining = deadline - Date.now();
     if (remaining <= 0) throw new Error('Bailian CLI quota deadline exceeded');
-    return runBailian(command, args, childEnv, remaining, deps);
+    return runBailian(executable, [...prefix, ...args], childEnv, remaining, deps);
   };
   if (variant.personal) {
     return { usageText: await run(['console', 'call', '--api',

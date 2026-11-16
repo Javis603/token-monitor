@@ -692,8 +692,10 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     }
 
     let removeAnonymous = false;
+    const replacementRemovals = [];
     for (const removal of removals) {
       let identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
+      if (removal.replacementAccount) { replacementRemovals.push(removal); continue; }
       if (identityKey === `${lane.provider}:*`) { removeAnonymous = true; continue; }
       if (dispatch.accountScoped && identityKey !== dispatch.identityKey) continue;
       if (apiOnly && !belongsToApi(identityKey)) continue;
@@ -736,6 +738,18 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       && accountRevisionStillCurrent(lane, `${lane.provider}:*`, dispatch)) {
       represented.add(`${lane.provider}:*`);
       lane.identities.delete(`${lane.provider}:*`);
+    }
+
+    // Source replacement differs from confirmed account disappearance: retire
+    // the old row only when its specific replacement survived the commit fences.
+    for (const removal of replacementRemovals) {
+      const identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
+      const replacementKey = rowIdentityKey({ ...removal.replacementAccount, provider: lane.provider });
+      if (dispatch.accountScoped || !accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
+      if (apiOnly && !belongsToApi(identityKey)) continue;
+      if (!committedRows.some(row => row.status === 'ok' && rowIdentityKey(row) === replacementKey)) continue;
+      represented.add(identityKey);
+      lane.identities.delete(identityKey);
     }
 
     if (!dispatch.accountScoped && !genericTerminal) {
