@@ -166,3 +166,9 @@ test('a paused duplicate of the collected credential is resumed rather than sile
   assert.equal(migrated.deepseekAccountSlots[0].enabled, true);
   assert.equal(migrated.deepseekApiKey, undefined);
 });
+
+test('activating a provider from an account save takes the settings path and reaches the renderer', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const wiring = main.slice(main.indexOf('accountSlotService = createAccountSlotService({'), main.indexOf('probeDeps: credentialProbeDeps,', main.indexOf('accountSlotService = createAccountSlotService({')));
+  assert.match(wiring, /applySettingsPatch\(\{ limitProviders, limitsEnabled \}\);\s*pushSettingsToRenderer\(\);/);
+});

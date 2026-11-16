@@ -8425,8 +8425,15 @@ app.whenReady().then(() => {
   accountSlotService = createAccountSlotService({
     getSettings: () => settings,
     write: (patch) => {
-      settings = { ...settings, ...patch };
+      const { limitProviders, limitsEnabled, ...slotPatch } = patch;
+      settings = { ...settings, ...slotPatch };
       saveSettings({ throwOnError: true });
+      // Turning a provider on takes the ordinary settings path (selection
+      // normalization, runtime start) and is published to the renderer.
+      if (limitProviders !== undefined && (limitProviders !== settings.limitProviders || limitsEnabled !== settings.limitsEnabled)) {
+        applySettingsPatch({ limitProviders, limitsEnabled });
+        pushSettingsToRenderer();
+      }
     },
     probeDeps: credentialProbeDeps,
     onChanged: (provider, change) => {
