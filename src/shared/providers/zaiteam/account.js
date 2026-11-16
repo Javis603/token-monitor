@@ -16,6 +16,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
     },
     {
       key: 'zaiTeamOrganizationId',
+      envFallback: ['ZAI_TEAM_ORGANIZATION_ID'],
       kind: 'credential',
       storePath: ['providers', 'zaiTeam', 'organizationId'],
       normalize: 'trim',
@@ -23,6 +24,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
     },
     {
       key: 'zaiTeamProjectId',
+      envFallback: ['ZAI_TEAM_PROJECT_ID'],
       kind: 'credential',
       storePath: ['providers', 'zaiTeam', 'projectId'],
       normalize: 'trim',
@@ -53,6 +55,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
       {
         key: 'zaiTeamOrganizationId',
         input: 'text',
+        secret: false,
         labelKey: 'settings.zaiteam.organizationId',
         placeholderKey: 'settings.zaiteam.organizationIdPlaceholder',
         required: true
@@ -60,6 +63,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
       {
         key: 'zaiTeamProjectId',
         input: 'text',
+        secret: false,
         labelKey: 'settings.zaiteam.projectId',
         placeholderKey: 'settings.zaiteam.projectIdPlaceholder',
         required: true

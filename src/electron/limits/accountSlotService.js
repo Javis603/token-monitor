@@ -80,8 +80,11 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
           const provesServer = entry.serverAccountKey && entry.limits[entry.serverAccountKey];
           // The proof is remembered on the record: a replacement saved without an
           // answer keeps the old key beside new values, which can no longer prove it.
+          // Provisional slot keys are bookkeeping, never server identity proof.
           const oldProven = Boolean(old?.accountKey && provesServer
-            && (old.serverIdentity || provesServer(old.accountKey, old.values, old.accountKeyAliases)));
+            && (old.serverIdentity || (old.accountKey !== hashKey(entry.id, 'account-slot', 'default')
+              && old.accountKey !== hashKey(entry.id, 'account-slot', `slot:${old.id}`)
+              && provesServer(old.accountKey, old.values, old.accountKeyAliases))));
           const provenNow = Boolean(provider?.accountKey && provesServer
             && provesServer(provider.accountKey, candidate, provider.accountKeyAliases || []));
           // A key this slot has been before (an alias) is its own account coming back.
@@ -153,7 +156,9 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
       const slot = next.find(item => item.id === id);
       if (!slot || !slot.enabled || fingerprint !== accountValuesFingerprint(slot.values)) return false;
       const provesServer = entry.serverAccountKey && entry.limits[entry.serverAccountKey];
-      const proven = Boolean(provesServer && provesServer(identity.accountKey, slot.values, identity.accountKeyAliases || []));
+      const proven = Boolean(provesServer && identity.accountKey !== hashKey(entry.id, 'account-slot', 'default')
+        && identity.accountKey !== hashKey(entry.id, 'account-slot', `slot:${slot.id}`)
+        && provesServer(identity.accountKey, slot.values, identity.accountKeyAliases || []));
       slot.serverIdentity = proven || slot.serverIdentity;
       Object.assign(slot, identity);
       await commit(entry, next, false);
