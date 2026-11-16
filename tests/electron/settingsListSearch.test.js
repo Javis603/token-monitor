@@ -85,7 +85,7 @@ test('an unfiltered toggle writes the same selection the old DOM read produced',
 
 test('both toggles route through the shared merge rather than reading the DOM directly', () => {
   const app = readRendererFile('app.js');
-  assert.match(fn(app, 'onToolTrackingToggle'), /settingsListFilterApi\.mergeRenderedSelection\(\s*enabledClientSet\(\),/);
+  assert.match(fn(app, 'onToolTrackingToggle'), /settingsListFilterApi\.mergeRenderedSelection\(\s*new Set\(String\(Object\.assign\(\{\}, state\.settings, \.\.\.pendingSettingsPatches\)\.clients/);
   assert.match(fn(app, 'onLimitProviderToggle'), /settingsListFilterApi\.mergeRenderedSelection\(\s*enabledLimitProviderSet\(\),/);
 });
 

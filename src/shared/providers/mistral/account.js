@@ -1,6 +1,7 @@
+// @ts-check
 'use strict';
 
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'mistral',
   fetch: 'fetchMistralLimits',
   fields: [{
@@ -25,4 +26,4 @@ module.exports = {
     openUrl: { url: 'https://admin.mistral.ai/subscription' }
   },
   urlPolicy: [{ hosts: ['admin.mistral.ai'], exactPaths: ['/subscription'] }]
-};
+});

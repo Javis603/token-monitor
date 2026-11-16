@@ -93,12 +93,12 @@ async function main() {
     scroll.scrollTop=60;
     const official=tab('discover');official.focus({preventScroll:true});const y=official.getBoundingClientRect().y;
     official.click();const during={y:official.getBoundingClientRect().y,focus:document.activeElement===official,connected:official.isConnected};
-    official.click();tab('installed').click();
+    official.click();tab('installed').click();await tick();
     check('pending-navigation-keeps-node-position-focus-and-one-request',during.y===y&&during.focus&&during.connected&&catalogCalls===1,{during,y,catalogCalls});
     scroll.scrollTop=70;pending(catalog);await tick();
     check('completion-retains-navigation-and-current-scroll',official===tab('discover')&&document.activeElement===official&&scroll.scrollTop===70&&official.getAttribute('aria-selected')==='true',{scroll:scroll.scrollTop});
     tab('installed').click();await tick();
-    const community=tab('discover');community.focus({preventScroll:true});community.click();reject(Error('offline'));await tick();
+    const community=tab('discover');community.focus({preventScroll:true});community.click();await tick();reject(Error('offline'));await tick();
     check('failed-tab-load-keeps-current-page-and-focus',tab('installed').getAttribute('aria-selected')==='true'&&document.activeElement===community&&box.querySelector('.plugin-action-error')?.textContent==='offline');
     community.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight',bubbles:true}));
     check('keyboard-navigation-with-labelled-panel',document.activeElement===tab('installed')&&tab('installed').tabIndex===0&&[...box.querySelectorAll('[role="tab"]')].filter(n=>n.tabIndex===0).length===1&&box.querySelector('[role="tabpanel"]').getAttribute('aria-labelledby')===tab('installed').id&&box.querySelector('[role="tablist"]')!==null);
@@ -142,7 +142,7 @@ async function main() {
     box.querySelector('[data-catalog-id="third-party"] .plugin-catalog-title').click();await tick();
     check('incompatible-details-explain-unavailability-without-install',box.querySelector('dialog footer .plugin-risk')?.textContent==='plugins.catalog.incompatible'&&!box.querySelector('dialog .plugin-allow'));
     box.querySelector('.plugin-dialog-close').click();await tick();
-    catalog.sources=[{id:'custom',kind:'community',label:'Cached source',nextError:'request failed'},{id:'empty',kind:'community',label:'Empty source',nextError:'invalid catalog'},{id:'healthy',kind:'community',label:'Healthy source'}];await panel.refresh();
+    catalog.sources=[{id:'custom',kind:'community',label:'Cached source',url:'https://example.test/cached.json',nextError:'request failed'},{id:'empty',kind:'community',label:'Empty source',url:'https://example.test/empty.json',nextError:'invalid catalog'},{id:'healthy',kind:'community',label:'Healthy source',url:'https://example.test/healthy.json'}];await panel.refresh();
     box.querySelector('.plugin-catalog-refresh button').click();await tick();
     check('discover-shows-each-returned-source-error-and-keeps-cached-entries',box.querySelector('.plugin-catalog').textContent.includes('Cached source: request failed')&&box.querySelector('.plugin-catalog').textContent.includes('Empty source: invalid catalog')&&box.querySelectorAll('[data-catalog-id]').length===2&&calls.filter(c=>c[0]==='refreshSource').length===3);
     await panel.refresh();
@@ -236,7 +236,7 @@ async function main() {
     check('author-guide-uses-host-external-route',calls.at(-1)?.[0]==='guide'&&calls.at(-1)?.[1]==='https://javis-ai.com/token-monitor/docs/plugin-quickstart.html?lang=en');
     box.querySelector('.plugin-back').click();await tick();check('about-back-restores-more-trigger-focus',document.activeElement===box.querySelector('.plugin-toolbar .plugin-more'));
     check('removed-style-editor-has-no-tab-or-controls',!tab('style')&&!box.querySelector('.plugin-style-form')&&box.querySelectorAll('[role=tab]').length===2);
-    tab('installed').click();await tick();catalogMode='deferred';tab('discover').focus();tab('discover').click();document.getElementById('outside').focus();pending(catalog);await tick();
+    tab('installed').click();await tick();catalogMode='deferred';tab('discover').focus();tab('discover').click();document.getElementById('outside').focus();await tick();pending(catalog);await tick();
     check('completion-does-not-steal-external-focus',document.activeElement.id==='outside');
     catalogMode='success';document.getElementById('after').style.display='none';scroll.style.height='400px';
     tab('installed').click();await tick();scroll.scrollTop=120;
@@ -313,7 +313,7 @@ async function main() {
     backgroundPanel.dispose();const disposedContent=backgroundBox.innerHTML;finishDiscovery();await tick();
     check('disposed-panel-ignores-late-catalog-completion',backgroundBox.innerHTML===disposedContent);backgroundBox.remove();
     const presetBox=document.createElement('div');document.body.append(presetBox);let presetDiscoverCalls=[];
-    const presetData={entries:[],sources:[{id:'maintainer-fixture',kind:'maintainer',cached:false}],github:{enabled:false,entries:[]}};
+    const presetData={entries:[],sources:[{id:'maintainer-fixture',kind:'maintainer',url:'https://example.test/preset.json',cached:false}],github:{enabled:false,entries:[]}};
     const presetPanel=TokenMonitorPluginSettings.createPluginSettingsPanel({document,container:presetBox,t:key=>key,api:{
       list:async()=>({enabled:true,plugins:[]}),catalog:async()=>presetData,
       discoverCatalog:async force=>{presetDiscoverCalls.push(force);presetData.sources[0].cached=true;return presetData}
@@ -361,7 +361,9 @@ async function main() {
     // New discovery details remain inert until explicit package review.
     catalogMode='success';
     let imageResolve;
-    const detailsBox=document.createElement('div');document.body.append(detailsBox);
+    // At the 361px fixture viewport the refresh row legitimately wraps; measure
+    // the alignment at a width where the row stays on one line.
+    const detailsBox=document.createElement('div');detailsBox.style.width='420px';document.body.append(detailsBox);
     const shot=canvas.toDataURL('image/png');
     const officialEntry={...catalog.entries[0],id:'official-detail',name:'Official detail',author:'Hidden credit',origin:{id:'official',kind:'official'},repository:'https://github.com/owner/repo'};
     const maintainerEntry={...officialEntry,id:'maintainer-detail',name:'Maintainer detail',origin:{id:'maintainer-fixture',kind:'maintainer'},installedVersion:'0.9.0'};
@@ -376,7 +378,7 @@ async function main() {
     }});
     await detailsPanel.refresh();detailsBox.querySelector('[data-tab="discover"]').click();await tick();
     const refreshButton=detailsBox.querySelector('.plugin-catalog-refresh button').getBoundingClientRect(),refreshTime=detailsBox.querySelector('.plugin-catalog-refresh .settings-note').getBoundingClientRect();
-    check('catalog-refresh-time-aligns-with-button',Math.abs(refreshButton.y+refreshButton.height/2-refreshTime.y-refreshTime.height/2)<1);
+    check('catalog-refresh-time-aligns-with-button',Math.abs(refreshButton.y+refreshButton.height/2-refreshTime.y-refreshTime.height/2)<1,{button:refreshButton.toJSON(),time:refreshTime.toJSON()});
     check('details-media-is-lazy-and-official-credit-hidden',shotCalls===0&&!detailsBox.textContent.includes('Hidden credit'));
     check('official-card-shows-host-publisher-community-card-shows-owner-only',detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-origin-official')?.textContent==='Token Monitor plugins.origin.official'&&Boolean(detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-shield'))&&detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-source')?.textContent==='owner');
     check('github-stars-only-on-community-card',detailsBox.querySelector('[data-catalog-id="owner/repo"] .plugin-stars')?.textContent.includes('42')&&!detailsBox.querySelector('[data-catalog-id="official-detail"] .plugin-stars'));
@@ -520,6 +522,8 @@ async function main() {
     for (const fail of [false, true]) {
       const chip = box.querySelector('.plugin-surface-chip'); chip.focus(); chip.click();
       checks.push({ name: 'author-controls-locked-during-' + (fail ? 'failure' : 'success'), ok: input.disabled && disabledButton.disabled && box.getAttribute('aria-busy') === 'true' });
+      // run() settles pending author-setting autosaves before invoking place().
+      await new Promise(resolve => setTimeout(resolve, 20));
       finish(fail); await new Promise(resolve => setTimeout(resolve, 0));
       checks.push({ name: 'author-controls-restored-after-' + (fail ? 'failure' : 'success'), ok: input === original && box.contains(input) && !input.disabled && disabledButton.disabled && input.value === 'retained draft' && input.getAttribute('aria-disabled') === 'false' && box.getAttribute('aria-busy') === 'false' && Boolean(box.querySelector('.plugin-action-error')) === fail });
       input.focus(); input.setSelectionRange(input.value.length, input.value.length);

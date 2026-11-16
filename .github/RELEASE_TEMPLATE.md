@@ -3,27 +3,22 @@
 ## What's changed
 
 <!-- app-update-notes:en:start -->
-### Added
-- **Edge Dock cache hit rate:** Adds a selectable item showing today's rate, with a hit/miss bar and session details in the card. (#1307)
-- **Session search:** Search the session list from the icon beside the total cost, matching titles, tool and model labels, and IDs in the current period. (#1454)
-- **Currencies:** Supports AUD, BRL, CAD, CHF, EUR, GBP, INR, JPY, KRW and SGD for display costs and subscription amounts. Update every device sharing a subscription list before recording these currencies. (#1449, #1452)
-
 ### Improved
-- **Cursor quotas:** The “Included usage” quota is labeled “Weekly” or “Monthly” according to its period. (#1447)
-- **Sync uploads:** Raises the upload size limit to 2 MiB, so devices with large histories keep more session detail and daily totals. Self-hosted Workers keep the 1 MiB limit until redeployed, and iCloud sync users should update every Mac. (#1450)
-- **Platform wording:** Settings descriptions and shortcut hints name only the current operating system. (#1455)
+- **New API account setup:** Identifies retired access tokens and missing permissions, and warns when a saved token can read the balance but not period spend. (#1506)
 
 ### Fixed
-- **Cursor accounts:** Switching desktop accounts no longer leaves a stale account asking to sign in on the quota card. (#1447)
-- **macOS panels:** Switching Notch or Edge Dock materials no longer leaves a black rectangle around the panel. (#1445)
+- **Muse quota:** Restores web-cookie quota readings after changes to the Muse website. (#1507)
+- **OpenClaw usage:** Includes usage found only in archived transcripts, without double-counting copies in live sessions or transcript files. (#1508)
+- **Git worktree projects:** Newly collected usage from linked worktree roots is grouped under the parent repository instead of separate projects. (#1505)
+- **Live animations:** Running and waiting indicators and hover effects no longer jump or stop during updates; session activity glows replay on new activity. (#1511)
 <!-- app-update-notes:en:end -->
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.91.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.91.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.91.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-Setup-0.91.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.91.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.91.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.93.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.93.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-Setup-0.93.1.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.93.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -58,28 +53,23 @@ Tokscale is bundled with this app and updated through Token Monitor releases. Se
 ## 更新内容
 
 <!-- app-update-notes:zh:start -->
-### 新增
-- **侧边栏缓存命中率：** 新增可选项目，显示今日命中率，卡片内含命中/未命中比例条与会话明细。 （#1307）
-- **会话搜索：** 可通过总费用旁的图标搜索会话列表，匹配当前周期内的标题、工具与模型标签及 ID。 （#1454）
-- **货币：** 费用显示与订阅金额支持 AUD、BRL、CAD、CHF、EUR、GBP、INR、JPY、KRW 和 SGD。使用这些货币前，请先更新所有共享订阅列表的设备。 （#1449、#1452）
-
 ### 改进
-- **Cursor 额度：** “Included usage”额度按周期显示为“Weekly”或“Monthly”。 （#1447）
-- **同步上传：** 上传大小上限提高到 2 MiB，历史较大的设备可保留更多会话明细与每日合计。自托管 Worker 重新部署前仍为 1 MiB 上限，使用 iCloud 同步时请更新每一台 Mac。 （#1450）
-- **平台文案：** 设置说明与快捷键提示只显示当前操作系统的写法。 （#1455）
+- **New API 账号设置：** 明确提示访问令牌已停用或缺少权限，并在保存的令牌只能读取余额、无法读取时段支出时显示警告。 （#1506）
 
 ### 修复
-- **Cursor 账号：** 切换桌面账号后，额度卡片不再残留要求重新登录的旧账号。 （#1447）
-- **macOS 面板：** 切换刘海面板或侧边栏的材质后，面板周围不再残留黑色方框。 （#1445）
+- **Muse 额度：** 修复网站变更后，使用 Cookie 读取额度时显示不可用的问题。 （#1507）
+- **OpenClaw 用量：** 补计仅存在于归档会话记录中的用量，且不会重复计算实时会话或会话文件中的副本。 （#1508）
+- **Git worktree 项目：** 从关联 worktree 根目录新采集的用量归入所属仓库，不再拆分为独立项目。 （#1505）
+- **实时动画：** 更新时，运行与等待指示器及悬停效果不再跳动或中断；会话有新活动时会重新播放发光效果。 （#1511）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.91.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.91.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.91.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-Setup-0.91.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.91.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.91.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.93.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.93.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-Setup-0.93.1.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.93.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -110,7 +100,7 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.90.0...v0.91.0">v0.90.0...v0.91.0</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.93.0...v0.93.1">v0.93.0...v0.93.1</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -127,28 +117,23 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ## 更新內容
 
 <!-- app-update-notes:zh-TW:start -->
-### 新增
-- **側邊欄快取命中率：** 新增可選項目，顯示今日命中率，卡片內含命中/未命中比例條與會話明細。 （#1307）
-- **會話搜尋：** 可透過總費用旁的圖示搜尋會話列表，比對目前週期內的標題、工具與模型標籤及 ID。 （#1454）
-- **貨幣：** 費用顯示與訂閱金額支援 AUD、BRL、CAD、CHF、EUR、GBP、INR、JPY、KRW 與 SGD。使用這些貨幣前，請先更新所有共用訂閱清單的裝置。 （#1449、#1452）
-
 ### 改進
-- **Cursor 額度：** 「Included usage」額度依週期顯示為「Weekly」或「Monthly」。 （#1447）
-- **同步上傳：** 上傳大小上限提高到 2 MiB，歷史較大的裝置可保留更多會話明細與每日合計。自架 Worker 重新部署前仍為 1 MiB 上限，使用 iCloud 同步時請更新每一台 Mac。 （#1450）
-- **平台文案：** 設定說明與快捷鍵提示只顯示目前作業系統的寫法。 （#1455）
+- **New API 帳戶設定：** 明確提示存取權杖已停用或缺少權限，並在儲存的權杖只能讀取餘額、無法讀取時段支出時顯示警告。 （#1506）
 
 ### 修復
-- **Cursor 帳號：** 切換桌面帳號後，額度卡片不再殘留要求重新登入的舊帳號。 （#1447）
-- **macOS 面板：** 切換瀏海面板或側邊欄的材質後，面板周圍不再殘留黑色方框。 （#1445）
+- **Muse 額度：** 修復網站變更後，使用 Cookie 讀取額度時顯示無法使用的問題。 （#1507）
+- **OpenClaw 用量：** 補計僅存在於封存對話紀錄中的用量，且不會重複計算即時工作階段或對話檔案中的副本。 （#1508）
+- **Git worktree 專案：** 從關聯 worktree 根目錄新收集的用量歸入所屬儲存庫，不再拆分為獨立專案。 （#1505）
+- **即時動畫：** 更新時，執行與等待指示器及懸停效果不再跳動或中斷；工作階段有新活動時會重新播放發光效果。 （#1511）
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.91.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.91.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.91.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-Setup-0.91.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.91.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.91.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.93.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.93.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-Setup-0.93.1.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.93.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.AppImage)
 
 </details>
 
@@ -160,28 +145,23 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ## 업데이트 내용
 
 <!-- app-update-notes:ko:start -->
-### 추가
-- **Edge Dock 캐시 적중률:** 오늘의 적중률을 표시하는 선택형 항목을 추가했습니다. 카드에서 적중/미적중 막대와 세션 상세를 확인할 수 있습니다. (#1307)
-- **세션 검색:** 총 비용 옆 아이콘으로 세션 목록을 검색합니다. 현재 기간의 제목, 도구·모델 라벨, ID와 일치하는 세션을 찾습니다. (#1454)
-- **통화:** 비용 표시와 구독 금액에서 AUD, BRL, CAD, CHF, EUR, GBP, INR, JPY, KRW, SGD를 지원합니다. 이 통화로 기록하기 전에 구독 목록을 공유하는 모든 기기를 업데이트하세요. (#1449, #1452)
-
 ### 개선
-- **Cursor 할당량:** “Included usage” 할당량을 기간에 따라 “Weekly” 또는 “Monthly”로 표시합니다. (#1447)
-- **동기화 업로드:** 업로드 크기 한도를 2 MiB로 높여, 기록이 많은 기기도 더 많은 세션 상세와 일별 합계를 유지합니다. 자체 호스팅 Worker는 다시 배포하기 전까지 1 MiB 한도를 유지하며, iCloud 동기화를 사용한다면 모든 Mac을 업데이트하세요. (#1450)
-- **플랫폼별 문구:** 설정 설명과 단축키 안내에 현재 운영체제의 표기만 나타납니다. (#1455)
+- **New API 계정 설정:** 사용이 종료된 액세스 토큰과 권한 부족을 구분해 안내하고, 저장한 토큰으로 잔액만 조회할 수 있고 기간별 지출은 조회할 수 없으면 경고를 표시합니다. (#1506)
 
 ### 수정
-- **Cursor 계정:** 데스크톱 계정을 전환한 뒤에도 할당량 카드에 로그인을 요구하는 이전 계정이 남던 문제를 수정했습니다. (#1447)
-- **macOS 패널:** 노치 패널 또는 Edge Dock의 재질을 바꾼 뒤 패널 주변에 검은 사각형이 남던 문제를 수정했습니다. (#1445)
+- **Muse 할당량:** 웹사이트 변경 후 쿠키로 조회한 할당량이 사용 불가로 표시되는 문제를 수정했습니다. (#1507)
+- **OpenClaw 사용량:** 보관된 대화 기록에만 남은 사용량도 집계하며, 실시간 세션이나 대화 파일에 같은 기록이 있어도 중복 계산하지 않습니다. (#1508)
+- **Git worktree 프로젝트:** 연결된 worktree의 루트 디렉터리에서 새로 수집한 사용량을 별도 프로젝트로 나누지 않고 원래 저장소에 합산합니다. (#1505)
+- **실시간 애니메이션:** 업데이트 중 실행·대기 표시와 호버 효과가 튀거나 끊기지 않으며, 세션에 새 활동이 생기면 발광 효과가 다시 재생됩니다. (#1511)
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.91.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.91.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.91.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-Setup-0.91.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.91.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.91.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.93.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.93.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-Setup-0.93.1.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.93.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.AppImage)
 
 </details>
 
@@ -193,28 +173,23 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ## 更新内容
 
 <!-- app-update-notes:ja:start -->
-### 追加
-- **エッジドックのキャッシュヒット率:** 今日のヒット率を表示する選択式の項目を追加しました。カードにはヒット/ミスの比率バーとセッションの詳細が表示されます。 (#1307)
-- **セッション検索:** 合計コストの横のアイコンからセッション一覧を検索できます。現在の期間のタイトル、ツールとモデルのラベル、IDが対象です。 (#1454)
-- **通貨:** コスト表示とサブスクリプション金額でAUD、BRL、CAD、CHF、EUR、GBP、INR、JPY、KRW、SGDに対応しました。これらの通貨で記録する前に、サブスクリプション一覧を共有するすべての端末を更新してください。 (#1449, #1452)
-
 ### 改善
-- **Cursorの使用量上限:** 「Included usage」の上限を期間に応じて「Weekly」または「Monthly」と表示します。 (#1447)
-- **同期アップロード:** アップロードサイズの上限を2 MiBに引き上げ、履歴の多い端末でもセッション詳細と日別合計をより多く保持できます。セルフホストのWorkerは再デプロイするまで1 MiBの上限のままです。iCloud同期をお使いの場合は、すべてのMacを更新してください。 (#1450)
-- **プラットフォーム別の表記:** 設定の説明とショートカットの案内に、現在のOSの表記だけが表示されます。 (#1455)
+- **New API アカウント設定：** 廃止されたアクセストークンと権限不足を区別して案内し、保存したトークンで残高のみ取得でき、期間別の支出を取得できない場合は警告を表示します。 (#1506)
 
 ### 修正
-- **Cursorアカウント:** デスクトップのアカウントを切り替えた後も、ログインを求める古いアカウントが上限カードに残る問題を修正しました。 (#1447)
-- **macOSのパネル:** ノッチパネルまたはエッジドックの素材を切り替えた後、パネルの周囲に黒い四角形が残る問題を修正しました。 (#1445)
+- **Muse クォータ：** ウェブサイトの変更後、Cookie によるクォータ取得が利用不可になる問題を修正しました。 (#1507)
+- **OpenClaw 使用量：** アーカイブされた会話記録にのみ残る使用量も集計し、実行中のセッションや会話ファイルに同じ記録があっても重複計上しません。 (#1508)
+- **Git worktree のプロジェクト：** リンクされた worktree のルートディレクトリで新たに収集した使用量を、個別のプロジェクトに分けず元のリポジトリにまとめます。 (#1505)
+- **リアルタイムのアニメーション：** 更新時に実行・待機インジケーターやホバー効果が飛んだり途切れたりする問題を修正し、セッションで新しい活動があると発光効果を再生します。 (#1511)
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.91.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.91.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.91.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-Setup-0.91.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.91.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.91.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.91.0/Token-Monitor-0.91.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.93.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.93.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-Setup-0.93.1.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.93.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.AppImage)
 
 </details>
 

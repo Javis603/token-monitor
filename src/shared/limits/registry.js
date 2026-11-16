@@ -12,6 +12,8 @@
 // vendored closure (scripts/hub-build-manifest.js); the Worker only needs
 // limits/providers.js and limits/core.js.
 
+const { createAccountSlotFetcher } = require('./accountSlotFetcher');
+const { accountSlotKey } = require('./accountSlots');
 const { LIMIT_PROVIDER_ACCOUNTS } = require('./accounts');
 
 // Each accounts.js entry carries a lazy loader for its limits module; binding
@@ -69,11 +71,18 @@ function bindField(field, limits) {
 }
 
 function bindDeclaration(decl) {
+  if (decl.accountSlots && (!decl.form || decl.fields.some((field) =>
+    field.kind === 'managed' || (field.kind === 'profiles' && field.key !== accountSlotKey(decl))))) {
+    throw new Error(`limits registry: invalid accountSlots declaration for ${decl.id}`);
+  }
   const limits = LIMIT_PROVIDER_MODULES[decl.id];
   if (!limits) throw new Error(`limits registry: no limits module registered for ${decl.id}`);
   const fetchLimits = limits[decl.fetch];
   if (typeof fetchLimits !== 'function') {
     throw new Error(`limits registry: ${decl.id} fetch references missing export ${decl.fetch}`);
+  }
+  if (decl.serverAccountKey && typeof limits[decl.serverAccountKey] !== 'function') {
+    throw new Error(`limits registry: ${decl.id} serverAccountKey references missing export ${decl.serverAccountKey}`);
   }
   return Object.freeze({
     ...decl,
@@ -96,7 +105,7 @@ const LIMIT_PROVIDER_REGISTRY = Object.freeze(LIMIT_PROVIDER_ACCOUNTS.map(bindDe
 const LIMIT_PROVIDER_FETCHERS = Object.freeze(Object.fromEntries(
   LIMIT_PROVIDER_REGISTRY.map((entry) => [
     entry.id,
-    (providerOptions, probeDeps) => entry.fetchLimits(providerOptions, probeDeps)
+    entry.accountSlots ? createAccountSlotFetcher(entry) : (providerOptions, probeDeps) => entry.fetchLimits(providerOptions, probeDeps)
   ])
 ));
 

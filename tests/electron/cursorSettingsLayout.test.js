@@ -758,8 +758,7 @@ test('Codex system account switching is exposed from limits account rows', () =>
   // view's policy, so it reaches the Edge Dock card too.
   assert.doesNotMatch(renderLimits, /rowOptions/);
   assert.match(renderLimits, /nodes\.push\(renderLimitProviderSolo\(id, label, provider, color\)\)/);
-  assert.match(renderLimits, /const holdCodexSwitchPopoverRender = codexAccountControl\.deferRender\(els\.limitsPanel\);/);
-  assert.match(renderLimits, /holdLimitDetailTooltipRender \|\| holdCodexSwitchPopoverRender/);
+  assert.match(renderLimits, /if \(codexAccountControl\.deferRender\(els\.limitsPanel\)\) return;/);
   assert.doesNotMatch(renderLimits, /codexSwitchPopoverRenderPending/);
 });
 
@@ -878,7 +877,7 @@ test('Copilot account panel provides GitHub sign-in plus manual token fallback',
   const details = html.match(/<div id="copilotSettingsDetails"[\s\S]*?<div id="copilotErrorMessage" class="settings-note error hidden" role="alert"><\/div>/)?.[0] || '';
   assert.match(details, /<button id="copilotSignInButton"[\s\S]*data-i18n="settings\.copilot\.signIn">/);
   assert.match(details, /<button id="copilotCancelSignInButton" class="hidden" data-i18n="settings\.common\.cancel">/);
-  assert.match(details, /<button id="copilotLogoutButton" class="hidden" data-i18n="settings\.copilot\.logout">/);
+  assert.match(details, /<div id="copilotAccountList" class="managed-account-list">/);
   assert.match(details, /<pre id="copilotLoginStatus" class="codex-login-output hidden" role="status" aria-live="polite"><\/pre>/);
   assert.match(details, /<button id="copilotManualToggle"[\s\S]*aria-controls="copilotManualDetails"/);
   assert.match(details, /<div id="copilotManualDetails" class="opencode-add-details accordion-animated-container hidden">/);
@@ -899,11 +898,11 @@ test('Copilot account panel provides GitHub sign-in plus manual token fallback',
   assert.match(setupBody, /state\.copilotAuthorizeMessage = t\('settings\.copilot\.authorize'/);
   assert.match(setupBody, /\[state\.copilotAuthorizeMessage, t\('settings\.copilot\.polling'\)\]\.filter\(Boolean\)\.join\('\\n\\n'\)/);
   assert.match(setupBody, /setCopilotManualExpanded\(false\)/);
-  assert.match(setupBody, /saveSettings\(\{ copilotApiToken: input\.value \}\)/);
-  assert.match(setupBody, /saveSettings\(\{ copilotApiToken: '' \}\)/);
+  assert.match(setupBody, /window\.tokenMonitor\.copilot\.addAccount\(input\.value\)/);
+  assert.doesNotMatch(setupBody, /saveSettings\(\{ copilotApiToken:/);
 
   const renderBody = functionBody(app, 'renderCopilotStatus', 'renderOpenCodeProfiles');
-  assert.match(renderBody, /cancelBtn\.classList\.toggle\('hidden', !state\.copilotSignInBusy \|\| !state\.copilotSignInCancelable \|\| linked\)/);
+  assert.match(renderBody, /cancelBtn\.classList\.toggle\('hidden', !state\.copilotSignInBusy \|\| !state\.copilotSignInCancelable\)/);
   assert.match(renderBody, /refreshBtn\.classList\.toggle\('hidden', !configured \|\| \(state\.copilotSignInBusy && !linked\)\)/);
   assert.match(renderBody, /accountShellApi\.render\(\{[\s\S]*?error: errorEl,\s*errorText: state\.copilotErrorMessage/);
   assert.doesNotMatch(renderBody, /errorEl\.textContent = '';/);
@@ -2342,8 +2341,6 @@ test('Host Hub invalid ports preserve the persisted port when another field save
   await els.saveSettingsButton.dispatch('click');
 
   assert.deepEqual(patches, [{
-    hubUrl: '',
-    secret: '',
     deviceId: 'draft-device',
     hubHostPort: 18000
   }]);
@@ -2587,8 +2584,6 @@ test('Host Hub port draft survives settings rehydration and saves with Hub field
 
   await els.saveSettingsButton.dispatch('click');
   assert.deepEqual(patches, [{
-    hubUrl: '',
-    secret: '',
     deviceId: 'saved-device',
     hubHostPort: 18000
   }]);
@@ -2657,8 +2652,6 @@ test('Host Hub port draft survives leaving and returning to Host mode', async ()
 
   await els.saveSettingsButton.dispatch('click');
   assert.deepEqual(patches, [{
-    hubUrl: '',
-    secret: '',
     deviceId: 'saved-device',
     hubHostPort: 18000
   }]);
@@ -2680,7 +2673,7 @@ test('remote Hub build status is wired as a separate localized sync hint', () =>
   assert.match(app, /getHubBuildStatus/);
   assert.match(app, /function renderHubBuildStatus\(\)/);
   assert.doesNotMatch(app, /await refreshHubBuildStatus\(\)/);
-  assert.equal([...app.matchAll(/void refreshHubBuildStatus\(\)/g)].length, 5);
+  assert.equal([...app.matchAll(/void refreshHubBuildStatus\(\)/g)].length, 6);
   const refreshBody = functionBody(app, 'refreshHubBuildStatus', 'syncPeriodTabs');
   assert.match(refreshBody, /const request = \+\+hubBuildStatusRequest/);
   assert.equal([...refreshBody.matchAll(/request !== hubBuildStatusRequest/g)].length, 2);
@@ -3374,4 +3367,34 @@ test('MiMo settings reuses the shared sign-in status for rejected accounts', () 
   providers = [{ provider: 'mimo', accountKey: 'a', sourceDetail: 'managed', status: 'ok' }];
   render();
   assert.equal([...list.children[0].walk()].find((node) => node.className === 'managed-account-info').textContent, 'Console');
+});
+
+test('Alibaba CLI readings keep saved Cookie setup reachable while web readings stay linked', () => {
+  const app = readRendererFile('app.js');
+  for (const source of ['cli', 'web']) {
+    const elements = new Map();
+    for (const suffix of ['AccountStatus', 'OpenBrowser', 'LogoutButton', 'RefreshButton', 'ManualPanel', 'ErrorMessage']) {
+      const classes = new Set();
+      elements.set(`alibaba${suffix}`, { textContent: '', classList: {
+        add: name => classes.add(name), remove: name => classes.delete(name),
+        toggle: (name, force) => force ? classes.add(name) : classes.delete(name),
+        contains: name => classes.has(name)
+      } });
+    }
+    runRendererFunctions(app, ['renderExternalProviderStatus'], "renderExternalProviderStatus('alibaba')", {
+      externalLimitAccountConfig: {},
+      limitAccountForm: () => ({ status: { configuredKey: 'alibabaCookieConfigured', sourceKey: 'alibabaCookieSource', pendingKey: 'alibabaPendingCheckSince' } }),
+      limitAccountPanelsApi: { syncCredentialFields() {} },
+      state: { settings: { alibabaCookieConfigured: true, alibabaCookieSource: 'settings' }, accountPanelMessages: {} },
+      document: { getElementById: id => elements.get(id) || null },
+      externalProviderForAccount: () => ({ provider: 'alibaba', source, status: 'ok' }),
+      externalProviderAccountLinked: () => true,
+      externalProviderCheckSettled: new Set(), limitProviderEnabled: () => true,
+      setCursorStatusText() {}, apiKeyAccountStatusText: () => '', t: key => key,
+      renderSettingsSummaries() {}, setExternalAccountExpanded() {}
+    });
+    assert.equal(elements.get('alibabaManualPanel').classList.contains('hidden'), source === 'web');
+    assert.equal(elements.get('alibabaOpenBrowser').classList.contains('hidden'), source === 'web');
+    assert.equal(elements.get('alibabaLogoutButton').classList.contains('hidden'), false);
+  }
 });

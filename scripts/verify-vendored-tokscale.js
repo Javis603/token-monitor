@@ -395,28 +395,55 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
     }
   },
   {
-    // Fork-only client (crates/tokscale-core/src/token_monitor/qodercn.rs):
-    // JSONL input_tokens includes the cached prefix, which is split out into
-    // cacheRead, and the qoder-custom-<profile>/ prefix is stripped.
-    client: 'qodercn',
-    expectedRow: { model: 'openai/gpt-5', input: 400, output: 120, cacheRead: 600, cacheWrite: 0, reasoning: 0 },
+    client: 'qoder',
+    expectedRow: { model: 'claude-sonnet-4-6', input: 1660, output: 200, cacheRead: 1240, cacheWrite: 0, reasoning: 90 },
     hasExplicitTotal: false,
-    expectedPeriod: { totalTokens: 1120, clientTokens: 1120, clientOutputTokens: 120 },
-    expectedSession: { id: QODER_CN_SESSION_ID, totalTokens: 1120, outputTokens: 120, reasoningTokens: 0 },
+    expectedPeriod: { totalTokens: 3190, clientTokens: 3190, clientOutputTokens: 290 },
+    expectedSession: { id: 'global-qsess-1', totalTokens: 3190, outputTokens: 290, reasoningTokens: 90 },
+    writeFixture(home) {
+      const dir = path.join(home, '.qoder', 'projects', 'ws');
+      fs.mkdirSync(dir, { recursive: true });
+      const message = { type: 'assistant', sessionId: 'global-qsess-1', cwd: '/tmp/qoder-global-workspace', timestamp: '2026-09-18T10:00:00Z', message: { id: 'global-m1', model: 'claude-sonnet-4-6', usage: { input_tokens: 1000, cache_read_input_tokens: 600, output_tokens: 120, thinking_tokens: 60 } } };
+      const gemini = { ...message, message: { ...message.message, id: 'global-m2', usage: { promptTokenCount: 100, cachedContentTokenCount: 40, candidatesTokenCount: 20, thoughtsTokenCount: 10, totalTokenCount: 130 } } };
+      const placeholder = { ...message, message: { ...message.message, model: 'auto', usage: undefined } };
+      const stale = { ...message, message: { ...message.message, model: 'auto', usage: { input_tokens: 1000, cache_read_input_tokens: 600, output_tokens: 2 } } };
+      const staleGemini = { ...gemini, message: { ...gemini.message, usage: { promptTokenCount: 100, candidatesTokenCount: 2, totalTokenCount: 102 } } };
+      // Candidates already include thoughts; an incomplete copy lacks that split.
+      const inclusive = { ...message, message: { ...message.message, id: 'global-m3', usage: { promptTokenCount: 100, candidatesTokenCount: 30, totalTokenCount: 130 } } };
+      const complete = { ...inclusive, message: { ...inclusive.message, usage: { ...inclusive.message.usage, thoughtsTokenCount: 10 } } };
+      const cross = { ...inclusive, message: { ...inclusive.message, id: 'global-m4' } };
+      const crossComplete = { ...complete, message: { ...complete.message, id: 'global-m4' } };
+      const unsplit = { ...message, message: { ...message.message, id: 'global-m5', usage: { input_tokens: 1000, output_tokens: 20 } } };
+      const split = { ...unsplit, message: { ...unsplit.message, usage: { input_tokens: 400, cache_read_input_tokens: 600, output_tokens: 20 } } };
+      fs.writeFileSync(path.join(dir, 'a-stale.jsonl'), `${JSON.stringify(stale)}\n${JSON.stringify(staleGemini)}\n${JSON.stringify(cross)}\n${JSON.stringify(unsplit)}\n`);
+      fs.writeFileSync(path.join(dir, 'tm-contract.jsonl'), [placeholder, message, gemini, inclusive, complete, crossComplete, split].map(row => JSON.stringify(row)).join('\n') + '\n');
+    }
+  },
+  {
+    // CN Anthropic input includes cache reads; Gemini promptTokenCount is
+    // split exactly once. Both formats emit disjoint reasoning tokens.
+    client: 'qodercn',
+    expectedRow: { model: 'openai/gpt-5', input: 660, output: 180, cacheRead: 640, cacheWrite: 0, reasoning: 90 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 1570, clientTokens: 1570, clientOutputTokens: 270 },
+    expectedSession: { id: QODER_CN_SESSION_ID, totalTokens: 1570, outputTokens: 270, reasoningTokens: 90 },
     writeFixture(home) {
       const dir = path.join(home, '.qoder-cn', 'projects', 'ws');
       fs.mkdirSync(dir, { recursive: true });
-      fs.writeFileSync(path.join(dir, 'tm-contract.jsonl'), `${JSON.stringify({
-        type: 'assistant',
-        sessionId: 'qsess-1',
-        cwd: '/tmp/qoder-workspace',
-        timestamp: '2026-09-18T10:00:00Z',
-        message: {
-          id: 'm1',
-          model: 'qoder-custom-abc/openai/gpt-5',
-          usage: { input_tokens: 1000, cache_read_input_tokens: 600, output_tokens: 120 }
-        }
-      })}\n`);
+      const message = {
+        type: 'assistant', sessionId: 'qsess-1', cwd: '/tmp/qoder-workspace', timestamp: '2026-09-18T10:00:00Z',
+        message: { id: 'm1', model: 'qoder-custom-abc/openai/gpt-5', usage: { input_tokens: 1000, cache_read_input_tokens: 600, output_tokens: 120, thinking_tokens: 60 } }
+      };
+      const placeholder = { ...message, message: { ...message.message, model: 'auto', usage: undefined } };
+      const gemini = { ...message, message: { ...message.message, id: 'm2', usage: { promptTokenCount: 100, cachedContentTokenCount: 40, candidatesTokenCount: 20, thoughtsTokenCount: 10, totalTokenCount: 130 } } };
+      const inclusive = { ...message, message: { ...message.message, id: 'm3', usage: { promptTokenCount: 100, candidatesTokenCount: 30, totalTokenCount: 130 } } };
+      const complete = { ...inclusive, message: { ...inclusive.message, usage: { ...inclusive.message.usage, thoughtsTokenCount: 10 } } };
+      const cross = { ...inclusive, message: { ...inclusive.message, id: 'm4' } };
+      const crossComplete = { ...complete, message: { ...complete.message, id: 'm4' } };
+      fs.writeFileSync(path.join(dir, 'tm-contract.jsonl'), [placeholder, message, gemini, inclusive, complete, crossComplete].map(row => JSON.stringify(row)).join('\n') + '\n');
+      const staleCopies = [message, gemini, inclusive, cross].map(row => ({ ...row, message: { ...row.message, model: 'auto' } }));
+      fs.writeFileSync(path.join(dir, 'a-stale.jsonl'), staleCopies.map(row => JSON.stringify(row)).join('\n') + '\n');
+      fs.writeFileSync(path.join(dir, 'z-fork.jsonl'), `${JSON.stringify(cross)}\n`);
     }
   },
   {
@@ -585,7 +612,7 @@ function hermeticEnv(home) {
     ...process.env,
     HOME: home,
     USERPROFILE: home, // Windows equivalent of HOME for path resolution
-    APPDATA: path.join(home, 'AppData', 'Roaming'), // Qoder CN's database root on Windows
+    APPDATA: path.join(home, 'AppData', 'Roaming'), // Isolate Windows application-data roots.
     XDG_CONFIG_HOME: path.join(home, '.config'),
     XDG_DATA_HOME: path.join(home, '.local', 'share'),
     XDG_CACHE_HOME: path.join(home, '.cache'),
@@ -605,7 +632,7 @@ function hermeticEnv(home) {
   // MiniMax data-directory overrides for the fork's mcode supplement.
   for (const key of [
     'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'CODEX_HOME', 'DSH_HOME', 'HERMES_HOME', 'GOOSE_PATH_ROOT',
-    'TOKEN_MONITOR_QODER_CN_DB_PATH', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
+    'QODER_CONFIG_DIR', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
     'VIBE_HOME', 'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR',
     'JCODE_HOME', 'GEMINI_CLI_HOME', 'PRIME_AGENT_SESSION_DIR', 'PRIME_AGENT_CODING_AGENT_SESSION_DIR', 'PRIME_AGENT_CODING_AGENT_DIR',
     'SENPI_CODING_AGENT_DIR', 'SENPI_CODING_AGENT_SESSION_DIR'
@@ -972,7 +999,9 @@ function main() {
       assertSessionMetadata(runAgainstFixture(binPath, home, SESSION_GROUP_BY));
     }
     for (const contract of applicableTokenContracts()) {
-      assertTokenContract(runAgainstFixture(binPath, home, 'client,session,model', contract.scanClient || contract.client), contract);
+      for (let scan = 0; scan < (['qoder', 'qodercn'].includes(contract.client) ? 2 : 1); scan += 1) {
+        assertTokenContract(runAgainstFixture(binPath, home, 'client,session,model', contract.scanClient || contract.client), contract);
+      }
     }
   } finally {
     fs.rmSync(home, { recursive: true, force: true });

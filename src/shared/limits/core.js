@@ -1,10 +1,11 @@
 'use strict';
 
 const { staleAfterMsForSyncUpload } = require('../syncUploadInterval');
-const { LIMIT_PROVIDER_IDS, VALID_LIMIT_WINDOW_METRICS } = require('./providers');
+const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_IDS, VALID_LIMIT_WINDOW_METRICS } = require('./providers');
 const { isWorkbuddyPlaceholder } = require('../providers/workbuddy/identity');
 
 const DEFAULT_LIMITS_REFRESH_MS = 5 * 60 * 1000;
+const PORTABLE_ACCOUNT_PROVIDERS = new Set(LIMIT_PROVIDER_CATALOG.filter(provider => provider.portableAccountKey).map(provider => provider.id));
 const VALID_PROVIDERS = new Set(LIMIT_PROVIDER_IDS);
 const VALID_STATUSES = new Set(['ok', 'disabled', 'notConfigured', 'unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error']);
 const VALID_SOURCES = new Set(['oauth', 'cli', 'web', 'rpc', 'local', 'api']);
@@ -17,7 +18,10 @@ const CODEX_TRANSIENT_WINDOW_RETENTION_MS = 10 * 60 * 1000;
 const CODEX_TRANSIENT_PROVIDER_STATUSES = new Set(['unavailable', 'error', 'rateLimited', 'sourceRateLimited']);
 const MAX_ACCOUNT_LABEL_INPUT_LENGTH = 256;
 const MAX_ACCOUNT_NAME_INPUT_LENGTH = 512;
-const MAX_OPENCODE_ACCOUNT_KEY_ALIASES = 8;
+// A provider can name one account by several keys: the stable key it reports
+// today and the credential-derived keys it reported before. They travel with
+// the row so the renderer and the quota history read every name as one account.
+const MAX_ACCOUNT_KEY_ALIASES = 8;
 
 function asNumber(value) {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -454,14 +458,14 @@ function normalizeProviderUsageSummary(input) {
   return Object.values(summary).some((value) => value !== null && value !== '') ? summary : null;
 }
 
-function normalizeOpenCodeAccountKeyAliases(values, accountKey = '') {
+function normalizeAccountKeyAliases(values, accountKey = '') {
   if (!Array.isArray(values)) return [];
   const canonical = String(accountKey || '').trim();
   return [...new Set(values
     .map((value) => String(value || '').trim())
     .filter((value) => value && value !== canonical && value.length <= 128))]
     .sort()
-    .slice(0, MAX_OPENCODE_ACCOUNT_KEY_ALIASES);
+    .slice(0, MAX_ACCOUNT_KEY_ALIASES);
 }
 
 function cursorWindowRank(window) {
@@ -487,9 +491,7 @@ function normalizeLimitProvider(input) {
   const relatedAccountKey = provider === 'minimax' && source === 'api' && typeof input.relatedAccountKey === 'string'
     && /^sha256:[a-f0-9]{64}$/.test(input.relatedAccountKey) && input.relatedAccountKey !== accountKey
     ? input.relatedAccountKey : '';
-  const accountKeyAliases = provider === 'opencode'
-    ? normalizeOpenCodeAccountKeyAliases(input.accountKeyAliases, accountKey)
-    : [];
+  const accountKeyAliases = normalizeAccountKeyAliases(input.accountKeyAliases, accountKey);
   const accountLabel = normalizeAccountLabel(input.accountLabel);
   const windows = Array.isArray(input.windows)
     ? input.windows.map(normalizeLimitWindow).filter(Boolean)
@@ -572,7 +574,10 @@ function normalizeLimitsSummary(input) {
   const providers = Array.isArray(source.providers)
     ? source.providers.map(normalizeLimitProvider).filter(Boolean)
     : [];
+  const multiAccountProviders = LIMIT_PROVIDER_IDS.filter(id => Array.isArray(source.multiAccountProviders)
+    && source.multiAccountProviders.includes(id));
   return {
+    ...(multiAccountProviders.length ? { multiAccountProviders } : {}),
     updatedAt: normalizeIsoTimestamp(source.updatedAt),
     refreshMs: normalizeRefreshMs(source.refreshMs),
     providers
@@ -633,11 +638,14 @@ function isConfiguredProvider(provider) {
     && !isWorkbuddyPlaceholder(provider));
 }
 
-function providerCollapseKey(provider) {
-  // Known WorkBuddy and MiniMax identities survive missing credentials and
+function providerCollapseKey(provider, multiAccount = false) {
+  // A device that reports several accounts keeps every keyed row per account,
+  // ahead of the provider-specific rules below.
+  if (multiAccount && provider.accountKey) return providerAggregateKey(provider);
+  // Known WorkBuddy, MiniMax and Copilot identities survive missing credentials and
   // refresh-token rotation. Keep every account separate even while its login is
   // unavailable.
-  if (['workbuddy', 'minimax'].includes(provider.provider) && provider.accountKey) return providerAggregateKey(provider);
+  if (['workbuddy', 'minimax', 'copilot'].includes(provider.provider) && provider.accountKey) return providerAggregateKey(provider);
   // Antigravity account keys are portable only when a normalized Google email
   // proves the identity. Anonymous RPC fallback keys are local observations,
   // so keep the device scope established by providerAggregateKey().
@@ -645,40 +653,7 @@ function providerCollapseKey(provider) {
   if (provider.provider === 'muse') {
     return provider.source === 'web' ? `${provider.provider}:source:web` : providerAggregateKey(provider);
   }
-  if (
-    (provider.provider === 'claude'
-      || provider.provider === 'codex'
-      || provider.provider === 'opencode'
-      || provider.provider === 'openrouter'
-      || provider.provider === 'thirdparty'
-      || provider.provider === 'mimo'
-      || provider.provider === 'cursor'
-      // Cline keys identify the API key or sign-in account id within each lane.
-      // Keep distinct credential identities from synced devices separate;
-      // matching display emails do not establish a shared identity.
-      || provider.provider === 'cline'
-      // Notion allowances are per user AND workspace. Its verified composite
-      // key is portable; neither a provider-only nor an email collapse is safe.
-      || provider.provider === 'notion'
-      // OpenDesign workspace IDs are portable across devices.
-      || provider.provider === 'opendesign'
-      // Manus keys hash the account's user id from its session, so the same
-      // account hashes identically on every device.
-      || provider.provider === 'manus'
-      // Hark keys hash the decoded session token, so the same cookie matches
-      // on every device. A second cookie is another session.
-      || provider.provider === 'hark'
-      // Volcengine's accountKey comes from the AK/SK and region, so it is the
-      // same on every platform. Two keys mean the Coding/Agent plan split, not
-      // one account hashed twice.
-      || provider.provider === 'volcengine'
-      // Alibaba's accountKey is the console-issued account UID, so it is also
-      // identical on every platform. Two keys mean two accounts, and collapsing
-      // by provider name alone would let one device's row silently replace the
-      // other's.
-      || provider.provider === 'alibaba')
-    && isConfiguredProvider(provider)
-  ) {
+  if (PORTABLE_ACCOUNT_PROVIDERS.has(provider.provider) && isConfiguredProvider(provider)) {
     return providerAggregateKey(provider);
   }
   return provider.provider;
@@ -973,7 +948,7 @@ function mergeOpenCodeProviderComponents(candidates) {
     .map((provider) => String(provider.webAccountKey || '').trim())
     .filter(Boolean))].sort()[0] || '';
   const accountKey = canonicalWebAccountKey || winner.accountKey;
-  const accountKeyAliases = normalizeOpenCodeAccountKeyAliases(
+  const accountKeyAliases = normalizeAccountKeyAliases(
     candidates.flatMap(openCodeIdentityKeys),
     accountKey
   );
@@ -988,10 +963,13 @@ function mergeOpenCodeProviderComponents(candidates) {
   };
 }
 
-function pickBetterProvider(current, candidate) {
+function pickBetterProvider(current, candidate, multiAccount = false) {
   if (!current) return candidate;
   const winner = betterProvider(current, candidate);
   const loser = winner === current ? candidate : current;
+  // In multi-account mode a balance and its credits window belong only to
+  // their exact account, in both aggregation passes.
+  if (multiAccount && winner.accountKey !== loser.accountKey) return winner;
   return carryMinimaxRelatedAccountKey(carryProviderBalance(winner, loser), loser);
 }
 
@@ -1014,12 +992,18 @@ function providerFreshnessKey(provider) {
 
 function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   const aggregate = { updatedAt: new Date(nowMs).toISOString(), providers: [] };
+  const multiAccountProviders = new Set((devices || []).flatMap(device =>
+    normalizeLimitsSummary(device?.limits).multiAccountProviders || []));
   const byKey = new Map();
   const candidatesByKey = new Map();
   const openCodeCandidates = [];
   const providersWithConfiguredAccounts = new Set();
   const providersWithFreshConfiguredAccounts = new Set();
   const providersWithFreshObservations = new Set();
+  // Lanes with a configured account: the freshness key without its account
+  // part, so a source-scoped provider keeps its lanes apart and an
+  // account-scoped one is still one lane.
+  const configuredLanes = new Set();
 
   for (const device of devices || []) {
     const summary = normalizeLimitsSummary(device?.limits);
@@ -1030,7 +1014,10 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
         stale: isProviderStale(provider, summary, device, staleAfterMs, nowMs)
       };
       const freshnessKey = providerFreshnessKey(provider);
-      if (isConfiguredProvider(provider)) providersWithConfiguredAccounts.add(freshnessKey);
+      if (isConfiguredProvider(provider)) {
+        providersWithConfiguredAccounts.add(freshnessKey);
+        configuredLanes.add(providerFreshnessKey({ ...provider, accountKey: '' }));
+      }
       if (!candidate.stale) {
         providersWithFreshObservations.add(freshnessKey);
         if (isConfiguredProvider(provider)) providersWithFreshConfiguredAccounts.add(freshnessKey);
@@ -1047,17 +1034,18 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   }
 
   for (const [key, candidates] of candidatesByKey) {
-    byKey.set(key, candidates.reduce(pickBetterProvider, null));
+    byKey.set(key, candidates.reduce((current, candidate) =>
+      pickBetterProvider(current, candidate, multiAccountProviders.has(candidate.provider)), null));
   }
   for (const candidates of groupOpenCodeCandidates(openCodeCandidates)) {
     const provider = mergeOpenCodeProviderComponents(candidates);
     byKey.set(providerAggregateKey(provider), provider);
   }
 
-  // Second pass: collapse by provider name. Same OAuth account on Mac vs Windows
-  // hashes to different accountKeys (keychain identity vs file path), so byKey
-  // keeps them as separate entries; without this pass the renderer's per-provider
-  // Map.set() would arbitrarily overwrite the fresh one with the stale one.
+  // Second pass: collapse device-local credential identities by provider.
+  // Portable accounts and explicitly reported multi-account providers keep each
+  // account's best observation, but a stale portable account still yields to a
+  // fresh account of the same provider.
   const hasKnownWorkbuddyAccount = Array.from(byKey.values()).some((candidate) =>
     candidate.provider === 'workbuddy' && candidate.accountKey && !isWorkbuddyPlaceholder(candidate));
   const knownMinimaxSources = new Set(Array.from(byKey.values())
@@ -1068,7 +1056,9 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
     candidate.provider === 'opendesign' && isConfiguredProvider(candidate));
   const byProvider = new Map();
   for (const candidate of byKey.values()) {
-    if (hasKnownOpendesignWorkspace && candidate.provider === 'opendesign'
+    const multiAccount = multiAccountProviders.has(candidate.provider);
+    const keyedMultiAccount = multiAccount && Boolean(candidate.accountKey);
+    if (!keyedMultiAccount && hasKnownOpendesignWorkspace && candidate.provider === 'opendesign'
       && ['notConfigured', 'disabled'].includes(candidate.status)) continue;
     // A local-app sentinel is an onboarding hint, not an extra account. Real
     // identities keep their own failure hints even when none has credentials.
@@ -1077,9 +1067,13 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
     // including an empty-source sentinel left by a provider-wide tick — is stale.
     if (candidate.provider === 'minimax' && !candidate.accountKey
       && (knownMinimaxSources.has(candidate.source) || (hasKnownMinimaxAccount && !candidate.source))) continue;
-    const knownAccount = candidate.accountKey && (candidate.provider === 'minimax'
+    const knownAccount = candidate.accountKey && (multiAccount || ['minimax', 'copilot'].includes(candidate.provider)
       || (candidate.provider === 'workbuddy' && !isWorkbuddyPlaceholder(candidate)));
     const freshnessKey = providerFreshnessKey(candidate);
+    // A keyless row says nothing once its lane has a configured account. A lane
+    // with no stable identity of its own (Muse Code beside web accounts) stays.
+    if (multiAccount && !candidate.accountKey
+      && configuredLanes.has(providerFreshnessKey({ ...candidate, accountKey: '' }))) continue;
     const hasFreshObservation = providersWithFreshObservations.has(freshnessKey);
     // Fresh siblings cannot establish freshness for a different account. The
     // first pass already chooses the best observation of each exact identity.
@@ -1088,8 +1082,8 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
       ? providersWithFreshConfiguredAccounts
       : providersWithConfiguredAccounts;
     if (!knownAccount && !isConfiguredProvider(candidate) && configuredProviders.has(freshnessKey)) continue;
-    const collapseKey = providerCollapseKey(candidate);
-    byProvider.set(collapseKey, pickBetterProvider(byProvider.get(collapseKey), candidate));
+    const collapseKey = providerCollapseKey(candidate, multiAccount);
+    byProvider.set(collapseKey, pickBetterProvider(byProvider.get(collapseKey), candidate, multiAccount));
   }
   aggregate.providers = Array.from(byProvider.values())
     .sort((a, b) => {
@@ -1137,6 +1131,7 @@ function publicLimits(limits) {
 function syncLimits(limits) {
   const normalized = normalizeLimitsSummary(limits);
   return {
+    ...(normalized.multiAccountProviders ? { multiAccountProviders: normalized.multiAccountProviders } : {}),
     updatedAt: normalized.updatedAt,
     refreshMs: normalized.refreshMs,
     providers: normalized.providers

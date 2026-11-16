@@ -67,6 +67,8 @@ test('native-only Copilot WSL home is discovered and its usage is collected', as
   const calls = [];
   const { bundle, detected } = await collectWslUsage({
     clients: 'copilot',
+    commandTimeoutMs: 120000,
+    allTimeTimeoutMs: 1800000,
     runTokscale: async (args) => {
       calls.push(args);
       return { entries: [{ client: 'copilot', model: 'gpt-5', inputTokens: 75, outputTokens: 25 }] };
@@ -74,6 +76,7 @@ test('native-only Copilot WSL home is discovered and its usage is collected', as
   }, deps);
   assert.deepEqual(detected, ['copilot']);
   assert.equal(calls.length, 3);
+  assert.deepEqual(calls.map(call => call.commandTimeoutMs), [120000, 120000, 1800000]);
   assert.ok(calls.every(args => args.clients === 'copilot' && args.flags.includes(home)));
   for (const period of ['today', 'month', 'allTime']) {
     assert.equal(bundle[period].totalTokens, 100);
@@ -462,7 +465,7 @@ test('collectWslUsage scans a Proma-only WSL home through tokscale --home', asyn
   assert.equal(bundle.today.clients.proma, 10);
 });
 
-test('collectWslUsage keeps Qoder CN and CatPaw out of WSL scans', async () => {
+test('collectWslUsage includes JSONL-only Qoder CN but excludes CatPaw', async () => {
   const home = '\\\\wsl$\\Ubuntu\\home\\u';
   const seen = [];
   const { detected } = await collectWslUsage(
@@ -480,11 +483,11 @@ test('collectWslUsage keeps Qoder CN and CatPaw out of WSL scans', async () => {
       platform: 'win32',
       exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
       readdirSync: () => ['u'],
-      existsSync: (p) => p === `${home}\\.claude\\projects`
+      existsSync: (p) => p === `${home}\\.claude\\projects` || p === `${home}\\.qoder-cn\\projects`
     }
   );
-  assert.deepEqual(detected, ['claude']);
-  assert.deepEqual(seen, ['claude', 'claude', 'claude']);
+  assert.deepEqual(detected, ['claude', 'qodercn']);
+  assert.deepEqual(seen, ['claude,qodercn', 'claude,qodercn', 'claude,qodercn']);
 });
 
 test('collectWslUsage returns empty bundle when no homes', async () => {

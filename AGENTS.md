@@ -11,10 +11,13 @@ npm run agent      # start the headless collector→hub agent
 npm run agent:once # one-shot collect+post, then exit (useful for cron/launchd)
 npm test           # run the node:test suite (node --test "tests/**/*.test.js")
 npm run lint       # ESLint flat config (eslint.config.js)
-npm run verify     # lint + test (single local entry point)
+npm run typecheck  # opt-in JavaScript type checking (no emit)
+npm run verify     # lint + typecheck + test (single local entry point)
 ```
 
-Automated verification is `npm run verify`; CI (`.github/workflows/ci.yml`) runs lint + test on push/PR across Node 22 & 24. The toolchain (ESLint 10 + the node:test glob) needs Node 22.13+ and DSH session decoding needs `zlib.zstdDecompressSync` (Node 22.15+), which is why `engines.node` is `>=22.15.0`.
+Automated verification is `npm run verify`; CI (`.github/workflows/ci.yml`) runs lint + typecheck + test on push/PR across Node 22 & 24. The toolchain (ESLint 10 + the node:test glob) needs Node 22.13+ and DSH session decoding needs `zlib.zstdDecompressSync` (Node 22.15+), which is why `engines.node` is `>=22.15.0`.
+
+New shared modules start with `// @ts-check`; existing files opt in when touched for a reason. Type checking uses JSDoc and emits no code.
 
 To dry-run the agent without posting: `npm run agent:once -- --dry-run`.
 

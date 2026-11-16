@@ -404,7 +404,8 @@ function createSessionUsageArchiveStore(options = {}) {
         pruned = updateSessionUsageArchive(latest, null, capturedAt);
         result = updateSessionUsageArchive(latest, deviceRecord, capturedAt, {
           canonicalSummary: true,
-          cursorUsageEvents: options.cursorUsageEvents
+          cursorUsageEvents: options.cursorUsageEvents,
+          homeDir: options.homeDir
         });
         return {
           archive: result.archive,

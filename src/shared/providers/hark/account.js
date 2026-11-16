@@ -1,7 +1,8 @@
+// @ts-check
 'use strict';
 
 // Leaf declaration: credential storage reads this without loading the probe.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'hark',
   fetch: 'fetchHarkLimits',
   fields: [{
@@ -16,7 +17,7 @@ module.exports = {
     try {
       return Boolean(limits.readHarkDesktopSession());
     } catch (error) {
-      return error?.status === 'unavailable';
+      return (/** @type {{status?: string}|null|undefined} */ (error))?.status === 'unavailable';
     }
   },
   status: {
@@ -50,4 +51,4 @@ module.exports = {
     openUrl: { url: 'https://hark.com/' }
   },
   urlPolicy: [{ hosts: ['hark.com'], exactPaths: ['/'] }]
-};
+});

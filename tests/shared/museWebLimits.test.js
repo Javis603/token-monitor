@@ -4,7 +4,7 @@ const test = require('node:test');
 const { fetchMuseWebLimits, normalizeMuseWebCookieHeader, parseMuseWebSubscription } = require('../../src/shared/providers/muse/webLimits');
 const { LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
 const { aggregateLimits } = require('../../src/shared/limits/core');
-const { actionID, free, paid, fixtureFetch } = require('../fixtures/museWeb');
+const { actionID, free, paid, chunks, immutableChunks, fixtureFetch } = require('../fixtures/museWeb');
 const options = { museWebCookie: 'hatch_sess=fixture' };
 
 test('Muse web shares the existing limits provider and accepts full Cookie headers only', async () => {
@@ -64,6 +64,37 @@ test('discovery keeps cookies off chunks, caches success and rediscovers a stale
     assert.equal((await fetchMuseWebLimits(options, deps)).status, 'ok');
     assert.deepEqual(calls, [['/', 'POST']]);
   }
+});
+
+test('discovery accepts the immutable chunk layout muse.ai serves today', async () => {
+  const row = await fetchMuseWebLimits(options, { env: {}, fetch: fixtureFetch({ chunks: immutableChunks }) });
+  assert.equal(row.status, 'ok');
+  assert.equal(row.windows[0].usedPercent, 28);
+});
+
+test('stale actions answered with 400, 404 or 409 rediscover once and cache the new id', async () => {
+  for (const status of [400, 404, 409]) {
+    const state = new Map([['muse:web:actionID', 'stale']]);
+    let posts = 0;
+    const row = await fetchMuseWebLimits(options, { providerRuntimeState: state, fetch: async (url, init) => {
+      const path = new URL(url).pathname;
+      if (init.method === 'POST') {
+        posts++;
+        return init.headers['Next-Action'] === 'stale' ? new Response('stale action', { status }) : new Response(free);
+      }
+      return new Response(chunks[path] || '');
+    } });
+    assert.equal(row.status, 'ok', String(status));
+    assert.equal(posts, 2);
+    assert.equal(state.get('muse:web:actionID'), actionID);
+  }
+});
+
+test('transient action failures keep the cached id for the next refresh', async () => {
+  const state = new Map([['muse:web:actionID', actionID]]);
+  const row = await fetchMuseWebLimits(options, { providerRuntimeState: state, fetch: async () => new Response('', { status: 500 }) });
+  assert.equal(row.status, 'unavailable');
+  assert.equal(state.get('muse:web:actionID'), actionID);
 });
 
 test('HTTP errors, auth redirects, malformed responses and timeouts cannot become healthy zero usage', async () => {

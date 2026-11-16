@@ -1,3 +1,4 @@
+// @ts-check
 'use strict';
 
 // WorkBuddy limits account wiring. Leaf module: no requires.
@@ -5,7 +6,7 @@
 // These fields remain available to headless/CLI deployments but are never
 // writable through settings:update and never cross to the renderer; the
 // desktop-session lanes in limitsConfigFromSettings stay hand-written there.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'workbuddy',
   fetch: 'fetchWorkbuddyLimits',
   fields: [
@@ -18,4 +19,4 @@ module.exports = {
     { key: 'workbuddyDepartmentInfo', kind: 'setting', persist: 'never', rendererOmit: true, initial: null, config: false }
   ],
   fetchDep: 'workbuddyFetch'
-};
+});

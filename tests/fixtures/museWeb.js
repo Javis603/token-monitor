@@ -10,7 +10,13 @@ const chunks = {
   '/_next/static/chunks/loader.js': '},434304,s=>{s.v(t=>Promise.all(["static/chunks/settings.js"].map(t=>s.l(t))))}',
   '/_next/static/chunks/settings.js': `(0,d.createServerReference)("${actionID}",d.callServer,void 0,d.findSourceMapURL,"fetchSubscriptionAction")`
 };
-function fixtureFetch({ action = free, actionStatus = 200, onRequest = () => {} } = {}) {
+const immutableChunks = {
+  '/': '<script src="/_next/static/immutable/chunks/app.js"></script><script src="/_next/static/immutable/chunks/loader.js"></script>',
+  '/_next/static/immutable/chunks/app.js': 'e.A(434304).then(({preloadHatchSettingsData:e})=>e({}))',
+  '/_next/static/immutable/chunks/loader.js': '},434304,s=>{s.v(t=>Promise.all(["static/immutable/chunks/settings.js"].map(t=>s.l(t))))}',
+  '/_next/static/immutable/chunks/settings.js': `(0,d.createServerReference)("${actionID}",d.callServer,void 0,d.findSourceMapURL,"fetchSubscriptionAction")`
+};
+function fixtureFetch({ action = free, actionStatus = 200, onRequest = () => {}, chunks: layout = chunks } = {}) {
   return async (url, init) => {
     const path = new URL(url).pathname;
     onRequest(path, init);
@@ -19,7 +25,7 @@ function fixtureFetch({ action = free, actionStatus = 200, onRequest = () => {} 
         ? new Response(action, { status: actionStatus })
         : new Response('Server action not found.', { status: 404 });
     }
-    return new Response(chunks[path] || '', { status: 200 });
+    return new Response(layout[path] || '', { status: 200 });
   };
 }
-module.exports = { actionID, free, paid, chunks, fixtureFetch };
+module.exports = { actionID, free, paid, chunks, immutableChunks, fixtureFetch };

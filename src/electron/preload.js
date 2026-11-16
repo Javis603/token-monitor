@@ -215,6 +215,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
       ipcRenderer.on('limitsHistory:state', listener);
       return () => ipcRenderer.removeListener('limitsHistory:state', listener);
     },
+    accountSlots: Object.fromEntries(['list', 'add', 'replace', 'rename', 'setEnabled', 'remove', 'move'].map(operation => [operation, (...args) => ipcRenderer.invoke(`limits:accountSlots:${operation}`, ...args)])),
     saveCredential: (providerId, values) => ipcRenderer.invoke('limits:saveCredential', providerId, values),
     listOrganizationChoices: (providerId) => ipcRenderer.invoke('limits:listOrganizationChoices', providerId),
     clearCredential: (providerId) => ipcRenderer.invoke('limits:clearCredential', providerId),
@@ -279,6 +280,10 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     }
   },
   copilot: {
+    getAccounts: () => ipcRenderer.invoke('copilot:getAccounts'),
+    addAccount: (token) => ipcRenderer.invoke('copilot:addAccount', token),
+    removeAccount: (id) => ipcRenderer.invoke('copilot:removeAccount', id),
+    setEnabled: (id, enabled) => ipcRenderer.invoke('copilot:setEnabled', id, enabled),
     signIn: (options = {}) => ipcRenderer.invoke('copilot:signIn', options),
     cancelSignIn: (options = {}) => ipcRenderer.invoke('copilot:cancelSignIn', options),
     onLoginStatus: (callback) => {

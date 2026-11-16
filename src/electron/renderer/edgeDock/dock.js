@@ -58,12 +58,6 @@ const RING_RADIUS = 18.5;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 const DRAG_THRESHOLD_PX = 4;
 const BREAKDOWN_VISIBLE_ROWS = 6;
-// Keep the phase anchor in sync with edge-dock-running-spin in dock.css.
-const RUNNING_SPIN_MS = 1400;
-// Match the waiting pulse in dock.css. Keep its entry clock across rail
-// rebuilds so usage pushes and live-status renewals preserve the breathing phase.
-const WAITING_PULSE_MS = 2400;
-const waitingRingStarts = new Map();
 
 const root = document.getElementById('edgeDockRoot');
 const query = new URLSearchParams(window.location.search);
@@ -451,19 +445,8 @@ function applyBarScale(fill, scale) {
   fill.style.setProperty('--bar-scale', String(Math.max(0, Math.min(1, Number(scale) || 0))));
 }
 
-// A tooltip the pointer is inside has to survive the countdown repaint, the
-// same hold the Limits page keeps. Without it the 30-second tick replaces the
-// card out from under an open tooltip and it vanishes mid-read.
-const limitTooltip = {
-  opened: false,
-  active: false,
-  pending: false
-};
-
-function limitTooltipShouldHoldRender() {
-  if (!limitTooltip.active) return false;
-  return Boolean(contentLayer.querySelector('.limit-detail-tooltip-wrap:hover, .limit-detail-tooltip-wrap:focus-within'));
-}
+// Track first opening for tooltip entrance motion across retained cards.
+const limitTooltip = { opened: false };
 
 function createCardWindowsView(cell = () => state.payload?.cell, forecast = () => cardForecast) {
   return limitWindowsViewApi.createLimitWindowsView({
@@ -482,18 +465,8 @@ function createCardWindowsView(cell = () => state.payload?.cell, forecast = () =
       hasOpened: () => limitTooltip.opened,
       markOpened() {
         limitTooltip.opened = true;
-        limitTooltip.active = true;
       },
-      release() {
-        requestAnimationFrame(() => {
-          if (limitTooltipShouldHoldRender()) return;
-          limitTooltip.active = false;
-          if (!limitTooltip.pending) return;
-          limitTooltip.pending = false;
-          if (surface === 'notch' && state.payload) notchRenderer.render(state.payload);
-          else if (state.payload?.cell) renderBubble(state.payload);
-        });
-      }
+      release() {}
     },
     formatCompact: formatTokens,
     compactTokenThreshold: () => compactTokenApi.compactTokenUnitThreshold(
@@ -757,20 +730,13 @@ if (surface === 'notch') {
 
 // ---- Rail ----------------------------------------------------------------
 
-function waitingRingStart(cellId, isWaiting) {
-  if (!isWaiting) {
-    waitingRingStarts.delete(cellId);
-    return null;
-  }
-  if (!waitingRingStarts.has(cellId)) {
-    waitingRingStarts.set(cellId, performance.now());
-  }
-  return waitingRingStarts.get(cellId);
-}
-
-function ringNode(remainingPercent, color, mark, waitingStartedAt = null) {
+function ringNode(remainingPercent, color, mark) {
   const ring = el('div', 'edge-dock-ring');
   ring.style.setProperty('--ring-color', color);
+  // Chromium interpolates color-mix() filter colours near black. Supply legacy
+  // RGBA so the hover shadow keeps the ring's colour throughout the transition.
+  const glowColor = color === 'var(--text)' ? getComputedStyle(document.documentElement).getPropertyValue('--text') : color;
+  ring.style.setProperty('--ring-glow-color', colorWithAlpha(glowColor, 0.55));
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 42 42');
   svg.setAttribute('aria-hidden', 'true');
@@ -803,22 +769,16 @@ function ringNode(remainingPercent, color, mark, waitingStartedAt = null) {
   waitingCircle.setAttribute('cy', '21');
   waitingCircle.setAttribute('r', '14');
   waiting.append(waitingCircle);
-  if (waitingStartedAt !== null) {
-    const elapsed = Math.max(0, performance.now() - waitingStartedAt);
-    waiting.style.animationDelay = `-${elapsed % WAITING_PULSE_MS}ms`;
-  }
   if (appearance().edgeDockRunningIndicatorEnabled === false) {
     ring.append(svg, mark, waiting);
     return ring;
   }
-  // A separate inner arc reports work without moving the quota reading. Rail
-  // pushes rebuild these nodes, so anchor rotation to the clock to avoid restarting
-  // the spinner each time new usage arrives.
+  // A separate inner arc reports work without moving the quota reading. The DOM
+  // is retained across pushes; let CSS keep its timeline without retiming it.
   const spinner = document.createElementNS(SVG_NS, 'svg');
   spinner.setAttribute('class', 'edge-dock-ring-spinner');
   spinner.setAttribute('viewBox', '0 0 42 42');
   spinner.setAttribute('aria-hidden', 'true');
-  spinner.style.animationDelay = `-${Date.now() % RUNNING_SPIN_MS}ms`;
   const arc = document.createElementNS(SVG_NS, 'circle');
   arc.setAttribute('cx', '21');
   arc.setAttribute('cy', '21');
@@ -876,7 +836,7 @@ function providerCellNode(cell) {
   value.dataset.severity = hasCreditsAmount && (severitySource === null || severitySource === undefined)
     ? 'ok'
     : displaySeverity(severitySource);
-  node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider), waitingRingStart(cell.id, waiting > 0)), value);
+  node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider)), value);
   // The spinner is decorative and carries no text, so the state it announces is
   // spoken here instead, from the same reading it is drawn from.
   const spoken = [providerLabel(cell.provider), value.textContent];
@@ -1069,6 +1029,7 @@ function statCellNode(cell) {
 // constants.
 
 const ringResetMotions = new WeakMap();
+const ringArcAnimations = new WeakMap();
 const ringNumberAnimations = new Map();
 const RING_MOTION_EASING = limitResetAnimatorApi.EASING;
 const RING_GLOW_MS = limitResetAnimatorApi.GLOW_MS;
@@ -1078,12 +1039,28 @@ function captureRingResetMotion(scope = railNode) {
   const snapshot = new Map();
   for (const cell of scope?.querySelectorAll('.edge-dock-cell[data-ring-motion-key]') || []) {
     const key = cell.dataset.ringMotionKey;
+    const circle = cell.querySelector('.edge-dock-ring-fill');
     const entry = {
       remainingPercent: cell.dataset.ringRemaining,
       displayPercent: cell.dataset.ringDisplay,
       resetsAt: cell.dataset.ringResetAt,
-      motion: ringResetMotions.get(cell.querySelector('.edge-dock-ring-fill'))
+      motion: ringResetMotions.get(circle)
     };
+    // The next render owns the reading, including non-reset updates. Valid
+    // resumed motions are registered again by animateRingResets below.
+    ringResetMotions.delete(circle);
+    const ring = cell.querySelector('.edge-dock-ring');
+    // Only retire our refill effect. CSS owns live quota and hover transitions.
+    ringArcAnimations.get(circle)?.cancel();
+    ringArcAnimations.delete(circle);
+    for (const flare of ring?.querySelectorAll('.edge-dock-ring-complete') || []) {
+      for (const animation of flare.getAnimations()) animation.cancel();
+      flare.remove();
+    }
+    const value = cell.querySelector('.edge-dock-value');
+    const number = ringNumberAnimations.get(value);
+    if (number) cancelAnimationFrame(number.handle);
+    ringNumberAnimations.delete(value);
     // Ambiguous identities are safer left static than animated on the wrong cell.
     snapshot.set(key, snapshot.has(key) ? null : entry);
   }
@@ -1095,7 +1072,8 @@ function captureRingResetMotion(scope = railNode) {
 // run, then lets go — the attribute already holds the target.
 function animateRingArc(circle, from, to, duration, startedAt) {
   if (!circle?.animate) return;
-  for (const animation of circle.getAnimations()) animation.cancel();
+  ringArcAnimations.get(circle)?.cancel();
+  ringArcAnimations.delete(circle);
   const fromOffset = RING_CIRCUMFERENCE * (1 - Math.max(0, Math.min(100, from)) / 100);
   const toOffset = RING_CIRCUMFERENCE * (1 - Math.max(0, Math.min(100, to)) / 100);
   if (Math.abs(toOffset - fromOffset) < 0.001) return;
@@ -1107,11 +1085,15 @@ function animateRingArc(circle, from, to, duration, startedAt) {
     easing: RING_MOTION_EASING,
     fill: 'backwards'
   });
+  ringArcAnimations.set(circle, animation);
   if (startedAt !== null) animation.startTime = startedAt;
 }
 
 function animateRingPercent(el, from, to, duration, startedAt = performance.now()) {
   if (!el) return;
+  const previous = ringNumberAnimations.get(el);
+  if (previous) cancelAnimationFrame(previous.handle);
+  ringNumberAnimations.delete(el);
   if (prefersReducedMotion() || !Number.isFinite(from) || !Number.isFinite(to) || from === to) {
     el.textContent = `${Math.round(to)}%`;
     return;
@@ -1187,8 +1169,8 @@ function animateRingResets(snapshot, scope = railNode) {
     if (!previous) continue;
     const circle = cell.querySelector('.edge-dock-ring-fill');
     const active = previous.motion;
-    // A stats push rebuilds the rail even when nothing changed. Carry the
-    // original timeline across that replacement, including its flare.
+    // Unchanged readings keep their timeline, including the flare. Fresh
+    // ownership prevents an older queued start from running on this ring too.
     if (
       active
       && circle
@@ -1197,7 +1179,7 @@ function animateRingResets(snapshot, scope = railNode) {
       && previous.resetsAt === current.resetsAt
       && (active.startedAt === null || performance.now() - active.startedAt < active.duration + RING_GLOW_MS - RING_GLOW_LEAD_MS)
     ) {
-      motions.push({ cell, circle, motion: active });
+      motions.push({ cell, circle, motion: { ...active } });
       continue;
     }
     if (!limitResetMotionApi.shouldAnimateReset(previous, current)) continue;
@@ -1239,7 +1221,7 @@ function animateRingResets(snapshot, scope = railNode) {
     ringResetMotions.set(circle, motion);
   }
   function startMotion({ cell, circle, motion }, now) {
-    if (!circle.isConnected || !cell.isConnected || prefersReducedMotion()) return;
+    if (!circle.isConnected || !cell.isConnected || prefersReducedMotion() || ringResetMotions.get(circle) !== motion) return;
     if (motion.startedAt === null) motion.startedAt = now;
     const { fromRemaining, toRemaining, display, duration, startedAt } = motion;
     animateRingArc(circle, fromRemaining, toRemaining, duration, startedAt);
@@ -1333,10 +1315,13 @@ function renderRail(payload) {
   const layout = payload.cellLayout || null;
   railNode.classList.toggle('is-compact', layout?.compact === true);
   const retainedPlugins = new Map([...railNode.children].filter(node => node.dataset.pluginRef).map(node => [node.dataset.cellId, node]));
+  const ringSnapshot = captureRingResetMotion();
+  const rollSnapshot = railNumberRoll.capture(railNode);
   const nodes = [];
   (payload.cells || []).forEach((cell, index) => {
     const node = cell.kind === 'stat' ? statCellNode(cell) : cell.kind === 'plugin' ? pluginCellNode(cell, retainedPlugins.get(cell.id)?.dataset.pluginRef === cell.ref ? retainedPlugins.get(cell.id) : null) : providerCellNode(cell);
     node.dataset.cellId = cell.id;
+    node.dataset.key = cell.id;
     node.dataset.index = String(index);
     // Cells are placed on the main process's layout so hover hit-testing and
     // what is painted can never drift apart.
@@ -1345,31 +1330,19 @@ function renderRail(payload) {
       node.style.height = `${layout.heights[index]}px`;
     }
     node.classList.toggle('is-focused', payload.focusCellId === cell.id);
+    if (cell.kind !== 'plugin' && pluginContent?.hasTarget(`edgeDock.rail.${cell.kind}.content`)) {
+      const native = el('div', 'plugin-native-content'); native.append(...node.childNodes); node.append(native);
+    }
     nodes.push(node);
   });
-  const providerIds = new Set((payload.cells || []).filter((cell) => cell.kind === 'provider').map((cell) => cell.id));
-  for (const id of waitingRingStarts.keys()) {
-    if (!providerIds.has(id)) waitingRingStarts.delete(id);
-  }
-  const ringSnapshot = captureRingResetMotion();
-  const rollSnapshot = railNumberRoll.capture(railNode);
-  // Keep surviving author controls connected: re-inserting an unchanged node
-  // clears browser focus even when its input object and draft survive.
-  const keep = new Set(nodes);
-  for (const node of [...railNode.children]) if (!keep.has(node)) node.remove();
-  let cursor = railNode.firstChild;
-  for (const node of nodes) {
-    if (node !== cursor) railNode.insertBefore(node, cursor);
-    cursor = node.nextSibling;
-  }
+  const retained = cardDom.reconcileChildren(railNode, nodes);
   const targets = [];
   (payload.cells || []).forEach((cell, index) => {
     if (cell.kind === 'plugin') return;
     const target = `edgeDock.rail.${cell.kind}.content`;
     targets.push(target);
     if (!pluginContent?.hasTarget(target)) return;
-    const node = nodes[index], native = el('div', 'plugin-native-content');
-    native.append(...node.childNodes); node.append(native);
+    const native = retained[index].querySelector(':scope > .plugin-native-content');
     pluginContent.render(target, native, { surface: 'edgeDock', surfaceVariant: 'rail', targetInstance: cell.id, cell, nativeData: payload });
   });
   pluginContent?.retain(targets);
@@ -1547,8 +1520,30 @@ function stateMark(session, key, state) {
   // nothing about which session just moved. The flare is a one-shot animation
   // rather than an `infinite` pulse, matching the titlebar dot and the Sessions
   // list, so an open-but-idle card costs the compositor nothing.
-  if (state === 'running' && previous && next > previous) dot.classList.add('pulse');
+  if (state === 'running' && previous && next > previous) dot.dataset.activityPulse = String(next);
   return dot;
+}
+
+const sessionActivityPulses = new WeakMap();
+function animateSessionActivity(card) {
+  const pending = [];
+  for (const dot of card.querySelectorAll('.edge-dock-session-dot')) {
+    if (dot.dataset.state !== 'running' || prefersReducedMotion()) {
+      dot.classList.remove('pulse');
+      continue;
+    }
+    const activity = dot.dataset.activityPulse;
+    if (!activity || sessionActivityPulses.get(dot) === activity) continue;
+    sessionActivityPulses.set(dot, activity);
+    dot.classList.remove('pulse');
+    pending.push(dot);
+  }
+  // The class belongs to the live DOM, so unchanged pushes leave the pulse alone.
+  // Restart once per new write, including when the previous pulse is still running.
+  if (pending.length) {
+    void card.offsetWidth;
+    for (const dot of pending) dot.classList.add('pulse');
+  }
 }
 
 function sessionsNode(sessions) {
@@ -1624,7 +1619,8 @@ function sessionsContainer(sessions, options = {}) {
     // more information than the dot does.
     nameNode.append(stateMark(session, key, activityState));
     const title = el('span', 'edge-dock-session-title', name);
-    title.dataset.overflowKey = key;
+    title.dataset.key = key;
+    row.dataset.key = key;
     overflowText.bind(title);
     nameNode.append(title);
     // The glyph is decorative and its `title` only reaches pointer users, so the
@@ -1671,6 +1667,7 @@ function sessionsContainer(sessions, options = {}) {
     );
     if (session.groupRows) {
       const family = el('details', 'edge-dock-session-family');
+      family.dataset.key = key;
       const expansionKey = sessionGroupExpansionKey(key);
       family.open = expandedSessionGroups.has(expansionKey);
       row.dataset.sessionGroupKey = key;
@@ -1784,12 +1781,13 @@ function appendLiveRate(card, head, cell) {
   const headline = el('div', 'edge-dock-stat-headline edge-dock-rate-headline');
   const figure = el('button', 'edge-dock-rate-figure');
   figure.type = 'button';
+  figure.dataset.rateMode = cell.rateMode;
   figure.setAttribute('aria-description', t('edgeDock.rate.switch'));
   const unit = el('span', 'edge-dock-rate-unit', t(burnMode ? 'edgeDock.rate.burnUnit' : 'edgeDock.rate.speedUnit'));
   figure.append(el('strong', '', hasSample ? formatRate(cell.rate) : '—'), unit, el('span', 'edge-dock-rate-swap', '⇄'));
-  // Press-activated, not click: the card is rebuilt whenever the rate moves, and
-  // a rebuild between press and release silently swallows the click.
+  // Start the mode change on press, retaining keyboard-click activation.
   activateOnPress(figure, () => {
+    const burnMode = figure.dataset.rateMode === 'burn';
     unit.textContent = t(burnMode ? 'edgeDock.rate.speedUnit' : 'edgeDock.rate.burnUnit');
     bridge.toggleRateMode();
   });
@@ -1825,6 +1823,7 @@ function appendLiveRateDetails(card, cell) {
       continue;
     }
     const row = el('div', 'edge-dock-rate-model');
+    row.dataset.key = entry[0];
     const mark = markNode(modelVendorFor(entry[0]) || 'token-monitor', null, true);
     mark.setAttribute('aria-hidden', 'true');
     row.append(mark, el('span', 'edge-dock-rate-model-name', entry[0]), el('span', 'edge-dock-rate-model-value', entry[1]));
@@ -1879,10 +1878,11 @@ function statCard(cell) {
       const list = el('div', 'edge-dock-session-list edge-dock-cache-hit-sessions');
       for (const session of cell.cacheSessions) {
         const row = el('div', 'edge-dock-session');
+        row.dataset.key = session.key;
         const name = el('span', 'edge-dock-session-name');
         name.append(markNode(session.client), el('span', 'sr-only', `${clientLabel(session.client)} `));
         const title = el('span', 'edge-dock-session-title', session.title);
-        title.dataset.overflowKey = session.key;
+        title.dataset.key = session.key;
         overflowText.bind(title);
         name.append(title);
         row.append(name, el('span', 'edge-dock-session-tokens', formatCacheHitRate(session.rate)),
@@ -1959,6 +1959,7 @@ function statCard(cell) {
   const sum = cell.totalTokens || rows.reduce((value, row) => value + row.tokens, 0) || 1;
   for (const entry of rows) {
     const row = el('div', 'edge-dock-client');
+    row.dataset.key = entry.id;
     // The same bar as the quota meters above it, built by the same helper.
     const meter = el('div', 'limit-meter');
     meter.style.background = colorWithAlpha(entry.color, 0.16);
@@ -2032,6 +2033,7 @@ function sessionsCard(cell, card, head) {
   const grouped = el('div', 'edge-dock-accounts edge-dock-session-groups');
   for (const [client, rows] of groups) {
     const section = el('div', 'edge-dock-session-group');
+    section.dataset.key = client;
     // Its own header class rather than the shared section head: that one is a
     // two-item caption row aligned on the baseline, and a mask-drawn mark has no
     // baseline, so it floated above its label. This row centers its three parts.
@@ -2046,16 +2048,8 @@ function sessionsCard(cell, card, head) {
   return card;
 }
 
-// Cards are built in a hidden staging layer and measured there. The visible
-// card is only replaced once the main process has accepted its measured size.
-// While switching, the content layer follows the painted frame inside the
-// fixed native canvas; text remains unscaled under the moving clip.
-//
-// Both scroll containers, because which one scrolls depends on the card. Provider,
-// grouped Sessions, and period-breakdown cards scroll `.edge-dock-accounts`; the
-// ungrouped Sessions card's list is `.edge-dock-session-list`. A repaint rebuilds the
-// card, so a selector that missed the container actually in use reset that card's
-// scroll on every clock tick - yanking the reader back to the top while they read it.
+// New cards stage until the main process accepts their measured size; live
+// readings reconcile in place. Switch motion keeps text unscaled inside the clip.
 const CARD_SCROLL_SELECTOR = '.edge-dock-accounts, .edge-dock-session-list';
 
 let observedPluginCard = null;
@@ -2069,29 +2063,21 @@ function clearCardSwitch() { cardSwitch.cancel(); }
 function captureCardSwitch(previous, sameCard, opening) { return cardSwitch.capture(previous, sameCard, opening); }
 function animateCardSwitch(card, motion) { cardSwitch.play(card, motion); }
 
+const cardDom = window.TokenMonitorDomReconcile.create({ nodesFor: node => pluginContent?.nodesFor(node) || [] });
+const pendingResetSnapshots = new WeakMap();
 function commitCard(card, cellId) {
   const previous = contentLayer.querySelector('.edge-dock-card');
   const sameCard = previous?.dataset.cellId === cellId
     && previous?.dataset.breakdownMode === card.dataset.breakdownMode;
-  const scrollLists = (node) => [...node.querySelectorAll(CARD_SCROLL_SELECTOR)]
-    .filter(list => !list.closest('.edge-dock-session-family'));
-  const scrollTops = sameCard ? scrollLists(previous).map(list => list.scrollTop) : [];
-  const focusedGroup = sameCard ? document.activeElement?.dataset?.sessionGroupKey : null;
   // The native window stays visible at zero opacity between hovers, so page
   // visibility cannot distinguish a new opening from a continuous switch.
   const opening = previous?.dataset.reveal !== card.dataset.reveal;
   const switchMotion = captureCardSwitch(previous, sameCard, opening);
-  const resetSnapshot = cardResetAnimator.capture(previous || contentLayer);
-  contentLayer.replaceChildren(card);
+  const resetSnapshot = pendingResetSnapshots.get(card);
+  pendingResetSnapshots.delete(card);
+  if (previous !== card) contentLayer.replaceChildren(card);
+  animateSessionActivity(card);
   overflowText.refresh();
-  if (focusedGroup) {
-    const summary = [...card.querySelectorAll('summary[data-session-group-key]')]
-      .find(node => node.dataset.sessionGroupKey === focusedGroup);
-    summary?.focus({ preventScroll: true });
-  }
-  scrollLists(card).forEach((list, index) => { list.scrollTop = scrollTops[index] || 0; });
-  // Measure reading targets only after mounting and restoring their scroll position.
-  if (sameCard) overflowText.preserveReading(previous, card);
   cardResetAnimator.animate(card, resetSnapshot);
   animateCardSwitch(card, switchMotion);
 }
@@ -2119,10 +2105,10 @@ function reserveAccountHeight(card, maxHeight) {
   const native = card.querySelector(':scope > .plugin-native-content') || card;
   const accounts = native.querySelector(':scope > .edge-dock-accounts');
   if (!accounts || !native.querySelector(':scope > .edge-dock-sessions') || !(maxHeight > 0)) return;
-  const shrink = accounts.style.flexShrink;
-  accounts.style.flexShrink = '0';
-  const naturalHeight = Math.ceil(accounts.getBoundingClientRect().height);
-  accounts.style.flexShrink = shrink;
+  // Expanding a live scroller to its natural height would clamp scrollTop to
+  // zero. Read its content extent while keeping flex constraints in place.
+  accounts.style.minHeight = '';
+  const naturalHeight = Math.ceil(accounts.scrollHeight);
   if (naturalHeight > 0) accounts.style.minHeight = `${Math.min(naturalHeight, maxHeight / 2)}px`;
 }
 
@@ -2131,6 +2117,7 @@ function fitCardTotal(card, scale = 1) {
   if (!row) return;
   const number = row.querySelector('strong');
   const compact = row.querySelector('.edge-dock-total-compact');
+  number.style.fontSize = '';
   const gap = compact ? parseFloat(getComputedStyle(row).columnGap) || 0 : 0;
   const available = row.clientWidth - (compact ? compact.getBoundingClientRect().width / scale : 0) - gap;
   const natural = number.getBoundingClientRect().width / scale;
@@ -2183,7 +2170,7 @@ function renderBubble(payload) {
     bubbleLayout.prepare({ card: retained, payload });
     return;
   }
-  const card = cell.kind === 'stat' ? statCard(cell) : cell.kind === 'plugin' ? pluginCard(cell) : providerCard(cell);
+  let card = cell.kind === 'stat' ? statCard(cell) : cell.kind === 'plugin' ? pluginCard(cell) : providerCard(cell);
   card.dataset.cellId = cell.id;
   card.dataset.reveal = String(payload.reveal);
   card.style.transform = contentTransform;
@@ -2193,12 +2180,25 @@ function renderBubble(payload) {
     native.append(...card.childNodes); card.append(native);
     const target = `edgeDock.${cell.kind}.content`;
     pluginContent.retain([target]);
-    pluginContent.render(target, native, { surface: 'edgeDock', cell, nativeData: payload });
+
   }
   if (payload.maxCardHeight) card.style.maxHeight = `${payload.maxCardHeight}px`;
+  const resetSnapshot = cardResetAnimator.capture(previous || contentLayer);
+  const sameCard = previous?.dataset.cellId === card.dataset.cellId
+    && previous?.dataset.breakdownMode === card.dataset.breakdownMode
+    && previous?.dataset.reveal === card.dataset.reveal;
+  card = cardDom.reconcile(sameCard ? previous : null, card);
+  // A retained card is already visible; do not lose its activity signal if a
+  // size acknowledgement renders the same reading again before commitCard.
+  if (card.parentNode === contentLayer) animateSessionActivity(card);
+  pendingResetSnapshots.set(card, resetSnapshot);
+  if (cell.kind !== 'plugin' && pluginContent?.hasTarget(`edgeDock.${cell.kind}.content`)) {
+    pluginContent.render(`edgeDock.${cell.kind}.content`, card.querySelector(':scope > .plugin-native-content'),
+      { surface: 'edgeDock', cell, nativeData: payload });
+  }
   if (observedPluginCard) bubbleSizeObserver?.unobserve(observedPluginCard);
   observedPluginCard = cell.kind === 'plugin' ? card : null;
-  stagingLayer.replaceChildren(card);
+  if (card.parentNode !== contentLayer) stagingLayer.replaceChildren(card);
   fitCardTotal(card);
   clampBreakdownList(card);
   if (observedPluginCard) bubbleSizeObserver?.observe(observedPluginCard);
@@ -2251,13 +2251,9 @@ function render(payload) {
   scheduleSelfRepaint();
 }
 
-// A repaint replaces the whole card, so it waits for whatever the pointer is
-// currently inside: an account control mid-gesture, or an open detail tooltip.
+// Account switching still owns its asynchronous native-control gesture.
 function deferBubbleRender() {
-  if (codexAccountControl.deferRender(contentLayer)) return true;
-  if (!limitTooltipShouldHoldRender()) return false;
-  limitTooltip.pending = true;
-  return true;
+  return codexAccountControl.deferRender(contentLayer);
 }
 
 bridge.onRender(render);

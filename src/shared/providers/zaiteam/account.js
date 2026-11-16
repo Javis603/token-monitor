@@ -1,7 +1,8 @@
+// @ts-check
 'use strict';
 
 // GLM Team limits account wiring. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'zaiteam',
   fetch: 'fetchZaiTeamLimits',
   fields: [
@@ -76,4 +77,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['bigmodel.cn', 'www.bigmodel.cn'], pathPrefixes: ['/coding-plan'] }
   ]
-};
+});

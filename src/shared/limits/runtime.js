@@ -1,5 +1,8 @@
 'use strict';
 
+const { configuredMultiAccountProviders, normalizeAccountSlots, accountSlotKey, defaultIdentityKey, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
+const { LIMIT_PROVIDER_REGISTRY } = require('./registry');
+
 const crypto = require('node:crypto');
 const {
   PROVIDER_CLEANUP_GRACE_MS,
@@ -25,6 +28,8 @@ const {
   recordLimitsUrgencyAttempt
 } = require('./burnRate');
 const { runWithProbeDeadline } = require('../probeDeadline');
+const { limitFailureDetail } = require('./failureDetail');
+const { providerStatusFromError } = require('./providerHelpers');
 const { accountIdentityDescriptor, probeAccount, rowMatchesScope } = require('./accountScope');
 const {
   DEFAULT_LIMITS_RETRY_BASE_MS,
@@ -34,6 +39,10 @@ const {
 } = require('./retryPolicy');
 
 const DEFAULT_LIMITS_MAX_CONCURRENCY = 3;
+// Per list in a provider's diagnostic failure detail; enough to tell sources
+// apart without letting one noisy probe fill the report.
+const MAX_FAILURE_DETAIL_ENTRIES = 4;
+const NON_FAILURE_STATUSES = new Set(['ok', 'notConfigured', 'disabled']);
 
 const TRANSIENT_STATUSES = new Set([
   'timeout',
@@ -198,10 +207,47 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         retryAttempt: 0,
         retryNotBefore: 0,
         retryScope: null,
-        retryTimer: null
+        retryTimer: null,
+        failureDetail: null
       });
     }
     return lanes.get(provider);
+  }
+
+  // Diagnostic detail is gathered per dispatch and kept only for the latest
+  // committed attempt, so a recovered provider stops reporting an old cause.
+  function addFailureDetail(dispatch, detail) {
+    // The same cause can arrive first without its source (the thrown error) and
+    // then with it (the provider that caught it). Keep the entry that says more.
+    const sameCause = (entry) => ['stage', 'kind', 'httpStatus', 'code']
+      .every((field) => entry[field] === detail[field]);
+    // Two accounts failing the same way are one cause; only different sources
+    // earn separate entries, unless one of them has no source at all.
+    const mergeable = (entry) => sameCause(entry)
+      && (!entry.source || !detail.source || entry.source === detail.source);
+    const index = dispatch.failures.findIndex(mergeable);
+    if (index !== -1) {
+      const existing = dispatch.failures[index];
+      if (!existing.source && detail.source) dispatch.failures[index] = detail;
+      return;
+    }
+    dispatch.failures.push(detail);
+  }
+
+  function noteFailure(dispatch, error, meta) {
+    if (NON_FAILURE_STATUSES.has(error?.status || providerStatusFromError(error))) return;
+    addFailureDetail(dispatch, limitFailureDetail(error, meta));
+  }
+
+  function recordFailureDetail(lane, dispatch, at, failed) {
+    lane.failureDetail = failed || dispatch.failures.length
+      ? {
+          at,
+          failures: dispatch.failures.slice(0, MAX_FAILURE_DETAIL_ENTRIES),
+          httpStatuses: [...dispatch.httpStatuses].slice(0, MAX_FAILURE_DETAIL_ENTRIES),
+          networkCodes: [...dispatch.networkCodes].slice(0, MAX_FAILURE_DETAIL_ENTRIES)
+        }
+      : null;
   }
 
   function finishIntent(intent, result) {
@@ -321,6 +367,33 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
           });
       if (row) rows.push(row);
     }
+    const entry = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === provider && entry.accountSlots);
+    if (entry) {
+      const slots = normalizeAccountSlots(entry, config[accountSlotKey(entry)]).filter(slot => slot.enabled);
+      // An alias names a key a slot moved away from. The default account, or
+      // another slot, may answer under it now, and then the row is theirs.
+      // Only while it still belongs to the current default credential, as in the fetcher.
+      // What this runtime resolved for the current default credential wins over the
+      // stored copy, which is only written back to the config on the next reconfigure.
+      const defaultFingerprint = accountValuesFingerprint(defaultAccountValues(entry, config, deps.env || process.env));
+      const storedDefault = config[defaultIdentityKey(entry)];
+      const defaultKey = providerRuntimeState.get(`account-slot:${entry.id}:default:${defaultFingerprint}`)?.accountKey
+        || (storedDefault?.fingerprint === defaultFingerprint ? storedDefault.accountKey || '' : '');
+      const owner = row => slots.find(slot => slot.accountKey === row.accountKey)
+        || (row.accountKey === defaultKey ? undefined : slots.find(slot => slot.accountKeyAliases.includes(row.accountKey)));
+      for (const row of rows) {
+        const slot = owner(row);
+        if (slot) {
+          // Labels are local metadata; changing them never replaces quota data.
+          // A slot's local name is its accountName, also while a retained
+          // reading answers for it; the provider's accountLabel (Qoder's plan)
+          // is never touched.
+          if (slot.label) row.accountName = slot.label;
+          else delete row.accountName;
+        }
+      }
+      rows.sort((a, b) => slots.indexOf(owner(a)) - slots.indexOf(owner(b)));
+    }
     return rows;
   }
 
@@ -332,6 +405,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     snapshot = normalizeLimitsSummary({
       updatedAt: new Date(now()).toISOString(),
       refreshMs,
+      multiAccountProviders: enabled && !stopped ? configuredMultiAccountProviders(LIMIT_PROVIDER_REGISTRY, config, deps.env || process.env).filter(id => configuredProviders.has(id)) : [],
       providers
     });
     pruneAttemptedResetBoundaries(snapshot, attemptedResetBoundaries);
@@ -622,6 +696,8 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
         applyAttempt(lane, identityKey, { provider: lane.provider, source: dispatch.scope.source }, status, attemptAt);
       }
+      addFailureDetail(dispatch, limitFailureDetail(attemptError));
+      recordFailureDetail(lane, dispatch, attemptAt, true);
       rebuildSnapshot();
       return [];
     }
@@ -637,15 +713,21 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         // whenever a real Code account is already present.
         if ([...lane.identities.values()].some(state =>
           (state.lastAttempt?.row?.source || state.lastGood?.source) === 'oauth')) {
+          // Nothing failed here, so the previous API outage must not stay on
+          // record for a lane this dispatch does not own.
+          recordFailureDetail(lane, dispatch, attemptAt, false);
           rebuildSnapshot();
           return [];
         }
       } else lane.identities.clear();
     }
 
+    let removeAnonymous = false;
+    const replacementRemovals = [];
     for (const removal of removals) {
       let identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
-      if (identityKey === `${lane.provider}:*`) continue;
+      if (removal.replacementAccount) { replacementRemovals.push(removal); continue; }
+      if (identityKey === `${lane.provider}:*`) { removeAnonymous = true; continue; }
       if (dispatch.accountScoped && identityKey !== dispatch.identityKey) continue;
       if (apiOnly && !belongsToApi(identityKey)) continue;
       if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
@@ -673,17 +755,44 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       represented.add(identityKey);
       const committedRow = applyAttempt(lane, identityKey, row, row.status, attemptAt, cacheInvalidations.get(rowIdentityKey(row)));
       committedRows.push(committedRow);
+      // An answer that dropped windows still on screen is published as stale
+      // `unavailable`; say so, or the report reads it as a failed request.
+      if (row.status === 'ok' && committedRow.status !== 'ok') addFailureDetail(dispatch, { kind: 'stale-windows' });
       // Marks the row as measurable by this runtime, so a persisted seed for a
       // provider that has not answered yet can never become a burn baseline.
       if (committedRow.status === 'ok') markLimitsProbeSuccess(burnState, committedRow);
+    }
+
+    // Retire anonymous state only after its healthy replacement actually commits;
+    // a result invalidated by a concurrent account clear cannot replace it.
+    if (removeAnonymous && !dispatch.accountScoped && committedRows.some(row => row.status === 'ok')
+      && accountRevisionStillCurrent(lane, `${lane.provider}:*`, dispatch)) {
+      represented.add(`${lane.provider}:*`);
+      lane.identities.delete(`${lane.provider}:*`);
+    }
+
+    // Source replacement differs from confirmed account disappearance: retire
+    // the old row only when its specific replacement survived the commit fences.
+    for (const removal of replacementRemovals) {
+      const identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
+      const replacementKey = rowIdentityKey({ ...removal.replacementAccount, provider: lane.provider });
+      if (dispatch.accountScoped || !accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
+      if (apiOnly && !belongsToApi(identityKey)) continue;
+      if (!committedRows.some(row => row.status === 'ok' && rowIdentityKey(row) === replacementKey)) continue;
+      represented.add(identityKey);
+      lane.identities.delete(identityKey);
     }
 
     if (!dispatch.accountScoped && !genericTerminal) {
       for (const identityKey of expected) {
         if (represented.has(identityKey) || !accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
         applyAttempt(lane, identityKey, { provider: lane.provider }, 'unavailable', attemptAt);
+        addFailureDetail(dispatch, { kind: 'not-returned' });
       }
     }
+    recordFailureDetail(lane, dispatch, attemptAt,
+      committedRows.some((row) => !NON_FAILURE_STATUSES.has(row?.status))
+      || dispatch.failures.some((entry) => entry.kind === 'not-returned'));
     rebuildSnapshot();
     // Retry decisions must follow the published status, including partial
     // successes that still retain stale windows, rather than the raw probe.
@@ -700,7 +809,10 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       identityKey: intent.identityKey,
       accountRevision: lane.accountRevisions.get(intent.identityKey) || 0,
       accountRevisions: new Map(lane.accountRevisions),
-      expectedIdentityKeys: [...lane.identities.keys()]
+      expectedIdentityKeys: [...lane.identities.keys()],
+      failures: [],
+      httpStatuses: new Set(),
+      networkCodes: new Set()
     };
     lane.active = { intent, controller, dispatch };
     emitEvent('probe-start', lane.provider, { reason: intent.reason, probes: activeProbes() });
@@ -730,6 +842,16 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
             const parsed = Number(value);
             if (!Number.isFinite(parsed) || parsed <= 0) return;
             reportedRetryAfterMs = Math.max(reportedRetryAfterMs || 0, parsed);
+          },
+          onFailure(error, meta) {
+            noteFailure(dispatch, error, meta);
+          },
+          onHttpStatus(value) {
+            if (Number.isInteger(value) && value >= 400 && value <= 599) dispatch.httpStatuses.add(value);
+          },
+          onTransportError(error) {
+            const detail = limitFailureDetail(error);
+            if (detail.kind === 'network') dispatch.networkCodes.add(detail.code);
           }
         }, { ...deps, providerRuntimeState }),
         { deadlineMs }
@@ -987,7 +1109,8 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         retryAt: lane?.retryNotBefore > 0 ? new Date(lane.retryNotBefore).toISOString() : null,
         lastAttemptAt: latestAttempt,
         lastSuccessAt: latestSuccess,
-        lastFailureCode: latestFailure ? publicAttemptStatus(latestFailure.status) : null
+        lastFailureCode: latestFailure ? publicAttemptStatus(latestFailure.status) : null,
+        lastFailureDetail: lane?.failureDetail ? cloneValue(lane.failureDetail) : null
       };
     });
     return {

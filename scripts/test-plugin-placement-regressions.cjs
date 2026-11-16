@@ -12,6 +12,9 @@ fs.mkdirSync(evidence, { recursive: true });
 const authorSource=path.join(scratch,'author-source');fs.cpSync(path.join(root,'tests/fixtures/trusted-plugin'),authorSource,{recursive:true});
 const authorManifest=JSON.parse(fs.readFileSync(path.join(authorSource,'manifest.json')));
 authorManifest.views.push({id:'bitmap',surfaces:['tray']});fs.writeFileSync(path.join(authorSource,'manifest.json'),JSON.stringify(authorManifest));
+// First-use setup defaults each replace target to the plugin's content; decline
+// them so this baseline keeps native content until a surface is explicitly placed.
+const declineContent=Object.fromEntries(authorManifest.views.filter(view=>view.mode==='replace').flatMap(view=>view.targets).map(target=>[`content:${target}`,null]));
 const uiFile=path.join(authorSource,'ui.mjs');
 fs.writeFileSync(uiFile, `export function activate(ctx) { return {
   renderTray(canvas) { const g=canvas.getContext('2d');g.fillStyle='#78c8b4';g.fillRect(0,0,canvas.width,canvas.height);g.fillStyle='#233e36';g.fillRect(canvas.width/3,canvas.height/4,canvas.width/3,canvas.height/2); },
@@ -67,7 +70,7 @@ app.whenReady().then(async () => {
   const js = text => main.webContents.executeJavaScript(text);
   const preview = await js("tokenMonitor.plugins.importPackage('directory')");
   await js(`tokenMonitor.plugins.install(${JSON.stringify(preview.token)})`);
-  await js("tokenMonitor.plugins.setEnabled('trusted-fixture',true)");
+  await js("tokenMonitor.plugins.setEnabled('trusted-fixture',true," + JSON.stringify(declineContent) + ")");
   assert.equal(runtime.manager.backendCount(), 0);console.log('STAGE fixture enabled');
   const shape = { key: 'fixture', width: 680, height: 300, d: 'M0 0H680V300H0Z' };
   const stat = require(path.join(root,'src/electron/renderer/edgeDock/presentation')).buildEdgeDockCells({periods:{today:{totalTokens:125000,costUsd:4.25}}},{items:[{type:'stat',metric:'today'}]})[0];

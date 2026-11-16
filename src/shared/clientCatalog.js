@@ -27,8 +27,7 @@
   // and the README table (tests/shared/clientTracking.test.js enforces that).
   //
   // `defaultTracked: false` keeps a client wired and selectable but off on a
-  // fresh install. qodercn is opt-in per the upstream tool-support boundary — a
-  // fork-only parser that may break when Qoder changes its storage format.
+  // fresh install. Saved selections remain authoritative when defaults change.
   //
   // mimo (MiMo) ships default-tracked even though mimocode.db auto-imports
   // Claude Code sessions (its claude-import service): tokscale parses the store
@@ -84,7 +83,8 @@
     { id: 'workbuddy', label: 'WorkBuddy' },
     { id: 'proma', label: 'Proma' },
     { id: 'catpaw', label: 'CatPaw', defaultTracked: false, forkOnly: true },
-    { id: 'qodercn', label: 'Qoder CN', defaultTracked: false, forkOnly: true },
+    { id: 'qoder', label: 'Qoder' },
+    { id: 'qodercn', label: 'Qoder CN', forkOnly: true },
     { id: 'reasonix', label: 'Reasonix' },
     { id: 'dsh', label: 'DeepSeek Harness' },
     { id: 'cherrystudio', label: 'Cherry Studio' },

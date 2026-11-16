@@ -321,6 +321,7 @@ function normalizeClientName(value) {
   if (raw.includes('workbuddy')) return 'workbuddy';
   if (raw.includes('proma')) return 'proma';
   if (raw === 'catpaw') return 'catpaw';
+  if (raw === 'qoder') return 'qoder';
   if (raw.includes('qodercn') || raw === 'qoder-cn' || raw === 'qoder cn') return 'qodercn';
   if (raw.includes('reasonix')) return 'reasonix';
   if (/cherry[\s_-]*studio/.test(raw)) return 'cherrystudio';
@@ -1604,17 +1605,6 @@ function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedCli
   }
 }
 
-function limitProviderMergeKey(provider) {
-  const name = String(provider?.provider || '').trim();
-  if (!name) return '';
-  if (GUI_SECRET_LIMIT_PROVIDERS.has(name)) return name;
-  const accountKey = String(provider?.accountKey || '').trim();
-  if (accountKey) return `${name}:${accountKey}`;
-  const accountEmail = String(provider?.accountEmail || '').trim().toLowerCase();
-  if (accountEmail) return `${name}:email:${accountEmail}`;
-  return `${name}:${String(provider?.status || '').trim()}`;
-}
-
 function isConfiguredLimitProvider(provider) {
   return Boolean(provider?.accountKey && provider.status !== 'notConfigured' && provider.status !== 'disabled');
 }
@@ -1626,6 +1616,12 @@ function shouldKeepExistingGuiSecretProvider(existingProvider, incomingProvider,
   if (!isConfiguredLimitProvider(existingProvider)) return false;
   const existingRuntime = String(existingRecord?.agentRuntime || '').trim();
   const incomingRuntime = String(incomingRecord?.agentRuntime || '').trim();
+  // Managed Copilot profiles belong to the widget, even after headless usage
+  // uploads replace the device-level runtime stamp. The widget can still clear
+  // its own profiles explicitly.
+  if (incomingProvider.provider === 'copilot' && existingProvider.sourceDetail === 'managed') {
+    return incomingRuntime === 'headless-agent';
+  }
   return Boolean(existingRuntime && incomingRuntime && existingRuntime !== incomingRuntime);
 }
 
@@ -1634,19 +1630,27 @@ function mergeDeviceLimits(existingRecord, incomingRecord) {
   const incomingLimits = normalizeLimitsSummary(incomingRecord?.limits);
   if (!incomingLimits.providers.length) return incomingLimits;
 
-  const existingByKey = new Map();
-  for (const provider of existingLimits.providers) {
-    const key = limitProviderMergeKey(provider);
-    if (key) existingByKey.set(key, provider);
-  }
-  return {
-    ...incomingLimits,
-    providers: incomingLimits.providers.map((provider) => {
-      const existing = existingByKey.get(limitProviderMergeKey(provider));
-      if (shouldKeepExistingGuiSecretProvider(existing, provider, existingRecord, incomingRecord)) return existing;
-      return provider;
-    })
-  };
+  const retainedProviders = new Set();
+  // An account the incoming summary reports itself is not restored beside it.
+  const incomingAccounts = new Set(incomingLimits.providers.filter(provider => provider.accountKey)
+    .map(provider => `${provider.provider}:${provider.accountKey}`));
+  const providers = incomingLimits.providers.flatMap((provider) => {
+    if (GUI_SECRET_LIMIT_PROVIDERS.has(provider.provider) && provider.status === 'notConfigured') {
+      // Several placeholders for one provider must not each restore the accounts.
+      if (retainedProviders.has(provider.provider)) return [];
+      const retained = existingLimits.providers.filter(existing => existing.provider === provider.provider
+        && !incomingAccounts.has(`${existing.provider}:${existing.accountKey}`)
+        && shouldKeepExistingGuiSecretProvider(existing, provider, existingRecord, incomingRecord));
+      if (!retained.length) return provider;
+      retainedProviders.add(provider.provider);
+      return retained;
+    }
+    return provider;
+  });
+  // A credential-less runtime cannot revoke the signal for accounts it keeps.
+  const multiAccountProviders = [...(incomingLimits.multiAccountProviders || []),
+    ...(existingLimits.multiAccountProviders || []).filter(id => retainedProviders.has(id))];
+  return normalizeLimitsSummary({ ...incomingLimits, multiAccountProviders, providers });
 }
 
 function mergeDeviceRecord(existing, incoming) {
@@ -2392,6 +2396,7 @@ module.exports = {
   PERIODS,
   UNATTRIBUTED_USAGE_CLIENT,
   addPeriodInto,
+  isPeriodExpired,
   aggregateDevices,
   aggregateHistory,
   applyPeriodDelta,

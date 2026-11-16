@@ -29,7 +29,7 @@
 //                                      read, for the plan cell's hover card
 //   format*, limitFillPercent, …       the page's own number formatting
 //   tooltip                            { hasOpened(), markOpened(), release() },
-//                                      the host's render-hold bookkeeping
+//                                      the host's tooltip entrance bookkeeping
 //
 // The one exception to "everything arrives through deps" is the provider
 // catalog: which client a provider's tokens are recorded under is the same
@@ -41,11 +41,12 @@
     node ? require('../../../shared/limits/providers') : root?.TokenMonitorLimitProviders,
     node ? require('../../../shared/limits/usageItems') : root?.TokenMonitorLimitUsageItems,
     node ? require('../../../shared/limits/accountScope') : root?.TokenMonitorLimitAccountScope,
-    node ? require('../pressActivation') : root?.TokenMonitorPressActivation
+    node ? require('../pressActivation') : root?.TokenMonitorPressActivation,
+    node ? require('../domReconcile') : root?.TokenMonitorDomReconcile
   );
   if (node) module.exports = api;
   if (root) root.TokenMonitorLimitWindowsView = api;
-})(typeof window !== 'undefined' ? window : globalThis, function createLimitWindowsViewApi(limitProviders, usageItems, accountScope, pressActivation) {
+})(typeof window !== 'undefined' ? window : globalThis, function createLimitWindowsViewApi(limitProviders, usageItems, accountScope, pressActivation, domApi) {
   function createLimitWindowsView(deps) {
     const {
       t,
@@ -452,6 +453,7 @@
   }
 
   function attachLimitDetailTooltip(wrap, tooltip) {
+    wrap.setAttribute('data-dom-kind', 'detail-tooltip');
     // A popover has no positioned ancestor to lay out against, so it is anchored
     // to its own trigger. Anchor names are per-element and the panel draws many
     // of these, so each pair gets its own rather than a name declared in CSS.
@@ -560,6 +562,7 @@
       tooltip?.hidePopover?.();
       tooltip?.replaceChildren();
       wrap.classList.remove('limit-detail-tooltip-wrap');
+      wrap.removeAttribute('data-dom-kind');
       wrap.removeAttribute('tabindex');
       wrap.removeAttribute('aria-label');
       wrap.style.removeProperty('-webkit-app-region');
@@ -2078,7 +2081,6 @@
   const pendingAccountRefreshes = new Set();
   // Each drawn button's row and status line, so a probe starting or finishing
   // can update them in place instead of waiting for the list's next repaint.
-  const refreshButtonRows = new WeakMap();
   const refreshButtonStatus = new WeakMap();
 
   function limitRowRefreshing(provider) {
@@ -2164,7 +2166,7 @@
   };
 
   function syncLimitRefreshButton(button) {
-    const provider = refreshButtonRows.get(button);
+    const provider = domApi.data(button);
     if (!provider) return;
     const key = motion.providerKey(provider);
     const now = Date.now();
@@ -2183,9 +2185,7 @@
     }
   }
 
-  // Every button on screen, read from the DOM rather than tracked: a repaint
-  // replaces the rows, and a list of the buttons drawn would keep each replaced
-  // one alive until the next sync.
+  // Read current buttons from the DOM, without retaining retired views.
   function syncLimitRefreshButtons(root = document) {
     for (const button of root.querySelectorAll('.limit-refresh-button')) syncLimitRefreshButton(button);
   }
@@ -2206,13 +2206,12 @@
     const status = document.createElement('span');
     status.className = 'limit-refresh-status';
     status.setAttribute('role', 'status');
-    refreshButtonRows.set(button, provider);
+    domApi.data(button, provider);
     refreshButtonStatus.set(button, status);
     syncLimitRefreshButton(button);
-    // Both hosts repaint their rows on a timer and on every stats push, so a
-    // click-only button loses a press whose release lands after the repaint.
-    // The row's own click handler already ignores clicks on buttons.
+    // The row's own click handler ignores clicks on buttons.
     pressActivation.activateOnPress(button, () => {
+      const provider = domApi.data(button);
       const key = motion.providerKey(provider);
       // The spinner is the row's state, not the request's: a click while it
       // still shows (a refresh in flight, or one just settled) does nothing.
@@ -2578,12 +2577,14 @@
         else hoverTimer = setTimeout(() => openHistory(false), 160);
       });
       if (id === 'mimo') {
-        const detail = row.querySelector('[data-usage-item="credits"] .limit-detail-tooltip-wrap');
-        detail?.addEventListener('pointerenter', () => clearTimeout(hoverTimer));
-        detail?.addEventListener('pointerleave', () => {
-          if (settings()?.limitsHistoryOpenMode !== 'click' && row.matches(':hover')) {
-            hoverTimer = setTimeout(() => openHistory(false), 160);
-          }
+        // Delegate to the retained row: a balance disclosure can appear later.
+        row.addEventListener('pointerover', event => {
+          if (event.target.closest('[data-usage-item="credits"] .limit-detail-tooltip-wrap')) clearTimeout(hoverTimer);
+        });
+        row.addEventListener('pointerout', event => {
+          const detail = event.target.closest('[data-usage-item="credits"] .limit-detail-tooltip-wrap');
+          if (!detail || detail.contains(event.relatedTarget)) return;
+          if (settings()?.limitsHistoryOpenMode !== 'click' && row.matches(':hover')) hoverTimer = setTimeout(() => openHistory(false), 160);
         });
       }
       row.addEventListener('pointerleave', () => { clearTimeout(hoverTimer); deps.history.leave(key); });

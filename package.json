@@ -1,7 +1,7 @@
 {
   "name": "token-monitor",
   "productName": "Token Monitor",
-  "version": "0.91.0",
+  "version": "0.93.1",
   "description": "Live token & cost widget for Claude Code, Codex & Hermes — local-first, optional multi-device sync.",
   "main": "src/electron/launch.js",
   "scripts": {
@@ -34,8 +34,9 @@
     "verify:release-artifact-names": "node scripts/verify-updater-artifact-names.js dist",
     "benchmark:hub-bandwidth": "node scripts/benchmark-hub-bandwidth.js",
     "lint": "eslint .",
-    "verify": "npm run lint && npm test",
-    "verify:plugins": "electron scripts/test-plugin-trusted.cjs && electron scripts/test-plugin-trusted-runtime.cjs && electron scripts/test-plugin-trusted-app.cjs && electron scripts/test-plugin-trusted-surfaces.cjs"
+    "verify": "npm run lint && npm run typecheck && npm test",
+    "verify:plugins": "electron scripts/test-plugin-icons.cjs && electron scripts/test-plugin-trusted.cjs && electron scripts/test-plugin-trusted-runtime.cjs && electron scripts/test-plugin-trusted-app.cjs && electron scripts/test-plugin-trusted-surfaces.cjs",
+    "typecheck": "tsc --project tsconfig.json"
   },
   "build": {
     "beforePack": "scripts/build-windows-dock.js",
@@ -169,7 +170,7 @@
     "koffi": "^3.3.5",
     "markdown-it": "^15.0.3",
     "semver": "^7.8.5",
-    "tokscale": "^4.21.0",
+    "tokscale": "^4.23.0",
     "undici": "^7.30.2"
   },
   "devDependencies": {
@@ -182,7 +183,8 @@
     "electron-builder": "26.18.1",
     "eslint": "^10.13.0",
     "espree": "^11.2.0",
-    "globals": "^17.13.0"
+    "globals": "^17.13.0",
+    "typescript": "^7.0.2"
   },
   "engines": {
     "node": ">=22.15.0"

@@ -1,8 +1,9 @@
+// @ts-check
 'use strict';
 
 // Claude limits account wiring. Leaf module: no requires — see
 // src/shared/limits/accounts.js for the field schema.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'claude',
   fetch: 'fetchClaudeAccountsLimits',
   accountRefresh: true,
@@ -82,4 +83,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['claude.ai'], pathPrefixes: ['/settings'] }
   ]
-};
+});

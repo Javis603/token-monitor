@@ -1,6 +1,7 @@
+// @ts-check
 'use strict';
 
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'stepfun',
   fetch: 'fetchStepfunLimits',
   fields: [{
@@ -36,4 +37,4 @@ module.exports = {
     url: 'https://platform.stepfun.com/plan-usage'
   },
   urlPolicy: [{ hosts: ['platform.stepfun.com'], exactPaths: ['/plan-usage'] }]
-};
+});

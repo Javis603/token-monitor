@@ -31,6 +31,11 @@ app.whenReady().then(async () => {
     const states=Object.fromEntries(refs.map((ref,i)=>[ref,{title:titles[i],icon:['cpu','draw','chart'][i]}]));
     const catalog={plugins:[{id:'demo',name:'Demo',status:'active',views:refs.map((ref,i)=>({ref,title:titles[i],icon:'cpu',surfaces:['notch'],placements:{notch:true}}))}]};
     let settings=await orderBridge.read(),drag;
+    // Same bridge surface the Notch preload exposes. This fixture renders no
+    // author content, so the backend/host routes stay explicitly inert.
+    window.tokenMonitorTrustedPlugins={uiLoading(){},onLifecycle(){return()=>{}},contentSelections:async()=>({}),selectContent:async()=>({}),
+      call:async()=>{throw Error('Fixture has no plugin backend')},host:async()=>{throw Error('Fixture has no plugin host backend')},
+      views:async()=>({views:{}}),subscribe(){return()=>{}},subscribeData:async()=> 'fixture-subscription',unsubscribeData:async()=>true,onData(){return()=>{}}};
     const host=TokenMonitorPluginViews.createPluginViewHost({document,window});host.update({surface:'notch',views:Object.fromEntries(refs.map(r=>[r,{...states[r],status:'active'}]))});
     const shared={pluginHost:host,markNode:()=>el('span'),hasMask:()=>false,providerLabel:x=>x,limitProviderColor:()=>'',formatTokens:String,formatCardTokens:String,formatBreakdownTokens:String,usageCostNode:()=>el('span'),formatRate:v=>TokenMonitorCompactTokens.formatCompactTokens(v,'western','en',{style:'tray'}),appearance:()=>({}),prefersReducedMotion:()=>true,limitAccountTitle:()=>'',overflowText:{stop(){},preserveReading(){},refresh(){}},limitWindowsView:{},ensureRefreshButton:()=>el('button')};
     const panel=TokenMonitorNotchPanel.createNotchPanel({document,window,el,t:key=>TokenMonitorI18n.translate('zh-TW',key),state:{locale:'zh-TW'},bridge:{},shared});document.getElementById('panel').append(panel.node);

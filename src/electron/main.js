@@ -5,6 +5,7 @@ const crypto = require('node:crypto');
 const os = require('node:os');
 const path = require('node:path');
 const { contentSecurityPolicyForRequest } = require('./contentSecurityPolicy');
+const { initializeHubProfiles, hubProfilesForRenderer, prepareHubProfilePatch } = require('./hubProfiles');
 const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences } = require('electron');
 
 // All of the app's pages are the same local bundle, and every window Chromium
@@ -154,7 +155,7 @@ const {
   antigravitySyncLockPath,
   repairAntigravitySyncLock
 } = require('../shared/providers/antigravity/selfSync');
-const { deviceRecordFromAnchor } = require('../shared/anchorSeed');
+const { deviceRecordFromAnchor, seedWithColdPreview } = require('../shared/anchorSeed');
 const { sendWhenRendererReady } = require('./deferredWindowSend');
 const { actionWindowForEvent, activateWindowAction, handoffWindow, showWindow } = require('./windowLifecycle');
 const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
@@ -202,7 +203,11 @@ const {
   redactThirdPartyProfilesForRenderer,
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
+const { createAccountSlotService, invalidateAccountSlotChange } = require('./limits/accountSlotService');
+let accountSlotService;
 const { createCredentialCommands } = require('./limits/credentialCommands');
+const { createCopilotAccounts } = require('./providers/copilot/accounts');
+const copilotLimits = require('../shared/providers/copilot/limits');
 const { createMinimaxApiKeys } = require('./providers/minimax/apiKeys');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
@@ -523,7 +528,7 @@ const {
   normalizeWindowsBackdropMode,
   normalizeWindowsDockBackdropMode
 } = require('./windowsBackdropMode');
-const { syncWindowsBackdrop, windowsBackdropFallback } = require('./windowsBackdrop');
+const { refreshWindowsBackdrop, syncWindowsBackdrop, windowsBackdropFallback } = require('./windowsBackdrop');
 const {
   isLiquidGlassBackdrop,
   liquidGlassStyle,
@@ -640,6 +645,8 @@ function defaultSettings() {
   return {
     hubMode: envHubUrl ? 'client' : 'local',
     hubUrl: envHubUrl,
+    hubProfiles: [],
+    activeHubProfileId: '',
     hubHostPort: Math.max(1, Math.min(65535, Number(process.env.TOKEN_MONITOR_PORT) || HUB_DEFAULT_PORT)),
     // Default to TOKEN_MONITOR_SECRET so agents that already trust this env
     // value (matching what the CLI hub uses) can connect to the widget's
@@ -748,6 +755,7 @@ function defaultSettings() {
     codexDotsVisible: true,
     customScanPaths: {},
     clientDisplayOrder: '',
+    separateQoderClients: false,
     hiddenClients: '',
     pinnedClients: '',
     viewDisplayOrder: '',
@@ -1075,6 +1083,7 @@ function electronLimitsDeps() {
         json: () => result.json()
       };
     },
+    onAccountSlotResolved: (...args) => { void accountSlotService?.resolved(...args).catch(() => {}); },
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
     onClaudeWebAccountResolved: (observation) => claudeAccountService().resolved(observation),
@@ -2730,7 +2739,9 @@ function readSettings() {
     const storedCredentials = loadCredentialSettings(saved);
     if (!saved.secret && defaults.secret) delete saved.secret;
     const merged = { ...defaults, ...saved, ...storedCredentials };
+    Object.assign(merged, initializeHubProfiles(merged));
     merged.clients = clientsCsvForSetting(merged.clients);
+    merged.separateQoderClients = parseBoolean(merged.separateQoderClients, false);
     // A client identity split (see clientIdentitySplits.js) is not a new tool:
     // the user tracking its parent was already counting it, so the split has to
     // be seeded or their usage drops. `seededClientSplits` makes that a one-time
@@ -3064,7 +3075,11 @@ function updateArchivedClientUsage(previousClients, nextClients) {
   const removedClients = removedTrackedClients(previousClients, nextClients);
   let archive = pruneArchivedClientUsage(settings.archivedClientUsage, nextClients);
   if (removedClients.length > 0) {
-    archive = captureArchivedClientUsage(archive, localArchiveSourceDevice(), removedClients);
+    // Before this run's first complete record, localDevice may be a first-scan
+    // preview whose unscanned windows would archive as zero. Only the seed, or
+    // nothing, stands for the client then.
+    const source = mode === 'local' && !lastCollectedDevice ? anchorSeedDevice : localArchiveSourceDevice();
+    archive = captureArchivedClientUsage(archive, source, removedClients);
   }
   settings.archivedClientUsage = archive;
 }
@@ -3266,6 +3281,9 @@ const usageRuntimeReconciler = createLatestWinsReconciler({
 });
 let localDevice = null;
 let localStats = null;
+// The cold-start seed as projected, kept until this run's first complete record
+// so each preview of the first scan is laid over it rather than over the last.
+let anchorSeedDevice = null;
 let sseAbortController = null;
 let sseRetryTimer = null;
 let streamConnected = false;
@@ -3273,6 +3291,8 @@ let streamFailure = null;
 let lastCollectedDevice = null;
 let latestHubStats = null;
 let latestHubStatsReceivedAt = null;
+// Matches the renderer's connected-stream fallback interval.
+const HUB_STREAM_CACHE_FRESH_MS = 5 * 60 * 1000;
 let latestHubStatsSource = 'none';
 let latestHubStatsGeneration = null;
 let latestHubStatsIdentity = null;
@@ -5415,6 +5435,7 @@ function stopLocalCollector(options = {}) {
   if (limitProbes.length) publishLimitProbes([]);
   localDevice = null;
   localStats = null;
+  anchorSeedDevice = null;
 }
 
 // Show the last full scan's totals while the first one of this run is still
@@ -5435,6 +5456,8 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
       customScanPaths: usageOptions.customScanPaths,
       wslScanEnabled: usageOptions.wslScanEnabled,
       wslSupported: process.platform === 'win32',
+      historyEnabled: usageOptions.historyEnabled,
+      dailyHistoryArchiveEnabled: usageOptions.dailyHistoryArchiveEnabled,
       hostname: os.hostname(),
       platform: `${process.platform}-${process.arch}`
     }
@@ -5456,6 +5479,7 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
     sendStatus(false, { reason: `session-archive:${error.message}` });
     return;
   }
+  anchorSeedDevice = visible;
   localDevice = visible;
   localStats = withHistoryPreview(aggregateDevices([visible], 0), [visible]);
   // Through the normal publisher, not straight to the renderer: the tray reads
@@ -5469,6 +5493,21 @@ function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
     event: 'stats',
     data: { type: 'stats', reason: 'anchor', stats: localStats, at: deviceRecord.receivedAt }
   }, { skipExport: true, deferToRenderer: true, widgetProducerOwner });
+}
+
+// The first scan holds its record back until all-time is in, which on a long
+// history is minutes after Today was ready. Show each window as it lands, over
+// the seed's last known values when there is one. Display only: nothing here is
+// exported, because a record missing windows reads as zero wherever it lands.
+function publishColdPreview(preview, reason, widgetProducerOwner) {
+  if (lastCollectedDevice) return;
+  const device = seedWithColdPreview(anchorSeedDevice || preview, preview);
+  localDevice = device;
+  localStats = withHistoryPreview(aggregateDevices([device], 0), [device]);
+  sendPush({
+    event: 'stats',
+    data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() }
+  }, { skipExport: true, widgetProducerOwner });
 }
 
 function startLocalCollector() {
@@ -5488,7 +5527,9 @@ function startLocalCollector() {
     usageOptions,
     progressive: true,
     onSessionActivity: publishLocalSessionActivity,
+    onColdPreview: (preview, meta) => publishColdPreview(preview, meta.reason, widgetProducerOwner),
     onRecord: (summary, meta) => {
+      anchorSeedDevice = null;
       seedInitialLimitProviders(summary);
       const reason = meta.reason;
       const visibleSummary = summary;
@@ -5542,7 +5583,21 @@ async function startStatsStream(options = {}) {
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats/stream`;
   const controller = new AbortController();
   sseAbortController = controller;
+  let activityTimer = null;
+  let timedOut = false;
+  // Hubs send a heartbeat every 30s. Bound both opening the request and waiting
+  // for bytes, since a half-open connection may never report an error or EOF.
+  function armActivityTimeout(delayMs) {
+    clearTimeout(activityTimer);
+    activityTimer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, delayMs);
+    activityTimer.unref?.();
+  }
+  controller.signal.addEventListener('abort', () => clearTimeout(activityTimer), { once: true });
   try {
+    armActivityTimeout(15_000);
     const response = await fetch(url, {
       headers: {
         accept: 'text/event-stream',
@@ -5551,22 +5606,27 @@ async function startStatsStream(options = {}) {
       },
       signal: controller.signal
     });
-    if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+    if (controller !== sseAbortController || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+    controller.signal.throwIfAborted();
     if (!response.ok || !response.body) {
       sendStatus(false, classifyStreamFailure({ status: response.status }));
       scheduleStreamRetry();
       return;
     }
+    armActivityTimeout(90_000);
     sendStatus(true);
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     const blocks = createSseBlockReader();
     const streamSnapshot = createStatsStreamReceiver();
     for (;;) {
-      if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+      if (controller !== sseAbortController || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
       const { value, done } = await reader.read();
-      if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+      if (controller !== sseAbortController || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+      controller.signal.throwIfAborted();
       if (done) break;
+      // Count comments and partial frames too: large snapshots may span reads.
+      if (value.byteLength) armActivityTimeout(90_000);
       for (const block of blocks.push(decoder.decode(value, { stream: true }))) {
         const parsed = parseSseBlock(block);
         if (parsed) {
@@ -5584,14 +5644,17 @@ async function startStatsStream(options = {}) {
         }
       }
     }
-    if (!hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+    if (controller !== sseAbortController || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
     sendStatus(false, classifyStreamFailure({ eof: true }));
     scheduleStreamRetry();
   } catch (error) {
-    if (controller.signal.aborted || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
-    controller.abort();
-    sendStatus(false, classifyStreamFailure({ errorCode: error?.cause?.code || error?.code, message: error?.message }));
+    if ((controller.signal.aborted && !timedOut) || controller !== sseAbortController
+      || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+    sendStatus(false, classifyStreamFailure({ errorCode: timedOut ? 'ETIMEDOUT' : error?.cause?.code || error?.code, message: error?.message }));
     scheduleStreamRetry();
+  } finally {
+    clearTimeout(activityTimer);
+    controller.abort();
   }
 }
 
@@ -5744,6 +5807,12 @@ function thirdPartyProfileWithCanonicalIdentity(profile, provider) {
   });
 }
 
+function thirdPartySaveErrorCode(error) {
+  if (error?.code === 'ACCESS_TOKEN_LEGACY_RETIRED') return 'newApiLegacyTokenRetired';
+  if (error?.code === 'ACCESS_TOKEN_SCOPE_DENIED') return 'newApiScopeDenied';
+  return error?.status === 'unauthorized' ? 'invalidCredential' : 'unavailable';
+}
+
 // The command carries identity only. Resolve at commit time, after any IPC
 // awaits, and persist the host-declared palette and finite tokens together.
 function preparePluginSkinSettings(patch, current, runtime) {
@@ -5793,6 +5862,7 @@ function settingsForRenderer() {
     locale: trayMenuLocale(),
     deviceIconScope: currentHubIdentity() || 'local',
     ...redactedCredentials,
+    hubProfiles: hubProfilesForRenderer(settings),
     // On a hub the shared list is the truth; settings.subscriptions is only the
     // last-known cache behind it.
     subscriptions: effectiveSubscriptions(),
@@ -7227,6 +7297,15 @@ async function fetchStats(options = {}) {
   }
   const { url: hubUrl, secret } = effectiveHubConfig();
   if (!hubUrl) return withHistoryPreview(aggregateDevices([], 0), []);
+  // A connected stream keeps this cache current. The renderer's periodic
+  // fallback only needs a full download once stream data has gone quiet. Other
+  // reads, such as deletion eligibility checks, always read the Hub.
+  if (options?.streamCache === true && streamConnected) {
+    const cached = currentHubStatsCache();
+    if (cached && Date.now() - Date.parse(latestHubStatsReceivedAt) < HUB_STREAM_CACHE_FRESH_MS) {
+      return injectLocalDeviceStatus(composeLocalSyncSummary(cached, lastCollectedDevice));
+    }
+  }
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
   const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
   if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
@@ -7817,7 +7896,9 @@ function createWindow(boundsOverride, options = {}) {
     }
   };
   const win = process.platform === 'win32'
-    ? createRetainedWindow({ BaseWindow, WebContentsView }, windowOptions, options.previousWindow)
+    ? createRetainedWindow({ BaseWindow, WebContentsView }, windowOptions, options.previousWindow, {
+      beforeReveal: refreshWindowsBackdrop
+    })
     : new BrowserWindow(windowOptions);
   mainWindow = win;
   mainWindowChrome = { collapsedFloatingBubble };
@@ -8312,6 +8393,28 @@ app.whenReady().then(() => {
     applySettingsPatch: applyCredentialSettingsPatch,
     probeDeps: credentialProbeDeps
   });
+  accountSlotService = createAccountSlotService({
+    getSettings: () => settings,
+    write: (patch) => {
+      settings = { ...settings, ...patch };
+      saveSettings({ throwOnError: true });
+    },
+    probeDeps: credentialProbeDeps,
+    onChanged: (provider, change) => {
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      // A rename or reorder is re-projected by the reconfigure above; asking the
+      // provider again would only spend its rate limit.
+      if (change?.refresh === false) return;
+      if (deviceRuntimeHandle) return invalidateAccountSlotChange(deviceRuntimeHandle, provider, change);
+      // No runtime yet: the retired accounts are cleared once one starts.
+      for (const accountKey of change?.retiredAccountKeys || []) {
+        void queueLimitInvalidation({ provider, accountKey }, 'settings-change', { clear: true, refresh: false });
+      }
+    }
+  });
+  for (const operation of ['list', 'add', 'replace', 'rename', 'setEnabled', 'remove', 'move']) {
+    ipcMain.handle(`limits:accountSlots:${operation}`, (_event, ...args) => accountSlotService[operation](...args));
+  }
   // Resolves only once a worker-hosted transform runs with the saved settings:
   // pausing the session archive must not be reported done while the worker can
   // still capture under the old value.
@@ -8351,6 +8454,7 @@ app.whenReady().then(() => {
   // The settings:update body, named so a credential save persists through the
   // exact same normalization, runtime reconfigure and limit invalidation.
   function applySettingsPatch(patch, onDotsVisibilityRefresh = () => {}, limitContext = {}) {
+    patch = prepareHubProfilePatch(settings, patch);
     const skinSelection = preparePluginSkinSettings(patch, settings, pluginRuntime);
     patch = skinSelection.patch;
     const contentRuntime = getSyncContentRuntime();
@@ -8543,6 +8647,7 @@ app.whenReady().then(() => {
       limitProviders: patch.limitProviders !== undefined ? migrateLimitProviders(patch.limitProviders) : settings.limitProviders,
       limitProviderOrder: patch.limitProviderOrder !== undefined ? migrateLimitProviderOrder(patch.limitProviderOrder) : settings.limitProviderOrder,
       clientDisplayOrder: patch.clientDisplayOrder !== undefined ? migrateClientDisplayOrder(patch.clientDisplayOrder) : (settings.clientDisplayOrder || ''),
+      separateQoderClients: parseBoolean(patch.separateQoderClients ?? settings.separateQoderClients, false),
       hiddenClients: patch.hiddenClients !== undefined ? migrateClientSelection(patch.hiddenClients, normalizeHiddenClients) : migrateClientSelection(settings.hiddenClients, normalizeHiddenClients),
       pinnedClients: patch.pinnedClients !== undefined ? migrateClientSelection(patch.pinnedClients, normalizePinnedClients) : migrateClientSelection(settings.pinnedClients, normalizePinnedClients),
       viewDisplayOrder: patch.viewDisplayOrder !== undefined ? migrateViewDisplayOrder(patch.viewDisplayOrder) : (settings.viewDisplayOrder || ''),
@@ -9785,10 +9890,15 @@ app.whenReady().then(() => {
       enabled: true
     });
     if (!profile) return { ok: false, errorCode: 'invalidCredential' };
+    let enrichmentAccessTokenError = null;
     try {
       const provider = await thirdPartyLimits.fetchThirdPartyAccount({ name, ...profile }, electronProviderDeps({
         env: process.env,
-        signal: AbortSignal.timeout(15_000)
+        signal: AbortSignal.timeout(15_000),
+        surfaceAccessTokenErrors: true,
+        onEnrichmentAccessTokenError: (error) => {
+          enrichmentAccessTokenError ||= error;
+        }
       }));
       if (provider?.status !== 'ok') {
         return {
@@ -9803,9 +9913,14 @@ app.whenReady().then(() => {
       };
       saveSettings({ throwOnError: true });
       void queueLimitInvalidation({ provider: 'thirdparty', accountName: name }, 'profile-save');
-      return { ok: true };
-    } catch (_) {
-      return { ok: false, errorCode: 'unavailable' };
+      return {
+        ok: true,
+        ...(enrichmentAccessTokenError?.code === 'ACCESS_TOKEN_SCOPE_DENIED'
+          ? { warning: 'newApiMissingUsageScope' }
+          : {})
+      };
+    } catch (error) {
+      return { ok: false, errorCode: thirdPartySaveErrorCode(error) };
     }
   });
   ipcMain.handle('thirdparty:deleteProfile', async (_event, rawName) => {
@@ -9956,6 +10071,38 @@ app.whenReady().then(() => {
   ipcMain.handle('codex:removeAccount', async (_event, id) => removeCodexManagedAccount(id));
   ipcMain.handle('codex:switchSystemAccount', async (_event, id) => switchCodexSystemAccount(id));
   ipcMain.handle('codex:refreshAccountLimits', async (_event, id) => refreshCodexManagedAccountLimits(id));
+  const copilotAccounts = createCopilotAccounts({
+    getSettings: () => settings, saveSettings,
+    probeDeps: () => electronProviderDeps({ env: {}, signal: AbortSignal.timeout(15_000) }),
+    changed: (accountKey, refresh) => {
+      if (!accountKey) {
+        const knownKeys = new Set(Object.values(copilotLimits.copilotProfiles(settings)).map(account => account.accountKey).filter(Boolean));
+        const legacyRows = (deviceRuntimeHandle?.getSnapshot()?.limits?.providers || [])
+          .filter(row => row.provider === 'copilot' && row.accountKey && !knownKeys.has(row.accountKey));
+        if (legacyRows.length === 1) accountKey = legacyRows[0].accountKey;
+      }
+      const resolved = Object.values(copilotLimits.copilotProfiles(settings)).find(account => account.accountKey === accountKey);
+      if (resolved) {
+        const fallbackKey = copilotLimits.copilotAccountKey(resolved.token, resolved.enterpriseHost);
+        const provisional = (deviceRuntimeHandle?.getSnapshot()?.limits?.providers || [])
+          .some(row => row.provider === 'copilot' && row.accountKey === fallbackKey);
+        if (provisional && fallbackKey !== accountKey) {
+          void queueLimitInvalidation({ provider: 'copilot', accountKey: fallbackKey }, 'identity-resolved', { clear: true, refresh: false });
+        }
+      }
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      pushSettingsToRenderer();
+      const scope = accountKey ? { provider: 'copilot', accountKey } : { provider: 'copilot' };
+      void queueLimitInvalidation(scope, 'account-change', { clear: Boolean(accountKey), refresh });
+    }
+  });
+  ipcMain.handle('copilot:getAccounts', () => copilotAccounts.getAccounts());
+  for (const method of ['addAccount', 'removeAccount', 'setEnabled']) {
+    ipcMain.handle(`copilot:${method}`, async (_event, ...args) => {
+      try { return await copilotAccounts[method](...args); }
+      catch (_) { return { ok: false, error: 'Could not update GitHub Copilot account. Please try again.' }; }
+    });
+  }
   ipcMain.handle('copilot:signIn', async (event, request = {}) => {
     if (copilotLoginController) return { ok: false, error: 'A GitHub Copilot sign-in is already in progress.', flowId: copilotLoginFlowId };
     const controller = new AbortController();
@@ -9967,8 +10114,9 @@ app.whenReady().then(() => {
       if (!event.sender.isDestroyed()) event.sender.send('copilot:loginStatus', { ...payload, flowId });
     };
     try {
+      const enterpriseHost = settings?.copilotEnterpriseHost || process.env.COPILOT_ENTERPRISE_HOST || process.env.GITHUB_ENTERPRISE_HOST || '';
       const result = await runCopilotDeviceFlowLogin({
-        enterpriseHost: settings?.copilotEnterpriseHost || process.env.COPILOT_ENTERPRISE_HOST || process.env.GITHUB_ENTERPRISE_HOST || '',
+        enterpriseHost,
         signal: controller.signal,
         onStatus: sendStatus
       }, {
@@ -9979,10 +10127,7 @@ app.whenReady().then(() => {
       if (copilotLoginController !== controller) {
         return { ok: false, error: copilotLoginErrorMessage({ status: 'cancelled' }), flowId };
       }
-      settings.copilotApiToken = normalizeAccountField('copilotApiToken', result.accessToken);
-      saveSettings({ throwOnError: true });
-      pushSettingsToRenderer();
-      void queueLimitInvalidation({ provider: 'copilot' }, 'login', { clear: true });
+      await copilotAccounts.addAccount(result.accessToken, () => copilotLoginController === controller && !controller.signal.aborted, controller.signal, enterpriseHost);
       return { ok: true, flowId };
     } catch (error) {
       const message = copilotLoginErrorMessage(error);

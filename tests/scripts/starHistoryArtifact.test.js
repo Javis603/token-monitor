@@ -30,11 +30,11 @@ const snapshot = () => ({
   ],
 });
 
-const svg = ({ extra = '' } = {}) => `<svg xmlns="http://www.w3.org/2000/svg">
+const svg = ({ extra = '', logo = 'data:image/png;base64,QUJD' } = {}) => `<svg xmlns="http://www.w3.org/2000/svg">
   <text>Star History</text>
   <text>GitHub Stars</text>
   <text>${REPOSITORY}</text>
-  <image width="22" height="22" x="316" y="12" clip-path="url(#clip-circle-title)" href="data:image/png;base64,QUJD"/>
+  <image width="22" height="22" x="316" y="12" clip-path="url(#clip-circle-title)" href="${logo}"/>
   ${extra}
 </svg>\n`;
 
@@ -55,6 +55,31 @@ const validate = (directory) => validateArtifact(directory, {
 test('accepts the exact generated file set and cumulative snapshot', () => {
   const directory = fixture();
   assert.deepEqual(validate(directory), { starCount: 2 });
+});
+
+test('accepts embedded JPEG owner avatars in both chart themes', () => {
+  const jpeg = svg({ logo: 'data:image/jpeg;base64,/9j/2Q==' });
+  assert.deepEqual(validate(fixture({ light: jpeg, dark: jpeg })), { starCount: 2 });
+});
+
+test('rejects remote, active and malformed owner avatar resources', () => {
+  for (const logo of [
+    'https://example.com/avatar.jpeg',
+    'data:image/svg+xml;base64,PHN2Zz4=',
+    'data:text/html;base64,PHNjcmlwdD4=',
+    'data:image/webp;base64,QUJD',
+    'data:image/jpeg;base64,',
+    'data:image/jpeg;base64,/9j/ 2Q==',
+    'data:image/jpeg;anything;base64,/9j/2Q==',
+  ]) {
+    for (const theme of ['light', 'dark']) {
+      assert.throws(
+        () => validate(fixture({ [theme]: svg({ logo }) })),
+        /disallowed linked resource/,
+        `${theme}: ${logo}`,
+      );
+    }
+  }
 });
 
 test('rejects extra files before publication', () => {

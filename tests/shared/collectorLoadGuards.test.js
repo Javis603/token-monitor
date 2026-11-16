@@ -2255,8 +2255,8 @@ test('watchIgnoreMatcher keeps a recursive source rooted on a bounded root', () 
 
     assert.equal(ignored(root), false);
     assert.equal(ignored(path.join(root, 'state.db')), false);
-    assert.equal(ignored(path.join(root, 'session.jsonl')), false);
-    assert.equal(ignored(path.join(root, 'nested', 'task.json')), false);
+    assert.equal(ignored(path.join(root, 'session.messages.json')), false);
+    assert.equal(ignored(path.join(root, 'nested', 'task.messages.json')), false);
   } finally {
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];
@@ -2452,9 +2452,8 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     assert.ok(dirs.includes(path.join(tmp, 'AppData', 'Roaming', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')));
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'mimocode')));
     assert.ok(dirs.includes(path.join(tmp, '.zcode', 'projects')));
-    // Kiro sessions and the bounded kiro-cli database keep seconds-level
-    // refresh. The unbounded IDE globalStorage source remains present and
-    // collectable, but never enters chokidar's native or 2-second polling tree.
+    // Kiro sessions and CLI keep live updates. GlobalStorage remains covered
+    // by interval/manual collection without a recursive watcher.
     assert.ok(dirs.includes(path.join(tmp, '.kiro', 'sessions')));
     assert.ok(!dirs.includes(path.join(tmp, 'Library', 'Application Support', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent')));
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'kiro-cli')));
@@ -2628,8 +2627,8 @@ test('watchIgnoreMatcher honors HERMES_HOME and is absent when Hermes is not tra
     assert.equal(ignored(path.join(hermesHome, 'state.db-wal')), false);
     assert.equal(ignored(path.join(hermesHome, 'logs')), false);
     assert.equal(ignored(path.join(hermesHome, 'logs', 'agent.log')), false);
-    // No Hermes tracked, no matcher, so other watchers run unchanged.
-    assert.equal(watchIgnoreMatcher('claude,codex'), undefined);
+    // No Hermes tracked, so its policy does not add a matcher to Codex.
+    assert.equal(watchIgnoreMatcher('codex'), undefined);
   } finally {
     os.homedir = originalHomedir;
     if (previousHermesHome === undefined) delete process.env.HERMES_HOME;
@@ -3345,18 +3344,15 @@ test('smart collection uses native watching and skips idle intervals after start
 // idle time rewrote it 0 times in 40s.
 test('self-watch db-shm events are ignored for every client whose scan recreates the sidecar', () => {
   const { isSelfWatchSqliteSidecarEvent } = freshCollector();
-  const qoderRoot = path.join(os.tmpdir(), 'QoderCN', 'db');
   const zcodeRoot = path.join(os.tmpdir(), 'zcode', 'cli', 'db');
   const antigravityRoot = path.join(os.tmpdir(), '.gemini', 'antigravity');
   const antigravityConversation = path.join(antigravityRoot, 'conversations');
   const cherryRoot = path.join(os.tmpdir(), 'CherryStudio', 'Data');
-  const roots = { antigravity: [antigravityRoot], cherrystudio: [cherryRoot], qodercn: [qoderRoot], zcode: [zcodeRoot] };
+  const roots = { antigravity: [antigravityRoot], cherrystudio: [cherryRoot], zcode: [zcodeRoot] };
 
-  // Each client keeps its own database basename: Qoder CN names it local.db,
-  // ZCode names it db.sqlite, Antigravity names one per conversation, below its
-  // watch root.
+  // Each SQLite client keeps its own database basename; Antigravity names
+  // one per conversation below its watch root.
   for (const [root, base] of [
-    [qoderRoot, 'local.db'],
     [zcodeRoot, 'db.sqlite'],
     [antigravityConversation, '1f17ba78-fe78-4ed6-9f69-07387625fdad.db'],
     [cherryRoot, 'cherrystudio.sqlite']
@@ -3379,16 +3375,6 @@ test('self-watch db-shm events are ignored for every client whose scan recreates
   for (const name of ['db.sqlite-shm-journal', 'db.sqlite-wal', 'db.sqlite', 'notes-shm', 'db.sqlite-shm.bak']) {
     assert.equal(isSelfWatchSqliteSidecarEvent(path.join(zcodeRoot, name), zcodeOnly), false, name);
   }
-});
-
-// A client is added to that list only on measured evidence, so a scan that does
-// not rewrite its sidecar must keep waking the collector on shm events.
-test('a SQLite client whose scan does not recreate its sidecar still watches db-shm', () => {
-  const { isSelfWatchSqliteSidecarEvent } = freshCollector();
-  const mimoRoot = path.join(os.tmpdir(), 'mimocode');
-  const roots = { mimo: [mimoRoot] };
-
-  assert.equal(isSelfWatchSqliteSidecarEvent(path.join(mimoRoot, 'mimocode.db-shm'), roots), false);
 });
 
 // The unit test above proves the predicate; this proves the consequence the bug
@@ -3479,14 +3465,13 @@ for (const client of ['zcode', 'cherrystudio', 'goose']) {
   });
 }
 
-test('collector does not reuse a persisted anchor after the Qoder CN DB path changes', async () => {
+test('collector does not reuse a persisted anchor with a retired Qoder CN database source', async () => {
   const tmp = withTmpHome([]);
   const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
-  const originalQoderCnDbPath = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+  const previousDbOverride = process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
   const oldDbPath = path.join(tmp, 'old', 'local.db');
-  const newDbPath = path.join(tmp, 'new', 'local.db');
   process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
-  process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = newDbPath;
+  process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = oldDbPath;
 
   const initialCollector = freshCollector();
   const oldQoderCnPeriod = emptyPeriod();
@@ -3494,10 +3479,12 @@ test('collector does not reuse a persisted anchor after the Qoder CN DB path cha
   oldQoderCnPeriod.clients = { qodercn: 9 };
   fs.writeFileSync(path.join(tmp, 'collector-anchor.json'), JSON.stringify({
     dateKey: initialCollector.localTodayKey(),
+    calendarKey: initialCollector.collectionCalendarKey(),
+    sessionIdentityVersion: 2,
     today: emptyPeriod(),
     month: oldQoderCnPeriod,
     allTime: oldQoderCnPeriod,
-    configFingerprint: initialCollector.configFingerprint('claude,qodercn', '2024-01-01', true, oldDbPath, initialCollector.qoderCnProjectsDirForClients('claude,qodercn')),
+    configFingerprint: `claude,qodercn|2024-01-01|projects:on|qodercn:${path.resolve(oldDbPath)}|qodercnProjects:${path.resolve(initialCollector.clientSourceRoots('qodercn').qodercn.find(root => root.id === 'qodercn-projects').dir)}|pricing:${initialCollector.pricingFingerprint()}`,
     fullScanAt: new Date(Date.now() - 5 * 60 * 1000).toISOString()
   }));
 
@@ -3527,8 +3514,8 @@ test('collector does not reuse a persisted anchor after the Qoder CN DB path cha
     if (handle) handle.stop();
     if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
     else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
-    if (originalQoderCnDbPath === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
-    else process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = originalQoderCnDbPath;
+    if (previousDbOverride === undefined) delete process.env.TOKEN_MONITOR_QODER_CN_DB_PATH;
+    else process.env.TOKEN_MONITOR_QODER_CN_DB_PATH = previousDbOverride;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }

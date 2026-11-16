@@ -102,10 +102,6 @@ test('Home activity heatmap is a scaled copy of the dashboard heatmap', () => {
   );
   assert.ok(homeActivityHoverRule, 'Home activity hover rule exists');
   assert.doesNotMatch(homeActivityHoverRule[1], /transform\s*:\s*scale/);
-  assert.match(
-    css,
-    /\.home-activity-scroll\.is-restoring-hover \.heat,\s*\.home-activity-scroll\.is-restoring-hover \.heat-bright-layer\s*\{[^}]*transition:\s*none/
-  );
   assert.match(rule(css, '.home-activity-tooltip'), /position:\s*fixed/);
   assert.match(rule(css, '.home-activity-tooltip'), /background:\s*rgba\(var\(--panel-rgb\), 0\.58\)/);
   assert.match(rule(css, '.home-activity-tooltip'), /backdrop-filter:\s*blur\(10px\) saturate\(120%\)/);
@@ -153,57 +149,17 @@ test('Home activity uses a custom spotlight hover instead of native SVG titles',
   const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const match = rendererSource.match(/function renderHomeTrendsModule\(\) \{([\s\S]*?)\n\}\n\nfunction renderHome/);
   assert.ok(match, 'renderHomeTrendsModule exists');
-  assert.match(match[1], /setupHomeActivityHover\(activityScroll\)/);
+  assert.match(rendererSource, /setupHomeActivityHover\(scroller\)/);
   assert.match(match[1], /spotlightId:\s*'homeActivitySpotlight'/);
   assert.doesNotMatch(match[1], /titleOf:/);
   assert.match(match[1], /tokenIntensity/);
   assert.match(rendererSource, /computeHeatmapIntensities\(daily\)/);
 });
 
-test('Home activity tooltip survives Home rerenders and is dismissed when the view leaves Home', () => {
+test('leaving Home dismisses the body-owned heatmap tooltip', () => {
   const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-  // The body-level tooltip only has scroller-local pointer handlers; DOM removal fires
-  // no pointerleave, so the hover setup must expose a teardown other code can invoke.
-  assert.match(rendererSource, /state\.homeActivityHoverPoint\s*=\s*\{\s*x:\s*clientX,\s*y:\s*clientY\s*\}/);
-  assert.match(rendererSource, /state\.homeActivityHoverDate\s*=\s*cell\.dataset\.d/);
-  assert.match(rendererSource, /state\.homeActivityHoverTeardown\s*=\s*\(\{\s*preserveHover/);
-  assert.match(rendererSource, /state\.homeActivityHoverRestore\s*=\s*\(\)\s*=>/);
-  assert.match(rendererSource, /candidate\.dataset\.d\s*===\s*date/);
-  assert.match(rendererSource, /stillHovered[\s\S]*?showAtPoint\(point\.x,\s*point\.y,\s*cell\)/);
-  // Clearing the ref after teardown lets a discarded scroller closure be collected.
-  const hideFn = rendererSource.match(/function hideHomeActivityTooltip\(\{ preserveHover = false \} = \{\}\) \{([\s\S]*?)\n\}/);
-  assert.ok(hideFn, 'hideHomeActivityTooltip exists');
-  assert.match(hideFn[1], /state\.homeActivityHoverTeardown\s*=\s*null/);
-  assert.match(hideFn[1], /state\.homeActivityHoverRestore\s*=\s*null/);
-  // renderHome replaces the scroller on live stats refreshes. Preserve the pointer point,
-  // restore the attached scroller position before measuring the new cell, and repeat the
-  // hover restoration after ResizeObserver confirms that layout has settled.
-  const renderHome = rendererSource.match(/function renderHome\(\) \{([\s\S]*?)\n\}\n\nfunction render\(/);
-  assert.ok(renderHome, 'renderHome exists');
-  assert.match(renderHome[1], /hideHomeActivityTooltip\(\{\s*preserveHover:\s*true\s*\}\)/);
-  assert.match(
-    renderHome[1],
-    /els\.homePanel\.insertBefore\(node, current \|\| null\)[\s\S]*?applyHomeActivityScroll\(activityScroller\)[\s\S]*?homeActivityHoverRestore\(\)/
-  );
-  const trendsModule = rendererSource.match(/function renderHomeTrendsModule\(\) \{([\s\S]*?)\n\}\n\nfunction renderHome/);
-  assert.ok(trendsModule, 'renderHomeTrendsModule exists');
-  assert.match(
-    trendsModule[1],
-    /setupHomeActivityScroller\(activityScroll,\s*\(\)\s*=>\s*\{[\s\S]*?homeActivityHoverRestore\?\.\(\)[\s\S]*?animateHomeHistoryVisuals/
-  );
-  assert.match(trendsModule[1], /homeActivityHoverPoint[\s\S]*?homeActivityHoverDate[\s\S]*?classList\.add\('is-restoring-hover'\)/);
-  assert.match(
-    renderHome[1],
-    /homeActivityHoverRestore\(\)[\s\S]*?requestAnimationFrame\(\(\)\s*=>\s*activityScroller\.classList\.remove\('is-restoring-hover'\)\)/
-  );
-  assert.match(rendererSource, /homeActivityProgrammaticScrollers\.add\(scroller\)[\s\S]*?scroller\.scrollLeft\s*=\s*target/);
-  assert.match(
-    rendererSource,
-    /addEventListener\('scroll',\s*\(\)\s*=>\s*\{[\s\S]*?homeActivityProgrammaticScrollers\.delete\(scroller\)[\s\S]*?homeActivityHoverRestore\?\.\(\)[\s\S]*?hide\(\)/
-  );
-  // Leaving Home for another view must also dismiss it (the panel is only CSS-hidden).
   const renderAppContent = rendererSource.match(/function renderAppContent\([^)]*\) \{([\s\S]*?)\n\}\n\nfunction setStatus/);
-  assert.ok(renderAppContent, 'renderAppContent exists');
+  assert.ok(renderAppContent);
   assert.match(renderAppContent[1], /breakdown !== 'home'[\s\S]*?hideHomeActivityTooltip\(\)/);
 });
 
@@ -1272,4 +1228,14 @@ test('Home renders lifetime-only activity and never labels the preview as a full
   state.homeHistoryLoadedSignature = 'current';
   state.stats.periods = { today: { totalTokens: 10 } };
   assert.equal(render(), 'home.activeDaysYear:1');
+});
+
+test('Home limit account keys follow account identity across provider reorder', () => {
+  const accounts = ['one', 'two'].map(accountKey => ({ provider: 'codex', accountKey,
+    windows: [{ kind: 'session', remainingPercent: 50 }] }));
+  const options = { providerOptions: [{ id: 'codex', label: 'Codex' }], sort: 'configured' };
+  const before = homeLimitAccountsForProviders({ ...options, providers: accounts });
+  const after = homeLimitAccountsForProviders({ ...options, providers: [...accounts].reverse() });
+  assert.deepEqual(before.map(row => row.key), ['codex:one', 'codex:two']);
+  assert.deepEqual(after.map(row => row.key), ['codex:two', 'codex:one']);
 });

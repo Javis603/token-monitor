@@ -1,14 +1,8 @@
 'use strict';
 
-// A dock card is thrown away and rebuilt from scratch on every repaint. A control
-// that only listens for `click` therefore loses its activation whenever a repaint
-// lands between press and release: the pressed button is detached, the release is
-// dispatched at a node no longer in the tree, and the click never arrives, so the
-// control silently does nothing. Activating on `pointerdown` for the primary
-// pointer closes that window, and the plain `click` path stays for keyboard
-// activation (Enter and Space synthesize a click that reports `detail === 0`).
-// The two paths never run one action twice: a pointer-driven click reports a real
-// detail count, so the click handler ignores it.
+// Controls activate on the primary press for immediate response; keyboard clicks
+// retain their normal activation path. Ignore the trailing pointer click so one
+// press never runs the action twice. Rail and summary controls use this too.
 (function exposePressActivation(root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;

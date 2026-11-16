@@ -60,6 +60,8 @@ test('third-party settings separate presets, scope, and safe custom mappings', (
   assert.match(html, /id="thirdpartyRefreshTokenRow" class="thirdparty-field hidden"/);
   assert.match(app, /const refreshToken = String\(refreshTokenInput\?\.value \|\| ''\)\.trim\(\)/);
   assert.match(app, /thirdPartyProfileErrorText\(result, adapter\)/);
+  assert.match(app, /errorCode === 'newApiLegacyTokenRetired'/);
+  assert.match(app, /errorCode === 'newApiScopeDenied'/);
   assert.match(app, /thirdpartyCustomConfig[\s\S]*?classList\.toggle\('hidden', !customMode\)/);
   assert.match(app, /thirdpartyCredentialGrid[\s\S]*?classList\.toggle\([\s\S]*?'single-field'/);
   assert.match(app, /const pairedCredentials = newApiAccountMode;/);
@@ -106,6 +108,12 @@ test('third-party credentials stay local while renderer metadata is redacted', (
   assert.match(main, /ipcMain\.handle\('thirdparty:renameProfile'/);
   assert.match(main, /ipcMain\.handle\('thirdparty:setProfileEnabled'/);
   assert.match(main, /thirdPartyLimits\.fetchThirdPartyAccount\(\{ name, \.\.\.profile \}/);
+  assert.match(main, /surfaceAccessTokenErrors: true/);
+  assert.match(main, /onEnrichmentAccessTokenError/);
+  assert.match(main, /warning: 'newApiMissingUsageScope'/);
+  assert.match(main, /'ACCESS_TOKEN_LEGACY_RETIRED'\) return 'newApiLegacyTokenRetired'/);
+  assert.match(main, /'ACCESS_TOKEN_SCOPE_DENIED'\) return 'newApiScopeDenied'/);
+  assert.match(read('src/electron/renderer/app.js'), /result\.warning === 'newApiMissingUsageScope'/);
   assert.match(main, /thirdPartyLimits\.CUSTOM_BALANCE_ADAPTER/);
   assert.doesNotMatch(main, /DEFAULT_THIRD_PARTY_ADAPTER/);
   assert.doesNotMatch(main, /ONEAPI_ACCOUNT_ADAPTER/);
