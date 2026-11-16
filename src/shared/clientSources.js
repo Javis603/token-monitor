@@ -451,9 +451,9 @@ function clientSourceRoots(clientsCsv, options = {}) {
   // both CLI and IDE, the Kiro IDE globalStorage root (native macOS / Linux /
   // Windows), and the kiro-cli sqlite dir. None falls back to a host-absolute
   // path under --home (unlike Zed), so every root remains a valid source and
-  // presence signal. The globalStorage kind is deliberately interval-only in
-  // clientWatchCandidates() because real trees can contain tens of thousands of
-  // files; the sessions and sqlite roots retain seconds-level refresh.
+  // presence signal. GlobalStorage stays interval-only: the scanner still
+  // traverses its checkpoint/index trees on every scan. The separate sessions
+  // and SQLite roots retain live updates, with session snapshots unwatched.
   //
   // Note the deliberate Kiro-vs-kiro casing asymmetry below (do not "fix" it to
   // list both cases everywhere): tokscale scans both `Kiro` and `kiro` cased
