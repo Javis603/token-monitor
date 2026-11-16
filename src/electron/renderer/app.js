@@ -12889,12 +12889,9 @@ function setupLimitAccountPanels() {
     container.insertBefore(panel, nextGroup || null);
     if (form.accountSlots) {
       const details = panel.querySelector('.cursor-settings-details');
-      const defaultPanel = document.createElement('div');
-      defaultPanel.className = 'slot-default-form';
-      details.append(defaultPanel);
-      for (const child of [...details.children]) if (child !== defaultPanel) defaultPanel.moveBefore(child, null);
+      for (const child of [...details.children]) child.remove();
       const slotsPanel = window.TokenMonitorAccountSlotsPanel.createPanel({
-        form, defaultPanel, label: LIMIT_PROVIDERS.find(provider => provider.id === form.id).label,
+        form, label: LIMIT_PROVIDERS.find(provider => provider.id === form.id).label,
         document, t, ipc: window.tokenMonitor.limits.accountSlots, forms: limitAccountPanelsApi,
         preserveScroll: preserveSettingsPanelScroll, openExternal: url => window.tokenMonitor.openExternal(url),
         confirm: message => window.confirm(message),
@@ -17910,6 +17907,13 @@ function renderExternalProviderStatus(providerName) {
   const refreshBtn = document.getElementById(`${providerName}RefreshButton`);
   const manualPanel = document.getElementById(`${providerName}ManualPanel`);
   const errorEl = document.getElementById(`${providerName}ErrorMessage`);
+  if (statusEl && limitAccountForm(providerName)?.accountSlots) {
+    const accounts = accountSlotLists[providerName] || [];
+    const readings = localProviderStatuses(providerName);
+    const linked = accounts.filter(slot => slot.enabled && limitProviderEnabled(providerName) && readings.some(row => (row.accountKey === slot.accountKey || slot.accountKeyAliases?.includes(row.accountKey)) && row.status === 'ok' && !row.stale)).length;
+    setCursorStatusText(statusEl, accounts.length ? t('settings.opencode.connected', { linked, total: accounts.length }) : t(limitAccountForm(providerName).emptyKey));
+    return;
+  }
   if (!config || !statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
 
   const source = state.settings?.[config.sourceKey] || '';

@@ -17,7 +17,7 @@ A failed console lookup leaves the balance row unchanged and is retried on the n
 
 ## Credentials and transport
 
-The API key can also come from `DEEPSEEK_API_KEY` or `DEEPSEEK_KEY`; the console token has no environment-variable lane. Once the account is linked and `ok`, the paste fields hide, so adding or replacing the token means clearing the account and pasting the API key again with it. An environment-variable API key leaves no Clear action, so the token cannot be added from Settings.
+The API key can also come from `DEEPSEEK_API_KEY` or `DEEPSEEK_KEY`; the console token has no environment-variable lane. Use the account row's Replace API key action to change the key or optional console token. Environment-variable accounts are read-only; add a stored account to configure its console token.
 
 ## Invariants and known gaps
 

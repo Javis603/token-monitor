@@ -22,14 +22,14 @@
     return slots.find(slot => slot.accountKey === accountKey)
       || slots.find(slot => slot.accountKeyAliases?.includes(accountKey));
   }
-  function applyAccountOrder(records, slotsByProvider, localDeviceId = '') {
+  function applyAccountOrder(records, slotsByProvider, _localDeviceId = '') {
     const result = [...records];
     for (const [provider, slots] of Object.entries(slotsByProvider)) {
       const positions = result.flatMap((row, index) => row.provider === provider ? [index] : []);
       const rank = row => {
         const index = slots.indexOf(slotOwner(slots, row.accountKey));
-        if (index >= 0) return index + 1;
-        return !row.sourceDeviceId || row.sourceDeviceId === localDeviceId ? 0 : slots.length + 1;
+        if (index >= 0) return index;
+        return slots.length;
       };
       const ordered = positions.map(index => result[index]).sort((a, b) => rank(a) - rank(b));
       positions.forEach((position, index) => { result[position] = ordered[index]; });
@@ -37,7 +37,7 @@
     return result;
   }
 
-  function createPanel({ form, label, document, t, ipc, forms, preserveScroll, onChanged, openExternal, confirm, defaultPanel }) {
+  function createPanel({ form, label, document, t, ipc, forms, preserveScroll, onChanged, openExternal, confirm }) {
     const make = (tag, className = '', text) => {
       const el = document.createElement(tag);
       el.className = className;
@@ -66,15 +66,10 @@
     message.setAttribute('role', 'status');
     list.append(editor);
     root.append(list, message);
-    const defaultParking = make('div', 'hidden');
-    root.append(defaultParking);
-    if (defaultPanel) defaultParking.append(defaultPanel);
     let editorOwner;
     const rows = new Map();
-    const defaultId = Symbol('default account');
     let slots = [];
     let readings = [];
-    let configured = false;
     let operationLane = Promise.resolve();
     let editorPanel;
     let editorRevision = 0;
@@ -97,7 +92,6 @@
     };
     function closeEditor() {
       editorRevision++;
-      if (defaultPanel?.parentElement === editor) defaultParking.moveBefore(defaultPanel, null);
       editorOwner = undefined;
       add?.classList.remove('hidden');
       editor.replaceChildren();
@@ -165,6 +159,7 @@
         }
         forms.refreshFieldDependents?.(draftForm, { document });
         editorPanel.querySelector(`#${prefix}CredentialSubmit`).classList.add('slot-save');
+        editorPanel.querySelector(`#${prefix}CredentialSubmit`).classList.add('slot-save');
         editorPanel.querySelector('.settings-group-header').classList.add('hidden');
         editorPanel.querySelector('.cursor-settings-details').classList.remove('hidden');
         editorPanel.querySelector(`#${prefix}LogoutButton`).classList.add('hidden');
@@ -175,7 +170,7 @@
       if (rows.has(id)) return rows.get(id);
       const el = make('div', 'slot-row');
       el.tabIndex = 0;
-      el.dataset.slotId = id === defaultId ? 'default' : id;
+      el.dataset.slotId = id;
       const copy = make('div', 'slot-copy');
       const name = make('div', 'slot-name');
       const status = make('span', 'slot-status');
@@ -222,25 +217,18 @@
         const pause = action('pause', () => run('setEnabled', id, !item.slot.enabled));
         const remove = action('remove', () => { if (confirm(tr('confirmRemove'))) return run('remove', id); });
         remove.className = 'menu-destructive';
-        if (id === defaultId) {
-          menu.append(
-            localized(button(t(form.clearKey), () => document.getElementById(`${form.id}LogoutButton`).click()), form.clearKey),
-            localized(button(t(form.openKey), () => document.getElementById(`${form.id}OpenBrowser`).click()), form.openKey),
-            localized(button(t('settings.common.refresh'), () => document.getElementById(`${form.id}RefreshButton`).click()), 'settings.common.refresh'),
-            action('defaultSettings', openDefault));
-        } else {
-          const separator = () => { const node = make('hr', 'action-menu-separator'); node.setAttribute('role', 'separator'); return node; };
-          menu.append(action('rename', rename), action(cookie ? 'replaceCookie' : 'replaceKey', () => openEditor(item.slot)), pause, separator(), up, down, separator(), remove);
-        }
-        const fix = slotButton(cookie ? 'fixCookie' : 'fixKey', () => id === defaultId ? openDefault() : openEditor(item.slot));
+        const separator = () => { const node = make('hr', 'action-menu-separator'); node.setAttribute('role', 'separator'); return node; };
+        const replace = action(cookie ? 'replaceCookie' : 'replaceKey', () => openEditor(item.slot));
+        menu.append(action('rename', rename), replace, pause, separator(), up, down, separator(), remove);
+        const fix = slotButton(cookie ? 'fixCookie' : 'fixKey', () => openEditor(item.slot));
         fix.className = 'slot-fix plugin-inline-action';
         copy.append(fix);
         item.fix = fix;
         actions.append(shared.element);
-        if (id !== defaultId) Object.assign(item, { up, down, pause, fix });
+        Object.assign(item, { up, down, pause, fix, replace, remove });
         el.addEventListener('keydown', event => {
           if (event.key === 'Escape' && menu.matches(':popover-open')) { closeMenu(); more.focus(); }
-          if (id !== defaultId && event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
+          if (item.slot.source !== 'environment' && event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
             event.preventDefault(); event.stopPropagation();
             void run('move', id, event.key === 'ArrowUp' ? 'up' : 'down');
           }
@@ -256,45 +244,33 @@
       if (before !== editor) list.moveBefore(editor, before || null);
       add.classList.toggle('hidden', editorOwner === null);
     }
-    function openDefault() {
-      preserveScroll(() => {
-        closeEditor();
-        editorOwner = configured ? defaultId : null;
-        editor.classList.remove('hidden');
-        editor.append(localized(make('strong'), 'settings.slots.defaultSettings'));
-        if (defaultPanel) editor.moveBefore(defaultPanel, null);
-        const submit = document.getElementById(`${form.id}CredentialSubmit`);
-        submit?.classList.add('slot-save');
-        if (submit && !defaultPanel.querySelector('.slot-cancel')) {
-          const cancel = slotButton('cancel', () => preserveScroll(closeEditor));
-          cancel.className = 'slot-cancel';
-          submit.parentElement.append(cancel);
-        }
-        document.getElementById(`${form.id}ManualPanel`)?.classList.remove('hidden');
-        placeEditor();
-      });
-    }
-    const add = slotButton('add', () => configured ? openEditor(null) : openDefault(), { provider: label });
+    const add = slotButton('add', () => openEditor(null), { provider: label });
     add.className = 'slot-add';
     list.append(add);
     function render() {
-      const active = [...(configured ? [{ id: defaultId, enabled: true, label: '', fingerprint: '' }] : []), ...slots];
+      const active = slots;
       for (const [id, item] of rows) if (!active.some(slot => slot.id === id)) { item.el.remove(); rows.delete(id); }
       active.forEach((slot, index) => {
         const item = rowFor(slot.id);
         item.slot = slot;
-        const reading = slot.id === defaultId ? readings.find(row => !slotOwner(slots, row.accountKey)) : readings.find(row => slotOwner(slots, row.accountKey) === slot);
-        if (!item.editing) item.name.textContent = slot.id === defaultId ? (reading?.accountName || reading?.accountEmail || tr('default')) : accountName(slot, reading, t);
+        const reading = readings.find(row => slotOwner(slots, row.accountKey) === slot);
+        if (!item.editing) item.name.textContent = accountName(slot, reading, t);
         const status = accountStatus(slot, reading);
         item.el.classList.toggle('slot-paused', !slot.enabled);
         item.status.className = `slot-status slot-${status}`;
         item.status.textContent = `● ${tr(status === 'invalid' ? (cookie ? 'invalidCookie' : 'invalidKey') : status)}`;
         if (item.pause) {
           localized(item.pause, `settings.slots.${slot.enabled ? 'pause' : 'resume'}`);
-          item.up.disabled = slots[0]?.id === slot.id;
-          item.down.disabled = slots.at(-1)?.id === slot.id;
+          item.up.disabled = index === 0;
+          item.down.disabled = index === active.length - 1;
+          item.actions.classList.toggle('hidden', slot.source === 'environment');
         }
-        item.fix.classList.toggle('hidden', !slot.enabled || !['invalid', 'unavailable'].includes(status));
+        item.fix.classList.toggle('hidden', slot.source === 'environment' || !slot.enabled || !['invalid', 'unavailable'].includes(status));
+        if (slot.source === 'environment' && !item.environmentNote) {
+          item.environmentNote = localized(make('div', 'settings-note'), 'settings.slots.environment');
+          item.el.querySelector('.slot-copy').append(item.environmentNote);
+        }
+        if (item.environmentNote) item.environmentNote.classList.toggle('hidden', slot.source !== 'environment');
         const before = [...list.children].filter(node => node !== editor)[index];
         if (before !== item.el) {
           if (item.el.isConnected) list.moveBefore(item.el, before || null);
@@ -304,8 +280,8 @@
       });
       placeEditor();
     }
-    return { element: root, update(nextSlots, nextReadings, defaultConfigured) {
-      slots = nextSlots; readings = nextReadings; configured = defaultConfigured;
+    return { element: root, update(nextSlots, nextReadings) {
+      slots = nextSlots; readings = nextReadings;
       preserveScroll(render);
     }, openEditor };
   }

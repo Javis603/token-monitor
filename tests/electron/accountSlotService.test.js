@@ -85,26 +85,7 @@ test('identity writes reject deleted, paused and changed credentials and seriali
   const late = h.service.resolved('deepseek', id, identity, values);
   await removal; assert.equal(await late, false); assert.deepEqual(h.settings.deepseekAccountSlots, []);
 });
-test('real runtime default identity survives restart and rejects a changed default credential', async () => {
-  const h = harness(); h.settings = { ...h.settings, deepseekApiKey: 'default' };
-  let fail = false;
-  const deps = { env: {}, autoStart: false, autoRetry: false, probe: true,
-    fetch: async () => { if (fail) throw new Error('offline'); return response(balance); },
-    onAccountSlotResolved: (...args) => h.service.resolved(...args) };
-  let runtime = createLimitsRuntime(limitsAccountConfig(h.settings, { env: {} }), deps);
-  await runtime.refresh({}, 'settings-change');
-  // Flush the service lane by enqueueing a read-independent resolution.
-  await h.service.resolved('unsupported', '', {}, {});
-  runtime.stop(); fail = true;
-  assert.equal(h.settings.deepseekDefaultAccountIdentity.accountKey, hashKey('deepseek', 'default'));
-  runtime = createLimitsRuntime({ ...limitsAccountConfig(h.settings, { env: {} }), limitProviders: 'deepseek' }, deps);
-  try {
-    await runtime.refresh({}, 'settings-change');
-    assert.equal(runtime.getSnapshot().providers[0].accountKey, hashKey('deepseek', 'default'));
-    h.settings = { ...h.settings, deepseekApiKey: 'other' };
-    assert.equal(await h.service.resolved('deepseek', null, { accountKey: 'stale', accountKeyAliases: [] }, { deepseekApiKey: 'default', deepseekWebToken: '' }), false);
-  } finally { runtime.stop(); }
-});
+
 test('real settings-change invalidation removes last slot row; pause/resume and multi-account signal clear', async () => {
   const h = harness(); h.settings = { ...h.settings, deepseekApiKey: 'default' };
   const config = () => ({ ...limitsAccountConfig(h.settings, { env: {} }), limitProviders: 'deepseek' });
@@ -117,7 +98,7 @@ test('real settings-change invalidation removes last slot row; pause/resume and 
     return refresh;
   };
   try {
-    const a = await add(h); await refresh; const id = a.accounts[0].id;
+    const a = await add(h); await refresh; const id = a.accounts.find(slot => slot.id !== 'default').id;
     assert.equal(runtime.getSnapshot().providers.length, 2);
     assert.deepEqual(runtime.getSnapshot().multiAccountProviders, ['deepseek']);
     await h.service.setEnabled('deepseek', id, false); await refresh;
@@ -142,7 +123,7 @@ test('queued removal cannot overtake an in-flight credential probe', async () =>
 });
 test('slot cap, invalid provider and failed atomic store write expose bounded errors', async () => {
   const h = harness();
-  h.settings = { ...h.settings, deepseekAccountSlots: Array.from({ length: 20 }, (_, i) => ({ id: `slot${i}`, values: { deepseekApiKey: 'secret' } })) };
+  h.settings = { ...h.settings, deepseekAccountSlots: Array.from({ length: 21 }, (_, i) => ({ id: `slot${i}`, values: { deepseekApiKey: 'secret' } })) };
   assert.equal((await add(h)).errorCode, 'slotLimit');
   assert.equal((await h.service.add('__proto__', {})).errorCode, 'unsupportedProvider');
   const failing = harness({ write: () => { throw new Error('SECRET disk path'); } });
@@ -166,7 +147,7 @@ test('settings-change clears removed account immediately while the replacement r
     await runtime.refresh({}, 'settings-change');
     assert.equal(runtime.getSnapshot().providers.length, 2);
     block = true;
-    await h.service.remove('deepseek', h.service.list('deepseek').accounts[0].id);
+    await h.service.remove('deepseek', h.service.list('deepseek').accounts.find(slot => slot.id !== 'default').id);
     assert.equal(runtime.getSnapshot().providers.length, 1);
     assert.equal(runtime.getSnapshot().providers[0].windows.length, 1);
     block = false; release?.(); await refresh;
@@ -177,7 +158,7 @@ test('settings-change clears removed account immediately while the replacement r
 test('slot edits offline preserve sibling readings and update local label and order', async () => {
   const h = harness(); h.settings = { ...h.settings, deepseekApiKey: 'default' };
   const a = await add(h), b = await h.service.add('deepseek', { deepseekApiKey: 'SECRET-two' }, 'Second');
-  const id = a.accounts[0].id, second = b.accounts[1].id;
+  const id = a.accounts.find(slot => slot.id !== 'default').id, second = b.accounts.at(-1).id;
   let offline = false, refresh;
   const config = () => ({ ...limitsAccountConfig(h.settings, { env: {} }), limitProviders: 'deepseek' });
   const runtime = createLimitsRuntime(config(), { env: {}, autoStart: false, autoRetry: false, probe: true,
@@ -199,7 +180,7 @@ test('slot edits offline preserve sibling readings and update local label and or
     await h.service.rename('deepseek', id, 'Renamed'); await refresh;
     assert.equal(retained().find(row => row.accountKey === hashKey('deepseek', 'SECRET-one')).accountName, 'Renamed');
     await h.service.move('deepseek', second, 'up'); await refresh;
-    assert.deepEqual(retained().map(row => row.accountKey), ['default', 'SECRET-two', 'SECRET-one'].map(key => hashKey('deepseek', key)));
+    assert.deepEqual(retained().map(row => row.accountKey), ['SECRET-two', 'SECRET-one', 'default'].map(key => hashKey('deepseek', key)));
     await h.service.setEnabled('deepseek', id, false); await refresh;
     assert.equal(retained().length, 2);
     await h.service.setEnabled('deepseek', id, true); await refresh;
@@ -302,15 +283,6 @@ for (const operation of ['replace', 'remove', 'disable']) test(`late slot dispat
   } finally { release?.(); runtime.stop(); }
 });
 
-test('a slot whose id is "default" is still a slot, and the default identity is untouched', async () => {
-  const h = harness();
-  h.settings = { ...h.settings, deepseekAccountSlots: [{ id: 'default', values: { deepseekApiKey: 'SECRET-slot' } }] };
-  const identity = { accountKey: hashKey('slot-account'), accountKeyAliases: [] };
-  assert.equal(await h.service.resolved('deepseek', 'default', identity, { deepseekApiKey: 'SECRET-slot' }), true);
-  assert.equal(h.settings.deepseekAccountSlots[0].accountKey, identity.accountKey);
-  assert.equal(h.settings.deepseekDefaultAccountIdentity, undefined);
-});
-
 test('a replacement changes only the fields it names, and needs an existing id', async () => {
   const h = harness(); let userId = 'one';
   h.fetch = async url => url.includes('/organization-shared-usages/') ? response({}, 404)
@@ -375,4 +347,14 @@ test('redacted China DTO round trip preserves site when replacement probe is ind
   const result = await h.service.replace('qoder', slot.id, { ...slot.formValues, qoderCookie: 'token=SECRET-new' });
   assert.equal(result.saved, true);
   assert.equal(h.settings.qoderAccountSlots[0].values.qoderSite, 'cn');
+});
+
+
+
+test('adding an extra account does not retire an unnamed implicit default before identity resolution', async () => {
+  const h = harness(); h.settings = { ...h.settings, deepseekApiKey: 'fixed' };
+  const changes = []; h.changed = (_provider, change) => changes.push(change);
+  await add(h);
+  assert.deepEqual(changes.at(-1).retiredAccountKeys, []);
+  assert.ok(!h.settings.deepseekAccountSlots.some(slot => slot.id === 'default'));
 });

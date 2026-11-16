@@ -46,6 +46,7 @@ function harness() {
   const slotSettings = { qoderAccountSlots: records.map(record => ({ ...record, values: { qoderSite: 'cn', qoderCookie: 'SECRET' }, accountKeyAliases: record.id === 'a' ? ['old', 'kb'] : [] })) };
   const service = createAccountSlotService({ getSettings: () => slotSettings });
   const slots = service.list('qoder').accounts;
+  slots.unshift({ id: 'default', label: '', enabled: true, accountKey: 'default', accountKeyAliases: [], fingerprint: 'abc', formValues: { qoderSite: 'cn' } });
   const ipc = Object.fromEntries(['rename', 'move', 'setEnabled', 'remove', 'add', 'replace'].map(op => [op, async (...args) => { calls.push([op, ...args]); return ['add', 'replace'].includes(op) ? verdict : { ok: true, accounts: slots }; }]));
   const host = new Node('div', document);
   const defaultPanel = new Node('div', document);
@@ -74,7 +75,7 @@ test('slot names and status respect labels, native identity, fingerprint, pause 
 test('stored account order is applied after name aggregation without mutating input', () => {
   const records = [{ provider: 'qoder', accountKey: 'b' }, { provider: 'deepseek' }, { provider: 'qoder', accountKey: 'default' }, { provider: 'qoder', accountKey: 'a' }];
   const ordered = applyAccountOrder(records, { qoder: [{ accountKey: 'a' }, { accountKey: 'b' }] });
-  assert.deepEqual(ordered.map(r => r.accountKey), ['default', undefined, 'a', 'b']);
+  assert.deepEqual(ordered.map(r => r.accountKey), ['a', undefined, 'b', 'default']);
   assert.equal(records[0].accountKey, 'b');
 });
 test('menu operations and Alt arrows use the slot IPC', async () => {
@@ -130,7 +131,7 @@ test('real aggregate name sorting is replaced by stored slot order with default 
   const aggregate = aggregateLimits([{ deviceId: 'local', limits: { multiAccountProviders: ['qoder'], providers: [row('default', 'Middle'), row('work', 'Zulu'), row('personal', 'Alpha')] } }], 0, now);
   assert.deepEqual(aggregate.providers.map(r => r.accountName), ['Alpha', 'Middle', 'Zulu']);
   const result = applyAccountOrder(aggregate.providers, { qoder: [{ accountKey: 'work' }, { accountKey: 'personal' }] }, 'local');
-  assert.deepEqual(result.map(r => r.accountName), ['Middle', 'Zulu', 'Alpha']);
+  assert.deepEqual(result.map(r => r.accountName), ['Zulu', 'Alpha', 'Middle']);
 });
 
 test('native desktop quota projection uses the same order for Edge Dock, Notch and bubble consumers', () => {
@@ -146,7 +147,7 @@ test('native desktop quota projection uses the same order for Edge Dock, Notch a
   vm.runInNewContext(source.slice(start, end), context);
   const stats = { limits: { providers: [{ provider: 'qoder', accountKey: 'a' }, { provider: 'qoder', accountKey: 'default' }, { provider: 'qoder', accountKey: 'z' }] } };
   const result = context.desktopQuotaStats(stats);
-  assert.deepEqual(Array.from(result.limits.providers, row => row.accountKey), ['default', 'z', 'a']);
+  assert.deepEqual(Array.from(result.limits.providers, row => row.accountKey), ['z', 'a', 'default']);
   assert.equal(stats.limits.providers[0].accountKey, 'a');
   assert.equal(context.desktopQuotaStats(null), null);
 });
@@ -175,14 +176,14 @@ test('local raw slot readings use aggregate freshness without borrowing a remote
 
 test('alias ownership follows current keys before aliases in rows and account order', () => {
   const h = harness();
-  assert.deepEqual(h.slots[0].accountKeyAliases, ['old', 'kb']);
+  assert.deepEqual(h.slots[1].accountKeyAliases, ['old', 'kb']);
   const rows = [{ provider: 'qoder', accountKey: 'old', status: 'unauthorized' },
     { provider: 'qoder', accountKey: 'kb', status: 'ok' }, { provider: 'qoder', accountKey: 'default', status: 'ok' }];
   h.panel.update(h.slots, rows, true);
   assert.match(h.row('a').textContent, /Cookie expired/);
   assert.match(h.row('default').textContent, /Connected/);
   assert.deepEqual(applyAccountOrder(rows, { qoder: h.slots }).map(row => row.accountKey), ['default', 'old', 'kb']);
-  h.slots[1].enabled = true;
+  h.slots.find(slot => slot.id === 'b').enabled = true;
   h.panel.update(h.slots, rows, true);
   assert.match(h.row('b').textContent, /Connected/);
 });
@@ -198,7 +199,7 @@ test('Home preserves slot order before card limit while preserving quota sorted 
 test('cancelled pending save cannot close or clear a newer credential draft', async () => {
   const h = harness(); let resolve;
   h.verdict = new Promise(r => { resolve = r; });
-  h.panel.openEditor(h.slots[0]);
+  h.panel.openEditor(h.slots.find(slot => slot.id === 'a'));
   h.document.getElementById('qoderSlotDraftqoderCookieInput').value = 'old';
   const pending = h.document.getElementById('qoderSlotDraftCredentialSubmit').click();
   h.click(h.panel.element, 'Cancel');
@@ -228,33 +229,34 @@ test('locale translation updates live menus fix and add actions without recreati
   assert.equal(input.value, 'draft');
 });
 
-test('default row owns credential actions and first account opens retained default settings', () => {
+test('default row shares menu and naming and retains default form for replacement', async () => {
   const h = harness();
-  h.row('default').key('ArrowUp', true);
-  assert.equal(h.calls.length, 0);
-  assert.doesNotMatch(h.row('default').textContent, /Replace cookie/);
-  assert.equal([...h.row('default').walk()].filter(node => node.tagName === 'button' && node.textContent === 'Default account settings').length, 1);
-  assert.match(h.row('default').textContent, /Clear cookie/i);
-  h.click(h.row('default'), 'Default account settings');
-  const region = h.defaultPanel.parentElement;
-  assert.equal(region.classList.contains('hidden'), false);
-  assert.equal(region.children[0].textContent, 'Default account settings');
-  h.panel.update([], [], false);
-  assert.equal(h.row('default'), undefined);
-  h.click(h.panel.element, 'Cancel');
-  h.click(h.panel.element, t('settings.slots.add', { provider: 'Qoder' }));
-  assert.equal(region.classList.contains('hidden'), false);
-  assert.equal(h.panel.element.querySelector('.slot-editor').classList.contains('hidden'), false);
-  assert.equal(region.children[1], h.defaultPanel);
+  const menu = row => row.querySelector('.plugin-menu').children.map(node => node.textContent);
+  assert.deepEqual(menu(h.row('default')), menu(h.row('a')));
+  assert.match(h.row('default').querySelector('.slot-name').textContent, /Account #/);
+  assert.doesNotMatch(h.row('default').textContent, /Default account|Clear cookie|Refresh/);
+  h.click(h.row('default'), 'Replace cookie');
+  const editor = h.panel.element.querySelector('.slot-editor');
+  assert.equal(editor.children[0].textContent, 'Replace credential');
+  assert.ok(h.document.getElementById('qoderSlotDraftqoderCookieInput'));
+  assert.ok(h.defaultPanel.parentElement !== editor);
+  await h.click(h.row('default'), 'Pause tracking');
+  assert.deepEqual(h.calls[0], ['setEnabled', 'qoder', 'default', false]);
+  h.panel.update([{ id: 'a', enabled: true, accountKey: 'ka' }, { id: 'default', enabled: false, label: 'Personal', fingerprint: 'abc', source: 'environment' }, { id: 'b', enabled: true, accountKey: 'kb' }], [], true);
+  assert.equal(h.row('default').querySelector('.slot-name').textContent, 'Personal');
+  const buttons = h.row('default').querySelector('.plugin-menu').children;
+  assert.equal(h.row('default').querySelector('.slot-actions').classList.contains('hidden'), true);
+  assert.equal(buttons.length, 8);
+  assert.match(h.row('default').textContent, /From environment variable/);
 });
-
 
 test('slot CSS uses defined theme tokens for light and dark surfaces and status', () => {
   const css = require('node:fs').readFileSync(require.resolve('../../src/electron/renderer/styles.css'), 'utf8');
   const slots = css.slice(css.indexOf('/* Local account slots'));
   const declared = new Set([...css.matchAll(/(--[\w-]+):/g)].map(match => match[1]));
   assert.match(slots, /\.slot-list \{[^}]*overflow: clip;/);
-  assert.match(slots, /grid-template-columns: minmax\(0, 1fr\) 92px 28px/);
+  assert.match(slots, /grid-template-columns: minmax\(0, 1fr\) minmax\(0, max-content\) 28px/);
+  assert.match(slots, /\.slot-status \{ min-width: 0; max-width: 150px; overflow: hidden; text-overflow: ellipsis;/);
   assert.match(slots, /\.slot-name \{[^}]*text-overflow: ellipsis; white-space: nowrap;/);
   assert.match(slots, /\.slot-status \{[^}]*text-align: right;/);
   for (const match of slots.matchAll(/var\((--[\w-]+)/g)) assert.ok(declared.has(match[1]), match[1]);
@@ -264,7 +266,7 @@ test('slot CSS uses defined theme tokens for light and dark surfaces and status'
 test('pending slot save queues move pause and rename without dropping operations', async () => {
   const h = harness(); let resolve;
   h.verdict = new Promise(r => { resolve = r; });
-  h.panel.openEditor(h.slots[0]);
+  h.panel.openEditor(h.slots.find(slot => slot.id === 'a'));
   h.document.getElementById('qoderSlotDraftqoderCookieInput').value = 'replacement';
   const saving = h.document.getElementById('qoderSlotDraftCredentialSubmit').click();
   await Promise.resolve();
@@ -283,7 +285,7 @@ test('pending slot save queues move pause and rename without dropping operations
 test('local default then stored slots precede remote accounts in aggregate order', () => {
   const row = (accountKey, sourceDeviceId) => ({ provider: 'qoder', accountKey, sourceDeviceId });
   const rows = [row('remote-a', 'remote'), row('b', 'local'), row('remote-b', 'remote'), row('default', 'local'), row('a', 'local')];
-  assert.deepEqual(applyAccountOrder(rows, { qoder: [{ accountKey: 'a' }, { accountKey: 'b' }] }, 'local').map(row => row.accountKey), ['default', 'a', 'b', 'remote-a', 'remote-b']);
+  assert.deepEqual(applyAccountOrder(rows, { qoder: [{ accountKey: 'a' }, { accountKey: 'b' }] }, 'local').map(row => row.accountKey), ['a', 'b', 'remote-a', 'remote-b', 'default']);
 });
 
 test('stale translations describe data rather than expired credentials', () => {
@@ -294,7 +296,7 @@ test('China replacement initializes redacted form values and retains site on ind
   const h = harness();
   assert.deepEqual(h.slots[0].formValues, { qoderSite: 'cn' });
   assert.ok(!JSON.stringify(h.slots).includes('SECRET'));
-  h.panel.openEditor(h.slots[0]);
+  h.panel.openEditor(h.slots.find(slot => slot.id === 'a'));
   const site = h.document.getElementById('qoderSlotDraftqoderSiteInput');
   assert.equal(site.value, 'cn');
   h.document.getElementById('qoderSlotDraftqoderCookieInput').value = 'replacement';
@@ -302,7 +304,7 @@ test('China replacement initializes redacted form values and retains site on ind
   h.verdict = { saved: true, verdict: 'unavailable', accounts: h.slots };
   await h.document.getElementById('qoderSlotDraftCredentialSubmit').click();
   assert.equal(h.calls[0][3].qoderSite, 'cn');
-  h.panel.openEditor(h.slots[0]);
+  h.panel.openEditor(h.slots.find(slot => slot.id === 'a'));
   h.document.getElementById('qoderSlotDraftqoderSiteInput').value = 'global';
   h.document.getElementById('qoderSlotDraftqoderCookieInput').value = 'replacement';
   await h.document.getElementById('qoderSlotDraftCredentialSubmit').click();
@@ -449,7 +451,7 @@ test('single line rows omit timestamps; only failing rows have a compact recover
 
 test('editors occupy the group at their owner and use existing form actions including cancel', () => {
   const h = harness();
-  h.panel.openEditor(h.slots[0]);
+  h.panel.openEditor(h.slots.find(slot => slot.id === 'a'));
   const editor = h.panel.element.querySelector('.slot-editor');
   const list = h.panel.element.querySelector('.slot-list');
   assert.ok(editor.parentElement === list);
@@ -462,15 +464,17 @@ test('editors occupy the group at their owner and use existing form actions incl
   assert.equal(editor.children[1].classList.contains('credential-input'), true);
   assert.equal(list.children[list.children.indexOf(editor) + 1].classList.contains('slot-add'), true);
   assert.equal(list.children.at(-1).classList.contains('hidden'), true);
-  h.click(h.row('default'), 'Default account settings');
-  assert.ok(h.defaultPanel.parentElement === editor);
+  h.click(h.row('default'), 'Replace cookie');
+  assert.ok(h.document.getElementById('qoderSlotDraftqoderCookieInput'));
+  assert.ok(h.defaultPanel.parentElement !== editor);
   assert.ok(list.children[list.children.indexOf(h.row('default')) + 1] === editor);
   h.update();
-  assert.ok(h.defaultPanel.parentElement === editor);
+  assert.ok(h.document.getElementById('qoderSlotDraftqoderCookieInput'));
+  assert.ok(h.defaultPanel.parentElement !== editor);
   assert.equal([...h.panel.element.walk()].some(node => node.tagName === 'details'), false);
   h.click(editor, 'Cancel');
   assert.equal(editor.classList.contains('hidden'), true);
-  assert.equal(h.defaultPanel.isConnected, true);
+  assert.equal(editor.children.length, 0);
 });
 
 
@@ -480,7 +484,7 @@ test('a failing default row opens the same retained default editor from its reco
   const fix = h.row('default').querySelector('.slot-fix');
   assert.equal(fix.classList.contains('hidden'), false);
   fix.click();
-  assert.ok(h.defaultPanel.parentElement === h.panel.element.querySelector('.slot-editor'));
+  assert.ok(h.document.getElementById('qoderSlotDraftqoderCookieInput'));
 });
 
 
@@ -551,4 +555,65 @@ test('adding a different account twice while the first add is pending saves it o
   if (resolve) resolve({ saved: true, verdict: 'valid', accounts: h.slots });
   for (let i = 0; i < 10; i++) await Promise.resolve();
   assert.equal(h.calls.filter(call => call[0] === 'add').length, 1);
+});
+
+test('full account order places the default placeholder in the middle', () => {
+  const slots = [{ id: 'a', accountKey: 'a' }, { id: 'default', accountKey: 'fixed', label: 'Personal' }, { id: 'b', accountKey: 'b' }];
+  const rows = ['b', 'fixed', 'a'].map(accountKey => ({ provider: 'deepseek', accountKey }));
+  assert.deepEqual(applyAccountOrder(rows, { deepseek: slots }).map(row => row.accountKey), ['a', 'fixed', 'b']);
+});
+
+
+test('shared action menu is loaded before both consumers and owns the plugin plate', () => {
+  const fs = require('node:fs');
+  const read = name => fs.readFileSync(require.resolve('../../src/electron/renderer/' + name), 'utf8');
+  assert.equal(typeof require('../../src/electron/renderer/actionMenu').create, 'function');
+  for (const name of ['pluginSettings.js', 'limits/accountSlotsPanel.js']) assert.match(read(name), /(?:actionMenuApi|menus)\.create\(document,/);
+  const html = read('index.html');
+  assert.ok(html.indexOf('src="selectControl.js"') < html.indexOf('src="actionMenu.js"'));
+  for (const name of ['pluginSettings.js', 'limits/accountSlotsPanel.js']) assert.ok(html.indexOf('src="actionMenu.js"') < html.indexOf(`src="${name}"`));
+  assert.match(read('actionMenu.js'), /positionApi.popupPosition/);
+  assert.match(read('actionMenu.js'), /positionApi.navigate/);
+  assert.doesNotMatch(read('limits/accountSlotsPanel.js'), /showPopover|popupPosition|function positionMenu/);
+  assert.doesNotMatch(read('styles.css'), /\.slot-menu/);
+});
+
+test('single line rows omit timestamps; only failing rows have a compact recovery beneath the name', () => {
+  const h = harness();
+  h.panel.update(h.slots, [{ accountKey: 'default', status: 'ok' }, { accountKey: 'ka', status: 'unauthorized' }], true);
+  assert.equal(h.row('default').querySelector('.slot-fix').classList.contains('hidden'), true);
+  assert.equal(h.row('a').querySelector('.slot-copy').children[1], h.row('a').querySelector('.slot-fix'));
+  assert.equal(h.row('a').querySelector('.slot-fix').classList.contains('plugin-inline-action'), true);
+  assert.equal(h.row('a').querySelector('.slot-fix').classList.contains('hidden'), false);
+  assert.equal(h.row('b').querySelector('.slot-fix').classList.contains('hidden'), true);
+  assert.equal(h.row('a').querySelector('.slot-updated'), undefined);
+  assert.ok(h.row('a').querySelector('.plugin-more-icon'));
+  const i18n = require('node:fs').readFileSync(require.resolve('../../src/electron/renderer/i18n.js'), 'utf8');
+  assert.doesNotMatch(i18n, /settings.slots.(?:updated|notUpdated)/);
+});
+
+test('editors occupy the group at their owner and use existing form actions including cancel', () => {
+  const h = harness();
+  h.panel.openEditor(h.slots.find(slot => slot.id === 'a'));
+  const editor = h.panel.element.querySelector('.slot-editor');
+  const list = h.panel.element.querySelector('.slot-list');
+  assert.equal(editor.parentElement, list);
+  assert.equal(list.children[list.children.indexOf(h.row('a')) + 1], editor);
+  assert.equal(editor.children.some(node => node.classList.contains('credential-input')), false);
+  const submit = h.document.getElementById('qoderSlotDraftCredentialSubmit');
+  assert.equal(submit.classList.contains('slot-save'), true);
+  assert.equal(submit.parentElement.children[1].textContent, 'Cancel');
+  h.panel.openEditor(null);
+  assert.equal(editor.children[1].classList.contains('credential-input'), true);
+  assert.equal(list.children[list.children.indexOf(editor) + 1].classList.contains('slot-add'), true);
+  assert.equal(list.children.at(-1).classList.contains('hidden'), true);
+  h.click(h.row('default'), 'Replace cookie');
+  assert.ok(h.document.getElementById('qoderSlotDraftqoderCookieInput'));
+  assert.equal(list.children[list.children.indexOf(h.row('default')) + 1], editor);
+  h.update();
+  assert.ok(h.document.getElementById('qoderSlotDraftqoderCookieInput'));
+  assert.equal([...h.panel.element.walk()].some(node => node.tagName === 'details'), false);
+  h.click(editor, 'Cancel');
+  assert.equal(editor.classList.contains('hidden'), true);
+  assert.equal(h.defaultPanel.isConnected, true);
 });

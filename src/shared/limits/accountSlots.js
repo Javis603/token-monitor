@@ -26,6 +26,7 @@ function normalizeAccountSlots(declaration, input) {
   for (const record of input) {
     if (!record || typeof record.id !== 'string' || !/^[A-Za-z0-9_-]{1,64}$/.test(record.id) || seen.has(record.id)) continue;
     seen.add(record.id);
+    if (!record.values || out.length >= 21) continue;
     const values = Object.fromEntries(keys.filter((key) => typeof record.values?.[key] === 'string').map((key) => [key, record.values[key]]));
     out.push({
       id: record.id, label: normalizeLimitProvider({ provider: declaration.id, accountLabel: record.label })?.accountLabel || '',
@@ -36,7 +37,6 @@ function normalizeAccountSlots(declaration, input) {
       createdAt: typeof record.createdAt === 'string' && Number.isFinite(Date.parse(record.createdAt)) ? new Date(record.createdAt).toISOString() : '',
       updatedAt: typeof record.updatedAt === 'string' && Number.isFinite(Date.parse(record.updatedAt)) ? new Date(record.updatedAt).toISOString() : ''
     });
-    if (out.length === 20) break;
   }
   return out;
 }

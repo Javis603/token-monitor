@@ -203,6 +203,7 @@ const {
   redactThirdPartyProfilesForRenderer,
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
+const { migrateAccountSlots } = require('./limits/accountSlotMigration');
 const { createAccountSlotService, invalidateAccountSlotChange } = require('./limits/accountSlotService');
 const { LIMIT_PROVIDER_REGISTRY } = require('../shared/limits/registry');
 const { isProviderStale } = require('../shared/limits/core');
@@ -2679,7 +2680,19 @@ function loadCredentialSettings(saved) {
   try {
     const store = ensureCredentialStore();
     store.migrateLegacySettings(saved);
-    const stored = store.settingsCredentials();
+    // A failed slot migration leaves its source untouched; it must not hide
+    // every other provider's credentials for this session.
+    let stored;
+    try {
+      stored = migrateAccountSlots(store, saved);
+    } catch (error) {
+      reportCredentialStorageError('could not move saved accounts into the account list', error);
+      stored = store.settingsCredentials();
+    }
+    for (const entry of LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots)) {
+      for (const field of entry.fields.filter(field => field.kind === 'credential')) saved[field.key] = '';
+      delete saved[`${entry.id}DefaultAccountIdentity`];
+    }
     // Cleanup is intentionally independent from the migration marker. If the
     // first cleanup write fails after credentials.json was committed, retry on
     // every startup until no credential keys remain in settings.json.
@@ -9239,7 +9252,7 @@ app.whenReady().then(() => {
   ipcMain.handle('claude:saveWebAccount', (_event, values) => claudeAccountService().saveAccount(values));
   ipcMain.handle('claude:removeWebAccount', (_event, id) => claudeAccountService().removeAccount(String(id || '')));
   ipcMain.handle('claude:setAccountEnabled', (_event, id, enabled) => claudeAccountService().setAccountEnabled(String(id || ''), enabled));
-  ipcMain.handle('limits:saveCredential', (_event, providerId, values) => credentialCommands.saveCredential(providerId, values));
+  ipcMain.handle('limits:saveCredential', (_event, providerId, values) => ACCOUNT_SLOT_PROVIDER_IDS.has(providerId) ? accountSlotService.add(providerId, values) : credentialCommands.saveCredential(providerId, values));
   getLimitsHistoryController().register();
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
   ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));

@@ -127,7 +127,7 @@ test('an overlong bypass save through renderer and preload leaves persisted sett
   const context = vm.createContext({
     ...proxy, settings: { ...original }, persistedSettingsSnapshot: { ...original },
     cloneSettingsSnapshot: (value) => JSON.parse(JSON.stringify(value)),
-    persistSettingsAndCredentials, ensureCredentialStore: () => store, settingsPath,
+    persistSettingsAndCredentials, migrateAccountSlots: () => ({}), LIMIT_PROVIDER_REGISTRY: [], ensureCredentialStore: () => store, settingsPath,
     refreshTrayContextMenu() {}, reportCredentialStorageError() {}
   });
   // The actual main validation and normalization execute before its actual

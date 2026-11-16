@@ -10,6 +10,7 @@
 // Adding a provider with a simple cookie/API-key account touches none of this
 // file; its account.js declaration is the whole change.
 
+const { accountSlotKey, normalizeAccountSlots } = require('../../shared/limits/accountSlots');
 const { limitProviderUrlAllowed } = require('../../shared/limits/accounts');
 const {
   LIMIT_PROVIDER_REGISTRY,
@@ -146,7 +147,7 @@ function defaultAccountStatus(entry, settings, env) {
   const stored = settings?.[field.key];
   const resolved = field.resolve ? field.resolve(env) : '';
   return {
-    [entry.status.configuredKey]: Boolean(stored || resolved),
+    [entry.status.configuredKey]: Boolean(entry.accountSlots ? normalizeAccountSlots(entry, settings?.[accountSlotKey(entry)]).length || resolved : stored || resolved),
     [entry.status.sourceKey]: stored ? 'settings' : resolved ? 'env' : ''
   };
 }

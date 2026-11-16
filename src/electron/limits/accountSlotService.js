@@ -6,12 +6,13 @@ const { randomUUID } = require('node:crypto');
 const { createCredentialCommands } = require('./credentialCommands');
 const { accountForm } = require('./accountSettings');
 const { limitProviderEntry } = require('../../shared/limits/registry');
-const { accountSlotKey, normalizeAccountSlots, defaultIdentityKey, defaultAccountValues, accountValuesFingerprint } = require('../../shared/limits/accountSlots');
+const { accountSlotKey, normalizeAccountSlots, defaultAccountValues, accountValuesFingerprint } = require('../../shared/limits/accountSlots');
 
 // All secret/identity writes share one lane. Refresh notification is outside the
 // transaction: a refresh may itself enqueue a resolved identity.
 function createAccountSlotService({ getSettings, write, onChanged, probeDeps, env = process.env, now = Date.now }) {
   let lane = Promise.resolve();
+  const environmentIdentities = new Map();
   const serialize = (work) => {
     const task = lane.then(work);
     lane = task.catch(() => {});
@@ -22,11 +23,17 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     return entry?.accountSlots ? entry : null;
   };
   const slots = (entry) => normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]);
-  const dto = (entry) => slots(entry).map(({ id, label, enabled, accountKey, accountKeyAliases, values, createdAt, updatedAt }) => {
-    const key = accountKey || hashKey(entry.id, 'account-slot', `slot:${id}`);
-    return { id, label, enabled, accountKey: key, accountKeyAliases,
+  const environment = entry => {
+    const values = defaultAccountValues(entry, getSettings(), env);
+    const field = entry.fields.find(field => field.key === entry.status.credential);
+    return !getSettings()[field.key] && field.resolve?.(env) ? { id: 'environment', label: '', enabled: true, source: 'environment', values, accountKey: hashKey(entry.id, values[field.key]), ...environmentIdentities.get(entry.id) } : null;
+  };
+  const ordered = (entry, list = slots(entry)) => [...(environment(entry) ? [environment(entry)] : []), ...list];
+  const dto = entry => ordered(entry).map(({ id, label, enabled, accountKey, accountKeyAliases = [], values, source, createdAt, updatedAt }) => {
+    const key = accountKey || hashKey(entry.id, 'account-slot', source ? 'default' : `slot:${id}`);
+    return { id, label, enabled, accountKey: key, accountKeyAliases, ...(source ? { source } : {}),
       formValues: Object.fromEntries(accountForm(entry).fields.filter(field => !field.secret).map(field => [field.key, values[field.key]])),
-      fingerprint: accountValuesFingerprint({ accountKey: key }).slice(7, 19), createdAt, updatedAt };
+      fingerprint: accountValuesFingerprint(values).slice(7, 19), createdAt, updatedAt };
   });
   const failure = (errorCode) => ({ ok: false, errorCode });
   // `refresh: false`: only local presentation changed (label, order), so the
@@ -35,16 +42,13 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     try { Promise.resolve(onChanged?.(entry.id, { retiredAccountKeys, refresh })).catch(() => {}); } catch (_) { /* Durable save already succeeded. */ }
   };
   async function commit(entry, next, notify = true, refresh = true) {
-    const previous = slots(entry);
+    const previous = ordered(entry);
     const normalized = normalizeAccountSlots(entry, next);
-    const keys = slot => [slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`), ...slot.accountKeyAliases];
-    const owned = new Set(normalized.filter(slot => slot.enabled).flatMap(keys));
-    const identity = getSettings()[defaultIdentityKey(entry)];
-    if (identity?.fingerprint === accountValuesFingerprint(defaultAccountValues(entry, getSettings(), env))) {
-      for (const key of [identity.accountKey, ...(identity.accountKeyAliases || [])]) owned.add(key);
-    }
+    const keys = slot => [slot.accountKey || hashKey(entry.id, 'account-slot', slot.source ? 'default' : `slot:${slot.id}`), ...(slot.accountKeyAliases || [])];
+    const active = ordered(entry, [...normalized]).filter(slot => slot.enabled);
+    const owned = new Set(active.flatMap(keys));
     const retiredAccountKeys = [...new Set(previous.filter(slot => slot.enabled
-      && !normalized.some(item => item.id === slot.id && item.enabled)).flatMap(keys))].filter(key => !owned.has(key));
+      && !active.some(item => item.id === slot.id)).flatMap(keys))].filter(key => !owned.has(key));
     await write({ [accountSlotKey(entry)]: normalized });
     if (notify) changed(entry, retiredAccountKeys, refresh);
   }
@@ -56,10 +60,11 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     return serialize(async () => {
       const entry = entryFor(providerId);
       if (!entry) return failure('unsupportedProvider');
+      if (id === 'environment') return failure('environmentCredential');
       const previous = slots(entry);
       const old = replacing ? previous.find(slot => slot.id === id) : null;
       if (replacing && !old) return failure('accountNotFound');
-      if (!replacing && previous.length >= 20) return failure('slotLimit');
+      if (!replacing && previous.length >= 21) return failure('slotLimit');
       let rejected;
       // Reuse the fixed credential validator, including transport isolation and
       // unauthorized/indeterminate verdicts. Never return its settings payload.
@@ -112,6 +117,7 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     return serialize(async () => {
       const entry = entryFor(providerId);
       if (!entry) return failure('unsupportedProvider');
+      if (id === 'environment') return failure('environmentCredential');
       const next = slots(entry);
       const index = next.findIndex(slot => slot.id === id);
       if (index < 0) return failure('accountNotFound');
@@ -132,11 +138,12 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
       const entry = entryFor(providerId);
       if (!entry) return false;
       const fingerprint = accountValuesFingerprint(dispatchedValues);
-      if (id === null) {
+      if (id === 'environment') {
         if (fingerprint !== accountValuesFingerprint(defaultAccountValues(entry, getSettings(), env))) return false;
-        await write({ [defaultIdentityKey(entry)]: { ...identity, fingerprint } });
+        environmentIdentities.set(entry.id, identity);
         return true;
       }
+      if (!id) return false;
       const next = slots(entry);
       const slot = next.find(item => item.id === id);
       if (!slot || !slot.enabled || fingerprint !== accountValuesFingerprint(slot.values)) return false;
