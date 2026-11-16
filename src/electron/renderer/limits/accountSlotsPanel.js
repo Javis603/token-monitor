@@ -83,6 +83,7 @@
     let slots = [];
     let readings = [];
     let operationLane = Promise.resolve();
+    let dragSavePending = false;
     let editorPanel;
     let editorRevision = 0;
     const error = () => { message.textContent = tr('failed'); };
@@ -102,7 +103,10 @@
       operationLane = task.catch(() => {});
       return task;
     };
-    const run = (operation, ...args) => enqueue(() => ipc[operation](form.id, ...args));
+    const run = (operation, ...args) => {
+      if (operation === 'move' && dragSavePending) return;
+      return enqueue(() => ipc[operation](form.id, ...args));
+    };
     const rowDrag = dragController.createRowDragController({
       dragSort,
       getList: () => list,
@@ -117,22 +121,43 @@
         // A push may add/remove an account while the measured rows are frozen.
         // Let the deferred render show that new list instead of saving a stale set.
         if (previous.length !== order.length || previous.some(key => !order.includes(key))) return { steps: 0 };
+        const previousSlots = slots;
         const delta = order.indexOf(id) - previous.indexOf(id);
         const byId = new Map(slots.map(slot => [slot.id, slot]));
         let index = 0;
         slots = slots.map(slot => slot.id === 'environment' ? slot : byId.get(order[index++]));
-        return { steps: Math.abs(delta), direction: delta < 0 ? 'up' : 'down' };
+        // Lock before the controller defers persistence until after paint.
+        dragSavePending = true;
+        preserveScroll(render);
+        return { steps: Math.abs(delta), direction: delta < 0 ? 'up' : 'down', previousSlots };
       },
       applyOrder: order => {
         for (const id of order) list.moveBefore(rows.get(id).el, add);
       },
-      persistOrder: (_order, id, { steps, direction }) => void enqueue(async () => {
+      persistOrder: (_order, id, { steps, direction, previousSlots }) => void enqueue(async () => {
         let result = { ok: true, accounts: slots };
-        for (let step = 0; step < steps; step++) {
-          result = await ipc.move(form.id, id, direction);
-          if (result.ok === false) break;
+        let confirmed = previousSlots || slots;
+        try {
+          for (let step = 0; step < steps; step++) {
+            result = await ipc.move(form.id, id, direction);
+            if (result.ok === false) throw new Error('Account move failed');
+            confirmed = result.accounts;
+          }
+          return result;
+        } catch (failure) {
+          // Earlier steps may already be stored even if a later move fails.
+          slots = confirmed;
+          try {
+            const current = await ipc.list(form.id);
+            if (current.ok !== false) slots = current.accounts;
+          } catch (_) { /* Keep the last confirmed order if reload also fails. */ }
+          preserveScroll(render);
+          onChanged(slots);
+          throw failure;
         }
-        return result;
+      }).finally(() => {
+        dragSavePending = false;
+        preserveScroll(render);
       }),
       requestRender: () => preserveScroll(render)
     });
@@ -267,7 +292,7 @@
       copy.append(name);
       el.append(grip, copy, status, actions);
       el.addEventListener('pointerdown', event => {
-        if (id === 'environment' || editorOwner !== undefined
+        if (dragSavePending || id === 'environment' || editorOwner !== undefined
           || [...rows.values()].some(row => row.editing || row.actions.querySelector('.plugin-menu').matches(':popover-open'))) return;
         rowDrag.startRowDrag(event, id);
       });
@@ -379,8 +404,8 @@
         if (item.pause) {
           item.updateRemove();
           localized(item.pause, `settings.slots.${slot.enabled ? 'pause' : 'resume'}`);
-          item.up.disabled = index === 0;
-          item.down.disabled = index === active.length - 1;
+          item.up.disabled = dragSavePending || index === 0;
+          item.down.disabled = dragSavePending || index === active.length - 1;
           item.actions.classList.toggle('hidden', slot.source === 'environment');
           if (slot.source === 'discovered') { item.replace.remove(); item.remove.remove(); }
         }
