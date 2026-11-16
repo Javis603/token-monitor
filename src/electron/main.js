@@ -8430,9 +8430,15 @@ app.whenReady().then(() => {
       saveSettings({ throwOnError: true });
       // Turning a provider on takes the ordinary settings path (selection
       // normalization, runtime start) and is published to the renderer.
+      // The account is already durable here: an activation failure is reported
+      // but must not turn the save into a failure the user retries as a duplicate.
       if (limitProviders !== undefined && (limitProviders !== settings.limitProviders || limitsEnabled !== settings.limitsEnabled)) {
-        applySettingsPatch({ limitProviders, limitsEnabled });
-        pushSettingsToRenderer();
+        try {
+          applySettingsPatch({ limitProviders, limitsEnabled });
+          pushSettingsToRenderer();
+        } catch (error) {
+          console.error(`[limits] could not turn on collection after saving an account: ${error?.message || error}`);
+        }
       }
     },
     probeDeps: credentialProbeDeps,

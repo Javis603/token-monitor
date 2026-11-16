@@ -171,4 +171,6 @@ test('activating a provider from an account save takes the settings path and rea
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   const wiring = main.slice(main.indexOf('accountSlotService = createAccountSlotService({'), main.indexOf('probeDeps: credentialProbeDeps,', main.indexOf('accountSlotService = createAccountSlotService({')));
   assert.match(wiring, /applySettingsPatch\(\{ limitProviders, limitsEnabled \}\);\s*pushSettingsToRenderer\(\);/);
+  // A failed activation after the durable slot write must not surface as a failed save (a retry would add a duplicate).
+  assert.match(wiring, /try \{\s*applySettingsPatch\(\{ limitProviders, limitsEnabled \}\);\s*pushSettingsToRenderer\(\);\s*\} catch \(error\) \{/);
 });
