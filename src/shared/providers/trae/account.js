@@ -60,7 +60,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
     fields: [
       { key: 'traeCookie', input: 'textarea', ariaLabelKey: 'settings.trae.cookie', configuredKey: 'traeCookieConfigured', placeholder: 'sessionid=...' },
       { key: 'traeAccessToken', input: 'password', labelKey: 'settings.trae.token', configuredKey: 'traeTokenConfigured', placeholder: 'Cloud-IDE-Token' },
-      { key: 'traeDeviceId', input: 'text', labelKey: 'settings.trae.deviceId', placeholderKey: 'settings.trae.deviceIdPlaceholder' }
+      { key: 'traeDeviceId', input: 'text', secret: false, labelKey: 'settings.trae.deviceId', placeholderKey: 'settings.trae.deviceIdPlaceholder' }
     ],
     credentialChoice: {
       key: 'traeCredentialKind',

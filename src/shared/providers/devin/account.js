@@ -64,6 +64,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
       {
         key: 'devinOrganization',
         input: 'text',
+        secret: false,
         labelKey: 'settings.devin.organization',
         placeholderKey: 'settings.devin.organizationPlaceholder',
         required: true,
