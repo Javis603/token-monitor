@@ -897,3 +897,20 @@ for (const action of ['menu', 'Alt']) test(`pending drag save blocks ${action} m
   assert.equal(h.listeners.has('pointermove'), true, 'dragging unlocks after settlement');
   h.emit('pointercancel', 100); await h.flush();
 }));
+
+for (const action of ['menu', 'Alt']) test(`a pending ${action} move blocks starting a drag until it settles`, () => withDrag(async h => {
+  h.panel.update(h.service.list('qoder').accounts, []); h.layout();
+  let finishMove;
+  h.ipc.move = (...args) => {
+    h.calls.push(['move', ...args]);
+    return new Promise(resolve => { finishMove = async () => resolve(await h.service.move(...args)); });
+  };
+  if (action === 'menu') h.click(h.row('b'), 'Move up'); else h.row('b').key('ArrowUp', true);
+  await h.flush();
+  h.press('a'); h.emit('pointermove', 100);
+  assert.equal(h.listeners.has('pointermove'), false, 'a drag cannot measure an order a pending move is about to change');
+  await finishMove(); await h.flush();
+  h.layout(); h.press('a'); h.emit('pointermove', 100);
+  assert.equal(h.listeners.has('pointermove'), true, 'dragging unlocks after the move settles');
+  h.emit('pointercancel', 100); await h.flush();
+}));
