@@ -3872,7 +3872,10 @@ function startCollector(options) {
       target: path.resolve(canonicalWatchPath(source.dir), path.relative(source.dir, source.target)),
       ...(source.runtimeFile ? { runtimeFile: path.resolve(canonicalWatchPath(source.dir), path.relative(source.dir, source.runtimeFile)) } : {}) }));
     const dirs = [...new Set([...usageDirs, ...activitySources.map((source) => source.dir)])];
-    const directoryKey = JSON.stringify([dirs, activitySources, watchOptions.senpiSources]);
+    // A custom Codex root's watch policy depends on whether it is a Codex home
+    // yet, so a root that becomes one must rebuild the watcher.
+    const codexHomeRoots = (rootsByClient.codex || []).filter(isCodexHome);
+    const directoryKey = JSON.stringify([dirs, activitySources, watchOptions.senpiSources, codexHomeRoots]);
     if (directoryKey === watchedDirectoryKey) return;
     closeWatchers();
     if (dirs.length === 0) {
