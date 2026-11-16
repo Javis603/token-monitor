@@ -497,3 +497,27 @@ test('a default identity this runtime just resolved is not claimed by a slot ali
     assert.deepEqual(runtime.getSnapshot().providers.map((r) => [r.accountKey, r.accountName || '']), [['A', ''], ['B', 'Work']]);
   } finally { runtime.stop(); }
 });
+
+test('a proven Qoder slot that answered once without a user id still separates a different proven account', async () => {
+  const { qoderCookie } = require('../../src/shared/providers/qoder/limits');
+  const values = { qoderCookie: 'token=three', qoderSite: 'global' };
+  const cookieHash = hashKey('qoder', qoderCookie({}, values));
+  const fetch = createAccountSlotFetcher({ ...limitProviderEntry('qoder'),
+    fetchLimits: () => ({ provider: 'qoder', status: 'ok', accountKey: 'B', accountKeyAliases: [cookieHash], updatedAt: new Date().toISOString(), windows: [] }) });
+  // Proven A, then an unproven cookie-hash answer C aliased A; the proof is kept.
+  const rows = await fetch({ qoderAccountSlots: [{ id: 'x', values, accountKey: 'C', accountKeyAliases: ['A'], serverIdentity: true }],
+    previousLimits: { providers: [{ provider: 'qoder', accountKey: 'C', status: 'ok', windows: [] }] } }, deps());
+  const row = rows.find((r) => r.accountKey === 'B');
+  assert.equal((row.accountKeyAliases || []).some((alias) => alias === 'A' || alias === 'C'), false);
+  assert.ok(rows.some((r) => r.removed && r.accountKey === 'C'));
+});
+
+test('a proven Qoder slot answering under a key it has been before stays the same account', async () => {
+  const { qoderCookie } = require('../../src/shared/providers/qoder/limits');
+  const values = { qoderCookie: 'token=one', qoderSite: 'global' };
+  const cookieHash = hashKey('qoder', qoderCookie({}, values));
+  const fetch = createAccountSlotFetcher({ ...limitProviderEntry('qoder'),
+    fetchLimits: () => ({ provider: 'qoder', status: 'ok', accountKey: 'A', accountKeyAliases: [cookieHash], updatedAt: new Date().toISOString(), windows: [] }) });
+  const rows = await fetch({ qoderAccountSlots: [{ id: 'x', values, accountKey: 'C', accountKeyAliases: ['A'], serverIdentity: true }] }, deps());
+  assert.ok(rows.find((r) => r.accountKey === 'A').accountKeyAliases.includes('C'));
+});

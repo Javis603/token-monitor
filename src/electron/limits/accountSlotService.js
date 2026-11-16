@@ -69,7 +69,8 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
             && (old.serverIdentity || provesServer(old.accountKey, old.values, old.accountKeyAliases)));
           const provenNow = Boolean(provider?.accountKey && provesServer
             && provesServer(provider.accountKey, candidate, provider.accountKeyAliases || []));
-          const different = oldProven && provenNow && key !== old.accountKey;
+          // A key this slot has been before (an alias) is its own account coming back.
+          const different = oldProven && provenNow && key !== old.accountKey && !old.accountKeyAliases.includes(key);
           if (different && replaceAnyway !== true) {
             rejected = { saved: false, verdict: 'differentAccount', status: 'differentAccount' };
             return;
@@ -79,7 +80,8 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
             values: candidate, accountKey: key,
             accountKeyAliases: [...new Set([...(old?.accountKeyAliases || []),
               ...(old?.accountKey && old.accountKey !== key ? [old.accountKey] : []), ...(provider?.accountKeyAliases || [])])].filter(alias => alias !== key).slice(-8),
-            serverIdentity: provider?.accountKey ? provenNow : oldProven,
+            // The proof outlives an unproven answer (Qoder without a user id).
+            serverIdentity: provenNow || oldProven,
             createdAt: old?.createdAt || timestamp, updatedAt: timestamp };
           await commit(entry, old ? previous.map(slot => slot.id === id ? record : slot) : [...previous, record]);
         }
@@ -133,7 +135,7 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
       if (!slot || !slot.enabled || fingerprint !== accountValuesFingerprint(slot.values)) return false;
       const provesServer = entry.serverAccountKey && entry.limits[entry.serverAccountKey];
       const proven = Boolean(provesServer && provesServer(identity.accountKey, slot.values, identity.accountKeyAliases || []));
-      slot.serverIdentity = proven || (slot.serverIdentity && identity.accountKey === slot.accountKey);
+      slot.serverIdentity = proven || slot.serverIdentity;
       Object.assign(slot, identity);
       await commit(entry, next, false);
       return true;

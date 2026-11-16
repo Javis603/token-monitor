@@ -320,3 +320,20 @@ test('a replacement changes only the fields it names, and needs an existing id',
   }
   assert.equal(h.settings.qoderAccountSlots.length, 1);
 });
+
+test('a Qoder proof survives an answer without a user id, and its own old key still counts as itself', async () => {
+  const h = harness(); let userId = 'one';
+  h.fetch = async url => url.includes('/organization-shared-usages/') ? response({}, 404)
+    : response({ ...(userId ? { userId } : {}), total_quota: { quota_summary: { limit_value: 100, used_value: 1, remaining_value: 99 } } });
+  const a = await h.service.add('qoder', { qoderCookie: 'token=one', qoderSite: 'global' });
+  const id = a.accounts[0].id; const proven = h.settings.qoderAccountSlots[0].accountKey;
+  userId = '';
+  assert.equal((await h.service.replace('qoder', id, { qoderCookie: 'token=anon' })).saved, true);
+  assert.equal(h.settings.qoderAccountSlots[0].serverIdentity, true);
+  userId = 'two';
+  assert.equal((await h.service.replace('qoder', id, { qoderCookie: 'token=two' })).verdict, 'differentAccount');
+  userId = 'one';
+  const back = await h.service.replace('qoder', id, { qoderCookie: 'token=one-again' });
+  assert.equal(back.saved, true);
+  assert.equal(h.settings.qoderAccountSlots[0].accountKey, proven);
+});

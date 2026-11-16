@@ -225,7 +225,10 @@ function createAccountSlotFetcher(entry) {
         // different proven server account (a credential replaced while offline),
         // is a different account: it takes nothing of the old identity, which the
         // snapshot then retires, so the old account's history is not handed on.
+        // The proof is kept through an unproven answer, and a key the slot has
+        // been before is its own account coming back.
         const separate = Boolean(moved && account.values && account.serverIdentity && provesServer
+          && !account.accountKeyAliases.includes(accountKey)
           && provesServer(accountKey, account.values, row.accountKeyAliases || []));
         const aliases = [...new Set([...(separate ? [] : account.accountKeyAliases), ...(row.accountKeyAliases || []), ...(moved && !separate ? [account.accountKey] : [])])]
           .filter((alias) => !live.has(alias)).slice(-8);
