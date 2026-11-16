@@ -373,9 +373,12 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       // An alias names a key a slot moved away from. The default account, or
       // another slot, may answer under it now, and then the row is theirs.
       // Only while it still belongs to the current default credential, as in the fetcher.
+      // What this runtime resolved for the current default credential wins over the
+      // stored copy, which is only written back to the config on the next reconfigure.
+      const defaultFingerprint = accountValuesFingerprint(defaultAccountValues(entry, config, deps.env || process.env));
       const storedDefault = config[defaultIdentityKey(entry)];
-      const defaultKey = storedDefault?.fingerprint === accountValuesFingerprint(defaultAccountValues(entry, config, deps.env || process.env))
-        ? storedDefault.accountKey || '' : '';
+      const defaultKey = providerRuntimeState.get(`account-slot:${entry.id}:default:${defaultFingerprint}`)?.accountKey
+        || (storedDefault?.fingerprint === defaultFingerprint ? storedDefault.accountKey || '' : '');
       const owner = row => slots.find(slot => slot.accountKey === row.accountKey)
         || (row.accountKey === defaultKey ? undefined : slots.find(slot => slot.accountKeyAliases.includes(row.accountKey)));
       for (const row of rows) {

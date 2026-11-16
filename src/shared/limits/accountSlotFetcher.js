@@ -7,7 +7,7 @@ const { accountSlotKey, normalizeAccountSlots, defaultIdentityKey, defaultAccoun
 
 /**
  * @typedef {import('./accountSlots').AccountSlot} AccountSlot
- * @typedef {Omit<import('./accounts').AccountDeclaration, 'fields'> & {fetchLimits: (options: SlotOptions, deps: SlotDeps) => any, fields: any[]}} SlotEntry
+ * @typedef {Omit<import('./accounts').AccountDeclaration, 'fields'> & {fetchLimits: (options: SlotOptions, deps: SlotDeps) => any, fields: any[], limits?: Record<string, any>}} SlotEntry
  * @typedef {Record<string, any>} SlotOptions Flat provider config, previousLimits and optional limitRefreshScope.
  * @typedef {{accountKey: string, accountKeyAliases: string[]}} SlotIdentity
  * @typedef {Record<string, any> & {providerRuntimeState?: Map<string, any>, onAccountSlotResolved?: (provider: string, slotId: string | null, identity: SlotIdentity, values: Record<string, string>) => void}} SlotDeps Injected transport/env/signal and optional identity persistence hook.
@@ -17,6 +17,7 @@ const { accountSlotKey, normalizeAccountSlots, defaultIdentityKey, defaultAccoun
  * @property {Record<string, string> | null} values
  * @property {string} provisional The key it is filed under until its fetch reports a real one.
  * @property {boolean} known Whether a row has already been filed under `accountKey`.
+ * @property {boolean} serverIdentity Whether the stored key was proven to be a server account.
  * @property {string} accountKey
  * @property {string[]} accountKeyAliases
  */
@@ -72,7 +73,7 @@ function slotAccounts(entry, options, deps) {
 
   // An account's identity is what this runtime remembers, else what the slot
   // record stores, else its provisional key if a row was already filed under it.
-  /** @param {{id: string, label: string, values: Record<string, string> | null, accountKey: string, accountKeyAliases: string[]}} account @returns {SlotAccount} */
+  /** @param {{id: string, label: string, values: Record<string, string> | null, accountKey: string, accountKeyAliases: string[], serverIdentity?: boolean}} account @returns {SlotAccount} */
   const describe = (account) => {
     const provisional = hashKey(entry.id, 'account-slot', accountNamespace(account));
     /** @type {SlotIdentity | null} */
@@ -80,7 +81,7 @@ function slotAccounts(entry, options, deps) {
       || (account.accountKey ? { accountKey: account.accountKey, accountKeyAliases: account.accountKeyAliases } : null)
       || (previousKeys.has(provisional) ? { accountKey: provisional, accountKeyAliases: [] } : null);
     return {
-      id: account.id, label: account.label, values: account.values, provisional, known: Boolean(identity),
+      id: account.id, label: account.label, values: account.values, provisional, known: Boolean(identity), serverIdentity: account.serverIdentity === true,
       accountKey: identity?.accountKey || provisional, accountKeyAliases: identity?.accountKeyAliases || []
     };
   };
@@ -218,8 +219,15 @@ function createAccountSlotFetcher(entry) {
       const rows = [];
       /** @type {Map<string, number>} */
       const emitted = new Map();
+      const provesServer = entry.serverAccountKey && entry.limits?.[entry.serverAccountKey];
       for (const { account, row, accountKey, moved } of answered) {
-        const aliases = [...new Set([...account.accountKeyAliases, ...(row.accountKeyAliases || []), ...(moved ? [account.accountKey] : [])])]
+        // A slot whose stored key was a proven server account, now answering as a
+        // different proven server account (a credential replaced while offline),
+        // is a different account: it takes nothing of the old identity, which the
+        // snapshot then retires, so the old account's history is not handed on.
+        const separate = Boolean(moved && account.values && account.serverIdentity && provesServer
+          && provesServer(accountKey, account.values, row.accountKeyAliases || []));
+        const aliases = [...new Set([...(separate ? [] : account.accountKeyAliases), ...(row.accountKeyAliases || []), ...(moved && !separate ? [account.accountKey] : [])])]
           .filter((alias) => !live.has(alias)).slice(-8);
         // Like retirement, a remembered identity only advances on a pass the
         // runtime can accept whole.

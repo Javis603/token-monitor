@@ -465,3 +465,35 @@ test('a default identity left by an older default credential does not take a slo
     assert.deepEqual(runtime.getSnapshot().providers.map((r) => r.accountKey), ['NEWDEFAULT', 'X', 'A']);
   } finally { runtime.stop(); }
 });
+
+test('a slot that turns out to be a different proven Qoder account takes nothing of the old one', async () => {
+  const { qoderCookie } = require('../../src/shared/providers/qoder/limits');
+  const values = { qoderCookie: 'token=two', qoderSite: 'global' };
+  const cookieHash = hashKey('qoder', qoderCookie({}, values));
+  const qoder = (fetchLimits) => createAccountSlotFetcher({ ...limitProviderEntry('qoder'), fetchLimits });
+  const answer = () => ({ provider: 'qoder', status: 'ok', accountKey: 'B', accountKeyAliases: [cookieHash], updatedAt: new Date().toISOString(), windows: [] });
+  for (const serverIdentity of [true, false]) {
+    const resolved = [];
+    const rows = await qoder(answer)({ qoderAccountSlots: [{ id: 'x', values, accountKey: 'A', accountKeyAliases: ['OLDER'], serverIdentity }],
+      previousLimits: { providers: [{ provider: 'qoder', accountKey: 'A', status: 'ok', windows: [] }] } },
+    { ...deps(), onAccountSlotResolved: (...args) => resolved.push(args) });
+    const row = rows.find((r) => r.accountKey === 'B');
+    const inherited = (row.accountKeyAliases || []).includes('A');
+    // A proven different account is separate; an unproven one keeps the old key as before.
+    assert.equal(inherited, !serverIdentity);
+    assert.equal((row.accountKeyAliases || []).includes('OLDER'), !serverIdentity);
+    assert.equal(resolved[0][2].accountKeyAliases.includes('A'), !serverIdentity);
+    assert.ok(rows.some((r) => r.removed && r.accountKey === 'A'));
+  }
+});
+
+test('a default identity this runtime just resolved is not claimed by a slot alias', async () => {
+  const fetch = fake((o) => reading(o.deepseekApiKey === 'b' ? 'B' : 'A'));
+  // No stored default identity yet: the runtime has only just resolved it.
+  const runtime = runtimeFor(fetch, { deepseekApiKey: 'a', ...config(slot('y', { deepseekApiKey: 'b' }, { label: 'Work', accountKey: 'B', accountKeyAliases: ['A'] })) });
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    await runtime.refresh({}, 'credential-edit');
+    assert.deepEqual(runtime.getSnapshot().providers.map((r) => [r.accountKey, r.accountName || '']), [['A', ''], ['B', 'Work']]);
+  } finally { runtime.stop(); }
+});
