@@ -1,5 +1,6 @@
 'use strict';
 
+const { accountSlotJobs } = require('./accountSlotFetcher');
 const { LIMIT_PROVIDER_IDS } = require('./providers');
 const { LIMIT_PROVIDER_FETCHERS, limitProviderEntry } = require('./registry');
 const {
@@ -160,6 +161,8 @@ function providerPhysicalBoundMs(provider, options = {}, deps = {}) {
       ? 1
       : Math.max(1, managed.length + 1);
   }
+  const entry = limitProviderEntry(provider);
+  if (entry?.accountSlots) jobs = accountSlotJobs(entry, options, deps);
   return base * jobs;
 }
 
