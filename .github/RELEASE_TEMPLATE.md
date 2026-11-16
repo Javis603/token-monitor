@@ -3,32 +3,22 @@
 ## What's changed
 
 <!-- app-update-notes:en:start -->
-### Added
-- **Qoder international usage:** Tracks the international Qoder edition alongside Qoder CN. Both appear in one Qoder row, with an option to show the versions separately. (#1464)
-- **Saved Hubs:** Saves several Hubs, each with its own name, URL, secret and Device ID, and switches between them from the sync status card without retyping. (#1496)
-- **Mica backdrops:** Windows Glass Style adds Mica and Mica Alt for the widget and quota history windows on Windows 11 22H2 or later. Older Windows builds keep using Acrylic. (#1497, #1500)
-
-### Changed
-- **Qoder CN usage:** Usage that exists only in the legacy local database is no longer counted. Project transcripts remain the source. (#1464)
-
 ### Improved
-- **Limits diagnostics:** The diagnostics report names the stage and cause of a quota failure, such as a timeout, a challenge page or an HTTP error. (#1492)
+- **New API account setup:** Identifies retired access tokens and missing permissions, and warns when a saved token can read the balance but not period spend. (#1506)
 
 ### Fixed
-- **Windows main window:** Reopening the window no longer flashes an empty backdrop or an opaque grey Acrylic background. (#1488)
-- **Hub connection:** A Hub that showed Connected while usage and quota stopped updating, for example after a Worker redeploy, now recovers on its own. (#1486)
-- **Multi-device quota history:** Accounts watched from several devices no longer show a broken trend line or usage that is “Not allocated to time buckets”. (#1490)
-- **Qoder quota history:** History stays on one timeline when the Qoder cookie refreshes or the account signs in again. (#1474)
-- **OMP totals:** Month and all-time totals no longer double-count OMP forks recorded before the Pi and OMP split. (#1493)
-- **Project ranking:** Projects are ranked by token usage instead of cost, matching the totals and bars shown. (#1501)
+- **Muse quota:** Restores web-cookie quota readings after changes to the Muse website. (#1507)
+- **OpenClaw usage:** Includes usage found only in archived transcripts, without double-counting copies in live sessions or transcript files. (#1508)
+- **Git worktree projects:** Newly collected usage from linked worktree roots is grouped under the parent repository instead of separate projects. (#1505)
+- **Live animations:** Running and waiting indicators and hover effects no longer jump or stop during updates; session activity glows replay on new activity. (#1511)
 <!-- app-update-notes:en:end -->
 ## Download
 
-- **macOS Apple Silicon** — [Token-Monitor-0.93.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.93.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0-x64.dmg)
-- **Windows Installer** — [Token-Monitor-Setup-0.93.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-Setup-0.93.0.exe) (recommended)
-- **Windows Portable** — [Token-Monitor-0.93.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0.exe) (no install required)
-- **Linux x64** — [Token-Monitor-0.93.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.93.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.93.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-x64.dmg)
+- **Windows Installer** — [Token-Monitor-Setup-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-Setup-0.93.1.exe) (recommended)
+- **Windows Portable** — [Token-Monitor-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.exe) (no install required)
+- **Linux x64** — [Token-Monitor-0.93.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.AppImage)
 
 <details>
 <summary><strong>First launch and other notes</strong></summary>
@@ -63,33 +53,23 @@ Tokscale is bundled with this app and updated through Token Monitor releases. Se
 ## 更新内容
 
 <!-- app-update-notes:zh:start -->
-### 新增
-- **Qoder 国际版用量：** 支持追踪 Qoder 国际版，与 Qoder CN 合并显示为一个 Qoder 行，也可选择分开显示版本。 （#1464）
-- **多个 Hub：** 可保存多个 Hub，各自拥有名称、URL、密钥和设备 ID，并在同步状态卡片中一键切换，无需重新输入。 （#1496）
-- **Mica 背景：** Windows 玻璃样式新增 Mica 与 Mica Alt，适用于小组件和额度历史窗口，需要 Windows 11 22H2 或更高版本；较旧的 Windows 继续使用 Acrylic。 （#1497、#1500）
-
-### 变更
-- **Qoder CN 用量：** 仅存在于旧版本地数据库中的用量不再计入，项目会话记录仍是统计来源。 （#1464）
-
 ### 改进
-- **额度诊断：** 诊断报告会指出额度失败所处的阶段和原因，例如超时、验证页面或 HTTP 错误。 （#1492）
+- **New API 账号设置：** 明确提示访问令牌已停用或缺少权限，并在保存的令牌只能读取余额、无法读取时段支出时显示警告。 （#1506）
 
 ### 修复
-- **Windows 主窗口：** 重新打开窗口时，不再闪现空白背景或不透明的灰色 Acrylic 背景。 （#1488）
-- **Hub 连接：** Hub 显示“已连接”但用量和额度停止更新的问题（例如 Worker 重新部署之后）现在会自动恢复。 （#1486）
-- **多设备额度历史：** 从多台设备监看同一账号时，不再出现中断的趋势线或“未能分配至时段”的用量。 （#1490）
-- **Qoder 额度历史：** Qoder Cookie 刷新或账号重新登录后，历史仍保持在同一条时间线上。 （#1474）
-- **OMP 合计：** 本月与总计用量不再重复计算在 Pi 与 OMP 拆分之前记录的 OMP 分支会话。 （#1493）
-- **项目排序：** 项目改为按 Token 用量排序而非费用，与显示的合计和条形图一致。 （#1501）
+- **Muse 额度：** 修复网站变更后，使用 Cookie 读取额度时显示不可用的问题。 （#1507）
+- **OpenClaw 用量：** 补计仅存在于归档会话记录中的用量，且不会重复计算实时会话或会话文件中的副本。 （#1508）
+- **Git worktree 项目：** 从关联 worktree 根目录新采集的用量归入所属仓库，不再拆分为独立项目。 （#1505）
+- **实时动画：** 更新时，运行与等待指示器及悬停效果不再跳动或中断；会话有新活动时会重新播放发光效果。 （#1511）
 <!-- app-update-notes:zh:end -->
 
 ## 下载
 
-- **macOS Apple Silicon** — [Token-Monitor-0.93.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.93.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0-x64.dmg)
-- **Windows 安装版** — [Token-Monitor-Setup-0.93.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-Setup-0.93.0.exe)（推荐）
-- **Windows 便携版** — [Token-Monitor-0.93.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0.exe)（免安装）
-- **Linux x64** — [Token-Monitor-0.93.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.93.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.93.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-x64.dmg)
+- **Windows 安装版** — [Token-Monitor-Setup-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-Setup-0.93.1.exe)（推荐）
+- **Windows 便携版** — [Token-Monitor-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.exe)（免安装）
+- **Linux x64** — [Token-Monitor-0.93.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.AppImage)
 
 <details>
 <summary><strong>首次启动与其他说明</strong></summary>
@@ -120,7 +100,7 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ---
 
 <details>
-<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.92.0...v0.93.0">v0.92.0...v0.93.0</a></summary>
+<summary><strong>Full Changelog:</strong> <a href="https://github.com/Javis603/token-monitor/compare/v0.93.0...v0.93.1">v0.93.0...v0.93.1</a></summary>
 
 <!-- github-generated-release-notes -->
 
@@ -137,33 +117,23 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ## 更新內容
 
 <!-- app-update-notes:zh-TW:start -->
-### 新增
-- **Qoder 國際版用量：** 支援追蹤 Qoder 國際版，與 Qoder CN 合併顯示為單一 Qoder 列，也可選擇分開顯示版本。 （#1464）
-- **多個 Hub：** 可儲存多個 Hub，各自擁有名稱、URL、金鑰與裝置 ID，並在同步狀態卡片中一鍵切換，無需重新輸入。 （#1496）
-- **Mica 背景：** Windows 玻璃樣式新增 Mica 與 Mica Alt，適用於小工具與額度歷史視窗，需要 Windows 11 22H2 或更新版本；較舊的 Windows 繼續使用 Acrylic。 （#1497、#1500）
-
-### 變更
-- **Qoder CN 用量：** 僅存在於舊版本機資料庫中的用量不再計入，專案對話紀錄仍是統計來源。 （#1464）
-
 ### 改進
-- **額度診斷：** 診斷報告會指出額度失敗所處的階段與原因，例如逾時、驗證頁面或 HTTP 錯誤。 （#1492）
+- **New API 帳戶設定：** 明確提示存取權杖已停用或缺少權限，並在儲存的權杖只能讀取餘額、無法讀取時段支出時顯示警告。 （#1506）
 
 ### 修復
-- **Windows 主視窗：** 重新開啟視窗時，不再閃現空白背景或不透明的灰色 Acrylic 背景。 （#1488）
-- **Hub 連線：** Hub 顯示「已連線」但用量與額度停止更新的問題（例如 Worker 重新部署之後）現在會自動恢復。 （#1486）
-- **多裝置額度歷史：** 從多台裝置監看同一帳號時，不再出現中斷的趨勢線或「未能分配至時段」的用量。 （#1490）
-- **Qoder 額度歷史：** Qoder Cookie 更新或帳號重新登入後，歷史仍維持在同一條時間線上。 （#1474）
-- **OMP 合計：** 本月與總計用量不再重複計算在 Pi 與 OMP 拆分之前記錄的 OMP 分支工作階段。 （#1493）
-- **專案排序：** 專案改為依 Token 用量排序而非費用，與顯示的合計和長條圖一致。 （#1501）
+- **Muse 額度：** 修復網站變更後，使用 Cookie 讀取額度時顯示無法使用的問題。 （#1507）
+- **OpenClaw 用量：** 補計僅存在於封存對話紀錄中的用量，且不會重複計算即時工作階段或對話檔案中的副本。 （#1508）
+- **Git worktree 專案：** 從關聯 worktree 根目錄新收集的用量歸入所屬儲存庫，不再拆分為獨立專案。 （#1505）
+- **即時動畫：** 更新時，執行與等待指示器及懸停效果不再跳動或中斷；工作階段有新活動時會重新播放發光效果。 （#1511）
 <!-- app-update-notes:zh-TW:end -->
 
 ## 下載
 
-- **macOS Apple Silicon** — [Token-Monitor-0.93.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.93.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0-x64.dmg)
-- **Windows 安裝版** — [Token-Monitor-Setup-0.93.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-Setup-0.93.0.exe)（推薦）
-- **Windows 便攜版** — [Token-Monitor-0.93.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0.exe)（免安裝）
-- **Linux x64** — [Token-Monitor-0.93.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.93.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.93.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-x64.dmg)
+- **Windows 安裝版** — [Token-Monitor-Setup-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-Setup-0.93.1.exe)（推薦）
+- **Windows 便攜版** — [Token-Monitor-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.exe)（免安裝）
+- **Linux x64** — [Token-Monitor-0.93.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.AppImage)
 
 </details>
 
@@ -175,33 +145,23 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ## 업데이트 내용
 
 <!-- app-update-notes:ko:start -->
-### 추가
-- **Qoder 국제 버전 사용량:** Qoder 국제 버전을 Qoder CN과 함께 추적합니다. 두 버전은 하나의 Qoder 행으로 표시되며, 버전별로 나누어 표시할 수도 있습니다. (#1464)
-- **여러 Hub 저장:** 이름, URL, 시크릿, 기기 ID가 각각 있는 Hub를 여러 개 저장하고, 동기화 상태 카드에서 다시 입력하지 않고 바로 전환할 수 있습니다. (#1496)
-- **Mica 배경:** Windows 글래스 스타일에 Mica와 Mica Alt가 추가되어 위젯과 한도 기록 창에 적용할 수 있습니다. Windows 11 22H2 이상이 필요하며, 이전 Windows에서는 계속 Acrylic을 사용합니다. (#1497, #1500)
-
-### 변경
-- **Qoder CN 사용량:** 예전 로컬 데이터베이스에만 있는 사용량은 더 이상 집계되지 않으며, 프로젝트 대화 기록이 집계 기준으로 유지됩니다. (#1464)
-
 ### 개선
-- **한도 진단:** 진단 보고서가 시간 초과, 인증 확인 페이지, HTTP 오류 등 할당량 조회 실패의 단계와 원인을 알려 줍니다. (#1492)
+- **New API 계정 설정:** 사용이 종료된 액세스 토큰과 권한 부족을 구분해 안내하고, 저장한 토큰으로 잔액만 조회할 수 있고 기간별 지출은 조회할 수 없으면 경고를 표시합니다. (#1506)
 
 ### 수정
-- **Windows 메인 창:** 창을 다시 열 때 빈 배경이 깜빡이거나 Acrylic 배경이 불투명한 회색으로 보이던 문제를 수정했습니다. (#1488)
-- **Hub 연결:** Hub가 연결됨으로 표시되는데 사용량과 한도가 갱신되지 않던 문제(예: Worker 재배포 이후)가 이제 자동으로 복구됩니다. (#1486)
-- **여러 기기의 한도 기록:** 여러 기기에서 같은 계정을 볼 때 추세선이 끊기거나 “시간 구간에 배분되지 않은 양”이 나타나던 문제를 수정했습니다. (#1490)
-- **Qoder 한도 기록:** Qoder 쿠키가 갱신되거나 계정에 다시 로그인해도 기록이 하나의 타임라인으로 유지됩니다. (#1474)
-- **OMP 합계:** Pi와 OMP가 분리되기 전에 기록된 OMP 포크가 이번 달과 전체 합계에 중복 집계되던 문제를 수정했습니다. (#1493)
-- **프로젝트 정렬:** 프로젝트를 비용이 아닌 토큰 사용량 순으로 정렬해, 표시되는 합계와 막대와 일치합니다. (#1501)
+- **Muse 할당량:** 웹사이트 변경 후 쿠키로 조회한 할당량이 사용 불가로 표시되는 문제를 수정했습니다. (#1507)
+- **OpenClaw 사용량:** 보관된 대화 기록에만 남은 사용량도 집계하며, 실시간 세션이나 대화 파일에 같은 기록이 있어도 중복 계산하지 않습니다. (#1508)
+- **Git worktree 프로젝트:** 연결된 worktree의 루트 디렉터리에서 새로 수집한 사용량을 별도 프로젝트로 나누지 않고 원래 저장소에 합산합니다. (#1505)
+- **실시간 애니메이션:** 업데이트 중 실행·대기 표시와 호버 효과가 튀거나 끊기지 않으며, 세션에 새 활동이 생기면 발광 효과가 다시 재생됩니다. (#1511)
 <!-- app-update-notes:ko:end -->
 
 ## 다운로드
 
-- **macOS Apple Silicon** — [Token-Monitor-0.93.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.93.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0-x64.dmg)
-- **Windows 설치 버전** — [Token-Monitor-Setup-0.93.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-Setup-0.93.0.exe) (권장)
-- **Windows 포터블 버전** — [Token-Monitor-0.93.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0.exe) (설치 필요 없음)
-- **Linux x64** — [Token-Monitor-0.93.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.93.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.93.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-x64.dmg)
+- **Windows 설치 버전** — [Token-Monitor-Setup-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-Setup-0.93.1.exe) (권장)
+- **Windows 포터블 버전** — [Token-Monitor-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.exe) (설치 필요 없음)
+- **Linux x64** — [Token-Monitor-0.93.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.AppImage)
 
 </details>
 
@@ -213,33 +173,23 @@ Tokscale 已随应用内置，并通过 Token Monitor 发布版本更新。你�
 ## 更新内容
 
 <!-- app-update-notes:ja:start -->
-### 追加
-- **Qoder国際版の使用量:** Qoder国際版をQoder CNと並べて追跡します。両方が1つのQoder行に表示され、バージョン別に分けて表示することもできます。 (#1464)
-- **複数Hubの保存:** 名前、URL、シークレット、デバイスIDを持つHubを複数保存し、同期ステータスカードから入力し直さずに切り替えられます。 (#1496)
-- **Mica背景:** WindowsガラススタイルにMicaとMica Altを追加しました。ウィジェットと上限履歴のウィンドウで使え、Windows 11 22H2以降が必要です。それより前のWindowsでは引き続きAcrylicを使用します。 (#1497, #1500)
-
-### 変更
-- **Qoder CNの使用量:** 旧ローカルデータベースにしかない使用量は集計されなくなりました。集計元はプロジェクトの会話記録です。 (#1464)
-
 ### 改善
-- **上限の診断:** 診断レポートに、タイムアウト、確認ページ、HTTPエラーなど、上限取得の失敗が起きた段階と原因が表示されます。 (#1492)
+- **New API アカウント設定：** 廃止されたアクセストークンと権限不足を区別して案内し、保存したトークンで残高のみ取得でき、期間別の支出を取得できない場合は警告を表示します。 (#1506)
 
 ### 修正
-- **Windowsのメインウィンドウ:** ウィンドウを開き直したときに、空の背景が一瞬表示されたり、Acrylic背景が不透明なグレーになったりする問題を修正しました。 (#1488)
-- **Hub接続:** Hubが接続済みと表示されているのに使用量と上限が更新されなくなる問題（Workerの再デプロイ後など）から、自動で回復するようになりました。 (#1486)
-- **複数端末の上限履歴:** 複数の端末から同じアカウントを監視しても、推移の線が途切れたり、「時間帯に配分できない変化」が表示されたりしなくなりました。 (#1490)
-- **Qoderの上限履歴:** QoderのCookieが更新されたりアカウントに再ログインしたりしても、履歴が1本のタイムラインにまとまったままになります。 (#1474)
-- **OMPの合計:** PiとOMPの分離前に記録されたOMPのフォークが、今月と合計で二重に集計される問題を修正しました。 (#1493)
-- **プロジェクトの並び順:** プロジェクトをコストではなくトークン使用量の順に並べ、表示される合計やバーと一致するようにしました。 (#1501)
+- **Muse クォータ：** ウェブサイトの変更後、Cookie によるクォータ取得が利用不可になる問題を修正しました。 (#1507)
+- **OpenClaw 使用量：** アーカイブされた会話記録にのみ残る使用量も集計し、実行中のセッションや会話ファイルに同じ記録があっても重複計上しません。 (#1508)
+- **Git worktree のプロジェクト：** リンクされた worktree のルートディレクトリで新たに収集した使用量を、個別のプロジェクトに分けず元のリポジトリにまとめます。 (#1505)
+- **リアルタイムのアニメーション：** 更新時に実行・待機インジケーターやホバー効果が飛んだり途切れたりする問題を修正し、セッションで新しい活動があると発光効果を再生します。 (#1511)
 <!-- app-update-notes:ja:end -->
 
 ## ダウンロード
 
-- **macOS Apple Silicon** — [Token-Monitor-0.93.0-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0-arm64.dmg)
-- **macOS Intel** — [Token-Monitor-0.93.0-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0-x64.dmg)
-- **Windows インストーラー** — [Token-Monitor-Setup-0.93.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-Setup-0.93.0.exe)（推奨）
-- **Windows ポータブル版** — [Token-Monitor-0.93.0.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0.exe)（インストール不要）
-- **Linux x64** — [Token-Monitor-0.93.0.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.93.0/Token-Monitor-0.93.0.AppImage)
+- **macOS Apple Silicon** — [Token-Monitor-0.93.1-arm64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-arm64.dmg)
+- **macOS Intel** — [Token-Monitor-0.93.1-x64.dmg](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1-x64.dmg)
+- **Windows インストーラー** — [Token-Monitor-Setup-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-Setup-0.93.1.exe)（推奨）
+- **Windows ポータブル版** — [Token-Monitor-0.93.1.exe](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.exe)（インストール不要）
+- **Linux x64** — [Token-Monitor-0.93.1.AppImage](https://github.com/Javis603/token-monitor/releases/download/v0.93.1/Token-Monitor-0.93.1.AppImage)
 
 </details>
 
