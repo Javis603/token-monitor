@@ -521,3 +521,15 @@ test('a proven Qoder slot answering under a key it has been before stays the sam
   const rows = await fetch({ qoderAccountSlots: [{ id: 'x', values, accountKey: 'C', accountKeyAliases: ['A'], serverIdentity: true }] }, deps());
   assert.ok(rows.find((r) => r.accountKey === 'A').accountKeyAliases.includes('C'));
 });
+
+test('a rename shows on the next reconfigure without another fetch', async () => {
+  let calls = 0;
+  const runtime = runtimeFor(fake((o) => { calls += 1; return reading(o.deepseekApiKey.toUpperCase()); }), config(slot('a', undefined, { label: 'Old', accountKey: 'A' })));
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    const before = calls;
+    runtime.reconfigure({ limitProviders: ['deepseek'], ...config(slot('a', undefined, { label: 'New', accountKey: 'A' })) });
+    assert.equal(runtime.getSnapshot().providers[0].accountName, 'New');
+    assert.equal(calls, before);
+  } finally { runtime.stop(); }
+});

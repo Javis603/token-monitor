@@ -53,7 +53,7 @@ test('probe invalid, incomplete, indeterminate; credential replacement continues
   assert.ok(h.settings.deepseekAccountSlots[0].accountKeyAliases.includes(old));
   assert.ok(!JSON.stringify(replaced).includes('SECRET'));
 });
-test('Qoder proven server identity differs; explicit replacement aliases; cookie fallback remains replaceable', async () => {
+test('Qoder proven server identity differs and is never merged; cookie fallback remains replaceable', async () => {
   const h = harness(); let userId = 'one';
   h.fetch = async (url) => url.includes('/organization-shared-usages/') ? response({}, 404) : response({ userId, total_quota: { quota_summary: { limit_value: 100, used_value: 1, remaining_value: 99 } } });
   const a = await h.service.add('qoder', { qoderCookie: 'token=one', qoderSite: 'global' });
@@ -63,8 +63,11 @@ test('Qoder proven server identity differs; explicit replacement aliases; cookie
   userId = 'two';
   assert.equal((await h.service.replace('qoder', id, { qoderCookie: 'token=two', qoderSite: 'global' })).verdict, 'differentAccount');
   assert.equal(h.settings.qoderAccountSlots[0].accountKey, old);
-  assert.equal((await h.service.replace('qoder', id, { qoderCookie: 'token=two', qoderSite: 'global' }, true)).saved, true);
-  assert.ok(h.settings.qoderAccountSlots[0].accountKeyAliases.includes(old));
+  // There is no override: a different proven account is added as its own account.
+  assert.equal((await h.service.replace('qoder', id, { qoderCookie: 'token=two', qoderSite: 'global' }, true)).verdict, 'differentAccount');
+  assert.equal((await h.service.add('qoder', { qoderCookie: 'token=two', qoderSite: 'global' })).saved, true);
+  assert.equal(h.settings.qoderAccountSlots.length, 2);
+  assert.ok(!h.settings.qoderAccountSlots[1].accountKeyAliases.includes(old));
   userId = '';
   assert.equal((await h.service.replace('qoder', id, { qoderCookie: 'token=fallback', qoderSite: 'global' })).saved, true);
 });
@@ -250,8 +253,9 @@ test('replaced Qoder credential cannot reuse remembered identity on keyless fail
   try {
     await runtime.refresh({}, 'settings-change');
     const old = runtime.getSnapshot().providers[0].accountKey;
-    userId = 'two';
-    await h.service.replace('qoder', a.accounts[0].id, { qoderCookie: 'token=two', qoderSite: 'global' }, true);
+    // A replacement that cannot prove a different account (no user id) is saved under a new key.
+    userId = '';
+    await h.service.replace('qoder', a.accounts[0].id, { qoderCookie: 'token=two', qoderSite: 'global' });
     const key = h.settings.qoderAccountSlots[0].accountKey; assert.notEqual(key, old);
     offline = true; runtime.reconfigure(config());
     await runtime.refresh({}, 'settings-change');
@@ -336,4 +340,16 @@ test('a Qoder proof survives an answer without a user id, and its own old key st
   const back = await h.service.replace('qoder', id, { qoderCookie: 'token=one-again' });
   assert.equal(back.saved, true);
   assert.equal(h.settings.qoderAccountSlots[0].accountKey, proven);
+});
+
+test('renaming and reordering re-project rows without asking the provider again', async () => {
+  const h = harness(); const changes = [];
+  h.changed = (provider, change) => changes.push([provider, change.refresh]);
+  const a = await add(h); const b = await h.service.add('deepseek', { deepseekApiKey: 'SECRET-two' }, 'Second');
+  const id = a.accounts[0].id; changes.length = 0;
+  await h.service.rename('deepseek', id, 'Renamed');
+  await h.service.move('deepseek', b.accounts[1].id, 'up');
+  await h.service.setEnabled('deepseek', id, false);
+  await h.service.remove('deepseek', id);
+  assert.deepEqual(changes, [['deepseek', false], ['deepseek', false], ['deepseek', true], ['deepseek', true]]);
 });

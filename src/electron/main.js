@@ -8402,6 +8402,9 @@ app.whenReady().then(() => {
     probeDeps: credentialProbeDeps,
     onChanged: (provider, change) => {
       deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      // A rename or reorder is re-projected by the reconfigure above; asking the
+      // provider again would only spend its rate limit.
+      if (change?.refresh === false) return;
       if (deviceRuntimeHandle) return invalidateAccountSlotChange(deviceRuntimeHandle, provider, change);
       // No runtime yet: the retired accounts are cleared once one starts.
       for (const accountKey of change?.retiredAccountKeys || []) {

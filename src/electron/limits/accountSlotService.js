@@ -26,10 +26,12 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     id, label, enabled, fingerprint: accountKey ? accountValuesFingerprint({ accountKey }).slice(7, 19) : '', createdAt, updatedAt
   }));
   const failure = (errorCode) => ({ ok: false, errorCode });
-  const changed = (entry, retiredAccountKeys) => {
-    try { Promise.resolve(onChanged?.(entry.id, { retiredAccountKeys })).catch(() => {}); } catch (_) { /* Durable save already succeeded. */ }
+  // `refresh: false`: only local presentation changed (label, order), so the
+  // runtime re-projects its rows without asking the provider again.
+  const changed = (entry, retiredAccountKeys, refresh) => {
+    try { Promise.resolve(onChanged?.(entry.id, { retiredAccountKeys, refresh })).catch(() => {}); } catch (_) { /* Durable save already succeeded. */ }
   };
-  async function commit(entry, next, notify = true) {
+  async function commit(entry, next, notify = true, refresh = true) {
     const previous = slots(entry);
     const normalized = normalizeAccountSlots(entry, next);
     const keys = slot => [slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`), ...slot.accountKeyAliases];
@@ -41,13 +43,13 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     const retiredAccountKeys = [...new Set(previous.filter(slot => slot.enabled
       && !normalized.some(item => item.id === slot.id && item.enabled)).flatMap(keys))].filter(key => !owned.has(key));
     await write({ [accountSlotKey(entry)]: normalized });
-    if (notify) changed(entry, retiredAccountKeys);
+    if (notify) changed(entry, retiredAccountKeys, refresh);
   }
   function list(providerId) {
     const entry = entryFor(providerId);
     return entry ? { ok: true, accounts: dto(entry) } : failure('unsupportedProvider');
   }
-  function save(providerId, values, { replacing = false, id, label = '', replaceAnyway = false } = {}) {
+  function save(providerId, values, { replacing = false, id, label = '' } = {}) {
     return serialize(async () => {
       const entry = entryFor(providerId);
       if (!entry) return failure('unsupportedProvider');
@@ -71,7 +73,9 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
             && provesServer(provider.accountKey, candidate, provider.accountKeyAliases || []));
           // A key this slot has been before (an alias) is its own account coming back.
           const different = oldProven && provenNow && key !== old.accountKey && !old.accountKeyAliases.includes(key);
-          if (different && replaceAnyway !== true) {
+          // Two proven server accounts never share a slot: the caller adds the
+          // new one as its own account instead, so no history is handed on.
+          if (different) {
             rejected = { saved: false, verdict: 'differentAccount', status: 'differentAccount' };
             return;
           }
@@ -116,7 +120,7 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
         if (target >= 0 && target < next.length) [next[index], next[target]] = [next[target], next[index]];
       } else return failure('invalidOperation');
       if (operation !== 'remove') next.find(slot => slot.id === id).updatedAt = new Date(now()).toISOString();
-      await commit(entry, next);
+      await commit(entry, next, true, operation !== 'rename' && operation !== 'move');
       return list(providerId);
     }).catch(() => failure('credentialStorageUnavailable'));
   }
@@ -142,7 +146,7 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     });
   }
   return { list, add: (provider, values, label) => save(provider, values, { label }),
-    replace: (provider, id, values, replaceAnyway = false) => save(provider, values, { replacing: true, id, replaceAnyway }),
+    replace: (provider, id, values) => save(provider, values, { replacing: true, id }),
     rename: (provider, id, label) => mutate(provider, id, 'rename', label),
     setEnabled: (provider, id, enabled) => mutate(provider, id, 'enabled', enabled),
     remove: (provider, id) => mutate(provider, id, 'remove'),
