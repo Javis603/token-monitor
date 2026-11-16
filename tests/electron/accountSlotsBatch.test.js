@@ -303,3 +303,64 @@ test('Devin slot editor prefills organization for token-only rotation and never 
   assert.equal(projection.devinOrganization, 'org/a');
   assert.equal(projection.devinBearerToken, 'set');
 });
+
+for (const withToken of [true, false]) test(`Trae device-only migration preserves companion without a phantom slot (env token: ${withToken})`, async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slots-trae-device-only-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const store = new CredentialStore(dir);
+  store.replaceSettingsCredentials({ traeDeviceId: 'stored-device' });
+  const env = withToken ? { TRAE_ACCESS_TOKEN: 'env-token' } : {};
+  let requests = 0;
+  const fetch = async (url, init) => {
+    requests++;
+    assert.ok(url.endsWith('/ide_user_ent_usage'));
+    assert.equal(init.headers.Authorization, 'Cloud-IDE-JWT env-token');
+    assert.equal(init.headers['X-Device-Id'], 'stored-device');
+    return { ok: true, status: 200, json: async () => legacyTraeBody };
+  };
+  const before = await limitProviderEntry('trae').fetchLimits(store.settingsCredentials(), { env, fetch });
+  const migrated = migrateAccountSlots(store, {}, Date.now, env);
+  assert.equal(migrated.traeDeviceId, 'stored-device');
+  assert.ok(!migrated.traeAccountSlots?.length);
+  assert.equal(store.settingsCredentials().traeDeviceId, 'stored-device');
+  assert.deepEqual(migrateAccountSlots(store, {}, Date.now, env), migrated);
+  const service = createAccountSlotService({ getSettings: () => migrated, write: async () => {}, env });
+  assert.deepEqual(service.list('trae').accounts.map(a => [a.id, a.source]), withToken ? [['environment', 'environment']] : []);
+  const raw = await LIMIT_PROVIDER_FETCHERS.trae(migrated, { env, fetch });
+  const row = Array.isArray(raw) ? raw[0] : raw;
+  assert.equal(row.status, withToken ? 'ok' : 'notConfigured');
+  assert.equal(row.accountKey, before.accountKey);
+  assert.equal(requests, withToken ? 2 : 0);
+  assert.ok(!JSON.stringify(store.readDocument()).includes('env-token'));
+});
+
+for (const [name, fixed, env, environmentWins] of [
+  ['env cookie beats stored token', { traeAccessToken: 'stored-token' }, { TRAE_COOKIE: 'sessionid=a' }, true],
+  ['stored cookie beats env token', { traeCookie: 'sessionid=a' }, { TRAE_ACCESS_TOKEN: 'env-token' }, false],
+  ['stored cookie beats env cookie', { traeCookie: 'sessionid=a' }, { TRAE_COOKIE: 'sessionid=b' }, false],
+  ['stored token beats env token', { traeAccessToken: 'stored-token', traeDeviceId: 'stored-device' }, { TRAE_ACCESS_TOKEN: 'env-token' }, false]
+]) test(`Trae winning credential lane: ${name}`, async () => {
+  const settings = { ...fixed, traeAccountSlots: [{ id: 'b', values: fixtures.trae.values('b') }] };
+  const seen = [];
+  const fetch = async (url, init) => {
+    if (url.endsWith('/ide_user_ent_usage')) {
+      assert.equal(init.headers.Authorization, 'Cloud-IDE-JWT stored-token');
+      assert.equal(init.headers['X-Device-Id'], 'stored-device');
+      seen.push({ n: 'token' });
+      return { ok: true, status: 200, json: async () => legacyTraeBody };
+    }
+    return transport('trae', seen)(url, init);
+  };
+  const rows = await LIMIT_PROVIDER_FETCHERS.trae(settings, { env, fetch });
+  const key = fixed.traeCookie || env.TRAE_COOKIE ? fixtures.trae.key('a') : hashKey('trae', 'stored-token');
+  assert.deepEqual(rows.map(r => [r.accountKey, r.status]), [[key, 'ok'], [fixtures.trae.key('b'), 'ok']]);
+  const service = createAccountSlotService({ getSettings: () => settings, write: async () => {}, env });
+  const listed = service.list('trae').accounts;
+  assert.deepEqual(listed.map(a => a.id), environmentWins ? ['environment', 'b'] : ['b']);
+  if (environmentWins) {
+    assert.equal(listed[0].accountKey, rows[0].accountKey);
+    assert.equal(listed[0].source, 'environment');
+    assert.equal((await service.remove('trae', 'environment')).errorCode, 'environmentCredential');
+  }
+  assert.ok(seen.some(c => c.n === 'b'));
+});
