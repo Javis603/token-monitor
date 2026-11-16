@@ -1076,8 +1076,17 @@ test('remote presentation names and ordering reach desktop titles without relabe
   assert.equal(result[1].accountName, 'Native');
   assert.equal(accountTitleLabel(result[1]), 'Local Work');
   assert.equal(accountTitleLabel(result[0]), 'Local Work');
-  const unlabelled = applyAccountOrder([{ provider: 'qoder', accountKey: 'local', accountName: 'Native' }], { qoder: [{ accountKey: 'local' }] }, 'local', presentation);
-  assert.equal(unlabelled[0].accountDisplayName, 'Native');
+  // Unnamed accounts keep their own name and email fields, so the title helper
+  // still masks emails; only a user-chosen label becomes the display name.
+  const unlabelled = applyAccountOrder([
+    { provider: 'qoder', accountKey: 'local', accountName: 'Native' },
+    { provider: 'qoder', accountKey: 'r9', accountEmail: 'private@example.com', sourceDeviceId: 'other' }
+  ], { qoder: [{ accountKey: 'local' }] }, 'local', presentation);
+  assert.equal(unlabelled[0].accountDisplayName, undefined);
+  assert.equal(accountTitleLabel(unlabelled[0]), 'Native');
+  assert.equal(unlabelled[1].accountDisplayName, undefined);
+  assert.equal(unlabelled[1].accountName, undefined);
+  assert.doesNotMatch(accountTitleLabel(unlabelled[1], [unlabelled[1]], { maskEmail: true }), /private@/);
   assert.equal(accountName({ source: 'remote', fingerprint: 'abc' }, { accountKey: 'r', accountEmail: 'native@example.com' }, t, { labels: { r: 'Named' } }), 'Named');
   assert.equal(accountName({ source: 'remote', fingerprint: 'abc' }, {}, t), 'Account #abc');
 });
@@ -1195,4 +1204,14 @@ test('a remote drop that a push already put in place releases its save lock', ()
   assert.deepEqual(h.calls, [], 'nothing to save for a zero-step drop');
   await h.click(h.row('remote:r2'), 'Move down'); await h.flush();
   assert.equal(h.calls.filter(call => call[0] === 'presentation').length, 1, 'remote reordering is not left locked');
+}));
+
+test('Alt+arrow on a remote row is ignored while a remote row is dragged', () => withDrag(async h => {
+  const context = remoteFixture();
+  h.panel.update(h.slots, [], context); h.layout();
+  h.ipc.presentation = async (...args) => { h.calls.push(['presentation', ...args]); return { ok: true }; };
+  h.press('remote:r2'); h.emit('pointermove', -100);
+  await h.row('remote:r1').key('ArrowDown', true); await h.flush();
+  assert.deepEqual(h.calls, []);
+  h.emit('pointercancel', -100); await h.flush();
 }));

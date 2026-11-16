@@ -37,8 +37,10 @@
       if (!slots) return row;
       const owner = slotOwner(slots, row.accountKey, row.accountKeyAliases);
       const remote = !owner && row.sourceDeviceId && row.sourceDeviceId !== localDeviceId;
-      const name = accountName(owner || { source: remote ? 'remote' : '', fingerprint: accountIdentity.accountStableFingerprint(row).slice(0, 12) }, row, undefined, presentation[row.provider] || {});
-      return { ...row, accountName: owner ? row.accountName : name, accountDisplayName: name };
+      // Only a name the user chose becomes the display name. Provider names and
+      // emails stay in their own fields, so email masking still applies to them.
+      const label = owner ? owner.label : remote ? presentation[row.provider]?.labels?.[row.accountKey] : '';
+      return label ? { ...row, accountDisplayName: label } : row;
     });
     for (const [provider, slots] of Object.entries(slotsByProvider)) {
       const positions = result.flatMap((row, index) => row.provider === provider ? [index] : []);
@@ -131,11 +133,11 @@
       const remote = remoteSlots.find(slot => slot.id === args[0]);
       if (!remote) {
         // A keyboard/menu move during a live drag would race the drop's measured order.
-        if (operation === 'move' && (dragSavePending || rowDrag.isDragging())) return;
+        if (operation === 'move' && (dragSavePending || rowDrag.isDragging() || remoteDrag.isDragging())) return;
         operationsPending++;
         return enqueue(() => ipc[operation](form.id, ...args)).finally(() => { operationsPending--; });
       }
-      if (operation === 'move' && (presentationPending > 0 || rowDrag.isDragging())) return;
+      if (operation === 'move' && (presentationPending > 0 || rowDrag.isDragging() || remoteDrag.isDragging())) return;
       presentationPending++;
       return enqueue(() => {
         if (operation === 'rename') return ipc.presentation(form.id, remote.accountKey, 'rename', args[1]);
