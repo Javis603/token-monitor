@@ -31,7 +31,12 @@ function migrateAccountSlots(store, settings, now = Date.now) {
     const slots = normalizeAccountSlots(entry, raw);
     if (slots.length !== raw.length) throw new Error('Invalid account slot list');
     let slot = slots.find(slot => accountValuesFingerprint(slot.values) === fingerprint);
-    if (!slot) {
+    if (slot && !slot.enabled) {
+      // The fixed credential was being collected; a paused duplicate taking its
+      // place must not stop that, so the destination is resumed.
+      slot = { ...slot, enabled: true, updatedAt: new Date(now()).toISOString() };
+      store.replaceSettingsCredentials({ ...stored, [key]: slots.map(item => item.id === slot.id ? slot : item) }, document);
+    } else if (!slot) {
       if (slots.length >= 21) throw new Error('Account slot limit prevents migration');
       const saved = stored[defaultIdentityKey(entry)];
       const identity = saved?.fingerprint === fingerprint ? saved : {};

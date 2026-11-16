@@ -3,7 +3,7 @@
 const { hashKey } = require('../../shared/hashKey');
 const { runLimitInvalidation } = require('../deviceRuntimeCoordinator');
 const { randomUUID } = require('node:crypto');
-const { createCredentialCommands } = require('./credentialCommands');
+const { createCredentialCommands, providerSelectionIncluding } = require('./credentialCommands');
 const { accountForm } = require('./accountSettings');
 const { limitProviderEntry } = require('../../shared/limits/registry');
 const { accountSlotKey, normalizeAccountSlots, defaultAccountValues, accountValuesFingerprint } = require('../../shared/limits/accountSlots');
@@ -41,7 +41,7 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
   const changed = (entry, retiredAccountKeys, refresh) => {
     try { Promise.resolve(onChanged?.(entry.id, { retiredAccountKeys, refresh })).catch(() => {}); } catch (_) { /* Durable save already succeeded. */ }
   };
-  async function commit(entry, next, notify = true, refresh = true) {
+  async function commit(entry, next, notify = true, refresh = true, activate = false) {
     const previous = ordered(entry);
     const normalized = normalizeAccountSlots(entry, next);
     const keys = slot => [slot.accountKey || hashKey(entry.id, 'account-slot', slot.source ? 'default' : `slot:${slot.id}`), ...(slot.accountKeyAliases || [])];
@@ -49,7 +49,10 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     const owned = new Set(active.flatMap(keys));
     const retiredAccountKeys = [...new Set(previous.filter(slot => slot.enabled
       && !active.some(item => item.id === slot.id)).flatMap(keys))].filter(key => !owned.has(key));
-    await write({ [accountSlotKey(entry)]: normalized });
+    // A saved credential turns collection on for its provider, as the fixed
+    // credential form always did.
+    await write({ [accountSlotKey(entry)]: normalized, ...(activate ? {
+      limitProviders: providerSelectionIncluding(getSettings().limitProviders, entry.id), limitsEnabled: true } : {}) });
     if (notify) changed(entry, retiredAccountKeys, refresh);
   }
   function list(providerId) {
@@ -95,7 +98,7 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
             // The proof outlives an unproven answer (Qoder without a user id).
             serverIdentity: provenNow || oldProven,
             createdAt: old?.createdAt || timestamp, updatedAt: timestamp };
-          await commit(entry, old ? previous.map(slot => slot.id === id ? record : slot) : [...previous, record]);
+          await commit(entry, old ? previous.map(slot => slot.id === id ? record : slot) : [...previous, record], true, true, true);
         }
       });
       if (!values || typeof values !== 'object' || Array.isArray(values)) return { saved: false, verdict: 'invalid', status: 'required' };

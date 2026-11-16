@@ -156,3 +156,13 @@ test('a provider with nothing to migrate is marked without creating an account',
   assert.equal(migrated.deepseekAccountSlots, undefined);
   assert.equal(store.readDocument().migrations.accountSlots.deepseek, 1);
 });
+
+test('a paused duplicate of the collected credential is resumed rather than silently stopping it', t => {
+  const paused = { id: 'dup', label: 'Copy', enabled: false, values };
+  const store = fixture(t, { ...values, deepseekAccountSlots: [paused] });
+  const migrated = migrateAccountSlots(store, {});
+  assert.equal(migrated.deepseekAccountSlots.length, 1);
+  assert.equal(migrated.deepseekAccountSlots[0].id, 'dup');
+  assert.equal(migrated.deepseekAccountSlots[0].enabled, true);
+  assert.equal(migrated.deepseekApiKey, undefined);
+});

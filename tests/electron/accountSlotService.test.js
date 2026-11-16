@@ -358,3 +358,15 @@ test('adding an extra account does not retire an unnamed implicit default before
   assert.deepEqual(changes.at(-1).retiredAccountKeys, []);
   assert.ok(!h.settings.deepseekAccountSlots.some(slot => slot.id === 'default'));
 });
+
+test('saving an account turns collection on for its provider, as the fixed form did', async () => {
+  const h = harness();
+  h.settings = { ...h.settings, limitsEnabled: false, limitProviders: 'qoder' };
+  assert.equal((await add(h)).saved, true);
+  assert.equal(h.settings.limitsEnabled, true);
+  assert.deepEqual(h.settings.limitProviders.split(',').sort(), ['deepseek', 'qoder']);
+  // Local presentation changes never touch the provider selection.
+  h.settings = { ...h.settings, limitProviders: 'qoder' };
+  await h.service.rename('deepseek', h.settings.deepseekAccountSlots[0].id, 'Renamed');
+  assert.equal(h.settings.limitProviders, 'qoder');
+});
