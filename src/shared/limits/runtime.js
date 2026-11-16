@@ -1,6 +1,6 @@
 'use strict';
 
-const { configuredMultiAccountProviders, normalizeAccountSlots, accountSlotKey, defaultIdentityKey } = require('./accountSlots');
+const { configuredMultiAccountProviders, normalizeAccountSlots, accountSlotKey, defaultIdentityKey, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
 const { LIMIT_PROVIDER_REGISTRY } = require('./registry');
 
 const crypto = require('node:crypto');
@@ -372,7 +372,10 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       const slots = normalizeAccountSlots(entry, config[accountSlotKey(entry)]).filter(slot => slot.enabled);
       // An alias names a key a slot moved away from. The default account, or
       // another slot, may answer under it now, and then the row is theirs.
-      const defaultKey = config[defaultIdentityKey(entry)]?.accountKey || '';
+      // Only while it still belongs to the current default credential, as in the fetcher.
+      const storedDefault = config[defaultIdentityKey(entry)];
+      const defaultKey = storedDefault?.fingerprint === accountValuesFingerprint(defaultAccountValues(entry, config, deps.env || process.env))
+        ? storedDefault.accountKey || '' : '';
       const owner = row => slots.find(slot => slot.accountKey === row.accountKey)
         || (row.accountKey === defaultKey ? undefined : slots.find(slot => slot.accountKeyAliases.includes(row.accountKey)));
       for (const row of rows) {

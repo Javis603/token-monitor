@@ -445,10 +445,23 @@ test('every declared serverAccountKey names a predicate its limits module export
 
 test('a key a slot moved away from stays with the default account that answers under it', async () => {
   const fetch = fake((o) => reading(o.deepseekApiKey === 'a' ? 'A' : 'B'));
-  const runtime = runtimeFor(fetch, { deepseekApiKey: 'a', deepseekDefaultAccountIdentity: { accountKey: 'A', accountKeyAliases: [] },
+  const { accountValuesFingerprint } = require('../../src/shared/limits/accountSlots');
+  const fingerprint = accountValuesFingerprint({ deepseekApiKey: 'a', deepseekWebToken: '' });
+  const runtime = runtimeFor(fetch, { deepseekApiKey: 'a', deepseekDefaultAccountIdentity: { accountKey: 'A', accountKeyAliases: [], fingerprint },
     ...config(slot('x', { deepseekApiKey: 'b' }, { label: 'Work', accountKey: 'B', accountKeyAliases: ['A'] })) });
   try {
     await runtime.refresh({}, 'credential-edit');
     assert.deepEqual(runtime.getSnapshot().providers.map((r) => [r.accountKey, r.accountName || '']), [['A', ''], ['B', 'Work']]);
+  } finally { runtime.stop(); }
+});
+
+test('a default identity left by an older default credential does not take a slot alias', async () => {
+  // Slot y answers under the key it moved away from, which the stale default identity also names.
+  const fetch = fake((o) => reading({ x: 'X', y: 'A' }[o.deepseekApiKey] || 'NEWDEFAULT'));
+  const runtime = runtimeFor(fetch, { deepseekApiKey: 'changed', deepseekDefaultAccountIdentity: { accountKey: 'A', accountKeyAliases: [], fingerprint: 'stale' },
+    ...config(slot('x', { deepseekApiKey: 'x' }, { accountKey: 'X' }), slot('y', { deepseekApiKey: 'y' }, { accountKey: 'B', accountKeyAliases: ['A'] })) });
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    assert.deepEqual(runtime.getSnapshot().providers.map((r) => r.accountKey), ['NEWDEFAULT', 'X', 'A']);
   } finally { runtime.stop(); }
 });
