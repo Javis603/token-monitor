@@ -418,3 +418,20 @@ test('a slot name never replaces the provider label that carries the plan', asyn
     assert.deepEqual(runtime.getSnapshot().providers.map((r) => [r.accountKey, r.accountLabel, r.accountName || '']), [['A', 'Pro', 'Work'], ['B', 'Pro', '']]);
   } finally { runtime.stop(); }
 });
+
+test('emptying a slot name removes it from retained readings too', async () => {
+  let offline = false;
+  const fetch = fake((o) => offline ? { provider: 'deepseek', status: 'unavailable' } : { ...reading(o.deepseekApiKey.toUpperCase()), accountLabel: 'Pro' });
+  const runtime = runtimeFor(fetch, config(slot('a', undefined, { label: 'Work', accountKey: 'A' })));
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    assert.equal(runtime.getSnapshot().providers[0].accountName, 'Work');
+    offline = true;
+    runtime.reconfigure({ limitProviders: ['deepseek'], ...config(slot('a', undefined, { label: '', accountKey: 'A' })) });
+    await runtime.refresh({}, 'settings-change');
+    const [row] = runtime.getSnapshot().providers;
+    assert.ok(!row.accountName);
+    assert.equal(row.accountLabel, 'Pro');
+    assert.equal(row.windows.length, 1);
+  } finally { runtime.stop(); }
+});

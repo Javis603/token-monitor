@@ -232,11 +232,13 @@ function createAccountSlotFetcher(entry) {
           }
         }
         const { accountKeyAliases: _reported, ...answer } = row;
+        // A slot's local name is its accountName (the runtime projects the same
+        // rule onto retained readings); the provider's accountLabel carries the plan.
+        if (account.values) delete answer.accountName;
         const emit = {
           ...answer, accountKey,
           ...(aliases.length ? { accountKeyAliases: aliases } : {}),
-          // The provider's accountLabel carries the plan; the local name is accountName.
-          ...(account.label ? { accountName: account.label } : {})
+          ...(account.values && account.label ? { accountName: account.label } : {})
         };
         // A second account reporting an identity already answered in this pass
         // is the same upstream account: one row, the first reading that worked,
