@@ -26,7 +26,9 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
   const environment = entry => {
     const values = defaultAccountValues(entry, getSettings(), env);
     const field = entry.fields.find(field => field.key === entry.status.credential);
-    return !getSettings()[field.key] && field.resolve?.(env) ? { id: 'environment', label: '', enabled: true, source: 'environment', values, accountKey: hashKey(entry.id, values[field.key]), ...environmentIdentities.get(entry.id) } : null;
+    const cached = environmentIdentities.get(entry.id);
+    const identity = cached?.fingerprint === accountValuesFingerprint(values) ? cached.identity : {};
+    return !getSettings()[field.key] && field.resolve?.(env) ? { id: 'environment', label: '', enabled: true, source: 'environment', values, accountKey: hashKey(entry.id, values[field.key]), ...identity } : null;
   };
   const ordered = (entry, list = slots(entry)) => [...(environment(entry) ? [environment(entry)] : []), ...list];
   const dto = entry => ordered(entry).map(({ id, label, enabled, accountKey, accountKeyAliases = [], values, source, createdAt, updatedAt }) => {
@@ -143,7 +145,7 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
       const fingerprint = accountValuesFingerprint(dispatchedValues);
       if (id === 'environment') {
         if (fingerprint !== accountValuesFingerprint(defaultAccountValues(entry, getSettings(), env))) return false;
-        environmentIdentities.set(entry.id, identity);
+        environmentIdentities.set(entry.id, { fingerprint, identity });
         return true;
       }
       if (!id) return false;

@@ -531,6 +531,7 @@ test('a rename finishes on its own row after another row starts renaming', async
   await pending;
   assert.equal(h.row('a').querySelector('.slot-rename'), undefined);
   assert.ok(h.row('b').querySelector('.slot-rename'));
+  assert.ok(h.document.activeElement === h.row('b').querySelector('.slot-rename'), 'row B keeps rename focus');
 });
 
 test('Enter that confirms an IME composition does not save the rename', async () => {
@@ -711,4 +712,28 @@ test('an armed remove item has its own tinted background, matching other inline 
   const css = require('node:fs').readFileSync(require.resolve('../../src/electron/renderer/styles.css'), 'utf8');
   assert.match(css, /\.plugin-menu button\.menu-destructive\.confirming \{ color: var\(--red\); background: rgba\(255, 91, 91, 0\.12\);/);
   assert.match(css, /\.managed-account-remove\.confirming \{[^}]*background: rgba\(255, 91, 91, 0\.12\);/);
+});
+
+for (const event of ['resize', 'scroll']) test(`detached open action menu releases global listeners on ${event}`, () => {
+  const h = harness(); const listeners = new Map();
+  const track = target => {
+    target.addEventListener = (name, callback) => listeners.set(name, callback);
+    target.removeEventListener = (name, callback) => { if (listeners.get(name) === callback) listeners.delete(name); };
+  };
+  track(h.document); track(h.document.defaultView);
+  const menu = h.row('a').querySelector('.plugin-menu');
+  menu.showPopover();
+  assert.equal(listeners.size, 2);
+  h.panel.element.remove();
+  listeners.get(event)();
+  assert.equal(listeners.size, 0);
+});
+
+test('a reading that resolved to its real key keeps its place with a cached pre-resolution slot list', () => {
+  const cached = { deepseek: [{ id: 'first', accountKey: 'provisional-first' }, { id: 'second', accountKey: 'second' }] };
+  const records = [
+    { provider: 'deepseek', accountKey: 'second' },
+    { provider: 'deepseek', accountKey: 'resolved-first', accountKeyAliases: ['provisional-first'] }
+  ];
+  assert.deepEqual(applyAccountOrder(records, cached).map(row => row.accountKey), ['resolved-first', 'second']);
 });

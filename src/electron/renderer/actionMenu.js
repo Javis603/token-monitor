@@ -30,6 +30,11 @@
       else popover.showPopover();
     });
     const position = () => {
+      if (!popover.isConnected) {
+        window.removeEventListener('resize', position);
+        document.removeEventListener('scroll', position, true);
+        return;
+      }
       if (popover.matches(':popover-open')) {
         const rect = trigger.getBoundingClientRect();
         const position = positionApi.popupPosition(rect, { width: window.innerWidth, height: window.innerHeight }, {

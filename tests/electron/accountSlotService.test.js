@@ -370,3 +370,19 @@ test('saving an account turns collection on for its provider, as the fixed form 
   await h.service.rename('deepseek', h.settings.deepseekAccountSlots[0].id, 'Renamed');
   assert.equal(h.settings.limitProviders, 'qoder');
 });
+
+test('environment identity is reused only for matching credential and site values', async () => {
+  const env = { QODER_COOKIE: 'token=one' };
+  const h = harness({ env });
+  const values = { qoderCookie: 'token=one', qoderSite: 'global' };
+  assert.equal(await h.service.resolved('qoder', 'environment', { accountKey: 'server-one', accountKeyAliases: ['old'] }, values), true);
+  assert.equal(h.service.list('qoder').accounts[0].accountKey, 'server-one');
+  env.QODER_COOKIE = 'token=two';
+  assert.notEqual(h.service.list('qoder').accounts[0].accountKey, 'server-one');
+  assert.deepEqual(h.service.list('qoder').accounts[0].accountKeyAliases, []);
+  env.QODER_COOKIE = 'token=one';
+  h.settings = { ...h.settings, qoderSite: 'cn' };
+  assert.notEqual(h.service.list('qoder').accounts[0].accountKey, 'server-one');
+  h.settings = { ...h.settings, qoderSite: 'global' };
+  assert.equal(h.service.list('qoder').accounts[0].accountKey, 'server-one');
+});

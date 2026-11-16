@@ -18,16 +18,19 @@
   }
   // Reorder only each provider's existing positions, leaving other providers and
   // remote accounts in their original relative order. Local defaults lead.
-  function slotOwner(slots, accountKey) {
+  // A reading that moved to its resolved key still lists the key it moved from,
+  // so a cached slot list that predates the move keeps its owner.
+  function slotOwner(slots, accountKey, readingAliases = []) {
     return slots.find(slot => slot.accountKey === accountKey)
-      || slots.find(slot => slot.accountKeyAliases?.includes(accountKey));
+      || slots.find(slot => slot.accountKeyAliases?.includes(accountKey))
+      || slots.find(slot => readingAliases.includes(slot.accountKey));
   }
   function applyAccountOrder(records, slotsByProvider, _localDeviceId = '') {
     const result = [...records];
     for (const [provider, slots] of Object.entries(slotsByProvider)) {
       const positions = result.flatMap((row, index) => row.provider === provider ? [index] : []);
       const rank = row => {
-        const index = slots.indexOf(slotOwner(slots, row.accountKey));
+        const index = slots.indexOf(slotOwner(slots, row.accountKey, row.accountKeyAliases));
         if (index >= 0) return index;
         return slots.length;
       };
@@ -196,10 +199,11 @@
             const result = await run('rename', id, input.value);
             if (!result?.ok || revision !== item.renameRevision) return;
           }
+          const restoreFocus = document.activeElement === input;
           item.renameRevision++;
           item.editing = false;
           preserveScroll(render);
-          el.focus({ preventScroll: true });
+          if (restoreFocus) el.focus({ preventScroll: true });
         });
         input.focus({ preventScroll: true });
         input.select();
@@ -273,7 +277,7 @@
       active.forEach((slot, index) => {
         const item = rowFor(slot.id);
         item.slot = slot;
-        const reading = readings.find(row => slotOwner(slots, row.accountKey) === slot);
+        const reading = readings.find(row => slotOwner(slots, row.accountKey, row.accountKeyAliases) === slot);
         if (!item.editing) item.name.textContent = accountName(slot, reading, t);
         const status = accountStatus(slot, reading);
         item.el.classList.toggle('slot-paused', !slot.enabled);

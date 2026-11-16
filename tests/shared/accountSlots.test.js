@@ -542,3 +542,22 @@ test('a separated Qoder account cannot take the old identity back through a repo
   assert.equal((row.accountKeyAliases || []).some((alias) => alias === cookieHash || alias === 'A'), false);
   assert.ok(rows.some((r) => r.removed && r.accountKey === cookieHash));
 });
+
+for (const withSlots of [false, true]) test(`environment resolution keeps dispatch values across a pending fetch (slots=${withSlots})`, async () => {
+  const env = { DEEPSEEK_API_KEY: 'before' };
+  const state = new Map(), calls = [];
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const options = withSlots ? config(slot('extra')) : {};
+  const pending = fake(async () => { await gate; return reading('old-account'); })(options, {
+    env, providerRuntimeState: state, onAccountSlotResolved: (...args) => calls.push(args)
+  });
+  env.DEEPSEEK_API_KEY = 'after';
+  release(); await pending;
+  assert.equal(calls.find(call => call[1] === 'environment')[3].deepseekApiKey, 'before');
+  if (withSlots) {
+    const { accountValuesFingerprint } = require('../../src/shared/limits/accountSlots');
+    assert.ok(state.has(`account-slot:deepseek:default:${accountValuesFingerprint({ deepseekApiKey: 'before', deepseekWebToken: '' })}`));
+    assert.ok(!state.has(`account-slot:deepseek:default:${accountValuesFingerprint({ deepseekApiKey: 'after', deepseekWebToken: '' })}`));
+  }
+});

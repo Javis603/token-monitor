@@ -160,10 +160,11 @@ function createAccountSlotFetcher(entry) {
   /** @param {SlotOptions} options @param {SlotDeps} deps */
   return function fetchAccountSlots(options = {}, deps = {}) {
     if (!normalizeAccountSlots(entry, options[key]).length) {
+      const dispatchedValues = defaultAccountValues(entry, options, deps.env || process.env);
       let result = entry.fetchLimits(options, deps);
       if (deps.onAccountSlotResolved) result = Promise.resolve(result).then(raw => {
         if (!deps.signal?.aborted) for (const row of Array.isArray(raw) ? raw : [raw]) {
-          if (row?.accountKey && !row.removed) deps.onAccountSlotResolved?.(entry.id, 'environment', { accountKey: row.accountKey, accountKeyAliases: row.accountKeyAliases || [] }, defaultAccountValues(entry, options, deps.env || process.env));
+          if (row?.accountKey && !row.removed) deps.onAccountSlotResolved?.(entry.id, 'environment', { accountKey: row.accountKey, accountKeyAliases: row.accountKeyAliases || [] }, dispatchedValues);
         }
         return raw;
       });
@@ -175,13 +176,14 @@ function createAccountSlotFetcher(entry) {
 
     async function collect() {
       const { accounts, scopeKey, previousKeys, check } = slotAccounts(entry, options, deps);
-      /** @type {{account: SlotAccount, row: any, accountKey: string, moved: boolean}[]} */
+      /** @type {{account: SlotAccount, values: Record<string, string>, row: any, accountKey: string, moved: boolean}[]} */
       const answered = [];
       let complete = true;
       for (const account of accounts) {
         if (deps.signal?.aborted) { complete = false; break; }
         const owned = new Set([account.accountKey, account.provisional, ...account.accountKeyAliases]);
         // The adapter decides retirement below, so a fetch's own removal rows are dropped.
+        const values = account.values || defaultAccountValues(entry, options, deps.env || process.env);
         const answers = (await fetchAccount(account, owned, options, deps))
           .filter((row) => !row.removed && answersScope(row, check));
         if (!answers.length && check && !check.keyless) continue;
@@ -192,7 +194,7 @@ function createAccountSlotFetcher(entry) {
           // nothing remembered; a held provisional key's recovery moves on the
           // next provider-wide dispatch.
           const accountKey = scopeKey || row.accountKey || account.accountKey;
-          answered.push({ account, row, accountKey, moved: account.known && accountKey !== account.accountKey });
+          answered.push({ account, values, row, accountKey, moved: account.known && accountKey !== account.accountKey });
         }
       }
       if (deps.signal?.aborted) complete = false;
@@ -204,7 +206,7 @@ function createAccountSlotFetcher(entry) {
       /** @type {Map<string, number>} */
       const emitted = new Map();
       const provesServer = entry.serverAccountKey && entry.limits?.[entry.serverAccountKey];
-      for (const { account, row, accountKey, moved } of answered) {
+      for (const { account, values, row, accountKey, moved } of answered) {
         // A slot whose stored key was a proven server account, now answering as a
         // different proven server account (a credential replaced while offline),
         // is a different account: it takes nothing of the old identity, which the
@@ -224,10 +226,10 @@ function createAccountSlotFetcher(entry) {
         // runtime can accept whole.
         if (!scopeKey && complete) {
           const identity = { accountKey, accountKeyAliases: aliases };
-          deps.providerRuntimeState?.set(`account-slot:${entry.id}:${accountNamespace(account)}:${accountValuesFingerprint(account.values || defaultAccountValues(entry, options, deps.env || process.env))}`, identity);
+          deps.providerRuntimeState?.set(`account-slot:${entry.id}:${accountNamespace(account)}:${accountValuesFingerprint(values)}`, identity);
           if (!account.known || moved || aliases.join('\n') !== account.accountKeyAliases.join('\n')) {
             // Environment identities stay in memory; local identities update their slot.
-            deps.onAccountSlotResolved?.(entry.id, account.id, identity, account.values || defaultAccountValues(entry, options, deps.env || process.env));
+            deps.onAccountSlotResolved?.(entry.id, account.id, identity, values);
           }
         }
         const { accountKeyAliases: _reported, ...answer } = row;
