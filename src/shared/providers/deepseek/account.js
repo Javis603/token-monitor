@@ -4,6 +4,7 @@
 // DeepSeek limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'deepseek',
+  accountSlots: true,
   fetch: 'fetchDeepSeekLimits',
   fields: [
     {
