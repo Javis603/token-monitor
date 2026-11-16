@@ -42,7 +42,7 @@
     { id: 'antigravity', label: 'Antigravity' },
     // Keys identify the API key or sign-in account within each lane; matching display emails do not establish identity.
     { id: 'cline', portableAccountKey: true, label: 'Cline' },
-    { id: 'factory', label: 'Factory Droid' },
+    { id: 'factory', portableAccountKey: true, label: 'Factory Droid' },
     { id: 'kimi', label: 'Kimi' },
     { id: 'grok', label: 'Grok' },
     { id: 'copilot', label: 'GitHub Copilot' },
@@ -55,7 +55,7 @@
     { id: 'kiro', label: 'Kiro' },
     { id: 'workbuddy', label: 'WorkBuddy' },
     { id: 'qoder', label: 'Qoder' },
-    { id: 'deepseek', label: 'DeepSeek' },
+    { id: 'deepseek', portableAccountKey: true, label: 'DeepSeek' },
     { id: 'devin', label: 'Devin' },
     { id: 'minimax', label: 'Minimax' },
     { id: 'mistral', label: 'Mistral' },

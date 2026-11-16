@@ -1045,10 +1045,10 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
     byKey.set(providerAggregateKey(provider), provider);
   }
 
-  // Second pass: collapse by provider name. Same OAuth account on Mac vs Windows
-  // hashes to different accountKeys (keychain identity vs file path), so byKey
-  // keeps them as separate entries; without this pass the renderer's per-provider
-  // Map.set() would arbitrarily overwrite the fresh one with the stale one.
+  // Second pass: collapse device-local credential identities by provider.
+  // Portable accounts and explicitly reported multi-account providers keep each
+  // account's best observation, but a stale portable account still yields to a
+  // fresh account of the same provider.
   const hasKnownWorkbuddyAccount = Array.from(byKey.values()).some((candidate) =>
     candidate.provider === 'workbuddy' && candidate.accountKey && !isWorkbuddyPlaceholder(candidate));
   const knownMinimaxSources = new Set(Array.from(byKey.values())

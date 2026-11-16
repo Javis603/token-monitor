@@ -7,11 +7,11 @@ const { normalizeDeviceRecord, mergeDeviceRecord } = require('../../src/shared/u
 const { syncPayload } = require('../../src/shared/syncPayload');
 const now = Date.parse('2026-11-16T10:00:00Z');
 const row = (accountKey, extra = {}) => ({
-  provider: 'deepseek', accountKey, status: 'ok', source: 'api',
+  provider: 'kimi', accountKey, status: 'ok', source: 'api',
   updatedAt: new Date(now).toISOString(), windows: [], ...extra
 });
 const device = (deviceId, providers, signal = false) => ({
-  deviceId, limits: { providers, ...(signal ? { multiAccountProviders: ['deepseek'] } : {}) }
+  deviceId, limits: { providers, ...(signal ? { multiAccountProviders: ['kimi'] } : {}) }
 });
 
 for (const variant of ['fresh', 'stale', 'unavailable', 'error', 'unauthorized']) {
@@ -161,3 +161,45 @@ test('the signal keeps a healthy keyless reading from a separate source lane', (
   assert.deepEqual(aggregateLimits(devices, 0, now).providers.map(p => [p.accountKey, p.source]).sort(),
     [['', 'cli'], ['M1', 'web'], ['M2', 'web']]);
 });
+
+// No device advertises multiAccountProviders: each has only one credential.
+for (const provider of ['deepseek', 'factory']) {
+  const portableRow = (key, extra = {}) => row(key, { provider, ...extra });
+  test(`portable accounts: ${provider} keeps distinct single-account devices and drops a keyless hint`, () => {
+    const result = aggregateLimits([
+      device('a', [portableRow('A')]), device('b', [portableRow('B')]),
+      device('c', [portableRow('', { status: 'notConfigured' })])
+    ], 0, now).providers;
+    assert.deepEqual(result.map(p => p.accountKey), ['A', 'B']);
+  });
+  test(`portable accounts: ${provider} merges the same key across devices and carries its balance`, () => {
+    const result = aggregateLimits([
+      device('a', [portableRow('A', { balance: { amount: 42, currency: 'USD' } })]),
+      device('b', [portableRow('A', { updatedAt: new Date(now + 1000).toISOString() })])
+    ], 0, now).providers;
+    assert.equal(result.length, 1);
+    assert.equal(result[0].sourceDeviceId, 'b');
+    assert.equal(result[0].balance.amount, 42);
+  });
+  for (const variant of ['unauthorized', 'unavailable', 'error']) {
+    test(`portable accounts: ${provider} preserves a distinct ${variant} account without carrying another balance`, () => {
+      const extra = { status: variant };
+      const result = aggregateLimits([
+        device('a', [portableRow('A', { balance: { amount: 42, currency: 'USD' } })]),
+        device('b', [portableRow('B', extra)]),
+        device('c', [portableRow('', { status: 'notConfigured' })])
+      ], 0, now).providers;
+      assert.deepEqual(result.map(p => [p.accountKey, p.status, p.stale]),
+        [['A', 'ok', false], ['B', variant, false]]);
+      assert.equal(result[1].balance, null);
+      assert.equal(result[1].windows.some(w => w.metric === 'credits'), false);
+    });
+  }
+  test(`portable accounts: ${provider} follows the portable rule for a stale account beside a fresh one`, () => {
+    const devices = [device('a', [portableRow('A')]),
+      device('b', [portableRow('B', { updatedAt: new Date(now - 3600000).toISOString() })])];
+    assert.deepEqual(aggregateLimits(devices, 0, now).providers.map(p => p.accountKey), ['A']);
+    const codex = devices.map(d => ({ ...d, limits: { providers: d.limits.providers.map(p => ({ ...p, provider: 'codex' })) } }));
+    assert.deepEqual(aggregateLimits(codex, 0, now).providers.map(p => p.accountKey), ['A']);
+  });
+}
