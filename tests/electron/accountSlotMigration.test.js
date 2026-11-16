@@ -58,8 +58,7 @@ test('Qoder environment site is copied, cookie moved; migrated account is first'
 test('destination verification precedes stripping; crash retry never duplicates', t => {
   const store = fixture(t, values);
   const read = store.readDocument.bind(store);
-  let reads = 0;
-  store.readDocument = () => { if (++reads === 3) throw new Error('crash after destination write'); return read(); };
+  store.readDocument = () => { const doc = read(); if (doc.credentials.providers?.deepseek?.accountSlots?.length) throw new Error('crash after destination write'); return doc; };
   assert.throws(() => migrateAccountSlots(store, {}), /crash/);
   store.readDocument = read;
   assert.equal(store.settingsCredentials().deepseekApiKey, values.deepseekApiKey);
@@ -71,8 +70,7 @@ test('destination verification precedes stripping; crash retry never duplicates'
 test('a failed read-back leaves the fixed credential intact', t => {
   const store = fixture(t, values);
   const read = store.readDocument.bind(store);
-  let reads = 0;
-  store.readDocument = () => { const doc = read(); if (++reads === 3) delete doc.credentials.providers.deepseek.accountSlots; return doc; };
+  store.readDocument = () => { const doc = read(); if (doc.credentials.providers?.deepseek?.accountSlots?.length) delete doc.credentials.providers.deepseek.accountSlots; return doc; };
   assert.throws(() => migrateAccountSlots(store, {}), /verification/);
   store.readDocument = read;
   assert.equal(store.settingsCredentials().deepseekApiKey, values.deepseekApiKey);
@@ -142,7 +140,7 @@ test('a failed slot migration at startup keeps every other stored credential loa
 test('migration runs once per provider and is recorded like the store\'s other migrations', t => {
   const store = fixture(t, values);
   migrateAccountSlots(store, {});
-  assert.deepEqual(store.readDocument().migrations.accountSlots, { qoder: 1, deepseek: 1 });
+  assert.deepEqual(store.readDocument().migrations.accountSlots, Object.fromEntries(require('../../src/shared/limits/registry').LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots).map(entry => [entry.id, 1])));
   // A fixed value written after the marker is not turned into another account.
   store.replaceSettingsCredentials({ ...store.settingsCredentials(), deepseekApiKey: 'later' });
   const again = migrateAccountSlots(store, {});

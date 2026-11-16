@@ -606,7 +606,7 @@ test('Trae Cookie save probes the two-hop web route, replaces the legacy token, 
   assert.deepEqual(expired.patches, []);
 });
 
-test('OpenDesign cookie saves probe the workspace and quota, reject expired sessions and clear through the shared path', async () => {
+test('OpenDesign cookie saves probe the workspace and quota, reject expired sessions and require slot commands to clear', async () => {
   const calls = [];
   const { api, patches } = commands({ answer: (url, init) => {
     calls.push({ url, init });
@@ -623,8 +623,8 @@ test('OpenDesign cookie saves probe the workspace and quota, reject expired sess
   assert.equal(calls.length, 2);
   assert.ok(calls.every(({ init }) => init.headers.Cookie === 'session=test-only'));
   assert.ok(!JSON.stringify(result).includes('test-only'));
-  assert.equal((await api.clearCredential('opendesign')).cleared, true);
-  assert.equal(patches[1].opendesignCookie, '');
+  assert.deepEqual(await api.clearCredential('opendesign'), { cleared: false, errorCode: 'accountSlotRequired' });
+  assert.equal(patches.length, 1);
 
   for (const [code, saved, verdict] of [[401, false, 'invalid'], [403, true, 'indeterminate'], [429, true, 'indeterminate']]) {
     const c = commands({ answer: () => response(code) });
@@ -637,7 +637,7 @@ test('OpenDesign cookie saves probe the workspace and quota, reject expired sess
   assert.deepEqual(c.patches, []);
 });
 
-for (const id of ['qoder', 'deepseek']) test(`legacy clear refuses ${id} account slots without a settings write`, async () => {
+for (const { id } of LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots)) test(`legacy clear refuses ${id} account slots without a settings write`, async () => {
   const { api, patches } = commands({ settings: { [`${id}AccountSlots`]: [{ id: 'migrated', values: {} }] } });
   assert.deepEqual(await api.clearCredential(id), { cleared: false, errorCode: 'accountSlotRequired' });
   assert.deepEqual(patches, []);

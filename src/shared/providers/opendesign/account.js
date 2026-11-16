@@ -4,6 +4,7 @@
 // OpenDesign limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'opendesign',
+  accountSlots: true,
   fetch: 'fetchOpendesignLimits',
   fields: [
     {

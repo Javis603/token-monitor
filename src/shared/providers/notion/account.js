@@ -4,6 +4,7 @@
 // Manual-only account declaration. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'notion',
+  accountSlots: true,
   fetch: 'fetchNotionLimits',
   fields: [
     {
