@@ -1020,3 +1020,18 @@ test('Alt+arrow during a live drag is ignored', () => withDrag(async h => {
   assert.equal(h.calls.filter(call => call[0] === 'move').length, 0);
   h.emit('pointercancel', 100); await h.flush();
 }));
+
+test('a pending removal blocks starting a drag until it settles', () => withDrag(async h => {
+  h.panel.update(h.service.list('qoder').accounts, []); h.layout();
+  let finishRemove;
+  h.ipc.remove = (...args) => {
+    h.calls.push(['remove', ...args]);
+    return new Promise(resolve => { finishRemove = async () => resolve(await h.service.remove(...args)); });
+  };
+  h.click(h.row('a'), 'Remove account'); h.click(h.row('a'), 'Confirm remove');
+  await h.flush();
+  h.press('b'); h.emit('pointermove', 0);
+  assert.equal(h.listeners.has('pointermove'), false, 'a drag cannot measure a list a pending removal is about to change');
+  await finishRemove(); await h.flush();
+  assert.equal(h.calls.filter(call => call[0] === 'move').length, 0);
+}));
