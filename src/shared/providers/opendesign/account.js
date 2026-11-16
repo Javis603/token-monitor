@@ -5,6 +5,7 @@
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'opendesign',
   accountSlots: true,
+  serverAccountKey: 'isOpendesignServerAccountKey',
   fetch: 'fetchOpendesignLimits',
   fields: [
     {

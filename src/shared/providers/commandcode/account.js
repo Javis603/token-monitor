@@ -5,6 +5,7 @@
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'commandcode',
   accountSlots: true,
+  serverAccountKey: 'isCommandcodeServerAccountKey',
   fetch: 'fetchCommandcodeLimits',
   fields: [
     {
