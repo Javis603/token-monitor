@@ -11,7 +11,7 @@ const { translate } = require('../../src/electron/renderer/i18n');
 const t = (key, params) => translate('en', key, params);
 class Node {
   constructor(tag, document) {
-    this.style = {}; this.rect = { top: 360, bottom: 380, right: 300, width: 160, height: 210 }; this.tagName = tag; this.document = document; this.children = []; this.dataset = {}; this.listeners = {}; this.attributes = {}; this.value = ''; this.className = '';
+    this.style = { setProperty(key, value) { this[key] = value; }, removeProperty(key) { delete this[key]; } }; this.rect = { top: 360, bottom: 380, right: 300, width: 160, height: 210 }; this.tagName = tag; this.document = document; this.children = []; this.dataset = {}; this.listeners = {}; this.attributes = {}; this.value = ''; this.className = '';
     this.classList = { contains: name => this.className.split(' ').includes(name), add: name => { if (!this.classList.contains(name)) this.className += ` ${name}`; }, remove: name => { this.className = this.className.split(' ').filter(v => v !== name).join(' '); }, toggle: (name, force) => { const yes = force ?? !this.classList.contains(name); this.classList[yes ? 'add' : 'remove'](name); return yes; } };
   }
   set textContent(value) { this.children.forEach(child => { child.parentElement = null; }); this.children = []; this.text = value; }
@@ -33,10 +33,16 @@ class Node {
   select() { this.selectionStart = 0; this.selectionEnd = this.value.length; }
   *walk() { yield this; for (const child of this.children) if (child.walk) yield* child.walk(); }
   querySelector(selector) { return [...this.walk()].find(node => selector[0] === '#' ? node.id === selector.slice(1) : node.classList.contains(selector.slice(1))); }
-  matches(selector) { return selector === ':popover-open' && Boolean(this.popoverOpen); }
+  matches(selector) {
+    if (selector === ':popover-open') return Boolean(this.popoverOpen);
+    if (selector === '.slot-row[data-slot-draggable="true"]') return this.classList.contains('slot-row') && this.dataset.slotDraggable === 'true';
+    return selector.split(', ').some(part => part[0] === '.' ? this.classList.contains(part.slice(1)) : this.tagName === part);
+  }
+  closest(selector) { return this.matches(selector) ? this : this.parentElement?.closest(selector); }
+  removeEventListener(key, fn) { if (this.listeners[key] === fn) delete this.listeners[key]; }
   get offsetWidth() { return 160; }
   get scrollHeight() { return 208; }
-  querySelectorAll() { return [...this.walk()].filter(n => ['button', 'input'].includes(n.tagName) && !n.disabled); }
+  querySelectorAll(selector = '') { return [...this.walk()].filter(n => selector.startsWith('.slot-row') ? n.matches(selector) : ['button', 'input'].includes(n.tagName) && !n.disabled); }
   click() { const result = this.listeners.click?.({ detail: 0 }); if (this.attributes.popovertarget) { const menu = this.document.getElementById(this.attributes.popovertarget); if (menu.popoverOpen) menu.hidePopover(); else menu.showPopover(); } return result; }
   key(key, altKey = false) { return this.listeners.keydown?.({ key, altKey, preventDefault() {}, stopPropagation() {} }); }
 }
@@ -45,7 +51,7 @@ function harness(translateMessage = t) {
   const calls = []; let verdict = { saved: true, verdict: 'valid', accounts: [] };
   const records = [{ id: 'a', label: 'Zulu', fingerprint: 'aa', accountKey: 'ka', enabled: true }, { id: 'b', label: 'Alpha', fingerprint: 'bb', accountKey: 'kb', enabled: false }];
   const slotSettings = { qoderAccountSlots: records.map(record => ({ ...record, values: { qoderSite: 'cn', qoderCookie: 'SECRET' }, accountKeyAliases: record.id === 'a' ? ['old', 'kb'] : [] })) };
-  const service = createAccountSlotService({ getSettings: () => slotSettings });
+  const service = createAccountSlotService({ getSettings: () => slotSettings, write: async patch => Object.assign(slotSettings, patch) });
   const slots = service.list('qoder').accounts;
   slots.unshift({ id: 'default', label: '', enabled: true, accountKey: 'default', accountKeyAliases: [], fingerprint: 'abc', formValues: { qoderSite: 'cn' } });
   const ipc = Object.fromEntries(['rename', 'move', 'setEnabled', 'remove', 'add', 'replace'].map(op => [op, async (...args) => { calls.push([op, ...args]); return ['add', 'replace'].includes(op) ? verdict : { ok: true, accounts: slots }; }]));
@@ -62,7 +68,7 @@ function harness(translateMessage = t) {
   const row = id => [...panel.element.walk()].find(node => node.dataset.slotId === id);
   const buttons = node => [...node.walk()].filter(n => n.tagName === 'button');
   const click = (node, text) => buttons(node).find(n => n.textContent === text).click();
-  return { panel, slots, document, calls, ipc, defaultPanel, row, update, click, set verdict(v) { verdict = v; } };
+  return { panel, slots, service, slotSettings, document, calls, ipc, defaultPanel, row, update, click, set verdict(v) { verdict = v; } };
 }
 test('slot names and status respect labels, native identity, fingerprint, pause and stale', () => {
   assert.equal(accountName({ label: 'Work', fingerprint: 'abc' }, { accountEmail: 'x@y' }, t), 'Work');
@@ -257,10 +263,12 @@ test('slot CSS uses defined theme tokens for light and dark surfaces and status'
   const slots = css.slice(css.indexOf('/* Local account slots'));
   const declared = new Set([...css.matchAll(/(--[\w-]+):/g)].map(match => match[1]));
   assert.match(slots, /\.slot-list \{[^}]*overflow: clip;/);
-  assert.match(slots, /grid-template-columns: minmax\(0, 1fr\) minmax\(0, max-content\) 28px/);
+  assert.match(slots, /grid-template-columns: 14px minmax\(0, 1fr\) minmax\(0, max-content\) 28px/);
   assert.match(slots, /\.slot-status \{ min-width: 0; max-width: 150px; overflow: hidden; text-overflow: ellipsis;/);
   assert.match(slots, /\.slot-name \{[^}]*text-overflow: ellipsis; white-space: nowrap;/);
   assert.match(slots, /\.slot-status \{[^}]*text-align: right;/);
+  // These geometry properties are supplied by the shared drag controller.
+  for (const key of ['--drag-y', '--drag-shift']) declared.add(key);
   for (const match of slots.matchAll(/var\((--[\w-]+)/g)) assert.ok(declared.has(match[1]), match[1]);
   for (const token of ['--panel-rgb', '--line', '--text', '--muted', '--success', '--red', '--yellow']) assert.ok(slots.includes(`var(${token})`), token);
 });
@@ -737,3 +745,96 @@ test('a reading that resolved to its real key keeps its place with a cached pre-
   ];
   assert.deepEqual(applyAccountOrder(records, cached).map(row => row.accountKey), ['resolved-first', 'second']);
 });
+
+// Exercise the real shared pointer controller, geometry solver and slot service.
+async function withDrag(callback) {
+  const previous = { window: global.window, requestAnimationFrame: global.requestAnimationFrame, cancelAnimationFrame: global.cancelAnimationFrame };
+  const listeners = new Map(), frames = new Map(); let frame = 0;
+  global.window = {
+    addEventListener: (key, fn) => listeners.set(key, fn),
+    removeEventListener: (key, fn) => { if (listeners.get(key) === fn) listeners.delete(key); }
+  };
+  global.requestAnimationFrame = fn => { frames.set(++frame, fn); return frame; };
+  global.cancelAnimationFrame = id => frames.delete(id);
+  const h = harness();
+  const layout = () => h.panel.element.querySelector('.slot-list').children.filter(n => n.dataset.slotId).forEach((row, index) => { row.rect = { top: index * 50, bottom: index * 50 + 50, height: 50 }; });
+  layout();
+  const emit = (type, y) => listeners.get(type)?.({ pointerId: 1, clientY: y, preventDefault() {} });
+  const press = id => { const row = h.row(id); row.listeners.pointerdown({ button: 0, pointerId: 1, clientY: row.rect.top + 10, currentTarget: row, target: row.querySelector('.slot-drag-handle') }); };
+  const flush = async () => {
+    for (const [id, fn] of [...frames]) { frames.delete(id); fn(); }
+    await new Promise(resolve => setTimeout(resolve, 5));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+  };
+  try { await callback({ ...h, emit, press, flush, layout, listeners }); }
+  finally { Object.assign(global, previous); }
+}
+
+test('drag drop persists the minimal adjacent moves through slot IPC and service', () => withDrag(async h => {
+  h.panel.update(h.service.list('qoder').accounts, []); h.layout();
+  h.ipc.move = async (...args) => { h.calls.push(['move', ...args]); return h.service.move(...args); };
+  h.press('b'); h.emit('pointermove', 10);
+  assert.ok(h.row('b').classList.contains('dragging'));
+  assert.equal(h.row('a').style['--drag-shift'], '50px');
+  h.emit('pointerup', 10); await h.flush();
+  assert.deepEqual(h.calls, [['move', 'qoder', 'b', 'up']]);
+  assert.deepEqual(h.service.list('qoder').accounts.map(slot => slot.id), ['b', 'a']);
+  assert.deepEqual(h.panel.element.querySelector('.slot-list').children.filter(n => n.dataset.slotId).map(n => n.dataset.slotId), ['b', 'a']);
+}));
+
+test('environment row is fixed and excluded from drag geometry', () => withDrag(async h => {
+  h.panel.update([{ id: 'environment', source: 'environment', enabled: true }, ...h.slots], []); h.layout();
+  h.press('environment'); h.emit('pointermove', 180);
+  assert.equal(h.row('environment').dataset.slotDraggable, 'false');
+  assert.equal(h.listeners.has('pointermove'), false);
+  h.press('b'); h.emit('pointermove', 0);
+  assert.equal(h.row('environment').style['--drag-shift'], undefined);
+  h.emit('pointercancel', 0); await h.flush();
+  assert.equal(h.calls.length, 0);
+}));
+
+for (const mode of ['rename', 'editor', 'menu']) test(`drag is suppressed while ${mode} is open on another row`, () => withDrag(async h => {
+  if (mode === 'rename') h.click(h.row('a'), 'Rename');
+  if (mode === 'editor') h.panel.openEditor(null);
+  if (mode === 'menu') h.row('a').querySelector('.plugin-more').click();
+  h.press('b'); h.emit('pointermove', 0);
+  assert.equal(h.listeners.has('pointermove'), false);
+  assert.equal(h.row('b').classList.contains('dragging'), false);
+  assert.equal(h.calls.length, 0);
+}));
+
+test('periodic updates preserve the live drag and flush current readings on drop', () => withDrag(async h => {
+  h.press('a'); h.emit('pointermove', 140);
+  const row = h.row('a'), transform = row.style['--drag-y'];
+  h.panel.update([...h.slots].reverse(), [{ accountKey: 'ka', status: 'ok' }]);
+  assert.equal(h.row('a'), row);
+  assert.equal(row.style['--drag-y'], transform);
+  assert.match(row.querySelector('.slot-status').textContent, /Cookie expired/);
+  h.emit('pointercancel', 140); await h.flush();
+  assert.match(row.querySelector('.slot-status').textContent, /Connected/);
+  assert.equal(row.classList.contains('dragging'), false);
+}));
+
+test('dragging across two neighbours uses two moves and leaves environment first', () => withDrag(async h => {
+  h.slotSettings.qoderAccountSlots.push({ ...h.slotSettings.qoderAccountSlots[1], id: 'c', accountKey: 'kc' });
+  const accounts = h.service.list('qoder').accounts;
+  const environment = { id: 'environment', source: 'environment', enabled: true };
+  h.panel.update([environment, ...accounts], []); h.layout();
+  h.ipc.move = async (...args) => {
+    h.calls.push(['move', ...args]);
+    const result = await h.service.move(...args);
+    return { ...result, accounts: [environment, ...result.accounts] };
+  };
+  h.press('c'); h.emit('pointermove', 0); h.emit('pointerup', 0); await h.flush();
+  assert.deepEqual(h.calls, [['move', 'qoder', 'c', 'up'], ['move', 'qoder', 'c', 'up']]);
+  assert.deepEqual(h.service.list('qoder').accounts.map(slot => slot.id), ['c', 'a', 'b']);
+  assert.equal(h.panel.element.querySelector('.slot-list').children.find(node => node.dataset.slotId).dataset.slotId, 'environment');
+}));
+
+test('a changed account set during drag is rendered without persisting the stale drop', () => withDrag(async h => {
+  h.press('b'); h.emit('pointermove', 10);
+  h.panel.update(h.slots.filter(slot => slot.id !== 'a'), []);
+  h.emit('pointerup', 10); await h.flush();
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.row('a'), undefined);
+}));
