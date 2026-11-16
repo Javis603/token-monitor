@@ -2255,8 +2255,8 @@ test('watchIgnoreMatcher keeps a recursive source rooted on a bounded root', () 
 
     assert.equal(ignored(root), false);
     assert.equal(ignored(path.join(root, 'state.db')), false);
-    assert.equal(ignored(path.join(root, 'session.jsonl')), false);
-    assert.equal(ignored(path.join(root, 'nested', 'task.json')), false);
+    assert.equal(ignored(path.join(root, 'session.messages.json')), false);
+    assert.equal(ignored(path.join(root, 'nested', 'task.messages.json')), false);
   } finally {
     os.homedir = originalHomedir;
     delete require.cache[collectorPath];
@@ -2452,9 +2452,8 @@ test('watchPathsForClients keeps bounded tool roots but leaves Kiro IDE globalSt
     assert.ok(dirs.includes(path.join(tmp, 'AppData', 'Roaming', 'Code', 'User', 'globalStorage', 'kilocode.kilo-code', 'tasks')));
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'mimocode')));
     assert.ok(dirs.includes(path.join(tmp, '.zcode', 'projects')));
-    // Kiro sessions and the bounded kiro-cli database keep seconds-level
-    // refresh. The unbounded IDE globalStorage source remains present and
-    // collectable, but never enters chokidar's native or 2-second polling tree.
+    // Kiro sessions and CLI keep live updates. GlobalStorage remains covered
+    // by interval/manual collection without a recursive watcher.
     assert.ok(dirs.includes(path.join(tmp, '.kiro', 'sessions')));
     assert.ok(!dirs.includes(path.join(tmp, 'Library', 'Application Support', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent')));
     assert.ok(dirs.includes(path.join(tmp, '.local', 'share', 'kiro-cli')));
@@ -2628,8 +2627,8 @@ test('watchIgnoreMatcher honors HERMES_HOME and is absent when Hermes is not tra
     assert.equal(ignored(path.join(hermesHome, 'state.db-wal')), false);
     assert.equal(ignored(path.join(hermesHome, 'logs')), false);
     assert.equal(ignored(path.join(hermesHome, 'logs', 'agent.log')), false);
-    // No Hermes tracked, no matcher, so other watchers run unchanged.
-    assert.equal(watchIgnoreMatcher('claude,codex'), undefined);
+    // No Hermes tracked, so its policy does not add a matcher to Codex.
+    assert.equal(watchIgnoreMatcher('codex'), undefined);
   } finally {
     os.homedir = originalHomedir;
     if (previousHermesHome === undefined) delete process.env.HERMES_HOME;
