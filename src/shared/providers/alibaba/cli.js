@@ -100,6 +100,11 @@ async function fetchBailianCLI(variant, deps = {}) {
   const command = existingBailianCli(env, deps.platform || process.platform, deps);
   if (!command) return null;
   const childEnv = cliEnvironment(env, variant);
+  // Preserve the parent's config lookup when the child runs in the temp dir.
+  const paths = (deps.platform || process.platform) === 'win32' ? path.win32 : path.posix;
+  if (childEnv.BAILIAN_CONFIG_DIR && !paths.isAbsolute(childEnv.BAILIAN_CONFIG_DIR)) {
+    childEnv.BAILIAN_CONFIG_DIR = paths.resolve(childEnv.BAILIAN_CONFIG_DIR);
+  }
   let executable = command;
   let prefix = [];
   if ((deps.platform || process.platform) === 'win32' && command.endsWith('.mjs')) {

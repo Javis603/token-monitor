@@ -373,6 +373,53 @@ test('Bailian config directory survives credential isolation', () => {
   assert.equal(env.BAILIAN_ACCESS_KEY_SECRET, undefined);
 });
 
+test('Bailian relative config directory keeps the saved login when the child changes directory', async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bailian-relative-config-'));
+  try {
+    const config = path.join(dir, 'saved profile');
+    mkdirSync(config);
+    writeFileSync(path.join(config, 'config.json'), JSON.stringify({ profile: 'fixture' }));
+    writeFileSync(path.join(config, 'credentials.json'), JSON.stringify({ login: 'synthetic' }));
+    const script = `
+      const assert = require('node:assert/strict');
+      const fs = require('node:fs');
+      const path = require('node:path');
+      assert.equal(fs.realpathSync(process.cwd()), fs.realpathSync(require('node:os').tmpdir()));
+      assert.equal(JSON.parse(fs.readFileSync(path.join(process.env.BAILIAN_CONFIG_DIR, 'config.json'))).profile, 'fixture');
+      assert.equal(JSON.parse(fs.readFileSync(path.join(process.env.BAILIAN_CONFIG_DIR, 'credentials.json'))).login, 'synthetic');
+      console.log(JSON.stringify({ per1MonthPercentage: 0.35 }));
+    `;
+    if (process.platform === 'win32') {
+      const dist = path.join(dir, 'node_modules', 'bailian-cli', 'dist');
+      mkdirSync(dist, { recursive: true });
+      writeFileSync(path.join(dir, 'bl.cmd'), '@echo off\r\nexit /b 99\r\n');
+      writeFileSync(path.join(dist, 'bailian.mjs'), `import { createRequire } from 'node:module';\nconst require = createRequire(import.meta.url);\n${script}`);
+    } else {
+      const executable = path.join(dir, 'bl');
+      writeFileSync(executable, `#!${process.execPath}\n${script}`);
+      chmodSync(executable, 0o755);
+    }
+    // Run the host in an isolated working directory so the configured path is
+    // genuinely relative, without changing this test process's global cwd.
+    const host = `
+      const { fetchAlibabaLimits } = require(${JSON.stringify(require.resolve('../../src/shared/providers/alibaba/limits'))});
+      fetchAlibabaLimits({ alibabaVariant: 'cn-personal' }, { noteLimitFailure(error) { throw error; } })
+        .then(([row]) => console.log(JSON.stringify(row)))
+        .catch(error => { console.error(error); process.exitCode = 1; });
+    `;
+    const stdout = await new Promise((resolve, reject) => {
+      require('node:child_process').execFile(process.execPath, ['-e', host], { cwd: dir, env: {
+        PATH: [dir, path.dirname(process.execPath)].join(path.delimiter),
+        BAILIAN_CONFIG_DIR: 'saved profile', SystemRoot: process.env.SystemRoot
+      } }, (error, output) => error ? reject(error) : resolve(output));
+    });
+    const row = JSON.parse(stdout);
+    assert.equal(row.source, 'cli');
+    assert.equal(row.status, 'ok');
+    assert.equal(row.windows[0].usedPercent, 35);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('Alibaba source replacement keeps old named quota if the new account was cleared during refresh', async () => {
   const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
   let ready;
