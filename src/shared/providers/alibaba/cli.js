@@ -127,6 +127,7 @@ async function fetchBailianCLI(variant, deps = {}) {
   const seats = new Set();
   const ends = new Set();
   let expectedTotal;
+  let activeSeats = 0;
   let total = 0;
   let remaining = 0;
   for (let pageNo = 1; pageNo <= MAX_SEATS / PAGE_SIZE; pageNo++) {
@@ -146,6 +147,7 @@ async function fetchBailianCLI(variant, deps = {}) {
       if (![seat.StartTime, seat.EndTime].every(Number.isFinite)
         || seat.StartTime <= 0 || seat.EndTime <= seat.StartTime) throw invalidOutput();
       if (now < seat.StartTime || now >= seat.EndTime) continue;
+      activeSeats++;
       if (!Array.isArray(seat.EquityList)) throw invalidOutput();
       const credits = seat.EquityList.filter(equity => equity?.EquityType === 'CREDITS');
       if (credits.length !== 1) throw invalidOutput();
@@ -159,6 +161,9 @@ async function fetchBailianCLI(variant, deps = {}) {
     }
     if (seats.size > expectedTotal) throw invalidOutput();
     if (seats.size === expectedTotal) {
+      // A complete seat list can legitimately contain no current subscription.
+      if (activeSeats === 0) return { summary: { uid: '', planName: 'Token Plan',
+        used: null, total: null, remaining: null, resetsAt: null } };
       if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(remaining)) throw invalidOutput();
       return { summary: { uid: '', planName: 'Token Plan', used: total - remaining,
         total, remaining, resetsAt: ends.size === 1 ? new Date([...ends][0]).toISOString() : null } };

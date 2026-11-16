@@ -91,6 +91,62 @@ test('Alibaba Team mixed credit cycles do not invent one reset; resource packs a
   assert.equal(row.windows[0].resetsAt, null);
 });
 
+test('Alibaba Team CLI accepts no active seats without falling back to Cookie', async () => {
+  for (const items of [[], [seat('expired', { EndTime: now - 1 })],
+    [seat('stopped', { Status: 'STOP' })], [seat('released', { Status: 'RELEASE' })],
+    [seat('future', { StartTime: now + 1000 })]]) {
+    for (const alibabaCookie of ['', 'a=b']) {
+      const deps = cliDeps(() => page(items));
+      const [row] = await fetchAlibabaLimits({ alibabaCookie }, deps);
+      assert.equal(row.status, 'ok');
+      assert.equal(row.source, 'cli');
+      assert.deepEqual(row.windows, []);
+      assert.equal(deps.calls.length, 1);
+    }
+  }
+});
+
+test('Alibaba Team CLI still rejects active seats with unusable credit quotas', async () => {
+  for (const EquityList of [[], [{ EquityType: 'RESOURCE_PACK' }],
+    [{ EquityType: 'CREDITS', CycleStartTime: now - 1000, CycleEndTime: end,
+      CycleTotalValue: 0, CycleSurplusValue: 0 }]]) {
+    const deps = cliDeps(() => page([seat('a', { EquityList })]));
+    const webCalls = webFallback(deps);
+    const [row] = await fetchAlibabaLimits({ alibabaCookie: 'a=b' }, deps);
+    assert.equal(row.source, 'web');
+    assert.equal(row.status, 'ok');
+    assert.ok(webCalls() > 0);
+  }
+});
+
+test('Alibaba Team empty CLI result clears previous quota and can recover in the real runtime', async () => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  for (const emptyItems of [[], [seat('expired', { EndTime: now - 1 })],
+    [seat('stopped', { Status: 'STOP' })]]) {
+    let items = [seat('a')];
+    const deps = cliDeps(() => page(items));
+    const runtime = createLimitsRuntime({ limitProviders: ['alibaba'] }, {
+      autoStart: false, autoRetry: false, now: () => now,
+      probeProvider: (_provider, options, context) => fetchAlibabaLimits(options, { ...deps, signal: context.signal })
+    });
+    try {
+      await runtime.refresh({ provider: 'alibaba' }, 'credential-edit');
+      assert.equal(runtime.getSnapshot().providers[0].windows[0].usedPercent, 70);
+      items = emptyItems;
+      await runtime.refresh({ provider: 'alibaba' }, 'credential-edit');
+      const rows = runtime.getSnapshot().providers;
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].status, 'ok');
+      assert.equal(rows[0].source, 'cli');
+      assert.deepEqual(rows[0].windows, []);
+      items = [seat('a')];
+      await runtime.refresh({ provider: 'alibaba' }, 'credential-edit');
+      assert.equal(runtime.getSnapshot().providers[0].status, 'ok');
+      assert.equal(runtime.getSnapshot().providers[0].windows[0].usedPercent, 70);
+    } finally { runtime.stop(); }
+  }
+});
+
 function webFallback(deps) {
   let calls = 0;
   deps.fetch = async url => {
@@ -145,7 +201,7 @@ test('Alibaba rejects malformed CLI percentages, error envelopes and empty usage
 
 test('Alibaba rejects incomplete pages and duplicate seats instead of publishing partial usage', async () => {
   for (const payload of [page([seat('a')], 2), page([seat('a'), seat('a')]),
-    page([], 0), { ...page([seat('a')]), Success: false }]) {
+    { ...page([seat('a')]), Success: false }]) {
     const [row] = await fetchAlibabaLimits({}, cliDeps(() => payload));
     assert.equal(row.status, 'unavailable');
     assert.equal(row.windows.length, 0);

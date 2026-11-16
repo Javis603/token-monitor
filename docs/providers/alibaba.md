@@ -49,7 +49,7 @@ Two distinctions are load-bearing and should not be collapsed:
 - A stale session (`Login.NotLogined`, a login HTML shell, HTTP 401/403) is `unauthorized`, so the UI tells the user to paste a fresh cookie. Everything else that fails is `unavailable`.
 - `Workspace.NotAuthorised` is **not** a credential failure. Reporting it as one asks the user to replace a cookie that is already valid, and the replacement fails identically.
 
-An empty subscription (`TotalCount: 0`) is a healthy, authorized account with nothing to draw: the row stays visible with no window.
+An empty subscription (`TotalCount: 0`), or a complete CLI seat list with no currently active seats, is a healthy, authorized account with nothing to draw: the row stays visible with no window.
 
 ## Scope and the provider id
 
