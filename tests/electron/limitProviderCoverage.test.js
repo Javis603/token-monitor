@@ -50,7 +50,7 @@ const app = read('app.js');
 const accountNodes = providerMap(app, 'LIMIT_PROVIDER_ACCOUNT_NODES');
 const accountGroups = Object.fromEntries(Object.entries(accountNodes).map(([id, node]) => [id, node.group]));
 const accountStatuses = Object.fromEntries(Object.entries(accountNodes).map(([id, node]) => [id, node.status]));
-const connectionDetails = providerMap(app, 'LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS');
+const connectionDetails = Object.fromEntries(require('../../src/shared/limits/accounts').LIMIT_PROVIDER_ACCOUNTS.map(({id, sources}) => [id, sources[0].descriptionKey]));
 
 test('every account group reports its state through a status pill', () => {
   // limitProviderAccountGroup and limitProviderAccountStatus are looked up

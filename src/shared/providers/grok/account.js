@@ -7,6 +7,10 @@
 // settings panel.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'grok',
+  sources: [
+    { id: 'rpc', kind: 'cli', relation: 'alternative', labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' },
+    { id: 'web', kind: 'web', relation: 'alternative', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
+  ],
   fetch: 'fetchGrokLimits',
   fields: [],
   resolveFetch: (deps, limits) => limits.resolveGrokFetch(deps)

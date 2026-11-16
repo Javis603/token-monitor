@@ -4,6 +4,10 @@
 // Z.ai / GLM limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'zai',
+  sources: [
+    { id: 'api', kind: 'apiKey', relation: 'complement', labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.zai.note' },
+    { id: 'zcode', kind: 'desktop', relation: 'complement', labelKey: 'settings.limits.sources.desktop', descriptionKey: 'settings.limits.sources.desktopDescription' }
+  ],
   fetch: 'fetchZaiLimits',
   fields: [
     {

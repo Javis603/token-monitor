@@ -100,8 +100,17 @@ const { defaultIdentityKey, accountSlotField } = require('./accountSlots');
  * @property {{key: string, labelKey: string, fields: string[]}} [credentialChoice]
  * @property {{fn: string, field: string}} [rememberProbe]
  *
+ * @typedef {object} AccountSource
+ * @property {string} id Stable, provider-local read lane.
+ * @property {'cli'|'desktop'|'web'|'apiKey'|'env'|'file'|'oauth'} kind
+ * @property {'alternative'|'complement'|'single'} relation Alternative lanes follow fallback order; complements may contribute together.
+ * @property {string} labelKey
+ * @property {string} descriptionKey
+ * @property {boolean} [getUrlFromForm] Reuse the account form's URL resolver; never copy its URL here.
+ *
  * @typedef {object} AccountDeclaration
  * @property {string} id
+ * @property {AccountSource[]} sources Display-only read sources; never select or dispatch a fetch.
  * @property {string} fetch Limits export called by the collector.
  * @property {AccountField[]} fields
  * @property {boolean} [accountSlots] Requires a form, no managed/profiles fields, credentials only from declared fields, no singleton credential write-back, and an audit of module-level state.

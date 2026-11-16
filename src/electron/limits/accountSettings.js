@@ -329,6 +329,10 @@ function assertAccountForm(entry, form) {
 
 // The renderer only needs the form's display and action schema. Never send
 // field declarations, store paths, resolvers, or credential values over IPC.
+function limitConnectionSourcesForRenderer() {
+  return LIMIT_PROVIDER_REGISTRY.map(({ id, sources }) => ({ id, sources }));
+}
+
 function limitAccountFormsForRenderer() {
   return LIMIT_PROVIDER_REGISTRY.filter((entry) => entry.form).flatMap((entry) => {
     const form = accountForm(entry);
@@ -365,6 +369,7 @@ module.exports = {
   finalAccountSettings,
   initialAccountSettings,
   limitAccountFormsForRenderer,
+  limitConnectionSourcesForRenderer,
   limitsAccountConfig,
   normalizeAccountField,
   normalizeAccountPatch,

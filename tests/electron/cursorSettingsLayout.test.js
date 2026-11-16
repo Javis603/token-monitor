@@ -1011,11 +1011,7 @@ test('Zed account panel follows the manual browser Cookie flow without exposing 
   assert.doesNotMatch(JSON.stringify(form), /zedUserId|zedAccessToken|zedServerUrl|cloud.zed.dev/);
 
   const app = readRendererFile('app.js');
-  const connectionDetailMap = app.slice(
-    app.indexOf('const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {'),
-    app.indexOf('const TRAY_ICON_VARIANTS = [')
-  );
-  assert.doesNotMatch(connectionDetailMap, /\bzed:/);
+  assert.equal(require('../../src/shared/providers/zed/account').sources[0].kind, 'web');
   assert.match(app, /limitAccountPanelsApi\.createCredentialPanel\(form/);
   assert.match(app, /window\.tokenMonitor\.limits\.saveCredential\(id, values\)/);
   assert.doesNotMatch(app, /window\.tokenMonitor\.zed|zedUserId|zedAccessToken|zedServerUrl/);
@@ -1814,7 +1810,7 @@ test('WorkBuddy settings retain automatic detection alongside managed regional a
   assert.match(html, /id="workbuddyAddAiAccountButton"/);
   assert.match(html, /id="workbuddyAccountStatus"/);
   const app = readRendererFile('app.js');
-  assert.match(app, /workbuddy: 'settings\.limits\.connection\.workbuddy'/);
+  assert.ok(require('../../src/shared/providers/workbuddy/account').sources.some(source => source.kind === 'desktop'));
   assert.match(app, /renderWorkbuddyStatus/);
   assert.match(app, /window\.tokenMonitor\.workbuddy/);
   assert.doesNotMatch(html, /workbuddy(?:AccessToken|RefreshToken|Privacy|OptIn)/);

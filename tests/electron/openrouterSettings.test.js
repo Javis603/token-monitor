@@ -104,7 +104,7 @@ test('OpenRouter credentials stay in the main process and renderer receives conf
 
 test('OpenRouter Limits presentation shows a real balance meter and compact spend tooltip', () => {
   const app = read('src/electron/renderer/app.js');
-  const presentation = read('src/electron/renderer/limits/providerPresentation.js');
+  const presentation = require('../../src/electron/renderer/limits/providerPresentation').connectionTag('openrouter');
   const styles = rendererStyles();
   const { clientColors } = require('../../src/electron/renderer/usageCharts');
 
@@ -136,7 +136,7 @@ test('OpenRouter Limits presentation shows a real balance meter and compact spen
   assert.match(limitsViewSource(), /\.filter\(\(window\) => window !== creditsWindow\)/);
   assert.match(limitsViewSource(), /const hasMeter = quotaWindow\?\.showMeter !== false/);
   assert.match(limitsViewSource(), /const valueOverride = hasMeter \? null : \(quotaWindow\?\.detail \|\| '—'\)/);
-  assert.match(presentation, /openrouter: \['Pay-as-you-go', 'API key'\]/);
+  assert.deepEqual(presentation.parts, ['API key']);
   assert.match(styles, /^\.row-icon-openrouter/m);
   assert.match(styles, /\.limit-spend-summary\s*\{[^}]*overflow: hidden;[^}]*text-overflow: ellipsis;[^}]*white-space: nowrap;/s);
   assert.equal(clientColors.openrouter, '#6566F1');

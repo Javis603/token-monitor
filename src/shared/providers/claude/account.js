@@ -5,6 +5,11 @@
 // src/shared/limits/accounts.js for the field schema.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'claude',
+  sources: [
+    { id: 'oauth', kind: 'oauth', relation: 'alternative', labelKey: 'settings.limits.sources.oauth', descriptionKey: 'settings.limits.sources.oauthDescription' },
+    { id: 'cli', kind: 'cli', relation: 'alternative', labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' },
+    { id: 'web', kind: 'web', relation: 'complement', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
+  ],
   fetch: 'fetchClaudeAccountsLimits',
   accountRefresh: true,
   fields: [

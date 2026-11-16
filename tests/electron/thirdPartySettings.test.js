@@ -184,7 +184,7 @@ test('third-party Limits presentation uses compact scope labels and a details to
   assert.doesNotMatch(app, /groupPlanText|markIdForProvider|colorForProvider/);
   assert.doesNotMatch(i18n, /settings\.thirdparty\.(?:spend|allTime)/);
   assert.match(read('src/electron/renderer/limits/windowsView.js'), /limitDetailInfoNode\(detailEntries, 'limit-spend-info-wrap'\)/);
-  assert.match(presentation, /thirdparty: \['Relay', 'API'\]/);
+  assert.deepEqual(require('../../src/electron/renderer/limits/providerPresentation').connectionTag('thirdparty').parts, ['API key']);
   assert.match(styles, /^\.row-icon-sub2api/m);
   assert.match(styles, /assets\/icons\/sub2api\.svg/);
   assert.match(styles, /^\.row-icon-thirdparty[\s\S]*?assets\/icons\/thirdparty\.svg/m);

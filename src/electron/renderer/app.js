@@ -109,17 +109,6 @@ const LIMIT_PROVIDER_ACCOUNT_NODES = {
   volcengine: { group: 'volcengineAccountGroup', status: 'volcengineAccountStatus' },
   thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
 };
-const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
-  minimax: 'settings.minimax.codeNote',
-  antigravity: 'settings.limits.connection.antigravity',
-  cline: 'settings.limits.connection.cline',
-  grok: 'settings.limits.connection.grok',
-  kiro: 'settings.limits.connection.kiro',
-  manus: 'settings.limits.connection.manus',
-  hark: 'settings.limits.connection.hark',
-  muse: 'settings.limits.connection.muse',
-  workbuddy: 'settings.limits.connection.workbuddy'
-};
 const TRAY_ICON_VARIANTS = [
   { id: 'claude-brand', label: 'Claude', after: 'claude' },
   { id: 'chatgpt', label: 'ChatGPT', after: 'codex' }
@@ -217,6 +206,8 @@ const LIMIT_REFRESH_OPTIONS = [60000, 120000, 300000, 900000, 1800000];
 const WINDOW_BEHAVIOR_VALUES = ['floating', 'normal', 'desktop'];
 const WINDOW_BEHAVIOR_ICONS = { floating: '⇧', normal: '○', desktop: '⇩' };
 const LIMIT_CAPABILITY_TAG_KEYS = {
+  CLI: 'settings.limits.sources.cli',
+  OAuth: 'settings.limits.sources.oauth',
   Auto: 'settings.limits.capability.auto',
   'OAuth/CLI': 'settings.limits.capability.oauthCli',
   'OAuth/App/CLI': 'settings.limits.capability.oauthAppCli',
@@ -235,6 +226,9 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   'Coding Plan': 'settings.limits.capability.codingPlan',
   Relay: 'settings.limits.capability.relay',
   'API key': 'settings.limits.capability.apiKey',
+  Environment: 'settings.limits.sources.env',
+  Local: 'settings.limits.sources.file',
+  'Desktop app': 'settings.limits.sources.desktop',
   'AK/SK': 'settings.limits.capability.akSk',
   'GitHub OAuth': 'settings.limits.capability.githubOAuth',
   API: 'settings.limits.capability.api',
@@ -12468,14 +12462,15 @@ function renderLimitProviderCheckboxesNow() {
     const tags = document.createElement('span');
     tags.className = 'limit-provider-tags';
     const provenance = limitProviderProvenance(provider);
-    const connectionDetailKey = LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS[id];
+    const sources = limitProviderPresentationApi.connectionSources(id, state.settings?.limitConnectionSources || []);
     const accountGroup = limitProviderAccountGroup(id);
     const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === id);
-    const tagInfos = limitProviderPresentationApi.limitProviderSettingsTags(provider, provenance);
+    const tagInfos = pluginModule ? limitProviderPresentationApi.limitProviderSettingsTags(provider, provenance)
+      : [limitProviderPresentationApi.connectionTag(id, state.settings?.limitConnectionSources || [])].filter(Boolean);
     if (pluginModule) tagInfos.push(...limitProviderPresentationApi.pluginLimitCapabilityTags(pluginModule));
     const detected = provider.status === 'ok' && !provider.stale;
     if (detected) {
-      const statusTag = tagInfos.find((tagInfo) => tagInfo.kind === 'status');
+      const statusTag = limitProviderPresentationApi.limitProviderStatusLabel(provider);
       const dot = document.createElement('span');
       dot.className = 'limit-provider-status-dot';
       dot.setAttribute('aria-label', translatedLimitProviderTag(statusTag));
@@ -12487,10 +12482,6 @@ function renderLimitProviderCheckboxesNow() {
       // Account groups own their configuration summary on the right. Avoid
       // repeating "Not set up" beside the same account state, as with Codex.
       if (accountGroup && provider.status === 'notConfigured' && tagInfo.kind === 'status') continue;
-      const duplicatesInlineSetup = tagInfo.kind === 'capability'
-        && ((connectionDetailKey && !accountGroup && tagInfo.label === 'Auto')
-          || (accountGroup && tagInfo.label === 'Manual login'));
-      if (duplicatesInlineSetup) continue;
       const tag = document.createElement('span');
       tag.className = `limit-provider-tag limit-provider-tag-${tagInfo.kind}`;
       if (tagInfo.tone) tag.classList.add(`limit-provider-tag-${tagInfo.tone}`);
@@ -12518,15 +12509,9 @@ function renderLimitProviderCheckboxesNow() {
     }
     // Multi-account providers use this space for their account summary. Their
     // automatic collection support stays with the capability tags on the left.
-    if (connectionDetailKey && !accountGroup) {
-      const mode = document.createElement('span');
-      mode.className = 'cursor-status-pill limit-provider-mode-pill';
-      mode.textContent = t('settings.limits.connection.autoDetect');
-      actions.append(mode);
-    }
     const settings = LIMIT_PROVIDER_SETTINGS[id];
     const usageItems = isEnabled ? limitProviderUsageItemRows(id) : [];
-    const hasOptions = Boolean(pluginModule?.credentials || pluginModule?.settingsView || accountGroup || settings || connectionDetailKey || usageItems.length);
+    const hasOptions = Boolean(pluginModule?.credentials || pluginModule?.settingsView || accountGroup || settings || sources.length || usageItems.length);
     let optionsContainer = null;
     let optionsInner = null;
     let main = null;
@@ -12553,7 +12538,7 @@ function renderLimitProviderCheckboxesNow() {
       if (accountGroup) {
         accountGroup.classList.add('limit-provider-account-group');
       }
-      if (connectionDetailKey) optionsInner.append(limitProviderConnectionDetail(connectionDetailKey));
+      if (sources.length) optionsInner.append(limitProviderConnectionDetail(id, sources, provider));
       if (settings) optionsInner.append(limitProviderSettingsList(id, settings, reusableSettingInputs));
       if (usageItems.length) optionsInner.append(limitProviderUsageItemsList(id, usageItems, reusableSettingInputs));
       optionsContainer.append(optionsInner);
@@ -12921,16 +12906,44 @@ function limitProviderAccountStatus(providerId) {
     : null;
 }
 
-function limitProviderConnectionDetail(bodyKey) {
+function limitProviderConnectionDetail(id, sources, provider) {
   const panel = document.createElement('div');
-  panel.className = 'limit-provider-connection-detail';
+  panel.className = 'settings-item';
+  const copy = document.createElement('span');
+  copy.className = 'settings-item-text';
   const title = document.createElement('span');
-  title.className = 'limit-provider-connection-title';
+  title.className = 'settings-item-title';
   title.textContent = t('settings.limits.connection.title');
-  const body = document.createElement('p');
-  body.className = 'settings-note';
-  body.textContent = t(bodyKey);
-  panel.append(title, body);
+  copy.append(title);
+  const alternative = sources.some(source => source.relation === 'alternative');
+  // A reported transport is not necessarily a credential lane (e.g. DeepSeek's
+  // optional Web enrichment). Only unambiguous, successful alternative readings
+  // identify the current source. Never infer "not detected" from absent data.
+  const current = alternative && provider.status === 'ok' && !provider.stale
+    ? sources.find(source => source.id === (provider.sourceDetail || provider.source))
+      || sources.find(source => source.id === provider.source) : null;
+  if (alternative) {
+    const summary = document.createElement('span');
+    summary.className = 'settings-item-desc';
+    summary.textContent = current ? t('settings.limits.sources.current', { source: t(current.labelKey) })
+      : t('settings.limits.sources.auto');
+    copy.append(summary);
+  }
+  for (const source of sources) {
+    const detail = document.createElement('span');
+    detail.className = 'settings-item-desc';
+    detail.textContent = `${t(source.labelKey)} · ${t(source.descriptionKey)}`;
+    copy.append(detail);
+    if (source.getUrlFromForm) {
+      const link = document.createElement('button');
+      link.type = 'button';
+      link.className = 'inline-link';
+      link.textContent = t('settings.limits.sources.get', { source: LIMIT_PROVIDERS.find(provider => provider.id === id).label });
+      link.addEventListener('click', () => window.tokenMonitor.openExternal(limitAccountPanelsApi.resolveOpenUrl(limitAccountForm(id), { document, provider: externalProviderForAccount(id) })));
+      copy.append(link);
+    }
+  }
+  panel.append(copy);
   return panel;
 }
 

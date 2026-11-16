@@ -6,6 +6,9 @@
 // settings-backed credential and no settings panel.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'kiro',
+  sources: [
+    { id: 'cli', kind: 'cli', relation: 'single', labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' }
+  ],
   fetch: 'fetchKiroLimits',
   fields: []
 });

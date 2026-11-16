@@ -4,6 +4,9 @@
 // Alibaba Cloud limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'alibaba',
+  sources: [
+    { id: 'web', kind: 'web', relation: 'single', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.alibabaWebDescription', getUrlFromForm: true }
+  ],
   fetch: 'fetchAlibabaLimits',
   fields: [
     {

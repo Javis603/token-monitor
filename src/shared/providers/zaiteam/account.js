@@ -4,6 +4,9 @@
 // GLM Team limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'zaiteam',
+  sources: [
+    { id: 'api', kind: 'apiKey', relation: 'single', labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.zaiteam.note', getUrlFromForm: true }
+  ],
   fetch: 'fetchZaiTeamLimits',
   fields: [
     {

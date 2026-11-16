@@ -8,6 +8,10 @@
 // desktop-session lanes in limitsConfigFromSettings stay hand-written there.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'workbuddy',
+  sources: [
+    { id: 'api', kind: 'web', relation: 'complement', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' },
+    { id: 'local', kind: 'desktop', relation: 'complement', labelKey: 'settings.limits.sources.desktop', descriptionKey: 'settings.limits.sources.desktopDescription' }
+  ],
   fetch: 'fetchWorkbuddyLimits',
   fields: [
     { key: 'workbuddyManagedAccounts', kind: 'managed', contextOverride: true, persist: 'never', initial: [], watch: false, rendererOmit: true },

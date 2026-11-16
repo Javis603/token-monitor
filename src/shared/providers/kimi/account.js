@@ -4,6 +4,10 @@
 // Kimi limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'kimi',
+  sources: [
+    { id: 'api', kind: 'apiKey', relation: 'alternative', labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.kimi.apiKeyNote' },
+    { id: 'web', kind: 'web', relation: 'alternative', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.kimi.webTokenNote' }
+  ],
   fetch: 'fetchKimiLimits',
   fields: [
     {

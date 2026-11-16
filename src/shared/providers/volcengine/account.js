@@ -7,6 +7,10 @@ const normalizeVolcengineRegion = (value) => String(value || '').trim().toLowerC
 
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'volcengine',
+  sources: [
+    { id: 'api', kind: 'apiKey', relation: 'alternative', labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.limits.sources.apiKeyDescription' },
+    { id: 'cli', kind: 'cli', relation: 'alternative', labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' }
+  ],
   fetch: 'fetchVolcengineLimits',
   fields: [
     {

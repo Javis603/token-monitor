@@ -4,6 +4,9 @@
 // GitHub Copilot limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'copilot',
+  sources: [
+    { id: 'oauth', kind: 'oauth', relation: 'single', labelKey: 'settings.limits.sources.oauth', descriptionKey: 'settings.limits.sources.oauthDescription' }
+  ],
   fetch: 'fetchCopilotLimits',
   accountRefresh: true,
   fields: [

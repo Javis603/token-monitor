@@ -4,6 +4,10 @@
 // Leaf declaration: shared credential storage and forms bind these names.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'manus',
+  sources: [
+    { id: 'web', kind: 'web', relation: 'alternative', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' },
+    { id: 'local', kind: 'desktop', relation: 'alternative', labelKey: 'settings.limits.sources.desktop', descriptionKey: 'settings.limits.sources.desktopDescription' }
+  ],
   fetch: 'fetchManusLimits',
   fields: [{
     key: 'manusSessionToken',

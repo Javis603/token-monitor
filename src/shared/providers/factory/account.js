@@ -4,6 +4,10 @@
 // Factory Droid limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'factory',
+  sources: [
+    { id: 'api', kind: 'apiKey', relation: 'alternative', labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.factory.note' },
+    { id: 'droid-env', kind: 'file', relation: 'alternative', labelKey: 'settings.limits.sources.file', descriptionKey: 'settings.limits.sources.fileDescription' }
+  ],
   fetch: 'fetchFactoryLimits',
   fields: [
     {

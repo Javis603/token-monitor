@@ -13,6 +13,7 @@ const {
   accountFieldProjection,
   accountStatusProjection,
   limitAccountFormsForRenderer,
+  limitConnectionSourcesForRenderer,
   rendererOmittedAccountKeys
 } = require('../../src/electron/limits/accountSettings');
 
@@ -51,7 +52,8 @@ test('the main settings IPC projection hides provider secrets while retaining co
   const project = vm.runInNewContext(`${main.slice(start, end)}; settingsForRenderer`, {
     settings, mainWindow: null, windowsBackdropFallback: () => false,
     networkProxySource, normalizePluginAuthorSkin, credentialSettingsForRenderer, hubProfilesForRenderer, accountFieldProjection, accountStatusProjection,
-    limitAccountFormsForRenderer, rendererOmittedAccountKeys, process: { env: {} },
+    limitAccountFormsForRenderer,
+  limitConnectionSourcesForRenderer, rendererOmittedAccountKeys, process: { env: {} },
     getSyncContentRuntime: () => ({ status: () => ({ enabled: {} }) }),
     trayMenuLocale: () => 'en', effectiveSubscriptions: () => [], subscriptionsAreShared: () => false,
     currentHubIdentity: () => 'local', subscriptionDocumentVersion: () => 0,
