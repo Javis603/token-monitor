@@ -16934,7 +16934,7 @@ async function refreshCodexAccounts() {
 // local device's RAW limits from state.stats.devices — NOT the collapsed
 // state.stats.limits.providers. In sync mode, aggregateLimits() collapses a
 // local `unauthorized` row out in favor of a remote `ok` (providerCollapseKey
-// for deepseek/grok and keyless minimax rows is just the provider name;
+// for grok and keyless minimax rows is just the provider name;
 // pickBetterProvider keeps the higher statusRank). Searching the aggregate
 // would miss the local row and fall back to the remote `ok`, falsely reporting
 // an invalid local key as Linked. Only legacy/non-aggregated stats without a

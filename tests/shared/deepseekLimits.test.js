@@ -5,6 +5,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { deepseekToken, parseLimitProviders, selectFundedRow, fetchDeepSeekLimits } = require('../../src/shared/limits/collector');
+const { aggregateLimits } = require('../../src/shared/limits/core');
 
 function memStoreDeps(initial = {}) {
   const box = { value: JSON.parse(JSON.stringify(initial)) };
@@ -147,6 +148,28 @@ test('fetchDeepSeekLimits maps HTTP 401 to unauthorized', async () => {
     ...memStoreDeps()
   });
   assert.equal(r.status, 'unauthorized');
+});
+
+test('a failed DeepSeek read stays on its account, apart from another device\'s account', async () => {
+  const read = (key, response) => fetchDeepSeekLimits({}, {
+    env: { DEEPSEEK_API_KEY: key },
+    deepseekStorePath: `/tmp/ds-${key}.json`,
+    fetch: async () => response,
+    ...memStoreDeps()
+  });
+  const ok = await read('sk-a', balanceResponse([{ currency: 'USD', total_balance: '5.00', topped_up_balance: '5.00' }]));
+  const rejected = await read('sk-b', { ok: false, status: 401, json: async () => ({}) });
+  const sameKeyFailure = await read('sk-a', { ok: false, status: 500, json: async () => ({}) });
+  assert.equal(rejected.status, 'unauthorized');
+  assert.match(rejected.accountKey, /^sha256:/);
+  assert.notEqual(rejected.accountKey, ok.accountKey);
+  assert.equal(sameKeyFailure.accountKey, ok.accountKey);
+
+  const devices = [{ deviceId: 'a', limits: { providers: [ok] } }, { deviceId: 'b', limits: { providers: [rejected] } }];
+  const rows = aggregateLimits(devices, 0, Date.now()).providers;
+  assert.deepEqual(rows.map((row) => [row.accountKey, row.status]).sort(),
+    [[ok.accountKey, 'ok'], [rejected.accountKey, 'unauthorized']].sort());
+  assert.equal(rows.some((row) => JSON.stringify(row).includes('sk-')), false);
 });
 
 test('fetchDeepSeekLimits keeps HTTP 403 as unavailable', async () => {
