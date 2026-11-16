@@ -3378,16 +3378,6 @@ test('self-watch db-shm events are ignored for every client whose scan recreates
   }
 });
 
-// A client is added to that list only on measured evidence, so a scan that does
-// not rewrite its sidecar must keep waking the collector on shm events.
-test('a SQLite client whose scan does not recreate its sidecar still watches db-shm', () => {
-  const { isSelfWatchSqliteSidecarEvent } = freshCollector();
-  const mimoRoot = path.join(os.tmpdir(), 'mimocode');
-  const roots = { mimo: [mimoRoot] };
-
-  assert.equal(isSelfWatchSqliteSidecarEvent(path.join(mimoRoot, 'mimocode.db-shm'), roots), false);
-});
-
 // The unit test above proves the predicate; this proves the consequence the bug
 // was actually about. A suppressed shm event must not spawn a scan, while a real
 // -wal change from the same directory still must — otherwise the fix would have

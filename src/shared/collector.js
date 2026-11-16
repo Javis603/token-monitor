@@ -1734,16 +1734,15 @@ const OPENCLAW_AGENT_DB_WATCH_PATTERN = /^openclaw-agent\.sqlite(?:-(?:wal|shm))
 // directory names, so one set covers both.
 const OPENCLAW_CODEX_HOME_DIRS = new Set(['sessions', 'archived_sessions']);
 // OpenCode discovers only direct opencode.db / opencode-<channel>.db files.
-// WAL/SHM are not database inputs to tokscale, but they are the live-write
-// signals that must remain watched so a transaction committed before a
-// checkpoint refreshes the usage view.
+// WAL/SHM are not database inputs to tokscale. WAL events refresh transactions
+// committed before a checkpoint; scan-generated SHM events are filtered below.
 const OPENCODE_DB_WATCH_PATTERN = /^opencode(?:-[A-Za-z0-9._-]+)?\.db(?:-(?:wal|shm))?$/;
 // MiMo keeps a multi-gigabyte log/ tree alongside its SQLite state files.
 // A plain recursive watch of ~/.local/share/mimocode storms the watcher (every
 // SQLite WAL/SHM transaction is a chokidar event, the log dir holds thousands
 // of rotated files). Tokscale discovers mimocode.db and
 // mimocode-<channel>.db directly under each data root; the sidecars are not
-// parsed but must stay watched so a write through WAL/SHM triggers a refresh.
+// parsed. WAL writes trigger a refresh; scan-generated SHM events are filtered.
 // Keep the home dir watched but ignore everything except that direct db family.
 // The home root itself stays watched so a freshly created database or sidecar
 // still surfaces on the next top-level readdir.
@@ -1868,10 +1867,10 @@ function ignoreDesktopTranscriptPath(parts, resolved) {
 }
 
 // Tokscale opens one exact database directly under this root instead of walking
-// it. Keep the direct children it names — including the WAL/SHM sidecars, which
-// are the live-write signal even though tokscale never parses them as databases
-// — so a database created later is still discovered, and never recurse into the
-// runtime files beside it.
+// it. Keep the direct children it names, including WAL/SHM sidecars, so a
+// database created later is still discovered. The event handler filters SHM
+// for measured self-writing clients; DB/WAL changes remain usage signals.
+// Never recurse into the runtime files beside it.
 function directChildOnly(isSource) {
   return (parts) => parts.length > 1 || !isSource(parts[0]);
 }
@@ -2688,12 +2687,18 @@ function watcherOptions(usePolling, ignored) {
 // its unchanged record to the Hub about every 2 s.
 //
 // Only the sidecar is dropped. The real data signal lives in the database and
-// its -wal, so a genuine change still produces an event; a client whose scan was
-// measured NOT to rewrite its sidecar (mimo) is deliberately absent here, and
-// adding a client to this list asserts a measurement rather than a hunch.
+// its -wal, so a genuine change still produces an event. With the bundled 4.23
+// scanner, unchanged WAL fixtures also rewrite SHM on every Kilo, Kiro, Zed,
+// Hermes, Copilot, Unsloth, Devin and OpenClaw scan. OpenCode and MiMo rewrite
+// it on the first read before their source cache is warm. A read-only SQLite
+// connection can write its wal-index; it is not evidence of new token usage.
+// Adding a client to this list asserts a measurement rather than a hunch.
 // Cherry Studio, CatPaw and Goose also rewrite their wal-index on repeated read-only WAL scans.
 // Cursor's read-only desktop credential/title queries change state.vscdb-shm too.
-const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['antigravity', 'catpaw', 'cherrystudio', 'cursor', 'goose', 'zcode']);
+const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze([
+  'antigravity', 'catpaw', 'cherrystudio', 'copilot', 'cursor', 'devin', 'goose',
+  'hermes', 'kilo', 'kiro', 'mimo', 'opencode', 'openclaw', 'unsloth', 'zcode', 'zed'
+]);
 
 function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
   // Match SQLite's wal-index suffix, not one client's database basename: ZCode's
