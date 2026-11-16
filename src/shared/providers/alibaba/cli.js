@@ -105,6 +105,13 @@ async function fetchBailianCLI(variant, deps = {}) {
   if (childEnv.BAILIAN_CONFIG_DIR && !paths.isAbsolute(childEnv.BAILIAN_CONFIG_DIR)) {
     childEnv.BAILIAN_CONFIG_DIR = paths.resolve(childEnv.BAILIAN_CONFIG_DIR);
   }
+  // npm's env-node entry also needs its adjacent interpreter after fallback discovery.
+  const commandDir = paths.dirname(command);
+  if ((deps.platform || process.platform) !== 'win32'
+    && !(childEnv.PATH || '').split(':').includes(commandDir)
+    && existingExecutable(paths.join(commandDir, 'node'), deps)) {
+    childEnv.PATH = childEnv.PATH ? `${childEnv.PATH}:${commandDir}` : commandDir;
+  }
   let executable = command;
   let prefix = [];
   if ((deps.platform || process.platform) === 'win32' && command.endsWith('.mjs')) {

@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { EventEmitter } = require('node:events');
-const { mkdtempSync, mkdirSync, writeFileSync, chmodSync, rmSync } = require('node:fs');
+const { mkdtempSync, mkdirSync, writeFileSync, chmodSync, symlinkSync, rmSync } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { fetchAlibabaLimits, alibabaVariantConfig } = require('../../src/shared/providers/alibaba/limits');
@@ -222,6 +222,35 @@ test('Bailian environment omits unrelated credentials and ignores ambient gatewa
 test('Bailian discovery supports native Windows executables and rejects relative PATH entries', () => {
   assert.equal(existingBailianCli({ Path: 'C:\\tools;relative' }, 'win32', { existsSync: p => p === 'C:\\tools\\bl.exe' }), 'C:\\tools\\bl.exe');
   assert.equal(existingBailianCli({ PATH: 'relative' }, 'linux', { existsSync: p => p === 'relative/bl' }), null);
+});
+
+test('Bailian fallback discovery makes its adjacent Node available without replacing the inherited PATH', async () => {
+  const deps = cliDeps(() => ({ per1MonthPercentage: 0.2 }));
+  deps.env = { PATH: '/usr/bin:/bin' };
+  deps.existsSync = file => ['/opt/homebrew/bin/bl', '/opt/homebrew/bin/node'].includes(file);
+  const [row] = await fetchAlibabaLimits({ alibabaVariant: 'cn-personal' }, deps);
+  assert.equal(row.status, 'ok');
+  assert.equal(deps.calls[0].command, '/opt/homebrew/bin/bl');
+  assert.equal(deps.calls[0].options.env.PATH, '/usr/bin:/bin:/opt/homebrew/bin');
+});
+
+test('Bailian fallback env-node entry executes with Node outside the inherited PATH', { skip: process.platform === 'win32' }, async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bailian-fallback-node-'));
+  try {
+    const bin = path.join(dir, '.local', 'bin');
+    const inherited = path.join(dir, 'limited-path');
+    mkdirSync(bin, { recursive: true });
+    mkdirSync(inherited);
+    symlinkSync(process.execPath, path.join(bin, 'node'));
+    writeFileSync(path.join(bin, 'bl'), '#!/usr/bin/env node\nconsole.log(JSON.stringify({per1MonthPercentage:0.2}));\n');
+    chmodSync(path.join(bin, 'bl'), 0o755);
+    const [row] = await fetchAlibabaLimits({ alibabaVariant: 'cn-personal' }, {
+      env: { HOME: dir, PATH: inherited }
+    });
+    assert.equal(row.status, 'ok');
+    assert.equal(row.source, 'cli');
+    assert.equal(row.windows[0].usedPercent, 20);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('Bailian subprocess executes JSON quota commands and stops on cancellation', { skip: process.platform === 'win32' }, async () => {
