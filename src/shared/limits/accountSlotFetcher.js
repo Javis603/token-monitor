@@ -31,6 +31,32 @@ function slotEnv(env) {
   return Object.fromEntries(SLOT_ENV_KEYS.filter((name) => env[name]).map((name) => [name, env[name]]));
 }
 
+/** @param {any} row @param {string} key */
+function reportsKey(row, key) {
+  return row?.accountKey === key || (Array.isArray(row?.accountKeyAliases) && row.accountKeyAliases.includes(key));
+}
+
+/** @typedef {{key: string, keyless: boolean} | null} ScopeCheck */
+
+// What an answer to an account-scoped refresh must show before the runtime files
+// it under the scope key. Every rendered row has a refresh, including rows
+// another device reported, and that device may still use a key this one has
+// moved away from, so an answer that reports another key is never filed under
+// it. A keyless answer (a failure that could not name its account) is kept only
+// for a key a local row holds.
+/** @param {SlotEntry} entry @param {SlotOptions} options @param {string} scopeKey */
+function scopeCheck(entry, options, scopeKey) {
+  const held = (options.previousLimits?.providers || [])
+    .some((/** @type {any} */ row) => row.provider === entry.id && reportsKey(row, scopeKey));
+  return { key: scopeKey, keyless: held };
+}
+
+/** @param {any} row @param {ScopeCheck} check */
+function answersScope(row, check) {
+  if (!check) return true;
+  return row.accountKey ? reportsKey(row, check.key) : check.keyless;
+}
+
 // Slots and the default account are namespaced apart, whatever a slot is called.
 /** @param {{id: string, values: Record<string, string> | null}} account */
 function accountNamespace(account) {
@@ -76,15 +102,25 @@ function slotAccounts(entry, options, deps) {
 
   const scope = options.limitRefreshScope;
   const scopeKey = scope?.provider === entry.id && scope.accountKey ? String(scope.accountKey) : '';
-  if (!scopeKey) return { accounts, scopeKey, previousKeys };
-  const scoped = accounts.find((account) => account.accountKey === scopeKey)
-    || accounts.find((account) => account.provisional === scopeKey)
-    || accounts.find((account) => account.accountKeyAliases.includes(scopeKey));
-  if (scoped) return { accounts: [scoped], scopeKey, previousKeys };
+  if (!scopeKey) return { accounts, scopeKey, previousKeys, check: /** @type {ScopeCheck} */ (null) };
+  const check = scopeCheck(entry, options, scopeKey);
+  // A provisional key no fetch can report: a held one is recovered in place (the
+  // next provider-wide pass moves it), and one no local row holds is another
+  // device's account that happens to share the namespace.
+  const provisional = accounts.find((account) => account.provisional === scopeKey);
+  if (provisional) return { accounts: [provisional], scopeKey, previousKeys, check: check.keyless ? null : check };
+  // A remembered or stored key can be stale until a provider-wide pass, so an
+  // exact match still has to report it.
+  const exact = accounts.find((account) => account.accountKey === scopeKey);
+  if (exact) return { accounts: [exact], scopeKey, previousKeys, check };
+  // A key an account moved away from can still be live on another device; this
+  // account answers for it only by reporting it again.
+  const moved = accounts.find((account) => account.accountKeyAliases.includes(scopeKey));
+  if (moved) return { accounts: [moved], scopeKey, previousKeys, check: { key: scopeKey, keyless: false } };
   // No account answers to this key. It can still be the default account's when
   // this process has not seen that account answer yet; a default account whose
   // key is known and different is not what was asked for.
-  return { accounts: accounts.filter((account) => !account.values && !account.known), scopeKey, previousKeys };
+  return { accounts: accounts.filter((account) => !account.values && !account.known), scopeKey, previousKeys, check };
 }
 
 /** @param {SlotEntry} entry @param {SlotOptions} options @param {SlotDeps} deps */
@@ -127,11 +163,17 @@ function createAccountSlotFetcher(entry) {
 
   /** @param {SlotOptions} options @param {SlotDeps} deps */
   return function fetchAccountSlots(options = {}, deps = {}) {
-    if (!normalizeAccountSlots(entry, options[key]).length) return entry.fetchLimits(options, deps);
+    if (!normalizeAccountSlots(entry, options[key]).length) {
+      const scope = options.limitRefreshScope;
+      if (!(scope?.provider === entry.id && scope.accountKey)) return entry.fetchLimits(options, deps);
+      const check = scopeCheck(entry, options, String(scope.accountKey));
+      return Promise.resolve(entry.fetchLimits(options, deps)).then((result) => (Array.isArray(result) ? result : [result])
+        .filter((row) => row && !row.removed && answersScope(row, check)));
+    }
     return collect();
 
     async function collect() {
-      const { accounts, scopeKey, previousKeys } = slotAccounts(entry, options, deps);
+      const { accounts, scopeKey, previousKeys, check } = slotAccounts(entry, options, deps);
       /** @type {{account: SlotAccount, row: any, accountKey: string, moved: boolean}[]} */
       const answered = [];
       let complete = true;
@@ -139,12 +181,15 @@ function createAccountSlotFetcher(entry) {
         if (deps.signal?.aborted) { complete = false; break; }
         const owned = new Set([account.accountKey, account.provisional, ...account.accountKeyAliases]);
         // The adapter decides retirement below, so a fetch's own removal rows are dropped.
-        const answers = (await fetchAccount(account, owned, options, deps)).filter((row) => !row.removed);
+        const answers = (await fetchAccount(account, owned, options, deps))
+          .filter((row) => !row.removed && answersScope(row, check));
+        if (!answers.length && check && !check.keyless) continue;
         if (!answers.length) answers.push({ provider: entry.id, status: 'unavailable', windows: [], updatedAt: nowIso((deps.now || Date.now)()) });
         for (const row of answers) {
           // The runtime files every row of an account-scoped dispatch under the
           // scope identity, so a scoped answer stays on that key and changes
-          // nothing remembered; the next provider-wide dispatch moves it.
+          // nothing remembered; a held provisional key's recovery moves on the
+          // next provider-wide dispatch.
           const accountKey = scopeKey || row.accountKey || account.accountKey;
           answered.push({ account, row, accountKey, moved: account.known && accountKey !== account.accountKey });
         }

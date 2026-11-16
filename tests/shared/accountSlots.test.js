@@ -113,8 +113,11 @@ test('11 account scope matches aliases and defaults only when unclaimed', async 
   const seen = [];
   const fetch = fake((o) => { seen.push(o.deepseekApiKey); return reading(o.deepseekApiKey); });
   const options = { deepseekApiKey: 'default', ...config(slot('a', undefined, { accountKey: 'A', accountKeyAliases: ['alias'] }), slot('b')) };
+  // An alias reaches its account, but the answer is filed under it only if it reports it.
   const rows = live(await fetch({ ...options, limitRefreshScope: { provider: 'deepseek', accountKey: 'alias' } }, deps()));
-  assert.equal(rows.length, 1); assert.deepEqual(seen, ['a']); seen.length = 0;
+  assert.equal(rows.length, 0); assert.deepEqual(seen, ['a']); seen.length = 0;
+  const reported = live(await fake(() => ({ ...reading('A'), accountKeyAliases: ['alias'] }))({ ...options, limitRefreshScope: { provider: 'deepseek', accountKey: 'alias' } }, deps()));
+  assert.deepEqual(reported.map((r) => r.accountKey), ['alias']);
   await fetch({ ...options, limitRefreshScope: { provider: 'deepseek', accountKey: 'unclaimed' } }, deps());
   assert.deepEqual(seen, ['default']);
   // A default account already known under another key is not what an unmatched scope asked for.
@@ -123,6 +126,35 @@ test('11 account scope matches aliases and defaults only when unclaimed', async 
   assert.deepEqual(await fetch({ ...options, limitRefreshScope: { provider: 'deepseek', accountKey: 'unclaimed' } }, d), []);
   assert.deepEqual(seen, []);
 });
+// Another device's row has a refresh too. No local credential answers for it,
+// so a local reading must never be filed under that device's account key.
+test('a scope for another device\'s account is never answered with a local reading', async () => {
+  const local = { deepseekApiKey: 'local', previousLimits: { providers: [reading('local')] } };
+  const remote = { provider: 'deepseek', accountKey: 'REMOTE' };
+  // Without slots, through the real fetcher and the real runtime.
+  const real = await LIMIT_PROVIDER_FETCHERS.deepseek({ ...local, limitRefreshScope: { provider: 'deepseek', accountKey: hashKey('deepseek', 'remote') } },
+    { env: {}, probe: true, fetch: async () => response(balance) });
+  assert.deepEqual(real, []);
+  const runtime = runtimeFor(fake((o) => reading(o.deepseekApiKey)), { deepseekApiKey: 'local' });
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    await runtime.refresh(remote, 'account-panel');
+    assert.deepEqual(snapshot(runtime), [['local', 'ok']]);
+  } finally { runtime.stop(); }
+  // With slots, an unclaimed default account is still fetched but cannot answer for it.
+  const seen = [];
+  const withSlots = fake((o) => { seen.push(o.deepseekApiKey); return o.deepseekApiKey === 'local' ? { provider: 'deepseek', status: 'unauthorized' } : reading(o.deepseekApiKey); });
+  assert.deepEqual(await withSlots({ ...local, ...config(slot('a')), limitRefreshScope: remote }, deps()), []);
+  assert.deepEqual(seen, ['local']);
+  // A key this runtime holds is still answered by the unclaimed default account, as after a restart.
+  assert.deepEqual(live(await fake((o) => reading(o.deepseekApiKey))({ deepseekApiKey: 'local', ...config(slot('a')),
+    previousLimits: { providers: [reading('HELD')] }, limitRefreshScope: { provider: 'deepseek', accountKey: 'HELD' } }, deps()))
+    .map((r) => r.accountKey), ['HELD']);
+  // The same account signed in on both devices answers as usual.
+  assert.deepEqual([await fake((o) => reading(o.deepseekApiKey))({ deepseekApiKey: 'local', limitRefreshScope: { provider: 'deepseek', accountKey: 'local' } }, deps())]
+    .flat().map((r) => r.accountKey), ['local']);
+});
+
 test('12 broad raw removals cannot retire sibling identities', async () => {
   const previousLimits = [reading('A'), reading('B')];
   const rows = await fake((o) => {
@@ -235,6 +267,48 @@ test('accounts that swap identities keep both rows and neither becomes an alias 
   const scoped = fake((o) => { seen.push(o.deepseekApiKey); return reading(o.deepseekApiKey === 'a' ? 'B' : 'A'); });
   const answer = await scoped({ ...config(slot('a'), slot('b')), limitRefreshScope: { provider: 'deepseek', accountKey: 'A' } }, d);
   assert.deepEqual(seen, ['b']); assert.deepEqual(answer.map((r) => r.accountKey), ['A']);
+});
+
+test('refreshing a key a slot moved away from does not file the slot\'s new reading under it', async () => {
+  // Another device can still report the old key; its row has a refresh too.
+  const runtime = runtimeFor(fake((o) => reading(o.deepseekApiKey.toUpperCase())), config(slot('x', { deepseekApiKey: 'old' })));
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    runtime.reconfigure({ limitProviders: ['deepseek'], ...config(slot('x', { deepseekApiKey: 'new' })) });
+    await runtime.refresh({}, 'credential-edit');
+    assert.deepEqual(snapshot(runtime), [['NEW', 'ok']]);
+    await runtime.refresh({ provider: 'deepseek', accountKey: 'OLD' }, 'account-panel');
+    assert.deepEqual(snapshot(runtime), [['NEW', 'ok']]);
+  } finally { runtime.stop(); }
+});
+
+test('a stale remembered key does not take the reading of a replaced credential', async () => {
+  // Stored on the slot record, with no local row and the real fetcher.
+  const stored = await LIMIT_PROVIDER_FETCHERS.deepseek({ ...config(slot('x', { deepseekApiKey: 'new' }, { accountKey: 'OLD' })),
+    limitRefreshScope: { provider: 'deepseek', accountKey: 'OLD' } }, { ...deps(), probe: true, fetch: async () => response(balance) });
+  assert.deepEqual(stored, []);
+  // Remembered by the runtime, refreshed before any provider-wide pass sees the new credential.
+  const remaining = (key) => ({ ...reading(key.toUpperCase()), windows: [{ ...reading(key).windows[0], remaining: key === 'old' ? 1 : 2 }] });
+  const runtime = runtimeFor(fake((o) => remaining(o.deepseekApiKey)), config(slot('x', { deepseekApiKey: 'old' })));
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    runtime.reconfigure({ limitProviders: ['deepseek'], ...config(slot('x', { deepseekApiKey: 'new' })) });
+    await runtime.refresh({ provider: 'deepseek', accountKey: 'OLD' }, 'account-panel');
+    const old = runtime.getSnapshot().providers.find((r) => r.accountKey === 'OLD');
+    assert.equal(old?.windows[0].remaining ?? 1, 1);
+  } finally { runtime.stop(); }
+  // An answer for the remembered key itself, or a keyless failure of a held key, is still filed under it.
+  const held = { previousLimits: { providers: [reading('OLD')] }, limitRefreshScope: { provider: 'deepseek', accountKey: 'OLD' } };
+  assert.deepEqual(live(await fake(() => reading('OLD'))({ ...config(slot('x', undefined, { accountKey: 'OLD' })), ...held }, deps())).map((r) => r.accountKey), ['OLD']);
+  assert.deepEqual(live(await fake(() => ({ provider: 'deepseek', status: 'unavailable' }))({ ...config(slot('x', undefined, { accountKey: 'OLD' })), ...held }, deps()))
+    .map((r) => [r.accountKey, r.status]), [['OLD', 'unavailable']]);
+});
+
+test('a provisional key no local row holds is another device\'s account', async () => {
+  const provisional = hashKey('deepseek', 'account-slot', 'default');
+  const rows = await fake((o) => reading(o.deepseekApiKey))({ deepseekApiKey: 'local', ...config(slot('a')),
+    limitRefreshScope: { provider: 'deepseek', accountKey: provisional } }, deps());
+  assert.deepEqual(rows, []);
 });
 
 test('a scoped refresh under an old key leaves nothing behind after the next provider-wide pass', async () => {
