@@ -90,6 +90,11 @@ test('source file policies preserve symlinked transcripts and recursive custom/o
     const directoryLink = path.join(path.dirname(source), 'linked-history');
     fs.symlinkSync(nested, directoryLink, 'dir');
     assert.equal(ignored(directoryLink), true, 'the scanner does not recurse through directory symlinks');
+    for (const name of ['linked-history.jsonl', 'agent-linked.meta.json']) {
+      const sourceNamedDirectoryLink = path.join(path.dirname(source), name);
+      fs.symlinkSync(nested, sourceNamedDirectoryLink, 'dir');
+      assert.equal(ignored(sourceNamedDirectoryLink), true, 'a source filename cannot admit a directory link');
+    }
   }
 });
 

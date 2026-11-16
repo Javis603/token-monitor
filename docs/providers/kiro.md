@@ -18,6 +18,8 @@ This root remains **interval/manual collection only**. Although its conversation
 
 The separate `~/.kiro/sessions` root retains live updates for CLI JSON headers and JSONL streams under `cli/`, plus IDE `session.json` and `messages.jsonl` directly inside `sess_*` directories. Discovery remains recursive, matching the scanner rather than requiring a fixed workspace depth. New workspaces and sessions appear without restarting. Per-session `snapshots/` contains project-file copies and is pruned before the watcher descends into it. Kiro CLI's SQLite roots retain database/WAL events, with scan-generated SHM events filtered by the common collector policy.
 
+Tokscale scans `cli/` as a separate root, so its root directory link remains supported. Interior directory links are not followed, even when their names resemble source files. Source-file links and source unlink events remain observable.
+
 A watch event can restrict collection to the Kiro client and Today; it does not pass an individual changed file to Tokscale. Existing native-session or CLI triggers may therefore still incur the scanner's legacy globalStorage traversal cost when that legacy tree exists.
 
 Full and manual Tokscale scans remain recursive and unchanged. Non-standard files outside the built-in live layout are still collected by those scans. Explicit custom scan roots retain the common recursive custom-root policy.

@@ -40,7 +40,7 @@ test('Kiro legacy globalStorage remains interval-only while native sessions stay
 
 test('Kiro native sessions keep headers, message streams and discovery but exclude snapshots', t => {
   const f = fixture(t);
-  const sources = ['cli/header.json', 'cli/header.jsonl', 'cli/nested/header.json',
+  const sources = ['cli/header.json', 'cli/header.jsonl', 'cli/nested/header.json', 'cli/sess_nested/snapshots/header.jsonl',
     'workspace/sess_example/session.json', 'workspace/sess_example/messages.jsonl',
     'workspace/nested/sess_deep/session.json', 'workspace/nested/sess_deep/messages.jsonl'];
   const noise = ['workspace/sess_example/snapshots/commit/src/session.json',
@@ -79,9 +79,18 @@ test('Kiro native discovery rejects directory symlinks while retaining transcrip
   fs.symlinkSync(target, messageLink);
   const directoryLink = path.join(f.sessions, 'linked-workspace');
   fs.symlinkSync(path.dirname(session), directoryLink, 'dir');
+  const cliLink = path.join(f.sessions, 'cli');
+  fs.symlinkSync(path.dirname(target), cliLink, 'dir');
+  const sessionLink = path.join(session, 'session.json');
+  fs.symlinkSync(path.dirname(target), sessionLink, 'dir');
   const ignored = watchIgnoreMatcher('kiro', f.options);
   assert.equal(ignored(messageLink), false);
   assert.equal(ignored(directoryLink), true);
+  assert.equal(ignored(cliLink), false, 'Tokscale follows the separate CLI scan-root link');
+  const nestedCliLink = path.join(cliLink, 'history.jsonl');
+  fs.symlinkSync(path.dirname(session), nestedCliLink, 'dir');
+  assert.equal(ignored(nestedCliLink), true, 'CLI scan-root links do not admit nested directory links');
+  assert.equal(ignored(sessionLink), true, 'a source filename cannot admit a directory link');
   fs.unlinkSync(messageLink);
   assert.equal(ignored(messageLink), false, 'source unlink remains observable');
 });

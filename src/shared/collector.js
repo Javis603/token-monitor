@@ -1876,11 +1876,16 @@ function directChildOnly(isSource) {
 
 // Keep directories for recursive discovery, but ignore files neither usage nor
 // metadata reads. Attachments, runtime databases and locks are not activity.
-// Match source names before stat so their unlink events remain observable.
+// Reject directory links even when their names look like sources. Missing
+// source paths still pass so unlink events remain observable.
 function recursiveSourceFiles(isSource) {
   return (parts, resolved) => {
-    if (isSource(parts[parts.length - 1])) return false;
-    try { return !fs.lstatSync(resolved).isDirectory(); } catch (_) { return true; }
+    const source = isSource(parts[parts.length - 1], parts);
+    try {
+      const stat = fs.lstatSync(resolved);
+      if (stat.isSymbolicLink()) return !source || !fs.statSync(resolved).isFile();
+      return !stat.isDirectory() && !source;
+    } catch (_) { return !source; }
   };
 }
 
@@ -1945,16 +1950,17 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // Rollups and model/session metadata can change without updates.jsonl growing.
   bound('grok', sourceRoots('grok', 'grok-sessions'),
     recursiveSourceFiles((name) => ['updates.jsonl', 'summary.json', 'signals.json', 'events.jsonl'].includes(name)));
-  const kiroCliFiles = recursiveSourceFiles((name) => name.endsWith('.json') || name.endsWith('.jsonl'));
+  // Tokscale accepts session.json in sess_* directories at any depth and
+  // reads messages.jsonl beside it. Keep the same discovery/link boundary.
+  const kiroSessionFiles = recursiveSourceFiles((name, parts) => parts[0] === 'cli'
+    ? name.endsWith('.json') || name.endsWith('.jsonl')
+    : parts.length > 1 && parts[parts.length - 2].startsWith('sess_')
+      && ['session.json', 'messages.jsonl'].includes(name));
   bound('kiro', sourceRoots('kiro', 'kiro-sessions'), (parts, resolved) => {
-    if (parts[0] === 'cli') return parts.length > 1 && kiroCliFiles(parts, resolved);
-    if (parts.some((part, index) => part === 'snapshots' && index > 0 && parts[index - 1].startsWith('sess_'))) return true;
-    // Tokscale accepts session.json in sess_* directories at any depth and
-    // reads messages.jsonl beside it. Keep the same discovery boundary.
-    const name = parts[parts.length - 1];
-    if (parts.length > 1 && parts[parts.length - 2].startsWith('sess_')
-      && ['session.json', 'messages.jsonl'].includes(name)) return false;
-    try { return !fs.lstatSync(resolved).isDirectory(); } catch (_) { return true; }
+    // CLI is its own Tokscale scan root, so its root directory link is valid.
+    if (parts.length === 1 && parts[0] === 'cli') return false;
+    if (parts[0] !== 'cli' && parts.some((part, index) => part === 'snapshots' && index > 0 && parts[index - 1].startsWith('sess_'))) return true;
+    return kiroSessionFiles(parts, resolved);
   });
 
   if (candidates.senpi) {
