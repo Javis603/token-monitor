@@ -5,7 +5,19 @@ const allowance = require('./notionAllowance.json');
 const workspace = 'f190126b-0445-43ec-94dd-f069ad1aa064';
 const user = '8f24ac06-1807-4d51-9317-87d2f1a5f394';
 const userB = 'ad5e1e56-1a69-42a5-aede-c8fde578f1a5';
+const legacyTraeBody = { user_entitlement_pack_list: [{ entitlement_base_info: { quota: { credits_limit: 100 } }, usage: { credits_amount: 10 } }] };
 const fixtures = {
+  devin: {
+    values: n => ({ devinBearerToken: `token-${n}`, devinOrganization: `org/${n}` }),
+    key: n => hashKey('devin', `token-${n}`, `org/${n}`),
+    body: () => ({ daily_percentage: 0.1, weekly_percentage: 0.2, plan_name: 'Pro' })
+  },
+  trae: {
+    values: n => ({ traeCookie: `sessionid=${n}`, traeAccessToken: '', traeDeviceId: '' }),
+    key: n => hashKey('trae', `sessionid=${n}`),
+    body: (n, url) => url.endsWith('/GetUserToken') ? { Result: { Token: `jwt-${n}` } }
+      : { is_credits_billing: true, usage_summary: { total_amount: 100, consumed_amount: 10 } }
+  },
   zed: {
     values: n => ({ zedCookie: `zed.session=${n}` }),
     key: n => hashKey('zed', n),
@@ -47,10 +59,15 @@ function transport(id, seen = []) {
 }
 function assertHeaders(id, values, headers) {
   const assert = require('node:assert/strict');
-  if (id === 'zaiteam') {
+  if (id === 'devin') {
+    assert.equal(headers.Authorization, `Bearer ${values.devinBearerToken}`);
+  } else if (id === 'trae') {
+    assert.equal(headers.Cookie, values.traeCookie);
+    if (headers.Authorization) assert.equal(headers.Authorization, `Cloud-IDE-JWT jwt-${headers.Cookie.slice(-1)}`);
+  } else if (id === 'zaiteam') {
     assert.equal(headers.Authorization, `Bearer ${values.zaiTeamApiKey}`);
     assert.equal(headers['bigmodel-organization'], values.zaiTeamOrganizationId);
     assert.equal(headers['bigmodel-project'], values.zaiTeamProjectId);
   } else assert.equal(headers.Cookie, Object.values(values)[0]);
 }
-module.exports = { fixtures, transport };
+module.exports = { fixtures, transport, legacyTraeBody };

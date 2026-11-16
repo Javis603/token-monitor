@@ -4,6 +4,7 @@
 // Devin limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'devin',
+  accountSlots: true,
   fetch: 'fetchDevinLimits',
   fields: [
     {
@@ -15,6 +16,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
     },
     {
       key: 'devinOrganization',
+      resolve: 'devinOrganization',
       kind: 'setting',
       normalize: { fn: 'normalizeDevinOrganization', style: 'value' },
       project: 'value'
@@ -23,6 +25,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   // The bearer token alone is not enough: Devin also needs an organization,
   // which may come from settings or the env lanes the resolver reads.
   status: {
+    credential: 'devinBearerToken',
     configuredKey: 'devinBearerTokenConfigured',
     sourceKey: 'devinBearerTokenSource',
     pendingKey: 'devinPendingCheckSince'

@@ -51,11 +51,18 @@ function defaultAccountValues(entry, options, env) {
   return Object.fromEntries(entry.fields.filter((/** @type {any} */ field) => (field.kind === 'credential' || field.kind === 'setting') && field.key !== defaultIdentityKey(entry))
     .map((/** @type {any} */ field) => [field.key, options[field.key] || field.resolve?.(env) || field.configDefault || '']));
 }
+// Credential choices are alternative authentication lanes, not companion fields
+// such as a device id. Keep one default account with the provider's precedence.
+/** @param {any} entry @param {any} values */
+function hasAccountCredential(entry, values) {
+  const keys = entry.form?.credentialChoice?.fields || [entry.status?.credential];
+  return keys.some((/** @type {string} */ key) => Boolean(values[key]));
+}
 /** @param {any} values */
 function accountValuesFingerprint(values) { return hashKey(JSON.stringify(Object.entries(values).sort(([a], [b]) => a.localeCompare(b)))); }
 /** @param {any[]} entries @param {any} options @param {any} env */
 function configuredMultiAccountProviders(entries, options, env) {
   return entries.filter(entry => entry.accountSlots && normalizeAccountSlots(entry, options[accountSlotKey(entry)]).filter(slot => slot.enabled).length
-    + (defaultAccountValues(entry, options, env)[entry.status?.credential] ? 1 : 0) > 1).map(entry => entry.id);
+    + (hasAccountCredential(entry, defaultAccountValues(entry, options, env)) ? 1 : 0) > 1).map(entry => entry.id);
 }
-module.exports = { defaultIdentityKey, defaultAccountValues, accountValuesFingerprint, configuredMultiAccountProviders, accountSlotKey, accountSlotField, normalizeAccountSlots };
+module.exports = { hasAccountCredential, defaultIdentityKey, defaultAccountValues, accountValuesFingerprint, configuredMultiAccountProviders, accountSlotKey, accountSlotField, normalizeAccountSlots };

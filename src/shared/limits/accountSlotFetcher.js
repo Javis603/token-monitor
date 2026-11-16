@@ -3,7 +3,7 @@
 
 const { hashKey } = require('../hashKey');
 const { nowIso, providerStatusFromError } = require('./providerHelpers');
-const { accountSlotKey, normalizeAccountSlots, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
+const { accountSlotKey, normalizeAccountSlots, defaultAccountValues, hasAccountCredential, accountValuesFingerprint } = require('./accountSlots');
 
 /**
  * @typedef {import('./accountSlots').AccountSlot} AccountSlot
@@ -89,8 +89,7 @@ function slotAccounts(entry, options, deps) {
   const slots = normalizeAccountSlots(entry, options[accountSlotKey(entry)]);
   const enabled = slots.filter(slot => slot.enabled).map(slot => describe(slot));
   const values = defaultAccountValues(entry, options, deps.env || process.env);
-  const primary = entry.status?.credential;
-  const all = [...(values[primary || ''] ? [describe({ id: 'environment', label: '', values: null, accountKey: '', accountKeyAliases: [] })] : []), ...enabled];
+  const all = [...(hasAccountCredential(entry, values) ? [describe({ id: 'environment', label: '', values: null, accountKey: '', accountKeyAliases: [] })] : []), ...enabled];
   // A key one account moved away from may be another account's key now; it is
   // that account's identity, not an alias of this one.
   const current = new Set(all.map((account) => account.accountKey));
