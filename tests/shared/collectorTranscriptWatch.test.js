@@ -83,5 +83,8 @@ test('source file policies preserve symlinked transcripts and recursive custom/o
     fs.symlinkSync(noise, source);
     const ignored = watchIgnoreMatcher('claude', { homeDir: home, env: {} });
     assert.equal(ignored?.(source) ?? false, false);
+    const directoryLink = path.join(path.dirname(source), 'linked-history');
+    fs.symlinkSync(nested, directoryLink, 'dir');
+    assert.equal(ignored(directoryLink), true, 'the scanner does not recurse through directory symlinks');
   }
 });

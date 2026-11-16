@@ -1880,7 +1880,7 @@ function directChildOnly(isSource) {
 function recursiveSourceFiles(isSource) {
   return (parts, resolved) => {
     if (isSource(parts[parts.length - 1])) return false;
-    try { return !fs.statSync(resolved).isDirectory(); } catch (_) { return true; }
+    try { return !fs.lstatSync(resolved).isDirectory(); } catch (_) { return true; }
   };
 }
 
@@ -1953,7 +1953,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
     const name = parts[parts.length - 1];
     if (parts.length > 1 && parts[parts.length - 2].startsWith('sess_')
       && ['session.json', 'messages.jsonl'].includes(name)) return false;
-    try { return !fs.statSync(resolved).isDirectory(); } catch (_) { return true; }
+    try { return !fs.lstatSync(resolved).isDirectory(); } catch (_) { return true; }
   });
 
   if (candidates.senpi) {

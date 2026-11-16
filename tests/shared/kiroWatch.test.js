@@ -69,6 +69,23 @@ test('Kiro snapshots do not consume the polling admission budget', t => {
   }));
 });
 
+test('Kiro native discovery rejects directory symlinks while retaining transcript links', t => {
+  if (process.platform === 'win32') return t.skip('creating file symlinks requires Windows privileges');
+  const f = fixture(t);
+  const target = f.write(f.home, 'external/messages.jsonl');
+  const session = path.join(f.sessions, 'workspace', 'sess_one');
+  fs.mkdirSync(session, { recursive: true });
+  const messageLink = path.join(session, 'messages.jsonl');
+  fs.symlinkSync(target, messageLink);
+  const directoryLink = path.join(f.sessions, 'linked-workspace');
+  fs.symlinkSync(path.dirname(session), directoryLink, 'dir');
+  const ignored = watchIgnoreMatcher('kiro', f.options);
+  assert.equal(ignored(messageLink), false);
+  assert.equal(ignored(directoryLink), true);
+  fs.unlinkSync(messageLink);
+  assert.equal(ignored(messageLink), false, 'source unlink remains observable');
+});
+
 test('explicit custom Kiro roots retain recursive discovery outside the built-in layout', t => {
   const f = fixture(t);
   const custom = path.join(f.home, 'custom');
