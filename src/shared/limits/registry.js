@@ -81,6 +81,9 @@ function bindDeclaration(decl) {
   if (typeof fetchLimits !== 'function') {
     throw new Error(`limits registry: ${decl.id} fetch references missing export ${decl.fetch}`);
   }
+  if (decl.serverAccountKey && typeof limits[decl.serverAccountKey] !== 'function') {
+    throw new Error(`limits registry: ${decl.id} serverAccountKey references missing export ${decl.serverAccountKey}`);
+  }
   return Object.freeze({
     ...decl,
     limits,

@@ -435,3 +435,20 @@ test('emptying a slot name removes it from retained readings too', async () => {
     assert.equal(row.windows.length, 1);
   } finally { runtime.stop(); }
 });
+
+test('every declared serverAccountKey names a predicate its limits module exports', () => {
+  const { LIMIT_PROVIDER_REGISTRY } = require('../../src/shared/limits/registry');
+  const declared = LIMIT_PROVIDER_REGISTRY.filter((entry) => entry.serverAccountKey);
+  assert.ok(declared.some((entry) => entry.id === 'qoder'));
+  for (const entry of declared) assert.equal(typeof entry.limits[entry.serverAccountKey], 'function', entry.id);
+});
+
+test('a key a slot moved away from stays with the default account that answers under it', async () => {
+  const fetch = fake((o) => reading(o.deepseekApiKey === 'a' ? 'A' : 'B'));
+  const runtime = runtimeFor(fetch, { deepseekApiKey: 'a', deepseekDefaultAccountIdentity: { accountKey: 'A', accountKeyAliases: [] },
+    ...config(slot('x', { deepseekApiKey: 'b' }, { label: 'Work', accountKey: 'B', accountKeyAliases: ['A'] })) });
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    assert.deepEqual(runtime.getSnapshot().providers.map((r) => [r.accountKey, r.accountName || '']), [['A', ''], ['B', 'Work']]);
+  } finally { runtime.stop(); }
+});

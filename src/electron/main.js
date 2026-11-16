@@ -8403,6 +8403,10 @@ app.whenReady().then(() => {
     onChanged: (provider, change) => {
       deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
       if (deviceRuntimeHandle) return invalidateAccountSlotChange(deviceRuntimeHandle, provider, change);
+      // No runtime yet: the retired accounts are cleared once one starts.
+      for (const accountKey of change?.retiredAccountKeys || []) {
+        void queueLimitInvalidation({ provider, accountKey }, 'settings-change', { clear: true, refresh: false });
+      }
     }
   });
   for (const operation of ['list', 'add', 'replace', 'rename', 'setEnabled', 'remove', 'move']) {
