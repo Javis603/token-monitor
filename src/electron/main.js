@@ -7869,6 +7869,22 @@ function refreshRetainedWindowsBackdrop(target = mainWindow) {
   return refreshed;
 }
 
+function attachWindowsBackdropRecovery() {
+  const refreshVisibleWindows = () => {
+    refreshRetainedWindowsBackdrop(mainWindow);
+    refreshRetainedWindowsBackdrop(dashboardWindow);
+  };
+  powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
+  powerMonitor.on('unlock-screen', () => {
+    notchController?.setLocked(false);
+    refreshVisibleWindows();
+  });
+  powerMonitor.on('resume', refreshVisibleWindows);
+  for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) {
+    screen.on(event, refreshVisibleWindows);
+  }
+}
+
 function createWindow(boundsOverride, options = {}) {
   ensureSettingsLoaded();
   const collapsedFloatingBubble = options.collapsedFloatingBubble === true;
@@ -8238,20 +8254,7 @@ registerPluginScheme(protocol);
 app.whenReady().then(() => {
   if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
   ensureSettingsLoaded();
-  powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
-  powerMonitor.on('unlock-screen', () => {
-    notchController?.setLocked(false);
-    refreshRetainedWindowsBackdrop(mainWindow);
-    refreshRetainedWindowsBackdrop(dashboardWindow);
-  });
-  powerMonitor.on('resume', () => {
-    refreshRetainedWindowsBackdrop(mainWindow);
-    refreshRetainedWindowsBackdrop(dashboardWindow);
-  });
-  screen.on('display-metrics-changed', () => {
-    refreshRetainedWindowsBackdrop(mainWindow);
-    refreshRetainedWindowsBackdrop(dashboardWindow);
-  });
+  attachWindowsBackdropRecovery();
   void sessionProxy.apply();
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose
