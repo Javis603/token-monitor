@@ -278,6 +278,11 @@ test('an aborted pass and a scoped pass retire nothing', async () => {
   const lastRows = await fake((o) => { if (o.deepseekApiKey === 'b') last.abort(); return reading(o.deepseekApiKey.toUpperCase()); })(
     { ...config(slot('a'), slot('b')), previousLimits }, { ...deps(), signal: last.signal });
   assert.equal(lastRows.some((r) => r.removed), false);
+  // Nor does it advance what is remembered: the next pass still treats the account as new.
+  const state = deps(), stop = new AbortController(), resolved = [];
+  await fake((o) => { stop.abort(); return reading(o.deepseekApiKey.toUpperCase()); })(config(slot('a')),
+    { ...state, signal: stop.signal, onAccountSlotResolved: (...args) => resolved.push(args) });
+  assert.equal(state.providerRuntimeState.size, 0); assert.deepEqual(resolved, []);
   const scoped = await fake((o) => reading(o.deepseekApiKey.toUpperCase()))(
     { ...config(slot('a', undefined, { accountKey: 'A' }), slot('b')), previousLimits, limitRefreshScope: { provider: 'deepseek', accountKey: 'A' } }, deps());
   assert.deepEqual(scoped.map((r) => [r.accountKey, r.removed === true]), [['A', false]]);

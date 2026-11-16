@@ -159,7 +159,9 @@ function createAccountSlotFetcher(entry) {
       for (const { account, row, accountKey, moved } of answered) {
         const aliases = [...new Set([...account.accountKeyAliases, ...(row.accountKeyAliases || []), ...(moved ? [account.accountKey] : [])])]
           .filter((alias) => !live.has(alias)).slice(-8);
-        if (!scopeKey) {
+        // Like retirement, a remembered identity only advances on a pass the
+        // runtime can accept whole.
+        if (!scopeKey && complete) {
           const identity = { accountKey, accountKeyAliases: aliases };
           deps.providerRuntimeState?.set(`account-slot:${entry.id}:${accountNamespace(account)}`, identity);
           if (account.values && (!account.known || moved || aliases.join('\n') !== account.accountKeyAliases.join('\n'))) {
