@@ -32,7 +32,11 @@ class Node {
   select() { this.selectionStart = 0; this.selectionEnd = this.value.length; }
   *walk() { yield this; for (const child of this.children) if (child.walk) yield* child.walk(); }
   querySelector(selector) { return [...this.walk()].find(node => selector[0] === '#' ? node.id === selector.slice(1) : node.classList.contains(selector.slice(1))); }
-  click() { return this.listeners.click?.(); }
+  matches(selector) { return selector === ':popover-open' && Boolean(this.popoverOpen); }
+  get offsetWidth() { return 160; }
+  get scrollHeight() { return 208; }
+  querySelectorAll() { return [...this.walk()].filter(n => ['button', 'input'].includes(n.tagName) && !n.disabled); }
+  click() { const result = this.listeners.click?.({ detail: 0 }); if (this.attributes.popovertarget) { const menu = this.document.getElementById(this.attributes.popovertarget); if (menu.popoverOpen) menu.hidePopover(); else menu.showPopover(); } return result; }
   key(key, altKey = false) { return this.listeners.keydown?.({ key, altKey, preventDefault() {}, stopPropagation() {} }); }
 }
 function harness() {
@@ -45,6 +49,8 @@ function harness() {
   const ipc = Object.fromEntries(['rename', 'move', 'setEnabled', 'remove', 'add', 'replace'].map(op => [op, async (...args) => { calls.push([op, ...args]); return ['add', 'replace'].includes(op) ? verdict : { ok: true, accounts: slots }; }]));
   const host = new Node('div', document);
   const defaultPanel = new Node('div', document);
+  const defaultForm = createCredentialPanel(limitAccountFormsForRenderer().find(f => f.id === 'qoder'), { document, translate: t, onToggle() {}, onClear() {}, onOpen() {}, onRefresh() {}, onSave() {} });
+  for (const child of [...defaultForm.querySelector('.cursor-settings-details').children]) defaultPanel.append(child);
   host.append(defaultPanel);
   const panel = createPanel({ defaultPanel, form: limitAccountFormsForRenderer().find(f => f.id === 'qoder'), label: 'Qoder', document, t, ipc, forms: { createCredentialPanel, resolveOpenUrl }, preserveScroll: fn => fn(), onChanged() {}, openExternal() {}, confirm: () => true });
   host.append(panel.element);
@@ -82,9 +88,9 @@ test('menu operations and Alt arrows use the slot IPC', async () => {
 });
 test('rename Enter saves, Escape cancels; pushes retain input, caret and open menu', async () => {
   const h = harness();
-  h.click(h.row('a'), '⋯');
+  h.row('a').querySelector('.plugin-more').click();
   h.update();
-  assert.equal(h.row('a').querySelector('.slot-menu').classList.contains('hidden'), false);
+  assert.equal(h.row('a').querySelector('.plugin-menu').popoverOpen, true);
   h.click(h.row('a'), 'Rename');
   const input = h.row('a').querySelector('.slot-rename'); input.value = 'Draft'; input.selectionStart = 2;
   h.update();
@@ -208,7 +214,7 @@ test('cancelled pending save cannot close or clear a newer credential draft', as
 
 test('locale translation updates live menus fix and add actions without recreating drafts', () => {
   const h = harness();
-  h.click(h.row('a'), '⋯');
+  h.row('a').querySelector('.plugin-more').click();
   h.panel.openEditor(null);
   const input = h.document.getElementById('qoderSlotDraftqoderCookieInput'); input.value = 'draft';
   const scope = { querySelectorAll(selector) {
@@ -218,7 +224,7 @@ test('locale translation updates live menus fix and add actions without recreati
   require('../../src/electron/renderer/i18n').applyTranslations(scope, 'zh-TW');
   assert.match(h.row('a').textContent, /更換 Cookie/);
   assert.equal(h.panel.element.querySelector('.slot-add').textContent, translate('zh-TW', 'settings.slots.add', { provider: 'Qoder' }));
-  assert.equal(h.row('a').querySelector('.slot-menu').classList.contains('hidden'), false);
+  assert.equal(h.row('a').querySelector('.plugin-menu').popoverOpen, true);
   assert.equal(input.value, 'draft');
 });
 
@@ -231,14 +237,14 @@ test('default row owns credential actions and first account opens retained defau
   assert.match(h.row('default').textContent, /Clear cookie/i);
   h.click(h.row('default'), 'Default account settings');
   const region = h.defaultPanel.parentElement;
-  assert.equal(region.open, true);
+  assert.equal(region.classList.contains('hidden'), false);
   assert.equal(region.children[0].textContent, 'Default account settings');
   h.panel.update([], [], false);
   assert.equal(h.row('default'), undefined);
-  region.open = false;
+  h.click(h.panel.element, 'Cancel');
   h.click(h.panel.element, t('settings.slots.add', { provider: 'Qoder' }));
-  assert.equal(region.open, true);
-  assert.equal(h.panel.element.querySelector('.slot-editor').classList.contains('hidden'), true);
+  assert.equal(region.classList.contains('hidden'), false);
+  assert.equal(h.panel.element.querySelector('.slot-editor').classList.contains('hidden'), false);
   assert.equal(region.children[1], h.defaultPanel);
 });
 
@@ -247,6 +253,10 @@ test('slot CSS uses defined theme tokens for light and dark surfaces and status'
   const css = require('node:fs').readFileSync(require.resolve('../../src/electron/renderer/styles.css'), 'utf8');
   const slots = css.slice(css.indexOf('/* Local account slots'));
   const declared = new Set([...css.matchAll(/(--[\w-]+):/g)].map(match => match[1]));
+  assert.match(slots, /\.slot-list \{[^}]*overflow: clip;/);
+  assert.match(slots, /grid-template-columns: minmax\(0, 1fr\) 92px 28px/);
+  assert.match(slots, /\.slot-name \{[^}]*text-overflow: ellipsis; white-space: nowrap;/);
+  assert.match(slots, /\.slot-status \{[^}]*text-align: right;/);
   for (const match of slots.matchAll(/var\((--[\w-]+)/g)) assert.ok(declared.has(match[1]), match[1]);
   for (const token of ['--panel-rgb', '--line', '--text', '--muted', '--success', '--red', '--yellow']) assert.ok(slots.includes(`var(${token})`), token);
 });
@@ -354,12 +364,12 @@ test('slot freshness honors Hub threshold upload interval floor and registry opt
 
 test('slot popover escapes clipping flips upward and retains keyboard focus across pushes', () => {
   const h = harness();
-  const row = h.row('b'); const more = row.querySelector('.slot-more');
-  const menu = row.querySelector('.slot-menu');
+  const row = h.row('b'); const more = row.querySelector('.plugin-more');
+  const menu = row.querySelector('.plugin-menu');
   more.click();
   assert.equal(menu.attributes.popover, 'auto');
   assert.equal(menu.popoverOpen, true);
-  assert.equal(menu.style.top, '142px');
+  assert.equal(menu.style.top, '146px');
   assert.equal(menu.style.left, '140px');
   assert.equal(h.document.activeElement, menu.children[0]);
   menu.key('ArrowDown');
@@ -369,20 +379,20 @@ test('slot popover escapes clipping flips upward and retains keyboard focus acro
   assert.equal(menu.popoverOpen, true);
   assert.equal(h.document.activeElement, focused);
   menu.key('End');
-  assert.equal(h.document.activeElement, menu.children[5]);
+  assert.equal(h.document.activeElement, menu.children[7]);
   menu.key('Escape');
   assert.equal(menu.popoverOpen, false);
   assert.equal(more.attributes['aria-expanded'], 'false');
   assert.equal(h.document.activeElement, more);
   more.click();
   menu.hidePopover(); // Native light dismissal uses the same beforetoggle lifecycle.
-  assert.equal(menu.classList.contains('hidden'), true);
+  assert.equal(menu.popoverOpen, false);
   assert.equal(h.document.activeElement, more);
   more.rect = { top: 10, bottom: 30, right: 300 };
   more.click();
-  assert.equal(menu.style.top, '38px');
+  assert.equal(menu.style.top, '34px');
   const css = require('node:fs').readFileSync(require.resolve('../../src/electron/renderer/styles.css'), 'utf8');
-  assert.match(css, /\.slot-menu \{ position: fixed; inset: auto; margin: 0;/);
+  assert.match(css, /\.plugin-menu \{ position: fixed; inset: auto; margin: 0;/);
 });
 
 for (const nextId of ['a', 'b']) test(`cancelled pending rename cannot finish a newer rename on ${nextId}`, async () => {
@@ -405,5 +415,140 @@ for (const nextId of ['a', 'b']) test(`cancelled pending rename cannot finish a 
 
 test('slot actions menu items and add row declare visible keyboard focus', () => {
   const css = require('node:fs').readFileSync(require.resolve('../../src/electron/renderer/styles.css'), 'utf8');
-  assert.match(css, /\.slot-actions button:focus-visible, \.slot-add:focus-visible \{ outline: 2px solid var\(--accent\); outline-offset: -2px;/);
+  assert.match(css, /\.slot-panel \.plugin-more:focus-visible, \.slot-fix:focus-visible, \.slot-add:focus-visible \{ outline: 2px solid var\(--accent\); outline-offset: -2px;/);
+});
+
+
+test('shared action menu is loaded before both consumers and owns the plugin plate', () => {
+  const fs = require('node:fs');
+  const read = name => fs.readFileSync(require.resolve('../../src/electron/renderer/' + name), 'utf8');
+  assert.equal(typeof require('../../src/electron/renderer/actionMenu').create, 'function');
+  for (const name of ['pluginSettings.js', 'limits/accountSlotsPanel.js']) assert.match(read(name), /(?:actionMenuApi|menus)\.create\(document,/);
+  const html = read('index.html');
+  assert.ok(html.indexOf('src="selectControl.js"') < html.indexOf('src="actionMenu.js"'));
+  for (const name of ['pluginSettings.js', 'limits/accountSlotsPanel.js']) assert.ok(html.indexOf('src="actionMenu.js"') < html.indexOf(`src="${name}"`));
+  assert.match(read('actionMenu.js'), /positionApi.popupPosition/);
+  assert.match(read('actionMenu.js'), /positionApi.navigate/);
+  assert.doesNotMatch(read('limits/accountSlotsPanel.js'), /showPopover|popupPosition/);
+  assert.doesNotMatch(read('styles.css'), /\.slot-menu/);
+});
+
+test('single line rows omit timestamps; only failing rows have a compact recovery beneath the name', () => {
+  const h = harness();
+  h.panel.update(h.slots, [{ accountKey: 'default', status: 'ok' }, { accountKey: 'ka', status: 'unauthorized' }], true);
+  assert.equal(h.row('default').querySelector('.slot-fix').classList.contains('hidden'), true);
+  assert.ok(h.row('a').querySelector('.slot-copy').children[1] === h.row('a').querySelector('.slot-fix'));
+  assert.equal(h.row('a').querySelector('.slot-fix').classList.contains('plugin-inline-action'), true);
+  assert.equal(h.row('a').querySelector('.slot-fix').classList.contains('hidden'), false);
+  assert.equal(h.row('b').querySelector('.slot-fix').classList.contains('hidden'), true);
+  assert.equal(h.row('a').querySelector('.slot-updated'), undefined);
+  assert.ok(h.row('a').querySelector('.plugin-more-icon'));
+  const i18n = require('node:fs').readFileSync(require.resolve('../../src/electron/renderer/i18n.js'), 'utf8');
+  assert.doesNotMatch(i18n, /settings.slots.(?:updated|notUpdated)/);
+});
+
+test('editors occupy the group at their owner and use existing form actions including cancel', () => {
+  const h = harness();
+  h.panel.openEditor(h.slots[0]);
+  const editor = h.panel.element.querySelector('.slot-editor');
+  const list = h.panel.element.querySelector('.slot-list');
+  assert.ok(editor.parentElement === list);
+  assert.ok(list.children[list.children.indexOf(h.row('a')) + 1] === editor);
+  assert.equal(editor.children.some(node => node.classList.contains('credential-input')), false);
+  const submit = h.document.getElementById('qoderSlotDraftCredentialSubmit');
+  assert.equal(submit.classList.contains('slot-save'), true);
+  assert.equal(submit.parentElement.children[1].textContent, 'Cancel');
+  h.panel.openEditor(null);
+  assert.equal(editor.children[1].classList.contains('credential-input'), true);
+  assert.equal(list.children[list.children.indexOf(editor) + 1].classList.contains('slot-add'), true);
+  assert.equal(list.children.at(-1).classList.contains('hidden'), true);
+  h.click(h.row('default'), 'Default account settings');
+  assert.ok(h.defaultPanel.parentElement === editor);
+  assert.ok(list.children[list.children.indexOf(h.row('default')) + 1] === editor);
+  h.update();
+  assert.ok(h.defaultPanel.parentElement === editor);
+  assert.equal([...h.panel.element.walk()].some(node => node.tagName === 'details'), false);
+  h.click(editor, 'Cancel');
+  assert.equal(editor.classList.contains('hidden'), true);
+  assert.equal(h.defaultPanel.isConnected, true);
+});
+
+
+test('a failing default row opens the same retained default editor from its recovery line', () => {
+  const h = harness();
+  h.panel.update(h.slots, [{ accountKey: 'default', status: 'unauthorized' }], true);
+  const fix = h.row('default').querySelector('.slot-fix');
+  assert.equal(fix.classList.contains('hidden'), false);
+  fix.click();
+  assert.ok(h.defaultPanel.parentElement === h.panel.element.querySelector('.slot-editor'));
+});
+
+
+test('shared menu module navigates enabled controls, restores focus and retains native target semantics', () => {
+  const h = harness();
+  const { create } = require('../../src/electron/renderer/actionMenu');
+  const menu = create(h.document, 'Actions', (text, fn, className) => {
+    const button = new Node('button', h.document); button.className = className; button.textContent = text; button.addEventListener('click', fn); return button;
+  });
+  const first = new Node('button', h.document);
+  const disabled = new Node('button', h.document); disabled.disabled = true;
+  const last = new Node('button', h.document);
+  menu.popover.append(first, disabled, last);
+  h.document.root.append(menu.element);
+  assert.equal(menu.trigger.attributes.popovertarget, menu.popover.id);
+  assert.equal(menu.popover.attributes.popover, 'auto');
+  assert.ok(menu.trigger.querySelector('.plugin-more-icon'));
+  menu.trigger.key('ArrowUp');
+  assert.ok(h.document.activeElement === last);
+  menu.popover.key('Home');
+  assert.ok(h.document.activeElement === first);
+  menu.popover.key('ArrowDown');
+  assert.ok(h.document.activeElement === last);
+  menu.popover.hidePopover();
+  assert.ok(h.document.activeElement === menu.trigger);
+  assert.equal(menu.trigger.attributes['aria-expanded'], 'false');
+  menu.trigger.click();
+  menu.popover.key('Escape');
+  assert.equal(menu.popover.popoverOpen, false);
+  assert.ok(h.document.activeElement === menu.trigger);
+});
+
+test('a rename finishes on its own row after another row starts renaming', async () => {
+  const h = harness(); let resolve;
+  h.ipc.rename = () => new Promise(r => { resolve = r; });
+  h.click(h.row('a'), 'Rename');
+  const first = h.row('a').querySelector('.slot-rename'); first.value = 'First';
+  const pending = first.key('Enter');
+  await Promise.resolve();
+  h.click(h.row('b'), 'Rename');
+  resolve({ ok: true, accounts: h.slots });
+  await pending;
+  assert.equal(h.row('a').querySelector('.slot-rename'), undefined);
+  assert.ok(h.row('b').querySelector('.slot-rename'));
+});
+
+test('Enter that confirms an IME composition does not save the rename', async () => {
+  const h = harness();
+  h.click(h.row('a'), 'Rename');
+  const input = h.row('a').querySelector('.slot-rename'); input.value = '工作';
+  await input.listeners.keydown({ key: 'Enter', isComposing: true, keyCode: 229, preventDefault() {}, stopPropagation() {} });
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.row('a').querySelector('.slot-rename'), input);
+});
+
+test('adding a different account twice while the first add is pending saves it once', async () => {
+  const h = harness(); h.verdict = { saved: false, verdict: 'differentAccount' };
+  h.click(h.row('a'), 'Replace cookie');
+  h.document.getElementById('qoderSlotDraftqoderCookieInput').value = 'fake-cookie';
+  await h.document.getElementById('qoderSlotDraftCredentialSubmit').click();
+  let resolve;
+  h.ipc.add = (...args) => { h.calls.push(['add', ...args]); return new Promise(r => { resolve = r; }); };
+  h.click(h.panel.element, 'Add as another account');
+  h.click(h.panel.element, 'Add as another account');
+  await Promise.resolve(); await Promise.resolve();
+  resolve({ saved: true, verdict: 'valid', accounts: h.slots });
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  if (resolve) resolve({ saved: true, verdict: 'valid', accounts: h.slots });
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+  assert.equal(h.calls.filter(call => call[0] === 'add').length, 1);
 });

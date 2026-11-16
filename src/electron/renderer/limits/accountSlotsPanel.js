@@ -1,10 +1,11 @@
 'use strict';
 
 (function expose(root, factory) {
-  const api = factory();
+  const menus = typeof module !== 'undefined' ? require('../actionMenu') : root.TokenMonitorActionMenu;
+  const api = factory(menus);
   if (typeof module !== 'undefined') module.exports = api;
   if (root) root.TokenMonitorAccountSlotsPanel = api;
-})(typeof window !== 'undefined' ? window : null, function accountSlotsPanelApi() {
+})(typeof window !== 'undefined' ? window : null, function accountSlotsPanelApi(menus) {
   function accountName(slot, reading, t) {
     return slot.label || reading?.accountName || reading?.accountEmail || reading?.email
       || t('settings.slots.account', { fingerprint: slot.fingerprint });
@@ -37,7 +38,7 @@
   }
 
   function createPanel({ form, label, document, t, ipc, forms, preserveScroll, onChanged, openExternal, confirm, defaultPanel }) {
-    const make = (tag, className, text) => {
+    const make = (tag, className = '', text) => {
       const el = document.createElement(tag);
       el.className = className;
       if (text !== undefined) el.textContent = text;
@@ -63,7 +64,12 @@
     const editor = make('div', 'slot-editor hidden');
     const message = make('div', 'settings-note slot-message');
     message.setAttribute('role', 'status');
-    root.append(list, editor, message);
+    list.append(editor);
+    root.append(list, message);
+    const defaultParking = make('div', 'hidden');
+    root.append(defaultParking);
+    if (defaultPanel) defaultParking.append(defaultPanel);
+    let editorOwner;
     const rows = new Map();
     const defaultId = Symbol('default account');
     let slots = [];
@@ -72,7 +78,6 @@
     let operationLane = Promise.resolve();
     let editorPanel;
     let editorRevision = 0;
-    let renameRevision = 0;
     const error = () => { message.textContent = tr('failed'); };
     const run = (operation, ...args) => {
       const task = operationLane.then(async () => {
@@ -92,6 +97,9 @@
     };
     function closeEditor() {
       editorRevision++;
+      if (defaultPanel?.parentElement === editor) defaultParking.moveBefore(defaultPanel, null);
+      editorOwner = undefined;
+      add?.classList.remove('hidden');
       editor.replaceChildren();
       editorPanel = null;
       editor.classList.add('hidden');
@@ -100,6 +108,8 @@
       preserveScroll(() => {
         closeEditor();
         editor.classList.remove('hidden');
+        editorOwner = slot?.id ?? null;
+        placeEditor();
         const revision = editorRevision;
         const prefix = `${form.id}SlotDraft`;
         const keys = new Map(form.fields.map(field => [field.key, `${prefix}${field.key}`]));
@@ -125,7 +135,14 @@
           choices.replaceChildren();
           if (result.verdict === 'differentAccount') {
             verdict.textContent = tr('differentAccount');
-            choices.append(slotButton('addDifferent', () => submit(values, clearInput, true))); 
+            // One add per confirmation: a second press would save the same account twice.
+            let adding = false;
+            const addDifferent = slotButton('addDifferent', () => {
+              if (adding) return;
+              adding = addDifferent.disabled = true;
+              return submit(values, clearInput, true).finally(() => { adding = addDifferent.disabled = false; });
+            });
+            choices.append(addDifferent);
           } else if (result.saved) {
             clearInput();
             preserveScroll(closeEditor);
@@ -140,12 +157,14 @@
           onOpen: () => openExternal(forms.resolveOpenUrl(draftForm, { document })),
           onSave: (_form, values, clearInput) => submit(values, clearInput)
         });
-        editor.append(title, ...(!slot ? [name] : []), editorPanel, verdict, choices, slotButton('cancel', () => preserveScroll(closeEditor)));
+        editor.append(title, ...(!slot ? [name] : []), editorPanel, verdict, choices);
+        editorPanel.querySelector('.credential-manual-panel').querySelector('.settings-actions').append(slotButton('cancel', () => preserveScroll(closeEditor)));
         for (const field of form.fields.filter(field => !field.secret)) {
           const input = editorPanel.querySelector(`#${prefix}${field.key}Input`);
           if (input && slot?.formValues && Object.hasOwn(slot.formValues, field.key)) input.value = slot.formValues[field.key];
         }
         forms.refreshFieldDependents?.(draftForm, { document });
+        editorPanel.querySelector(`#${prefix}CredentialSubmit`).classList.add('slot-save');
         editorPanel.querySelector('.settings-group-header').classList.add('hidden');
         editorPanel.querySelector('.cursor-settings-details').classList.remove('hidden');
         editorPanel.querySelector(`#${prefix}LogoutButton`).classList.add('hidden');
@@ -159,28 +178,30 @@
       el.dataset.slotId = id === defaultId ? 'default' : id;
       const copy = make('div', 'slot-copy');
       const name = make('div', 'slot-name');
-      const updated = make('div', 'slot-updated');
       const status = make('span', 'slot-status');
       const actions = make('div', 'slot-actions');
-      copy.append(name, updated);
+      copy.append(name);
       el.append(copy, status, actions);
-      const item = { el, name, updated, status, actions, editing: false, slot: null };
+      // Each row owns its rename session, so one row cannot invalidate another's.
+      const item = { el, name, status, actions, editing: false, renameRevision: 0, slot: null };
       const rename = () => {
         if (item.editing) return;
         item.editing = true;
-        const revision = ++renameRevision;
+        const revision = ++item.renameRevision;
         const input = make('input', 'slot-rename');
         input.value = item.slot.label || '';
         input.setAttribute('aria-label', tr('rename'));
         name.replaceChildren(input);
         input.addEventListener('keydown', async event => {
+          // Enter that confirms an IME composition is not a submit.
+          if (event.isComposing || event.keyCode === 229) return;
           if (event.key !== 'Enter' && event.key !== 'Escape') return;
           event.preventDefault(); event.stopPropagation();
           if (event.key === 'Enter') {
             const result = await run('rename', id, input.value);
-            if (!result?.ok || revision !== renameRevision) return;
+            if (!result?.ok || revision !== item.renameRevision) return;
           }
-          renameRevision++;
+          item.renameRevision++;
           item.editing = false;
           preserveScroll(render);
           el.focus({ preventScroll: true });
@@ -189,72 +210,36 @@
         input.select();
       };
       {
-        const menu = make('div', 'slot-menu hidden');
-        menu.setAttribute('popover', 'auto');
-        const closeMenu = () => { if (!menu.classList.contains('hidden')) menu.hidePopover(); };
-        const positionMenu = () => {
-          if (menu.classList.contains('hidden')) return;
-          const anchor = more.getBoundingClientRect();
-          const rect = menu.getBoundingClientRect();
-          const view = document.defaultView;
-          const gutter = 10;
-          const below = anchor.bottom + 8;
-          const top = below + rect.height <= view.innerHeight - gutter ? below : anchor.top - rect.height - 8;
-          menu.style.left = `${Math.round(Math.max(gutter, Math.min(anchor.right - rect.width, view.innerWidth - rect.width - gutter)))}px`;
-          menu.style.top = `${Math.round(Math.max(gutter, top))}px`;
-        };
-        const more = button('⋯', () => {
-          if (!menu.classList.contains('hidden')) { closeMenu(); return; }
-          menu.classList.remove('hidden');
-          menu.showPopover();
-          positionMenu();
-          menu.children[0].focus({ preventScroll: true });
+        const shared = menus.create(document, tr('actions'), (text, fn, className) => {
+          const node = button(text, fn); node.className = className || ''; return node;
         });
-        menu.addEventListener('beforetoggle', event => {
-          const open = event.newState === 'open';
-          menu.classList.toggle('hidden', !open);
-          more.setAttribute('aria-expanded', String(open));
-          if (!open && menu.contains(document.activeElement)) more.focus({ preventScroll: true });
-        });
-        menu.addEventListener('keydown', event => {
-          if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); return; }
-          if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
-          event.preventDefault(); event.stopPropagation();
-          const enabled = [...menu.children].filter(child => !child.disabled);
-          const index = enabled.indexOf(document.activeElement);
-          const next = event.key === 'Home' ? 0 : event.key === 'End' ? enabled.length - 1
-            : (index + (event.key === 'ArrowDown' ? 1 : -1) + enabled.length) % enabled.length;
-          enabled[next].focus({ preventScroll: true });
-        });
-        menu.addEventListener('toggle', event => {
-          const method = event.newState === 'open' ? 'addEventListener' : 'removeEventListener';
-          document.defaultView[method]('resize', positionMenu);
-          document[method]('scroll', positionMenu, true);
-        });
-        item.positionMenu = positionMenu;
-        more.className = 'slot-more';
+        const { popover: menu, trigger: more, close: closeMenu } = shared;
+        item.positionMenu = shared.position;
         more.dataset.i18nAriaLabel = 'settings.slots.actions';
-        more.setAttribute('aria-label', tr('actions'));
-        more.setAttribute('aria-expanded', 'false');
         const action = (key, fn) => slotButton(key, () => { closeMenu(); return fn(); });
         const up = action('up', () => run('move', id, 'up'));
         const down = action('down', () => run('move', id, 'down'));
         const pause = action('pause', () => run('setEnabled', id, !item.slot.enabled));
         const remove = action('remove', () => { if (confirm(tr('confirmRemove'))) return run('remove', id); });
-        remove.className = 'slot-destructive';
+        remove.className = 'menu-destructive';
         if (id === defaultId) {
           menu.append(
             localized(button(t(form.clearKey), () => document.getElementById(`${form.id}LogoutButton`).click()), form.clearKey),
             localized(button(t(form.openKey), () => document.getElementById(`${form.id}OpenBrowser`).click()), form.openKey),
             localized(button(t('settings.common.refresh'), () => document.getElementById(`${form.id}RefreshButton`).click()), 'settings.common.refresh'),
             action('defaultSettings', openDefault));
-        } else menu.append(action('rename', rename), action(cookie ? 'replaceCookie' : 'replaceKey', () => openEditor(item.slot)), pause, up, down, remove);
-        const fix = slotButton(cookie ? 'fixCookie' : 'fixKey', () => openEditor(item.slot));
-        fix.className = 'slot-fix';
-        actions.append(...(id === defaultId ? [] : [fix]), more, menu);
+        } else {
+          const separator = () => { const node = make('hr', 'action-menu-separator'); node.setAttribute('role', 'separator'); return node; };
+          menu.append(action('rename', rename), action(cookie ? 'replaceCookie' : 'replaceKey', () => openEditor(item.slot)), pause, separator(), up, down, separator(), remove);
+        }
+        const fix = slotButton(cookie ? 'fixCookie' : 'fixKey', () => id === defaultId ? openDefault() : openEditor(item.slot));
+        fix.className = 'slot-fix plugin-inline-action';
+        copy.append(fix);
+        item.fix = fix;
+        actions.append(shared.element);
         if (id !== defaultId) Object.assign(item, { up, down, pause, fix });
         el.addEventListener('keydown', event => {
-          if (event.key === 'Escape' && !menu.classList.contains('hidden')) { closeMenu(); more.focus(); }
+          if (event.key === 'Escape' && menu.matches(':popover-open')) { closeMenu(); more.focus(); }
           if (id !== defaultId && event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
             event.preventDefault(); event.stopPropagation();
             void run('move', id, event.key === 'ArrowUp' ? 'up' : 'down');
@@ -264,18 +249,29 @@
       rows.set(id, item);
       return item;
     }
-    const defaultRegion = make('details', 'slot-default-settings');
-    const defaultTitle = localized(make('summary'), 'settings.slots.defaultSettings');
-    defaultRegion.append(defaultTitle);
-    if (defaultPanel) {
-      // Mount before moving live controls so moveBefore preserves focus/drafts.
-      defaultPanel.parentElement.append(defaultRegion);
-      defaultRegion.moveBefore(defaultPanel, null);
+    function placeEditor() {
+      if (editorOwner === undefined) return;
+      const owner = rows.get(editorOwner);
+      const before = owner ? list.children[[...list.children].indexOf(owner.el) + 1] : add;
+      if (before !== editor) list.moveBefore(editor, before || null);
+      add.classList.toggle('hidden', editorOwner === null);
     }
     function openDefault() {
       preserveScroll(() => {
-        defaultRegion.open = true;
+        closeEditor();
+        editorOwner = configured ? defaultId : null;
+        editor.classList.remove('hidden');
+        editor.append(localized(make('strong'), 'settings.slots.defaultSettings'));
+        if (defaultPanel) editor.moveBefore(defaultPanel, null);
+        const submit = document.getElementById(`${form.id}CredentialSubmit`);
+        submit?.classList.add('slot-save');
+        if (submit && !defaultPanel.querySelector('.slot-cancel')) {
+          const cancel = slotButton('cancel', () => preserveScroll(closeEditor));
+          cancel.className = 'slot-cancel';
+          submit.parentElement.append(cancel);
+        }
         document.getElementById(`${form.id}ManualPanel`)?.classList.remove('hidden');
+        placeEditor();
       });
     }
     const add = slotButton('add', () => configured ? openEditor(null) : openDefault(), { provider: label });
@@ -289,8 +285,6 @@
         item.slot = slot;
         const reading = slot.id === defaultId ? readings.find(row => !slotOwner(slots, row.accountKey)) : readings.find(row => slotOwner(slots, row.accountKey) === slot);
         if (!item.editing) item.name.textContent = slot.id === defaultId ? (reading?.accountName || reading?.accountEmail || tr('default')) : accountName(slot, reading, t);
-        const minutes = Math.max(0, Math.floor((Date.now() - Date.parse(reading?.updatedAt || slot.updatedAt)) / 60000));
-        item.updated.textContent = Number.isFinite(minutes) ? tr('updated', { minutes }) : tr('notUpdated');
         const status = accountStatus(slot, reading);
         item.el.classList.toggle('slot-paused', !slot.enabled);
         item.status.className = `slot-status slot-${status}`;
@@ -299,15 +293,16 @@
           localized(item.pause, `settings.slots.${slot.enabled ? 'pause' : 'resume'}`);
           item.up.disabled = slots[0]?.id === slot.id;
           item.down.disabled = slots.at(-1)?.id === slot.id;
-          item.fix.classList.toggle('hidden', !slot.enabled || !['invalid', 'unavailable'].includes(status));
         }
-        const before = list.children[index];
+        item.fix.classList.toggle('hidden', !slot.enabled || !['invalid', 'unavailable'].includes(status));
+        const before = [...list.children].filter(node => node !== editor)[index];
         if (before !== item.el) {
           if (item.el.isConnected) list.moveBefore(item.el, before || null);
           else list.insertBefore(item.el, before || null);
         }
         item.positionMenu();
       });
+      placeEditor();
     }
     return { element: root, update(nextSlots, nextReadings, defaultConfigured) {
       slots = nextSlots; readings = nextReadings; configured = defaultConfigured;
