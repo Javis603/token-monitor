@@ -100,8 +100,12 @@ async function fetchBailianCLI(variant, deps = {}) {
   const command = existingBailianCli(env, deps.platform || process.platform, deps);
   if (!command) return null;
   const childEnv = cliEnvironment(env, variant);
-  // Preserve the parent's config lookup when the child runs in the temp dir.
   const paths = (deps.platform || process.platform) === 'win32' ? path.win32 : path.posix;
+  // Relative/empty PATH entries would search the child's temporary directory.
+  // Keep the discovered CLI directory if none remain; an empty PATH also searches cwd.
+  const absolutePath = (childEnv.PATH || '').split(paths.delimiter).filter(paths.isAbsolute);
+  childEnv.PATH = absolutePath.length ? absolutePath.join(paths.delimiter) : paths.dirname(command);
+  // Preserve the parent's config lookup when the child runs in the temp dir.
   if (childEnv.BAILIAN_CONFIG_DIR && !paths.isAbsolute(childEnv.BAILIAN_CONFIG_DIR)) {
     childEnv.BAILIAN_CONFIG_DIR = paths.resolve(childEnv.BAILIAN_CONFIG_DIR);
   }

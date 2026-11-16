@@ -224,6 +224,54 @@ test('Bailian discovery supports native Windows executables and rejects relative
   assert.equal(existingBailianCli({ PATH: 'relative' }, 'linux', { existsSync: p => p === 'relative/bl' }), null);
 });
 
+test('Bailian child PATH keeps only absolute directories and cannot become an empty cwd lookup', async () => {
+  for (const platform of ['linux', 'win32']) {
+    const paths = platform === 'win32' ? path.win32 : path.posix;
+    const bin = platform === 'win32' ? 'C:\\cli' : '/cli';
+    for (const inherited of [`.${paths.delimiter}${paths.delimiter}relative${paths.delimiter}${bin}${paths.delimiter}`, '.']) {
+      const deps = cliDeps(() => ({ per1MonthPercentage: 0.2 }));
+      deps.platform = platform;
+      deps.env = { PATH: inherited, HOME: platform === 'win32' ? 'C:\\home' : '/home' };
+      const fallback = paths.join(deps.env.HOME, '.local', 'bin');
+      deps.existsSync = file => [bin, fallback].some(dir => file === paths.join(dir, platform === 'win32' ? 'bl.exe' : 'bl'));
+      const [row] = await fetchAlibabaLimits({ alibabaVariant: 'cn-personal' }, deps);
+      assert.equal(row.status, 'ok');
+      assert.equal(deps.calls[0].options.env.PATH, inherited === '.' ? fallback : bin);
+    }
+  }
+});
+
+test('Bailian env-node launch never executes a Node planted in the child working directory', { skip: process.platform === 'win32' }, async () => {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'bailian-untrusted-path-'));
+  try {
+    const bin = path.join(dir, 'trusted-bin');
+    const cwd = path.join(dir, 'child-cwd');
+    const marker = path.join(dir, 'untrusted-node-ran');
+    mkdirSync(bin);
+    mkdirSync(cwd);
+    symlinkSync(process.execPath, path.join(bin, 'node'));
+    writeFileSync(path.join(bin, 'bl'), '#!/usr/bin/env node\nconsole.log(JSON.stringify({per1MonthPercentage:0.2}));\n');
+    chmodSync(path.join(bin, 'bl'), 0o755);
+    writeFileSync(path.join(cwd, 'node'), `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(marker)}, 'executed');\nconsole.log(JSON.stringify({per1MonthPercentage:0.99}));\n`);
+    chmodSync(path.join(cwd, 'node'), 0o755);
+    const host = `
+      const { fetchAlibabaLimits } = require(${JSON.stringify(require.resolve('../../src/shared/providers/alibaba/limits'))});
+      fetchAlibabaLimits({ alibabaVariant: 'cn-personal' })
+        .then(([row]) => console.log(JSON.stringify(row)))
+        .catch(error => { console.error(error); process.exitCode = 1; });
+    `;
+    const stdout = await new Promise((resolve, reject) => {
+      require('node:child_process').execFile(process.execPath, ['-e', host], { env: {
+        PATH: `.:relative-bin::${bin}:`, TMPDIR: cwd, TMP: cwd, TEMP: cwd
+      } }, (error, output) => error ? reject(error) : resolve(output));
+    });
+    assert.equal(require('node:fs').existsSync(marker), false);
+    const row = JSON.parse(stdout);
+    assert.equal(row.status, 'ok');
+    assert.equal(row.windows[0].usedPercent, 20);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('Bailian fallback discovery makes its adjacent Node available without replacing the inherited PATH', async () => {
   const deps = cliDeps(() => ({ per1MonthPercentage: 0.2 }));
   deps.env = { PATH: '/usr/bin:/bin' };
