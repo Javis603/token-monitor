@@ -504,9 +504,11 @@ function edgeDockBubbleBounds({ railBounds, cellIndex, height, workArea, side, m
       ? workArea.y + workArea.height - margin - (railBounds.y + railBounds.height + gap) - tail
       : (railBounds.y - gap) - (workArea.y + margin) - tail;
     const cardHeight = Math.max(60, Math.min(Math.round(Number(height) || 0), Math.max(60, space)));
+    // The bubble window is expanded outward by the tail so the visible card keeps
+    // the same gap from the bar as a side rail's card does.
     const y = edgeSide === 'top'
-      ? railBounds.y + railBounds.height + gap
-      : railBounds.y - gap - tail - cardHeight;
+      ? railBounds.y + railBounds.height + gap + tail
+      : railBounds.y - gap - tail - cardHeight - tail;
     return {
       x,
       y: Math.round(y),

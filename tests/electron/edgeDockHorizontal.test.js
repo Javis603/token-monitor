@@ -82,8 +82,10 @@ test('a called-up card hangs off the bar with its tail pointing back', () => {
     const rail = edgeDockRailBounds({ workArea, side, offset: 0.5, cellKinds: kinds(6) });
     const card = edgeDockBubbleBounds({ railBounds: rail, cellIndex: 3, height: 300, workArea, side });
     assert.equal(card.height, 300 + EDGE_DOCK_METRICS.bubbleTail);
-    if (side === 'top') assert.equal(card.y, rail.y + rail.height + EDGE_DOCK_METRICS.bubbleGap);
-    else assert.equal(card.y + card.height, rail.y - EDGE_DOCK_METRICS.bubbleGap);
+    // The window carries the tail beyond the visible card, so both edges move out
+    // by the tail length on top of the regular gap.
+    if (side === 'top') assert.equal(card.y, rail.y + rail.height + EDGE_DOCK_METRICS.bubbleGap + EDGE_DOCK_METRICS.bubbleTail);
+    else assert.equal(card.y + card.height, rail.y - EDGE_DOCK_METRICS.bubbleGap - EDGE_DOCK_METRICS.bubbleTail);
     assert.ok(card.x >= 0 && card.x + card.width <= workArea.width);
     // The tail is drawn from the same page-side anchor the card uses.
     const centre = rail.x + rail.cells.lefts[3] + rail.cells.widths[3] / 2;
