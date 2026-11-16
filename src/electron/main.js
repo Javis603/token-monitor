@@ -204,6 +204,9 @@ const {
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
 const { createAccountSlotService, invalidateAccountSlotChange } = require('./limits/accountSlotService');
+const { LIMIT_PROVIDER_REGISTRY } = require('../shared/limits/registry');
+const { isProviderStale } = require('../shared/limits/core');
+const ACCOUNT_SLOT_PROVIDER_IDS = new Set(LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots).map(entry => entry.id));
 const { applyAccountOrder } = require('./renderer/limits/accountSlotsPanel');
 let accountSlotService;
 const { createCredentialCommands } = require('./limits/credentialCommands');
@@ -4955,8 +4958,8 @@ function injectLocalDeviceStatus(stats) {
   // Raw local rows remain authoritative for settings, including failures that
   // a remote healthy aggregate row can hide. Share the aggregate freshness rule.
   const device = stats.devices.find(entry => entry.deviceId === settings.deviceId);
-  if (device?.limits) device.limits = { ...device.limits, providers: device.limits.providers.map(row => !['qoder', 'deepseek'].includes(row.provider) ? row : ({
-    ...row, stale: require('../shared/limits/core').isProviderStale(row, device.limits, device, 0, Date.now())
+  if (device?.limits) device.limits = { ...device.limits, providers: device.limits.providers.map(row => !ACCOUNT_SLOT_PROVIDER_IDS.has(row.provider) ? row : ({
+    ...row, stale: isProviderStale(row, device.limits, device, stats.staleAfterMs, Date.now())
   })) };
   if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
   return stats;
@@ -5340,11 +5343,11 @@ function refreshTrayContextMenu() {
 function desktopQuotaStats(stats) {
   const projected = require('./plugins/limitsPresentation').projectPluginLimits(stats, pluginRuntime?.limitsSnapshot());
   if (!projected?.limits) return projected;
-  const slotLists = Object.fromEntries(require('../shared/limits/registry').LIMIT_PROVIDER_REGISTRY
+  const slotLists = Object.fromEntries(LIMIT_PROVIDER_REGISTRY
     .filter(entry => entry.accountSlots)
     .map(entry => [entry.id, accountSlotService?.list(entry.id).accounts || []]));
   return { ...projected, limits: { ...projected.limits,
-    providers: applyAccountOrder(projected.limits.providers || [], slotLists) } };
+    providers: applyAccountOrder(projected.limits.providers || [], slotLists, settings.deviceId) } };
 }
 
 function syncPluginQuotaSurfaceDemand() {

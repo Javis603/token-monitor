@@ -22,9 +22,10 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     return entry?.accountSlots ? entry : null;
   };
   const slots = (entry) => normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]);
-  const dto = (entry) => slots(entry).map(({ id, label, enabled, accountKey, createdAt, updatedAt }) => {
+  const dto = (entry) => slots(entry).map(({ id, label, enabled, accountKey, accountKeyAliases, values, createdAt, updatedAt }) => {
     const key = accountKey || hashKey(entry.id, 'account-slot', `slot:${id}`);
-    return { id, label, enabled, accountKey: key,
+    return { id, label, enabled, accountKey: key, accountKeyAliases,
+      formValues: Object.fromEntries(accountForm(entry).fields.filter(field => !field.secret).map(field => [field.key, values[field.key]])),
       fingerprint: accountValuesFingerprint({ accountKey: key }).slice(7, 19), createdAt, updatedAt };
   });
   const failure = (errorCode) => ({ ok: false, errorCode });

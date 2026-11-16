@@ -4743,27 +4743,27 @@ let accountSlotListPending = false;
 function refreshAccountSlotPanels() {
   for (const [id, panel] of accountSlotPanels) {
     const form = limitAccountForm(id);
-    panel.update(accountSlotLists[id] || [], (localDeviceLimitsProviders() || []).filter(row => row.provider === id),
+    panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
       Boolean(state.settings?.[form.status.configuredKey]));
   }
   if (accountSlotListPending) return;
   accountSlotListPending = true;
   const previousSlotLists = JSON.stringify(accountSlotLists);
-  Promise.all([...accountSlotPanels.keys()].map(async id => {
+  return Promise.all((state.settings?.limitAccountForms || []).filter(form => form.accountSlots).map(async ({ id }) => {
     const result = await window.tokenMonitor.limits.accountSlots.list(id);
     if (result.ok) accountSlotLists[id] = result.accounts;
   })).then(() => {
     if (previousSlotLists !== JSON.stringify(accountSlotLists)) render();
     for (const [id, panel] of accountSlotPanels) {
       const form = limitAccountForm(id);
-      panel.update(accountSlotLists[id] || [], (localDeviceLimitsProviders() || []).filter(row => row.provider === id),
+      panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
         Boolean(state.settings?.[form.status.configuredKey]));
     }
   }).catch(() => {}).finally(() => { accountSlotListPending = false; });
 }
 function desktopLimitRecords() {
   const modules = new Map((state.pluginCatalog?.limits?.modules || []).map(module => [module.id, module]));
-  return window.TokenMonitorAccountSlotsPanel.applyAccountOrder([...(state.stats?.limits?.providers || []), ...(state.pluginCatalog?.limits?.providers || []).filter(row => modules.has(row.provider)).map(row => ({ ...row, pluginQuota: modules.get(row.provider) }))], accountSlotLists);
+  return window.TokenMonitorAccountSlotsPanel.applyAccountOrder([...(state.stats?.limits?.providers || []), ...(state.pluginCatalog?.limits?.providers || []).filter(row => modules.has(row.provider)).map(row => ({ ...row, pluginQuota: modules.get(row.provider) }))], accountSlotLists, state.settings?.deviceId);
 }
 function desktopSurfaceStats() {
   return state.stats ? { ...state.stats, limits: { ...state.stats.limits, providers: desktopLimitRecords() }, pluginLimitModules: state.pluginCatalog?.limits?.modules || [] } : state.stats;
@@ -13540,6 +13540,7 @@ async function saveSettings(patch, syncContentBase) {
 // whether the renderer sent it as a patch or as an account credential command.
 function applyPersistedSettings(next, settingsPushRevision) {
   setRendererSettings(next);
+  void refreshAccountSlotPanels();
   applyEffectiveCurrencyRates();
   // settings:update broadcasts the normalized settings before resolving the
   // IPC request. The push already ran the full sync; repeating it when the
@@ -13907,6 +13908,7 @@ async function init() {
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
+  await refreshAccountSlotPanels();
   // Local appearance is sufficient for first reveal. Plugin discovery, sync,
   // updater and stats queries below must not hold the window off screen.
   // Tray startup also needs its saved appearance prepared before native show.
@@ -15233,6 +15235,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
     if (JSON.stringify(next[key]) !== JSON.stringify(state.settings?.[key])) delete appearancePreview[key];
   }
   setRendererSettings(next);
+  void refreshAccountSlotPanels();
   syncPluginTrayDemand();
   applyEffectiveCurrencyRates();
   observeDisplayLiveTokenRates(state.stats);

@@ -361,5 +361,18 @@ test('slot DTO supplies public matching keys and stable fingerprints before iden
   assert.match(slot.accountKey, /^sha256:[a-f0-9]{64}$/);
   assert.match(slot.fingerprint, /^[a-f0-9]{12}$/);
   assert.equal(JSON.stringify(slot).includes('SECRET'), false);
-  assert.deepEqual(Object.keys(slot).sort(), ['accountKey', 'createdAt', 'enabled', 'fingerprint', 'id', 'label', 'updatedAt']);
+  assert.deepEqual(Object.keys(slot).sort(), ['accountKey', 'accountKeyAliases', 'createdAt', 'enabled', 'fingerprint', 'formValues', 'id', 'label', 'updatedAt']);
+});
+
+
+test('redacted China DTO round trip preserves site when replacement probe is indeterminate', async () => {
+  const h = harness();
+  h.settings = { ...h.settings, qoderAccountSlots: [{ id: 'china', enabled: true, values: { qoderSite: 'cn', qoderCookie: 'token=SECRET-old' } }] };
+  h.fetch = async () => { throw new Error('offline'); };
+  const slot = h.service.list('qoder').accounts[0];
+  assert.deepEqual(slot.formValues, { qoderSite: 'cn' });
+  assert.ok(!JSON.stringify(slot).includes('SECRET'));
+  const result = await h.service.replace('qoder', slot.id, { ...slot.formValues, qoderCookie: 'token=SECRET-new' });
+  assert.equal(result.saved, true);
+  assert.equal(h.settings.qoderAccountSlots[0].values.qoderSite, 'cn');
 });

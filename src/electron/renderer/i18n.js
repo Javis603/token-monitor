@@ -2562,7 +2562,7 @@
     'zh-TW': {
       "settings.slots.account": "帳號 #{fingerprint}",
       "settings.slots.paused": "已暫停",
-      "settings.slots.stale": "已過期",
+      "settings.slots.stale": "資料未更新",
       "settings.slots.connected": "已連線",
       "settings.slots.unavailable": "無法連線",
       "settings.slots.invalidCookie": "Cookie 已失效",
@@ -5104,7 +5104,7 @@
     'zh-CN': {
       "settings.slots.account": "账号 #{fingerprint}",
       "settings.slots.paused": "已暂停",
-      "settings.slots.stale": "已过期",
+      "settings.slots.stale": "数据未更新",
       "settings.slots.connected": "已连接",
       "settings.slots.unavailable": "无法连接",
       "settings.slots.invalidCookie": "Cookie 已失效",
@@ -10188,7 +10188,7 @@
     ja: {
       "settings.slots.account": "アカウント #{fingerprint}",
       "settings.slots.paused": "一時停止中",
-      "settings.slots.stale": "期限切れ",
+      "settings.slots.stale": "古いデータ",
       "settings.slots.connected": "接続済み",
       "settings.slots.unavailable": "接続できません",
       "settings.slots.invalidCookie": "Cookie が無効",

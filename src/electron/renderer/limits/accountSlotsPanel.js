@@ -16,18 +16,19 @@
     return reading?.status === 'ok' ? 'connected' : 'unavailable';
   }
   // Reorder only each provider's existing positions, leaving other providers and
-  // remote accounts in their original relative order. Unknown/default keys lead.
+  // remote accounts in their original relative order. Local defaults lead.
   function slotOwner(slots, accountKey) {
     return slots.find(slot => slot.accountKey === accountKey)
-      || slots.find(slot => slot.aliases?.includes(accountKey));
+      || slots.find(slot => slot.accountKeyAliases?.includes(accountKey));
   }
-  function applyAccountOrder(records, slotsByProvider) {
+  function applyAccountOrder(records, slotsByProvider, localDeviceId = '') {
     const result = [...records];
     for (const [provider, slots] of Object.entries(slotsByProvider)) {
       const positions = result.flatMap((row, index) => row.provider === provider ? [index] : []);
       const rank = row => {
         const index = slots.indexOf(slotOwner(slots, row.accountKey));
-        return index < 0 ? -1 : index;
+        if (index >= 0) return index + 1;
+        return !row.sourceDeviceId || row.sourceDeviceId === localDeviceId ? 0 : slots.length + 1;
       };
       const ordered = positions.map(index => result[index]).sort((a, b) => rank(a) - rank(b));
       positions.forEach((position, index) => { result[position] = ordered[index]; });
@@ -68,23 +69,26 @@
     let slots = [];
     let readings = [];
     let configured = false;
-    let busy = false;
+    let operationLane = Promise.resolve();
     let editorPanel;
     let editorRevision = 0;
+    let renameRevision = 0;
     const error = () => { message.textContent = tr('failed'); };
-    const run = async (operation, ...args) => {
-      if (busy) return;
-      busy = true;
-      try {
-        const result = await ipc[operation](form.id, ...args);
-        if (result.ok === false) { error(); return result; }
-        if (result.accounts) {
-          slots = result.accounts;
-          preserveScroll(render);
-          onChanged(slots);
-        }
-        return result;
-      } catch (_) { error(); } finally { busy = false; }
+    const run = (operation, ...args) => {
+      const task = operationLane.then(async () => {
+        try {
+          const result = await ipc[operation](form.id, ...args);
+          if (result.ok === false) { error(); return result; }
+          if (result.accounts) {
+            slots = result.accounts;
+            preserveScroll(render);
+            onChanged(slots);
+          }
+          return result;
+        } catch (_) { error(); }
+      });
+      operationLane = task.catch(() => {});
+      return task;
     };
     function closeEditor() {
       editorRevision++;
@@ -137,6 +141,10 @@
           onSave: (_form, values, clearInput) => submit(values, clearInput)
         });
         editor.append(title, ...(!slot ? [name] : []), editorPanel, verdict, choices, slotButton('cancel', () => preserveScroll(closeEditor)));
+        for (const field of form.fields.filter(field => !field.secret)) {
+          const input = editorPanel.querySelector(`#${prefix}${field.key}Input`);
+          if (input && slot?.formValues && Object.hasOwn(slot.formValues, field.key)) input.value = slot.formValues[field.key];
+        }
         forms.refreshFieldDependents?.(draftForm, { document });
         editorPanel.querySelector('.settings-group-header').classList.add('hidden');
         editorPanel.querySelector('.cursor-settings-details').classList.remove('hidden');
@@ -160,6 +168,7 @@
       const rename = () => {
         if (item.editing) return;
         item.editing = true;
+        const revision = ++renameRevision;
         const input = make('input', 'slot-rename');
         input.value = item.slot.label || '';
         input.setAttribute('aria-label', tr('rename'));
@@ -169,8 +178,9 @@
           event.preventDefault(); event.stopPropagation();
           if (event.key === 'Enter') {
             const result = await run('rename', id, input.value);
-            if (!result?.ok) return;
+            if (!result?.ok || revision !== renameRevision) return;
           }
+          renameRevision++;
           item.editing = false;
           preserveScroll(render);
           el.focus({ preventScroll: true });
@@ -180,19 +190,60 @@
       };
       {
         const menu = make('div', 'slot-menu hidden');
-        const more = button('⋯', () => { const open = menu.classList.contains('hidden'); menu.classList.toggle('hidden', !open); more.setAttribute('aria-expanded', String(open)); });
+        menu.setAttribute('popover', 'auto');
+        const closeMenu = () => { if (!menu.classList.contains('hidden')) menu.hidePopover(); };
+        const positionMenu = () => {
+          if (menu.classList.contains('hidden')) return;
+          const anchor = more.getBoundingClientRect();
+          const rect = menu.getBoundingClientRect();
+          const view = document.defaultView;
+          const gutter = 10;
+          const below = anchor.bottom + 8;
+          const top = below + rect.height <= view.innerHeight - gutter ? below : anchor.top - rect.height - 8;
+          menu.style.left = `${Math.round(Math.max(gutter, Math.min(anchor.right - rect.width, view.innerWidth - rect.width - gutter)))}px`;
+          menu.style.top = `${Math.round(Math.max(gutter, top))}px`;
+        };
+        const more = button('⋯', () => {
+          if (!menu.classList.contains('hidden')) { closeMenu(); return; }
+          menu.classList.remove('hidden');
+          menu.showPopover();
+          positionMenu();
+          menu.children[0].focus({ preventScroll: true });
+        });
+        menu.addEventListener('beforetoggle', event => {
+          const open = event.newState === 'open';
+          menu.classList.toggle('hidden', !open);
+          more.setAttribute('aria-expanded', String(open));
+          if (!open && menu.contains(document.activeElement)) more.focus({ preventScroll: true });
+        });
+        menu.addEventListener('keydown', event => {
+          if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeMenu(); return; }
+          if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+          event.preventDefault(); event.stopPropagation();
+          const enabled = [...menu.children].filter(child => !child.disabled);
+          const index = enabled.indexOf(document.activeElement);
+          const next = event.key === 'Home' ? 0 : event.key === 'End' ? enabled.length - 1
+            : (index + (event.key === 'ArrowDown' ? 1 : -1) + enabled.length) % enabled.length;
+          enabled[next].focus({ preventScroll: true });
+        });
+        menu.addEventListener('toggle', event => {
+          const method = event.newState === 'open' ? 'addEventListener' : 'removeEventListener';
+          document.defaultView[method]('resize', positionMenu);
+          document[method]('scroll', positionMenu, true);
+        });
+        item.positionMenu = positionMenu;
         more.className = 'slot-more';
         more.dataset.i18nAriaLabel = 'settings.slots.actions';
         more.setAttribute('aria-label', tr('actions'));
         more.setAttribute('aria-expanded', 'false');
-        const action = (key, fn) => slotButton(key, () => { menu.classList.add('hidden'); more.setAttribute('aria-expanded', 'false'); return fn(); });
+        const action = (key, fn) => slotButton(key, () => { closeMenu(); return fn(); });
         const up = action('up', () => run('move', id, 'up'));
         const down = action('down', () => run('move', id, 'down'));
         const pause = action('pause', () => run('setEnabled', id, !item.slot.enabled));
         const remove = action('remove', () => { if (confirm(tr('confirmRemove'))) return run('remove', id); });
         remove.className = 'slot-destructive';
         if (id === defaultId) {
-          menu.append(action(cookie ? 'replaceCookie' : 'replaceKey', openDefault),
+          menu.append(
             localized(button(t(form.clearKey), () => document.getElementById(`${form.id}LogoutButton`).click()), form.clearKey),
             localized(button(t(form.openKey), () => document.getElementById(`${form.id}OpenBrowser`).click()), form.openKey),
             localized(button(t('settings.common.refresh'), () => document.getElementById(`${form.id}RefreshButton`).click()), 'settings.common.refresh'),
@@ -203,7 +254,7 @@
         actions.append(...(id === defaultId ? [] : [fix]), more, menu);
         if (id !== defaultId) Object.assign(item, { up, down, pause, fix });
         el.addEventListener('keydown', event => {
-          if (event.key === 'Escape') { menu.classList.add('hidden'); more.setAttribute('aria-expanded', 'false'); more.focus(); }
+          if (event.key === 'Escape' && !menu.classList.contains('hidden')) { closeMenu(); more.focus(); }
           if (id !== defaultId && event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
             event.preventDefault(); event.stopPropagation();
             void run('move', id, event.key === 'ArrowUp' ? 'up' : 'down');
@@ -255,6 +306,7 @@
           if (item.el.isConnected) list.moveBefore(item.el, before || null);
           else list.insertBefore(item.el, before || null);
         }
+        item.positionMenu();
       });
     }
     return { element: root, update(nextSlots, nextReadings, defaultConfigured) {
