@@ -4,6 +4,7 @@
 // Zed limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'zed',
+  accountSlots: true,
   fetch: 'fetchZedLimits',
   fields: [
     {

@@ -343,7 +343,7 @@ test('startup and settings pushes load slot lists with no mounted Settings panel
   const start = source.indexOf('  state.settings = await window.tokenMonitor.getSettings();', source.indexOf('async function init()'));
   const end = source.indexOf('  // Local appearance', start);
   await vm.runInContext(`(async () => { ${source.slice(start, end)} })()`, context);
-  assert.deepEqual(calls.sort(), ['deepseek', 'qoder']);
+  assert.deepEqual(calls.sort(), LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots).map(entry => entry.id).sort());
   assert.equal(vm.runInContext('accountSlotLists.qoder[0].accountKey', context), 'z');
   const push = source.slice(source.indexOf('window.tokenMonitor.onSettingsPush?.((next)'), source.indexOf('window.tokenMonitor.codex.onActiveAccount'));
   assert.match(push, /refreshAccountSlotPanels\(\)/);
@@ -736,4 +736,27 @@ test('a reading that resolved to its real key keeps its place with a cached pre-
     { provider: 'deepseek', accountKey: 'resolved-first', accountKeyAliases: ['provisional-first'] }
   ];
   assert.deepEqual(applyAccountOrder(records, cached).map(row => row.accountKey), ['resolved-first', 'second']);
+});
+
+for (const [id, fixture] of Object.entries(require('../fixtures/accountSlotsBatch').fixtures)) test(`${id}: slot editor renders and submits its complete field shape`, async () => {
+  const h = harness();
+  const form = limitAccountFormsForRenderer().find(f => f.id === id);
+  assert.equal(form.accountSlots, true);
+  const values = fixture.values('a');
+  assert.deepEqual(form.fields.map(f => f.key).sort(), Object.keys(values).sort());
+  const submitted = [];
+  const panel = createPanel({ form, label: id, document: h.document, t,
+    ipc: { add: async (...args) => { submitted.push(args); return { saved: true, verdict: 'valid', accounts: [] }; } },
+    forms: { createCredentialPanel, resolveOpenUrl }, preserveScroll: fn => fn(), onChanged() {}, openExternal() {} });
+  h.document.root.append(panel.element);
+  panel.openEditor(null);
+  for (const field of form.fields) {
+    const input = h.document.getElementById(`${id}SlotDraft${field.key}Input`);
+    assert.ok(input, field.key);
+    assert.equal(input.tagName, field.input === 'textarea' ? 'textarea' : 'input');
+    input.value = values[field.key];
+  }
+  await h.document.getElementById(`${id}SlotDraftCredentialSubmit`).click();
+  assert.equal(submitted[0][0], id);
+  assert.deepEqual(submitted[0][1], values);
 });

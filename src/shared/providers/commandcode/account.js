@@ -4,6 +4,7 @@
 // Command Code limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'commandcode',
+  accountSlots: true,
   fetch: 'fetchCommandcodeLimits',
   fields: [
     {
