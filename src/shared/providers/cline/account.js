@@ -5,6 +5,10 @@
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'cline',
   accountSlots: true,
+  sources: [
+    { id: 'api', kind: 'apiKey', relation: 'alternative', labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.cline.note' },
+    { id: 'local', kind: 'file', relation: 'alternative', labelKey: 'settings.limits.sources.file', descriptionKey: 'settings.limits.sources.fileDescription' }
+  ],
   fetch: 'fetchClineLimits',
   fields: [
     {

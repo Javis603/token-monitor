@@ -9,6 +9,9 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   serverAccountKey: 'isCopilotServerAccountKey',
   dedupeAccounts: true,
   environmentWhenSaved: false,
+  sources: [
+    { id: 'oauth', kind: 'oauth', relation: 'single', labelKey: 'settings.limits.sources.oauth', descriptionKey: 'settings.limits.sources.oauthDescription' }
+  ],
   accountRefresh: true,
   fields: [
     { key: 'copilotProfiles', kind: 'setting', rendererOmit: true, config: false, watch: false,

@@ -29,7 +29,7 @@ test('Antigravity settings manage quota accounts without exposing a local accoun
   assert.doesNotMatch(html, /settings\.antigravity\.(?:description|localAccountNote)/);
   assert.match(app, /function renderAntigravityStatus\(\)/);
   assert.match(app, /t\('settings\.antigravity\.notConfigured'\)/);
-  assert.match(app, /connectionDetailKey && !accountGroup/);
+  assert.match(app, /sources.length\) optionsInner.append\(limitProviderConnectionDetail/);
   assert.match(app, /window\.tokenMonitor\.antigravity\.setAccountEnabled/);
   assert.match(app, /window\.tokenMonitor\.antigravity\.removeAccount/);
   // Several Antigravity accounts render as the shared group, by account count

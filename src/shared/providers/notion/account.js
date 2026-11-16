@@ -6,6 +6,9 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   id: 'notion',
   accountSlots: true,
   serverAccountKey: 'isNotionServerAccountKey',
+  sources: [
+    { id: 'web', kind: 'web', relation: 'single', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription', getUrlFromForm: true }
+  ],
   fetch: 'fetchNotionLimits',
   fields: [
     {

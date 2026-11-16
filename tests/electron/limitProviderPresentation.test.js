@@ -503,13 +503,13 @@ test('Home omits reset rows that have no visible reset content', () => {
 });
 
 test('capability tags explain how each provider is collected in settings', () => {
-  assert.deepEqual(limitProviderCapabilityTags('claude'), ['Auto', 'OAuth/CLI', 'Web']);
-  assert.deepEqual(limitProviderCapabilityTags('codex'), ['Auto', 'OAuth/App/CLI']);
-  assert.deepEqual(limitProviderCapabilityTags('cursor'), ['Auto', 'Web']);
-  assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['Auto', 'OAuth/App/CLI']);
-  assert.deepEqual(limitProviderCapabilityTags('opencode'), ['Auto', 'API/Web']);
-  assert.deepEqual(limitProviderCapabilityTags('grok'), ['Auto', 'CLI/Web']);
-  assert.deepEqual(limitProviderCapabilityTags('copilot'), ['Manual login', 'API']);
+  assert.deepEqual(limitProviderCapabilityTags('claude'), ["OAuth/CLI/Web"]);
+  assert.deepEqual(limitProviderCapabilityTags('codex'), ["OAuth/Desktop app/CLI"]);
+  assert.deepEqual(limitProviderCapabilityTags('cursor'), ["Desktop app/Web"]);
+  assert.deepEqual(limitProviderCapabilityTags('antigravity'), ["Desktop app/OAuth"]);
+  assert.deepEqual(limitProviderCapabilityTags('opencode'), ["API key/Web/Local"]);
+  assert.deepEqual(limitProviderCapabilityTags('grok'), ["CLI/Web"]);
+  assert.deepEqual(limitProviderCapabilityTags('copilot'), ["OAuth"]);
   assert.deepEqual(limitProviderCapabilityTags('unknown'), []);
 });
 
@@ -518,10 +518,11 @@ test('Minimax capability tags are localized in settings', () => {
   const i18n = require('../../src/electron/renderer/i18n');
   const start = app.indexOf('const LIMIT_CAPABILITY_TAG_KEYS = {');
   const keys = app.slice(start, app.indexOf('\n};', start) + 3);
+  const apiParts = require('../../src/electron/renderer/limits/providerPresentation').connectionTag('minimax').parts;
   const translate = functionBody(app, 'translatedLimitCapabilityTag', 'translatedLimitProviderTag');
   for (const locale of Object.keys(i18n.MESSAGES)) {
     const tags = vm.runInNewContext(`${keys}\n${translate}\ntags.map(label => ({ key: LIMIT_CAPABILITY_TAG_KEYS[label], text: translatedLimitCapabilityTag(label) }));`, {
-      tags: limitProviderCapabilityTags('minimax'),
+      tags: apiParts,
       t: key => i18n.translate(locale, key)
     });
     for (const tag of tags) {
@@ -607,27 +608,27 @@ test('undetected settings tags include status and supported collection hints', (
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'codex', status: 'notConfigured', source: 'oauth' })
       .map((tag) => tag.label),
-    ['Not set up', 'Auto', 'OAuth/App/CLI']
+    ['Not set up', ...limitProviderCapabilityTags('codex')]
   );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'antigravity', status: 'notConfigured', source: 'rpc' })
       .map((tag) => tag.label),
-    ['Not set up', 'Auto', 'OAuth/App/CLI']
+    ['Not set up', ...limitProviderCapabilityTags('antigravity')]
   );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'antigravity', status: 'unavailable', source: 'rpc' })
       .map((tag) => tag.label),
-    ['Unavailable', 'Auto', 'OAuth/App/CLI']
+    ['Unavailable', ...limitProviderCapabilityTags('antigravity')]
   );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'cursor', status: 'notConfigured', source: 'web' })
       .map((tag) => tag.label),
-    ['Sign in', 'Auto', 'Web']
+    ['Sign in', ...limitProviderCapabilityTags('cursor')]
   );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'grok', status: 'notConfigured', source: 'web' })
       .map((tag) => tag.label),
-    ['Run grok login', 'Auto', 'CLI/Web']
+    ['Run grok login', ...limitProviderCapabilityTags('grok')]
   );
 });
 
@@ -681,7 +682,7 @@ test('detected settings tags show only current source after status', () => {
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'grok', status: 'ok', source: 'rpc', sourceDetail: 'cli' })
       .map((tag) => tag.label),
-    ['Live', 'CLI']
+    ['Live', 'RPC']
   );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'grok', status: 'ok', source: 'web' })
@@ -2115,7 +2116,7 @@ test('Cline exposes its API key through the settings and credential-store patter
     limitProviderStatusLabel({ provider: 'cline', status: 'notConfigured' }),
     { label: 'Add API key', tone: 'setup' }
   );
-  assert.deepEqual(limitProviderCapabilityTags({ provider: 'cline' }), ['Auto', 'Desktop app', 'CLI']);
+  assert.deepEqual(limitProviderCapabilityTags({ provider: 'cline' }), ["API key/Local"]);
   // The list renders per provider, and its default branch draws session and weekly
   // only — a three-window provider needs its own branch or the monthly window never
   // appears. Guarded by source patterns because the view module builds DOM and this
@@ -2152,7 +2153,7 @@ test('AI Tool Limits owns every live account group and its status pill', () => {
   const html = readRendererFile('index.html');
   const accountNodes = app.slice(
     app.indexOf('const LIMIT_PROVIDER_ACCOUNT_NODES = {'),
-    app.indexOf('const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {')
+    app.indexOf('const TRAY_ICON_VARIANTS = [')
   );
   const providers = [
     ['codex', 'codexAccountGroup', 'codexAccountStatus'],
@@ -2719,19 +2720,10 @@ test('account and automatic provider panels reuse the original account summary g
   assert.match(renderSettings, /disclosureIcon\.className = 'cursor-disclosure-icon'/);
   assert.match(renderSettings, /actions\.append\(disclosureIcon\)/);
   assert.match(renderSettings, /moveLimitProviderLiveNode\(actions, accountStatus, disclosureIcon\)/);
-  assert.match(renderSettings, /mode\.className = 'cursor-status-pill limit-provider-mode-pill'/);
-  assert.match(renderSettings, /mode\.textContent = t\('settings\.limits\.connection\.autoDetect'\)/);
-  assert.match(renderSettings, /connectionDetailKey && !accountGroup/);
   assert.match(renderSettings, /accountGroup && provider\.status === 'notConfigured'/);
-  assert.match(renderSettings, /connectionDetailKey && !accountGroup && tagInfo\.label === 'Auto'/);
-  assert.match(renderSettings, /accountGroup && tagInfo\.label === 'Manual login'/);
-  assert.match(renderSettings, /if \(duplicatesInlineSetup\) continue/);
   assert.match(renderSettings, /main\.append\(copy, actions\)/);
   assert.doesNotMatch(renderSettings, /limit-provider-disclosure/);
   assert.doesNotMatch(renderSettings, /view-subgroup-toggle|view-subgroup-icon/);
-  assert.match(app, /antigravity: 'settings\.limits\.connection\.antigravity'/);
-  assert.match(app, /grok: 'settings\.limits\.connection\.grok'/);
-  assert.match(app, /kiro: 'settings\.limits\.connection\.kiro'/);
   assert.equal((i18n.match(/'settings\.limits\.connection\.title':/g) || []).length, 6);
   assert.equal((i18n.match(/'settings\.limits\.connection\.autoDetect':/g) || []).length, 6);
   assert.equal((i18n.match(/'settings\.limits\.connection\.antigravity':/g) || []).length, 6);
@@ -2870,7 +2862,7 @@ test('Antigravity uses the shared OAuth source label', () => {
 });
 
 test('Zed identifies its manual web-session setup and dashboard source', () => {
-  assert.deepEqual(presentation.limitProviderCapabilityTags('zed'), ['Manual login', 'Web']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zed'), ["Web"]);
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'zed', source: 'web' }), 'Web');
 });
 
@@ -2920,7 +2912,7 @@ test('WorkBuddy sealed app credentials are shown as an actionable status', () =>
 
 test('deepseek source label and capability tags', () => {
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'deepseek', source: 'api' }), 'API');
-  assert.deepEqual(presentation.limitProviderCapabilityTags('deepseek'), ['Pay-as-you-go', 'API key']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('deepseek'), ["API key/Web"]);
 });
 
 test('deepseek status copy: notConfigured -> Add API key, unauthorized -> Update API key', () => {
@@ -2936,7 +2928,7 @@ test('deepseek status copy: notConfigured -> Add API key, unauthorized -> Update
 
 test('OpenRouter uses API-key setup copy and pay-as-you-go capability tags', () => {
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'openrouter', source: 'api' }), 'API');
-  assert.deepEqual(presentation.limitProviderCapabilityTags('openrouter'), ['Pay-as-you-go', 'API key']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('openrouter'), ["API key"]);
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'openrouter', status: 'notConfigured' }),
     { label: 'Add API key', tone: 'setup' }
@@ -2949,7 +2941,7 @@ test('OpenRouter uses API-key setup copy and pay-as-you-go capability tags', () 
 
 test('third-party API uses credential setup copy and relay capability tags', () => {
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'thirdparty', source: 'api' }), 'API');
-  assert.deepEqual(presentation.limitProviderCapabilityTags('thirdparty'), ['Relay', 'API']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('thirdparty'), ["API key"]);
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'thirdparty', status: 'notConfigured' }),
     { label: 'Add credential', tone: 'setup' }
@@ -3135,20 +3127,20 @@ test('copilot setup status asks for sign-in instead of an API key', () => {
 });
 
 test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama source labels and setup statuses', () => {
-  assert.deepEqual(presentation.limitProviderCapabilityTags('factory'), ['Auto', 'API key']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('zai'), ['Auto', 'Coding Plan', 'API key']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('zaiteam'), ['Team Plan', 'API key']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ['Auto', 'API key', 'CLI']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ['Manual login', 'Web']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ['Manual login', 'Web']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ['Auto', 'Desktop app', 'Web']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ['Manual login', 'API/Web']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('factory'), ["API key/Local"]);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zai'), ["API key/Desktop app"]);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zaiteam'), ["API key"]);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ["API key/CLI"]);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ["Web"]);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ["Web"]);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ["Web/Desktop app"]);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ["API key/Web"]);
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'factory', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'zai', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'api' }), 'API');
-  assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'cli' }), 'arkcli');
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'cli' }), 'CLI');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'qoder', source: 'web' }), 'Web');
-  assert.equal(presentation.limitProviderSourceLabel({ provider: 'trae', source: 'api' }), 'Web');
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'trae', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'workbuddy', source: 'local' }), 'Local');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'ollama', source: 'web' }), 'Web');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'ollama', source: 'api' }), 'API');
@@ -3207,7 +3199,7 @@ test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama so
 });
 
 test('Kimi capability tags and source label', () => {
-  assert.deepEqual(presentation.limitProviderCapabilityTags('kimi'), ['Coding Plan', 'Web/API']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('kimi'), ["API key/Web"]);
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'kimi', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'kimi', source: 'web' }), 'Web');
   assert.deepEqual(

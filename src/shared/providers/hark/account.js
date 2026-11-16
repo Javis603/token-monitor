@@ -5,6 +5,10 @@
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'hark',
   accountSlots: true,
+  sources: [
+    { id: 'web', kind: 'web', relation: 'alternative', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' },
+    { id: 'local', kind: 'desktop', relation: 'alternative', labelKey: 'settings.limits.sources.desktop', descriptionKey: 'settings.limits.sources.desktopDescription' }
+  ],
   fetch: 'fetchHarkLimits',
   fields: [{
     key: 'harkCookie',

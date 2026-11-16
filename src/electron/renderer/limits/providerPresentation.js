@@ -25,38 +25,6 @@
     api: 'API'
   };
 
-  const PROVIDER_SOURCE_LABELS = {
-    claude: { oauth: 'OAuth', cli: 'CLI', web: 'Web' },
-    codex: { rpc: 'RPC' },
-    opencode: { local: 'Local', web: 'Web', api: 'API' },
-    cursor: { web: 'Web' },
-    antigravity: { oauth: 'OAuth', rpc: 'RPC' },
-    factory: { api: 'API' },
-    kimi: { api: 'API', web: 'Web' },
-    grok: { rpc: 'CLI', web: 'Web' },
-    copilot: { api: 'API' },
-    zed: { web: 'Web' },
-    commandcode: { web: 'Web' },
-    mimo: { web: 'Web' },
-    muse: { cli: 'CLI', web: 'Web' },
-    zai: { api: 'API' },
-    zaiteam: { api: 'API' },
-    kiro: { cli: 'CLI' },
-    workbuddy: { local: 'Local', api: 'API', oauth: 'OAuth' },
-    qoder: { web: 'Web' },
-    deepseek: { api: 'API' },
-    devin: { web: 'Web' },
-    minimax: { api: 'API' },
-    openrouter: { api: 'API' },
-    volcengine: { api: 'API', cli: 'arkcli' },
-    ollama: { api: 'API', web: 'Web' },
-    trae: { api: 'Web' },
-    alibaba: { cli: 'CLI', web: 'Web' },
-    stepfun: { web: 'Web' },
-    manus: { local: 'Local', web: 'Web' },
-    thirdparty: { api: 'API' }
-  };
-
   const CODEX_RPC_DETAIL_LABELS = {
     app: 'App',
     cli: 'CLI',
@@ -64,43 +32,18 @@
     unknown: 'RPC'
   };
 
-  const CAPABILITY_TAGS = {
-    claude: ['Auto', 'OAuth/CLI', 'Web'],
-    codex: ['Auto', 'OAuth/App/CLI'],
-    opencode: ['Auto', 'API/Web'],
-    cursor: ['Auto', 'Web'],
-    antigravity: ['Auto', 'OAuth/App/CLI'],
-    cline: ['Auto', 'Desktop app', 'CLI'],
-    factory: ['Auto', 'API key'],
-    kimi: ['Coding Plan', 'Web/API'],
-    grok: ['Auto', 'CLI/Web'],
-    copilot: ['Manual login', 'API'],
-    zed: ['Manual login', 'Web'],
-    commandcode: ['Manual login', 'Web'],
-    mimo: ['Auto', 'Desktop app', 'Token Plan'],
-    muse: ['Auto', 'CLI', 'Web', 'Manual'],
-    zai: ['Auto', 'Coding Plan', 'API key'],
-    zaiteam: ['Team Plan', 'API key'],
-    kiro: ['Auto', 'CLI'],
-    workbuddy: ['Auto', 'Desktop app', 'Web'],
-    qoder: ['Manual login', 'Web'],
-    deepseek: ['Pay-as-you-go', 'API key'],
-    devin: ['Manual login', 'Web'],
-    minimax: ['Auto', 'Token Plan', 'Pay-as-you-go', 'API key'],
-    mistral: ['Web', 'Manual'],
-    typesafe: ['Manual login', 'Web'],
-    openrouter: ['Pay-as-you-go', 'API key'],
-    volcengine: ['Auto', 'API key', 'CLI'],
-    ollama: ['Manual login', 'API/Web'],
-    trae: ['Manual login', 'Web'],
-    alibaba: ['Token Plan', 'CLI', 'Web'],
-    stepfun: ['Coding/Token Plan', 'Web'],
-    notion: ['Web', 'Manual'],
-    manus: ['Auto', 'Desktop app', 'Manual'],
-    hark: ['Auto', 'Desktop app', 'Manual'],
-    opendesign: ['Web', 'Manual'],
-    thirdparty: ['Relay', 'API']
-  };
+  const accountDeclarations = typeof module === 'object' && module.exports
+    ? require('../../../shared/limits/accounts').LIMIT_PROVIDER_ACCOUNTS : [];
+  const KIND_LABELS = { oauth: 'OAuth', cli: 'CLI', desktop: 'Desktop app', web: 'Web', apiKey: 'API key', env: 'Environment', file: 'Local' };
+
+  function connectionSources(id, declarations = accountDeclarations) {
+    return declarations.find(entry => entry.id === providerId(id))?.sources || [];
+  }
+
+  function connectionTag(provider, declarations = accountDeclarations) {
+    const parts = [...new Set(connectionSources(provider, declarations).map(source => KIND_LABELS[source.kind]))];
+    return parts.length ? { label: parts.join('/'), parts, kind: 'capability' } : null;
+  }
 
   const COMPACT_LIMIT_CRITICAL_PERCENT = 20;
 
@@ -142,11 +85,12 @@
     if (provider === 'codex' && source === 'rpc' && CODEX_RPC_DETAIL_LABELS[sourceDetail]) {
       return CODEX_RPC_DETAIL_LABELS[sourceDetail];
     }
-    return PROVIDER_SOURCE_LABELS[provider]?.[source] || SOURCE_LABELS[source] || '';
+    return SOURCE_LABELS[source] || '';
   }
 
   function limitProviderCapabilityTags(providerOrId) {
-    return (CAPABILITY_TAGS[providerId(providerOrId)] || []).slice();
+    const tag = connectionTag(providerOrId);
+    return tag ? [tag.label] : [];
   }
 
   function limitProviderDisplayLabel(value) {
@@ -739,6 +683,8 @@
   }
 
   return {
+    connectionSources,
+    connectionTag,
     antigravityQuotaWindow,
     antigravityQuotaWindowVisible,
     apiKeyAccountStatus,

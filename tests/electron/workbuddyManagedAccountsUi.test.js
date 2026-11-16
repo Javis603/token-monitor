@@ -359,8 +359,9 @@ test('WorkBuddy account and total copy is present in every locale and auto conne
   const html = fs.readFileSync(path.join(renderer, 'index.html'), 'utf8');
   assert.match(html, /id="workbuddyLoginStatus"[^>]*role="status"[^>]*aria-live="polite"/);
   assert.match(html, /id="workbuddyAccountErrorMessage"[^>]*role="alert"/);
-  assert.match(app, /workbuddy: 'settings\.limits\.connection\.workbuddy'/);
-  assert.match(app, /if \(connectionDetailKey\) optionsInner\.append\(limitProviderConnectionDetail\(connectionDetailKey\)\)/);
+  assert.ok(require('../../src/shared/providers/workbuddy/account').sources.some(source => source.kind === 'desktop'));
+
+  assert.match(app, /if \(sources\.length\) optionsInner\.append\(limitProviderConnectionDetail\(id, sources, provider\)\)/);
 });
 
 
