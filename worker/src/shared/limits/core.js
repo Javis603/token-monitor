@@ -1045,9 +1045,10 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
     byKey.set(providerAggregateKey(provider), provider);
   }
 
-  // Second pass: collapse device-local credential identities by provider, while
-  // portable accounts and explicitly reported multi-account providers retain
-  // each account's best observation.
+  // Second pass: collapse device-local credential identities by provider.
+  // Portable accounts and explicitly reported multi-account providers keep each
+  // account's best observation, but a stale portable account still yields to a
+  // fresh account of the same provider.
   const hasKnownWorkbuddyAccount = Array.from(byKey.values()).some((candidate) =>
     candidate.provider === 'workbuddy' && candidate.accountKey && !isWorkbuddyPlaceholder(candidate));
   const knownMinimaxSources = new Set(Array.from(byKey.values())
