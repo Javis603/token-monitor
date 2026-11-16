@@ -214,9 +214,23 @@ test('Bailian environment omits unrelated credentials and ignores ambient gatewa
     SSH_AUTH_SOCK: '/socket', DASHSCOPE_BASE_URL: 'https://wrong', BAILIAN_BASE_URL: 'https://wrong' };
   assert.deepEqual(cliEnvironment(env, alibabaVariantConfig('intl')), {
     PATH: '/bin', HOME: '/home/test', HTTP_PROXY: 'http://proxy',
+    NO_UPDATE_NOTIFIER: '1', DO_NOT_TRACK: '1',
     DASHSCOPE_BASE_URL: 'https://dashscope-intl.aliyuncs.com', BAILIAN_BASE_URL: 'https://dashscope-intl.aliyuncs.com'
   });
   assert.equal(cliEnvironment(env, alibabaVariantConfig('cn-personal')).DASHSCOPE_BASE_URL, undefined);
+});
+
+test('Bailian quota environment disables updates and telemetry regardless of parent settings', () => {
+  for (const variant of ['cn', 'intl', 'cn-personal', 'intl-personal']) {
+    for (const inherited of [{}, { NO_UPDATE_NOTIFIER: '0', DO_NOT_TRACK: '0' },
+      { NO_UPDATE_NOTIFIER: '1', DO_NOT_TRACK: '1' }]) {
+      const before = { ...inherited };
+      const env = cliEnvironment(inherited, alibabaVariantConfig(variant));
+      assert.equal(env.NO_UPDATE_NOTIFIER, '1');
+      assert.equal(env.DO_NOT_TRACK, '1');
+      assert.deepEqual(inherited, before);
+    }
+  }
 });
 
 test('Bailian discovery supports native Windows executables and rejects relative PATH entries', () => {
@@ -461,6 +475,8 @@ test('Bailian relative config directory keeps the saved login when the child cha
       const assert = require('node:assert/strict');
       const fs = require('node:fs');
       const path = require('node:path');
+      assert.equal(process.env.NO_UPDATE_NOTIFIER, '1');
+      assert.equal(process.env.DO_NOT_TRACK, '1');
       assert.equal(fs.realpathSync(process.cwd()), fs.realpathSync(require('node:os').tmpdir()));
       assert.equal(JSON.parse(fs.readFileSync(path.join(process.env.BAILIAN_CONFIG_DIR, 'config.json'))).profile, 'fixture');
       assert.equal(JSON.parse(fs.readFileSync(path.join(process.env.BAILIAN_CONFIG_DIR, 'credentials.json'))).login, 'synthetic');
@@ -487,7 +503,8 @@ test('Bailian relative config directory keeps the saved login when the child cha
     const stdout = await new Promise((resolve, reject) => {
       require('node:child_process').execFile(process.execPath, ['-e', host], { cwd: dir, env: {
         PATH: [dir, path.dirname(process.execPath)].join(path.delimiter),
-        BAILIAN_CONFIG_DIR: 'saved profile', SystemRoot: process.env.SystemRoot
+        BAILIAN_CONFIG_DIR: 'saved profile', SystemRoot: process.env.SystemRoot,
+        NO_UPDATE_NOTIFIER: '0', DO_NOT_TRACK: '0'
       } }, (error, output) => error ? reject(error) : resolve(output));
     });
     const row = JSON.parse(stdout);

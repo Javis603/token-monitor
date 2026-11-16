@@ -45,6 +45,9 @@ function cliEnvironment(env, variant) {
     'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
     'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy']);
   const result = Object.fromEntries(Object.entries(env).filter(([key]) => allowed.has(key)));
+  // Background quota reads must not update the CLI or generate CLI telemetry.
+  result.NO_UPDATE_NOTIFIER = '1';
+  result.DO_NOT_TRACK = '1';
   if (env.Path && !result.PATH) result.PATH = env.Path;
   if (!variant.personal) {
     const base = variant.id === 'intl' ? 'https://dashscope-intl.aliyuncs.com' : 'https://dashscope.aliyuncs.com';
