@@ -2688,12 +2688,18 @@ function watcherOptions(usePolling, ignored) {
 // its unchanged record to the Hub about every 2 s.
 //
 // Only the sidecar is dropped. The real data signal lives in the database and
-// its -wal, so a genuine change still produces an event; a client whose scan was
-// measured NOT to rewrite its sidecar (mimo) is deliberately absent here, and
-// adding a client to this list asserts a measurement rather than a hunch.
+// its -wal, so a genuine change still produces an event. With the bundled 4.23
+// scanner, unchanged WAL fixtures also rewrite SHM on every Kilo, Kiro, Zed,
+// Hermes, Copilot, Unsloth, Devin and OpenClaw scan. OpenCode and MiMo rewrite
+// it on the first read before their source cache is warm. A read-only SQLite
+// connection can write its wal-index; it is not evidence of new token usage.
+// Adding a client to this list asserts a measurement rather than a hunch.
 // Cherry Studio, CatPaw and Goose also rewrite their wal-index on repeated read-only WAL scans.
 // Cursor's read-only desktop credential/title queries change state.vscdb-shm too.
-const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze(['antigravity', 'catpaw', 'cherrystudio', 'cursor', 'goose', 'zcode']);
+const SELF_WATCHED_SQLITE_SIDECAR_CLIENTS = Object.freeze([
+  'antigravity', 'catpaw', 'cherrystudio', 'copilot', 'cursor', 'devin', 'goose',
+  'hermes', 'kilo', 'kiro', 'mimo', 'opencode', 'openclaw', 'unsloth', 'zcode', 'zed'
+]);
 
 function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
   // Match SQLite's wal-index suffix, not one client's database basename: ZCode's
