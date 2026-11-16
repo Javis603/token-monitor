@@ -56,7 +56,7 @@ function parseMuseWebSubscription(text) {
   return { planLabel: typeof sub.tier?.name === 'string' ? sub.tier.name : '', windows };
 }
 
-const chunkPaths = (text) => [...new Set((text.match(/static\/chunks\/[\w~.-]+\.js/gu) || []).map((path) => `/_next/${path}`))];
+const chunkPaths = (text) => [...new Set((text.match(/static\/(?:immutable\/)?chunks\/[\w~.-]+\.js/gu) || []).map((path) => `/_next/${path}`))];
 
 async function fetchMuseWebLimits(options = {}, deps = {}) {
   const base = { provider: 'muse', source: 'web', accountLabel: 'Muse (Meta)', updatedAt: new Date((deps.now || Date.now)()).toISOString(), windows: [] };
@@ -122,10 +122,13 @@ async function fetchMuseWebLimits(options = {}, deps = {}) {
       });
       let actionID = state?.get(cacheKey);
       let response = actionID ? await post(actionID) : null;
-      if (!response || (response.status === 404 && /server action not found/iu.test(response.text))) {
+      // A redeployed muse.ai answers a stale action with 400, 404 or 409.
+      const staleAction = (result) => [400, 404, 409].includes(result.status);
+      if (!response || staleAction(response)) {
         state?.delete(cacheKey);
         actionID = await discover();
         response = await post(actionID);
+        if (staleAction(response)) throw invalidResponse();
       }
       if (response.status !== 200) throw errorWithStatus(statusForHttp(response.status), 'Muse subscription unavailable');
       const result = parseMuseWebSubscription(response.text);

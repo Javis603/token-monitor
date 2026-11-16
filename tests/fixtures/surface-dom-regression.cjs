@@ -1,4 +1,4 @@
-/* global state, surface, render, ringNumberAnimations, appendLiveRate, t, document, requestAnimationFrame, MouseEvent, PointerEvent */
+/* global state, surface, render, ringNumberAnimations, appendLiveRate, t, document, getComputedStyle, requestAnimationFrame, MouseEvent, PointerEvent */
 'use strict';
 (async () => {
   const assert = (ok, message) => { if (!ok) throw new Error(message); };
@@ -58,10 +58,34 @@
       const indicator = ring.querySelector(selector), animation = indicator.getAnimations().find(animation => animation.animationName);
       assert(animation?.playState === 'running', `${activity} indicator really animates`);
       for (let i = 0; i < 2; i++) {
+        await new Promise(resolve => setTimeout(resolve, 120));
+        const delay = animation.effect.getTiming().delay;
+        const startTime = animation.startTime;
+        payload.focusCellId = i % 2 === 0 ? payload.cells[0].id : null;
         push(); await settle();
         assert(ring.querySelector(selector) === indicator && indicator.getAnimations().includes(animation) && animation.playState === 'running', `${activity} CSS animation survives two rail pushes`);
+        assert(animation.effect.getTiming().delay === delay && animation.startTime === startTime, `${activity} animation phase stays continuous through hover and live pushes`);
       }
     }
+    payload.focusCellId = null; push();
+    await new Promise(resolve => setTimeout(resolve, 220));
+    payload.focusCellId = payload.cells[0].id; push(); await settle();
+    const fill = ring.querySelector('.edge-dock-ring-fill');
+    const hover = fill.getAnimations().find(animation => animation.transitionProperty === 'filter');
+    assert(hover?.playState === 'running', 'hover glow really transitions');
+    push(); await settle();
+    assert(fill.getAnimations().includes(hover) && hover.playState === 'running', 'unchanged push preserves the in-flight hover glow');
+    const assertGlowColor = () => {
+      const style = getComputedStyle(fill);
+      const shadow = style.filter.match(/rgba?\(([^)]+)\)/)?.[1].split(',').slice(0, 3).map(Number);
+      const stroke = style.stroke.match(/rgb\(([^)]+)\)/)?.[1].split(',').map(Number);
+      assert(shadow && stroke && shadow.every((channel, index) => channel === stroke[index]), 'mid-transition hover glow keeps the provider colour instead of turning black');
+    };
+    hover.pause(); hover.currentTime = 90; assertGlowColor();
+    payload.focusCellId = null; push(); await settle();
+    const exit = fill.getAnimations().find(animation => animation.transitionProperty === 'filter');
+    assert(exit, 'hover exit really transitions');
+    exit.pause(); exit.currentTime = exit.effect.getTiming().duration / 2; assertGlowColor();
     return 'PASS actual rail cell identity and focus';
   }
   const row = { key: 'codex:dom-proof', client: 'codex', sessionId: 'dom-proof', title: 'An intentionally long ongoing engineering task title for reading across updates',
@@ -98,6 +122,28 @@
   assert(title.isConnected && document.activeElement === model, `${surface} focused session survives insertion before it`);
   rows.reverse(); render(next); await settle();
   assert(title.isConnected && document.activeElement === model, `${surface} focused session survives reorder`);
+  if (surface === 'bubble') {
+    const dot = title.closest('.edge-dock-session').querySelector('.edge-dock-session-dot');
+    const spin = dot.querySelector('.edge-dock-session-spin');
+    const pulse = () => spin.getAnimations().find(animation => animation.animationName === 'edge-dock-session-pulse');
+    pulse()?.finish();
+    row.lastUsedAt = new Date(Date.now() + 100).toISOString(); render(next); await settle();
+    const first = pulse(); assert(first?.playState === 'running', 'a transcript write starts the activity pulse');
+    first.pause(); first.currentTime = 400;
+    render(next); await settle();
+    assert(pulse() === first && first.currentTime === 400, 'unchanged push leaves the activity pulse intact');
+    first.finish();
+    row.lastUsedAt = new Date(Date.parse(row.lastUsedAt) + 100).toISOString(); render(next); await settle();
+    const second = pulse();
+    assert(second && second !== first && second.playState === 'running', 'next transcript write replays a finished pulse on the retained spinner');
+    second.currentTime = 600;
+    row.lastUsedAt = new Date(Date.parse(row.lastUsedAt) + 100).toISOString(); render(next); await settle();
+    assert(pulse()?.currentTime < 200 && document.contains(spin), 'a write during a pulse restarts the effect without replacing the spinner');
+    next.appearance.reduceMotion = 'on'; render(next); await settle();
+    assert(!pulse(), 'reduced motion stops session activity pulses');
+    next.appearance.reduceMotion = 'off'; render(next); await settle();
+    assert(!pulse(), 'restoring motion does not replay old activity');
+  }
   if (surface === 'notch') {
     document.querySelector('.notch-tab[data-page="home"]').click(); await settle();
     const day = document.querySelector('.notch-day');

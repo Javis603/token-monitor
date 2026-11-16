@@ -1,7 +1,8 @@
+// @ts-check
 'use strict';
 
 // GitHub Copilot limits account wiring. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'copilot',
   fetch: 'fetchCopilotLimits',
   accountRefresh: true,
@@ -24,7 +25,7 @@ module.exports = {
     const accounts = limits.configuredCopilotAccounts(settings, { env });
     return {
       copilotApiTokenConfigured: accounts.length > 0,
-      copilotApiTokenSource: accounts.some(account => account.id !== 'environment') ? 'settings' : accounts.length ? 'env' : ''
+      copilotApiTokenSource: accounts.some(/** @param {{id: string}} account */ account => account.id !== 'environment') ? 'settings' : accounts.length ? 'env' : ''
     };
   },
   // Copilot's sign-in flow owns its pending state, so there is no pendingKey.
@@ -33,4 +34,4 @@ module.exports = {
     configuredKey: 'copilotApiTokenConfigured',
     sourceKey: 'copilotApiTokenSource'
   }
-};
+});

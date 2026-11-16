@@ -39,6 +39,7 @@
   }
   const settle = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   state.settings.reduceMotion = 'off'; state.settings.showLimitUsed = false;
+  document.documentElement.dataset.reduceMotion = 'off';
   const quota = record.windows[0];
   const publishQuota = (remaining, resetsAt) => {
     Object.assign(quota, { remainingPercent: remaining, usedPercent: 100 - remaining, resetsAt });
@@ -46,6 +47,16 @@
   };
   publishQuota(5, '2026-11-12T00:00:00Z');
   const quotaValue = limitRow.querySelector('[data-limit-motion-value]'), quotaFill = limitRow.querySelector('.limit-meter-fill');
+  await new Promise(resolve => setTimeout(resolve, 450));
+  limitRow.classList.add('is-history-active'); await settle();
+  const hover = quotaFill.getAnimations().find(animation => animation.transitionProperty === 'filter');
+  assert(hover, 'App quota hover really transitions');
+  hover.pause(); hover.currentTime = 40;
+  record.updatedAt = '2026-11-16T10:00:01Z';
+  renderLimits(); await settle();
+  assert(limitRow.querySelector('.limit-meter-fill') === quotaFill, 'App data refresh retains the hovered quota fill');
+  assert(hover.playState === 'paused' && hover.currentTime === 40, 'App data refresh preserves the hover timeline');
+  hover.finish(); limitRow.classList.remove('is-history-active');
   for (const switchMode of [false, true]) {
     publishQuota(100, switchMode ? '2026-11-14T00:00:00Z' : '2026-11-13T00:00:00Z'); await settle();
     assert(quotaFill.getAnimations().some(animation => !('animationName' in animation) && !('transitionProperty' in animation)), 'App refill really starts');

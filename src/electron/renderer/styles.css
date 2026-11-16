@@ -7222,6 +7222,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .settings-note.error {
   color: var(--red);
 }
+.settings-note.warning {
+  color: var(--orange);
+}
 .client-checkbox.disabled,
 .tool-preference-row.disabled .tool-preference-name {
   opacity: 0.5;

@@ -167,7 +167,7 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
 /* Hover is carried by the mark itself rather than a selection box: the focused
    ring thickens and glows in its own colour. */
 .edge-dock-cell.is-focused .edge-dock-ring-fill {
-  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--ring-color, var(--accent)) 55%, transparent));
+  filter: drop-shadow(0 0 3px var(--ring-glow-color));
 }
 
 .edge-dock-ring {

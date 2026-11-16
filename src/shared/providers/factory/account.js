@@ -1,7 +1,8 @@
+// @ts-check
 'use strict';
 
 // Factory Droid limits account wiring. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'factory',
   fetch: 'fetchFactoryLimits',
   fields: [
@@ -44,4 +45,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['app.factory.ai'], pathPrefixes: ['/settings/api-keys'] }
   ]
-};
+});

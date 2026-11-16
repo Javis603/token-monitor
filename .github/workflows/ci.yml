@@ -45,6 +45,7 @@ jobs:
           git diff --exit-code worker/src/shared \
             || { echo "::error::worker/src/shared is stale — run 'npm run sync:worker' and commit."; exit 1; }
       - run: npm run lint
+      - run: npm run typecheck
       - name: Run tests with coverage
         id: coverage
         if: runner.os == 'Linux' && matrix.node-version == '24'

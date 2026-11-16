@@ -58,12 +58,6 @@ const RING_RADIUS = 18.5;
 const RING_CIRCUMFERENCE = 2 * Math.PI * RING_RADIUS;
 const DRAG_THRESHOLD_PX = 4;
 const BREAKDOWN_VISIBLE_ROWS = 6;
-// Keep the phase anchor in sync with edge-dock-running-spin in dock.css.
-const RUNNING_SPIN_MS = 1400;
-// Match the waiting pulse in dock.css. Keep its entry clock across rail
-// rebuilds so usage pushes and live-status renewals preserve the breathing phase.
-const WAITING_PULSE_MS = 2400;
-const waitingRingStarts = new Map();
 
 const root = document.getElementById('edgeDockRoot');
 const query = new URLSearchParams(window.location.search);
@@ -736,20 +730,13 @@ if (surface === 'notch') {
 
 // ---- Rail ----------------------------------------------------------------
 
-function waitingRingStart(cellId, isWaiting) {
-  if (!isWaiting) {
-    waitingRingStarts.delete(cellId);
-    return null;
-  }
-  if (!waitingRingStarts.has(cellId)) {
-    waitingRingStarts.set(cellId, performance.now());
-  }
-  return waitingRingStarts.get(cellId);
-}
-
-function ringNode(remainingPercent, color, mark, waitingStartedAt = null) {
+function ringNode(remainingPercent, color, mark) {
   const ring = el('div', 'edge-dock-ring');
   ring.style.setProperty('--ring-color', color);
+  // Chromium interpolates color-mix() filter colours near black. Supply legacy
+  // RGBA so the hover shadow keeps the ring's colour throughout the transition.
+  const glowColor = color === 'var(--text)' ? getComputedStyle(document.documentElement).getPropertyValue('--text') : color;
+  ring.style.setProperty('--ring-glow-color', colorWithAlpha(glowColor, 0.55));
   const svg = document.createElementNS(SVG_NS, 'svg');
   svg.setAttribute('viewBox', '0 0 42 42');
   svg.setAttribute('aria-hidden', 'true');
@@ -782,22 +769,16 @@ function ringNode(remainingPercent, color, mark, waitingStartedAt = null) {
   waitingCircle.setAttribute('cy', '21');
   waitingCircle.setAttribute('r', '14');
   waiting.append(waitingCircle);
-  if (waitingStartedAt !== null) {
-    const elapsed = Math.max(0, performance.now() - waitingStartedAt);
-    waiting.style.animationDelay = `-${elapsed % WAITING_PULSE_MS}ms`;
-  }
   if (appearance().edgeDockRunningIndicatorEnabled === false) {
     ring.append(svg, mark, waiting);
     return ring;
   }
-  // A separate inner arc reports work without moving the quota reading. Rail
-  // pushes rebuild these nodes, so anchor rotation to the clock to avoid restarting
-  // the spinner each time new usage arrives.
+  // A separate inner arc reports work without moving the quota reading. The DOM
+  // is retained across pushes; let CSS keep its timeline without retiming it.
   const spinner = document.createElementNS(SVG_NS, 'svg');
   spinner.setAttribute('class', 'edge-dock-ring-spinner');
   spinner.setAttribute('viewBox', '0 0 42 42');
   spinner.setAttribute('aria-hidden', 'true');
-  spinner.style.animationDelay = `-${Date.now() % RUNNING_SPIN_MS}ms`;
   const arc = document.createElementNS(SVG_NS, 'circle');
   arc.setAttribute('cx', '21');
   arc.setAttribute('cy', '21');
@@ -855,7 +836,7 @@ function providerCellNode(cell) {
   value.dataset.severity = hasCreditsAmount && (severitySource === null || severitySource === undefined)
     ? 'ok'
     : displaySeverity(severitySource);
-  node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider), waitingRingStart(cell.id, waiting > 0)), value);
+  node.append(ringNode(cell.remainingPercent, color, markNode(cell.provider)), value);
   // The spinner is decorative and carries no text, so the state it announces is
   // spoken here instead, from the same reading it is drawn from.
   const spoken = [providerLabel(cell.provider), value.textContent];
@@ -1048,6 +1029,7 @@ function statCellNode(cell) {
 // constants.
 
 const ringResetMotions = new WeakMap();
+const ringArcAnimations = new WeakMap();
 const ringNumberAnimations = new Map();
 const RING_MOTION_EASING = limitResetAnimatorApi.EASING;
 const RING_GLOW_MS = limitResetAnimatorApi.GLOW_MS;
@@ -1068,7 +1050,9 @@ function captureRingResetMotion(scope = railNode) {
     // resumed motions are registered again by animateRingResets below.
     ringResetMotions.delete(circle);
     const ring = cell.querySelector('.edge-dock-ring');
-    for (const animation of circle?.getAnimations?.() || []) animation.cancel();
+    // Only retire our refill effect. CSS owns live quota and hover transitions.
+    ringArcAnimations.get(circle)?.cancel();
+    ringArcAnimations.delete(circle);
     for (const flare of ring?.querySelectorAll('.edge-dock-ring-complete') || []) {
       for (const animation of flare.getAnimations()) animation.cancel();
       flare.remove();
@@ -1088,7 +1072,8 @@ function captureRingResetMotion(scope = railNode) {
 // run, then lets go — the attribute already holds the target.
 function animateRingArc(circle, from, to, duration, startedAt) {
   if (!circle?.animate) return;
-  for (const animation of circle.getAnimations()) animation.cancel();
+  ringArcAnimations.get(circle)?.cancel();
+  ringArcAnimations.delete(circle);
   const fromOffset = RING_CIRCUMFERENCE * (1 - Math.max(0, Math.min(100, from)) / 100);
   const toOffset = RING_CIRCUMFERENCE * (1 - Math.max(0, Math.min(100, to)) / 100);
   if (Math.abs(toOffset - fromOffset) < 0.001) return;
@@ -1100,6 +1085,7 @@ function animateRingArc(circle, from, to, duration, startedAt) {
     easing: RING_MOTION_EASING,
     fill: 'backwards'
   });
+  ringArcAnimations.set(circle, animation);
   if (startedAt !== null) animation.startTime = startedAt;
 }
 
@@ -1349,10 +1335,6 @@ function renderRail(payload) {
     }
     nodes.push(node);
   });
-  const providerIds = new Set((payload.cells || []).filter((cell) => cell.kind === 'provider').map((cell) => cell.id));
-  for (const id of waitingRingStarts.keys()) {
-    if (!providerIds.has(id)) waitingRingStarts.delete(id);
-  }
   const retained = cardDom.reconcileChildren(railNode, nodes);
   const targets = [];
   (payload.cells || []).forEach((cell, index) => {
@@ -1538,8 +1520,30 @@ function stateMark(session, key, state) {
   // nothing about which session just moved. The flare is a one-shot animation
   // rather than an `infinite` pulse, matching the titlebar dot and the Sessions
   // list, so an open-but-idle card costs the compositor nothing.
-  if (state === 'running' && previous && next > previous) dot.classList.add('pulse');
+  if (state === 'running' && previous && next > previous) dot.dataset.activityPulse = String(next);
   return dot;
+}
+
+const sessionActivityPulses = new WeakMap();
+function animateSessionActivity(card) {
+  const pending = [];
+  for (const dot of card.querySelectorAll('.edge-dock-session-dot')) {
+    if (dot.dataset.state !== 'running' || prefersReducedMotion()) {
+      dot.classList.remove('pulse');
+      continue;
+    }
+    const activity = dot.dataset.activityPulse;
+    if (!activity || sessionActivityPulses.get(dot) === activity) continue;
+    sessionActivityPulses.set(dot, activity);
+    dot.classList.remove('pulse');
+    pending.push(dot);
+  }
+  // The class belongs to the live DOM, so unchanged pushes leave the pulse alone.
+  // Restart once per new write, including when the previous pulse is still running.
+  if (pending.length) {
+    void card.offsetWidth;
+    for (const dot of pending) dot.classList.add('pulse');
+  }
 }
 
 function sessionsNode(sessions) {
@@ -2072,6 +2076,7 @@ function commitCard(card, cellId) {
   const resetSnapshot = pendingResetSnapshots.get(card);
   pendingResetSnapshots.delete(card);
   if (previous !== card) contentLayer.replaceChildren(card);
+  animateSessionActivity(card);
   overflowText.refresh();
   cardResetAnimator.animate(card, resetSnapshot);
   animateCardSwitch(card, switchMotion);
@@ -2183,6 +2188,9 @@ function renderBubble(payload) {
     && previous?.dataset.breakdownMode === card.dataset.breakdownMode
     && previous?.dataset.reveal === card.dataset.reveal;
   card = cardDom.reconcile(sameCard ? previous : null, card);
+  // A retained card is already visible; do not lose its activity signal if a
+  // size acknowledgement renders the same reading again before commitCard.
+  if (card.parentNode === contentLayer) animateSessionActivity(card);
   pendingResetSnapshots.set(card, resetSnapshot);
   if (cell.kind !== 'plugin' && pluginContent?.hasTarget(`edgeDock.${cell.kind}.content`)) {
     pluginContent.render(`edgeDock.${cell.kind}.content`, card.querySelector(':scope > .plugin-native-content'),

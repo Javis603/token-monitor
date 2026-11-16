@@ -1,9 +1,11 @@
+// @ts-check
 'use strict';
 
 // Volcengine limits account wiring. Leaf module: no requires.
+/** @param {unknown} value */
 const normalizeVolcengineRegion = (value) => String(value || '').trim().toLowerCase();
 
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'volcengine',
   fetch: 'fetchVolcengineLimits',
   fields: [
@@ -76,4 +78,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['www.volcengine.com', 'console.volcengine.com'] }
   ]
-};
+});

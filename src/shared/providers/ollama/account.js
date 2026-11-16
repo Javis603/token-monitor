@@ -1,7 +1,8 @@
+// @ts-check
 'use strict';
 
 // Ollama limits account wiring. Leaf module: no requires.
-module.exports = {
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'ollama',
   fetch: 'fetchOllamaLimits',
   fields: [
@@ -91,4 +92,4 @@ module.exports = {
   urlPolicy: [
     { hosts: ['ollama.com', 'www.ollama.com'], exactPaths: ['/settings', '/settings/keys', '/signin'] }
   ]
-};
+});
