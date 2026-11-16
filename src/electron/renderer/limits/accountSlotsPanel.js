@@ -107,7 +107,8 @@
       return task;
     };
     const run = (operation, ...args) => {
-      if (operation === 'move' && dragSavePending) return;
+      // A keyboard/menu move during a live drag would race the drop's measured order.
+      if (operation === 'move' && (dragSavePending || rowDrag.isDragging())) return;
       if (operation !== 'move') return enqueue(() => ipc[operation](form.id, ...args));
       movesPending++;
       return enqueue(() => ipc[operation](form.id, ...args)).finally(() => { movesPending--; });

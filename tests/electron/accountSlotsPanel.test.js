@@ -1012,3 +1012,11 @@ for (const action of ['menu', 'Alt']) test(`a pending ${action} move blocks star
   assert.equal(h.listeners.has('pointermove'), true, 'dragging unlocks after the move settles');
   h.emit('pointercancel', 100); await h.flush();
 }));
+
+test('Alt+arrow during a live drag is ignored', () => withDrag(async h => {
+  h.panel.update(h.service.list('qoder').accounts, []); h.layout();
+  h.press('a'); h.emit('pointermove', 100);
+  await h.row('b').key('ArrowUp', true); await h.flush();
+  assert.equal(h.calls.filter(call => call[0] === 'move').length, 0);
+  h.emit('pointercancel', 100); await h.flush();
+}));
