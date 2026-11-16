@@ -60,8 +60,10 @@ for (const [from, to] of [['a', 'b'], ['b', 'a']]) {
   test(`GLM Team fetch ${from} to ${to} separates quota history while same-pool rotation keeps it`, async t => {
     const now = new Date(2026, 10, 17, 12).getTime();
     const old = await entry.fetchLimits(fixture.values(from), { env: {}, fetch: transport('zaiteam'), now: () => now - 300000 });
-    const history = createLimitsHistoryStore(path.join(directory(t), 'history.sqlite'), { now: () => now });
-    t.after(() => history.close());
+    // Close before removing: Windows cannot delete a directory holding an open database.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slots-regression-'));
+    const history = createLimitsHistoryStore(path.join(dir, 'history.sqlite'), { now: () => now });
+    t.after(async () => { await history.close(); fs.rmSync(dir, { recursive: true, force: true }); });
     await history.record('local', { providers: [old] });
     const fetch = async () => ({ ok: true, status: 200, json: async () => fixture.body() });
     // Persisted proof survives an offline edit of the slot's pair.
