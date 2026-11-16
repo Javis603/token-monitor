@@ -1602,17 +1602,6 @@ function preserveUntrackedClientUsage(existingRecord, incomingRecord, trackedCli
   }
 }
 
-function limitProviderMergeKey(provider) {
-  const name = String(provider?.provider || '').trim();
-  if (!name) return '';
-  if (GUI_SECRET_LIMIT_PROVIDERS.has(name) && name !== 'copilot') return name;
-  const accountKey = String(provider?.accountKey || '').trim();
-  if (accountKey) return `${name}:${accountKey}`;
-  const accountEmail = String(provider?.accountEmail || '').trim().toLowerCase();
-  if (accountEmail) return `${name}:email:${accountEmail}`;
-  return `${name}:${String(provider?.status || '').trim()}`;
-}
-
 function isConfiguredLimitProvider(provider) {
   return Boolean(provider?.accountKey && provider.status !== 'notConfigured' && provider.status !== 'disabled');
 }
@@ -1638,11 +1627,6 @@ function mergeDeviceLimits(existingRecord, incomingRecord) {
   const incomingLimits = normalizeLimitsSummary(incomingRecord?.limits);
   if (!incomingLimits.providers.length) return incomingLimits;
 
-  const existingByKey = new Map();
-  for (const provider of existingLimits.providers) {
-    const key = limitProviderMergeKey(provider);
-    if (key) existingByKey.set(key, provider);
-  }
   const retainedProviders = new Set();
   // An account the incoming summary reports itself is not restored beside it.
   const incomingAccounts = new Set(incomingLimits.providers.filter(provider => provider.accountKey)
@@ -1654,13 +1638,10 @@ function mergeDeviceLimits(existingRecord, incomingRecord) {
       const retained = existingLimits.providers.filter(existing => existing.provider === provider.provider
         && !incomingAccounts.has(`${existing.provider}:${existing.accountKey}`)
         && shouldKeepExistingGuiSecretProvider(existing, provider, existingRecord, incomingRecord));
-      if (retained.length) {
-        retainedProviders.add(provider.provider);
-        return retained;
-      }
+      if (!retained.length) return provider;
+      retainedProviders.add(provider.provider);
+      return retained;
     }
-    const existing = existingByKey.get(limitProviderMergeKey(provider));
-    if (shouldKeepExistingGuiSecretProvider(existing, provider, existingRecord, incomingRecord)) return existing;
     return provider;
   });
   // A credential-less runtime cannot revoke the signal for accounts it keeps.

@@ -138,3 +138,13 @@ test('an account the incoming summary reports itself is not restored beside it',
   assert.deepEqual(mergeDeviceRecord(existing, incoming).limits.providers.map(p => [p.accountKey, p.source]),
     [['A1', 'oauth'], ['A2', 'api']]);
 });
+
+test('a placeholder beside an incoming account does not restore that account through the provider lookup', () => {
+  const existing = { deviceId: 'a', agentRuntime: 'electron-widget', limits: { providers: [row('A1', { provider: 'minimax' })] } };
+  const incoming = { deviceId: 'a', agentRuntime: 'headless-agent', limits: { providers: [
+    row('A1', { provider: 'minimax', source: 'oauth' }),
+    row('', { provider: 'minimax', status: 'notConfigured', source: 'api' })
+  ] } };
+  assert.deepEqual(mergeDeviceRecord(existing, incoming).limits.providers.map(p => [p.accountKey, p.status, p.source]),
+    [['A1', 'ok', 'oauth'], ['', 'notConfigured', 'api']]);
+});
