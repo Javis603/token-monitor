@@ -4737,9 +4737,33 @@ function pluginLimitMetadata(id) {
 function desktopLimitProviders() {
   return [...LIMIT_PROVIDERS, ...(state.pluginCatalog?.limits?.modules || [])];
 }
+const accountSlotPanels = new Map();
+const accountSlotLists = {};
+let accountSlotListPending = false;
+function refreshAccountSlotPanels() {
+  for (const [id, panel] of accountSlotPanels) {
+    const form = limitAccountForm(id);
+    panel.update(accountSlotLists[id] || [], (localDeviceLimitsProviders() || []).filter(row => row.provider === id),
+      Boolean(state.settings?.[form.status.configuredKey]));
+  }
+  if (accountSlotListPending) return;
+  accountSlotListPending = true;
+  const previousSlotLists = JSON.stringify(accountSlotLists);
+  Promise.all([...accountSlotPanels.keys()].map(async id => {
+    const result = await window.tokenMonitor.limits.accountSlots.list(id);
+    if (result.ok) accountSlotLists[id] = result.accounts;
+  })).then(() => {
+    if (previousSlotLists !== JSON.stringify(accountSlotLists)) render();
+    for (const [id, panel] of accountSlotPanels) {
+      const form = limitAccountForm(id);
+      panel.update(accountSlotLists[id] || [], (localDeviceLimitsProviders() || []).filter(row => row.provider === id),
+        Boolean(state.settings?.[form.status.configuredKey]));
+    }
+  }).catch(() => {}).finally(() => { accountSlotListPending = false; });
+}
 function desktopLimitRecords() {
   const modules = new Map((state.pluginCatalog?.limits?.modules || []).map(module => [module.id, module]));
-  return [...(state.stats?.limits?.providers || []), ...(state.pluginCatalog?.limits?.providers || []).filter(row => modules.has(row.provider)).map(row => ({ ...row, pluginQuota: modules.get(row.provider) }))];
+  return window.TokenMonitorAccountSlotsPanel.applyAccountOrder([...(state.stats?.limits?.providers || []), ...(state.pluginCatalog?.limits?.providers || []).filter(row => modules.has(row.provider)).map(row => ({ ...row, pluginQuota: modules.get(row.provider) }))], accountSlotLists);
 }
 function desktopSurfaceStats() {
   return state.stats ? { ...state.stats, limits: { ...state.stats.limits, providers: desktopLimitRecords() }, pluginLimitModules: state.pluginCatalog?.limits?.modules || [] } : state.stats;
@@ -6826,6 +6850,7 @@ function homeLimitRows() {
     colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
+    orderedAccountProviders: Object.keys(accountSlotLists),
     accountPlan: (provider, index, providerEntries) => limitWindowsView.limitAccountPlan(provider, {
       grouped: providerEntries.length > 1
     }),
@@ -12377,6 +12402,7 @@ function renderLimitProviderCheckboxes() {
 }
 
 function renderLimitProviderCheckboxesNow() {
+  refreshAccountSlotPanels();
   const renderSignature = limitProviderSettingsRenderSignature();
   const { providers, matched } = limitProviderRows();
   // Same reasoning as the tracked-tools list: every provider keeps a row, and no
@@ -12861,6 +12887,22 @@ function setupLimitAccountPanels() {
       .map((provider) => limitProviderAccountGroup(provider.id))
       .find((group) => group?.parentElement === container);
     container.insertBefore(panel, nextGroup || null);
+    if (form.accountSlots) {
+      const details = panel.querySelector('.cursor-settings-details');
+      const defaultPanel = document.createElement('div');
+      defaultPanel.className = 'slot-default-form';
+      details.append(defaultPanel);
+      for (const child of [...details.children]) if (child !== defaultPanel) defaultPanel.moveBefore(child, null);
+      const slotsPanel = window.TokenMonitorAccountSlotsPanel.createPanel({
+        form, defaultPanel, label: LIMIT_PROVIDERS.find(provider => provider.id === form.id).label,
+        document, t, ipc: window.tokenMonitor.limits.accountSlots, forms: limitAccountPanelsApi,
+        preserveScroll: preserveSettingsPanelScroll, openExternal: url => window.tokenMonitor.openExternal(url),
+        confirm: message => window.confirm(message),
+        onChanged: slots => { accountSlotLists[form.id] = slots; render(); void refreshStats(); }
+      });
+      accountSlotPanels.set(form.id, slotsPanel);
+      panel.querySelector('.cursor-settings-details').prepend(slotsPanel.element);
+    }
     added = true;
     setExternalAccountExpanded(form.id, false);
     limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
@@ -17907,7 +17949,7 @@ function renderExternalProviderStatus(providerName) {
   if (providerName === 'zai' && !enabled && state.settings?.zcodeLoginDetected === true) {
     setCursorStatusText(statusEl, t('settings.limits.connection.autoDetect'));
   }
-  manualPanel.classList.toggle('hidden', linked);
+  manualPanel.classList.toggle('hidden', linked && !limitAccountForm(providerName)?.accountSlots);
   openBtn.classList.toggle('hidden', linked);
   if (providerName === 'claude') {
     const showForm = claudeWebFormOpen ?? (!(state.settings?.claudeManagedAccounts || []).length && !state.settings?.claudeWebLegacyCookieConfigured);

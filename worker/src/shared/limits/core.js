@@ -1144,6 +1144,7 @@ function syncLimits(limits) {
 module.exports = {
   DEFAULT_LIMITS_REFRESH_MS,
   aggregateLimits,
+  isProviderStale,
   mergeCodexTransientWindows,
   normalizeLimitProvider,
   normalizeLimitsSummary,

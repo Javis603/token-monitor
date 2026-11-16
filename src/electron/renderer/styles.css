@@ -9380,3 +9380,41 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .qoder-edition-controls { display: flex; align-items: center; gap: 4px; }
 .qoder-edition-controls button { flex: 0 0 22px; }
 .qoder-collection-settings > .settings-note { margin: 0; }
+
+/* Local account slots keep live controls mounted across provider redraws. */
+.slot-panel { margin-bottom: 14px; }
+.slot-list { border: 1px solid var(--border-color, #8883); border-radius: 12px; background: #88888808; }
+.slot-row { display: flex; align-items: center; gap: 10px; padding: 12px; border-bottom: 1px solid #8882; position: relative; }
+.slot-copy { flex: 1; min-width: 0; }
+.slot-name { font-size: 13px; overflow-wrap: anywhere; }
+.slot-updated { font-size: 11px; opacity: .5; margin-top: 4px; }
+.slot-status { flex: 0 0 112px; font-size: 11px; color: var(--text-secondary, #999); }
+.slot-connected { color: #71b79e; }
+.slot-invalid { color: #e57676; }
+.slot-stale { color: #c3a35b; }
+.slot-paused .slot-name { opacity: .45; }
+.slot-actions { display: flex; align-items: center; gap: 6px; }
+.slot-actions button, .slot-add { font: inherit; font-size: 11px; cursor: pointer; }
+.slot-actions > button { padding: 4px 6px; }
+.slot-menu { position: absolute; right: 10px; top: 36px; z-index: 20; min-width: 160px; padding: 5px; border-radius: 9px; background: var(--bg-card, #24272c); border: 1px solid #8885; box-shadow: 0 8px 24px #0004; }
+.slot-menu button { display: block; width: 100%; padding: 8px 12px; border: 0; text-align: left; background: transparent; color: inherit; }
+.slot-menu button:hover { background: #8882; }
+.slot-menu button:disabled { opacity: .3; }
+.slot-menu .slot-destructive { color: #e57676; }
+.slot-add { width: calc(100% - 16px); margin: 8px; padding: 10px; border: 1px dashed #8886; border-radius: 7px; background: transparent; color: var(--text-secondary, inherit); }
+.slot-rename { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; }
+.slot-editor { padding: 14px 0; }
+.slot-editor > strong { display: block; margin-bottom: 10px; }
+.slot-editor .cursor-account-group { border: 0; margin-top: 8px; }
+.slot-message:empty { display: none; }
+.slot-row { display: grid; grid-template-columns: minmax(0, 1fr) 108px 24px; gap: 5px 6px; }
+.slot-copy { grid-column: 1; grid-row: 1 / span 2; align-self: center; }
+.slot-status { grid-column: 2; grid-row: 1; white-space: nowrap; }
+.slot-actions { display: contents; }
+.slot-actions > button { background: transparent; border: 0; color: inherit; }
+.slot-actions > .slot-fix { grid-column: 2; grid-row: 2; font-size: 10px; padding: 0; text-align: left; color: #e57676; }
+.slot-actions > .slot-more { grid-column: 3; grid-row: 1 / span 2; padding: 4px 0; }
+
+.slot-default-settings { margin-top: 12px; }
+.slot-default-settings > summary { cursor: pointer; font-size: 12px; font-weight: 600; padding: 8px 0; }
+.slot-default-form { padding-top: 8px; }

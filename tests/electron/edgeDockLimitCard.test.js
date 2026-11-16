@@ -925,6 +925,7 @@ test('Home text and bars use the plan text rendered by Limits account rows', () 
           .filter((node) => node.classNames.has('limit-row') && node.children[1]?.classNames?.has('limit-windows'))
           .map((row) => row.children[0].find('limit-plan').textContent);
         const home = vm.runInNewContext(`${app.slice(start, end)}; homeLimitRows();`, {
+          accountSlotLists: {},
           state: { stats: { limits: { providers } }, settings },
           enabledLimitProviderSet: () => new Set([id]),
           hiddenHomeLimitProviderSet: () => new Set(),

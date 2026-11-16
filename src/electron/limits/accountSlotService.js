@@ -22,9 +22,11 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     return entry?.accountSlots ? entry : null;
   };
   const slots = (entry) => normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]);
-  const dto = (entry) => slots(entry).map(({ id, label, enabled, accountKey, createdAt, updatedAt }) => ({
-    id, label, enabled, fingerprint: accountKey ? accountValuesFingerprint({ accountKey }).slice(7, 19) : '', createdAt, updatedAt
-  }));
+  const dto = (entry) => slots(entry).map(({ id, label, enabled, accountKey, createdAt, updatedAt }) => {
+    const key = accountKey || hashKey(entry.id, 'account-slot', `slot:${id}`);
+    return { id, label, enabled, accountKey: key,
+      fingerprint: accountValuesFingerprint({ accountKey: key }).slice(7, 19), createdAt, updatedAt };
+  });
   const failure = (errorCode) => ({ ok: false, errorCode });
   // `refresh: false`: only local presentation changed (label, order), so the
   // runtime re-projects its rows without asking the provider again.

@@ -353,3 +353,13 @@ test('renaming and reordering re-project rows without asking the provider again'
   await h.service.remove('deepseek', id);
   assert.deepEqual(changes, [['deepseek', false], ['deepseek', false], ['deepseek', true], ['deepseek', true]]);
 });
+
+test('slot DTO supplies public matching keys and stable fingerprints before identity resolves', () => {
+  const h = harness();
+  h.settings = { ...h.settings, deepseekAccountSlots: [{ id: 'pending', enabled: true, values: { deepseekApiKey: 'SECRET-pending' } }] };
+  const [slot] = h.service.list('deepseek').accounts;
+  assert.match(slot.accountKey, /^sha256:[a-f0-9]{64}$/);
+  assert.match(slot.fingerprint, /^[a-f0-9]{12}$/);
+  assert.equal(JSON.stringify(slot).includes('SECRET'), false);
+  assert.deepEqual(Object.keys(slot).sort(), ['accountKey', 'createdAt', 'enabled', 'fingerprint', 'id', 'label', 'updatedAt']);
+});

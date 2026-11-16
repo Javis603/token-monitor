@@ -335,6 +335,7 @@ function limitAccountFormsForRenderer() {
     return [JSON.parse(JSON.stringify({
       id: entry.id,
       kind: form.kind,
+      ...(entry.accountSlots ? { accountSlots: true } : {}),
       titleKey: form.titleKey,
       openKey: form.openKey,
       clearKey: form.clearKey,
