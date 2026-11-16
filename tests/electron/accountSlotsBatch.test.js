@@ -240,3 +240,66 @@ test('Trae legacy migration preserves its key, token and device companion', asyn
   assert.equal(rows[0].accountKey, accountKey);
   assert.equal(rows[0].status, 'ok');
 });
+
+for (const deviceEnv of ['TRAE_DEVICE_ID', 'TOKEN_MONITOR_TRAE_DEVICE_ID']) {
+  test(`Trae migration captures ${deviceEnv} without persisting environment credentials`, async t => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slots-trae-env-device-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const store = new CredentialStore(dir);
+    store.replaceSettingsCredentials({ traeAccessToken: 'stored-token' });
+    const env = { [deviceEnv]: 'env-device', TRAE_COOKIE: 'env-cookie-secret', TRAE_ACCESS_TOKEN: 'env-token-secret' };
+    const seen = [];
+    const fetch = async (url, init) => {
+      assert.ok(url.endsWith('/ide_user_ent_usage'));
+      assert.equal(init.headers.Authorization, 'Cloud-IDE-JWT stored-token');
+      assert.equal(init.headers.Cookie, undefined);
+      seen.push(init.headers['X-Device-Id']);
+      return { ok: true, status: 200, json: async () => legacyTraeBody };
+    };
+    const entry = limitProviderEntry('trae');
+    assert.equal((await entry.fetchLimits({ traeAccessToken: 'stored-token' }, { env: { [deviceEnv]: 'env-device' }, fetch })).status, 'ok');
+    const migrated = migrateAccountSlots(store, {}, Date.now, env);
+    const rows = await LIMIT_PROVIDER_FETCHERS.trae(migrated, { env: {}, fetch });
+    assert.equal(rows[0].status, 'ok');
+    assert.deepEqual(seen, ['env-device', 'env-device']);
+    assert.deepEqual(migrated.traeAccountSlots[0].values, {
+      traeCookie: '', traeAccessToken: 'stored-token', traeDeviceId: 'env-device'
+    });
+    assert.ok(!JSON.stringify(store.readDocument()).includes('env-cookie-secret'));
+    assert.ok(!JSON.stringify(store.readDocument()).includes('env-token-secret'));
+    const override = new CredentialStore(path.join(dir, 'override'));
+    override.replaceSettingsCredentials({ traeAccessToken: 'stored-token', traeDeviceId: 'stored-device' });
+    assert.equal(migrateAccountSlots(override, {}, Date.now, env).traeAccountSlots[0].values.traeDeviceId, 'stored-device');
+  });
+}
+
+test('Devin slot editor prefills organization for token-only rotation and never exposes tokens', async () => {
+  const { accountForm, accountFieldProjection } = require('../../src/electron/limits/accountSettings');
+  let settings = {};
+  const seen = [];
+  const fetch = async (url, init) => {
+    assert.ok(url.includes('/api/org/a/billing/quota/usage'));
+    seen.push(init.headers);
+    return { ok: true, status: 200, json: async () => fixtures.devin.body() };
+  };
+  const service = createAccountSlotService({ getSettings: () => settings, env: {},
+    write: async patch => { settings = { ...settings, ...patch }; }, probeDeps: () => ({ fetch }) });
+  assert.equal((await service.add('devin', fixtures.devin.values('a'))).saved, true);
+  const slot = service.list('devin').accounts[0];
+  // Mirror the editor: secret inputs start empty, non-secret inputs use formValues.
+  const draft = Object.fromEntries(accountForm(limitProviderEntry('devin')).fields.map(field =>
+    [field.key, field.secret ? '' : slot.formValues[field.key] || '']));
+  draft.devinBearerToken = 'rotated-token';
+  const result = await service.replace('devin', slot.id, draft);
+  assert.equal(result.saved, true);
+  assert.deepEqual(settings.devinAccountSlots[0].values, { devinBearerToken: 'rotated-token', devinOrganization: 'org/a' });
+  assert.equal(seen.at(-1).Authorization, 'Bearer rotated-token');
+  assert.deepEqual(slot.formValues, { devinOrganization: 'org/a' });
+  assert.deepEqual(result.accounts[0].formValues, { devinOrganization: 'org/a' });
+  const serialized = JSON.stringify([slot, result.accounts]);
+  assert.ok(!serialized.includes('token-a'));
+  assert.ok(!serialized.includes('rotated-token'));
+  const projection = accountFieldProjection(fixtures.devin.values('a'), {});
+  assert.equal(projection.devinOrganization, 'org/a');
+  assert.equal(projection.devinBearerToken, 'set');
+});
