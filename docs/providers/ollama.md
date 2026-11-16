@@ -50,4 +50,4 @@ Saved accounts use the shared account-slot panel, with one credential lane per a
 
 ## Verification
 
-Run `node --test tests/shared/ollamaLimits.test.js tests/shared/ollamaCookieCredits.test.js tests/shared/limitBalanceDisplay.test.js tests/electron/edgeDockLimitCard.test.js tests/electron/homeOverview.test.js`.
+Run `node --test tests/shared/ollamaLimits.test.js tests/shared/ollamaCookieCredits.test.js tests/shared/limitBalanceDisplay.test.js tests/electron/edgeDockLimitCard.test.js tests/electron/homeOverview.test.js tests/electron/accountSlotsBatch.test.js`.

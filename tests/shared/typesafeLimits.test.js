@@ -246,5 +246,6 @@ test('TypeSafe billing discovery and rates belong to the normalized cookie', asy
     assert.equal(row.status, 'ok');
     assert.equal(row.balance.monthSpend, n === 'a' ? 0.01 : 0.02);
   }
-  assert.deepEqual(discoveries, ['a', 'b', 'a']);
+  // Each account keeps its own discovery, so alternating accounts never rescan the bundle.
+  assert.deepEqual(discoveries, ['a', 'b']);
 });
