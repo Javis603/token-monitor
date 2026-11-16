@@ -72,13 +72,13 @@ test('5 first failure provisional identity retires on resolution with callback a
 test('6 credential replacement aliases and removes the old identity', async () => {
   const d = deps(), fetch = fake((o) => reading(o.deepseekApiKey));
   await fetch(config(slot('x', { deepseekApiKey: 'old' })), d);
-  const rows = await fetch({ ...config(slot('x', { deepseekApiKey: 'new' })), previousLimits: { providers: [reading('old')] } }, d);
+  const rows = await fetch({ ...config(slot('x', { deepseekApiKey: 'new' }, { accountKey: 'new', accountKeyAliases: ['old'] })), previousLimits: { providers: [reading('old')] } }, d);
   assert.ok(rows[0].accountKeyAliases.includes('old'));
   assert.ok(rows.some((r) => r.removed && r.accountKey === 'old'));
 });
 test('7 duplicate resolved accounts keep only the first', async () => {
   const rows = live(await fake(() => reading('same'))(config(slot('a', undefined, { label: 'First' }), slot('b')), deps()));
-  assert.equal(rows.length, 1); assert.equal(rows[0].accountName, 'First');
+  assert.equal(rows.length, 1); assert.equal(rows[0].accountLabel, 'First');
 });
 test('a duplicate that answers wins over an earlier failed or unconfigured copy of the same account', async () => {
   for (const first of [slot('a', undefined, { accountKey: 'K' }), slot('missing', {}, { accountKey: 'K' })]) {
@@ -129,7 +129,7 @@ test('11 account scope matches aliases and defaults only when unclaimed', async 
   assert.deepEqual(seen, ['default']);
   // A default account already known under another key is not what an unmatched scope asked for.
   seen.length = 0;
-  const d = deps(); d.providerRuntimeState.set('account-slot:deepseek:default', { accountKey: 'DEFAULT', accountKeyAliases: [] });
+  const d = deps(); d.providerRuntimeState.set(`account-slot:deepseek:default:${require('../../src/shared/limits/accountSlots').accountValuesFingerprint({ deepseekApiKey: 'default', deepseekWebToken: '' })}`,  { accountKey: 'DEFAULT', accountKeyAliases: [] });
   assert.deepEqual(await fetch({ ...options, limitRefreshScope: { provider: 'deepseek', accountKey: 'unclaimed' } }, d), []);
   assert.deepEqual(seen, []);
 });
@@ -388,4 +388,22 @@ test('a slot keeps the shared data location but no credential from the environme
   // The environment key makes a default account, which keeps the whole environment.
   assert.equal(seen[0].DEEPSEEK_API_KEY, 'environment');
   assert.deepEqual(seen[1], { TOKEN_MONITOR_SHARED_DIR: '/data' });
+});
+
+test('zero slots with identity observer preserve raw results and last-good keyless failures', async () => {
+  const calls = [], d = { ...deps(), onAccountSlotResolved: (...args) => calls.push(args) };
+  for (const raw of [reading('REAL'), { provider: 'deepseek', status: 'notConfigured', windows: [] },
+    [{ ...reading('REAL'), accountKeyAliases: ['alias'] }, { provider: 'deepseek', accountKey: 'GONE', removed: true }]]) {
+    assert.equal(await fake(() => raw)({ deepseekApiKey: 'default', previousLimits: { providers: [reading('HELD')] } }, d), raw);
+  }
+  assert.equal(calls.length, 2); assert.equal(calls[0][1], 'default');
+  assert.equal(calls[0][3].deepseekApiKey, 'default');
+  let fail = false;
+  const runtime = createLimitsRuntime({ limitProviders: 'deepseek', deepseekApiKey: 'default' }, { ...d, autoStart: false, autoRetry: false, providerFetchers: { deepseek: fake(() => fail ? { provider: 'deepseek', status: 'unavailable' } : reading('REAL')) } });
+  try {
+    await runtime.refresh({}, 'settings-change'); fail = true;
+    await runtime.refresh({}, 'settings-change');
+    assert.equal(runtime.getSnapshot().providers[0].windows.length, 1);
+    assert.equal(runtime.getSnapshot().providers[0].accountKey, 'REAL');
+  } finally { runtime.stop(); }
 });

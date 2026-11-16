@@ -1,7 +1,7 @@
 // @ts-check
 'use strict';
 
-const { accountSlotField } = require('./accountSlots');
+const { defaultIdentityKey, accountSlotField } = require('./accountSlots');
 
 // The limits account registry index: one account declaration per catalog
 // provider, in catalog order. Each declaration lives in
@@ -105,6 +105,7 @@ const { accountSlotField } = require('./accountSlots');
  * @property {string} fetch Limits export called by the collector.
  * @property {AccountField[]} fields
  * @property {boolean} [accountSlots] Requires a form, no managed/profiles fields, credentials only from declared fields, no singleton credential write-back, and an audit of module-level state.
+ * @property {string} [serverAccountKey] Limits export testing whether a resolved key proves a server identity.
  * @property {boolean} [accountRefresh] Fetch honors account-scoped limitRefreshScope and returns only that row.
  * @property {AccountStatus} [status] Standard settings/env source and configured flag.
  * @property {(input: {settings: AccountValues, env: AccountValues, limits: AccountLimits, discovered?: any}) => AccountValues} [accountStatus] Replaces standard status with a flat projection map.
@@ -124,7 +125,7 @@ const { accountSlotField } = require('./accountSlots');
 // credentialStore, and an eager require here would be a cycle.
 /** @param {AccountDeclaration} account @param {() => AccountLimits} loadLimits */
 function registerProvider(account, loadLimits) {
-  return { ...account, fields: account.accountSlots ? [...account.fields, accountSlotField(account)] : account.fields, loadLimits };
+  return { ...account, fields: account.accountSlots ? [...account.fields, accountSlotField(account), { key: defaultIdentityKey(account), kind: 'setting', configDefault: {}, storePath: ['providers', account.id, 'defaultAccountIdentity'], persist: 'never', rendererOmit: true, watch: false, initial: null }] : account.fields, loadLimits };
 }
 
 const LIMIT_PROVIDER_ACCOUNTS = Object.freeze([

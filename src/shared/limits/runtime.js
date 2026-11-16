@@ -1,5 +1,8 @@
 'use strict';
 
+const { configuredMultiAccountProviders, normalizeAccountSlots, accountSlotKey } = require('./accountSlots');
+const { LIMIT_PROVIDER_REGISTRY } = require('./registry');
+
 const crypto = require('node:crypto');
 const {
   PROVIDER_CLEANUP_GRACE_MS,
@@ -364,6 +367,21 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
           });
       if (row) rows.push(row);
     }
+    const entry = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === provider && entry.accountSlots);
+    if (entry) {
+      const slots = normalizeAccountSlots(entry, config[accountSlotKey(entry)]).filter(slot => slot.enabled);
+      const owner = row => slots.find(slot => slot.accountKey === row.accountKey)
+        || slots.find(slot => slot.accountKeyAliases.includes(row.accountKey));
+      for (const row of rows) {
+        const slot = owner(row);
+        if (slot) {
+          // Labels are local metadata; changing them never replaces quota data.
+          if (slot.label) row.accountLabel = slot.label;
+          else delete row.accountLabel;
+        }
+      }
+      rows.sort((a, b) => slots.indexOf(owner(a)) - slots.indexOf(owner(b)));
+    }
     return rows;
   }
 
@@ -375,6 +393,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     snapshot = normalizeLimitsSummary({
       updatedAt: new Date(now()).toISOString(),
       refreshMs,
+      multiAccountProviders: enabled && !stopped ? configuredMultiAccountProviders(LIMIT_PROVIDER_REGISTRY, config, deps.env || process.env).filter(id => configuredProviders.has(id)) : [],
       providers
     });
     pruneAttemptedResetBoundaries(snapshot, attemptedResetBoundaries);
