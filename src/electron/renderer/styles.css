@@ -9436,3 +9436,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 :root[data-reduce-motion="on"] .slot-row { transition: none; }
 
 .slot-remote-note { max-width: 190px; padding: 6px 10px; white-space: normal; }
+.limit-provider-connection-sources .settings-item-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+}

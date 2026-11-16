@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const { LIMIT_PROVIDER_ACCOUNTS } = require('../../src/shared/limits/accounts');
 const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
 const { MESSAGES, translate } = require('../../src/electron/renderer/i18n');
-const { connectionTag } = require('../../src/electron/renderer/limits/providerPresentation');
+const presentation = require('../../src/electron/renderer/limits/providerPresentation');
 const { limitConnectionSourcesForRenderer, limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
 const app = fs.readFileSync('src/electron/renderer/app.js', 'utf8');
 
@@ -35,7 +35,7 @@ test('every provider declares ordered, localized display sources without credent
 test('headers derive exactly one connection tag regardless of reading state', () => {
   for (const id of LIMIT_PROVIDER_IDS) {
     const expression = app.slice(app.indexOf('    const tagInfos = pluginModule ?'), app.indexOf('    if (pluginModule) tagInfos.push'));
-    const tags = vm.runInNewContext(expression + '\ntagInfos;', { pluginModule: null, limitProviderPresentationApi: { connectionTag }, id, state: { settings: { limitConnectionSources: limitConnectionSourcesForRenderer() } } });
+    const tags = vm.runInNewContext(expression + '\ntagInfos;', { pluginModule: null, limitProviderPresentationApi: presentation, provider: { provider: id }, provenance: null, id, state: { settings: { limitConnectionSources: limitConnectionSourcesForRenderer() } } });
     assert.equal(tags.length, 1);
     const tag = tags[0];
     assert.equal(tag.kind, 'capability');
@@ -44,13 +44,13 @@ test('headers derive exactly one connection tag regardless of reading state', ()
     assert.doesNotMatch(tag.label, /Plan|Pay-as|Auto|Manual/);
   }
   const render = app.slice(app.indexOf('function renderLimitProviderCheckboxes('), app.indexOf('function limitProviderConnectionDetail('));
-  assert.match(render, /: \[limitProviderPresentationApi.connectionTag\(id,/);
+  assert.match(render, /limitProviderPresentationApi.connectionTag\(id,/);
   assert.ok(render.indexOf('optionsInner.append(limitProviderConnectionDetail') < render.indexOf('optionsInner.append(limitProviderSettingsList'));
 });
 
-function renderConnection(id, reading = {}) {
+function renderConnection(id, reading = {}, hasOpenControl = true) {
   const nodes = [];
-  const document = { createElement(tag) { const node = { tag, children: [], textContent: '', append(...children) { this.children.push(...children); }, addEventListener(event, callback) { this[event] = callback; } }; nodes.push(node); return node; } };
+  const document = { getElementById: () => hasOpenControl ? {} : null, createElement(tag) { const node = { tag, children: [], textContent: '', append(...children) { this.children.push(...children); }, addEventListener(event, callback) { this[event] = callback; } }; nodes.push(node); return node; } };
   const source = app.slice(app.indexOf('function limitProviderConnectionDetail('), app.indexOf('// Single entry point for the provider options'));
   const opened = [];
   const form = limitAccountFormsForRenderer().find(entry => entry.id === id);
@@ -64,16 +64,16 @@ function renderConnection(id, reading = {}) {
 
 test('alternative connection row uses existing provenance, never invents detection', () => {
   const { panel, nodes } = renderConnection('ollama', { source: 'api', status: 'ok' });
-  assert.equal(panel.className, 'settings-item');
+  assert.match(panel.className, /settings-item/);
   assert.ok(nodes.some(node => node.textContent === 'Auto · currently using API key'));
   assert.equal(nodes.filter(node => node.className === 'settings-item-desc').length, 3);
   const unknown = renderConnection('ollama', { source: 'api', status: 'unavailable' });
-  assert.ok(unknown.nodes.some(node => node.textContent === 'Auto'));
+  assert.ok(unknown.nodes.some(node => node.textContent === 'Auto · try sources in order'));
   assert.ok(!unknown.nodes.some(node => /currently using|not detected/i.test(node.textContent)));
 });
 
 test('single connection row reuses the form URL and existing link style', () => {
-  const { nodes, opened } = renderConnection('zed');
+  const { nodes, opened } = renderConnection('zed', {}, false);
   const link = nodes.find(node => node.tag === 'button');
   assert.equal(link.className, 'inline-link');
   assert.equal(link.textContent, 'Get from Zed ↗');
@@ -86,4 +86,61 @@ test('retired provider tag and connection tables stay unused', () => {
   for (const name of ['CAPABILITY_TAGS', 'PROVIDER_SOURCE_LABELS', 'LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS']) {
     assert.ok(!app.includes(name) && !presentation.includes(name), name);
   }
+});
+
+function headerTags(provider) {
+  const expression = app.slice(app.indexOf('    const tagInfos = pluginModule ?'), app.indexOf('    if (pluginModule) tagInfos.push'));
+  return vm.runInNewContext(expression + '\ntagInfos;', { pluginModule: null, limitProviderPresentationApi: presentation, provider, provenance: null, id: provider.provider, state: { settings: { limitConnectionSources: limitConnectionSourcesForRenderer() } } });
+}
+
+test('all provider headers retain state/action tags separately from the connection tag', () => {
+  for (const id of LIMIT_PROVIDER_IDS) {
+    for (const status of ['unauthorized', 'notConfigured', 'unavailable', 'rateLimited', 'sourceRateLimited', 'error', 'disabled', 'noSyncedData']) {
+      const provider = { provider: id, status };
+      assert.deepEqual(JSON.parse(JSON.stringify(headerTags(provider).filter(tag => tag.kind === 'status'))), presentation.limitProviderSettingsTags(provider).filter(tag => tag.kind === 'status'), `${id} ${status}`);
+    }
+  }
+  for (const [id, label] of [['opencode', 'Sign in again'], ['cline', 'Open Cline']]) {
+    const tags = { children: [], append(node) { this.children.push(node); } };
+    const source = app.slice(app.indexOf('    const tagInfos = pluginModule ?'), app.indexOf('    copy.append(nameLine, tags);'));
+    vm.runInNewContext(source, {
+      pluginModule: null, provider: { provider: id, status: 'unauthorized', source: 'oauth' },
+      provenance: null, id, isEnabled: true, accountGroup: {}, tags,
+      state: { settings: { limitConnectionSources: limitConnectionSourcesForRenderer() } },
+      limitProviderPresentationApi: presentation,
+      document: { createElement: () => ({ classList: { add() {} } }) },
+      translatedLimitProviderTag: tag => tag.label, translatedLimitCapabilityTag: label => label
+    });
+    assert.equal(tags.children.find(node => node.className.includes('tag-status'))?.textContent, label);
+    assert.equal(tags.children.filter(node => node.className.includes('tag-capability')).length, 1);
+  }
+  assert.equal(headerTags({ provider: 'opencode', status: 'unauthorized' })[0].label, 'Sign in again');
+  assert.equal(headerTags({ provider: 'cline', status: 'unauthorized', source: 'oauth' })[0].label, 'Open Cline');
+  for (const provider of [{ provider: 'antigravity', status: 'error', actionRequired: 'accountVerification' }, { provider: 'workbuddy', status: 'error', actionRequired: 'appSessionEncrypted' }]) {
+    assert.equal(headerTags(provider)[0].label, presentation.limitProviderStatusLabel(provider).label);
+  }
+});
+
+test('Grok retains its automatic-detection right-side pill without duplicating account summaries', () => {
+  const source = app.slice(app.indexOf('    // Multi-account providers use this space'), app.indexOf('    const settings = LIMIT_PROVIDER_SETTINGS[id];', app.indexOf('    // Multi-account providers use this space')));
+  const render = (accountGroup) => {
+    const actions = { children: [], append(node) { this.children.push(node); } };
+    vm.runInNewContext(source, { accountGroup, sources: LIMIT_PROVIDER_ACCOUNTS.find(entry => entry.id === 'grok').sources, document: { createElement: () => ({}) }, t: key => translate('zh-TW', key), actions });
+    return actions.children;
+  };
+  assert.equal(render(null)[0]?.textContent, '自動偵測');
+  assert.equal(render({}).length, 0);
+});
+
+test('connection get link is suppressed when the existing browser control is present', () => {
+  assert.equal(renderConnection('zed').nodes.filter(node => node.tag === 'button').length, 0);
+  assert.equal(renderConnection('zed', {}, false).nodes.filter(node => node.tag === 'button').length, 1);
+});
+
+test('all seven locales explain ordered fallback when the current source is unknown', () => {
+  const expected = ['Auto · try sources in order', '自動 · 依序嘗試來源', '自动 · 按顺序尝试来源', '자동 · 소스를 순서대로 시도', '自動 · ソースを順番に試行', 'Automático · probar fuentes en orden', 'Automático · tentar fontes em ordem'];
+  assert.deepEqual(Object.keys(MESSAGES).map(locale => translate(locale, 'settings.limits.sources.auto')), expected);
+  const { nodes } = renderConnection('ollama');
+  const title = nodes.find(node => node.className === 'settings-item-title');
+  assert.equal(title.children[0].textContent, expected[0]);
 });
