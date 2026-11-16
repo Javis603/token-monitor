@@ -533,3 +533,17 @@ test('a rename shows on the next reconfigure without another fetch', async () =>
     assert.equal(calls, before);
   } finally { runtime.stop(); }
 });
+
+test('a separated Qoder account cannot take the old identity back through a reported alias', async () => {
+  const { qoderCookie } = require('../../src/shared/providers/qoder/limits');
+  const values = { qoderCookie: 'token=four', qoderSite: 'global' };
+  const cookieHash = hashKey('qoder', qoderCookie({}, values));
+  const fetch = createAccountSlotFetcher({ ...limitProviderEntry('qoder'),
+    fetchLimits: () => ({ provider: 'qoder', status: 'ok', accountKey: 'B', accountKeyAliases: [cookieHash], updatedAt: new Date().toISOString(), windows: [] }) });
+  // Proven A, then an unproven answer moved the slot to its cookie hash, which now carries A's history.
+  const rows = await fetch({ qoderAccountSlots: [{ id: 'x', values, accountKey: cookieHash, accountKeyAliases: ['A'], serverIdentity: true }],
+    previousLimits: { providers: [{ provider: 'qoder', accountKey: cookieHash, status: 'ok', windows: [] }] } }, deps());
+  const row = rows.find((r) => r.accountKey === 'B');
+  assert.equal((row.accountKeyAliases || []).some((alias) => alias === cookieHash || alias === 'A'), false);
+  assert.ok(rows.some((r) => r.removed && r.accountKey === cookieHash));
+});

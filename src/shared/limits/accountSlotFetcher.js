@@ -230,7 +230,11 @@ function createAccountSlotFetcher(entry) {
         const separate = Boolean(moved && account.values && account.serverIdentity && provesServer
           && !account.accountKeyAliases.includes(accountKey)
           && provesServer(accountKey, account.values, row.accountKeyAliases || []));
-        const aliases = [...new Set([...(separate ? [] : account.accountKeyAliases), ...(row.accountKeyAliases || []), ...(moved && !separate ? [account.accountKey] : [])])]
+        // Separated, nothing of the previous identity may come back through the
+        // fetch's own aliases either (Qoder reports its cookie hash as one).
+        const previous = new Set(separate ? [account.accountKey, ...account.accountKeyAliases] : []);
+        const reported = (row.accountKeyAliases || []).filter((/** @type {string} */ alias) => !previous.has(alias));
+        const aliases = [...new Set([...(separate ? [] : account.accountKeyAliases), ...reported, ...(moved && !separate ? [account.accountKey] : [])])]
           .filter((alias) => !live.has(alias)).slice(-8);
         // Like retirement, a remembered identity only advances on a pass the
         // runtime can accept whole.
