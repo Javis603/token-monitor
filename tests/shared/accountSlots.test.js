@@ -72,7 +72,7 @@ test('5 first failure provisional identity retires on resolution with callback a
 test('6 credential replacement aliases and removes the old identity', async () => {
   const d = deps(), fetch = fake((o) => reading(o.deepseekApiKey));
   await fetch(config(slot('x', { deepseekApiKey: 'old' })), d);
-  const rows = await fetch({ ...config(slot('x', { deepseekApiKey: 'new' })), previousLimits: { providers: [reading('old')] } }, d);
+  const rows = await fetch({ ...config(slot('x', { deepseekApiKey: 'new' }, { accountKey: 'new', accountKeyAliases: ['old'] })), previousLimits: { providers: [reading('old')] } }, d);
   assert.ok(rows[0].accountKeyAliases.includes('old'));
   assert.ok(rows.some((r) => r.removed && r.accountKey === 'old'));
 });
@@ -129,7 +129,7 @@ test('11 account scope matches aliases and defaults only when unclaimed', async 
   assert.deepEqual(seen, ['default']);
   // A default account already known under another key is not what an unmatched scope asked for.
   seen.length = 0;
-  const d = deps(); d.providerRuntimeState.set('account-slot:deepseek:default', { accountKey: 'DEFAULT', accountKeyAliases: [] });
+  const d = deps(); d.providerRuntimeState.set(`account-slot:deepseek:default:${require('../../src/shared/limits/accountSlots').accountValuesFingerprint({ deepseekApiKey: 'default', deepseekWebToken: '' })}`,  { accountKey: 'DEFAULT', accountKeyAliases: [] });
   assert.deepEqual(await fetch({ ...options, limitRefreshScope: { provider: 'deepseek', accountKey: 'unclaimed' } }, d), []);
   assert.deepEqual(seen, []);
 });
@@ -388,4 +388,162 @@ test('a slot keeps the shared data location but no credential from the environme
   // The environment key makes a default account, which keeps the whole environment.
   assert.equal(seen[0].DEEPSEEK_API_KEY, 'environment');
   assert.deepEqual(seen[1], { TOKEN_MONITOR_SHARED_DIR: '/data' });
+});
+
+test('zero slots with identity observer preserve raw results and last-good keyless failures', async () => {
+  const calls = [], d = { ...deps(), onAccountSlotResolved: (...args) => calls.push(args) };
+  for (const raw of [reading('REAL'), { provider: 'deepseek', status: 'notConfigured', windows: [] },
+    [{ ...reading('REAL'), accountKeyAliases: ['alias'] }, { provider: 'deepseek', accountKey: 'GONE', removed: true }]]) {
+    assert.equal(await fake(() => raw)({ deepseekApiKey: 'default', previousLimits: { providers: [reading('HELD')] } }, d), raw);
+  }
+  assert.equal(calls.length, 2); assert.equal(calls[0][1], null);
+  assert.equal(calls[0][3].deepseekApiKey, 'default');
+  let fail = false;
+  const runtime = createLimitsRuntime({ limitProviders: 'deepseek', deepseekApiKey: 'default' }, { ...d, autoStart: false, autoRetry: false, providerFetchers: { deepseek: fake(() => fail ? { provider: 'deepseek', status: 'unavailable' } : reading('REAL')) } });
+  try {
+    await runtime.refresh({}, 'settings-change'); fail = true;
+    await runtime.refresh({}, 'settings-change');
+    assert.equal(runtime.getSnapshot().providers[0].windows.length, 1);
+    assert.equal(runtime.getSnapshot().providers[0].accountKey, 'REAL');
+  } finally { runtime.stop(); }
+});
+
+test('a slot name never replaces the provider label that carries the plan', async () => {
+  const fetch = fake((o) => ({ ...reading(o.deepseekApiKey.toUpperCase()), accountLabel: 'Pro' }));
+  const rows = live(await fetch(config(slot('a', undefined, { label: 'Work' }), slot('b')), deps()));
+  assert.deepEqual(rows.map((r) => [r.accountKey, r.accountLabel, r.accountName || '']), [['A', 'Pro', 'Work'], ['B', 'Pro', '']]);
+  const runtime = runtimeFor(fetch, config(slot('a', undefined, { label: 'Work', accountKey: 'A' }), slot('b', undefined, { accountKey: 'B' })));
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    assert.deepEqual(runtime.getSnapshot().providers.map((r) => [r.accountKey, r.accountLabel, r.accountName || '']), [['A', 'Pro', 'Work'], ['B', 'Pro', '']]);
+  } finally { runtime.stop(); }
+});
+
+test('emptying a slot name removes it from retained readings too', async () => {
+  let offline = false;
+  const fetch = fake((o) => offline ? { provider: 'deepseek', status: 'unavailable' } : { ...reading(o.deepseekApiKey.toUpperCase()), accountLabel: 'Pro' });
+  const runtime = runtimeFor(fetch, config(slot('a', undefined, { label: 'Work', accountKey: 'A' })));
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    assert.equal(runtime.getSnapshot().providers[0].accountName, 'Work');
+    offline = true;
+    runtime.reconfigure({ limitProviders: ['deepseek'], ...config(slot('a', undefined, { label: '', accountKey: 'A' })) });
+    await runtime.refresh({}, 'settings-change');
+    const [row] = runtime.getSnapshot().providers;
+    assert.ok(!row.accountName);
+    assert.equal(row.accountLabel, 'Pro');
+    assert.equal(row.windows.length, 1);
+  } finally { runtime.stop(); }
+});
+
+test('every declared serverAccountKey names a predicate its limits module exports', () => {
+  const { LIMIT_PROVIDER_REGISTRY } = require('../../src/shared/limits/registry');
+  const declared = LIMIT_PROVIDER_REGISTRY.filter((entry) => entry.serverAccountKey);
+  assert.ok(declared.some((entry) => entry.id === 'qoder'));
+  for (const entry of declared) assert.equal(typeof entry.limits[entry.serverAccountKey], 'function', entry.id);
+});
+
+test('a key a slot moved away from stays with the default account that answers under it', async () => {
+  const fetch = fake((o) => reading(o.deepseekApiKey === 'a' ? 'A' : 'B'));
+  const { accountValuesFingerprint } = require('../../src/shared/limits/accountSlots');
+  const fingerprint = accountValuesFingerprint({ deepseekApiKey: 'a', deepseekWebToken: '' });
+  const runtime = runtimeFor(fetch, { deepseekApiKey: 'a', deepseekDefaultAccountIdentity: { accountKey: 'A', accountKeyAliases: [], fingerprint },
+    ...config(slot('x', { deepseekApiKey: 'b' }, { label: 'Work', accountKey: 'B', accountKeyAliases: ['A'] })) });
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    assert.deepEqual(runtime.getSnapshot().providers.map((r) => [r.accountKey, r.accountName || '']), [['A', ''], ['B', 'Work']]);
+  } finally { runtime.stop(); }
+});
+
+test('a default identity left by an older default credential does not take a slot alias', async () => {
+  // Slot y answers under the key it moved away from, which the stale default identity also names.
+  const fetch = fake((o) => reading({ x: 'X', y: 'A' }[o.deepseekApiKey] || 'NEWDEFAULT'));
+  const runtime = runtimeFor(fetch, { deepseekApiKey: 'changed', deepseekDefaultAccountIdentity: { accountKey: 'A', accountKeyAliases: [], fingerprint: 'stale' },
+    ...config(slot('x', { deepseekApiKey: 'x' }, { accountKey: 'X' }), slot('y', { deepseekApiKey: 'y' }, { accountKey: 'B', accountKeyAliases: ['A'] })) });
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    assert.deepEqual(runtime.getSnapshot().providers.map((r) => r.accountKey), ['NEWDEFAULT', 'X', 'A']);
+  } finally { runtime.stop(); }
+});
+
+test('a slot that turns out to be a different proven Qoder account takes nothing of the old one', async () => {
+  const { qoderCookie } = require('../../src/shared/providers/qoder/limits');
+  const values = { qoderCookie: 'token=two', qoderSite: 'global' };
+  const cookieHash = hashKey('qoder', qoderCookie({}, values));
+  const qoder = (fetchLimits) => createAccountSlotFetcher({ ...limitProviderEntry('qoder'), fetchLimits });
+  const answer = () => ({ provider: 'qoder', status: 'ok', accountKey: 'B', accountKeyAliases: [cookieHash], updatedAt: new Date().toISOString(), windows: [] });
+  for (const serverIdentity of [true, false]) {
+    const resolved = [];
+    const rows = await qoder(answer)({ qoderAccountSlots: [{ id: 'x', values, accountKey: 'A', accountKeyAliases: ['OLDER'], serverIdentity }],
+      previousLimits: { providers: [{ provider: 'qoder', accountKey: 'A', status: 'ok', windows: [] }] } },
+    { ...deps(), onAccountSlotResolved: (...args) => resolved.push(args) });
+    const row = rows.find((r) => r.accountKey === 'B');
+    const inherited = (row.accountKeyAliases || []).includes('A');
+    // A proven different account is separate; an unproven one keeps the old key as before.
+    assert.equal(inherited, !serverIdentity);
+    assert.equal((row.accountKeyAliases || []).includes('OLDER'), !serverIdentity);
+    assert.equal(resolved[0][2].accountKeyAliases.includes('A'), !serverIdentity);
+    assert.ok(rows.some((r) => r.removed && r.accountKey === 'A'));
+  }
+});
+
+test('a default identity this runtime just resolved is not claimed by a slot alias', async () => {
+  const fetch = fake((o) => reading(o.deepseekApiKey === 'b' ? 'B' : 'A'));
+  // No stored default identity yet: the runtime has only just resolved it.
+  const runtime = runtimeFor(fetch, { deepseekApiKey: 'a', ...config(slot('y', { deepseekApiKey: 'b' }, { label: 'Work', accountKey: 'B', accountKeyAliases: ['A'] })) });
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    await runtime.refresh({}, 'credential-edit');
+    assert.deepEqual(runtime.getSnapshot().providers.map((r) => [r.accountKey, r.accountName || '']), [['A', ''], ['B', 'Work']]);
+  } finally { runtime.stop(); }
+});
+
+test('a proven Qoder slot that answered once without a user id still separates a different proven account', async () => {
+  const { qoderCookie } = require('../../src/shared/providers/qoder/limits');
+  const values = { qoderCookie: 'token=three', qoderSite: 'global' };
+  const cookieHash = hashKey('qoder', qoderCookie({}, values));
+  const fetch = createAccountSlotFetcher({ ...limitProviderEntry('qoder'),
+    fetchLimits: () => ({ provider: 'qoder', status: 'ok', accountKey: 'B', accountKeyAliases: [cookieHash], updatedAt: new Date().toISOString(), windows: [] }) });
+  // Proven A, then an unproven cookie-hash answer C aliased A; the proof is kept.
+  const rows = await fetch({ qoderAccountSlots: [{ id: 'x', values, accountKey: 'C', accountKeyAliases: ['A'], serverIdentity: true }],
+    previousLimits: { providers: [{ provider: 'qoder', accountKey: 'C', status: 'ok', windows: [] }] } }, deps());
+  const row = rows.find((r) => r.accountKey === 'B');
+  assert.equal((row.accountKeyAliases || []).some((alias) => alias === 'A' || alias === 'C'), false);
+  assert.ok(rows.some((r) => r.removed && r.accountKey === 'C'));
+});
+
+test('a proven Qoder slot answering under a key it has been before stays the same account', async () => {
+  const { qoderCookie } = require('../../src/shared/providers/qoder/limits');
+  const values = { qoderCookie: 'token=one', qoderSite: 'global' };
+  const cookieHash = hashKey('qoder', qoderCookie({}, values));
+  const fetch = createAccountSlotFetcher({ ...limitProviderEntry('qoder'),
+    fetchLimits: () => ({ provider: 'qoder', status: 'ok', accountKey: 'A', accountKeyAliases: [cookieHash], updatedAt: new Date().toISOString(), windows: [] }) });
+  const rows = await fetch({ qoderAccountSlots: [{ id: 'x', values, accountKey: 'C', accountKeyAliases: ['A'], serverIdentity: true }] }, deps());
+  assert.ok(rows.find((r) => r.accountKey === 'A').accountKeyAliases.includes('C'));
+});
+
+test('a rename shows on the next reconfigure without another fetch', async () => {
+  let calls = 0;
+  const runtime = runtimeFor(fake((o) => { calls += 1; return reading(o.deepseekApiKey.toUpperCase()); }), config(slot('a', undefined, { label: 'Old', accountKey: 'A' })));
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    const before = calls;
+    runtime.reconfigure({ limitProviders: ['deepseek'], ...config(slot('a', undefined, { label: 'New', accountKey: 'A' })) });
+    assert.equal(runtime.getSnapshot().providers[0].accountName, 'New');
+    assert.equal(calls, before);
+  } finally { runtime.stop(); }
+});
+
+test('a separated Qoder account cannot take the old identity back through a reported alias', async () => {
+  const { qoderCookie } = require('../../src/shared/providers/qoder/limits');
+  const values = { qoderCookie: 'token=four', qoderSite: 'global' };
+  const cookieHash = hashKey('qoder', qoderCookie({}, values));
+  const fetch = createAccountSlotFetcher({ ...limitProviderEntry('qoder'),
+    fetchLimits: () => ({ provider: 'qoder', status: 'ok', accountKey: 'B', accountKeyAliases: [cookieHash], updatedAt: new Date().toISOString(), windows: [] }) });
+  // Proven A, then an unproven answer moved the slot to its cookie hash, which now carries A's history.
+  const rows = await fetch({ qoderAccountSlots: [{ id: 'x', values, accountKey: cookieHash, accountKeyAliases: ['A'], serverIdentity: true }],
+    previousLimits: { providers: [{ provider: 'qoder', accountKey: cookieHash, status: 'ok', windows: [] }] } }, deps());
+  const row = rows.find((r) => r.accountKey === 'B');
+  assert.equal((row.accountKeyAliases || []).some((alias) => alias === cookieHash || alias === 'A'), false);
+  assert.ok(rows.some((r) => r.removed && r.accountKey === cookieHash));
 });

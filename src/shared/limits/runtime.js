@@ -1,5 +1,8 @@
 'use strict';
 
+const { configuredMultiAccountProviders, normalizeAccountSlots, accountSlotKey, defaultIdentityKey, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
+const { LIMIT_PROVIDER_REGISTRY } = require('./registry');
+
 const crypto = require('node:crypto');
 const {
   PROVIDER_CLEANUP_GRACE_MS,
@@ -364,6 +367,33 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
           });
       if (row) rows.push(row);
     }
+    const entry = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === provider && entry.accountSlots);
+    if (entry) {
+      const slots = normalizeAccountSlots(entry, config[accountSlotKey(entry)]).filter(slot => slot.enabled);
+      // An alias names a key a slot moved away from. The default account, or
+      // another slot, may answer under it now, and then the row is theirs.
+      // Only while it still belongs to the current default credential, as in the fetcher.
+      // What this runtime resolved for the current default credential wins over the
+      // stored copy, which is only written back to the config on the next reconfigure.
+      const defaultFingerprint = accountValuesFingerprint(defaultAccountValues(entry, config, deps.env || process.env));
+      const storedDefault = config[defaultIdentityKey(entry)];
+      const defaultKey = providerRuntimeState.get(`account-slot:${entry.id}:default:${defaultFingerprint}`)?.accountKey
+        || (storedDefault?.fingerprint === defaultFingerprint ? storedDefault.accountKey || '' : '');
+      const owner = row => slots.find(slot => slot.accountKey === row.accountKey)
+        || (row.accountKey === defaultKey ? undefined : slots.find(slot => slot.accountKeyAliases.includes(row.accountKey)));
+      for (const row of rows) {
+        const slot = owner(row);
+        if (slot) {
+          // Labels are local metadata; changing them never replaces quota data.
+          // A slot's local name is its accountName, also while a retained
+          // reading answers for it; the provider's accountLabel (Qoder's plan)
+          // is never touched.
+          if (slot.label) row.accountName = slot.label;
+          else delete row.accountName;
+        }
+      }
+      rows.sort((a, b) => slots.indexOf(owner(a)) - slots.indexOf(owner(b)));
+    }
     return rows;
   }
 
@@ -375,6 +405,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     snapshot = normalizeLimitsSummary({
       updatedAt: new Date(now()).toISOString(),
       refreshMs,
+      multiAccountProviders: enabled && !stopped ? configuredMultiAccountProviders(LIMIT_PROVIDER_REGISTRY, config, deps.env || process.env).filter(id => configuredProviders.has(id)) : [],
       providers
     });
     pruneAttemptedResetBoundaries(snapshot, attemptedResetBoundaries);

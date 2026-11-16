@@ -203,6 +203,8 @@ const {
   redactThirdPartyProfilesForRenderer,
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
+const { createAccountSlotService, invalidateAccountSlotChange } = require('./limits/accountSlotService');
+let accountSlotService;
 const { createCredentialCommands } = require('./limits/credentialCommands');
 const { createCopilotAccounts } = require('./providers/copilot/accounts');
 const copilotLimits = require('../shared/providers/copilot/limits');
@@ -1081,6 +1083,7 @@ function electronLimitsDeps() {
         json: () => result.json()
       };
     },
+    onAccountSlotResolved: (...args) => { void accountSlotService?.resolved(...args).catch(() => {}); },
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
     onClaudeWebAccountResolved: (observation) => claudeAccountService().resolved(observation),
@@ -8390,6 +8393,28 @@ app.whenReady().then(() => {
     applySettingsPatch: applyCredentialSettingsPatch,
     probeDeps: credentialProbeDeps
   });
+  accountSlotService = createAccountSlotService({
+    getSettings: () => settings,
+    write: (patch) => {
+      settings = { ...settings, ...patch };
+      saveSettings({ throwOnError: true });
+    },
+    probeDeps: credentialProbeDeps,
+    onChanged: (provider, change) => {
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      // A rename or reorder is re-projected by the reconfigure above; asking the
+      // provider again would only spend its rate limit.
+      if (change?.refresh === false) return;
+      if (deviceRuntimeHandle) return invalidateAccountSlotChange(deviceRuntimeHandle, provider, change);
+      // No runtime yet: the retired accounts are cleared once one starts.
+      for (const accountKey of change?.retiredAccountKeys || []) {
+        void queueLimitInvalidation({ provider, accountKey }, 'settings-change', { clear: true, refresh: false });
+      }
+    }
+  });
+  for (const operation of ['list', 'add', 'replace', 'rename', 'setEnabled', 'remove', 'move']) {
+    ipcMain.handle(`limits:accountSlots:${operation}`, (_event, ...args) => accountSlotService[operation](...args));
+  }
   // Resolves only once a worker-hosted transform runs with the saved settings:
   // pausing the session archive must not be reported done while the worker can
   // still capture under the old value.

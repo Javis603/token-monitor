@@ -5,6 +5,7 @@
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'qoder',
   accountSlots: true,
+  serverAccountKey: 'isQoderServerAccountKey',
   fetch: 'fetchQoderLimits',
   fields: [
     {
