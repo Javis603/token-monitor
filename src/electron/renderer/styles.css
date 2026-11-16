@@ -9394,6 +9394,10 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .slot-paused .slot-name { color: var(--muted); }
 .slot-fix.plugin-inline-action { display: block; margin-top: 4px; padding: 2px 0; color: var(--red); text-align: left; }
 .plugin-menu button.menu-destructive { color: var(--red); }
+/* Armed removal reads as a different state, not just the same red item: the
+   tint matches the app's other inline remove confirmations. */
+.plugin-menu button.menu-destructive.confirming { color: var(--red); background: rgba(255, 91, 91, 0.12); font-weight: 600; }
+.plugin-menu button.menu-destructive.confirming:hover, .plugin-menu button.menu-destructive.confirming:focus-visible { color: var(--red); background: rgba(255, 91, 91, 0.2); }
 .plugin-menu button:disabled { opacity: .35; cursor: default; }
 .action-menu-separator { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
 .slot-add { display: block; width: calc(100% - 24px); margin: 10px 12px; padding: 9px 6px; border: 1px dashed var(--line); border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: .6875rem; cursor: pointer; }

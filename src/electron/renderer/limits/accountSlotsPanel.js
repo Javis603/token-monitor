@@ -37,7 +37,7 @@
     return result;
   }
 
-  function createPanel({ form, label, document, t, ipc, forms, preserveScroll, onChanged, openExternal, confirm }) {
+  function createPanel({ form, label, document, t, ipc, forms, preserveScroll, onChanged, openExternal }) {
     const make = (tag, className = '', text) => {
       const el = document.createElement(tag);
       el.className = className;
@@ -215,11 +215,31 @@
         const up = action('up', () => run('move', id, 'up'));
         const down = action('down', () => run('move', id, 'down'));
         const pause = action('pause', () => run('setEnabled', id, !item.slot.enabled));
-        const remove = action('remove', () => { if (confirm(tr('confirmRemove'))) return run('remove', id); });
+        let confirmingRemove = false;
+        const updateRemove = () => {
+          localized(remove, `settings.slots.${confirmingRemove ? 'confirmRemove' : 'remove'}`);
+          remove.dataset.i18nAriaLabel = remove.dataset.i18n;
+          remove.setAttribute('aria-label', remove.textContent);
+          remove.classList.toggle('confirming', confirmingRemove);
+        };
+        const remove = slotButton('remove', () => {
+          if (!confirmingRemove) {
+            confirmingRemove = true;
+            updateRemove();
+            remove.focus({ preventScroll: true });
+            return;
+          }
+          closeMenu();
+          return run('remove', id);
+        });
+        menu.addEventListener('beforetoggle', event => {
+          if (event.newState === 'closed') { confirmingRemove = false; updateRemove(); }
+        });
+        item.updateRemove = updateRemove;
         remove.className = 'menu-destructive';
         const separator = () => { const node = make('hr', 'action-menu-separator'); node.setAttribute('role', 'separator'); return node; };
         const replace = action(cookie ? 'replaceCookie' : 'replaceKey', () => openEditor(item.slot));
-        menu.append(action('rename', rename), replace, pause, separator(), up, down, separator(), remove);
+        shared.appendItems(action('rename', rename), replace, pause, separator(), up, down, separator(), remove);
         const fix = slotButton(cookie ? 'fixCookie' : 'fixKey', () => openEditor(item.slot));
         fix.className = 'slot-fix plugin-inline-action';
         copy.append(fix);
@@ -260,6 +280,7 @@
         item.status.className = `slot-status slot-${status}`;
         item.status.textContent = `● ${tr(status === 'invalid' ? (cookie ? 'invalidCookie' : 'invalidKey') : status)}`;
         if (item.pause) {
+          item.updateRemove();
           localized(item.pause, `settings.slots.${slot.enabled ? 'pause' : 'resume'}`);
           item.up.disabled = index === 0;
           item.down.disabled = index === active.length - 1;

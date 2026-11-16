@@ -283,10 +283,10 @@
     function actionMenu(label, entries, leadingControl = null) {
       const menu = actionMenuApi.create(document, label, button);
       if (leadingControl) {
-        menu.popover.append(leadingControl);
-        const automatic = autoUpdateControl(); if (automatic) menu.popover.append(automatic);
+        menu.appendItems(leadingControl);
+        const automatic = autoUpdateControl(); if (automatic) menu.appendItems(automatic);
       }
-      for (const [text, action] of entries) menu.popover.append(button(text, () => { menu.close(); action(); }));
+      for (const [text, action] of entries) menu.appendItems(button(text, () => { menu.close(); action(); }));
       return menu.element;
     }
 

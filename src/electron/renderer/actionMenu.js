@@ -13,8 +13,11 @@
     /** @param {Document} document @param {string} tag @param {string} className */
     const el = (document, tag, className) => { const node = document.createElement(tag); node.className = className; return node; };
     const wrap = el(document, 'div', 'plugin-menu-wrap');
-    const popover = el(document, 'div', 'plugin-menu'); popover.id = `action-menu-${++menuId}`; popover.setAttribute('popover', 'auto');
+    const popover = el(document, 'div', 'plugin-menu'); popover.id = `action-menu-${++menuId}`; popover.setAttribute('popover', 'auto'); popover.setAttribute('role', 'menu');
     const trigger = button('', () => {}, 'plugin-more'); trigger.setAttribute('aria-label', label);
+    trigger.id = `${popover.id}-trigger`;
+    trigger.setAttribute('aria-haspopup', 'menu');
+    popover.setAttribute('aria-labelledby', trigger.id);
     const icon = el(document, 'span', 'plugin-more-icon'); icon.setAttribute('aria-hidden', 'true'); trigger.append(icon);
     trigger.setAttribute('popovertarget', popover.id); trigger.setAttribute('aria-controls', popover.id); trigger.setAttribute('aria-expanded', 'false');
     let keyboardOpen = false, focusLast = false;
@@ -60,7 +63,15 @@
 
     const close = () => { popover.hidePopover(); trigger.focus({ preventScroll: true }); };
     wrap.append(trigger, popover);
-    return { element: wrap, trigger, popover, position, close };
+    // Only direct action buttons become menuitems; embedded switch/checkbox rows keep their semantics.
+    /** @param {...HTMLElement} items */
+    const appendItems = (...items) => {
+      for (const item of items) {
+        if (item.tagName.toLowerCase() === 'button' && !item.hasAttribute('role')) item.setAttribute('role', 'menuitem');
+        popover.append(item);
+      }
+    };
+    return { element: wrap, trigger, popover, position, close, appendItems };
   }
   return { create };
 });

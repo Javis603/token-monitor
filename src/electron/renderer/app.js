@@ -12894,7 +12894,6 @@ function setupLimitAccountPanels() {
         form, label: LIMIT_PROVIDERS.find(provider => provider.id === form.id).label,
         document, t, ipc: window.tokenMonitor.limits.accountSlots, forms: limitAccountPanelsApi,
         preserveScroll: preserveSettingsPanelScroll, openExternal: url => window.tokenMonitor.openExternal(url),
-        confirm: message => window.confirm(message),
         onChanged: slots => { accountSlotLists[form.id] = slots; render(); void refreshStats(); }
       });
       accountSlotPanels.set(form.id, slotsPanel);

@@ -26,8 +26,9 @@ class Node {
   contains(node) { return [...this.walk()].includes(node); }
   showPopover() { this.popoverOpen = true; this.listeners.beforetoggle?.({ newState: 'open' }); this.listeners.toggle?.({ newState: 'open' }); }
   hidePopover() { this.popoverOpen = false; this.listeners.beforetoggle?.({ newState: 'closed' }); this.listeners.toggle?.({ newState: 'closed' }); }
+  hasAttribute(key) { return Object.hasOwn(this.attributes, key); }
   setAttribute(key, value) { this.attributes[key] = value; }
-  addEventListener(key, fn) { this.listeners[key] = fn; }
+  addEventListener(key, fn) { const previous = this.listeners[key]; this.listeners[key] = previous ? event => { previous(event); return fn(event); } : fn; }
   focus() { this.document.activeElement = this; }
   select() { this.selectionStart = 0; this.selectionEnd = this.value.length; }
   *walk() { yield this; for (const child of this.children) if (child.walk) yield* child.walk(); }
@@ -39,7 +40,7 @@ class Node {
   click() { const result = this.listeners.click?.({ detail: 0 }); if (this.attributes.popovertarget) { const menu = this.document.getElementById(this.attributes.popovertarget); if (menu.popoverOpen) menu.hidePopover(); else menu.showPopover(); } return result; }
   key(key, altKey = false) { return this.listeners.keydown?.({ key, altKey, preventDefault() {}, stopPropagation() {} }); }
 }
-function harness() {
+function harness(translateMessage = t) {
   const document = { defaultView: { innerWidth: 400, innerHeight: 400, addEventListener() {}, removeEventListener() {} }, addEventListener() {}, removeEventListener() {}, moves: 0, createElement: tag => new Node(tag, document), createTextNode: text => ({ textContent: text }), getElementById: id => document.root.querySelector(`#${id}`) };
   const calls = []; let verdict = { saved: true, verdict: 'valid', accounts: [] };
   const records = [{ id: 'a', label: 'Zulu', fingerprint: 'aa', accountKey: 'ka', enabled: true }, { id: 'b', label: 'Alpha', fingerprint: 'bb', accountKey: 'kb', enabled: false }];
@@ -53,7 +54,7 @@ function harness() {
   const defaultForm = createCredentialPanel(limitAccountFormsForRenderer().find(f => f.id === 'qoder'), { document, translate: t, onToggle() {}, onClear() {}, onOpen() {}, onRefresh() {}, onSave() {} });
   for (const child of [...defaultForm.querySelector('.cursor-settings-details').children]) defaultPanel.append(child);
   host.append(defaultPanel);
-  const panel = createPanel({ defaultPanel, form: limitAccountFormsForRenderer().find(f => f.id === 'qoder'), label: 'Qoder', document, t, ipc, forms: { createCredentialPanel, resolveOpenUrl }, preserveScroll: fn => fn(), onChanged() {}, openExternal() {}, confirm: () => true });
+  const panel = createPanel({ defaultPanel, form: limitAccountFormsForRenderer().find(f => f.id === 'qoder'), label: 'Qoder', document, t: translateMessage, ipc, forms: { createCredentialPanel, resolveOpenUrl }, preserveScroll: fn => fn(), onChanged() {}, openExternal() {} });
   host.append(panel.element);
   document.root = host;
   const update = () => panel.update(slots, [{ accountKey: 'ka', status: 'unauthorized', updatedAt: new Date().toISOString() }], true);
@@ -85,6 +86,7 @@ test('menu operations and Alt arrows use the slot IPC', async () => {
   await h.click(h.row('a'), 'Move down');
   await h.row('b').key('ArrowUp', true);
   await h.click(h.row('b'), 'Remove account');
+  await h.click(h.row('b'), 'Confirm remove');
   assert.deepEqual(h.calls, [['setEnabled', 'qoder', 'a', false], ['setEnabled', 'qoder', 'b', true], ['move', 'qoder', 'a', 'down'], ['move', 'qoder', 'b', 'up'], ['remove', 'qoder', 'b']]);
 });
 test('rename Enter saves, Escape cancels; pushes retain input, caret and open menu', async () => {
@@ -616,4 +618,97 @@ test('editors occupy the group at their owner and use existing form actions incl
   h.click(editor, 'Cancel');
   assert.equal(editor.classList.contains('hidden'), true);
   assert.equal(h.defaultPanel.isConnected, true);
+});
+
+
+test('slot remove arms in place then confirms without a native dialog', async () => {
+  const h = harness(); const row = h.row('a');
+  row.querySelector('.plugin-more').click();
+  const menu = row.querySelector('.plugin-menu');
+  const remove = menu.children.at(-1);
+  await remove.click();
+  assert.equal(h.calls.length, 0);
+  assert.equal(menu.popoverOpen, true);
+  assert.equal(remove.textContent, 'Confirm remove');
+  assert.equal(remove.attributes['aria-label'], 'Confirm remove');
+  assert.equal(h.document.activeElement, remove);
+  assert.ok(remove.classList.contains('menu-destructive'));
+  assert.ok(remove.classList.contains('confirming'));
+  await remove.click();
+  assert.equal(menu.popoverOpen, false);
+  assert.deepEqual(h.calls, [['remove', 'qoder', 'a']]);
+});
+for (const close of ['escape', 'outside', 'other action']) test(`slot remove disarms on ${close}`, async () => {
+  const h = harness(); const row = h.row('a');
+  const trigger = row.querySelector('.plugin-more'); trigger.click();
+  const menu = row.querySelector('.plugin-menu'); const remove = menu.children.at(-1);
+  await remove.click();
+  if (close === 'escape') menu.key('Escape');
+  else if (close === 'outside') menu.hidePopover();
+  else await h.click(row, 'Pause tracking');
+  trigger.click();
+  assert.equal(remove.textContent, 'Remove account');
+  assert.equal(remove.attributes['aria-label'], 'Remove account');
+  assert.equal(remove.classList.contains('confirming'), false);
+  await remove.click();
+  assert.equal(h.calls.filter(call => call[0] === 'remove').length, 0);
+});
+test('armed remove survives provider render and live locale translation', () => {
+  let language = 'en';
+  const h = harness((key, params) => translate(language, key, params)); const row = h.row('a'); row.querySelector('.plugin-more').click();
+  const menu = row.querySelector('.plugin-menu'); const remove = menu.children.at(-1); remove.click();
+  h.update();
+  assert.equal(menu.popoverOpen, true);
+  assert.equal(h.document.activeElement, remove);
+  assert.equal(remove.textContent, 'Confirm remove');
+  for (const [locale, label] of Object.entries({ en: 'Confirm remove', 'zh-TW': '確認移除', 'zh-CN': '确认移除', ko: '삭제 확인', ja: '削除を確認', es: 'Confirmar eliminación', 'pt-BR': 'Confirmar remoção' })) {
+    language = locale;
+    // The application's live i18n pass follows these data attributes.
+    remove.textContent = translate(locale, remove.dataset.i18n);
+    remove.setAttribute('aria-label', translate(locale, remove.dataset.i18nAriaLabel));
+    assert.equal(remove.textContent, label);
+    h.update();
+    assert.equal(remove.textContent, label);
+    assert.equal(menu.popoverOpen, true);
+    assert.equal(remove.attributes['aria-label'], remove.textContent);
+  }
+});
+test('slot native confirmation plumbing is absent', () => {
+  const fs = require('node:fs');
+  const read = name => fs.readFileSync(require.resolve('../../src/electron/renderer/' + name), 'utf8');
+  assert.doesNotMatch(read('limits/accountSlotsPanel.js'), /\bconfirm\s*[(:]/);
+  const setup = read('app.js').split('TokenMonitorAccountSlotsPanel.createPanel({')[1].split('accountSlotPanels.set')[0];
+  assert.doesNotMatch(setup, /window\.confirm|\bconfirm\s*:/);
+});
+test('shared menu ARIA applies to slot actions and plugin actions while preserving switch rows', () => {
+  const h = harness(); const row = h.row('a');
+  assert.equal(row.querySelector('.plugin-more').attributes['aria-haspopup'], 'menu');
+  const popover = row.querySelector('.plugin-menu');
+  assert.equal(popover.attributes.role, 'menu');
+  assert.equal(popover.attributes['aria-labelledby'], row.querySelector('.plugin-more').id);
+  for (const node of popover.children) assert.equal(node.attributes.role, node.tagName === 'hr' ? 'separator' : 'menuitem');
+  const { create } = require('../../src/electron/renderer/actionMenu');
+  const menu = create(h.document, 'Plugin actions', () => new Node('button', h.document));
+  const label = new Node('label', h.document); const toggle = new Node('input', h.document); toggle.setAttribute('role', 'switch'); label.append(toggle);
+  const auto = new Node('label', h.document); const checkbox = new Node('input', h.document); checkbox.type = 'checkbox'; auto.append(checkbox);
+  const action = new Node('button', h.document);
+  menu.appendItems(label, auto, action);
+  assert.equal(menu.trigger.attributes['aria-haspopup'], 'menu');
+  assert.equal(menu.popover.attributes.role, 'menu');
+  assert.equal(menu.popover.attributes['aria-labelledby'], menu.trigger.id);
+  assert.equal(action.attributes.role, 'menuitem');
+  assert.equal(toggle.attributes.role, 'switch');
+  assert.equal(checkbox.attributes.role, undefined);
+  assert.equal(label.attributes.role, undefined);
+  assert.equal(auto.attributes.role, undefined);
+  const source = require('node:fs').readFileSync(require.resolve('../../src/electron/renderer/pluginSettings'), 'utf8');
+  assert.match(source, /menu\.appendItems\(button/);
+  assert.match(source, /menu\.appendItems\(leadingControl/);
+  assert.match(source, /menu\.appendItems\(automatic/);
+});
+
+test('an armed remove item has its own tinted background, matching other inline confirmations', () => {
+  const css = require('node:fs').readFileSync(require.resolve('../../src/electron/renderer/styles.css'), 'utf8');
+  assert.match(css, /\.plugin-menu button\.menu-destructive\.confirming \{ color: var\(--red\); background: rgba\(255, 91, 91, 0\.12\);/);
+  assert.match(css, /\.managed-account-remove\.confirming \{[^}]*background: rgba\(255, 91, 91, 0\.12\);/);
 });
