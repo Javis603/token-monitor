@@ -1084,3 +1084,17 @@ for (const failure of ['rejected', 'thrown']) test(`failed remote drag save rest
   assert.equal(h.listeners.has('pointermove'), true);
   h.emit('pointercancel', 0);
 }));
+
+test('a remote drop that a push already put in place releases its save lock', () => withDrag(async h => {
+  const context = remoteFixture();
+  h.panel.update(h.slots, [], context); h.layout();
+  h.ipc.presentation = async (...args) => { h.calls.push(['presentation', ...args]); return { ok: true }; };
+  h.press('remote:r2'); h.emit('pointermove', -100);
+  // A stats push reorders the aggregate so r2 already sits where it is dropped.
+  const [r1, r2, ...rest] = context.records;
+  h.panel.update(h.slots, [], { ...context, records: [r2, r1, ...rest] });
+  h.emit('pointerup', -100); await h.flush();
+  assert.deepEqual(h.calls, [], 'nothing to save for a zero-step drop');
+  await h.click(h.row('remote:r2'), 'Move down'); await h.flush();
+  assert.equal(h.calls.filter(call => call[0] === 'presentation').length, 1, 'remote reordering is not left locked');
+}));

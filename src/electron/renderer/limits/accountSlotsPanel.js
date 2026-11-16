@@ -169,14 +169,19 @@
           dragSavePending = true;
         }
         preserveScroll(render);
-        return { steps: Math.abs(delta), direction: delta < 0 ? 'up' : 'down', previousSlots, previousOrder,
+        return { steps: Math.abs(delta), direction: delta < 0 ? 'up' : 'down', previousSlots, previousOrder, locked: true,
           remoteOrder: remote ? next.map(slot => slot.accountKey) : undefined };
       },
       applyOrder: order => {
         for (const id of order) (remote ? remoteList : list).moveBefore(rows.get(id).el, remote ? null : add);
       },
-      persistOrder: (_order, id, { steps, direction, previousSlots, previousOrder, remoteOrder }) => {
-        if (remote && !steps) return;
+      persistOrder: (_order, id, { steps, direction, previousSlots, previousOrder, remoteOrder, locked }) => {
+        if (remote && !steps) {
+          // A push can leave the dragged row already in place; release the lock
+          // this drop took, but not one an invalidated drop never acquired.
+          if (locked) { presentationPending--; preserveScroll(render); }
+          return;
+        }
         return void enqueue(async () => {
           if (remote) {
             try {
