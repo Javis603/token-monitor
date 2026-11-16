@@ -30,7 +30,9 @@ const sources = [
 
 for (const [client, relative] of sources) {
   test(`${client} scan sidecars cannot feed another live scan, while DB and WAL changes still refresh`, async (t) => {
-    const home = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'tm-sqlite-watch-'));
+    // Match the canonical paths emitted by the native watcher on Windows,
+    // where the temporary directory can otherwise retain an 8.3 alias.
+    const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'tm-sqlite-watch-')));
     const database = path.join(home, relative);
     fs.mkdirSync(path.dirname(database), { recursive: true });
     fs.writeFileSync(database, '');
