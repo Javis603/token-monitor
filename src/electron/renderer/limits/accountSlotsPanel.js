@@ -2,10 +2,12 @@
 
 (function expose(root, factory) {
   const menus = typeof module !== 'undefined' ? require('../actionMenu') : root.TokenMonitorActionMenu;
-  const api = factory(menus);
+  const dragController = typeof module !== 'undefined' ? require('../rowDragController') : root.TokenMonitorRowDragController;
+  const dragSort = typeof module !== 'undefined' ? require('../verticalDragSort') : root.TokenMonitorVerticalDragSort;
+  const api = factory(menus, dragController, dragSort);
   if (typeof module !== 'undefined') module.exports = api;
   if (root) root.TokenMonitorAccountSlotsPanel = api;
-})(typeof window !== 'undefined' ? window : null, function accountSlotsPanelApi(menus) {
+})(typeof window !== 'undefined' ? window : null, function accountSlotsPanelApi(menus, dragController, dragSort) {
   function accountName(slot, reading, t) {
     return slot.label || reading?.accountName || reading?.accountEmail || reading?.email
       || slot.accountName || slot.accountEmail
@@ -84,10 +86,10 @@
     let editorPanel;
     let editorRevision = 0;
     const error = () => { message.textContent = tr('failed'); };
-    const run = (operation, ...args) => {
+    const enqueue = operation => {
       const task = operationLane.then(async () => {
         try {
-          const result = await ipc[operation](form.id, ...args);
+          const result = await operation();
           if (result.ok === false) { error(); return result; }
           if (result.accounts) {
             slots = result.accounts;
@@ -100,6 +102,40 @@
       operationLane = task.catch(() => {});
       return task;
     };
+    const run = (operation, ...args) => enqueue(() => ipc[operation](form.id, ...args));
+    const rowDrag = dragController.createRowDragController({
+      dragSort,
+      getList: () => list,
+      getScrollPanel: () => root.closest('.settings-panel'),
+      rowSelector: '.slot-row[data-slot-draggable="true"]',
+      idKey: 'slotId',
+      dragStartSelector: '.slot-drag-handle',
+      dragExcluded: 'input, select, textarea, a',
+      preserveScroll,
+      mirrorOrder: (order, id) => {
+        const previous = slots.filter(slot => slot.id !== 'environment').map(slot => slot.id);
+        // A push may add/remove an account while the measured rows are frozen.
+        // Let the deferred render show that new list instead of saving a stale set.
+        if (previous.length !== order.length || previous.some(key => !order.includes(key))) return { steps: 0 };
+        const delta = order.indexOf(id) - previous.indexOf(id);
+        const byId = new Map(slots.map(slot => [slot.id, slot]));
+        let index = 0;
+        slots = slots.map(slot => slot.id === 'environment' ? slot : byId.get(order[index++]));
+        return { steps: Math.abs(delta), direction: delta < 0 ? 'up' : 'down' };
+      },
+      applyOrder: order => {
+        for (const id of order) list.moveBefore(rows.get(id).el, add);
+      },
+      persistOrder: (_order, id, { steps, direction }) => void enqueue(async () => {
+        let result = { ok: true, accounts: slots };
+        for (let step = 0; step < steps; step++) {
+          result = await ipc.move(form.id, id, direction);
+          if (result.ok === false) break;
+        }
+        return result;
+      }),
+      requestRender: () => preserveScroll(render)
+    });
     function closeEditor() {
       cancelLogin?.();
       cancelLogin = null;
@@ -222,12 +258,19 @@
       const el = make('div', 'slot-row');
       el.tabIndex = 0;
       el.dataset.slotId = id;
+      const grip = make('span', 'preference-order-handle slot-drag-handle');
+      grip.setAttribute('aria-hidden', 'true');
       const copy = make('div', 'slot-copy');
       const name = make('div', 'slot-name');
       const status = make('span', 'slot-status');
       const actions = make('div', 'slot-actions');
       copy.append(name);
-      el.append(copy, status, actions);
+      el.append(grip, copy, status, actions);
+      el.addEventListener('pointerdown', event => {
+        if (id === 'environment' || editorOwner !== undefined
+          || [...rows.values()].some(row => row.editing || row.actions.querySelector('.plugin-menu').matches(':popover-open'))) return;
+        rowDrag.startRowDrag(event, id);
+      });
       // Each row owns its rename session, so one row cannot invalidate another's.
       const item = { el, name, status, actions, editing: false, renameRevision: 0, slot: null };
       const rename = () => {
@@ -320,11 +363,13 @@
     add.className = 'slot-add';
     list.append(add);
     function render() {
+      if (rowDrag.deferRender()) return;
       const active = slots;
       for (const [id, item] of rows) if (!active.some(slot => slot.id === id)) { item.el.remove(); rows.delete(id); }
       active.forEach((slot, index) => {
         const item = rowFor(slot.id);
         item.slot = slot;
+        item.el.dataset.slotDraggable = String(slot.id !== 'environment');
         const reading = readings.find(row => slotOwner(slots, row.accountKey, row.accountKeyAliases) === slot);
         if (!item.editing) item.name.textContent = accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') }, reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading, t);
         const status = accountStatus(slot, reading);
