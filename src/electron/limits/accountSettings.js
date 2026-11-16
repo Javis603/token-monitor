@@ -147,7 +147,9 @@ function defaultAccountStatus(entry, settings, env) {
   const stored = settings?.[field.key];
   const resolved = field.resolve ? field.resolve(env) : '';
   return {
-    [entry.status.configuredKey]: Boolean(entry.accountSlots ? normalizeAccountSlots(entry, settings?.[accountSlotKey(entry)]).length || resolved : stored || resolved),
+    // A stored fixed credential left by a failed migration is still collected
+    // (the slot fetcher passes it through when no slot exists), so it counts.
+    [entry.status.configuredKey]: Boolean(entry.accountSlots ? normalizeAccountSlots(entry, settings?.[accountSlotKey(entry)]).length || stored || resolved : stored || resolved),
     [entry.status.sourceKey]: stored ? 'settings' : resolved ? 'env' : ''
   };
 }

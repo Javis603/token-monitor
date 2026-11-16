@@ -174,3 +174,8 @@ test('activating a provider from an account save takes the settings path and rea
   // A failed activation after the durable slot write must not surface as a failed save (a retry would add a duplicate).
   assert.match(wiring, /try \{\s*applySettingsPatch\(\{ limitProviders, limitsEnabled \}\);\s*pushSettingsToRenderer\(\);\s*\} catch \(error\) \{/);
 });
+
+test('a stored fixed credential left by a failed migration is reported as configured, matching collection', () => {
+  assert.equal(accountStatusProjection({ deepseekApiKey: 'stranded' }, {}).deepseekApiKeyConfigured, true);
+  assert.equal(accountStatusProjection({}, {}).deepseekApiKeyConfigured, false);
+});
