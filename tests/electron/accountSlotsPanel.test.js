@@ -738,11 +738,12 @@ test('a reading that resolved to its real key keeps its place with a cached pre-
   assert.deepEqual(applyAccountOrder(records, cached).map(row => row.accountKey), ['resolved-first', 'second']);
 });
 
-for (const [id, fixture] of Object.entries(require('../fixtures/accountSlotsBatch').fixtures)) test(`${id}: slot editor renders and submits its complete field shape`, async () => {
+for (const [id, fixture] of Object.entries(require('../fixtures/accountSlotsBatch').fixtures)) for (const legacy of id === 'trae' ? [false, true] : [false]) test(`${id}${legacy ? ' legacy' : ''}: slot editor renders and submits its complete field shape`, async () => {
   const h = harness();
   const form = limitAccountFormsForRenderer().find(f => f.id === id);
   assert.equal(form.accountSlots, true);
-  const values = fixture.values('a');
+  const values = legacy ? { traeCookie: '', traeAccessToken: 'token-a', traeDeviceId: 'device-a' } : fixture.values('a');
+  const selected = legacy ? 'traeAccessToken' : form.credentialChoice?.fields[0];
   assert.deepEqual(form.fields.map(f => f.key).sort(), Object.keys(values).sort());
   const submitted = [];
   const panel = createPanel({ form, label: id, document: h.document, t,
@@ -756,7 +757,8 @@ for (const [id, fixture] of Object.entries(require('../fixtures/accountSlotsBatc
     assert.equal(input.tagName, field.input === 'textarea' ? 'textarea' : 'input');
     input.value = values[field.key];
   }
+  if (form.credentialChoice) h.document.getElementById(`${id}SlotDraft${form.credentialChoice.key}Input`).value = `${id}SlotDraft${selected}`;
   await h.document.getElementById(`${id}SlotDraftCredentialSubmit`).click();
   assert.equal(submitted[0][0], id);
-  assert.deepEqual(submitted[0][1], values);
+  assert.deepEqual(submitted[0][1], Object.fromEntries(Object.entries(values).map(([key, value]) => [key, form.credentialChoice?.fields.includes(key) && key !== selected ? undefined : value])));
 });

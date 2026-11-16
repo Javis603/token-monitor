@@ -63,7 +63,7 @@ for (const [id, fixture] of Object.entries(fixtures)) {
   });
 }
 test('batch eligibility keeps incompatible providers out of slots', () => {
-  for (const id of ['devin', 'factory', 'cline', 'trae', 'alibaba', 'kimi']) assert.ok(!limitProviderEntry(id).accountSlots, id);
+  for (const id of ['factory', 'cline', 'alibaba', 'kimi']) assert.ok(!limitProviderEntry(id).accountSlots, id);
   assert.deepEqual(LIMIT_PROVIDER_REGISTRY.filter(e => e.accountSlots).map(e => e.id).sort(), ['qoder', 'deepseek', ...Object.keys(fixtures)].sort());
 });
 
@@ -153,3 +153,90 @@ for (const id of ['notion', 'zaiteam']) {
     assert.deepEqual(preferred.values, values);
   });
 }
+const { createAccountSlotService } = require('../../src/electron/limits/accountSlotService');
+const { accountStatusProjection } = require('../../src/electron/limits/accountSettings');
+const { configuredMultiAccountProviders } = require('../../src/shared/limits/accountSlots');
+const { legacyTraeBody } = require('../fixtures/accountSlotsBatch');
+for (const id of ['devin', 'trae']) test(`${id}: environment lane remains first and read-only alongside a slot`, async () => {
+  const fixture = fixtures[id];
+  const settings = { [`${id}AccountSlots`]: [{ id: 'b', values: fixture.values('b'), enabled: true }] };
+  const env = id === 'devin' ? { DEVIN_BEARER_TOKEN: 'token-a', DEVIN_ORG: 'a' } : { TRAE_ACCESS_TOKEN: 'token-a', TRAE_DEVICE_ID: 'device-a' };
+  const seen = [];
+  const fetch = id === 'devin' ? transport(id, seen) : async (url, init) => {
+    if (url.endsWith('/ide_user_ent_usage')) {
+      assert.equal(init.headers.Authorization, 'Cloud-IDE-JWT token-a');
+      assert.equal(init.headers['X-Device-Id'], 'device-a');
+      seen.push({ n: 'a' });
+      return { ok: true, status: 200, json: async () => legacyTraeBody };
+    }
+    return transport(id, seen)(url, init);
+  };
+  const service = createAccountSlotService({ getSettings: () => settings, write: async () => {}, env });
+  const listed = service.list(id).accounts;
+  assert.deepEqual(listed.map(a => a.id), ['environment', 'b']);
+  assert.equal(listed[0].source, 'environment');
+  assert.equal((await service.remove(id, 'environment')).errorCode, 'environmentCredential');
+  assert.ok(!JSON.stringify(listed).includes('token-a'));
+  assert.deepEqual(configuredMultiAccountProviders([limitProviderEntry(id)], settings, env), [id]);
+  const rows = await LIMIT_PROVIDER_FETCHERS[id](settings, { env, fetch });
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every(row => row.status === 'ok'));
+  assert.equal(rows[0].accountKey, id === 'devin' ? fixture.key('a') : hashKey('trae', 'token-a'));
+  assert.equal(rows[1].accountKey, fixture.key('b'));
+  assert.ok(seen.some(c => c.n === 'a') && seen.some(c => c.n === 'b'));
+  assert.equal(accountStatusProjection(settings, {})[limitProviderEntry(id).status.configuredKey], true);
+});
+test('Trae legacy-token slots retain device isolation and scoped refresh', async () => {
+  const values = n => ({ traeCookie: '', traeAccessToken: `token-${n}`, traeDeviceId: `device-${n}` });
+  const key = n => hashKey('trae', `token-${n}`);
+  const slots = ['a', 'b'].map(n => ({ id: n, values: values(n), accountKey: key(n) }));
+  const seen = [];
+  const deps = { env: { TRAE_COOKIE: 'foreign-cookie' }, fetch: async (url, init) => {
+    const n = init.headers.Authorization.slice(-1);
+    assert.ok(url.endsWith('/ide_user_ent_usage'));
+    assert.equal(init.headers.Cookie, undefined);
+    assert.equal(init.headers['X-Device-Id'], `device-${n}`);
+    seen.push(n);
+    return { ok: true, status: 200, json: async () => legacyTraeBody };
+  } };
+  // No environment credential for this dispatch; its foreign companion must
+  // never fill a slot's own device id.
+  deps.env = { TRAE_DEVICE_ID: 'foreign-device' };
+  const rows = await LIMIT_PROVIDER_FETCHERS.trae({ traeAccountSlots: slots }, deps);
+  assert.deepEqual(rows.map(r => [r.accountKey, r.status]), ['a', 'b'].map(n => [key(n), 'ok']));
+  seen.length = 0;
+  const scoped = await LIMIT_PROVIDER_FETCHERS.trae({ traeAccountSlots: slots, previousLimits: { providers: rows }, limitRefreshScope: { provider: 'trae', accountKey: key('b') } }, deps);
+  assert.deepEqual(scoped.map(r => r.accountKey), [key('b')]);
+  assert.deepEqual(seen, ['b']);
+});
+
+test('Devin migration captures its env organization without persisting an env token', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slots-devin-env-'));
+  const previous = process.env.DEVIN_ORGANIZATION;
+  process.env.DEVIN_ORGANIZATION = 'a';
+  t.after(() => { fs.rmSync(dir, { recursive: true, force: true }); if (previous === undefined) delete process.env.DEVIN_ORGANIZATION; else process.env.DEVIN_ORGANIZATION = previous; });
+  const store = new CredentialStore(dir);
+  store.replaceSettingsCredentials({ devinBearerToken: 'token-a' });
+  const migrated = migrateAccountSlots(store, {});
+  assert.deepEqual(migrated.devinAccountSlots[0].values, fixtures.devin.values('a'));
+  const rows = await LIMIT_PROVIDER_FETCHERS.devin(migrated, { env: {}, fetch: transport('devin') });
+  assert.equal(rows[0].accountKey, fixtures.devin.key('a'));
+});
+test('Trae legacy migration preserves its key, token and device companion', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'slots-trae-token-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const values = { traeCookie: '', traeAccessToken: 'token-a', traeDeviceId: 'device-a' };
+  const accountKey = hashKey('trae', 'token-a');
+  const store = new CredentialStore(dir);
+  store.replaceSettingsCredentials({ ...values, traeDefaultAccountIdentity: { fingerprint: accountValuesFingerprint(values), accountKey } });
+  const migrated = migrateAccountSlots(store, {});
+  assert.deepEqual(migrated.traeAccountSlots[0].values, values);
+  assert.equal(migrated.traeAccountSlots[0].accountKey, accountKey);
+  const rows = await LIMIT_PROVIDER_FETCHERS.trae(migrated, { env: {}, fetch: async (_url, init) => {
+    assert.equal(init.headers.Authorization, 'Cloud-IDE-JWT token-a');
+    assert.equal(init.headers['X-Device-Id'], 'device-a');
+    return { ok: true, status: 200, json: async () => legacyTraeBody };
+  } });
+  assert.equal(rows[0].accountKey, accountKey);
+  assert.equal(rows[0].status, 'ok');
+});

@@ -6,7 +6,7 @@ const { randomUUID } = require('node:crypto');
 const { createCredentialCommands, providerSelectionIncluding } = require('./credentialCommands');
 const { accountForm } = require('./accountSettings');
 const { limitProviderEntry } = require('../../shared/limits/registry');
-const { accountSlotKey, normalizeAccountSlots, defaultAccountValues, accountValuesFingerprint } = require('../../shared/limits/accountSlots');
+const { accountSlotKey, normalizeAccountSlots, defaultAccountValues, hasAccountCredential, accountValuesFingerprint } = require('../../shared/limits/accountSlots');
 
 // All secret/identity writes share one lane. Refresh notification is outside the
 // transaction: a refresh may itself enqueue a resolved identity.
@@ -25,10 +25,10 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
   const slots = (entry) => normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]);
   const environment = entry => {
     const values = defaultAccountValues(entry, getSettings(), env);
-    const field = entry.fields.find(field => field.key === entry.status.credential);
     const cached = environmentIdentities.get(entry.id);
     const identity = cached?.fingerprint === accountValuesFingerprint(values) ? cached.identity : {};
-    return !getSettings()[field.key] && field.resolve?.(env) ? { id: 'environment', label: '', enabled: true, source: 'environment', values, accountKey: hashKey(entry.id, values[field.key]), ...identity } : null;
+    const credential = values[entry.status.credential] || entry.form?.credentialChoice?.fields.map(key => values[key]).find(Boolean);
+    return !hasAccountCredential(entry, getSettings()) && hasAccountCredential(entry, values) ? { id: 'environment', label: '', enabled: true, source: 'environment', values, accountKey: hashKey(entry.id, credential), ...identity } : null;
   };
   const ordered = (entry, list = slots(entry)) => [...(environment(entry) ? [environment(entry)] : []), ...list];
   const dto = entry => ordered(entry).map(({ id, label, enabled, accountKey, accountKeyAliases = [], values, source, createdAt, updatedAt }) => {

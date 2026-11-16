@@ -4,6 +4,7 @@
 // Trae CN limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'trae',
+  accountSlots: true,
   fetch: 'fetchTraeLimits',
   fields: [
     {
@@ -32,6 +33,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
     }
   ],
   status: {
+    credential: 'traeCookie',
     configuredKey: 'traeAccessTokenConfigured',
     sourceKey: 'traeAccessTokenSource',
     pendingKey: 'traePendingCheckSince'

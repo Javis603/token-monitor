@@ -165,6 +165,9 @@ function accountStatusProjection(settings, env = process.env) {
     } else if (entry.status) {
       Object.assign(out, defaultAccountStatus(entry, settings, env));
     }
+    if (entry.accountSlots && normalizeAccountSlots(entry, settings?.[accountSlotKey(entry)]).length) {
+      out[entry.status.configuredKey] = true;
+    }
     if (entry.envProbe) out[entry.envProbe.key] = entry.envProbe.probe(env);
   }
   return out;

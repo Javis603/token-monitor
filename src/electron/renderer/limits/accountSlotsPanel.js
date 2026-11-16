@@ -110,7 +110,7 @@
         const revision = editorRevision;
         const prefix = `${form.id}SlotDraft`;
         const keys = new Map(form.fields.map(field => [field.key, `${prefix}${field.key}`]));
-        const remap = value => typeof value === 'string' ? (keys.get(value) || value)
+        const remap = value => typeof value === 'string' ? (keys.get(value) || (value === form.credentialChoice?.key ? `${prefix}${value}` : value))
           : Array.isArray(value) ? value.map(remap)
             : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, val]) => [key, remap(val)])) : value;
         const draftForm = remap(form);
