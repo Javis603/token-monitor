@@ -84,6 +84,9 @@
     let readings = [];
     let operationLane = Promise.resolve();
     let dragSavePending = false;
+    // Menu and Alt+arrow moves still awaiting IPC: a drag measured now would
+    // persist steps from an order those moves are about to change.
+    let movesPending = 0;
     let editorPanel;
     let editorRevision = 0;
     const error = () => { message.textContent = tr('failed'); };
@@ -105,7 +108,9 @@
     };
     const run = (operation, ...args) => {
       if (operation === 'move' && dragSavePending) return;
-      return enqueue(() => ipc[operation](form.id, ...args));
+      if (operation !== 'move') return enqueue(() => ipc[operation](form.id, ...args));
+      movesPending++;
+      return enqueue(() => ipc[operation](form.id, ...args)).finally(() => { movesPending--; });
     };
     const rowDrag = dragController.createRowDragController({
       dragSort,
@@ -292,7 +297,7 @@
       copy.append(name);
       el.append(grip, copy, status, actions);
       el.addEventListener('pointerdown', event => {
-        if (dragSavePending || id === 'environment' || editorOwner !== undefined
+        if (dragSavePending || movesPending > 0 || id === 'environment' || editorOwner !== undefined
           || [...rows.values()].some(row => row.editing || row.actions.querySelector('.plugin-menu').matches(':popover-open'))) return;
         rowDrag.startRowDrag(event, id);
       });
