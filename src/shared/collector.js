@@ -2997,6 +2997,16 @@ function startCollector(options) {
   let initialCollectionComplete = false;
   const watchers = [];
   let watchedDirectoryKey = null;
+  // A custom Codex root's watch policy depends on whether it is a Codex home
+  // yet. It becomes one when Codex first writes there, usually between hourly
+  // full scans, so successful Today ticks recheck it too and rebuild the
+  // watcher on a change; otherwise idle title lookups re-trigger collection
+  // until the next full scan.
+  let watchedCodexHomes = '';
+  const customCodexHomesKey = () => (trackedClients.has('codex')
+    ? JSON.stringify((normalizeCustomScanPaths(sourceOptions.customScanPaths, { platform: sourceOptions.platform || process.platform }).codex || [])
+      .map((dir) => path.resolve(canonicalWatchPath(dir))).filter(isCodexHome))
+    : '');
   // Sticky: once the kernel has refused us watch descriptors, every later
   // rebuild (a client gaining or losing a data directory) stays on polling for
   // the rest of the process. Retrying native events on each rebuild would just
@@ -3517,7 +3527,7 @@ function startCollector(options) {
       }
       // A newly written Senpi header can expose a different project's child
       // tree during an anchored Today tick, before the fallback interval.
-      if (!anchored || trackedClients.has('senpi')) setupWatchers();
+      if (!anchored || trackedClients.has('senpi') || customCodexHomesKey() !== watchedCodexHomes) setupWatchers();
       if (Number.isFinite(tickOptions.activityRevision)) {
         collectedActivityRevision = Math.max(collectedActivityRevision, tickOptions.activityRevision);
         initialCollectionComplete = true;
@@ -3872,10 +3882,8 @@ function startCollector(options) {
       target: path.resolve(canonicalWatchPath(source.dir), path.relative(source.dir, source.target)),
       ...(source.runtimeFile ? { runtimeFile: path.resolve(canonicalWatchPath(source.dir), path.relative(source.dir, source.runtimeFile)) } : {}) }));
     const dirs = [...new Set([...usageDirs, ...activitySources.map((source) => source.dir)])];
-    // A custom Codex root's watch policy depends on whether it is a Codex home
-    // yet, so a root that becomes one must rebuild the watcher.
-    const codexHomeRoots = (rootsByClient.codex || []).filter(isCodexHome);
-    const directoryKey = JSON.stringify([dirs, activitySources, watchOptions.senpiSources, codexHomeRoots]);
+    watchedCodexHomes = customCodexHomesKey();
+    const directoryKey = JSON.stringify([dirs, activitySources, watchOptions.senpiSources, watchedCodexHomes]);
     if (directoryKey === watchedDirectoryKey) return;
     closeWatchers();
     if (dirs.length === 0) {

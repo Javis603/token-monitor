@@ -4590,73 +4590,62 @@ test('hourly smart reconciliation starts watching a client directory created aft
   }
 });
 
-test('a custom Codex root that becomes a Codex home rebuilds the watcher with the home policy', async () => {
+// A root becomes a Codex home when Codex first writes there, usually between
+// hourly full scans. The Today tick that write triggers must swap in the home
+// policy, or idle title lookups re-trigger collection until the next full scan.
+test('a custom Codex root that becomes a Codex home rebuilds the watcher on a Today tick', async (t) => {
   const tmp = withTmpHome([path.join('.codex', 'sessions')]);
   const customHome = path.join(tmp, 'task', 'codex-home');
   fs.mkdirSync(customHome, { recursive: true });
   const originalHomedir = os.homedir;
-  const originalNow = Date.now;
-  const originalSharedDir = process.env.TOKEN_MONITOR_SHARED_DIR;
   const originalCodexHome = process.env.CODEX_HOME;
-  let nowMs = originalNow();
-  os.homedir = () => tmp;
-  Date.now = () => nowMs;
-  process.env.TOKEN_MONITOR_SHARED_DIR = tmp;
-  delete process.env.CODEX_HOME;
-
   const chokidar = require('chokidar');
   const originalWatch = chokidar.watch;
-  const watchOptions = [];
-  chokidar.watch = (_dirs, opts) => {
-    watchOptions.push(opts);
-    return { on: () => {}, close: () => {} };
-  };
-  const childProcess = require('node:child_process');
-  const originalSpawn = childProcess.spawn;
-  childProcess.spawn = recordingSpawn([]);
-
-  let handle = null;
-  try {
-    const { startCollector } = freshCollector();
-    const updates = [];
-    handle = startCollector({
-      clients: 'codex',
-      customScanPaths: { codex: [customHome] },
-      allTimeSince: '2024-01-01',
-      commandTimeoutMs: 1000,
-      deviceId: 'test-device',
-      agentVersion: 'test',
-      intervalMs: 20,
-      watchEnabled: true,
-      watchUsePolling: false,
-      watchTriggersCollection: false,
-      intervalRequiresActivity: true,
-      limitsEnabled: false,
-      historyEnabled: false,
-      onUpdate: (summary) => updates.push(summary)
-    });
-    const sidecar = path.join(customHome, 'state_5.sqlite-shm');
-    await waitForCondition(() => updates.length === 1 && watchOptions.length === 1);
-    assert.equal(watchOptions[0].ignored?.(sidecar) ?? false, false, 'an empty custom root is not a Codex home yet');
-
-    fs.mkdirSync(path.join(customHome, 'sessions'));
-    nowMs += 60 * 60 * 1000 + 1;
-    await waitForCondition(() => updates.length === 2 && watchOptions.length === 2);
-    assert.equal(watchOptions[1].ignored(sidecar), true, 'the rebuilt watcher ignores the home catalog sidecars');
-    assert.equal(watchOptions[1].ignored(path.join(customHome, 'sessions', 'rollout.jsonl')), false);
-  } finally {
-    if (handle) handle.stop();
-    childProcess.spawn = originalSpawn;
+  let handle;
+  t.after(() => {
+    handle?.stop();
     chokidar.watch = originalWatch;
     os.homedir = originalHomedir;
-    Date.now = originalNow;
-    if (originalSharedDir === undefined) delete process.env.TOKEN_MONITOR_SHARED_DIR;
-    else process.env.TOKEN_MONITOR_SHARED_DIR = originalSharedDir;
     if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
     else process.env.CODEX_HOME = originalCodexHome;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
-  }
+  });
+  os.homedir = () => tmp;
+  delete process.env.CODEX_HOME;
+  const ignoredByWatcher = [];
+  let watchHandler;
+  chokidar.watch = (_dirs, options) => {
+    ignoredByWatcher.push(options.ignored);
+    const watcher = {
+      on(event, callback) { if (event === 'all') watchHandler = callback; return watcher; },
+      close() {}
+    };
+    return watcher;
+  };
+  const calls = [];
+  const updates = [];
+  const { startCollector } = freshCollector();
+  handle = startCollector({
+    clients: 'codex', customScanPaths: { codex: [customHome] },
+    allTimeSince: '2024-01-01', commandTimeoutMs: 1000,
+    deviceId: 'fixture-device', agentVersion: 'fixture', intervalMs: 60 * 60 * 1000,
+    watchEnabled: true, watchUsePolling: false, watchTriggersCollection: true, watchDebounceMs: 10,
+    historyEnabled: false, dailyHistoryArchiveEnabled: false, anchorPersistenceEnabled: false,
+    codexLocalUsageEnabled: false, wslScanEnabled: false,
+    runTokscale: async (input) => { calls.push(input); return { entries: [] }; },
+    onUpdate: (summary) => updates.push(summary)
+  });
+  const sidecar = path.join(customHome, 'state_5.sqlite-shm');
+  await waitForCondition(() => updates.length === 1 && ignoredByWatcher.length === 1);
+  assert.equal(ignoredByWatcher[0]?.(sidecar) ?? false, false, 'an empty custom root is not a Codex home yet');
+
+  fs.mkdirSync(path.join(customHome, 'sessions'));
+  watchHandler('add', path.join(customHome, 'sessions'));
+  await waitForCondition(() => updates.length === 2 && ignoredByWatcher.length === 2);
+  assert.deepEqual(calls.at(-1).flags, ['--today'], 'the rebuild happens on the anchored Today tick');
+  assert.equal(ignoredByWatcher[1](sidecar), true, 'the rebuilt watcher ignores the home catalog sidecars');
+  assert.equal(ignoredByWatcher[1](path.join(customHome, 'sessions', 'rollout.jsonl')), false);
 });
 
 test('smart collection lets a successful manual refresh acknowledge existing activity', async () => {
