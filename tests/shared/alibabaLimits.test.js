@@ -59,6 +59,8 @@ function status(code, body = '{}') {
   return () => ({ ok: code >= 200 && code < 300, status: code, text: async () => body });
 }
 
+// Cookie-only tests explicitly disable CLI discovery, including fixed install
+// directories, so a developer's local Bailian login cannot bypass fixture HTTP.
 // A sec_token is resolved before every quota call; these routes keep it out of
 // the way so each test asserts on the request it actually cares about.
 const NO_SEC_TOKEN = [
@@ -362,7 +364,7 @@ test('parsePersonalUsage rejects a payload with no window fields', () => {
 });
 
 test('fetchAlibabaLimits reports notConfigured without a cookie', async () => {
-  const [provider] = await fetchAlibabaLimits({}, { env: {} });
+  const [provider] = await fetchAlibabaLimits({}, { env: {}, existsSync: () => false });
   assert.equal(provider.provider, 'alibaba');
   assert.equal(provider.status, 'notConfigured');
   assert.equal(provider.region, 'cn');
@@ -377,7 +379,7 @@ test('fetchAlibabaLimits posts GetSubscriptionSummary and normalizes the Team po
 
   const [provider] = await fetchAlibabaLimits(
     { alibabaCookie: 'login_aliyunid_pk=abc; login_aliyunid_csrf=tok' },
-    { env: {}, fetch: fetchFn }
+    { env: {}, existsSync: () => false, fetch: fetchFn }
   );
 
   const quota = calls.find((call) => call.url.includes('GetSubscriptionSummary') && call.init.method === 'POST');
@@ -407,7 +409,7 @@ test('fetchAlibabaLimits sends a bare-origin Referer', async () => {
     ['GetSubscriptionSummary', ok(REAL_MAINLAND_TEAM_BODY)]
   ]);
 
-  await fetchAlibabaLimits({ alibabaCookie: 'a=b' }, { env: {}, fetch: fetchFn });
+  await fetchAlibabaLimits({ alibabaCookie: 'a=b' }, { env: {}, existsSync: () => false, fetch: fetchFn });
 
   for (const call of calls) {
     const referer = call.init.headers?.Referer;
@@ -424,7 +426,7 @@ test('fetchAlibabaLimits targets the international console for the intl variant'
 
   await fetchAlibabaLimits(
     { alibabaCookie: 'a=b', alibabaVariant: 'intl' },
-    { env: {}, fetch: fetchFn }
+    { env: {}, existsSync: () => false, fetch: fetchFn }
   );
 
   const quota = calls.find((call) => call.url.includes('GetSubscriptionSummary') && call.init.method === 'POST');
@@ -442,7 +444,7 @@ test('fetchAlibabaLimits keeps an empty subscription visible without a window', 
     ['GetSubscriptionSummary', ok({ Success: true, Data: { TotalCount: 0 }, Code: '200' })]
   ]);
 
-  const [provider] = await fetchAlibabaLimits({ alibabaCookie: 'a=b' }, { env: {}, fetch: fetchFn });
+  const [provider] = await fetchAlibabaLimits({ alibabaCookie: 'a=b' }, { env: {}, existsSync: () => false, fetch: fetchFn });
   assert.equal(provider.status, 'ok');
   assert.deepEqual(provider.windows, []);
 });
@@ -459,7 +461,7 @@ test('fetchAlibabaLimits maps HTTP and envelope failures to distinct statuses', 
 
   for (const [respond, expected] of cases) {
     const { fetchFn } = routedFetch([...NO_SEC_TOKEN, ['GetSubscriptionSummary', respond]]);
-    const [provider] = await fetchAlibabaLimits({ alibabaCookie: 'a=b' }, { env: {}, fetch: fetchFn });
+    const [provider] = await fetchAlibabaLimits({ alibabaCookie: 'a=b' }, { env: {}, existsSync: () => false, fetch: fetchFn });
     assert.equal(provider.status, expected);
     assert.equal(provider.region, 'cn');
   }
@@ -491,7 +493,7 @@ test('fetchAlibabaLimits reads Personal rolling windows from the quota host', as
 
   const [provider] = await fetchAlibabaLimits(
     { alibabaCookie: 'login_aliyunid_pk=abc; cna=anon1', alibabaVariant: 'cn-personal' },
-    { env: {}, fetch: fetchFn }
+    { env: {}, existsSync: () => false, fetch: fetchFn }
   );
 
   const usage = calls.find((call) => decodeURIComponent(call.url).includes('api/v2/usage'));
@@ -536,7 +538,7 @@ test('fetchAlibabaLimits reads a monthly-only Personal window', async () => {
 
   const [provider] = await fetchAlibabaLimits(
     { alibabaCookie: 'a=b', alibabaVariant: 'cn-personal' },
-    { env: {}, fetch: fetchFn }
+    { env: {}, existsSync: () => false, fetch: fetchFn }
   );
 
   assert.equal(provider.status, 'ok');
@@ -574,7 +576,7 @@ test('fetchAlibabaLimits keeps a monthly window beside the rolling pair', async 
 
   const [provider] = await fetchAlibabaLimits(
     { alibabaCookie: 'a=b', alibabaVariant: 'cn-personal' },
-    { env: {}, fetch: fetchFn }
+    { env: {}, existsSync: () => false, fetch: fetchFn }
   );
 
   assert.equal(provider.status, 'ok');
@@ -600,7 +602,7 @@ test('fetchAlibabaLimits retries a Personal response that carries no windows', a
 
   const [provider] = await fetchAlibabaLimits(
     { alibabaCookie: 'a=b', alibabaVariant: 'intl-personal' },
-    { env: {}, fetch: fetchFn, setTimeout: (fn) => fn() }
+    { env: {}, existsSync: () => false, fetch: fetchFn, setTimeout: (fn) => fn() }
   );
 
   assert.equal(usageCalls, 2);
@@ -622,7 +624,7 @@ test('fetchAlibabaLimits gives up after the bounded Personal retry budget', asyn
 
   const [provider] = await fetchAlibabaLimits(
     { alibabaCookie: 'a=b', alibabaVariant: 'cn-personal' },
-    { env: {}, fetch: fetchFn, setTimeout: (fn) => fn() }
+    { env: {}, existsSync: () => false, fetch: fetchFn, setTimeout: (fn) => fn() }
   );
 
   assert.equal(usageCalls, 3);
@@ -638,7 +640,7 @@ test('fetchAlibabaLimits propagates an abort instead of reporting a status', asy
   await assert.rejects(
     () => fetchAlibabaLimits(
       { alibabaCookie: 'a=b' },
-      { env: {}, fetch: async () => { throw new Error('must not reach the network'); }, signal: controller.signal }
+      { env: {}, existsSync: () => false, fetch: async () => { throw new Error('must not reach the network'); }, signal: controller.signal }
     ),
     (error) => error.name === 'AbortError'
   );
@@ -656,7 +658,7 @@ test('fetchAlibabaLimits stops the sec_token hunt once the refresh is aborted', 
   await assert.rejects(
     () => fetchAlibabaLimits(
       { alibabaCookie: 'a=b' },
-      { env: {}, fetch: fetchFn, signal: controller.signal }
+      { env: {}, existsSync: () => false, fetch: fetchFn, signal: controller.signal }
     ),
     (error) => error.name === 'AbortError'
   );
