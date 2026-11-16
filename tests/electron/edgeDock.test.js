@@ -212,6 +212,7 @@ test('reopening hides the previous reading before a delayed placement acknowledg
     const clearCardSwitch = () => {};
     const captureCardSwitch = (_old, _same, opening) => { switches.push(opening); return null; };
     const animateCardSwitch = () => {};
+    const animateSessionActivity = () => {};
     const providerCard = cell => {
       const node = document.createElement('section'); node.className = 'edge-dock-card';
       node.getBoundingClientRect = () => ({ height: cell.height });
@@ -2825,37 +2826,12 @@ test('the running arc clears the mark and stays inside the quota ring', () => {
   assert.doesNotMatch(spinner, /edge-dock-ring-fill/);
 });
 
-// Stats pushes rebuild the rail. The rotation must retain its phase across those
-// swaps, including frequent pushes while an agent is working.
-test('the running arc resumes its phase rather than restarting on every repaint', () => {
-  const css = readRendererFile(path.join('edgeDock', 'dock.css'));
+// Retained CSS animations keep their own clock across stats and hover pushes.
+test('activity rings do not retime retained CSS animations on repaint', () => {
   const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const period = Number(css.match(/animation: edge-dock-running-spin (\d+)ms/)[1]);
-  assert.equal(Number(dock.match(/const RUNNING_SPIN_MS = (\d+);/)[1]), period, 'the phase anchor must use the animation period');
-  assert.match(dock, /spinner\.style\.animationDelay = `-\$\{Date\.now\(\) % RUNNING_SPIN_MS\}ms`;/);
   const ring = dock.slice(dock.indexOf('function ringNode('), dock.indexOf('function providerCellNode('));
-  assert.match(ring, /spinner\.style\.animationDelay/);
+  assert.doesNotMatch(ring, /animationDelay/);
   assert.match(ring, /spinner\.setAttribute\('aria-hidden', 'true'\)/);
-});
-
-test('waiting ring keeps its phase across renewals and resets after waiting clears', () => {
-  const dock = readRendererFile(path.join('edgeDock', 'dock.js'));
-  const body = dock.slice(dock.indexOf('function waitingRingStart('), dock.indexOf('function ringNode('));
-  const starts = new Map();
-  let clock = 100;
-  const start = Function('waitingRingStarts', 'performance', `return (${body})`)(
-    starts, { now: () => clock }
-  );
-  assert.equal(start('claude', true), 100);
-  clock = 1500;
-  assert.equal(start('claude', true), 100, 'a heartbeat must not replay the entry');
-  assert.equal(start('codex', true), 1500, 'providers enter waiting independently');
-  clock = 5000;
-  assert.equal(start('claude', true), 100, 'a long wait keeps the original phase anchor');
-  assert.equal(start('claude', false), null);
-  assert.equal(starts.has('claude'), false);
-  assert.equal(start('claude', true), 5000, 'a later wait gets its own entry');
-  assert.equal(start('codex', true), 1500, 'another provider remains undisturbed');
 });
 
 // The handle's exit is a move now rather than a blink. The window's fade is the main
@@ -3576,6 +3552,7 @@ for (const kind of ['provider', 'stat']) {
         const { document, el, root, contentLayer, stagingLayer, bridge, pluginHost } = deps;
         const surface = 'bubble', CARD_SCROLL_SELECTOR = '.edge-dock-accounts, .edge-dock-session-list', BREAKDOWN_VISIBLE_ROWS = 6;
         const prefersReducedMotion = () => false;
+        const animateSessionActivity = () => {};
         const overflowText = { refresh() {}, preserveReading() {} };
         const cardResetAnimator = { capture() {}, animate() {} };
         const pluginContent = null, bubbleSizeObserver = null;

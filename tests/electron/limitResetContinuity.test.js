@@ -92,6 +92,16 @@ function harness({ used = false } = {}) {
   return { animator, frame, panel, refresh, retain, reduce: () => { reduced = true; } };
 }
 
+test('reset capture preserves CSS hover and quota transitions', () => {
+  const h = harness();
+  const item = h.panel.rows[0].items[0];
+  const hover = item.fill.animate([], { duration: 140 });
+  const quota = item.fill.animate([], { duration: 420 });
+  h.animator.capture(h.panel);
+  assert.equal(hover.playState, 'running');
+  assert.equal(quota.playState, 'running');
+});
+
 test('non-reset readings cancel active and queued refills on retained quota nodes', () => {
   for (const started of [false, true]) {
     const h = harness();
