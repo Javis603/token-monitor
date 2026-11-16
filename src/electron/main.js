@@ -2684,7 +2684,7 @@ function loadCredentialSettings(saved) {
     // every other provider's credentials for this session.
     let stored;
     try {
-      stored = migrateAccountSlots(store, saved);
+      stored = migrateAccountSlots(store, saved, Date.now, process.env);
     } catch (error) {
       reportCredentialStorageError('could not move saved accounts into the account list', error);
       stored = store.settingsCredentials();

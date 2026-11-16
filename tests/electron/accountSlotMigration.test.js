@@ -52,7 +52,7 @@ test('Qoder environment site is copied, cookie moved; migrated account is first'
   assert.equal(migrated.qoderAccountSlots[1].id, 'extra');
   assert.equal(migrated.qoderCookie, undefined);
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
-  assert.match(main, /migrateAccountSlots\(store, saved\)/);
+  assert.match(main, /migrateAccountSlots\(store, saved, Date.now, process\.env\)/);
 
 });
 test('destination verification precedes stripping; crash retry never duplicates', t => {
@@ -136,7 +136,7 @@ test('migration preserves all twenty existing extra accounts', t => {
 test('a failed slot migration at startup keeps every other stored credential loaded', () => {
   const main = require('node:fs').readFileSync(require.resolve('../../src/electron/main.js'), 'utf8');
   const body = main.slice(main.indexOf('function loadCredentialSettings'), main.indexOf('function migrateLegacyMimoCredentialFiles'));
-  assert.match(body, /try \{\s*stored = migrateAccountSlots\(store, saved\);\s*\} catch \(error\) \{[^}]*stored = store\.settingsCredentials\(\);/);
+  assert.match(body, /try \{\s*stored = migrateAccountSlots\(store, saved, Date.now, process\.env\);\s*\} catch \(error\) \{[^}]*stored = store\.settingsCredentials\(\);/);
 });
 
 test('migration runs once per provider and is recorded like the store\'s other migrations', t => {
@@ -179,3 +179,15 @@ test('a stored fixed credential left by a failed migration is reported as config
   assert.equal(accountStatusProjection({ deepseekApiKey: 'stranded' }, {}).deepseekApiKeyConfigured, true);
   assert.equal(accountStatusProjection({}, {}).deepseekApiKeyConfigured, false);
 });
+
+test('a stored console token beside an environment API key stays with the environment account', t => {
+  const store = fixture(t, { deepseekWebToken: 'stored-console-token' });
+  const env = { DEEPSEEK_API_KEY: 'env-key' };
+  const migrated = migrateAccountSlots(store, {}, Date.now, env);
+  // No slot is created from a companion alone, and the companion is not stripped.
+  assert.equal(migrated.deepseekAccountSlots, undefined);
+  assert.equal(migrated.deepseekWebToken, 'stored-console-token');
+  assert.equal(migrated.deepseekApiKey, undefined, 'the environment secret is never persisted');
+  assert.equal(store.readDocument().migrations.accountSlots.deepseek, 1);
+});
+

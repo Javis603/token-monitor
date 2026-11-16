@@ -11,7 +11,7 @@ const ACCOUNT_SLOT_MIGRATION_VERSION = 1;
 // store's other migrations, so a provider that opts in later migrates once too.
 // Read the real document before every write: invalid/unsupported/symlinked
 // stores must throw, never become an empty replacement.
-function migrateAccountSlots(store, settings, now = Date.now) {
+function migrateAccountSlots(store, settings, now = Date.now, env = process.env) {
   for (const entry of LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots)) {
     let document = store.readDocument();
     if (Number(document.migrations.accountSlots?.[entry.id] || 0) >= ACCOUNT_SLOT_MIGRATION_VERSION) continue;
@@ -20,11 +20,21 @@ function migrateAccountSlots(store, settings, now = Date.now) {
       return target;
     };
     const stored = store.settingsCredentials(document);
-    if (!entry.fields.some(field => field.kind === 'credential' && stored[field.key])) {
+    // Companion fields can belong to an environment account. Move them only
+    // when a stored primary credential (or one of its alternatives) moves too.
+    const credentials = [entry.status.credential, ...(entry.form?.credentialChoice?.fields || [])];
+    if (!credentials.some(key => stored[key])) {
       store.writeDocument(mark(document));
       continue;
     }
     const values = defaultAccountValues(entry, { ...settings, ...stored }, {});
+    // Only non-secret companions may borrow the environment. Secrets remain
+    // in the ephemeral environment lane, never copied into a stored slot.
+    for (const field of entry.fields) {
+      const companion = field.kind === 'setting' || entry.form?.fields?.some(form => form.key === field.key && form.secret === false);
+      if (!companion || !(field.key in values) || values[field.key]) continue;
+      values[field.key] = field.resolve?.(env) || field.envFallback?.map(key => env[key]).find(Boolean) || field.configDefault || '';
+    }
     const fingerprint = accountValuesFingerprint(values);
     const key = accountSlotKey(entry);
     const raw = stored[key] || [];
@@ -45,7 +55,8 @@ function migrateAccountSlots(store, settings, now = Date.now) {
       slot = { id: randomUUID(), label: '', enabled: true, values,
         accountKey: identity.accountKey || hashKey(entry.id, 'account-slot', 'default'),
         accountKeyAliases: identity.accountKeyAliases || [],
-        serverIdentity: identity.serverIdentity === true || Boolean(proves && proves(identity.accountKey, values, identity.accountKeyAliases || [])),
+        serverIdentity: identity.serverIdentity === true || Boolean(proves && identity.accountKey !== hashKey(entry.id, 'account-slot', 'default')
+          && proves(identity.accountKey, values, identity.accountKeyAliases || [])),
         createdAt: timestamp, updatedAt: timestamp };
       store.replaceSettingsCredentials({ ...stored, [key]: [slot, ...slots] }, document);
     }
