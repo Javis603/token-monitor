@@ -47,14 +47,14 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     const entry = entryFor(providerId);
     return entry ? { ok: true, accounts: dto(entry) } : failure('unsupportedProvider');
   }
-  function save(providerId, values, { id, label = '', replaceAnyway = false } = {}) {
+  function save(providerId, values, { replacing = false, id, label = '', replaceAnyway = false } = {}) {
     return serialize(async () => {
       const entry = entryFor(providerId);
       if (!entry) return failure('unsupportedProvider');
       const previous = slots(entry);
-      const old = id && previous.find(slot => slot.id === id);
-      if (id && !old) return failure('accountNotFound');
-      if (!id && previous.length >= 20) return failure('slotLimit');
+      const old = replacing ? previous.find(slot => slot.id === id) : null;
+      if (replacing && !old) return failure('accountNotFound');
+      if (!replacing && previous.length >= 20) return failure('slotLimit');
       let rejected;
       // Reuse the fixed credential validator, including transport isolation and
       // unauthorized/indeterminate verdicts. Never return its settings payload.
@@ -86,7 +86,10 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
       });
       if (!values || typeof values !== 'object' || Array.isArray(values)) return { saved: false, verdict: 'invalid', status: 'required' };
       const draft = Object.fromEntries(accountForm(entry).fields.map(field => [field.key,
-        Object.hasOwn(values, field.key) ? values[field.key] : field.secret ? '' : entry.fields.find(item => item.key === field.key)?.configDefault || '']));
+        Object.hasOwn(values, field.key) ? values[field.key]
+          // A replacement changes only what it names; everything else stays the account's own.
+          : old && Object.hasOwn(old.values, field.key) ? old.values[field.key]
+          : field.secret ? '' : entry.fields.find(item => item.key === field.key)?.configDefault || '']));
       const result = await commands.saveCredential(providerId, draft, { includeIndependentSettings: true });
       if (rejected) return rejected;
       // Fetchers may throw arbitrary error codes; only the validator's bounded
@@ -120,7 +123,7 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
       const entry = entryFor(providerId);
       if (!entry) return false;
       const fingerprint = accountValuesFingerprint(dispatchedValues);
-      if (id === 'default') {
+      if (id === null) {
         if (fingerprint !== accountValuesFingerprint(defaultAccountValues(entry, getSettings(), env))) return false;
         await write({ [defaultIdentityKey(entry)]: { ...identity, fingerprint } });
         return true;
@@ -137,7 +140,7 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     });
   }
   return { list, add: (provider, values, label) => save(provider, values, { label }),
-    replace: (provider, id, values, replaceAnyway = false) => save(provider, values, { id, replaceAnyway }),
+    replace: (provider, id, values, replaceAnyway = false) => save(provider, values, { replacing: true, id, replaceAnyway }),
     rename: (provider, id, label) => mutate(provider, id, 'rename', label),
     setEnabled: (provider, id, enabled) => mutate(provider, id, 'enabled', enabled),
     remove: (provider, id) => mutate(provider, id, 'remove'),

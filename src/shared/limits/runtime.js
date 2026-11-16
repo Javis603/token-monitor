@@ -376,8 +376,8 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         const slot = owner(row);
         if (slot) {
           // Labels are local metadata; changing them never replaces quota data.
-          if (slot.label) row.accountLabel = slot.label;
-          else delete row.accountLabel;
+          // The provider's accountLabel (Qoder's plan) is never replaced.
+          if (slot.label) row.accountName = slot.label;
         }
       }
       rows.sort((a, b) => slots.indexOf(owner(a)) - slots.indexOf(owner(b)));

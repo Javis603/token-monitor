@@ -10,7 +10,7 @@ const { accountSlotKey, normalizeAccountSlots, defaultIdentityKey, defaultAccoun
  * @typedef {Omit<import('./accounts').AccountDeclaration, 'fields'> & {fetchLimits: (options: SlotOptions, deps: SlotDeps) => any, fields: any[]}} SlotEntry
  * @typedef {Record<string, any>} SlotOptions Flat provider config, previousLimits and optional limitRefreshScope.
  * @typedef {{accountKey: string, accountKeyAliases: string[]}} SlotIdentity
- * @typedef {Record<string, any> & {providerRuntimeState?: Map<string, any>, onAccountSlotResolved?: (provider: string, slotId: string, identity: SlotIdentity, values: Record<string, string>) => void}} SlotDeps Injected transport/env/signal and optional identity persistence hook.
+ * @typedef {Record<string, any> & {providerRuntimeState?: Map<string, any>, onAccountSlotResolved?: (provider: string, slotId: string | null, identity: SlotIdentity, values: Record<string, string>) => void}} SlotDeps Injected transport/env/signal and optional identity persistence hook.
  * @typedef {object} SlotAccount One account of a dispatch: the default account (`values: null`) or an enabled slot.
  * @property {string} id
  * @property {string} label
@@ -176,7 +176,7 @@ function createAccountSlotFetcher(entry) {
         if (!deps.signal?.aborted) for (const row of rows) {
           if (row?.status === 'ok' && row.accountKey && !row.removed
             && (persisted?.fingerprint !== accountValuesFingerprint(values) || row.accountKey !== persisted?.accountKey)) {
-            deps.onAccountSlotResolved?.(entry.id, 'default', {
+            deps.onAccountSlotResolved?.(entry.id, null, {
               accountKey: row.accountKey, accountKeyAliases: row.accountKeyAliases || []
             }, values);
           }
@@ -227,14 +227,16 @@ function createAccountSlotFetcher(entry) {
           const identity = { accountKey, accountKeyAliases: aliases };
           deps.providerRuntimeState?.set(`account-slot:${entry.id}:${accountNamespace(account)}:${accountValuesFingerprint(account.values || defaultAccountValues(entry, options, deps.env || process.env))}`, identity);
           if (!account.known || moved || aliases.join('\n') !== account.accountKeyAliases.join('\n')) {
-            deps.onAccountSlotResolved?.(entry.id, account.id, identity, account.values || defaultAccountValues(entry, options, deps.env || process.env));
+            // The default account is `null`: any string is a valid slot id, including 'default'.
+            deps.onAccountSlotResolved?.(entry.id, account.values ? account.id : null, identity, account.values || defaultAccountValues(entry, options, deps.env || process.env));
           }
         }
         const { accountKeyAliases: _reported, ...answer } = row;
         const emit = {
           ...answer, accountKey,
           ...(aliases.length ? { accountKeyAliases: aliases } : {}),
-          ...(account.label ? { accountLabel: account.label } : {})
+          // The provider's accountLabel carries the plan; the local name is accountName.
+          ...(account.label ? { accountName: account.label } : {})
         };
         // A second account reporting an identity already answered in this pass
         // is the same upstream account: one row, the first reading that worked,

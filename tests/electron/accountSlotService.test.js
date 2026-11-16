@@ -99,7 +99,7 @@ test('real runtime default identity survives restart and rejects a changed defau
     await runtime.refresh({}, 'settings-change');
     assert.equal(runtime.getSnapshot().providers[0].accountKey, hashKey('deepseek', 'default'));
     h.settings = { ...h.settings, deepseekApiKey: 'other' };
-    assert.equal(await h.service.resolved('deepseek', 'default', { accountKey: 'stale', accountKeyAliases: [] }, { deepseekApiKey: 'default', deepseekWebToken: '' }), false);
+    assert.equal(await h.service.resolved('deepseek', null, { accountKey: 'stale', accountKeyAliases: [] }, { deepseekApiKey: 'default', deepseekWebToken: '' }), false);
   } finally { runtime.stop(); }
 });
 test('real settings-change invalidation removes last slot row; pause/resume and multi-account signal clear', async () => {
@@ -194,7 +194,7 @@ test('slot edits offline preserve sibling readings and update local label and or
   try {
     await runtime.refresh({}, 'settings-change'); offline = true;
     await h.service.rename('deepseek', id, 'Renamed'); await refresh;
-    assert.equal(retained().find(row => row.accountKey === hashKey('deepseek', 'SECRET-one')).accountLabel, 'Renamed');
+    assert.equal(retained().find(row => row.accountKey === hashKey('deepseek', 'SECRET-one')).accountName, 'Renamed');
     await h.service.move('deepseek', second, 'up'); await refresh;
     assert.deepEqual(retained().map(row => row.accountKey), ['default', 'SECRET-two', 'SECRET-one'].map(key => hashKey('deepseek', key)));
     await h.service.setEnabled('deepseek', id, false); await refresh;
@@ -296,4 +296,27 @@ for (const operation of ['replace', 'remove', 'disable']) test(`late slot dispat
     else if (operation === 'disable') assert.equal(h.settings.deepseekAccountSlots[0].enabled, false);
     else assert.deepEqual(runtime.getSnapshot().providers.map(row => row.accountKey), [hashKey('deepseek', 'new')]);
   } finally { release?.(); runtime.stop(); }
+});
+
+test('a slot whose id is "default" is still a slot, and the default identity is untouched', async () => {
+  const h = harness();
+  h.settings = { ...h.settings, deepseekAccountSlots: [{ id: 'default', values: { deepseekApiKey: 'SECRET-slot' } }] };
+  const identity = { accountKey: hashKey('slot-account'), accountKeyAliases: [] };
+  assert.equal(await h.service.resolved('deepseek', 'default', identity, { deepseekApiKey: 'SECRET-slot' }), true);
+  assert.equal(h.settings.deepseekAccountSlots[0].accountKey, identity.accountKey);
+  assert.equal(h.settings.deepseekDefaultAccountIdentity, undefined);
+});
+
+test('a replacement changes only the fields it names, and needs an existing id', async () => {
+  const h = harness(); let userId = 'one';
+  h.fetch = async url => url.includes('/organization-shared-usages/') ? response({}, 404)
+    : response({ userId, total_quota: { quota_summary: { limit_value: 100, used_value: 1, remaining_value: 99 } } });
+  const a = await h.service.add('qoder', { qoderCookie: 'token=one', qoderSite: 'cn' });
+  const id = a.accounts[0].id;
+  assert.equal((await h.service.replace('qoder', id, { qoderCookie: 'token=again' })).saved, true);
+  assert.equal(h.settings.qoderAccountSlots[0].values.qoderSite, 'cn');
+  for (const missing of ['', undefined, 'nope']) {
+    assert.equal((await h.service.replace('qoder', missing, { qoderCookie: 'token=x' })).errorCode, 'accountNotFound');
+  }
+  assert.equal(h.settings.qoderAccountSlots.length, 1);
 });

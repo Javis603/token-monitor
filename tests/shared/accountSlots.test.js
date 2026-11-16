@@ -78,7 +78,7 @@ test('6 credential replacement aliases and removes the old identity', async () =
 });
 test('7 duplicate resolved accounts keep only the first', async () => {
   const rows = live(await fake(() => reading('same'))(config(slot('a', undefined, { label: 'First' }), slot('b')), deps()));
-  assert.equal(rows.length, 1); assert.equal(rows[0].accountLabel, 'First');
+  assert.equal(rows.length, 1); assert.equal(rows[0].accountName, 'First');
 });
 test('a duplicate that answers wins over an earlier failed or unconfigured copy of the same account', async () => {
   for (const first of [slot('a', undefined, { accountKey: 'K' }), slot('missing', {}, { accountKey: 'K' })]) {
@@ -396,7 +396,7 @@ test('zero slots with identity observer preserve raw results and last-good keyle
     [{ ...reading('REAL'), accountKeyAliases: ['alias'] }, { provider: 'deepseek', accountKey: 'GONE', removed: true }]]) {
     assert.equal(await fake(() => raw)({ deepseekApiKey: 'default', previousLimits: { providers: [reading('HELD')] } }, d), raw);
   }
-  assert.equal(calls.length, 2); assert.equal(calls[0][1], 'default');
+  assert.equal(calls.length, 2); assert.equal(calls[0][1], null);
   assert.equal(calls[0][3].deepseekApiKey, 'default');
   let fail = false;
   const runtime = createLimitsRuntime({ limitProviders: 'deepseek', deepseekApiKey: 'default' }, { ...d, autoStart: false, autoRetry: false, providerFetchers: { deepseek: fake(() => fail ? { provider: 'deepseek', status: 'unavailable' } : reading('REAL')) } });
@@ -405,5 +405,16 @@ test('zero slots with identity observer preserve raw results and last-good keyle
     await runtime.refresh({}, 'settings-change');
     assert.equal(runtime.getSnapshot().providers[0].windows.length, 1);
     assert.equal(runtime.getSnapshot().providers[0].accountKey, 'REAL');
+  } finally { runtime.stop(); }
+});
+
+test('a slot name never replaces the provider label that carries the plan', async () => {
+  const fetch = fake((o) => ({ ...reading(o.deepseekApiKey.toUpperCase()), accountLabel: 'Pro' }));
+  const rows = live(await fetch(config(slot('a', undefined, { label: 'Work' }), slot('b')), deps()));
+  assert.deepEqual(rows.map((r) => [r.accountKey, r.accountLabel, r.accountName || '']), [['A', 'Pro', 'Work'], ['B', 'Pro', '']]);
+  const runtime = runtimeFor(fetch, config(slot('a', undefined, { label: 'Work', accountKey: 'A' }), slot('b', undefined, { accountKey: 'B' })));
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    assert.deepEqual(runtime.getSnapshot().providers.map((r) => [r.accountKey, r.accountLabel, r.accountName || '']), [['A', 'Pro', 'Work'], ['B', 'Pro', '']]);
   } finally { runtime.stop(); }
 });
