@@ -1003,9 +1003,10 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   const providersWithConfiguredAccounts = new Set();
   const providersWithFreshConfiguredAccounts = new Set();
   const providersWithFreshObservations = new Set();
-  // By provider id, unlike the freshness keys above, which some providers scope
-  // to a source or an account.
-  const configuredProviderIds = new Set();
+  // Lanes with a configured account: the freshness key without its account
+  // part, so a source-scoped provider keeps its lanes apart and an
+  // account-scoped one is still one lane.
+  const configuredLanes = new Set();
 
   for (const device of devices || []) {
     const summary = normalizeLimitsSummary(device?.limits);
@@ -1018,7 +1019,7 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
       const freshnessKey = providerFreshnessKey(provider);
       if (isConfiguredProvider(provider)) {
         providersWithConfiguredAccounts.add(freshnessKey);
-        configuredProviderIds.add(provider.provider);
+        configuredLanes.add(providerFreshnessKey({ ...provider, accountKey: '' }));
       }
       if (!candidate.stale) {
         providersWithFreshObservations.add(freshnessKey);
@@ -1072,7 +1073,10 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
     const knownAccount = candidate.accountKey && (multiAccount || ['minimax', 'copilot'].includes(candidate.provider)
       || (candidate.provider === 'workbuddy' && !isWorkbuddyPlaceholder(candidate)));
     const freshnessKey = providerFreshnessKey(candidate);
-    if (multiAccount && !candidate.accountKey && configuredProviderIds.has(candidate.provider)) continue;
+    // A keyless row says nothing once its lane has a configured account. A lane
+    // with no stable identity of its own (Muse Code beside web accounts) stays.
+    if (multiAccount && !candidate.accountKey
+      && configuredLanes.has(providerFreshnessKey({ ...candidate, accountKey: '' }))) continue;
     const hasFreshObservation = providersWithFreshObservations.has(freshnessKey);
     // Fresh siblings cannot establish freshness for a different account. The
     // first pass already chooses the best observation of each exact identity.

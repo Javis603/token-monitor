@@ -148,3 +148,16 @@ test('a placeholder beside an incoming account does not restore that account thr
   assert.deepEqual(mergeDeviceRecord(existing, incoming).limits.providers.map(p => [p.accountKey, p.status, p.source]),
     [['A1', 'ok', 'oauth'], ['', 'notConfigured', 'api']]);
 });
+
+test('the signal keeps a healthy keyless reading from a separate source lane', () => {
+  const muse = (accountKey, source, extra = {}) => row(accountKey, { provider: 'muse', source, ...extra });
+  const devices = [{ deviceId: 'a', limits: { multiAccountProviders: ['muse'],
+    providers: [muse('M1', 'web'), muse('M2', 'web'), muse('', 'cli')] } }];
+  assert.deepEqual(aggregateLimits(devices, 0, now).providers.map(p => [p.accountKey, p.source]).sort(),
+    [['', 'cli'], ['M1', 'web'], ['M2', 'web']]);
+  // Its failure is that lane's own state too; a keyless web hint is not.
+  devices[0].limits.providers[2] = muse('', 'cli', { status: 'unavailable' });
+  devices[0].limits.providers.push(muse('', 'web', { status: 'unavailable' }));
+  assert.deepEqual(aggregateLimits(devices, 0, now).providers.map(p => [p.accountKey, p.source]).sort(),
+    [['', 'cli'], ['M1', 'web'], ['M2', 'web']]);
+});
