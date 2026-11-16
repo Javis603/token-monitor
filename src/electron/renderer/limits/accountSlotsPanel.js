@@ -44,7 +44,8 @@
       const rank = row => {
         const index = slots.indexOf(slotOwner(slots, row.accountKey, row.accountKeyAliases));
         if (index >= 0) return index;
-        if (localDeviceId && row.sourceDeviceId === localDeviceId) return slots.length;
+        // A row without a source device is this device's (local mode), as in #1520.
+        if (!row.sourceDeviceId || row.sourceDeviceId === localDeviceId) return slots.length;
         const remoteIndex = row.sourceDeviceId && row.sourceDeviceId !== localDeviceId
           ? (presentation[provider]?.order || []).indexOf(row.accountKey) : -1;
         return slots.length + 1 + (remoteIndex < 0 ? (presentation[provider]?.order || []).length : remoteIndex);

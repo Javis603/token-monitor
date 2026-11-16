@@ -155,8 +155,9 @@ test('native desktop quota projection uses the same order for Edge Dock, Notch a
   vm.runInNewContext(source.slice(start, end), context);
   const stats = { limits: { providers: [{ provider: 'qoder', accountKey: 'a' }, { provider: 'qoder', accountKey: 'default' }, { provider: 'qoder', accountKey: 'z' }, { provider: 'qoder', accountKey: 'r1', sourceDeviceId: 'other' }, { provider: 'qoder', accountKey: 'r2', sourceDeviceId: 'other' }] } };
   const result = context.desktopQuotaStats(stats);
-  assert.deepEqual(Array.from(result.limits.providers, row => row.accountKey), ['z', 'a', 'r2', 'r1', 'default']);
-  assert.equal(result.limits.providers[2].accountDisplayName, 'Remote work');
+  // A row without a source device is this device's, so it stays ahead of other devices.
+  assert.deepEqual(Array.from(result.limits.providers, row => row.accountKey), ['z', 'a', 'default', 'r2', 'r1']);
+  assert.equal(result.limits.providers[3].accountDisplayName, 'Remote work');
   assert.equal(stats.limits.providers[0].accountKey, 'a');
   assert.equal(context.desktopQuotaStats(null), null);
 });
@@ -1117,3 +1118,20 @@ test('Alt+arrow on a remote row is ignored while a remote row is dragged', () =>
   assert.deepEqual(h.calls, []);
   h.emit('pointercancel', -100); await h.flush();
 }));
+
+test('rows without a source device rank as this device, ahead of other devices', () => {
+  const records = [
+    { provider: 'qoder', accountKey: 'r1', sourceDeviceId: 'other' },
+    { provider: 'qoder', accountKey: 'plain' }
+  ];
+  assert.deepEqual(applyAccountOrder(records, { qoder: [] }, 'local', { qoder: { labels: {}, order: ['r1'] } }).map(row => row.accountKey), ['plain', 'r1']);
+});
+
+test('presentation labels keep the newest entries at the cap and ignore invalid ones', () => {
+  const { normalizeAccountPresentation } = require('../../src/electron/limits/accountPresentation');
+  const labels = { bad: 7, ...Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`k${i}`, `L${i}`])), newest: 'New name' };
+  const result = normalizeAccountPresentation({ qoder: { labels, order: [] } }).qoder.labels;
+  assert.equal(Object.keys(result).length, 200);
+  assert.equal(result.newest, 'New name');
+  assert.equal(result.bad, undefined);
+});
