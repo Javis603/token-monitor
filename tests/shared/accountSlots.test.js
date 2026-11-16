@@ -80,6 +80,13 @@ test('7 duplicate resolved accounts keep only the first', async () => {
   const rows = live(await fake(() => reading('same'))(config(slot('a', undefined, { label: 'First' }), slot('b')), deps()));
   assert.equal(rows.length, 1); assert.equal(rows[0].accountName, 'First');
 });
+test('a duplicate that answers wins over an earlier failed or unconfigured copy of the same account', async () => {
+  for (const first of [slot('a', undefined, { accountKey: 'K' }), slot('missing', {}, { accountKey: 'K' })]) {
+    const rows = live(await fake((o) => o.deepseekApiKey === 'a' ? { provider: 'deepseek', status: 'unauthorized' } : reading('K'))(
+      config(first, slot('b', undefined, { accountKey: 'K' })), deps()));
+    assert.deepEqual(rows.map((r) => [r.accountKey, r.status]), [['K', 'ok']]);
+  }
+});
 test('8 environment default and slot credentials stay isolated', async () => {
   const seen = [];
   const rows = live(await LIMIT_PROVIDER_FETCHERS.deepseek(config(slot('slot')), { env: { DEEPSEEK_API_KEY: 'environment' }, probe: true, fetch: async (_url, init) => { seen.push(init.headers.Authorization); return response(balance); } }));

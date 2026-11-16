@@ -200,7 +200,8 @@ function createAccountSlotFetcher(entry) {
       // account's identity in this pass is never another account's alias.
       const live = new Set(answered.map((answer) => answer.accountKey));
       const rows = [];
-      const emitted = new Set();
+      /** @type {Map<string, number>} */
+      const emitted = new Map();
       for (const { account, row, accountKey, moved } of answered) {
         const aliases = [...new Set([...account.accountKeyAliases, ...(row.accountKeyAliases || []), ...(moved ? [account.accountKey] : [])])]
           .filter((alias) => !live.has(alias)).slice(-8);
@@ -213,16 +214,18 @@ function createAccountSlotFetcher(entry) {
             deps.onAccountSlotResolved?.(entry.id, account.id, identity);
           }
         }
-        // A second account reporting an identity already answered in this pass
-        // is the same upstream account; the first answer stands.
-        if (emitted.has(accountKey)) continue;
-        emitted.add(accountKey);
         const { accountKeyAliases: _reported, ...answer } = row;
-        rows.push({
+        const emit = {
           ...answer, accountKey,
           ...(aliases.length ? { accountKeyAliases: aliases } : {}),
           ...(!row.accountName && account.label ? { accountName: account.label } : {})
-        });
+        };
+        // A second account reporting an identity already answered in this pass
+        // is the same upstream account: one row, the first reading that worked,
+        // so a stale duplicate credential cannot hide a working one.
+        const index = emitted.get(accountKey);
+        if (index === undefined) { emitted.set(accountKey, rows.length); rows.push(emit); }
+        else if (rows[index].status !== 'ok' && emit.status === 'ok') rows[index] = emit;
       }
       // A provider-wide pass that reached every account is a full snapshot: an
       // identity the runtime still holds that no account answered under (a key
