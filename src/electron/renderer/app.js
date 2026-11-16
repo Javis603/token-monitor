@@ -12466,7 +12466,8 @@ function renderLimitProviderCheckboxesNow() {
     const accountGroup = limitProviderAccountGroup(id);
     const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === id);
     const tagInfos = pluginModule ? limitProviderPresentationApi.limitProviderSettingsTags(provider, provenance)
-      : [limitProviderPresentationApi.connectionTag(id, state.settings?.limitConnectionSources || [])].filter(Boolean);
+      : [...limitProviderPresentationApi.limitProviderSettingsTags(provider, provenance).filter(tag => tag.kind === 'status'),
+        limitProviderPresentationApi.connectionTag(id, state.settings?.limitConnectionSources || [])].filter(Boolean);
     if (pluginModule) tagInfos.push(...limitProviderPresentationApi.pluginLimitCapabilityTags(pluginModule));
     const detected = provider.status === 'ok' && !provider.stale;
     if (detected) {
@@ -12509,6 +12510,12 @@ function renderLimitProviderCheckboxesNow() {
     }
     // Multi-account providers use this space for their account summary. Their
     // automatic collection support stays with the capability tags on the left.
+    if (!accountGroup && sources.some(source => ['cli', 'desktop', 'oauth', 'file'].includes(source.kind))) {
+      const mode = document.createElement('span');
+      mode.className = 'cursor-status-pill limit-provider-mode-pill';
+      mode.textContent = t('settings.limits.connection.autoDetect');
+      actions.append(mode);
+    }
     const settings = LIMIT_PROVIDER_SETTINGS[id];
     const usageItems = isEnabled ? limitProviderUsageItemRows(id) : [];
     const hasOptions = Boolean(pluginModule?.credentials || pluginModule?.settingsView || accountGroup || settings || sources.length || usageItems.length);
@@ -12908,7 +12915,7 @@ function limitProviderAccountStatus(providerId) {
 
 function limitProviderConnectionDetail(id, sources, provider) {
   const panel = document.createElement('div');
-  panel.className = 'settings-item';
+  panel.className = 'settings-item limit-provider-connection-sources';
   const copy = document.createElement('span');
   copy.className = 'settings-item-text';
   const title = document.createElement('span');
@@ -12927,14 +12934,14 @@ function limitProviderConnectionDetail(id, sources, provider) {
     summary.className = 'settings-item-desc';
     summary.textContent = current ? t('settings.limits.sources.current', { source: t(current.labelKey) })
       : t('settings.limits.sources.auto');
-    copy.append(summary);
+    title.append(summary);
   }
   for (const source of sources) {
     const detail = document.createElement('span');
     detail.className = 'settings-item-desc';
     detail.textContent = `${t(source.labelKey)} · ${t(source.descriptionKey)}`;
     copy.append(detail);
-    if (source.getUrlFromForm) {
+    if (source.getUrlFromForm && !document.getElementById(`${id}OpenBrowser`)) {
       const link = document.createElement('button');
       link.type = 'button';
       link.className = 'inline-link';

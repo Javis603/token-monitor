@@ -9422,3 +9422,10 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .slot-editor [id$="LogoutButton"], .slot-editor [id$="RefreshButton"] { display: none !important; }
 
 .slot-editor .settings-actions button.slot-save { color: var(--accent); border-color: rgba(var(--accent-rgb), .3); background: rgba(var(--accent-rgb), .12); }
+
+.limit-provider-connection-sources .settings-item-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+}
