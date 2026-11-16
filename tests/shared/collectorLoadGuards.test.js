@@ -5016,6 +5016,52 @@ test('custom Tokscale scan paths stay visible and use recursive extra-root watch
   }
 });
 
+// Title lookups read a custom Codex home's catalog every tick. While Codex is
+// idle that read recreates the -wal/-shm sidecars, so watching them would
+// re-trigger the collector forever. A custom home keeps the built-in contract.
+test('a custom Codex home watches only its transcript trees', () => {
+  const tmp = withTmpHome([path.join('.codex', 'sessions')]);
+  const originalHomedir = os.homedir;
+  const originalCodexHome = process.env.CODEX_HOME;
+  delete process.env.CODEX_HOME;
+  os.homedir = () => tmp;
+  try {
+    const { watchIgnoreMatcher } = freshCollector();
+    const taskHome = path.join(tmp, 'task', 'codex-home');
+    fs.mkdirSync(path.join(taskHome, 'sessions'), { recursive: true });
+    const catalogOnly = path.join(tmp, 'fresh', 'codex-home');
+    fs.mkdirSync(catalogOnly, { recursive: true });
+    fs.writeFileSync(path.join(catalogOnly, 'state_5.sqlite'), '');
+    const ignored = watchIgnoreMatcher('codex', { customScanPaths: { codex: [taskHome, catalogOnly] } });
+
+    assert.equal(ignored(taskHome), false, 'the root itself is always kept');
+    assert.equal(ignored(path.join(taskHome, 'sessions')), false);
+    assert.equal(ignored(path.join(taskHome, 'sessions', '2026', '11', '01', 'rollout-x.jsonl')), false);
+    assert.equal(ignored(path.join(taskHome, 'archived_sessions', 'rollout-y.jsonl')), false);
+    assert.equal(ignored(path.join(taskHome, 'sessions', 'app', 'node_modules')), true);
+    for (const runtime of ['state_5.sqlite', 'state_5.sqlite-shm', 'state_5.sqlite-wal', 'logs_2.sqlite', 'history.jsonl']) {
+      assert.equal(ignored(path.join(taskHome, runtime)), true, `${runtime} is not a live source`);
+    }
+    assert.equal(ignored(path.join(taskHome, 'sqlite', 'state_5.sqlite-shm')), true);
+    // A home whose transcript tree does not exist yet is recognised by its catalog.
+    assert.equal(ignored(path.join(catalogOnly, 'state_5.sqlite-shm')), true);
+    assert.equal(ignored(path.join(catalogOnly, 'sessions')), false);
+
+    // A custom transcript tree and a directory of homes keep the generic policy.
+    const sessionsRoot = path.join(taskHome, 'sessions');
+    const tasks = path.join(tmp, 'task');
+    const generic = watchIgnoreMatcher('codex', { customScanPaths: { codex: [sessionsRoot, tasks] } });
+    assert.equal(generic(path.join(sessionsRoot, '2026', 'rollout-x.jsonl')), false);
+    assert.equal(generic(path.join(tasks, 'other', 'codex-home', 'state_5.sqlite-shm')), false);
+  } finally {
+    os.homedir = originalHomedir;
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('custom roots prune dependency and VCS trees without touching built-in roots', () => {
   const tmp = withTmpHome([path.join('.codex', 'sessions')]);
   const originalHomedir = os.homedir;

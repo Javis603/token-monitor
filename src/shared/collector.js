@@ -1727,10 +1727,10 @@ const HERMES_DB_FILES = new Set(['state.db', 'state.db-wal', 'state.db-shm']);
 // non-standard JSONL placed elsewhere under agents/.
 const OPENCLAW_TRANSCRIPT_DIRS = new Set(['sessions', 'session-sqlite-import-archive']);
 const OPENCLAW_AGENT_DB_WATCH_PATTERN = /^openclaw-agent\.sqlite(?:-(?:wal|shm))?$/;
-// Both Codex homes an agent can own — `agent/codex-home` and the legacy
-// `agent/cli-auth/codex/<profile>` — expose their rollouts under the same two
-// directory names, so one set covers both.
-const OPENCLAW_CODEX_HOME_DIRS = new Set(['sessions', 'archived_sessions']);
+// Every Codex home exposes its rollouts under these two directories: the
+// built-in home, a custom root that is a home, and both homes an OpenClaw agent
+// can own (`agent/codex-home` and the legacy `agent/cli-auth/codex/<profile>`).
+const CODEX_HOME_TRANSCRIPT_DIRS = new Set(['sessions', 'archived_sessions']);
 // OpenCode discovers only direct opencode.db / opencode-<channel>.db files.
 // WAL/SHM are not database inputs to tokscale. WAL events refresh transactions
 // committed before a checkpoint; scan-generated SHM events are filtered below.
@@ -1824,6 +1824,19 @@ const CUSTOM_ROOT_PRUNED_DIRS = new Set([
   '.git', '.hg', '.svn', 'node_modules', '.venv', 'venv', '__pycache__', '.tox'
 ]);
 const pruneDependencyTrees = (parts) => parts.some((part) => CUSTOM_ROOT_PRUNED_DIRS.has(part));
+
+// A custom root that is itself a Codex home keeps the built-in Codex contract:
+// only its transcript trees are live sources. Session titles are read from the
+// home's thread catalog every tick, and while Codex is idle that read-only open
+// recreates the catalog's -wal/-shm; watching the rest of the home would turn
+// each title lookup into another collection.
+function isCodexHome(dir) {
+  if ([...CODEX_HOME_TRANSCRIPT_DIRS].some((name) => dirExists(path.join(dir, name)))) return true;
+  return [dir, path.join(dir, 'sqlite')].some((catalogDir) => {
+    try { return fs.readdirSync(catalogDir).some((name) => /^state_\d+\.sqlite$/.test(name)); } catch (_) { return false; }
+  });
+}
+const pruneCodexHome = (parts) => !CODEX_HOME_TRANSCRIPT_DIRS.has(parts[0]) || pruneDependencyTrees(parts);
 
 function ignoreDesktopTranscriptPath(parts, resolved) {
   const marker = parts.indexOf('.claude');
@@ -2011,7 +2024,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
         && parts[2] !== 'cli-auth'
         && !OPENCLAW_AGENT_DB_WATCH_PATTERN.test(parts[2]);
     }
-    if (parts[2] === 'codex-home') return !OPENCLAW_CODEX_HOME_DIRS.has(parts[3]);
+    if (parts[2] === 'codex-home') return !CODEX_HOME_TRANSCRIPT_DIRS.has(parts[3]);
     if (parts[2] !== 'cli-auth') return true;
     // Only `cli-auth/codex/<profile>` is a Codex home; `cli-auth/<other>` is an
     // authentication profile Tokscale never reads. The profile level is kept so
@@ -2019,7 +2032,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
     // session dirs is pruned the same way it is under codex-home.
     if (parts[3] !== 'codex') return true;
     if (parts.length <= 5) return false;
-    return !OPENCLAW_CODEX_HOME_DIRS.has(parts[5]);
+    return !CODEX_HOME_TRANSCRIPT_DIRS.has(parts[5]);
   });
 
   bound('copilot', withBasename('copilot', '.copilot'), (parts) => {
@@ -2186,9 +2199,9 @@ function watchPolicyEntries(clientsCsv, options = {}) {
           && (!SELF_SYNCED_CLIENTS.has(client) || customScanPaths[client]?.includes(dir))
           && !(claimed.get(client) || EMPTY_SET).has(dir)
         ))
-        .map((dir) => ({ root: canonicalRoot(dir), custom: isCustomOnly(client, canonicalRoot(dir)) }))),
+        .map((dir) => ({ client, root: canonicalRoot(dir), custom: isCustomOnly(client, canonicalRoot(dir)) }))),
     ...(antigravityEnabled && dirExists(antigravityCliDataDir(options))
-      ? [{ root: canonicalRoot(antigravityCliDataDir(options)), custom: false }]
+      ? [{ client: 'antigravity', root: canonicalRoot(antigravityCliDataDir(options)), custom: false }]
       : [])
   ];
   // A directory that is a built-in root for any client keeps everything, even
@@ -2198,9 +2211,17 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   for (const root of builtInRoots) {
     entries.push({ root, prefix: root + path.sep, policy: KEEP_EVERYTHING });
   }
-  for (const root of new Set(recursive.filter((entry) => entry.custom).map((entry) => entry.root))) {
-    if (builtInRoots.has(root)) continue;
-    entries.push({ root, prefix: root + path.sep, policy: pruneDependencyTrees });
+  // A path stays watched while any policy on its root keeps it, so a root
+  // named by two clients keeps the union of their contracts.
+  const customPolicies = new Map();
+  for (const { client, root, custom } of recursive) {
+    if (!custom || builtInRoots.has(root)) continue;
+    const policy = client === 'codex' && isCodexHome(root) ? pruneCodexHome : pruneDependencyTrees;
+    if (!customPolicies.has(root)) customPolicies.set(root, new Set());
+    customPolicies.get(root).add(policy);
+  }
+  for (const [root, policies] of customPolicies) for (const policy of policies) {
+    entries.push({ root, prefix: root + path.sep, policy });
     boundedCount += 1;
   }
   return { entries, boundedCount };
