@@ -108,13 +108,15 @@ async function fetchDeepSeekLimits(options = {}, deps = {}) {
   if (!key) {
     return normalizeLimitProvider({ provider: 'deepseek', source: 'api', status: 'notConfigured', updatedAt: nowIso(now), windows: [] });
   }
+  // The key names the account before any request, so a failed read stays on
+  // that account instead of becoming a keyless provider row.
+  const accountKey = hashKey('deepseek', key);
   try {
     const data = await fetchJson(DEEPSEEK_BALANCE_URL, { Authorization: `Bearer ${key}`, Accept: 'application/json' }, deps);
     if (!data || !Array.isArray(data.balance_infos)) {
       throw errorWithStatus('unavailable', 'unexpected balance response shape');
     }
     const row = selectFundedRow(data.balance_infos);
-    const accountKey = hashKey('deepseek', key);
     const dataDir = sharedDataDir({ env });
     const storePath = deps.deepseekStorePath || path.join(dataDir, 'deepseek-balance-v2.json');
     const legacyStorePath = deps.deepseekLegacyStorePath
@@ -159,6 +161,7 @@ async function fetchDeepSeekLimits(options = {}, deps = {}) {
     return normalizeLimitProvider({
       provider: 'deepseek',
       source: 'api',
+      accountKey,
       status: providerStatusFromError(error),
       updatedAt: nowIso(now),
       windows: []
