@@ -4742,9 +4742,8 @@ const accountSlotLists = {};
 let accountSlotListPending = false;
 function refreshAccountSlotPanels() {
   for (const [id, panel] of accountSlotPanels) {
-    const form = limitAccountForm(id);
     panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
-      Boolean(state.settings?.[form.status.configuredKey]));
+      { records: state.stats?.limits?.providers || [], devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId, presentation: state.settings?.limitAccountPresentation?.[id] });
   }
   if (accountSlotListPending) return;
   accountSlotListPending = true;
@@ -4755,15 +4754,14 @@ function refreshAccountSlotPanels() {
   })).then(() => {
     if (previousSlotLists !== JSON.stringify(accountSlotLists)) render();
     for (const [id, panel] of accountSlotPanels) {
-      const form = limitAccountForm(id);
       panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
-        Boolean(state.settings?.[form.status.configuredKey]));
+        { records: state.stats?.limits?.providers || [], devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId, presentation: state.settings?.limitAccountPresentation?.[id] });
     }
   }).catch(() => {}).finally(() => { accountSlotListPending = false; });
 }
 function desktopLimitRecords() {
   const modules = new Map((state.pluginCatalog?.limits?.modules || []).map(module => [module.id, module]));
-  return window.TokenMonitorAccountSlotsPanel.applyAccountOrder([...(state.stats?.limits?.providers || []), ...(state.pluginCatalog?.limits?.providers || []).filter(row => modules.has(row.provider)).map(row => ({ ...row, pluginQuota: modules.get(row.provider) }))], accountSlotLists, state.settings?.deviceId);
+  return window.TokenMonitorAccountSlotsPanel.applyAccountOrder([...(state.stats?.limits?.providers || []), ...(state.pluginCatalog?.limits?.providers || []).filter(row => modules.has(row.provider)).map(row => ({ ...row, pluginQuota: modules.get(row.provider) }))], accountSlotLists, state.settings?.deviceId, state.settings?.limitAccountPresentation);
 }
 function desktopSurfaceStats() {
   return state.stats ? { ...state.stats, limits: { ...state.stats.limits, providers: desktopLimitRecords() }, pluginLimitModules: state.pluginCatalog?.limits?.modules || [] } : state.stats;

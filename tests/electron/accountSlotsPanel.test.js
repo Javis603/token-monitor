@@ -150,12 +150,13 @@ test('native desktop quota projection uses the same order for Edge Dock, Notch a
   const source = fs.readFileSync(mainPath, 'utf8');
   const start = source.indexOf('function desktopQuotaStats(');
   const end = source.indexOf('\nfunction syncPluginQuotaSurfaceDemand(', start);
-  const context = { require: require('node:module').createRequire(mainPath), applyAccountOrder, LIMIT_PROVIDER_REGISTRY, settings: { deviceId: 'local' }, pluginRuntime: null,
+  const context = { require: require('node:module').createRequire(mainPath), applyAccountOrder, LIMIT_PROVIDER_REGISTRY, settings: { deviceId: 'local', limitAccountPresentation: { qoder: { labels: { r2: 'Remote work' }, order: ['r2', 'r1'] } } }, pluginRuntime: null,
     accountSlotService: { list: id => ({ accounts: id === 'qoder' ? [{ accountKey: 'z' }, { accountKey: 'a' }] : [] }) } };
   vm.runInNewContext(source.slice(start, end), context);
-  const stats = { limits: { providers: [{ provider: 'qoder', accountKey: 'a' }, { provider: 'qoder', accountKey: 'default' }, { provider: 'qoder', accountKey: 'z' }] } };
+  const stats = { limits: { providers: [{ provider: 'qoder', accountKey: 'a' }, { provider: 'qoder', accountKey: 'default' }, { provider: 'qoder', accountKey: 'z' }, { provider: 'qoder', accountKey: 'r1', sourceDeviceId: 'other' }, { provider: 'qoder', accountKey: 'r2', sourceDeviceId: 'other' }] } };
   const result = context.desktopQuotaStats(stats);
-  assert.deepEqual(Array.from(result.limits.providers, row => row.accountKey), ['z', 'a', 'default']);
+  assert.deepEqual(Array.from(result.limits.providers, row => row.accountKey), ['z', 'a', 'r2', 'r1', 'default']);
+  assert.equal(result.limits.providers[2].accountDisplayName, 'Remote work');
   assert.equal(stats.limits.providers[0].accountKey, 'a');
   assert.equal(context.desktopQuotaStats(null), null);
 });
@@ -295,7 +296,7 @@ test('pending slot save queues move pause and rename without dropping operations
 test('local default then stored slots precede remote accounts in aggregate order', () => {
   const row = (accountKey, sourceDeviceId) => ({ provider: 'qoder', accountKey, sourceDeviceId });
   const rows = [row('remote-a', 'remote'), row('b', 'local'), row('remote-b', 'remote'), row('default', 'local'), row('a', 'local')];
-  assert.deepEqual(applyAccountOrder(rows, { qoder: [{ accountKey: 'a' }, { accountKey: 'b' }] }, 'local').map(row => row.accountKey), ['a', 'b', 'remote-a', 'remote-b', 'default']);
+  assert.deepEqual(applyAccountOrder(rows, { qoder: [{ accountKey: 'a' }, { accountKey: 'b' }] }, 'local').map(row => row.accountKey), ['a', 'b', 'default', 'remote-a', 'remote-b']);
 });
 
 test('stale translations describe data rather than expired credentials', () => {
@@ -936,4 +937,150 @@ test('a pending removal blocks starting a drag until it settles', () => withDrag
   assert.equal(h.listeners.has('pointermove'), false, 'a drag cannot measure a list a pending removal is about to change');
   await finishRemove(); await h.flush();
   assert.equal(h.calls.filter(call => call[0] === 'move').length, 0);
+}));
+const remoteFixture = () => ({ records: [
+  { provider: 'qoder', accountKey: 'r1', accountName: 'Remote One', sourceDeviceId: 'other', status: 'ok' },
+  { provider: 'qoder', accountKey: 'r2', accountEmail: 'two@example.com', sourceDeviceId: 'other', status: 'unauthorized' },
+  { provider: 'qoder', accountKey: 'owned', accountKeyAliases: ['old'], sourceDeviceId: 'other' },
+  { provider: 'qoder', accountKey: 'unknown-local', sourceDeviceId: 'local' }
+], devices: [{ deviceId: 'other', displayName: 'Office Mac' }], localDeviceId: 'local', presentation: {} });
+
+test('remote rows follow local rows with device labels and presentation-only menu commands', async () => {
+  const h = harness(), context = remoteFixture();
+  h.ipc.presentation = async (...args) => { h.calls.push(['presentation', ...args]); return { ok: true, accounts: h.slots, presentation: { qoder: { labels: { r1: 'Remote work' }, order: ['r2', 'r1'] } } }; };
+  h.panel.update(h.slots, [], context);
+  assert.equal(h.row('remote:owned'), undefined);
+  assert.equal(h.row('remote:unknown-local'), undefined);
+  const row = h.row('remote:r1');
+  assert.match(row.textContent, /Remote One.*Office Mac/);
+  assert.match(row.textContent, /Connected/);
+  const menu = row.querySelector('.plugin-menu');
+  assert.deepEqual(menu.children.filter(n => n.tagName === 'button').map(n => n.textContent), ['Rename', 'Move up', 'Move down']);
+  assert.match(menu.textContent, /on that device/);
+  assert.equal(row.querySelector('.slot-fix').classList.contains('hidden'), true);
+  await h.click(row, 'Move down');
+  h.click(row, 'Rename'); row.querySelector('.slot-rename').value = 'Remote work';
+  await row.querySelector('.slot-rename').key('Enter');
+  assert.deepEqual(h.calls, [['presentation', 'qoder', 'r1', 'order', ['r2', 'r1']], ['presentation', 'qoder', 'r1', 'rename', 'Remote work']]);
+  assert.deepEqual(h.panel.element.querySelector('.slot-remote-list').children.map(n => n.dataset.slotId), ['remote:r2', 'remote:r1']);
+  assert.ok(h.panel.element.children.indexOf(h.panel.element.querySelector('.slot-list')) < h.panel.element.children.indexOf(h.panel.element.querySelector('.slot-remote-list')));
+});
+
+test('remote presentation names and ordering reach desktop titles without relabeling local owners', () => {
+  const context = remoteFixture();
+  const slots = [{ accountKey: 'local', label: 'Local Work', accountKeyAliases: ['old'] }];
+  const records = [...context.records, { provider: 'qoder', accountKey: 'local', accountName: 'Native', accountEmail: 'local@example.com', sourceDeviceId: 'local' }];
+  const presentation = { qoder: { labels: { r2: 'Remote Work', local: 'Wrong', owned: 'Wrong' }, order: ['r2', 'r1'] } };
+  const result = applyAccountOrder(records, { qoder: slots }, 'local', presentation);
+  assert.deepEqual(result.map(row => row.accountKey), ['owned', 'local', 'unknown-local', 'r2', 'r1']);
+  const { accountTitleLabel } = require('../../src/electron/renderer/accountIdentity');
+  assert.equal(accountTitleLabel(result[3]), 'Remote Work');
+  assert.equal(result[1].accountName, 'Native');
+  assert.equal(accountTitleLabel(result[1]), 'Local Work');
+  assert.equal(accountTitleLabel(result[0]), 'Local Work');
+  const unlabelled = applyAccountOrder([{ provider: 'qoder', accountKey: 'local', accountName: 'Native' }], { qoder: [{ accountKey: 'local' }] }, 'local', presentation);
+  assert.equal(unlabelled[0].accountDisplayName, 'Native');
+  assert.equal(accountName({ source: 'remote', fingerprint: 'abc' }, { accountKey: 'r', accountEmail: 'native@example.com' }, t, { labels: { r: 'Named' } }), 'Named');
+  assert.equal(accountName({ source: 'remote', fingerprint: 'abc' }, {}, t), 'Account #abc');
+});
+
+test('remote drag persists presentation order only and cannot cross the local group', () => withDrag(async h => {
+  const context = remoteFixture();
+  h.panel.update(h.slots, [], context); h.layout();
+  h.ipc.presentation = async (...args) => { h.calls.push(['presentation', ...args]); return { ok: true }; };
+  h.press('remote:r2'); h.emit('pointermove', -100); h.emit('pointerup', -100); await h.flush();
+  assert.deepEqual(h.calls, [['presentation', 'qoder', 'r2', 'order', ['r2', 'r1']]]);
+  assert.deepEqual(h.slots.map(slot => slot.id), ['default', 'a', 'b']);
+}));
+
+test('a changed remote account set during drag does not persist the stale drop', () => withDrag(async h => {
+  const context = remoteFixture();
+  h.panel.update(h.slots, [], context); h.layout();
+  h.ipc.presentation = async (...args) => { h.calls.push(args); return { ok: true }; };
+  h.press('remote:r2'); h.emit('pointermove', -100);
+  h.panel.update(h.slots, [], { ...context, records: context.records.filter(row => row.accountKey !== 'r1') });
+  h.emit('pointerup', -100); await h.flush();
+  assert.deepEqual(h.calls, []);
+  assert.equal(h.row('remote:r1'), undefined);
+}));
+
+test('renderer desktop records project remote presentation for Limits and Home consumers', () => {
+  const fs = require('node:fs'), vm = require('node:vm');
+  const source = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
+  const start = source.indexOf('function desktopLimitRecords()');
+  const context = { window: { TokenMonitorAccountSlotsPanel: { applyAccountOrder } }, accountSlotLists: { qoder: [] }, state: {
+    settings: { deviceId: 'local', limitAccountPresentation: { qoder: { labels: { r2: 'Remote work' }, order: ['r2', 'r1'] } } },
+    stats: { limits: { providers: remoteFixture().records.slice(0, 2) } }
+  } };
+  vm.runInNewContext(source.slice(start, source.indexOf('\nfunction desktopSurfaceStats()', start)), context);
+  const rows = context.desktopLimitRecords();
+  assert.deepEqual(Array.from(rows, row => row.accountKey), ['r2', 'r1']);
+  assert.equal(rows[0].accountDisplayName, 'Remote work');
+});
+
+for (const action of ['menu', 'Alt']) test(`pending remote drag save blocks ${action} steps and new remote drags`, () => withDrag(async h => {
+  const context = remoteFixture();
+  h.panel.update(h.slots, [], context);
+  let finish;
+  h.ipc.presentation = (...args) => {
+    h.calls.push(['presentation', ...args]);
+    return new Promise(resolve => { finish = () => resolve({ ok: true, accounts: h.slots, presentation: { qoder: { order: args[3] } } }); });
+  };
+  const attempt = () => action === 'menu' ? h.click(h.row('remote:r2'), 'Move down') : h.row('remote:r2').key('ArrowDown', true);
+  h.press('remote:r2'); h.emit('pointermove', -100); h.emit('pointerup', -100);
+  attempt();
+  h.press('remote:r1');
+  assert.equal(h.listeners.has('pointermove'), false, 'lock covers the deferred save before paint');
+  await h.flush();
+  attempt();
+  h.press('remote:r1');
+  assert.equal(h.listeners.has('pointermove'), false);
+  const buttons = h.row('remote:r2').querySelector('.plugin-menu').children.filter(n => n.textContent === 'Move up' || n.textContent === 'Move down');
+  assert.ok(buttons.every(n => n.disabled));
+  h.panel.update(h.slots, [], context);
+  attempt();
+  finish(); await h.flush();
+  assert.deepEqual(h.calls, [['presentation', 'qoder', 'r2', 'order', ['r2', 'r1']]]);
+  h.press('remote:r1');
+  assert.equal(h.listeners.has('pointermove'), true, 'remote drag unlocks');
+  h.emit('pointercancel', 0);
+}));
+
+for (const action of ['move', 'rename']) test(`pending remote ${action} presentation write blocks remote drag and stale steps`, () => withDrag(async h => {
+  h.panel.update(h.slots, [], remoteFixture());
+  let finish;
+  h.ipc.presentation = (...args) => { h.calls.push(args); return new Promise(resolve => { finish = () => resolve({ ok: true }); }); };
+  if (action === 'move') h.click(h.row('remote:r1'), 'Move down');
+  else {
+    h.click(h.row('remote:r1'), 'Rename');
+    const input = h.row('remote:r1').querySelector('.slot-rename');
+    input.key('Enter'); input.key('Escape');
+  }
+  h.row('remote:r2').key('ArrowUp', true);
+  h.press('remote:r2');
+  assert.equal(h.listeners.has('pointermove'), false);
+  await h.flush();
+  finish(); await h.flush();
+  assert.equal(h.calls.length, 1, 'no stale step was queued');
+  h.press('remote:r2');
+  assert.equal(h.listeners.has('pointermove'), true);
+  h.emit('pointercancel', 0);
+}));
+
+for (const failure of ['rejected', 'thrown']) test(`failed remote drag save restores stored presentation order when ${failure}`, () => withDrag(async h => {
+  const context = remoteFixture();
+  h.panel.update(h.slots, [], context);
+  h.ipc.presentation = async () => {
+    if (failure === 'thrown') throw new Error('write failed');
+    return { ok: false };
+  };
+  const order = () => h.panel.element.querySelector('.slot-remote-list').children.map(n => n.dataset.slotId);
+  h.press('remote:r2'); h.emit('pointermove', -100); h.emit('pointerup', -100);
+  assert.deepEqual(order(), ['remote:r2', 'remote:r1']);
+  await h.flush();
+  assert.deepEqual(order(), ['remote:r1', 'remote:r2']);
+  assert.equal(h.panel.element.querySelector('.slot-message').textContent, t('settings.slots.failed'));
+  h.press('remote:r2');
+  assert.equal(h.listeners.has('pointermove'), true);
+  h.emit('pointercancel', 0);
 }));

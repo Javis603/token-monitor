@@ -1,5 +1,6 @@
 'use strict';
 
+const { normalizeAccountPresentation, validKey } = require('./accountPresentation');
 const { hashKey } = require('../../shared/hashKey');
 const { runLimitInvalidation } = require('../deviceRuntimeCoordinator');
 const { randomUUID } = require('node:crypto');
@@ -138,6 +139,21 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
       return list(providerId);
     }).catch(() => failure('credentialStorageUnavailable'));
   }
+  function presentation(providerId, accountKey, operation, value) {
+    return serialize(async () => {
+      const entry = entryFor(providerId);
+      if (!entry || !validKey(accountKey)) return failure('invalidOperation');
+      const all = normalizeAccountPresentation(getSettings().limitAccountPresentation);
+      const group = all[providerId] || { labels: {}, order: [] };
+      if (operation === 'rename' && typeof value === 'string') group.labels = { ...group.labels, [accountKey]: value };
+      else if (operation === 'order' && Array.isArray(value) && value.every(validKey)) group.order = value;
+      else return failure('invalidOperation');
+      const next = normalizeAccountPresentation({ ...all, [providerId]: group });
+      await write({ limitAccountPresentation: next });
+      changed(entry, [], false);
+      return { ...list(providerId), presentation: next };
+    }).catch(() => failure('settingsStorageUnavailable'));
+  }
   function resolved(providerId, id, identity, dispatchedValues) {
     return serialize(async () => {
       const entry = entryFor(providerId);
@@ -160,7 +176,7 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
       return true;
     });
   }
-  return { list, add: (provider, values, label) => save(provider, values, { label }),
+  return { list, presentation, add: (provider, values, label) => save(provider, values, { label }),
     replace: (provider, id, values) => save(provider, values, { replacing: true, id }),
     rename: (provider, id, label) => mutate(provider, id, 'rename', label),
     setEnabled: (provider, id, enabled) => mutate(provider, id, 'enabled', enabled),
