@@ -117,6 +117,11 @@ test('11 account scope matches aliases and defaults only when unclaimed', async 
   assert.equal(rows.length, 1); assert.deepEqual(seen, ['a']); seen.length = 0;
   await fetch({ ...options, limitRefreshScope: { provider: 'deepseek', accountKey: 'unclaimed' } }, deps());
   assert.deepEqual(seen, ['default']);
+  // A default account already known under another key is not what an unmatched scope asked for.
+  seen.length = 0;
+  const d = deps(); d.providerRuntimeState.set('account-slot:deepseek:default', { accountKey: 'DEFAULT', accountKeyAliases: [] });
+  assert.deepEqual(await fetch({ ...options, limitRefreshScope: { provider: 'deepseek', accountKey: 'unclaimed' } }, d), []);
+  assert.deepEqual(seen, []);
 });
 test('12 broad raw removals cannot retire sibling identities', async () => {
   const previousLimits = [reading('A'), reading('B')];
@@ -282,4 +287,19 @@ test('a first successful answer adds no alias and retires nothing', async () => 
   const rows = await fake((o) => reading(o.deepseekApiKey))({ deepseekApiKey: 'default', ...config(slot('a')) }, deps());
   assert.deepEqual(rows.map((r) => [r.accountKey, r.removed === true, Object.hasOwn(r, 'accountKeyAliases')]),
     [['default', false, false], ['a', false, false]]);
+});
+
+test('aliases a fetch reports are dropped when they are another account\'s identity', async () => {
+  const fetch = fake((o) => o.deepseekApiKey === 'a' ? { ...reading('A'), accountKeyAliases: ['B'] } : reading('B'));
+  const rows = await fetch(config(slot('a'), slot('b')), deps());
+  assert.deepEqual(rows.map((r) => [r.accountKey, Object.hasOwn(r, 'accountKeyAliases')]), [['A', false], ['B', false]]);
+});
+
+test('a slot keeps the shared data location but no credential from the environment', async () => {
+  const seen = [];
+  const fetch = fake((o, d) => { seen.push(d.env); return reading(o.deepseekApiKey); });
+  await fetch(config(slot('a')), { ...deps(), env: { TOKEN_MONITOR_SHARED_DIR: '/data', DEEPSEEK_API_KEY: 'environment', OTHER: 'x' } });
+  // The environment key makes a default account, which keeps the whole environment.
+  assert.equal(seen[0].DEEPSEEK_API_KEY, 'environment');
+  assert.deepEqual(seen[1], { TOKEN_MONITOR_SHARED_DIR: '/data' });
 });

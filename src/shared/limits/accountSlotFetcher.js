@@ -21,6 +21,16 @@ const { accountSlotKey, normalizeAccountSlots } = require('./accountSlots');
  * @property {string[]} accountKeyAliases
  */
 
+// What a slot's fetch keeps of the environment: where shared data is stored
+// (`sharedDataDir`), so a slot's derived history sits beside the default
+// account's. Everything else is dropped, because a slot never takes a
+// credential from the environment: that is the default account's lane.
+const SLOT_ENV_KEYS = ['TOKEN_MONITOR_SHARED_DIR', 'APPDATA', 'XDG_CONFIG_HOME'];
+/** @param {Record<string, string | undefined>} env */
+function slotEnv(env) {
+  return Object.fromEntries(SLOT_ENV_KEYS.filter((name) => env[name]).map((name) => [name, env[name]]));
+}
+
 // Slots and the default account are namespaced apart, whatever a slot is called.
 /** @param {{id: string, values: Record<string, string> | null}} account */
 function accountNamespace(account) {
@@ -70,7 +80,11 @@ function slotAccounts(entry, options, deps) {
   const scoped = accounts.find((account) => account.accountKey === scopeKey)
     || accounts.find((account) => account.provisional === scopeKey)
     || accounts.find((account) => account.accountKeyAliases.includes(scopeKey));
-  return { accounts: scoped ? [scoped] : accounts.filter((account) => !account.values), scopeKey, previousKeys };
+  if (scoped) return { accounts: [scoped], scopeKey, previousKeys };
+  // No account answers to this key. It can still be the default account's when
+  // this process has not seen that account answer yet; a default account whose
+  // key is known and different is not what was asked for.
+  return { accounts: accounts.filter((account) => !account.values && !account.known), scopeKey, previousKeys };
 }
 
 /** @param {SlotEntry} entry @param {SlotOptions} options @param {SlotDeps} deps */
@@ -103,8 +117,7 @@ function createAccountSlotFetcher(entry) {
       return [{ provider: entry.id, status: 'notConfigured', windows: [], updatedAt }];
     }
     try {
-      // A slot never falls back to the environment: that is the default account's lane.
-      const result = await entry.fetchLimits(callOptions, account.values ? { ...deps, env: {} } : deps);
+      const result = await entry.fetchLimits(callOptions, account.values ? { ...deps, env: slotEnv(deps.env || process.env) } : deps);
       return (Array.isArray(result) ? result : [result]).filter(Boolean);
     } catch (error) {
       deps.noteLimitFailure?.(error);
@@ -157,8 +170,9 @@ function createAccountSlotFetcher(entry) {
         // is the same upstream account; the first answer stands.
         if (emitted.has(accountKey)) continue;
         emitted.add(accountKey);
+        const { accountKeyAliases: _reported, ...answer } = row;
         rows.push({
-          ...row, accountKey,
+          ...answer, accountKey,
           ...(aliases.length ? { accountKeyAliases: aliases } : {}),
           ...(!row.accountName && account.label ? { accountName: account.label } : {})
         });
