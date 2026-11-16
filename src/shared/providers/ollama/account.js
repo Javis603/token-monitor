@@ -4,6 +4,7 @@
 // Ollama limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'ollama',
+  accountSlots: true,
   fetch: 'fetchOllamaLimits',
   fields: [
     {

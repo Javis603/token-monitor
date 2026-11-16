@@ -17,6 +17,7 @@ const OUTPUT_USD_PER_TOKEN = 0;
 const ACTION_PATTERN = /"([0-9a-f]{40,})"[^)]{0,150}"getBillingOverviewResult"/i;
 const MAX_CHUNKS = 60;
 const ACTION_TTL_MS = 12 * 60 * 60 * 1000;
+let cachedCredentialKey = '';
 let cachedActionId = '';
 let cachedRates = null;
 let actionExpiresAt = 0;
@@ -163,6 +164,7 @@ async function discoverBilling(fetchImpl, cookie, signal) {
     if (actionId && inputRate !== null && outputRate !== null) break;
   }
   if (!actionId) throw errorWithStatus('unavailable', 'TypeSafe billing action unavailable');
+  cachedCredentialKey = hashKey('typesafe', cookie);
   cachedActionId = actionId;
   cachedRates = {
     input: inputRate === null ? INPUT_USD_PER_TOKEN : inputRate,
@@ -173,7 +175,9 @@ async function discoverBilling(fetchImpl, cookie, signal) {
 }
 
 async function billingAction(fetchImpl, cookie, signal) {
-  let session = cachedActionId && cachedRates && Date.now() < actionExpiresAt
+  // Bundle deployments and rates observed through one session must not vouch
+  // for another account. Keep the existing bounded, single-entry cache.
+  let session = cachedCredentialKey === hashKey('typesafe', cookie) && cachedActionId && cachedRates && Date.now() < actionExpiresAt
     ? { actionId: cachedActionId, rates: cachedRates }
     : await discoverBilling(fetchImpl, cookie, signal);
   const post = (id) => request(fetchImpl, BILLING_URL, cookie, {
@@ -296,6 +300,7 @@ async function fetchTypesafeLimits(options = {}, deps = {}) {
 }
 
 function resetBillingCache() {
+  cachedCredentialKey = '';
   cachedActionId = '';
   cachedRates = null;
   actionExpiresAt = 0;

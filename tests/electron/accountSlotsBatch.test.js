@@ -48,7 +48,7 @@ for (const [id, fixture] of Object.entries(fixtures)) {
       calls.push(n);
       return entry.fetchLimits(options, deps);
     } });
-    const options = { ...fixture.values('b'), [entry.status.credential]: '', [`${id}AccountSlots`]: slots };
+    const options = { ...fixture.values('b'), ...Object.fromEntries(entry.fields.filter(f => f.kind === 'credential').map(f => [f.key, ''])), [`${id}AccountSlots`]: slots };
     const deps = { env: { UNRELATED_SECRET: 'default-secret' }, fetch: transport(id, seen), providerRuntimeState: new Map() };
     const rows = await fetcher(options, deps);
     assert.deepEqual(calls, ['a', 'b']);
@@ -63,7 +63,7 @@ for (const [id, fixture] of Object.entries(fixtures)) {
   });
 }
 test('batch eligibility keeps incompatible providers out of slots', () => {
-  for (const id of ['factory', 'cline', 'alibaba', 'kimi']) assert.ok(!limitProviderEntry(id).accountSlots, id);
+  for (const id of ['factory', 'cline', 'alibaba', 'kimi', 'hark', 'stepfun', 'mistral', 'muse', 'zai', 'manus', 'volcengine']) assert.ok(!limitProviderEntry(id).accountSlots, id);
   assert.deepEqual(LIMIT_PROVIDER_REGISTRY.filter(e => e.accountSlots).map(e => e.id).sort(), ['qoder', 'deepseek', ...Object.keys(fixtures)].sort());
 });
 
@@ -363,4 +363,40 @@ for (const [name, fixed, env, environmentWins] of [
     assert.equal((await service.remove('trae', 'environment')).errorCode, 'environmentCredential');
   }
   assert.ok(seen.some(c => c.n === 'b'));
+});
+
+test('Ollama slots contain identity retirement and isolate API and cookie lanes', async () => {
+  const key = n => hashKey('ollama', `slot-${n}@example.com`);
+  const slots = [
+    { id: 'api', values: { ollamaApiKey: 'batch3-api', ollamaCookie: '' }, accountKey: key('old') },
+    { id: 'cookie', values: { ollamaApiKey: '', ollamaCookie: 'wos-session=batch3-cookie' }, accountKey: key('cookie') }
+  ];
+  const seen = [];
+  const fetch = async (url, init) => {
+    url = String(url);
+    const cookie = url.endsWith('/settings');
+    if (cookie) {
+      assert.equal(init.headers.Cookie, 'wos-session=batch3-cookie');
+      assert.equal(init.headers.Authorization, undefined);
+    } else {
+      assert.equal(init.headers.Authorization, 'Bearer batch3-api');
+      assert.equal(init.headers.Cookie, undefined);
+    }
+    seen.push(cookie ? 'cookie' : 'api');
+    return { ok: true, status: 200, headers: { get: () => null },
+      json: async () => url.endsWith('/me') ? { Email: 'slot-api@example.com' } : { included: { balance_usd: 5, allowance_usd: 10 } },
+      text: async () => '<span id="header-email">slot-cookie@example.com</span><section aria-label="Session usage 10% used"><div style="width: 10%"></div></section>' };
+  };
+  const previous = [key('old'), key('cookie')].map(accountKey => ({ provider: 'ollama', accountKey, status: 'ok', windows: [] }));
+  const options = { ollamaAccountSlots: slots, previousLimits: { providers: previous } };
+  const deps = { env: {}, fetch };
+  const rows = await LIMIT_PROVIDER_FETCHERS.ollama(options, deps);
+  assert.deepEqual(rows.filter(r => !r.removed).map(r => [r.accountKey, r.status]), [[key('api'), 'ok'], [key('cookie'), 'ok']]);
+  assert.deepEqual(rows.filter(r => r.removed).map(r => r.accountKey), [key('old')]);
+  assert.ok(rows[0].accountKeyAliases.includes(key('old')));
+  seen.length = 0;
+  const scoped = await LIMIT_PROVIDER_FETCHERS.ollama({ ...options, previousLimits: { providers: rows.filter(r => !r.removed) },
+    limitRefreshScope: { provider: 'ollama', accountKey: key('cookie') } }, deps);
+  assert.deepEqual(scoped.map(r => [r.accountKey, r.status]), [[key('cookie'), 'ok']]);
+  assert.deepEqual(seen, ['cookie']);
 });
