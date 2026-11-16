@@ -7,6 +7,19 @@ const user = '8f24ac06-1807-4d51-9317-87d2f1a5f394';
 const userB = 'ad5e1e56-1a69-42a5-aede-c8fde578f1a5';
 const legacyTraeBody = { user_entitlement_pack_list: [{ entitlement_base_info: { quota: { credits_limit: 100 } }, usage: { credits_amount: 10 } }] };
 const fixtures = {
+  typesafe: {
+    values: n => ({ typesafeCookie: `session=${n}` }),
+    key: n => hashKey('typesafe', `session=${n}`),
+    body: (n, url, init) => url.includes('/api/usage') ? JSON.stringify({ buckets: [] })
+      : url.endsWith('/chunk.js') ? `"${n.repeat(40)}","getBillingOverviewResult"`
+        : init.method === 'POST' ? `0:${JSON.stringify({ ok: true, data: { billing: { balance: 5, plan: 'free_plan' } } })}`
+          : '<html><script src="/_next/chunk.js"></script></html>'
+  },
+  ollama: {
+    values: n => ({ ollamaApiKey: `key-${n}`, ollamaCookie: '' }),
+    key: n => hashKey('ollama', `api-key:key-${n}`),
+    body: (_n, url) => url.endsWith('/me') ? {} : { included: { balance_usd: 5, allowance_usd: 10 } }
+  },
   devin: {
     values: n => ({ devinBearerToken: `token-${n}`, devinOrganization: `org/${n}` }),
     key: n => hashKey('devin', `token-${n}`, `org/${n}`),
@@ -53,13 +66,17 @@ function transport(id, seen = []) {
     const values = fixture.values(n);
     assertHeaders(id, values, init.headers);
     seen.push({ n, url, init });
-    const body = fixture.body(n, url);
-    return { ok: true, status: 200, json: async () => body, headers: { get: () => null } };
+    if (id === 'typesafe' && init.method === 'POST') require('node:assert/strict').equal(init.headers['Next-Action'], n.repeat(40));
+    const body = fixture.body(n, url, init);
+    return { ok: true, status: 200, json: async () => body, text: async () => body, headers: { get: () => null } };
   };
 }
 function assertHeaders(id, values, headers) {
   const assert = require('node:assert/strict');
-  if (id === 'devin') {
+  if (id === 'ollama') {
+    assert.equal(headers.Authorization, `Bearer ${values.ollamaApiKey}`);
+    assert.equal(headers.Cookie, undefined);
+  } else if (id === 'devin') {
     assert.equal(headers.Authorization, `Bearer ${values.devinBearerToken}`);
   } else if (id === 'trae') {
     assert.equal(headers.Cookie, values.traeCookie);

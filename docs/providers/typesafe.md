@@ -17,7 +17,9 @@ The Billing action's `resetsInDays` does not match the Console's credit-grant ex
 
 ## Credentials and transport
 
-The GUI accepts a full `Cookie` header from an authenticated request to `console.typesafe.ai/settings/billing`, stored through the shared credential store. The same value can be supplied through `TOKEN_MONITOR_TYPESAFE_COOKIE` or `TYPESAFE_COOKIE`. A TypeSafe inference API key is not a Console session. Requests use the injected transport, set `credentials: 'omit'`, reject redirects, and send the header only to the fixed Console origin. The current server-action ID is discovered from Billing's same-origin scripts, cached for 12 hours, and rediscovered once when the server reports a stale ID.
+The GUI accepts a full `Cookie` header from an authenticated request to `console.typesafe.ai/settings/billing`, stored through the shared credential store. The same value can be supplied through `TOKEN_MONITOR_TYPESAFE_COOKIE` or `TYPESAFE_COOKIE`. A TypeSafe inference API key is not a Console session. Requests use the injected transport, set `credentials: 'omit'`, reject redirects, and send the header only to the fixed Console origin. The current server-action ID is discovered from Billing's same-origin scripts, cached for 12 hours for the same normalized Cookie, and rediscovered once when the server reports a stale ID.
+
+Saved accounts use the shared account-slot panel. Switching Cookies rediscovers the action and rates; the cache retains only the most recently discovered session.
 
 ## Invariants and known gaps
 
