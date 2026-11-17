@@ -51,7 +51,7 @@ function normalizeSharedSyncValue(kind, value) {
       const labels = Object.fromEntries(Object.entries(group.labels).map(([key, label]) => {
         if (!validKey(key) || typeof label !== 'string' || label.length > 256) throw badRequest('invalid account label');
         const clean = normalizeLimitProvider({ provider: id, accountLabel: label })?.accountLabel || '';
-        if (label && !clean) throw badRequest('invalid account label');
+        if (label.trim() && !clean) throw badRequest('invalid account label');
         return [key, clean];
       }));
       return [id, { labels, order: [...group.order] }];
