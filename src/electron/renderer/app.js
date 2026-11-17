@@ -12598,13 +12598,13 @@ function renderLimitProviderCheckboxesNow() {
       else optionsInner.append(automatic.container);
       automatic.controller.update(strictLocalProviderStatuses(id));
     }
+    if (usageItems.length) optionsInner?.append(limitProviderUsageItemsList(id, usageItems, reusableSettingInputs));
     if (settings) optionsInner.append(limitProviderSettingsList(id, settings, reusableSettingInputs));
     if (pluginModule) {
       const authorSettings = pluginLimitSettings?.node(pluginModule);
       if (authorSettings?.isConnected) moveLimitProviderLiveNode(optionsInner, authorSettings);
       else if (authorSettings) optionsInner?.append(authorSettings);
     }
-    if (usageItems.length) optionsInner?.append(limitProviderUsageItemsList(id, usageItems, reusableSettingInputs));
     // OpenCode's one setting is an off-by-default fallback estimate. Rendered by
     // the shared path it lands above the account list, reading as the first
     // thing to set up; it belongs below the accounts, collapsed. Reparented
@@ -12746,14 +12746,6 @@ async function refreshLimitAccount(provider) {
   return result;
 }
 
-async function refreshLimitProviderQuota(providerName) {
-  try {
-    await window.tokenMonitor.limits?.refresh?.(providerName);
-  } catch (_) {
-    // The next scheduled poll still settles the record.
-  }
-}
-
 async function clearAccountCredential(id) {
   if (id === 'claude') legacyAccountOwners.claude.editor.revision += 1;
   setAccountPanelMessage(id, null);
@@ -12780,8 +12772,6 @@ function limitAccountForm(providerId) {
 }
 
 function renderClaudeOrganizationChoices(...args) { return legacyAccountOwners.claude.renderClaudeOrganizationChoices(...args); }
-
-function loadClaudeOrganizationChoices(...args) { return legacyAccountOwners.claude.loadClaudeOrganizationChoices(...args); }
 
 // A select beside a credential (region, site, console) saves as soon as it
 // changes. `clears` names what the change invalidates: an Alibaba cookie
@@ -12820,11 +12810,6 @@ function setupLimitAccountPanels() {
         document,
         provider: externalProviderForAccount(form.id)
       })),
-      onRefresh: async () => {
-        if (form.id === 'claude' && legacyAccountOwners.claude.editor.accountId === 'legacy') await loadClaudeOrganizationChoices();
-        await refreshLimitProviderQuota(form.id);
-        await refreshStats();
-      },
       onClear: ({ id }) => clearAccountCredential(id),
       onSave: async ({ id, messages, failedKey }, values, clearInput) => {
         if (id === 'claude' && legacyAccountOwners.claude.editor.accountId !== 'legacy') values.claudeWebAccountId = legacyAccountOwners.claude.editor.accountId;
@@ -16908,7 +16893,6 @@ function renderExternalProviderStatus(providerName) {
   const statusEl = document.getElementById(`${providerName}AccountStatus`);
   const openBtn = document.getElementById(`${providerName}OpenBrowser`);
   const logoutBtn = document.getElementById(`${providerName}LogoutButton`);
-  const refreshBtn = document.getElementById(`${providerName}RefreshButton`);
   const manualPanel = document.getElementById(`${providerName}ManualPanel`);
   const errorEl = document.getElementById(`${providerName}ErrorMessage`);
   if (statusEl && limitAccountForm(providerName)?.accountSlots && !limitAccountForm(providerName)?.accountSlotOwner) {
@@ -16918,7 +16902,7 @@ function renderExternalProviderStatus(providerName) {
     setCursorStatusText(statusEl, accounts.length ? t('settings.opencode.connected', { linked, total: accounts.length }) : t(limitAccountForm(providerName).emptyKey));
     return;
   }
-  if (!config || !statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
+  if (!config || !statusEl || !openBtn || !logoutBtn || !manualPanel || !errorEl) return;
 
   const source = state.settings?.[config.sourceKey] || '';
   const wasPending = Number(state[config.pendingKey] || 0) > 0;
@@ -16983,7 +16967,6 @@ function renderExternalProviderStatus(providerName) {
   const canClearConfiguredCredential = source === 'settings' && configured;
   logoutBtn.classList.toggle('hidden', !canClearConfiguredCredential);
   if (providerName === 'claude') logoutBtn.classList.add('hidden');
-  refreshBtn.classList.toggle('hidden', !configured);
   renderSettingsSummaries();
 }
 
@@ -17421,7 +17404,7 @@ function createLegacyAccountOwners() {
 
  owners.opencode = window.TokenMonitorOpencodeAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'opencode').label, initial: {opencodeProfileCount: state.opencodeProfileCount}, getSettings: () => state.settings, getAccountContext: () => ({ settings: state.settings, records: state.stats?.limits?.providers || [], devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId }), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), renderAccountShellError: (...args) => renderAccountShellError(...args), accountProfileRequests, accountProfileStatuses, t: (...args) => t(...args), renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), setAccountShellError: (...args) => setAccountShellError(...args), accountShellApi, encodeURIComponent: (...args) => encodeURIComponent(...args), accountProfileSaves });
  Object.defineProperty(state, 'opencodeProfileCount', { configurable: true, get: () => owners.opencode.state.opencodeProfileCount, set: value => { owners.opencode.state.opencodeProfileCount = value; } });
- owners.minimax = window.TokenMonitorMinimaxAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'minimax').label, initial: {minimaxAccountExpanded: state.minimaxAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => ({ settings: state.settings, records: state.stats?.limits?.providers || [], devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId }), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), limitProviderEnabled: (...args) => limitProviderEnabled(...args), limitProviderPresentationApi, accountShellApi, t: (...args) => t(...args), translatedLimitProviderTag: (...args) => translatedLimitProviderTag(...args), apiKeyAccountStatusText: (...args) => apiKeyAccountStatusText(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), accountProfileRequests, accountProfileSaves, setAccountShellError: (...args) => setAccountShellError(...args), refreshStats: (...args) => refreshStats(...args), renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), setExternalAccountExpanded: (...args) => setExternalAccountExpanded(...args), refreshLimitProviderQuota: (...args) => refreshLimitProviderQuota(...args) });
+ owners.minimax = window.TokenMonitorMinimaxAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'minimax').label, initial: {minimaxAccountExpanded: state.minimaxAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => ({ settings: state.settings, records: state.stats?.limits?.providers || [], devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId }), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), limitProviderEnabled: (...args) => limitProviderEnabled(...args), limitProviderPresentationApi, accountShellApi, t: (...args) => t(...args), translatedLimitProviderTag: (...args) => translatedLimitProviderTag(...args), apiKeyAccountStatusText: (...args) => apiKeyAccountStatusText(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), accountProfileRequests, accountProfileSaves, setAccountShellError: (...args) => setAccountShellError(...args), refreshStats: (...args) => refreshStats(...args), renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), setExternalAccountExpanded: (...args) => setExternalAccountExpanded(...args) });
  Object.defineProperty(state, 'minimaxAccountExpanded', { configurable: true, get: () => owners.minimax.state.minimaxAccountExpanded, set: value => { owners.minimax.state.minimaxAccountExpanded = value; } });
  owners.thirdparty = window.TokenMonitorThirdpartyAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'thirdparty').label, initial: {thirdPartyAccountExpanded: state.thirdPartyAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => ({ settings: state.settings, records: state.stats?.limits?.providers || [], devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId }), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args), t: (...args) => t(...args), limitProviderPresentationApi, optionalFiniteNumber: (...args) => optionalFiniteNumber(...args), formatCompactMoney: (...args) => formatCompactMoney(...args), currentLocale: (...args) => currentLocale(...args), limitProviderEnabled: (...args) => limitProviderEnabled(...args), accountShellApi, renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), setAccountShellError: (...args) => setAccountShellError(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), renderAccountShellError: (...args) => renderAccountShellError(...args), accountProfileRequests, accountProfileSaves, refreshStats: (...args) => refreshStats(...args) });
  Object.defineProperty(state, 'thirdPartyAccountExpanded', { configurable: true, get: () => owners.thirdparty.state.thirdPartyAccountExpanded, set: value => { owners.thirdparty.state.thirdPartyAccountExpanded = value; } });

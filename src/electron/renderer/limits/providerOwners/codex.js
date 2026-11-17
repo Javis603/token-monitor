@@ -21,7 +21,6 @@ function setCodexAccountExpanded(expanded) {
 function renderCodexLoginStatus() {
   const addButton = document.getElementById('codexAddAccountButton');
   const cancelButton = document.getElementById('codexCancelLoginButton');
-  const refreshButton = document.getElementById('codexRefreshAccountsButton');
   const openButton = document.getElementById('codexOpenLoginUrlButton');
   const copyButton = document.getElementById('codexCopyLoginUrlButton');
   const statusEl = document.getElementById('codexLoginStatus');
@@ -30,11 +29,10 @@ function renderCodexLoginStatus() {
   const urlActions = document.getElementById('codexLoginUrlActions');
   const details = document.getElementById('codexLoginDetails');
   const output = document.getElementById('codexLoginOutput');
-  if (!addButton || !cancelButton || !refreshButton || !openButton || !copyButton || !statusEl || !workspaceSelection || !workspaceSelect || !urlActions || !details || !output) return;
+  if (!addButton || !cancelButton || !openButton || !copyButton || !statusEl || !workspaceSelection || !workspaceSelect || !urlActions || !details || !output) return;
 
   addButton.classList.add('hidden');
   cancelButton.classList.toggle('hidden', !state.codexSignInBusy);
-  refreshButton.classList.toggle('hidden', state.codexSignInBusy);
   accountShellApi.render({ progress: statusEl, progressText: state.codexLoginStatus });
   workspaceSelection.classList.toggle('hidden', state.codexWorkspaceChoices.length === 0);
   workspaceSelect.replaceChildren(...state.codexWorkspaceChoices.map((workspace) => {
@@ -71,7 +69,7 @@ function renderCodexAccounts() {
         const source = reading?.source === 'rpc' ? reading.sourceDetail : reading?.source;
         return t(`settings.limits.sources.${source === 'app' ? 'desktop' : source === 'cli' ? 'cli' : 'oauth'}`);
       },
-      editor: { isOpen: () => state.codexSignInBusy || state.codexWorkspaceChoices.length > 0 || Boolean(state.codexAccountError), allowBusyCancel: true, nodes: ['codexLoginStatus', 'codexWorkspaceSelection', 'codexLoginUrlActions', 'codexLoginDetails', 'codexAccountErrorMessage'], cancel: () => { if (state.codexSignInBusy) document.getElementById('codexCancelLoginButton')?.click(); else { state.codexAccountError = ''; state.codexLoginStatus = ''; renderCodexLoginStatus(); renderCodexAccounts(); } } },
+      editor: { isOpen: () => state.codexSignInBusy || state.codexWorkspaceChoices.length > 0 || Boolean(state.codexAccountError), allowBusyCancel: true, nodes: ['codexAccountDescription', 'codexLoginStatus', 'codexWorkspaceSelection', 'codexLoginUrlActions', 'codexLoginDetails', 'codexAccountErrorMessage'], cancel: () => { if (state.codexSignInBusy) document.getElementById('codexCancelLoginButton')?.click(); else { state.codexAccountError = ''; state.codexLoginStatus = ''; renderCodexLoginStatus(); renderCodexAccounts(); } } },
     document, provider: 'codex', label: host.providerLabel || 'Codex', add: startCodexLogin, container: listEl, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
     enabled: (account, value) => window.tokenMonitor.codex.setAccountEnabled(account.id, value),
@@ -246,9 +244,6 @@ function setup() {
 
     renderCodexLoginStatus();
 
-    document.getElementById('codexRefreshAccountsButton').addEventListener('click', () => {
-      refreshCodexAccounts();
-    });
   }
 
 

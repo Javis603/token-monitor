@@ -199,7 +199,7 @@ test('an old Claude organization discovery cannot replace a newly saved cookieâ€
   context.legacyAccountOwners = { claude: claudeOwner.create({ ...context, initial: {}, getSettings: () => state.settings }) };
   vm.runInNewContext(app.slice(start, end), context);
 
-  const loadingOld = context.loadClaudeOrganizationChoices();
+  const loadingOld = context.legacyAccountOwners.claude.loadClaudeOrganizationChoices();
   await context.clearAccountCredential('claude');
   await context.saveAccountCredential('claude', { claudeWebCookie: 'sessionKey=sk-ant-new', claudeWebOrganizationId: 'new' });
   resolveOld({ status: 'ok', choices: [{ id: 'old', name: 'Old workspace' }] });

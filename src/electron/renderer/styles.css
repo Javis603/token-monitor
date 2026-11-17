@@ -2934,13 +2934,23 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .limit-provider-connection-detail > .settings-note {
   margin: 0;
 }
+.limit-provider-usage-items,
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list {
+  min-width: 0;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list > .settings-item {
+  padding: 8px 0;
+}
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list > .settings-item + .settings-item {
+  border-top-color: var(--line);
+}
 .limit-provider-usage-items {
   display: grid;
-  min-width: 0;
-  gap: 6px;
-  margin: 8px 0 8px 12px;
-  padding-inline-start: 12px;
-  border-inline-start: 1px solid var(--line);
+  gap: 4px;
 }
 .limit-provider-usage-items-head {
   display: flex;
@@ -2952,9 +2962,8 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   font-size: 0.625rem;
 }
 .limit-provider-usage-items-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 2px 16px;
+  display: grid;
+  gap: 0;
 }
 .settings-panel .limit-provider-usage-items-list > .client-checkbox {
   display: flex;
@@ -2963,7 +2972,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   align-items: center;
   gap: 8px;
   min-width: 0;
-  min-height: 24px;
+  min-height: 28px;
   font-size: 0.6875rem;
 }
 .settings-panel .limit-provider-usage-items-list > .client-checkbox > input {

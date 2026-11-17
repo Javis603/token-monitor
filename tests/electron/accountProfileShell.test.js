@@ -174,8 +174,6 @@ test('MiniMax saved keys use independent API status and billing links, with remo
   h.get('minimaxOpenBrowser').click();
   assert.equal(h.opened.at(-1), 'https://platform.minimax.io/user-center/payment/token-plan',
     'an unremembered Auto choice uses the collector\'s International-first default');
-  h.get('minimaxRefreshButton').click();
-  assert.deepEqual(h.refreshes, ['minimax']);
   h.api.getKeys = async () => { throw new Error('IPC unavailable'); };
   await h.render();
   assert.equal(h.get('minimaxStatus').textContent, t('settings.common.unavailable'));

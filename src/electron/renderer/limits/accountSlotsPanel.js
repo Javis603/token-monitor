@@ -317,7 +317,7 @@
           }
         };
         editorPanel = forms.createCredentialPanel(draftForm, {
-          document, translate: t, onToggle() {}, onClear() {}, onRefresh() {},
+          document, translate: t, onToggle() {}, onClear() {},
           onOpen: () => openExternal(forms.resolveOpenUrl(draftForm, { document })),
           onSave: (_form, values, clearInput) => submit(values, clearInput)
         });
@@ -373,7 +373,6 @@
         editorPanel.querySelector('.settings-group-header').classList.add('hidden');
         editorPanel.querySelector('.cursor-settings-details').classList.remove('hidden');
         editorPanel.querySelector(`#${prefix}LogoutButton`).classList.add('hidden');
-        editorPanel.querySelector(`#${prefix}RefreshButton`).classList.add('hidden');
       });
     }
     function rowFor(id) {

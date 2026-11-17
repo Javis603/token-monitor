@@ -438,7 +438,7 @@ test('shared account actions reuse credential settings invalidation and collect 
   const app = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
   const main = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'), 'utf8');
   const slice = (source, from, to) => source.slice(source.indexOf(from), source.indexOf(to, source.indexOf(from)));
-  for (const action of ['save', 'save-unchanged', 'save-cookie', 'save-slow', 'save-refresh-fails', 'refresh', 'startup']) {
+  for (const action of ['save', 'save-unchanged', 'save-cookie', 'save-slow', 'save-refresh-fails', 'startup']) {
     await t.test(action, async (t) => {
       let settings = { limitsEnabled: true, limitProviders: 'ollama,deepseek', ollamaApiKey: 'fixture-old', ollamaCookie: '' };
       if (action === 'startup') settings.limitProviders = 'ollama';
@@ -496,7 +496,6 @@ test('shared account actions reuse credential settings invalidation and collect 
         probeDeps: () => ({ probe: true, providerRuntimeState: new Map(), fetch: (url) => http(url, true) })
       });
       const form = { id: 'ollama', kind: 'credential' };
-      let callbacks;
       let statsReads = 0;
       let cutoff;
       const context = {
@@ -509,7 +508,7 @@ test('shared account actions reuse credential settings invalidation and collect 
           refresh: (id) => runLimitInvalidation(handle, { provider: id }, 'account-panel', { clear: false })
         } } },
         limitAccountPanelsApi: {
-          createCredentialPanel: (_form, handlers) => { callbacks = handlers; return {}; },
+          createCredentialPanel: () => ({}),
           syncCredentialFields() {}
         },
         refreshStats: async (options = {}) => {
@@ -540,9 +539,6 @@ test('shared account actions reuse credential settings invalidation and collect 
           releaseQuota();
         }
         assert.equal((await saved).saved, true, 'refresh failure cannot undo a successful credential write');
-      } else {
-        context.setupLimitAccountPanels();
-        await callbacks.onRefresh();
       }
       if (action === 'startup') {
         assert.equal(polls.length, 0, 'startup queues one intent until a runtime is ready');

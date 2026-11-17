@@ -155,7 +155,7 @@ test('provider account lists precede guidance with live controls and keyboard or
   const accounts = render.indexOf('moveLimitProviderLiveNode(optionsInner, accountGroup);');
   const settings = render.indexOf('optionsInner.append(limitProviderSettingsList(');
   const usage = render.indexOf('optionsInner?.append(limitProviderUsageItemsList(');
-  assert.ok(connection >= 0 && connection < accounts && accounts < settings && settings < usage);
+  assert.ok(connection >= 0 && connection < accounts && accounts < usage && usage < settings);
 });
 
 test('busy submit-row cancel settles its observed disabled mutations before returning to the event loop', () => {

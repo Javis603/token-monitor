@@ -11,7 +11,7 @@
  */ function create(host) {
  let accountList;
  // Host exposes named capabilities, never the application state object.
- const { document, window, localProviderStatuses, limitProviderEnabled, limitProviderPresentationApi, accountShellApi, t, translatedLimitProviderTag, isSettingsSurfaceVisible, accountProfileRequests, accountProfileSaves, setAccountShellError, refreshStats, renderSettingsSummaries, setExternalAccountExpanded, refreshLimitProviderQuota } = host;
+ const { document, window, localProviderStatuses, limitProviderEnabled, limitProviderPresentationApi, accountShellApi, t, translatedLimitProviderTag, isSettingsSurfaceVisible, accountProfileRequests, accountProfileSaves, setAccountShellError, refreshStats, renderSettingsSummaries, setExternalAccountExpanded } = host;
  const state = {minimaxAccountExpanded: host.initial.minimaxAccountExpanded};
  Object.defineProperty(state, 'settings', { get: host.getSettings });
 function updateMinimaxApiKeysStatus() {
@@ -91,7 +91,6 @@ function setup() {
       const apiRegion = document.getElementById('minimaxApiRegionInput').value;
       window.tokenMonitor.openExternal(minimaxBillingUrl({ billingMode, apiRegion }));
     });
-    document.getElementById('minimaxRefreshButton').addEventListener('click', () => refreshLimitProviderQuota('minimax'));
     const submit = document.getElementById('minimaxKeySubmit');
     submit.addEventListener('click', () => accountProfileSaves.run('minimax', submit, async () => {
       setAccountShellError('minimax', '');
