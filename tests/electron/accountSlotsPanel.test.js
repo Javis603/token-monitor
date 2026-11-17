@@ -235,7 +235,7 @@ test('Alibaba saved slots without a variant default to cn and reject missing or 
   for (const region of [undefined, 'intl', 'cn-personal']) {
     h.panel.update(slots, [{ provider: 'alibaba', accountKey: 'shared-uid', region, status: 'ok' }]);
     assert.equal(h.row('legacy').querySelector('.slot-status').classList.contains('slot-unavailable'), true, `must not borrow ${region} status`);
-    assert.equal(h.row('legacy').querySelector('.slot-fix').classList.contains('hidden'), false);
+    assert.equal(h.row('legacy').querySelector('.slot-fix').classList.contains('hidden'), true);
   }
   h.panel.update(slots, [
     { provider: 'alibaba', accountKey: 'shared-uid', region: 'cn-personal', status: 'unauthorized' },
@@ -494,11 +494,11 @@ test('shared action menu is loaded before both consumers and owns the plugin pla
   assert.doesNotMatch(read('styles.css'), /\.slot-menu/);
 });
 
-test('single line rows omit timestamps; only failing rows have a compact recovery beneath the name', () => {
+test('single line rows omit timestamps; only rejected credentials have a compact recovery after account details', () => {
   const h = harness();
   h.panel.update(h.slots, [{ accountKey: 'default', status: 'ok' }, { accountKey: 'ka', status: 'unauthorized' }], true);
   assert.equal(h.row('default').querySelector('.slot-fix').classList.contains('hidden'), true);
-  assert.ok(h.row('a').querySelector('.slot-copy').children[1] === h.row('a').querySelector('.slot-fix'));
+  assert.ok(h.row('a').querySelector('.slot-copy').children.at(-1) === h.row('a').querySelector('.slot-fix'));
   assert.equal(h.row('a').querySelector('.slot-fix').classList.contains('plugin-inline-action'), true);
   assert.equal(h.row('a').querySelector('.slot-fix').classList.contains('hidden'), false);
   assert.equal(h.row('b').querySelector('.slot-fix').classList.contains('hidden'), true);
@@ -638,11 +638,11 @@ test('shared action menu is loaded before both consumers and owns the plugin pla
   assert.doesNotMatch(read('styles.css'), /\.slot-menu/);
 });
 
-test('single line rows omit timestamps; only failing rows have a compact recovery beneath the name', () => {
+test('single line rows omit timestamps; only rejected credentials have a compact recovery after account details', () => {
   const h = harness();
   h.panel.update(h.slots, [{ accountKey: 'default', status: 'ok' }, { accountKey: 'ka', status: 'unauthorized' }], true);
   assert.equal(h.row('default').querySelector('.slot-fix').classList.contains('hidden'), true);
-  assert.equal(h.row('a').querySelector('.slot-copy').children[1], h.row('a').querySelector('.slot-fix'));
+  assert.equal(h.row('a').querySelector('.slot-copy').children.at(-1), h.row('a').querySelector('.slot-fix'));
   assert.equal(h.row('a').querySelector('.slot-fix').classList.contains('plugin-inline-action'), true);
   assert.equal(h.row('a').querySelector('.slot-fix').classList.contains('hidden'), false);
   assert.equal(h.row('b').querySelector('.slot-fix').classList.contains('hidden'), true);
@@ -1456,4 +1456,20 @@ test('healthy account shows its source with accessible status; failures keep exp
     assert.notEqual(status.textContent, 'Web');
     assert.equal(row.querySelector('.slot-detail').textContent, 'Pro · Web');
   }
+});
+
+
+test('connection failures do not suggest credential replacement; rejected credentials retain one recovery action', () => {
+  const h = harness();
+  h.panel.update(h.slots, [{ accountKey: 'ka', status: 'unavailable' }], true);
+  assert.equal(h.row('a').querySelector('.slot-fix').classList.contains('hidden'), true);
+  h.panel.update(h.slots, [{ accountKey: 'ka', status: 'unauthorized', source: 'web' }], true);
+  const row = h.row('a');
+  const fix = row.querySelector('.slot-fix');
+  assert.equal(fix.classList.contains('hidden'), false);
+  assert.equal(fix.textContent, 'Replace credential');
+  const copy = row.querySelector('.slot-copy');
+  assert.ok(copy.children.indexOf(row.querySelector('.slot-detail')) < copy.children.indexOf(fix));
+  fix.click();
+  assert.ok(h.document.getElementById('qoderSlotDraftqoderCookieInput'));
 });

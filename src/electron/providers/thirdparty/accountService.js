@@ -96,9 +96,11 @@ function createThirdpartyAccountService(deps) {
   }
 
   async function getProfiles() {
+      const [environment] = thirdPartyLimits.configuredAccounts({}, { env });
       return {
         profiles: redactThirdPartyProfilesForRenderer(getThirdPartyProfiles() || {}),
-        hasEnvVar: thirdPartyLimits.configuredAccounts({}, { env: env }).length > 0
+        hasEnvVar: Boolean(environment),
+        environmentAccountKey: environment ? thirdPartyLimits.thirdPartyAccountKey(environment.name, environment) : ''
       };
     }
 

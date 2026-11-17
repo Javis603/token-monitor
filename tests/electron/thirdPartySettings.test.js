@@ -18,7 +18,7 @@ const { VENDOR_LABELS, VENDOR_ORDER } = require('../../src/electron/renderer/the
 const { rendererStyles } = require('../helpers/rendererStyles');
 const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
 
-async function thirdPartyRows(profiles, hasEnvVar = false, readings = []) {
+async function thirdPartyRows(profiles, hasEnvVar = false, readings = [], bridge = {}) {
   const document = require('./accountOwnerDom.fixture.cjs').createDocument();
   const list = document.createElement('div'); list.id = 'thirdpartyProfileList'; document.root.append(list);
   const settings = {};
@@ -30,7 +30,7 @@ async function thirdPartyRows(profiles, hasEnvVar = false, readings = []) {
     accountProfileRequests: { begin: () => () => true }, renderAccountShellError() {}, renderSettingsSummaries() {},
     accountShellApi: require('../../src/electron/renderer/limits/accountShell'),
     window: { TokenMonitorLegacyAccountList: require('../../src/electron/renderer/limits/legacyAccountList'),
-      tokenMonitor: { thirdparty: { getProfiles: async () => ({ profiles, hasEnvVar }) } } }
+      tokenMonitor: { thirdparty: bridge.api || { getProfiles: async () => ({ profiles, hasEnvVar }) }, limits: { accountSlots: { presentation: bridge.presentation } } } }
   });
   owner.renderThirdPartyProfiles();
   await new Promise(resolve => setImmediate(resolve));
@@ -418,3 +418,46 @@ test('third-party service DTO retains collector identity through redaction and s
   profiles.sub.enabled = false;
   assert.equal((await service.getProfiles()).profiles.sub.accountKey, safe.sub.accountKey);
 });
+
+for (const mode of ['account', 'token']) for (const status of ['ok', 'unauthorized']) {
+  test(`third-party ${mode} environment DTO drives ${status} status and presentation controls`, async () => {
+    const limits = require('../../src/shared/providers/thirdparty/limits');
+    const { createThirdpartyAccountService } = require('../../src/electron/providers/thirdparty/accountService');
+    const env = { TOKEN_MONITOR_NEWAPI_BASE_URL: 'https://env.example/v1/',
+      ...(mode === 'account' ? { TOKEN_MONITOR_NEWAPI_ACCESS_TOKEN: 'private-env-access', TOKEN_MONITOR_NEWAPI_USER_ID: '42' }
+        : { TOKEN_MONITOR_NEWAPI_API_KEY: 'private-env-api' }) };
+    const profiles = { saved: { adapter: 'newapi-token', baseUrl: 'https://saved.example', apiKey: 'private-saved-api' } };
+    const service = createThirdpartyAccountService({ getThirdPartyProfiles: () => profiles, env });
+    const dto = await service.getProfiles();
+    const readings = await limits.fetchThirdPartyLimits({}, { env, fetch: async url => {
+      const path = new URL(url).pathname;
+      const http = status === 'unauthorized' && path !== '/api/status' ? 401 : 200;
+      const data = path === '/api/status' ? { quota_per_unit: 500000 }
+        : path === '/api/data/self' ? []
+        : { quota: 2500000, used_quota: 500000, total_available: 2500000, total_used: 500000 };
+      return { ok: http === 200, status: http, json: async () => ({ success: true, data }) };
+    } });
+    assert.equal(readings.length, 1);
+    assert.equal(readings[0].status, status);
+    assert.equal(dto.hasEnvVar, true);
+    assert.equal(dto.environmentAccountKey, readings[0].accountKey);
+    assert.doesNotMatch(JSON.stringify(dto), /private-/);
+    const calls = [];
+    const { rows } = await thirdPartyRows({}, false, readings, { api: service, presentation: async (...args) => {
+      calls.push(args); return { ok: true };
+    } });
+    const row = rows.find(row => row.dataset.slotId === 'environment');
+    assert.ok(row);
+    assert.equal(row.querySelector('.slot-status').classList.contains(status === 'ok' ? 'slot-connected' : 'slot-invalid'), true);
+    const action = name => [...row.walk()].find(node => node.dataset.slotAction === name);
+    assert.equal(action('rename').classList.contains('hidden'), false);
+    action('rename').click();
+    const input = row.querySelector('.slot-rename'); input.value = 'Environment display name';
+    await input.key('Enter');
+    assert.deepEqual(calls[0], ['thirdparty', readings[0].accountKey, 'rename', 'Environment display name']);
+    await action('up').click();
+    assert.deepEqual(calls[1], ['thirdparty', readings[0].accountKey, 'order', [readings[0].accountKey, dto.profiles.saved.accountKey]]);
+    for (const name of ['replaceKey', 'pause', 'remove']) assert.equal(action(name).classList.contains('hidden'), true, name);
+    assert.equal(row.querySelector('.slot-fix').classList.contains('hidden'), true);
+  });
+}

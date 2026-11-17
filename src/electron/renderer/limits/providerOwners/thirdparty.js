@@ -204,7 +204,7 @@ function renderNamedApiProfiles(config) {
   if (!listEl || !api) return;
   renderAccountShellError(providerId);
   const isCurrent = accountProfileRequests.begin(providerId);
-  api.getProfiles().then(({ profiles, hasEnvVar }) => {
+  api.getProfiles().then(({ profiles, hasEnvVar, environmentAccountKey }) => {
     if (!isCurrent() || !isSettingsSurfaceVisible() || document.getElementById(`${providerId}ProfileList`) !== listEl) return;
     if (!accountList) listEl.replaceChildren();
     state.settings[profileSettingsKey] = profiles;
@@ -240,7 +240,7 @@ function renderNamedApiProfiles(config) {
     });
     accountList.update([
       ...entries.map(([name, profile]) => ({ ...profile, id: name, accountName: name, accountKey: profile.accountKey || profile.canonicalAccountKey })),
-      ...(hasEnvVar ? [{ id: 'environment', accountName: t('settings.thirdparty.environment'), source: 'environment', canPause: false, removable: false }] : [])
+      ...(hasEnvVar ? [{ id: 'environment', accountKey: environmentAccountKey, accountName: t('settings.thirdparty.environment'), source: 'environment', canPause: false, removable: false }] : [])
     ], host.localProviderStatuses(providerId));
     updateStatus();
     renderSettingsSummaries();

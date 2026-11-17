@@ -511,7 +511,7 @@
           menu.append(localized(make('div', 'settings-note slot-remote-note'), 'settings.slots.remoteNote'));
         } else shared.appendItems(action('rename', rename), replace, pause, separator(), up, down, separator(), remove);
         item.menu = menu;
-        const fix = slotButton(`fix${credentialWord}`, () => openEditor(item.slot));
+        const fix = slotButton('replaceTitle', () => openEditor(item.slot));
         fix.className = 'slot-fix plugin-inline-action';
         copy.append(fix);
         item.fix = fix;
@@ -585,7 +585,7 @@
           .filter((value, index, all) => value && all.indexOf(value) === index).join(' · ');
         if (detail && !item.detail) {
           item.detail = make('div', 'settings-note slot-detail');
-          item.el.querySelector('.slot-copy').append(item.detail);
+          item.el.querySelector('.slot-copy').insertBefore(item.detail, item.fix);
         }
         if (item.detail) {
           item.detail.textContent = detail;
@@ -616,7 +616,7 @@
           item.remove.classList.toggle('hidden', slot.source === 'environment');
           if (slot.source === 'discovered') { item.replace.remove(); item.remove.remove(); }
         }
-        item.fix.classList.toggle('hidden', permission.replace === false || Boolean(slot.source) || !slot.enabled || !['invalid', 'unavailable'].includes(status));
+        item.fix.classList.toggle('hidden', permission.replace === false || Boolean(slot.source) || !slot.enabled || status !== 'invalid');
         if (slot.source === 'environment' && !item.environmentNote) {
           item.environmentNote = localized(make('div', 'settings-note'), 'settings.slots.environment');
           item.el.querySelector('.slot-copy').append(item.environmentNote);
