@@ -136,7 +136,7 @@ test('Grok explicit RPC failure stops, web skips RPC, both keep OIDC subject ide
 function documentFixture() {
   const nodes=[];
   return { nodes, createTextNode:textContent=>({textContent}), createElement(tag) {
-    const node={tag,children:[],textContent:'',value:'',disabled:false,append(...children){this.children.push(...children);},setAttribute(key,value){this[key]=value;},addEventListener(event,fn){this[event]=fn;}};
+    const node={tag,children:[],dataset:{},textContent:'',value:'',disabled:false,append(...children){this.children.push(...children);},setAttribute(key,value){this[key]=value;},addEventListener(event,fn){this[event]=fn;}};
     nodes.push(node);return node;
   }};
 }

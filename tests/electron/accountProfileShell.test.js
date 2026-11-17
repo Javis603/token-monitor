@@ -205,13 +205,16 @@ async function settle() {
 }
 
 function namedProfilesHarness() {
-  const lists = new Map(['openrouter', 'thirdparty'].map((id) => [id, {
-    children: [],
-    replaceChildren() { this.children = []; },
-    append(node) { this.children.push(node); }
-  }]));
-  const statuses = new Map(['openrouter', 'thirdparty'].map((id) => [id, { textContent: '' }]));
-  const errors = new Map(['openrouter', 'thirdparty'].map((id) => [id, { textContent: '', classList: { toggle() {} } }]));
+  const document = require('./accountOwnerDom.fixture.cjs').createDocument();
+  const nodes = suffix => new Map(['openrouter', 'thirdparty'].map(id => {
+    const node = document.createElement('div');
+    node.id = `${id}${suffix}`;
+    document.root.append(node);
+    return [id, node];
+  }));
+  const lists = nodes('ProfileList');
+  const statuses = nodes('Status');
+  const errors = nodes('ErrorMessage');
   const requests = { openrouter: [], thirdparty: [] };
   const state = { settings: {}, openrouterProfileCount: -1, thirdpartyProfileCount: -1 };
   let visible = true;
@@ -225,17 +228,11 @@ function namedProfilesHarness() {
     isSettingsSurfaceVisible: () => visible,
     renderSettingsSummaries: () => { summaryRenders += 1; },
     t: (key) => key,
-    document: {
-      getElementById(id) {
-        for (const [provider, list] of lists) {
-          if (id === `${provider}ProfileList`) return list;
-          if (id === `${provider}Status`) return statuses.get(provider);
-          if (id === `${provider}ErrorMessage`) return errors.get(provider);
-        }
-        return null;
-      },
-      createElement() { return { className: '', textContent: '' }; }
-    }
+    document,
+    window: { TokenMonitorLegacyAccountList: require('../../src/electron/renderer/limits/legacyAccountList'), tokenMonitor: {} },
+    getAccountContext: () => ({ settings: state.settings }),
+    preserveScroll: callback => callback(),
+    localProviderStatuses: () => []
   };
   const shellErrorSource = app.slice(app.indexOf('function setAccountShellError('), app.indexOf('const { clientColors, fallbackModelColors'));
   vm.runInNewContext(shellErrorSource, context);

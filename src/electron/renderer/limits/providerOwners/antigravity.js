@@ -39,6 +39,7 @@ function renderAntigravityStatus() {
     progress: statusMessage,
     progressText: state.antigravitySignInBusy ? t('settings.antigravity.loginStatus') : ''
   });
+  addButton.classList.add('hidden');
   addButton.disabled = state.antigravitySignInBusy;
   addButton.textContent = t(state.antigravitySignInBusy
     ? 'settings.antigravity.waitingForGoogle'
@@ -46,7 +47,7 @@ function renderAntigravityStatus() {
   cancelButton.classList.toggle('hidden', !state.antigravitySignInBusy);
 
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
-    document, provider: 'antigravity', container: listEl, t, bridge: window.tokenMonitor,
+    document, provider: 'antigravity', label: host.providerLabel || 'Antigravity', add: startAntigravityLogin, container: listEl, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
     enabled: (account, value) => window.tokenMonitor.antigravity.setAccountEnabled(account.id, value),
     remove: account => window.tokenMonitor.antigravity.removeAccount(account.id),
@@ -54,6 +55,41 @@ function renderAntigravityStatus() {
   });
   accountList.update(accounts, host.localProviderStatuses('antigravity'));
   renderSettingsSummaries();
+}
+async function startAntigravityLogin() {
+  if (state.antigravitySignInBusy) return;
+  state.antigravitySignInBusy = true;
+  state.antigravityAccountError = '';
+  renderAntigravityStatus();
+  let result;
+  try {
+    result = await window.tokenMonitor.antigravity.addAccount();
+  } catch (error) {
+    result = { ok: false, error: error.message };
+  } finally {
+    state.antigravitySignInBusy = false;
+  }
+  if (!result?.ok && result?.errorCode !== 'cancelled') {
+    const errorKeys = {
+      OAUTH_CLIENT_NOT_FOUND: 'settings.antigravity.oauthClientMissing',
+      TIMEOUT: 'settings.antigravity.loginTimeout',
+      STATE_MISMATCH: 'settings.antigravity.loginStateMismatch',
+      credentialStorageUnavailable: 'settings.antigravity.credentialStorageUnavailable',
+      loginInProgress: 'settings.antigravity.loginInProgress'
+    };
+    state.antigravityAccountError = errorKeys[result?.errorCode]
+      ? t(errorKeys[result.errorCode])
+      : result?.error || t('settings.antigravity.loginFailed');
+  } else if (result?.ok) {
+    state.antigravityAccountError = '';
+    state.settings.antigravityManagedAccounts = result.accounts || [];
+    // Match the Codex account flow: the account is connected as soon as its
+    // credential is stored. Quota onboarding and refresh continue in the
+    // background instead of leaving the login button visually busy.
+    refreshStats({ force: true }).catch(() => {});
+  }
+  renderAntigravityStatus();
+
 }
 function setup() {
   const antigravityToggle = document.getElementById('antigravitySettingsToggle');
@@ -73,40 +109,6 @@ function setup() {
       renderAntigravityStatus();
     }).catch(() => {});
 
-    document.getElementById('antigravityAddAccountButton').addEventListener('click', async () => {
-      if (state.antigravitySignInBusy) return;
-      state.antigravitySignInBusy = true;
-      state.antigravityAccountError = '';
-      renderAntigravityStatus();
-      let result;
-      try {
-        result = await window.tokenMonitor.antigravity.addAccount();
-      } catch (error) {
-        result = { ok: false, error: error.message };
-      } finally {
-        state.antigravitySignInBusy = false;
-      }
-      if (!result?.ok && result?.errorCode !== 'cancelled') {
-        const errorKeys = {
-          OAUTH_CLIENT_NOT_FOUND: 'settings.antigravity.oauthClientMissing',
-          TIMEOUT: 'settings.antigravity.loginTimeout',
-          STATE_MISMATCH: 'settings.antigravity.loginStateMismatch',
-          credentialStorageUnavailable: 'settings.antigravity.credentialStorageUnavailable',
-          loginInProgress: 'settings.antigravity.loginInProgress'
-        };
-        state.antigravityAccountError = errorKeys[result?.errorCode]
-          ? t(errorKeys[result.errorCode])
-          : result?.error || t('settings.antigravity.loginFailed');
-      } else if (result?.ok) {
-        state.antigravityAccountError = '';
-        state.settings.antigravityManagedAccounts = result.accounts || [];
-        // Match the Codex account flow: the account is connected as soon as its
-        // credential is stored. Quota onboarding and refresh continue in the
-        // background instead of leaving the login button visually busy.
-        refreshStats({ force: true }).catch(() => {});
-      }
-      renderAntigravityStatus();
-    });
 
     document.getElementById('antigravityCancelLoginButton').addEventListener('click', async () => {
       await window.tokenMonitor.antigravity.cancelLogin();
@@ -117,5 +119,5 @@ function setup() {
 
 
 }
- return { state, setAntigravityAccountExpanded, renderAntigravityStatus, setup };
+ return { state, setAntigravityAccountExpanded, renderAntigravityStatus, startAntigravityLogin, setup };
 });

@@ -48,14 +48,21 @@ function renderMimoStatus() {
   emptyEl.classList.toggle('hidden', accounts.length > 0);
 
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
-    document, provider: 'mimo', container: listEl, t, bridge: window.tokenMonitor,
+    document, provider: 'mimo', label: host.providerLabel || 'MiMo',
+    add: () => setMimoAddExpanded(document.getElementById('mimoAddDetails')?.classList.contains('hidden')), container: listEl, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
     enabled: (account, value) => window.tokenMonitor.mimo.setAccountEnabled(account.id, value),
     remove: account => window.tokenMonitor.mimo.removeAccount(account.id),
-    changed: result => { if (result.accounts) state.settings.mimoManagedAccounts = result.accounts; }, refresh: refreshMimoAccounts, busy: () => false
+    changed: result => { if (result.accounts) state.settings.mimoManagedAccounts = result.accounts; }, refresh: refreshMimoAccounts, busy: () => document.getElementById('mimoSaveAccountButton')?.disabled === true
   });
   accountList.update(accounts.map((account, index) => ({ ...account, canPause: account.removable !== false, accountName: mimoSettingsAccountTitle(account, index) })), host.localProviderStatuses('mimo'));
   renderSettingsSummaries();
+}
+function setMimoAddExpanded(expanded) {
+  const next = Boolean(expanded);
+  document.getElementById('mimoAddToggle')?.setAttribute('aria-expanded', String(next));
+  document.getElementById('mimoAddDetails')?.classList.toggle('hidden', !next);
+  document.getElementById('mimoManualPanel')?.classList.toggle('expanded', next);
 }
 function setup() {
   const mimoToggle = document.getElementById('mimoSettingsToggle');
@@ -67,13 +74,9 @@ function setup() {
     });
 
     const addToggle = document.getElementById('mimoAddToggle');
+    addToggle?.classList.toggle('hidden', true);
     const addDetails = document.getElementById('mimoAddDetails');
-    function setMimoAddExpanded(expanded) {
-      const next = Boolean(expanded);
-      addToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
-      addDetails?.classList.toggle('hidden', !next);
-      document.getElementById('mimoManualPanel')?.classList.toggle('expanded', next);
-    }
+
     addToggle?.addEventListener('click', () => setMimoAddExpanded(addDetails?.classList.contains('hidden')));
     setMimoAccountExpanded(false);
     renderMimoStatus();
@@ -101,6 +104,7 @@ function setup() {
       const saveButton = document.getElementById('mimoSaveAccountButton');
       saveButton.disabled = true;
       saveButton.textContent = t('settings.mimo.checking');
+      renderMimoStatus();
       const draft = input.value;
       let result;
       try {

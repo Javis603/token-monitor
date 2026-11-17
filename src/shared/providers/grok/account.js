@@ -3,8 +3,8 @@
 
 // Grok limits account wiring. Leaf module: no requires.
 // Grok has no settings-backed credential: it authenticates through the local
-// X account material its limits module knows how to find, and it gets no
-// settings panel.
+// X account material its limits module knows how to find, and it has no
+// saved credential editor.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'grok',
   sourceSelection: { sources: ['rpc', 'web'] },

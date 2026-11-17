@@ -32,7 +32,7 @@ function renderCodexLoginStatus() {
   const output = document.getElementById('codexLoginOutput');
   if (!addButton || !cancelButton || !refreshButton || !openButton || !copyButton || !statusEl || !workspaceSelection || !workspaceSelect || !urlActions || !details || !output) return;
 
-  addButton.classList.toggle('hidden', state.codexSignInBusy);
+  addButton.classList.add('hidden');
   cancelButton.classList.toggle('hidden', !state.codexSignInBusy);
   refreshButton.classList.toggle('hidden', state.codexSignInBusy);
   accountShellApi.render({ progress: statusEl, progressText: state.codexLoginStatus });
@@ -67,7 +67,7 @@ function renderCodexAccounts() {
     : t('settings.opencode.connected', { linked: enabledCount, total: accounts.length });
   accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.codexAccountError });
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
-    document, provider: 'codex', container: listEl, t, bridge: window.tokenMonitor,
+    document, provider: 'codex', label: host.providerLabel || 'Codex', add: startCodexLogin, container: listEl, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
     enabled: (account, value) => window.tokenMonitor.codex.setAccountEnabled(account.id, value),
     remove: account => window.tokenMonitor.codex.removeAccount(account.id),
@@ -96,6 +96,59 @@ function isCurrentCodexSignInFlow(flowId) {
   const incoming = String(flowId || '');
   return current && incoming === current;
 }
+async function startCodexLogin() {
+  const codexLoginDetails = document.getElementById('codexLoginDetails');
+  if (state.codexSignInBusy) return;
+  const flowId = nextCodexSignInFlowId();
+  state.codexSignInFlowId = flowId;
+  state.codexSignInBusy = true;
+  state.codexLoginUrl = '';
+  state.codexLoginOutput = '';
+  state.codexWorkspaceChoices = [];
+  state.codexWorkspaceId = '';
+  state.codexLoginStatus = t('settings.codex.loginStarting');
+  state.codexAccountError = '';
+  if (codexLoginDetails) codexLoginDetails.open = false;
+  renderCodexLoginStatus();
+  renderCodexAccounts();
+  try {
+    const result = await window.tokenMonitor.codex.addAccount({ flowId });
+    if (!isCurrentCodexSignInFlow(result?.flowId || flowId)) return;
+    if (!result?.ok) {
+      if (result?.outcome === 'cancelled') return;
+      state.codexAccountError = result?.error || t('settings.codex.loginFailed');
+      state.codexLoginStatus = t('settings.codex.loginFailed');
+      if (codexLoginDetails && state.codexLoginOutput) codexLoginDetails.open = true;
+      setCodexAccountExpanded(true);
+    } else {
+      state.codexAccountError = '';
+      state.codexLoginStatus = t('settings.codex.loginSuccess');
+      renderCodexLoginStatus();
+      state.settings.codexManagedAccounts = await window.tokenMonitor.codex.accounts();
+      await refreshStats({ force: true });
+      state.codexLoginStatus = '';
+      state.codexLoginOutput = '';
+      state.codexWorkspaceChoices = [];
+      state.codexWorkspaceId = '';
+    }
+  } catch (err) {
+    if (!isCurrentCodexSignInFlow(flowId)) return;
+    state.codexAccountError = err.message;
+    state.codexLoginStatus = t('settings.codex.loginFailed');
+    if (codexLoginDetails && state.codexLoginOutput) codexLoginDetails.open = true;
+  } finally {
+    if (isCurrentCodexSignInFlow(flowId)) {
+      state.codexSignInBusy = false;
+      state.codexSignInFlowId = '';
+      state.codexLoginUrl = '';
+      state.codexWorkspaceChoices = [];
+      state.codexWorkspaceId = '';
+      renderCodexLoginStatus();
+      renderCodexAccounts();
+    }
+  }
+
+}
 function setup() {
   const codexToggle = document.getElementById('codexSettingsToggle');
   if (codexToggle) {
@@ -103,7 +156,6 @@ function setup() {
     setCodexAccountExpanded(false);
     renderCodexAccounts();
 
-    const codexAddButton = document.getElementById('codexAddAccountButton');
     const codexCancelButton = document.getElementById('codexCancelLoginButton');
     const codexOpenUrlButton = document.getElementById('codexOpenLoginUrlButton');
     const codexCopyUrlButton = document.getElementById('codexCopyLoginUrlButton');
@@ -126,57 +178,6 @@ function setup() {
       if (status.loginUrl) state.codexLoginUrl = status.loginUrl;
       state.codexLoginStatus = t(state.codexLoginUrl ? 'settings.codex.loginWaiting' : 'settings.codex.loginStarting');
       renderCodexLoginStatus();
-    });
-    codexAddButton.addEventListener('click', async () => {
-      if (state.codexSignInBusy) return;
-      const flowId = nextCodexSignInFlowId();
-      state.codexSignInFlowId = flowId;
-      state.codexSignInBusy = true;
-      state.codexLoginUrl = '';
-      state.codexLoginOutput = '';
-      state.codexWorkspaceChoices = [];
-      state.codexWorkspaceId = '';
-      state.codexLoginStatus = t('settings.codex.loginStarting');
-      state.codexAccountError = '';
-      if (codexLoginDetails) codexLoginDetails.open = false;
-      renderCodexLoginStatus();
-      renderCodexAccounts();
-      try {
-        const result = await window.tokenMonitor.codex.addAccount({ flowId });
-        if (!isCurrentCodexSignInFlow(result?.flowId || flowId)) return;
-        if (!result?.ok) {
-          if (result?.outcome === 'cancelled') return;
-          state.codexAccountError = result?.error || t('settings.codex.loginFailed');
-          state.codexLoginStatus = t('settings.codex.loginFailed');
-          if (codexLoginDetails && state.codexLoginOutput) codexLoginDetails.open = true;
-          setCodexAccountExpanded(true);
-        } else {
-          state.codexAccountError = '';
-          state.codexLoginStatus = t('settings.codex.loginSuccess');
-          renderCodexLoginStatus();
-          state.settings.codexManagedAccounts = await window.tokenMonitor.codex.accounts();
-          await refreshStats({ force: true });
-          state.codexLoginStatus = '';
-          state.codexLoginOutput = '';
-          state.codexWorkspaceChoices = [];
-          state.codexWorkspaceId = '';
-        }
-      } catch (err) {
-        if (!isCurrentCodexSignInFlow(flowId)) return;
-        state.codexAccountError = err.message;
-        state.codexLoginStatus = t('settings.codex.loginFailed');
-        if (codexLoginDetails && state.codexLoginOutput) codexLoginDetails.open = true;
-      } finally {
-        if (isCurrentCodexSignInFlow(flowId)) {
-          state.codexSignInBusy = false;
-          state.codexSignInFlowId = '';
-          state.codexLoginUrl = '';
-          state.codexWorkspaceChoices = [];
-          state.codexWorkspaceId = '';
-          renderCodexLoginStatus();
-          renderCodexAccounts();
-        }
-      }
     });
 
     codexCancelButton.addEventListener('click', async () => {
@@ -240,5 +241,5 @@ function setup() {
 
 
 }
- return { state, setCodexAccountExpanded, renderCodexLoginStatus, renderCodexAccounts, refreshCodexAccounts, nextCodexSignInFlowId, isCurrentCodexSignInFlow, setup };
+ return { state, setCodexAccountExpanded, renderCodexLoginStatus, renderCodexAccounts, refreshCodexAccounts, nextCodexSignInFlowId, isCurrentCodexSignInFlow, startCodexLogin, setup };
 });

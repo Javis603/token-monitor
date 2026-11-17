@@ -173,7 +173,7 @@ test('Codex startup hydrates missing managed workspace labels without blocking s
 test('Codex login renderer ignores stale flows and exposes explicit URL actions', () => {
   const app = read(path.join(rendererDir, 'limits/providerOwners/codex.js'));
   const setup = app.slice(
-    app.indexOf('function setup()'),
+    app.indexOf('async function startCodexLogin()'),
     app.length
   );
 

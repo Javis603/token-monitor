@@ -9383,15 +9383,16 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .qoder-collection-settings > .settings-note { margin: 0; }
 
 /* Local account slots keep live controls mounted across provider redraws. */
-.slot-panel { margin-bottom: 14px; }
+.slot-panel { margin-bottom: 8px; }
 .slot-list { border: 1px solid var(--line); border-radius: 12px; background: rgba(var(--panel-rgb), .15); overflow: clip; }
-.slot-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) minmax(0, max-content) 28px; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.slot-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) minmax(0, max-content) 28px; align-items: center; gap: 6px; padding: 4px 8px; border-bottom: 1px solid var(--line); }
 .slot-copy { min-width: 0; }
-.slot-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .75rem; font-weight: 500; color: var(--text); }
+.slot-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .6875rem; font-weight: 500; color: var(--text); }
 .slot-name-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .slot-name-line .slot-name { min-width: 0; }
 .slot-name-line.is-editing .slot-name { flex: 1; }
-.slot-rename-button { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.slot-rename-button { opacity: 0; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.slot-row:is(:hover, :focus-within) .slot-rename-button { opacity: 1; }
 .slot-rename-button::before { content: ''; width: 12px; height: 12px; background: currentColor; mask: url("icons/actions/pencil-line.svg") center / contain no-repeat; }
 .slot-rename-button:hover { color: var(--text); background: rgba(var(--overlay-rgb), .06); }
 .slot-rename-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -9419,7 +9420,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-menu button.menu-destructive.confirming:hover, .plugin-menu button.menu-destructive.confirming:focus-visible { color: var(--red); background: rgba(255, 91, 91, 0.2); }
 .plugin-menu button:disabled { opacity: .35; cursor: default; }
 .action-menu-separator { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
-.slot-add { display: block; width: calc(100% - 24px); margin: 10px 12px; padding: 9px 6px; border: 1px dashed var(--line); border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: .6875rem; cursor: pointer; }
+.slot-add { display: block; width: calc(100% - 16px); margin: 6px 8px; padding: 6px; border: 1px dashed var(--line); border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: .6875rem; cursor: pointer; }
 .slot-rename { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; }
 .slot-editor { padding: 14px 12px; border-bottom: 1px solid var(--line); }
 .slot-editor > strong { display: block; font-size: .75rem; font-weight: 600; margin-bottom: 12px; }
@@ -9454,23 +9455,21 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 :root[data-reduce-motion="on"] .slot-row { transition: none; }
 
 .slot-remote-note { max-width: 190px; padding: 6px 10px; white-space: normal; }
-/* Connection metadata is a compact summary; setup remains in the disclosure. */
+/* Connection metadata stays compact; explanations belong to the source menu. */
 .limit-provider-connection-sources { min-width: 0; container-type: inline-size; }
-.connection-source-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: rgba(var(--overlay-rgb), .025); }
+.connection-source-card { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 12px; background: rgba(var(--overlay-rgb), .025); }
 .connection-source-copy { flex: 1; min-width: 0; }
-.connection-source-copy .settings-item-title { font-size: 0.75rem; font-weight: 500; }
+.connection-source-copy .settings-item-title { font-size: 0.6875rem; font-weight: 500; }
 .connection-source-copy .settings-item-title, .connection-source-copy .settings-item-desc { display: block; }
 .connection-source-copy .settings-item-desc { margin-top: 3px; }
+.connection-source-actions > .settings-item-desc:empty { display: none; }
 .connection-source-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 0; max-width: 52%; text-align: right; overflow-wrap: anywhere; }
-.connection-source-method { font-size: 0.8125rem; font-weight: 500; }
-.connection-source-get { display: inline-flex; align-items: center; justify-content: flex-end; gap: 3px; font: inherit; font-size: 0.75rem; text-align: right; }
+.connection-source-method { font-size: 0.75rem; font-weight: 500; }
+.connection-source-get { display: inline-flex; align-items: center; justify-content: flex-end; gap: 3px; font: inherit; font-size: 0.6875rem; text-align: right; }
 .connection-source-icon { width: 12px; height: 12px; flex-shrink: 0; background: currentColor; mask: url("icons/actions/external-link.svg") center / contain no-repeat; }
-.connection-source-details { margin-top: 6px; }
-.connection-source-details summary { width: fit-content; cursor: pointer; font-size: 0.75rem; }
-.connection-source-details p { margin: 8px 0 0; overflow-wrap: anywhere; }
-.connection-source-details summary:focus-visible, .connection-source-get:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.connection-source-get:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 @container (max-width: 300px) {
-  .connection-source-card { align-items: flex-start; flex-direction: column; gap: 8px; padding: 10px 12px; }
+  .connection-source-card { align-items: flex-start; flex-direction: column; gap: 8px; padding: 8px 10px; }
   .connection-source-actions { align-items: flex-start; max-width: 100%; text-align: left; }
   .connection-source-get { text-align: left; }
 }

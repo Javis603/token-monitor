@@ -24,7 +24,7 @@ test('Antigravity settings manage quota accounts without exposing a local accoun
     app.indexOf('function setup()')
   );
   const antigravitySetup = app.slice(
-    app.indexOf("const antigravityToggle = document.getElementById('antigravitySettingsToggle')"),
+    app.indexOf('async function startAntigravityLogin()'),
     app.indexOf(' return { state')
   );
 

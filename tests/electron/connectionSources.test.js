@@ -51,7 +51,7 @@ test('headers derive exactly one connection tag regardless of reading state', ()
 
 function renderConnection(id, reading = {}, hasOpenControl = true, preference = 'auto') {
   const nodes = [];
-  const document = { getElementById: () => hasOpenControl ? {} : null, createTextNode(textContent) { return { textContent }; }, createElement(tag) { const node = { tag, children: [], textContent: '', append(...children) { this.children.push(...children); }, setAttribute() {}, addEventListener(event, callback) { this[event] = callback; } }; nodes.push(node); return node; } };
+  const document = { getElementById: () => hasOpenControl ? {} : null, createTextNode(textContent) { return { textContent }; }, createElement(tag) { const node = { tag, children: [], dataset: {}, textContent: '', append(...children) { this.children.push(...children); }, setAttribute() {}, addEventListener(event, callback) { this[event] = callback; } }; nodes.push(node); return node; } };
   const source = app.slice(app.indexOf('function limitProviderConnectionDetail('), app.indexOf('// Single entry point for the provider options'));
   const opened = [];
   const form = limitAccountFormsForRenderer().find(entry => entry.id === id);
@@ -69,10 +69,10 @@ test('alternative connection row uses existing provenance, never invents detecti
   const { panel, nodes } = renderConnection('ollama', { source: 'api', status: 'ok' });
   assert.equal(panel.className, 'limit-provider-connection-sources');
   assert.ok(nodes.some(node => node.className === 'connection-source-card'));
-  assert.ok(nodes.some(node => node.tag === 'details'));
-  assert.ok(nodes.some(node => node.textContent === 'Currently using API key'));
+  assert.ok(!nodes.some(node => node.tag === 'details'));
+  assert.ok(nodes.some(node => node.tag === 'option' && node.value === 'auto' && node.textContent === 'Auto · API key'));
   assert.equal(nodes.filter(node => node.className === 'settings-item-desc').length,
-    4 + (nodes.some(node => node.tag === 'select') ? 1 : 0), 'a selectable source also exposes a save-status line');
+    2, 'only the summary and save-status line remain outside the menu');
   const unknown = renderConnection('ollama', { source: 'api', status: 'unavailable' });
   assert.ok(unknown.nodes.some(node => node.textContent === 'Auto · try sources in order'));
   assert.ok(!unknown.nodes.some(node => /currently using|not detected/i.test(node.textContent)));
@@ -159,20 +159,20 @@ test('Alibaba displays main CLI-first Cookie fallback without changing its dispa
 });
 
 
-test('manual API card keeps optional Web complement instructions in its disclosure', () => {
+test('manual API card omits the redundant disclosure and retains the credential setup form', () => {
   const { nodes } = renderConnection('deepseek', { source: 'web', status: 'ok' });
   assert.equal(nodes.find(n => n.className === 'connection-source-method').textContent, 'API key');
   assert.ok(nodes.some(n => n.textContent === 'Paste an API key'));
-  const details = nodes.find(n => n.tag === 'details');
-  assert.ok(details.children.some(n => n.textContent.includes(translate('en', 'settings.deepseek.webTokenNote'))));
+  assert.ok(!nodes.some(n => n.tag === 'details'));
+  assert.ok(JSON.stringify(limitAccountFormsForRenderer().find(entry => entry.id === 'deepseek')).includes('settings.deepseek.webTokenNote'));
   assert.ok(!nodes.some(n => /Currently using/.test(n.textContent)));
 });
 
 test('sourceDetail takes precedence and stale/failed readings never claim a current lane', () => {
   const ok = renderConnection('codex', { source: 'rpc', sourceDetail: 'app', status: 'ok' });
-  assert.ok(ok.nodes.some(n => n.textContent === 'Currently using Desktop app'));
+  assert.ok(ok.nodes.some(n => n.tag === 'option' && n.value === 'auto' && n.textContent === 'Auto · Desktop app'));
   for (const reading of [{source:'oauth',status:'ok',stale:true}, {source:'oauth',status:'error'}]) {
-    assert.ok(!renderConnection('codex', reading).nodes.some(n => /Currently using/.test(n.textContent)));
+    assert.equal(renderConnection('codex', reading).nodes.find(n => n.tag === 'option' && n.value === 'auto').textContent, 'Auto detect');
   }
   for (const id of ['cline','factory','opencode','volcengine']) {
     const method = renderConnection(id).nodes.find(n => n.className.split(' ').includes('connection-source-method'));
@@ -191,7 +191,12 @@ for (const locale of Object.keys(MESSAGES)) {
       });
       const select = [...card.walk()].find(n => n.tagName === 'select');
       assert.deepEqual(select.children.map(n => n.value), ['auto', ...entry.sources.filter(s => entry.sourceSelection.sources.includes(s.id) && s.relation === 'alternative').map(s => s.id)]);
-      for (const option of select.children) assert.ok(option.textContent && !option.textContent.startsWith('settings.'), `${entry.id} ${option.value}`);
+      for (const option of select.children) {
+        assert.ok(option.textContent && !option.textContent.startsWith('settings.'), `${entry.id} ${option.value}`);
+        const description = option.dataset.tmSelectDescription ?? translate(locale, option.dataset.selectDescription);
+        assert.ok(description && !description.startsWith('settings.'), `${entry.id} ${option.value} description`);
+      }
+      assert.ok(![...card.walk()].some(node => node.tagName === 'details'));
     }
   });
 }

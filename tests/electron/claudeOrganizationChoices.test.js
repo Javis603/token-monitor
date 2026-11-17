@@ -70,7 +70,7 @@ for (const fromCancel of [true, false]) {
     const unrelated = { id: 'elsewhere' };
     const draft = { value: 'discard-this' };
     const document = { activeElement: fromCancel ? cancel : unrelated,
-      getElementById: (id) => id === 'claudeWebCookieInput' ? draft : id === 'claudeAddWebAccountButton' ? add : null };
+      getElementById: (id) => id === 'claudeWebCookieInput' ? draft : id === 'claudeWebAccountList' ? { querySelector: () => add } : null };
     const add = { focus() { document.activeElement = add; } };
     const select = { options: [], append(option) { this.options.push(option); } };
     const get = document.getElementById;

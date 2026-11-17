@@ -256,7 +256,7 @@ test('Cursor settings use the shared multi-account rows and inline add flow', ()
   assert.deepEqual(openedUrls, ['https://cursor.com']);
   assert.doesNotMatch(setup, /openExternal\('https:\/\/cursor\.com\/dashboard\/settings'\)/);
   assert.match(setup, /cursorAddAccountButton\?\.addEventListener\('click'/);
-  assert.match(setup, /cursorManualDetails\?\.classList\.toggle\('hidden', !next\)/);
+  assert.match(setup, /getElementById\('cursorManualDetails'\)\?\.classList\.toggle\('hidden', !next\)/);
   assert.match(setup, /const expanding = !state\.cursorAccountExpanded;[\s\S]*?setCursorAccountExpanded\(expanding\);[\s\S]*?if \(expanding && !state\.cursorAccount\.busy\) void refreshCursorStatus\(\{ discover: true \}\);/);
   assert.doesNotMatch(setup, /cursorRefreshButton|refreshCursorAccounts|cursor\.refresh\(/);
 
@@ -338,7 +338,7 @@ test('OpenCode account panel provides multi-profile management', () => {
 
   const setupBody = functionBody(app, 'setup');
   assert.match(setupBody, /document\.getElementById\('opencodeAddToggle'\)/);
-  assert.match(setupBody, /addDetails\?\.classList\.toggle\('hidden'/);
+  assert.match(app, /getElementById\('opencodeAddDetails'\)\?\.classList\.toggle\('hidden'/);
   assert.match(setupBody, /document\.getElementById\('opencodeOpenBrowser'\)\?\.addEventListener\('click'/);
   assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/opencode\.ai\/console'\)/);
   // The add form asks before binding: main refuses a name that already holds a
@@ -418,7 +418,7 @@ test('OpenCode disabled profiles still count in the account summary', () => {
   assert.match(renderBody, /ambientToggle\.checked = ambientEnabled;/);
   assert.match(renderBody, /setAmbientEnabled\(ambientToggle\.checked\)/);
   assert.match(renderBody, /item\.append\(ambientToggle, nameBox, rightBox\)/);
-  assert.match(renderBody, /if \(entries\.length === 0 && !hasEnvVar && !hasAmbientKey\)/);
+  assert.match(renderBody, /const empty = entries\.length === 0 && !hasEnvVar && !hasAmbientKey/);
   // Credential composition stays visible after the fact, because two kinds under
   // one name is a user assertion that changes identity and fallback behaviour,
   // and each is removable so undoing it does not cost the one being kept.

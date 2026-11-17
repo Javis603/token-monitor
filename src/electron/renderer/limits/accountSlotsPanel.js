@@ -72,7 +72,7 @@
     return result;
   }
 
-  function createPanel({ form, label, loginAction, document, t, ipc, forms, preserveScroll, onChanged, openExternal, maskEmail = value => value, customEditor, capabilities = () => ({}), isBusy = () => false, extraActions = () => [], statusReading = (_slot, reading) => reading, secondaryText = () => '', detailText = () => '', hideAdd = false }) {
+  function createPanel({ form, label, loginAction, document, t, ipc, forms, preserveScroll, onChanged, openExternal, maskEmail = value => value, customEditor, onAdd, capabilities = () => ({}), isBusy = () => false, extraActions = () => [], statusReading = (_slot, reading) => reading, secondaryText = () => '', detailText = () => '', hideAdd = false }) {
     const make = (tag, className = '', text) => {
       const el = document.createElement(tag);
       el.className = className;
@@ -156,7 +156,7 @@
         if (presentationPending || (operationsPending > 0 && remoteAccounts().some(slot => slot.id === args[0])) || rowDrag.isDragging()) return;
         presentationPending++;
         return enqueue(() => {
-          const accounts = activeAccounts();
+          const accounts = activeAccounts().filter(account => account.accountKey);
           const index = accounts.findIndex(slot => slot.id === args[0]);
           const target = index + (args[1] === 'up' ? -1 : 1);
           if (index < 0 || target < 0 || target >= accounts.length) return { ok: true };
@@ -182,7 +182,7 @@
       dragExcluded: 'input, select, textarea, a',
       preserveScroll,
       mirrorOrder: (order, id) => {
-        const group = activeAccounts();
+        const group = activeAccounts().filter(account => account.accountKey);
         const previous = group.map(slot => slot.id);
         if (previous.length !== order.length || previous.some(key => !order.includes(key))) return { changed: false };
         const previousOrder = presentation.order;
@@ -351,7 +351,7 @@
       el.append(grip, copy, status, actions);
       el.addEventListener('pointerdown', event => {
         if ((presentationPending > 0 || operationsPending > 0) || editorOwner !== undefined
-          || isBusy() || [...rows.values()].some(row => row.editing || row.actions.querySelector('.plugin-menu').matches(':popover-open'))) return;
+          || isBusy() || capabilities(item.slot).move === false || [...rows.values()].some(row => row.editing || row.actions.querySelector('.plugin-menu').matches(':popover-open'))) return;
         rowDrag.startRowDrag(event, id);
       });
       // Each row owns its rename session, so one row cannot invalidate another's.
@@ -423,6 +423,7 @@
         });
         const { popover: menu, trigger: more, close: closeMenu } = shared;
         item.positionMenu = shared.position;
+        item.menuTrigger = more;
         more.dataset.i18nAriaLabel = 'settings.slots.actions';
         const action = (key, fn) => {
           const node = slotButton(key, () => { closeMenu(); return fn(); });
@@ -458,7 +459,9 @@
         remove.dataset.slotAction = 'remove';
         const separator = () => { const node = make('hr', 'action-menu-separator'); node.setAttribute('role', 'separator'); return node; };
         const replace = action(`replace${credentialWord}`, () => openEditor(item.slot));
-        for (const entry of extraActions(() => item.slot)) {
+        const additionalActions = extraActions(() => item.slot);
+        item.hasExtraActions = additionalActions.length > 0;
+        for (const entry of additionalActions) {
           shared.appendItems(button(entry.label, () => { closeMenu(); return entry.run(item.slot); }));
         }
         if (id.startsWith('remote:')) {
@@ -489,7 +492,11 @@
       if (before !== editor) list.moveBefore(editor, before || null);
       add.classList.toggle('hidden', editorOwner === null);
     }
-    const add = slotButton('add', () => openEditor(null), { provider: label });
+    const add = slotButton('add', () => {
+      if (isBusy()) return;
+      if (!onAdd) return openEditor(null);
+      try { return Promise.resolve(onAdd()).catch(error); } catch (_) { error(); }
+    }, { provider: label });
     add.className = 'slot-add';
     add.classList.toggle('hidden', hideAdd);
     list.append(add);
@@ -501,6 +508,7 @@
     function render() {
       if (rowDrag.deferRender()) return;
       const active = activeAccounts();
+      add.disabled = Boolean(isBusy());
       for (const [id, item] of rows) if (!active.some(slot => slot.id === id)) { item.el.remove(); rows.delete(id); }
       active.forEach((slot, index) => {
         const item = rowFor(slot.id);
@@ -519,6 +527,8 @@
           item.detail.classList.toggle('hidden', !detail);
         }
         const permission = capabilities(slot);
+        item.menuTrigger.classList.toggle('hidden', !item.hasExtraActions
+          && ['rename', 'move', 'replace', 'setEnabled', 'remove'].every(operation => permission[operation] === false));
         item.renameButton.disabled = isBusy();
         item.renameAction?.classList.toggle('hidden', permission.rename === false);
         item.renameButton.classList.toggle('hidden', item.editing || permission.rename === false);

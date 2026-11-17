@@ -35,18 +35,6 @@ function renderOpenCodeProfiles() {
     listEl.replaceChildren();
     const entries = Object.entries(profiles);
 
-    if (entries.length === 0 && !hasEnvVar && !hasAmbientKey) {
-      accountList?.update([], []);
-      listEl.classList.remove('hidden');
-      const empty = document.createElement('div');
-      empty.className = 'opencode-empty';
-      empty.textContent = t('settings.opencode.emptyList');
-      listEl.append(empty);
-      state.opencodeProfileCount = 0;
-      renderOpenCodeProfilesStatusSummary({});
-      renderSettingsSummaries();
-      return;
-    }
 
     // The auto-detected key counts as an account: it is what the limits card is
     // reading, so leaving it out of the total reports "not set up" next to live
@@ -338,7 +326,8 @@ function renderOpenCodeProfiles() {
       const common = document.createElement('div');
       listEl.before(common);
       accountList = window.TokenMonitorLegacyAccountList.create({
-        document, provider: 'opencode', container: common, t, bridge: window.tokenMonitor,
+        document, provider: 'opencode', label: host.providerLabel || 'OpenCode',
+    add: () => setOpenCodeAddExpanded(document.getElementById('opencodeAddDetails')?.classList.contains('hidden')), container: common, t, bridge: window.tokenMonitor,
         getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
         enabled: (account, value) => account.id === 'ambient'
           ? api.setAmbientEnabled(value) : api.setProfileEnabled(account.id, value),
@@ -351,7 +340,14 @@ function renderOpenCodeProfiles() {
       });
     }
     for (const [index, row] of [...listEl.children].entries()) row.dataset.ownerId = hasAmbientKey && index === 0 ? 'ambient' : entries[index - (hasAmbientKey ? 1 : 0)]?.[0];
-    listEl.classList.add('hidden');
+    const empty = entries.length === 0 && !hasEnvVar && !hasAmbientKey;
+    listEl.classList.toggle('hidden', !empty);
+    if (empty) {
+      const notice = document.createElement('div');
+      notice.className = 'opencode-empty';
+      notice.textContent = t('settings.opencode.emptyList');
+      listEl.append(notice);
+    }
     accountList.update([
       ...(hasAmbientKey ? [{ id: 'ambient', accountKey: ambientAccountKey, accountName: t('settings.opencode.ambientName'), enabled: ambientEnabled, removable: false }] : []),
       ...entries.map(([name, profile]) => ({ id: name, accountKey: profile.accountKey, accountKeyAliases: profile.accountKeyAliases, accountName: name, enabled: profile.enabled }))
@@ -562,6 +558,12 @@ function renderOpenCodeProfilesStatusSummary(profiles, ambient = null) {
     });
   }
 }
+function setOpenCodeAddExpanded(expanded) {
+  const next = Boolean(expanded);
+  document.getElementById('opencodeAddToggle')?.setAttribute('aria-expanded', String(next));
+  document.getElementById('opencodeAddDetails')?.classList.toggle('hidden', !next);
+  document.getElementById('opencodeAddForm')?.classList.toggle('expanded', next);
+}
 function setup() {
   const opencodeToggle = document.getElementById('opencodeSettingsToggle');
   if (opencodeToggle) {
@@ -572,13 +574,9 @@ function setup() {
     });
 
     const addToggle = document.getElementById('opencodeAddToggle');
+    addToggle?.classList.toggle('hidden', true);
     const addDetails = document.getElementById('opencodeAddDetails');
-    function setOpenCodeAddExpanded(expanded) {
-      const next = Boolean(expanded);
-      addToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
-      addDetails?.classList.toggle('hidden', !next);
-      document.getElementById('opencodeAddForm')?.classList.toggle('expanded', next);
-    }
+
     addToggle?.addEventListener('click', () => setOpenCodeAddExpanded(addDetails?.classList.contains('hidden')));
 
     document.getElementById('opencodeOpenBrowser')?.addEventListener('click', () => {

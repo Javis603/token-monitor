@@ -8,7 +8,7 @@
 })(typeof window !== 'undefined' ? /** @type {any} */ (window) : null, function createConnectionPresentationApi() {
   /**
    * Only declared capability options may select a provider-owned read lane.
-   * Complements remain discoverable even when the primary method is manual.
+   * Source descriptions use the shared select menu; credential setup stays in account forms.
    * @param {{ document: Document, t: (key: string, params?: Record<string, string>) => string,
    * sources: import('../../../shared/limits/accounts').AccountSource[],
    * provider: {status?: string, stale?: boolean, source?: string, sourceDetail?: string},
@@ -39,16 +39,28 @@
       : primary.kind === 'apiKey' ? 'settings.limits.sources.manualApi' : 'settings.limits.sources.manualWeb');
     const summary = node('span', 'settings-item-desc', automaticSummary);
     copy.append(summary);
+    // A fresh alternative reading can annotate Auto without adding another row.
+    const current = alternatives.length > 1 && provider.status === 'ok' && !provider.stale
+      ? alternatives.find(source => source.id === (provider.sourceDetail || provider.source))
+        || alternatives.find(source => source.id === provider.source) : null;
+    const autoLabel = current
+      ? `${t('settings.limits.capability.auto')} · ${t(current.labelKey)}`
+      : t('settings.limits.connection.autoDetect');
     const actions = node('div', 'connection-source-actions');
     if (selection && onSelect) {
       const select = document.createElement('select');
       select.className = 'settings-select connection-source-method';
       select.setAttribute('aria-label', t('settings.limits.connection.title'));
       const choices = sources.filter(source => selection.sources.includes(source.id) && source.relation === 'alternative');
-      for (const choice of [{ id: 'auto', labelKey: 'settings.limits.connection.autoDetect' }, ...choices]) {
+      for (const choice of [{ id: 'auto', labelKey: 'settings.limits.connection.autoDetect', descriptionKey: 'settings.limits.sources.auto' }, ...choices]) {
         const option = document.createElement('option');
         option.value = choice.id;
-        option.textContent = t(choice.labelKey);
+        option.textContent = choice.id === 'auto' ? autoLabel : t(choice.labelKey);
+        // appSelects already renders localized descriptions below menu options.
+        if (choice.id === 'auto') option.dataset.tmSelectDescription = [automaticSummary,
+          ...sources.filter(source => source.relation === 'complement').map(source => `${t(source.labelKey)} · ${t(source.descriptionKey)}`)
+        ].join(' ');
+        else option.dataset.selectDescription = choice.descriptionKey;
         select.append(option);
       }
       let accepted = choices.some(source => source.id === preference) ? preference : 'auto';
@@ -77,14 +89,8 @@
       actions.append(select, error);
     } else {
       actions.append(node('span', 'connection-source-method', automatic
-        ? t('settings.limits.connection.autoDetect') : t(primary.labelKey)));
+        ? autoLabel : t(primary.labelKey)));
     }
-    // Only fresh successful alternative readings prove a current lane. A Web
-    // complement is never reported as the exclusive source of a combined read.
-    const current = alternatives.length > 1 && provider.status === 'ok' && !provider.stale
-      ? alternatives.find(source => source.id === (provider.sourceDetail || provider.source))
-        || alternatives.find(source => source.id === provider.source) : null;
-    if (current) actions.append(node('span', 'settings-item-desc', t('settings.limits.sources.using', { source: t(current.labelKey) })));
     if (onOpen && manual.length) {
       const link = document.createElement('button');
       link.type = 'button';
@@ -99,13 +105,6 @@
     }
     card.append(copy, actions);
     panel.append(card);
-    const details = document.createElement('details');
-    details.className = 'connection-source-details';
-    details.append(node('summary', 'inline-link', t('settings.limits.sources.details')));
-    for (const source of sources) {
-      details.append(node('p', 'settings-item-desc', `${t(source.labelKey)} · ${t(source.descriptionKey)}`));
-    }
-    panel.append(details);
     return panel;
   }
   return { createConnectionCard };

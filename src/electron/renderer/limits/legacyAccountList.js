@@ -27,7 +27,7 @@
     return candidates.length === 1 ? candidates[0] : undefined;
   }
   /**
-   * @param {{document: Document, provider: string, container: HTMLElement, t: Function, bridge: any, getContext: Function, preserveScroll: Function, refresh: Function, changed: Function, enabled?: Function, remove?: Function, edit?: Function, busy?: Function, actions?: Function, statusReading?: Function, secondaryText?: Function, detailText?: Function}} options
+   * @param {{document: Document, provider: string, label?: string, add?: Function, container: HTMLElement, t: Function, bridge: any, getContext: Function, preserveScroll: Function, refresh: Function, changed: Function, enabled?: Function, remove?: Function, edit?: Function, busy?: Function, actions?: Function, statusReading?: Function, secondaryText?: Function, detailText?: Function}} options
    */
   function create(options) {
     let accounts = /** @type {any[]} */ ([]);
@@ -35,7 +35,7 @@
     const { provider, bridge } = options;
     const permission = (/** @type {any} */ account) => ({
       rename: Boolean(account?.accountKey), move: Boolean(account?.accountKey),
-      replace: Boolean(options.edit) && account?.source !== 'environment' && account?.source !== 'remote',
+      replace: Boolean(options.edit) && account?.canReplace !== false && account?.source !== 'environment' && account?.source !== 'remote',
       setEnabled: Boolean(options.enabled) && account?.canPause !== false,
       remove: Boolean(options.remove) && account?.removable !== false
     });
@@ -51,8 +51,8 @@
       return { ok: true };
     };
     const list = panel.createPanel({
-      form: { id: provider, fields: [] }, label: provider,
-      document: options.document, t: options.t, hideAdd: true,
+      form: { id: provider, fields: [] }, label: options.label || provider,
+      document: options.document, t: options.t, hideAdd: !options.add, onAdd: options.add,
       customEditor: (/** @type {any} */ row) => options.edit?.(accounts.find(account => account.id === row?.id)),
       capabilities: permission, isBusy: options.busy || (() => false),
       extraActions: options.actions || (() => []),

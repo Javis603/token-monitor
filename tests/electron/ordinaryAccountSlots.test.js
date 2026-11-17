@@ -239,3 +239,20 @@ for (const enabled of [true, false]) test(`MiniMax removes ${enabled ? 'enabled'
   assert(!retried.minimaxAccountSlots.some(slot => slot.id === 'k1'));
   assert.equal(retried.minimaxAccountSlots.length, 20);
 });
+
+for (const provider of ['grok', 'kiro']) test(`${provider} automatic accounts can only edit presentation for main-proven identities`, async () => {
+  let settings = {}; const writes = [];
+  const service = createAccountSlotService({ getSettings: () => settings,
+    write: patch => { writes.push(patch); settings = { ...settings, ...patch }; },
+    presentationAccounts: id => id === provider ? ['detected-key'] : [], env: {} });
+  assert.equal((await service.presentation(provider, 'arbitrary', 'rename', 'Bad')).ok, false);
+  assert.equal((await service.presentation(provider, '', 'order', ['arbitrary'])).ok, false);
+  assert.equal(writes.length, 0);
+  assert.equal((await service.presentation(provider, 'detected-key', 'rename', 'Work')).ok, true);
+  assert.equal((await service.presentation(provider, '', 'order', ['detected-key'])).ok, true);
+  assert.equal(settings.limitAccountPresentation[provider].labels['detected-key'], 'Work');
+  assert.ok(writes.every(patch => Object.keys(patch).every(key => key === 'limitAccountPresentation')));
+  assert.equal((await service.add(provider, {})).errorCode, 'unsupportedProvider');
+  assert.equal((await service.remove(provider, 'detected-key')).errorCode, 'unsupportedProvider');
+  assert.equal((await service.setEnabled(provider, 'detected-key', false)).errorCode, 'unsupportedProvider');
+});

@@ -10,6 +10,7 @@
  * The owner retains login/cancellation and editor generations across repaints.
  */ function create(host) {
  let accountList;
+ let realmChoicesOpen = false;
  // Host exposes named capabilities, never the application state object.
  const { document, window, t, renderSettingsSummaries, renderSubscriptionSettings, refreshStats, accountShellApi, setAccountGroupExpanded } = host;
  const state = {workbuddyAccountsRevision: host.initial.workbuddyAccountsRevision, workbuddyMutationBusy: host.initial.workbuddyMutationBusy, workbuddySignInBusy: host.initial.workbuddySignInBusy, workbuddyCancelBusy: host.initial.workbuddyCancelBusy, workbuddyAccountError: host.initial.workbuddyAccountError, workbuddyLoginAttempt: host.initial.workbuddyLoginAttempt, workbuddyPendingLoginResult: host.initial.workbuddyPendingLoginResult, workbuddyLoginStatusKey: host.initial.workbuddyLoginStatusKey, workbuddyAccountExpanded: host.initial.workbuddyAccountExpanded};
@@ -88,6 +89,7 @@ async function startWorkbuddyLogin(realm) {
   if (!['cn', 'ai'].includes(realm) || state.workbuddySignInBusy || state.workbuddyCancelBusy || state.workbuddyMutationBusy) return;
   const attempt = (state.workbuddyLoginAttempt || 0) + 1;
   state.workbuddyLoginAttempt = attempt;
+  realmChoicesOpen = false;
   state.workbuddySignInBusy = true;
   state.workbuddyPendingLoginResult = null;
   state.workbuddyAccountError = '';
@@ -149,6 +151,7 @@ function renderWorkbuddyStatus() {
   for (const [id, key] of [['workbuddyAddCnAccountButton', 'addCnAccount'], ['workbuddyAddAiAccountButton', 'addAiAccount']]) {
     const button = document.getElementById(id);
     if (!button) continue;
+    button.classList.toggle('hidden', !realmChoicesOpen || busy);
     button.disabled = busy;
     button.textContent = t(`settings.workbuddy.${key}`);
   }
@@ -158,7 +161,8 @@ function renderWorkbuddyStatus() {
     cancel.disabled = Boolean(state.workbuddyCancelBusy);
   }
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
-    document, provider: 'workbuddy', container: list, t, bridge: window.tokenMonitor,
+    document, provider: 'workbuddy', label: host.providerLabel || 'WorkBuddy',
+    add: () => { realmChoicesOpen = !realmChoicesOpen; renderWorkbuddyStatus(); }, container: list, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
     enabled: (account, value) => window.tokenMonitor.workbuddy.setAccountEnabled(account.id, value),
     remove: account => window.tokenMonitor.workbuddy.removeAccount(account.id),

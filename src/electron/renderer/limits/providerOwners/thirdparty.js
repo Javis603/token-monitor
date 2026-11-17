@@ -211,18 +211,10 @@ function renderNamedApiProfiles(config) {
     state.settings[envConfiguredKey] = Boolean(hasEnvVar);
     const entries = Object.entries(profiles);
     state[profileCountStateKey] = entries.length + (hasEnvVar ? 1 : 0);
-    if (state[profileCountStateKey] === 0 && !accountList) {
-      const empty = document.createElement('div');
-      empty.className = 'opencode-empty';
-      empty.textContent = t(`settings.${providerId}.emptyList`);
-      listEl.append(empty);
-      updateStatus();
-      renderSettingsSummaries();
-      return;
-    }
 
     if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
-      document, provider: providerId, container: listEl, t, bridge: window.tokenMonitor,
+      document, provider: providerId, label: host.providerLabel || providerId,
+      add: () => setThirdPartyAddExpanded(document.getElementById('thirdpartyAddDetails')?.classList.contains('hidden')), container: listEl, t, bridge: window.tokenMonitor,
       getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
       detailText: account => account.source === 'environment' ? '' : detailForProfile(account),
       enabled: (account, value) => api.setProfileEnabled(account.id, value),
@@ -281,6 +273,12 @@ function renderThirdPartyProfiles() {
     }
   });
 }
+function setThirdPartyAddExpanded(expanded) {
+  const next = Boolean(expanded);
+  document.getElementById('thirdpartyAddToggle')?.setAttribute('aria-expanded', String(next));
+  document.getElementById('thirdpartyAddDetails')?.classList.toggle('hidden', !next);
+  document.getElementById('thirdpartyAddForm')?.classList.toggle('expanded', next);
+}
 function setup() {
   const thirdpartyToggle = document.getElementById('thirdpartySettingsToggle');
   if (thirdpartyToggle) {
@@ -292,7 +290,6 @@ function setup() {
     setThirdPartyAccountExpanded(false);
 
     const addToggle = document.getElementById('thirdpartyAddToggle');
-    const addDetails = document.getElementById('thirdpartyAddDetails');
     const platformInput = document.getElementById('thirdpartyPlatformInput');
     const modeInput = document.getElementById('thirdpartyModeInput');
     const baseUrlInput = document.getElementById('thirdpartyBaseUrlInput');
@@ -301,12 +298,8 @@ function setup() {
     baseUrlInput?.addEventListener('input', updateThirdPartyHttpWarning);
     setThirdPartyAdapterFields();
     updateThirdPartyHttpWarning();
-    addToggle?.addEventListener('click', () => {
-      const expanded = addDetails?.classList.contains('hidden');
-      addToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-      addDetails?.classList.toggle('hidden', !expanded);
-      document.getElementById('thirdpartyAddForm')?.classList.toggle('expanded', expanded);
-    });
+    addToggle?.classList.add('hidden');
+
     const profileSubmit = document.getElementById('thirdpartyProfileSubmit');
     profileSubmit?.addEventListener('click', () => accountProfileSaves.run('thirdparty', profileSubmit, async () => {
       const nameInput = document.getElementById('thirdpartyProfileName');

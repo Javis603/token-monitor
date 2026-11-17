@@ -59,7 +59,8 @@ function renderCursorStatus() {
   setCursorStatusText(statusEl, summary);
   setCursorCheckboxesEnabled(accounts.some((account) => !account.expired && !account.error));
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
-    document, provider: 'cursor', container: listEl, t, bridge: window.tokenMonitor,
+    document, provider: 'cursor', label: host.providerLabel || 'Cursor',
+    add: () => setCursorManualExpanded(document.getElementById('cursorManualDetails')?.classList.contains('hidden')), container: listEl, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
     enabled: (account, value) => window.tokenMonitor.cursor.setAccountEnabled(account.id, value),
     remove: account => window.tokenMonitor.cursor.logout(account.id),
@@ -91,6 +92,12 @@ function setCursorCheckboxesEnabled(enabled) {
     input.setAttribute('aria-description', enabled ? '' : t('settings.cursor.loginRequired'));
   }
 }
+function setCursorManualExpanded(expanded) {
+  const next = Boolean(expanded);
+  document.getElementById('cursorAddAccountButton')?.setAttribute('aria-expanded', String(next));
+  document.getElementById('cursorManualDetails')?.classList.toggle('hidden', !next);
+  document.getElementById('cursorManualPanel')?.classList.toggle('expanded', next);
+}
 function setup() {
   document.getElementById('cursorSettingsToggle').addEventListener('click', () => {
     const expanding = !state.cursorAccountExpanded;
@@ -100,13 +107,9 @@ function setup() {
   setCursorAccountExpanded(false);
 
   const cursorAddAccountButton = document.getElementById('cursorAddAccountButton');
+  cursorAddAccountButton?.classList.toggle('hidden', true);
   const cursorManualDetails = document.getElementById('cursorManualDetails');
-  function setCursorManualExpanded(expanded) {
-    const next = Boolean(expanded);
-    cursorAddAccountButton?.setAttribute('aria-expanded', next ? 'true' : 'false');
-    cursorManualDetails?.classList.toggle('hidden', !next);
-    document.getElementById('cursorManualPanel')?.classList.toggle('expanded', next);
-  }
+
   cursorAddAccountButton?.addEventListener('click', () => {
     setCursorManualExpanded(cursorManualDetails?.classList.contains('hidden'));
   });

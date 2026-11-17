@@ -55,7 +55,8 @@ async function renderMinimaxApiKeys() {
     const keys = await window.tokenMonitor.minimax.getKeys();
     if (!isCurrent() || !isSettingsSurfaceVisible()) return;
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
-    document, provider: 'minimax', container: list, t, bridge: window.tokenMonitor,
+    document, provider: 'minimax', label: host.providerLabel || 'MiniMax',
+    add: () => { document.getElementById('minimaxAddDetails')?.classList.toggle('hidden'); document.getElementById('minimaxApiKeyInput')?.focus(); }, container: list, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
     enabled: (account, value) => window.tokenMonitor.limits.accountSlots.setEnabled('minimax', account.id, value),
     statusReading: (_account, reading) => limitProviderEnabled('minimax') ? reading : { status: 'disabled' },

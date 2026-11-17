@@ -312,7 +312,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       const entry = entryFor(providerId);
       if (!registered || operation !== 'order' && !validKey(accountKey)) return failure('invalidOperation');
       if (!entry) {
-        if (!['codex', 'cursor', 'opencode', 'mimo', 'thirdparty'].includes(providerId)) return failure('unsupportedProvider');
+        // Source-owned accounts expose presentation only, proven by main's current metadata.
         const canonical = new Set(await presentationAccounts(providerId));
         if (operation === 'rename' && (typeof value !== 'string' || value.length > 256 || !canonical.has(accountKey))) return failure('invalidOperation');
         if (operation === 'order' && (!Array.isArray(value) || value.length > 200 || new Set(value).size !== value.length || !value.every(key => validKey(key) && canonical.has(key)))) return failure('invalidOperation');

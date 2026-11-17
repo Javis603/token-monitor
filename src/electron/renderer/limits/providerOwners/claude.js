@@ -10,9 +10,10 @@
  * The owner retains login/cancellation and editor generations across repaints.
  */ function create(host) {
  let accountList;
+ const automaticAccounts = typeof module === 'object' && module.exports ? require('../automaticAccountList') : host.window.TokenMonitorAutomaticAccountList;
  // Host exposes named capabilities, never the application state object.
  const { document, window, accountShellApi, t, setAccountPanelMessage, renderExternalProviderStatus, commitAccountCredential, refreshStats, localProviderStatuses } = host;
- const editor = { revision: 0, accountId: 'new', open: null };
+ const editor = { revision: 0, accountId: 'new', open: false };
  const claudeAccountActions = accountShellApi.createBusyGuard();
  const state = {};
  Object.defineProperty(state, 'settings', { get: host.getSettings });
@@ -80,7 +81,7 @@ function cancelClaudeWebAccountEdit(restoreFocus = document.activeElement?.id ==
   renderClaudeOrganizationChoices([]);
   setAccountPanelMessage('claude', null);
   renderExternalProviderStatus('claude');
-  if (restoreFocus) document.getElementById('claudeAddWebAccountButton')?.focus({ preventScroll: true });
+  if (restoreFocus) document.getElementById('claudeWebAccountList')?.querySelector('.slot-add')?.focus({ preventScroll: true });
 }
 
 async function runClaudeAccountAction(button, operation) {
@@ -111,7 +112,7 @@ function claudeWebSettingsAccounts(providers) {
 }
 
 function claudeAccountStatusText(fallback, enabled) {
-  const providers = localProviderStatuses('claude');
+  const providers = (host.strictLocalProviderStatuses || localProviderStatuses)('claude');
   const accounts = claudeWebSettingsAccounts(providers);
   // Count configured Web logins even before their first result, and include
   // discovered local identities without double-counting the same subscription.
@@ -134,17 +135,25 @@ function claudeAccountStatusText(fallback, enabled) {
 function renderClaudeWebAccounts() {
   const list = document.getElementById('claudeWebAccountList');
   if (!list) return;
-  const providers = localProviderStatuses('claude');
+  const providers = (host.strictLocalProviderStatuses || localProviderStatuses)('claude');
   const accounts = claudeWebSettingsAccounts(providers);
+  const automatic = automaticAccounts.accountsFromReadings('claude', providers, {
+    represented: accounts, localDeviceId: host.getAccountContext().localDeviceId, label: host.providerLabel || 'Claude',
+    sourceName: reading => t(`settings.limits.sources.${reading.source}`)
+  });
   if (!accountList) {
     const container = document.createElement('div');
     list.prepend(container);
     accountList = window.TokenMonitorLegacyAccountList.create({
-      document, provider: 'claude', container, t, bridge: window.tokenMonitor,
+      document, provider: 'claude', label: host.providerLabel || 'Claude',
+      add: () => claudeAccountActions.run('claude', null, () => editClaudeWebAccount()), container, t, bridge: window.tokenMonitor,
       getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
       edit: editClaudeWebAccount,
       // Login health belongs to the saved Web credential, not merged OAuth quota.
+      secondaryText: account => account.source === 'automatic' && account.accountKey && (account.observation.accountName || account.accountEmail) ? account.sourceName : '',
       statusReading: (account, reading) => {
+        if (account.source === 'remote') return reading;
+        if (account.source === 'automatic') return account.observation;
         const status = state.settings?.claudeWebLoginStatuses?.[account.id];
         return status ? { status } : reading?.source === 'web' ? reading : undefined;
       },
@@ -160,18 +169,11 @@ function renderClaudeWebAccounts() {
       refresh: () => renderExternalProviderStatus('claude')
     });
   }
-  accountList.update(accounts.map(account => ({ ...account, canPause: account.id !== 'legacy',
-    removable: !(account.id === 'legacy' && state.settings?.claudeWebLegacyCookieSource === 'env') })), providers);
+  accountList.update([...accounts.map(account => ({ ...account, canPause: account.id !== 'legacy',
+    removable: !(account.id === 'legacy' && state.settings?.claudeWebLegacyCookieSource === 'env') })), ...automatic], providers.filter(row => row.accountKey));
   list.querySelector(':scope > .settings-actions')?.remove();
-  const add = document.createElement('button');
-  add.id = 'claudeAddWebAccountButton';
-  add.type = 'button';
-  add.textContent = t('settings.codex.addAccount');
-  add.setAttribute('aria-expanded', String(editor.open ?? accounts.length === 0));
-  add.addEventListener('click', () => claudeAccountActions.run('claude', add, () => editClaudeWebAccount()));
   const actions = document.createElement('div');
   actions.className = 'settings-actions';
-  actions.append(add);
   if (editor.open ?? accounts.length === 0) {
     const cancel = document.createElement('button');
     cancel.id = 'claudeCancelWebAccountButton';

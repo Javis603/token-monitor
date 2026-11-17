@@ -2505,7 +2505,7 @@ test('overlapping failures preserve the latest toggle, then fall back to a newer
   assert.deepEqual(harness.selection(), ['zed']);
 });
 
-test('empty OpenCode profiles render a localized summary before returning', () => {
+test('empty OpenCode profiles retain the shared list and refresh a localized summary', () => {
   const app = readRendererFile('limits/providerOwners/opencode.js');
   const renderProfiles = functionBody(app, 'renderOpenCodeProfiles', 'updateOpenCodeProfilesStatus');
   const renderSummary = functionBody(app, 'renderOpenCodeProfilesStatusSummary', 'thirdPartyProfileStatusText');
@@ -2524,10 +2524,9 @@ test('empty OpenCode profiles render a localized summary before returning', () =
   runViewFixture(`${renderSummary}\nrenderOpenCodeProfilesStatusSummary({});`, context);
 
   assert.equal(totalEl.textContent, 'localized:settings.opencode.statusNotSet');
-  assert.match(
-    renderProfiles,
-    /state\.opencodeProfileCount = 0;\s*renderOpenCodeProfilesStatusSummary\(\{\}\);\s*renderSettingsSummaries\(\);\s*return;/
-  );
+  assert.match(renderProfiles, /state\.opencodeProfileCount = entries\.length \+ \(hasAmbientKey \? 1 : 0\);/);
+  assert.match(renderProfiles, /accountList\.update\([\s\S]*updateOpenCodeProfilesStatus\(\);/);
+  assert.doesNotMatch(renderProfiles, /if \(entries\.length === 0[\s\S]*?return;/);
 });
 
 test('expanded provider options use the full row width without nested indentation', () => {
