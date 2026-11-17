@@ -2948,6 +2948,15 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .settings-panel .limit-provider-options-inner > .limit-provider-settings-list > .settings-item + .settings-item {
   border-top-color: var(--line);
 }
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list > .settings-item:first-child {
+  padding-top: 0;
+}
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list > .settings-item:last-child {
+  padding-bottom: 0;
+}
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list .settings-item-desc {
+  padding-bottom: 0;
+}
 .limit-provider-usage-items {
   display: grid;
   gap: 4px;
@@ -9506,7 +9515,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .legacy-slot-editor :is(input, textarea, select) { box-sizing: border-box; max-width: 100%; }
 .legacy-slot-editor textarea { width: 100%; }
 .legacy-slot-editor > .settings-actions:last-child { margin-top: 12px; }
-.limit-provider-account-group > .cursor-settings-details > .cursor-settings-details-inner > .settings-actions:empty { display: none; }
+.limit-provider-account-group > .cursor-settings-details > .cursor-settings-details-inner > .settings-actions:not(:has(> :not(.hidden))) { display: none; }
 .slot-editor-reveal.hidden, .legacy-editor-reveal.hidden { border: 0; }
 .settings-panel .plugin-menu button { height: 28px; min-height: 28px; padding: 0 7px; font-size: .6875rem; line-height: normal; border: 0; border-radius: 5px; }
 .connection-source-actions > .connection-source-method { box-sizing: border-box; min-height: 28px; display: flex; align-items: center; }

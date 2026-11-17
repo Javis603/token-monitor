@@ -69,7 +69,9 @@ test('no component restates the blanket hiding rule', () => {
   // including compound class tokens, without rejecting :not([hidden]) margins.
   // The lookahead keeps a hypothetical `.hidden-sm` out.
   const offenders = rules(css)
-    .filter((r) => /\.hidden(?![-\w])|\[hidden\]/.test(r.selector))
+    // A negative visibility probe can hide an empty parent without restating
+    // the utility on its hidden children.
+    .filter((r) => /\.hidden(?![-\w])|\[hidden\]/.test(r.selector.replace(/:not\(\.hidden\)/g, '')))
     .filter((r) => /\bdisplay\s*:/.test(r.body))
     .filter((r) => !ANIMATED.includes(r.selector))
     .map((r) => r.selector);
