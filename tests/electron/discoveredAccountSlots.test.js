@@ -64,6 +64,7 @@ for (const id of ['factory', 'cline', 'hark', 'manus', 'zai']) {
     assert.equal(service.list(id).accounts[0].source, undefined);
     settings[`${id}AccountSlots`] = [];
     const removed = await fetcher({ ...settings, previousLimits: { providers: rows } }, { env: {} });
+    assert.deepEqual(removed.map(row => row.accountKey).sort(), rows.map(row => row.accountKey).sort());
     assert.ok(removed.every(row => row.removed));
     assert.equal(service.list(id).accounts.length, 0);
   });
@@ -516,4 +517,36 @@ test('discovered shared labels use retired aliases without taking another accoun
   assert.equal(settings.clineAmbientAccounts[fingerprint].label, '');
   await adopt({ 'canonical-b': 'Current B', 'retired-b': 'Old B' });
   assert.equal(settings.clineAmbientAccounts[fingerprint].label, 'Current B');
+});
+
+
+test('renaming a saved slot newly hidden by discovery succeeds and publishes the name', async t => {
+  let discovered = false;
+  stubDiscovery(t, 'factory', () => discovered ? [{ values: { factoryApiKey: 'same' }, accountKey: 'known', sourceName: 'Droid' }] : []);
+  let settings = { factoryAccountSlots: [{ id: 'saved', values: { factoryApiKey: 'same' }, accountKey: 'known', label: 'Before' }] };
+  const published = [];
+  const service = createAccountSlotService({ getSettings: () => settings, env: {}, probeDeps: () => ({}),
+    write: async patch => { settings = { ...settings, ...patch }; }, onPresentation: operations => published.push(...operations) });
+  assert.equal(service.list('factory').accounts[0].id, 'saved');
+  discovered = true;
+  const result = await service.rename('factory', 'saved', 'After');
+  assert.equal(result.ok, true);
+  assert.equal(settings.factoryAccountSlots[0].label, 'After');
+  assert.equal(settings.limitAccountPresentation.factory.labels.known, 'After');
+  assert.ok(published.some(op => op.type === 'rename' && op.key === 'known' && op.label === 'After'));
+});
+
+test('source positions persist the local subsequence when shared order includes remote-only rows', async t => {
+  stubDiscovery(t, 'factory', () => [{ values: { factoryApiKey: 'discovered' }, accountKey: 'discovered-key', sourceName: 'Droid' }]);
+  let settings = { factoryAccountSlots: [{ id: 'saved', values: { factoryApiKey: 'saved' }, accountKey: 'saved-key', accountKeyAliases: ['old-saved'] }] };
+  const make = () => createAccountSlotService({ getSettings: () => settings, env: { FACTORY_API_KEY: 'environment' }, probeDeps: () => ({}), write: async patch => { settings = { ...settings, ...patch }; } });
+  let service = make();
+  const envKey = service.list('factory').accounts.find(row => row.source === 'environment').accountKey;
+  const order = ['remote-a', 'old-saved', envKey, 'remote-b', 'saved-key', 'discovered-key'];
+  const group = { labels: {}, order };
+  settings.limitAccountPresentation = { factory: group };
+  await service.adoptSharedLabels(settings.limitAccountPresentation);
+  delete settings.limitAccountPresentation;
+  service = make();
+  assert.deepEqual(service.list('factory').accounts.map(row => row.accountKey), [envKey, 'saved-key', 'discovered-key']);
 });

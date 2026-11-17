@@ -269,9 +269,9 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       await commit(entry, next, true, operation !== 'rename' && operation !== 'move');
       if (operation === 'rename' || operation === 'move') {
         const accounts = operation === 'move' ? next.map(item => dto(entry).find(slot => slot.id === item.id)) : dto(entry);
-        const slot = accounts.find(slot => slot.id === id);
+        const slot = slots(entry).find(slot => slot.id === id);
         const operations = operation === 'rename'
-          ? [{ provider: providerId, type: 'rename', key: slot.accountKey, label: slot.label }]
+          ? [{ provider: providerId, type: 'rename', key: slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`), label: slot.label }]
           : [{ provider: providerId, type: 'order', order: accounts.map(slot => slot.accountKey) }];
         const { replayPresentation } = require('./accountPresentationSync');
         await write({ limitAccountPresentation: replayPresentation(getSettings().limitAccountPresentation, operations) });
@@ -286,13 +286,16 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
     const patch = {};
     const metadata = { ...(getSettings()[`${entry.id}AmbientAccounts`] || {}) };
     const rows = ordered(entry);
-    const canonicalKeys = new Set(rows.map(row => row.accountKey));
+    const keyOf = row => row.accountKey || hashKey(entry.id, 'account-slot', row.source ? 'default' : `slot:${row.id}`);
+    const canonicalKeys = new Set(rows.map(keyOf));
+    // Remote-only keys and old aliases occupy no position in the local list.
+    const sharedOrder = group.order || [];
+    const localOrder = [...new Set(sharedOrder.map(key => rows.find(row => keyOf(row) === key)
+      || rows.find(row => !sharedOrder.includes(keyOf(row)) && row.accountKeyAliases?.includes(key))).filter(Boolean))];
     for (const row of rows.filter(row => row.source)) {
-      const keys = [row.accountKey, ...(row.accountKeyAliases || [])];
       const labelKey = [row.accountKey, ...(row.accountKeyAliases || []).filter(key => !canonicalKeys.has(key))]
         .find(key => Object.hasOwn(group.labels || {}, key));
-      const canonical = (group.order || []).indexOf(row.accountKey);
-      const order = canonical >= 0 ? canonical : (group.order || []).findIndex(key => keys.includes(key));
+      const order = localOrder.indexOf(row);
       if (row.source === 'discovered') metadata[row.fingerprint] = { ...metadata[row.fingerprint],
         accountKey: row.accountKey, accountKeyAliases: row.accountKeyAliases, accountName: row.accountName,
         accountEmail: row.accountEmail, sourceName: row.sourceName, enabled: row.enabled,
