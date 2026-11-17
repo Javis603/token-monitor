@@ -203,6 +203,7 @@ function homeTrendFixture(points = [
 ]) {
   const body = new Element();
   const document = { createElement: () => new Element(), body, querySelector: selector => body.querySelector(selector) };
+  const homePanel = new Element();
   const chart = new Element(); chart.className = 'home-area-chart';
   const module = new Element(); module.className = 'home-module'; module.tabIndex = 0;
   module.setAttribute('role', 'button'); module.setAttribute('aria-label', 'Activity');
@@ -214,7 +215,7 @@ function homeTrendFixture(points = [
   const marker = new Element(); marker.className = 'home-trend-marker';
   chart.append(svg, crosshair, marker);
   const state = {};
-  const context = { state, document, window: { innerWidth: 340, innerHeight: 180 }, currencyApi,
+  const context = { state, document, els: { homePanel }, window: { innerWidth: 340, innerHeight: 180 }, currencyApi,
     usageAttributionRowsApi: require('../../src/electron/renderer/usageAttributionRows'),
     t: key => key === 'home.activity' ? 'Activity' : 'Trend',
     formatNumber: n => Number(n).toLocaleString('en-US') };
@@ -225,7 +226,7 @@ function homeTrendFixture(points = [
   bind(points);
   const tooltip = body.querySelector('.home-trend-tooltip');
   tooltip.bounds = { width: 120, height: 50 };
-  return { chart, module, crosshair, marker, tooltip, bind, state, context };
+  return { chart, module, homePanel, crosshair, marker, tooltip, bind, state, context };
 }
 
 test('Home trend hover snaps across the full plot, including zero and edge days', () => {
@@ -329,8 +330,17 @@ test('unavailable period hides a visible Home trend tooltip with the panel', () 
   assert.equal(chart.getAttribute('data-active'), null);
 });
 
-test('replacing the Home chart does not retain keyboard listeners on its module', () => {
-  const { module, context, tooltip } = homeTrendFixture();
+test('Home panel scroll dismisses keyboard details and chart replacement removes its listener', () => {
+  const { module, homePanel, context, tooltip } = homeTrendFixture();
+  module.fire('focusin', { target: module });
+  assert.equal(tooltip.dataset.visible, 'true');
+  homePanel.fire('scroll');
+  assert.equal(tooltip.dataset.visible, 'false');
+  assert.equal(module.getAttribute('aria-label'), 'Activity');
+  module.fire('keydown', { target: module, key: 'ArrowLeft', preventDefault() {} });
+  assert.equal(tooltip.textContent, '0tokens2026-10-22USD $0.0000');
+  assert.equal(tooltip.dataset.visible, 'true');
+  assert.equal((homePanel.handlers.scroll || []).length, 1);
   const chart = new Element(); chart.className = 'home-area-chart'; chart.closest = () => module;
   const svg = new Element(); svg.className = 'area-line';
   svg.bounds = { left: 20, top: 100, width: 300, height: 70 };
@@ -340,6 +350,7 @@ test('replacing the Home chart does not retain keyboard listeners on its module'
   const rows = [{ date: '2026-10-24', tokens: 7, cost: 0.1 }];
   context.bindHomeTrendTooltip(chart, charts.areaLineChart(rows, { width: 300, height: 70 }), rows);
   assert.equal(Object.values(module.handlers).flat().length, 3);
+  assert.equal((homePanel.handlers.scroll || []).length, 1);
   module.fire('focusin', { target: module });
   assert.equal(tooltip.textContent, '7tokens2026-10-24USD $0.1000');
 });

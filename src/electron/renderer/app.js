@@ -7625,11 +7625,13 @@ function bindHomeTrendTooltip(chart, model, points) {
   homeModule.addEventListener('focusin', onFocusIn);
   homeModule.addEventListener('keydown', onKeyDown);
   homeModule.addEventListener('focusout', onFocusOut);
+  els.homePanel.addEventListener('scroll', hide);
   state.homeTrendTooltipBinding = { chart, hide, dispose() {
     hide();
     homeModule.removeEventListener('focusin', onFocusIn);
     homeModule.removeEventListener('keydown', onKeyDown);
     homeModule.removeEventListener('focusout', onFocusOut);
+    els.homePanel.removeEventListener('scroll', hide);
     homeModule.removeAttribute('aria-keyshortcuts');
   }, update(nextModel, nextPoints) {
     const date = points[selected]?.date;
