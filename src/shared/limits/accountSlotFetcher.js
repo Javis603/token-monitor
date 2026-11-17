@@ -160,6 +160,8 @@ function accountSlotJobs(entry, options, deps) {
 /** @param {SlotEntry} entry */
 function createAccountSlotFetcher(entry) {
   const key = accountSlotKey(entry);
+  /** @param {any} row */
+  const rowKeyOf = row => entry.limits?.accountSlotRowKey?.(row) || row.accountKey;
   const form = entry.form;
   const requiredSecrets = form?.field ? [form.field] : (form?.fields || [])
     .filter((field) => field.required && (field.secret ?? field.input !== 'select')).map((field) => field.key);
@@ -215,7 +217,7 @@ function createAccountSlotFetcher(entry) {
     return collect();
 
     async function collect() {
-      const { accounts, scopeKey, previousKeys, check, discoveryFailed } = slotAccounts(entry, options, deps);
+      const { accounts, scopeKey, check, discoveryFailed } = slotAccounts(entry, options, deps);
       /** @type {{account: SlotAccount, values: Record<string, string>, row: any, accountKey: string, moved: boolean}[]} */
       const answered = [];
       /** @type {Map<string, any[]>} */
@@ -299,7 +301,7 @@ function createAccountSlotFetcher(entry) {
         // A second account reporting an identity already answered in this pass
         // is the same upstream account: one row, the first reading that worked,
         // so a stale duplicate credential cannot hide a working one.
-        const rowKey = entry.limits?.accountSlotRowKey?.({ ...row, accountKey }) || accountKey;
+        const rowKey = rowKeyOf({ ...row, accountKey });
         const index = emitted.get(rowKey) ?? rows.findIndex(existing => (!entry.limits?.accountSlotRowKey || entry.limits.accountSlotRowKey(existing) === rowKey)
           && (reportsKey(existing, accountKey) || reportsKey(row, existing.accountKey)));
         if (index === undefined || index < 0) { emitted.set(rowKey, rows.length); rows.push(emit); labels.push(account.label); }
@@ -315,7 +317,7 @@ function createAccountSlotFetcher(entry) {
             ...(labels[index] ? { accountName: labels[index] } : {}) };
         }
       }
-      const emittedKeys = new Set(rows.map(row => row.accountKey));
+      const emittedKeys = new Set(rows.map(rowKeyOf));
       // A provider-wide pass that reached every account is a full snapshot: an
       // identity the runtime still holds that no account answered under (a key
       // an account moved away from, a disabled or duplicate slot, a row a scoped
@@ -330,9 +332,14 @@ function createAccountSlotFetcher(entry) {
         const unresolvedDiscovery = answered.some(answer => answer.account.id.startsWith('discovered-') && answer.row.status !== 'ok'
           && !previousAppRows.some((/** @type {any} */ row) => row.accountKey === answer.accountKey
             && (row.status === 'ok' || row.windows?.length)));
-        for (const accountKey of previousKeys) {
-          const appReading = previousAppRows.some((/** @type {any} */ row) => row.accountKey === accountKey);
-          if (!emittedKeys.has(accountKey) && !(appReading && (discoveryFailed || unresolvedDiscovery))) rows.push({ provider: entry.id, accountKey, removed: true });
+        const previousRows = new Map((options.previousLimits?.providers || [])
+          .filter((/** @type {any} */ row) => row.provider === entry.id && row.accountKey)
+          .map((/** @type {any} */ row) => [rowKeyOf(row), row]));
+        for (const [rowKey, previous] of previousRows) {
+          const appReading = previousAppRows.some((/** @type {any} */ row) => rowKeyOf(row) === rowKey);
+          if (!emittedKeys.has(rowKey) && !(appReading && (discoveryFailed || unresolvedDiscovery))) rows.push({
+            provider: entry.id, accountKey: previous.accountKey, ...(previous.region ? { region: previous.region } : {}), removed: true
+          });
         }
       }
       return rows;
