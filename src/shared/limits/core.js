@@ -3,7 +3,6 @@
 const { normalizeLimitProductId } = require('./products');
 const { staleAfterMsForSyncUpload } = require('../syncUploadInterval');
 const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_IDS, VALID_LIMIT_WINDOW_METRICS } = require('./providers');
-const { isWorkbuddyPlaceholder } = require('../providers/workbuddy/identity');
 const { providerPolicies } = require('./providerPolicies');
 const { mergeCodexTransientWindows } = require('../providers/codex/corePolicy').createRetentionPolicy({ normalizeLimitsSummary, timestampMs });
 const { openCodeWindowKey, groupOpenCodeCandidates, mergeOpenCodeProviderComponents } = require('../providers/opencode/corePolicy').createComponentPolicy({
@@ -586,7 +585,7 @@ function providerAggregateKey(provider) {
 
 function isConfiguredProvider(provider) {
   return Boolean(provider.accountKey && provider.status !== 'notConfigured' && provider.status !== 'disabled'
-    && !isWorkbuddyPlaceholder(provider));
+    && !providerPolicies[provider.provider]?.isPlaceholder?.(provider));
 }
 
 function providerCollapseKey(provider, multiAccount = false) {
@@ -623,16 +622,6 @@ function carryProviderBalance(winner, loser) {
   return { ...winner, balance: loser.balance, windows };
 }
 
-// A confirmed MiniMax API/Code link is an account-level fact; do not drop it
-// when an unlinked observation of the same account and region wins.
-function carryMinimaxRelatedAccountKey(winner, loser) {
-  if (winner.provider !== 'minimax' || loser?.provider !== 'minimax') return winner;
-  if (!winner.accountKey || winner.accountKey !== loser.accountKey) return winner;
-  if (!winner.region || winner.region !== loser.region) return winner;
-  if (winner.relatedAccountKey || !loser.relatedAccountKey) return winner;
-  return { ...winner, relatedAccountKey: loser.relatedAccountKey };
-}
-
 function pickBetterProvider(current, candidate, multiAccount = false) {
   if (!current) return candidate;
   const winner = betterProvider(current, candidate);
@@ -640,7 +629,8 @@ function pickBetterProvider(current, candidate, multiAccount = false) {
   // In multi-account mode a balance and its credits window belong only to
   // their exact account, in both aggregation passes.
   if (multiAccount && winner.accountKey !== loser.accountKey) return winner;
-  return carryMinimaxRelatedAccountKey(carryProviderBalance(winner, loser), loser);
+  const balanced = carryProviderBalance(winner, loser);
+  return providerPolicies[winner.provider]?.carryObservation?.(balanced, loser) || balanced;
 }
 
 function betterProvider(current, candidate) {
@@ -714,29 +704,23 @@ function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
   // Portable accounts and explicitly reported multi-account providers keep each
   // account's best observation, but a stale portable account still yields to a
   // fresh account of the same provider.
-  const hasKnownWorkbuddyAccount = Array.from(byKey.values()).some((candidate) =>
-    candidate.provider === 'workbuddy' && candidate.accountKey && !isWorkbuddyPlaceholder(candidate));
-  const knownMinimaxSources = new Set(Array.from(byKey.values())
-    .filter((candidate) => candidate.provider === 'minimax' && candidate.accountKey)
-    .map((candidate) => candidate.source));
-  const hasKnownMinimaxAccount = knownMinimaxSources.size > 0;
-  const hasKnownOpendesignWorkspace = Array.from(byKey.values()).some((candidate) =>
-    candidate.provider === 'opendesign' && isConfiguredProvider(candidate));
+  const rowsByProvider = new Map();
+  for (const row of byKey.values()) {
+    const rows = rowsByProvider.get(row.provider) || [];
+    rows.push(row);
+    rowsByProvider.set(row.provider, rows);
+  }
+  const suppressed = new Set();
+  for (const [id, rows] of rowsByProvider) {
+    const omitted = providerPolicies[id]?.suppressCandidates?.(rows, multiAccountProviders.has(id), isConfiguredProvider) || [];
+    for (const row of omitted) suppressed.add(row);
+  }
   const byProvider = new Map();
   for (const candidate of byKey.values()) {
+    if (suppressed.has(candidate)) continue;
     const multiAccount = multiAccountProviders.has(candidate.provider);
-    const keyedMultiAccount = multiAccount && Boolean(candidate.accountKey);
-    if (!keyedMultiAccount && hasKnownOpendesignWorkspace && candidate.provider === 'opendesign'
-      && ['notConfigured', 'disabled'].includes(candidate.status)) continue;
-    // A local-app sentinel is an onboarding hint, not an extra account. Real
-    // identities keep their own failure hints even when none has credentials.
-    if (hasKnownWorkbuddyAccount && isWorkbuddyPlaceholder(candidate)) continue;
-    // Once a keyed MiniMax identity exists, a keyless row for an answered lane —
-    // including an empty-source sentinel left by a provider-wide tick — is stale.
-    if (candidate.provider === 'minimax' && !candidate.accountKey
-      && (knownMinimaxSources.has(candidate.source) || (hasKnownMinimaxAccount && !candidate.source))) continue;
-    const knownAccount = candidate.accountKey && (multiAccount || ['minimax', 'copilot'].includes(candidate.provider)
-      || (candidate.provider === 'workbuddy' && !isWorkbuddyPlaceholder(candidate)));
+    const knownAccount = candidate.accountKey && (multiAccount
+      || providerPolicies[candidate.provider]?.preserveStaleAccount?.(candidate));
     const freshnessKey = providerFreshnessKey(candidate);
     // A keyless row says nothing once its lane has a configured account. A lane
     // with no stable identity of its own (Muse Code beside web accounts) stays.

@@ -389,8 +389,9 @@ test('Alibaba source switches retire previous Cookie and CLI identities in the r
   try {
     const { limitAccountRefreshScope } = require('../../src/shared/limits/accounts');
     const scope = limitAccountRefreshScope('alibaba', { accountKey: 'old-cookie-account' });
-    assert.deepEqual(scope, { provider: 'alibaba' });
-    await runtime.refresh(scope, 'manual');
+    assert.deepEqual(scope, { provider: 'alibaba', accountKey: 'old-cookie-account' });
+    // Automatic source reconciliation is provider-wide; account refresh is tested separately.
+    await runtime.refresh({ provider: 'alibaba' }, 'manual');
     const rows = runtime.getSnapshot().providers;
     assert.equal(rows.length, 1);
     assert.equal(rows[0].source, 'cli');
