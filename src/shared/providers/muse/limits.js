@@ -160,6 +160,12 @@ async function fetchAccountSlotSnapshot(options, deps, collect) {
   const cli = options.limitRefreshScope?.accountKey ? null : await fetchMuseCodeLimits(options, deps);
   const previousLimits = { providers: (options.previousLimits?.providers || []).filter(row => row.source !== 'cli') };
   const web = await collect({ ...options, previousLimits }, { ...deps, accountSlotWebOnly: true });
+  // Slot collection owns every Web credential under a keyed row, including
+  // the environment cookie. Retire its former anonymous lane separately from
+  // the independently owned CLI; scoped and aborted passes cannot replace it.
+  if (cli && !deps.signal?.aborted && previousLimits.providers.some(row => row.provider === 'muse' && row.source === 'web' && !row.accountKey)) {
+    web.push({ provider: 'muse', source: 'web', removed: true });
+  }
   return [...(cli ? [cli.status === 'notConfigured' ? { provider: 'muse', source: 'cli', removed: true } : cli] : []), ...web];
 }
 

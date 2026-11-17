@@ -196,3 +196,61 @@ test('skipping failed chunks never swallows Muse discovery cancellation', async 
   assert.equal(row.status, 'unavailable');
   assert.equal(requests, 2);
 });
+
+for (const cliFails of [false, true]) test(`Muse first saved slot retires anonymous Web quota and preserves CLI, cliFails=${cliFails}`, async () => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  let slots = [];
+  let failed = false;
+  let cliCalls = 0;
+  const runtime = createLimitsRuntime({ limitProviders: ['muse'] }, {
+    autoStart: false, autoRetry: false,
+    resolveConfigSnapshot: (_scope, config) => ({ ...config, museAccountSlots: slots }),
+    providerFetchers: { muse: LIMIT_PROVIDER_FETCHERS.muse },
+    env: { PATH: '/fixture', TOKEN_MONITOR_MUSE_WEB_COOKIE: 'hatch_sess=environment' },
+    platform: 'linux', existsSync: path => path === '/fixture/muse',
+    execFile: (_cmd, _args, _opts, callback) => {
+      cliCalls++;
+      queueMicrotask(() => callback(failed ? new Error('fixture offline') : null,
+        JSON.stringify({ schemaVersion: 1, allowance: { window: { usedPercent: 17 } } }), ''));
+      return { stdin: { end() {} } };
+    },
+    museWebFetch: fixtureFetch()
+  });
+  try {
+    await runtime.refresh({ provider: 'muse' });
+    const initial = runtime.getSnapshot().providers;
+    assert.equal(initial.length, 2);
+    assert.equal(initial.find(row => row.source === 'web').accountKey, '');
+    slots = [{ id: 'saved', enabled: true, values: { museWebCookie: 'hatch_sess=saved' } }];
+    failed = cliFails;
+    await runtime.refresh({ provider: 'muse' });
+    const rows = runtime.getSnapshot().providers;
+    const web = rows.filter(row => row.source === 'web');
+    assert.equal(web.length, 2, 'only the environment and saved Web credentials remain');
+    assert.ok(web.every(row => row.accountKey && row.status === 'ok'));
+    assert.equal(new Set(web.map(row => row.accountKey)).size, 2);
+    const cli = rows.filter(row => row.source === 'cli');
+    assert.equal(cli.length, 1);
+    assert.equal(cli[0].windows[0].usedPercent, 17);
+    assert.equal(cli[0].status, cliFails ? 'unavailable' : 'ok');
+    assert.equal(cliCalls, 2);
+    await runtime.refresh({ provider: 'muse', accountKey: web[0].accountKey });
+    assert.equal(cliCalls, 2, 'scoped Web refresh does not invoke CLI');
+    assert.equal(runtime.getSnapshot().providers.length, 3);
+  } finally { runtime.stop(); }
+});
+
+test('Muse scoped or aborted slot snapshots cannot retire the anonymous Web lane', async () => {
+  const { fetchAccountSlotSnapshot } = require('../../src/shared/providers/muse/limits');
+  const previousLimits = { providers: [{ provider: 'muse', source: 'web', status: 'ok', windows: [] }] };
+  const slotOptions = { museAccountSlots: [{ id: 'saved' }], previousLimits };
+  const row = { provider: 'muse', source: 'web', accountKey: 'saved-key', status: 'ok', windows: [] };
+  const scoped = await fetchAccountSlotSnapshot({ ...slotOptions, limitRefreshScope: { provider: 'muse', accountKey: 'saved-key' } }, {}, async () => [row]);
+  assert.deepEqual(scoped, [row]);
+  const controller = new AbortController();
+  const aborted = await fetchAccountSlotSnapshot(slotOptions, { env: {}, existsSync: () => false, signal: controller.signal }, async () => {
+    controller.abort();
+    return [row];
+  });
+  assert.equal(aborted.some(item => item.removed && item.source === 'web'), false);
+});
