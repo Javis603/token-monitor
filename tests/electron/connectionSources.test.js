@@ -50,13 +50,13 @@ test('headers derive exactly one connection tag regardless of reading state', ()
 
 function renderConnection(id, reading = {}, hasOpenControl = true) {
   const nodes = [];
-  const document = { getElementById: () => hasOpenControl ? {} : null, createElement(tag) { const node = { tag, children: [], textContent: '', append(...children) { this.children.push(...children); }, addEventListener(event, callback) { this[event] = callback; } }; nodes.push(node); return node; } };
+  const document = { getElementById: () => hasOpenControl ? {} : null, createTextNode(textContent) { return { textContent }; }, createElement(tag) { const node = { tag, children: [], textContent: '', append(...children) { this.children.push(...children); }, setAttribute() {}, addEventListener(event, callback) { this[event] = callback; } }; nodes.push(node); return node; } };
   const source = app.slice(app.indexOf('function limitProviderConnectionDetail('), app.indexOf('// Single entry point for the provider options'));
   const opened = [];
   const form = limitAccountFormsForRenderer().find(entry => entry.id === id);
   const context = { LIMIT_PROVIDERS: [{ id, label: id === 'zed' ? 'Zed' : id }], document, t: (key, params) => translate('en', key, params), limitAccountForm: () => form,
     externalProviderForAccount: () => reading, limitAccountPanelsApi: require('../../src/electron/renderer/limits/accountPanels'),
-    window: { tokenMonitor: { openExternal: url => opened.push(url) } } };
+    window: { TokenMonitorConnectionPresentation: require('../../src/electron/renderer/limits/connectionPresentation'), tokenMonitor: { openExternal: url => opened.push(url) } } };
   vm.runInNewContext(source + '\nthis.renderConnection = limitProviderConnectionDetail;', context);
   const panel = context.renderConnection(id, LIMIT_PROVIDER_ACCOUNTS.find(entry => entry.id === id).sources, reading);
   return { panel, nodes, opened };
@@ -64,9 +64,11 @@ function renderConnection(id, reading = {}, hasOpenControl = true) {
 
 test('alternative connection row uses existing provenance, never invents detection', () => {
   const { panel, nodes } = renderConnection('ollama', { source: 'api', status: 'ok' });
-  assert.match(panel.className, /settings-item/);
-  assert.ok(nodes.some(node => node.textContent === 'Auto · currently using API key'));
-  assert.equal(nodes.filter(node => node.className === 'settings-item-desc').length, 3);
+  assert.equal(panel.className, 'limit-provider-connection-sources');
+  assert.ok(nodes.some(node => node.className === 'connection-source-card'));
+  assert.ok(nodes.some(node => node.tag === 'details'));
+  assert.ok(nodes.some(node => node.textContent === 'Currently using API key'));
+  assert.equal(nodes.filter(node => node.className === 'settings-item-desc').length, 4);
   const unknown = renderConnection('ollama', { source: 'api', status: 'unavailable' });
   assert.ok(unknown.nodes.some(node => node.textContent === 'Auto · try sources in order'));
   assert.ok(!unknown.nodes.some(node => /currently using|not detected/i.test(node.textContent)));
@@ -75,8 +77,9 @@ test('alternative connection row uses existing provenance, never invents detecti
 test('single connection row reuses the form URL and existing link style', () => {
   const { nodes, opened } = renderConnection('zed', {}, false);
   const link = nodes.find(node => node.tag === 'button');
-  assert.equal(link.className, 'inline-link');
-  assert.equal(link.textContent, 'Get from Zed ↗');
+  assert.equal(link.className, 'inline-link connection-source-get');
+  assert.equal(link.children[0].textContent, 'Get from Zed');
+  assert.equal(link.children[1].tag, 'span');
   link.click();
   assert.deepEqual(opened, ['https://dashboard.zed.dev/']);
 });
@@ -132,8 +135,8 @@ test('Grok retains its automatic-detection right-side pill without duplicating a
   assert.equal(render({}).length, 0);
 });
 
-test('connection get link is suppressed when the existing browser control is present', () => {
-  assert.equal(renderConnection('zed').nodes.filter(node => node.tag === 'button').length, 0);
+test('connection get link remains available outside the account editor', () => {
+  assert.equal(renderConnection('zed').nodes.filter(node => node.tag === 'button').length, 1);
   assert.equal(renderConnection('zed', {}, false).nodes.filter(node => node.tag === 'button').length, 1);
 });
 
@@ -141,8 +144,7 @@ test('all seven locales explain ordered fallback when the current source is unkn
   const expected = ['Auto · try sources in order', '自動 · 依序嘗試來源', '自动 · 按顺序尝试来源', '자동 · 소스를 순서대로 시도', '自動 · ソースを順番に試行', 'Automático · probar fuentes en orden', 'Automático · tentar fontes em ordem'];
   assert.deepEqual(Object.keys(MESSAGES).map(locale => translate(locale, 'settings.limits.sources.auto')), expected);
   const { nodes } = renderConnection('ollama');
-  const title = nodes.find(node => node.className === 'settings-item-title');
-  assert.equal(title.children[0].textContent, expected[0]);
+  assert.ok(nodes.some(node => node.textContent === expected[0]));
 });
 
 test('Alibaba displays main CLI-first Cookie fallback without changing its dispatch', () => {
@@ -150,4 +152,25 @@ test('Alibaba displays main CLI-first Cookie fallback without changing its dispa
   assert.deepEqual(entry.sources.map(({ id, relation }) => [id, relation]), [['cli', 'alternative'], ['web', 'alternative']]);
   assert.equal(entry.fetch, 'fetchAlibabaLimits');
   assert.equal(entry.accountSlots, undefined);
+});
+
+
+test('manual API card keeps optional Web complement instructions in its disclosure', () => {
+  const { nodes } = renderConnection('deepseek', { source: 'web', status: 'ok' });
+  assert.equal(nodes.find(n => n.className === 'connection-source-method').textContent, 'API key');
+  assert.ok(nodes.some(n => n.textContent === 'Paste an API key'));
+  const details = nodes.find(n => n.tag === 'details');
+  assert.ok(details.children.some(n => n.textContent.includes(translate('en', 'settings.deepseek.webTokenNote'))));
+  assert.ok(!nodes.some(n => /Currently using/.test(n.textContent)));
+});
+
+test('sourceDetail takes precedence and stale/failed readings never claim a current lane', () => {
+  const ok = renderConnection('codex', { source: 'rpc', sourceDetail: 'app', status: 'ok' });
+  assert.ok(ok.nodes.some(n => n.textContent === 'Currently using Desktop app'));
+  for (const reading of [{source:'oauth',status:'ok',stale:true}, {source:'oauth',status:'error'}]) {
+    assert.ok(!renderConnection('codex', reading).nodes.some(n => /Currently using/.test(n.textContent)));
+  }
+  for (const id of ['cline','factory','opencode','volcengine']) {
+    assert.equal(renderConnection(id).nodes.find(n => n.className === 'connection-source-method').textContent, 'Auto detect');
+  }
 });

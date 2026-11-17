@@ -9447,9 +9447,23 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 :root[data-reduce-motion="on"] .slot-row { transition: none; }
 
 .slot-remote-note { max-width: 190px; padding: 6px 10px; white-space: normal; }
-.limit-provider-connection-sources .settings-item-title {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  column-gap: 8px;
+/* Connection metadata is a compact summary; setup remains in the disclosure. */
+.limit-provider-connection-sources { min-width: 0; container-type: inline-size; }
+.connection-source-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: rgba(var(--overlay-rgb), .025); }
+.connection-source-copy { flex: 1; min-width: 0; }
+.connection-source-copy .settings-item-title { font-size: 0.75rem; font-weight: 500; }
+.connection-source-copy .settings-item-title, .connection-source-copy .settings-item-desc { display: block; }
+.connection-source-copy .settings-item-desc { margin-top: 3px; }
+.connection-source-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 0; max-width: 52%; text-align: right; overflow-wrap: anywhere; }
+.connection-source-method { font-size: 0.8125rem; font-weight: 500; }
+.connection-source-get { display: inline-flex; align-items: center; justify-content: flex-end; gap: 3px; font: inherit; font-size: 0.75rem; text-align: right; }
+.connection-source-icon { width: 12px; height: 12px; flex-shrink: 0; background: currentColor; mask: url("icons/actions/external-link.svg") center / contain no-repeat; }
+.connection-source-details { margin-top: 6px; }
+.connection-source-details summary { width: fit-content; cursor: pointer; font-size: 0.75rem; }
+.connection-source-details p { margin: 8px 0 0; overflow-wrap: anywhere; }
+.connection-source-details summary:focus-visible, .connection-source-get:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+@container (max-width: 300px) {
+  .connection-source-card { align-items: flex-start; flex-direction: column; gap: 8px; padding: 10px 12px; }
+  .connection-source-actions { align-items: flex-start; max-width: 100%; text-align: left; }
+  .connection-source-get { text-align: left; }
 }

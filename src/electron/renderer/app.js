@@ -12910,44 +12910,14 @@ function limitProviderAccountStatus(providerId) {
 }
 
 function limitProviderConnectionDetail(id, sources, provider) {
-  const panel = document.createElement('div');
-  panel.className = 'settings-item limit-provider-connection-sources';
-  const copy = document.createElement('span');
-  copy.className = 'settings-item-text';
-  const title = document.createElement('span');
-  title.className = 'settings-item-title';
-  title.textContent = t('settings.limits.connection.title');
-  copy.append(title);
-  const alternative = sources.some(source => source.relation === 'alternative');
-  // A reported transport is not necessarily a credential lane (e.g. DeepSeek's
-  // optional Web enrichment). Only unambiguous, successful alternative readings
-  // identify the current source. Never infer "not detected" from absent data.
-  const current = alternative && provider.status === 'ok' && !provider.stale
-    ? sources.find(source => source.id === (provider.sourceDetail || provider.source))
-      || sources.find(source => source.id === provider.source) : null;
-  if (alternative) {
-    const summary = document.createElement('span');
-    summary.className = 'settings-item-desc';
-    summary.textContent = current ? t('settings.limits.sources.current', { source: t(current.labelKey) })
-      : t('settings.limits.sources.auto');
-    title.append(summary);
-  }
-  for (const source of sources) {
-    const detail = document.createElement('span');
-    detail.className = 'settings-item-desc';
-    detail.textContent = `${t(source.labelKey)} · ${t(source.descriptionKey)}`;
-    copy.append(detail);
-    if (source.getUrlFromForm && !document.getElementById(`${id}OpenBrowser`)) {
-      const link = document.createElement('button');
-      link.type = 'button';
-      link.className = 'inline-link';
-      link.textContent = t('settings.limits.sources.get', { source: LIMIT_PROVIDERS.find(provider => provider.id === id).label });
-      link.addEventListener('click', () => window.tokenMonitor.openExternal(limitAccountPanelsApi.resolveOpenUrl(limitAccountForm(id), { document, provider: externalProviderForAccount(id) })));
-      copy.append(link);
-    }
-  }
-  panel.append(copy);
-  return panel;
+  const form = limitAccountForm(id);
+  return window.TokenMonitorConnectionPresentation.createConnectionCard({
+    document, t, sources, provider,
+    label: LIMIT_PROVIDERS.find(entry => entry.id === id).label,
+    onOpen: form?.openUrl ? () => window.tokenMonitor.openExternal(
+      limitAccountPanelsApi.resolveOpenUrl(form, { document, provider: externalProviderForAccount(id) })
+    ) : undefined
+  });
 }
 
 // Single entry point for the provider options accordion. The drag gesture also
