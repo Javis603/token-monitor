@@ -239,8 +239,12 @@ test('Factory discovery parses one opened snapshot even if the next open would f
   assert.equal(opens, 1);
 });
 
-test('Factory discovery propagates an unavailable read while the legacy resolver stays empty', () => {
-  const deps = { env: {}, fs: { ...fs, openSync: () => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); } } };
+test('Factory discovery propagates an unavailable read while the legacy resolver stays empty', (t) => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'factory-unavailable-'));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(homeDir, '.factory'));
+  fs.writeFileSync(path.join(homeDir, '.factory', '.env'), 'FACTORY_API_KEY=fixture-key\n');
+  const deps = { env: {}, homeDir, fs: { ...fs, openSync: () => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); } } };
   assert.throws(() => require('../../src/shared/providers/factory/limits').discoverAccountSlots(deps), { code: 'EACCES' });
   assert.deepEqual(resolveFactoryAutomaticApiKey({}, deps), { apiKey: '', source: '' });
 });
