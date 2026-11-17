@@ -610,3 +610,31 @@ test('incoming shared labels follow prior keys without taking another slot canon
   await h.service.adoptSharedLabels({ deepseek: { labels: { 'current-b': 'Another account' }, order: [] } });
   assert.equal(h.settings.deepseekAccountSlots[0].label, 'Canonical');
 });
+
+for (const variant of ['cn', 'intl', 'cn-personal', 'intl-personal']) {
+  for (const alias of [false, true]) test(`Alibaba controls retain other plan variants beside ${variant} environment identity (alias=${alias})`, async () => {
+    const { defaultAccountValues } = require('../../src/shared/limits/accountSlots');
+    const { limitProviderEntry } = require('../../src/shared/limits/registry');
+    const env = { ALIBABA_TOKEN_PLAN_COOKIE: 'session=SECRET-env', ALIBABA_TOKEN_PLAN_VARIANT: variant };
+    const h = harness({ env });
+    h.settings = { alibabaVariant: '', alibabaAccountSlots: ['cn', 'intl', 'cn-personal', 'intl-personal'].map(id => ({
+      id, enabled: true, accountKey: 'same-uid', accountKeyAliases: [],
+      values: { alibabaCookie: `session=SECRET-${id}`, alibabaVariant: id }
+    })) };
+    const before = structuredClone(h.settings.alibabaAccountSlots);
+    const values = defaultAccountValues(limitProviderEntry('alibaba'), h.settings, env);
+    assert.equal(await h.service.resolved('alibaba', 'environment', {
+      accountKey: alias ? 'resolved-uid' : 'same-uid', accountKeyAliases: alias ? ['same-uid'] : []
+    }, values), true);
+    const accounts = h.service.list('alibaba').accounts;
+    assert.deepEqual(accounts.map(account => account.id), ['environment', ...before.map(account => account.id).filter(id => id !== variant)]);
+    assert.equal(accounts[0].formValues.alibabaVariant, variant);
+    assert.deepEqual(h.settings.alibabaAccountSlots, before, 'projection must not rewrite persisted values');
+    assert.ok(!JSON.stringify(accounts).includes('SECRET'));
+    const saved = accounts.find(account => account.id !== 'environment');
+    assert.equal((await h.service.setEnabled('alibaba', saved.id, false)).ok, true);
+    assert.equal(h.service.list('alibaba').accounts.find(account => account.id === saved.id).enabled, false);
+    assert.equal((await h.service.remove('alibaba', saved.id)).ok, true);
+    assert.ok(!h.settings.alibabaAccountSlots.some(account => account.id === saved.id));
+  });
+}

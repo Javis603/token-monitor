@@ -1366,3 +1366,31 @@ test('opening rename and clicking away without editing does not clear an inherit
   assert.deepEqual(h.calls, []);
   assert.equal(h.row('default').querySelector('.slot-rename'), undefined);
 });
+
+for (const variant of ['intl', 'cn-personal', 'intl-personal']) test(`Alibaba environment ${variant} DTO matches the successful plan reading`, () => {
+  const h = harness(t, 'alibaba');
+  const settings = { alibabaVariant: '' };
+  const service = createAccountSlotService({ getSettings: () => settings, write: async () => {},
+    env: { ALIBABA_TOKEN_PLAN_COOKIE: 'session=SECRET-env', ALIBABA_TOKEN_PLAN_VARIANT: variant } });
+  const accounts = service.list('alibaba').accounts;
+  const environment = accounts.find(account => account.id === 'environment');
+  h.panel.update(accounts, [
+    { provider: 'alibaba', accountKey: environment.accountKey, region: 'cn', status: 'unauthorized' },
+    { provider: 'alibaba', accountKey: environment.accountKey, region: variant, status: 'ok' }
+  ]);
+  assert.equal(h.row('environment').querySelector('.slot-status').classList.contains('slot-connected'), true);
+  assert.equal(environment.formValues.alibabaVariant, variant);
+  assert.ok(!JSON.stringify(accounts).includes('SECRET'));
+  assert.equal(settings.alibabaVariant, '');
+});
+
+test('Alibaba environment DTO respects a stored variant override without changing its fingerprint', () => {
+  const { accountValuesFingerprint, defaultAccountValues } = require('../../src/shared/limits/accountSlots');
+  const { limitProviderEntry } = require('../../src/shared/limits/registry');
+  const settings = { alibabaVariant: 'cn-personal' };
+  const env = { ALIBABA_TOKEN_PLAN_COOKIE: 'session=SECRET-env', ALIBABA_TOKEN_PLAN_VARIANT: 'intl' };
+  const service = createAccountSlotService({ getSettings: () => settings, write: async () => {}, env });
+  const account = service.list('alibaba').accounts[0];
+  assert.equal(account.formValues.alibabaVariant, 'cn-personal');
+  assert.equal(account.fingerprint, accountValuesFingerprint(defaultAccountValues(limitProviderEntry('alibaba'), settings, env)).slice(7, 19));
+});

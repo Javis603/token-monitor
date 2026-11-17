@@ -60,15 +60,22 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
     };
     return rows.sort((a, b) => rank(a) - rank(b));
   };
+  // Saved plans do not inherit the environment lane's variant. Keep the raw
+  // values for fingerprints and resolve only the plan used for presentation.
+  const accountVariant = (entry, account) => entry.id === 'alibaba'
+    ? entry.limits.alibabaVariant(account.values, account.source === 'environment' ? env : {}) : '';
   const visible = entry => ordered(entry).filter((item, index, all) => !all.slice(0, index).some(other => (other.source || item.source)
-    && other.enabled !== false && item.enabled !== false && other.accountKey && (other.accountKey === item.accountKey || other.accountKeyAliases?.includes(item.accountKey) || item.accountKeyAliases?.includes(other.accountKey))));
+    && other.enabled !== false && item.enabled !== false && accountVariant(entry, other) === accountVariant(entry, item)
+    && other.accountKey && (other.accountKey === item.accountKey || other.accountKeyAliases?.includes(item.accountKey) || item.accountKeyAliases?.includes(other.accountKey))));
   const dto = entry => visible(entry).map(({ id, label, enabled, accountKey, accountKeyAliases = [], values, fingerprint, source, sourceName, accountName, accountEmail, createdAt, updatedAt }) => {
     const key = accountKey || hashKey(entry.id, 'account-slot', source ? 'default' : `slot:${id}`);
+    const formValues = Object.fromEntries(accountForm(entry).fields.filter(field => !field.secret).map(field => [field.key, values[field.key]]));
+    if (entry.id === 'alibaba' && source === 'environment') formValues.alibabaVariant = accountVariant(entry, { values, source });
     return { id, label, enabled, accountKey: key, accountKeyAliases, ...(source ? { source } : {}),
       ...(accountName ? { accountName } : {}),
       ...(source === 'discovered' ? { sourceName, accountName, accountEmail } : {}),
       ...(entry.accountSlotOwner ? { capabilities: { rename: true, move: true, remove: true, pause: true, edit: true }, accountEmail: values?.accountEmail || '' } : {}),
-      formValues: Object.fromEntries(accountForm(entry).fields.filter(field => !field.secret).map(field => [field.key, values[field.key]])),
+      formValues,
       fingerprint: (source === 'discovered' ? fingerprint : accountValuesFingerprint(values)).slice(7, 19), createdAt, updatedAt };
   });
   const failure = (errorCode) => ({ ok: false, errorCode });
