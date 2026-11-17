@@ -33,8 +33,9 @@
     if (identities.some(identity => identity && String(identity).toLowerCase() === String(value).toLowerCase())) return '';
     return presentationApi.limitProviderPlanDisplayLabel(row, value);
   }
-  function accountStatus(slot, reading) {
+  function accountStatus(slot, reading, providerEnabled = true) {
     if (!slot.enabled) return 'paused';
+    if (!providerEnabled) return 'disabled';
     if (slot.sourceSelected === false) return 'notCollected';
     if (reading?.status === 'disabled') return 'disabled';
     if (reading?.status === 'unauthorized') return 'invalid';
@@ -149,6 +150,7 @@
     let devices = [];
     let localDeviceId = '';
     let settings;
+    let providerEnabled = true;
     const deviceIcons = typeof module !== 'undefined' ? require('../deviceIcons') : window.TokenMonitorDeviceIcons;
     const deviceLabels = typeof module !== 'undefined' ? require('../deviceBreakdown') : window.TokenMonitorDeviceBreakdown;
     let operationLane = Promise.resolve();
@@ -575,7 +577,7 @@
         const reading = remote ? remoteReadings.find(row => row.sourceDeviceId === slot.sourceDeviceId && row.accountKey === slot.accountKey)
           : localReading(slot);
         if (!item.editing) item.name.textContent = accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') }, reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading, t, presentation);
-        const status = accountStatus(slot, statusReading(slot, reading));
+        const status = accountStatus(slot, statusReading(slot, reading), remote || providerEnabled);
         const source = sourceText(slot, reading) || slot.sourceName || presentationApi.limitProviderSourceLabel(reading) || '';
         const secondary = secondaryText(slot);
         const provenance = secondary && secondary !== source ? secondary : !source
@@ -662,6 +664,7 @@
     }
     return { element: root, update(nextSlots, nextReadings, context = {}) {
       slots = nextSlots; readings = nextReadings; settings = context.settings;
+      providerEnabled = context.providerEnabled !== false;
       remoteReadings = context.records || []; devices = context.devices || []; localDeviceId = context.localDeviceId || ''; presentation = context.presentation || {};
       preserveScroll(render);
     }, openEditor };

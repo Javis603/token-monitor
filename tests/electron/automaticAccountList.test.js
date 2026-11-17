@@ -270,3 +270,18 @@ test('automatic provenance follows managed/app ownership instead of the quota en
   assert.equal(byKey('unknown').querySelector('.slot-detail'), undefined);
   for (const row of rows(container)) assert.equal(row.querySelector('.slot-name').textContent, 'Account');
 });
+
+test('automatic and legacy account rows respect provider collection state without overriding remote status', () => {
+  const h = harness();
+  const local = reading('local-account');
+  h.context.providerEnabled = false;
+  h.context.records = [reading('remote-account', { sourceDeviceId: 'remote' })];
+  h.context.devices = [{ deviceId: 'remote', name: 'Remote' }];
+  h.list.update([local]);
+  assert.equal(h.row('local-account').querySelector('.slot-status').textContent, t('settings.limits.status.disabled'));
+  const remote = rows(h.container).find(row => row.dataset.slotId.startsWith('remote:'));
+  assert.equal(remote.querySelector('.slot-status').classList.contains('slot-connected'), true);
+  h.context.providerEnabled = true;
+  h.list.update([local]);
+  assert.equal(h.row('local-account').querySelector('.slot-status').classList.contains('slot-connected'), true);
+});

@@ -375,7 +375,7 @@ function rendererSlotContext(stats) {
   const source = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
   const state = { stats, settings: { deviceId: 'local', limitAccountForms: limitAccountFormsForRenderer() } };
   const calls = [];
-  const context = { state, localDeviceLimitsProviders: () => null, limitAccountForm: id => state.settings.limitAccountForms.find(form => form.id === id), render() {},
+  const context = { state, limitProviderEnabled: () => true, localDeviceLimitsProviders: () => null, limitAccountForm: id => state.settings.limitAccountForms.find(form => form.id === id), render() {},
     localProviderStatuses: id => (stats.limits?.providers || []).filter(row => row.provider === id),
     window: { tokenMonitor: { limits: { accountSlots: { list: async id => { calls.push(id); return { ok: true, accounts: [{ accountKey: 'z' }] }; } } } } } };
   vm.createContext(context);
@@ -1472,4 +1472,38 @@ test('connection failures do not suggest credential replacement; rejected creden
   assert.ok(copy.children.indexOf(row.querySelector('.slot-detail')) < copy.children.indexOf(fix));
   fix.click();
   assert.ok(h.document.getElementById('qoderSlotDraftqoderCookieInput'));
+});
+
+test('provider collection disabled is distinct from failed credentials and per-account pause', () => {
+  const h = harness(t, 'openrouter');
+  const saved = JSON.stringify(h.slots);
+  for (const readings of [[], [{ accountKey: 'ka', status: 'ok' }], [{ accountKey: 'ka', status: 'unauthorized' }]]) {
+    h.panel.update(h.slots, readings, { providerEnabled: false });
+    assert.equal(h.row('a').querySelector('.slot-status').textContent, t('settings.limits.status.disabled'));
+    assert.equal(h.row('a').querySelector('.slot-fix').classList.contains('hidden'), true);
+    assert.equal(h.row('b').querySelector('.slot-status').textContent, t('settings.slots.paused'));
+  }
+  assert.equal(JSON.stringify(h.slots), saved, 'provider selection does not pause or mutate stored accounts');
+  h.panel.update(h.slots, [{ accountKey: 'ka', status: 'ok' }], { providerEnabled: true });
+  assert.equal(h.row('a').querySelector('.slot-status').classList.contains('slot-connected'), true);
+  h.panel.update(h.slots, [{ accountKey: 'ka', status: 'unauthorized' }], { providerEnabled: true });
+  assert.equal(h.row('a').querySelector('.slot-status').classList.contains('slot-invalid'), true);
+});
+
+test('account context follows pending provider selection and the master limits switch', () => {
+  const { context, source, vm } = rendererSlotContext({ limits: { providers: [] } });
+  context.desktopLimitProviders = () => [{ id: 'openrouter' }, { id: 'claude' }];
+  context.limitProviderOrderApi = require('../../src/electron/renderer/limits/providerOrder');
+  context.DEFAULT_LIMIT_PROVIDER_ORDER = 'openrouter,claude';
+  vm.runInContext(source.slice(source.indexOf('function configuredLimitProviderSelection()'), source.indexOf('function missingLimitProviderStatus()')), context);
+  context.state.settings.limitProviders = 'openrouter,claude';
+  assert.equal(context.limitAccountContext('openrouter').providerEnabled, true);
+  context.state.pendingLimitProviderSelection = { limitsEnabled: true, limitProviders: 'claude' };
+  assert.equal(context.limitAccountContext('openrouter').providerEnabled, false);
+  assert.equal(context.limitAccountContext('claude').providerEnabled, true);
+  context.state.settings.limitProviders = 'claude';
+  context.state.pendingLimitProviderSelection = null;
+  assert.equal(context.limitAccountContext('openrouter').providerEnabled, false);
+  context.state.settings.limitsEnabled = false;
+  assert.equal(context.limitAccountContext('claude').providerEnabled, false);
 });
