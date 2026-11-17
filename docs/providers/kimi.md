@@ -4,6 +4,7 @@ ids: [kimi]
 read_when:
   - Changing or debugging Kimi session discovery, project attribution, timestamps or session names
   - Investigating Kimi usage that is missing from, or zero in, the widget
+  - Investigating Kimi response timing, missing speed or generation rate
   - Touching providers/kimi/sessionMetadata.js or the kimi roots in clientSources.js
   - Adding a Kimi surface (a new front-end root, client id or limits source)
 ---

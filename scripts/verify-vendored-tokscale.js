@@ -172,22 +172,7 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
     expectedSession: { id: 'kimi-contract', totalTokens: 360, outputTokens: 120, reasoningTokens: 0 },
     expectedPerformance: { totalDurationMs: 4500, sampleCount: 2, timedTokens: 360, tokenCoverage: 1 },
     writeFixture(home) {
-      const dir = path.join(home, '.kimi-code', 'sessions', 'workspace', 'kimi-contract', 'agents', 'main');
-      fs.mkdirSync(dir, { recursive: true });
-      const usage = { inputOther: 100, output: 60, inputCacheRead: 20, inputCacheCreation: 0 };
-      const records = [
-        { type: 'llm.request', model: 'kimi-code/kimi-for-coding', turnStep: '0.1', time: 1800000000000 },
-        { type: 'context.append_loop_event', agentId: 'main', time: 1800000000100,
-          event: { type: 'step.begin', uuid: 'synthetic-legacy-step', turnId: '0', step: 1 } },
-        { type: 'usage.record', model: 'kimi-code/kimi-for-coding', usageScope: 'turn', time: 1800000003000, usage },
-        { type: 'context.append_loop_event', agentId: 'main', time: 1800000010000,
-          event: { type: 'step.begin', uuid: 'synthetic-step' } },
-        { type: 'usage.record', agentId: 'main', model: 'kimi-code/kimi-for-coding', usageScope: 'turn', time: 1800000011500, usage },
-        { type: 'context.append_loop_event', agentId: 'main', time: 1800000016000,
-          event: { type: 'step.end', uuid: 'synthetic-step', messageId: 'synthetic-message', usage,
-            llmFirstTokenLatencyMs: 500, llmStreamDurationMs: 1000 } }
-      ];
-      fs.writeFileSync(path.join(dir, 'wire.jsonl'), records.map((record) => JSON.stringify(record)).join('\n') + '\n');
+      writeKimiTimingFixture(home, false);
     }
   },
   {
@@ -630,6 +615,50 @@ function primePricingCache(configDir) {
   fs.writeFileSync(path.join(cacheDir, 'pricing-models-dev.json'), empty);
 }
 
+function writeKimiTimingFixture(home, nativeOnly) {
+  const sessionId = nativeOnly ? 'kimi-native-contract' : 'kimi-contract';
+  const model = nativeOnly ? 'kimi-code/k3.1-pro' : 'kimi-code/kimi-for-coding';
+  const dir = path.join(home, '.kimi-code', 'sessions', 'workspace', sessionId, 'agents', 'main');
+  fs.mkdirSync(dir, { recursive: true });
+  const usage = { inputOther: 100, output: 60, inputCacheRead: 20, inputCacheCreation: 0 };
+  const legacy = [
+    { type: 'llm.request', model, turnStep: '0.1', time: 1800000000000 },
+    { type: 'context.append_loop_event', agentId: 'main', time: 1800000000100,
+      event: { type: 'step.begin', uuid: 'synthetic-legacy-step', turnId: '0', step: 1 } },
+    { type: 'usage.record', model, usageScope: 'turn', time: 1800000003000, usage }
+  ];
+  const native = [
+    { type: 'context.append_loop_event', agentId: 'main', time: 1800000010000,
+      event: { type: 'step.begin', uuid: 'synthetic-step' } },
+    { type: 'usage.record', agentId: 'main', model, usageScope: 'turn', time: 1800000011500, usage },
+    { type: 'context.append_loop_event', agentId: 'main', time: 1800000016000,
+      event: { type: 'step.end', uuid: 'synthetic-step', messageId: 'synthetic-message', usage,
+        llmFirstTokenLatencyMs: 500, llmStreamDurationMs: 1000 } }
+  ];
+  const records = nativeOnly ? native : [...legacy, ...native];
+  fs.writeFileSync(path.join(dir, 'wire.jsonl'), records.map((record) => JSON.stringify(record)).join('\n') + '\n');
+}
+
+const KIMI_NATIVE_TIMING_CONTRACT = Object.freeze({
+  client: 'kimi',
+  expectedRow: { model: 'k3.1-pro', input: 100, output: 60, cacheRead: 20, cacheWrite: 0, reasoning: 0 },
+  hasExplicitTotal: false,
+  expectedPeriod: { totalTokens: 180, clientTokens: 180, clientOutputTokens: 60 },
+  expectedSession: { id: 'kimi-native-contract', totalTokens: 180, outputTokens: 60, reasoningTokens: 0 },
+  expectedPerformance: { totalDurationMs: 1500, sampleCount: 1, timedTokens: 180, tokenCoverage: 1 },
+  writeFixture(home) { writeKimiTimingFixture(home, true); }
+});
+
+function verifyKimiNativeTimingContract(binPath) {
+  const home = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'tm-kimi-native-'));
+  try {
+    KIMI_NATIVE_TIMING_CONTRACT.writeFixture(home);
+    assertTokenContract(runAgainstFixture(binPath, home, 'client,session,model', 'kimi'), KIMI_NATIVE_TIMING_CONTRACT);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
 function hermeticEnv(home) {
   const configDir = path.join(home, '.config', 'tokscale');
   primePricingCache(configDir);
@@ -657,7 +686,7 @@ function hermeticEnv(home) {
   // overrides would do the same for the fork-only qodercn client, and the
   // MiniMax data-directory overrides for the fork's mcode supplement.
   for (const key of [
-    'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'CODEX_HOME', 'DSH_HOME', 'HERMES_HOME', 'GOOSE_PATH_ROOT',
+    'NO_PROXY', 'no_proxy', 'TOKSCALE_EXTRA_DIRS', 'KIMI_CODE_HOME', 'CODEX_HOME', 'DSH_HOME', 'HERMES_HOME', 'GOOSE_PATH_ROOT',
     'QODER_CONFIG_DIR', 'TOKEN_MONITOR_QODER_CN_PROJECTS_PATH', 'QODERCN_CONFIG_DIR',
     'VIBE_HOME', 'MINIMAX_DATA_DIR', 'MAVIS_DATA_DIR', 'TOKSCALE_HEADLESS_DIR',
     'JCODE_HOME', 'GEMINI_CLI_HOME', 'PRIME_AGENT_SESSION_DIR', 'PRIME_AGENT_CODING_AGENT_SESSION_DIR', 'PRIME_AGENT_CODING_AGENT_DIR',
@@ -1021,6 +1050,7 @@ function main() {
   }
 
   verifyReportTimezoneContract(binPath);
+  verifyKimiNativeTimingContract(binPath);
   verifyGooseScannerContract(binPath);
   verifyCodexOutputRateContract(binPath);
 
@@ -1066,4 +1096,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { main, TOKEN_CONTRACT_CASES, DSH_MODEL_CONTRACT_CASES, applicableTokenContracts, writeFixtureHome, assertExpected, verifyGooseScannerContract, verifyCodexOutputRateContract, verifyReportTimezoneContract };
+module.exports = { main, TOKEN_CONTRACT_CASES, KIMI_NATIVE_TIMING_CONTRACT, DSH_MODEL_CONTRACT_CASES, applicableTokenContracts, writeFixtureHome, assertExpected, hermeticEnv, verifyKimiNativeTimingContract, verifyGooseScannerContract, verifyCodexOutputRateContract, verifyReportTimezoneContract };
