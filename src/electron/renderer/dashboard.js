@@ -355,7 +355,12 @@ function renderLegend(model) {
 function renderTrends() {
   const previousKind = state.chartKind;
   const previousGeometry = captureGeometry(els.chart, '.bar-stack[data-motion-key]');
-  const daily = charts.clampDaily(state.history?.daily || [], state.range === 'all' ? 0 : Number(state.range));
+  // The selected range is calendar days, not recorded rows: history omits
+  // zero-usage days, so slicing it would quietly shorten the range and drop the
+  // quiet days from the chart entirely.
+  const daily = charts.dailyWindow(state.history?.daily || [], {
+    days: state.range === 'all' ? 0 : Number(state.range)
+  });
   if (daily.length === 0) { els.chart.innerHTML = ''; els.legend.innerHTML = ''; state.chartModel = null; return; }
   const pad = { padTop: 10, padRight: 14, padBottom: 24, padLeft: 52 };
   
@@ -608,7 +613,10 @@ function showBarTooltip(bar, ev) {
   const rows = segs.map((s) =>
     `<div class="tt-row"><span class="tt-dot" data-c="${colorFor(s.key)}"></span><span class="tt-name">${s.key}</span><span class="tt-val">${formatCompact(s.value)}</span></div>`
   ).join('');
-  els.tooltip.innerHTML = `<div class="tt-head">${shortDate(bar.label)} · ${formatCompact(bar.total)}</div>${rows}`;
+  // History only stores days that saw usage, so a filled day with no segments is
+  // a day without a record — not a measured zero.
+  const total = rows ? ` · ${formatCompact(bar.total)}` : ` · ${t('dashboard.noRecord')}`;
+  els.tooltip.innerHTML = `<div class="tt-head">${shortDate(bar.label)}${total}</div>${rows}`;
   applySwatchColors(els.tooltip);
   positionTooltip(ev);
 }
@@ -616,6 +624,12 @@ function showBarTooltip(bar, ev) {
 function showCandleTooltip(c, ev) {
   // Each candle spans a bucket of days: O = first day, C = last day, H/L = busiest/quietest.
   const head = c.endKey && c.endKey !== c.key ? `${longDate(c.key)} – ${longDate(c.endKey)}` : longDate(c.key);
+  // A bucket whose every day is a filled zero row has no recorded usage at all.
+  if (c.flat) {
+    els.tooltip.innerHTML = `<div class="tt-head">${head}</div><div class="tt-row"><span class="tt-name">${t('dashboard.noRecord')}</span></div>`;
+    positionTooltip(ev);
+    return;
+  }
   const ohlc = [['O', c.open], ['H', c.high], ['L', c.low], ['C', c.close]];
   els.tooltip.innerHTML = `<div class="tt-head">${head}</div>`
     + ohlc.map(([k, v]) => `<div class="tt-row"><span class="tt-name">${k}</span><span class="tt-val">${formatCompact(v)}</span></div>`).join('');
