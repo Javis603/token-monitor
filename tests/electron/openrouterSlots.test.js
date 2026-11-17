@@ -10,9 +10,9 @@ const { migrateAccountSlots } = require('../../src/electron/limits/accountSlotMi
 const { createAccountSlotService } = require('../../src/electron/limits/accountSlotService');
 const { LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
 const key = n => hashKey('openrouter', `secret-${n}`);
-function fixture(t, settings) {
+function fixture(t, settings, cleanup = () => {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'openrouter-slots-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  t.after(() => { cleanup(); fs.rmSync(dir, { recursive: true, force: true }); });
   const store = new CredentialStore(dir);
   store.replaceSettingsCredentials(settings);
   return store;
@@ -94,11 +94,11 @@ test('OpenRouter migrated readings retain history and subscription bindings afte
   const now = new Date(2026, 10, 17, 12).getTime();
   const old = await fetchOpenRouterAccount('Work', 'secret-a', { env: {}, fetch: transport(), now: () => now - 300000 });
   const subscription = { provider: 'openrouter', binding: bindingFromAccount(old) };
-  const store = fixture(t, { openrouterProfiles: { Work: profiles.Work, Personal: { ...profiles.Personal, enabled: true } } });
+  let history;
+  const store = fixture(t, { openrouterProfiles: { Work: profiles.Work, Personal: { ...profiles.Personal, enabled: true } } }, () => history?.close());
   let settings = migrateAccountSlots(store, {});
   const dir = path.dirname(store.filePath);
-  const history = createLimitsHistoryStore(path.join(dir, 'history.sqlite'), { now: () => now });
-  t.after(() => history.close());
+  history = createLimitsHistoryStore(path.join(dir, 'history.sqlite'), { now: () => now });
   await history.record('local', { providers: [old] });
   const service = createAccountSlotService({ getSettings: () => settings, env: {}, write: patch => { settings = { ...settings, ...patch }; } });
   await service.rename('openrouter', settings.openrouterAccountSlots[0].id, 'Renamed');
