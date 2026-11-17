@@ -121,3 +121,39 @@ test('a separate replacement protocol gets its own cancel footer rather than the
   footer.children[0].click();
   assert.equal(h.replacement.classList.contains('hidden'), true);
 });
+
+test('provider account lists precede guidance with live controls and keyboard order preserved', () => {
+  const source = require('node:fs').readFileSync(require('node:path').join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = source.indexOf('function prioritizeLimitProviderAccounts(');
+  const end = source.indexOf('\nfunction limitProviderQuery()', start);
+  for (const wrapped of [false, true]) {
+    const document = createDocument();
+    const group = document.createElement('div'), details = document.createElement('div');
+    details.className = 'cursor-settings-details'; group.append(details); document.root.append(group);
+    const body = wrapped ? document.createElement('div') : details;
+    if (wrapped) { body.className = 'cursor-settings-details-inner'; details.append(body); }
+    const guidance = document.createElement('p'), section = document.createElement('div'), panel = document.createElement('div');
+    const draft = document.createElement('input'); draft.value = 'live draft'; draft.selectionStart = 4;
+    panel.className = 'slot-panel'; section.append(panel); panel.append(draft); body.append(guidance, section);
+    Object.defineProperty(body, 'firstElementChild', { get: () => body.children[0] });
+    const originalQuery = body.querySelector.bind(body);
+    body.querySelector = selector => selector === '.slot-panel, .managed-account-list, .opencode-profile-list' ? panel : originalQuery(selector);
+    draft.focus();
+    const context = { group };
+    require('node:vm').runInNewContext(source.slice(start, end) + '\nprioritizeLimitProviderAccounts(group);', context);
+    assert.equal(body.children[0], section);
+    assert.equal(body.children[1], guidance);
+    assert.equal(document.activeElement, draft);
+    assert.equal(draft.value, 'live draft');
+    assert.equal(draft.selectionStart, 4);
+    assert.equal(document.moves, 1);
+    context.prioritizeLimitProviderAccounts(group);
+    assert.equal(document.moves, 1, 'settled order does not move focused controls again');
+  }
+  const render = source.slice(source.indexOf('function renderLimitProviderCheckboxes('), source.indexOf('function moveOpenCodeLocalFallbackSetting('));
+  const connection = render.indexOf('optionsInner.append(limitProviderConnectionDetail(');
+  const accounts = render.indexOf('moveLimitProviderLiveNode(optionsInner, accountGroup);');
+  const settings = render.indexOf('optionsInner.append(limitProviderSettingsList(');
+  const usage = render.indexOf('optionsInner?.append(limitProviderUsageItemsList(');
+  assert.ok(connection >= 0 && connection < accounts && accounts < settings && settings < usage);
+});

@@ -49,7 +49,7 @@ function harness(provider, overrides = {}) {
   owner = require(path.join(renderer, `limits/providerOwners/${provider}`)).create(host);
   const render = { codex: 'renderCodexAccounts', claude: 'renderClaudeWebAccounts', cursor: 'renderCursorStatus', antigravity: 'renderAntigravityStatus',
     mimo: 'renderMimoStatus', workbuddy: 'renderWorkbuddyStatus', minimax: 'renderMinimaxApiKeys', opencode: 'renderOpenCodeProfiles', thirdparty: 'renderThirdPartyProfiles' }[provider];
-  return { document, nodes, owner, api, calls, settings,
+  return { document, nodes, owner, api, calls, settings, bridge: host.window.tokenMonitor,
     async render() { await owner[render](); await flush(); },
     add: () => document.root.querySelector('.slot-add') };
 }
@@ -229,4 +229,37 @@ test('Cursor initial discovery failure keeps the shared manual-login footer reac
   h.owner.state.cursorAccount = { error: 'discovery unavailable', busy: false, status: { accounts: [], managementBlocked: true } };
   await h.render();
   assert.equal(h.add().disabled, true, 'a known external-agent gate still blocks management on error');
+});
+
+for (const removeLast of [false, true]) test(`MiniMax billing remains reachable with a collapsed editor, removeLast=${removeLast}`, async () => {
+  let keys = removeLast ? [{ id: 'last', accountKey: 'wallet', billingMode: 'api', apiRegion: 'cn' }] : [];
+  const h = harness('minimax', { getKeys: async () => keys, removeKey: async () => { keys = []; return { ok: true }; } });
+  const opened = [];
+  h.bridge.openExternal = url => opened.push(url);
+  h.owner.setup();
+  await h.render();
+  if (removeLast) {
+    const remove = [...h.document.root.walk()].find(node => node.dataset.slotAction === 'remove');
+    await remove.click(); await remove.click();
+    assert.equal(keys.length, 0);
+    assert.equal(h.document.root.querySelector('.slot-row'), undefined);
+  }
+  const browser = h.nodes.minimaxOpenBrowser;
+  assert.equal(h.document.root.querySelector('.legacy-editor-reveal').inert, true);
+  // The fixture permits synthetic clicks on hidden/inert nodes: check the
+  // actual owner/list DOM ancestry before invoking the real event handler.
+  assert.equal(Boolean(browser.closest('.hidden')), false, 'billing must be visible without opening Add');
+  for (let node = browser; node; node = node.parentElement) assert.notEqual(node.inert, true, 'billing must not be inert');
+  for (const [billingMode, apiRegion, expected] of [
+    ['token-plan', 'cn', 'https://platform.minimaxi.com/user-center/payment/token-plan'],
+    ['api', 'intl', 'https://platform.minimax.io/user-center/payment/balance'],
+    ['api', 'auto', 'https://platform.minimax.io/user-center/payment/balance']
+  ]) {
+    h.nodes.minimaxBillingModeInput.value = billingMode;
+    h.nodes.minimaxApiRegionInput.value = apiRegion;
+    browser.click();
+    assert.equal(opened.at(-1), expected);
+  }
+  await h.add().click();
+  assert.equal(h.nodes.minimaxAddDetails.classList.contains('hidden'), false, 'add form remains available');
 });

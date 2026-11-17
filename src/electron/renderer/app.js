@@ -12364,6 +12364,17 @@ function moveLimitProviderLiveNode(parent, node, before = null) {
   parent.moveBefore(node, before);
 }
 
+// Account management leads each provider. Move live nodes so keyboard order,
+// focused edits and provider listeners follow the same order as the layout.
+function prioritizeLimitProviderAccounts(group) {
+  const details = group?.querySelector('.cursor-settings-details');
+  const body = details?.querySelector(':scope > .cursor-settings-details-inner') || details;
+  let accounts = body?.querySelector('.slot-panel, .managed-account-list, .opencode-profile-list');
+  if (!accounts) return;
+  while (accounts.parentElement !== body) accounts = accounts.parentElement;
+  if (accounts !== body.firstElementChild) body.moveBefore(accounts, body.firstElementChild);
+}
+
 function limitProviderQuery() {
   return settingsListFilterApi.normalizeListQuery(state.limitProviderSearchQuery);
 }
@@ -12540,7 +12551,6 @@ function renderLimitProviderCheckboxesNow() {
         accountGroup.classList.add('limit-provider-account-group');
       }
       if (sources.length) optionsInner.append(limitProviderConnectionDetail(id, sources, provider));
-      if (settings) optionsInner.append(limitProviderSettingsList(id, settings, reusableSettingInputs));
       optionsContainer.append(optionsInner);
       const toggleOptions = () => {
         const opening = state.limitProviderSettingsExpanded !== id;
@@ -12569,6 +12579,7 @@ function renderLimitProviderCheckboxesNow() {
     // destination must already be connected, so the row is mounted first.
     moveLimitProviderLiveNode(actions, accountStatus, disclosureIcon);
     moveLimitProviderLiveNode(optionsInner, accountGroup);
+    prioritizeLimitProviderAccounts(accountGroup);
     if (!pluginModule && !accountGroup && !limitAccountForm(id)
       && sources.some(source => ['cli', 'desktop', 'oauth', 'file'].includes(source.kind))) {
       let automatic = automaticAccountPanels.get(id);
@@ -12587,6 +12598,7 @@ function renderLimitProviderCheckboxesNow() {
       else optionsInner.append(automatic.container);
       automatic.controller.update(strictLocalProviderStatuses(id));
     }
+    if (settings) optionsInner.append(limitProviderSettingsList(id, settings, reusableSettingInputs));
     if (pluginModule) {
       const authorSettings = pluginLimitSettings?.node(pluginModule);
       if (authorSettings?.isConnected) moveLimitProviderLiveNode(optionsInner, authorSettings);
