@@ -2937,8 +2937,10 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .limit-provider-usage-items {
   display: grid;
   min-width: 0;
-  gap: 4px;
-  padding: 4px 0 2px;
+  gap: 6px;
+  margin: 8px 0 8px 12px;
+  padding-inline-start: 12px;
+  border-inline-start: 1px solid var(--line);
 }
 .limit-provider-usage-items-head {
   display: flex;
@@ -2946,11 +2948,18 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   gap: 6px;
 }
 .limit-provider-usage-items-title {
-  color: var(--text);
+  color: var(--muted);
   font-size: 0.625rem;
+}
+.limit-provider-usage-items-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 16px;
 }
 .settings-panel .limit-provider-usage-items-list > .client-checkbox {
   display: flex;
+  flex: 0 1 auto;
+  max-width: 100%;
   align-items: center;
   gap: 8px;
   min-width: 0;
@@ -2963,9 +2972,8 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 }
 .settings-panel .limit-provider-usage-items-list > .client-checkbox > span {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .preference-order-handle {
   display: inline-flex;
@@ -9403,7 +9411,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .slot-status::before { content: ''; display: inline-block; width: 12px; height: 12px; margin-inline-end: 4px; vertical-align: -2px; background: currentColor; mask: var(--slot-status-icon) center / contain no-repeat; }
 .slot-connected { --slot-status-icon: url("icons/actions/check.svg"); }
 .slot-status.slot-paused { --slot-status-icon: url("icons/actions/pause.svg"); }
-.slot-invalid, .slot-unavailable { --slot-status-icon: url("icons/actions/attention.svg"); }
+.slot-invalid, .slot-unavailable { --slot-status-icon: url("icons/actions/circle-exclamation-point.svg"); }
 .slot-stale { --slot-status-icon: url("icons/actions/clock.svg"); }
 .slot-notCollected, .slot-disabled { --slot-status-icon: url("icons/actions/circle-minus.svg"); }
 .slot-invalid { color: var(--red); }
