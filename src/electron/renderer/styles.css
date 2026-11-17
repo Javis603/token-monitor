@@ -9435,7 +9435,4 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .slot-list.is-landing .slot-row { transition: none; }
 :root[data-reduce-motion="on"] .slot-row { transition: none; }
 
-.slot-remote-list { margin-top: 8px; border: 1px solid var(--line); border-radius: 12px; background: rgba(var(--panel-rgb), .15); overflow: clip; }
-.slot-remote-list:empty { display: none; }
-.slot-remote-list .slot-row:last-child { border-bottom: 0; }
 .slot-remote-note { max-width: 190px; padding: 6px 10px; white-space: normal; }

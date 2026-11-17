@@ -29,10 +29,13 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
     const entry = limitProviderEntry(typeof id === 'string' ? id : '');
     return entry?.accountSlots ? entry : null;
   };
-  const slots = (entry) => {
-    const order = getSettings().limitAccountPresentation?.[entry.id]?.order || [];
+  const slots = (entry, order = getSettings().limitAccountPresentation?.[entry.id]?.order || []) => {
     const keyOf = slot => slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`);
-    const rank = slot => order.includes(keyOf(slot)) ? order.indexOf(keyOf(slot)) : order.length;
+    const rank = slot => {
+      const canonical = order.indexOf(keyOf(slot));
+      const index = canonical >= 0 ? canonical : order.findIndex(key => slot.accountKeyAliases?.includes(key));
+      return index < 0 ? order.length : index;
+    };
     return normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]).sort((a, b) => rank(a) - rank(b));
   };
   const environment = entry => {
@@ -245,7 +248,10 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       else if (operation === 'order' && Array.isArray(value) && value.every(validKey)) group.order = value;
       else return failure('invalidOperation');
       const next = normalizeAccountPresentation({ ...all, [providerId]: group });
-      await write({ limitAccountPresentation: next });
+      const local = slots(entry, next[providerId].order);
+      const stored = normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]);
+      const reordered = local.some((slot, index) => slot.id !== stored[index]?.id);
+      await write({ limitAccountPresentation: next, ...(reordered ? { [accountSlotKey(entry)]: local } : {}) });
       publishPresentation([operation === 'rename'
         ? { provider: providerId, type: 'rename', key: accountKey, label: next[providerId]?.labels[accountKey] || '' }
         : { provider: providerId, type: 'order', order: next[providerId].order }]);
@@ -313,16 +319,17 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
     const draft = await produce();
     return save(providerId, draft.values, { verified: draft.identity, isCurrent: draft.isCurrent, label: draft.label });
   }
-  // A shared name (including an explicit blank) becomes the local slot label,
-  // so readings projected from the slot carry the same name. Not republished.
+  // Adopt shared labels and persist the local order for offline restarts.
+  // Incoming presentation changes are not republished.
   function adoptSharedLabels(shared) {
     return serialize(async () => {
       for (const [providerId, group] of Object.entries(shared || {})) {
         const entry = entryFor(providerId);
         if (!entry) continue;
         const labels = group?.labels || {};
-        const next = slots(entry);
-        let changedAny = false;
+        const next = slots(entry, group?.order || []);
+        const stored = normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]);
+        let changedAny = next.some((slot, index) => slot.id !== stored[index]?.id);
         for (const slot of next) {
           if (!slot.accountKey || !Object.hasOwn(labels, slot.accountKey) || labels[slot.accountKey] === slot.label) continue;
           slot.label = labels[slot.accountKey];

@@ -546,3 +546,19 @@ test('a resolved account key takes over its provisional key in the shared order'
   assert.ok(operations.some(operation => operation.type === 'order' && operation.order[0] === 'resolved-two'), `provisional ${provisional}`);
   assert.equal(h.service.list('deepseek').accounts[0].accountKey, 'resolved-two');
 });
+
+test('full shared order persists the local subsequence for a restart without presentation cache', async () => {
+  const published = [];
+  const h = harness({ onPresentation: operations => published.push(...operations) });
+  await add(h);
+  const { accounts: [a, b] } = await h.service.add('deepseek', { deepseekApiKey: 'SECRET-two' }, 'Second');
+  const order = ['remote-a', b.accountKey, 'remote-b', a.accountKey];
+  await h.service.presentation('deepseek', b.accountKey, 'order', order);
+  assert.deepEqual(published.at(-1).order, order);
+  assert.deepEqual(h.settings.deepseekAccountSlots.map(slot => slot.id), [b.id, a.id]);
+  h.settings = { ...h.settings, limitAccountPresentation: {} };
+  assert.deepEqual(h.service.list('deepseek').accounts.map(slot => slot.id), [b.id, a.id]);
+  h.settings = { ...h.settings, limitAccountPresentation: { deepseek: { labels: {}, order: ['remote-a', a.accountKey, b.accountKey] } } };
+  await h.service.adoptSharedLabels(h.settings.limitAccountPresentation);
+  assert.deepEqual(h.settings.deepseekAccountSlots.map(slot => slot.id), [a.id, b.id]);
+});
