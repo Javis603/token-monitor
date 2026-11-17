@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { CLIENT_CATALOG } = require('../../src/shared/clientCatalog');
-const { TOKEN_CONTRACT_CASES, KIMI_NATIVE_TIMING_CONTRACT, applicableTokenContracts, hermeticEnv } = require('../../scripts/verify-vendored-tokscale');
+const { TOKEN_CONTRACT_CASES, KIMI_NATIVE_TIMING_CONTRACT, KIMI_UNTIMED_CONTRACT_CASES, applicableTokenContracts, assertTokenContract, hermeticEnv } = require('../../scripts/verify-vendored-tokscale');
 
 // Existing Tokscale-parsed clients before this gate was introduced. Keep this
 // baseline fixed when adding a client: each new id needs a runnable contract
@@ -72,6 +72,19 @@ test('an inherited Kimi home cannot redirect the binary contract scan', () => {
     fs.rmSync(home, { recursive: true, force: true });
   }
 });
+
+for (const contract of KIMI_UNTIMED_CONTRACT_CASES) {
+  test(`${contract.expectedSession.id} rejects invented timing while preserving usage`, () => {
+    const entry = { client: 'kimi', sessionId: contract.expectedSession.id, ...contract.expectedRow };
+    const performance = contract.expectedPerformance;
+    assert.doesNotThrow(() => assertTokenContract({ entries: [{ ...entry, performance }] }, contract));
+    for (const key of Object.keys(performance)) {
+      const invented = { ...performance, [key]: 1 };
+      assert.throws(() => assertTokenContract({ entries: [{ ...entry, performance: invented }] }, contract), /timing contract mismatch/);
+    }
+    assert.throws(() => assertTokenContract({ entries: [{ ...entry, output: 0 }] }, contract), /fixture mismatch/);
+  });
+}
 
 
 test('CatPaw nonzero fixtures run only on supported app platforms', () => {

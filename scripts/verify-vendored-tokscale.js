@@ -618,8 +618,6 @@ function primePricingCache(configDir) {
 function writeKimiTimingFixture(home, nativeOnly) {
   const sessionId = nativeOnly ? 'kimi-native-contract' : 'kimi-contract';
   const model = nativeOnly ? 'kimi-code/k3.1-pro' : 'kimi-code/kimi-for-coding';
-  const dir = path.join(home, '.kimi-code', 'sessions', 'workspace', sessionId, 'agents', 'main');
-  fs.mkdirSync(dir, { recursive: true });
   const usage = { inputOther: 100, output: 60, inputCacheRead: 20, inputCacheCreation: 0 };
   const legacy = [
     { type: 'llm.request', model, turnStep: '0.1', time: 1800000000000 },
@@ -636,6 +634,12 @@ function writeKimiTimingFixture(home, nativeOnly) {
         llmFirstTokenLatencyMs: 500, llmStreamDurationMs: 1000 } }
   ];
   const records = nativeOnly ? native : [...legacy, ...native];
+  writeKimiRecords(home, sessionId, records);
+}
+
+function writeKimiRecords(home, sessionId, records) {
+  const dir = path.join(home, '.kimi-code', 'sessions', 'workspace', sessionId, 'agents', 'main');
+  fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'wire.jsonl'), records.map((record) => JSON.stringify(record)).join('\n') + '\n');
 }
 
@@ -649,13 +653,50 @@ const KIMI_NATIVE_TIMING_CONTRACT = Object.freeze({
   writeFixture(home) { writeKimiTimingFixture(home, true); }
 });
 
-function verifyKimiNativeTimingContract(binPath) {
-  const home = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'tm-kimi-native-'));
-  try {
-    KIMI_NATIVE_TIMING_CONTRACT.writeFixture(home);
-    assertTokenContract(runAgainstFixture(binPath, home, 'client,session,model', 'kimi'), KIMI_NATIVE_TIMING_CONTRACT);
-  } finally {
-    fs.rmSync(home, { recursive: true, force: true });
+// The CLI always serializes performance; no timing means zero samples/counters
+// and a null rate, rather than an omitted JSON property.
+const KIMI_UNTIMED_PERFORMANCE = Object.freeze({
+  msPer1KTokens: null, totalDurationMs: 0, timedTokens: 0, timedOutputTokens: 0,
+  timedReasoningTokens: 0, sampleCount: 0, tokenCoverage: 0
+});
+
+const KIMI_UNTIMED_CONTRACT_CASES = Object.freeze([
+  {
+    ...KIMI_NATIVE_TIMING_CONTRACT,
+    expectedSession: { ...KIMI_NATIVE_TIMING_CONTRACT.expectedSession, id: 'kimi-mismatched-step-contract' },
+    expectedPerformance: KIMI_UNTIMED_PERFORMANCE,
+    writeFixture(home) {
+      writeKimiRecords(home, 'kimi-mismatched-step-contract', [
+        { type: 'llm.request', model: 'kimi-code/k3.1-pro', turnStep: '0.1', time: 1800000000000 },
+        { type: 'context.append_loop_event', agentId: 'main', time: 1800000000100,
+          event: { type: 'step.begin', uuid: 'synthetic-different-step', turnId: '0', step: 2 } },
+        { type: 'usage.record', agentId: 'main', model: 'kimi-code/k3.1-pro', usageScope: 'turn', time: 1800000003000,
+          usage: { inputOther: 100, output: 60, inputCacheRead: 20, inputCacheCreation: 0 } }
+      ]);
+    }
+  },
+  {
+    ...KIMI_NATIVE_TIMING_CONTRACT,
+    expectedSession: { ...KIMI_NATIVE_TIMING_CONTRACT.expectedSession, id: 'kimi-no-timing-contract' },
+    expectedPerformance: KIMI_UNTIMED_PERFORMANCE,
+    writeFixture(home) {
+      writeKimiRecords(home, 'kimi-no-timing-contract', [
+        { type: 'usage.record', agentId: 'main', model: 'kimi-code/k3.1-pro', usageScope: 'turn', time: 1800000003000,
+          usage: { inputOther: 100, output: 60, inputCacheRead: 20, inputCacheCreation: 0 } }
+      ]);
+    }
+  }
+]);
+
+function verifyKimiTimingContracts(binPath) {
+  for (const contract of [KIMI_NATIVE_TIMING_CONTRACT, ...KIMI_UNTIMED_CONTRACT_CASES]) {
+    const home = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'tm-kimi-timing-'));
+    try {
+      contract.writeFixture(home);
+      assertTokenContract(runAgainstFixture(binPath, home, 'client,session,model', 'kimi'), contract);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   }
 }
 
@@ -752,7 +793,9 @@ function assertTokenContract(parsed, contract) {
     const performance = entries[0]?.performance;
     const mismatches = Object.entries(contract.expectedPerformance)
       .filter(([key, value]) => performance?.[key] !== value);
-    if (entries.length !== 1 || mismatches.length || usage.timedOutputTokens !== contract.expectedPeriod.clientOutputTokens ||
+    const expectedTimedOutput = contract.expectedPerformance.timedOutputTokens ?? contract.expectedPeriod.clientOutputTokens;
+    if (entries.length !== 1 || mismatches.length || usage.timedTokens !== contract.expectedPerformance.timedTokens ||
+        usage.timedOutputTokens !== expectedTimedOutput ||
         usage.timedDurationMs !== contract.expectedPerformance.totalDurationMs) {
       throw new Error(`${contract.client} timing contract mismatch: ${JSON.stringify(performance)}`);
     }
@@ -1050,7 +1093,7 @@ function main() {
   }
 
   verifyReportTimezoneContract(binPath);
-  verifyKimiNativeTimingContract(binPath);
+  verifyKimiTimingContracts(binPath);
   verifyGooseScannerContract(binPath);
   verifyCodexOutputRateContract(binPath);
 
@@ -1096,4 +1139,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { main, TOKEN_CONTRACT_CASES, KIMI_NATIVE_TIMING_CONTRACT, DSH_MODEL_CONTRACT_CASES, applicableTokenContracts, writeFixtureHome, assertExpected, hermeticEnv, verifyKimiNativeTimingContract, verifyGooseScannerContract, verifyCodexOutputRateContract, verifyReportTimezoneContract };
+module.exports = { main, TOKEN_CONTRACT_CASES, KIMI_NATIVE_TIMING_CONTRACT, KIMI_UNTIMED_CONTRACT_CASES, DSH_MODEL_CONTRACT_CASES, applicableTokenContracts, writeFixtureHome, assertExpected, assertTokenContract, hermeticEnv, verifyKimiTimingContracts, verifyGooseScannerContract, verifyCodexOutputRateContract, verifyReportTimezoneContract };

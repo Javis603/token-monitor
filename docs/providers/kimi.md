@@ -40,14 +40,18 @@ is the one applied: clients that carry their own path (kimi, droid, opencode) st
 design, while the transcript-reading resolvers skip their expensive read for a session the scan
 already attributed.
 
-Only `usage.record` lines count tokens, and only with `usageScope: "turn"`. The Kimi timing fix
-preserves the `llm.request` → `usage.record` interval for old logs. New logs without a request
-record use the matching `step.end`'s `llmFirstTokenLatencyMs + llmStreamDurationMs`: whole-response
-time, including first-token wait, rather than decode-only time. All four usage buckets must match
-within the same agent and step; the step supplies timing and never another token row. Timed rows
-are anchored at the step/request start (or back-calculated from the usage response time), excluding
-later tool execution. This fallback requires a vendor build carrying the Kimi timing fix; changing
-this document or the app's speed settings cannot add timing to an older parser.
+Only `usage.record` lines count tokens, and only with `usageScope: "turn"`. A valid paired
+`llm.request` supplies the interval from its `time` to `usage.record.time`, anchored at the
+request's start. An intervening `step.begin` preserves the request unless its explicit
+`turnId.step` differs from the request's `turnStep`.
+
+Without a valid request interval, the parser uses the matching `step.end`'s
+`llmFirstTokenLatencyMs + llmStreamDurationMs`: whole-response time, including first-token wait,
+rather than decode-only time. All four usage buckets must match within the same agent and step;
+the step supplies timing and never another token row. This path anchors the row at the matching
+`step.begin.time`, or, without that start, at `usage.record.time` minus the response duration.
+It never uses the later `step.end.time` as the response's end, so tool execution is excluded.
+Usage without either timing source still counts tokens but supplies no `performance` sample.
 
 `"session"`-scoped records are the
 runtime's own bookkeeping — compaction calls today. Whether those should be counted is an open
