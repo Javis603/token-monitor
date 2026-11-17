@@ -59,8 +59,9 @@ function accountSlotField(declaration) {
 function defaultIdentityKey(entry) { return `${entry.id}DefaultAccountIdentity`; }
 /** @param {any} entry @param {any} options @param {any} env */
 function defaultAccountValues(entry, options, env) {
+  if (entry.environmentWhenSaved === false && normalizeAccountSlots(entry, options[accountSlotKey(entry)]).length) env = {};
   return Object.fromEntries(entry.fields.filter((/** @type {any} */ field) => field.config !== false && (field.kind === 'credential' || field.kind === 'setting') && field.key !== defaultIdentityKey(entry) && field.key !== `${entry.id}AmbientAccounts`)
-    .map((/** @type {any} */ field) => [field.key, options[field.key] || field.resolve?.(env) || field.configDefault || '']));
+    .map((/** @type {any} */ field) => [field.key, options[field.key] || field.resolve?.(env) || field.envFallback?.map((/** @type {string} */ key) => env[key]).find(Boolean) || field.configDefault || '']));
 }
 // Credential choices are alternative authentication lanes, not companion fields
 // such as a device id. Keep one default account with the provider's precedence.

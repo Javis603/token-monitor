@@ -211,7 +211,6 @@ const { applyAccountOrder } = require('./renderer/limits/accountSlotsPanel');
 let accountSlotService;
 const { createCredentialCommands } = require('./limits/credentialCommands');
 const { createCopilotAccounts } = require('./providers/copilot/accounts');
-const copilotLimits = require('../shared/providers/copilot/limits');
 const { createMinimaxApiKeys } = require('./providers/minimax/apiKeys');
 const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
 const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
@@ -10031,29 +10030,8 @@ app.whenReady().then(() => {
   ipcMain.handle('codex:switchSystemAccount', async (_event, id) => switchCodexSystemAccount(id));
   ipcMain.handle('codex:refreshAccountLimits', async (_event, id) => refreshCodexManagedAccountLimits(id));
   const copilotAccounts = createCopilotAccounts({
-    getSettings: () => settings, saveSettings,
-    probeDeps: () => electronProviderDeps({ env: {}, signal: AbortSignal.timeout(15_000) }),
-    changed: (accountKey, refresh) => {
-      if (!accountKey) {
-        const knownKeys = new Set(Object.values(copilotLimits.copilotProfiles(settings)).map(account => account.accountKey).filter(Boolean));
-        const legacyRows = (deviceRuntimeHandle?.getSnapshot()?.limits?.providers || [])
-          .filter(row => row.provider === 'copilot' && row.accountKey && !knownKeys.has(row.accountKey));
-        if (legacyRows.length === 1) accountKey = legacyRows[0].accountKey;
-      }
-      const resolved = Object.values(copilotLimits.copilotProfiles(settings)).find(account => account.accountKey === accountKey);
-      if (resolved) {
-        const fallbackKey = copilotLimits.copilotAccountKey(resolved.token, resolved.enterpriseHost);
-        const provisional = (deviceRuntimeHandle?.getSnapshot()?.limits?.providers || [])
-          .some(row => row.provider === 'copilot' && row.accountKey === fallbackKey);
-        if (provisional && fallbackKey !== accountKey) {
-          void queueLimitInvalidation({ provider: 'copilot', accountKey: fallbackKey }, 'identity-resolved', { clear: true, refresh: false });
-        }
-      }
-      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
-      pushSettingsToRenderer();
-      const scope = accountKey ? { provider: 'copilot', accountKey } : { provider: 'copilot' };
-      void queueLimitInvalidation(scope, 'account-change', { clear: Boolean(accountKey), refresh });
-    }
+    getSettings: () => settings, service: accountSlotService,
+    probeDeps: () => electronProviderDeps({ env: {}, signal: AbortSignal.timeout(15_000) })
   });
   ipcMain.handle('copilot:getAccounts', () => copilotAccounts.getAccounts());
   for (const method of ['addAccount', 'removeAccount', 'setEnabled']) {
@@ -10073,7 +10051,7 @@ app.whenReady().then(() => {
       if (!event.sender.isDestroyed()) event.sender.send('copilot:loginStatus', { ...payload, flowId });
     };
     try {
-      const enterpriseHost = settings?.copilotEnterpriseHost || process.env.COPILOT_ENTERPRISE_HOST || process.env.GITHUB_ENTERPRISE_HOST || '';
+      const enterpriseHost = request.values?.copilotEnterpriseHost || request.enterpriseHost || settings?.copilotEnterpriseHost || process.env.COPILOT_ENTERPRISE_HOST || process.env.GITHUB_ENTERPRISE_HOST || '';
       const result = await runCopilotDeviceFlowLogin({
         enterpriseHost,
         signal: controller.signal,
@@ -10086,7 +10064,8 @@ app.whenReady().then(() => {
       if (copilotLoginController !== controller) {
         return { ok: false, error: copilotLoginErrorMessage({ status: 'cancelled' }), flowId };
       }
-      await copilotAccounts.addAccount(result.accessToken, () => copilotLoginController === controller && !controller.signal.aborted, controller.signal, enterpriseHost);
+      const saved = await copilotAccounts.addAccount(result.accessToken, () => copilotLoginController === controller && !controller.signal.aborted, controller.signal, enterpriseHost, request.label);
+      if (!saved.ok) throw new Error('Could not save GitHub Copilot account.');
       return { ok: true, flowId };
     } catch (error) {
       const message = copilotLoginErrorMessage(error);

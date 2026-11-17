@@ -68,65 +68,70 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     const entry = entryFor(providerId);
     return entry ? { ok: true, accounts: dto(entry) } : failure('unsupportedProvider');
   }
-  function save(providerId, values, { replacing = false, id, label = '' } = {}) {
+  function save(providerId, values, { replacing = false, id, label = '', verified, isCurrent = () => true } = {}) {
     return serialize(async () => {
       const entry = entryFor(providerId);
       if (!entry) return failure('unsupportedProvider');
+      if (!isCurrent()) return failure('cancelled');
       if (id === 'environment' || id?.startsWith('discovered-')) return failure('environmentCredential');
       const previous = slots(entry);
-      const old = replacing ? previous.find(slot => slot.id === id) : null;
+      let old = replacing ? previous.find(slot => slot.id === id) : null;
       if (replacing && !old) return failure('accountNotFound');
-      if (!replacing && previous.length >= 21) return failure('slotLimit');
+      if (!replacing && !entry.dedupeAccounts && previous.length >= 21) return failure('slotLimit');
       let rejected;
       // Reuse the fixed credential validator, including transport isolation and
       // unauthorized/indeterminate verdicts. Never return its settings payload.
+      const commitCredential = async ({ candidate, provider }) => {
+        if (!isCurrent()) throw new Error('Login cancelled');
+        if (!old && entry.dedupeAccounts) old = previous.find(slot => slot.accountKey === provider?.accountKey || accountValuesFingerprint(slot.values) === accountValuesFingerprint(candidate));
+        if (!old && previous.length >= 21) throw new Error('Account slot limit');
+        // The same credential twice would be two rows for one account and a
+        // duplicate request each pass; it is refused, pointing at the existing row.
+        const fingerprint = accountValuesFingerprint(candidate);
+        const environmentRow = environment(entry);
+        const environmentValues = environmentRow && Object.fromEntries(accountForm(entry).fields.map(({ key }) =>
+          [key, normalizeAccountField(key, environmentRow.values[key])]));
+        // Re-saving this slot's own values keeps the existing replace contract,
+        // even if an environment credential now duplicates this older slot.
+        const duplicatesEnvironment = environmentValues && accountValuesFingerprint(environmentValues) === fingerprint
+          && (!old || accountValuesFingerprint(old.values) !== fingerprint);
+        if (duplicatesEnvironment
+          || previous.some(slot => slot.id !== old?.id && accountValuesFingerprint(slot.values) === fingerprint)) {
+          rejected = { saved: false, verdict: 'duplicate', status: 'duplicate' };
+          return;
+        }
+        const key = provider?.accountKey || old?.accountKey || '';
+        const provesServer = entry.serverAccountKey && entry.limits[entry.serverAccountKey];
+        // The proof is remembered on the record: a replacement saved without an
+        // answer keeps the old key beside new values, which can no longer prove it.
+        // Provisional slot keys are bookkeeping, never server identity proof.
+        const oldProven = Boolean(old?.accountKey && provesServer
+          && (old.serverIdentity || (old.accountKey !== hashKey(entry.id, 'account-slot', 'default')
+            && old.accountKey !== hashKey(entry.id, 'account-slot', `slot:${old.id}`)
+            && provesServer(old.accountKey, old.values, old.accountKeyAliases))));
+        const provenNow = Boolean(provider?.accountKey && provesServer
+          && provesServer(provider.accountKey, candidate, provider.accountKeyAliases || []));
+        // A key this slot has been before (an alias) is its own account coming back.
+        const different = oldProven && provenNow && key !== old.accountKey && !old.accountKeyAliases.includes(key);
+        // Two proven server accounts never share a slot: the caller adds the
+        // new one as its own account instead, so no history is handed on.
+        if (different) {
+          rejected = { saved: false, verdict: 'differentAccount', status: 'differentAccount' };
+          return;
+        }
+        const timestamp = new Date(now()).toISOString();
+        const record = { id: old?.id || randomUUID(), label: old ? old.label : label, enabled: old?.enabled !== false,
+          values: candidate, accountKey: key,
+          accountKeyAliases: [...new Set([...(old?.accountKeyAliases || []),
+            ...(old?.accountKey && old.accountKey !== key ? [old.accountKey] : []), ...(provider?.accountKeyAliases || [])])].filter(alias => alias !== key).slice(-8),
+          // The proof outlives an unproven answer (Qoder without a user id).
+          serverIdentity: provenNow || oldProven,
+          createdAt: old?.createdAt || timestamp, updatedAt: timestamp };
+        await commit(entry, old ? previous.map(slot => slot.id === old.id ? record : slot) : [...previous, record], true, true, true);
+      };
       const commands = createCredentialCommands({ getSettings, env: {},
         probeDeps: () => ({ ...probeDeps(), probe: true, providerRuntimeState: new Map(), env: {} }),
-        commitCredential: async ({ candidate, provider }) => {
-          const key = provider?.accountKey || old?.accountKey || '';
-          const provesServer = entry.serverAccountKey && entry.limits[entry.serverAccountKey];
-          // The proof is remembered on the record: a replacement saved without an
-          // answer keeps the old key beside new values, which can no longer prove it.
-          // Provisional slot keys are bookkeeping, never server identity proof.
-          const oldProven = Boolean(old?.accountKey && provesServer
-            && (old.serverIdentity || (old.accountKey !== hashKey(entry.id, 'account-slot', 'default')
-              && old.accountKey !== hashKey(entry.id, 'account-slot', `slot:${old.id}`)
-              && provesServer(old.accountKey, old.values, old.accountKeyAliases))));
-          const provenNow = Boolean(provider?.accountKey && provesServer
-            && provesServer(provider.accountKey, candidate, provider.accountKeyAliases || []));
-          // The same credential twice would be two rows for one account and a
-          // duplicate request each pass; it is refused, pointing at the existing row.
-          const fingerprint = accountValuesFingerprint(candidate);
-          const environmentRow = environment(entry);
-          const environmentValues = environmentRow && Object.fromEntries(accountForm(entry).fields.map(({ key }) =>
-            [key, normalizeAccountField(key, environmentRow.values[key])]));
-          // Re-saving this slot's own values keeps the existing replace contract,
-          // even if an environment credential now duplicates this older slot.
-          const duplicatesEnvironment = environmentValues && accountValuesFingerprint(environmentValues) === fingerprint
-            && (!old || accountValuesFingerprint(old.values) !== fingerprint);
-          if (duplicatesEnvironment
-            || previous.some(slot => slot.id !== old?.id && accountValuesFingerprint(slot.values) === fingerprint)) {
-            rejected = { saved: false, verdict: 'duplicate', status: 'duplicate' };
-            return;
-          }
-          // A key this slot has been before (an alias) is its own account coming back.
-          const different = oldProven && provenNow && key !== old.accountKey && !old.accountKeyAliases.includes(key);
-          // Two proven server accounts never share a slot: the caller adds the
-          // new one as its own account instead, so no history is handed on.
-          if (different) {
-            rejected = { saved: false, verdict: 'differentAccount', status: 'differentAccount' };
-            return;
-          }
-          const timestamp = new Date(now()).toISOString();
-          const record = { id: old?.id || randomUUID(), label: old ? old.label : label, enabled: old?.enabled !== false,
-            values: candidate, accountKey: key,
-            accountKeyAliases: [...new Set([...(old?.accountKeyAliases || []),
-              ...(old?.accountKey && old.accountKey !== key ? [old.accountKey] : []), ...(provider?.accountKeyAliases || [])])].filter(alias => alias !== key).slice(-8),
-            // The proof outlives an unproven answer (Qoder without a user id).
-            serverIdentity: provenNow || oldProven,
-            createdAt: old?.createdAt || timestamp, updatedAt: timestamp };
-          await commit(entry, old ? previous.map(slot => slot.id === id ? record : slot) : [...previous, record], true, true, true);
-        }
+        commitCredential
       });
       if (!values || typeof values !== 'object' || Array.isArray(values)) return { saved: false, verdict: 'invalid', status: 'required' };
       const draft = Object.fromEntries(accountForm(entry).fields.map(field => [field.key,
@@ -134,7 +139,9 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
           // A replacement changes only what it names; everything else stays the account's own.
           : old && Object.hasOwn(old.values, field.key) ? old.values[field.key]
           : field.secret ? '' : entry.fields.find(item => item.key === field.key)?.configDefault || '']));
-      const result = await commands.saveCredential(providerId, draft, { includeIndependentSettings: true });
+      const result = verified
+        ? (await commitCredential({ candidate: draft, provider: verified }), { saved: true, verdict: 'valid', status: 'ok' })
+        : await commands.saveCredential(providerId, draft, { includeIndependentSettings: true });
       if (rejected) return rejected;
       // Fetchers may throw arbitrary error codes; only the validator's bounded
       // verdict/status vocabulary is exposed by this API.
@@ -237,7 +244,13 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
       return true;
     });
   }
-  return { list, add: (provider, values, label) => save(provider, values, { label }),
+  // Provider owns authentication and returns a main-only verified draft. The
+  // fence is checked again inside the same serialized lane as every slot write.
+  async function loginAction(providerId, produce) {
+    const draft = await produce();
+    return save(providerId, draft.values, { verified: draft.identity, isCurrent: draft.isCurrent, label: draft.label });
+  }
+  return { list, loginAction, add: (provider, values, label) => save(provider, values, { label }),
     replace: (provider, id, values) => save(provider, values, { replacing: true, id }),
     rename: (provider, id, label) => mutate(provider, id, 'rename', label),
     setEnabled: (provider, id, enabled) => mutate(provider, id, 'enabled', enabled),

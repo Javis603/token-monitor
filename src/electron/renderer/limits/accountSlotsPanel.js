@@ -43,7 +43,7 @@
     return result;
   }
 
-  function createPanel({ form, label, document, t, ipc, forms, preserveScroll, onChanged, openExternal, maskEmail = value => value }) {
+  function createPanel({ form, label, loginAction, document, t, ipc, forms, preserveScroll, onChanged, openExternal, maskEmail = value => value }) {
     const make = (tag, className = '', text) => {
       const el = document.createElement(tag);
       el.className = className;
@@ -72,6 +72,7 @@
     message.setAttribute('role', 'status');
     list.append(editor);
     root.append(list, message);
+    let cancelLogin;
     let editorOwner;
     const rows = new Map();
     let slots = [];
@@ -97,6 +98,8 @@
       return task;
     };
     function closeEditor() {
+      cancelLogin?.();
+      cancelLogin = null;
       editorRevision++;
       editorOwner = undefined;
       add?.classList.remove('hidden');
@@ -160,6 +163,43 @@
           onSave: (_form, values, clearInput) => submit(values, clearInput)
         });
         editor.append(title, ...(!slot ? [name] : []), editorPanel, verdict, choices);
+        if (!slot && form.loginAction && loginAction) {
+          let flowId;
+          let unsubscribe;
+          const signIn = button(t(form.loginAction.labelKey), async () => {
+            if (flowId) return;
+            flowId = `${form.id}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            const current = flowId;
+            signIn.disabled = true;
+            cancelLogin = () => {
+              if (flowId) void loginAction.cancelSignIn({ flowId });
+              flowId = null;
+              unsubscribe?.();
+            };
+            unsubscribe = loginAction.onLoginStatus?.(status => {
+              if (status.flowId !== flowId || revision !== editorRevision) return;
+              verdict.textContent = status.phase === 'authorize'
+                ? t(`settings.${form.id}.authorize`, { code: status.userCode || '' })
+                : status.phase === 'error' ? status.error : t(`settings.${form.id}.polling`);
+            });
+            const values = Object.fromEntries(form.fields.filter(field => !field.secret).map(field => [field.key, editorPanel.querySelector(`#${prefix}${field.key}Input`)?.value || '']));
+            try {
+              const result = await loginAction.signIn({ flowId, values, label: name.value });
+              if (flowId !== current || revision !== editorRevision) return;
+              unsubscribe?.();
+              flowId = null;
+              cancelLogin = null;
+              if (result.ok) { await run('list'); preserveScroll(closeEditor); }
+              else verdict.textContent = result.error || tr('failed');
+            } catch (_) { if (revision === editorRevision) verdict.textContent = tr('failed'); }
+            finally { if (flowId === current) { unsubscribe?.(); flowId = null; cancelLogin = null; } signIn.disabled = false; }
+          });
+          const loginChoices = make('div', 'settings-actions');
+          loginChoices.append(signIn);
+          editor.insertBefore(loginChoices, editorPanel);
+          editorPanel.querySelector(`#${prefix}OpenBrowser`).classList.add('hidden');
+        }
+
         editorPanel.querySelector('.credential-manual-panel').querySelector('.settings-actions').append(slotButton('cancel', () => preserveScroll(closeEditor)));
         for (const field of form.fields.filter(field => !field.secret)) {
           const input = editorPanel.querySelector(`#${prefix}${field.key}Input`);

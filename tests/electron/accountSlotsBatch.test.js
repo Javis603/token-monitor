@@ -64,7 +64,7 @@ for (const [id, fixture] of Object.entries(fixtures)) {
 }
 test('batch eligibility keeps incompatible providers out of slots', () => {
   for (const id of ['alibaba', 'kimi', 'stepfun', 'mistral', 'muse', 'volcengine']) assert.ok(!limitProviderEntry(id).accountSlots, id);
-  assert.deepEqual(LIMIT_PROVIDER_REGISTRY.filter(e => e.accountSlots).map(e => e.id).sort(), ['openrouter', 'qoder', 'deepseek', 'factory', 'cline', 'hark', 'manus', 'zai', ...Object.keys(fixtures)].sort());
+  assert.deepEqual(LIMIT_PROVIDER_REGISTRY.filter(e => e.accountSlots).map(e => e.id).sort(), ['copilot', 'openrouter', 'qoder', 'deepseek', 'factory', 'cline', 'hark', 'manus', 'zai', ...Object.keys(fixtures)].sort());
 });
 
 for (const id of ['opendesign', 'commandcode', 'notion']) {

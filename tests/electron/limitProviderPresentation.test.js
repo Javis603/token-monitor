@@ -2159,7 +2159,6 @@ test('AI Tool Limits owns every live account group and its status pill', () => {
     ['opencode', 'opencodeCookieGroup', 'opencodeCookieStatus'],
     ['cursor', 'cursorAccountGroup', 'cursorAccountStatus'],
     ['kimi', 'kimiAccountGroup', 'kimiAccountStatus'],
-    ['copilot', 'copilotAccountGroup', 'copilotApiTokenStatus'],
     ['mimo', 'mimoAccountGroup', 'mimoAccountStatus'],
     ['volcengine', 'volcengineAccountGroup', 'volcengineAccountStatus'],
     ['thirdparty', 'thirdpartyAccountGroup', 'thirdpartyStatus']
@@ -2360,7 +2359,6 @@ test('dynamic account summaries are never reset by the static translation pass',
     'volcengineAccountStatus',
     'kimiAccountStatus',
     'mimoAccountStatus',
-    'copilotApiTokenStatus',
     'thirdpartyStatus'
   ];
 

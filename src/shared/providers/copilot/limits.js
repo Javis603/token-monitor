@@ -46,6 +46,10 @@ function copilotAccountKey(seed, host) {
     : hashKey('copilot', normalizedHost, seed);
 }
 
+function isCopilotServerAccountKey(key, values) {
+  return Boolean(key && key !== copilotAccountKey(copilotToken({}, values), values.copilotEnterpriseHost));
+}
+
 function copilotApiHost(enterpriseHost) {
   const host = normalizedEnterpriseHost(enterpriseHost);
   if (host === COPILOT_DEFAULT_HOST) return 'api.github.com';
@@ -430,7 +434,7 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
       accountEmail: '',
       updatedAt,
       source: 'api',
-      sourceDetail: options.sourceDetail
+      sourceDetail: deps.accountSlotSaved ? 'managed' : options.sourceDetail
     });
   } catch (error) {
     if (deps.signal?.aborted) throw deps.signal.reason;
@@ -439,7 +443,7 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
       accountKey: options.accountKey || remembered?.accountKey || copilotAccountKey(token, enterpriseHost),
       accountName: options.accountName || remembered?.accountName || '',
       source: 'api',
-      sourceDetail: options.sourceDetail,
+      sourceDetail: deps.accountSlotSaved ? 'managed' : options.sourceDetail,
       status: providerStatusFromError(error),
       updatedAt,
       windows: []
@@ -450,6 +454,7 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
 module.exports = {
   COPILOT_DEFAULT_HOST,
   copilotToken,
+  isCopilotServerAccountKey,
   copilotAccountKey,
   copilotProfiles,
   configuredCopilotAccounts,

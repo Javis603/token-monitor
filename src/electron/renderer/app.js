@@ -101,7 +101,6 @@ const LIMIT_PROVIDER_ACCOUNT_NODES = {
   cursor: { group: 'cursorAccountGroup', status: 'cursorAccountStatus' },
   antigravity: { group: 'antigravityAccountGroup', status: 'antigravityAccountStatus' },
   kimi: { group: 'kimiAccountGroup', status: 'kimiAccountStatus' },
-  copilot: { group: 'copilotAccountGroup', status: 'copilotApiTokenStatus' },
   mimo: { group: 'mimoAccountGroup', status: 'mimoAccountStatus' },
   workbuddy: { group: 'workbuddyAccountGroup', status: 'workbuddyAccountStatus' },
   minimax: { group: 'minimaxAccountGroup', status: 'minimaxStatus' },
@@ -12889,6 +12888,7 @@ function setupLimitAccountPanels() {
       const details = panel.querySelector('.cursor-settings-details');
       for (const child of [...details.children]) child.remove();
       const slotsPanel = window.TokenMonitorAccountSlotsPanel.createPanel({
+        loginAction: window.tokenMonitor[form.id],
         form, label: LIMIT_PROVIDERS.find(provider => provider.id === form.id).label,
         document, t, ipc: window.tokenMonitor.limits.accountSlots, forms: limitAccountPanelsApi,
         maskEmail: email => state.settings?.maskLimitAccountEmails === true ? accountIdentityApi.maskEmailAddress(email) : email,
@@ -16798,17 +16798,9 @@ async function refreshMimoAccounts() {
   } catch (_) {}
 }
 
-function setCopilotAccountExpanded(expanded) {
-  setAccountGroupExpanded('copilot', expanded, 'copilotAccountExpanded');
-}
 
-function setCopilotManualExpanded(expanded) {
-  const next = Boolean(expanded);
-  state.copilotManualExpanded = next;
-  document.getElementById('copilotManualToggle')?.setAttribute('aria-expanded', next ? 'true' : 'false');
-  document.getElementById('copilotManualDetails')?.classList.toggle('hidden', !next);
-  document.getElementById('copilotManualPanel')?.classList.toggle('expanded', next);
-}
+
+
 
 function setCursorStatusText(el, text) {
   el.textContent = text;
@@ -17494,9 +17486,7 @@ function copilotProviderForAccount() {
   return provider;
 }
 
-function markCopilotTokenCheckPending() {
-  state.copilotPendingCheckSince = Date.now();
-}
+
 
 function clearCopilotPendingCheck() {
   state.copilotPendingCheckSince = 0;
@@ -17613,9 +17603,7 @@ function clearExternalProviderPendingStatus(providerName) {
   state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName);
 }
 
-function nextCopilotSignInFlowId() {
-  return `copilot-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
+
 
 function nextCodexSignInFlowId() {
   return `codex-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -17627,11 +17615,7 @@ function isCurrentCodexSignInFlow(flowId) {
   return current && incoming === current;
 }
 
-function isCurrentCopilotSignInFlow(flowId) {
-  const current = String(state.copilotSignInFlowId || '');
-  const incoming = String(flowId || '');
-  return current && incoming === current;
-}
+
 
 function copilotAccountStatusText(provider, configured, source, enabled = true) {
   const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
@@ -20237,135 +20221,7 @@ function setupCursorAccountUI() {
       await refreshStats({ force: true });
     });
   }
-  const copilotToggle = document.getElementById('copilotSettingsToggle');
-  if (copilotToggle) {
-    copilotToggle.addEventListener('click', () => {
-      setCopilotAccountExpanded(!state.copilotAccountExpanded);
-      if (state.copilotAccountExpanded) void renderCopilotAccounts();
-    });
-    document.getElementById('copilotManualToggle')?.addEventListener('click', () => {
-      const details = document.getElementById('copilotManualDetails');
-      setCopilotManualExpanded(details?.classList.contains('hidden'));
-    });
-    setCopilotAccountExpanded(false);
-    setCopilotManualExpanded(false);
-    renderCopilotStatus();
 
-    const setCopilotError = (message) => {
-      state.copilotErrorMessage = message || '';
-      renderCopilotStatus();
-    };
-
-    window.tokenMonitor.copilot?.onLoginStatus?.((status) => {
-      if (!status) return;
-      if (!isCurrentCopilotSignInFlow(status.flowId)) return;
-      if (status.phase === 'authorize') {
-        state.copilotAuthorizeMessage = t('settings.copilot.authorize', { code: status.userCode || '' });
-        state.copilotLoginStatus = state.copilotAuthorizeMessage;
-      } else if (status.phase === 'polling') {
-        state.copilotLoginStatus = [state.copilotAuthorizeMessage, t('settings.copilot.polling')].filter(Boolean).join('\n\n');
-      } else if (status.phase === 'success') {
-        state.copilotSignInCancelable = false;
-        state.copilotAuthorizeMessage = '';
-        state.copilotLoginStatus = t('settings.copilot.loginSuccess');
-      } else if (status.phase === 'error') {
-        state.copilotSignInCancelable = false;
-        state.copilotAuthorizeMessage = '';
-        state.copilotLoginStatus = '';
-        setCopilotError(status.error || t('settings.copilot.loginFailed'));
-      } else {
-        state.copilotAuthorizeMessage = '';
-        state.copilotLoginStatus = t('settings.copilot.loginStarting');
-      }
-      renderCopilotStatus();
-    });
-
-    document.getElementById('copilotSignInButton').addEventListener('click', async () => {
-      if (state.copilotSignInBusy) return;
-      const flowId = nextCopilotSignInFlowId();
-      state.copilotSignInFlowId = flowId;
-      state.copilotSignInBusy = true;
-      state.copilotSignInCancelable = true;
-      state.copilotAuthorizeMessage = '';
-      state.copilotLoginStatus = t('settings.copilot.loginStarting');
-      setCopilotError('');
-      setCopilotManualExpanded(false);
-      renderCopilotStatus();
-      try {
-        markCopilotTokenCheckPending();
-        const result = await window.tokenMonitor.copilot.signIn({ flowId });
-        if (!isCurrentCopilotSignInFlow(result?.flowId || flowId)) return;
-        if (!result?.ok) {
-          clearCopilotPendingCheck();
-          setCopilotError(result?.error || t('settings.copilot.loginFailed'));
-          setCopilotAccountExpanded(true);
-        } else {
-          state.copilotSignInCancelable = false;
-          state.copilotAuthorizeMessage = '';
-          state.copilotLoginStatus = '';
-          renderCopilotStatus();
-          await refreshStats();
-          if (copilotAccountLinked()) setCopilotAccountExpanded(false);
-        }
-      } catch (err) {
-        if (!isCurrentCopilotSignInFlow(flowId)) return;
-        clearCopilotPendingCheck();
-        setCopilotError(err.message);
-      } finally {
-        if (isCurrentCopilotSignInFlow(flowId)) {
-          state.copilotSignInBusy = false;
-          state.copilotSignInCancelable = false;
-          state.copilotSignInFlowId = '';
-          state.copilotAuthorizeMessage = '';
-          state.copilotLoginStatus = '';
-          renderCopilotStatus();
-        }
-      }
-    });
-
-    document.getElementById('copilotCancelSignInButton').addEventListener('click', async () => {
-      const flowId = state.copilotSignInFlowId;
-      await window.tokenMonitor.copilot.cancelSignIn({ flowId });
-      clearCopilotPendingCheck();
-      if (!isCurrentCopilotSignInFlow(flowId)) return;
-      state.copilotSignInBusy = false;
-      state.copilotSignInCancelable = false;
-      state.copilotSignInFlowId = '';
-      state.copilotAuthorizeMessage = '';
-      state.copilotLoginStatus = '';
-      renderCopilotStatus();
-    });
-
-    document.getElementById('copilotRefreshButton').addEventListener('click', async () => {
-      await window.tokenMonitor.limits.refresh('copilot');
-      await refreshStats();
-    });
-
-    document.getElementById('copilotApiTokenSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('copilotApiTokenInput');
-      setCopilotError('');
-      if (!String(input.value || '').trim()) {
-        setCopilotManualExpanded(true);
-        setCopilotError(t('settings.copilot.statusNotSet'));
-        return;
-      }
-      try {
-        markCopilotTokenCheckPending();
-        const result = await window.tokenMonitor.copilot.addAccount(input.value);
-        if (!result?.ok) throw new Error(result?.error || t('settings.copilot.loginFailed'));
-        state.settings = await window.tokenMonitor.getSettings();
-        input.value = '';
-        renderCopilotStatus();
-        await refreshStats();
-        if (copilotAccountLinked()) setCopilotAccountExpanded(false);
-        else setCopilotAccountExpanded(true);
-        renderCopilotStatus();
-      } catch (err) {
-        clearCopilotPendingCheck();
-        setCopilotError(t('settings.copilot.saveFailed', { message: err.message }));
-      }
-    });
-  }
 
 }
 

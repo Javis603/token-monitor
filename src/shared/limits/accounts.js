@@ -77,6 +77,7 @@ const { defaultIdentityKey, accountSlotField, normalizeAmbientAccounts } = requi
  *
  * @typedef {object} AccountForm
  * @property {'custom'} [kind] Custom panels may borrow only the shared save path.
+ * @property {{labelKey: string}} [loginAction]
  * @property {string} [titleKey]
  * @property {string} [openKey]
  * @property {string} [clearKey]
@@ -112,6 +113,8 @@ const { defaultIdentityKey, accountSlotField, normalizeAmbientAccounts } = requi
  *
  * @typedef {object} AccountDeclaration
  * @property {string} id
+ * @property {boolean} [environmentWhenSaved]
+ * @property {boolean} [dedupeAccounts]
  * @property {string} fetch Limits export called by the collector.
  * @property {AccountField[]} fields
  * @property {boolean} [accountSlots] Requires a form, no managed/profiles fields, credentials only from declared fields, no singleton credential write-back, and an audit of module-level state.

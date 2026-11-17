@@ -348,6 +348,7 @@ function limitAccountFormsForRenderer() {
       id: entry.id,
       kind: form.kind,
       ...(entry.accountSlots ? { accountSlots: true } : {}),
+      ...(form.loginAction ? { loginAction: form.loginAction } : {}),
       titleKey: form.titleKey,
       openKey: form.openKey,
       clearKey: form.clearKey,

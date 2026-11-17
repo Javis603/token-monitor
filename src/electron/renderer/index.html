@@ -1087,42 +1087,6 @@
                 <div id="kimiErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
-            <div id="copilotAccountGroup" class="settings-group cursor-account-group">
-              <button id="copilotSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="copilotSettingsDetails">
-                <span data-i18n="settings.copilot.title">GitHub Copilot Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="copilotApiTokenStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="copilotSettingsDetails" class="cursor-settings-details hidden">
-                <div id="copilotAccountList" class="managed-account-list"></div>
-                <div class="settings-actions">
-                  <button id="copilotSignInButton" data-i18n="settings.copilot.signIn">Sign in with GitHub</button>
-                  <button id="copilotCancelSignInButton" class="hidden" data-i18n="settings.common.cancel">Cancel</button>
-                  <button id="copilotRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <pre id="copilotLoginStatus" class="codex-login-output hidden" role="status" aria-live="polite"></pre>
-                <div id="copilotManualPanel" class="opencode-add-form">
-                  <button id="copilotManualToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="copilotManualDetails">
-                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
-                    <span data-i18n="settings.copilot.manualToggle">Enter token manually</span>
-                  </button>
-                  <div id="copilotManualDetails" class="opencode-add-details accordion-animated-container hidden">
-                    <div class="accordion-animation-inner opencode-add-body">
-                      <p class="settings-note" data-i18n="settings.copilot.note">Paste a GitHub OAuth token with Copilot access. It stays on this device and is used only for Copilot quota lookup.</p>
-                      <input id="copilotApiTokenInput" type="password" spellcheck="false" placeholder="gho_..." data-i18n-placeholder="settings.copilot.apiTokenPlaceholder" />
-                      <div class="settings-actions">
-                        <button id="copilotApiTokenSubmit" data-i18n="settings.copilot.saveToken">Save token</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div id="copilotErrorMessage" class="settings-note error hidden" role="alert"></div>
-              </div>
-            </div>
             <div id="mimoAccountGroup" class="settings-group cursor-account-group">
               <button id="mimoSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="mimoSettingsDetails">
                 <span data-i18n="settings.mimo.title">Xiaomi MiMo Account</span>

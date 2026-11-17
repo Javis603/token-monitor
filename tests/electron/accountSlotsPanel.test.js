@@ -40,7 +40,7 @@ class Node {
   click() { const result = this.listeners.click?.({ detail: 0 }); if (this.attributes.popovertarget) { const menu = this.document.getElementById(this.attributes.popovertarget); if (menu.popoverOpen) menu.hidePopover(); else menu.showPopover(); } return result; }
   key(key, altKey = false) { return this.listeners.keydown?.({ key, altKey, preventDefault() {}, stopPropagation() {} }); }
 }
-function harness(translateMessage = t, providerId = 'qoder') {
+function harness(translateMessage = t, providerId = 'qoder', loginAction) {
   const document = { defaultView: { innerWidth: 400, innerHeight: 400, addEventListener() {}, removeEventListener() {} }, addEventListener() {}, removeEventListener() {}, moves: 0, createElement: tag => new Node(tag, document), createTextNode: text => ({ textContent: text }), getElementById: id => document.root.querySelector(`#${id}`) };
   const calls = []; let verdict = { saved: true, verdict: 'valid', accounts: [] };
   const records = [{ id: 'a', label: 'Zulu', fingerprint: 'aa', accountKey: 'ka', enabled: true }, { id: 'b', label: 'Alpha', fingerprint: 'bb', accountKey: 'kb', enabled: false }];
@@ -54,7 +54,7 @@ function harness(translateMessage = t, providerId = 'qoder') {
   const defaultForm = createCredentialPanel(limitAccountFormsForRenderer().find(f => f.id === providerId), { document, translate: t, onToggle() {}, onClear() {}, onOpen() {}, onRefresh() {}, onSave() {} });
   for (const child of [...defaultForm.querySelector('.cursor-settings-details').children]) defaultPanel.append(child);
   host.append(defaultPanel);
-  const panel = createPanel({ defaultPanel, form: limitAccountFormsForRenderer().find(f => f.id === providerId), label: 'Qoder', document, t: translateMessage, ipc, forms: { createCredentialPanel, resolveOpenUrl }, preserveScroll: fn => fn(), onChanged() {}, openExternal() {} });
+  const panel = createPanel({ loginAction, defaultPanel, form: limitAccountFormsForRenderer().find(f => f.id === providerId), label: 'Qoder', document, t: translateMessage, ipc, forms: { createCredentialPanel, resolveOpenUrl }, preserveScroll: fn => fn(), onChanged() {}, openExternal() {} });
   host.append(panel.element);
   document.root = host;
   const update = () => panel.update(slots, [{ accountKey: 'ka', status: 'unauthorized', updatedAt: new Date().toISOString() }], true);
@@ -790,4 +790,42 @@ test('OpenRouter single-key form submits to slot add without a profile-name fiel
   h.document.getElementById('openrouterSlotDraftopenrouterApiKeyInput').value = 'fixture-secret';
   await h.document.getElementById('openrouterSlotDraftCredentialSubmit').click();
   assert.deepEqual(h.calls[0], ['add', 'openrouter', { openrouterApiKey: 'fixture-secret' }, 'Work']);
+});
+
+
+test('Copilot paste editor submits token and non-secret enterprise host to slot add', async () => {
+  const h = harness(t, 'copilot'); h.panel.openEditor(null);
+  h.panel.element.querySelector('.slot-editor').children[1].value = 'Work';
+  h.document.getElementById('copilotSlotDraftcopilotApiTokenInput').value = 'fixture-secret';
+  h.document.getElementById('copilotSlotDraftcopilotEnterpriseHostInput').value = 'ghe.example';
+  await h.document.getElementById('copilotSlotDraftCredentialSubmit').click();
+  assert.deepEqual(h.calls[0], ['add', 'copilot', { copilotApiToken: 'fixture-secret', copilotEnterpriseHost: 'ghe.example' }, 'Work']);
+});
+
+test('Copilot browser choice carries only host and flowId; cancelling fences stale progress and completion', async () => {
+  const requests = [];
+  let status, finish;
+  const pending = new Promise(resolve => { finish = resolve; });
+  const loginAction = {
+    signIn: request => { requests.push(request); return pending; },
+    cancelSignIn: request => { requests.push(['cancel', request]); },
+    onLoginStatus: listener => { status = listener; return () => {}; }
+  };
+  const h = harness(t, 'copilot', loginAction); h.panel.openEditor(null);
+  h.document.getElementById('copilotSlotDraftcopilotEnterpriseHostInput').value = 'ghe.example';
+  const signingIn = h.click(h.panel.element, t('settings.copilot.signIn'));
+  const request = requests[0];
+  assert.deepEqual(request.values, { copilotEnterpriseHost: 'ghe.example' });
+  assert.equal(typeof request.flowId, 'string');
+  assert.ok(!JSON.stringify(request).includes('copilotApiToken'));
+  const editor = h.panel.element.querySelector('.slot-editor');
+  status({ flowId: 'stale', phase: 'authorize', userCode: 'OLD-CODE' });
+  assert.ok(!editor.textContent.includes('OLD-CODE'));
+  h.click(editor, 'Cancel');
+  h.panel.openEditor(null);
+  h.document.getElementById('copilotSlotDraftcopilotApiTokenInput').value = 'new-draft';
+  finish({ ok: true, flowId: request.flowId });
+  await signingIn;
+  assert.equal(requests[1][0], 'cancel');
+  assert.equal(h.document.getElementById('copilotSlotDraftcopilotApiTokenInput').value, 'new-draft');
 });

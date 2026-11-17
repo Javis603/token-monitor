@@ -22,6 +22,10 @@ function migrateAccountSlots(store, settings, now = Date.now, env = process.env)
     const stored = store.settingsCredentials(document);
     // Companion fields can belong to an environment account. Move them only
     // when a stored primary credential (or one of its alternatives) moves too.
+    if (entry.id === 'copilot') {
+      migrateCopilotSlots(store, stored, settings, document, mark, now, env);
+      continue;
+    }
     if (entry.id === 'openrouter') {
       migrateOpenRouterSlots(store, stored, document, mark, now);
       continue;
@@ -137,5 +141,35 @@ function migrateOpenRouterSlots(store, stored, document, mark, now) {
   if (pending) console.warn('[OpenRouter] Account list is full. Remaining legacy profiles continue collecting; remove saved accounts and restart to import them.');
   stored[defaultIdentityKey(entry)] = null;
   store.replaceSettingsCredentials(stored, pending ? document : mark(document));
+}
+function migrateCopilotSlots(store, stored, settings, document, mark, now, env) {
+  const entry = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === 'copilot');
+  const profiles = entry.limits.copilotProfiles({ ...settings, ...stored }, env);
+  const timestamp = new Date(now()).toISOString();
+  const imports = Object.entries(profiles).map(([id, profile]) => ({
+    id: hashKey('copilot', 'legacy-profile', id).slice(7), label: '', enabled: profile.enabled,
+    values: { copilotApiToken: profile.token, copilotEnterpriseHost: profile.enterpriseHost },
+    accountKey: profile.accountKey || entry.limits.copilotAccountKey(profile.token, profile.enterpriseHost),
+    accountKeyAliases: [], serverIdentity: Boolean(profile.accountKey), createdAt: timestamp, updatedAt: timestamp
+  }));
+  const raw = stored.copilotAccountSlots || [];
+  const slots = normalizeAccountSlots(entry, raw);
+  if (raw.length !== slots.length) throw new Error('Invalid account slot list');
+  const next = [...imports.filter(item => !slots.some(slot => slot.id === item.id)), ...slots];
+  if (next.length > 21) throw new Error('Account slot limit prevents migration');
+  for (const item of imports) {
+    const slot = next.find(slot => slot.id === item.id);
+    if (slot.accountKey !== item.accountKey || slot.enabled !== item.enabled || !isDeepStrictEqual(slot.values, item.values)) throw new Error('Copilot import conflicts with existing slot');
+  }
+  if (imports.length) {
+    store.replaceSettingsCredentials({ ...stored, copilotAccountSlots: next }, document);
+    document = store.readDocument();
+    stored = store.settingsCredentials(document);
+    if (!isDeepStrictEqual(stored.copilotAccountSlots, next)) throw new Error('Account slot migration verification failed');
+  }
+  stored.copilotProfiles = {};
+  stored.copilotApiToken = '';
+  stored.copilotDefaultAccountIdentity = null;
+  store.replaceSettingsCredentials(stored, mark(document));
 }
 module.exports = { migrateAccountSlots };

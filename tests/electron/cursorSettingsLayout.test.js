@@ -846,7 +846,7 @@ test('API key account entries share styling and Copilot uses the folded token en
   // Each provider's error line starts hidden. Hiding itself is the stylesheet's
   // one blanket rule, so what is worth asserting here is that every provider has
   // such a line and that none of them ship visible.
-  for (const provider of ['volcengine', 'kimi', 'copilot']) {
+  for (const provider of ['volcengine', 'kimi']) {
     assert.match(html, new RegExp(`id="${provider}ErrorMessage"[^>]*class="[^"]*hidden"`), provider);
   }
   assert.match(css, /#kimiManualPanel,\n#copilotManualPanel,\n\.credential-manual-panel,\n#mimoManualPanel,\n#volcengineManualPanel\s*\{\n\s*min-width: 0;/);
@@ -872,49 +872,12 @@ test('API key account entries share styling and Copilot uses the folded token en
   assert.match(css, /\.thirdparty-field :is\(input, select, \.select-control-trigger\)\s*\{[\s\S]*?font-size: 0\.75rem;/);
 });
 
-test('Copilot account panel provides GitHub sign-in plus manual token fallback', () => {
-  const html = readRendererFile('index.html');
-  const details = html.match(/<div id="copilotSettingsDetails"[\s\S]*?<div id="copilotErrorMessage" class="settings-note error hidden" role="alert"><\/div>/)?.[0] || '';
-  assert.match(details, /<button id="copilotSignInButton"[\s\S]*data-i18n="settings\.copilot\.signIn">/);
-  assert.match(details, /<button id="copilotCancelSignInButton" class="hidden" data-i18n="settings\.common\.cancel">/);
-  assert.match(details, /<div id="copilotAccountList" class="managed-account-list">/);
-  assert.match(details, /<pre id="copilotLoginStatus" class="codex-login-output hidden" role="status" aria-live="polite"><\/pre>/);
-  assert.match(details, /<button id="copilotManualToggle"[\s\S]*aria-controls="copilotManualDetails"/);
-  assert.match(details, /<div id="copilotManualDetails" class="opencode-add-details accordion-animated-container hidden">/);
-  assert.match(details, /<input id="copilotApiTokenInput" type="password"[\s\S]*data-i18n-placeholder="settings\.copilot\.apiTokenPlaceholder"/);
-  assert.match(details, /<button id="copilotApiTokenSubmit"[\s\S]*data-i18n="settings\.copilot\.saveToken">/);
-
-  const app = readRendererFile('app.js');
-  const setupBody = functionBodyBeforeMarker(app, 'setupCursorAccountUI', '\nsetupCursorAccountUI();');
-  assert.match(setupBody, /const flowId = nextCopilotSignInFlowId\(\);/);
-  assert.match(setupBody, /state\.copilotSignInFlowId = flowId;/);
-  assert.match(setupBody, /window\.tokenMonitor\.copilot\.signIn\(\{ flowId \}\)/);
-  assert.match(setupBody, /isCurrentCopilotSignInFlow\(status\.flowId\)/);
-  assert.match(setupBody, /isCurrentCopilotSignInFlow\(result\?\.flowId \|\| flowId\)/);
-  assert.match(setupBody, /window\.tokenMonitor\.copilot\.cancelSignIn\(\{ flowId \}\)/);
-  assert.match(setupBody, /state\.copilotSignInFlowId = '';/);
-  assert.match(setupBody, /state\.copilotSignInCancelable = true;/);
-  assert.match(setupBody, /status\.phase === 'success'[\s\S]*?state\.copilotSignInCancelable = false;/);
-  assert.match(setupBody, /state\.copilotAuthorizeMessage = t\('settings\.copilot\.authorize'/);
-  assert.match(setupBody, /\[state\.copilotAuthorizeMessage, t\('settings\.copilot\.polling'\)\]\.filter\(Boolean\)\.join\('\\n\\n'\)/);
-  assert.match(setupBody, /setCopilotManualExpanded\(false\)/);
-  assert.match(setupBody, /window\.tokenMonitor\.copilot\.addAccount\(input\.value\)/);
-  assert.doesNotMatch(setupBody, /saveSettings\(\{ copilotApiToken:/);
-
-  const renderBody = functionBody(app, 'renderCopilotStatus', 'renderOpenCodeProfiles');
-  assert.match(renderBody, /cancelBtn\.classList\.toggle\('hidden', !state\.copilotSignInBusy \|\| !state\.copilotSignInCancelable\)/);
-  assert.match(renderBody, /refreshBtn\.classList\.toggle\('hidden', !configured \|\| \(state\.copilotSignInBusy && !linked\)\)/);
-  assert.match(renderBody, /accountShellApi\.render\(\{[\s\S]*?error: errorEl,\s*errorText: state\.copilotErrorMessage/);
-  assert.doesNotMatch(renderBody, /errorEl\.textContent = '';/);
-
-  const statusBody = functionBody(app, 'copilotAccountStatusText', 'apiKeyAccountStatusText');
-  assert.match(statusBody, /provider\?\.accountName/);
-  assert.match(statusBody, /settings\.copilot\.statusSet/);
-
-  const flowBody = functionBody(app, 'isCurrentCopilotSignInFlow', 'copilotAccountStatusText');
-  assert.match(flowBody, /const current = String\(state\.copilotSignInFlowId \|\| ''\);/);
-  assert.match(flowBody, /const incoming = String\(flowId \|\| ''\);/);
-  assert.match(flowBody, /return current && incoming === current;/);
+test('Copilot uses the shared slot form with a provider-owned login action', () => {
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(form => form.id === 'copilot');
+  assert.equal(form.accountSlots, true);
+  assert.equal(form.loginAction.labelKey, 'settings.copilot.signIn');
+  assert.deepEqual(form.fields.map(field => field.key), ['copilotApiToken', 'copilotEnterpriseHost']);
 });
 
 test('Volcengine keeps its hand-built panel and saves through the shared credential path', () => {
@@ -1259,7 +1222,7 @@ test('DeepSeek key changes invalidate stale provider status before re-checking',
   assert.match(linkedBody, /state\.settings\?\.\[config\.configuredKey\]/);
   assert.match(linkedBody, /provider\?\.status === 'ok'/);
 
-  const pendingStatusBody = functionBody(app, 'clearExternalProviderPendingStatus', 'nextCopilotSignInFlowId');
+  const pendingStatusBody = functionBody(app, 'clearExternalProviderPendingStatus', 'copilotAccountStatusText');
   assert.match(pendingStatusBody, /state\.stats\.limits\.providers = state\.stats\.limits\.providers\.filter/);
   assert.match(pendingStatusBody, /provider\.provider !== providerName/);
 });
@@ -3287,7 +3250,7 @@ test('MiMo main projects the detected Desktop account without raw credentials', 
 
 test('MiMo refreshes its detected account when the settings section is expanded again', async () => {
   const app = readRendererFile('app.js');
-  const refresh = functionBody(app, 'refreshMimoAccounts', 'setCopilotAccountExpanded');
+  const refresh = functionBody(app, 'refreshMimoAccounts', 'setCursorStatusText');
   let detected = [{ id: 'desktop-a', removable: false }];
   let rendered = 0;
   const state = { settings: { mimoManagedAccounts: [] } };
