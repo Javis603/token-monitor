@@ -386,3 +386,18 @@ test('environment identity is reused only for matching credential and site value
   h.settings = { ...h.settings, qoderSite: 'global' };
   assert.equal(h.service.list('qoder').accounts[0].accountKey, 'server-one');
 });
+
+test('the same credential cannot be added twice or replaced into another account', async () => {
+  const h = harness();
+  await add(h);
+  const again = await h.service.add('deepseek', { deepseekApiKey: 'SECRET-one' }, 'Copy');
+  assert.equal(again.saved, false);
+  assert.equal(again.verdict, 'duplicate');
+  assert.equal(h.settings.deepseekAccountSlots.length, 1);
+  const second = await h.service.add('deepseek', { deepseekApiKey: 'SECRET-two' }, 'Second');
+  const replaced = await h.service.replace('deepseek', second.accounts[1].id, { deepseekApiKey: 'SECRET-one' });
+  assert.equal(replaced.verdict, 'duplicate');
+  assert.equal(h.settings.deepseekAccountSlots[1].values.deepseekApiKey, 'SECRET-two');
+  const same = await h.service.replace('deepseek', second.accounts[1].id, { deepseekApiKey: 'SECRET-two' });
+  assert.notEqual(same.verdict, 'duplicate', 'replacing an account with its own credential is not a duplicate');
+});

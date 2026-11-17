@@ -84,6 +84,13 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
             && (old.serverIdentity || provesServer(old.accountKey, old.values, old.accountKeyAliases)));
           const provenNow = Boolean(provider?.accountKey && provesServer
             && provesServer(provider.accountKey, candidate, provider.accountKeyAliases || []));
+          // The same credential twice would be two rows for one account and a
+          // duplicate request each pass; it is refused, pointing at the existing row.
+          const fingerprint = accountValuesFingerprint(candidate);
+          if (previous.some(slot => slot.id !== old?.id && accountValuesFingerprint(slot.values) === fingerprint)) {
+            rejected = { saved: false, verdict: 'duplicate', status: 'duplicate' };
+            return;
+          }
           // A key this slot has been before (an alias) is its own account coming back.
           const different = oldProven && provenNow && key !== old.accountKey && !old.accountKeyAliases.includes(key);
           // Two proven server accounts never share a slot: the caller adds the

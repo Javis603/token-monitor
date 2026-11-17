@@ -130,7 +130,9 @@
           const result = await run(slot && !asNew ? 'replace' : 'add', ...(slot && !asNew ? [slot.id, original] : [original, name.value]));
           if (!result || revision !== editorRevision) return;
           choices.replaceChildren();
-          if (result.verdict === 'differentAccount') {
+          if (result.verdict === 'duplicate') {
+            verdict.textContent = tr('duplicate');
+          } else if (result.verdict === 'differentAccount') {
             verdict.textContent = tr('differentAccount');
             // One add per confirmation: a second press would save the same account twice.
             let adding = false;
