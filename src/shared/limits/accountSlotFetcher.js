@@ -3,14 +3,14 @@
 
 const { hashKey } = require('../hashKey');
 const { nowIso, providerStatusFromError } = require('./providerHelpers');
-const { accountSlotKey, normalizeAccountSlots, defaultIdentityKey, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
+const { accountSlotKey, normalizeAccountSlots, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
 
 /**
  * @typedef {import('./accountSlots').AccountSlot} AccountSlot
  * @typedef {Omit<import('./accounts').AccountDeclaration, 'fields'> & {fetchLimits: (options: SlotOptions, deps: SlotDeps) => any, fields: any[], limits?: Record<string, any>}} SlotEntry
  * @typedef {Record<string, any>} SlotOptions Flat provider config, previousLimits and optional limitRefreshScope.
  * @typedef {{accountKey: string, accountKeyAliases: string[]}} SlotIdentity
- * @typedef {Record<string, any> & {providerRuntimeState?: Map<string, any>, onAccountSlotResolved?: (provider: string, slotId: string | null, identity: SlotIdentity, values: Record<string, string>) => void}} SlotDeps Injected transport/env/signal and optional identity persistence hook.
+ * @typedef {Record<string, any> & {providerRuntimeState?: Map<string, any>, onAccountSlotResolved?: (provider: string, slotId: string, identity: SlotIdentity, values: Record<string, string>) => void}} SlotDeps Injected transport/env/signal and optional identity persistence hook.
  * @typedef {object} SlotAccount One account of a dispatch: the default account (`values: null`) or an enabled slot.
  * @property {string} id
  * @property {string} label
@@ -87,15 +87,10 @@ function slotAccounts(entry, options, deps) {
   };
 
   const slots = normalizeAccountSlots(entry, options[accountSlotKey(entry)]);
-  const described = slots.map(describe);
-  const enabled = described.filter((_account, index) => slots[index].enabled);
-
-  // The default account exists when its primary credential does; an optional
-  // sibling alone (DeepSeek's console token) is not an account.
+  const enabled = slots.filter(slot => slot.enabled).map(slot => describe(slot));
+  const values = defaultAccountValues(entry, options, deps.env || process.env);
   const primary = entry.status?.credential;
-  const defaultPresent = entry.fields.some((field) => field.kind === 'credential' && (!primary || field.key === primary)
-    && (options[field.key] || field.resolve?.(deps.env || process.env)));
-  const all = [...(defaultPresent ? [describe({ id: 'default', label: '', values: null, ...((options[defaultIdentityKey(entry)]?.fingerprint === accountValuesFingerprint(defaultAccountValues(entry, options, deps.env || process.env))) ? options[defaultIdentityKey(entry)] : { accountKey: '', accountKeyAliases: [] }) })] : []), ...enabled];
+  const all = [...(values[primary || ''] ? [describe({ id: 'environment', label: '', values: null, accountKey: '', accountKeyAliases: [] })] : []), ...enabled];
   // A key one account moved away from may be another account's key now; it is
   // that account's identity, not an alias of this one.
   const current = new Set(all.map((account) => account.accountKey));
@@ -165,39 +160,30 @@ function createAccountSlotFetcher(entry) {
   /** @param {SlotOptions} options @param {SlotDeps} deps */
   return function fetchAccountSlots(options = {}, deps = {}) {
     if (!normalizeAccountSlots(entry, options[key]).length) {
-      // Capture the dispatched values, and observe without rewriting the raw result.
-      const values = defaultAccountValues(entry, options, deps.env || process.env);
-      const persisted = options[defaultIdentityKey(entry)];
-      const result = entry.fetchLimits(options, deps);
-      const scope = options.limitRefreshScope;
-      const scoped = scope?.provider === entry.id && scope.accountKey;
-      if (!deps.onAccountSlotResolved && !scoped) return result;
-      return Promise.resolve(result).then((raw) => {
-        const rows = Array.isArray(raw) ? raw : [raw];
-        if (!deps.signal?.aborted) for (const row of rows) {
-          if (row?.status === 'ok' && row.accountKey && !row.removed
-            && (persisted?.fingerprint !== accountValuesFingerprint(values) || row.accountKey !== persisted?.accountKey)) {
-            deps.onAccountSlotResolved?.(entry.id, null, {
-              accountKey: row.accountKey, accountKeyAliases: row.accountKeyAliases || []
-            }, values);
-          }
+      const dispatchedValues = defaultAccountValues(entry, options, deps.env || process.env);
+      let result = entry.fetchLimits(options, deps);
+      if (deps.onAccountSlotResolved) result = Promise.resolve(result).then(raw => {
+        if (!deps.signal?.aborted) for (const row of Array.isArray(raw) ? raw : [raw]) {
+          if (row?.accountKey && !row.removed) deps.onAccountSlotResolved?.(entry.id, 'environment', { accountKey: row.accountKey, accountKeyAliases: row.accountKeyAliases || [] }, dispatchedValues);
         }
-        if (!scoped) return raw;
-        const check = scopeCheck(entry, options, String(scope.accountKey));
-        return rows.filter((row) => row && !row.removed && answersScope(row, check));
+        return raw;
       });
+      const scope = options.limitRefreshScope;
+      if (!scope?.accountKey || scope.provider !== entry.id) return result;
+      return Promise.resolve(result).then(raw => (Array.isArray(raw) ? raw : [raw]).filter(row => row && !row.removed && answersScope(row, scopeCheck(entry, options, String(scope.accountKey)))));
     }
     return collect();
 
     async function collect() {
       const { accounts, scopeKey, previousKeys, check } = slotAccounts(entry, options, deps);
-      /** @type {{account: SlotAccount, row: any, accountKey: string, moved: boolean}[]} */
+      /** @type {{account: SlotAccount, values: Record<string, string>, row: any, accountKey: string, moved: boolean}[]} */
       const answered = [];
       let complete = true;
       for (const account of accounts) {
         if (deps.signal?.aborted) { complete = false; break; }
         const owned = new Set([account.accountKey, account.provisional, ...account.accountKeyAliases]);
         // The adapter decides retirement below, so a fetch's own removal rows are dropped.
+        const values = account.values || defaultAccountValues(entry, options, deps.env || process.env);
         const answers = (await fetchAccount(account, owned, options, deps))
           .filter((row) => !row.removed && answersScope(row, check));
         if (!answers.length && check && !check.keyless) continue;
@@ -208,7 +194,7 @@ function createAccountSlotFetcher(entry) {
           // nothing remembered; a held provisional key's recovery moves on the
           // next provider-wide dispatch.
           const accountKey = scopeKey || row.accountKey || account.accountKey;
-          answered.push({ account, row, accountKey, moved: account.known && accountKey !== account.accountKey });
+          answered.push({ account, values, row, accountKey, moved: account.known && accountKey !== account.accountKey });
         }
       }
       if (deps.signal?.aborted) complete = false;
@@ -220,7 +206,7 @@ function createAccountSlotFetcher(entry) {
       /** @type {Map<string, number>} */
       const emitted = new Map();
       const provesServer = entry.serverAccountKey && entry.limits?.[entry.serverAccountKey];
-      for (const { account, row, accountKey, moved } of answered) {
+      for (const { account, values, row, accountKey, moved } of answered) {
         // A slot whose stored key was a proven server account, now answering as a
         // different proven server account (a credential replaced while offline),
         // is a different account: it takes nothing of the old identity, which the
@@ -240,20 +226,21 @@ function createAccountSlotFetcher(entry) {
         // runtime can accept whole.
         if (!scopeKey && complete) {
           const identity = { accountKey, accountKeyAliases: aliases };
-          deps.providerRuntimeState?.set(`account-slot:${entry.id}:${accountNamespace(account)}:${accountValuesFingerprint(account.values || defaultAccountValues(entry, options, deps.env || process.env))}`, identity);
+          deps.providerRuntimeState?.set(`account-slot:${entry.id}:${accountNamespace(account)}:${accountValuesFingerprint(values)}`, identity);
           if (!account.known || moved || aliases.join('\n') !== account.accountKeyAliases.join('\n')) {
-            // The default account is `null`: any string is a valid slot id, including 'default'.
-            deps.onAccountSlotResolved?.(entry.id, account.values ? account.id : null, identity, account.values || defaultAccountValues(entry, options, deps.env || process.env));
+            // Environment identities stay in memory; local identities update their slot.
+            deps.onAccountSlotResolved?.(entry.id, account.id, identity, values);
           }
         }
         const { accountKeyAliases: _reported, ...answer } = row;
+        if (complete && !scopeKey && row.status === 'ok') deps.providerRuntimeState?.set(`account-name:${entry.id}:${accountKey}`, row.accountName || '');
         // A slot's local name is its accountName (the runtime projects the same
         // rule onto retained readings); the provider's accountLabel carries the plan.
-        if (account.values) delete answer.accountName;
+        if (account.label) delete answer.accountName;
         const emit = {
           ...answer, accountKey,
           ...(aliases.length ? { accountKeyAliases: aliases } : {}),
-          ...(account.values && account.label ? { accountName: account.label } : {})
+          ...(account.label ? { accountName: account.label } : {})
         };
         // A second account reporting an identity already answered in this pass
         // is the same upstream account: one row, the first reading that worked,

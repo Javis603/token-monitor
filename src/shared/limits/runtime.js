@@ -1,6 +1,6 @@
 'use strict';
 
-const { configuredMultiAccountProviders, normalizeAccountSlots, accountSlotKey, defaultIdentityKey, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
+const { configuredMultiAccountProviders, normalizeAccountSlots, accountSlotKey, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
 const { LIMIT_PROVIDER_REGISTRY } = require('./registry');
 
 const crypto = require('node:crypto');
@@ -370,17 +370,9 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     const entry = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === provider && entry.accountSlots);
     if (entry) {
       const slots = normalizeAccountSlots(entry, config[accountSlotKey(entry)]).filter(slot => slot.enabled);
-      // An alias names a key a slot moved away from. The default account, or
-      // another slot, may answer under it now, and then the row is theirs.
-      // Only while it still belongs to the current default credential, as in the fetcher.
-      // What this runtime resolved for the current default credential wins over the
-      // stored copy, which is only written back to the config on the next reconfigure.
-      const defaultFingerprint = accountValuesFingerprint(defaultAccountValues(entry, config, deps.env || process.env));
-      const storedDefault = config[defaultIdentityKey(entry)];
-      const defaultKey = providerRuntimeState.get(`account-slot:${entry.id}:default:${defaultFingerprint}`)?.accountKey
-        || (storedDefault?.fingerprint === defaultFingerprint ? storedDefault.accountKey || '' : '');
+      const current = providerRuntimeState.get(`account-slot:${entry.id}:default:${accountValuesFingerprint(defaultAccountValues(entry, config, deps.env || process.env))}`)?.accountKey;
       const owner = row => slots.find(slot => slot.accountKey === row.accountKey)
-        || (row.accountKey === defaultKey ? undefined : slots.find(slot => slot.accountKeyAliases.includes(row.accountKey)));
+        || (row.accountKey === current ? undefined : slots.find(slot => slot.accountKeyAliases.includes(row.accountKey)));
       for (const row of rows) {
         const slot = owner(row);
         if (slot) {
@@ -389,10 +381,15 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
           // reading answers for it; the provider's accountLabel (Qoder's plan)
           // is never touched.
           if (slot.label) row.accountName = slot.label;
-          else delete row.accountName;
+          else {
+            const nativeName = providerRuntimeState.get(`account-name:${entry.id}:${row.accountKey}`);
+            if (nativeName) row.accountName = nativeName;
+            else delete row.accountName;
+          }
+
         }
       }
-      rows.sort((a, b) => slots.indexOf(owner(a)) - slots.indexOf(owner(b)));
+      rows.sort((a, b) => (owner(a) ? slots.indexOf(owner(a)) : slots.length) - (owner(b) ? slots.indexOf(owner(b)) : slots.length));
     }
     return rows;
   }

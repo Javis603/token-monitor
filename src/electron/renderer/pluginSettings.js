@@ -7,10 +7,11 @@
 // through the trusted host; this is not a same-renderer security boundary.
 (function exposePluginSettings(root, factory) {
   const positionApi = typeof module === 'object' && module.exports ? require('./selectControl') : root?.TokenMonitorSelectControl;
-  const api = factory(positionApi);
+  const actionMenuApi = typeof module === 'object' && module.exports ? require('./actionMenu') : root?.TokenMonitorActionMenu;
+  const api = factory(positionApi, actionMenuApi);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorPluginSettings = api;
-})(typeof window !== 'undefined' ? window : null, function createPluginSettingsApi(positionApi) {
+})(typeof window !== 'undefined' ? window : null, function createPluginSettingsApi(positionApi, actionMenuApi) {
   const isFeatured = origin => origin?.kind === 'official' || origin?.kind === 'maintainer';
   const SURFACE_ORDER = ['home', 'page', 'tray', 'edgeDock', 'notch'];
   const SURFACE_LABEL_KEYS = { home: 'views.home', page: 'plugins.initial.purpose.page', tray: 'settings.plugins.surface.tray',
@@ -280,45 +281,13 @@
     }
 
     function actionMenu(label, entries, leadingControl = null) {
-      const wrap = el(document, 'div', 'plugin-menu-wrap');
-      const popover = el(document, 'div', 'plugin-menu'); popover.id = `plugin-menu-${++menuId}`; popover.setAttribute('popover', 'auto');
-      const trigger = button('', () => {}, 'plugin-more'); trigger.setAttribute('aria-label', label);
-      const icon = el(document, 'span', 'plugin-more-icon'); icon.setAttribute('aria-hidden', 'true'); trigger.append(icon);
-      trigger.setAttribute('popovertarget', popover.id); trigger.setAttribute('aria-controls', popover.id); trigger.setAttribute('aria-expanded', 'false');
-      let keyboardOpen = false, focusLast = false;
-      const menuItems = () => [...popover.querySelectorAll('button:not(:disabled), input:not(:disabled)')];
-      trigger.addEventListener('click', event => { keyboardOpen = event.detail === 0; focusLast = false; });
-      trigger.addEventListener('keydown', event => {
-        if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return;
-        event.preventDefault(); keyboardOpen = true; focusLast = event.key === 'ArrowUp';
-        if (popover.matches(':popover-open')) (focusLast ? menuItems().at(-1) : menuItems()[0])?.focus({ preventScroll: true });
-        else popover.showPopover();
-      });
-      popover.addEventListener('toggle', () => {
-        trigger.setAttribute('aria-expanded', String(popover.matches(':popover-open')));
-        if (popover.matches(':popover-open')) {
-          const rect = trigger.getBoundingClientRect();
-          const position = positionApi.popupPosition(rect, { width: window.innerWidth, height: window.innerHeight }, {
-            width: popover.offsetWidth, height: popover.scrollHeight + 2, align: 'end', heightLimit: window.innerHeight
-          });
-          Object.assign(popover.style, { left: `${position.left}px`, top: `${position.top}px`, width: `${position.width}px`, maxHeight: `${position.maxHeight}px` });
-          if (keyboardOpen) (focusLast ? menuItems().at(-1) : menuItems()[0])?.focus({ preventScroll: true });
-        }
-      });
-      popover.addEventListener('keydown', (event) => {
-        const direction = { ArrowDown: 1, ArrowUp: -1, Home: 'first', End: 'last' }[event.key];
-        if (direction === undefined) return;
-        event.preventDefault();
-        const items = menuItems();
-        const next = positionApi.navigate(items, items.indexOf(document.activeElement), direction);
-        items[next]?.focus();
-      });
+      const menu = actionMenuApi.create(document, label, button);
       if (leadingControl) {
-        popover.append(leadingControl);
-        const automatic = autoUpdateControl(); if (automatic) popover.append(automatic);
+        menu.appendItems(leadingControl);
+        const automatic = autoUpdateControl(); if (automatic) menu.appendItems(automatic);
       }
-      for (const [text, action] of entries) popover.append(button(text, () => { popover.hidePopover(); trigger.focus({ preventScroll: true }); action(); }));
-      wrap.append(trigger, popover); return wrap;
+      for (const [text, action] of entries) menu.appendItems(button(text, () => { menu.close(); action(); }));
+      return menu.element;
     }
 
     // Runtime enabled also includes safe mode. The switch edits the saved

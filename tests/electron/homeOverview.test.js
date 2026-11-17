@@ -402,6 +402,8 @@ for (const { name, settings, expected } of [
     const body = { children: [], append(element) { this.children.push(element); } };
     vm.runInNewContext(`${functions}\nrenderHomeLimitModule();`, {
       state: { settings, stats: { limits: { providers: [] } } },
+      accountSlotLists: {},
+      window: { TokenMonitorAccountSlotsPanel: require('../../src/electron/renderer/limits/accountSlotsPanel') },
       LIMIT_PROVIDERS: [{ id: 'claude', label: 'Claude' }],
       DEFAULT_LIMIT_PROVIDER_ORDER: 'claude',
       limitProviderOrderApi,
@@ -443,6 +445,7 @@ test('Home keeps both MiniMax readings named and in their own units', () => {
   for (const showHomeLimitProviderNames of [false, true]) {
     settings.showHomeLimitProviderNames = showHomeLimitProviderNames;
     const rows = vm.runInNewContext(`${fn}\nhomeLimitRows();`, {
+      accountSlotLists: {},
       state: { settings, stats: { limits: { providers } } },
       desktopLimitProviders: () => [{ id: 'minimax', label: 'Minimax' }], desktopLimitRecords: () => providers,
       LIMIT_PROVIDERS: [{ id: 'minimax', label: 'Minimax' }],

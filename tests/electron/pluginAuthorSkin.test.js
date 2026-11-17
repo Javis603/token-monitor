@@ -82,7 +82,7 @@ test('actual settings candidate and saveSettings rollback commit palette + snaps
   let fail = true; const writes = [];
   Object.assign(h, { settings: structuredClone(old), previousSettingsState: structuredClone(old), persistedSettingsSnapshot: structuredClone(old),
     cloneSettingsSnapshot: structuredClone, normalizeSyncContentState: value => value || {}, syncContentContext: value => value,
-    contentRuntime: { beforeDestinationChange() {} }, ensureCredentialStore: () => ({ readDocument: () => ({}), replaceSettingsCredentials() {}, writeDocument() {} }), settingsPath: file, refreshTrayContextMenu() {}, reportCredentialStorageError() {},
+    contentRuntime: { beforeDestinationChange() {} }, migrateAccountSlots: () => ({}), LIMIT_PROVIDER_REGISTRY: [], ensureCredentialStore: () => ({ readDocument: () => ({}), replaceSettingsCredentials() {}, writeDocument() {} }), settingsPath: file, refreshTrayContextMenu() {}, reportCredentialStorageError() {},
     persistSettingsAndCredentials: args => persistSettingsAndCredentials({ ...args, writeSettings: (target, value) => { if (fail) throw Error('disk full'); writePrivateJsonAtomic(target, value); writes.push(structuredClone(value)); } }) });
   vm.runInContext(extract(main, 'saveSettings'), h);
   h.skinSelection = selection; h.normalizedPatch = selection.patch;

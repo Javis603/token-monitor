@@ -2669,6 +2669,7 @@ test('main limits cache reuses unchanged data and repaints when token units chan
   const state = { settings: { compactTokenUnits: 'western' }, stats: { limits: { providers: [{ provider: 'muse', source: 'web', status: 'ok' }] } } };
   const context = vm.createContext({
     state,
+    window: { TokenMonitorAccountSlotsPanel: require('../../src/electron/renderer/limits/accountSlotsPanel') },
     pluginBridge: null, syncPluginLimitsDemand() {},
     Date: class extends Date { static now() { return 1793512800000; } },
     els: { limitsPanel: { children: [], replaceChildren(...nodes) { this.children = nodes; paints++; } } },
