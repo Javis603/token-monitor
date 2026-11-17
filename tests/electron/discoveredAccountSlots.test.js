@@ -319,3 +319,22 @@ test('runtime order follows persisted environment and multiple discovered positi
   await runtime.refresh({}, 'settings-change');
   assert.deepEqual(runtime.getSnapshot().providers.map(row => row.accountKey), ['a', 'saved', 'b', 'env']);
 });
+
+test('factory: a scoped refresh reaches a discovered account by the identity this runtime resolved', async t => {
+  const values = { factoryApiKey: 'droid-secret' };
+  const entry = stubDiscovery(t, 'factory', () => [{ values, sourceName: 'Droid' }]);
+  const fingerprint = accountValuesFingerprint(values);
+  const state = new Map([[`account-slot:factory:slot:discovered-${fingerprint}:${fingerprint}`, { accountKey: 'server-key', accountKeyAliases: [] }]]);
+  const calls = [];
+  const fetcher = createAccountSlotFetcher({ ...entry, fetchLimits: options => { calls.push(options.factoryApiKey); return { provider: 'factory', status: 'ok', accountKey: 'server-key', windows: [] }; } });
+  await fetcher({ limitRefreshScope: { provider: 'factory', accountKey: 'server-key' } }, { env: {}, providerRuntimeState: state });
+  assert.deepEqual(calls, ['droid-secret']);
+});
+
+test('zai: a signed-in ZCode account whose credential is unreadable stays listed as unavailable', () => {
+  const { discoverAccountSlots } = limitProviderEntry('zai').limits;
+  for (const reason of ['billing_jwt_unavailable', 'coding_plan_key_missing']) {
+    assert.throws(() => discoverAccountSlots({ discoverZcodeConnection: () => ({ kind: 'start-billing', entitled: false, reason }) }), error => error.status === 'unavailable');
+  }
+  assert.deepEqual(discoverAccountSlots({ discoverZcodeConnection: () => ({ kind: 'coding-quota', entitled: false, reason: 'coding_plan_not_authenticated' }) }), []);
+});
