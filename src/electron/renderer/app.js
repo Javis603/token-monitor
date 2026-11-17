@@ -4741,7 +4741,7 @@ let accountSlotListPending = false;
 function refreshAccountSlotPanels() {
   for (const [id, panel] of accountSlotPanels) {
     panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
-      { records: state.stats?.limits?.providers || [], devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId, presentation: state.settings?.limitAccountPresentation?.[id] });
+      { records: state.stats?.limits?.providers || [], devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId, settings: state.settings, presentation: state.settings?.limitAccountPresentation?.[id] });
   }
   if (accountSlotListPending) return;
   accountSlotListPending = true;
@@ -4753,7 +4753,7 @@ function refreshAccountSlotPanels() {
     if (previousSlotLists !== JSON.stringify(accountSlotLists)) render();
     for (const [id, panel] of accountSlotPanels) {
       panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
-        { records: state.stats?.limits?.providers || [], devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId, presentation: state.settings?.limitAccountPresentation?.[id] });
+        { records: state.stats?.limits?.providers || [], devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId, settings: state.settings, presentation: state.settings?.limitAccountPresentation?.[id] });
     }
   }).catch(() => {}).finally(() => { accountSlotListPending = false; });
 }
