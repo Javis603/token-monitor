@@ -1218,7 +1218,7 @@ test('DeepSeek key changes invalidate stale provider status before re-checking',
   assert.match(linkedBody, /state\.settings\?\.\[config\.configuredKey\]/);
   assert.match(linkedBody, /provider\?\.status === 'ok'/);
 
-  const pendingStatusBody = functionBody(app, 'clearExternalProviderPendingStatus', 'copilotAccountStatusText');
+  const pendingStatusBody = functionBody(app, 'clearExternalProviderPendingStatus', 'nextCodexSignInFlowId');
   assert.match(pendingStatusBody, /state\.stats\.limits\.providers = state\.stats\.limits\.providers\.filter/);
   assert.match(pendingStatusBody, /provider\.provider !== providerName/);
 });
@@ -1228,17 +1228,15 @@ test('disabled credential providers settle account status instead of checking fo
   const toggleBody = functionBody(app, 'onLimitProviderToggle', 'onLimitProviderMove');
   const clearBody = functionBody(app, 'clearDisabledLimitProviderPendingChecks', 'externalProviderForAccount');
   const externalRenderBody = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
-  const copilotRenderBody = functionBody(app, 'renderCopilotStatus', 'renderOpenCodeProfiles');
 
   assert.match(toggleBody, /clearDisabledLimitProviderPendingChecks\(new Set\(checked\)\)/);
-  assert.match(clearBody, /clearCopilotPendingCheck\(\)/);
+  assert.doesNotMatch(app, /function renderCopilotStatus|function renderCopilotAccounts|clearCopilotPendingCheck/);
   assert.match(clearBody, /Object\.keys\(externalLimitAccountConfig\)/);
   assert.match(clearBody, /\(state\.settings\?\.limitAccountForms \|\| \[\]\)\.map\(\(form\) => form\.id\)/);
   assert.match(clearBody, /clearExternalProviderCheckPending\(providerName\)/);
   assert.match(externalRenderBody, /const enabled = limitProviderEnabled\(providerName\);/);
   assert.match(externalRenderBody, /const pending = enabled &&/);
   assert.match(externalRenderBody, /apiKeyAccountStatusText\(providerName, statusProvider, configured, source, enabled\)/);
-  assert.match(copilotRenderBody, /copilotAccountStatusText\(provider, configured, source, enabled\)/);
 });
 
 test('MiMo account panel matches the manual Cookie provider layout', () => {
@@ -3271,7 +3269,7 @@ test('MiMo refreshes its detected account when the settings section is expanded 
 
 test('MiMo settings reuses the shared sign-in status for rejected accounts', () => {
   const app = readRendererFile('app.js');
-  const source = functionBody(app, 'mimoSettingsAccountTitle', 'copilotProviderStatus');
+  const source = functionBody(app, 'mimoSettingsAccountTitle', 'clearDisabledLimitProviderPendingChecks');
   class Node {
     constructor() {
       this.children = [];

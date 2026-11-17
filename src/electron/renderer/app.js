@@ -338,7 +338,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) || (allowed === viewBreakdownValues && pluginPlacementsApi.isHomeToken(raw)) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.icloudStatus = null;
@@ -10217,7 +10217,6 @@ function syncSettingsForm() {
   renderAntigravityStatus();
   renderWorkbuddyStatus();
   renderMimoStatus();
-  renderCopilotStatus();
   renderViewPreferences();
   renderToolPreferences();
   renderLimitProviderCheckboxes();
@@ -15328,7 +15327,6 @@ function renderStatsUpdate() {
   for (const form of state.settings?.limitAccountForms || []) {
     if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
   }
-  renderCopilotStatus();
   signalContentReady();
 }
 
@@ -17485,32 +17483,6 @@ function renderMimoStatus() {
   renderSettingsSummaries();
 }
 
-function copilotProviderStatus() {
-  return localProviderStatus('copilot');
-}
-
-function copilotAccountLinked() {
-  const provider = copilotProviderForAccount();
-  return Boolean(state.settings?.copilotApiTokenConfigured) && provider?.status === 'ok';
-}
-
-function copilotProviderForAccount() {
-  const provider = copilotProviderStatus();
-  const pendingSince = Number(state.copilotPendingCheckSince || 0);
-  if (!provider || !pendingSince) return provider;
-  const updatedAt = Date.parse(provider.updatedAt || '');
-  if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
-  state.copilotPendingCheckSince = 0;
-  return provider;
-}
-
-
-
-function clearCopilotPendingCheck() {
-  state.copilotPendingCheckSince = 0;
-}
-
-
 const externalLimitAccountConfig = {
   kimi: {
     configuredKey: 'kimiCredentialConfigured',
@@ -17525,7 +17497,6 @@ const externalLimitAccountConfig = {
 };
 
 function clearDisabledLimitProviderPendingChecks(enabledProviders) {
-  if (!enabledProviders.has('copilot')) clearCopilotPendingCheck();
   for (const providerName of [...Object.keys(externalLimitAccountConfig),
     ...(state.settings?.limitAccountForms || []).map((form) => form.id)]) {
     if (!enabledProviders.has(providerName)) clearExternalProviderCheckPending(providerName);
@@ -17634,25 +17605,6 @@ function isCurrentCodexSignInFlow(flowId) {
 }
 
 
-
-function copilotAccountStatusText(provider, configured, source, enabled = true) {
-  const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
-  if (accountStatus === 'linked') {
-    const accountName = String(provider?.accountName || '').trim();
-    return accountName || t(source === 'env' ? 'settings.copilot.statusEnv' : 'settings.copilot.statusSet');
-  }
-  if (accountStatus === 'invalid') return t('settings.copilot.statusInvalid');
-  if (accountStatus === 'notConfigured') return t('settings.copilot.statusNotSet');
-  const statusKeys = {
-    checking: 'settings.common.checking',
-    disabled: 'settings.limits.status.disabled',
-    limited: 'settings.common.limited',
-    unavailable: 'settings.common.unavailable',
-    notChecked: 'settings.common.notChecked',
-    error: 'settings.common.error'
-  };
-  return t(statusKeys[accountStatus] || 'settings.common.error');
-}
 
 function apiKeyAccountStatusText(providerName, provider, configured, source, enabled = true) {
   if (providerName === 'alibaba' && provider?.source === 'cli') source = 'cli';
@@ -18003,154 +17955,6 @@ function setVolcengineAgentExpanded(expanded) {
   document.getElementById('volcengineAgentToggle')?.setAttribute('aria-expanded', next ? 'true' : 'false');
   document.getElementById('volcengineAgentDetails')?.classList.toggle('hidden', !next);
   document.getElementById('volcengineAgentPanel')?.classList.toggle('expanded', next);
-}
-
-
-async function renderCopilotAccounts() {
-  if (!isSettingsSurfaceVisible()) return;
-  const list = document.getElementById('copilotAccountList');
-  if (!list) return;
-  const isCurrent = accountProfileRequests.begin('copilot');
-  try {
-    const accounts = await window.tokenMonitor.copilot.getAccounts();
-    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
-    const readings = localProviderStatuses('copilot');
-    const readingFor = account => localProviderStatuses('copilot').find(row => account.accountKey
-      ? row.accountKey === account.accountKey
-      : !accounts.some(other => other.accountKey === row.accountKey));
-    const nameFor = account => account.accountName || readingFor(account)?.accountName || t('settings.copilot.title');
-    const updateInfo = (account, info) => {
-      info.textContent = apiKeyAccountStatusText('copilot', readingFor(account), true, account.external ? 'env' : 'settings',
-        account.enabled && limitProviderEnabled('copilot'));
-    };
-    if (accounts.length > 1 && limitProviderEnabled('copilot')) {
-      accountShellApi.render({ status: document.getElementById('copilotApiTokenStatus'),
-        statusText: t('settings.opencode.connected', {
-          linked: accounts.filter(account => account.enabled && readings.some(row => row.accountKey === account.accountKey && row.status === 'ok')).length,
-          total: accounts.length
-        }) });
-    }
-    const signature = JSON.stringify([accounts, state.settings?.locale, state.settings?.language]);
-    if (list.dataset.accountSignature === signature) {
-      for (const row of list.children) {
-        const account = accounts.find(account => account.id === row.dataset.accountId);
-        if (account) {
-          const name = nameFor(account);
-          row.querySelector('.managed-account-email').textContent = name;
-          const toggle = row.querySelector('.managed-account-checkbox');
-          if (toggle) {
-            toggle.checked = account.enabled;
-            toggle.setAttribute('aria-label', name);
-          }
-          row.querySelector('.confirming')?.setAttribute('aria-label', t('settings.profiles.deleteConfirm', { name }));
-          updateInfo(account, row.querySelector('.managed-account-info'));
-        }
-      }
-      return;
-    }
-    list.dataset.accountSignature = signature;
-    list.replaceChildren();
-    for (const account of accounts) {
-      const name = nameFor(account);
-      const row = document.createElement('div');
-      row.className = 'managed-account-row';
-      row.dataset.accountId = account.id;
-      row.classList.toggle('disabled', !account.enabled);
-      const label = document.createElement('span');
-      label.className = 'managed-account-main managed-account-email';
-      if (!account.external) {
-        const toggle = document.createElement('input');
-        toggle.type = 'checkbox';
-        toggle.className = 'managed-account-checkbox';
-        toggle.checked = account.enabled;
-        toggle.setAttribute('aria-label', name);
-        toggle.addEventListener('change', () => mutate(toggle, () => window.tokenMonitor.copilot.setEnabled(account.id, toggle.checked)));
-        row.append(toggle);
-      } else {
-        row.append(document.createElement('span'));
-      }
-      label.textContent = name;
-      const actions = document.createElement('span');
-      actions.className = 'managed-account-right';
-      const info = document.createElement('span');
-      info.className = 'managed-account-info';
-      updateInfo(account, info);
-      const refresh = document.createElement('button');
-      refresh.className = 'managed-account-remove';
-      refresh.setAttribute('aria-label', t('settings.common.refresh'));
-      refresh.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13 6a5.2 5.2 0 1 0 .2 3M13 2v4H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-      refresh.disabled = !account.enabled;
-      refresh.addEventListener('click', () => mutate(refresh, () => window.tokenMonitor.limits.refresh('copilot', readingFor(account) || account)));
-      actions.append(info, refresh);
-      if (!account.external) {
-        const remove = document.createElement('button');
-        remove.className = 'managed-account-remove';
-        remove.textContent = '✕';
-        remove.setAttribute('aria-label', t('settings.copilot.logout'));
-        let confirming = false;
-        remove.addEventListener('click', () => {
-          if (!confirming) {
-            confirming = true;
-            remove.textContent = '✓';
-            remove.classList.add('confirming');
-            remove.setAttribute('aria-label', t('settings.profiles.deleteConfirm', { name: nameFor(account) }));
-            return;
-          }
-          return mutate(remove, () => window.tokenMonitor.copilot.removeAccount(account.id));
-        });
-        actions.append(remove);
-      }
-      row.append(label, actions);
-      list.append(row);
-    }
-  } catch (error) {
-    if (isCurrent()) {
-      state.copilotErrorMessage = error.message;
-      accountShellApi.render({ error: document.getElementById('copilotErrorMessage'), errorText: error.message });
-    }
-  }
-  async function mutate(button, action) {
-    await accountProfileSaves.run('copilot', button, async () => {
-      try {
-        const result = await action();
-        if (!result?.ok) throw new Error(result?.error || t('settings.copilot.loginFailed'));
-        state.copilotErrorMessage = '';
-        await refreshStats();
-      } catch (error) { state.copilotErrorMessage = error.message; }
-      renderCopilotStatus();
-    });
-  }
-}
-
-function renderCopilotStatus() {
-  const statusEl = document.getElementById('copilotApiTokenStatus');
-  const signInBtn = document.getElementById('copilotSignInButton');
-  const cancelBtn = document.getElementById('copilotCancelSignInButton');
-  const refreshBtn = document.getElementById('copilotRefreshButton');
-  const manualPanel = document.getElementById('copilotManualPanel');
-  const loginStatusEl = document.getElementById('copilotLoginStatus');
-  const errorEl = document.getElementById('copilotErrorMessage');
-  if (!statusEl || !signInBtn || !cancelBtn || !refreshBtn || !manualPanel || !loginStatusEl || !errorEl) return;
-
-  const source = state.settings?.copilotApiTokenSource || '';
-  const provider = copilotProviderForAccount();
-  const configured = Boolean(state.settings?.copilotApiTokenConfigured);
-  const enabled = limitProviderEnabled('copilot');
-  const linked = copilotAccountLinked();
-  accountShellApi.render({
-    status: statusEl,
-    statusText: copilotAccountStatusText(provider, configured, source, enabled),
-    error: errorEl,
-    errorText: state.copilotErrorMessage,
-    progress: loginStatusEl,
-    progressText: state.copilotLoginStatus
-  });
-  manualPanel.classList.remove('hidden');
-  signInBtn.classList.toggle('hidden', state.copilotSignInBusy);
-  cancelBtn.classList.toggle('hidden', !state.copilotSignInBusy || !state.copilotSignInCancelable);
-  refreshBtn.classList.toggle('hidden', !configured || (state.copilotSignInBusy && !linked));
-  void renderCopilotAccounts();
-  renderSettingsSummaries();
 }
 
 

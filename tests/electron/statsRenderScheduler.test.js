@@ -294,8 +294,7 @@ test('a stats update repaints main and the visible Settings overlay', () => {
     'updateOpenRouterProfilesStatus', 'updateMinimaxApiKeysStatus',
     'updateThirdPartyProfilesStatus',
     'renderDeepseekStatus',
-    'renderMinimaxStatus',
-    'renderCopilotStatus'
+    'renderMinimaxStatus'
   ];
   const context = {
     visibleStatsSurface: () => 'main',
