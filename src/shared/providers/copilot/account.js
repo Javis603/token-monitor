@@ -4,7 +4,7 @@
 // GitHub Copilot limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'copilot',
-  fetch: 'fetchCopilotAccountLimits',
+  fetch: 'fetchCopilotLimits',
   accountSlots: true,
   serverAccountKey: 'isCopilotServerAccountKey',
   dedupeAccounts: true,
@@ -13,6 +13,12 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
     { id: 'oauth', kind: 'oauth', relation: 'single', labelKey: 'settings.limits.sources.oauth', descriptionKey: 'settings.limits.sources.oauthDescription' }
   ],
   accountRefresh: true,
+  accountStatus: ({ settings, env, limits }) => {
+    const stored = Object.keys(limits.copilotProfiles(settings, env)).length > 0;
+    const environment = Boolean(limits.copilotToken(env));
+    return { copilotApiTokenConfigured: stored || environment,
+      copilotApiTokenSource: stored ? 'settings' : environment ? 'env' : '' };
+  },
   fields: [
     { key: 'copilotProfiles', kind: 'setting', rendererOmit: true, config: false, watch: false,
       storePath: ['providers', 'copilot', 'profiles'], configDefault: {}, persist: 'never' },

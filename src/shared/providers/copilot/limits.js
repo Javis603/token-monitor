@@ -361,6 +361,8 @@ function retireCopilotFallbacks(rows, accounts, options) {
 }
 
 async function fetchCopilotLimits(options = {}, deps = {}) {
+  if (deps.copilotLegacyAccountKey) return fetchCopilotAccountLimits({ ...options,
+    accountKey: deps.copilotLegacyAccountKey, accountName: deps.copilotLegacyAccountName }, deps);
   const scope = options.limitRefreshScope?.provider === 'copilot' ? options.limitRefreshScope : null;
   const configured = configuredCopilotAccounts(options, deps);
   const scopedKey = account => scope?.accountKey === copilotAccountKey(account.token, account.enterpriseHost) ? scope.accountKey : '';
@@ -373,8 +375,14 @@ async function fetchCopilotLimits(options = {}, deps = {}) {
     const rows = retireCopilotFallbacks([row], configured, options);
     return rows.length === 1 ? row : rows;
   }
-  const accounts = configured.filter(account => account.enabled
-    && (!scope?.accountKey || !account.accountKey || account.accountKey === scope.accountKey));
+  const seenCredentials = new Set();
+  const accounts = configured.filter(account => {
+    if (!account.enabled || (scope?.accountKey && account.accountKey && account.accountKey !== scope.accountKey)) return false;
+    const fingerprint = copilotAccountKey(account.token, account.enterpriseHost);
+    if (seenCredentials.has(fingerprint)) return false;
+    seenCredentials.add(fingerprint);
+    return true;
+  });
   const rows = await Promise.all(accounts.map(account => fetchCopilotAccountLimits({
     copilotApiToken: account.token, copilotEnterpriseHost: account.enterpriseHost,
     accountKey: account.accountKey || scopedKey(account), accountName: account.accountName, sourceDetail: 'managed'
@@ -402,7 +410,7 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
   // credential's failure to the previous account.
   const runtimeState = deps.providerRuntimeState;
   const fingerprint = hashKey('copilot-credential', normalizedEnterpriseHost(enterpriseHost), token);
-  const previous = runtimeState?.get('copilot:legacy-identity');
+  const previous = runtimeState?.get(`copilot:legacy-identity:${fingerprint}`);
   const remembered = previous?.fingerprint === fingerprint ? previous : null;
 
   if (!token) {
@@ -423,7 +431,7 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
     const login = String(identity.login || '').trim();
     const accountSeed = login || (identity.id != null ? String(identity.id) : '');
     if (!options.accountKey && accountSeed) {
-      runtimeState?.set('copilot:legacy-identity', {
+      runtimeState?.set(`copilot:legacy-identity:${fingerprint}`, {
         fingerprint, accountKey: copilotAccountKey(accountSeed, enterpriseHost), accountName: login
       });
     }
@@ -440,7 +448,9 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
     if (deps.signal?.aborted) throw deps.signal.reason;
     return normalizeLimitProvider({
       provider: 'copilot',
-      accountKey: options.accountKey || remembered?.accountKey || copilotAccountKey(token, enterpriseHost),
+      // The slot dispatcher owns the saved identity when the server cannot
+      // answer; a token hash must not replace that identity on a failed call.
+      accountKey: options.accountKey || remembered?.accountKey || (deps.accountSlotSaved ? '' : copilotAccountKey(token, enterpriseHost)),
       accountName: options.accountName || remembered?.accountName || '',
       source: 'api',
       sourceDetail: deps.accountSlotSaved ? 'managed' : options.sourceDetail,

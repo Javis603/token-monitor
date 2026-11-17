@@ -606,6 +606,7 @@ let seededClientSplitsPending = false;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
 let openrouterSlotsMigrated = false;
+let copilotSlotsMigrated = false;
 let credentialStorageErrorShown = false;
 let antigravityOAuthLoginController = null;
 const sessionUsageArchiveStore = createSessionUsageArchiveStore({ cursorUsageEvents: createCursorUsageEventIndex() });
@@ -964,6 +965,7 @@ function electronLimitsConfig() {
   return limitsConfigFromSettings(settings, {
     env: process.env,
     openrouterSlotsMigrated,
+    copilotSlotsMigrated,
     workbuddyDesktopSessionOnly: true,
     workbuddyDesktopSessionSupported,
     workbuddyDesktopSessionEnabled,
@@ -2692,6 +2694,7 @@ function loadCredentialSettings(saved) {
       stored = store.settingsCredentials();
     }
     openrouterSlotsMigrated = Number(store.readDocument().migrations.accountSlots?.openrouter || 0) >= 1;
+    copilotSlotsMigrated = Number(store.readDocument().migrations.accountSlots?.copilot || 0) >= 1;
     for (const entry of LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots)) {
       for (const field of entry.fields.filter(field => field.kind === 'credential')) saved[field.key] = '';
       delete saved[`${entry.id}DefaultAccountIdentity`];

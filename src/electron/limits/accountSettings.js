@@ -216,6 +216,10 @@ function limitsAccountConfig(settings = {}, context = {}) {
     out.openrouterProfiles = settings.openrouterProfiles;
   }
   if (context.openrouterSlotsMigrated) out.openrouterApiKey = '';
+  if (!context.copilotSlotsMigrated && Object.keys(settings.copilotProfiles || {}).length) {
+    out.copilotProfiles = settings.copilotProfiles;
+  }
+  if (context.copilotSlotsMigrated) out.copilotApiToken = '';
   return out;
 }
 

@@ -107,7 +107,17 @@ function slotAccounts(entry, options, deps) {
   const legacyAccounts = legacy.filter((/** @type {any} */ account) => !slots.some(slot => slot.enabled && slot.accountKey === hashKey(entry.id, account.apiKey)))
     .map((/** @type {any} */ account) => describe({ id: `legacy-${hashKey(entry.id, account.apiKey)}`, label: account.name,
       values: { openrouterApiKey: account.apiKey }, accountKey: hashKey(entry.id, account.apiKey), accountKeyAliases: [] }));
-  const all = [...ambient, ...(hasAccountCredential(entry, values) ? [describe({ id: 'environment', label: '', values: null, accountKey: '', accountKeyAliases: [] })] : []), ...enabled, ...legacyAccounts];
+  // Copilot's old map is read-only migration input. Preserve its saved keys
+  // and effective hosts, including an unmatched fixed token, until verified.
+  const copilotLegacy = entry.id === 'copilot' ? entry.limits?.configuredCopilotAccounts(options, { env: {} }) || [] : [];
+  const copilotAccounts = copilotLegacy.filter((/** @type {any} */ account) => account.enabled
+    && !slots.some(slot => slot.enabled && slot.values.copilotApiToken === account.token
+      && entry.limits?.normalizedEnterpriseHost(slot.values.copilotEnterpriseHost) === account.enterpriseHost))
+    .map((/** @type {any} */ account) => ({ ...describe({ id: `legacy-${entry.limits?.copilotAccountKey(account.token, account.enterpriseHost)}`, label: '',
+      values: { copilotApiToken: account.token, copilotEnterpriseHost: account.enterpriseHost },
+      accountKey: account.accountKey || entry.limits?.copilotAccountKey(account.token, account.enterpriseHost), accountKeyAliases: [], serverIdentity: Boolean(account.accountKey) }),
+      fetchDeps: { copilotLegacyAccountKey: account.accountKey, copilotLegacyAccountName: account.accountName } }));
+  const all = [...ambient, ...(!copilotLegacy.length && hasAccountCredential(entry, values) ? [describe({ id: 'environment', label: '', values: null, accountKey: '', accountKeyAliases: [] })] : []), ...enabled, ...legacyAccounts, ...copilotAccounts];
   // A key one account moved away from may be another account's key now; it is
   // that account's identity, not an alias of this one.
   const current = new Set(all.map((account) => account.accountKey));

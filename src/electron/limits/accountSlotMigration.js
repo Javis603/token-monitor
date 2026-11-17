@@ -144,10 +144,20 @@ function migrateOpenRouterSlots(store, stored, document, mark, now) {
 }
 function migrateCopilotSlots(store, stored, settings, document, mark, now, env) {
   const entry = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === 'copilot');
-  const profiles = entry.limits.copilotProfiles({ ...settings, ...stored }, env);
+  // Keep the fixed-token ID independent of the remaining profile names: a
+  // bounded import can strip a profile named "legacy" before the next retry.
+  const profiles = entry.limits.copilotProfiles({ ...settings, ...stored, copilotApiToken: '' }, env);
+  const fixed = entry.limits.copilotToken({}, stored);
+  const fixedCovered = fixed && Object.values(profiles).some(profile => profile.token === fixed);
+  const sources = Object.entries(profiles).map(([id, profile]) => [hashKey('copilot', 'legacy-profile', id).slice(7), profile]);
+  const fixedId = hashKey('copilot', 'legacy-fixed-token').slice(7);
+  if (fixed && !fixedCovered) sources.push([fixedId, {
+    token: fixed, enabled: true, accountKey: '',
+    enterpriseHost: entry.limits.normalizedEnterpriseHost(settings.copilotEnterpriseHost || env.COPILOT_ENTERPRISE_HOST || env.GITHUB_ENTERPRISE_HOST)
+  }]);
   const timestamp = new Date(now()).toISOString();
-  const imports = Object.entries(profiles).map(([id, profile]) => ({
-    id: hashKey('copilot', 'legacy-profile', id).slice(7), label: '', enabled: profile.enabled,
+  const imports = sources.map(([id, profile]) => ({
+    id, label: '', enabled: profile.enabled,
     values: { copilotApiToken: profile.token, copilotEnterpriseHost: profile.enterpriseHost },
     accountKey: profile.accountKey || entry.limits.copilotAccountKey(profile.token, profile.enterpriseHost),
     accountKeyAliases: [], serverIdentity: Boolean(profile.accountKey), createdAt: timestamp, updatedAt: timestamp
@@ -155,9 +165,10 @@ function migrateCopilotSlots(store, stored, settings, document, mark, now, env) 
   const raw = stored.copilotAccountSlots || [];
   const slots = normalizeAccountSlots(entry, raw);
   if (raw.length !== slots.length) throw new Error('Invalid account slot list');
-  const next = [...imports.filter(item => !slots.some(slot => slot.id === item.id)), ...slots];
-  if (next.length > 21) throw new Error('Account slot limit prevents migration');
-  for (const item of imports) {
+  const additions = imports.filter(item => !slots.some(slot => slot.id === item.id));
+  const next = [...slots, ...additions.slice(0, 21 - slots.length)];
+  const imported = imports.filter(item => next.some(slot => slot.id === item.id));
+  for (const item of imported) {
     const slot = next.find(slot => slot.id === item.id);
     if (slot.accountKey !== item.accountKey || slot.enabled !== item.enabled || !isDeepStrictEqual(slot.values, item.values)) throw new Error('Copilot import conflicts with existing slot');
   }
@@ -167,9 +178,13 @@ function migrateCopilotSlots(store, stored, settings, document, mark, now, env) 
     stored = store.settingsCredentials(document);
     if (!isDeepStrictEqual(stored.copilotAccountSlots, next)) throw new Error('Account slot migration verification failed');
   }
-  stored.copilotProfiles = {};
-  stored.copilotApiToken = '';
+  const importedIds = new Set(imported.map(item => item.id));
+  stored.copilotProfiles = Object.fromEntries(Object.entries(profiles).filter(([id]) =>
+    !importedIds.has(hashKey('copilot', 'legacy-profile', id).slice(7))));
+  if (!fixed || fixedCovered || importedIds.has(fixedId)) stored.copilotApiToken = '';
+  const pending = Object.keys(stored.copilotProfiles).length > 0 || Boolean(stored.copilotApiToken);
+  if (pending) console.warn('[Copilot] Account list is full. Remaining legacy accounts continue collecting; remove saved accounts and restart to import them.');
   stored.copilotDefaultAccountIdentity = null;
-  store.replaceSettingsCredentials(stored, mark(document));
+  store.replaceSettingsCredentials(stored, pending ? document : mark(document));
 }
 module.exports = { migrateAccountSlots };
