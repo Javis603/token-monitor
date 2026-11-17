@@ -47,7 +47,7 @@ test('actual main plugin persistence rolls back failed consent and does not noti
   let writes = 0, pushes = 0, failed = true;
   const error = new Error('injected rename failure');
   const context = { settings: structuredClone(saved), persistedSettingsSnapshot: structuredClone(saved), normalizePluginStates,
-    ensureCredentialStore: () => ({}), settingsPath: '/unused',
+    migrateAccountSlots: () => ({}), LIMIT_PROVIDER_REGISTRY: [], ensureCredentialStore: () => ({}), settingsPath: '/unused',
     persistSettingsAndCredentials: () => { writes++; if (failed) throw error; },
     refreshTrayContextMenu() {}, reportCredentialStorageError() {}, pushSettingsToRenderer: () => pushes++ };
   vm.createContext(context);

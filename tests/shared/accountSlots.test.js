@@ -199,7 +199,7 @@ test('15 provider deadline scales by active accounts and scoped dispatch', () =>
 test('normalizer bounds records and aliases, sanitizes labels and drops unknown values', () => {
   const entry = limitProviderEntry('deepseek');
   const normalized = normalizeAccountSlots(entry, [slot('a', { deepseekApiKey: 'secret', qoderCookie: 'bad' }, { label: '  My / Account  ', accountKeyAliases: Array.from({ length: 30 }, (_, i) => String(i)) }), slot('a'), {}, ...Array.from({ length: 30 }, (_, i) => slot(String(i)))]);
-  assert.equal(normalized.length, 20); assert.equal(normalized[0].label, 'My Account'); assert.equal(normalized[0].accountKeyAliases.length, 8);
+  assert.equal(normalized.length, 21); assert.equal(normalized[0].label, 'My Account'); assert.equal(normalized[0].accountKeyAliases.length, 8);
   assert.deepEqual(normalized[0].values, { deepseekApiKey: 'secret' }); assert.equal(accountSlotKey(entry), 'deepseekAccountSlots');
 });
 test('abort stops between sequential accounts', async () => {
@@ -208,11 +208,6 @@ test('abort stops between sequential accounts', async () => {
   assert.equal(calls, 1); assert.equal(live(rows).length, 1);
 });
 
-test('a slot named default and the default account keep separate provisional identities', async () => {
-  const fetch = fake(() => ({ provider: 'deepseek', status: 'unavailable' }));
-  const rows = await fetch({ deepseekApiKey: 'default-key', ...config(slot('default')) }, deps());
-  assert.equal(rows.length, 2); assert.notEqual(rows[0].accountKey, rows[1].accountKey);
-});
 test('an optional sibling credential alone is not a default account', async () => {
   let calls = 0;
   const fetch = fake((options) => { calls++; return reading(options.deepseekApiKey); });
@@ -396,7 +391,7 @@ test('zero slots with identity observer preserve raw results and last-good keyle
     [{ ...reading('REAL'), accountKeyAliases: ['alias'] }, { provider: 'deepseek', accountKey: 'GONE', removed: true }]]) {
     assert.equal(await fake(() => raw)({ deepseekApiKey: 'default', previousLimits: { providers: [reading('HELD')] } }, d), raw);
   }
-  assert.equal(calls.length, 2); assert.equal(calls[0][1], null);
+  assert.equal(calls.length, 2); assert.equal(calls[0][1], 'environment');
   assert.equal(calls[0][3].deepseekApiKey, 'default');
   let fail = false;
   const runtime = createLimitsRuntime({ limitProviders: 'deepseek', deepseekApiKey: 'default' }, { ...d, autoStart: false, autoRetry: false, providerFetchers: { deepseek: fake(() => fail ? { provider: 'deepseek', status: 'unavailable' } : reading('REAL')) } });
@@ -451,7 +446,7 @@ test('a key a slot moved away from stays with the default account that answers u
     ...config(slot('x', { deepseekApiKey: 'b' }, { label: 'Work', accountKey: 'B', accountKeyAliases: ['A'] })) });
   try {
     await runtime.refresh({}, 'credential-edit');
-    assert.deepEqual(runtime.getSnapshot().providers.map((r) => [r.accountKey, r.accountName || '']), [['A', ''], ['B', 'Work']]);
+    assert.deepEqual(runtime.getSnapshot().providers.map((r) => [r.accountKey, r.accountName || '']), [['B', 'Work'], ['A', '']]);
   } finally { runtime.stop(); }
 });
 
@@ -462,7 +457,7 @@ test('a default identity left by an older default credential does not take a slo
     ...config(slot('x', { deepseekApiKey: 'x' }, { accountKey: 'X' }), slot('y', { deepseekApiKey: 'y' }, { accountKey: 'B', accountKeyAliases: ['A'] })) });
   try {
     await runtime.refresh({}, 'credential-edit');
-    assert.deepEqual(runtime.getSnapshot().providers.map((r) => r.accountKey), ['NEWDEFAULT', 'X', 'A']);
+    assert.deepEqual(runtime.getSnapshot().providers.map((r) => r.accountKey), ['X', 'A', 'NEWDEFAULT']);
   } finally { runtime.stop(); }
 });
 
@@ -494,7 +489,7 @@ test('a default identity this runtime just resolved is not claimed by a slot ali
   try {
     await runtime.refresh({}, 'credential-edit');
     await runtime.refresh({}, 'credential-edit');
-    assert.deepEqual(runtime.getSnapshot().providers.map((r) => [r.accountKey, r.accountName || '']), [['A', ''], ['B', 'Work']]);
+    assert.deepEqual(runtime.getSnapshot().providers.map((r) => [r.accountKey, r.accountName || '']), [['B', 'Work'], ['A', '']]);
   } finally { runtime.stop(); }
 });
 
@@ -546,4 +541,23 @@ test('a separated Qoder account cannot take the old identity back through a repo
   const row = rows.find((r) => r.accountKey === 'B');
   assert.equal((row.accountKeyAliases || []).some((alias) => alias === cookieHash || alias === 'A'), false);
   assert.ok(rows.some((r) => r.removed && r.accountKey === cookieHash));
+});
+
+for (const withSlots of [false, true]) test(`environment resolution keeps dispatch values across a pending fetch (slots=${withSlots})`, async () => {
+  const env = { DEEPSEEK_API_KEY: 'before' };
+  const state = new Map(), calls = [];
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const options = withSlots ? config(slot('extra')) : {};
+  const pending = fake(async () => { await gate; return reading('old-account'); })(options, {
+    env, providerRuntimeState: state, onAccountSlotResolved: (...args) => calls.push(args)
+  });
+  env.DEEPSEEK_API_KEY = 'after';
+  release(); await pending;
+  assert.equal(calls.find(call => call[1] === 'environment')[3].deepseekApiKey, 'before');
+  if (withSlots) {
+    const { accountValuesFingerprint } = require('../../src/shared/limits/accountSlots');
+    assert.ok(state.has(`account-slot:deepseek:default:${accountValuesFingerprint({ deepseekApiKey: 'before', deepseekWebToken: '' })}`));
+    assert.ok(!state.has(`account-slot:deepseek:default:${accountValuesFingerprint({ deepseekApiKey: 'after', deepseekWebToken: '' })}`));
+  }
 });

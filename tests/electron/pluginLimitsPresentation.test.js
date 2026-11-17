@@ -117,7 +117,7 @@ test('display preview reuses retained module identity and balances without colle
 test('renderer Tray picker retains inactive source labels while the desktop readings omit that module', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const state = { stats: base(), pluginCatalog: { plugins: [{ id: 'sample-plugin', status: 'disabled', limits: [{ id: 'credits', name: 'API pool' }] }], limits: { modules: [], providers: [reading] } } };
-  const context = vm.createContext({ state, LIMIT_PROVIDERS: [{ id: 'claude', label: 'Claude' }], trayLayoutApi: tray,
+  const context = vm.createContext({ state, accountSlotLists: {}, window: { TokenMonitorAccountSlotsPanel: require('../../src/electron/renderer/limits/accountSlotsPanel') }, LIMIT_PROVIDERS: [{ id: 'claude', label: 'Claude' }], trayLayoutApi: tray,
     t: key => key, trayComposerProviderIcon: () => '' });
   for (const name of ['pluginLimitMetadata', 'desktopLimitProviders', 'desktopLimitRecords', 'desktopSurfaceStats', 'trayComposerProviderChoices']) {
     vm.runInContext(source.match(new RegExp(`function ${name}\\([^]*?\\n}`))[0], context);

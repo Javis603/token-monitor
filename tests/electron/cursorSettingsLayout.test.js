@@ -1194,7 +1194,7 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   const app = readRendererFile('app.js');
   const statusBody = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
   assert.match(statusBody, /const canClearConfiguredCredential = source === 'settings' && configured;/);
-  assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked\)/);
+  assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked && !limitAccountForm\(providerName\)\?\.accountSlots\)/);
   assert.match(statusBody, /logoutBtn\.classList\.toggle\('hidden', !canClearConfiguredCredential\)/);
 
   // The cookie is checked in main before it can replace a working one: a paste
@@ -1409,7 +1409,7 @@ test('Factory account form keeps its setup copy and validates before saving', ()
   const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
   assert.match(preload, /saveCredential: \(providerId, values\) => ipcRenderer\.invoke\('limits:saveCredential', providerId, values\)/);
   assert.match(preload, /clearCredential: \(providerId\) => ipcRenderer\.invoke\('limits:clearCredential', providerId\)/);
-  assert.match(main, /ipcMain\.handle\('limits:saveCredential', \(_event, providerId, values\) => credentialCommands\.saveCredential\(providerId, values\)\)/);
+  assert.match(main, /ipcMain\.handle\('limits:saveCredential', \(_event, providerId, values\) => .*credentialCommands\.saveCredential\(providerId, values\)\)/);
   assert.match(main, /ipcMain\.handle\('limits:clearCredential', \(_event, providerId\) => credentialCommands\.clearCredential\(providerId\)\)/);
   assert.doesNotMatch(main + preload, /limits:validateCredential|validateLimitCredential/);
   assert.equal(normalizeAccountField('factoryApiKey', ' " fk-live " '), 'fk-live');

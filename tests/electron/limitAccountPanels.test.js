@@ -474,7 +474,7 @@ test('shared account actions reuse credential settings invalidation and collect 
       let commands;
       const host = {
         console: { log() {} },
-        settingsForRenderer: () => ({ limitAccountForms: [form] }),
+        settingsForRenderer: () => ({ limitAccountForms: [{ ...form, accountSlots: false }] }),
         applySettingsPatch: (patch, _onDots, limitContext) => {
           const previous = settings;
           commands.noteSettingsPatch(patch);
@@ -501,7 +501,7 @@ test('shared account actions reuse credential settings invalidation and collect 
       let statsReads = 0;
       let cutoff;
       const context = {
-        state: { settings: { limitAccountForms: [form] }, accountPanelMessages: {} },
+        state: { settings: { limitAccountForms: [{ ...form, accountSlots: false }] }, accountPanelMessages: {} },
         LIMIT_PROVIDERS: [{ id: 'ollama', label: 'Ollama' }],
         document: { getElementById: (id) => id === 'accountsSettingsDetails' ? { insertBefore() {} } : null },
         window: { tokenMonitor: { limits: {
@@ -645,7 +645,7 @@ test('account setting errors are reported through the persistent panel message',
   const renders = [];
   let callbacks;
   const context = {
-    state: { settings: { limitAccountForms: [form] } },
+    state: { settings: { limitAccountForms: [{ ...form, accountSlots: false }] } },
     document: { getElementById: (id) => id === 'accountsSettingsDetails' ? { insertBefore() {} } : null },
     limitAccountPanelsApi: { createCredentialPanel: (_, received) => { callbacks = received; return {}; } },
     LIMIT_PROVIDERS: [{ id: 'deepseek' }],

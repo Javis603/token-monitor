@@ -112,8 +112,8 @@
   // `isWindowHidden(providerId, window)` drops the rows the user unchecked on
   // the provider's usage-item list. It runs after the MiMo plan is synthesized,
   // so hiding the plan hides the placeholder built from the balance as well.
-  function homeLimitAccounts(accounts, limit = 3, { sort = 'remaining', isWindowHidden = null } = {}) {
-    return (accounts || [])
+  function homeLimitAccounts(accounts, limit = 3, { sort = 'remaining', isWindowHidden = null, orderedAccountProviders = [] } = {}) {
+    const rows = (accounts || [])
       .map((account, index) => {
         const providerId = String(account?.providerId || '').trim().toLowerCase();
         const windows = accountWindows(account)
@@ -167,8 +167,15 @@
       .filter(Boolean)
       .sort((a, b) => sort === 'configured'
         ? a.index - b.index
-        : a.lowestRemaining - b.lowestRemaining || a.index - b.index)
-      .slice(0, Math.max(0, Number(limit) || 0))
+        : a.lowestRemaining - b.lowestRemaining || a.index - b.index);
+    // Retain the quota sort's provider positions, but fill each slot provider's
+    // positions in input order before applying the card limit.
+    for (const id of orderedAccountProviders) {
+      const positions = rows.flatMap((row, index) => row.providerId === id ? [index] : []);
+      const ordered = positions.map(index => rows[index]).sort((a, b) => a.index - b.index);
+      positions.forEach((position, index) => { rows[position] = ordered[index]; });
+    }
+    return rows.slice(0, Math.max(0, Number(limit) || 0))
       .map(({ index: _index, ...account }) => account);
   }
 
@@ -255,6 +262,7 @@
     colors = {},
     limit = 3,
     sort = 'remaining',
+    orderedAccountProviders = [],
     accountName,
     accountPlan,
     accountColor,
@@ -284,7 +292,7 @@
         });
       });
     }
-    return homeLimitAccounts(accounts, limit, { sort, isWindowHidden });
+    return homeLimitAccounts(accounts, limit, { sort, isWindowHidden, orderedAccountProviders });
   }
 
   // True when at least one enabled, unhidden limit provider has no entry yet in

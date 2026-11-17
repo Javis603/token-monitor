@@ -34,6 +34,7 @@ test('the main settings IPC projection hides provider secrets while retaining co
     secrets.push(value);
     settings[key] = value;
   }
+  settings.deepseekAccountSlots = [{ id: 'migrated', values: { deepseekApiKey: 'fixture' } }];
   settings.icloudWriterId = 'private-writer-id';
   settings.icloudRetiredDeviceIds = ['private-retired-device'];
   settings.syncContentState = { privateCleanupState: true };

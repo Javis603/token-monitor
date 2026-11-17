@@ -152,7 +152,7 @@ test('credential saves and clears wait for persistence and propagate storage fai
         let settled = false;
         const result = operation === 'save'
           ? api.saveCredential('deepseek', { deepseekApiKey: 'sk-draft' })
-          : api.clearCredential('deepseek');
+          : api.clearCredential('kimi');
         void result.then(() => { settled = true; }, () => { settled = true; });
         await entered.promise;
         await new Promise((resolve) => setImmediate(resolve));
@@ -635,4 +635,10 @@ test('OpenDesign cookie saves probe the workspace and quota, reject expired sess
   const c = commands({ answer: () => { throw new Error('malformed draft must not probe'); } });
   assert.equal((await c.api.saveCredential('opendesign', { opendesignCookie: 'bare-token' })).saved, false);
   assert.deepEqual(c.patches, []);
+});
+
+for (const id of ['qoder', 'deepseek']) test(`legacy clear refuses ${id} account slots without a settings write`, async () => {
+  const { api, patches } = commands({ settings: { [`${id}AccountSlots`]: [{ id: 'migrated', values: {} }] } });
+  assert.deepEqual(await api.clearCredential(id), { cleared: false, errorCode: 'accountSlotRequired' });
+  assert.deepEqual(patches, []);
 });
