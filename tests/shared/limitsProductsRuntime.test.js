@@ -170,3 +170,37 @@ for (const variant of variants) for (const settingOverride of [false, true]) {
     assert.deepEqual(result.map(item => item.region), [variant]);
   });
 }
+
+for (const variant of variants) for (const operation of ['remove', 'pause']) for (const settingOverride of [false, true]) {
+  test(`Alibaba ${operation} preserves environment-owned ${variant} quota (${settingOverride ? 'settings' : 'env'})`, async () => {
+    const { limitProviderEntry } = require('../../src/shared/limits/registry');
+    const { createAccountSlotFetcher } = require('../../src/shared/limits/accountSlotFetcher');
+    const entry = limitProviderEntry('alibaba');
+    let unavailable = false;
+    const sibling = variant === 'cn' ? 'intl' : 'cn';
+    const env = { ALIBABA_TOKEN_PLAN_COOKIE: 'session=environment', ALIBABA_TOKEN_PLAN_VARIANT: settingOverride ? sibling : variant };
+    const fetcher = createAccountSlotFetcher({ ...entry, fetchLimits: async (options, deps) => {
+      const region = entry.limits.alibabaVariant(options, deps.env);
+      return { ...row(region, region === variant ? 25 : 60), ...(unavailable ? { status: 'unavailable', windows: [] } : {}) };
+    } });
+    const duplicate = { id: 'duplicate', accountKey: 'same-uid', enabled: true, values: { alibabaCookie: 'session=duplicate', alibabaVariant: variant } };
+    const other = { id: 'other', accountKey: 'same-uid', enabled: true, values: { alibabaCookie: 'session=other', alibabaVariant: sibling } };
+    const rt = createLimitsRuntime({ limitProviders: ['alibaba'], alibabaSourcePreference: 'web',
+      ...(settingOverride ? { alibabaVariant: variant } : {}), alibabaAccountSlots: [duplicate, other] }, {
+      autoStart: false, autoRetry: false, env,
+      probeProvider: (_provider, options, context, deps) => fetcher(options, { ...deps, signal: context.signal })
+    });
+    try {
+      await rt.refresh();
+      assert.equal(rt.getSnapshot().providers.length, 2);
+      rt.reconfigure({ alibabaAccountSlots: operation === 'remove' ? [other] : [{ ...duplicate, enabled: false }, other] });
+      const retained = () => rt.getSnapshot().providers.find(reading => reading.region === variant);
+      assert.equal(retained()?.windows[0]?.usedPercent, 25, 'environment ownership preserves quota immediately');
+      unavailable = true;
+      await rt.refresh();
+      assert.equal(retained()?.windows[0]?.usedPercent, 25, 'a failed refresh retains the environment quota');
+      assert.equal(retained()?.status, 'unavailable');
+      assert.equal(rt.getSnapshot().providers.find(reading => reading.region === sibling)?.windows[0]?.usedPercent, 60);
+    } finally { rt.stop(); }
+  });
+}

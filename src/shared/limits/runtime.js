@@ -1043,7 +1043,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       const describe = options => normalizeAccountSlots(alibaba, options[accountSlotKey(alibaba)]).map(slot => ({ ...slot,
         accountKey: providerRuntimeState.get(`account-slot:alibaba:slot:${slot.id}:${accountValuesFingerprint(slot.values)}`)?.accountKey || slot.accountKey }));
       const environmentKey = providerRuntimeState.get(`account-slot:alibaba:default:${accountValuesFingerprint(defaultAccountValues(alibaba, config, deps.env || process.env))}`)?.accountKey;
-      const environment = environmentKey ? { accountKey: environmentKey, region: config.alibabaVariant || 'cn' } : null;
+      const environment = environmentKey ? { accountKey: environmentKey, region: alibaba.limits.alibabaVariant(config, deps.env || process.env) } : null;
       for (const scope of alibabaRetiredVariantScopes(describe(previousConfig), describe(config), environment)) clear(scope, 'settings-change');
     }
     enabled = parseBoolean(config.limitsEnabled ?? config.enabled, true);
