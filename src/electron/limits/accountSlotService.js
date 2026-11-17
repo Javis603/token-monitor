@@ -282,9 +282,12 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
   function sourcePresentationPatch(entry, group) {
     const patch = {};
     const metadata = { ...(getSettings()[`${entry.id}AmbientAccounts`] || {}) };
-    for (const row of ordered(entry).filter(row => row.source)) {
+    const rows = ordered(entry);
+    const canonicalKeys = new Set(rows.map(row => row.accountKey));
+    for (const row of rows.filter(row => row.source)) {
       const keys = [row.accountKey, ...(row.accountKeyAliases || [])];
-      const labelKey = keys.find(key => Object.hasOwn(group.labels || {}, key));
+      const labelKey = [row.accountKey, ...(row.accountKeyAliases || []).filter(key => !canonicalKeys.has(key))]
+        .find(key => Object.hasOwn(group.labels || {}, key));
       const canonical = (group.order || []).indexOf(row.accountKey);
       const order = canonical >= 0 ? canonical : (group.order || []).findIndex(key => keys.includes(key));
       if (row.source === 'discovered') metadata[row.fingerprint] = { ...metadata[row.fingerprint],

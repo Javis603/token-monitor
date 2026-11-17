@@ -495,3 +495,25 @@ test('multi-account signal keeps remembered discovered canonical identity', t =>
   options.factoryAccountSlots[0].accountKey = 'different-server';
   assert.deepEqual(configuredMultiAccountProviders([entry], options, {}), ['factory']);
 });
+
+
+test('discovered shared labels use retired aliases without taking another account name', async t => {
+  const values = { clineApiKey: 'discovered-B' };
+  const fingerprint = accountValuesFingerprint(values);
+  stubDiscovery(t, 'cline', () => [{ values, accountKey: 'canonical-b', sourceName: 'Cline' }]);
+  let settings = {
+    clineAccountSlots: [{ id: 'saved-a', values: { clineApiKey: 'saved-A' }, accountKey: 'canonical-a', label: 'A' }],
+    clineAmbientAccounts: { [fingerprint]: { accountKey: 'canonical-b', accountKeyAliases: ['canonical-a', 'retired-b'], label: 'B', enabled: false } }
+  };
+  const service = createAccountSlotService({ getSettings: () => settings, env: {}, probeDeps: () => ({}), write: async patch => { settings = { ...settings, ...patch }; } });
+  const adopt = labels => service.adoptSharedLabels({ cline: { labels, order: [] } });
+  await adopt({ 'canonical-a': 'Remote A' });
+  assert.equal(settings.clineAccountSlots[0].label, 'Remote A');
+  assert.equal(settings.clineAmbientAccounts[fingerprint].label, 'B');
+  await adopt({ 'canonical-a': 'Remote A', 'retired-b': 'Remote B' });
+  assert.equal(settings.clineAmbientAccounts[fingerprint].label, 'Remote B');
+  await adopt({ 'retired-b': '' });
+  assert.equal(settings.clineAmbientAccounts[fingerprint].label, '');
+  await adopt({ 'canonical-b': 'Current B', 'retired-b': 'Old B' });
+  assert.equal(settings.clineAmbientAccounts[fingerprint].label, 'Current B');
+});
