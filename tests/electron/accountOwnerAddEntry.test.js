@@ -191,3 +191,42 @@ test('OpenCode saved profile named ambient remains distinct from the detected ke
   await [...rows.find(row=>row.dataset.slotId==='ambient').walk()].find(node=>node.dataset.slotAction==='pause').click();
   assert.deepEqual(toggles,[['saved','ambient',false]]);
 });
+
+
+test('Codex cancelled add result clears progress before a delayed cancel reply', async () => {
+  let finishAdd, finishCancel;
+  const h = harness('codex', {
+    addAccount: () => new Promise(resolve => { finishAdd = resolve; }),
+    cancelLogin: () => new Promise(resolve => { finishCancel = resolve; })
+  });
+  h.owner.setup(); await flush();
+  const adding = h.add().click();
+  h.owner.state.codexLoginOutput = 'Waiting for browser';
+  h.owner.state.codexAccountError = 'Previous error';
+  h.nodes.codexLoginDetails.open = true;
+  const cancelling = h.nodes.codexCancelLoginButton.click();
+  finishAdd({ ok: false, outcome: 'cancelled' }); await adding;
+  assert.equal(h.nodes.codexLoginStatus.textContent, '');
+  assert.equal(h.nodes.codexLoginOutput.textContent, '');
+  assert.equal(h.owner.state.codexAccountError, '');
+  assert.equal(h.nodes.codexLoginDetails.open, false);
+  assert.equal(h.add().disabled, false);
+  const retry = h.add().click();
+  const retryFlow = h.owner.state.codexSignInFlowId;
+  finishCancel({ ok: true, cancelled: true }); await cancelling;
+  assert.equal(h.owner.state.codexSignInFlowId, retryFlow);
+  assert.equal(h.add().disabled, true);
+  finishAdd({ ok: false, outcome: 'cancelled' }); await retry;
+});
+
+test('Cursor initial discovery failure keeps the shared manual-login footer reachable', async () => {
+  const h = harness('cursor', { status: async () => { throw new Error('discovery unavailable'); } });
+  h.owner.setup(); await flush();
+  assert.ok(h.add());
+  assert.equal(h.add().disabled, false);
+  await h.add().click();
+  assert.equal(h.nodes.cursorManualDetails.classList.contains('hidden'), false);
+  h.owner.state.cursorAccount = { error: 'discovery unavailable', busy: false, status: { accounts: [], managementBlocked: true } };
+  await h.render();
+  assert.equal(h.add().disabled, true, 'a known external-agent gate still blocks management on error');
+});

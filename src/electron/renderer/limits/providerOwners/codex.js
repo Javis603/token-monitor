@@ -115,7 +115,13 @@ async function startCodexLogin() {
     const result = await window.tokenMonitor.codex.addAccount({ flowId });
     if (!isCurrentCodexSignInFlow(result?.flowId || flowId)) return;
     if (!result?.ok) {
-      if (result?.outcome === 'cancelled') return;
+      if (result?.outcome === 'cancelled') {
+        state.codexLoginStatus = '';
+        state.codexLoginOutput = '';
+        state.codexAccountError = '';
+        if (codexLoginDetails) codexLoginDetails.open = false;
+        return;
+      }
       state.codexAccountError = result?.error || t('settings.codex.loginFailed');
       state.codexLoginStatus = t('settings.codex.loginFailed');
       if (codexLoginDetails && state.codexLoginOutput) codexLoginDetails.open = true;

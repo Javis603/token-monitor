@@ -111,6 +111,13 @@ function claudeWebSettingsAccounts(providers) {
   return accounts;
 }
 
+function claudeAutomaticAccounts(providers, accounts) {
+  return automaticAccounts.accountsFromReadings('claude', providers, {
+    represented: accounts, localDeviceId: host.getAccountContext().localDeviceId, label: host.providerLabel || 'Claude',
+    sourceName: reading => t(`settings.limits.sources.${reading.source}`)
+  });
+}
+
 function claudeAccountStatusText(fallback, enabled) {
   const providers = (host.strictLocalProviderStatuses || localProviderStatuses)('claude');
   const accounts = claudeWebSettingsAccounts(providers);
@@ -119,12 +126,13 @@ function claudeAccountStatusText(fallback, enabled) {
   const identities = new Map();
   for (const account of accounts) {
     const key = account.accountKey || `managed:${account.id}`;
-    const linked = enabled && account.enabled !== false
-      && providers.some((provider) => provider.accountKey && provider.accountKey === account.accountKey && provider.status === 'ok');
+    const reading = window.TokenMonitorLegacyAccountList.readingFor(account, providers);
+    const linked = enabled && account.enabled !== false && reading?.status === 'ok';
     identities.set(key, identities.get(key) === true || linked);
   }
-  for (const provider of providers) {
-    if (!provider.accountKey || provider.source === 'web' || provider.status === 'notConfigured') continue;
+  for (const account of claudeAutomaticAccounts(providers, accounts)) {
+    const provider = account.observation;
+    if (!provider.accountKey) continue;
     identities.set(provider.accountKey, identities.get(provider.accountKey) === true || (enabled && provider.status === 'ok'));
   }
   return identities.size ? t('settings.opencode.connected', {
@@ -137,10 +145,7 @@ function renderClaudeWebAccounts() {
   if (!list) return;
   const providers = (host.strictLocalProviderStatuses || localProviderStatuses)('claude');
   const accounts = claudeWebSettingsAccounts(providers);
-  const automatic = automaticAccounts.accountsFromReadings('claude', providers, {
-    represented: accounts, localDeviceId: host.getAccountContext().localDeviceId, label: host.providerLabel || 'Claude',
-    sourceName: reading => t(`settings.limits.sources.${reading.source}`)
-  });
+  const automatic = claudeAutomaticAccounts(providers, accounts);
   if (!accountList) {
     const container = document.createElement('div');
     list.prepend(container);

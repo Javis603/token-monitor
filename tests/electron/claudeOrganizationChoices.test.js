@@ -103,7 +103,8 @@ test('Claude card counts healthy identities instead of letting one linked accoun
     { accountKey: 'a', source: 'oauth', status: 'ok' }
   ];
   const context = claudeOwner.create({ initial: {}, getSettings: () => state.settings, accountShellApi, localProviderStatuses: () => providers,
-    t: (_key, { linked, total }) => `${linked}/${total}` });
+    getAccountContext: () => ({ settings: state.settings }), window: { TokenMonitorLegacyAccountList: legacyList },
+    t: (key, params) => key === 'settings.opencode.connected' ? `${params.linked}/${params.total}` : key });
   assert.equal(context.claudeAccountStatusText('fallback', true), '1/4');
   assert.equal(context.claudeAccountStatusText('fallback', false), '0/4');
   providers.push({ accountKey: 'local', source: 'oauth', status: 'ok' });

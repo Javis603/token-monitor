@@ -96,7 +96,7 @@
           const label = labelKey ? presentation.labels[labelKey] : account.label || '';
           return { ...account, accountKey, accountKeyAliases: aliases,
             accountEmail: account.accountEmail || account.email, enabled: account.enabled !== false,
-            fingerprint: account.id, label, accountName: account.accountName || account.email || account.accountEmail || account.id };
+            fingerprint: account.id, label, accountName: account.accountName || (account.email || account.accountEmail ? '' : account.id) };
         });
         list.update(accounts, readings, { ...context, presentation: context.settings?.limitAccountPresentation?.[provider] || {} });
       }

@@ -145,6 +145,11 @@ test('Claude combines Web management with strict local OAuth/CLI rows without du
   assert.match(automaticRow.textContent, /Connected/);
   assert.deepEqual(actions(automaticRow).map(node => node.dataset.slotAction), ['rename', 'up', 'down']);
   assert.equal(container.querySelector('.slot-add').classList.contains('hidden'), false, 'Web add entry remains visible');
+  assert.equal(owner.claudeAccountStatusText('', true), t('settings.opencode.connected', { linked: 2, total: 2 }), 'summary counts the same resolved identities as the local rows');
+  settings.claudeManagedAccounts[0].enabled = false;
+  assert.equal(owner.claudeAccountStatusText('', true), t('settings.opencode.connected', { linked: 1, total: 2 }));
+  assert.equal(owner.claudeAccountStatusText('', false), t('settings.opencode.connected', { linked: 0, total: 2 }));
+  settings.claudeManagedAccounts[0].enabled = true;
   assert.equal(allRows[2].querySelector('.slot-status').textContent, `● ${t('settings.slots.connected')}`, 'remote OAuth keeps its own status');
   assert.ok(actions(allRows[0]).some(node => node.dataset.slotAction === 'remove'), 'saved Web controls remain reachable');
   local.length = 0;
@@ -196,4 +201,33 @@ test('canonical success takes precedence over an earlier failed alias reading', 
   const list = legacy.create({document, provider:'opencode',container,t,bridge:{},getContext:()=>({settings:{}}),preserveScroll:fn=>fn(),changed(){},refresh(){}});
   list.update([{id:'saved',accountKey:'fallback'}], [reading('fallback',{status:'unauthorized'}),reading('canonical',{accountKeyAliases:['fallback'],status:'ok'})]);
   assert.match(rows(container)[0].querySelector('.slot-status').className,/connected/);
+});
+
+
+test('automatic alias cycles preserve every identity while acyclic chains collapse to their root', () => {
+  const cycle = [reading('a', { accountKeyAliases: ['c'] }), reading('b', { accountKeyAliases: ['a'] }), reading('c', { accountKeyAliases: ['b'] })];
+  for (const input of [cycle, [...cycle].reverse()]) {
+    assert.deepEqual(automatic.accountsFromReadings('grok', input).map(row => row.accountKey).sort(), ['a', 'b', 'c']);
+  }
+  const chain = [reading('a'), reading('b', { accountKeyAliases: ['a'] }), reading('c', { accountKeyAliases: ['b'] })];
+  assert.deepEqual(automatic.accountsFromReadings('grok', chain).map(row => row.accountKey), ['c']);
+});
+
+for (const emailField of ['email', 'accountEmail']) test(`legacy ${emailField} stays masked without a successful quota reading`, () => {
+  const document = createDocument(), container = document.createElement('div'); document.root.append(container);
+  const settings = { maskLimitAccountEmails: true };
+  const list = legacy.create({ document, provider: 'codex', container, t, bridge: {},
+    getContext: () => ({ settings }), preserveScroll: fn => fn(), changed() {}, refresh() {} });
+  const account = { id: 'saved', accountKey: 'key', [emailField]: 'person@example.com' };
+  for (const readings of [[], [reading('key', { status: 'unauthorized' })]]) {
+    list.update([account], readings);
+    assert.match(rows(container)[0].querySelector('.slot-name').textContent, /p\*\*\*@example.com/);
+    assert.doesNotMatch(rows(container)[0].textContent, /person@example.com/);
+  }
+  settings.maskLimitAccountEmails = false;
+  list.update([account], []);
+  assert.equal(rows(container)[0].querySelector('.slot-name').textContent, 'person@example.com');
+  settings.maskLimitAccountEmails = true;
+  list.update([{ ...account, accountName: 'Work' }], []);
+  assert.equal(rows(container)[0].querySelector('.slot-name').textContent, 'Work');
 });

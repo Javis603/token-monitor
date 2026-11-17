@@ -36,8 +36,20 @@
     }
     const accounts = [...keyed.values(), ...local.filter(row => !row.accountKey)].filter(row => {
       if (!row.accountKey) return true;
-      const owners = claims.get(row.accountKey) || [];
-      if (owners.length === 1 && !(row.accountKeyAliases || []).includes(owners[0])) return false;
+      // Only collapse a chain that reaches one unambiguous canonical root.
+      // A cycle of any length cannot establish which identity supersedes another.
+      const visited = new Set();
+      let key = row.accountKey;
+      while (!visited.has(key)) {
+        visited.add(key);
+        const owners = claims.get(key) || [];
+        if (!owners.length) {
+          if (key !== row.accountKey) return false;
+          break;
+        }
+        if (owners.length !== 1) break;
+        key = owners[0];
+      }
       if (represented.some(account => account.accountKey === row.accountKey)) return false;
       const linked = represented.filter(account => {
         const resolvesSaved = row.accountKeyAliases?.includes(account.accountKey);

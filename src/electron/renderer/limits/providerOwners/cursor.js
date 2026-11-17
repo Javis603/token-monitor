@@ -33,32 +33,9 @@ function renderCursorStatus() {
       : accountShellErrors.cursor || ''
   });
 
-  if (state.cursorAccount.error) {
-    setCursorStatusText(statusEl, t('settings.common.error'));
-    setCursorCheckboxesEnabled(Boolean(state.cursorAccount.status?.accounts?.length));
-    setSettingsSectionExpanded('limits', true);
-    setCursorAccountExpanded(true);
-    renderSettingsSummaries();
-    return;
-  }
-
   const status = state.cursorAccount.status;
-  if (!status) {
-    setCursorStatusText(statusEl, t('settings.common.checking'));
-    renderSettingsSummaries();
-    return;
-  }
-
-  const accounts = Array.isArray(status.accounts) ? status.accounts : [];
-  const managementBlocked = status.managementBlocked === true;
-  document.getElementById('cursorAgentActiveNote')?.classList.toggle('hidden', !managementBlocked);
-  const addButton = document.getElementById('cursorAddAccountButton');
-  if (addButton) addButton.disabled = managementBlocked;
-  const summary = accounts.length === 0
-    ? t('settings.cursor.notLoggedIn')
-    : t('settings.cursor.connected', { linked: status.linkedCount || 0, total: accounts.length });
-  setCursorStatusText(statusEl, summary);
-  setCursorCheckboxesEnabled(accounts.some((account) => !account.expired && !account.error));
+  const accounts = Array.isArray(status?.accounts) ? status.accounts : [];
+  const managementBlocked = status?.managementBlocked === true;
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
     document, provider: 'cursor', label: host.providerLabel || 'Cursor',
     add: () => setCursorManualExpanded(document.getElementById('cursorManualDetails')?.classList.contains('hidden')), container: listEl, t, bridge: window.tokenMonitor,
@@ -68,6 +45,30 @@ function renderCursorStatus() {
     changed: result => { if (result.status) { statusRevision++; state.cursorAccount = { status: result.status, error: "", busy: false }; } }, refresh: refreshCursorStatus, busy: () => state.cursorAccount.busy || state.cursorAccount.status?.managementBlocked
   });
   accountList.update(accounts.map(account => ({ ...account, canPause: !managementBlocked, removable: account.removable === true && !managementBlocked })), host.localProviderStatuses('cursor'));
+
+  if (state.cursorAccount.error) {
+    setCursorStatusText(statusEl, t('settings.common.error'));
+    setCursorCheckboxesEnabled(Boolean(state.cursorAccount.status?.accounts?.length));
+    setSettingsSectionExpanded('limits', true);
+    setCursorAccountExpanded(true);
+    renderSettingsSummaries();
+    return;
+  }
+
+  if (!status) {
+    setCursorStatusText(statusEl, t('settings.common.checking'));
+    renderSettingsSummaries();
+    return;
+  }
+
+  document.getElementById('cursorAgentActiveNote')?.classList.toggle('hidden', !managementBlocked);
+  const addButton = document.getElementById('cursorAddAccountButton');
+  if (addButton) addButton.disabled = managementBlocked;
+  const summary = accounts.length === 0
+    ? t('settings.cursor.notLoggedIn')
+    : t('settings.cursor.connected', { linked: status.linkedCount || 0, total: accounts.length });
+  setCursorStatusText(statusEl, summary);
+  setCursorCheckboxesEnabled(accounts.some((account) => !account.expired && !account.error));
   renderSettingsSummaries();
 }
 
