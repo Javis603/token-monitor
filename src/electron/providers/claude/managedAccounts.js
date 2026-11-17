@@ -199,7 +199,23 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
     });
   }
 
-  return { accounts, saveAccount, removeAccount: (id) => mutateAccount(id),
+  function renewCookie({ accountId, previousCookie, cookie } = {}) {
+    if (accountId) return renew({ accountId, previousCookie, cookie });
+    if (!getSettings()?.claudeWebCookie) return false;
+    let expected;
+    let renewed;
+    try {
+      expected = normalizeClaudeWebCookieInput(previousCookie);
+      renewed = normalizeClaudeWebCookieInput(cookie);
+    } catch (_) { return false; }
+    if (!renewed || normalizeClaudeWebCookieInput(getSettings().claudeWebCookie) !== expected) return false;
+    if (getSettings().claudeWebCookie === renewed) return true;
+    setSettings({ ...getSettings(), claudeWebCookie: renewed });
+    saveSettings({ throwOnError: true });
+    return true;
+  }
+
+  return { renewCookie, accounts, saveAccount, removeAccount: (id) => mutateAccount(id),
     setAccountEnabled: (id, enabled) => typeof enabled === 'boolean'
       ? mutateAccount(id, enabled) : Promise.resolve({ ok: false, errorCode: 'invalidEnabled' }),
     resolveCredential, renew, resolved, legacyAccount, loginStatuses };

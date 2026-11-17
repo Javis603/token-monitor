@@ -5,6 +5,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 
+function readAccountOwnersAndMain() {
+  const owners = ['codex', 'antigravity', 'mimo', 'cursor', 'opencode', 'thirdparty'];
+  return owners.map(id => fs.readFileSync(path.join(__dirname, '../../src/electron/providers', id, 'accountService.js'), 'utf8')).join('\n')
+    + '\n' + fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+}
+
+
 const root = path.join(__dirname, '..', '..');
 const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
@@ -50,7 +57,7 @@ test('Antigravity settings manage quota accounts without exposing a local accoun
 });
 
 test('Antigravity OAuth credentials remain in the main-process credential store', () => {
-  const main = read('src/electron/main.js');
+  const main = readAccountOwnersAndMain();
   const credentials = read('src/shared/credentialStore.js');
 
   assert.match(credentials, /readAntigravityCredential\(id/);
@@ -72,7 +79,7 @@ test('Antigravity OAuth credentials remain in the main-process credential store'
 });
 
 test('Antigravity account mutations rely on centralized settings rollback', () => {
-  const main = read('src/electron/main.js');
+  const main = readAccountOwnersAndMain();
   const antigravityHandlers = main.slice(
     main.indexOf('async function addAntigravityManagedAccount()'),
     main.indexOf('function normalizeMimoManagedAccounts(value)')

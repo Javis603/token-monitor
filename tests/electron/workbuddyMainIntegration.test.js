@@ -9,7 +9,7 @@ const oauth = require('../../src/shared/providers/workbuddy/oauth');
 const { createWorkbuddyManagedAccounts } = require('../../src/electron/providers/workbuddy/managedAccounts');
 const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
 const start = source.indexOf('let workbuddyManagedAccountService = null;');
-const end = source.indexOf('function antigravityAccountsForRenderer()', start);
+const end = source.indexOf('function pushCodexActiveAccountToRenderer(', start);
 
 function harness() {
   const account = oauth.normalizeManagedAccounts([{ id: 'managed', realm: 'cn', userId: 'fixture', accountName: 'Fixture' }])[0];
