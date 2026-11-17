@@ -17,6 +17,7 @@ function harness(provider, overrides = {}) {
   for (const id of ids) {
     const node = document.createElement('div'); node.id = id; node.options = []; nodes[id] = node;
     node.before = child => node.parentElement.insertBefore(child, node);
+    node.appendChild = child => { node.append(child); return child; };
     if (/Details$/.test(id)) node.classList.add('hidden');
     document.root.append(node);
   }
@@ -128,4 +129,65 @@ test('Cursor external-agent gate disables the common add footer', async () => {
   assert.equal(h.add().disabled, true);
   await h.add().click();
   assert.equal(h.nodes.cursorManualDetails.classList.contains('hidden'), true);
+});
+
+test('third-party editing clears another profile draft credentials and restores only selected metadata', async () => {
+  const h = harness('thirdparty', { getProfiles: async () => ({ profiles: { selected: { adapter: 'sub2api', baseUrl: 'https://selected.example', canonicalAccountKey: 'selected-key' } } }) });
+  await h.render();
+  for (const field of ['AccessToken', 'RefreshToken', 'ApiKey', 'UserId']) h.nodes[`thirdparty${field}Input`].value = 'other-profile-draft';
+  await [...h.document.root.walk()].find(node => node.dataset.slotAction === 'replaceKey').click();
+  for (const field of ['AccessToken', 'RefreshToken', 'ApiKey', 'UserId']) assert.equal(h.nodes[`thirdparty${field}Input`].value, '', field);
+});
+test('Cursor discovery response cannot replace a newer successful manual login', async () => {
+  let finish;
+  const h = harness('cursor', { status: () => new Promise(resolve => { finish = resolve; }), loginManual: async () => ({ ok: true, status: { accounts: [{ id: 'fresh', accountKey: 'fresh' }] } }) });
+  h.owner.setup();
+  h.nodes.cursorManualInput.value = 'new-login';
+  await h.nodes.cursorManualSubmit.click();
+  finish({ accounts: [{ id: 'stale', accountKey: 'stale' }] }); await flush();
+  assert.equal(h.owner.state.cursorAccount.status.accounts[0].id, 'fresh');
+});
+test('Antigravity cancel waits for the original add request before permitting a retry', async () => {
+  let finish;
+  const h = harness('antigravity', { addAccount: () => new Promise(resolve => { finish = resolve; }) });
+  h.owner.setup(); await flush();
+  const pending = h.add().click();
+  await h.nodes.antigravityCancelLoginButton.click();
+  assert.equal(h.add().disabled, true);
+  finish({ ok: false, errorCode: 'cancelled' }); await pending;
+  assert.equal(h.add().disabled, false);
+});
+test('MiMo preserves a newer draft entered while refreshing saved accounts', async () => {
+  let refresh;
+  const h = harness('mimo', { addAccount: async () => ({ ok: true }) });
+  h.owner.setup(); await flush();
+  h.api.accounts = () => new Promise(resolve => { refresh = resolve; });
+  await h.add().click();
+  h.nodes.mimoCookieInput.value = 'draft-a';
+  const saving = h.nodes.mimoSaveAccountButton.click(); await flush();
+  h.nodes.mimoCookieInput.value = 'draft-b';
+  refresh([]); await saving;
+  assert.equal(h.nodes.mimoCookieInput.value, 'draft-b');
+  assert.equal(h.nodes.mimoAddDetails.classList.contains('hidden'), false);
+});
+test('WorkBuddy shared row mutation blocks sign-in until the account update settles', async () => {
+  let finish;
+  const h = harness('workbuddy', { setAccountEnabled: () => new Promise(resolve => { finish = resolve; }) });
+  h.settings.workbuddyManagedAccounts = [{ id: 'a', accountKey: 'a', enabled: true }];
+  await h.render();
+  const pause = [...h.document.root.walk()].find(node => node.dataset.slotAction === 'pause').click(); await flush();
+  await h.owner.startWorkbuddyLogin('cn');
+  assert.equal(h.calls.length, 0);
+  finish({ ok: true, accounts: [{ id: 'a', accountKey: 'a', enabled: false }] }); await pause;
+  assert.equal(h.settings.workbuddyManagedAccounts[0].enabled, false);
+});
+test('OpenCode saved profile named ambient remains distinct from the detected key', async () => {
+  const toggles = [];
+  const h = harness('opencode', { getProfiles: async () => ({ profiles: { ambient: { accountKey: 'saved', enabled: true } }, hasAmbientKey: true, ambientAccountKey: 'detected' }),
+    setProfileEnabled: async (id,value) => { toggles.push(['saved',id,value]); return {ok:true}; }, setAmbientEnabled: async value => {toggles.push(['ambient',value]);return {ok:true};} });
+  await h.render();
+  const rows = [...h.document.root.walk()].filter(node=>node.classList.contains('slot-row'));
+  assert.equal(rows.length,2);
+  await [...rows.find(row=>row.dataset.slotId==='ambient').walk()].find(node=>node.dataset.slotAction==='pause').click();
+  assert.deepEqual(toggles,[['saved','ambient',false]]);
 });

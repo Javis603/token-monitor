@@ -112,7 +112,7 @@ function setup() {
 
     document.getElementById('antigravityCancelLoginButton').addEventListener('click', async () => {
       await window.tokenMonitor.antigravity.cancelLogin();
-      state.antigravitySignInBusy = false;
+      // The add request owns busy until its cancellation and cleanup settle.
       renderAntigravityStatus();
     });
   }

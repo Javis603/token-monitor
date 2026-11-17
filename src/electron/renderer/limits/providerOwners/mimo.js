@@ -137,7 +137,7 @@ function setup() {
       state.mimoAccountError = '';
       state.settings.mimoManagedAccounts = await window.tokenMonitor.mimo.accounts();
       renderMimoStatus();
-      if (unchanged) setMimoAddExpanded(false);
+      if (unchanged && input.value === '') setMimoAddExpanded(false);
       await refreshStats({ force: true });
     });
   }

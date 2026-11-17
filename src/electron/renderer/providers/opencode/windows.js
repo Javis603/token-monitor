@@ -62,7 +62,7 @@
   }
 
   /** @param {any} provider @param {any} index @returns {any} */ function opencodeAccountTitle(provider, index) {
-    const name = String(provider?.accountName || '').trim();
+    const name = String(provider?.accountDisplayName || provider?.accountName || '').trim();
     // The collector's canonical name is shown as-is. This column holds account
     // names, which are user strings and almost never translated, so a localized
     // phrase reads as a stray UI label among them — and the plan and source

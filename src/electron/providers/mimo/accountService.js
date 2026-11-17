@@ -111,17 +111,21 @@ function createMimoAccountService(deps) {
       return { ok: false, errorCode };
     }
     result.account.accountEmail = String(validation.accountEmail || '').trim().slice(0, 254);
+    const currentAccounts = normalizeMimoManagedAccounts(getMimoManagedAccounts());
+    const current = currentAccounts.find(account => account.accountKey === result.account.accountKey);
+    if (current) result.account = { ...current, ...result.account, id: current.id, addedAt: current.addedAt, accountLabel: current.accountLabel };
     const previousCookie = readMimoCredential(result.account.id);
     const credentialStored = writeMimoCredential(result.account.id, result.account.cookieHeader);
     delete result.account.cookieHeader;
     if (!credentialStored) return { ok: false, errorCode: 'credentialStorageUnavailable' };
     setMimoManagedAccounts(normalizeMimoManagedAccounts([
-      ...accounts.filter((account) => account.accountKey !== result.account.accountKey),
+      ...currentAccounts.filter((account) => account.accountKey !== result.account.accountKey),
       result.account
     ]));
     try {
       saveSettings({ throwOnError: true });
     } catch (_) {
+      setMimoManagedAccounts(currentAccounts);
       if (previousCookie) writeMimoCredential(result.account.id, previousCookie);
       else removeMimoCredential(result.account.id);
       return { ok: false, errorCode: 'credentialStorageUnavailable' };

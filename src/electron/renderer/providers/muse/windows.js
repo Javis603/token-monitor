@@ -32,6 +32,7 @@
   /** @param {any} provider @param {any} color @param {any} windows @returns {any} */ function renderWindows(provider, color, windows) { renderGenericWindows(provider, color, windows, { appendCredits }); }
 
   /** @param {any} provider @param {any} index @param {any} providers @returns {any} */ function museSourceTitle(provider, index, providers = [provider]) {
+    if (provider?.accountDisplayName) return provider.accountDisplayName;
     const title = provider?.source === 'cli' ? 'Muse Code' : provider?.source === 'web' ? 'Muse' : '';
     if (!title) return limitAccountDefaultTitle(provider, index, providers);
     if (providers.filter(/** @param {any} row @returns {any} */ (row) => row.source === provider.source).length < 2) return title;

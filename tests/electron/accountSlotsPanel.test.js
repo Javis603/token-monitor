@@ -933,7 +933,7 @@ test('remote rows share the list with device labels and presentation-only menu c
   h.panel.update(h.slots, [], context);
   assert.equal(h.row('remote:owned'), undefined);
   assert.equal(h.row('remote:unknown-local'), undefined);
-  const row = h.row('remote:r1');
+  const row = h.row('remote:other:r1');
   assert.match(row.textContent, /Remote One.*Office Mac/);
   assert.match(row.textContent, /Connected/);
   const menu = row.querySelector('.plugin-menu');
@@ -945,7 +945,7 @@ test('remote rows share the list with device labels and presentation-only menu c
   await row.querySelector('.slot-rename').key('Enter');
   assert.deepEqual(h.calls, [['presentation', 'qoder', 'r1', 'order', ['default', 'ka', 'kb', 'r2', 'r1']], ['presentation', 'qoder', 'r1', 'rename', 'Renamed remote']]);
   assert.equal(h.panel.element.querySelector('.slot-remote-list'), undefined);
-  assert.deepEqual(h.panel.element.querySelector('.slot-list').children.filter(n => n.dataset.slotId).map(n => n.dataset.slotId), ['remote:r2', 'remote:r1', 'default', 'a', 'b']);
+  assert.deepEqual(h.panel.element.querySelector('.slot-list').children.filter(n => n.dataset.slotId).map(n => n.dataset.slotId), ['remote:other:r2', 'remote:other:r1', 'default', 'a', 'b']);
 });
 
 test('shared presentation names and ordering reach desktop titles including local owners', () => {
@@ -979,7 +979,7 @@ test('remote drag crosses local rows and publishes the full known order', () => 
   const context = remoteFixture();
   h.panel.update(h.slots, [], context); h.layout();
   h.ipc.presentation = async (...args) => { h.calls.push(['presentation', ...args]); return { ok: true }; };
-  h.press('remote:r2'); h.emit('pointermove', -100); h.emit('pointerup', -100); await h.flush();
+  h.press('remote:other:r2'); h.emit('pointermove', -100); h.emit('pointerup', -100); await h.flush();
   assert.deepEqual(h.calls, [['presentation', 'qoder', 'r2', 'order', ['r2', 'default', 'ka', 'kb', 'r1']]]);
   assert.deepEqual(h.slots.map(slot => slot.id), ['default', 'a', 'b']);
 }));
@@ -988,11 +988,11 @@ test('a changed remote account set during drag does not persist the stale drop',
   const context = remoteFixture();
   h.panel.update(h.slots, [], context); h.layout();
   h.ipc.presentation = async (...args) => { h.calls.push(args); return { ok: true }; };
-  h.press('remote:r2'); h.emit('pointermove', -100);
+  h.press('remote:other:r2'); h.emit('pointermove', -100);
   h.panel.update(h.slots, [], { ...context, records: context.records.filter(row => row.accountKey !== 'r1') });
   h.emit('pointerup', -100); await h.flush();
   assert.deepEqual(h.calls, []);
-  assert.equal(h.row('remote:r1'), undefined);
+  assert.equal(h.row('remote:other:r1'), undefined);
 }));
 
 test('renderer desktop records project remote presentation for Limits and Home consumers', () => {
@@ -1017,22 +1017,22 @@ for (const action of ['menu', 'Alt']) test(`pending remote drag save blocks ${ac
     h.calls.push(['presentation', ...args]);
     return new Promise(resolve => { finish = () => resolve({ ok: true, accounts: h.slots, presentation: { qoder: { order: args[3] } } }); });
   };
-  const attempt = () => action === 'menu' ? h.click(h.row('remote:r2'), 'Move down') : h.row('remote:r2').key('ArrowDown', true);
-  h.press('remote:r2'); h.emit('pointermove', -100); h.emit('pointerup', -100);
+  const attempt = () => action === 'menu' ? h.click(h.row('remote:other:r2'), 'Move down') : h.row('remote:other:r2').key('ArrowDown', true);
+  h.press('remote:other:r2'); h.emit('pointermove', -100); h.emit('pointerup', -100);
   attempt();
-  h.press('remote:r1');
+  h.press('remote:other:r1');
   assert.equal(h.listeners.has('pointermove'), false, 'lock covers the deferred save before paint');
   await h.flush();
   attempt();
-  h.press('remote:r1');
+  h.press('remote:other:r1');
   assert.equal(h.listeners.has('pointermove'), false);
-  const buttons = h.row('remote:r2').querySelector('.plugin-menu').children.filter(n => n.textContent === 'Move up' || n.textContent === 'Move down');
+  const buttons = h.row('remote:other:r2').querySelector('.plugin-menu').children.filter(n => n.textContent === 'Move up' || n.textContent === 'Move down');
   assert.ok(buttons.every(n => n.disabled));
   h.panel.update(h.slots, [], context);
   attempt();
   finish(); await h.flush();
   assert.deepEqual(h.calls, [['presentation', 'qoder', 'r2', 'order', ['r2', 'default', 'ka', 'kb', 'r1']]]);
-  h.press('remote:r1');
+  h.press('remote:other:r1');
   assert.equal(h.listeners.has('pointermove'), true, 'remote drag unlocks');
   h.emit('pointercancel', 0);
 }));
@@ -1041,19 +1041,19 @@ for (const action of ['move', 'rename']) test(`pending remote ${action} presenta
   h.panel.update(h.slots, [], remoteFixture());
   let finish;
   h.ipc.presentation = (...args) => { h.calls.push(args); return new Promise(resolve => { finish = () => resolve({ ok: true }); }); };
-  if (action === 'move') h.click(h.row('remote:r1'), 'Move down');
+  if (action === 'move') h.click(h.row('remote:other:r1'), 'Move down');
   else {
-    h.click(h.row('remote:r1'), 'Rename');
-    const input = h.row('remote:r1').querySelector('.slot-rename');
+    h.click(h.row('remote:other:r1'), 'Rename');
+    const input = h.row('remote:other:r1').querySelector('.slot-rename');
     input.value = 'Remote name'; input.key('Enter'); input.key('Escape');
   }
-  h.row('remote:r2').key('ArrowUp', true);
-  h.press('remote:r2');
+  h.row('remote:other:r2').key('ArrowUp', true);
+  h.press('remote:other:r2');
   assert.equal(h.listeners.has('pointermove'), false);
   await h.flush();
   finish(); await h.flush();
   assert.equal(h.calls.length, 1, 'no stale step was queued');
-  h.press('remote:r2');
+  h.press('remote:other:r2');
   assert.equal(h.listeners.has('pointermove'), true);
   h.emit('pointercancel', 0);
 }));
@@ -1066,12 +1066,12 @@ for (const failure of ['rejected', 'thrown']) test(`failed remote drag save rest
     return { ok: false };
   };
   const order = () => h.panel.element.querySelector('.slot-list').children.filter(n => n.dataset.slotId).map(n => n.dataset.slotId);
-  h.press('remote:r2'); h.emit('pointermove', -100); h.emit('pointerup', -100);
-  assert.deepEqual(order(), ['remote:r2', 'default', 'a', 'b', 'remote:r1']);
+  h.press('remote:other:r2'); h.emit('pointermove', -100); h.emit('pointerup', -100);
+  assert.deepEqual(order(), ['remote:other:r2', 'default', 'a', 'b', 'remote:other:r1']);
   await h.flush();
-  assert.deepEqual(order(), ['default', 'a', 'b', 'remote:r1', 'remote:r2']);
+  assert.deepEqual(order(), ['default', 'a', 'b', 'remote:other:r1', 'remote:other:r2']);
   assert.equal(h.panel.element.querySelector('.slot-message').textContent, t('settings.slots.failed'));
-  h.press('remote:r2');
+  h.press('remote:other:r2');
   assert.equal(h.listeners.has('pointermove'), true);
   h.emit('pointercancel', 0);
 }));
@@ -1080,13 +1080,13 @@ test('a remote drop that a push already put in place releases its save lock', ()
   const context = remoteFixture();
   h.panel.update(h.slots, [], context); h.layout();
   h.ipc.presentation = async (...args) => { h.calls.push(['presentation', ...args]); return { ok: true }; };
-  h.press('remote:r2'); h.emit('pointermove', -100);
+  h.press('remote:other:r2'); h.emit('pointermove', -100);
   // A stats push reorders the aggregate so r2 already sits where it is dropped.
   const [r1, r2, ...rest] = context.records;
   h.panel.update(h.slots, [], { ...context, records: [r2, r1, ...rest], presentation: { order: ['r2', 'default', 'ka', 'kb', 'r1'] } });
   h.emit('pointerup', -100); await h.flush();
   assert.deepEqual(h.calls, [], 'nothing to save for a zero-step drop');
-  await h.click(h.row('remote:r2'), 'Move down'); await h.flush();
+  await h.click(h.row('remote:other:r2'), 'Move down'); await h.flush();
   assert.equal(h.calls.filter(call => call[0] === 'presentation').length, 1, 'remote reordering is not left locked');
 }));
 
@@ -1094,8 +1094,8 @@ test('Alt+arrow on a remote row is ignored while a remote row is dragged', () =>
   const context = remoteFixture();
   h.panel.update(h.slots, [], context); h.layout();
   h.ipc.presentation = async (...args) => { h.calls.push(['presentation', ...args]); return { ok: true }; };
-  h.press('remote:r2'); h.emit('pointermove', -100);
-  await h.row('remote:r1').key('ArrowDown', true); await h.flush();
+  h.press('remote:other:r2'); h.emit('pointermove', -100);
+  await h.row('remote:other:r1').key('ArrowDown', true); await h.flush();
   assert.deepEqual(h.calls, []);
   h.emit('pointercancel', -100); await h.flush();
 }));
@@ -1125,7 +1125,7 @@ test('incoming shared preferences repaint local and remote panel names and order
   const localIds = h.panel.element.querySelector('.slot-list').children.filter(node => node.dataset.slotId).map(node => node.dataset.slotId);
   assert.ok(localIds.indexOf('b') < localIds.indexOf('a'));
   assert.match(h.row('a').textContent, /Synced Laptop/);
-  assert.match(h.row('remote:r1').textContent, /Synced Remote/);
+  assert.match(h.row('remote:other:r1').textContent, /Synced Remote/);
   h.click(h.row('a'), 'Rename');
   assert.equal(h.row('a').querySelector('.slot-rename').value, 'Synced Laptop');
 });
@@ -1148,12 +1148,12 @@ test('panel has one interleaved list and local and remote moves publish every vi
   h.ipc.presentation = async (...args) => { h.calls.push(args); return { ok: true, presentation: { qoder: { order: args[3] } } }; };
   h.panel.update(h.slots, [], context);
   const order = () => h.panel.element.querySelector('.slot-list').children.filter(n => n.dataset.slotId).map(n => n.dataset.slotId);
-  assert.deepEqual(order(), ['remote:r1', 'a', 'remote:r2', 'b', 'default']);
+  assert.deepEqual(order(), ['remote:other:r1', 'a', 'remote:other:r2', 'b', 'default']);
   assert.equal(h.panel.element.querySelector('.slot-remote-list'), undefined);
   assert.equal(h.panel.element.querySelector('.slot-list').children.at(-1).className, 'slot-add');
   await h.click(h.row('a'), 'Move up');
   assert.deepEqual(h.calls[0], ['qoder', 'ka', 'order', ['ka', 'r1', 'r2', 'kb', 'default']]);
-  await h.row('remote:r2').key('ArrowDown', true);
+  await h.row('remote:other:r2').key('ArrowDown', true);
   assert.deepEqual(h.calls[1], ['qoder', 'r2', 'order', ['ka', 'r1', 'kb', 'r2', 'default']]);
 });
 
@@ -1188,7 +1188,7 @@ test('remote device lines reuse session icons before names and follow scoped ove
     settings: { deviceIconScope: 'hub', deviceIconOverrides: { local: { desktop: 'cloud' }, hub: {} } }
   };
   const check = (id, kind, name) => {
-    const line = h.row(`remote:${id}`).querySelector('.row-device');
+    const line = h.row(`remote:${id}:${id}`).querySelector('.row-device');
     assert.ok(line, 'remote row has the Sessions device-line class');
     assert.equal(line.children[0].className, `device-kind-icon device-kind-${kind}`);
     assert.equal(line.children[0].attributes['aria-hidden'], 'true');

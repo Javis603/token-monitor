@@ -124,6 +124,7 @@ function createRetentionPolicy({ normalizeLimitsSummary, timestampMs }) {
             : null
         );
         if (!previousProvider) return provider;
+        if (provider.accountKey && previousProvider.accountKey && provider.accountKey !== previousProvider.accountKey) return provider;
         return mergeCodexProviderSnapshot(previousProvider, provider);
       })
     };

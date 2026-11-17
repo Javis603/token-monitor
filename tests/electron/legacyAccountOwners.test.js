@@ -212,7 +212,7 @@ test('OpenCode owner forwards explicit profile and ambient DTO identities to the
   owner.renderOpenCodeProfiles();
   await new Promise(resolve => setImmediate(resolve));
   assert.ok(saved, 'owner must finish rendering and update the list');
-  assert.equal(saved[0].id, 'ambient');
+  assert.equal(saved[0].id, 'ambient:');
   assert.equal(saved[0].accountKey, 'ambient-key');
   assert.equal(saved[0].removable, false);
   assert.equal(saved[0].enabled, false);
@@ -245,7 +245,7 @@ function liveOwnerHarness(provider) {
   document.querySelectorAll = selector => selector.startsWith('[data-managed-profile-') ? [] : querySelectorAll(selector);
   const nodes = {};
   for (const id of [`${provider}ProfileList`, 'thirdpartyProfileName', 'thirdpartyBaseUrlInput',
-    'thirdpartyPlatformInput', 'thirdpartyModeInput', 'thirdpartyAddDetails', 'thirdpartyAddToggle']) {
+    'thirdpartyAccessTokenInput', 'thirdpartyRefreshTokenInput', 'thirdpartyApiKeyInput', 'thirdpartyUserIdInput', 'thirdpartyPlatformInput', 'thirdpartyModeInput', 'thirdpartyAddDetails', 'thirdpartyAddToggle']) {
     nodes[id] = document.createElement('div'); nodes[id].id = id; document.root.append(nodes[id]);
   }
   let profiles = {}, readings = [];

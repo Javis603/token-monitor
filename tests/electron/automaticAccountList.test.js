@@ -115,7 +115,7 @@ test('remote-only accounts remain remote presentation rows and never become loca
   h.context.devices = [{ deviceId: 'other', deviceName: 'Remote laptop', platform: 'win32' }];
   h.list.update([remote]);
   const [row] = rows(h.container);
-  assert.equal(row.dataset.slotId, 'remote:remote-account');
+  assert.equal(row.dataset.slotId, 'remote:other:remote-account');
   assert.equal(row.querySelector('.slot-status').textContent, `● ${t('settings.slots.connected')}`);
   assert.ok(row.querySelector('.row-device'));
   assert.equal(h.row('remote-account'), undefined);
@@ -140,7 +140,7 @@ test('Claude combines Web management with strict local OAuth/CLI rows without du
     window: { TokenMonitorLegacyAccountList: legacy, tokenMonitor: {} } });
   owner.renderClaudeWebAccounts();
   const allRows = rows(container);
-  assert.deepEqual(allRows.map(row => row.dataset.slotId), ['saved', 'automatic:cli-other', 'remote:remote']);
+  assert.deepEqual(allRows.map(row => row.dataset.slotId), ['saved', 'automatic:cli-other', 'remote:other:remote']);
   const automaticRow = allRows.find(row => row.dataset.slotId === 'automatic:cli-other');
   assert.match(automaticRow.textContent, /Connected/);
   assert.deepEqual(actions(automaticRow).map(node => node.dataset.slotAction), ['rename', 'up', 'down']);
@@ -149,7 +149,7 @@ test('Claude combines Web management with strict local OAuth/CLI rows without du
   assert.ok(actions(allRows[0]).some(node => node.dataset.slotAction === 'remove'), 'saved Web controls remain reachable');
   local.length = 0;
   owner.renderClaudeWebAccounts();
-  assert.deepEqual(rows(container).map(row => row.dataset.slotId), ['saved', 'remote:remote']);
+  assert.deepEqual(rows(container).map(row => row.dataset.slotId), ['saved', 'remote:other:remote']);
 });
 
 test('automatic account drag ignores read-only source observations and persists canonical keys only', async () => {
@@ -175,4 +175,25 @@ test('automatic account drag ignores read-only source observations and persists 
     assert.deepEqual(h.calls, [['grok', 'b', 'order', ['b', 'a']]]);
     assert.deepEqual(rows(h.container).map(row => row.dataset.slotId), ['automatic:b', 'automatic:a', 'observation:rpc:2']);
   } finally { Object.assign(global, previous); }
+});
+
+test('remote devices with the same scoped key retain distinct rows and their own readings', async () => {
+  const h = harness();
+  h.context.records = [reading('shared', { sourceDeviceId: 'one', status: 'ok', accountName: 'First' }), reading('shared', { sourceDeviceId: 'two', status: 'unauthorized', accountName: 'Second' }), reading('other', { sourceDeviceId: 'one' })];
+  h.list.update([]);
+  const visible = rows(h.container);
+  assert.equal(visible.length, 3);
+  assert.equal(new Set(visible.map(row => row.dataset.slotId)).size, 3);
+  assert.match(visible[0].textContent, /First/);
+  assert.match(visible[0].querySelector('.slot-status').className, /connected/);
+  assert.match(visible[1].textContent, /Second/);
+  assert.match(visible[1].querySelector('.slot-status').className, /invalid/);
+  await visible[2].key('ArrowUp', true);
+  assert.equal(new Set(h.calls[0][3]).size, h.calls[0][3].length, 'presentation order contains each account key once');
+});
+test('canonical success takes precedence over an earlier failed alias reading', () => {
+  const document = createDocument(), container = document.createElement('div'); document.root.append(container);
+  const list = legacy.create({document, provider:'opencode',container,t,bridge:{},getContext:()=>({settings:{}}),preserveScroll:fn=>fn(),changed(){},refresh(){}});
+  list.update([{id:'saved',accountKey:'fallback'}], [reading('fallback',{status:'unauthorized'}),reading('canonical',{accountKeyAliases:['fallback'],status:'ok'})]);
+  assert.match(rows(container)[0].querySelector('.slot-status').className,/connected/);
 });

@@ -75,7 +75,7 @@
     } : {}
   });
 
-  const accountTitle = /** @param {any} provider @param {any} index @returns {any} */ (provider, index) => namedApiAccountTitle(provider, index, 'openrouter');
+  const accountTitle = /** @param {any} provider @param {any} index @returns {any} */ (provider, index) => provider?.accountDisplayName || namedApiAccountTitle(provider, index, 'openrouter');
 
   return { renderWindows, openrouterCreditsWindow, rowPolicy, accountTitle };
 });

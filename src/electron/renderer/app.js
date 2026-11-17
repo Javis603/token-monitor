@@ -12989,6 +12989,8 @@ function limitProviderSettingsRenderSignature() {
       settingValues,
       state.limitProviderSettingsExpanded
     ],
+    connectionPreferences: (settings.limitConnectionSources || []).filter(entry => entry.sourceSelection)
+      .map(entry => [entry.id, entry.sourceSelection.sources, settings[entry.sourceSelection.key] || 'auto']),
     usageItems: [...enabledLimitProviderSet()].sort().map((id) => [id, limitProviderUsageItemRows(id)]),
     query: limitProviderQuery(),
     providers: (state.stats?.limits?.providers || []).map(providerSignature),

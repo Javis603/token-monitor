@@ -1,0 +1,104 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { CredentialStore } = require('../../src/shared/credentialStore');
+const { migrateAccountSlots } = require('../../src/electron/limits/accountSlotMigration');
+const { createAccountSlotService } = require('../../src/electron/limits/accountSlotService');
+const { createOwnerSlotPersistence } = require('../../src/electron/limits/ownerSlotPersistence');
+const { createMinimaxApiKeys } = require('../../src/electron/providers/minimax/apiKeys');
+const { createClaudeManagedAccounts } = require('../../src/electron/providers/claude/managedAccounts');
+const { createMimoAccountService } = require('../../src/electron/providers/mimo/accountService');
+const { createMimoManagedAccount } = require('../../src/shared/providers/mimo/limits');
+const { hasAccountCredential, accountValuesFingerprint } = require('../../src/shared/limits/accountSlots');
+const { LIMIT_PROVIDER_FETCHERS, limitProviderEntry } = require('../../src/shared/limits/registry');
+const response = body => ({ ok: true, status: 200, json: async () => body });
+for (const fail of [false, true]) test(`MiMo current metadata and rollback (${fail})`, async () => {
+  const old = createMimoManagedAccount('userId=1; api-platform_serviceToken=fixture-old').account;
+  delete old.cookieHeader;
+  let accounts = [old];
+  const credentials = new Map();
+  const started = Promise.withResolvers(), release = Promise.withResolvers();
+  const api = createMimoAccountService({ getMimoManagedAccounts: () => accounts, setMimoManagedAccounts: next => { accounts = next; },
+    getCredentialStore: () => ({ readMimoCredential: id => credentials.get(id), writeMimoCredential: (id, value) => { credentials.set(id, value); return true; }, removeMimoCredential: id => { credentials.delete(id); return true; } }),
+    credentialProbeDeps: () => ({ env: {}, readMimoDesktopAccount: () => { throw Error('absent'); }, fetch: async url => {
+      started.resolve(); await release.promise;
+      return response({ code: 0, data: url.endsWith('/balance') ? { balance: '10' } : url.endsWith('/userProfile') ? { email: 'fixture@example.com' } : {} });
+    } }), saveSettings: () => { if (fail) throw Error('disk'); }, pushSettingsToRenderer() {}, sendMimoAccountsPush() {}, queueLimitInvalidation() {} });
+  const pending = api.addMimoManagedAccount('userId=2; api-platform_serviceToken=fixture-new');
+  await started.promise;
+  const sibling = { ...old, id: 'sibling', accountKey: 'sibling-key' };
+  accounts = [sibling]; release.resolve();
+  assert.equal((await pending).ok, !fail);
+  assert.ok(accounts.some(a => a.id === 'sibling'));
+  assert.ok(!accounts.some(a => a.id === old.id));
+  if (fail) { assert.deepEqual(accounts, [sibling]); assert.equal(credentials.size, 0); }
+});
+for (const saved of [false, true]) test(`MiniMax removal clears matching legacy key atomically (${saved})`, async () => {
+  let settings = { minimaxApiKey: 'fixture-key', minimaxApiProfiles: { default: { apiKey: 'fixture-key', enabled: true } } };
+  if (saved) settings = { ...settings, minimaxApiProfiles: {}, minimaxAccountSlots: [{ id: 'default', enabled: true, values: {}, owner: { metadata: { id: 'default', enabled: true }, credential: 'fixture-key' } }] };
+  const service = createAccountSlotService({ getSettings: () => settings, env: {}, write: async patch => { settings = { ...settings, ...patch }; },
+    ownerWrite: async (_provider, patch, metadata) => { settings = { ...settings, ...patch, minimaxApiProfiles: metadata }; } });
+  const api = createMinimaxApiKeys({ getSettings: () => settings, slotPersistence: createOwnerSlotPersistence('minimax', () => settings, () => service), env: {}, changed() {}, probeDeps: () => ({}) });
+  assert.equal((await api.removeKey('default')).ok, true);
+  assert.equal(settings.minimaxApiKey, ''); assert.deepEqual(api.getKeys(), []);
+});
+test('Claude save checks draft epoch inside queued transaction', async () => {
+  let settings = { claudeManagedAccounts: [] };
+  const started = Promise.withResolvers(), release = Promise.withResolvers();
+  const service = createAccountSlotService({ getSettings: () => settings, env: {}, write: async patch => { settings = { ...settings, ...patch }; } });
+  const persistence = createOwnerSlotPersistence('claude', () => settings, () => service);
+  const blocker = service.ownerTransaction('claude', async current => { await release.promise; return current; });
+  const commit = persistence.commit;
+  persistence.commit = (...args) => { const pending = commit(...args); started.resolve(); return pending; };
+  const api = createClaudeManagedAccounts({ getSettings: () => settings, slotPersistence: persistence, credentialStore: {}, projectSettings: () => ({}),
+    probeDeps: () => ({ env: {}, isClaudeCliAuthenticated: async () => false, readMacKeychain: false, readWindowsCredential: false,
+      fetch: async url => response(url.endsWith('/api/organizations') ? [{ uuid: 'org-fixture' }] : url.endsWith('/api/account') ? { uuid: 'account-fixture' } : { five_hour: { utilization: 20 } }) }) });
+  const saving = api.saveAccount({ claudeWebCookie: 'sk-ant-fixture', claudeWebAccountId: 'new' });
+  await started.promise;
+  const removal = api.removeAccount('missing'); release.resolve();
+  assert.equal((await saving).saved, false); await blocker; await removal;
+  assert.equal(settings.claudeAccountSlots?.length || 0, 0);
+});
+for (const provider of ['claude', 'antigravity', 'workbuddy']) test(`${provider} resumes bounded import after credential cleanup`, t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'owner-recovery-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const store = new CredentialStore(dir);
+  const write = provider === 'claude' ? 'writeClaudeWebCredential' : provider === 'antigravity' ? 'writeAntigravityCredential' : 'writeWorkbuddyCredential';
+  const metadata = Array.from({ length: 22 }, (_, i) => ({ id: `owner${i}`, accountKey: `key${i}`, enabled: true }));
+  for (const item of metadata) store[write](item.id, provider === 'claude' ? 'fixture-cookie' : { accessToken: 'fixture-token' });
+  const settings = { [`${provider}ManagedAccounts`]: metadata };
+  assert.equal(migrateAccountSlots(store, settings, () => 1000, {})[`${provider}AccountSlots`].length, 21);
+  assert.doesNotThrow(() => migrateAccountSlots(store, settings, () => 2000, {}));
+  assert.notEqual(store.settingsCredentials()[`${provider}AccountSlots`][0].owner.credential, null);
+  assert.throws(() => migrateAccountSlots(store, { [`${provider}ManagedAccounts`]: metadata.map(item => item.id === 'owner0' ? { ...item, accountKey: 'conflicting-key' } : item) }, () => 2500, {}), /conflict/);
+  store[write]('owner0', provider === 'claude' ? 'conflicting-cookie' : { accessToken: 'conflicting-token' });
+  assert.throws(() => migrateAccountSlots(store, settings, () => 3000, {}), /conflict/);
+});
+test('queued shared label cannot overwrite newer local rename', async () => {
+  const key = 'canonical';
+  const shared = { deepseek: { labels: { [key]: 'A' }, order: [key] } };
+  let settings = { limitAccountPresentation: shared, deepseekAccountSlots: [{ id: 'one', enabled: true, accountKey: key, label: 'old', values: { deepseekApiKey: 'fixture' } }] };
+  const service = createAccountSlotService({ getSettings: () => settings, env: {}, write: async patch => { settings = { ...settings, ...patch }; } });
+  const rename = service.rename('deepseek', 'one', 'B');
+  const adoption = service.adoptSharedLabels(shared);
+  await rename; await adoption;
+  assert.equal(settings.deepseekAccountSlots[0].label, 'B');
+});
+test('StepFun cookie input renews through dispatch and persistence', async () => {
+  let settings = { stepfunAccountSlots: [{ id: 'one', enabled: true, values: { stepfunToken: 'Oasis-Token=old...refresh;other=x' } }] };
+  const service = createAccountSlotService({ getSettings: () => settings, env: {}, write: async patch => { settings = { ...settings, ...patch }; } });
+  const initialValues = structuredClone(settings.stepfunAccountSlots[0].values);
+  assert.equal(hasAccountCredential(limitProviderEntry('stepfun'), initialValues), true);
+  const renewed = [];
+  const rows = await LIMIT_PROVIDER_FETCHERS.stepfun(settings, { env: {}, onAccountSlotCredentialRenewed: async value => { assert.equal(accountValuesFingerprint(value.values), accountValuesFingerprint(initialValues)); renewed.push(await service.renew(value)); },
+    fetch: async (url, init) => url.includes('RefreshToken') ? response({ accessToken: { raw: 'new' } })
+      : url.includes('GetStepPlanStatus') ? response({}) : init.headers.Cookie.includes('old...') ? { ok: false, status: 401 }
+      : response({ status: 1, five_hour_usage_left_rate: 0.8, weekly_usage_left_rate: 0.5, five_hour_usage_reset_time: 1780000000, weekly_usage_reset_time: 1780500000 }) });
+  assert.ok(rows.some(row => row.status === 'ok'));
+  assert.deepEqual(renewed, [true]);
+  assert.equal(settings.stepfunAccountSlots[0].values.stepfunToken, 'new...refresh');
+  assert.equal(await service.renew({ provider: 'stepfun', slotId: 'one', field: 'stepfunToken', previous: 'old...refresh', value: 'stale', values: initialValues }), false);
+});

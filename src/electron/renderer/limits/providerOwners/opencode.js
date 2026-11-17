@@ -329,7 +329,7 @@ function renderOpenCodeProfiles() {
         document, provider: 'opencode', label: host.providerLabel || 'OpenCode',
     add: () => setOpenCodeAddExpanded(document.getElementById('opencodeAddDetails')?.classList.contains('hidden')), container: common, t, bridge: window.tokenMonitor,
         getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
-        enabled: (account, value) => account.id === 'ambient'
+        enabled: (account, value) => account.source === 'ambient'
           ? api.setAmbientEnabled(value) : api.setProfileEnabled(account.id, value),
         remove: account => api.deleteProfile(account.id),
         edit: account => {
@@ -339,7 +339,7 @@ function renderOpenCodeProfiles() {
         changed: () => {}, refresh: renderOpenCodeProfiles
       });
     }
-    for (const [index, row] of [...listEl.children].entries()) row.dataset.ownerId = hasAmbientKey && index === 0 ? 'ambient' : entries[index - (hasAmbientKey ? 1 : 0)]?.[0];
+    for (const [index, row] of [...listEl.children].entries()) row.dataset.ownerId = hasAmbientKey && index === 0 ? 'ambient:' : entries[index - (hasAmbientKey ? 1 : 0)]?.[0];
     const empty = entries.length === 0 && !hasEnvVar && !hasAmbientKey;
     listEl.classList.toggle('hidden', !empty);
     if (empty) {
@@ -349,7 +349,7 @@ function renderOpenCodeProfiles() {
       listEl.append(notice);
     }
     accountList.update([
-      ...(hasAmbientKey ? [{ id: 'ambient', accountKey: ambientAccountKey, accountName: t('settings.opencode.ambientName'), enabled: ambientEnabled, removable: false }] : []),
+      ...(hasAmbientKey ? [{ id: 'ambient:', source: 'ambient', accountKey: ambientAccountKey, accountName: t('settings.opencode.ambientName'), enabled: ambientEnabled, removable: false }] : []),
       ...entries.map(([name, profile]) => ({ id: name, accountKey: profile.accountKey, accountKeyAliases: profile.accountKeyAliases, accountName: name, enabled: profile.enabled }))
     ], host.localProviderStatuses('opencode'));
     updateOpenCodeProfilesStatus();

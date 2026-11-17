@@ -196,9 +196,15 @@ function createComponentPolicy(helpers) {
       : everyWindowFromApi
         ? 'api'
         : hasWebComponent ? 'web' : winner.source;
-    const canonicalWebAccountKey = [...new Set(candidates
+    const webKeys = [...new Set(candidates
       .map((provider) => String(provider.webAccountKey || '').trim())
-      .filter(Boolean))].sort()[0] || '';
+      .filter(Boolean))].sort();
+    // A resolved web identity explicitly claims its credential fallback aliases.
+    // Prefer the unique root of that relationship, never infer from hash order.
+    const roots = webKeys.filter(key => !candidates.some(provider =>
+      provider.webAccountKey && provider.webAccountKey !== key
+      && Array.isArray(provider.accountKeyAliases) && provider.accountKeyAliases.includes(key)));
+    const canonicalWebAccountKey = roots.length === 1 ? roots[0] : webKeys[0] || '';
     const accountKey = canonicalWebAccountKey || winner.accountKey;
     const accountKeyAliases = normalizeAccountKeyAliases(
       candidates.flatMap(openCodeIdentityKeys),

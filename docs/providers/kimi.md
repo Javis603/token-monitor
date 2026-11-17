@@ -98,4 +98,4 @@ for Kimi.
 
 ## Saved accounts
 
-Saved accounts keep the Code API key and complementary Web token together. Either can configure an account; when both are present the API key determines identity even if only the Web fallback answers. Web fills missing quota kinds using the existing source precedence.
+Saved accounts keep the Code API key and complementary Web token together. Both must belong to the same Kimi account; the app does not verify that they match. Either can configure an account; when both are present the API key determines identity even if only the Web fallback answers. Web fills missing quota kinds using the existing source precedence.

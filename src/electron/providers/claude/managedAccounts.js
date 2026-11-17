@@ -33,9 +33,10 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
 
   // Settings holds only metadata; the same canonical store owns credentials.
   // Restore both sides if either durable write fails, including post-rename errors.
-  async function commit(next, writes, preferences = {}) {
+  async function commit(next, writes, preferences = {}, validate = () => {}) {
+    validate();
     if (slotPersistence) {
-      await slotPersistence.commit(next, writes.map(({ id, cookie }) => ({ id, credential: cookie })), () => {}, preferences);
+      await slotPersistence.commit(next, writes.map(({ id, cookie }) => ({ id, credential: cookie })), validate, preferences);
       return;
     }
     const previous = getSettings();
@@ -74,6 +75,8 @@ function createClaudeManagedAccounts({ getSettings, setSettings, saveSettings, c
       const removed = previous.filter((entry) => !next.some((current) => current.id === entry.id));
       await commit(next, [{ id: account.id, cookie: candidate.claudeWebCookie }, ...removed.map(({ id }) => ({ id, cookie: '' }))], {
         limitProviders: providerSelectionIncluding(getSettings().limitProviders, 'claude'), limitsEnabled: true
+      }, () => {
+        if (contexts.get(values) !== epoch) throw new Error('superseded');
       });
       for (const entry of [account, ...removed]) loginObservations.delete(entry.id);
       // A duplicate credential disappearing does not retire the shared identity.

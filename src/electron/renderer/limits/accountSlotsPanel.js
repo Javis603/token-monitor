@@ -162,7 +162,7 @@
           if (index < 0 || target < 0 || target >= accounts.length) return { ok: true };
           const key = accounts[index].accountKey;
           [accounts[index], accounts[target]] = [accounts[target], accounts[index]];
-          return ipc.presentation(form.id, key, 'order', accounts.map(slot => slot.accountKey));
+          return ipc.presentation(form.id, key, 'order', [...new Set(accounts.map(slot => slot.accountKey))]);
         }).finally(() => { presentationPending--; preserveScroll(render); });
       }
       const remote = remoteAccounts().find(slot => slot.id === args[0])
@@ -186,7 +186,7 @@
         const previous = group.map(slot => slot.id);
         if (previous.length !== order.length || previous.some(key => !order.includes(key))) return { changed: false };
         const previousOrder = presentation.order;
-        const next = order.map(id => group.find(slot => slot.id === id).accountKey);
+        const next = [...new Set(order.map(id => group.find(slot => slot.id === id).accountKey))];
         const changed = order.some((key, index) => key !== previous[index]);
         if (!changed) return { changed: false };
         presentation = { ...presentation, order: next };
@@ -503,7 +503,7 @@
     function remoteAccounts() {
       return applyAccountOrder(remoteReadings, { [form.id]: slots }, localDeviceId, { [form.id]: presentation })
         .filter(row => row.provider === form.id && row.accountKey && row.sourceDeviceId && row.sourceDeviceId !== localDeviceId && !slotOwner(slots, row.accountKey, row.accountKeyAliases))
-        .map(row => ({ id: `remote:${row.accountKey}`, source: 'remote', accountKey: row.accountKey, accountKeyAliases: row.accountKeyAliases, label: presentation.labels?.[row.accountKey] || '', enabled: true, fingerprint: accountIdentity.accountStableFingerprint(row).slice(0, 12) }));
+        .map(row => ({ id: `remote:${row.sourceDeviceId}:${row.accountKey}`, source: 'remote', sourceDeviceId: row.sourceDeviceId, accountKey: row.accountKey, accountKeyAliases: row.accountKeyAliases, label: presentation.labels?.[row.accountKey] || '', enabled: true, fingerprint: accountIdentity.accountStableFingerprint(row).slice(0, 12) }));
     }
     function render() {
       if (rowDrag.deferRender()) return;
@@ -515,7 +515,8 @@
         item.slot = slot;
         item.el.dataset.slotDraggable = 'true';
         const remote = slot.source === 'remote';
-        const reading = remote ? remoteReadings.find(row => row.accountKey === slot.accountKey) : readings.find(row => slotOwner(slots, row.accountKey, row.accountKeyAliases) === slot);
+        const reading = remote ? remoteReadings.find(row => row.sourceDeviceId === slot.sourceDeviceId && row.accountKey === slot.accountKey)
+          : readings.find(row => row.accountKey === slot.accountKey) || readings.find(row => slotOwner(slots, row.accountKey, row.accountKeyAliases) === slot);
         if (!item.editing) item.name.textContent = [accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') }, reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading, t, presentation), secondaryText(slot)].filter(Boolean).join(' · ');
         const detail = detailText(slot);
         if (detail && !item.detail) {

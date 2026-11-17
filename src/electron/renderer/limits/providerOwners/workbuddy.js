@@ -40,7 +40,7 @@ function applyWorkbuddyAccounts(accounts) {
 }
 
 async function mutateWorkbuddyAccount(id, operation, enabled) {
-  if (state.workbuddyMutationBusy || state.workbuddySignInBusy || state.workbuddyCancelBusy) return;
+  if (state.workbuddyMutationBusy || state.workbuddySignInBusy || state.workbuddyCancelBusy) return { ok: false };
   state.workbuddyMutationBusy = true;
   state.workbuddyAccountError = '';
   renderWorkbuddyStatus();
@@ -56,8 +56,10 @@ async function mutateWorkbuddyAccount(id, operation, enabled) {
       applyWorkbuddyAccounts(result.accounts);
       refreshStats({ force: true }).catch(() => {});
     }
+    return result || { ok: false };
   } catch (_) {
     state.workbuddyAccountError = workbuddyAccountError('', operation === 'remove' ? 'removeFailed' : 'toggleFailed');
+    return { ok: false };
   } finally {
     state.workbuddyMutationBusy = false;
     renderWorkbuddyStatus();
@@ -164,8 +166,8 @@ function renderWorkbuddyStatus() {
     document, provider: 'workbuddy', label: host.providerLabel || 'WorkBuddy',
     add: () => { realmChoicesOpen = !realmChoicesOpen; renderWorkbuddyStatus(); }, container: list, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
-    enabled: (account, value) => window.tokenMonitor.workbuddy.setAccountEnabled(account.id, value),
-    remove: account => window.tokenMonitor.workbuddy.removeAccount(account.id),
+    enabled: (account, value) => mutateWorkbuddyAccount(account.id, 'enabled', value),
+    remove: account => mutateWorkbuddyAccount(account.id, 'remove'),
     changed: result => { if (result.accounts) state.settings.workbuddyManagedAccounts = result.accounts; }, refresh: renderWorkbuddyStatus, busy: () => state.workbuddySignInBusy || state.workbuddyCancelBusy || state.workbuddyMutationBusy
   });
   accountList.update(accounts, host.localProviderStatuses('workbuddy'));

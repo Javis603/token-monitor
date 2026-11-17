@@ -229,7 +229,11 @@ function migrateOwnerSlots(store, stored, settings, entry, document, mark, now) 
   const imported = imports.filter(item => next.some(slot => slot.id === item.id));
   for (const item of imported) {
     const existing = next.find(slot => slot.id === item.id);
-    if (!isDeepStrictEqual(existing.owner, item.owner) || existing.enabled !== item.enabled) throw new Error('Saved account import conflict');
+    // Cleanup may have removed the legacy credential before settings metadata
+    // reached disk. The durable destination and identical metadata prove import.
+    const cleanedSource = item.owner.credential === null && existing.owner?.credential != null
+      && isDeepStrictEqual(existing.owner.metadata, item.owner.metadata);
+    if ((!cleanedSource && !isDeepStrictEqual(existing.owner, item.owner)) || existing.enabled !== item.enabled) throw new Error('Saved account import conflict');
   }
   store.replaceSettingsCredentials({ ...stored, [key]: next }, document);
   document = store.readDocument();

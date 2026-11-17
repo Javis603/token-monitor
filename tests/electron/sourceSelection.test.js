@@ -42,8 +42,8 @@ const harkToken = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbb+/=';
 const harkBody = { plan:{id:'free'}, meters:{harkTokens:{dailyUsed:1,dailyLimit:10,poolUsed:1,poolLimit:100}} };
 
 for (const [id, field, token, body, discovery] of [
-  ['manus','manusSessionToken',jwt('one'),require('../fixtures/manusAvailableCredits.json'), {readManusDesktopSession: () => ({token:jwt('one'),userId:'one'})}],
-  ['hark','harkCookie',harkToken,harkBody,{readHarkDesktopSession: () => harkToken}]
+  ['manus','manusSessionToken',jwt('one'),require('../fixtures/manusAvailableCredits.json'), {readManusDesktopSession: () => ({token:jwt('desktop'),userId:'desktop'})}],
+  ['hark','harkCookie',harkToken,harkBody,{readHarkDesktopSession: () => harkToken.replace(/^a/,'c')}]
 ]) {
   test(`${id}: saved, environment and discovered dispatch honor explicit source without credential substitution`, async () => {
     const key = `${id}SourcePreference`, entry = limitProviderEntry(id), seen = [];
@@ -52,13 +52,19 @@ for (const [id, field, token, body, discovery] of [
     const web = await LIMIT_PROVIDER_FETCHERS[id](saved, deps);
     assert.equal(web.find(x => !x.removed && x.status === 'ok')?.source, 'web');
     assert.equal(seen.length,1);
+    assert.equal(id === 'manus' ? seen[0].Authorization : seen[0].Cookie, id === 'manus' ? `Bearer ${token}` : `__Secure-hark.session_token=${token}`);
     seen.length=0;
     const local = await LIMIT_PROVIDER_FETCHERS[id]({...saved,[key]:'local'}, deps);
     assert.equal(local.find(x => !x.removed && x.status === 'ok')?.source, 'local');
     assert.equal(seen.length,1);
-    assert.equal(web.find(x=>x.status==='ok').accountKey,local.find(x=>x.status==='ok').accountKey);
+    const desktopToken = id === 'manus' ? jwt('desktop') : harkToken.replace(/^a/,'c');
+    assert.equal(id === 'manus' ? seen[0].Authorization : seen[0].Cookie, id === 'manus' ? `Bearer ${desktopToken}` : `__Secure-hark.session_token=${desktopToken}`);
+    assert.notEqual(web.find(x=>x.status==='ok').accountKey,local.find(x=>x.status==='ok').accountKey);
+    seen.length=0;
     const envName = id === 'manus' ? 'MANUS_SESSION_TOKEN' : 'HARK_COOKIE';
-    const envRows = await LIMIT_PROVIDER_FETCHERS[id]({[key]:'web'}, {...deps,env:{[envName]:token}});
+    const envToken = id === 'manus' ? jwt('environment') : harkToken.replace(/^a/,'d');
+    const envRows = await LIMIT_PROVIDER_FETCHERS[id]({[key]:'web'}, {...deps,env:{[envName]:envToken}});
+    assert.equal(id === 'manus' ? seen[0].Authorization : seen[0].Cookie, id === 'manus' ? `Bearer ${envToken}` : `__Secure-hark.session_token=${envToken}`);
     assert.ok(envRows.some(x => x.status==='ok' && x.source==='web'));
     let desktopReads=0;
     const rejected = await entry.fetchLimits({[field]:token,[key]:'web'}, {...deps,fetch:async()=>({ok:false,status:401}), [id === 'manus'?'readManusDesktopSession':'readHarkDesktopSession']:()=>{desktopReads++;throw Error('unexpected');}});

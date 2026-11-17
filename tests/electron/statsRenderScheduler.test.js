@@ -367,8 +367,8 @@ test('heavy render roots reject work for an inactive surface', () => {
     assert.match(body(name, next), new RegExp(`function ${name}\\([^)]*\\) \\{\\n {2}if \\(!isSettingsSurfaceVisible\\(\\)\\) return;`));
   }
 
-  assert.match(body('renderOpenCodeProfiles', '\nfunction normalizeProfileName('), /\.then\(\([^)]*\) => \{[\s\S]*?if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
-  assert.match(body('renderNamedApiProfiles', '\nfunction renderOpenRouterProfiles('), /\.then\(\([^)]*\) => \{[\s\S]*?if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
+  assert.match(body('renderOpenCodeProfiles', '\nfunction normalizeProfileName('), /getProfiles\(\)\.then\((?:\(\{[^}]*\}\)|result) => \{\s*(?:const \{[^}]*\} = result;\s*)*if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
+  assert.match(body('renderNamedApiProfiles', '\nfunction renderOpenRouterProfiles('), /getProfiles\(\)\.then\((?:\(\{[^}]*\}\)|result) => \{\s*(?:const \{[^}]*\} = result;\s*)*if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
 });
 
 test('entering Status does not depend on the panel class from the previous render', () => {

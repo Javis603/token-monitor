@@ -421,8 +421,8 @@ function cookieAccountKey(cookieHeader) {
 function isOllamaServerAccountKey(key, values, aliases = []) {
   const apiKey = ollamaApiKey({}, values);
   const cookie = ollamaSessionCookie({}, values);
-  const fallback = apiKey ? fallbackAccountKey(apiKey) : cookie ? cookieAccountKey(cookie) : '';
-  return Boolean(key && fallback && key !== fallback && aliases.includes(fallback));
+  const fallbacks = [apiKey ? fallbackAccountKey(apiKey) : '', cookie ? cookieAccountKey(cookie) : ''].filter(Boolean);
+  return Boolean(key && !fallbacks.includes(key) && fallbacks.some(fallback => aliases.includes(fallback)));
 }
 
 function fallbackAccountKey(apiKey) {

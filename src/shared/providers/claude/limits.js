@@ -1510,9 +1510,16 @@ async function fetchSelectedClaudeCliLimits(options, deps, nowMs) {
     return { email: status.email.trim().toLowerCase(), orgId: status.orgId.trim() };
   };
   const before = await readIdentity();
-  const credentials = await readClaudeCredentials(deps).catch(limitStage('credentials'));
+  let credentials = await readClaudeCredentials(deps).catch(limitStage('credentials'));
   // Deliberately bypass the identity cache and do not request OAuth quota.
-  const profile = await callClaudeProfile(credentials.accessToken, deps);
+  let profile;
+  try {
+    profile = await callClaudeProfile(credentials.accessToken, deps);
+  } catch (error) {
+    if (error?.status !== 'unauthorized') throw error;
+    credentials = await refreshClaudeCredentials(credentials, deps, options);
+    profile = await callClaudeProfile(credentials.accessToken, deps);
+  }
   const identity = claudeOauthAccountIdentity(profile);
   const organizationId = String(profile?.organization?.uuid || profile?.organization?.id || profile?.organization_uuid || '').trim();
   const matches = status => status.email === identity.accountEmail && status.orgId === organizationId;

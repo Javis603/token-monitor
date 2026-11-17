@@ -222,6 +222,7 @@ function renderNamedApiProfiles(config) {
       edit: account => {
         const profile = account;
         document.getElementById('thirdpartyProfileName').value = account.id;
+        for (const field of ['AccessToken', 'RefreshToken', 'ApiKey', 'UserId']) document.getElementById(`thirdparty${field}Input`).value = '';
         document.getElementById('thirdpartyBaseUrlInput').value = profile.baseUrl || '';
         document.getElementById('thirdpartyPlatformInput').value = profile.adapter === 'newapi-account' || profile.adapter === 'newapi-token' ? 'newapi' : profile.adapter;
         document.getElementById('thirdpartyModeInput').value = profile.adapter === 'newapi-token' ? 'token' : 'account';

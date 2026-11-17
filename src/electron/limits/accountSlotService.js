@@ -419,10 +419,13 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
   // Adopt shared labels and persist the local order for offline restarts.
   // Incoming presentation changes are not republished.
   function adoptSharedLabels(shared) {
+    const expectedGroups = Object.fromEntries(Object.keys(shared || {}).map(providerId =>
+      [providerId, JSON.stringify(getSettings().limitAccountPresentation?.[providerId] || {})]));
     return serialize(async () => {
       for (const [providerId, group] of Object.entries(shared || {})) {
         const entry = entryFor(providerId);
-        if (!entry) continue;
+        if (!entry || JSON.stringify(getSettings().limitAccountPresentation?.[providerId] || {})
+          !== expectedGroups[providerId]) continue;
         const labels = group?.labels || {};
         const next = slots(entry, group?.order || []);
         const stored = normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]);

@@ -11,6 +11,12 @@ const { createCursorAccountService } = require('../../src/electron/providers/cur
 const { createOpencodeAccountService } = require('../../src/electron/providers/opencode/accountService');
 const { createThirdpartyAccountService } = require('../../src/electron/providers/thirdparty/accountService');
 
+async function waitForPhase(ready, phase) {
+  const deadline = Date.now() + 1000;
+  while (!ready() && Date.now() < deadline) await new Promise(resolve => setImmediate(resolve));
+  assert.ok(ready(), `Missing login phase: ${phase}`);
+}
+
 function codex(t, extra = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-account-owner-'));
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -25,7 +31,8 @@ test('Codex login owns singleflight, flow-specific cancellation and deferred cle
   let release;
   const h = codex(t, { runLogin: () => new Promise(resolve => { release = resolve; }) });
   const login = h.service.login({ flowId: 'one' }, { ownerId: 7, onStatus() {} });
-  while (!release) await new Promise(resolve => setImmediate(resolve));
+  t.after(async () => { h.service.cancelLogin({ flowId: 'one' }); release?.({ outcome: 'cancelled' }); await login.catch(() => {}); });
+  await waitForPhase(() => release, 'runLogin');
   assert.equal((await h.service.login({ flowId: 'two' }, { ownerId: 8, onStatus() {} })).flowId, 'two');
   assert.deepEqual(h.service.cancelLogin({ flowId: 'two' }), { ok: true, cancelled: false });
   assert.deepEqual(h.service.cancelLogin({ flowId: 'one' }), { ok: true, cancelled: true });
@@ -76,7 +83,8 @@ test('Codex workspace selection rejects another sender, stale flow and unknown w
     return { outcome: 'success' };
   }, listWorkspaces: async () => [{ id: 'acct_one' }, { id: 'acct_two' }] });
   const login = h.service.login({ flowId: 'flow' }, { ownerId: 7, onStatus: payload => { if (payload.phase === 'workspaceSelection') selection = payload; } });
-  while (!selection) await new Promise(resolve => setImmediate(resolve));
+  t.after(async () => { h.service.cancelLogin({ flowId: 'flow' }); await login.catch(() => {}); });
+  await waitForPhase(() => selection, 'workspaceSelection');
   assert.deepEqual(h.service.selectWorkspace({ flowId: 'flow', workspaceId: 'acct_one' }, 8), { ok: false, stale: true });
   assert.deepEqual(h.service.selectWorkspace({ flowId: 'old', workspaceId: 'acct_one' }, 7), { ok: false, stale: true });
   assert.equal(h.service.selectWorkspace({ flowId: 'flow', workspaceId: 'unknown' }, 7).ok, false);

@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
+const { limitProviderEntry } = require('../../src/shared/limits/registry');
 const { normalizePluginAuthorSkin } = require('../../src/electron/plugins/runtime');
 const { networkProxySource } = require('../../src/electron/networkProxy');
 const { hubProfilesForRenderer } = require('../../src/electron/hubProfiles');
@@ -27,10 +28,16 @@ test('the main settings IPC projection hides provider secrets while retaining co
     settings[key] = key === 'hubProfiles'
       ? [{ id: 'home', name: 'Home', hubUrl: 'https://home.example/private?token=hidden', secret: value, deviceId: 'laptop' }]
       : key.endsWith('AccountSlots')
-      ? [{ id: 'saved', owner: { credential: { apiKey: value }, metadata: {} } }]
+      ? [limitProviderEntry(key.replace(/AccountSlots$/, ''))?.accountSlotOwner
+        ? { id: 'saved', owner: { credential: { apiKey: value }, metadata: {} } }
+        : { id: 'saved', values: Object.fromEntries((limitProviderEntry(key.replace(/AccountSlots$/, ''))?.fields || [])
+          .filter(field => field.kind === 'credential').map(field => [field.key, value])) }]
       : key.endsWith('Profiles')
       ? { work: { enabled: true, cookie: value, apiKey: value, accessToken: value, futureSecret: value } }
       : value;
+  }
+  for (const [key, slots] of Object.entries(settings)) {
+    if (key.endsWith('AccountSlots')) assert.ok(JSON.stringify(slots).includes(`private-${key}-sentinel`), `${key} fixture contains its credential`);
   }
   for (const key of rendererOmittedAccountKeys()) {
     const value = `private-${key}-sentinel`;

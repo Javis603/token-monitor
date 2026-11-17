@@ -15,7 +15,8 @@ function createMinimaxApiKeys({ getSettings, saveSettings, probeDeps, changed, s
         accountKey: hashKey('minimax', profile.apiKey), enabled: profile.enabled,
         billingMode: profile.billingMode, apiRegion: profile.apiRegion
       })), [...Object.entries(next).map(([id, profile]) => ({ id, credential: profile.apiKey })),
-        ...(removedId ? [{ id: removedId, credential: null }] : [])]);
+        ...(removedId ? [{ id: removedId, credential: null }] : [])], () => {},
+        reason === 'key-remove' && limits.minimaxToken({}, getSettings().minimaxApiKey) === key ? { minimaxApiKey: '' } : {});
     } else {
     settings.minimaxApiProfiles = next;
     // The legacy field stays for downgrades until its own key is removed.

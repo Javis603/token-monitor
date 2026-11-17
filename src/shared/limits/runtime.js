@@ -1006,7 +1006,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
           }
         } else if (provider === 'muse' && scope.source === 'web') {
           for (const [key, state] of lane.identities) {
-            if ((state.lastAttempt?.row || state.lastGood)?.source === 'web') lane.identities.delete(key);
+            if ((state.lastAttempt?.row?.source || state.lastGood?.source) === 'web') lane.identities.delete(key);
           }
           lane.accountRevisions.clear();
         } else {

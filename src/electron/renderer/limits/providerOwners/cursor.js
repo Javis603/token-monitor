@@ -10,6 +10,7 @@
  * The owner retains login/cancellation and editor generations across repaints.
  */ function create(host) {
  let accountList;
+ let statusRevision = 0;
  // Host exposes named capabilities, never the application state object.
  const { document, window, setAccountGroupExpanded, isSettingsSurfaceVisible, accountShellApi, t, accountShellErrors, setCursorStatusText, setSettingsSectionExpanded, renderSettingsSummaries, refreshStats, setAccountShellError, accountProfileSaves } = host;
  const state = {cursorAccount: host.initial.cursorAccount, cursorAccountExpanded: host.initial.cursorAccountExpanded};
@@ -64,20 +65,23 @@ function renderCursorStatus() {
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
     enabled: (account, value) => window.tokenMonitor.cursor.setAccountEnabled(account.id, value),
     remove: account => window.tokenMonitor.cursor.logout(account.id),
-    changed: result => { if (result.status) state.cursorAccount = { status: result.status, error: "", busy: false }; }, refresh: refreshCursorStatus, busy: () => state.cursorAccount.busy || state.cursorAccount.status?.managementBlocked
+    changed: result => { if (result.status) { statusRevision++; state.cursorAccount = { status: result.status, error: "", busy: false }; } }, refresh: refreshCursorStatus, busy: () => state.cursorAccount.busy || state.cursorAccount.status?.managementBlocked
   });
   accountList.update(accounts.map(account => ({ ...account, canPause: !managementBlocked, removable: account.removable === true && !managementBlocked })), host.localProviderStatuses('cursor'));
   renderSettingsSummaries();
 }
 
 async function refreshCursorStatus({ force = false, discover = false } = {}) {
+  const revision = ++statusRevision;
   setAccountShellError('cursor', '');
   state.cursorAccount = { status: null, error: '', busy: true };
   renderCursorStatus();
   try {
     const status = await window.tokenMonitor.cursor.status({ force, discover });
+    if (revision !== statusRevision) return;
     state.cursorAccount = { status, error: '', busy: false };
   } catch (err) {
+    if (revision !== statusRevision) return;
     state.cursorAccount = { status: null, error: err.message, busy: false };
   }
   renderCursorStatus();
@@ -135,6 +139,7 @@ function setup() {
     const unchanged = input.value === draft;
     if (unchanged) input.value = '';
     setAccountShellError('cursor', '');
+    statusRevision++;
     state.cursorAccount = { status: result.status, error: '', busy: false };
     renderCursorStatus();
     if (unchanged) setCursorManualExpanded(false);
