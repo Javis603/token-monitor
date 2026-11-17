@@ -136,6 +136,10 @@ function slotAccounts(entry, options, deps) {
   if (provisional) return { accounts: [provisional], scopeKey, previousKeys, check: check.keyless ? null : check };
   // A remembered or stored key can be stale until a provider-wide pass, so an
   // exact match still has to report it.
+  // Providers with multiple entitlement variants under one server account
+  // choose the relevant slots without changing generic account identity rules.
+  const scoped = entry.limits?.accountSlotsForScope?.(accounts, scope);
+  if (scoped) return { accounts: scoped, scopeKey, previousKeys, check };
   const exact = accounts.find((account) => account.accountKey === scopeKey);
   if (exact) return { accounts: [exact], scopeKey, previousKeys, check };
   // A key an account moved away from can still be live on another device; this

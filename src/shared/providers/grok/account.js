@@ -9,8 +9,8 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   id: 'grok',
   sourceSelection: { sources: ['rpc', 'web'] },
   sources: [
-    { id: 'rpc', kind: 'cli', relation: 'alternative', labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' },
-    { id: 'web', kind: 'web', relation: 'alternative', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
+    { id: 'rpc', kind: 'cli', relation: 'alternative', products: ['grok'], labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' },
+    { id: 'web', kind: 'web', relation: 'alternative', products: ['grok'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
   ],
   fetch: 'fetchGrokLimits',
   fields: [],

@@ -30,6 +30,7 @@
 const crypto = require('node:crypto');
 
 const { normalizeLimitProvider } = require('../../limits/core');
+const { alibabaAccountSlotsForScope } = require('./runtimeIdentity');
 const { hashKey } = require('../../hashKey');
 const { runWithProbeDeadline } = require('../../probeDeadline');
 const { throwIfAborted } = require('../../abortSignal');
@@ -545,6 +546,7 @@ function teamWindows(summary) {
   // and the renderer supplies "Monthly" for a billing window. Naming the product
   // here instead would both break that convention and repeat the account label.
   return [{
+    productId: 'token-plan-team',
     kind: 'billing',
     used: summary.used,
     limit: summary.total,
@@ -626,6 +628,7 @@ function personalWindows(usage) {
   const windows = [];
   if (usage.fiveHourPercent !== null) {
     windows.push({
+      productId: 'token-plan-personal',
       kind: 'session',
       label: '5-hour',
       usedPercent: usage.fiveHourPercent,
@@ -636,6 +639,7 @@ function personalWindows(usage) {
   }
   if (usage.weeklyPercent !== null) {
     windows.push({
+      productId: 'token-plan-personal',
       kind: 'weekly',
       label: 'Weekly',
       usedPercent: usage.weeklyPercent,
@@ -649,6 +653,7 @@ function personalWindows(usage) {
     // as the row's single window — the same 'billing' kind the Team pool uses,
     // which every surface already labels "Monthly".
     windows.push({
+      productId: 'token-plan-personal',
       kind: 'billing',
       usedPercent: usage.monthlyPercent,
       limit: usage.monthlyTotal,
@@ -925,10 +930,11 @@ function selectedAlibabaResult(provider, options, deps) {
   // Never copy that label into the cross-device account key.
   const identity = accountIdentityDescriptor(provider)?.part;
   const removals = (options.previousLimits?.providers || [])
-    .filter(row => row.provider === 'alibaba' && accountIdentityDescriptor(row)?.part !== identity)
+    .filter(row => row.provider === 'alibaba' && (!row.region || row.region === provider.region)
+      && accountIdentityDescriptor(row)?.part !== identity)
     .map(row => ({ provider: 'alibaba', accountKey: row.accountKey,
-      accountName: row.accountName, accountEmail: row.accountEmail, accountLabel: row.accountLabel,
-      removed: true, replacementAccount: { accountKey: provider.accountKey, accountLabel: provider.accountLabel } }));
+      accountName: row.accountName, accountEmail: row.accountEmail, accountLabel: row.accountLabel, region: row.region,
+      removed: true, replacementAccount: { accountKey: provider.accountKey, accountLabel: provider.accountLabel, region: provider.region } }));
   return [provider, ...removals];
 }
 
@@ -1025,7 +1031,7 @@ async function fetchAccountSlotSnapshot(options, deps, collect) {
   return [...local.filter(row => row.source === 'cli' && !row.removed), ...await collect({ ...options, previousLimits }, deps)];
 }
 
-module.exports = { accountSlotRowKey: row => `${row.accountKey}:${row.region || ''}`, fetchAccountSlotSnapshot,
+module.exports = { accountSlotsForScope: alibabaAccountSlotsForScope, accountSlotRowKey: row => `${row.accountKey}:${row.region || ''}`, fetchAccountSlotSnapshot,
   ALIBABA_FETCH_TIMEOUT_MS,
   ALIBABA_VARIANTS,
   ALIBABA_VARIANT_IDS,

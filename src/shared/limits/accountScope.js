@@ -38,7 +38,8 @@
   function rowMatchesScope(row, scope) {
     const descriptor = accountIdentityDescriptor(scope);
     if (!descriptor) return false;
-    return clean(accountIdentityField(row, descriptor.name)).toLowerCase() === descriptor.value;
+    return clean(accountIdentityField(row, descriptor.name)).toLowerCase() === descriptor.value
+      && (scope.provider !== 'alibaba' || !clean(scope.region) || clean(row?.region).toLowerCase() === clean(scope.region).toLowerCase());
   }
 
   // Which account a running probe is for, named by the identity field rows are
@@ -46,7 +47,7 @@
   // credential-only scope names no row, so it is reported as unmatched.
   function probeAccount(scope) {
     const descriptor = accountIdentityDescriptor(scope);
-    return descriptor ? { field: descriptor.name, value: descriptor.value } : { field: 'private', value: '' };
+    return descriptor ? { field: descriptor.name, value: descriptor.value, ...(scope.provider === 'alibaba' && clean(scope.region) ? { region: clean(scope.region).toLowerCase() } : {}) } : { field: 'private', value: '' };
   }
 
   // Whether a probe in flight is refreshing this row: a provider-wide probe
@@ -55,7 +56,8 @@
     if (!probe || probe.provider !== row?.provider) return false;
     if (!probe.account) return true;
     if (!IDENTITY_FIELD.has(probe.account.field)) return false;
-    return clean(accountIdentityField(row, probe.account.field)).toLowerCase() === probe.account.value;
+    return clean(accountIdentityField(row, probe.account.field)).toLowerCase() === probe.account.value
+      && (probe.provider !== 'alibaba' || !probe.account.region || clean(row?.region).toLowerCase() === probe.account.region);
   }
 
   return {

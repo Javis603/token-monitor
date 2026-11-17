@@ -6,8 +6,8 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   id: 'muse',
   accountSlots: true,
   sources: [
-    { id: 'cli', kind: 'cli', relation: 'complement', labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' },
-    { id: 'web', kind: 'web', relation: 'complement', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
+    { id: 'cli', kind: 'cli', relation: 'complement', products: ['code'], labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' },
+    { id: 'web', kind: 'web', relation: 'complement', products: ['web'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
   ],
   fetch: 'fetchMuseLimits',
   fields: [{

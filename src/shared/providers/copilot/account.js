@@ -10,7 +10,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   dedupeAccounts: true,
   environmentWhenSaved: false,
   sources: [
-    { id: 'oauth', kind: 'oauth', relation: 'single', labelKey: 'settings.limits.sources.oauth', descriptionKey: 'settings.limits.sources.oauthDescription' }
+    { id: 'oauth', kind: 'oauth', relation: 'single', products: ['copilot'], labelKey: 'settings.limits.sources.oauth', descriptionKey: 'settings.limits.sources.oauthDescription' }
   ],
   accountRefresh: true,
   accountStatus: ({ settings, env, limits }) => {

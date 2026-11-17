@@ -6,8 +6,8 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   id: 'factory',
   accountSlots: true,
   sources: [
-    { id: 'api', kind: 'apiKey', relation: 'alternative', labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.factory.note' },
-    { id: 'droid-env', kind: 'file', relation: 'alternative', labelKey: 'settings.limits.sources.file', descriptionKey: 'settings.limits.sources.fileDescription' }
+    { id: 'api', kind: 'apiKey', relation: 'alternative', products: ['factory'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.factory.note' },
+    { id: 'droid-env', kind: 'file', relation: 'alternative', products: ['factory'], labelKey: 'settings.limits.sources.file', descriptionKey: 'settings.limits.sources.fileDescription' }
   ],
   fetch: 'fetchFactoryLimits',
   fields: [

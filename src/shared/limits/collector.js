@@ -216,7 +216,13 @@ async function probeLimitProvider(provider, options = {}, context = {}, deps = {
       // (one account of several, a fallback source) reports the cause here.
       ...(context.onFailure ? { noteLimitFailure: context.onFailure } : {})
     });
-    return (Array.isArray(result) ? result : [result]).filter(Boolean);
+    const entry = limitProviderEntry(provider);
+    const products = [...new Set((entry?.sources || []).flatMap(source => source.products))];
+    return (Array.isArray(result) ? result : [result]).filter(Boolean).map(row => ({
+      ...row,
+      ...(Array.isArray(row.windows) ? { windows: row.windows.map(window => ({ ...window,
+        ...(!window.productId && products.length === 1 ? { productId: products[0] } : {}) })) } : {})
+    }));
   } catch (error) {
     context.onFailure?.(error);
     return [statusProvider(provider, providerStatusFromError(error), nowIso(nowMs))];

@@ -1,5 +1,6 @@
 'use strict';
 
+const { normalizeLimitProductId } = require('./products');
 const { staleAfterMsForSyncUpload } = require('../syncUploadInterval');
 const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_IDS, VALID_LIMIT_WINDOW_METRICS } = require('./providers');
 const { isWorkbuddyPlaceholder } = require('../providers/workbuddy/identity');
@@ -192,6 +193,7 @@ function normalizeLimitWindow(input) {
     ...(metric ? { metric } : {}),
     ...(source ? { source } : {}),
     ...(limitId ? { limitId } : {}),
+    ...(normalizeLimitProductId(input.productId) ? { productId: normalizeLimitProductId(input.productId) } : {}),
     ...(boundaryKind ? { boundaryKind } : {}),
     ...(input.additional === true ? { additional: true } : {}),
     label: normalizeWindowLabel(input.label || input.displayLabel || input.title),

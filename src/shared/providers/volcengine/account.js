@@ -12,8 +12,8 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   accountCredentialReady: (values, key) => key !== 'volcengineAccessKeyId'
     || !/^AKLT/i.test(values[key]) || Boolean(values.volcengineSecretAccessKey),
   sources: [
-    { id: 'api', kind: 'apiKey', relation: 'alternative', labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.limits.sources.apiKeyDescription' },
-    { id: 'cli', kind: 'cli', relation: 'alternative', labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' }
+    { id: 'api', kind: 'apiKey', relation: 'alternative', products: ['coding-plan', 'ark', 'agent-plan'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.limits.sources.apiKeyDescription' },
+    { id: 'cli', kind: 'cli', relation: 'alternative', products: ['coding-plan', 'agent-plan'], labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' }
   ],
   fetch: 'fetchVolcengineLimits',
   fields: [

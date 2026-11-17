@@ -83,6 +83,7 @@ function allowanceWindow(period, kind) {
   }
   return {
     kind,
+    productId: 'code',
     label: kind === 'weekly' ? 'Weekly' : 'Session',
     usedPercent: period.usedPercent,
     ...(reset != null ? { resetsAt: new Date(reset).toISOString(), boundaryKind: 'reset' } : {}),

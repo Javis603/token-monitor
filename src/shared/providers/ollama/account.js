@@ -8,8 +8,8 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   accountSlots: true,
   serverAccountKey: 'isOllamaServerAccountKey',
   sources: [
-    { id: 'api', kind: 'apiKey', relation: 'alternative', labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.limits.sources.apiKeyDescription' },
-    { id: 'web', kind: 'web', relation: 'alternative', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
+    { id: 'api', kind: 'apiKey', relation: 'alternative', products: ['ollama'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.limits.sources.apiKeyDescription' },
+    { id: 'web', kind: 'web', relation: 'alternative', products: ['ollama'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
   ],
   fetch: 'fetchOllamaLimits',
   fields: [

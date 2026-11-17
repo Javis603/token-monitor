@@ -26,8 +26,8 @@ function isCursorDetectedAccountCurrent({ desktop, userId = '', unauthorized = f
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration & {isCursorDetectedAccountCurrent: typeof isCursorDetectedAccountCurrent, normalizeCursorAccountIds: typeof normalizeCursorAccountIds}} */ ({
   id: 'cursor',
   sources: [
-    { id: 'desktop', kind: 'desktop', relation: 'complement', labelKey: 'settings.limits.sources.desktop', descriptionKey: 'settings.limits.sources.desktopDescription' },
-    { id: 'web', kind: 'web', relation: 'complement', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
+    { id: 'desktop', kind: 'desktop', relation: 'complement', products: ['cursor'], labelKey: 'settings.limits.sources.desktop', descriptionKey: 'settings.limits.sources.desktopDescription' },
+    { id: 'web', kind: 'web', relation: 'complement', products: ['cursor'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
   ],
   fetch: 'fetchCursorLimits',
   fields: [

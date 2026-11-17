@@ -503,7 +503,7 @@ async function fetchVolcengineAgentPlanLimits(credentials, deps, now, updatedAt)
     source: 'api',
     status: 'ok',
     updatedAt,
-    windows: usage.windows,
+    windows: usage.windows.map(window => ({ ...window, productId: 'agent-plan' })),
     region: credentials.region
   });
 }
@@ -631,7 +631,7 @@ async function fetchVolcengineCodingPlanLimits(credentials, deps, now, updatedAt
     source: 'api',
     status: usage.windows.length ? 'ok' : 'unavailable',
     updatedAt: usage.updatedAt || updatedAt,
-    windows: usage.windows,
+    windows: usage.windows.map(window => ({ ...window, productId: 'coding-plan' })),
     region: credentials.region
   });
 }
@@ -660,7 +660,7 @@ async function fetchVolcengineArkLimits(credentials, deps, now, updatedAt) {
       source: 'api',
       status: usage.windows.length ? 'ok' : 'unavailable',
       updatedAt: usage.updatedAt || updatedAt,
-      windows: usage.windows,
+      windows: usage.windows.map(window => ({ ...window, productId: 'ark' })),
       region: credentials.region
     });
   }

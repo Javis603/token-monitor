@@ -1,6 +1,7 @@
 // @ts-check
 'use strict';
 
+const { normalizeLimitProductId } = require('./products');
 const { sourcePreferenceKey, normalizeSourcePreference } = require('./sourceSelection');
 const { defaultIdentityKey, accountSlotField, normalizeAmbientAccounts } = require('./accountSlots');
 
@@ -116,6 +117,7 @@ const { defaultIdentityKey, accountSlotField, normalizeAmbientAccounts } = requi
  * @property {string} id Stable, provider-local read lane.
  * @property {'cli'|'desktop'|'web'|'apiKey'|'env'|'file'|'oauth'} kind
  * @property {'alternative'|'complement'|'single'} relation Alternative lanes follow fallback order; complements may contribute together.
+ * @property {string[]} products Stable provider-local entitlement IDs, independent of source and region.
  * @property {string} labelKey
  * @property {string} descriptionKey
  * @property {boolean} [getUrlFromForm] Reuse the account form's URL resolver; never copy its URL here.
@@ -152,6 +154,13 @@ const { defaultIdentityKey, accountSlotField, normalizeAmbientAccounts } = requi
 // credentialStore, and an eager require here would be a cycle.
 /** @param {AccountDeclaration} account @param {() => AccountLimits} loadLimits */
 function registerProvider(account, loadLimits) {
+  for (const source of account.sources) {
+    if (!Array.isArray(source.products) || !source.products.length
+      || new Set(source.products).size !== source.products.length
+      || source.products.some(id => !id || normalizeLimitProductId(id) !== id)) {
+      throw new Error(`limits accounts: invalid source products for ${account.id}:${source.id}`);
+    }
+  }
   /** @type {AccountField[]} */
   const preference = account.sourceSelection ? [{ key: sourcePreferenceKey(account), kind: 'setting', normalize: (/** @type {unknown} */ value) => normalizeSourcePreference(account, value), configNormalize: (/** @type {unknown} */ value) => normalizeSourcePreference(account, value), configDefault: 'auto', initial: 'auto', persist: 'renormalize', project: (/** @type {unknown} */ value) => normalizeSourcePreference(account, value) }] : [];
   return { ...account, fields: [...preference, ...(account.accountSlots ? [...account.fields, accountSlotField(account), ...(account.discoveredAccounts ? [{ key: `${account.id}AmbientAccounts`, kind: 'setting', configDefault: {}, configNormalize: (/** @type {any} */ value) => normalizeAmbientAccounts(account, value), storePath: ['providers', account.id, 'ambientAccounts'], rendererOmit: true, persist: 'never', initial: null, watch: false }] : []), { key: defaultIdentityKey(account), kind: 'setting', configDefault: {}, storePath: ['providers', account.id, 'defaultAccountIdentity'], persist: 'never', rendererOmit: true, watch: false, initial: null }] : account.fields)], loadLimits };
@@ -261,11 +270,11 @@ function limitProviderUrlAllowed(hostname, pathname, providerId = '') {
 }
 
 // The refresh scope for one rendered limits row. LimitsRuntime files every row
-// an account-scoped probe returns under that one identity, so the scope may
+// an account-scoped probe returns under its reported identity, so the scope may
 // only name an account when the provider's fetch filters by it, and only by
 // its account key: providers' name- or email-only paths can fall back to
 // reading every account. Anything else refreshes the whole provider instead.
-/** @param {string} provider @param {{accountKey?: string, accountEmail?: string, accountName?: string, accountLabel?: string, sourceDetail?: string}} [row] */
+/** @param {string} provider @param {{accountKey?: string, accountEmail?: string, accountName?: string, accountLabel?: string, sourceDetail?: string, region?: string}} [row] */
 function limitAccountRefreshScope(provider, row = {}) {
   /** @param {unknown} value */
   const text = (value) => (typeof value === 'string' ? value.trim() : '');
@@ -282,6 +291,7 @@ function limitAccountRefreshScope(provider, row = {}) {
   };
   if (!account.accountKey) return scope;
   for (const [key, value] of Object.entries(account)) if (value) scope[key] = value;
+  if (provider === 'alibaba' && text(row.region)) scope.region = text(row.region).toLowerCase();
   return scope;
 }
 

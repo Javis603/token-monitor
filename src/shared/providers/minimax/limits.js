@@ -529,7 +529,7 @@ async function fetchMinimaxCodeLimits(deps = {}, context = {}, discovered = null
   const state = deps.providerRuntimeState instanceof Map ? deps.providerRuntimeState : null;
   const row = (status, windows = []) => normalizeLimitProvider({
     provider: 'minimax', accountKey, accountLabel: 'MiniMax Code', source: 'oauth',
-    status, updatedAt, windows, planLabel, region: session?.regionDir || ''
+    status, updatedAt, windows: windows.map(window => ({ ...window, productId: 'mcode' })), planLabel, region: session?.regionDir || ''
   });
   const env = deps.env || process.env;
   if (['MCODE_OAUTH_DEVICE_AUTHORIZATION_ENDPOINT', 'MCODE_OAUTH_TOKEN_ENDPOINT', 'MCODE_OAUTH_REVOCATION_ENDPOINT']
@@ -783,7 +783,7 @@ async function fetchMinimaxApiLimits(options, deps, { now, updatedAt }) {
       return normalizeLimitProvider({
         ...account,
         status: windows.length ? 'ok' : 'unavailable',
-        windows,
+        windows: windows.map(window => ({ ...window, productId: 'api' })),
         ...(attempt.kind === 'balance' && windows.length ? { balance: {
           amount: windows[0].remaining, currency: windows[0].currency, ...spend
         } } : {}),

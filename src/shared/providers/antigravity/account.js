@@ -5,8 +5,8 @@
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'antigravity',
   sources: [
-    { id: 'rpc', kind: 'desktop', relation: 'complement', labelKey: 'settings.limits.sources.desktop', descriptionKey: 'settings.limits.sources.desktopDescription' },
-    { id: 'oauth', kind: 'oauth', relation: 'complement', labelKey: 'settings.limits.sources.oauth', descriptionKey: 'settings.limits.sources.oauthDescription' }
+    { id: 'rpc', kind: 'desktop', relation: 'complement', products: ['antigravity'], labelKey: 'settings.limits.sources.desktop', descriptionKey: 'settings.limits.sources.desktopDescription' },
+    { id: 'oauth', kind: 'oauth', relation: 'complement', products: ['antigravity'], labelKey: 'settings.limits.sources.oauth', descriptionKey: 'settings.limits.sources.oauthDescription' }
   ],
   fetch: 'fetchAntigravityLimits',
   fields: [

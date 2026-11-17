@@ -5,8 +5,8 @@
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'minimax',
   sources: [
-    { id: 'api', kind: 'apiKey', relation: 'complement', labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.limits.sources.apiKeyDescription' },
-    { id: 'oauth', kind: 'cli', relation: 'complement', labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.minimax.codeNote' }
+    { id: 'api', kind: 'apiKey', relation: 'complement', products: ['api'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.limits.sources.apiKeyDescription' },
+    { id: 'oauth', kind: 'cli', relation: 'complement', products: ['mcode'], labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.minimax.codeNote' }
   ],
   fetch: 'fetchMinimaxLimits',
   accountRefresh: true,

@@ -7,8 +7,8 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   sourceSelection: { sources: ['web', 'ide'] },
   accountSlots: true,
   sources: [
-    { id: 'web', kind: 'web', relation: 'alternative', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription', getUrlFromForm: true },
-    { id: 'ide', kind: 'cli', relation: 'alternative', labelKey: 'settings.trae.token', descriptionKey: 'settings.trae.deviceIdNote' }
+    { id: 'web', kind: 'web', relation: 'alternative', products: ['trae'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription', getUrlFromForm: true },
+    { id: 'ide', kind: 'cli', relation: 'alternative', products: ['trae'], labelKey: 'settings.trae.token', descriptionKey: 'settings.trae.deviceIdNote' }
   ],
   fetch: 'fetchTraeLimits',
   fields: [

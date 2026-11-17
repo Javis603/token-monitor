@@ -5,9 +5,9 @@
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'opencode',
   sources: [
-    { id: 'api', kind: 'apiKey', relation: 'alternative', labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.limits.sources.apiKeyDescription' },
-    { id: 'web', kind: 'web', relation: 'complement', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.opencodeWebDescription' },
-    { id: 'local', kind: 'file', relation: 'alternative', labelKey: 'settings.limits.sources.file', descriptionKey: 'settings.limits.sources.opencodeLocalDescription' }
+    { id: 'api', kind: 'apiKey', relation: 'alternative', products: ['go'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.limits.sources.apiKeyDescription' },
+    { id: 'web', kind: 'web', relation: 'complement', products: ['go', 'zen'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.opencodeWebDescription' },
+    { id: 'local', kind: 'file', relation: 'alternative', products: ['go'], labelKey: 'settings.limits.sources.file', descriptionKey: 'settings.limits.sources.opencodeLocalDescription' }
   ],
   fetch: 'fetchOpenCodeLimits',
   fields: [

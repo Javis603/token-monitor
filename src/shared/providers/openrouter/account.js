@@ -5,7 +5,7 @@
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'openrouter',
   sources: [
-    { id: 'api', kind: 'apiKey', relation: 'single', labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.limits.sources.apiKeyDescription' }
+    { id: 'api', kind: 'apiKey', relation: 'single', products: ['openrouter'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.limits.sources.apiKeyDescription' }
   ],
   fetch: 'fetchOpenRouterLimits',
   accountSlots: true,

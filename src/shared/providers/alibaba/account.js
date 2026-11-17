@@ -6,8 +6,8 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   id: 'alibaba',
   accountSlots: true,
   sources: [
-    { id: 'cli', kind: 'cli', relation: 'alternative', labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' },
-    { id: 'web', kind: 'web', relation: 'alternative', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.alibabaWebDescription', getUrlFromForm: true }
+    { id: 'cli', kind: 'cli', relation: 'alternative', products: ['token-plan-team', 'token-plan-personal'], labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' },
+    { id: 'web', kind: 'web', relation: 'alternative', products: ['token-plan-team', 'token-plan-personal'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.alibabaWebDescription', getUrlFromForm: true }
   ],
   fetch: 'fetchAlibabaLimits',
   fields: [

@@ -7,8 +7,8 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   sourceSelection: { sources: ['api', 'local'] },
   accountSlots: true,
   sources: [
-    { id: 'api', kind: 'apiKey', relation: 'alternative', labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.cline.note' },
-    { id: 'local', kind: 'file', relation: 'alternative', labelKey: 'settings.limits.sources.file', descriptionKey: 'settings.limits.sources.fileDescription' }
+    { id: 'api', kind: 'apiKey', relation: 'alternative', products: ['cline'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.cline.note' },
+    { id: 'local', kind: 'file', relation: 'alternative', products: ['cline'], labelKey: 'settings.limits.sources.file', descriptionKey: 'settings.limits.sources.fileDescription' }
   ],
   fetch: 'fetchClineLimits',
   fields: [

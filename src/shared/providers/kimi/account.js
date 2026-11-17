@@ -7,8 +7,8 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   accountSlots: true,
   accountCredentialKeys: ['kimiApiKey', 'kimiWebAccessToken'],
   sources: [
-    { id: 'api', kind: 'apiKey', relation: 'alternative', labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.kimi.apiKeyNote' },
-    { id: 'web', kind: 'web', relation: 'complement', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.kimi.webTokenNote' }
+    { id: 'api', kind: 'apiKey', relation: 'alternative', products: ['kimi'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.kimi.apiKeyNote' },
+    { id: 'web', kind: 'web', relation: 'complement', products: ['kimi'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.kimi.webTokenNote' }
   ],
   fetch: 'fetchKimiLimits',
   fields: [

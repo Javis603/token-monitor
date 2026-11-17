@@ -1,6 +1,7 @@
 'use strict';
 
 const { orderAccountRows, defaultIdentityKey, configuredMultiAccountProviders, normalizeAccountSlots, accountSlotKey, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
+const { alibabaVariantIdentityPart, alibabaRetiredVariantScopes } = require('../providers/alibaba/runtimeIdentity');
 const { LIMIT_PROVIDER_REGISTRY } = require('./registry');
 
 const crypto = require('node:crypto');
@@ -105,7 +106,7 @@ function credentialIdentityPart(provider, value) {
 function scopeIdentityKey(scope) {
   const provider = providerId(scope?.provider);
   const identity = accountIdentityPart(scope) || credentialIdentityPart(provider, scope);
-  return identity ? `${provider}:${identity}` : `${provider}:*`;
+  return identity ? `${provider}:${identity}${provider === 'alibaba' ? alibabaVariantIdentityPart(scope) : ''}` : `${provider}:*`;
 }
 
 function isAccountScope(scope) {
@@ -124,7 +125,7 @@ function rowIdentityKey(row) {
   const provider = providerId(row?.provider);
   if (provider === 'muse' && row?.source && !row.accountKey) return `${provider}:source:${row.source}`;
   const identity = accountIdentityPart(row);
-  return identity ? `${provider}:${identity}` : `${provider}:*`;
+  return identity ? `${provider}:${identity}${provider === 'alibaba' ? alibabaVariantIdentityPart(row) : ''}` : `${provider}:*`;
 }
 
 function publicAttemptStatus(status) {
@@ -588,7 +589,10 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
   }
 
   function accountRevisionStillCurrent(lane, identityKey, dispatch) {
-    return (lane.accountRevisions.get(identityKey) || 0) === (dispatch.accountRevisions.get(identityKey) || 0);
+    const keys = [identityKey];
+    // An account-wide clear also fences variants first discovered by this probe.
+    if (lane.provider === 'alibaba' && identityKey.includes(':region:')) keys.push(identityKey.slice(0, identityKey.lastIndexOf(':region:')));
+    return keys.every(key => (lane.accountRevisions.get(key) || 0) === (dispatch.accountRevisions.get(key) || 0));
   }
 
   function applyAttempt(lane, identityKey, row, status, at, invalidatedWindowLabels) {
@@ -622,7 +626,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       const previous = existing.lastAttempt?.row || existing.lastGood;
       if (previous?.source) row = { ...row, source: previous.source };
     }
-    if (lane.provider === 'workbuddy' && TRANSIENT_STATUSES.has(status) && !row.accountKey) {
+    if (['workbuddy', 'alibaba'].includes(lane.provider) && TRANSIENT_STATUSES.has(status) && !row.accountKey) {
       // A partial discovery can miss an encrypted identity which has never
       // produced lastGood quota. Preserve its last known metadata as well as
       // identities with successful readings until explicit removal confirms
@@ -687,14 +691,15 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       const state = lane.identities.get(identityKey);
       return (state?.lastAttempt?.row?.source || state?.lastGood?.source) === 'api';
     };
-    const expected = new Set(dispatch.expectedIdentityKeys.filter(belongsToApi));
+    const expected = new Set(dispatch.expectedIdentityKeys.filter(key => belongsToApi(key)
+      && (!dispatch.accountScoped || rowMatchesScope(lane.identities.get(key)?.lastGood || lane.identities.get(key)?.lastAttempt?.row, dispatch.scope))));
     const represented = new Set();
     const committedRows = [];
 
     if (attemptError) {
       const status = attemptError.status || (attemptError.code === 'PROBE_TIMEOUT' ? 'timeout' : 'unavailable');
       const targets = dispatch.accountScoped
-        ? [dispatch.identityKey]
+        ? (expected.size ? [...expected] : [dispatch.identityKey])
         : expected.size ? [...expected] : apiOnly && lane.identities.size ? [] : [`${lane.provider}:*`];
       for (const identityKey of targets) {
         if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
@@ -732,7 +737,8 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       let identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
       if (removal.replacementAccount) { replacementRemovals.push(removal); continue; }
       if (identityKey === `${lane.provider}:*`) { removeAnonymous = true; continue; }
-      if (dispatch.accountScoped && identityKey !== dispatch.identityKey) continue;
+      if (dispatch.accountScoped && identityKey !== dispatch.identityKey
+        && !rowMatchesScope({ ...removal, provider: lane.provider }, dispatch.scope)) continue;
       if (apiOnly && !belongsToApi(identityKey)) continue;
       if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
       represented.add(identityKey);
@@ -741,11 +747,25 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
 
     for (const row of normalizedRows) {
       let identityKey = rowIdentityKey(row);
-      if (identityKey === `${lane.provider}:*` && dispatch.accountScoped) identityKey = dispatch.identityKey;
+      if (identityKey === `${lane.provider}:*` && dispatch.accountScoped) {
+        if (lane.provider === 'alibaba' && expected.size) {
+          for (const expectedKey of expected) {
+            if (!accountRevisionStillCurrent(lane, expectedKey, dispatch)) continue;
+            represented.add(expectedKey);
+            committedRows.push(applyAttempt(lane, expectedKey, row, row.status, attemptAt));
+          }
+          continue;
+        }
+        identityKey = dispatch.identityKey;
+      }
       if (apiOnly && identityKey !== `${lane.provider}:*`
         && lane.identities.has(identityKey) && !belongsToApi(identityKey)) continue;
       if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
-      if (dispatch.accountScoped && identityKey !== dispatch.identityKey) identityKey = dispatch.identityKey;
+      if (dispatch.accountScoped && identityKey !== dispatch.identityKey) {
+        if (lane.provider === 'alibaba' && row.accountKey) {
+          if (!rowMatchesScope(row, dispatch.scope)) continue;
+        } else identityKey = dispatch.identityKey;
+      }
 
       if (identityKey === `${lane.provider}:*` && TRANSIENT_STATUSES.has(row.status) && expected.size > 0) {
         for (const expectedKey of expected) {
@@ -1016,7 +1036,16 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     const previousEnabled = enabled;
     const previousRefreshMs = refreshMs;
     const previousProviders = configuredProviders;
+    const previousConfig = config;
     config = { ...config, ...cloneValue(nextOptions) };
+    const alibaba = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === 'alibaba');
+    if (alibaba && Object.hasOwn(nextOptions, accountSlotKey(alibaba))) {
+      const describe = options => normalizeAccountSlots(alibaba, options[accountSlotKey(alibaba)]).map(slot => ({ ...slot,
+        accountKey: providerRuntimeState.get(`account-slot:alibaba:slot:${slot.id}:${accountValuesFingerprint(slot.values)}`)?.accountKey || slot.accountKey }));
+      const environmentKey = providerRuntimeState.get(`account-slot:alibaba:default:${accountValuesFingerprint(defaultAccountValues(alibaba, config, deps.env || process.env))}`)?.accountKey;
+      const environment = environmentKey ? { accountKey: environmentKey, region: config.alibabaVariant || 'cn' } : null;
+      for (const scope of alibabaRetiredVariantScopes(describe(previousConfig), describe(config), environment)) clear(scope, 'settings-change');
+    }
     enabled = parseBoolean(config.limitsEnabled ?? config.enabled, true);
     refreshMode = normalizeLimitsRefreshMode(config.limitsRefreshMode);
     refreshMs = refreshMode === 'adaptive'
