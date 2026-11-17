@@ -75,15 +75,39 @@ function hasAccountCredential(entry, values) {
 }
 /** @param {any} values */
 function accountValuesFingerprint(values) { return hashKey(JSON.stringify(Object.entries(values).sort(([a], [b]) => a.localeCompare(b)))); }
+// Saved array order fills the gaps between persisted external row positions.
+// Unpositioned discoveries keep their initial precedence over the environment.
+/** @param {any[]} saved @param {any[]} ambient @param {any} environment */
+function orderAccountRows(saved, ambient, environment) {
+  const positioned = [...ambient, ...(environment && Number.isFinite(environment.order) ? [environment] : [])]
+    .filter(item => Number.isFinite(item.order) && item.order >= 0).sort((a, b) => a.order - b.order);
+  const rows = [...ambient.filter(item => !Number.isFinite(item.order) || item.order < 0),
+    ...(environment && !positioned.includes(environment) ? [environment] : []), ...saved];
+  for (const item of positioned) rows.splice(Math.min(Math.floor(item.order), rows.length), 0, item);
+  return rows;
+}
 /** @param {any[]} entries @param {any} options @param {any} env @param {any} [deps] */
 function configuredMultiAccountProviders(entries, options, env, deps = {}) {
   const discoveredCount = (/** @type {any} */ entry) => {
     try {
-      return (entry.discoveredAccounts?.(env, entry.limits, { ...deps, env }) || []).filter((/** @type {any} */ record) => options[`${entry.id}AmbientAccounts`]?.[accountValuesFingerprint(record.values)]?.enabled !== false).length;
+      /** @type {any[]} */
+      const owners = normalizeAccountSlots(entry, options[accountSlotKey(entry)]).filter(slot => slot.enabled);
+      const values = defaultAccountValues(entry, options, env);
+      if (hasAccountCredential(entry, values)) owners.push({ values, accountKey: hashKey(entry.id, values[accountCredentialKey(entry, values)]), accountKeyAliases: [] });
+      const records = (entry.discoveredAccounts?.(env, entry.limits, { ...deps, env }) || []).filter((/** @type {any} */ record) => options[`${entry.id}AmbientAccounts`]?.[accountValuesFingerprint(record.values)]?.enabled !== false);
+      let count = 0;
+      for (const record of records) {
+        const identity = { ...options[`${entry.id}AmbientAccounts`]?.[accountValuesFingerprint(record.values)], ...record };
+        if (owners.some(owner => accountValuesFingerprint(owner.values) === accountValuesFingerprint(record.values)
+          || (owner.accountKey && (owner.accountKey === identity.accountKey || identity.accountKeyAliases?.includes(owner.accountKey) || owner.accountKeyAliases?.includes(identity.accountKey))))) continue;
+        owners.push({ ...record, ...identity });
+        count += 1;
+      }
+      return count;
     } catch (_) { return Object.values(options[`${entry.id}AmbientAccounts`] || {}).filter((/** @type {any} */ item) => item.enabled !== false).length; }
   };
   return entries.filter(entry => entry.accountSlots && normalizeAccountSlots(entry, options[accountSlotKey(entry)]).filter(slot => slot.enabled).length
     + discoveredCount(entry)
     + (hasAccountCredential(entry, defaultAccountValues(entry, options, env)) ? 1 : 0) > 1).map(entry => entry.id);
 }
-module.exports = { normalizeAmbientAccounts, accountCredentialKey, hasAccountCredential, defaultIdentityKey, defaultAccountValues, accountValuesFingerprint, configuredMultiAccountProviders, accountSlotKey, accountSlotField, normalizeAccountSlots };
+module.exports = { orderAccountRows, normalizeAmbientAccounts, accountCredentialKey, hasAccountCredential, defaultIdentityKey, defaultAccountValues, accountValuesFingerprint, configuredMultiAccountProviders, accountSlotKey, accountSlotField, normalizeAccountSlots };

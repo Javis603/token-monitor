@@ -7,7 +7,7 @@ const { randomUUID } = require('node:crypto');
 const { createCredentialCommands, providerSelectionIncluding } = require('./credentialCommands');
 const { accountForm } = require('./accountSettings');
 const { limitProviderEntry } = require('../../shared/limits/registry');
-const { accountSlotKey, normalizeAccountSlots, defaultAccountValues, accountCredentialKey, accountValuesFingerprint } = require('../../shared/limits/accountSlots');
+const { orderAccountRows, defaultIdentityKey, accountSlotKey, normalizeAccountSlots, defaultAccountValues, accountCredentialKey, accountValuesFingerprint } = require('../../shared/limits/accountSlots');
 
 // All secret/identity writes share one lane. Refresh notification is outside the
 // transaction: a refresh may itself enqueue a resolved identity.
@@ -33,15 +33,16 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     return credentialKey && !getSettings()[credentialKey] ? { id: 'environment', label: '', enabled: true, source: 'environment', values, accountKey: hashKey(entry.id, credential), ...identity } : null;
   };
   const ambient = entry => ambientAccounts(entry, getSettings(), { ...probeDeps?.(), env });
-  const ordered = (entry, list = slots(entry)) => [...ambient(entry), ...(environment(entry) ? [environment(entry)] : []), ...list.map((slot, index) => ({ ...slot, order: index }))].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  const dto = entry => ordered(entry).filter((item, index, all) => !all.slice(0, index).some(other => (other.source || item.source)
-    // A paused duplicate stays listed, so the row the user sees matches what is collected.
-    && other.enabled !== false && item.enabled !== false && other.accountKey && (other.accountKey === item.accountKey || other.accountKeyAliases?.includes(item.accountKey) || item.accountKeyAliases?.includes(other.accountKey)))).map(({ id, label, enabled, accountKey, accountKeyAliases = [], values, source, sourceName, accountName, accountEmail, createdAt, updatedAt }) => {
+  const ordered = (entry, list = slots(entry)) => orderAccountRows(list, ambient(entry),
+    environment(entry) ? { ...environment(entry), order: getSettings()[defaultIdentityKey(entry)]?.order } : null);
+  const visible = entry => ordered(entry).filter((item, index, all) => !all.slice(0, index).some(other => (other.source || item.source)
+    && other.enabled !== false && item.enabled !== false && other.accountKey && (other.accountKey === item.accountKey || other.accountKeyAliases?.includes(item.accountKey) || item.accountKeyAliases?.includes(other.accountKey))));
+  const dto = entry => visible(entry).map(({ id, label, enabled, accountKey, accountKeyAliases = [], values, fingerprint, source, sourceName, accountName, accountEmail, createdAt, updatedAt }) => {
     const key = accountKey || hashKey(entry.id, 'account-slot', source ? 'default' : `slot:${id}`);
     return { id, label, enabled, accountKey: key, accountKeyAliases, ...(source ? { source } : {}),
       ...(source === 'discovered' ? { sourceName, accountName, accountEmail } : {}),
       formValues: Object.fromEntries(accountForm(entry).fields.filter(field => !field.secret).map(field => [field.key, values[field.key]])),
-      fingerprint: accountValuesFingerprint(values).slice(7, 19), createdAt, updatedAt };
+      fingerprint: (source === 'discovered' ? fingerprint : accountValuesFingerprint(values)).slice(7, 19), createdAt, updatedAt };
   });
   const failure = (errorCode) => ({ ok: false, errorCode });
   // `refresh: false`: only local presentation changed (label, order), so the
@@ -131,18 +132,34 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     return serialize(async () => {
       const entry = entryFor(providerId);
       if (!entry) return failure('unsupportedProvider');
+      if (operation === 'move' && ['up', 'down'].includes(value)) {
+        const rows = visible(entry);
+        const index = rows.findIndex(item => item.id === id);
+        if (index < 0) return failure('accountNotFound');
+        const target = index + (value === 'up' ? -1 : 1);
+        if (target < 0 || target >= rows.length) return list(providerId);
+        [rows[index], rows[target]] = [rows[target], rows[index]];
+        // Hidden duplicate owners follow the visible list without displacing
+        // the neighbour the user chose. Preserve every saved credential.
+        const all = [...rows, ...ordered(entry).filter(item => !rows.some(row => row.id === item.id))];
+        const metadata = { ...(getSettings()[`${entry.id}AmbientAccounts`] || {}) };
+        const patch = { [accountSlotKey(entry)]: all.filter(item => !item.source) };
+        all.forEach((item, order) => {
+          if (item.source === 'discovered') metadata[item.fingerprint] = { accountKey: item.accountKey, accountKeyAliases: item.accountKeyAliases, accountName: item.accountName, accountEmail: item.accountEmail, sourceName: item.sourceName, label: item.label, enabled: item.enabled, order };
+          if (item.source === 'environment') patch[defaultIdentityKey(entry)] = { ...getSettings()[defaultIdentityKey(entry)], order };
+        });
+        if (entry.discoveredAccounts) patch[`${entry.id}AmbientAccounts`] = metadata;
+        await write(patch);
+        changed(entry, [], false);
+        return list(providerId);
+      }
       const external = ordered(entry).find(item => item.id === id && item.source);
       if (external?.source === 'discovered') {
-        if (!['rename', 'enabled', 'move'].includes(operation)) return failure('environmentCredential');
+        if (!['rename', 'enabled'].includes(operation)) return failure('environmentCredential');
         const metadata = { ...(getSettings()[`${entry.id}AmbientAccounts`] || {}) };
-        const record = { ...metadata[external.fingerprint], accountKey: external.accountKey, accountKeyAliases: external.accountKeyAliases, label: external.label, enabled: external.enabled };
+        const record = { ...metadata[external.fingerprint], order: external.order, accountKey: external.accountKey, accountKeyAliases: external.accountKeyAliases, label: external.label, enabled: external.enabled };
         if (operation === 'rename' && typeof value === 'string') record.label = value;
         else if (operation === 'enabled' && typeof value === 'boolean') record.enabled = value;
-        else if (operation === 'move' && ['up', 'down'].includes(value)) {
-          const accounts = ordered(entry);
-          const target = accounts[accounts.findIndex(item => item.id === id) + (value === 'down' ? 1 : -1)];
-          if (target) record.order = (target.order ?? 0) + (value === 'down' ? 0.5 : -0.5);
-        }
         else return failure('invalidOperation');
         metadata[external.fingerprint] = record;
         // One control record per account: drop records left by an earlier token.
@@ -158,10 +175,7 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
       if (operation === 'remove') next.splice(index, 1);
       else if (operation === 'rename' && typeof value === 'string') next[index].label = value;
       else if (operation === 'enabled' && typeof value === 'boolean') next[index].enabled = value;
-      else if (operation === 'move' && (value === 'up' || value === 'down')) {
-        const target = index + (value === 'up' ? -1 : 1);
-        if (target >= 0 && target < next.length) [next[index], next[target]] = [next[target], next[index]];
-      } else return failure('invalidOperation');
+      else return failure('invalidOperation');
       if (operation !== 'remove') next.find(slot => slot.id === id).updatedAt = new Date(now()).toISOString();
       await commit(entry, next, true, operation !== 'rename' && operation !== 'move');
       return list(providerId);
@@ -182,7 +196,7 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
         if (!current || fingerprint !== current.fingerprint) return false;
         const metadata = { ...(getSettings()[`${entry.id}AmbientAccounts`] || {}) };
         // A rotated token keeps the account's name, pause and position.
-        const previous = metadata[fingerprint] || Object.values(metadata).find(item => item?.accountKey === identity.accountKey) || {};
+        const previous = metadata[fingerprint] || Object.values(metadata).find(item => item?.accountKey === identity.accountKey || item?.accountKeyAliases?.includes(identity.accountKey)) || current;
         const nextIdentity = { label: previous.label, enabled: previous.enabled, order: previous.order, ...metadata[fingerprint], ...identity, sourceName: current.sourceName };
         for (const [key, item] of Object.entries(metadata)) if (key !== fingerprint && item?.accountKey === identity.accountKey) delete metadata[key];
         if (JSON.stringify(metadata[fingerprint]) === JSON.stringify(nextIdentity)) return true;

@@ -205,3 +205,117 @@ test('cline: a saved reading suppressed by the discovered alias is retired and i
   assert.ok(live[0].accountKeyAliases?.includes('saved-key') || live[0].accountKey === 'saved-key');
   if (live[0].accountKey !== 'saved-key') assert.ok(rows.some(row => row.removed && row.accountKey === 'saved-key'));
 });
+
+test('rotated discovered identity inherits controls through a remembered alias', t => {
+  const entry = stubDiscovery(t, 'cline', () => [{ values: { clineApiKey: 'new' }, accountKey: 'alias' }]);
+  const { ambientAccounts } = require('../../src/shared/limits/ambientAccounts');
+  const old = accountValuesFingerprint({ clineApiKey: 'old' });
+  const current = accountValuesFingerprint({ clineApiKey: 'new' });
+  const options = { clineAmbientAccounts: { [old]: { accountKey: 'canonical', accountKeyAliases: ['alias'], label: 'Work', enabled: false, order: 2 } } };
+  assert.equal(ambientAccounts(entry, options, { env: {} })[0].enabled, false);
+  assert.equal(ambientAccounts(entry, options, { env: {} })[0].order, 2);
+  options.clineAmbientAccounts[current] = { label: 'Current', enabled: true };
+  assert.equal(ambientAccounts(entry, options, { env: {} })[0].label, 'Current');
+});
+
+test('Factory identical environment and Droid credentials show one row before fetching', t => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'factory-duplicate-'));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(homeDir, '.factory'));
+  fs.writeFileSync(path.join(homeDir, '.factory/.env'), 'FACTORY_API_KEY=same\n');
+  const service = createAccountSlotService({ getSettings: () => ({}), env: { FACTORY_API_KEY: 'same' }, probeDeps: () => ({ homeDir }) });
+  assert.equal(service.list('factory').accounts.length, 1);
+});
+
+test('discovered and environment accounts each receive a physical job budget without saved slots', t => {
+  const entry = stubDiscovery(t, 'factory', () => [{ values: { factoryApiKey: 'droid' } }]);
+  const { accountSlotJobs } = require('../../src/shared/limits/accountSlotFetcher');
+  assert.equal(accountSlotJobs(entry, {}, { env: { FACTORY_API_KEY: 'env' } }), 2);
+});
+
+test('billing-only ZCode discovery is configured consistently with its collected row', () => {
+  const declaration = require('../../src/shared/providers/zai/account');
+  const discovery = { kind: 'coding-quota', entitled: false, reason: 'coding_plan_key_missing', billing: { credential: { token: 'billing' } } };
+  const found = declaration.discover({}, { discoverZcodeConnection: () => discovery });
+  assert.equal(found, discovery);
+  assert.equal(declaration.accountStatus({ settings: {}, env: {}, discovered: found, limits: { zaiToken: () => '' } }).zaiApiKeyConfigured, true);
+});
+
+test('unavailable discovered DTOs retain their distinct credential fingerprints', () => {
+  const a = accountValuesFingerprint({ harkCookie: 'a' }), b = accountValuesFingerprint({ harkCookie: 'b' });
+  const service = createAccountSlotService({ getSettings: () => ({ harkAmbientAccounts: { [a]: { accountKey: 'a' }, [b]: { accountKey: 'b' } } }), env: {}, probeDeps: () => ({ readHarkDesktopSession: () => { throw new Error('unreadable'); } }) });
+  assert.deepEqual(service.list('hark').accounts.map(row => row.fingerprint), [a, b].map(key => key.slice(7, 19)));
+});
+
+test('omitted ambient metadata stays omitted after credential and field projection', () => {
+  const { credentialSettingsForRenderer } = require('../../src/shared/credentialStore');
+  const { accountFieldProjection } = require('../../src/electron/limits/accountSettings');
+  const settings = { harkAmbientAccounts: { private: 'metadata' } };
+  const projection = { ...credentialSettingsForRenderer(settings), ...accountFieldProjection(settings, {}) };
+  assert.equal(Object.hasOwn(projection, 'harkAmbientAccounts'), false);
+});
+
+test('saved and discovered moves swap the visible neighbour and survive restart, including environment', async t => {
+  stubDiscovery(t, 'factory', () => [{ values: { factoryApiKey: 'droid' }, accountKey: 'droid-key' }]);
+  let settings = { factoryAccountSlots: [{ id: 'saved', values: { factoryApiKey: 'saved' }, accountKey: 'saved-key' }] };
+  const make = () => createAccountSlotService({ getSettings: () => settings, env: { FACTORY_API_KEY: 'env' }, probeDeps: () => ({}), write: async patch => { settings = { ...settings, ...patch }; } });
+  let service = make();
+  const discovered = service.list('factory').accounts.find(row => row.source === 'discovered').id;
+  const ids = () => service.list('factory').accounts.map(row => row.id);
+  await service.move('factory', 'saved', 'up');
+  assert.deepEqual(ids(), [discovered, 'saved', 'environment']);
+  await service.move('factory', 'saved', 'up');
+  service = make();
+  assert.deepEqual(ids(), ['saved', discovered, 'environment']);
+  await service.move('factory', discovered, 'up');
+  service = make();
+  assert.deepEqual(ids(), [discovered, 'saved', 'environment']);
+});
+
+test('runtime interleaves discovered metadata positions with saved rows', async t => {
+  stubDiscovery(t, 'factory', () => []);
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  const fingerprint = accountValuesFingerprint({ factoryApiKey: 'droid' });
+  const config = { limitsEnabled: true, limitProviders: 'factory', factoryAccountSlots: [{ id: 'saved', values: { factoryApiKey: 'saved' }, accountKey: 'saved-key' }], factoryAmbientAccounts: { [fingerprint]: { accountKey: 'droid-key', accountKeyAliases: [], order: 1 } } };
+  const runtime = createLimitsRuntime(config, { env: {}, autoStart: false, autoRetry: false, providerFetchers: { factory: () => ['droid-key', 'saved-key'].map(accountKey => ({ provider: 'factory', accountKey, status: 'ok', windows: [] })) } });
+  t.after(() => runtime.stop());
+  await runtime.refresh({}, 'settings-change');
+  assert.deepEqual(runtime.getSnapshot().providers.map(row => row.accountKey), ['saved-key', 'droid-key']);
+});
+
+test('multi-account advertisement ignores discovered credentials duplicated by a saved or environment account', t => {
+  const entry = stubDiscovery(t, 'factory', () => [{ values: { factoryApiKey: 'same' }, accountKey: 'same-key' }]);
+  const { configuredMultiAccountProviders } = require('../../src/shared/limits/accountSlots');
+  assert.deepEqual(configuredMultiAccountProviders([entry], {}, { FACTORY_API_KEY: 'same' }), []);
+  assert.deepEqual(configuredMultiAccountProviders([entry], { factoryAccountSlots: [{ id: 'saved', values: { factoryApiKey: 'same' }, accountKey: 'same-key' }] }, {}), []);
+  assert.deepEqual(configuredMultiAccountProviders([entry], { factoryAccountSlots: [{ id: 'saved', values: { factoryApiKey: 'different' }, accountKey: 'same-key' }] }, {}), []);
+  assert.deepEqual(configuredMultiAccountProviders([entry], {}, { FACTORY_API_KEY: 'other' }), ['factory']);
+});
+
+test('provider guidance describes independent collection followed by account identity collapse', () => {
+  for (const id of ['hark', 'manus']) assert.match(fs.readFileSync(path.join(__dirname, `../../docs/providers/${id}.md`), 'utf8'), /collected independently; rows identifying the same account by key or aliases collapse into one/);
+});
+test('ZCode guidance distinguishes coding-plan and Start-plan ownership', () => {
+  assert.match(fs.readFileSync(path.join(__dirname, '../../docs/providers/zai.md'), 'utf8'), /coding quota plus Start\/Weekend billing for a coding-plan selection, or only Start\/Weekend billing for a Start-plan selection/);
+});
+test('account cap guidance distinguishes saved slots from additional ambient rows', () => {
+  assert.match(fs.readFileSync(path.join(__dirname, '../../docs/architecture.md'), 'utf8'), /21 saved slots, with discovered and environment rows additional/);
+});
+
+test('runtime order follows persisted environment and multiple discovered positions after moves', async t => {
+  const entry = stubDiscovery(t, 'factory', () => ['a', 'b'].map(key => ({ values: { factoryApiKey: key }, accountKey: key })));
+  let settings = { limitsEnabled: true, limitProviders: 'factory', factoryAccountSlots: [{ id: 'saved', values: { factoryApiKey: 'saved' }, accountKey: 'saved' }] };
+  const env = { FACTORY_API_KEY: 'env' };
+  const make = () => createAccountSlotService({ getSettings: () => settings, env, probeDeps: () => ({}), write: async patch => { settings = { ...settings, ...patch }; } });
+  let service = make();
+  await service.move('factory', 'saved', 'up');
+  await service.move('factory', 'saved', 'up');
+  service = make();
+  assert.deepEqual(service.list('factory').accounts.slice(0, 3).map(row => row.accountKey), ['a', 'saved', 'b']);
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  const fetcher = createAccountSlotFetcher({ ...entry, fetchLimits: (options, deps) => ({ provider: 'factory', accountKey: options.factoryApiKey || deps.env.FACTORY_API_KEY, status: 'ok', windows: [] }) });
+  const runtime = createLimitsRuntime(settings, { env, autoStart: false, autoRetry: false, providerFetchers: { factory: fetcher } });
+  t.after(() => runtime.stop());
+  await runtime.refresh({}, 'settings-change');
+  assert.deepEqual(runtime.getSnapshot().providers.map(row => row.accountKey), ['a', 'saved', 'b', 'env']);
+});

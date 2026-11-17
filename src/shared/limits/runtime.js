@@ -1,6 +1,6 @@
 'use strict';
 
-const { configuredMultiAccountProviders, normalizeAccountSlots, accountSlotKey, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
+const { orderAccountRows, defaultIdentityKey, configuredMultiAccountProviders, normalizeAccountSlots, accountSlotKey, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
 const { LIMIT_PROVIDER_REGISTRY } = require('./registry');
 
 const crypto = require('node:crypto');
@@ -369,13 +369,19 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     }
     const entry = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === provider && entry.accountSlots);
     if (entry) {
-      const slots = [...Object.values(config[`${entry.id}AmbientAccounts`] || {}), ...normalizeAccountSlots(entry, config[accountSlotKey(entry)])].filter(slot => slot.enabled !== false);
       const current = providerRuntimeState.get(`account-slot:${entry.id}:default:${accountValuesFingerprint(defaultAccountValues(entry, config, deps.env || process.env))}`)?.accountKey;
+      const saved = normalizeAccountSlots(entry, config[accountSlotKey(entry)]);
+      const ambient = Object.values(config[`${entry.id}AmbientAccounts`] || {});
+      const environmentOrder = config[defaultIdentityKey(entry)]?.order;
+      // Legacy fixed accounts without discovery retain their trailing position.
+      const environment = current ? { accountKey: current, accountKeyAliases: [], source: 'environment',
+        order: environmentOrder ?? (entry.discoveredAccounts ? undefined : saved.length + ambient.length) } : null;
+      const slots = orderAccountRows(saved, ambient, environment).filter(slot => slot.enabled !== false);
       const owner = row => slots.find(slot => slot.accountKey === row.accountKey)
         || (row.accountKey === current ? undefined : slots.find(slot => slot.accountKeyAliases.includes(row.accountKey)));
       for (const row of rows) {
         const slot = owner(row);
-        if (slot) {
+        if (slot && slot.source !== 'environment') {
           // Labels are local metadata; changing them never replaces quota data.
           // A slot's local name is its accountName, also while a retained
           // reading answers for it; the provider's accountLabel (Qoder's plan)

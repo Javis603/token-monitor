@@ -124,7 +124,7 @@ function slotAccounts(entry, options, deps) {
 
 /** @param {SlotEntry} entry @param {SlotOptions} options @param {SlotDeps} deps */
 function accountSlotJobs(entry, options, deps) {
-  return normalizeAccountSlots(entry, options[accountSlotKey(entry)]).length ? Math.max(1, slotAccounts(entry, options, deps).accounts.length) : 1;
+  return entry.discoveredAccounts || normalizeAccountSlots(entry, options[accountSlotKey(entry)]).length ? Math.max(1, slotAccounts(entry, options, deps).accounts.length) : 1;
 }
 
 /** @param {SlotEntry} entry */

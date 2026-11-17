@@ -84,14 +84,16 @@ for (const bad of ['corrupt', 'unsupported', 'symlink']) test(`migration refuses
   assert.throws(() => migrateAccountSlots(store, {}));
   assert.equal(fs.readFileSync(file, 'utf8'), before);
 });
-test('environment account is ephemeral, first, and rejects every mutation', async () => {
+test('environment credential is ephemeral and read-only, with movable presentation', async () => {
   const settings = { deepseekAccountSlots: [{ id: 'local', values, enabled: true }] };
   let writes = 0;
   const service = createAccountSlotService({ getSettings: () => settings, env: { DEEPSEEK_API_KEY: 'environment-key' }, write: () => writes++ });
   const accounts = service.list('deepseek').accounts;
   assert.equal(accounts[0].source, 'environment'); assert.equal(accounts[0].accountKey, hashKey('deepseek', 'environment-key')); assert.equal(accounts[1].id, 'local');
-  for (const result of [await service.rename('deepseek', 'environment', 'name'), await service.setEnabled('deepseek', 'environment', false), await service.move('deepseek', 'environment', 'down'), await service.remove('deepseek', 'environment'), await service.replace('deepseek', 'environment', values)]) assert.equal(result.errorCode, 'environmentCredential');
+  for (const result of [await service.rename('deepseek', 'environment', 'name'), await service.setEnabled('deepseek', 'environment', false), await service.remove('deepseek', 'environment'), await service.replace('deepseek', 'environment', values)]) assert.equal(result.errorCode, 'environmentCredential');
   assert.equal(writes, 0);
+  assert.equal((await service.move('deepseek', 'environment', 'down')).ok, true);
+  assert.equal(writes, 1);
 });
 
 test('fixed-form IPC routes slot providers to add; settings saves do not re-run the migration', () => {
