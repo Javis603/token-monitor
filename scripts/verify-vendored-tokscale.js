@@ -718,11 +718,12 @@ function assertTokenContract(parsed, contract) {
   }
   const usage = extractUsageFromTokscale(parsed);
   if (contract.expectedPerformance) {
+    const performance = entries[0]?.performance;
     const mismatches = Object.entries(contract.expectedPerformance)
-      .filter(([key, value]) => entry.performance?.[key] !== value);
-    if (mismatches.length || usage.timedOutputTokens !== contract.expectedPeriod.clientOutputTokens ||
+      .filter(([key, value]) => performance?.[key] !== value);
+    if (entries.length !== 1 || mismatches.length || usage.timedOutputTokens !== contract.expectedPeriod.clientOutputTokens ||
         usage.timedDurationMs !== contract.expectedPerformance.totalDurationMs) {
-      throw new Error(`${contract.client} timing contract mismatch: ${JSON.stringify(entry.performance)}`);
+      throw new Error(`${contract.client} timing contract mismatch: ${JSON.stringify(performance)}`);
     }
   }
   const expected = contract.expectedPeriod;
