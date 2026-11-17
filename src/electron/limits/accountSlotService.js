@@ -284,7 +284,9 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       const fingerprint = accountValuesFingerprint(dispatchedValues);
       if (id === 'environment') {
         if (fingerprint !== accountValuesFingerprint(defaultAccountValues(entry, getSettings(), env))) return false;
+        const previousKey = dto(entry).find(item => item.id === 'environment')?.accountKey || '';
         environmentIdentities.set(entry.id, { fingerprint, identity });
+        await migratePresentationKey(providerId, previousKey, identity.accountKey);
         return true;
       }
       if (id?.startsWith('discovered-')) {
