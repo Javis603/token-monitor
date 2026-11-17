@@ -424,3 +424,16 @@ test('a rename answers without waiting for the shared document', async () => {
   assert.notEqual(result, 'timed out');
   assert.equal(h.settings.limitAccountPresentation.deepseek.labels[result.accounts[0].accountKey], 'Offline Hub');
 });
+
+test('a shared name, including a clear, becomes the slot label without being republished', async () => {
+  const operations = [];
+  const h = harness({ onPresentation: batch => operations.push(...batch) });
+  const result = await add(h);
+  const key = result.accounts[0].accountKey;
+  operations.length = 0;
+  await h.service.adoptSharedLabels({ deepseek: { labels: { [key]: 'From Windows' }, order: [] } });
+  assert.equal(h.service.list('deepseek').accounts[0].label, 'From Windows');
+  await h.service.adoptSharedLabels({ deepseek: { labels: { [key]: '' }, order: [] } });
+  assert.equal(h.service.list('deepseek').accounts[0].label, '');
+  assert.deepEqual(operations, []);
+});

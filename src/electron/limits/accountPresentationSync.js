@@ -44,7 +44,9 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
       if ([400, 404].includes(response.status)) { unsupported = true; pending = []; return; }
       if (response.status !== 200) return;
       let document = response.body;
-      const localLabels = !getCacheIdentity() ? getLocalLabels() : [];
+      // This device's own slot names are its input, so they fill gaps on the
+      // first connection to each destination; only a Hub cache is never a seed.
+      const localLabels = getCacheIdentity() !== captured ? getLocalLabels() : [];
       // A cache of any Hub is never a seed, even when that Hub cleared its map.
       const seed = document.value === null && !getCacheIdentity() ? getSeed() : {};
       for (let attempt = 0; attempt < 3; attempt++) {
@@ -104,7 +106,9 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
     return refreshPending;
   }
   return { publish, refresh, notifyStats(/** @type {any} */ stats) {
-    if (connected() && (binding !== identity(getContext()) || stats?.syncSettingsRevisions?.[KIND] !== revision)) {
+    // Pending edits retry on the next frame even when the Hub's revision has
+    // not moved, so a transient failure cannot strand them.
+    if (connected() && (pending.length || binding !== identity(getContext()) || stats?.syncSettingsRevisions?.[KIND] !== revision)) {
       if (refreshPending) refreshAgain = true;
       else void refresh();
     }

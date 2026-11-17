@@ -214,7 +214,26 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       return true;
     });
   }
-  return { list, presentation, add: (provider, values, label) => save(provider, values, { label }),
+  // A shared name (including an explicit blank) becomes the local slot label,
+  // so readings projected from the slot carry the same name. Not republished.
+  function adoptSharedLabels(shared) {
+    return serialize(async () => {
+      for (const [providerId, group] of Object.entries(shared || {})) {
+        const entry = entryFor(providerId);
+        if (!entry) continue;
+        const labels = group?.labels || {};
+        const next = slots(entry);
+        let changedAny = false;
+        for (const slot of next) {
+          if (!slot.accountKey || !Object.hasOwn(labels, slot.accountKey) || labels[slot.accountKey] === slot.label) continue;
+          slot.label = labels[slot.accountKey];
+          changedAny = true;
+        }
+        if (changedAny) await commit(entry, next, true, false);
+      }
+    }).catch(() => {});
+  }
+  return { list, presentation, adoptSharedLabels, add: (provider, values, label) => save(provider, values, { label }),
     replace: (provider, id, values) => save(provider, values, { replacing: true, id }),
     rename: (provider, id, label) => mutate(provider, id, 'rename', label),
     setEnabled: (provider, id, enabled) => mutate(provider, id, 'enabled', enabled),

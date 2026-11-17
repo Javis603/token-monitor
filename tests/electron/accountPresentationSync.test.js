@@ -113,3 +113,35 @@ test('a stream marker arriving during a read schedules a fresh follow-up read', 
   await caughtUp;
   assert.equal(reads, 2);
 });
+
+test('a pending edit retries on the next stats frame even when the Hub revision is unchanged', async () => {
+  let failPut = true;
+  let document = { revision: 1, value: { deepseek: { labels: {}, order: [] } } };
+  const puts = [];
+  const runtime = createAccountPresentationSync({
+    getContext: () => ({ mode: 'client', url: 'https://hub' }), identity: () => 'hub',
+    getCacheIdentity: () => 'hub', getSeed: () => ({}), getLocalLabels: () => [], apply: () => {},
+    request: async (_context, _path, method, body) => {
+      if (method === 'GET') return { status: 200, body: structuredClone(document) };
+      puts.push(body.value);
+      if (failPut) { failPut = false; return { status: 503 }; }
+      document = { revision: document.revision + 1, value: body.value };
+      return { status: 200, body: structuredClone(document) };
+    }
+  });
+  await runtime.refresh();
+  await runtime.publish([{ provider: 'deepseek', type: 'rename', key: 'a', label: 'Work' }]);
+  assert.equal(document.revision, 1, 'the first write failed');
+  runtime.notifyStats({ syncSettingsRevisions: { limitAccountPresentation: 1 } });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(document.value.deepseek.labels.a, 'Work');
+});
+
+test('slot names fill gaps on the first connection to another Hub despite an older Hub cache', async () => {
+  const f = fixture({ cache: 'previous-hub', document: { revision: 3, value: { deepseek: { labels: {}, order: [] } } },
+    localLabels: [{ provider: 'deepseek', type: 'rename', key: 'mine', label: 'Mine' }] });
+  await f.runtime.refresh();
+  const put = f.calls.find(call => call.method === 'PUT');
+  assert.equal(put?.body.value.deepseek.labels.mine, 'Mine');
+  assert.equal(Object.hasOwn(put.body.value.deepseek.labels, 'a'), false, 'the old Hub cache never seeds');
+});

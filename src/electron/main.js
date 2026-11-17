@@ -3990,6 +3990,7 @@ function getAccountPresentationSync() {
       settings = { ...settings, limitAccountPresentation: value, limitAccountPresentationCacheIdentity: identity };
       saveSettings({ throwOnError: true });
       pushSettingsToRenderer();
+      void accountSlotService?.adoptSharedLabels(value);
     }
   });
 }
