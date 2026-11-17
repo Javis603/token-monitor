@@ -113,7 +113,7 @@ function createMimoAccountService(deps) {
     result.account.accountEmail = String(validation.accountEmail || '').trim().slice(0, 254);
     const currentAccounts = normalizeMimoManagedAccounts(getMimoManagedAccounts());
     const current = currentAccounts.find(account => account.accountKey === result.account.accountKey);
-    if (current) result.account = { ...current, ...result.account, id: current.id, addedAt: current.addedAt, accountLabel: current.accountLabel };
+    if (current) result.account = { ...current, ...result.account, id: current.id, addedAt: current.addedAt, accountLabel: current.accountLabel, enabled: current.enabled };
     const previousCookie = readMimoCredential(result.account.id);
     const credentialStored = writeMimoCredential(result.account.id, result.account.cookieHeader);
     delete result.account.cookieHeader;

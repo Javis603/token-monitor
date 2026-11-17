@@ -36,6 +36,34 @@ for (const fail of [false, true]) test(`MiMo current metadata and rollback (${fa
   assert.ok(!accounts.some(a => a.id === old.id));
   if (fail) { assert.deepEqual(accounts, [sibling]); assert.equal(credentials.size, 0); }
 });
+for (const pauseDuringProbe of [false, true]) test(`MiMo re-add preserves pause state (during validation=${pauseDuringProbe})`, async () => {
+  const original = createMimoManagedAccount('userId=1; api-platform_serviceToken=fixture-old').account;
+  delete original.cookieHeader;
+  original.enabled = pauseDuringProbe;
+  original.accountLabel = 'Saved label';
+  let accounts = [original];
+  const credentials = new Map([[original.id, 'userId=1; api-platform_serviceToken=fixture-old']]);
+  const started = Promise.withResolvers(), release = Promise.withResolvers();
+  const api = createMimoAccountService({ getMimoManagedAccounts: () => accounts, setMimoManagedAccounts: next => { accounts = next; },
+    getCredentialStore: () => ({ readMimoCredential: id => credentials.get(id), writeMimoCredential: (id, value) => { credentials.set(id, value); return true; } }),
+    credentialProbeDeps: () => ({ env: {}, readMimoDesktopAccount: () => { throw Error('absent'); }, fetch: async url => {
+      started.resolve(); await release.promise;
+      return response({ code: 0, data: url.endsWith('/balance') ? { balance: '10' } : url.endsWith('/userProfile') ? { email: 'fixture@example.com' } : {} });
+    } }), saveSettings() {}, pushSettingsToRenderer() {}, sendMimoAccountsPush() {}, queueLimitInvalidation() {} });
+  const pending = api.addMimoManagedAccount('userId=1; api-platform_serviceToken=fixture-new');
+  await started.promise;
+  if (pauseDuringProbe) assert.equal(api.setMimoManagedAccountEnabled(original.id, false).ok, true);
+  release.resolve();
+  const result = await pending;
+  assert.equal(result.ok, true);
+  assert.equal(accounts.length, 1);
+  assert.equal(accounts[0].enabled, false);
+  assert.equal(result.accounts.find(account => account.id === original.id).enabled, false);
+  assert.equal(accounts[0].id, original.id);
+  assert.equal(accounts[0].addedAt, original.addedAt);
+  assert.equal(accounts[0].accountLabel, 'Saved label');
+  assert.match(credentials.get(original.id), /fixture-new/);
+});
 for (const saved of [false, true]) test(`MiniMax removal clears matching legacy key atomically (${saved})`, async () => {
   let settings = { minimaxApiKey: 'fixture-key', minimaxApiProfiles: { default: { apiKey: 'fixture-key', enabled: true } } };
   if (saved) settings = { ...settings, minimaxApiProfiles: {}, minimaxAccountSlots: [{ id: 'default', enabled: true, values: {}, owner: { metadata: { id: 'default', enabled: true }, credential: 'fixture-key' } }] };
