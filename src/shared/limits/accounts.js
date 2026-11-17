@@ -1,7 +1,7 @@
 // @ts-check
 'use strict';
 
-const { defaultIdentityKey, accountSlotField } = require('./accountSlots');
+const { defaultIdentityKey, accountSlotField, normalizeAmbientAccounts } = require('./accountSlots');
 
 // The limits account registry index: one account declaration per catalog
 // provider, in catalog order. Each declaration lives in
@@ -100,11 +100,22 @@ const { defaultIdentityKey, accountSlotField } = require('./accountSlots');
  * @property {{key: string, labelKey: string, fields: string[]}} [credentialChoice]
  * @property {{fn: string, field: string}} [rememberProbe]
  *
+ * @typedef {object} DiscoveredAccount
+ * @property {AccountValues} values In-memory form-shaped credentials, never persisted.
+ * @property {string} sourceName Fallback display name and sign-out location.
+ * @property {string} [accountKey]
+ * @property {string} [accountName]
+ * @property {string} [accountEmail]
+ * @property {AccountValues} [fetchDeps] Provider-owned isolated dispatch dependencies.
+ * @property {boolean} [combineMatchingCredential] Preserve a combined pool fetch for an exact form-value match.
+ * @property {AccountValues} [combinedFetchDeps]
+ *
  * @typedef {object} AccountDeclaration
  * @property {string} id
  * @property {string} fetch Limits export called by the collector.
  * @property {AccountField[]} fields
  * @property {boolean} [accountSlots] Requires a form, no managed/profiles fields, credentials only from declared fields, no singleton credential write-back, and an audit of module-level state.
+ * @property {(env: AccountValues, limits: AccountLimits, deps: AccountValues) => DiscoveredAccount[]} [discoveredAccounts] Ephemeral main-only credentials; never projected or saved.
  * @property {string} [serverAccountKey] Limits export testing whether a resolved key proves a server identity.
  * @property {boolean} [accountRefresh] Fetch honors account-scoped limitRefreshScope and returns only that row.
  * @property {AccountStatus} [status] Standard settings/env source and configured flag.
@@ -125,7 +136,7 @@ const { defaultIdentityKey, accountSlotField } = require('./accountSlots');
 // credentialStore, and an eager require here would be a cycle.
 /** @param {AccountDeclaration} account @param {() => AccountLimits} loadLimits */
 function registerProvider(account, loadLimits) {
-  return { ...account, fields: account.accountSlots ? [...account.fields, accountSlotField(account), { key: defaultIdentityKey(account), kind: 'setting', configDefault: {}, storePath: ['providers', account.id, 'defaultAccountIdentity'], persist: 'never', rendererOmit: true, watch: false, initial: null }] : account.fields, loadLimits };
+  return { ...account, fields: account.accountSlots ? [...account.fields, accountSlotField(account), ...(account.discoveredAccounts ? [{ key: `${account.id}AmbientAccounts`, kind: 'setting', configDefault: {}, configNormalize: (/** @type {any} */ value) => normalizeAmbientAccounts(account, value), storePath: ['providers', account.id, 'ambientAccounts'], rendererOmit: true, persist: 'never', initial: null, watch: false }] : []), { key: defaultIdentityKey(account), kind: 'setting', configDefault: {}, storePath: ['providers', account.id, 'defaultAccountIdentity'], persist: 'never', rendererOmit: true, watch: false, initial: null }] : account.fields, loadLimits };
 }
 
 const LIMIT_PROVIDER_ACCOUNTS = Object.freeze([

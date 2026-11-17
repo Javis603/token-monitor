@@ -1,5 +1,6 @@
 'use strict';
 
+const { ambientAccounts } = require('../../shared/limits/ambientAccounts');
 const { hashKey } = require('../../shared/hashKey');
 const { runLimitInvalidation } = require('../deviceRuntimeCoordinator');
 const { randomUUID } = require('node:crypto');
@@ -31,10 +32,12 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     const credential = values[credentialKey];
     return credentialKey && !getSettings()[credentialKey] ? { id: 'environment', label: '', enabled: true, source: 'environment', values, accountKey: hashKey(entry.id, credential), ...identity } : null;
   };
-  const ordered = (entry, list = slots(entry)) => [...(environment(entry) ? [environment(entry)] : []), ...list];
-  const dto = entry => ordered(entry).map(({ id, label, enabled, accountKey, accountKeyAliases = [], values, source, createdAt, updatedAt }) => {
+  const ambient = entry => ambientAccounts(entry, getSettings(), { ...probeDeps?.(), env });
+  const ordered = (entry, list = slots(entry)) => [...ambient(entry), ...(environment(entry) ? [environment(entry)] : []), ...list.map((slot, index) => ({ ...slot, order: index }))].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+  const dto = entry => ordered(entry).filter((item, index, all) => !all.slice(0, index).some(other => (other.source || item.source) && other.accountKey && (other.accountKey === item.accountKey || other.accountKeyAliases?.includes(item.accountKey) || item.accountKeyAliases?.includes(other.accountKey)))).map(({ id, label, enabled, accountKey, accountKeyAliases = [], values, source, sourceName, accountName, accountEmail, createdAt, updatedAt }) => {
     const key = accountKey || hashKey(entry.id, 'account-slot', source ? 'default' : `slot:${id}`);
     return { id, label, enabled, accountKey: key, accountKeyAliases, ...(source ? { source } : {}),
+      ...(source === 'discovered' ? { sourceName, accountName, accountEmail } : {}),
       formValues: Object.fromEntries(accountForm(entry).fields.filter(field => !field.secret).map(field => [field.key, values[field.key]])),
       fingerprint: accountValuesFingerprint(values).slice(7, 19), createdAt, updatedAt };
   });
@@ -66,7 +69,7 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     return serialize(async () => {
       const entry = entryFor(providerId);
       if (!entry) return failure('unsupportedProvider');
-      if (id === 'environment') return failure('environmentCredential');
+      if (id === 'environment' || id?.startsWith('discovered-')) return failure('environmentCredential');
       const previous = slots(entry);
       const old = replacing ? previous.find(slot => slot.id === id) : null;
       if (replacing && !old) return failure('accountNotFound');
@@ -141,6 +144,24 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     return serialize(async () => {
       const entry = entryFor(providerId);
       if (!entry) return failure('unsupportedProvider');
+      const external = ordered(entry).find(item => item.id === id && item.source);
+      if (external?.source === 'discovered') {
+        if (!['rename', 'enabled', 'move'].includes(operation)) return failure('environmentCredential');
+        const metadata = { ...(getSettings()[`${entry.id}AmbientAccounts`] || {}) };
+        const record = { ...metadata[external.fingerprint], accountKey: external.accountKey, accountKeyAliases: external.accountKeyAliases, label: external.label, enabled: external.enabled };
+        if (operation === 'rename' && typeof value === 'string') record.label = value;
+        else if (operation === 'enabled' && typeof value === 'boolean') record.enabled = value;
+        else if (operation === 'move' && ['up', 'down'].includes(value)) {
+          const accounts = ordered(entry);
+          const target = accounts[accounts.findIndex(item => item.id === id) + (value === 'down' ? 1 : -1)];
+          if (target) record.order = (target.order ?? 0) + (value === 'down' ? 0.5 : -0.5);
+        }
+        else return failure('invalidOperation');
+        metadata[external.fingerprint] = record;
+        await write({ [`${entry.id}AmbientAccounts`]: metadata });
+        changed(entry, operation === 'enabled' && !value ? [external.accountKey] : [], operation === 'enabled');
+        return list(providerId);
+      }
       if (id === 'environment') return failure('environmentCredential');
       const next = slots(entry);
       const index = next.findIndex(slot => slot.id === id);
@@ -165,6 +186,16 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
       if (id === 'environment') {
         if (fingerprint !== accountValuesFingerprint(defaultAccountValues(entry, getSettings(), env))) return false;
         environmentIdentities.set(entry.id, { fingerprint, identity });
+        return true;
+      }
+      if (id?.startsWith('discovered-')) {
+        const current = ambient(entry).find(item => item.id === id);
+        if (!current || fingerprint !== current.fingerprint) return false;
+        const metadata = { ...(getSettings()[`${entry.id}AmbientAccounts`] || {}) };
+        const nextIdentity = { ...metadata[fingerprint], ...identity, sourceName: current.sourceName };
+        if (JSON.stringify(metadata[fingerprint]) === JSON.stringify(nextIdentity)) return true;
+        metadata[fingerprint] = nextIdentity;
+        await write({ [`${entry.id}AmbientAccounts`]: metadata });
         return true;
       }
       if (!id) return false;

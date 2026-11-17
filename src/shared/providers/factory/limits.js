@@ -281,7 +281,17 @@ async function fetchFactoryLimits(options = {}, deps = {}) {
   });
 }
 
+function factoryAccountEnvKey(env = process.env) {
+  return FACTORY_API_KEY_NAMES.map(name => cleanSecret(env[name])).find(Boolean) || '';
+}
+function discoverAccountSlots(deps = {}) {
+  const result = resolveFactoryAutomaticApiKey({}, { ...deps, env: {} });
+  return result.apiKey ? [{ values: { factoryApiKey: result.apiKey }, sourceName: 'Droid' }] : [];
+}
+
 module.exports = {
+  discoverAccountSlots,
+  factoryAccountEnvKey,
   FACTORY_API_BASE_URL,
   FACTORY_APP_BASE_URL,
   factoryEnvApiKey,

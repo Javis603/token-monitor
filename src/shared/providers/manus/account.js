@@ -4,6 +4,7 @@
 // Leaf declaration: shared credential storage and forms bind these names.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'manus',
+  accountSlots: true,
   fetch: 'fetchManusLimits',
   fields: [{
     key: 'manusSessionToken',
@@ -14,6 +15,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
     envFallback: ['TOKEN_MONITOR_MANUS_SESSION_TOKEN', 'MANUS_SESSION_TOKEN', 'MANUS_COOKIE'],
     project: 'set'
   }],
+  discoveredAccounts: (_env, limits, deps) => limits.discoverAccountSlots(deps),
   status: {
     credential: 'manusSessionToken',
     configuredKey: 'manusSessionTokenConfigured',

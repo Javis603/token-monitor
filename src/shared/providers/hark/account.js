@@ -4,6 +4,7 @@
 // Leaf declaration: credential storage reads this without loading the probe.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'hark',
+  accountSlots: true,
   fetch: 'fetchHarkLimits',
   fields: [{
     key: 'harkCookie',
@@ -20,6 +21,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
       return (/** @type {{status?: string}|null|undefined} */ (error))?.status === 'unavailable';
     }
   },
+  discoveredAccounts: (_env, limits, deps) => limits.discoverAccountSlots(deps),
   status: {
     credential: 'harkCookie',
     configuredKey: 'harkCookieConfigured',

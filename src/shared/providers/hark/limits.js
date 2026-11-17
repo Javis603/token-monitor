@@ -192,7 +192,18 @@ async function fetchHarkLimits(options = {}, deps = {}) {
   return removals.length ? [provider, ...removals] : provider;
 }
 
+function discoverAccountSlots(deps = {}) {
+  try {
+    const token = normalizeHarkSessionToken((deps.readHarkDesktopSession || readHarkDesktopSession)(deps.harkDesktopOptions || {}));
+    return token ? [{ values: { harkCookie: token }, accountKey: hashKey('hark', decodeURIComponent(token)), sourceName: 'Hark' }] : [];
+  } catch (error) {
+    if (error?.status === 'notConfigured') return [];
+    throw error;
+  }
+}
+
 module.exports = {
+  discoverAccountSlots,
   HARK_COOKIE_NAME,
   HARK_ORIGIN,
   HARK_SUMMARY_URL,

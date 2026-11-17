@@ -1135,3 +1135,26 @@ test('fetchZaiLimits keeps the quota half when the billing mirror is refused', a
   assert.ok(calls.every((call) => !call.url.includes('billing')), 'no billing request');
   assert.ok(calls.every((call) => call.authorization === 'account-key'), 'only the account key was carried');
 });
+
+for (const savedKey of [null, 'other-key', 'mirror-jwt']) test(`ZCode slot keeps pools isolated with saved key ${savedKey}`, async () => {
+  const { LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
+  const calls = [];
+  const consoleResponse = keyLaneResponses({ balance: '2.50', subscription: 'GLM Coding' });
+  const deps = { env: {}, ...zcodeLaneDeps(async (url, init) => {
+    calls.push({ url: String(url), authorization: init.headers.Authorization });
+    return String(url).includes('zcode-plan/billing/balance') ? BILLING_OK : consoleResponse(url, init);
+  }, 'coding-plan', { includeStartPlan: true }) };
+  const slots = savedKey ? [{ id: 'saved', values: { zaiApiKey: savedKey, zaiApiRegion: 'global' } }] : [];
+  const rows = (await LIMIT_PROVIDER_FETCHERS.zai({ zaiAccountSlots: slots }, deps)).filter(row => !row.removed);
+  assert.equal(rows.length, savedKey && savedKey !== 'mirror-jwt' ? 2 : 1);
+  assert.equal(calls.filter(call => call.url.includes('billing/balance')).length, 1);
+  assert.equal(calls.filter(call => call.url.includes('quota/limit') && call.authorization === 'Bearer mirror-jwt').length, 1);
+  const discovered = rows.find(row => row.windows.some(window => window.limitId));
+  assert.ok(discovered, 'the discovered row retains billing buckets');
+  if (savedKey === 'mirror-jwt') assert.ok(discovered.windows.some(window => window.metric === 'credits'), 'matching key retains finance');
+  if (savedKey === 'other-key') {
+    const saved = rows.find(row => row !== discovered);
+    assert.ok(saved.windows.some(window => window.metric === 'credits'));
+    assert.ok(!saved.windows.some(window => window.limitId));
+  }
+});

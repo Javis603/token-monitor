@@ -4,6 +4,7 @@
 // Z.ai / GLM limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'zai',
+  accountSlots: true,
   fetch: 'fetchZaiLimits',
   fields: [
     {
@@ -34,7 +35,9 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
     const discovery = limits.discoverZcodeConnection();
     return discovery.entitled && discovery.credential ? discovery : null;
   },
+  discoveredAccounts: (_env, limits, deps) => limits.discoverAccountSlots(deps),
   status: {
+    credential: 'zaiApiKey',
     configuredKey: 'zaiApiKeyConfigured',
     sourceKey: 'zaiApiKeySource',
     pendingKey: 'zaiPendingCheckSince'

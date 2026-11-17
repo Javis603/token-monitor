@@ -15,6 +15,17 @@ const { normalizeLimitProvider } = require('./core');
  * @property {string} createdAt
  * @property {string} updatedAt
  */
+/** @param {{id: string}} entry @param {any} input */
+function normalizeAmbientAccounts(entry, input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return {};
+  return Object.fromEntries(Object.entries(input).filter(([fingerprint, value]) => /^sha256:[a-f0-9]{64}$/.test(fingerprint) && value && typeof value === 'object').map(([fingerprint, value]) => {
+    const identity = normalizeLimitProvider({ ...value, provider: entry.id, accountLabel: value.label });
+    return [fingerprint, { accountKey: identity?.accountKey || '', accountKeyAliases: identity?.accountKeyAliases || [],
+      accountName: identity?.accountName || '', accountEmail: identity?.accountEmail || '', label: identity?.accountLabel || '',
+      sourceName: typeof value.sourceName === 'string' ? value.sourceName.slice(0, 120) : '',
+      enabled: value.enabled !== false, order: Number.isFinite(value.order) ? value.order : -1 }];
+  }));
+}
 /** @param {{id: string}} declaration */
 function accountSlotKey(declaration) { return `${declaration.id}AccountSlots`; }
 /** @param {import('./accounts').AccountDeclaration} declaration @param {unknown} input @returns {AccountSlot[]} */
@@ -48,7 +59,7 @@ function accountSlotField(declaration) {
 function defaultIdentityKey(entry) { return `${entry.id}DefaultAccountIdentity`; }
 /** @param {any} entry @param {any} options @param {any} env */
 function defaultAccountValues(entry, options, env) {
-  return Object.fromEntries(entry.fields.filter((/** @type {any} */ field) => (field.kind === 'credential' || field.kind === 'setting') && field.key !== defaultIdentityKey(entry))
+  return Object.fromEntries(entry.fields.filter((/** @type {any} */ field) => (field.kind === 'credential' || field.kind === 'setting') && field.key !== defaultIdentityKey(entry) && field.key !== `${entry.id}AmbientAccounts`)
     .map((/** @type {any} */ field) => [field.key, options[field.key] || field.resolve?.(env) || field.configDefault || '']));
 }
 // Credential choices are alternative authentication lanes, not companion fields
@@ -64,9 +75,15 @@ function hasAccountCredential(entry, values) {
 }
 /** @param {any} values */
 function accountValuesFingerprint(values) { return hashKey(JSON.stringify(Object.entries(values).sort(([a], [b]) => a.localeCompare(b)))); }
-/** @param {any[]} entries @param {any} options @param {any} env */
-function configuredMultiAccountProviders(entries, options, env) {
+/** @param {any[]} entries @param {any} options @param {any} env @param {any} [deps] */
+function configuredMultiAccountProviders(entries, options, env, deps = {}) {
+  const discoveredCount = (/** @type {any} */ entry) => {
+    try {
+      return (entry.discoveredAccounts?.(env, entry.limits, { ...deps, env }) || []).filter((/** @type {any} */ record) => options[`${entry.id}AmbientAccounts`]?.[accountValuesFingerprint(record.values)]?.enabled !== false).length;
+    } catch (_) { return Object.values(options[`${entry.id}AmbientAccounts`] || {}).filter((/** @type {any} */ item) => item.enabled !== false).length; }
+  };
   return entries.filter(entry => entry.accountSlots && normalizeAccountSlots(entry, options[accountSlotKey(entry)]).filter(slot => slot.enabled).length
+    + discoveredCount(entry)
     + (hasAccountCredential(entry, defaultAccountValues(entry, options, env)) ? 1 : 0) > 1).map(entry => entry.id);
 }
-module.exports = { accountCredentialKey, hasAccountCredential, defaultIdentityKey, defaultAccountValues, accountValuesFingerprint, configuredMultiAccountProviders, accountSlotKey, accountSlotField, normalizeAccountSlots };
+module.exports = { normalizeAmbientAccounts, accountCredentialKey, hasAccountCredential, defaultIdentityKey, defaultAccountValues, accountValuesFingerprint, configuredMultiAccountProviders, accountSlotKey, accountSlotField, normalizeAccountSlots };

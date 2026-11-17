@@ -762,3 +762,24 @@ for (const [id, fixture] of Object.entries(require('../fixtures/accountSlotsBatc
   assert.equal(submitted[0][0], id);
   assert.deepEqual(submitted[0][1], Object.fromEntries(Object.entries(values).map(([key, value]) => [key, form.credentialChoice?.fields.includes(key) && key !== selected ? undefined : value])));
 });
+
+for (const id of ['factory', 'cline', 'hark', 'manus', 'zai']) test(`${id}: discovered row menu permits controls and directs sign-out without replace/remove`, () => {
+  const h = harness();
+  const slot = { id: 'ambient', enabled: true, source: 'discovered', accountKey: 'ambient-key', sourceName: `${id} sign-in`, accountEmail: 'person@example.com' };
+  h.panel.update([slot], [{ accountKey: 'ambient-key', status: 'ok' }]);
+  const row = h.row('ambient');
+  assert.equal(row.querySelector('.slot-name').textContent, 'person@example.com');
+  const text = row.textContent;
+  assert.match(text, /Rename/);
+  assert.match(text, /Pause/);
+  assert.match(text, /Sign out in/);
+  assert.doesNotMatch(text, /Replace API key|Remove account/);
+});
+
+test('a discovered row without a name or email is named after its app in the UI language', () => {
+  const h = harness();
+  const slot = { id: 'ambient', enabled: true, source: 'discovered', accountKey: 'ambient-key', sourceName: 'Cline' };
+  h.panel.update([slot], [{ accountKey: 'ambient-key', status: 'ok' }]);
+  assert.equal(h.row('ambient').querySelector('.slot-name').textContent, 'Cline sign-in');
+  assert.match(h.row('ambient').textContent, /Sign out in Cline to remove this account\./);
+});

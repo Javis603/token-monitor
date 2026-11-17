@@ -12893,6 +12893,7 @@ function setupLimitAccountPanels() {
       const slotsPanel = window.TokenMonitorAccountSlotsPanel.createPanel({
         form, label: LIMIT_PROVIDERS.find(provider => provider.id === form.id).label,
         document, t, ipc: window.tokenMonitor.limits.accountSlots, forms: limitAccountPanelsApi,
+        maskEmail: email => state.settings?.maskLimitAccountEmails === true ? accountIdentityApi.maskEmailAddress(email) : email,
         preserveScroll: preserveSettingsPanelScroll, openExternal: url => window.tokenMonitor.openExternal(url),
         onChanged: slots => { accountSlotLists[form.id] = slots; render(); void refreshStats(); }
       });
