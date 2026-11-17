@@ -38,7 +38,7 @@ const { runWithProbeDeadline } = require('../../probeDeadline');
 const { throwIfAborted } = require('../../abortSignal');
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const { fetchBailianCLI, validatePersonalCLIUsage } = require('./cli');
-const { accountIdentityDescriptor } = require('../../limits/accountScope');
+const { accountIdentityDescriptor, rowMatchesScope } = require('../../limits/accountScope');
 const { providerStatusFromError } = require('../../limits/providerHelpers');
 
 const ALIBABA_FETCH_TIMEOUT_MS = 20_000;
@@ -1030,10 +1030,19 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
 async function fetchAccountSlotSnapshot(options, deps, collect) {
   const source = selectedSource('alibaba', options, deps);
   if (deps.probe || source === 'web') return collect(options, deps);
+  const previous = options.previousLimits?.providers || [];
+  const cliPrevious = previous.filter(row => row.provider === 'alibaba' && row.source === 'cli');
+  const previousLimits = { providers: previous.filter(row => row.source !== 'cli') };
+  const scope = options.limitRefreshScope;
+  // A keyless Team CLI result cannot prove that it belongs to a Cookie scope.
+  // Only a previously observed CLI identity may select that lane by account.
+  if (scope?.provider === 'alibaba' && scope.accountKey && !cliPrevious.some(row => rowMatchesScope(row, scope))) {
+    return collect({ ...options, alibabaSourcePreference: 'web', previousLimits }, deps);
+  }
   if (source !== 'cli' && !options.alibabaAccountSlots?.length) return collect(options, deps);
-  const local = await fetchAlibabaLimits({ ...options, alibabaSourcePreference: 'cli', previousLimits: { providers: [] } }, deps);
-  const previousLimits = { providers: (options.previousLimits?.providers || []).filter(row => row.source !== 'cli') };
-  return [...local.filter(row => row.source === 'cli' && !row.removed && (source === 'cli' || row.status !== 'notConfigured')), ...await collect({ ...options, alibabaSourcePreference: 'web', previousLimits }, deps)];
+  const local = await fetchAlibabaLimits({ ...options, alibabaSourcePreference: 'cli', previousLimits: { providers: cliPrevious } }, deps);
+  // Replacement removals carry identity only, without a source field.
+  return [...local.filter(row => row.removed || row.source === 'cli' && (source === 'cli' || row.status !== 'notConfigured')), ...await collect({ ...options, alibabaSourcePreference: 'web', previousLimits }, deps)];
 }
 
 module.exports = { accountSlotsForScope: (accounts, scope, options, deps) => alibabaAccountSlotsForScope(accounts, scope, alibabaVariant(options, deps.env)), accountSlotRowKey: row => `${row.accountKey}:${row.region || ''}`, fetchAccountSlotSnapshot,

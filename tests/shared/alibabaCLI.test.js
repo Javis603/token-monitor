@@ -568,3 +568,72 @@ test('Windows npm Bailian entry executes natively with a custom config directory
     assert.equal(row.windows[0].usedPercent, 35);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+
+for (const source of ['auto', 'cli']) test(`Alibaba ${source} Cookie account refresh cannot retain another CLI account's quota`, async () => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  const { LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
+  const deps = cliDeps(() => page([seat('other-cli-account')]));
+  let webCalls = 0;
+  deps.fetch = async () => { webCalls++; return { ok: false, status: 503, text: async () => '' }; };
+  const previous = { provider: 'alibaba', accountKey: require('../../src/shared/hashKey').hashKey('alibaba', 'cookie-account'), source: 'web', status: 'ok', region: 'cn',
+    updatedAt: new Date(now - 1000).toISOString(), windows: [{ kind: 'billing', usedPercent: 25 }] };
+  const runtime = createLimitsRuntime({ limitProviders: ['alibaba'], alibabaSourcePreference: source,
+    alibabaAccountSlots: [{ id: 'saved', accountKey: previous.accountKey, enabled: true, values: { alibabaCookie: 'fixture=cookie', alibabaVariant: 'cn' } }],
+    previousLimits: { providers: [previous] }
+  }, { autoStart: false, autoRetry: false, now: () => now,
+    probeProvider: (_provider, options, context) => LIMIT_PROVIDER_FETCHERS.alibaba(options, { ...deps, signal: context.signal }) });
+  try {
+    await runtime.refresh({ provider: 'alibaba', accountKey: previous.accountKey, region: 'cn' }, 'manual');
+    const row = runtime.getSnapshot().providers.find(row => row.accountKey === previous.accountKey);
+    assert.equal(row?.windows[0]?.usedPercent, 25, JSON.stringify(runtime.getSnapshot().providers));
+    assert.equal(row.status, 'unavailable');
+    assert.equal(deps.calls.length, 0, 'a Cookie account refresh never probes the CLI login');
+    assert.ok(webCalls > 0);
+  } finally { runtime.stop(); }
+});
+
+for (const [source, saved] of [['auto', true], ['cli', true], ['cli', false]]) {
+  for (const scoped of [false, true]) test(`Alibaba CLI replacement retires its previous identity: ${source}, saved=${saved}, scoped=${scoped}`, async () => {
+    const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+    const { LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
+    const { hashKey } = require('../../src/shared/hashKey');
+    let time = now, offline = true;
+    const deps = cliDeps(() => {
+      if (offline) throw new Error('CLI temporarily unavailable');
+      return { Uid: 456, per1MonthPercentage: 0.7 };
+    });
+    deps.now = () => time;
+    deps.providerRuntimeState = new Map();
+    deps.fetch = async url => ({ ok: true, status: 200, text: async () => String(url).includes('GetSubscriptionSummary')
+      ? JSON.stringify({ Success: true, Data: { Uid: 999, TotalValue: 100, TotalSurplusValue: 75, TotalCount: 1 } }) : '{}' });
+    const old = { provider: 'alibaba', source: 'cli', accountKey: hashKey('alibaba', '123'), region: 'cn-personal', status: 'ok',
+      updatedAt: new Date(now - 1000).toISOString(), windows: [{ kind: 'billing', usedPercent: 20 }] };
+    const cookie = { provider: 'alibaba', source: 'web', accountKey: hashKey('alibaba', '999'), region: 'cn', status: 'ok',
+      updatedAt: old.updatedAt, windows: [{ kind: 'billing', usedPercent: 25 }] };
+    const runtime = createLimitsRuntime({ limitProviders: ['alibaba'], alibabaVariant: 'cn-personal', alibabaSourcePreference: source,
+      ...(saved ? { alibabaAccountSlots: [{ id: 'saved', accountKey: cookie.accountKey, enabled: true,
+        values: { alibabaCookie: 'fixture=saved', alibabaVariant: 'cn' } }] } : {}),
+      previousLimits: { providers: [old, ...(saved ? [cookie] : [])] }
+    }, { autoStart: false, autoRetry: false, now: () => time,
+      probeProvider: (_provider, options, context) => LIMIT_PROVIDER_FETCHERS.alibaba(options, { ...deps, signal: context.signal }) });
+    try {
+      const scope = scoped ? { provider: 'alibaba', accountKey: old.accountKey, region: old.region } : { provider: 'alibaba' };
+      await runtime.refresh(scope, 'manual');
+      assert.equal(runtime.getSnapshot().providers.find(row => row.accountKey === old.accountKey)?.windows[0].usedPercent, 20,
+        'unknown CLI state retains its previous reading');
+      offline = false; time += 300_000;
+      await runtime.refresh(scope, 'manual');
+      if (scoped) {
+        assert.equal(runtime.getSnapshot().providers.find(row => row.accountKey === old.accountKey)?.windows[0].usedPercent, 20,
+          'an account refresh does not adopt a different login');
+        time += 300_000;
+        await runtime.refresh({ provider: 'alibaba' }, 'manual');
+      }
+      const rows = runtime.getSnapshot().providers;
+      assert.equal(rows.find(row => row.accountKey === old.accountKey), undefined, 'a confirmed replacement retires the old CLI identity');
+      assert.equal(rows.find(row => row.accountKey === hashKey('alibaba', '456'))?.windows[0].usedPercent, 70);
+      if (saved) assert.equal(rows.find(row => row.accountKey === cookie.accountKey)?.windows[0].usedPercent, 25, 'Cookie sibling remains intact');
+    } finally { runtime.stop(); }
+  });
+}
