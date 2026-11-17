@@ -37,7 +37,11 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
   /** @type {any[]} */
   let queued = [];
   /** @param {any} value */
-  const withQueued = value => queued.length ? replayPresentation(value, queued) : value;
+  /** @param {any} value @param {string} destination */
+  const withQueued = (value, destination) => {
+    const own = queued.filter(item => item.destination === destination).map(item => item.operation);
+    return own.length ? replayPresentation(value, own) : value;
+  };
   const connected = () => ['client', 'host'].includes(getContext()?.mode) && getContext()?.url;
   /** @param {any[]} operations */
   async function reconcile(operations) {
@@ -46,8 +50,11 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
     const captured = identity(context);
     if (!captured) return;
     if (binding !== captured) { binding = captured; revision = -1; unsupported = false; pending = []; }
-    if (unsupported) { queued = []; return; }
-    pending.push(...queued.splice(0), ...operations);
+    // Queued edits belong to the Hub they were made against; others are dropped.
+    const mine = queued.filter(item => item.destination === captured).map(item => item.operation);
+    queued = [];
+    if (unsupported) return;
+    pending.push(...mine, ...operations);
     const current = () => connected() && identity(getContext()) === captured;
     try {
       let response = await request(context, `/api/sync/settings/${KIND}`, 'GET');
@@ -77,7 +84,7 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
           !Object.hasOwn(base[operation.provider]?.labels || {}, operation.key));
         const value = replayPresentation(base, [...missingLocalLabels, ...pending]);
         if (!pending.length && (document.value !== null ? JSON.stringify(value) === JSON.stringify(document.value) : !Object.keys(seed).length)) {
-          await apply(withQueued(value), captured);
+          await apply(withQueued(value, captured), captured);
           revision = document.revision;
           return;
         }
@@ -93,7 +100,7 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
         }
         if (response.status !== 200) return;
         pending = [];
-        await apply(withQueued(normalizeSharedSyncValue(KIND, response.body.value)), captured);
+        await apply(withQueued(normalizeSharedSyncValue(KIND, response.body.value), captured), captured);
         revision = response.body.revision;
         return;
       }
@@ -102,7 +109,7 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
   /** @param {any[]} operations */
   function publish(operations) {
     const captured = identity(getContext());
-    queued.push(...operations);
+    queued.push(...operations.map(operation => ({ destination: captured, operation })));
     const task = lane.then(() => {
       if (identity(getContext()) !== captured) return;
       return reconcile([]);
