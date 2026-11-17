@@ -803,6 +803,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       if (dispatch.accountScoped || !accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
       if (apiOnly && !belongsToApi(identityKey)) continue;
       if (!committedRows.some(row => row.status === 'ok' && rowIdentityKey(row) === replacementKey)) continue;
+      if (committedRows.some(row => row.status === 'ok' && rowIdentityKey(row) === identityKey)) continue;
       represented.add(identityKey);
       lane.identities.delete(identityKey);
     }

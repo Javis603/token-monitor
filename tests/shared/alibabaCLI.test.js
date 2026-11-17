@@ -637,3 +637,59 @@ for (const [source, saved] of [['auto', true], ['cli', true], ['cli', false]]) {
     } finally { runtime.stop(); }
   });
 }
+
+for (const source of ['auto', 'cli']) for (const saved of [false, true]) {
+  test(`Alibaba scoped CLI keeps the observed Personal variant after default changes: ${source}, saved=${saved}`, async () => {
+    const { LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
+    const { hashKey } = require('../../src/shared/hashKey');
+    const key = hashKey('alibaba', '123');
+    const deps = cliDeps(args => args[0] === 'console' ? { Uid: 123, per1MonthPercentage: 0.2 } : page([seat('team')]));
+    const rows = await LIMIT_PROVIDER_FETCHERS.alibaba({ alibabaVariant: 'cn', alibabaSourcePreference: source,
+      ...(saved ? { alibabaAccountSlots: [{ id: 'other', enabled: true, accountKey: 'other', values: { alibabaCookie: 'a=b', alibabaVariant: 'cn' } }] } : {}),
+      limitRefreshScope: { provider: 'alibaba', accountKey: key, region: 'cn-personal' },
+      previousLimits: { providers: [{ provider: 'alibaba', source: 'cli', accountKey: key, region: 'cn-personal', status: 'ok', windows: [{ kind: 'billing', usedPercent: 10 }] }] }
+    }, deps);
+    const row = rows.find(row => row.source === 'cli' && !row.removed);
+    assert.equal(row?.region, 'cn-personal');
+    assert.equal(row.accountKey, key);
+    assert.equal(row.windows[0].usedPercent, 20);
+    assert.equal(deps.calls[0].args[0], 'console');
+  });
+}
+
+for (const available of [true, false]) test(`Alibaba explicit CLI without slots never requests environment Cookie: available=${available}`, async () => {
+  const { LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
+  const deps = cliDeps(() => ({ Uid: 456, per1MonthPercentage: 0.2 }));
+  deps.env.ALIBABA_TOKEN_PLAN_COOKIE = 'fixture=environment';
+  if (!available) deps.existsSync = () => false;
+  let webCalls = 0;
+  deps.fetch = async () => { webCalls++; return { ok: false, status: 503, text: async () => '' }; };
+  const rows = await LIMIT_PROVIDER_FETCHERS.alibaba({ alibabaVariant: 'cn-personal', alibabaSourcePreference: 'cli',
+    previousLimits: { providers: [{ provider: 'alibaba', source: 'web', accountKey: 'old-web', region: 'cn-personal', status: 'ok', windows: [] }] }
+  }, deps);
+  assert.equal(webCalls, 0);
+  assert.ok(rows.every(row => row.removed || row.source === 'cli'));
+  if (available) assert.ok(rows.some(row => row.removed && row.accountKey === 'old-web' && row.replacementAccount));
+  else assert.ok(!rows.some(row => row.removed), 'unproven replacement retains prior quota');
+});
+
+test('Alibaba CLI replacement keeps a successful Cookie row with the old identity and variant', async () => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  const { fetchAccountSlotSnapshot } = require('../../src/shared/providers/alibaba/limits');
+  const { hashKey } = require('../../src/shared/hashKey');
+  const previous = { provider: 'alibaba', source: 'cli', accountKey: hashKey('alibaba', '123'), region: 'cn-personal', status: 'ok',
+    updatedAt: new Date(now - 1000).toISOString(), windows: [{ kind: 'billing', usedPercent: 10 }] };
+  const deps = cliDeps(() => ({ Uid: 456, per1MonthPercentage: 0.7 }));
+  const runtime = createLimitsRuntime({ limitProviders: ['alibaba'], alibabaVariant: 'cn-personal', alibabaSourcePreference: 'cli',
+    alibabaAccountSlots: [{ id: 'saved', enabled: true, accountKey: previous.accountKey, values: { alibabaCookie: 'fixture=saved', alibabaVariant: 'cn-personal' } }],
+    previousLimits: { providers: [previous] }
+  }, { autoStart: false, autoRetry: false, now: () => now,
+    probeProvider: (_provider, options, context) => fetchAccountSlotSnapshot(options, { ...deps, signal: context.signal },
+      async () => [{ ...previous, source: 'web', updatedAt: new Date(now).toISOString(), windows: [{ kind: 'billing', usedPercent: 25 }] }]) });
+  try {
+    await runtime.refresh({ provider: 'alibaba' }, 'manual');
+    const rows = runtime.getSnapshot().providers;
+    assert.equal(rows.find(row => row.accountKey === previous.accountKey)?.windows[0].usedPercent, 25);
+    assert.equal(rows.find(row => row.accountKey === hashKey('alibaba', '456'))?.windows[0].usedPercent, 70);
+  } finally { runtime.stop(); }
+});

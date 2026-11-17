@@ -1039,8 +1039,14 @@ async function fetchAccountSlotSnapshot(options, deps, collect) {
   if (scope?.provider === 'alibaba' && scope.accountKey && !cliPrevious.some(row => rowMatchesScope(row, scope))) {
     return collect({ ...options, alibabaSourcePreference: 'web', previousLimits }, deps);
   }
-  if (source !== 'cli' && !options.alibabaAccountSlots?.length) return collect(options, deps);
-  const local = await fetchAlibabaLimits({ ...options, alibabaSourcePreference: 'cli', previousLimits: { providers: cliPrevious } }, deps);
+  const localOptions = scope?.provider === 'alibaba' && scope.region
+    ? { ...options, alibabaVariant: scope.region } : options;
+  if (!options.alibabaAccountSlots?.length) {
+    // Keep the default lane's source policy and replacement history together.
+    // Explicit CLI must not query an environment Cookie as a second account.
+    return source === 'cli' ? fetchAlibabaLimits(localOptions, deps) : collect(localOptions, deps);
+  }
+  const local = await fetchAlibabaLimits({ ...localOptions, alibabaSourcePreference: 'cli', previousLimits: { providers: cliPrevious } }, deps);
   // Replacement removals carry identity only, without a source field.
   return [...local.filter(row => row.removed || row.source === 'cli' && (source === 'cli' || row.status !== 'notConfigured')), ...await collect({ ...options, alibabaSourcePreference: 'web', previousLimits }, deps)];
 }
