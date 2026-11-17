@@ -190,3 +190,29 @@ test('a rename published while a refresh awaits the Hub survives that refresh', 
   assert.equal(applied[0], 'New', 'the in-flight refresh replays the queued rename');
   assert.ok(!applied.includes('Old'));
 });
+
+test('an edit queued for one Hub is never written to the next one', async () => {
+  let hub = 'a';
+  let releaseGet;
+  const puts = [];
+  const runtime = createAccountPresentationSync({
+    getContext: () => ({ mode: 'client', url: `https://${hub}` }), identity: context => context.url,
+    getCacheIdentity: () => `https://${hub}`, getSeed: () => ({}), getLocalLabels: () => [], apply: () => {},
+    request: async (context, _path, method, body) => {
+      if (method === 'GET') {
+        if (context.url === 'https://a' && !releaseGet) await new Promise(resolve => { releaseGet = resolve; });
+        return { status: 200, body: { revision: 1, value: { deepseek: { labels: { k: 'Existing' }, order: [] } } } };
+      }
+      puts.push({ url: context.url, value: body.value });
+      return { status: 200, body: { revision: 2, value: body.value } };
+    }
+  });
+  const refresh = runtime.refresh();
+  await new Promise(resolve => setImmediate(resolve));
+  const publish = runtime.publish([{ provider: 'deepseek', type: 'rename', key: 'k', label: 'Meant for A' }]);
+  hub = 'b';
+  releaseGet();
+  await refresh; await publish;
+  await runtime.refresh();
+  assert.equal(puts.some(put => put.url === 'https://b' && put.value.deepseek?.labels?.k === 'Meant for A'), false);
+});
