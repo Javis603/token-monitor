@@ -7,14 +7,16 @@
   if (root) root.TokenMonitorConnectionPresentation = api;
 })(typeof window !== 'undefined' ? /** @type {any} */ (window) : null, function createConnectionPresentationApi() {
   /**
-   * Display metadata never selects a collector or changes fallback order.
+   * Only declared capability options may select a provider-owned read lane.
    * Complements remain discoverable even when the primary method is manual.
    * @param {{ document: Document, t: (key: string, params?: Record<string, string>) => string,
    * sources: import('../../../shared/limits/accounts').AccountSource[],
    * provider: {status?: string, stale?: boolean, source?: string, sourceDetail?: string},
-   * label: string, onOpen?: () => void }} options
+   * label: string, onOpen?: () => void,
+   * selection?: {key: string, sources: string[]}, preference?: string,
+   * onSelect?: (patch: Record<string, string>) => Promise<string> }} options
    */
-  function createConnectionCard({ document, t, sources, provider, label, onOpen }) {
+  function createConnectionCard({ document, t, sources, provider, label, onOpen, selection, preference = 'auto', onSelect }) {
     /** @param {string} tag @param {string} className @param {string} [text] */
     const node = (tag, className, text = '') => {
       const el = document.createElement(tag);
@@ -36,8 +38,38 @@
       ? alternatives.length > 1 ? 'settings.limits.sources.auto' : 'settings.limits.sources.detectSummary'
       : primary.kind === 'apiKey' ? 'settings.limits.sources.manualApi' : 'settings.limits.sources.manualWeb')));
     const actions = node('div', 'connection-source-actions');
-    actions.append(node('span', 'connection-source-method', automatic
-      ? t('settings.limits.connection.autoDetect') : t(primary.labelKey)));
+    if (selection && onSelect) {
+      const select = document.createElement('select');
+      select.className = 'settings-select connection-source-method';
+      select.setAttribute('aria-label', t('settings.limits.connection.title'));
+      const choices = sources.filter(source => selection.sources.includes(source.id) && source.relation === 'alternative');
+      for (const choice of [{ id: 'auto', labelKey: 'settings.limits.connection.autoDetect' }, ...choices]) {
+        const option = document.createElement('option');
+        option.value = choice.id;
+        option.textContent = t(choice.labelKey);
+        select.append(option);
+      }
+      let accepted = choices.some(source => source.id === preference) ? preference : 'auto';
+      select.value = accepted;
+      const error = node('span', 'settings-item-desc');
+      error.setAttribute('role', 'status');
+      select.addEventListener('change', async () => {
+        select.disabled = true;
+        error.textContent = '';
+        try {
+          accepted = await onSelect({ [selection.key]: select.value });
+        } catch (_) {
+          error.textContent = t('settings.limits.sources.saveFailed');
+        } finally {
+          select.value = accepted;
+          select.disabled = false;
+        }
+      });
+      actions.append(select, error);
+    } else {
+      actions.append(node('span', 'connection-source-method', automatic
+        ? t('settings.limits.connection.autoDetect') : t(primary.labelKey)));
+    }
     // Only fresh successful alternative readings prove a current lane. A Web
     // complement is never reported as the exclusive source of a combined read.
     const current = alternatives.length > 1 && provider.status === 'ok' && !provider.stale

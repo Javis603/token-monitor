@@ -119,3 +119,7 @@ For retained Desktop discovery and watch rules, run `node --test tests/shared/cl
 ```bash
 node --test tests/shared/claudeProbe.test.js tests/shared/claudePrintedUsage.test.js tests/shared/claudeSessionActivity.test.js tests/shared/claudeSessionMetadata.test.js tests/shared/limitCollector.claude.test.js tests/electron/claudeWebFetch.test.js
 ```
+
+## Connection source selection
+
+Claude currently exposes no source-selection capability. Web organizations are independently collected/enriching accounts, not an exclusive alternative to OAuth/CLI. The CLI usage fallback can reuse cached OAuth identity, but does not provide a separately verified identity matching the CLI-authenticated account; therefore a forced CLI selector would promise an account guarantee it cannot establish. `claudeCliFallbackEnabled` remains the existing fallback control. Adding selection requires a CLI identity read and comparison before publication; it must preserve the independent Web organizations.

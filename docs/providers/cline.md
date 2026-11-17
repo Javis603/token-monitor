@@ -217,3 +217,7 @@ from a key, which has to learn its account id first:
 ```bash
 node -e "require('./src/shared/providers/cline/limits').fetchClineLimits().then(r => console.log(r.status, JSON.stringify(r.windows)))"
 ```
+
+## Connection source selection
+
+The connection selector supports Automatic, API key and local sign-in. Automatic collects saved, environment and discovered accounts independently. An explicit source limits each fetch to that origin; it never reads a different local account to repair a saved key. The preference does not affect draft validation or credential fingerprints.

@@ -4,9 +4,11 @@
 // Trae CN limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'trae',
+  sourceSelection: { sources: ['web', 'ide'] },
   accountSlots: true,
   sources: [
-    { id: 'web', kind: 'web', relation: 'single', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription', getUrlFromForm: true }
+    { id: 'web', kind: 'web', relation: 'alternative', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription', getUrlFromForm: true },
+    { id: 'ide', kind: 'cli', relation: 'alternative', labelKey: 'settings.trae.token', descriptionKey: 'settings.trae.deviceIdNote' }
   ],
   fetch: 'fetchTraeLimits',
   fields: [

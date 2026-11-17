@@ -2077,7 +2077,7 @@ test('Cline exposes its API key through the settings and credential-store patter
   // Settings + credential store + IPC, the pattern the pattern-bound test above
   // asserts for the catalog; the path is what keeps the key out of settings.json.
   assert.match(runtimeConfig, /limitProviderSettingKeys\(\)/);
-  assert.deepEqual(require('../../src/electron/runtimeConfig').LIMIT_PROVIDER_SETTING_KEYS.cline, ['clineApiKey', 'clineAccountSlots']);
+  assert.deepEqual(require('../../src/electron/runtimeConfig').LIMIT_PROVIDER_SETTING_KEYS.cline, ['clineSourcePreference', 'clineApiKey', 'clineAccountSlots']);
   assert.deepEqual(CREDENTIAL_SETTING_PATHS.clineApiKey, ['providers', 'cline', 'apiKey']);
   assert.match(main, /ipcMain\.handle\('limits:saveCredential'/);
   assert.match(main, /\.\.\.finalAccountSettings\(patch, settings\)/);
@@ -3132,7 +3132,7 @@ test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama so
   assert.deepEqual(presentation.limitProviderCapabilityTags('zaiteam'), ["API key"]);
   assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ["API key/CLI"]);
   assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ["Web"]);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ["Web"]);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ["Web/CLI"]);
   assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ["Web/Desktop app"]);
   assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ["API key/Web"]);
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'factory', source: 'api' }), 'API');

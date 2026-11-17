@@ -1,4 +1,5 @@
 'use strict';
+const { selectedSource } = require('../../limits/sourceSelection');
 
 // Grok (xAI) SuperGrok subscription usage lookup.
 //
@@ -760,7 +761,11 @@ async function fetchGrokLimits(options = {}, deps = {}) {
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
   const credential = await resolveGrokCredential(env, options, deps);
-  if (shouldTryGrokRpc(credential, deps)) {
+  const selection = selectedSource('grok', options, deps);
+  if (selection === 'rpc' && !shouldTryGrokRpc(credential, deps)) {
+    return normalizeLimitProvider({ provider: 'grok', source: 'rpc', status: 'notConfigured', updatedAt, windows: [] });
+  }
+  if (selection !== 'web' && shouldTryGrokRpc(credential, deps)) {
     try {
       const rpcBody = await (deps.fetchRpcBilling || fetchGrokRpcBilling)(options, deps);
       const windows = parseGrokBilling(rpcBody);
@@ -778,7 +783,7 @@ async function fetchGrokLimits(options = {}, deps = {}) {
     } catch (error) {
       if (deps.signal?.aborted) throw abortError(deps.signal);
       const status = classifyGrokRpcError(error);
-      if (!credential || status === 'unauthorized') {
+      if (selection === 'rpc' || !credential || status === 'unauthorized') {
         return status === 'unauthorized'
           ? unauthorizedGrokProvider(updatedAt, 'rpc', 'cli')
           : normalizeLimitProvider({

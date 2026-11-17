@@ -4,6 +4,7 @@
 // Leaf declaration: shared credential storage and forms bind these names.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'manus',
+  sourceSelection: { sources: ['web', 'local'] },
   accountSlots: true,
   sources: [
     { id: 'web', kind: 'web', relation: 'alternative', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' },

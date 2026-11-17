@@ -46,3 +46,7 @@ node --test tests/shared/harkLimits.test.js tests/shared/limitWindowText.test.js
 ```
 
 The fixtures contain synthetic credentials. On a signed-in Mac, verify desktop discovery without pasting, compare both pools with the live summary, reject an invalid paste, then clear the override and confirm discovery resumes. Paid-plan API behavior still requires a real account sample.
+
+## Connection source selection
+
+The connection selector supports Automatic, Web and Desktop. Automatic keeps independent saved, environment and discovered accounts. An explicit origin constrains collection without substituting credentials in a saved row. Encoded and decoded versions of the same session retain identity across origins. Draft validation ignores the collector preference.

@@ -1,4 +1,5 @@
 'use strict';
+const { selectedSource } = require('../../limits/sourceSelection');
 
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const { hashKey } = require('../../hashKey');
@@ -134,10 +135,16 @@ function statusForResponse(status) {
 async function fetchManusLimits(options = {}, deps = {}) {
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
   const supplied = manusSessionValue(deps.env || process.env, options);
+  const selection = selectedSource('manus', options, deps);
+  const lane = deps.accountSource || (supplied ? 'web' : 'local');
+  if ((selection !== 'auto' && selection !== lane) || (deps.probe && !supplied)
+    || (deps.accountSlotSaved && !supplied)) {
+    return normalizeLimitProvider({ provider: 'manus', source: selection === 'auto' ? lane : selection, status: 'notConfigured', updatedAt, windows: [] });
+  }
   const base = {
     provider: 'manus',
-    source: supplied ? 'web' : 'local',
-    sourceDetail: supplied ? 'managed' : 'app',
+    source: lane,
+    sourceDetail: lane === 'web' ? 'managed' : 'app',
     updatedAt,
     windows: []
   };
@@ -201,7 +208,7 @@ async function fetchManusLimits(options = {}, deps = {}) {
 function discoverAccountSlots(deps = {}) {
   try {
     const session = (deps.readManusDesktopSession || readManusDesktopSession)(deps.manusDesktopOptions || {});
-    return [{ values: { manusSessionToken: session.token }, accountKey: hashKey('manus', session.userId || session.token), accountEmail: session.email, sourceName: 'Manus' }];
+    return [{ fetchDeps: { accountSource: 'local' }, values: { manusSessionToken: session.token }, accountKey: hashKey('manus', session.userId || session.token), accountEmail: session.email, sourceName: 'Manus' }];
   } catch (error) {
     if (error?.status === 'notConfigured') return [];
     throw error;

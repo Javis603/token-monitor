@@ -1,6 +1,7 @@
 // @ts-check
 'use strict';
 
+const { sourcePreferenceKey, normalizeSourcePreference } = require('./sourceSelection');
 const { defaultIdentityKey, accountSlotField, normalizeAmbientAccounts } = require('./accountSlots');
 
 // The limits account registry index: one account declaration per catalog
@@ -121,7 +122,8 @@ const { defaultIdentityKey, accountSlotField, normalizeAmbientAccounts } = requi
  *
  * @typedef {object} AccountDeclaration
  * @property {string} id
- * @property {AccountSource[]} sources Display-only read sources; never select or dispatch a fetch.
+ * @property {AccountSource[]} sources Ordered read sources.
+ * @property {{sources: string[]}} [sourceSelection] Explicit provider-supported exclusive lanes; complements must stay out.
  * @property {boolean} [environmentWhenSaved]
  * @property {boolean} [dedupeAccounts]
  * @property {string} fetch Limits export called by the collector.
@@ -150,7 +152,9 @@ const { defaultIdentityKey, accountSlotField, normalizeAmbientAccounts } = requi
 // credentialStore, and an eager require here would be a cycle.
 /** @param {AccountDeclaration} account @param {() => AccountLimits} loadLimits */
 function registerProvider(account, loadLimits) {
-  return { ...account, fields: account.accountSlots ? [...account.fields, accountSlotField(account), ...(account.discoveredAccounts ? [{ key: `${account.id}AmbientAccounts`, kind: 'setting', configDefault: {}, configNormalize: (/** @type {any} */ value) => normalizeAmbientAccounts(account, value), storePath: ['providers', account.id, 'ambientAccounts'], rendererOmit: true, persist: 'never', initial: null, watch: false }] : []), { key: defaultIdentityKey(account), kind: 'setting', configDefault: {}, storePath: ['providers', account.id, 'defaultAccountIdentity'], persist: 'never', rendererOmit: true, watch: false, initial: null }] : account.fields, loadLimits };
+  /** @type {AccountField[]} */
+  const preference = account.sourceSelection ? [{ key: sourcePreferenceKey(account), kind: 'setting', normalize: (/** @type {unknown} */ value) => normalizeSourcePreference(account, value), configNormalize: (/** @type {unknown} */ value) => normalizeSourcePreference(account, value), configDefault: 'auto', initial: 'auto', persist: 'renormalize', project: (/** @type {unknown} */ value) => normalizeSourcePreference(account, value) }] : [];
+  return { ...account, fields: [...preference, ...(account.accountSlots ? [...account.fields, accountSlotField(account), ...(account.discoveredAccounts ? [{ key: `${account.id}AmbientAccounts`, kind: 'setting', configDefault: {}, configNormalize: (/** @type {any} */ value) => normalizeAmbientAccounts(account, value), storePath: ['providers', account.id, 'ambientAccounts'], rendererOmit: true, persist: 'never', initial: null, watch: false }] : []), { key: defaultIdentityKey(account), kind: 'setting', configDefault: {}, storePath: ['providers', account.id, 'defaultAccountIdentity'], persist: 'never', rendererOmit: true, watch: false, initial: null }] : account.fields)], loadLimits };
 }
 
 const LIMIT_PROVIDER_ACCOUNTS = Object.freeze([

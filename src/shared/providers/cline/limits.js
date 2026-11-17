@@ -1,4 +1,5 @@
 'use strict';
+const { selectedSource } = require('../../limits/sourceSelection');
 
 // Cline limits provider: the ClinePass usage windows, read from the account API
 // Cline itself uses. Reached through providerFetchers() in
@@ -465,7 +466,13 @@ async function fetchClineLimits(options = {}, deps = {}) {
   throwIfAborted(deps.signal, 'Cline limits aborted');
   let credential;
   try {
-    credential = deps.clineCredential || resolveClineCredential(options, env);
+    const selection = selectedSource('cline', options, deps);
+    const discoveredCredential = deps.probe ? null : deps.clineCredential;
+    const lane = discoveredCredential ? 'local' : clineApiKey(env, options) ? 'api' : 'local';
+    if ((selection !== 'auto' && selection !== lane) || ((deps.probe || deps.accountSlotSaved) && lane === 'local' && !discoveredCredential)) {
+      return failingProvider('notConfigured', nowMs, lane === 'local' ? 'oauth' : 'api');
+    }
+    credential = discoveredCredential || resolveClineCredential(options, env);
   } catch (error) {
     // The file lane's refusal, reported as the credential problem it is — and it
     // still names the lane it came from.
