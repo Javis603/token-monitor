@@ -203,6 +203,13 @@ const {
   redactThirdPartyProfilesForRenderer,
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
+const { migrateAccountSlots } = require('./limits/accountSlotMigration');
+const { createAccountSlotService, invalidateAccountSlotChange } = require('./limits/accountSlotService');
+const { LIMIT_PROVIDER_REGISTRY } = require('../shared/limits/registry');
+const { isProviderStale } = require('../shared/limits/core');
+const ACCOUNT_SLOT_PROVIDER_IDS = new Set(LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots).map(entry => entry.id));
+const { applyAccountOrder } = require('./renderer/limits/accountSlotsPanel');
+let accountSlotService;
 const { createCredentialCommands } = require('./limits/credentialCommands');
 const { createCopilotAccounts } = require('./providers/copilot/accounts');
 const copilotLimits = require('../shared/providers/copilot/limits');
@@ -1081,6 +1088,7 @@ function electronLimitsDeps() {
         json: () => result.json()
       };
     },
+    onAccountSlotResolved: (...args) => { void accountSlotService?.resolved(...args).catch(() => {}); },
     resolveConfigSnapshot: () => electronLimitsConfig(),
     onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
     onClaudeWebAccountResolved: (observation) => claudeAccountService().resolved(observation),
@@ -2672,7 +2680,19 @@ function loadCredentialSettings(saved) {
   try {
     const store = ensureCredentialStore();
     store.migrateLegacySettings(saved);
-    const stored = store.settingsCredentials();
+    // A failed slot migration leaves its source untouched; it must not hide
+    // every other provider's credentials for this session.
+    let stored;
+    try {
+      stored = migrateAccountSlots(store, saved, Date.now, process.env);
+    } catch (error) {
+      reportCredentialStorageError('could not move saved accounts into the account list', error);
+      stored = store.settingsCredentials();
+    }
+    for (const entry of LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots)) {
+      for (const field of entry.fields.filter(field => field.kind === 'credential')) saved[field.key] = '';
+      delete saved[`${entry.id}DefaultAccountIdentity`];
+    }
     // Cleanup is intentionally independent from the migration marker. If the
     // first cleanup write fails after credentials.json was committed, retry on
     // every startup until no credential keys remain in settings.json.
@@ -4948,6 +4968,12 @@ function injectLocalDeviceStatus(stats) {
     const activity = localActivityPatch(lastCollectedDevice);
     if (activity) stats = projectLocalActivity(stats, activity);
   }
+  // Raw local rows remain authoritative for settings, including failures that
+  // a remote healthy aggregate row can hide. Share the aggregate freshness rule.
+  const device = stats.devices.find(entry => entry.deviceId === settings.deviceId);
+  if (device?.limits) device.limits = { ...device.limits, providers: device.limits.providers.map(row => !ACCOUNT_SLOT_PROVIDER_IDS.has(row.provider) ? row : ({
+    ...row, stale: isProviderStale(row, device.limits, device, stats.staleAfterMs, Date.now())
+  })) };
   if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
   return stats;
 }
@@ -5328,7 +5354,13 @@ function refreshTrayContextMenu() {
 }
 
 function desktopQuotaStats(stats) {
-  return require('./plugins/limitsPresentation').projectPluginLimits(stats, pluginRuntime?.limitsSnapshot());
+  const projected = require('./plugins/limitsPresentation').projectPluginLimits(stats, pluginRuntime?.limitsSnapshot());
+  if (!projected?.limits) return projected;
+  const slotLists = Object.fromEntries(LIMIT_PROVIDER_REGISTRY
+    .filter(entry => entry.accountSlots)
+    .map(entry => [entry.id, accountSlotService?.list(entry.id).accounts || []]));
+  return { ...projected, limits: { ...projected.limits,
+    providers: applyAccountOrder(projected.limits.providers || [], slotLists, settings.deviceId) } };
 }
 
 function syncPluginQuotaSurfaceDemand() {
@@ -8390,6 +8422,41 @@ app.whenReady().then(() => {
     applySettingsPatch: applyCredentialSettingsPatch,
     probeDeps: credentialProbeDeps
   });
+  accountSlotService = createAccountSlotService({
+    getSettings: () => settings,
+    write: (patch) => {
+      const { limitProviders, limitsEnabled, ...slotPatch } = patch;
+      settings = { ...settings, ...slotPatch };
+      saveSettings({ throwOnError: true });
+      // Turning a provider on takes the ordinary settings path (selection
+      // normalization, runtime start) and is published to the renderer.
+      // The account is already durable here: an activation failure is reported
+      // but must not turn the save into a failure the user retries as a duplicate.
+      if (limitProviders !== undefined && (limitProviders !== settings.limitProviders || limitsEnabled !== settings.limitsEnabled)) {
+        try {
+          applySettingsPatch({ limitProviders, limitsEnabled });
+          pushSettingsToRenderer();
+        } catch (error) {
+          console.error(`[limits] could not turn on collection after saving an account: ${error?.message || error}`);
+        }
+      }
+    },
+    probeDeps: credentialProbeDeps,
+    onChanged: (provider, change) => {
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      // A rename or reorder is re-projected by the reconfigure above; asking the
+      // provider again would only spend its rate limit.
+      if (change?.refresh === false) return;
+      if (deviceRuntimeHandle) return invalidateAccountSlotChange(deviceRuntimeHandle, provider, change);
+      // No runtime yet: the retired accounts are cleared once one starts.
+      for (const accountKey of change?.retiredAccountKeys || []) {
+        void queueLimitInvalidation({ provider, accountKey }, 'settings-change', { clear: true, refresh: false });
+      }
+    }
+  });
+  for (const operation of ['list', 'add', 'replace', 'rename', 'setEnabled', 'remove', 'move']) {
+    ipcMain.handle(`limits:accountSlots:${operation}`, (_event, ...args) => accountSlotService[operation](...args));
+  }
   // Resolves only once a worker-hosted transform runs with the saved settings:
   // pausing the session archive must not be reported done while the worker can
   // still capture under the old value.
@@ -9198,7 +9265,7 @@ app.whenReady().then(() => {
   ipcMain.handle('claude:saveWebAccount', (_event, values) => claudeAccountService().saveAccount(values));
   ipcMain.handle('claude:removeWebAccount', (_event, id) => claudeAccountService().removeAccount(String(id || '')));
   ipcMain.handle('claude:setAccountEnabled', (_event, id, enabled) => claudeAccountService().setAccountEnabled(String(id || ''), enabled));
-  ipcMain.handle('limits:saveCredential', (_event, providerId, values) => credentialCommands.saveCredential(providerId, values));
+  ipcMain.handle('limits:saveCredential', (_event, providerId, values) => ACCOUNT_SLOT_PROVIDER_IDS.has(providerId) ? accountSlotService.add(providerId, values) : credentialCommands.saveCredential(providerId, values));
   getLimitsHistoryController().register();
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
   ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));

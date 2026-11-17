@@ -4737,9 +4737,33 @@ function pluginLimitMetadata(id) {
 function desktopLimitProviders() {
   return [...LIMIT_PROVIDERS, ...(state.pluginCatalog?.limits?.modules || [])];
 }
+const accountSlotPanels = new Map();
+const accountSlotLists = {};
+let accountSlotListPending = false;
+function refreshAccountSlotPanels() {
+  for (const [id, panel] of accountSlotPanels) {
+    const form = limitAccountForm(id);
+    panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
+      Boolean(state.settings?.[form.status.configuredKey]));
+  }
+  if (accountSlotListPending) return;
+  accountSlotListPending = true;
+  const previousSlotLists = JSON.stringify(accountSlotLists);
+  return Promise.all((state.settings?.limitAccountForms || []).filter(form => form.accountSlots).map(async ({ id }) => {
+    const result = await window.tokenMonitor.limits.accountSlots.list(id);
+    if (result.ok) accountSlotLists[id] = result.accounts;
+  })).then(() => {
+    if (previousSlotLists !== JSON.stringify(accountSlotLists)) render();
+    for (const [id, panel] of accountSlotPanels) {
+      const form = limitAccountForm(id);
+      panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
+        Boolean(state.settings?.[form.status.configuredKey]));
+    }
+  }).catch(() => {}).finally(() => { accountSlotListPending = false; });
+}
 function desktopLimitRecords() {
   const modules = new Map((state.pluginCatalog?.limits?.modules || []).map(module => [module.id, module]));
-  return [...(state.stats?.limits?.providers || []), ...(state.pluginCatalog?.limits?.providers || []).filter(row => modules.has(row.provider)).map(row => ({ ...row, pluginQuota: modules.get(row.provider) }))];
+  return window.TokenMonitorAccountSlotsPanel.applyAccountOrder([...(state.stats?.limits?.providers || []), ...(state.pluginCatalog?.limits?.providers || []).filter(row => modules.has(row.provider)).map(row => ({ ...row, pluginQuota: modules.get(row.provider) }))], accountSlotLists, state.settings?.deviceId);
 }
 function desktopSurfaceStats() {
   return state.stats ? { ...state.stats, limits: { ...state.stats.limits, providers: desktopLimitRecords() }, pluginLimitModules: state.pluginCatalog?.limits?.modules || [] } : state.stats;
@@ -6826,6 +6850,7 @@ function homeLimitRows() {
     colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
+    orderedAccountProviders: Object.keys(accountSlotLists),
     accountPlan: (provider, index, providerEntries) => limitWindowsView.limitAccountPlan(provider, {
       grouped: providerEntries.length > 1
     }),
@@ -12377,6 +12402,7 @@ function renderLimitProviderCheckboxes() {
 }
 
 function renderLimitProviderCheckboxesNow() {
+  refreshAccountSlotPanels();
   const renderSignature = limitProviderSettingsRenderSignature();
   const { providers, matched } = limitProviderRows();
   // Same reasoning as the tracked-tools list: every provider keeps a row, and no
@@ -12861,6 +12887,18 @@ function setupLimitAccountPanels() {
       .map((provider) => limitProviderAccountGroup(provider.id))
       .find((group) => group?.parentElement === container);
     container.insertBefore(panel, nextGroup || null);
+    if (form.accountSlots) {
+      const details = panel.querySelector('.cursor-settings-details');
+      for (const child of [...details.children]) child.remove();
+      const slotsPanel = window.TokenMonitorAccountSlotsPanel.createPanel({
+        form, label: LIMIT_PROVIDERS.find(provider => provider.id === form.id).label,
+        document, t, ipc: window.tokenMonitor.limits.accountSlots, forms: limitAccountPanelsApi,
+        preserveScroll: preserveSettingsPanelScroll, openExternal: url => window.tokenMonitor.openExternal(url),
+        onChanged: slots => { accountSlotLists[form.id] = slots; render(); void refreshStats(); }
+      });
+      accountSlotPanels.set(form.id, slotsPanel);
+      panel.querySelector('.cursor-settings-details').prepend(slotsPanel.element);
+    }
     added = true;
     setExternalAccountExpanded(form.id, false);
     limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
@@ -13498,6 +13536,7 @@ async function saveSettings(patch, syncContentBase) {
 // whether the renderer sent it as a patch or as an account credential command.
 function applyPersistedSettings(next, settingsPushRevision) {
   setRendererSettings(next);
+  void refreshAccountSlotPanels();
   applyEffectiveCurrencyRates();
   // settings:update broadcasts the normalized settings before resolving the
   // IPC request. The push already ran the full sync; repeating it when the
@@ -13865,6 +13904,7 @@ async function init() {
   if (!systemUiThemeSeeded) state.systemDarkUi = state.appInfo?.systemDarkUi === true;
   if (els.aboutVersion) els.aboutVersion.textContent = state.appInfo?.version ? `v${state.appInfo.version}` : '—';
   state.settings = await window.tokenMonitor.getSettings();
+  await refreshAccountSlotPanels();
   // Local appearance is sufficient for first reveal. Plugin discovery, sync,
   // updater and stats queries below must not hold the window off screen.
   // Tray startup also needs its saved appearance prepared before native show.
@@ -15191,6 +15231,7 @@ window.tokenMonitor.onSettingsPush?.((next) => {
     if (JSON.stringify(next[key]) !== JSON.stringify(state.settings?.[key])) delete appearancePreview[key];
   }
   setRendererSettings(next);
+  void refreshAccountSlotPanels();
   syncPluginTrayDemand();
   applyEffectiveCurrencyRates();
   observeDisplayLiveTokenRates(state.stats);
@@ -17617,6 +17658,7 @@ function copilotAccountStatusText(provider, configured, source, enabled = true) 
 }
 
 function apiKeyAccountStatusText(providerName, provider, configured, source, enabled = true) {
+  if (providerName === 'alibaba' && provider?.source === 'cli') source = 'cli';
   const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
   if (accountStatus === 'linked') {
     // A ZCode-discovered login is an OAuth-style link, not a pasted API key,
@@ -17865,6 +17907,13 @@ function renderExternalProviderStatus(providerName) {
   const refreshBtn = document.getElementById(`${providerName}RefreshButton`);
   const manualPanel = document.getElementById(`${providerName}ManualPanel`);
   const errorEl = document.getElementById(`${providerName}ErrorMessage`);
+  if (statusEl && limitAccountForm(providerName)?.accountSlots) {
+    const accounts = accountSlotLists[providerName] || [];
+    const readings = localProviderStatuses(providerName);
+    const linked = accounts.filter(slot => slot.enabled && limitProviderEnabled(providerName) && readings.some(row => (row.accountKey === slot.accountKey || slot.accountKeyAliases?.includes(row.accountKey)) && row.status === 'ok' && !row.stale)).length;
+    setCursorStatusText(statusEl, accounts.length ? t('settings.opencode.connected', { linked, total: accounts.length }) : t(limitAccountForm(providerName).emptyKey));
+    return;
+  }
   if (!config || !statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
 
   const source = state.settings?.[config.sourceKey] || '';
@@ -17881,7 +17930,8 @@ function renderExternalProviderStatus(providerName) {
   errorEl.textContent = message ? t(message.key, message.params) : '';
   errorEl.classList.toggle('hidden', !message);
   errorEl.classList.toggle('error', message?.tone !== 'notice');
-  const configured = Boolean(state.settings?.[config.configuredKey]);
+  const cliAccount = providerName === 'alibaba' && provider?.source === 'cli';
+  const configured = Boolean(state.settings?.[config.configuredKey] || cliAccount);
   const enabled = limitProviderEnabled(providerName);
   const settled = externalProviderCheckSettled.has(providerName);
   const pending = enabled && Number(state[config.pendingKey] || 0) > 0 && !settled;
@@ -17897,8 +17947,9 @@ function renderExternalProviderStatus(providerName) {
   // instead of a permanent spinner; the cutoff above still blocks the old
   // record from being read as a confirmed link.
   const statusProvider = provider || (settled && configured && enabled ? { status: 'noSyncedData' } : null);
-  const statusText = pending ? t('settings.common.checking')
+  let statusText = pending ? t('settings.common.checking')
     : apiKeyAccountStatusText(providerName, statusProvider, configured, source, enabled);
+  if (cliAccount && !pending) statusText = `CLI · ${statusText}`;
   setCursorStatusText(statusEl, providerName === 'claude' && !pending
     ? claudeAccountStatusText(statusText, enabled) : statusText);
   // A local ZCode install keeps the Z.ai row honest when unchecked: the
@@ -17907,7 +17958,7 @@ function renderExternalProviderStatus(providerName) {
   if (providerName === 'zai' && !enabled && state.settings?.zcodeLoginDetected === true) {
     setCursorStatusText(statusEl, t('settings.limits.connection.autoDetect'));
   }
-  manualPanel.classList.toggle('hidden', linked);
+  manualPanel.classList.toggle('hidden', linked && !limitAccountForm(providerName)?.accountSlots);
   openBtn.classList.toggle('hidden', linked);
   if (providerName === 'claude') {
     const showForm = claudeWebFormOpen ?? (!(state.settings?.claudeManagedAccounts || []).length && !state.settings?.claudeWebLegacyCookieConfigured);
@@ -17917,6 +17968,7 @@ function renderExternalProviderStatus(providerName) {
   }
   const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')
     || (providerName === 'cline' && source === 'cline-signin')
+    || cliAccount
     || providerName === 'hark';
   if (discoveredLogin) {
     // The discovered login is not user-entered, so the override input and the

@@ -65,8 +65,11 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
         required: true
       }
     ],
-    manual: [
+    top: [
       { field: 'alibabaVariant' },
+      { note: 'settings.alibaba.cliNote' }
+    ],
+    manual: [
       {
         steps: [
           'settings.alibaba.step1',

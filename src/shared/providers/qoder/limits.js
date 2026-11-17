@@ -346,6 +346,7 @@ async function fetchQoderLimits(options = {}, deps = {}) {
 }
 
 module.exports = {
+  isQoderServerAccountKey: (key, values, aliases = []) => Boolean(key && key !== hashKey('qoder', qoderCookie({}, values)) && aliases.includes(hashKey('qoder', qoderCookie({}, values)))),
   QODER_FETCH_TIMEOUT_MS,
   qoderCookie,
   qoderSite,

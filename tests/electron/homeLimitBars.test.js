@@ -28,6 +28,7 @@ function resolveHomeRows(providers, settings = {}) {
   const start = app.indexOf('function homeLimitRows()');
   const end = app.indexOf('function homeLimitWindowLabel(', start);
   return vm.runInNewContext(`${app.slice(start, end)}; homeLimitRows();`, {
+    accountSlotLists: {},
     state: { stats: { limits: { providers } }, settings: { homeLimitAccountCount: 20, ...settings } },
     enabledLimitProviderSet: () => new Set(ids),
     hiddenHomeLimitProviderSet: () => new Set(),

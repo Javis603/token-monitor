@@ -4,6 +4,8 @@
 // Qoder limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'qoder',
+  accountSlots: true,
+  serverAccountKey: 'isQoderServerAccountKey',
   fetch: 'fetchQoderLimits',
   fields: [
     {

@@ -1194,7 +1194,7 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
   const app = readRendererFile('app.js');
   const statusBody = functionBody(app, 'renderExternalProviderStatus', 'renderVolcengineAgentOverrideState');
   assert.match(statusBody, /const canClearConfiguredCredential = source === 'settings' && configured;/);
-  assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked\)/);
+  assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked && !limitAccountForm\(providerName\)\?\.accountSlots\)/);
   assert.match(statusBody, /logoutBtn\.classList\.toggle\('hidden', !canClearConfiguredCredential\)/);
 
   // The cookie is checked in main before it can replace a working one: a paste
@@ -1409,7 +1409,7 @@ test('Factory account form keeps its setup copy and validates before saving', ()
   const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
   assert.match(preload, /saveCredential: \(providerId, values\) => ipcRenderer\.invoke\('limits:saveCredential', providerId, values\)/);
   assert.match(preload, /clearCredential: \(providerId\) => ipcRenderer\.invoke\('limits:clearCredential', providerId\)/);
-  assert.match(main, /ipcMain\.handle\('limits:saveCredential', \(_event, providerId, values\) => credentialCommands\.saveCredential\(providerId, values\)\)/);
+  assert.match(main, /ipcMain\.handle\('limits:saveCredential', \(_event, providerId, values\) => .*credentialCommands\.saveCredential\(providerId, values\)\)/);
   assert.match(main, /ipcMain\.handle\('limits:clearCredential', \(_event, providerId\) => credentialCommands\.clearCredential\(providerId\)\)/);
   assert.doesNotMatch(main + preload, /limits:validateCredential|validateLimitCredential/);
   assert.equal(normalizeAccountField('factoryApiKey', ' " fk-live " '), 'fk-live');
@@ -3367,4 +3367,34 @@ test('MiMo settings reuses the shared sign-in status for rejected accounts', () 
   providers = [{ provider: 'mimo', accountKey: 'a', sourceDetail: 'managed', status: 'ok' }];
   render();
   assert.equal([...list.children[0].walk()].find((node) => node.className === 'managed-account-info').textContent, 'Console');
+});
+
+test('Alibaba CLI readings keep saved Cookie setup reachable while web readings stay linked', () => {
+  const app = readRendererFile('app.js');
+  for (const source of ['cli', 'web']) {
+    const elements = new Map();
+    for (const suffix of ['AccountStatus', 'OpenBrowser', 'LogoutButton', 'RefreshButton', 'ManualPanel', 'ErrorMessage']) {
+      const classes = new Set();
+      elements.set(`alibaba${suffix}`, { textContent: '', classList: {
+        add: name => classes.add(name), remove: name => classes.delete(name),
+        toggle: (name, force) => force ? classes.add(name) : classes.delete(name),
+        contains: name => classes.has(name)
+      } });
+    }
+    runRendererFunctions(app, ['renderExternalProviderStatus'], "renderExternalProviderStatus('alibaba')", {
+      externalLimitAccountConfig: {},
+      limitAccountForm: () => ({ status: { configuredKey: 'alibabaCookieConfigured', sourceKey: 'alibabaCookieSource', pendingKey: 'alibabaPendingCheckSince' } }),
+      limitAccountPanelsApi: { syncCredentialFields() {} },
+      state: { settings: { alibabaCookieConfigured: true, alibabaCookieSource: 'settings' }, accountPanelMessages: {} },
+      document: { getElementById: id => elements.get(id) || null },
+      externalProviderForAccount: () => ({ provider: 'alibaba', source, status: 'ok' }),
+      externalProviderAccountLinked: () => true,
+      externalProviderCheckSettled: new Set(), limitProviderEnabled: () => true,
+      setCursorStatusText() {}, apiKeyAccountStatusText: () => '', t: key => key,
+      renderSettingsSummaries() {}, setExternalAccountExpanded() {}
+    });
+    assert.equal(elements.get('alibabaManualPanel').classList.contains('hidden'), source === 'web');
+    assert.equal(elements.get('alibabaOpenBrowser').classList.contains('hidden'), source === 'web');
+    assert.equal(elements.get('alibabaLogoutButton').classList.contains('hidden'), false);
+  }
 });

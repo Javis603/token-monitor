@@ -215,6 +215,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
       ipcRenderer.on('limitsHistory:state', listener);
       return () => ipcRenderer.removeListener('limitsHistory:state', listener);
     },
+    accountSlots: Object.fromEntries(['list', 'add', 'replace', 'rename', 'setEnabled', 'remove', 'move'].map(operation => [operation, (...args) => ipcRenderer.invoke(`limits:accountSlots:${operation}`, ...args)])),
     saveCredential: (providerId, values) => ipcRenderer.invoke('limits:saveCredential', providerId, values),
     listOrganizationChoices: (providerId) => ipcRenderer.invoke('limits:listOrganizationChoices', providerId),
     clearCredential: (providerId) => ipcRenderer.invoke('limits:clearCredential', providerId),

@@ -369,6 +369,7 @@ test('Home sends the complete source readings through the shared WorkBuddy colla
   const members = [reading('a'), reading('b', [], { status: 'unavailable' })];
   let drawn, collapsed;
   vm.runInNewContext(`${source}\nhomeLimitRows();`, {
+    accountSlotLists: {},
     state: { settings: {}, stats: { limits: { providers: members } } },
     enabledLimitProviderSet: () => new Set(['workbuddy']), hiddenHomeLimitProviderSet: () => new Set(),
     desktopLimitProviders: () => [{ id: 'workbuddy', label: 'WorkBuddy' }], desktopLimitRecords: () => members,

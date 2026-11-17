@@ -1,5 +1,8 @@
 'use strict';
 
+const { configuredMultiAccountProviders, normalizeAccountSlots, accountSlotKey, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
+const { LIMIT_PROVIDER_REGISTRY } = require('./registry');
+
 const crypto = require('node:crypto');
 const {
   PROVIDER_CLEANUP_GRACE_MS,
@@ -364,6 +367,30 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
           });
       if (row) rows.push(row);
     }
+    const entry = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === provider && entry.accountSlots);
+    if (entry) {
+      const slots = normalizeAccountSlots(entry, config[accountSlotKey(entry)]).filter(slot => slot.enabled);
+      const current = providerRuntimeState.get(`account-slot:${entry.id}:default:${accountValuesFingerprint(defaultAccountValues(entry, config, deps.env || process.env))}`)?.accountKey;
+      const owner = row => slots.find(slot => slot.accountKey === row.accountKey)
+        || (row.accountKey === current ? undefined : slots.find(slot => slot.accountKeyAliases.includes(row.accountKey)));
+      for (const row of rows) {
+        const slot = owner(row);
+        if (slot) {
+          // Labels are local metadata; changing them never replaces quota data.
+          // A slot's local name is its accountName, also while a retained
+          // reading answers for it; the provider's accountLabel (Qoder's plan)
+          // is never touched.
+          if (slot.label) row.accountName = slot.label;
+          else {
+            const nativeName = providerRuntimeState.get(`account-name:${entry.id}:${row.accountKey}`);
+            if (nativeName) row.accountName = nativeName;
+            else delete row.accountName;
+          }
+
+        }
+      }
+      rows.sort((a, b) => (owner(a) ? slots.indexOf(owner(a)) : slots.length) - (owner(b) ? slots.indexOf(owner(b)) : slots.length));
+    }
     return rows;
   }
 
@@ -375,6 +402,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     snapshot = normalizeLimitsSummary({
       updatedAt: new Date(now()).toISOString(),
       refreshMs,
+      multiAccountProviders: enabled && !stopped ? configuredMultiAccountProviders(LIMIT_PROVIDER_REGISTRY, config, deps.env || process.env).filter(id => configuredProviders.has(id)) : [],
       providers
     });
     pruneAttemptedResetBoundaries(snapshot, attemptedResetBoundaries);
@@ -691,9 +719,12 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       } else lane.identities.clear();
     }
 
+    let removeAnonymous = false;
+    const replacementRemovals = [];
     for (const removal of removals) {
       let identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
-      if (identityKey === `${lane.provider}:*`) continue;
+      if (removal.replacementAccount) { replacementRemovals.push(removal); continue; }
+      if (identityKey === `${lane.provider}:*`) { removeAnonymous = true; continue; }
       if (dispatch.accountScoped && identityKey !== dispatch.identityKey) continue;
       if (apiOnly && !belongsToApi(identityKey)) continue;
       if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
@@ -727,6 +758,26 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       // Marks the row as measurable by this runtime, so a persisted seed for a
       // provider that has not answered yet can never become a burn baseline.
       if (committedRow.status === 'ok') markLimitsProbeSuccess(burnState, committedRow);
+    }
+
+    // Retire anonymous state only after its healthy replacement actually commits;
+    // a result invalidated by a concurrent account clear cannot replace it.
+    if (removeAnonymous && !dispatch.accountScoped && committedRows.some(row => row.status === 'ok')
+      && accountRevisionStillCurrent(lane, `${lane.provider}:*`, dispatch)) {
+      represented.add(`${lane.provider}:*`);
+      lane.identities.delete(`${lane.provider}:*`);
+    }
+
+    // Source replacement differs from confirmed account disappearance: retire
+    // the old row only when its specific replacement survived the commit fences.
+    for (const removal of replacementRemovals) {
+      const identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
+      const replacementKey = rowIdentityKey({ ...removal.replacementAccount, provider: lane.provider });
+      if (dispatch.accountScoped || !accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
+      if (apiOnly && !belongsToApi(identityKey)) continue;
+      if (!committedRows.some(row => row.status === 'ok' && rowIdentityKey(row) === replacementKey)) continue;
+      represented.add(identityKey);
+      lane.identities.delete(identityKey);
     }
 
     if (!dispatch.accountScoped && !genericTerminal) {

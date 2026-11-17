@@ -1,5 +1,5 @@
 ---
-summary: "Alibaba Token Plan provider notes: the four console variants, cookie scope, sec_token resolution, and which variants are verified."
+summary: "Alibaba Token Plan provider notes: the four console variants, Bailian CLI first with Cookie fallback, cookie scope, sec_token resolution, and which variants are verified."
 ids: [alibaba]
 read_when:
   - Adding or modifying the Alibaba Token Plan provider
@@ -26,7 +26,13 @@ Only `cn` has been exercised against a real account, from the capture reported o
 
 ## Auth
 
-A console `Cookie` request header, pasted in the GUI or set through `ALIBABA_TOKEN_PLAN_COOKIE`. There is no API-token path.
+Refreshes first look for a native Bailian `bl` executable on PATH or in common install directories (`bl.exe` or a standard global npm installation on Windows). Windows npm installations use the fixed `node_modules/bailian-cli/dist/bailian.mjs` entry with `node.exe` found beside the shim or on PATH; the `.cmd` shim itself is never executed. No CLI is installed and no interactive login is started. The selected `alibabaVariant` still controls the region and plan type; neither is auto-detected.
+
+- Personal/Solo reuses the CLI console login and calls `bl console call --api zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage --data '{}'` with the selected region and CLI site (`domestic` or `international`), plus JSON output. These CLI site values differ from the web gateway’s internal console identifiers. It reads the reported percentage windows, including monthly usage; absolute totals and tier metadata are unavailable through this path.
+- Team requires read-only AK/SK configured with `bl auth login --open-api`, including `modelstudio:GetSubscriptionSeatDetails` (for example via `AliyunTokenPlanReadOnlyAccess`). Console login alone does not authenticate Team. `bl token-plan list-seats` is paginated and the active seats' current `CREDITS` cycles are aggregated. Resource packs and historical cycles are excluded. Different cycle ends have no single reset time.
+- Missing CLI, failed login, or unusable CLI quota falls back to a console `Cookie` request header, pasted in the GUI or set through `ALIBABA_TOKEN_PLAN_COOKIE`. Cookie save-time validation always checks the submitted cookie alone. No model API-token path is supported.
+
+Background CLI quota reads force `NO_UPDATE_NOTIFIER=1` and `DO_NOT_TRACK=1` to disable CLI update checks/automatic upgrades and telemetry. CLI calls have a shared 15-second budget per refresh, bounded output and closed stdin. Only config/home discovery (including `BAILIAN_CONFIG_DIR`), locale, timezone, absolute PATH directories and proxy variables are inherited; Team endpoints are fixed to the selected region. CLI networking uses its own proxy configuration/environment rather than the injected Electron HTTP transport. The app does not read or copy the CLI's credentials. If the CLI and Cookie belong to different accounts, the CLI wins when usable; saving a Cookie does not change the CLI login. A successful source switch replaces the previous local row rather than retaining both sources. CLI authentication and Team seat aggregation have fixture/subprocess coverage but have not been verified against a live Alibaba account.
 
 The cookie is scoped to the console it was copied from, so switching variants clears the stored cookie rather than leaving one that can only answer `unauthorized`.
 
@@ -43,7 +49,7 @@ Two distinctions are load-bearing and should not be collapsed:
 - A stale session (`Login.NotLogined`, a login HTML shell, HTTP 401/403) is `unauthorized`, so the UI tells the user to paste a fresh cookie. Everything else that fails is `unavailable`.
 - `Workspace.NotAuthorised` is **not** a credential failure. Reporting it as one asks the user to replace a cookie that is already valid, and the replacement fails identically.
 
-An empty subscription (`TotalCount: 0`) is a healthy, authorized account with nothing to draw: the row stays visible with no window.
+An empty subscription (`TotalCount: 0`), or a complete CLI seat list with no currently active seats, is a healthy, authorized account with nothing to draw: the row stays visible with no window.
 
 ## Scope and the provider id
 
@@ -51,11 +57,11 @@ This provider reads Token Plan. Alibaba's other console product, Coding Plan, is
 
 If it is ever added it belongs as extra windows under this same provider and cookie, since both plans live behind one Alibaba Cloud login, the way Volcengine carries its Coding and Agent plans together. That is why `alibaba` is a platform-level id rather than a plan-level one.
 
-A plan-specific API key is an inference credential: it calls models, it does not read quota. That is why this provider is cookie-only.
+A plan-specific API key is an inference credential: it calls models, it does not read quota. It cannot replace either a console cookie or the Team CLI’s read-only AK/SK.
 
 ## What the Team figure is
 
-Team quota is allocated **per seat**, not as one shared pool. This provider shows `TotalValue` / `TotalSurplusValue` from `GetSubscriptionSummary`, which is the account-level summary Alibaba's own My Subscriptions page headlines as its "overall quota usage percentage" — the same endpoint behind that page. The endpoint also returns `TotalCount`, which is read only to tell an empty subscription apart from a populated one; how it and the value fields behave on a multi-seat account has not been verified against a real one.
+Team quota is allocated **per seat**, not as one shared pool. The CLI path aggregates active seat credits; the Cookie path shows `TotalValue` / `TotalSurplusValue` from `GetSubscriptionSummary`, which is the account-level summary Alibaba's own My Subscriptions page headlines as its "overall quota usage percentage" — the same endpoint behind that page. The endpoint also returns `TotalCount`, which is read only to tell an empty subscription apart from a populated one; how it and the value fields behave on a multi-seat account has not been verified against a real one.
 
 **This figure does not tell you whether a given seat can still call.** Alibaba's Team FAQ is explicit: "When the seat quota is exhausted, API calls are blocked and no pay-as-you-go charges apply." A seat that runs out continues only if the team has eligible shared usage pack quota left, and an admin can cap how much of that pack an individual member may draw. So on a multi-seat team, read this as overall base-plan usage across the account, never as one member's remaining callable quota.
 
@@ -66,9 +72,9 @@ Alibaba's window set is not fixed. It originally defined 5-hour and 7-day window
 ## Known gaps
 
 - **Base plan quota only.** Alibaba sells add-on quota on top of the base plan — an Extra Bundle for Personal and shared usage packs for Team — and both sit outside the base windows this provider reads. Neither is read here, so an account holding add-on credit can show a base window at 100% used while the service still answers. Treat a "used everything but it still works" report as this gap, not as a parsing bug.
-- **Multi-seat Team distribution is not shown.** Only the account-level total is read; per-seat allocation and per-member consumption live on other console pages and are not fetched. Unverified against a real multi-seat account.
-- **One credential per device.** `alibabaVariant` and `alibabaCookie` are single-valued, so a machine tracks either Team or Personal, not both — even though Alibaba lets one account hold both subscriptions with independent quotas. Two devices can cover both, and aggregation keeps them as separate rows as long as each carries an account id.
-- **A Personal row with no account id can be superseded.** The account id is read opportunistically from the Personal payloads; if the console supplies none, the row is unidentified, and the shared aggregation rule drops unidentified observations when another device reports an identified row for the same provider.
+- **Multi-seat Team distribution is not shown.** The CLI reads seats but publishes only their aggregate; the Cookie path reads only the account-level summary. No per-member breakdown is shown. Unverified against a real multi-seat account.
+- **One selected plan per device.** `alibabaVariant` and `alibabaCookie` are single-valued, so a machine tracks either Team or Personal, not both — even though Alibaba lets one account hold both subscriptions with independent quotas. Two devices can cover both, and aggregation keeps them as separate rows as long as each carries an account id.
+- **A row with no account id can be superseded.** The account id is read opportunistically from the Personal payloads. Team CLI seat responses supply no account id. An unidentified row can be dropped by shared aggregation when another device reports an identified row for the same provider; no cross-device account id is invented from the CLI path, credentials or plan tier. A plan label may identify the local runtime row without proving that two devices observe the same account.
 - **An env cookie can be paired with a GUI-selected variant.** `ALIBABA_TOKEN_PLAN_COOKIE` is not cleared by changing the console in Settings, so the two can disagree. The result is a clean `unauthorized` from the newly selected console rather than wrong figures, so this is left as a documented sharp edge rather than a disabled control; set `ALIBABA_TOKEN_PLAN_VARIANT` alongside the cookie for headless installs.
 - Personal/Solo reports percentages. Absolute totals appear only when the quota-config endpoint recognises the plan code.
 - The Team figure is a token-value quota, not money, so its windows carry no `credits` metric and no currency.
