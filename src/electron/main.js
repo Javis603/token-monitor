@@ -10118,7 +10118,8 @@ app.whenReady().then(() => {
       if (!event.sender.isDestroyed()) event.sender.send('copilot:loginStatus', { ...payload, flowId });
     };
     try {
-      const enterpriseHost = request.values?.copilotEnterpriseHost || request.enterpriseHost || settings?.copilotEnterpriseHost || process.env.COPILOT_ENTERPRISE_HOST || process.env.GITHUB_ENTERPRISE_HOST || '';
+      const enterpriseHost = request.values?.copilotEnterpriseHost ?? request.enterpriseHost
+        ?? (settings?.copilotEnterpriseHost || process.env.COPILOT_ENTERPRISE_HOST || process.env.GITHUB_ENTERPRISE_HOST || '');
       const result = await runCopilotDeviceFlowLogin({
         enterpriseHost,
         signal: controller.signal,
