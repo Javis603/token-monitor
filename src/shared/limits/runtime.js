@@ -601,6 +601,20 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       lastGood: null,
       lastAttempt: null
     };
+    if (lane.provider === 'alibaba' && row.source === 'cli' && row.region) {
+      // CLI and Cookie can report the same identity. Keep the CLI's own quota
+      // when a later Cookie result becomes the displayed row. A confirmed CLI
+      // login replacement relinquishes only that variant's previous ownership.
+      if (status === 'ok' || !TRANSIENT_STATUSES.has(status)) {
+        for (const state of lane.identities.values()) {
+          if (state.alibabaCliLastGood?.region === row.region) {
+            delete state.alibabaCliLastGood;
+            delete state.alibabaCliLastAttempt;
+          }
+        }
+      }
+      if (status === 'ok' && row.accountKey) existing.alibabaCliLastGood = row;
+    }
     if (status === 'ok') {
       const retainedWindows = existing.lastGood && invalidatedWindowLabels
         ? existing.lastGood.windows.filter((window) => !invalidatedWindowLabels.has(window.label)
@@ -638,6 +652,9 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       }
     }
     existing.lastAttempt = { status, at, row };
+    if (lane.provider === 'alibaba' && row.source === 'cli' && existing.alibabaCliLastGood) {
+      existing.alibabaCliLastAttempt = existing.lastAttempt;
+    }
     lane.identities.set(identityKey, existing);
     return row;
   }
@@ -1020,7 +1037,13 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       resetRetryPolicy(lane);
       for (const identityKey of identityKeys) {
         lane.accountRevisions.set(identityKey, (lane.accountRevisions.get(identityKey) || 0) + 1);
-        lane.identities.delete(identityKey);
+        const state = lane.identities.get(identityKey);
+        // Saved Cookie changes do not retire an independent CLI login. Restore
+        // its own quota/attempt while still fencing the old Cookie dispatch.
+        if (provider === 'alibaba' && reason === 'settings-change' && config.alibabaSourcePreference !== 'web' && state?.alibabaCliLastGood) {
+          state.lastGood = state.alibabaCliLastGood;
+          state.lastAttempt = state.alibabaCliLastAttempt;
+        } else lane.identities.delete(identityKey);
         const pending = lane.pending.get(identityKey);
         finishIntent(pending, { superseded: true, reason });
         lane.pending.delete(identityKey);
@@ -1201,6 +1224,8 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       lane.identities.set(identityKey, {
         identityKey,
         lastGood: normalizeLimitProvider({ ...row, status: 'ok' }),
+        ...(row.provider === 'alibaba' && row.source === 'cli' && row.accountKey
+          ? { alibabaCliLastGood: normalizeLimitProvider({ ...row, status: 'ok' }), alibabaCliLastAttempt: { status: row.status, at, row } } : {}),
         lastAttempt: { status: row.status, at, row }
       });
     } else {

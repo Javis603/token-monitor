@@ -204,3 +204,39 @@ for (const variant of variants) for (const operation of ['remove', 'pause']) for
     } finally { rt.stop(); }
   });
 }
+
+
+for (const source of ['auto', 'cli', 'web']) test(`Alibaba seeded CLI ownership honors ${source} preference and exact variant`, () => {
+  const slot = variant => ({ id: variant, accountKey: 'same-uid', enabled: true, values: { alibabaCookie: 'fixture=saved', alibabaVariant: variant } });
+  const rt = createLimitsRuntime({ limitProviders: ['alibaba'], alibabaSourcePreference: source,
+    alibabaAccountSlots: [slot('cn-personal'), slot('intl-personal')],
+    previousLimits: { providers: [{ ...row('cn-personal', 70), source: 'cli', status: 'unavailable' }, row('intl-personal', 25)] }
+  }, { autoStart: false, autoRetry: false, env: {} });
+  try {
+    rt.reconfigure({ alibabaAccountSlots: [] });
+    assert.deepEqual(rt.getSnapshot().providers.map(row => row.region), source === 'web' ? [] : ['cn-personal']);
+    if (source !== 'web') assert.equal(rt.getSnapshot().providers[0].windows[0].usedPercent, 70);
+  } finally { rt.stop(); }
+});
+
+test('Alibaba slot retirement fences an in-flight Cookie reply without publishing an empty CLI quota', async () => {
+  let release;
+  let started;
+  const running = new Promise(resolve => { started = resolve; });
+  const held = new Promise(resolve => { release = resolve; });
+  const slot = { id: 'saved', accountKey: 'same-uid', enabled: true, values: { alibabaCookie: 'fixture=saved', alibabaVariant: 'cn-personal' } };
+  const rt = createLimitsRuntime({ limitProviders: ['alibaba'], alibabaAccountSlots: [slot],
+    previousLimits: { providers: [{ ...row('cn-personal', 70), source: 'cli' }] }
+  }, { autoStart: false, autoRetry: false, env: {}, probeProvider: async () => { started(); return held; } });
+  try {
+    const snapshots = [];
+    rt.subscribe(snapshot => snapshots.push(snapshot));
+    const refresh = rt.refresh();
+    await running;
+    rt.reconfigure({ alibabaAccountSlots: [] });
+    release([row('cn-personal', 25)]);
+    await refresh;
+    assert.equal(rt.getSnapshot().providers[0]?.windows[0]?.usedPercent, 70);
+    assert.ok(snapshots.every(snapshot => snapshot.providers[0]?.windows[0]?.usedPercent === 70));
+  } finally { rt.stop(); }
+});

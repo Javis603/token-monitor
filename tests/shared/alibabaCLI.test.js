@@ -693,3 +693,68 @@ test('Alibaba CLI replacement keeps a successful Cookie row with the old identit
     assert.equal(rows.find(row => row.accountKey === hashKey('alibaba', '456'))?.windows[0].usedPercent, 70);
   } finally { runtime.stop(); }
 });
+
+
+for (const variant of ['cn-personal', 'intl-personal']) for (const action of ['pause', 'remove']) for (const cookieHealthy of [false, true]) {
+  test(`Alibaba ${action} preserves independent ${variant} CLI quota, Cookie healthy=${cookieHealthy}`, async () => {
+    const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+    const { fetchAccountSlotSnapshot } = require('../../src/shared/providers/alibaba/limits');
+    const { hashKey } = require('../../src/shared/hashKey');
+    const key = hashKey('alibaba', '123');
+    let offline = false, time = now;
+    const deps = cliDeps(() => {
+      if (offline) throw new Error('temporary CLI outage');
+      return { Uid: 123, per1MonthPercentage: 0.7 };
+    });
+    const slot = { id: 'saved', accountKey: key, enabled: true, values: { alibabaCookie: 'fixture=saved', alibabaVariant: variant } };
+    const runtime = createLimitsRuntime({ limitProviders: ['alibaba'], alibabaVariant: variant, alibabaSourcePreference: 'auto', alibabaAccountSlots: [slot] }, {
+      autoStart: false, autoRetry: false, now: () => time,
+      probeProvider: (_provider, options, context) => fetchAccountSlotSnapshot(options, { ...deps, signal: context.signal }, async () =>
+        options.alibabaAccountSlots.some(slot => slot.enabled) ? [{ provider: 'alibaba', accountKey: key, region: variant, source: 'web',
+          status: cookieHealthy ? 'ok' : 'unavailable', windows: cookieHealthy ? [{ kind: 'billing', usedPercent: 25 }] : [] }] : [])
+    });
+    try {
+      await runtime.refresh();
+      offline = true; time += 300_000;
+      if (cookieHealthy) {
+        await runtime.refresh({}, 'settings-change');
+        time += 300_000;
+      }
+      const published = [];
+      runtime.subscribe(snapshot => published.push(snapshot));
+      runtime.reconfigure({ alibabaAccountSlots: action === 'remove' ? [] : [{ ...slot, enabled: false }] });
+      let row = runtime.getSnapshot().providers.find(row => row.accountKey === key);
+      assert.equal(row?.windows[0]?.usedPercent, 70, 'retiring Cookie restores CLI-owned quota, not the last Cookie reading');
+      assert.equal(row.source, 'cli');
+      if (cookieHealthy) assert.equal(row.status, 'unavailable', 'Cookie success cannot hide the latest CLI failure');
+      runtime.clear({ provider: 'alibaba', accountKey: key }, 'settings-change');
+      assert.ok(published.every(snapshot => snapshot.providers.some(row => row.accountKey === key && row.windows.length)), 'settings invalidation never publishes an empty CLI quota');
+      await runtime.refresh();
+      row = runtime.getSnapshot().providers.find(row => row.accountKey === key);
+      assert.equal(row?.windows[0]?.usedPercent, 70);
+      assert.equal(row.status, 'unavailable');
+    } finally { runtime.stop(); }
+  });
+}
+
+test('Alibaba CLI replacement does not protect an old Cookie identity from later removal', async () => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  const { hashKey } = require('../../src/shared/hashKey');
+  const oldKey = hashKey('alibaba', '123'), newKey = hashKey('alibaba', '456');
+  const slot = { id: 'old', accountKey: oldKey, enabled: true, values: { alibabaCookie: 'fixture=old', alibabaVariant: 'cn-personal' } };
+  let key = oldKey;
+  const runtime = createLimitsRuntime({ limitProviders: ['alibaba'], alibabaAccountSlots: [slot] }, {
+    autoStart: false, autoRetry: false, env: {}, probeProvider: async () => [
+      { provider: 'alibaba', source: 'cli', accountKey: key, region: 'cn-personal', status: 'ok', windows: [{ kind: 'billing', usedPercent: 70 }] },
+      { provider: 'alibaba', source: 'web', accountKey: oldKey, region: 'cn-personal', status: 'ok', windows: [{ kind: 'billing', usedPercent: 25 }] }
+    ]
+  });
+  try {
+    await runtime.refresh();
+    key = newKey;
+    await runtime.refresh({}, 'settings-change');
+    runtime.reconfigure({ alibabaAccountSlots: [] });
+    assert.equal(runtime.getSnapshot().providers.some(row => row.accountKey === oldKey), false);
+    assert.equal(runtime.getSnapshot().providers.find(row => row.accountKey === newKey)?.windows[0]?.usedPercent, 70);
+  } finally { runtime.stop(); }
+});
