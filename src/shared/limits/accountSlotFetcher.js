@@ -314,9 +314,11 @@ function createAccountSlotFetcher(entry) {
       if (!scopeKey && complete) {
         const previousAppRows = (options.previousLimits?.providers || []).filter((/** @type {any} */ row) => row.provider === entry.id && row.sourceDetail === 'app');
         // An unknown credential key may be a rotated token for a held account.
-        // A failure on an already held identity only preserves that identity.
+        // A previously successful identity only preserves itself. Failure-only
+        // rows never confirm a rotated key, even after repeated attempts.
         const unresolvedDiscovery = answered.some(answer => answer.account.id.startsWith('discovered-') && answer.row.status !== 'ok'
-          && !previousAppRows.some((/** @type {any} */ row) => row.accountKey === answer.accountKey));
+          && !previousAppRows.some((/** @type {any} */ row) => row.accountKey === answer.accountKey
+            && (row.status === 'ok' || row.windows?.length)));
         for (const accountKey of previousKeys) {
           const appReading = previousAppRows.some((/** @type {any} */ row) => row.accountKey === accountKey);
           if (!emittedKeys.has(accountKey) && !(appReading && (discoveryFailed || unresolvedDiscovery))) rows.push({ provider: entry.id, accountKey, removed: true });

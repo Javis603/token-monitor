@@ -68,3 +68,29 @@ test('an unreadable discovery store retains the previous app identities', async 
   const rows = await fetch({ previousLimits: previous('missing-a', 'known-b') }, { env: {} });
   assert.ok(!rows.some(row => row.removed));
 });
+
+test('consecutive failures never confirm an unknown rotated credential identity', async () => {
+  let status = 'unauthorized';
+  const fetch = createAccountSlotFetcher({ ...limitProviderEntry('factory'),
+    discoveredAccounts: () => [{ values: { factoryApiKey: 'rotated' }, accountKey: 'rotated-key' }],
+    fetchLimits: () => ({ provider: 'factory', status, windows: [] })
+  });
+  let previousLimits = previous('old-key');
+  for (status of ['unauthorized', 'unavailable', 'unauthorized']) {
+    const rows = await fetch({ previousLimits }, { env: {} });
+    assert.ok(!rows.some(row => row.removed && row.accountKey === 'old-key'), status);
+    assert.ok(rows.some(row => row.accountKey === 'rotated-key' && row.status === status));
+    previousLimits = { providers: [previousLimits.providers.find(row => row.accountKey === 'old-key'), ...rows.filter(row => !row.removed)] };
+  }
+});
+
+test('a failed known account with retained successful windows does not block another retirement', async () => {
+  const fetch = createAccountSlotFetcher({ ...limitProviderEntry('factory'),
+    discoveredAccounts: () => [{ values: { factoryApiKey: 'known' }, accountKey: 'known-b' }],
+    fetchLimits: () => ({ provider: 'factory', status: 'unavailable', windows: [] })
+  });
+  const previousLimits = previous('missing-a', 'known-b');
+  Object.assign(previousLimits.providers[1], { status: 'unavailable', windows: [{ kind: 'monthly', usedPercent: 10 }] });
+  const rows = await fetch({ previousLimits }, { env: {} });
+  assert.ok(rows.some(row => row.removed && row.accountKey === 'missing-a'));
+});
