@@ -12541,7 +12541,6 @@ function renderLimitProviderCheckboxesNow() {
       }
       if (sources.length) optionsInner.append(limitProviderConnectionDetail(id, sources, provider));
       if (settings) optionsInner.append(limitProviderSettingsList(id, settings, reusableSettingInputs));
-      if (usageItems.length) optionsInner.append(limitProviderUsageItemsList(id, usageItems, reusableSettingInputs));
       optionsContainer.append(optionsInner);
       const toggleOptions = () => {
         const opening = state.limitProviderSettingsExpanded !== id;
@@ -12575,6 +12574,7 @@ function renderLimitProviderCheckboxesNow() {
       if (authorSettings?.isConnected) moveLimitProviderLiveNode(optionsInner, authorSettings);
       else if (authorSettings) optionsInner?.append(authorSettings);
     }
+    if (usageItems.length) optionsInner?.append(limitProviderUsageItemsList(id, usageItems, reusableSettingInputs));
     // OpenCode's one setting is an off-by-default fallback estimate. Rendered by
     // the shared path it lands above the account list, reading as the first
     // thing to set up; it belongs below the accounts, collapsed. Reparented
