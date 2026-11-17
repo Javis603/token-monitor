@@ -9394,6 +9394,17 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .slot-stale { color: var(--yellow); }
 .slot-paused .slot-name { color: var(--muted); }
 .slot-fix.plugin-inline-action { display: block; margin-top: 4px; padding: 2px 0; color: var(--red); text-align: left; }
+/* Decorative masks survive translation updates to each button's text. */
+.plugin-menu button[data-slot-action] { grid-template-columns: 15px minmax(0, 1fr); }
+.plugin-menu button[data-slot-action]::before { content: ''; width: 15px; height: 15px; background: currentColor; mask: var(--slot-action-icon) center / contain no-repeat; }
+.plugin-menu button[data-slot-action="rename"] { --slot-action-icon: url("icons/actions/pencil-line.svg"); }
+.plugin-menu button[data-slot-action^="replace"] { --slot-action-icon: url("icons/actions/key.svg"); }
+.plugin-menu button[data-slot-action="pause"] { --slot-action-icon: url("icons/actions/pause.svg"); }
+.plugin-menu button[data-slot-action="resume"] { --slot-action-icon: url("icons/actions/play.svg"); }
+.plugin-menu button[data-slot-action="up"], .plugin-menu button[data-slot-action="down"] { --slot-action-icon: url("icons/actions/arrow-left.svg"); }
+.plugin-menu button[data-slot-action="up"]::before { transform: rotate(90deg); }
+.plugin-menu button[data-slot-action="down"]::before { transform: rotate(-90deg); }
+.plugin-menu button[data-slot-action="remove"] { --slot-action-icon: url("icons/actions/trash.svg"); }
 .plugin-menu button.menu-destructive { color: var(--red); }
 /* Armed removal reads as a different state, not just the same red item: the
    tint matches the app's other inline remove confirmations. */

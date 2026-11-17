@@ -382,7 +382,11 @@
         const { popover: menu, trigger: more, close: closeMenu } = shared;
         item.positionMenu = shared.position;
         more.dataset.i18nAriaLabel = 'settings.slots.actions';
-        const action = (key, fn) => slotButton(key, () => { closeMenu(); return fn(); });
+        const action = (key, fn) => {
+          const node = slotButton(key, () => { closeMenu(); return fn(); });
+          node.dataset.slotAction = key;
+          return node;
+        };
         const up = action('up', () => run('move', id, 'up'));
         const down = action('down', () => run('move', id, 'down'));
         const pause = action('pause', () => run('setEnabled', id, !item.slot.enabled));
@@ -408,6 +412,7 @@
         });
         item.updateRemove = updateRemove;
         remove.className = 'menu-destructive';
+        remove.dataset.slotAction = 'remove';
         const separator = () => { const node = make('hr', 'action-menu-separator'); node.setAttribute('role', 'separator'); return node; };
         const replace = action(`replace${credentialWord}`, () => openEditor(item.slot));
         if (id.startsWith('remote:')) {
@@ -463,7 +468,8 @@
         item.status.textContent = `● ${tr(status === 'invalid' ? (cookie ? 'invalidCookie' : 'invalidKey') : status)}`;
         if (item.pause) {
           item.updateRemove();
-          localized(item.pause, `settings.slots.${slot.enabled ? 'pause' : 'resume'}`);
+          item.pause.dataset.slotAction = slot.enabled ? 'pause' : 'resume';
+          localized(item.pause, `settings.slots.${item.pause.dataset.slotAction}`);
           const pending = presentationPending > 0;
           item.up.disabled = pending || index === 0;
           item.down.disabled = pending || index === active.length - 1;
