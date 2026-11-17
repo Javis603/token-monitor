@@ -165,7 +165,11 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
         // One control record per account: drop records left by an earlier token.
         for (const [fingerprint, item] of Object.entries(metadata)) if (fingerprint !== external.fingerprint && item?.accountKey === external.accountKey) delete metadata[fingerprint];
         await write({ [`${entry.id}AmbientAccounts`]: metadata });
-        changed(entry, operation === 'enabled' && !value ? [external.accountKey] : [], operation === 'enabled');
+        // A key another enabled owner (saved or environment) still holds is not retired.
+        const keys = [external.accountKey, ...(external.accountKeyAliases || [])];
+        const stillOwned = ordered(entry).some(item => item.id !== external.id && item.enabled !== false
+          && [item.accountKey, ...(item.accountKeyAliases || [])].some(key => keys.includes(key)));
+        changed(entry, operation === 'enabled' && !value && !stillOwned ? [external.accountKey] : [], operation === 'enabled');
         return list(providerId);
       }
       if (id === 'environment') return failure('environmentCredential');

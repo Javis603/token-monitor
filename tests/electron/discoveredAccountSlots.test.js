@@ -376,3 +376,14 @@ test('hark: an account retired on sign-out is not revived by a later store failu
   };
   assert.deepEqual(ambientAccounts(limitProviderEntry('hark'), options, { env: {} }).map(account => account.accountKey), ['current-login']);
 });
+
+test('cline: pausing a discovered duplicate does not retire the key a saved account still owns', async t => {
+  stubDiscovery(t, 'cline', () => [{ values: { clineApiKey: 'app-secret' }, accountKey: 'same-account', sourceName: 'Cline' }]);
+  let settings = { clineAccountSlots: [{ id: 'saved', values: { clineApiKey: 'saved-secret' }, accountKey: 'same-account' }] };
+  const changes = [];
+  const service = createAccountSlotService({ getSettings: () => settings, env: {}, probeDeps: () => ({}),
+    onChanged: (_provider, change) => changes.push(change), write: async patch => { settings = { ...settings, ...patch }; } });
+  const discovered = service.list('cline').accounts.find(account => account.id.startsWith('discovered-'));
+  await service.setEnabled('cline', discovered.id, false);
+  assert.deepEqual(changes.at(-1).retiredAccountKeys, []);
+});
