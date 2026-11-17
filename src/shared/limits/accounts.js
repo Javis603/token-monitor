@@ -126,6 +126,8 @@ const { defaultIdentityKey, accountSlotField, normalizeAmbientAccounts } = requi
  * @property {boolean} [dedupeAccounts]
  * @property {string} fetch Limits export called by the collector.
  * @property {AccountField[]} fields
+ * @property {string[]} [accountCredentialKeys] Ordered independently authenticating credentials; companions are never cleared.
+ * @property {(values: Record<string, string>, key: string) => boolean} [accountCredentialReady] Compound credential completeness check.
  * @property {boolean} [accountSlots] Requires a form, no managed/profiles fields, credentials only from declared fields, no singleton credential write-back, and an audit of module-level state.
  * @property {(env: AccountValues, limits: AccountLimits, deps: AccountValues) => DiscoveredAccount[]} [discoveredAccounts] Ephemeral main-only credentials; never projected or saved.
  * @property {string} [serverAccountKey] Limits export testing whether a resolved key proves a server identity.

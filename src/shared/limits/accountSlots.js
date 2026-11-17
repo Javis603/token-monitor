@@ -70,8 +70,8 @@ function defaultAccountValues(entry, options, env) {
 // such as a device id. Keep one default account with the provider's precedence.
 /** @param {any} entry @param {any} values */
 function accountCredentialKey(entry, values) {
-  const keys = entry.form?.credentialChoice?.fields || [entry.status?.credential];
-  return keys.find((/** @type {string} */ key) => Boolean(values[key])) || '';
+  const keys = entry.form?.credentialChoice?.fields || entry.accountCredentialKeys || [entry.status?.credential];
+  return keys.find((/** @type {string} */ key) => Boolean(values[key]) && (!entry.accountCredentialReady || entry.accountCredentialReady(values, key))) || '';
 }
 /** @param {any} entry @param {any} values */
 function hasAccountCredential(entry, values) {

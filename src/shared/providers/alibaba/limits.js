@@ -941,7 +941,7 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
 
   // A save-time probe validates the submitted cookie alone. An unrelated CLI
   // login must never make a bad credential look valid.
-  if (!deps.probe) {
+  if (!deps.probe && (!deps.accountSlotSaved || deps.accountSlotId === 'environment')) {
     throwIfAborted(deps.signal);
     try {
       const result = await fetchBailianCLI(variant, deps);
@@ -1018,7 +1018,14 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
   }
 }
 
-module.exports = {
+async function fetchAccountSlotSnapshot(options, deps, collect) {
+  if (!options.alibabaAccountSlots?.length || alibabaCookie(deps.env || process.env, options)) return collect(options, deps);
+  const local = await fetchAlibabaLimits({ ...options, previousLimits: { providers: [] } }, deps);
+  const previousLimits = { providers: (options.previousLimits?.providers || []).filter(row => row.source !== 'cli') };
+  return [...local.filter(row => row.source === 'cli' && !row.removed), ...await collect({ ...options, previousLimits }, deps)];
+}
+
+module.exports = { accountSlotRowKey: row => `${row.accountKey}:${row.region || ''}`, fetchAccountSlotSnapshot,
   ALIBABA_FETCH_TIMEOUT_MS,
   ALIBABA_VARIANTS,
   ALIBABA_VARIANT_IDS,

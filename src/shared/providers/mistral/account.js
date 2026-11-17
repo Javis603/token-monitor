@@ -3,6 +3,7 @@
 
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'mistral',
+  accountSlots: true,
   sources: [
     { id: 'web', kind: 'web', relation: 'single', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription', getUrlFromForm: true }
   ],

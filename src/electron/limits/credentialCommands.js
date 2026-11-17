@@ -134,7 +134,8 @@ function createCredentialCommands({ getSettings, applySettingsPatch, commitCrede
       if (field.secret && !Object.hasOwn(candidate, field.key)) options[field.key] = '';
     }
     const renewed = {};
-    const deps = { ...probeDeps(renewed), env: {} };
+    const deps = { ...probeDeps(renewed), env: {}, probe: true,
+      onStepfunTokenRenewed: ({ token }) => { renewed.stepfunToken = token; } };
     let discoveredChoices;
     const selectionRequired = (choices) => {
       if (discover && renewed[discover.credential]) {
@@ -179,6 +180,11 @@ function createCredentialCommands({ getSettings, applySettingsPatch, commitCrede
     let errorCode = '';
     try {
       provider = await entry.fetchLimits({ ...options, ...candidate }, deps);
+      if (Array.isArray(provider)) {
+        const rows = provider.filter(row => row && !row.removed);
+        provider = rows.find(row => row.status === 'ok')
+          || rows.find(row => !['unauthorized', 'notConfigured'].includes(row.status)) || rows[0];
+      }
       status = provider?.status || 'unavailable';
     } catch (error) {
       status = error?.status || 'unavailable';

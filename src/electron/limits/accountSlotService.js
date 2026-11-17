@@ -376,6 +376,23 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       return true;
     });
   }
+  function renew({ provider, slotId, field, previous, value, values }) {
+    return serialize(async () => {
+      const entry = entryFor(provider);
+      if (!entry || !slotId || slotId === 'environment'
+        || !entry.fields.some(item => item.key === field && item.kind === 'credential')) return false;
+      const next = slots(entry);
+      const slot = next.find(item => item.id === slotId);
+      if (!slot || !slot.enabled || accountValuesFingerprint(slot.values) !== accountValuesFingerprint(values)) return false;
+      const expected = normalizeAccountField(field, previous);
+      const renewed = normalizeAccountField(field, value);
+      if (!expected || !renewed || normalizeAccountField(field, slot.values[field]) !== expected) return false;
+      slot.values = { ...slot.values, [field]: renewed };
+      slot.updatedAt = new Date(now()).toISOString();
+      await commit(entry, next, false);
+      return true;
+    });
+  }
   // Provider owns authentication and returns a main-only verified draft. The
   // fence is checked again inside the same serialized lane as every slot write.
   async function loginAction(providerId, produce) {
@@ -410,7 +427,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       }
     }).catch(() => {});
   }
-  return { list, loginAction, presentation, adoptSharedLabels, add: (provider, values, label) => save(provider, values, { label }),
+  return { list, renew, loginAction, presentation, adoptSharedLabels, add: (provider, values, label) => save(provider, values, { label }),
     replace: (provider, id, values) => save(provider, values, { replacing: true, id }),
     rename: (provider, id, label) => mutate(provider, id, 'rename', label),
     setEnabled: (provider, id, enabled) => mutate(provider, id, 'enabled', enabled),

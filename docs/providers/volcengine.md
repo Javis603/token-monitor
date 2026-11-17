@@ -26,3 +26,7 @@ Discovery is on by default when the Volcengine provider is enabled; no extra ark
 For a headless deployment, enable `volcengine` in `TOKEN_MONITOR_LIMIT_PROVIDERS`, run the service as the logged-in user, and preserve that user's HOME. No extra polling service is needed.
 
 Subprocesses run without a shell or stdin, with implicit arkcli updates disabled, bounded output and execution time, and cancellation/termination handling. Raw stdout/stderr (especially auth output) must never enter logs or Hub payloads.
+
+## Saved accounts
+
+Saved accounts preserve independent Coding and Agent Plan rows and the existing Ark fallback. An AKLT key requires its secret before it constitutes a configured primary lane; an independent Ark API key can answer when that pair is incomplete. The legacy combined key field continues to accept Ark API keys. Local arkcli discovery remains a separate default lane when no default explicit credentials are configured.

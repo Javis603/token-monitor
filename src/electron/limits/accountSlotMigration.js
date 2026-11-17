@@ -30,7 +30,7 @@ function migrateAccountSlots(store, settings, now = Date.now, env = process.env)
       migrateOpenRouterSlots(store, stored, document, mark, now);
       continue;
     }
-    const credentials = [entry.status.credential, ...(entry.form?.credentialChoice?.fields || [])];
+    const credentials = entry.form?.credentialChoice?.fields || entry.accountCredentialKeys || [entry.status.credential];
     if (!credentials.some(key => stored[key])) {
       store.writeDocument(mark(document));
       continue;

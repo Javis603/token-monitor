@@ -4,6 +4,7 @@
 // Leaf declaration: credential storage reads this without loading the probe.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'muse',
+  accountSlots: true,
   sources: [
     { id: 'cli', kind: 'cli', relation: 'complement', labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' },
     { id: 'web', kind: 'web', relation: 'complement', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }

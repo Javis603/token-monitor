@@ -250,7 +250,24 @@ test('Muse Cookie settings invalidation preserves CLI last-good through a failed
           }
         });
         if (action === 'save') await api.saveCredential('muse', { museWebCookie: 'session=new' });
-        else await api.clearCredential('muse');
+        else {
+          // A migrated account uses slot removal, whose settings notification
+          // clears only its web lane and retains the anonymous CLI observation.
+          const { createAccountSlotService } = require('../../src/electron/limits/accountSlotService');
+          settings = { ...settings, museAccountSlots: [{ id: 'web', enabled: true, values: { museWebCookie: 'session=old' } }] };
+          let removalRefresh;
+          const service = createAccountSlotService({ getSettings: () => settings, env: {}, probeDeps: () => ({}),
+            write: async patch => { settings = { ...settings, ...patch }; },
+            onChanged: async () => {
+              settings.museWebCookie = '';
+              runtime.reconfigure(settings);
+              await runtime.clear({ provider: 'muse', source: 'web' });
+              removalRefresh = runtime.refresh({ provider: 'muse' }, 'settings-change');
+              await removalRefresh;
+            } });
+          await service.remove('muse', 'web');
+          await removalRefresh;
+        }
         assert.ok(snapshots.length > 0);
         for (const snapshot of snapshots) {
           assert.equal(snapshot.providers.find(row => row.source === 'cli')?.windows[0]?.usedPercent, 35,

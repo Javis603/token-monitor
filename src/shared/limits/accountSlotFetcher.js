@@ -145,7 +145,7 @@ function slotAccounts(entry, options, deps) {
   // No account answers to this key. It can still be the default account's when
   // this process has not seen that account answer yet; a default account whose
   // key is known and different is not what was asked for.
-  return { accounts: accounts.filter((account) => !account.values && !account.known), scopeKey, previousKeys, check };
+  return { accounts: entry.limits?.accountSlotMultiRow ? accounts : accounts.filter((account) => !account.values && !account.known), scopeKey, previousKeys, check };
 }
 
 /** @param {SlotEntry} entry @param {SlotOptions} options @param {SlotDeps} deps */
@@ -180,7 +180,8 @@ function createAccountSlotFetcher(entry) {
       return [{ provider: entry.id, status: 'notConfigured', windows: [], updatedAt }];
     }
     try {
-      const result = await entry.fetchLimits(callOptions, { ...(account.values ? { ...deps, env: slotEnv(deps.env || process.env) } : deps), accountSlotSaved: true, ...(account.fetchDeps || {}) });
+      const result = await entry.fetchLimits(callOptions, { ...(account.values ? { ...deps, env: slotEnv(deps.env || process.env) } : deps), accountSlotSaved: true, accountSlotId: account.id, accountSlotValues: account.values,
+        renewAccountSlotCredential: (/** @type {string} */ field, /** @type {string} */ previous, /** @type {string} */ value) => deps.onAccountSlotCredentialRenewed?.({ provider: entry.id, slotId: account.id, field, previous, value, values: account.values }), ...(account.fetchDeps || {}) });
       return (Array.isArray(result) ? result : [result]).filter(Boolean);
     } catch (error) {
       deps.noteLimitFailure?.(error);
@@ -189,12 +190,16 @@ function createAccountSlotFetcher(entry) {
   }
 
   /** @param {SlotOptions} options @param {SlotDeps} deps */
-  return function fetchAccountSlots(options = {}, deps = {}) {
+  const snapshot = entry.limits?.fetchAccountSlotSnapshot;
+  return snapshot ? (options = {}, deps = {}) => snapshot(options, deps, fetchAccountSlots) : fetchAccountSlots;
+
+  /** @param {SlotOptions} options @param {SlotDeps} deps */
+  function fetchAccountSlots(options = {}, deps = {}) {
     if (!entry.discoveredAccounts && !normalizeAccountSlots(entry, options[key]).length) {
       const dispatchedValues = defaultAccountValues(entry, options, deps.env || process.env);
       let result = entry.fetchLimits(options, deps);
       if (deps.onAccountSlotResolved) result = Promise.resolve(result).then(raw => {
-        if (!deps.signal?.aborted) for (const row of Array.isArray(raw) ? raw : [raw]) {
+        if (!deps.signal?.aborted) for (const row of entry.limits?.accountSlotMultiRow ? (Array.isArray(raw) ? raw.slice(0, 1) : [raw]) : Array.isArray(raw) ? raw : [raw]) {
           if (row?.accountKey && !row.removed) deps.onAccountSlotResolved?.(entry.id, 'environment', { accountKey: row.accountKey, accountKeyAliases: row.accountKeyAliases || [] }, dispatchedValues);
         }
         return raw;
@@ -217,7 +222,7 @@ function createAccountSlotFetcher(entry) {
         // The environment account carries `values: null`; compare what it dispatches.
         const values = account.values || defaultAccountValues(entry, options, deps.env || process.env);
         const fingerprint = accountValuesFingerprint(values);
-        const owned = new Set([account.accountKey, account.provisional, ...account.accountKeyAliases]);
+        const owned = new Set([account.accountKey, account.provisional, ...account.accountKeyAliases, ...(entry.limits?.accountSlotKeys?.(values) || [])]);
         // Reuse successful requests while each duplicate owner still passes
         // through server-proof separation and its own callback.
         // The adapter decides retirement below, so a fetch's own removal rows are dropped.
@@ -233,7 +238,7 @@ function createAccountSlotFetcher(entry) {
           // nothing remembered; a held provisional key's recovery moves on the
           // next provider-wide dispatch.
           const accountKey = scopeKey || row.accountKey || account.accountKey;
-          answered.push({ account, values, row, accountKey, moved: account.known && accountKey !== account.accountKey });
+          answered.push({ account, values, row, accountKey, moved: account.known && accountKey !== account.accountKey && (!entry.limits?.accountSlotMultiRow || row === answers[0]) });
         }
       }
       if (deps.signal?.aborted) complete = false;
@@ -249,6 +254,7 @@ function createAccountSlotFetcher(entry) {
       const labels = [];
       const provesServer = entry.serverAccountKey && entry.limits?.[entry.serverAccountKey];
       for (const { account, values, row, accountKey, moved } of answered) {
+        const secondary = entry.limits?.accountSlotMultiRow && answered.find(item => item.account === account)?.row !== row;
         // A slot whose stored key was a proven server account, now answering as a
         // different proven server account (a credential replaced while offline),
         // is a different account: it takes nothing of the old identity, which the
@@ -262,11 +268,11 @@ function createAccountSlotFetcher(entry) {
         // fetch's own aliases either (Qoder reports its cookie hash as one).
         const previous = new Set(separate ? [account.accountKey, ...account.accountKeyAliases] : []);
         const reported = (row.accountKeyAliases || []).filter((/** @type {string} */ alias) => !previous.has(alias));
-        const aliases = [...new Set([...(separate ? [] : account.accountKeyAliases), ...reported, ...(moved && !separate ? [account.accountKey] : [])])]
+        const aliases = secondary ? [] : [...new Set([...(separate ? [] : account.accountKeyAliases), ...reported, ...(moved && !separate ? [account.accountKey] : [])])]
           .filter((alias) => !live.has(alias)).slice(-8);
         // Like retirement, a remembered identity only advances on a pass the
         // runtime can accept whole.
-        if (!scopeKey && complete) {
+        if (!scopeKey && complete && !secondary) {
           const ambientAliases = reported.filter((/** @type {string} */ alias) => answered.some(other => other.account.id.startsWith('discovered-') && other.accountKey === alias));
           const identity = { accountKey, accountKeyAliases: [...new Set([...aliases, ...ambientAliases])], accountName: row.accountName || '', accountEmail: row.accountEmail || '' };
           deps.providerRuntimeState?.set(`account-slot:${entry.id}:${accountNamespace(account)}:${accountValuesFingerprint(values)}`, identity);
@@ -289,9 +295,10 @@ function createAccountSlotFetcher(entry) {
         // A second account reporting an identity already answered in this pass
         // is the same upstream account: one row, the first reading that worked,
         // so a stale duplicate credential cannot hide a working one.
-        /** @type {number | undefined} */
-        const index = emitted.get(accountKey) ?? rows.findIndex(existing => reportsKey(existing, accountKey) || reportsKey(row, existing.accountKey));
-        if (index === undefined || index < 0) { emitted.set(accountKey, rows.length); rows.push(emit); labels.push(account.label); }
+        const rowKey = entry.limits?.accountSlotRowKey?.({ ...row, accountKey }) || accountKey;
+        const index = emitted.get(rowKey) ?? rows.findIndex(existing => (!entry.limits?.accountSlotRowKey || entry.limits.accountSlotRowKey(existing) === rowKey)
+          && (reportsKey(existing, accountKey) || reportsKey(row, existing.accountKey)));
+        if (index === undefined || index < 0) { emitted.set(rowKey, rows.length); rows.push(emit); labels.push(account.label); }
         else {
           const kept = rows[index].status !== 'ok' && emit.status === 'ok' ? emit : rows[index];
           const dropped = kept === emit ? rows[index] : emit;

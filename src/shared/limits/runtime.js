@@ -115,15 +115,14 @@ function isAccountScope(scope) {
 function normalizedScope(scope) {
   if (!scope || typeof scope !== 'object') return { provider: '' };
   const provider = providerId(scope.provider);
-  // Muse rows identify local sources, not accounts. Display labels cannot
-  // address one source, so refresh scopes stay provider-wide. clear() can
-  // explicitly invalidate the web source when its Cookie changes.
-  return provider === 'muse' ? { provider } : { ...cloneValue(scope), provider };
+  // Legacy anonymous Muse rows address sources; saved web slots address accounts.
+  // Display labels alone still cannot narrow an anonymous refresh.
+  return provider === 'muse' && !scope.accountKey ? { provider } : { ...cloneValue(scope), provider };
 }
 
 function rowIdentityKey(row) {
   const provider = providerId(row?.provider);
-  if (provider === 'muse' && row?.source) return `${provider}:source:${row.source}`;
+  if (provider === 'muse' && row?.source && !row.accountKey) return `${provider}:source:${row.source}`;
   const identity = accountIdentityPart(row);
   return identity ? `${provider}:${identity}` : `${provider}:*`;
 }
@@ -986,7 +985,9 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
             lane.accountRevisions.set(identityKey, (lane.accountRevisions.get(identityKey) || 0) + 1);
           }
         } else if (provider === 'muse' && scope.source === 'web') {
-          lane.identities.delete('muse:source:web');
+          for (const [key, state] of lane.identities) {
+            if ((state.lastAttempt?.row || state.lastGood)?.source === 'web') lane.identities.delete(key);
+          }
           lane.accountRevisions.clear();
         } else {
           lane.identities.clear();

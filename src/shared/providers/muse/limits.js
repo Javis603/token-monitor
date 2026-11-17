@@ -142,7 +142,7 @@ const { fetchMuseWebLimits, museWebCookie, normalizeMuseWebCookieHeader } = requ
 async function fetchMuseLimits(options = {}, deps = {}) {
   // A save-time check must only validate the submitted web cookie; the CLI
   // login cannot vouch for it or turn a rejected cookie into a successful save.
-  if (deps.probe) return fetchMuseWebLimits(options, deps);
+  if (deps.probe || deps.accountSlotWebOnly) return fetchMuseWebLimits(options, deps);
   const hasWeb = Boolean(museWebCookie(deps.env || process.env, options));
   const [cli, web] = await Promise.all([
     fetchMuseCodeLimits(options, deps),
@@ -154,4 +154,12 @@ async function fetchMuseLimits(options = {}, deps = {}) {
   return [code, web];
 }
 
-module.exports = { existingMuseCli, runMuseUsageCli, parseMuseUsage, fetchMuseCodeLimits, fetchMuseLimits, museWebCookie, normalizeMuseWebCookieHeader };
+async function fetchAccountSlotSnapshot(options, deps, collect) {
+  if (!options.museAccountSlots?.length) return collect(options, deps);
+  const cli = options.limitRefreshScope?.accountKey ? null : await fetchMuseCodeLimits(options, deps);
+  const previousLimits = { providers: (options.previousLimits?.providers || []).filter(row => row.source !== 'cli') };
+  const web = await collect({ ...options, previousLimits }, { ...deps, accountSlotWebOnly: true });
+  return [...(cli ? [cli.status === 'notConfigured' ? { provider: 'muse', source: 'cli', removed: true } : cli] : []), ...web];
+}
+
+module.exports = { fetchAccountSlotSnapshot, existingMuseCli, runMuseUsageCli, parseMuseUsage, fetchMuseCodeLimits, fetchMuseLimits, museWebCookie, normalizeMuseWebCookieHeader };

@@ -75,6 +75,11 @@ function bindDeclaration(decl) {
     field.kind === 'managed' || (field.kind === 'profiles' && field.key !== accountSlotKey(decl))))) {
     throw new Error(`limits registry: invalid accountSlots declaration for ${decl.id}`);
   }
+  if (decl.accountCredentialKeys && (!Array.isArray(decl.accountCredentialKeys)
+    || !decl.accountCredentialKeys.length || new Set(decl.accountCredentialKeys).size !== decl.accountCredentialKeys.length
+    || decl.accountCredentialKeys.some(key => !decl.fields.some(field => field.key === key && field.kind === 'credential')))) {
+    throw new Error(`limits registry: invalid account credential keys for ${decl.id}`);
+  }
   const limits = LIMIT_PROVIDER_MODULES[decl.id];
   if (!limits) throw new Error(`limits registry: no limits module registered for ${decl.id}`);
   const fetchLimits = limits[decl.fetch];

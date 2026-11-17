@@ -61,7 +61,7 @@ function volcengineCredentials(env = process.env, options = {}) {
     'VOLC_ACCESS_KEY_ID',
     'DOUBAO_ACCESS_KEY_ID'
   ]);
-  const envApiKey = pickFirst(env, ['ARK_API_KEY', 'VOLCENGINE_API_KEY', 'DOUBAO_API_KEY']);
+  const envApiKey = cleanSecret(options.volcengineApiKey) || pickFirst(env, ['ARK_API_KEY', 'VOLCENGINE_API_KEY', 'DOUBAO_API_KEY']);
   const combinedKey = inputKey || envAccessKeyId;
   if (combinedKey && !isVolcengineAccessKeyId(combinedKey)) return { mode: 'ark', apiKey: combinedKey, region };
   const accessKeyId = combinedKey;
@@ -702,7 +702,24 @@ async function confirmVolcengineArkExhausted(credentials, deps, model, now, init
   }
 }
 
-module.exports = {
+function accountSlotKeys(values) {
+  const credentials = volcengineCredentials({}, values);
+  if (!credentials) return [];
+  const agent = volcengineAgentCredentials({}, values);
+  return [credentials.mode === 'ark' ? hashKey('volcengine', credentials.apiKey, credentials.region)
+    : hashKey('volcengine', credentials.accessKeyId, credentials.region), ...(agent ? [volcengineAgentAccountKey(agent)] : [])];
+}
+async function fetchAccountSlotSnapshot(options, deps, collect) {
+  if (!options.volcengineAccountSlots?.length || volcengineCredentials(deps.env || process.env, options)) return collect(options, deps);
+  const local = await fetchVolcengineLimits(options, deps);
+  const previousLimits = { providers: (options.previousLimits?.providers || []).filter(row => row.source !== 'cli') };
+  return [...local.filter(row => row.source === 'cli'), ...await collect({ ...options, previousLimits }, deps)];
+}
+function volcengineArkKey(env) { return pickFirst(env, ['ARK_API_KEY', 'VOLCENGINE_API_KEY', 'DOUBAO_API_KEY']); }
+function volcenginePrimaryKey(env) { const c = volcengineCredentials(env); return c?.accessKeyId || c?.apiKey || ''; }
+function volcenginePrimarySecret(env) { return volcengineCredentials(env)?.secretAccessKey || ''; }
+
+module.exports = { accountSlotMultiRow: true, accountSlotKeys, fetchAccountSlotSnapshot, volcenginePrimaryKey, volcenginePrimarySecret, volcengineArkKey,
   VOLCENGINE_FETCH_TIMEOUT_MS,
   VOLCENGINE_CODING_PLAN_URL,
   VOLCENGINE_ARK_CHAT_COMPLETIONS_URL,
