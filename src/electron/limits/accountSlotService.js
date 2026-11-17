@@ -34,7 +34,9 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
   };
   const ambient = entry => ambientAccounts(entry, getSettings(), { ...probeDeps?.(), env });
   const ordered = (entry, list = slots(entry)) => [...ambient(entry), ...(environment(entry) ? [environment(entry)] : []), ...list.map((slot, index) => ({ ...slot, order: index }))].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-  const dto = entry => ordered(entry).filter((item, index, all) => !all.slice(0, index).some(other => (other.source || item.source) && other.accountKey && (other.accountKey === item.accountKey || other.accountKeyAliases?.includes(item.accountKey) || item.accountKeyAliases?.includes(other.accountKey)))).map(({ id, label, enabled, accountKey, accountKeyAliases = [], values, source, sourceName, accountName, accountEmail, createdAt, updatedAt }) => {
+  const dto = entry => ordered(entry).filter((item, index, all) => !all.slice(0, index).some(other => (other.source || item.source)
+    // A paused duplicate stays listed, so the row the user sees matches what is collected.
+    && other.enabled !== false && item.enabled !== false && other.accountKey && (other.accountKey === item.accountKey || other.accountKeyAliases?.includes(item.accountKey) || item.accountKeyAliases?.includes(other.accountKey)))).map(({ id, label, enabled, accountKey, accountKeyAliases = [], values, source, sourceName, accountName, accountEmail, createdAt, updatedAt }) => {
     const key = accountKey || hashKey(entry.id, 'account-slot', source ? 'default' : `slot:${id}`);
     return { id, label, enabled, accountKey: key, accountKeyAliases, ...(source ? { source } : {}),
       ...(source === 'discovered' ? { sourceName, accountName, accountEmail } : {}),
@@ -143,6 +145,8 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
         }
         else return failure('invalidOperation');
         metadata[external.fingerprint] = record;
+        // One control record per account: drop records left by an earlier token.
+        for (const [fingerprint, item] of Object.entries(metadata)) if (fingerprint !== external.fingerprint && item?.accountKey === external.accountKey) delete metadata[fingerprint];
         await write({ [`${entry.id}AmbientAccounts`]: metadata });
         changed(entry, operation === 'enabled' && !value ? [external.accountKey] : [], operation === 'enabled');
         return list(providerId);
@@ -177,7 +181,10 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
         const current = ambient(entry).find(item => item.id === id);
         if (!current || fingerprint !== current.fingerprint) return false;
         const metadata = { ...(getSettings()[`${entry.id}AmbientAccounts`] || {}) };
-        const nextIdentity = { ...metadata[fingerprint], ...identity, sourceName: current.sourceName };
+        // A rotated token keeps the account's name, pause and position.
+        const previous = metadata[fingerprint] || Object.values(metadata).find(item => item?.accountKey === identity.accountKey) || {};
+        const nextIdentity = { label: previous.label, enabled: previous.enabled, order: previous.order, ...metadata[fingerprint], ...identity, sourceName: current.sourceName };
+        for (const [key, item] of Object.entries(metadata)) if (key !== fingerprint && item?.accountKey === identity.accountKey) delete metadata[key];
         if (JSON.stringify(metadata[fingerprint]) === JSON.stringify(nextIdentity)) return true;
         metadata[fingerprint] = nextIdentity;
         await write({ [`${entry.id}AmbientAccounts`]: metadata });

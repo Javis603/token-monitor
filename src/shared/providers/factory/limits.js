@@ -285,6 +285,14 @@ function factoryAccountEnvKey(env = process.env) {
   return FACTORY_API_KEY_NAMES.map(name => cleanSecret(env[name])).find(Boolean) || '';
 }
 function discoverAccountSlots(deps = {}) {
+  // A missing file means no Droid sign-in; any other read failure is not a
+  // sign-out, so it propagates and the discovered account stays unavailable.
+  try {
+    readFactoryFile(path.join(factoryProfileDir({}, deps), '.env'), 'Factory environment file', deps);
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    return [];
+  }
   const result = resolveFactoryAutomaticApiKey({}, { ...deps, env: {} });
   return result.apiKey ? [{ values: { factoryApiKey: result.apiKey }, sourceName: 'Droid' }] : [];
 }
