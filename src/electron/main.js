@@ -3971,6 +3971,11 @@ function getAccountPresentationSync() {
       try { return getSyncContentCredentials().resolveIdentity(context); } catch (_) { return ''; }
     },
     getCacheIdentity: () => settings.limitAccountPresentationCacheIdentity || '',
+    loadJournal: () => (Array.isArray(settings.limitAccountPresentationPending) ? settings.limitAccountPresentationPending : []),
+    saveJournal: (journal) => {
+      settings = { ...settings, limitAccountPresentationPending: journal };
+      saveSettings({ throwOnError: true });
+    },
     getLocalLabels: () => LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots).flatMap(entry =>
       (accountSlotService?.list(entry.id).accounts || []).filter(slot => slot.label).map(slot =>
         ({ provider: entry.id, type: 'rename', key: slot.accountKey, label: slot.label }))),
@@ -5925,6 +5930,7 @@ function settingsForRenderer() {
   delete rendererSettings.icloudRetiredDeviceIds;
   delete rendererSettings.icloudWriterId;
   delete rendererSettings.limitAccountPresentationCacheIdentity;
+  delete rendererSettings.limitAccountPresentationPending;
   delete rendererSettings.syncContentState;
   delete rendererSettings.pluginSkinRef;
   // Usage retained for untracked clients: only the collector transform reads
@@ -8603,6 +8609,7 @@ app.whenReady().then(() => {
     // Presentation writes use the serialized account command lane.
     delete normalizedPatch.limitAccountPresentation;
     delete normalizedPatch.limitAccountPresentationCacheIdentity;
+    delete normalizedPatch.limitAccountPresentationPending;
     // Derived for the renderer from the hub document, not settings. Persisting a
     // copy would leave a key on disk that describes a hub as of whenever a form
     // was last saved, waiting to be mistaken for the real thing.
