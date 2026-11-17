@@ -33,7 +33,7 @@ The Cline Desktop/CLI sign-in is an ephemeral account row alongside saved API ke
 
 The app store reads the `cline` section first, then `cline-pass` only as a fallback, because ClinePass writes its current sign-in under `cline` too.
 
-`CLINE_API_KEY` precedes `CLINEPASS_API_KEY` within the environment lane. Saved keys authenticate exactly as entered; the app token retains its `workos:` prefix. A rejected credential never falls through to another row. The status pill uses `api` versus `oauth` to direct users to update the key or open Cline.
+`CLINE_API_KEY` precedes `CLINEPASS_API_KEY` within the environment lane. Saved keys authenticate exactly as entered; the app token retains its `workos:` prefix. A rejected credential does not fall back to another credential within its row; other account rows are fetched independently. The status pill uses `api` versus `oauth` to direct users to update the key or open Cline.
 
 Reading another application's credential file follows the existing local-discovery boundary: a
 readable provider-owned configuration file may supply an in-memory credential

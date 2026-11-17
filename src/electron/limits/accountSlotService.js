@@ -29,6 +29,8 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
     const entry = limitProviderEntry(typeof id === 'string' ? id : '');
     return entry?.accountSlots ? entry : null;
   };
+  const sameAccount = (a, b) => Boolean(a?.accountKey && b?.accountKey && (a.accountKey === b.accountKey
+    || a.accountKeyAliases?.includes(b.accountKey) || b.accountKeyAliases?.includes(a.accountKey)));
   const slots = (entry, order = getSettings().limitAccountPresentation?.[entry.id]?.order || []) => {
     const keyOf = slot => slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`);
     const rank = slot => {
@@ -233,13 +235,13 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       if (external?.source === 'discovered') {
         if (!['rename', 'enabled'].includes(operation)) return failure('environmentCredential');
         const metadata = { ...(getSettings()[`${entry.id}AmbientAccounts`] || {}) };
-        const record = { ...metadata[external.fingerprint], order: external.order, accountKey: external.accountKey, accountKeyAliases: external.accountKeyAliases, label: external.label, enabled: external.enabled };
+        const record = { ...metadata[external.fingerprint], order: external.order, accountKey: external.accountKey, accountKeyAliases: external.accountKeyAliases, accountName: external.accountName, accountEmail: external.accountEmail, sourceName: external.sourceName, label: external.label, enabled: external.enabled };
         if (operation === 'rename' && typeof value === 'string') record.label = value;
         else if (operation === 'enabled' && typeof value === 'boolean') record.enabled = value;
         else return failure('invalidOperation');
         metadata[external.fingerprint] = record;
         // One control record per account: drop records left by an earlier token.
-        for (const [fingerprint, item] of Object.entries(metadata)) if (fingerprint !== external.fingerprint && item?.accountKey === external.accountKey) delete metadata[fingerprint];
+        for (const [fingerprint, item] of Object.entries(metadata)) if (fingerprint !== external.fingerprint && sameAccount(item, external)) delete metadata[fingerprint];
         const operations = operation === 'rename' ? [{ provider: providerId, type: 'rename', key: external.accountKey, label: value }] : [];
         const { replayPresentation } = require('./accountPresentationSync');
         await write({ [`${entry.id}AmbientAccounts`]: metadata,
@@ -332,10 +334,14 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
         if (!current || fingerprint !== current.fingerprint) return false;
         const metadata = { ...(getSettings()[`${entry.id}AmbientAccounts`] || {}) };
         // A rotated token keeps the account's name, pause and position.
-        const previous = metadata[fingerprint] || Object.values(metadata).find(item => item?.accountKey === identity.accountKey || item?.accountKeyAliases?.includes(identity.accountKey)) || current;
+        const previous = metadata[fingerprint] || Object.values(metadata).find(item => sameAccount(item, identity)) || current;
         const nextIdentity = { label: previous.label, enabled: previous.enabled, order: previous.order, ...metadata[fingerprint], ...identity, sourceName: current.sourceName };
-        for (const [key, item] of Object.entries(metadata)) if (key !== fingerprint && item?.accountKey === identity.accountKey) delete metadata[key];
-        if (JSON.stringify(metadata[fingerprint]) === JSON.stringify(nextIdentity)) return true;
+        let retired = false;
+        for (const [key, item] of Object.entries(metadata)) if (key !== fingerprint && sameAccount(item, identity)) {
+          delete metadata[key];
+          retired = true;
+        }
+        if (!retired && JSON.stringify(metadata[fingerprint]) === JSON.stringify(nextIdentity)) return true;
         metadata[fingerprint] = nextIdentity;
         await write({ [`${entry.id}AmbientAccounts`]: metadata });
         await migratePresentationKey(providerId, current.accountKey, identity.accountKey, previous.label);
@@ -375,9 +381,13 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
         const next = slots(entry, group?.order || []);
         const stored = normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]);
         let changedAny = next.some((slot, index) => slot.id !== stored[index]?.id);
+        const canonicalKeys = new Set(ordered(entry, next).map(row => row.accountKey));
         for (const slot of next) {
-          if (!slot.accountKey || !Object.hasOwn(labels, slot.accountKey) || labels[slot.accountKey] === slot.label) continue;
-          slot.label = labels[slot.accountKey];
+          // A retired alias may now be another local account's canonical key.
+          const labelKey = [slot.accountKey, ...slot.accountKeyAliases.filter(key => !canonicalKeys.has(key))]
+            .find(key => Object.hasOwn(labels, key));
+          if (!slot.accountKey || labelKey === undefined || labels[labelKey] === slot.label) continue;
+          slot.label = labels[labelKey];
           changedAny = true;
         }
         const sourcePatch = sourcePresentationPatch(entry, group);

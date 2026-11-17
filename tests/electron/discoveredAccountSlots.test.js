@@ -448,3 +448,50 @@ for (const replacing of [false, true]) test(`factory: ${replacing ? 'replacing' 
   assert.equal(accountName(result.accounts[0], null, value => value, settings.limitAccountPresentation.factory), 'Work');
   assert.doesNotMatch(JSON.stringify(published), /droid-secret|old-secret/);
 });
+
+for (const operation of ['rename', 'setEnabled']) test(`discovered ${operation} retains public identity when its store becomes unreadable`, async t => {
+  let unreadable = false;
+  stubDiscovery(t, 'factory', () => {
+    if (unreadable) throw new Error('store unavailable');
+    return [{ values: { factoryApiKey: 'fixture-key' }, accountKey: 'known', accountName: 'Team', accountEmail: 'member@example.com', sourceName: 'Droid' }];
+  });
+  let settings = {};
+  const service = createAccountSlotService({ getSettings: () => settings, env: {}, probeDeps: () => ({}), write: async patch => { settings = { ...settings, ...patch }; } });
+  const id = service.list('factory').accounts[0].id;
+  await service[operation]('factory', id, operation === 'rename' ? 'Work' : false);
+  unreadable = true;
+  const row = service.list('factory').accounts[0];
+  assert.deepEqual([row.accountName, row.accountEmail, row.sourceName], ['Team', 'member@example.com', 'Droid']);
+  assert.doesNotMatch(JSON.stringify(settings.factoryAmbientAccounts), /fixture-key/);
+});
+
+test('discovered resolution retires old fingerprint controls through canonical aliases', async t => {
+  const values = { clineApiKey: 'new-session' };
+  const old = accountValuesFingerprint({ clineApiKey: 'old-session' });
+  const fingerprint = accountValuesFingerprint(values);
+  stubDiscovery(t, 'cline', () => [{ values, accountKey: 'new-key', sourceName: 'Cline' }]);
+  let settings = { clineAmbientAccounts: {
+    [old]: { accountKey: 'old-key', accountKeyAliases: [], label: 'Work', enabled: false, order: 2 },
+    unrelated: { accountKey: 'unrelated', accountKeyAliases: [], label: 'Other', enabled: true }
+  } };
+  const service = createAccountSlotService({ getSettings: () => settings, env: {}, probeDeps: () => ({}), write: async patch => { settings = { ...settings, ...patch }; } });
+  await service.resolved('cline', `discovered-${fingerprint}`, { accountKey: 'new-key', accountKeyAliases: ['old-key'] }, values);
+  assert.equal(settings.clineAmbientAccounts[old], undefined);
+  assert.equal(settings.clineAmbientAccounts[fingerprint].label, 'Work');
+  assert.equal(settings.clineAmbientAccounts[fingerprint].enabled, false);
+  assert.equal(settings.clineAmbientAccounts[fingerprint].order, 2);
+  assert.ok(settings.clineAmbientAccounts.unrelated);
+});
+
+test('multi-account signal keeps remembered discovered canonical identity', t => {
+  const values = { factoryApiKey: 'rotated' };
+  const entry = stubDiscovery(t, 'factory', () => [{ values, accountKey: 'credential-key' }]);
+  const { configuredMultiAccountProviders } = require('../../src/shared/limits/accountSlots');
+  const options = { factoryAccountSlots: [{ id: 'saved', values: { factoryApiKey: 'saved' }, accountKey: 'server-key' }],
+    factoryAmbientAccounts: { [accountValuesFingerprint(values)]: { accountKey: 'server-key', accountKeyAliases: ['previous-key'], enabled: true } } };
+  assert.deepEqual(configuredMultiAccountProviders([entry], options, {}), []);
+  options.factoryAccountSlots[0].accountKey = 'credential-key';
+  assert.deepEqual(configuredMultiAccountProviders([entry], options, {}), [], 'new discovery key is retained as an alias');
+  options.factoryAccountSlots[0].accountKey = 'different-server';
+  assert.deepEqual(configuredMultiAccountProviders([entry], options, {}), ['factory']);
+});

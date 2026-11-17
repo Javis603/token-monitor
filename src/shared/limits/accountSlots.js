@@ -98,7 +98,10 @@ function configuredMultiAccountProviders(entries, options, env, deps = {}) {
       const records = (entry.discoveredAccounts?.(env, entry.limits, { ...deps, env }) || []).filter((/** @type {any} */ record) => options[`${entry.id}AmbientAccounts`]?.[accountValuesFingerprint(record.values)]?.enabled !== false);
       let count = 0;
       for (const record of records) {
-        const identity = { ...options[`${entry.id}AmbientAccounts`]?.[accountValuesFingerprint(record.values)], ...record };
+        const remembered = options[`${entry.id}AmbientAccounts`]?.[accountValuesFingerprint(record.values)] || {};
+        const accountKey = remembered.accountKey || record.accountKey;
+        const identity = { ...record, accountKey, accountKeyAliases: [...new Set([...(remembered.accountKeyAliases || []),
+          ...(record.accountKeyAliases || []), ...(record.accountKey && record.accountKey !== accountKey ? [record.accountKey] : [])])] };
         if (owners.some(owner => accountValuesFingerprint(owner.values) === accountValuesFingerprint(record.values)
           || (owner.accountKey && (owner.accountKey === identity.accountKey || identity.accountKeyAliases?.includes(owner.accountKey) || owner.accountKeyAliases?.includes(identity.accountKey))))) continue;
         owners.push({ ...record, ...identity });

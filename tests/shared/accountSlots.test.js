@@ -561,3 +561,19 @@ for (const withSlots of [false, true]) test(`environment resolution keeps dispat
     assert.ok(!state.has(`account-slot:deepseek:default:${accountValuesFingerprint({ deepseekApiKey: 'after', deepseekWebToken: '' })}`));
   }
 });
+
+test('unresolved slot failures follow reordered slots and retain their local labels', async () => {
+  const a = slot('a', undefined, { label: 'Work' });
+  const b = slot('b', undefined, { label: 'Personal' });
+  const runtime = createLimitsRuntime({ limitProviders: ['deepseek'], ...config(a, b) }, {
+    ...deps(), autoStart: false, autoRetry: false,
+    providerFetchers: { deepseek: fake(() => ({ provider: 'deepseek', status: 'unavailable' })) }
+  });
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    runtime.reconfigure({ limitProviders: ['deepseek'], ...config(b, a) });
+    const rows = runtime.getSnapshot().providers;
+    assert.deepEqual(rows.map(r => r.accountKey), ['b', 'a'].map(id => hashKey('deepseek', 'account-slot', `slot:${id}`)));
+    assert.deepEqual(rows.map(r => r.accountName), ['Personal', 'Work']);
+  } finally { runtime.stop(); }
+});

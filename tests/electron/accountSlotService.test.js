@@ -593,3 +593,19 @@ test('an environment account keeps its shared name when its identity resolves', 
   await h.service.resolved('deepseek', 'environment', { accountKey: 'server-env', accountKeyAliases: [] }, defaultAccountValues(limitProviderEntry('deepseek'), h.settings, { DEEPSEEK_API_KEY: 'SECRET-env' }) || values);
   assert.equal(h.settings.limitAccountPresentation.deepseek.labels['server-env'], 'From env');
 });
+
+test('incoming shared labels follow prior keys without taking another slot canonical label', async () => {
+  const h = harness();
+  h.settings = { ...h.settings, deepseekAccountSlots: [
+    { id: 'a', values: { deepseekApiKey: 'a' }, accountKey: 'current-a', accountKeyAliases: ['prior-a', 'current-b'], label: 'Local A' },
+    { id: 'b', values: { deepseekApiKey: 'b' }, accountKey: 'current-b', label: 'Local B' }
+  ] };
+  await h.service.adoptSharedLabels({ deepseek: { labels: { 'prior-a': 'Remote A', 'current-b': 'Remote B' }, order: [] } });
+  assert.deepEqual(h.settings.deepseekAccountSlots.map(s => s.label), ['Remote A', 'Remote B']);
+  await h.service.adoptSharedLabels({ deepseek: { labels: { 'prior-a': '', 'current-b': 'Remote B' }, order: [] } });
+  assert.equal(h.settings.deepseekAccountSlots[0].label, '');
+  await h.service.adoptSharedLabels({ deepseek: { labels: { 'current-a': 'Canonical', 'prior-a': 'Outdated' }, order: [] } });
+  assert.equal(h.settings.deepseekAccountSlots[0].label, 'Canonical');
+  await h.service.adoptSharedLabels({ deepseek: { labels: { 'current-b': 'Another account' }, order: [] } });
+  assert.equal(h.settings.deepseekAccountSlots[0].label, 'Canonical');
+});

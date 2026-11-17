@@ -4,6 +4,7 @@ const { orderAccountRows, defaultIdentityKey, configuredMultiAccountProviders, n
 const { LIMIT_PROVIDER_REGISTRY } = require('./registry');
 
 const crypto = require('node:crypto');
+const { hashKey } = require('../hashKey');
 const {
   PROVIDER_CLEANUP_GRACE_MS,
   normalizeLimitsRefreshMode,
@@ -370,7 +371,8 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     const entry = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === provider && entry.accountSlots);
     if (entry) {
       const current = providerRuntimeState.get(`account-slot:${entry.id}:default:${accountValuesFingerprint(defaultAccountValues(entry, config, deps.env || process.env))}`)?.accountKey;
-      const saved = normalizeAccountSlots(entry, config[accountSlotKey(entry)]);
+      const saved = normalizeAccountSlots(entry, config[accountSlotKey(entry)]).map(slot => ({ ...slot,
+        accountKey: slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`) }));
       const ambient = Object.values(config[`${entry.id}AmbientAccounts`] || {});
       const environmentOrder = config[defaultIdentityKey(entry)]?.order;
       // Legacy fixed accounts without discovery retain their trailing position.
