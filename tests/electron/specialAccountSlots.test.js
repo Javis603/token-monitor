@@ -190,10 +190,12 @@ test('incomplete stored AKLT does not import an environment Ark credential', t =
 test('fetched Mistral slots record and query separate real history streams', async t => {
   const { createLimitsHistoryStore } = require('../../src/electron/limits/historyStore');
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'special-slot-history-'));
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const now = () => Date.parse('2026-11-17T00:00:00Z');
   const store = createLimitsHistoryStore(path.join(dir, 'history.sqlite'), { now });
-  t.after(() => store.close());
+  t.after(async () => {
+    await store.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
   const rows = await LIMIT_PROVIDER_FETCHERS.mistral({ mistralAccountSlots: ['a', 'b'].map(id => ({ id, enabled: true, values: { mistralCookie: `ory_session_x=${id}` } })) }, {
     env: {}, now, fetch: async (url, init) => url.endsWith('/subscription') ? { ok: false, status: 503 }
       : { ok: true, json: async () => ({ wallet_amount: init.headers.Cookie.endsWith('a') ? 10 : 20, credit_notes_amount: 0, ongoing_usage_balance: 0, currency: 'EUR' }) }
