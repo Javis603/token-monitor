@@ -22,6 +22,10 @@ function migrateAccountSlots(store, settings, now = Date.now, env = process.env)
     const stored = store.settingsCredentials(document);
     // Companion fields can belong to an environment account. Move them only
     // when a stored primary credential (or one of its alternatives) moves too.
+    if (entry.id === 'openrouter') {
+      migrateOpenRouterSlots(store, stored, document, mark, now);
+      continue;
+    }
     const credentials = [entry.status.credential, ...(entry.form?.credentialChoice?.fields || [])];
     if (!credentials.some(key => stored[key])) {
       store.writeDocument(mark(document));
@@ -75,5 +79,45 @@ function migrateAccountSlots(store, settings, now = Date.now, env = process.env)
     store.replaceSettingsCredentials(verified, mark(document));
   }
   return store.settingsCredentials();
+}
+// Names are presentation, never identity. Stable import IDs allow retry after
+// the destination write while retaining duplicate and paused profile records.
+function migrateOpenRouterSlots(store, stored, document, mark, now) {
+  const entry = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === 'openrouter');
+  const profiles = Object.entries(stored.openrouterProfiles || {});
+  const imports = [
+    ...(stored.openrouterApiKey ? [['', { apiKey: stored.openrouterApiKey }]] : []), ...profiles
+  ].flatMap(([name, profile]) => {
+    // A profile without a usable key collected nothing; skipping it must not
+    // block every other profile's migration.
+    const apiKey = entry.limits.openrouterToken({}, profile?.apiKey);
+    if (!apiKey) return [];
+    const timestamp = new Date(now()).toISOString();
+    return [{ id: hashKey('openrouter', 'legacy-profile', name).slice(7), label: name, enabled: profile.enabled !== false,
+      values: { openrouterApiKey: apiKey }, accountKey: hashKey('openrouter', apiKey), accountKeyAliases: [], serverIdentity: false,
+      createdAt: timestamp, updatedAt: timestamp }];
+  });
+  const key = accountSlotKey(entry);
+  const raw = stored[key] || [];
+  const slots = normalizeAccountSlots(entry, raw);
+  if (raw.length !== slots.length) throw new Error('Invalid account slot list');
+  const additions = imports.filter(item => !slots.some(slot => slot.id === item.id));
+  if (slots.length + additions.length > 21) throw new Error('Account slot limit prevents migration');
+  const next = [...additions, ...slots];
+  for (const item of imports) {
+    const slot = next.find(slot => slot.id === item.id);
+    if (slot.label !== item.label || slot.enabled !== item.enabled || slot.accountKey !== item.accountKey || !isDeepStrictEqual(slot.values, item.values)) throw new Error('OpenRouter import conflicts with existing slot');
+  }
+  if (imports.length) {
+    store.replaceSettingsCredentials({ ...stored, [key]: next }, document);
+    document = store.readDocument();
+    const verified = store.settingsCredentials(document);
+    if (!isDeepStrictEqual(verified[key], next)) throw new Error('Account slot migration verification failed');
+    stored = verified;
+  }
+  stored.openrouterProfiles = {};
+  stored.openrouterApiKey = '';
+  stored[defaultIdentityKey(entry)] = null;
+  store.replaceSettingsCredentials(stored, mark(document));
 }
 module.exports = { migrateAccountSlots };

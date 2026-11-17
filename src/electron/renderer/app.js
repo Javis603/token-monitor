@@ -105,7 +105,6 @@ const LIMIT_PROVIDER_ACCOUNT_NODES = {
   mimo: { group: 'mimoAccountGroup', status: 'mimoAccountStatus' },
   workbuddy: { group: 'workbuddyAccountGroup', status: 'workbuddyAccountStatus' },
   minimax: { group: 'minimaxAccountGroup', status: 'minimaxStatus' },
-  openrouter: { group: 'openrouterAccountGroup', status: 'openrouterStatus' },
   volcengine: { group: 'volcengineAccountGroup', status: 'volcengineAccountStatus' },
   thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
 };
@@ -346,7 +345,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) || (allowed === viewBreakdownValues && pluginPlacementsApi.isHomeToken(raw)) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.icloudStatus = null;
@@ -10233,7 +10232,6 @@ function syncSettingsForm() {
   renderLimitProviderCheckboxes();
   renderSettingsSummaries();
   renderOpenCodeProfiles();
-  renderOpenRouterProfiles();
   renderMinimaxApiKeys();
   renderThirdPartyProfiles();
   buildAppearanceColorControls();
@@ -15305,7 +15303,6 @@ function renderStatsUpdate() {
   renderLimitProviderCheckboxes();
   renderToolPreferences();
   renderWslPanel();
-  updateOpenRouterProfilesStatus();
   updateMinimaxApiKeysStatus();
   updateThirdPartyProfilesStatus();
   renderExternalProviderStatus('volcengine');
@@ -16701,9 +16698,6 @@ function setOpencodeCookieExpanded(expanded) {
   setAccountGroupExpanded('opencode', expanded, 'opencodeCookieExpanded');
 }
 
-function setOpenrouterAccountExpanded(expanded) {
-  setAccountGroupExpanded('openrouter', expanded, 'openrouterAccountExpanded');
-}
 
 function setThirdPartyAccountExpanded(expanded) {
   setAccountGroupExpanded('thirdparty', expanded, 'thirdPartyAccountExpanded');
@@ -18710,20 +18704,6 @@ function renderOpenCodeProfilesStatusSummary(profiles, ambient = null) {
   }
 }
 
-function openrouterProfileStatusText(provider, options = {}) {
-  const status = limitProviderPresentationApi.namedApiProfileStatus(provider, options);
-  if (status === 'disabled') return t('settings.profiles.disabled');
-  if (status === 'hidden') return '';
-  if (status === 'checking') return t('settings.openrouter.checking');
-  if (status === 'invalid') return t('settings.openrouter.invalidKey');
-  if (status !== 'linked') return t('settings.openrouter.unavailable');
-  const balance = optionalFiniteNumber(provider.balance?.amount);
-  if (balance !== null) return `✓ ${formatMoney(balance, 'USD')}`;
-  const quota = (provider.windows || []).find((window) => window?.showMeter !== false);
-  const remaining = optionalFiniteNumber(quota?.remaining);
-  if (remaining !== null) return `✓ ${formatMoney(remaining, 'USD')} left`;
-  return '✓';
-}
 
 function thirdPartyProfileStatusText(provider, options = {}) {
   const status = limitProviderPresentationApi.namedApiProfileStatus(provider, options);
@@ -18815,14 +18795,6 @@ function minimaxBillingUrl(key) {
   return `${origin}/user-center/payment/${key.billingMode === 'api' ? 'balance' : 'token-plan'}`;
 }
 
-function updateOpenRouterProfilesStatus() {
-  updateNamedApiProfilesStatus({
-    providerId: 'openrouter',
-    profileSettingsKey: 'openrouterProfiles',
-    profileCountStateKey: 'openrouterProfileCount',
-    statusText: openrouterProfileStatusText
-  });
-}
 
 function updateThirdPartyProfilesStatus() {
   updateNamedApiProfilesStatus({
@@ -18833,11 +18805,6 @@ function updateThirdPartyProfilesStatus() {
   });
 }
 
-function openrouterProfileErrorText(result) {
-  if (result?.errorCode === 'invalidName') return t('settings.openrouter.invalidName');
-  if (result?.errorCode === 'missingApiKey') return t('settings.openrouter.statusNotSet');
-  return result?.error || t('settings.openrouter.saveFailedShort');
-}
 
 function thirdPartyProfileErrorText(result, adapter = '') {
   if (result?.errorCode === 'invalidName') return t('settings.thirdparty.invalidName');
@@ -19068,18 +19035,6 @@ function renderNamedApiProfiles(config) {
   });
 }
 
-function renderOpenRouterProfiles() {
-  renderNamedApiProfiles({
-    providerId: 'openrouter',
-    profileSettingsKey: 'openrouterProfiles',
-    envConfiguredKey: 'openrouterEnvConfigured',
-    profileCountStateKey: 'openrouterProfileCount',
-    api: window.tokenMonitor.openrouter,
-    rerender: renderOpenRouterProfiles,
-    updateStatus: updateOpenRouterProfilesStatus,
-    errorText: openrouterProfileErrorText
-  });
-}
 
 async function renderMinimaxApiKeys() {
   if (!isSettingsSurfaceVisible()) return;
@@ -19942,49 +19897,6 @@ function setupCursorAccountUI() {
       if (unchanged) input.value = '';
       await renderMinimaxApiKeys();
       await refreshStats();
-    }));
-  }
-
-  const openrouterToggle = document.getElementById('openrouterSettingsToggle');
-  if (openrouterToggle) {
-    openrouterToggle.addEventListener('click', () => {
-      const expanding = !state.openrouterAccountExpanded;
-      setOpenrouterAccountExpanded(expanding);
-      if (expanding) renderOpenRouterProfiles();
-    });
-    setOpenrouterAccountExpanded(false);
-
-    const addToggle = document.getElementById('openrouterAddToggle');
-    const addDetails = document.getElementById('openrouterAddDetails');
-    addToggle?.addEventListener('click', () => {
-      const expanded = addDetails?.classList.contains('hidden');
-      addToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-      addDetails?.classList.toggle('hidden', !expanded);
-      document.getElementById('openrouterAddForm')?.classList.toggle('expanded', expanded);
-    });
-    document.getElementById('openrouterOpenBrowser')?.addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://openrouter.ai/settings/keys');
-    });
-    const profileSubmit = document.getElementById('openrouterProfileSubmit');
-    profileSubmit?.addEventListener('click', () => accountProfileSaves.run('openrouter', profileSubmit, async () => {
-      const nameInput = document.getElementById('openrouterProfileName');
-      const keyInput = document.getElementById('openrouterApiKeyInput');
-      const name = String(nameInput?.value || '').trim() || 'default';
-      const apiKey = String(keyInput?.value || '').trim();
-      setAccountShellError('openrouter', '');
-      if (!apiKey) {
-        setAccountShellError('openrouter', t('settings.openrouter.statusNotSet'));
-        return;
-      }
-      const result = await window.tokenMonitor.openrouter.saveProfile(name, apiKey);
-      if (result?.ok) {
-        nameInput.value = '';
-        keyInput.value = '';
-        renderOpenRouterProfiles();
-        await refreshStats({ force: true });
-      } else {
-        setAccountShellError('openrouter', openrouterProfileErrorText(result));
-      }
     }));
   }
 

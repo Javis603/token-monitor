@@ -365,7 +365,7 @@ test('OpenCode account panel provides multi-profile management', () => {
   // still default a blank name, and they have no such merge semantics.
   const opencodeSubmit = setupBody.slice(
     setupBody.indexOf("document.getElementById('opencodeCookieSubmit')"),
-    setupBody.indexOf("document.getElementById('openrouterSettingsToggle')")
+    setupBody.indexOf("const minimaxToggle =")
   );
   assert.ok(opencodeSubmit, 'opencode submit handler should be present');
   assert.match(opencodeSubmit, /const name = \(nameInput\.value \|\| ''\)\.trim\(\);/);
@@ -2939,7 +2939,7 @@ test('a zero-config OpenCode machine is not reported as unconfigured', () => {
   // a scoped refresh to address.
   const ambientToggle = main.slice(
     main.indexOf("ipcMain.handle('opencode:setAmbientEnabled'"),
-    main.indexOf("ipcMain.handle('openrouter:getProfiles'")
+    main.indexOf("const openrouterProfiles = createOpenRouterProfileCommands")
   );
   assert.ok(ambientToggle, 'setAmbientEnabled handler should exist');
   assert.match(ambientToggle, /queueLimitInvalidation\(\{ provider: 'opencode' \}, 'ambient-toggle', \{ clear: true \}\)/);
@@ -2990,7 +2990,7 @@ test('OpenCode credentials are named, merged and removed one at a time', () => {
   // reaches around it.
   const handlers = main.slice(
     main.indexOf("ipcMain.handle('opencode:saveProfile'"),
-    main.indexOf("ipcMain.handle('openrouter:getProfiles'")
+    main.indexOf("const openrouterProfiles = createOpenRouterProfileCommands")
   );
   for (const call of [
     /opencodeProfiles\.saveCredential\(\s*settings\.opencodeProfiles \|\| \{\},\s*name,\s*credential,\s*\{ merge: options\.merge === true \}/,

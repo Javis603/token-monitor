@@ -581,7 +581,7 @@ test('named API profile status prioritizes provider and profile disablement over
 
 test('named API profile rows hide global disablement while the group preserves configured account count', () => {
   const app = readRendererFile('app.js');
-  const updater = functionBody(app, 'updateNamedApiProfilesStatus', 'updateOpenRouterProfilesStatus');
+  const updater = functionBody(app, 'updateNamedApiProfilesStatus', 'updateThirdPartyProfilesStatus');
 
   assert.match(app, /if \(status === 'hidden'\) return '';/);
   assert.match(updater, /const providerEnabled = limitProviderEnabled\(providerId\)/);
@@ -2161,7 +2161,6 @@ test('AI Tool Limits owns every live account group and its status pill', () => {
     ['kimi', 'kimiAccountGroup', 'kimiAccountStatus'],
     ['copilot', 'copilotAccountGroup', 'copilotApiTokenStatus'],
     ['mimo', 'mimoAccountGroup', 'mimoAccountStatus'],
-    ['openrouter', 'openrouterAccountGroup', 'openrouterStatus'],
     ['volcengine', 'volcengineAccountGroup', 'volcengineAccountStatus'],
     ['thirdparty', 'thirdpartyAccountGroup', 'thirdpartyStatus']
   ];
@@ -2358,7 +2357,6 @@ test('dynamic account summaries are never reset by the static translation pass',
     'codexAccountStatus',
     'cursorAccountStatus',
     'opencodeCookieStatus',
-    'openrouterStatus',
     'volcengineAccountStatus',
     'kimiAccountStatus',
     'mimoAccountStatus',
@@ -2499,7 +2497,7 @@ test('overlapping failures preserve the latest toggle, then fall back to a newer
 test('empty OpenCode profiles render a localized summary before returning', () => {
   const app = readRendererFile('app.js');
   const renderProfiles = functionBody(app, 'renderOpenCodeProfiles', 'updateOpenCodeProfilesStatus');
-  const renderSummary = functionBody(app, 'renderOpenCodeProfilesStatusSummary', 'openrouterProfileStatusText');
+  const renderSummary = functionBody(app, 'renderOpenCodeProfilesStatusSummary', 'thirdPartyProfileStatusText');
   const totalEl = { textContent: 'Not configured', setAttribute(name, value) { this[name] = value; } };
   const context = {
     document: {

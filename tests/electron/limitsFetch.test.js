@@ -129,7 +129,7 @@ test('every widget provider probe takes the runtime transport', () => {
     // forms, so it has to ask for the probe deps itself: saving a credential
     // must not write the spend ledger the credential has not earned yet.
     /fetchMimoLimits\([^;]+credentialProbeDeps\(\)\)/,
-    /fetchOpenRouterAccount\([^,]+, [^,]+, electronProviderDeps\(/,
+    /createOpenRouterProfileCommands\(accountSlotService\)/,
     /fetchThirdPartyAccount\(\{[^}]*\}, electronProviderDeps\(/,
     /listCodexWorkspaces\(auth, electronProviderDeps\(/
   ]) {

@@ -152,6 +152,9 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     deepseekAccountSlots: ['providers', 'deepseek', 'accountSlots'],
     deepseekDefaultAccountIdentity: ['providers', 'deepseek', 'defaultAccountIdentity'],
     openrouterProfiles: ['providers', 'openrouter', 'profiles'],
+    openrouterApiKey: ['providers', 'openrouter', 'apiKey'],
+    openrouterAccountSlots: ['providers', 'openrouter', 'accountSlots'],
+    openrouterDefaultAccountIdentity: ['providers', 'openrouter', 'defaultAccountIdentity'],
     minimaxApiProfiles: ['providers', 'minimax', 'profiles'],
     minimaxApiKey: ['providers', 'minimax', 'apiKey'],
     volcengineAccessKeyId: ['providers', 'volcengine', 'accessKeyId'],
@@ -219,7 +222,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     manus: ['manusSessionToken', 'manusAccountSlots'],
     hark: ['harkCookie', 'harkAccountSlots'],
     muse: ['museWebCookie'],
-    openrouter: ['openrouterProfiles'],
+    openrouter: ['openrouterApiKey', 'openrouterAccountSlots'],
     minimax: ['minimaxApiProfiles', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode'],
     volcengine: [
       'volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion',
@@ -327,7 +330,7 @@ test('settings:update normalizes provider fields and strips separately managed a
   const fields = LIMIT_PROVIDER_REGISTRY.flatMap(({ fields }) => fields);
   const normalizedKeys = fields.filter(({ normalize, persist }) => normalize && persist !== 'never').map(({ key }) => key);
   assert.deepEqual(normalizedKeys.sort(), [
-    'claudeWebCookie', 'claudeWebOrganizationId', 'deepseekApiKey', 'deepseekWebToken', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode', 'copilotApiToken', 'copilotEnterpriseHost',
+    'openrouterApiKey', 'claudeWebCookie', 'claudeWebOrganizationId', 'deepseekApiKey', 'deepseekWebToken', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode', 'copilotApiToken', 'copilotEnterpriseHost',
     'factoryApiKey', 'clineApiKey', 'zaiApiKey', 'zaiApiRegion', 'zaiTeamApiKey',
     'zaiTeamOrganizationId', 'zaiTeamProjectId', 'volcengineAccessKeyId',
     'volcengineSecretAccessKey', 'volcengineRegion', 'volcengineAgentAccessKeyId',
@@ -521,7 +524,7 @@ test('account projections redact secrets while preserving profile metadata and s
   assert.equal(projected.claudeWebCookie, 'set');
   assert.equal(projected.zaiTeamOrganizationId, 'set');
   assert.deepEqual({ ...projected.opencodeProfiles.default }, { enabled: false, cookie: 'set', apiKey: 'set' });
-  assert.deepEqual({ ...projected.openrouterProfiles.default }, { enabled: true, apiKey: 'set' });
+  assert.equal(projected.openrouterProfiles, undefined);
   assert.equal(JSON.stringify(projected).includes('private'), false);
   const status = accountStatusProjection({ clineApiKey: 'stored' }, { CLINE_API_KEY: 'environment' });
   assert.equal(status.clineCredentialConfigured, true);

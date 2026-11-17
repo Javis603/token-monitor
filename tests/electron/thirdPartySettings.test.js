@@ -120,13 +120,12 @@ test('third-party credentials stay local while renderer metadata is redacted', (
   assert.doesNotMatch(main, /errorCode: 'missingUserId'/);
 });
 
-test('third-party profile rows share the named-account component with OpenRouter', () => {
+test('third-party profile rows retain the named-account component', () => {
   const app = read('src/electron/renderer/app.js');
   assert.match(app, /function appendNamedApiProfileRow/);
   assert.match(app, /info\.dataset\.managedProfileProvider = providerId/);
   assert.match(app, /info\.dataset\.managedProfileName = name/);
   assert.match(app, /info\.dataset\.managedProfileEnvironment = 'true'/);
-  assert.match(app, /providerId: 'openrouter',[\s\S]*?rerender: renderOpenRouterProfiles/);
   assert.match(app, /providerId: 'thirdparty',[\s\S]*?rerender: renderThirdPartyProfiles/);
   assert.match(app, /t\('settings\.profiles\.rename'\)/);
   assert.match(app, /t\('settings\.profiles\.delete'\)/);
@@ -375,11 +374,8 @@ test('third-party adapters share one documentation icon and preserve compatibili
 });
 
 test('OpenRouter remains official-only and does not inherit third-party Base URL settings', () => {
-  const html = read('src/electron/renderer/index.html');
-  const openrouterSection = html.slice(
-    html.indexOf('id="openrouterAccountGroup"'),
-    html.indexOf('id="thirdpartyAccountGroup"')
-  );
-  assert.doesNotMatch(openrouterSection, /Base URL|baseUrl|newapi|thirdparty/i);
-  assert.match(openrouterSection, /id="openrouterApiKeyInput"/);
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(form => form.id === 'openrouter');
+  assert.deepEqual(form.fields.map(field => field.key), ['openrouterApiKey']);
+  assert.equal(form.openUrl.url, 'https://openrouter.ai/settings/keys');
 });
