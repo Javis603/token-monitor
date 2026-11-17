@@ -554,6 +554,13 @@ async function fetchClineLimits(options = {}, deps = {}) {
 }
 
 function discoverAccountSlots(deps = {}) {
+  // For the account list only a missing store means no sign-in. An unreadable
+  // or half-written providers.json is unavailable, so a known account is kept.
+  try { JSON.parse(fs.readFileSync(clineProvidersPath(deps.env || process.env), 'utf8')); }
+  catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw errorWithStatus('unavailable', 'Cline providers.json could not be read');
+  }
   try {
     const credential = resolveClineCredential({}, { ...(deps.env || process.env), CLINE_API_KEY: '', CLINEPASS_API_KEY: '' });
     return [{ values: { clineApiKey: credential.accessToken }, accountKey: credential.accountSeed ? hashKey('cline', credential.accountSeed) : '',

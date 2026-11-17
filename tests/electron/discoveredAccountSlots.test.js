@@ -338,3 +338,20 @@ test('zai: a signed-in ZCode account whose credential is unreadable stays listed
   }
   assert.deepEqual(discoverAccountSlots({ discoverZcodeConnection: () => ({ kind: 'coding-quota', entitled: false, reason: 'coding_plan_not_authenticated' }) }), []);
 });
+
+test('cline: a missing store is no sign-in, a half-written one is unavailable', t => {
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cline-discovery-'));
+  t.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
+  const { discoverAccountSlots } = limitProviderEntry('cline').limits;
+  assert.deepEqual(discoverAccountSlots({ env: { CLINE_DATA_DIR: dataDir } }), []);
+  fs.mkdirSync(path.join(dataDir, 'settings'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'settings', 'providers.json'), '{ not json');
+  assert.throws(() => discoverAccountSlots({ env: { CLINE_DATA_DIR: dataDir } }), error => error.status === 'unavailable');
+});
+
+test('factory: a headless collector keeps an app reading while discovery fails', async t => {
+  const entry = stubDiscovery(t, 'factory', () => { throw Object.assign(new Error('store unreadable'), { status: 'unavailable' }); });
+  const fetcher = createAccountSlotFetcher({ ...entry, fetchLimits: () => { throw new Error('no account should be fetched'); } });
+  const rows = await fetcher({ previousLimits: { providers: [{ provider: 'factory', accountKey: 'app-key', sourceDetail: 'app', status: 'ok', windows: [] }] } }, { env: {} });
+  assert.equal(rows.some(row => row.removed && row.accountKey === 'app-key'), false);
+});
