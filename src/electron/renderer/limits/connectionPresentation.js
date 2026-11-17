@@ -37,7 +37,12 @@
     const automaticSummary = t(automatic
       ? alternatives.length > 1 ? 'settings.limits.sources.auto' : 'settings.limits.sources.detectSummary'
       : primary.kind === 'apiKey' ? 'settings.limits.sources.manualApi' : 'settings.limits.sources.manualWeb');
-    const summary = node('span', 'settings-item-desc', automaticSummary);
+    const sourceSummary = sources.map(source => `${t(source.labelKey)} · ${t(source.descriptionKey)}`).join(' · ');
+    const hasComplement = sources.some(source => source.relation === 'complement');
+    const complementLabels = sources.filter(source => source.relation === 'complement').map(source => t(source.labelKey));
+    const summaryText = hasComplement ? (selection && onSelect
+      ? [automaticSummary, ...complementLabels].join(' · ') : sourceSummary) : automaticSummary;
+    const summary = node('span', 'settings-item-desc', summaryText);
     copy.append(summary);
     // A fresh alternative reading can annotate Auto without adding another row.
     const current = alternatives.length > 1 && provider.status === 'ok' && !provider.stale
@@ -67,7 +72,8 @@
       const updateSummary = () => {
         const selected = choices.find(source => source.id === accepted);
         summary.textContent = selected
-          ? t('settings.limits.sources.selected', { source: t(selected.labelKey) }) : automaticSummary;
+          ? [t('settings.limits.sources.selected', { source: t(selected.labelKey) }),
+            ...complementLabels].join(' · ') : summaryText;
       };
       select.value = accepted;
       updateSummary();
@@ -89,7 +95,7 @@
       actions.append(select, error);
     } else {
       actions.append(node('span', 'connection-source-method', automatic
-        ? autoLabel : t(primary.labelKey)));
+        ? (hasComplement && alternatives.length <= 1 ? sources.map(source => t(source.labelKey)).join(' + ') : autoLabel) : t(primary.labelKey)));
     }
     if (onOpen && manual.length) {
       const link = document.createElement('button');

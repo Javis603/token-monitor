@@ -150,6 +150,9 @@ function renderClaudeWebAccounts() {
     const container = document.createElement('div');
     list.prepend(container);
     accountList = window.TokenMonitorLegacyAccountList.create({
+      busy: () => document.getElementById('claudeCredentialSubmit')?.disabled === true,
+      sourceLabel: account => account.source === 'automatic' ? account.sourceName : t(account.id === 'legacy' && state.settings?.claudeWebLegacyCookieSource === 'env' ? 'settings.limits.sources.env' : 'settings.limits.sources.web'),
+      editor: { nodes: ['claudeManualPanel', 'claudeErrorMessage'], visibility: 'claudeManualPanel', cancel: () => cancelClaudeWebAccountEdit(true) },
       document, provider: 'claude', label: host.providerLabel || 'Claude',
       add: () => claudeAccountActions.run('claude', null, () => editClaudeWebAccount()), container, t, bridge: window.tokenMonitor,
       getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
@@ -176,22 +179,7 @@ function renderClaudeWebAccounts() {
   }
   accountList.update([...accounts.map(account => ({ ...account, canPause: account.id !== 'legacy',
     removable: !(account.id === 'legacy' && state.settings?.claudeWebLegacyCookieSource === 'env') })), ...automatic], providers.filter(row => row.accountKey));
-  list.querySelector(':scope > .settings-actions')?.remove();
-  const actions = document.createElement('div');
-  actions.className = 'settings-actions';
-  if (editor.open ?? accounts.length === 0) {
-    const cancel = document.createElement('button');
-    cancel.id = 'claudeCancelWebAccountButton';
-    cancel.type = 'button';
-    cancel.textContent = t('settings.common.cancel');
-    cancel.addEventListener('click', () => {
-      // Capture before the busy guard disables Cancel and blurs it.
-      const restoreFocus = document.activeElement === cancel;
-      return claudeAccountActions.run('claude', cancel, () => cancelClaudeWebAccountEdit(restoreFocus));
-    });
-    actions.append(cancel);
-  }
-  list.append(actions);
+
 }
  return { state, editor, claudeAccountActions, renderClaudeOrganizationChoices, loadClaudeOrganizationChoices, editClaudeWebAccount, cancelClaudeWebAccountEdit, runClaudeAccountAction, claudeWebSettingsAccounts, claudeAccountStatusText, renderClaudeWebAccounts };
 });

@@ -221,7 +221,7 @@ test('cancelled pending save cannot close or clear a newer credential draft', as
   await pending;
   assert.equal(h.document.getElementById(input.id), input);
   assert.equal(input.value, 'new-secret');
-  assert.equal(h.panel.element.querySelector('.slot-editor').classList.contains('hidden'), false);
+  assert.equal(h.panel.element.querySelector('.slot-editor-reveal').classList.contains('hidden'), false);
 });
 
 test('locale translation updates live menus fix and add actions without recreating drafts', () => {
@@ -467,26 +467,26 @@ test('editors occupy the group at their owner and use existing form actions incl
   h.panel.openEditor(h.slots.find(slot => slot.id === 'a'));
   const editor = h.panel.element.querySelector('.slot-editor');
   const list = h.panel.element.querySelector('.slot-list');
-  assert.ok(editor.parentElement === list);
-  assert.ok(list.children[list.children.indexOf(h.row('a')) + 1] === editor);
+  assert.ok(editor.parentElement.parentElement.parentElement === list);
+  assert.ok(list.children[list.children.indexOf(h.row('a')) + 1] === editor.parentElement.parentElement);
   assert.equal(editor.children.some(node => node.classList.contains('credential-input')), false);
   const submit = h.document.getElementById('qoderSlotDraftCredentialSubmit');
   assert.equal(submit.classList.contains('slot-save'), true);
   assert.equal(submit.parentElement.children[1].textContent, 'Cancel');
   h.panel.openEditor(null);
   assert.equal(editor.children[1].classList.contains('credential-input'), true);
-  assert.equal(list.children[list.children.indexOf(editor) + 1].classList.contains('slot-add'), true);
+  assert.equal(list.children[list.children.indexOf(editor.parentElement.parentElement) + 1].classList.contains('slot-add'), true);
   assert.equal(list.children.at(-1).classList.contains('hidden'), true);
   h.click(h.row('default'), 'Replace cookie');
   assert.ok(h.document.getElementById('qoderSlotDraftqoderCookieInput'));
   assert.ok(h.defaultPanel.parentElement !== editor);
-  assert.ok(list.children[list.children.indexOf(h.row('default')) + 1] === editor);
+  assert.ok(list.children[list.children.indexOf(h.row('default')) + 1] === editor.parentElement.parentElement);
   h.update();
   assert.ok(h.document.getElementById('qoderSlotDraftqoderCookieInput'));
   assert.ok(h.defaultPanel.parentElement !== editor);
   assert.equal([...h.panel.element.walk()].some(node => node.tagName === 'details'), false);
   h.click(editor, 'Cancel');
-  assert.equal(editor.classList.contains('hidden'), true);
+  assert.equal(editor.parentElement.parentElement.classList.contains('hidden'), true);
   assert.equal(editor.children.length, 0);
 });
 
@@ -611,24 +611,24 @@ test('editors occupy the group at their owner and use existing form actions incl
   h.panel.openEditor(h.slots.find(slot => slot.id === 'a'));
   const editor = h.panel.element.querySelector('.slot-editor');
   const list = h.panel.element.querySelector('.slot-list');
-  assert.equal(editor.parentElement, list);
-  assert.equal(list.children[list.children.indexOf(h.row('a')) + 1], editor);
+  assert.equal(editor.parentElement.parentElement.parentElement, list);
+  assert.equal(list.children[list.children.indexOf(h.row('a')) + 1], editor.parentElement.parentElement);
   assert.equal(editor.children.some(node => node.classList.contains('credential-input')), false);
   const submit = h.document.getElementById('qoderSlotDraftCredentialSubmit');
   assert.equal(submit.classList.contains('slot-save'), true);
   assert.equal(submit.parentElement.children[1].textContent, 'Cancel');
   h.panel.openEditor(null);
   assert.equal(editor.children[1].classList.contains('credential-input'), true);
-  assert.equal(list.children[list.children.indexOf(editor) + 1].classList.contains('slot-add'), true);
+  assert.equal(list.children[list.children.indexOf(editor.parentElement.parentElement) + 1].classList.contains('slot-add'), true);
   assert.equal(list.children.at(-1).classList.contains('hidden'), true);
   h.click(h.row('default'), 'Replace cookie');
   assert.ok(h.document.getElementById('qoderSlotDraftqoderCookieInput'));
-  assert.equal(list.children[list.children.indexOf(h.row('default')) + 1], editor);
+  assert.equal(list.children[list.children.indexOf(h.row('default')) + 1], editor.parentElement.parentElement);
   h.update();
   assert.ok(h.document.getElementById('qoderSlotDraftqoderCookieInput'));
   assert.equal([...h.panel.element.walk()].some(node => node.tagName === 'details'), false);
   h.click(editor, 'Cancel');
-  assert.equal(editor.classList.contains('hidden'), true);
+  assert.equal(editor.parentElement.parentElement.classList.contains('hidden'), true);
   assert.equal(h.defaultPanel.isConnected, true);
 });
 
@@ -1228,7 +1228,7 @@ test('completed browser login cannot close a new draft opened while list refresh
   input.value = 'new-draft';
   listed.resolve({ ok: true, accounts: h.slots });
   await signingIn;
-  assert.equal(h.panel.element.querySelector('.slot-editor').classList.contains('hidden'), false);
+  assert.equal(h.panel.element.querySelector('.slot-editor-reveal').classList.contains('hidden'), false);
   assert.equal(h.document.getElementById(input.id), input);
   assert.equal(input.value, 'new-draft');
 });

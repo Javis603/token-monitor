@@ -18,6 +18,7 @@
 
   const MESSAGES = {
     en: {
+      "settings.slots.savedSource": "Saved credential",
       "settings.limits.sources.alibabaWebDescription": "Read Token Plan quota from the console web session.",
       "settings.limits.sources.stepfunWebDescription": "Read Coding Plan / Token Plan quota from the web session.",
       "settings.limits.sources.opencodeLocalDescription": "Read local Go usage from the OpenCode database.",
@@ -2593,6 +2594,7 @@
       'sortMostTokens': '↕ Most tokens'
     },
     'zh-TW': {
+      "settings.slots.savedSource": "已儲存的憑證",
       "settings.limits.sources.alibabaWebDescription": "使用控制台的網頁登入資料讀取 Token Plan 額度。",
       "settings.limits.sources.stepfunWebDescription": "使用網頁登入資料讀取 Coding Plan／Token Plan 額度。",
       "settings.limits.sources.opencodeLocalDescription": "從 OpenCode 本機資料庫讀取 Go 用量。",
@@ -5168,6 +5170,7 @@
       'sortMostTokens': '↕ Token 最多'
     },
     'zh-CN': {
+      "settings.slots.savedSource": "已保存的凭据",
       "settings.limits.sources.alibabaWebDescription": "使用控制台的网页登录信息读取 Token Plan 额度。",
       "settings.limits.sources.stepfunWebDescription": "使用网页登录信息读取 Coding Plan／Token Plan 额度。",
       "settings.limits.sources.opencodeLocalDescription": "从 OpenCode 本地数据库读取 Go 用量。",
@@ -7743,6 +7746,7 @@
       'sortMostTokens': '↕ Token 最多'
     },
     ko: {
+      "settings.slots.savedSource": "저장된 자격 증명",
       "settings.limits.sources.alibabaWebDescription": "콘솔 웹 세션에서 Token Plan 할당량을 읽습니다.",
       "settings.limits.sources.stepfunWebDescription": "웹 세션에서 Coding Plan / Token Plan 할당량을 읽습니다.",
       "settings.limits.sources.opencodeLocalDescription": "OpenCode 로컬 데이터베이스에서 Go 사용량을 읽습니다.",
@@ -10318,6 +10322,7 @@
       'views.trends': '추이',
     },
     ja: {
+      "settings.slots.savedSource": "保存済みの認証情報",
       "settings.limits.sources.alibabaWebDescription": "コンソールの Web セッションから Token Plan の上限を読み取ります。",
       "settings.limits.sources.stepfunWebDescription": "Web セッションから Coding Plan / Token Plan の上限を読み取ります。",
       "settings.limits.sources.opencodeLocalDescription": "OpenCode のローカルデータベースから Go の使用量を読み取ります。",
@@ -12893,6 +12898,7 @@
       'views.trends': 'トレンド',
     },
     es: {
+      "settings.slots.savedSource": "Credencial guardada",
       "settings.limits.sources.alibabaWebDescription": "Lee la cuota de Token Plan desde la sesión Web de la consola.",
       "settings.limits.sources.stepfunWebDescription": "Lee la cuota de Coding Plan / Token Plan desde la sesión Web.",
       "settings.limits.sources.opencodeLocalDescription": "Lee el uso local de Go desde la base de datos de OpenCode.",
@@ -15463,6 +15469,7 @@
       "sortMostTokens": "↕ Más tokens"
     },
     'pt-BR': {
+      "settings.slots.savedSource": "Credencial salva",
       "settings.limits.sources.alibabaWebDescription": "Lê a cota do Token Plan pela sessão Web do console.",
       "settings.limits.sources.stepfunWebDescription": "Lê a cota do Coding Plan / Token Plan pela sessão Web.",
       "settings.limits.sources.opencodeLocalDescription": "Lê o uso local do Go no banco de dados do OpenCode.",

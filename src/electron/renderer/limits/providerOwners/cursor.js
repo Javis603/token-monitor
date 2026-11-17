@@ -37,6 +37,8 @@ function renderCursorStatus() {
   const accounts = Array.isArray(status?.accounts) ? status.accounts : [];
   const managementBlocked = status?.managementBlocked === true;
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
+      sourceLabel: account => account.sourceName,
+      editor: { nodes: ['cursorManualDetails', 'cursorErrorMessage'], visibility: 'cursorManualDetails', cancel: () => setCursorManualExpanded(false) },
     document, provider: 'cursor', label: host.providerLabel || 'Cursor',
     add: () => setCursorManualExpanded(document.getElementById('cursorManualDetails')?.classList.contains('hidden')), container: listEl, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
@@ -44,7 +46,7 @@ function renderCursorStatus() {
     remove: account => window.tokenMonitor.cursor.logout(account.id),
     changed: result => { if (result.status) { statusRevision++; state.cursorAccount = { status: result.status, error: "", busy: false }; } }, refresh: refreshCursorStatus, busy: () => state.cursorAccount.busy || state.cursorAccount.status?.managementBlocked
   });
-  accountList.update(accounts.map(account => ({ ...account, canPause: !managementBlocked, removable: account.removable === true && !managementBlocked })), host.localProviderStatuses('cursor'));
+  accountList.update(accounts.map(account => ({ ...account, sourceName: t(account.removable ? 'settings.limits.sources.web' : 'settings.limits.sources.desktop'), canPause: !managementBlocked, removable: account.removable === true && !managementBlocked })), host.localProviderStatuses('cursor'));
 
   if (state.cursorAccount.error) {
     setCursorStatusText(statusEl, t('settings.common.error'));

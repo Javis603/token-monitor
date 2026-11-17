@@ -163,6 +163,8 @@ function renderWorkbuddyStatus() {
     cancel.disabled = Boolean(state.workbuddyCancelBusy);
   }
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
+      sourceLabel: () => t('settings.limits.sources.oauth'),
+      editor: { isOpen: () => realmChoicesOpen || state.workbuddySignInBusy || state.workbuddyCancelBusy || Boolean(state.workbuddyAccountError), allowBusyCancel: true, nodes: ['workbuddyAddCnAccountButton', 'workbuddyAddAiAccountButton', 'workbuddyLoginStatus', 'workbuddyAccountErrorMessage', 'workbuddyCancelLoginButton'], cancel: () => { if (state.workbuddySignInBusy) return cancelWorkbuddyLogin(); realmChoicesOpen = false; state.workbuddyAccountError = ''; renderWorkbuddyStatus(); } },
     document, provider: 'workbuddy', label: host.providerLabel || 'WorkBuddy',
     add: () => { realmChoicesOpen = !realmChoicesOpen; renderWorkbuddyStatus(); }, container: list, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,

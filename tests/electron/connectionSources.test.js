@@ -162,7 +162,7 @@ test('Alibaba displays main CLI-first Cookie fallback without changing its dispa
 test('manual API card omits the redundant disclosure and retains the credential setup form', () => {
   const { nodes } = renderConnection('deepseek', { source: 'web', status: 'ok' });
   assert.equal(nodes.find(n => n.className === 'connection-source-method').textContent, 'API key');
-  assert.ok(nodes.some(n => n.textContent === 'Paste an API key'));
+  assert.ok(nodes.some(n => n.textContent.includes('API key') && n.textContent.includes('Web session')));
   assert.ok(!nodes.some(n => n.tag === 'details'));
   assert.ok(JSON.stringify(limitAccountFormsForRenderer().find(entry => entry.id === 'deepseek')).includes('settings.deepseek.webTokenNote'));
   assert.ok(!nodes.some(n => /Currently using/.test(n.textContent)));
@@ -176,7 +176,7 @@ test('sourceDetail takes precedence and stale/failed readings never claim a curr
   }
   for (const id of ['cline','factory','opencode','volcengine']) {
     const method = renderConnection(id).nodes.find(n => n.className.split(' ').includes('connection-source-method'));
-    assert.equal(method.tag === 'select' ? method.children[0].textContent : method.textContent, 'Auto detect');
+    assert.equal(method.tag === 'select' ? method.children[0].textContent : method.textContent, id === 'factory' ? 'API key + Local credentials' : 'Auto detect');
   }
 });
 
@@ -228,4 +228,23 @@ test('a rejected source preference restores the accepted selection and localized
   assert.equal(select.value, 'cli');
   assert.equal(select.disabled, false);
   assert.ok(card.textContent.includes(translate('zh-TW', 'settings.limits.sources.saveFailed')));
+});
+
+for (const id of ['cursor', 'antigravity', 'workbuddy']) test(`${id} describes complementary manual and detected connections without a selector`, () => {
+  const { nodes } = renderConnection(id);
+  const entry = limitConnectionSourcesForRenderer().find(entry => entry.id === id);
+  const method = nodes.find(node => node.className === 'connection-source-method');
+  for (const source of entry.sources) assert.ok(method.textContent.includes(translate('en', source.labelKey)), source.id);
+  assert.ok(!nodes.some(node => node.tag === 'select'));
+  for (const source of entry.sources) assert.ok(nodes.some(node => node.textContent.includes(translate('en', source.descriptionKey))), source.id);
+});
+
+
+test('selectable connection cards keep descriptions in the menu instead of repeating them in the summary', () => {
+  const { nodes } = renderConnection('claude');
+  const entry = limitConnectionSourcesForRenderer().find(entry => entry.id === 'claude');
+  const summary = nodes.find(node => node.className === 'settings-item-desc');
+  for (const source of entry.sources) assert.ok(!summary.textContent.includes(translate('en', source.descriptionKey)));
+  const select = nodes.find(node => node.tag === 'select');
+  assert.ok(select.children[0].dataset.tmSelectDescription.includes(translate('en', entry.sources.find(source => source.relation === 'complement').descriptionKey)));
 });

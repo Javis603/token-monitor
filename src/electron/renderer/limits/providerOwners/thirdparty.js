@@ -213,6 +213,9 @@ function renderNamedApiProfiles(config) {
     state[profileCountStateKey] = entries.length + (hasEnvVar ? 1 : 0);
 
     if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
+      busy: () => document.getElementById('thirdpartyProfileSubmit')?.disabled === true,
+      sourceLabel: account => t(account.source === 'environment' ? 'settings.limits.sources.env' : 'settings.slots.savedSource'),
+      editor: { nodes: ['thirdpartyAddDetails', 'thirdpartyErrorMessage'], visibility: 'thirdpartyAddDetails', cancel: () => setThirdPartyAddExpanded(false) },
       document, provider: providerId, label: host.providerLabel || providerId,
       add: () => setThirdPartyAddExpanded(document.getElementById('thirdpartyAddDetails')?.classList.contains('hidden')), container: listEl, t, bridge: window.tokenMonitor,
       getContext: host.getAccountContext, preserveScroll: host.preserveScroll,

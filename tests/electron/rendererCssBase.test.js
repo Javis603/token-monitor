@@ -57,6 +57,8 @@ test('no component restates the blanket hiding rule', () => {
   const ANIMATED = [
     '.settings-panel.hidden',
     '.accordion-animated-container.hidden',
+    '.legacy-editor-reveal .legacy-editor-content.hidden',
+    '.legacy-slot-editor.is-replacing > .legacy-replacement-content.hidden',
     '.accordion-animated-container.hidden > .accordion-animation-inner',
     '.about-settings-diagnostics.hidden',
     '.view-switcher-menu.hidden',

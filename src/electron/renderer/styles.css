@@ -8954,6 +8954,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .tray-composer-item { transition: none; }
+  :is(.slot-editor-reveal, .legacy-editor-reveal), :is(.slot-editor-reveal, .legacy-editor-reveal) > .accordion-animation-inner { transition: none; }
   :root:not([data-reduce-motion="off"]) .slot-row { transition: none; }
   .settings-panel .limit-provider-row { transition: none; }
   .tool-preference-row { transition: none; }
@@ -9473,3 +9474,22 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   .connection-source-actions { align-items: flex-start; max-width: 100%; text-align: left; }
   .connection-source-get { text-align: left; }
 }
+
+/* Provider editors retain their own controls inside the shared account card. */
+.legacy-editor-reveal .legacy-editor-content.hidden { display: block !important; }
+.legacy-editor-reveal .legacy-editor-content.accordion-animated-container { grid-template-rows: 1fr; }
+.legacy-editor-reveal .legacy-editor-content > .accordion-animation-inner { opacity: 1; }
+.legacy-slot-editor .opencode-add-body { padding: 0; }
+.legacy-slot-editor :is(input, textarea, select) { box-sizing: border-box; max-width: 100%; }
+.legacy-slot-editor textarea { width: 100%; }
+.legacy-slot-editor > .settings-actions:last-child { margin-top: 12px; }
+.slot-editor-reveal.hidden, .legacy-editor-reveal.hidden { border: 0; }
+.settings-panel .plugin-menu button { height: 28px; min-height: 28px; padding: 0 7px; font-size: .6875rem; line-height: normal; border: 0; border-radius: 5px; }
+.connection-source-actions { align-items: flex-start; }
+.connection-source-actions > .connection-source-method { box-sizing: border-box; min-height: 28px; display: flex; align-items: center; }
+
+.legacy-slot-editor :is(#codexCancelLoginButton, #antigravityCancelLoginButton, #workbuddyCancelLoginButton) { display: none; }
+
+.legacy-slot-editor.is-replacing > .legacy-editor-content { display: none !important; }
+.legacy-slot-editor.is-replacing > .legacy-replacement-content.hidden { display: block !important; }
+.connection-source-actions .select-control-trigger { min-height: 28px; font-size: .75rem; }

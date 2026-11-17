@@ -15,8 +15,8 @@
     return Object.hasOwn(presentation.labels || {}, accountKey) ? presentation.labels[accountKey] : slot?.label || '';
   }
   function accountName(slot, reading, t = (_key, { fingerprint }) => `Account #${fingerprint}`, presentation = {}) {
-    return presentationLabel(slot, slot.accountKey || reading?.accountKey, presentation) || reading?.accountName || reading?.accountEmail || reading?.email
-      || slot.accountName || slot.accountEmail
+    return presentationLabel(slot, slot.accountKey || reading?.accountKey, presentation) || reading?.accountEmail || reading?.email || slot.accountEmail
+      || reading?.accountName || slot.accountName
       // The app's name is a proper noun; the phrase around it is localized.
       || (slot.sourceName ? t('settings.slots.discoveredName', { source: slot.sourceName }) : '')
       || t('settings.slots.account', { fingerprint: slot.fingerprint });
@@ -99,10 +99,14 @@
       : form.fields.some(field => /token/i.test(field.key)) ? 'Token' : 'Key';
     const root = make('div', 'slot-panel');
     const list = make('div', 'slot-list');
-    const editor = make('div', 'slot-editor hidden');
+    const editorReveal = make('div', 'accordion-animated-container hidden slot-editor-reveal');
+    editorReveal.inert = true;
+    const editorInner = make('div', 'accordion-animation-inner');
+    const editor = make('div', 'slot-editor');
+    editorInner.append(editor); editorReveal.append(editorInner);
     const message = make('div', 'settings-note slot-message');
     message.setAttribute('role', 'status');
-    list.append(editor);
+    list.append(editorReveal);
     root.append(list, message);
     let cancelLogin;
     let editorOwner;
@@ -213,21 +217,25 @@
       },
       requestRender: () => preserveScroll(render)
     });
-    function closeEditor() {
+    function closeEditor(immediate = false) {
       cancelLogin?.();
       cancelLogin = null;
       editorRevision++;
       editorOwner = undefined;
       add?.classList.remove('hidden');
-      editor.replaceChildren();
+      const revision = editorRevision;
+      const clear = () => { if (revision === editorRevision) editor.replaceChildren(); };
+      const motion = document.defaultView?.matchMedia;
+      if (!immediate && motion && !motion.call(document.defaultView, '(prefers-reduced-motion: reduce)').matches) setTimeout(clear, 250);
+      else clear();
       editorPanel = null;
-      editor.classList.add('hidden');
+      editorReveal.classList.add('hidden'); editorReveal.inert = true;
     }
     function openEditor(slot) {
       if (customEditor) return customEditor(slot);
       preserveScroll(() => {
-        closeEditor();
-        editor.classList.remove('hidden');
+        closeEditor(true);
+        editorReveal.classList.remove('hidden'); editorReveal.inert = false;
         editorOwner = slot?.id ?? null;
         placeEditor();
         const revision = editorRevision;
@@ -468,6 +476,7 @@
           shared.appendItems(action('rename', rename), up, down);
           menu.append(localized(make('div', 'settings-note slot-remote-note'), 'settings.slots.remoteNote'));
         } else shared.appendItems(action('rename', rename), replace, pause, separator(), up, down, separator(), remove);
+        item.menu = menu;
         const fix = slotButton(`fix${credentialWord}`, () => openEditor(item.slot));
         fix.className = 'slot-fix plugin-inline-action';
         copy.append(fix);
@@ -489,7 +498,7 @@
       if (editorOwner === undefined) return;
       const owner = rows.get(editorOwner);
       const before = owner ? list.children[[...list.children].indexOf(owner.el) + 1] : add;
-      if (before !== editor) list.moveBefore(editor, before || null);
+      if (before !== editorReveal) list.moveBefore(editorReveal, before || null);
       add.classList.toggle('hidden', editorOwner === null);
     }
     const add = slotButton('add', () => {
@@ -517,8 +526,9 @@
         const remote = slot.source === 'remote';
         const reading = remote ? remoteReadings.find(row => row.sourceDeviceId === slot.sourceDeviceId && row.accountKey === slot.accountKey)
           : readings.find(row => row.accountKey === slot.accountKey) || readings.find(row => slotOwner(slots, row.accountKey, row.accountKeyAliases) === slot);
-        if (!item.editing) item.name.textContent = [accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') }, reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading, t, presentation), secondaryText(slot)].filter(Boolean).join(' · ');
-        const detail = detailText(slot);
+        if (!item.editing) item.name.textContent = accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') }, reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading, t, presentation);
+        const provenance = secondaryText(slot) || slot.sourceName || (slot.source === 'environment' ? t('settings.limits.sources.env') : !slot.source && !customEditor ? tr('savedSource') : '');
+        const detail = [provenance, detailText(slot)].filter((value, index, all) => value && all.indexOf(value) === index).join(' · ');
         if (detail && !item.detail) {
           item.detail = make('div', 'settings-note slot-detail');
           item.el.querySelector('.slot-copy').append(item.detail);
@@ -568,7 +578,7 @@
             document.createTextNode(deviceLabels.deviceLabel(device)));
         }
         const parent = list;
-        const before = [...parent.children].filter(node => node !== editor)[index];
+        const before = [...parent.children].filter(node => node !== editorReveal)[index];
         if (before !== item.el) {
           if (item.el.isConnected) parent.moveBefore(item.el, before || null);
           else parent.insertBefore(item.el, before || null);
@@ -576,6 +586,20 @@
         for (const [node, operation] of [[item.up, 'move'], [item.down, 'move'], [item.pause, 'setEnabled'], [item.replace, 'replace'], [item.remove, 'remove']]) {
           node?.classList.toggle('hidden', permission[operation] === false || (['replace', 'setEnabled', 'remove'].includes(operation) && ['remote', 'environment'].includes(slot.source)));
           if (node && isBusy()) node.disabled = true;
+        }
+        // Separators delimit visible groups, including read-only automatic rows.
+        if (item.menu) {
+          let groupHasItem = false;
+          let pendingSeparator;
+          for (const child of item.menu.children) {
+            if (child.classList.contains('action-menu-separator')) {
+              child.classList.add('hidden');
+              if (groupHasItem) pendingSeparator = child;
+            } else if (!child.classList.contains('hidden')) {
+              if (pendingSeparator) { pendingSeparator.classList.remove('hidden'); pendingSeparator = null; }
+              groupHasItem = true;
+            }
+          }
         }
         item.el.dataset.slotDraggable = String(permission.move !== false && !isBusy());
         item.positionMenu();

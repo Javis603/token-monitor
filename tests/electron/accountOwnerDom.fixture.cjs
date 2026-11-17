@@ -45,7 +45,7 @@ function createDocument() {
     defaultView: { innerWidth: 800, innerHeight: 800, addEventListener() {}, removeEventListener() {} },
     addEventListener() {}, removeEventListener() {},
     createElement: tag => new Node(tag, document), createTextNode: text => ({ textContent: text }),
-    getElementById: id => document.root.querySelector(`#${id}`),
+    getElementById: id => document.root.querySelector(`#${id}`) || null,
     querySelector: selector => document.root.querySelector(selector),
     querySelectorAll: selector => document.root.querySelectorAll(selector)
   };

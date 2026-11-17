@@ -55,6 +55,8 @@ async function renderMinimaxApiKeys() {
     const keys = await window.tokenMonitor.minimax.getKeys();
     if (!isCurrent() || !isSettingsSurfaceVisible()) return;
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
+      sourceLabel: () => t('settings.limits.sources.apiKey'),
+      editor: { nodes: ['minimaxAddDetails', 'minimaxErrorMessage'], visibility: 'minimaxAddDetails' },
     document, provider: 'minimax', label: host.providerLabel || 'MiniMax',
     add: () => { document.getElementById('minimaxAddDetails')?.classList.toggle('hidden'); document.getElementById('minimaxApiKeyInput')?.focus(); }, container: list, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
@@ -63,7 +65,7 @@ async function renderMinimaxApiKeys() {
     secondaryText: account => t(account.billingMode === 'api' ? 'settings.minimax.billingApi' : 'settings.minimax.billingTokenPlan'),
     actions: () => [{ label: t('settings.minimax.openBrowser'), run: account => window.tokenMonitor.openExternal(minimaxBillingUrl(account)) }],
     remove: account => window.tokenMonitor.minimax.removeKey(account.id),
-    changed: _result => {  }, refresh: renderMinimaxApiKeys, busy: () => false
+    changed: _result => {  }, refresh: renderMinimaxApiKeys, busy: () => document.getElementById('minimaxKeySubmit')?.disabled === true
   });
   accountList.update(keys.map((key, index) => ({ ...key, accountName: t("settings.minimax.accountFallback", { number: index + 1 }) })), host.localProviderStatuses('minimax').filter(row => row.source === 'api'));
     updateMinimaxApiKeysStatus();

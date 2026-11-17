@@ -61,7 +61,7 @@
     return accounts.map((row, index) => ({
       id: row.accountKey ? `automatic:${row.accountKey}` : `observation:${row.source || 'local'}:${index}`,
       accountKey: row.accountKey || '', accountKeyAliases: row.accountKeyAliases || [],
-      accountName: !row.accountKey ? `${label} · ${sourceName(row)}` : row.accountName || (!row.accountEmail ? `${label} · ${sourceName(row)}` : ''),
+      accountName: row.accountName || (!row.accountEmail ? label : ''),
       accountEmail: row.accountKey ? row.accountEmail || '' : '', sourceName: sourceName(row),
       source: 'automatic', enabled: true, canReplace: false, canPause: false, removable: false,
       observation: row
@@ -76,7 +76,7 @@
     const list = legacy.create({ ...options,
       changed: () => {}, refresh: () => {},
       statusReading: (/** @type {any} */ account, /** @type {any} */ reading) => account.observation || reading,
-      secondaryText: (/** @type {any} */ account) => account.accountKey && (account.accountEmail || account.observation?.accountName) ? account.sourceName : ''
+      secondaryText: (/** @type {any} */ account) => account.sourceName
     });
     /** @param {any[]} readings */
     function update(readings) {
@@ -84,8 +84,14 @@
       const accounts = accountsFromReadings(options.provider, readings, {
         localDeviceId: context.localDeviceId, label: options.label,
         sourceName: row => {
-          const source = options.sources.find(source => source.id === row.source);
-          return source ? options.t(source.labelKey) : row.source;
+          // Provenance details name the acquisition owner; the quota endpoint alone may not.
+          if (row.sourceDetail === 'managed') return options.t('settings.slots.savedSource');
+          if (row.sourceDetail === 'unknown') return '';
+          const source = row.sourceDetail === 'app'
+            ? options.sources.find(source => source.kind === 'desktop')
+            : options.sources.find(source => source.id === row.sourceDetail)
+              || options.sources.find(source => source.id === row.source);
+          return source ? options.t(source.labelKey) : '';
         }
       });
       // Keyless source observations own status only, never an account match.

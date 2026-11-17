@@ -228,6 +228,42 @@ for (const emailField of ['email', 'accountEmail']) test(`legacy ${emailField} s
   list.update([account], []);
   assert.equal(rows(container)[0].querySelector('.slot-name').textContent, 'person@example.com');
   settings.maskLimitAccountEmails = true;
-  list.update([{ ...account, accountName: 'Work' }], []);
+  list.update([{ ...account, label: 'Work', accountName: 'Provider name' }], []);
   assert.equal(rows(container)[0].querySelector('.slot-name').textContent, 'Work');
+});
+
+for (const status of ['ok', 'unauthorized']) test(`email outranks provider name, explicit labels remain first: ${status}`, () => {
+  const document = createDocument(), container = document.createElement('div'); document.root.append(container);
+  const settings = { maskLimitAccountEmails: true };
+  const list = legacy.create({ document, provider: 'codex', container, t, bridge: {},
+    getContext: () => ({ settings }), preserveScroll: fn => fn(), changed() {}, refresh() {} });
+  const account = { id: 'saved', accountKey: 'key', accountEmail: 'person@example.com', accountName: 'Provider name', sourceName: 'OAuth' };
+  const quota = reading('key', { status, accountName: 'Other provider name', accountEmail: 'person@example.com' });
+  list.update([account], [quota]);
+  const row = rows(container)[0];
+  assert.equal(row.querySelector('.slot-name').textContent, 'p***@example.com');
+  assert.equal(row.querySelector('.slot-detail').textContent, 'OAuth');
+  list.update([{ ...account, label: 'My label' }], [quota]);
+  assert.equal(row.querySelector('.slot-name').textContent, 'My label');
+  assert.doesNotMatch(row.textContent, /person@example.com/);
+});
+test('automatic account menu has no trailing divider when removal is unavailable', () => {
+  const h = harness(); h.list.update([reading('known')]);
+  const menu = h.row('known').querySelector('.plugin-menu');
+  const visible = menu.children.filter(node => !node.classList.contains('hidden'));
+  assert.equal(visible.at(-1).classList.contains('action-menu-separator'), false);
+  assert.equal(visible.filter(node => node.classList.contains('action-menu-separator')).length, 1);
+});
+
+test('automatic provenance follows managed/app ownership instead of the quota endpoint', () => {
+  const document = createDocument(), container = document.createElement('div'); document.root.append(container);
+  const sources = require('../../src/electron/limits/accountSettings').limitConnectionSourcesForRenderer().find(entry => entry.id === 'workbuddy').sources;
+  const list = automatic.create({ document, provider: 'workbuddy', label: 'WorkBuddy', container, t, bridge: {},
+    getContext: () => ({ settings: {}, localDeviceId: 'local' }), preserveScroll: fn => fn(), sources });
+  list.update(['managed', 'app', 'unknown'].map(sourceDetail => reading(sourceDetail, { provider: 'workbuddy', source: 'api', sourceDetail, accountName: 'Account' })));
+  const byKey = key => rows(container).find(row => row.dataset.slotId === `automatic:${key}`);
+  assert.equal(byKey('managed').querySelector('.slot-detail').textContent, t('settings.slots.savedSource'));
+  assert.equal(byKey('app').querySelector('.slot-detail').textContent, t('settings.limits.sources.desktop'));
+  assert.equal(byKey('unknown').querySelector('.slot-detail'), undefined);
+  for (const row of rows(container)) assert.equal(row.querySelector('.slot-name').textContent, 'Account');
 });

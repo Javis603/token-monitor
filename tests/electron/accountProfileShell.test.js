@@ -129,7 +129,9 @@ test('MiniMax saved keys use independent API status and billing links, with remo
   const tokenLabel = t('settings.minimax.billingTokenPlan');
   const accountLabel = number => t('settings.minimax.accountFallback', { number });
   await suite.test('billing modes remain visible on each account', () => {
-    assert.deepEqual(labels(), [`${accountLabel(1)} · ${apiLabel}`, `${accountLabel(2)} · ${tokenLabel}`]);
+    assert.deepEqual(labels(), [accountLabel(1), accountLabel(2)]);
+    assert.deepEqual(h.rows().map(row => row.querySelector('.slot-detail').textContent),
+      [`${t('settings.limits.sources.apiKey')} · ${apiLabel}`, `${t('settings.limits.sources.apiKey')} · ${tokenLabel}`]);
   });
   h.status([{ source: 'oauth', status: 'ok', accountKey: 'a' }, { source: 'api', accountKey: 'a', region: 'en', status: 'unauthorized' }]);
   await suite.test('API failure overrides a healthy OAuth reading', () => {
@@ -148,7 +150,9 @@ test('MiniMax saved keys use independent API status and billing links, with remo
     { source: 'api', accountKey: 'b', region: 'cn', relatedAccountKey: 'code', status: 'ok' },
     { source: 'oauth', accountKey: 'code', region: 'cn', status: 'ok' }]);
   await suite.test('billing modes remain visible on each account', () => {
-    assert.deepEqual(labels(), [`${accountLabel(1)} · ${apiLabel}`, `${accountLabel(2)} · ${tokenLabel}`]);
+    assert.deepEqual(labels(), [accountLabel(1), accountLabel(2)]);
+    assert.deepEqual(h.rows().map(row => row.querySelector('.slot-detail').textContent),
+      [`${t('settings.limits.sources.apiKey')} · ${apiLabel}`, `${t('settings.limits.sources.apiKey')} · ${tokenLabel}`]);
   });
   h.status([{ source: 'api', accountKey: 'a', region: 'en', status: 'ok' }]);
   h.buttons('settings.minimax.openBrowser').forEach(button => button.click());
@@ -300,7 +304,8 @@ test('profile list isolates providers and ignores stale failures and hidden resp
 });
 
 test('Cursor retires a failed manual login message when status is refreshed', async () => {
-  const errors = { textContent: '', classList: { hidden: false, toggle(name, value) { if (name === 'hidden') this.hidden = value; } } };
+  const document = require('./accountOwnerDom.fixture.cjs').createDocument();
+  const errors = document.createElement('div'); errors.textContent = '';
   const statusPill = { textContent: '', title: '' };
   const accountList = { children: [], replaceChildren() { this.children = []; }, append(node) { this.children.push(node); } };
   const manualInput = { value: 'bad session' };
@@ -337,7 +342,6 @@ test('Cursor retires a failed manual login message when status is refreshed', as
   };
   const shellErrorSource = app.slice(app.indexOf('function setAccountShellError('), app.indexOf('const { clientColors, fallbackModelColors'));
   vm.runInNewContext(shellErrorSource, context);
-  const document = require('./accountOwnerDom.fixture.cjs').createDocument();
   const owner = require('../../src/electron/renderer/limits/providerOwners/cursor').create({
     ...context, initial: state, getSettings: () => ({}), getAccountContext: () => ({ settings: {} }),
     preserveScroll: fn => fn(), localProviderStatuses: () => [], setAccountGroupExpanded() {},
@@ -356,7 +360,7 @@ test('Cursor retires a failed manual login message when status is refreshed', as
   await refresh;
   assert.equal(statusPill.textContent, 'settings.cursor.connected');
   assert.equal(errors.textContent, '');
-  assert.equal(errors.classList.hidden, true);
+  assert.equal(errors.classList.contains('hidden'), true);
 });
 
 test('OpenCode status ignores an older probe after a newer status resolves', async () => {
