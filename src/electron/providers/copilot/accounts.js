@@ -26,7 +26,8 @@ function createCopilotAccounts({ getSettings, service, probeDeps, env = process.
         if (row.status === 'unauthorized') throw new Error('The token does not have GitHub Copilot access.');
         if (!current()) throw new Error('GitHub Copilot sign-in was cancelled.');
         return { label, values: { copilotApiToken: token, copilotEnterpriseHost: enterpriseHost },
-          identity: { ...row, accountKey: limits.copilotAccountKey(identity.login || String(identity.id), enterpriseHost) }, isCurrent: current };
+          identity: { ...row, accountName: identity.login || row.accountName,
+            accountKey: limits.copilotAccountKey(identity.login || String(identity.id), enterpriseHost) }, isCurrent: current };
       });
       return { ok: Boolean(result.saved), ...(!result.saved ? { errorCode: result.errorCode || result.verdict } : {}) };
     },

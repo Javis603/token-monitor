@@ -11,12 +11,12 @@ const { createCopilotAccounts } = require('../../src/electron/providers/copilot/
 const { LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
 const { copilotAccountKey } = require('../../src/shared/providers/copilot/limits');
 const usage = { quota_snapshots: { premium_interactions: { entitlement: 100, remaining: 75, percent_remaining: 75 } } };
-function transport(seen = []) {
+function transport(seen = [], loginForToken = token => `login-${token}`) {
   return async (url, init) => {
     const token = init.headers.Authorization.slice(6);
     assert.equal(init.headers.Host, undefined);
     seen.push([url, token]);
-    return { ok: true, json: async () => url.includes('copilot_internal') ? usage : { login: `login-${token}`, id: 1 } };
+    return { ok: true, json: async () => url.includes('copilot_internal') ? usage : { login: loginForToken(token), id: 1 } };
   };
 }
 function fixture(t) {
@@ -51,11 +51,11 @@ test('Copilot interrupted migration verifies before stripping and retries with s
   assert.ok(before.copilotProfiles);
   assert.deepEqual(migrateAccountSlots(store, {}).copilotAccountSlots, before.copilotAccountSlots);
 });
-function serviceFixture() {
+function serviceFixture(loginForToken) {
   let settings = {};
   const seen = [];
-  const service = createAccountSlotService({ getSettings: () => settings, env: {}, write: patch => { settings = { ...settings, ...patch }; }, probeDeps: () => ({ fetch: transport(seen) }) });
-  const api = createCopilotAccounts({ service, getSettings: () => settings, env: {}, probeDeps: () => ({ fetch: transport(seen) }) });
+  const service = createAccountSlotService({ getSettings: () => settings, env: {}, write: patch => { settings = { ...settings, ...patch }; }, probeDeps: () => ({ fetch: transport(seen, loginForToken) }) });
+  const api = createCopilotAccounts({ service, getSettings: () => settings, env: {}, probeDeps: () => ({ fetch: transport(seen, loginForToken) }) });
   return { service, api, seen, get settings() { return settings; } };
 }
 test('Copilot real transport isolates two saved accounts and scoped refresh, and rejects replacing a proven identity', async () => {
@@ -140,11 +140,12 @@ test('real Copilot device-flow IPC fences cancelled flow and stale cancel, and r
 
 test('Copilot renderer settings and form DTOs omit tokens and credential declarations', async () => {
   const { accountFieldProjection, limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
-  const f = serviceFixture();
+  const f = serviceFixture(() => 'public-login');
   await f.api.addAccount('unique-private-token');
   const projected = accountFieldProjection(f.settings);
   const forms = limitAccountFormsForRenderer().find(form => form.id === 'copilot');
   const data = JSON.stringify([projected, forms, f.service.list('copilot')]);
+  assert.equal(f.service.list('copilot').accounts[0].accountName, 'public-login');
   assert.ok(!data.includes('unique-private-token'));
   assert.ok(!JSON.stringify(forms).includes('storePath'));
 });

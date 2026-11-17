@@ -156,12 +156,13 @@ function migrateCopilotSlots(store, stored, settings, document, mark, now, env) 
     enterpriseHost: entry.limits.normalizedEnterpriseHost(settings.copilotEnterpriseHost || env.COPILOT_ENTERPRISE_HOST || env.GITHUB_ENTERPRISE_HOST)
   }]);
   const timestamp = new Date(now()).toISOString();
-  const imports = sources.map(([id, profile]) => ({
+  const imports = sources.map(([id, profile]) => normalizeAccountSlots(entry, [{
     id, label: '', enabled: profile.enabled,
     values: { copilotApiToken: profile.token, copilotEnterpriseHost: profile.enterpriseHost },
     accountKey: profile.accountKey || entry.limits.copilotAccountKey(profile.token, profile.enterpriseHost),
+    ...(profile.accountName ? { accountName: profile.accountName } : {}),
     accountKeyAliases: [], serverIdentity: Boolean(profile.accountKey), createdAt: timestamp, updatedAt: timestamp
-  }));
+  }])[0]);
   const raw = stored.copilotAccountSlots || [];
   const slots = normalizeAccountSlots(entry, raw);
   if (raw.length !== slots.length) throw new Error('Invalid account slot list');

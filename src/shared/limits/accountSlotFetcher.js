@@ -10,7 +10,7 @@ const { accountSlotKey, normalizeAccountSlots, defaultAccountValues, hasAccountC
  * @typedef {import('./accountSlots').AccountSlot} AccountSlot
  * @typedef {Omit<import('./accounts').AccountDeclaration, 'fields'> & {fetchLimits: (options: SlotOptions, deps: SlotDeps) => any, fields: any[], limits?: Record<string, any>}} SlotEntry
  * @typedef {Record<string, any>} SlotOptions Flat provider config, previousLimits and optional limitRefreshScope.
- * @typedef {{accountKey: string, accountKeyAliases: string[]}} SlotIdentity
+ * @typedef {{accountKey: string, accountKeyAliases: string[], accountName?: string}} SlotIdentity
  * @typedef {Record<string, any> & {providerRuntimeState?: Map<string, any>, onAccountSlotResolved?: (provider: string, slotId: string, identity: SlotIdentity, values: Record<string, string>) => void}} SlotDeps Injected transport/env/signal and optional identity persistence hook.
  * @typedef {object} SlotAccount One account of a dispatch: the default account (`values: null`) or an enabled slot.
  * @property {string} [discoveryStatus]
@@ -22,6 +22,7 @@ const { accountSlotKey, normalizeAccountSlots, defaultAccountValues, hasAccountC
  * @property {boolean} known Whether a row has already been filed under `accountKey`.
  * @property {boolean} serverIdentity Whether the stored key was proven to be a server account.
  * @property {string} accountKey
+ * @property {string} [accountName]
  * @property {string[]} accountKeyAliases
  */
 
@@ -76,7 +77,7 @@ function slotAccounts(entry, options, deps) {
 
   // An account's identity is what this runtime remembers, else what the slot
   // record stores, else its provisional key if a row was already filed under it.
-  /** @param {{id: string, label: string, values: Record<string, string> | null, accountKey: string, accountKeyAliases: string[], serverIdentity?: boolean}} account @returns {SlotAccount} */
+  /** @param {{id: string, label: string, values: Record<string, string> | null, accountKey: string, accountKeyAliases: string[], accountName?: string, serverIdentity?: boolean}} account @returns {SlotAccount} */
   const describe = (account) => {
     const provisional = hashKey(entry.id, 'account-slot', accountNamespace(account));
     /** @type {SlotIdentity | null} */
@@ -85,6 +86,7 @@ function slotAccounts(entry, options, deps) {
       || (previousKeys.has(provisional) ? { accountKey: provisional, accountKeyAliases: [] } : null);
     return {
       id: account.id, label: account.label, values: account.values, provisional, known: Boolean(identity), serverIdentity: account.serverIdentity === true,
+      accountName: identity?.accountName || (identity?.accountKey === account.accountKey ? account.accountName : ''),
       accountKey: identity?.accountKey || provisional, accountKeyAliases: identity?.accountKeyAliases || []
     };
   };
@@ -261,7 +263,8 @@ function createAccountSlotFetcher(entry) {
           const ambientAliases = reported.filter((/** @type {string} */ alias) => answered.some(other => other.account.id.startsWith('discovered-') && other.accountKey === alias));
           const identity = { accountKey, accountKeyAliases: [...new Set([...aliases, ...ambientAliases])], accountName: row.accountName || '', accountEmail: row.accountEmail || '' };
           deps.providerRuntimeState?.set(`account-slot:${entry.id}:${accountNamespace(account)}:${accountValuesFingerprint(values)}`, identity);
-          if (account.id.startsWith('discovered-') || !account.known || moved || identity.accountKeyAliases.join('\n') !== account.accountKeyAliases.join('\n')) {
+          if (account.id.startsWith('discovered-') || !account.known || moved || identity.accountKeyAliases.join('\n') !== account.accountKeyAliases.join('\n')
+            || (identity.accountName && identity.accountName !== account.accountName)) {
             // Environment identities stay in memory; local identities update their slot.
             deps.onAccountSlotResolved?.(entry.id, account.id, identity, values);
           }

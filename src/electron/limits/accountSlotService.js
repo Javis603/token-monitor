@@ -65,6 +65,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
   const dto = entry => visible(entry).map(({ id, label, enabled, accountKey, accountKeyAliases = [], values, fingerprint, source, sourceName, accountName, accountEmail, createdAt, updatedAt }) => {
     const key = accountKey || hashKey(entry.id, 'account-slot', source ? 'default' : `slot:${id}`);
     return { id, label, enabled, accountKey: key, accountKeyAliases, ...(source ? { source } : {}),
+      ...(accountName ? { accountName } : {}),
       ...(source === 'discovered' ? { sourceName, accountName, accountEmail } : {}),
       formValues: Object.fromEntries(accountForm(entry).fields.filter(field => !field.secret).map(field => [field.key, values[field.key]])),
       fingerprint: (source === 'discovered' ? fingerprint : accountValuesFingerprint(values)).slice(7, 19), createdAt, updatedAt };
@@ -161,8 +162,10 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
           return;
         }
         const timestamp = new Date(now()).toISOString();
+        const accountName = provider?.accountName || (key === old?.accountKey ? old?.accountName : '');
         const record = { id: old?.id || randomUUID(), label: old ? old.label : label, enabled: old?.enabled !== false,
           values: candidate, accountKey: key,
+          ...(accountName ? { accountName } : {}),
           accountKeyAliases: [...new Set([...(old?.accountKeyAliases || []),
             ...(old?.accountKey && old.accountKey !== key ? [old.accountKey] : []), ...(provider?.accountKeyAliases || [])])].filter(alias => alias !== key).slice(-8),
           // The proof outlives an unproven answer (Qoder without a user id).
@@ -361,7 +364,12 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       slot.serverIdentity = proven || slot.serverIdentity;
       const previousKey = slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`);
       const label = slot.label;
+      // A missing provider name is not an explicit clear. Keep it only while
+      // this remains the same identity; another account cannot inherit it.
+      const accountName = identity.accountName || (identity.accountKey === slot.accountKey ? slot.accountName : '');
       Object.assign(slot, identity);
+      if (accountName) slot.accountName = accountName;
+      else delete slot.accountName;
       await commit(entry, next, false);
       await migratePresentationKey(providerId, previousKey, slot.accountKey, label);
       return true;

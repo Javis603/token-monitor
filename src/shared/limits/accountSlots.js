@@ -10,6 +10,7 @@ const { normalizeLimitProvider } = require('./core');
  * @property {boolean} enabled
  * @property {Record<string, string>} values
  * @property {string} accountKey
+ * @property {string} [accountName] Public provider name, separate from a user label or identity key.
  * @property {string[]} accountKeyAliases
  * @property {boolean} serverIdentity Whether `accountKey` was proven to be a server account identity.
  * @property {string} createdAt
@@ -39,10 +40,12 @@ function normalizeAccountSlots(declaration, input) {
     seen.add(record.id);
     if (!record.values || out.length >= 21) continue;
     const values = Object.fromEntries(keys.filter((key) => typeof record.values?.[key] === 'string').map((key) => [key, record.values[key]]));
+    const identity = normalizeLimitProvider({ provider: declaration.id, accountLabel: record.label, accountName: record.accountName });
     out.push({
-      id: record.id, label: normalizeLimitProvider({ provider: declaration.id, accountLabel: record.label })?.accountLabel || '',
+      id: record.id, label: identity?.accountLabel || '',
       enabled: record.enabled !== false, values,
       accountKey: typeof record.accountKey === 'string' ? record.accountKey.trim() : '',
+      ...(identity?.accountName ? { accountName: identity.accountName } : {}),
       accountKeyAliases: Array.isArray(record.accountKeyAliases) ? [...new Set(record.accountKeyAliases.filter((/** @type {unknown} */ key) => typeof key === 'string' && key.trim()).map((/** @type {string} */ key) => key.trim()))].slice(0, 8) : [],
       serverIdentity: record.serverIdentity === true,
       createdAt: typeof record.createdAt === 'string' && Number.isFinite(Date.parse(record.createdAt)) ? new Date(record.createdAt).toISOString() : '',
