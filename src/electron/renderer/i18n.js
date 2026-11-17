@@ -20,6 +20,7 @@
     en: {
       "settings.limits.sources.alibabaWebDescription": "Read Token Plan quota from the console web session.",
       "settings.limits.sources.stepfunWebDescription": "Read Coding Plan / Token Plan quota from the web session.",
+      "settings.limits.sources.opencodeLocalDescription": "Read local Go usage from the OpenCode database.",
       "settings.limits.sources.opencodeWebDescription": "Go quota fallback and complementary Zen balance from the web session.",
       "settings.limits.sources.oauth": "OAuth",
       "settings.limits.sources.oauthDescription": "Read the connected OAuth account.",
@@ -2586,6 +2587,7 @@
     'zh-TW': {
       "settings.limits.sources.alibabaWebDescription": "使用控制台的網頁登入資料讀取 Token Plan 額度。",
       "settings.limits.sources.stepfunWebDescription": "使用網頁登入資料讀取 Coding Plan／Token Plan 額度。",
+      "settings.limits.sources.opencodeLocalDescription": "從 OpenCode 本機資料庫讀取 Go 用量。",
       "settings.limits.sources.opencodeWebDescription": "網頁登入資料補充 Go 額度，並讀取 Zen 餘額。",
       "settings.limits.sources.oauth": "OAuth",
       "settings.limits.sources.oauthDescription": "讀取已連結的 OAuth 帳戶。",
@@ -5152,6 +5154,7 @@
     'zh-CN': {
       "settings.limits.sources.alibabaWebDescription": "使用控制台的网页登录信息读取 Token Plan 额度。",
       "settings.limits.sources.stepfunWebDescription": "使用网页登录信息读取 Coding Plan／Token Plan 额度。",
+      "settings.limits.sources.opencodeLocalDescription": "从 OpenCode 本地数据库读取 Go 用量。",
       "settings.limits.sources.opencodeWebDescription": "网页登录信息补充 Go 额度，并读取 Zen 余额。",
       "settings.limits.sources.oauth": "OAuth",
       "settings.limits.sources.oauthDescription": "读取已连接的 OAuth 账户。",
@@ -7718,6 +7721,7 @@
     ko: {
       "settings.limits.sources.alibabaWebDescription": "콘솔 웹 세션에서 Token Plan 할당량을 읽습니다.",
       "settings.limits.sources.stepfunWebDescription": "웹 세션에서 Coding Plan / Token Plan 할당량을 읽습니다.",
+      "settings.limits.sources.opencodeLocalDescription": "OpenCode 로컬 데이터베이스에서 Go 사용량을 읽습니다.",
       "settings.limits.sources.opencodeWebDescription": "웹 세션으로 Go 할당량을 보완하고 Zen 잔액을 읽습니다.",
       "settings.limits.sources.oauth": "OAuth",
       "settings.limits.sources.oauthDescription": "연결된 OAuth 계정에서 읽습니다.",
@@ -10284,6 +10288,7 @@
     ja: {
       "settings.limits.sources.alibabaWebDescription": "コンソールの Web セッションから Token Plan の上限を読み取ります。",
       "settings.limits.sources.stepfunWebDescription": "Web セッションから Coding Plan / Token Plan の上限を読み取ります。",
+      "settings.limits.sources.opencodeLocalDescription": "OpenCode のローカルデータベースから Go の使用量を読み取ります。",
       "settings.limits.sources.opencodeWebDescription": "Web セッションで Go の上限を補い、Zen の残高も読み取ります。",
       "settings.limits.sources.oauth": "OAuth",
       "settings.limits.sources.oauthDescription": "連携した OAuth アカウントから読み取ります。",
@@ -12850,6 +12855,7 @@
     es: {
       "settings.limits.sources.alibabaWebDescription": "Lee la cuota de Token Plan desde la sesión Web de la consola.",
       "settings.limits.sources.stepfunWebDescription": "Lee la cuota de Coding Plan / Token Plan desde la sesión Web.",
+      "settings.limits.sources.opencodeLocalDescription": "Lee el uso local de Go desde la base de datos de OpenCode.",
       "settings.limits.sources.opencodeWebDescription": "La sesión Web complementa la cuota Go y aporta el saldo Zen.",
       "settings.limits.sources.oauth": "OAuth",
       "settings.limits.sources.oauthDescription": "Lee la cuenta OAuth conectada.",
@@ -15411,6 +15417,7 @@
     'pt-BR': {
       "settings.limits.sources.alibabaWebDescription": "Lê a cota do Token Plan pela sessão Web do console.",
       "settings.limits.sources.stepfunWebDescription": "Lê a cota do Coding Plan / Token Plan pela sessão Web.",
+      "settings.limits.sources.opencodeLocalDescription": "Lê o uso local do Go no banco de dados do OpenCode.",
       "settings.limits.sources.opencodeWebDescription": "A sessão Web complementa a cota Go e fornece o saldo Zen.",
       "settings.limits.sources.oauth": "OAuth",
       "settings.limits.sources.oauthDescription": "Lê a conta OAuth conectada.",

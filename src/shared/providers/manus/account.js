@@ -19,6 +19,17 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
     envFallback: ['TOKEN_MONITOR_MANUS_SESSION_TOKEN', 'MANUS_SESSION_TOKEN', 'MANUS_COOKIE'],
     project: 'set'
   }],
+  discover: (_env, limits) => {
+    try {
+      return Boolean(limits.readManusDesktopSession());
+    } catch (error) {
+      return (/** @type {{status?: string}|null|undefined} */ (error))?.status === 'unavailable';
+    }
+  },
+  accountStatus: ({ settings, env, discovered, limits }) => ({
+    manusSessionTokenConfigured: Boolean(settings?.manusSessionToken || limits.manusSessionToken(env) || discovered),
+    manusSessionTokenSource: settings?.manusSessionToken ? 'settings' : limits.manusSessionToken(env) ? 'env' : discovered ? 'manus-desktop' : ''
+  }),
   discoveredAccounts: (_env, limits, deps) => limits.discoverAccountSlots(deps),
   status: {
     credential: 'manusSessionToken',

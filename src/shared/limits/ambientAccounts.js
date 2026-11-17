@@ -40,7 +40,7 @@ function ambientAccounts(entry, options, deps) {
     // For an unchanged credential, the identity a fetch resolved (a server user
     // id) wins over the key discovery derives; that key stays an alias.
     const accountKey = remembered.accountKey || record.accountKey || hashKey(entry.id, 'discovered', fingerprint);
-    const aliases = [...new Set([...(remembered.accountKeyAliases || []), ...(record.accountKey && record.accountKey !== accountKey ? [record.accountKey] : [])])].slice(-8);
+    const aliases = [...new Set([...(remembered.accountKeyAliases || []), ...(record.accountKeyAliases || []), ...(record.accountKey && record.accountKey !== accountKey ? [record.accountKey] : [])])].slice(-8);
     // The current fingerprint's record is authoritative; an older record of the
     // same account (before a token rotation) only seeds it.
     const controls = metadata[fingerprint] || Object.values(metadata).find((/** @type {any} */ item) => (item.accountKey === accountKey || item.accountKeyAliases.includes(accountKey))) || {};

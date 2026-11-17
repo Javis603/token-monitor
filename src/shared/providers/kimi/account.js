@@ -6,7 +6,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   id: 'kimi',
   sources: [
     { id: 'api', kind: 'apiKey', relation: 'alternative', labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.kimi.apiKeyNote' },
-    { id: 'web', kind: 'web', relation: 'alternative', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.kimi.webTokenNote' }
+    { id: 'web', kind: 'web', relation: 'complement', labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.kimi.webTokenNote' }
   ],
   fetch: 'fetchKimiLimits',
   fields: [
@@ -48,7 +48,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
       kimiCredentialSource: webTokenSource || apiKeySource
     };
   },
-  // Kimi keeps its own panel (a primary Code API key and a Web-token fallback,
+  // Kimi keeps its own panel (a primary Code API key and a complementary Web token,
   // each saved on its own) and borrows only the shared save path.
   form: {
     kind: 'custom',

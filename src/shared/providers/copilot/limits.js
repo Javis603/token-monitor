@@ -378,7 +378,12 @@ async function fetchCopilotLimits(options = {}, deps = {}) {
     return rows.length === 1 ? row : rows;
   }
   const seenCredentials = new Set();
-  const accounts = configured.filter(account => {
+  // An unbound duplicate must not hide the scoped profile's saved identity
+  // when GitHub cannot answer either the identity or quota request.
+  const prioritized = scope?.accountKey
+    ? [...configured].sort((a, b) => Number(b.accountKey === scope.accountKey) - Number(a.accountKey === scope.accountKey))
+    : configured;
+  const accounts = prioritized.filter(account => {
     if (!account.enabled || (scope?.accountKey && account.accountKey && account.accountKey !== scope.accountKey)) return false;
     const fingerprint = copilotAccountKey(account.token, account.enterpriseHost);
     if (seenCredentials.has(fingerprint)) return false;

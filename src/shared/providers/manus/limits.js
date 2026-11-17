@@ -215,6 +215,7 @@ module.exports = {
   MANUS_FETCH_TIMEOUT_MS,
   fetchManusLimits,
   manusCreditsUrl,
+  readManusDesktopSession,
   manusSessionToken,
   normalizeManusSessionToken,
   parseManusCredits

@@ -195,7 +195,16 @@ async function fetchHarkLimits(options = {}, deps = {}) {
 function discoverAccountSlots(deps = {}) {
   try {
     const token = normalizeHarkSessionToken((deps.readHarkDesktopSession || readHarkDesktopSession)(deps.harkDesktopOptions || {}));
-    return token ? [{ values: { harkCookie: token }, accountKey: hashKey('hark', decodeURIComponent(token)), sourceName: 'Hark' }] : [];
+    if (!token) return [];
+    const decoded = decodeURIComponent(token);
+    const supplied = harkCookie(deps.env || {});
+    const environmentToken = normalizeHarkSessionToken(supplied);
+    // The environment row initially hashes its accepted spelling (which may
+    // include a Cookie header), before a probe resolves the decoded identity.
+    const aliases = [token, ...(environmentToken && decodeURIComponent(environmentToken) === decoded ? [supplied] : [])]
+      .filter(value => value !== decoded).map(value => hashKey('hark', value));
+    return [{ values: { harkCookie: token }, accountKey: hashKey('hark', decoded),
+      accountKeyAliases: [...new Set(aliases)], sourceName: 'Hark' }];
   } catch (error) {
     if (error?.status === 'notConfigured') return [];
     throw error;
