@@ -260,3 +260,88 @@ test('an edit made offline survives a restart and is published on the next conne
   assert.equal(document.value.deepseek.labels.k, 'Renamed offline');
   assert.deepEqual(stored, [], 'an acknowledged edit leaves the journal');
 });
+
+
+test('fresh Hub publishes missing local labels without seeding an older Hub cache', async () => {
+  const f = fixture({ cache: 'previous-hub', localLabels: [
+    { provider: 'deepseek', type: 'rename', key: 'mine', label: 'Mine' }
+  ] });
+  await f.runtime.refresh();
+  assert.deepEqual(f.calls.map(call => call.method), ['GET', 'PUT']);
+  assert.deepEqual(f.calls[1].body.value, { deepseek: { labels: { mine: 'Mine' }, order: [] } });
+});
+
+test('unsupported Hub stats suppress settings writes until capability or destination changes', async () => {
+  for (const status of [400, 404]) {
+    let hub = 'old';
+    let writes = 0;
+    const calls = [];
+    const runtime = createAccountPresentationSync({
+      getContext: () => ({ mode: 'client', url: hub }), identity: context => context.url,
+      getCacheIdentity: () => '', getSeed: () => ({}), apply: () => {},
+      saveJournal: () => { writes++; },
+      request: async context => { calls.push(context.url); return { status }; }
+    });
+    await runtime.refresh();
+    const initialWrites = writes;
+    for (let frame = 0; frame < 3; frame++) {
+      runtime.notifyStats({});
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    assert.equal(writes, initialWrites, `HTTP ${status} must suppress repeated settings writes`);
+    assert.deepEqual(calls, ['old']);
+    hub = 'new';
+    runtime.notifyStats({});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls, ['old', 'new']);
+  }
+});
+
+for (const stage of ['queued', 'in-flight', 'failed']) {
+  test(`destination switching preserves ${stage} edits across restart`, async () => {
+    let hub = 'a';
+    let stored = [];
+    let releaseGet;
+    let failPut = true;
+    const puts = [];
+    const make = (hold = false) => createAccountPresentationSync({
+      getContext: () => ({ mode: 'client', url: hub }), identity: context => context.url,
+      getCacheIdentity: () => hub, getSeed: () => ({}), apply: () => {},
+      loadJournal: () => structuredClone(stored), saveJournal: journal => { stored = structuredClone(journal); },
+      request: async (context, _path, method, body) => {
+        if (method === 'GET') {
+          if (hold && context.url === 'a') await new Promise(resolve => { releaseGet = resolve; });
+          return { status: 200, body: { revision: 1, value: {} } };
+        }
+        puts.push({ hub: context.url, value: body.value });
+        if (failPut) { failPut = false; return { status: 503 }; }
+        return { status: 200, body: { revision: 2, value: body.value } };
+      }
+    });
+    const runtime = make(stage !== 'failed');
+    let read;
+    if (stage === 'queued') {
+      read = runtime.refresh();
+      await new Promise(resolve => setImmediate(resolve));
+    }
+    const edit = runtime.publish([{ provider: 'deepseek', type: 'rename', key: 'k', label: 'For A' }]);
+    if (stage === 'failed') await edit;
+    else await new Promise(resolve => setImmediate(resolve));
+    hub = 'b';
+    if (releaseGet) releaseGet();
+    if (read) await read;
+    await edit;
+    await runtime.refresh();
+    assert.deepEqual(stored, [{ destination: 'a', operation: { provider: 'deepseek', type: 'rename', key: 'k', label: 'For A' } }]);
+    assert.equal(puts.some(put => put.hub === 'b'), false, 'A edits must never be sent to B');
+    const restarted = make();
+    await restarted.refresh();
+    assert.equal(stored.length, 1, 'connecting to B after restart retains A edits');
+    hub = 'a';
+    failPut = false;
+    await restarted.refresh();
+    assert.equal(puts.at(-1).hub, 'a');
+    assert.equal(puts.at(-1).value.deepseek.labels.k, 'For A');
+    assert.deepEqual(stored, []);
+  });
+}

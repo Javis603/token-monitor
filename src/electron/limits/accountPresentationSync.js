@@ -59,10 +59,15 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
     const context = { ...getContext() };
     const captured = identity(context);
     if (!captured) return;
-    if (binding !== captured) { binding = captured; revision = -1; unsupported = false; pending = []; }
-    // Queued edits belong to the Hub they were made against; others are dropped.
+    if (binding !== captured) {
+      // Keep unacknowledged edits bound to their original destination. A later
+      // connection to that Hub can retry them, including after a restart.
+      queued = [...pending.map(operation => ({ destination: binding, operation })), ...queued];
+      binding = captured; revision = -1; unsupported = false; pending = [];
+    }
+    // Only consume this Hub's queue; never replay another Hub's edits here.
     const mine = queued.filter(item => item.destination === captured).map(item => item.operation);
-    queued = [];
+    queued = queued.filter(item => item.destination !== captured);
     if (unsupported) { pending = []; persist(); return; }
     pending.push(...mine, ...operations);
     persist();
@@ -94,7 +99,7 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
         const missingLocalLabels = localLabels.filter((/** @type {any} */ operation) =>
           !Object.hasOwn(base[operation.provider]?.labels || {}, operation.key));
         const value = replayPresentation(base, [...missingLocalLabels, ...pending]);
-        if (!pending.length && (document.value !== null ? JSON.stringify(value) === JSON.stringify(document.value) : !Object.keys(seed).length)) {
+        if (!pending.length && (document.value !== null ? JSON.stringify(value) === JSON.stringify(document.value) : !Object.keys(seed).length && !missingLocalLabels.length)) {
           await apply(withQueued(value, captured), captured);
           revision = document.revision;
           return;
@@ -139,10 +144,12 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
   }
   return { publish, refresh, notifyStats(/** @type {any} */ stats) {
     // A Hub upgraded in place starts advertising this kind; try it again.
-    if (unsupported && stats?.syncSettingsRevisions && Object.hasOwn(stats.syncSettingsRevisions, KIND)) unsupported = false;
+    if (unsupported && binding === identity(getContext()) && stats?.syncSettingsRevisions && Object.hasOwn(stats.syncSettingsRevisions, KIND)) unsupported = false;
     // Pending edits retry on the next frame even when the Hub's revision has
     // not moved, so a transient failure cannot strand them.
-    if (connected() && (pending.length || queued.length || binding !== identity(getContext()) || stats?.syncSettingsRevisions?.[KIND] !== revision)) {
+    const captured = identity(getContext());
+    if (unsupported && binding === captured) return;
+    if (connected() && (pending.length || queued.some(item => item.destination === captured) || binding !== captured || stats?.syncSettingsRevisions?.[KIND] !== revision)) {
       if (refreshPending) refreshAgain = true;
       else void refresh();
     }
