@@ -23,6 +23,7 @@
   }
   function accountStatus(slot, reading) {
     if (!slot.enabled) return 'paused';
+    if (slot.sourceSelected === false) return 'notCollected';
     if (reading?.status === 'disabled') return 'disabled';
     if (reading?.status === 'unauthorized') return 'invalid';
     if (reading?.stale) return 'stale';

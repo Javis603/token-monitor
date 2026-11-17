@@ -346,7 +346,9 @@ function assertAccountForm(entry, form) {
 // field declarations, store paths, resolvers, or credential values over IPC.
 function limitConnectionSourcesForRenderer() {
   return LIMIT_PROVIDER_REGISTRY.map(({ id, sources, sourceSelection }) => ({ id, sources,
-    ...(sourceSelection ? { sourceSelection: { key: `${id}SourcePreference`, sources: sourceSelection.sources } } : {}) }));
+    ...(sourceSelection ? { sourceSelection: { key: `${id}SourcePreference`, sources: sourceSelection.sources,
+      ...(sourceSelection.autoLabelKey ? { autoLabelKey: sourceSelection.autoLabelKey } : {}),
+      ...(sourceSelection.autoDescriptionKey ? { autoDescriptionKey: sourceSelection.autoDescriptionKey } : {}) } } : {}) }));
 }
 
 function limitAccountFormsForRenderer() {

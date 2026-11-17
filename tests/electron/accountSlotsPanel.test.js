@@ -1394,3 +1394,7 @@ test('Alibaba environment DTO respects a stored variant override without changin
   assert.equal(account.formValues.alibabaVariant, 'cn-personal');
   assert.equal(account.fingerprint, accountValuesFingerprint(defaultAccountValues(limitProviderEntry('alibaba'), settings, env)).slice(7, 19));
 });
+
+test('source-excluded accounts do not inherit a connected retained reading', () => {
+  assert.equal(accountStatus({ enabled: true, sourceSelected: false }, { status: 'ok' }), 'notCollected');
+});

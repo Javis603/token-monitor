@@ -207,7 +207,7 @@ test('Hub secret input stays masked and exposes an accessible paste button', () 
 
 test('Cursor account header uses the shared linked-account summary', () => {
   const body = functionBody(readRendererOwner('cursor'), 'renderCursorStatus', 'refreshCursorStatus');
-  assert.match(body, /t\('settings\.cursor\.connected', \{ linked: status\.linkedCount \|\| 0, total: accounts\.length \}\)/);
+  assert.match(body, /t\('settings\.cursor\.connected', \{ linked: accounts\.filter\(account => sourceSelected\(account\) && account\.enabled && !account\.expired && !account\.error\)\.length, total: accounts\.length \}\)/);
   assert.match(body, /setCursorStatusText\(statusEl, summary\);/);
   assert.doesNotMatch(body, /status\.email|billingCycleEnd|billingResets|selectedAccountId/);
 });

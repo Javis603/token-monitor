@@ -6,7 +6,7 @@ const { defaultAccountValues, accountValuesFingerprint } = require('../../src/sh
 const { normalizeAccountPatch, finalAccountSettings, initialAccountSettings, limitsAccountConfig, accountFieldProjection, limitConnectionSourcesForRenderer } = require('../../src/electron/limits/accountSettings');
 const { createAccountSlotService } = require('../../src/electron/limits/accountSlotService');
 const { transport } = require('../fixtures/accountSlotsBatch');
-const ids = ['ollama', 'trae', 'cline', 'manus', 'hark', 'grok', 'codex', 'claude', 'alibaba', 'volcengine'];
+const ids = ['ollama', 'trae', 'cline', 'manus', 'hark', 'grok', 'codex', 'claude', 'alibaba', 'volcengine', 'cursor'];
 for (const id of ids) test(`${id}: preference validates, defaults, projects and preserves credential fingerprint`, () => {
   const entry = limitProviderEntry(id), key = `${id}SourcePreference`;
   const chosen = entry.sourceSelection.sources[0];
@@ -207,5 +207,17 @@ test('Codex actual RPC candidate dispatch never spawns the opposite selected exe
   const fetcher=limitProviderEntry('codex').fetchLimits;
   for (const [selection,command] of [['app','codex'],['cli','/Applications/Codex.app/Contents/Resources/codex']]) {
     await assert.rejects(fetcher({codexSourcePreference:selection},{env:{},codexCommand:command,readFileSync:()=>{throw Error('no auth');},spawn:()=>assert.fail('opposite executable must not run')}),{status:'notConfigured'});
+  }
+});
+
+test('source selection DTO projects only public selector fields', () => {
+  const declaration = limitProviderEntry('cursor').sourceSelection;
+  declaration.privateResolver = 'main-only';
+  try {
+    const selection = limitConnectionSourcesForRenderer().find(entry => entry.id === 'cursor').sourceSelection;
+    assert.deepEqual(Object.keys(selection).sort(), ['autoDescriptionKey', 'autoLabelKey', 'key', 'sources']);
+    assert.equal(selection.privateResolver, undefined);
+  } finally {
+    delete declaration.privateResolver;
   }
 });

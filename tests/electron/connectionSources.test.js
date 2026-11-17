@@ -230,7 +230,7 @@ test('a rejected source preference restores the accepted selection and localized
   assert.ok(card.textContent.includes(translate('zh-TW', 'settings.limits.sources.saveFailed')));
 });
 
-for (const id of ['cursor', 'antigravity', 'workbuddy']) test(`${id} describes complementary manual and detected connections without a selector`, () => {
+for (const id of ['antigravity', 'workbuddy']) test(`${id} describes complementary manual and detected connections without a selector`, () => {
   const { nodes } = renderConnection(id);
   const entry = limitConnectionSourcesForRenderer().find(entry => entry.id === id);
   const method = nodes.find(node => node.className === 'connection-source-method');
@@ -248,4 +248,15 @@ test('selectable connection cards keep descriptions in the menu instead of repea
   for (const source of entry.sources) assert.ok(!summary.textContent.includes(translate('en', source.descriptionKey)));
   const select = nodes.find(node => node.tag === 'select');
   assert.ok(select.children[0].dataset.tmSelectDescription.includes(translate('en', entry.sources.find(source => source.relation === 'complement').descriptionKey)));
+});
+
+
+test('Cursor offers three collection modes using compact menu descriptions', () => {
+  const { nodes } = renderConnection('cursor');
+  const select = nodes.find(node => node.tag === 'select');
+  assert.deepEqual(select.children.map(option => option.value), ['auto', 'desktop', 'web']);
+  assert.equal(select.children[0].textContent, 'Auto + manual');
+  assert.ok(select.children[0].dataset.tmSelectDescription.includes('desktop'));
+  assert.equal(select.children[1].dataset.selectDescription, 'settings.cursor.sources.desktopDescription');
+  assert.equal(select.children[2].dataset.selectDescription, 'settings.cursor.sources.webDescription');
 });

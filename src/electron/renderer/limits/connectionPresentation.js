@@ -13,7 +13,7 @@
    * sources: import('../../../shared/limits/accounts').AccountSource[],
    * provider: {status?: string, stale?: boolean, source?: string, sourceDetail?: string},
    * label: string, onOpen?: () => void,
-   * selection?: {key: string, sources: string[]}, preference?: string,
+   * selection?: {key: string, sources: string[], autoLabelKey?: string, autoDescriptionKey?: string}, preference?: string,
    * onSelect?: (patch: Record<string, string>) => Promise<string> }} options
    */
   function createConnectionCard({ document, t, sources, provider, label, onOpen, selection, preference = 'auto', onSelect }) {
@@ -36,9 +36,9 @@
     const automatic = !primary || alternatives.length > 1 || sources.some(source => !['apiKey', 'web'].includes(source.kind));
     const hasComplement = sources.some(source => source.relation === 'complement');
     const mixed = automatic && hasComplement && alternatives.length <= 1 && !(selection && onSelect);
-    const automaticSummary = t(mixed ? 'settings.limits.sources.mixedSummary' : automatic
+    const automaticSummary = t(selection?.autoLabelKey || (mixed ? 'settings.limits.sources.mixedSummary' : automatic
       ? alternatives.length > 1 ? 'settings.limits.sources.auto' : 'settings.limits.sources.detectSummary'
-      : primary.kind === 'apiKey' ? 'settings.limits.sources.manualApi' : 'settings.limits.sources.manualWeb');
+      : primary.kind === 'apiKey' ? 'settings.limits.sources.manualApi' : 'settings.limits.sources.manualWeb'));
     const complementLabels = sources.filter(source => source.relation === 'complement').map(source => t(source.labelKey));
     // Setup instructions belong to the account editor; this card is a summary.
     const summaryText = selection && onSelect && hasComplement
@@ -49,7 +49,7 @@
     const current = alternatives.length > 1 && provider.status === 'ok' && !provider.stale
       ? alternatives.find(source => source.id === (provider.sourceDetail || provider.source))
         || alternatives.find(source => source.id === provider.source) : null;
-    const autoLabel = current
+    const autoLabel = selection?.autoLabelKey ? t(selection.autoLabelKey) : current
       ? `${t('settings.limits.capability.auto')} · ${t(current.labelKey)}`
       : t('settings.limits.connection.autoDetect');
     const actions = node('div', 'connection-source-actions');
@@ -63,7 +63,7 @@
         option.value = choice.id;
         option.textContent = choice.id === 'auto' ? autoLabel : t(choice.labelKey);
         // appSelects already renders localized descriptions below menu options.
-        if (choice.id === 'auto') option.dataset.tmSelectDescription = [automaticSummary,
+        if (choice.id === 'auto') option.dataset.tmSelectDescription = [selection.autoDescriptionKey ? t(selection.autoDescriptionKey) : automaticSummary,
           ...sources.filter(source => source.relation === 'complement').map(source => `${t(source.labelKey)} · ${t(source.descriptionKey)}`)
         ].join(' ');
         else option.dataset.selectDescription = choice.descriptionKey;

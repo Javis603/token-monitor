@@ -223,7 +223,7 @@ test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refre
     claude: ['claudeSourcePreference', 'claudeWebCookie', 'claudeWebOrganizationId', 'claudeAccountSlots', 'claudeCliFallbackEnabled'],
     codex: ['codexSourcePreference', 'codexManagedAccounts'],
     opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
-    cursor: ['cursorDisabledAccountIds'],
+    cursor: ['cursorSourcePreference', 'cursorDisabledAccountIds'],
     antigravity: ['antigravityAccountSlots'],
     cline: ['clineSourcePreference', 'clineApiKey', 'clineAccountSlots'],
     grok: ['grokSourcePreference'],
@@ -355,7 +355,7 @@ test('settings:update normalizes provider fields and strips separately managed a
   const fields = LIMIT_PROVIDER_REGISTRY.flatMap(({ fields }) => fields);
   const normalizedKeys = fields.filter(({ normalize, persist }) => normalize && persist !== 'never').map(({ key }) => key);
   assert.deepEqual(normalizedKeys.sort(), [
-    'claudeSourcePreference', 'codexSourcePreference', 'clineSourcePreference', 'grokSourcePreference',
+    'claudeSourcePreference', 'codexSourcePreference', 'cursorSourcePreference', 'clineSourcePreference', 'grokSourcePreference',
     'ollamaSourcePreference', 'traeSourcePreference', 'manusSourcePreference', 'harkSourcePreference',
     'alibabaSourcePreference', 'volcengineSourcePreference',
     'openrouterApiKey', 'claudeWebCookie', 'claudeWebOrganizationId', 'deepseekApiKey', 'deepseekWebToken', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode', 'copilotApiToken', 'copilotEnterpriseHost',

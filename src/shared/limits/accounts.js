@@ -125,7 +125,7 @@ const { defaultIdentityKey, accountSlotField, normalizeAmbientAccounts } = requi
  * @typedef {object} AccountDeclaration
  * @property {string} id
  * @property {AccountSource[]} sources Ordered read sources.
- * @property {{sources: string[]}} [sourceSelection] Explicit provider-supported exclusive lanes; complements must stay out.
+ * @property {{sources: string[], autoLabelKey?: string, autoDescriptionKey?: string}} [sourceSelection] Explicit provider-supported exclusive lanes; complements must stay out.
  * @property {boolean} [environmentWhenSaved]
  * @property {boolean} [dedupeAccounts]
  * @property {string} fetch Limits export called by the collector.
