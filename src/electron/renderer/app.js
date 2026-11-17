@@ -7353,7 +7353,7 @@ function homeActivityTooltipEl(instanceClass = 'home-heatmap-tooltip') {
   let tooltip = document.querySelector(`.${instanceClass}`);
   if (tooltip) return tooltip;
   tooltip = document.createElement('div');
-  // Trends shares the heatmap's layout and positioning, with its own instance.
+  // Chart tooltips share the heatmap's layout, each with its own instance.
   tooltip.className = `home-activity-tooltip ${instanceClass}`;
   tooltip.setAttribute('role', 'tooltip');
   tooltip.setAttribute('aria-hidden', 'true');
@@ -7511,6 +7511,82 @@ function hideHomeActivityTooltip() {
   state.homeActivityHoverTeardown?.();
 }
 
+function bindHomeTrendTooltip(chart, model, points) {
+  if (state.homeTrendTooltipBinding?.chart === chart) {
+    state.homeTrendTooltipBinding.update(model, points);
+    return;
+  }
+  state.homeTrendTooltipBinding?.hide();
+  if (!chart || !model?.points.length) {
+    state.homeTrendTooltipBinding = null;
+    return;
+  }
+  const svg = chart.querySelector('.area-line');
+  const crosshair = chart.querySelector('.home-trend-crosshair');
+  const marker = chart.querySelector('.home-trend-marker');
+  const tooltip = homeActivityTooltipEl('home-trend-tooltip');
+  let cost = tooltip.querySelector('.home-trend-tooltip-cost');
+  if (!cost) {
+    cost = document.createElement('span');
+    cost.className = 'home-trend-tooltip-cost';
+    tooltip.append(cost);
+  }
+  let pointerX = null;
+  const hide = () => {
+    pointerX = null;
+    chart.removeAttribute('data-active');
+    tooltip.dataset.visible = 'false';
+    tooltip.setAttribute('aria-hidden', 'true');
+    tooltip.style.transform = 'translate(-9999px, -9999px)';
+  };
+  const showAt = (clientX) => {
+    if (!model.points.length) { hide(); return; }
+    const rect = svg.getBoundingClientRect();
+    if (!(rect.width > 0)) { hide(); return; }
+    pointerX = clientX;
+    const first = model.points[0].x;
+    const last = model.points[model.points.length - 1].x;
+    const x = (clientX - rect.left) / rect.width * model.width;
+    const index = last === first ? 0 : Math.max(0, Math.min(model.points.length - 1,
+      Math.round((x - first) / (last - first) * (model.points.length - 1))));
+    const point = model.points[index];
+    const daily = points[index];
+    const left = `${point.x / model.width * 100}%`;
+    crosshair.style.left = left;
+    marker.style.left = left;
+    marker.style.top = `${point.y / model.height * 100}%`;
+    tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatNumber(daily.tokens);
+    tooltip.querySelector('[data-home-activity-tooltip-date]').textContent = daily.date;
+    cost.textContent = daily.cost != null && Number.isFinite(Number(daily.cost))
+      ? `USD ${currencyApi.formatCurrencyFromUsd(daily.cost, 'USD')}` : '';
+    chart.setAttribute('data-active', 'true');
+    tooltip.dataset.visible = 'true';
+    tooltip.setAttribute('aria-hidden', 'false');
+    const tipRect = tooltip.getBoundingClientRect();
+    const anchorX = rect.left + point.x / model.width * rect.width;
+    const anchorY = rect.top + point.y / model.height * rect.height;
+    const pad = 6;
+    const gap = 9;
+    const xPos = Math.max(pad, Math.min(window.innerWidth - pad - tipRect.width, anchorX - tipRect.width / 2));
+    const aboveY = anchorY - gap - tipRect.height;
+    const yPos = Math.max(pad, Math.min(window.innerHeight - pad - tipRect.height,
+      aboveY >= pad ? aboveY : anchorY + gap));
+    tooltip.style.transform = `translate(${Math.round(xPos)}px, ${Math.round(yPos)}px)`;
+  };
+  chart.addEventListener('pointerenter', (event) => showAt(event.clientX));
+  chart.addEventListener('pointermove', (event) => showAt(event.clientX));
+  chart.addEventListener('pointerleave', hide);
+  state.homeTrendTooltipBinding = { chart, hide, update(nextModel, nextPoints) {
+    model = nextModel;
+    points = nextPoints;
+    if (pointerX != null) showAt(pointerX);
+  } };
+}
+
+function hideHomeTrendTooltip() {
+  state.homeTrendTooltipBinding?.hide();
+}
+
 const rendererDom = window.TokenMonitorDomReconcile.create({ nodesFor: node => pluginContent?.nodesFor(node) || [] });
 let homeActivityScroller = null;
 function updateHomeActivity() {
@@ -7532,6 +7608,9 @@ function updateHomeActivity() {
   if (scroller) applyHomeActivityScroll(scroller);
   if (scroller && state.animateChartsOnRender && scroller.clientWidth > 0) reveal();
   state.homeActivityTooltipUpdate?.();
+  const trendChart = els.homePanel.querySelector('.home-area-chart');
+  const trendData = trendChart && window.TokenMonitorDomReconcile.data(trendChart);
+  bindHomeTrendTooltip(trendChart, trendData?.model, trendData?.points);
 }
 
 function renderHomeTrendsModule() {
@@ -7636,6 +7715,12 @@ function renderHomeTrendsModule() {
   const chart = document.createElement('div');
   chart.className = 'home-area-chart';
   chart.innerHTML = charts.areaLineSvg(model);
+  const crosshair = document.createElement('div');
+  crosshair.className = 'home-trend-crosshair';
+  const marker = document.createElement('div');
+  marker.className = 'home-trend-marker';
+  chart.append(crosshair, marker);
+  window.TokenMonitorDomReconcile.data(chart, { model, points: linePoints });
   plot.append(chart);
   const dates = document.createElement('div');
   dates.className = 'home-trend-dates';
@@ -7812,7 +7897,7 @@ function renderAppContent({ fromSearch = false } = {}) {
   const pluginPage = pluginMainPages?.render(pluginPageOptions(), state.breakdown) || false;
   els.shell.classList.toggle('plugin-page-mode', pluginPage);
   if (pluginPage) {
-    stopHomeSessionRepaint(); stopSessionStatusRepaint(); stopServiceStatusTicker(); hideHomeActivityTooltip();
+    stopHomeSessionRepaint(); stopSessionStatusRepaint(); stopServiceStatusTicker(); hideHomeActivityTooltip(); hideHomeTrendTooltip();
     cancelNumberAnimation();
     state.openSession = null;
     for (const panel of [els.homePanel, els.breakdown, els.limitsPanel, els.trendsPanel, els.serviceStatusPanel,
@@ -7903,9 +7988,8 @@ function renderAppContent({ fromSearch = false } = {}) {
   syncSessionSearchChrome();
   if (state.breakdown !== 'session' || state.openSession) els.sessionPagerHost.classList.add('hidden');
   els.viewBackRow?.classList.toggle('hidden', state.breakdown === 'home' || !state.homeReturnVisible);
-  // Leaving Home only CSS-hides the panel, so its heatmap scroller never sees a
-  // pointerleave — dismiss the body-level tooltip here (renderHome covers rerenders).
-  if (state.breakdown !== 'home') hideHomeActivityTooltip();
+  // Leaving Home only CSS-hides the panel, so its charts may not see pointerleave.
+  if (state.breakdown !== 'home') { hideHomeActivityTooltip(); hideHomeTrendTooltip(); }
   if (state.breakdown !== 'trends') hideTrendTooltip();
   if (state.breakdown === 'status') ensureServiceStatusTicker(); else stopServiceStatusTicker();
   if (state.breakdown === 'home') {

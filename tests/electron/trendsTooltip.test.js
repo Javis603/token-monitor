@@ -6,9 +6,11 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const charts = require('../../src/electron/renderer/usageCharts');
+const currencyApi = require('../../src/shared/currency');
 const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
 const binding = source.slice(source.indexOf('function hideTrendTooltip('), source.indexOf('function renderTrends('));
 const heatmapTooltip = source.slice(source.indexOf('function homeActivityTooltipEl('), source.indexOf('function setupHomeActivityHover('));
+const homeTrendBinding = source.slice(source.indexOf('function bindHomeTrendTooltip('), source.indexOf('const rendererDom ='));
 
 class Element {
   constructor() {
@@ -190,4 +192,70 @@ test('window blur hides Trends details without a delayed repaint', () => {
   assert.equal(renders(), 0);
   context[handler]();
   assert.equal(renders(), 0);
+});
+
+function homeTrendFixture(points = [
+  { date: '2026-10-21', tokens: 100, cost: 1.25 },
+  { date: '2026-10-22', tokens: 0, cost: 0 },
+  { date: '2026-10-23', tokens: 40 }
+]) {
+  const body = new Element();
+  const document = { createElement: () => new Element(), body, querySelector: selector => body.querySelector(selector) };
+  const chart = new Element(); chart.className = 'home-area-chart';
+  const svg = new Element(); svg.className = 'area-line';
+  svg.bounds = { left: 20, top: 100, width: 300, height: 70 };
+  const crosshair = new Element(); crosshair.className = 'home-trend-crosshair';
+  const marker = new Element(); marker.className = 'home-trend-marker';
+  chart.append(svg, crosshair, marker);
+  const state = {};
+  const context = { state, document, window: { innerWidth: 340, innerHeight: 180 }, currencyApi,
+    formatNumber: n => Number(n).toLocaleString('en-US') };
+  assert.ok(source.includes('function bindHomeTrendTooltip('), 'Home trend hover binding exists');
+  vm.runInNewContext(`${heatmapTooltip}\n${homeTrendBinding}`, context);
+  const bind = rows => context.bindHomeTrendTooltip(chart,
+    charts.areaLineChart(rows, { width: 300, height: 70, padTop: 4, padRight: 3, padBottom: 4, padLeft: 3, curve: true }), rows);
+  bind(points);
+  const tooltip = body.querySelector('.home-trend-tooltip');
+  tooltip.bounds = { width: 120, height: 50 };
+  return { chart, crosshair, marker, tooltip, bind, state, context };
+}
+
+test('Home trend hover snaps across the full plot, including zero and edge days', () => {
+  const { chart, crosshair, marker, tooltip } = homeTrendFixture();
+  chart.fire('pointerenter', { clientX: 20, clientY: 130 });
+  assert.equal(tooltip.textContent, '100tokens2026-10-21USD $1.2500');
+  assert.equal(chart.getAttribute('data-active'), 'true');
+  assert.equal(crosshair.style.left, '1%');
+  assert.equal(marker.style.left, '1%');
+  chart.fire('pointermove', { clientX: 170, clientY: 169 });
+  assert.equal(tooltip.textContent, '0tokens2026-10-22USD $0.0000');
+  assert.equal(crosshair.style.left, '50%');
+  assert.equal(marker.style.top, `${(66 / 70) * 100}%`);
+  chart.fire('pointermove', { clientX: 500, clientY: 110 });
+  assert.equal(tooltip.textContent, '40tokens2026-10-23');
+  assert.equal(crosshair.style.left, '99%');
+  chart.fire('pointerleave');
+  assert.equal(chart.getAttribute('data-active'), null);
+  assert.equal(tooltip.dataset.visible, 'false');
+  assert.equal(tooltip.getAttribute('aria-hidden'), 'true');
+});
+
+test('Home trend tooltip remains within the window and refreshes hovered values', () => {
+  const { chart, tooltip, bind, state, context } = homeTrendFixture();
+  chart.fire('pointermove', { clientX: 319, clientY: 175 });
+  assert.equal(tooltip.style.transform, 'translate(214px, 82px)');
+  context.window.innerHeight = 100;
+  chart.fire('pointermove', { clientX: 319, clientY: 175 });
+  assert.equal(tooltip.style.transform, 'translate(214px, 44px)');
+  bind([
+    { date: '2026-10-21', tokens: 100, cost: 1.25 },
+    { date: '2026-10-22', tokens: 0, cost: 0 },
+    { date: '2026-10-23', tokens: 55, cost: 2 }
+  ]);
+  assert.equal(tooltip.textContent, '55tokens2026-10-23USD $2.0000');
+  assert.equal(Object.values(chart.handlers).flat().length, 3);
+  context.hideHomeTrendTooltip();
+  assert.equal(tooltip.dataset.visible, 'false');
+  assert.equal(chart.getAttribute('data-active'), null);
+  assert.equal(state.homeTrendTooltipBinding.chart, chart);
 });
