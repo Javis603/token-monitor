@@ -210,6 +210,12 @@ function limitsAccountConfig(settings = {}, context = {}) {
       ? field.configNormalize(value)
       : (value || field.configDefault || '');
   }
+  // The credential-store marker is authoritative even if stale source fields
+  // survived a previous cleanup. Legacy credentials never reach the renderer.
+  if (!context.openrouterSlotsMigrated && Object.keys(settings.openrouterProfiles || {}).length) {
+    out.openrouterProfiles = settings.openrouterProfiles;
+  }
+  if (context.openrouterSlotsMigrated) out.openrouterApiKey = '';
   return out;
 }
 

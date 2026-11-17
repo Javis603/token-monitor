@@ -191,16 +191,21 @@ function configuredAccounts(options = {}, deps = {}) {
   for (const [name, profile] of Object.entries(options.openrouterProfiles || {})) {
     const profileName = openrouterProfileName(name);
     const apiKey = cleanSecret(profile?.apiKey);
-    if (profile?.enabled !== false && profileName && apiKey && !seenKeys.has(apiKey)) {
+    if (profile?.enabled !== false && profileName && apiKey && !seenKeys.has(hashKey('openrouter', apiKey))) {
       accounts.push({ name: profileName, apiKey });
-      seenKeys.add(apiKey);
+      seenKeys.add(hashKey('openrouter', apiKey));
     }
   }
+  const fixedKey = openrouterToken({}, options.openrouterApiKey);
+  if (fixedKey && !seenKeys.has(hashKey('openrouter', fixedKey))) {
+    accounts.push({ name: '', apiKey: fixedKey });
+    seenKeys.add(hashKey('openrouter', fixedKey));
+  }
   const envKey = openrouterToken(deps.env || process.env);
-  if (envKey && !seenKeys.has(envKey)) {
+  if (envKey && !seenKeys.has(hashKey('openrouter', envKey))) {
     accounts.push({ name: OPENROUTER_ENV_ACCOUNT_NAME, apiKey: envKey });
   }
-  return accounts.filter((account) => account.name);
+  return accounts;
 }
 
 async function fetchOpenRouterProfiles(options = {}, deps = {}) {
@@ -210,7 +215,9 @@ async function fetchOpenRouterProfiles(options = {}, deps = {}) {
     : null;
   if (scope) {
     const name = String(scope.accountName || scope.accountLabel || '').trim();
-    accounts = name ? accounts.filter((account) => account.name === name) : [];
+    accounts = scope.accountKey
+      ? accounts.filter(account => hashKey('openrouter', account.apiKey) === scope.accountKey)
+      : accounts.filter(account => name && account.name === name);
   }
   if (accounts.length === 0) {
     return normalizeLimitProvider({

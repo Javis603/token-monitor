@@ -313,7 +313,6 @@ async function probeOpenCodeApiKey(apiKey) {
     return { status: 'unavailable', windows: [] };
   }
 }
-const { createOpenRouterProfileCommands } = require('./limits/openrouterProfileCommands');
 const thirdPartyLimits = require('../shared/providers/thirdparty/limits');
 const subscriptionDisplay = require('../shared/subscriptionDisplay');
 const { CURRENCY_CODES, normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
@@ -605,6 +604,7 @@ let initialLimitProvidersPending = false;
 let seededClientSplitsPending = false;
 let persistedSettingsSnapshot = null;
 let credentialStore = null;
+let openrouterSlotsMigrated = false;
 let credentialStorageErrorShown = false;
 let antigravityOAuthLoginController = null;
 const sessionUsageArchiveStore = createSessionUsageArchiveStore({ cursorUsageEvents: createCursorUsageEventIndex() });
@@ -961,6 +961,7 @@ function electronLimitsConfig() {
   const workbuddyDesktopSessionEnabled = workbuddyEnabled && workbuddyDesktopSessionSupported;
   return limitsConfigFromSettings(settings, {
     env: process.env,
+    openrouterSlotsMigrated,
     workbuddyDesktopSessionOnly: true,
     workbuddyDesktopSessionSupported,
     workbuddyDesktopSessionEnabled,
@@ -2688,6 +2689,7 @@ function loadCredentialSettings(saved) {
       reportCredentialStorageError('could not move saved accounts into the account list', error);
       stored = store.settingsCredentials();
     }
+    openrouterSlotsMigrated = Number(store.readDocument().migrations.accountSlots?.openrouter || 0) >= 1;
     for (const entry of LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots)) {
       for (const field of entry.fields.filter(field => field.kind === 'credential')) saved[field.key] = '';
       delete saved[`${entry.id}DefaultAccountIdentity`];
@@ -9781,10 +9783,6 @@ app.whenReady().then(() => {
       try { return await minimaxApiKeys[method](...args); }
       catch (error) { return { ok: false, error: error?.message || 'Could not save MiniMax API key' }; }
     });
-  }
-  const openrouterProfiles = createOpenRouterProfileCommands(accountSlotService);
-  for (const method of ['getProfiles', 'saveProfile', 'deleteProfile', 'renameProfile', 'setProfileEnabled']) {
-    ipcMain.handle(`openrouter:${method}`, (_event, ...args) => openrouterProfiles[method](...args));
   }
   ipcMain.handle('thirdparty:getProfiles', async () => {
     return {

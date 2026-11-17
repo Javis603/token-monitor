@@ -2939,7 +2939,7 @@ test('a zero-config OpenCode machine is not reported as unconfigured', () => {
   // a scoped refresh to address.
   const ambientToggle = main.slice(
     main.indexOf("ipcMain.handle('opencode:setAmbientEnabled'"),
-    main.indexOf("const openrouterProfiles = createOpenRouterProfileCommands")
+    main.indexOf("ipcMain.handle('thirdparty:getProfiles'")
   );
   assert.ok(ambientToggle, 'setAmbientEnabled handler should exist');
   assert.match(ambientToggle, /queueLimitInvalidation\(\{ provider: 'opencode' \}, 'ambient-toggle', \{ clear: true \}\)/);
@@ -2990,7 +2990,7 @@ test('OpenCode credentials are named, merged and removed one at a time', () => {
   // reaches around it.
   const handlers = main.slice(
     main.indexOf("ipcMain.handle('opencode:saveProfile'"),
-    main.indexOf("const openrouterProfiles = createOpenRouterProfileCommands")
+    main.indexOf("ipcMain.handle('thirdparty:getProfiles'")
   );
   for (const call of [
     /opencodeProfiles\.saveCredential\(\s*settings\.opencodeProfiles \|\| \{\},\s*name,\s*credential,\s*\{ merge: options\.merge === true \}/,

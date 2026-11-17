@@ -80,6 +80,19 @@ function migrateAccountSlots(store, settings, now = Date.now, env = process.env)
   }
   return store.settingsCredentials();
 }
+// The shared label alphabet excludes the ellipsis glyph; use three periods.
+// Normalize before counting, and never split a grapheme to fit the 32-codepoint cap.
+function migratedOpenRouterLabel(name) {
+  const label = name.normalize('NFC');
+  if ([...label].length <= 32) return label;
+  let prefix = '';
+  for (const { segment } of new Intl.Segmenter('und', { granularity: 'grapheme' }).segment(label)) {
+    if ([...prefix, ...segment].length > 29) break;
+    prefix += segment;
+  }
+  return prefix.trimEnd() + '...';
+}
+
 // Names are presentation, never identity. Stable import IDs allow retry after
 // the destination write while retaining duplicate and paused profile records.
 function migrateOpenRouterSlots(store, stored, document, mark, now) {
@@ -93,7 +106,7 @@ function migrateOpenRouterSlots(store, stored, document, mark, now) {
     const apiKey = entry.limits.openrouterToken({}, profile?.apiKey);
     if (!apiKey) return [];
     const timestamp = new Date(now()).toISOString();
-    return [{ id: hashKey('openrouter', 'legacy-profile', name).slice(7), label: name, enabled: profile.enabled !== false,
+    return [{ id: hashKey('openrouter', 'legacy-profile', name).slice(7), label: migratedOpenRouterLabel(name), enabled: profile.enabled !== false,
       values: { openrouterApiKey: apiKey }, accountKey: hashKey('openrouter', apiKey), accountKeyAliases: [], serverIdentity: false,
       createdAt: timestamp, updatedAt: timestamp }];
   });
@@ -102,9 +115,10 @@ function migrateOpenRouterSlots(store, stored, document, mark, now) {
   const slots = normalizeAccountSlots(entry, raw);
   if (raw.length !== slots.length) throw new Error('Invalid account slot list');
   const additions = imports.filter(item => !slots.some(slot => slot.id === item.id));
-  if (slots.length + additions.length > 21) throw new Error('Account slot limit prevents migration');
-  const next = [...additions, ...slots];
-  for (const item of imports) {
+  const accepted = additions.slice(0, 21 - slots.length);
+  const next = [...slots, ...accepted];
+  const imported = imports.filter(item => next.some(slot => slot.id === item.id));
+  for (const item of imported) {
     const slot = next.find(slot => slot.id === item.id);
     if (slot.label !== item.label || slot.enabled !== item.enabled || slot.accountKey !== item.accountKey || !isDeepStrictEqual(slot.values, item.values)) throw new Error('OpenRouter import conflicts with existing slot');
   }
@@ -115,9 +129,13 @@ function migrateOpenRouterSlots(store, stored, document, mark, now) {
     if (!isDeepStrictEqual(verified[key], next)) throw new Error('Account slot migration verification failed');
     stored = verified;
   }
-  stored.openrouterProfiles = {};
-  stored.openrouterApiKey = '';
+  const importedIds = new Set(imported.map(item => item.id));
+  stored.openrouterProfiles = Object.fromEntries(profiles.filter(([name, profile]) =>
+    entry.limits.openrouterToken({}, profile?.apiKey) && !importedIds.has(hashKey('openrouter', 'legacy-profile', name).slice(7))));
+  if (!entry.limits.openrouterToken({}, stored.openrouterApiKey) || importedIds.has(hashKey('openrouter', 'legacy-profile', '').slice(7))) stored.openrouterApiKey = '';
+  const pending = Object.keys(stored.openrouterProfiles).length > 0 || Boolean(stored.openrouterApiKey);
+  if (pending) console.warn('[OpenRouter] Account list is full. Remaining legacy profiles continue collecting; remove saved accounts and restart to import them.');
   stored[defaultIdentityKey(entry)] = null;
-  store.replaceSettingsCredentials(stored, mark(document));
+  store.replaceSettingsCredentials(stored, pending ? document : mark(document));
 }
 module.exports = { migrateAccountSlots };

@@ -99,7 +99,15 @@ function slotAccounts(entry, options, deps) {
     // runtime resolved (headless collectors have no persistence callback) wins.
     ...account, ...describe(account)
   }));
-  const all = [...ambient, ...(hasAccountCredential(entry, values) ? [describe({ id: 'environment', label: '', values: null, accountKey: '', accountKeyAliases: [] })] : []), ...enabled];
+  // During OpenRouter's bounded import, overflow stays in the legacy source
+  // until space is freed. Dispatch it through the same isolated/scoped lane as
+  // slots; an enabled slot already collects matching credentials. A paused
+  // slot must not suppress a different enabled legacy profile with the same key.
+  const legacy = entry.id === 'openrouter' ? entry.limits?.configuredAccounts(options, { env: {} }) || [] : [];
+  const legacyAccounts = legacy.filter((/** @type {any} */ account) => !slots.some(slot => slot.enabled && slot.accountKey === hashKey(entry.id, account.apiKey)))
+    .map((/** @type {any} */ account) => describe({ id: `legacy-${hashKey(entry.id, account.apiKey)}`, label: account.name,
+      values: { openrouterApiKey: account.apiKey }, accountKey: hashKey(entry.id, account.apiKey), accountKeyAliases: [] }));
+  const all = [...ambient, ...(hasAccountCredential(entry, values) ? [describe({ id: 'environment', label: '', values: null, accountKey: '', accountKeyAliases: [] })] : []), ...enabled, ...legacyAccounts];
   // A key one account moved away from may be another account's key now; it is
   // that account's identity, not an alias of this one.
   const current = new Set(all.map((account) => account.accountKey));
