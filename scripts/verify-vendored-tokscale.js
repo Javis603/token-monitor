@@ -165,6 +165,30 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
     }
   },
   {
+    client: 'kimi',
+    expectedRow: { model: 'kimi-for-coding', input: 200, output: 120, cacheRead: 40, cacheWrite: 0, reasoning: 0 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 360, clientTokens: 360, clientOutputTokens: 120 },
+    expectedSession: { id: 'kimi-contract', totalTokens: 360, outputTokens: 120, reasoningTokens: 0 },
+    expectedPerformance: { totalDurationMs: 4500, sampleCount: 2, timedTokens: 360, tokenCoverage: 1 },
+    writeFixture(home) {
+      const dir = path.join(home, '.kimi-code', 'sessions', 'workspace', 'kimi-contract', 'agents', 'main');
+      fs.mkdirSync(dir, { recursive: true });
+      const usage = { inputOther: 100, output: 60, inputCacheRead: 20, inputCacheCreation: 0 };
+      const records = [
+        { type: 'llm.request', model: 'kimi-code/kimi-for-coding', time: 1800000000000 },
+        { type: 'usage.record', model: 'kimi-code/kimi-for-coding', usageScope: 'turn', time: 1800000003000, usage },
+        { type: 'context.append_loop_event', agentId: 'main', time: 1800000010000,
+          event: { type: 'step.begin', uuid: 'synthetic-step' } },
+        { type: 'usage.record', agentId: 'main', model: 'kimi-code/kimi-for-coding', usageScope: 'turn', time: 1800000011500, usage },
+        { type: 'context.append_loop_event', agentId: 'main', time: 1800000016000,
+          event: { type: 'step.end', uuid: 'synthetic-step', messageId: 'synthetic-message', usage,
+            llmFirstTokenLatencyMs: 500, llmStreamDurationMs: 1000 } }
+      ];
+      fs.writeFileSync(path.join(dir, 'wire.jsonl'), records.map((record) => JSON.stringify(record)).join('\n') + '\n');
+    }
+  },
+  {
     client: 'hermes',
     // Hermes stores reasoning inside output; Tokscale splits it before JSON.
     expectedRow: { model: 'claude-sonnet-4-5', input: 1000, output: 250, cacheRead: 200, cacheWrite: 50, reasoning: 150, cost: 1.25 },
@@ -693,6 +717,14 @@ function assertTokenContract(parsed, contract) {
     );
   }
   const usage = extractUsageFromTokscale(parsed);
+  if (contract.expectedPerformance) {
+    const mismatches = Object.entries(contract.expectedPerformance)
+      .filter(([key, value]) => entry.performance?.[key] !== value);
+    if (mismatches.length || usage.timedOutputTokens !== contract.expectedPeriod.clientOutputTokens ||
+        usage.timedDurationMs !== contract.expectedPerformance.totalDurationMs) {
+      throw new Error(`${contract.client} timing contract mismatch: ${JSON.stringify(entry.performance)}`);
+    }
+  }
   const expected = contract.expectedPeriod;
   const sessionId = contract.expectedSession?.id;
   const sessionKey = sessionId instanceof RegExp

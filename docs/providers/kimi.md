@@ -39,8 +39,16 @@ is the one applied: clients that carry their own path (kimi, droid, opencode) st
 design, while the transcript-reading resolvers skip their expensive read for a session the scan
 already attributed.
 
-Only `usage.record` lines count, and only with `usageScope: "turn"`. `step.end` repeats the same
-usage in the same turn (skipped to avoid double counting), and `"session"`-scoped records are the
+Only `usage.record` lines count tokens, and only with `usageScope: "turn"`. The Kimi timing fix
+preserves the `llm.request` → `usage.record` interval for old logs. New logs without a request
+record use the matching `step.end`'s `llmFirstTokenLatencyMs + llmStreamDurationMs`: whole-response
+time, including first-token wait, rather than decode-only time. All four usage buckets must match
+within the same agent and step; the step supplies timing and never another token row. Timed rows
+are anchored at the step/request start (or back-calculated from the usage response time), excluding
+later tool execution. This fallback requires a vendor build carrying the Kimi timing fix; changing
+this document or the app's speed settings cannot add timing to an older parser.
+
+`"session"`-scoped records are the
 runtime's own bookkeeping — compaction calls today. Whether those should be counted is an open
 question tracked outside this provider: tokscale excludes them, so the widget's totals are ~1% below
 the vendor's own accounting on a compaction-heavy history.
