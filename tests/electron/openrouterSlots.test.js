@@ -12,7 +12,7 @@ const { LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
 const key = n => hashKey('openrouter', `secret-${n}`);
 function fixture(t, settings, cleanup = () => {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'openrouter-slots-'));
-  t.after(() => { cleanup(); fs.rmSync(dir, { recursive: true, force: true }); });
+  t.after(async () => { await cleanup(); fs.rmSync(dir, { recursive: true, force: true }); });
   const store = new CredentialStore(dir);
   store.replaceSettingsCredentials(settings);
   return store;
