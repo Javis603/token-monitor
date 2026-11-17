@@ -31,6 +31,13 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
   let unsupported = false;
   /** @type {any[]} */
   let pending = [];
+  // Edits published while an earlier pass is in flight. They are kept apart
+  // from `pending` until their own pass, but any snapshot applied meanwhile
+  // replays them, so a refresh can never put an older name back.
+  /** @type {any[]} */
+  let queued = [];
+  /** @param {any} value */
+  const withQueued = value => queued.length ? replayPresentation(value, queued) : value;
   const connected = () => ['client', 'host'].includes(getContext()?.mode) && getContext()?.url;
   /** @param {any[]} operations */
   async function reconcile(operations) {
@@ -39,8 +46,8 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
     const captured = identity(context);
     if (!captured) return;
     if (binding !== captured) { binding = captured; revision = -1; unsupported = false; pending = []; }
-    if (unsupported) return;
-    pending.push(...operations);
+    if (unsupported) { queued = []; return; }
+    pending.push(...queued.splice(0), ...operations);
     const current = () => connected() && identity(getContext()) === captured;
     try {
       let response = await request(context, `/api/sync/settings/${KIND}`, 'GET');
@@ -70,7 +77,7 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
           !Object.hasOwn(base[operation.provider]?.labels || {}, operation.key));
         const value = replayPresentation(base, [...missingLocalLabels, ...pending]);
         if (!pending.length && (document.value !== null ? JSON.stringify(value) === JSON.stringify(document.value) : !Object.keys(seed).length)) {
-          await apply(value, captured);
+          await apply(withQueued(value), captured);
           revision = document.revision;
           return;
         }
@@ -86,7 +93,7 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
         }
         if (response.status !== 200) return;
         pending = [];
-        await apply(normalizeSharedSyncValue(KIND, response.body.value), captured);
+        await apply(withQueued(normalizeSharedSyncValue(KIND, response.body.value)), captured);
         revision = response.body.revision;
         return;
       }
@@ -95,9 +102,10 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
   /** @param {any[]} operations */
   function publish(operations) {
     const captured = identity(getContext());
+    queued.push(...operations);
     const task = lane.then(() => {
       if (identity(getContext()) !== captured) return;
-      return reconcile(operations);
+      return reconcile([]);
     });
     lane = task.catch(() => {});
     return task;
@@ -112,7 +120,7 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
   return { publish, refresh, notifyStats(/** @type {any} */ stats) {
     // Pending edits retry on the next frame even when the Hub's revision has
     // not moved, so a transient failure cannot strand them.
-    if (connected() && (pending.length || binding !== identity(getContext()) || stats?.syncSettingsRevisions?.[KIND] !== revision)) {
+    if (connected() && (pending.length || queued.length || binding !== identity(getContext()) || stats?.syncSettingsRevisions?.[KIND] !== revision)) {
       if (refreshPending) refreshAgain = true;
       else void refresh();
     }

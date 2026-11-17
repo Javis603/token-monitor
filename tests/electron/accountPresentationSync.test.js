@@ -165,3 +165,28 @@ test('a rename becomes the newest label, and providers sort by code point', () =
   assert.equal(Object.hasOwn(next.deepseek.labels, 'k1'), false, 'the oldest untouched label is trimmed');
   assert.deepEqual(Object.keys(normalizeSharedSyncValue('limitAccountPresentation', { qoder: { labels: {}, order: [] }, deepseek: { labels: {}, order: [] } })), ['deepseek', 'qoder']);
 });
+
+test('a rename published while a refresh awaits the Hub survives that refresh', async () => {
+  let releaseGet;
+  let document = { revision: 4, value: { deepseek: { labels: { a: 'Old' }, order: [] } } };
+  const applied = [];
+  const runtime = createAccountPresentationSync({
+    getContext: () => ({ mode: 'client', url: 'https://hub' }), identity: () => 'hub',
+    getCacheIdentity: () => 'hub', getSeed: () => ({}), getLocalLabels: () => [],
+    apply: value => { applied.push(value.deepseek?.labels?.a); },
+    request: async (_context, _path, method) => {
+      if (method === 'GET') {
+        if (!releaseGet) await new Promise(resolve => { releaseGet = resolve; });
+        return { status: 200, body: structuredClone(document) };
+      }
+      return { status: 503 };
+    }
+  });
+  const refresh = runtime.refresh();
+  await new Promise(resolve => setImmediate(resolve));
+  const publish = runtime.publish([{ provider: 'deepseek', type: 'rename', key: 'a', label: 'New' }]);
+  releaseGet();
+  await refresh; await publish;
+  assert.equal(applied[0], 'New', 'the in-flight refresh replays the queued rename');
+  assert.ok(!applied.includes('Old'));
+});

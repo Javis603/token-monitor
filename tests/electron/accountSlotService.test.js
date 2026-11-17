@@ -469,3 +469,21 @@ test('full shared order persists the local subsequence for a restart without pre
   await h.service.adoptSharedLabels(h.settings.limitAccountPresentation);
   assert.deepEqual(h.settings.deepseekAccountSlots.map(slot => slot.id), [a.id, b.id]);
 });
+
+test('replacing a credential carries its shared name and position to the new key', async () => {
+  const h = harness();
+  await add(h);
+  const second = await h.service.add('deepseek', { deepseekApiKey: 'SECRET-two' }, 'Second');
+  const [first, other] = second.accounts;
+  await h.service.move('deepseek', other.id, 'up');
+  await h.service.rename('deepseek', first.id, 'Work');
+  await h.service.replace('deepseek', first.id, { deepseekApiKey: 'SECRET-rotated' });
+  const replaced = h.service.list('deepseek').accounts.find(account => account.id === first.id);
+  const group = h.settings.limitAccountPresentation.deepseek;
+  if (replaced.accountKey !== first.accountKey) {
+    assert.equal(group.labels[replaced.accountKey], 'Work');
+    assert.ok(group.order.indexOf(replaced.accountKey) > group.order.indexOf(other.accountKey));
+  }
+  assert.deepEqual(h.service.list('deepseek').accounts.map(account => account.id), [other.id, first.id]);
+  assert.notEqual(replaced.accountKey, first.accountKey, 'the fixture exercises a key change');
+});

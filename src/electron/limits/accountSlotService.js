@@ -71,6 +71,22 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       limitProviders: providerSelectionIncluding(getSettings().limitProviders, entry.id), limitsEnabled: true } : {}) });
     if (notify) changed(entry, retiredAccountKeys, refresh);
   }
+  // An account whose key changes (resolution or a replaced credential) keeps
+  // its shared name and position under the new key.
+  async function migratePresentationKey(providerId, previousKey, nextKey, fallbackLabel = '') {
+    if (!nextKey || nextKey === previousKey) return;
+    const group = getSettings().limitAccountPresentation?.[providerId] || {};
+    const labels = group.labels || {};
+    const order = group.order || [];
+    const label = Object.hasOwn(labels, previousKey) ? labels[previousKey] : fallbackLabel;
+    const operations = [];
+    if ((label || Object.hasOwn(labels, previousKey)) && !Object.hasOwn(labels, nextKey)) operations.push({ provider: providerId, type: 'rename', key: nextKey, label });
+    if (order.includes(previousKey) && !order.includes(nextKey)) operations.push({ provider: providerId, type: 'order', order: order.map(key => key === previousKey ? nextKey : key) });
+    if (!operations.length) return;
+    const { replayPresentation } = require('./accountPresentationSync');
+    await write({ limitAccountPresentation: replayPresentation(getSettings().limitAccountPresentation, operations) });
+    publishPresentation(operations);
+  }
   function list(providerId) {
     const entry = entryFor(providerId);
     return entry ? { ok: true, accounts: dto(entry) } : failure('unsupportedProvider');
@@ -114,7 +130,9 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
             // The proof outlives an unproven answer (Qoder without a user id).
             serverIdentity: provenNow || oldProven,
             createdAt: old?.createdAt || timestamp, updatedAt: timestamp };
+          const previousKey = old ? dto(entry).find(slot => slot.id === old.id)?.accountKey : '';
           await commit(entry, old ? previous.map(slot => slot.id === id ? record : slot) : [...previous, record], true, true, true);
+          if (old) await migratePresentationKey(providerId, previousKey, dto(entry).find(slot => slot.id === record.id)?.accountKey, old.label);
           if (!old && record.label) {
             const account = dto(entry).find(slot => slot.id === record.id);
             const operations = [{ provider: providerId, type: 'rename', key: account.accountKey, label: account.label }];
@@ -208,24 +226,10 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       const proven = Boolean(provesServer && provesServer(identity.accountKey, slot.values, identity.accountKeyAliases || []));
       slot.serverIdentity = proven || slot.serverIdentity;
       const previousKey = slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`);
-      const labels = getSettings().limitAccountPresentation?.[providerId]?.labels || {};
-      const label = Object.hasOwn(labels, previousKey) ? labels[previousKey] : slot.label;
+      const label = slot.label;
       Object.assign(slot, identity);
       await commit(entry, next, false);
-      const order = getSettings().limitAccountPresentation?.[providerId]?.order || [];
-      const operations = [];
-      if (slot.accountKey && slot.accountKey !== previousKey && (label || Object.hasOwn(labels, previousKey)) && !Object.hasOwn(labels, slot.accountKey)) {
-        operations.push({ provider: providerId, type: 'rename', key: slot.accountKey, label });
-      }
-      // The resolved key takes over the provisional key's saved position.
-      if (slot.accountKey && slot.accountKey !== previousKey && order.includes(previousKey) && !order.includes(slot.accountKey)) {
-        operations.push({ provider: providerId, type: 'order', order: order.map(key => key === previousKey ? slot.accountKey : key) });
-      }
-      if (operations.length) {
-        const { replayPresentation } = require('./accountPresentationSync');
-        await write({ limitAccountPresentation: replayPresentation(getSettings().limitAccountPresentation, operations) });
-        publishPresentation(operations);
-      }
+      await migratePresentationKey(providerId, previousKey, slot.accountKey, label);
       return true;
     });
   }
