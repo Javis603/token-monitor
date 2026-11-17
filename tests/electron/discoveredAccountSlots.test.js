@@ -418,3 +418,33 @@ test('discovered edits publish, adopt shared controls, and carry presentation th
   assert.equal(service.list('factory').accounts[0].id, 'saved');
   assert.equal(service.list('factory').accounts.find(row => row.id === found.id).label, 'Shared');
 });
+
+for (const replacing of [false, true]) test(`factory: ${replacing ? 'replacing' : 'adding'} a named slot hidden by discovery publishes its name`, async t => {
+  const { hashKey } = require('../../src/shared/hashKey');
+  const key = hashKey('factory', 'fixture-user');
+  stubDiscovery(t, 'factory', () => [{ values: { factoryApiKey: 'droid-secret' }, accountKey: key, sourceName: 'Droid' }]);
+  let settings = replacing ? {
+    factoryAccountSlots: [{ id: 'saved', values: { factoryApiKey: 'old-secret' }, accountKey: 'old-key', label: 'Work' }],
+    limitAccountPresentation: { factory: { labels: { 'old-key': 'Work' }, order: [] } }
+  } : {};
+  const writes = [], published = [];
+  const service = createAccountSlotService({ getSettings: () => settings, env: {},
+    write: async patch => { writes.push(patch); settings = { ...settings, ...patch }; },
+    onPresentation: operations => published.push(...operations),
+    probeDeps: () => ({ fetch: async url => ({ ok: true, status: 200, json: async () => String(url).endsWith('/auth/me')
+      ? { userProfile: { id: 'fixture-user' } }
+      : { usesTokenRateLimitsBilling: true, limits: { standard: { fiveHour: { usedPercent: 10 } } } } }) }) });
+  const result = replacing
+    ? await service.replace('factory', 'saved', { factoryApiKey: 'droid-secret' })
+    : await service.add('factory', { factoryApiKey: 'droid-secret' }, '  Work  ');
+  assert.equal(result.saved, true, JSON.stringify(result));
+  assert.equal(settings.factoryAccountSlots.length, 1);
+  assert.equal(writes.filter(patch => patch.factoryAccountSlots).length, 1, 'commit the credential only once');
+  assert.equal(settings.factoryAccountSlots[0].label, 'Work');
+  assert.equal(result.accounts.length, 1);
+  assert.equal(result.accounts[0].source, 'discovered', 'keep the existing visible owner');
+  assert.equal(settings.limitAccountPresentation.factory.labels[key], 'Work');
+  assert.ok(published.some(op => op.type === 'rename' && op.key === key && op.label === 'Work'));
+  assert.equal(accountName(result.accounts[0], null, value => value, settings.limitAccountPresentation.factory), 'Work');
+  assert.doesNotMatch(JSON.stringify(published), /droid-secret|old-secret/);
+});

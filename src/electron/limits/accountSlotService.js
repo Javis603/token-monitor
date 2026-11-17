@@ -166,16 +166,19 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
           // The proof outlives an unproven answer (Qoder without a user id).
           serverIdentity: provenNow || oldProven,
           createdAt: old?.createdAt || timestamp, updatedAt: timestamp };
-        const previousKey = old ? dto(entry).find(slot => slot.id === old.id)?.accountKey : '';
+        const previousKey = old ? old.accountKey || hashKey(entry.id, 'account-slot', `slot:${old.id}`) : '';
         await commit(entry, old ? previous.map(slot => slot.id === old.id ? record : slot) : [...previous, record], true, true, true);
-        if (old) await migratePresentationKey(providerId, previousKey, dto(entry).find(slot => slot.id === record.id)?.accountKey, old.label);
-          if (!old && record.label) {
-            const account = dto(entry).find(slot => slot.id === record.id);
-            const operations = [{ provider: providerId, type: 'rename', key: account.accountKey, label: account.label }];
-            const { replayPresentation } = require('./accountPresentationSync');
-            await write({ limitAccountPresentation: replayPresentation(getSettings().limitAccountPresentation, operations) });
-            publishPresentation(operations);
-          }
+        // Discovery may hide this slot from the visible list. Presentation still
+        // belongs to its committed identity and normalized label.
+        const account = slots(entry).find(slot => slot.id === record.id);
+        const accountKey = account.accountKey || hashKey(entry.id, 'account-slot', `slot:${account.id}`);
+        if (old) await migratePresentationKey(providerId, previousKey, accountKey, old.label);
+        if (!old && account.label) {
+          const operations = [{ provider: providerId, type: 'rename', key: accountKey, label: account.label }];
+          const { replayPresentation } = require('./accountPresentationSync');
+          await write({ limitAccountPresentation: replayPresentation(getSettings().limitAccountPresentation, operations) });
+          publishPresentation(operations);
+        }
       };
       const commands = createCredentialCommands({ getSettings, env: {},
         probeDeps: () => ({ ...probeDeps(), probe: true, providerRuntimeState: new Map(), env: {} }),
