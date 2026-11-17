@@ -85,6 +85,7 @@
     if (provider === 'codex' && source === 'rpc' && CODEX_RPC_DETAIL_LABELS[sourceDetail]) {
       return CODEX_RPC_DETAIL_LABELS[sourceDetail];
     }
+    if (provider === 'trae' && source === 'api') return 'Web';
     return SOURCE_LABELS[source] || '';
   }
 

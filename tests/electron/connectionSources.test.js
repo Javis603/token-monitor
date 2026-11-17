@@ -144,3 +144,10 @@ test('all seven locales explain ordered fallback when the current source is unkn
   const title = nodes.find(node => node.className === 'settings-item-title');
   assert.equal(title.children[0].textContent, expected[0]);
 });
+
+test('Alibaba displays main CLI-first Cookie fallback without changing its dispatch', () => {
+  const entry = require('../../src/shared/limits/registry').limitProviderEntry('alibaba');
+  assert.deepEqual(entry.sources.map(({ id, relation }) => [id, relation]), [['cli', 'alternative'], ['web', 'alternative']]);
+  assert.equal(entry.fetch, 'fetchAlibabaLimits');
+  assert.equal(entry.accountSlots, undefined);
+});
