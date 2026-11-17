@@ -158,11 +158,11 @@ test('Muse Cookie save and clear retire only local Web rows when the following s
   const vm = require('node:vm');
   const source = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
   const bodies = [
-    ['async function saveAccountCredential(', '\n// The busy guard'],
+    ['async function saveAccountCredential(', '\nasync function refreshLimitAccount('],
     ['async function clearAccountCredential(', '\nasync function commitAccountCredential('],
     ['function markExternalProviderCheckPending(', '\nfunction clearExternalProviderCheckPending('],
     ['function clearExternalProviderCheckPending(', '\nfunction clearExternalProviderPendingStatus('],
-    ['function clearExternalProviderPendingStatus(', '\nfunction nextCodexSignInFlowId(']
+    ['function clearExternalProviderPendingStatus(', '\nfunction apiKeyAccountStatusText(']
   ].map(([start, end]) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)))).join('\n');
   for (const action of ['save', 'clear']) {
     const cli = { provider: 'muse', source: 'cli', sourceDeviceId: 'local', status: 'ok', windows: [{ kind: 'weekly', usedPercent: 35 }] };

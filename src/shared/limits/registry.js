@@ -71,7 +71,7 @@ function bindField(field, limits) {
 }
 
 function bindDeclaration(decl) {
-  if (decl.accountSlots && (!decl.form || decl.fields.some((field) =>
+  if (decl.accountSlots && !decl.accountSlotOwner && (!decl.form || decl.fields.some((field) =>
     field.kind === 'managed' || (field.kind === 'profiles' && field.key !== accountSlotKey(decl))))) {
     throw new Error(`limits registry: invalid accountSlots declaration for ${decl.id}`);
   }
@@ -115,7 +115,7 @@ const LIMIT_PROVIDER_REGISTRY = Object.freeze(LIMIT_PROVIDER_ACCOUNTS.map(bindDe
 const LIMIT_PROVIDER_FETCHERS = Object.freeze(Object.fromEntries(
   LIMIT_PROVIDER_REGISTRY.map((entry) => [
     entry.id,
-    entry.accountSlots ? createAccountSlotFetcher(entry) : (providerOptions, probeDeps) => entry.fetchLimits(providerOptions, probeDeps)
+    entry.accountSlots && !entry.accountSlotOwner ? createAccountSlotFetcher(entry) : (providerOptions, probeDeps) => entry.fetchLimits(providerOptions, probeDeps)
   ])
 ));
 

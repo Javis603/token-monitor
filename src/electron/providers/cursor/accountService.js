@@ -3,6 +3,7 @@
 const cursorAuth = require('../../../shared/providers/cursor/auth');
 const { normalizeCursorDisabledAccountIds, normalizeCursorAccountIds } = require('../../runtimeConfig');
 const cursorProbe = require('../../../shared/providers/cursor/probe');
+const { hashKey } = require('../../../shared/hashKey');
 const { isCursorDetectedAccountCurrent } = require('../../../shared/providers/cursor/account');
 
 /**
@@ -35,8 +36,18 @@ function createCursorAccountService(deps) {
         userId: auth.canonicalCursorUserId(account.userId || account.id),
         unauthorized: expired
       })) return null;
+      // Match limits.js hashCursorAccountKey, including its local-only fallback.
+      // Email and labels are presentation metadata, never identity evidence.
+      const accountId = String(account.id || '').trim();
+      const canonicalUserId = [probeResult.ok ? probeResult.user?.sub : '', account.userId, accountId]
+        .map(cursorAuth.canonicalCursorUserId)
+        .find(Boolean) || '';
+      const accountKey = canonicalUserId
+        ? hashKey('cursor', canonicalUserId)
+        : hashKey('cursor-local', accountId || 'unknown');
       return {
         id: account.id,
+        accountKey,
         enabled: !disabled.has(account.id),
         removable: manual.has(account.id),
         email: probeResult.ok ? probeResult.user?.email || '' : '',

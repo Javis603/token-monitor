@@ -1047,46 +1047,6 @@
                 <div id="antigravityAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
-            <div id="kimiAccountGroup" class="settings-group cursor-account-group">
-              <button id="kimiSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="kimiSettingsDetails">
-                <span data-i18n="settings.kimi.title">Kimi Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="kimiAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="kimiSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="kimiOpenBrowser" data-i18n="settings.kimi.openBrowser">Open Kimi Code Console</button>
-                  <button id="kimiLogoutButton" class="hidden" data-i18n="settings.kimi.clearApiKey">Clear key</button>
-                  <button id="kimiRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="kimiManualPanel">
-                  <p class="settings-note" data-i18n="settings.kimi.apiKeyNote">Paste your Kimi Code API key. It stays on this device and is used only for the Kimi Code quota API.</p>
-                  <input id="kimiApiKeyInput" type="password" spellcheck="false" aria-label="Kimi Code API key" data-i18n-aria-label="settings.kimi.apiKeyLabel" placeholder="sk-..." data-i18n-placeholder="settings.kimi.apiKeyPlaceholder" />
-                  <div class="settings-actions">
-                    <button id="kimiApiKeySubmit" data-i18n="settings.kimi.saveApiKey">Save API key</button>
-                  </div>
-                  <details class="kimi-web-fallback">
-                    <summary data-i18n="settings.kimi.webFallback">Optional: Kimi Web fallback</summary>
-                    <div class="kimi-web-fallback-body">
-                      <p class="settings-note" data-i18n="settings.kimi.webTokenNote">Use a Kimi Web access token only to fill quota windows missing from the Code API. The token stays on this device and expires quickly.</p>
-                      <p class="settings-note kimi-web-steps">
-                        <strong>1.</strong> <span data-i18n="settings.kimi.step1">Open Kimi Code Console in your browser (button above) and sign in.</span><br>
-                        <strong>2.</strong> <span data-i18n="settings.kimi.step2">Open DevTools (F12) -&gt; Application/Storage -&gt; Local Storage -&gt; https://www.kimi.com.</span><br>
-                        <strong>3.</strong> <span data-i18n="settings.kimi.step3">Find access_token and copy its Value.</span><br>
-                        <strong>4.</strong> <span data-i18n="settings.kimi.step4">Paste the value below and click Save Web token.</span>
-                      </p>
-                      <textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off" spellcheck="false" aria-label="Kimi Web access token" data-i18n-aria-label="settings.kimi.webTokenLabel" placeholder="access_token=..." data-i18n-placeholder="settings.kimi.webTokenPlaceholder"></textarea>
-                      <div class="settings-actions">
-                        <button id="kimiWebAccessTokenSubmit" data-i18n="settings.kimi.saveWebToken">Save Web token</button>
-                      </div>
-                    </div>
-                  </details>
-                </div>
-                <div id="kimiErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
             <div id="mimoAccountGroup" class="settings-group cursor-account-group">
               <button id="mimoSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="mimoSettingsDetails">
                 <span data-i18n="settings.mimo.title">Xiaomi MiMo Account</span>
@@ -1184,70 +1144,6 @@
                   </div>
                 </div>
                 <div id="minimaxErrorMessage" class="settings-note error hidden" role="alert"></div>
-              </div>
-            </div>
-            <div id="volcengineAccountGroup" class="settings-group cursor-account-group">
-              <button id="volcengineSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="volcengineSettingsDetails">
-                <span data-i18n="settings.volcengine.title">Volcengine Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="volcengineAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="volcengineSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="volcengineOpenBrowser" data-i18n="settings.volcengine.openBrowser">Open Volcengine Ark console</button>
-                  <button id="volcengineLogoutButton" class="hidden" data-i18n="settings.volcengine.clearCredentials">Clear credentials</button>
-                  <button id="volcengineRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="volcengineManualPanel">
-                  <p class="settings-note" data-i18n="settings.volcengine.note">Paste an Ark API key, or use a Volcengine access key ID with the secret field. An access key reads both the Coding Plan and the Agent Plan.</p>
-                  <div class="settings-row">
-                    <label for="volcengineAccessKeyInput" data-i18n="settings.volcengine.accessKeyId">Access key ID / API key</label>
-                    <input id="volcengineAccessKeyInput" type="password" spellcheck="false" placeholder="AKLT... or ark-..." data-i18n-placeholder="settings.volcengine.accessKeyPlaceholder" />
-                  </div>
-                  <div class="settings-row">
-                    <label for="volcengineSecretAccessKeyInput" data-i18n="settings.volcengine.secretAccessKey">Secret access key</label>
-                    <input id="volcengineSecretAccessKeyInput" type="password" spellcheck="false" placeholder="..." data-i18n-placeholder="settings.volcengine.secretKeyPlaceholder" />
-                  </div>
-                  <div class="settings-row">
-                    <label for="volcengineRegionInput" data-i18n="settings.volcengine.region">Region (optional)</label>
-                    <input id="volcengineRegionInput" type="text" spellcheck="false" placeholder="cn-beijing" data-i18n-placeholder="settings.volcengine.regionPlaceholder" />
-                  </div>
-                  <div id="volcengineAgentPanel" class="opencode-add-form">
-                    <button id="volcengineAgentToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="volcengineAgentDetails">
-                      <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
-                        <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                      </svg>
-                      <span data-i18n="settings.volcengine.agentToggle">Agent Plan is on a different account</span>
-                      <span id="volcengineAgentConfigured" class="tool-status-tag tool-status-tag-ok hidden" data-i18n="settings.volcengine.agentConfigured">Set</span>
-                    </button>
-                    <div id="volcengineAgentDetails" class="opencode-add-details accordion-animated-container hidden">
-                      <div class="accordion-animation-inner opencode-add-body">
-                        <p class="settings-note" data-i18n="settings.volcengine.agentNote">Leave empty to read the Agent Plan with the access key above. Fill these in only when the Agent Plan was bought on a different Volcengine account.</p>
-                        <div class="settings-row">
-                          <label for="volcengineAgentAccessKeyInput" data-i18n="settings.volcengine.agentAccessKeyId">Agent access key ID</label>
-                          <input id="volcengineAgentAccessKeyInput" type="password" spellcheck="false" placeholder="AKLT..." data-i18n-placeholder="settings.volcengine.agentAccessKeyPlaceholder" />
-                        </div>
-                        <div class="settings-row">
-                          <label for="volcengineAgentSecretAccessKeyInput" data-i18n="settings.volcengine.agentSecretAccessKey">Agent secret access key</label>
-                          <input id="volcengineAgentSecretAccessKeyInput" type="password" spellcheck="false" placeholder="..." data-i18n-placeholder="settings.volcengine.secretKeyPlaceholder" />
-                        </div>
-                        <div class="settings-row">
-                          <label for="volcengineAgentRegionInput" data-i18n="settings.volcengine.agentRegion">Agent region (optional)</label>
-                          <input id="volcengineAgentRegionInput" type="text" spellcheck="false" placeholder="cn-beijing" data-i18n-placeholder="settings.volcengine.regionPlaceholder" />
-                        </div>
-                        <div class="settings-actions">
-                          <button id="volcengineAgentClearButton" class="hidden" data-i18n="settings.volcengine.agentClear">Use the main account</button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="settings-actions">
-                    <button id="volcengineCredentialsSubmit" data-i18n="settings.volcengine.saveCredentials">Save credentials</button>
-                  </div>
-                </div>
-                <div id="volcengineErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
             <div id="thirdpartyAccountGroup" class="settings-group cursor-account-group">
@@ -1779,6 +1675,38 @@
     <script src="../limits/historyIdentity.js"></script>
     <script src="domReconcile.js"></script>
     <script src="pressActivation.js"></script>
+    <script src="providers/codex/windows.js"></script>
+    <script src="providers/cursor/windows.js"></script>
+    <script src="providers/antigravity/windows.js"></script>
+    <script src="providers/opencode/windows.js"></script>
+    <script src="providers/openrouter/windows.js"></script>
+    <script src="providers/thirdparty/windows.js"></script>
+    <script src="providers/deepseek/windows.js"></script>
+    <script src="providers/typesafe/windows.js"></script>
+    <script src="providers/mimo/windows.js"></script>
+    <script src="providers/grok/windows.js"></script>
+    <script src="providers/copilot/windows.js"></script>
+    <script src="providers/zed/windows.js"></script>
+    <script src="providers/zai/windows.js"></script>
+    <script src="providers/volcengine/windows.js"></script>
+    <script src="providers/devin/windows.js"></script>
+    <script src="providers/factory/windows.js"></script>
+    <script src="providers/kiro/windows.js"></script>
+    <script src="providers/qoder/windows.js"></script>
+    <script src="providers/workbuddy/windows.js"></script>
+    <script src="providers/commandcode/windows.js"></script>
+    <script src="providers/kimi/windows.js"></script>
+    <script src="providers/alibaba/windows.js"></script>
+    <script src="providers/ollama/windows.js"></script>
+    <script src="providers/claude/windows.js"></script>
+    <script src="providers/hark/windows.js"></script>
+    <script src="providers/manus/windows.js"></script>
+    <script src="providers/mistral/windows.js"></script>
+    <script src="providers/notion/windows.js"></script>
+    <script src="providers/cline/windows.js"></script>
+    <script src="providers/muse/windows.js"></script>
+    <script src="providers/minimax/windows.js"></script>
+    <script src="limits/windowOwners.js"></script>
     <script src="limits/windowsView.js"></script>
     <script src="trayBars.js"></script>
     <script src="usageCharts.js"></script>
@@ -1911,6 +1839,16 @@
     <script src="displaySettings.js"></script>
     <script src="displaySettingsPreview.js"></script>
     <script src="contentBlur.js"></script>
-    <script src="app.js"></script>
+    <script src="limits/legacyAccountList.js"></script>
+  <script src="limits/providerOwners/antigravity.js"></script>
+  <script src="limits/providerOwners/claude.js"></script>
+  <script src="limits/providerOwners/codex.js"></script>
+  <script src="limits/providerOwners/cursor.js"></script>
+  <script src="limits/providerOwners/mimo.js"></script>
+  <script src="limits/providerOwners/minimax.js"></script>
+  <script src="limits/providerOwners/opencode.js"></script>
+  <script src="limits/providerOwners/thirdparty.js"></script>
+  <script src="limits/providerOwners/workbuddy.js"></script>
+  <script src="app.js"></script>
   </body>
 </html>

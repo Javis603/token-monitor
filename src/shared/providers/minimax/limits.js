@@ -1,4 +1,5 @@
 'use strict';
+const { ownerSlotAccounts } = require('../../limits/ownerAccountSlots');
 
 const fs = require('node:fs');
 const os = require('node:os');
@@ -95,6 +96,10 @@ function minimaxApiProfiles(options = {}) {
       billingMode: normalizeMinimaxBillingMode(value.billingMode),
       apiRegion: normalizeMinimaxRegionSetting(value.apiRegion) };
   }
+  for (const account of ownerSlotAccounts(options, 'minimax')) profiles[account.id] = {
+    apiKey: minimaxToken({}, account.credentials), enabled: account.enabled,
+    billingMode: normalizeMinimaxBillingMode(account.billingMode), apiRegion: normalizeMinimaxRegionSetting(account.apiRegion)
+  };
   const legacyKey = minimaxToken({}, options.minimaxApiKey);
   if (legacyKey && !Object.values(profiles).some(profile => profile.apiKey === legacyKey)) {
     let name = 'default';
@@ -110,12 +115,12 @@ function configuredMinimaxAccounts(options = {}, deps = {}) {
   const seen = new Set();
   const accounts = [];
   for (const [name, profile] of Object.entries(minimaxApiProfiles(options))) {
-    if (seen.has(profile.apiKey)) continue;
+    if (!profile.apiKey || seen.has(profile.apiKey)) continue;
     // Stored credentials, including disabled entries, take precedence over env.
     seen.add(profile.apiKey);
     if (profile.enabled) accounts.push({ name, ...profile });
   }
-  const envKey = seen.size === 0 && minimaxToken(deps.env || process.env);
+  const envKey = seen.size === 0 && !ownerSlotAccounts(options, 'minimax').length && minimaxToken(deps.env || process.env);
   if (envKey) accounts.push({ name: 'environment', apiKey: envKey,
     billingMode: normalizeMinimaxBillingMode(options.minimaxBillingMode),
     apiRegion: normalizeMinimaxRegionSetting(options.minimaxApiRegion || options.minimaxApiHost) });
@@ -908,7 +913,7 @@ async function fetchMinimaxLimits(options = {}, deps = {}) {
   const [api, code] = await Promise.all([
     (!scoped || apiScope) ? Promise.all(selected.map(account => fetchMinimaxApiLimits({ ...options, minimaxApiKey: account.apiKey,
         minimaxBillingMode: account.billingMode, minimaxApiRegion: account.apiRegion },
-      Object.keys(options.minimaxApiProfiles || {}).length ? { ...deps,
+      Object.keys(options.minimaxApiProfiles || {}).length || options.minimaxAccountSlots?.length ? { ...deps,
         minimaxRegionStateKey: `${MINIMAX_REGION_MEMORY_STATE_KEY}:${hashKey('minimax', account.apiKey)}` } : deps, context))) : [],
     !apiScope ? fetchMinimaxCodeRows(options, deps, context) : null
   ]);

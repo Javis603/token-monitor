@@ -17,15 +17,15 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
 test('Antigravity settings manage quota accounts without exposing a local account switch', () => {
   const html = read('src/electron/renderer/index.html');
-  const app = read('src/electron/renderer/app.js');
+  const app = read('src/electron/renderer/limits/providerOwners/antigravity.js') + '\n' + read('src/electron/renderer/app.js');
   const preload = read('src/electron/preload.js');
   const antigravityRenderer = app.slice(
     app.indexOf('function renderAntigravityStatus()'),
-    app.indexOf('function renderMimoStatus()')
+    app.indexOf('function setup()')
   );
   const antigravitySetup = app.slice(
     app.indexOf("const antigravityToggle = document.getElementById('antigravitySettingsToggle')"),
-    app.indexOf("const mimoToggle = document.getElementById('mimoSettingsToggle')")
+    app.indexOf(' return { state')
   );
 
   assert.match(html, /id="antigravityAccountGroup"/);
@@ -43,11 +43,13 @@ test('Antigravity settings manage quota accounts without exposing a local accoun
   // rather than by a wrapper of their own — the page has no per-provider group
   // builders left, so the count phrase is the catalog's own.
   assert.match(app, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\)/);
-  assert.match(read('src/electron/renderer/limits/windowsView.js'), /GROUP_COUNT_KEYS = \{ volcengine: 'settings\.volcengine\.nPlans' \}/);
-  assert.match(antigravityRenderer, /const planLabel = limitProviderPresentationApi\.limitProviderDisplayLabel\(provider\?\.accountLabel\)/);
-  assert.match(antigravityRenderer, /if \(accounts\.length === 0\)[\s\S]*empty\.textContent = t\('settings\.antigravity\.empty'\)/);
-  assert.match(antigravityRenderer, /remove\.className = 'managed-account-remove'/);
-  assert.match(antigravityRenderer, /remove\.textContent = '✕'/);
+  assert.equal(require('../../src/electron/renderer/providers/volcengine/windows')({}).groupCountKey, 'settings.volcengine.nPlans');
+  assert.match(antigravityRenderer, /TokenMonitorLegacyAccountList\.create/);
+  assert.match(antigravityRenderer, /accountList\.update\(accounts, host\.localProviderStatuses\('antigravity'\)\)/);
+  assert.match(antigravityRenderer, /remove: account => window\.tokenMonitor\.antigravity\.removeAccount\(account\.id\)/);
+  const panel = read('src/electron/renderer/limits/accountSlotsPanel.js');
+  assert.match(panel, /let confirmingRemove = false/);
+  assert.match(panel, /if \(!confirmingRemove\)/);
   assert.match(antigravitySetup, /refreshStats\(\{ force: true \}\)\.catch\(\(\) => \{\}\)/);
   assert.doesNotMatch(antigravitySetup, /await refreshStats\(\{ force: true \}\);/);
   assert.doesNotMatch(antigravityRenderer, /managed-account-remove-label/);
@@ -70,10 +72,10 @@ test('Antigravity OAuth credentials remain in the main-process credential store'
   const patch = { antigravityManagedAccounts: [{ id: 'private' }] };
   normalizeAccountPatch(patch, patch);
   assert.equal(Object.hasOwn(patch, 'antigravityManagedAccounts'), false);
-  const app = read('src/electron/renderer/app.js');
+  const app = read('src/electron/renderer/limits/providerOwners/antigravity.js') + '\n' + read('src/electron/renderer/app.js');
   const antigravityRenderer = app.slice(
     app.indexOf('function renderAntigravityStatus()'),
-    app.indexOf('function renderMimoStatus()')
+    app.indexOf('function setup()')
   );
   assert.doesNotMatch(antigravityRenderer, /accessToken|refreshToken|clientSecret|credentials/);
 });

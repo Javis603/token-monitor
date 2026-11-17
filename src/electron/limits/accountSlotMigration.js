@@ -30,6 +30,10 @@ function migrateAccountSlots(store, settings, now = Date.now, env = process.env)
       migrateOpenRouterSlots(store, stored, document, mark, now);
       continue;
     }
+    if (entry.accountSlotOwner) {
+      migrateOwnerSlots(store, stored, settings, entry, document, mark, now);
+      continue;
+    }
     const credentials = entry.form?.credentialChoice?.fields || entry.accountCredentialKeys || [entry.status.credential];
     if (!credentials.some(key => stored[key])) {
       store.writeDocument(mark(document));
@@ -187,5 +191,62 @@ function migrateCopilotSlots(store, stored, settings, document, mark, now, env) 
   if (pending) console.warn('[Copilot] Account list is full. Remaining legacy accounts continue collecting; remove saved accounts and restart to import them.');
   stored.copilotDefaultAccountIdentity = null;
   store.replaceSettingsCredentials(stored, pending ? document : mark(document));
+}
+// Provider metadata and its complete credential travel together. A missing
+// credential remains a visible repairable account, including disabled records.
+function migrateOwnerSlots(store, stored, settings, entry, document, mark, now) {
+  const provider = entry.id;
+  const key = accountSlotKey(entry);
+  const metadataKey = `${provider}ManagedAccounts`;
+  let sources;
+  if (provider === 'minimax') {
+    // Collection merges saved slots into profiles; migration must read only
+    // legacy sources still present, including an interrupted destination write.
+    sources = Object.entries(entry.limits.minimaxApiProfiles({ ...settings, ...stored, minimaxAccountSlots: [] })).map(([id, profile]) => ({
+      metadata: { id, accountKey: hashKey(provider, profile.apiKey), enabled: profile.enabled, billingMode: profile.billingMode, apiRegion: profile.apiRegion }, credential: profile.apiKey
+    }));
+  } else {
+    const records = document.credentials.providers?.[provider]?.accounts || {};
+    sources = (settings[metadataKey] || []).map(metadata => ({ metadata,
+      credential: records[metadata.id]?.[provider === 'claude' ? 'cookie' : 'credentials'] ?? null }));
+    if (provider === 'claude' && stored.claudeWebCookie) sources.unshift({
+      metadata: { id: 'legacy-web-cookie', organizationId: settings.claudeWebOrganizationId || '', enabled: true }, credential: stored.claudeWebCookie
+    });
+  }
+  const raw = stored[key] || [];
+  const slots = normalizeAccountSlots(entry, raw);
+  if (raw.length !== slots.length) throw new Error('Invalid account slot list');
+  const timestamp = new Date(now()).toISOString();
+  const imports = sources.map(({ metadata, credential }) => ({
+    id: /^[A-Za-z0-9_-]{1,64}$/.test(metadata.id) ? metadata.id : hashKey(provider, 'legacy-owner', metadata.id).slice(7),
+    label: migratedOpenRouterLabel(String(metadata.accountLabel || '')), enabled: metadata.enabled !== false, values: {},
+    accountKey: metadata.accountKey || '', accountKeyAliases: metadata.accountKeyAliases || [], serverIdentity: Boolean(metadata.accountKey),
+    createdAt: metadata.addedAt || timestamp, updatedAt: metadata.updatedAt || timestamp,
+    owner: { metadata, credential }
+  }));
+  const additions = imports.filter(item => !slots.some(slot => slot.id === item.id));
+  const next = normalizeAccountSlots(entry, [...slots, ...additions.slice(0, 21 - slots.length)]);
+  const imported = imports.filter(item => next.some(slot => slot.id === item.id));
+  for (const item of imported) {
+    const existing = next.find(slot => slot.id === item.id);
+    if (!isDeepStrictEqual(existing.owner, item.owner) || existing.enabled !== item.enabled) throw new Error('Saved account import conflict');
+  }
+  store.replaceSettingsCredentials({ ...stored, [key]: next }, document);
+  document = store.readDocument();
+  const verified = store.settingsCredentials(document);
+  if (!isDeepStrictEqual(verified[key] || [], next)) throw new Error('Account slot migration verification failed');
+  const ids = new Set(imported.map(item => item.owner.metadata.id));
+  // Remove credentials only from the document just verified, never an earlier
+  // snapshot. Metadata cleanup is repeated by main on every settings load.
+  if (provider === 'minimax') {
+    verified.minimaxApiProfiles = Object.fromEntries(Object.entries(stored.minimaxApiProfiles || {}).filter(([id]) => !ids.has(id)));
+    if (stored.minimaxApiKey && imported.some(item => item.owner.credential === stored.minimaxApiKey)) verified.minimaxApiKey = '';
+  } else {
+    for (const id of ids) if (document.credentials.providers?.[provider]?.accounts) delete document.credentials.providers[provider].accounts[id];
+    if (provider === 'claude' && ids.has('legacy-web-cookie')) verified.claudeWebCookie = '';
+  }
+  const pending = imported.length < imports.length;
+  store.replaceSettingsCredentials(verified, pending ? document : mark(document));
+  if (pending) console.warn(`[${provider}] Account list is full; remaining legacy accounts are retained and continue collecting.`);
 }
 module.exports = { migrateAccountSlots };

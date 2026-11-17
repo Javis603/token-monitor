@@ -276,7 +276,8 @@ async function fetchFactoryWithToken(token, source, deps = {}) {
 }
 
 async function fetchFactoryLimits(options = {}, deps = {}) {
-  const key = factoryEnvApiKey(options, deps);
+  // A draft probe cannot be authenticated by the environment or Droid file.
+  const key = deps.probe ? cleanSecret(options.factoryApiKey) : factoryEnvApiKey(options, deps);
   if (key) return fetchFactoryWithToken(key, 'api', deps);
   return normalizeLimitProvider({
     provider: 'factory',

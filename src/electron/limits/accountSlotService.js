@@ -12,7 +12,7 @@ const { orderAccountRows, defaultIdentityKey, accountSlotKey, normalizeAccountSl
 
 // All secret/identity writes share one lane. Refresh notification is outside the
 // transaction: a refresh may itself enqueue a resolved identity.
-function createAccountSlotService({ getSettings, write, onChanged, onPresentation, probeDeps, env = process.env, now = Date.now }) {
+function createAccountSlotService({ getSettings, write, onChanged, onPresentation, probeDeps, owners = {}, ownerWrite, presentationAccounts = () => [], env = process.env, now = Date.now }) {
   let lane = Promise.resolve();
   // Sharing is best effort and off the account lane: a rename or move answers
   // as soon as it is saved locally, never after a Hub round trip.
@@ -67,6 +67,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
     return { id, label, enabled, accountKey: key, accountKeyAliases, ...(source ? { source } : {}),
       ...(accountName ? { accountName } : {}),
       ...(source === 'discovered' ? { sourceName, accountName, accountEmail } : {}),
+      ...(entry.accountSlotOwner ? { capabilities: { rename: true, move: true, remove: true, pause: true, edit: true }, accountEmail: values?.accountEmail || '' } : {}),
       formValues: Object.fromEntries(accountForm(entry).fields.filter(field => !field.secret).map(field => [field.key, values[field.key]])),
       fingerprint: (source === 'discovered' ? fingerprint : accountValuesFingerprint(values)).slice(7, 19), createdAt, updatedAt };
   });
@@ -114,6 +115,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
     return serialize(async () => {
       const entry = entryFor(providerId);
       if (!entry) return failure('unsupportedProvider');
+      if (entry.accountSlotOwner) return failure('providerEditorRequired');
       if (!isCurrent()) return failure('cancelled');
       if (id === 'environment' || id?.startsWith('discovered-')) return failure('environmentCredential');
       const previous = slots(entry);
@@ -207,6 +209,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
     }).catch(() => failure('credentialStorageUnavailable'));
   }
   function mutate(providerId, id, operation, value) {
+    if (owners[providerId] && ['remove', 'enabled'].includes(operation)) return owners[providerId](id, operation, value);
     return serialize(async () => {
       const entry = entryFor(providerId);
       if (!entry) return failure('unsupportedProvider');
@@ -305,8 +308,22 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
   }
   function presentation(providerId, accountKey, operation, value) {
     return serialize(async () => {
+      const registered = limitProviderEntry(providerId);
       const entry = entryFor(providerId);
-      if (!entry || !validKey(accountKey)) return failure('invalidOperation');
+      if (!registered || operation !== 'order' && !validKey(accountKey)) return failure('invalidOperation');
+      if (!entry) {
+        if (!['codex', 'cursor', 'opencode', 'mimo', 'thirdparty'].includes(providerId)) return failure('unsupportedProvider');
+        const canonical = new Set(await presentationAccounts(providerId));
+        if (operation === 'rename' && (typeof value !== 'string' || value.length > 256 || !canonical.has(accountKey))) return failure('invalidOperation');
+        if (operation === 'order' && (!Array.isArray(value) || value.length > 200 || new Set(value).size !== value.length || !value.every(key => validKey(key) && canonical.has(key)))) return failure('invalidOperation');
+        if (!['rename', 'order'].includes(operation)) return failure('invalidOperation');
+        const { replayPresentation } = require('./accountPresentationSync');
+        const operations = [{ provider: providerId, type: operation, ...(operation === 'rename' ? { key: accountKey, label: value } : { order: value }) }];
+        await write({ limitAccountPresentation: replayPresentation(getSettings().limitAccountPresentation, operations) });
+        publishPresentation(operations);
+        changed(registered, [], false);
+        return { ok: true, presentation: getSettings().limitAccountPresentation };
+      }
       const all = normalizeAccountPresentation(getSettings().limitAccountPresentation);
       const group = all[providerId] || { labels: {}, order: [] };
       if (operation === 'rename' && typeof value === 'string') group.labels = { ...group.labels, [accountKey]: value };
@@ -427,7 +444,25 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       }
     }).catch(() => {});
   }
-  return { list, renew, loginAction, presentation, adoptSharedLabels, add: (provider, values, label) => save(provider, values, { label }),
+  // Provider workflows execute their fences inside this same persistence lane.
+  function ownerTransaction(providerId, produce, preferences = {}) {
+    return serialize(async () => {
+      const entry = entryFor(providerId);
+      if (!entry?.accountSlotOwner) throw new Error('Unsupported account owner');
+      const plan = await produce(slots(entry));
+      const next = Array.isArray(plan) ? plan : plan.slots;
+      if (next.length > 21) throw new Error('Account slot limit');
+      const normalized = normalizeAccountSlots(entry, next);
+      if (normalized.length !== next.length) throw new Error('Invalid account slot transaction');
+      const patch = { ...preferences, [accountSlotKey(entry)]: normalized };
+      if (!Array.isArray(plan) && plan.legacyMetadata !== undefined) {
+        if (!ownerWrite) throw new Error('Legacy account transaction unavailable');
+        await ownerWrite(providerId, patch, plan.legacyMetadata, plan.legacyWrites);
+      } else await write(patch);
+      return true;
+    });
+  }
+  return { ownerTransaction, list, renew, loginAction, presentation, adoptSharedLabels, add: (provider, values, label) => save(provider, values, { label }),
     replace: (provider, id, values) => save(provider, values, { replacing: true, id }),
     rename: (provider, id, label) => mutate(provider, id, 'rename', label),
     setEnabled: (provider, id, enabled) => mutate(provider, id, 'enabled', enabled),

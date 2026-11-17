@@ -32,3 +32,11 @@ Global settings loading still invokes provider normalization and existing startu
 ## Focused validation
 
 `tests/electron/providerOwners.test.js` exercises provider boundaries without Electron or a visible app: cancellation and workspace fences, Codex auth rollback/path confinement, credential CAS, credential-free projections, external Cursor authority, explicit OpenCode pairing and slot-renewal promise forwarding. Existing managed-account, OAuth, profile algebra and source tests cover the underlying provider implementations. Source fixtures inspect owner definitions alongside the main wiring; renderer fixture assertions remain renderer-owned.
+
+## Saved owner slots
+
+MiniMax API keys, Claude Web, Antigravity OAuth and WorkBuddy browser accounts persist through the shared account-slot transaction lane. Their existing IPC remains an adapter to the provider owners: those owners still validate credentials, perform login/renewal and enforce organization, realm and generation fences. MiniMax Code, Claude OAuth/CLI, Antigravity RPC and WorkBuddy Desktop discovery retain their independent source ownership.
+
+The credential store holds complete main-only owner records, including OAuth client/project context. Renderer lists expose only identity, aliases, labels, enabled state and editor capabilities; collector projections are private and must never become renderer DTOs. Account names and order use shared account presentation; changing either performs no authentication or credential copy. Non-slot Codex, Cursor, OpenCode, MiMo and third-party accounts support presentation commands only after main confirms the canonical key.
+
+Startup migration writes the destination, rereads and verifies it, then removes the corresponding legacy credential. Stable source IDs make a retry reuse the destination. Missing credentials remain repairable metadata; disabled records remain disabled. A full saved list leaves remaining legacy accounts and credentials in place for collection and retries import on restart after space is freed. Successfully moved records are no longer visible to older Token Monitor versions: downgrading requires restoring the previous credential/settings backup or signing in again. Migration does not write secrets back into the old layouts for downgrade compatibility.

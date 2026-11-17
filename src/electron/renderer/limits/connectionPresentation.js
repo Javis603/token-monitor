@@ -34,9 +34,11 @@
     // not a pair of mutually exclusive choices (DeepSeek, for example).
     const primary = manual.find(source => source.kind === 'apiKey') || (sources.length === 1 ? manual[0] : null);
     const automatic = !primary || alternatives.length > 1 || sources.some(source => !['apiKey', 'web'].includes(source.kind));
-    copy.append(node('span', 'settings-item-desc', t(automatic
+    const automaticSummary = t(automatic
       ? alternatives.length > 1 ? 'settings.limits.sources.auto' : 'settings.limits.sources.detectSummary'
-      : primary.kind === 'apiKey' ? 'settings.limits.sources.manualApi' : 'settings.limits.sources.manualWeb')));
+      : primary.kind === 'apiKey' ? 'settings.limits.sources.manualApi' : 'settings.limits.sources.manualWeb');
+    const summary = node('span', 'settings-item-desc', automaticSummary);
+    copy.append(summary);
     const actions = node('div', 'connection-source-actions');
     if (selection && onSelect) {
       const select = document.createElement('select');
@@ -50,7 +52,13 @@
         select.append(option);
       }
       let accepted = choices.some(source => source.id === preference) ? preference : 'auto';
+      const updateSummary = () => {
+        const selected = choices.find(source => source.id === accepted);
+        summary.textContent = selected
+          ? t('settings.limits.sources.selected', { source: t(selected.labelKey) }) : automaticSummary;
+      };
       select.value = accepted;
+      updateSummary();
       const error = node('span', 'settings-item-desc');
       error.setAttribute('role', 'status');
       select.addEventListener('change', async () => {
@@ -62,6 +70,7 @@
           error.textContent = t('settings.limits.sources.saveFailed');
         } finally {
           select.value = accepted;
+          updateSummary();
           select.disabled = false;
         }
       });

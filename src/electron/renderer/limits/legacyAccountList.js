@@ -1,0 +1,106 @@
+// @ts-check
+'use strict';
+(function expose(root, factory) {
+  const panel = typeof module === 'object' && module.exports ? require('./accountSlotsPanel') : /** @type {any} */ (root).TokenMonitorAccountSlotsPanel;
+  const api = factory(panel);
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  if (root) /** @type {any} */ (root).TokenMonitorLegacyAccountList = api;
+})(typeof window !== 'undefined' ? window : null, /** @param {any} panel */ function legacyAccountList(panel) {
+  /**
+   * Metadata-only adapter. `id` belongs to the provider authority; accountKey
+   * belongs to quota/history. Presentation commands never rename a store key.
+   * @typedef {{id: string, accountKey?: string, accountKeyAliases?: string[], enabled?: boolean, label?: string, accountEmail?: string, accountName?: string, email?: string, source?: string, removable?: boolean}} Account
+   */
+  /** @param {Account} account @param {any[]} readings */
+  function readingFor(account, readings) {
+    if (!account.accountKey) return undefined;
+    const exact = readings.find(row => row.accountKey === account.accountKey);
+    // A resolved reading explicitly owns this credential alias. Prefer that
+    // canonical key over a cached observation still filed under the fallback.
+    const resolved = readings.filter(row => row.accountKey !== account.accountKey
+      && row.accountKeyAliases?.includes(account.accountKey));
+    if (resolved.length === 1) return resolved[0];
+    if (exact) return exact;
+    const keys = [account.accountKey, ...(account.accountKeyAliases || [])];
+    const candidates = readings.filter(row => row.accountKey &&
+      [row.accountKey, ...(row.accountKeyAliases || [])].some(key => keys.includes(key)));
+    return candidates.length === 1 ? candidates[0] : undefined;
+  }
+  /**
+   * @param {{document: Document, provider: string, container: HTMLElement, t: Function, bridge: any, getContext: Function, preserveScroll: Function, refresh: Function, changed: Function, enabled?: Function, remove?: Function, edit?: Function, busy?: Function, actions?: Function, statusReading?: Function, secondaryText?: Function, detailText?: Function}} options
+   */
+  function create(options) {
+    let accounts = /** @type {any[]} */ ([]);
+    let readings = /** @type {any[]} */ ([]);
+    const { provider, bridge } = options;
+    const permission = (/** @type {any} */ account) => ({
+      rename: Boolean(account?.accountKey), move: Boolean(account?.accountKey),
+      replace: Boolean(options.edit) && account?.source !== 'environment' && account?.source !== 'remote',
+      setEnabled: Boolean(options.enabled) && account?.canPause !== false,
+      remove: Boolean(options.remove) && account?.removable !== false
+    });
+    /** @param {Function | undefined} command @param {string} id @param {any} [value] */
+    const mutate = async (command, id, value) => {
+      if (!command) return { ok: false };
+      const account = accounts.find(row => row.id === id);
+      if (!account) return { ok: false };
+      const result = await command(account, value);
+      if (result?.ok === false) return result;
+      await options.changed(result);
+      await options.refresh();
+      return { ok: true };
+    };
+    const list = panel.createPanel({
+      form: { id: provider, fields: [] }, label: provider,
+      document: options.document, t: options.t, hideAdd: true,
+      customEditor: (/** @type {any} */ row) => options.edit?.(accounts.find(account => account.id === row?.id)),
+      capabilities: permission, isBusy: options.busy || (() => false),
+      extraActions: options.actions || (() => []),
+      statusReading: options.statusReading, secondaryText: options.secondaryText, detailText: options.detailText,
+      ipc: {
+        /** @param {string} _provider @param {string} id @param {string} value */
+        rename: (_provider, id, value) => bridge.limits.accountSlots.presentation(provider, accounts.find(row => row.id === id)?.accountKey, 'rename', value),
+        /** @param {string} _provider @param {string} id @param {boolean} value */
+        setEnabled: (_provider, id, value) => mutate(options.enabled, id, value),
+        /** @param {string} _provider @param {string} id */
+        remove: (_provider, id) => mutate(options.remove, id),
+        /** @param {any[]} args */
+        presentation: (...args) => bridge.limits.accountSlots.presentation(...args)
+      },
+      forms: {}, preserveScroll: options.preserveScroll,
+      onChanged: () => {}, openExternal: (/** @type {string} */ url) => bridge.openExternal(url),
+      maskEmail: (/** @type {string} */ value) => options.getContext().settings?.maskLimitAccountEmails === true ? value.replace(/^(.).*(@.*)$/, '$1***$2') : value
+    });
+    options.container.replaceChildren(list.element);
+    return {
+      /** Refresh status without replacing provider-owned account controls. @param {any[]} nextReadings */
+      updateReadings(nextReadings) {
+        readings = nextReadings;
+        const context = options.getContext();
+        list.update(accounts, readings, { ...context, presentation: context.settings?.limitAccountPresentation?.[provider] || {} });
+      },
+      /** @param {any[]} next @param {any[]} nextReadings */
+      update(next, nextReadings) {
+        readings = nextReadings;
+        const context = options.getContext();
+        const presentation = context.settings?.limitAccountPresentation?.[provider] || {};
+        accounts = next.map(account => {
+          const reading = readingFor(account, readings);
+          // Only an explicit alias from the quota authority can resolve a
+          // credential key to its workspace. A shared name/email proves nothing.
+          const accountKey = reading?.accountKeyAliases?.includes(account.accountKey)
+            ? reading.accountKey : account.accountKey;
+          const aliases = reading ? [...new Set([...(account.accountKeyAliases || []),
+            account.accountKey, ...(reading.accountKeyAliases || [])].filter(key => key && key !== accountKey))] : account.accountKeyAliases;
+          const labelKey = [accountKey, ...(aliases || [])].find(key => Object.hasOwn(presentation.labels || {}, key));
+          const label = labelKey ? presentation.labels[labelKey] : account.label || '';
+          return { ...account, accountKey, accountKeyAliases: aliases,
+            accountEmail: account.accountEmail || account.email, enabled: account.enabled !== false,
+            fingerprint: account.id, label, accountName: account.accountName || account.email || account.accountEmail || account.id };
+        });
+        list.update(accounts, readings, { ...context, presentation: context.settings?.limitAccountPresentation?.[provider] || {} });
+      }
+    };
+  }
+  return { create, readingFor };
+});

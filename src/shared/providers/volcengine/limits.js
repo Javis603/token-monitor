@@ -1,5 +1,7 @@
 'use strict';
 
+const { selectedSource } = require('../../limits/sourceSelection');
+
 const crypto = require('node:crypto');
 const { fetchArkcliLimits } = require('./arkcli');
 const { normalizeLimitProvider } = require('../../limits/core');
@@ -520,7 +522,8 @@ async function fetchVolcengineLimits(options = {}, deps = {}) {
     windows: [],
     ...(credentials ? { region: credentials.region } : {})
   });
-  const credentials = volcengineCredentials(env, options);
+  const source = deps.accountSlotSaved ? 'api' : selectedSource('volcengine', options, deps);
+  const credentials = source === 'cli' ? null : volcengineCredentials(env, options);
   if (!credentials) {
     // Never replace an explicitly selected (even incomplete) account with the
     // unrelated identity currently logged into a CLI.
@@ -528,7 +531,7 @@ async function fetchVolcengineLimits(options = {}, deps = {}) {
       /volcengine.*(key|secret)/i.test(key) && cleanSecret(value))
       || Object.entries(env).some(([key, value]) =>
         /^(VOLCENGINE|VOLC|DOUBAO|ARK)_.*(KEY|SECRET)/.test(key) && cleanSecret(value));
-    if (explicit || env.TOKEN_MONITOR_VOLCENGINE_ARKCLI === '0') return [statusRow('notConfigured')];
+    if (source === 'api' || deps.probe || (source !== 'cli' && explicit) || env.TOKEN_MONITOR_VOLCENGINE_ARKCLI === '0') return [statusRow('notConfigured')];
     const rows = await fetchArkcliLimits(deps, updatedAt, options.previousLimits);
     const scope = options.limitRefreshScope?.provider === 'volcengine' ? options.limitRefreshScope : null;
     const identity = scope && [
@@ -710,10 +713,12 @@ function accountSlotKeys(values) {
     : hashKey('volcengine', credentials.accessKeyId, credentials.region), ...(agent ? [volcengineAgentAccountKey(agent)] : [])];
 }
 async function fetchAccountSlotSnapshot(options, deps, collect) {
-  if (!options.volcengineAccountSlots?.length || volcengineCredentials(deps.env || process.env, options)) return collect(options, deps);
-  const local = await fetchVolcengineLimits(options, deps);
+  const source = selectedSource('volcengine', options, deps);
+  if (deps.probe || source === 'api') return collect(options, deps);
+  if (source !== 'cli' && !options.volcengineAccountSlots?.length) return collect(options, deps);
+  const local = await fetchVolcengineLimits({ ...options, volcengineSourcePreference: 'cli' }, deps);
   const previousLimits = { providers: (options.previousLimits?.providers || []).filter(row => row.source !== 'cli') };
-  return [...local.filter(row => row.source === 'cli'), ...await collect({ ...options, previousLimits }, deps)];
+  return [...local.filter(row => row.source === 'cli'), ...await collect({ ...options, volcengineSourcePreference: 'api', previousLimits }, deps)];
 }
 function volcengineArkKey(env) { return pickFirst(env, ['ARK_API_KEY', 'VOLCENGINE_API_KEY', 'DOUBAO_API_KEY']); }
 function volcenginePrimaryKey(env) { const c = volcengineCredentials(env); return c?.accessKeyId || c?.apiKey || ''; }

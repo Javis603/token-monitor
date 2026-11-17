@@ -165,7 +165,7 @@ function accountStatusProjection(settings, env = process.env) {
     } else if (entry.status) {
       Object.assign(out, defaultAccountStatus(entry, settings, env));
     }
-    if (entry.accountSlots && normalizeAccountSlots(entry, settings?.[accountSlotKey(entry)]).length) {
+    if (entry.status && entry.accountSlots && normalizeAccountSlots(entry, settings?.[accountSlotKey(entry)]).length) {
       out[entry.status.configuredKey] = true;
     }
     if (entry.envProbe) out[entry.envProbe.key] = entry.envProbe.probe(env);
@@ -302,6 +302,7 @@ function formUrls(openUrl) {
 }
 
 function assertAccountForm(entry, form) {
+  if (entry.accountSlotOwner && form.kind === 'custom') return;
   const fail = (reason) => { throw new Error(`limits form: ${reason} for ${entry.id}`); };
   const declared = new Map(entry.fields.map((field) => [field.key, field]));
   if (!form.fields.length) fail('no fields');
@@ -357,6 +358,7 @@ function limitAccountFormsForRenderer() {
       id: entry.id,
       kind: form.kind,
       ...(entry.accountSlots ? { accountSlots: true } : {}),
+      ...(entry.accountSlotOwner ? { accountSlotOwner: true } : {}),
       ...(form.loginAction ? { loginAction: form.loginAction } : {}),
       titleKey: form.titleKey,
       openKey: form.openKey,

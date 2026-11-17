@@ -5,9 +5,11 @@
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'factory',
   accountSlots: true,
+  // Independent credential owners, all querying the same Factory API.
+  // Selecting an acquisition location would hide another account.
   sources: [
-    { id: 'api', kind: 'apiKey', relation: 'alternative', products: ['factory'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.factory.note' },
-    { id: 'droid-env', kind: 'file', relation: 'alternative', products: ['factory'], labelKey: 'settings.limits.sources.file', descriptionKey: 'settings.limits.sources.fileDescription' }
+    { id: 'api', kind: 'apiKey', relation: 'complement', products: ['factory'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.factory.note' },
+    { id: 'droid-env', kind: 'file', relation: 'complement', products: ['factory'], labelKey: 'settings.limits.sources.file', descriptionKey: 'settings.limits.sources.fileDescription' }
   ],
   fetch: 'fetchFactoryLimits',
   fields: [

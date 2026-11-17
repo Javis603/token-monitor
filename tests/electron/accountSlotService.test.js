@@ -35,7 +35,8 @@ test('serialized add, rename, pause, order, remove; all results redact values', 
   assert.ok(!JSON.stringify(results).includes('SECRET'));
   assert.ok(!JSON.stringify(results).includes('values'));
   assert.equal((await h.service.setEnabled('deepseek', second.id, 'false')).ok, false);
-  assert.equal(h.service.list('claude').ok, false);
+  assert.equal(h.service.list('claude').ok, true);
+  assert.equal((await h.service.add('claude', {})).errorCode, 'providerEditorRequired');
 });
 test('probe invalid, incomplete, indeterminate; credential replacement continues history', async () => {
   const h = harness();

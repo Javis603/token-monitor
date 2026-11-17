@@ -1,5 +1,7 @@
 'use strict';
 
+const { selectedSource } = require('../../limits/sourceSelection');
+
 // Alibaba Cloud Token Plan limits.
 //
 // One provider, four console variants — the mainland Bailian console and the
@@ -943,11 +945,12 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
   const variantId = alibabaVariant(options, env);
   const variant = alibabaVariantConfig(variantId);
-  const cookieHeader = alibabaCookie(env, options);
+  const source = deps.accountSlotSaved ? 'web' : selectedSource('alibaba', options, deps);
+  const cookieHeader = source === 'cli' ? '' : alibabaCookie(env, options);
 
   // A save-time probe validates the submitted cookie alone. An unrelated CLI
   // login must never make a bad credential look valid.
-  if (!deps.probe && (!deps.accountSlotSaved || deps.accountSlotId === 'environment')) {
+  if (!deps.probe && source !== 'web' && !deps.accountSlotSaved) {
     throwIfAborted(deps.signal);
     try {
       const result = await fetchBailianCLI(variant, deps);
@@ -979,7 +982,7 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
     }
   }
 
-  if (!cookieHeader) return [statusRow('notConfigured', updatedAt, variantId, variant.personal)];
+  if (!cookieHeader) return [{ ...statusRow('notConfigured', updatedAt, variantId, variant.personal), ...(source === 'cli' ? { source: 'cli' } : {}) }];
 
   try {
     throwIfAborted(deps.signal);
@@ -1025,10 +1028,12 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
 }
 
 async function fetchAccountSlotSnapshot(options, deps, collect) {
-  if (!options.alibabaAccountSlots?.length || alibabaCookie(deps.env || process.env, options)) return collect(options, deps);
-  const local = await fetchAlibabaLimits({ ...options, previousLimits: { providers: [] } }, deps);
+  const source = selectedSource('alibaba', options, deps);
+  if (deps.probe || source === 'web') return collect(options, deps);
+  if (source !== 'cli' && !options.alibabaAccountSlots?.length) return collect(options, deps);
+  const local = await fetchAlibabaLimits({ ...options, alibabaSourcePreference: 'cli', previousLimits: { providers: [] } }, deps);
   const previousLimits = { providers: (options.previousLimits?.providers || []).filter(row => row.source !== 'cli') };
-  return [...local.filter(row => row.source === 'cli' && !row.removed), ...await collect({ ...options, previousLimits }, deps)];
+  return [...local.filter(row => row.source === 'cli' && !row.removed && (source === 'cli' || row.status !== 'notConfigured')), ...await collect({ ...options, alibabaSourcePreference: 'web', previousLimits }, deps)];
 }
 
 module.exports = { accountSlotsForScope: alibabaAccountSlotsForScope, accountSlotRowKey: row => `${row.accountKey}:${row.region || ''}`, fetchAccountSlotSnapshot,

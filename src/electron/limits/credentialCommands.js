@@ -224,7 +224,9 @@ function createCredentialCommands({ getSettings, applySettingsPatch, commitCrede
   async function clearCredential(providerId) {
     const entry = formEntry(providerId);
     if (!entry) return { cleared: false };
-    if (entry.accountSlots) return { cleared: false, errorCode: 'accountSlotRequired' };
+    // Owner-backed legacy forms clear only their fixed credential lane. Their
+    // saved slots remain under the provider's management commands.
+    if (entry.accountSlots && (!entry.accountSlotOwner || accountForm(entry)?.kind === 'custom')) return { cleared: false, errorCode: 'accountSlotRequired' };
     // MiniMax's multi-key panel owns a profile store this command cannot write.
     if (entry.id === 'minimax') return { cleared: false, errorCode: 'customForm' };
     pendingRenewals.delete(entry.id);

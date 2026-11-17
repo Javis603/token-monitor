@@ -47,6 +47,7 @@
       ? totals : null;
   }
   return /** @satisfies {import('../../limits/presentationPolicies').PresentationPolicy} */ ({
+    failureLabel: (row, translate) => row.actionRequired === 'appSessionEncrypted' ? translate('settings.limits.status.appSessionEncrypted') : undefined,
     workbuddyCreditTotals,
     statusLabel: row => row.actionRequired === 'appSessionEncrypted' ? { label: 'Encrypted by app', key: 'settings.limits.status.appSessionEncrypted', tone: 'warn' } : null,
     statusLabels: { notConfigured: "Sign in" }

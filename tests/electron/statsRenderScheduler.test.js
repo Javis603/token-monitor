@@ -342,7 +342,14 @@ test('the closed-Settings guard does not strand main-surface controls', () => {
 
 test('heavy render roots reject work for an inactive surface', () => {
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
-  const body = (name, next) => app.slice(app.indexOf(`function ${name}(`), app.indexOf(next));
+  const owners = { renderCodexAccounts: 'codex', renderMimoStatus: 'mimo', renderOpenCodeProfiles: 'opencode', renderNamedApiProfiles: 'thirdparty', renderCursorStatus: 'cursor' };
+  const body = (name, next) => {
+    const source = owners[name] ? fs.readFileSync(path.join(rendererDir, `limits/providerOwners/${owners[name]}.js`), 'utf8') : app;
+    const start = source.indexOf(`function ${name}(`);
+    const end = source.indexOf(next, start);
+    assert.ok(start >= 0, name);
+    return source.slice(start, end < 0 ? undefined : end);
+  };
 
   assert.match(body('renderServiceStatus', '\nasync function refreshServiceStatus('), /function renderServiceStatus\(\) \{\n {2}if \(!serviceStatusSurfaceVisible\(\)\) return;/);
   assert.match(body('renderFloatingBubbleContent', '\nfunction setupFloatingBubbleInteraction('), /function renderFloatingBubbleContent\(\) \{\n {2}if \(visibleStatsSurface\(\) !== 'bubble'\) return;/);
@@ -360,8 +367,8 @@ test('heavy render roots reject work for an inactive surface', () => {
     assert.match(body(name, next), new RegExp(`function ${name}\\([^)]*\\) \\{\\n {2}if \\(!isSettingsSurfaceVisible\\(\\)\\) return;`));
   }
 
-  assert.match(body('renderOpenCodeProfiles', '\nfunction normalizeProfileName('), /\.then\(\([^)]*\) => \{\n {4}if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
-  assert.match(body('renderNamedApiProfiles', '\nfunction renderOpenRouterProfiles('), /\.then\(\([^)]*\) => \{\n {4}if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
+  assert.match(body('renderOpenCodeProfiles', '\nfunction normalizeProfileName('), /\.then\(\([^)]*\) => \{[\s\S]*?if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
+  assert.match(body('renderNamedApiProfiles', '\nfunction renderOpenRouterProfiles('), /\.then\(\([^)]*\) => \{[\s\S]*?if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
 });
 
 test('entering Status does not depend on the panel class from the previous render', () => {

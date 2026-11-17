@@ -132,6 +132,7 @@ const { defaultIdentityKey, accountSlotField, normalizeAmbientAccounts } = requi
  * @property {AccountField[]} fields
  * @property {string[]} [accountCredentialKeys] Ordered independently authenticating credentials; companions are never cleared.
  * @property {(values: Record<string, string>, key: string) => boolean} [accountCredentialReady] Compound credential completeness check.
+ * @property {boolean} [accountSlotOwner] Provider owns authentication and collector union; slots persist main-only owner records.
  * @property {boolean} [accountSlots] Requires a form, no managed/profiles fields, credentials only from declared fields, no singleton credential write-back, and an audit of module-level state.
  * @property {(env: AccountValues, limits: AccountLimits, deps: AccountValues) => DiscoveredAccount[]} [discoveredAccounts] Ephemeral main-only credentials; never projected or saved.
  * @property {string} [serverAccountKey] Limits export testing whether a resolved key proves a server identity.
@@ -281,7 +282,7 @@ function limitAccountRefreshScope(provider, row = {}) {
   /** @type {Record<string, string>} */
   const scope = { provider };
   const declaration = limitAccountDeclaration(provider);
-  if (!declaration?.accountRefresh && !declaration?.accountSlots) return scope;
+  if (!declaration?.accountRefresh && !(declaration?.accountSlots && !declaration.accountSlotOwner)) return scope;
   const account = {
     accountKey: text(row.accountKey),
     accountEmail: text(row.accountEmail).toLowerCase(),

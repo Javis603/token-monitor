@@ -25,7 +25,8 @@ test('every provider declares ordered, localized display sources without credent
         assert.ok(MESSAGES[locale][source.labelKey], `${id} ${locale} label`);
         assert.ok(MESSAGES[locale][source.descriptionKey], `${id} ${locale} description`);
       }
-      assert.ok(Object.keys(source).every(key => ['id', 'kind', 'relation', 'labelKey', 'descriptionKey', 'getUrlFromForm'].includes(key)));
+      if (source.products) assert.ok(source.products.every(product => typeof product === 'string' && product.length > 0));
+      assert.ok(Object.keys(source).every(key => ['id', 'kind', 'relation', 'labelKey', 'descriptionKey', 'getUrlFromForm', 'products'].includes(key)));
       if (source.getUrlFromForm) assert.ok(limitAccountFormsForRenderer().find(form => form.id === id)?.openUrl, id);
     }
   }
@@ -48,18 +49,20 @@ test('headers derive exactly one connection tag regardless of reading state', ()
   assert.ok(render.indexOf('optionsInner.append(limitProviderConnectionDetail') < render.indexOf('optionsInner.append(limitProviderSettingsList'));
 });
 
-function renderConnection(id, reading = {}, hasOpenControl = true) {
+function renderConnection(id, reading = {}, hasOpenControl = true, preference = 'auto') {
   const nodes = [];
   const document = { getElementById: () => hasOpenControl ? {} : null, createTextNode(textContent) { return { textContent }; }, createElement(tag) { const node = { tag, children: [], textContent: '', append(...children) { this.children.push(...children); }, setAttribute() {}, addEventListener(event, callback) { this[event] = callback; } }; nodes.push(node); return node; } };
   const source = app.slice(app.indexOf('function limitProviderConnectionDetail('), app.indexOf('// Single entry point for the provider options'));
   const opened = [];
   const form = limitAccountFormsForRenderer().find(entry => entry.id === id);
-  const context = { LIMIT_PROVIDERS: [{ id, label: id === 'zed' ? 'Zed' : id }], document, t: (key, params) => translate('en', key, params), limitAccountForm: () => form,
+  const state = { settings: { limitConnectionSources: limitConnectionSourcesForRenderer(), [`${id}SourcePreference`]: preference } };
+  const saves = [];
+  const context = { state, saveSettings: async patch => { saves.push(patch); Object.assign(state.settings, patch); }, LIMIT_PROVIDERS: [{ id, label: id === 'zed' ? 'Zed' : id }], document, t: (key, params) => translate('en', key, params), limitAccountForm: () => form,
     externalProviderForAccount: () => reading, limitAccountPanelsApi: require('../../src/electron/renderer/limits/accountPanels'),
     window: { TokenMonitorConnectionPresentation: require('../../src/electron/renderer/limits/connectionPresentation'), tokenMonitor: { openExternal: url => opened.push(url) } } };
   vm.runInNewContext(source + '\nthis.renderConnection = limitProviderConnectionDetail;', context);
   const panel = context.renderConnection(id, LIMIT_PROVIDER_ACCOUNTS.find(entry => entry.id === id).sources, reading);
-  return { panel, nodes, opened };
+  return { panel, nodes, opened, saves, state };
 }
 
 test('alternative connection row uses existing provenance, never invents detection', () => {
@@ -68,7 +71,8 @@ test('alternative connection row uses existing provenance, never invents detecti
   assert.ok(nodes.some(node => node.className === 'connection-source-card'));
   assert.ok(nodes.some(node => node.tag === 'details'));
   assert.ok(nodes.some(node => node.textContent === 'Currently using API key'));
-  assert.equal(nodes.filter(node => node.className === 'settings-item-desc').length, 4);
+  assert.equal(nodes.filter(node => node.className === 'settings-item-desc').length,
+    4 + (nodes.some(node => node.tag === 'select') ? 1 : 0), 'a selectable source also exposes a save-status line');
   const unknown = renderConnection('ollama', { source: 'api', status: 'unavailable' });
   assert.ok(unknown.nodes.some(node => node.textContent === 'Auto · try sources in order'));
   assert.ok(!unknown.nodes.some(node => /currently using|not detected/i.test(node.textContent)));
@@ -151,7 +155,7 @@ test('Alibaba displays main CLI-first Cookie fallback without changing its dispa
   const entry = require('../../src/shared/limits/registry').limitProviderEntry('alibaba');
   assert.deepEqual(entry.sources.map(({ id, relation }) => [id, relation]), [['cli', 'alternative'], ['web', 'alternative']]);
   assert.equal(entry.fetch, 'fetchAlibabaLimits');
-  assert.equal(entry.accountSlots, undefined);
+  assert.ok(entry.accountSlots, 'Alibaba exposes the shared credential account editor');
 });
 
 
@@ -171,6 +175,52 @@ test('sourceDetail takes precedence and stale/failed readings never claim a curr
     assert.ok(!renderConnection('codex', reading).nodes.some(n => /Currently using/.test(n.textContent)));
   }
   for (const id of ['cline','factory','opencode','volcengine']) {
-    assert.equal(renderConnection(id).nodes.find(n => n.className === 'connection-source-method').textContent, 'Auto detect');
+    const method = renderConnection(id).nodes.find(n => n.className.split(' ').includes('connection-source-method'));
+    assert.equal(method.tag === 'select' ? method.children[0].textContent : method.textContent, 'Auto detect');
   }
+});
+
+for (const locale of Object.keys(MESSAGES)) {
+  test(`${locale} translates every declared source selection option`, () => {
+    for (const entry of limitConnectionSourcesForRenderer().filter(entry => entry.sourceSelection)) {
+      for (const key of ['settings.limits.connection.title', 'settings.limits.connection.autoDetect', 'settings.limits.sources.saveFailed']) assert.ok(MESSAGES[locale][key], `${locale} ${key}`);
+      const card = require('../../src/electron/renderer/limits/connectionPresentation').createConnectionCard({
+        document: require('./accountOwnerDom.fixture.cjs').createDocument(),
+        t: (key, params) => translate(locale, key, params), sources: entry.sources, provider: {}, label: entry.id,
+        selection: entry.sourceSelection, onSelect: async () => 'auto'
+      });
+      const select = [...card.walk()].find(n => n.tagName === 'select');
+      assert.deepEqual(select.children.map(n => n.value), ['auto', ...entry.sources.filter(s => entry.sourceSelection.sources.includes(s.id) && s.relation === 'alternative').map(s => s.id)]);
+      for (const option of select.children) assert.ok(option.textContent && !option.textContent.startsWith('settings.'), `${entry.id} ${option.value}`);
+    }
+  });
+}
+test('Claude source selection saves the declared preference and restores its control', async () => {
+  const h = renderConnection('claude', {}, true, 'cli');
+  const select = h.nodes.find(n => n.tag === 'select');
+  assert.deepEqual(select.children.map(n => n.value), ['auto', 'oauth', 'cli']);
+  assert.equal(select.value, 'cli');
+  select.value = 'oauth';
+  const saving = select.change();
+  assert.equal(select.disabled, true);
+  await saving;
+  assert.deepEqual(JSON.parse(JSON.stringify(h.saves)), [{ claudeSourcePreference: 'oauth' }]);
+  assert.equal(select.disabled, false);
+  assert.equal(select.value, 'oauth');
+});
+
+test('a rejected source preference restores the accepted selection and localized error', async () => {
+  const document = require('./accountOwnerDom.fixture.cjs').createDocument();
+  const entry = limitConnectionSourcesForRenderer().find(entry => entry.id === 'claude');
+  const card = require('../../src/electron/renderer/limits/connectionPresentation').createConnectionCard({
+    document, t: (key, params) => translate('zh-TW', key, params), sources: entry.sources,
+    selection: entry.sourceSelection, preference: 'cli', provider: {}, label: 'Claude',
+    onSelect: async () => { throw new Error('IPC failed'); }
+  });
+  const select = [...card.walk()].find(n => n.tagName === 'select');
+  select.value = 'oauth';
+  await select.listeners.change();
+  assert.equal(select.value, 'cli');
+  assert.equal(select.disabled, false);
+  assert.ok(card.textContent.includes(translate('zh-TW', 'settings.limits.sources.saveFailed')));
 });

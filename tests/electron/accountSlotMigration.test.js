@@ -135,7 +135,7 @@ test('migration preserves all twenty existing extra accounts', t => {
 
 test('a failed slot migration at startup keeps every other stored credential loaded', () => {
   const main = require('node:fs').readFileSync(require.resolve('../../src/electron/main.js'), 'utf8');
-  const body = main.slice(main.indexOf('function loadCredentialSettings'), main.indexOf('function migrateLegacyMimoCredentialFiles'));
+  const body = main.slice(main.indexOf('function loadCredentialSettings'), main.indexOf('function readSettings()', main.indexOf('function loadCredentialSettings')));
   assert.match(body, /try \{\s*stored = migrateAccountSlots\(store, saved, Date.now, process\.env\);\s*\} catch \(error\) \{[^}]*stored = store\.settingsCredentials\(\);/);
 });
 

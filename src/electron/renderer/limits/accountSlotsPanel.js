@@ -23,6 +23,7 @@
   }
   function accountStatus(slot, reading) {
     if (!slot.enabled) return 'paused';
+    if (reading?.status === 'disabled') return 'disabled';
     if (reading?.status === 'unauthorized') return 'invalid';
     if (reading?.stale) return 'stale';
     return reading?.status === 'ok' ? 'connected' : 'unavailable';
@@ -71,7 +72,7 @@
     return result;
   }
 
-  function createPanel({ form, label, loginAction, document, t, ipc, forms, preserveScroll, onChanged, openExternal, maskEmail = value => value }) {
+  function createPanel({ form, label, loginAction, document, t, ipc, forms, preserveScroll, onChanged, openExternal, maskEmail = value => value, customEditor, capabilities = () => ({}), isBusy = () => false, extraActions = () => [], statusReading = (_slot, reading) => reading, secondaryText = () => '', detailText = () => '', hideAdd = false }) {
     const make = (tag, className = '', text) => {
       const el = document.createElement(tag);
       el.className = className;
@@ -148,6 +149,9 @@
         { [form.id]: slots }, localDeviceId, { [form.id]: presentation }).map(row => byId.get(row.id));
     }
     const run = (operation, ...args) => {
+      const slot = activeAccounts().find(slot => slot.id === args[0]);
+      const permission = capabilities(slot);
+      if (isBusy() || (slot && permission[operation] === false)) return Promise.resolve({ ok: false });
       if (operation === 'move') {
         if (presentationPending || (operationsPending > 0 && remoteAccounts().some(slot => slot.id === args[0])) || rowDrag.isDragging()) return;
         presentationPending++;
@@ -220,6 +224,7 @@
       editor.classList.add('hidden');
     }
     function openEditor(slot) {
+      if (customEditor) return customEditor(slot);
       preserveScroll(() => {
         closeEditor();
         editor.classList.remove('hidden');
@@ -346,13 +351,13 @@
       el.append(grip, copy, status, actions);
       el.addEventListener('pointerdown', event => {
         if ((presentationPending > 0 || operationsPending > 0) || editorOwner !== undefined
-          || [...rows.values()].some(row => row.editing || row.actions.querySelector('.plugin-menu').matches(':popover-open'))) return;
+          || isBusy() || [...rows.values()].some(row => row.editing || row.actions.querySelector('.plugin-menu').matches(':popover-open'))) return;
         rowDrag.startRowDrag(event, id);
       });
       // Each row owns its rename session, so one row cannot invalidate another's.
       const item = { el, name, status, actions, editing: false, renameRevision: 0, slot: null };
       const rename = () => {
-        if (item.editing) return;
+        if (item.editing || isBusy() || capabilities(item.slot).rename === false) return;
         item.editing = true;
         const revision = ++item.renameRevision;
         const input = make('input', 'slot-rename');
@@ -422,6 +427,7 @@
         const action = (key, fn) => {
           const node = slotButton(key, () => { closeMenu(); return fn(); });
           node.dataset.slotAction = key;
+          if (key === 'rename') item.renameAction = node;
           return node;
         };
         const up = action('up', () => run('move', id, 'up'));
@@ -452,6 +458,9 @@
         remove.dataset.slotAction = 'remove';
         const separator = () => { const node = make('hr', 'action-menu-separator'); node.setAttribute('role', 'separator'); return node; };
         const replace = action(`replace${credentialWord}`, () => openEditor(item.slot));
+        for (const entry of extraActions(() => item.slot)) {
+          shared.appendItems(button(entry.label, () => { closeMenu(); return entry.run(item.slot); }));
+        }
         if (id.startsWith('remote:')) {
           shared.appendItems(action('rename', rename), up, down);
           menu.append(localized(make('div', 'settings-note slot-remote-note'), 'settings.slots.remoteNote'));
@@ -482,6 +491,7 @@
     }
     const add = slotButton('add', () => openEditor(null), { provider: label });
     add.className = 'slot-add';
+    add.classList.toggle('hidden', hideAdd);
     list.append(add);
     function remoteAccounts() {
       return applyAccountOrder(remoteReadings, { [form.id]: slots }, localDeviceId, { [form.id]: presentation })
@@ -498,18 +508,31 @@
         item.el.dataset.slotDraggable = 'true';
         const remote = slot.source === 'remote';
         const reading = remote ? remoteReadings.find(row => row.accountKey === slot.accountKey) : readings.find(row => slotOwner(slots, row.accountKey, row.accountKeyAliases) === slot);
-        if (!item.editing) item.name.textContent = accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') }, reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading, t, presentation);
-        item.renameButton.classList.toggle('hidden', item.editing);
+        if (!item.editing) item.name.textContent = [accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') }, reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading, t, presentation), secondaryText(slot)].filter(Boolean).join(' · ');
+        const detail = detailText(slot);
+        if (detail && !item.detail) {
+          item.detail = make('div', 'settings-note slot-detail');
+          item.el.querySelector('.slot-copy').append(item.detail);
+        }
+        if (item.detail) {
+          item.detail.textContent = detail;
+          item.detail.classList.toggle('hidden', !detail);
+        }
+        const permission = capabilities(slot);
+        item.renameButton.disabled = isBusy();
+        item.renameAction?.classList.toggle('hidden', permission.rename === false);
+        item.renameButton.classList.toggle('hidden', item.editing || permission.rename === false);
         item.name.parentElement.classList.toggle('is-editing', item.editing);
-        const status = accountStatus(slot, reading);
+        const status = accountStatus(slot, statusReading(slot, reading));
         item.el.classList.toggle('slot-paused', !slot.enabled);
         item.status.className = `slot-status slot-${status}`;
-        item.status.textContent = `● ${tr(status === 'invalid' ? (cookie ? 'invalidCookie' : 'invalidKey') : status)}`;
+        item.status.textContent = `● ${status === 'disabled' ? t('settings.limits.status.disabled') : tr(status === 'invalid' ? (cookie ? 'invalidCookie' : 'invalidKey') : status)}`;
         if (item.pause) {
           item.updateRemove();
           item.pause.dataset.slotAction = slot.enabled ? 'pause' : 'resume';
           localized(item.pause, `settings.slots.${item.pause.dataset.slotAction}`);
-          const pending = presentationPending > 0;
+          const pending = presentationPending > 0 || isBusy();
+          item.pause.disabled = pending; item.replace.disabled = pending; item.remove.disabled = pending;
           item.up.disabled = pending || index === 0;
           item.down.disabled = pending || index === active.length - 1;
           item.replace.classList.toggle('hidden', slot.source === 'environment');
@@ -517,7 +540,7 @@
           item.remove.classList.toggle('hidden', slot.source === 'environment');
           if (slot.source === 'discovered') { item.replace.remove(); item.remove.remove(); }
         }
-        item.fix.classList.toggle('hidden', Boolean(slot.source) || !slot.enabled || !['invalid', 'unavailable'].includes(status));
+        item.fix.classList.toggle('hidden', permission.replace === false || Boolean(slot.source) || !slot.enabled || !['invalid', 'unavailable'].includes(status));
         if (slot.source === 'environment' && !item.environmentNote) {
           item.environmentNote = localized(make('div', 'settings-note'), 'settings.slots.environment');
           item.el.querySelector('.slot-copy').append(item.environmentNote);
@@ -539,6 +562,11 @@
           if (item.el.isConnected) parent.moveBefore(item.el, before || null);
           else parent.insertBefore(item.el, before || null);
         }
+        for (const [node, operation] of [[item.up, 'move'], [item.down, 'move'], [item.pause, 'setEnabled'], [item.replace, 'replace'], [item.remove, 'remove']]) {
+          node?.classList.toggle('hidden', permission[operation] === false || (['replace', 'setEnabled', 'remove'].includes(operation) && ['remote', 'environment'].includes(slot.source)));
+          if (node && isBusy()) node.disabled = true;
+        }
+        item.el.dataset.slotDraggable = String(permission.move !== false && !isBusy());
         item.positionMenu();
       });
       placeEditor();

@@ -111,7 +111,7 @@ test('Codex managed login stores workspace metadata without rewriting CLI auth b
   const main = readAccountOwnersAndMain();
   const preload = read(path.join(electronDir, 'preload.js'));
   const html = read(path.join(rendererDir, 'index.html'));
-  const app = read(path.join(rendererDir, 'app.js'));
+  const app = read(path.join(rendererDir, 'limits/providerOwners/codex.js'));
   const resolver = main.slice(
     main.indexOf('async function resolveCodexWorkspaceAfterLogin'),
     main.indexOf('async function addCodexManagedAccount')
@@ -171,10 +171,10 @@ test('Codex startup hydrates missing managed workspace labels without blocking s
 });
 
 test('Codex login renderer ignores stale flows and exposes explicit URL actions', () => {
-  const app = read(path.join(rendererDir, 'app.js'));
+  const app = read(path.join(rendererDir, 'limits/providerOwners/codex.js'));
   const setup = app.slice(
-    app.indexOf('function setupCursorAccountUI()'),
-    app.indexOf('\nsetupCursorAccountUI();')
+    app.indexOf('function setup()'),
+    app.length
   );
 
   assert.match(setup, /const flowId = nextCodexSignInFlowId\(\);/);

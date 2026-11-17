@@ -6,7 +6,7 @@ const { defaultAccountValues, accountValuesFingerprint } = require('../../src/sh
 const { normalizeAccountPatch, finalAccountSettings, initialAccountSettings, limitsAccountConfig, accountFieldProjection, limitConnectionSourcesForRenderer } = require('../../src/electron/limits/accountSettings');
 const { createAccountSlotService } = require('../../src/electron/limits/accountSlotService');
 const { transport } = require('../fixtures/accountSlotsBatch');
-const ids = ['ollama', 'trae', 'cline', 'manus', 'hark', 'grok', 'codex'];
+const ids = ['ollama', 'trae', 'cline', 'manus', 'hark', 'grok', 'codex', 'claude', 'alibaba', 'volcengine'];
 for (const id of ids) test(`${id}: preference validates, defaults, projects and preserves credential fingerprint`, () => {
   const entry = limitProviderEntry(id), key = `${id}SourcePreference`;
   const chosen = entry.sourceSelection.sources[0];
@@ -28,7 +28,7 @@ for (const id of ids) test(`${id}: preference validates, defaults, projects and 
 
 test('only implemented exclusive lanes are exposed; complements stay independent', () => {
   const dto = limitConnectionSourcesForRenderer();
-  assert.equal(dto.find(x => x.id === 'claude').sourceSelection, undefined);
+  assert.deepEqual(dto.find(x => x.id === 'claude').sourceSelection.sources, ['oauth', 'cli']);
   assert.equal(dto.find(x => x.id === 'deepseek').sourceSelection, undefined);
   for (const id of ids) {
     const entry = dto.find(x => x.id === id);
@@ -157,6 +157,7 @@ test('renderer select saves through validated settings and reads canonical prefe
   assert.deepEqual(select.children.map(x=>x.value),['auto','api','web']);
   assert.equal(select.value,'auto');select.value='web';await select.change();
   assert.equal(persisted.ollamaSourcePreference,'web');assert.equal(limitsAccountConfig(persisted,{env:{}}).ollamaSourcePreference,'web');
+  assert.ok(document.nodes.some(x=>x.textContent===translate('zh-TW','settings.limits.sources.selected',{source:translate('zh-TW',entry.sources.find(x=>x.id==='web').labelKey)})));
   render();assert.equal(document.nodes.filter(x=>x.tag==='select').at(-1).value,'web');
   reject=true;select.value='api';await select.change();
   assert.equal(select.value,'web');assert.equal(select.disabled,false);assert.equal(persisted.ollamaSourcePreference,'web');

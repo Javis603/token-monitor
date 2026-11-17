@@ -91,6 +91,14 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     hubHostSecret: ['hub', 'hostSecret'],
     secret: ['hub', 'clientSecret'],
     hubProfiles: ['hub', 'profiles'],
+    claudeAccountSlots: ['providers', 'claude', 'accountSlots'],
+    claudeDefaultAccountIdentity: ['providers', 'claude', 'defaultAccountIdentity'],
+    antigravityAccountSlots: ['providers', 'antigravity', 'accountSlots'],
+    antigravityDefaultAccountIdentity: ['providers', 'antigravity', 'defaultAccountIdentity'],
+    minimaxAccountSlots: ['providers', 'minimax', 'accountSlots'],
+    minimaxDefaultAccountIdentity: ['providers', 'minimax', 'defaultAccountIdentity'],
+    workbuddyAccountSlots: ['providers', 'workbuddy', 'accountSlots'],
+    workbuddyDefaultAccountIdentity: ['providers', 'workbuddy', 'defaultAccountIdentity'],
     claudeWebCookie: ['providers', 'claude', 'webCookie'],
     opencodeCookie: ['providers', 'opencode', 'cookie'],
     opencodeProfiles: ['providers', 'opencode', 'profiles'],
@@ -102,6 +110,18 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     factoryDefaultAccountIdentity: ['providers', 'factory', 'defaultAccountIdentity'],
     factoryAmbientAccounts: ['providers', 'factory', 'ambientAccounts'],
     factoryApiKey: ['providers', 'factory', 'apiKey'],
+    kimiAccountSlots: ['providers', 'kimi', 'accountSlots'],
+    kimiDefaultAccountIdentity: ['providers', 'kimi', 'defaultAccountIdentity'],
+    mistralAccountSlots: ['providers', 'mistral', 'accountSlots'],
+    mistralDefaultAccountIdentity: ['providers', 'mistral', 'defaultAccountIdentity'],
+    stepfunAccountSlots: ['providers', 'stepfun', 'accountSlots'],
+    stepfunDefaultAccountIdentity: ['providers', 'stepfun', 'defaultAccountIdentity'],
+    museAccountSlots: ['providers', 'muse', 'accountSlots'],
+    museDefaultAccountIdentity: ['providers', 'muse', 'defaultAccountIdentity'],
+    alibabaAccountSlots: ['providers', 'alibaba', 'accountSlots'],
+    alibabaDefaultAccountIdentity: ['providers', 'alibaba', 'defaultAccountIdentity'],
+    volcengineAccountSlots: ['providers', 'volcengine', 'accountSlots'],
+    volcengineDefaultAccountIdentity: ['providers', 'volcengine', 'defaultAccountIdentity'],
     kimiApiKey: ['providers', 'kimi', 'apiKey'],
     kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
     copilotApiToken: ['providers', 'copilot', 'apiToken'],
@@ -159,6 +179,7 @@ test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)',
     openrouterDefaultAccountIdentity: ['providers', 'openrouter', 'defaultAccountIdentity'],
     minimaxApiProfiles: ['providers', 'minimax', 'profiles'],
     minimaxApiKey: ['providers', 'minimax', 'apiKey'],
+    volcengineApiKey: ['providers', 'volcengine', 'apiKey'],
     volcengineAccessKeyId: ['providers', 'volcengine', 'accessKeyId'],
     volcengineSecretAccessKey: ['providers', 'volcengine', 'secretAccessKey'],
     volcengineAgentAccessKeyId: ['providers', 'volcengine', 'agentAccessKeyId'],
@@ -199,40 +220,42 @@ test('the renderer receives no credential values except the two hub secrets', ()
 
 test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refresh scopes)', () => {
   assert.deepEqual(LIMIT_PROVIDER_SETTING_KEYS, {
-    claude: ['claudeWebCookie', 'claudeWebOrganizationId', 'claudeCliFallbackEnabled'],
-    codex: ['codexManagedAccounts'],
+    claude: ['claudeSourcePreference', 'claudeWebCookie', 'claudeWebOrganizationId', 'claudeAccountSlots', 'claudeCliFallbackEnabled'],
+    codex: ['codexSourcePreference', 'codexManagedAccounts'],
     opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
     cursor: ['cursorDisabledAccountIds'],
-    cline: ['clineApiKey', 'clineAccountSlots'],
+    antigravity: ['antigravityAccountSlots'],
+    cline: ['clineSourcePreference', 'clineApiKey', 'clineAccountSlots'],
+    grok: ['grokSourcePreference'],
     factory: ['factoryApiKey', 'factoryAccountSlots'],
-    kimi: ['kimiApiKey', 'kimiWebAccessToken'],
+    kimi: ['kimiApiKey', 'kimiWebAccessToken', 'kimiAccountSlots'],
     copilot: ['copilotApiToken', 'copilotEnterpriseHost', 'copilotAccountSlots'],
     zed: ['zedCookie', 'zedAccountSlots'],
     commandcode: ['commandcodeCookie', 'commandcodeAccountSlots'],
     mimo: ['mimoManagedAccounts'],
     zai: ['zaiApiKey', 'zaiApiRegion', 'zaiAccountSlots'],
     zaiteam: ['zaiTeamApiKey', 'zaiTeamOrganizationId', 'zaiTeamProjectId', 'zaiteamAccountSlots'],
-    workbuddy: ['workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId', 'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo'],
+    workbuddy: ['workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId', 'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo', 'workbuddyAccountSlots'],
     qoder: ['qoderCookie', 'qoderSite', 'qoderAccountSlots'],
     deepseek: ['deepseekApiKey', 'deepseekWebToken', 'deepseekAccountSlots'],
     devin: ['devinBearerToken', 'devinOrganization', 'devinAccountSlots'],
-    mistral: ['mistralCookie'],
+    mistral: ['mistralCookie', 'mistralAccountSlots'],
     typesafe: ['typesafeCookie', 'typesafeAccountSlots'],
-    stepfun: ['stepfunToken'],
+    stepfun: ['stepfunToken', 'stepfunAccountSlots'],
     notion: ['notionCookie', 'notionWorkspaceId', 'notionAccountSlots'],
     opendesign: ['opendesignCookie', 'opendesignAccountSlots'],
-    manus: ['manusSessionToken', 'manusAccountSlots'],
-    hark: ['harkCookie', 'harkAccountSlots'],
-    muse: ['museWebCookie'],
+    manus: ['manusSourcePreference', 'manusSessionToken', 'manusAccountSlots'],
+    hark: ['harkSourcePreference', 'harkCookie', 'harkAccountSlots'],
+    muse: ['museWebCookie', 'museAccountSlots'],
     openrouter: ['openrouterApiKey', 'openrouterAccountSlots'],
-    minimax: ['minimaxApiProfiles', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode'],
+    minimax: ['minimaxApiProfiles', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode', 'minimaxAccountSlots'],
     volcengine: [
-      'volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion',
-      'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion'
+      'volcengineSourcePreference', 'volcengineApiKey', 'volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion',
+      'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'volcengineAccountSlots'
     ],
-    ollama: ['ollamaApiKey', 'ollamaCookie', 'ollamaAccountSlots'],
-    trae: ['traeCookie', 'traeAccessToken', 'traeDeviceId', 'traeAccountSlots'],
-    alibaba: ['alibabaCookie', 'alibabaVariant'],
+    ollama: ['ollamaSourcePreference', 'ollamaApiKey', 'ollamaCookie', 'ollamaAccountSlots'],
+    trae: ['traeSourcePreference', 'traeCookie', 'traeAccessToken', 'traeDeviceId', 'traeAccountSlots'],
+    alibaba: ['alibabaSourcePreference', 'alibabaCookie', 'alibabaVariant', 'alibabaAccountSlots'],
     thirdparty: ['thirdPartyProfiles']
   });
   for (const provider of Object.keys(LIMIT_PROVIDER_SETTING_KEYS)) {
@@ -332,9 +355,12 @@ test('settings:update normalizes provider fields and strips separately managed a
   const fields = LIMIT_PROVIDER_REGISTRY.flatMap(({ fields }) => fields);
   const normalizedKeys = fields.filter(({ normalize, persist }) => normalize && persist !== 'never').map(({ key }) => key);
   assert.deepEqual(normalizedKeys.sort(), [
+    'claudeSourcePreference', 'codexSourcePreference', 'clineSourcePreference', 'grokSourcePreference',
+    'ollamaSourcePreference', 'traeSourcePreference', 'manusSourcePreference', 'harkSourcePreference',
+    'alibabaSourcePreference', 'volcengineSourcePreference',
     'openrouterApiKey', 'claudeWebCookie', 'claudeWebOrganizationId', 'deepseekApiKey', 'deepseekWebToken', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode', 'copilotApiToken', 'copilotEnterpriseHost',
     'factoryApiKey', 'clineApiKey', 'zaiApiKey', 'zaiApiRegion', 'zaiTeamApiKey',
-    'zaiTeamOrganizationId', 'zaiTeamProjectId', 'volcengineAccessKeyId',
+    'zaiTeamOrganizationId', 'zaiTeamProjectId', 'volcengineApiKey', 'volcengineAccessKeyId',
     'volcengineSecretAccessKey', 'volcengineRegion', 'volcengineAgentAccessKeyId',
     'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
     'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
@@ -464,11 +490,13 @@ test('the external URL allowlist admits exactly the provider consoles it should'
   ];
   for (const url of allowed) assert.equal(isAllowedExternalUrl(url), true, url);
 
-  const cursorLoginStart = appSource.indexOf("  document.getElementById('cursorLoginButton').addEventListener");
-  const cursorLoginEnd = appSource.indexOf('\n  });', cursorLoginStart) + '\n  });'.length;
+  const cursorOwnerSource = fs.readFileSync(path.join(ROOT, 'src/electron/renderer/limits/providerOwners/cursor.js'), 'utf8');
+  const cursorLoginStart = cursorOwnerSource.indexOf("  document.getElementById('cursorLoginButton').addEventListener");
+  assert.notEqual(cursorLoginStart, -1, 'Cursor owner binds its login button');
+  const cursorLoginEnd = cursorOwnerSource.indexOf('\n  });', cursorLoginStart) + '\n  });'.length;
   let cursorLogin;
   const cursorUrls = [];
-  vm.runInNewContext(appSource.slice(cursorLoginStart, cursorLoginEnd), {
+  vm.runInNewContext(cursorOwnerSource.slice(cursorLoginStart, cursorLoginEnd), {
     document: { getElementById: () => ({ addEventListener: (_event, handler) => { cursorLogin = handler; } }) },
     window: { tokenMonitor: { openExternal: (url) => {
       assert.equal(isAllowedExternalUrl(url), true, 'the Cursor login button must pass the main-process URL policy');
@@ -555,10 +583,13 @@ test('the renderer receives serializable account forms but no credential declara
     }
     assert.equal(candidate.kind, 'credential');
   }
-  // Hand-built panels borrow only the save path; the renderer never gets a form.
-  for (const custom of ['kimi', 'volcengine']) {
-    assert.equal(forms.some(({ id }) => id === custom), false, custom);
-    assert.equal(require('../../src/shared/limits/registry').limitProviderEntry(custom).form.kind, 'custom');
+  for (const id of ['kimi', 'volcengine', 'muse', 'mistral', 'stepfun', 'alibaba']) {
+    const form = forms.find(form => form.id === id);
+    assert.equal(form?.accountSlots, true, id);
+    assert.equal(form.kind, 'credential', id);
+    for (const key of ['accountCredentialReady', 'accountCredentialKeys']) {
+      assert.equal(JSON.stringify(form).includes(key), false, `${id} ${key}`);
+    }
   }
   const form = forms.find(({ id }) => id === 'typesafe');
   assert.deepEqual(form.fields, [{
@@ -602,29 +633,14 @@ test('every account form display key exists in each supported locale', () => {
   }
 });
 
-test('the renderer account config names the settings keys main must project', () => {
-  const config = evalTopLevel(appSource, 'const externalLimitAccountConfig = {', '\nfunction clearDisabledLimitProviderPendingChecks(');
-  // Only the hand-built panels: generated ones read the same keys from their form.
-  assert.deepEqual(Object.keys(config).sort(), ['kimi', 'volcengine']);
+test('declarative account status keys are projected and refreshed from forms', () => {
+  assert.doesNotMatch(appSource, /externalLimitAccountConfig/);
   assert.match(mainSource, /\.\.\.accountStatusProjection\(settings, process\.env\)/);
   const projected = accountStatusProjection({}, {});
-  for (const [provider, entry] of Object.entries(config)) {
-    assert.deepEqual(Object.keys(entry).sort(), ['configuredKey', 'pendingKey', 'sourceKey'], provider);
-    for (const key of [entry.configuredKey, entry.sourceKey]) {
-      assert.ok(Object.hasOwn(projected, key), `${provider}.${key} projected`);
+  for (const form of limitAccountFormsForRenderer()) {
+    for (const key of [form.status.configuredKey, form.status.sourceKey].filter(Boolean)) {
+      assert.ok(Object.hasOwn(projected, key), `${form.id}.${key} projected`);
     }
-  }
-});
-
-test('static account statuses refresh in both paths while descriptor panels use the form loop', () => {
-  const config = evalTopLevel(appSource, 'const externalLimitAccountConfig = {', '\nfunction clearDisabledLimitProviderPendingChecks(');
-  const expected = Object.keys(config).sort();
-  const calls = [...appSource.matchAll(/renderExternalProviderStatus\('([a-z]+)'\)/g)].map((match) => match[1])
-    .filter((provider) => expected.includes(provider));
-  assert.deepEqual(calls.slice(0, expected.length).sort(), expected);
-  assert.deepEqual(calls.slice(expected.length, expected.length * 2).sort(), expected);
-  for (const provider of expected) {
-    assert.ok(calls.slice(expected.length * 2).includes(provider), `${provider} is re-rendered by its own wiring`);
   }
   assert.match(appSource, /for \(const form of state\.settings\?\.limitAccountForms \|\| \[\]\)[\s\S]*?renderExternalProviderStatus\(form\.id\)/);
 });

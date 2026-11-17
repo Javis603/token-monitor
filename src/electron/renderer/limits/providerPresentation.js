@@ -86,6 +86,18 @@
     return label.replace(/^[a-z]/, (letter) => letter.toUpperCase());
   }
 
+  function limitProviderLegacyPlanLabel(provider) {
+    return policies[providerId(provider)]?.legacyPlanLabel?.(provider) ?? String(provider?.accountLabel || '').trim();
+  }
+
+  function limitProviderPlanValue(provider, helpers) {
+    return policies[providerId(provider)]?.planValue?.(provider, helpers);
+  }
+
+  function limitProviderFailureLabel(provider, translate) {
+    return policies[providerId(provider)]?.failureLabel?.(provider, translate);
+  }
+
   function limitProviderPlanDisplayLabel(providerOrId, value) {
     const label = limitProviderDisplayLabel(value);
     return policies[providerId(providerOrId)]?.planLabel?.(label) || label;
@@ -418,6 +430,9 @@
     limitProviderFreshness,
     limitProviderDisplayLabel,
     limitProviderPlanDisplayLabel,
+    limitProviderPlanValue,
+    limitProviderLegacyPlanLabel,
+    limitProviderFailureLabel,
     limitProviderMainDeviceLabel,
     namedApiProfileStatus,
     limitProviderProvenance,

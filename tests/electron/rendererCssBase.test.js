@@ -131,9 +131,19 @@ test('profile rename icons keep fixed geometry and an accessible name', () => {
   assert.doesNotMatch(icon?.body || '', /(?:rem|em)\b/);
   assert.ok(fs.existsSync(path.join(rendererDir, 'icons', 'actions', 'pencil-line.svg')));
 
-  const app = readRendererFile('app.js');
+  const app = ['opencode', 'thirdparty'].map(id => readRendererFile(`limits/providerOwners/${id}.js`)).join('\n');
   const renameButtons = [...app.matchAll(/const renameBtn = document\.createElement\('button'\);([\s\S]*?)renameBtn\.setAttribute\('aria-label', t\('settings\.(?:opencode|profiles)\.rename'\)\);/g)];
-  assert.equal(renameButtons.length, 2, 'OpenCode and shared profile rows both label the icon');
+  assert.equal(renameButtons.length, 1, 'OpenCode editor labels its rename icon');
+  const panel = readRendererFile('limits/accountSlotsPanel.js');
+  assert.match(panel, /renameButton\.setAttribute\('aria-label', tr\('rename'\)\)/);
+  assert.match(panel, /const el = make\('button'/);
+  assert.match(panel, /el\.type = 'button'/);
+  const slotButton = cssRules.find(rule => rule.selector === '.slot-rename-button');
+  const slotIcon = cssRules.find(rule => rule.selector === '.slot-rename-button::before');
+  assert.match(slotButton?.body || '', /width: 24px; height: 24px;/);
+  assert.match(slotIcon?.body || '', /width: 12px; height: 12px;/);
+  assert.match(slotIcon?.body || '', /background: currentColor;/);
+  assert.match(slotIcon?.body || '', /mask: url\("icons\/actions\/pencil-line\.svg"\)/);
   for (const [, setup] of renameButtons) {
     assert.match(setup, /renameBtn\.type = 'button';/);
     assert.doesNotMatch(setup, /renameBtn\.title/);

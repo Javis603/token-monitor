@@ -354,7 +354,7 @@ test('startup and settings pushes load slot lists with no mounted Settings panel
   const start = source.indexOf('  state.settings = await window.tokenMonitor.getSettings();', source.indexOf('async function init()'));
   const end = source.indexOf('  // Local appearance', start);
   await vm.runInContext(`(async () => { ${source.slice(start, end)} })()`, context);
-  assert.deepEqual(calls.sort(), LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots).map(entry => entry.id).sort());
+  assert.deepEqual(calls.sort(), limitAccountFormsForRenderer().filter(form => form.accountSlots && !form.accountSlotOwner).map(form => form.id).sort());
   assert.equal(vm.runInContext('accountSlotLists.qoder[0].accountKey', context), 'z');
   const push = source.slice(source.indexOf('window.tokenMonitor.onSettingsPush?.((next)'), source.indexOf('window.tokenMonitor.codex.onActiveAccount'));
   assert.match(push, /refreshAccountSlotPanels\(\)/);

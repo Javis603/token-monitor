@@ -3,6 +3,8 @@
 const opencodeGoApi = require('../../../shared/providers/opencode/goApi');
 const opencodeProfiles = require('../../../shared/providers/opencode/profiles');
 const opencodeWeb = require('../../../shared/providers/opencode/web');
+const { openCodeCookieAccountKey } = require('../../../shared/providers/opencode/identity');
+const { hashKey } = require('../../../shared/hashKey');
 
 /**
  * Owns opencode account workflows and process-local state.
@@ -216,16 +218,23 @@ function createOpencodeAccountService(deps) {
       // Kept as its own field rather than folded into hasEnvVar: an environment
       // cookie and a key OpenCode stored for itself are different sources, and a
       // later reader seeing hasEnvVar would reasonably assume the former.
-      const hasAmbientKey = opencodeAmbientKeyActive(profiles);
       // Credential values never cross to the renderer; which kinds exist does, so
       // the list can show what a profile actually holds.
       const ambientKey = goApi.readGoApiKey(env);
       const ambientIdentity = ambientKey ? goApi.goApiIdentity(ambientKey) : '';
+      const hasAmbientKey = Boolean(ambientKey)
+        && !opencodeProfiles.ambientKeyClaimed(profiles, ambientKey, ambientIdentity);
       // Keyed on user-typed names, so it must not inherit one. Structured clone
       // hands the renderer a plain object either way.
       const safe = Object.create(null);
       for (const [name, p] of Object.entries(profiles)) {
+        // Use the same key identity as quota collection. A pinned ambient
+        // reference must not adopt a newly rotated machine key. Cookie-only
+        // profiles use the collector's credential fallback; a verified reading
+        // can resolve that alias to its workspace without guessing from names.
+        const key = p.apiKey || opencodeProfiles.ambientKeyFor(p, ambientKey, ambientIdentity);
         safe[name] = {
+          accountKey: key ? hashKey('opencode', goApi.goApiIdentity(key)) : openCodeCookieAccountKey(p.cookie || ''),
           enabled: p.enabled,
           hasApiKey: Boolean(p.apiKey),
           hasCookie: Boolean(p.cookie),
@@ -242,6 +251,7 @@ function createOpencodeAccountService(deps) {
         profiles: safe,
         hasEnvVar,
         hasAmbientKey,
+        ambientAccountKey: hasAmbientKey ? hashKey('opencode', ambientIdentity) : '',
         ambientEnabled: getOpencodeAmbientEnabled() !== false
       };
     }

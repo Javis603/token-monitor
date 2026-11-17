@@ -177,6 +177,16 @@ const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usag
 const { limitAccountRefreshScope, limitProviderUrlAllowed } = require('../shared/limits/accounts');
 const { normalizeLimitProviderHiddenItems } = require('../shared/limits/usageItems');
 const { accountFieldProjection, accountStatusProjection, currentAccountField, finalAccountSettings, initialAccountSettings, limitAccountFormsForRenderer, limitConnectionSourcesForRenderer, normalizeAccountPatch, rendererOmittedAccountKeys } = require('./limits/accountSettings');
+const { createOwnerSlotPersistence } = require('./limits/ownerSlotPersistence');
+function ordinarySlotPersistence(provider) {
+  return createOwnerSlotPersistence(provider, () => settings, () => accountSlotService, id => {
+    const store = ensureCredentialStore();
+    if (provider === 'claude') return store.readClaudeWebCredential(id);
+    if (provider === 'antigravity') return store.readAntigravityCredential(id);
+    if (provider === 'workbuddy') return store.readWorkbuddyCredential(id);
+    return null;
+  });
+}
 const { migrateAccountSlots } = require('./limits/accountSlotMigration');
 const { createAccountSlotService, invalidateAccountSlotChange } = require('./limits/accountSlotService');
 const { LIMIT_PROVIDER_REGISTRY } = require('../shared/limits/registry');
@@ -927,6 +937,7 @@ const { createAntigravityAccountService } = require('./providers/antigravity/acc
 let antigravityAccountsOwner;
 function antigravityAccountService() {
   return antigravityAccountsOwner ||= createAntigravityAccountService({
+    slotPersistence: ordinarySlotPersistence('antigravity'),
     getAntigravityManagedAccounts: () => settings?.antigravityManagedAccounts,
     getCredentialStore: ensureCredentialStore,
     electronLimitsFetch,
@@ -1055,6 +1066,7 @@ let claudeManagedAccountService = null;
 function claudeAccountService() {
   if (!claudeManagedAccountService) {
     claudeManagedAccountService = createClaudeManagedAccounts({
+      slotPersistence: ordinarySlotPersistence('claude'),
       getSettings: () => settings,
       setSettings: (next) => { settings = next; },
       saveSettings: () => saveSettings({ throwOnError: true }),
@@ -1199,12 +1211,13 @@ let copilotLoginFlowId = '';
 let workbuddyManagedAccountService = null;
 
 function workbuddyAccountsForRenderer() {
-  return workbuddyOAuth.normalizeManagedAccounts(settings?.workbuddyManagedAccounts);
+  return workbuddyOAuth.normalizeManagedAccounts(ordinarySlotPersistence('workbuddy').accounts());
 }
 
 function workbuddyAccountService() {
   if (!workbuddyManagedAccountService) {
     workbuddyManagedAccountService = createWorkbuddyManagedAccounts({
+      slotPersistence: ordinarySlotPersistence('workbuddy'),
       getAccounts: () => settings?.workbuddyManagedAccounts,
       setAccounts: (accounts) => { settings.workbuddyManagedAccounts = accounts; },
       saveSettings: () => saveSettings({ throwOnError: true }),
@@ -1782,6 +1795,11 @@ function loadCredentialSettings(saved) {
     } catch (error) {
       reportCredentialStorageError('could not move saved accounts into the account list', error);
       stored = store.settingsCredentials();
+    }
+    for (const provider of ['claude', 'antigravity', 'workbuddy']) {
+      const completed = Number(store.readDocument().migrations.accountSlots?.[provider] || 0) >= 1;
+      const moved = new Set((stored[`${provider}AccountSlots`] || []).map(slot => slot.owner?.metadata?.id));
+      saved[`${provider}ManagedAccounts`] = completed ? [] : (saved[`${provider}ManagedAccounts`] || []).filter(account => !moved.has(account.id));
     }
     openrouterSlotsMigrated = Number(store.readDocument().migrations.accountSlots?.openrouter || 0) >= 1;
     copilotSlotsMigrated = Number(store.readDocument().migrations.accountSlots?.copilot || 0) >= 1;
@@ -4938,6 +4956,7 @@ function settingsForRenderer() {
     subscriptionsUpdatedAt: subscriptionDocumentVersion(subscriptionsDocumentFor(currentHubIdentity())),
     subscriptionsOrphaned: pendingOrphanedSubscriptions(),
     ...accountFieldProjection(settings, process.env),
+    claudeManagedAccounts: claudeAccountService().accounts(),
     codexManagedAccounts: codexAccountsForRenderer(),
     antigravityManagedAccounts: antigravityAccountsForRenderer(),
     workbuddyManagedAccounts: workbuddyAccountsForRenderer(),
@@ -7414,6 +7433,44 @@ app.whenReady().then(() => {
   });
   accountSlotService = createAccountSlotService({
     getSettings: () => settings,
+    ownerWrite: (provider, patch, legacyMetadata, legacyWrites) => {
+      const store = ensureCredentialStore();
+      const previousDocument = store.readDocument();
+      const previousSettings = settings;
+      try {
+        if (provider !== 'minimax') {
+          const document = structuredClone(previousDocument);
+          const records = document.credentials.providers?.[provider]?.accounts;
+          for (const { id, credential } of legacyWrites) {
+            if (!records) throw new Error('Legacy credential context missing');
+            if (credential === null) delete records[id];
+            else records[id] = { ...records[id], [provider === 'claude' ? 'cookie' : 'credentials']: credential };
+          }
+          store.writeDocument(document);
+        }
+        settings = { ...settings, ...patch, ...(provider === 'minimax'
+          ? { minimaxApiProfiles: legacyMetadata, minimaxApiKey: '' }
+          : { [`${provider}ManagedAccounts`]: legacyMetadata }) };
+        saveSettings({ throwOnError: true });
+      } catch (error) {
+        settings = previousSettings;
+        store.writeDocument(previousDocument);
+        throw error;
+      }
+    },
+    presentationAccounts: async provider => {
+      const rows = [...(localStats?.limits?.providers || []), ...(latestStats?.limits?.providers || [])].filter(row => row.provider === provider);
+      if (provider === 'codex') rows.push(...codexAccountsForRenderer());
+      if (provider === 'cursor') rows.push(...(await cursorAccountService().status()).accounts);
+      if (provider === 'mimo') rows.push(...mimoAccountsForRenderer());
+      if (provider === 'opencode') {
+        const result = await opencodeAccountService().getProfiles();
+        rows.push(...Object.values(result?.profiles || {}));
+        if (result?.ambientAccountKey) rows.push({ accountKey: result.ambientAccountKey });
+      }
+      if (provider === 'thirdparty') { const result = await thirdpartyAccountService().getProfiles(); rows.push(...Object.values(result?.profiles || {})); }
+      return rows.map(row => row.accountKey || row.canonicalAccountKey).filter(Boolean);
+    },
     write: (patch) => {
       const { limitProviders, limitsEnabled, ...slotPatch } = patch;
       settings = { ...settings, ...slotPatch };
@@ -7431,6 +7488,11 @@ app.whenReady().then(() => {
           console.error(`[limits] could not turn on collection after saving an account: ${error?.message || error}`);
         }
       }
+    },
+    owners: {
+      claude: (id, operation, value) => operation === 'remove' ? claudeAccountService().removeAccount(id) : claudeAccountService().setAccountEnabled(id, value),
+      workbuddy: (id, operation, value) => operation === 'remove' ? workbuddyAccountService().removeAccount(id) : workbuddyAccountService().setAccountEnabled(id, value),
+      antigravity: (id, operation, value) => operation === 'remove' ? antigravityAccountService().removeAntigravityManagedAccount(id) : antigravityAccountService().setAntigravityManagedAccountEnabled(id, value)
     },
     onPresentation: (operations) => getAccountPresentationSync().publish(operations),
     probeDeps: credentialProbeDeps,
@@ -8279,6 +8341,7 @@ app.whenReady().then(() => {
   // and quietly comes back enabled when the key it pinned is rotated.
   ipcMain.handle('opencode:setAmbientEnabled', (_event, ...args) => opencodeAccountService().setAmbientEnabled(...args));
   const minimaxApiKeys = createMinimaxApiKeys({
+    slotPersistence: ordinarySlotPersistence('minimax'),
     getSettings: () => settings, saveSettings,
     probeDeps: () => electronProviderDeps({ env: {}, signal: AbortSignal.timeout(15_000) }),
     changed: (accountKey, refresh, reason) => {

@@ -26,6 +26,8 @@ test('the main settings IPC projection hides provider secrets while retaining co
     secrets.push(value);
     settings[key] = key === 'hubProfiles'
       ? [{ id: 'home', name: 'Home', hubUrl: 'https://home.example/private?token=hidden', secret: value, deviceId: 'laptop' }]
+      : key.endsWith('AccountSlots')
+      ? [{ id: 'saved', owner: { credential: { apiKey: value }, metadata: {} } }]
       : key.endsWith('Profiles')
       ? { work: { enabled: true, cookie: value, apiKey: value, accessToken: value, futureSecret: value } }
       : value;
@@ -60,7 +62,7 @@ test('the main settings IPC projection hides provider secrets while retaining co
     subscriptionsDocumentFor: () => null, pendingOrphanedSubscriptions: () => [],
     codexAccountsForRenderer: () => [], antigravityAccountsForRenderer: () => [],
     workbuddyAccountsForRenderer: () => [], mimoAccountsForRenderer: () => [],
-    claudeAccountService: () => ({ legacyAccount: () => null, loginStatuses: () => [] }),
+    claudeAccountService: () => ({ accounts: () => [], legacyAccount: () => null, loginStatuses: () => [] }),
     effectiveRates: {}, rateCache: null, currentWindowToggleShortcutStatus: () => ({})
   });
   const projected = structuredClone(project());

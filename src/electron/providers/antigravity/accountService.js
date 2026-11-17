@@ -9,19 +9,21 @@ const crypto = require('node:crypto');
  * @param {object} deps Provider-scoped persistence and named host IO capabilities.
  */
 function createAntigravityAccountService(deps) {
-  const { getAntigravityManagedAccounts, getCredentialStore, electronLimitsFetch, openExternal, setAntigravityManagedAccounts, saveSettings, pushSettingsToRenderer, sendAntigravityAccountsPush, queueLimitInvalidation, env = process.env, oauthLogin = runAntigravityOAuthLogin } = deps;
+  const { getAntigravityManagedAccounts, getCredentialStore, electronLimitsFetch, openExternal, setAntigravityManagedAccounts, saveSettings, pushSettingsToRenderer, sendAntigravityAccountsPush, queueLimitInvalidation, slotPersistence, env = process.env, oauthLogin = runAntigravityOAuthLogin } = deps;
   let antigravityOAuthLoginController = null;
+  const generations = new Map();
+  const retire = id => generations.set(id, (generations.get(id) || 0) + 1);
   function normalizeAntigravityManagedAccounts(value) {
     return antigravityOAuth.normalizeManagedAccounts(value);
   }
 
   function antigravityAccountsForRenderer() {
-    return normalizeAntigravityManagedAccounts(getAntigravityManagedAccounts());
+    return normalizeAntigravityManagedAccounts(slotPersistence ? slotPersistence.accounts() : getAntigravityManagedAccounts());
   }
 
   function readAntigravityCredential(id) {
     try {
-      return getCredentialStore().readAntigravityCredential(id);
+      return slotPersistence ? slotPersistence.read(id) : getCredentialStore().readAntigravityCredential(id);
     } catch (_) {
       return null;
     }
@@ -45,7 +47,7 @@ function createAntigravityAccountService(deps) {
 
   function antigravityManagedAccountsForCollector() {
     return antigravityOAuth.managedAccountsForCollector(
-      getAntigravityManagedAccounts(),
+      slotPersistence ? slotPersistence.accounts() : getAntigravityManagedAccounts(),
       readAntigravityCredential
     );
   }
@@ -55,6 +57,12 @@ function createAntigravityAccountService(deps) {
     if (!accountId || !credentials || typeof credentials !== 'object') return false;
     const current = readAntigravityCredential(accountId);
     if (!current || JSON.stringify(current) !== JSON.stringify(previous || {})) return false;
+    if (slotPersistence) {
+      return slotPersistence.commit(antigravityAccountsForRenderer(), [{ id: accountId, credential: credentials }], () => {
+        if (!antigravityAccountsForRenderer().some(item => item.id === accountId && item.enabled)
+          || JSON.stringify(readAntigravityCredential(accountId)) !== JSON.stringify(previous || {})) throw new Error('superseded');
+      }).then(() => true, () => false);
+    }
     return writeAntigravityCredential(accountId, credentials);
   }
 
@@ -62,6 +70,8 @@ function createAntigravityAccountService(deps) {
     if (antigravityOAuthLoginController) return { ok: false, errorCode: 'loginInProgress' };
     const controller = new AbortController();
     antigravityOAuthLoginController = controller;
+    const startingAccounts = antigravityAccountsForRenderer();
+    const startingGenerations = new Map(generations);
     try {
       const { credential, identity } = await oauthLogin({
         env: env,
@@ -70,7 +80,8 @@ function createAntigravityAccountService(deps) {
         signal: controller.signal,
         logger: (message) => console.log(`[antigravity-oauth] ${message}`)
       });
-      const accounts = normalizeAntigravityManagedAccounts(getAntigravityManagedAccounts());
+      if (controller.signal.aborted) return { ok: false, errorCode: 'cancelled' };
+      const accounts = normalizeAntigravityManagedAccounts(slotPersistence ? slotPersistence.accounts() : getAntigravityManagedAccounts());
       const now = new Date().toISOString();
       const existing = accounts.find((account) => account.accountEmail === identity.email);
       const account = {
@@ -83,6 +94,14 @@ function createAntigravityAccountService(deps) {
         updatedAt: now
       };
       const previousCredential = existing ? readAntigravityCredential(existing.id) : null;
+      if (slotPersistence) {
+        const original = startingAccounts.find(item => item.accountEmail === identity.email);
+        await slotPersistence.commit([...accounts.filter(item => item.id !== account.id), account], [{ id: account.id, credential: {
+          ...credential, refreshToken: credential.refreshToken || previousCredential?.refreshToken || ''
+        } }], () => {
+          if (controller.signal.aborted || original && ((generations.get(original.id) || 0) !== (startingGenerations.get(original.id) || 0)) || original && JSON.stringify(antigravityAccountsForRenderer().find(item => item.id === original.id)) !== JSON.stringify(original)) throw new Error('superseded');
+        });
+      } else {
       if (!writeAntigravityCredential(account.id, {
         ...credential,
         refreshToken: credential.refreshToken || previousCredential?.refreshToken || ''
@@ -99,6 +118,7 @@ function createAntigravityAccountService(deps) {
         if (previousCredential) writeAntigravityCredential(account.id, previousCredential);
         else removeAntigravityCredential(account.id);
         return { ok: false, errorCode: 'credentialStorageUnavailable' };
+      }
       }
       pushSettingsToRenderer();
       sendAntigravityAccountsPush();
@@ -130,9 +150,12 @@ function createAntigravityAccountService(deps) {
 
   async function removeAntigravityManagedAccount(id) {
     const accountId = String(id || '').trim();
-    const accounts = normalizeAntigravityManagedAccounts(getAntigravityManagedAccounts());
+    const accounts = normalizeAntigravityManagedAccounts(slotPersistence ? slotPersistence.accounts() : getAntigravityManagedAccounts());
     const account = accounts.find((entry) => entry.id === accountId);
     if (!account) return { ok: false, error: 'Account not found' };
+    retire(accountId);
+    if (slotPersistence) await slotPersistence.commit(accounts.filter(item => item.id !== accountId), [{ id: accountId, credential: null }]);
+    else {
     const previousCredential = readAntigravityCredential(accountId);
     if (!removeAntigravityCredential(accountId)) return { ok: false, error: 'Could not remove stored credential' };
     setAntigravityManagedAccounts(accounts.filter((entry) => entry.id !== accountId));
@@ -141,6 +164,7 @@ function createAntigravityAccountService(deps) {
     } catch (_) {
       if (previousCredential) writeAntigravityCredential(accountId, previousCredential);
       return { ok: false, error: 'Could not persist account removal' };
+    }
     }
     pushSettingsToRenderer();
     sendAntigravityAccountsPush();
@@ -151,18 +175,22 @@ function createAntigravityAccountService(deps) {
     return { ok: true, accounts: antigravityAccountsForRenderer() };
   }
 
-  function setAntigravityManagedAccountEnabled(id, enabled) {
+  async function setAntigravityManagedAccountEnabled(id, enabled) {
     const accountId = String(id || '').trim();
-    const accounts = normalizeAntigravityManagedAccounts(getAntigravityManagedAccounts());
+    const accounts = normalizeAntigravityManagedAccounts(slotPersistence ? slotPersistence.accounts() : getAntigravityManagedAccounts());
     const account = accounts.find((entry) => entry.id === accountId);
     if (!account) return { ok: false, error: 'Account not found' };
+    retire(accountId);
     account.enabled = Boolean(enabled);
     account.updatedAt = new Date().toISOString();
+    if (slotPersistence) await slotPersistence.commit(accounts, []);
+    else {
     setAntigravityManagedAccounts(accounts);
     try {
       saveSettings({ throwOnError: true });
     } catch (_) {
       return { ok: false, error: 'Could not persist account state' };
+    }
     }
     pushSettingsToRenderer();
     sendAntigravityAccountsPush();

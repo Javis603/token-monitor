@@ -5,6 +5,7 @@ const { hashKey } = require('../hashKey');
 const { normalizeLimitProvider } = require('./core');
 /**
  * @typedef {object} AccountSlot
+ * @property {any} [owner] Main-only provider metadata and complete credential record.
  * @property {string} id
  * @property {string} label
  * @property {boolean} enabled
@@ -42,6 +43,7 @@ function normalizeAccountSlots(declaration, input) {
     const values = Object.fromEntries(keys.filter((key) => typeof record.values?.[key] === 'string').map((key) => [key, record.values[key]]));
     const identity = normalizeLimitProvider({ provider: declaration.id, accountLabel: record.label, accountName: record.accountName });
     out.push({
+      ...(declaration.accountSlotOwner && record.owner && typeof record.owner === 'object' ? { owner: structuredClone(record.owner) } : {}),
       id: record.id, label: identity?.accountLabel || '',
       enabled: record.enabled !== false, values,
       accountKey: typeof record.accountKey === 'string' ? record.accountKey.trim() : '',

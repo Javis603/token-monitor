@@ -21,30 +21,20 @@ function deferred() {
 }
 
 function minimaxPanelHarness() {
-  const element = () => {
-    const node = { value: '', textContent: '', dataset: {}, attributes: {}, children: [], listeners: {},
-      append(...children) { this.children.push(...children); }, replaceChildren() { this.children = []; },
-      querySelector(selector) { return this.children.find(child => child.classList.contains(selector.slice(1)))
-        || this.children.map(child => child.querySelector(selector)).find(Boolean); },
-      addEventListener(type, handler) { this.listeners[type] = handler; },
-      setAttribute(key, value) { this.attributes[key] = value; }, focus() {}, select() {},
-      click() { return this.listeners.click?.({ currentTarget: this }); } };
-    let classes = new Set();
-    Object.defineProperty(node, 'className', { get: () => [...classes].join(' '), set: value => { classes = new Set(value.split(/\s+/)); } });
-    node.classList = { contains: name => classes.has(name), add: name => classes.add(name), remove: name => classes.delete(name),
-      toggle: (name, on) => on ? classes.add(name) : classes.delete(name) };
-    return node;
-  };
+  const document = require('./accountOwnerDom.fixture.cjs').createDocument();
+  const element = () => document.createElement('div');
   const elements = new Map();
   for (const match of html.matchAll(/<[^>]+\bid="(minimax[^" ]+)"[^>]*>/g)) {
     const node = element();
     node.className = match[0].match(/class="([^"]*)"/)?.[1] || '';
     if (match[0].startsWith('<select')) node.value = html.slice(match.index).match(/<option value="([^"]*)"/)[1];
+    node.id = match[1];
+    document.root.append(node);
     elements.set(match[1], node);
   }
   const get = id => { assert.ok(elements.has(id), `${id} must exist in the real markup`); return elements.get(id); };
   const walk = node => [node, ...node.children.flatMap(walk)];
-  const rows = () => walk(get('minimaxKeyList')).filter(node => node.dataset.minimaxKey);
+  const rows = () => walk(get('minimaxKeyList')).filter(node => node.dataset.slotId);
   const saves = [], opened = [], refreshes = [], removed = [];
   const state = { settings: { minimaxApiRegion: 'cn', minimaxBillingMode: 'token-plan' } };
   const api = { getKeys: async () => [], addKey: async () => ({ ok: true }) };
@@ -59,25 +49,23 @@ function minimaxPanelHarness() {
     setExternalAccountExpanded: (_id, value) => { state.minimaxAccountExpanded = value; },
     refreshLimitProviderQuota: id => refreshes.push(id),
     localProviderStatuses: () => providers, limitProviderEnabled: () => enabled,
-    document: { getElementById: get, createElement: element,
-      querySelectorAll: () => rows() },
-    window: { tokenMonitor: { openExternal: url => opened.push(url), minimax: {
+    document,
+    window: { TokenMonitorLegacyAccountList: require('../../src/electron/renderer/limits/legacyAccountList'), tokenMonitor: { openExternal: url => opened.push(url), minimax: {
       getKeys: () => api.getKeys(), addKey: draft => { saves.push(draft); return api.addKey(draft); },
       removeKey: async id => { removed.push(id); return { ok: true }; }
     } } }
   };
-  const names = ['setAccountShellError', 'renderAccountShellError', 'minimaxBillingUrl', 'updateMinimaxApiKeysStatus', 'apiKeyAccountStatusText', 'minimaxKeyErrorText', 'renderMinimaxApiKeys'];
-  const functions = names.map(name => {
-    const marker = app.indexOf(`function ${name}(`);
-    const start = app.slice(marker - 6, marker) === 'async ' ? marker - 6 : marker;
-    return app.slice(start, app.indexOf('\n}\n', start) + 2);
-  }).join('\n');
-  const start = app.indexOf("  const minimaxToggle = document.getElementById('minimaxSettingsToggle');");
-  vm.runInNewContext(`${functions}\n${app.slice(start, app.indexOf('\n  }\n', start) + 5)}`, context);
+  vm.runInNewContext(app.slice(app.indexOf('function setAccountShellError('), app.indexOf('const { clientColors, fallbackModelColors'))
+    + app.slice(app.indexOf('function apiKeyAccountStatusText('), app.indexOf('function setExternalAccountExpanded(')), context);
+  const owner = require('../../src/electron/renderer/limits/providerOwners/minimax').create({
+    ...context, initial: {}, getSettings: () => state.settings,
+    getAccountContext: () => ({ settings: state.settings }), preserveScroll: fn => fn()
+  });
+  owner.setup();
   return { get, api, saves, opened, refreshes, removed, state, rows,
-    buttons: label => walk(get('minimaxKeyList')).filter(node => node.attributes['aria-label'] === t(label)),
-    render: () => context.renderMinimaxApiKeys(),
-    status: (rows, on = true) => { providers = rows.map(row => ({ provider: 'minimax', ...row })); enabled = on; context.updateMinimaxApiKeysStatus(); },
+    buttons: label => walk(get('minimaxKeyList')).filter(node => node.textContent === t(label === 'settings.minimax.clearApiKey' ? 'settings.slots.remove' : label)),
+    render: () => owner.renderMinimaxApiKeys(),
+    status: (rows, on = true) => { providers = rows.map(row => ({ provider: 'minimax', ...row })); enabled = on; owner.updateMinimaxApiKeysStatus(); },
     draft: values => { for (const [id, value] of Object.entries(values)) get(id).value = value; } };
 }
 
@@ -127,7 +115,7 @@ test('MiniMax key input retains a rejected draft and allows recovery', async () 
   assert.equal(h.get('minimaxApiKeyInput').value, '');
 });
 
-test('MiniMax saved keys use independent API status and billing links, with removal', async () => {
+test('MiniMax saved keys use independent API status and billing links, with removal', async (suite) => {
   const h = minimaxPanelHarness();
   h.api.getKeys = async () => [
     { id: 'a', accountKey: 'a', apiRegion: 'auto', billingMode: 'api' },
@@ -135,23 +123,33 @@ test('MiniMax saved keys use independent API status and billing links, with remo
   ];
   await h.render();
   assert.equal(h.get('minimaxStatus').textContent, t('settings.common.checking'));
-  const info = id => h.rows().find(node => node.dataset.minimaxKey === id).querySelector('.managed-account-info');
-  const labels = () => h.rows().map(row => row.querySelector('.managed-account-email').textContent);
+  const info = id => h.rows().find(node => node.dataset.slotId === id).querySelector('.slot-status');
+  const labels = () => h.rows().map(row => row.querySelector('.slot-name').textContent);
   const apiLabel = t('settings.minimax.billingApi');
   const tokenLabel = t('settings.minimax.billingTokenPlan');
   const accountLabel = number => t('settings.minimax.accountFallback', { number });
-  assert.deepEqual(labels(), [`${accountLabel(1)} · ${apiLabel}`, `${accountLabel(2)} · ${tokenLabel}`]);
+  await suite.test('billing modes remain visible on each account', () => {
+    assert.deepEqual(labels(), [`${accountLabel(1)} · ${apiLabel}`, `${accountLabel(2)} · ${tokenLabel}`]);
+  });
   h.status([{ source: 'oauth', status: 'ok', accountKey: 'a' }, { source: 'api', accountKey: 'a', region: 'en', status: 'unauthorized' }]);
-  assert.equal(info('a').textContent, t('settings.minimax.statusInvalid'));
+  await suite.test('API failure overrides a healthy OAuth reading', () => {
+    assert.equal(info('a').textContent, `● ${t('settings.slots.invalidKey')}`);
+  });
   h.status([{ source: 'oauth', status: 'ok', accountKey: 'a' }]);
-  assert.equal(info('a').textContent, t('settings.common.checking'));
+  await suite.test('OAuth alone never marks the API credential connected', () => {
+    assert.equal(info('a').textContent, `● ${t('settings.slots.unavailable')}`);
+  });
   h.status([], false);
-  assert.equal(info('a').textContent, t('settings.limits.status.disabled'));
+  await suite.test('disabled provider retires the account status', () => {
+    assert.equal(info('a').textContent, `● ${t('settings.limits.status.disabled')}`);
+  });
   assert.equal(h.get('minimaxStatus').textContent, t('settings.limits.status.disabled'));
   h.status([{ source: 'api', accountKey: 'a', region: 'cn', relatedAccountKey: 'code', status: 'ok' },
     { source: 'api', accountKey: 'b', region: 'cn', relatedAccountKey: 'code', status: 'ok' },
     { source: 'oauth', accountKey: 'code', region: 'cn', status: 'ok' }]);
-  assert.deepEqual(labels(), [`${accountLabel(1)} · ${apiLabel}`, `${accountLabel(2)} · ${tokenLabel}`]);
+  await suite.test('billing modes remain visible on each account', () => {
+    assert.deepEqual(labels(), [`${accountLabel(1)} · ${apiLabel}`, `${accountLabel(2)} · ${tokenLabel}`]);
+  });
   h.status([{ source: 'api', accountKey: 'a', region: 'en', status: 'ok' }]);
   h.buttons('settings.minimax.openBrowser').forEach(button => button.click());
   assert.deepEqual(h.opened, ['https://platform.minimax.io/user-center/payment/balance',
@@ -179,11 +177,27 @@ test('MiniMax saved keys use independent API status and billing links, with remo
   assert.equal(h.get('minimaxStatus').textContent, t('settings.common.unavailable'));
   assert.equal(h.get('minimaxErrorMessage').textContent, '');
   h.status([{ source: 'api', accountKey: 'a', status: 'ok' }]);
-  assert.equal(info('a').textContent, t('settings.minimax.statusSet'));
+  await suite.test('new API readings update the retained account row', () => {
+    assert.equal(info('a').textContent, `● ${t('settings.slots.connected')}`);
+  });
   h.api.getKeys = async () => [{ id: 'a', accountKey: 'a', apiRegion: 'auto', billingMode: 'api' }];
   await h.render();
   assert.equal(h.get('minimaxStatus').textContent, t('settings.limits.status.live'));
   assert.equal(h.get('minimaxErrorMessage').textContent, '', 'a recovered list read must not retain a false save error');
+  const retained = h.rows()[0];
+  const remove = retained.querySelector('.plugin-menu').querySelectorAll('button').find(node => node.dataset.slotAction === 'remove');
+  remove.click();
+  remove.focus();
+  h.status([{ source: 'api', accountKey: 'a', status: 'unauthorized' }]);
+  assert.equal(h.rows()[0], retained);
+  assert.equal(h.get('minimaxKeyList').document.activeElement, remove);
+  assert.equal(remove.textContent, t('settings.slots.confirmRemove'));
+  h.api.getKeys = async () => [{ id: 'a', accountKey: 'a', billingMode: 'api', enabled: false }];
+  await h.render();
+  assert.equal(info('a').textContent, `● ${t('settings.slots.paused')}`);
+  h.status([], false);
+  assert.equal(info('a').textContent, `● ${t('settings.slots.paused')}`, 'pause survives provider disable');
+
 });
 
 async function settle() {
@@ -191,7 +205,6 @@ async function settle() {
 }
 
 function namedProfilesHarness() {
-  const source = app.slice(app.indexOf('function renderNamedApiProfiles('), app.indexOf('function renderThirdPartyProfiles('));
   const lists = new Map(['openrouter', 'thirdparty'].map((id) => [id, {
     children: [],
     replaceChildren() { this.children = []; },
@@ -225,8 +238,14 @@ function namedProfilesHarness() {
     }
   };
   const shellErrorSource = app.slice(app.indexOf('function setAccountShellError('), app.indexOf('const { clientColors, fallbackModelColors'));
-  vm.runInNewContext(`${shellErrorSource}\n${source}\nthis.renderNamedApiProfiles = renderNamedApiProfiles;`, context);
-  const render = (providerId) => context.renderNamedApiProfiles({
+  vm.runInNewContext(shellErrorSource, context);
+  const owners = Object.fromEntries(['openrouter', 'thirdparty'].map(id => [id,
+    require('../../src/electron/renderer/limits/providerOwners/thirdparty').create({
+      ...context, initial: { thirdpartyProfileCount: -1 }, getSettings: () => state.settings
+    })]));
+  for (const id of Object.keys(owners)) owners[id].state[`${id}ProfileCount`] = -1;
+  for (const id of Object.keys(owners)) Object.defineProperty(state, `${id}ProfileCount`, { get: () => owners[id].state[`${id}ProfileCount`] });
+  const render = (providerId) => owners[providerId].renderNamedApiProfiles({
     providerId,
     profileSettingsKey: `${providerId}Profiles`,
     envConfiguredKey: `${providerId}EnvConfigured`,
@@ -310,25 +329,31 @@ test('Cursor retires a failed manual login message when status is refreshed', as
     renderSettingsSummaries() {},
     t: (key, values) => values?.message ? `${key}: ${values.message}` : key,
     document: {
-      getElementById: (id) => elements[id] || null,
+      getElementById: (id) => elements[id] || (['cursorSettingsToggle', 'cursorLoginButton'].includes(id) ? { addEventListener() {} } : null),
+      querySelector: () => null,
       createElement: () => ({ className: '', textContent: '', classList: { toggle() {} }, setAttribute() {}, addEventListener() {}, append() {} })
     },
-    window: { tokenMonitor: { cursor: {
+    window: { TokenMonitorLegacyAccountList: require('../../src/electron/renderer/limits/legacyAccountList'), tokenMonitor: { cursor: {
       loginManual: async () => ({ ok: false, error: 'Invalid session' }),
       status: () => statusRequest.promise
     } } }
   };
   const shellErrorSource = app.slice(app.indexOf('function setAccountShellError('), app.indexOf('const { clientColors, fallbackModelColors'));
-  const renderSource = app.slice(app.indexOf('function renderCursorStatus('), app.indexOf('function setCursorCheckboxesEnabled('));
-  const submitSource = app.slice(app.indexOf('  const cursorManualSubmit ='), app.indexOf('  refreshCursorStatus({ discover: true });', app.indexOf('  const cursorManualSubmit =')));
-  vm.runInNewContext(`${shellErrorSource}\n${renderSource}\n${submitSource}\nthis.refreshCursorStatus = refreshCursorStatus; this.renderCursorStatus = renderCursorStatus;`, context);
+  vm.runInNewContext(shellErrorSource, context);
+  const document = require('./accountOwnerDom.fixture.cjs').createDocument();
+  const owner = require('../../src/electron/renderer/limits/providerOwners/cursor').create({
+    ...context, initial: state, getSettings: () => ({}), getAccountContext: () => ({ settings: {} }),
+    preserveScroll: fn => fn(), localProviderStatuses: () => [], setAccountGroupExpanded() {},
+    document: { ...document, getElementById: id => context.document.getElementById(id), querySelector: () => null }
+  });
+  owner.setup();
 
   await manualSubmit.click();
   assert.equal(errors.textContent, 'settings.cursor.loginFailed: Invalid session');
-  context.renderCursorStatus();
+  owner.renderCursorStatus();
   assert.equal(errors.textContent, 'settings.cursor.loginFailed: Invalid session');
 
-  const refresh = context.refreshCursorStatus({ discover: true });
+  const refresh = owner.refreshCursorStatus({ discover: true });
   assert.equal(errors.textContent, '');
   statusRequest.resolve({ accounts: [{ id: 'manual', email: 'user@example.com', enabled: true }], linkedCount: 1 });
   await refresh;
@@ -338,7 +363,6 @@ test('Cursor retires a failed manual login message when status is refreshed', as
 });
 
 test('OpenCode status ignores an older probe after a newer status resolves', async () => {
-  const source = app.slice(app.indexOf('async function updateOpenCodeProfilesStatus('), app.indexOf('function renderOpenCodeProfilesStatusSummary('));
   const requests = [];
   const info = { textContent: '' };
   const summaries = [];
@@ -355,9 +379,13 @@ test('OpenCode status ignores an older probe after a newer status resolves', asy
     t: (key) => key,
     renderOpenCodeProfilesStatusSummary: (profiles) => summaries.push(profiles)
   };
-  vm.runInNewContext(`${source}\nthis.updateOpenCodeProfilesStatus = updateOpenCodeProfilesStatus;`, context);
-  const older = context.updateOpenCodeProfilesStatus();
-  const newer = context.updateOpenCodeProfilesStatus();
+  const owner = require('../../src/electron/renderer/limits/providerOwners/opencode').create({
+    ...context, encodeURIComponent, initial: {}, getSettings: () => ({}), accountShellApi: {
+      render: value => summaries.push(value)
+    }, document: { getElementById: id => id === 'opencodeCookieStatus' ? {} : id.startsWith('opencode-info-') ? info : null }
+  });
+  const older = owner.updateOpenCodeProfilesStatus();
+  const newer = owner.updateOpenCodeProfilesStatus();
   requests[1].resolve({ profiles: { main: { expired: true } } });
   await newer;
   assert.equal(info.textContent, 'settings.opencode.statusExpired');
