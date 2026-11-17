@@ -912,7 +912,7 @@ for (const action of ['move', 'remove', 'rename']) test(`pending ${action} block
   const wait = () => new Promise(resolve => { finish = () => resolve({ ok: true }); });
   if (action === 'move') { h.ipc.presentation = wait; h.click(h.row('a'), 'Move down'); }
   if (action === 'remove') { h.ipc.remove = wait; h.click(h.row('a'), 'Remove account'); h.click(h.row('a'), 'Confirm remove'); }
-  if (action === 'rename') { h.ipc.rename = wait; h.click(h.row('a'), 'Rename'); h.row('a').querySelector('.slot-rename').key('Enter'); h.row('a').querySelector('.slot-rename').key('Escape'); }
+  if (action === 'rename') { h.ipc.rename = wait; h.click(h.row('a'), 'Rename'); h.row('a').querySelector('.slot-rename').value = 'New name'; h.row('a').querySelector('.slot-rename').key('Enter'); h.row('a').querySelector('.slot-rename').key('Escape'); }
   await h.flush(); h.press('b');
   assert.equal(h.listeners.has('pointermove'), false);
   finish(); await h.flush(); h.press('b');
@@ -941,9 +941,9 @@ test('remote rows share the list with device labels and presentation-only menu c
   assert.match(menu.textContent, /on that device/);
   assert.equal(row.querySelector('.slot-fix').classList.contains('hidden'), true);
   await h.click(row, 'Move down');
-  h.click(row, 'Rename'); row.querySelector('.slot-rename').value = 'Remote work';
+  h.click(row, 'Rename'); row.querySelector('.slot-rename').value = 'Renamed remote';
   await row.querySelector('.slot-rename').key('Enter');
-  assert.deepEqual(h.calls, [['presentation', 'qoder', 'r1', 'order', ['default', 'ka', 'kb', 'r2', 'r1']], ['presentation', 'qoder', 'r1', 'rename', 'Remote work']]);
+  assert.deepEqual(h.calls, [['presentation', 'qoder', 'r1', 'order', ['default', 'ka', 'kb', 'r2', 'r1']], ['presentation', 'qoder', 'r1', 'rename', 'Renamed remote']]);
   assert.equal(h.panel.element.querySelector('.slot-remote-list'), undefined);
   assert.deepEqual(h.panel.element.querySelector('.slot-list').children.filter(n => n.dataset.slotId).map(n => n.dataset.slotId), ['remote:r2', 'remote:r1', 'default', 'a', 'b']);
 });
@@ -1045,7 +1045,7 @@ for (const action of ['move', 'rename']) test(`pending remote ${action} presenta
   else {
     h.click(h.row('remote:r1'), 'Rename');
     const input = h.row('remote:r1').querySelector('.slot-rename');
-    input.key('Enter'); input.key('Escape');
+    input.value = 'Remote name'; input.key('Enter'); input.key('Escape');
   }
   h.row('remote:r2').key('ArrowUp', true);
   h.press('remote:r2');
@@ -1307,4 +1307,16 @@ test('blur during composition saves the final text only after composition ends',
   assert.equal(h.calls.length, 0);
   input.value = '工作'; await input.listeners.compositionend?.();
   assert.deepEqual(h.calls, [['rename', 'qoder', 'a', '工作']]);
+});
+
+test('opening rename and clicking away without editing does not clear an inherited name', async () => {
+  const h = harness();
+  h.panel.update(h.slots, [{ accountKey: 'default', accountDisplayName: 'Other device label', status: 'ok' }]);
+  h.click(h.row('default'), 'Rename');
+  const input = h.row('default').querySelector('.slot-rename');
+  assert.equal(input.value, '');
+  h.row('a').querySelector('.plugin-more').focus();
+  await input.listeners.blur();
+  assert.deepEqual(h.calls, []);
+  assert.equal(h.row('default').querySelector('.slot-rename'), undefined);
 });

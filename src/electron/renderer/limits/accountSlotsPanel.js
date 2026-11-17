@@ -356,7 +356,8 @@
         item.editing = true;
         const revision = ++item.renameRevision;
         const input = make('input', 'slot-rename');
-        input.value = presentationLabel(item.slot, item.slot.accountKey, presentation);
+        const initialValue = presentationLabel(item.slot, item.slot.accountKey, presentation);
+        input.value = initialValue;
         input.placeholder = name.textContent;
         input.setAttribute('aria-label', tr('rename'));
         name.replaceChildren(input);
@@ -376,6 +377,7 @@
         };
         const save = async () => {
           if (!current() || saving || composing) return;
+          if (input.value === initialValue) { finish(); return; }
           saving = true;
           input.readOnly = true;
           const result = await run('rename', id, input.value);
