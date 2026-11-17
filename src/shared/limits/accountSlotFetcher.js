@@ -92,7 +92,9 @@ function slotAccounts(entry, options, deps) {
   const slots = normalizeAccountSlots(entry, options[accountSlotKey(entry)]);
   const enabled = slots.filter(slot => slot.enabled).map(slot => describe(slot));
   const values = defaultAccountValues(entry, options, deps.env || process.env);
-  const ambient = ambientAccounts(entry, options, deps).filter((/** @type {any} */ account) => account.enabled).map((/** @type {any} */ account) => ({
+  const discovered = ambientAccounts(entry, options, deps);
+  const discoveryFailed = discovered.discoveryFailed === true;
+  const ambient = discovered.filter((/** @type {any} */ account) => account.enabled).map((/** @type {any} */ account) => ({
     // The descriptor carries fetch deps and discovery status; the identity this
     // runtime resolved (headless collectors have no persistence callback) wins.
     ...account, ...describe(account)
@@ -105,7 +107,7 @@ function slotAccounts(entry, options, deps) {
 
   const scope = options.limitRefreshScope;
   const scopeKey = scope?.provider === entry.id && scope.accountKey ? String(scope.accountKey) : '';
-  if (!scopeKey) return { accounts, scopeKey, previousKeys, check: /** @type {ScopeCheck} */ (null) };
+  if (!scopeKey) return { accounts, scopeKey, previousKeys, discoveryFailed, check: /** @type {ScopeCheck} */ (null) };
   const check = scopeCheck(entry, options, scopeKey);
   // A provisional key no fetch can report: a held one is recovered in place (the
   // next provider-wide pass moves it), and one no local row holds is another
@@ -184,7 +186,7 @@ function createAccountSlotFetcher(entry) {
     return collect();
 
     async function collect() {
-      const { accounts, scopeKey, previousKeys, check } = slotAccounts(entry, options, deps);
+      const { accounts, scopeKey, previousKeys, check, discoveryFailed } = slotAccounts(entry, options, deps);
       /** @type {{account: SlotAccount, values: Record<string, string>, row: any, accountKey: string, moved: boolean}[]} */
       const answered = [];
       let complete = true;
@@ -281,7 +283,9 @@ function createAccountSlotFetcher(entry) {
       // superseded pass loses nothing: the next one sees the same leftovers.
       if (!scopeKey && complete) {
         for (const accountKey of previousKeys) {
-          if (!emittedKeys.has(accountKey) && !((options.previousLimits?.providers || []).some((/** @type {any} */ row) => row.accountKey === accountKey && row.sourceDetail === 'app') && answered.some(answer => answer.account.id.startsWith('discovered-') && answer.row.status !== 'ok'))) rows.push({ provider: entry.id, accountKey, removed: true });
+          const appReading = (options.previousLimits?.providers || []).some((/** @type {any} */ row) => row.accountKey === accountKey && row.sourceDetail === 'app');
+          // An app account is not retired while its discovery failed or answered unavailable.
+          if (!emittedKeys.has(accountKey) && !(appReading && (discoveryFailed || answered.some(answer => answer.account.id.startsWith('discovered-') && answer.row.status !== 'ok')))) rows.push({ provider: entry.id, accountKey, removed: true });
         }
       }
       return rows;

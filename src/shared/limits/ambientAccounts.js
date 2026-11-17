@@ -13,9 +13,12 @@ function ambientAccounts(entry, options, deps) {
   catch (_) {
     // An unreadable app store does not prove sign-out. Keep only public identity
     // metadata as unavailable; there is no retained credential to retry here.
-    return Object.entries(metadata).map(([fingerprint, item]) => ({ ...item,
+    const known = Object.entries(metadata).map(([fingerprint, item]) => ({ ...item,
       id: `discovered-${fingerprint}`, source: 'discovered', fingerprint, values: {},
       discoveryStatus: 'unavailable', enabled: item.enabled !== false, order: item.order ?? -1 }));
+    // A headless collector has no persisted metadata; the flag lets it keep the
+    // app readings it already holds rather than retiring them.
+    return Object.assign(known, { discoveryFailed: true });
   }
   const saved = normalizeAccountSlots(entry, options[accountSlotKey(entry)]).filter(slot => slot.enabled);
   return discovered.map((/** @type {any} */ record) => {
