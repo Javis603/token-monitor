@@ -209,16 +209,21 @@ function createAccountSlotFetcher(entry) {
       const { accounts, scopeKey, previousKeys, check, discoveryFailed } = slotAccounts(entry, options, deps);
       /** @type {{account: SlotAccount, values: Record<string, string>, row: any, accountKey: string, moved: boolean}[]} */
       const answered = [];
+      /** @type {Map<string, any[]>} */
+      const successful = new Map();
       let complete = true;
       for (const account of accounts) {
         if (deps.signal?.aborted) { complete = false; break; }
         // The environment account carries `values: null`; compare what it dispatches.
         const values = account.values || defaultAccountValues(entry, options, deps.env || process.env);
-        if (answered.some(answer => answer.row.status === 'ok' && accountValuesFingerprint(answer.values) === accountValuesFingerprint(values))) continue;
+        const fingerprint = accountValuesFingerprint(values);
         const owned = new Set([account.accountKey, account.provisional, ...account.accountKeyAliases]);
+        // Reuse successful requests while each duplicate owner still passes
+        // through server-proof separation and its own callback.
         // The adapter decides retirement below, so a fetch's own removal rows are dropped.
-        const answers = (await fetchAccount(account, owned, options, deps))
-          .filter((row) => !row.removed && answersScope(row, check));
+        const answers = (successful.get(fingerprint) || await fetchAccount(account, owned, options, deps))
+          .filter((row) => !row.removed && answersScope(row, check)).map(row => ({ ...row }));
+        if (answers.some(row => row.status === 'ok')) successful.set(fingerprint, answers.map(row => ({ ...row })));
         if (!answers.length && check && !check.keyless) continue;
         if (!answers.length) answers.push({ provider: entry.id, status: 'unavailable', windows: [], updatedAt: nowIso((deps.now || Date.now)()) });
         for (const row of answers) {
@@ -240,6 +245,8 @@ function createAccountSlotFetcher(entry) {
       const rows = [];
       /** @type {Map<string, number>} */
       const emitted = new Map();
+      /** @type {string[]} First explicit local label, with discoveries preceding saved slots. */
+      const labels = [];
       const provesServer = entry.serverAccountKey && entry.limits?.[entry.serverAccountKey];
       for (const { account, values, row, accountKey, moved } of answered) {
         // A slot whose stored key was a proven server account, now answering as a
@@ -284,7 +291,7 @@ function createAccountSlotFetcher(entry) {
         // so a stale duplicate credential cannot hide a working one.
         /** @type {number | undefined} */
         const index = emitted.get(accountKey) ?? rows.findIndex(existing => reportsKey(existing, accountKey) || reportsKey(row, existing.accountKey));
-        if (index === undefined || index < 0) { emitted.set(accountKey, rows.length); rows.push(emit); }
+        if (index === undefined || index < 0) { emitted.set(accountKey, rows.length); rows.push(emit); labels.push(account.label); }
         else {
           const kept = rows[index].status !== 'ok' && emit.status === 'ok' ? emit : rows[index];
           const dropped = kept === emit ? rows[index] : emit;
@@ -292,7 +299,9 @@ function createAccountSlotFetcher(entry) {
           // follows and the suppressed key is retired below.
           const keptAliases = [...new Set([...(kept.accountKeyAliases || []), ...(dropped.accountKey !== kept.accountKey ? [dropped.accountKey] : []), ...(dropped.accountKeyAliases || [])])]
             .filter(alias => alias !== kept.accountKey).slice(-8);
-          rows[index] = { ...kept, ...(keptAliases.length ? { accountKeyAliases: keptAliases } : {}) };
+          labels[index] ||= account.label;
+          rows[index] = { ...kept, ...(keptAliases.length ? { accountKeyAliases: keptAliases } : {}),
+            ...(labels[index] ? { accountName: labels[index] } : {}) };
         }
       }
       const emittedKeys = new Set(rows.map(row => row.accountKey));
@@ -303,10 +312,14 @@ function createAccountSlotFetcher(entry) {
       // runtime accepted, not from what earlier passes meant to retire, means a
       // superseded pass loses nothing: the next one sees the same leftovers.
       if (!scopeKey && complete) {
+        const previousAppRows = (options.previousLimits?.providers || []).filter((/** @type {any} */ row) => row.provider === entry.id && row.sourceDetail === 'app');
+        // An unknown credential key may be a rotated token for a held account.
+        // A failure on an already held identity only preserves that identity.
+        const unresolvedDiscovery = answered.some(answer => answer.account.id.startsWith('discovered-') && answer.row.status !== 'ok'
+          && !previousAppRows.some((/** @type {any} */ row) => row.accountKey === answer.accountKey));
         for (const accountKey of previousKeys) {
-          const appReading = (options.previousLimits?.providers || []).some((/** @type {any} */ row) => row.accountKey === accountKey && row.sourceDetail === 'app');
-          // An app account is not retired while its discovery failed or answered unavailable.
-          if (!emittedKeys.has(accountKey) && !(appReading && (discoveryFailed || answered.some(answer => answer.account.id.startsWith('discovered-') && answer.row.status !== 'ok')))) rows.push({ provider: entry.id, accountKey, removed: true });
+          const appReading = previousAppRows.some((/** @type {any} */ row) => row.accountKey === accountKey);
+          if (!emittedKeys.has(accountKey) && !(appReading && (discoveryFailed || unresolvedDiscovery))) rows.push({ provider: entry.id, accountKey, removed: true });
         }
       }
       return rows;
