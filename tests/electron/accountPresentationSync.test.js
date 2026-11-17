@@ -237,3 +237,26 @@ test('a Hub upgraded in place is used once its stats advertise the group', async
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.ok(calls.includes('PUT'), 'the upgraded Hub receives the local names');
 });
+
+test('an edit made offline survives a restart and is published on the next connection', async () => {
+  let stored = [];
+  let online = false;
+  let document = { revision: 3, value: { deepseek: { labels: { k: 'Old' }, order: [] } } };
+  const make = () => createAccountPresentationSync({
+    getContext: () => ({ mode: 'client', url: 'https://hub' }), identity: () => 'hub',
+    getCacheIdentity: () => 'hub', getSeed: () => ({}), getLocalLabels: () => [], apply: () => {},
+    loadJournal: () => structuredClone(stored), saveJournal: journal => { stored = structuredClone(journal); },
+    request: async (_context, _path, method, body) => {
+      if (!online) throw new Error('offline');
+      if (method === 'GET') return { status: 200, body: structuredClone(document) };
+      document = { revision: document.revision + 1, value: body.value };
+      return { status: 200, body: structuredClone(document) };
+    }
+  });
+  await make().publish([{ provider: 'deepseek', type: 'rename', key: 'k', label: 'Renamed offline' }]);
+  assert.equal(stored.length, 1, 'the unacknowledged edit is journaled');
+  online = true;
+  await make().refresh();
+  assert.equal(document.value.deepseek.labels.k, 'Renamed offline');
+  assert.deepEqual(stored, [], 'an acknowledged edit leaves the journal');
+});

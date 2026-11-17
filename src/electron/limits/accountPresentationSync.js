@@ -21,7 +21,8 @@ function replayPresentation(value, operations) {
   return normalizeSharedSyncValue(KIND, next);
 }
 /** @param {any} options */
-function createAccountPresentationSync({ getContext, identity, getSeed, getLocalLabels = () => [], getCacheIdentity, apply, request }) {
+function createAccountPresentationSync({ getContext, identity, getSeed, getLocalLabels = () => [], getCacheIdentity, apply, request,
+  loadJournal = () => [], saveJournal = () => {} }) {
   let lane = Promise.resolve();
   /** @type {Promise<void> | null} */
   let refreshPending = null;
@@ -34,13 +35,22 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
   // Edits published while an earlier pass is in flight. They are kept apart
   // from `pending` until their own pass, but any snapshot applied meanwhile
   // replays them, so a refresh can never put an older name back.
+  // A journal left by an earlier run starts as queued edits for its destination.
   /** @type {any[]} */
   let queued = [];
+  try { queued = (loadJournal() || []).filter((/** @type {any} */ item) => item?.destination && item.operation); } catch (_) { queued = []; }
   /** @param {any} value */
   /** @param {any} value @param {string} destination */
   const withQueued = (value, destination) => {
     const own = queued.filter(item => item.destination === destination).map(item => item.operation);
     return own.length ? replayPresentation(value, own) : value;
+  };
+  // Edits not yet acknowledged by their Hub survive a restart: a device that
+  // edits offline and quits publishes them on its next connection.
+  const persist = () => {
+    try {
+      saveJournal([...pending.map(operation => ({ destination: binding, operation })), ...queued].slice(-200));
+    } catch (_) { /* The local edit is saved; only its later publication is at risk. */ }
   };
   const connected = () => ['client', 'host'].includes(getContext()?.mode) && getContext()?.url;
   /** @param {any[]} operations */
@@ -53,13 +63,14 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
     // Queued edits belong to the Hub they were made against; others are dropped.
     const mine = queued.filter(item => item.destination === captured).map(item => item.operation);
     queued = [];
-    if (unsupported) return;
+    if (unsupported) { pending = []; persist(); return; }
     pending.push(...mine, ...operations);
+    persist();
     const current = () => connected() && identity(getContext()) === captured;
     try {
       let response = await request(context, `/api/sync/settings/${KIND}`, 'GET');
       if (!current()) return;
-      if ([400, 404].includes(response.status)) { unsupported = true; pending = []; return; }
+      if ([400, 404].includes(response.status)) { unsupported = true; pending = []; persist(); return; }
       if (response.status !== 200) return;
       let document = response.body;
       // This device's own slot names are its input, so they fill gaps on the
@@ -90,7 +101,7 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
         }
         response = await request(context, `/api/sync/settings/${KIND}`, 'PUT', { baseRevision: document.revision, value });
         if (!current()) return;
-        if ([400, 404].includes(response.status)) { unsupported = true; pending = []; return; }
+        if ([400, 404].includes(response.status)) { unsupported = true; pending = []; persist(); return; }
         if (response.status === 409) {
           // Always reread; never retarget a stale replacement to a new revision.
           response = await request(context, `/api/sync/settings/${KIND}`, 'GET');
@@ -100,6 +111,7 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
         }
         if (response.status !== 200) return;
         pending = [];
+        persist();
         await apply(withQueued(normalizeSharedSyncValue(KIND, response.body.value), captured), captured);
         revision = response.body.revision;
         return;
@@ -110,6 +122,7 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
   function publish(operations) {
     const captured = identity(getContext());
     queued.push(...operations.map(operation => ({ destination: captured, operation })));
+    if (operations.length) persist();
     const task = lane.then(() => {
       if (identity(getContext()) !== captured) return;
       return reconcile([]);
