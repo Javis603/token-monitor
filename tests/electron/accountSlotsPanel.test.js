@@ -199,6 +199,52 @@ test('alias ownership follows current keys before aliases in rows and account or
   assert.match(h.row('b').textContent, /Connected/);
 });
 
+for (const identity of ['current key', 'slot alias', 'reading alias']) {
+  for (const reversed of [false, true]) test(`Alibaba saved slots match their own variant with ${identity} and ${reversed ? 'reversed' : 'forward'} readings`, () => {
+    const h = harness(t, 'alibaba');
+    const settings = { alibabaAccountSlots: ['cn', 'cn-personal'].map(variant => ({
+      id: variant, label: '', enabled: true, accountKey: 'shared-uid',
+      accountKeyAliases: identity === 'slot alias' ? ['previous-key'] : [],
+      values: { alibabaCookie: `session=${variant}`, alibabaVariant: variant }
+    })) };
+    const service = createAccountSlotService({ getSettings: () => settings, write: async () => {} });
+    const slots = service.list('alibaba').accounts;
+    assert.deepEqual(slots.map(slot => slot.formValues.alibabaVariant), ['cn', 'cn-personal']);
+    const readings = ['cn', 'cn-personal'].map(region => ({
+      provider: 'alibaba', region, accountKey: identity === 'slot alias' ? 'previous-key' : identity === 'reading alias' ? 'resolved-uid' : 'shared-uid',
+      accountKeyAliases: identity === 'reading alias' ? ['shared-uid'] : [],
+      accountName: region === 'cn' ? 'Team owner' : 'Personal owner', status: region === 'cn' ? 'ok' : 'unauthorized'
+    }));
+    h.panel.update(slots, reversed ? readings.reverse() : readings);
+    const team = h.row('cn'), personal = h.row('cn-personal');
+    assert.equal(team.querySelector('.slot-name').textContent, 'Team owner');
+    assert.equal(team.querySelector('.slot-status').classList.contains('slot-connected'), true);
+    assert.equal(team.querySelector('.slot-fix').classList.contains('hidden'), true);
+    assert.equal(personal.querySelector('.slot-name').textContent, 'Personal owner');
+    assert.equal(personal.querySelector('.slot-status').classList.contains('slot-invalid'), true);
+    assert.equal(personal.querySelector('.slot-fix').classList.contains('hidden'), false);
+  });
+}
+
+test('Alibaba saved slots without a variant default to cn and reject missing or different reading regions', () => {
+  const h = harness(t, 'alibaba');
+  const settings = { alibabaAccountSlots: [{ id: 'legacy', label: '', enabled: true, accountKey: 'shared-uid', values: { alibabaCookie: 'session=legacy' } }] };
+  const service = createAccountSlotService({ getSettings: () => settings, write: async () => {} });
+  const slots = service.list('alibaba').accounts;
+  assert.equal(slots[0].formValues.alibabaVariant, undefined);
+  for (const region of [undefined, 'intl', 'cn-personal']) {
+    h.panel.update(slots, [{ provider: 'alibaba', accountKey: 'shared-uid', region, status: 'ok' }]);
+    assert.equal(h.row('legacy').querySelector('.slot-status').classList.contains('slot-unavailable'), true, `must not borrow ${region} status`);
+    assert.equal(h.row('legacy').querySelector('.slot-fix').classList.contains('hidden'), false);
+  }
+  h.panel.update(slots, [
+    { provider: 'alibaba', accountKey: 'shared-uid', region: 'cn-personal', status: 'unauthorized' },
+    { provider: 'alibaba', accountKey: 'shared-uid', region: 'cn', status: 'ok' }
+  ]);
+  assert.equal(h.row('legacy').querySelector('.slot-status').classList.contains('slot-connected'), true);
+  assert.equal(h.row('legacy').querySelector('.slot-fix').classList.contains('hidden'), true);
+});
+
 test('Home preserves slot order before card limit while preserving quota sorted provider positions', () => {
   const { homeLimitAccountsForProviders } = require('../../src/electron/renderer/homeOverview');
   const row = (provider, accountKey, remainingPercent) => ({ provider, accountKey, windows: [{ kind: 'monthly', remainingPercent }] });

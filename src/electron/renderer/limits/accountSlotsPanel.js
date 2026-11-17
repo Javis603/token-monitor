@@ -514,6 +514,15 @@
         .filter(row => row.provider === form.id && row.accountKey && row.sourceDeviceId && row.sourceDeviceId !== localDeviceId && !slotOwner(slots, row.accountKey, row.accountKeyAliases))
         .map(row => ({ id: `remote:${row.sourceDeviceId}:${row.accountKey}`, source: 'remote', sourceDeviceId: row.sourceDeviceId, accountKey: row.accountKey, accountKeyAliases: row.accountKeyAliases, label: presentation.labels?.[row.accountKey] || '', enabled: true, fingerprint: accountIdentity.accountStableFingerprint(row).slice(0, 12) }));
     }
+    function localReading(slot) {
+      // Alibaba keeps one account key across plans; both readings and alias
+      // owners must belong to this slot's variant. Legacy saved slots use cn.
+      const variant = form.id === 'alibaba' ? slot.formValues?.alibabaVariant || 'cn' : null;
+      const candidates = variant ? readings.filter(row => row.region === variant) : readings;
+      const owners = variant ? slots.filter(owner => (owner.formValues?.alibabaVariant || 'cn') === variant) : slots;
+      return candidates.find(row => row.accountKey === slot.accountKey)
+        || candidates.find(row => slotOwner(owners, row.accountKey, row.accountKeyAliases) === slot);
+    }
     function render() {
       if (rowDrag.deferRender()) return;
       const active = activeAccounts();
@@ -525,7 +534,7 @@
         item.el.dataset.slotDraggable = 'true';
         const remote = slot.source === 'remote';
         const reading = remote ? remoteReadings.find(row => row.sourceDeviceId === slot.sourceDeviceId && row.accountKey === slot.accountKey)
-          : readings.find(row => row.accountKey === slot.accountKey) || readings.find(row => slotOwner(slots, row.accountKey, row.accountKeyAliases) === slot);
+          : localReading(slot);
         if (!item.editing) item.name.textContent = accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') }, reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading, t, presentation);
         const provenance = secondaryText(slot) || slot.sourceName || (slot.source === 'environment' ? t('settings.limits.sources.env') : !slot.source && !customEditor ? tr('savedSource') : '');
         const detail = [provenance, detailText(slot)].filter((value, index, all) => value && all.indexOf(value) === index).join(' · ');
