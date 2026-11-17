@@ -198,7 +198,18 @@ async function fetchManusLimits(options = {}, deps = {}) {
   }
 }
 
+function discoverAccountSlots(deps = {}) {
+  try {
+    const session = (deps.readManusDesktopSession || readManusDesktopSession)(deps.manusDesktopOptions || {});
+    return [{ values: { manusSessionToken: session.token }, accountKey: hashKey('manus', session.userId || session.token), accountEmail: session.email, sourceName: 'Manus' }];
+  } catch (error) {
+    if (error?.status === 'notConfigured') return [];
+    throw error;
+  }
+}
+
 module.exports = {
+  discoverAccountSlots,
   MANUS_API_ORIGIN,
   MANUS_CREDITS_PATH,
   MANUS_FETCH_TIMEOUT_MS,

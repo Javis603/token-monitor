@@ -369,7 +369,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     }
     const entry = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === provider && entry.accountSlots);
     if (entry) {
-      const slots = normalizeAccountSlots(entry, config[accountSlotKey(entry)]).filter(slot => slot.enabled);
+      const slots = [...Object.values(config[`${entry.id}AmbientAccounts`] || {}), ...normalizeAccountSlots(entry, config[accountSlotKey(entry)])].filter(slot => slot.enabled !== false);
       const current = providerRuntimeState.get(`account-slot:${entry.id}:default:${accountValuesFingerprint(defaultAccountValues(entry, config, deps.env || process.env))}`)?.accountKey;
       const owner = row => slots.find(slot => slot.accountKey === row.accountKey)
         || (row.accountKey === current ? undefined : slots.find(slot => slot.accountKeyAliases.includes(row.accountKey)));
@@ -402,7 +402,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     snapshot = normalizeLimitsSummary({
       updatedAt: new Date(now()).toISOString(),
       refreshMs,
-      multiAccountProviders: enabled && !stopped ? configuredMultiAccountProviders(LIMIT_PROVIDER_REGISTRY, config, deps.env || process.env).filter(id => configuredProviders.has(id)) : [],
+      multiAccountProviders: enabled && !stopped ? configuredMultiAccountProviders(LIMIT_PROVIDER_REGISTRY, config, deps.env || process.env, deps).filter(id => configuredProviders.has(id)) : [],
       providers
     });
     pruneAttemptedResetBoundaries(snapshot, attemptedResetBoundaries);

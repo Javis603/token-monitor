@@ -25,7 +25,7 @@ Feature allowances appear only when `meters.perFeature` supplies a positive coun
 
 ## Source precedence
 
-A saved `harkCookie` wins over `TOKEN_MONITOR_HARK_COOKIE`, then `HARK_COOKIE`, then desktop discovery. Other platforms support the same manual cookie but have no desktop discovery. A non-empty invalid credential or an API rejection never falls through to the desktop session. Clearing the saved cookie restores environment or desktop discovery.
+Saved cookies, the environment credential (`TOKEN_MONITOR_HARK_COOKIE` before `HARK_COOKIE`) and the macOS desktop session are independent account rows. Pasting a cookie no longer hides the desktop account. A discovered row can be renamed, paused and reordered, but replacement/removal belongs in Hark. Signing out removes that row while saved accounts remain. Other platforms support saved cookies without desktop discovery.
 
 Credential forms use the shared save validation: a rejected draft is not persisted and does not replace the existing account. The rejection appears in the panel; an existing desktop reading is not used to validate the draft.
 

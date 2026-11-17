@@ -4,6 +4,7 @@
 // Cline limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'cline',
+  accountSlots: true,
   fetch: 'fetchClineLimits',
   fields: [
     {
@@ -18,7 +19,9 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   // login: otherwise the pill reads "Not configured" on the machine this
   // provider is built for. The source label then says which lane it is.
   discover: (env, limits) => limits.resolveClineAutomaticCredential(env),
+  discoveredAccounts: (_env, limits, deps) => limits.discoverAccountSlots(deps),
   status: {
+    credential: 'clineApiKey',
     configuredKey: 'clineCredentialConfigured',
     sourceKey: 'clineCredentialSource',
     pendingKey: 'clinePendingCheckSince'

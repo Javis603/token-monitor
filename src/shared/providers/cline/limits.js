@@ -315,13 +315,14 @@ function parseClineLimits(payload) {
 // `no plan history found for user` that fetchJson maps to `unavailable` before
 // reaching here (verified live) — and neither is the same as a live zero-usage
 // window: report no data rather than 0%.
-function providerResult(windows, { nowMs, credential, status = '', accountSeed = '', accountEmail = '' }) {
+function providerResult(windows, { nowMs, credential, status = '', accountSeed = '', accountEmail = '', accountId = '' }) {
   // `accountSeed` is decided per lane in resolveClineCredential; with no stable
   // identifier there is no accountKey, rather than one invented here.
   const seed = accountSeed || credential?.accountSeed || '';
   return normalizeLimitProvider({
     provider: 'cline',
     accountKey: seed ? hashKey('cline', seed) : '',
+    accountKeyAliases: accountId && seed !== accountId ? [hashKey('cline', accountId)] : [],
     accountLabel: '',
     accountEmail: String(accountEmail || credential?.email || '').trim().toLowerCase(),
     source: credential?.source || 'api',
@@ -457,7 +458,7 @@ async function fetchClineLimits(options = {}, deps = {}) {
   throwIfAborted(deps.signal, 'Cline limits aborted');
   let credential;
   try {
-    credential = resolveClineCredential(options, env);
+    credential = deps.clineCredential || resolveClineCredential(options, env);
   } catch (error) {
     // The file lane's refusal, reported as the credential problem it is — and it
     // still names the lane it came from.
@@ -549,10 +550,22 @@ async function fetchClineLimits(options = {}, deps = {}) {
   // without a subscription whose console still answers a balance).
   const status = planStatus || (readings.length > 0 ? 'ok' : 'unavailable');
   if (readings.length === 0 && !planStatus) return failingProvider(status, nowMs, credential.source);
-  return providerResult(readings, { nowMs, credential, status, accountSeed, accountEmail: email });
+  return providerResult(readings, { nowMs, credential, status, accountSeed, accountId, accountEmail: email });
+}
+
+function discoverAccountSlots(deps = {}) {
+  try {
+    const credential = resolveClineCredential({}, { ...(deps.env || process.env), CLINE_API_KEY: '', CLINEPASS_API_KEY: '' });
+    return [{ values: { clineApiKey: credential.accessToken }, accountKey: credential.accountSeed ? hashKey('cline', credential.accountSeed) : '',
+      accountEmail: credential.email, sourceName: 'Cline', fetchDeps: { clineCredential: credential } }];
+  } catch (error) {
+    if (['notConfigured', 'unauthorized'].includes(error?.status)) return [];
+    throw error;
+  }
 }
 
 module.exports = {
+  discoverAccountSlots,
   CLINE_API_BASE,
   USAGE_LIMITS_PATH,
   USERS_ME_PATH,

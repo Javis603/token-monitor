@@ -47,7 +47,7 @@ Connect's JSON mapping omits zero-valued fields, so an absent count is read as z
 ## Invariants and known gaps
 
 - Desktop discovery supports macOS and Windows. Linux supports the same manual web session and credits API.
-- A saved or environment session selects that account; an API rejection never silently switches to a different desktop account. Clearing the manual session restores desktop discovery.
+- Saved sessions, the environment session and the discovered desktop sign-in are independent account rows. Pasting a session no longer hides the desktop account. Its row can be renamed, paused and reordered; sign out in Manus to remove it. An API rejection never switches credentials.
 - Signing out of Manus only removes its desktop source; a separately saved web session remains configured until cleared or expired.
 - If a future Manus build starts encrypting the cookie (`encrypted_value` only), the provider reports unavailable; it does not read the Keychain.
 - The endpoint and its field names can change without notice. Unknown shapes fail closed.

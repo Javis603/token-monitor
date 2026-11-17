@@ -8,6 +8,9 @@
 })(typeof window !== 'undefined' ? window : null, function accountSlotsPanelApi(menus) {
   function accountName(slot, reading, t) {
     return slot.label || reading?.accountName || reading?.accountEmail || reading?.email
+      || slot.accountName || slot.accountEmail
+      // The app's name is a proper noun; the phrase around it is localized.
+      || (slot.sourceName ? t('settings.slots.discoveredName', { source: slot.sourceName }) : '')
       || t('settings.slots.account', { fingerprint: slot.fingerprint });
   }
   function accountStatus(slot, reading) {
@@ -40,7 +43,7 @@
     return result;
   }
 
-  function createPanel({ form, label, document, t, ipc, forms, preserveScroll, onChanged, openExternal }) {
+  function createPanel({ form, label, document, t, ipc, forms, preserveScroll, onChanged, openExternal, maskEmail = value => value }) {
     const make = (tag, className = '', text) => {
       const el = document.createElement(tag);
       el.className = className;
@@ -278,7 +281,7 @@
         const item = rowFor(slot.id);
         item.slot = slot;
         const reading = readings.find(row => slotOwner(slots, row.accountKey, row.accountKeyAliases) === slot);
-        if (!item.editing) item.name.textContent = accountName(slot, reading, t);
+        if (!item.editing) item.name.textContent = accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') }, reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading, t);
         const status = accountStatus(slot, reading);
         item.el.classList.toggle('slot-paused', !slot.enabled);
         item.status.className = `slot-status slot-${status}`;
@@ -289,13 +292,18 @@
           item.up.disabled = index === 0;
           item.down.disabled = index === active.length - 1;
           item.actions.classList.toggle('hidden', slot.source === 'environment');
+          if (slot.source === 'discovered') { item.replace.remove(); item.remove.remove(); }
         }
-        item.fix.classList.toggle('hidden', slot.source === 'environment' || !slot.enabled || !['invalid', 'unavailable'].includes(status));
+        item.fix.classList.toggle('hidden', Boolean(slot.source) || !slot.enabled || !['invalid', 'unavailable'].includes(status));
         if (slot.source === 'environment' && !item.environmentNote) {
           item.environmentNote = localized(make('div', 'settings-note'), 'settings.slots.environment');
           item.el.querySelector('.slot-copy').append(item.environmentNote);
         }
         if (item.environmentNote) item.environmentNote.classList.toggle('hidden', slot.source !== 'environment');
+        if (slot.source === 'discovered' && !item.discoveredNote) {
+          item.discoveredNote = localized(make('div', 'settings-note'), 'settings.slots.discovered', { source: slot.sourceName });
+          item.el.querySelector('.plugin-menu')?.append(item.discoveredNote);
+        }
         const before = [...list.children].filter(node => node !== editor)[index];
         if (before !== item.el) {
           if (item.el.isConnected) list.moveBefore(item.el, before || null);
