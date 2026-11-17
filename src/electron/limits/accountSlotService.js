@@ -47,8 +47,17 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
     return credentialKey && !getSettings()[credentialKey] ? { id: 'environment', label: '', enabled: true, source: 'environment', values, accountKey: hashKey(entry.id, credential), ...identity } : null;
   };
   const ambient = entry => ambientAccounts(entry, getSettings(), { ...probeDeps?.(), env });
-  const ordered = (entry, list = slots(entry)) => orderAccountRows(list, ambient(entry),
-    environment(entry) ? { ...environment(entry), order: getSettings()[defaultIdentityKey(entry)]?.order } : null);
+  const ordered = (entry, list = slots(entry)) => {
+    const rows = orderAccountRows(list, ambient(entry),
+      environment(entry) ? { ...environment(entry), order: getSettings()[defaultIdentityKey(entry)]?.order } : null);
+    const order = getSettings().limitAccountPresentation?.[entry.id]?.order || [];
+    const rank = row => {
+      const canonical = order.indexOf(row.accountKey);
+      const index = canonical >= 0 ? canonical : order.findIndex(key => row.accountKeyAliases?.includes(key));
+      return index < 0 ? order.length : index;
+    };
+    return rows.sort((a, b) => rank(a) - rank(b));
+  };
   const visible = entry => ordered(entry).filter((item, index, all) => !all.slice(0, index).some(other => (other.source || item.source)
     && other.enabled !== false && item.enabled !== false && other.accountKey && (other.accountKey === item.accountKey || other.accountKeyAliases?.includes(item.accountKey) || item.accountKeyAliases?.includes(other.accountKey))));
   const dto = entry => visible(entry).map(({ id, label, enabled, accountKey, accountKeyAliases = [], values, fingerprint, source, sourceName, accountName, accountEmail, createdAt, updatedAt }) => {
@@ -210,7 +219,10 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
           if (item.source === 'environment') patch[defaultIdentityKey(entry)] = { ...getSettings()[defaultIdentityKey(entry)], order };
         });
         if (entry.discoveredAccounts) patch[`${entry.id}AmbientAccounts`] = metadata;
-        await write(patch);
+        const operations = [{ provider: providerId, type: 'order', order: rows.map(row => row.accountKey || hashKey(entry.id, 'account-slot', `slot:${row.id}`)) }];
+        const { replayPresentation } = require('./accountPresentationSync');
+        await write({ ...patch, limitAccountPresentation: replayPresentation(getSettings().limitAccountPresentation, operations) });
+        publishPresentation(operations);
         changed(entry, [], false);
         return list(providerId);
       }
@@ -225,7 +237,11 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
         metadata[external.fingerprint] = record;
         // One control record per account: drop records left by an earlier token.
         for (const [fingerprint, item] of Object.entries(metadata)) if (fingerprint !== external.fingerprint && item?.accountKey === external.accountKey) delete metadata[fingerprint];
-        await write({ [`${entry.id}AmbientAccounts`]: metadata });
+        const operations = operation === 'rename' ? [{ provider: providerId, type: 'rename', key: external.accountKey, label: value }] : [];
+        const { replayPresentation } = require('./accountPresentationSync');
+        await write({ [`${entry.id}AmbientAccounts`]: metadata,
+          ...(operations.length ? { limitAccountPresentation: replayPresentation(getSettings().limitAccountPresentation, operations) } : {}) });
+        if (operations.length) publishPresentation(operations);
         // A key another enabled owner (saved or environment) still holds is not retired.
         const keys = [external.accountKey, ...(external.accountKeyAliases || [])];
         const stillOwned = ordered(entry).some(item => item.id !== external.id && item.enabled !== false
@@ -256,6 +272,25 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       return list(providerId);
     }).catch(() => failure('credentialStorageUnavailable'));
   }
+  // Persist controls for source-owned rows too, so an offline restart has the
+  // same local subsequence even before the shared document is loaded.
+  function sourcePresentationPatch(entry, group) {
+    const patch = {};
+    const metadata = { ...(getSettings()[`${entry.id}AmbientAccounts`] || {}) };
+    for (const row of ordered(entry).filter(row => row.source)) {
+      const keys = [row.accountKey, ...(row.accountKeyAliases || [])];
+      const labelKey = keys.find(key => Object.hasOwn(group.labels || {}, key));
+      const canonical = (group.order || []).indexOf(row.accountKey);
+      const order = canonical >= 0 ? canonical : (group.order || []).findIndex(key => keys.includes(key));
+      if (row.source === 'discovered') metadata[row.fingerprint] = { ...metadata[row.fingerprint],
+        accountKey: row.accountKey, accountKeyAliases: row.accountKeyAliases, accountName: row.accountName,
+        accountEmail: row.accountEmail, sourceName: row.sourceName, enabled: row.enabled,
+        label: labelKey === undefined ? row.label : group.labels[labelKey], order: order < 0 ? row.order : order };
+      else if (order >= 0) patch[defaultIdentityKey(entry)] = { ...getSettings()[defaultIdentityKey(entry)], order };
+    }
+    if (entry.discoveredAccounts) patch[`${entry.id}AmbientAccounts`] = metadata;
+    return patch;
+  }
   function presentation(providerId, accountKey, operation, value) {
     return serialize(async () => {
       const entry = entryFor(providerId);
@@ -269,7 +304,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       const local = slots(entry, next[providerId].order);
       const stored = normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]);
       const reordered = local.some((slot, index) => slot.id !== stored[index]?.id);
-      await write({ limitAccountPresentation: next, ...(reordered ? { [accountSlotKey(entry)]: local } : {}) });
+      await write({ ...sourcePresentationPatch(entry, next[providerId]), limitAccountPresentation: next, ...(reordered ? { [accountSlotKey(entry)]: local } : {}) });
       publishPresentation([operation === 'rename'
         ? { provider: providerId, type: 'rename', key: accountKey, label: next[providerId]?.labels[accountKey] || '' }
         : { provider: providerId, type: 'order', order: next[providerId].order }]);
@@ -300,6 +335,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
         if (JSON.stringify(metadata[fingerprint]) === JSON.stringify(nextIdentity)) return true;
         metadata[fingerprint] = nextIdentity;
         await write({ [`${entry.id}AmbientAccounts`]: metadata });
+        await migratePresentationKey(providerId, current.accountKey, identity.accountKey, previous.label);
         return true;
       }
       if (!id) return false;
@@ -341,7 +377,11 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
           slot.label = labels[slot.accountKey];
           changedAny = true;
         }
+        const sourcePatch = sourcePresentationPatch(entry, group);
+        const sourceChanged = Object.entries(sourcePatch).some(([key, value]) => JSON.stringify(getSettings()[key]) !== JSON.stringify(value));
+        if (sourceChanged) await write(sourcePatch);
         if (changedAny) await commit(entry, next, true, false);
+        else if (sourceChanged) changed(entry, [], false);
       }
     }).catch(() => {});
   }

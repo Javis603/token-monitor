@@ -111,8 +111,6 @@ const { defaultIdentityKey, accountSlotField, normalizeAmbientAccounts } = requi
  * @property {boolean} [combineMatchingCredential] Preserve a combined pool fetch for an exact form-value match.
  * @property {AccountValues} [combinedFetchDeps]
  *
- * @property {boolean} [environmentWhenSaved]
- * @property {boolean} [dedupeAccounts]
  * @typedef {object} AccountSource
  * @property {string} id Stable, provider-local read lane.
  * @property {'cli'|'desktop'|'web'|'apiKey'|'env'|'file'|'oauth'} kind
@@ -124,6 +122,8 @@ const { defaultIdentityKey, accountSlotField, normalizeAmbientAccounts } = requi
  * @typedef {object} AccountDeclaration
  * @property {string} id
  * @property {AccountSource[]} sources Display-only read sources; never select or dispatch a fetch.
+ * @property {boolean} [environmentWhenSaved]
+ * @property {boolean} [dedupeAccounts]
  * @property {string} fetch Limits export called by the collector.
  * @property {AccountField[]} fields
  * @property {boolean} [accountSlots] Requires a form, no managed/profiles fields, credentials only from declared fields, no singleton credential write-back, and an audit of module-level state.

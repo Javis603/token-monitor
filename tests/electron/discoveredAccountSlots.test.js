@@ -387,3 +387,34 @@ test('cline: pausing a discovered duplicate does not retire the key a saved acco
   await service.setEnabled('cline', discovered.id, false);
   assert.deepEqual(changes.at(-1).retiredAccountKeys, []);
 });
+
+test('discovered edits publish, adopt shared controls, and carry presentation through identity resolution', async t => {
+  stubDiscovery(t, 'factory', () => [{ values: { factoryApiKey: 'droid' }, accountKey: 'droid-key' }]);
+  let settings = { factoryAccountSlots: [{ id: 'saved', values: { factoryApiKey: 'saved' }, accountKey: 'saved-key' }] };
+  const operations = [], changes = [];
+  const make = () => createAccountSlotService({ getSettings: () => settings, env: { FACTORY_API_KEY: 'env' }, probeDeps: () => ({}),
+    write: async patch => { settings = { ...settings, ...patch }; }, onPresentation: batch => operations.push(...batch), onChanged: (provider, change) => changes.push({ provider, ...change }) });
+  let service = make();
+  const found = service.list('factory').accounts.find(row => row.source === 'discovered');
+  await service.rename('factory', found.id, 'Work');
+  assert.deepEqual(operations.at(-1), { provider: 'factory', type: 'rename', key: 'droid-key', label: 'Work' });
+  await service.move('factory', found.id, 'down');
+  assert.equal(operations.at(-1).type, 'order');
+  const order = ['saved-key', 'remote-key', 'droid-key', service.list('factory').accounts.find(row => row.source === 'environment').accountKey];
+  const shared = { factory: { labels: { 'droid-key': 'Shared' }, order } };
+  settings.limitAccountPresentation = shared;
+  const beforeAdoption = changes.length;
+  await service.adoptSharedLabels(shared);
+  assert.deepEqual(changes.slice(beforeAdoption), [{ provider: 'factory', retiredAccountKeys: [], refresh: false }]);
+  assert.equal(service.list('factory').accounts.find(row => row.id === found.id).label, 'Shared');
+  service = make();
+  assert.deepEqual(service.list('factory').accounts.map(row => row.accountKey), order.filter(key => key !== 'remote-key'));
+  await service.resolved('factory', found.id, { accountKey: 'resolved-droid', accountKeyAliases: ['droid-key'] }, { factoryApiKey: 'droid' });
+  assert.equal(settings.limitAccountPresentation.factory.labels['resolved-droid'], 'Shared');
+  assert.deepEqual(settings.limitAccountPresentation.factory.order.slice(0, order.length), order.map(key => key === 'droid-key' ? 'resolved-droid' : key));
+  assert.doesNotMatch(JSON.stringify(operations), /factoryApiKey|"droid"/);
+  delete settings.limitAccountPresentation;
+  service = make();
+  assert.equal(service.list('factory').accounts[0].id, 'saved');
+  assert.equal(service.list('factory').accounts.find(row => row.id === found.id).label, 'Shared');
+});

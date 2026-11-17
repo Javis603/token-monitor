@@ -460,7 +460,7 @@ test('environment comparison includes Qoder site and DeepSeek web-token companio
       : { deepseekApiKey: 'SECRET-env', deepseekWebToken: 'web-companion' };
     const added = await h.service.add(provider, values);
     assert.equal(added.saved, true);
-    const id = added.accounts.find(account => account.id !== 'environment').id;
+    const id = h.settings[`${provider}AccountSlots`][0].id;
     assert.equal((await h.service.replace(provider, id, {})).saved, true);
     assert.equal(h.writes.length, 2);
   }
@@ -472,12 +472,13 @@ test('a pre-existing environment duplicate can replace itself without migrating 
   const added = await add(h);
   const id = added.accounts[0].id;
   env.DEEPSEEK_API_KEY = 'SECRET-one';
-  assert.equal(h.service.list('deepseek').accounts.length, 2);
+  assert.equal(h.service.list('deepseek').accounts.length, 1, 'same identity has one displayed owner');
   const replaced = await h.service.replace('deepseek', id, { deepseekApiKey: ' SECRET-one ' });
   assert.equal(replaced.saved, true);
-  assert.equal(replaced.accounts.length, 2);
+  assert.equal(replaced.accounts.length, 1);
   assert.equal(h.settings.deepseekAccountSlots[0].id, id);
-  assert.equal(h.writes.length, 2);
+  assert.equal(h.settings.deepseekAccountSlots[0].values.deepseekApiKey, 'SECRET-one');
+  assert.equal(h.writes.length, 3, 'initial named add also persists its shared label');
 });
 
 test('local slot labels and moves publish user operations without credential material', async () => {
