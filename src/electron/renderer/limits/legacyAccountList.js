@@ -170,7 +170,10 @@
       actions.classList.toggle('hidden', footer !== actions);
       if (config.isOpen) setOpen(Boolean(config.isOpen()));
       else if (active) setOpen(!active.classList.contains('hidden'));
-      cancel.disabled = Boolean(options.busy?.()) && !config.allowBusyCancel;
+      const disabled = Boolean(options.busy?.()) && !config.allowBusyCancel;
+      // Cancel can live inside an observed owner form. Rewriting a present
+      // boolean attribute queues another mutation even when its value is equal.
+      if (cancel.disabled !== disabled) cancel.disabled = disabled;
     };
     const close = () => {
       if (options.busy?.() && !config.allowBusyCancel) return;

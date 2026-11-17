@@ -5,8 +5,8 @@ const { createDocument } = require('./accountOwnerDom.fixture.cjs');
 const { create } = require('../../src/electron/renderer/limits/legacyAccountList');
 const { translate } = require('../../src/electron/renderer/i18n');
 
-function harness(editorConfig = {}) {
-  const document = createDocument(), container = document.createElement('div'); document.root.append(container);
+function harness(editorConfig = {}, document = createDocument()) {
+  const container = document.createElement('div'); document.root.append(container);
   const form = document.createElement('div'); form.id = 'ownedForm'; form.classList.add('hidden');
   const submitActions = document.createElement('div'); submitActions.className = 'settings-actions';
   const submit = document.createElement('button'); submit.id = 'ownedSubmit'; submitActions.append(submit);
@@ -156,4 +156,48 @@ test('provider account lists precede guidance with live controls and keyboard or
   const settings = render.indexOf('optionsInner.append(limitProviderSettingsList(');
   const usage = render.indexOf('optionsInner?.append(limitProviderUsageItemsList(');
   assert.ok(connection >= 0 && connection < accounts && accounts < settings && settings < usage);
+});
+
+test('busy submit-row cancel settles its observed disabled mutations before returning to the event loop', () => {
+  const document = createDocument();
+  const observers = [], pending = new Set();
+  // Reflect Chromium boolean attributes: setting true emits an attribute
+  // mutation even if already true; removing an absent attribute emits none.
+  document.defaultView.MutationObserver = class {
+    constructor(callback) { this.callback = callback; this.targets = []; observers.push(this); }
+    observe(target) { this.targets.push(target); }
+  };
+  const h = harness({ submit: 'ownedSubmit' }, document);
+  const cancel = h.submitActions.children[1];
+  let disabled = cancel.disabled;
+  Object.defineProperty(cancel, 'disabled', {
+    get: () => disabled,
+    set(value) {
+      const mutated = Boolean(value) || disabled;
+      disabled = Boolean(value);
+      if (mutated) for (const observer of observers) {
+        if (observer.targets.some(target => target.contains(cancel))) pending.add(observer);
+      }
+    }
+  });
+  function settle() {
+    for (let round = 0; pending.size && round < 10; round++) {
+      const batch = [...pending]; pending.clear();
+      for (const observer of batch) observer.callback();
+    }
+    assert.equal(pending.size, 0, 'editor observer must not perpetually observe its own Cancel writes');
+  }
+  // Returning to settings while a provider check is pending, then completing
+  // it, must keep the editor and provider-owned draft usable on each visit.
+  for (let visit = 0; visit < 3; visit++) {
+    h.container.querySelector('.slot-add').click();
+    h.setBusy(true); settle();
+    assert.equal(cancel.disabled, true);
+    h.list.updateReadings([]); settle();
+    h.setBusy(false); settle();
+    assert.equal(cancel.disabled, false);
+    cancel.click(); settle();
+    assert.equal(h.input.value, 'draft');
+    assert.equal(h.container.querySelector('.legacy-editor-reveal').inert, true);
+  }
 });
