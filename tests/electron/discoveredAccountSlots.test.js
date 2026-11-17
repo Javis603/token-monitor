@@ -137,3 +137,71 @@ test('an unreadable Hark store retains its public identity as unavailable, witho
   assert.equal(rows[0].status, 'unavailable');
   assert.equal(rows[0].accountKey, 'known');
 });
+
+function stubDiscovery(t, id, records) {
+  const entry = limitProviderEntry(id);
+  const original = entry.limits.discoverAccountSlots;
+  entry.limits.discoverAccountSlots = () => records();
+  t.after(() => { entry.limits.discoverAccountSlots = original; });
+  return entry;
+}
+
+test('factory: a working discovered key alongside FACTORY_API_KEY collects both accounts', async t => {
+  const entry = stubDiscovery(t, 'factory', () => [{ values: { factoryApiKey: 'droid-secret' }, sourceName: 'Droid' }]);
+  const fetcher = createAccountSlotFetcher({ ...entry, fetchLimits: (options, deps) => ({ provider: 'factory', status: 'ok', accountKey: `${options.factoryApiKey || deps.env.FACTORY_API_KEY}-account`, windows: [] }) });
+  const rows = await fetcher({}, { env: { FACTORY_API_KEY: 'env-secret' } });
+  assert.deepEqual(rows.filter(row => !row.removed).map(row => row.accountKey).sort(), ['droid-secret-account', 'env-secret-account']);
+});
+
+test('cline: a paused discovered account leaves its saved duplicate listed and manageable', async t => {
+  stubDiscovery(t, 'cline', () => [{ values: { clineApiKey: 'app-secret' }, accountKey: 'same-account', sourceName: 'Cline' }]);
+  let settings = { clineAccountSlots: [{ id: 'saved', values: { clineApiKey: 'saved-secret' }, accountKey: 'same-account' }] };
+  const service = createAccountSlotService({ getSettings: () => settings, env: {}, probeDeps: () => ({}), write: async patch => { settings = { ...settings, ...patch }; } });
+  assert.equal(service.list('cline').accounts.length, 1, 'two enabled owners of one account show once');
+  await service.setEnabled('cline', service.list('cline').accounts[0].id, false);
+  const accounts = service.list('cline').accounts;
+  assert.deepEqual(accounts.map(account => [account.id.startsWith('discovered-') ? 'discovered' : account.id, account.enabled]), [['discovered', false], ['saved', true]]);
+});
+
+test('manus: after a token rotation, controls apply to the current record and the older one is dropped', async t => {
+  let token = 'token-one';
+  stubDiscovery(t, 'manus', () => [{ values: { manusSessionToken: token }, accountKey: 'user-1', sourceName: 'Manus' }]);
+  let settings = {};
+  const service = createAccountSlotService({ getSettings: () => settings, env: {}, probeDeps: () => ({}), write: async patch => { settings = { ...settings, ...patch }; } });
+  await service.rename('manus', service.list('manus').accounts[0].id, 'Work');
+  token = 'token-two';
+  const rotated = service.list('manus').accounts[0];
+  assert.equal(rotated.label, 'Work', 'the rotated token keeps the name');
+  await service.setEnabled('manus', rotated.id, false);
+  assert.equal(service.list('manus').accounts[0].enabled, false, 'the pause takes effect after rotation');
+  assert.equal(Object.keys(settings.manusAmbientAccounts).length, 1);
+});
+
+test('factory: an unreadable Droid file is not a sign-out; a missing one is', t => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'factory-discovery-'));
+  t.after(() => { fs.chmodSync(path.join(home, '.factory', '.env'), 0o600); fs.rmSync(home, { recursive: true, force: true }); });
+  const { discoverAccountSlots } = limitProviderEntry('factory').limits;
+  fs.mkdirSync(path.join(home, '.factory'));
+  assert.deepEqual(discoverAccountSlots({ homeDir: home }), []);
+  fs.writeFileSync(path.join(home, '.factory', '.env'), 'FACTORY_API_KEY=droid-secret\n');
+  assert.equal(discoverAccountSlots({ homeDir: home })[0].values.factoryApiKey, 'droid-secret');
+  if (process.platform === 'win32' || process.getuid?.() === 0) return;
+  fs.chmodSync(path.join(home, '.factory', '.env'), 0o000);
+  assert.throws(() => discoverAccountSlots({ homeDir: home }));
+});
+
+test('cline: a saved reading suppressed by the discovered alias is retired and its key handed to the survivor', async t => {
+  const entry = stubDiscovery(t, 'cline', () => [{ values: { clineApiKey: 'app-secret' }, accountKey: 'server-key', sourceName: 'Cline' }]);
+  const options = {
+    clineAccountSlots: [{ id: 'saved', values: { clineApiKey: 'saved-secret' }, accountKey: 'saved-key' }],
+    previousLimits: { providers: [{ provider: 'cline', accountKey: 'saved-key', status: 'ok', windows: [] }] }
+  };
+  const fetcher = createAccountSlotFetcher({ ...entry, fetchLimits: o => o.clineApiKey === 'app-secret'
+    ? { provider: 'cline', status: 'ok', accountKey: 'server-key', windows: [] }
+    : { provider: 'cline', status: 'ok', accountKey: 'saved-key', accountKeyAliases: ['server-key'], windows: [] } });
+  const rows = await fetcher(options, { env: {} });
+  const live = rows.filter(row => !row.removed);
+  assert.equal(live.length, 1);
+  assert.ok(live[0].accountKeyAliases?.includes('saved-key') || live[0].accountKey === 'saved-key');
+  if (live[0].accountKey !== 'saved-key') assert.ok(rows.some(row => row.removed && row.accountKey === 'saved-key'));
+});

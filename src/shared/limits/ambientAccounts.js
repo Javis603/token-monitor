@@ -30,7 +30,9 @@ function ambientAccounts(entry, options, deps) {
     const fingerprint = accountValuesFingerprint(record.values);
     const remembered = metadata[fingerprint] || {};
     const accountKey = record.accountKey || remembered.accountKey || hashKey(entry.id, 'discovered', fingerprint);
-    const controls = Object.values(metadata).find((/** @type {any} */ item) => item.accountKey === accountKey) || remembered;
+    // The current fingerprint's record is authoritative; an older record of the
+    // same account (before a token rotation) only seeds it.
+    const controls = metadata[fingerprint] || Object.values(metadata).find((/** @type {any} */ item) => item.accountKey === accountKey) || {};
     return { ...record, id: `discovered-${fingerprint}`, source: 'discovered', fingerprint,
       accountName: record.accountName || remembered.accountName || '', accountEmail: record.accountEmail || remembered.accountEmail || '',
       accountKey, accountKeyAliases: remembered.accountKeyAliases || [], label: controls.label || '',
