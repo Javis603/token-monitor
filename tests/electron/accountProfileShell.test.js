@@ -191,7 +191,7 @@ async function settle() {
 }
 
 function namedProfilesHarness() {
-  const source = app.slice(app.indexOf('function renderNamedApiProfiles('), app.indexOf('function renderOpenRouterProfiles('));
+  const source = app.slice(app.indexOf('function renderNamedApiProfiles('), app.indexOf('function renderThirdPartyProfiles('));
   const lists = new Map(['openrouter', 'thirdparty'].map((id) => [id, {
     children: [],
     replaceChildren() { this.children = []; },

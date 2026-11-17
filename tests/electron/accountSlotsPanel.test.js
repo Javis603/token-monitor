@@ -40,7 +40,7 @@ class Node {
   click() { const result = this.listeners.click?.({ detail: 0 }); if (this.attributes.popovertarget) { const menu = this.document.getElementById(this.attributes.popovertarget); if (menu.popoverOpen) menu.hidePopover(); else menu.showPopover(); } return result; }
   key(key, altKey = false) { return this.listeners.keydown?.({ key, altKey, preventDefault() {}, stopPropagation() {} }); }
 }
-function harness(translateMessage = t) {
+function harness(translateMessage = t, providerId = 'qoder') {
   const document = { defaultView: { innerWidth: 400, innerHeight: 400, addEventListener() {}, removeEventListener() {} }, addEventListener() {}, removeEventListener() {}, moves: 0, createElement: tag => new Node(tag, document), createTextNode: text => ({ textContent: text }), getElementById: id => document.root.querySelector(`#${id}`) };
   const calls = []; let verdict = { saved: true, verdict: 'valid', accounts: [] };
   const records = [{ id: 'a', label: 'Zulu', fingerprint: 'aa', accountKey: 'ka', enabled: true }, { id: 'b', label: 'Alpha', fingerprint: 'bb', accountKey: 'kb', enabled: false }];
@@ -51,10 +51,10 @@ function harness(translateMessage = t) {
   const ipc = Object.fromEntries(['rename', 'move', 'setEnabled', 'remove', 'add', 'replace'].map(op => [op, async (...args) => { calls.push([op, ...args]); return ['add', 'replace'].includes(op) ? verdict : { ok: true, accounts: slots }; }]));
   const host = new Node('div', document);
   const defaultPanel = new Node('div', document);
-  const defaultForm = createCredentialPanel(limitAccountFormsForRenderer().find(f => f.id === 'qoder'), { document, translate: t, onToggle() {}, onClear() {}, onOpen() {}, onRefresh() {}, onSave() {} });
+  const defaultForm = createCredentialPanel(limitAccountFormsForRenderer().find(f => f.id === providerId), { document, translate: t, onToggle() {}, onClear() {}, onOpen() {}, onRefresh() {}, onSave() {} });
   for (const child of [...defaultForm.querySelector('.cursor-settings-details').children]) defaultPanel.append(child);
   host.append(defaultPanel);
-  const panel = createPanel({ defaultPanel, form: limitAccountFormsForRenderer().find(f => f.id === 'qoder'), label: 'Qoder', document, t: translateMessage, ipc, forms: { createCredentialPanel, resolveOpenUrl }, preserveScroll: fn => fn(), onChanged() {}, openExternal() {} });
+  const panel = createPanel({ defaultPanel, form: limitAccountFormsForRenderer().find(f => f.id === providerId), label: 'Qoder', document, t: translateMessage, ipc, forms: { createCredentialPanel, resolveOpenUrl }, preserveScroll: fn => fn(), onChanged() {}, openExternal() {} });
   host.append(panel.element);
   document.root = host;
   const update = () => panel.update(slots, [{ accountKey: 'ka', status: 'unauthorized', updatedAt: new Date().toISOString() }], true);
@@ -782,4 +782,12 @@ test('a discovered row without a name or email is named after its app in the UI 
   h.panel.update([slot], [{ accountKey: 'ambient-key', status: 'ok' }]);
   assert.equal(h.row('ambient').querySelector('.slot-name').textContent, 'Cline sign-in');
   assert.match(h.row('ambient').textContent, /Sign out in Cline to remove this account\./);
+});
+
+test('OpenRouter single-key form submits to slot add without a profile-name field', async () => {
+  const h = harness(t, 'openrouter'); h.panel.openEditor(null);
+  h.panel.element.querySelector('.slot-editor').children[1].value = 'Work';
+  h.document.getElementById('openrouterSlotDraftopenrouterApiKeyInput').value = 'fixture-secret';
+  await h.document.getElementById('openrouterSlotDraftCredentialSubmit').click();
+  assert.deepEqual(h.calls[0], ['add', 'openrouter', { openrouterApiKey: 'fixture-secret' }, 'Work']);
 });

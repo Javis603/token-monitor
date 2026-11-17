@@ -203,7 +203,7 @@ function configuredAccounts(options = {}, deps = {}) {
   return accounts.filter((account) => account.name);
 }
 
-async function fetchOpenRouterLimits(options = {}, deps = {}) {
+async function fetchOpenRouterProfiles(options = {}, deps = {}) {
   let accounts = configuredAccounts(options, deps);
   const scope = options.limitRefreshScope?.provider === 'openrouter'
     ? options.limitRefreshScope
@@ -222,6 +222,18 @@ async function fetchOpenRouterLimits(options = {}, deps = {}) {
     });
   }
   return Promise.all(accounts.map((account) => fetchOpenRouterAccount(account.name, account.apiKey, deps)));
+}
+
+// Raw single-account adapter: slots supply an explicit key and an isolated env.
+async function fetchOpenRouterLimits(options = {}, deps = {}) {
+  // Keep collecting the source if a startup migration could not finish.
+  if (!deps.accountSlotSaved && Object.keys(options.openrouterProfiles || {}).length) return fetchOpenRouterProfiles(options, deps);
+  const apiKey = openrouterToken(deps.env || process.env, options.openrouterApiKey);
+  if (!apiKey) return normalizeLimitProvider({ provider: 'openrouter', source: 'api', status: 'notConfigured', windows: [], updatedAt: new Date((deps.now || Date.now)()).toISOString() });
+  const row = await fetchOpenRouterAccount('', apiKey, deps);
+  delete row.accountName;
+  delete row.accountLabel;
+  return row;
 }
 
 module.exports = {

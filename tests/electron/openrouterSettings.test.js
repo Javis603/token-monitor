@@ -33,73 +33,16 @@ function viewBody(name, nextName = '') {
     : functionBody(`${source}\nfunction __endOfView__() {`, name, '__endOfView__');
 }
 
-test('OpenRouter settings provide multi-account API key management without a custom URL', () => {
-  const html = read('src/electron/renderer/index.html');
-  const app = read('src/electron/renderer/app.js');
-  const preload = read('src/electron/preload.js');
-
-  assert.match(html, /id="openrouterAccountGroup"/);
-  assert.match(html, /id="openrouterProfileList"/);
-  assert.match(html, /id="openrouterProfileName"/);
-  assert.match(html, /<input id="openrouterApiKeyInput" type="password"[^>]*data-i18n-placeholder="settings\.openrouter\.apiKeyPlaceholder"/);
-  assert.doesNotMatch(html, /<textarea id="openrouterApiKeyInput"/);
-  assert.match(html, /id="openrouterProfileSubmit"/);
-  assert.match(html, /data-i18n="settings\.openrouter\.profileName"/);
-  assert.doesNotMatch(html, /openrouter[^"]*(?:Base URL|baseUrl|base-url)/i);
-  assert.match(app, /window\.tokenMonitor\.openExternal\('https:\/\/openrouter\.ai\/settings\/keys'\)/);
-  assert.match(app, /renderOpenRouterProfiles/);
-  assert.match(app, /setProfileEnabled/);
-  assert.match(app, /renameProfile/);
-  assert.match(app, /deleteProfile/);
-  assert.match(preload, /getProfiles: \(\) => ipcRenderer\.invoke\('openrouter:getProfiles'\)/);
-  assert.match(preload, /saveProfile: \(name, apiKey\) => ipcRenderer\.invoke\('openrouter:saveProfile', name, apiKey\)/);
-});
-
-test('OpenRouter account statuses settle when refreshed stats arrive', () => {
-  const app = read('src/electron/renderer/app.js');
-  const refreshStats = app.slice(
-    app.indexOf('async function refreshStats(options = {})'),
-    app.indexOf('async function refreshStatusViewManually()')
-  );
-  const statsPush = app.slice(
-    app.indexOf('window.tokenMonitor.onStatsPush?.'),
-    app.indexOf('function pickWorstProvider(')
-  );
-  const statsRender = app.slice(
-    app.indexOf('function renderStatsUpdate()'),
-    app.indexOf('const statsRenderScheduler =')
-  );
-
-  assert.match(refreshStats, /statsRenderScheduler\.request\(\)/);
-  assert.match(statsPush, /statsRenderScheduler\.request\(\)/);
-  assert.match(statsRender, /updateOpenRouterProfilesStatus\(\)/);
-});
-
-test('OpenRouter credentials stay in the main process and renderer receives configured state only', () => {
-  const app = read('src/electron/renderer/app.js');
-  const main = read('src/electron/main.js');
-  const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
-  const { accountFieldProjection, normalizeAccountPatch } = require('../../src/electron/limits/accountSettings');
-  const accountSettings = read('src/electron/limits/accountSettings.js');
-
-  assert.deepEqual(CREDENTIAL_SETTING_PATHS.openrouterProfiles, ['providers', 'openrouter', 'profiles']);
-  assert.match(accountSettings, /function redactOpenRouterProfilesForRenderer/);
-  assert.match(accountSettings, /apiKey: profile\?\.apiKey \? 'set' : ''/);
-  assert.equal(accountFieldProjection({ openrouterProfiles: { example: { apiKey: 'private' } } }).openrouterProfiles.example.apiKey, 'set');
-  assert.match(main, /normalizeAccountPatch\(patch, normalizedPatch\)/);
-  const patch = { openrouterProfiles: { example: { apiKey: 'private' } } };
-  normalizeAccountPatch(patch, patch);
-  assert.equal(Object.hasOwn(patch, 'openrouterProfiles'), false);
-  assert.match(main, /ipcMain\.handle\('openrouter:saveProfile'/);
-  assert.match(main, /ipcMain\.handle\('openrouter:deleteProfile'/);
-  assert.match(main, /ipcMain\.handle\('openrouter:renameProfile'/);
-  assert.match(main, /ipcMain\.handle\('openrouter:setProfileEnabled'/);
-  assert.match(main, /AbortSignal\.timeout\(15_000\)/);
-  assert.match(main, /openrouterLimits\.openrouterProfileName\(rawName\)/);
-  assert.match(main, /openrouterLimits\.openrouterProfileName\(rawNewName\)/);
-  assert.match(main, /errorCode: 'invalidName'/);
-  assert.match(app, /function openrouterProfileErrorText\(result\)/);
-  assert.match(app, /t\('settings\.openrouter\.invalidName'\)/);
+test('OpenRouter uses a single secret form and the shared slot panel', () => {
+  const { limitAccountFormsForRenderer, accountFieldProjection } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(form => form.id === 'openrouter');
+  assert.equal(form.accountSlots, true);
+  assert.deepEqual(form.fields.map(field => [field.key, field.secret]), [['openrouterApiKey', true]]);
+  assert.ok(!JSON.stringify(form).includes('storePath'));
+  assert.doesNotMatch(read('src/electron/renderer/index.html'), /id="openrouterProfileName"/);
+  assert.doesNotMatch(read('src/electron/renderer/app.js'), /renderOpenRouterProfiles/);
+  const projection = accountFieldProjection({ openrouterApiKey: 'private', openrouterProfiles: { work: { apiKey: 'private' } } });
+  assert.ok(!JSON.stringify(projection).includes('private'));
 });
 
 test('OpenRouter Limits presentation shows a real balance meter and compact spend tooltip', () => {

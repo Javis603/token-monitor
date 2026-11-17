@@ -199,7 +199,6 @@ const {
   limitAccountFormsForRenderer,
   normalizeAccountField,
   normalizeAccountPatch,
-  redactOpenRouterProfilesForRenderer,
   redactThirdPartyProfilesForRenderer,
   rendererOmittedAccountKeys
 } = require('./limits/accountSettings');
@@ -314,7 +313,7 @@ async function probeOpenCodeApiKey(apiKey) {
     return { status: 'unavailable', windows: [] };
   }
 }
-const openrouterLimits = require('../shared/providers/openrouter/limits');
+const { createOpenRouterProfileCommands } = require('./limits/openrouterProfileCommands');
 const thirdPartyLimits = require('../shared/providers/thirdparty/limits');
 const subscriptionDisplay = require('../shared/subscriptionDisplay');
 const { CURRENCY_CODES, normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
@@ -9783,92 +9782,10 @@ app.whenReady().then(() => {
       catch (error) { return { ok: false, error: error?.message || 'Could not save MiniMax API key' }; }
     });
   }
-  ipcMain.handle('openrouter:getProfiles', async () => {
-    return {
-      profiles: redactOpenRouterProfilesForRenderer(settings.openrouterProfiles || {}),
-      hasEnvVar: Boolean(openrouterLimits.openrouterToken(process.env))
-    };
-  });
-  ipcMain.handle('openrouter:saveProfile', async (_event, rawName, rawApiKey) => {
-    const name = openrouterLimits.openrouterProfileName(rawName);
-    const apiKey = openrouterLimits.openrouterToken({}, rawApiKey);
-    if (!name) return { ok: false, errorCode: 'invalidName' };
-    if (!apiKey) return { ok: false, errorCode: 'missingApiKey' };
-    try {
-      const provider = await openrouterLimits.fetchOpenRouterAccount(name, apiKey, electronProviderDeps({
-        env: process.env,
-        signal: AbortSignal.timeout(15_000)
-      }));
-      if (provider?.status !== 'ok') {
-        return { ok: false, error: provider?.status === 'unauthorized' ? 'OpenRouter rejected the API key' : 'Could not validate the OpenRouter API key' };
-      }
-      settings.openrouterProfiles = {
-        ...(settings.openrouterProfiles || {}),
-        [name]: { apiKey, enabled: true }
-      };
-      saveSettings({ throwOnError: true });
-      void queueLimitInvalidation({ provider: 'openrouter', accountName: name }, 'profile-save');
-      return { ok: true };
-    } catch (error) {
-      return { ok: false, error: error?.message || 'Could not validate the OpenRouter API key' };
-    }
-  });
-  ipcMain.handle('openrouter:deleteProfile', async (_event, rawName) => {
-    const name = String(rawName || '').trim();
-    const profiles = { ...(settings.openrouterProfiles || {}) };
-    if (!profiles[name]) return { ok: false, error: 'Profile not found' };
-    delete profiles[name];
-    settings.openrouterProfiles = profiles;
-    try {
-      saveSettings({ throwOnError: true });
-    } catch (error) {
-      return { ok: false, error: error?.message || 'Could not persist OpenRouter profile deletion' };
-    }
-    void queueLimitInvalidation({ provider: 'openrouter', accountName: name }, 'profile-delete', {
-      clear: true,
-      refresh: false
-    });
-    return { ok: true };
-  });
-  ipcMain.handle('openrouter:renameProfile', async (_event, rawOldName, rawNewName) => {
-    const oldName = String(rawOldName || '').trim();
-    const newName = openrouterLimits.openrouterProfileName(rawNewName);
-    const profiles = { ...(settings.openrouterProfiles || {}) };
-    if (!newName || oldName === newName) return { ok: false, errorCode: 'invalidName' };
-    if (!profiles[oldName]) return { ok: false, error: 'Profile not found' };
-    if (profiles[newName]) return { ok: false, error: 'Profile name already exists' };
-    profiles[newName] = profiles[oldName];
-    delete profiles[oldName];
-    settings.openrouterProfiles = profiles;
-    try {
-      saveSettings({ throwOnError: true });
-    } catch (error) {
-      return { ok: false, error: error?.message || 'Could not persist OpenRouter profile rename' };
-    }
-    void queueLimitInvalidation({ provider: 'openrouter', accountName: oldName }, 'profile-rename', {
-      clear: true,
-      refresh: false
-    });
-    void queueLimitInvalidation({ provider: 'openrouter', accountName: newName }, 'profile-rename');
-    return { ok: true };
-  });
-  ipcMain.handle('openrouter:setProfileEnabled', async (_event, rawName, enabled) => {
-    const name = String(rawName || '').trim();
-    const profiles = { ...(settings.openrouterProfiles || {}) };
-    if (!profiles[name]) return { ok: false, error: 'Profile not found' };
-    profiles[name] = { ...profiles[name], enabled: Boolean(enabled) };
-    settings.openrouterProfiles = profiles;
-    try {
-      saveSettings({ throwOnError: true });
-    } catch (error) {
-      return { ok: false, error: error?.message || 'Could not persist OpenRouter profile state' };
-    }
-    void queueLimitInvalidation({ provider: 'openrouter', accountName: name }, 'profile-state', {
-      clear: !enabled,
-      refresh: Boolean(enabled)
-    });
-    return { ok: true };
-  });
+  const openrouterProfiles = createOpenRouterProfileCommands(accountSlotService);
+  for (const method of ['getProfiles', 'saveProfile', 'deleteProfile', 'renameProfile', 'setProfileEnabled']) {
+    ipcMain.handle(`openrouter:${method}`, (_event, ...args) => openrouterProfiles[method](...args));
+  }
   ipcMain.handle('thirdparty:getProfiles', async () => {
     return {
       profiles: redactThirdPartyProfilesForRenderer(settings.thirdPartyProfiles || {}),
