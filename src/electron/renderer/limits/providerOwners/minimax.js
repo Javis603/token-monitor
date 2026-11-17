@@ -56,7 +56,7 @@ async function renderMinimaxApiKeys() {
     if (!isCurrent() || !isSettingsSurfaceVisible()) return;
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
       sourceLabel: () => t('settings.limits.sources.apiKey'),
-      editor: { nodes: ['minimaxAddDetails', 'minimaxErrorMessage'], visibility: 'minimaxAddDetails' },
+      editor: { submit: 'minimaxKeySubmit', nodes: ['minimaxAddDetails', 'minimaxErrorMessage'], visibility: 'minimaxAddDetails' },
     document, provider: 'minimax', label: host.providerLabel || 'MiniMax',
     add: () => { document.getElementById('minimaxAddDetails')?.classList.toggle('hidden'); document.getElementById('minimaxApiKeyInput')?.focus(); }, container: list, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,

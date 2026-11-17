@@ -49,7 +49,7 @@ function renderMimoStatus() {
 
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
       sourceLabel: account => t(account.removable === false ? 'settings.limits.sources.desktop' : 'settings.limits.sources.web'),
-      editor: { nodes: ['mimoAddDetails', 'mimoAccountErrorMessage'], visibility: 'mimoAddDetails', cancel: () => setMimoAddExpanded(false) },
+      editor: { submit: 'mimoSaveAccountButton', nodes: ['mimoAddDetails', 'mimoAccountErrorMessage'], visibility: 'mimoAddDetails', cancel: () => setMimoAddExpanded(false) },
     document, provider: 'mimo', label: host.providerLabel || 'MiMo',
     add: () => setMimoAddExpanded(document.getElementById('mimoAddDetails')?.classList.contains('hidden')), container: listEl, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,

@@ -39,10 +39,8 @@
     const automaticSummary = t(selection?.autoLabelKey || (mixed ? 'settings.limits.sources.mixedSummary' : automatic
       ? alternatives.length > 1 ? 'settings.limits.sources.auto' : 'settings.limits.sources.detectSummary'
       : primary.kind === 'apiKey' ? 'settings.limits.sources.manualApi' : 'settings.limits.sources.manualWeb'));
-    const complementLabels = sources.filter(source => source.relation === 'complement').map(source => t(source.labelKey));
     // Setup instructions belong to the account editor; this card is a summary.
-    const summaryText = selection && onSelect && hasComplement
-      ? [automaticSummary, ...complementLabels].join(' · ') : automaticSummary;
+    const summaryText = automaticSummary;
     const summary = node('span', 'settings-item-desc', summaryText);
     copy.append(summary);
     // A fresh alternative reading can annotate Auto without adding another row.
@@ -73,8 +71,7 @@
       const updateSummary = () => {
         const selected = choices.find(source => source.id === accepted);
         summary.textContent = selected
-          ? [t('settings.limits.sources.selected', { source: t(selected.labelKey) }),
-            ...complementLabels].join(' · ') : summaryText;
+          ? t('settings.limits.sources.selected', { source: t(selected.labelKey) }) : summaryText;
       };
       select.value = accepted;
       updateSummary();

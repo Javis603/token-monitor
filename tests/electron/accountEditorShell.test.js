@@ -8,7 +8,9 @@ const { translate } = require('../../src/electron/renderer/i18n');
 function harness(editorConfig = {}) {
   const document = createDocument(), container = document.createElement('div'); document.root.append(container);
   const form = document.createElement('div'); form.id = 'ownedForm'; form.classList.add('hidden');
-  const input = document.createElement('input'); input.value = 'draft'; form.append(input); document.root.append(form);
+  const submitActions = document.createElement('div'); submitActions.className = 'settings-actions';
+  const submit = document.createElement('button'); submit.id = 'ownedSubmit'; submitActions.append(submit);
+  const input = document.createElement('input'); input.value = 'draft'; form.append(input, submitActions); document.root.append(form);
   const replacement = document.createElement('div'); replacement.id = 'ownedReplacement'; replacement.classList.add('hidden'); document.root.append(replacement);
   let busy = false, cancellations = 0;
   const list = create({ document, container, provider: 'fixture', label: 'Fixture', t: (key, params) => translate('en', key, params), bridge: {},
@@ -16,7 +18,7 @@ function harness(editorConfig = {}) {
     editor: { nodes: ['ownedForm'], visibility: 'ownedForm', cancel() { cancellations++; form.classList.add('hidden'); }, ...editorConfig },
     add() { form.classList.remove('hidden'); }, edit() { (editorConfig.replaceVisibility ? replacement : form).classList.remove('hidden'); } });
   list.update([{ id: 'account', accountKey: 'key' }], []);
-  return { document, container, input, form, replacement, list, cancellations: () => cancellations, setBusy: value => { busy = value; list.updateReadings([]); } };
+  return { document, container, input, form, submit, submitActions, replacement, list, cancellations: () => cancellations, setBusy: value => { busy = value; list.updateReadings([]); } };
 }
 
 test('owned editor stays inside compact card with a live draft across updates and fold/reopen', () => {
@@ -91,4 +93,31 @@ test('native editor visibility follows the owner after login completion', () => 
   h.setBusy(false);
   assert.equal(reveal.inert, true);
   assert.equal(h.container.querySelector('.slot-add').classList.contains('hidden'), false);
+});
+
+for (const replacing of [false, true]) {
+  test(`shared cancel joins the declared submit row during ${replacing ? 'edit' : 'add'} without rebuilding owner controls`, () => {
+    const h = harness({ submit: 'ownedSubmit' });
+    if (replacing) [...h.container.walk()].find(node => node.dataset.slotAction?.startsWith('replace')).click();
+    else h.container.querySelector('.slot-add').click();
+    const cancel = h.submitActions.children[1];
+    assert.equal(cancel.textContent, 'Cancel');
+    assert.equal(h.submitActions.children[0], h.submit);
+    h.input.focus(); h.input.selectionStart = 2; h.list.updateReadings([]);
+    assert.equal(h.submitActions.children[1], cancel);
+    assert.equal(h.document.activeElement, h.input);
+    assert.equal(h.input.selectionStart, 2);
+    h.setBusy(true); assert.equal(cancel.disabled, true);
+    h.setBusy(false); cancel.click();
+    assert.equal(h.cancellations(), 1);
+  });
+}
+test('a separate replacement protocol gets its own cancel footer rather than the hidden add submit row', () => {
+  const h = harness({ submit: 'ownedSubmit', replaceVisibility: 'ownedReplacement' });
+  [...h.container.walk()].find(node => node.dataset.slotAction?.startsWith('replace')).click();
+  assert.equal(h.submitActions.children.length, 1);
+  const footer = h.container.querySelector('.legacy-slot-editor').children.at(-1);
+  assert.equal(footer.classList.contains('hidden'), false);
+  footer.children[0].click();
+  assert.equal(h.replacement.classList.contains('hidden'), true);
 });

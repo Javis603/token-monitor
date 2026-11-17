@@ -27,7 +27,7 @@
     return candidates.length === 1 ? candidates[0] : undefined;
   }
   /**
-   * @param {{document: Document, provider: string, label?: string, add?: Function, container: HTMLElement, t: Function, bridge: any, getContext: Function, preserveScroll: Function, refresh: Function, changed: Function, enabled?: Function, remove?: Function, edit?: Function, sourceLabel?: Function, busy?: Function, editor?: {nodes: string[], visibility?: string, replaceVisibility?: string, allowBusyCancel?: boolean, isOpen?: Function, cancel?: Function}, actions?: Function, statusReading?: Function, secondaryText?: Function, detailText?: Function}} options
+   * @param {{document: Document, provider: string, label?: string, add?: Function, container: HTMLElement, t: Function, bridge: any, getContext: Function, preserveScroll: Function, refresh: Function, changed: Function, enabled?: Function, remove?: Function, edit?: Function, sourceLabel?: Function, busy?: Function, editor?: {nodes: string[], submit?: string, visibility?: string, replaceVisibility?: string, allowBusyCancel?: boolean, isOpen?: Function, cancel?: Function}, actions?: Function, statusReading?: Function, secondaryText?: Function, detailText?: Function}} options
    */
   function create(options) {
     let accounts = /** @type {any[]} */ ([]);
@@ -118,7 +118,7 @@
     };
   }
   /** Provider-owned nodes and callbacks remain live across expansion and status updates.
-   * @param {{document: Document, editor: {nodes: string[], visibility?: string, replaceVisibility?: string, allowBusyCancel?: boolean, isOpen?: Function, cancel?: Function}, t: Function, label?: string, provider: string, busy?: Function}} options @param {HTMLElement} root
+   * @param {{document: Document, editor: {nodes: string[], submit?: string, visibility?: string, replaceVisibility?: string, allowBusyCancel?: boolean, isOpen?: Function, cancel?: Function}, t: Function, label?: string, provider: string, busy?: Function}} options @param {HTMLElement} root
    */
   function mountEditor(options, root) {
     const { document, editor: config, t } = options;
@@ -145,7 +145,11 @@
     cancel.type = 'button';
     cancel.dataset.i18n = 'settings.common.cancel';
     cancel.textContent = t(cancel.dataset.i18n);
-    actions.append(cancel); card.append(actions); inner.append(card); reveal.append(inner); /** @type {HTMLElement} */ (root.querySelector('.slot-list')).append(reveal);
+    actions.append(cancel); card.append(actions);
+    // Owners identify their mutation boundary; the shell owns Cancel and places
+    // it beside that action without rebuilding controls or touching listeners.
+    const submitActions = config.submit ? card.querySelector(`#${config.submit}`)?.closest('.settings-actions') : null;
+    inner.append(card); reveal.append(inner); /** @type {HTMLElement} */ (root.querySelector('.slot-list')).append(reveal);
     let opened = false;
     let replacing = false;
     const visibility = config.visibility ? document.getElementById(config.visibility) : null;
@@ -161,6 +165,9 @@
     };
     const sync = () => {
       const active = replacing && replacement ? replacement : visibility;
+      const footer = !(replacing && replacement) && submitActions ? submitActions : actions;
+      if (cancel.parentElement !== footer) footer.append(cancel);
+      actions.classList.toggle('hidden', footer !== actions);
       if (config.isOpen) setOpen(Boolean(config.isOpen()));
       else if (active) setOpen(!active.classList.contains('hidden'));
       cancel.disabled = Boolean(options.busy?.()) && !config.allowBusyCancel;

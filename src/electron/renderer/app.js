@@ -16954,7 +16954,7 @@ function renderExternalProviderStatus(providerName) {
   if (providerName === 'claude') {
     const showForm = legacyAccountOwners.claude.editor.open ?? (!(state.settings?.claudeManagedAccounts || []).length && !state.settings?.claudeWebLegacyCookieConfigured);
     manualPanel.classList.toggle('hidden', !showForm);
-    document.getElementById('claudeWebOrganizationRow')?.classList.toggle('hidden', !showForm || !document.getElementById('claudeWebOrganizationIdInput')?.options.length);
+    document.getElementById('claudeWebOrganizationRow')?.classList.toggle('hidden', !showForm || ![...(document.getElementById('claudeWebOrganizationIdInput')?.options || [])].some(option => option.value));
     openBtn.classList.remove('hidden');
   }
   const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')

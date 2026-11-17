@@ -246,6 +246,7 @@ test('selectable connection cards keep descriptions in the menu instead of repea
   const entry = limitConnectionSourcesForRenderer().find(entry => entry.id === 'claude');
   const summary = nodes.find(node => node.className === 'settings-item-desc');
   for (const source of entry.sources) assert.ok(!summary.textContent.includes(translate('en', source.descriptionKey)));
+  assert.ok(!summary.textContent.includes(translate('en', entry.sources.find(source => source.relation === 'complement').labelKey)), 'complementary Web detail stays in the source menu');
   const select = nodes.find(node => node.tag === 'select');
   assert.ok(select.children[0].dataset.tmSelectDescription.includes(translate('en', entry.sources.find(source => source.relation === 'complement').descriptionKey)));
 });

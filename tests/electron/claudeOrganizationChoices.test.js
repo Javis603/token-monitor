@@ -208,3 +208,21 @@ test('an old Claude organization discovery cannot replace a newly saved cookieâ€
   assert.equal(select.value, 'new');
   assert.equal(messages.some((message) => message?.key === 'settings.claude.organizationUnavailable'), false);
 });
+
+test('status refresh hides the placeholder-only Claude organization row and shows real choices inside the editor', () => {
+  const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = app.indexOf("  if (providerName === 'claude') {\n    const showForm =", app.indexOf('function renderExternalProviderStatus('));
+  const end = app.indexOf('\n  const discoveredLogin', start);
+  assert.ok(start > 0 && end > start);
+  let hidden;
+  const select = { options: [{ value: '' }] };
+  const context = { providerName: 'claude', legacyAccountOwners: { claude: { editor: { open: true } } }, state: { settings: {} },
+    manualPanel: { classList: { toggle() {} } }, openBtn: { classList: { remove() {} } },
+    document: { getElementById: id => id === 'claudeWebOrganizationIdInput' ? select : { classList: { toggle(_name, value) { hidden = value; } } } } };
+  const refresh = () => vm.runInNewContext(app.slice(start, end), context);
+  refresh(); assert.equal(hidden, true);
+  select.options.push({ value: 'org-a' });
+  refresh(); assert.equal(hidden, false);
+  context.legacyAccountOwners.claude.editor.open = false;
+  refresh(); assert.equal(hidden, true);
+});
