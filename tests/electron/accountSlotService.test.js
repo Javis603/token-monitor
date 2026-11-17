@@ -487,3 +487,15 @@ test('replacing a credential carries its shared name and position to the new key
   assert.deepEqual(h.service.list('deepseek').accounts.map(account => account.id), [other.id, first.id]);
   assert.notEqual(replaced.accountKey, first.accountKey, 'the fixture exercises a key change');
 });
+
+test('an environment account keeps its shared name when its identity resolves', async () => {
+  const h = harness({ env: { DEEPSEEK_API_KEY: 'SECRET-env' } });
+  const environment = h.service.list('deepseek').accounts.find(account => account.id === 'environment');
+  assert.ok(environment, 'fixture lists the environment account');
+  await h.service.presentation('deepseek', environment.accountKey, 'rename', 'From env');
+  const values = { deepseekApiKey: 'SECRET-env' };
+  const { defaultAccountValues } = require('../../src/shared/limits/accountSlots');
+  const { limitProviderEntry } = require('../../src/shared/limits/registry');
+  await h.service.resolved('deepseek', 'environment', { accountKey: 'server-env', accountKeyAliases: [] }, defaultAccountValues(limitProviderEntry('deepseek'), h.settings, { DEEPSEEK_API_KEY: 'SECRET-env' }) || values);
+  assert.equal(h.settings.limitAccountPresentation.deepseek.labels['server-env'], 'From env');
+});

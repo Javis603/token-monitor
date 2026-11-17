@@ -125,6 +125,8 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
     return refreshPending;
   }
   return { publish, refresh, notifyStats(/** @type {any} */ stats) {
+    // A Hub upgraded in place starts advertising this kind; try it again.
+    if (unsupported && stats?.syncSettingsRevisions && Object.hasOwn(stats.syncSettingsRevisions, KIND)) unsupported = false;
     // Pending edits retry on the next frame even when the Hub's revision has
     // not moved, so a transient failure cannot strand them.
     if (connected() && (pending.length || queued.length || binding !== identity(getContext()) || stats?.syncSettingsRevisions?.[KIND] !== revision)) {

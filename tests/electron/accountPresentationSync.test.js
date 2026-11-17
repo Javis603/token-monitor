@@ -216,3 +216,24 @@ test('an edit queued for one Hub is never written to the next one', async () => 
   await runtime.refresh();
   assert.equal(puts.some(put => put.url === 'https://b' && put.value.deepseek?.labels?.k === 'Meant for A'), false);
 });
+
+test('a Hub upgraded in place is used once its stats advertise the group', async () => {
+  let upgraded = false;
+  const calls = [];
+  const runtime = createAccountPresentationSync({
+    getContext: () => ({ mode: 'client', url: 'https://hub' }), identity: () => 'hub',
+    getCacheIdentity: () => '', getSeed: () => ({ deepseek: { labels: { k: 'Mine' }, order: [] } }), getLocalLabels: () => [], apply: () => {},
+    request: async (_context, _path, method, body) => {
+      calls.push(method);
+      if (!upgraded) return { status: 404 };
+      if (method === 'GET') return { status: 200, body: { revision: 0, value: null } };
+      return { status: 200, body: { revision: 1, value: body.value } };
+    }
+  });
+  await runtime.refresh();
+  assert.deepEqual(calls, ['GET']);
+  upgraded = true;
+  runtime.notifyStats({ syncSettingsRevisions: { limitAccountPresentation: 0 } });
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.ok(calls.includes('PUT'), 'the upgraded Hub receives the local names');
+});
