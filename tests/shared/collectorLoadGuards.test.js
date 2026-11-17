@@ -4640,8 +4640,8 @@ test('a custom Codex root that becomes a Codex home rebuilds the watcher on a To
   await waitForCondition(() => updates.length === 1 && ignoredByWatcher.length === 1);
   assert.equal(ignoredByWatcher[0]?.(sidecar) ?? false, false, 'an empty custom root is not a Codex home yet');
 
-  fs.mkdirSync(path.join(customHome, 'sessions'));
-  watchHandler('add', path.join(customHome, 'sessions'));
+  fs.writeFileSync(path.join(customHome, 'state_5.sqlite'), '');
+  watchHandler('add', path.join(customHome, 'state_5.sqlite'));
   await waitForCondition(() => updates.length === 2 && ignoredByWatcher.length === 2);
   assert.deepEqual(calls.at(-1).flags, ['--today'], 'the rebuild happens on the anchored Today tick');
   assert.equal(ignoredByWatcher[1](sidecar), true, 'the rebuilt watcher ignores the home catalog sidecars');
@@ -5087,6 +5087,7 @@ test('a custom Codex home watches only its transcript trees', () => {
     const { watchIgnoreMatcher } = freshCollector();
     const taskHome = path.join(tmp, 'task', 'codex-home');
     fs.mkdirSync(path.join(taskHome, 'sessions'), { recursive: true });
+    fs.writeFileSync(path.join(taskHome, 'state_5.sqlite'), '');
     const catalogOnly = path.join(tmp, 'fresh', 'codex-home');
     fs.mkdirSync(catalogOnly, { recursive: true });
     fs.writeFileSync(path.join(catalogOnly, 'state_5.sqlite'), '');
@@ -5105,12 +5106,15 @@ test('a custom Codex home watches only its transcript trees', () => {
     assert.equal(ignored(path.join(catalogOnly, 'state_5.sqlite-shm')), true);
     assert.equal(ignored(path.join(catalogOnly, 'sessions')), false);
 
-    // A custom transcript tree and a directory of homes keep the generic policy.
+    // A custom transcript tree and a directory of homes keep the generic policy,
+    // even when that directory has its own `sessions` folder.
     const sessionsRoot = path.join(taskHome, 'sessions');
     const tasks = path.join(tmp, 'task');
+    fs.mkdirSync(path.join(tasks, 'sessions'));
     const generic = watchIgnoreMatcher('codex', { customScanPaths: { codex: [sessionsRoot, tasks] } });
     assert.equal(generic(path.join(sessionsRoot, '2026', 'rollout-x.jsonl')), false);
     assert.equal(generic(path.join(tasks, 'other', 'codex-home', 'state_5.sqlite-shm')), false);
+    assert.equal(generic(path.join(taskHome, 'sessions', '2026', 'rollout-x.jsonl')), false, 'nested homes stay live');
   } finally {
     os.homedir = originalHomedir;
     if (originalCodexHome === undefined) delete process.env.CODEX_HOME;

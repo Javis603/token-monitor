@@ -1829,9 +1829,10 @@ const pruneDependencyTrees = (parts) => parts.some((part) => CUSTOM_ROOT_PRUNED_
 // only its transcript trees are live sources. Session titles are read from the
 // home's thread catalog every tick, and while Codex is idle that read-only open
 // recreates the catalog's -wal/-shm; watching the rest of the home would turn
-// each title lookup into another collection.
+// each title lookup into another collection. The catalog is what identifies a
+// home: a root without one has nothing for the lookup to open, and a `sessions`
+// directory alone can belong to a parent of several homes or to another tool.
 function isCodexHome(dir) {
-  if ([...CODEX_HOME_TRANSCRIPT_DIRS].some((name) => dirExists(path.join(dir, name)))) return true;
   return [dir, path.join(dir, 'sqlite')].some((catalogDir) => {
     try { return fs.readdirSync(catalogDir).some((name) => /^state_\d+\.sqlite$/.test(name)); } catch (_) { return false; }
   });
