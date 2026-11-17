@@ -1234,7 +1234,7 @@ test('remote device lines reuse session icons before names and follow scoped ove
     settings: { deviceIconScope: 'hub', deviceIconOverrides: { local: { desktop: 'cloud' }, hub: {} } }
   };
   const check = (id, kind, name) => {
-    const line = h.row(`remote:${id}:${id}`).querySelector('.row-device');
+    const line = h.row(`remote:${id}:${id}`).querySelector('.slot-device-token');
     assert.ok(line, 'remote row has the Sessions device-line class');
     assert.equal(line.children[0].className, `device-kind-icon device-kind-${kind}`);
     assert.equal(line.children[0].attributes['aria-hidden'], 'true');
@@ -1506,4 +1506,100 @@ test('account context follows pending provider selection and the master limits s
   assert.equal(context.limitAccountContext('openrouter').providerEnabled, false);
   context.state.settings.limitsEnabled = false;
   assert.equal(context.limitAccountContext('claude').providerEnabled, false);
+});
+
+
+test('device disclosure keeps local failures and remote health separate without duplicate accounts or requests', () => {
+  const h = harness();
+  const now = new Date().toISOString();
+  const remote = { provider: 'qoder', accountKey: 'ka', source: 'web', status: 'ok', updatedAt: now };
+  const local = { ...remote, status: 'unauthorized' };
+  const context = { localDeviceId: 'local', records: [{ ...remote, sourceDeviceId: 'laptop' }], devices: [
+    { deviceId: 'local', deviceKind: 'desktop', limits: { providers: [local] } },
+    { deviceId: 'laptop', deviceKind: 'laptop', displayName: 'MacBook Pro', limits: { providers: [remote] } }
+  ] };
+  h.panel.update(h.slots, [local], context);
+  assert.equal(h.row('remote:laptop:ka'), undefined);
+  const row = h.row('a'), toggle = row.querySelector('.slot-device-toggle');
+  assert.ok(toggle);
+  assert.match(toggle.textContent, /This device.*MacBook Pro/);
+  assert.equal(toggle.children[0].children[0].className, 'device-kind-icon device-kind-desktop');
+  assert.equal(toggle.children[1].children[0].className, 'device-kind-icon device-kind-laptop');
+  assert.match(row.querySelector('.slot-status').textContent, /Cookie expired/);
+  toggle.click();
+  const list = row.querySelector('.slot-device-list');
+  assert.equal(list.classList.contains('hidden'), false);
+  assert.match(list.children[0].textContent, /Cookie expired/);
+  assert.match(list.children[1].textContent, /Web.*Current quota source/);
+  const localFix = list.children[0].querySelector('.slot-device-fix');
+  assert.equal(localFix.classList.contains('hidden'), false);
+  assert.equal(list.children[1].querySelector('.slot-device-fix').classList.contains('hidden'), true);
+  h.panel.update(h.slots, [local], context);
+  assert.equal(row.querySelector('.slot-device-toggle'), toggle);
+  assert.equal(list.children[0].querySelector('.slot-device-fix'), localFix);
+  assert.equal(toggle.attributes['aria-expanded'], 'true');
+  toggle.click();
+  assert.equal(list.classList.contains('hidden'), true);
+  assert.deepEqual(h.calls, []);
+});
+
+test('device disclosure respects pause, provider disable, stale peers and disappearance', () => {
+  const h = harness();
+  const row = { provider: 'qoder', accountKey: 'kb', status: 'ok' };
+  const context = { localDeviceId: 'local', providerEnabled: false,
+    records: [{ ...row, sourceDeviceId: 'peer' }], devices: [{ deviceId: 'peer', stale: true, limits: { providers: [row] } }] };
+  h.panel.update(h.slots, [row], context);
+  assert.equal(h.row('a').querySelector('.slot-device-toggle'), undefined, 'exact owner wins over sibling alias');
+  h.row('b').querySelector('.slot-device-toggle').click();
+  const list = h.row('b').querySelector('.slot-device-list');
+  assert.equal(list.children[0].querySelector('.slot-status').textContent, 'Paused');
+  assert.equal(list.children[1].querySelector('.slot-status').textContent, 'Stale');
+  assert.doesNotMatch(list.children[1].textContent, /1970|Current quota source/);
+  h.slots.find(slot => slot.id === 'b').enabled = true;
+  h.panel.update(h.slots, [row], context);
+  assert.equal(list.children[0].querySelector('.slot-status').textContent, 'Disabled');
+  h.panel.update(h.slots, [row], { ...context, records: [], devices: [] });
+  assert.equal(h.row('b').querySelector('.row-device'), undefined);
+  assert.equal(list.classList.contains('hidden'), true);
+  assert.equal(h.row('b').classList.contains('slot-devices-expanded'), false);
+});
+
+test('device disclosure includes two remote peers without inventing a local login', () => {
+  const h = harness();
+  const reading = { provider: 'qoder', accountKey: 'only-remote', status: 'ok' };
+  h.panel.update(h.slots, [], { localDeviceId: 'local', records: [{ ...reading, sourceDeviceId: 'one' }], devices: [
+    { deviceId: 'one', displayName: 'Office', limits: { providers: [reading] } },
+    { deviceId: 'two', displayName: 'Laptop', limits: { providers: [reading] } }
+  ] });
+  const row = h.row('remote:one:only-remote');
+  const toggle = row.querySelector('.slot-device-toggle');
+  assert.match(toggle.textContent, /Office.*Laptop/);
+  assert.doesNotMatch(toggle.textContent, /This device/);
+  toggle.click();
+  const list = row.querySelector('.slot-device-list');
+  assert.equal(list.children.length, 2);
+  for (const child of list.children) assert.equal(child.querySelector('.slot-device-fix').classList.contains('hidden'), true);
+});
+
+test('device disclosure never joins Alibaba sibling plan variants', () => {
+  const h = harness(t, 'alibaba');
+  const slots = [{ id: 'team', accountKey: 'uid', enabled: true, formValues: { alibabaVariant: 'cn' } },
+    { id: 'personal', accountKey: 'uid', enabled: true, formValues: { alibabaVariant: 'cn-personal' } }];
+  const remote = { provider: 'alibaba', accountKey: 'uid', region: 'cn-personal', status: 'ok' };
+  h.panel.update(slots, [], { localDeviceId: 'local', records: [{ ...remote, sourceDeviceId: 'peer' }],
+    devices: [{ deviceId: 'peer', limits: { providers: [remote] } }] });
+  assert.equal(h.row('team').querySelector('.row-device'), undefined);
+  assert.ok(h.row('personal').querySelector('.slot-device-toggle'));
+});
+
+test('raw device observations use aggregate freshness for remote disclosure too', () => {
+  const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+  const file = path.resolve(__dirname, '../../src/electron/main.js'), source = fs.readFileSync(file, 'utf8');
+  const context = { settings: { deviceId: 'local' }, ACCOUNT_SLOT_PROVIDER_IDS: new Set(['qoder']), isProviderStale,
+    lastCollectedDevice: null, localDevice: null, mode: 'local', attachLocalPresentationNativeViews() {} };
+  vm.runInNewContext(source.slice(source.indexOf('function injectLocalDeviceStatus('), source.indexOf('function macWidgetConfiguration(')), context);
+  const stats = { devices: [{ deviceId: 'remote', limits: { refreshMs: 60000, providers: [
+    { provider: 'qoder', accountKey: 'old', status: 'ok', updatedAt: '2000-01-01T00:00:00Z' }
+  ] } }] };
+  assert.equal(context.injectLocalDeviceStatus(stats).devices[0].limits.providers[0].stale, true);
 });

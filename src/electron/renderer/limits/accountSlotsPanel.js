@@ -216,7 +216,7 @@
       rowSelector: '.slot-row[data-slot-draggable="true"]',
       idKey: 'slotId',
       dragStartSelector: '.slot-drag-handle',
-      dragExcluded: 'input, select, textarea, a',
+      dragExcluded: 'input, select, textarea, a, .slot-device-toggle, .slot-device-list',
       preserveScroll,
       mirrorOrder: (order, id) => {
         const group = activeAccounts().filter(account => account.accountKey);
@@ -564,6 +564,110 @@
       return candidates.find(row => row.accountKey === slot.accountKey)
         || candidates.find(row => slotOwner(owners, row.accountKey, row.accountKeyAliases) === slot);
     }
+    function matchingObservation(slot, reference, row) {
+      if (row.provider !== form.id || row.removed || !row.accountKey) return false;
+      const owners = slot.source === 'remote' ? [slot] : slots.filter(owner => form.id !== 'alibaba'
+        || (owner.formValues?.alibabaVariant || 'cn') === (slot.formValues?.alibabaVariant || 'cn'));
+      if (slotOwner(owners, row.accountKey, row.accountKeyAliases) !== slot) return false;
+      // Alibaba shares a UID across plans; device provenance must not cross them.
+      return form.id !== 'alibaba' || row.region === (slot.formValues?.alibabaVariant || reference?.region || 'cn');
+    }
+    function renderDevices(item, slot, reading, status, source, permission) {
+      const remote = slot.source === 'remote';
+      const observed = new Map();
+      const selected = remoteReadings.find(row => matchingObservation(slot, reading, row));
+      for (const device of devices) {
+        if (device.deviceId === localDeviceId) continue;
+        const candidates = (device.limits?.providers || []).filter(row => matchingObservation(slot, reading, row));
+        // Prefer the lane used by the displayed account when a device has several.
+        const candidate = candidates.find(row => row.source === reading?.source) || candidates[0];
+        if (candidate) observed.set(device.deviceId, { ...candidate, stale: Boolean(candidate.stale || device.stale) });
+      }
+      // Older snapshots may carry only the aggregate observation.
+      for (const row of remoteReadings) {
+        if (row.sourceDeviceId && row.sourceDeviceId !== localDeviceId
+          && matchingObservation(slot, reading, row) && !observed.has(row.sourceDeviceId)) observed.set(row.sourceDeviceId, row);
+      }
+      const members = [...(!remote && observed.size ? [{ deviceId: localDeviceId, reading, local: true }] : []),
+        ...[...observed].map(([deviceId, observation]) => ({ deviceId, reading: observation, local: false }))];
+      const multiple = members.length > 1;
+      if (!members.length) {
+        item.deviceNote?.remove(); item.deviceNote = null;
+        item.deviceList?.classList.add('hidden'); item.devicesExpanded = false;
+        item.el.classList.remove('slot-devices-expanded');
+        item.status.setAttribute('aria-hidden', 'false');
+        return;
+      }
+      if (!item.deviceNote || item.deviceMultiple !== multiple) {
+        item.deviceNote?.remove();
+        item.deviceNote = multiple ? button('', () => preserveScroll(() => {
+          item.devicesExpanded = !item.devicesExpanded; render();
+        })) : make('div');
+        item.deviceNote.className = `row-device slot-device-summary${multiple ? ' slot-device-toggle' : ''}`;
+        item.el.insertBefore(item.deviceNote, item.deviceList || null);
+        item.deviceMultiple = multiple;
+      }
+      if (!multiple) item.devicesExpanded = false;
+      const expanded = Boolean(item.devicesExpanded);
+      item.el.classList.toggle('slot-devices-expanded', expanded);
+      item.status.setAttribute('aria-hidden', String(expanded));
+      const deviceName = member => member.local ? t('settings.sync.panel.thisDevice')
+        : deviceLabels.deviceLabel(devices.find(device => device.deviceId === member.deviceId) || { deviceId: member.deviceId });
+      const deviceToken = member => {
+        const device = devices.find(device => device.deviceId === member.deviceId) || { deviceId: member.deviceId };
+        const token = make('span', 'slot-device-token');
+        token.append(deviceIcons.deviceIconNode(document, deviceIcons.deviceIconKind(settings, device)), document.createTextNode(deviceName(member)));
+        return token;
+      };
+      item.deviceNote.replaceChildren(...members.map(deviceToken));
+      if (multiple) {
+        item.deviceNote.setAttribute('aria-expanded', String(expanded));
+        item.deviceNote.setAttribute('aria-label', `${tr(expanded ? 'hideDevices' : 'showDevices')}: ${members.map(deviceName).join(', ')}`);
+        const hint = make('span', 'slot-device-hint', tr(expanded ? 'hideDevices' : 'showDevices'));
+        item.deviceNote.append(hint);
+      }
+      if (!item.deviceList && multiple) {
+        item.deviceList = make('div', 'slot-device-list hidden');
+        item.deviceList.id = `slot-devices-${form.id}-${encodeURIComponent(slot.id)}`;
+        item.el.append(item.deviceList); item.deviceRows = new Map();
+      }
+      if (!item.deviceList) return;
+      item.deviceList.classList.toggle('hidden', !expanded);
+      if (multiple) item.deviceNote.setAttribute('aria-controls', item.deviceList.id);
+      if (!expanded) return;
+      for (const [id, row] of item.deviceRows) if (!members.some(member => member.deviceId === id)) { row.element.remove(); item.deviceRows.delete(id); }
+      for (const member of members) {
+        let row = item.deviceRows.get(member.deviceId);
+        if (!row) {
+          const element = make('div', 'slot-device-row');
+          const name = make('span', 'slot-device-name'), state = make('span'), note = make('div', 'slot-device-note');
+          const fix = slotButton('replaceTitle', () => openEditor(item.slot));
+          fix.className = 'slot-device-fix plugin-inline-action';
+          element.append(name, state, note, fix);
+          row = { element, name, state, note, fix }; item.deviceRows.set(member.deviceId, row); item.deviceList.append(element);
+        }
+        row.name.replaceChildren(deviceToken(member));
+        const memberStatus = member.local ? status : accountStatus({ enabled: true }, member.reading);
+        const memberSource = member.local ? source : presentationApi.limitProviderSourceLabel(member.reading) || '';
+        const statusText = memberStatus === 'disabled' ? t('settings.limits.status.disabled')
+          : tr(memberStatus === 'invalid' ? (cookie ? 'invalidCookie' : 'invalidKey') : memberStatus);
+        row.state.className = `slot-status slot-${memberStatus}`;
+        row.state.textContent = memberStatus === 'connected' ? memberSource || statusText : statusText;
+        row.state.setAttribute('aria-label', [statusText, memberSource].filter(Boolean).join(' · '));
+        const updated = new Date(member.reading?.updatedAt || NaN);
+        let time = '';
+        if (Number.isFinite(updated.getTime())) {
+          const seconds = Math.max(0, (Date.now() - updated.getTime()) / 1000);
+          const unit = seconds < 60 ? 'second' : seconds < 3600 ? 'minute' : seconds < 86400 ? 'hour' : 'day';
+          const divisor = { second: 1, minute: 60, hour: 3600, day: 86400 }[unit];
+          time = new Intl.RelativeTimeFormat(document.documentElement?.lang || 'en', { numeric: 'auto' }).format(-Math.floor(seconds / divisor), unit);
+        }
+        const current = selected?.sourceDeviceId === member.deviceId && selected.status === 'ok' && !selected.stale && !member.reading?.stale;
+        row.note.textContent = [time ? tr('deviceUpdated', { time }) : '', current ? tr('quotaSource') : ''].filter(Boolean).join(' · ');
+        row.note.classList.toggle('hidden', !row.note.textContent);
+        row.fix.classList.toggle('hidden', !member.local || permission.replace === false || Boolean(slot.source) || !slot.enabled || memberStatus !== 'invalid');
+      }
+    }
     function render() {
       if (rowDrag.deferRender()) return;
       const active = activeAccounts();
@@ -627,12 +731,7 @@
           item.discoveredNote = localized(make('div', 'settings-note'), 'settings.slots.discovered', { source: slot.sourceName });
           item.el.querySelector('.plugin-menu')?.append(item.discoveredNote);
         }
-        if (remote) {
-          if (!item.deviceNote) { item.deviceNote = make('div', 'row-device'); item.el.querySelector('.slot-copy').append(item.deviceNote); }
-          const device = devices.find(device => device.deviceId === reading?.sourceDeviceId) || { deviceId: reading?.sourceDeviceId };
-          item.deviceNote.replaceChildren(deviceIcons.deviceIconNode(document, deviceIcons.deviceIconKind(settings, device)),
-            document.createTextNode(deviceLabels.deviceLabel(device)));
-        }
+        renderDevices(item, slot, reading, status, source, permission);
         const parent = list;
         const before = [...parent.children].filter(node => node !== editorReveal)[index];
         if (before !== item.el) {

@@ -9414,7 +9414,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .slot-list { border: 1px solid var(--line); border-radius: 12px; background: rgba(var(--panel-rgb), .15); overflow: clip; }
 .slot-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) minmax(0, max-content) 28px; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .slot-copy { min-width: 0; }
-.slot-copy .slot-detail { margin: 1px 0 0; font-size: .59375rem; line-height: 1.4; }
+.slot-copy .slot-detail { margin: 4px 0 0; font-size: .59375rem; line-height: 1.4; }
 .slot-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .6875rem; font-weight: 500; color: var(--text); }
 .slot-name-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .slot-name-line .slot-name { min-width: 0; }
@@ -9525,3 +9525,23 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .legacy-slot-editor.is-replacing > .legacy-editor-content { display: none !important; }
 .legacy-slot-editor.is-replacing > .legacy-replacement-content.hidden { display: block !important; }
 .connection-source-actions .select-control-trigger { min-height: 28px; font-size: .75rem; }
+
+/* Account identity, plan and device provenance share one compact rhythm. */
+.slot-row { row-gap: 4px; }
+.slot-name-line { height: 16px; }
+.slot-name-line.is-editing { height: auto; min-height: 24px; }
+.slot-device-summary { grid-column: 2 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 0; line-height: 1.4; white-space: normal; }
+button.slot-device-toggle { width: 100%; min-height: 0; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--muted); font: inherit; font-size: .59375rem; text-align: left; cursor: pointer; }
+.slot-device-toggle:hover { color: var(--text); }
+.slot-device-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.slot-device-token { display: inline-flex; align-items: center; min-width: 0; gap: 4px; overflow-wrap: anywhere; }
+.slot-device-token .device-kind-icon { margin-right: 0; }
+.slot-device-hint { margin-left: auto; font-size: .5625rem; }
+.slot-device-list { margin-top: 4px; grid-column: 2 / -1; min-width: 0; border-top: 1px solid var(--line); }
+.slot-device-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; padding: 8px 0; }
+.slot-device-row + .slot-device-row { border-top: 1px solid var(--line); }
+.slot-device-name { min-width: 0; font-size: .625rem; }
+.slot-device-note { grid-column: 1 / -1; color: var(--muted); font-size: .59375rem; line-height: 1.4; overflow-wrap: anywhere; }
+.slot-device-fix { grid-column: 1 / -1; justify-self: start; }
+.slot-devices-expanded > .slot-status { visibility: hidden; }
+.slot-devices-expanded > .slot-copy > .slot-fix { display: none; }

@@ -4106,10 +4106,9 @@ function injectLocalDeviceStatus(stats) {
     const activity = localActivityPatch(lastCollectedDevice);
     if (activity) stats = projectLocalActivity(stats, activity);
   }
-  // Raw local rows remain authoritative for settings, including failures that
-  // a remote healthy aggregate row can hide. Share the aggregate freshness rule.
-  const device = stats.devices.find(entry => entry.deviceId === settings.deviceId);
-  if (device?.limits) device.limits = { ...device.limits, providers: device.limits.providers.map(row => !ACCOUNT_SLOT_PROVIDER_IDS.has(row.provider) ? row : ({
+  // Per-device rows remain authoritative for account disclosures, including
+  // failures hidden by a healthy aggregate. Share the aggregate freshness rule.
+  for (const device of stats.devices) if (device.limits) device.limits = { ...device.limits, providers: device.limits.providers.map(row => !ACCOUNT_SLOT_PROVIDER_IDS.has(row.provider) ? row : ({
     ...row, stale: isProviderStale(row, device.limits, device, stats.staleAfterMs, Date.now())
   })) };
   if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
