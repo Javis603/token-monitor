@@ -40,7 +40,7 @@ function normalizeSharedSyncValue(kind, value) {
     const { normalizeLimitProvider } = require('./limits/core');
     if (!object(value) || Object.keys(value).length > LIMIT_PROVIDER_IDS.length) throw badRequest('invalid account presentation');
     const validKey = key => typeof key === 'string' && key.length > 0 && key.length <= 256 && key.trim() === key;
-    return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)).map(([id, group]) => {
+    return Object.fromEntries(Object.entries(value).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([id, group]) => {
       if (!LIMIT_PROVIDER_IDS.includes(id)) throw badRequest('unknown provider');
       onlyKeys(group, ['labels', 'order']);
       if (!object(group.labels) || Object.keys(group.labels).length > 200 || !Array.isArray(group.order)

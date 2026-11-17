@@ -43,7 +43,7 @@
       const owner = slotOwner(slots, row.accountKey, row.accountKeyAliases);
       // Only a name the user chose becomes the display name. Provider names and
       // emails stay in their own fields, so email masking still applies to them.
-      const label = presentationLabel(owner, row.accountKey, presentation[row.provider]);
+      const label = presentationLabel(owner, owner?.accountKey || row.accountKey, presentation[row.provider]);
       return label ? { ...row, accountDisplayName: label } : row;
     });
     for (const [provider, slots] of Object.entries(slotsByProvider)) {
@@ -52,7 +52,7 @@
         const index = slots.indexOf(slotOwner(slots, row.accountKey, row.accountKeyAliases));
         if (index >= 0) {
           const sharedOrder = presentation[provider]?.order || [];
-          const sharedIndex = sharedOrder.indexOf(row.accountKey);
+          const sharedIndex = sharedOrder.indexOf(slots[index].accountKey || row.accountKey);
           return sharedIndex < 0 ? sharedOrder.length + index : sharedIndex;
         }
         // A row without a source device is this device's (local mode), as in #1520.

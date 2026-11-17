@@ -8,7 +8,11 @@ function replayPresentation(value, operations) {
   for (const operation of operations) {
     const { provider, key, type } = operation;
     const group = next[provider] ||= { labels: {}, order: [] };
-    if (type === 'rename') group.labels = Object.fromEntries(Object.entries({ ...group.labels, [key]: operation.label }).slice(-200));
+    if (type === 'rename') {
+      // Reinsert so the latest rename is the newest entry when the cap trims.
+      const { [key]: _previous, ...rest } = group.labels;
+      group.labels = Object.fromEntries(Object.entries({ ...rest, [key]: operation.label }).slice(-200));
+    }
     if (type === 'order') {
       // Preserve accounts added by another writer while honoring the new order.
       group.order = [...new Set([...operation.order, ...group.order])].slice(0, 200);
