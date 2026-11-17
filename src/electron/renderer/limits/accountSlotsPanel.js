@@ -340,7 +340,9 @@
       const name = make('div', 'slot-name');
       const status = make('span', 'slot-status');
       const actions = make('div', 'slot-actions');
-      copy.append(name);
+      const nameLine = make('div', 'slot-name-line');
+      nameLine.append(name);
+      copy.append(nameLine);
       el.append(grip, copy, status, actions);
       el.addEventListener('pointerdown', event => {
         if ((presentationPending > 0 || operationsPending > 0) || editorOwner !== undefined
@@ -355,26 +357,59 @@
         const revision = ++item.renameRevision;
         const input = make('input', 'slot-rename');
         input.value = presentationLabel(item.slot, item.slot.accountKey, presentation);
+        input.placeholder = name.textContent;
         input.setAttribute('aria-label', tr('rename'));
         name.replaceChildren(input);
-        input.addEventListener('keydown', async event => {
+        nameLine.classList.add('is-editing');
+        item.renameButton.classList.add('hidden');
+        let saving = false;
+        let composing = false;
+        const current = () => item.editing && revision === item.renameRevision;
+        const finish = () => {
+          if (!current()) return;
+          const restoreFocus = document.activeElement === input;
+          // Invalidate before removing the input: its resulting blur must not save.
+          item.renameRevision++;
+          item.editing = false;
+          preserveScroll(render);
+          if (restoreFocus) item.renameButton.focus({ preventScroll: true });
+        };
+        const save = async () => {
+          if (!current() || saving || composing) return;
+          saving = true;
+          input.readOnly = true;
+          const result = await run('rename', id, input.value);
+          if (!current()) return;
+          saving = false;
+          input.readOnly = false;
+          if (!result?.ok) {
+            input.setAttribute('aria-invalid', 'true');
+            return;
+          }
+          finish();
+        };
+        input.addEventListener('compositionstart', () => { composing = true; });
+        input.addEventListener('compositionend', () => {
+          composing = false;
+          if (document.activeElement !== input) return save();
+        });
+        input.addEventListener('blur', save);
+        input.addEventListener('keydown', event => {
           // Enter that confirms an IME composition is not a submit.
           if (event.isComposing || event.keyCode === 229) return;
           if (event.key !== 'Enter' && event.key !== 'Escape') return;
           event.preventDefault(); event.stopPropagation();
-          if (event.key === 'Enter') {
-            const result = await run('rename', id, input.value);
-            if (!result?.ok || revision !== item.renameRevision) return;
-          }
-          const restoreFocus = document.activeElement === input;
-          item.renameRevision++;
-          item.editing = false;
-          preserveScroll(render);
-          if (restoreFocus) el.focus({ preventScroll: true });
+          return event.key === 'Enter' ? save() : finish();
         });
         input.focus({ preventScroll: true });
         input.select();
       };
+      const renameButton = button('', rename);
+      renameButton.className = 'slot-rename-button';
+      renameButton.dataset.i18nAriaLabel = 'settings.slots.rename';
+      renameButton.setAttribute('aria-label', tr('rename'));
+      nameLine.append(renameButton);
+      item.renameButton = renameButton;
       {
         const shared = menus.create(document, tr('actions'), (text, fn, className) => {
           const node = button(text, fn); node.className = className || ''; return node;
@@ -462,6 +497,8 @@
         const remote = slot.source === 'remote';
         const reading = remote ? remoteReadings.find(row => row.accountKey === slot.accountKey) : readings.find(row => slotOwner(slots, row.accountKey, row.accountKeyAliases) === slot);
         if (!item.editing) item.name.textContent = accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') }, reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading, t, presentation);
+        item.renameButton.classList.toggle('hidden', item.editing);
+        item.name.parentElement.classList.toggle('is-editing', item.editing);
         const status = accountStatus(slot, reading);
         item.el.classList.toggle('slot-paused', !slot.enabled);
         item.status.className = `slot-status slot-${status}`;

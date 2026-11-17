@@ -1232,3 +1232,79 @@ test('completed browser login cannot close a new draft opened while list refresh
   assert.equal(h.document.getElementById(input.id), input);
   assert.equal(input.value, 'new-draft');
 });
+
+test('inline pencil starts renaming without opening the actions menu', () => {
+  const h = harness();
+  const pencil = h.row('a').querySelector('.slot-rename-button');
+  assert.ok(pencil, 'account name has a direct rename button');
+  assert.equal(pencil.attributes['aria-label'], 'Rename');
+  pencil.click();
+  assert.equal(h.document.activeElement, h.row('a').querySelector('.slot-rename'));
+  assert.equal(h.row('a').querySelector('.plugin-menu').popoverOpen, undefined);
+});
+
+test('rename saves on blur and leaves focus on the control the user clicked', async () => {
+  const h = harness();
+  h.click(h.row('a'), 'Rename');
+  const input = h.row('a').querySelector('.slot-rename'); input.value = 'Work';
+  const next = h.row('b').querySelector('.plugin-more'); next.focus();
+  await input.listeners.blur?.();
+  assert.deepEqual(h.calls, [['rename', 'qoder', 'a', 'Work']]);
+  assert.equal(h.row('a').querySelector('.slot-rename'), undefined);
+  assert.equal(h.document.activeElement, next);
+});
+
+test('Enter followed by blur saves a pending rename only once', async () => {
+  const h = harness(); let resolve;
+  h.ipc.rename = (...args) => { h.calls.push(['rename', ...args]); return new Promise(r => { resolve = r; }); };
+  h.click(h.row('a'), 'Rename');
+  const input = h.row('a').querySelector('.slot-rename'); input.value = 'Work';
+  const pending = input.key('Enter');
+  await Promise.resolve();
+  await input.listeners.blur?.();
+  assert.equal(h.calls.length, 1);
+  assert.equal(input.readOnly, true, 'a submitted draft cannot change while saving');
+  resolve({ ok: true, accounts: h.slots });
+  await pending;
+  assert.equal(h.calls.length, 1);
+});
+
+test('Escape cancels rename before the resulting blur can save it', async () => {
+  const h = harness();
+  h.click(h.row('a'), 'Rename');
+  const input = h.row('a').querySelector('.slot-rename'); input.value = 'Cancelled';
+  await input.key('Escape');
+  await input.listeners.blur?.();
+  assert.deepEqual(h.calls, []);
+  assert.equal(h.row('a').querySelector('.slot-rename'), undefined);
+});
+
+test('failed blur save preserves the draft for retry without taking focus back', async () => {
+  const h = harness();
+  h.ipc.rename = (...args) => { h.calls.push(['rename', ...args]); return { ok: false }; };
+  h.click(h.row('a'), 'Rename');
+  const input = h.row('a').querySelector('.slot-rename'); input.value = 'Retry me';
+  const next = h.row('b').querySelector('.plugin-more'); next.focus();
+  await input.listeners.blur?.();
+  assert.equal(h.calls.length, 1);
+  assert.equal(h.row('a').querySelector('.slot-rename'), input);
+  assert.equal(input.value, 'Retry me');
+  assert.equal(input.readOnly, false);
+  assert.equal(h.document.activeElement, next);
+  h.ipc.rename = (...args) => { h.calls.push(['rename', ...args]); return { ok: true, accounts: h.slots }; };
+  input.focus(); await input.key('Enter');
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.row('a').querySelector('.slot-rename'), undefined);
+});
+
+test('blur during composition saves the final text only after composition ends', async () => {
+  const h = harness();
+  h.click(h.row('a'), 'Rename');
+  const input = h.row('a').querySelector('.slot-rename');
+  input.listeners.compositionstart?.(); input.value = '工';
+  h.row('b').querySelector('.plugin-more').focus();
+  await input.listeners.blur?.();
+  assert.equal(h.calls.length, 0);
+  input.value = '工作'; await input.listeners.compositionend?.();
+  assert.deepEqual(h.calls, [['rename', 'qoder', 'a', '工作']]);
+});
