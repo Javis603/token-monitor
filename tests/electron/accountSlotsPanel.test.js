@@ -133,7 +133,7 @@ test('add form submits optional name and independent site through slot IPC only'
   assert.deepEqual(h.calls[0], ['add', 'qoder', { qoderSite: 'cn', qoderCookie: 'fake' }, 'New']);
 });
 
-test('real aggregate name sorting is replaced by stored slot order with default first', () => {
+test('real aggregate name sorting is replaced by stored slots before an unowned default', () => {
   const { aggregateLimits } = require('../../src/shared/limits/core');
   const now = Date.now();
   const row = (accountKey, accountName) => ({ provider: 'qoder', accountKey, accountName, status: 'ok', windows: [], updatedAt: new Date(now).toISOString() });
@@ -295,7 +295,7 @@ test('pending slot save queues move pause and rename without dropping operations
   assert.equal(h.calls.at(-1)[3], 'Queued');
 });
 
-test('local default then stored slots precede remote accounts in aggregate order', () => {
+test('stored slots then an unowned local default precede remote accounts in aggregate order', () => {
   const row = (accountKey, sourceDeviceId) => ({ provider: 'qoder', accountKey, sourceDeviceId });
   const rows = [row('remote-a', 'remote'), row('b', 'local'), row('remote-b', 'remote'), row('default', 'local'), row('a', 'local')];
   assert.deepEqual(applyAccountOrder(rows, { qoder: [{ accountKey: 'a' }, { accountKey: 'b' }] }, 'local').map(row => row.accountKey), ['a', 'b', 'default', 'remote-a', 'remote-b']);
