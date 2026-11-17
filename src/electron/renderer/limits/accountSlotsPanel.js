@@ -65,6 +65,9 @@
     };
     const slotButton = (key, fn, params) => localized(button(tr(key, params), fn), `settings.slots.${key}`, params);
     const cookie = form.fields.some(field => /cookie/i.test(field.key));
+    // Bearer and session tokens (Copilot, Devin, Manus) are not API keys.
+    const credentialWord = cookie ? 'Cookie' : form.fields.some(field => /apikey/i.test(field.key)) ? 'Key'
+      : form.fields.some(field => /token/i.test(field.key)) ? 'Token' : 'Key';
     const root = make('div', 'slot-panel');
     const list = make('div', 'slot-list');
     const editor = make('div', 'slot-editor hidden');
@@ -287,9 +290,9 @@
         item.updateRemove = updateRemove;
         remove.className = 'menu-destructive';
         const separator = () => { const node = make('hr', 'action-menu-separator'); node.setAttribute('role', 'separator'); return node; };
-        const replace = action(cookie ? 'replaceCookie' : 'replaceKey', () => openEditor(item.slot));
+        const replace = action(`replace${credentialWord}`, () => openEditor(item.slot));
         shared.appendItems(action('rename', rename), replace, pause, separator(), up, down, separator(), remove);
-        const fix = slotButton(cookie ? 'fixCookie' : 'fixKey', () => openEditor(item.slot));
+        const fix = slotButton(`fix${credentialWord}`, () => openEditor(item.slot));
         fix.className = 'slot-fix plugin-inline-action';
         copy.append(fix);
         item.fix = fix;

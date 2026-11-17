@@ -829,3 +829,10 @@ test('Copilot browser choice carries only host and flowId; cancelling fences sta
   assert.equal(requests[1][0], 'cancel');
   assert.equal(h.document.getElementById('copilotSlotDraftcopilotApiTokenInput').value, 'new-draft');
 });
+
+test('token providers say token in the replace and fix actions', () => {
+  for (const [id, expected] of [['copilot', /Replace token/], ['qoder', /Replace cookie/], ['openrouter', /Replace API key/]]) {
+    const h = harness(t, id);
+    assert.match(h.row('a').textContent, expected);
+  }
+});
