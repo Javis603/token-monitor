@@ -4590,6 +4590,64 @@ test('hourly smart reconciliation starts watching a client directory created aft
   }
 });
 
+// A root becomes a Codex home when Codex first writes there, usually between
+// hourly full scans. The Today tick that write triggers must swap in the home
+// policy, or idle title lookups re-trigger collection until the next full scan.
+test('a custom Codex root that becomes a Codex home rebuilds the watcher on a Today tick', async (t) => {
+  const tmp = withTmpHome([path.join('.codex', 'sessions')]);
+  const customHome = path.join(tmp, 'task', 'codex-home');
+  fs.mkdirSync(customHome, { recursive: true });
+  const originalHomedir = os.homedir;
+  const originalCodexHome = process.env.CODEX_HOME;
+  const chokidar = require('chokidar');
+  const originalWatch = chokidar.watch;
+  let handle;
+  t.after(() => {
+    handle?.stop();
+    chokidar.watch = originalWatch;
+    os.homedir = originalHomedir;
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+  os.homedir = () => tmp;
+  delete process.env.CODEX_HOME;
+  const ignoredByWatcher = [];
+  let watchHandler;
+  chokidar.watch = (_dirs, options) => {
+    ignoredByWatcher.push(options.ignored);
+    const watcher = {
+      on(event, callback) { if (event === 'all') watchHandler = callback; return watcher; },
+      close() {}
+    };
+    return watcher;
+  };
+  const calls = [];
+  const updates = [];
+  const { startCollector } = freshCollector();
+  handle = startCollector({
+    clients: 'codex', customScanPaths: { codex: [customHome] },
+    allTimeSince: '2024-01-01', commandTimeoutMs: 1000,
+    deviceId: 'fixture-device', agentVersion: 'fixture', intervalMs: 60 * 60 * 1000,
+    watchEnabled: true, watchUsePolling: false, watchTriggersCollection: true, watchDebounceMs: 10,
+    historyEnabled: false, dailyHistoryArchiveEnabled: false, anchorPersistenceEnabled: false,
+    codexLocalUsageEnabled: false, wslScanEnabled: false,
+    runTokscale: async (input) => { calls.push(input); return { entries: [] }; },
+    onUpdate: (summary) => updates.push(summary)
+  });
+  const sidecar = path.join(customHome, 'state_5.sqlite-shm');
+  await waitForCondition(() => updates.length === 1 && ignoredByWatcher.length === 1);
+  assert.equal(ignoredByWatcher[0]?.(sidecar) ?? false, false, 'an empty custom root is not a Codex home yet');
+
+  fs.writeFileSync(path.join(customHome, 'state_5.sqlite'), '');
+  watchHandler('add', path.join(customHome, 'state_5.sqlite'));
+  await waitForCondition(() => updates.length === 2 && ignoredByWatcher.length === 2);
+  assert.deepEqual(calls.at(-1).flags, ['--today'], 'the rebuild happens on the anchored Today tick');
+  assert.equal(ignoredByWatcher[1](sidecar), true, 'the rebuilt watcher ignores the home catalog sidecars');
+  assert.equal(ignoredByWatcher[1](path.join(customHome, 'sessions', 'rollout.jsonl')), false);
+});
+
 test('smart collection lets a successful manual refresh acknowledge existing activity', async () => {
   const tmp = withTmpHome([path.join('.claude', 'projects')]);
   const originalHomedir = os.homedir;
@@ -5011,6 +5069,56 @@ test('custom Tokscale scan paths stay visible and use recursive extra-root watch
     assert.equal(copilotIgnored(path.join(copilotCustom, 'nested', 'session.jsonl')), false);
   } finally {
     os.homedir = originalHomedir;
+    delete require.cache[collectorPath];
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+// Title lookups read a custom Codex home's catalog every tick. While Codex is
+// idle that read recreates the -wal/-shm sidecars, so watching them would
+// re-trigger the collector forever. A custom home keeps the built-in contract.
+test('a custom Codex home watches only its transcript trees', () => {
+  const tmp = withTmpHome([path.join('.codex', 'sessions')]);
+  const originalHomedir = os.homedir;
+  const originalCodexHome = process.env.CODEX_HOME;
+  delete process.env.CODEX_HOME;
+  os.homedir = () => tmp;
+  try {
+    const { watchIgnoreMatcher } = freshCollector();
+    const taskHome = path.join(tmp, 'task', 'codex-home');
+    fs.mkdirSync(path.join(taskHome, 'sessions'), { recursive: true });
+    fs.writeFileSync(path.join(taskHome, 'state_5.sqlite'), '');
+    const catalogOnly = path.join(tmp, 'fresh', 'codex-home');
+    fs.mkdirSync(catalogOnly, { recursive: true });
+    fs.writeFileSync(path.join(catalogOnly, 'state_5.sqlite'), '');
+    const ignored = watchIgnoreMatcher('codex', { customScanPaths: { codex: [taskHome, catalogOnly] } });
+
+    assert.equal(ignored(taskHome), false, 'the root itself is always kept');
+    assert.equal(ignored(path.join(taskHome, 'sessions')), false);
+    assert.equal(ignored(path.join(taskHome, 'sessions', '2026', '11', '01', 'rollout-x.jsonl')), false);
+    assert.equal(ignored(path.join(taskHome, 'archived_sessions', 'rollout-y.jsonl')), false);
+    assert.equal(ignored(path.join(taskHome, 'sessions', 'app', 'node_modules')), true);
+    for (const runtime of ['state_5.sqlite', 'state_5.sqlite-shm', 'state_5.sqlite-wal', 'logs_2.sqlite', 'history.jsonl']) {
+      assert.equal(ignored(path.join(taskHome, runtime)), true, `${runtime} is not a live source`);
+    }
+    assert.equal(ignored(path.join(taskHome, 'sqlite', 'state_5.sqlite-shm')), true);
+    // A home whose transcript tree does not exist yet is recognised by its catalog.
+    assert.equal(ignored(path.join(catalogOnly, 'state_5.sqlite-shm')), true);
+    assert.equal(ignored(path.join(catalogOnly, 'sessions')), false);
+
+    // A custom transcript tree and a directory of homes keep the generic policy,
+    // even when that directory has its own `sessions` folder.
+    const sessionsRoot = path.join(taskHome, 'sessions');
+    const tasks = path.join(tmp, 'task');
+    fs.mkdirSync(path.join(tasks, 'sessions'));
+    const generic = watchIgnoreMatcher('codex', { customScanPaths: { codex: [sessionsRoot, tasks] } });
+    assert.equal(generic(path.join(sessionsRoot, '2026', 'rollout-x.jsonl')), false);
+    assert.equal(generic(path.join(tasks, 'other', 'codex-home', 'state_5.sqlite-shm')), false);
+    assert.equal(generic(path.join(taskHome, 'sessions', '2026', 'rollout-x.jsonl')), false, 'nested homes stay live');
+  } finally {
+    os.homedir = originalHomedir;
+    if (originalCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = originalCodexHome;
     delete require.cache[collectorPath];
     fs.rmSync(tmp, { recursive: true, force: true });
   }
