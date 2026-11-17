@@ -27,7 +27,7 @@
     return candidates.length === 1 ? candidates[0] : undefined;
   }
   /**
-   * @param {{document: Document, provider: string, label?: string, add?: Function, container: HTMLElement, t: Function, bridge: any, getContext: Function, preserveScroll: Function, refresh: Function, changed: Function, enabled?: Function, remove?: Function, edit?: Function, sourceLabel?: Function, busy?: Function, editor?: {nodes: string[], submit?: string, visibility?: string, replaceVisibility?: string, allowBusyCancel?: boolean, isOpen?: Function, cancel?: Function}, actions?: Function, statusReading?: Function, secondaryText?: Function, detailText?: Function}} options
+   * @param {{document: Document, provider: string, label?: string, add?: Function, container: HTMLElement, t: Function, bridge: any, getContext: Function, preserveScroll: Function, refresh: Function, changed: Function, enabled?: Function, remove?: Function, edit?: Function, sourceLabel?: Function, busy?: Function, editor?: {nodes: string[], submit?: string, visibility?: string, replaceVisibility?: string, allowBusyCancel?: boolean, isOpen?: Function, cancel?: Function}, actions?: Function, statusReading?: Function, secondaryText?: Function, detailText?: Function, blocked?: Function}} options
    */
   function create(options) {
     let accounts = /** @type {any[]} */ ([]);
@@ -37,6 +37,8 @@
     let sharedEditor;
     /** @param {Function | undefined} command @param {any} [account] */
     const open = (command, account = undefined) => {
+      if (options.blocked?.()) return;
+      if (!account && sharedEditor?.toggle()) return;
       if (options.busy?.()) return;
       sharedEditor?.open(Boolean(account));
       const result = command?.(account);
@@ -64,10 +66,11 @@
     const list = panel.createPanel({
       form: { id: provider, fields: [] }, label: options.label || provider,
       document: options.document, t: options.t, hideAdd: !options.add, onAdd: options.add ? () => open(options.add) : undefined,
+      addCanToggle: () => sharedEditor?.hasDraft() || false, addBlocked: options.blocked,
       customEditor: (/** @type {any} */ row) => open(options.edit, accounts.find(account => account.id === row?.id)),
       capabilities: permission, isBusy: options.busy || (() => false),
       extraActions: options.actions || (() => []),
-      statusReading: options.statusReading, secondaryText: (/** @type {any} */ account) => account.source === 'remote' ? '' : [options.sourceLabel?.(account) || account.sourceName || '', options.secondaryText?.(account) || ''].filter((value, index, all) => value && all.indexOf(value) === index).join(' · '), detailText: options.detailText,
+      statusReading: options.statusReading, sourceText: (/** @type {any} */ account, /** @type {any} */ reading) => account.source === 'remote' ? '' : options.sourceLabel?.(account, reading) || account.sourceName || '', secondaryText: options.secondaryText, detailText: options.detailText,
       ipc: {
         /** @param {string} _provider @param {string} id @param {string} value */
         rename: (_provider, id, value) => bridge.limits.accountSlots.presentation(provider, accounts.find(row => row.id === id)?.accountKey, 'rename', value),
@@ -108,10 +111,10 @@
           const aliases = reading ? [...new Set([...(account.accountKeyAliases || []),
             account.accountKey, ...(reading.accountKeyAliases || [])].filter(key => key && key !== accountKey))] : account.accountKeyAliases;
           const labelKey = [accountKey, ...(aliases || [])].find(key => Object.hasOwn(presentation.labels || {}, key));
-          const label = labelKey ? presentation.labels[labelKey] : account.label || account.accountLabel || '';
+          const label = labelKey ? presentation.labels[labelKey] : account.label || '';
           return { ...account, accountKey, accountKeyAliases: aliases,
             accountEmail: account.accountEmail || account.email, enabled: account.enabled !== false,
-            fingerprint: account.id, label, accountName: account.accountName || (account.email || account.accountEmail ? '' : account.id) };
+            fingerprint: account.id, label, accountName: account.accountName || account.accountLabel || (account.email || account.accountEmail ? '' : account.id) };
         });
         list.update(accounts, readings, { ...context, presentation: context.settings?.limitAccountPresentation?.[provider] || {} });
       }
@@ -150,7 +153,9 @@
     // it beside that action without rebuilding controls or touching listeners.
     const submitActions = config.submit ? card.querySelector(`#${config.submit}`)?.closest('.settings-actions') : null;
     inner.append(card); reveal.append(inner); /** @type {HTMLElement} */ (root.querySelector('.slot-list')).append(reveal);
-    let opened = false;
+    let ownerOpen = false;
+    let collapsed = false;
+    const toggle = panel.createEditorToggle(root.querySelector('.slot-add'), reveal, `${options.provider}LegacySlotEditor`);
     let replacing = false;
     const visibility = config.visibility ? document.getElementById(config.visibility) : null;
     const replacement = config.replaceVisibility ? document.getElementById(config.replaceVisibility) : null;
@@ -158,16 +163,15 @@
     if (replacement) replacement.classList.add('legacy-replacement-content');
     /** @param {boolean} value */
     const setOpen = value => {
-      opened = value;
-      reveal.classList.toggle('hidden', !value);
-      reveal.inert = !value;
-      root.querySelector('.slot-add')?.classList.toggle('hidden', value);
+      ownerOpen = value;
+      if (!value) collapsed = false;
+      toggle.setExpanded(value && !collapsed);
     };
     const sync = () => {
       const active = replacing && replacement ? replacement : visibility;
       const footer = !(replacing && replacement) && submitActions ? submitActions : actions;
       if (cancel.parentElement !== footer) footer.append(cancel);
-      actions.classList.toggle('hidden', footer !== actions);
+      if (actions.classList.contains('hidden') !== (footer !== actions)) actions.classList.toggle('hidden', footer !== actions);
       if (config.isOpen) setOpen(Boolean(config.isOpen()));
       else if (active) setOpen(!active.classList.contains('hidden'));
       const disabled = Boolean(options.busy?.()) && !config.allowBusyCancel;
@@ -198,7 +202,13 @@
     title.dataset.i18nParams = JSON.stringify({ provider: options.label || options.provider });
     title.textContent = t(title.dataset.i18n, { provider: options.label || options.provider });
     sync();
-    return { sync, focus() {
+    return { sync, hasDraft: () => ownerOpen, toggle() {
+      sync();
+      if (!ownerOpen) return false;
+      collapsed = !collapsed;
+      setOpen(true);
+      return true;
+    }, focus() {
       if (reveal.contains(document.activeElement)) return;
       const target = [.../** @type {NodeListOf<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>} */ (card.querySelectorAll('input, textarea, select, button'))].find(node => !node.disabled && !node.closest('.hidden'));
       target?.focus({ preventScroll: true });
@@ -210,7 +220,8 @@
       title.dataset.i18n = `settings.slots.${replace ? 'replaceTitle' : 'addTitle'}`;
       title.dataset.i18nParams = JSON.stringify({ provider: options.label || options.provider });
       title.textContent = t(title.dataset.i18n, { provider: options.label || options.provider });
-      if (!opened) setOpen(true);
+      collapsed = false;
+      setOpen(true);
     } };
   }
   return { create, readingFor };

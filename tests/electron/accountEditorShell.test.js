@@ -12,13 +12,13 @@ function harness(editorConfig = {}, document = createDocument()) {
   const submit = document.createElement('button'); submit.id = 'ownedSubmit'; submitActions.append(submit);
   const input = document.createElement('input'); input.value = 'draft'; form.append(input, submitActions); document.root.append(form);
   const replacement = document.createElement('div'); replacement.id = 'ownedReplacement'; replacement.classList.add('hidden'); document.root.append(replacement);
-  let busy = false, cancellations = 0;
+  let busy = false, cancellations = 0, additions = 0;
   const list = create({ document, container, provider: 'fixture', label: 'Fixture', t: (key, params) => translate('en', key, params), bridge: {},
     getContext: () => ({ settings: {} }), preserveScroll: fn => fn(), changed() {}, refresh() {}, busy: () => busy,
     editor: { nodes: ['ownedForm'], visibility: 'ownedForm', cancel() { cancellations++; form.classList.add('hidden'); }, ...editorConfig },
-    add() { form.classList.remove('hidden'); }, edit() { (editorConfig.replaceVisibility ? replacement : form).classList.remove('hidden'); } });
+    add() { additions++; form.classList.remove('hidden'); }, edit() { (editorConfig.replaceVisibility ? replacement : form).classList.remove('hidden'); } });
   list.update([{ id: 'account', accountKey: 'key' }], []);
-  return { document, container, input, form, submit, submitActions, replacement, list, cancellations: () => cancellations, setBusy: value => { busy = value; list.updateReadings([]); } };
+  return { document, container, input, form, submit, submitActions, replacement, list, cancellations: () => cancellations, additions: () => additions, setBusy: value => { busy = value; list.updateReadings([]); } };
 }
 
 test('owned editor stays inside compact card with a live draft across updates and fold/reopen', () => {
@@ -200,4 +200,94 @@ test('busy submit-row cancel settles its observed disabled mutations before retu
     assert.equal(h.input.value, 'draft');
     assert.equal(h.container.querySelector('.legacy-editor-reveal').inert, true);
   }
+});
+
+for (const native of [false, true]) {
+  test(`persistent legacy toggle preserves ${native ? 'native login' : 'manual save'} while busy`, () => {
+    let active = false;
+    const h = harness(native ? { isOpen: () => active, allowBusyCancel: true } : {});
+    // Count/reset initialization, just as provider-owned add callbacks do.
+    const add = h.container.querySelector('.slot-add');
+    add.click(); active = true;
+    h.input.value = '草稿 draft'; h.input.selectionStart = 2;
+    h.setBusy(true);
+    assert.equal(add.classList.contains('hidden'), false);
+    assert.equal(add.disabled, false);
+    assert.equal(add.attributes['aria-expanded'], 'true');
+    const reveal = h.container.querySelector('.legacy-editor-reveal');
+    assert.equal(add.attributes['aria-controls'], reveal.id);
+    add.click();
+    assert.equal(reveal.inert, true);
+    h.list.updateReadings([]);
+    assert.equal(reveal.inert, true, 'owner updates must not reopen a collapsed draft');
+    add.click();
+    assert.equal(reveal.inert, false);
+    assert.equal(h.input.value, '草稿 draft');
+    assert.equal(h.input.selectionStart, 2);
+    assert.equal(h.cancellations(), 0);
+    assert.equal(h.additions(), 1);
+  });
+}
+test('persistent entry folds and resumes replacement without switching to add', () => {
+  const h = harness({ replaceVisibility: 'ownedReplacement' });
+  [...h.container.walk()].find(node => node.dataset.slotAction?.startsWith('replace')).click();
+  const add = h.container.querySelector('.slot-add');
+  add.click(); add.click();
+  assert.equal(h.container.querySelector('.legacy-slot-editor').classList.contains('is-replacing'), true);
+  assert.equal(h.form.classList.contains('hidden'), true);
+  assert.equal(h.replacement.classList.contains('hidden'), false);
+  assert.equal(h.cancellations(), 0);
+});
+
+const { createPanel } = require('../../src/electron/renderer/limits/accountSlotsPanel');
+const forms = require('../../src/electron/renderer/limits/accountPanels');
+const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+function generic(login = false) {
+  const document = createDocument(), calls = [], pending = [];
+  const form = limitAccountFormsForRenderer().find(form => form.id === (login ? 'copilot' : 'qoder'));
+  let cancellations = 0, builds = 0;
+  const panel = createPanel({ document, form, label: form.id, t: (key, params) => translate('en', key, params),
+    ipc: { list: async () => ({ ok: true, accounts: [] }), add: async (...args) => { calls.push(['add', ...args]); return new Promise(resolve => pending.push(resolve)); }, replace: async (...args) => { calls.push(['replace', ...args]); return { ok: false }; } },
+    forms: { resolveOpenUrl: forms.resolveOpenUrl, createCredentialPanel(...args) { builds++; return forms.createCredentialPanel(...args); } },
+    preserveScroll: fn => fn(), onChanged() {}, openExternal() {},
+    loginAction: { signIn: async () => { calls.push(['login']); return new Promise(resolve => pending.push(resolve)); }, cancelSignIn() { cancellations++; } }
+  });
+  document.root.append(panel.element);
+  return { document, panel, calls, pending, form, builds: () => builds, cancellations: () => cancellations, add: panel.element.querySelector('.slot-add') };
+}
+const flush = () => new Promise(resolve => setImmediate(resolve));
+test('generic toggle preserves draft, selection and pending save until success', async () => {
+  const h = generic(); h.add.click();
+  const input = h.document.getElementById('qoderSlotDraftqoderCookieInput');
+  input.value = '草稿 draft'; input.selectionStart = 2;
+  const saving = h.document.getElementById('qoderSlotDraftCredentialSubmit').click(); await flush();
+  assert.equal(h.calls.length, 1);
+  for (let cycle = 0; cycle < 3; cycle++) {
+    h.add.click(); assert.equal(h.add.attributes['aria-expanded'], 'false');
+    h.panel.update([], []); h.add.click();
+    assert.equal(h.add.attributes['aria-expanded'], 'true');
+    assert.equal(h.document.getElementById(input.id), input);
+    assert.equal(input.value, '草稿 draft'); assert.equal(input.selectionStart, 2);
+  }
+  h.panel.openEditor(null);
+  assert.equal(h.builds(), 1); assert.equal(h.cancellations(), 0); assert.equal(h.calls.length, 1);
+  h.pending[0]({ ok: true, saved: true, verdict: 'valid', accounts: [] }); await saving;
+  assert.equal(h.add.attributes['aria-expanded'], 'false');
+});
+test('generic login and replacement retain identity across toggle cycles', async () => {
+  const h = generic(true); h.add.click();
+  const signIn = [...h.panel.element.walk()].find(node => node.tagName === 'button' && node.textContent === translate('en', h.form.loginAction.labelKey));
+  const login = signIn.click(); await flush();
+  h.add.click(); h.add.click(); void signIn.click(); await flush();
+  assert.equal(h.calls.length, 1); assert.equal(h.cancellations(), 0); assert.equal(h.builds(), 1);
+  h.pending[0]({ ok: false }); await login;
+  const replacement = generic(); replacement.panel.openEditor({ id: 'existing' });
+  const editor = replacement.panel.element.querySelector('.slot-editor');
+  replacement.add.click(); replacement.add.click();
+  assert.equal(replacement.builds(), 1);
+  assert.equal(editor.children.some(node => node.classList.contains('credential-input')), false);
+  const input = replacement.document.getElementById('qoderSlotDraftqoderCookieInput'); input.value = 'cookie draft';
+  await replacement.document.getElementById('qoderSlotDraftCredentialSubmit').click();
+  assert.equal(replacement.calls[0][0], 'replace');
+  assert.equal(replacement.calls[0][2], 'existing');
 });

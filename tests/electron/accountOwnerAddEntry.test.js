@@ -66,6 +66,13 @@ for (const provider of ['codex', 'claude', 'cursor', 'antigravity', 'mimo', 'wor
     if (['codex', 'antigravity'].includes(provider)) assert.equal(h.calls.length, 1);
     else if (provider === 'claude') {
       assert.equal(h.owner.editor.open, true);
+      const revision = h.owner.editor.revision;
+      h.nodes.claudeWebCookieInput.value = '草稿';
+      await add.click();
+      assert.equal(h.document.root.querySelector('.legacy-editor-reveal').inert, true);
+      await add.click();
+      assert.equal(h.owner.editor.revision, revision);
+      assert.equal(h.nodes.claudeWebCookieInput.value, '草稿');
       h.owner.cancelClaudeWebAccountEdit();
       await add.click();
       assert.equal(h.owner.editor.open, true);
@@ -75,29 +82,40 @@ for (const provider of ['codex', 'claude', 'cursor', 'antigravity', 'mimo', 'wor
     } else {
       const id = { cursor: 'cursorManualDetails', mimo: 'mimoAddDetails', minimax: 'minimaxAddDetails', opencode: 'opencodeAddDetails', thirdparty: 'thirdpartyAddDetails' }[provider];
       assert.equal(h.nodes[id].classList.contains('hidden'), false);
+      const reveal = h.document.root.querySelector('.legacy-editor-reveal');
+      const input = Object.values(h.nodes).find(node => /Input$/.test(node.id));
+      if (input) { input.value = '草稿 draft'; input.selectionStart = 2; }
       await add.click();
-      assert.equal(h.nodes[id].classList.contains('hidden'), true);
+      assert.equal(reveal.inert, true);
+      await h.render();
+      assert.equal(reveal.inert, true);
       await add.click();
+      assert.equal(reveal.inert, false);
       assert.equal(h.nodes[id].classList.contains('hidden'), false);
+      if (input) { assert.equal(input.value, '草稿 draft'); assert.equal(input.selectionStart, 2); }
     }
   });
 }
-test('Codex common add stays disabled during login, then cancellation permits retry before the old result settles', async () => {
+test('Codex common add remains a toggle during login, then cancellation permits retry before the old result settles', async () => {
   const pending = [];
   const h = harness('codex', { addAccount: () => new Promise(resolve => pending.push(resolve)) });
   h.owner.setup(); await flush();
   const first = h.add().click();
   assert.equal(pending.length, 1);
-  assert.equal(h.add().disabled, true);
+  assert.equal(h.add().disabled, false);
   assert.equal(h.nodes.codexCancelLoginButton.classList.contains('hidden'), false);
   await h.add().click();
-  assert.equal(pending.length, 1, 'busy guard must also reject synthetic clicks');
+  assert.equal(pending.length, 1, 'folding a busy login cannot launch another request');
+  assert.equal(h.document.root.querySelector('.legacy-editor-reveal').inert, true);
+  await h.add().click();
+  assert.equal(h.document.root.querySelector('.legacy-editor-reveal').inert, false);
+  assert.equal(pending.length, 1);
   await h.nodes.codexCancelLoginButton.click();
   assert.equal(h.add().disabled, false);
   const second = h.add().click();
   assert.equal(pending.length, 2);
   pending[0]({ ok: false, outcome: 'cancelled' }); await first;
-  assert.equal(h.add().disabled, true, 'late result cannot settle the new login');
+  assert.equal(h.owner.state.codexSignInBusy, true, 'late result cannot settle the new login');
   pending[1]({ ok: false, outcome: 'cancelled' }); await second;
   assert.equal(h.add().disabled, false);
 });
@@ -110,7 +128,7 @@ test('WorkBuddy footer retains both realm protocols and cancel/retry', async () 
   await h.add().click();
   const first = h.nodes.workbuddyAddAiAccountButton.click();
   assert.deepEqual(realms, ['ai']);
-  assert.equal(h.add().disabled, true);
+  assert.equal(h.add().disabled, false);
   assert.equal(h.nodes.workbuddyCancelLoginButton.classList.contains('hidden'), false);
   await h.nodes.workbuddyCancelLoginButton.click();
   assert.equal(h.add().disabled, false);
@@ -153,7 +171,9 @@ test('Antigravity cancel waits for the original add request before permitting a 
   h.owner.setup(); await flush();
   const pending = h.add().click();
   await h.nodes.antigravityCancelLoginButton.click();
-  assert.equal(h.add().disabled, true);
+  assert.equal(h.add().disabled, false);
+  await h.add().click();
+  assert.equal(h.owner.state.antigravitySignInBusy, true);
   finish({ ok: false, errorCode: 'cancelled' }); await pending;
   assert.equal(h.add().disabled, false);
 });
@@ -215,7 +235,8 @@ test('Codex cancelled add result clears progress before a delayed cancel reply',
   const retryFlow = h.owner.state.codexSignInFlowId;
   finishCancel({ ok: true, cancelled: true }); await cancelling;
   assert.equal(h.owner.state.codexSignInFlowId, retryFlow);
-  assert.equal(h.add().disabled, true);
+  assert.equal(h.add().disabled, false);
+  assert.equal(h.owner.state.codexSignInBusy, true);
   finishAdd({ ok: false, outcome: 'cancelled' }); await retry;
 });
 
@@ -262,4 +283,24 @@ for (const removeLast of [false, true]) test(`MiniMax billing remains reachable 
   }
   await h.add().click();
   assert.equal(h.nodes.minimaxAddDetails.classList.contains('hidden'), false, 'add form remains available');
+});
+
+for (const masked of [false, true]) test(`Codex titles retain emails and custom names separately from plans (masked=${masked})`, async () => {
+  const h = harness('codex');
+  h.settings.maskLimitAccountEmails = masked;
+  h.settings.codexManagedAccounts = [
+    { id: 'a', accountKey: 'ka', email: 'alice@example.com', accountLabel: 'plus', enabled: true },
+    { id: 'b', accountKey: 'kb', email: 'bob@example.com', accountLabel: 'free', enabled: false }
+  ];
+  const rows = () => [...h.document.root.walk()].filter(node => node.classList.contains('slot-row'));
+  await h.render();
+  assert.deepEqual(rows().map(row => row.querySelector('.slot-name').textContent),
+    masked ? ['a***@example.com', 'b***@example.com'] : ['alice@example.com', 'bob@example.com']);
+  assert.deepEqual(rows().map(row => row.querySelector('.slot-detail').textContent),
+    ['Plus · settings.limits.sources.oauth', 'Free · settings.limits.sources.oauth']);
+  h.settings.limitAccountPresentation = { codex: { labels: { ka: 'Work', kb: '' } } };
+  await h.render();
+  assert.equal(rows()[0].querySelector('.slot-name').textContent, 'Work');
+  assert.match(rows()[0].querySelector('.slot-detail').textContent, /^Plus/);
+  assert.equal(rows()[1].querySelector('.slot-name').textContent, masked ? 'b***@example.com' : 'bob@example.com');
 });

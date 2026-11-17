@@ -67,7 +67,10 @@ function renderCodexAccounts() {
     : t('settings.opencode.connected', { linked: enabledCount, total: accounts.length });
   accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.codexAccountError });
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
-      sourceLabel: () => t('settings.limits.sources.oauth'),
+      sourceLabel: (_account, reading) => {
+        const source = reading?.source === 'rpc' ? reading.sourceDetail : reading?.source;
+        return t(`settings.limits.sources.${source === 'app' ? 'desktop' : source === 'cli' ? 'cli' : 'oauth'}`);
+      },
       editor: { isOpen: () => state.codexSignInBusy || state.codexWorkspaceChoices.length > 0 || Boolean(state.codexAccountError), allowBusyCancel: true, nodes: ['codexLoginStatus', 'codexWorkspaceSelection', 'codexLoginUrlActions', 'codexLoginDetails', 'codexAccountErrorMessage'], cancel: () => { if (state.codexSignInBusy) document.getElementById('codexCancelLoginButton')?.click(); else { state.codexAccountError = ''; state.codexLoginStatus = ''; renderCodexLoginStatus(); renderCodexAccounts(); } } },
     document, provider: 'codex', label: host.providerLabel || 'Codex', add: startCodexLogin, container: listEl, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
@@ -75,7 +78,8 @@ function renderCodexAccounts() {
     remove: account => window.tokenMonitor.codex.removeAccount(account.id),
     changed: result => { if (result.accounts) state.settings.codexManagedAccounts = result.accounts; }, refresh: refreshCodexAccounts, busy: () => state.codexSignInBusy
   });
-  accountList.update(accounts, host.localProviderStatuses('codex'));
+  // Codex accountLabel is a plan type, not a user-chosen account name.
+  accountList.update(accounts.map(({ accountLabel, ...account }) => ({ ...account, planLabel: accountLabel })), host.localProviderStatuses('codex'));
   renderSettingsSummaries();
 }
 

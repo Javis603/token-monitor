@@ -407,7 +407,7 @@ test('third-party service DTO retains collector identity through redaction and s
     assert.equal(safe[name].accountKey, reading.accountKey, name);
     const { rows } = await thirdPartyRows({ [name]: safe[name] }, false, [{ ...reading, status: 'ok' }]);
     assert.equal(rows.length, 1);
-    assert.match(rows[0].textContent, /Connected/);
+    assert.match(rows[0].querySelector('.slot-status').attributes['aria-label'], /Connected/);
     const rename = [...rows[0].walk()].find(node => node.dataset.slotAction === 'rename');
     assert.ok(rename);
     assert.notEqual(rename.disabled, true);

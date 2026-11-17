@@ -56,7 +56,7 @@ for (const provider of ['grok', 'kiro']) test(`${provider}: empty discovery, kno
   h.list.update([reading('known', { provider, source: 'cli', accountEmail: 'user@example.com' })]);
   const first = h.row('known');
   assert.ok(first);
-  assert.match(first.textContent, /Connected/);
+  assert.match(first.querySelector('.slot-status').attributes['aria-label'], /Connected/);
   assert.deepEqual(actions(first).map(node => node.dataset.slotAction), ['rename', 'up', 'down']);
   assert.equal(h.container.querySelector('.slot-add').classList.contains('hidden'), true);
   h.list.update([reading('known', { provider, source: 'cli', stale: true })]);
@@ -75,7 +75,7 @@ test('keyless healthy discovery is a read-only source observation without fabric
   h.list.update([reading('', { accountEmail: 'unproven@example.com' })]);
   const [row] = rows(h.container);
   assert.ok(row.dataset.slotId.startsWith('observation:'));
-  assert.match(row.textContent, /Connected/);
+  assert.match(row.querySelector('.slot-status').attributes['aria-label'], /Connected/);
   assert.doesNotMatch(row.textContent, /unproven@example.com/, 'keyless observations expose their source rather than presenting an unproven identity');
   assert.equal(row.dataset.slotDraggable, 'false');
   assert.deepEqual(actions(row), []);
@@ -116,7 +116,8 @@ test('remote-only accounts remain remote presentation rows and never become loca
   h.list.update([remote]);
   const [row] = rows(h.container);
   assert.equal(row.dataset.slotId, 'remote:other:remote-account');
-  assert.equal(row.querySelector('.slot-status').textContent, `● ${t('settings.slots.connected')}`);
+  assert.equal(row.querySelector('.slot-status').textContent, 'RPC');
+  assert.match(row.querySelector('.slot-status').attributes['aria-label'], /Connected/);
   assert.ok(row.querySelector('.row-device'));
   assert.equal(h.row('remote-account'), undefined);
   assert.deepEqual(actions(row).map(node => node.dataset.slotAction), ['rename', 'up', 'down']);
@@ -142,7 +143,7 @@ test('Claude combines Web management with strict local OAuth/CLI rows without du
   const allRows = rows(container);
   assert.deepEqual(allRows.map(row => row.dataset.slotId), ['saved', 'automatic:cli-other', 'remote:other:remote']);
   const automaticRow = allRows.find(row => row.dataset.slotId === 'automatic:cli-other');
-  assert.match(automaticRow.textContent, /Connected/);
+  assert.match(automaticRow.querySelector('.slot-status').attributes['aria-label'], /Connected/);
   assert.deepEqual(actions(automaticRow).map(node => node.dataset.slotAction), ['rename', 'up', 'down']);
   assert.equal(container.querySelector('.slot-add').classList.contains('hidden'), false, 'Web add entry remains visible');
   assert.equal(owner.claudeAccountStatusText('', true), t('settings.opencode.connected', { linked: 2, total: 2 }), 'summary counts the same resolved identities as the local rows');
@@ -150,7 +151,8 @@ test('Claude combines Web management with strict local OAuth/CLI rows without du
   assert.equal(owner.claudeAccountStatusText('', true), t('settings.opencode.connected', { linked: 1, total: 2 }));
   assert.equal(owner.claudeAccountStatusText('', false), t('settings.opencode.connected', { linked: 0, total: 2 }));
   settings.claudeManagedAccounts[0].enabled = true;
-  assert.equal(allRows[2].querySelector('.slot-status').textContent, `● ${t('settings.slots.connected')}`, 'remote OAuth keeps its own status');
+  assert.equal(allRows[2].querySelector('.slot-status').textContent, 'OAuth', 'remote OAuth keeps its own source');
+  assert.equal(allRows[2].querySelector('.slot-status').classList.contains('slot-connected'), true);
   assert.ok(actions(allRows[0]).some(node => node.dataset.slotAction === 'remove'), 'saved Web controls remain reachable');
   local.length = 0;
   owner.renderClaudeWebAccounts();
@@ -238,11 +240,12 @@ for (const status of ['ok', 'unauthorized']) test(`email outranks provider name,
   const list = legacy.create({ document, provider: 'codex', container, t, bridge: {},
     getContext: () => ({ settings }), preserveScroll: fn => fn(), changed() {}, refresh() {} });
   const account = { id: 'saved', accountKey: 'key', accountEmail: 'person@example.com', accountName: 'Provider name', sourceName: 'OAuth' };
-  const quota = reading('key', { status, accountName: 'Other provider name', accountEmail: 'person@example.com' });
+  const quota = reading('key', { provider: 'codex', source: 'oauth', status, accountName: 'Other provider name', accountEmail: 'person@example.com' });
   list.update([account], [quota]);
   const row = rows(container)[0];
   assert.equal(row.querySelector('.slot-name').textContent, 'p***@example.com');
-  assert.equal(row.querySelector('.slot-detail').textContent, 'OAuth');
+  if (status === 'ok') assert.equal(row.querySelector('.slot-status').textContent, 'OAuth');
+  else assert.equal(row.querySelector('.slot-detail').textContent, 'OAuth');
   list.update([{ ...account, label: 'My label' }], [quota]);
   assert.equal(row.querySelector('.slot-name').textContent, 'My label');
   assert.doesNotMatch(row.textContent, /person@example.com/);
@@ -262,8 +265,8 @@ test('automatic provenance follows managed/app ownership instead of the quota en
     getContext: () => ({ settings: {}, localDeviceId: 'local' }), preserveScroll: fn => fn(), sources });
   list.update(['managed', 'app', 'unknown'].map(sourceDetail => reading(sourceDetail, { provider: 'workbuddy', source: 'api', sourceDetail, accountName: 'Account' })));
   const byKey = key => rows(container).find(row => row.dataset.slotId === `automatic:${key}`);
-  assert.equal(byKey('managed').querySelector('.slot-detail').textContent, t('settings.slots.savedSource'));
-  assert.equal(byKey('app').querySelector('.slot-detail').textContent, t('settings.limits.sources.desktop'));
+  assert.equal(byKey('managed').querySelector('.slot-status').textContent, t('settings.slots.savedSource'));
+  assert.equal(byKey('app').querySelector('.slot-status').textContent, t('settings.limits.sources.desktop'));
   assert.equal(byKey('unknown').querySelector('.slot-detail'), undefined);
   for (const row of rows(container)) assert.equal(row.querySelector('.slot-name').textContent, 'Account');
 });

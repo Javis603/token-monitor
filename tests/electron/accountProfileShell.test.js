@@ -152,7 +152,7 @@ test('MiniMax saved keys use independent API status and billing links, with remo
   await suite.test('billing modes remain visible on each account', () => {
     assert.deepEqual(labels(), [accountLabel(1), accountLabel(2)]);
     assert.deepEqual(h.rows().map(row => row.querySelector('.slot-detail').textContent),
-      [`${t('settings.limits.sources.apiKey')} · ${apiLabel}`, `${t('settings.limits.sources.apiKey')} · ${tokenLabel}`]);
+      [apiLabel, tokenLabel]);
   });
   h.status([{ source: 'api', accountKey: 'a', region: 'en', status: 'ok' }]);
   h.buttons('settings.minimax.openBrowser').forEach(button => button.click());
@@ -182,7 +182,8 @@ test('MiniMax saved keys use independent API status and billing links, with remo
   assert.equal(h.get('minimaxErrorMessage').textContent, '');
   h.status([{ source: 'api', accountKey: 'a', status: 'ok' }]);
   await suite.test('new API readings update the retained account row', () => {
-    assert.equal(info('a').textContent, `● ${t('settings.slots.connected')}`);
+    assert.equal(info('a').textContent, t('settings.limits.sources.apiKey'));
+    assert.equal(info('a').classList.contains('slot-connected'), true);
   });
   h.api.getKeys = async () => [{ id: 'a', accountKey: 'a', apiRegion: 'auto', billingMode: 'api' }];
   await h.render();

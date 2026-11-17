@@ -38,6 +38,7 @@ function renderCursorStatus() {
   const managementBlocked = status?.managementBlocked === true;
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
       sourceLabel: account => account.sourceName,
+      blocked: () => state.cursorAccount.status?.managementBlocked === true,
       editor: { submit: 'cursorManualSubmit', nodes: ['cursorManualDetails', 'cursorErrorMessage'], visibility: 'cursorManualDetails', cancel: () => setCursorManualExpanded(false) },
     document, provider: 'cursor', label: host.providerLabel || 'Cursor',
     add: () => setCursorManualExpanded(document.getElementById('cursorManualDetails')?.classList.contains('hidden')), container: listEl, t, bridge: window.tokenMonitor,

@@ -521,8 +521,8 @@ test('editors occupy the group at their owner and use existing form actions incl
   assert.equal(submit.parentElement.children[1].textContent, 'Cancel');
   h.panel.openEditor(null);
   assert.equal(editor.children[1].classList.contains('credential-input'), true);
-  assert.equal(list.children[list.children.indexOf(editor.parentElement.parentElement) + 1].classList.contains('slot-add'), true);
-  assert.equal(list.children.at(-1).classList.contains('hidden'), true);
+  assert.equal(list.children[list.children.indexOf(editor.parentElement.parentElement) - 1].classList.contains('slot-add'), true);
+  assert.equal(list.children.find(child => child.classList.contains('slot-add')).classList.contains('hidden'), false);
   h.click(h.row('default'), 'Replace cookie');
   assert.ok(h.document.getElementById('qoderSlotDraftqoderCookieInput'));
   assert.ok(h.defaultPanel.parentElement !== editor);
@@ -665,8 +665,8 @@ test('editors occupy the group at their owner and use existing form actions incl
   assert.equal(submit.parentElement.children[1].textContent, 'Cancel');
   h.panel.openEditor(null);
   assert.equal(editor.children[1].classList.contains('credential-input'), true);
-  assert.equal(list.children[list.children.indexOf(editor.parentElement.parentElement) + 1].classList.contains('slot-add'), true);
-  assert.equal(list.children.at(-1).classList.contains('hidden'), true);
+  assert.equal(list.children[list.children.indexOf(editor.parentElement.parentElement) - 1].classList.contains('slot-add'), true);
+  assert.equal(list.children.find(child => child.classList.contains('slot-add')).classList.contains('hidden'), false);
   h.click(h.row('default'), 'Replace cookie');
   assert.ok(h.document.getElementById('qoderSlotDraftqoderCookieInput'));
   assert.equal(list.children[list.children.indexOf(h.row('default')) + 1], editor.parentElement.parentElement);
@@ -1397,4 +1397,63 @@ test('Alibaba environment DTO respects a stored variant override without changin
 
 test('source-excluded accounts do not inherit a connected retained reading', () => {
   assert.equal(accountStatus({ enabled: true, sourceSelected: false }, { status: 'ok' }), 'notCollected');
+});
+
+test('Command Code displays its plan independently of the account title and updates it in place', () => {
+  const h = harness(t, 'commandcode');
+  const slot = { id: 'account', accountKey: 'key', fingerprint: 'abc123', enabled: true };
+  const quota = { provider: 'commandcode', accountKey: 'key', status: 'ok', source: 'web', accountLabel: 'Pro' };
+  h.panel.update([slot], [quota], {});
+  const row = h.row('account');
+  assert.equal(row.querySelector('.slot-name').textContent, 'Account #abc123');
+  assert.equal(row.querySelector('.slot-detail').textContent, 'Pro');
+  h.panel.update([{ ...slot, label: 'Work' }], [{ ...quota, accountLabel: 'Max' }], {});
+  assert.equal(h.row('account'), row);
+  assert.equal(row.querySelector('.slot-name').textContent, 'Work');
+  assert.equal(row.querySelector('.slot-detail').textContent, 'Max');
+  h.panel.update([slot], [{ ...quota, accountEmail: 'user@example.com', accountName: 'User', accountLabel: 'Pro' }], {});
+  assert.equal(row.querySelector('.slot-name').textContent, 'user@example.com');
+  assert.match(row.querySelector('.slot-detail').textContent, /Pro$/);
+});
+
+test('account plan details honor provider plan policies and do not repeat identity as a plan', () => {
+  for (const [provider, metadata, expected] of [
+    ['cursor', { accountLabel: 'user@example.com', accountEmail: 'user@example.com' }, ''],
+    ['qoder', { accountLabel: 'User', accountName: 'User' }, ''],
+    ['mimo', { accountLabel: 'Console', planLabel: 'Pro' }, 'Pro'],
+    ['minimax', { accountLabel: 'Profile' }, ''],
+    ['qoder', { accountLabel: 'Old', planLabel: 'Premium' }, 'Premium']
+  ]) {
+    const h = harness();
+    // The policy belongs to the reading provider; the generic panel consumes its metadata.
+    const slot = { id: 'account', accountKey: 'key', enabled: true, fingerprint: '123' };
+    h.panel.update([slot], [{ provider, accountKey: 'key', status: 'ok', ...metadata }], {});
+    const detail = h.row('account').querySelector('.slot-detail').textContent;
+    assert.equal(detail, [expected, t('settings.slots.savedSource')].filter(Boolean).join(' · '), provider);
+  }
+});
+
+test('healthy account shows its source with accessible status; failures keep explicit status and source detail', () => {
+  const h = harness(t, 'commandcode');
+  const slot = { id: 'account', accountKey: 'key', fingerprint: 'abc', enabled: true };
+  const quota = { provider: 'commandcode', accountKey: 'key', source: 'web', status: 'ok', accountLabel: 'Pro' };
+  const update = (account, reading) => h.panel.update([account], [reading], {});
+  update(slot, quota);
+  const row = h.row('account'), status = row.querySelector('.slot-status');
+  assert.equal(status.textContent, 'Web');
+  assert.equal(status.attributes['aria-label'], 'Connected · Web');
+  assert.equal(status.classList.contains('slot-connected'), true);
+  assert.equal(row.querySelector('.slot-detail').textContent, 'Pro');
+  for (const [account, reading, expected] of [
+    [{ ...slot, enabled: false }, quota, 'paused'],
+    [{ ...slot, sourceSelected: false }, quota, 'notCollected'],
+    [slot, { ...quota, status: 'unauthorized' }, 'invalid'],
+    [slot, { ...quota, stale: true }, 'stale']
+  ]) {
+    update(account, reading);
+    assert.equal(status.classList.contains('slot-connected'), false);
+    assert.equal(status.classList.contains(`slot-${expected}`), true);
+    assert.notEqual(status.textContent, 'Web');
+    assert.equal(row.querySelector('.slot-detail').textContent, 'Pro · Web');
+  }
 });

@@ -9400,6 +9400,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .slot-rename-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .slot-status { min-width: 0; max-width: 150px; overflow: hidden; text-overflow: ellipsis; font-size: .6875rem; color: var(--muted); text-align: right; white-space: nowrap; }
 .slot-connected { color: var(--success); }
+.slot-connected::before { content: ''; display: inline-block; width: 12px; height: 12px; margin-inline-end: 4px; vertical-align: -2px; background: currentColor; mask: url("icons/actions/check.svg") center / contain no-repeat; }
 .slot-invalid { color: var(--red); }
 .slot-stale { color: var(--yellow); }
 .slot-paused .slot-name { color: var(--muted); }

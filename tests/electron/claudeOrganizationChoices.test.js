@@ -26,7 +26,8 @@ test('Claude Web rows retain controls and removal confirmation across quota and 
   const row = [...list.walk()].find(n => n.dataset.slotId === 'a');
   const info = row.querySelector('.slot-status');
   const remove = [...row.walk()].find(n => n.dataset.slotAction === 'remove');
-  assert.equal(info.textContent, '● settings.slots.connected');
+  assert.equal(info.textContent, 'settings.limits.sources.web');
+  assert.equal(info.classList.contains('slot-connected'), true);
   remove.click();
   document.activeElement = remove;
   providers[0].updatedAt = 'new';

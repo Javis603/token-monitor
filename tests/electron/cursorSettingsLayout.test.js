@@ -528,7 +528,8 @@ test('Codex account panel supports per-account enable toggles without showing ti
   assert.match(body, /remove: account => window\.tokenMonitor\.codex\.removeAccount\(account\.id\)/);
   assert.match(body, /changed: result => \{ if \(result\.accounts\) state\.settings\.codexManagedAccounts = result\.accounts;/);
   assert.match(body, /refresh: refreshCodexAccounts, busy: \(\) => state\.codexSignInBusy/);
-  assert.match(body, /accountList\.update\(accounts, host\.localProviderStatuses\('codex'\)\)/);
+  assert.match(body, /accountList\.update\(accounts\.map/);
+  assert.match(body, /planLabel: accountLabel/);
   assert.doesNotMatch(body, /formatTime\(account\.updatedAt\)|refreshStats/);
   const common = readRendererFile('limits/legacyAccountList.js');
   assert.match(common, /enabled: account\.enabled !== false/);

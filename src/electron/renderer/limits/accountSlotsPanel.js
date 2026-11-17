@@ -5,10 +5,12 @@
   const dragController = typeof module !== 'undefined' ? require('../rowDragController') : root.TokenMonitorRowDragController;
   const dragSort = typeof module !== 'undefined' ? require('../verticalDragSort') : root.TokenMonitorVerticalDragSort;
   const identity = typeof module !== 'undefined' ? require('../accountIdentity') : root.TokenMonitorAccountIdentity;
-  const api = factory(menus, dragController, dragSort, identity);
+  const presentationApi = typeof module !== 'undefined' ? require('./providerPresentation') : root.TokenMonitorLimitProviderPresentation;
+  const windowLabels = typeof module !== 'undefined' ? require('../../../shared/limits/windowLabels') : root.TokenMonitorLimitWindowLabels;
+  const api = factory(menus, dragController, dragSort, identity, presentationApi, windowLabels);
   if (typeof module !== 'undefined') module.exports = api;
   if (root) root.TokenMonitorAccountSlotsPanel = api;
-})(typeof window !== 'undefined' ? window : null, function accountSlotsPanelApi(menus, dragController, dragSort, accountIdentity) {
+})(typeof window !== 'undefined' ? window : null, function accountSlotsPanelApi(menus, dragController, dragSort, accountIdentity, presentationApi, windowLabels) {
   // One precedence rule for local panels, remote panels and reading overlays.
   // An explicit blank overrides an old credential-slot label after a clear.
   function presentationLabel(slot, accountKey, presentation = {}) {
@@ -20,6 +22,16 @@
       // The app's name is a proper noun; the phrase around it is localized.
       || (slot.sourceName ? t('settings.slots.discoveredName', { source: slot.sourceName }) : '')
       || t('settings.slots.account', { fingerprint: slot.fingerprint });
+  }
+  // Plans describe the subscription, never the account's identity or rename.
+  function accountPlan(provider, slot, reading) {
+    const row = reading || { provider, planLabel: slot.planLabel };
+    const owned = presentationApi.limitProviderPlanValue(row, { mimoProductLabel: windowLabels.mimoProductLabel });
+    const value = owned !== undefined ? owned : String(row.planLabel || '').trim() || presentationApi.limitProviderLegacyPlanLabel(row);
+    if (!value) return '';
+    const identities = [slot.accountEmail, slot.accountName, row.accountEmail, row.email, row.accountName];
+    if (identities.some(identity => identity && String(identity).toLowerCase() === String(value).toLowerCase())) return '';
+    return presentationApi.limitProviderPlanDisplayLabel(row, value);
   }
   function accountStatus(slot, reading) {
     if (!slot.enabled) return 'paused';
@@ -73,7 +85,25 @@
     return result;
   }
 
-  function createPanel({ form, label, loginAction, document, t, ipc, forms, preserveScroll, onChanged, openExternal, maskEmail = value => value, customEditor, onAdd, capabilities = () => ({}), isBusy = () => false, extraActions = () => [], statusReading = (_slot, reading) => reading, secondaryText = () => '', detailText = () => '', hideAdd = false }) {
+  // Both editor owners use the existing grid accordion. Collapse only changes
+  // presentation: the same controls and pending operations remain mounted.
+  function createEditorToggle(button, reveal, id) {
+    reveal.id = id;
+    button.setAttribute('aria-controls', id);
+    let expanded = false;
+    return {
+      get expanded() { return expanded; },
+      setExpanded(value) {
+        expanded = value;
+        if (reveal.classList.contains('hidden') === value) reveal.classList.toggle('hidden', !value);
+        if (reveal.inert !== !value) reveal.inert = !value;
+        const aria = String(value);
+        if (button.getAttribute?.('aria-expanded') !== aria) button.setAttribute('aria-expanded', aria);
+      }
+    };
+  }
+
+  function createPanel({ form, label, loginAction, document, t, ipc, forms, preserveScroll, onChanged, openExternal, maskEmail = value => value, customEditor, onAdd, addCanToggle = () => false, addBlocked = () => false, capabilities = () => ({}), isBusy = () => false, extraActions = () => [], statusReading = (_slot, reading) => reading, sourceText = () => '', secondaryText = () => '', detailText = () => '', hideAdd = false }) {
     const make = (tag, className = '', text) => {
       const el = document.createElement(tag);
       el.className = className;
@@ -223,7 +253,7 @@
       cancelLogin = null;
       editorRevision++;
       editorOwner = undefined;
-      add?.classList.remove('hidden');
+      editorToggle.setExpanded(false);
       const revision = editorRevision;
       const clear = () => { if (revision === editorRevision) editor.replaceChildren(); };
       const motion = document.defaultView?.matchMedia;
@@ -234,9 +264,12 @@
     }
     function openEditor(slot) {
       if (customEditor) return customEditor(slot);
+      if (editorOwner !== undefined && editorOwner === (slot?.id ?? null)) {
+        return preserveScroll(() => editorToggle.setExpanded(true));
+      }
       preserveScroll(() => {
         closeEditor(true);
-        editorReveal.classList.remove('hidden'); editorReveal.inert = false;
+        editorToggle.setExpanded(true);
         editorOwner = slot?.id ?? null;
         placeEditor();
         const revision = editorRevision;
@@ -498,17 +531,23 @@
     function placeEditor() {
       if (editorOwner === undefined) return;
       const owner = rows.get(editorOwner);
-      const before = owner ? list.children[[...list.children].indexOf(owner.el) + 1] : add;
+      const anchor = owner?.el || add;
+      const before = list.children[[...list.children].indexOf(anchor) + 1];
       if (before !== editorReveal) list.moveBefore(editorReveal, before || null);
-      add.classList.toggle('hidden', editorOwner === null);
     }
     const add = slotButton('add', () => {
-      if (isBusy()) return;
+      if (addBlocked()) return;
+      if (!onAdd && editorOwner !== undefined) {
+        return preserveScroll(() => editorToggle.setExpanded(!editorToggle.expanded));
+      }
+      if (isBusy() && !onAdd) return;
       if (!onAdd) return openEditor(null);
       try { return Promise.resolve(onAdd()).catch(error); } catch (_) { error(); }
     }, { provider: label });
     add.className = 'slot-add';
     add.classList.toggle('hidden', hideAdd);
+    const editorToggle = createEditorToggle(add, editorReveal, `${form.id}SlotEditor`);
+    editorToggle.setExpanded(false);
     list.append(add);
     function remoteAccounts() {
       return applyAccountOrder(remoteReadings, { [form.id]: slots }, localDeviceId, { [form.id]: presentation })
@@ -527,7 +566,7 @@
     function render() {
       if (rowDrag.deferRender()) return;
       const active = activeAccounts();
-      add.disabled = Boolean(isBusy());
+      add.disabled = Boolean(addBlocked()) || (editorOwner === undefined && !addCanToggle() && Boolean(isBusy()));
       for (const [id, item] of rows) if (!active.some(slot => slot.id === id)) { item.el.remove(); rows.delete(id); }
       active.forEach((slot, index) => {
         const item = rowFor(slot.id);
@@ -537,8 +576,13 @@
         const reading = remote ? remoteReadings.find(row => row.sourceDeviceId === slot.sourceDeviceId && row.accountKey === slot.accountKey)
           : localReading(slot);
         if (!item.editing) item.name.textContent = accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') }, reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading, t, presentation);
-        const provenance = secondaryText(slot) || slot.sourceName || (slot.source === 'environment' ? t('settings.limits.sources.env') : !slot.source && !customEditor ? tr('savedSource') : '');
-        const detail = [provenance, detailText(slot)].filter((value, index, all) => value && all.indexOf(value) === index).join(' · ');
+        const status = accountStatus(slot, statusReading(slot, reading));
+        const source = sourceText(slot, reading) || slot.sourceName || presentationApi.limitProviderSourceLabel(reading) || '';
+        const secondary = secondaryText(slot);
+        const provenance = secondary && secondary !== source ? secondary : !source
+          ? (slot.source === 'environment' ? t('settings.limits.sources.env') : !slot.source && !customEditor ? tr('savedSource') : '') : '';
+        const detail = [maskEmail(accountPlan(form.id, slot, reading)), status !== 'connected' ? source : '', provenance, detailText(slot)]
+          .filter((value, index, all) => value && all.indexOf(value) === index).join(' · ');
         if (detail && !item.detail) {
           item.detail = make('div', 'settings-note slot-detail');
           item.el.querySelector('.slot-copy').append(item.detail);
@@ -554,10 +598,11 @@
         item.renameAction?.classList.toggle('hidden', permission.rename === false);
         item.renameButton.classList.toggle('hidden', item.editing || permission.rename === false);
         item.name.parentElement.classList.toggle('is-editing', item.editing);
-        const status = accountStatus(slot, statusReading(slot, reading));
         item.el.classList.toggle('slot-paused', !slot.enabled);
         item.status.className = `slot-status slot-${status}`;
-        item.status.textContent = `● ${status === 'disabled' ? t('settings.limits.status.disabled') : tr(status === 'invalid' ? (cookie ? 'invalidCookie' : 'invalidKey') : status)}`;
+        const statusText = status === 'disabled' ? t('settings.limits.status.disabled') : tr(status === 'invalid' ? (cookie ? 'invalidCookie' : 'invalidKey') : status);
+        item.status.textContent = status === 'connected' ? source || statusText : `● ${statusText}`;
+        item.status.setAttribute('aria-label', [statusText, source].filter(Boolean).join(' · '));
         if (item.pause) {
           item.updateRemove();
           item.pause.dataset.slotAction = slot.enabled ? 'pause' : 'resume';
@@ -622,5 +667,5 @@
       preserveScroll(render);
     }, openEditor };
   }
-  return { presentationLabel, accountName, accountStatus, slotOwner, applyAccountOrder, createPanel };
+  return { presentationLabel, accountName, accountStatus, slotOwner, applyAccountOrder, createPanel, createEditorToggle };
 });

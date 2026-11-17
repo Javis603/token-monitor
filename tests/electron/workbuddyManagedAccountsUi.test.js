@@ -104,7 +104,7 @@ test('visible Settings follows quota pushes and defers hidden updates without po
   h.run('renderWorkbuddyStatus()');
   assert.equal(label(), `● ${MESSAGES.en['settings.slots.unavailable']}`);
   push('ok');
-  assert.equal(label(), `● ${MESSAGES.en['settings.slots.connected']}`);
+  assert.equal(label(), MESSAGES.en['settings.limits.sources.oauth']);
   push('unauthorized');
   assert.equal(label(), `● ${MESSAGES.en['settings.slots.invalidKey']}`);
   settingsVisible = false;
@@ -116,7 +116,7 @@ test('visible Settings follows quota pushes and defers hidden updates without po
   assert.equal(label(), `● ${MESSAGES.en['settings.slots.invalidKey']}`, 'hidden pushes are coalesced');
   hidden = false;
   scheduler.flush();
-  assert.equal(label(), `● ${MESSAGES.en['settings.slots.connected']}`);
+  assert.equal(label(), MESSAGES.en['settings.limits.sources.oauth']);
   assert.deepEqual(h.refreshes, [], 'status rendering requests no extra stats or account polling');
 });
 
