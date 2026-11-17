@@ -294,7 +294,7 @@ function discoverAccountSlots(deps = {}) {
     return [];
   }
   const result = resolveFactoryAutomaticApiKey({}, { ...deps, env: {} });
-  return result.apiKey ? [{ values: { factoryApiKey: result.apiKey }, sourceName: 'Droid' }] : [];
+  return result.apiKey ? [{ values: { factoryApiKey: result.apiKey }, accountKey: hashKey('factory', result.apiKey), sourceName: 'Droid' }] : [];
 }
 
 module.exports = {

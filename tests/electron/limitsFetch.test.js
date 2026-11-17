@@ -138,9 +138,11 @@ test('every widget provider probe takes the runtime transport', () => {
 });
 
 test('the auto-detect pill requires a usable ZCode credential, not any install', () => {
-  const account = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'providers', 'zai', 'account.js'), 'utf8');
-  // An API-only or unentitled ZCode selection is not an auto quota source;
-  // only entitled + credential marks the login detected, so the pill never
-  // advertises auto-detect for a state the collector cannot answer.
-  assert.match(account, /return discovery\.entitled && discovery\.credential \? discovery : null;/);
+  const account = require('../../src/shared/providers/zai/account');
+  for (const discovery of [{}, { entitled: false }, { kind: 'api-balance' }]) {
+    assert.equal(account.discover({}, { discoverZcodeConnection: () => discovery }), null);
+  }
+  for (const discovery of [{ credential: { token: 'quota' } }, { billing: { credential: { token: 'billing' } } }]) {
+    assert.equal(account.discover({}, { discoverZcodeConnection: () => discovery }), discovery);
+  }
 });

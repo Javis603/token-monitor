@@ -21,6 +21,7 @@ const { SERVICE_STATUS_PROVIDERS } = require('../../src/electron/serviceStatus')
 const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
 const { LIMIT_PROVIDER_REGISTRY, LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
 const {
+  rendererOmittedAccountKeys,
   accountFieldProjection,
   accountStatusProjection,
   finalAccountSettings,
@@ -184,6 +185,7 @@ test('the renderer receives no credential values except the two hub secrets', ()
   const redacted = credentialSettingsForRenderer(settings, { expose: ['hubHostSecret', 'secret'] });
   for (const key of Object.keys(CREDENTIAL_SETTING_PATHS)) {
     if (key === 'hubHostSecret' || key === 'secret') assert.deepEqual(redacted[key], { secret: 'x' });
+    else if (rendererOmittedAccountKeys().includes(key)) assert.equal(Object.hasOwn(redacted, key), false, key);
     else assert.equal(redacted[key], '', key);
   }
   // main.js is the only caller; pin that it exposes exactly those two keys.
