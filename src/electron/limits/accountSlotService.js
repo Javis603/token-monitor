@@ -12,8 +12,13 @@ const { orderAccountRows, defaultIdentityKey, accountSlotKey, normalizeAccountSl
 
 // All secret/identity writes share one lane. Refresh notification is outside the
 // transaction: a refresh may itself enqueue a resolved identity.
-function createAccountSlotService({ getSettings, write, onChanged, probeDeps, env = process.env, now = Date.now }) {
+function createAccountSlotService({ getSettings, write, onChanged, onPresentation, probeDeps, env = process.env, now = Date.now }) {
   let lane = Promise.resolve();
+  // Sharing is best effort and off the account lane: a rename or move answers
+  // as soon as it is saved locally, never after a Hub round trip.
+  const publishPresentation = (operations) => {
+    try { Promise.resolve(onPresentation?.(operations)).catch(() => {}); } catch (_) { /* Local save already succeeded. */ }
+  };
   const environmentIdentities = new Map();
   const serialize = (work) => {
     const task = lane.then(work);
@@ -24,7 +29,11 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
     const entry = limitProviderEntry(typeof id === 'string' ? id : '');
     return entry?.accountSlots ? entry : null;
   };
-  const slots = (entry) => normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]);
+  const slots = (entry) => {
+    const order = getSettings().limitAccountPresentation?.[entry.id]?.order || [];
+    const rank = slot => order.includes(slot.accountKey) ? order.indexOf(slot.accountKey) : order.length;
+    return normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]).sort((a, b) => rank(a) - rank(b));
+  };
   const environment = entry => {
     const values = defaultAccountValues(entry, getSettings(), env);
     const cached = environmentIdentities.get(entry.id);
@@ -129,6 +138,13 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
           serverIdentity: provenNow || oldProven,
           createdAt: old?.createdAt || timestamp, updatedAt: timestamp };
         await commit(entry, old ? previous.map(slot => slot.id === old.id ? record : slot) : [...previous, record], true, true, true);
+          if (!old && record.label) {
+            const account = dto(entry).find(slot => slot.id === record.id);
+            const operations = [{ provider: providerId, type: 'rename', key: account.accountKey, label: account.label }];
+            const { replayPresentation } = require('./accountPresentationSync');
+            await write({ limitAccountPresentation: replayPresentation(getSettings().limitAccountPresentation, operations) });
+            publishPresentation(operations);
+          }
       };
       const commands = createCredentialCommands({ getSettings, env: {},
         probeDeps: () => ({ ...probeDeps(), probe: true, providerRuntimeState: new Map(), env: {} }),
@@ -205,6 +221,16 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
       else return failure('invalidOperation');
       if (operation !== 'remove') next.find(slot => slot.id === id).updatedAt = new Date(now()).toISOString();
       await commit(entry, next, true, operation !== 'rename' && operation !== 'move');
+      if (operation === 'rename' || operation === 'move') {
+        const accounts = operation === 'move' ? next.map(item => dto(entry).find(slot => slot.id === item.id)) : dto(entry);
+        const slot = accounts.find(slot => slot.id === id);
+        const operations = operation === 'rename'
+          ? [{ provider: providerId, type: 'rename', key: slot.accountKey, label: slot.label }]
+          : [{ provider: providerId, type: 'order', order: accounts.map(slot => slot.accountKey) }];
+        const { replayPresentation } = require('./accountPresentationSync');
+        await write({ limitAccountPresentation: replayPresentation(getSettings().limitAccountPresentation, operations) });
+        publishPresentation(operations);
+      }
       return list(providerId);
     }).catch(() => failure('credentialStorageUnavailable'));
   }
@@ -219,8 +245,11 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
       else return failure('invalidOperation');
       const next = normalizeAccountPresentation({ ...all, [providerId]: group });
       await write({ limitAccountPresentation: next });
+      publishPresentation([operation === 'rename'
+        ? { provider: providerId, type: 'rename', key: accountKey, label: next[providerId]?.labels[accountKey] || '' }
+        : { provider: providerId, type: 'order', order: next[providerId].order }]);
       changed(entry, [], false);
-      return { ...list(providerId), presentation: next };
+      return { ...list(providerId), presentation: getSettings().limitAccountPresentation };
     }).catch(() => failure('settingsStorageUnavailable'));
   }
   function resolved(providerId, id, identity, dispatchedValues) {
@@ -255,8 +284,17 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
         && identity.accountKey !== hashKey(entry.id, 'account-slot', `slot:${slot.id}`)
         && provesServer(identity.accountKey, slot.values, identity.accountKeyAliases || []));
       slot.serverIdentity = proven || slot.serverIdentity;
+      const previousKey = slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`);
+      const labels = getSettings().limitAccountPresentation?.[providerId]?.labels || {};
+      const label = Object.hasOwn(labels, previousKey) ? labels[previousKey] : slot.label;
       Object.assign(slot, identity);
       await commit(entry, next, false);
+      if (slot.accountKey && slot.accountKey !== previousKey && (label || Object.hasOwn(labels, previousKey)) && !Object.hasOwn(labels, slot.accountKey)) {
+        const operations = [{ provider: providerId, type: 'rename', key: slot.accountKey, label }];
+        const { replayPresentation } = require('./accountPresentationSync');
+        await write({ limitAccountPresentation: replayPresentation(getSettings().limitAccountPresentation, operations) });
+        publishPresentation(operations);
+      }
       return true;
     });
   }

@@ -97,6 +97,21 @@ async function readDevice(client) {
 }
 
 for (const runtime of ['Node', 'Worker']) {
+  test(`${runtime}: account presentation uses authenticated CAS and stays out of public stats`, async (t) => {
+    const client = await fixture(t, runtime);
+    const endpoint = '/api/sync/settings/limitAccountPresentation';
+    const value = { deepseek: { labels: { key: 'My account' }, order: ['key'] } };
+    assert.equal((await client.send(endpoint, 'PUT', { baseRevision: 0, value }, false)).status, 401);
+    assert.equal((await client.send(endpoint, 'PUT', { baseRevision: 0, value })).status, 200);
+    assert.deepEqual((await (await client.send(endpoint)).json()).value, value);
+    assert.equal((await client.send(endpoint, 'PUT', { baseRevision: 0, value })).status, 409);
+    assert.equal((await client.send(endpoint, 'PUT', { baseRevision: 1, value: { deepseek: { ...value.deepseek, secret: 'no' } } })).status, 400);
+    assert.equal((await (await client.send('/api/stats')).json()).syncSettingsRevisions.limitAccountPresentation, 1);
+    if (runtime === 'Worker') assert.doesNotMatch(JSON.stringify(await (await client.send('/api/public/stats', 'GET', undefined, false)).json()), /limitAccountPresentation|My account|syncSettingsRevisions/);
+    await client.restart(false);
+    assert.deepEqual((await (await client.send(endpoint)).json()).value, value);
+  });
+
   test(`${runtime}: capability, settings and policy share authentication and default off`, async (t) => {
     const client = await fixture(t, runtime);
     assert.deepEqual(await (await client.send('/api/sync/content')).json(), {
@@ -116,7 +131,7 @@ for (const runtime of ['Node', 'Worker']) {
       });
     }
     const privateStats = await (await client.send('/api/stats')).json();
-    assert.deepEqual(privateStats.syncSettingsRevisions, { modelAliases: 0, customPricing: 0 });
+    assert.deepEqual(privateStats.syncSettingsRevisions, { modelAliases: 0, customPricing: 0, limitAccountPresentation: 0 });
     if (runtime === 'Node') assert.equal((await client.send('/api/public/stats', 'GET', undefined, false)).status, 401);
   });
 
@@ -247,7 +262,7 @@ for (const runtime of ['Node', 'Worker']) {
     assert.equal((await client.send('/api/sync/settings/credentials', 'PUT', { baseRevision: 0, value: {} })).status, 404);
     await client.restart(false);
     assert.deepEqual(await (await client.send(pathPrices)).json(), empty);
-    assert.deepEqual((await (await client.send('/api/stats')).json()).syncSettingsRevisions, { modelAliases: 1, customPricing: 2 });
+    assert.deepEqual((await (await client.send('/api/stats')).json()).syncSettingsRevisions, { modelAliases: 1, customPricing: 2, limitAccountPresentation: 0 });
     if (runtime === 'Worker') {
       assert.ok(client.state.gates > 5, 'compound operations use the DO gate');
       assert.equal(client.state.resets, 0, 'normal validation and CAS conflicts must not reset the DO');

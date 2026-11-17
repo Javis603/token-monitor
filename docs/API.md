@@ -523,7 +523,7 @@ An ingest can carry `sessionTitleSyncGeneration: <integer>`. It accepts canonica
 
 ## `GET` / `PUT /api/sync/settings/:kind`
 
-Authenticated shared groups are exactly `modelAliases` and `customPricing`. An uninitialized group returns:
+Authenticated shared groups are `modelAliases`, `customPricing` and `limitAccountPresentation` (described below). An uninitialized group returns:
 
 ```json
 {"ok":true,"version":1,"revision":0,"updatedAt":"","value":null}
@@ -538,3 +538,11 @@ Authenticated shared groups are exactly `modelAliases` and `customPricing`. An u
 Only these whitelisted group fields are stored: settings files, raw credentials and session messages are never accepted. Accepted writes broadcast authenticated stats with `reason: "sync-settings"` and the new `syncSettingsRevisions` marker. Neither group contents nor their revision markers are included in public Worker stats.
 
 Optional `unpricedTokens` on periods, sessions and project rollups counts usage with unavailable catalog pricing; `costUsd` is the known subtotal. Period `clientUnpricedTokens`, `modelUnpricedTokens` and `clientModelUnpricedTokens` attribute those counts. Absent fields preserve legacy behavior and must not be inferred from zero cost. These additive counters survive Hub/Worker normalization and merging. History daily/monthly rows, their perClient/perModel buckets, previews and the lifetime summary also carry optional unpricedTokens; cost/totalCost remain known subtotals. Fixed-range projections preserve those counts from history and live-today overlays, including per-device aggregation. Legacy rows without the field retain their existing semantics; zero cost alone never implies a missing price.
+
+### Automatic account presentation
+
+`limitAccountPresentation` is also an authenticated sync-settings kind. Its value is `{ "deepseek": { "labels": { "accountKey": "Work" }, "order": ["accountKey"] } }`, keyed by registered limits provider. Each provider group accepts only `labels` and `order`, with at most 200 entries in each. Keys are nonblank trimmed strings of at most 256 characters; order keys are unique. Labels use the same normalization as local account-slot labels: at most 256 input characters and 32 normalized Unicode codepoints, with email addresses and URLs refused. An empty label explicitly clears a previous name. Unknown providers, extra group fields and malformed or oversized replacements return `400`.
+
+Desktop clients synchronize this group automatically in Hub client and host modes, independently of optional model/pricing sync. Local mode keeps using the local `limitAccountPresentation` store. Stats revision markers trigger rereads; the group and marker remain absent from unauthenticated Worker public stats. A `400` or `404` from an older Hub silently leaves the local editor usable.
+
+Clients replay pending rename/order operations after a `409`, refetching before each retry, up to three write attempts. A later order wins for the accounts it names, retaining other known keys afterward. Existing local presentation can seed only a never-written document; a cache of any Hub never seeds another document. If two devices initialize together, existing remote names win and missing initial names are retained. On a device's first connection, user-chosen credential-slot labels missing from the document are published once, independently of the presentation cache; explicit shared labels, including empty labels, take precedence. Account keys that differ across platforms refer to different entries, as with subscriptions.

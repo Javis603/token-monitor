@@ -14,7 +14,7 @@ function normalizeAccountPresentation(input) {
   return Object.fromEntries(Object.entries(input).filter(([id, group]) => PROVIDERS.has(id) && object(group)).map(([id, group]) => {
     // Normalize before bounding so invalid entries never take a place, and keep
     // the most recent entries so a new rename is not the one dropped at the cap.
-    const labels = Object.fromEntries((object(group.labels) ? Object.entries(group.labels) : []).filter(([key, label]) => validKey(key) && typeof label === 'string').map(([key, label]) => [key, normalizeLimitProvider({ provider: id, accountLabel: label })?.accountLabel || '']).filter(([, label]) => label).slice(-MAX_ENTRIES));
+    const labels = Object.fromEntries((object(group.labels) ? Object.entries(group.labels) : []).filter(([key, label]) => validKey(key) && typeof label === 'string').map(([key, label]) => [key, normalizeLimitProvider({ provider: id, accountLabel: label })?.accountLabel || '']).filter(([key, label]) => label || group.labels[key] === '').slice(-MAX_ENTRIES));
     const order = Array.isArray(group.order) ? [...new Set(group.order.filter(validKey))].slice(0, MAX_ENTRIES) : [];
     return [id, { labels, order }];
   }));

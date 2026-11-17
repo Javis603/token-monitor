@@ -3919,9 +3919,84 @@ function syncContentContext(sourceSettings = settings) {
   return { ...endpoint, mode: sourceSettings?.hubMode, deviceId: sourceSettings?.deviceId || defaultDeviceId() };
 }
 
+async function requestSyncContent(context, pathname, method, body) {
+  // The embedded Hub uses the same authenticated protocol in-process. Its
+  // own usage must keep working when outbound loopback traffic is blocked.
+  if (context.mode === 'host' && embeddedHub
+    && ((context.url === `http://127.0.0.1:${embeddedHub.port}` && context.secret === embeddedHub.secret)
+      // Every embedded host generation shares this app's hubDataFile. Old
+      // host journals may scrub that same store after port/secret rotation;
+      // they cannot read or admit a new generation through this exception.
+      || (method === 'PUT' && /^\/api\/sync\/titles\//.test(pathname) && body?.enabled === false))) {
+    const hub = embeddedHub.hub;
+    try {
+      if (pathname === '/api/sync/content') return { status: 200, body: hub.getSyncContent() };
+      const match = pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing|limitAccountPresentation)$/);
+      if (match) return { status: 200, body: { ok: true, ...(method === 'PUT'
+        ? hub.setSyncSettings(match[1], body) : hub.getSyncSettings(match[1])) } };
+      const titleMatch = pathname.match(/^\/api\/sync\/titles\/([^/]+)$/);
+      if (titleMatch && method === 'PUT') return { status: 200,
+        body: { ok: true, ...hub.setSyncTitlePolicy(decodeURIComponent(titleMatch[1]), body.enabled) } };
+      return { status: 404, body: null };
+    } catch (error) {
+      return { status: error.code === 'stale_write' ? 409 : error.code === 'forbidden' ? 403 : 400,
+        body: error.current || null };
+    }
+  }
+  const response = await fetch(`${context.url.replace(/\/$/, '')}${pathname}`, {
+    method, redirect: 'error',
+    headers: { 'content-type': 'application/json', ...(context.secret ? { authorization: `Bearer ${context.secret}` } : {}) },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    signal: AbortSignal.timeout(15_000)
+  });
+  let data;
+  try { data = await response.json(); } catch (_) { data = null; }
+  return { status: response.status, body: data };
+
+}
+
+let syncContentCredentials;
+// One CredentialStore-backed destination binding for every sync lane, so no
+// secret-derived value is written to settings.json.
+function getSyncContentCredentials() {
+  return syncContentCredentials ||= createSyncContentCredentialQueue(ensureCredentialStore);
+}
+
+const { createAccountPresentationSync } = require('./limits/accountPresentationSync');
+let accountPresentationSync;
+function getAccountPresentationSync() {
+  return accountPresentationSync ||= createAccountPresentationSync({
+    getContext: syncContentContext,
+    identity: (context) => {
+      try { return getSyncContentCredentials().resolveIdentity(context); } catch (_) { return ''; }
+    },
+    getCacheIdentity: () => settings.limitAccountPresentationCacheIdentity || '',
+    getLocalLabels: () => LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots).flatMap(entry =>
+      (accountSlotService?.list(entry.id).accounts || []).filter(slot => slot.label).map(slot =>
+        ({ provider: entry.id, type: 'rename', key: slot.accountKey, label: slot.label }))),
+    getSeed: () => {
+      const seed = structuredClone(settings.limitAccountPresentation || {});
+      for (const entry of LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots)) {
+        const accounts = accountSlotService?.list(entry.id).accounts || [];
+        if (!accounts.length) continue;
+        const group = seed[entry.id] ||= { labels: {}, order: [] };
+        for (const slot of accounts) if (slot.label && !Object.hasOwn(group.labels, slot.accountKey)) group.labels[slot.accountKey] = slot.label;
+        group.order = [...new Set([...group.order, ...accounts.map(slot => slot.accountKey)])];
+      }
+      return normalizeSharedSyncValue('limitAccountPresentation', normalizeAccountPresentation(seed));
+    },
+    request: requestSyncContent,
+    apply: (value, identity) => {
+      settings = { ...settings, limitAccountPresentation: value, limitAccountPresentationCacheIdentity: identity };
+      saveSettings({ throwOnError: true });
+      pushSettingsToRenderer();
+    }
+  });
+}
+
 function getSyncContentRuntime() {
   if (syncContentRuntime) return syncContentRuntime;
-  const cleanupCredentials = createSyncContentCredentialQueue(ensureCredentialStore);
+  const cleanupCredentials = getSyncContentCredentials();
   syncContentRuntime = createSyncContentRuntime({
     resolveIdentity: cleanupCredentials.resolveIdentity,
     loadCleanupContexts: cleanupCredentials.read,
@@ -3947,40 +4022,7 @@ function getSyncContentRuntime() {
       return applySyncSettingsPatch(kind === 'modelAliases' ? value : { customModelPricing: value });
     },
     normalizeValue: normalizeSharedSyncValue,
-    request: async (context, pathname, method, body) => {
-      // The embedded Hub uses the same authenticated protocol in-process. Its
-      // own usage must keep working when outbound loopback traffic is blocked.
-      if (context.mode === 'host' && embeddedHub
-        && ((context.url === `http://127.0.0.1:${embeddedHub.port}` && context.secret === embeddedHub.secret)
-          // Every embedded host generation shares this app's hubDataFile. Old
-          // host journals may scrub that same store after port/secret rotation;
-          // they cannot read or admit a new generation through this exception.
-          || (method === 'PUT' && /^\/api\/sync\/titles\//.test(pathname) && body?.enabled === false))) {
-        const hub = embeddedHub.hub;
-        try {
-          if (pathname === '/api/sync/content') return { status: 200, body: hub.getSyncContent() };
-          const match = pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing)$/);
-          if (match) return { status: 200, body: { ok: true, ...(method === 'PUT'
-            ? hub.setSyncSettings(match[1], body) : hub.getSyncSettings(match[1])) } };
-          const titleMatch = pathname.match(/^\/api\/sync\/titles\/([^/]+)$/);
-          if (titleMatch && method === 'PUT') return { status: 200,
-            body: { ok: true, ...hub.setSyncTitlePolicy(decodeURIComponent(titleMatch[1]), body.enabled) } };
-          return { status: 404, body: null };
-        } catch (error) {
-          return { status: error.code === 'stale_write' ? 409 : error.code === 'forbidden' ? 403 : 400,
-            body: error.current || null };
-        }
-      }
-      const response = await fetch(`${context.url.replace(/\/$/, '')}${pathname}`, {
-        method, redirect: 'error',
-        headers: { 'content-type': 'application/json', ...(context.secret ? { authorization: `Bearer ${context.secret}` } : {}) },
-        ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-        signal: AbortSignal.timeout(15_000)
-      });
-      let data;
-      try { data = await response.json(); } catch (_) { data = null; }
-      return { status: response.status, body: data };
-    },
+    request: requestSyncContent,
     onStatus: (status) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
         try { mainWindow.webContents.send('syncContent:push', status); } catch (_) {}
@@ -5254,6 +5296,7 @@ function sendPush(payload, options = {}) {
     }
     edgeDockManualStats = null;
     getSyncContentRuntime().notifyStats(latestStats);
+    getAccountPresentationSync().notifyStats(latestStats);
     const visibleStats = electronPresentationStats(latestStats);
     getLimitsHistoryStore().record(currentHubStatsIdentity(), visibleStats.limits);
     limitsHistoryController?.refresh();
@@ -5880,6 +5923,7 @@ function settingsForRenderer() {
   const rendererSettings = { ...settings };
   delete rendererSettings.icloudRetiredDeviceIds;
   delete rendererSettings.icloudWriterId;
+  delete rendererSettings.limitAccountPresentationCacheIdentity;
   delete rendererSettings.syncContentState;
   delete rendererSettings.pluginSkinRef;
   // Usage retained for untracked clients: only the collector transform reads
@@ -7020,6 +7064,7 @@ function startMode() {
       startHostStats();
       startHostCollector();
       void getSyncContentRuntime().refresh();
+      void getAccountPresentationSync().refresh();
       reconcileSharedSubscriptions();
       return;
     }
@@ -7033,6 +7078,7 @@ function startMode() {
       startStatsStream({ resetSnapshot: true });
       startSyncCollector();
       void getSyncContentRuntime().refresh();
+      void getAccountPresentationSync().refresh();
       reconcileSharedSubscriptions();
     } else {
       startLocalCollector();
@@ -8447,6 +8493,7 @@ app.whenReady().then(() => {
         }
       }
     },
+    onPresentation: (operations) => getAccountPresentationSync().publish(operations),
     probeDeps: credentialProbeDeps,
     onChanged: (provider, change) => {
       deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
@@ -8556,6 +8603,7 @@ app.whenReady().then(() => {
     delete normalizedPatch.icloudWriterId;
     // Presentation writes use the serialized account command lane.
     delete normalizedPatch.limitAccountPresentation;
+    delete normalizedPatch.limitAccountPresentationCacheIdentity;
     // Derived for the renderer from the hub document, not settings. Persisting a
     // copy would leave a key on disk that describes a hub as of whenever a form
     // was last saved, waiting to be mistaken for the real thing.
