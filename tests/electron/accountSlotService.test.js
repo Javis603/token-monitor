@@ -401,3 +401,81 @@ test('the same credential cannot be added twice or replaced into another account
   const same = await h.service.replace('deepseek', second.accounts[1].id, { deepseekApiKey: 'SECRET-two' });
   assert.notEqual(same.verdict, 'duplicate', 'replacing an account with its own credential is not a duplicate');
 });
+
+
+for (const operation of ['add', 'replace']) {
+  for (const provider of ['deepseek', 'qoder']) {
+    test(`${operation} rejects normalized ${provider} environment duplicates without writes or refresh`, async () => {
+      const deepseek = provider === 'deepseek';
+      const env = deepseek ? { DEEPSEEK_API_KEY: 'SECRET-env' } : { QODER_COOKIE: 'token=env' };
+      const h = harness({ env });
+      h.fetch = async () => { throw new Error('offline'); };
+      const field = deepseek ? 'deepseekApiKey' : 'qoderCookie';
+      const values = { [field]: deepseek ? '  SECRET-env  ' : '  token=env  ',
+        ...(deepseek ? {} : { qoderSite: ' https://qoder.com.cn ' }) };
+      // The environment companion is normalized too, using the form's rules.
+      if (!deepseek) h.settings = { ...h.settings, qoderSite: 'china' };
+      let id;
+      if (operation === 'replace') {
+        const added = await h.service.add(provider, { [field]: deepseek ? 'SECRET-other' : 'token=other',
+          ...(deepseek ? {} : { qoderSite: 'cn' }) });
+        id = added.accounts.find(account => account.id !== 'environment').id;
+      }
+      const before = structuredClone(h.settings);
+      const writes = h.writes.length;
+      const changes = [];
+      h.changed = (...args) => changes.push(args);
+      const result = operation === 'add' ? await h.service.add(provider, values)
+        : await h.service.replace(provider, id, values);
+      assert.deepEqual(result, { saved: false, verdict: 'duplicate', status: 'duplicate' });
+      assert.deepEqual(h.settings, before);
+      assert.equal(h.writes.length, writes);
+      assert.deepEqual(changes, []);
+      assert.equal(h.service.list(provider).accounts.length, operation === 'add' ? 1 : 2);
+    });
+  }
+}
+
+test('environment comparison allows absent or shadowed environment accounts and different credentials', async () => {
+  for (const mode of ['absent', 'shadowed', 'different']) {
+    const h = harness({ env: mode === 'absent' ? {} : { DEEPSEEK_API_KEY: 'SECRET-env' } });
+    if (mode === 'shadowed') h.settings = { ...h.settings, deepseekApiKey: 'SECRET-fixed' };
+    const changes = [];
+    h.changed = (...args) => changes.push(args);
+    const added = await h.service.add('deepseek', { deepseekApiKey: mode === 'different' ? 'SECRET-other' : 'SECRET-env' });
+    assert.equal(added.saved, true, mode);
+    const id = added.accounts.find(account => account.id !== 'environment').id;
+    assert.equal((await h.service.replace('deepseek', id, {})).saved, true, mode);
+    assert.equal(h.writes.length, 2);
+    assert.equal(changes.length, 2);
+  }
+});
+
+test('environment comparison includes Qoder site and DeepSeek web-token companions', async () => {
+  for (const provider of ['qoder', 'deepseek']) {
+    const qoder = provider === 'qoder';
+    const h = harness({ env: qoder ? { QODER_COOKIE: 'token=env' } : { DEEPSEEK_API_KEY: 'SECRET-env' } });
+    h.fetch = async () => { throw new Error('offline'); };
+    const values = qoder ? { qoderCookie: 'token=env', qoderSite: 'china' }
+      : { deepseekApiKey: 'SECRET-env', deepseekWebToken: 'web-companion' };
+    const added = await h.service.add(provider, values);
+    assert.equal(added.saved, true);
+    const id = added.accounts.find(account => account.id !== 'environment').id;
+    assert.equal((await h.service.replace(provider, id, {})).saved, true);
+    assert.equal(h.writes.length, 2);
+  }
+});
+
+test('a pre-existing environment duplicate can replace itself without migrating or deleting rows', async () => {
+  const env = {};
+  const h = harness({ env });
+  const added = await add(h);
+  const id = added.accounts[0].id;
+  env.DEEPSEEK_API_KEY = 'SECRET-one';
+  assert.equal(h.service.list('deepseek').accounts.length, 2);
+  const replaced = await h.service.replace('deepseek', id, { deepseekApiKey: ' SECRET-one ' });
+  assert.equal(replaced.saved, true);
+  assert.equal(replaced.accounts.length, 2);
+  assert.equal(h.settings.deepseekAccountSlots[0].id, id);
+  assert.equal(h.writes.length, 2);
+});

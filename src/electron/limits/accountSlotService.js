@@ -4,7 +4,7 @@ const { hashKey } = require('../../shared/hashKey');
 const { runLimitInvalidation } = require('../deviceRuntimeCoordinator');
 const { randomUUID } = require('node:crypto');
 const { createCredentialCommands, providerSelectionIncluding } = require('./credentialCommands');
-const { accountForm } = require('./accountSettings');
+const { accountForm, normalizeAccountField } = require('./accountSettings');
 const { limitProviderEntry } = require('../../shared/limits/registry');
 const { accountSlotKey, normalizeAccountSlots, defaultAccountValues, accountValuesFingerprint } = require('../../shared/limits/accountSlots');
 
@@ -87,7 +87,15 @@ function createAccountSlotService({ getSettings, write, onChanged, probeDeps, en
           // The same credential twice would be two rows for one account and a
           // duplicate request each pass; it is refused, pointing at the existing row.
           const fingerprint = accountValuesFingerprint(candidate);
-          if (previous.some(slot => slot.id !== old?.id && accountValuesFingerprint(slot.values) === fingerprint)) {
+          const environmentRow = environment(entry);
+          const environmentValues = environmentRow && Object.fromEntries(accountForm(entry).fields.map(({ key }) =>
+            [key, normalizeAccountField(key, environmentRow.values[key])]));
+          // Re-saving this slot's own values keeps the existing replace contract,
+          // even if an environment credential now duplicates this older slot.
+          const duplicatesEnvironment = environmentValues && accountValuesFingerprint(environmentValues) === fingerprint
+            && (!old || accountValuesFingerprint(old.values) !== fingerprint);
+          if (duplicatesEnvironment
+            || previous.some(slot => slot.id !== old?.id && accountValuesFingerprint(slot.values) === fingerprint)) {
             rejected = { saved: false, verdict: 'duplicate', status: 'duplicate' };
             return;
           }
