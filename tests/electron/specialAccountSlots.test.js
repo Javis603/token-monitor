@@ -125,7 +125,7 @@ test('Muse runs anonymous CLI once for multiple saved web slots and never lets i
 test('Kimi configured primary survives Web fallback and keeps slot history separate', async () => {
   const requests = [];
   const rows = await LIMIT_PROVIDER_FETCHERS.kimi({ kimiAccountSlots: [{ id: 'a', enabled: true, values: { kimiApiKey: 'primary', kimiWebAccessToken: 'web' } }, { id: 'b', enabled: true, values: { kimiWebAccessToken: 'web-only' } }] }, {
-    env: {}, fetch: async (url, init) => { requests.push(init.headers); return { ok: true, status: 200, json: async () => url.includes('api.kimi.com')
+    env: {}, fetch: async (url, init) => { requests.push(init.headers); return { ok: true, status: 200, json: async () => new URL(url).hostname === 'api.kimi.com'
       ? { usage: { used: 10, limit: 100 }, usages: { limit_5h: { used_ratio: 0.1 }, limit_month_total: { used_ratio: 0.3 }, limit_month_code: { used_ratio: 0.12 } } }
       : { usage: { used: 10, limit: 100 } } }; }
   });
