@@ -834,8 +834,15 @@ function parseZcodeStartPlanBalances(payload) {
 }
 
 function discoverAccountSlots(deps = {}) {
-  const discovery = discoverZcodeConnection({}, { ...deps, env: deps.env || process.env });
-  if (!discovery.credential && !discovery.billing) return [];
+  const discovery = (deps.discoverZcodeConnection || discoverZcodeConnection)({}, { ...deps, env: deps.env || process.env });
+  if (!discovery.credential && !discovery.billing) {
+    // ZCode still names the signed-in account but its credential cannot be
+    // read: not a sign-out, so the known account stays listed as unavailable.
+    if (['billing_jwt_unavailable', 'coding_plan_key_missing'].includes(discovery.reason)) {
+      throw Object.assign(new Error('ZCode credential unavailable'), { status: 'unavailable' });
+    }
+    return [];
+  }
   const token = discovery.credential?.token || discovery.billing.credential.token;
   return [{ values: { zaiApiKey: token, zaiApiRegion: discovery.family === 'bigmodel' ? 'bigmodel-cn' : 'global' },
     accountKey: hashKey('zai', token), sourceName: 'ZCode',

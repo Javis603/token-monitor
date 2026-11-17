@@ -92,7 +92,11 @@ function slotAccounts(entry, options, deps) {
   const slots = normalizeAccountSlots(entry, options[accountSlotKey(entry)]);
   const enabled = slots.filter(slot => slot.enabled).map(slot => describe(slot));
   const values = defaultAccountValues(entry, options, deps.env || process.env);
-  const ambient = ambientAccounts(entry, options, deps).filter((/** @type {any} */ account) => account.enabled).map((/** @type {any} */ account) => ({ ...describe(account), ...account, provisional: hashKey(entry.id, 'account-slot', `slot:${account.id}`), known: Boolean(account.accountKey) }));
+  const ambient = ambientAccounts(entry, options, deps).filter((/** @type {any} */ account) => account.enabled).map((/** @type {any} */ account) => ({
+    // The descriptor carries fetch deps and discovery status; the identity this
+    // runtime resolved (headless collectors have no persistence callback) wins.
+    ...account, ...describe(account)
+  }));
   const all = [...ambient, ...(hasAccountCredential(entry, values) ? [describe({ id: 'environment', label: '', values: null, accountKey: '', accountKeyAliases: [] })] : []), ...enabled];
   // A key one account moved away from may be another account's key now; it is
   // that account's identity, not an alias of this one.
