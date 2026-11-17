@@ -718,7 +718,8 @@ async function fetchAccountSlotSnapshot(options, deps, collect) {
   if (source !== 'cli' && !options.volcengineAccountSlots?.length) return collect(options, deps);
   const local = await fetchVolcengineLimits({ ...options, volcengineSourcePreference: 'cli' }, deps);
   const previousLimits = { providers: (options.previousLimits?.providers || []).filter(row => row.source !== 'cli') };
-  return [...local.filter(row => row.source === 'cli'), ...await collect({ ...options, volcengineSourcePreference: 'api', previousLimits }, deps)];
+  // Confirmed removals carry identity only, without a source field.
+  return [...local.filter(row => row.source === 'cli' || row.removed), ...await collect({ ...options, volcengineSourcePreference: 'api', previousLimits }, deps)];
 }
 function volcengineArkKey(env) { return pickFirst(env, ['ARK_API_KEY', 'VOLCENGINE_API_KEY', 'DOUBAO_API_KEY']); }
 function volcenginePrimaryKey(env) { const c = volcengineCredentials(env); return c?.accessKeyId || c?.apiKey || ''; }
