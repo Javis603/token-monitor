@@ -169,6 +169,10 @@ function readClineSession(env = process.env) {
   } catch (_) {
     throw errorWithStatus('notConfigured', 'Cline providers.json not found');
   }
+  return parseClineSession(document);
+}
+
+function parseClineSession(document) {
   if (!document || typeof document !== 'object') {
     throw errorWithStatus('unauthorized', 'Cline access token not found');
   }
@@ -220,7 +224,10 @@ function resolveClineCredential(options = {}, env = process.env) {
     // credential. The key is also this lane's account identity.
     return { accessToken: apiKey, accountSeed: apiKey, accountId: '', email: '', source: 'api' };
   }
-  const session = readClineSession(env);
+  return clineSessionCredential(readClineSession(env));
+}
+
+function clineSessionCredential(session) {
   return {
     ...session,
     accessToken: formatAccessToken(session.accessToken),
@@ -556,17 +563,18 @@ async function fetchClineLimits(options = {}, deps = {}) {
 function discoverAccountSlots(deps = {}) {
   // For the account list only a missing store means no sign-in. An unreadable
   // or half-written providers.json is unavailable, so a known account is kept.
-  try { JSON.parse(fs.readFileSync(clineProvidersPath(deps.env || process.env), 'utf8')); }
+  let document;
+  try { document = JSON.parse(fs.readFileSync(clineProvidersPath(deps.env || process.env), 'utf8')); }
   catch (error) {
     if (error?.code === 'ENOENT') return [];
     throw errorWithStatus('unavailable', 'Cline providers.json could not be read');
   }
   try {
-    const credential = resolveClineCredential({}, { ...(deps.env || process.env), CLINE_API_KEY: '', CLINEPASS_API_KEY: '' });
+    const credential = clineSessionCredential(parseClineSession(document));
     return [{ values: { clineApiKey: credential.accessToken }, accountKey: credential.accountSeed ? hashKey('cline', credential.accountSeed) : '',
       accountEmail: credential.email, sourceName: 'Cline', fetchDeps: { clineCredential: credential } }];
   } catch (error) {
-    if (['notConfigured', 'unauthorized'].includes(error?.status)) return [];
+    if (error?.status === 'unauthorized') return [];
     throw error;
   }
 }

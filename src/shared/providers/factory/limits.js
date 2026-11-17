@@ -47,14 +47,20 @@ function resolveFactoryAutomaticApiKey(options = {}, deps = {}) {
       'Factory environment file',
       deps
     );
-    for (const line of source.split(/\r?\n/u)) {
-      const match = line.match(/^\s*(?:export\s+)?FACTORY_API_KEY\s*=\s*(.*?)\s*$/u);
-      if (!match) continue;
-      const value = cleanSecret(match[1].replace(/\s+#.*$/u, ''));
-      if (value) return { apiKey: value, source: 'droid-env' };
-    }
+    const apiKey = parseFactoryApiKey(source);
+    if (apiKey) return { apiKey, source: 'droid-env' };
   } catch (_) {}
   return { apiKey: '', source: '' };
+}
+
+function parseFactoryApiKey(source) {
+  for (const line of source.split(/\r?\n/u)) {
+    const match = line.match(/^\s*(?:export\s+)?FACTORY_API_KEY\s*=\s*(.*?)\s*$/u);
+    if (!match) continue;
+    const value = cleanSecret(match[1].replace(/\s+#.*$/u, ''));
+    if (value) return value;
+  }
+  return '';
 }
 
 function factoryEnvApiKey(options = {}, deps = {}) {
@@ -287,14 +293,15 @@ function factoryAccountEnvKey(env = process.env) {
 function discoverAccountSlots(deps = {}) {
   // A missing file means no Droid sign-in; any other read failure is not a
   // sign-out, so it propagates and the discovered account stays unavailable.
+  let source;
   try {
-    readFactoryFile(path.join(factoryProfileDir({}, deps), '.env'), 'Factory environment file', deps);
+    source = readFactoryFile(path.join(factoryProfileDir({}, deps), '.env'), 'Factory environment file', deps);
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
     return [];
   }
-  const result = resolveFactoryAutomaticApiKey({}, { ...deps, env: {} });
-  return result.apiKey ? [{ values: { factoryApiKey: result.apiKey }, accountKey: hashKey('factory', result.apiKey), sourceName: 'Droid' }] : [];
+  const apiKey = parseFactoryApiKey(source);
+  return apiKey ? [{ values: { factoryApiKey: apiKey }, accountKey: hashKey('factory', apiKey), sourceName: 'Droid' }] : [];
 }
 
 module.exports = {
