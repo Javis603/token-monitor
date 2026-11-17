@@ -437,3 +437,19 @@ test('a shared name, including a clear, becomes the slot label without being rep
   assert.equal(h.service.list('deepseek').accounts[0].label, '');
   assert.deepEqual(operations, []);
 });
+
+test('a resolved account key takes over its provisional key in the shared order', async () => {
+  const operations = [];
+  const h = harness({ onPresentation: batch => operations.push(...batch) });
+  await add(h);
+  const second = await h.service.add('deepseek', { deepseekApiKey: 'SECRET-two' }, '');
+  await h.service.move('deepseek', second.accounts[1].id, 'up');
+  const slot = h.settings.deepseekAccountSlots.find(item => item.id === second.accounts[1].id);
+  const provisional = h.service.list('deepseek').accounts[0].accountKey;
+  operations.length = 0;
+  await h.service.resolved('deepseek', slot.id, { accountKey: 'resolved-two' }, slot.values);
+  const order = h.settings.limitAccountPresentation.deepseek.order;
+  assert.ok(order.indexOf('resolved-two') >= 0 && order.indexOf('resolved-two') < order.indexOf(h.service.list('deepseek').accounts[1].accountKey));
+  assert.ok(operations.some(operation => operation.type === 'order' && operation.order[0] === 'resolved-two'), `provisional ${provisional}`);
+  assert.equal(h.service.list('deepseek').accounts[0].accountKey, 'resolved-two');
+});

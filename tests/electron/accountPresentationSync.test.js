@@ -145,3 +145,23 @@ test('slot names fill gaps on the first connection to another Hub despite an old
   assert.equal(put?.body.value.deepseek.labels.mine, 'Mine');
   assert.equal(Object.hasOwn(put.body.value.deepseek.labels, 'a'), false, 'the old Hub cache never seeds');
 });
+
+test('an aliased reading takes the shared name and position of the account that owns it', () => {
+  const slots = [{ id: '1', accountKey: 'current-a', accountKeyAliases: ['old-a'], label: '' }, { id: '2', accountKey: 'b', label: '' }];
+  const presentation = { deepseek: { labels: { 'current-a': 'Shared A' }, order: ['b', 'current-a'] } };
+  const rows = applyAccountOrder([{ provider: 'deepseek', accountKey: 'old-a' }, { provider: 'deepseek', accountKey: 'b' }], { deepseek: slots }, '', presentation);
+  assert.deepEqual(rows.map(row => row.accountKey), ['b', 'old-a']);
+  assert.equal(rows[1].accountDisplayName, 'Shared A');
+});
+
+test('a rename becomes the newest label, and providers sort by code point', () => {
+  const { replayPresentation } = require('../../src/electron/limits/accountPresentationSync');
+  const labels = Object.fromEntries(Array.from({ length: 200 }, (_, i) => [`k${i}`, 'A']));
+  const next = replayPresentation({ deepseek: { labels, order: [] } }, [
+    { provider: 'deepseek', type: 'rename', key: 'k0', label: 'Fresh' },
+    { provider: 'deepseek', type: 'rename', key: 'new', label: 'New' }
+  ]);
+  assert.equal(next.deepseek.labels.k0, 'Fresh', 'the renamed key survives the cap');
+  assert.equal(Object.hasOwn(next.deepseek.labels, 'k1'), false, 'the oldest untouched label is trimmed');
+  assert.deepEqual(Object.keys(normalizeSharedSyncValue('limitAccountPresentation', { qoder: { labels: {}, order: [] }, deepseek: { labels: {}, order: [] } })), ['deepseek', 'qoder']);
+});

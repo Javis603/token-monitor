@@ -30,7 +30,8 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
   };
   const slots = (entry) => {
     const order = getSettings().limitAccountPresentation?.[entry.id]?.order || [];
-    const rank = slot => order.includes(slot.accountKey) ? order.indexOf(slot.accountKey) : order.length;
+    const keyOf = slot => slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`);
+    const rank = slot => order.includes(keyOf(slot)) ? order.indexOf(keyOf(slot)) : order.length;
     return normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]).sort((a, b) => rank(a) - rank(b));
   };
   const environment = entry => {
@@ -205,8 +206,16 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       const label = Object.hasOwn(labels, previousKey) ? labels[previousKey] : slot.label;
       Object.assign(slot, identity);
       await commit(entry, next, false);
+      const order = getSettings().limitAccountPresentation?.[providerId]?.order || [];
+      const operations = [];
       if (slot.accountKey && slot.accountKey !== previousKey && (label || Object.hasOwn(labels, previousKey)) && !Object.hasOwn(labels, slot.accountKey)) {
-        const operations = [{ provider: providerId, type: 'rename', key: slot.accountKey, label }];
+        operations.push({ provider: providerId, type: 'rename', key: slot.accountKey, label });
+      }
+      // The resolved key takes over the provisional key's saved position.
+      if (slot.accountKey && slot.accountKey !== previousKey && order.includes(previousKey) && !order.includes(slot.accountKey)) {
+        operations.push({ provider: providerId, type: 'order', order: order.map(key => key === previousKey ? slot.accountKey : key) });
+      }
+      if (operations.length) {
         const { replayPresentation } = require('./accountPresentationSync');
         await write({ limitAccountPresentation: replayPresentation(getSettings().limitAccountPresentation, operations) });
         publishPresentation(operations);
