@@ -176,7 +176,9 @@ const TOKEN_CONTRACT_CASES = Object.freeze([
       fs.mkdirSync(dir, { recursive: true });
       const usage = { inputOther: 100, output: 60, inputCacheRead: 20, inputCacheCreation: 0 };
       const records = [
-        { type: 'llm.request', model: 'kimi-code/kimi-for-coding', time: 1800000000000 },
+        { type: 'llm.request', model: 'kimi-code/kimi-for-coding', turnStep: '0.1', time: 1800000000000 },
+        { type: 'context.append_loop_event', agentId: 'main', time: 1800000000100,
+          event: { type: 'step.begin', uuid: 'synthetic-legacy-step', turnId: '0', step: 1 } },
         { type: 'usage.record', model: 'kimi-code/kimi-for-coding', usageScope: 'turn', time: 1800000003000, usage },
         { type: 'context.append_loop_event', agentId: 'main', time: 1800000010000,
           event: { type: 'step.begin', uuid: 'synthetic-step' } },
