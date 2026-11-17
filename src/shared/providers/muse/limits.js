@@ -156,7 +156,19 @@ async function fetchMuseLimits(options = {}, deps = {}) {
 }
 
 async function fetchAccountSlotSnapshot(options, deps, collect) {
-  if (!options.museAccountSlots?.length) return collect(options, deps);
+  if (!options.museAccountSlots?.length) {
+    const rows = await collect(options, deps);
+    // Leaving slot mode returns the environment Web cookie to its anonymous
+    // lane. Retire the former keyed Web rows, never the independent CLI.
+    if (Array.isArray(rows) && !options.limitRefreshScope?.accountKey && !deps.signal?.aborted) {
+      for (const row of options.previousLimits?.providers || []) {
+        if (row.provider === 'muse' && row.source === 'web' && row.accountKey) {
+          rows.push({ provider: 'muse', source: 'web', accountKey: row.accountKey, removed: true });
+        }
+      }
+    }
+    return rows;
+  }
   const cli = options.limitRefreshScope?.accountKey ? null : await fetchMuseCodeLimits(options, deps);
   const previousLimits = { providers: (options.previousLimits?.providers || []).filter(row => row.source !== 'cli') };
   const web = await collect({ ...options, previousLimits }, { ...deps, accountSlotWebOnly: true });
