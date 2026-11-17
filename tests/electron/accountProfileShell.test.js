@@ -135,15 +135,15 @@ test('MiniMax saved keys use independent API status and billing links, with remo
   });
   h.status([{ source: 'oauth', status: 'ok', accountKey: 'a' }, { source: 'api', accountKey: 'a', region: 'en', status: 'unauthorized' }]);
   await suite.test('API failure overrides a healthy OAuth reading', () => {
-    assert.equal(info('a').textContent, `● ${t('settings.slots.invalidKey')}`);
+    assert.equal(info('a').textContent, `${t('settings.slots.invalidKey')}`);
   });
   h.status([{ source: 'oauth', status: 'ok', accountKey: 'a' }]);
   await suite.test('OAuth alone never marks the API credential connected', () => {
-    assert.equal(info('a').textContent, `● ${t('settings.slots.unavailable')}`);
+    assert.equal(info('a').textContent, `${t('settings.slots.unavailable')}`);
   });
   h.status([], false);
   await suite.test('disabled provider retires the account status', () => {
-    assert.equal(info('a').textContent, `● ${t('settings.limits.status.disabled')}`);
+    assert.equal(info('a').textContent, `${t('settings.limits.status.disabled')}`);
   });
   assert.equal(h.get('minimaxStatus').textContent, t('settings.limits.status.disabled'));
   h.status([{ source: 'api', accountKey: 'a', region: 'cn', relatedAccountKey: 'code', status: 'ok' },
@@ -199,9 +199,9 @@ test('MiniMax saved keys use independent API status and billing links, with remo
   assert.equal(remove.textContent, t('settings.slots.confirmRemove'));
   h.api.getKeys = async () => [{ id: 'a', accountKey: 'a', billingMode: 'api', enabled: false }];
   await h.render();
-  assert.equal(info('a').textContent, `● ${t('settings.slots.paused')}`);
+  assert.equal(info('a').textContent, `${t('settings.slots.paused')}`);
   h.status([], false);
-  assert.equal(info('a').textContent, `● ${t('settings.slots.paused')}`, 'pause survives provider disable');
+  assert.equal(info('a').textContent, `${t('settings.slots.paused')}`, 'pause survives provider disable');
 
 });
 

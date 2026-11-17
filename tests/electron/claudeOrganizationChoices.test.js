@@ -39,17 +39,17 @@ test('Claude Web rows retain controls and removal confirmation across quota and 
   state.settings.claudeWebLoginStatuses.a = 'unauthorized';
   context.renderClaudeWebAccounts();
   await suite.test('Web login rejection remains visible beside healthy OAuth quota', () => {
-    assert.equal(info.textContent, '● settings.slots.invalidKey');
+    assert.equal(info.textContent, 'settings.slots.invalidKey');
   });
   assert.equal(document.activeElement, remove);
   assert.equal(remove.textContent, 'settings.slots.confirmRemove');
   delete state.settings.claudeWebLoginStatuses.a;
   context.renderClaudeWebAccounts();
-  assert.equal(info.textContent, '● settings.slots.unavailable', 'unchecked Web login cannot borrow OAuth health');
+  assert.equal(info.textContent, 'settings.slots.unavailable', 'unchecked Web login cannot borrow OAuth health');
   state.settings.claudeWebLoginStatuses.a = 'ok';
   state.settings.claudeManagedAccounts[0].enabled = false;
   context.renderClaudeWebAccounts();
-  assert.equal(info.textContent, '● settings.slots.paused', 'pause wins over retained login health');
+  assert.equal(info.textContent, 'settings.slots.paused', 'pause wins over retained login health');
   assert.equal(document.activeElement, remove);
   assert.equal(remove.textContent, 'settings.slots.confirmRemove');
   state.settings = { ...state.settings, claudeManagedAccounts: [], claudeWebLegacyCookieConfigured: true,

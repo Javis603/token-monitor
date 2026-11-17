@@ -61,7 +61,7 @@ for (const provider of ['grok', 'kiro']) test(`${provider}: empty discovery, kno
   assert.equal(h.container.querySelector('.slot-add').classList.contains('hidden'), true);
   h.list.update([reading('known', { provider, source: 'cli', stale: true })]);
   assert.equal(h.row('known'), first);
-  assert.equal(first.querySelector('.slot-status').textContent, `● ${t('settings.slots.stale')}`);
+  assert.equal(first.querySelector('.slot-status').textContent, `${t('settings.slots.stale')}`);
   h.list.update([reading('known', { provider, source: 'cli', status: 'notConfigured' })]);
   assert.equal(rows(h.container).length, 0, 'a missing credential is not a saved account');
   h.list.update([reading('known', { provider, source: 'cli', removed: true })]);

@@ -601,7 +601,7 @@
         item.el.classList.toggle('slot-paused', !slot.enabled);
         item.status.className = `slot-status slot-${status}`;
         const statusText = status === 'disabled' ? t('settings.limits.status.disabled') : tr(status === 'invalid' ? (cookie ? 'invalidCookie' : 'invalidKey') : status);
-        item.status.textContent = status === 'connected' ? source || statusText : `● ${statusText}`;
+        item.status.textContent = status === 'connected' ? source || statusText : statusText;
         item.status.setAttribute('aria-label', [statusText, source].filter(Boolean).join(' · '));
         if (item.pause) {
           item.updateRemove();
