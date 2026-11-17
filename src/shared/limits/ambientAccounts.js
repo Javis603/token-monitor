@@ -13,7 +13,12 @@ function ambientAccounts(entry, options, deps) {
   catch (_) {
     // An unreadable app store does not prove sign-out. Keep only public identity
     // metadata as unavailable; there is no retained credential to retry here.
-    const known = Object.entries(metadata).map(([fingerprint, item]) => ({ ...item,
+    // A collector knows which app accounts it still holds; one already retired
+    // on sign-out is not brought back by a later read failure.
+    const held = options.previousLimits ? new Set((options.previousLimits.providers || [])
+      .filter((/** @type {any} */ row) => row.provider === entry.id && row.accountKey).map((/** @type {any} */ row) => row.accountKey)) : null;
+    const known = Object.entries(metadata).filter(([, item]) => !held || held.has(item.accountKey)
+      || (item.accountKeyAliases || []).some((/** @type {string} */ key) => held.has(key))).map(([fingerprint, item]) => ({ ...item,
       id: `discovered-${fingerprint}`, source: 'discovered', fingerprint, values: {},
       discoveryStatus: 'unavailable', enabled: item.enabled !== false, order: item.order ?? -1 }));
     // A headless collector has no persisted metadata; the flag lets it keep the
@@ -32,13 +37,16 @@ function ambientAccounts(entry, options, deps) {
     }
     const fingerprint = accountValuesFingerprint(record.values);
     const remembered = metadata[fingerprint] || {};
-    const accountKey = record.accountKey || remembered.accountKey || hashKey(entry.id, 'discovered', fingerprint);
+    // For an unchanged credential, the identity a fetch resolved (a server user
+    // id) wins over the key discovery derives; that key stays an alias.
+    const accountKey = remembered.accountKey || record.accountKey || hashKey(entry.id, 'discovered', fingerprint);
+    const aliases = [...new Set([...(remembered.accountKeyAliases || []), ...(record.accountKey && record.accountKey !== accountKey ? [record.accountKey] : [])])].slice(-8);
     // The current fingerprint's record is authoritative; an older record of the
     // same account (before a token rotation) only seeds it.
     const controls = metadata[fingerprint] || Object.values(metadata).find((/** @type {any} */ item) => (item.accountKey === accountKey || item.accountKeyAliases.includes(accountKey))) || {};
     return { ...record, id: `discovered-${fingerprint}`, source: 'discovered', fingerprint,
       accountName: record.accountName || remembered.accountName || '', accountEmail: record.accountEmail || remembered.accountEmail || '',
-      accountKey, accountKeyAliases: remembered.accountKeyAliases || [], label: controls.label || '',
+      accountKey, accountKeyAliases: aliases, label: controls.label || '',
       enabled: controls.enabled !== false, order: controls.order ?? -1 };
   });
 }

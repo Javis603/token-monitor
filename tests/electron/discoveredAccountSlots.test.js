@@ -355,3 +355,24 @@ test('factory: a headless collector keeps an app reading while discovery fails',
   const rows = await fetcher({ previousLimits: { providers: [{ provider: 'factory', accountKey: 'app-key', sourceDetail: 'app', status: 'ok', windows: [] }] } }, { env: {} });
   assert.equal(rows.some(row => row.removed && row.accountKey === 'app-key'), false);
 });
+
+test('factory: a discovered credential keeps the server identity it resolved to', t => {
+  const values = { factoryApiKey: 'droid-secret' };
+  stubDiscovery(t, 'factory', () => [{ values, accountKey: 'credential-key', sourceName: 'Droid' }]);
+  const { ambientAccounts } = require('../../src/shared/limits/ambientAccounts');
+  const fingerprint = accountValuesFingerprint(values);
+  const [account] = ambientAccounts(limitProviderEntry('factory'), { factoryAmbientAccounts: { [fingerprint]: { accountKey: 'server-user', accountKeyAliases: [], enabled: true } } }, { env: {} });
+  assert.equal(account.accountKey, 'server-user');
+  assert.ok(account.accountKeyAliases.includes('credential-key'));
+});
+
+test('hark: an account retired on sign-out is not revived by a later store failure', t => {
+  stubDiscovery(t, 'hark', () => { throw Object.assign(new Error('unreadable'), { status: 'unavailable' }); });
+  const { ambientAccounts } = require('../../src/shared/limits/ambientAccounts');
+  const fp = id => `sha256:${id.repeat(64)}`;
+  const options = {
+    harkAmbientAccounts: { [fp('a')]: { accountKey: 'old-login', enabled: true }, [fp('b')]: { accountKey: 'current-login', enabled: true } },
+    previousLimits: { providers: [{ provider: 'hark', accountKey: 'current-login', sourceDetail: 'app' }] }
+  };
+  assert.deepEqual(ambientAccounts(limitProviderEntry('hark'), options, { env: {} }).map(account => account.accountKey), ['current-login']);
+});
