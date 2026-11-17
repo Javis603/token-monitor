@@ -685,3 +685,55 @@ test('fetchVolcengineLimits never queries the Agent Plan with an Ark API key', a
   // GetAFPUsage is OpenAPI-only; an Ark key cannot sign it.
   assert.ok(!requests.some((url) => url.includes('GetAFPUsage')));
 });
+
+for (const failure of ['http503', 'empty', 'arkFallbackFailed']) test(`Volcengine slots retain Coding Plan quota after ${failure} with a healthy Agent Plan`, async () => {
+  const { createAccountSlotFetcher } = require('../../src/shared/limits/accountSlotFetcher');
+  const { limitProviderEntry } = require('../../src/shared/limits/registry');
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  const fetcher = createAccountSlotFetcher(limitProviderEntry('volcengine'));
+  const values = { volcengineAccessKeyId: 'AKLT-partial', volcengineSecretAccessKey: 'test-secret',
+    ...(failure === 'arkFallbackFailed' ? { volcengineApiKey: 'test-ark' } : {}) };
+  const options = { limitProviders: ['volcengine'], volcengineSourcePreference: 'api',
+    volcengineAccountSlots: [{ id: 'saved', enabled: true, values }] };
+  let failing = false;
+  const requests = [];
+  let now = Date.parse('2026-07-06T00:00:00Z');
+  const deps = { env: {}, now: () => now, providerRuntimeState: new Map(), fetch: async url => {
+    requests.push(String(url));
+    const agent = String(url).includes('GetAFPUsage');
+    if (failing && !agent && failure !== 'empty') return { ok: false, status: 503, json: async () => ({}) };
+    return { ok: true, status: 200, json: async () => agent
+      ? { Result: { PlanType: 'Medium', AFPFiveHour: { Quota: 200, Used: failing ? 60 : 50 } } }
+      : failing ? {} : { Result: { QuotaUsage: [{ Level: 'session', Percent: 10 }] } } };
+  } };
+  const previous = await fetcher(options, deps);
+  assert.equal(previous.length, 2);
+  const coding = previous.find(row => row.windows.some(window => window.productId === 'coding-plan'));
+  const agent = previous.find(row => row.windows.some(window => window.productId === 'agent-plan'));
+  failing = true; now += 1000;
+  const nextOptions = { ...options, previousLimits: { providers: previous } };
+  const rows = await fetcher(nextOptions, deps);
+  assert.equal(requests.some(url => url.includes('/chat/completions')), failure === 'arkFallbackFailed');
+  assert.equal(rows.some(row => row.removed), false, 'a partial failure is not confirmed product removal');
+  assert.equal(rows.find(row => row.accountKey === coding.accountKey)?.status, 'unavailable');
+  assert.equal(rows.find(row => row.accountKey === agent.accountKey)?.status, 'ok');
+  const scoped = await fetcher({ ...nextOptions, limitRefreshScope: { provider: 'volcengine', accountKey: coding.accountKey } }, deps);
+  assert.equal(scoped.length, 1);
+  assert.equal(scoped[0].accountKey, coding.accountKey);
+  assert.equal(scoped[0].status, 'unavailable');
+  const runtime = createLimitsRuntime(nextOptions, { ...deps, autoStart: false, autoRetry: false,
+    providerFetchers: { volcengine: fetcher } });
+  try {
+    await runtime.refresh({ provider: 'volcengine' }, 'credential-edit');
+    const snapshot = runtime.getSnapshot().providers;
+    assert.equal(snapshot.length, 2);
+    const retained = snapshot.find(row => row.accountKey === coding.accountKey);
+    assert.equal(retained.status, 'unavailable');
+    assert.deepEqual(retained.windows, coding.windows);
+    assert.equal(snapshot.find(row => row.accountKey === agent.accountKey).windows[0].used, 60);
+  } finally { runtime.stop(); }
+  const fresh = await fetcher(options, { ...deps, providerRuntimeState: new Map() });
+  assert.equal(fresh.filter(row => !row.removed).length, 1, 'an Agent-only account does not acquire a phantom Coding Plan');
+  const removed = await fetcher({ ...nextOptions, volcengineAccountSlots: [{ ...options.volcengineAccountSlots[0], enabled: false }] }, deps);
+  assert.deepEqual(new Set(removed.filter(row => row.removed).map(row => row.accountKey)), new Set(previous.map(row => row.accountKey)));
+});

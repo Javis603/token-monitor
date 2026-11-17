@@ -581,15 +581,25 @@ async function fetchVolcengineLimits(options = {}, deps = {}) {
     if (codingRow) return agentRow ? [codingRow, agentRow] : [codingRow];
 
     if (agentRow) {
-      // The Agent Plan answered, so a Coding lane with nothing to report is not
-      // worth a row of its own — unless an Ark key can still answer for it.
       if (coding.status === 'rejected' && credentials.apiKey) {
         try {
           return [await tryArkFallback(), agentRow];
-        } catch {
-          return [agentRow];
+        } catch (error) {
+          deps.noteLimitFailure?.(error, { source: 'api' });
         }
       }
+      // A failed or empty Coding response does not prove its previously owned
+      // product disappeared. Keep its identity so slot snapshots and runtime
+      // retention can preserve last-good quota without failing the Agent Plan.
+      const codingKey = hashKey('volcengine', credentials.accessKeyId, credentials.region);
+      const previousCoding = options.previousLimits?.providers?.some(row => row.provider === 'volcengine' && row.accountKey === codingKey);
+      if (previousCoding) {
+        if (coding.status === 'rejected') deps.noteLimitFailure?.(coding.reason, { source: 'api' });
+        const failure = { ...statusRow(coding.status === 'rejected' ? coding.reason?.status || 'unavailable' : 'unavailable'),
+          accountKey: codingKey, accountLabel: 'Coding Plan' };
+        return [failure, agentRow];
+      }
+      // Never-observed Coding Plans stay absent for Agent-only accounts.
       return [agentRow];
     }
 
