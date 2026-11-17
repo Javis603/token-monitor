@@ -55,6 +55,7 @@ function harness(translateMessage = t) {
   const slots = service.list('qoder').accounts;
   slots.unshift({ id: 'default', label: '', enabled: true, accountKey: 'default', accountKeyAliases: [], fingerprint: 'abc', formValues: { qoderSite: 'cn' } });
   const ipc = Object.fromEntries(['rename', 'move', 'setEnabled', 'remove', 'add', 'replace'].map(op => [op, async (...args) => { calls.push([op, ...args]); return ['add', 'replace'].includes(op) ? verdict : { ok: true, accounts: slots }; }]));
+  ipc.presentation = async (...args) => { calls.push(['presentation', ...args]); return { ok: true, accounts: slots, presentation: { qoder: { labels: {}, order: args[3] } } }; };
   const host = new Node('div', document);
   const defaultPanel = new Node('div', document);
   const defaultForm = createCredentialPanel(limitAccountFormsForRenderer().find(f => f.id === 'qoder'), { document, translate: t, onToggle() {}, onClear() {}, onOpen() {}, onRefresh() {}, onSave() {} });
@@ -93,7 +94,7 @@ test('menu operations and Alt arrows use the slot IPC', async () => {
   await h.row('b').key('ArrowUp', true);
   await h.click(h.row('b'), 'Remove account');
   await h.click(h.row('b'), 'Confirm remove');
-  assert.deepEqual(h.calls, [['setEnabled', 'qoder', 'a', false], ['setEnabled', 'qoder', 'b', true], ['move', 'qoder', 'a', 'down'], ['move', 'qoder', 'b', 'up'], ['remove', 'qoder', 'b']]);
+  assert.deepEqual(h.calls, [['setEnabled', 'qoder', 'a', false], ['setEnabled', 'qoder', 'b', true], ['presentation', 'qoder', 'ka', 'order', ['default', 'kb', 'ka']], ['presentation', 'qoder', 'kb', 'order', ['kb', 'default', 'ka']], ['remove', 'qoder', 'b']]);
 });
 test('rename Enter saves, Escape cancels; pushes retain input, caret and open menu', async () => {
   const h = harness();
@@ -155,9 +156,9 @@ test('native desktop quota projection uses the same order for Edge Dock, Notch a
   vm.runInNewContext(source.slice(start, end), context);
   const stats = { limits: { providers: [{ provider: 'qoder', accountKey: 'a' }, { provider: 'qoder', accountKey: 'default' }, { provider: 'qoder', accountKey: 'z' }, { provider: 'qoder', accountKey: 'r1', sourceDeviceId: 'other' }, { provider: 'qoder', accountKey: 'r2', sourceDeviceId: 'other' }] } };
   const result = context.desktopQuotaStats(stats);
-  // A row without a source device is this device's, so it stays ahead of other devices.
-  assert.deepEqual(Array.from(result.limits.providers, row => row.accountKey), ['z', 'a', 'default', 'r2', 'r1']);
-  assert.equal(result.limits.providers[3].accountDisplayName, 'Remote work');
+  // Shared remote ranks lead the fallback local subsequence on every desktop surface.
+  assert.deepEqual(Array.from(result.limits.providers, row => row.accountKey), ['r2', 'r1', 'z', 'a', 'default']);
+  assert.equal(result.limits.providers[0].accountDisplayName, 'Remote work');
   assert.equal(stats.limits.providers[0].accountKey, 'a');
   assert.equal(context.desktopQuotaStats(null), null);
 });
@@ -255,7 +256,7 @@ test('default row shares menu and naming and retains default form for replacemen
   h.panel.update([{ id: 'a', enabled: true, accountKey: 'ka' }, { id: 'default', enabled: false, label: 'Personal', fingerprint: 'abc', source: 'environment' }, { id: 'b', enabled: true, accountKey: 'kb' }], [], true);
   assert.equal(h.row('default').querySelector('.slot-name').textContent, 'Personal');
   const buttons = h.row('default').querySelector('.plugin-menu').children;
-  assert.equal(h.row('default').querySelector('.slot-actions').classList.contains('hidden'), true);
+  assert.equal(h.row('default').querySelector('.slot-actions').classList.contains('hidden'), false);
   assert.equal(buttons.length, 8);
   assert.match(h.row('default').textContent, /From environment variable/);
 });
@@ -290,7 +291,7 @@ test('pending slot save queues move pause and rename without dropping operations
   assert.deepEqual(h.calls.map(call => call[0]), ['replace']);
   resolve({ saved: true, verdict: 'valid', accounts: h.slots });
   await Promise.all([saving, move, pause, rename]);
-  assert.deepEqual(h.calls.map(call => call[0]), ['replace', 'move', 'setEnabled', 'rename']);
+  assert.deepEqual(h.calls.map(call => call[0]), ['replace', 'presentation', 'setEnabled', 'rename']);
   assert.equal(h.calls.at(-1)[3], 'Queued');
 });
 
@@ -772,173 +773,55 @@ async function withDrag(callback) {
   finally { Object.assign(global, previous); }
 }
 
-test('drag drop persists the minimal adjacent moves through slot IPC and service', () => withDrag(async h => {
+test('local drag publishes one complete order and persists the slot subsequence', () => withDrag(async h => {
   h.panel.update(h.service.list('qoder').accounts, []); h.layout();
-  h.ipc.move = async (...args) => { h.calls.push(['move', ...args]); return h.service.move(...args); };
-  h.press('b'); h.emit('pointermove', 10);
-  assert.ok(h.row('b').classList.contains('dragging'));
-  assert.equal(h.row('a').style['--drag-shift'], '50px');
-  h.emit('pointerup', 10); await h.flush();
-  assert.deepEqual(h.calls, [['move', 'qoder', 'b', 'up']]);
-  assert.deepEqual(h.service.list('qoder').accounts.map(slot => slot.id), ['b', 'a']);
-  assert.deepEqual(h.panel.element.querySelector('.slot-list').children.filter(n => n.dataset.slotId).map(n => n.dataset.slotId), ['b', 'a']);
+  h.ipc.presentation = async (...args) => { h.calls.push(['presentation', ...args]); return h.service.presentation(...args); };
+  h.press('b'); h.emit('pointermove', 10); h.emit('pointerup', 10); await h.flush();
+  assert.deepEqual(h.calls, [['presentation', 'qoder', 'kb', 'order', ['kb', 'ka']]]);
+  assert.deepEqual(h.slotSettings.qoderAccountSlots.map(slot => slot.id), ['b', 'a']);
 }));
 
-test('environment row is fixed and excluded from drag geometry', () => withDrag(async h => {
-  h.panel.update([{ id: 'environment', source: 'environment', enabled: true }, ...h.slots], []); h.layout();
-  h.press('environment'); h.emit('pointermove', 180);
-  assert.equal(h.row('environment').dataset.slotDraggable, 'false');
-  assert.equal(h.listeners.has('pointermove'), false);
-  h.press('b'); h.emit('pointermove', 0);
-  assert.equal(h.row('environment').style['--drag-shift'], undefined);
-  h.emit('pointercancel', 0); await h.flush();
-  assert.equal(h.calls.length, 0);
+test('environment participates in shared drag order but credential actions stay hidden', () => withDrag(async h => {
+  h.ipc.presentation = async (...args) => { h.calls.push(['presentation', ...args]); return { ok: true }; };
+  h.panel.update([{ id: 'environment', accountKey: 'env', source: 'environment', enabled: true }, ...h.slots], []); h.layout();
+  h.press('environment'); h.emit('pointermove', 190); h.emit('pointerup', 190); await h.flush();
+  assert.equal(h.row('environment').dataset.slotDraggable, 'true');
+  assert.equal(h.calls[0][0], 'presentation');
+  assert.equal(h.calls[0][4].at(-1), 'env');
+  for (const key of ['Replace cookie', 'Pause tracking', 'Remove account']) {
+    assert.equal([...h.row('environment').walk()].find(n => n.textContent === key && n.tagName === 'button').classList.contains('hidden'), true);
+  }
 }));
 
-for (const mode of ['rename', 'editor', 'menu']) test(`drag is suppressed while ${mode} is open on another row`, () => withDrag(async h => {
+for (const mode of ['rename', 'editor', 'menu']) test(`drag is suppressed while ${mode} is open`, () => withDrag(async h => {
   if (mode === 'rename') h.click(h.row('a'), 'Rename');
   if (mode === 'editor') h.panel.openEditor(null);
   if (mode === 'menu') h.row('a').querySelector('.plugin-more').click();
   h.press('b'); h.emit('pointermove', 0);
   assert.equal(h.listeners.has('pointermove'), false);
-  assert.equal(h.row('b').classList.contains('dragging'), false);
-  assert.equal(h.calls.length, 0);
 }));
 
-test('periodic updates preserve the live drag and flush current readings on drop', () => withDrag(async h => {
-  h.press('a'); h.emit('pointermove', 140);
-  const row = h.row('a'), transform = row.style['--drag-y'];
-  h.panel.update([...h.slots].reverse(), [{ accountKey: 'ka', status: 'ok' }]);
-  assert.equal(h.row('a'), row);
-  assert.equal(row.style['--drag-y'], transform);
-  assert.match(row.querySelector('.slot-status').textContent, /Cookie expired/);
-  h.emit('pointercancel', 140); await h.flush();
-  assert.match(row.querySelector('.slot-status').textContent, /Connected/);
-  assert.equal(row.classList.contains('dragging'), false);
-}));
-
-test('dragging across two neighbours uses two moves and leaves environment first', () => withDrag(async h => {
-  h.slotSettings.qoderAccountSlots.push({ ...h.slotSettings.qoderAccountSlots[1], id: 'c', accountKey: 'kc' });
-  const accounts = h.service.list('qoder').accounts;
-  const environment = { id: 'environment', source: 'environment', enabled: true };
-  h.panel.update([environment, ...accounts], []); h.layout();
-  h.ipc.move = async (...args) => {
-    h.calls.push(['move', ...args]);
-    const result = await h.service.move(...args);
-    return { ...result, accounts: [environment, ...result.accounts] };
-  };
-  h.press('c'); h.emit('pointermove', 0); h.emit('pointerup', 0); await h.flush();
-  assert.deepEqual(h.calls, [['move', 'qoder', 'c', 'up'], ['move', 'qoder', 'c', 'up']]);
-  assert.deepEqual(h.service.list('qoder').accounts.map(slot => slot.id), ['c', 'a', 'b']);
-  assert.equal(h.panel.element.querySelector('.slot-list').children.find(node => node.dataset.slotId).dataset.slotId, 'environment');
-}));
-
-test('a changed account set during drag is rendered without persisting the stale drop', () => withDrag(async h => {
+test('a changed account set invalidates a frozen drag', () => withDrag(async h => {
   h.press('b'); h.emit('pointermove', 10);
   h.panel.update(h.slots.filter(slot => slot.id !== 'a'), []);
   h.emit('pointerup', 10); await h.flush();
-  assert.equal(h.calls.length, 0);
+  assert.deepEqual(h.calls, []);
   assert.equal(h.row('a'), undefined);
 }));
 
-for (const failure of ['rejected', 'thrown']) test(`failed drag save reloads the stored order after a ${failure} move`, () => withDrag(async h => {
-  h.slotSettings.qoderAccountSlots.push({ ...h.slotSettings.qoderAccountSlots[1], id: 'c', accountKey: 'kc' });
-  h.panel.update(h.service.list('qoder').accounts, []); h.layout();
-  let moves = 0;
-  h.ipc.move = async (...args) => {
-    h.calls.push(['move', ...args]);
-    if (++moves === 1) return h.service.move(...args);
-    if (failure === 'thrown') throw new Error('IPC failed');
-    return { ok: false };
-  };
-  h.ipc.list = async provider => { h.calls.push(['list', provider]); return h.service.list(provider); };
-  const order = () => h.panel.element.querySelector('.slot-list').children.filter(n => n.dataset.slotId).map(n => n.dataset.slotId);
-  h.press('c'); h.emit('pointermove', 0); h.emit('pointerup', 0);
-  assert.deepEqual(order(), ['c', 'a', 'b'], 'drop is initially optimistic');
-  await h.flush();
-  assert.deepEqual(h.service.list('qoder').accounts.map(slot => slot.id), ['a', 'c', 'b']);
-  assert.deepEqual(order(), ['a', 'c', 'b'], 'partial success is recovered from storage');
-  assert.deepEqual(h.calls.at(-1), ['list', 'qoder']);
-  assert.equal(h.panel.element.querySelector('.slot-message').textContent, t('settings.slots.failed'));
-  await h.row('c').key('ArrowUp', true);
-  assert.equal(h.calls.filter(call => call[0] === 'move').length, 3, 'reordering is unlocked after failure');
+for (const action of ['move', 'remove', 'rename']) test(`pending ${action} blocks dragging the unified list`, () => withDrag(async h => {
+  let finish;
+  const wait = () => new Promise(resolve => { finish = () => resolve({ ok: true }); });
+  if (action === 'move') { h.ipc.presentation = wait; h.click(h.row('a'), 'Move down'); }
+  if (action === 'remove') { h.ipc.remove = wait; h.click(h.row('a'), 'Remove account'); h.click(h.row('a'), 'Confirm remove'); }
+  if (action === 'rename') { h.ipc.rename = wait; h.click(h.row('a'), 'Rename'); h.row('a').querySelector('.slot-rename').key('Enter'); h.row('a').querySelector('.slot-rename').key('Escape'); }
+  await h.flush(); h.press('b');
+  assert.equal(h.listeners.has('pointermove'), false);
+  finish(); await h.flush(); h.press('b');
+  assert.equal(h.listeners.has('pointermove'), true);
+  h.emit('pointercancel', 0);
 }));
 
-for (const action of ['menu', 'Alt']) test(`pending drag save blocks ${action} moves and new drags until settlement`, () => withDrag(async h => {
-  h.panel.update(h.service.list('qoder').accounts, []); h.layout();
-  let finishMove;
-  h.ipc.move = (...args) => {
-    h.calls.push(['move', ...args]);
-    return new Promise(resolve => { finishMove = async () => resolve(await h.service.move(...args)); });
-  };
-  const attemptMove = () => action === 'menu' ? h.click(h.row('b'), 'Move down') : h.row('b').key('ArrowDown', true);
-  h.press('b'); h.emit('pointermove', 0); h.emit('pointerup', 0);
-  // The lock must also cover the paint before persistOrder enters the lane.
-  attemptMove();
-  await h.flush();
-  assert.deepEqual(h.calls, [['move', 'qoder', 'b', 'up']]);
-  for (const id of ['a', 'b']) {
-    const moves = h.row(id).querySelector('.plugin-menu').children.filter(node => ['Move up', 'Move down'].includes(node.textContent));
-    assert.ok(moves.every(node => node.disabled), 'both menu directions are disabled');
-  }
-  attemptMove();
-  h.press('a'); h.emit('pointermove', 0);
-  assert.equal(h.listeners.has('pointermove'), false, 'a pending save cannot start another drag');
-  // A push must not accidentally unlock menu actions.
-  h.panel.update(h.service.list('qoder').accounts, []);
-  attemptMove();
-  await finishMove(); await h.flush();
-  assert.deepEqual(h.calls, [['move', 'qoder', 'b', 'up']], 'no stale extra move was queued');
-  assert.deepEqual(h.service.list('qoder').accounts.map(slot => slot.id), ['b', 'a']);
-  const down = h.row('b').querySelector('.plugin-menu').children.find(node => node.textContent === 'Move down');
-  assert.equal(down.disabled, false, 'menu unlocks when the save settles');
-  h.ipc.move = async (...args) => { h.calls.push(['move', ...args]); return h.service.move(...args); };
-  await attemptMove(); await h.flush();
-  assert.deepEqual(h.service.list('qoder').accounts.map(slot => slot.id), ['a', 'b']);
-  h.layout(); h.press('a'); h.emit('pointermove', 100);
-  assert.equal(h.listeners.has('pointermove'), true, 'dragging unlocks after settlement');
-  h.emit('pointercancel', 100); await h.flush();
-}));
-
-for (const action of ['menu', 'Alt']) test(`a pending ${action} move blocks starting a drag until it settles`, () => withDrag(async h => {
-  h.panel.update(h.service.list('qoder').accounts, []); h.layout();
-  let finishMove;
-  h.ipc.move = (...args) => {
-    h.calls.push(['move', ...args]);
-    return new Promise(resolve => { finishMove = async () => resolve(await h.service.move(...args)); });
-  };
-  if (action === 'menu') h.click(h.row('b'), 'Move up'); else h.row('b').key('ArrowUp', true);
-  await h.flush();
-  h.press('a'); h.emit('pointermove', 100);
-  assert.equal(h.listeners.has('pointermove'), false, 'a drag cannot measure an order a pending move is about to change');
-  await finishMove(); await h.flush();
-  h.layout(); h.press('a'); h.emit('pointermove', 100);
-  assert.equal(h.listeners.has('pointermove'), true, 'dragging unlocks after the move settles');
-  h.emit('pointercancel', 100); await h.flush();
-}));
-
-test('Alt+arrow during a live drag is ignored', () => withDrag(async h => {
-  h.panel.update(h.service.list('qoder').accounts, []); h.layout();
-  h.press('a'); h.emit('pointermove', 100);
-  await h.row('b').key('ArrowUp', true); await h.flush();
-  assert.equal(h.calls.filter(call => call[0] === 'move').length, 0);
-  h.emit('pointercancel', 100); await h.flush();
-}));
-
-test('a pending removal blocks starting a drag until it settles', () => withDrag(async h => {
-  h.panel.update(h.service.list('qoder').accounts, []); h.layout();
-  let finishRemove;
-  h.ipc.remove = (...args) => {
-    h.calls.push(['remove', ...args]);
-    return new Promise(resolve => { finishRemove = async () => resolve(await h.service.remove(...args)); });
-  };
-  h.click(h.row('a'), 'Remove account'); h.click(h.row('a'), 'Confirm remove');
-  await h.flush();
-  h.press('b'); h.emit('pointermove', 0);
-  assert.equal(h.listeners.has('pointermove'), false, 'a drag cannot measure a list a pending removal is about to change');
-  await finishRemove(); await h.flush();
-  assert.equal(h.calls.filter(call => call[0] === 'move').length, 0);
-}));
 const remoteFixture = () => ({ records: [
   { provider: 'qoder', accountKey: 'r1', accountName: 'Remote One', sourceDeviceId: 'other', status: 'ok' },
   { provider: 'qoder', accountKey: 'r2', accountEmail: 'two@example.com', sourceDeviceId: 'other', status: 'unauthorized' },
@@ -946,7 +829,7 @@ const remoteFixture = () => ({ records: [
   { provider: 'qoder', accountKey: 'unknown-local', sourceDeviceId: 'local' }
 ], devices: [{ deviceId: 'other', displayName: 'Office Mac' }], localDeviceId: 'local', presentation: {} });
 
-test('remote rows follow local rows with device labels and presentation-only menu commands', async () => {
+test('remote rows share the list with device labels and presentation-only menu commands', async () => {
   const h = harness(), context = remoteFixture();
   h.ipc.presentation = async (...args) => { h.calls.push(['presentation', ...args]); return { ok: true, accounts: h.slots, presentation: { qoder: { labels: { r1: 'Remote work' }, order: ['r2', 'r1'] } } }; };
   h.panel.update(h.slots, [], context);
@@ -962,9 +845,9 @@ test('remote rows follow local rows with device labels and presentation-only men
   await h.click(row, 'Move down');
   h.click(row, 'Rename'); row.querySelector('.slot-rename').value = 'Remote work';
   await row.querySelector('.slot-rename').key('Enter');
-  assert.deepEqual(h.calls, [['presentation', 'qoder', 'r1', 'order', ['r2', 'r1']], ['presentation', 'qoder', 'r1', 'rename', 'Remote work']]);
-  assert.deepEqual(h.panel.element.querySelector('.slot-remote-list').children.map(n => n.dataset.slotId), ['remote:r2', 'remote:r1']);
-  assert.ok(h.panel.element.children.indexOf(h.panel.element.querySelector('.slot-list')) < h.panel.element.children.indexOf(h.panel.element.querySelector('.slot-remote-list')));
+  assert.deepEqual(h.calls, [['presentation', 'qoder', 'r1', 'order', ['default', 'ka', 'kb', 'r2', 'r1']], ['presentation', 'qoder', 'r1', 'rename', 'Remote work']]);
+  assert.equal(h.panel.element.querySelector('.slot-remote-list'), undefined);
+  assert.deepEqual(h.panel.element.querySelector('.slot-list').children.filter(n => n.dataset.slotId).map(n => n.dataset.slotId), ['remote:r2', 'remote:r1', 'default', 'a', 'b']);
 });
 
 test('shared presentation names and ordering reach desktop titles including local owners', () => {
@@ -973,12 +856,12 @@ test('shared presentation names and ordering reach desktop titles including loca
   const records = [...context.records, { provider: 'qoder', accountKey: 'local', accountName: 'Native', accountEmail: 'local@example.com', sourceDeviceId: 'local' }];
   const presentation = { qoder: { labels: { r2: 'Remote Work', local: 'Shared Work', owned: 'Shared Work' }, order: ['r2', 'r1'] } };
   const result = applyAccountOrder(records, { qoder: slots }, 'local', presentation);
-  assert.deepEqual(result.map(row => row.accountKey), ['owned', 'local', 'unknown-local', 'r2', 'r1']);
+  assert.deepEqual(result.map(row => row.accountKey), ['r2', 'r1', 'owned', 'local', 'unknown-local']);
   const { accountTitleLabel } = require('../../src/electron/renderer/accountIdentity');
-  assert.equal(accountTitleLabel(result[3]), 'Remote Work');
-  assert.equal(result[1].accountName, 'Native');
-  assert.equal(accountTitleLabel(result[1]), 'Shared Work');
-  assert.equal(accountTitleLabel(result[0]), 'Shared Work');
+  assert.equal(accountTitleLabel(result[0]), 'Remote Work');
+  assert.equal(result[3].accountName, 'Native');
+  assert.equal(accountTitleLabel(result[3]), 'Shared Work');
+  assert.equal(accountTitleLabel(result[2]), 'Shared Work');
   // Unnamed accounts keep their own name and email fields, so the title helper
   // still masks emails; only a user-chosen label becomes the display name.
   const unlabelled = applyAccountOrder([
@@ -994,12 +877,12 @@ test('shared presentation names and ordering reach desktop titles including loca
   assert.equal(accountName({ source: 'remote', fingerprint: 'abc' }, {}, t), 'Account #abc');
 });
 
-test('remote drag persists presentation order only and cannot cross the local group', () => withDrag(async h => {
+test('remote drag crosses local rows and publishes the full known order', () => withDrag(async h => {
   const context = remoteFixture();
   h.panel.update(h.slots, [], context); h.layout();
   h.ipc.presentation = async (...args) => { h.calls.push(['presentation', ...args]); return { ok: true }; };
   h.press('remote:r2'); h.emit('pointermove', -100); h.emit('pointerup', -100); await h.flush();
-  assert.deepEqual(h.calls, [['presentation', 'qoder', 'r2', 'order', ['r2', 'r1']]]);
+  assert.deepEqual(h.calls, [['presentation', 'qoder', 'r2', 'order', ['r2', 'default', 'ka', 'kb', 'r1']]]);
   assert.deepEqual(h.slots.map(slot => slot.id), ['default', 'a', 'b']);
 }));
 
@@ -1030,7 +913,7 @@ test('renderer desktop records project remote presentation for Limits and Home c
 
 for (const action of ['menu', 'Alt']) test(`pending remote drag save blocks ${action} steps and new remote drags`, () => withDrag(async h => {
   const context = remoteFixture();
-  h.panel.update(h.slots, [], context);
+  h.panel.update(h.slots, [], context); h.layout();
   let finish;
   h.ipc.presentation = (...args) => {
     h.calls.push(['presentation', ...args]);
@@ -1050,7 +933,7 @@ for (const action of ['menu', 'Alt']) test(`pending remote drag save blocks ${ac
   h.panel.update(h.slots, [], context);
   attempt();
   finish(); await h.flush();
-  assert.deepEqual(h.calls, [['presentation', 'qoder', 'r2', 'order', ['r2', 'r1']]]);
+  assert.deepEqual(h.calls, [['presentation', 'qoder', 'r2', 'order', ['r2', 'default', 'ka', 'kb', 'r1']]]);
   h.press('remote:r1');
   assert.equal(h.listeners.has('pointermove'), true, 'remote drag unlocks');
   h.emit('pointercancel', 0);
@@ -1079,16 +962,16 @@ for (const action of ['move', 'rename']) test(`pending remote ${action} presenta
 
 for (const failure of ['rejected', 'thrown']) test(`failed remote drag save restores stored presentation order when ${failure}`, () => withDrag(async h => {
   const context = remoteFixture();
-  h.panel.update(h.slots, [], context);
+  h.panel.update(h.slots, [], context); h.layout();
   h.ipc.presentation = async () => {
     if (failure === 'thrown') throw new Error('write failed');
     return { ok: false };
   };
-  const order = () => h.panel.element.querySelector('.slot-remote-list').children.map(n => n.dataset.slotId);
+  const order = () => h.panel.element.querySelector('.slot-list').children.filter(n => n.dataset.slotId).map(n => n.dataset.slotId);
   h.press('remote:r2'); h.emit('pointermove', -100); h.emit('pointerup', -100);
-  assert.deepEqual(order(), ['remote:r2', 'remote:r1']);
+  assert.deepEqual(order(), ['remote:r2', 'default', 'a', 'b', 'remote:r1']);
   await h.flush();
-  assert.deepEqual(order(), ['remote:r1', 'remote:r2']);
+  assert.deepEqual(order(), ['default', 'a', 'b', 'remote:r1', 'remote:r2']);
   assert.equal(h.panel.element.querySelector('.slot-message').textContent, t('settings.slots.failed'));
   h.press('remote:r2');
   assert.equal(h.listeners.has('pointermove'), true);
@@ -1102,7 +985,7 @@ test('a remote drop that a push already put in place releases its save lock', ()
   h.press('remote:r2'); h.emit('pointermove', -100);
   // A stats push reorders the aggregate so r2 already sits where it is dropped.
   const [r1, r2, ...rest] = context.records;
-  h.panel.update(h.slots, [], { ...context, records: [r2, r1, ...rest] });
+  h.panel.update(h.slots, [], { ...context, records: [r2, r1, ...rest], presentation: { order: ['r2', 'default', 'ka', 'kb', 'r1'] } });
   h.emit('pointerup', -100); await h.flush();
   assert.deepEqual(h.calls, [], 'nothing to save for a zero-step drop');
   await h.click(h.row('remote:r2'), 'Move down'); await h.flush();
@@ -1119,12 +1002,12 @@ test('Alt+arrow on a remote row is ignored while a remote row is dragged', () =>
   h.emit('pointercancel', -100); await h.flush();
 }));
 
-test('rows without a source device rank as this device, ahead of other devices', () => {
+test('shared remote ranks precede unknown rows without a source device', () => {
   const records = [
     { provider: 'qoder', accountKey: 'r1', sourceDeviceId: 'other' },
     { provider: 'qoder', accountKey: 'plain' }
   ];
-  assert.deepEqual(applyAccountOrder(records, { qoder: [] }, 'local', { qoder: { labels: {}, order: ['r1'] } }).map(row => row.accountKey), ['plain', 'r1']);
+  assert.deepEqual(applyAccountOrder(records, { qoder: [] }, 'local', { qoder: { labels: {}, order: ['r1'] } }).map(row => row.accountKey), ['r1', 'plain']);
 });
 
 test('presentation labels keep the newest entries at the cap and ignore invalid ones', () => {
@@ -1147,4 +1030,49 @@ test('incoming shared preferences repaint local and remote panel names and order
   assert.match(h.row('remote:r1').textContent, /Synced Remote/);
   h.click(h.row('a'), 'Rename');
   assert.equal(h.row('a').querySelector('.slot-rename').value, 'Synced Laptop');
+});
+
+test('one shared order interleaves owners identically on either device, then appends unknown keys', () => {
+  const rows = ['remote-new', 'local-new', 'remote-b', 'local-b', 'remote-a', 'local-a'].map(accountKey => ({ provider: 'deepseek', accountKey, sourceDeviceId: accountKey.startsWith('remote') ? 'windows' : 'mac' }));
+  const presentation = { deepseek: { order: ['remote-a', 'local-a', 'remote-b', 'local-b'] } };
+  const mac = { deepseek: ['local-a', 'local-b', 'local-new'].map(accountKey => ({ accountKey })) };
+  const windows = { deepseek: ['remote-a', 'remote-b', 'remote-new'].map(accountKey => ({ accountKey })) };
+  const known = presentation.deepseek.order;
+  assert.deepEqual(applyAccountOrder(rows, mac, 'mac', presentation).map(r => r.accountKey), [...known, 'local-new', 'remote-new']);
+  assert.deepEqual(applyAccountOrder(rows, windows, 'windows', presentation).map(r => r.accountKey), [...known, 'remote-new', 'local-new']);
+  const aliased = [{ provider: 'deepseek', accountKey: 'resolved', accountKeyAliases: ['remote-a'], sourceDeviceId: 'windows' }, rows.at(-1)];
+  assert.deepEqual(applyAccountOrder(aliased, mac, 'mac', presentation).map(r => r.accountKey), ['resolved', 'local-a']);
+});
+
+test('panel has one interleaved list and local and remote moves publish every visible key', async () => {
+  const h = harness(), context = remoteFixture();
+  context.presentation = { order: ['r1', 'ka', 'r2', 'kb', 'default'] };
+  h.ipc.presentation = async (...args) => { h.calls.push(args); return { ok: true, presentation: { qoder: { order: args[3] } } }; };
+  h.panel.update(h.slots, [], context);
+  const order = () => h.panel.element.querySelector('.slot-list').children.filter(n => n.dataset.slotId).map(n => n.dataset.slotId);
+  assert.deepEqual(order(), ['remote:r1', 'a', 'remote:r2', 'b', 'default']);
+  assert.equal(h.panel.element.querySelector('.slot-remote-list'), undefined);
+  assert.equal(h.panel.element.querySelector('.slot-list').children.at(-1).className, 'slot-add');
+  await h.click(h.row('a'), 'Move up');
+  assert.deepEqual(h.calls[0], ['qoder', 'ka', 'order', ['ka', 'r1', 'r2', 'kb', 'default']]);
+  await h.row('remote:r2').key('ArrowDown', true);
+  assert.deepEqual(h.calls[1], ['qoder', 'r2', 'order', ['ka', 'r1', 'kb', 'r2', 'default']]);
+});
+
+test('local drag crosses remote neighbours and publishes the same full order', () => withDrag(async h => {
+  const context = remoteFixture();
+  context.presentation = { order: ['r1', 'ka', 'r2', 'kb', 'default'] };
+  h.panel.update(h.slots, [], context); h.layout();
+  h.ipc.presentation = async (...args) => { h.calls.push(args); return { ok: true }; };
+  h.press('b'); h.emit('pointermove', 0); h.emit('pointerup', 0); await h.flush();
+  assert.deepEqual(h.calls, [['qoder', 'kb', 'order', ['kb', 'r1', 'ka', 'r2', 'default']]]);
+}));
+
+test('environment rename uses presentation IPC without changing the credential', async () => {
+  const h = harness();
+  h.panel.update([{ id: 'environment', source: 'environment', accountKey: 'env', fingerprint: 'env', enabled: true }], []);
+  h.click(h.row('environment'), 'Rename');
+  const input = h.row('environment').querySelector('.slot-rename'); input.value = 'Build machine';
+  await input.key('Enter');
+  assert.deepEqual(h.calls, [['presentation', 'qoder', 'env', 'rename', 'Build machine']]);
 });
