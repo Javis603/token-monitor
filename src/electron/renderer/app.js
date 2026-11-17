@@ -6495,6 +6495,7 @@ function fixedPeriodMessage(snapshot, breakdown = '') {
 }
 
 function hidePeriodContentForMessage(message) {
+  hideHomeTrendTooltip();
   els.fixedPeriodMessage.textContent = message;
   els.fixedPeriodMessage.classList.remove('hidden');
   els.homePanel.classList.add('hidden');
@@ -7516,15 +7517,19 @@ function bindHomeTrendTooltip(chart, model, points) {
     state.homeTrendTooltipBinding.update(model, points);
     return;
   }
-  state.homeTrendTooltipBinding?.hide();
+  state.homeTrendTooltipBinding?.dispose();
   if (!chart || !model?.points.length) {
     state.homeTrendTooltipBinding = null;
     return;
   }
+  const homeModule = chart.closest('.home-module');
+  homeModule.setAttribute('aria-keyshortcuts', 'ArrowLeft ArrowRight Home End');
   const svg = chart.querySelector('.area-line');
   const crosshair = chart.querySelector('.home-trend-crosshair');
   const marker = chart.querySelector('.home-trend-marker');
   const tooltip = homeActivityTooltipEl('home-trend-tooltip');
+  tooltip.setAttribute('aria-live', 'polite');
+  tooltip.setAttribute('aria-atomic', 'true');
   let cost = tooltip.querySelector('.home-trend-tooltip-cost');
   if (!cost) {
     cost = document.createElement('span');
@@ -7532,23 +7537,24 @@ function bindHomeTrendTooltip(chart, model, points) {
     tooltip.append(cost);
   }
   let pointerX = null;
-  const hide = () => {
-    pointerX = null;
+  let focused = false;
+  let selected = -1;
+  const dismiss = () => {
     chart.removeAttribute('data-active');
+    homeModule.setAttribute('aria-label', t('home.activity'));
     tooltip.dataset.visible = 'false';
     tooltip.setAttribute('aria-hidden', 'true');
     tooltip.style.transform = 'translate(-9999px, -9999px)';
   };
-  const showAt = (clientX) => {
-    if (!model.points.length) { hide(); return; }
+  const hide = () => {
+    pointerX = null;
+    focused = false;
+    dismiss();
+  };
+  const select = (index) => {
     const rect = svg.getBoundingClientRect();
     if (!(rect.width > 0)) { hide(); return; }
-    pointerX = clientX;
-    const first = model.points[0].x;
-    const last = model.points[model.points.length - 1].x;
-    const x = (clientX - rect.left) / rect.width * model.width;
-    const index = last === first ? 0 : Math.max(0, Math.min(model.points.length - 1,
-      Math.round((x - first) / (last - first) * (model.points.length - 1))));
+    selected = index;
     const point = model.points[index];
     const daily = points[index];
     const left = `${point.x / model.width * 100}%`;
@@ -7557,8 +7563,11 @@ function bindHomeTrendTooltip(chart, model, points) {
     marker.style.top = `${point.y / model.height * 100}%`;
     tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatNumber(daily.tokens);
     tooltip.querySelector('[data-home-activity-tooltip-date]').textContent = daily.date;
-    cost.textContent = daily.cost != null && Number.isFinite(Number(daily.cost))
-      ? `USD ${currencyApi.formatCurrencyFromUsd(daily.cost, 'USD')}` : '';
+    const hasCost = daily.cost != null && Number.isFinite(Number(daily.cost));
+    cost.textContent = hasCost || Number(daily.unpricedTokens) > 0
+      ? `USD ${usageAttributionRowsApi.compactUsageCostLabel(daily.cost, daily.unpricedTokens,
+        (amount) => currencyApi.formatCurrencyFromUsd(amount, 'USD'))}` : '';
+    homeModule.setAttribute('aria-label', `${t('home.activity')} · ${t('home.trend')} · ${daily.date} · ${formatNumber(daily.tokens)} tokens${cost.textContent ? ` · ${cost.textContent}` : ''}`);
     chart.setAttribute('data-active', 'true');
     tooltip.dataset.visible = 'true';
     tooltip.setAttribute('aria-hidden', 'false');
@@ -7573,13 +7582,64 @@ function bindHomeTrendTooltip(chart, model, points) {
       aboveY >= pad ? aboveY : anchorY + gap));
     tooltip.style.transform = `translate(${Math.round(xPos)}px, ${Math.round(yPos)}px)`;
   };
+  const showAt = (clientX) => {
+    if (!model.points.length) { hide(); return; }
+    const rect = svg.getBoundingClientRect();
+    if (!(rect.width > 0)) { hide(); return; }
+    pointerX = clientX;
+    const first = model.points[0].x;
+    const last = model.points[model.points.length - 1].x;
+    const x = (clientX - rect.left) / rect.width * model.width;
+    select(last === first ? 0 : Math.max(0, Math.min(model.points.length - 1,
+      Math.round((x - first) / (last - first) * (model.points.length - 1)))));
+  };
   chart.addEventListener('pointerenter', (event) => showAt(event.clientX));
   chart.addEventListener('pointermove', (event) => showAt(event.clientX));
-  chart.addEventListener('pointerleave', hide);
-  state.homeTrendTooltipBinding = { chart, hide, update(nextModel, nextPoints) {
+  chart.addEventListener('pointerleave', () => {
+    pointerX = null;
+    if (focused) select(selected); else dismiss();
+  });
+  const onFocusIn = (event) => {
+    if (event.target !== homeModule) return;
+    focused = true;
+    pointerX = null;
+    select(selected < 0 ? points.length - 1 : selected);
+  };
+  const onKeyDown = (event) => {
+    if (event.target !== homeModule) return;
+    if (event.key === 'Escape') { hide(); return; }
+    const index = event.key === 'ArrowLeft' ? Math.max(0, selected - 1)
+      : event.key === 'ArrowRight' ? Math.min(points.length - 1, selected + 1)
+        : event.key === 'Home' ? 0 : event.key === 'End' ? points.length - 1 : null;
+    if (index === null) return;
+    event.preventDefault();
+    pointerX = null;
+    focused = true;
+    select(index);
+  };
+  const onFocusOut = (event) => {
+    if (event.target !== homeModule) return;
+    focused = false;
+    if (pointerX == null) dismiss();
+  };
+  homeModule.addEventListener('focusin', onFocusIn);
+  homeModule.addEventListener('keydown', onKeyDown);
+  homeModule.addEventListener('focusout', onFocusOut);
+  state.homeTrendTooltipBinding = { chart, hide, dispose() {
+    hide();
+    homeModule.removeEventListener('focusin', onFocusIn);
+    homeModule.removeEventListener('keydown', onKeyDown);
+    homeModule.removeEventListener('focusout', onFocusOut);
+    homeModule.removeAttribute('aria-keyshortcuts');
+  }, update(nextModel, nextPoints) {
+    const date = points[selected]?.date;
     model = nextModel;
     points = nextPoints;
+    if (!model.points.length) { hide(); return; }
+    selected = points.findIndex(point => point.date === date);
+    if (selected < 0) selected = points.length - 1;
     if (pointerX != null) showAt(pointerX);
+    else if (focused) select(selected);
   } };
 }
 
@@ -7653,7 +7713,8 @@ function renderHomeTrendsModule() {
     rawDaily,
     today,
     Number(todayPeriod?.totalTokens || 0),
-    Number(todayPeriod?.costUsd || 0)
+    Number(todayPeriod?.costUsd || 0),
+    Number(todayPeriod?.unpricedTokens || 0)
   );
   const activityLayout = homeOverviewApi.homeActivityHeatmapLayout();
   const heatMetric = state.settings?.heatmapMetric || 'cost';
