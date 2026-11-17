@@ -1592,6 +1592,27 @@ test('device disclosure never joins Alibaba sibling plan variants', () => {
   assert.ok(h.row('personal').querySelector('.slot-device-toggle'));
 });
 
+test('Alibaba remote plans remain separate from local owners and each other', () => {
+  const h = harness(t, 'alibaba');
+  const team = { provider: 'alibaba', accountKey: 'uid', region: 'cn', status: 'unauthorized', sourceDeviceId: 'peer' };
+  const personal = { ...team, region: 'cn-personal', status: 'ok', source: 'web' };
+  const context = { localDeviceId: 'local', records: [team, personal],
+    devices: [{ deviceId: 'peer', displayName: 'MacBook Pro', limits: { providers: [team, personal] } }] };
+  const remoteRows = () => [...h.panel.element.walk()].filter(node => node.dataset.slotId?.startsWith('remote:'));
+  h.panel.update([], [], context);
+  assert.equal(remoteRows().length, 2);
+  assert.equal(new Set(remoteRows().map(node => node.dataset.slotId)).size, 2);
+  assert.ok(remoteRows()[0].querySelector('.slot-invalid'));
+  assert.ok(remoteRows()[1].querySelector('.slot-connected'));
+  assert.ok(remoteRows().every(node => node.querySelector('.row-device').textContent === 'MacBook Pro'));
+
+  h.panel.update([{ id: 'local-team', accountKey: 'old-uid', enabled: true }], [team],
+    { ...context, records: context.records.map(row => ({ ...row, accountKeyAliases: ['old-uid'] })) });
+  assert.equal(remoteRows().length, 1);
+  assert.ok(remoteRows()[0].querySelector('.slot-connected'));
+  assert.ok(h.row('local-team').querySelector('.slot-device-toggle'));
+});
+
 test('raw device observations use aggregate freshness for remote disclosure too', () => {
   const fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
   const file = path.resolve(__dirname, '../../src/electron/main.js'), source = fs.readFileSync(file, 'utf8');

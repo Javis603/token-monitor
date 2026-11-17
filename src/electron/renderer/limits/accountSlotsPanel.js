@@ -51,10 +51,18 @@
       || slots.find(slot => slot.accountKeyAliases?.includes(accountKey))
       || slots.find(slot => readingAliases.includes(slot.accountKey) || slot.accountKeyAliases?.some(key => readingAliases.includes(key)));
   }
+  function alibabaVariant(slot) {
+    return slot.source === 'remote' ? slot.region : slot.formValues?.alibabaVariant || 'cn';
+  }
+  function readingOwner(slots, row) {
+    const candidates = row.provider === 'alibaba'
+      ? slots.filter(slot => alibabaVariant(slot) === row.region) : slots;
+    return slotOwner(candidates, row.accountKey, row.accountKeyAliases);
+  }
   function applyAccountOrder(records, slotsByProvider, localDeviceId = '', presentation = {}) {
     const result = records.map(row => {
       const slots = slotsByProvider[row.provider] || [];
-      const owner = slotOwner(slots, row.accountKey, row.accountKeyAliases);
+      const owner = readingOwner(slots, row);
       // Only a name the user chose becomes the display name. Provider names and
       // emails stay in their own fields, so email masking still applies to them.
       const key = owner?.accountKey || row.accountKey;
@@ -72,7 +80,7 @@
       const positions = result.flatMap((row, index) => row.provider === provider ? [index] : []);
       const order = presentation[provider]?.order || [];
       const rank = row => {
-        const owner = slotOwner(slots, row.accountKey, row.accountKeyAliases);
+        const owner = readingOwner(slots, row);
         const keys = [owner?.accountKey, ...(owner?.accountKeyAliases || []), row.accountKey, ...(row.accountKeyAliases || [])];
         const canonicalIndex = order.indexOf(owner?.accountKey || row.accountKey);
         const sharedIndex = canonicalIndex >= 0 ? canonicalIndex : order.findIndex(key => keys.includes(key));
@@ -182,7 +190,9 @@
     function activeAccounts() {
       const accounts = [...slots, ...remoteAccounts()];
       const byId = new Map(accounts.map(slot => [slot.id, slot]));
-      return applyAccountOrder(accounts.map(slot => ({ ...slot, provider: form.id })),
+      return applyAccountOrder(accounts.map(slot => ({
+        ...slot, provider: form.id, region: form.id === 'alibaba' ? alibabaVariant(slot) : undefined
+      })),
         { [form.id]: slots }, localDeviceId, { [form.id]: presentation }).map(row => byId.get(row.id));
     }
     const run = (operation, ...args) => {
@@ -552,33 +562,38 @@
     list.append(add);
     function remoteAccounts() {
       return applyAccountOrder(remoteReadings, { [form.id]: slots }, localDeviceId, { [form.id]: presentation })
-        .filter(row => row.provider === form.id && row.accountKey && row.sourceDeviceId && row.sourceDeviceId !== localDeviceId && !slotOwner(slots, row.accountKey, row.accountKeyAliases))
-        .map(row => ({ id: `remote:${row.sourceDeviceId}:${row.accountKey}`, source: 'remote', sourceDeviceId: row.sourceDeviceId, accountKey: row.accountKey, accountKeyAliases: row.accountKeyAliases, label: presentation.labels?.[row.accountKey] || '', enabled: true, fingerprint: accountIdentity.accountStableFingerprint(row).slice(0, 12) }));
+        .filter(row => row.provider === form.id && row.accountKey && row.sourceDeviceId && row.sourceDeviceId !== localDeviceId && !readingOwner(slots, row))
+        .map(row => {
+          const variant = form.id === 'alibaba' ? row.region : undefined;
+          return {
+            id: `remote:${row.sourceDeviceId}:${row.accountKey}${variant ? `:${variant}` : ''}`,
+            source: 'remote', sourceDeviceId: row.sourceDeviceId, accountKey: row.accountKey,
+            accountKeyAliases: row.accountKeyAliases, region: variant, label: presentation.labels?.[row.accountKey] || '',
+            enabled: true, fingerprint: accountIdentity.accountStableFingerprint(row).slice(0, 12)
+          };
+        });
     }
     function localReading(slot) {
       // Alibaba keeps one account key across plans; both readings and alias
       // owners must belong to this slot's variant. Legacy saved slots use cn.
-      const variant = form.id === 'alibaba' ? slot.formValues?.alibabaVariant || 'cn' : null;
+      const variant = form.id === 'alibaba' ? alibabaVariant(slot) : null;
       const candidates = variant ? readings.filter(row => row.region === variant) : readings;
-      const owners = variant ? slots.filter(owner => (owner.formValues?.alibabaVariant || 'cn') === variant) : slots;
+      const owners = variant ? slots.filter(owner => alibabaVariant(owner) === variant) : slots;
       return candidates.find(row => row.accountKey === slot.accountKey)
         || candidates.find(row => slotOwner(owners, row.accountKey, row.accountKeyAliases) === slot);
     }
-    function matchingObservation(slot, reference, row) {
+    function matchingObservation(slot, row) {
       if (row.provider !== form.id || row.removed || !row.accountKey) return false;
-      const owners = slot.source === 'remote' ? [slot] : slots.filter(owner => form.id !== 'alibaba'
-        || (owner.formValues?.alibabaVariant || 'cn') === (slot.formValues?.alibabaVariant || 'cn'));
-      if (slotOwner(owners, row.accountKey, row.accountKeyAliases) !== slot) return false;
-      // Alibaba shares a UID across plans; device provenance must not cross them.
-      return form.id !== 'alibaba' || row.region === (slot.formValues?.alibabaVariant || reference?.region || 'cn');
+      const owners = slot.source === 'remote' ? [slot] : slots;
+      return readingOwner(owners, row) === slot;
     }
     function renderDevices(item, slot, reading, status, source, permission) {
       const remote = slot.source === 'remote';
       const observed = new Map();
-      const selected = remoteReadings.find(row => matchingObservation(slot, reading, row));
+      const selected = remoteReadings.find(row => matchingObservation(slot, row));
       for (const device of devices) {
         if (device.deviceId === localDeviceId) continue;
-        const candidates = (device.limits?.providers || []).filter(row => matchingObservation(slot, reading, row));
+        const candidates = (device.limits?.providers || []).filter(row => matchingObservation(slot, row));
         // Prefer the lane used by the displayed account when a device has several.
         const candidate = candidates.find(row => row.source === reading?.source) || candidates[0];
         if (candidate) observed.set(device.deviceId, { ...candidate, stale: Boolean(candidate.stale || device.stale) });
@@ -586,7 +601,7 @@
       // Older snapshots may carry only the aggregate observation.
       for (const row of remoteReadings) {
         if (row.sourceDeviceId && row.sourceDeviceId !== localDeviceId
-          && matchingObservation(slot, reading, row) && !observed.has(row.sourceDeviceId)) observed.set(row.sourceDeviceId, row);
+          && matchingObservation(slot, row) && !observed.has(row.sourceDeviceId)) observed.set(row.sourceDeviceId, row);
       }
       const members = [...(!remote && observed.size ? [{ deviceId: localDeviceId, reading, local: true }] : []),
         ...[...observed].map(([deviceId, observation]) => ({ deviceId, reading: observation, local: false }))];
@@ -678,7 +693,8 @@
         item.slot = slot;
         item.el.dataset.slotDraggable = 'true';
         const remote = slot.source === 'remote';
-        const reading = remote ? remoteReadings.find(row => row.sourceDeviceId === slot.sourceDeviceId && row.accountKey === slot.accountKey)
+        const reading = remote ? remoteReadings.find(row => row.provider === form.id && row.sourceDeviceId === slot.sourceDeviceId
+          && row.accountKey === slot.accountKey && (form.id !== 'alibaba' || row.region === slot.region))
           : localReading(slot);
         if (!item.editing) item.name.textContent = accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') }, reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading, t, presentation);
         const status = accountStatus(slot, statusReading(slot, reading), remote || providerEnabled);
