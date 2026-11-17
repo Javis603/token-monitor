@@ -1076,3 +1076,33 @@ test('environment rename uses presentation IPC without changing the credential',
   await input.key('Enter');
   assert.deepEqual(h.calls, [['presentation', 'qoder', 'env', 'rename', 'Build machine']]);
 });
+
+test('remote device lines reuse session icons before names and follow scoped overrides on update', () => {
+  const h = harness();
+  const devices = [
+    { deviceId: 'desktop', displayName: 'imac-m1', deviceKind: 'desktop' },
+    { deviceId: 'laptop', displayName: 'macbook-air', deviceKind: 'laptop' },
+    { deviceId: 'linux', displayName: 'ubuntu', deviceKind: 'linux' }
+  ];
+  const context = {
+    localDeviceId: 'local', devices,
+    records: devices.map(device => ({ provider: 'qoder', accountKey: device.deviceId, sourceDeviceId: device.deviceId, status: 'ok' })),
+    settings: { deviceIconScope: 'hub', deviceIconOverrides: { local: { desktop: 'cloud' }, hub: {} } }
+  };
+  const check = (id, kind, name) => {
+    const line = h.row(`remote:${id}`).querySelector('.row-device');
+    assert.ok(line, 'remote row has the Sessions device-line class');
+    assert.equal(line.children[0].className, `device-kind-icon device-kind-${kind}`);
+    assert.equal(line.children[0].attributes['aria-hidden'], 'true');
+    assert.equal(line.children[1].textContent, name, 'device icon precedes the name');
+  };
+  h.panel.update(h.slots, [], context);
+  check('desktop', 'desktop', 'imac-m1');
+  check('laptop', 'laptop', 'macbook-air');
+  check('linux', 'linux', 'ubuntu');
+  assert.equal(h.row('a').querySelector('.row-device'), undefined, 'local rows have no device line');
+  context.settings.deviceIconOverrides.hub.desktop = 'server';
+  context.devices[0].displayName = 'renamed-imac';
+  h.panel.update(h.slots, [], context);
+  check('desktop', 'server', 'renamed-imac');
+});

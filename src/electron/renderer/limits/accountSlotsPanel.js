@@ -98,6 +98,8 @@
     let presentation = {};
     let devices = [];
     let localDeviceId = '';
+    let settings;
+    const deviceIcons = typeof module !== 'undefined' ? require('../deviceIcons') : window.TokenMonitorDeviceIcons;
     const deviceLabels = typeof module !== 'undefined' ? require('../deviceBreakdown') : window.TokenMonitorDeviceBreakdown;
     let operationLane = Promise.resolve();
     let presentationPending = 0;
@@ -418,8 +420,10 @@
         }
         if (item.environmentNote) item.environmentNote.classList.toggle('hidden', slot.source !== 'environment');
         if (remote) {
-          if (!item.deviceNote) { item.deviceNote = make('div', 'settings-note'); item.el.querySelector('.slot-copy').append(item.deviceNote); }
-          item.deviceNote.textContent = deviceLabels.deviceLabel(devices.find(device => device.deviceId === reading?.sourceDeviceId) || { deviceId: reading?.sourceDeviceId });
+          if (!item.deviceNote) { item.deviceNote = make('div', 'row-device'); item.el.querySelector('.slot-copy').append(item.deviceNote); }
+          const device = devices.find(device => device.deviceId === reading?.sourceDeviceId) || { deviceId: reading?.sourceDeviceId };
+          item.deviceNote.replaceChildren(deviceIcons.deviceIconNode(document, deviceIcons.deviceIconKind(settings, device)),
+            document.createTextNode(deviceLabels.deviceLabel(device)));
         }
         const parent = list;
         const before = [...parent.children].filter(node => node !== editor)[index];
@@ -432,7 +436,7 @@
       placeEditor();
     }
     return { element: root, update(nextSlots, nextReadings, context = {}) {
-      slots = nextSlots; readings = nextReadings;
+      slots = nextSlots; readings = nextReadings; settings = context.settings;
       remoteReadings = context.records || []; devices = context.devices || []; localDeviceId = context.localDeviceId || ''; presentation = context.presentation || {};
       preserveScroll(render);
     }, openEditor };
