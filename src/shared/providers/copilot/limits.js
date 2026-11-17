@@ -361,6 +361,8 @@ function retireCopilotFallbacks(rows, accounts, options) {
 }
 
 async function fetchCopilotLimits(options = {}, deps = {}) {
+  // A credential draft must be judged on its own, even during legacy migration.
+  if (deps.probe) return fetchCopilotAccountLimits(options, deps);
   if (deps.copilotLegacyAccountKey) return fetchCopilotAccountLimits({ ...options,
     accountKey: deps.copilotLegacyAccountKey, accountName: deps.copilotLegacyAccountName }, deps);
   const scope = options.limitRefreshScope?.provider === 'copilot' ? options.limitRefreshScope : null;

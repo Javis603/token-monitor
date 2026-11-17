@@ -164,3 +164,29 @@ test('Copilot unbound legacy profiles remember separate identities across failed
   assert.deepEqual(failed.map(r => r.accountKey), good.map(r => r.accountKey));
   assert.ok(failed.every(r => r.status === 'unauthorized'));
 });
+
+for (const [status, saved, verdict] of [[200, true, 'valid'], [401, false, 'invalid'], [429, true, 'indeterminate']]) {
+  test(`Copilot draft probe isolates legacy profiles when the draft returns ${status}`, async () => {
+    const { createAccountSlotService } = require('../../src/electron/limits/accountSlotService');
+    const legacy = { old: { token: 'old-valid', enabled: true, accountKey: 'old-account' } };
+    let settings = { copilotProfiles: legacy };
+    const seen = [], writes = [];
+    const service = createAccountSlotService({ env: {}, getSettings: () => settings,
+      write: async patch => { writes.push(patch); settings = { ...settings, ...patch }; },
+      probeDeps: () => ({ fetch: async (url, init) => {
+        const token = init.headers.Authorization.slice(6);
+        seen.push(token);
+        const code = token === 'new-draft' ? status : 200;
+        return { ok: code === 200, status: code, json: async () => url.includes('copilot_internal')
+          ? { quota_snapshots: { premium_interactions: { entitlement: 100, remaining: 75, percent_remaining: 75 } } }
+          : { login: 'draft-user', id: 1 } };
+      } }) });
+    const result = await service.add('copilot', { copilotApiToken: 'new-draft', copilotEnterpriseHost: '' });
+    assert.ok(seen.length > 0);
+    assert.deepEqual([...new Set(seen)], ['new-draft'], 'old accounts cannot vouch for a draft');
+    assert.equal(result.saved, saved);
+    assert.equal(result.verdict, verdict);
+    assert.deepEqual(settings.copilotProfiles, legacy);
+    if (!saved) assert.equal(writes.length, 0, 'a rejected draft must not change credentials');
+  });
+}
