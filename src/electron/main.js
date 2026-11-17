@@ -3043,8 +3043,7 @@ async function requestSyncContent(context, pathname, method, body) {
 }
 
 let syncContentCredentials;
-// One CredentialStore-backed destination binding for every sync lane, so no
-// secret-derived value is written to settings.json.
+// Destination bindings stay in CredentialStore; preferences contain only opaque IDs.
 function getSyncContentCredentials() {
   return syncContentCredentials ||= createSyncContentCredentialQueue(ensureCredentialStore);
 }
@@ -3055,7 +3054,7 @@ function getAccountPresentationSync() {
   return accountPresentationSync ||= createAccountPresentationSync({
     getContext: syncContentContext,
     identity: (context) => {
-      try { return getSyncContentCredentials().resolveIdentity(context); } catch (_) { return ''; }
+      try { return getSyncContentCredentials().resolvePresentationIdentity(context); } catch (_) { return ''; }
     },
     getCacheIdentity: () => settings.limitAccountPresentationCacheIdentity || '',
     loadJournal: () => (Array.isArray(settings.limitAccountPresentationPending) ? settings.limitAccountPresentationPending : []),

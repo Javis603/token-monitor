@@ -68,14 +68,14 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
     // Only consume this Hub's queue; never replay another Hub's edits here.
     const mine = queued.filter(item => item.destination === captured).map(item => item.operation);
     queued = queued.filter(item => item.destination !== captured);
-    if (unsupported) { pending = []; persist(); return; }
     pending.push(...mine, ...operations);
     persist();
+    if (unsupported) return;
     const current = () => connected() && identity(getContext()) === captured;
     try {
       let response = await request(context, `/api/sync/settings/${KIND}`, 'GET');
       if (!current()) return;
-      if ([400, 404].includes(response.status)) { unsupported = true; pending = []; persist(); return; }
+      if ([400, 404].includes(response.status)) { unsupported = true; return; }
       if (response.status !== 200) return;
       let document = response.body;
       // This device's own slot names are its input, so they fill gaps on the
@@ -106,7 +106,7 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
         }
         response = await request(context, `/api/sync/settings/${KIND}`, 'PUT', { baseRevision: document.revision, value });
         if (!current()) return;
-        if ([400, 404].includes(response.status)) { unsupported = true; pending = []; persist(); return; }
+        if ([400, 404].includes(response.status)) { unsupported = true; return; }
         if (response.status === 409) {
           // Always reread; never retarget a stale replacement to a new revision.
           response = await request(context, `/api/sync/settings/${KIND}`, 'GET');

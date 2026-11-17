@@ -345,3 +345,83 @@ for (const stage of ['queued', 'in-flight', 'failed']) {
     assert.deepEqual(stored, []);
   });
 }
+
+for (const rejectedMethod of ['GET', 'PUT']) {
+  for (const restart of [false, true]) {
+    test(`unsupported Hub retains edits after ${rejectedMethod} rejection, restart=${restart}`, async () => {
+      let journal = [];
+      let supported = false;
+      let calls = 0;
+      let document = { revision: 3, value: { deepseek: { labels: { remote: 'Remote' }, order: ['remote', 'a', 'b'] } } };
+      const make = () => createAccountPresentationSync({
+        getContext: () => ({ mode: 'client', url: 'https://hub' }), identity: () => 'hub',
+        getCacheIdentity: () => 'hub', getSeed: () => ({}), apply: () => {},
+        loadJournal: () => structuredClone(journal), saveJournal: value => { journal = structuredClone(value); },
+        request: async (_context, _path, method, body) => {
+          calls++;
+          if (!supported && method === rejectedMethod) return { status: 404 };
+          if (method === 'PUT') document = { revision: document.revision + 1, value: body.value };
+          return { status: 200, body: structuredClone(document) };
+        }
+      });
+      let runtime = make();
+      await runtime.publish([{ provider: 'deepseek', type: 'rename', key: 'a', label: 'Work' }]);
+      const rejectedCalls = calls;
+      await runtime.publish([{ provider: 'deepseek', type: 'order', order: ['b', 'a'] }]);
+      runtime.notifyStats({});
+      await runtime.refresh();
+      assert.equal(calls, rejectedCalls, 'unsupported destination stays quiet');
+      assert.equal(journal.length, 2, 'both edits remain unacknowledged');
+      if (restart) runtime = make();
+      supported = true;
+      runtime.notifyStats({ syncSettingsRevisions: { limitAccountPresentation: 3 } });
+      await runtime.refresh();
+      assert.deepEqual(document.value.deepseek, { labels: { remote: 'Remote', a: 'Work' }, order: ['b', 'a', 'remote'] });
+      assert.deepEqual(journal, []);
+    });
+  }
+}
+
+test('real destination identities replay offline edits after A to B to A and restart', async t => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const { CredentialStore } = require('../../src/shared/credentialStore');
+  const { createSyncContentCredentialQueue } = require('../../src/electron/syncContentCredentials');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'presentation-destinations-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  let context = { mode: 'client', url: 'https://a.example', secret: 'private-a', deviceId: 'one' };
+  let journal = [];
+  let online = false;
+  const puts = [];
+  const boot = () => {
+    const queue = createSyncContentCredentialQueue(() => new CredentialStore(dir));
+    // Exercise the former binding on the regression baseline too.
+    const identity = queue.resolvePresentationIdentity || queue.resolveIdentity;
+    return createAccountPresentationSync({
+      getContext: () => context, identity, getCacheIdentity: () => identity(context), getSeed: () => ({}), apply: () => {},
+      loadJournal: () => structuredClone(journal), saveJournal: next => { journal = structuredClone(next); },
+      request: async (captured, _path, method, body) => {
+        if (!online) return { status: 503 };
+        if (method === 'PUT') puts.push({ url: captured.url, value: body.value });
+        return { status: 200, body: { revision: 1, value: body?.value || {} } };
+      }
+    });
+  };
+  let runtime = boot();
+  await runtime.publish([{ provider: 'deepseek', type: 'rename', key: 'a', label: 'For A' }]);
+  const originalJournal = structuredClone(journal);
+  context = { ...context, url: 'https://b.example', secret: 'private-b' };
+  online = true;
+  await runtime.refresh();
+  assert.deepEqual(puts, [], 'never publish A edits to B');
+  assert.deepEqual(journal, originalJournal);
+  runtime = boot();
+  await runtime.refresh();
+  context = { ...context, url: 'https://a.example', secret: 'private-a' };
+  await runtime.refresh();
+  assert.equal(puts.length, 1);
+  assert.equal(puts[0].url, context.url);
+  assert.equal(puts[0].value.deepseek.labels.a, 'For A');
+  assert.deepEqual(journal, []);
+});

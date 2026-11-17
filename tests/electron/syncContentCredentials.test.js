@@ -388,3 +388,42 @@ test('actual private-store local OFF defeats a delayed response after the server
     fs.rmSync(f.dir, { recursive: true, force: true });
   }
 });
+
+
+test('presentation identities persist privately without reviving optional-sync consent identities', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'presentation-binding-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const store = new CredentialStore(dir);
+  const queue = () => createSyncContentCredentialQueue(() => new CredentialStore(dir));
+  const context = { mode: 'client', url: 'https://hub.example', secret: 'private-original', deviceId: 'one' };
+  const original = queue().resolveIdentity(context);
+  assert.equal(queue().resolvePresentationIdentity(context), original, 'existing journals retain their opaque binding');
+  for (const patch of [{ url: 'https://other.example' }, { secret: 'private-replacement' }, { deviceId: 'two' }, { mode: 'host' }]) {
+    const other = { ...context, ...patch };
+    assert.notEqual(queue().resolvePresentationIdentity(other), original);
+    assert.equal(queue().resolvePresentationIdentity(context), original);
+    queue().resolveIdentity(other);
+    assert.notEqual(queue().resolveIdentity(context), original, 'presentation reuse cannot restore the former consent identity');
+    assert.equal(queue().resolvePresentationIdentity(context), original);
+  }
+  assert.equal(queue().resolvePresentationIdentity({ ...context, mode: 'local' }), '');
+  assert.equal(store.settingsCredentials().accountPresentationIdentities, undefined, 'private bindings never enter settings');
+  assert.match(original, /^[a-f0-9-]{36}$/);
+});
+
+test('failed presentation binding persistence is retried without exposing an uncommitted identity', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'presentation-binding-failure-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const store = new CredentialStore(dir);
+  const queue = createSyncContentCredentialQueue(() => store);
+  const context = { mode: 'client', url: 'https://hub.example', secret: 'private', deviceId: 'one' };
+  const before = store.readDocument();
+  const write = store.writeDocument.bind(store);
+  t.mock.method(store, 'writeDocument', () => { throw new Error('write denied'); });
+  assert.throws(() => queue.resolvePresentationIdentity(context), /write denied/);
+  assert.deepEqual(new CredentialStore(dir).readDocument(), before);
+  t.mock.method(store, 'writeDocument', write);
+  const committed = queue.resolvePresentationIdentity(context);
+  const reloaded = createSyncContentCredentialQueue(() => new CredentialStore(dir));
+  assert.equal(reloaded.resolvePresentationIdentity(context), committed);
+});
