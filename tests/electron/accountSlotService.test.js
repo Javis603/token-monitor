@@ -638,3 +638,29 @@ for (const variant of ['cn', 'intl', 'cn-personal', 'intl-personal']) {
     assert.ok(!h.settings.alibabaAccountSlots.some(account => account.id === saved.id));
   });
 }
+
+for (const action of ['add', 'replace']) {
+  test(`OpenRouter ${action} rejects a draft despite healthy legacy overflow profiles`, async () => {
+    const h = harness();
+    const requested = [];
+    h.fetch = async (_url, init) => {
+      const auth = init.headers.Authorization;
+      requested.push(auth);
+      return auth === 'Bearer bad-draft'
+        ? response({}, 401) : response({ data: { limit: 20, usage: 2, total_credits: 20, total_usage: 2 } });
+    };
+    const first = await h.service.add('openrouter', { openrouterApiKey: 'saved-key' }, 'Saved');
+    assert.equal(first.saved, true);
+    h.settings = { ...h.settings, openrouterProfiles: { overflow: { apiKey: 'legacy-key' } } };
+    const before = structuredClone(h.settings);
+    requested.length = 0;
+    const result = action === 'add'
+      ? await h.service.add('openrouter', { openrouterApiKey: 'bad-draft' }, 'Draft')
+      : await h.service.replace('openrouter', first.accounts[0].id, { openrouterApiKey: 'bad-draft' });
+    assert.equal(result.saved, false);
+    assert.equal(result.status, 'unauthorized');
+    assert.deepEqual(h.settings, before, 'failed validation never changes saved credentials or legacy overflow');
+    assert.ok(requested.length > 0);
+    assert.equal(requested.every(auth => auth === 'Bearer bad-draft'), true);
+  });
+}

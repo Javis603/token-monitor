@@ -234,7 +234,7 @@ async function fetchOpenRouterProfiles(options = {}, deps = {}) {
 // Raw single-account adapter: slots supply an explicit key and an isolated env.
 async function fetchOpenRouterLimits(options = {}, deps = {}) {
   // Keep collecting the source if a startup migration could not finish.
-  if (!deps.accountSlotSaved && Object.keys(options.openrouterProfiles || {}).length) return fetchOpenRouterProfiles(options, deps);
+  if (!deps.probe && !deps.accountSlotSaved && Object.keys(options.openrouterProfiles || {}).length) return fetchOpenRouterProfiles(options, deps);
   const apiKey = openrouterToken(deps.env || process.env, options.openrouterApiKey);
   if (!apiKey) return normalizeLimitProvider({ provider: 'openrouter', source: 'api', status: 'notConfigured', windows: [], updatedAt: new Date((deps.now || Date.now)()).toISOString() });
   const row = await fetchOpenRouterAccount('', apiKey, deps);
