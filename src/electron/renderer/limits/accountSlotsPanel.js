@@ -9,8 +9,13 @@
   if (typeof module !== 'undefined') module.exports = api;
   if (root) root.TokenMonitorAccountSlotsPanel = api;
 })(typeof window !== 'undefined' ? window : null, function accountSlotsPanelApi(menus, dragController, dragSort, accountIdentity) {
+  // One precedence rule for local panels, remote panels and reading overlays.
+  // An explicit blank overrides an old credential-slot label after a clear.
+  function presentationLabel(slot, accountKey, presentation = {}) {
+    return Object.hasOwn(presentation.labels || {}, accountKey) ? presentation.labels[accountKey] : slot?.label || '';
+  }
   function accountName(slot, reading, t = (_key, { fingerprint }) => `Account #${fingerprint}`, presentation = {}) {
-    return slot.label || (slot.source === 'remote' ? presentation.labels?.[reading?.accountKey] : '') || reading?.accountName || reading?.accountEmail || reading?.email
+    return presentationLabel(slot, slot.accountKey || reading?.accountKey, presentation) || reading?.accountName || reading?.accountEmail || reading?.email
       || t('settings.slots.account', { fingerprint: slot.fingerprint });
   }
   function accountStatus(slot, reading) {
@@ -33,22 +38,25 @@
       const slots = slotsByProvider[row.provider];
       if (!slots) return row;
       const owner = slotOwner(slots, row.accountKey, row.accountKeyAliases);
-      const remote = !owner && row.sourceDeviceId && row.sourceDeviceId !== localDeviceId;
       // Only a name the user chose becomes the display name. Provider names and
       // emails stay in their own fields, so email masking still applies to them.
-      const label = owner ? owner.label : remote ? presentation[row.provider]?.labels?.[row.accountKey] : '';
+      const label = presentationLabel(owner, row.accountKey, presentation[row.provider]);
       return label ? { ...row, accountDisplayName: label } : row;
     });
     for (const [provider, slots] of Object.entries(slotsByProvider)) {
       const positions = result.flatMap((row, index) => row.provider === provider ? [index] : []);
       const rank = row => {
         const index = slots.indexOf(slotOwner(slots, row.accountKey, row.accountKeyAliases));
-        if (index >= 0) return index;
+        if (index >= 0) {
+          const sharedOrder = presentation[provider]?.order || [];
+          const sharedIndex = sharedOrder.indexOf(row.accountKey);
+          return sharedIndex < 0 ? sharedOrder.length + index : sharedIndex;
+        }
         // A row without a source device is this device's (local mode), as in #1520.
-        if (!row.sourceDeviceId || row.sourceDeviceId === localDeviceId) return slots.length;
+        if (!row.sourceDeviceId || row.sourceDeviceId === localDeviceId) return (presentation[provider]?.order || []).length + slots.length;
         const remoteIndex = row.sourceDeviceId && row.sourceDeviceId !== localDeviceId
           ? (presentation[provider]?.order || []).indexOf(row.accountKey) : -1;
-        return slots.length + 1 + (remoteIndex < 0 ? (presentation[provider]?.order || []).length : remoteIndex);
+        return (presentation[provider]?.order || []).length + slots.length + 1 + (remoteIndex < 0 ? (presentation[provider]?.order || []).length : remoteIndex);
       };
       const ordered = positions.map(index => result[index]).sort((a, b) => rank(a) - rank(b));
       positions.forEach((position, index) => { result[position] = ordered[index]; });
@@ -327,7 +335,7 @@
         item.editing = true;
         const revision = ++item.renameRevision;
         const input = make('input', 'slot-rename');
-        input.value = item.slot.label || '';
+        input.value = presentationLabel(item.slot, item.slot.accountKey, presentation);
         input.setAttribute('aria-label', tr('rename'));
         name.replaceChildren(input);
         input.addEventListener('keydown', async event => {
@@ -431,7 +439,7 @@
         item.el.dataset.slotDraggable = String(slot.id !== 'environment');
         const remote = slot.source === 'remote';
         const reading = remote ? remoteReadings.find(row => row.accountKey === slot.accountKey) : readings.find(row => slotOwner(slots, row.accountKey, row.accountKeyAliases) === slot);
-        if (!item.editing) item.name.textContent = accountName(slot, reading, t);
+        if (!item.editing) item.name.textContent = accountName(slot, reading, t, presentation);
         const status = accountStatus(slot, reading);
         item.el.classList.toggle('slot-paused', !slot.enabled);
         item.status.className = `slot-status slot-${status}`;
@@ -465,10 +473,16 @@
       placeEditor();
     }
     return { element: root, update(nextSlots, nextReadings, context = {}) {
-      slots = nextSlots; readings = nextReadings;
+      const order = context.presentation?.order || [];
+      slots = [...nextSlots].sort((a, b) => {
+        if (a.id === 'environment') return -1;
+        if (b.id === 'environment') return 1;
+        const rank = slot => order.includes(slot.accountKey) ? order.indexOf(slot.accountKey) : order.length;
+        return rank(a) - rank(b);
+      }); readings = nextReadings;
       remoteReadings = context.records || []; devices = context.devices || []; localDeviceId = context.localDeviceId || ''; presentation = context.presentation || {};
       preserveScroll(render);
     }, openEditor };
   }
-  return { accountName, accountStatus, slotOwner, applyAccountOrder, createPanel };
+  return { presentationLabel, accountName, accountStatus, slotOwner, applyAccountOrder, createPanel };
 });

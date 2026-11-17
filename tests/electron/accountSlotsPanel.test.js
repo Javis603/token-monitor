@@ -967,26 +967,26 @@ test('remote rows follow local rows with device labels and presentation-only men
   assert.ok(h.panel.element.children.indexOf(h.panel.element.querySelector('.slot-list')) < h.panel.element.children.indexOf(h.panel.element.querySelector('.slot-remote-list')));
 });
 
-test('remote presentation names and ordering reach desktop titles without relabeling local owners', () => {
+test('shared presentation names and ordering reach desktop titles including local owners', () => {
   const context = remoteFixture();
   const slots = [{ accountKey: 'local', label: 'Local Work', accountKeyAliases: ['old'] }];
   const records = [...context.records, { provider: 'qoder', accountKey: 'local', accountName: 'Native', accountEmail: 'local@example.com', sourceDeviceId: 'local' }];
-  const presentation = { qoder: { labels: { r2: 'Remote Work', local: 'Wrong', owned: 'Wrong' }, order: ['r2', 'r1'] } };
+  const presentation = { qoder: { labels: { r2: 'Remote Work', local: 'Shared Work', owned: 'Shared Work' }, order: ['r2', 'r1'] } };
   const result = applyAccountOrder(records, { qoder: slots }, 'local', presentation);
   assert.deepEqual(result.map(row => row.accountKey), ['owned', 'local', 'unknown-local', 'r2', 'r1']);
   const { accountTitleLabel } = require('../../src/electron/renderer/accountIdentity');
   assert.equal(accountTitleLabel(result[3]), 'Remote Work');
   assert.equal(result[1].accountName, 'Native');
-  assert.equal(accountTitleLabel(result[1]), 'Local Work');
-  assert.equal(accountTitleLabel(result[0]), 'Local Work');
+  assert.equal(accountTitleLabel(result[1]), 'Shared Work');
+  assert.equal(accountTitleLabel(result[0]), 'Shared Work');
   // Unnamed accounts keep their own name and email fields, so the title helper
   // still masks emails; only a user-chosen label becomes the display name.
   const unlabelled = applyAccountOrder([
     { provider: 'qoder', accountKey: 'local', accountName: 'Native' },
     { provider: 'qoder', accountKey: 'r9', accountEmail: 'private@example.com', sourceDeviceId: 'other' }
   ], { qoder: [{ accountKey: 'local' }] }, 'local', presentation);
-  assert.equal(unlabelled[0].accountDisplayName, undefined);
-  assert.equal(accountTitleLabel(unlabelled[0]), 'Native');
+  assert.equal(unlabelled[0].accountDisplayName, 'Shared Work');
+  assert.equal(accountTitleLabel(unlabelled[0]), 'Shared Work');
   assert.equal(unlabelled[1].accountDisplayName, undefined);
   assert.equal(unlabelled[1].accountName, undefined);
   assert.doesNotMatch(accountTitleLabel(unlabelled[1], [unlabelled[1]], { maskEmail: true }), /private@/);
@@ -1134,4 +1134,17 @@ test('presentation labels keep the newest entries at the cap and ignore invalid 
   assert.equal(Object.keys(result).length, 200);
   assert.equal(result.newest, 'New name');
   assert.equal(result.bad, undefined);
+});
+
+test('incoming shared preferences repaint local and remote panel names and order', async () => {
+  const h = harness(), context = remoteFixture();
+  const a = h.slots.find(slot => slot.id === 'a'), b = h.slots.find(slot => slot.id === 'b');
+  context.presentation = { labels: { [a.accountKey]: 'Synced Laptop', r1: 'Synced Remote' }, order: [b.accountKey, a.accountKey, 'r2', 'r1'] };
+  h.panel.update(h.slots, [], context);
+  const localIds = h.panel.element.querySelector('.slot-list').children.filter(node => node.dataset.slotId).map(node => node.dataset.slotId);
+  assert.ok(localIds.indexOf('b') < localIds.indexOf('a'));
+  assert.match(h.row('a').textContent, /Synced Laptop/);
+  assert.match(h.row('remote:r1').textContent, /Synced Remote/);
+  h.click(h.row('a'), 'Rename');
+  assert.equal(h.row('a').querySelector('.slot-rename').value, 'Synced Laptop');
 });

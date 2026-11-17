@@ -126,6 +126,7 @@ function mainActivityHarness(hubMode, externalAgent = false) {
     effectiveHubConfig: () => ({ url: 'https://fixture.invalid' }),
     fetch: async () => ({ ok: true, json: async () => aggregate() }),
     modeQueue: Promise.resolve(), setLatestHubStatsCache() {},
+    getAccountPresentationSync: () => ({ notifyStats() {}, refresh: async () => {} }),
     getSyncContentRuntime: () => ({ notifyStats() {} }), electronPresentationStats: stats => stats,
     getLimitsHistoryStore: () => ({ record() {} }), limitsHistoryController: null,
     migrateCodexAdditionalLimits() {}, scheduleMacWidgetSnapshot() {}, updateEdgeDockCells() {}, pluginRuntime: null,

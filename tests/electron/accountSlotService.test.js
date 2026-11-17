@@ -386,3 +386,41 @@ test('environment identity is reused only for matching credential and site value
   h.settings = { ...h.settings, qoderSite: 'global' };
   assert.equal(h.service.list('qoder').accounts[0].accountKey, 'server-one');
 });
+
+test('local slot labels and moves publish user operations without credential material', async () => {
+  const operations = [];
+  const h = harness({ onPresentation: async batch => operations.push(...batch) });
+  await add(h);
+  const second = await h.service.add('deepseek', { deepseekApiKey: 'SECRET-two' }, 'Second');
+  operations.length = 0;
+  const first = second.accounts[0];
+  await h.service.rename('deepseek', first.id, 'Shared Work');
+  await h.service.move('deepseek', second.accounts[1].id, 'up');
+  assert.deepEqual(operations[0], { provider: 'deepseek', type: 'rename', key: first.accountKey, label: 'Shared Work' });
+  assert.deepEqual(operations[1], { provider: 'deepseek', type: 'order', order: [second.accounts[1].accountKey, first.accountKey] });
+  assert.equal(h.settings.limitAccountPresentation.deepseek.labels[first.accountKey], 'Shared Work');
+  assert.doesNotMatch(JSON.stringify(operations), /SECRET|ApiKey|accountEmail/);
+});
+
+test('a resolved account key carries its chosen name to the shared document', async () => {
+  const operations = [];
+  const h = harness({ onPresentation: async batch => operations.push(...batch) });
+  await add(h);
+  const slot = h.settings.deepseekAccountSlots[0];
+  operations.length = 0;
+  await h.service.resolved('deepseek', slot.id, { accountKey: 'resolved-account' }, slot.values);
+  assert.deepEqual(operations, [{ provider: 'deepseek', type: 'rename', key: 'resolved-account', label: 'First' }]);
+  assert.equal(h.settings.limitAccountPresentation.deepseek.labels['resolved-account'], 'First');
+});
+
+test('a rename answers without waiting for the shared document', async () => {
+  const h = harness({ onPresentation: () => new Promise(() => {}) });
+  await add(h);
+  const slot = h.settings.deepseekAccountSlots[0];
+  const result = await Promise.race([
+    h.service.rename('deepseek', slot.id, 'Offline Hub'),
+    new Promise(resolve => setTimeout(() => resolve('timed out'), 500))
+  ]);
+  assert.notEqual(result, 'timed out');
+  assert.equal(h.settings.limitAccountPresentation.deepseek.labels[result.accounts[0].accountKey], 'Offline Hub');
+});
