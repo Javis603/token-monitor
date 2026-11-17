@@ -146,3 +146,27 @@ test('Alibaba slot removal/disable retires only the last owner of that UID varia
     assert.deepEqual(rt.getSnapshot().providers.map(r => r.region).sort(), ['cn-personal', 'intl']);
   } finally { rt.stop(); }
 });
+
+for (const variant of variants) for (const settingOverride of [false, true]) {
+  test(`Alibaba environment scoped refresh resolves ${variant} from ${settingOverride ? 'settings' : 'env'}`, async () => {
+    const { limitProviderEntry } = require('../../src/shared/limits/registry');
+    const { createAccountSlotFetcher } = require('../../src/shared/limits/accountSlotFetcher');
+    const entry = limitProviderEntry('alibaba');
+    const calls = [];
+    const fetcher = createAccountSlotFetcher({ ...entry, fetchLimits: async (options, deps) => {
+      const region = entry.limits.alibabaVariant(options, deps.env);
+      calls.push({ region, id: deps.accountSlotId });
+      return row(region);
+    } });
+    const sibling = variant === 'cn' ? 'intl' : 'cn';
+    const config = { alibabaSourcePreference: 'web', ...(settingOverride ? { alibabaVariant: variant } : {}),
+      alibabaAccountSlots: [{ id: 'saved', enabled: true, values: { alibabaCookie: 'session=saved', alibabaVariant: sibling } }] };
+    const deps = { env: { ALIBABA_TOKEN_PLAN_COOKIE: 'session=environment', ALIBABA_TOKEN_PLAN_VARIANT: settingOverride ? sibling : variant }, providerRuntimeState: new Map() };
+    const full = await fetcher(config, deps);
+    assert.deepEqual(full.map(item => item.region).sort(), [variant, sibling].sort());
+    calls.length = 0;
+    const result = await fetcher({ ...config, previousLimits: { providers: full }, limitRefreshScope: { provider: 'alibaba', accountKey: 'same-uid', region: variant } }, deps);
+    assert.deepEqual(calls, [{ region: variant, id: 'environment' }]);
+    assert.deepEqual(result.map(item => item.region), [variant]);
+  });
+}

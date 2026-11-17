@@ -236,7 +236,7 @@ function renderNamedApiProfiles(config) {
       }
     });
     accountList.update([
-      ...entries.map(([name, profile]) => ({ ...profile, id: name, accountName: name, accountKey: profile.canonicalAccountKey })),
+      ...entries.map(([name, profile]) => ({ ...profile, id: name, accountName: name, accountKey: profile.accountKey || profile.canonicalAccountKey })),
       ...(hasEnvVar ? [{ id: 'environment', accountName: t('settings.thirdparty.environment'), source: 'environment', canPause: false, removable: false }] : [])
     ], host.localProviderStatuses(providerId));
     updateStatus();

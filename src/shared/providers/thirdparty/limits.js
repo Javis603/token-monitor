@@ -875,6 +875,15 @@ function resolvedAccountKey(account, adapter, quotaPayload) {
   };
 }
 
+// Resolve the same safe identity used before quota retrieval, including paused
+// profiles. The renderer never receives the credentials behind this hash.
+function thirdPartyAccountKey(name, profile) {
+  const normalized = normalizeThirdPartyProfile(profile);
+  return normalized
+    ? resolvedAccountKey({ name, ...normalized }, THIRD_PARTY_ADAPTERS[normalized.adapter], null).accountKey
+    : '';
+}
+
 function configuredAccounts(options = {}, deps = {}) {
   const accounts = [];
   const seen = new Set();
@@ -1099,5 +1108,6 @@ module.exports = {
   normalizeThirdPartyProfile,
   quotaPerUnit,
   readCustomJsonPath,
-  thirdPartyProfileName
+  thirdPartyProfileName,
+  thirdPartyAccountKey
 };

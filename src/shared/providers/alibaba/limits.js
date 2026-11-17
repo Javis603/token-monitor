@@ -1036,7 +1036,7 @@ async function fetchAccountSlotSnapshot(options, deps, collect) {
   return [...local.filter(row => row.source === 'cli' && !row.removed && (source === 'cli' || row.status !== 'notConfigured')), ...await collect({ ...options, alibabaSourcePreference: 'web', previousLimits }, deps)];
 }
 
-module.exports = { accountSlotsForScope: alibabaAccountSlotsForScope, accountSlotRowKey: row => `${row.accountKey}:${row.region || ''}`, fetchAccountSlotSnapshot,
+module.exports = { accountSlotsForScope: (accounts, scope, options, deps) => alibabaAccountSlotsForScope(accounts, scope, alibabaVariant(options, deps.env)), accountSlotRowKey: row => `${row.accountKey}:${row.region || ''}`, fetchAccountSlotSnapshot,
   ALIBABA_FETCH_TIMEOUT_MS,
   ALIBABA_VARIANTS,
   ALIBABA_VARIANT_IDS,

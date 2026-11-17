@@ -2,7 +2,7 @@
 'use strict';
 const { LIMIT_PROVIDER_REGISTRY } = require('../../shared/limits/registry');
 const { normalizeLimitProvider } = require('../../shared/limits/core');
-const PROVIDERS = new Set(LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots || ['codex', 'cursor', 'opencode', 'mimo', 'thirdparty'].includes(entry.id)).map(entry => entry.id));
+const PROVIDERS = new Set(LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots || ['codex', 'cursor', 'opencode', 'mimo', 'thirdparty', 'grok', 'kiro'].includes(entry.id)).map(entry => entry.id));
 const MAX_ENTRIES = 200;
 /** @param {any} value */
 const object = value => value && typeof value === 'object' && !Array.isArray(value);

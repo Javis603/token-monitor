@@ -89,6 +89,7 @@ function redactThirdPartyProfilesForRenderer(profiles) {
   for (const [name, profile] of Object.entries(profiles)) {
     const adapter = thirdPartyLimits.normalizeAdapterId(profile?.adapter);
     out[name] = {
+      accountKey: thirdPartyLimits.thirdPartyAccountKey(name, profile),
       enabled: profile?.enabled !== false,
       adapter,
       baseUrl: thirdPartyLimits.normalizeThirdPartyBaseUrl(profile?.baseUrl, {

@@ -22,3 +22,13 @@ test('remote rename/order write only the non-secret presentation object', async 
   assert.equal((await service.presentation('qoder', 'remote', 'order', [{}])).ok, false);
   assert.deepEqual(settings.qoderAccountSlots, []);
 });
+
+for (const provider of ['grok', 'kiro']) test(`${provider} local rename and order survive persisted normalization`, async () => {
+  let settings = {};
+  const service = createAccountSlotService({ getSettings: () => settings, write: async patch => { settings = { ...settings, ...patch }; },
+    presentationAccounts: async () => ['first', 'second'], env: {} });
+  assert.equal((await service.presentation(provider, 'first', 'rename', 'Work')).ok, true);
+  assert.equal((await service.presentation(provider, 'first', 'order', ['second', 'first'])).ok, true);
+  const restarted = normalizeAccountPresentation(JSON.parse(JSON.stringify(settings.limitAccountPresentation)));
+  assert.deepEqual(restarted[provider], { labels: { first: 'Work' }, order: ['second', 'first'] });
+});

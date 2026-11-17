@@ -18,7 +18,7 @@ const { VENDOR_LABELS, VENDOR_ORDER } = require('../../src/electron/renderer/the
 const { rendererStyles } = require('../helpers/rendererStyles');
 const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_LABELS } = require('../../src/shared/limits/providers');
 
-async function thirdPartyRows(profiles, hasEnvVar = false) {
+async function thirdPartyRows(profiles, hasEnvVar = false, readings = []) {
   const document = require('./accountOwnerDom.fixture.cjs').createDocument();
   const list = document.createElement('div'); list.id = 'thirdpartyProfileList'; document.root.append(list);
   const settings = {};
@@ -26,7 +26,7 @@ async function thirdPartyRows(profiles, hasEnvVar = false) {
   const owner = require('../../src/electron/renderer/limits/providerOwners/thirdparty').create({
     document, initial: {}, getSettings: () => settings, getAccountContext: () => ({ settings }), preserveScroll: fn => fn(),
     t: (key, params) => translate('en', key, params), isSettingsSurfaceVisible: () => true,
-    localProviderStatuses: () => [], limitProviderEnabled: () => true,
+    localProviderStatuses: () => readings, limitProviderEnabled: () => true,
     accountProfileRequests: { begin: () => () => true }, renderAccountShellError() {}, renderSettingsSummaries() {},
     accountShellApi: require('../../src/electron/renderer/limits/accountShell'),
     window: { TokenMonitorLegacyAccountList: require('../../src/electron/renderer/limits/legacyAccountList'),
@@ -388,4 +388,33 @@ test('OpenRouter remains official-only and does not inherit third-party Base URL
   const form = limitAccountFormsForRenderer().find(form => form.id === 'openrouter');
   assert.deepEqual(form.fields.map(field => field.key), ['openrouterApiKey']);
   assert.equal(form.openUrl.url, 'https://openrouter.ai/settings/keys');
+});
+
+test('third-party service DTO retains collector identity through redaction and shared rows', async () => {
+  const limits = require('../../src/shared/providers/thirdparty/limits');
+  const { createThirdpartyAccountService } = require('../../src/electron/providers/thirdparty/accountService');
+  const profiles = {
+    account: { adapter: 'newapi-account', baseUrl: 'https://account.example', accessToken: 'private-access', userId: '42' },
+    token: { adapter: 'newapi-token', baseUrl: 'https://token.example', apiKey: 'private-api' },
+    sub: { adapter: 'sub2api', baseUrl: 'https://sub.example', accessToken: 'private-sub', refreshToken: 'private-refresh', canonicalAccountKey: `sha256:${'a'.repeat(64)}` },
+    custom: { adapter: 'custom', baseUrl: 'https://custom.example', apiKey: 'private-custom', endpointPath: '/balance', authMode: 'bearer', remainingPath: 'balance', currency: 'USD', divisor: 1 }
+  };
+  const service = createThirdpartyAccountService({ getThirdPartyProfiles: () => profiles, env: {} });
+  const { profiles: safe } = await service.getProfiles();
+  for (const [name, profile] of Object.entries(profiles)) {
+    const reading = await limits.fetchThirdPartyAccount({ name, ...limits.normalizeThirdPartyProfile(profile) }, { env: {}, fetch: async () => ({ ok: false, status: 401 }) });
+    assert.ok(safe[name].accountKey, name);
+    assert.equal(safe[name].accountKey, reading.accountKey, name);
+    const { rows } = await thirdPartyRows({ [name]: safe[name] }, false, [{ ...reading, status: 'ok' }]);
+    assert.equal(rows.length, 1);
+    assert.match(rows[0].textContent, /Connected/);
+    const rename = [...rows[0].walk()].find(node => node.dataset.slotAction === 'rename');
+    assert.ok(rename);
+    assert.notEqual(rename.disabled, true);
+    assert.equal(rename.classList.contains('hidden'), false);
+  }
+  assert.equal(safe.sub.accountKey, profiles.sub.canonicalAccountKey);
+  assert.ok(!JSON.stringify(safe).includes('private-'));
+  profiles.sub.enabled = false;
+  assert.equal((await service.getProfiles()).profiles.sub.accountKey, safe.sub.accountKey);
 });
