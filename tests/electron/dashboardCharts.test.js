@@ -7,7 +7,7 @@ const test = require('node:test');
 
 const charts = require('../../src/electron/renderer/usageCharts');
 const {
-  clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,
+  clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily, dailyWindow,
   dailyBarsChart, candleChart, contribHeatmap, statsCards,
   barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths
 } = charts;
@@ -115,6 +115,68 @@ test('clampDaily keeps the last N days, or all for falsy/all', () => {
   assert.equal(clampDaily(daily, 'all').length, 40);
   assert.equal(clampDaily(daily, 0).length, 40);
   assert.deepEqual(clampDaily(daily, 7).map((d) => d.date).slice(0, 1), ['d33']);
+});
+
+test('dailyWindow keeps every calendar day, so zero-usage days stay in the range', () => {
+  const daily = [
+    { date: '2026-06-01', tokens: 10, perClient: { claude: { tokens: 10 } } },
+    { date: '2026-06-04', tokens: 30, perClient: { claude: { tokens: 30 } } }
+  ];
+  const window = dailyWindow(daily, { days: 7, todayKey: '2026-06-07' });
+
+  assert.deepEqual(window.map((day) => day.date), [
+    '2026-06-01', '2026-06-02', '2026-06-03', '2026-06-04', '2026-06-05', '2026-06-06', '2026-06-07'
+  ]);
+  assert.deepEqual(window.map((day) => day.tokens), [10, 0, 0, 30, 0, 0, 0]);
+  assert.equal(window[0].perClient.claude.tokens, 10, 'recorded rows keep their attribution');
+  assert.equal(window[1].perClient, undefined, 'a filled day is an explicit zero, not an empty row');
+});
+
+test('dailyWindow spans the whole recorded run through today, never just the rows', () => {
+  const daily = [{ date: '2026-06-01', tokens: 10 }, { date: '2026-06-02', tokens: 5 }];
+  assert.deepEqual(
+    dailyWindow(daily, { days: 0, todayKey: '2026-06-04' }).map((day) => day.date),
+    ['2026-06-01', '2026-06-02', '2026-06-03', '2026-06-04']
+  );
+  // A device whose local today is ahead of ours keeps its row instead of being cut off.
+  assert.deepEqual(
+    dailyWindow([{ date: '2026-06-09', tokens: 5 }], { days: 0, todayKey: '2026-06-07' }).map((day) => day.date),
+    ['2026-06-09']
+  );
+  assert.deepEqual(dailyWindow([], { days: 7, todayKey: '2026-06-07' }), []);
+});
+
+test('candleChart keeps quiet days out of OHLC without collapsing the calendar', () => {
+  const week = [
+    { date: '2026-06-01', tokens: 0 },
+    { date: '2026-06-02', tokens: 10 },
+    { date: '2026-06-03', tokens: 0 },
+    { date: '2026-06-04', tokens: 30 },
+    { date: '2026-06-05', tokens: 0 },
+    { date: '2026-06-06', tokens: 0 },
+    { date: '2026-06-07', tokens: 0 }
+  ];
+  const options = { width: 100, height: 100, padTop: 0, padRight: 0, padBottom: 0, padLeft: 0, bucketDays: 7 };
+  const model = candleChart(week, options);
+
+  assert.equal(model.candles.length, 1);
+  assert.deepEqual(
+    [model.candles[0].open, model.candles[0].high, model.candles[0].low, model.candles[0].close],
+    [10, 30, 10, 30],
+    'zero days must not drag the bucket low to the baseline'
+  );
+  assert.equal(model.candles[0].key, '2026-06-01');
+  assert.equal(model.candles[0].endKey, '2026-06-07');
+  assert.equal(model.candles[0].flat, false);
+
+  // A bucket with no usage at all keeps its calendar slot but draws no mark.
+  const quiet = candleChart(week.map((day) => ({ ...day, tokens: 0 })), options);
+  assert.equal(quiet.candles.length, 1);
+  assert.deepEqual([quiet.candles[0].open, quiet.candles[0].high, quiet.candles[0].low, quiet.candles[0].close], [0, 0, 0, 0]);
+  assert.equal(quiet.candles[0].flat, true);
+  const quietSvg = candleChartSvg(quiet, { axisLabel: () => '' });
+  assert.doesNotMatch(quietSvg, /candle-body/);
+  assert.match(quietSvg, /class="bar-hover"/);
 });
 
 test('barsChartSvg renders one rect per segment with colorFor fill and a per-bar description', () => {
