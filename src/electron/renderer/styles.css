@@ -3276,6 +3276,12 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   -webkit-app-region: no-drag;
 }
 .select-control-popup.has-search { overflow: hidden; }
+.select-control-hint {
+  padding: 6px 8px;
+  max-height: calc(100vh - 16px);
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
 .select-control-search {
   display: block;
   box-sizing: border-box;
@@ -9490,19 +9496,20 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .slot-remote-note { max-width: 190px; padding: 6px 10px; white-space: normal; }
 /* Connection metadata stays compact; explanations belong to the source menu. */
 .limit-provider-connection-sources { min-width: 0; container-type: inline-size; }
-.connection-source-card { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 12px; background: rgba(var(--overlay-rgb), .025); }
+.connection-source-card { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(var(--overlay-rgb), .025); }
 .connection-source-copy { flex: 1; min-width: 0; }
-.connection-source-copy .settings-item-title { font-size: .6875rem; font-weight: 500; }
+.connection-source-copy .settings-item-title { font-size: .6875rem; font-weight: 500; line-height: 1.4; }
 .connection-source-copy .settings-item-title, .connection-source-copy .settings-item-desc { display: block; }
 .connection-source-copy .settings-item-desc { margin-top: 3px; font-size: .59375rem; line-height: 1.4; }
 .connection-source-actions > .settings-item-desc:empty { display: none; }
 .connection-source-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 0; max-width: 52%; text-align: right; overflow-wrap: anywhere; }
-.connection-source-method { font-size: 0.75rem; font-weight: 500; }
-.connection-source-get { display: inline-flex; align-items: center; justify-content: flex-end; gap: 3px; font: inherit; font-size: 0.6875rem; text-align: right; }
-.connection-source-icon { width: 12px; height: 12px; flex-shrink: 0; background: currentColor; mask: url("icons/actions/external-link.svg") center / contain no-repeat; }
+.connection-source-actions > span.connection-source-method { font-size: .6875rem; font-weight: 500; line-height: 1.4; }
+.connection-source-actions :is(select, .select-control-trigger) { font-size: .6875rem; }
+.connection-source-get { display: inline-flex; align-items: center; justify-content: flex-end; gap: 3px; font: inherit; font-size: .625rem; line-height: 1.4; text-align: right; }
+.connection-source-icon { width: 10px; height: 10px; flex-shrink: 0; background: currentColor; mask: url("icons/actions/external-link.svg") center / contain no-repeat; }
 .connection-source-get:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
 @container (max-width: 300px) {
-  .connection-source-card { align-items: flex-start; flex-direction: column; gap: 8px; padding: 12px; }
+  .connection-source-card { align-items: flex-start; flex-direction: column; gap: 8px; }
   .connection-source-actions { align-items: flex-start; max-width: 100%; text-align: left; }
   .connection-source-get { text-align: left; }
 }
@@ -9518,13 +9525,11 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .limit-provider-account-group > .cursor-settings-details > .cursor-settings-details-inner > .settings-actions:not(:has(> :not(.hidden))) { display: none; }
 .slot-editor-reveal.hidden, .legacy-editor-reveal.hidden { border: 0; }
 .settings-panel .plugin-menu button { height: 28px; min-height: 28px; padding: 0 7px; font-size: .6875rem; line-height: normal; border: 0; border-radius: 5px; }
-.connection-source-actions > .connection-source-method { box-sizing: border-box; min-height: 28px; display: flex; align-items: center; }
 
 .legacy-slot-editor :is(#codexCancelLoginButton, #antigravityCancelLoginButton, #workbuddyCancelLoginButton) { display: none; }
 
 .legacy-slot-editor.is-replacing > .legacy-editor-content { display: none !important; }
 .legacy-slot-editor.is-replacing > .legacy-replacement-content.hidden { display: block !important; }
-.connection-source-actions .select-control-trigger { min-height: 28px; font-size: .75rem; }
 
 /* Account identity, plan and device provenance share one compact rhythm. */
 .slot-row { row-gap: 4px; }

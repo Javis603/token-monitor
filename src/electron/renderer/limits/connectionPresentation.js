@@ -34,6 +34,7 @@
     // not a pair of mutually exclusive choices (DeepSeek, for example).
     const primary = manual.find(source => source.kind === 'apiKey') || (sources.length === 1 ? manual[0] : null);
     const automatic = !primary || alternatives.length > 1 || sources.some(source => !['apiKey', 'web'].includes(source.kind));
+    const showGetLink = onOpen && manual.length > 0;
     const hasComplement = sources.some(source => source.relation === 'complement');
     const mixed = automatic && hasComplement && alternatives.length <= 1 && !(selection && onSelect);
     const automaticSummary = t(selection?.autoLabelKey || (mixed ? 'settings.limits.sources.mixedSummary' : automatic
@@ -91,11 +92,11 @@
         }
       });
       actions.append(select, error);
-    } else {
+    } else if (automatic || !showGetLink) {
       actions.append(node('span', 'connection-source-method', automatic
         ? (mixed ? t('settings.limits.sources.mixed') : autoLabel) : t(primary.labelKey)));
     }
-    if (onOpen && manual.length) {
+    if (showGetLink && onOpen) {
       const link = document.createElement('button');
       link.type = 'button';
       link.className = 'inline-link connection-source-get';

@@ -12902,7 +12902,7 @@ function limitProviderConnectionDetail(id, sources, provider) {
       return state.settings?.[`${id}SourcePreference`] || 'auto';
     },
     label: LIMIT_PROVIDERS.find(entry => entry.id === id).label,
-    onOpen: form?.openUrl ? () => window.tokenMonitor.openExternal(
+    onOpen: id !== 'claude' && form?.openUrl ? () => window.tokenMonitor.openExternal(
       limitAccountPanelsApi.resolveOpenUrl(form, { document, provider: externalProviderForAccount(id) })
     ) : undefined
   });

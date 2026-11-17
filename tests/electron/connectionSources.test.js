@@ -144,6 +144,15 @@ test('connection get link remains available outside the account editor', () => {
   assert.equal(renderConnection('zed', {}, false).nodes.filter(node => node.tag === 'button').length, 1);
 });
 
+test('connection cards keep manual setup links and leave optional Claude Web setup to the account editor', () => {
+  const getLink = id => renderConnection(id).nodes.find(node => node.className === 'inline-link connection-source-get');
+  assert.equal(getLink('claude'), undefined);
+  assert.ok(getLink('deepseek'));
+  assert.ok(getLink('commandcode'));
+  assert.ok(getLink('muse'));
+  assert.ok(getLink('volcengine'));
+});
+
 test('all seven locales explain ordered fallback when the current source is unknown', () => {
   const expected = ['Auto · try sources in order', '自動 · 依序嘗試來源', '自动 · 按顺序尝试来源', '자동 · 소스를 순서대로 시도', '自動 · ソースを順番に試行', 'Automático · probar fuentes en orden', 'Automático · tentar fontes em ordem'];
   assert.deepEqual(Object.keys(MESSAGES).map(locale => translate(locale, 'settings.limits.sources.auto')), expected);
@@ -161,7 +170,7 @@ test('Alibaba displays main CLI-first Cookie fallback without changing its dispa
 
 test('manual API card omits the redundant disclosure and retains the credential setup form', () => {
   const { nodes } = renderConnection('deepseek', { source: 'web', status: 'ok' });
-  assert.equal(nodes.find(n => n.className === 'connection-source-method').textContent, 'API key');
+  assert.ok(!nodes.some(n => n.className === 'connection-source-method'));
   assert.equal(nodes.find(n => n.className === 'settings-item-desc').textContent, 'Paste an API key');
   assert.ok(!nodes.some(n => n.tag === 'details'));
   assert.ok(JSON.stringify(limitAccountFormsForRenderer().find(entry => entry.id === 'deepseek')).includes('settings.deepseek.webTokenNote'));
