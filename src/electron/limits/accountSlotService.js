@@ -266,13 +266,11 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       else if (operation === 'enabled' && typeof value === 'boolean') next[index].enabled = value;
       else return failure('invalidOperation');
       if (operation !== 'remove') next.find(slot => slot.id === id).updatedAt = new Date(now()).toISOString();
-      await commit(entry, next, true, operation !== 'rename' && operation !== 'move');
-      if (operation === 'rename' || operation === 'move') {
-        const accounts = operation === 'move' ? next.map(item => dto(entry).find(slot => slot.id === item.id)) : dto(entry);
+      await commit(entry, next, true, operation !== 'rename');
+      if (operation === 'rename') {
         const slot = slots(entry).find(slot => slot.id === id);
-        const operations = operation === 'rename'
-          ? [{ provider: providerId, type: 'rename', key: slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`), label: slot.label }]
-          : [{ provider: providerId, type: 'order', order: accounts.map(slot => slot.accountKey) }];
+        const operations = [{ provider: providerId, type: 'rename',
+          key: slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`), label: slot.label }];
         const { replayPresentation } = require('./accountPresentationSync');
         await write({ limitAccountPresentation: replayPresentation(getSettings().limitAccountPresentation, operations) });
         publishPresentation(operations);
