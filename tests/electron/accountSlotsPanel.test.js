@@ -1204,3 +1204,31 @@ test('remote device lines reuse session icons before names and follow scoped ove
   h.panel.update(h.slots, [], context);
   check('desktop', 'server', 'renamed-imac');
 });
+
+
+test('explicit shared clear removes an inherited display name without mutating the reading', () => {
+  const reading = { provider: 'qoder', accountKey: 'a', accountName: 'Native name', accountDisplayName: 'Old custom' };
+  const result = applyAccountOrder([reading], { qoder: [{ accountKey: 'a', label: 'Old slot' }] }, '', { qoder: { labels: { a: '' }, order: [] } });
+  assert.equal(result[0].accountDisplayName, undefined);
+  assert.equal(result[0].accountName, 'Native name');
+  assert.equal(reading.accountDisplayName, 'Old custom');
+  assert.equal(applyAccountOrder([reading], {}, '', {})[0].accountDisplayName, 'Old custom', 'absent local label retains remote display metadata');
+});
+
+test('completed browser login cannot close a new draft opened while list refresh is pending', async () => {
+  const started = Promise.withResolvers(), listed = Promise.withResolvers();
+  const h = harness(t, 'copilot', { signIn: async () => ({ ok: true }), cancelSignIn() {}, onLoginStatus: () => () => {} });
+  h.ipc.list = () => { started.resolve(); return listed.promise; };
+  h.panel.openEditor(null);
+  const signingIn = h.click(h.panel.element, t('settings.copilot.signIn'));
+  await started.promise;
+  h.click(h.panel.element.querySelector('.slot-editor'), 'Cancel');
+  h.panel.openEditor(null);
+  const input = h.document.getElementById('copilotSlotDraftcopilotApiTokenInput');
+  input.value = 'new-draft';
+  listed.resolve({ ok: true, accounts: h.slots });
+  await signingIn;
+  assert.equal(h.panel.element.querySelector('.slot-editor').classList.contains('hidden'), false);
+  assert.equal(h.document.getElementById(input.id), input);
+  assert.equal(input.value, 'new-draft');
+});

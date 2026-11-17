@@ -42,8 +42,15 @@
       const owner = slotOwner(slots, row.accountKey, row.accountKeyAliases);
       // Only a name the user chose becomes the display name. Provider names and
       // emails stay in their own fields, so email masking still applies to them.
-      const label = presentationLabel(owner, owner?.accountKey || row.accountKey, presentation[row.provider]);
-      return label ? { ...row, accountDisplayName: label } : row;
+      const key = owner?.accountKey || row.accountKey;
+      const group = presentation[row.provider];
+      const label = presentationLabel(owner, key, group);
+      if (label) return { ...row, accountDisplayName: label };
+      if (Object.hasOwn(group?.labels || {}, key)) {
+        const { accountDisplayName: _previous, ...cleared } = row;
+        return cleared;
+      }
+      return row;
     });
     for (const provider of new Set([...Object.keys(slotsByProvider), ...Object.keys(presentation)])) {
       const slots = slotsByProvider[provider] || [];
@@ -294,7 +301,10 @@
               unsubscribe?.();
               flowId = null;
               cancelLogin = null;
-              if (result.ok) { await run('list'); preserveScroll(closeEditor); }
+              if (result.ok) {
+                await run('list');
+                if (revision === editorRevision) preserveScroll(closeEditor);
+              }
               else verdict.textContent = result.error || tr('failed');
             } catch (_) { if (revision === editorRevision) verdict.textContent = tr('failed'); }
             finally { if (flowId === current) { unsubscribe?.(); flowId = null; cancelLogin = null; } signIn.disabled = false; }
