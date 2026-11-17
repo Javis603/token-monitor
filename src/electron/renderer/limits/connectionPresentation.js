@@ -34,14 +34,15 @@
     // not a pair of mutually exclusive choices (DeepSeek, for example).
     const primary = manual.find(source => source.kind === 'apiKey') || (sources.length === 1 ? manual[0] : null);
     const automatic = !primary || alternatives.length > 1 || sources.some(source => !['apiKey', 'web'].includes(source.kind));
-    const automaticSummary = t(automatic
+    const hasComplement = sources.some(source => source.relation === 'complement');
+    const mixed = automatic && hasComplement && alternatives.length <= 1 && !(selection && onSelect);
+    const automaticSummary = t(mixed ? 'settings.limits.sources.mixedSummary' : automatic
       ? alternatives.length > 1 ? 'settings.limits.sources.auto' : 'settings.limits.sources.detectSummary'
       : primary.kind === 'apiKey' ? 'settings.limits.sources.manualApi' : 'settings.limits.sources.manualWeb');
-    const sourceSummary = sources.map(source => `${t(source.labelKey)} · ${t(source.descriptionKey)}`).join(' · ');
-    const hasComplement = sources.some(source => source.relation === 'complement');
     const complementLabels = sources.filter(source => source.relation === 'complement').map(source => t(source.labelKey));
-    const summaryText = hasComplement ? (selection && onSelect
-      ? [automaticSummary, ...complementLabels].join(' · ') : sourceSummary) : automaticSummary;
+    // Setup instructions belong to the account editor; this card is a summary.
+    const summaryText = selection && onSelect && hasComplement
+      ? [automaticSummary, ...complementLabels].join(' · ') : automaticSummary;
     const summary = node('span', 'settings-item-desc', summaryText);
     copy.append(summary);
     // A fresh alternative reading can annotate Auto without adding another row.
@@ -95,7 +96,7 @@
       actions.append(select, error);
     } else {
       actions.append(node('span', 'connection-source-method', automatic
-        ? (hasComplement && alternatives.length <= 1 ? sources.map(source => t(source.labelKey)).join(' + ') : autoLabel) : t(primary.labelKey)));
+        ? (mixed ? t('settings.limits.sources.mixed') : autoLabel) : t(primary.labelKey)));
     }
     if (onOpen && manual.length) {
       const link = document.createElement('button');

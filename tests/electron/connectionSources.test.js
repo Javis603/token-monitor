@@ -162,7 +162,7 @@ test('Alibaba displays main CLI-first Cookie fallback without changing its dispa
 test('manual API card omits the redundant disclosure and retains the credential setup form', () => {
   const { nodes } = renderConnection('deepseek', { source: 'web', status: 'ok' });
   assert.equal(nodes.find(n => n.className === 'connection-source-method').textContent, 'API key');
-  assert.ok(nodes.some(n => n.textContent.includes('API key') && n.textContent.includes('Web session')));
+  assert.equal(nodes.find(n => n.className === 'settings-item-desc').textContent, 'Paste an API key');
   assert.ok(!nodes.some(n => n.tag === 'details'));
   assert.ok(JSON.stringify(limitAccountFormsForRenderer().find(entry => entry.id === 'deepseek')).includes('settings.deepseek.webTokenNote'));
   assert.ok(!nodes.some(n => /Currently using/.test(n.textContent)));
@@ -176,7 +176,7 @@ test('sourceDetail takes precedence and stale/failed readings never claim a curr
   }
   for (const id of ['cline','factory','opencode','volcengine']) {
     const method = renderConnection(id).nodes.find(n => n.className.split(' ').includes('connection-source-method'));
-    assert.equal(method.tag === 'select' ? method.children[0].textContent : method.textContent, id === 'factory' ? 'API key + Local credentials' : 'Auto detect');
+    assert.equal(method.tag === 'select' ? method.children[0].textContent : method.textContent, id === 'factory' ? 'Auto + manual' : 'Auto detect');
   }
 });
 
@@ -234,9 +234,10 @@ for (const id of ['cursor', 'antigravity', 'workbuddy']) test(`${id} describes c
   const { nodes } = renderConnection(id);
   const entry = limitConnectionSourcesForRenderer().find(entry => entry.id === id);
   const method = nodes.find(node => node.className === 'connection-source-method');
-  for (const source of entry.sources) assert.ok(method.textContent.includes(translate('en', source.labelKey)), source.id);
+  assert.equal(method.textContent, 'Auto + manual');
   assert.ok(!nodes.some(node => node.tag === 'select'));
-  for (const source of entry.sources) assert.ok(nodes.some(node => node.textContent.includes(translate('en', source.descriptionKey))), source.id);
+  const summary = nodes.find(node => node.className === 'settings-item-desc');
+  for (const source of entry.sources) assert.ok(!summary.textContent.includes(translate('en', source.descriptionKey)), source.id);
 });
 
 
