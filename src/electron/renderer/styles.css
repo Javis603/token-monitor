@@ -9422,7 +9422,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-menu button.menu-destructive.confirming:hover, .plugin-menu button.menu-destructive.confirming:focus-visible { color: var(--red); background: rgba(255, 91, 91, 0.2); }
 .plugin-menu button:disabled { opacity: .35; cursor: default; }
 .action-menu-separator { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
-.slot-add { display: block; width: 100%; min-height: 32px; margin: 0; padding: 8px 10px; border: 0; border-radius: 0; background: transparent; color: var(--muted); font: inherit; font-size: .6875rem; text-align: left; cursor: pointer; }
+.slot-add { display: block; width: calc(100% - 16px); min-height: 30px; margin: 6px 8px; padding: 6px; border: 1px dashed var(--line); border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: .6875rem; text-align: center; cursor: pointer; }
 .slot-add:hover { color: var(--text); background: rgba(var(--overlay-rgb), .04); }
 .slot-rename { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; }
 .slot-editor { padding: 14px 12px; border-bottom: 1px solid var(--line); }
