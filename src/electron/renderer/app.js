@@ -12863,7 +12863,7 @@ function limitProviderConnectionDetail(id, sources, provider) {
     },
     label: LIMIT_PROVIDERS.find(entry => entry.id === id).label,
     onOpen: id !== 'claude' && form?.openUrl ? () => window.tokenMonitor.openExternal(
-      limitAccountPanelsApi.resolveOpenUrl(form, { document, provider: externalProviderForAccount(id), settings: state.settings })
+      accountSlotPanels.get(id)?.activeEditorUrl() || limitAccountPanelsApi.resolveOpenUrl(form, { document, provider: externalProviderForAccount(id), settings: state.settings })
     ) : undefined
   });
 }
@@ -16217,8 +16217,8 @@ function trayComposerProviderChoices(currentProviders = [], options = {}) {
 function trayComposerAccountChoices(provider) {
   const stats = desktopSurfaceStats() || {};
   const raw = provider === 'auto'
-    ? desktopLimitProviders().flatMap((entry) => trayLayoutApi.accountOptions(stats, entry.id))
-    : trayLayoutApi.accountOptions(stats, provider);
+    ? desktopLimitProviders().flatMap((entry) => trayLayoutApi.accountOptions(stats, entry.id, t))
+    : trayLayoutApi.accountOptions(stats, provider, t);
   return raw.map((entry) => ({
     value: entry.value,
     label: entry.label,

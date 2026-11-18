@@ -197,6 +197,7 @@
     // to change, so no drag starts until they settle.
     let operationsPending = 0;
     let editorPanel;
+    let editorOpenUrl;
     let editorRevision = 0;
     const error = () => { message.textContent = tr('failed'); };
     const enqueue = operation => {
@@ -303,6 +304,7 @@
       if (!immediate && motion && !motion.call(document.defaultView, '(prefers-reduced-motion: reduce)').matches) setTimeout(clear, 250);
       else clear();
       editorPanel = null;
+      editorOpenUrl = null;
       editorReveal.classList.add('hidden'); editorReveal.inert = true;
     }
     function openEditor(slot) {
@@ -368,9 +370,10 @@
             verdict.textContent = result.ok === false ? tr('failed') : t(`settings.common.${key}`, { provider: label });
           }
         };
+        editorOpenUrl = draftForm.openUrl ? () => forms.resolveOpenUrl(draftForm, { document }) : null;
         editorPanel = forms.createCredentialPanel(draftForm, {
           document, translate: t, onToggle() {}, onClear() {},
-          onOpen: () => openExternal(forms.resolveOpenUrl(draftForm, { document })),
+          onOpen: () => { if (editorOpenUrl) openExternal(editorOpenUrl()); },
           onSave: (_form, values, clearInput) => submit(values, clearInput)
         });
         editor.append(title, ...(!slot ? [name] : []), editorPanel, verdict, choices);
@@ -590,15 +593,35 @@
       const before = list.children[[...list.children].indexOf(anchor) + 1];
       if (before !== editorReveal) list.moveBefore(editorReveal, before || null);
     }
+    function revealAddInput() {
+      const target = editor.querySelector('.credential-input');
+      if (!target) return;
+      target.focus?.({ preventScroll: true });
+      const frame = document.defaultView?.requestAnimationFrame?.bind(document.defaultView);
+      frame?.(() => {
+        const animations = editorReveal.getAnimations?.() || [];
+        void Promise.allSettled(animations.map(animation => animation.finished)).then(() => {
+          if (editorOwner === null && editorToggle.expanded && document.activeElement === target) {
+            const panel = root.closest('.settings-panel')?.getBoundingClientRect();
+            const input = target.getBoundingClientRect();
+            if (panel && (input.bottom > panel.bottom || input.top < panel.top)) {
+              target.scrollIntoView({ block: 'center' });
+            }
+          }
+        });
+      });
+    }
     const add = slotButton('add', () => {
       if (addBlocked()) return;
       if (!onAdd && editorOwner !== undefined) {
-        return preserveScroll(() => editorToggle.setExpanded(!editorToggle.expanded));
+        preserveScroll(() => editorToggle.setExpanded(!editorToggle.expanded));
+        if (editorOwner === null && editorToggle.expanded) revealAddInput();
+        return;
       }
       if (isBusy() && !onAdd) return;
       if (!onAdd) {
         openEditor(null);
-        editor.querySelector('input:not([type="hidden"])')?.focus?.();
+        revealAddInput();
         return;
       }
       try { return Promise.resolve(onAdd()).catch(error); } catch (_) { error(); }
@@ -839,7 +862,7 @@
       const linked = accounts.filter(slot => accountStatus(slot, statusReading(slot, accountReading(slot)),
         slot.source === 'remote' || providerEnabled) === 'connected').length;
       return { total: accounts.length, linked };
-    }, openEditor };
+    }, openEditor, activeEditorUrl: () => editorToggle.expanded ? editorOpenUrl?.() : undefined };
   }
   return { presentationLabel, accountName, accountStatus, slotOwner, applyAccountOrder, createPanel, createEditorToggle };
 });

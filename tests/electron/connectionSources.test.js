@@ -49,7 +49,7 @@ test('headers derive exactly one connection tag regardless of reading state', ()
   assert.ok(render.indexOf('optionsInner.append(limitProviderConnectionDetail') < render.indexOf('optionsInner.append(settingsList)'));
 });
 
-function renderConnection(id, reading = {}, hasOpenControl = true, preference = 'auto') {
+function renderConnection(id, reading = {}, hasOpenControl = true, preference = 'auto', editorUrl) {
   const nodes = [];
   const document = { getElementById: () => hasOpenControl ? {} : null, createTextNode(textContent) { return { textContent }; }, createElement(tag) { const node = { tag, children: [], dataset: {}, textContent: '', append(...children) { this.children.push(...children); }, setAttribute() {}, addEventListener(event, callback) { this[event] = callback; } }; nodes.push(node); return node; } };
   const source = app.slice(app.indexOf('function limitProviderConnectionDetail('), app.indexOf('// Single entry point for the provider options'));
@@ -57,7 +57,7 @@ function renderConnection(id, reading = {}, hasOpenControl = true, preference = 
   const form = limitAccountFormsForRenderer().find(entry => entry.id === id);
   const state = { settings: { limitConnectionSources: limitConnectionSourcesForRenderer(), [`${id}SourcePreference`]: preference } };
   const saves = [];
-  const context = { state, saveSettings: async patch => { saves.push(patch); Object.assign(state.settings, patch); }, LIMIT_PROVIDERS: [{ id, label: id === 'zed' ? 'Zed' : id }], document, t: (key, params) => translate('en', key, params), limitAccountForm: () => form,
+  const context = { state, accountSlotPanels: new Map([[id, { activeEditorUrl: () => editorUrl }]]), saveSettings: async patch => { saves.push(patch); Object.assign(state.settings, patch); }, LIMIT_PROVIDERS: [{ id, label: id === 'zed' ? 'Zed' : id }], document, t: (key, params) => translate('en', key, params), limitAccountForm: () => form,
     externalProviderForAccount: () => reading, limitAccountPanelsApi: require('../../src/electron/renderer/limits/accountPanels'),
     window: { TokenMonitorConnectionPresentation: require('../../src/electron/renderer/limits/connectionPresentation'), tokenMonitor: { openExternal: url => opened.push(url) } } };
   vm.runInNewContext(source + '\nthis.renderConnection = limitProviderConnectionDetail;', context);
@@ -139,6 +139,13 @@ test('Grok shows the selected collection source without duplicating account summ
   const web = LIMIT_PROVIDER_ACCOUNTS.find(entry => entry.id === 'grok').sources.find(source => source.id === 'web');
   assert.equal(render(null, 'web')[0]?.textContent, translate('zh-TW', web.labelKey));
   assert.equal(render({}).length, 0);
+});
+
+test('Alibaba connection link follows the open account editor', () => {
+  const url = 'https://modelstudio.console.alibabacloud.com/ap-southeast-1/?tab=plan#/efm/subscription/token-plan/personal';
+  const rendered = renderConnection('alibaba', {}, true, 'auto', url);
+  rendered.nodes.find(node => node.className === 'inline-link connection-source-get').click();
+  assert.deepEqual(rendered.opened, [url]);
 });
 
 test('connection get link remains available outside the account editor', () => {

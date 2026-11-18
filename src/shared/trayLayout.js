@@ -673,12 +673,14 @@
   function matchesSelection(provider, key) {
     return selectionKey(provider) === key || clean(provider.accountKey) === key;
   }
-  function accountLabel(provider, siblings) {
+  function accountLabel(provider, siblings, translate) {
     if (providerId(provider) === 'alibaba' && provider?.region) {
       const plan = /-personal$/.test(provider.region) ? 'Personal' : 'Team';
       const site = provider.region.startsWith('intl') ? 'International' : 'China mainland';
       const name = clean(provider.accountDisplayName || provider.accountName || provider.accountEmail);
-      return [name, `${site} · ${plan}`].filter(Boolean).join(' · ');
+      const labelKey = { cn: 'planCn', intl: 'planIntl', 'cn-personal': 'planCnPersonal', 'intl-personal': 'planIntlPersonal' }[provider.region];
+      const localized = labelKey && translate?.(`settings.alibaba.${labelKey}`);
+      return [name, localized || `${site} · ${plan}`].filter(Boolean).join(' · ');
     }
     const email = clean(provider?.accountEmail);
     const name = clean(provider?.accountName);
@@ -703,7 +705,7 @@
     ) || providerId(provider);
   }
 
-  function accountOptions(stats, selectedProvider) {
+  function accountOptions(stats, selectedProvider, translate) {
     const id = clean(selectedProvider, 80).toLowerCase();
     const rows = providersFromStats(stats).filter((provider) => providerId(provider) === id);
     const seen = new Set();
@@ -712,7 +714,7 @@
       const key = selectionKey(provider) || `${id}:${accountLabel(provider, rows)}`;
       if (!key || seen.has(key)) continue;
       seen.add(key);
-      options.push({ value: key, label: accountLabel(provider, rows), provider });
+      options.push({ value: key, label: accountLabel(provider, rows, translate), provider });
     }
     return options;
   }

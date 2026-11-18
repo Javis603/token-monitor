@@ -59,11 +59,6 @@ function renderCodexAccounts() {
   if (!statusEl || !listEl || !errorEl) return;
 
   const accounts = state.settings?.codexManagedAccounts || [];
-  const enabledCount = accounts.filter(account => account.enabled !== false).length;
-  const statusText = accounts.length === 0
-    ? t('settings.codex.notConfigured')
-    : t('settings.opencode.connected', { linked: enabledCount, total: accounts.length });
-  accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.codexAccountError });
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
       sourceLabel: (_account, reading) => {
         const source = reading?.source === 'rpc' ? reading.sourceDetail : reading?.source;
@@ -78,6 +73,11 @@ function renderCodexAccounts() {
   });
   // Codex accountLabel is a plan type, not a user-chosen account name.
   accountList.update(accounts.map(({ accountLabel, ...account }) => ({ ...account, planLabel: accountLabel })), host.localProviderStatuses('codex'));
+  const summary = accountList.summary();
+  accountShellApi.render({
+    status: statusEl, error: errorEl, errorText: state.codexAccountError,
+    statusText: summary.total ? t('settings.opencode.connected', summary) : t('settings.codex.notConfigured')
+  });
   renderSettingsSummaries();
 }
 

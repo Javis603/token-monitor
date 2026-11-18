@@ -8,7 +8,7 @@ const legacyList = require('../../src/electron/renderer/limits/legacyAccountList
 const accountShellApi = require('../../src/electron/renderer/limits/accountShell');
 const renderer = path.resolve(__dirname, '../../src/electron/renderer');
 const flush = () => new Promise(resolve => setImmediate(resolve));
-function harness(provider, overrides = {}) {
+function harness(provider, overrides = {}, context = {}) {
   const document = createDocument();
   const source = fs.readFileSync(path.join(renderer, `limits/providerOwners/${provider}.js`), 'utf8');
   const nodes = {};
@@ -34,8 +34,8 @@ function harness(provider, overrides = {}) {
   let owner;
   const host = {
     document, providerLabel: `Display ${provider}`, initial: { cursorAccount: { status: { accounts: [] }, busy: false }, codexWorkspaceChoices: [] },
-    getSettings: () => settings, getAccountContext: () => ({ settings }), preserveScroll: fn => fn(),
-    t: (key, params) => key === 'settings.slots.add' ? `＋ Add ${params.provider} account` : key,
+    getSettings: () => settings, getAccountContext: () => ({ settings, ...context }), preserveScroll: fn => fn(),
+    t: (key, params) => key === 'settings.slots.add' ? `＋ Add ${params.provider} account` : key === 'settings.opencode.connected' ? `${params.linked}/${params.total}` : key,
     window: { TokenMonitorLegacyAccountList: legacyList, tokenMonitor: { [provider]: api } },
     isSettingsSurfaceVisible: () => true, localProviderStatuses: () => [], limitProviderEnabled: () => true,
     accountShellApi, setCursorStatusText() {}, setCursorCheckboxesEnabled() {}, setSettingsSectionExpanded() {}, accountShellErrors: {},
@@ -53,6 +53,13 @@ function harness(provider, overrides = {}) {
     async render() { await owner[render](); await flush(); },
     add: () => document.root.querySelector('.slot-add') };
 }
+test('Codex settings summary counts connected remote accounts without a local login', async () => {
+  const records = [{ provider: 'codex', sourceDeviceId: 'peer', accountKey: 'remote-codex', status: 'ok' }];
+  const h = harness('codex', {}, { records, localDeviceId: 'local' });
+  await h.render();
+  assert.equal(h.nodes.codexAccountStatus.textContent, '1/1');
+});
+
 for (const provider of ['codex', 'claude', 'cursor', 'antigravity', 'mimo', 'workbuddy', 'minimax', 'opencode', 'thirdparty']) {
   test(`${provider}: the first account uses the visible common add footer and provider display label`, async () => {
     const h = harness(provider);

@@ -1038,6 +1038,9 @@ test('tray selection distinguishes Alibaba plans sharing an account key', () => 
   const options = accountOptions(snapshot, 'alibaba');
   assert.equal(options.length, 2);
   assert.notEqual(options[0].label, options[1].label);
+  const { translate } = require('../../src/electron/renderer/i18n');
+  const localized = accountOptions(snapshot, 'alibaba', key => translate('zh-TW', key));
+  assert.deepEqual(localized.map(option => option.label), ['中國站 · 團隊版', '中國站 · 個人版']);
   for (const [index, row] of [team, personal].entries()) {
     const selected = selectSource(snapshot, {
       provider: 'alibaba', accountMode: 'specific', accountKey: options[index].value, window: 'primary'

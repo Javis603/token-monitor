@@ -520,8 +520,6 @@ test('OpenCode profile enable toggles refresh only the affected limits lane', ()
 test('Codex account panel supports per-account enable toggles without showing timestamps', () => {
   const app = readRendererOwner('codex');
   const body = functionBody(app, 'renderCodexAccounts', 'refreshCodexAccounts');
-  assert.match(body, /const enabledCount = accounts\.filter\(account => account\.enabled !== false\)\.length;/);
-  assert.match(body, /t\('settings\.opencode\.connected', \{ linked: enabledCount, total: accounts\.length \}\)/);
   assert.doesNotMatch(body, /t\('settings\.codex\.accountMany'/);
   assert.match(body, /TokenMonitorLegacyAccountList\.create/);
   assert.match(body, /enabled: \(account, value\) => window\.tokenMonitor\.codex\.setAccountEnabled\(account\.id, value\)/);
