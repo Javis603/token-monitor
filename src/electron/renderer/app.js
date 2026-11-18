@@ -1005,7 +1005,9 @@ function renderSettingsSummaries() {
   if (!isSettingsSurfaceVisible()) return;
   for (const section of SETTINGS_SECTION_IDS) {
     const el = els[`${section}SettingsSummary`];
-    if (el) el.textContent = settingsSectionSummary(section);
+    if (!el) continue;
+    const summary = settingsSectionSummary(section);
+    if (el.textContent !== summary) el.textContent = summary;
   }
 }
 
@@ -16647,8 +16649,8 @@ function setThirdPartyAdapterFields(...args) { return legacyAccountOwners.thirdp
 
 
 function setCursorStatusText(el, text) {
-  el.textContent = text;
-  el.setAttribute('aria-label', text);
+  if (el.textContent !== text) el.textContent = text;
+  if (el.getAttribute('aria-label') !== text) el.setAttribute('aria-label', text);
 }
 
 

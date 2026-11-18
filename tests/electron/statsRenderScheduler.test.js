@@ -373,6 +373,30 @@ test('heavy render roots reject work for an inactive surface', () => {
   assert.match(body('renderNamedApiProfiles', '\nfunction renderOpenRouterProfiles('), /getProfiles\(\)\.then\((?:\(\{[^}]*\}\)|result) => \{\s*(?:const \{[^}]*\} = result;\s*)*if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
 });
 
+test('settings summary updates keep identical text nodes during a stats render', () => {
+  let text = 'AI Tool Limits';
+  let summary = text;
+  let writes = 0;
+  const summaryElement = {
+    get textContent() { return text; },
+    set textContent(next) { text = next; writes++; }
+  };
+  const renderSettingsSummaries = rendererFunction('renderSettingsSummaries', '\nfunction formatNumber(', {
+    isSettingsSurfaceVisible: () => true,
+    SETTINGS_SECTION_IDS: ['limits'],
+    els: { limitsSettingsSummary: summaryElement },
+    settingsSectionSummary: () => summary
+  });
+  renderSettingsSummaries();
+  assert.equal(writes, 0);
+
+  summary = '2 enabled';
+  renderSettingsSummaries();
+  renderSettingsSummaries();
+  assert.equal(text, '2 enabled');
+  assert.equal(writes, 1);
+});
+
 test('entering Status does not depend on the panel class from the previous render', () => {
   const serviceStatusSurfaceVisible = rendererFunction(
     'serviceStatusSurfaceVisible',
