@@ -87,6 +87,7 @@ test('visible Settings follows quota pushes and defers hidden updates without po
   let settingsVisible = true, hidden = false;
   h.context.visibleStatsSurface = () => hidden ? null : 'main';
   h.context.isSettingsSurfaceVisible = () => settingsVisible;
+  h.context.preserveSettingsPanelScroll = callback => callback();
   const localStart = app.indexOf('function localDeviceLimitsProviders()');
   vm.runInContext(app.slice(localStart, app.indexOf('function localProviderStatuses(', localStart)), h.context);
   const providerStart = app.indexOf('function localProviderStatuses(');

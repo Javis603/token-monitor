@@ -117,3 +117,42 @@ test('scroll anchoring follows the visible section order with plugins after sync
   const reverse = scrollAnchorHarness({ sectionIds, settingsSections: { plugins: true } });
   assert.equal(reverse.api.shouldAnchorSettingsScroll('sync', true), false);
 });
+
+test('a batch of settings panel updates only restores scroll when it moves', () => {
+  const source = app.slice(app.indexOf('function preserveSettingsPanelScroll('), app.indexOf('\nfunction setSyncContentEditError('));
+  let scrollTop = 400;
+  const writes = [];
+  const frames = [];
+  const panel = {
+    classList: { contains: () => false },
+    get scrollTop() { return scrollTop; },
+    set scrollTop(value) { writes.push(value); scrollTop = value; },
+    scrollLeft: 0
+  };
+  const context = {
+    els: { settingsPanel: panel },
+    isRendererWindowHidden: () => false,
+    preservingSettingsPanelScroll: false,
+    settingsScrollInteractionRevision: 0,
+    requestAnimationFrame: callback => frames.push(callback)
+  };
+  vm.runInNewContext(source, context);
+  const preserve = context.preserveSettingsPanelScroll;
+
+  preserve(() => {
+    preserve(() => {});
+    preserve(() => { scrollTop = 380; });
+    assert.equal(scrollTop, 380, 'inner renders do not interrupt the batch');
+  });
+  assert.deepEqual(writes, [400]);
+  assert.equal(frames.length, 1);
+  frames.shift()();
+  assert.deepEqual(writes, [400], 'no write when the panel stays put');
+
+  preserve(() => {});
+  assert.deepEqual(writes, [400]);
+  context.settingsScrollInteractionRevision += 1;
+  scrollTop = 430;
+  frames.shift()();
+  assert.equal(scrollTop, 430, 'new wheel input wins over a deferred restoration');
+});

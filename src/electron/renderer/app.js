@@ -849,6 +849,7 @@ const SETTINGS_SCROLL_ANCHOR_MS = 360;
 const SETTINGS_SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Tab']);
 let settingsScrollAnchorFrame = null;
 let settingsScrollInteractionRevision = 0;
+let preservingSettingsPanelScroll = false;
 
 function cancelSettingsScrollAnchor() {
   if (settingsScrollAnchorFrame === null) return;
@@ -4748,7 +4749,8 @@ function refreshAccountSlotPanels() {
     const result = await window.tokenMonitor.limits.accountSlots.list(id);
     if (result.ok) accountSlotLists[id] = result.accounts;
   })).then(() => {
-    if (previousSlotLists !== JSON.stringify(accountSlotLists)) render();
+    if (previousSlotLists === JSON.stringify(accountSlotLists)) return;
+    render();
     for (const [id, panel] of accountSlotPanels) {
       panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
         limitAccountContext(id));
@@ -13405,17 +13407,24 @@ async function showAllViews() {
 }
 
 function preserveSettingsPanelScroll(callback) {
-  if (isRendererWindowHidden()) return callback();
+  // A stats refresh can update many account panels in one synchronous pass.
+  if (preservingSettingsPanelScroll || isRendererWindowHidden()) return callback();
   const panel = els.settingsPanel;
   if (!panel || panel.classList.contains('hidden')) return callback();
   const scrollTop = panel.scrollTop;
   const scrollLeft = panel.scrollLeft;
   const interactionRevision = settingsScrollInteractionRevision;
   const restore = () => {
-    panel.scrollTop = scrollTop;
-    panel.scrollLeft = scrollLeft;
+    if (panel.scrollTop !== scrollTop) panel.scrollTop = scrollTop;
+    if (panel.scrollLeft !== scrollLeft) panel.scrollLeft = scrollLeft;
   };
-  const result = callback();
+  preservingSettingsPanelScroll = true;
+  let result;
+  try {
+    result = callback();
+  } finally {
+    preservingSettingsPanelScroll = false;
+  }
   restore();
   if (typeof requestAnimationFrame === 'function') {
     requestAnimationFrame(() => {
@@ -15233,20 +15242,22 @@ function renderStatsUpdate() {
   if (surface !== 'main') return;
   render();
   if (!isSettingsSurfaceVisible()) return;
-  renderCodexAccounts();
-  renderMimoStatus();
-  renderWorkbuddyStatus();
-  renderSettingsSummaries();
-  renderLimitProviderCheckboxes();
-  renderToolPreferences();
-  renderWslPanel();
-  updateMinimaxApiKeysStatus();
-  updateThirdPartyProfilesStatus();
-  renderExternalProviderStatus('volcengine');
-  renderExternalProviderStatus('kimi');
-  for (const form of state.settings?.limitAccountForms || []) {
-    if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
-  }
+  preserveSettingsPanelScroll(() => {
+    renderCodexAccounts();
+    renderMimoStatus();
+    renderWorkbuddyStatus();
+    renderSettingsSummaries();
+    renderLimitProviderCheckboxes();
+    renderToolPreferences();
+    renderWslPanel();
+    updateMinimaxApiKeysStatus();
+    updateThirdPartyProfilesStatus();
+    renderExternalProviderStatus('volcengine');
+    renderExternalProviderStatus('kimi');
+    for (const form of state.settings?.limitAccountForms || []) {
+      if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
+    }
+  });
   signalContentReady();
 }
 

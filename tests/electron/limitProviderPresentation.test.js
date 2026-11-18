@@ -2309,6 +2309,7 @@ test('hidden settings rerenders skip settings panel scroll DOM', () => {
       isRendererWindowHidden: () => true,
       metrics,
       panel,
+      preservingSettingsPanelScroll: false,
       requestAnimationFrame: () => { throw new Error('hidden render scheduled a frame'); },
       settingsScrollInteractionRevision: 0
     }
@@ -3825,6 +3826,7 @@ test('deleting a subscription preserves the settings scroll position and renders
     els: { settingsPanel: panel },
     isRendererWindowHidden: () => false,
     panel,
+    preservingSettingsPanelScroll: false,
     settingsScrollInteractionRevision: 0,
     requestAnimationFrame(callback) {
       frames.push(callback);

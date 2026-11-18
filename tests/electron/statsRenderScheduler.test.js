@@ -303,6 +303,7 @@ test('a stats update repaints main and the visible Settings overlay', () => {
     state: { settings: { limitAccountForms: [{ id: 'typesafe' }] } },
     limitProviderAccountGroup: () => true,
     isSettingsSurfaceVisible: () => true,
+    preserveSettingsPanelScroll(callback) { calls.push('settings-scroll-batch'); return callback(); },
     renderFloatingBubbleContent: () => calls.push('bubble'),
     signalContentReady: () => calls.push('ready')
   };
@@ -317,6 +318,7 @@ test('a stats update repaints main and the visible Settings overlay', () => {
   renderStatsUpdate();
 
   assert.deepEqual(calls.slice(0, 2), ['connection:main', 'main']);
+  assert.equal(calls.filter(call => call === 'settings-scroll-batch').length, 1);
   assert.ok(calls.indexOf('renderSettingsSummaries') > calls.indexOf('main'));
   assert.ok(calls.indexOf('renderMimoStatus') > calls.indexOf('main'));
   assert.equal(calls.at(-1), 'ready');
