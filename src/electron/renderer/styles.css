@@ -4169,8 +4169,9 @@ html.is-windows .settings-panel select option {
 .home-session-meta .home-list-sub { min-width: 0; }
 .home-session-cache { margin-left: auto; flex: 0 0 auto; color: var(--muted); font-size: 0.625rem; white-space: nowrap; }
 .home-session-context { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; margin-left: auto; color: var(--muted); font-size: 0.625rem; }
-.home-session-context-meter { width: 16px; height: 3px; overflow: hidden; border-radius: 2px; background: rgba(var(--overlay-rgb), 0.18); }
+.home-session-context-meter { flex: 0 0 16px; width: 16px; height: 3px; overflow: hidden; border-radius: 2px; background: rgba(var(--overlay-rgb), 0.18); }
 .home-session-context-fill { display: block; width: 100%; height: 100%; background: rgba(var(--overlay-rgb), 0.5); transform: scaleX(var(--bar-scale, 0)); transform-origin: left center; }
+.home-session-context-value { min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
 .home-session-context[data-tone="caution"] { color: var(--yellow); }
 .home-session-context[data-tone="caution"] .home-session-context-fill { background: var(--yellow); }
 .home-session-context[data-tone="low"] { color: var(--orange); }
@@ -5084,11 +5085,17 @@ html.is-windows .settings-panel select option {
   white-space: nowrap;
 }
 .row-context-meter {
+  flex: 0 0 20px;
   width: 20px;
   height: 3px;
   overflow: hidden;
   border-radius: 2px;
   background: rgba(var(--sunken-rgb), 0.46);
+}
+.row-context-meter:not(.hidden) + .row-context-value {
+  min-width: 3ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .row-context-fill {
