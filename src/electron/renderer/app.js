@@ -16916,6 +16916,17 @@ function renderExternalProviderStatus(providerName) {
     const fixedForm = document.getElementById('volcengineFixedCredentialForm');
     fixedForm?.classList.toggle('hidden', !retained);
     if (fixedForm && !retained) fixedForm.open = false;
+    if (fixedForm && retained) {
+      for (const key of ['volcengineRegion', 'volcengineAgentRegion']) {
+        const input = document.getElementById(`${key}Input`);
+        const region = state.settings[key] || '';
+        // Follow stored settings until the user edits the value, including
+        // intentionally clearing it to fall back to the provider's region.
+        const unchanged = input.value === (input.defaultValue || '');
+        input.defaultValue = region;
+        if (unchanged) input.value = region;
+      }
+    }
   }
   if (!retained && statusEl && limitAccountForm(providerName)?.accountSlots && !limitAccountForm(providerName)?.accountSlotOwner) {
     const summary = accountSlotPanels.get(providerName)?.summary();

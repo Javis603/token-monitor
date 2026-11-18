@@ -33,7 +33,8 @@ test('Volcengine retains controls to replace and clear a fixed key backed by an 
   const { createCredentialCommands } = require('../../src/electron/limits/credentialCommands');
   const store = fixture(t, { volcengineAccessKeyId: 'AKLT-before-fixture' });
   const env = { VOLCENGINE_SECRET_ACCESS_KEY: 'environment-fixture-secret' };
-  let settings = migrateAccountSlots(store, {}, Date.now, env);
+  let settings = { ...migrateAccountSlots(store, {}, Date.now, env),
+    volcengineRegion: 'cn-shanghai', volcengineAgentRegion: 'cn-guangzhou' };
   const service = createAccountSlotService({ getSettings: () => settings, env });
   assert.deepEqual(service.list('volcengine').accounts, []);
   assert.equal(accountStatusProjection(settings, env).volcengineFixedCredentialsStored, true);
@@ -62,7 +63,8 @@ test('Volcengine retains controls to replace and clear a fixed key backed by an 
     .filter(node => node.dataset.credentialForm === 'volcengine' && node.dataset.byField);
   const app = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
   const form = limitAccountFormsForRenderer().find(({ id }) => id === 'volcengine');
-  const state = { settings: { ...accountStatusProjection(settings, env), limitAccountForms: [form] }, accountPanelMessages: {} };
+  const state = { settings: { ...accountStatusProjection(settings, env), limitAccountForms: [form],
+    volcengineRegion: settings.volcengineRegion, volcengineAgentRegion: settings.volcengineAgentRegion }, accountPanelMessages: {} };
   const context = {
     document, state, limitAccountPanelsApi, limitAccountForm: () => form,
     LIMIT_PROVIDERS: [{ id: 'volcengine', label: 'Volcengine' }],
@@ -97,14 +99,41 @@ test('Volcengine retains controls to replace and clear a fixed key backed by an 
   context.saveAccountCredential = async (id, values) => { saved = await commands.saveCredential(id, values); return saved; };
   await document.getElementById('volcengineCredentialSubmit').click();
   assert.equal(saved.verdict, 'valid');
-  assert.ok(signed.some(header => header?.includes('Credential=AKLT-after-fixture/')));
+  assert.ok(signed.some(header => /Credential=AKLT-after-fixture\/[^/]+\/cn-shanghai\//.test(header)));
+  assert.equal(settings.volcengineRegion, 'cn-shanghai');
+  assert.equal(settings.volcengineAgentRegion, 'cn-guangzhou');
   assert.equal(store.settingsCredentials().volcengineAccessKeyId, 'AKLT-after-fixture');
   assert.equal(store.settingsCredentials().volcengineSecretAccessKey, undefined);
+  document.getElementById('volcengineAgentRegionInput').value = '';
+  context.renderExternalProviderStatus('volcengine');
+  await document.getElementById('volcengineCredentialSubmit').click();
+  assert.equal(settings.volcengineAgentRegion, '');
   assert.equal((await document.getElementById('volcengineLogoutButton').click()).cleared, true);
   assert.equal(retained.classList.contains('hidden'), true);
   assert.equal(accountStatusProjection(settings, env).volcengineFixedCredentialsStored, false);
   assert.equal(env.VOLCENGINE_SECRET_ACCESS_KEY, 'environment-fixture-secret');
   assert.equal(store.settingsCredentials().volcengineAccessKeyId, undefined);
+});
+
+test('Volcengine rejects a retained Coding key even when the edited Agent key has no quota', async () => {
+  const { createCredentialCommands } = require('../../src/electron/limits/credentialCommands');
+  const settings = { volcengineAccessKeyId: 'AKLT-before-fixture' };
+  const commands = createCredentialCommands({
+    allowRetainedFixedCredentials: true,
+    getSettings: () => settings,
+    env: { VOLCENGINE_SECRET_ACCESS_KEY: 'environment-coding-fixture', VOLCENGINE_AGENT_SECRET_ACCESS_KEY: 'environment-agent-fixture' },
+    applySettingsPatch: () => assert.fail('a rejected key must not replace the saved credential'),
+    probeDeps: () => ({ fetch: async (_url, options) => {
+      const authorization = options.headers.Authorization ?? options.headers.authorization;
+      const ok = authorization.includes('Credential=AKLT-agent-fixture/');
+      return { ok, status: ok ? 200 : 403, json: async () => ({ Result: {} }) };
+    } })
+  });
+  const result = await commands.saveCredential('volcengine', {
+    volcengineAccessKeyId: 'AKLT-rejected-fixture', volcengineAgentAccessKeyId: 'AKLT-agent-fixture'
+  });
+  assert.equal(result.saved, false);
+  assert.equal(result.status, 'unauthorized');
 });
 
 test('Volcengine migration retains a complete Coding pair with a split Agent pair', async t => {

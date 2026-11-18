@@ -749,7 +749,7 @@ async function probeRetainedCredentials(settings, draft, deps) {
   const results = await Promise.allSettled(jobs);
   const rows = results.map(result => {
     if (result.status === 'rejected') return { status: result.reason?.status || 'unavailable' };
-    const candidates = Array.isArray(result.value) ? result.value : [result.value];
+    const candidates = (Array.isArray(result.value) ? result.value : [result.value]).filter(Boolean);
     return candidates.find(row => row.status === 'ok') || candidates[0] || { status: 'unavailable' };
   });
   return rows.find(row => row.status === 'unauthorized' || row.status === 'notConfigured')

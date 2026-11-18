@@ -1661,7 +1661,7 @@ test('account credentials persist through the settings:update body, not a second
   const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), patchStart);
   assert.match(updateHandler, /applySettingsPatch\(patch, \(refresh\) => \{ dotsVisibilityApplied = refresh; \}\)/);
   assert.match(updateHandler, /await dotsVisibilityApplied;/);
-  assert.match(main, /createCredentialCommands\(\{\s*getSettings: \(\) => settings,\s*applySettingsPatch: applyCredentialSettingsPatch,\s*probeDeps: credentialProbeDeps\s*\}\)/);
+  assert.match(main, /createCredentialCommands\(\{\s*allowRetainedFixedCredentials: true,\s*getSettings: \(\) => settings,\s*applySettingsPatch: applyCredentialSettingsPatch,\s*probeDeps: credentialProbeDeps\s*\}\)/);
   const credentialPatch = functionBody(main, 'applyCredentialSettingsPatch', 'applySettingsPatch');
   assert.match(credentialPatch, /applySettingsPatch\(patch, undefined, \{/);
   assert.match(credentialPatch, /ensureLimitProvider: provider/);
