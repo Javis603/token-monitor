@@ -2772,7 +2772,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 }
 .limit-provider-actions {
   display: flex;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
   max-width: 58%;
   align-items: center;
@@ -2782,7 +2782,6 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .limit-provider-actions > .cursor-status-pill {
   flex: 0 1 auto;
   white-space: normal;
-  overflow-wrap: anywhere;
   text-align: center;
 }
 .limit-provider-actions > .cursor-status-pill[data-local-scope]::before {
@@ -9423,7 +9422,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .slot-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) minmax(0, max-content) 28px; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .slot-copy { min-width: 0; }
 .slot-copy .slot-detail { margin: 4px 0 0; font-size: .59375rem; line-height: 1.4; }
-.slot-name { overflow-wrap: anywhere; white-space: normal; font-size: .6875rem; font-weight: 500; color: var(--text); }
+.slot-name { overflow-wrap: anywhere; white-space: normal; text-wrap: balance; font-size: .6875rem; font-weight: 500; color: var(--text); }
 .slot-name-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .slot-name-line .slot-name { min-width: 0; }
 .slot-name-line.is-editing .slot-name { flex: 1; }

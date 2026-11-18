@@ -28,6 +28,20 @@
       || (slot.source === 'environment' ? t('settings.limits.sources.env') : '')
       || t('settings.slots.account', { fingerprint: slot.fingerprint });
   }
+  function renderAccountName(document, node, name) {
+    if (node.textContent === name) return;
+    const email = /^([^\s@]+)(@[^\s@]+)(.*)$/.exec(name);
+    if (!email) {
+      node.textContent = name;
+      return;
+    }
+    // Prefer email boundaries when there is room. Keep the text intact for
+    // assistive technology and the rename placeholder.
+    const parts = [...email[1].split(/(?<=[._+-])/), email[2] + email[3]];
+    node.replaceChildren(...parts.flatMap((part, index) => [
+      ...(index ? [document.createElement('wbr')] : []), document.createTextNode(part)
+    ]));
+  }
   // Plans describe the subscription, never the account's identity or rename.
   function accountPlan(provider, slot, reading) {
     const row = reading || { provider, planLabel: slot.planLabel };
@@ -209,7 +223,10 @@
       const task = operationLane.then(async () => {
         try {
           const result = await operation();
-          if (result.ok === false) { error(); return result; }
+          if (result.ok === false) {
+            if (result.errorCode !== 'slotLimit') error();
+            return result;
+          }
           if (result.presentation) presentation = result.presentation[form.id] || {};
           if (result.accounts) {
             slots = result.accounts;
@@ -354,7 +371,9 @@
             credentialInput?.setAttribute('aria-describedby', verdict.id);
             credentialInput?.focus();
           }
-          if (result.verdict === 'duplicate') {
+          if (result.errorCode === 'slotLimit') {
+            verdict.textContent = tr('slotLimit', { limit: result.limit });
+          } else if (result.verdict === 'duplicate') {
             verdict.textContent = tr('duplicate');
           } else if (result.verdict === 'differentAccount') {
             verdict.textContent = tr('differentAccount');
@@ -793,7 +812,7 @@
         const remote = slot.source === 'remote';
         if (!item.editing) {
           const name = accountIdentity.accountTitleLabel(account, peersByName.get(account.accountDisplayName.toLowerCase()), { index });
-          if (item.name.children.length || item.name.textContent !== name) item.name.textContent = name;
+          renderAccountName(document, item.name, name);
         }
         const status = accountStatus(slot, statusReading(slot, reading), remote || providerEnabled);
         const source = sourceText(slot, reading) || slot.sourceName || presentationApi.limitProviderSourceLabel(reading) || '';

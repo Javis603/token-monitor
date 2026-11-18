@@ -58,6 +58,18 @@ function serviceFixture(loginForToken) {
   const api = createCopilotAccounts({ service, getSettings: () => settings, env: {}, probeDeps: () => ({ fetch: transport(seen, loginForToken) }) });
   return { service, api, seen, get settings() { return settings; } };
 }
+test('Copilot reports capacity for a new account but accepts the same account at capacity', async () => {
+  const { service } = serviceFixture();
+  for (let index = 0; index < 21; index++) {
+    assert.equal((await service.add('copilot', { copilotApiToken: `fixture-${index}` })).saved, true);
+  }
+  const atCapacity = service.list('copilot').accounts;
+  assert.deepEqual(await service.add('copilot', { copilotApiToken: 'another-fixture' }),
+    { ok: false, errorCode: 'slotLimit', limit: 21 });
+  assert.deepEqual(service.list('copilot').accounts, atCapacity);
+  assert.equal((await service.add('copilot', { copilotApiToken: 'fixture-0' })).saved, true);
+  assert.equal(service.list('copilot').accounts.length, 21);
+});
 test('Copilot real transport isolates two saved accounts and scoped refresh, and rejects replacing a proven identity', async () => {
   const f = serviceFixture();
   assert.equal((await f.service.add('copilot', { copilotApiToken: 'alice', copilotEnterpriseHost: '' })).saved, true);

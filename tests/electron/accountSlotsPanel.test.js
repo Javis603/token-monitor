@@ -19,7 +19,7 @@ class Node {
   append(...children) { children.forEach(child => this.insertBefore(child, null)); }
   insertBefore(child, before) { if (typeof child === 'string') child = { textContent: child }; child.remove?.(); this.children.splice(before ? this.children.indexOf(before) : this.children.length, 0, child); child.parentElement = this; }
   moveBefore(child, before) { this.document.moves++; this.insertBefore(child, before); }
-  replaceChildren(...children) { this.children.forEach(child => { child.parentElement = null; }); this.children = []; this.append(...children); }
+  replaceChildren(...children) { this.textContent = ''; this.append(...children); }
   remove() { if (this.parentElement) { const p = this.parentElement; p.children.splice(p.children.indexOf(this), 1); this.parentElement = null; } }
   get isConnected() { return this === this.document.root || Boolean(this.parentElement?.isConnected); }
   getBoundingClientRect() { return this.rect; }
@@ -94,7 +94,10 @@ test('account list distinguishes duplicate visible labels without revealing mask
   const second = title('b');
   assert.match(first, /^a\*\*\*e@example\.test · #[a-f0-9]+$/);
   assert.notEqual(first, second);
+  const breakBeforeDomain = h.row('a').querySelector('.slot-name').children.find(node => node.tagName === 'wbr');
+  assert.ok(breakBeforeDomain);
   h.panel.update([...slots].reverse(), []);
+  assert.ok(h.row('a').querySelector('.slot-name').children.includes(breakBeforeDomain));
   assert.equal(title('a'), first);
   assert.equal(title('b'), second);
   h.panel.update(slots.map(row => ({ ...row, label: 'Work' })), []);
@@ -165,6 +168,22 @@ test('add form submits optional name and independent site through slot IPC only'
   h.document.getElementById('qoderSlotDraftqoderSiteInput').value = 'cn';
   await h.document.getElementById('qoderSlotDraftCredentialSubmit').click();
   assert.deepEqual(h.calls[0], ['add', 'qoder', { qoderSite: 'cn', qoderCookie: 'fake' }, 'New']);
+});
+
+test('a full account list explains its saved account limit inside the add form', async () => {
+  const h = harness();
+  h.slotSettings.qoderAccountSlots = Array.from({ length: 21 }, (_, index) => ({
+    id: `account-${index}`, values: { qoderCookie: `fixture-${index}`, qoderSite: 'cn' }
+  }));
+  h.ipc.add = h.service.add;
+  h.panel.openEditor(null);
+  const input = h.document.getElementById('qoderSlotDraftqoderCookieInput');
+  input.value = 'another-fixture';
+  await h.document.getElementById('qoderSlotDraftCredentialSubmit').click();
+  assert.equal(h.document.getElementById('qoderSlotDraftVerdict').textContent,
+    'You can save up to 21 accounts for this provider. Remove one to add another.');
+  assert.equal(h.panel.element.querySelector('.slot-message').textContent, '');
+  assert.equal(input.value, 'another-fixture');
 });
 
 test('real aggregate name sorting is replaced by stored slots before an unowned default', () => {
@@ -348,7 +367,7 @@ test('slot CSS uses defined theme tokens for light and dark surfaces and status'
   assert.match(slots, /\.slot-list \{[^}]*overflow: clip;/);
   assert.match(slots, /grid-template-columns: 14px minmax\(0, 1fr\) minmax\(0, max-content\) 28px/);
   assert.match(slots, /\.slot-status \{ min-width: 0; max-width: 150px; overflow: hidden; text-overflow: ellipsis;/);
-  assert.match(slots, /\.slot-name \{[^}]*overflow-wrap: anywhere; white-space: normal;/);
+  assert.match(slots, /\.slot-name \{[^}]*text-wrap: balance;/);
   assert.match(slots, /\.slot-status \{[^}]*text-align: right;/);
   // These geometry properties are supplied by the shared drag controller.
   for (const key of ['--drag-y', '--drag-shift']) declared.add(key);

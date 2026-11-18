@@ -223,7 +223,7 @@ for (const emailField of ['email', 'accountEmail']) test(`legacy ${emailField} s
   const account = { id: 'saved', accountKey: 'key', [emailField]: 'person@example.com' };
   for (const readings of [[], [reading('key', { status: 'unauthorized' })]]) {
     list.update([account], readings);
-    assert.match(rows(container)[0].querySelector('.slot-name').textContent, /p\*\*\*@example.com/);
+    assert.equal(rows(container)[0].querySelector('.slot-name').textContent, 'p***n@example.com');
     assert.doesNotMatch(rows(container)[0].textContent, /person@example.com/);
   }
   settings.maskLimitAccountEmails = false;
@@ -243,7 +243,7 @@ for (const status of ['ok', 'unauthorized']) test(`email outranks provider name,
   const quota = reading('key', { provider: 'codex', source: 'oauth', status, accountName: 'Other provider name', accountEmail: 'person@example.com' });
   list.update([account], [quota]);
   const row = rows(container)[0];
-  assert.equal(row.querySelector('.slot-name').textContent, 'p***@example.com');
+  assert.equal(row.querySelector('.slot-name').textContent, 'p***n@example.com');
   if (status === 'ok') assert.equal(row.querySelector('.slot-status').textContent, 'OAuth');
   else assert.equal(row.querySelector('.slot-detail').textContent, 'OAuth');
   list.update([{ ...account, label: 'My label' }], [quota]);

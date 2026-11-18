@@ -2749,8 +2749,8 @@ test('account and automatic provider panels reuse the original account summary g
   assert.equal((i18n.match(/'settings\.limits\.connection\.grok':/g) || []).length, 6);
   assert.equal((i18n.match(/'settings\.limits\.connection\.kiro':/g) || []).length, 6);
   assert.match(css, /\.limit-provider-main\s*\{[\s\S]*?display: flex;[\s\S]*?justify-content: space-between/);
-  assert.match(css, /\.limit-provider-actions\s*\{[\s\S]*?flex: 0 1 auto;[\s\S]*?max-width: 58%;[\s\S]*?gap: 4px/);
-  assert.doesNotMatch(css, /\.limit-provider-actions > \.cursor-status-pill\s*\{[^}]*min-width:/);
+  assert.match(css, /\.limit-provider-actions\s*\{[^}]*flex: 0 0 auto;[^}]*max-width: 58%;[^}]*gap: 4px/);
+  assert.doesNotMatch(css, /\.limit-provider-actions > \.cursor-status-pill\s*\{[^}]*overflow-wrap: anywhere/);
   assert.match(css, /\.limit-provider-row\.expanded > \.limit-provider-main \.cursor-disclosure-icon/);
 });
 

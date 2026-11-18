@@ -2,10 +2,11 @@
 'use strict';
 (function expose(root, factory) {
   const panel = typeof module === 'object' && module.exports ? require('./accountSlotsPanel') : /** @type {any} */ (root).TokenMonitorAccountSlotsPanel;
-  const api = factory(panel);
+  const accountIdentity = typeof module === 'object' && module.exports ? require('../accountIdentity') : /** @type {any} */ (root).TokenMonitorAccountIdentity;
+  const api = factory(panel, accountIdentity);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) /** @type {any} */ (root).TokenMonitorLegacyAccountList = api;
-})(typeof window !== 'undefined' ? window : null, /** @param {any} panel */ function legacyAccountList(panel) {
+})(typeof window !== 'undefined' ? window : null, /** @param {any} panel @param {any} accountIdentity */ function legacyAccountList(panel, accountIdentity) {
   /**
    * Metadata-only adapter. `id` belongs to the provider authority; accountKey
    * belongs to quota/history. Presentation commands never rename a store key.
@@ -83,7 +84,7 @@
       },
       forms: {}, preserveScroll: options.preserveScroll,
       onChanged: () => {}, openExternal: (/** @type {string} */ url) => bridge.openExternal(url),
-      maskEmail: (/** @type {string} */ value) => options.getContext().settings?.maskLimitAccountEmails === true ? value.replace(/^(.).*(@.*)$/, '$1***$2') : value
+      maskEmail: (/** @type {string} */ value) => options.getContext().settings?.maskLimitAccountEmails === true ? accountIdentity.maskEmailAddress(value) : value
     });
     options.container.replaceChildren(list.element);
     if (options.editor) sharedEditor = mountEditor({ ...options, editor: options.editor }, list.element);

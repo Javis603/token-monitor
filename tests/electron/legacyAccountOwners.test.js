@@ -5,19 +5,28 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const renderer = path.resolve(__dirname, '../../src/electron/renderer');
-function adapterHarness() {
+function adapterHarness(settings = {}) {
   let config, update;
-  const window = { TokenMonitorAccountSlotsPanel: { createPanel(options) { config = options; return { element: {}, update(...args) { update = args; } }; } } };
+  const window = { TokenMonitorAccountIdentity: require(path.join(renderer, 'accountIdentity.js')),
+    TokenMonitorAccountSlotsPanel: { createPanel(options) { config = options; return { element: {}, update(...args) { update = args; } }; } } };
   vm.runInNewContext(fs.readFileSync(path.join(renderer, 'limits/legacyAccountList.js'), 'utf8'), { window });
   const calls = [];
   const list = window.TokenMonitorLegacyAccountList.create({ document: {}, provider: 'codex', container: { replaceChildren() {} }, t: key => key,
     bridge: { limits: { accountSlots: { presentation: async (...args) => { calls.push(args); return { ok: true }; } } } },
-    getContext: () => ({ settings: { limitAccountPresentation: { codex: { order: ['canonical'] } } } }), preserveScroll: fn => fn(),
+    getContext: () => ({ settings: { limitAccountPresentation: { codex: { order: ['canonical'] } }, ...settings } }), preserveScroll: fn => fn(),
     refresh() {}, changed() {}, enabled: async (account, value) => { calls.push(['enabled', account.id, value]); return { ok: true }; },
     remove: async account => { calls.push(['remove', account.id]); return { ok: true }; }
   });
   return { list, calls, config: () => config, update: () => update, api: window.TokenMonitorLegacyAccountList };
 }
+test('legacy account lists use the shared email mask and respect the setting', () => {
+  const settings = { maskLimitAccountEmails: true };
+  const { config } = adapterHarness(settings);
+  assert.equal(config().maskEmail('jordan@example.com'), 'j***n@example.com');
+  assert.equal(config().maskEmail('j@example.com'), 'j***@example.com');
+  settings.maskLimitAccountEmails = false;
+  assert.equal(config().maskEmail('jordan@example.com'), 'jordan@example.com');
+});
 test('legacy commands retain authority id and use canonical history key only for presentation', async () => {
   const h = adapterHarness();
   h.list.update([{ id: 'managed-home', accountKey: 'canonical', accountKeyAliases: ['old'], email: 'user@example.com' }], []);

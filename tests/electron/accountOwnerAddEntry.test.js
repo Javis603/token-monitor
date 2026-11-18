@@ -353,12 +353,12 @@ for (const masked of [false, true]) test(`Codex titles retain emails and custom 
   const rows = () => [...h.document.root.walk()].filter(node => node.classList.contains('slot-row'));
   await h.render();
   assert.deepEqual(rows().map(row => row.querySelector('.slot-name').textContent),
-    masked ? ['a***@example.com', 'b***@example.com'] : ['alice@example.com', 'bob@example.com']);
+    masked ? ['a***e@example.com', 'b***b@example.com'] : ['alice@example.com', 'bob@example.com']);
   assert.deepEqual(rows().map(row => row.querySelector('.slot-detail').textContent),
     ['Plus · settings.limits.sources.oauth', 'Free · settings.limits.sources.oauth']);
   h.settings.limitAccountPresentation = { codex: { labels: { ka: 'Work', kb: '' } } };
   await h.render();
   assert.equal(rows()[0].querySelector('.slot-name').textContent, 'Work');
   assert.match(rows()[0].querySelector('.slot-detail').textContent, /^Plus/);
-  assert.equal(rows()[1].querySelector('.slot-name').textContent, masked ? 'b***@example.com' : 'bob@example.com');
+  assert.equal(rows()[1].querySelector('.slot-name').textContent, masked ? 'b***b@example.com' : 'bob@example.com');
 });

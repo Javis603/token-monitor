@@ -92,6 +92,8 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       fingerprint: (source === 'discovered' ? fingerprint : accountValuesFingerprint(values)).slice(7, 19), createdAt, updatedAt };
   });
   const failure = (errorCode) => ({ ok: false, errorCode });
+  const slotLimit = 21;
+  const capacityFailure = () => ({ ...failure('slotLimit'), limit: slotLimit });
   // `refresh: false`: only local presentation changed (label, order), so the
   // runtime re-projects its rows without asking the provider again.
   const changed = (entry, retiredAccountKeys, refresh) => {
@@ -142,14 +144,17 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       const previous = slots(entry);
       let old = replacing ? previous.find(slot => slot.id === id) : null;
       if (replacing && !old) return failure('accountNotFound');
-      if (!replacing && !entry.dedupeAccounts && previous.length >= 21) return failure('slotLimit');
+      if (!replacing && !entry.dedupeAccounts && previous.length >= slotLimit) return capacityFailure();
       let rejected;
       // Reuse the fixed credential validator, including transport isolation and
       // unauthorized/indeterminate verdicts. Never return its settings payload.
       const commitCredential = async ({ candidate, provider }) => {
         if (!isCurrent()) throw new Error('Login cancelled');
         if (!old && entry.dedupeAccounts) old = previous.find(slot => slot.accountKey === provider?.accountKey || accountValuesFingerprint(slot.values) === accountValuesFingerprint(candidate));
-        if (!old && previous.length >= 21) throw new Error('Account slot limit');
+        if (!old && previous.length >= slotLimit) {
+          rejected = capacityFailure();
+          return;
+        }
         // The same credential twice would be two rows for one account and a
         // duplicate request each pass; it is refused, pointing at the existing row.
         const fingerprint = accountValuesFingerprint(candidate);
