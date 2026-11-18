@@ -78,7 +78,8 @@
   function readingOwner(slots, row) {
     const candidates = row.provider === 'alibaba'
       ? slots.filter(slot => alibabaVariant(slot) === row.region) : slots;
-    return slotOwner(candidates, row.accountKey, row.accountKeyAliases);
+    const owner = slotOwner(candidates, row.accountKey, row.accountKeyAliases);
+    return owner?.credentialFor ? candidates.find(slot => slot.id === owner.credentialFor) : owner;
   }
   function applyAccountOrder(records, slotsByProvider, localDeviceId = '', presentation = {}) {
     const result = records.map(row => {
@@ -242,15 +243,25 @@
     function activeAccounts() {
       const accounts = [...slots, ...remoteAccounts()];
       const byId = new Map(accounts.map(slot => [slot.id, slot]));
-      return applyAccountOrder(accounts.map(slot => ({
+      const ordered = applyAccountOrder(accounts.map(slot => ({
         ...slot, provider: form.id, region: form.id === 'alibaba' ? alibabaVariant(slot) : undefined
       })),
         { [form.id]: slots }, localDeviceId, { [form.id]: presentation }).map(row => byId.get(row.id));
+      if (!ordered.some(slot => slot.credentialFor)) return ordered;
+      return ordered.filter(slot => !slot.credentialFor).flatMap(slot => [slot, ...ordered.filter(account => account.credentialFor === slot.id)]);
     }
-    const presentationOrder = accounts => [...new Set(accounts.map(slot => selectionKey(form.id, slot)).filter(Boolean))];
+    const presentationOrder = accounts => [...new Set(accounts.filter(slot => !slot.credentialFor)
+      .map(slot => selectionKey(form.id, slot)).filter(Boolean))];
+    const permissions = slot => slot?.credentialFor ? { ...capabilities(slot), rename: false, move: false } : capabilities(slot);
+    function rowStatus(slot, reading) {
+      const preference = settings?.[`${form.id}SourcePreference`];
+      const omitted = preference && preference !== 'auto' && slot.collectionSources && !slot.collectionSources.includes(preference);
+      return accountStatus(omitted ? { ...slot, sourceSelected: false } : slot, statusReading(slot, reading),
+        slot.source === 'remote' || providerEnabled);
+    }
     const run = (operation, ...args) => {
       const slot = activeAccounts().find(slot => slot.id === args[0]);
-      const permission = capabilities(slot);
+      const permission = permissions(slot);
       if (isBusy() || (slot && permission[operation] === false)) return Promise.resolve({ ok: false });
       if (operation === 'move') {
         if (presentationPending || (operationsPending > 0 && remoteAccounts().some(slot => slot.id === args[0])) || rowDrag.isDragging()) return;
@@ -283,7 +294,7 @@
       dragExcluded: 'input, select, textarea, a, .slot-device-toggle, .slot-device-list',
       preserveScroll,
       mirrorOrder: (order, id) => {
-        const group = activeAccounts().filter(account => account.accountKey);
+        const group = activeAccounts().filter(account => account.accountKey && !account.credentialFor);
         const previous = group.map(slot => slot.id);
         if (previous.length !== order.length || previous.some(key => !order.includes(key))) return { changed: false };
         const previousOrder = presentation.order;
@@ -296,7 +307,11 @@
         return { changed, previousOrder, next, key: selectionKey(form.id, group.find(slot => slot.id === id)) };
       },
       applyOrder: order => {
-        for (const id of order) list.moveBefore(rows.get(id).el, add);
+        const credentials = slots.filter(slot => slot.credentialFor);
+        for (const id of order) {
+          list.moveBefore(rows.get(id).el, add);
+          for (const slot of credentials) if (slot.credentialFor === id) list.moveBefore(rows.get(slot.id).el, add);
+        }
       },
       persistOrder: (_order, _id, { changed, previousOrder, next, key }) => {
         if (!changed) return;
@@ -475,13 +490,13 @@
       el.append(grip, copy, status, actions);
       el.addEventListener('pointerdown', event => {
         if ((presentationPending > 0 || operationsPending > 0) || editorOwner !== undefined
-          || isBusy() || capabilities(item.slot).move === false || [...rows.values()].some(row => row.editing || row.actions.querySelector('.plugin-menu').matches(':popover-open'))) return;
+          || isBusy() || permissions(item.slot).move === false || [...rows.values()].some(row => row.editing || row.actions.querySelector('.plugin-menu').matches(':popover-open'))) return;
         rowDrag.startRowDrag(event, id);
       });
       // Each row owns its rename session, so one row cannot invalidate another's.
       const item = { el, name, status, actions, editing: false, renameRevision: 0, slot: null };
       const rename = () => {
-        if (item.editing || isBusy() || capabilities(item.slot).rename === false) return;
+        if (item.editing || isBusy() || permissions(item.slot).rename === false) return;
         item.editing = true;
         const revision = ++item.renameRevision;
         const input = make('input', 'slot-rename');
@@ -676,10 +691,10 @@
       const candidates = variant ? readings.filter(row => row.region === variant) : readings;
       const owners = variant ? slots.filter(owner => alibabaVariant(owner) === variant) : slots;
       return candidates.find(row => row.accountKey === slot.accountKey)
-        || candidates.find(row => slotOwner(owners, row.accountKey, row.accountKeyAliases) === slot);
+        || candidates.find(row => readingOwner(owners, row) === slot);
     }
     function matchingObservation(slot, row) {
-      if (row.provider !== form.id || row.removed || !row.accountKey) return false;
+      if (slot.credentialFor || row.provider !== form.id || row.removed || !row.accountKey) return false;
       const owners = slot.source === 'remote' ? [slot] : slots;
       return readingOwner(owners, row) === slot;
     }
@@ -796,8 +811,9 @@
         const accountDisplayName = accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') },
           reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading,
           t, presentation);
-        return { id: slot.id, accountKey: selectionKey(form.id, slot), accountDisplayName, reading, slot };
+        return { id: slot.id, accountKey: selectionKey(form.id, slot), accountDisplayName, reading, slot, status: rowStatus(slot, reading) };
       });
+      const statuses = new Map(displayed.map(({ id, status }) => [id, status]));
       const peersByName = new Map();
       for (const account of displayed) {
         const name = account.accountDisplayName.toLowerCase();
@@ -805,21 +821,24 @@
         peersByName.get(name).push(account);
       }
       displayed.forEach((account, index) => {
-        const { slot, reading } = account;
+        const { slot, reading, status } = account;
         const item = rowFor(slot);
         item.slot = slot;
         item.el.dataset.slotDraggable = 'true';
-        const remote = slot.source === 'remote';
         if (!item.editing) {
           const name = accountIdentity.accountTitleLabel(account, peersByName.get(account.accountDisplayName.toLowerCase()), { index });
           renderAccountName(document, item.name, name);
         }
-        const status = accountStatus(slot, statusReading(slot, reading), remote || providerEnabled);
-        const source = sourceText(slot, reading) || slot.sourceName || presentationApi.limitProviderSourceLabel(reading) || '';
+        const primaryStatus = statuses.get(slot.credentialFor);
+        const sharesStatus = primaryStatus && primaryStatus !== 'notCollected'
+          && !['notCollected', 'paused', 'disabled'].includes(status);
+        const source = !slot.source && (slot.credentialFor || (slot.collectionSources && status === 'notCollected')) ? tr('savedSource')
+          : sourceText(slot, reading) || slot.sourceName || presentationApi.limitProviderSourceLabel(reading) || '';
         const secondary = secondaryText(slot);
         const provenance = secondary && secondary !== source ? secondary : !source
           ? (slot.source === 'environment' ? t('settings.limits.sources.env') : !slot.source && !customEditor ? tr('savedSource') : '') : '';
-        const detail = [maskEmail(accountPlan(form.id, slot, reading)), status !== 'connected' ? source : '', provenance, detailText(slot)]
+        const detail = [...(!slot.credentialFor ? [maskEmail(accountPlan(form.id, slot, reading))] : []),
+          status !== 'connected' || sharesStatus ? source : '', provenance, detailText(slot)]
           .filter((value, index, all) => value && all.indexOf(value) === index).join(' · ');
         if (detail && !item.detail) {
           item.detail = make('div', 'settings-note slot-detail');
@@ -829,7 +848,7 @@
           item.detail.textContent = detail;
           item.detail.classList.toggle('hidden', !detail);
         }
-        const permission = capabilities(slot);
+        const permission = permissions(slot);
         item.menuTrigger.classList.toggle('hidden', !item.hasExtraActions
           && ['rename', 'move', 'replace', 'setEnabled', 'remove'].every(operation => permission[operation] === false));
         item.renameButton.disabled = isBusy();
@@ -837,10 +856,11 @@
         item.renameButton.classList.toggle('hidden', item.editing || permission.rename === false);
         item.name.parentElement.classList.toggle('is-editing', item.editing);
         item.el.classList.toggle('slot-paused', !slot.enabled);
-        item.status.className = `slot-status slot-${status}`;
+        item.status.className = sharesStatus ? 'slot-status' : `slot-status slot-${status}`;
         const statusText = statusLabel(status, slot, reading);
-        item.status.textContent = status === 'connected' ? source || statusText : statusText;
-        item.status.setAttribute('aria-label', [statusText, source].filter(Boolean).join(' · '));
+        item.status.textContent = sharesStatus ? '' : status === 'connected' ? source || statusText : statusText;
+        if (sharesStatus) item.status.removeAttribute('aria-label');
+        else item.status.setAttribute('aria-label', [statusText, source].filter(Boolean).join(' · '));
         if (item.pause) {
           const kind = credentialKind(slot, reading);
           localized(item.replace, `settings.slots.${kind ? `replace${kind}` : 'replaceTitle'}`);
@@ -857,7 +877,7 @@
           item.remove.classList.toggle('hidden', slot.source === 'environment');
           if (slot.source === 'discovered') { item.replace.remove(); item.remove.remove(); }
         }
-        item.fix.classList.toggle('hidden', permission.replace === false || Boolean(slot.source) || !slot.enabled || status !== 'invalid');
+        item.fix.classList.toggle('hidden', Boolean(sharesStatus) || permission.replace === false || Boolean(slot.source) || !slot.enabled || status !== 'invalid');
         if (slot.source === 'discovered' && !item.discoveredNote) {
           item.discoveredNote = localized(make('div', 'settings-note'), 'settings.slots.discovered', { source: slot.sourceName });
           item.el.querySelector('.plugin-menu')?.append(item.discoveredNote);
@@ -899,9 +919,9 @@
       preserveScroll(render);
     }, summary() {
       const accounts = activeAccounts();
-      const linked = accounts.filter(slot => accountStatus(slot, statusReading(slot, accountReading(slot)),
-        slot.source === 'remote' || providerEnabled) === 'connected').length;
-      return { total: accounts.length, linked };
+      const linked = new Set(accounts.filter(slot => rowStatus(slot, accountReading(slot)) === 'connected')
+        .map(slot => slot.credentialFor || slot.id)).size;
+      return { total: accounts.filter(slot => !slot.credentialFor).length, linked };
     }, openEditor, activeEditorUrl: () => editorToggle.expanded ? editorOpenUrl?.() : undefined };
   }
   return { presentationLabel, accountName, accountStatus, slotOwner, applyAccountOrder, createPanel, createEditorToggle };

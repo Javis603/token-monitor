@@ -7438,11 +7438,11 @@ app.whenReady().then(() => {
   accountSlotService = createAccountSlotService({
     getSettings: () => settings,
     ownerWrite: (provider, patch, legacyMetadata, legacyWrites) => {
-      const store = ensureCredentialStore();
-      const previousDocument = store.readDocument();
+      const store = legacyMetadata !== undefined && provider !== 'minimax' ? ensureCredentialStore() : null;
+      const previousDocument = store?.readDocument();
       const previousSettings = settings;
       try {
-        if (provider !== 'minimax') {
+        if (store) {
           const document = structuredClone(previousDocument);
           const records = document.credentials.providers?.[provider]?.accounts;
           for (const { id, credential } of legacyWrites) {
@@ -7452,13 +7452,14 @@ app.whenReady().then(() => {
           }
           store.writeDocument(document);
         }
-        settings = { ...settings, ...patch, ...(provider === 'minimax'
+        const legacyPatch = legacyMetadata === undefined ? {} : (provider === 'minimax'
           ? { minimaxApiProfiles: legacyMetadata, minimaxApiKey: '' }
-          : { [`${provider}ManagedAccounts`]: legacyMetadata }) };
+          : { [`${provider}ManagedAccounts`]: legacyMetadata });
+        settings = { ...settings, ...patch, ...legacyPatch };
         saveSettings({ throwOnError: true });
       } catch (error) {
         settings = previousSettings;
-        store.writeDocument(previousDocument);
+        store?.writeDocument(previousDocument);
         throw error;
       }
     },

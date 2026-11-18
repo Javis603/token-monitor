@@ -81,6 +81,38 @@ test('slot names and status respect labels, native identity, fingerprint, pause 
   assert.equal(accountStatus({ enabled: true }, { status: 'ok', stale: true }), 'stale');
   assert.equal(accountStatus({ enabled: true }, { status: 'ok' }), 'connected');
 });
+test('explicit collection sources change row status without waiting for newer quota', () => {
+  const h = harness(t, 'cline');
+  const slots = [
+    { id: 'detected', accountKey: 'local-key', source: 'discovered', collectionSources: ['local'], enabled: true },
+    { id: 'saved', accountKey: 'saved-key', collectionSources: ['api'], enabled: true }
+  ];
+  const readings = slots.map(slot => ({ provider: 'cline', accountKey: slot.accountKey, status: 'ok' }));
+  const status = id => h.row(id).querySelector('.slot-status').textContent;
+  h.panel.update(slots, readings, { settings: { clineSourcePreference: 'local' } });
+  assert.equal(status('saved'), 'Not collected');
+  assert.equal(status('detected'), 'Connected');
+  h.panel.update(slots, readings, { settings: { clineSourcePreference: 'api' } });
+  assert.equal(status('detected'), 'Not collected');
+  assert.equal(status('saved'), 'Connected');
+});
+test('a paired saved credential keeps its own replace and remove controls under one identity', async () => {
+  const h = harness(t, 'cline');
+  const detected = { id: 'detected', accountKey: 'shared', label: 'Work', source: 'discovered', sourceName: 'Cline', enabled: true };
+  const saved = { id: 'saved', accountKey: 'shared', label: 'Work', credentialFor: detected.id, enabled: true };
+  h.panel.update([detected, saved], [{ provider: 'cline', accountKey: 'shared', status: 'ok' }]);
+  assert.deepEqual(h.panel.summary(), { total: 1, linked: 1 });
+  const row = h.row(saved.id);
+  assert.equal(row.querySelector('.slot-detail').textContent, 'Saved credential');
+  assert.equal(row.querySelector('.slot-status').textContent, '');
+  assert.equal(row.dataset.slotDraggable, 'false');
+  h.click(row, 'Replace API key');
+  assert.ok(h.document.getElementById('clineSlotDraftclineApiKeyInput'));
+  h.click(h.panel.element, 'Cancel');
+  h.click(row, 'Remove account');
+  await h.click(row, 'Confirm remove');
+  assert.deepEqual(h.calls[0], ['remove', 'cline', saved.id]);
+});
 test('account list distinguishes duplicate visible labels without revealing masked addresses', () => {
   const { maskEmailAddress } = require('../../src/electron/renderer/accountIdentity');
   const h = harness(t, 'qoder', undefined, maskEmailAddress);

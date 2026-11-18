@@ -64,11 +64,37 @@ for (const pauseDuringProbe of [false, true]) test(`MiMo re-add preserves pause 
   assert.equal(accounts[0].accountLabel, 'Saved label');
   assert.match(credentials.get(original.id), /fixture-new/);
 });
+for (const failure of ['slotLimit', 'disk']) test(`MiniMax add leaves collection settings intact after ${failure}`, async () => {
+  const settings = { limitsEnabled: false, limitProviders: 'codex' };
+  if (failure === 'slotLimit') settings.minimaxAccountSlots = Array.from({ length: 21 }, (_, index) => {
+    const id = `fixture-${index}`;
+    return { id, values: {}, enabled: true, owner: { metadata: { id, billingMode: 'api' }, credential: id } };
+  });
+  const before = structuredClone(settings);
+  const writes = [];
+  const getSettings = () => settings;
+  const service = createAccountSlotService({ getSettings, env: {}, write: patch => {
+    writes.push(patch);
+    throw Error('disk');
+  } });
+  const api = createMinimaxApiKeys({ getSettings, env: {}, slotPersistence: createOwnerSlotPersistence('minimax', getSettings, () => service),
+    changed: () => assert.fail('failed save published a change'), probeDeps: () => ({ fetch: async () => response({ available_amount: 8 }) }) });
+  await assert.rejects(api.addKey({ apiKey: 'fixture-new', billingMode: 'api' }), new RegExp(failure));
+  assert.deepEqual(settings, before);
+  assert.equal(writes.length, failure === 'disk' ? 1 : 0);
+  if (writes.length) {
+    assert.equal(writes[0].limitsEnabled, true);
+    assert.equal(writes[0].limitProviders, 'codex,minimax');
+    assert.equal(writes[0].minimaxAccountSlots.length, 1);
+  }
+});
 for (const saved of [false, true]) test(`MiniMax removal clears matching legacy key atomically (${saved})`, async () => {
   let settings = { minimaxApiKey: 'fixture-key', minimaxApiProfiles: { default: { apiKey: 'fixture-key', enabled: true } } };
   if (saved) settings = { ...settings, minimaxApiProfiles: {}, minimaxAccountSlots: [{ id: 'default', enabled: true, values: {}, owner: { metadata: { id: 'default', enabled: true }, credential: 'fixture-key' } }] };
   const service = createAccountSlotService({ getSettings: () => settings, env: {}, write: async patch => { settings = { ...settings, ...patch }; },
-    ownerWrite: async (_provider, patch, metadata) => { settings = { ...settings, ...patch, minimaxApiProfiles: metadata }; } });
+    ownerWrite: async (_provider, patch, metadata) => {
+      settings = { ...settings, ...patch, ...(metadata === undefined ? {} : { minimaxApiProfiles: metadata }) };
+    } });
   const api = createMinimaxApiKeys({ getSettings: () => settings, slotPersistence: createOwnerSlotPersistence('minimax', () => settings, () => service), env: {}, changed() {}, probeDeps: () => ({}) });
   assert.equal((await api.removeKey('default')).ok, true);
   assert.equal(settings.minimaxApiKey, ''); assert.deepEqual(api.getKeys(), []);

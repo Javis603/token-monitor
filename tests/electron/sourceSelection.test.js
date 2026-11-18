@@ -194,6 +194,11 @@ test('Cline real discovery, saved and environment keys stay separate under sourc
   };
   const options={clineAccountSlots:[{id:'saved',values:{clineApiKey:'key-saved'}}]};
   const deps={env:{CLINE_DATA_DIR:dir,CLINE_API_KEY:'key-env'},fetch};
+  const service=createAccountSlotService({getSettings:()=>options,env:deps.env,probeDeps:()=>deps});
+  const slots=service.list('cline').accounts;
+  assert.deepEqual(slots.find(slot=>slot.source==='discovered').collectionSources,['local']);
+  assert.deepEqual(slots.find(slot=>slot.id==='saved').collectionSources,['api']);
+  assert.deepEqual(slots.find(slot=>slot.source==='environment').collectionSources,['api']);
   const local=await LIMIT_PROVIDER_FETCHERS.cline({...options,clineSourcePreference:'local'},deps);
   assert.ok(local.some(x=>x.status==='ok' && x.source==='oauth'));
   assert.ok(seen.every(x=>x==='Bearer workos:local'));

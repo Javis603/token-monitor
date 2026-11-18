@@ -10,18 +10,31 @@ function createMinimaxApiKeys({ getSettings, saveSettings, probeDeps, changed, s
   async function commit(next, key, reason, removedId) {
     const settings = getSettings();
     const before = new Set(limits.configuredMinimaxAccounts(settings, { env }).map(account => account.apiKey));
+    const preferences = () => {
+      const current = getSettings();
+      if (reason === 'key-save') return { limitsEnabled: true, limitProviders: providerSelectionIncluding(current.limitProviders, 'minimax') };
+      // The legacy field stays for downgrades until its own key is removed.
+      return limits.minimaxToken({}, current.minimaxApiKey) === key ? { minimaxApiKey: '' } : {};
+    };
     if (slotPersistence) {
       await slotPersistence.commit(Object.entries(next).map(([id, profile]) => ({ id,
         accountKey: hashKey('minimax', profile.apiKey), enabled: profile.enabled,
         billingMode: profile.billingMode, apiRegion: profile.apiRegion
       })), [...Object.entries(next).map(([id, profile]) => ({ id, credential: profile.apiKey })),
-        ...(removedId ? [{ id: removedId, credential: null }] : [])], () => {},
-        reason === 'key-remove' && limits.minimaxToken({}, getSettings().minimaxApiKey) === key ? { minimaxApiKey: '' } : {});
+        ...(removedId ? [{ id: removedId, credential: null }] : [])], undefined, preferences);
     } else {
-    settings.minimaxApiProfiles = next;
-    // The legacy field stays for downgrades until its own key is removed.
-    if (reason === 'key-remove' && limits.minimaxToken({}, settings.minimaxApiKey) === key) settings.minimaxApiKey = '';
-    saveSettings({ throwOnError: true });
+      const patch = { ...preferences(), minimaxApiProfiles: next };
+      const previous = { ...settings };
+      try {
+        Object.assign(settings, patch);
+        saveSettings({ throwOnError: true });
+      } catch (error) {
+        for (const key of Object.keys(patch)) {
+          if (Object.hasOwn(previous, key)) settings[key] = previous[key];
+          else delete settings[key];
+        }
+        throw error;
+      }
     }
     const after = limits.configuredMinimaxAccounts(getSettings(), { env });
     for (const previous of before) {
@@ -39,9 +52,6 @@ function createMinimaxApiKeys({ getSettings, saveSettings, probeDeps, changed, s
       const key = candidate.minimaxApiKey;
       const id = Object.keys(next).find(id => next[id].apiKey === key) || randomUUID();
       next[id] = { apiKey: key, enabled: true, billingMode: candidate.minimaxBillingMode, apiRegion: candidate.minimaxApiRegion };
-      const settings = getSettings();
-      settings.limitProviders = providerSelectionIncluding(settings.limitProviders, 'minimax');
-      settings.limitsEnabled = true;
       await commit(next, key, 'key-save');
     }
   });

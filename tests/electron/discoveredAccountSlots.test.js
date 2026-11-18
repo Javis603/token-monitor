@@ -58,7 +58,11 @@ for (const id of ['factory', 'cline', 'hark', 'manus', 'zai']) {
     calls.length = 0;
     assert.equal((await fetcher(settings, { env: {} })).length, 1);
     assert.equal(calls.length, 1);
-    assert.equal(service.list(id).accounts.length, 1);
+    const listed = service.list(id).accounts;
+    assert.equal(listed.length, 2);
+    assert.ok(listed.some(account => account.source === 'discovered'));
+    assert.ok(listed.some(account => account.id === 'same'));
+    assert.equal(listed[1].credentialFor, listed[0].id);
     signedIn = false;
     assert.equal(service.list(id).accounts.length, 1);
     assert.equal(service.list(id).accounts[0].source, undefined);
@@ -95,7 +99,9 @@ test('real Cline discovery and saved API key deduplicate through the profile acc
   const resolutions = [];
   const rows = await LIMIT_PROVIDER_FETCHERS.cline(settings, { env: { CLINE_DATA_DIR: dir }, fetch, onAccountSlotResolved: (...args) => resolutions.push(service.resolved(...args)) });
   await Promise.all(resolutions);
-  assert.equal(service.list('cline').accounts.length, 1);
+  const listed = service.list('cline').accounts;
+  assert.equal(listed.length, 2);
+  assert.equal(listed.find(row => row.id === 'saved').credentialFor, listed.find(row => row.source === 'discovered').id);
   assert.equal(rows.filter(row => !row.removed).length, 1);
   fs.writeFileSync(path.join(dir, 'settings/providers.json'), JSON.stringify({ providers: {} }));
   assert.deepEqual(entry.discoveredAccounts({}, entry.limits, { env: { CLINE_DATA_DIR: dir } }), []);
@@ -154,14 +160,21 @@ test('factory: a working discovered key alongside FACTORY_API_KEY collects both 
   assert.deepEqual(rows.filter(row => !row.removed).map(row => row.accountKey).sort(), ['droid-secret-account', 'env-secret-account']);
 });
 
-test('cline: a paused discovered account leaves its saved duplicate listed and manageable', async t => {
+test('cline: a discovered account leaves its saved duplicate directly manageable', async t => {
   stubDiscovery(t, 'cline', () => [{ values: { clineApiKey: 'app-secret' }, accountKey: 'same-account', sourceName: 'Cline' }]);
   let settings = { clineAccountSlots: [{ id: 'saved', values: { clineApiKey: 'saved-secret' }, accountKey: 'same-account' }] };
-  const service = createAccountSlotService({ getSettings: () => settings, env: {}, probeDeps: () => ({}), write: async patch => { settings = { ...settings, ...patch }; } });
-  assert.equal(service.list('cline').accounts.length, 1, 'two enabled owners of one account show once');
-  await service.setEnabled('cline', service.list('cline').accounts[0].id, false);
-  const accounts = service.list('cline').accounts;
-  assert.deepEqual(accounts.map(account => [account.id.startsWith('discovered-') ? 'discovered' : account.id, account.enabled]), [['discovered', false], ['saved', true]]);
+  const service = createAccountSlotService({ getSettings: () => settings, env: {},
+    probeDeps: () => ({ fetch: async () => ({ ok: true, status: 200, json: async () => ({}) }) }),
+    write: async patch => { settings = { ...settings, ...patch }; } });
+  const [detected, saved] = service.list('cline').accounts;
+  assert.equal(saved.credentialFor, detected.id);
+  assert.equal((await service.replace('cline', saved.id, { clineApiKey: 'replaced-secret' })).saved, true);
+  assert.equal(settings.clineAccountSlots[0].values.clineApiKey, 'replaced-secret');
+  assert.equal((await service.remove('cline', saved.id)).ok, true);
+  const [remaining] = service.list('cline').accounts;
+  assert.equal(remaining.id, detected.id);
+  assert.equal(remaining.enabled, true);
+  assert.deepEqual(settings.clineAccountSlots, []);
 });
 
 test('manus: after a token rotation, controls apply to the current record and the older one is dropped', async t => {
@@ -420,7 +433,7 @@ test('discovered edits publish, adopt shared controls, and carry presentation th
   assert.equal(service.list('factory').accounts.find(row => row.id === found.id).label, 'Shared');
 });
 
-for (const replacing of [false, true]) test(`factory: ${replacing ? 'replacing' : 'adding'} a named slot hidden by discovery publishes its name`, async t => {
+for (const replacing of [false, true]) test(`factory: ${replacing ? 'replacing' : 'adding'} a saved credential sharing a detected identity publishes its name`, async t => {
   const { hashKey } = require('../../src/shared/hashKey');
   const key = hashKey('factory', 'fixture-user');
   stubDiscovery(t, 'factory', () => [{ values: { factoryApiKey: 'droid-secret' }, accountKey: key, sourceName: 'Droid' }]);
@@ -442,8 +455,9 @@ for (const replacing of [false, true]) test(`factory: ${replacing ? 'replacing' 
   assert.equal(settings.factoryAccountSlots.length, 1);
   assert.equal(writes.filter(patch => patch.factoryAccountSlots).length, 1, 'commit the credential only once');
   assert.equal(settings.factoryAccountSlots[0].label, 'Work');
-  assert.equal(result.accounts.length, 1);
+  assert.equal(result.accounts.length, 2);
   assert.equal(result.accounts[0].source, 'discovered', 'keep the existing visible owner');
+  assert.equal(result.accounts[1].credentialFor, result.accounts[0].id);
   assert.equal(settings.limitAccountPresentation.factory.labels[key], 'Work');
   assert.ok(published.some(op => op.type === 'rename' && op.key === key && op.label === 'Work'));
   assert.equal(accountName(result.accounts[0], null, value => value, settings.limitAccountPresentation.factory), 'Work');
@@ -520,7 +534,7 @@ test('discovered shared labels use retired aliases without taking another accoun
 });
 
 
-test('renaming a saved slot newly hidden by discovery succeeds and publishes the name', async t => {
+test('renaming a saved slot after matching discovery succeeds and publishes the name', async t => {
   let discovered = false;
   stubDiscovery(t, 'factory', () => discovered ? [{ values: { factoryApiKey: 'same' }, accountKey: 'known', sourceName: 'Droid' }] : []);
   let settings = { factoryAccountSlots: [{ id: 'saved', values: { factoryApiKey: 'same' }, accountKey: 'known', label: 'Before' }] };

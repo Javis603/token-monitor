@@ -4,7 +4,7 @@
 // Leaf declaration: credential storage reads this without loading the probe.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'hark',
-  sourceSelection: { sources: ['web', 'local'] },
+  sourceSelection: { sources: ['web', 'local'], slotSources: { credentials: { harkCookie: 'web' }, discovered: 'local' } },
   accountSlots: true,
   dedupeAccounts: true,
   sources: [

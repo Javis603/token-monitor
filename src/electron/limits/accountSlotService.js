@@ -76,21 +76,45 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
   // values for fingerprints and resolve only the plan used for presentation.
   const accountVariant = (entry, account) => entry.id === 'alibaba'
     ? entry.limits.alibabaVariant(account.values, account.source === 'environment' ? env : {}) : '';
-  const visible = entry => ordered(entry).filter((item, index, all) => !all.slice(0, index).some(other => (other.source || item.source)
-    && other.enabled !== false && item.enabled !== false && accountVariant(entry, other) === accountVariant(entry, item)
-    && other.accountKey && (other.accountKey === item.accountKey || other.accountKeyAliases?.includes(item.accountKey) || item.accountKeyAliases?.includes(other.accountKey))));
-  const dto = entry => visible(entry).map(({ id, label, enabled, accountKey, accountKeyAliases = [], values, fingerprint, source, sourceName, accountName, accountEmail, createdAt, updatedAt }) => {
+  const sameVisibleAccount = (entry, item, other) => (other.source || item.source)
+    && other.enabled !== false && item.enabled !== false && accountVariant(entry, other) === accountVariant(entry, item) && sameAccount(other, item);
+  function accountRows(entry) {
+    const primary = [];
+    const rows = [];
+    for (const account of ordered(entry)) {
+      const representative = primary.find(other => sameVisibleAccount(entry, account, other));
+      if (!representative) {
+        primary.push(account);
+        rows.push(account);
+      } else if ((representative.source === 'discovered' && !account.source)
+        || (!representative.source && account.source === 'discovered')) {
+        // Use one account identity for presentation, with a separate edit and
+        // removal target for each saved credential.
+        rows.push({ ...account, credentialFor: representative.id });
+      }
+    }
+    return { primary, rows };
+  }
+  function dto(entry) {
+    const slotSources = entry.sourceSelection?.slotSources;
+    return accountRows(entry).rows.map(({ id, label, enabled, accountKey, accountKeyAliases = [], values, fingerprint, source, sourceName, accountName, accountEmail, createdAt, updatedAt, credentialFor }) => {
     const key = accountKey || hashKey(entry.id, 'account-slot', source ? 'default' : `slot:${id}`);
     const formValues = Object.fromEntries(accountForm(entry).fields.filter(field => !field.secret).map(field => [field.key, values[field.key]]));
     if (entry.id === 'alibaba' && source === 'environment') formValues.alibabaVariant = accountVariant(entry, { values, source });
+    const collectionSources = slotSources && (source === 'discovered'
+      ? [slotSources.discovered].filter(Boolean)
+      : Object.entries(slotSources.credentials).filter(([field]) => values[field]).map(([, lane]) => lane));
     return { id, label, enabled, accountKey: key, accountKeyAliases, ...(source ? { source } : {}),
+      ...(credentialFor ? { credentialFor } : {}),
+      ...(collectionSources?.length ? { collectionSources } : {}),
       ...(accountName ? { accountName } : {}),
       ...(source === 'discovered' ? { sourceName, accountName, accountEmail } : {}),
       ...(entry.accountSlotOwner ? { capabilities: { rename: true, move: true, remove: true, pause: true, edit: true }, accountEmail: values?.accountEmail || '' } : {}),
       ...(entry.id === 'alibaba' ? { presentationKey: slotPresentationKey(entry, { id, source, accountKey, values }) } : {}),
       formValues,
       fingerprint: (source === 'discovered' ? fingerprint : accountValuesFingerprint(values)).slice(7, 19), createdAt, updatedAt };
-  });
+    });
+  }
   const failure = (errorCode) => ({ ok: false, errorCode });
   const slotLimit = 21;
   const capacityFailure = () => ({ ...failure('slotLimit'), limit: slotLimit });
@@ -241,7 +265,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       const entry = entryFor(providerId);
       if (!entry) return failure('unsupportedProvider');
       if (operation === 'move' && ['up', 'down'].includes(value)) {
-        const rows = visible(entry);
+        const rows = accountRows(entry).primary;
         const index = rows.findIndex(item => item.id === id);
         if (index < 0) return failure('accountNotFound');
         const target = index + (value === 'up' ? -1 : 1);
@@ -495,11 +519,13 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       if (next.length > 21) throw new Error('Account slot limit');
       const normalized = normalizeAccountSlots(entry, next);
       if (normalized.length !== next.length) throw new Error('Invalid account slot transaction');
-      const patch = { ...preferences, [accountSlotKey(entry)]: normalized };
-      if (!Array.isArray(plan) && plan.legacyMetadata !== undefined) {
-        if (!ownerWrite) throw new Error('Legacy account transaction unavailable');
-        await ownerWrite(providerId, patch, plan.legacyMetadata, plan.legacyWrites);
-      } else await write(patch);
+      const patch = { ...(typeof preferences === 'function' ? preferences() : preferences), [accountSlotKey(entry)]: normalized };
+      const { legacyMetadata, legacyWrites } = Array.isArray(plan) ? {} : plan;
+      if (ownerWrite) await ownerWrite(providerId, patch, legacyMetadata, legacyWrites);
+      else {
+        if (legacyMetadata !== undefined) throw new Error('Legacy account transaction unavailable');
+        await write(patch);
+      }
       return true;
     });
   }

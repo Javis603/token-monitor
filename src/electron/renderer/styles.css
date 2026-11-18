@@ -9434,6 +9434,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .slot-status { min-width: 0; max-width: 150px; overflow: hidden; text-overflow: ellipsis; font-size: .6875rem; color: var(--muted); text-align: right; white-space: nowrap; }
 .slot-connected { color: var(--success); }
 .slot-status::before { content: ''; display: inline-block; width: 12px; height: 12px; margin-inline-end: 4px; vertical-align: -2px; background: currentColor; mask: var(--slot-status-icon) center / contain no-repeat; }
+.slot-status:empty::before { content: none; }
 .slot-connected { --slot-status-icon: url("icons/actions/check.svg"); }
 .slot-status.slot-paused { --slot-status-icon: url("icons/actions/pause.svg"); }
 .slot-invalid, .slot-unavailable { --slot-status-icon: url("icons/actions/circle-exclamation-point.svg"); }
