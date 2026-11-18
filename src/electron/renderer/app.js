@@ -14036,14 +14036,16 @@ const pluginLimitSettings = pluginViewHost ? window.TokenMonitorPluginLimitSetti
   getView: module => state.pluginCatalog?.plugins?.find(plugin => plugin.id === module.pluginId && plugin.status === 'active')?.views?.find(view => view.id === module.settingsView && view.surfaces.includes('settings')),
   isVisible: (module, container) => container.isConnected && isSettingsSurfaceVisible()
     && state.settingsSections?.limits && state.limitProviderSettingsExpanded === module.id
-    && !container.closest('.is-filtered-out')
+    && !container.closest('.is-filtered-out, .settings-list-group.hidden')
 }) : null;
 if (pluginLimitSettings) {
   new MutationObserver(records => {
     if (records.some(({ target }) => target === els.shell || target === els.settingsPanel
       || target === document.getElementById('limitsSettingsDetails')
-      || (target.parentElement === els.limitProviderCheckboxes && target.classList.contains('limit-provider-row'))
-      || (target.parentElement?.parentElement === els.limitProviderCheckboxes && target.classList.contains('accordion-animated-container')))) pluginLimitSettings.reconcile();
+      // Rows sit in the list or, when disabled, in its collapsible group.
+      || target.id === 'limitProviderDisabledGroup'
+      || (els.limitProviderCheckboxes.contains(target) && (target.classList.contains('limit-provider-row')
+        || (target.classList.contains('accordion-animated-container') && target.parentElement?.classList.contains('limit-provider-row')))))) pluginLimitSettings.reconcile();
   }).observe(els.shell, { subtree: true, attributes: true, attributeFilter: ['class'] });
 }
 pluginContent = pluginViewHost ? window.TokenMonitorPluginContent.create({ document,

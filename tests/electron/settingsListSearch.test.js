@@ -171,6 +171,11 @@ test('both lists group enabled rows above a collapsed group of the rest', () => 
   assert.match(app, /rowSelector: ':scope > \.limit-provider-row\[data-provider\]'/);
   assert.match(fn(app, 'preferenceRows'), /':scope > \.limit-provider-row\[data-provider\]'/);
   assert.match(fn(app, 'applyPreferenceOrder'), /list\.insertBefore\(row, tail\)/);
+  // A disabled plugin provider's settings view mounts when its nested row
+  // opens and goes inactive while the group is collapsed.
+  assert.match(app, /!container\.closest\('\.is-filtered-out, \.settings-list-group\.hidden'\)/);
+  assert.match(app, /target\.id === 'limitProviderDisabledGroup'/);
+  assert.match(app, /els\.limitProviderCheckboxes\.contains\(target\) && \(target\.classList\.contains\('limit-provider-row'\)/);
   // A filter shows every match flat; so does a list with one side empty.
   assert.match(fn(app, 'renderSettingsListGroups'), /if \(filtering \|\| !enabledCount\)/);
   for (const locale of Object.keys(MESSAGES)) {
