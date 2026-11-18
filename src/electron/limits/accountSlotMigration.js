@@ -272,8 +272,11 @@ function migrateOwnerSlots(store, stored, settings, entry, document, mark, now) 
       const index = slots.findIndex(slot => slot.id === item.id);
       const existing = slots[index];
       if (!existing || item.owner.credential == null || isDeepStrictEqual(existing.owner, item.owner)) continue;
-      const id = hashKey(provider, 'owner-slot-conflict', existing.id).slice(7);
-      if (reserved.has(id) || !existing.owner) throw new Error('Saved account import conflict');
+      if (!existing.owner) throw new Error('Saved account import conflict');
+      let id = hashKey(provider, 'owner-slot-conflict', existing.id).slice(7);
+      for (let attempt = 1; reserved.has(id); attempt++) {
+        id = hashKey(provider, 'owner-slot-conflict', existing.id, attempt).slice(7);
+      }
       reserved.add(id);
       slots[index] = { ...existing, id, owner: { ...existing.owner, metadata: { ...existing.owner.metadata, id } } };
     }

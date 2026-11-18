@@ -81,6 +81,25 @@ test('startup makes a conflicting legacy owner reachable even when saved slots a
   assert.notEqual(savedCopy.id, legacy.id);
 });
 
+test('successive Claude restores preserve each credential when the legacy ID is reused', t => {
+  const id = 'same';
+  const saved = { id, organizationId: 'saved-org', enabled: true };
+  const store = fixture(t, { claudeAccountSlots: [{ id, enabled: true, values: {}, accountKey: 'saved-key',
+    owner: { metadata: saved, credential: 'fixture-saved' } }] });
+  for (const version of ['first', 'second']) {
+    store.writeClaudeWebCredential(id, `fixture-${version}`);
+    const metadata = { id, organizationId: `${version}-org`, enabled: true, accountKey: `${version}-key` };
+    const settings = migrateAccountSlots(store, { claudeManagedAccounts: [metadata] }, Date.now, {});
+    assert.equal(settings.claudeAccountSlots.find(slot => slot.id === id)?.owner.credential, `fixture-${version}`);
+    assert.equal(store.readClaudeWebCredential(id), '');
+  }
+  const slots = store.settingsCredentials().claudeAccountSlots;
+  assert.equal(new Set(slots.map(slot => slot.id)).size, 3);
+  assert.deepEqual(slots.map(slot => [slot.accountKey, slot.owner.credential]), [
+    ['saved-key', 'fixture-saved'], ['first-key', 'fixture-first'], ['second-key', 'fixture-second']
+  ]);
+});
+
 test('legacy Claude Settings save uses the fixed credential IPC path', async () => {
   const main = fs.readFileSync(require.resolve('../../src/electron/main.js'), 'utf8');
   const line = main.split('\n').find(line => line.includes("ipcMain.handle('limits:saveCredential'"));
