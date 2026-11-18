@@ -770,6 +770,16 @@ function accountSlotKeys(values, env = {}) {
   return [credentials.mode === 'ark' ? hashKey('volcengine', credentials.apiKey, credentials.region)
     : hashKey('volcengine', credentials.accessKeyId, credentials.region), ...(agent?.mode === 'signed' ? [volcengineAgentAccountKey(agent)] : [])];
 }
+function accountSlotIsSecondary(row, values, env) {
+  const agent = volcengineAgentCredentials(env, values);
+  return Boolean(agent && row?.accountKey === volcengineAgentAccountKey(agent));
+}
+function accountSlotsForScope(accounts, scope, options, deps) {
+  const productOwner = accounts.find(account => accountSlotKeys(account.values || options, account.values ? {} : deps.env || process.env).includes(scope.accountKey));
+  const owner = productOwner || accounts.find(account => account.accountKey === scope.accountKey)
+    || accounts.find(account => account.accountKeyAliases.includes(scope.accountKey));
+  return owner ? [owner] : [];
+}
 async function fetchAccountSlotSnapshot(options, deps, collect) {
   const source = selectedSource('volcengine', options, deps);
   if (deps.probe || source === 'api') return collect(options, deps);
@@ -793,7 +803,7 @@ function volcengineArkKey(env) { return pickFirst(env, ['ARK_API_KEY', 'VOLCENGI
 function volcenginePrimaryKey(env) { const c = volcengineCredentials(env); return c?.accessKeyId || c?.apiKey || ''; }
 function volcenginePrimarySecret(env) { return volcengineCredentials(env)?.secretAccessKey || ''; }
 
-module.exports = { probeRetainedCredentials, accountSlotMultiRow: true, accountSlotKeys, accountSlotMigrationNeedsEnvironment, fetchAccountSlotSnapshot, volcenginePrimaryKey, volcenginePrimarySecret, volcengineArkKey,
+module.exports = { probeRetainedCredentials, accountSlotIsSecondary, accountSlotsForScope, accountSlotKeys, accountSlotMigrationNeedsEnvironment, fetchAccountSlotSnapshot, volcenginePrimaryKey, volcenginePrimarySecret, volcengineArkKey,
   VOLCENGINE_FETCH_TIMEOUT_MS,
   VOLCENGINE_CODING_PLAN_URL,
   VOLCENGINE_ARK_CHAT_COMPLETIONS_URL,

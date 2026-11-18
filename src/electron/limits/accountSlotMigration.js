@@ -51,6 +51,9 @@ function migrateAccountSlots(store, settings, now = Date.now, env = process.env)
       if (!companion || !(field.key in values) || values[field.key]) continue;
       values[field.key] = field.resolve?.(env) || field.envFallback?.map(key => env[key]).find(Boolean) || field.configDefault || '';
     }
+    if (entry.id === 'alibaba' && !values.alibabaVariant && env.ALIBABA_TOKEN_PLAN_VARIANT) {
+      values.alibabaVariant = entry.limits.alibabaVariant(values, env);
+    }
     // Keep a working fixed lane intact when only the environment completes its credentials.
     if (entry.limits?.accountSlotMigrationNeedsEnvironment?.(values, env)) {
       store.writeDocument(mark(document));

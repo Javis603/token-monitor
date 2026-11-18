@@ -20,6 +20,53 @@ function fixture(t, settings = {}) {
   store.replaceSettingsCredentials(settings);
   return store;
 }
+test('Alibaba migration captures the selected console without storing an environment cookie', t => {
+  const store = fixture(t, { alibabaCookie: 'fixture-cookie' });
+  const env = { ALIBABA_TOKEN_PLAN_VARIANT: 'intl-personal', ALIBABA_TOKEN_PLAN_COOKIE: 'fixture-environment-cookie' };
+  const migrated = migrateAccountSlots(store, {}, Date.now, env);
+  assert.deepEqual(migrated.alibabaAccountSlots[0].values, { alibabaCookie: 'fixture-cookie', alibabaVariant: 'intl-personal' });
+  assert.ok(!migrated.alibabaCookie);
+});
+
+test('startup retains source metadata after a conflicting owner import', t => {
+  const legacy = { id: 'same', organizationId: 'legacy-org', enabled: true };
+  const store = fixture(t, { claudeAccountSlots: [{ id: 'same', enabled: true, values: {},
+    owner: { metadata: { ...legacy, organizationId: 'different-org' }, credential: 'fixture-slot' } }] });
+  store.writeClaudeWebCredential(legacy.id, 'fixture-source');
+  const main = fs.readFileSync(require.resolve('../../src/electron/main.js'), 'utf8');
+  const loader = main.slice(main.indexOf('function loadCredentialSettings'), main.indexOf('function readSettings()'));
+  const saved = { claudeManagedAccounts: [legacy] };
+  const errors = [];
+  let written;
+  const run = require('node:vm').runInNewContext(`let openrouterSlotsMigrated, copilotSlotsMigrated; ${loader}; loadCredentialSettings`, {
+    ensureCredentialStore: () => store, migrateAccountSlots, process: { env: {} }, require,
+    reportCredentialStorageError: (_message, error) => errors.push(error.message),
+    LIMIT_PROVIDER_REGISTRY: require('../../src/shared/limits/registry').LIMIT_PROVIDER_REGISTRY,
+    hasCredentialSettings: () => true, settingsPath: 'settings.json',
+    stripCredentialSettings: require('../../src/shared/credentialStore').stripCredentialSettings,
+    writePrivateJsonAtomic: (_path, settings) => { written = JSON.parse(JSON.stringify(settings)); }
+  });
+  run(saved);
+  assert.deepEqual(errors, ['Saved account import conflict']);
+  assert.equal(store.readClaudeWebCredential(legacy.id), 'fixture-source');
+  assert.deepEqual(Array.from(saved.claudeManagedAccounts), [legacy]);
+  assert.deepEqual(written.claudeManagedAccounts, [legacy]);
+});
+
+test('legacy Claude Settings save uses the fixed credential IPC path', async () => {
+  const main = fs.readFileSync(require.resolve('../../src/electron/main.js'), 'utf8');
+  const line = main.split('\n').find(line => line.includes("ipcMain.handle('limits:saveCredential'"));
+  let handler;
+  const fixed = [];
+  Function('ipcMain', 'ACCOUNT_SLOT_PROVIDER_IDS', 'credentialCommands', 'accountSlotService', line)(
+    { handle: (_channel, fn) => { handler = fn; } }, new Set(['claude', 'qoder']),
+    { hasRetainedCredential: () => false, saveCredential: (...args) => fixed.push(args) },
+    { add: () => ({ errorCode: 'providerEditorRequired' }) });
+  const values = { claudeWebCookie: 'fixture-cookie', claudeWebOrganizationId: 'fixture-org' };
+  await handler(null, 'claude', values);
+  assert.deepEqual(fixed, [['claude', values]]);
+});
+
 test('Volcengine migration leaves a stored access key paired with its environment secret', t => {
   const store = fixture(t, { volcengineAccessKeyId: 'AKLT-test-key' });
   const env = { VOLCENGINE_SECRET_ACCESS_KEY: 'test-environment-secret' };

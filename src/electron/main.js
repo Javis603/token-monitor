@@ -1797,13 +1797,17 @@ function loadCredentialSettings(saved) {
       reportCredentialStorageError('could not move saved accounts into the account list', error);
       stored = store.settingsCredentials();
     }
+    // A destination with a matching ID can also be an import conflict.
+    // A matching copy and no remaining source credential prove cleanup.
+    const document = store.readDocument();
     for (const provider of ['claude', 'antigravity', 'workbuddy']) {
-      const completed = Number(store.readDocument().migrations.accountSlots?.[provider] || 0) >= 1;
-      const moved = new Set((stored[`${provider}AccountSlots`] || []).map(slot => slot.owner?.metadata?.id));
-      saved[`${provider}ManagedAccounts`] = completed ? [] : (saved[`${provider}ManagedAccounts`] || []).filter(account => !moved.has(account.id));
+      const records = document.credentials.providers?.[provider]?.accounts || {};
+      const moved = new Map((stored[`${provider}AccountSlots`] || []).map(slot => [slot.owner?.metadata?.id, slot.owner?.metadata]));
+      saved[`${provider}ManagedAccounts`] = (saved[`${provider}ManagedAccounts`] || []).filter(account =>
+        Object.hasOwn(records, account.id) || !require('node:util').isDeepStrictEqual(moved.get(account.id), account));
     }
-    openrouterSlotsMigrated = Number(store.readDocument().migrations.accountSlots?.openrouter || 0) >= 1;
-    copilotSlotsMigrated = Number(store.readDocument().migrations.accountSlots?.copilot || 0) >= 1;
+    openrouterSlotsMigrated = Number(document.migrations.accountSlots?.openrouter || 0) >= 1;
+    copilotSlotsMigrated = Number(document.migrations.accountSlots?.copilot || 0) >= 1;
     for (const entry of LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots)) {
       for (const field of entry.fields.filter(field => field.kind === 'credential')) saved[field.key] = '';
       delete saved[`${entry.id}DefaultAccountIdentity`];
@@ -8306,7 +8310,8 @@ app.whenReady().then(() => {
   ipcMain.handle('claude:saveWebAccount', (_event, values) => claudeAccountService().saveAccount(values));
   ipcMain.handle('claude:removeWebAccount', (_event, id) => claudeAccountService().removeAccount(String(id || '')));
   ipcMain.handle('claude:setAccountEnabled', (_event, id, enabled) => claudeAccountService().setAccountEnabled(String(id || ''), enabled));
-  ipcMain.handle('limits:saveCredential', (_event, providerId, values) => ACCOUNT_SLOT_PROVIDER_IDS.has(providerId) && !credentialCommands.hasRetainedCredential(providerId) ? accountSlotService.add(providerId, values) : credentialCommands.saveCredential(providerId, values));
+  // Claude managed accounts have their own IPC. This form serves the legacy Web lane.
+  ipcMain.handle('limits:saveCredential', (_event, providerId, values) => providerId !== 'claude' && ACCOUNT_SLOT_PROVIDER_IDS.has(providerId) && !credentialCommands.hasRetainedCredential(providerId) ? accountSlotService.add(providerId, values) : credentialCommands.saveCredential(providerId, values));
   getLimitsHistoryController().register();
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
   ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));

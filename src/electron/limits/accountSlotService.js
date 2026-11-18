@@ -174,6 +174,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       // unauthorized/indeterminate verdicts. Never return its settings payload.
       const commitCredential = async ({ candidate, provider }) => {
         if (!isCurrent()) throw new Error('Login cancelled');
+        if (entry.limits?.accountSlotIsSecondary?.(provider, candidate, {})) provider = null;
         if (!old && entry.dedupeAccounts) old = previous.find(slot => slot.accountKey === provider?.accountKey || accountValuesFingerprint(slot.values) === accountValuesFingerprint(candidate));
         if (!old && previous.length >= slotLimit) {
           rejected = capacityFailure();

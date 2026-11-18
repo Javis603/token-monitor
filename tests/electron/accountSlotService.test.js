@@ -118,6 +118,42 @@ test('real settings-change invalidation removes last slot row; pause/resume and 
     assert.equal(runtime.getSnapshot().providers.length, 1); assert.equal(runtime.getSnapshot().multiAccountProviders, undefined);
   } finally { runtime.stop(); }
 });
+test('Volcengine Agent-only answers never adopt the saved Coding identity', async () => {
+  const values = { volcengineAccessKeyId: 'AKLT-fixture', volcengineSecretAccessKey: 'fixture-secret' };
+  const { accountSlotKeys } = require('../../src/shared/providers/volcengine/limits');
+  const [coding, agent] = accountSlotKeys(values);
+  const options = { volcengineSourcePreference: 'api', volcengineAccountSlots: [{ id: 'saved', accountKey: coding, values }] };
+  const updates = [];
+  const fetch = async url => String(url).includes('GetAFPUsage')
+    ? response({ Result: { PlanType: 'Medium', AFPFiveHour: { Quota: 200, Used: 50 } } }) : response({}, 503);
+  const rows = await LIMIT_PROVIDER_FETCHERS.volcengine(options, { env: {}, fetch,
+    onAccountSlotResolved: (...args) => updates.push(args) });
+  assert.equal(rows.find(row => row.accountKey === agent)?.status, 'ok');
+  assert.ok(!rows.find(row => row.accountKey === agent)?.accountKeyAliases?.includes(coding));
+  assert.deepEqual(updates, []);
+  const h = harness();
+  h.fetch = fetch;
+  assert.equal((await h.service.add('volcengine', values)).saved, true);
+  assert.notEqual(h.settings.volcengineAccountSlots[0].accountKey, agent);
+});
+
+test('scoped Volcengine Agent refresh only probes the owning slot', async () => {
+  const slots = ['one', 'two'].map(id => ({ id, values: { volcengineAccessKeyId: `AKLT-${id}`, volcengineSecretAccessKey: 'fixture-secret' } }));
+  const { accountSlotKeys } = require('../../src/shared/providers/volcengine/limits');
+  const [, agent] = accountSlotKeys(slots[1].values);
+  let calls = 0;
+  const rows = await LIMIT_PROVIDER_FETCHERS.volcengine({ volcengineSourcePreference: 'api', volcengineAccountSlots: slots,
+    limitRefreshScope: { provider: 'volcengine', accountKey: agent } }, { env: {}, fetch: async (url, init) => {
+    calls++;
+    assert.match(init.headers.Authorization, /Credential=AKLT-two\//);
+    return response(String(url).includes('GetAFPUsage')
+      ? { Result: { PlanType: 'Medium', AFPFiveHour: { Quota: 200, Used: 50 } } }
+      : { Result: { QuotaUsage: [{ Level: 'session', Percent: 10 }] } });
+  } });
+  assert.equal(calls, 2);
+  assert.deepEqual(rows.filter(row => row.status === 'ok').map(row => row.accountKey), [agent]);
+});
+
 test('removing the last Volcengine slot retires both products but keeps environment quota', async () => {
   const env = { VOLCENGINE_ACCESS_KEY_ID: 'AKLT-env', VOLCENGINE_SECRET_ACCESS_KEY: 'env-secret' };
   const h = harness({ env });

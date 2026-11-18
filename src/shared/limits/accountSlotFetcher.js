@@ -149,7 +149,7 @@ function slotAccounts(entry, options, deps) {
   // No account answers to this key. It can still be the default account's when
   // this process has not seen that account answer yet; a default account whose
   // key is known and different is not what was asked for.
-  return { accounts: entry.limits?.accountSlotMultiRow ? accounts : accounts.filter((account) => !account.values && !account.known), scopeKey, previousKeys, check };
+  return { accounts: accounts.filter((account) => !account.values && !account.known), scopeKey, previousKeys, check };
 }
 
 /** @param {SlotEntry} entry @param {SlotOptions} options @param {SlotDeps} deps */
@@ -205,8 +205,10 @@ function createAccountSlotFetcher(entry) {
       const dispatchedValues = defaultAccountValues(entry, options, deps.env || process.env);
       let result = entry.fetchLimits(options, deps);
       if (deps.onAccountSlotResolved) result = Promise.resolve(result).then(raw => {
-        if (!deps.signal?.aborted) for (const row of entry.limits?.accountSlotMultiRow ? (Array.isArray(raw) ? raw.slice(0, 1) : [raw]) : Array.isArray(raw) ? raw : [raw]) {
-          if (row?.accountKey && !row.removed) deps.onAccountSlotResolved?.(entry.id, 'environment', { accountKey: row.accountKey, accountKeyAliases: row.accountKeyAliases || [] }, dispatchedValues);
+        if (!deps.signal?.aborted) for (const row of Array.isArray(raw) ? raw : [raw]) {
+          if (row?.accountKey && !row.removed && !entry.limits?.accountSlotIsSecondary?.(row, dispatchedValues, deps.env || process.env)) {
+            deps.onAccountSlotResolved?.(entry.id, 'environment', { accountKey: row.accountKey, accountKeyAliases: row.accountKeyAliases || [] }, dispatchedValues);
+          }
         }
         return raw;
       });
@@ -218,7 +220,7 @@ function createAccountSlotFetcher(entry) {
 
     async function collect() {
       const { accounts, scopeKey, check, discoveryFailed } = slotAccounts(entry, options, deps);
-      /** @type {{account: SlotAccount, values: Record<string, string>, row: any, accountKey: string, moved: boolean}[]} */
+      /** @type {{account: SlotAccount, values: Record<string, string>, row: any, accountKey: string, moved: boolean, secondary: boolean}[]} */
       const answered = [];
       /** @type {Map<string, any[]>} */
       const successful = new Map();
@@ -244,7 +246,8 @@ function createAccountSlotFetcher(entry) {
           // nothing remembered; a held provisional key's recovery moves on the
           // next provider-wide dispatch.
           const accountKey = scopeKey || row.accountKey || account.accountKey;
-          answered.push({ account, values, row, accountKey, moved: account.known && accountKey !== account.accountKey && (!entry.limits?.accountSlotMultiRow || row === answers[0]) });
+          const secondary = Boolean(entry.limits?.accountSlotIsSecondary?.(row, values, account.values ? {} : deps.env || process.env));
+          answered.push({ account, values, row, accountKey, secondary, moved: account.known && accountKey !== account.accountKey && !secondary });
         }
       }
       if (deps.signal?.aborted) complete = false;
@@ -259,8 +262,7 @@ function createAccountSlotFetcher(entry) {
       /** @type {string[]} First explicit local label, with discoveries preceding saved slots. */
       const labels = [];
       const provesServer = entry.serverAccountKey && entry.limits?.[entry.serverAccountKey];
-      for (const { account, values, row, accountKey, moved } of answered) {
-        const secondary = entry.limits?.accountSlotMultiRow && answered.find(item => item.account === account)?.row !== row;
+      for (const { account, values, row, accountKey, moved, secondary } of answered) {
         // A slot whose stored key was a proven server account, now answering as a
         // different proven server account (a credential replaced while offline),
         // is a different account: it takes nothing of the old identity, which the
@@ -275,7 +277,7 @@ function createAccountSlotFetcher(entry) {
         const previous = new Set(separate ? [account.accountKey, ...account.accountKeyAliases] : []);
         const reported = (row.accountKeyAliases || []).filter((/** @type {string} */ alias) => !previous.has(alias));
         const aliases = secondary ? [] : [...new Set([...(separate ? [] : account.accountKeyAliases), ...reported, ...(moved && !separate ? [account.accountKey] : [])])]
-          .filter((alias) => !live.has(alias)).slice(-8);
+          .filter((alias) => !live.has(alias) && !entry.limits?.accountSlotIsSecondary?.({ accountKey: alias }, values, account.values ? {} : deps.env || process.env)).slice(-8);
         // Like retirement, a remembered identity only advances on a pass the
         // runtime can accept whole.
         if (!scopeKey && complete && !secondary) {
