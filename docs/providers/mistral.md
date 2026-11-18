@@ -37,3 +37,7 @@ Requests use the injected transport, omit browser-managed credentials and do not
 `node --test tests/shared/mistralLimits.test.js tests/electron/limitProviderWiring.test.js tests/electron/limitProviderOrder.test.js` covers quota parsing, optional-source failures, credential redaction, registration and transport. Fixtures follow the upstream schemas; live Mistral authentication still needs manual acceptance with a real account. API billing spend is not reconstructed by this limits integration.
 
 `node scripts/verify-vendored-tokscale.js` exercises a nonzero Vibe metadata fixture against the selected binary and verifies both raw token buckets and normalized period/session totals. `node --test tests/shared/tokscaleUpstreamSources.test.js tests/shared/clientPartitionInvariants.test.js` checks source overrides, watch attribution and client partition identity.
+
+## Saved accounts
+
+Saved web accounts use isolated request cookies. A subscription or Vibe endpoint failure still preserves a successful credits response for that same account. No verified server account identity is inferred from these cookies.

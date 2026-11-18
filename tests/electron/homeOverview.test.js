@@ -805,6 +805,15 @@ test('patchDailyToday appends today with live cost so its heatmap cell is not em
   assert.equal(appended.cost, 492.5); // intensity uses cost — a 0 here renders today as empty
 });
 
+test('patchDailyToday replaces stale unpriced coverage with the live today value', () => {
+  const daily = [{ date: '2026-07-07', tokens: 100, cost: 1, unpricedTokens: 20 }];
+  const patched = patchDailyToday(daily, '2026-07-07', 120, 1.5, 0);
+  assert.equal(patched[0].unpricedTokens, undefined);
+  const unpriced = patchDailyToday(daily, '2026-07-07', 120, 1.5, 30);
+  assert.equal(unpriced[0].unpricedTokens, 30);
+  assert.equal(daily[0].unpricedTokens, 20);
+});
+
 test('renderHomeTrendsModule preserves long-range Activity and peak', () => {
   const rendererSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const match = rendererSource.match(/function renderHomeTrendsModule\(\) \{([\s\S]*?)\n\}\n\nfunction renderHome/);

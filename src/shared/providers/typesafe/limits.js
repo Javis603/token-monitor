@@ -17,9 +17,11 @@ const OUTPUT_USD_PER_TOKEN = 0;
 const ACTION_PATTERN = /"([0-9a-f]{40,})"[^)]{0,150}"getBillingOverviewResult"/i;
 const MAX_CHUNKS = 60;
 const ACTION_TTL_MS = 12 * 60 * 60 * 1000;
-let cachedActionId = '';
-let cachedRates = null;
-let actionExpiresAt = 0;
+// Per-account billing discovery, keyed by the credential hash so one session's
+// bundle never vouches for another account. Bounded to the slot cap so several
+// accounts do not evict each other and rescan the billing bundle every refresh.
+const MAX_CACHED_SESSIONS = 21;
+const billingSessions = new Map();
 
 // 'free_plan' → 'Free', 'pro_plan' → 'Pro'; unknown ids still read as words
 // rather than rendering as a raw enum or, worse, a blank badge.
@@ -163,19 +165,21 @@ async function discoverBilling(fetchImpl, cookie, signal) {
     if (actionId && inputRate !== null && outputRate !== null) break;
   }
   if (!actionId) throw errorWithStatus('unavailable', 'TypeSafe billing action unavailable');
-  cachedActionId = actionId;
-  cachedRates = {
+  const session = { actionId, rates: {
     input: inputRate === null ? INPUT_USD_PER_TOKEN : inputRate,
     output: outputRate === null ? OUTPUT_USD_PER_TOKEN : outputRate
-  };
-  actionExpiresAt = Date.now() + ACTION_TTL_MS;
-  return { actionId, rates: cachedRates };
+  }, expiresAt: Date.now() + ACTION_TTL_MS };
+  const key = hashKey('typesafe', cookie);
+  billingSessions.delete(key);
+  billingSessions.set(key, session);
+  while (billingSessions.size > MAX_CACHED_SESSIONS) billingSessions.delete(billingSessions.keys().next().value);
+  return session;
 }
 
 async function billingAction(fetchImpl, cookie, signal) {
-  let session = cachedActionId && cachedRates && Date.now() < actionExpiresAt
-    ? { actionId: cachedActionId, rates: cachedRates }
-    : await discoverBilling(fetchImpl, cookie, signal);
+  const key = hashKey('typesafe', cookie);
+  const cached = billingSessions.get(key);
+  let session = cached && Date.now() < cached.expiresAt ? cached : await discoverBilling(fetchImpl, cookie, signal);
   const post = (id) => request(fetchImpl, BILLING_URL, cookie, {
     method: 'POST',
     headers: {
@@ -189,7 +193,7 @@ async function billingAction(fetchImpl, cookie, signal) {
   });
   let response = await post(session.actionId);
   if (response.status === 404 && response.headers.get('x-nextjs-action-not-found') === '1') {
-    cachedActionId = '';
+    billingSessions.delete(key);
     session = await discoverBilling(fetchImpl, cookie, signal);
     response = await post(session.actionId);
   }
@@ -296,9 +300,7 @@ async function fetchTypesafeLimits(options = {}, deps = {}) {
 }
 
 function resetBillingCache() {
-  cachedActionId = '';
-  cachedRates = null;
-  actionExpiresAt = 0;
+  billingSessions.clear();
 }
 
 module.exports = { fetchTypesafeLimits, parseUsage, typesafeCookie, resetBillingCache };

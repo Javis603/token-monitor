@@ -6,12 +6,12 @@ const { normalizeManagedAccounts, normalizeCredential, refreshCredential,
 const { runWorkbuddyOAuthLogin } = require('./oauthLogin');
 
 function createWorkbuddyManagedAccounts({ getAccounts, setAccounts, saveSettings,
-  credentialStore, fetch, openExternal, onChanged, now = Date.now }) {
+  credentialStore, fetch, openExternal, onChanged, slotPersistence, now = Date.now }) {
   let mutationLane = Promise.resolve();
   let login = null;
   const generations = new Map();
   const flights = new Map();
-  const accounts = () => normalizeManagedAccounts(getAccounts());
+  const accounts = () => normalizeManagedAccounts(slotPersistence ? slotPersistence.accounts() : getAccounts());
   const generation = (id) => generations.get(id) || 0;
   const fingerprint = (value) => JSON.stringify(value);
   const serialize = (work) => {
@@ -37,8 +37,9 @@ function createWorkbuddyManagedAccounts({ getAccounts, setAccounts, saveSettings
   // The store and settings writer are deliberately separate. Restore both
   // even when an atomic writer renamed successfully before reporting failure.
   async function commitAccounts(next, id, credential, writeCredential = true, validate = () => {}) {
+    if (slotPersistence) return slotPersistence.commit(next, writeCredential ? [{ id, credential }] : [], validate);
     const previous = accounts();
-    const oldCredential = writeCredential ? credentialStore.readWorkbuddyCredential(id) : null;
+    const oldCredential = writeCredential ? (slotPersistence ? slotPersistence.read : credentialStore.readWorkbuddyCredential.bind(credentialStore))(id) : null;
     try {
       if (writeCredential) storeCredential(id, credential);
       setAccounts(next);
@@ -136,7 +137,7 @@ function createWorkbuddyManagedAccounts({ getAccounts, setAccounts, saveSettings
     if (signal?.aborted) throw authError('CANCELED');
     const account = matchingAccount(candidate);
     let stored;
-    try { stored = credentialStore.readWorkbuddyCredential(account.id); }
+    try { stored = (slotPersistence ? slotPersistence.read : credentialStore.readWorkbuddyCredential.bind(credentialStore))(account.id); }
     catch (_) { throw authError('PERSISTENCE_FAILED'); }
     if (!stored) throw authError('NOT_CONFIGURED', 'notConfigured');
     const credential = normalizeCredential(stored, { realm: account.realm, now: now() });
@@ -150,13 +151,18 @@ function createWorkbuddyManagedAccounts({ getAccounts, setAccounts, saveSettings
       const ownedFlight = flight;
       flight.promise = (async () => {
         const updated = await refreshCredential(credential, account, { fetch, signal: controller.signal, now });
-        return serialize(() => {
+        return serialize(async () => {
           const latest = accounts().find((item) => item.id === account.id);
           if (controller.signal.aborted || generation(account.id) !== ownedFlight.generation
             || fingerprint(latest) !== fingerprint(account)) throw authError('SUPERSEDED');
           try {
-            if (fingerprint(credentialStore.readWorkbuddyCredential(account.id)) !== fingerprint(stored)) throw authError('SUPERSEDED');
-            storeCredential(account.id, updated);
+            if (fingerprint((slotPersistence ? slotPersistence.read : credentialStore.readWorkbuddyCredential.bind(credentialStore))(account.id)) !== fingerprint(stored)) throw authError('SUPERSEDED');
+            if (slotPersistence) await slotPersistence.commit(accounts(), [{ id: account.id, credential: updated }], () => {
+              if (controller.signal.aborted || generation(account.id) !== ownedFlight.generation
+                || fingerprint(accounts().find(item => item.id === account.id)) !== fingerprint(account)
+                || fingerprint(slotPersistence.read(account.id)) !== fingerprint(stored)) throw authError('SUPERSEDED');
+            });
+            else storeCredential(account.id, updated);
           } catch (error) {
             if (error?.code === 'SUPERSEDED') throw error;
             throw authError('PERSISTENCE_FAILED');

@@ -136,7 +136,7 @@ When changing normalized limits behavior:
 
 ## Settings and credentials
 
-GUI-managed account metadata lives in `settings.antigravityManagedAccounts`. Raw tokens live under the Antigravity account namespace in the shared credential store, never in renderer-visible settings.
+GUI-managed accounts use shared account-slot persistence while the Antigravity owner retains OAuth and renewal. Existing records migrate with stable IDs after destination readback; disabled and incomplete records are preserved, and overflow remains available through the legacy owner. `antigravityManagedAccounts` in renderer settings is a safe metadata projection; raw tokens never enter renderer-visible settings.
 
 Settings persistence failures must leave account metadata unchanged. `saveSettings()` owns the in-memory settings rollback, while Antigravity account handlers compensate any dynamic credential write performed before that transaction. Credential writes and metadata writes form one user-visible operation even though they use separate files.
 

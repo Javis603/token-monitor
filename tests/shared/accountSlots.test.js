@@ -561,3 +561,52 @@ for (const withSlots of [false, true]) test(`environment resolution keeps dispat
     assert.ok(!state.has(`account-slot:deepseek:default:${accountValuesFingerprint({ deepseekApiKey: 'after', deepseekWebToken: '' })}`));
   }
 });
+
+test('unresolved slot failures follow reordered slots and retain their local labels', async () => {
+  const a = slot('a', undefined, { label: 'Work' });
+  const b = slot('b', undefined, { label: 'Personal' });
+  const runtime = createLimitsRuntime({ limitProviders: ['deepseek'], ...config(a, b) }, {
+    ...deps(), autoStart: false, autoRetry: false,
+    providerFetchers: { deepseek: fake(() => ({ provider: 'deepseek', status: 'unavailable' })) }
+  });
+  try {
+    await runtime.refresh({}, 'credential-edit');
+    runtime.reconfigure({ limitProviders: ['deepseek'], ...config(b, a) });
+    const rows = runtime.getSnapshot().providers;
+    assert.deepEqual(rows.map(r => r.accountKey), ['b', 'a'].map(id => hashKey('deepseek', 'account-slot', `slot:${id}`)));
+    assert.deepEqual(rows.map(r => r.accountName), ['Personal', 'Work']);
+  } finally { runtime.stop(); }
+});
+
+for (const changedVariant of ['cn', 'cn-personal']) test(`Alibaba slot retirement includes the ${changedVariant} variant and preserves its sibling`, async () => {
+  let moved = false;
+  const entry = limitProviderEntry('alibaba');
+  const fetch = createAccountSlotFetcher({ ...entry, fetchLimits: options => ({
+    provider: 'alibaba', source: 'web', status: 'ok', region: options.alibabaVariant,
+    accountKey: moved && options.alibabaVariant === changedVariant ? 'new-uid' : 'old-uid',
+    updatedAt: new Date().toISOString(), windows: [{ kind: 'billing', usedPercent: options.alibabaVariant === changedVariant ? 20 : 40 }]
+  }) });
+  const options = { alibabaSourcePreference: 'web', alibabaAccountSlots: ['cn', 'cn-personal'].map(variant => ({
+    id: variant, enabled: true, values: { alibabaCookie: `fixture=${variant}`, alibabaVariant: variant }
+  })) };
+  const d = deps();
+  const previous = await fetch(options, d);
+  assert.equal(previous.filter(row => !row.removed).length, 2);
+  moved = true;
+  const scoped = await fetch({ ...options, previousLimits: { providers: previous },
+    limitRefreshScope: { provider: 'alibaba', accountKey: 'old-uid', region: changedVariant } }, d);
+  assert.equal(scoped.some(row => row.removed), false, 'scoped refresh cannot retire the old identity');
+  const rows = await fetch({ ...options, previousLimits: { providers: previous } }, d);
+  assert.deepEqual(rows.filter(row => row.removed), [{ provider: 'alibaba', accountKey: 'old-uid', region: changedVariant, removed: true }]);
+  const sibling = changedVariant === 'cn' ? 'cn-personal' : 'cn';
+  assert.ok(rows.some(row => !row.removed && row.accountKey === 'old-uid' && row.region === sibling));
+  const runtime = createLimitsRuntime({ ...options, limitProviders: ['alibaba'], previousLimits: { providers: previous } }, {
+    ...deps(), autoStart: false, autoRetry: false, providerFetchers: { alibaba: fetch }
+  });
+  try {
+    await runtime.refresh({ provider: 'alibaba' }, 'credential-edit');
+    assert.deepEqual(runtime.getSnapshot().providers.map(row => [row.accountKey, row.region]).sort(),
+      [['new-uid', changedVariant], ['old-uid', sibling]].sort());
+    assert.equal(runtime.getSnapshot().providers.find(row => row.region === sibling).windows[0].usedPercent, 40);
+  } finally { runtime.stop(); }
+});

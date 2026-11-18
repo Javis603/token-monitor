@@ -5,11 +5,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 const test = require('node:test');
+const { createOwnerSlotPersistence } = require('../../src/electron/limits/ownerSlotPersistence');
+const { createAccountSlotService } = require('../../src/electron/limits/accountSlotService');
 const oauth = require('../../src/shared/providers/workbuddy/oauth');
 const { createWorkbuddyManagedAccounts } = require('../../src/electron/providers/workbuddy/managedAccounts');
 const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
 const start = source.indexOf('let workbuddyManagedAccountService = null;');
-const end = source.indexOf('function antigravityAccountsForRenderer()', start);
+const end = source.indexOf('function pushCodexActiveAccountToRenderer(', start);
 
 function harness() {
   const account = oauth.normalizeManagedAccounts([{ id: 'managed', realm: 'cn', userId: 'fixture', accountName: 'Fixture' }])[0];
@@ -28,6 +30,12 @@ function harness() {
     queueLimitInvalidation: async (scope, reason, options) => { invalidations.push({ scope, reason, options }); },
     Promise
   });
+  const service = createAccountSlotService({ getSettings: () => settings, env: {}, write: patch => Object.assign(settings, patch),
+    ownerWrite: (_provider, patch, metadata, writes) => {
+      Object.assign(settings, patch, { workbuddyManagedAccounts: metadata });
+      for (const { id, credential } of writes) { if (credential === null) secrets.delete(id); else secrets.set(id, credential); }
+    } });
+  context.ordinarySlotPersistence = () => createOwnerSlotPersistence('workbuddy', () => settings, () => service, id => secrets.get(id));
   // Supply a fetch function, never run any real network request.
   context.electronLimitsFetch = () => async () => { throw new Error('Network is unavailable'); };
   vm.runInContext(source.slice(start, end), context);

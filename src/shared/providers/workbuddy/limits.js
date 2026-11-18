@@ -1,4 +1,5 @@
 'use strict';
+const { mergedOwnerAccounts } = require('../../limits/ownerAccountSlots');
 
 const { hashKey } = require('../../hashKey');
 const { normalizeLimitProvider } = require('../../limits/core');
@@ -552,6 +553,7 @@ function appendWorkbuddyRemovals(rows, options, deps, accountScoped) {
 }
 
 async function fetchWorkbuddyLimits(options = {}, deps = {}) {
+  if (options.workbuddyAccountSlots?.length) options = { ...options, workbuddyManagedAccounts: mergedOwnerAccounts(options, 'workbuddy', options.workbuddyManagedAccounts || []).map(({ credentials, ...account }) => account) };
   const managed = Array.isArray(options.workbuddyManagedAccounts)
     ? options.workbuddyManagedAccounts.filter((account) => account && typeof account === 'object' && cleanSecret(account.id)) : [];
   const token = workbuddyAccessToken(deps.env || process.env, options);

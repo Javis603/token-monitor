@@ -7,10 +7,22 @@ const normalizeVolcengineRegion = (value) => String(value || '').trim().toLowerC
 
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'volcengine',
+  sourceSelection: { sources: ['api', 'cli'] },
+  accountSlots: true,
+  accountCredentialKeys: ['volcengineAccessKeyId', 'volcengineApiKey'],
+  accountCredentialReady: (values, key) => key !== 'volcengineAccessKeyId'
+    || !/^AKLT/i.test(values[key]) || Boolean(values.volcengineSecretAccessKey),
+  sources: [
+    { id: 'api', kind: 'apiKey', relation: 'alternative', products: ['coding-plan', 'ark', 'agent-plan'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.limits.sources.apiKeyDescription' },
+    { id: 'cli', kind: 'cli', relation: 'alternative', products: ['coding-plan', 'agent-plan'], labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' }
+  ],
   fetch: 'fetchVolcengineLimits',
   fields: [
+    { key: 'volcengineApiKey', kind: 'credential', storePath: ['providers', 'volcengine', 'apiKey'],
+      resolve: 'volcengineArkKey', normalize: 'secret' },
     {
       key: 'volcengineAccessKeyId',
+      resolve: 'volcenginePrimaryKey',
       kind: 'credential',
       storePath: ['providers', 'volcengine', 'accessKeyId'],
       normalize: 'secret',
@@ -18,17 +30,20 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
     },
     {
       key: 'volcengineSecretAccessKey',
+      resolve: 'volcenginePrimarySecret',
       kind: 'credential',
       storePath: ['providers', 'volcengine', 'secretAccessKey'],
       normalize: 'secret'
     },
     {
       key: 'volcengineRegion',
+      envFallback: ['VOLCENGINE_REGION', 'VOLCENGINE_REGION_ID', 'VOLC_REGION', 'DOUBAO_REGION'],
       kind: 'setting',
       normalize: normalizeVolcengineRegion
     },
     {
       key: 'volcengineAgentAccessKeyId',
+      envFallback: ['VOLCENGINE_AGENT_ACCESS_KEY_ID', 'VOLC_AGENT_ACCESS_KEY_ID'],
       kind: 'credential',
       storePath: ['providers', 'volcengine', 'agentAccessKeyId'],
       normalize: 'secret',
@@ -36,12 +51,14 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
     },
     {
       key: 'volcengineAgentSecretAccessKey',
+      envFallback: ['VOLCENGINE_AGENT_SECRET_ACCESS_KEY', 'VOLC_AGENT_SECRET_ACCESS_KEY'],
       kind: 'credential',
       storePath: ['providers', 'volcengine', 'agentSecretAccessKey'],
       normalize: 'secret'
     },
     {
       key: 'volcengineAgentRegion',
+      envFallback: ['VOLCENGINE_AGENT_REGION'],
       kind: 'setting',
       normalize: normalizeVolcengineRegion
     }
@@ -62,18 +79,22 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
         ? 'env'
         : ''
   }),
-  // Volcengine keeps its own panel (an optional second account for the Agent
-  // Plan with its own clear) and borrows only the shared save path.
+  // The shared form keeps the optional Agent credentials with their owner.
   form: {
-    kind: 'custom',
+    titleKey: 'settings.volcengine.title', openKey: 'settings.volcengine.openBrowser',
+    clearKey: 'settings.volcengine.clearCredentials', saveKey: 'settings.volcengine.saveCredentials',
+    emptyKey: 'settings.volcengine.statusNotSet', failedKey: 'settings.volcengine.saveFailed',
+    openUrl: { url: 'https://console.volcengine.com/ark' },
     fields: [
-      { key: 'volcengineAccessKeyId', required: true },
-      { key: 'volcengineSecretAccessKey' },
-      { key: 'volcengineRegion' },
-      { key: 'volcengineAgentAccessKeyId' },
-      { key: 'volcengineAgentSecretAccessKey' },
-      { key: 'volcengineAgentRegion' }
-    ]
+      { input: 'password', key: 'volcengineAccessKeyId', labelKey: 'settings.volcengine.accessKeyId', placeholderKey: 'settings.volcengine.accessKeyPlaceholder' },
+      { input: 'password', key: 'volcengineApiKey', labelKey: 'settings.limits.sources.apiKey' },
+      { input: 'password', key: 'volcengineSecretAccessKey', labelKey: 'settings.volcengine.secretAccessKey', placeholderKey: 'settings.volcengine.secretKeyPlaceholder' },
+      { input: 'text', secret: false, key: 'volcengineRegion', labelKey: 'settings.volcengine.region', placeholderKey: 'settings.volcengine.regionPlaceholder' },
+      { input: 'password', key: 'volcengineAgentAccessKeyId', labelKey: 'settings.volcengine.agentAccessKeyId', placeholderKey: 'settings.volcengine.agentAccessKeyPlaceholder' },
+      { input: 'password', key: 'volcengineAgentSecretAccessKey', labelKey: 'settings.volcengine.agentSecretAccessKey', placeholderKey: 'settings.volcengine.secretKeyPlaceholder' },
+      { input: 'text', secret: false, key: 'volcengineAgentRegion', labelKey: 'settings.volcengine.agentRegion', placeholderKey: 'settings.volcengine.regionPlaceholder' }
+    ],
+    manual: [{ note: 'settings.volcengine.note' }, { field: 'volcengineAccessKeyId' }, { field: 'volcengineApiKey' }, { field: 'volcengineSecretAccessKey' }, { field: 'volcengineRegion' }, { field: 'volcengineAgentAccessKeyId' }, { field: 'volcengineAgentSecretAccessKey' }, { field: 'volcengineAgentRegion' }]
   },
   urlPolicy: [
     { hosts: ['www.volcengine.com', 'console.volcengine.com'] }

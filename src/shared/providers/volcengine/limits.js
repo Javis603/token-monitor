@@ -1,5 +1,7 @@
 'use strict';
 
+const { selectedSource } = require('../../limits/sourceSelection');
+
 const crypto = require('node:crypto');
 const { fetchArkcliLimits } = require('./arkcli');
 const { normalizeLimitProvider } = require('../../limits/core');
@@ -61,7 +63,7 @@ function volcengineCredentials(env = process.env, options = {}) {
     'VOLC_ACCESS_KEY_ID',
     'DOUBAO_ACCESS_KEY_ID'
   ]);
-  const envApiKey = pickFirst(env, ['ARK_API_KEY', 'VOLCENGINE_API_KEY', 'DOUBAO_API_KEY']);
+  const envApiKey = cleanSecret(options.volcengineApiKey) || pickFirst(env, ['ARK_API_KEY', 'VOLCENGINE_API_KEY', 'DOUBAO_API_KEY']);
   const combinedKey = inputKey || envAccessKeyId;
   if (combinedKey && !isVolcengineAccessKeyId(combinedKey)) return { mode: 'ark', apiKey: combinedKey, region };
   const accessKeyId = combinedKey;
@@ -503,7 +505,7 @@ async function fetchVolcengineAgentPlanLimits(credentials, deps, now, updatedAt)
     source: 'api',
     status: 'ok',
     updatedAt,
-    windows: usage.windows,
+    windows: usage.windows.map(window => ({ ...window, productId: 'agent-plan' })),
     region: credentials.region
   });
 }
@@ -520,7 +522,8 @@ async function fetchVolcengineLimits(options = {}, deps = {}) {
     windows: [],
     ...(credentials ? { region: credentials.region } : {})
   });
-  const credentials = volcengineCredentials(env, options);
+  const source = deps.accountSlotSaved ? 'api' : selectedSource('volcengine', options, deps);
+  const credentials = source === 'cli' ? null : volcengineCredentials(env, options);
   if (!credentials) {
     // Never replace an explicitly selected (even incomplete) account with the
     // unrelated identity currently logged into a CLI.
@@ -528,7 +531,7 @@ async function fetchVolcengineLimits(options = {}, deps = {}) {
       /volcengine.*(key|secret)/i.test(key) && cleanSecret(value))
       || Object.entries(env).some(([key, value]) =>
         /^(VOLCENGINE|VOLC|DOUBAO|ARK)_.*(KEY|SECRET)/.test(key) && cleanSecret(value));
-    if (explicit || env.TOKEN_MONITOR_VOLCENGINE_ARKCLI === '0') return [statusRow('notConfigured')];
+    if (source === 'api' || deps.probe || (source !== 'cli' && explicit) || env.TOKEN_MONITOR_VOLCENGINE_ARKCLI === '0') return [statusRow('notConfigured')];
     const rows = await fetchArkcliLimits(deps, updatedAt, options.previousLimits);
     const scope = options.limitRefreshScope?.provider === 'volcengine' ? options.limitRefreshScope : null;
     const identity = scope && [
@@ -578,15 +581,25 @@ async function fetchVolcengineLimits(options = {}, deps = {}) {
     if (codingRow) return agentRow ? [codingRow, agentRow] : [codingRow];
 
     if (agentRow) {
-      // The Agent Plan answered, so a Coding lane with nothing to report is not
-      // worth a row of its own — unless an Ark key can still answer for it.
       if (coding.status === 'rejected' && credentials.apiKey) {
         try {
           return [await tryArkFallback(), agentRow];
-        } catch {
-          return [agentRow];
+        } catch (error) {
+          deps.noteLimitFailure?.(error, { source: 'api' });
         }
       }
+      // A failed or empty Coding response does not prove its previously owned
+      // product disappeared. Keep its identity so slot snapshots and runtime
+      // retention can preserve last-good quota without failing the Agent Plan.
+      const codingKey = hashKey('volcengine', credentials.accessKeyId, credentials.region);
+      const previousCoding = options.previousLimits?.providers?.some(row => row.provider === 'volcengine' && row.accountKey === codingKey);
+      if (previousCoding) {
+        if (coding.status === 'rejected') deps.noteLimitFailure?.(coding.reason, { source: 'api' });
+        const failure = { ...statusRow(coding.status === 'rejected' ? coding.reason?.status || 'unavailable' : 'unavailable'),
+          accountKey: codingKey, accountLabel: 'Coding Plan' };
+        return [failure, agentRow];
+      }
+      // Never-observed Coding Plans stay absent for Agent-only accounts.
       return [agentRow];
     }
 
@@ -631,7 +644,7 @@ async function fetchVolcengineCodingPlanLimits(credentials, deps, now, updatedAt
     source: 'api',
     status: usage.windows.length ? 'ok' : 'unavailable',
     updatedAt: usage.updatedAt || updatedAt,
-    windows: usage.windows,
+    windows: usage.windows.map(window => ({ ...window, productId: 'coding-plan' })),
     region: credentials.region
   });
 }
@@ -660,7 +673,7 @@ async function fetchVolcengineArkLimits(credentials, deps, now, updatedAt) {
       source: 'api',
       status: usage.windows.length ? 'ok' : 'unavailable',
       updatedAt: usage.updatedAt || updatedAt,
-      windows: usage.windows,
+      windows: usage.windows.map(window => ({ ...window, productId: 'ark' })),
       region: credentials.region
     });
   }
@@ -702,7 +715,96 @@ async function confirmVolcengineArkExhausted(credentials, deps, model, now, init
   }
 }
 
-module.exports = {
+// Validate only the edited credential lanes. Environment companions are used
+// for the probe, while main persists only the locally submitted fields.
+async function probeRetainedCredentials(settings, draft, deps) {
+  const values = { ...settings, ...draft };
+  const env = deps.env || {};
+  const now = (deps.now || Date.now)();
+  const updatedAt = new Date(now).toISOString();
+  const jobs = [];
+  if (draft.volcengineAccessKeyId || draft.volcengineSecretAccessKey) {
+    const credentials = volcengineCredentials(env, { ...values, volcengineApiKey: '' });
+    if (credentials?.mode === 'signed') {
+      jobs.push(fetchVolcengineLimits({
+        volcengineAccessKeyId: credentials.accessKeyId, volcengineSecretAccessKey: credentials.secretAccessKey,
+        volcengineRegion: credentials.region, volcengineSourcePreference: 'api'
+      }, { ...deps, env: {} }));
+    } else if (draft.volcengineAccessKeyId && credentials?.apiKey === draft.volcengineAccessKeyId) {
+      jobs.push(fetchVolcengineArkLimits(credentials, deps, now, updatedAt));
+    } else {
+      jobs.push([{ status: 'notConfigured' }]);
+    }
+  }
+  if (draft.volcengineApiKey) {
+    const credentials = volcengineCredentials(env, { volcengineApiKey: draft.volcengineApiKey, volcengineRegion: values.volcengineRegion });
+    jobs.push(fetchVolcengineArkLimits({ apiKey: draft.volcengineApiKey, region: credentials.region }, deps, now, updatedAt));
+  }
+  if (draft.volcengineAgentAccessKeyId || draft.volcengineAgentSecretAccessKey) {
+    const agent = volcengineAgentCredentials(env, values);
+    jobs.push(agent?.mode === 'signed' && agent.explicit
+      ? fetchVolcengineAgentPlanLimits(agent, deps, now, updatedAt)
+      : [{ status: 'notConfigured' }]);
+  }
+  const results = await Promise.allSettled(jobs);
+  const rows = results.map(result => {
+    if (result.status === 'rejected') return { status: result.reason?.status || 'unavailable' };
+    const candidates = (Array.isArray(result.value) ? result.value : [result.value]).filter(Boolean);
+    return candidates.find(row => row.status === 'ok') || candidates[0] || { status: 'unavailable' };
+  });
+  return rows.find(row => row.status === 'unauthorized' || row.status === 'notConfigured')
+    || rows.find(row => row.status !== 'ok') || rows[0] || { status: 'notConfigured' };
+}
+
+function accountSlotMigrationNeedsEnvironment(values, env) {
+  return (volcengineCredentials(env, values)?.mode === 'signed' && volcengineCredentials({}, values)?.mode !== 'signed'
+      && Boolean(values.volcengineAccessKeyId || values.volcengineSecretAccessKey))
+    || (Boolean(values.volcengineAgentAccessKeyId || values.volcengineAgentSecretAccessKey)
+      && volcengineAgentCredentials(env, values)?.mode === 'signed'
+      && volcengineAgentCredentials({}, values)?.mode !== 'signed');
+}
+function accountSlotKeys(values, env = {}) {
+  const credentials = volcengineCredentials(env, values);
+  if (!credentials) return [];
+  const agent = volcengineAgentCredentials(env, values);
+  const arkKey = credentials.apiKey ? hashKey('volcengine', credentials.apiKey, credentials.region) : '';
+  if (credentials.mode === 'ark') return [arkKey];
+  return [hashKey('volcengine', credentials.accessKeyId, credentials.region),
+    ...(agent?.mode === 'signed' ? [volcengineAgentAccountKey(agent)] : []), ...(arkKey ? [arkKey] : [])];
+}
+function accountSlotIsSecondary(row, values, env) {
+  const agent = volcengineAgentCredentials(env, values);
+  return Boolean(agent && row?.accountKey === volcengineAgentAccountKey(agent));
+}
+function accountSlotsForScope(accounts, scope, options, deps) {
+  const productOwners = accounts.filter(account => accountSlotKeys(account.values || options, account.values ? {} : deps.env || process.env).includes(scope.accountKey));
+  return productOwners.length ? productOwners : accounts.filter(account => account.accountKey === scope.accountKey
+    || account.accountKeyAliases.includes(scope.accountKey));
+}
+async function fetchAccountSlotSnapshot(options, deps, collect) {
+  const source = selectedSource('volcengine', options, deps);
+  if (deps.probe || source === 'api') return collect(options, deps);
+  const hasSlots = Boolean(options.volcengineAccountSlots?.length);
+  if (!hasSlots && source !== 'cli') return collect(options, deps);
+  const local = await fetchVolcengineLimits({ ...options, volcengineSourcePreference: 'cli' }, deps);
+  if (!hasSlots) {
+    if (options.limitRefreshScope || deps.signal?.aborted) return local;
+    // Forced CLI closes the API lane when the final slot is removed, even
+    // when fixed credentials still exist. Retire only its previously accepted rows.
+    const retired = (options.previousLimits?.providers || [])
+      .filter(row => row.provider === 'volcengine' && row.source === 'api' && row.accountKey)
+      .map(row => ({ provider: 'volcengine', accountKey: row.accountKey, removed: true }));
+    return [...local, ...retired];
+  }
+  const previousLimits = { providers: (options.previousLimits?.providers || []).filter(row => row.source !== 'cli') };
+  // Confirmed removals carry identity only, without a source field.
+  return [...local.filter(row => row.source === 'cli' || row.removed), ...await collect({ ...options, volcengineSourcePreference: 'api', previousLimits }, deps)];
+}
+function volcengineArkKey(env) { return pickFirst(env, ['ARK_API_KEY', 'VOLCENGINE_API_KEY', 'DOUBAO_API_KEY']); }
+function volcenginePrimaryKey(env) { const c = volcengineCredentials(env); return c?.accessKeyId || c?.apiKey || ''; }
+function volcenginePrimarySecret(env) { return volcengineCredentials(env)?.secretAccessKey || ''; }
+
+module.exports = { probeRetainedCredentials, accountSlotIsSecondary, accountSlotsForScope, accountSlotKeys, accountSlotMigrationNeedsEnvironment, fetchAccountSlotSnapshot, volcenginePrimaryKey, volcenginePrimarySecret, volcengineArkKey,
   VOLCENGINE_FETCH_TIMEOUT_MS,
   VOLCENGINE_CODING_PLAN_URL,
   VOLCENGINE_ARK_CHAT_COMPLETIONS_URL,

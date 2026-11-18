@@ -22,3 +22,9 @@ The provider exchanges the Cookie for a JWT on every refresh, then requests curr
 Existing `traeAccessToken` / `traeDeviceId` settings and `TRAE_ACCESS_TOKEN` / `TRAE_DEVICE_ID` environment variables (including their `TOKEN_MONITOR_` aliases) retain the old `ide_user_ent_usage` route when no Cookie is configured. The account form also offers **Access token (legacy)**. Saving either authentication type replaces the other stored type; environment fallbacks remain independently configured.
 
 The legacy endpoint can return 401 with an unexpired IDE JWT on newer Trae CN clients. Telemetry IDs are not evidence of the server-registered device ID used by the IDE. Prefer the web-session route; it does not need a device ID or the IDE's TTNet stack.
+
+The widget supports multiple accounts. Each slot uses the same Browser Cookie / Access token choice; its device ID belongs to that slot. Environment credentials remain one read-only account, with the existing Cookie-first precedence.
+
+## Connection source selection
+
+Automatic preserves Cookie-first precedence. The connection selector can force the Web session or legacy IDE token route; an absent or rejected selected credential never tries the other route. Reads report Web provenance for Cookie and API/IDE provenance for the legacy token. Existing token-derived identities remain separate when the two credentials cannot prove a common server identity.

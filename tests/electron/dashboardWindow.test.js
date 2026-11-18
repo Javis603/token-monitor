@@ -49,7 +49,7 @@ function dashboardWindowFixture(platform = 'win32') {
   const context = vm.createContext({
     dashboardWindow: null, dashboardWindowReady: false,
     BrowserWindow: Window, process: { platform }, path, __dirname: rootDir,
-    appWindowIcon: () => ({}), applyWindowsChrome() {}, syncWindowsBackdrop() {},
+    appWindowIcon: () => ({}), applyWindowsChrome() {}, suppressLinuxSystemContextMenu() {}, syncWindowsBackdrop() {},
     nativeBlurEnabled: () => false, attachNativeMaterialVisibility() {},
     syncNativeMaterialVisibility() {}, nativeMaterialOptions: () => ({}), settings: {},
     isAllowedExternalUrl: () => false, console: { log() {} },

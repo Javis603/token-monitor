@@ -86,8 +86,22 @@
     if (age === 0) initialSamples = indices;
     return indices;
   }
+  let steadyInk;
+  const steadyGlyphFrames = new Map();
   function glyphFrames({ outgoing = false, numeric, direction, ink, opacity = 1,
     filter = 'blur(0px)', matching = false, age = 0 }) {
+    // A settled reading's fresh glyphs share the same curves. Their position
+    // in the wave is a separate delay passed to Element.animate().
+    let steadyKey;
+    if (age === 0 && !matching && filter === 'blur(0px)' && (!outgoing || opacity === 1)) {
+      if (ink !== steadyInk) {
+        steadyInk = ink;
+        steadyGlyphFrames.clear();
+      }
+      steadyKey = `${outgoing}:${numeric}:${direction}`;
+      const cached = steadyGlyphFrames.get(steadyKey);
+      if (cached) return cached;
+    }
     const initialBlur = Math.sqrt(Array.from(filter.matchAll(/blur\(([\d.]+)px\)/g), (match) => Number(match[1]) ** 2)
       .reduce((sum, value) => sum + value, 0));
     const initialBody = response(age, 1, 0.278);
@@ -96,7 +110,7 @@
     // channel. Separators blur too: a sharp comma reads as a stray mark.
     const initialBlurProgress = Math.min(0.999999, response(age, 1, 0.22));
     const blurEm = 0.16 * ink;
-    return sampleIndices(age).map((index) => {
+    const frames = sampleIndices(age).map((index) => {
       const offset = index / 48;
       const seconds = age + offset * Math.max(0, 0.65 - age);
       const position = index === 48 ? 1 : response(seconds, 0.55, 0.353);
@@ -120,6 +134,8 @@
           : matching ? `blur(${initialBlur * (1 - blur)}px)` : `blur(${blurEm * (1 - blur)}em)`
       };
     });
+    if (steadyKey !== undefined) steadyGlyphFrames.set(steadyKey, frames);
+    return frames;
   }
   function normalize(value) { return value === 'count' ? 'count' : 'roll'; }
 
@@ -260,6 +276,11 @@
     // Two endpoint measurements per number; no layout reads during frames.
     const box = wrapper.getBoundingClientRect();
     const rects = transitions.map(({ place }) => place.getBoundingClientRect());
+    // Outgoing glyphs are absolutely positioned. Read the companion alongside
+    // the destination glyphs, before adding layers that can invalidate layout.
+    const companionNextLeft = companion?.getBoundingClientRect().left;
+    const destinationFontSize = parseFloat(view.getComputedStyle(el).fontSize);
+    const ink = inkRatio(document, el);
     // The wrapper's mask paints only inside its padding; widen that, without
     // moving layout, by however far the outgoing reading overhangs.
     const overhangLeft = Math.max(0, box.left - Math.min(...previous.map((glyph) => glyph.rect.left)));
@@ -267,14 +288,12 @@
     if (overhangLeft) wrapper.style.setProperty('--token-number-overhang-left', `${overhangLeft}px`);
     if (overhangRight) wrapper.style.setProperty('--token-number-overhang-right', `${overhangRight}px`);
     const origin = { left: box.left - overhangLeft, top: box.top };
-    const destinationFontSize = parseFloat(view.getComputedStyle(el).fontSize);
     const startTime = document.timeline?.currentTime;
     const animations = [];
     const glyphs = [];
     // Increasing values enter from below; travel uses ink height, not the CSS
     // line box.
     const direction = increasing ? 1 : -1;
-    const ink = inkRatio(document, el);
     const indexOf = (glyph) => Number(glyph.key.split(':')[1]);
     const isUnit = (key) => key.startsWith('unit:');
     const center = (rect) => rect.left + rect.width / 2;
@@ -351,7 +370,7 @@
     const keys = new Set(transitions.map((part) => part.key));
     previous.filter((glyph) => !keys.has(glyph.key)).forEach(appendOutgoing);
     if (companion && Number.isFinite(companionLeft)) {
-      const dx = companionLeft - companion.getBoundingClientRect().left;
+      const dx = companionLeft - companionNextLeft;
       if (dx) animate(companion, [
         { transform: `translateX(${dx}px)` },
         { transform: 'translateX(0px)' }

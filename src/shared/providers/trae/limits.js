@@ -1,4 +1,5 @@
 'use strict';
+const { selectedSource } = require('../../limits/sourceSelection');
 
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const { hashKey } = require('../../hashKey');
@@ -184,8 +185,9 @@ async function fetchTraeWebCredits(cookie, deps) {
 async function fetchTraeLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
-  const accessToken = traeAccessToken(env, options);
-  const cookie = traeCookie(env, options);
+  const selection = selectedSource('trae', options, deps);
+  const accessToken = selection === 'web' ? '' : traeAccessToken(env, options);
+  const cookie = selection === 'ide' ? '' : traeCookie(env, options);
   if (!accessToken && !cookie) {
     return normalizeLimitProvider({
       provider: 'trae',
@@ -229,7 +231,8 @@ async function fetchTraeLimits(options = {}, deps = {}) {
     return normalizeLimitProvider({
       provider: 'trae',
       accountKey: hashKey('trae', cookie || accessToken),
-      source: 'api',
+      sourceDetail: cookie ? 'managed' : 'ide',
+      source: cookie ? 'web' : 'api',
       status: 'ok',
       updatedAt,
       windows: [window],
@@ -242,7 +245,8 @@ async function fetchTraeLimits(options = {}, deps = {}) {
   } catch (error) {
     return normalizeLimitProvider({
       provider: 'trae',
-      source: 'api',
+      source: cookie ? 'web' : 'api',
+      sourceDetail: cookie ? 'managed' : 'ide',
       status: error?.status === 'timeout' ? 'unavailable' : error?.status || 'unavailable',
       updatedAt,
       windows: [],

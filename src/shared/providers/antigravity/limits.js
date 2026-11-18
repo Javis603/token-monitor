@@ -1,4 +1,5 @@
 'use strict';
+const { mergedOwnerAccounts } = require('../../limits/ownerAccountSlots');
 
 // Antigravity limits provider: RPC snapshot plus the OAuth/probe helpers in
 // this folder. Reached through providerFetchers() in src/shared/limits/collector.js.
@@ -106,6 +107,7 @@ function antigravityAccountError(account, error, nowMs) {
 }
 
 async function fetchAntigravityLimits(options = {}, deps = {}) {
+  if (options.antigravityAccountSlots?.length) options = { ...options, antigravityManagedAccounts: mergedOwnerAccounts(options, 'antigravity', options.antigravityManagedAccounts || []).map(account => ({ ...account, credentials: account.credentials })) };
   const nowMs = (deps.now || Date.now)();
   const probeFn = deps.antigravityProbe || antigravityProbe.probe;
   const scope = options.limitRefreshScope?.provider === 'antigravity' ? options.limitRefreshScope : null;

@@ -4,17 +4,27 @@
 // Factory Droid limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'factory',
+  accountSlots: true,
+  // Independent credential owners, all querying the same Factory API.
+  // Selecting an acquisition location would hide another account.
+  sources: [
+    { id: 'api', kind: 'apiKey', relation: 'complement', products: ['factory'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.factory.note' },
+    { id: 'droid-env', kind: 'file', relation: 'complement', products: ['factory'], labelKey: 'settings.limits.sources.file', descriptionKey: 'settings.limits.sources.fileDescription' }
+  ],
   fetch: 'fetchFactoryLimits',
   fields: [
     {
       key: 'factoryApiKey',
       kind: 'credential',
       storePath: ['providers', 'factory', 'apiKey'],
+      resolve: 'factoryAccountEnvKey',
       normalize: 'secret'
     }
   ],
   discover: (env, limits) => limits.resolveFactoryAutomaticApiKey({}, { env }),
+  discoveredAccounts: (_env, limits, deps) => limits.discoverAccountSlots(deps),
   status: {
+    credential: 'factoryApiKey',
     configuredKey: 'factoryCredentialConfigured',
     sourceKey: 'factoryCredentialSource',
     pendingKey: 'factoryPendingCheckSince'

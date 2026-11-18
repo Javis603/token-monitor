@@ -1,9 +1,11 @@
 'use strict';
 
-const { configuredMultiAccountProviders, normalizeAccountSlots, accountSlotKey, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
+const { orderAccountRows, defaultIdentityKey, configuredMultiAccountProviders, normalizeAccountSlots, accountSlotKey, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
+const { alibabaVariantIdentityPart, alibabaRetiredVariantScopes } = require('../providers/alibaba/runtimeIdentity');
 const { LIMIT_PROVIDER_REGISTRY } = require('./registry');
 
 const crypto = require('node:crypto');
+const { hashKey } = require('../hashKey');
 const {
   PROVIDER_CLEANUP_GRACE_MS,
   normalizeLimitsRefreshMode,
@@ -104,7 +106,7 @@ function credentialIdentityPart(provider, value) {
 function scopeIdentityKey(scope) {
   const provider = providerId(scope?.provider);
   const identity = accountIdentityPart(scope) || credentialIdentityPart(provider, scope);
-  return identity ? `${provider}:${identity}` : `${provider}:*`;
+  return identity ? `${provider}:${identity}${provider === 'alibaba' ? alibabaVariantIdentityPart(scope) : ''}` : `${provider}:*`;
 }
 
 function isAccountScope(scope) {
@@ -114,17 +116,16 @@ function isAccountScope(scope) {
 function normalizedScope(scope) {
   if (!scope || typeof scope !== 'object') return { provider: '' };
   const provider = providerId(scope.provider);
-  // Muse rows identify local sources, not accounts. Display labels cannot
-  // address one source, so refresh scopes stay provider-wide. clear() can
-  // explicitly invalidate the web source when its Cookie changes.
-  return provider === 'muse' ? { provider } : { ...cloneValue(scope), provider };
+  // Legacy anonymous Muse rows address sources; saved web slots address accounts.
+  // Display labels alone still cannot narrow an anonymous refresh.
+  return provider === 'muse' && !scope.accountKey ? { provider } : { ...cloneValue(scope), provider };
 }
 
 function rowIdentityKey(row) {
   const provider = providerId(row?.provider);
-  if (provider === 'muse' && row?.source) return `${provider}:source:${row.source}`;
+  if (provider === 'muse' && row?.source && !row.accountKey) return `${provider}:source:${row.source}`;
   const identity = accountIdentityPart(row);
-  return identity ? `${provider}:${identity}` : `${provider}:*`;
+  return identity ? `${provider}:${identity}${provider === 'alibaba' ? alibabaVariantIdentityPart(row) : ''}` : `${provider}:*`;
 }
 
 function publicAttemptStatus(status) {
@@ -369,13 +370,26 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     }
     const entry = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === provider && entry.accountSlots);
     if (entry) {
-      const slots = normalizeAccountSlots(entry, config[accountSlotKey(entry)]).filter(slot => slot.enabled);
       const current = providerRuntimeState.get(`account-slot:${entry.id}:default:${accountValuesFingerprint(defaultAccountValues(entry, config, deps.env || process.env))}`)?.accountKey;
-      const owner = row => slots.find(slot => slot.accountKey === row.accountKey)
-        || (row.accountKey === current ? undefined : slots.find(slot => slot.accountKeyAliases.includes(row.accountKey)));
+      const saved = normalizeAccountSlots(entry, config[accountSlotKey(entry)]).map(slot => ({ ...slot,
+        accountKey: slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`) }));
+      const ambient = Object.values(config[`${entry.id}AmbientAccounts`] || {});
+      const environmentOrder = config[defaultIdentityKey(entry)]?.order;
+      // Legacy fixed accounts without discovery retain their trailing position.
+      const environment = current ? { accountKey: current, accountKeyAliases: [], source: 'environment',
+        order: environmentOrder ?? (entry.discoveredAccounts ? undefined : saved.length + ambient.length) } : null;
+      const slots = orderAccountRows(saved, ambient, environment).filter(slot => slot.enabled !== false);
+      const owner = row => {
+        const owners = provider === 'alibaba' ? slots.filter(slot => {
+          const values = slot.source === 'environment' ? config : slot.values;
+          return entry.limits.alibabaVariant(values, slot.source === 'environment' ? deps.env : {}) === (row.region || 'cn');
+        }) : slots;
+        return owners.find(slot => slot.accountKey === row.accountKey)
+          || (row.accountKey === current ? undefined : owners.find(slot => slot.accountKeyAliases.includes(row.accountKey)));
+      };
       for (const row of rows) {
         const slot = owner(row);
-        if (slot) {
+        if (slot && slot.source !== 'environment') {
           // Labels are local metadata; changing them never replaces quota data.
           // A slot's local name is its accountName, also while a retained
           // reading answers for it; the provider's accountLabel (Qoder's plan)
@@ -402,7 +416,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     snapshot = normalizeLimitsSummary({
       updatedAt: new Date(now()).toISOString(),
       refreshMs,
-      multiAccountProviders: enabled && !stopped ? configuredMultiAccountProviders(LIMIT_PROVIDER_REGISTRY, config, deps.env || process.env).filter(id => configuredProviders.has(id)) : [],
+      multiAccountProviders: enabled && !stopped ? configuredMultiAccountProviders(LIMIT_PROVIDER_REGISTRY.filter(entry => configuredProviders.has(entry.id)), config, deps.env || process.env, deps) : [],
       providers
     });
     pruneAttemptedResetBoundaries(snapshot, attemptedResetBoundaries);
@@ -581,7 +595,10 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
   }
 
   function accountRevisionStillCurrent(lane, identityKey, dispatch) {
-    return (lane.accountRevisions.get(identityKey) || 0) === (dispatch.accountRevisions.get(identityKey) || 0);
+    const keys = [identityKey];
+    // An account-wide clear also fences variants first discovered by this probe.
+    if (lane.provider === 'alibaba' && identityKey.includes(':region:')) keys.push(identityKey.slice(0, identityKey.lastIndexOf(':region:')));
+    return keys.every(key => (lane.accountRevisions.get(key) || 0) === (dispatch.accountRevisions.get(key) || 0));
   }
 
   function applyAttempt(lane, identityKey, row, status, at, invalidatedWindowLabels) {
@@ -590,6 +607,20 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       lastGood: null,
       lastAttempt: null
     };
+    if (lane.provider === 'alibaba' && row.source === 'cli' && row.region) {
+      // CLI and Cookie can report the same identity. Keep the CLI's own quota
+      // when a later Cookie result becomes the displayed row. A confirmed CLI
+      // login replacement relinquishes only that variant's previous ownership.
+      if (status === 'ok' || !TRANSIENT_STATUSES.has(status)) {
+        for (const state of lane.identities.values()) {
+          if (state.alibabaCliLastGood?.region === row.region) {
+            delete state.alibabaCliLastGood;
+            delete state.alibabaCliLastAttempt;
+          }
+        }
+      }
+      if (status === 'ok' && row.accountKey) existing.alibabaCliLastGood = row;
+    }
     if (status === 'ok') {
       const retainedWindows = existing.lastGood && invalidatedWindowLabels
         ? existing.lastGood.windows.filter((window) => !invalidatedWindowLabels.has(window.label)
@@ -615,7 +646,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       const previous = existing.lastAttempt?.row || existing.lastGood;
       if (previous?.source) row = { ...row, source: previous.source };
     }
-    if (lane.provider === 'workbuddy' && TRANSIENT_STATUSES.has(status) && !row.accountKey) {
+    if (['workbuddy', 'alibaba'].includes(lane.provider) && TRANSIENT_STATUSES.has(status) && !row.accountKey) {
       // A partial discovery can miss an encrypted identity which has never
       // produced lastGood quota. Preserve its last known metadata as well as
       // identities with successful readings until explicit removal confirms
@@ -627,6 +658,9 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       }
     }
     existing.lastAttempt = { status, at, row };
+    if (lane.provider === 'alibaba' && row.source === 'cli' && existing.alibabaCliLastGood) {
+      existing.alibabaCliLastAttempt = existing.lastAttempt;
+    }
     lane.identities.set(identityKey, existing);
     return row;
   }
@@ -680,14 +714,15 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       const state = lane.identities.get(identityKey);
       return (state?.lastAttempt?.row?.source || state?.lastGood?.source) === 'api';
     };
-    const expected = new Set(dispatch.expectedIdentityKeys.filter(belongsToApi));
+    const expected = new Set(dispatch.expectedIdentityKeys.filter(key => belongsToApi(key)
+      && (!dispatch.accountScoped || rowMatchesScope(lane.identities.get(key)?.lastGood || lane.identities.get(key)?.lastAttempt?.row, dispatch.scope))));
     const represented = new Set();
     const committedRows = [];
 
     if (attemptError) {
       const status = attemptError.status || (attemptError.code === 'PROBE_TIMEOUT' ? 'timeout' : 'unavailable');
       const targets = dispatch.accountScoped
-        ? [dispatch.identityKey]
+        ? (expected.size ? [...expected] : [dispatch.identityKey])
         : expected.size ? [...expected] : apiOnly && lane.identities.size ? [] : [`${lane.provider}:*`];
       for (const identityKey of targets) {
         if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
@@ -725,7 +760,8 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       let identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
       if (removal.replacementAccount) { replacementRemovals.push(removal); continue; }
       if (identityKey === `${lane.provider}:*`) { removeAnonymous = true; continue; }
-      if (dispatch.accountScoped && identityKey !== dispatch.identityKey) continue;
+      if (dispatch.accountScoped && identityKey !== dispatch.identityKey
+        && !rowMatchesScope({ ...removal, provider: lane.provider }, dispatch.scope)) continue;
       if (apiOnly && !belongsToApi(identityKey)) continue;
       if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
       represented.add(identityKey);
@@ -734,11 +770,25 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
 
     for (const row of normalizedRows) {
       let identityKey = rowIdentityKey(row);
-      if (identityKey === `${lane.provider}:*` && dispatch.accountScoped) identityKey = dispatch.identityKey;
+      if (identityKey === `${lane.provider}:*` && dispatch.accountScoped) {
+        if (lane.provider === 'alibaba' && expected.size) {
+          for (const expectedKey of expected) {
+            if (!accountRevisionStillCurrent(lane, expectedKey, dispatch)) continue;
+            represented.add(expectedKey);
+            committedRows.push(applyAttempt(lane, expectedKey, row, row.status, attemptAt));
+          }
+          continue;
+        }
+        identityKey = dispatch.identityKey;
+      }
       if (apiOnly && identityKey !== `${lane.provider}:*`
         && lane.identities.has(identityKey) && !belongsToApi(identityKey)) continue;
       if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
-      if (dispatch.accountScoped && identityKey !== dispatch.identityKey) identityKey = dispatch.identityKey;
+      if (dispatch.accountScoped && identityKey !== dispatch.identityKey) {
+        if (lane.provider === 'alibaba' && row.accountKey) {
+          if (!rowMatchesScope(row, dispatch.scope)) continue;
+        } else identityKey = dispatch.identityKey;
+      }
 
       if (identityKey === `${lane.provider}:*` && TRANSIENT_STATUSES.has(row.status) && expected.size > 0) {
         for (const expectedKey of expected) {
@@ -776,6 +826,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       if (dispatch.accountScoped || !accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
       if (apiOnly && !belongsToApi(identityKey)) continue;
       if (!committedRows.some(row => row.status === 'ok' && rowIdentityKey(row) === replacementKey)) continue;
+      if (committedRows.some(row => row.status === 'ok' && rowIdentityKey(row) === identityKey)) continue;
       represented.add(identityKey);
       lane.identities.delete(identityKey);
     }
@@ -978,7 +1029,9 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
             lane.accountRevisions.set(identityKey, (lane.accountRevisions.get(identityKey) || 0) + 1);
           }
         } else if (provider === 'muse' && scope.source === 'web') {
-          lane.identities.delete('muse:source:web');
+          for (const [key, state] of lane.identities) {
+            if ((state.lastAttempt?.row?.source || state.lastGood?.source) === 'web') lane.identities.delete(key);
+          }
           lane.accountRevisions.clear();
         } else {
           lane.identities.clear();
@@ -990,7 +1043,13 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       resetRetryPolicy(lane);
       for (const identityKey of identityKeys) {
         lane.accountRevisions.set(identityKey, (lane.accountRevisions.get(identityKey) || 0) + 1);
-        lane.identities.delete(identityKey);
+        const state = lane.identities.get(identityKey);
+        // Saved Cookie changes do not retire an independent CLI login. Restore
+        // its own quota/attempt while still fencing the old Cookie dispatch.
+        if (provider === 'alibaba' && reason === 'settings-change' && config.alibabaSourcePreference !== 'web' && state?.alibabaCliLastGood) {
+          state.lastGood = state.alibabaCliLastGood;
+          state.lastAttempt = state.alibabaCliLastAttempt;
+        } else lane.identities.delete(identityKey);
         const pending = lane.pending.get(identityKey);
         finishIntent(pending, { superseded: true, reason });
         lane.pending.delete(identityKey);
@@ -1007,7 +1066,16 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     const previousEnabled = enabled;
     const previousRefreshMs = refreshMs;
     const previousProviders = configuredProviders;
+    const previousConfig = config;
     config = { ...config, ...cloneValue(nextOptions) };
+    const alibaba = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === 'alibaba');
+    if (alibaba && Object.hasOwn(nextOptions, accountSlotKey(alibaba))) {
+      const describe = options => normalizeAccountSlots(alibaba, options[accountSlotKey(alibaba)]).map(slot => ({ ...slot,
+        accountKey: providerRuntimeState.get(`account-slot:alibaba:slot:${slot.id}:${accountValuesFingerprint(slot.values)}`)?.accountKey || slot.accountKey }));
+      const environmentKey = providerRuntimeState.get(`account-slot:alibaba:default:${accountValuesFingerprint(defaultAccountValues(alibaba, config, deps.env || process.env))}`)?.accountKey;
+      const environment = environmentKey ? { accountKey: environmentKey, region: alibaba.limits.alibabaVariant(config, deps.env || process.env) } : null;
+      for (const scope of alibabaRetiredVariantScopes(describe(previousConfig), describe(config), environment)) clear(scope, 'settings-change');
+    }
     enabled = parseBoolean(config.limitsEnabled ?? config.enabled, true);
     refreshMode = normalizeLimitsRefreshMode(config.limitsRefreshMode);
     refreshMs = refreshMode === 'adaptive'
@@ -1162,6 +1230,8 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       lane.identities.set(identityKey, {
         identityKey,
         lastGood: normalizeLimitProvider({ ...row, status: 'ok' }),
+        ...(row.provider === 'alibaba' && row.source === 'cli' && row.accountKey
+          ? { alibabaCliLastGood: normalizeLimitProvider({ ...row, status: 'ok' }), alibabaCliLastAttempt: { status: row.status, at, row } } : {}),
         lastAttempt: { status: row.status, at, row }
       });
     } else {

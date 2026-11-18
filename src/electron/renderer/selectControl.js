@@ -56,6 +56,7 @@
     document = select?.ownerDocument,
     window = document?.defaultView,
     getOptionMeta = () => ({}),
+    compactDescriptions = false,
     minPopupWidth = 0,
     align = 'start',
     searchable = false,
@@ -69,7 +70,7 @@
     const id = `select-control-${++nextId}`;
     const trigger = document.createElement('button');
     trigger.type = 'button';
-    trigger.id = `${id}-trigger`;
+    trigger.id = `${select.id || id}-trigger`;
     trigger.className = 'select-control-trigger';
     trigger.setAttribute('role', 'combobox');
     trigger.setAttribute('aria-haspopup', 'listbox');
@@ -88,6 +89,12 @@
     const popup = document.createElement('div');
     popup.className = 'select-control-popup';
     popup.setAttribute('popover', 'manual');
+    const hint = compactDescriptions ? document.createElement('div') : null;
+    if (hint) {
+      hint.className = 'select-control-popup select-control-hint';
+      hint.setAttribute('popover', 'manual');
+      hint.setAttribute('aria-hidden', 'true');
+    }
     const listbox = searchable ? document.createElement('div') : popup;
     listbox.id = `${id}-listbox`;
     listbox.setAttribute('role', 'listbox');
@@ -178,7 +185,7 @@
     function createRow(option, index) {
       const row = document.createElement('div');
       row.id = `${id}-option-${index}`;
-      row.className = `select-control-option${option.description ? ' has-description' : ''}`;
+      row.className = `select-control-option${option.description && !compactDescriptions ? ' has-description' : ''}`;
       row.setAttribute('role', 'option');
       const icon = document.createElement('span');
       icon.className = 'select-control-icon';
@@ -194,7 +201,7 @@
       description.className = 'select-control-description';
       description.id = `${row.id}-description`;
       description.textContent = option.description;
-      description.hidden = !option.description;
+      description.hidden = compactDescriptions || !option.description;
       row.setAttribute('aria-label', option.label);
       if (option.description) row.setAttribute('aria-describedby', description.id);
       row.setAttribute('aria-disabled', String(option.disabled));
@@ -330,6 +337,29 @@
         if (opened && rows[active]) searchInput.setAttribute('aria-activedescendant', rows[active].id);
         else searchInput.removeAttribute('aria-activedescendant');
       }
+      updateHint();
+    }
+
+    function updateHint() {
+      if (!hint) return;
+      const index = hovered >= 0 ? hovered : keyboardHighlight ? active : -1;
+      const text = opened && options[index]?.description;
+      if (!text) {
+        if (hint.matches(':popover-open')) hint.hidePopover();
+        return;
+      }
+      if (hint.textContent !== text) hint.textContent = text;
+      if (!hint.isConnected) popup.append(hint);
+      if (!hint.matches(':popover-open')) hint.showPopover();
+      const rect = popup.getBoundingClientRect();
+      const width = Math.min(240, window.innerWidth - 16);
+      hint.style.width = `${width}px`;
+      hint.style.left = `${Math.max(8, rect.right - width)}px`;
+      const above = rect.top - hint.offsetHeight - 4;
+      const below = rect.bottom + 4;
+      const bottomLimit = window.innerHeight - hint.offsetHeight - 8;
+      const preferred = above >= 8 && (popup.dataset.side === 'top' || below > bottomLimit) ? above : below;
+      hint.style.top = `${Math.max(8, Math.min(preferred, bottomLimit))}px`;
     }
 
     function highlight(index, scroll = true) {
@@ -360,7 +390,7 @@
       if (!anchorVisible()) { close(); return; }
       const rect = trigger.getBoundingClientRect();
       const availableWidth = Math.max(0, window.innerWidth - 16);
-      const hasDescriptions = options.some(option => option.description);
+      const hasDescriptions = !compactDescriptions && options.some(option => option.description);
       // Measure every kind of picker, including searchable lists. A short
       // selected value must not squeeze its longer choices or the search field.
       popup.style.maxWidth = `${Math.min(360, availableWidth)}px`;
@@ -378,6 +408,7 @@
       popup.style.maxHeight = `${result.maxHeight}px`;
       if (searchInput) listbox.style.maxHeight = `${Math.max(0, result.maxHeight - (hasSearch() ? searchInput.offsetHeight + 16 : 8))}px`;
       popup.dataset.side = result.opensAbove ? 'top' : 'bottom';
+      updateHint();
     }
 
     function schedulePosition(event) {

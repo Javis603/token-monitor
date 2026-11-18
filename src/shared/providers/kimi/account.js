@@ -4,6 +4,12 @@
 // Kimi limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'kimi',
+  accountSlots: true,
+  accountCredentialKeys: ['kimiApiKey', 'kimiWebAccessToken'],
+  sources: [
+    { id: 'api', kind: 'apiKey', relation: 'alternative', products: ['kimi'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.kimi.apiKeyNote' },
+    { id: 'web', kind: 'web', relation: 'complement', products: ['kimi'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.kimi.webTokenNote' }
+  ],
   fetch: 'fetchKimiLimits',
   fields: [
     {
@@ -44,11 +50,19 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
       kimiCredentialSource: webTokenSource || apiKeySource
     };
   },
-  // Kimi keeps its own panel (a primary Code API key and a Web-token fallback,
-  // each saved on its own) and borrows only the shared save path.
+  // Code is primary; Web complements missing quota windows within the same slot.
   form: {
-    kind: 'custom',
-    fields: [{ key: 'kimiApiKey' }, { key: 'kimiWebAccessToken' }]
+    titleKey: 'settings.kimi.title', openKey: 'settings.kimi.openBrowser',
+    clearKey: 'settings.kimi.clearApiKey', saveKey: 'settings.kimi.saveApiKey',
+    emptyKey: 'settings.kimi.statusNotSet', failedKey: 'settings.kimi.saveFailed',
+    openUrl: { url: 'https://www.kimi.com/code/console' },
+    fields: [
+      { input: 'password', key: 'kimiApiKey', labelKey: 'settings.kimi.apiKeyLabel', placeholderKey: 'settings.kimi.apiKeyPlaceholder' },
+      { input: 'password', key: 'kimiWebAccessToken', labelKey: 'settings.kimi.webTokenLabel', placeholderKey: 'settings.kimi.webTokenPlaceholder' }
+    ],
+    manual: [{ note: 'settings.kimi.apiKeyNote' }, { field: 'kimiApiKey' },
+      { note: 'settings.kimi.webTokenNote' },
+      { steps: ['settings.kimi.step1', 'settings.kimi.step2', 'settings.kimi.step3', 'settings.kimi.step4'] }, { field: 'kimiWebAccessToken' }]
   },
   urlPolicy: [
     { hosts: ['kimi.com', 'www.kimi.com'], pathPrefixes: ['/code'] }

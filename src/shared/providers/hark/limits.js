@@ -1,4 +1,5 @@
 'use strict';
+const { selectedSource } = require('../../limits/sourceSelection');
 
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const { hashKey } = require('../../hashKey');
@@ -134,10 +135,16 @@ async function fetchHarkLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
   const supplied = harkCookie(env, options);
+  const selection = selectedSource('hark', options, deps);
+  const lane = deps.accountSource || (supplied ? 'web' : 'local');
+  if ((selection !== 'auto' && selection !== lane) || (deps.probe && !supplied)
+    || (deps.accountSlotSaved && !supplied)) {
+    return normalizeLimitProvider({ provider: 'hark', source: selection === 'auto' ? lane : selection, status: 'notConfigured', updatedAt, windows: [] });
+  }
   const base = {
     provider: 'hark',
-    source: supplied ? 'web' : 'local',
-    sourceDetail: supplied ? 'managed' : 'app',
+    source: lane,
+    sourceDetail: lane === 'web' ? 'managed' : 'app',
     updatedAt,
     windows: []
   };
@@ -192,7 +199,27 @@ async function fetchHarkLimits(options = {}, deps = {}) {
   return removals.length ? [provider, ...removals] : provider;
 }
 
+function discoverAccountSlots(deps = {}) {
+  try {
+    const token = normalizeHarkSessionToken((deps.readHarkDesktopSession || readHarkDesktopSession)(deps.harkDesktopOptions || {}));
+    if (!token) return [];
+    const decoded = decodeURIComponent(token);
+    const supplied = harkCookie(deps.env || {});
+    const environmentToken = normalizeHarkSessionToken(supplied);
+    // The environment row initially hashes its accepted spelling (which may
+    // include a Cookie header), before a probe resolves the decoded identity.
+    const aliases = [token, ...(environmentToken && decodeURIComponent(environmentToken) === decoded ? [supplied] : [])]
+      .filter(value => value !== decoded).map(value => hashKey('hark', value));
+    return [{ fetchDeps: { accountSource: 'local' }, values: { harkCookie: token }, accountKey: hashKey('hark', decoded),
+      accountKeyAliases: [...new Set(aliases)], sourceName: 'Hark' }];
+  } catch (error) {
+    if (error?.status === 'notConfigured') return [];
+    throw error;
+  }
+}
+
 module.exports = {
+  discoverAccountSlots,
   HARK_COOKIE_NAME,
   HARK_ORIGIN,
   HARK_SUMMARY_URL,

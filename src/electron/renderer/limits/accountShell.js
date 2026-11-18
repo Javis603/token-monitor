@@ -24,11 +24,17 @@
     }
   }
 
+  function setDisclosureBody(toggle, details, open) {
+    if (!open && details.contains(details.ownerDocument?.activeElement)) toggle?.focus({ preventScroll: true });
+    details.inert = !open;
+    details.classList.toggle('hidden', !open);
+  }
+
   function setExpanded({ toggle, details, group, expanded, onChange }) {
     if (!toggle || !details) return;
     const open = Boolean(expanded);
     toggle.setAttribute('aria-expanded', String(open));
-    details.classList.toggle('hidden', !open);
+    setDisclosureBody(toggle, details, open);
     group?.classList.toggle('expanded', open);
     onChange?.(open);
   }
@@ -64,5 +70,5 @@
     };
   }
 
-  return { render, setExpanded, createBusyGuard, createRequestGuard };
+  return { render, setDisclosureBody, setExpanded, createBusyGuard, createRequestGuard };
 });

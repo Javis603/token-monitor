@@ -369,24 +369,27 @@
 
   // The full-year homeHistory is fetched once per session and then frozen, so its today
   // bucket lags the live headline total as usage accrues within the day (the trends
-  // sparkline avoids this via patchTodayBar). Overwrite today's tokens AND cost with the
-  // live period totals so the home heatmap/trend agree with the number shown above them
+  // sparkline avoids this via patchTodayBar). Overwrite today's tokens, cost and unpriced
+  // coverage with the live period totals so the home heatmap/trend agree with the number shown above them
   // — cost matters because dailyWithHeatIntensity colours cells by cost when any exists,
   // so an appended today with cost 0 would render as an empty cell. Append a today row
   // when the frozen snapshot predates today (app opened before midnight). Returns a new
   // array; the input is never mutated.
-  function patchDailyToday(daily, todayDate, todayTotal, todayCost) {
+  function patchDailyToday(daily, todayDate, todayTotal, todayCost, todayUnpricedTokens = 0) {
     const rows = Array.isArray(daily) ? daily.slice() : [];
     const date = String(todayDate || '').slice(0, 10);
     if (!date) return rows;
     const tokens = finiteNumber(todayTotal) || 0;
     const cost = finiteNumber(todayCost) || 0;
+    const unpricedTokens = finiteNumber(todayUnpricedTokens) || 0;
     const idx = rows.findIndex((row) => String(row?.date).slice(0, 10) === date);
     if (idx === -1) {
-      rows.push({ date, tokens, cost });
+      rows.push({ date, tokens, cost, ...(unpricedTokens > 0 ? { unpricedTokens } : {}) });
       return rows;
     }
     rows[idx] = Object.assign({}, rows[idx], { tokens, cost });
+    if (unpricedTokens > 0) rows[idx].unpricedTokens = unpricedTokens;
+    else delete rows[idx].unpricedTokens;
     return rows;
   }
 

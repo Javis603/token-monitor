@@ -1038,8 +1038,8 @@ function previewFixture(t, { platform = 'win32', nativeRegions = false } = {}) {
   f.controller.register();
   f.handlers = handlers;
   f.owner = owner;
-  f.open = async (key = 'a', interactive = false, rect = { x: 0, y: 50, width: 300, height: 100 }) => {
-    const result = await handlers.get('limitsHistory:open')({ sender: owner.webContents }, { key, interactive, rect });
+  f.open = async (key = 'a', interactive = false, rect = { x: 0, y: 50, width: 300, height: 100 }, requestId) => {
+    const result = await handlers.get('limitsHistory:open')({ sender: owner.webContents }, { key, interactive, rect, requestId });
     if (f.window && !f.loaded) { f.loaded = true; f.window.webContents.emit('did-finish-load'); }
     return result;
   };
@@ -1049,6 +1049,198 @@ function previewFixture(t, { platform = 'win32', nativeRegions = false } = {}) {
   t.after(() => f.controller.dispose());
   return f;
 }
+
+for (const event of ['keydown', 'pointerdown']) {
+  test(`main renderer ${event} cancels an account switch after the old preview hides`, async t => {
+    const f = previewFixture(t);
+    const handlers = new Map();
+    let closeMessages = 0;
+    let queueClose = false;
+    let deliverClose;
+    const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+    const start = source.indexOf('let limitsHistoryOpen = false;');
+    const end = source.indexOf('\n  t,', source.indexOf('const limitWindowsView =', start));
+    const history = require('node:vm').runInNewContext(source.slice(start, end) + '}); limitWindowsView;', {
+      document: { addEventListener: (type, handler) => handlers.set(type, handler), querySelectorAll: () => [] },
+      window: {
+        TokenMonitorLimitsHistoryIdentity: {},
+        TokenMonitorLimitWindowsView: { createLimitWindowsView: options => options.history },
+        tokenMonitor: { limits: {
+          openHistory: (key, rect, interactive, requestId) => f.open(key, interactive, rect, requestId),
+          closeHistory: requestId => {
+            closeMessages++;
+            if (queueClose) deliverClose = () => f.fromOwner('close', requestId);
+            else f.fromOwner('close', requestId);
+          },
+          onHistoryState: callback => {
+            f.owner.webContents.send = (channel, ...args) => {
+              if (channel === 'limitsHistory:state') callback(...args);
+            };
+          }
+        } }
+      }
+    });
+    const rect = { x: 0, y: 50, width: 300, height: 100 };
+    assert.equal(await history.open('a', rect, true), true);
+    const readB = Promise.withResolvers();
+    f.pending = readB.promise;
+    const opening = history.open('b', rect, true);
+    f.pending = Promise.resolve(null);
+    await f.controller.refresh();
+    assert.equal(history.activeKey(), '');
+
+    const cancel = { key: 'Escape', target: { closest: () => null }, preventDefault() {} };
+    handlers.get(event)(cancel);
+    readB.resolve({ source: 'a', title: 'B' });
+    assert.equal(await opening, false);
+    assert.equal(f.shown(), false);
+    assert.equal(closeMessages, 1);
+    handlers.get(event)(cancel);
+    assert.equal(closeMessages, 1, 'settled opens no longer consume dismissal');
+
+    f.pending = Promise.resolve({ source: 'a', title: 'A' });
+    assert.equal(await history.open('a', rect, true), true);
+    const staleRead = Promise.withResolvers();
+    f.pending = staleRead.promise;
+    const staleOpen = history.open('b', rect, true);
+    f.pending = Promise.resolve(null);
+    await f.controller.refresh();
+    assert.equal(await history.open('c', rect, false), false, 'hover cannot supersede an explicit switch');
+    queueClose = true;
+    handlers.get(event)(cancel);
+    staleRead.resolve({ source: 'a', title: 'B' });
+    assert.equal(await staleOpen, true, 'the read can complete before close reaches main');
+    assert.equal(f.shown(), true);
+    deliverClose();
+    assert.equal(f.shown(), false, 'the targeted close still dismisses the committed card');
+
+    const hoverRead = Promise.withResolvers();
+    f.pending = hoverRead.promise;
+    const hover = history.open('c', rect, false);
+    deliverClose();
+    hoverRead.resolve({ source: 'a', title: 'C' });
+    assert.equal(await hover, true);
+    assert.equal(f.lastPayload.title, 'C');
+  });
+}
+
+test('refreshing the visible history does not cancel an in-flight account switch', async t => {
+  const f = previewFixture(t);
+  await f.open('a', true);
+  assert.equal(f.shown(), true);
+  const readB = Promise.withResolvers();
+  f.pending = readB.promise;
+  const switchToB = f.open('b', true);
+
+  f.pending = Promise.resolve({ source: 'a', title: 'Refreshed A' });
+  await f.controller.refresh();
+  assert.equal(f.lastPayload.title, 'Refreshed A');
+  assert.deepEqual(f.reads.map(({ key }) => key), ['a', 'b', 'a']);
+
+  readB.resolve({ source: 'a', title: 'B' });
+  assert.equal(await switchToB, true);
+  assert.equal(f.lastPayload.title, 'B');
+});
+
+test('pinning the visible history supersedes an earlier explicit account switch', async t => {
+  const f = previewFixture(t);
+  f.pending = Promise.resolve({ source: 'a', title: 'A' });
+  await f.open('a');
+  assert.equal(f.shown(), true);
+  const readB = Promise.withResolvers();
+  f.pending = readB.promise;
+  const switchToB = f.open('b', true);
+  f.fromOwner('leave', 'b');
+
+  assert.equal(await f.open('a', true), true);
+  readB.resolve({ source: 'a', title: 'B' });
+
+  assert.equal(await switchToB, false);
+  assert.equal(f.lastPayload.title, 'A');
+});
+
+test('a refresh finishing after an account switch cannot update the new history card', async t => {
+  const f = previewFixture(t);
+  await f.open('a', true);
+  const readA = Promise.withResolvers();
+  f.pending = readA.promise;
+  const refreshA = f.controller.refresh();
+
+  f.pending = Promise.resolve({ source: 'a', title: 'B' });
+  assert.equal(await f.open('b', true), true);
+  readA.resolve({ source: 'a', title: 'Refreshed A' });
+  await refreshA;
+
+  assert.equal(f.lastPayload.title, 'B');
+});
+
+test('invalidating the visible history preserves an in-flight switch to another account', async t => {
+  const f = previewFixture(t);
+  await f.open('a', true);
+  const readB = Promise.withResolvers();
+  f.pending = readB.promise;
+  const switchToB = f.open('b', true);
+
+  f.pending = Promise.resolve(null);
+  await f.controller.refresh();
+  assert.equal(f.shown(), false);
+
+  readB.resolve({ source: 'a', title: 'B' });
+  assert.equal(await switchToB, true);
+  assert.equal(f.lastPayload.title, 'B');
+  assert.equal(f.shown(), true);
+});
+
+test('dismissing a hovered history card preserves a slower explicit account switch', async t => {
+  const f = previewFixture(t);
+  await f.open('a');
+  f.fromOwner('leave', 'a');
+  const readB = Promise.withResolvers();
+  f.pending = readB.promise;
+  const switchToB = f.open('b', true);
+
+  f.fire();
+  assert.equal(f.shown(), false);
+
+  readB.resolve({ source: 'a', title: 'B' });
+  assert.equal(await switchToB, true);
+  assert.equal(f.lastPayload.title, 'B');
+});
+
+for (const event of ['move', 'resize']) {
+  test(`owner ${event} cancels a pending switch after the old history is hidden`, async t => {
+    const f = previewFixture(t);
+    await f.open('a', true);
+    const readB = Promise.withResolvers();
+    f.pending = readB.promise;
+    const switchToB = f.open('b', true);
+
+    f.pending = Promise.resolve(null);
+    await f.controller.refresh();
+    assert.equal(f.shown(), false);
+    f.owner.emit(event);
+
+    readB.resolve({ source: 'a', title: 'B' });
+    assert.equal(await switchToB, false);
+    assert.equal(f.shown(), false);
+  });
+}
+
+test('invalidating the visible history cancels a pending hover preview', async t => {
+  const f = previewFixture(t);
+  await f.open('a');
+  const readB = Promise.withResolvers();
+  f.pending = readB.promise;
+  const hoverB = f.open('b');
+
+  f.pending = Promise.resolve(null);
+  await f.controller.refresh();
+  assert.equal(f.shown(), false);
+
+  readB.resolve({ source: 'a', title: 'B' });
+  assert.equal(await hoverB, false);
+  assert.equal(f.shown(), false);
+});
 
 test('macOS history keeps its screenshot bounds fitted to the moving card', async t => {
   const f = previewFixture(t, { platform: 'darwin' });
@@ -1835,6 +2027,7 @@ for (const change of ['activity', 'quota', 'removed', 'backend']) test(`a pendin
   const context = {
     latestStats: { limits: { providers: [row] } }, statsPushSource: null, hubModeGeneration: 0, scope: 'local',
     currentHubStatsIdentity: () => context.scope, electronPresentationStats: stats => stats,
+    accountSlotService: undefined, applyAccountOrder: records => records,
     historyRowKey, getLimitsHistoryStore: () => ({ query: () => new Promise(resolve => { complete = resolve; }) }),
     settings: {}, historyWindowHidden: () => false, historyMaskEmail: value => value,
     historyProviderCatalog: [], historyVendorColors: () => ({}),

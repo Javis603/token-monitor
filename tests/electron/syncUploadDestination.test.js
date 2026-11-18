@@ -114,7 +114,7 @@ test('the main-process persistence adapter rolls back failed sync state writes',
     stripCredentialSettings: value => value, cloneSettingsSnapshot: value => structuredClone(value),
     writePrivateJsonAtomic: () => { if (failure) throw new Error('disk full'); }
   });
-  vm.runInContext(source.slice(start, end), sandbox);
+  vm.runInContext(source.slice(source.indexOf('async function requestSyncContent('), source.indexOf("const { createAccountPresentationSync }")) + source.slice(start, end), sandbox);
   sandbox.getSyncContentRuntime();
   const next = { enabled: { sessionTitles: false }, pendingTitleCleanup: [] };
   assert.throws(() => dependencies.saveState(next), /disk full/);
@@ -181,7 +181,7 @@ test('embedded Host cleanup targets the shared local store after port/secret rot
     } },
     fetch: async () => ({ status: 401, json: async () => ({}) }), AbortSignal
   });
-  vm.runInContext(source.slice(start, end), sandbox);
+  vm.runInContext(source.slice(source.indexOf('async function requestSyncContent('), source.indexOf("const { createAccountPresentationSync }")) + source.slice(start, end), sandbox);
   sandbox.getSyncContentRuntime();
   const old = { mode: 'host', url: 'http://127.0.0.1:17321', secret: 'old-private', deviceId: 'old-device' };
   assert.equal((await dependencies.request(old, '/api/sync/titles/old-device', 'PUT', { enabled: false })).status, 200);

@@ -419,7 +419,7 @@ function createHub({
 
     if (req.method === 'GET' && url.pathname === '/api/sync/content') return sendJson(res, 200, getSyncContent());
 
-    const settingsMatch = url.pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing)$/);
+    const settingsMatch = url.pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing|limitAccountPresentation)$/);
     if (settingsMatch && req.method === 'GET') return sendJson(res, 200, { ok: true, ...getSyncSettings(settingsMatch[1]) });
     const titlesMatch = url.pathname.match(/^\/api\/sync\/titles\/([^/]+)$/);
     if (req.method === 'PUT' && (settingsMatch || titlesMatch)) {

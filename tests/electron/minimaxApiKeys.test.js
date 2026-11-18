@@ -129,7 +129,7 @@ test('MiniMax key saves persist private keys and notify the runtime with the com
 
 test('MiniMax billing links use only the selected key region and default Auto to International', () => {
   const fs = require('node:fs');
-  const source = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
+  const source = fs.readFileSync(require.resolve('../../src/electron/renderer/limits/providerOwners/minimax.js'), 'utf8');
   const match = source.match(/function minimaxBillingUrl\(key\) \{[\s\S]*?\n\}/);
   assert.ok(match, 'exercise the renderer implementation rather than a duplicated link policy');
   const rows = [

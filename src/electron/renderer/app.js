@@ -97,28 +97,13 @@ function iconKindFor(rowData, breakdown) {
 
 const LIMIT_PROVIDER_ACCOUNT_NODES = {
   codex: { group: 'codexAccountGroup', status: 'codexAccountStatus' },
-  opencode: { group: 'opencodeCookieGroup', status: 'opencodeCookieStatus' },
-  cursor: { group: 'cursorAccountGroup', status: 'cursorAccountStatus' },
-  antigravity: { group: 'antigravityAccountGroup', status: 'antigravityAccountStatus' },
-  kimi: { group: 'kimiAccountGroup', status: 'kimiAccountStatus' },
-  copilot: { group: 'copilotAccountGroup', status: 'copilotApiTokenStatus' },
+  opencode: { group: 'opencodeCookieGroup', status: 'opencodeCookieStatus', localSummary: true },
+  cursor: { group: 'cursorAccountGroup', status: 'cursorAccountStatus', localSummary: true },
+  antigravity: { group: 'antigravityAccountGroup', status: 'antigravityAccountStatus', localSummary: true },
   mimo: { group: 'mimoAccountGroup', status: 'mimoAccountStatus' },
-  workbuddy: { group: 'workbuddyAccountGroup', status: 'workbuddyAccountStatus' },
-  minimax: { group: 'minimaxAccountGroup', status: 'minimaxStatus' },
-  openrouter: { group: 'openrouterAccountGroup', status: 'openrouterStatus' },
-  volcengine: { group: 'volcengineAccountGroup', status: 'volcengineAccountStatus' },
-  thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
-};
-const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {
-  minimax: 'settings.minimax.codeNote',
-  antigravity: 'settings.limits.connection.antigravity',
-  cline: 'settings.limits.connection.cline',
-  grok: 'settings.limits.connection.grok',
-  kiro: 'settings.limits.connection.kiro',
-  manus: 'settings.limits.connection.manus',
-  hark: 'settings.limits.connection.hark',
-  muse: 'settings.limits.connection.muse',
-  workbuddy: 'settings.limits.connection.workbuddy'
+  workbuddy: { group: 'workbuddyAccountGroup', status: 'workbuddyAccountStatus', localSummary: true },
+  minimax: { group: 'minimaxAccountGroup', status: 'minimaxStatus', localSummary: true },
+  thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus', localSummary: true }
 };
 const TRAY_ICON_VARIANTS = [
   { id: 'claude-brand', label: 'Claude', after: 'claude' },
@@ -217,6 +202,8 @@ const LIMIT_REFRESH_OPTIONS = [60000, 120000, 300000, 900000, 1800000];
 const WINDOW_BEHAVIOR_VALUES = ['floating', 'normal', 'desktop'];
 const WINDOW_BEHAVIOR_ICONS = { floating: '⇧', normal: '○', desktop: '⇩' };
 const LIMIT_CAPABILITY_TAG_KEYS = {
+  CLI: 'settings.limits.sources.cli',
+  OAuth: 'settings.limits.sources.oauth',
   Auto: 'settings.limits.capability.auto',
   'OAuth/CLI': 'settings.limits.capability.oauthCli',
   'OAuth/App/CLI': 'settings.limits.capability.oauthAppCli',
@@ -235,6 +222,9 @@ const LIMIT_CAPABILITY_TAG_KEYS = {
   'Coding Plan': 'settings.limits.capability.codingPlan',
   Relay: 'settings.limits.capability.relay',
   'API key': 'settings.limits.capability.apiKey',
+  Environment: 'settings.limits.sources.env',
+  Local: 'settings.limits.sources.file',
+  'Desktop app': 'settings.limits.sources.desktop',
   'AK/SK': 'settings.limits.capability.akSk',
   'GitHub OAuth': 'settings.limits.capability.githubOAuth',
   API: 'settings.limits.capability.api',
@@ -346,7 +336,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) || (allowed === viewBreakdownValues && pluginPlacementsApi.isHomeToken(raw)) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, openrouterProfileCount: 0, openrouterAccountExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, volcengineAgentExpanded: false, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, copilotAccountExpanded: false, copilotManualExpanded: false, copilotPendingCheckSince: 0, copilotSignInBusy: false, copilotSignInCancelable: false, copilotSignInFlowId: '', copilotAuthorizeMessage: '', copilotLoginStatus: '', copilotErrorMessage: '', floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.icloudStatus = null;
@@ -829,7 +819,7 @@ function applySettingsSectionDom(id, open) {
   const details = document.getElementById(`${id}SettingsDetails`);
   const group = toggle?.closest('.settings-collapsible-group');
   toggle?.setAttribute('aria-expanded', open ? 'true' : 'false');
-  details?.classList.toggle('hidden', !open);
+  if (details) accountShellApi.setDisclosureBody(toggle, details, open);
   group?.classList.toggle('expanded', open);
 }
 
@@ -859,6 +849,7 @@ const SETTINGS_SCROLL_ANCHOR_MS = 360;
 const SETTINGS_SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ', 'Tab']);
 let settingsScrollAnchorFrame = null;
 let settingsScrollInteractionRevision = 0;
+let preservingSettingsPanelScroll = false;
 
 function cancelSettingsScrollAnchor() {
   if (settingsScrollAnchorFrame === null) return;
@@ -1014,7 +1005,9 @@ function renderSettingsSummaries() {
   if (!isSettingsSurfaceVisible()) return;
   for (const section of SETTINGS_SECTION_IDS) {
     const el = els[`${section}SettingsSummary`];
-    if (el) el.textContent = settingsSectionSummary(section);
+    if (!el) continue;
+    const summary = settingsSectionSummary(section);
+    if (el.textContent !== summary) el.textContent = summary;
   }
 }
 
@@ -4738,32 +4731,40 @@ function desktopLimitProviders() {
   return [...LIMIT_PROVIDERS, ...(state.pluginCatalog?.limits?.modules || [])];
 }
 const accountSlotPanels = new Map();
+const automaticAccountPanels = new Map();
 const accountSlotLists = {};
 let accountSlotListPending = false;
-function refreshAccountSlotPanels() {
+function limitAccountContext(providerId) {
+  return { settings: state.settings, records: state.stats?.limits?.providers || [],
+    devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId,
+    providerEnabled: limitProviderEnabled(providerId), presentation: state.settings?.limitAccountPresentation?.[providerId] };
+}
+function renderAccountSlotPanels() {
   for (const [id, panel] of accountSlotPanels) {
-    const form = limitAccountForm(id);
     panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
-      Boolean(state.settings?.[form.status.configuredKey]));
+      limitAccountContext(id));
   }
+}
+
+function refreshAccountSlotPanels() {
   if (accountSlotListPending) return;
   accountSlotListPending = true;
   const previousSlotLists = JSON.stringify(accountSlotLists);
-  return Promise.all((state.settings?.limitAccountForms || []).filter(form => form.accountSlots).map(async ({ id }) => {
+  return Promise.all((state.settings?.limitAccountForms || []).filter(form => form.accountSlots && !form.accountSlotOwner).map(async ({ id }) => {
     const result = await window.tokenMonitor.limits.accountSlots.list(id);
     if (result.ok) accountSlotLists[id] = result.accounts;
   })).then(() => {
-    if (previousSlotLists !== JSON.stringify(accountSlotLists)) render();
-    for (const [id, panel] of accountSlotPanels) {
-      const form = limitAccountForm(id);
-      panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
-        Boolean(state.settings?.[form.status.configuredKey]));
-    }
+    if (previousSlotLists === JSON.stringify(accountSlotLists)) return;
+    render();
+    preserveSettingsPanelScroll(() => {
+      renderAccountSlotPanels();
+      for (const id of accountSlotPanels.keys()) renderExternalProviderStatus(id);
+    });
   }).catch(() => {}).finally(() => { accountSlotListPending = false; });
 }
 function desktopLimitRecords() {
   const modules = new Map((state.pluginCatalog?.limits?.modules || []).map(module => [module.id, module]));
-  return window.TokenMonitorAccountSlotsPanel.applyAccountOrder([...(state.stats?.limits?.providers || []), ...(state.pluginCatalog?.limits?.providers || []).filter(row => modules.has(row.provider)).map(row => ({ ...row, pluginQuota: modules.get(row.provider) }))], accountSlotLists, state.settings?.deviceId);
+  return window.TokenMonitorAccountSlotsPanel.applyAccountOrder([...(state.stats?.limits?.providers || []), ...(state.pluginCatalog?.limits?.providers || []).filter(row => modules.has(row.provider)).map(row => ({ ...row, pluginQuota: modules.get(row.provider) }))], accountSlotLists, state.settings?.deviceId, state.settings?.limitAccountPresentation);
 }
 function desktopSurfaceStats() {
   return state.stats ? { ...state.stats, limits: { ...state.stats.limits, providers: desktopLimitRecords() }, pluginLimitModules: state.pluginCatalog?.limits?.modules || [] } : state.stats;
@@ -4817,8 +4818,25 @@ const { limitWindowText } = window.TokenMonitorLimitWindowText;
 // globals of its own.
 let limitsHistoryOpen = false;
 let limitsHistoryActiveKey = '';
+let pendingLimitsHistoryOpen = null;
+let limitsHistoryRequestId = 0;
+async function openLimitsHistory(key, rect, interactive) {
+  if (!interactive) return window.tokenMonitor.limits.openHistory(key, rect, false);
+  const requestId = ++limitsHistoryRequestId;
+  pendingLimitsHistoryOpen = requestId;
+  try {
+    return await window.tokenMonitor.limits.openHistory(key, rect, true, requestId);
+  } finally {
+    if (pendingLimitsHistoryOpen === requestId) pendingLimitsHistoryOpen = null;
+  }
+}
+function dismissLimitsHistory() {
+  const requestId = limitsHistoryOpen ? null : pendingLimitsHistoryOpen;
+  pendingLimitsHistoryOpen = null;
+  window.tokenMonitor.limits.closeHistory(requestId);
+}
 document.addEventListener('pointerdown', event => {
-  if (limitsHistoryOpen && !event.target.closest('[data-limit-history]')) window.tokenMonitor.limits.closeHistory();
+  if ((limitsHistoryOpen || pendingLimitsHistoryOpen) && !event.target.closest('[data-limit-history]')) dismissLimitsHistory();
 }, true);
 window.tokenMonitor?.limits?.onHistoryState?.((open, key) => {
   limitsHistoryOpen = open === true;
@@ -4828,9 +4846,9 @@ window.tokenMonitor?.limits?.onHistoryState?.((open, key) => {
   }
 });
 document.addEventListener('keydown', event => {
-  if (event.key !== 'Escape' || !limitsHistoryOpen) return;
+  if (event.key !== 'Escape' || !(limitsHistoryOpen || pendingLimitsHistoryOpen)) return;
   event.preventDefault();
-  window.tokenMonitor.limits.closeHistory();
+  dismissLimitsHistory();
 }, true);
 
 // Probes the limits runtime is running right now, whoever started them.
@@ -4841,7 +4859,7 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   history: window.tokenMonitor?.limits?.openHistory ? {
     key: window.TokenMonitorLimitsHistoryIdentity.historyRowKey,
     activeKey: () => limitsHistoryActiveKey,
-    open: (key, rect, interactive) => window.tokenMonitor.limits.openHistory(key, rect, interactive),
+    open: openLimitsHistory,
     enter: key => window.tokenMonitor.limits.enterHistory(key),
     leave: key => window.tokenMonitor.limits.leaveHistory(key)
   } : null,
@@ -6182,6 +6200,7 @@ function serviceStatusSurfaceVisible() {
 
 function openHomeSettings() {
   if (!els.settingsPanel) return;
+  hideHomeTrendTooltip();
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   els.shell.style.transform = 'translateZ(0)';
@@ -6196,6 +6215,7 @@ function openHomeSettings() {
 
 function openTrendSettings() {
   if (!els.settingsPanel) return;
+  hideHomeTrendTooltip();
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   els.shell.style.transform = 'translateZ(0)';
@@ -6221,6 +6241,7 @@ function resetSettingsListSearch() {
 function openSettingsPanel(section) {
   if (!els.settingsPanel) return;
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
+  hideHomeTrendTooltip();
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   syncPluginLimitsDemand();
@@ -6495,6 +6516,7 @@ function fixedPeriodMessage(snapshot, breakdown = '') {
 }
 
 function hidePeriodContentForMessage(message) {
+  hideHomeTrendTooltip();
   els.fixedPeriodMessage.textContent = message;
   els.fixedPeriodMessage.classList.remove('hidden');
   els.homePanel.classList.add('hidden');
@@ -6850,7 +6872,7 @@ function homeLimitRows() {
     colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
-    orderedAccountProviders: Object.keys(accountSlotLists),
+    orderedAccountProviders: [...new Set([...Object.keys(accountSlotLists), ...Object.keys(state.settings?.limitAccountPresentation || {})])],
     accountPlan: (provider, index, providerEntries) => limitWindowsView.limitAccountPlan(provider, {
       grouped: providerEntries.length > 1
     }),
@@ -7353,7 +7375,7 @@ function homeActivityTooltipEl(instanceClass = 'home-heatmap-tooltip') {
   let tooltip = document.querySelector(`.${instanceClass}`);
   if (tooltip) return tooltip;
   tooltip = document.createElement('div');
-  // Trends shares the heatmap's layout and positioning, with its own instance.
+  // Chart tooltips share the heatmap's layout, each with its own instance.
   tooltip.className = `home-activity-tooltip ${instanceClass}`;
   tooltip.setAttribute('role', 'tooltip');
   tooltip.setAttribute('aria-hidden', 'true');
@@ -7511,6 +7533,141 @@ function hideHomeActivityTooltip() {
   state.homeActivityHoverTeardown?.();
 }
 
+function bindHomeTrendTooltip(chart, model, points) {
+  if (state.homeTrendTooltipBinding?.chart === chart) {
+    state.homeTrendTooltipBinding.update(model, points);
+    return;
+  }
+  state.homeTrendTooltipBinding?.dispose();
+  if (!chart || !model?.points.length) {
+    state.homeTrendTooltipBinding = null;
+    return;
+  }
+  const homeModule = chart.closest('.home-module');
+  homeModule.setAttribute('aria-keyshortcuts', 'ArrowLeft ArrowRight Home End');
+  const svg = chart.querySelector('.area-line');
+  const crosshair = chart.querySelector('.home-trend-crosshair');
+  const marker = chart.querySelector('.home-trend-marker');
+  const tooltip = homeActivityTooltipEl('home-trend-tooltip');
+  tooltip.setAttribute('aria-live', 'polite');
+  tooltip.setAttribute('aria-atomic', 'true');
+  const date = tooltip.querySelector('[data-home-activity-tooltip-date]');
+  let cost = tooltip.querySelector('.home-trend-tooltip-cost');
+  if (!cost) {
+    cost = document.createElement('span');
+    cost.className = 'home-trend-tooltip-cost';
+    tooltip.insertBefore(cost, date);
+  }
+  let pointerX = null;
+  let focused = false;
+  let selected = -1;
+  const dismiss = () => {
+    chart.removeAttribute('data-active');
+    homeModule.setAttribute('aria-label', t('home.activity'));
+    tooltip.dataset.visible = 'false';
+    tooltip.setAttribute('aria-hidden', 'true');
+    tooltip.style.transform = 'translate(-9999px, -9999px)';
+  };
+  const hide = () => {
+    pointerX = null;
+    focused = false;
+    dismiss();
+  };
+  const select = (index) => {
+    const rect = svg.getBoundingClientRect();
+    if (!(rect.width > 0)) { hide(); return; }
+    selected = index;
+    const point = model.points[index];
+    const daily = points[index];
+    const left = `${point.x / model.width * 100}%`;
+    crosshair.style.left = left;
+    marker.style.left = left;
+    marker.style.top = `${point.y / model.height * 100}%`;
+    tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatNumber(daily.tokens);
+    date.textContent = daily.date;
+    const hasCost = daily.cost != null && Number.isFinite(Number(daily.cost));
+    cost.textContent = hasCost || Number(daily.unpricedTokens) > 0
+      ? usageAttributionRowsApi.compactUsageCostLabel(daily.cost, daily.unpricedTokens,
+        (amount) => currencyApi.formatCurrencyFromUsd(amount, currentCurrency())) : '';
+    cost.hidden = !cost.textContent;
+    homeModule.setAttribute('aria-label', `${t('home.activity')} · ${t('home.trend')} · ${formatNumber(daily.tokens)} tokens${cost.textContent ? ` · ${cost.textContent}` : ''} · ${daily.date}`);
+    chart.setAttribute('data-active', 'true');
+    tooltip.dataset.visible = 'true';
+    tooltip.setAttribute('aria-hidden', 'false');
+    const tipRect = tooltip.getBoundingClientRect();
+    const anchorX = rect.left + point.x / model.width * rect.width;
+    const anchorY = rect.top + point.y / model.height * rect.height;
+    const pad = 6;
+    const gap = 9;
+    const xPos = Math.max(pad, Math.min(window.innerWidth - pad - tipRect.width, anchorX - tipRect.width / 2));
+    const aboveY = anchorY - gap - tipRect.height;
+    const yPos = Math.max(pad, Math.min(window.innerHeight - pad - tipRect.height,
+      aboveY >= pad ? aboveY : anchorY + gap));
+    tooltip.style.transform = `translate(${Math.round(xPos)}px, ${Math.round(yPos)}px)`;
+  };
+  const showAt = (clientX) => {
+    if (!model.points.length) { hide(); return; }
+    const rect = svg.getBoundingClientRect();
+    if (!(rect.width > 0)) { hide(); return; }
+    pointerX = clientX;
+    const first = model.points[0].x;
+    const last = model.points[model.points.length - 1].x;
+    const x = (clientX - rect.left) / rect.width * model.width;
+    select(last === first ? 0 : Math.max(0, Math.min(model.points.length - 1,
+      Math.round((x - first) / (last - first) * (model.points.length - 1)))));
+  };
+  chart.addEventListener('pointerenter', (event) => showAt(event.clientX));
+  chart.addEventListener('pointermove', (event) => showAt(event.clientX));
+  chart.addEventListener('pointerleave', hide);
+  const onFocusIn = (event) => {
+    if (event.target !== homeModule) return;
+    focused = true;
+    pointerX = null;
+    select(selected < 0 ? points.length - 1 : selected);
+  };
+  const onKeyDown = (event) => {
+    if (event.target !== homeModule) return;
+    const index = event.key === 'ArrowLeft' ? Math.max(0, selected - 1)
+      : event.key === 'ArrowRight' ? Math.min(points.length - 1, selected + 1)
+        : event.key === 'Home' ? 0 : event.key === 'End' ? points.length - 1 : null;
+    if (index === null) return;
+    event.preventDefault();
+    pointerX = null;
+    focused = true;
+    select(index);
+  };
+  const onFocusOut = (event) => {
+    if (event.target !== homeModule) return;
+    focused = false;
+    if (pointerX == null) dismiss();
+  };
+  homeModule.addEventListener('focusin', onFocusIn);
+  homeModule.addEventListener('keydown', onKeyDown);
+  homeModule.addEventListener('focusout', onFocusOut);
+  els.homePanel.addEventListener('scroll', hide);
+  state.homeTrendTooltipBinding = { chart, hide, dispose() {
+    hide();
+    homeModule.removeEventListener('focusin', onFocusIn);
+    homeModule.removeEventListener('keydown', onKeyDown);
+    homeModule.removeEventListener('focusout', onFocusOut);
+    els.homePanel.removeEventListener('scroll', hide);
+    homeModule.removeAttribute('aria-keyshortcuts');
+  }, update(nextModel, nextPoints) {
+    const date = points[selected]?.date;
+    model = nextModel;
+    points = nextPoints;
+    if (!model.points.length) { hide(); return; }
+    selected = points.findIndex(point => point.date === date);
+    if (selected < 0) selected = points.length - 1;
+    if (pointerX != null) showAt(pointerX);
+    else if (focused) select(selected);
+  } };
+}
+
+function hideHomeTrendTooltip() {
+  state.homeTrendTooltipBinding?.hide();
+}
+
 const rendererDom = window.TokenMonitorDomReconcile.create({ nodesFor: node => pluginContent?.nodesFor(node) || [] });
 let homeActivityScroller = null;
 function updateHomeActivity() {
@@ -7532,6 +7689,9 @@ function updateHomeActivity() {
   if (scroller) applyHomeActivityScroll(scroller);
   if (scroller && state.animateChartsOnRender && scroller.clientWidth > 0) reveal();
   state.homeActivityTooltipUpdate?.();
+  const trendChart = els.homePanel.querySelector('.home-area-chart');
+  const trendData = trendChart && window.TokenMonitorDomReconcile.data(trendChart);
+  bindHomeTrendTooltip(trendChart, trendData?.model, trendData?.points);
 }
 
 function renderHomeTrendsModule() {
@@ -7574,7 +7734,8 @@ function renderHomeTrendsModule() {
     rawDaily,
     today,
     Number(todayPeriod?.totalTokens || 0),
-    Number(todayPeriod?.costUsd || 0)
+    Number(todayPeriod?.costUsd || 0),
+    Number(todayPeriod?.unpricedTokens || 0)
   );
   const activityLayout = homeOverviewApi.homeActivityHeatmapLayout();
   const heatMetric = state.settings?.heatmapMetric || 'cost';
@@ -7636,6 +7797,12 @@ function renderHomeTrendsModule() {
   const chart = document.createElement('div');
   chart.className = 'home-area-chart';
   chart.innerHTML = charts.areaLineSvg(model);
+  const crosshair = document.createElement('div');
+  crosshair.className = 'home-trend-crosshair';
+  const marker = document.createElement('div');
+  marker.className = 'home-trend-marker';
+  chart.append(crosshair, marker);
+  window.TokenMonitorDomReconcile.data(chart, { model, points: linePoints });
   plot.append(chart);
   const dates = document.createElement('div');
   dates.className = 'home-trend-dates';
@@ -7812,7 +7979,7 @@ function renderAppContent({ fromSearch = false } = {}) {
   const pluginPage = pluginMainPages?.render(pluginPageOptions(), state.breakdown) || false;
   els.shell.classList.toggle('plugin-page-mode', pluginPage);
   if (pluginPage) {
-    stopHomeSessionRepaint(); stopSessionStatusRepaint(); stopServiceStatusTicker(); hideHomeActivityTooltip();
+    stopHomeSessionRepaint(); stopSessionStatusRepaint(); stopServiceStatusTicker(); hideHomeActivityTooltip(); hideHomeTrendTooltip();
     cancelNumberAnimation();
     state.openSession = null;
     for (const panel of [els.homePanel, els.breakdown, els.limitsPanel, els.trendsPanel, els.serviceStatusPanel,
@@ -7903,9 +8070,8 @@ function renderAppContent({ fromSearch = false } = {}) {
   syncSessionSearchChrome();
   if (state.breakdown !== 'session' || state.openSession) els.sessionPagerHost.classList.add('hidden');
   els.viewBackRow?.classList.toggle('hidden', state.breakdown === 'home' || !state.homeReturnVisible);
-  // Leaving Home only CSS-hides the panel, so its heatmap scroller never sees a
-  // pointerleave — dismiss the body-level tooltip here (renderHome covers rerenders).
-  if (state.breakdown !== 'home') hideHomeActivityTooltip();
+  // Leaving Home only CSS-hides the panel, so its charts may not see pointerleave.
+  if (state.breakdown !== 'home') { hideHomeActivityTooltip(); hideHomeTrendTooltip(); }
   if (state.breakdown !== 'trends') hideTrendTooltip();
   if (state.breakdown === 'status') ensureServiceStatusTicker(); else stopServiceStatusTicker();
   if (state.breakdown === 'home') {
@@ -10219,21 +10385,19 @@ function syncSettingsForm() {
   if (els.backgroundImageOpacityInput) els.backgroundImageOpacityInput.value = String(state.settings.backgroundImageOpacity ?? defaultAppearance.backgroundImageOpacity);
   els.zoomInput.value = String(Math.round((Number(state.settings.zoomFactor) || 1) * 100));
   syncSliderRows();
+  renderAntigravityStatus();
+  renderWorkbuddyStatus();
+  renderMimoStatus();
+  renderViewPreferences();
+  renderToolPreferences();
+  renderLimitProviderCheckboxes();
   renderExternalProviderStatus('volcengine');
   renderExternalProviderStatus('kimi');
   for (const form of state.settings?.limitAccountForms || []) {
     if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
   }
-  renderAntigravityStatus();
-  renderWorkbuddyStatus();
-  renderMimoStatus();
-  renderCopilotStatus();
-  renderViewPreferences();
-  renderToolPreferences();
-  renderLimitProviderCheckboxes();
   renderSettingsSummaries();
   renderOpenCodeProfiles();
-  renderOpenRouterProfiles();
   renderMinimaxApiKeys();
   renderThirdPartyProfiles();
   buildAppearanceColorControls();
@@ -12377,6 +12541,17 @@ function moveLimitProviderLiveNode(parent, node, before = null) {
   parent.moveBefore(node, before);
 }
 
+// Account management leads each provider. Move live nodes so keyboard order,
+// focused edits and provider listeners follow the same order as the layout.
+function prioritizeLimitProviderAccounts(group) {
+  const details = group?.querySelector('.cursor-settings-details');
+  const body = details?.querySelector(':scope > .cursor-settings-details-inner') || details;
+  let accounts = body?.querySelector('.slot-panel, .managed-account-list, .opencode-profile-list');
+  if (!accounts) return;
+  while (accounts.parentElement !== body) accounts = accounts.parentElement;
+  if (accounts !== body.firstElementChild) body.moveBefore(accounts, body.firstElementChild);
+}
+
 function limitProviderQuery() {
   return settingsListFilterApi.normalizeListQuery(state.limitProviderSearchQuery);
 }
@@ -12402,7 +12577,9 @@ function renderLimitProviderCheckboxes() {
 }
 
 function renderLimitProviderCheckboxesNow() {
+  renderAccountSlotPanels();
   refreshAccountSlotPanels();
+  for (const [id, panel] of automaticAccountPanels) panel.controller.update(strictLocalProviderStatuses(id));
   const renderSignature = limitProviderSettingsRenderSignature();
   const { providers, matched } = limitProviderRows();
   // Same reasoning as the tracked-tools list: every provider keeps a row, and no
@@ -12433,10 +12610,14 @@ function renderLimitProviderCheckboxesNow() {
   }
   const enabled = enabledLimitProviderSet();
   const filtering = Boolean(limitProviderQuery());
+  const localId = state.settings?.deviceId;
+  const remoteProviders = new Set((state.stats?.limits?.providers || [])
+    .filter(row => row.accountKey && row.sourceDeviceId && row.sourceDeviceId !== localId).map(row => row.provider));
+  const records = enabled.size ? desktopLimitRecords() : [];
   for (const { id, label, settingsLabel } of providers) {
     const isEnabled = enabled.has(id);
     const provider = isEnabled
-      ? (limitProviderPresentationApi.limitProviderSettingsRecord(desktopLimitRecords(), id)
+      ? (limitProviderPresentationApi.limitProviderSettingsRecord(records, id)
         || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
       : { provider: id, status: 'disabled', windows: [] };
     const row = document.createElement('div');
@@ -12468,14 +12649,16 @@ function renderLimitProviderCheckboxesNow() {
     const tags = document.createElement('span');
     tags.className = 'limit-provider-tags';
     const provenance = limitProviderProvenance(provider);
-    const connectionDetailKey = LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS[id];
+    const sources = limitProviderPresentationApi.connectionSources(id, state.settings?.limitConnectionSources || []);
     const accountGroup = limitProviderAccountGroup(id);
     const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === id);
-    const tagInfos = limitProviderPresentationApi.limitProviderSettingsTags(provider, provenance);
+    const tagInfos = pluginModule ? limitProviderPresentationApi.limitProviderSettingsTags(provider, provenance)
+      : [...limitProviderPresentationApi.limitProviderSettingsTags(provider, provenance).filter(tag => tag.kind === 'status'),
+        limitProviderPresentationApi.connectionTag(id, state.settings?.limitConnectionSources || [])].filter(Boolean);
     if (pluginModule) tagInfos.push(...limitProviderPresentationApi.pluginLimitCapabilityTags(pluginModule));
     const detected = provider.status === 'ok' && !provider.stale;
     if (detected) {
-      const statusTag = tagInfos.find((tagInfo) => tagInfo.kind === 'status');
+      const statusTag = limitProviderPresentationApi.limitProviderStatusLabel(provider);
       const dot = document.createElement('span');
       dot.className = 'limit-provider-status-dot';
       dot.setAttribute('aria-label', translatedLimitProviderTag(statusTag));
@@ -12487,10 +12670,6 @@ function renderLimitProviderCheckboxesNow() {
       // Account groups own their configuration summary on the right. Avoid
       // repeating "Not set up" beside the same account state, as with Codex.
       if (accountGroup && provider.status === 'notConfigured' && tagInfo.kind === 'status') continue;
-      const duplicatesInlineSetup = tagInfo.kind === 'capability'
-        && ((connectionDetailKey && !accountGroup && tagInfo.label === 'Auto')
-          || (accountGroup && tagInfo.label === 'Manual login'));
-      if (duplicatesInlineSetup) continue;
       const tag = document.createElement('span');
       tag.className = `limit-provider-tag limit-provider-tag-${tagInfo.kind}`;
       if (tagInfo.tone) tag.classList.add(`limit-provider-tag-${tagInfo.tone}`);
@@ -12504,6 +12683,25 @@ function renderLimitProviderCheckboxesNow() {
     const actions = document.createElement('span');
     actions.className = 'limit-provider-actions';
     const accountStatus = limitProviderAccountStatus(id);
+    if (accountStatus) {
+      accountStatus.classList.toggle('hidden', !isEnabled);
+      // Provider-owned login summaries describe this device. Keep a local
+      // failure visible even if a different device can still supply quota.
+      if (localId && (id === 'claude' || LIMIT_PROVIDER_ACCOUNT_NODES[id]?.localSummary) && remoteProviders.has(id)) {
+        const scope = t('settings.sync.panel.thisDevice');
+        accountStatus.dataset.localScope = scope;
+        accountStatus.setAttribute('aria-description', scope);
+      } else if (accountStatus.dataset?.localScope) {
+        delete accountStatus.dataset.localScope;
+        accountStatus.removeAttribute('aria-description');
+      }
+      if (!isEnabled) {
+        const disabledStatus = document.createElement('span');
+        disabledStatus.className = 'cursor-status-pill';
+        disabledStatus.textContent = t('settings.limits.status.disabled');
+        actions.append(disabledStatus);
+      }
+    }
     if (pluginModule) {
       const reading = limitProviderPresentationApi.limitProviderSettingsRecord(state.pluginCatalog?.limits?.providers, id);
       const summary = limitProviderPresentationApi.pluginLimitSettingsStatus(pluginModule, reading, isEnabled);
@@ -12518,15 +12716,17 @@ function renderLimitProviderCheckboxesNow() {
     }
     // Multi-account providers use this space for their account summary. Their
     // automatic collection support stays with the capability tags on the left.
-    if (connectionDetailKey && !accountGroup) {
+    if (!accountGroup && sources.some(source => ['cli', 'desktop', 'oauth', 'file'].includes(source.kind))) {
       const mode = document.createElement('span');
       mode.className = 'cursor-status-pill limit-provider-mode-pill';
-      mode.textContent = t('settings.limits.connection.autoDetect');
+      const preference = state.settings?.[`${id}SourcePreference`];
+      const selected = preference !== 'auto' && sources.find(source => source.id === preference && source.relation === 'alternative');
+      mode.textContent = selected ? t(selected.labelKey) : t('settings.limits.connection.autoDetect');
       actions.append(mode);
     }
     const settings = LIMIT_PROVIDER_SETTINGS[id];
     const usageItems = isEnabled ? limitProviderUsageItemRows(id) : [];
-    const hasOptions = Boolean(pluginModule?.credentials || pluginModule?.settingsView || accountGroup || settings || connectionDetailKey || usageItems.length);
+    const hasOptions = Boolean(pluginModule?.credentials || pluginModule?.settingsView || accountGroup || settings || sources.length || usageItems.length);
     let optionsContainer = null;
     let optionsInner = null;
     let main = null;
@@ -12547,15 +12747,14 @@ function renderLimitProviderCheckboxesNow() {
       optionsContainer = document.createElement('div');
       optionsContainer.id = `limitProviderOptions-${id}`;
       optionsContainer.className = `accordion-animated-container${expanded ? '' : ' hidden'}`;
+      optionsContainer.inert = !expanded;
       main.setAttribute('aria-controls', optionsContainer.id);
       optionsInner = document.createElement('div');
       optionsInner.className = 'accordion-animation-inner limit-provider-options-inner';
       if (accountGroup) {
         accountGroup.classList.add('limit-provider-account-group');
       }
-      if (connectionDetailKey) optionsInner.append(limitProviderConnectionDetail(connectionDetailKey));
-      if (settings) optionsInner.append(limitProviderSettingsList(id, settings, reusableSettingInputs));
-      if (usageItems.length) optionsInner.append(limitProviderUsageItemsList(id, usageItems, reusableSettingInputs));
+      if (sources.length) optionsInner.append(limitProviderConnectionDetail(id, sources, provider));
       optionsContainer.append(optionsInner);
       const toggleOptions = () => {
         const opening = state.limitProviderSettingsExpanded !== id;
@@ -12584,17 +12783,32 @@ function renderLimitProviderCheckboxesNow() {
     // destination must already be connected, so the row is mounted first.
     moveLimitProviderLiveNode(actions, accountStatus, disclosureIcon);
     moveLimitProviderLiveNode(optionsInner, accountGroup);
+    prioritizeLimitProviderAccounts(accountGroup);
+    if (!pluginModule && !accountGroup && !limitAccountForm(id)
+      && sources.some(source => ['cli', 'desktop', 'oauth', 'file'].includes(source.kind))) {
+      let automatic = automaticAccountPanels.get(id);
+      if (!automatic) {
+        const container = document.createElement('div');
+        const controller = window.TokenMonitorAutomaticAccountList.create({
+          document, provider: id, label, container, t, bridge: window.tokenMonitor, sources,
+          getContext: () => limitAccountContext(id),
+          preserveScroll: preserveSettingsPanelScroll
+        });
+        automatic = { container, controller };
+        automaticAccountPanels.set(id, automatic);
+      }
+      if (automatic.container.isConnected) moveLimitProviderLiveNode(optionsInner, automatic.container);
+      else optionsInner.append(automatic.container);
+      automatic.controller.update(strictLocalProviderStatuses(id));
+    }
+    if (usageItems.length) optionsInner?.append(limitProviderUsageItemsList(id, usageItems, reusableSettingInputs));
+    const settingsList = settings ? limitProviderSettingsList(id, settings, reusableSettingInputs) : null;
+    if (settingsList) optionsInner.append(settingsList);
     if (pluginModule) {
       const authorSettings = pluginLimitSettings?.node(pluginModule);
       if (authorSettings?.isConnected) moveLimitProviderLiveNode(optionsInner, authorSettings);
       else if (authorSettings) optionsInner?.append(authorSettings);
     }
-    // OpenCode's one setting is an off-by-default fallback estimate. Rendered by
-    // the shared path it lands above the account list, reading as the first
-    // thing to set up; it belongs below the accounts, collapsed. Reparented
-    // rather than special-cased in the shared renderer so the setting keeps its
-    // change tracking and re-render signature.
-    if (id === 'opencode') moveOpenCodeLocalFallbackSetting();
   }
   if (!matched.size) renderSettingsListEmptyState(els.limitProviderCheckboxes);
   for (const row of previousRows) row.remove();
@@ -12605,59 +12819,15 @@ function renderLimitProviderCheckboxesNow() {
   pluginLimitSettings?.reconcile();
 }
 
-// Moves the OpenCode local-DB toggle into its own collapsed group beneath the
-// account list, and keeps that group's status pill in sync with the setting.
-function moveOpenCodeLocalFallbackSetting() {
-  const target = document.getElementById('opencodeLocalFallbackInner');
-  const list = document.querySelector('#limitProviderOptions-opencode .limit-provider-settings-list');
-  if (!target) return;
-  if (list) {
-    if (list.parentElement !== target) moveLimitProviderLiveNode(target, list);
-    // The shared renderer builds a fresh settings list on every pass, so moving
-    // without clearing stacks one copy of the toggle per re-render.
-    for (const stale of [...target.children]) if (stale !== list) stale.remove();
-    // The group header already names the setting, so the item's own title would
-    // read twice. Dropping it alone leaves the label cell empty and the switch
-    // adrift, so the description moves into that cell and becomes the label.
-    for (const item of target.querySelectorAll('.settings-item')) {
-      item.querySelector('.settings-item-title')?.remove();
-      const cell = item.querySelector('.settings-item-text');
-      const desc = item.querySelector('.settings-item-desc');
-      if (cell && desc && desc.parentElement !== cell) cell.append(desc);
-    }
-  }
-
-  const pill = document.getElementById('opencodeLocalFallbackStatus');
-  if (pill) {
-    const on = (state.settings || {}).opencodeLocalLimitsEnabled === true;
-    pill.textContent = t(on ? 'settings.appearance.motion.on' : 'settings.appearance.motion.off');
-  }
-
-  const toggle = document.getElementById('opencodeLocalFallbackSettingsToggle');
-  if (toggle && !toggle.dataset.wired) {
-    toggle.dataset.wired = '1';
-    // The shared helper, so this collapses exactly like every other group
-    // instead of a second hand-rolled implementation of the same thing.
-    toggle.addEventListener('click', () => setAccountGroupExpanded(
-      'opencodeLocalFallback',
-      toggle.getAttribute('aria-expanded') !== 'true'
-    ));
-  }
-}
-
 // Every account form saves through limits:saveCredential, which checks the
 // draft, probes it in main and stores it unless the provider rejected it. The
 // panel only turns the answer into its message line and the pending pill;
 // generated and hand-built panels share this, including which messages they
 // may override (`messages.required` / `rejected` / `invalidFormat`).
-let claudeOrganizationChoicesRevision = 0;
-let claudeWebAccountId = 'new';
-// null opens the initial empty-account form; an explicit cancel stays closed.
-let claudeWebFormOpen = null;
-const claudeAccountActions = accountShellApi.createBusyGuard();
+
 
 async function saveAccountCredential(id, values, { messages = {}, failedKey, clearInput = () => {} } = {}) {
-  if (id === 'claude') claudeOrganizationChoicesRevision += 1;
+  if (id === 'claude') legacyAccountOwners.claude.editor.revision += 1;
   const provider = LIMIT_PROVIDERS.find((entry) => entry.id === id);
   const name = provider?.settingsLabel || provider?.label || id;
   setAccountPanelMessage(id, null);
@@ -12665,7 +12835,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   let result;
   try {
     result = await commitAccountCredential(() => id === 'claude' && values.claudeWebAccountId
-      ? claudeAccountActions.run('claude', null, () => window.tokenMonitor.claude.saveWebAccount(values))
+      ? legacyAccountOwners.claude.claudeAccountActions.run('claude', null, () => window.tokenMonitor.claude.saveWebAccount(values))
       : window.tokenMonitor.limits.saveCredential(id, values));
   } catch (error) {
     setAccountPanelMessage(id, { key: failedKey, params: { message: error.message } });
@@ -12674,7 +12844,8 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   }
   if (id === 'claude' && values.claudeWebAccountId && result === undefined) return result;
   if (result?.verdict === 'superseded') return result;
-  if (id === 'claude') claudeOrganizationChoicesRevision += 1;
+  if (id === 'claude') legacyAccountOwners.claude.editor.revision += 1;
+  if (id === 'claude' && result?.saved) clearInput();
   if (id === 'claude' && result?.choices) renderClaudeOrganizationChoices(result.choices, result.settings?.claudeWebOrganizationId || values.claudeWebOrganizationId);
   if (id === 'claude' && result?.verdict === 'selectionRequired') {
     setAccountPanelMessage(id, { key: 'settings.claude.organizationRequired', tone: 'notice' });
@@ -12695,7 +12866,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
     renderExternalProviderStatus(id);
     return result;
   }
-  clearInput();
+  if (id !== 'claude') clearInput();
   // Marked only once the credential is stored: marking drops the provider's
   // current record, and a rejected key must leave the linked status on screen.
   markExternalProviderCheckPending(id, result.checkedSince);
@@ -12715,21 +12886,6 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   return result;
 }
 
-// The busy guard generated panels get from their factory, for a hand-built
-// panel's own submit button.
-async function submitAccountCredential(button, id, values, options) {
-  if (button.disabled) return undefined;
-  const label = button.textContent;
-  button.disabled = true;
-  button.textContent = t('settings.common.checking');
-  try {
-    return await saveAccountCredential(id, values, options);
-  } finally {
-    button.disabled = false;
-    button.textContent = label;
-  }
-}
-
 // A quota row's own refresh. The result says whether anything new is coming,
 // so the row can tell the user when it is not.
 async function refreshLimitAccount(provider) {
@@ -12740,7 +12896,8 @@ async function refreshLimitAccount(provider) {
       accountEmail: provider.accountEmail,
       accountName: provider.accountName,
       accountLabel: provider.accountLabel,
-      sourceDetail: provider.sourceDetail
+      sourceDetail: provider.sourceDetail,
+      region: provider.region
     });
   } catch (_) {
     result = { ok: false, reason: 'failed' };
@@ -12749,20 +12906,12 @@ async function refreshLimitAccount(provider) {
   return result;
 }
 
-async function refreshLimitProviderQuota(providerName) {
-  try {
-    await window.tokenMonitor.limits?.refresh?.(providerName);
-  } catch (_) {
-    // The next scheduled poll still settles the record.
-  }
-}
-
 async function clearAccountCredential(id) {
-  if (id === 'claude') claudeOrganizationChoicesRevision += 1;
+  if (id === 'claude') legacyAccountOwners.claude.editor.revision += 1;
   setAccountPanelMessage(id, null);
   await commitAccountCredential(() => window.tokenMonitor.limits.clearCredential(id));
   if (id === 'claude') {
-    claudeOrganizationChoicesRevision += 1;
+    legacyAccountOwners.claude.editor.revision += 1;
     renderClaudeOrganizationChoices([]);
   }
   clearExternalProviderCheckPending(id);
@@ -12782,45 +12931,7 @@ function limitAccountForm(providerId) {
   return state.settings?.limitAccountForms?.find((form) => form.id === providerId);
 }
 
-function renderClaudeOrganizationChoices(choices, selectedId = state.settings?.claudeWebOrganizationId || '') {
-  const select = document.getElementById('claudeWebOrganizationIdInput');
-  if (!select) return false;
-  document.getElementById('claudeWebOrganizationRow')?.classList.toggle('hidden', choices.length === 0);
-  select.options.length = 0;
-  const placeholder = document.createElement('option');
-  placeholder.value = '';
-  placeholder.textContent = t('settings.claude.organizationChoose');
-  select.append(placeholder);
-  for (const choice of choices) {
-    const option = document.createElement('option');
-    option.value = choice.id;
-    option.textContent = [choice.name || choice.id, choice.plan ? choice.plan[0].toUpperCase() + choice.plan.slice(1) : ''].filter(Boolean).join(' · ');
-    select.append(option);
-  }
-  const selectedAvailable = choices.some((choice) => choice.id === selectedId);
-  select.value = selectedAvailable ? selectedId : !selectedId && choices.length === 1 ? choices[0].id : '';
-  select.disabled = choices.length === 0;
-  return selectedAvailable;
-}
-
-async function loadClaudeOrganizationChoices() {
-  const revision = ++claudeOrganizationChoicesRevision;
-  try {
-    const result = await window.tokenMonitor.limits.listOrganizationChoices('claude');
-    if (revision !== claudeOrganizationChoicesRevision) return;
-    if (result.status === 'ok') {
-      const selectedAvailable = renderClaudeOrganizationChoices(result.choices);
-      if (!selectedAvailable && (state.settings?.claudeWebOrganizationId || result.choices.length > 1)) {
-        setAccountPanelMessage('claude', { key: state.settings?.claudeWebOrganizationId
-          ? 'settings.claude.organizationUnavailable'
-          : 'settings.claude.organizationSelect', tone: 'notice' });
-      }
-    } else setAccountPanelMessage('claude', { key: 'settings.claude.organizationLoadFailed', tone: 'notice' });
-  } catch (_) {
-    if (revision !== claudeOrganizationChoicesRevision) return;
-    setAccountPanelMessage('claude', { key: 'settings.claude.organizationLoadFailed', tone: 'notice' });
-  }
-}
+function renderClaudeOrganizationChoices(...args) { return legacyAccountOwners.claude.renderClaudeOrganizationChoices(...args); }
 
 // A select beside a credential (region, site, console) saves as soon as it
 // changes. `clears` names what the change invalidates: an Alibaba cookie
@@ -12828,9 +12939,9 @@ async function loadClaudeOrganizationChoices() {
 // one, so switching drops it instead of leaving a key that can only fail.
 async function saveAccountFormSetting({ id }, field, value) {
   if (id === 'claude' && field.key === 'claudeWebOrganizationId') {
-    if (claudeWebAccountId !== 'legacy') return;
+    if (legacyAccountOwners.claude.editor.accountId !== 'legacy') return;
     if (!value || !state.settings?.claudeWebCookieConfigured || document.getElementById('claudeWebCookieInput')?.value) return;
-    claudeOrganizationChoicesRevision += 1;
+    legacyAccountOwners.claude.editor.revision += 1;
     await saveSettings({ claudeWebOrganizationId: value });
     setAccountPanelMessage('claude', null);
     await refreshStats({ force: true });
@@ -12859,18 +12970,22 @@ function setupLimitAccountPanels() {
         document,
         provider: externalProviderForAccount(form.id)
       })),
-      onRefresh: async () => {
-        if (form.id === 'claude' && claudeWebAccountId === 'legacy') await loadClaudeOrganizationChoices();
-        await refreshLimitProviderQuota(form.id);
-        await refreshStats();
-      },
       onClear: ({ id }) => clearAccountCredential(id),
       onSave: async ({ id, messages, failedKey }, values, clearInput) => {
-        if (id === 'claude' && claudeWebAccountId !== 'legacy') values.claudeWebAccountId = claudeWebAccountId;
-        const result = await saveAccountCredential(id, values, { messages, failedKey, clearInput });
-        if (id === 'claude' && result?.saved) {
-          claudeWebFormOpen = false;
-          claudeWebAccountId = 'new';
+        if (id === 'claude' && legacyAccountOwners.claude.editor.accountId !== 'legacy') values.claudeWebAccountId = legacyAccountOwners.claude.editor.accountId;
+        const editorRevision = legacyAccountOwners.claude.editor.revision;
+        const unchanged = () => (id !== 'claude' || editorRevision + 2 === legacyAccountOwners.claude.editor.revision)
+          && Object.entries(values).every(([key, value]) => {
+            const input = document.getElementById(`${key}Input`);
+            return !input || input.value === String(value);
+          });
+        let cleared = false;
+        const result = await saveAccountCredential(id, values, { messages, failedKey, clearInput: () => {
+          if (unchanged()) { clearInput(); cleared = true; }
+        } });
+        if (id === 'claude' && result?.saved && cleared) {
+          legacyAccountOwners.claude.editor.open = false;
+          legacyAccountOwners.claude.editor.accountId = 'new';
           renderClaudeOrganizationChoices([]);
           renderExternalProviderStatus(id);
         }
@@ -12887,14 +13002,28 @@ function setupLimitAccountPanels() {
       .map((provider) => limitProviderAccountGroup(provider.id))
       .find((group) => group?.parentElement === container);
     container.insertBefore(panel, nextGroup || null);
-    if (form.accountSlots) {
+    if (form.accountSlots && !form.accountSlotOwner) {
       const details = panel.querySelector('.cursor-settings-details');
-      for (const child of [...details.children]) child.remove();
+      if (form.id === 'volcengine') {
+        // Migration retains local credentials completed by the environment.
+        const retained = document.createElement('details');
+        retained.id = 'volcengineFixedCredentialForm';
+        retained.className = 'hidden';
+        const summary = document.createElement('summary');
+        summary.dataset.i18n = 'settings.slots.savedSource';
+        summary.textContent = t(summary.dataset.i18n);
+        retained.append(summary, ...details.children);
+        details.append(retained);
+      } else {
+        for (const child of [...details.children]) child.remove();
+      }
       const slotsPanel = window.TokenMonitorAccountSlotsPanel.createPanel({
+        loginAction: window.tokenMonitor[form.id],
         form, label: LIMIT_PROVIDERS.find(provider => provider.id === form.id).label,
         document, t, ipc: window.tokenMonitor.limits.accountSlots, forms: limitAccountPanelsApi,
+        maskEmail: email => state.settings?.maskLimitAccountEmails === true ? accountIdentityApi.maskEmailAddress(email) : email,
         preserveScroll: preserveSettingsPanelScroll, openExternal: url => window.tokenMonitor.openExternal(url),
-        onChanged: slots => { accountSlotLists[form.id] = slots; render(); void refreshStats(); }
+        onChanged: slots => { accountSlotLists[form.id] = slots; render(); renderExternalProviderStatus(form.id); void refreshStats(); }
       });
       accountSlotPanels.set(form.id, slotsPanel);
       panel.querySelector('.cursor-settings-details').prepend(slotsPanel.element);
@@ -12921,17 +13050,21 @@ function limitProviderAccountStatus(providerId) {
     : null;
 }
 
-function limitProviderConnectionDetail(bodyKey) {
-  const panel = document.createElement('div');
-  panel.className = 'limit-provider-connection-detail';
-  const title = document.createElement('span');
-  title.className = 'limit-provider-connection-title';
-  title.textContent = t('settings.limits.connection.title');
-  const body = document.createElement('p');
-  body.className = 'settings-note';
-  body.textContent = t(bodyKey);
-  panel.append(title, body);
-  return panel;
+function limitProviderConnectionDetail(id, sources, provider) {
+  const form = limitAccountForm(id);
+  return window.TokenMonitorConnectionPresentation.createConnectionCard({
+    document, t, sources, provider, providerId: id,
+    selection: state.settings?.limitConnectionSources?.find(entry => entry.id === id)?.sourceSelection,
+    preference: state.settings?.[`${id}SourcePreference`] || 'auto',
+    onSelect: async patch => {
+      await saveSettings(patch);
+      return state.settings?.[`${id}SourcePreference`] || 'auto';
+    },
+    label: LIMIT_PROVIDERS.find(entry => entry.id === id).label,
+    onOpen: id !== 'claude' && form?.openUrl ? () => window.tokenMonitor.openExternal(
+      accountSlotPanels.get(id)?.activeEditorUrl() || limitAccountPanelsApi.resolveOpenUrl(form, { document, provider: externalProviderForAccount(id), settings: state.settings })
+    ) : undefined
+  });
 }
 
 // Single entry point for the provider options accordion. The drag gesture also
@@ -12947,7 +13080,7 @@ function setLimitProviderSettingsExpanded(providerId) {
     const open = row.dataset.provider === state.limitProviderSettingsExpanded;
     disclosure.setAttribute('aria-expanded', String(open));
     row.classList.toggle('expanded', open);
-    container.classList.toggle('hidden', !open);
+    accountShellApi.setDisclosureBody(disclosure, container, open);
   }
 }
 
@@ -13025,6 +13158,8 @@ function limitProviderSettingsRenderSignature() {
       settingValues,
       state.limitProviderSettingsExpanded
     ],
+    connectionPreferences: (settings.limitConnectionSources || []).filter(entry => entry.sourceSelection)
+      .map(entry => [entry.id, entry.sourceSelection.sources, settings[entry.sourceSelection.key] || 'auto']),
     usageItems: [...enabledLimitProviderSet()].sort().map((id) => [id, limitProviderUsageItemRows(id)]),
     query: limitProviderQuery(),
     providers: (state.stats?.limits?.providers || []).map(providerSignature),
@@ -13469,17 +13604,24 @@ async function showAllViews() {
 }
 
 function preserveSettingsPanelScroll(callback) {
-  if (isRendererWindowHidden()) return callback();
+  // A stats refresh can update many account panels in one synchronous pass.
+  if (preservingSettingsPanelScroll || isRendererWindowHidden()) return callback();
   const panel = els.settingsPanel;
   if (!panel || panel.classList.contains('hidden')) return callback();
   const scrollTop = panel.scrollTop;
   const scrollLeft = panel.scrollLeft;
   const interactionRevision = settingsScrollInteractionRevision;
   const restore = () => {
-    panel.scrollTop = scrollTop;
-    panel.scrollLeft = scrollLeft;
+    if (panel.scrollTop !== scrollTop) panel.scrollTop = scrollTop;
+    if (panel.scrollLeft !== scrollLeft) panel.scrollLeft = scrollLeft;
   };
-  const result = callback();
+  preservingSettingsPanelScroll = true;
+  let result;
+  try {
+    result = callback();
+  } finally {
+    preservingSettingsPanelScroll = false;
+  }
   restore();
   if (typeof requestAnimationFrame === 'function') {
     requestAnimationFrame(() => {
@@ -14057,7 +14199,9 @@ document.addEventListener('click', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && state.periodMenuOpen) {
+  if (event.key !== 'Escape') return;
+  hideHomeTrendTooltip();
+  if (state.periodMenuOpen) {
     event.preventDefault();
     setPeriodMenuOpen(false, { restoreFocus: true });
   }
@@ -14117,6 +14261,7 @@ els.settingsButton.addEventListener('click', (event) => {
   // closing it needs no catch-up repaint. Only the panel's own DOM has to be
   // caught up when it opens, because its renderers idle while it is closed.
   if (settingsOpen) {
+    hideHomeTrendTooltip();
     syncSettingsForm();
   } else {
     syncModeSelect?.close();
@@ -15096,6 +15241,8 @@ els.floatingBubbleTab.addEventListener('mouseleave', handleFloatingBubbleHoverLe
 document.documentElement.addEventListener('mouseleave', handleDocumentHoverLeave);
 document.documentElement.addEventListener('mouseleave', hideTrendTooltip);
 window.addEventListener('blur', handleTrendsWindowBlur);
+window.addEventListener('blur', hideHomeTrendTooltip);
+window.addEventListener('resize', hideHomeTrendTooltip);
 document.documentElement.addEventListener('mouseenter', clearHoverCollapseTimer);
 els.floatingBubbleTab.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter' && event.key !== ' ') return;
@@ -15297,22 +15444,22 @@ function renderStatsUpdate() {
   if (surface !== 'main') return;
   render();
   if (!isSettingsSurfaceVisible()) return;
-  renderCodexAccounts();
-  renderMimoStatus();
-  renderWorkbuddyStatus();
-  renderSettingsSummaries();
-  renderLimitProviderCheckboxes();
-  renderToolPreferences();
-  renderWslPanel();
-  updateOpenRouterProfilesStatus();
-  updateMinimaxApiKeysStatus();
-  updateThirdPartyProfilesStatus();
-  renderExternalProviderStatus('volcengine');
-  renderExternalProviderStatus('kimi');
-  for (const form of state.settings?.limitAccountForms || []) {
-    if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
-  }
-  renderCopilotStatus();
+  preserveSettingsPanelScroll(() => {
+    renderCodexAccounts();
+    renderMimoStatus();
+    renderWorkbuddyStatus();
+    renderSettingsSummaries();
+    renderLimitProviderCheckboxes();
+    renderToolPreferences();
+    renderWslPanel();
+    updateMinimaxApiKeysStatus();
+    updateThirdPartyProfilesStatus();
+    renderExternalProviderStatus('volcengine');
+    renderExternalProviderStatus('kimi');
+    for (const form of state.settings?.limitAccountForms || []) {
+      if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
+    }
+  });
   signalContentReady();
 }
 
@@ -16283,8 +16430,8 @@ function trayComposerProviderChoices(currentProviders = [], options = {}) {
 function trayComposerAccountChoices(provider) {
   const stats = desktopSurfaceStats() || {};
   const raw = provider === 'auto'
-    ? desktopLimitProviders().flatMap((entry) => trayLayoutApi.accountOptions(stats, entry.id))
-    : trayLayoutApi.accountOptions(stats, provider);
+    ? desktopLimitProviders().flatMap((entry) => trayLayoutApi.accountOptions(stats, entry.id, t))
+    : trayLayoutApi.accountOptions(stats, provider, t);
   return raw.map((entry) => ({
     value: entry.value,
     label: entry.label,
@@ -16684,292 +16831,31 @@ function syncLimitProviderAccountExpansion(providerId, expanded) {
   }
 }
 
-function setCodexAccountExpanded(expanded) {
-  setAccountGroupExpanded('codex', expanded, 'codexAccountExpanded');
-}
-
-function setCursorAccountExpanded(expanded) {
-  setAccountGroupExpanded('cursor', expanded, 'cursorAccountExpanded');
-}
-
-function setAntigravityAccountExpanded(expanded) {
-  setAccountGroupExpanded('antigravity', expanded, 'antigravityAccountExpanded');
-}
-
-function setOpencodeCookieExpanded(expanded) {
-  setAccountGroupExpanded('opencode', expanded, 'opencodeCookieExpanded');
-}
-
-function setOpenrouterAccountExpanded(expanded) {
-  setAccountGroupExpanded('openrouter', expanded, 'openrouterAccountExpanded');
-}
-
-function setThirdPartyAccountExpanded(expanded) {
-  setAccountGroupExpanded('thirdparty', expanded, 'thirdPartyAccountExpanded');
-}
-
-function selectedThirdPartyAdapter() {
-  const platform = String(document.getElementById('thirdpartyPlatformInput')?.value || 'newapi');
-  const mode = String(document.getElementById('thirdpartyModeInput')?.value || 'account');
-  if (platform === 'custom') return 'custom';
-  if (platform === 'sub2api') return 'sub2api';
-  return mode === 'token' ? 'newapi-token' : 'newapi-account';
-}
-
-function updateThirdPartyHttpWarning() {
-  const input = document.getElementById('thirdpartyBaseUrlInput');
-  const warning = document.getElementById('thirdpartyHttpWarning');
-  if (!warning) return;
-  let insecure;
-  try {
-    insecure = new URL(String(input?.value || '').trim()).protocol === 'http:';
-  } catch {
-    warning.classList.add('hidden');
-    return;
-  }
-  warning.classList.toggle('hidden', !insecure);
-}
-
-function setThirdPartyAdapterFields() {
-  const adapter = selectedThirdPartyAdapter();
-  const customMode = adapter === 'custom';
-  const sub2apiMode = adapter === 'sub2api';
-  const singleChoiceField = customMode || sub2apiMode;
-  const accountMode = adapter === 'newapi-account' || sub2apiMode;
-  const newApiAccountMode = adapter === 'newapi-account';
-  const pairedCredentials = newApiAccountMode;
-  document.getElementById('thirdpartyChoiceGrid')?.classList.toggle('single-field', singleChoiceField);
-  document.getElementById('thirdpartyModeField')?.classList.toggle('hidden', singleChoiceField);
-  document.getElementById('thirdpartyCredentialGrid')?.classList.toggle(
-    'single-field',
-    !pairedCredentials
-  );
-  document.getElementById('thirdpartyAccessTokenRow')?.classList.toggle('hidden', !accountMode);
-  document.getElementById('thirdpartyRefreshTokenRow')?.classList.toggle('hidden', !sub2apiMode);
-  document.getElementById('thirdpartySub2ApiSteps')?.classList.toggle('hidden', !sub2apiMode);
-  document.getElementById('thirdpartyUserIdRow')?.classList.toggle('hidden', !newApiAccountMode);
-  document.getElementById('thirdpartyApiKeyRow')?.classList.toggle('hidden', accountMode);
-  document.getElementById('thirdpartyCustomConfig')?.classList.toggle('hidden', !customMode);
-  const hint = document.getElementById('thirdpartyModeHint');
-  if (hint) {
-    const hintKey = customMode
-      ? 'settings.thirdparty.hintCustom'
-      : sub2apiMode
-        ? 'settings.thirdparty.hintSub2Api'
-        : adapter === 'newapi-token'
-          ? 'settings.thirdparty.hintNewApiToken'
-          : 'settings.thirdparty.hintNewApiAccount';
-    hint.textContent = t(hintKey);
-  }
-  const accessTokenLabel = document.getElementById('thirdpartyAccessTokenLabel');
-  const accessTokenInput = document.getElementById('thirdpartyAccessTokenInput');
-  const refreshTokenLabel = document.getElementById('thirdpartyRefreshTokenLabel');
-  const refreshTokenInput = document.getElementById('thirdpartyRefreshTokenInput');
-  const accessTokenKey = 'settings.thirdparty.accessToken';
-  const accessTokenPlaceholderKey = sub2apiMode
-    ? 'settings.thirdparty.sub2ApiAccessTokenPlaceholder'
-    : 'settings.thirdparty.accessTokenPlaceholder';
-  const refreshTokenKey = 'settings.thirdparty.refreshToken';
-  const refreshTokenPlaceholderKey = sub2apiMode
-    ? 'settings.thirdparty.sub2ApiRefreshTokenPlaceholder'
-    : 'settings.thirdparty.refreshTokenPlaceholder';
-  if (accessTokenLabel) {
-    accessTokenLabel.dataset.i18n = accessTokenKey;
-    accessTokenLabel.textContent = t(accessTokenKey);
-  }
-  if (accessTokenInput) {
-    accessTokenInput.dataset.i18nPlaceholder = accessTokenPlaceholderKey;
-    accessTokenInput.placeholder = t(accessTokenPlaceholderKey);
-  }
-  if (refreshTokenLabel) {
-    refreshTokenLabel.dataset.i18n = refreshTokenKey;
-    refreshTokenLabel.textContent = t(refreshTokenKey);
-  }
-  if (refreshTokenInput) {
-    refreshTokenInput.dataset.i18nPlaceholder = refreshTokenPlaceholderKey;
-    refreshTokenInput.placeholder = t(refreshTokenPlaceholderKey);
-  }
-}
 
 
-function setMimoAccountExpanded(expanded) {
-  setAccountGroupExpanded('mimo', expanded, 'mimoAccountExpanded');
-}
 
-async function refreshMimoAccounts() {
-  try {
-    state.settings.mimoManagedAccounts = await window.tokenMonitor.mimo.accounts() || [];
-    renderMimoStatus();
-  } catch (_) {}
-}
 
-function setCopilotAccountExpanded(expanded) {
-  setAccountGroupExpanded('copilot', expanded, 'copilotAccountExpanded');
-}
 
-function setCopilotManualExpanded(expanded) {
-  const next = Boolean(expanded);
-  state.copilotManualExpanded = next;
-  document.getElementById('copilotManualToggle')?.setAttribute('aria-expanded', next ? 'true' : 'false');
-  document.getElementById('copilotManualDetails')?.classList.toggle('hidden', !next);
-  document.getElementById('copilotManualPanel')?.classList.toggle('expanded', next);
-}
+
+
+
+function setThirdPartyAdapterFields(...args) { return legacyAccountOwners.thirdparty.setThirdPartyAdapterFields(...args); }
+
+
+
+
+
+
+
 
 function setCursorStatusText(el, text) {
-  el.textContent = text;
-  el.setAttribute('aria-label', text);
+  if (el.textContent !== text) el.textContent = text;
+  if (el.getAttribute('aria-label') !== text) el.setAttribute('aria-label', text);
 }
 
-function renderCodexLoginStatus() {
-  const addButton = document.getElementById('codexAddAccountButton');
-  const cancelButton = document.getElementById('codexCancelLoginButton');
-  const refreshButton = document.getElementById('codexRefreshAccountsButton');
-  const openButton = document.getElementById('codexOpenLoginUrlButton');
-  const copyButton = document.getElementById('codexCopyLoginUrlButton');
-  const statusEl = document.getElementById('codexLoginStatus');
-  const workspaceSelection = document.getElementById('codexWorkspaceSelection');
-  const workspaceSelect = document.getElementById('codexWorkspaceSelect');
-  const urlActions = document.getElementById('codexLoginUrlActions');
-  const details = document.getElementById('codexLoginDetails');
-  const output = document.getElementById('codexLoginOutput');
-  if (!addButton || !cancelButton || !refreshButton || !openButton || !copyButton || !statusEl || !workspaceSelection || !workspaceSelect || !urlActions || !details || !output) return;
 
-  addButton.classList.toggle('hidden', state.codexSignInBusy);
-  cancelButton.classList.toggle('hidden', !state.codexSignInBusy);
-  refreshButton.classList.toggle('hidden', state.codexSignInBusy);
-  accountShellApi.render({ progress: statusEl, progressText: state.codexLoginStatus });
-  workspaceSelection.classList.toggle('hidden', state.codexWorkspaceChoices.length === 0);
-  workspaceSelect.replaceChildren(...state.codexWorkspaceChoices.map((workspace) => {
-    const option = document.createElement('option');
-    option.value = workspace.id;
-    option.textContent = workspace.workspaceKind === 'personal'
-      ? t('settings.codex.personalWorkspace')
-      : workspace.label || workspace.id;
-    option.selected = workspace.id === state.codexWorkspaceId;
-    return option;
-  }));
-  urlActions.classList.toggle('hidden', !state.codexSignInBusy);
-  openButton.classList.toggle('hidden', !state.codexLoginUrl);
-  copyButton.classList.toggle('hidden', !state.codexLoginUrl);
-  output.textContent = state.codexLoginOutput;
-  details.classList.toggle('hidden', !state.codexLoginOutput);
-}
+function renderCodexAccounts(...args) { return legacyAccountOwners.codex.renderCodexAccounts(...args); }
 
-function renderCodexAccounts() {
-  if (!isSettingsSurfaceVisible()) return;
-  const statusEl = document.getElementById('codexAccountStatus');
-  const listEl = document.getElementById('codexAccountList');
-  const errorEl = document.getElementById('codexAccountErrorMessage');
-  if (!statusEl || !listEl || !errorEl) return;
-
-  const accounts = state.settings?.codexManagedAccounts || [];
-  const enabledCount = accounts.filter(account => account.enabled !== false).length;
-  const statusText = accounts.length === 0
-    ? t('settings.codex.notConfigured')
-    : t('settings.opencode.connected', { linked: enabledCount, total: accounts.length });
-  accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.codexAccountError });
-  listEl.replaceChildren();
-  if (accounts.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'settings-note';
-    empty.textContent = t('settings.codex.empty');
-    listEl.append(empty);
-  } else {
-    const codexProviders = localProviderStatuses('codex');
-    for (const account of accounts) {
-      const enabled = account.enabled !== false;
-      const row = document.createElement('div');
-      row.className = 'managed-account-row';
-      row.classList.toggle('disabled', !enabled);
-      const input = document.createElement('input');
-      input.className = 'managed-account-checkbox';
-      input.type = 'checkbox';
-      input.checked = account.enabled !== false;
-      input.setAttribute('aria-label', t('settings.codex.toggleAccount', {
-        account: account.email || t('settings.codex.unnamedAccount')
-      }));
-      const main = document.createElement('div');
-      main.className = 'managed-account-main';
-      const email = document.createElement('div');
-      email.className = 'managed-account-email';
-      email.textContent = account.email || t('settings.codex.unnamedAccount');
-      main.append(email);
-      input.addEventListener('change', async () => {
-        input.disabled = true;
-        const result = await window.tokenMonitor.codex.setAccountEnabled(account.id, input.checked);
-        if (!result?.ok) {
-          state.codexAccountError = result?.error || t('settings.codex.toggleFailed');
-        } else {
-          state.codexAccountError = '';
-          state.settings.codexManagedAccounts = result.accounts || [];
-        }
-        renderCodexAccounts();
-        renderSettingsSummaries();
-      });
-      const right = document.createElement('span');
-      right.className = 'managed-account-right';
-      const info = document.createElement('span');
-      info.className = 'managed-account-info';
-      const workspaceLabel = account.workspaceKind === 'personal'
-        ? t('settings.codex.personalWorkspace')
-        : account.workspaceLabel;
-      const accountMetadata = [
-        workspaceLabel,
-        enabled
-          ? limitProviderPresentationApi.limitProviderDisplayLabel(
-            accountIdentityApi.codexManagedAccountPlanLabel(account, codexProviders)
-          )
-          : t('settings.codex.disabled')
-      ].filter((value, index, values) => value && values.indexOf(value) === index);
-      info.textContent = accountMetadata.join(' · ');
-      info.setAttribute('aria-label', accountMetadata.join(' · '));
-      const remove = document.createElement('button');
-      remove.type = 'button';
-      remove.className = 'managed-account-remove';
-      remove.textContent = '✕';
-      remove.setAttribute('aria-label', t('settings.codex.remove'));
-      let confirmingRemove = false;
-      remove.addEventListener('click', async () => {
-        if (!confirmingRemove) {
-          confirmingRemove = true;
-          remove.classList.add('confirming');
-          remove.textContent = '✓';
-          remove.setAttribute('aria-label', t('settings.codex.removeConfirm', {
-            account: account.email || t('settings.codex.unnamedAccount')
-          }));
-          return;
-        }
-        const result = await window.tokenMonitor.codex.removeAccount(account.id);
-        if (!result?.ok) {
-          state.codexAccountError = result?.error || t('settings.codex.removeFailed');
-        } else {
-          state.codexAccountError = '';
-          state.settings.codexManagedAccounts = result.accounts || [];
-          renderCodexAccounts();
-          renderSettingsSummaries();
-          refreshStats({ force: true }).catch(() => {});
-          return;
-        }
-        renderCodexAccounts();
-        renderSettingsSummaries();
-      });
-      right.append(info, remove);
-      row.append(input, main, right);
-      listEl.append(row);
-    }
-  }
-  renderSettingsSummaries();
-}
-
-async function refreshCodexAccounts() {
-  try {
-    state.settings.codexManagedAccounts = await window.tokenMonitor.codex.accounts();
-    state.codexAccountError = '';
-  } catch (err) {
-    state.codexAccountError = err.message;
-  }
-  renderCodexAccounts();
-}
 
 // Account cards reflect THIS machine's configured credential, so read the
 // local device's RAW limits from state.stats.devices — NOT the collapsed
@@ -16996,6 +16882,18 @@ function localProviderStatus(name) {
   return (state.stats?.limits?.providers || []).find((provider) => provider.provider === name) || null;
 }
 
+// Automatic account rows must not promote a Hub aggregate to a local login.
+function strictLocalProviderStatuses(name) {
+  const localDeviceId = state.settings?.deviceId || '';
+  if (!localDeviceId && Array.isArray(state.stats?.devices)) return [];
+  const local = localDeviceLimitsProviders();
+  const providers = local !== null ? local
+    : state.mode !== 'sync' && (!state.settings?.hubMode || state.settings.hubMode === 'local')
+      ? state.stats?.limits?.providers || [] : [];
+  return providers.filter(provider => provider.provider === name
+    && (!provider.sourceDeviceId || provider.sourceDeviceId === localDeviceId));
+}
+
 function localProviderStatuses(name) {
   const localProviders = localDeviceLimitsProviders();
   const providers = localProviders !== null
@@ -17004,527 +16902,22 @@ function localProviderStatuses(name) {
   return providers.filter((provider) => provider.provider === name);
 }
 
-function workbuddyAccountError(code, fallback = 'loginFailed') {
-  const keys = {
-    TIMEOUT: 'loginTimeout',
-    STATE_MISMATCH: 'loginStateMismatch',
-    INVALID_STATE: 'loginStateMismatch',
-    INVALID_LOGIN_URL: 'loginStateMismatch',
-    CONTEXT_CHANGED: 'loginStateMismatch',
-    credentialStorageUnavailable: 'credentialStorageUnavailable',
-    PERSISTENCE_FAILED: 'credentialStorageUnavailable',
-    ROLLBACK_FAILED: 'credentialStorageUnavailable',
-    loginInProgress: 'loginInProgress'
-  };
-  return t(`settings.workbuddy.${Object.hasOwn(keys, code) ? keys[code] : fallback}`);
-}
-
-function applyWorkbuddyAccounts(accounts) {
-  if (!state.settings || !Array.isArray(accounts)) return;
-  state.workbuddyAccountsRevision = (state.workbuddyAccountsRevision || 0) + 1;
-  state.settings.workbuddyManagedAccounts = accounts;
-  renderWorkbuddyStatus();
-  renderSettingsSummaries();
-  renderSubscriptionSettings();
-}
-
-async function mutateWorkbuddyAccount(id, operation, enabled) {
-  if (state.workbuddyMutationBusy || state.workbuddySignInBusy || state.workbuddyCancelBusy) return;
-  state.workbuddyMutationBusy = true;
-  state.workbuddyAccountError = '';
-  renderWorkbuddyStatus();
-  try {
-    const api = window.tokenMonitor.workbuddy;
-    const result = operation === 'remove'
-      ? await api.removeAccount(id)
-      : await api.setAccountEnabled(id, enabled);
-    if (!result?.ok) {
-      state.workbuddyAccountError = workbuddyAccountError(result?.errorCode,
-        operation === 'remove' ? 'removeFailed' : 'toggleFailed');
-    } else {
-      applyWorkbuddyAccounts(result.accounts);
-      refreshStats({ force: true }).catch(() => {});
-    }
-  } catch (_) {
-    state.workbuddyAccountError = workbuddyAccountError('', operation === 'remove' ? 'removeFailed' : 'toggleFailed');
-  } finally {
-    state.workbuddyMutationBusy = false;
-    renderWorkbuddyStatus();
-  }
-}
-
-function finishWorkbuddyLogin(attempt, result) {
-  if (state.workbuddyLoginAttempt !== attempt) return;
-  if (state.workbuddyCancelBusy) {
-    state.workbuddyPendingLoginResult = { attempt, result };
-    return;
-  }
-  state.workbuddySignInBusy = false;
-  state.workbuddyAccountError = '';
-  if (result?.ok) {
-    applyWorkbuddyAccounts(result.accounts);
-    state.workbuddyLoginStatusKey = '';
-    refreshStats({ force: true }).catch(() => {});
-  } else if (['CANCELED', 'CANCELLED'].includes(result?.errorCode)) {
-    state.workbuddyLoginStatusKey = 'loginCancelled';
-  } else {
-    state.workbuddyLoginStatusKey = '';
-    state.workbuddyAccountError = workbuddyAccountError(result?.errorCode);
-  }
-  renderWorkbuddyStatus();
-}
-
-async function startWorkbuddyLogin(realm) {
-  if (!['cn', 'ai'].includes(realm) || state.workbuddySignInBusy || state.workbuddyCancelBusy || state.workbuddyMutationBusy) return;
-  const attempt = (state.workbuddyLoginAttempt || 0) + 1;
-  state.workbuddyLoginAttempt = attempt;
-  state.workbuddySignInBusy = true;
-  state.workbuddyPendingLoginResult = null;
-  state.workbuddyAccountError = '';
-  state.workbuddyLoginStatusKey = 'loginStatus';
-  renderWorkbuddyStatus();
-  let result;
-  try {
-    result = await window.tokenMonitor.workbuddy.addAccount(realm);
-  } catch (_) {
-    result = { ok: false };
-  }
-  finishWorkbuddyLogin(attempt, result);
-}
-
-async function cancelWorkbuddyLogin() {
-  if (!state.workbuddySignInBusy || state.workbuddyCancelBusy) return;
-  state.workbuddyCancelBusy = true;
-  state.workbuddyAccountError = '';
-  renderWorkbuddyStatus();
-  let cancelled = false;
-  try {
-    const result = await window.tokenMonitor.workbuddy.cancelLogin();
-    cancelled = result === true || result?.ok === true;
-  } catch (_) {}
-  state.workbuddyCancelBusy = false;
-  if (cancelled) {
-    // A cancelled IPC promise may settle later, including after the next login.
-    state.workbuddyLoginAttempt = (state.workbuddyLoginAttempt || 0) + 1;
-    state.workbuddySignInBusy = false;
-    state.workbuddyPendingLoginResult = null;
-    state.workbuddyLoginStatusKey = 'loginCancelled';
-  } else if (state.workbuddyPendingLoginResult) {
-    const pending = state.workbuddyPendingLoginResult;
-    state.workbuddyPendingLoginResult = null;
-    finishWorkbuddyLogin(pending.attempt, pending.result);
-  } else {
-    state.workbuddyAccountError = workbuddyAccountError('', 'cancelFailed');
-  }
-  renderWorkbuddyStatus();
-}
-
-function renderWorkbuddyStatus() {
-  const list = document.getElementById('workbuddyAccountList');
-  if (!list || !state.settings) return;
-  const accounts = Array.isArray(state.settings.workbuddyManagedAccounts) ? state.settings.workbuddyManagedAccounts : [];
-  const busy = Boolean(state.workbuddySignInBusy || state.workbuddyCancelBusy || state.workbuddyMutationBusy);
-  accountShellApi.render({
-    status: document.getElementById('workbuddyAccountStatus'),
-    statusText: accounts.length
-      ? t('settings.workbuddy.connected', { linked: accounts.filter((a) => a.enabled !== false).length, total: accounts.length })
-      : t('settings.workbuddy.notConfigured'),
-    progress: document.getElementById('workbuddyLoginStatus'),
-    progressText: state.workbuddyCancelBusy
-      ? t('settings.workbuddy.cancelling')
-      : state.workbuddyLoginStatusKey ? t(`settings.workbuddy.${state.workbuddyLoginStatusKey}`) : '',
-    error: document.getElementById('workbuddyAccountErrorMessage'),
-    errorText: state.workbuddyAccountError
-  });
-  for (const [id, key] of [['workbuddyAddCnAccountButton', 'addCnAccount'], ['workbuddyAddAiAccountButton', 'addAiAccount']]) {
-    const button = document.getElementById(id);
-    if (!button) continue;
-    button.disabled = busy;
-    button.textContent = t(`settings.workbuddy.${key}`);
-  }
-  const cancel = document.getElementById('workbuddyCancelLoginButton');
-  if (cancel) {
-    cancel.classList.toggle('hidden', !state.workbuddySignInBusy && !state.workbuddyCancelBusy);
-    cancel.disabled = Boolean(state.workbuddyCancelBusy);
-  }
-  list.replaceChildren();
-  if (!accounts.length) {
-    const empty = document.createElement('p');
-    empty.className = 'settings-note';
-    empty.textContent = t('settings.workbuddy.empty');
-    list.append(empty);
-  }
-  const providers = localProviderStatuses('workbuddy');
-  accounts.forEach((account, index) => {
-    const name = accountIdentityApi.accountTitleLabel({ provider: 'workbuddy', ...account }, accounts, {
-      maskEmail: state.settings.maskLimitAccountEmails === true, index
-    }) || t('settings.workbuddy.accountFallback', { number: index + 1 });
-    const row = document.createElement('div');
-    row.className = 'managed-account-row';
-    row.classList.toggle('disabled', account.enabled === false);
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.className = 'managed-account-checkbox';
-    input.checked = account.enabled !== false;
-    input.disabled = busy;
-    input.setAttribute('aria-label', t('settings.workbuddy.toggleAccount', { account: name }));
-    input.addEventListener('change', () => mutateWorkbuddyAccount(account.id, 'toggle', input.checked));
-    const main = document.createElement('div');
-    main.className = 'managed-account-main';
-    const title = document.createElement('div');
-    title.className = 'managed-account-email';
-    title.textContent = name;
-    title.setAttribute('aria-label', name);
-    const meta = document.createElement('div');
-    meta.className = 'workbuddy-account-meta';
-    meta.textContent = t(account.realm === 'ai' ? 'settings.workbuddy.realmAi' : 'settings.workbuddy.realmCn');
-    main.append(title, meta);
-    const right = document.createElement('span');
-    right.className = 'managed-account-right';
-    const info = document.createElement('span');
-    info.className = 'managed-account-info';
-    // Nicknames, realm labels and email addresses never redirect a quota lookup.
-    const provider = account.accountKey
-      ? providers.find((candidate) => candidate.accountKey === account.accountKey)
-      : null;
-    info.textContent = account.enabled === false ? t('settings.workbuddy.disabled')
-      : provider ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(provider))
-        : t('settings.workbuddy.notChecked');
-    info.setAttribute('aria-label', info.textContent);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'managed-account-remove';
-    remove.textContent = '✕';
-    remove.setAttribute('aria-label', t('settings.workbuddy.remove'));
-    remove.disabled = busy;
-    let armed = false;
-    remove.addEventListener('click', () => {
-      if (busy) return;
-      if (!armed) {
-        armed = true;
-        remove.classList.add('confirming');
-        remove.textContent = '✓';
-        remove.setAttribute('aria-label', t('settings.workbuddy.removeConfirm', { account: name }));
-        return;
-      }
-      return mutateWorkbuddyAccount(account.id, 'remove');
-    });
-    right.append(info, remove);
-    row.append(input, main, right);
-    list.append(row);
-  });
-}
-
-function initWorkbuddyAccountSettings() {
-  const api = window.tokenMonitor.workbuddy;
-  const toggle = document.getElementById('workbuddySettingsToggle');
-  if (!api || !toggle) return;
-  toggle.addEventListener('click', () => setAccountGroupExpanded('workbuddy', !state.workbuddyAccountExpanded, 'workbuddyAccountExpanded'));
-  setAccountGroupExpanded('workbuddy', false, 'workbuddyAccountExpanded');
-  renderWorkbuddyStatus();
-  api.onAccounts(applyWorkbuddyAccounts);
-  const revision = state.workbuddyAccountsRevision || 0;
-  api.accounts().then((accounts) => {
-    if ((state.workbuddyAccountsRevision || 0) === revision) applyWorkbuddyAccounts(accounts);
-  }).catch(() => {
-    if ((state.workbuddyAccountsRevision || 0) !== revision) return;
-    state.workbuddyAccountError = workbuddyAccountError('', 'accountsFailed');
-    renderWorkbuddyStatus();
-  });
-  document.getElementById('workbuddyAddCnAccountButton')?.addEventListener('click', () => startWorkbuddyLogin('cn'));
-  document.getElementById('workbuddyAddAiAccountButton')?.addEventListener('click', () => startWorkbuddyLogin('ai'));
-  document.getElementById('workbuddyCancelLoginButton')?.addEventListener('click', cancelWorkbuddyLogin);
-}
-
-function renderAntigravityStatus() {
-  if (!isSettingsSurfaceVisible()) return;
-  const statusEl = document.getElementById('antigravityAccountStatus');
-  const listEl = document.getElementById('antigravityAccountList');
-  const errorEl = document.getElementById('antigravityAccountErrorMessage');
-  const statusMessage = document.getElementById('antigravityLoginStatus');
-  const addButton = document.getElementById('antigravityAddAccountButton');
-  const cancelButton = document.getElementById('antigravityCancelLoginButton');
-  if (!statusEl || !listEl || !errorEl || !addButton || !cancelButton) return;
-  const accounts = state.settings?.antigravityManagedAccounts || [];
-  const enabledCount = accounts.filter((account) => account.enabled !== false).length;
-  accountShellApi.render({
-    status: statusEl,
-    statusText: accounts.length === 0
-      ? t('settings.antigravity.notConfigured')
-      : t('settings.antigravity.connected', { linked: enabledCount, total: accounts.length }),
-    error: errorEl,
-    errorText: state.antigravityAccountError,
-    progress: statusMessage,
-    progressText: state.antigravitySignInBusy ? t('settings.antigravity.loginStatus') : ''
-  });
-  addButton.disabled = state.antigravitySignInBusy;
-  addButton.textContent = t(state.antigravitySignInBusy
-    ? 'settings.antigravity.waitingForGoogle'
-    : 'settings.antigravity.addAccount');
-  cancelButton.classList.toggle('hidden', !state.antigravitySignInBusy);
-
-  listEl.replaceChildren();
-  if (accounts.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'settings-note';
-    empty.textContent = t('settings.antigravity.empty');
-    listEl.append(empty);
-  }
-  const antigravityProviders = localProviderStatuses('antigravity');
-  accounts.forEach((account, index) => {
-    const enabled = account.enabled !== false;
-    const accountName = String(account.accountEmail || account.accountLabel || '').trim()
-      || t('settings.antigravity.accountFallback', { number: index + 1 });
-    const row = document.createElement('div');
-    row.className = 'managed-account-row';
-    row.classList.toggle('disabled', !enabled);
-
-    const input = document.createElement('input');
-    input.className = 'managed-account-checkbox';
-    input.type = 'checkbox';
-    input.checked = enabled;
-    input.disabled = state.antigravitySignInBusy;
-    input.setAttribute('aria-label', t('settings.antigravity.toggleAccount', { account: accountName }));
-    input.addEventListener('change', async () => {
-      input.disabled = true;
-      const result = await window.tokenMonitor.antigravity.setAccountEnabled(account.id, input.checked);
-      if (!result?.ok) state.antigravityAccountError = result?.error || t('settings.antigravity.toggleFailed');
-      else {
-        state.antigravityAccountError = '';
-        state.settings.antigravityManagedAccounts = result.accounts || [];
-      }
-      renderAntigravityStatus();
-      renderSettingsSummaries();
-    });
-
-    const main = document.createElement('div');
-    main.className = 'managed-account-main';
-    const email = document.createElement('div');
-    email.className = 'managed-account-email';
-    email.textContent = accountName;
-    main.append(email);
-
-    const right = document.createElement('span');
-    right.className = 'managed-account-right';
-    const info = document.createElement('span');
-    info.className = 'managed-account-info';
-    const accountKey = String(account.accountKey || '').trim();
-    const accountEmail = String(account.accountEmail || '').trim().toLowerCase();
-    const provider = antigravityProviders.find((candidate) => {
-      const providerKey = String(candidate?.accountKey || '').trim();
-      const providerEmail = String(candidate?.accountEmail || '').trim().toLowerCase();
-      if (accountKey && providerKey) return accountKey === providerKey;
-      return Boolean(accountEmail && providerEmail && accountEmail === providerEmail);
-    });
-    const planLabel = limitProviderPresentationApi.limitProviderDisplayLabel(provider?.accountLabel);
-    const statusLabel = provider && provider.status !== 'ok'
-      ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(provider))
-      : '';
-    info.textContent = enabled ? (planLabel || statusLabel) : t('settings.antigravity.disabled');
-    info.setAttribute('aria-label', provider?.actionRequired === 'accountVerification'
-      ? t('settings.antigravity.verificationRequiredDetail')
-      : info.textContent);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'managed-account-remove';
-    remove.textContent = '✕';
-    remove.setAttribute('aria-label', t('settings.antigravity.remove'));
-    remove.disabled = state.antigravitySignInBusy;
-    let confirmingRemove = false;
-    remove.addEventListener('click', async () => {
-      if (!confirmingRemove) {
-        confirmingRemove = true;
-        remove.classList.add('confirming');
-        remove.textContent = '✓';
-        remove.setAttribute('aria-label', t('settings.antigravity.removeConfirm', { account: accountName }));
-        return;
-      }
-      remove.disabled = true;
-      const result = await window.tokenMonitor.antigravity.removeAccount(account.id);
-      if (!result?.ok) state.antigravityAccountError = result?.error || t('settings.antigravity.removeFailed');
-      else {
-        state.antigravityAccountError = '';
-        state.settings.antigravityManagedAccounts = result.accounts || [];
-        refreshStats({ force: true }).catch(() => {});
-      }
-      renderAntigravityStatus();
-      renderSettingsSummaries();
-    });
-    right.append(info, remove);
-    row.append(input, main, right);
-    listEl.append(row);
-  });
-  renderSettingsSummaries();
-}
-
-function mimoSettingsAccountTitle(account, index) {
-  // The discovered session has no address to name it by — nothing was pasted for
-  // it — so it is named after the app it comes from.
-  if (account?.removable === false) return t('settings.mimo.desktopAccount');
-  return String(account?.accountEmail || '').trim() || `Account ${index + 1}`;
-}
-
-function renderMimoStatus() {
-  if (!isSettingsSurfaceVisible()) return;
-  const statusEl = document.getElementById('mimoAccountStatus');
-  const listEl = document.getElementById('mimoAccountList');
-  const emptyEl = document.getElementById('mimoAccountEmpty');
-  const errorEl = document.getElementById('mimoAccountErrorMessage');
-  if (!statusEl || !listEl || !emptyEl || !errorEl) return;
-  const accounts = state.settings?.mimoManagedAccounts || [];
-  const enabledCount = accounts.filter((account) => account.enabled !== false).length;
-  const statusText = accounts.length === 0
-    ? t('settings.mimo.notConfigured')
-    : t('settings.mimo.connected', { linked: enabledCount, total: accounts.length });
-  accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.mimoAccountError });
-  emptyEl.classList.toggle('hidden', accounts.length > 0);
-
-  const providers = localProviderStatuses('mimo');
-  listEl.replaceChildren();
-  if (accounts.length > 0) {
-    for (const [index, account] of accounts.entries()) {
-      const enabled = account.enabled !== false;
-      const accountName = mimoSettingsAccountTitle(account, index);
-      const row = document.createElement('div');
-      row.className = 'managed-account-row';
-      row.classList.toggle('disabled', !enabled);
-      // A credential Token Monitor never stored has no stored preference to
-      // toggle and nothing here to remove: this row is the session the machine's
-      // own MiMo Desktop is signed into, listed so the count above it is honest
-      // about what the provider answers for.
-      const detected = account.removable === false;
-
-      const input = detected ? null : document.createElement('input');
-      if (input) {
-        input.className = 'managed-account-checkbox';
-        input.type = 'checkbox';
-        input.checked = enabled;
-        input.setAttribute('aria-label', t('settings.mimo.toggleAccount', {
-          account: accountName
-        }));
-        input.addEventListener('change', async () => {
-          input.disabled = true;
-          const result = await window.tokenMonitor.mimo.setAccountEnabled(account.id, input.checked);
-          if (!result?.ok) {
-            state.mimoAccountError = result?.error || t('settings.mimo.toggleFailed');
-          } else {
-            state.mimoAccountError = '';
-            state.settings.mimoManagedAccounts = result.accounts || [];
-          }
-          renderMimoStatus();
-          renderSettingsSummaries();
-        });
-      }
-
-      const main = document.createElement('div');
-      main.className = 'managed-account-main';
-      const label = document.createElement('div');
-      label.className = 'managed-account-email';
-      label.textContent = accountName;
-      main.append(label);
-
-      const right = document.createElement('span');
-      right.className = 'managed-account-right';
-      const info = document.createElement('span');
-      info.className = 'managed-account-info';
-      const failedProvider = enabled && providers.find((provider) => (
-        provider.accountKey === account.accountKey
-        && provider.sourceDetail === (detected ? 'app' : 'managed')
-        && provider.status === 'unauthorized'
-      ));
-      const statusLabel = failedProvider
-        ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(failedProvider))
-        : '';
-      info.textContent = !enabled ? t('settings.mimo.disabled')
-        : statusLabel || limitProviderPresentationApi.limitProviderDisplayLabel(account.accountLabel);
-      info.setAttribute('aria-label', info.textContent);
-
-      const remove = detected ? null : document.createElement('button');
-      if (remove) {
-        remove.type = 'button';
-        remove.className = 'managed-account-remove';
-        remove.textContent = '✕';
-        remove.setAttribute('aria-label', t('settings.mimo.remove'));
-        let confirmingRemove = false;
-        remove.addEventListener('click', async () => {
-          if (!confirmingRemove) {
-            confirmingRemove = true;
-            remove.classList.add('confirming');
-            remove.textContent = '✓';
-            remove.setAttribute('aria-label', t('settings.mimo.removeConfirm', {
-              account: accountName
-            }));
-            return;
-          }
-          const result = await window.tokenMonitor.mimo.removeAccount(account.id);
-          if (result?.ok) {
-            state.mimoAccountError = '';
-            state.settings.mimoManagedAccounts = result.accounts || [];
-            renderMimoStatus();
-            renderSettingsSummaries();
-            refreshStats({ force: true }).catch(() => {});
-            return;
-          }
-          state.mimoAccountError = result?.error || t('settings.mimo.removeFailed');
-          renderMimoStatus();
-          renderSettingsSummaries();
-        });
-      }
-
-      right.append(info);
-      if (remove) right.append(remove);
-      row.append(input || document.createElement('span'), main, right);
-      listEl.append(row);
-    }
-  }
-  renderSettingsSummaries();
-}
-
-function copilotProviderStatus() {
-  return localProviderStatus('copilot');
-}
-
-function copilotAccountLinked() {
-  const provider = copilotProviderForAccount();
-  return Boolean(state.settings?.copilotApiTokenConfigured) && provider?.status === 'ok';
-}
-
-function copilotProviderForAccount() {
-  const provider = copilotProviderStatus();
-  const pendingSince = Number(state.copilotPendingCheckSince || 0);
-  if (!provider || !pendingSince) return provider;
-  const updatedAt = Date.parse(provider.updatedAt || '');
-  if (!Number.isFinite(updatedAt) || updatedAt < pendingSince) return null;
-  state.copilotPendingCheckSince = 0;
-  return provider;
-}
-
-function markCopilotTokenCheckPending() {
-  state.copilotPendingCheckSince = Date.now();
-}
-
-function clearCopilotPendingCheck() {
-  state.copilotPendingCheckSince = 0;
-}
 
 
-const externalLimitAccountConfig = {
-  kimi: {
-    configuredKey: 'kimiCredentialConfigured',
-    sourceKey: 'kimiCredentialSource',
-    pendingKey: 'kimiPendingCheckSince'
-  },
-  volcengine: {
-    configuredKey: 'volcengineCredentialsConfigured',
-    sourceKey: 'volcengineCredentialsSource',
-    pendingKey: 'volcenginePendingCheckSince'
-  }
-};
+
+
+
+
+function renderWorkbuddyStatus(...args) { return legacyAccountOwners.workbuddy.renderWorkbuddyStatus(...args); }
+
+
+function renderAntigravityStatus(...args) { return legacyAccountOwners.antigravity.renderAntigravityStatus(...args); }
+
+
+function renderMimoStatus(...args) { return legacyAccountOwners.mimo.renderMimoStatus(...args); }
 
 function clearDisabledLimitProviderPendingChecks(enabledProviders) {
-  if (!enabledProviders.has('copilot')) clearCopilotPendingCheck();
-  for (const providerName of [...Object.keys(externalLimitAccountConfig),
-    ...(state.settings?.limitAccountForms || []).map((form) => form.id)]) {
+  for (const providerName of (state.settings?.limitAccountForms || []).map((form) => form.id)) {
     if (!enabledProviders.has(providerName)) clearExternalProviderCheckPending(providerName);
   }
 }
@@ -17534,7 +16927,7 @@ function externalProviderForAccount(providerName) {
   const provider = providerName === 'muse'
     ? localProviderStatuses('muse').find((row) => row.source === 'web') || null
     : localProviderStatus(providerName);
-  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
+  const config = limitAccountForm(providerName)?.status;
   const pendingSince = Number(config ? state[config.pendingKey] : 0);
   if (!provider || !pendingSince) return provider;
   const updatedAt = Date.parse(provider.updatedAt || '');
@@ -17546,7 +16939,7 @@ function externalProviderForAccount(providerName) {
 }
 
 function externalProviderAccountLinked(providerName) {
-  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
+  const config = limitAccountForm(providerName)?.status;
   const provider = externalProviderForAccount(providerName);
   return Boolean(config && state.settings?.[config.configuredKey]) && provider?.status === 'ok';
 }
@@ -17571,7 +16964,7 @@ function scheduleExternalProviderCheckSettle(providerName) {
   cancelExternalProviderCheckSettle(providerName);
   const timer = setTimeout(() => {
     externalProviderCheckSettleTimers.delete(providerName);
-    const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
+    const config = limitAccountForm(providerName)?.status;
     if (!config || Number(state[config.pendingKey] || 0) <= 0) return;
     // Stop the spinner, but keep the save-time cutoff: a record dated before
     // this save must never be able to confirm the new credential.
@@ -17582,7 +16975,7 @@ function scheduleExternalProviderCheckSettle(providerName) {
 }
 
 function markExternalProviderCheckPending(providerName, checkedSince = Date.now()) {
-  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
+  const config = limitAccountForm(providerName)?.status;
   if (!config) return;
   state[config.pendingKey] = checkedSince;
   externalProviderCheckSettled.delete(providerName);
@@ -17593,7 +16986,7 @@ function markExternalProviderCheckPending(providerName, checkedSince = Date.now(
 function clearExternalProviderCheckPending(providerName) {
   cancelExternalProviderCheckSettle(providerName);
   externalProviderCheckSettled.delete(providerName);
-  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
+  const config = limitAccountForm(providerName)?.status;
   if (config) state[config.pendingKey] = 0;
 }
 
@@ -17618,44 +17011,11 @@ function clearExternalProviderPendingStatus(providerName) {
   state.stats.limits.providers = state.stats.limits.providers.filter((provider) => provider.provider !== providerName);
 }
 
-function nextCopilotSignInFlowId() {
-  return `copilot-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
-function nextCodexSignInFlowId() {
-  return `codex-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
 
-function isCurrentCodexSignInFlow(flowId) {
-  const current = String(state.codexSignInFlowId || '');
-  const incoming = String(flowId || '');
-  return current && incoming === current;
-}
 
-function isCurrentCopilotSignInFlow(flowId) {
-  const current = String(state.copilotSignInFlowId || '');
-  const incoming = String(flowId || '');
-  return current && incoming === current;
-}
 
-function copilotAccountStatusText(provider, configured, source, enabled = true) {
-  const accountStatus = limitProviderPresentationApi.apiKeyAccountStatus(provider, configured, enabled);
-  if (accountStatus === 'linked') {
-    const accountName = String(provider?.accountName || '').trim();
-    return accountName || t(source === 'env' ? 'settings.copilot.statusEnv' : 'settings.copilot.statusSet');
-  }
-  if (accountStatus === 'invalid') return t('settings.copilot.statusInvalid');
-  if (accountStatus === 'notConfigured') return t('settings.copilot.statusNotSet');
-  const statusKeys = {
-    checking: 'settings.common.checking',
-    disabled: 'settings.limits.status.disabled',
-    limited: 'settings.common.limited',
-    unavailable: 'settings.common.unavailable',
-    notChecked: 'settings.common.notChecked',
-    error: 'settings.common.error'
-  };
-  return t(statusKeys[accountStatus] || 'settings.common.error');
-}
+
 
 function apiKeyAccountStatusText(providerName, provider, configured, source, enabled = true) {
   if (providerName === 'alibaba' && provider?.source === 'cli') source = 'cli';
@@ -17706,215 +17066,44 @@ function setExternalAccountExpanded(providerName, expanded) {
   });
 }
 
-function volcenginePlatformUrl() {
-  return 'https://console.volcengine.com/ark/region:ark+cn-beijing/openManagement?LLM=%7B%7D&advancedActiveKey=subscribe';
-}
 
-function kimiPlatformUrl() {
-  return 'https://www.kimi.com/code/console';
-}
 
-function editClaudeWebAccount(account = null) {
-  claudeOrganizationChoicesRevision += 1;
-  claudeWebAccountId = account?.id || 'new';
-  claudeWebFormOpen = true;
-  const input = document.getElementById('claudeWebCookieInput');
-  if (input) input.value = '';
-  renderClaudeOrganizationChoices(account?.organizationId
-    ? [{ id: account.organizationId, name: account.accountName || account.organizationId }]
-    : [], account?.organizationId || '');
-  setAccountPanelMessage('claude', null);
-  renderExternalProviderStatus('claude');
-  input?.focus();
-  if (account?.id === 'legacy') void loadClaudeOrganizationChoices();
-}
 
-function cancelClaudeWebAccountEdit(restoreFocus = document.activeElement?.id === 'claudeCancelWebAccountButton') {
-  claudeOrganizationChoicesRevision += 1;
-  claudeWebAccountId = 'new';
-  claudeWebFormOpen = false;
-  const input = document.getElementById('claudeWebCookieInput');
-  if (input) input.value = '';
-  renderClaudeOrganizationChoices([]);
-  setAccountPanelMessage('claude', null);
-  renderExternalProviderStatus('claude');
-  if (restoreFocus) document.getElementById('claudeAddWebAccountButton')?.focus({ preventScroll: true });
-}
 
-async function runClaudeAccountAction(button, operation) {
-  return claudeAccountActions.run('claude', button, async () => {
-    setAccountPanelMessage('claude', null);
-    try {
-      const result = await commitAccountCredential(operation);
-      if (!result?.ok) throw new Error(t('settings.common.error'));
-      await refreshStats();
-      renderExternalProviderStatus('claude');
-      return result;
-    } catch (error) {
-      setAccountPanelMessage('claude', { key: 'settings.claude.saveFailed', params: { message: error.message } });
-      renderExternalProviderStatus('claude');
-      return null;
-    }
-  });
-}
+function claudeAccountStatusText(...args) { return legacyAccountOwners.claude.claudeAccountStatusText(...args); }
 
-function claudeWebSettingsAccounts(providers) {
-  const accounts = [...(state.settings?.claudeManagedAccounts || [])];
-  if (state.settings?.claudeWebLegacyCookieConfigured) {
-    const legacy = state.settings.claudeWebLegacyAccount || providers.find((provider) => provider.source === 'web'
-      && !accounts.some((account) => account.accountKey === provider.accountKey));
-    accounts.unshift({ ...legacy, id: 'legacy', enabled: true, organizationId: state.settings.claudeWebOrganizationId || '' });
-  }
-  return accounts;
-}
-
-function claudeAccountStatusText(fallback, enabled) {
-  const providers = localProviderStatuses('claude');
-  const accounts = claudeWebSettingsAccounts(providers);
-  // Count configured Web logins even before their first result, and include
-  // discovered local identities without double-counting the same subscription.
-  const identities = new Map();
-  for (const account of accounts) {
-    const key = account.accountKey || `managed:${account.id}`;
-    const linked = enabled && account.enabled !== false
-      && providers.some((provider) => provider.accountKey && provider.accountKey === account.accountKey && provider.status === 'ok');
-    identities.set(key, identities.get(key) === true || linked);
-  }
-  for (const provider of providers) {
-    if (!provider.accountKey || provider.source === 'web' || provider.status === 'notConfigured') continue;
-    identities.set(provider.accountKey, identities.get(provider.accountKey) === true || (enabled && provider.status === 'ok'));
-  }
-  return identities.size ? t('settings.opencode.connected', {
-    linked: [...identities.values()].filter(Boolean).length, total: identities.size
-  }) : fallback;
-}
-
-function renderClaudeWebAccounts() {
-  const list = document.getElementById('claudeWebAccountList');
-  if (!list) return;
-  const providers = localProviderStatuses('claude');
-  const accounts = claudeWebSettingsAccounts(providers);
-  const statusTexts = accounts.map((account) => [account.id === 'legacy' ? t('settings.claude.legacyLogin') : '', account.accountName, account.accountLabel,
-    account.enabled === false ? t('settings.codex.disabled')
-      : apiKeyAccountStatusText('claude', { status: state.settings?.claudeWebLoginStatuses?.[account.id] || 'notChecked' },
-        true, 'settings', limitProviderEnabled('claude'))].filter(Boolean).join(' · '));
-  const signature = JSON.stringify([accounts.map((account) => [account.id, account.accountKey, account.accountEmail,
-    account.accountName, account.accountLabel, account.organizationId, account.enabled]),
-  claudeWebAccountId, claudeWebFormOpen, state.settings?.claudeWebLegacyCookieSource, currentLocale()]);
-  if (list.dataset.signature === signature) {
-    list.querySelectorAll('.managed-account-info').forEach((info, index) => {
-      info.textContent = statusTexts[index];
-      info.setAttribute('aria-label', info.textContent);
-    });
-    return;
-  }
-  list.dataset.signature = signature;
-  list.replaceChildren();
-  for (const [index, account] of accounts.entries()) {
-    const row = document.createElement('div');
-    row.className = 'managed-account-row claude-web-account-row';
-    row.classList.toggle('disabled', account.enabled === false);
-    const labelText = account.accountEmail || account.accountName || t('settings.codex.unnamedAccount');
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.className = 'managed-account-checkbox';
-    input.checked = account.enabled !== false;
-    input.disabled = account.id === 'legacy';
-    input.setAttribute('aria-label', t('settings.codex.toggleAccount', { account: labelText }));
-    input.addEventListener('change', async () => {
-      await runClaudeAccountAction(input, () => window.tokenMonitor.claude.setAccountEnabled(account.id, input.checked));
-      input.checked = (state.settings?.claudeManagedAccounts || []).find((entry) => entry.id === account.id)?.enabled !== false;
-    });
-    const main = document.createElement('div');
-    main.className = 'managed-account-main';
-    const label = document.createElement('div');
-    label.className = 'managed-account-email';
-    label.textContent = labelText;
-    const info = document.createElement('div');
-    info.className = 'managed-account-info';
-    info.textContent = statusTexts[index];
-    info.setAttribute('aria-label', info.textContent);
-    main.append(label, info);
-    const actions = document.createElement('span');
-    actions.className = 'managed-account-right';
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.textContent = t('settings.claude.updateAccount');
-    edit.addEventListener('click', () => claudeAccountActions.run('claude', edit, () => editClaudeWebAccount(account)));
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'managed-account-remove';
-    remove.textContent = '✕';
-    remove.setAttribute('aria-label', t('settings.codex.remove'));
-    let confirmingRemove = false;
-    remove.addEventListener('click', () => {
-      if (!confirmingRemove) {
-        confirmingRemove = true;
-        remove.classList.add('confirming');
-        remove.textContent = '✓';
-        remove.setAttribute('aria-label', t('settings.codex.removeConfirm', { account: labelText }));
-        return;
-      }
-      return runClaudeAccountAction(remove, async () => {
-        const result = account.id === 'legacy'
-          ? { ...(await window.tokenMonitor.limits.clearCredential('claude')), ok: true }
-          : await window.tokenMonitor.claude.removeWebAccount(account.id);
-        if (result?.ok && claudeWebAccountId === account.id) {
-          claudeWebAccountId = 'new';
-          claudeWebFormOpen = false;
-          renderClaudeOrganizationChoices([]);
-        }
-        return result;
-      });
-    });
-    remove.classList.toggle('hidden', account.id === 'legacy' && state.settings?.claudeWebLegacyCookieSource === 'env');
-    const controls = document.createElement('span');
-    controls.className = 'settings-actions';
-    controls.append(edit);
-    actions.append(controls, remove);
-    row.append(input, main, actions);
-    list.append(row);
-  }
-  const add = document.createElement('button');
-  add.id = 'claudeAddWebAccountButton';
-  add.type = 'button';
-  add.textContent = t('settings.codex.addAccount');
-  add.setAttribute('aria-expanded', String(claudeWebFormOpen ?? accounts.length === 0));
-  add.addEventListener('click', () => claudeAccountActions.run('claude', add, () => editClaudeWebAccount()));
-  const actions = document.createElement('div');
-  actions.className = 'settings-actions';
-  actions.append(add);
-  if (claudeWebFormOpen ?? accounts.length === 0) {
-    const cancel = document.createElement('button');
-    cancel.id = 'claudeCancelWebAccountButton';
-    cancel.type = 'button';
-    cancel.textContent = t('settings.common.cancel');
-    cancel.addEventListener('click', () => {
-      // Capture before the busy guard disables Cancel and blurs it.
-      const restoreFocus = document.activeElement === cancel;
-      return claudeAccountActions.run('claude', cancel, () => cancelClaudeWebAccountEdit(restoreFocus));
-    });
-    actions.append(cancel);
-  }
-  list.append(actions);
-}
+function renderClaudeWebAccounts(...args) { return legacyAccountOwners.claude.renderClaudeWebAccounts(...args); }
 
 function renderExternalProviderStatus(providerName) {
-  const config = externalLimitAccountConfig[providerName] || limitAccountForm(providerName)?.status;
+  const config = limitAccountForm(providerName)?.status;
   const statusEl = document.getElementById(`${providerName}AccountStatus`);
   const openBtn = document.getElementById(`${providerName}OpenBrowser`);
   const logoutBtn = document.getElementById(`${providerName}LogoutButton`);
-  const refreshBtn = document.getElementById(`${providerName}RefreshButton`);
   const manualPanel = document.getElementById(`${providerName}ManualPanel`);
   const errorEl = document.getElementById(`${providerName}ErrorMessage`);
-  if (statusEl && limitAccountForm(providerName)?.accountSlots) {
-    const accounts = accountSlotLists[providerName] || [];
-    const readings = localProviderStatuses(providerName);
-    const linked = accounts.filter(slot => slot.enabled && limitProviderEnabled(providerName) && readings.some(row => (row.accountKey === slot.accountKey || slot.accountKeyAliases?.includes(row.accountKey)) && row.status === 'ok' && !row.stale)).length;
-    setCursorStatusText(statusEl, accounts.length ? t('settings.opencode.connected', { linked, total: accounts.length }) : t(limitAccountForm(providerName).emptyKey));
+  const retained = providerName === 'volcengine' && state.settings?.volcengineFixedCredentialsStored === true;
+  if (providerName === 'volcengine') {
+    const fixedForm = document.getElementById('volcengineFixedCredentialForm');
+    fixedForm?.classList.toggle('hidden', !retained);
+    if (fixedForm && !retained) fixedForm.open = false;
+    if (fixedForm && retained) {
+      for (const key of ['volcengineRegion', 'volcengineAgentRegion']) {
+        const input = document.getElementById(`${key}Input`);
+        const region = state.settings[key] || '';
+        // Follow stored settings until the user edits the value, including
+        // intentionally clearing it to fall back to the provider's region.
+        const unchanged = input.value === (input.defaultValue || '');
+        input.defaultValue = region;
+        if (unchanged) input.value = region;
+      }
+    }
+  }
+  if (!retained && statusEl && limitAccountForm(providerName)?.accountSlots && !limitAccountForm(providerName)?.accountSlotOwner) {
+    const summary = accountSlotPanels.get(providerName)?.summary();
+    setCursorStatusText(statusEl, summary?.total ? t('settings.opencode.connected', summary) : t(limitAccountForm(providerName).emptyKey));
     return;
   }
-  if (!config || !statusEl || !openBtn || !logoutBtn || !refreshBtn || !manualPanel || !errorEl) return;
+  if (!config || !statusEl || !openBtn || !logoutBtn || !manualPanel || !errorEl) return;
 
   const source = state.settings?.[config.sourceKey] || '';
   const wasPending = Number(state[config.pendingKey] || 0) > 0;
@@ -17941,7 +17130,6 @@ function renderExternalProviderStatus(providerName) {
   if (wasPending && !pending && linked) setExternalAccountExpanded(providerName, false);
   const form = limitAccountForm(providerName);
   if (form) limitAccountPanelsApi.syncCredentialFields(form, { document, settings: state.settings });
-  if (providerName === 'volcengine') renderVolcengineAgentOverrideState();
   if (providerName === 'claude') renderClaudeWebAccounts();
   // Once the settle window lapses without a fresh record, show "not checked"
   // instead of a permanent spinner; the cutoff above still blocks the old
@@ -17961,9 +17149,9 @@ function renderExternalProviderStatus(providerName) {
   manualPanel.classList.toggle('hidden', linked && !limitAccountForm(providerName)?.accountSlots);
   openBtn.classList.toggle('hidden', linked);
   if (providerName === 'claude') {
-    const showForm = claudeWebFormOpen ?? (!(state.settings?.claudeManagedAccounts || []).length && !state.settings?.claudeWebLegacyCookieConfigured);
+    const showForm = legacyAccountOwners.claude.editor.open ?? (!(state.settings?.claudeManagedAccounts || []).length && !state.settings?.claudeWebLegacyCookieConfigured);
     manualPanel.classList.toggle('hidden', !showForm);
-    document.getElementById('claudeWebOrganizationRow')?.classList.toggle('hidden', !showForm || !document.getElementById('claudeWebOrganizationIdInput')?.options.length);
+    document.getElementById('claudeWebOrganizationRow')?.classList.toggle('hidden', !showForm || ![...(document.getElementById('claudeWebOrganizationIdInput')?.options || [])].some(option => option.value));
     openBtn.classList.remove('hidden');
   }
   const discoveredLogin = (providerName === 'zai' && source === 'zcode-auto')
@@ -17977,521 +17165,17 @@ function renderExternalProviderStatus(providerName) {
     manualPanel.classList.remove('hidden');
     openBtn.classList.remove('hidden');
   }
-  const canClearConfiguredCredential = source === 'settings' && configured;
+  const canClearConfiguredCredential = retained || (source === 'settings' && configured);
   logoutBtn.classList.toggle('hidden', !canClearConfiguredCredential);
   if (providerName === 'claude') logoutBtn.classList.add('hidden');
-  refreshBtn.classList.toggle('hidden', !configured);
   renderSettingsSummaries();
 }
 
-// The override inputs are password fields, cleared after every save and never
-// repopulated, so this tag is the only thing that tells a stored second account
-// apart from one that was never filled in. It reads the redacted 'set' marker
-// rather than volcengineAgentCredentials, which falls back to the Coding Plan
-// key and is therefore truthy for every Coding-only user.
-function renderVolcengineAgentOverrideState() {
-  const stored = state.settings?.volcengineAgentAccessKeyId === 'set';
-  document.getElementById('volcengineAgentConfigured')?.classList.toggle('hidden', !stored);
-  // Saving with the override fields empty deliberately keeps the stored one, so
-  // without this there is no way back to the main account short of clearing the
-  // Coding Plan credentials too.
-  document.getElementById('volcengineAgentClearButton')?.classList.toggle('hidden', !stored);
-}
-
-// The Agent Plan override is collapsed by default: it only matters when the two
-// plans were bought on different Volcengine accounts.
-function setVolcengineAgentExpanded(expanded) {
-  const next = Boolean(expanded);
-  state.volcengineAgentExpanded = next;
-  document.getElementById('volcengineAgentToggle')?.setAttribute('aria-expanded', next ? 'true' : 'false');
-  document.getElementById('volcengineAgentDetails')?.classList.toggle('hidden', !next);
-  document.getElementById('volcengineAgentPanel')?.classList.toggle('expanded', next);
-}
-
-
-async function renderCopilotAccounts() {
-  if (!isSettingsSurfaceVisible()) return;
-  const list = document.getElementById('copilotAccountList');
-  if (!list) return;
-  const isCurrent = accountProfileRequests.begin('copilot');
-  try {
-    const accounts = await window.tokenMonitor.copilot.getAccounts();
-    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
-    const readings = localProviderStatuses('copilot');
-    const readingFor = account => localProviderStatuses('copilot').find(row => account.accountKey
-      ? row.accountKey === account.accountKey
-      : !accounts.some(other => other.accountKey === row.accountKey));
-    const nameFor = account => account.accountName || readingFor(account)?.accountName || t('settings.copilot.title');
-    const updateInfo = (account, info) => {
-      info.textContent = apiKeyAccountStatusText('copilot', readingFor(account), true, account.external ? 'env' : 'settings',
-        account.enabled && limitProviderEnabled('copilot'));
-    };
-    if (accounts.length > 1 && limitProviderEnabled('copilot')) {
-      accountShellApi.render({ status: document.getElementById('copilotApiTokenStatus'),
-        statusText: t('settings.opencode.connected', {
-          linked: accounts.filter(account => account.enabled && readings.some(row => row.accountKey === account.accountKey && row.status === 'ok')).length,
-          total: accounts.length
-        }) });
-    }
-    const signature = JSON.stringify([accounts, state.settings?.locale, state.settings?.language]);
-    if (list.dataset.accountSignature === signature) {
-      for (const row of list.children) {
-        const account = accounts.find(account => account.id === row.dataset.accountId);
-        if (account) {
-          const name = nameFor(account);
-          row.querySelector('.managed-account-email').textContent = name;
-          const toggle = row.querySelector('.managed-account-checkbox');
-          if (toggle) {
-            toggle.checked = account.enabled;
-            toggle.setAttribute('aria-label', name);
-          }
-          row.querySelector('.confirming')?.setAttribute('aria-label', t('settings.profiles.deleteConfirm', { name }));
-          updateInfo(account, row.querySelector('.managed-account-info'));
-        }
-      }
-      return;
-    }
-    list.dataset.accountSignature = signature;
-    list.replaceChildren();
-    for (const account of accounts) {
-      const name = nameFor(account);
-      const row = document.createElement('div');
-      row.className = 'managed-account-row';
-      row.dataset.accountId = account.id;
-      row.classList.toggle('disabled', !account.enabled);
-      const label = document.createElement('span');
-      label.className = 'managed-account-main managed-account-email';
-      if (!account.external) {
-        const toggle = document.createElement('input');
-        toggle.type = 'checkbox';
-        toggle.className = 'managed-account-checkbox';
-        toggle.checked = account.enabled;
-        toggle.setAttribute('aria-label', name);
-        toggle.addEventListener('change', () => mutate(toggle, () => window.tokenMonitor.copilot.setEnabled(account.id, toggle.checked)));
-        row.append(toggle);
-      } else {
-        row.append(document.createElement('span'));
-      }
-      label.textContent = name;
-      const actions = document.createElement('span');
-      actions.className = 'managed-account-right';
-      const info = document.createElement('span');
-      info.className = 'managed-account-info';
-      updateInfo(account, info);
-      const refresh = document.createElement('button');
-      refresh.className = 'managed-account-remove';
-      refresh.setAttribute('aria-label', t('settings.common.refresh'));
-      refresh.innerHTML = '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M13 6a5.2 5.2 0 1 0 .2 3M13 2v4H9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
-      refresh.disabled = !account.enabled;
-      refresh.addEventListener('click', () => mutate(refresh, () => window.tokenMonitor.limits.refresh('copilot', readingFor(account) || account)));
-      actions.append(info, refresh);
-      if (!account.external) {
-        const remove = document.createElement('button');
-        remove.className = 'managed-account-remove';
-        remove.textContent = '✕';
-        remove.setAttribute('aria-label', t('settings.copilot.logout'));
-        let confirming = false;
-        remove.addEventListener('click', () => {
-          if (!confirming) {
-            confirming = true;
-            remove.textContent = '✓';
-            remove.classList.add('confirming');
-            remove.setAttribute('aria-label', t('settings.profiles.deleteConfirm', { name: nameFor(account) }));
-            return;
-          }
-          return mutate(remove, () => window.tokenMonitor.copilot.removeAccount(account.id));
-        });
-        actions.append(remove);
-      }
-      row.append(label, actions);
-      list.append(row);
-    }
-  } catch (error) {
-    if (isCurrent()) {
-      state.copilotErrorMessage = error.message;
-      accountShellApi.render({ error: document.getElementById('copilotErrorMessage'), errorText: error.message });
-    }
-  }
-  async function mutate(button, action) {
-    await accountProfileSaves.run('copilot', button, async () => {
-      try {
-        const result = await action();
-        if (!result?.ok) throw new Error(result?.error || t('settings.copilot.loginFailed'));
-        state.copilotErrorMessage = '';
-        await refreshStats();
-      } catch (error) { state.copilotErrorMessage = error.message; }
-      renderCopilotStatus();
-    });
-  }
-}
-
-function renderCopilotStatus() {
-  const statusEl = document.getElementById('copilotApiTokenStatus');
-  const signInBtn = document.getElementById('copilotSignInButton');
-  const cancelBtn = document.getElementById('copilotCancelSignInButton');
-  const refreshBtn = document.getElementById('copilotRefreshButton');
-  const manualPanel = document.getElementById('copilotManualPanel');
-  const loginStatusEl = document.getElementById('copilotLoginStatus');
-  const errorEl = document.getElementById('copilotErrorMessage');
-  if (!statusEl || !signInBtn || !cancelBtn || !refreshBtn || !manualPanel || !loginStatusEl || !errorEl) return;
-
-  const source = state.settings?.copilotApiTokenSource || '';
-  const provider = copilotProviderForAccount();
-  const configured = Boolean(state.settings?.copilotApiTokenConfigured);
-  const enabled = limitProviderEnabled('copilot');
-  const linked = copilotAccountLinked();
-  accountShellApi.render({
-    status: statusEl,
-    statusText: copilotAccountStatusText(provider, configured, source, enabled),
-    error: errorEl,
-    errorText: state.copilotErrorMessage,
-    progress: loginStatusEl,
-    progressText: state.copilotLoginStatus
-  });
-  manualPanel.classList.remove('hidden');
-  signInBtn.classList.toggle('hidden', state.copilotSignInBusy);
-  cancelBtn.classList.toggle('hidden', !state.copilotSignInBusy || !state.copilotSignInCancelable);
-  refreshBtn.classList.toggle('hidden', !configured || (state.copilotSignInBusy && !linked));
-  void renderCopilotAccounts();
-  renderSettingsSummaries();
-}
-
-
-function renderOpenCodeProfiles() {
-  if (!isSettingsSurfaceVisible()) return;
-  const listEl = document.getElementById('opencodeProfileList');
-  if (!listEl) return;
-  renderAccountShellError('opencode');
-
-  const api = window.tokenMonitor.opencode;
-
-  const isCurrent = accountProfileRequests.begin('opencode');
-  api.getProfiles().then(({ profiles, hasEnvVar, hasAmbientKey, ambientEnabled = true }) => {
-    if (!isCurrent() || !isSettingsSurfaceVisible() || document.getElementById('opencodeProfileList') !== listEl) return;
-    accountProfileStatuses.retire('opencode');
-    listEl.replaceChildren();
-    const entries = Object.entries(profiles);
-
-    if (entries.length === 0 && !hasEnvVar && !hasAmbientKey) {
-      const empty = document.createElement('div');
-      empty.className = 'opencode-empty';
-      empty.textContent = t('settings.opencode.emptyList');
-      listEl.append(empty);
-      state.opencodeProfileCount = 0;
-      renderOpenCodeProfilesStatusSummary({});
-      renderSettingsSummaries();
-      return;
-    }
-
-    // The auto-detected key counts as an account: it is what the limits card is
-    // reading, so leaving it out of the total reports "not set up" next to live
-    // quota. It has no delete because Token Monitor does not own that
-    // credential — OpenCode does — but naming it does belong here: a name is
-    // what lets it join an account, and typing an existing account's name is
-    // how a user says the two are the same OpenCode account.
-    if (hasAmbientKey) {
-      const item = document.createElement('div');
-      item.className = 'opencode-profile-item';
-      // Switchable like any other account, even without a name. Turning it off
-      // is a device preference rather than a stored credential, so the row keeps
-      // rendering with its box clear instead of disappearing along with the only
-      // control that could bring it back.
-      const ambientToggle = document.createElement('input');
-      ambientToggle.className = 'profile-toggle';
-      ambientToggle.type = 'checkbox';
-      ambientToggle.checked = ambientEnabled;
-      ambientToggle.setAttribute('aria-label', t('settings.opencode.ambientName'));
-      ambientToggle.setAttribute('aria-description', t('settings.opencode.ambientDetail'));
-      ambientToggle.addEventListener('change', async () => {
-        await window.tokenMonitor.opencode.setAmbientEnabled(ambientToggle.checked);
-        renderOpenCodeProfiles();
-        updateOpenCodeProfilesStatus();
-        renderSettingsSummaries();
-      });
-      const nameBox = document.createElement('span');
-      nameBox.className = 'profile-name-box';
-      // An editable field rather than a label behind an edit button: this row
-      // has no name yet, and naming it is the only thing a user can do here, so
-      // hiding that behind a hover-revealed pencil hides the whole feature. The
-      // placeholder carries the label the row used to show.
-      const nameInput = document.createElement('input');
-      nameInput.className = 'profile-name-input is-placeholder';
-      nameInput.type = 'text';
-      nameInput.placeholder = t('settings.opencode.ambientName');
-      nameInput.setAttribute('aria-label', t('settings.opencode.nameAmbient'));
-
-      // Typing an existing account's name binds the auto-detected key into that
-      // account. That claim is confirmed, never inferred: the main process
-      // refuses it without `merge`, so a blur landing on a name that happens to
-      // exist offers the button instead of quietly merging.
-      const mergeBtn = document.createElement('button');
-      mergeBtn.className = 'credential-merge-btn hidden';
-      const offer = opencodeMergeOffer(mergeBtn, (name) => applyNaming(name, true));
-      const applyNaming = async (name, merge) => {
-        const at = offer.revision();
-        // 'ambient' stores a reference rather than the key, so a key rotated
-        // inside OpenCode keeps being read live.
-        const result = await window.tokenMonitor.opencode.saveProfile(name, '', 'ambient', { merge });
-        if (!result.ok) {
-          if (result.nameTaken) {
-            offer.offer(at, name, t('settings.opencode.mergeInto', { name }));
-            return;
-          }
-          if (offer.stale(at)) return;
-          setAccountShellError('opencode', opencodeSaveErrorText(result));
-          return;
-        }
-        setAccountShellError('opencode', '');
-        renderOpenCodeProfiles();
-        updateOpenCodeProfilesStatus();
-        renderSettingsSummaries();
-      };
-      const endNaming = async (save) => {
-        const name = nameInput.value.trim();
-        if (!save || !name) {
-          nameInput.value = '';
-          offer.withdraw();
-          return;
-        }
-        await applyNaming(name, false);
-      };
-      // Editing the name withdraws the offer: the confirmation names one account,
-      // and it must be the one on screen when the user clicks it.
-      nameInput.addEventListener('input', () => offer.withdraw());
-      nameInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') endNaming(true);
-        if (e.key === 'Escape') endNaming(false);
-      });
-      nameInput.addEventListener('blur', () => endNaming(true));
-
-      const detail = document.createElement('span');
-      detail.className = 'profile-detail';
-      detail.textContent = t('settings.opencode.ambientDetail');
-      nameBox.append(nameInput, mergeBtn, detail);
-
-      const rightBox = document.createElement('span');
-      rightBox.className = 'profile-right';
-      const infoSpan = document.createElement('span');
-      infoSpan.className = 'profile-info';
-      // Not `opencode-info-<name>`: that shape is generated from user-chosen
-      // account names, so a profile named the same as any sentinel would take
-      // this row's status.
-      infoSpan.id = 'opencodeAmbientInfo';
-      infoSpan.textContent = ambientEnabled ? '...' : t('settings.opencode.disabled');
-      rightBox.append(infoSpan);
-      item.append(ambientToggle, nameBox, rightBox);
-      listEl.appendChild(item);
-    }
-
-    state.opencodeProfileCount = entries.length + (hasAmbientKey ? 1 : 0);
-    renderSettingsSummaries();
-
-    for (const [name, profile] of entries) {
-      const item = document.createElement('div');
-      item.className = 'opencode-profile-item';
-
-      const toggle = document.createElement('input');
-      toggle.className = 'profile-toggle';
-      toggle.type = 'checkbox';
-      toggle.checked = profile.enabled;
-      toggle.addEventListener('change', () => {
-        api.setProfileEnabled(name, toggle.checked).then(() => {
-          const info = item.querySelector('.profile-info');
-          info.textContent = toggle.checked ? '...' : t('settings.opencode.disabled');
-          renderSettingsSummaries();
-          updateOpenCodeProfilesStatus();
-        });
-      });
-
-      const nameBox = document.createElement('span');
-      nameBox.className = 'profile-name-box';
-      const nameSpan = document.createElement('span');
-      nameSpan.className = 'profile-name';
-      nameSpan.textContent = name;
-
-      const nameInput = document.createElement('input');
-      nameInput.className = 'profile-name-input hidden';
-      nameInput.type = 'text';
-      nameInput.value = name;
-
-      const renameBtn = document.createElement('button');
-      renameBtn.type = 'button';
-      renameBtn.className = 'profile-rename-btn';
-      renameBtn.setAttribute('aria-label', t('settings.opencode.rename'));
-
-      let editing = false;
-      function beginRename() {
-        if (editing) return;
-        editing = true;
-        nameSpan.classList.add('hidden');
-        nameInput.classList.remove('hidden');
-        nameInput.focus();
-        nameInput.select();
-      }
-      // Renaming onto an existing account merges the two, which asserts they are
-      // the same OpenCode account. That claim gets a visible button rather than
-      // a repeated keypress: confirming should be something the user chooses,
-      // not something they discover by pressing Enter again.
-      const mergeBtn = document.createElement('button');
-      mergeBtn.className = 'credential-merge-btn hidden';
-      const offer = opencodeMergeOffer(mergeBtn, (next) => applyRename(next, true));
-      const applyRename = async (next, merge) => {
-        const at = offer.revision();
-        const result = await api.renameProfile(name, next, { merge });
-        if (!result.ok) {
-          if (result.nameTaken) {
-            offer.offer(at, next, t('settings.opencode.mergeInto', { name: next }));
-            return;
-          }
-          if (offer.stale(at)) return;
-          setAccountShellError('opencode', opencodeSaveErrorText(result));
-          return;
-        }
-        setAccountShellError('opencode', '');
-        renderOpenCodeProfiles();
-        updateOpenCodeProfilesStatus();
-        renderSettingsSummaries();
-      };
-      // Retyping withdraws the offer, so the button can only ever confirm the
-      // name the user is currently proposing.
-      nameInput.addEventListener('input', () => offer.withdraw());
-      async function endRename(save) {
-        if (!editing) return;
-        editing = false;
-        nameInput.classList.add('hidden');
-        nameSpan.classList.remove('hidden');
-        const next = nameInput.value.trim();
-        if (!save || !next || next === name) return;
-        await applyRename(next, false);
-      }
-      renameBtn.addEventListener('click', beginRename);
-      nameInput.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') endRename(true);
-        if (e.key === 'Escape') endRename(false);
-      });
-      nameInput.addEventListener('blur', () => endRename(true));
-
-      // Which credentials this account holds. Two of them under one name is the
-      // user's assertion that they are the same OpenCode account, and that
-      // assertion decides which source answers for quota and which identity the
-      // account is published under, so it stays visible. Acting on them lives in
-      // the expanded section rather than inline: a click that unbinds an account
-      // should not sit one pixel from the account's own controls.
-      // A reference the collector has stopped using says so on its own row.
-      // Otherwise an account that also holds a cookie shows the credential as
-      // present, keeps reporting fine from the cookie, and nothing anywhere
-      // reveals that its Go quota is no longer coming from the detected key.
-      const ambientLabel = profile.ambientStale
-        ? `${t('settings.opencode.ambientName')} · ${t('settings.opencode.needsRebind')}`
-        : t('settings.opencode.ambientName');
-      const credentials = [
-        ['ambient', profile.usesAmbientKey, ambientLabel],
-        ['api', profile.hasApiKey, t('settings.opencode.kindApi')],
-        ['cookie', profile.hasCookie, t('settings.opencode.kindCookie')]
-      ].filter(([, present]) => present);
-
-      // The summary line is the control that expands it: clicking the thing you
-      // want to see beats a separate chevron stranded between the status text
-      // and the delete button.
-      const multiCredential = credentials.length > 1;
-      const detail = document.createElement(multiCredential ? 'button' : 'span');
-      detail.className = 'profile-detail';
-      let chevron = null;
-      if (multiCredential) {
-        detail.type = 'button';
-        detail.classList.add('is-expandable');
-        detail.setAttribute('aria-expanded', 'false');
-        detail.setAttribute('aria-label', t('settings.opencode.showCredentials'));
-        // The same disclosure chevron every other group uses, so it animates and
-        // reads the same; only the direction differs, pointing right when closed.
-        chevron = document.createElement('span');
-        chevron.className = 'cursor-disclosure-icon';
-        chevron.setAttribute('aria-hidden', 'true');
-      }
-      detail.textContent = credentials.map(([, , label]) => label).join(' + ');
-      if (chevron) detail.append(chevron);
-
-      nameBox.append(nameSpan, nameInput, renameBtn, mergeBtn, detail);
-
-      const rightBox = document.createElement('span');
-      rightBox.className = 'profile-right';
-
-      const infoSpan = document.createElement('span');
-      infoSpan.className = 'profile-info';
-      infoSpan.id = opencodeRowId('opencode-info-', name);
-      infoSpan.textContent = profile.enabled ? '...' : t('settings.opencode.disabled');
-
-      const deleteBtn = document.createElement('button');
-      deleteBtn.className = 'profile-delete';
-      deleteBtn.textContent = '✕';
-      deleteBtn.setAttribute('aria-label', t('settings.opencode.delete'));
-      let confirmingDelete = false;
-      deleteBtn.addEventListener('click', async () => {
-        if (!confirmingDelete) {
-          confirmingDelete = true;
-          deleteBtn.classList.add('confirming');
-          deleteBtn.textContent = '✓';
-          deleteBtn.setAttribute('aria-label', t('settings.opencode.deleteConfirm', { name }));
-          return;
-        }
-        await api.deleteProfile(name);
-        renderOpenCodeProfiles();
-        updateOpenCodeProfilesStatus();
-        renderSettingsSummaries();
-      });
-
-      // Expanding is only worth offering once an account holds more than one
-      // credential — with a single one the row already says everything.
-      let credentialList = null;
-      if (multiCredential) {
-        credentialList = document.createElement('div');
-        credentialList.className = 'opencode-credential-list accordion-animated-container hidden';
-        credentialList.id = opencodeRowId('opencode-credentials-', name);
-        // The shared accordion squeezes one inner wrapper, so the rows go inside
-        // it rather than on the container, which cannot shrink.
-        const credentialInner = document.createElement('div');
-        credentialInner.className = 'accordion-animation-inner';
-        for (const [kind, , label] of credentials) {
-          credentialInner.append(opencodeCredentialRow(name, kind, label));
-        }
-        credentialList.append(credentialInner);
-        detail.setAttribute('aria-controls', credentialList.id);
-        detail.addEventListener('click', () => {
-          const open = credentialList.classList.toggle('hidden') === false;
-          detail.setAttribute('aria-expanded', String(open));
-          detail.classList.toggle('is-open', open);
-        });
-      }
-
-      rightBox.append(infoSpan, deleteBtn);
-      item.append(toggle, nameBox, rightBox);
-      if (credentialList) item.append(credentialList);
-      listEl.appendChild(item);
-    }
-
-    updateOpenCodeProfilesStatus();
-  }).catch(() => {
-    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
-    accountShellApi.render({
-      status: document.getElementById('opencodeCookieStatus'),
-      statusText: t('settings.opencode.connectFailed')
-    });
-  });
-}
+function renderOpenCodeProfiles(...args) { return legacyAccountOwners.opencode.renderOpenCodeProfiles(...args); }
 
 // A merge that would land two credentials of the same kind on one account is
 // refused rather than resolved: confirming that two accounts are the same is a
 // different question from choosing which of two cookies to keep.
-function opencodeSaveErrorText(result) {
-  if (result?.credentialConflict) {
-    return t('settings.opencode.credentialConflict', {
-      kind: t(result.kind === 'cookie' ? 'settings.opencode.kindCookie'
-        : result.kind === 'ambient' ? 'settings.opencode.ambientName'
-          : 'settings.opencode.kindApi')
-    });
-  }
-  return result?.error || t('settings.opencode.saveFailedShort');
-}
 
 // A merge confirmation names one specific proposal: this credential, into this
 // account. Editing the field withdraws it, so the click the main process
@@ -18510,29 +17194,6 @@ function opencodeSaveErrorText(result) {
 // revision where it was, so the reply to the request the user just cancelled
 // still matched and put the button back — the original bug, reached through the
 // other door. Everything that ends an offer withdraws it.
-function opencodeMergeOffer(button, confirm) {
-  let revision = 0;
-  let pending = '';
-  button.addEventListener('click', () => {
-    if (pending !== '') confirm(pending);
-  });
-  return {
-    // Captured before the await, compared after it.
-    revision: () => revision,
-    stale: (at) => at !== revision,
-    withdraw: () => {
-      revision += 1;
-      pending = '';
-      button.classList.add('hidden');
-    },
-    offer: (at, name, label) => {
-      if (at !== revision) return;
-      pending = name;
-      button.textContent = label;
-      button.classList.remove('hidden');
-    }
-  };
-}
 
 // Element ids for a row, from the account name.
 //
@@ -18545,783 +17206,38 @@ function opencodeMergeOffer(button, confirm) {
 // A counter would work too, but these two call sites are independent: one
 // renders the row, the other looks it up from a later status reply. A pure
 // function of the name cannot drift between them the way a shared table can.
-function opencodeRowId(prefix, name) {
-  return `${prefix}${encodeURIComponent(name)}`;
-}
 
 // One credential inside an expanded account. Renaming moves it to another
 // account name, which is what splits a binding apart or forms a new one;
 // deleting drops just this credential and leaves the rest of the account.
-function opencodeCredentialRow(accountName, kind, label) {
-  const api = window.tokenMonitor.opencode;
-  const refresh = () => {
-    renderOpenCodeProfiles();
-    updateOpenCodeProfilesStatus();
-    renderSettingsSummaries();
-  };
 
-  const row = document.createElement('div');
-  row.className = 'opencode-credential-row';
-
-  const labelSpan = document.createElement('span');
-  labelSpan.className = 'credential-label';
-  labelSpan.textContent = label;
-
-  // The account name is shown on every credential rather than hidden behind an
-  // edit button, because seeing the same name twice is the explanation for why
-  // these are one account. Typing a different one moves that credential out.
-  const nameInput = document.createElement('input');
-  nameInput.className = 'credential-name-input';
-  nameInput.type = 'text';
-  nameInput.value = accountName;
-  nameInput.setAttribute('aria-label', t('settings.opencode.moveCredential', { kind: label }));
-  nameInput.placeholder = t('settings.opencode.profileNamePlaceholder');
-
-  const actions = document.createElement('span');
-  actions.className = 'credential-actions';
-
-  // A merge is a claim that two credentials belong to one OpenCode account, so
-  // it is confirmed with a visible button rather than by pressing the same key
-  // twice and hoping the user reads why.
-  const mergeBtn = document.createElement('button');
-  mergeBtn.className = 'credential-merge-btn hidden';
-  const offer = opencodeMergeOffer(mergeBtn, (target) => finishMove(target, true));
-
-  const finishMove = async (target, merge) => {
-    const at = offer.revision();
-    const result = await api.moveCredential(accountName, kind, target, { merge });
-    if (!result.ok) {
-      if (result.nameTaken) {
-        offer.offer(at, target, t('settings.opencode.mergeInto', { name: target }));
-        return;
-      }
-      if (offer.stale(at)) return;
-      setAccountShellError('opencode', opencodeSaveErrorText(result));
-      return;
-    }
-    setAccountShellError('opencode', '');
-    refresh();
-  };
-  const endMove = async (save) => {
-    const target = nameInput.value.trim();
-    if (!save || !target || target === accountName) {
-      nameInput.value = accountName;
-      offer.withdraw();
-      return;
-    }
-    await finishMove(target, false);
-  };
-
-  // Same rule as everywhere else: retyping the target withdraws the pending
-  // confirmation rather than leaving a button that would move it somewhere the
-  // user is no longer proposing.
-  nameInput.addEventListener('input', () => offer.withdraw());
-  nameInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') endMove(true);
-    if (e.key === 'Escape') endMove(false);
-  });
-  nameInput.addEventListener('blur', () => endMove(true));
-
-  const removeBtn = document.createElement('button');
-  removeBtn.className = 'profile-delete';
-  removeBtn.textContent = '✕';
-  removeBtn.setAttribute('aria-label', t('settings.opencode.removeCredential', { kind: label }));
-  // Two-step, like deleting an account: unbinding is not undoable from here.
-  let confirming = false;
-  removeBtn.addEventListener('click', async () => {
-    if (!confirming) {
-      confirming = true;
-      removeBtn.classList.add('confirming');
-      removeBtn.textContent = '✓';
-      return;
-    }
-    const result = await api.removeCredential(accountName, kind);
-    if (result.ok) refresh();
-  });
-
-  actions.append(removeBtn);
-  // The merge label carries the target account name and never fits beside the
-  // input, so it trails the row and wraps onto its own line when it appears.
-  row.append(labelSpan, nameInput, actions, mergeBtn);
-  return row;
-}
-
-async function updateOpenCodeProfilesStatus() {
-  const api = window.tokenMonitor.opencode;
-  const isCurrent = accountProfileStatuses.begin('opencode');
-  const status = await api.status();
-  if (!isCurrent() || !isSettingsSurfaceVisible()) return;
-  const profiles = status.profiles || {};
-
-  // The auto-detected key has no account name, so it arrives in its own field
-  // and lands on its own element rather than one keyed by a name a user could
-  // also type.
-  const entries = Object.entries(profiles).map(([name, s]) => [
-    opencodeRowId('opencode-info-', name),
-    s
-  ]);
-  if (status.ambient) entries.push(['opencodeAmbientInfo', status.ambient]);
-
-  for (const [elementId, s] of entries) {
-    const infoEl = document.getElementById(elementId);
-    if (!infoEl) continue;
-
-    if (s.disabled) {
-      infoEl.textContent = t('settings.opencode.disabled');
-    } else if (s.needsRebind) {
-      // Said once, on the credential line, which has room for it and is the
-      // thing that needs re-attaching. This cell is a fixed narrow column and
-      // would only repeat it truncated.
-      infoEl.textContent = '';
-    } else if (s.expired) {
-      infoEl.textContent = t('settings.opencode.statusExpired');
-    } else if (s.linked) {
-      const parts = [];
-      if (s.go) parts.push('Go');
-      if (s.zen) parts.push('Zen');
-      let text = '✓ ' + parts.join(' · ');
-      if (s.hasBalance && s.balanceUsd != null) {
-        text += '  $' + Number(s.balanceUsd).toFixed(2);
-      }
-      infoEl.textContent = text;
-    } else if (s.error) {
-      infoEl.textContent = s.error;
-    } else {
-      infoEl.textContent = t('settings.opencode.connectFailed');
-    }
-  }
-
-  renderOpenCodeProfilesStatusSummary(profiles, status.ambient);
-}
 
 // `ambient` counts toward both halves: it is a row in the list and it is what
 // the limits card reads on a machine with nothing configured, so leaving it out
 // reports "0/0" beside live quota.
-function renderOpenCodeProfilesStatusSummary(profiles, ambient = null) {
-  const totalEl = document.getElementById('opencodeCookieStatus');
-  if (totalEl) {
-    const statuses = [...Object.values(profiles), ...(ambient ? [ambient] : [])];
-    const linkedCount = statuses.filter(s => s.linked).length;
-    const configuredProfileCount = state.opencodeProfileCount || 0;
-    const totalCount = Math.max(statuses.length, configuredProfileCount);
-    accountShellApi.render({
-      status: totalEl,
-      statusText: totalCount > 0
-        ? t('settings.opencode.connected', { linked: linkedCount, total: totalCount })
-        : t('settings.opencode.statusNotSet')
-    });
-  }
-}
 
-function openrouterProfileStatusText(provider, options = {}) {
-  const status = limitProviderPresentationApi.namedApiProfileStatus(provider, options);
-  if (status === 'disabled') return t('settings.profiles.disabled');
-  if (status === 'hidden') return '';
-  if (status === 'checking') return t('settings.openrouter.checking');
-  if (status === 'invalid') return t('settings.openrouter.invalidKey');
-  if (status !== 'linked') return t('settings.openrouter.unavailable');
-  const balance = optionalFiniteNumber(provider.balance?.amount);
-  if (balance !== null) return `✓ ${formatMoney(balance, 'USD')}`;
-  const quota = (provider.windows || []).find((window) => window?.showMeter !== false);
-  const remaining = optionalFiniteNumber(quota?.remaining);
-  if (remaining !== null) return `✓ ${formatMoney(remaining, 'USD')} left`;
-  return '✓';
-}
 
-function thirdPartyProfileStatusText(provider, options = {}) {
-  const status = limitProviderPresentationApi.namedApiProfileStatus(provider, options);
-  if (status === 'disabled') return t('settings.profiles.disabled');
-  if (status === 'hidden') return '';
-  if (status === 'checking') return t('settings.thirdparty.checking');
-  if (status === 'invalid') return t('settings.thirdparty.invalidKey');
-  if (status !== 'linked') return t('settings.thirdparty.unavailable');
-  const balance = optionalFiniteNumber(provider.balance?.amount);
-  if (balance !== null) return `✓ ${formatCompactMoney(balance, provider.balance?.currency || 'USD', state.settings?.compactTokenUnits, currentLocale())}`;
-  const unlimited = (provider.windows || []).some((window) => (
-    window?.showMeter === false && String(window?.detail || '').toLowerCase() === 'unlimited'
-  ));
-  return unlimited ? `✓ ${t('settings.thirdparty.unlimited')}` : '✓';
-}
 
-function updateNamedApiProfilesStatus({
-  providerId,
-  profileSettingsKey,
-  profileCountStateKey,
-  statusText
-}) {
-  const providerEnabled = limitProviderEnabled(providerId);
-  const providers = localProviderStatuses(providerId);
-  const byName = new Map(providers.map((provider) => [
-    String(provider.accountName || provider.accountLabel || ''),
-    provider
-  ]));
-  for (const infoEl of document.querySelectorAll(`[data-managed-profile-provider="${providerId}"][data-managed-profile-name]`)) {
-    const name = infoEl.dataset.managedProfileName || '';
-    const profile = state.settings?.[profileSettingsKey]?.[name];
-    infoEl.textContent = statusText(byName.get(name), {
-      providerEnabled,
-      profileEnabled: profile?.enabled !== false
-    });
-  }
-  const envInfo = document.querySelector(
-    `[data-managed-profile-provider="${providerId}"][data-managed-profile-environment]`
-  );
-  if (envInfo) envInfo.textContent = statusText(byName.get('environment'), { providerEnabled });
-  const statusEl = document.getElementById(`${providerId}Status`);
-  if (!statusEl) return;
-  const total = state[profileCountStateKey] || 0;
-  const linked = providers.filter((provider) => provider.status === 'ok').length;
-  accountShellApi.render({
-    status: statusEl,
-    statusText: total === 0
-      ? t(`settings.${providerId}.statusNotSet`)
-      : !providerEnabled
-        ? t(`settings.${providerId}.nAccounts`, { count: total })
-        : t(`settings.${providerId}.connected`, { linked, total })
-  });
-}
 
-function updateMinimaxApiKeysStatus() {
-  const rows = localProviderStatuses('minimax');
-  const enabled = limitProviderEnabled('minimax');
-  const provider = enabled ? limitProviderPresentationApi.limitProviderSettingsRecord(rows, 'minimax') : null;
-  accountShellApi.render({
-    status: document.getElementById('minimaxStatus'),
-    statusText: !enabled
-      ? t('settings.limits.status.disabled')
-      : provider
-        ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(provider))
-        : t('settings.common.checking')
-  });
-  for (const row of document.querySelectorAll('[data-minimax-key]')) {
-    const reading = rows.find(candidate => candidate.source === 'api' && candidate.accountKey === row.dataset.minimaxKey);
-    row.querySelector('.managed-account-info').textContent = apiKeyAccountStatusText('minimax', reading, true, 'settings',
-      enabled && row.dataset.credentialEnabled !== 'false');
-  }
-}
+function updateMinimaxApiKeysStatus(...args) { return legacyAccountOwners.minimax.updateMinimaxApiKeysStatus(...args); }
 
-function minimaxKeyErrorText(result) {
-  const key = result?.status === 'required' ? 'settings.common.credentialRequired'
-    : result?.status === 'invalidFormat' ? 'settings.common.credentialInvalidFormat'
-    : result?.status === 'notConfigured' ? 'settings.minimax.statusNotSet'
-    : result?.status === 'unauthorized' ? 'settings.minimax.statusInvalid'
-    : 'settings.common.unavailable';
-  return result?.error || t(key);
-}
 
-function minimaxBillingUrl(key) {
-  const rows = localProviderStatuses('minimax').filter(row => row.source === 'api');
-  const row = key.accountKey ? rows.find(row => row.accountKey === key.accountKey) : null;
-  const region = key.apiRegion || state.settings?.minimaxApiRegion || 'auto';
-  const intl = region === 'intl' || (region === 'auto' && row?.region !== 'cn');
-  const origin = intl ? 'https://platform.minimax.io' : 'https://platform.minimaxi.com';
-  return `${origin}/user-center/payment/${key.billingMode === 'api' ? 'balance' : 'token-plan'}`;
-}
 
-function updateOpenRouterProfilesStatus() {
-  updateNamedApiProfilesStatus({
-    providerId: 'openrouter',
-    profileSettingsKey: 'openrouterProfiles',
-    profileCountStateKey: 'openrouterProfileCount',
-    statusText: openrouterProfileStatusText
-  });
-}
 
-function updateThirdPartyProfilesStatus() {
-  updateNamedApiProfilesStatus({
-    providerId: 'thirdparty',
-    profileSettingsKey: 'thirdPartyProfiles',
-    profileCountStateKey: 'thirdPartyProfileCount',
-    statusText: thirdPartyProfileStatusText
-  });
-}
+function updateThirdPartyProfilesStatus(...args) { return legacyAccountOwners.thirdparty.updateThirdPartyProfilesStatus(...args); }
 
-function openrouterProfileErrorText(result) {
-  if (result?.errorCode === 'invalidName') return t('settings.openrouter.invalidName');
-  if (result?.errorCode === 'missingApiKey') return t('settings.openrouter.statusNotSet');
-  return result?.error || t('settings.openrouter.saveFailedShort');
-}
 
-function thirdPartyProfileErrorText(result, adapter = '') {
-  if (result?.errorCode === 'invalidName') return t('settings.thirdparty.invalidName');
-  if (result?.errorCode === 'invalidAdapter') return t('settings.thirdparty.invalidAdapter');
-  if (result?.errorCode === 'invalidBaseUrl') return t('settings.thirdparty.invalidBaseUrl');
-  if (result?.errorCode === 'missingAccessToken' && adapter === 'sub2api') {
-    return t('settings.thirdparty.missingSub2ApiToken');
-  }
-  if (result?.errorCode === 'missingAccessToken') return t('settings.thirdparty.missingAccessToken');
-  if (result?.errorCode === 'missingApiKey') return t('settings.thirdparty.missingApiKey');
-  if (result?.errorCode === 'invalidCredential' && adapter === 'sub2api') {
-    return t('settings.thirdparty.sub2ApiCredentialRejected');
-  }
-  if (result?.errorCode === 'newApiLegacyTokenRetired') return t('settings.thirdparty.legacyTokenRetired');
-  if (result?.errorCode === 'newApiScopeDenied') return t('settings.thirdparty.scopeDenied');
-  if (result?.errorCode === 'invalidEndpointPath') return t('settings.thirdparty.invalidEndpointPath');
-  if (result?.errorCode === 'invalidAuthMode') return t('settings.thirdparty.invalidAuthMode');
-  if (result?.errorCode === 'invalidJsonPath') return t('settings.thirdparty.invalidJsonPath');
-  if (result?.errorCode === 'invalidCurrency') return t('settings.thirdparty.invalidCurrency');
-  if (result?.errorCode === 'invalidDivisor') return t('settings.thirdparty.invalidDivisor');
-  if (result?.errorCode === 'invalidCredential') return t('settings.thirdparty.invalidCredential');
-  if (result?.errorCode === 'unavailable') return t('settings.thirdparty.unavailable');
-  return result?.error || t('settings.thirdparty.saveFailedShort');
-}
 
-function appendNamedApiProfileRow(listEl, config) {
-  const {
-    api,
-    providerId,
-    name = '',
-    profile = { enabled: true },
-    env = false,
-    rerender,
-    updateStatus,
-    errorText,
-    detail = ''
-  } = config;
-  const item = document.createElement('div');
-  item.className = 'opencode-profile-item';
-  if (!env) {
-    const toggle = document.createElement('input');
-    toggle.className = 'profile-toggle';
-    toggle.type = 'checkbox';
-    toggle.checked = profile.enabled !== false;
-    toggle.setAttribute('aria-label', name);
-    toggle.addEventListener('change', async () => {
-      const previousEnabled = profile.enabled !== false;
-      profile.enabled = toggle.checked;
-      toggle.disabled = true;
-      updateStatus();
-      try {
-        const result = await api.setProfileEnabled(name, toggle.checked);
-        if (!result?.ok) {
-          toggle.checked = previousEnabled;
-          profile.enabled = previousEnabled;
-          updateStatus();
-        }
-      } catch (_) {
-        toggle.checked = previousEnabled;
-        profile.enabled = previousEnabled;
-        updateStatus();
-      } finally {
-        toggle.disabled = false;
-        renderSettingsSummaries();
-      }
-    });
-    item.append(toggle);
-  } else {
-    const spacer = document.createElement('span');
-    spacer.className = 'profile-toggle';
-    spacer.setAttribute('aria-hidden', 'true');
-    item.append(spacer);
-  }
 
-  const nameBox = document.createElement('span');
-  nameBox.className = 'profile-name-box';
-  const nameSpan = document.createElement('span');
-  nameSpan.className = 'profile-name';
-  nameSpan.textContent = env ? t(`settings.${providerId}.environment`) : name;
-  nameBox.append(nameSpan);
-  if (detail) {
-    const detailSpan = document.createElement('span');
-    detailSpan.className = 'profile-detail';
-    detailSpan.textContent = detail;
-    detailSpan.setAttribute('aria-label', detail);
-    nameBox.append(detailSpan);
-  }
 
-  if (!env) {
-    const nameInput = document.createElement('input');
-    nameInput.className = 'profile-name-input hidden';
-    nameInput.type = 'text';
-    nameInput.value = name;
-    const renameBtn = document.createElement('button');
-    renameBtn.type = 'button';
-    renameBtn.className = 'profile-rename-btn';
-    renameBtn.setAttribute('aria-label', t('settings.profiles.rename'));
-    let editing = false;
-    const finishRename = async (save) => {
-      if (!editing) return;
-      editing = false;
-      nameInput.classList.add('hidden');
-      nameSpan.classList.remove('hidden');
-      const nextName = nameInput.value.trim();
-      if (save && nextName && nextName !== name) {
-        const result = await api.renameProfile(name, nextName);
-        if (result?.ok) {
-          setAccountShellError(providerId, '');
-          rerender();
-        } else {
-          nameInput.value = name;
-          setAccountShellError(providerId, errorText(result));
-        }
-      }
-    };
-    renameBtn.addEventListener('click', () => {
-      editing = true;
-      nameSpan.classList.add('hidden');
-      nameInput.classList.remove('hidden');
-      nameInput.focus();
-      nameInput.select();
-    });
-    nameInput.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') void finishRename(true);
-      if (event.key === 'Escape') void finishRename(false);
-    });
-    nameInput.addEventListener('blur', () => void finishRename(true));
-    nameBox.append(nameInput, renameBtn);
-  }
 
-  const rightBox = document.createElement('span');
-  rightBox.className = 'profile-right';
-  const info = document.createElement('span');
-  info.className = 'profile-info';
-  info.dataset.managedProfileProvider = providerId;
-  if (env) info.dataset.managedProfileEnvironment = 'true';
-  else info.dataset.managedProfileName = name;
-  info.textContent = t(`settings.${providerId}.checking`);
-  rightBox.append(info);
+function renderMinimaxApiKeys(...args) { return legacyAccountOwners.minimax.renderMinimaxApiKeys(...args); }
 
-  if (!env) {
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'profile-delete';
-    deleteBtn.textContent = '✕';
-    deleteBtn.setAttribute('aria-label', t('settings.profiles.delete'));
-    let confirming = false;
-    deleteBtn.addEventListener('click', async () => {
-      if (!confirming) {
-        confirming = true;
-        deleteBtn.classList.add('confirming');
-        deleteBtn.textContent = '✓';
-        deleteBtn.setAttribute('aria-label', t('settings.profiles.deleteConfirm', { name }));
-        return;
-      }
-      const result = await api.deleteProfile(name);
-      if (result?.ok) rerender();
-    });
-    rightBox.append(deleteBtn);
-  }
-  item.append(nameBox, rightBox);
-  listEl.append(item);
-}
+function renderThirdPartyProfiles(...args) { return legacyAccountOwners.thirdparty.renderThirdPartyProfiles(...args); }
 
-function renderNamedApiProfiles(config) {
-  if (!isSettingsSurfaceVisible()) return;
-  const {
-    providerId,
-    profileSettingsKey,
-    envConfiguredKey,
-    profileCountStateKey,
-    api,
-    rerender,
-    updateStatus,
-    errorText,
-    detailForProfile = () => ''
-  } = config;
-  const listEl = document.getElementById(`${providerId}ProfileList`);
-  if (!listEl || !api) return;
-  renderAccountShellError(providerId);
-  const isCurrent = accountProfileRequests.begin(providerId);
-  api.getProfiles().then(({ profiles, hasEnvVar }) => {
-    if (!isCurrent() || !isSettingsSurfaceVisible() || document.getElementById(`${providerId}ProfileList`) !== listEl) return;
-    listEl.replaceChildren();
-    state.settings[profileSettingsKey] = profiles;
-    state.settings[envConfiguredKey] = Boolean(hasEnvVar);
-    const entries = Object.entries(profiles);
-    state[profileCountStateKey] = entries.length + (hasEnvVar ? 1 : 0);
-    if (state[profileCountStateKey] === 0) {
-      const empty = document.createElement('div');
-      empty.className = 'opencode-empty';
-      empty.textContent = t(`settings.${providerId}.emptyList`);
-      listEl.append(empty);
-      updateStatus();
-      renderSettingsSummaries();
-      return;
-    }
+function renderCursorStatus(...args) { return legacyAccountOwners.cursor.renderCursorStatus(...args); }
 
-    for (const [name, profile] of entries) {
-      appendNamedApiProfileRow(listEl, {
-        api,
-        providerId,
-        name,
-        profile,
-        rerender,
-        updateStatus,
-        errorText,
-        detail: detailForProfile(profile)
-      });
-    }
-    if (hasEnvVar) {
-      appendNamedApiProfileRow(listEl, {
-        api,
-        providerId,
-        env: true,
-        rerender,
-        updateStatus,
-        errorText
-      });
-    }
-    updateStatus();
-    renderSettingsSummaries();
-  }).catch(() => {
-    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
-    accountShellApi.render({
-      status: document.getElementById(`${providerId}Status`),
-      statusText: t(`settings.${providerId}.unavailable`)
-    });
-  });
-}
 
-function renderOpenRouterProfiles() {
-  renderNamedApiProfiles({
-    providerId: 'openrouter',
-    profileSettingsKey: 'openrouterProfiles',
-    envConfiguredKey: 'openrouterEnvConfigured',
-    profileCountStateKey: 'openrouterProfileCount',
-    api: window.tokenMonitor.openrouter,
-    rerender: renderOpenRouterProfiles,
-    updateStatus: updateOpenRouterProfilesStatus,
-    errorText: openrouterProfileErrorText
-  });
-}
-
-async function renderMinimaxApiKeys() {
-  if (!isSettingsSurfaceVisible()) return;
-  const list = document.getElementById('minimaxKeyList');
-  const isCurrent = accountProfileRequests.begin('minimax');
-  try {
-    const keys = await window.tokenMonitor.minimax.getKeys();
-    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
-    list.replaceChildren();
-    let savedIndex = 0;
-    for (const key of keys) {
-      const row = document.createElement('div');
-      row.className = 'managed-account-row';
-      row.dataset.minimaxKey = key.accountKey;
-      row.dataset.credentialEnabled = String(key.enabled !== false);
-      const label = document.createElement('span');
-      label.className = 'managed-account-main managed-account-email';
-      const name = t('settings.minimax.accountFallback', { number: ++savedIndex });
-      label.textContent = `${name} · ${t(`settings.minimax.${key.billingMode === 'api' ? 'billingApi' : 'billingTokenPlan'}`)}`;
-      const actions = document.createElement('span');
-      actions.className = 'managed-account-right';
-      const info = document.createElement('span');
-      info.className = 'managed-account-info';
-      const open = document.createElement('button');
-      open.className = 'managed-account-remove';
-      open.textContent = '↗';
-      open.setAttribute('aria-label', t('settings.minimax.openBrowser'));
-      open.addEventListener('click', () => window.tokenMonitor.openExternal(minimaxBillingUrl(key)));
-      actions.append(info, open);
-      const remove = document.createElement('button');
-      remove.className = 'managed-account-remove';
-      remove.textContent = '✕';
-      remove.setAttribute('aria-label', t('settings.minimax.clearApiKey'));
-      let confirming = false;
-      remove.addEventListener('click', () => {
-        if (!confirming) {
-          confirming = true;
-          remove.textContent = '✓';
-          remove.classList.add('confirming');
-          remove.setAttribute('aria-label', t('settings.profiles.deleteConfirm', { name: label.textContent }));
-          return;
-        }
-        return accountProfileSaves.run('minimax', remove, async () => {
-          const result = await window.tokenMonitor.minimax.removeKey(key.id);
-          setAccountShellError('minimax', result?.ok ? '' : minimaxKeyErrorText(result));
-          if (result?.ok) { await renderMinimaxApiKeys(); await refreshStats(); }
-        });
-      });
-      actions.append(remove);
-      row.append(label, actions);
-      list.append(row);
-    }
-    updateMinimaxApiKeysStatus();
-    renderSettingsSummaries();
-  } catch (_) {
-    if (!isCurrent() || !isSettingsSurfaceVisible()) return;
-    accountShellApi.render({
-      status: document.getElementById('minimaxStatus'),
-      statusText: t('settings.common.unavailable')
-    });
-  }
-}
-
-function renderThirdPartyProfiles() {
-  renderNamedApiProfiles({
-    providerId: 'thirdparty',
-    profileSettingsKey: 'thirdPartyProfiles',
-    envConfiguredKey: 'thirdPartyEnvConfigured',
-    profileCountStateKey: 'thirdPartyProfileCount',
-    api: window.tokenMonitor.thirdparty,
-    rerender: renderThirdPartyProfiles,
-    updateStatus: updateThirdPartyProfilesStatus,
-    errorText: thirdPartyProfileErrorText,
-    detailForProfile: (profile) => {
-      const adapter = profile?.adapter === 'newapi-token'
-        ? t('settings.thirdparty.detailNewApiKey')
-        : profile?.adapter === 'custom'
-          ? t('settings.thirdparty.detailCustom')
-          : profile?.adapter === 'sub2api'
-            ? t('settings.thirdparty.detailSub2Api')
-            : t('settings.thirdparty.detailNewApiAccount');
-      let host = '';
-      try { host = new URL(String(profile?.baseUrl || '')).host; } catch (_) {}
-      return [adapter, host].filter(Boolean).join(' · ');
-    }
-  });
-}
-
-function renderCursorStatus() {
-  if (!isSettingsSurfaceVisible()) return;
-  const statusEl = document.getElementById('cursorAccountStatus');
-  const listEl = document.getElementById('cursorAccountList');
-  const errorEl = document.getElementById('cursorErrorMessage');
-  if (!statusEl || !listEl || !errorEl) return;
-
-  accountShellApi.render({
-    error: errorEl,
-    errorText: state.cursorAccount.error
-      ? t('settings.cursor.statusCheckFailed', { message: state.cursorAccount.error })
-      : accountShellErrors.cursor || ''
-  });
-
-  if (state.cursorAccount.error) {
-    setCursorStatusText(statusEl, t('settings.common.error'));
-    setCursorCheckboxesEnabled(Boolean(state.cursorAccount.status?.accounts?.length));
-    setSettingsSectionExpanded('limits', true);
-    setCursorAccountExpanded(true);
-    renderSettingsSummaries();
-    return;
-  }
-
-  const status = state.cursorAccount.status;
-  if (!status) {
-    setCursorStatusText(statusEl, t('settings.common.checking'));
-    renderSettingsSummaries();
-    return;
-  }
-
-  const accounts = Array.isArray(status.accounts) ? status.accounts : [];
-  const managementBlocked = status.managementBlocked === true;
-  document.getElementById('cursorAgentActiveNote')?.classList.toggle('hidden', !managementBlocked);
-  const addButton = document.getElementById('cursorAddAccountButton');
-  if (addButton) addButton.disabled = managementBlocked;
-  const summary = accounts.length === 0
-    ? t('settings.cursor.notLoggedIn')
-    : t('settings.cursor.connected', { linked: status.linkedCount || 0, total: accounts.length });
-  setCursorStatusText(statusEl, summary);
-  setCursorCheckboxesEnabled(accounts.some((account) => !account.expired && !account.error));
-  listEl.replaceChildren();
-  if (accounts.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'settings-note';
-    empty.textContent = t('settings.cursor.empty');
-    listEl.append(empty);
-  } else {
-    for (const account of accounts) {
-      const enabled = account.enabled !== false;
-      const row = document.createElement('div');
-      row.className = 'managed-account-row';
-      row.classList.toggle('disabled', !enabled);
-      const fallbackId = String(account.id || '');
-      const accountName = account.email || account.label || (fallbackId ? `…${fallbackId.slice(-8)}` : t('settings.cursor.unnamedAccount'));
-      const input = document.createElement('input');
-      input.className = 'managed-account-checkbox';
-      input.type = 'checkbox';
-      input.checked = enabled;
-      input.setAttribute('aria-label', t('settings.cursor.toggleAccount', { account: accountName }));
-      const main = document.createElement('div');
-      main.className = 'managed-account-main';
-      const name = document.createElement('div');
-      name.className = 'managed-account-email';
-      name.textContent = accountName;
-      main.append(name);
-      const planLabel = account.membershipType
-        ? limitProviderPresentationApi.limitProviderDisplayLabel(account.membershipType)
-        : t('settings.cursor.webAccount');
-      input.addEventListener('change', async () => {
-        input.disabled = true;
-        const result = await window.tokenMonitor.cursor.setAccountEnabled(account.id, input.checked);
-        if (!result?.ok) {
-          state.cursorAccount = { ...state.cursorAccount, error: result?.error || t('settings.cursor.toggleFailed') };
-        } else {
-          state.cursorAccount = { status: result.status, error: '', busy: false };
-          refreshStats({ force: true }).catch(() => {});
-        }
-        renderCursorStatus();
-      });
-      const right = document.createElement('span');
-      right.className = 'managed-account-right';
-      const info = document.createElement('div');
-      info.className = 'managed-account-info';
-      info.textContent = !enabled
-        ? t('settings.cursor.disabled')
-        : account.expired
-          ? t('settings.cursor.expiredShort')
-          : account.error
-            ? t('settings.common.error')
-            : planLabel;
-      info.setAttribute('aria-label', info.textContent);
-      right.append(info);
-      if (account.removable === true && !managementBlocked) {
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'managed-account-remove';
-        remove.textContent = '✕';
-        remove.setAttribute('aria-label', t('settings.cursor.remove'));
-        let confirmingRemove = false;
-        remove.addEventListener('click', async () => {
-          if (!confirmingRemove) {
-            confirmingRemove = true;
-            remove.classList.add('confirming');
-            remove.textContent = '✓';
-            remove.setAttribute('aria-label', t('settings.cursor.removeConfirm', { account: accountName }));
-            return;
-          }
-          remove.disabled = true;
-          const result = await window.tokenMonitor.cursor.logout(account.id);
-          if (!result?.ok) {
-            const message = result?.code === 'EXTERNAL_AGENT_ACTIVE'
-              ? t('settings.cursor.agentActive')
-              : result?.error || t('settings.cursor.removeFailed');
-            state.cursorAccount = { ...state.cursorAccount, error: message };
-          } else {
-            state.cursorAccount = { status: result.status, error: '', busy: false };
-            refreshStats({ force: true }).catch(() => {});
-          }
-          renderCursorStatus();
-        });
-        right.append(remove);
-      }
-      row.append(input, main, right);
-      listEl.append(row);
-    }
-  }
-  renderSettingsSummaries();
-}
-
-async function refreshCursorStatus({ force = false, discover = false } = {}) {
-  setAccountShellError('cursor', '');
-  state.cursorAccount = { status: null, error: '', busy: true };
-  renderCursorStatus();
-  try {
-    const status = await window.tokenMonitor.cursor.status({ force, discover });
-    state.cursorAccount = { status, error: '', busy: false };
-  } catch (err) {
-    state.cursorAccount = { status: null, error: err.message, busy: false };
-  }
-  renderCursorStatus();
-}
-
-function setCursorCheckboxesEnabled(enabled) {
-  const row = document.querySelector('#clientDisplayList .tool-preference-row[data-client="cursor"]');
-  const input = row?.querySelector('input[data-preference="track"]');
-  row?.classList.toggle('disabled', !enabled);
-  if (input) {
-    input.disabled = !enabled;
-    input.setAttribute('aria-description', enabled ? '' : t('settings.cursor.loginRequired'));
-  }
-}
 
 let openCustomPricingForm = null;
 let modelAliasForm = null;
@@ -19598,862 +17514,7 @@ function setupCustomPricingUI() {
 }
 
 function setupCursorAccountUI() {
-  const codexToggle = document.getElementById('codexSettingsToggle');
-  if (codexToggle) {
-    codexToggle.addEventListener('click', () => setCodexAccountExpanded(!state.codexAccountExpanded));
-    setCodexAccountExpanded(false);
-    renderCodexAccounts();
-
-    const codexAddButton = document.getElementById('codexAddAccountButton');
-    const codexCancelButton = document.getElementById('codexCancelLoginButton');
-    const codexOpenUrlButton = document.getElementById('codexOpenLoginUrlButton');
-    const codexCopyUrlButton = document.getElementById('codexCopyLoginUrlButton');
-    const codexWorkspaceSelect = document.getElementById('codexWorkspaceSelect');
-    const codexConfirmWorkspaceButton = document.getElementById('codexConfirmWorkspaceButton');
-    const codexLoginDetails = document.getElementById('codexLoginDetails');
-    window.tokenMonitor.codex.onLoginStatus((status) => {
-      if (!status || !isCurrentCodexSignInFlow(status.flowId)) return;
-      if (status.phase === 'workspaceSelection') {
-        state.codexWorkspaceChoices = Array.isArray(status.workspaces) ? status.workspaces : [];
-        state.codexWorkspaceId = state.codexWorkspaceChoices.some((workspace) => workspace.id === status.currentWorkspaceId)
-          ? status.currentWorkspaceId
-          : state.codexWorkspaceChoices[0]?.id || '';
-        state.codexLoginStatus = t('settings.codex.chooseWorkspace');
-        renderCodexLoginStatus();
-        return;
-      }
-      if (status.phase !== 'output') return;
-      state.codexLoginOutput = (state.codexLoginOutput + String(status.text || '')).slice(-3000);
-      if (status.loginUrl) state.codexLoginUrl = status.loginUrl;
-      state.codexLoginStatus = t(state.codexLoginUrl ? 'settings.codex.loginWaiting' : 'settings.codex.loginStarting');
-      renderCodexLoginStatus();
-    });
-    codexAddButton.addEventListener('click', async () => {
-      if (state.codexSignInBusy) return;
-      const flowId = nextCodexSignInFlowId();
-      state.codexSignInFlowId = flowId;
-      state.codexSignInBusy = true;
-      state.codexLoginUrl = '';
-      state.codexLoginOutput = '';
-      state.codexWorkspaceChoices = [];
-      state.codexWorkspaceId = '';
-      state.codexLoginStatus = t('settings.codex.loginStarting');
-      state.codexAccountError = '';
-      if (codexLoginDetails) codexLoginDetails.open = false;
-      renderCodexLoginStatus();
-      renderCodexAccounts();
-      try {
-        const result = await window.tokenMonitor.codex.addAccount({ flowId });
-        if (!isCurrentCodexSignInFlow(result?.flowId || flowId)) return;
-        if (!result?.ok) {
-          if (result?.outcome === 'cancelled') return;
-          state.codexAccountError = result?.error || t('settings.codex.loginFailed');
-          state.codexLoginStatus = t('settings.codex.loginFailed');
-          if (codexLoginDetails && state.codexLoginOutput) codexLoginDetails.open = true;
-          setCodexAccountExpanded(true);
-        } else {
-          state.codexAccountError = '';
-          state.codexLoginStatus = t('settings.codex.loginSuccess');
-          renderCodexLoginStatus();
-          state.settings.codexManagedAccounts = await window.tokenMonitor.codex.accounts();
-          await refreshStats({ force: true });
-          state.codexLoginStatus = '';
-          state.codexLoginOutput = '';
-          state.codexWorkspaceChoices = [];
-          state.codexWorkspaceId = '';
-        }
-      } catch (err) {
-        if (!isCurrentCodexSignInFlow(flowId)) return;
-        state.codexAccountError = err.message;
-        state.codexLoginStatus = t('settings.codex.loginFailed');
-        if (codexLoginDetails && state.codexLoginOutput) codexLoginDetails.open = true;
-      } finally {
-        if (isCurrentCodexSignInFlow(flowId)) {
-          state.codexSignInBusy = false;
-          state.codexSignInFlowId = '';
-          state.codexLoginUrl = '';
-          state.codexWorkspaceChoices = [];
-          state.codexWorkspaceId = '';
-          renderCodexLoginStatus();
-          renderCodexAccounts();
-        }
-      }
-    });
-
-    codexCancelButton.addEventListener('click', async () => {
-      const flowId = state.codexSignInFlowId;
-      if (!isCurrentCodexSignInFlow(flowId)) return;
-      const result = await window.tokenMonitor.codex.cancelLogin({ flowId });
-      if (!result?.cancelled || !isCurrentCodexSignInFlow(flowId)) return;
-      state.codexSignInBusy = false;
-      state.codexSignInFlowId = '';
-      state.codexLoginUrl = '';
-      state.codexLoginStatus = '';
-      state.codexLoginOutput = '';
-      state.codexWorkspaceChoices = [];
-      state.codexWorkspaceId = '';
-      state.codexAccountError = '';
-      if (codexLoginDetails) codexLoginDetails.open = false;
-      renderCodexLoginStatus();
-      renderCodexAccounts();
-    });
-
-    codexWorkspaceSelect.addEventListener('change', () => {
-      state.codexWorkspaceId = codexWorkspaceSelect.value;
-    });
-
-    codexConfirmWorkspaceButton.addEventListener('click', async () => {
-      const flowId = state.codexSignInFlowId;
-      const workspaceId = state.codexWorkspaceId;
-      if (!isCurrentCodexSignInFlow(flowId) || !workspaceId) return;
-      codexConfirmWorkspaceButton.disabled = true;
-      try {
-        const result = await window.tokenMonitor.codex.selectWorkspace({ flowId, workspaceId });
-        if (!result?.ok || !isCurrentCodexSignInFlow(flowId)) return;
-        state.codexWorkspaceChoices = [];
-        state.codexWorkspaceId = '';
-        state.codexLoginStatus = t('settings.codex.loginLoadingAccount');
-        renderCodexLoginStatus();
-      } finally {
-        codexConfirmWorkspaceButton.disabled = false;
-      }
-    });
-
-    codexOpenUrlButton.addEventListener('click', async () => {
-      if (!state.codexLoginUrl) return;
-      const result = await window.tokenMonitor.openExternal(state.codexLoginUrl);
-      if (!result?.ok) {
-        state.codexAccountError = result?.error || t('settings.codex.openLoginUrlFailed');
-        renderCodexAccounts();
-      }
-    });
-
-    codexCopyUrlButton.addEventListener('click', () => {
-      if (state.codexLoginUrl) copyToClipboard(state.codexLoginUrl, codexCopyUrlButton);
-    });
-
-    renderCodexLoginStatus();
-
-    document.getElementById('codexRefreshAccountsButton').addEventListener('click', () => {
-      refreshCodexAccounts();
-    });
-  }
-
-  document.getElementById('cursorSettingsToggle').addEventListener('click', () => {
-    const expanding = !state.cursorAccountExpanded;
-    setCursorAccountExpanded(expanding);
-    if (expanding && !state.cursorAccount.busy) void refreshCursorStatus({ discover: true });
-  });
-  setCursorAccountExpanded(false);
-
-  const cursorAddAccountButton = document.getElementById('cursorAddAccountButton');
-  const cursorManualDetails = document.getElementById('cursorManualDetails');
-  function setCursorManualExpanded(expanded) {
-    const next = Boolean(expanded);
-    cursorAddAccountButton?.setAttribute('aria-expanded', next ? 'true' : 'false');
-    cursorManualDetails?.classList.toggle('hidden', !next);
-    document.getElementById('cursorManualPanel')?.classList.toggle('expanded', next);
-  }
-  cursorAddAccountButton?.addEventListener('click', () => {
-    setCursorManualExpanded(cursorManualDetails?.classList.contains('hidden'));
-  });
-  setCursorManualExpanded(false);
-
-  document.getElementById('cursorLoginButton').addEventListener('click', () => {
-    window.tokenMonitor.openExternal('https://cursor.com');
-  });
-
-  const cursorManualSubmit = document.getElementById('cursorManualSubmit');
-  cursorManualSubmit.addEventListener('click', () => accountProfileSaves.run('cursor', cursorManualSubmit, async () => {
-    const input = document.getElementById('cursorManualInput');
-    setAccountShellError('cursor', '');
-    const result = await window.tokenMonitor.cursor.loginManual(input.value);
-    if (!result.ok) {
-      const message = result.code === 'EXTERNAL_AGENT_ACTIVE'
-        ? t('settings.cursor.agentActive')
-        : result.error;
-      setAccountShellError('cursor', t('settings.cursor.loginFailed', { message }));
-      return;
-    }
-    input.value = '';
-    setAccountShellError('cursor', '');
-    state.cursorAccount = { status: result.status, error: '', busy: false };
-    renderCursorStatus();
-    setCursorManualExpanded(false);
-    await refreshStats({ force: true });
-  }));
-
-  refreshCursorStatus({ discover: true });
-
-  const opencodeToggle = document.getElementById('opencodeSettingsToggle');
-  if (opencodeToggle) {
-    opencodeToggle.addEventListener('click', () => {
-      const expanding = document.getElementById('opencodeSettingsDetails').classList.contains('hidden');
-      setOpencodeCookieExpanded(expanding);
-      if (expanding) renderOpenCodeProfiles();
-    });
-
-    const addToggle = document.getElementById('opencodeAddToggle');
-    const addDetails = document.getElementById('opencodeAddDetails');
-    function setOpenCodeAddExpanded(expanded) {
-      const next = Boolean(expanded);
-      addToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
-      addDetails?.classList.toggle('hidden', !next);
-      document.getElementById('opencodeAddForm')?.classList.toggle('expanded', next);
-    }
-    addToggle?.addEventListener('click', () => setOpenCodeAddExpanded(addDetails?.classList.contains('hidden')));
-
-    document.getElementById('opencodeOpenBrowser')?.addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://opencode.ai/console');
-    });
-
-    // API key is the default: it needs no browser round trip. The cookie stays
-    // selectable because it is the only thing that reaches the Zen balance.
-    const kindSelect = document.getElementById('opencodeCredentialKind');
-    // The merge confirmation is about one specific proposal: this name, this
-    // credential. Editing any part of the form makes the offer on screen stale,
-    // and a confirmation the user gives has to be a confirmation of what they
-    // are looking at, so any edit withdraws it.
-    const addMergeButton = document.getElementById('opencodeCredentialMerge');
-    // Confirming re-runs the submit handler's own closure, which is what holds
-    // the name and credential the offer was made for.
-    let confirmOpenCodeMerge = () => {};
-    const addMergeOffer = addMergeButton
-      ? opencodeMergeOffer(addMergeButton, () => confirmOpenCodeMerge())
-      : null;
-    const clearOpenCodeMergeOffer = () => addMergeOffer?.withdraw();
-    for (const id of ['opencodeProfileName', 'opencodeApiKeyInput', 'opencodeCookieInput']) {
-      document.getElementById(id)?.addEventListener('input', clearOpenCodeMergeOffer);
-    }
-    const applyOpenCodeCredentialKind = () => {
-      const isCookie = kindSelect?.value === 'cookie';
-      document.getElementById('opencodeApiFields')?.classList.toggle('hidden', isCookie);
-      document.getElementById('opencodeCookieFields')?.classList.toggle('hidden', !isCookie);
-      // One button for both modes; only what it is fetching differs. The keys
-      // page itself lives under a workspace id we do not have, so both land on
-      // the console sign-in.
-      const browserButton = document.getElementById('opencodeOpenBrowser');
-      if (browserButton) {
-        const key = isCookie ? 'settings.opencode.openBrowser' : 'settings.opencode.openBrowserKeys';
-        browserButton.dataset.i18n = key;
-        browserButton.textContent = t(key);
-      }
-      // Clear the field being hidden so a value typed under one credential type
-      // can never be submitted as the other.
-      const stale = document.getElementById(isCookie ? 'opencodeApiKeyInput' : 'opencodeCookieInput');
-      if (stale) stale.value = '';
-      setAccountShellError('opencode', '');
-      clearOpenCodeMergeOffer();
-    };
-    kindSelect?.addEventListener('change', applyOpenCodeCredentialKind);
-    applyOpenCodeCredentialKind();
-
-    const profileSubmit = document.getElementById('opencodeCookieSubmit');
-    profileSubmit.addEventListener('click', () => accountProfileSaves.run('opencode', profileSubmit, async () => {
-      const opencodeCredentialKind = kindSelect?.value === 'cookie' ? 'cookie' : 'api';
-      const input = document.getElementById(opencodeCredentialKind === 'cookie'
-        ? 'opencodeCookieInput'
-        : 'opencodeApiKeyInput');
-      const nameInput = document.getElementById('opencodeProfileName');
-      const name = (nameInput.value || '').trim();
-      const cookie = input.value;
-
-      setAccountShellError('opencode', '');
-
-      // The name is required rather than defaulted. Saving one credential keeps
-      // the other under the same name, and the collector reads that as "these
-      // are the same account", so a blank name silently becoming `default`
-      // could attach one account's key to another account's cookie. Making the
-      // user type the name is what keeps the association explicit.
-      if (!name) {
-        setAccountShellError('opencode', t('settings.opencode.nameRequired'));
-        nameInput.focus();
-        return;
-      }
-
-      // A name that already holds a different credential kind binds the two into
-      // one account, so the main process refuses it and the form asks first.
-      // The confirmation replaces the submit button rather than appearing beside
-      // it: the next click has different consequences from the one just made.
-      const submit = async (merge) => {
-        const at = addMergeOffer?.revision();
-        confirmOpenCodeMerge = () => accountProfileSaves.run('opencode', addMergeButton, () => submit(true));
-        const result = await window.tokenMonitor.opencode.saveProfile(
-          name,
-          cookie,
-          opencodeCredentialKind,
-          { merge }
-        );
-        // Whether or not the form still shows this proposal, a save that landed
-        // has to reach the list. Only the fields are left alone, so an edit made
-        // while the request was in flight is not wiped by its reply.
-        const stale = addMergeOffer ? addMergeOffer.stale(at) : false;
-        if (result.ok) {
-          // Only this proposal's own offer is taken down. Two saves can overlap,
-          // and the newer one can answer first: clearing unconditionally let an
-          // older success wipe a merge confirmation the user was looking at and
-          // that was still correct.
-          if (!stale) {
-            input.value = '';
-            nameInput.value = '';
-            addMergeOffer?.withdraw();
-          }
-          if (!stale) setAccountShellError('opencode', '');
-          renderOpenCodeProfiles();
-          updateOpenCodeProfilesStatus();
-          renderSettingsSummaries();
-          return;
-        }
-        if (stale) return;
-        if (result.nameTaken && addMergeOffer) {
-          addMergeOffer.offer(at, name, t('settings.opencode.mergeInto', { name }));
-          return;
-        }
-        setAccountShellError('opencode', opencodeSaveErrorText(result));
-      };
-      await submit(false);
-    }));
-  }
-
-  const minimaxToggle = document.getElementById('minimaxSettingsToggle');
-  if (minimaxToggle) {
-    minimaxToggle.addEventListener('click', () => {
-      const expanded = !state.minimaxAccountExpanded;
-      setExternalAccountExpanded('minimax', expanded);
-      if (expanded) renderMinimaxApiKeys();
-    });
-    document.getElementById('minimaxOpenBrowser').addEventListener('click', () => {
-      const billingMode = document.getElementById('minimaxBillingModeInput').value;
-      const apiRegion = document.getElementById('minimaxApiRegionInput').value;
-      window.tokenMonitor.openExternal(minimaxBillingUrl({ billingMode, apiRegion }));
-    });
-    document.getElementById('minimaxRefreshButton').addEventListener('click', () => refreshLimitProviderQuota('minimax'));
-    const submit = document.getElementById('minimaxKeySubmit');
-    submit.addEventListener('click', () => accountProfileSaves.run('minimax', submit, async () => {
-      setAccountShellError('minimax', '');
-      const input = document.getElementById('minimaxApiKeyInput');
-      const mode = document.getElementById('minimaxBillingModeInput');
-      const region = document.getElementById('minimaxApiRegionInput');
-      const draft = { apiKey: input.value, billingMode: mode.value, apiRegion: region.value };
-      const result = await window.tokenMonitor.minimax.addKey(draft);
-      const unchanged = input.value === draft.apiKey && mode.value === draft.billingMode
-        && region.value === draft.apiRegion;
-      if (!result?.ok) {
-        if (unchanged) setAccountShellError('minimax', minimaxKeyErrorText(result));
-        return;
-      }
-      if (unchanged) input.value = '';
-      await renderMinimaxApiKeys();
-      await refreshStats();
-    }));
-  }
-
-  const openrouterToggle = document.getElementById('openrouterSettingsToggle');
-  if (openrouterToggle) {
-    openrouterToggle.addEventListener('click', () => {
-      const expanding = !state.openrouterAccountExpanded;
-      setOpenrouterAccountExpanded(expanding);
-      if (expanding) renderOpenRouterProfiles();
-    });
-    setOpenrouterAccountExpanded(false);
-
-    const addToggle = document.getElementById('openrouterAddToggle');
-    const addDetails = document.getElementById('openrouterAddDetails');
-    addToggle?.addEventListener('click', () => {
-      const expanded = addDetails?.classList.contains('hidden');
-      addToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-      addDetails?.classList.toggle('hidden', !expanded);
-      document.getElementById('openrouterAddForm')?.classList.toggle('expanded', expanded);
-    });
-    document.getElementById('openrouterOpenBrowser')?.addEventListener('click', () => {
-      window.tokenMonitor.openExternal('https://openrouter.ai/settings/keys');
-    });
-    const profileSubmit = document.getElementById('openrouterProfileSubmit');
-    profileSubmit?.addEventListener('click', () => accountProfileSaves.run('openrouter', profileSubmit, async () => {
-      const nameInput = document.getElementById('openrouterProfileName');
-      const keyInput = document.getElementById('openrouterApiKeyInput');
-      const name = String(nameInput?.value || '').trim() || 'default';
-      const apiKey = String(keyInput?.value || '').trim();
-      setAccountShellError('openrouter', '');
-      if (!apiKey) {
-        setAccountShellError('openrouter', t('settings.openrouter.statusNotSet'));
-        return;
-      }
-      const result = await window.tokenMonitor.openrouter.saveProfile(name, apiKey);
-      if (result?.ok) {
-        nameInput.value = '';
-        keyInput.value = '';
-        renderOpenRouterProfiles();
-        await refreshStats({ force: true });
-      } else {
-        setAccountShellError('openrouter', openrouterProfileErrorText(result));
-      }
-    }));
-  }
-
-  const thirdpartyToggle = document.getElementById('thirdpartySettingsToggle');
-  if (thirdpartyToggle) {
-    thirdpartyToggle.addEventListener('click', () => {
-      const expanding = !state.thirdPartyAccountExpanded;
-      setThirdPartyAccountExpanded(expanding);
-      if (expanding) renderThirdPartyProfiles();
-    });
-    setThirdPartyAccountExpanded(false);
-
-    const addToggle = document.getElementById('thirdpartyAddToggle');
-    const addDetails = document.getElementById('thirdpartyAddDetails');
-    const platformInput = document.getElementById('thirdpartyPlatformInput');
-    const modeInput = document.getElementById('thirdpartyModeInput');
-    const baseUrlInput = document.getElementById('thirdpartyBaseUrlInput');
-    platformInput?.addEventListener('change', setThirdPartyAdapterFields);
-    modeInput?.addEventListener('change', setThirdPartyAdapterFields);
-    baseUrlInput?.addEventListener('input', updateThirdPartyHttpWarning);
-    setThirdPartyAdapterFields();
-    updateThirdPartyHttpWarning();
-    addToggle?.addEventListener('click', () => {
-      const expanded = addDetails?.classList.contains('hidden');
-      addToggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
-      addDetails?.classList.toggle('hidden', !expanded);
-      document.getElementById('thirdpartyAddForm')?.classList.toggle('expanded', expanded);
-    });
-    const profileSubmit = document.getElementById('thirdpartyProfileSubmit');
-    profileSubmit?.addEventListener('click', () => accountProfileSaves.run('thirdparty', profileSubmit, async () => {
-      const nameInput = document.getElementById('thirdpartyProfileName');
-      const accessTokenInput = document.getElementById('thirdpartyAccessTokenInput');
-      const refreshTokenInput = document.getElementById('thirdpartyRefreshTokenInput');
-      const userIdInput = document.getElementById('thirdpartyUserIdInput');
-      const keyInput = document.getElementById('thirdpartyApiKeyInput');
-      const endpointPathInput = document.getElementById('thirdpartyEndpointPathInput');
-      const authModeInput = document.getElementById('thirdpartyAuthModeInput');
-      const remainingPathInput = document.getElementById('thirdpartyRemainingPathInput');
-      const usedPathInput = document.getElementById('thirdpartyUsedPathInput');
-      const totalPathInput = document.getElementById('thirdpartyTotalPathInput');
-      const currencyInput = document.getElementById('thirdpartyCurrencyInput');
-      const divisorInput = document.getElementById('thirdpartyDivisorInput');
-      const name = String(nameInput?.value || '').trim() || 'default';
-      const adapter = selectedThirdPartyAdapter();
-      const baseUrl = String(baseUrlInput?.value || '').trim();
-      const accessToken = String(accessTokenInput?.value || '').trim();
-      const refreshToken = String(refreshTokenInput?.value || '').trim();
-      const userId = String(userIdInput?.value || '').trim();
-      const apiKey = String(keyInput?.value || '').trim();
-      setAccountShellError('thirdparty', '');
-      const result = await window.tokenMonitor.thirdparty.saveProfile({
-        name,
-        adapter,
-        baseUrl,
-        accessToken,
-        refreshToken,
-        userId,
-        apiKey,
-        endpointPath: String(endpointPathInput?.value || '').trim(),
-        authMode: String(authModeInput?.value || '').trim(),
-        remainingPath: String(remainingPathInput?.value || '').trim(),
-        usedPath: String(usedPathInput?.value || '').trim(),
-        totalPath: String(totalPathInput?.value || '').trim(),
-        currency: String(currencyInput?.value || '').trim(),
-        divisor: String(divisorInput?.value || '').trim()
-      });
-      if (result?.ok) {
-        nameInput.value = '';
-        baseUrlInput.value = '';
-        updateThirdPartyHttpWarning();
-        accessTokenInput.value = '';
-        refreshTokenInput.value = '';
-        userIdInput.value = '';
-        keyInput.value = '';
-        endpointPathInput.value = '/user/balance';
-        authModeInput.value = 'bearer';
-        remainingPathInput.value = '';
-        usedPathInput.value = '';
-        totalPathInput.value = '';
-        currencyInput.value = 'USD';
-        divisorInput.value = '1';
-        renderThirdPartyProfiles();
-        setAccountShellError(
-          'thirdparty',
-          result.warning === 'newApiMissingUsageScope' ? t('settings.thirdparty.missingUsageScope') : '',
-          result.warning ? 'warning' : 'error'
-        );
-        await refreshStats({ force: true });
-      } else {
-        setAccountShellError('thirdparty', thirdPartyProfileErrorText(result, adapter));
-      }
-    }));
-  }
-
-  const volcengineToggle = document.getElementById('volcengineSettingsToggle');
-  if (volcengineToggle) {
-    volcengineToggle.addEventListener('click', () => setExternalAccountExpanded('volcengine', !state.volcengineAccountExpanded));
-    setExternalAccountExpanded('volcengine', false);
-    renderExternalProviderStatus('volcengine');
-
-    document.getElementById('volcengineOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(volcenginePlatformUrl());
-    });
-
-    document.getElementById('volcengineAgentToggle')?.addEventListener('click', () => {
-      setVolcengineAgentExpanded(document.getElementById('volcengineAgentDetails')?.classList.contains('hidden'));
-    });
-    setVolcengineAgentExpanded(false);
-
-    document.getElementById('volcengineAgentClearButton')?.addEventListener('click', async () => {
-      await saveSettings({
-        volcengineAgentAccessKeyId: '', volcengineAgentSecretAccessKey: '', volcengineAgentRegion: ''
-      });
-      renderExternalProviderStatus('volcengine');
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('volcengineLogoutButton').addEventListener('click', () => clearAccountCredential('volcengine'));
-
-    document.getElementById('volcengineRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    document.getElementById('volcengineCredentialsSubmit').addEventListener('click', async (event) => {
-      const accessKeyInput = document.getElementById('volcengineAccessKeyInput');
-      const secretInput = document.getElementById('volcengineSecretAccessKeyInput');
-      const regionInput = document.getElementById('volcengineRegionInput');
-      const agentAccessKeyInput = document.getElementById('volcengineAgentAccessKeyInput');
-      const agentSecretInput = document.getElementById('volcengineAgentSecretAccessKeyInput');
-      const agentRegionInput = document.getElementById('volcengineAgentRegionInput');
-      const accessKeyValue = String(accessKeyInput.value || '').trim();
-      const secretValue = String(secretInput.value || '').trim();
-      // Checks only this panel can make: which fields pair with which.
-      const agentAccessKeyValue = String(agentAccessKeyInput?.value || '').trim();
-      const agentSecretValue = String(agentSecretInput?.value || '').trim();
-      const pairing = accessKeyValue && /^AKLT/i.test(accessKeyValue) && !secretValue
-        ? 'settings.volcengine.secretRequired'
-        : agentAccessKeyValue && !agentSecretValue ? 'settings.volcengine.agentSecretRequired' : '';
-      if (pairing) {
-        setAccountPanelMessage('volcengine', { key: pairing });
-        renderExternalProviderStatus('volcengine');
-        return;
-      }
-      await submitAccountCredential(event.currentTarget, 'volcengine', {
-        volcengineAccessKeyId: accessKeyInput.value,
-        volcengineSecretAccessKey: secretInput.value,
-        volcengineRegion: regionInput.value || 'cn-beijing',
-        // Only sent when the user actually filled the override in, so saving the
-        // Coding Plan key again cannot silently wipe a separate Agent account.
-        ...(agentAccessKeyValue ? {
-          volcengineAgentAccessKeyId: agentAccessKeyValue,
-          volcengineAgentSecretAccessKey: agentSecretValue,
-          volcengineAgentRegion: agentRegionInput?.value || 'cn-beijing'
-        } : {})
-      }, {
-        failedKey: 'settings.volcengine.saveFailed',
-        clearInput: () => {
-          accessKeyInput.value = '';
-          secretInput.value = '';
-          if (agentAccessKeyInput) agentAccessKeyInput.value = '';
-          if (agentSecretInput) agentSecretInput.value = '';
-        }
-      });
-    });
-  }
-
-  const kimiToggle = document.getElementById('kimiSettingsToggle');
-  if (kimiToggle) {
-    kimiToggle.addEventListener('click', () => setExternalAccountExpanded('kimi', !state.kimiAccountExpanded));
-    setExternalAccountExpanded('kimi', false);
-    renderExternalProviderStatus('kimi');
-
-    document.getElementById('kimiOpenBrowser').addEventListener('click', () => {
-      window.tokenMonitor.openExternal(kimiPlatformUrl());
-    });
-
-    document.getElementById('kimiLogoutButton').addEventListener('click', () => clearAccountCredential('kimi'));
-
-    document.getElementById('kimiRefreshButton').addEventListener('click', async () => {
-      await refreshStats({ force: true });
-    });
-
-    // Two independent lanes: each submit sends only its own credential, so
-    // saving one never blanks the other.
-    for (const [submitId, inputId, field] of [
-      ['kimiApiKeySubmit', 'kimiApiKeyInput', 'kimiApiKey'],
-      ['kimiWebAccessTokenSubmit', 'kimiWebAccessTokenInput', 'kimiWebAccessToken']
-    ]) {
-      document.getElementById(submitId).addEventListener('click', (event) => {
-        const input = document.getElementById(inputId);
-        return submitAccountCredential(event.currentTarget, 'kimi', { [field]: input.value }, {
-          failedKey: 'settings.kimi.saveFailed',
-          clearInput: () => { input.value = ''; }
-        });
-      });
-    }
-  }
-
-  initWorkbuddyAccountSettings();
-
-  const antigravityToggle = document.getElementById('antigravitySettingsToggle');
-  if (antigravityToggle && window.tokenMonitor.antigravity) {
-    antigravityToggle.addEventListener('click', () => {
-      setAntigravityAccountExpanded(!state.antigravityAccountExpanded);
-    });
-    setAntigravityAccountExpanded(false);
-    renderAntigravityStatus();
-
-    window.tokenMonitor.antigravity.onAccounts((accounts) => {
-      state.settings.antigravityManagedAccounts = accounts || [];
-      renderAntigravityStatus();
-    });
-    window.tokenMonitor.antigravity.accounts().then((accounts) => {
-      state.settings.antigravityManagedAccounts = accounts || [];
-      renderAntigravityStatus();
-    }).catch(() => {});
-
-    document.getElementById('antigravityAddAccountButton').addEventListener('click', async () => {
-      if (state.antigravitySignInBusy) return;
-      state.antigravitySignInBusy = true;
-      state.antigravityAccountError = '';
-      renderAntigravityStatus();
-      let result;
-      try {
-        result = await window.tokenMonitor.antigravity.addAccount();
-      } catch (error) {
-        result = { ok: false, error: error.message };
-      } finally {
-        state.antigravitySignInBusy = false;
-      }
-      if (!result?.ok && result?.errorCode !== 'cancelled') {
-        const errorKeys = {
-          OAUTH_CLIENT_NOT_FOUND: 'settings.antigravity.oauthClientMissing',
-          TIMEOUT: 'settings.antigravity.loginTimeout',
-          STATE_MISMATCH: 'settings.antigravity.loginStateMismatch',
-          credentialStorageUnavailable: 'settings.antigravity.credentialStorageUnavailable',
-          loginInProgress: 'settings.antigravity.loginInProgress'
-        };
-        state.antigravityAccountError = errorKeys[result?.errorCode]
-          ? t(errorKeys[result.errorCode])
-          : result?.error || t('settings.antigravity.loginFailed');
-      } else if (result?.ok) {
-        state.antigravityAccountError = '';
-        state.settings.antigravityManagedAccounts = result.accounts || [];
-        // Match the Codex account flow: the account is connected as soon as its
-        // credential is stored. Quota onboarding and refresh continue in the
-        // background instead of leaving the login button visually busy.
-        refreshStats({ force: true }).catch(() => {});
-      }
-      renderAntigravityStatus();
-    });
-
-    document.getElementById('antigravityCancelLoginButton').addEventListener('click', async () => {
-      await window.tokenMonitor.antigravity.cancelLogin();
-      state.antigravitySignInBusy = false;
-      renderAntigravityStatus();
-    });
-  }
-
-  const mimoToggle = document.getElementById('mimoSettingsToggle');
-  if (mimoToggle) {
-    mimoToggle.addEventListener('click', () => {
-      const expanding = !state.mimoAccountExpanded;
-      setMimoAccountExpanded(expanding);
-      if (expanding) void refreshMimoAccounts();
-    });
-
-    const addToggle = document.getElementById('mimoAddToggle');
-    const addDetails = document.getElementById('mimoAddDetails');
-    function setMimoAddExpanded(expanded) {
-      const next = Boolean(expanded);
-      addToggle?.setAttribute('aria-expanded', next ? 'true' : 'false');
-      addDetails?.classList.toggle('hidden', !next);
-      document.getElementById('mimoManualPanel')?.classList.toggle('expanded', next);
-    }
-    addToggle?.addEventListener('click', () => setMimoAddExpanded(addDetails?.classList.contains('hidden')));
-    setMimoAccountExpanded(false);
-    renderMimoStatus();
-
-    window.tokenMonitor.mimo.onAccounts((accounts) => {
-      state.settings.mimoManagedAccounts = accounts || [];
-      renderMimoStatus();
-    });
-
-    void refreshMimoAccounts();
-
-    document.getElementById('mimoOpenConsoleButton').addEventListener('click', async () => {
-      const result = await window.tokenMonitor.mimo.openConsole();
-      if (!result?.ok) {
-        state.mimoAccountError = result?.error || t('settings.mimo.openFailed');
-        renderMimoStatus();
-        return;
-      }
-      state.mimoAccountError = '';
-      renderMimoStatus();
-    });
-
-    document.getElementById('mimoSaveAccountButton').addEventListener('click', async () => {
-      const input = document.getElementById('mimoCookieInput');
-      const saveButton = document.getElementById('mimoSaveAccountButton');
-      saveButton.disabled = true;
-      saveButton.textContent = t('settings.mimo.checking');
-      let result;
-      try {
-        result = await window.tokenMonitor.mimo.addAccount(input.value);
-      } catch (_) {
-        result = { ok: false, errorCode: 'validationUnavailable' };
-      } finally {
-        saveButton.disabled = false;
-        saveButton.textContent = t('settings.mimo.saveAccount');
-      }
-      if (!result?.ok) {
-        if (result?.errorCode === 'missingRequiredCookies') {
-          state.mimoAccountError = t('settings.mimo.missingCookies', { cookies: (result.missingCookies || []).join(', ') });
-        } else if (result?.errorCode === 'invalidCookie') {
-          state.mimoAccountError = t('settings.mimo.invalidCookie');
-        } else if (result?.errorCode === 'validationRateLimited') {
-          state.mimoAccountError = t('settings.mimo.validationRateLimited');
-        } else if (result?.errorCode === 'validationUnavailable') {
-          state.mimoAccountError = t('settings.mimo.validationUnavailable');
-        } else if (result?.errorCode === 'credentialStorageUnavailable') {
-          state.mimoAccountError = t('settings.mimo.credentialStorageUnavailable');
-        } else {
-          state.mimoAccountError = result?.error || t('settings.mimo.addFailed');
-        }
-        renderMimoStatus();
-        return;
-      }
-      input.value = '';
-      state.mimoAccountError = '';
-      state.settings.mimoManagedAccounts = await window.tokenMonitor.mimo.accounts();
-      renderMimoStatus();
-      setMimoAddExpanded(false);
-      await refreshStats({ force: true });
-    });
-  }
-  const copilotToggle = document.getElementById('copilotSettingsToggle');
-  if (copilotToggle) {
-    copilotToggle.addEventListener('click', () => {
-      setCopilotAccountExpanded(!state.copilotAccountExpanded);
-      if (state.copilotAccountExpanded) void renderCopilotAccounts();
-    });
-    document.getElementById('copilotManualToggle')?.addEventListener('click', () => {
-      const details = document.getElementById('copilotManualDetails');
-      setCopilotManualExpanded(details?.classList.contains('hidden'));
-    });
-    setCopilotAccountExpanded(false);
-    setCopilotManualExpanded(false);
-    renderCopilotStatus();
-
-    const setCopilotError = (message) => {
-      state.copilotErrorMessage = message || '';
-      renderCopilotStatus();
-    };
-
-    window.tokenMonitor.copilot?.onLoginStatus?.((status) => {
-      if (!status) return;
-      if (!isCurrentCopilotSignInFlow(status.flowId)) return;
-      if (status.phase === 'authorize') {
-        state.copilotAuthorizeMessage = t('settings.copilot.authorize', { code: status.userCode || '' });
-        state.copilotLoginStatus = state.copilotAuthorizeMessage;
-      } else if (status.phase === 'polling') {
-        state.copilotLoginStatus = [state.copilotAuthorizeMessage, t('settings.copilot.polling')].filter(Boolean).join('\n\n');
-      } else if (status.phase === 'success') {
-        state.copilotSignInCancelable = false;
-        state.copilotAuthorizeMessage = '';
-        state.copilotLoginStatus = t('settings.copilot.loginSuccess');
-      } else if (status.phase === 'error') {
-        state.copilotSignInCancelable = false;
-        state.copilotAuthorizeMessage = '';
-        state.copilotLoginStatus = '';
-        setCopilotError(status.error || t('settings.copilot.loginFailed'));
-      } else {
-        state.copilotAuthorizeMessage = '';
-        state.copilotLoginStatus = t('settings.copilot.loginStarting');
-      }
-      renderCopilotStatus();
-    });
-
-    document.getElementById('copilotSignInButton').addEventListener('click', async () => {
-      if (state.copilotSignInBusy) return;
-      const flowId = nextCopilotSignInFlowId();
-      state.copilotSignInFlowId = flowId;
-      state.copilotSignInBusy = true;
-      state.copilotSignInCancelable = true;
-      state.copilotAuthorizeMessage = '';
-      state.copilotLoginStatus = t('settings.copilot.loginStarting');
-      setCopilotError('');
-      setCopilotManualExpanded(false);
-      renderCopilotStatus();
-      try {
-        markCopilotTokenCheckPending();
-        const result = await window.tokenMonitor.copilot.signIn({ flowId });
-        if (!isCurrentCopilotSignInFlow(result?.flowId || flowId)) return;
-        if (!result?.ok) {
-          clearCopilotPendingCheck();
-          setCopilotError(result?.error || t('settings.copilot.loginFailed'));
-          setCopilotAccountExpanded(true);
-        } else {
-          state.copilotSignInCancelable = false;
-          state.copilotAuthorizeMessage = '';
-          state.copilotLoginStatus = '';
-          renderCopilotStatus();
-          await refreshStats();
-          if (copilotAccountLinked()) setCopilotAccountExpanded(false);
-        }
-      } catch (err) {
-        if (!isCurrentCopilotSignInFlow(flowId)) return;
-        clearCopilotPendingCheck();
-        setCopilotError(err.message);
-      } finally {
-        if (isCurrentCopilotSignInFlow(flowId)) {
-          state.copilotSignInBusy = false;
-          state.copilotSignInCancelable = false;
-          state.copilotSignInFlowId = '';
-          state.copilotAuthorizeMessage = '';
-          state.copilotLoginStatus = '';
-          renderCopilotStatus();
-        }
-      }
-    });
-
-    document.getElementById('copilotCancelSignInButton').addEventListener('click', async () => {
-      const flowId = state.copilotSignInFlowId;
-      await window.tokenMonitor.copilot.cancelSignIn({ flowId });
-      clearCopilotPendingCheck();
-      if (!isCurrentCopilotSignInFlow(flowId)) return;
-      state.copilotSignInBusy = false;
-      state.copilotSignInCancelable = false;
-      state.copilotSignInFlowId = '';
-      state.copilotAuthorizeMessage = '';
-      state.copilotLoginStatus = '';
-      renderCopilotStatus();
-    });
-
-    document.getElementById('copilotRefreshButton').addEventListener('click', async () => {
-      await window.tokenMonitor.limits.refresh('copilot');
-      await refreshStats();
-    });
-
-    document.getElementById('copilotApiTokenSubmit').addEventListener('click', async () => {
-      const input = document.getElementById('copilotApiTokenInput');
-      setCopilotError('');
-      if (!String(input.value || '').trim()) {
-        setCopilotManualExpanded(true);
-        setCopilotError(t('settings.copilot.statusNotSet'));
-        return;
-      }
-      try {
-        markCopilotTokenCheckPending();
-        const result = await window.tokenMonitor.copilot.addAccount(input.value);
-        if (!result?.ok) throw new Error(result?.error || t('settings.copilot.loginFailed'));
-        state.settings = await window.tokenMonitor.getSettings();
-        input.value = '';
-        renderCopilotStatus();
-        await refreshStats();
-        if (copilotAccountLinked()) setCopilotAccountExpanded(false);
-        else setCopilotAccountExpanded(true);
-        renderCopilotStatus();
-      } catch (err) {
-        clearCopilotPendingCheck();
-        setCopilotError(t('settings.copilot.saveFailed', { message: err.message }));
-      }
-    });
-  }
-
+ for (const owner of Object.values(legacyAccountOwners)) owner.setup?.();
 }
 
 function initSettingsAnimationWrappers() {
@@ -20466,9 +17527,7 @@ function initSettingsAnimationWrappers() {
     '.presence-feature-body',
     '#opencodeManualPanel',
     '#cursorManualPanel',
-    '#kimiManualPanel',
-    '.credential-manual-panel',
-    '#volcengineManualPanel'
+    '.credential-manual-panel'
   ].join(', ');
 
   document.querySelectorAll(selectors).forEach(el => {
@@ -20509,6 +17568,50 @@ displaySettings = window.TokenMonitorDisplaySettings.create({
   scrollPanel: els.settingsPanel, t, platform: () => state.appInfo?.platform, settings: () => state.settings,
   preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction
 });
+let legacyAccountOwners;
+function createLegacyAccountOwners() {
+ const owners = {};
+ owners.codex = window.TokenMonitorCodexAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'codex').label, initial: {codexSignInBusy: state.codexSignInBusy, codexLoginStatus: state.codexLoginStatus, codexWorkspaceChoices: state.codexWorkspaceChoices, codexWorkspaceId: state.codexWorkspaceId, codexLoginUrl: state.codexLoginUrl, codexLoginOutput: state.codexLoginOutput, codexAccountError: state.codexAccountError, codexSignInFlowId: state.codexSignInFlowId, codexAccountExpanded: state.codexAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('codex'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args), accountShellApi, t: (...args) => t(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), limitProviderPresentationApi, accountIdentityApi, refreshStats: (...args) => refreshStats(...args), copyToClipboard: (...args) => copyToClipboard(...args) });
+ Object.defineProperty(state, 'codexSignInBusy', { configurable: true, get: () => owners.codex.state.codexSignInBusy, set: value => { owners.codex.state.codexSignInBusy = value; } });
+ Object.defineProperty(state, 'codexLoginStatus', { configurable: true, get: () => owners.codex.state.codexLoginStatus, set: value => { owners.codex.state.codexLoginStatus = value; } });
+ Object.defineProperty(state, 'codexWorkspaceChoices', { configurable: true, get: () => owners.codex.state.codexWorkspaceChoices, set: value => { owners.codex.state.codexWorkspaceChoices = value; } });
+ Object.defineProperty(state, 'codexWorkspaceId', { configurable: true, get: () => owners.codex.state.codexWorkspaceId, set: value => { owners.codex.state.codexWorkspaceId = value; } });
+ Object.defineProperty(state, 'codexLoginUrl', { configurable: true, get: () => owners.codex.state.codexLoginUrl, set: value => { owners.codex.state.codexLoginUrl = value; } });
+ Object.defineProperty(state, 'codexLoginOutput', { configurable: true, get: () => owners.codex.state.codexLoginOutput, set: value => { owners.codex.state.codexLoginOutput = value; } });
+ Object.defineProperty(state, 'codexAccountError', { configurable: true, get: () => owners.codex.state.codexAccountError, set: value => { owners.codex.state.codexAccountError = value; } });
+ Object.defineProperty(state, 'codexSignInFlowId', { configurable: true, get: () => owners.codex.state.codexSignInFlowId, set: value => { owners.codex.state.codexSignInFlowId = value; } });
+ Object.defineProperty(state, 'codexAccountExpanded', { configurable: true, get: () => owners.codex.state.codexAccountExpanded, set: value => { owners.codex.state.codexAccountExpanded = value; } });
+ owners.cursor = window.TokenMonitorCursorAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'cursor').label, initial: {cursorAccount: state.cursorAccount, cursorAccountExpanded: state.cursorAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('cursor'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), accountShellApi, t: (...args) => t(...args), accountShellErrors, setCursorStatusText: (...args) => setCursorStatusText(...args), setSettingsSectionExpanded: (...args) => setSettingsSectionExpanded(...args), renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), limitProviderPresentationApi, refreshStats: (...args) => refreshStats(...args), setAccountShellError: (...args) => setAccountShellError(...args), accountProfileSaves });
+ Object.defineProperty(state, 'cursorAccount', { configurable: true, get: () => owners.cursor.state.cursorAccount, set: value => { owners.cursor.state.cursorAccount = value; } });
+ Object.defineProperty(state, 'cursorAccountExpanded', { configurable: true, get: () => owners.cursor.state.cursorAccountExpanded, set: value => { owners.cursor.state.cursorAccountExpanded = value; } });
+ owners.antigravity = window.TokenMonitorAntigravityAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'antigravity').label, initial: {antigravityAccountError: state.antigravityAccountError, antigravitySignInBusy: state.antigravitySignInBusy, antigravityAccountExpanded: state.antigravityAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('antigravity'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), accountShellApi, t: (...args) => t(...args), renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), limitProviderPresentationApi, translatedLimitProviderTag: (...args) => translatedLimitProviderTag(...args), refreshStats: (...args) => refreshStats(...args) });
+ Object.defineProperty(state, 'antigravityAccountError', { configurable: true, get: () => owners.antigravity.state.antigravityAccountError, set: value => { owners.antigravity.state.antigravityAccountError = value; } });
+ Object.defineProperty(state, 'antigravitySignInBusy', { configurable: true, get: () => owners.antigravity.state.antigravitySignInBusy, set: value => { owners.antigravity.state.antigravitySignInBusy = value; } });
+ Object.defineProperty(state, 'antigravityAccountExpanded', { configurable: true, get: () => owners.antigravity.state.antigravityAccountExpanded, set: value => { owners.antigravity.state.antigravityAccountExpanded = value; } });
+ owners.mimo = window.TokenMonitorMimoAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'mimo').label, initial: {mimoAccountError: state.mimoAccountError, mimoAccountExpanded: state.mimoAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('mimo'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args), t: (...args) => t(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), accountShellApi, renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), translatedLimitProviderTag: (...args) => translatedLimitProviderTag(...args), limitProviderPresentationApi, refreshStats: (...args) => refreshStats(...args) });
+ Object.defineProperty(state, 'mimoAccountError', { configurable: true, get: () => owners.mimo.state.mimoAccountError, set: value => { owners.mimo.state.mimoAccountError = value; } });
+ Object.defineProperty(state, 'mimoAccountExpanded', { configurable: true, get: () => owners.mimo.state.mimoAccountExpanded, set: value => { owners.mimo.state.mimoAccountExpanded = value; } });
+ owners.workbuddy = window.TokenMonitorWorkbuddyAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'workbuddy').label, initial: {workbuddyAccountsRevision: state.workbuddyAccountsRevision, workbuddyMutationBusy: state.workbuddyMutationBusy, workbuddySignInBusy: state.workbuddySignInBusy, workbuddyCancelBusy: state.workbuddyCancelBusy, workbuddyAccountError: state.workbuddyAccountError, workbuddyLoginAttempt: state.workbuddyLoginAttempt, workbuddyPendingLoginResult: state.workbuddyPendingLoginResult, workbuddyLoginStatusKey: state.workbuddyLoginStatusKey, workbuddyAccountExpanded: state.workbuddyAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('workbuddy'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), t: (...args) => t(...args), renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), renderSubscriptionSettings: (...args) => renderSubscriptionSettings(...args), refreshStats: (...args) => refreshStats(...args), accountShellApi, accountIdentityApi, translatedLimitProviderTag: (...args) => translatedLimitProviderTag(...args), limitProviderPresentationApi, setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args) });
+ Object.defineProperty(state, 'workbuddyAccountsRevision', { configurable: true, get: () => owners.workbuddy.state.workbuddyAccountsRevision, set: value => { owners.workbuddy.state.workbuddyAccountsRevision = value; } });
+ Object.defineProperty(state, 'workbuddyMutationBusy', { configurable: true, get: () => owners.workbuddy.state.workbuddyMutationBusy, set: value => { owners.workbuddy.state.workbuddyMutationBusy = value; } });
+ Object.defineProperty(state, 'workbuddySignInBusy', { configurable: true, get: () => owners.workbuddy.state.workbuddySignInBusy, set: value => { owners.workbuddy.state.workbuddySignInBusy = value; } });
+ Object.defineProperty(state, 'workbuddyCancelBusy', { configurable: true, get: () => owners.workbuddy.state.workbuddyCancelBusy, set: value => { owners.workbuddy.state.workbuddyCancelBusy = value; } });
+ Object.defineProperty(state, 'workbuddyAccountError', { configurable: true, get: () => owners.workbuddy.state.workbuddyAccountError, set: value => { owners.workbuddy.state.workbuddyAccountError = value; } });
+ Object.defineProperty(state, 'workbuddyLoginAttempt', { configurable: true, get: () => owners.workbuddy.state.workbuddyLoginAttempt, set: value => { owners.workbuddy.state.workbuddyLoginAttempt = value; } });
+ Object.defineProperty(state, 'workbuddyPendingLoginResult', { configurable: true, get: () => owners.workbuddy.state.workbuddyPendingLoginResult, set: value => { owners.workbuddy.state.workbuddyPendingLoginResult = value; } });
+ Object.defineProperty(state, 'workbuddyLoginStatusKey', { configurable: true, get: () => owners.workbuddy.state.workbuddyLoginStatusKey, set: value => { owners.workbuddy.state.workbuddyLoginStatusKey = value; } });
+ Object.defineProperty(state, 'workbuddyAccountExpanded', { configurable: true, get: () => owners.workbuddy.state.workbuddyAccountExpanded, set: value => { owners.workbuddy.state.workbuddyAccountExpanded = value; } });
+ owners.claude = window.TokenMonitorClaudeAccountOwner.create({ document, window, strictLocalProviderStatuses, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'claude').label, accountShellApi, initial: {}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('claude'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), t: (...args) => t(...args), setAccountPanelMessage: (...args) => setAccountPanelMessage(...args), renderExternalProviderStatus: (...args) => renderExternalProviderStatus(...args), commitAccountCredential: (...args) => commitAccountCredential(...args), refreshStats: (...args) => refreshStats(...args), apiKeyAccountStatusText: (...args) => apiKeyAccountStatusText(...args), limitProviderEnabled: (...args) => limitProviderEnabled(...args), currentLocale: (...args) => currentLocale(...args) });
+
+ owners.opencode = window.TokenMonitorOpencodeAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'opencode').label, initial: {opencodeProfileCount: state.opencodeProfileCount}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('opencode'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), renderAccountShellError: (...args) => renderAccountShellError(...args), accountProfileRequests, accountProfileStatuses, t: (...args) => t(...args), renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), setAccountShellError: (...args) => setAccountShellError(...args), accountShellApi, encodeURIComponent: (...args) => encodeURIComponent(...args), accountProfileSaves });
+ Object.defineProperty(state, 'opencodeProfileCount', { configurable: true, get: () => owners.opencode.state.opencodeProfileCount, set: value => { owners.opencode.state.opencodeProfileCount = value; } });
+ owners.minimax = window.TokenMonitorMinimaxAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'minimax').label, initial: {minimaxAccountExpanded: state.minimaxAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('minimax'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), limitProviderEnabled: (...args) => limitProviderEnabled(...args), limitProviderPresentationApi, accountShellApi, t: (...args) => t(...args), translatedLimitProviderTag: (...args) => translatedLimitProviderTag(...args), apiKeyAccountStatusText: (...args) => apiKeyAccountStatusText(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), accountProfileRequests, accountProfileSaves, setAccountShellError: (...args) => setAccountShellError(...args), refreshStats: (...args) => refreshStats(...args), renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), setExternalAccountExpanded: (...args) => setExternalAccountExpanded(...args) });
+ Object.defineProperty(state, 'minimaxAccountExpanded', { configurable: true, get: () => owners.minimax.state.minimaxAccountExpanded, set: value => { owners.minimax.state.minimaxAccountExpanded = value; } });
+ owners.thirdparty = window.TokenMonitorThirdpartyAccountOwner.create({ document, window, providerLabel: LIMIT_PROVIDERS.find(entry => entry.id === 'thirdparty').label, initial: {thirdPartyAccountExpanded: state.thirdPartyAccountExpanded}, getSettings: () => state.settings, getAccountContext: () => limitAccountContext('thirdparty'), preserveScroll: preserveSettingsPanelScroll, localProviderStatuses, applySettings: settings => applyPersistedSettings(settings, state.settingsPushRevision), setAccountGroupExpanded: (...args) => setAccountGroupExpanded(...args), t: (...args) => t(...args), limitProviderPresentationApi, optionalFiniteNumber: (...args) => optionalFiniteNumber(...args), formatCompactMoney: (...args) => formatCompactMoney(...args), currentLocale: (...args) => currentLocale(...args), limitProviderEnabled: (...args) => limitProviderEnabled(...args), accountShellApi, renderSettingsSummaries: (...args) => renderSettingsSummaries(...args), setAccountShellError: (...args) => setAccountShellError(...args), isSettingsSurfaceVisible: (...args) => isSettingsSurfaceVisible(...args), renderAccountShellError: (...args) => renderAccountShellError(...args), accountProfileRequests, accountProfileSaves, refreshStats: (...args) => refreshStats(...args) });
+ Object.defineProperty(state, 'thirdPartyAccountExpanded', { configurable: true, get: () => owners.thirdparty.state.thirdPartyAccountExpanded, set: value => { owners.thirdparty.state.thirdPartyAccountExpanded = value; } });
+ return owners;
+}
+legacyAccountOwners = createLegacyAccountOwners();
 setupCursorAccountUI();
 setupCustomPricingUI();
 setupModelAliasesUI();

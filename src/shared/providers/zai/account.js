@@ -4,6 +4,11 @@
 // Z.ai / GLM limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'zai',
+  accountSlots: true,
+  sources: [
+    { id: 'api', kind: 'apiKey', relation: 'complement', products: ['zai'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.zai.note' },
+    { id: 'zcode', kind: 'desktop', relation: 'complement', products: ['zai'], labelKey: 'settings.limits.sources.desktop', descriptionKey: 'settings.limits.sources.desktopDescription' }
+  ],
   fetch: 'fetchZaiLimits',
   fields: [
     {
@@ -32,9 +37,11 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   // the cost is bounded by how often that runs, not by any refresh loop.
   discover: (env, limits) => {
     const discovery = limits.discoverZcodeConnection();
-    return discovery.entitled && discovery.credential ? discovery : null;
+    return (discovery.credential || discovery.billing?.credential) ? discovery : null;
   },
+  discoveredAccounts: (_env, limits, deps) => limits.discoverAccountSlots(deps),
   status: {
+    credential: 'zaiApiKey',
     configuredKey: 'zaiApiKeyConfigured',
     sourceKey: 'zaiApiKeySource',
     pendingKey: 'zaiPendingCheckSince'
@@ -50,8 +57,8 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
           : '',
     // "A usable local ZCode login exists" — advertised so the renderer shows
     // the auto-detect state instead of "disabled" when the provider is
-    // unchecked. Anything else (API-only, unentitled plan) is not an auto
-    // quota source.
+    // unchecked. A usable billing-only login counts too; the server answers
+    // entitlement for whichever lanes have credentials.
     zcodeLoginDetected: Boolean(discovered)
   }),
   form: {

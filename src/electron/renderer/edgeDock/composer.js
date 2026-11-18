@@ -5,10 +5,12 @@
 // extend with +) but is laid out for the dock: a vertical miniature rail on the
 // left, the selected item's options on the right.
 (function exposeEdgeDockComposer(root, factory) {
-  const api = factory();
+  const scope = typeof module === 'object' && module.exports ? require('../../../shared/limits/accountScope') : root.TokenMonitorLimitAccountScope;
+  const api = factory(scope);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorEdgeDockComposer = api;
-})(typeof window !== 'undefined' ? window : null, function createEdgeDockComposerApi() {
+})(typeof window !== 'undefined' ? window : null, function createEdgeDockComposerApi(scope) {
+  const selectionKey = record => scope.accountSelectionKey(record.provider, record.accountKey, record.region);
   function createEdgeDockComposer(deps) {
     const {
       root,
@@ -96,8 +98,9 @@
       return providers
         .filter((record) => String(record?.provider || '').toLowerCase() === provider && record.accountKey)
         .filter((record) => {
-          if (seen.has(record.accountKey)) return false;
-          seen.add(record.accountKey);
+          const key = selectionKey(record);
+          if (seen.has(key)) return false;
+          seen.add(key);
           return true;
         });
     }
@@ -253,7 +256,7 @@
 
     function headlineAccountChoices(item) {
       const hidden = new Set(item.hiddenAccounts || []);
-      return accountsFor(item.provider).filter((account) => !hidden.has(account.accountKey));
+      return accountsFor(item.provider).filter((account) => !hidden.has(selectionKey(account)) && !hidden.has(account.accountKey));
     }
 
     function refreshAccountPicker(select, item) {
@@ -261,7 +264,7 @@
       const options = accounts.map((account) => {
         const option = document.createElement('option');
         option.value = account.accountKey;
-        option.textContent = account.accountName || maskEmail(account.accountEmail)
+        option.textContent = account.accountDisplayName || account.accountName || maskEmail(account.accountEmail)
           || account.planLabel || providerLabel(item.provider);
         return option;
       });
@@ -295,7 +298,7 @@
       const choices = new Map();
       for (const record of getStats()?.limits?.providers || []) {
         if (String(record?.provider || '').toLowerCase() !== item.provider
-          || (record.accountKey && hidden.has(record.accountKey))) continue;
+          || (record.accountKey && (hidden.has(selectionKey(record)) || hidden.has(record.accountKey)))) continue;
         for (const window of itemsApi.selectableLimitWindows(record, getSettings())) {
           const key = itemsApi.limitWindowKey(window);
           if (!key || choices.has(key)) continue;
@@ -450,21 +453,30 @@
           const label = el('label', 'edge-dock-composer-account');
           const input = document.createElement('input');
           input.type = 'checkbox';
-          input.checked = !hidden.has(account.accountKey);
+          input.checked = !hidden.has(selectionKey(account)) && !hidden.has(account.accountKey);
           input.addEventListener('change', () => {
             const next = new Set(item.hiddenAccounts || []);
-            if (input.checked) next.delete(account.accountKey);
-            else next.add(account.accountKey);
+            if (input.checked) {
+              if (next.delete(account.accountKey) && account.provider === 'alibaba') {
+                for (const other of accountsFor(item.provider)) {
+                  if (other.accountKey === account.accountKey && selectionKey(other) !== selectionKey(account)) next.add(selectionKey(other));
+                }
+              }
+              next.delete(selectionKey(account));
+            } else next.add(selectionKey(account));
             void updateItem(id, { hiddenAccounts: [...next] });
           });
-          const identity = account.accountName || maskEmail(account.accountEmail);
+          const identity = account.accountDisplayName || account.accountName || maskEmail(account.accountEmail);
           const product = item.provider === 'mimo' ? mimoProductLabel(account) : '';
-          const name = product
-            ? limitAccountTitle('mimo', account, accounts.indexOf(account), accounts)
+          const name = product || item.provider === 'alibaba'
+            ? limitAccountTitle(item.provider, account, accounts.indexOf(account), accounts)
             : identity || account.planLabel || providerLabel(item.provider);
           const text = el('span', 'edge-dock-composer-account-name', name);
           text.setAttribute('aria-label', name);
-          const plan = account.planLabel && name !== account.planLabel ? el('span', 'edge-dock-composer-account-plan', account.planLabel) : null;
+          const planText = item.provider === 'alibaba'
+            ? t(`settings.alibaba.${{ cn: 'planCn', intl: 'planIntl', 'cn-personal': 'planCnPersonal', 'intl-personal': 'planIntlPersonal' }[account.region] || 'planCn'}`)
+            : account.planLabel;
+          const plan = planText && name !== planText ? el('span', 'edge-dock-composer-account-plan', planText) : null;
           label.append(input, text);
           if (plan) label.append(plan);
           group.append(label);
@@ -495,7 +507,7 @@
         addable: ui.menuOpen ? enabledLimitProviders?.() : null,
         windows: selectedItem?.type === 'limit' ? windowChoices(selectedItem) : null,
         accounts: selectedItem?.type === 'limit' ? accountsFor(selectedItem.provider).map((account, index, accounts) => {
-          const identity = [account.accountKey, account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel];
+          const identity = [selectionKey(account), account.accountDisplayName, account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel];
           if (selectedItem.provider === 'mimo' && mimoProductLabel(account)) {
             identity.push(limitAccountTitle('mimo', account, index, accounts));
           }

@@ -221,3 +221,30 @@ test('Factory aborts hung requests and stalled response bodies within its deadli
     );
   }
 });
+
+
+test('Factory discovery parses one opened snapshot even if the next open would fail', (t) => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'factory-discovery-'));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(homeDir, '.factory'));
+  fs.writeFileSync(path.join(homeDir, '.factory', '.env'), 'export FACTORY_API_KEY="snapshot-key" # comment\n');
+  let opens = 0;
+  const fsApi = { ...fs, openSync: (...args) => {
+    opens += 1;
+    if (opens > 1) throw Object.assign(new Error('external rewrite'), { code: 'EACCES' });
+    return fs.openSync(...args);
+  } };
+  const rows = require('../../src/shared/providers/factory/limits').discoverAccountSlots({ env: {}, homeDir, fs: fsApi });
+  assert.equal(rows[0]?.values.factoryApiKey, 'snapshot-key');
+  assert.equal(opens, 1);
+});
+
+test('Factory discovery propagates an unavailable read while the legacy resolver stays empty', (t) => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'factory-unavailable-'));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  fs.mkdirSync(path.join(homeDir, '.factory'));
+  fs.writeFileSync(path.join(homeDir, '.factory', '.env'), 'FACTORY_API_KEY=fixture-key\n');
+  const deps = { env: {}, homeDir, fs: { ...fs, openSync: () => { throw Object.assign(new Error('denied'), { code: 'EACCES' }); } } };
+  assert.throws(() => require('../../src/shared/providers/factory/limits').discoverAccountSlots(deps), { code: 'EACCES' });
+  assert.deepEqual(resolveFactoryAutomaticApiKey({}, deps), { apiKey: '', source: '' });
+});

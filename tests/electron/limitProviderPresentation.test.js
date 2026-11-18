@@ -284,7 +284,13 @@ function readSharedFile(name) {
 function functionBody(source, name, nextName) {
   const start = source.indexOf(`function ${name}(`);
   assert.notEqual(start, -1, `${name} function should exist`);
-  const end = source.indexOf(`function ${nextName}(`, start);
+  let end = nextName ? source.indexOf(`function ${nextName}(`, start) : -1;
+  if (end === -1) {
+    const indent = source.slice(source.lastIndexOf('\n', start) + 1, start).match(/^ */)[0];
+    end = source.indexOf('\n' + indent + '}', start);
+    assert.notEqual(end, -1, `${name} function should close`);
+    return source.slice(start, end + indent.length + 2);
+  }
   assert.notEqual(end, -1, `${nextName} function should follow ${name}`);
   const endLineStart = source.lastIndexOf('\n', end) + 1;
   return source.slice(start, endLineStart);
@@ -297,39 +303,35 @@ function limitsViewSource() {
   return readRendererFile('limits/windowsView.js');
 }
 
-function viewBody(name, nextName = '') {
-  const source = limitsViewSource();
-  if (nextName) return functionBody(source, name, nextName);
-  // Without a named terminator the body runs to the next line at the factory's
-  // own indent: the brace that closes it, or the declaration that follows.
-  // Slicing to the export block instead sweeps in whatever factory-scope tables
-  // sit further down, and a test that evals the slice a second time into the same
-  // context then redeclares them.
-  const start = source.indexOf(`function ${name}(`);
-  assert.notEqual(start, -1, `${name} function should exist`);
-  const rest = source.slice(start);
-  const end = rest.search(/\n {0,2}(?:\}|(?:async )?function |const |let |var )/);
-  assert.notEqual(end, -1, `${name} function should end`);
-  const closing = rest.slice(end).match(/^\n {0,2}\}/);
-  return rest.slice(0, closing ? end + closing[0].length : end);
+function windowOwnerSource(id) {
+  return readRendererFile(`providers/${id}/windows.js`).replace(/\/\*\*[\s\S]*?\*\/ /g, '');
 }
 
-// A factory-scope table — `const NAME = { … };` — which is where the per-provider
-// policies live now that both surfaces read them.
-function viewTable(name) {
-  const source = limitsViewSource();
-  const start = source.indexOf(`const ${name} = `);
-  assert.notEqual(start, -1, `${name} table should exist`);
-  const rest = source.slice(start);
-  const end = rest.indexOf('\n  };');
-  assert.notEqual(end, -1, `${name} table should close`);
-  return rest.slice(0, end + '\n  };'.length);
+function viewBody(name) {
+  let source = limitsViewSource();
+  if (!source.includes(`function ${name}(`)) {
+    source = fs.readdirSync(path.join(__dirname, '../../src/electron/renderer/providers'))
+      .map(id => path.join(__dirname, '../../src/electron/renderer/providers', id, 'windows.js'))
+      .filter(file => fs.existsSync(file)).map(file => fs.readFileSync(file, 'utf8'))
+      .find(candidate => candidate.includes(`function ${name}(`)) || source;
+  }
+  return functionBody(source.replace(/\/\*\*[\s\S]*?\*\/ /g, ''), name);
+}
+
+// VM slices share the real owner registry. Resolve capabilities after the slice
+// has declared its helpers, exactly when the dispatcher invokes an owner.
+function runViewFixture(code, context = {}) {
+  context.windowOwners ||= new Proxy({}, { get: (_target, id) => require('../../src/electron/renderer/limits/windowOwners').createOwners(context)[id] });
+  if (code.includes('function renderProviderWindows(') && !code.includes('function renderGenericWindows(')) {
+    code = viewBody('renderGenericWindows') + '\n' + code;
+  }
+  return vm.runInNewContext(code, context);
 }
 
 function runLocalProviderStatus(source, state, providerName) {
   const localDeviceHelper = functionBody(source, 'localDeviceLimitsProviders', 'localProviderStatus');
   const localProviderHelper = functionBody(source, 'localProviderStatus', 'renderAntigravityStatus');
-  return vm.runInNewContext(
+  return runViewFixture(
     `${localDeviceHelper}\n${localProviderHelper}\nlocalProviderStatus(${JSON.stringify(providerName)});`,
     { accountIdentityApi, state }
   );
@@ -337,7 +339,7 @@ function runLocalProviderStatus(source, state, providerName) {
 
 function runLocalLiveCodexProvider(source, state) {
   const liveHelper = functionBody(source, 'localLiveCodexProvider', 'codexActiveAccountFromStats');
-  return vm.runInNewContext(
+  return runViewFixture(
     `${liveHelper}\nlocalLiveCodexProvider();`,
     { accountIdentityApi, state }
   );
@@ -366,7 +368,7 @@ function runProviderSpendNode(source, balance, provider = null) {
     limitNoteRowNode: (options) => options,
     tagUsageItem: (node) => node
   };
-  vm.runInNewContext(
+  runViewFixture(
     `${optionalNumber}\n${spendEntries}\n${spendNode}\n`
       + `result = providerSpendNode(${JSON.stringify(balance)}, ${JSON.stringify(provider)});`,
     context
@@ -389,15 +391,15 @@ function windowText(providerId, window, options = {}) {
 }
 
 function runCodexAdditionalWindowLabel(window, siblingWindows) {
-  const formatter = viewBody('codexAdditionalWindowLabel', 'antigravityQuotaGroups');
-  return vm.runInNewContext(
+  const formatter = viewBody('codexAdditionalWindowPeriodLabel') + '\n' + viewBody('codexAdditionalWindowLabel');
+  return runViewFixture(
     `${formatter}\ncodexAdditionalWindowLabel(${JSON.stringify(window)}, ${JSON.stringify(siblingWindows)});`,
     { presentationApi: { codexAdditionalQuotaDisplayName } }
   );
 }
 
 test('Cursor limits render every normalized quota and format on-demand spend explicitly', () => {
-  const windows = viewBody('renderProviderWindows');
+  const windows = functionBody(windowOwnerSource('cursor'), 'renderWindows');
 
   assert.match(windows, /for \(const quotaWindow of provider\.windows \|\| \[\]\)/);
   assert.doesNotMatch(windows, /visibleWindows = billingWindows\.length > 0 \? billingWindows : \[null\]/);
@@ -444,7 +446,7 @@ function runHomeLimitModule(rows, boundaryLabels = {}) {
     state: { settings: {} },
     t: (key, values) => key === 'home.reset' ? `Reset ${values.value}` : key
   };
-  vm.runInNewContext(`${homeLimits}\nresult = renderHomeLimitModule();`, context);
+  runViewFixture(`${homeLimits}\nresult = renderHomeLimitModule();`, context);
   return body;
 }
 
@@ -503,13 +505,13 @@ test('Home omits reset rows that have no visible reset content', () => {
 });
 
 test('capability tags explain how each provider is collected in settings', () => {
-  assert.deepEqual(limitProviderCapabilityTags('claude'), ['Auto', 'OAuth/CLI', 'Web']);
-  assert.deepEqual(limitProviderCapabilityTags('codex'), ['Auto', 'OAuth/App/CLI']);
-  assert.deepEqual(limitProviderCapabilityTags('cursor'), ['Auto', 'Web']);
-  assert.deepEqual(limitProviderCapabilityTags('antigravity'), ['Auto', 'OAuth/App/CLI']);
-  assert.deepEqual(limitProviderCapabilityTags('opencode'), ['Auto', 'API/Web']);
-  assert.deepEqual(limitProviderCapabilityTags('grok'), ['Auto', 'CLI/Web']);
-  assert.deepEqual(limitProviderCapabilityTags('copilot'), ['Manual login', 'API']);
+  assert.deepEqual(limitProviderCapabilityTags('claude'), ["OAuth/CLI/Web"]);
+  assert.deepEqual(limitProviderCapabilityTags('codex'), ["OAuth/Desktop app/CLI"]);
+  assert.deepEqual(limitProviderCapabilityTags('cursor'), ["Desktop app/Web"]);
+  assert.deepEqual(limitProviderCapabilityTags('antigravity'), ["Desktop app/OAuth"]);
+  assert.deepEqual(limitProviderCapabilityTags('opencode'), ["API key/Web/Local"]);
+  assert.deepEqual(limitProviderCapabilityTags('grok'), ["CLI/Web"]);
+  assert.deepEqual(limitProviderCapabilityTags('copilot'), ["OAuth"]);
   assert.deepEqual(limitProviderCapabilityTags('unknown'), []);
 });
 
@@ -518,10 +520,11 @@ test('Minimax capability tags are localized in settings', () => {
   const i18n = require('../../src/electron/renderer/i18n');
   const start = app.indexOf('const LIMIT_CAPABILITY_TAG_KEYS = {');
   const keys = app.slice(start, app.indexOf('\n};', start) + 3);
+  const apiParts = require('../../src/electron/renderer/limits/providerPresentation').connectionTag('minimax').parts;
   const translate = functionBody(app, 'translatedLimitCapabilityTag', 'translatedLimitProviderTag');
   for (const locale of Object.keys(i18n.MESSAGES)) {
-    const tags = vm.runInNewContext(`${keys}\n${translate}\ntags.map(label => ({ key: LIMIT_CAPABILITY_TAG_KEYS[label], text: translatedLimitCapabilityTag(label) }));`, {
-      tags: limitProviderCapabilityTags('minimax'),
+    const tags = runViewFixture(`${keys}\n${translate}\ntags.map(label => ({ key: LIMIT_CAPABILITY_TAG_KEYS[label], text: translatedLimitCapabilityTag(label) }));`, {
+      tags: apiParts,
       t: key => i18n.translate(locale, key)
     });
     for (const tag of tags) {
@@ -580,8 +583,8 @@ test('named API profile status prioritizes provider and profile disablement over
 });
 
 test('named API profile rows hide global disablement while the group preserves configured account count', () => {
-  const app = readRendererFile('app.js');
-  const updater = functionBody(app, 'updateNamedApiProfilesStatus', 'updateOpenRouterProfilesStatus');
+  const app = readRendererFile('limits/providerOwners/thirdparty.js');
+  const updater = functionBody(app, 'updateNamedApiProfilesStatus', 'updateThirdPartyProfilesStatus');
 
   assert.match(app, /if \(status === 'hidden'\) return '';/);
   assert.match(updater, /const providerEnabled = limitProviderEnabled\(providerId\)/);
@@ -591,43 +594,56 @@ test('named API profile rows hide global disablement while the group preserves c
   assert.match(updater, /: t\(`settings\.\$\{providerId\}\.connected`, \{ linked, total \}\)/);
 });
 
-test('named API profile toggles update immediately and roll back failed persistence', () => {
-  const app = readRendererFile('app.js');
-  const row = functionBody(app, 'appendNamedApiProfileRow', 'renderNamedApiProfiles');
-  const optimisticUpdate = row.indexOf('profile.enabled = toggle.checked;');
-  const save = row.indexOf('await api.setProfileEnabled(name, toggle.checked);');
-
-  assert.ok(optimisticUpdate >= 0 && optimisticUpdate < save);
-  assert.match(row, /profile\.enabled = toggle\.checked;\s*toggle\.disabled = true;\s*updateStatus\(\)/);
-  assert.match(row, /toggle\.checked = previousEnabled;\s*profile\.enabled = previousEnabled;\s*updateStatus\(\)/);
-  assert.match(row, /finally \{\s*toggle\.disabled = false;\s*renderSettingsSummaries\(\)/);
+test('named API profile toggles keep the saved account after rejected persistence', async () => {
+  let config, changed = 0, refreshed = 0;
+  const window = { TokenMonitorAccountSlotsPanel: { createPanel(options) {
+    config = options;
+    return { element: {}, update() {} };
+  } } };
+  vm.runInNewContext(readRendererFile('limits/legacyAccountList.js'), { window });
+  const account = { id: 'work', enabled: true, accountKey: 'key' };
+  const list = window.TokenMonitorLegacyAccountList.create({
+    provider: 'thirdparty', document: {}, container: { replaceChildren() {} },
+    getContext: () => ({ settings: {} }), bridge: {},
+    enabled: async (row, value) => {
+      assert.equal(row.id, 'work'); assert.equal(value, false);
+      return { ok: false, error: 'save failed' };
+    }, changed() { changed++; }, refresh() { refreshed++; }
+  });
+  list.update([account], []);
+  const result = await config.ipc.setEnabled('thirdparty', 'work', false);
+  assert.equal(result.ok, false);
+  assert.equal(account.enabled, true);
+  assert.equal(changed, 0);
+  assert.equal(refreshed, 0);
+  assert.match(readRendererFile('limits/providerOwners/thirdparty.js'), /enabled: \(account, value\) => api\.setProfileEnabled\(account\.id, value\)/);
 });
 
 test('undetected settings tags include status and supported collection hints', () => {
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'codex', status: 'notConfigured', source: 'oauth' })
       .map((tag) => tag.label),
-    ['Not set up', 'Auto', 'OAuth/App/CLI']
+    ['Not set up', ...limitProviderCapabilityTags('codex')]
   );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'antigravity', status: 'notConfigured', source: 'rpc' })
       .map((tag) => tag.label),
-    ['Not set up', 'Auto', 'OAuth/App/CLI']
+    ['Not set up', ...limitProviderCapabilityTags('antigravity')]
   );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'antigravity', status: 'unavailable', source: 'rpc' })
       .map((tag) => tag.label),
-    ['Unavailable', 'Auto', 'OAuth/App/CLI']
+    ['Unavailable', ...limitProviderCapabilityTags('antigravity')]
   );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'cursor', status: 'notConfigured', source: 'web' })
       .map((tag) => tag.label),
-    ['Sign in', 'Auto', 'Web']
+    ['Sign in', ...limitProviderCapabilityTags('cursor')]
   );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'grok', status: 'notConfigured', source: 'web' })
       .map((tag) => tag.label),
-    ['Run grok login', 'Auto', 'CLI/Web']
+    ['Run grok login', ...limitProviderCapabilityTags('grok')]
   );
 });
 
@@ -886,8 +902,8 @@ test('Codex limits render as one provider group with account subrows', () => {
   const styles = readRendererFile('styles.css');
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   const renderGroup = viewBody('renderLimitProviderGroup');
-  const policy = viewTable('LIMIT_ACCOUNT_ROW_POLICIES');
-  const groupPolicy = viewTable('LIMIT_GROUP_POLICIES');
+  const owner = require('../../src/electron/renderer/providers/codex/windows')({});
+  const policy = owner.rowPolicy.toString();
 
   assert.match(renderLimits, /providersByLimitProviderId\(desktopLimitRecords\(\)\)/);
   // The dispatch is by account count, not by provider: which providers have a
@@ -896,12 +912,12 @@ test('Codex limits render as one provider group with account subrows', () => {
   assert.match(renderLimits, /renderLimitProviderGroup\(id, label, visibleProviders, color\)/);
   assert.doesNotMatch(renderLimits, /renderCodexAccountGroup|renderClaudeAccountGroup/);
   assert.doesNotMatch(renderLimits, /new Map\(\(state\.stats\?\.limits\?\.providers \|\| \[\]\)\.map\(\(provider\) => \[provider\.provider, provider\]\)\)/);
-  assert.match(policy, /codex: \(provider, color, \{ grouped \}\) => \(\{/);
+  assert.equal(owner.rowPolicy({}, '', { grouped: true }).options.accountTitle, true);
   assert.match(policy, /accountTitle: true,\s*allowSystemSwitch: true,\s*\.\.\.\(grouped \? \{ showActiveBadge: true, showIcon: false \} : \{\}\)/);
   // The forecast describes the account set, so it is appended once below the
   // rows rather than on each of them.
-  assert.match(groupPolicy, /codex: \(\) => \(\{ forecastOnGroup: true \}\)/);
-  assert.match(renderGroup, /if \(forecastOnGroup\) appendCodexResetForecast\(row\);/);
+  assert.equal(owner.groupPolicy().forecastOnGroup, true);
+  assert.match(renderGroup, /if \(forecastOnGroup\) owner\?\.appendCodexResetForecast\(row\);/);
   assert.match(styles, /\.limit-account-list\s*\{/);
   assert.match(styles, /\.limit-account-row\s*\{/);
 });
@@ -910,7 +926,7 @@ test('Claude limits render as one provider group with account subrows', () => {
   const app = readRendererFile('app.js');
   const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   const renderGroup = viewBody('renderLimitProviderGroup');
-  const policy = viewTable('LIMIT_ACCOUNT_ROW_POLICIES');
+  const owner = require('../../src/electron/renderer/providers/claude/windows')({});
 
   assert.match(renderLimits, /renderLimitProviderGroup\(id, label, visibleProviders, color\)/);
   // The row's title is also the name its switch control offers, so an account is
@@ -919,7 +935,8 @@ test('Claude limits render as one provider group with account subrows', () => {
   assert.match(renderGroup, /const title = limitAccountTitle\(providerId, provider, index, providers\);/);
   // The mark is dropped only for a group row. Standing alone the row is the card's
   // whole identity, and that is the shape the Edge Dock card renders.
-  assert.match(policy, /claude: \(provider, color, \{ grouped \}\) => \(\{\s*options: \{ accountTitle: true, \.\.\.\(grouped \? \{ showIcon: false \} : \{\}\) \}/);
+  assert.deepEqual(owner.rowPolicy({}, '', { grouped: true }).options, { accountTitle: true, showIcon: false });
+  assert.equal(owner.rowPolicy({}, '', { grouped: false }).options.showIcon, undefined);
   assert.match(renderGroup, /\{ accountRow: true, accountLabel: title, \.\.\.account\.options \}/);
 });
 
@@ -929,8 +946,8 @@ test('every multi-account Limits group uses its provider-localized account count
   // One derivation instead of one string per wrapper: a provider that has a key
   // gets its own phrase, and one that does not renders no count rather than the
   // key itself.
-  assert.match(view, /const key = GROUP_COUNT_KEYS\[providerId\] \|\| `settings\.\$\{providerId\}\.nAccounts`;/);
-  assert.match(view, /return text === key \? '' : text;/);
+  assert.match(view, /const key = windowOwners\[providerId\]\?\.groupCountKey \|\| `settings\.\$\{providerId\}\.nAccounts`;/);
+  assert.match(view, /return text === key \? t\('settings.limits.nAccounts'/);
   assert.match(view, /count \? limitGroupCountText\(providerId, count\) : ''/);
   assert.match(view, /providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.doesNotMatch(view, /settings\.(claude|codex|mimo|opencode|openrouter|thirdparty)\.nAccounts/);
@@ -1041,7 +1058,7 @@ test('hidden Settings keeps the custom tray clock running without refreshing com
     }
   };
 
-  await vm.runInNewContext(
+  await runViewFixture(
     `${syncClock}\n${maybeUpdateBarsIcon}\nmaybeUpdateBarsIcon();`,
     context
   );
@@ -1102,19 +1119,19 @@ test('Grok renders its single Monthly billing window full-width instead of an em
   // Grok only exposes a billing window. The default render branch draws
   // session+weekly, which would leave Grok with no visible bar. A dedicated
   // grok branch must surface the billing window as a wide row.
-  const renderProviderWindows = viewBody('renderProviderWindows');
+  const renderProviderWindows = functionBody(windowOwnerSource('grok'), 'renderWindows');
 
-  assert.match(renderProviderWindows, /provider\.provider === 'grok'/);
+  assert.equal(typeof require('../../src/electron/renderer/providers/grok/windows')({}).renderWindows, 'function');
   assert.match(renderProviderWindows, /windowForKind\(provider, 'billing'\)/);
   assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, monthly\), monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /limit-window-wide/);
 });
 
 test('Zed renders unlimited Edit Predictions plus a percent-led Token Spend with a Limits icon', () => {
-  const renderProviderWindows = viewBody('renderProviderWindows');
+  const renderProviderWindows = functionBody(windowOwnerSource('zed'), 'renderWindows');
   const css = rendererStyles();
 
-  assert.match(renderProviderWindows, /provider\.provider === 'zed'/);
+  assert.equal(typeof require('../../src/electron/renderer/providers/zed/windows')({}).renderWindows, 'function');
   assert.match(renderProviderWindows, /windowsForKind\(provider, 'billing'\)/);
   assert.match(renderProviderWindows, /billing\?\.limitId === 'zed\.edit-predictions'/);
   assert.match(renderProviderWindows, /billing\?\.label \|\| 'Token Spend'/);
@@ -1166,10 +1183,17 @@ test('Zed compact windows label unlimited Edit Predictions without a fake reset'
   ]);
 });
 
+test('third-party quota account titles prefer a shared display name', () => {
+  const titles = runViewFixture(`${viewBody('namedApiAccountTitle')}
+    [windowOwners.thirdparty.accountTitle({ accountName: 'Original', accountDisplayName: 'Work' }, 0),
+      windowOwners.thirdparty.accountTitle({ accountName: 'Original' }, 0)];`);
+  assert.deepEqual(Array.from(titles), ['Work', 'Original']);
+});
+
 test('WorkBuddy renders unlimited enterprise credits without requiring a numeric balance', () => {
   const valueFunction = viewBody('creditsBalanceValue', 'mimoTokenPlanWindowFromBalance');
-  const renderProviderWindows = viewBody('renderProviderWindows');
-  const value = vm.runInNewContext(
+  const renderProviderWindows = functionBody(windowOwnerSource('workbuddy'), 'renderWindows');
+  const value = runViewFixture(
     `${valueFunction}\ncreditsBalanceValue({ balance: { amount: null, currency: 'CREDITS' } }, { detail: 'unlimited', remaining: null });`,
     {
       creditsAmount: () => null,
@@ -1194,11 +1218,11 @@ test('WorkBuddy renders unlimited enterprise credits without requiring a numeric
 
 test('Antigravity groups returned quota windows under dynamic model-family headings', () => {
   const quotaGroups = viewBody('antigravityQuotaGroups', 'formatLimitAmount');
-  const renderProviderWindows = viewBody('renderProviderWindows');
+  const renderProviderWindows = functionBody(windowOwnerSource('antigravity'), 'renderWindows');
   const css = readRendererFile('styles.css');
 
   const context = { presentationApi: { antigravityQuotaWindow } };
-  const grouped = vm.runInNewContext(`${quotaGroups}\nantigravityQuotaGroups({ windows: [
+  const grouped = runViewFixture(`${quotaGroups}\nantigravityQuotaGroups({ windows: [
     { kind: 'session', label: 'Gemini 5-hour' },
     { kind: 'weekly', label: 'Gemini weekly' },
     { kind: 'weekly', label: 'Gemini 4 Argon weekly' },
@@ -1225,7 +1249,7 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
       ]
     }
   ]);
-  const legacy = vm.runInNewContext(`${quotaGroups}\nantigravityQuotaGroups({ windows: [
+  const legacy = runViewFixture(`${quotaGroups}\nantigravityQuotaGroups({ windows: [
     { kind: 'weekly', label: 'Gemini Pro' },
     { kind: 'weekly', label: 'Claude' }
   ] });`, context);
@@ -1233,8 +1257,8 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
 
   assert.match(quotaGroups, /presentationApi\.antigravityQuotaWindow\(window\)/);
   assert.match(quotaGroups, /groups\.set\(entry\.groupLabel, \[\]\)/);
-  assert.match(quotaGroups, /entries\.some\(\(entry\) => entry === null\)/);
-  assert.match(renderProviderWindows, /provider\.provider === 'antigravity'/);
+  assert.match(quotaGroups, /entries\.some\([\s\S]*?\(entry\) => entry === null\)/);
+  assert.equal(typeof require('../../src/electron/renderer/providers/antigravity/windows')({}).renderWindows, 'function');
   assert.match(renderProviderWindows, /const quotaGroups = antigravityQuotaGroups\(provider\)/);
   assert.match(renderProviderWindows, /title\.textContent = group\.label/);
   assert.match(renderProviderWindows, /entry\.windowLabel/);
@@ -1245,10 +1269,10 @@ test('Antigravity groups returned quota windows under dynamic model-family headi
 });
 
 test('Qoder renders its single Credits billing window full-width', () => {
-  const renderProviderWindows = viewBody('renderProviderWindows');
+  const renderProviderWindows = functionBody(windowOwnerSource('qoder'), 'renderWindows');
 
-  assert.match(renderProviderWindows, /provider\.provider === 'qoder'/);
-  assert.match(renderProviderWindows, /const credits = windowForKind\(provider, 'billing'\);/);
+  assert.equal(typeof require('../../src/electron/renderer/providers/qoder/windows')({}).renderWindows, 'function');
+  assert.match(renderProviderWindows, /for \(const credits of windowsForKind\(provider, 'billing'\)\)/);
   assert.match(renderProviderWindows, /providerWindowText\(provider, credits\)\.detail/);
   assert.match(renderProviderWindows, /limit-window-wide/);
 
@@ -1259,9 +1283,9 @@ test('Qoder renders its single Credits billing window full-width', () => {
 });
 
 test('Kimi renders 5-hour and Weekly above one full-width Monthly window', () => {
-  const renderProviderWindows = viewBody('renderProviderWindows');
+  const renderProviderWindows = functionBody(windowOwnerSource('kimi'), 'renderWindows');
 
-  assert.match(renderProviderWindows, /provider\.provider === 'kimi'/);
+  assert.equal(typeof require('../../src/electron/renderer/providers/kimi/windows')({}).renderWindows, 'function');
   assert.match(renderProviderWindows, /const fiveHour = windowForKind\(provider, 'session'\);/);
   assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
   assert.match(renderProviderWindows, /const monthly = windowForKind\(provider, 'billing'\);/);
@@ -1274,9 +1298,9 @@ test('Kimi renders 5-hour and Weekly above one full-width Monthly window', () =>
 });
 
 test('Command Code renders 5-hour and Weekly above full-width credit windows', () => {
-  const renderProviderWindows = viewBody('renderProviderWindows');
+  const renderProviderWindows = functionBody(windowOwnerSource('commandcode'), 'renderWindows');
 
-  assert.match(renderProviderWindows, /provider\.provider === 'commandcode'/);
+  assert.equal(typeof require('../../src/electron/renderer/providers/commandcode/windows')({}).renderWindows, 'function');
   assert.match(renderProviderWindows, /const fiveHour = windowForKind\(provider, 'session'\);/);
   assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
   // The monthly grant and any rollover top-up are both billing windows, so the
@@ -1296,25 +1320,25 @@ test('Command Code renders 5-hour and Weekly above full-width credit windows', (
 });
 
 test('Ollama renders Session and Weekly usage windows', () => {
-  const renderProviderWindows = viewBody('renderProviderWindows');
-  assert.match(renderProviderWindows, /provider\.provider === 'ollama'/);
+  const renderProviderWindows = functionBody(windowOwnerSource('ollama'), 'renderWindows');
+  assert.equal(typeof require('../../src/electron/renderer/providers/ollama/windows')({}).renderWindows, 'function');
   assert.match(renderProviderWindows, /windowForKind\(provider, 'session'\)/);
   assert.match(renderProviderWindows, /windowForKind\(provider, 'weekly'\)/);
   assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, session\), session/);
-  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, weekly\), weekly/);
+  assert.match(renderProviderWindows, /limitWindowNode\('Weekly', weekly/);
 });
 
 test('Volcengine renders quota windows as paired rows with an odd final window full-width', () => {
-  const renderProviderWindows = viewBody('renderProviderWindows');
+  const renderProviderWindows = functionBody(windowOwnerSource('volcengine'), 'renderWindows');
 
-  assert.match(renderProviderWindows, /provider\.provider === 'volcengine'/);
+  assert.equal(typeof require('../../src/electron/renderer/providers/volcengine/windows')({}).renderWindows, 'function');
   assert.match(renderProviderWindows, /const session = windowForKind\(provider, 'session'\);/);
   assert.match(renderProviderWindows, /const daily = windowForKind\(provider, 'daily'\);/);
   assert.match(renderProviderWindows, /const weekly = windowForKind\(provider, 'weekly'\);/);
   assert.match(renderProviderWindows, /const monthly = windowForKind\(provider, 'billing'\);/);
   assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, session\), session, color, 0\.95\)/);
   assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, daily\), daily, color, 0\.78\)/);
-  assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, weekly\), weekly, color, 0\.68\)/);
+  assert.match(renderProviderWindows, /limitWindowNode\('Weekly', weekly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, monthly\), monthly, color, 0\.68\)/);
   assert.match(renderProviderWindows, /if \(nodes\.length % 2 === 1\) nodes\.at\(-1\)\.classList\.add\('limit-window-wide'\)/);
   assert.match(renderProviderWindows, /windows\.append\(\.\.\.nodes\)/);
@@ -1344,7 +1368,7 @@ test('Z.ai and Team keep all billing windows and render MCP full width after pai
         { kind: 'billing', label: 'Legacy bucket', detail: 'Missing plan id' }
       ] }
     };
-    const rendered = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+    const rendered = runViewFixture(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
     assert.deepEqual(Array.from(rendered.children, n => n.label), ['Weekly', 'MCP', 'Legacy bucket']);
     assert.ok(rendered.children.every(n => n.classes.has('limit-window-wide')));
     assert.equal(rendered.children[2].detail, 'Missing plan id');
@@ -1353,7 +1377,7 @@ test('Z.ai and Team keep all billing windows and render MCP full width after pai
       { kind: 'billing', limitId: 'model-beta', label: 'model-beta', detail: 'Combined grant' },
       { kind: 'billing', label: 'MCP' }
     ];
-    const paired = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+    const paired = runViewFixture(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
     assert.equal(paired.children[0].detail, 'Daily');
     assert.equal(paired.children[1].detail, 'Combined grant');
     assert.equal(paired.children[0].classes.has('limit-window-wide'), false);
@@ -1396,7 +1420,7 @@ test('OpenCode reads the Zen balance from its credits window without metering it
 
   // Zen only: the balance must be the Balance row, and nothing may claim Monthly.
   context.provider = { provider: 'opencode', windows: [balanceWindow] };
-  const zenOnly = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  const zenOnly = runViewFixture(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
   assert.deepEqual(Array.from(zenOnly.children, (n) => n.label), ['Balance']);
   assert.equal(zenOnly.children[0].value, '$8.50');
   assert.equal(zenOnly.children[0].window.showMeter, false);
@@ -1407,27 +1431,27 @@ test('OpenCode reads the Zen balance from its credits window without metering it
     { kind: 'billing', used: 21, limit: 60 },
     balanceWindow
   ] };
-  const both = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  const both = runViewFixture(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
   assert.deepEqual(Array.from(both.children, (n) => n.label), ['Session', 'Monthly', 'Balance']);
   assert.equal(both.children[1].window.limit, 60, 'Monthly is the Go grant, not the balance');
   assert.equal(both.children[2].value, '$8.50');
 
   // A record synced from a device on an older build carries only balanceUsd.
   context.provider = { provider: 'opencode', windows: [{ kind: 'session', usedPercent: 25 }], balanceUsd: 3.25 };
-  const legacy = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  const legacy = runViewFixture(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
   assert.deepEqual(Array.from(legacy.children, (n) => n.label), ['Session', 'Balance']);
   assert.equal(legacy.children[1].value, '$3.25');
 
   // A pure-Go account has no balance at all and must not grow a phantom row.
   context.provider = { provider: 'opencode', windows: [{ kind: 'session', usedPercent: 25 }] };
-  const goOnly = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  const goOnly = runViewFixture(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
   assert.deepEqual(Array.from(goOnly.children, (n) => n.label), ['Session']);
 });
 
 test('Copilot renders monthly Premium and Chat quotas as billing windows', () => {
-  const renderProviderWindows = viewBody('renderProviderWindows');
+  const renderProviderWindows = functionBody(windowOwnerSource('copilot'), 'renderWindows');
 
-  assert.match(renderProviderWindows, /provider\.provider === 'copilot'/);
+  assert.equal(typeof require('../../src/electron/renderer/providers/copilot/windows')({}).renderWindows, 'function');
   assert.match(renderProviderWindows, /const billingWindows = windowsForKind\(provider, 'billing'\);/);
   assert.match(renderProviderWindows, /for \(const billing of billingWindows\)/);
   assert.match(renderProviderWindows, /limitWindowNode\(providerWindowLabel\(provider, billing\), billing, color, 0\.68\)/);
@@ -1437,18 +1461,18 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
   const main = fs.readFileSync(path.join(rendererDir, '..', 'main.js'), 'utf8');
-  const renderProviderWindows = viewBody('renderProviderWindows');
-  const codexAdditionalWindowLabel = viewBody('codexAdditionalWindowLabel', 'antigravityQuotaGroups');
-  const resetCreditsValue = viewBody('formatCodexResetCreditsValue', 'codexResetCreditExpirationDates');
-  const resetCreditExpirationDates = viewBody('codexResetCreditExpirationDates', 'codexResetCreditExpiryLabel');
-  const resetCreditExpiryLabel = viewBody('codexResetCreditExpiryLabel', 'codexResetCreditExpiryDetailLabel');
-  const resetCreditExpiryDetailLabel = viewBody('codexResetCreditExpiryDetailLabel', 'expiryDateLabel');
-  const resetCreditExpiryDateLabel = viewBody('expiryDateLabel', 'codexResetCreditsNode');
+  const renderProviderWindows = functionBody(windowOwnerSource('codex'), 'renderWindows');
+  const codexAdditionalWindowLabel = functionBody(windowOwnerSource('codex'), 'codexAdditionalWindowPeriodLabel') + viewBody('codexAdditionalWindowLabel', 'antigravityQuotaGroups');
+  const resetCreditsValue = viewBody('formatResetCreditsValue', 'resetCreditExpirationDates');
+  const resetCreditExpirationDates = viewBody('resetCreditExpirationDates', 'resetCreditExpiryLabel');
+  const resetCreditExpiryLabel = viewBody('resetCreditExpiryLabel', 'resetCreditExpiryDetailLabel');
+  const resetCreditExpiryDetailLabel = viewBody('resetCreditExpiryDetailLabel', 'expiryDateLabel');
+  const resetCreditExpiryDateLabel = viewBody('expiryDateLabel', 'resetCreditsNode');
   // Sliced to the next function, not to `renderLimitProviderHead`: the wider slice
   // swept in the shared tooltip builder, so these assertions passed on code that
   // isn't Codex's.
-  const codexResetCreditsNode = viewBody('codexResetCreditsNode', 'providerSpendEntries');
-  assert.match(renderProviderWindows, /provider\.provider === 'codex'/);
+  const resetCreditsNode = viewBody('resetCreditsNode', 'providerSpendEntries');
+  assert.equal(typeof require('../../src/electron/renderer/providers/codex/windows')({}).renderWindows, 'function');
   assert.match(renderProviderWindows, /const session = codexCanonicalWindow\(provider, 'session'\);/);
   assert.match(renderProviderWindows, /const weekly = codexCanonicalWindow\(provider, 'weekly'\);/);
   assert.match(renderProviderWindows, /const monthly = codexCanonicalWindow\(provider, 'billing'\);/);
@@ -1474,7 +1498,7 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
   assert.match(codexAdditionalWindowLabel, /codexAdditionalWindowPeriodLabel\(window\)/);
   assert.match(codexAdditionalWindowLabel, /minutes % 60 === 0/);
   assert.match(styles, /\.limit-window-text span:first-child \{[\s\S]*text-overflow: ellipsis;/);
-  assert.match(renderProviderWindows, /const resetNode = codexResetCreditsNode\(provider\.resetCredits\);/);
+  assert.match(renderProviderWindows, /const resetNode = resetCreditsNode\(provider\.resetCredits\);/);
   assert.doesNotMatch(renderProviderWindows, /limitWindowNode\('Reset credits'/);
   assert.match(resetCreditsValue, /if \(count <= 0\) return '';/);
   assert.match(resetCreditsValue, /return `\$\{count\} reset\$\{count === 1 \? '' : 's'\}`;/);
@@ -1488,32 +1512,32 @@ test('Codex renders Monthly quota and manual reset credits below rolling windows
     resetCreditExpiryDateLabel,
     /Intl\.DateTimeFormat\(currentLocale\(\), \{\s*month: 'numeric',\s*day: 'numeric',\s*hour: 'numeric',\s*minute: '2-digit'\s*\}\)/
   );
-  assert.match(codexResetCreditsNode, /limit-reset-credits/);
-  assert.match(codexResetCreditsNode, /limit-reset-credits-line/);
-  assert.match(codexResetCreditsNode, /limit-reset-credits-timeline/);
-  assert.match(codexResetCreditsNode, /limit-reset-credits-time/);
-  assert.match(codexResetCreditsNode, /limit-reset-credits-separator/);
-  assert.match(codexResetCreditsNode, /separator\.textContent = '·'/);
-  assert.match(codexResetCreditsNode, /expirationDates\.slice\(0, 3\)\.map\(codexResetCreditExpiryLabel\)/);
-  assert.match(codexResetCreditsNode, /hiddenExpirationCount = expirationDates\.length - summaryParts\.length/);
-  assert.match(codexResetCreditsNode, /summaryParts\.push\(`\+\$\{hiddenExpirationCount\}`\)/);
+  assert.match(resetCreditsNode, /limit-reset-credits/);
+  assert.match(resetCreditsNode, /limit-reset-credits-line/);
+  assert.match(resetCreditsNode, /limit-reset-credits-timeline/);
+  assert.match(resetCreditsNode, /limit-reset-credits-time/);
+  assert.match(resetCreditsNode, /limit-reset-credits-separator/);
+  assert.match(resetCreditsNode, /separator\.textContent = '·'/);
+  assert.match(resetCreditsNode, /expirationDates\.slice\(0, 3\)\.map\(resetCreditExpiryLabel\)/);
+  assert.match(resetCreditsNode, /hiddenExpirationCount = expirationDates\.length - summaryParts\.length/);
+  assert.match(resetCreditsNode, /summaryParts\.push\(`\+\$\{hiddenExpirationCount\}`\)/);
   // The expiry tooltip is the shared builder, not a second copy of its
   // hover/focus wiring that has to be kept in step by hand. It is useful for a
   // single reset too, not only when several dates are present — and Claude's
   // grants can supply the tooltip rows when plain expiry dates cannot.
-  assert.match(codexResetCreditsNode, /if \(expirationDates\.length > 0 \|\| detailEntries\) \{/);
-  assert.match(codexResetCreditsNode, /if \(expirationDates\.length > 0\) \{\s*const timeline/);
-  assert.match(codexResetCreditsNode, /expiryGroup\.append\(timeline\);/);
-  assert.match(codexResetCreditsNode, /limitDetailInfoNode\(detailEntries, '', detail\?\.ariaLabel \|\| ''\)/);
+  assert.match(resetCreditsNode, /if \(expirationDates\.length > 0 \|\| detailEntries\) \{/);
+  assert.match(resetCreditsNode, /if \(expirationDates\.length > 0\) \{\s*const timeline/);
+  assert.match(resetCreditsNode, /expiryGroup\.append\(timeline\);/);
+  assert.match(resetCreditsNode, /limitDetailInfoNode\(detailEntries, '', detail\?\.ariaLabel \|\| ''\)/);
   assert.match(
-    codexResetCreditsNode,
-    /expirationDates\.map\(\(date\) => \[expiryDateLabel\(date\), codexResetCreditExpiryLabel\(date\)\]\)/
+    resetCreditsNode,
+    /expirationDates\.map\(\(date\) => \[expiryDateLabel\(date\), resetCreditExpiryLabel\(date\)\]\)/
   );
-  assert.match(codexResetCreditsNode, /`Reset \$\{index \+ 1\}: \$\{codexResetCreditExpiryDetailLabel\(date\)\}`/);
-  assert.doesNotMatch(codexResetCreditsNode, /addEventListener/);
-  assert.doesNotMatch(codexResetCreditsNode, /state\.limitDetailTooltip/);
-  assert.match(codexResetCreditsNode, /formatCodexResetCreditsValue\(resetCredits\)/);
-  assert.match(codexResetCreditsNode, /aria-label/);
+  assert.match(resetCreditsNode, /`Reset \$\{index \+ 1\}: \$\{resetCreditExpiryDetailLabel\(date\)\}`/);
+  assert.doesNotMatch(resetCreditsNode, /addEventListener/);
+  assert.doesNotMatch(resetCreditsNode, /state\.limitDetailTooltip/);
+  assert.match(resetCreditsNode, /formatResetCreditsValue\(resetCredits\)/);
+  assert.match(resetCreditsNode, /aria-label/);
   assert.match(styles, /\.limit-reset-credits\s*\{[^}]*min-height: 11px;[^}]*font-size: 0\.5625rem;/s);
   assert.match(styles, /\.limit-reset-credits-line\s*\{[^}]*justify-content: space-between;/s);
   assert.match(styles, /\.limit-reset-credits-expiry-group\s*\{[^}]*flex: 0 0 auto;/s);
@@ -1561,7 +1585,7 @@ function runClaudePrepaidGrantRows(app, tranches, currency, now) {
     formatMoney: (value, code) => `${code === 'USD' ? '$' : `${code} `}${Number(value).toFixed(2)}`,
     formatDuration: limitDurationText
   };
-  vm.runInNewContext(
+  runViewFixture(
     `${optionalNumber}\n${dateLabel}\n${grantRows}\n`
       + `result = claudePrepaidGrantRows(${JSON.stringify(tranches)}, ${JSON.stringify(currency)});`,
     context
@@ -1614,7 +1638,7 @@ test('Claude prepaid grants keep three cells when a grant has no usable expiry',
 
 test('The detail tooltip widens its grid and pads short rows for three-column entries', () => {
   const styles = readRendererFile('styles.css');
-  const infoNode = viewBody('limitDetailInfoNode', 'providerSpendNode');
+  const infoNode = viewBody('limitDetailInfoNode') + viewBody('detailTooltipNode') + viewBody('attachLimitDetailTooltip');
   const grantRows = viewBody('claudePrepaidGrantRows', 'claudeBalanceNode');
   const balanceNode = viewBody('claudeBalanceNode', 'providerWindowText');
 
@@ -1648,7 +1672,7 @@ function runClaudeResetGrantRows(app, grants, now) {
     currentLocale: () => 'en-US',
     formatDuration: limitDurationText
   };
-  vm.runInNewContext(
+  runViewFixture(
     `${dateLabel}\n${clearLabel}\n${grantRows}\n`
       + `result = claudeResetGrantRows(${JSON.stringify(grants)});`,
     context
@@ -1659,9 +1683,9 @@ function runClaudeResetGrantRows(app, grants, now) {
 test('Claude reset grants wrap their label and clears as full-width lines', () => {
   const app = readRendererFile('app.js');
   const styles = readRendererFile('styles.css');
-  const renderProviderWindows = viewBody('renderProviderWindows');
+  const renderProviderWindows = windowOwnerSource('claude');
   const claudeNode = viewBody('claudeResetCreditsNode', 'providerSpendEntries');
-  const infoNode = viewBody('limitDetailInfoNode', 'providerSpendNode');
+  const infoNode = viewBody('limitDetailInfoNode') + viewBody('detailTooltipNode') + viewBody('attachLimitDetailTooltip');
   const now = new Date(2026, 6, 28, 0, 0, 0, 0).getTime();
   const rows = runClaudeResetGrantRows(app, [
     {
@@ -1705,7 +1729,7 @@ test('Claude reset grants wrap their label and clears as full-width lines', () =
   ]);
 
   assert.match(renderProviderWindows, /claudeResetCreditsNode\(provider\.resetCredits\)/);
-  assert.match(claudeNode, /if \(grants\.length === 0\) return codexResetCreditsNode\(resetCredits\);/);
+  assert.match(claudeNode, /if \(grants\.length === 0\) return resetCreditsNode\(resetCredits\);/);
   // The spoken label must carry the same rows the tooltip shows — expiry,
   // cleared windows, usability — so grant restrictions are not silent.
   assert.match(claudeNode, /claudeResetGrantRows\(\[grant\]\)/);
@@ -1760,7 +1784,7 @@ test('tray bars draw the resolved primary window on top and preserve an empty lo
 });
 
 test('DeepSeek main Limits row preserves the intentional month-spend balance meter', () => {
-  const renderProviderWindows = viewBody('renderProviderWindows');
+  const renderProviderWindows = functionBody(windowOwnerSource('deepseek'), 'renderWindows');
   const balanceWindow = readSharedFile('limits/balanceDisplay.js');
   const styles = readRendererFile('styles.css');
 
@@ -1866,7 +1890,7 @@ test('TypeSafe row mirrors the Spend row with token totals and keeps the month b
 });
 
 test('Balance and token quota values omit the redundant left suffix', () => {
-  const renderProviderWindows = viewBody('renderProviderWindows');
+  const renderProviderWindows = windowOwnerSource('openrouter') + windowOwnerSource('thirdparty');
 
   assert.match(renderProviderWindows, /'Balance',\s*\{ \.\.\.balanceWindow, label: 'Balance' \},\s*color,\s*0\.95,\s*formatMoney\(balanceAmount, currency\)/);
   assert.match(renderProviderWindows, /const meterPercent = creditsMeterPercent\(provider, quotaWindow\);/);
@@ -1906,7 +1930,7 @@ test('MiMo Limits draws a credits balance when the provider balance object is ab
     }
   };
 
-  const windowOnly = vm.runInNewContext(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
+  const windowOnly = runViewFixture(`${render}\nrenderProviderWindows(provider, 'blue')`, context);
   assert.deepEqual(Array.from(windowOnly.children, (node) => [node.label, node.value]), [['Balance', '¥9.95']]);
 });
 
@@ -1915,7 +1939,7 @@ test('MiMo balance-only accounts do not synthesize an empty Token Plan meter', (
   const optionalNumber = functionBody(app, 'optionalFiniteNumber', 'formatHomeLimitWindowValue');
   const tokenPlanFallback = viewBody('mimoTokenPlanWindowFromBalance', 'limitWindowNode');
   const context = {};
-  vm.runInNewContext(`${optionalNumber}\n${tokenPlanFallback}\nresult = mimoTokenPlanWindowFromBalance({
+  runViewFixture(`${optionalNumber}\n${tokenPlanFallback}\nresult = mimoTokenPlanWindowFromBalance({
     planUsed: null,
     planLimit: null,
     planPercent: null,
@@ -2076,7 +2100,7 @@ test('Cline exposes its API key through the settings and credential-store patter
   // Settings + credential store + IPC, the pattern the pattern-bound test above
   // asserts for the catalog; the path is what keeps the key out of settings.json.
   assert.match(runtimeConfig, /limitProviderSettingKeys\(\)/);
-  assert.deepEqual(require('../../src/electron/runtimeConfig').LIMIT_PROVIDER_SETTING_KEYS.cline, ['clineApiKey']);
+  assert.deepEqual(require('../../src/electron/runtimeConfig').LIMIT_PROVIDER_SETTING_KEYS.cline, ['clineSourcePreference', 'clineApiKey', 'clineAccountSlots']);
   assert.deepEqual(CREDENTIAL_SETTING_PATHS.clineApiKey, ['providers', 'cline', 'apiKey']);
   assert.match(main, /ipcMain\.handle\('limits:saveCredential'/);
   assert.match(main, /\.\.\.finalAccountSettings\(patch, settings\)/);
@@ -2115,14 +2139,14 @@ test('Cline exposes its API key through the settings and credential-store patter
     limitProviderStatusLabel({ provider: 'cline', status: 'notConfigured' }),
     { label: 'Add API key', tone: 'setup' }
   );
-  assert.deepEqual(limitProviderCapabilityTags({ provider: 'cline' }), ['Auto', 'Desktop app', 'CLI']);
+  assert.deepEqual(limitProviderCapabilityTags({ provider: 'cline' }), ["API key/Local"]);
   // The list renders per provider, and its default branch draws session and weekly
   // only — a three-window provider needs its own branch or the monthly window never
   // appears. Guarded by source patterns because the view module builds DOM and this
   // repository has no DOM harness; the branch was also confirmed by driving the
   // running widget (a mocked row renders Session, Weekly and a full-width Monthly).
-  const windowsView = readRendererFile('limits/windowsView.js');
-  assert.match(windowsView, /provider\.provider === 'cline'/);
+  const windowsView = windowOwnerSource('cline');
+  assert.equal(typeof require('../../src/electron/renderer/providers/cline/windows')({}).renderWindows, 'function');
   // The account credit shares the `billing` kind with the monthly quota, so the
   // branch tells them apart by metric and renders the credit through the panel's own
   // balance path, the way WorkBuddy's and Trae's balance is rendered.
@@ -2152,22 +2176,18 @@ test('AI Tool Limits owns every live account group and its status pill', () => {
   const html = readRendererFile('index.html');
   const accountNodes = app.slice(
     app.indexOf('const LIMIT_PROVIDER_ACCOUNT_NODES = {'),
-    app.indexOf('const LIMIT_PROVIDER_CONNECTION_DETAIL_KEYS = {')
+    app.indexOf('const TRAY_ICON_VARIANTS = [')
   );
   const providers = [
     ['codex', 'codexAccountGroup', 'codexAccountStatus'],
     ['opencode', 'opencodeCookieGroup', 'opencodeCookieStatus'],
     ['cursor', 'cursorAccountGroup', 'cursorAccountStatus'],
-    ['kimi', 'kimiAccountGroup', 'kimiAccountStatus'],
-    ['copilot', 'copilotAccountGroup', 'copilotApiTokenStatus'],
-    ['mimo', 'mimoAccountGroup', 'mimoAccountStatus'],
-    ['openrouter', 'openrouterAccountGroup', 'openrouterStatus'],
-    ['volcengine', 'volcengineAccountGroup', 'volcengineAccountStatus'],
-    ['thirdparty', 'thirdpartyAccountGroup', 'thirdpartyStatus']
+        ['mimo', 'mimoAccountGroup', 'mimoAccountStatus'],
+        ['thirdparty', 'thirdpartyAccountGroup', 'thirdpartyStatus']
   ];
 
   for (const [provider, groupId, statusId] of providers) {
-    assert.match(accountNodes, new RegExp(`${provider}: \\{ group: '${groupId}', status: '${statusId}' \\}`));
+    assert.match(accountNodes, new RegExp(`${provider}: \\{ group: '${groupId}', status: '${statusId}'(?:, localSummary: true)? \\}`));
     assert.match(html, new RegExp(`id="${groupId}"`));
     assert.match(html, new RegExp(`id="${statusId}"[^>]*class="cursor-status-pill`));
   }
@@ -2199,7 +2219,7 @@ test('provider rerenders preserve live account nodes and focused controls', () =
   };
   focusedInput.parentElement = oldParent;
 
-  vm.runInNewContext(
+  runViewFixture(
     `${moveLiveNode}\nmoveLimitProviderLiveNode(connectedParent, focusedInput, disclosureIcon);`,
     { connectedParent, disclosureIcon, focusedInput }
   );
@@ -2244,7 +2264,7 @@ test('background provider rerenders preserve settings scroll without a focused c
     panel.scrollLeft = 0;
   };
 
-  vm.runInNewContext(
+  runViewFixture(
     `${scrollInteraction}\n${preserveScroll}\n${renderSettings}\nrenderLimitProviderCheckboxes();`,
     {
       cancelAnimationFrame: () => {},
@@ -2282,13 +2302,14 @@ test('hidden settings rerenders skip settings panel scroll DOM', () => {
     });
   }
 
-  vm.runInNewContext(
+  runViewFixture(
     `${preserveScroll}\npreserveSettingsPanelScroll(() => { metrics.callbacks += 1; });`,
     {
       els: { settingsPanel: panel },
       isRendererWindowHidden: () => true,
       metrics,
       panel,
+      preservingSettingsPanelScroll: false,
       requestAnimationFrame: () => { throw new Error('hidden render scheduled a frame'); },
       settingsScrollInteractionRevision: 0
     }
@@ -2328,7 +2349,7 @@ test('user scrolling wins over a pending provider scroll restore', () => {
   };
   const renderLimitProviderCheckboxesNow = () => {};
 
-  vm.runInNewContext(
+  runViewFixture(
     `${scrollInteraction}
 ${setupSections}
 ${preserveScroll}
@@ -2358,11 +2379,7 @@ test('dynamic account summaries are never reset by the static translation pass',
     'codexAccountStatus',
     'cursorAccountStatus',
     'opencodeCookieStatus',
-    'openrouterStatus',
-    'volcengineAccountStatus',
-    'kimiAccountStatus',
     'mimoAccountStatus',
-    'copilotApiTokenStatus',
     'thirdpartyStatus'
   ];
 
@@ -2496,10 +2513,10 @@ test('overlapping failures preserve the latest toggle, then fall back to a newer
   assert.deepEqual(harness.selection(), ['zed']);
 });
 
-test('empty OpenCode profiles render a localized summary before returning', () => {
-  const app = readRendererFile('app.js');
+test('empty OpenCode profiles retain the shared list and refresh a localized summary', () => {
+  const app = readRendererFile('limits/providerOwners/opencode.js');
   const renderProfiles = functionBody(app, 'renderOpenCodeProfiles', 'updateOpenCodeProfilesStatus');
-  const renderSummary = functionBody(app, 'renderOpenCodeProfilesStatusSummary', 'openrouterProfileStatusText');
+  const renderSummary = functionBody(app, 'renderOpenCodeProfilesStatusSummary', 'thirdPartyProfileStatusText');
   const totalEl = { textContent: 'Not configured', setAttribute(name, value) { this[name] = value; } };
   const context = {
     document: {
@@ -2512,13 +2529,12 @@ test('empty OpenCode profiles render a localized summary before returning', () =
     t: (key, params) => params ? `${key}:${params.linked}/${params.total}` : `localized:${key}`
   };
 
-  vm.runInNewContext(`${renderSummary}\nrenderOpenCodeProfilesStatusSummary({});`, context);
+  runViewFixture(`${renderSummary}\nrenderOpenCodeProfilesStatusSummary({});`, context);
 
   assert.equal(totalEl.textContent, 'localized:settings.opencode.statusNotSet');
-  assert.match(
-    renderProfiles,
-    /state\.opencodeProfileCount = 0;\s*renderOpenCodeProfilesStatusSummary\(\{\}\);\s*renderSettingsSummaries\(\);\s*return;/
-  );
+  assert.match(renderProfiles, /state\.opencodeProfileCount = entries\.length \+ \(hasAmbientKey \? 1 : 0\);/);
+  assert.match(renderProfiles, /accountList\.update\([\s\S]*updateOpenCodeProfilesStatus\(\);/);
+  assert.doesNotMatch(renderProfiles, /if \(entries\.length === 0[\s\S]*?return;/);
 });
 
 test('expanded provider options use the full row width without nested indentation', () => {
@@ -2566,7 +2582,7 @@ test('Claude prepaid balance stays off and disabled until Web login is configure
     t: (key) => key
   };
   const loggedOutContext = { ...context, settings };
-  vm.runInNewContext(
+  runViewFixture(
     `${renderList}\nresult = limitProviderSettingsList('claude', settings);`,
     loggedOutContext
   );
@@ -2576,7 +2592,7 @@ test('Claude prepaid balance stays off and disabled until Web login is configure
 
   context.state.settings.claudeWebCookieConfigured = true;
   const loggedInContext = { ...context, settings };
-  vm.runInNewContext(
+  runViewFixture(
     `${renderList}\nresult = limitProviderSettingsList('claude', settings);`,
     loggedInContext
   );
@@ -2622,7 +2638,7 @@ test('OpenCode local DB fallback is off by default', () => {
     t: (key) => key
   };
   const settingsContext = { ...context, settings };
-  vm.runInNewContext(
+  runViewFixture(
     `${renderList}\nresult = limitProviderSettingsList('opencode', settings);`,
     settingsContext
   );
@@ -2723,27 +2739,18 @@ test('account and automatic provider panels reuse the original account summary g
   assert.match(renderSettings, /disclosureIcon\.className = 'cursor-disclosure-icon'/);
   assert.match(renderSettings, /actions\.append\(disclosureIcon\)/);
   assert.match(renderSettings, /moveLimitProviderLiveNode\(actions, accountStatus, disclosureIcon\)/);
-  assert.match(renderSettings, /mode\.className = 'cursor-status-pill limit-provider-mode-pill'/);
-  assert.match(renderSettings, /mode\.textContent = t\('settings\.limits\.connection\.autoDetect'\)/);
-  assert.match(renderSettings, /connectionDetailKey && !accountGroup/);
   assert.match(renderSettings, /accountGroup && provider\.status === 'notConfigured'/);
-  assert.match(renderSettings, /connectionDetailKey && !accountGroup && tagInfo\.label === 'Auto'/);
-  assert.match(renderSettings, /accountGroup && tagInfo\.label === 'Manual login'/);
-  assert.match(renderSettings, /if \(duplicatesInlineSetup\) continue/);
   assert.match(renderSettings, /main\.append\(copy, actions\)/);
   assert.doesNotMatch(renderSettings, /limit-provider-disclosure/);
   assert.doesNotMatch(renderSettings, /view-subgroup-toggle|view-subgroup-icon/);
-  assert.match(app, /antigravity: 'settings\.limits\.connection\.antigravity'/);
-  assert.match(app, /grok: 'settings\.limits\.connection\.grok'/);
-  assert.match(app, /kiro: 'settings\.limits\.connection\.kiro'/);
   assert.equal((i18n.match(/'settings\.limits\.connection\.title':/g) || []).length, 6);
   assert.equal((i18n.match(/'settings\.limits\.connection\.autoDetect':/g) || []).length, 6);
   assert.equal((i18n.match(/'settings\.limits\.connection\.antigravity':/g) || []).length, 6);
   assert.equal((i18n.match(/'settings\.limits\.connection\.grok':/g) || []).length, 6);
   assert.equal((i18n.match(/'settings\.limits\.connection\.kiro':/g) || []).length, 6);
   assert.match(css, /\.limit-provider-main\s*\{[\s\S]*?display: flex;[\s\S]*?justify-content: space-between/);
-  assert.match(css, /\.limit-provider-actions\s*\{[\s\S]*?flex: 0 1 auto;[\s\S]*?max-width: 58%;[\s\S]*?gap: 4px/);
-  assert.doesNotMatch(css, /\.limit-provider-actions > \.cursor-status-pill\s*\{[^}]*min-width:/);
+  assert.match(css, /\.limit-provider-actions\s*\{[^}]*flex: 0 0 auto;[^}]*max-width: 58%;[^}]*gap: 4px/);
+  assert.doesNotMatch(css, /\.limit-provider-actions > \.cursor-status-pill\s*\{[^}]*overflow-wrap: anywhere/);
   assert.match(css, /\.limit-provider-row\.expanded > \.limit-provider-main \.cursor-disclosure-icon/);
 });
 
@@ -2772,7 +2779,7 @@ test('provider checkboxes are named by their visible provider name', () => {
   };
   const nameNode = { id: '', textContent: 'Codex' };
 
-  vm.runInNewContext(
+  runViewFixture(
     `${connectName}\nconnectLimitProviderCheckboxName(checkbox, nameNode, 'codex');`,
     { checkbox, nameNode }
   );
@@ -2874,7 +2881,7 @@ test('Antigravity uses the shared OAuth source label', () => {
 });
 
 test('Zed identifies its manual web-session setup and dashboard source', () => {
-  assert.deepEqual(presentation.limitProviderCapabilityTags('zed'), ['Manual login', 'Web']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zed'), ["Web"]);
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'zed', source: 'web' }), 'Web');
 });
 
@@ -2924,7 +2931,7 @@ test('WorkBuddy sealed app credentials are shown as an actionable status', () =>
 
 test('deepseek source label and capability tags', () => {
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'deepseek', source: 'api' }), 'API');
-  assert.deepEqual(presentation.limitProviderCapabilityTags('deepseek'), ['Pay-as-you-go', 'API key']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('deepseek'), ["API key/Web"]);
 });
 
 test('deepseek status copy: notConfigured -> Add API key, unauthorized -> Update API key', () => {
@@ -2940,7 +2947,7 @@ test('deepseek status copy: notConfigured -> Add API key, unauthorized -> Update
 
 test('OpenRouter uses API-key setup copy and pay-as-you-go capability tags', () => {
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'openrouter', source: 'api' }), 'API');
-  assert.deepEqual(presentation.limitProviderCapabilityTags('openrouter'), ['Pay-as-you-go', 'API key']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('openrouter'), ["API key"]);
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'openrouter', status: 'notConfigured' }),
     { label: 'Add API key', tone: 'setup' }
@@ -2953,7 +2960,7 @@ test('OpenRouter uses API-key setup copy and pay-as-you-go capability tags', () 
 
 test('third-party API uses credential setup copy and relay capability tags', () => {
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'thirdparty', source: 'api' }), 'API');
-  assert.deepEqual(presentation.limitProviderCapabilityTags('thirdparty'), ['Relay', 'API']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('thirdparty'), ["API key"]);
   assert.deepEqual(
     presentation.limitProviderStatusLabel({ provider: 'thirdparty', status: 'notConfigured' }),
     { label: 'Add credential', tone: 'setup' }
@@ -3139,14 +3146,14 @@ test('copilot setup status asks for sign-in instead of an API key', () => {
 });
 
 test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama source labels and setup statuses', () => {
-  assert.deepEqual(presentation.limitProviderCapabilityTags('factory'), ['Auto', 'API key']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('zai'), ['Auto', 'Coding Plan', 'API key']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('zaiteam'), ['Team Plan', 'API key']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ['Auto', 'API key', 'CLI']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ['Manual login', 'Web']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ['Manual login', 'Web']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ['Auto', 'Desktop app', 'Web']);
-  assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ['Manual login', 'API/Web']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('factory'), ["API key/Local"]);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zai'), ["API key/Desktop app"]);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('zaiteam'), ["API key"]);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('volcengine'), ["API key/CLI"]);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('qoder'), ["Web"]);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('trae'), ["Web/CLI"]);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('workbuddy'), ["Web/Desktop app"]);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('ollama'), ["API key/Web"]);
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'factory', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'zai', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'api' }), 'API');
@@ -3211,7 +3218,7 @@ test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama so
 });
 
 test('Kimi capability tags and source label', () => {
-  assert.deepEqual(presentation.limitProviderCapabilityTags('kimi'), ['Coding Plan', 'Web/API']);
+  assert.deepEqual(presentation.limitProviderCapabilityTags('kimi'), ["API key/Web"]);
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'kimi', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'kimi', source: 'web' }), 'Web');
   assert.deepEqual(
@@ -3243,7 +3250,7 @@ test('Kimi, Droid and MiMo limits reuse their tracked-client colors', () => {
   assert.match(app, /if \(providerId === 'factory'\) return clientColors\.droid;/);
   assert.doesNotMatch(app, /providerId === 'mimo'/);
   assert.match(app, /const color = limitProviderColor\(id\);/);
-  const dockColor = vm.runInNewContext(
+  const dockColor = runViewFixture(
     `(${functionBody(dock, 'limitProviderColor', 'providerColor')})`,
     { pluginQuotaMetadata: () => null, clientColors: { mimo: '#111111', xiaomi: '#222222', droid: '#333333', default: '#444444' } }
   );
@@ -3359,7 +3366,7 @@ test('subscription editor captures its version before the opening animation', ()
     updatedAt: state.settings.subscriptionsUpdatedAt
   });
 
-  vm.runInNewContext(
+  runViewFixture(
     `${open}\nopenSubscriptionEditor();`,
     {
       cancelSubscriptionEditorClose() {},
@@ -3749,7 +3756,7 @@ test('subscription row rerenders keep the live editor node attached', () => {
   const empty = { removed: false, remove() { this.removed = true; } };
   const list = { children: [row, editor, empty] };
 
-  vm.runInNewContext(
+  runViewFixture(
     `${clear}\nclearSubscriptionListChildren(list, editor);`,
     { list, editor }
   );
@@ -3778,13 +3785,13 @@ test('the add control is a disclosure only in add mode', () => {
   const state = { subscriptionEditingId: 'subscription-1' };
   const els = { subscriptionAddToggle: toggle, subscriptionAddForm: form, subscriptionAddDetails: details };
 
-  vm.runInNewContext(`${control}\nsyncSubscriptionAddControl();`, { els, state });
+  runViewFixture(`${control}\nsyncSubscriptionAddControl();`, { els, state });
   assert.equal(attrs.has('aria-expanded'), false);
   assert.equal(attrs.has('aria-controls'), false);
   assert.equal(form.classList.expanded, false);
 
   state.subscriptionEditingId = '';
-  vm.runInNewContext(`${control}\nsyncSubscriptionAddControl();`, { els, state });
+  runViewFixture(`${control}\nsyncSubscriptionAddControl();`, { els, state });
   assert.equal(attrs.get('aria-expanded'), 'true');
   assert.equal(attrs.get('aria-controls'), 'subscriptionAddDetails');
   assert.equal(form.classList.expanded, true);
@@ -3819,6 +3826,7 @@ test('deleting a subscription preserves the settings scroll position and renders
     els: { settingsPanel: panel },
     isRendererWindowHidden: () => false,
     panel,
+    preservingSettingsPanelScroll: false,
     settingsScrollInteractionRevision: 0,
     requestAnimationFrame(callback) {
       frames.push(callback);
@@ -3972,7 +3980,7 @@ test('a top-up record keeps a ledger, and the tooltip reads from it', () => {
       { date: '2026-08-06', amountMinor: 10000 }
     ]
   });
-  const labels = Array.from(vm.runInNewContext(
+  const labels = Array.from(runViewFixture(
     `${rows}\ntopUpTooltipRows(subscription, provider, today, false).map((row) => row.label);`,
     {
       subscription: ledger,
@@ -4033,7 +4041,7 @@ test('the settings row is titled by account and carries the plan name in its met
   const title = functionBody(app, 'subscriptionRowTitle', 'subscriptionRowMeta');
   const meta = functionBody(app, 'subscriptionRowMeta', 'renderSubscriptionRows');
 
-  const run = (subscription, account) => vm.runInNewContext(
+  const run = (subscription, account) => runViewFixture(
     `${title}\nsubscriptionRowTitle(subscription, account);`,
     {
       subscription,
@@ -4056,7 +4064,7 @@ test('the settings row is titled by account and carries the plan name in its met
   // Which leaves the plan name a place of its own — except on the row where the
   // title already spent itself on it. The second line is the one that runs out of
   // room, so it never repeats what the first line just said.
-  const metaFor = (subscription, account) => vm.runInNewContext(
+  const metaFor = (subscription, account) => runViewFixture(
     `${title}\n${meta}\nsubscriptionRowMeta(subscription, account);`,
     {
       subscription,
@@ -4130,7 +4138,7 @@ test("one account's subscription never appears on its siblings", () => {
   const accountMatch = viewBody('subscriptionAccountMatches', 'subscriptionUsageCostUsd');
   const forProvider = viewBody('subscriptionForProvider', 'subscriptionsForProviderGroup');
 
-  const resolve = (accounts, subscriptions, provider) => vm.runInNewContext(
+  const resolve = (accounts, subscriptions, provider) => runViewFixture(
     `${accountMatch}\n${forProvider}\nsubscriptionForProvider(provider)?.id || null;`,
     {
       subscriptionApi,
@@ -4173,7 +4181,7 @@ test('the provider rollup appears once, on the row that stands for the provider'
   const subscription = subscriptionApi.normalizeSubscription({
     provider: 'codex', startDate: '2026-06-08', amountMinor: 2000, currency: 'USD'
   });
-  const labels = (includeRollup) => Array.from(vm.runInNewContext(
+  const labels = (includeRollup) => Array.from(runViewFixture(
     `${planRows}\nsubscriptionPlanTooltipRows(subscription, {}, today, includeRollup).map((row) => (row.separator ? '--' : row.label));`,
     {
       subscription,
@@ -4324,7 +4332,7 @@ test('elapsed subscription time never reads as zero months', () => {
   const symbol = functionBody(text, 'symbolFor', 'amountText');
   const elapsed = functionBody(text, 'elapsedText', 'topUpMinorText');
 
-  const run = (startDate, today) => vm.runInNewContext(
+  const run = (startDate, today) => runViewFixture(
     `${symbol}\n${elapsed}\nelapsedText(t, currencyApi, subscription, today);`,
     {
       subscription: subscriptionApi.normalizeSubscription({
@@ -4367,12 +4375,12 @@ test('a date bound is only written when it actually changes', () => {
     getAttribute(name) { return Object.prototype.hasOwnProperty.call(this.attrs, name) ? this.attrs[name] : null; },
     setAttribute(name, value) { this.writes += 1; this.attrs[name] = value; }
   };
-  vm.runInNewContext(
+  runViewFixture(
     `${setBound}\nsetSubscriptionDateBound(input, 'max', '2026-08-01');`,
     { input }
   );
   assert.equal(input.writes, 0);
-  vm.runInNewContext(
+  runViewFixture(
     `${setBound}\nsetSubscriptionDateBound(input, 'max', '2026-08-02');`,
     { input }
   );
@@ -4392,7 +4400,7 @@ test('one account holds one subscription record', () => {
     { provider: 'codex', accountKey: 'k2', accountEmail: 'b@example.com' }
   ];
   const existing = [{ id: 's1', provider: 'codex', binding: { accountEmail: 'b@example.com' } }];
-  const clash = (target, excludeId) => vm.runInNewContext(
+  const clash = (target, excludeId) => runViewFixture(
     `${forAccount}\nsubscriptionForAccount(list, 'codex', target, excludeId)?.id || null;`,
     {
       subscriptionApi,
@@ -4451,7 +4459,7 @@ test('a plan that does not auto-renew asks when it ends, and stores it there', (
   // the field currently means, not the one the markup shipped with.
   const label = { dataset: {}, textContent: '' };
   const note = { dataset: {}, textContent: '' };
-  const run = (checked) => vm.runInNewContext(
+  const run = (checked) => runViewFixture(
     `${fieldMode}\nsetSubscriptionRenewalFieldMode();`,
     {
       t: (key) => `t:${key}`,
@@ -4624,7 +4632,7 @@ test('the note stops promising the data stays on this device once a hub has it',
 
   // Only the two hub modes share; local mode keeps its own list.
   const shared = functionBody(main, 'subscriptionsAreShared', 'effectiveSubscriptions');
-  const run = (hubMode) => vm.runInNewContext(`${shared}\nsubscriptionsAreShared();`, { settings: { hubMode } });
+  const run = (hubMode) => runViewFixture(`${shared}\nsubscriptionsAreShared();`, { settings: { hubMode } });
   assert.equal(run('local'), false);
   assert.equal(run('client'), true);
   assert.equal(run('host'), true);
@@ -4826,7 +4834,7 @@ test('a refused write says which problem it was', () => {
   const mapCode = functionBody(main, 'subscriptionWriteFailureCode', 'discardOrphanedSubscriptions');
   const mapKey = functionBody(app, 'subscriptionWriteErrorKey', 'renderSubscriptionOrphanNotice');
 
-  const code = (error) => vm.runInNewContext(`${mapCode}\nsubscriptionWriteFailureCode(error);`, { error });
+  const code = (error) => runViewFixture(`${mapCode}\nsubscriptionWriteFailureCode(error);`, { error });
   // A hub that answered 401 is reachable — telling the user to check their
   // network sends them looking in the wrong place for a wrong secret.
   assert.equal(code({ code: 'rejected', status: 401 }), 'hub_rejected');
@@ -4834,7 +4842,7 @@ test('a refused write says which problem it was', () => {
   assert.equal(code({ code: 'write_failed' }), 'write_failed');
   assert.equal(code(new TypeError('fetch failed')), 'hub_unreachable');
 
-  const key = (message) => vm.runInNewContext(`${mapKey}\nsubscriptionWriteErrorKey({ message });`, { message });
+  const key = (message) => runViewFixture(`${mapKey}\nsubscriptionWriteErrorKey({ message });`, { message });
   assert.match(key("Error invoking remote method 'subscriptions:save': Error: hub_rejected"), /errorHubRejected$/);
   assert.match(key('Error: write_failed'), /errorWriteFailed$/);
   assert.match(key('Error: icloud_write_failed'), /errorIcloudWrite$/);
@@ -4862,7 +4870,7 @@ test('iCloud startup lets local subscription ownership reach the seed reconcile'
 test('a device with no limits of its own can still name the accounts on the hub', () => {
   const app = readRendererFile('app.js');
   const source = functionBody(app, 'limitProvidersForSubscriptions', 'subscriptionAccountValue');
-  const run = (local, aggregate) => plain(vm.runInNewContext(
+  const run = (local, aggregate) => plain(runViewFixture(
     `${source}\nlimitProvidersForSubscriptions();`,
     {
       accountIdentityApi: require('../../src/electron/renderer/accountIdentity'),
@@ -4959,7 +4967,7 @@ test('limitProvidersForSubscriptions keeps anonymous Muse accounts from every de
     devices[1]
   ], 0, Date.parse('2026-08-31T10:03:00.000Z'));
   const stats = { devices, limits: aggregate };
-  const run = (localStats, localDeviceId) => plain(vm.runInNewContext(
+  const run = (localStats, localDeviceId) => plain(runViewFixture(
     `${source}\nlimitProvidersForSubscriptions();`,
     {
       accountIdentityApi,
@@ -4996,7 +5004,7 @@ test('limitProvidersForSubscriptions keeps anonymous Muse accounts from every de
 test('the account picker tells two address-only accounts apart', () => {
   const app = readRendererFile('app.js');
   const source = functionBody(app, 'subscriptionAccountValue', 'subscriptionSuggestedPlanName');
-  const value = (provider) => vm.runInNewContext(`${source}\nsubscriptionAccountValue(__provider)`, {
+  const value = (provider) => runViewFixture(`${source}\nsubscriptionAccountValue(__provider)`, {
     __provider: provider
   });
 
@@ -5061,7 +5069,7 @@ test('one hub cached list is never filed as records belonging to the next hub', 
 
   // A trailing slash the user typed must not read as a different hub.
   const identity = functionBody(main, 'currentHubIdentity', 'orphanedSubscriptions');
-  const run = (url) => vm.runInNewContext(`${identity}\ncurrentHubIdentity();`, { effectiveHubConfig: () => ({ url }) });
+  const run = (url) => runViewFixture(`${identity}\ncurrentHubIdentity();`, { effectiveHubConfig: () => ({ url }) });
   assert.equal(run('https://hub.example/'), 'https://hub.example');
   assert.equal(run('https://hub.example'), 'https://hub.example');
   assert.equal(run(null), '');
@@ -5129,7 +5137,7 @@ test('a hub that cannot be reached never shows the previous hub records', () => 
     functionBody(main, 'subscriptionsDocumentFor', 'effectiveSubscriptions'),
     functionBody(main, 'effectiveSubscriptions', 'cacheSharedSubscriptions')
   ].join('\n');
-  const run = (context) => plain(vm.runInNewContext(`${effective}\neffectiveSubscriptions();`, {
+  const run = (context) => plain(runViewFixture(`${effective}\neffectiveSubscriptions();`, {
     subscriptionsAreShared: () => true,
     currentHubIdentity: () => 'https://b.example',
     ...context

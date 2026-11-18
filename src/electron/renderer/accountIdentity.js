@@ -343,6 +343,7 @@
   function accountTitleLabel(account, peers = [account], options = {}) {
     const resolvedPeers = Array.isArray(peers) && peers.length > 0 ? peers : [account];
     const baseLabelFor = (peer) => {
+      if (peer?.accountDisplayName) return peer.accountDisplayName;
       const name = String(peer?.accountName || '').trim();
       return accountEmailLabel(peer, resolvedPeers, {
         maskEmail: options.maskEmail === true,
@@ -408,6 +409,7 @@
   }
 
   return {
+    accountStableFingerprint,
     accountEmailLabel,
     accountKeyFamily,
     accountTitleLabel,
