@@ -4061,6 +4061,7 @@ html.is-windows .settings-panel select option {
   width: 100%;
   height: 70px;
   min-height: 56px;
+  cursor: default;
 }
 .home-area-chart .area-line {
   display: block;

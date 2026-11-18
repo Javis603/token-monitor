@@ -7530,11 +7530,12 @@ function bindHomeTrendTooltip(chart, model, points) {
   const tooltip = homeActivityTooltipEl('home-trend-tooltip');
   tooltip.setAttribute('aria-live', 'polite');
   tooltip.setAttribute('aria-atomic', 'true');
+  const date = tooltip.querySelector('[data-home-activity-tooltip-date]');
   let cost = tooltip.querySelector('.home-trend-tooltip-cost');
   if (!cost) {
     cost = document.createElement('span');
     cost.className = 'home-trend-tooltip-cost';
-    tooltip.append(cost);
+    tooltip.insertBefore(cost, date);
   }
   let pointerX = null;
   let focused = false;
@@ -7561,13 +7562,14 @@ function bindHomeTrendTooltip(chart, model, points) {
     crosshair.style.left = left;
     marker.style.left = left;
     marker.style.top = `${point.y / model.height * 100}%`;
-    tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatNumber(daily.tokens);
-    tooltip.querySelector('[data-home-activity-tooltip-date]').textContent = daily.date;
+    tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatCompact(daily.tokens);
+    date.textContent = daily.date;
     const hasCost = daily.cost != null && Number.isFinite(Number(daily.cost));
     cost.textContent = hasCost || Number(daily.unpricedTokens) > 0
-      ? `USD ${usageAttributionRowsApi.compactUsageCostLabel(daily.cost, daily.unpricedTokens,
-        (amount) => currencyApi.formatCurrencyFromUsd(amount, 'USD'))}` : '';
-    homeModule.setAttribute('aria-label', `${t('home.activity')} · ${t('home.trend')} · ${daily.date} · ${formatNumber(daily.tokens)} tokens${cost.textContent ? ` · ${cost.textContent}` : ''}`);
+      ? usageAttributionRowsApi.compactUsageCostLabel(daily.cost, daily.unpricedTokens,
+        (amount) => currencyApi.formatCurrencyFromUsd(amount, currentCurrency())) : '';
+    cost.hidden = !cost.textContent;
+    homeModule.setAttribute('aria-label', `${t('home.activity')} · ${t('home.trend')} · ${formatNumber(daily.tokens)} tokens${cost.textContent ? ` · ${cost.textContent}` : ''} · ${daily.date}`);
     chart.setAttribute('data-active', 'true');
     tooltip.dataset.visible = 'true';
     tooltip.setAttribute('aria-hidden', 'false');
@@ -7595,10 +7597,7 @@ function bindHomeTrendTooltip(chart, model, points) {
   };
   chart.addEventListener('pointerenter', (event) => showAt(event.clientX));
   chart.addEventListener('pointermove', (event) => showAt(event.clientX));
-  chart.addEventListener('pointerleave', () => {
-    pointerX = null;
-    if (focused) select(selected); else dismiss();
-  });
+  chart.addEventListener('pointerleave', hide);
   const onFocusIn = (event) => {
     if (event.target !== homeModule) return;
     focused = true;
