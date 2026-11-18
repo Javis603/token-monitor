@@ -7,7 +7,12 @@ const test = require('node:test');
 const { EventEmitter } = require('node:events');
 const vm = require('node:vm');
 
-const { shouldUseXWayland, startWithXWayland, canPositionWindow } = require('../../src/electron/linuxDisplayServer');
+const {
+  shouldUseXWayland,
+  startWithXWayland,
+  canPositionWindow,
+  suppressLinuxSystemContextMenu
+} = require('../../src/electron/linuxDisplayServer');
 
 const waylandSession = { WAYLAND_DISPLAY: 'wayland-0', DISPLAY: ':0' };
 
@@ -140,4 +145,50 @@ test('backend-looking data after the terminator is not an effective switch', () 
   assert.equal(shouldUseXWayland({ platform: 'linux', env: waylandSession, argv: ['--', '--ozone-platform=wayland'] }), true);
   assert.equal(canPositionWindow({ platform: 'linux', env: waylandSession, argv: ['--', '--ozone-platform=x11'] }), false);
   assert.equal(canPositionWindow({ platform: 'linux', env: { DISPLAY: ':0' }, argv: ['--', '--ozone-platform=wayland'] }), true);
+});
+
+test('suppressLinuxSystemContextMenu cancels system-context-menu on Linux X11 and XWayland', () => {
+  for (const envAndArgv of [
+    { env: { DISPLAY: ':0' }, argv: [] },
+    { env: waylandSession, argv: ['electron', '.', '--ozone-platform=x11'] }
+  ]) {
+    const win = new EventEmitter();
+    let prevented = 0;
+    assert.equal(suppressLinuxSystemContextMenu(win, { platform: 'linux', ...envAndArgv }), true);
+    win.emit('system-context-menu', { preventDefault: () => { prevented += 1; } });
+    assert.equal(prevented, 1);
+
+    // Calling again on the same window must not stack duplicate listeners.
+    assert.equal(suppressLinuxSystemContextMenu(win, { platform: 'linux', ...envAndArgv }), true);
+    assert.equal(win.listenerCount('system-context-menu'), 1);
+  }
+});
+
+test('suppressLinuxSystemContextMenu skips non-Linux, native Wayland, and unusable windows', () => {
+  for (const options of [
+    { platform: 'win32', env: { DISPLAY: ':0' }, argv: [] },
+    { platform: 'darwin', env: { DISPLAY: ':0' }, argv: [] },
+    { platform: 'linux', env: waylandSession, argv: [] },
+    { platform: 'linux', env: { DISPLAY: ':0' }, argv: ['--ozone-platform=wayland'] }
+  ]) {
+    const win = new EventEmitter();
+    let prevented = 0;
+    assert.equal(suppressLinuxSystemContextMenu(win, options), false);
+    assert.equal(win.listenerCount('system-context-menu'), 0);
+    win.emit('system-context-menu', { preventDefault: () => { prevented += 1; } });
+    assert.equal(prevented, 0);
+  }
+
+  assert.equal(suppressLinuxSystemContextMenu(null, { platform: 'linux', env: { DISPLAY: ':0' }, argv: [] }), false);
+  const destroyed = new EventEmitter();
+  destroyed.isDestroyed = () => true;
+  assert.equal(suppressLinuxSystemContextMenu(destroyed, { platform: 'linux', env: { DISPLAY: ':0' }, argv: [] }), false);
+});
+
+test('mainWindow and dashboardWindow install Linux X11 system context menu suppression', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const createWindowSection = main.slice(main.indexOf('function createWindow('), main.indexOf('function createDashboardWindow('));
+  const createDashboardSection = main.slice(main.indexOf('function createDashboardWindow('), main.indexOf('async function getDashboardHistory('));
+  assert.match(createWindowSection, /suppressLinuxSystemContextMenu\(win\)/);
+  assert.match(createDashboardSection, /suppressLinuxSystemContextMenu\(win\)/);
 });
