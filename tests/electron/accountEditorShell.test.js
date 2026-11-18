@@ -150,7 +150,7 @@ test('provider account lists precede guidance with live controls and keyboard or
     context.prioritizeLimitProviderAccounts(group);
     assert.equal(document.moves, 1, 'settled order does not move focused controls again');
   }
-  const render = source.slice(source.indexOf('function renderLimitProviderCheckboxes('), source.indexOf('function moveOpenCodeLocalFallbackSetting('));
+  const render = source.slice(source.indexOf('function renderLimitProviderCheckboxes('), source.indexOf('async function saveAccountCredential('));
   const connection = render.indexOf('optionsInner.append(limitProviderConnectionDetail(');
   const accounts = render.indexOf('moveLimitProviderLiveNode(optionsInner, accountGroup);');
   const settings = render.indexOf('optionsInner.append(settingsList)');

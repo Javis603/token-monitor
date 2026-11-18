@@ -12623,12 +12623,6 @@ function renderLimitProviderCheckboxesNow() {
       if (authorSettings?.isConnected) moveLimitProviderLiveNode(optionsInner, authorSettings);
       else if (authorSettings) optionsInner?.append(authorSettings);
     }
-    // OpenCode's one setting is an off-by-default fallback estimate. Rendered by
-    // the shared path it lands above the account list, reading as the first
-    // thing to set up; it belongs below the accounts, collapsed. Reparented
-    // rather than special-cased in the shared renderer so the setting keeps its
-    // change tracking and re-render signature.
-    if (id === 'opencode') moveOpenCodeLocalFallbackSetting(settingsList);
   }
   if (!matched.size) renderSettingsListEmptyState(els.limitProviderCheckboxes);
   for (const row of previousRows) row.remove();
@@ -12637,45 +12631,6 @@ function renderLimitProviderCheckboxesNow() {
   }
   state.limitProviderRenderSignature = renderSignature;
   pluginLimitSettings?.reconcile();
-}
-
-// Moves the OpenCode local-DB toggle into its own collapsed group beneath the
-// account list, and keeps that group's status pill in sync with the setting.
-function moveOpenCodeLocalFallbackSetting(list) {
-  const target = document.getElementById('opencodeLocalFallbackInner');
-  if (!target) return;
-  if (list) {
-    if (list.parentElement !== target) moveLimitProviderLiveNode(target, list);
-    // The shared renderer builds a fresh settings list on every pass, so moving
-    // without clearing stacks one copy of the toggle per re-render.
-    for (const stale of [...target.children]) if (stale !== list) stale.remove();
-    // The group header already names the setting, so the item's own title would
-    // read twice. Dropping it alone leaves the label cell empty and the switch
-    // adrift, so the description moves into that cell and becomes the label.
-    for (const item of target.querySelectorAll('.settings-item')) {
-      item.querySelector('.settings-item-title')?.remove();
-      const cell = item.querySelector('.settings-item-text');
-      const desc = item.querySelector('.settings-item-desc');
-      if (cell && desc && desc.parentElement !== cell) cell.append(desc);
-    }
-  }
-
-  const pill = document.getElementById('opencodeLocalFallbackStatus');
-  if (pill) {
-    const on = (state.settings || {}).opencodeLocalLimitsEnabled === true;
-    pill.textContent = t(on ? 'settings.appearance.motion.on' : 'settings.appearance.motion.off');
-  }
-
-  const toggle = document.getElementById('opencodeLocalFallbackSettingsToggle');
-  if (toggle && !toggle.dataset.wired) {
-    toggle.dataset.wired = '1';
-    // The shared helper, so this collapses exactly like every other group
-    // instead of a second hand-rolled implementation of the same thing.
-    toggle.addEventListener('click', () => setAccountGroupExpanded(
-      'opencodeLocalFallback',
-      toggle.getAttribute('aria-expanded') !== 'true'
-    ));
-  }
 }
 
 // Every account form saves through limits:saveCredential, which checks the

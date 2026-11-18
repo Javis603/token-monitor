@@ -7962,19 +7962,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   height: 4px;
   border-width: 0 1.2px 1.2px 0;
 }
-#opencodeLocalFallbackAccountGroup > .settings-group-header .cursor-disclosure-icon {
-  transform: rotate(-90deg);
-}
-#opencodeLocalFallbackAccountGroup.expanded > .settings-group-header .cursor-disclosure-icon {
-  transform: rotate(0deg);
-}
-/* The relocated toggle keeps only its description, and a paragraph's
-   content-based flex basis is wide enough to claim the whole line on its own,
-   pushing the switch to a second row. A zero basis lets both share the line and
-   the text reflow into the space that is left. */
-#opencodeLocalFallbackInner .settings-item > .settings-item-text {
-  flex: 1 1 0;
-}
 /* Animated like every other disclosure in the panel rather than snapping from
    `display: none`; the container squeezes a single inner wrapper, so the rows
    have to live inside one. */

@@ -2917,37 +2917,12 @@ test('OpenCode credentials are named, merged and removed one at a time', () => {
   assert.doesNotMatch(handlers, /api: 'apiKey', cookie: 'cookie', ambient: 'useAmbientKey'/);
 });
 
-test('the OpenCode local fallback toggle is relocated once, not once per render', () => {
+test('OpenCode local fallback uses the standard settings card without a nested disclosure', () => {
   const app = readRendererFile('app.js');
-  const body = functionBody(app, 'moveOpenCodeLocalFallbackSetting', 'limitProviderAccountGroup');
-  assert.ok(body, 'relocation helper should exist');
-  // The shared renderer builds a fresh settings list every pass, so a move that
-  // does not clear the destination stacks one copy of the toggle per re-render.
-  assert.match(body, /for \(const stale of \[\.\.\.target\.children\]\) if \(stale !== list\) stale\.remove\(\);/);
-  // The group header already names the setting, so the item title would read
-  // twice; dropping it alone leaves the label cell empty and the switch adrift.
-  assert.match(body, /querySelector\('\.settings-item-title'\)\?\.remove\(\)/);
-  assert.match(body, /if \(cell && desc && desc\.parentElement !== cell\) cell\.append\(desc\)/);
-  // The shared collapsible helper, not a second hand-rolled one, which also
-  // means the ids have to follow its \`\${prefix}SettingsToggle\` convention.
-  assert.match(body, /setAccountGroupExpanded\(\s*'opencodeLocalFallback'/);
-  assert.match(body, /getElementById\('opencodeLocalFallbackSettingsToggle'\)/);
-
   const html = readRendererFile('index.html');
-  const details = html.match(/<div id="opencodeSettingsDetails"[\s\S]*?<div id="opencodeErrorMessage"/)?.[0] || '';
-  // The collapse animates by squeezing one inner wrapper; a bare container has
-  // nothing to shrink and keeps its height however the class is toggled.
-  assert.match(details, /<div id="opencodeLocalFallbackSettingsDetails"[^>]*>\s*<div id="opencodeLocalFallbackInner" class="accordion-animation-inner">/);
-  // Accounts first, then the off-by-default estimate, then adding an account.
-  const order = ['settings.opencode.accountsNote', 'opencodeProfileList', 'opencodeLocalFallbackAccountGroup', 'opencodeAddForm']
-    .map((token) => details.indexOf(token));
-  assert.ok(order.every((index) => index >= 0), 'panel should contain note, list, fallback and add form');
-  assert.deepEqual(order, [...order].sort((a, b) => a - b));
-
-  // Left with only its description, the text cell's content-based flex basis
-  // claims the whole line on its own and wraps the switch onto a second row.
-  const css = readRendererFile('styles.css');
-  assert.match(css, /#opencodeLocalFallbackInner \.settings-item > \.settings-item-text \{[^}]*flex: 1 1 0;/);
+  assert.match(app, /opencode:\s*\[\{\s*key: 'opencodeLocalLimitsEnabled'/);
+  assert.match(app, /if \(settingsList\) optionsInner\.append\(settingsList\)/);
+  assert.doesNotMatch(app + html, /opencodeLocalFallback/);
 });
 
 test('an expanded OpenCode account animates and its merge button gets its own row', () => {
