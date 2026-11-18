@@ -12558,7 +12558,9 @@ function renderToolPreferencesNow() {
   state.toolPreferenceSourceSignature = sourceSignature;
   const previousChildren = Array.from(els.clientDisplayList.children);
   const focusedId = document.activeElement?.id || '';
-  const enabled = enabledClientSet();
+  // One selection for the whole repaint, including writes still in flight:
+  // grouping, switches and the attention check must agree with the signature.
+  const enabled = new Set(String(pendingTrackedClients() || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
   const hidden = hiddenClientSet();
   const pinned = pinnedClientSet();
   const clientStatus = localClientStatus();
