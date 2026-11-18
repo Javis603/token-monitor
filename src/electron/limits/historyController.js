@@ -13,6 +13,8 @@ const { CARD_MOVE_MS, CARD_SPRING, advanceCardFrame } = require('../cardSpring')
 const motionPreference = require('../motionPreference');
 const { attachNativeMaterialVisibility, syncNativeMaterialVisibility, getNativeMaterialState } = require('../nativeMaterialVisibility');
 
+const OWNER_DISMISS_EVENTS = ['blur', 'hide', 'closed', 'move', 'resize', 'minimize'];
+
 function historyBounds(owner, rect, workArea, zoom = 1) {
   const width = Math.min(Math.round(310 * zoom), workArea.width - 16);
   const height = Math.min(Math.round(420 * zoom), workArea.height - 16);
@@ -39,8 +41,9 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
   let presented = false;
   let timer = null;
   let ownerListeners = [];
-  let revision = 0;
+  let refreshRevision = 0;
   let pendingOpen = null;
+  let visibleRequestId = null;
   let activated = false;
   let anchor = null;
   let currentPayload = null;
@@ -156,14 +159,15 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
       layoutWidth: placement.bounds.width / win.webContents.getZoomFactor(), nativeMaterial: getNativeMaterialState(win) });
   }
   function cancelClose() { clearTimer(timer); timer = null; }
-  function hide() {
+  function hide({ keepInteractiveOpen = false } = {}) {
     const instant = reducedMotion();
-    revision += 1;
-    pendingOpen = null;
+    refreshRevision += 1;
+    if (!keepInteractiveOpen || !pendingOpen?.interactive) pendingOpen = null;
     activated = false;
     anchor = null;
     cancelClose();
     visible = false;
+    visibleRequestId = null;
     presented = false;
     clearPointerTimer(pointerTimer);
     pointerTimer = null;
@@ -194,19 +198,19 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
       const point = screen.getCursorScreenPoint();
       if (!visible || activated || containsPoint(point) || inside(point, anchor)) return;
       if (crossingGap(point)) return leave();
-      hide();
+      hide({ keepInteractiveOpen: true });
     }, 600);
   }
   async function refresh() {
     if (getOpenMode() === 'off') return hide();
     if (!visible || !ready) return;
     if (getOpenMode() === 'click' && !activated) return hide();
-    const request = ++revision;
+    const request = ++refreshRevision;
     try {
       const payload = await read(key);
-      if (request !== revision || !visible) return;
+      if (request !== refreshRevision || !visible) return;
       if (payload === undefined) return; // superseded read, not a removed account
-      if (!payload || payload.source !== source) return hide();
+      if (!payload || payload.source !== source) return hide({ keepInteractiveOpen: true });
       send(payload);
     } catch (error) { logger(`[limits-history] ${error.message}`); }
   }
@@ -251,50 +255,61 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     const rect = request.rect;
     if (!rect || !['x', 'y', 'width', 'height'].every(k => Number.isFinite(rect[k]))) return false;
     const interactive = request.interactive === true;
+    const requestId = interactive && Number.isSafeInteger(request.requestId) ? request.requestId : null;
     if (!interactive && (getOpenMode() === 'click' || activated || containsPoint(screen.getCursorScreenPoint()))) return false;
     if (visible && owner === parent && key === request.key) {
       cancelClose();
       if (interactive) {
+        pendingOpen = null;
         if (activated) hide();
-        else activated = true;
+        else {
+          activated = true;
+          visibleRequestId = requestId;
+        }
       }
       return true;
     }
     // Loading the reusable renderer and reading SQLite need not wait for each other.
+    if (!interactive && pendingOpen?.interactive) return false;
     const panel = ensureWindow();
-    const requestRevision = ++revision;
-    pendingOpen = { parent, key: request.key, interactive };
+    const openingRequest = { parent, key: request.key, interactive, requestId };
+    pendingOpen = openingRequest;
     const cancelPending = () => {
-      if (requestRevision === revision) { pendingOpen = null; revision += 1; }
+      if (pendingOpen === openingRequest) pendingOpen = null;
     };
-    parent.once('blur', cancelPending);
+    // The visible card can hide and detach its listeners while this read is pending.
+    for (const event of OWNER_DISMISS_EVENTS) parent.once(event, cancelPending);
     let payload;
     try { payload = await read(request.key); }
     catch (error) {
-      if (requestRevision === revision) pendingOpen = null;
+      cancelPending();
       logger(`[limits-history] ${error.message}`);
       return false;
     }
-    finally { parent.removeListener('blur', cancelPending); }
-    if (requestRevision !== revision) return false;
+    finally {
+      for (const event of OWNER_DISMISS_EVENTS) parent.removeListener(event, cancelPending);
+    }
+    if (pendingOpen !== openingRequest) return false;
     pendingOpen = null;
     if (!payload || getOpenMode() === 'off' || parent.isDestroyed() || !parent.isVisible() || !interactive && getOpenMode() === 'click') return false;
     if (owner !== parent) {
       hide();
       owner = parent;
-      for (const event of ['blur', 'hide', 'closed', 'move', 'resize', 'minimize']) {
+      for (const event of OWNER_DISMISS_EVENTS) {
         const listener = () => hide();
         owner.on(event, listener);
         ownerListeners.push([event, listener]);
       }
     }
     cancelClose();
+    refreshRevision += 1;
     animatePlacement = visible && key !== request.key;
     key = request.key;
     source = payload.source;
     currentPayload = payload;
     const opening = !presented;
     visible = true;
+    visibleRequestId = requestId;
     activated = interactive;
     parent.webContents.send('limitsHistory:state', true, key);
     const bounds = parent.getBounds();
@@ -319,17 +334,21 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     ipcMain.on('limitsHistory:leave', (event, leavingKey) => {
       if (event.sender === pendingOpen?.parent.webContents && leavingKey === pendingOpen.key && !pendingOpen.interactive) {
         pendingOpen = null;
-        revision += 1;
       }
       if (event.sender === win?.webContents || event.sender === owner?.webContents && leavingKey === key) leave();
     });
     ipcMain.on('limitsHistory:enter', (event, enteringKey) => {
       if (event.sender === win?.webContents) {
         cancelClose();
-        if (pendingOpen && !pendingOpen.interactive) { pendingOpen = null; revision += 1; }
+        if (pendingOpen && !pendingOpen.interactive) pendingOpen = null;
       } else if (event.sender === owner?.webContents && enteringKey === key) cancelClose();
     });
-    ipcMain.on('limitsHistory:close', event => {
+    ipcMain.on('limitsHistory:close', (event, requestId) => {
+      if (Number.isSafeInteger(requestId)) {
+        if (pendingOpen?.requestId === requestId && event.sender === pendingOpen.parent.webContents) pendingOpen = null;
+        if (visibleRequestId === requestId && event.sender === owner?.webContents) hide({ keepInteractiveOpen: true });
+        return;
+      }
       if (event.sender === win?.webContents || event.sender === owner?.webContents || event.sender === pendingOpen?.parent.webContents) {
         hide();
       }
