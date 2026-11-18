@@ -4817,8 +4817,23 @@ const { limitWindowText } = window.TokenMonitorLimitWindowText;
 // globals of its own.
 let limitsHistoryOpen = false;
 let limitsHistoryActiveKey = '';
+let pendingLimitsHistoryOpen = null;
+async function openLimitsHistory(key, rect, interactive) {
+  const opening = window.tokenMonitor.limits.openHistory(key, rect, interactive);
+  if (!interactive) return opening;
+  pendingLimitsHistoryOpen = opening;
+  try {
+    return await opening;
+  } finally {
+    if (pendingLimitsHistoryOpen === opening) pendingLimitsHistoryOpen = null;
+  }
+}
+function dismissLimitsHistory() {
+  pendingLimitsHistoryOpen = null;
+  window.tokenMonitor.limits.closeHistory();
+}
 document.addEventListener('pointerdown', event => {
-  if (limitsHistoryOpen && !event.target.closest('[data-limit-history]')) window.tokenMonitor.limits.closeHistory();
+  if ((limitsHistoryOpen || pendingLimitsHistoryOpen) && !event.target.closest('[data-limit-history]')) dismissLimitsHistory();
 }, true);
 window.tokenMonitor?.limits?.onHistoryState?.((open, key) => {
   limitsHistoryOpen = open === true;
@@ -4828,9 +4843,9 @@ window.tokenMonitor?.limits?.onHistoryState?.((open, key) => {
   }
 });
 document.addEventListener('keydown', event => {
-  if (event.key !== 'Escape' || !limitsHistoryOpen) return;
+  if (event.key !== 'Escape' || !(limitsHistoryOpen || pendingLimitsHistoryOpen)) return;
   event.preventDefault();
-  window.tokenMonitor.limits.closeHistory();
+  dismissLimitsHistory();
 }, true);
 
 // Probes the limits runtime is running right now, whoever started them.
@@ -4841,7 +4856,7 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   history: window.tokenMonitor?.limits?.openHistory ? {
     key: window.TokenMonitorLimitsHistoryIdentity.historyRowKey,
     activeKey: () => limitsHistoryActiveKey,
-    open: (key, rect, interactive) => window.tokenMonitor.limits.openHistory(key, rect, interactive),
+    open: openLimitsHistory,
     enter: key => window.tokenMonitor.limits.enterHistory(key),
     leave: key => window.tokenMonitor.limits.leaveHistory(key)
   } : null,

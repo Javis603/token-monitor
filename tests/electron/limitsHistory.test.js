@@ -1050,6 +1050,50 @@ function previewFixture(t, { platform = 'win32', nativeRegions = false } = {}) {
   return f;
 }
 
+for (const event of ['keydown', 'pointerdown']) {
+  test(`main renderer ${event} cancels an account switch after the old preview hides`, async t => {
+    const f = previewFixture(t);
+    const handlers = new Map();
+    let closeMessages = 0;
+    const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+    const start = source.indexOf('let limitsHistoryOpen = false;');
+    const end = source.indexOf('\n  t,', source.indexOf('const limitWindowsView =', start));
+    const history = require('node:vm').runInNewContext(source.slice(start, end) + '}); limitWindowsView;', {
+      document: { addEventListener: (type, handler) => handlers.set(type, handler), querySelectorAll: () => [] },
+      window: {
+        TokenMonitorLimitsHistoryIdentity: {},
+        TokenMonitorLimitWindowsView: { createLimitWindowsView: options => options.history },
+        tokenMonitor: { limits: {
+          openHistory: (key, rect, interactive) => f.open(key, interactive, rect),
+          closeHistory: () => { closeMessages++; f.fromOwner('close'); },
+          onHistoryState: callback => {
+            f.owner.webContents.send = (channel, ...args) => {
+              if (channel === 'limitsHistory:state') callback(...args);
+            };
+          }
+        } }
+      }
+    });
+    const rect = { x: 0, y: 50, width: 300, height: 100 };
+    assert.equal(await history.open('a', rect, true), true);
+    const readB = Promise.withResolvers();
+    f.pending = readB.promise;
+    const opening = history.open('b', rect, true);
+    f.pending = Promise.resolve(null);
+    await f.controller.refresh();
+    assert.equal(history.activeKey(), '');
+
+    const cancel = { key: 'Escape', target: { closest: () => null }, preventDefault() {} };
+    handlers.get(event)(cancel);
+    readB.resolve({ source: 'a', title: 'B' });
+    assert.equal(await opening, false);
+    assert.equal(f.shown(), false);
+    assert.equal(closeMessages, 1);
+    handlers.get(event)(cancel);
+    assert.equal(closeMessages, 1, 'settled opens no longer consume dismissal');
+  });
+}
+
 test('refreshing the visible history does not cancel an in-flight account switch', async t => {
   const f = previewFixture(t);
   await f.open('a', true);
