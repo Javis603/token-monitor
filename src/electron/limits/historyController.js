@@ -43,6 +43,7 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
   let ownerListeners = [];
   let refreshRevision = 0;
   let pendingOpen = null;
+  let visibleRequestId = null;
   let activated = false;
   let anchor = null;
   let currentPayload = null;
@@ -166,6 +167,7 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     anchor = null;
     cancelClose();
     visible = false;
+    visibleRequestId = null;
     presented = false;
     clearPointerTimer(pointerTimer);
     pointerTimer = null;
@@ -253,19 +255,24 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     const rect = request.rect;
     if (!rect || !['x', 'y', 'width', 'height'].every(k => Number.isFinite(rect[k]))) return false;
     const interactive = request.interactive === true;
+    const requestId = interactive && Number.isSafeInteger(request.requestId) ? request.requestId : null;
     if (!interactive && (getOpenMode() === 'click' || activated || containsPoint(screen.getCursorScreenPoint()))) return false;
     if (visible && owner === parent && key === request.key) {
       cancelClose();
       if (interactive) {
         pendingOpen = null;
         if (activated) hide();
-        else activated = true;
+        else {
+          activated = true;
+          visibleRequestId = requestId;
+        }
       }
       return true;
     }
     // Loading the reusable renderer and reading SQLite need not wait for each other.
+    if (!interactive && pendingOpen?.interactive) return false;
     const panel = ensureWindow();
-    const openingRequest = { parent, key: request.key, interactive };
+    const openingRequest = { parent, key: request.key, interactive, requestId };
     pendingOpen = openingRequest;
     const cancelPending = () => {
       if (pendingOpen === openingRequest) pendingOpen = null;
@@ -302,6 +309,7 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     currentPayload = payload;
     const opening = !presented;
     visible = true;
+    visibleRequestId = requestId;
     activated = interactive;
     parent.webContents.send('limitsHistory:state', true, key);
     const bounds = parent.getBounds();
@@ -335,9 +343,10 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
         if (pendingOpen && !pendingOpen.interactive) pendingOpen = null;
       } else if (event.sender === owner?.webContents && enteringKey === key) cancelClose();
     });
-    ipcMain.on('limitsHistory:close', (event, pendingOnly) => {
-      if (pendingOnly === true) {
-        if (pendingOpen?.interactive && event.sender === pendingOpen.parent.webContents) pendingOpen = null;
+    ipcMain.on('limitsHistory:close', (event, requestId) => {
+      if (Number.isSafeInteger(requestId)) {
+        if (pendingOpen?.requestId === requestId && event.sender === pendingOpen.parent.webContents) pendingOpen = null;
+        if (visibleRequestId === requestId && event.sender === owner?.webContents) hide({ keepInteractiveOpen: true });
         return;
       }
       if (event.sender === win?.webContents || event.sender === owner?.webContents || event.sender === pendingOpen?.parent.webContents) {

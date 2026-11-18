@@ -4818,19 +4818,21 @@ const { limitWindowText } = window.TokenMonitorLimitWindowText;
 let limitsHistoryOpen = false;
 let limitsHistoryActiveKey = '';
 let pendingLimitsHistoryOpen = null;
+let limitsHistoryRequestId = 0;
 async function openLimitsHistory(key, rect, interactive) {
-  const opening = window.tokenMonitor.limits.openHistory(key, rect, interactive);
-  if (!interactive) return opening;
-  pendingLimitsHistoryOpen = opening;
+  if (!interactive) return window.tokenMonitor.limits.openHistory(key, rect, false);
+  const requestId = ++limitsHistoryRequestId;
+  pendingLimitsHistoryOpen = requestId;
   try {
-    return await opening;
+    return await window.tokenMonitor.limits.openHistory(key, rect, true, requestId);
   } finally {
-    if (pendingLimitsHistoryOpen === opening) pendingLimitsHistoryOpen = null;
+    if (pendingLimitsHistoryOpen === requestId) pendingLimitsHistoryOpen = null;
   }
 }
 function dismissLimitsHistory() {
+  const requestId = limitsHistoryOpen ? null : pendingLimitsHistoryOpen;
   pendingLimitsHistoryOpen = null;
-  window.tokenMonitor.limits.closeHistory(!limitsHistoryOpen);
+  window.tokenMonitor.limits.closeHistory(requestId);
 }
 document.addEventListener('pointerdown', event => {
   if ((limitsHistoryOpen || pendingLimitsHistoryOpen) && !event.target.closest('[data-limit-history]')) dismissLimitsHistory();

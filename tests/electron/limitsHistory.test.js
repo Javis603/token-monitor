@@ -1038,8 +1038,8 @@ function previewFixture(t, { platform = 'win32', nativeRegions = false } = {}) {
   f.controller.register();
   f.handlers = handlers;
   f.owner = owner;
-  f.open = async (key = 'a', interactive = false, rect = { x: 0, y: 50, width: 300, height: 100 }) => {
-    const result = await handlers.get('limitsHistory:open')({ sender: owner.webContents }, { key, interactive, rect });
+  f.open = async (key = 'a', interactive = false, rect = { x: 0, y: 50, width: 300, height: 100 }, requestId) => {
+    const result = await handlers.get('limitsHistory:open')({ sender: owner.webContents }, { key, interactive, rect, requestId });
     if (f.window && !f.loaded) { f.loaded = true; f.window.webContents.emit('did-finish-load'); }
     return result;
   };
@@ -1055,6 +1055,8 @@ for (const event of ['keydown', 'pointerdown']) {
     const f = previewFixture(t);
     const handlers = new Map();
     let closeMessages = 0;
+    let queueClose = false;
+    let deliverClose;
     const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
     const start = source.indexOf('let limitsHistoryOpen = false;');
     const end = source.indexOf('\n  t,', source.indexOf('const limitWindowsView =', start));
@@ -1064,8 +1066,12 @@ for (const event of ['keydown', 'pointerdown']) {
         TokenMonitorLimitsHistoryIdentity: {},
         TokenMonitorLimitWindowsView: { createLimitWindowsView: options => options.history },
         tokenMonitor: { limits: {
-          openHistory: (key, rect, interactive) => f.open(key, interactive, rect),
-          closeHistory: pendingOnly => { closeMessages++; f.fromOwner('close', pendingOnly); },
+          openHistory: (key, rect, interactive, requestId) => f.open(key, interactive, rect, requestId),
+          closeHistory: requestId => {
+            closeMessages++;
+            if (queueClose) deliverClose = () => f.fromOwner('close', requestId);
+            else f.fromOwner('close', requestId);
+          },
           onHistoryState: callback => {
             f.owner.webContents.send = (channel, ...args) => {
               if (channel === 'limitsHistory:state') callback(...args);
@@ -1099,13 +1105,20 @@ for (const event of ['keydown', 'pointerdown']) {
     const staleOpen = history.open('b', rect, true);
     f.pending = Promise.resolve(null);
     await f.controller.refresh();
+    assert.equal(await history.open('c', rect, false), false, 'hover cannot supersede an explicit switch');
+    queueClose = true;
+    handlers.get(event)(cancel);
+    staleRead.resolve({ source: 'a', title: 'B' });
+    assert.equal(await staleOpen, true, 'the read can complete before close reaches main');
+    assert.equal(f.shown(), true);
+    deliverClose();
+    assert.equal(f.shown(), false, 'the targeted close still dismisses the committed card');
+
     const hoverRead = Promise.withResolvers();
     f.pending = hoverRead.promise;
     const hover = history.open('c', rect, false);
-    handlers.get(event)(cancel);
-    staleRead.resolve({ source: 'a', title: 'B' });
+    deliverClose();
     hoverRead.resolve({ source: 'a', title: 'C' });
-    assert.equal(await staleOpen, false);
     assert.equal(await hover, true);
     assert.equal(f.lastPayload.title, 'C');
   });
