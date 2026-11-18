@@ -64,12 +64,18 @@ function migrateAccountSlots(store, settings, now = Date.now, env = process.env)
     const raw = stored[key] || [];
     const slots = normalizeAccountSlots(entry, raw);
     if (slots.length !== raw.length) throw new Error('Invalid account slot list');
-    let slot = slots.find(slot => accountValuesFingerprint(slot.values) === fingerprint);
+    const alibabaImport = entry.id === 'alibaba';
+    // Journal the chosen destination with its first write. A restart can have
+    // a different console environment even though the fixed cookie is unchanged.
+    const pendingAlibaba = alibabaImport && document.migrations.alibabaSlotImport;
+    let slot = slots.find(slot => pendingAlibaba === slot.id && slot.values.alibabaCookie === values.alibabaCookie)
+      || slots.find(slot => accountValuesFingerprint(slot.values) === fingerprint);
+    let next = slots;
     if (slot && !slot.enabled) {
       // The fixed credential was being collected; a paused duplicate taking its
       // place must not stop that, so the destination is resumed.
       slot = { ...slot, enabled: true, updatedAt: new Date(now()).toISOString() };
-      store.replaceSettingsCredentials({ ...stored, [key]: slots.map(item => item.id === slot.id ? slot : item) }, document);
+      next = slots.map(item => item.id === slot.id ? slot : item);
     } else if (!slot) {
       if (slots.length >= 21) throw new Error('Account slot limit prevents migration');
       const saved = stored[defaultIdentityKey(entry)];
@@ -82,7 +88,11 @@ function migrateAccountSlots(store, settings, now = Date.now, env = process.env)
         serverIdentity: identity.serverIdentity === true || Boolean(proves && identity.accountKey !== hashKey(entry.id, 'account-slot', 'default')
           && proves(identity.accountKey, values, identity.accountKeyAliases || [])),
         createdAt: timestamp, updatedAt: timestamp };
-      store.replaceSettingsCredentials({ ...stored, [key]: [slot, ...slots] }, document);
+      next = [slot, ...slots];
+    }
+    if (alibabaImport) document.migrations.alibabaSlotImport = slot.id;
+    if (alibabaImport || next !== slots) {
+      store.replaceSettingsCredentials({ ...stored, [key]: next }, document);
     }
     // Verify the destination from disk before stripping even one source field.
     document = store.readDocument();
@@ -94,6 +104,7 @@ function migrateAccountSlots(store, settings, now = Date.now, env = process.env)
     // Copy that shared setting; move only the stored credential fields.
     for (const field of entry.fields.filter(field => field.kind === 'credential')) verified[field.key] = '';
     verified[defaultIdentityKey(entry)] = null;
+    if (alibabaImport) delete document.migrations.alibabaSlotImport;
     // Stripping and the marker land in one write; a crash before it re-runs
     // and finds the verified slot instead of adding another.
     store.replaceSettingsCredentials(verified, mark(document));
@@ -252,6 +263,21 @@ function migrateOwnerSlots(store, stored, settings, entry, document, mark, now) 
     createdAt: metadata.addedAt || timestamp, updatedAt: metadata.updatedAt || timestamp,
     owner: { metadata, credential }
   }));
+  // An independently saved account may reuse a live legacy ID after a restore.
+  // Give the saved copy its own ID so even a full list leaves both credentials
+  // reachable, while keeping its account key and quota history.
+  if (provider !== 'minimax') {
+    const reserved = new Set([...slots, ...imports].map(slot => slot.id));
+    for (const item of imports) {
+      const index = slots.findIndex(slot => slot.id === item.id);
+      const existing = slots[index];
+      if (!existing || item.owner.credential == null || isDeepStrictEqual(existing.owner, item.owner)) continue;
+      const id = hashKey(provider, 'owner-slot-conflict', existing.id).slice(7);
+      if (reserved.has(id) || !existing.owner) throw new Error('Saved account import conflict');
+      reserved.add(id);
+      slots[index] = { ...existing, id, owner: { ...existing.owner, metadata: { ...existing.owner.metadata, id } } };
+    }
+  }
   const additions = imports.filter(item => !slots.some(slot => slot.id === item.id));
   const next = normalizeAccountSlots(entry, [...slots, ...additions.slice(0, 21 - slots.length)]);
   const imported = imports.filter(item => next.some(slot => slot.id === item.id));

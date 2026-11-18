@@ -158,7 +158,10 @@ for (const provider of ['claude', 'antigravity', 'workbuddy']) test(`${provider}
   assert.notEqual(store.settingsCredentials()[`${provider}AccountSlots`][0].owner.credential, null);
   assert.throws(() => migrateAccountSlots(store, { [`${provider}ManagedAccounts`]: metadata.map(item => item.id === 'owner0' ? { ...item, accountKey: 'conflicting-key' } : item) }, () => 2500, {}), /conflict/);
   store[write]('owner0', provider === 'claude' ? 'conflicting-cookie' : { accessToken: 'conflicting-token' });
-  assert.throws(() => migrateAccountSlots(store, settings, () => 3000, {}), /conflict/);
+  const repaired = migrateAccountSlots(store, settings, () => 3000, {})[`${provider}AccountSlots`];
+  assert.equal(repaired.length, 21);
+  assert.equal(repaired.some(slot => slot.id === 'owner0'), false);
+  assert.equal(repaired.some(slot => slot.accountKey === 'key0'), true);
 });
 test('queued shared label cannot overwrite newer local rename', async () => {
   const key = 'canonical';

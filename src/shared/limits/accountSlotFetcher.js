@@ -229,13 +229,15 @@ function createAccountSlotFetcher(entry) {
         if (deps.signal?.aborted) { complete = false; break; }
         // The environment account carries `values: null`; compare what it dispatches.
         const values = account.values || defaultAccountValues(entry, options, deps.env || process.env);
+        const env = account.values ? {} : deps.env || process.env;
+        const isSecondary = (/** @type {any} */ row) => Boolean(entry.limits?.accountSlotIsSecondary?.(row, values, env));
         const fingerprint = accountValuesFingerprint(values);
         const owned = new Set([account.accountKey, account.provisional, ...account.accountKeyAliases, ...(entry.limits?.accountSlotKeys?.(values) || [])]);
         // Reuse successful requests while each duplicate owner still passes
         // through server-proof separation and its own callback.
         // The adapter decides retirement below, so a fetch's own removal rows are dropped.
         const answers = (successful.get(fingerprint) || await fetchAccount(account, owned, options, deps))
-          .filter((row) => !row.removed && answersScope(row, check)).map(row => ({ ...row }));
+          .filter((row) => !row.removed && answersScope(row, check) && !(scopeKey && !check && isSecondary(row))).map(row => ({ ...row }));
         if (answers.some(row => row.status === 'ok')) successful.set(fingerprint, answers.map(row => ({ ...row })));
         if (!answers.length && check && !check.keyless) continue;
         if (!answers.length) answers.push({ provider: entry.id, status: 'unavailable', windows: [], updatedAt: nowIso((deps.now || Date.now)()) });
@@ -246,7 +248,7 @@ function createAccountSlotFetcher(entry) {
           // nothing remembered; a held provisional key's recovery moves on the
           // next provider-wide dispatch.
           const accountKey = scopeKey || row.accountKey || account.accountKey;
-          const secondary = Boolean(entry.limits?.accountSlotIsSecondary?.(row, values, account.values ? {} : deps.env || process.env));
+          const secondary = isSecondary(row);
           answered.push({ account, values, row, accountKey, secondary, moved: account.known && accountKey !== account.accountKey && !secondary });
         }
       }

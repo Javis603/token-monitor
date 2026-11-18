@@ -767,18 +767,19 @@ function accountSlotKeys(values, env = {}) {
   const credentials = volcengineCredentials(env, values);
   if (!credentials) return [];
   const agent = volcengineAgentCredentials(env, values);
-  return [credentials.mode === 'ark' ? hashKey('volcengine', credentials.apiKey, credentials.region)
-    : hashKey('volcengine', credentials.accessKeyId, credentials.region), ...(agent?.mode === 'signed' ? [volcengineAgentAccountKey(agent)] : [])];
+  const arkKey = credentials.apiKey ? hashKey('volcengine', credentials.apiKey, credentials.region) : '';
+  if (credentials.mode === 'ark') return [arkKey];
+  return [hashKey('volcengine', credentials.accessKeyId, credentials.region),
+    ...(agent?.mode === 'signed' ? [volcengineAgentAccountKey(agent)] : []), ...(arkKey ? [arkKey] : [])];
 }
 function accountSlotIsSecondary(row, values, env) {
   const agent = volcengineAgentCredentials(env, values);
   return Boolean(agent && row?.accountKey === volcengineAgentAccountKey(agent));
 }
 function accountSlotsForScope(accounts, scope, options, deps) {
-  const productOwner = accounts.find(account => accountSlotKeys(account.values || options, account.values ? {} : deps.env || process.env).includes(scope.accountKey));
-  const owner = productOwner || accounts.find(account => account.accountKey === scope.accountKey)
-    || accounts.find(account => account.accountKeyAliases.includes(scope.accountKey));
-  return owner ? [owner] : [];
+  const productOwners = accounts.filter(account => accountSlotKeys(account.values || options, account.values ? {} : deps.env || process.env).includes(scope.accountKey));
+  return productOwners.length ? productOwners : accounts.filter(account => account.accountKey === scope.accountKey
+    || account.accountKeyAliases.includes(scope.accountKey));
 }
 async function fetchAccountSlotSnapshot(options, deps, collect) {
   const source = selectedSource('volcengine', options, deps);

@@ -131,6 +131,12 @@ test('Volcengine Agent-only answers never adopt the saved Coding identity', asyn
   assert.equal(rows.find(row => row.accountKey === agent)?.status, 'ok');
   assert.ok(!rows.find(row => row.accountKey === agent)?.accountKeyAliases?.includes(coding));
   assert.deepEqual(updates, []);
+  const provisional = hashKey('volcengine', 'account-slot', 'slot:saved');
+  const held = await LIMIT_PROVIDER_FETCHERS.volcengine({ ...options,
+    previousLimits: { providers: [{ provider: 'volcengine', accountKey: provisional }] },
+    limitRefreshScope: { provider: 'volcengine', accountKey: provisional }
+  }, { env: {}, fetch });
+  assert.ok(held.every(row => row.status !== 'ok' && !row.windows?.length));
   const h = harness();
   h.fetch = fetch;
   assert.equal((await h.service.add('volcengine', values)).saved, true);
@@ -152,6 +158,39 @@ test('scoped Volcengine Agent refresh only probes the owning slot', async () => 
   } });
   assert.equal(calls, 2);
   assert.deepEqual(rows.filter(row => row.status === 'ok').map(row => row.accountKey), [agent]);
+});
+
+test('scoped Volcengine Agent refresh can use a second matching owner', async () => {
+  const slots = ['one', 'two', 'other'].map(id => ({ id, values: {
+    volcengineAccessKeyId: `AKLT-${id}`, volcengineSecretAccessKey: 'fixture-secret',
+    ...(id === 'other' ? {} : { volcengineAgentAccessKeyId: 'AKLT-shared', volcengineAgentSecretAccessKey: `fixture-${id}` })
+  } }));
+  const [, agent] = require('../../src/shared/providers/volcengine/limits').accountSlotKeys(slots[0].values);
+  let agentCalls = 0, calls = 0;
+  const rows = await LIMIT_PROVIDER_FETCHERS.volcengine({ volcengineSourcePreference: 'api', volcengineAccountSlots: slots,
+    limitRefreshScope: { provider: 'volcengine', accountKey: agent } }, { env: {}, fetch: async url => {
+    calls++;
+    if (!String(url).includes('GetAFPUsage')) return response({}, 503);
+    return ++agentCalls === 1 ? response({}, 403) : response({ Result: { PlanType: 'Medium', AFPFiveHour: { Quota: 200, Used: 50 } } });
+  } });
+  assert.equal(calls, 4);
+  assert.deepEqual(rows.map(row => [row.accountKey, row.status]), [[agent, 'ok']]);
+});
+
+test('scoped Volcengine Ark fallback refresh finds a signed slot without a remembered key', async () => {
+  const values = { volcengineAccessKeyId: 'AKLT-fixture', volcengineSecretAccessKey: 'fixture-secret', volcengineApiKey: 'fixture-ark' };
+  const ark = hashKey('volcengine', values.volcengineApiKey, 'cn-beijing');
+  const calls = [];
+  const rows = await LIMIT_PROVIDER_FETCHERS.volcengine({ volcengineSourcePreference: 'api', volcengineAccountSlots: [{ id: 'fixture', values }],
+    limitRefreshScope: { provider: 'volcengine', accountKey: ark } }, { env: {}, fetch: async url => {
+    calls.push(String(url));
+    if (String(url).includes('chat/completions')) return { ...response({}), headers: new Headers({
+      'x-ratelimit-limit-requests': '10', 'x-ratelimit-remaining-requests': '7'
+    }) };
+    return response({}, String(url).includes('GetAFPUsage') ? 404 : 503);
+  } });
+  assert.ok(calls.some(url => url.includes('chat/completions')));
+  assert.deepEqual(rows.map(row => [row.accountKey, row.status]), [[ark, 'ok']]);
 });
 
 test('removing the last Volcengine slot retires both products but keeps environment quota', async () => {

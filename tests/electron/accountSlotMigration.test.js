@@ -28,10 +28,28 @@ test('Alibaba migration captures the selected console without storing an environ
   assert.ok(!migrated.alibabaCookie);
 });
 
-test('startup retains source metadata after a conflicting owner import', t => {
+test('an interrupted Alibaba import preserves its chosen console across environment changes', t => {
+  const store = fixture(t, { alibabaCookie: 'fixture-cookie' });
+  const read = store.readDocument.bind(store);
+  store.readDocument = () => {
+    const document = read();
+    if (document.credentials.providers?.alibaba?.accountSlots?.length) throw Error('interrupted');
+    return document;
+  };
+  assert.throws(() => migrateAccountSlots(store, {}, Date.now, { ALIBABA_TOKEN_PLAN_VARIANT: 'intl-personal' }), /interrupted/);
+  store.readDocument = read;
+  const migrated = migrateAccountSlots(store, {}, Date.now, {});
+  assert.deepEqual(migrated.alibabaAccountSlots.map(slot => slot.values.alibabaVariant), ['intl-personal']);
+  assert.ok(!migrated.alibabaCookie);
+});
+
+test('startup makes a conflicting legacy owner reachable even when saved slots are full', t => {
   const legacy = { id: 'same', organizationId: 'legacy-org', enabled: true };
-  const store = fixture(t, { claudeAccountSlots: [{ id: 'same', enabled: true, values: {},
-    owner: { metadata: { ...legacy, organizationId: 'different-org' }, credential: 'fixture-slot' } }] });
+  const clash = { id: 'same', enabled: true, values: {}, accountKey: 'saved-key',
+    owner: { metadata: { ...legacy, organizationId: 'different-org' }, credential: 'fixture-slot' } };
+  const others = Array.from({ length: 20 }, (_, i) => ({ ...clash, id: `slot-${i}`,
+    owner: { ...clash.owner, metadata: { id: `slot-${i}` } } }));
+  const store = fixture(t, { claudeAccountSlots: [clash, ...others] });
   store.writeClaudeWebCredential(legacy.id, 'fixture-source');
   const main = fs.readFileSync(require.resolve('../../src/electron/main.js'), 'utf8');
   const loader = main.slice(main.indexOf('function loadCredentialSettings'), main.indexOf('function readSettings()'));
@@ -46,11 +64,21 @@ test('startup retains source metadata after a conflicting owner import', t => {
     stripCredentialSettings: require('../../src/shared/credentialStore').stripCredentialSettings,
     writePrivateJsonAtomic: (_path, settings) => { written = JSON.parse(JSON.stringify(settings)); }
   });
-  run(saved);
-  assert.deepEqual(errors, ['Saved account import conflict']);
+  const stored = run(saved);
+  assert.deepEqual(errors, []);
   assert.equal(store.readClaudeWebCredential(legacy.id), 'fixture-source');
   assert.deepEqual(Array.from(saved.claudeManagedAccounts), [legacy]);
   assert.deepEqual(written.claudeManagedAccounts, [legacy]);
+  const settings = { ...saved, ...stored };
+  const persistence = require('../../src/electron/limits/ownerSlotPersistence')
+    .createOwnerSlotPersistence('claude', () => settings, () => null, id => store.readClaudeWebCredential(id));
+  assert.equal(persistence.accounts().find(row => row.id === legacy.id)?.organizationId, legacy.organizationId);
+  assert.equal(persistence.read(legacy.id), 'fixture-source');
+  const collected = require('../../src/shared/limits/ownerAccountSlots').mergedOwnerAccounts(settings, 'claude', saved.claudeManagedAccounts);
+  assert.equal(collected.find(row => row.id === legacy.id)?.organizationId, legacy.organizationId);
+  const savedCopy = collected.find(row => row.accountKey === 'saved-key');
+  assert.equal(savedCopy.credentials, 'fixture-slot');
+  assert.notEqual(savedCopy.id, legacy.id);
 });
 
 test('legacy Claude Settings save uses the fixed credential IPC path', async () => {
