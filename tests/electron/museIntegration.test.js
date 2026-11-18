@@ -158,11 +158,11 @@ test('Muse Cookie save and clear retire only local Web rows when the following s
   const vm = require('node:vm');
   const source = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
   const bodies = [
-    ['async function saveAccountCredential(', '\n// The busy guard'],
+    ['async function saveAccountCredential(', '\nasync function refreshLimitAccount('],
     ['async function clearAccountCredential(', '\nasync function commitAccountCredential('],
     ['function markExternalProviderCheckPending(', '\nfunction clearExternalProviderCheckPending('],
     ['function clearExternalProviderCheckPending(', '\nfunction clearExternalProviderPendingStatus('],
-    ['function clearExternalProviderPendingStatus(', '\nfunction nextCopilotSignInFlowId(']
+    ['function clearExternalProviderPendingStatus(', '\nfunction apiKeyAccountStatusText(']
   ].map(([start, end]) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)))).join('\n');
   for (const action of ['save', 'clear']) {
     const cli = { provider: 'muse', source: 'cli', sourceDeviceId: 'local', status: 'ok', windows: [{ kind: 'weekly', usedPercent: 35 }] };
@@ -212,7 +212,10 @@ test('Muse Cookie settings invalidation preserves CLI last-good through a failed
   const { settingsLimitInvalidationPlan, runLimitInvalidation } = require('../../src/electron/deviceRuntimeCoordinator');
   for (const action of ['save', 'clear']) {
     await t.test(action, async () => {
-      let settings = { limitProviders: 'muse', museWebCookie: 'session=old' };
+      const accountKey = 'saved-muse-web';
+      let settings = { limitProviders: 'muse', ...(action === 'save'
+        ? { museWebCookie: 'session=old' }
+        : { museAccountSlots: [{ id: 'web', accountKey, enabled: true, values: { museWebCookie: 'session=old' } }] }) };
       let failing = false;
       const scopes = [];
       const snapshots = [];
@@ -224,10 +227,10 @@ test('Muse Cookie settings invalidation preserves CLI last-good through a failed
           return [
             { provider: 'muse', source: 'cli', status: failing ? 'unavailable' : 'ok',
               windows: failing ? [] : [{ kind: 'weekly', usedPercent: 35 }] },
-            settings.museWebCookie
-              ? { provider: 'muse', source: 'web', status: failing ? 'unavailable' : 'ok',
-                windows: failing ? [] : [{ kind: 'weekly', usedPercent: 20 }] }
-              : { provider: 'muse', source: 'web', removed: true }
+            ...((settings.museWebCookie || settings.museAccountSlots?.length)
+              ? [{ provider: 'muse', source: 'web', accountKey, status: failing ? 'unavailable' : 'ok',
+                windows: failing ? [] : [{ kind: 'weekly', usedPercent: 20 }] }]
+              : [])
           ];
         }
       });
@@ -250,7 +253,25 @@ test('Muse Cookie settings invalidation preserves CLI last-good through a failed
           }
         });
         if (action === 'save') await api.saveCredential('muse', { museWebCookie: 'session=new' });
-        else await api.clearCredential('muse');
+        else {
+          // A migrated account uses slot removal, whose settings notification
+          // clears only its web lane and retains the anonymous CLI observation.
+          const { createAccountSlotService, invalidateAccountSlotChange } = require('../../src/electron/limits/accountSlotService');
+          let removalRefresh;
+          const service = createAccountSlotService({ getSettings: () => settings, env: {}, probeDeps: () => ({}),
+            write: async patch => { settings = { ...settings, ...patch }; },
+            onChanged: (provider, change) => {
+              runtime.reconfigure(settings);
+              if (change.refresh) removalRefresh = invalidateAccountSlotChange({
+                clearLimits: runtime.clear, refreshLimits: runtime.refresh
+              }, provider, change);
+              return removalRefresh;
+            } });
+          assert.equal((await service.remove('muse', 'web')).ok, true);
+          assert.ok(removalRefresh, 'slot removal requests a refresh');
+          await removalRefresh;
+          assert.ok(!runtime.getSnapshot().providers.some(row => row.accountKey === accountKey));
+        }
         assert.ok(snapshots.length > 0);
         for (const snapshot of snapshots) {
           assert.equal(snapshot.providers.find(row => row.source === 'cli')?.windows[0]?.usedPercent, 35,

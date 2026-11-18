@@ -5,6 +5,14 @@
 // src/shared/limits/accounts.js for the field schema.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'claude',
+  sourceSelection: { sources: ['oauth', 'cli'] },
+  accountSlots: true,
+  accountSlotOwner: true,
+  sources: [
+    { id: 'oauth', kind: 'oauth', relation: 'alternative', products: ['claude'], labelKey: 'settings.limits.sources.oauth', descriptionKey: 'settings.limits.sources.oauthDescription' },
+    { id: 'cli', kind: 'cli', relation: 'alternative', products: ['claude'], labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' },
+    { id: 'web', kind: 'web', relation: 'complement', products: ['claude'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
+  ],
   fetch: 'fetchClaudeAccountsLimits',
   accountRefresh: true,
   fields: [
@@ -44,7 +52,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   accountStatus({ settings, env, limits }) {
     const stored = Boolean(settings?.claudeWebCookie);
     const external = Boolean(limits.claudeWebCookie(env));
-    const managed = limits.normalizeClaudeManagedAccounts(settings?.claudeManagedAccounts).length > 0;
+    const managed = Boolean(settings?.claudeAccountSlots?.length) || limits.normalizeClaudeManagedAccounts(settings?.claudeManagedAccounts).length > 0;
     return {
       claudeWebCookieConfigured: stored || external || managed,
       claudeWebCookieSource: stored || managed ? 'settings' : external ? 'env' : '',

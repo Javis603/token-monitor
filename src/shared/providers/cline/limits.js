@@ -1,4 +1,5 @@
 'use strict';
+const { selectedSource } = require('../../limits/sourceSelection');
 
 // Cline limits provider: the ClinePass usage windows, read from the account API
 // Cline itself uses. Reached through providerFetchers() in
@@ -169,6 +170,10 @@ function readClineSession(env = process.env) {
   } catch (_) {
     throw errorWithStatus('notConfigured', 'Cline providers.json not found');
   }
+  return parseClineSession(document);
+}
+
+function parseClineSession(document) {
   if (!document || typeof document !== 'object') {
     throw errorWithStatus('unauthorized', 'Cline access token not found');
   }
@@ -220,7 +225,10 @@ function resolveClineCredential(options = {}, env = process.env) {
     // credential. The key is also this lane's account identity.
     return { accessToken: apiKey, accountSeed: apiKey, accountId: '', email: '', source: 'api' };
   }
-  const session = readClineSession(env);
+  return clineSessionCredential(readClineSession(env));
+}
+
+function clineSessionCredential(session) {
   return {
     ...session,
     accessToken: formatAccessToken(session.accessToken),
@@ -315,13 +323,14 @@ function parseClineLimits(payload) {
 // `no plan history found for user` that fetchJson maps to `unavailable` before
 // reaching here (verified live) — and neither is the same as a live zero-usage
 // window: report no data rather than 0%.
-function providerResult(windows, { nowMs, credential, status = '', accountSeed = '', accountEmail = '' }) {
+function providerResult(windows, { nowMs, credential, status = '', accountSeed = '', accountEmail = '', accountId = '' }) {
   // `accountSeed` is decided per lane in resolveClineCredential; with no stable
   // identifier there is no accountKey, rather than one invented here.
   const seed = accountSeed || credential?.accountSeed || '';
   return normalizeLimitProvider({
     provider: 'cline',
     accountKey: seed ? hashKey('cline', seed) : '',
+    accountKeyAliases: accountId && seed !== accountId ? [hashKey('cline', accountId)] : [],
     accountLabel: '',
     accountEmail: String(accountEmail || credential?.email || '').trim().toLowerCase(),
     source: credential?.source || 'api',
@@ -457,7 +466,13 @@ async function fetchClineLimits(options = {}, deps = {}) {
   throwIfAborted(deps.signal, 'Cline limits aborted');
   let credential;
   try {
-    credential = resolveClineCredential(options, env);
+    const selection = selectedSource('cline', options, deps);
+    const discoveredCredential = deps.probe ? null : deps.clineCredential;
+    const lane = discoveredCredential ? 'local' : clineApiKey(env, options) ? 'api' : 'local';
+    if ((selection !== 'auto' && selection !== lane) || ((deps.probe || deps.accountSlotSaved) && lane === 'local' && !discoveredCredential)) {
+      return failingProvider('notConfigured', nowMs, lane === 'local' ? 'oauth' : 'api');
+    }
+    credential = discoveredCredential || resolveClineCredential(options, env);
   } catch (error) {
     // The file lane's refusal, reported as the credential problem it is — and it
     // still names the lane it came from.
@@ -549,10 +564,30 @@ async function fetchClineLimits(options = {}, deps = {}) {
   // without a subscription whose console still answers a balance).
   const status = planStatus || (readings.length > 0 ? 'ok' : 'unavailable');
   if (readings.length === 0 && !planStatus) return failingProvider(status, nowMs, credential.source);
-  return providerResult(readings, { nowMs, credential, status, accountSeed, accountEmail: email });
+  return providerResult(readings, { nowMs, credential, status, accountSeed, accountId, accountEmail: email });
+}
+
+function discoverAccountSlots(deps = {}) {
+  // For the account list only a missing store means no sign-in. An unreadable
+  // or half-written providers.json is unavailable, so a known account is kept.
+  let document;
+  try { document = JSON.parse(fs.readFileSync(clineProvidersPath(deps.env || process.env), 'utf8')); }
+  catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw errorWithStatus('unavailable', 'Cline providers.json could not be read');
+  }
+  try {
+    const credential = clineSessionCredential(parseClineSession(document));
+    return [{ values: { clineApiKey: credential.accessToken }, accountKey: credential.accountSeed ? hashKey('cline', credential.accountSeed) : '',
+      accountEmail: credential.email, sourceName: 'Cline', fetchDeps: { clineCredential: credential } }];
+  } catch (error) {
+    if (error?.status === 'unauthorized') return [];
+    throw error;
+  }
 }
 
 module.exports = {
+  discoverAccountSlots,
   CLINE_API_BASE,
   USAGE_LIMITS_PATH,
   USERS_ME_PATH,

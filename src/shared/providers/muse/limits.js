@@ -5,6 +5,7 @@ const os = require('node:os');
 const nodePath = require('node:path');
 const { execFile } = require('node:child_process');
 const { normalizeLimitProvider } = require('../../limits/core');
+const { hashKey } = require('../../hashKey');
 const { abortError } = require('../../probeDeadline');
 const {
   errorWithStatus,
@@ -83,6 +84,7 @@ function allowanceWindow(period, kind) {
   }
   return {
     kind,
+    productId: 'code',
     label: kind === 'weekly' ? 'Weekly' : 'Session',
     usedPercent: period.usedPercent,
     ...(reset != null ? { resetsAt: new Date(reset).toISOString(), boundaryKind: 'reset' } : {}),
@@ -142,7 +144,7 @@ const { fetchMuseWebLimits, museWebCookie, normalizeMuseWebCookieHeader } = requ
 async function fetchMuseLimits(options = {}, deps = {}) {
   // A save-time check must only validate the submitted web cookie; the CLI
   // login cannot vouch for it or turn a rejected cookie into a successful save.
-  if (deps.probe) return fetchMuseWebLimits(options, deps);
+  if (deps.probe || deps.accountSlotWebOnly) return fetchMuseWebLimits(options, deps);
   const hasWeb = Boolean(museWebCookie(deps.env || process.env, options));
   const [cli, web] = await Promise.all([
     fetchMuseCodeLimits(options, deps),
@@ -154,4 +156,45 @@ async function fetchMuseLimits(options = {}, deps = {}) {
   return [code, web];
 }
 
-module.exports = { existingMuseCli, runMuseUsageCli, parseMuseUsage, fetchMuseCodeLimits, fetchMuseLimits, museWebCookie, normalizeMuseWebCookieHeader };
+// Muse Web reports no account identity. The slot fetcher files the environment
+// credential under its default provisional key whenever saved slots exist.
+const defaultWebSlotKey = hashKey('muse', 'account-slot', 'default');
+
+async function fetchAccountSlotSnapshot(options, deps, collect) {
+  const previousWeb = (options.previousLimits?.providers || []).filter(row => row.provider === 'muse' && row.source === 'web');
+  const scoped = Boolean(options.limitRefreshScope?.accountKey);
+  if (!options.museAccountSlots?.length) {
+    const rows = await collect(options, scoped ? { ...deps, accountSlotWebOnly: true } : deps);
+    if (!Array.isArray(rows) || scoped || deps.signal?.aborted) return rows;
+
+    const web = rows.find(row => row.source === 'web');
+    for (const old of previousWeb.filter(row => row.accountKey)) {
+      if (old.accountKey === defaultWebSlotKey && web && !web.removed && web.status !== 'ok') {
+        // Keep the failure on the same identity so its last-good windows remain.
+        web.accountKey = old.accountKey;
+      } else {
+        rows.push({ provider: 'muse', source: 'web', accountKey: old.accountKey, removed: true,
+          ...(old.accountKey === defaultWebSlotKey && web?.status === 'ok' ? { replacementAccount: { source: 'web' } } : {}) });
+      }
+    }
+    return rows;
+  }
+
+  const cli = scoped ? null : await fetchMuseCodeLimits(options, deps);
+  const previousLimits = { providers: (options.previousLimits?.providers || []).filter(row => row.source !== 'cli') };
+  const web = await collect({ ...options, previousLimits }, { ...deps, accountSlotWebOnly: true });
+  if (!scoped && !deps.signal?.aborted && previousWeb.some(row => !row.accountKey)) {
+    const replacement = web.find(row => row.accountKey === defaultWebSlotKey && !row.removed);
+    if (replacement?.status === 'ok') {
+      web.push({ provider: 'muse', source: 'web', removed: true, replacementAccount: { accountKey: defaultWebSlotKey } });
+    } else if (replacement) {
+      // A successful saved cookie cannot replace the environment cookie's quota.
+      replacement.accountKey = '';
+    } else if (!museWebCookie(deps.env || process.env, options)) {
+      web.push({ provider: 'muse', source: 'web', removed: true });
+    }
+  }
+  return [...(cli ? [cli.status === 'notConfigured' ? { provider: 'muse', source: 'cli', removed: true } : cli] : []), ...web];
+}
+
+module.exports = { fetchAccountSlotSnapshot, existingMuseCli, runMuseUsageCli, parseMuseUsage, fetchMuseCodeLimits, fetchMuseLimits, museWebCookie, normalizeMuseWebCookieHeader };

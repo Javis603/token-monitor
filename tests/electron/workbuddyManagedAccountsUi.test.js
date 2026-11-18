@@ -22,36 +22,18 @@ const deferred = () => {
 
 // The same small DOM surface is used for settings rendering and real click
 // handlers, so these tests exercise state transitions rather than source regexes.
-class Element {
-  constructor() {
-    this.children = [];
-    this.attributes = {};
-    this.handlers = {};
-    this.textContent = '';
-    this.disabled = false;
-    this.classes = new Set();
-    this.classList = {
-      toggle: (name, on) => on ? this.classes.add(name) : this.classes.delete(name),
-      add: (...names) => names.forEach((name) => this.classes.add(name)),
-      contains: (name) => this.classes.has(name)
-    };
-  }
-  append(...children) { this.children.push(...children); }
-  replaceChildren(...children) { this.children = children; }
-  setAttribute(name, value) { this.attributes[name] = value; }
-  addEventListener(name, callback) { this.handlers[name] = callback; }
-  fire(name) { return this.handlers[name]?.(); }
-}
-
 const nodeIds = ['AccountList', 'AccountStatus', 'AccountErrorMessage', 'LoginStatus', 'AddCnAccountButton', 'AddAiAccountButton', 'CancelLoginButton', 'SettingsToggle'];
 function settingsHarness(api = {}, providers = []) {
-  const nodes = Object.fromEntries(nodeIds.map((id) => [`workbuddy${id}`, new Element()]));
+  const document = require('./accountOwnerDom.fixture.cjs').createDocument();
+  const createElement = document.createElement;
+  document.createElement = tag => { const node = createElement(tag); node.fire = name => node.listeners[name]?.({}); return node; };
+  const nodes = Object.fromEntries(nodeIds.map(id => { const node = document.createElement('div'); node.id = `workbuddy${id}`; document.root.append(node); return [node.id, node]; }));
   const state = { settings: { workbuddyManagedAccounts: [] }, workbuddyLoginAttempt: 0, workbuddyAccountError: '' };
   const refreshes = [];
   const context = vm.createContext({
     state,
-    window: { tokenMonitor: { workbuddy: api } },
-    document: { getElementById: (id) => nodes[id], createElement: () => new Element() },
+    window: { TokenMonitorLegacyAccountList: require('../../src/electron/renderer/limits/legacyAccountList'), tokenMonitor: { workbuddy: api, limits: { accountSlots: { presentation: async () => ({ ok: true }) } } } },
+    document,
     accountIdentityApi, accountShellApi,
     limitProviderPresentationApi: presentation,
     t: (key, values = {}) => Object.entries(values).reduce((text, [name, value]) => text.replace(`{${name}}`, value), MESSAGES.en[key] || key),
@@ -60,8 +42,16 @@ function settingsHarness(api = {}, providers = []) {
     renderSettingsSummaries() {}, renderSubscriptionSettings() {}, setAccountGroupExpanded() {},
     refreshStats: async (options) => { refreshes.push(options); }
   });
-  const start = app.indexOf('function workbuddyAccountError(');
-  vm.runInContext(app.slice(start, app.indexOf('function renderAntigravityStatus()', start)), context);
+  const owner = require('../../src/electron/renderer/limits/providerOwners/workbuddy').create({
+    ...context, initial: state, getSettings: () => state.settings,
+    getAccountContext: () => ({ settings: state.settings }), preserveScroll: fn => fn(),
+    localProviderStatuses: id => context.localProviderStatuses(id)
+  });
+  for (const key of Object.keys(owner.state)) Object.defineProperty(state, key, { configurable: true, get: () => owner.state[key], set: value => { owner.state[key] = value; } });
+  const methods = { ...owner };
+  delete methods.state;
+  // Keep application stats separate from provider-owned state.
+  Object.assign(context, methods);
   return { state, nodes, refreshes, context, run: (expression) => vm.runInContext(expression, context) };
 }
 
@@ -97,12 +87,15 @@ test('visible Settings follows quota pushes and defers hidden updates without po
   let settingsVisible = true, hidden = false;
   h.context.visibleStatsSurface = () => hidden ? null : 'main';
   h.context.isSettingsSurfaceVisible = () => settingsVisible;
+  h.context.preserveSettingsPanelScroll = callback => callback();
   const localStart = app.indexOf('function localDeviceLimitsProviders()');
-  vm.runInContext(app.slice(localStart, app.indexOf('function workbuddyAccountError(', localStart)), h.context);
+  vm.runInContext(app.slice(localStart, app.indexOf('function localProviderStatuses(', localStart)), h.context);
+  const providerStart = app.indexOf('function localProviderStatuses(');
+  vm.runInContext(app.slice(providerStart, app.indexOf('function ', providerStart + 10)), h.context);
   const statsStart = app.indexOf('function renderStatsUpdate()');
   vm.runInContext(app.slice(statsStart, app.indexOf('const statsRenderScheduler =', statsStart)), h.context);
   const scheduler = createStatsRenderScheduler({ isHidden: () => hidden, render: () => h.run('renderStatsUpdate()') });
-  const label = () => h.nodes.workbuddyAccountList.children[0].children[2].children[0].textContent;
+  const label = () => h.nodes.workbuddyAccountList.querySelector('.slot-status').textContent;
   const push = (status) => {
     h.state.stats = { devices: [{ deviceId: 'local', limits: { providers: [{
       provider: 'workbuddy', accountKey: account.accountKey, status, windows: []
@@ -110,21 +103,21 @@ test('visible Settings follows quota pushes and defers hidden updates without po
     scheduler.request();
   };
   h.run('renderWorkbuddyStatus()');
-  assert.equal(label(), MESSAGES.en['settings.workbuddy.notChecked']);
+  assert.equal(label(), `${MESSAGES.en['settings.slots.unavailable']}`);
   push('ok');
-  assert.equal(label(), 'Live');
+  assert.equal(label(), 'OAuth · China');
   push('unauthorized');
-  assert.equal(label(), 'Sign in again');
+  assert.equal(label(), `${MESSAGES.en['settings.limits.status.signInAgain']}`);
   settingsVisible = false;
   push('ok');
-  assert.equal(label(), 'Sign in again', 'closed Settings does not redraw account controls');
+  assert.equal(label(), `${MESSAGES.en['settings.limits.status.signInAgain']}`, 'closed Settings does not redraw account controls');
   settingsVisible = true;
   hidden = true;
   push('ok');
-  assert.equal(label(), 'Sign in again', 'hidden pushes are coalesced');
+  assert.equal(label(), `${MESSAGES.en['settings.limits.status.signInAgain']}`, 'hidden pushes are coalesced');
   hidden = false;
   scheduler.flush();
-  assert.equal(label(), 'Live');
+  assert.equal(label(), 'OAuth · China');
   assert.deepEqual(h.refreshes, [], 'status rendering requests no extra stats or account polling');
 });
 
@@ -256,19 +249,19 @@ test('enabled and remove controls use ids, require remove confirmation, and reco
   });
   h.context.__accounts = [account];
   h.run('applyWorkbuddyAccounts(__accounts)');
-  const row = h.nodes.workbuddyAccountList.children[0];
-  row.children[0].checked = false;
-  await row.children[0].fire('change');
+  const action = key => [...h.nodes.workbuddyAccountList.walk()].find(node => node.dataset.slotAction === key);
+  await action('pause').fire('click');
   assert.deepEqual(calls, [['enabled', account.id, false]]);
-  const remove = h.nodes.workbuddyAccountList.children[0].children[2].children[1];
-  assert.equal(remove.attributes['aria-label'], MESSAGES.en['settings.workbuddy.remove']);
+  const remove = action('remove');
+  assert.equal(remove.attributes['aria-label'], MESSAGES.en['settings.slots.remove']);
   await remove.fire('click');
   assert.equal(calls.length, 1);
-  assert.equal(remove.attributes['aria-label'], h.context.t('settings.workbuddy.removeConfirm', { account: account.accountEmail }));
+  assert.equal(remove.attributes['aria-label'], MESSAGES.en['settings.slots.confirmRemove']);
   await remove.fire('click');
   assert.deepEqual(calls.at(-1), ['remove', account.id]);
-  assert.equal(h.state.workbuddyMutationBusy, false);
-  assert.equal(h.nodes.workbuddyAccountErrorMessage.textContent, MESSAGES.en['settings.workbuddy.removeFailed']);
+  assert.equal(Boolean(h.state.workbuddyMutationBusy), false);
+  assert.equal(h.nodes.workbuddyAccountList.querySelector('.slot-message').textContent, MESSAGES.en['settings.slots.failed']);
+  assert.equal(Boolean(action('resume').disabled), false, 'controls recover after a failed removal');
   assert.equal(h.state.settings.workbuddyManagedAccounts.length, 1);
 });
 
@@ -359,8 +352,9 @@ test('WorkBuddy account and total copy is present in every locale and auto conne
   const html = fs.readFileSync(path.join(renderer, 'index.html'), 'utf8');
   assert.match(html, /id="workbuddyLoginStatus"[^>]*role="status"[^>]*aria-live="polite"/);
   assert.match(html, /id="workbuddyAccountErrorMessage"[^>]*role="alert"/);
-  assert.match(app, /workbuddy: 'settings\.limits\.connection\.workbuddy'/);
-  assert.match(app, /if \(connectionDetailKey\) optionsInner\.append\(limitProviderConnectionDetail\(connectionDetailKey\)\)/);
+  assert.ok(require('../../src/shared/providers/workbuddy/account').sources.some(source => source.kind === 'desktop'));
+
+  assert.match(app, /if \(sources\.length\) optionsInner\.append\(limitProviderConnectionDetail\(id, sources, provider\)\)/);
 });
 
 

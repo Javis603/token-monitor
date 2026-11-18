@@ -909,6 +909,10 @@ span.settings-note.settings-item-desc {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+[data-settings-section="limits"] .settings-section-heading > span:last-child {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .settings-section-meta {
   display: flex;
   min-width: 0;
@@ -1273,11 +1277,14 @@ span.settings-note.settings-item-desc {
 }
 .cursor-settings-details-inner {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   gap: 8px;
 }
 .managed-account-list {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 6px;
 }
 .managed-account-list:empty { display: none; }
@@ -2765,7 +2772,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 }
 .limit-provider-actions {
   display: flex;
-  flex: 0 1 auto;
+  flex: 0 0 auto;
   min-width: 0;
   max-width: 58%;
   align-items: center;
@@ -2774,6 +2781,11 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 }
 .limit-provider-actions > .cursor-status-pill {
   flex: 0 1 auto;
+  white-space: normal;
+  text-align: center;
+}
+.limit-provider-actions > .cursor-status-pill[data-local-scope]::before {
+  content: attr(data-local-scope) " · ";
 }
 .limit-provider-row.expanded > .limit-provider-main .cursor-disclosure-icon {
   transform: rotate(180deg);
@@ -2909,10 +2921,12 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 }
 .limit-provider-options-inner {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   gap: 8px;
 }
 .limit-provider-account-group {
+  min-width: 0;
   margin-left: 0;
 }
 .limit-provider-account-group > .settings-group-header {
@@ -2934,11 +2948,32 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .limit-provider-connection-detail > .settings-note {
   margin: 0;
 }
+.limit-provider-usage-items,
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list {
+  min-width: 0;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list > .settings-item {
+  padding: 8px 0;
+}
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list > .settings-item + .settings-item {
+  border-top-color: var(--line);
+}
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list > .settings-item:first-child {
+  padding-top: 0;
+}
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list > .settings-item:last-child {
+  padding-bottom: 0;
+}
+.settings-panel .limit-provider-options-inner > .limit-provider-settings-list .settings-item-desc {
+  padding-bottom: 0;
+}
 .limit-provider-usage-items {
   display: grid;
-  min-width: 0;
   gap: 4px;
-  padding: 4px 0 2px;
 }
 .limit-provider-usage-items-head {
   display: flex;
@@ -2946,15 +2981,21 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   gap: 6px;
 }
 .limit-provider-usage-items-title {
-  color: var(--text);
+  color: var(--muted);
   font-size: 0.625rem;
+}
+.limit-provider-usage-items-list {
+  display: grid;
+  gap: 0;
 }
 .settings-panel .limit-provider-usage-items-list > .client-checkbox {
   display: flex;
+  flex: 0 1 auto;
+  max-width: 100%;
   align-items: center;
   gap: 8px;
   min-width: 0;
-  min-height: 24px;
+  min-height: 28px;
   font-size: 0.6875rem;
 }
 .settings-panel .limit-provider-usage-items-list > .client-checkbox > input {
@@ -2963,9 +3004,8 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 }
 .settings-panel .limit-provider-usage-items-list > .client-checkbox > span {
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .preference-order-handle {
   display: inline-flex;
@@ -3250,6 +3290,12 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   -webkit-app-region: no-drag;
 }
 .select-control-popup.has-search { overflow: hidden; }
+.select-control-hint {
+  padding: 6px 8px;
+  max-height: calc(100vh - 16px);
+  pointer-events: none;
+  overflow-wrap: anywhere;
+}
 .select-control-search {
   display: block;
   box-sizing: border-box;
@@ -7948,19 +7994,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   height: 4px;
   border-width: 0 1.2px 1.2px 0;
 }
-#opencodeLocalFallbackAccountGroup > .settings-group-header .cursor-disclosure-icon {
-  transform: rotate(-90deg);
-}
-#opencodeLocalFallbackAccountGroup.expanded > .settings-group-header .cursor-disclosure-icon {
-  transform: rotate(0deg);
-}
-/* The relocated toggle keeps only its description, and a paragraph's
-   content-based flex basis is wide enough to claim the whole line on its own,
-   pushing the switch to a second row. A zero basis lets both share the line and
-   the text reflow into the space that is left. */
-#opencodeLocalFallbackInner .settings-item > .settings-item-text {
-  flex: 1 1 0;
-}
 /* Animated like every other disclosure in the panel rather than snapping from
    `display: none`; the container squeezes a single inner wrapper, so the rows
    have to live inside one. */
@@ -8984,6 +9017,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .tray-composer-item { transition: none; }
+  :is(.slot-editor-reveal, .legacy-editor-reveal), :is(.slot-editor-reveal, .legacy-editor-reveal) > .accordion-animation-inner { transition: none; }
+  :root:not([data-reduce-motion="off"]) .slot-row { transition: none; }
   .settings-panel .limit-provider-row { transition: none; }
   .tool-preference-row { transition: none; }
   .view-preference-row,
@@ -9412,17 +9447,45 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .qoder-collection-settings > .settings-note { margin: 0; }
 
 /* Local account slots keep live controls mounted across provider redraws. */
-.slot-panel { margin-bottom: 14px; }
-.slot-list { border: 1px solid var(--line); border-radius: 12px; background: rgba(var(--panel-rgb), .15); overflow: clip; }
-.slot-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, max-content) 28px; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.slot-panel { min-width: 0; max-width: 100%; margin-bottom: 0; }
+.slot-list { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: rgba(var(--panel-rgb), .15); overflow: clip; }
+.slot-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) minmax(0, max-content) 28px; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .slot-copy { min-width: 0; }
-.slot-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .75rem; font-weight: 500; color: var(--text); }
+.slot-copy .slot-detail { margin: 4px 0 0; font-size: .59375rem; line-height: 1.4; }
+.slot-name { overflow-wrap: anywhere; white-space: normal; text-wrap: balance; font-size: .6875rem; font-weight: 500; color: var(--text); }
+.slot-name-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
+.slot-name-line .slot-name { min-width: 0; }
+.slot-name-line.is-editing .slot-name { flex: 1; }
+.slot-rename-button { opacity: 0; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.slot-row:is(:hover, :focus-within) .slot-rename-button { opacity: 1; }
+.slot-rename-button::before { content: ''; width: 12px; height: 12px; background: currentColor; mask: url("icons/actions/pencil-line.svg") center / contain no-repeat; }
+.slot-rename-button:hover { color: var(--text); background: rgba(var(--overlay-rgb), .06); }
+.slot-rename-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .slot-status { min-width: 0; max-width: 150px; overflow: hidden; text-overflow: ellipsis; font-size: .6875rem; color: var(--muted); text-align: right; white-space: nowrap; }
 .slot-connected { color: var(--success); }
+.slot-status::before { content: ''; display: inline-block; width: 12px; height: 12px; margin-inline-end: 4px; vertical-align: -2px; background: currentColor; mask: var(--slot-status-icon) center / contain no-repeat; }
+.slot-status:empty::before { content: none; }
+.slot-connected { --slot-status-icon: url("icons/actions/check.svg"); }
+.slot-status.slot-paused { --slot-status-icon: url("icons/actions/pause.svg"); }
+.slot-invalid, .slot-unavailable { --slot-status-icon: url("icons/actions/circle-exclamation-point.svg"); }
+.slot-stale { --slot-status-icon: url("icons/actions/clock.svg"); }
+.slot-notCollected, .slot-disabled { --slot-status-icon: url("icons/actions/circle-minus.svg"); }
 .slot-invalid { color: var(--red); }
+.slot-limited, .slot-usageApiLimited { color: var(--yellow); }
 .slot-stale { color: var(--yellow); }
 .slot-paused .slot-name { color: var(--muted); }
-.slot-fix.plugin-inline-action { display: block; margin-top: 4px; padding: 2px 0; color: var(--red); text-align: left; }
+.slot-fix.plugin-inline-action { display: block; margin-top: 4px; padding: 2px 0; color: var(--accent); text-align: left; }
+/* Decorative masks survive translation updates to each button's text. */
+.plugin-menu button[data-slot-action] { grid-template-columns: 15px minmax(0, 1fr); }
+.plugin-menu button[data-slot-action]::before { content: ''; width: 15px; height: 15px; background: currentColor; mask: var(--slot-action-icon) center / contain no-repeat; }
+.plugin-menu button[data-slot-action="rename"] { --slot-action-icon: url("icons/actions/pencil-line.svg"); }
+.plugin-menu button[data-slot-action^="replace"] { --slot-action-icon: url("icons/actions/key.svg"); }
+.plugin-menu button[data-slot-action="pause"] { --slot-action-icon: url("icons/actions/pause.svg"); }
+.plugin-menu button[data-slot-action="resume"] { --slot-action-icon: url("icons/actions/play.svg"); }
+.plugin-menu button[data-slot-action="up"], .plugin-menu button[data-slot-action="down"] { --slot-action-icon: url("icons/actions/arrow-left.svg"); }
+.plugin-menu button[data-slot-action="up"]::before { transform: rotate(90deg); }
+.plugin-menu button[data-slot-action="down"]::before { transform: rotate(-90deg); }
+.plugin-menu button[data-slot-action="remove"] { --slot-action-icon: url("icons/actions/trash.svg"); }
 .plugin-menu button.menu-destructive { color: var(--red); }
 /* Armed removal reads as a different state, not just the same red item: the
    tint matches the app's other inline remove confirmations. */
@@ -9430,7 +9493,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-menu button.menu-destructive.confirming:hover, .plugin-menu button.menu-destructive.confirming:focus-visible { color: var(--red); background: rgba(255, 91, 91, 0.2); }
 .plugin-menu button:disabled { opacity: .35; cursor: default; }
 .action-menu-separator { border: 0; border-top: 1px solid var(--line); margin: 4px 0; width: 100%; }
-.slot-add { display: block; width: calc(100% - 24px); margin: 10px 12px; padding: 9px 6px; border: 1px dashed var(--line); border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: .6875rem; cursor: pointer; }
+.slot-add { display: block; width: calc(100% - 16px); min-height: 30px; margin: 6px 8px; padding: 6px; border: 1px dashed var(--line); border-radius: 7px; background: transparent; color: var(--muted); font: inherit; font-size: .6875rem; text-align: center; cursor: pointer; }
+.slot-add:hover { color: var(--text); background: rgba(var(--overlay-rgb), .04); }
 .slot-rename { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; }
 .slot-editor { padding: 14px 12px; border-bottom: 1px solid var(--line); }
 .slot-editor > strong { display: block; font-size: .75rem; font-weight: 600; margin-bottom: 12px; }
@@ -9443,12 +9507,84 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .settings-panel .slot-editor .settings-row select { width: auto; max-width: 60%; }
 .slot-editor .settings-actions { margin-top: 12px; }
 .slot-editor .cursor-settings-details > .settings-actions:first-child { margin-top: 0; }
+.limit-provider-options-inner .settings-actions button {
+  max-width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .slot-editor .settings-actions button:last-child:not(:first-child) { background: rgba(var(--overlay-rgb), .06); color: var(--muted); }
 .slot-message:empty { display: none; }
 .slot-panel .plugin-more:focus-visible, .slot-fix:focus-visible, .slot-add:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 4px; }
 
-.slot-editor .settings-actions button.slot-save { color: var(--accent); border-color: rgba(var(--accent-rgb), .3); background: rgba(var(--accent-rgb), .12); }
-
 .slot-editor [id$="LogoutButton"], .slot-editor [id$="RefreshButton"] { display: none !important; }
 
 .slot-editor .settings-actions button.slot-save { color: var(--accent); border-color: rgba(var(--accent-rgb), .3); background: rgba(var(--accent-rgb), .12); }
+
+/* Account rows share the settings-list drag transforms and six-dot grip. */
+.slot-row { position: relative; transform: translateY(calc(var(--drag-y, 0px) + var(--drag-shift, 0px))); transition: transform 170ms cubic-bezier(0.22, 1, 0.36, 1), opacity 120ms ease; }
+.slot-drag-handle { width: 14px; opacity: 0; }
+.slot-row:is(:hover, :focus-within, .dragging) .slot-drag-handle { opacity: 1; }
+.slot-row[data-slot-draggable="false"] .slot-drag-handle { visibility: hidden; }
+.slot-row.dragging { z-index: 2; background: rgba(var(--panel-rgb), .96); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .62); cursor: grabbing; transition: none; will-change: transform; }
+.slot-row.dragging .slot-drag-handle { cursor: grabbing; }
+.slot-list.drag-active .slot-row:not(.dragging) { opacity: .78; }
+.slot-list.is-landing .slot-row { transition: none; }
+:root[data-reduce-motion="on"] .slot-row { transition: none; }
+
+.slot-remote-note { max-width: 190px; padding: 6px 10px; white-space: normal; }
+/* Connection metadata stays compact; explanations belong to the source menu. */
+.limit-provider-connection-sources { min-width: 0; container-type: inline-size; }
+.connection-source-card { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 12px; background: rgba(var(--overlay-rgb), .025); }
+.connection-source-copy { flex: 1; min-width: 0; }
+.connection-source-copy .settings-item-title { font-size: .6875rem; font-weight: 500; line-height: 1.4; }
+.connection-source-copy .settings-item-title, .connection-source-copy .settings-item-desc { display: block; }
+.connection-source-copy .settings-item-desc { margin-top: 3px; font-size: .59375rem; line-height: 1.4; }
+.connection-source-actions > .settings-item-desc:empty { display: none; }
+.connection-source-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 0; max-width: 52%; text-align: right; overflow-wrap: anywhere; }
+.connection-source-actions > span.connection-source-method { font-size: .6875rem; font-weight: 500; line-height: 1.4; }
+.connection-source-actions :is(select, .select-control-trigger) { font-size: .6875rem; }
+.connection-source-get { display: inline-flex; align-items: center; justify-content: flex-end; gap: 3px; font: inherit; font-size: .625rem; line-height: 1.4; text-align: right; }
+.connection-source-icon { width: 10px; height: 10px; flex-shrink: 0; background: currentColor; mask: url("icons/actions/external-link.svg") center / contain no-repeat; }
+.connection-source-get:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+@container (max-width: 300px) {
+  .connection-source-card { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .connection-source-actions { align-items: flex-start; max-width: 100%; text-align: left; }
+  .connection-source-get { text-align: left; }
+}
+
+/* Provider editors retain their own controls inside the shared account card. */
+.legacy-editor-reveal .legacy-editor-content.hidden { display: block !important; }
+.legacy-editor-reveal .legacy-editor-content.accordion-animated-container { grid-template-rows: 1fr; }
+.legacy-editor-reveal .legacy-editor-content > .accordion-animation-inner { opacity: 1; }
+.legacy-slot-editor .opencode-add-body { padding: 0; }
+.legacy-slot-editor :is(input, textarea, select) { box-sizing: border-box; max-width: 100%; }
+.legacy-slot-editor textarea { width: 100%; }
+.legacy-slot-editor > .settings-actions:last-child { margin-top: 12px; }
+.limit-provider-account-group > .cursor-settings-details > .cursor-settings-details-inner > .settings-actions:not(:has(> :not(.hidden))) { display: none; }
+.slot-editor-reveal.hidden, .legacy-editor-reveal.hidden { border: 0; }
+.settings-panel .plugin-menu button { height: 28px; min-height: 28px; padding: 0 7px; font-size: .6875rem; line-height: normal; border: 0; border-radius: 5px; }
+
+.legacy-slot-editor :is(#codexCancelLoginButton, #antigravityCancelLoginButton, #workbuddyCancelLoginButton) { display: none; }
+
+.legacy-slot-editor.is-replacing > .legacy-editor-content { display: none !important; }
+.legacy-slot-editor.is-replacing > .legacy-replacement-content.hidden { display: block !important; }
+
+/* Account identity, plan and device provenance share one compact rhythm. */
+.slot-row { row-gap: 4px; }
+.slot-name-line { min-height: 16px; }
+.slot-name-line.is-editing { height: auto; min-height: 24px; }
+.slot-device-summary { grid-column: 2 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 0; line-height: 1.4; white-space: normal; }
+button.slot-device-toggle { width: 100%; min-height: 0; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--muted); font: inherit; font-size: .59375rem; text-align: left; cursor: pointer; }
+.slot-device-toggle:hover { color: var(--text); }
+.slot-device-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.slot-device-token { display: inline-flex; align-items: center; min-width: 0; gap: 4px; overflow-wrap: anywhere; }
+.slot-device-token .device-kind-icon { margin-right: 0; }
+.slot-device-hint { margin-left: auto; font-size: .5625rem; }
+.slot-device-list { margin-top: 4px; grid-column: 2 / -1; min-width: 0; border-top: 1px solid var(--line); }
+.slot-device-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; padding: 8px 0; }
+.slot-device-row + .slot-device-row { border-top: 1px solid var(--line); }
+.slot-device-name { min-width: 0; font-size: .625rem; }
+.slot-device-note { grid-column: 1 / -1; color: var(--muted); font-size: .59375rem; line-height: 1.4; overflow-wrap: anywhere; }
+.slot-device-fix { grid-column: 1 / -1; justify-self: start; }
+.slot-devices-expanded > .slot-status { visibility: hidden; }
+.slot-devices-expanded > .slot-copy > .slot-fix { display: none; }

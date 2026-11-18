@@ -739,3 +739,45 @@ test('known npm install locations survive Electron-style truncated PATH', (t) =>
   }
   assert.equal(resolveArkcliCommand(env), fs.realpathSync(binary));
 });
+
+for (const [source, saved] of [['auto', true], ['cli', true], ['cli', false]]) {
+  for (const scoped of [false, true]) test(`slot snapshot retires absent CLI plan: ${source}, saved=${saved}, scoped=${scoped}`, async () => {
+    const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+    const { createAccountSlotFetcher } = require('../../src/shared/limits/accountSlotFetcher');
+    const { limitProviderEntry } = require('../../src/shared/limits/registry');
+    let stage = 'active';
+    let time = Date.parse(now);
+    const entry = limitProviderEntry('volcengine');
+    const fetcher = createAccountSlotFetcher({ ...entry, fetchLimits: async options => options.volcengineAccessKeyId
+      ? [{ provider: 'volcengine', source: 'api', accountKey: 'saved-api', status: 'ok', windows: [{ kind: 'weekly', usedPercent: 12 }], updatedAt: new Date(time).toISOString() }]
+      : [] });
+    const deps = { env: {}, now: () => time, providerRuntimeState: new Map(), runArkcli: async args => {
+      if (args[0] === 'auth') return auth;
+      if (args[0] === 'plans') {
+        if (stage === 'unknown') throw new Error('offline');
+        return stage === 'absent' ? subscriptions() : subscriptions('agent-plan');
+      }
+      return response();
+    } };
+    const runtime = createLimitsRuntime({ limitProviders: ['volcengine'], volcengineSourcePreference: source,
+      ...(saved ? { volcengineAccountSlots: [{ id: 'api', enabled: true, values: { volcengineAccessKeyId: 'ark-fixture' } }] } : {})
+    }, { autoStart: false, autoRetry: false, now: () => time, probeProvider: (_provider, options) => fetcher(options, deps) });
+    try {
+      await runtime.refresh({}, 'manual');
+      const initial = runtime.getSnapshot().providers;
+      const cli = initial.find(row => row.source === 'cli');
+      assert.ok(cli?.windows.length);
+      const scope = scoped ? { provider: 'volcengine', accountKey: cli.accountKey } : {};
+      stage = 'unknown'; time += 300_000;
+      await runtime.refresh(scope, 'manual');
+      const retained = runtime.getSnapshot().providers.find(row => row.accountKey === cli.accountKey);
+      assert.equal(retained.status, 'unavailable');
+      assert.deepEqual(retained.windows, cli.windows);
+      stage = 'absent'; time += 300_000;
+      await runtime.refresh(scope, 'manual');
+      const final = runtime.getSnapshot().providers;
+      assert.equal(final.find(row => row.accountKey === cli.accountKey), undefined);
+      if (saved) assert.equal(final.find(row => row.accountKey === 'saved-api').status, 'ok');
+    } finally { runtime.stop(); }
+  });
+}

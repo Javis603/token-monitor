@@ -56,22 +56,26 @@ test('icon-only tool health disclosures keep an action and client in their name'
 });
 
 test('the OpenCode detected-account checkbox has a localized name and description', async () => {
-  const list = new Element();
+  const ownerDocument = require('./accountOwnerDom.fixture.cjs').createDocument();
+  const createElement = ownerDocument.createElement;
+  ownerDocument.createElement = tag => { const node = createElement(tag); node.appendChild = child => node.append(child); return node; };
+  const list = ownerDocument.createElement('div'); list.id = 'opencodeProfileList'; ownerDocument.root.append(list);
+  list.before = node => ownerDocument.root.insertBefore(node, list);
   const context = {
-    document: { ...document, getElementById: id => id === 'opencodeProfileList' ? list : null },
-    state: { settings: {} }, t, isSettingsSurfaceVisible: () => true,
+    document: ownerDocument, initial: {}, getSettings: () => ({}), getAccountContext: () => ({ settings: {} }), preserveScroll: fn => fn(), localProviderStatuses: () => [],
+    state: { settings: {} }, accountShellApi: require('../../src/electron/renderer/limits/accountShell'), encodeURIComponent, t, isSettingsSurfaceVisible: () => true,
     renderAccountShellError() {}, renderSettingsSummaries() {}, updateOpenCodeProfilesStatus() {},
-    accountProfileRequests: { begin: () => () => true }, accountProfileStatuses: { retire() {} },
+    accountProfileRequests: { begin: () => () => true }, accountProfileStatuses: { retire() {}, begin: () => () => true },
     opencodeMergeOffer: () => ({}),
-    window: { tokenMonitor: { opencode: { getProfiles: async () => ({ profiles: {}, hasAmbientKey: true }) } } }
+    window: { TokenMonitorLegacyAccountList: require('../../src/electron/renderer/limits/legacyAccountList'), tokenMonitor: { opencode: { getProfiles: async () => ({ profiles: {}, hasAmbientKey: true }), status: async () => ({ profiles: {} }) } } }
   };
-  vm.runInNewContext(`${section(app, 'renderOpenCodeProfiles', 'opencodeSaveErrorText')}\nrenderOpenCodeProfiles();`, context);
+  require('../../src/electron/renderer/limits/providerOwners/opencode').create(context).renderOpenCodeProfiles();
   await new Promise(resolve => setImmediate(resolve));
   const checkbox = list.children[0].children[0];
   assert.equal(checkbox.type, 'checkbox');
-  assert.equal(checkbox.getAttribute('aria-label'), t('settings.opencode.ambientName'));
-  assert.equal(checkbox.getAttribute('aria-description'), t('settings.opencode.ambientDetail'));
-  assert.equal(checkbox.getAttribute('title'), null);
+  assert.equal(checkbox.attributes['aria-label'], t('settings.opencode.ambientName'));
+  assert.equal(checkbox.attributes['aria-description'], t('settings.opencode.ambientDetail'));
+  assert.equal(checkbox.attributes.title, undefined);
 });
 
 test('shortcut names follow the saved value, empty state and recording state', () => {

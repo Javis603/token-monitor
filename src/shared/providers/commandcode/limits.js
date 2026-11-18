@@ -477,7 +477,13 @@ async function fetchCommandcodeLimits(options = {}, deps = {}) {
   }
 }
 
+// Successful identity discovery is distinct from the credential fallback.
+function isCommandcodeServerAccountKey(key, values) {
+  return Boolean(key && key !== hashKey('commandcode', commandcodeAccountSeed(commandcodeCookie({}, values))));
+}
+
 module.exports = {
+  isCommandcodeServerAccountKey,
   COMMANDCODE_CREDITS_URL,
   COMMANDCODE_FORWARDED_COOKIE_NAMES,
   COMMANDCODE_FETCH_TIMEOUT_MS,

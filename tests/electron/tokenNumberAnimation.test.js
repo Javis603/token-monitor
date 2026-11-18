@@ -604,7 +604,11 @@ test('outgoing glyphs roll where they stood while a companion follows the layout
   el.rightAligned = true;
   const companion = element();
   let companionLeft = 300;
-  companion.getBoundingClientRect = () => ({ left: companionLeft, top: 0, width: 10, height: 20 });
+  companion.getBoundingClientRect = () => {
+    assert.ok(!el.children[1]?.children.some((glyph) => glyph.className?.includes('token-number-previous')),
+      'companion layout is measured before inserting outgoing layers');
+    return { left: companionLeft, top: 0, width: 10, height: 20 };
+  };
   el.nextElementSibling = companion;
   const settle = animationApi.beginRoll(el, '999', '1,000', true, () => { companionLeft = 320; });
   const wrapper = el.children[1];

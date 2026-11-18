@@ -20,8 +20,8 @@ function fieldValue(document, key) {
 
 // A value that follows a select: `{ byField, values }` picks by the select's
 // current value and falls back to its first entry.
-function byFieldValue(document, spec) {
-  const current = fieldValue(document, spec.byField);
+function byFieldValue(document, spec, settings) {
+  const current = fieldValue(document, spec.byField) || settings?.[spec.byField];
   return spec.values[current] ?? Object.values(spec.values)[0];
 }
 
@@ -29,15 +29,15 @@ function byFieldValue(document, spec) {
 // saved; `byStatus` follows the provider's last successful poll (MiniMax's
 // region), with `default` until there is one. A form with both uses statusUrls
 // only when the select has no explicit URL (for example Auto).
-function resolveOpenUrl(form, { document, provider }) {
+function resolveOpenUrl(form, { document, provider, settings }) {
   const { openUrl } = form;
   if (openUrl.url) return openUrl.url;
   let url;
   if (openUrl.byField) {
-    const selected = openUrl.urls[fieldValue(document, openUrl.byField)];
+    const selected = openUrl.urls[fieldValue(document, openUrl.byField) || settings?.[openUrl.byField]];
     url = selected || openUrl.statusUrls?.[provider?.[openUrl.byStatus]] || openUrl.default;
   } else url = openUrl.urls[provider?.[openUrl.byStatus]] || openUrl.default;
-  return openUrl.pathByField ? new URL(byFieldValue(document, openUrl.pathByField), url).href : url;
+  return openUrl.pathByField ? new URL(byFieldValue(document, openUrl.pathByField, settings), url).href : url;
 }
 
 // Selects and plain-text settings mirror what is stored; secrets never do.
@@ -85,7 +85,7 @@ function refreshFieldDependents(form, { document }) {
   }
 }
 
-function createCredentialPanel(form, { document, translate, onToggle, onOpen, onClear, onRefresh, onSave, onFieldChange, onFieldError }) {
+function createCredentialPanel(form, { document, translate, onToggle, onOpen, onClear, onSave, onFieldChange, onFieldError }) {
   const { id } = form;
   const element = (tag, elementId, className = '') => {
     const node = document.createElement(tag);
@@ -121,8 +121,7 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
   const actions = element('div', '', 'settings-actions');
   const open = localized(element('button', 'OpenBrowser'), form.openKey);
   const clear = localized(element('button', 'LogoutButton', 'hidden'), form.clearKey);
-  const refresh = localized(element('button', 'RefreshButton'), 'settings.common.refresh');
-  actions.append(open, clear, refresh);
+  actions.append(open, clear);
 
   const stepPart = (part) => {
     if (typeof part === 'string') return localized(document.createElement('span'), part);
@@ -256,7 +255,6 @@ function createCredentialPanel(form, { document, translate, onToggle, onOpen, on
   toggle.addEventListener('click', () => onToggle(form));
   open.addEventListener('click', () => onOpen(form));
   clear.addEventListener('click', () => onClear(form));
-  refresh.addEventListener('click', () => onRefresh(form));
   let saving = false;
   submit.addEventListener('click', async () => {
     if (saving) return;

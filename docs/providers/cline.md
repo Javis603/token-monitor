@@ -25,45 +25,15 @@ clear one partition and write another on every targeted scan.
 
 `settings/providers.json` in that tree holds the account sign-in, which is what the limits read uses.
 Finding sessions does not authenticate the account API: a directory can sit there with the sign-in
-removed or expired, which is reported as `unauthorized` rather than as missing data.
+expired, which is reported as `unauthorized`. Signing out removes the discovered account row.
 
-## Credentials resolve in one order
+## Saved and discovered accounts
 
-1. A `clineApiKey` provider option outranks the environment, then `CLINE_API_KEY`, then
-   `CLINEPASS_API_KEY`. The settings field is what supplies that option, and the key it saves goes to
-   the credential store (`providers.cline.apiKey`) rather than to `settings.json`; the two
-   variables remain the surface for deployments with no UI.
-2. The stored Cline sign-in in `settings/providers.json`. Cline keeps two provider sections there,
-   and the ClinePass selection writes its credentials into the `cline` entry as well ("cline-pass
-   stores under \"cline\"", `apps/vscode/src/sdk/auth-service.ts`), so `cline` is read first and
-   `cline-pass` only as a fallback for a file an older version wrote. Reading them the other way round
-   would let a stale entry mask the current credential.
+The Cline Desktop/CLI sign-in is an ephemeral account row alongside saved API keys and the environment key. Pasting a key no longer hides the app sign-in. Discovered and saved rows can be named, paused and reordered; the discovered row is removed by signing out in Cline, rather than deleting its credential from Token Monitor. Only account identity and user controls are persisted for discovery.
 
-A machine without Cline has no sign-in to read, which is why the key lane exists. Keys are created at
-`app.cline.bot/dashboard/account`; the documented "Settings → API Keys" path 404s for a personal account,
-so this URL rather than navigation. **Verified live**: a key authenticates here and is rejected when
-prefixed, the mirror image of the stored sign-in.
+The app store reads the `cline` section first, then `cline-pass` only as a fallback, because ClinePass writes its current sign-in under `cline` too.
 
-A missing store and a signed-out one are reported differently, the distinction `readCodexOAuthAuth`
-draws in `providers/codex`: no `providers.json` (or one that cannot be parsed) is `notConfigured`,
-while a file that reads and holds no access token is `unauthorized`. Both name the `oauth` lane as the
-source they failed on.
-
-The lanes are **exclusive**, the rule `docs/providers/volcengine.md` fixes for the same situation: a
-configured key owns the lane and a rejected key is reported rather than falling back, since quietly
-switching would show a different account's quota. Each names its provenance — `api` for a key, `oauth`
-for a sign-in, the split `docs/providers/zai.md` states.
-
-Both refusals report the same shared `unauthorized` status, so the status pill reads that provenance to
-name the credential to fix: `api` renders "Update API key" (the field this application owns) and
-`oauth` renders "Open Cline". This is the only provider whose pill branches on `source`, and it does so
-because neither cause is the rarer one — the file lane is the discovery default while its access token
-expires hourly — so any single label would be wrong for the state a fresh install is in.
-
-The order is deliberately not Cline's, which prefers the stored token: the key comes first because it is
-Token Monitor's own operator instruction while the file is another application's store, and the
-repository resolves credentials that way everywhere. Do not "fix" this into the vendor's order — it
-would silently ignore a key the user configured for this machine.
+`CLINE_API_KEY` precedes `CLINEPASS_API_KEY` within the environment lane. Saved keys authenticate exactly as entered; the app token retains its `workos:` prefix. A rejected credential does not fall back to another credential within its row; other account rows are fetched independently. The status pill uses `api` versus `oauth` to direct users to update the key or open Cline.
 
 Reading another application's credential file follows the existing local-discovery boundary: a
 readable provider-owned configuration file may supply an in-memory credential
@@ -94,9 +64,7 @@ every ingest. A sign-in whose file carries no id takes the one the profile read 
 where the row's display email comes from; only when neither names an account is there no `accountKey`,
 rather than an invented one.
 
-That makes identity per lane, so one account reached by key on one machine and by sign-in on another
-lists as two. `providers/zai` has the same shape. Merging them would need `accountKeyAliases`, which
-`limits/core.js` gates to opencode — widening the shared Hub core for one provider.
+API-key readings keep their credential-derived key for compatibility and report the server account id as an alias when the profile supplies it. This lets the slot layer deduplicate the Desktop sign-in without merging accounts by email.
 
 A Cline that lives only inside WSL is not read: `providers/claude/limits.js` has
 `wslClaudeCredentialPaths()` for the same case, and the Cline equivalent is not implemented. Usage is
@@ -249,3 +217,9 @@ from a key, which has to learn its account id first:
 ```bash
 node -e "require('./src/shared/providers/cline/limits').fetchClineLimits().then(r => console.log(r.status, JSON.stringify(r.windows)))"
 ```
+
+## Connection source selection
+
+The connection selector supports Automatic, API key and local sign-in. Automatic collects saved, environment and discovered accounts independently. An explicit source limits each fetch to that origin; it never reads a different local account to repair a saved key. The preference does not affect draft validation or credential fingerprints.
+
+Settings marks accounts excluded by the selected source as Not collected. A saved key stays editable and removable when the same quota account is also available through a detected sign-in.

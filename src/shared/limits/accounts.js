@@ -1,7 +1,9 @@
 // @ts-check
 'use strict';
 
-const { defaultIdentityKey, accountSlotField } = require('./accountSlots');
+const { normalizeLimitProductId } = require('./products');
+const { sourcePreferenceKey, normalizeSourcePreference } = require('./sourceSelection');
+const { defaultIdentityKey, accountSlotField, normalizeAmbientAccounts } = require('./accountSlots');
 
 // The limits account registry index: one account declaration per catalog
 // provider, in catalog order. Each declaration lives in
@@ -77,6 +79,7 @@ const { defaultIdentityKey, accountSlotField } = require('./accountSlots');
  *
  * @typedef {object} AccountForm
  * @property {'custom'} [kind] Custom panels may borrow only the shared save path.
+ * @property {{labelKey: string}} [loginAction]
  * @property {string} [titleKey]
  * @property {string} [openKey]
  * @property {string} [clearKey]
@@ -100,11 +103,38 @@ const { defaultIdentityKey, accountSlotField } = require('./accountSlots');
  * @property {{key: string, labelKey: string, fields: string[]}} [credentialChoice]
  * @property {{fn: string, field: string}} [rememberProbe]
  *
+ * @typedef {object} DiscoveredAccount
+ * @property {AccountValues} values In-memory form-shaped credentials, never persisted.
+ * @property {string} sourceName Fallback display name and sign-out location.
+ * @property {string} [accountKey]
+ * @property {string} [accountName]
+ * @property {string} [accountEmail]
+ * @property {AccountValues} [fetchDeps] Provider-owned isolated dispatch dependencies.
+ * @property {boolean} [combineMatchingCredential] Preserve a combined pool fetch for an exact form-value match.
+ * @property {AccountValues} [combinedFetchDeps]
+ *
+ * @typedef {object} AccountSource
+ * @property {string} id Stable, provider-local read lane.
+ * @property {'cli'|'desktop'|'web'|'apiKey'|'env'|'file'|'oauth'} kind
+ * @property {'alternative'|'complement'|'single'} relation Alternative lanes follow fallback order; complements may contribute together.
+ * @property {string[]} products Stable provider-local entitlement IDs, independent of source and region.
+ * @property {string} labelKey
+ * @property {string} descriptionKey
+ * @property {boolean} [getUrlFromForm] Reuse the account form's URL resolver; never copy its URL here.
+ *
  * @typedef {object} AccountDeclaration
  * @property {string} id
+ * @property {AccountSource[]} sources Ordered read sources.
+ * @property {{sources: string[], autoLabelKey?: string, autoDescriptionKey?: string, slotSources?: {credentials: Record<string, string>, discovered?: string}}} [sourceSelection] Explicit provider-supported exclusive lanes; complements must stay out. Optional slot sources describe which lanes can collect each saved, environment or discovered credential.
+ * @property {boolean} [environmentWhenSaved]
+ * @property {boolean} [dedupeAccounts]
  * @property {string} fetch Limits export called by the collector.
  * @property {AccountField[]} fields
+ * @property {string[]} [accountCredentialKeys] Ordered independently authenticating credentials; companions are never cleared.
+ * @property {(values: Record<string, string>, key: string) => boolean} [accountCredentialReady] Compound credential completeness check.
+ * @property {boolean} [accountSlotOwner] Provider owns authentication and collector union; slots persist main-only owner records.
  * @property {boolean} [accountSlots] Requires a form, no managed/profiles fields, credentials only from declared fields, no singleton credential write-back, and an audit of module-level state.
+ * @property {(env: AccountValues, limits: AccountLimits, deps: AccountValues) => DiscoveredAccount[]} [discoveredAccounts] Ephemeral main-only credentials; never projected or saved.
  * @property {string} [serverAccountKey] Limits export testing whether a resolved key proves a server identity.
  * @property {boolean} [accountRefresh] Fetch honors account-scoped limitRefreshScope and returns only that row.
  * @property {AccountStatus} [status] Standard settings/env source and configured flag.
@@ -125,7 +155,16 @@ const { defaultIdentityKey, accountSlotField } = require('./accountSlots');
 // credentialStore, and an eager require here would be a cycle.
 /** @param {AccountDeclaration} account @param {() => AccountLimits} loadLimits */
 function registerProvider(account, loadLimits) {
-  return { ...account, fields: account.accountSlots ? [...account.fields, accountSlotField(account), { key: defaultIdentityKey(account), kind: 'setting', configDefault: {}, storePath: ['providers', account.id, 'defaultAccountIdentity'], persist: 'never', rendererOmit: true, watch: false, initial: null }] : account.fields, loadLimits };
+  for (const source of account.sources) {
+    if (!Array.isArray(source.products) || !source.products.length
+      || new Set(source.products).size !== source.products.length
+      || source.products.some(id => !id || normalizeLimitProductId(id) !== id)) {
+      throw new Error(`limits accounts: invalid source products for ${account.id}:${source.id}`);
+    }
+  }
+  /** @type {AccountField[]} */
+  const preference = account.sourceSelection ? [{ key: sourcePreferenceKey(account), kind: 'setting', normalize: (/** @type {unknown} */ value) => normalizeSourcePreference(account, value), configNormalize: (/** @type {unknown} */ value) => normalizeSourcePreference(account, value), configDefault: 'auto', initial: 'auto', persist: 'renormalize', project: (/** @type {unknown} */ value) => normalizeSourcePreference(account, value) }] : [];
+  return { ...account, fields: [...preference, ...(account.accountSlots ? [...account.fields, accountSlotField(account), ...(account.discoveredAccounts ? [{ key: `${account.id}AmbientAccounts`, kind: 'setting', configDefault: {}, configNormalize: (/** @type {any} */ value) => normalizeAmbientAccounts(account, value), storePath: ['providers', account.id, 'ambientAccounts'], rendererOmit: true, persist: 'never', initial: null, watch: false }] : []), { key: defaultIdentityKey(account), kind: 'setting', configDefault: {}, storePath: ['providers', account.id, 'defaultAccountIdentity'], persist: 'never', rendererOmit: true, watch: false, initial: null }] : account.fields)], loadLimits };
 }
 
 const LIMIT_PROVIDER_ACCOUNTS = Object.freeze([
@@ -232,18 +271,18 @@ function limitProviderUrlAllowed(hostname, pathname, providerId = '') {
 }
 
 // The refresh scope for one rendered limits row. LimitsRuntime files every row
-// an account-scoped probe returns under that one identity, so the scope may
+// an account-scoped probe returns under its reported identity, so the scope may
 // only name an account when the provider's fetch filters by it, and only by
 // its account key: providers' name- or email-only paths can fall back to
 // reading every account. Anything else refreshes the whole provider instead.
-/** @param {string} provider @param {{accountKey?: string, accountEmail?: string, accountName?: string, accountLabel?: string, sourceDetail?: string}} [row] */
+/** @param {string} provider @param {{accountKey?: string, accountEmail?: string, accountName?: string, accountLabel?: string, sourceDetail?: string, region?: string}} [row] */
 function limitAccountRefreshScope(provider, row = {}) {
   /** @param {unknown} value */
   const text = (value) => (typeof value === 'string' ? value.trim() : '');
   /** @type {Record<string, string>} */
   const scope = { provider };
   const declaration = limitAccountDeclaration(provider);
-  if (!declaration?.accountRefresh && !declaration?.accountSlots) return scope;
+  if (!declaration?.accountRefresh && !(declaration?.accountSlots && !declaration.accountSlotOwner)) return scope;
   const account = {
     accountKey: text(row.accountKey),
     accountEmail: text(row.accountEmail).toLowerCase(),
@@ -253,6 +292,7 @@ function limitAccountRefreshScope(provider, row = {}) {
   };
   if (!account.accountKey) return scope;
   for (const [key, value] of Object.entries(account)) if (value) scope[key] = value;
+  if (provider === 'alibaba' && text(row.region)) scope.region = text(row.region).toLowerCase();
   return scope;
 }
 

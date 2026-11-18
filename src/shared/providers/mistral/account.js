@@ -3,6 +3,10 @@
 
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'mistral',
+  accountSlots: true,
+  sources: [
+    { id: 'web', kind: 'web', relation: 'single', products: ['mistral'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription', getUrlFromForm: true }
+  ],
   fetch: 'fetchMistralLimits',
   fields: [{
     key: 'mistralCookie', kind: 'credential', storePath: ['providers', 'mistral', 'cookie'],

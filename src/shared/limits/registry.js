@@ -71,9 +71,19 @@ function bindField(field, limits) {
 }
 
 function bindDeclaration(decl) {
-  if (decl.accountSlots && (!decl.form || decl.fields.some((field) =>
+  if (decl.accountSlots && !decl.accountSlotOwner && (!decl.form || decl.fields.some((field) =>
     field.kind === 'managed' || (field.kind === 'profiles' && field.key !== accountSlotKey(decl))))) {
     throw new Error(`limits registry: invalid accountSlots declaration for ${decl.id}`);
+  }
+  if (decl.sourceSelection && (decl.sourceSelection.sources.length < 2
+    || new Set(decl.sourceSelection.sources).size !== decl.sourceSelection.sources.length
+    || decl.sourceSelection.sources.some(id => !decl.sources.some(source => source.id === id && source.relation === 'alternative')))) {
+    throw new Error(`limits registry: invalid source selection for ${decl.id}`);
+  }
+  if (decl.accountCredentialKeys && (!Array.isArray(decl.accountCredentialKeys)
+    || !decl.accountCredentialKeys.length || new Set(decl.accountCredentialKeys).size !== decl.accountCredentialKeys.length
+    || decl.accountCredentialKeys.some(key => !decl.fields.some(field => field.key === key && field.kind === 'credential')))) {
+    throw new Error(`limits registry: invalid account credential keys for ${decl.id}`);
   }
   const limits = LIMIT_PROVIDER_MODULES[decl.id];
   if (!limits) throw new Error(`limits registry: no limits module registered for ${decl.id}`);
@@ -105,7 +115,7 @@ const LIMIT_PROVIDER_REGISTRY = Object.freeze(LIMIT_PROVIDER_ACCOUNTS.map(bindDe
 const LIMIT_PROVIDER_FETCHERS = Object.freeze(Object.fromEntries(
   LIMIT_PROVIDER_REGISTRY.map((entry) => [
     entry.id,
-    entry.accountSlots ? createAccountSlotFetcher(entry) : (providerOptions, probeDeps) => entry.fetchLimits(providerOptions, probeDeps)
+    entry.accountSlots && !entry.accountSlotOwner ? createAccountSlotFetcher(entry) : (providerOptions, probeDeps) => entry.fetchLimits(providerOptions, probeDeps)
   ])
 ));
 

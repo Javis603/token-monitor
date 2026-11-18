@@ -4,6 +4,14 @@
 // Account declarations must remain require-free for renderer-safe projection.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'minimax',
+  accountSlots: true,
+  accountSlotOwner: true,
+  environmentWhenSaved: false,
+  accountCredentialKeys: ['minimaxApiKey'],
+  sources: [
+    { id: 'api', kind: 'apiKey', relation: 'complement', products: ['api'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.limits.sources.apiKeyDescription' },
+    { id: 'oauth', kind: 'cli', relation: 'complement', products: ['mcode'], labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.minimax.codeNote' }
+  ],
   fetch: 'fetchMinimaxLimits',
   accountRefresh: true,
   fields: [

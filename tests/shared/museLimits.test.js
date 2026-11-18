@@ -187,6 +187,9 @@ test('Muse terminates a SIGTERM-ignoring probe on timeout, overflow and cancella
         execFile(_command, _args, options, callback) {
           child = execFile(process.execPath, ['-e', `
             process.on('SIGTERM', () => {});
+            // execFile closes stdout before killing on overflow. Keep this
+            // stubborn fixture alive if a pending write reaches that closed pipe.
+            process.stdout.on('error', error => { if (error.code !== 'EPIPE') throw error; });
             process.stdout.write('ready\\n');
             ${reason === 'overflow' ? "setImmediate(() => process.stdout.write('x'.repeat(300000)));" : ''}
             setInterval(() => {}, 1000);

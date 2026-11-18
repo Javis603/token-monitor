@@ -95,3 +95,7 @@ for Kimi.
 - **The desktop app writes more than sessions.** `server/` (its embedded host) and the root indexes
   sit outside the watched root; `sessions/.index-dirty/` sits inside it, so indexing can trigger a
   targeted scan. Neither changes what is counted: `wire.jsonl` is the only usage source.
+
+## Saved accounts
+
+Saved accounts keep the Code API key and complementary Web token together. Both must belong to the same Kimi account; the app does not verify that they match. Either can configure an account; when both are present the API key determines identity even if only the Web fallback answers. Web fills missing quota kinds using the existing source precedence.

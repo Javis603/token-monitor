@@ -65,6 +65,7 @@ function fixture() {
     edgeDockRateHistory: require('../../src/electron/renderer/tokenRatePresentation').createLiveTokenRateHistory(), edgeDockLiveRateSample: () => null,
     statsHistoryRevision: (stats) => stats?.historyRevision,
     injectLocalDeviceStatus: (stats) => stats,
+    getAccountPresentationSync: () => ({ notifyStats() {}, refresh: async () => {} }),
     getSyncContentRuntime: () => ({ notifyStats() {} }),
     getLimitsHistoryStore: () => ({ record: (...args) => calls.push(['history', ...args]) }),
     limitsHistoryController: null,

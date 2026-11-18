@@ -4,6 +4,9 @@
 // Third-party APIs limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'thirdparty',
+  sources: [
+    { id: 'api', kind: 'apiKey', relation: 'single', products: ['thirdparty'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.limits.sources.apiKeyDescription' }
+  ],
   fetch: 'fetchThirdPartyLimits',
   accountRefresh: true,
   fields: [

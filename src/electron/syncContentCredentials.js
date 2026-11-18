@@ -49,6 +49,27 @@ function createSyncContentCredentialQueue(getStore) {
     cachedIdentity = document.credentials.hub.syncContentIdentity;
     return identity;
   }
+  // Presentation edits must return to the same destination after A → B → A.
+  // Optional-sync consent keeps its separate, rotating active identity above.
+  function resolvePresentationIdentity(context) {
+    const binding = destinationBinding(context);
+    if (!binding) return '';
+    const store = getStore();
+    const document = store.readDocument();
+    document.credentials.hub ||= {};
+    const hub = document.credentials.hub;
+    const identities = hub.accountPresentationIdentities ||= {};
+    for (const [identity, destination] of Object.entries(identities)) {
+      if (opaque(identity) && sameDestination(destination, binding)) return identity;
+    }
+    // Preserve journals/cache written with the former shared active identity.
+    const active = hub.syncContentIdentity;
+    const identity = opaque(active?.identity) && sameDestination(active, binding)
+      ? active.identity : crypto.randomUUID();
+    identities[identity] = binding;
+    store.writeDocument(document);
+    return identity;
+  }
   function save(context) {
     const binding = destinationBinding(context);
     if (!binding || !opaque(context.identity)) throw new Error('Invalid cleanup context');
@@ -67,7 +88,7 @@ function createSyncContentCredentialQueue(getStore) {
       store.writeDocument(document);
     }
   }
-  return { read, save, remove, resolveIdentity };
+  return { read, save, remove, resolveIdentity, resolvePresentationIdentity };
 }
 
 module.exports = { createSyncContentCredentialQueue };

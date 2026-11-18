@@ -26,3 +26,7 @@ When the access half expires, the fetcher calls the platform's own `POST /passpo
 ## Verification
 
 `node --test tests/shared/stepfunLimits.test.js tests/shared/stepfunRefresh.test.js` covers plan detection, bucket weighting, token device ID, the refresh/retry flow, injected requests and failures. A signed-in StepFun account is needed to confirm the live endpoint and both plan variants.
+
+## Saved accounts
+
+Saved accounts refresh independently. Renewal is bound to the dispatched slot and its complete expected credential values; deleting, pausing or replacing that slot wins over an in-flight renewal. The fixed environment credential is never updated by a saved slot.

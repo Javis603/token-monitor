@@ -114,7 +114,8 @@ test('OpenCode Web identity stays stable when Go availability changes for the sa
   assert.equal(goAndZen.accountKey, zenOnly.accountKey);
   assert.deepEqual(new Set(goAndZen.accountKeyAliases), new Set([
     hashKey('opencode', 'go:shared-workspace'),
-    hashKey('opencode', 'zen:shared-workspace')
+    hashKey('opencode', 'zen:shared-workspace'),
+    require('../../src/shared/providers/opencode/identity').openCodeCookieAccountKey('sess=1')
   ]));
   assert.equal(aggregateLimits([
     { deviceId: 'go-device', limits: goAndZenSummary },
@@ -146,7 +147,8 @@ test('OpenCode Web identity ignores workspace ids from failed probes', async () 
   assert.equal(provider.accountKey, hashKey('opencode', 'workspace:workspace-successful-zen'));
   assert.deepEqual(new Set(provider.accountKeyAliases), new Set([
     hashKey('opencode', 'go:workspace-successful-zen'),
-    hashKey('opencode', 'zen:workspace-successful-zen')
+    hashKey('opencode', 'zen:workspace-successful-zen'),
+    require('../../src/shared/providers/opencode/identity').openCodeCookieAccountKey('sess=1')
   ]));
   assert.equal(provider.balanceUsd, 5);
 });

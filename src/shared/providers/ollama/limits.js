@@ -1,4 +1,5 @@
 'use strict';
+const { selectedSource } = require('../../limits/sourceSelection');
 
 const { normalizeLimitProvider } = require('../../limits/core');
 const {
@@ -408,6 +409,22 @@ function apiKeyCacheKey(apiKey) {
   return hashKey('ollama-api-key', apiKey);
 }
 
+function cookieAccountKey(cookieHeader) {
+  const identity = cookiePairs(cookieHeader)
+    .filter((pair) => isRecognizedSessionCookieName(pair.name))
+    .map((pair) => `${pair.name}=${pair.value}`).join(';');
+  return hashKey('ollama', identity);
+}
+
+// Email identities carry the credential fallback as an alias, so only a
+// provider-resolved identity, rather than an arbitrary key, is server proof.
+function isOllamaServerAccountKey(key, values, aliases = []) {
+  const apiKey = ollamaApiKey({}, values);
+  const cookie = ollamaSessionCookie({}, values);
+  const fallbacks = [apiKey ? fallbackAccountKey(apiKey) : '', cookie ? cookieAccountKey(cookie) : ''].filter(Boolean);
+  return Boolean(key && !fallbacks.includes(key) && fallbacks.some(fallback => aliases.includes(fallback)));
+}
+
 function fallbackAccountKey(apiKey) {
   return hashKey('ollama', `api-key:${apiKey}`);
 }
@@ -548,6 +565,7 @@ async function fetchOllamaApiLimits(apiKey, options, deps, nowMs, updatedAt) {
   const row = normalizeLimitProvider({
     provider: 'ollama',
     accountKey,
+    ...(identity ? { accountKeyAliases: [fallbackAccountKey(apiKey)] } : {}),
     ...(identity?.accountEmail ? { accountEmail: identity.accountEmail } : {}),
     ...(identity?.accountLabel ? { accountLabel: identity.accountLabel } : {}),
     source: 'api',
@@ -562,12 +580,13 @@ async function fetchOllamaLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
-  const apiKey = ollamaApiKey(env, options);
+  const selection = selectedSource('ollama', options, deps);
+  const apiKey = selection === 'web' ? '' : ollamaApiKey(env, options);
   if (apiKey) return fetchOllamaApiLimits(apiKey, options, deps, now, updatedAt);
 
-  const cookieHeader = ollamaSessionCookie(env, options);
+  const cookieHeader = selection === 'api' ? '' : ollamaSessionCookie(env, options);
   if (!cookieHeader) {
-    return normalizeLimitProvider({ provider: 'ollama', source: 'web', status: 'notConfigured', updatedAt, windows: [] });
+    return normalizeLimitProvider({ provider: 'ollama', source: selection === 'api' ? 'api' : 'web', status: 'notConfigured', updatedAt, windows: [] });
   }
 
   if (!deps.bypassValidationCache) {
@@ -591,12 +610,11 @@ async function fetchOllamaLimits(options = {}, deps = {}) {
     if (parsed.windows.length === 0) {
       throw errorWithStatus(looksSignedOut(html) ? 'unauthorized' : 'unavailable', 'Ollama settings page had no usage meters');
     }
-    const identity = parsed.accountEmail || cookiePairs(cookieHeader)
-      .filter((pair) => isRecognizedSessionCookieName(pair.name))
-      .map((pair) => `${pair.name}=${pair.value}`).join(';');
+    const fallbackKey = cookieAccountKey(cookieHeader);
     return normalizeLimitProvider({
       provider: 'ollama',
-      accountKey: hashKey('ollama', identity),
+      accountKey: parsed.accountEmail ? hashKey('ollama', parsed.accountEmail) : fallbackKey,
+      ...(parsed.accountEmail ? { accountKeyAliases: [fallbackKey] } : {}),
       accountEmail: parsed.accountEmail,
       accountLabel: parsed.planName,
       source: 'web',
@@ -618,6 +636,7 @@ async function fetchOllamaLimits(options = {}, deps = {}) {
 }
 
 module.exports = {
+  isOllamaServerAccountKey,
   OLLAMA_SETTINGS_URL,
   OLLAMA_BALANCE_URL,
   OLLAMA_ME_URL,

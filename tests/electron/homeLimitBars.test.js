@@ -65,7 +65,8 @@ test('Home uses account-row plan policies for grouped titles and adapter identit
     ...['Work profile', 'Personal profile'].map((accountLabel) => ({ provider: 'opencode', status: 'ok', accountLabel, windows: [window] })),
     ...['newapi-account', 'sub2api'].map((adapterId) => ({ provider: 'thirdparty', status: 'ok', adapterId, planLabel: 'Account', windows: [window] }))
   ]);
-  for (const name of ['Coding Plan', 'Agent Plan Pro', 'Work profile', 'Personal profile']) {
+  assert.deepEqual(rows.filter(row => row.providerId === 'volcengine').map(row => row.plan), ['Coding Plan', 'Agent Plan Pro']);
+  for (const name of ['Work profile', 'Personal profile']) {
     assert.equal(rows.find((row) => row.name === name).plan, '');
   }
   const adapters = rows.filter((row) => row.providerId === 'thirdparty');

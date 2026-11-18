@@ -1,5 +1,7 @@
 'use strict';
 
+const { selectedSource } = require('../../limits/sourceSelection');
+
 // Cursor limits provider: per-account billing and on-demand windows, using the
 // session/auth helpers in this folder. Reached through providerFetchers() in
 // src/shared/limits/collector.js.
@@ -284,6 +286,8 @@ async function fetchCursorLimits(options = {}, deps = {}) {
   // Electron supplies manual ownership; headless callers without that metadata
   // retain their existing saved-account behavior.
   const manual = Array.isArray(options.cursorManualAccountIds) ? new Set(options.cursorManualAccountIds) : null;
+  const source = selectedSource('cursor', options, deps);
+  const selected = account => source === 'auto' || source === (manual?.has(account.id) ? 'web' : 'desktop');
   const current = (account, unauthorized = false) => !manual || manual.has(account.id)
       || isCursorDetectedAccountCurrent({
         desktop: (deps.readCursorDesktopSignIn || cursorAuth.readCursorDesktopSignIn)(),
@@ -293,14 +297,18 @@ async function fetchCursorLimits(options = {}, deps = {}) {
   // Omission would leave a retained LimitsRuntime identity behind. The marker
   // retires only its quota row, never the stored credential or usage history.
   const removed = account => ({ provider: 'cursor', accountKey: hashCursorAccountKey(account), removed: true });
-  const providers = await Promise.all(enabledAccounts.map(account => current(account)
+  const providers = await Promise.all(enabledAccounts.map(account => selected(account) && current(account)
     ? fetchCursorAccountLimits(account, deps) : removed(account)));
   // Recheck after every probe settles: even a completed account can become stale
   // while a slower sibling is still fetching.
   const rows = providers.map((provider, index) => provider.removed
     || current(enabledAccounts[index], provider.status === 'unauthorized')
     ? provider : removed(enabledAccounts[index]));
-  return rows.length === 1 ? rows[0] : rows;
+  // Two stored tokens can resolve to one identity. An excluded token must not
+  // retire a row still collected through the selected ownership lane.
+  const collectedKeys = new Set(rows.filter(row => !row.removed).map(row => row.accountKey));
+  const retainedRows = rows.filter(row => !row.removed || !collectedKeys.has(row.accountKey));
+  return retainedRows.length === 1 ? retainedRows[0] : retainedRows;
 }
 
 module.exports = {

@@ -131,6 +131,10 @@ async function queryRateLimit(request, token, deps = {}) {
 }
 
 async function fetchStepfunLimits(options = {}, deps = {}) {
+  if (deps.accountSlotSaved && deps.accountSlotId !== 'environment') {
+    deps = { ...deps, onStepfunTokenRenewed: ({ previousToken, token }) =>
+      deps.renewAccountSlotCredential?.('stepfunToken', previousToken, token) };
+  }
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
   const base = { provider: 'stepfun', source: 'web', updatedAt };
   const token = stepfunToken(deps.env || process.env, options);

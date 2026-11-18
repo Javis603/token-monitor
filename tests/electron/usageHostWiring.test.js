@@ -294,6 +294,7 @@ test('Dots visibility refresh only delays its own settings save, including after
   vm.runInNewContext(main.slice(guardStart, guardEnd) + registration, {
     pluginRuntime: null,
     ipcMain: { handle: (_name, handler) => { update = handler; } },
+    getAccountPresentationSync: () => ({ notifyStats() {}, refresh: async () => {} }),
     getSyncContentRuntime: () => contentRuntime,
     latestUsageHost: { transformSettingsApplied: async () => {} },
     settingsForRenderer: () => saved,
@@ -330,6 +331,7 @@ test('a delayed Dots visibility reply keeps the settings saved by a later write'
   vm.runInNewContext(main.slice(guardStart, guardEnd) + registration, {
     pluginRuntime: null,
     ipcMain: { handle: (_name, handler) => { update = handler; } },
+    getAccountPresentationSync: () => ({ notifyStats() {}, refresh: async () => {} }),
     getSyncContentRuntime: () => contentRuntime,
     latestUsageHost: { transformSettingsApplied: async () => {} },
     settingsForRenderer: () => ({ ...saved }),

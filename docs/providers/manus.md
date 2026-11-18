@@ -47,7 +47,7 @@ Connect's JSON mapping omits zero-valued fields, so an absent count is read as z
 ## Invariants and known gaps
 
 - Desktop discovery supports macOS and Windows. Linux supports the same manual web session and credits API.
-- A saved or environment session selects that account; an API rejection never silently switches to a different desktop account. Clearing the manual session restores desktop discovery.
+- Saved sessions, the environment session and the discovered desktop sign-in are collected independently; rows identifying the same account by key or aliases collapse into one. Pasting a session no longer hides the desktop account. Its row can be renamed, paused and reordered; sign out in Manus to remove it. An API rejection never switches credentials.
 - Signing out of Manus only removes its desktop source; a separately saved web session remains configured until cleared or expired.
 - If a future Manus build starts encrypting the cookie (`encrypted_value` only), the provider reports unavailable; it does not read the Keychain.
 - The endpoint and its field names can change without notice. Unknown shapes fail closed.
@@ -55,3 +55,7 @@ Connect's JSON mapping omits zero-valued fields, so an absent count is read as z
 ## Verification
 
 `node --test tests/shared/manusLimits.test.js` covers cookie discovery, a real SQLite/WAL snapshot, manual/environment session selection, monthly and refresh parsing (including omitted zero fields), the request shape and the HTTP status mapping, using the sanitized fixture `tests/fixtures/manusAvailableCredits.json` (invented values, real field names). `tests/electron/edgeDockLimitCard.test.js` renders the card. Registration, locale keys, vendor presentation and README entries are covered by the provider-order, i18n, vendor-presentation and README consistency checks.
+
+## Connection source selection
+
+The connection selector supports Automatic, Web and Desktop. Automatic keeps independent saved, environment and discovered accounts. Web reads only supplied sessions; Desktop reads only the discovered account. A saved account with an incompatible selected origin reports not configured rather than adopting a desktop identity. Draft validation always checks only its submitted session.

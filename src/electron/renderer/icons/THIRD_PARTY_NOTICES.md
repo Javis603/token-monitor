@@ -6,6 +6,14 @@ Sources:
   - actions/search.svg: search
   - actions/settings.svg: settings
   - actions/pencil-line.svg: pencil-line
+  - actions/key.svg: key
+  - actions/clock.svg: clock
+  - actions/circle-minus.svg: circle-minus
+  - actions/circle-exclamation-point.svg: circle-exclamation-point
+    (clock, circle-minus and circle-exclamation-point copied from upstream commit `149eba0aea48178a5ab1efe2c701de1da94f4be8`)
+  - actions/pause.svg: pause
+  - actions/play.svg: play
+    (key, pause and play copied from upstream commit `f8feea7a02ea461c9f2a4b4d851512aae6ec933f`)
   - actions/trash.svg: trash
   - actions/download.svg: download
   - actions/rotate-cw.svg: rotate-cw

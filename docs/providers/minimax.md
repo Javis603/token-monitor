@@ -67,7 +67,7 @@ The Status panel lists MiniMax (China) and MiniMax (International) separately be
 
 ## Credentials and transport
 
-Add each API key with its billing type and region; Auto is the default and no user-defined account name is needed. Readding the same key updates its entry instead of collecting it twice. Removing a saved key never signs out Code. Environment credentials remain supported as a fallback, including for headless/agent runs, and are not shown in settings. Legacy and saved API keys take precedence over the environment key. Disabled saved entries still suppress environment fallback; removing the last saved entry restores it. Different credentials may observe the same wallet; never sum their balances or allowances.
+Add each API key with its billing type and region; Auto is the default and no user-defined account name is needed. Saved API profiles use shared account slots while Code discovery remains an independent source. Existing profiles migrate with stable IDs after destination readback; overflow profiles keep collecting through the legacy owner until space is available on a later startup. Readding the same key updates its entry instead of collecting it twice. Removing a saved key never signs out Code. Environment credentials remain supported as a fallback, including for headless/agent runs, and are not shown in settings. Legacy and saved API keys take precedence over the environment key. Disabled saved entries still suppress environment fallback; removing the last saved entry restores it. Different credentials may observe the same wallet; never sum their balances or allowances.
 
 The settings list labels each saved key `Account N` in saved order. These are display labels; limits surfaces still group readings by confirmed GroupId.
 

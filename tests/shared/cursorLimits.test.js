@@ -538,3 +538,28 @@ test('Cursor limits checks ownership after a slower sibling probe finishes', asy
     assert.equal(rows[1].status, 'ok');
   }
 });
+
+for (const preference of ['auto', 'desktop', 'web']) test(`Cursor ${preference} source preference filters requests while retiring excluded observations`, async () => {
+  const accounts = [{ id: 'user_desktop', sessionToken: 'desktop' }, { id: 'user_manual', sessionToken: 'web' }];
+  const calls = [];
+  const rows = await fetchCursorLimits({ cursorSourcePreference: preference, cursorManualAccountIds: ['user_manual'] }, {
+    listAccounts: () => accounts,
+    readCursorDesktopSignIn: () => ({ state: 'unknown' }),
+    probe: async token => { calls.push(token); return { ok: false, error: { kind: 'network', message: 'offline' } }; }
+  });
+  assert.deepEqual(calls, preference === 'auto' ? ['desktop', 'web'] : [preference]);
+  assert.equal(rows.length, 2);
+  assert.equal(rows.filter(row => row.removed).length, preference === 'auto' ? 0 : 1);
+  assert.deepEqual(accounts.map(account => account.sessionToken), ['desktop', 'web']);
+});
+
+test('Cursor source exclusion does not retire a shared identity still collected by the selected lane', async () => {
+  const rows = await fetchCursorLimits({ cursorSourcePreference: 'web', cursorManualAccountIds: ['manual'] }, {
+    listAccounts: () => [{ id: 'desktop', userId: 'user_shared', sessionToken: 'desktop' }, { id: 'manual', userId: 'user_shared', sessionToken: 'web' }],
+    readCursorDesktopSignIn: () => ({ state: 'unknown' }),
+    probe: async token => { assert.equal(token, 'web'); return { ok: false, error: { kind: 'network', message: 'offline' } }; }
+  });
+  assert.equal(rows.removed, undefined);
+  assert.equal(rows.provider, 'cursor');
+  assert.notEqual(rows.status, 'notConfigured');
+});

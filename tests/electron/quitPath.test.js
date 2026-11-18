@@ -105,7 +105,7 @@ test('an aborted updater handoff can reopen quota history after draining the pri
     limitsHistoryController: { dispose() { events.push('preview-close'); }, refresh() {} },
     app: { getPath: () => directory, on: (_event, callback) => { beforeQuit = callback; } },
     console, quitRequested: false, skipForcedQuit: false,
-    antigravityOAuthLoginController: null, workbuddyManagedAccountService: null,
+    cancelAntigravityManagedAccountLogin() {}, workbuddyManagedAccountService: null,
     resetMacWidgetReloadThrottle() {}, rateRefreshTimer: null, appUpdateBackgroundTimer: null,
     clearInterval() {}, stopTaskbarZOrderKeeper() {}, unregisterWindowToggleShortcut() {},
     edgeDockController: null, notchController: null, clearTimeout() {}, notchRateTimer: null,

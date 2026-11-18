@@ -294,8 +294,7 @@ test('a stats update repaints main and the visible Settings overlay', () => {
     'updateOpenRouterProfilesStatus', 'updateMinimaxApiKeysStatus',
     'updateThirdPartyProfilesStatus',
     'renderDeepseekStatus',
-    'renderMinimaxStatus',
-    'renderCopilotStatus'
+    'renderMinimaxStatus'
   ];
   const context = {
     visibleStatsSurface: () => 'main',
@@ -304,6 +303,7 @@ test('a stats update repaints main and the visible Settings overlay', () => {
     state: { settings: { limitAccountForms: [{ id: 'typesafe' }] } },
     limitProviderAccountGroup: () => true,
     isSettingsSurfaceVisible: () => true,
+    preserveSettingsPanelScroll(callback) { calls.push('settings-scroll-batch'); return callback(); },
     renderFloatingBubbleContent: () => calls.push('bubble'),
     signalContentReady: () => calls.push('ready')
   };
@@ -318,6 +318,7 @@ test('a stats update repaints main and the visible Settings overlay', () => {
   renderStatsUpdate();
 
   assert.deepEqual(calls.slice(0, 2), ['connection:main', 'main']);
+  assert.equal(calls.filter(call => call === 'settings-scroll-batch').length, 1);
   assert.ok(calls.indexOf('renderSettingsSummaries') > calls.indexOf('main'));
   assert.ok(calls.indexOf('renderMimoStatus') > calls.indexOf('main'));
   assert.equal(calls.at(-1), 'ready');
@@ -343,7 +344,14 @@ test('the closed-Settings guard does not strand main-surface controls', () => {
 
 test('heavy render roots reject work for an inactive surface', () => {
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
-  const body = (name, next) => app.slice(app.indexOf(`function ${name}(`), app.indexOf(next));
+  const owners = { renderCodexAccounts: 'codex', renderMimoStatus: 'mimo', renderOpenCodeProfiles: 'opencode', renderNamedApiProfiles: 'thirdparty', renderCursorStatus: 'cursor' };
+  const body = (name, next) => {
+    const source = owners[name] ? fs.readFileSync(path.join(rendererDir, `limits/providerOwners/${owners[name]}.js`), 'utf8') : app;
+    const start = source.indexOf(`function ${name}(`);
+    const end = source.indexOf(next, start);
+    assert.ok(start >= 0, name);
+    return source.slice(start, end < 0 ? undefined : end);
+  };
 
   assert.match(body('renderServiceStatus', '\nasync function refreshServiceStatus('), /function renderServiceStatus\(\) \{\n {2}if \(!serviceStatusSurfaceVisible\(\)\) return;/);
   assert.match(body('renderFloatingBubbleContent', '\nfunction setupFloatingBubbleInteraction('), /function renderFloatingBubbleContent\(\) \{\n {2}if \(visibleStatsSurface\(\) !== 'bubble'\) return;/);
@@ -361,8 +369,32 @@ test('heavy render roots reject work for an inactive surface', () => {
     assert.match(body(name, next), new RegExp(`function ${name}\\([^)]*\\) \\{\\n {2}if \\(!isSettingsSurfaceVisible\\(\\)\\) return;`));
   }
 
-  assert.match(body('renderOpenCodeProfiles', '\nfunction normalizeProfileName('), /\.then\(\([^)]*\) => \{\n {4}if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
-  assert.match(body('renderNamedApiProfiles', '\nfunction renderOpenRouterProfiles('), /\.then\(\([^)]*\) => \{\n {4}if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
+  assert.match(body('renderOpenCodeProfiles', '\nfunction normalizeProfileName('), /getProfiles\(\)\.then\((?:\(\{[^}]*\}\)|result) => \{\s*(?:const \{[^}]*\} = result;\s*)*if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
+  assert.match(body('renderNamedApiProfiles', '\nfunction renderOpenRouterProfiles('), /getProfiles\(\)\.then\((?:\(\{[^}]*\}\)|result) => \{\s*(?:const \{[^}]*\} = result;\s*)*if \(!isCurrent\(\) \|\| !isSettingsSurfaceVisible\(\)/);
+});
+
+test('settings summary updates keep identical text nodes during a stats render', () => {
+  let text = 'AI Tool Limits';
+  let summary = text;
+  let writes = 0;
+  const summaryElement = {
+    get textContent() { return text; },
+    set textContent(next) { text = next; writes++; }
+  };
+  const renderSettingsSummaries = rendererFunction('renderSettingsSummaries', '\nfunction formatNumber(', {
+    isSettingsSurfaceVisible: () => true,
+    SETTINGS_SECTION_IDS: ['limits'],
+    els: { limitsSettingsSummary: summaryElement },
+    settingsSectionSummary: () => summary
+  });
+  renderSettingsSummaries();
+  assert.equal(writes, 0);
+
+  summary = '2 enabled';
+  renderSettingsSummaries();
+  renderSettingsSummaries();
+  assert.equal(text, '2 enabled');
+  assert.equal(writes, 1);
 });
 
 test('entering Status does not depend on the panel class from the previous render', () => {

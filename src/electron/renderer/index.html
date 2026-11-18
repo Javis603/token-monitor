@@ -873,11 +873,10 @@
                 </span>
               </button>
               <div id="codexSettingsDetails" class="cursor-settings-details hidden">
-                <p class="settings-note" data-i18n="settings.codex.description">Sign in to each Codex account you want to track. Tracking uses isolated managed logins; switch the local Codex account from the Limits page.</p>
+                <p id="codexAccountDescription" class="settings-note" data-i18n="settings.codex.description">Sign in to each Codex account you want to track. Tracking uses isolated managed logins; switch the local Codex account from the Limits page.</p>
                 <div id="codexAccountList" class="managed-account-list"></div>
-                <div class="settings-actions">
+                <div class="settings-actions hidden">
                   <button id="codexAddAccountButton" data-i18n="settings.codex.addAccount">Add account</button>
-                  <button id="codexRefreshAccountsButton" data-i18n="settings.codex.refresh">Refresh</button>
                 </div>
                 <div id="codexLoginStatus" class="settings-note hidden" role="status" aria-live="polite"></div>
                 <div id="codexWorkspaceSelection" class="codex-workspace-selection hidden">
@@ -912,25 +911,6 @@
 
                 <!-- Profile list -->
                 <div id="opencodeProfileList" class="opencode-profile-list"></div>
-
-                <!-- Local DB fallback: an advanced, off-by-default estimate, so
-                     it collapses below the accounts instead of sitting above
-                     them where it reads as the first thing to configure. -->
-                <div id="opencodeLocalFallbackAccountGroup" class="settings-group cursor-account-group">
-                  <button id="opencodeLocalFallbackSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="opencodeLocalFallbackSettingsDetails">
-                    <span data-i18n="settings.limits.opencodeLocalLimits">Use local DB fallback</span>
-                    <span class="cursor-settings-summary">
-                      <span id="opencodeLocalFallbackStatus" class="cursor-status-pill"></span>
-                      <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                    </span>
-                  </button>
-                  <!-- The collapse animates by squeezing a single inner wrapper,
-                       so the moved setting has to land inside it rather than
-                       directly on the container, which cannot shrink. -->
-                  <div id="opencodeLocalFallbackSettingsDetails" class="cursor-settings-details hidden">
-                    <div id="opencodeLocalFallbackInner" class="accordion-animation-inner"></div>
-                  </div>
-                </div>
 
                 <!-- Add new account -->
                 <div id="opencodeAddForm" class="opencode-add-form">
@@ -1047,82 +1027,6 @@
                 <div id="antigravityAccountErrorMessage" class="settings-note error hidden" role="alert"></div>
               </div>
             </div>
-            <div id="kimiAccountGroup" class="settings-group cursor-account-group">
-              <button id="kimiSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="kimiSettingsDetails">
-                <span data-i18n="settings.kimi.title">Kimi Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="kimiAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="kimiSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="kimiOpenBrowser" data-i18n="settings.kimi.openBrowser">Open Kimi Code Console</button>
-                  <button id="kimiLogoutButton" class="hidden" data-i18n="settings.kimi.clearApiKey">Clear key</button>
-                  <button id="kimiRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="kimiManualPanel">
-                  <p class="settings-note" data-i18n="settings.kimi.apiKeyNote">Paste your Kimi Code API key. It stays on this device and is used only for the Kimi Code quota API.</p>
-                  <input id="kimiApiKeyInput" type="password" spellcheck="false" aria-label="Kimi Code API key" data-i18n-aria-label="settings.kimi.apiKeyLabel" placeholder="sk-..." data-i18n-placeholder="settings.kimi.apiKeyPlaceholder" />
-                  <div class="settings-actions">
-                    <button id="kimiApiKeySubmit" data-i18n="settings.kimi.saveApiKey">Save API key</button>
-                  </div>
-                  <details class="kimi-web-fallback">
-                    <summary data-i18n="settings.kimi.webFallback">Optional: Kimi Web fallback</summary>
-                    <div class="kimi-web-fallback-body">
-                      <p class="settings-note" data-i18n="settings.kimi.webTokenNote">Use a Kimi Web access token only to fill quota windows missing from the Code API. The token stays on this device and expires quickly.</p>
-                      <p class="settings-note kimi-web-steps">
-                        <strong>1.</strong> <span data-i18n="settings.kimi.step1">Open Kimi Code Console in your browser (button above) and sign in.</span><br>
-                        <strong>2.</strong> <span data-i18n="settings.kimi.step2">Open DevTools (F12) -&gt; Application/Storage -&gt; Local Storage -&gt; https://www.kimi.com.</span><br>
-                        <strong>3.</strong> <span data-i18n="settings.kimi.step3">Find access_token and copy its Value.</span><br>
-                        <strong>4.</strong> <span data-i18n="settings.kimi.step4">Paste the value below and click Save Web token.</span>
-                      </p>
-                      <textarea id="kimiWebAccessTokenInput" rows="3" autocomplete="off" spellcheck="false" aria-label="Kimi Web access token" data-i18n-aria-label="settings.kimi.webTokenLabel" placeholder="access_token=..." data-i18n-placeholder="settings.kimi.webTokenPlaceholder"></textarea>
-                      <div class="settings-actions">
-                        <button id="kimiWebAccessTokenSubmit" data-i18n="settings.kimi.saveWebToken">Save Web token</button>
-                      </div>
-                    </div>
-                  </details>
-                </div>
-                <div id="kimiErrorMessage" class="settings-note error hidden"></div>
-              </div>
-            </div>
-            <div id="copilotAccountGroup" class="settings-group cursor-account-group">
-              <button id="copilotSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="copilotSettingsDetails">
-                <span data-i18n="settings.copilot.title">GitHub Copilot Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="copilotApiTokenStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="copilotSettingsDetails" class="cursor-settings-details hidden">
-                <div id="copilotAccountList" class="managed-account-list"></div>
-                <div class="settings-actions">
-                  <button id="copilotSignInButton" data-i18n="settings.copilot.signIn">Sign in with GitHub</button>
-                  <button id="copilotCancelSignInButton" class="hidden" data-i18n="settings.common.cancel">Cancel</button>
-                  <button id="copilotRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <pre id="copilotLoginStatus" class="codex-login-output hidden" role="status" aria-live="polite"></pre>
-                <div id="copilotManualPanel" class="opencode-add-form">
-                  <button id="copilotManualToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="copilotManualDetails">
-                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
-                    <span data-i18n="settings.copilot.manualToggle">Enter token manually</span>
-                  </button>
-                  <div id="copilotManualDetails" class="opencode-add-details accordion-animated-container hidden">
-                    <div class="accordion-animation-inner opencode-add-body">
-                      <p class="settings-note" data-i18n="settings.copilot.note">Paste a GitHub OAuth token with Copilot access. It stays on this device and is used only for Copilot quota lookup.</p>
-                      <input id="copilotApiTokenInput" type="password" spellcheck="false" placeholder="gho_..." data-i18n-placeholder="settings.copilot.apiTokenPlaceholder" />
-                      <div class="settings-actions">
-                        <button id="copilotApiTokenSubmit" data-i18n="settings.copilot.saveToken">Save token</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div id="copilotErrorMessage" class="settings-note error hidden" role="alert"></div>
-              </div>
-            </div>
             <div id="mimoAccountGroup" class="settings-group cursor-account-group">
               <button id="mimoSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="mimoSettingsDetails">
                 <span data-i18n="settings.mimo.title">Xiaomi MiMo Account</span>
@@ -1192,10 +1096,9 @@
               <div id="minimaxSettingsDetails" class="cursor-settings-details hidden">
                 <div class="settings-actions">
                   <button id="minimaxOpenBrowser" data-i18n="settings.minimax.openBrowser">Open MiniMax billing page</button>
-                  <button id="minimaxRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
                 </div>
                 <div id="minimaxKeyList" class="managed-account-list"></div>
-                <div class="opencode-credential-fields">
+                <div id="minimaxAddDetails" class="opencode-credential-fields hidden">
                   <label>
                     <span data-i18n="settings.minimax.billingMode">Billing type</span>
                     <select id="minimaxBillingModeInput" class="credential-input">
@@ -1220,107 +1123,6 @@
                   </div>
                 </div>
                 <div id="minimaxErrorMessage" class="settings-note error hidden" role="alert"></div>
-              </div>
-            </div>
-            <div id="openrouterAccountGroup" class="settings-group cursor-account-group">
-              <button id="openrouterSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="openrouterSettingsDetails">
-                <span data-i18n="settings.openrouter.title">OpenRouter Accounts</span>
-                <span class="cursor-settings-summary">
-                  <span id="openrouterStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="openrouterSettingsDetails" class="cursor-settings-details hidden">
-                <div id="openrouterProfileList" class="opencode-profile-list"></div>
-                <div id="openrouterAddForm" class="opencode-add-form">
-                  <button id="openrouterAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="openrouterAddDetails">
-                    <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
-                      <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                    </svg>
-                    <span data-i18n="settings.openrouter.addProfile">Add account</span>
-                  </button>
-                  <div id="openrouterAddDetails" class="opencode-add-details accordion-animated-container hidden">
-                    <div class="accordion-animation-inner opencode-add-body">
-                      <div class="settings-actions">
-                        <button id="openrouterOpenBrowser" data-i18n="settings.openrouter.openBrowser">Open OpenRouter API keys</button>
-                      </div>
-                      <p class="settings-note" data-i18n="settings.openrouter.note">Add an OpenRouter API key to view usage, the key limit, and available balance. Both regular and Management API keys are supported. Keys stay on this device and only official OpenRouter endpoints are used.</p>
-                      <div class="settings-row">
-                        <label for="openrouterProfileName" data-i18n="settings.openrouter.profileName">Account name</label>
-                        <input id="openrouterProfileName" type="text" data-i18n-placeholder="settings.openrouter.profileNamePlaceholder" placeholder="e.g. work, personal">
-                      </div>
-                      <input id="openrouterApiKeyInput" type="password" spellcheck="false" placeholder="sk-or-v1-..." data-i18n-placeholder="settings.openrouter.apiKeyPlaceholder" />
-                      <div class="settings-actions">
-                        <button id="openrouterProfileSubmit" data-i18n="settings.openrouter.saveProfile">Save</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                <div id="openrouterErrorMessage" class="settings-note error hidden" role="alert"></div>
-              </div>
-            </div>
-            <div id="volcengineAccountGroup" class="settings-group cursor-account-group">
-              <button id="volcengineSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="volcengineSettingsDetails">
-                <span data-i18n="settings.volcengine.title">Volcengine Account</span>
-                <span class="cursor-settings-summary">
-                  <span id="volcengineAccountStatus" class="cursor-status-pill">Not configured</span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="volcengineSettingsDetails" class="cursor-settings-details hidden">
-                <div class="settings-actions">
-                  <button id="volcengineOpenBrowser" data-i18n="settings.volcengine.openBrowser">Open Volcengine Ark console</button>
-                  <button id="volcengineLogoutButton" class="hidden" data-i18n="settings.volcengine.clearCredentials">Clear credentials</button>
-                  <button id="volcengineRefreshButton" data-i18n="settings.common.refresh">Refresh</button>
-                </div>
-                <div id="volcengineManualPanel">
-                  <p class="settings-note" data-i18n="settings.volcengine.note">Paste an Ark API key, or use a Volcengine access key ID with the secret field. An access key reads both the Coding Plan and the Agent Plan.</p>
-                  <div class="settings-row">
-                    <label for="volcengineAccessKeyInput" data-i18n="settings.volcengine.accessKeyId">Access key ID / API key</label>
-                    <input id="volcengineAccessKeyInput" type="password" spellcheck="false" placeholder="AKLT... or ark-..." data-i18n-placeholder="settings.volcengine.accessKeyPlaceholder" />
-                  </div>
-                  <div class="settings-row">
-                    <label for="volcengineSecretAccessKeyInput" data-i18n="settings.volcengine.secretAccessKey">Secret access key</label>
-                    <input id="volcengineSecretAccessKeyInput" type="password" spellcheck="false" placeholder="..." data-i18n-placeholder="settings.volcengine.secretKeyPlaceholder" />
-                  </div>
-                  <div class="settings-row">
-                    <label for="volcengineRegionInput" data-i18n="settings.volcengine.region">Region (optional)</label>
-                    <input id="volcengineRegionInput" type="text" spellcheck="false" placeholder="cn-beijing" data-i18n-placeholder="settings.volcengine.regionPlaceholder" />
-                  </div>
-                  <div id="volcengineAgentPanel" class="opencode-add-form">
-                    <button id="volcengineAgentToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="volcengineAgentDetails">
-                      <svg class="add-icon" width="14" height="14" viewBox="0 0 14 14" fill="none">
-                        <path d="M7 1v12M1 7h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-                      </svg>
-                      <span data-i18n="settings.volcengine.agentToggle">Agent Plan is on a different account</span>
-                      <span id="volcengineAgentConfigured" class="tool-status-tag tool-status-tag-ok hidden" data-i18n="settings.volcengine.agentConfigured">Set</span>
-                    </button>
-                    <div id="volcengineAgentDetails" class="opencode-add-details accordion-animated-container hidden">
-                      <div class="accordion-animation-inner opencode-add-body">
-                        <p class="settings-note" data-i18n="settings.volcengine.agentNote">Leave empty to read the Agent Plan with the access key above. Fill these in only when the Agent Plan was bought on a different Volcengine account.</p>
-                        <div class="settings-row">
-                          <label for="volcengineAgentAccessKeyInput" data-i18n="settings.volcengine.agentAccessKeyId">Agent access key ID</label>
-                          <input id="volcengineAgentAccessKeyInput" type="password" spellcheck="false" placeholder="AKLT..." data-i18n-placeholder="settings.volcengine.agentAccessKeyPlaceholder" />
-                        </div>
-                        <div class="settings-row">
-                          <label for="volcengineAgentSecretAccessKeyInput" data-i18n="settings.volcengine.agentSecretAccessKey">Agent secret access key</label>
-                          <input id="volcengineAgentSecretAccessKeyInput" type="password" spellcheck="false" placeholder="..." data-i18n-placeholder="settings.volcengine.secretKeyPlaceholder" />
-                        </div>
-                        <div class="settings-row">
-                          <label for="volcengineAgentRegionInput" data-i18n="settings.volcengine.agentRegion">Agent region (optional)</label>
-                          <input id="volcengineAgentRegionInput" type="text" spellcheck="false" placeholder="cn-beijing" data-i18n-placeholder="settings.volcengine.regionPlaceholder" />
-                        </div>
-                        <div class="settings-actions">
-                          <button id="volcengineAgentClearButton" class="hidden" data-i18n="settings.volcengine.agentClear">Use the main account</button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <div class="settings-actions">
-                    <button id="volcengineCredentialsSubmit" data-i18n="settings.volcengine.saveCredentials">Save credentials</button>
-                  </div>
-                </div>
-                <div id="volcengineErrorMessage" class="settings-note error hidden"></div>
               </div>
             </div>
             <div id="thirdpartyAccountGroup" class="settings-group cursor-account-group">
@@ -1852,6 +1654,38 @@
     <script src="../limits/historyIdentity.js"></script>
     <script src="domReconcile.js"></script>
     <script src="pressActivation.js"></script>
+    <script src="providers/codex/windows.js"></script>
+    <script src="providers/cursor/windows.js"></script>
+    <script src="providers/antigravity/windows.js"></script>
+    <script src="providers/opencode/windows.js"></script>
+    <script src="providers/openrouter/windows.js"></script>
+    <script src="providers/thirdparty/windows.js"></script>
+    <script src="providers/deepseek/windows.js"></script>
+    <script src="providers/typesafe/windows.js"></script>
+    <script src="providers/mimo/windows.js"></script>
+    <script src="providers/grok/windows.js"></script>
+    <script src="providers/copilot/windows.js"></script>
+    <script src="providers/zed/windows.js"></script>
+    <script src="providers/zai/windows.js"></script>
+    <script src="providers/volcengine/windows.js"></script>
+    <script src="providers/devin/windows.js"></script>
+    <script src="providers/factory/windows.js"></script>
+    <script src="providers/kiro/windows.js"></script>
+    <script src="providers/qoder/windows.js"></script>
+    <script src="providers/workbuddy/windows.js"></script>
+    <script src="providers/commandcode/windows.js"></script>
+    <script src="providers/kimi/windows.js"></script>
+    <script src="providers/alibaba/windows.js"></script>
+    <script src="providers/ollama/windows.js"></script>
+    <script src="providers/claude/windows.js"></script>
+    <script src="providers/hark/windows.js"></script>
+    <script src="providers/manus/windows.js"></script>
+    <script src="providers/mistral/windows.js"></script>
+    <script src="providers/notion/windows.js"></script>
+    <script src="providers/cline/windows.js"></script>
+    <script src="providers/muse/windows.js"></script>
+    <script src="providers/minimax/windows.js"></script>
+    <script src="limits/windowOwners.js"></script>
     <script src="limits/windowsView.js"></script>
     <script src="trayBars.js"></script>
     <script src="usageCharts.js"></script>
@@ -1860,11 +1694,43 @@
     <script src="trayProviderIcons.js"></script>
     <script src="limits/providerOrder.js"></script>
     <script src="limits/accountPanels.js"></script>
+    <script src="limits/connectionPresentation.js"></script>
 
     <script src="limits/accountShell.js"></script>
     <script src="accountIdentity.js"></script>
     <script src="appUpdatePresentation.js"></script>
     <script src="../../shared/providers/workbuddy/identity.js"></script>
+    <script src="providers/alibaba/presentation.js"></script>
+    <script src="providers/antigravity/presentation.js"></script>
+    <script src="providers/claude/presentation.js"></script>
+    <script src="providers/cline/presentation.js"></script>
+    <script src="providers/codex/presentation.js"></script>
+    <script src="providers/commandcode/presentation.js"></script>
+    <script src="providers/copilot/presentation.js"></script>
+    <script src="providers/cursor/presentation.js"></script>
+    <script src="providers/deepseek/presentation.js"></script>
+    <script src="providers/factory/presentation.js"></script>
+    <script src="providers/grok/presentation.js"></script>
+    <script src="providers/hark/presentation.js"></script>
+    <script src="providers/kimi/presentation.js"></script>
+    <script src="providers/kiro/presentation.js"></script>
+    <script src="providers/manus/presentation.js"></script>
+    <script src="providers/mimo/presentation.js"></script>
+    <script src="providers/minimax/presentation.js"></script>
+    <script src="providers/muse/presentation.js"></script>
+    <script src="providers/ollama/presentation.js"></script>
+    <script src="providers/opencode/presentation.js"></script>
+    <script src="providers/openrouter/presentation.js"></script>
+    <script src="providers/qoder/presentation.js"></script>
+    <script src="providers/stepfun/presentation.js"></script>
+    <script src="providers/thirdparty/presentation.js"></script>
+    <script src="providers/trae/presentation.js"></script>
+    <script src="providers/typesafe/presentation.js"></script>
+    <script src="providers/volcengine/presentation.js"></script>
+    <script src="providers/workbuddy/presentation.js"></script>
+    <script src="providers/zai/presentation.js"></script>
+    <script src="providers/zaiteam/presentation.js"></script>
+    <script src="providers/zed/presentation.js"></script>
     <script src="limits/providerPresentation.js"></script>
     <script src="../../shared/plugins/localized.js"></script>
     <script src="pluginCredentials.js"></script>
@@ -1952,6 +1818,17 @@
     <script src="displaySettings.js"></script>
     <script src="displaySettingsPreview.js"></script>
     <script src="contentBlur.js"></script>
-    <script src="app.js"></script>
+    <script src="limits/legacyAccountList.js"></script>
+    <script src="limits/automaticAccountList.js"></script>
+  <script src="limits/providerOwners/antigravity.js"></script>
+  <script src="limits/providerOwners/claude.js"></script>
+  <script src="limits/providerOwners/codex.js"></script>
+  <script src="limits/providerOwners/cursor.js"></script>
+  <script src="limits/providerOwners/mimo.js"></script>
+  <script src="limits/providerOwners/minimax.js"></script>
+  <script src="limits/providerOwners/opencode.js"></script>
+  <script src="limits/providerOwners/thirdparty.js"></script>
+  <script src="limits/providerOwners/workbuddy.js"></script>
+  <script src="app.js"></script>
   </body>
 </html>

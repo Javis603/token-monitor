@@ -108,5 +108,10 @@ async function fetchOpendesignLimits(options = {}, deps = {}) {
   }
 }
 
-module.exports = { OPENDESIGN_API, fetchOpendesignLimits, normalizeOpendesignCookieHeader,
+// Successful identity discovery is distinct from the credential fallback.
+function isOpendesignServerAccountKey(key, values) {
+  return Boolean(key && key !== hashKey('opendesign', opendesignCookie({}, values)));
+}
+
+module.exports = { isOpendesignServerAccountKey, OPENDESIGN_API, fetchOpendesignLimits, normalizeOpendesignCookieHeader,
   opendesignCookie, parseOpendesignUsage };

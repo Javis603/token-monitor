@@ -1,10 +1,10 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const { hashKey } = require('../../src/shared/hashKey');
 const test = require('node:test');
 
 const {
-  OPENROUTER_ENV_ACCOUNT_NAME,
   OPENROUTER_CREDITS_URL,
   OPENROUTER_KEY_URL,
   fetchOpenRouterLimits,
@@ -193,8 +193,8 @@ test('profiles and the official env key produce separate deduplicated accounts',
   assert.deepEqual(result.map((provider) => provider.accountName), ['work', 'duplicate']);
 });
 
-test('the official env key uses a normalization-safe account identity', async () => {
-  const [provider] = await fetchOpenRouterLimits({}, {
+test('the official env key retains its credential hash without a presentation name', async () => {
+  const provider = await fetchOpenRouterLimits({}, {
     env: { OPENROUTER_API_KEY: 'sk-env' },
     fetch: apiFetch({
       'sk-env': { usage_monthly: 2 }
@@ -202,7 +202,8 @@ test('the official env key uses a normalization-safe account identity', async ()
       'sk-env': { status: 403 }
     })
   });
-  assert.equal(provider.accountName, OPENROUTER_ENV_ACCOUNT_NAME);
+  assert.equal(provider.accountName, undefined);
+  assert.equal(provider.accountKey, hashKey('openrouter', 'sk-env'));
 });
 
 test('blank and absent API numbers stay unknown instead of becoming zero-value meters', async () => {

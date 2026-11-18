@@ -1,33 +1,22 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const test = require('node:test');
-const vm = require('node:vm');
 const web = require('../../src/shared/providers/opencode/web');
 
 // Execute the actual IPC handler with synthetic runtime dependencies. Loading
 // Electron main itself would launch the app and read real credentials.
 function statusHandler({ profiles = {}, env = {}, fetch, apiStatus = 'ok' } = {}) {
-  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
-  const start = main.indexOf("ipcMain.handle('opencode:status'");
-  const end = main.indexOf("ipcMain.handle('opencode:getProfiles'", start);
-  let handler;
-  vm.runInNewContext(main.slice(start, end), {
-    ipcMain: { handle: (_name, callback) => { handler = callback; } },
-    Date, Object, Boolean, Promise,
-    settings: { opencodeProfiles: profiles },
-    process: { env },
-    opencodeStatusCache: { value: null, at: 0 }, CURSOR_STATUS_TTL_MS: 1000,
-    opencodeGoApi: { readGoApiKey: () => '' },
-    opencodeProfiles: { ambientKeyFor: () => '' },
-    opencodeAmbientKeyActive: () => false,
-    opencodeWeb: web,
+  const { createOpencodeAccountService } = require('../../src/electron/providers/opencode/accountService');
+  const owner = createOpencodeAccountService({
+    getOpencodeProfiles: () => profiles,
     electronProviderDeps: () => ({ fetch, env: {} }),
-    probeOpenCodeApiKey: async () => ({ status: apiStatus })
+    electronLimitsFetch: () => async () => ({ status: apiStatus === 'ok' ? 200 : 401, json: async () => ({}) }),
+    env,
+    goApi: { readGoApiKey: () => '', fetchGoApi: async () => ({ status: apiStatus }) },
+    web
   });
-  return handler;
+  return () => owner.status();
 }
 
 const cookie = '__Host-console_session=fixture';

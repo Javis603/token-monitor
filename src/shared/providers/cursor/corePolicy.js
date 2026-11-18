@@ -1,0 +1,12 @@
+// @ts-check
+'use strict';
+// Dashboard model pools precede Grok and on-demand spend, regardless of period.
+/** @param {any} window */
+function windowRank(window) {
+  if (window.metric === 'spend') return 4;
+  if (window.label === 'Requests' || window.label === 'Cursor Models') return 0;
+  if (window.label === 'Other Models') return 1;
+  if (window.label === 'Grok Bot') return 2;
+  return 3;
+}
+module.exports = { windowRank };
