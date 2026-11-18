@@ -720,6 +720,7 @@
       if (!members.length) {
         item.deviceNote?.remove(); item.deviceNote = null;
         item.deviceList?.classList.add('hidden'); item.devicesExpanded = false;
+        if (item.deviceList) item.deviceList.inert = true;
         item.el.classList.remove('slot-devices-expanded');
         item.status.setAttribute('aria-hidden', 'false');
         return;
@@ -749,16 +750,18 @@
       if (multiple) {
         item.deviceNote.setAttribute('aria-expanded', String(expanded));
         item.deviceNote.setAttribute('aria-label', `${tr(expanded ? 'hideDevices' : 'showDevices')}: ${members.map(deviceName).join(', ')}`);
-        const hint = make('span', 'slot-device-hint', tr(expanded ? 'hideDevices' : 'showDevices'));
-        item.deviceNote.append(hint);
       }
       if (!item.deviceList && multiple) {
-        item.deviceList = make('div', 'slot-device-list hidden');
+        item.deviceList = make('div', 'slot-device-list accordion-animated-container hidden');
+        item.deviceList.inert = true;
         item.deviceList.id = `slot-devices-${form.id}-${encodeURIComponent(slot.id)}`;
+        item.deviceListInner = make('div', 'accordion-animation-inner');
+        item.deviceList.append(item.deviceListInner);
         item.el.append(item.deviceList); item.deviceRows = new Map();
       }
       if (!item.deviceList) return;
       item.deviceList.classList.toggle('hidden', !expanded);
+      item.deviceList.inert = !expanded;
       if (multiple) item.deviceNote.setAttribute('aria-controls', item.deviceList.id);
       if (!expanded) return;
       for (const [id, row] of item.deviceRows) if (!members.some(member => member.deviceId === id)) { row.element.remove(); item.deviceRows.delete(id); }
@@ -770,7 +773,7 @@
           const fix = slotButton('replaceTitle', () => openEditor(item.slot));
           fix.className = 'slot-device-fix plugin-inline-action';
           element.append(name, state, note, fix);
-          row = { element, name, state, note, fix }; item.deviceRows.set(member.deviceId, row); item.deviceList.append(element);
+          row = { element, name, state, note, fix }; item.deviceRows.set(member.deviceId, row); item.deviceListInner.append(element);
         }
         row.name.replaceChildren(deviceToken(member));
         const memberStatus = member.local ? status : accountStatus({ enabled: true }, member.reading);

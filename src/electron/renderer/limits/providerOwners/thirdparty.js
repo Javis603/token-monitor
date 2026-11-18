@@ -214,7 +214,7 @@ function renderNamedApiProfiles(config) {
 
     if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
       busy: () => document.getElementById('thirdpartyProfileSubmit')?.disabled === true,
-      sourceLabel: account => t(account.source === 'environment' ? 'settings.limits.sources.env' : 'settings.slots.savedSource'),
+      sourceLabel: account => account.source === 'environment' ? t('settings.limits.sources.env') : '',
       editor: { submit: 'thirdpartyProfileSubmit', nodes: ['thirdpartyAddDetails'], visibility: 'thirdpartyAddDetails', cancel: () => setThirdPartyAddExpanded(false) },
       document, provider: providerId, label: host.providerLabel || providerId,
       add: () => {

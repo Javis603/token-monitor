@@ -579,7 +579,7 @@
       value.textContent = current?.label || String(currentValue || '');
       const chevron = document.createElement('span');
       chevron.className = 'tray-composer-picker-chevron';
-      chevron.textContent = '⌄';
+      chevron.setAttribute('aria-hidden', 'true');
       trigger.append(value, chevron);
       trigger.addEventListener('click', () => {
         openPickerMenu(

@@ -299,20 +299,23 @@ test('the drop mirrors the new order locally before anything can repaint', () =>
   // storage format and stays in the wiring.
   let config;
   const inactive = 'plugin:disabled-plugin:quota';
-  const state = { settings: { limitProviderOrder: `claude,${inactive},codex` } };
+  const state = { settings: { limitProviderOrder: `claude,cursor,${inactive},codex` } };
   const saves = [];
-  vm.runInNewContext(wiring, {
+  const helper = app.slice(app.indexOf('function limitProviderOrderWithEnabled('), app.indexOf('function enabledLimitProviderOrder('));
+  vm.runInNewContext(`${helper}\n${wiring}`, {
     state, rowDragControllerApi: { createRowDragController: value => { config = value; } },
     verticalDragSortApi: {}, els: {}, LIMIT_PROVIDER_DRAG_EXCLUDED: '',
     setLimitProviderSettingsExpanded() {}, preserveSettingsPanelScroll() {},
     limitProviderOrderApi: require('../../src/electron/renderer/limits/providerOrder'),
-    desktopLimitProviders: () => [{ id: 'claude' }, { id: 'codex' }],
+    settingsListFilterApi: require('../../src/electron/renderer/settingsListFilter'),
+    desktopLimitProviders: () => [{ id: 'claude' }, { id: 'cursor' }, { id: 'codex' }],
     saveSettings: value => saves.push(value)
   });
+  // Only the enabled group is dragged; the disabled provider keeps its slot.
   const visibleOrder = ['codex', 'claude'];
   const mirrored = config.mirrorOrder(visibleOrder);
-  assert.equal(mirrored, `codex,${inactive},claude`);
-  assert.equal(state.settings.limitProviderOrder, mirrored, 'inactive slots survive the immediate mirror');
+  assert.equal(mirrored, `codex,cursor,${inactive},claude`);
+  assert.equal(state.settings.limitProviderOrder, mirrored, 'inactive and disabled slots survive the immediate mirror');
   config.persistOrder(visibleOrder, 'codex', mirrored);
   assert.equal(saves[0].limitProviderOrder, mirrored, 'save uses the preserved value returned before repaint');
   assert.doesNotMatch(wiring, /onPreferenceOrderCommit\(/);

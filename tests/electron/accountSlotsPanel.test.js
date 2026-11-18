@@ -1629,24 +1629,30 @@ test('device disclosure keeps local failures and remote health separate without 
   assert.equal(h.row('remote:laptop:ka'), undefined);
   const row = h.row('a'), toggle = row.querySelector('.slot-device-toggle');
   assert.ok(toggle);
-  assert.match(toggle.textContent, /This device.*MacBook Pro/);
+  assert.equal(toggle.textContent, 'This deviceMacBook Pro');
+  assert.equal(toggle.tagName, 'button');
+  assert.equal(toggle.attributes['aria-expanded'], 'false');
   assert.equal(toggle.children[0].children[0].className, 'device-kind-icon device-kind-desktop');
   assert.equal(toggle.children[1].children[0].className, 'device-kind-icon device-kind-laptop');
   assert.match(row.querySelector('.slot-status').textContent, /Cookie expired/);
   toggle.click();
   const list = row.querySelector('.slot-device-list');
+  assert.equal(list.classList.contains('accordion-animated-container'), true);
+  assert.equal(list.children[0].classList.contains('accordion-animation-inner'), true);
   assert.equal(list.classList.contains('hidden'), false);
-  assert.match(list.children[0].textContent, /Cookie expired/);
-  assert.match(list.children[1].textContent, /Web.*Current quota source/);
-  const localFix = list.children[0].querySelector('.slot-device-fix');
+  assert.equal(list.inert, false);
+  assert.match(list.children[0].children[0].textContent, /Cookie expired/);
+  assert.match(list.children[0].children[1].textContent, /Web.*Current quota source/);
+  const localFix = list.children[0].children[0].querySelector('.slot-device-fix');
   assert.equal(localFix.classList.contains('hidden'), false);
-  assert.equal(list.children[1].querySelector('.slot-device-fix').classList.contains('hidden'), true);
+  assert.equal(list.children[0].children[1].querySelector('.slot-device-fix').classList.contains('hidden'), true);
   h.panel.update(h.slots, [local], context);
   assert.equal(row.querySelector('.slot-device-toggle'), toggle);
-  assert.equal(list.children[0].querySelector('.slot-device-fix'), localFix);
+  assert.equal(list.children[0].children[0].querySelector('.slot-device-fix'), localFix);
   assert.equal(toggle.attributes['aria-expanded'], 'true');
   toggle.click();
   assert.equal(list.classList.contains('hidden'), true);
+  assert.equal(list.inert, true);
   assert.deepEqual(h.calls, []);
 });
 
@@ -1659,15 +1665,16 @@ test('device disclosure respects pause, provider disable, stale peers and disapp
   assert.equal(h.row('a').querySelector('.slot-device-toggle'), undefined, 'exact owner wins over sibling alias');
   h.row('b').querySelector('.slot-device-toggle').click();
   const list = h.row('b').querySelector('.slot-device-list');
-  assert.equal(list.children[0].querySelector('.slot-status').textContent, 'Paused');
-  assert.equal(list.children[1].querySelector('.slot-status').textContent, 'Stale');
-  assert.doesNotMatch(list.children[1].textContent, /1970|Current quota source/);
+  assert.equal(list.children[0].children[0].querySelector('.slot-status').textContent, 'Paused');
+  assert.equal(list.children[0].children[1].querySelector('.slot-status').textContent, 'Stale');
+  assert.doesNotMatch(list.children[0].children[1].textContent, /1970|Current quota source/);
   h.slots.find(slot => slot.id === 'b').enabled = true;
   h.panel.update(h.slots, [row], context);
-  assert.equal(list.children[0].querySelector('.slot-status').textContent, 'Disabled');
+  assert.equal(list.children[0].children[0].querySelector('.slot-status').textContent, 'Disabled');
   h.panel.update(h.slots, [row], { ...context, records: [], devices: [] });
   assert.equal(h.row('b').querySelector('.row-device'), undefined);
   assert.equal(list.classList.contains('hidden'), true);
+  assert.equal(list.inert, true);
   assert.equal(h.row('b').classList.contains('slot-devices-expanded'), false);
 });
 
@@ -1684,8 +1691,8 @@ test('device disclosure includes two remote peers without inventing a local logi
   assert.doesNotMatch(toggle.textContent, /This device/);
   toggle.click();
   const list = row.querySelector('.slot-device-list');
-  assert.equal(list.children.length, 2);
-  for (const child of list.children) assert.equal(child.querySelector('.slot-device-fix').classList.contains('hidden'), true);
+  assert.equal(list.children[0].children.length, 2);
+  for (const child of list.children[0].children) assert.equal(child.querySelector('.slot-device-fix').classList.contains('hidden'), true);
 });
 
 test('device disclosure never joins Alibaba sibling plan variants', () => {
