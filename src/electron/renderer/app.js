@@ -12499,7 +12499,9 @@ function toolPreferenceRenderSignature() {
   const device = localDevice();
   return JSON.stringify({
     settings: [
-      [...enabledClientSet()].sort(),
+      // The rows group by the selection including in-flight writes, so a write
+      // that fails and is dropped must invalidate them too.
+      String(pendingTrackedClients() || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean).sort(),
       state.settings?.hiddenClients || '',
       state.settings?.separateQoderClients === true,
       state.settings?.pinnedClients || '',

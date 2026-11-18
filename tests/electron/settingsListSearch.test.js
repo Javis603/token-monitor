@@ -225,4 +225,7 @@ test('tracked-tool grouping reads settings writes still in flight', () => {
   assert.equal(context.tracked('claude'), true);
   context.pendingSettingsPatches.clear();
   assert.equal(context.tracked('codex'), true);
+  // The cached rows are keyed on the same selection, so dropping a failed write
+  // forces a rebuild.
+  assert.match(fn(app, 'toolPreferenceRenderSignature'), /String\(pendingTrackedClients\(\) \|\| ''\)/);
 });

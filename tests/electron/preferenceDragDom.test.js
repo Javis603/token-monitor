@@ -195,7 +195,7 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   assert.match(defer, /return preserveSettingsPanelScroll\(renderToolPreferencesNow\);/);
 
   const signature = functionBody(app, 'toolPreferenceRenderSignature', 'renderToolPreferencesNow');
-  assert.match(signature, /\[\.\.\.enabledClientSet\(\)\]\.sort\(\)/);
+  assert.match(signature, /String\(pendingTrackedClients\(\) \|\| ''\)\.split\(','\)[^\n]*\.sort\(\)/);
   assert.match(signature, /state\.settings\?\.customScanPaths/);
   assert.doesNotMatch(signature, /trackedClients/);
   assert.match(signature, /healthRows: KNOWN_CLIENTS\.map/);
