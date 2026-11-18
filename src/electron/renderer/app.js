@@ -6182,6 +6182,7 @@ function serviceStatusSurfaceVisible() {
 
 function openHomeSettings() {
   if (!els.settingsPanel) return;
+  hideHomeTrendTooltip();
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   els.shell.style.transform = 'translateZ(0)';
@@ -6196,6 +6197,7 @@ function openHomeSettings() {
 
 function openTrendSettings() {
   if (!els.settingsPanel) return;
+  hideHomeTrendTooltip();
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   els.shell.style.transform = 'translateZ(0)';
@@ -6221,6 +6223,7 @@ function resetSettingsListSearch() {
 function openSettingsPanel(section) {
   if (!els.settingsPanel) return;
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
+  hideHomeTrendTooltip();
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   syncPluginLimitsDemand();
@@ -7562,7 +7565,7 @@ function bindHomeTrendTooltip(chart, model, points) {
     crosshair.style.left = left;
     marker.style.left = left;
     marker.style.top = `${point.y / model.height * 100}%`;
-    tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatCompact(daily.tokens);
+    tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatNumber(daily.tokens);
     date.textContent = daily.date;
     const hasCost = daily.cost != null && Number.isFinite(Number(daily.cost));
     cost.textContent = hasCost || Number(daily.unpricedTokens) > 0
@@ -7606,7 +7609,6 @@ function bindHomeTrendTooltip(chart, model, points) {
   };
   const onKeyDown = (event) => {
     if (event.target !== homeModule) return;
-    if (event.key === 'Escape') { hide(); return; }
     const index = event.key === 'ArrowLeft' ? Math.max(0, selected - 1)
       : event.key === 'ArrowRight' ? Math.min(points.length - 1, selected + 1)
         : event.key === 'Home' ? 0 : event.key === 'End' ? points.length - 1 : null;
@@ -14203,7 +14205,9 @@ document.addEventListener('click', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && state.periodMenuOpen) {
+  if (event.key !== 'Escape') return;
+  hideHomeTrendTooltip();
+  if (state.periodMenuOpen) {
     event.preventDefault();
     setPeriodMenuOpen(false, { restoreFocus: true });
   }
@@ -14263,6 +14267,7 @@ els.settingsButton.addEventListener('click', (event) => {
   // closing it needs no catch-up repaint. Only the panel's own DOM has to be
   // caught up when it opens, because its renderers idle while it is closed.
   if (settingsOpen) {
+    hideHomeTrendTooltip();
     syncSettingsForm();
   } else {
     syncModeSelect?.close();
@@ -15242,6 +15247,8 @@ els.floatingBubbleTab.addEventListener('mouseleave', handleFloatingBubbleHoverLe
 document.documentElement.addEventListener('mouseleave', handleDocumentHoverLeave);
 document.documentElement.addEventListener('mouseleave', hideTrendTooltip);
 window.addEventListener('blur', handleTrendsWindowBlur);
+window.addEventListener('blur', hideHomeTrendTooltip);
+window.addEventListener('resize', hideHomeTrendTooltip);
 document.documentElement.addEventListener('mouseenter', clearHoverCollapseTimer);
 els.floatingBubbleTab.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter' && event.key !== ' ') return;
