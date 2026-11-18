@@ -2171,8 +2171,9 @@ function removedTrackedClients(previousClients, nextClients) {
   return Array.from(previous).filter((client) => !next.has(client));
 }
 
-function localArchiveSourceDevice() {
+function localDeviceRecord({ forClientArchive = false } = {}) {
   return selectLocalDeviceRecord({
+    forClientArchive,
     deviceId: settings?.deviceId || defaultDeviceId(),
     externalAgentActive: isExternalAgentActive(),
     hubMode: settings?.hubMode,
@@ -2183,6 +2184,18 @@ function localArchiveSourceDevice() {
   });
 }
 
+function assertClientArchiveCaptureReady(nextClients, sessionUsageArchiveEnabled) {
+  const deviceId = settings?.deviceId || defaultDeviceId();
+  if (mode !== 'sync' || lastCollectedDevice?.deviceId === deviceId
+    || !sessionUsageArchiveEnabled
+    || (isExternalAgentActive() && settings?.hubMode !== 'icloud')
+    || !removedTrackedClients(settings?.clients, nextClients).length) return;
+
+  // A Hub snapshot can arrive before the first full collection. Its aggregate
+  // has no lifetime session IDs to reconcile against the SQLite archive.
+  if (localDeviceRecord()) throw new Error('tracking-scan-pending');
+}
+
 function updateArchivedClientUsage(previousClients, nextClients) {
   const removedClients = removedTrackedClients(previousClients, nextClients);
   let archive = pruneArchivedClientUsage(settings.archivedClientUsage, nextClients);
@@ -2190,7 +2203,9 @@ function updateArchivedClientUsage(previousClients, nextClients) {
     // Before this run's first complete record, localDevice may be a first-scan
     // preview whose unscanned windows would archive as zero. Only the seed, or
     // nothing, stands for the client then.
-    const source = mode === 'local' && !lastCollectedDevice ? anchorSeedDevice : localArchiveSourceDevice();
+    const source = mode === 'local' && !lastCollectedDevice
+      ? anchorSeedDevice
+      : localDeviceRecord({ forClientArchive: settings.sessionUsageArchiveEnabled !== false });
     archive = captureArchivedClientUsage(archive, source, removedClients);
   }
   settings.archivedClientUsage = archive;
@@ -2644,7 +2659,7 @@ const diagnosticSnapshotBuilder = createDiagnosticSnapshotBuilder({
   getLatestHubStatsIdentity: () => latestHubStatsIdentity,
   getHubModeGeneration: () => hubModeGeneration,
   getCurrentHubStatsIdentity: (hubMode) => currentHubStatsIdentity(hubMode),
-  getLocalRecord: localArchiveSourceDevice,
+  getLocalRecord: localDeviceRecord,
   getTokscaleStatus,
   getConfiguration: () => diagnosticConfigurationFromSettings(settings || {}, {
     usage: {
@@ -7625,7 +7640,11 @@ app.whenReady().then(() => {
     delete normalizedPatch.subscriptionsShared;
     delete normalizedPatch.subscriptionsHub;
     delete normalizedPatch.subscriptionsUpdatedAt;
-    if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
+    const sessionUsageArchiveEnabled = parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true);
+    if (patch.clients !== undefined) {
+      normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
+      assertClientArchiveCaptureReady(normalizedPatch.clients, sessionUsageArchiveEnabled);
+    }
     if (patch.customScanPaths !== undefined) {
       const limitError = customScanPathLimitError(patch.customScanPaths);
       if (limitError) throw new Error(limitError);
@@ -7783,7 +7802,7 @@ app.whenReady().then(() => {
       projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
       projectBreakdownMode: normalizeProjectBreakdownMode(patch.projectBreakdownMode ?? settings.projectBreakdownMode),
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
-      sessionUsageArchiveEnabled: parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true),
+      sessionUsageArchiveEnabled,
       wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, false),
       collectionMode: normalizeCollectionMode(patch.collectionMode ?? settings.collectionMode),
       collectionIntervalMs: normalizeCollectionIntervalMs(patch.collectionIntervalMs ?? settings.collectionIntervalMs),

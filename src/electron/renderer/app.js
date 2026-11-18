@@ -13659,11 +13659,16 @@ async function saveSettings(patch, syncContentBase) {
     setSyncContentEditError(patch, error);
     console.error('Could not persist settings:', error);
     try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
+    const trackingScanPending = String(error?.message || '').includes('tracking-scan-pending');
+    if (trackingScanPending) state.toolPreferenceRenderSignature = '';
     applyEffectiveCurrencyRates();
     preserveSettingsPanelScroll(syncSettingsForm);
     if (isSettingsSurfaceVisible()) render(); else statsRenderScheduler.request();
     restartTimer();
     maybeUpdateBarsIcon();
+    if (trackingScanPending) {
+      window.alert(t('settings.tools.trackingScanPending'));
+    }
     throw error;
   }
   pendingSettingsPatches.delete(patch);
