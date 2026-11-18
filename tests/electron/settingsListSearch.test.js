@@ -171,8 +171,6 @@ test('both lists group enabled rows above a collapsed group of the rest', () => 
   assert.match(app, /rowSelector: ':scope > \.limit-provider-row\[data-provider\]'/);
   assert.match(fn(app, 'preferenceRows'), /':scope > \.limit-provider-row\[data-provider\]'/);
   assert.match(fn(app, 'applyPreferenceOrder'), /list\.insertBefore\(row, tail\)/);
-  // Local sign-in summaries keep their visible "This device" scope.
-  assert.match(readRendererFile('styles.css'), /\.limit-provider-actions > \.cursor-status-pill\[data-local-scope\]::before \{\s*content: attr\(data-local-scope\) " · ";/);
   // A filter shows every match flat; so does a list with one side empty.
   assert.match(fn(app, 'renderSettingsListGroups'), /if \(filtering \|\| !enabledCount\)/);
   for (const locale of Object.keys(MESSAGES)) {
@@ -204,4 +202,22 @@ test('a switch turned off hands focus to the collapsed group toggle', () => {
   group.inert = false;
   context.restore('limitProviderEnabled-zed');
   assert.deepEqual(focused, ['limitProviderDisabledGroupToggle', 'limitProviderEnabled-claude', 'limitProviderEnabled-zed']);
+});
+
+// A repaint while a tracking write is in flight groups rows by that write, so a
+// tool just switched off is not drawn back into the tracked group.
+test('tracked-tool grouping reads settings writes still in flight', () => {
+  const vm = require('node:vm');
+  const app = readRendererFile('app.js');
+  const source = `${fn(app, 'pendingTrackedClients')}\n${fn(app, 'clientRowTracked')}`;
+  const context = {
+    state: { settings: { clients: 'codex,claude' } },
+    pendingSettingsPatches: new Set([{ clients: 'claude' }]),
+    qoderDisplayApi: require('../../src/electron/renderer/qoderDisplay')
+  };
+  vm.runInNewContext(`${source}\nglobalThis.tracked = clientRowTracked;`, context);
+  assert.equal(context.tracked('codex'), false);
+  assert.equal(context.tracked('claude'), true);
+  context.pendingSettingsPatches.clear();
+  assert.equal(context.tracked('codex'), true);
 });

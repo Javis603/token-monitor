@@ -2839,11 +2839,6 @@ button.tool-preference-main:focus-visible {
 .limit-provider-row.has-status-tag .limit-provider-actions > .cursor-status-pill {
   display: none;
 }
-/* A local sign-in summary says which device it describes, so it is not read
-   as the state of a reading synced from another device. */
-.limit-provider-actions > .cursor-status-pill[data-local-scope]::before {
-  content: attr(data-local-scope) " · ";
-}
 /* Every status carries a dot in its own tone (setup orange, warning yellow,
    sync blue), like the green dot of a healthy provider. */
 .limit-provider-actions > .limit-provider-tag-status::before,

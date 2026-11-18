@@ -12471,11 +12471,18 @@ function playSettingsRowMotion(list, selector, key, before) {
   }
 }
 
+// The tracked selection including writes still in flight, so a repaint during
+// a toggle keeps each row in the group its switch shows.
+function pendingTrackedClients() {
+  return Object.assign({}, state.settings, ...pendingSettingsPatches).clients;
+}
+
 // Whether a tracked-tools row belongs to the tracked group. Qoder's single row
 // counts when either edition is tracked.
 function clientRowTracked(id) {
-  if (id !== 'qoder') return enabledClientSet().has(id);
-  const tracking = qoderDisplayApi.trackingState(Object.assign({}, state.settings, ...pendingSettingsPatches).clients);
+  const clients = pendingTrackedClients();
+  if (id !== 'qoder') return String(clients || '').split(',').map(s => s.trim().toLowerCase()).includes(id);
+  const tracking = qoderDisplayApi.trackingState(clients);
   return tracking.checked || tracking.mixed;
 }
 
@@ -12560,7 +12567,7 @@ function renderToolPreferencesNow() {
   const hasHiddenClients = hidden.size > 0;
   if (els.resetClientDisplayOrderButton) els.resetClientDisplayOrderButton.disabled = !hasCustomOrder && !hasPinnedClients;
   if (els.showAllClientsButton) els.showAllClientsButton.disabled = !hasHiddenClients;
-  const qoderTrackingState = qoderDisplayApi.trackingState(Object.assign({}, state.settings, ...pendingSettingsPatches).clients);
+  const qoderTrackingState = qoderDisplayApi.trackingState(pendingTrackedClients());
   const isTracked = clientRowTracked;
   const motion = takeSettingsListMotion('client', isTracked)
     ? captureSettingsRowMotion(els.clientDisplayList, '.tool-preference-row[data-client]', 'client')
@@ -12632,7 +12639,7 @@ function renderToolPreferencesNow() {
     trackInput.id = id === 'qoder' ? 'toolTrackGroup-qoder' : `toolTrackEnabled-${id}`;
     trackInput.dataset.client = id;
     trackInput.dataset.preference = id === 'qoder' ? 'track-group' : 'track';
-    trackInput.checked = id === 'qoder' ? qoderTracking.checked : enabled.has(id);
+    trackInput.checked = id === 'qoder' ? qoderTracking.checked : tracked;
     trackInput.indeterminate = id === 'qoder' && qoderTracking.mixed;
     trackInput.setAttribute('aria-label', t('settings.tools.trackClient', { name: label }));
     trackInput.addEventListener('change', () => { state.settingsListMotion = { kind: 'client', id, enabled: trackInput.checked }; });
