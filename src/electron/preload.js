@@ -206,10 +206,10 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     setAccountEnabled: (id, enabled) => ipcRenderer.invoke('claude:setAccountEnabled', id, enabled)
   },
   limits: {
-    openHistory: (key, rect, interactive = false) => ipcRenderer.invoke('limitsHistory:open', { key, rect, interactive }),
+    openHistory: (key, rect, interactive = false, requestId) => ipcRenderer.invoke('limitsHistory:open', { key, rect, interactive, requestId }),
     enterHistory: key => ipcRenderer.send('limitsHistory:enter', key),
     leaveHistory: key => ipcRenderer.send('limitsHistory:leave', key),
-    closeHistory: () => ipcRenderer.send('limitsHistory:close'),
+    closeHistory: (requestId = null) => ipcRenderer.send('limitsHistory:close', requestId),
     onHistoryState: callback => {
       const listener = (_event, open, key) => callback(open, key);
       ipcRenderer.on('limitsHistory:state', listener);

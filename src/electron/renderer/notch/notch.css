@@ -164,8 +164,18 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-status .edge-dock-refresh { width: 24px; height: 24px; }
 
 .notch-pages { position: relative; height: 176px; margin-top: 6px; }
-.notch-pages.is-handoff { overflow: clip; }
-.notch-pages.is-handoff .notch-page { overflow: clip; transition: none; }
+.notch-pages.is-handoff { clip-path: inset(0 -8px); }
+/* shortcut: settled attached corner only (24.5 = 40.5 - 16, handles 0.68 and 0.32); a shorter shell keeps this arc */
+.is-notch-attached .notch-pages.is-handoff {
+  clip-path: shape(from -8px 0,
+    vline to calc(100% - 22.5px),
+    curve by 24.5px 24.5px with 0px 16.66px / 7.84px 24.5px,
+    hline to calc(100% - 16.5px),
+    curve by 24.5px -24.5px with 16.66px 0px / 24.5px -7.84px,
+    vline to 0,
+    close);
+}
+.notch-pages.is-handoff .notch-page { clip-path: inset(0 -8px); transition: none; }
 .notch-page { position: absolute; inset: 0; opacity: 0; transform: translateX(12px); filter: blur(5px); pointer-events: none;
   transition: opacity .22s ease, transform .38s var(--notch-spring), filter .28s ease; }
 .notch-page.is-before { transform: translateX(-12px); }

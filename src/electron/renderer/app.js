@@ -4818,8 +4818,25 @@ const { limitWindowText } = window.TokenMonitorLimitWindowText;
 // globals of its own.
 let limitsHistoryOpen = false;
 let limitsHistoryActiveKey = '';
+let pendingLimitsHistoryOpen = null;
+let limitsHistoryRequestId = 0;
+async function openLimitsHistory(key, rect, interactive) {
+  if (!interactive) return window.tokenMonitor.limits.openHistory(key, rect, false);
+  const requestId = ++limitsHistoryRequestId;
+  pendingLimitsHistoryOpen = requestId;
+  try {
+    return await window.tokenMonitor.limits.openHistory(key, rect, true, requestId);
+  } finally {
+    if (pendingLimitsHistoryOpen === requestId) pendingLimitsHistoryOpen = null;
+  }
+}
+function dismissLimitsHistory() {
+  const requestId = limitsHistoryOpen ? null : pendingLimitsHistoryOpen;
+  pendingLimitsHistoryOpen = null;
+  window.tokenMonitor.limits.closeHistory(requestId);
+}
 document.addEventListener('pointerdown', event => {
-  if (limitsHistoryOpen && !event.target.closest('[data-limit-history]')) window.tokenMonitor.limits.closeHistory();
+  if ((limitsHistoryOpen || pendingLimitsHistoryOpen) && !event.target.closest('[data-limit-history]')) dismissLimitsHistory();
 }, true);
 window.tokenMonitor?.limits?.onHistoryState?.((open, key) => {
   limitsHistoryOpen = open === true;
@@ -4829,9 +4846,9 @@ window.tokenMonitor?.limits?.onHistoryState?.((open, key) => {
   }
 });
 document.addEventListener('keydown', event => {
-  if (event.key !== 'Escape' || !limitsHistoryOpen) return;
+  if (event.key !== 'Escape' || !(limitsHistoryOpen || pendingLimitsHistoryOpen)) return;
   event.preventDefault();
-  window.tokenMonitor.limits.closeHistory();
+  dismissLimitsHistory();
 }, true);
 
 // Probes the limits runtime is running right now, whoever started them.
@@ -4842,7 +4859,7 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   history: window.tokenMonitor?.limits?.openHistory ? {
     key: window.TokenMonitorLimitsHistoryIdentity.historyRowKey,
     activeKey: () => limitsHistoryActiveKey,
-    open: (key, rect, interactive) => window.tokenMonitor.limits.openHistory(key, rect, interactive),
+    open: openLimitsHistory,
     enter: key => window.tokenMonitor.limits.enterHistory(key),
     leave: key => window.tokenMonitor.limits.leaveHistory(key)
   } : null,
@@ -6183,6 +6200,7 @@ function serviceStatusSurfaceVisible() {
 
 function openHomeSettings() {
   if (!els.settingsPanel) return;
+  hideHomeTrendTooltip();
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   els.shell.style.transform = 'translateZ(0)';
@@ -6197,6 +6215,7 @@ function openHomeSettings() {
 
 function openTrendSettings() {
   if (!els.settingsPanel) return;
+  hideHomeTrendTooltip();
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   els.shell.style.transform = 'translateZ(0)';
@@ -6222,6 +6241,7 @@ function resetSettingsListSearch() {
 function openSettingsPanel(section) {
   if (!els.settingsPanel) return;
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
+  hideHomeTrendTooltip();
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   syncPluginLimitsDemand();
@@ -6496,6 +6516,7 @@ function fixedPeriodMessage(snapshot, breakdown = '') {
 }
 
 function hidePeriodContentForMessage(message) {
+  hideHomeTrendTooltip();
   els.fixedPeriodMessage.textContent = message;
   els.fixedPeriodMessage.classList.remove('hidden');
   els.homePanel.classList.add('hidden');
@@ -7354,7 +7375,7 @@ function homeActivityTooltipEl(instanceClass = 'home-heatmap-tooltip') {
   let tooltip = document.querySelector(`.${instanceClass}`);
   if (tooltip) return tooltip;
   tooltip = document.createElement('div');
-  // Trends shares the heatmap's layout and positioning, with its own instance.
+  // Chart tooltips share the heatmap's layout, each with its own instance.
   tooltip.className = `home-activity-tooltip ${instanceClass}`;
   tooltip.setAttribute('role', 'tooltip');
   tooltip.setAttribute('aria-hidden', 'true');
@@ -7512,6 +7533,141 @@ function hideHomeActivityTooltip() {
   state.homeActivityHoverTeardown?.();
 }
 
+function bindHomeTrendTooltip(chart, model, points) {
+  if (state.homeTrendTooltipBinding?.chart === chart) {
+    state.homeTrendTooltipBinding.update(model, points);
+    return;
+  }
+  state.homeTrendTooltipBinding?.dispose();
+  if (!chart || !model?.points.length) {
+    state.homeTrendTooltipBinding = null;
+    return;
+  }
+  const homeModule = chart.closest('.home-module');
+  homeModule.setAttribute('aria-keyshortcuts', 'ArrowLeft ArrowRight Home End');
+  const svg = chart.querySelector('.area-line');
+  const crosshair = chart.querySelector('.home-trend-crosshair');
+  const marker = chart.querySelector('.home-trend-marker');
+  const tooltip = homeActivityTooltipEl('home-trend-tooltip');
+  tooltip.setAttribute('aria-live', 'polite');
+  tooltip.setAttribute('aria-atomic', 'true');
+  const date = tooltip.querySelector('[data-home-activity-tooltip-date]');
+  let cost = tooltip.querySelector('.home-trend-tooltip-cost');
+  if (!cost) {
+    cost = document.createElement('span');
+    cost.className = 'home-trend-tooltip-cost';
+    tooltip.insertBefore(cost, date);
+  }
+  let pointerX = null;
+  let focused = false;
+  let selected = -1;
+  const dismiss = () => {
+    chart.removeAttribute('data-active');
+    homeModule.setAttribute('aria-label', t('home.activity'));
+    tooltip.dataset.visible = 'false';
+    tooltip.setAttribute('aria-hidden', 'true');
+    tooltip.style.transform = 'translate(-9999px, -9999px)';
+  };
+  const hide = () => {
+    pointerX = null;
+    focused = false;
+    dismiss();
+  };
+  const select = (index) => {
+    const rect = svg.getBoundingClientRect();
+    if (!(rect.width > 0)) { hide(); return; }
+    selected = index;
+    const point = model.points[index];
+    const daily = points[index];
+    const left = `${point.x / model.width * 100}%`;
+    crosshair.style.left = left;
+    marker.style.left = left;
+    marker.style.top = `${point.y / model.height * 100}%`;
+    tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatNumber(daily.tokens);
+    date.textContent = daily.date;
+    const hasCost = daily.cost != null && Number.isFinite(Number(daily.cost));
+    cost.textContent = hasCost || Number(daily.unpricedTokens) > 0
+      ? usageAttributionRowsApi.compactUsageCostLabel(daily.cost, daily.unpricedTokens,
+        (amount) => currencyApi.formatCurrencyFromUsd(amount, currentCurrency())) : '';
+    cost.hidden = !cost.textContent;
+    homeModule.setAttribute('aria-label', `${t('home.activity')} · ${t('home.trend')} · ${formatNumber(daily.tokens)} tokens${cost.textContent ? ` · ${cost.textContent}` : ''} · ${daily.date}`);
+    chart.setAttribute('data-active', 'true');
+    tooltip.dataset.visible = 'true';
+    tooltip.setAttribute('aria-hidden', 'false');
+    const tipRect = tooltip.getBoundingClientRect();
+    const anchorX = rect.left + point.x / model.width * rect.width;
+    const anchorY = rect.top + point.y / model.height * rect.height;
+    const pad = 6;
+    const gap = 9;
+    const xPos = Math.max(pad, Math.min(window.innerWidth - pad - tipRect.width, anchorX - tipRect.width / 2));
+    const aboveY = anchorY - gap - tipRect.height;
+    const yPos = Math.max(pad, Math.min(window.innerHeight - pad - tipRect.height,
+      aboveY >= pad ? aboveY : anchorY + gap));
+    tooltip.style.transform = `translate(${Math.round(xPos)}px, ${Math.round(yPos)}px)`;
+  };
+  const showAt = (clientX) => {
+    if (!model.points.length) { hide(); return; }
+    const rect = svg.getBoundingClientRect();
+    if (!(rect.width > 0)) { hide(); return; }
+    pointerX = clientX;
+    const first = model.points[0].x;
+    const last = model.points[model.points.length - 1].x;
+    const x = (clientX - rect.left) / rect.width * model.width;
+    select(last === first ? 0 : Math.max(0, Math.min(model.points.length - 1,
+      Math.round((x - first) / (last - first) * (model.points.length - 1)))));
+  };
+  chart.addEventListener('pointerenter', (event) => showAt(event.clientX));
+  chart.addEventListener('pointermove', (event) => showAt(event.clientX));
+  chart.addEventListener('pointerleave', hide);
+  const onFocusIn = (event) => {
+    if (event.target !== homeModule) return;
+    focused = true;
+    pointerX = null;
+    select(selected < 0 ? points.length - 1 : selected);
+  };
+  const onKeyDown = (event) => {
+    if (event.target !== homeModule) return;
+    const index = event.key === 'ArrowLeft' ? Math.max(0, selected - 1)
+      : event.key === 'ArrowRight' ? Math.min(points.length - 1, selected + 1)
+        : event.key === 'Home' ? 0 : event.key === 'End' ? points.length - 1 : null;
+    if (index === null) return;
+    event.preventDefault();
+    pointerX = null;
+    focused = true;
+    select(index);
+  };
+  const onFocusOut = (event) => {
+    if (event.target !== homeModule) return;
+    focused = false;
+    if (pointerX == null) dismiss();
+  };
+  homeModule.addEventListener('focusin', onFocusIn);
+  homeModule.addEventListener('keydown', onKeyDown);
+  homeModule.addEventListener('focusout', onFocusOut);
+  els.homePanel.addEventListener('scroll', hide);
+  state.homeTrendTooltipBinding = { chart, hide, dispose() {
+    hide();
+    homeModule.removeEventListener('focusin', onFocusIn);
+    homeModule.removeEventListener('keydown', onKeyDown);
+    homeModule.removeEventListener('focusout', onFocusOut);
+    els.homePanel.removeEventListener('scroll', hide);
+    homeModule.removeAttribute('aria-keyshortcuts');
+  }, update(nextModel, nextPoints) {
+    const date = points[selected]?.date;
+    model = nextModel;
+    points = nextPoints;
+    if (!model.points.length) { hide(); return; }
+    selected = points.findIndex(point => point.date === date);
+    if (selected < 0) selected = points.length - 1;
+    if (pointerX != null) showAt(pointerX);
+    else if (focused) select(selected);
+  } };
+}
+
+function hideHomeTrendTooltip() {
+  state.homeTrendTooltipBinding?.hide();
+}
+
 const rendererDom = window.TokenMonitorDomReconcile.create({ nodesFor: node => pluginContent?.nodesFor(node) || [] });
 let homeActivityScroller = null;
 function updateHomeActivity() {
@@ -7533,6 +7689,9 @@ function updateHomeActivity() {
   if (scroller) applyHomeActivityScroll(scroller);
   if (scroller && state.animateChartsOnRender && scroller.clientWidth > 0) reveal();
   state.homeActivityTooltipUpdate?.();
+  const trendChart = els.homePanel.querySelector('.home-area-chart');
+  const trendData = trendChart && window.TokenMonitorDomReconcile.data(trendChart);
+  bindHomeTrendTooltip(trendChart, trendData?.model, trendData?.points);
 }
 
 function renderHomeTrendsModule() {
@@ -7575,7 +7734,8 @@ function renderHomeTrendsModule() {
     rawDaily,
     today,
     Number(todayPeriod?.totalTokens || 0),
-    Number(todayPeriod?.costUsd || 0)
+    Number(todayPeriod?.costUsd || 0),
+    Number(todayPeriod?.unpricedTokens || 0)
   );
   const activityLayout = homeOverviewApi.homeActivityHeatmapLayout();
   const heatMetric = state.settings?.heatmapMetric || 'cost';
@@ -7637,6 +7797,12 @@ function renderHomeTrendsModule() {
   const chart = document.createElement('div');
   chart.className = 'home-area-chart';
   chart.innerHTML = charts.areaLineSvg(model);
+  const crosshair = document.createElement('div');
+  crosshair.className = 'home-trend-crosshair';
+  const marker = document.createElement('div');
+  marker.className = 'home-trend-marker';
+  chart.append(crosshair, marker);
+  window.TokenMonitorDomReconcile.data(chart, { model, points: linePoints });
   plot.append(chart);
   const dates = document.createElement('div');
   dates.className = 'home-trend-dates';
@@ -7813,7 +7979,7 @@ function renderAppContent({ fromSearch = false } = {}) {
   const pluginPage = pluginMainPages?.render(pluginPageOptions(), state.breakdown) || false;
   els.shell.classList.toggle('plugin-page-mode', pluginPage);
   if (pluginPage) {
-    stopHomeSessionRepaint(); stopSessionStatusRepaint(); stopServiceStatusTicker(); hideHomeActivityTooltip();
+    stopHomeSessionRepaint(); stopSessionStatusRepaint(); stopServiceStatusTicker(); hideHomeActivityTooltip(); hideHomeTrendTooltip();
     cancelNumberAnimation();
     state.openSession = null;
     for (const panel of [els.homePanel, els.breakdown, els.limitsPanel, els.trendsPanel, els.serviceStatusPanel,
@@ -7904,9 +8070,8 @@ function renderAppContent({ fromSearch = false } = {}) {
   syncSessionSearchChrome();
   if (state.breakdown !== 'session' || state.openSession) els.sessionPagerHost.classList.add('hidden');
   els.viewBackRow?.classList.toggle('hidden', state.breakdown === 'home' || !state.homeReturnVisible);
-  // Leaving Home only CSS-hides the panel, so its heatmap scroller never sees a
-  // pointerleave — dismiss the body-level tooltip here (renderHome covers rerenders).
-  if (state.breakdown !== 'home') hideHomeActivityTooltip();
+  // Leaving Home only CSS-hides the panel, so its charts may not see pointerleave.
+  if (state.breakdown !== 'home') { hideHomeActivityTooltip(); hideHomeTrendTooltip(); }
   if (state.breakdown !== 'trends') hideTrendTooltip();
   if (state.breakdown === 'status') ensureServiceStatusTicker(); else stopServiceStatusTicker();
   if (state.breakdown === 'home') {
@@ -14034,7 +14199,9 @@ document.addEventListener('click', (event) => {
 });
 
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && state.periodMenuOpen) {
+  if (event.key !== 'Escape') return;
+  hideHomeTrendTooltip();
+  if (state.periodMenuOpen) {
     event.preventDefault();
     setPeriodMenuOpen(false, { restoreFocus: true });
   }
@@ -14094,6 +14261,7 @@ els.settingsButton.addEventListener('click', (event) => {
   // closing it needs no catch-up repaint. Only the panel's own DOM has to be
   // caught up when it opens, because its renderers idle while it is closed.
   if (settingsOpen) {
+    hideHomeTrendTooltip();
     syncSettingsForm();
   } else {
     syncModeSelect?.close();
@@ -15073,6 +15241,8 @@ els.floatingBubbleTab.addEventListener('mouseleave', handleFloatingBubbleHoverLe
 document.documentElement.addEventListener('mouseleave', handleDocumentHoverLeave);
 document.documentElement.addEventListener('mouseleave', hideTrendTooltip);
 window.addEventListener('blur', handleTrendsWindowBlur);
+window.addEventListener('blur', hideHomeTrendTooltip);
+window.addEventListener('resize', hideHomeTrendTooltip);
 document.documentElement.addEventListener('mouseenter', clearHoverCollapseTimer);
 els.floatingBubbleTab.addEventListener('keydown', (event) => {
   if (event.key !== 'Enter' && event.key !== ' ') return;
