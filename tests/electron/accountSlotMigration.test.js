@@ -46,6 +46,26 @@ test('Volcengine migration retains a complete Coding pair with a split Agent pai
   assert.equal(before.length, 2);
   assert.deepEqual(after.map(row => [row.accountKey, row.status]), before.map(row => [row.accountKey, 'ok']));
 });
+test('MiniMax imports the remaining fixed key after freeing a slot without overwriting the named default', t => {
+  const fixed = 'fixture-fixed';
+  const minimaxApiProfiles = { default: { apiKey: 'fixture-named' } };
+  for (let index = 1; index <= 20; index++) minimaxApiProfiles['profile-' + index] = { apiKey: 'fixture-' + index };
+  const store = fixture(t, { minimaxApiKey: fixed, minimaxApiProfiles });
+  const first = migrateAccountSlots(store, {}, Date.now, {});
+  assert.equal(first.minimaxAccountSlots.length, 21);
+  assert.equal(first.minimaxApiKey, fixed);
+
+  const retained = first.minimaxAccountSlots.filter(slot => slot.id !== 'profile-1');
+  store.replaceSettingsCredentials({ ...first, minimaxAccountSlots: retained });
+  const second = migrateAccountSlots(store, {}, Date.now, {});
+  assert.equal(second.minimaxApiKey, undefined);
+  assert.deepEqual(second.minimaxAccountSlots.slice(0, 20), retained);
+  const imported = second.minimaxAccountSlots.at(-1);
+  assert.equal(imported.id, 'default-2');
+  assert.equal(imported.owner.credential, fixed);
+  assert.deepEqual(migrateAccountSlots(store, {}, Date.now, {}), second);
+});
+
 const values = { deepseekApiKey: 'fixture-key', deepseekWebToken: 'fixture-console' };
 for (const known of [false, true]) test(`migration preserves ${known ? 'known identity, aliases and proof' : 'provisional identity'} through failed fetch and renderer`, async t => {
   const identity = { fingerprint: accountValuesFingerprint(values), accountKey: 'known-key', accountKeyAliases: ['old-key'], serverIdentity: true };

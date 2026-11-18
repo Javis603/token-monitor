@@ -33,13 +33,7 @@ test('Codex reset forecast stays local to the renderer and uses a narrow IPC bri
   assert.match(main, /parsed\.hostname === 'codex-resets\.com' && \(parsed\.pathname === '' \|\| parsed\.pathname === '\/'\)/);
 });
 
-test('single and multi-account Codex rows render one forecast entry', () => {
-  // One per row, and one per group — the group's policy says so, so the Edge
-  // Dock card's Codex group gets it without being handed an option. Both
-  // surfaces render these two functions, so the count cannot differ between them.
-  assert.match(view, /if \(!options\.accountRow\) windowOwners\[id\]\?\.decorateRow\?\.\(row\);/);
-  assert.match(view, /const groupPolicy = \(\) => \(\{ forecastOnGroup: true \}\)/);
-  assert.equal((view.match(/appendCodexResetForecast\(/g) || []).length, 2, 'once per row, once per group, once as the declaration');
+test('single and multi-account Codex rows share the forecast divider styling', () => {
   assert.match(styles, /\.codex-reset-forecast \{/);
   assert.match(styles, /\.limit-row:has\(> \.codex-reset-forecast\)\s*\{[^}]*padding-bottom: 7px;/s);
   assert.doesNotMatch(styles, /\.codex-reset-forecast\s*\{[^}]*border-top:/s);

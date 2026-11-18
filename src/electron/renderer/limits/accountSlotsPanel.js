@@ -439,7 +439,7 @@
         editorPanel.querySelector(`#${prefix}LogoutButton`).classList.add('hidden');
       });
     }
-    function rowFor(id) {
+    function rowFor({ id, source }) {
       if (rows.has(id)) return rows.get(id);
       const el = make('div', 'slot-row');
       el.tabIndex = 0;
@@ -569,7 +569,7 @@
         for (const entry of additionalActions) {
           shared.appendItems(button(entry.label, () => { closeMenu(); return entry.run(item.slot); }));
         }
-        if (id.startsWith('remote:')) {
+        if (source === 'remote') {
           shared.appendItems(action('rename', rename), up, down);
           menu.append(localized(make('div', 'settings-note slot-remote-note'), 'settings.slots.remoteNote'));
         } else shared.appendItems(action('rename', rename), replace, pause, separator(), up, down, separator(), remove);
@@ -787,7 +787,7 @@
       }
       displayed.forEach((account, index) => {
         const { slot, reading } = account;
-        const item = rowFor(slot.id);
+        const item = rowFor(slot);
         item.slot = slot;
         item.el.dataset.slotDraggable = 'true';
         const remote = slot.source === 'remote';

@@ -7464,14 +7464,18 @@ app.whenReady().then(() => {
     presentationAccounts: async provider => {
       const rows = [...(localStats?.limits?.providers || []), ...(latestStats?.limits?.providers || [])].filter(row => row.provider === provider);
       if (provider === 'codex') rows.push(...codexAccountsForRenderer());
-      if (provider === 'cursor') rows.push(...(await cursorAccountService().status()).accounts);
+      if (provider === 'cursor') rows.push(...cursorAccountService().presentationAccounts());
       if (provider === 'mimo') rows.push(...mimoAccountsForRenderer());
       if (provider === 'opencode') {
         const result = await opencodeAccountService().getProfiles();
         rows.push(...Object.values(result?.profiles || {}));
         if (result?.ambientAccountKey) rows.push({ accountKey: result.ambientAccountKey });
       }
-      if (provider === 'thirdparty') { const result = await thirdpartyAccountService().getProfiles(); rows.push(...Object.values(result?.profiles || {})); }
+      if (provider === 'thirdparty') {
+        const result = await thirdpartyAccountService().getProfiles();
+        rows.push(...Object.values(result?.profiles || {}));
+        if (result?.environmentAccountKey) rows.push({ accountKey: result.environmentAccountKey });
+      }
       return rows.map(row => row.accountKey || row.canonicalAccountKey).filter(Boolean);
     },
     write: (patch) => {

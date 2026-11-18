@@ -252,12 +252,14 @@ test('a Hub upgraded in place is used once its stats advertise the group', async
   assert.ok(calls.includes('PUT'), 'the upgraded Hub receives the local names');
 });
 
-test('an edit made offline survives a restart and is published on the next connection', async () => {
+test('an edit made offline survives local-only renames, restart and reconnection', async () => {
   let stored = [];
+  let local = false;
   let online = false;
   let document = { revision: 3, value: { deepseek: { labels: { k: 'Old' }, order: [] } } };
   const make = () => createAccountPresentationSync({
-    getContext: () => ({ mode: 'client', url: 'https://hub' }), identity: () => 'hub',
+    getContext: () => local ? { mode: 'local' } : { mode: 'client', url: 'https://hub' },
+    identity: context => context.mode === 'client' ? 'hub' : '',
     getCacheIdentity: () => 'hub', getSeed: () => ({}), getLocalLabels: () => [], apply: () => {},
     loadJournal: () => structuredClone(stored), saveJournal: journal => { stored = structuredClone(journal); },
     request: async (_context, _path, method, body) => {
@@ -267,8 +269,16 @@ test('an edit made offline survives a restart and is published on the next conne
       return { status: 200, body: structuredClone(document) };
     }
   });
-  await make().publish([{ provider: 'deepseek', type: 'rename', key: 'k', label: 'Renamed offline' }]);
+  const runtime = make();
+  await runtime.publish([{ provider: 'deepseek', type: 'rename', key: 'k', label: 'Renamed offline' }]);
   assert.equal(stored.length, 1, 'the unacknowledged edit is journaled');
+  const pending = stored;
+  local = true;
+  for (let index = 0; index < 200; index++) {
+    await runtime.publish([{ provider: 'deepseek', type: 'rename', key: 'k', label: 'Local ' + index }]);
+  }
+  assert.deepEqual(stored, pending);
+  local = false;
   online = true;
   await make().refresh();
   assert.equal(document.value.deepseek.labels.k, 'Renamed offline');

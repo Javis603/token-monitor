@@ -89,11 +89,31 @@ test('provider groups preserve identity, order, and shared frames', () => {
   const view = fixture(createView);
   for (const id of ['mimo', 'minimax', 'codex', 'workbuddy', 'thirdparty', 'muse']) {
     const first = { ...records(id)[1], source: 'oauth', region: 'cn', accountName: 'First' };
-    const second = { ...first, source: 'api', accountKey: 'two', accountName: 'Second', accountEmail: 'two@example.com', relatedAccountKey: id === 'minimax' ? 'one' : '' };
+    const second = { ...first, source: 'api', accountKey: 'two', accountName: 'Second', accountEmail: 'two@example.com' };
     const row = view.renderLimitProviderGroup(id, id, [first, second], '#fff');
     assert.ok(row);
     assert.ok(row.classList.contains('limit-row'));
+    const accountRows = [];
+    const visit = node => {
+      if (node.classList.contains('limit-account-row') && node.dataset.limitMotionKey) accountRows.push(node);
+      for (const child of node.children) visit(child);
+    };
+    visit(row);
+    const { providerKey } = require('../../src/electron/renderer/limits/resetMotion');
+    assert.deepEqual(accountRows.map(child => child.dataset.limitMotionKey), [first, second].map(providerKey), id);
   }
+});
+
+test('Codex solo and grouped rows each render one enabled forecast', () => {
+  const view = fixture(createView, { codexResetForecastEnabled: true });
+  const first = records('codex')[1];
+  const second = { ...first, accountKey: 'two', accountEmail: 'two@example.com' };
+  const solo = view.renderLimitProviderSolo('codex', 'Codex', first, '#fff');
+  const grouped = view.renderLimitProviderGroup('codex', 'Codex', [first, second], '#fff');
+  const forecastCount = node => Number(node.classList.contains('codex-reset-forecast'))
+    + node.children.reduce((count, child) => count + forecastCount(child), 0);
+  assert.equal(forecastCount(solo), 1);
+  assert.equal(forecastCount(grouped), 1);
 });
 
 test('optional migration evidence compares original and owner DOM snapshots', { skip: !process.env.WINDOWS_OWNER_BASELINE }, () => {

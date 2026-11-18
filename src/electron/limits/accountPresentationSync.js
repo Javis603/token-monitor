@@ -126,6 +126,7 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
   /** @param {any[]} operations */
   function publish(operations) {
     const captured = identity(getContext());
+    if (!captured) return Promise.resolve();
     queued.push(...operations.map(operation => ({ destination: captured, operation })));
     if (operations.length) persist();
     const task = lane.then(() => {

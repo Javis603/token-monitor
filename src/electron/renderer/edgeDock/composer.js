@@ -264,7 +264,7 @@
       const options = accounts.map((account) => {
         const option = document.createElement('option');
         option.value = account.accountKey;
-        option.textContent = account.accountName || maskEmail(account.accountEmail)
+        option.textContent = account.accountDisplayName || account.accountName || maskEmail(account.accountEmail)
           || account.planLabel || providerLabel(item.provider);
         return option;
       });
@@ -466,7 +466,7 @@
             } else next.add(selectionKey(account));
             void updateItem(id, { hiddenAccounts: [...next] });
           });
-          const identity = account.accountName || maskEmail(account.accountEmail);
+          const identity = account.accountDisplayName || account.accountName || maskEmail(account.accountEmail);
           const product = item.provider === 'mimo' ? mimoProductLabel(account) : '';
           const name = product || item.provider === 'alibaba'
             ? limitAccountTitle(item.provider, account, accounts.indexOf(account), accounts)
@@ -507,7 +507,7 @@
         addable: ui.menuOpen ? enabledLimitProviders?.() : null,
         windows: selectedItem?.type === 'limit' ? windowChoices(selectedItem) : null,
         accounts: selectedItem?.type === 'limit' ? accountsFor(selectedItem.provider).map((account, index, accounts) => {
-          const identity = [selectionKey(account), account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel];
+          const identity = [selectionKey(account), account.accountDisplayName, account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel];
           if (selectedItem.provider === 'mimo' && mimoProductLabel(account)) {
             identity.push(limitAccountTitle('mimo', account, index, accounts));
           }

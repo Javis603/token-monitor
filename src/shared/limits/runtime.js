@@ -416,7 +416,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
     snapshot = normalizeLimitsSummary({
       updatedAt: new Date(now()).toISOString(),
       refreshMs,
-      multiAccountProviders: enabled && !stopped ? configuredMultiAccountProviders(LIMIT_PROVIDER_REGISTRY, config, deps.env || process.env, deps).filter(id => configuredProviders.has(id)) : [],
+      multiAccountProviders: enabled && !stopped ? configuredMultiAccountProviders(LIMIT_PROVIDER_REGISTRY.filter(entry => configuredProviders.has(entry.id)), config, deps.env || process.env, deps) : [],
       providers
     });
     pruneAttemptedResetBoundaries(snapshot, attemptedResetBoundaries);

@@ -216,7 +216,8 @@ test('OpenCode owner forwards explicit profile and ambient DTO identities to the
   assert.equal(saved[0].accountKey, 'ambient-key');
   assert.equal(saved[0].removable, false);
   assert.equal(saved[0].enabled, false);
-  assert.equal(saved[1].id, 'Work');
+  assert.equal(saved[1].id, 'profile:Work');
+  assert.equal(saved[1].profileName, 'Work');
   assert.equal(saved[1].accountKey, 'canonical');
   assert.deepEqual(saved[1].accountKeyAliases, ['old']);
 });

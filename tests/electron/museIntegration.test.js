@@ -212,7 +212,10 @@ test('Muse Cookie settings invalidation preserves CLI last-good through a failed
   const { settingsLimitInvalidationPlan, runLimitInvalidation } = require('../../src/electron/deviceRuntimeCoordinator');
   for (const action of ['save', 'clear']) {
     await t.test(action, async () => {
-      let settings = { limitProviders: 'muse', museWebCookie: 'session=old' };
+      const accountKey = 'saved-muse-web';
+      let settings = { limitProviders: 'muse', ...(action === 'save'
+        ? { museWebCookie: 'session=old' }
+        : { museAccountSlots: [{ id: 'web', accountKey, enabled: true, values: { museWebCookie: 'session=old' } }] }) };
       let failing = false;
       const scopes = [];
       const snapshots = [];
@@ -224,10 +227,10 @@ test('Muse Cookie settings invalidation preserves CLI last-good through a failed
           return [
             { provider: 'muse', source: 'cli', status: failing ? 'unavailable' : 'ok',
               windows: failing ? [] : [{ kind: 'weekly', usedPercent: 35 }] },
-            settings.museWebCookie
-              ? { provider: 'muse', source: 'web', status: failing ? 'unavailable' : 'ok',
-                windows: failing ? [] : [{ kind: 'weekly', usedPercent: 20 }] }
-              : { provider: 'muse', source: 'web', removed: true }
+            ...((settings.museWebCookie || settings.museAccountSlots?.length)
+              ? [{ provider: 'muse', source: 'web', accountKey, status: failing ? 'unavailable' : 'ok',
+                windows: failing ? [] : [{ kind: 'weekly', usedPercent: 20 }] }]
+              : [])
           ];
         }
       });
@@ -253,20 +256,21 @@ test('Muse Cookie settings invalidation preserves CLI last-good through a failed
         else {
           // A migrated account uses slot removal, whose settings notification
           // clears only its web lane and retains the anonymous CLI observation.
-          const { createAccountSlotService } = require('../../src/electron/limits/accountSlotService');
-          settings = { ...settings, museAccountSlots: [{ id: 'web', enabled: true, values: { museWebCookie: 'session=old' } }] };
+          const { createAccountSlotService, invalidateAccountSlotChange } = require('../../src/electron/limits/accountSlotService');
           let removalRefresh;
           const service = createAccountSlotService({ getSettings: () => settings, env: {}, probeDeps: () => ({}),
             write: async patch => { settings = { ...settings, ...patch }; },
-            onChanged: async () => {
-              settings.museWebCookie = '';
+            onChanged: (provider, change) => {
               runtime.reconfigure(settings);
-              await runtime.clear({ provider: 'muse', source: 'web' });
-              removalRefresh = runtime.refresh({ provider: 'muse' }, 'settings-change');
-              await removalRefresh;
+              if (change.refresh) removalRefresh = invalidateAccountSlotChange({
+                clearLimits: runtime.clear, refreshLimits: runtime.refresh
+              }, provider, change);
+              return removalRefresh;
             } });
-          await service.remove('muse', 'web');
+          assert.equal((await service.remove('muse', 'web')).ok, true);
+          assert.ok(removalRefresh, 'slot removal requests a refresh');
           await removalRefresh;
+          assert.ok(!runtime.getSnapshot().providers.some(row => row.accountKey === accountKey));
         }
         assert.ok(snapshots.length > 0);
         for (const snapshot of snapshots) {

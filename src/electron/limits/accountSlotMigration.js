@@ -212,7 +212,14 @@ function migrateOwnerSlots(store, stored, settings, entry, document, mark, now) 
   if (provider === 'minimax') {
     // Collection merges saved slots into profiles; migration must read only
     // legacy sources still present, including an interrupted destination write.
-    sources = Object.entries(entry.limits.minimaxApiProfiles({ ...settings, ...stored, minimaxAccountSlots: [] })).map(([id, profile]) => ({
+    const legacy = { ...settings, ...stored, minimaxAccountSlots: [] };
+    const named = entry.limits.minimaxApiProfiles({ ...legacy, minimaxApiKey: '' });
+    // Reserve the names already imported when choosing a name for the fixed
+    // key. They are no longer in the legacy map after partial cleanup.
+    const combined = entry.limits.minimaxApiProfiles({ ...legacy, minimaxAccountSlots: stored[key] });
+    const occupied = new Set((stored[key] || []).map(slot => slot.id));
+    const fixed = Object.entries(combined).filter(([id]) => !Object.hasOwn(named, id) && !occupied.has(id));
+    sources = [...Object.entries(named), ...fixed].map(([id, profile]) => ({
       metadata: { id, accountKey: hashKey(provider, profile.apiKey), enabled: profile.enabled, billingMode: profile.billingMode, apiRegion: profile.apiRegion }, credential: profile.apiKey
     }));
   } else {
@@ -262,7 +269,7 @@ function migrateOwnerSlots(store, stored, settings, entry, document, mark, now) 
   // snapshot. Metadata cleanup is repeated by main on every settings load.
   if (provider === 'minimax') {
     verified.minimaxApiProfiles = Object.fromEntries(Object.entries(stored.minimaxApiProfiles || {}).filter(([id]) => !ids.has(id)));
-    if (stored.minimaxApiKey && imported.some(item => item.owner.credential === stored.minimaxApiKey)) verified.minimaxApiKey = '';
+    if (stored.minimaxApiKey && next.some(item => item.owner?.credential === stored.minimaxApiKey)) verified.minimaxApiKey = '';
   } else {
     for (const id of ids) if (document.credentials.providers?.[provider]?.accounts) delete document.credentials.providers[provider].accounts[id];
     if (provider === 'claude' && ids.has('legacy-web-cookie')) verified.claudeWebCookie = '';

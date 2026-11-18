@@ -63,6 +63,19 @@ for (const fixture of [
   });
 }
 
+test('Cursor presentation resolves local and matching verified identities without probing', async () => {
+  const account = { id: 'user_saved', sessionToken: 'private-token' };
+  const probeCalls = [];
+  const service = createService([account], success('user_verified'), { probeCalls });
+  assert.deepEqual(service.presentationAccounts(), [{ accountKey: hashKey('cursor', 'user_saved') }]);
+  assert.deepEqual(probeCalls, []);
+  await service.status();
+  assert.deepEqual(service.presentationAccounts(), [{ accountKey: hashKey('cursor', 'user_verified') }]);
+  account.sessionToken = 'rotated-token';
+  assert.deepEqual(service.presentationAccounts(), [{ accountKey: hashKey('cursor', 'user_saved') }]);
+  assert.deepEqual(probeCalls, ['private-token']);
+});
+
 test('Cursor disabled accounts keep canonical identity without a quota reading', async () => {
   const account = { id: 'opaque', userId: 'user_saved', sessionToken: 'private-token' };
   const service = createService([account], failure('network'), { disabled: [account.id] });

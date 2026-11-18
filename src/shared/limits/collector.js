@@ -1,6 +1,7 @@
 'use strict';
 
 const { accountSlotJobs } = require('./accountSlotFetcher');
+const { mergedOwnerAccounts } = require('./ownerAccountSlots');
 const { LIMIT_PROVIDER_IDS } = require('./providers');
 const { LIMIT_PROVIDER_FETCHERS, limitProviderEntry } = require('./registry');
 const {
@@ -142,7 +143,7 @@ function providerPhysicalBoundMs(provider, options = {}, deps = {}) {
     : DEFAULT_PROVIDER_PHYSICAL_BOUND_MS;
   let jobs = 1;
   if (provider === 'claude') {
-    jobs = claudeLimits.normalizeClaudeManagedAccounts(options.claudeManagedAccounts).filter((account) => account.enabled).length
+    jobs = claudeLimits.normalizeClaudeManagedAccounts(mergedOwnerAccounts(options, 'claude', options.claudeManagedAccounts || [])).filter((account) => account.enabled).length
       + (claudeWebCookie(deps.env || process.env, options) ? 1 : 0) + 1;
   }
   if (provider === 'codex') {
@@ -162,7 +163,7 @@ function providerPhysicalBoundMs(provider, options = {}, deps = {}) {
       : Math.max(1, managed.length + 1);
   }
   const entry = limitProviderEntry(provider);
-  if (entry?.accountSlots) jobs = accountSlotJobs(entry, options, deps);
+  if (entry?.accountSlots && provider !== 'claude') jobs = accountSlotJobs(entry, options, deps);
   return base * jobs;
 }
 

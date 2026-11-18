@@ -40,6 +40,15 @@ test('provider physical bounds follow whether account jobs run serially or concu
   }, { providerPhysicalBounds: { codex: 10 } }), 10);
 });
 
+test('Claude physical deadline includes enabled legacy and saved Web accounts', () => {
+  const legacy = ['a', 'b', 'c'].map(id => ({ id, enabled: true }));
+  const slot = (id, enabled) => ({ id, enabled, values: {}, owner: { metadata: { id }, credential: 'synthetic' } });
+  const deps = { env: {}, providerPhysicalBounds: { claude: 10 } };
+  assert.equal(providerPhysicalBoundMs('claude', { claudeManagedAccounts: legacy }, deps), 40);
+  assert.equal(providerPhysicalBoundMs('claude', { claudeManagedAccounts: legacy,
+    claudeAccountSlots: [slot('d', true), slot('e', false)] }, deps), 50);
+});
+
 test('probeLimitProvider passes runtime cancellation into the selected adapter', async () => {
   const controller = new AbortController();
   let observedSignal;

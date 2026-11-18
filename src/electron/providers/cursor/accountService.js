@@ -17,6 +17,24 @@ function createCursorAccountService(deps) {
   const CURSOR_STATUS_TTL_MS = 30 * 1000;
   const CURSOR_EXTERNAL_AGENT_ERROR = 'Stop the headless agent before managing Cursor accounts.';
   const normalizeManualCookie = input => auth.normalizeCursorSessionToken(input);
+  function accountKeyFor(account, verifiedUserId = '') {
+    const id = String(account.id || '').trim();
+    const canonical = [verifiedUserId, account.userId, id].map(cursorAuth.canonicalCursorUserId).find(Boolean);
+    return canonical ? hashKey('cursor', canonical) : hashKey('cursor-local', id || 'unknown');
+  }
+  function presentationAccounts() {
+    const manual = new Set(normalizeCursorAccountIds(getCursorManualAccountIds()));
+    const desktop = auth.readCursorDesktopSignIn();
+    return auth.listAccounts().flatMap(account => {
+      const cached = knownAccountMetadata.get(account.id);
+      const previous = cached?.sessionToken === account.sessionToken ? cached?.metadata : null;
+      if (!manual.has(account.id) && !isCursorDetectedAccountCurrent({
+        desktop, userId: auth.canonicalCursorUserId(account.userId || account.id),
+        unauthorized: previous?.expired === true
+      })) return [];
+      return [{ accountKey: previous?.accountKey || accountKeyFor(account) }];
+    });
+  }
   async function cursorStatusValue({ discover = false } = {}) {
     const managementBlocked = isExternalAgentActive();
     let accounts = auth.listAccounts();
@@ -48,13 +66,7 @@ function createCursorAccountService(deps) {
       })) return null;
       // Match limits.js hashCursorAccountKey, including its local-only fallback.
       // Email and labels are presentation metadata, never identity evidence.
-      const accountId = String(account.id || '').trim();
-      const canonicalUserId = [probeResult.ok ? probeResult.user?.sub : '', account.userId, accountId]
-        .map(cursorAuth.canonicalCursorUserId)
-        .find(Boolean) || '';
-      const accountKey = canonicalUserId
-        ? hashKey('cursor', canonicalUserId)
-        : hashKey('cursor-local', accountId || 'unknown');
+      const accountKey = accountKeyFor(account, probeResult.ok ? probeResult.user?.sub : '');
       const metadata = {
         id: account.id,
         accountKey: !sourceSelected && previous ? previous.accountKey : accountKey,
@@ -164,6 +176,6 @@ function createCursorAccountService(deps) {
       cursorStatusCache = { value, at: now };
       return value;
     }
-  return { cursorStatusValue, loginManual, setAccountEnabled, logout, status };
+  return { cursorStatusValue, loginManual, setAccountEnabled, logout, status, presentationAccounts };
 }
 module.exports = { createCursorAccountService };

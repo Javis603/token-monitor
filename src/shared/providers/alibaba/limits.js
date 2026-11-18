@@ -1034,18 +1034,16 @@ async function fetchAccountSlotSnapshot(options, deps, collect) {
   const cliPrevious = previous.filter(row => row.provider === 'alibaba' && row.source === 'cli');
   const previousLimits = { providers: previous.filter(row => row.source !== 'cli') };
   const scope = options.limitRefreshScope;
-  // A keyless Team CLI result cannot prove that it belongs to a Cookie scope.
-  // Only a previously observed CLI identity may select that lane by account.
-  if (scope?.provider === 'alibaba' && scope.accountKey && !cliPrevious.some(row => rowMatchesScope(row, scope))) {
-    return collect({ ...options, alibabaSourcePreference: 'web', previousLimits }, deps);
-  }
   const localOptions = scope?.provider === 'alibaba' && scope.region
     ? { ...options, alibabaVariant: scope.region } : options;
-  if (!options.alibabaAccountSlots?.length) {
-    // Keep the default lane's source policy and replacement history together.
-    // Explicit CLI must not query an environment Cookie as a second account.
-    return source === 'cli' ? fetchAlibabaLimits(localOptions, deps) : collect(localOptions, deps);
+  const unprovenCliScope = scope?.provider === 'alibaba' && scope.accountKey && !cliPrevious.some(row => rowMatchesScope(row, scope));
+  // Without saved slots, explicit CLI owns the whole provider. An unmatched
+  // account scope cannot fall through to Cookie or claim a keyless CLI result.
+  if (source === 'cli' && !options.alibabaAccountSlots?.length) {
+    return unprovenCliScope ? [] : fetchAlibabaLimits(localOptions, deps);
   }
+  if (unprovenCliScope) return collect({ ...options, alibabaSourcePreference: 'web', previousLimits }, deps);
+  if (!options.alibabaAccountSlots?.length) return collect(localOptions, deps);
   const local = await fetchAlibabaLimits({ ...localOptions, alibabaSourcePreference: 'cli', previousLimits: { providers: cliPrevious } }, deps);
   // Replacement removals carry identity only, without a source field.
   return [...local.filter(row => row.removed || row.source === 'cli' && (source === 'cli' || row.status !== 'notConfigured')), ...await collect({ ...options, alibabaSourcePreference: 'web', previousLimits }, deps)];

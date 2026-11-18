@@ -239,6 +239,7 @@ function renderNamedApiProfiles(config) {
           if (input && profile[key] !== undefined) input.value = profile[key];
         }
         setThirdPartyAdapterFields();
+        updateThirdPartyHttpWarning();
         document.getElementById('thirdpartyAddDetails').classList.remove('hidden');
         document.getElementById('thirdpartyAddToggle').setAttribute('aria-expanded', 'true');
       }

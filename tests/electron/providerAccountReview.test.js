@@ -18,9 +18,9 @@ test('OpenCode local source describes its usage database and Kimi web complement
 
 test('Manus status includes desktop discovery and keeps settings/environment precedence', t => {
   const entry = limitProviderEntry('manus');
-  const original = entry.limits.readManusDesktopSession;
-  entry.limits.readManusDesktopSession = () => ({ token: 'desktop-session' });
-  t.after(() => { entry.limits.readManusDesktopSession = original; });
+  t.mock.method(entry.limits, 'readManusDesktopSession', () => ({ token: 'desktop-session' }));
+  t.mock.method(limitProviderEntry('hark').limits, 'readHarkDesktopSession', () => null);
+  t.mock.method(limitProviderEntry('zai').limits, 'discoverZcodeConnection', () => ({}));
   assert.equal(accountStatusProjection({}, {}).manusSessionTokenConfigured, true);
   assert.equal(accountStatusProjection({}, {}).manusSessionTokenSource, 'manus-desktop');
   assert.equal(accountStatusProjection({}, { MANUS_SESSION_TOKEN: 'env.token.sig' }).manusSessionTokenSource, 'env');
@@ -33,6 +33,24 @@ test('Manus status includes desktop discovery and keeps settings/environment pre
   assert.equal(accountStatusProjection({}, {}).manusSessionTokenConfigured, true);
   entry.limits.readManusDesktopSession = () => { throw Object.assign(new Error('signed out'), { status: 'notConfigured' }); };
   assert.equal(accountStatusProjection({}, {}).manusSessionTokenConfigured, false);
+});
+
+test('limits runtime discovers local credentials only for enabled providers', () => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  const calls = [];
+  const runtime = createLimitsRuntime({ limitProviders: ['codex'] }, {
+    autoStart: false, env: {},
+    readHarkDesktopSession: () => { calls.push('hark'); return null; },
+    readManusDesktopSession: () => { calls.push('manus'); return null; },
+    discoverZcodeConnection: () => { calls.push('zai'); return {}; }
+  });
+  try {
+    assert.deepEqual(calls, []);
+    runtime.reconfigure({ limitProviders: ['codex'] });
+    assert.deepEqual(calls, []);
+    runtime.reconfigure({ limitProviders: ['codex', 'hark'] });
+    assert.deepEqual(calls, ['hark']);
+  } finally { runtime.stop(); }
 });
 
 test('Hark equivalent saved cookie spellings update one slot and preserve its controls', async () => {

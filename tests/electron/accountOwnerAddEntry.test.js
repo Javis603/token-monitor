@@ -157,11 +157,13 @@ test('Cursor external-agent gate disables the common add footer', async () => {
 });
 
 test('third-party editing clears another profile draft credentials and restores only selected metadata', async () => {
-  const h = harness('thirdparty', { getProfiles: async () => ({ profiles: { selected: { adapter: 'sub2api', baseUrl: 'https://selected.example', canonicalAccountKey: 'selected-key' } } }) });
+  const h = harness('thirdparty', { getProfiles: async () => ({ profiles: { selected: { adapter: 'sub2api', baseUrl: 'http://selected.example', canonicalAccountKey: 'selected-key' } } }) });
   await h.render();
   for (const field of ['AccessToken', 'RefreshToken', 'ApiKey', 'UserId']) h.nodes[`thirdparty${field}Input`].value = 'other-profile-draft';
   await [...h.document.root.walk()].find(node => node.dataset.slotAction === 'replaceKey').click();
   for (const field of ['AccessToken', 'RefreshToken', 'ApiKey', 'UserId']) assert.equal(h.nodes[`thirdparty${field}Input`].value, '', field);
+  assert.equal(h.nodes.thirdpartyBaseUrlInput.value, 'http://selected.example');
+  assert.equal(h.nodes.thirdpartyHttpWarning.classList.contains('hidden'), false);
 });
 test('Cursor discovery response cannot replace a newer successful manual login', async () => {
   let finish;
@@ -208,17 +210,28 @@ test('WorkBuddy shared row mutation blocks sign-in until the account update sett
   finish({ ok: true, accounts: [{ id: 'a', accountKey: 'a', enabled: false }] }); await pause;
   assert.equal(h.settings.workbuddyManagedAccounts[0].enabled, false);
 });
-test('OpenCode saved profile named ambient remains distinct from the detected key', async () => {
-  const toggles = [];
-  const h = harness('opencode', { getProfiles: async () => ({ profiles: { ambient: { accountKey: 'saved', enabled: true } }, hasAmbientKey: true, ambientAccountKey: 'detected' }),
-    setProfileEnabled: async (id,value) => { toggles.push(['saved',id,value]); return {ok:true}; }, setAmbientEnabled: async value => {toggles.push(['ambient',value]);return {ok:true};} });
-  await h.render();
-  const rows = [...h.document.root.walk()].filter(node=>node.classList.contains('slot-row'));
-  assert.equal(rows.length,2);
-  await [...rows.find(row=>row.dataset.slotId==='ambient').walk()].find(node=>node.dataset.slotAction==='pause').click();
-  assert.deepEqual(toggles,[['saved','ambient',false]]);
-});
-
+for (const name of ['ambient', 'ambient:', 'remote:work']) {
+  test(`OpenCode saved profile named ${name} keeps the saved account actions`, async () => {
+    const toggles = [];
+    const h = harness('opencode', {
+      getProfiles: async () => ({ profiles: { [name]: { accountKey: 'saved', enabled: true } },
+        hasAmbientKey: true, ambientAccountKey: 'detected' }),
+      setProfileEnabled: async (id, enabled) => { toggles.push(['saved', id, enabled]); return { ok: true }; },
+      setAmbientEnabled: async enabled => { toggles.push(['ambient', enabled]); return { ok: true }; }
+    });
+    await h.render();
+    const rows = [...h.document.root.walk()].filter(node => node.classList.contains('slot-row'));
+    assert.equal(rows.length, 2);
+    const saved = rows.find(row => row.dataset.slotId === `profile:${name}`);
+    assert.ok(saved);
+    const actions = [...saved.walk()].filter(node => node.dataset.slotAction);
+    for (const action of [/^pause$/, /^replace/, /^remove$/]) {
+      assert.ok(actions.some(node => action.test(node.dataset.slotAction) && !node.classList.contains('hidden')), String(action));
+    }
+    await actions.find(node => node.dataset.slotAction === 'pause').click();
+    assert.deepEqual(toggles, [['saved', name, false]]);
+  });
+}
 
 test('Codex cancelled add result clears progress before a delayed cancel reply', async () => {
   let finishAdd, finishCancel;

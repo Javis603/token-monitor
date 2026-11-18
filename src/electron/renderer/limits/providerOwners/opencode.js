@@ -45,6 +45,7 @@ function renderOpenCodeProfiles() {
     if (hasAmbientKey) {
       const item = document.createElement('div');
       item.className = 'opencode-profile-item';
+      item.dataset.ownerId = 'ambient:';
       // Switchable like any other account, even without a name. Turning it off
       // is a device preference rather than a stored credential, so the row keeps
       // rendering with its box clear instead of disappearing along with the only
@@ -142,6 +143,7 @@ function renderOpenCodeProfiles() {
     for (const [name, profile] of entries) {
       const item = document.createElement('div');
       item.className = 'opencode-profile-item';
+      item.dataset.ownerId = `profile:${name}`;
 
       const toggle = document.createElement('input');
       toggle.className = 'profile-toggle';
@@ -333,8 +335,8 @@ function renderOpenCodeProfiles() {
     add: () => setOpenCodeAddExpanded(document.getElementById('opencodeAddDetails')?.classList.contains('hidden')), container: common, t, bridge: window.tokenMonitor,
         getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
         enabled: (account, value) => account.source === 'ambient'
-          ? api.setAmbientEnabled(value) : api.setProfileEnabled(account.id, value),
-        remove: account => api.deleteProfile(account.id),
+          ? api.setAmbientEnabled(value) : api.setProfileEnabled(account.profileName, value),
+        remove: account => api.deleteProfile(account.profileName),
         edit: account => {
           listEl.classList.remove('hidden');
           for (const row of listEl.children) row.classList.toggle('hidden', row.dataset.ownerId !== account.id);
@@ -342,7 +344,6 @@ function renderOpenCodeProfiles() {
         changed: () => {}, refresh: renderOpenCodeProfiles
       });
     }
-    for (const [index, row] of [...listEl.children].entries()) row.dataset.ownerId = hasAmbientKey && index === 0 ? 'ambient:' : entries[index - (hasAmbientKey ? 1 : 0)]?.[0];
     const empty = entries.length === 0 && !hasEnvVar && !hasAmbientKey;
     listEl.classList.toggle('hidden', !empty);
     if (empty) {
@@ -353,7 +354,7 @@ function renderOpenCodeProfiles() {
     }
     accountList.update([
       ...(hasAmbientKey ? [{ id: 'ambient:', source: 'ambient', accountKey: ambientAccountKey, accountName: t('settings.opencode.ambientName'), enabled: ambientEnabled, removable: false }] : []),
-      ...entries.map(([name, profile]) => ({ id: name, accountKey: profile.accountKey, accountKeyAliases: profile.accountKeyAliases, accountName: name, enabled: profile.enabled }))
+      ...entries.map(([name, profile]) => ({ id: `profile:${name}`, profileName: name, accountKey: profile.accountKey, accountKeyAliases: profile.accountKeyAliases, accountName: name, enabled: profile.enabled }))
     ], host.localProviderStatuses('opencode'));
     updateOpenCodeProfilesStatus();
   }).catch(() => {

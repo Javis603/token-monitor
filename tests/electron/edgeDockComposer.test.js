@@ -97,6 +97,22 @@ test('dock account choices distinguish MiMo products without changing sibling pr
   }
 });
 
+test('dock account choices repaint with the shared display name after rename', () => {
+  const previousDocument = global.document;
+  global.document = { createElement: tag => new Element(tag), activeElement: null };
+  try {
+    const account = { provider: 'thirdparty', accountKey: 'a', accountName: 'relay-one', accountDisplayName: 'Work' };
+    const home = { ...account, accountKey: 'b', accountName: 'relay-two', accountDisplayName: 'Home' };
+    const { composer, names } = accountChoices('thirdparty', [account, home], {});
+    assert.deepEqual(names(), ['Work', 'Home']);
+    account.accountDisplayName = 'Office';
+    composer.render();
+    assert.deepEqual(names(), ['Office', 'Home']);
+  } finally {
+    global.document = previousDocument;
+  }
+});
+
 test('MiMo account choices repaint when product labels or account identity change', () => {
   const previousDocument = global.document;
   global.document = { createElement: (tag) => new Element(tag), activeElement: null };
@@ -440,7 +456,8 @@ test('third-party headline controls persist a specific account independently of 
   try {
     const root = new Element('div');
     const settings = { edgeDockItems: [{ type: 'limit', provider: 'thirdparty', hiddenAccounts: ['c'] }] };
-    let rows = ['a', 'b', 'c'].map((accountKey) => ({ provider: 'thirdparty', accountKey, accountName: `Account ${accountKey}` }));
+    let rows = ['a', 'b', 'c'].map(accountKey => ({ provider: 'thirdparty', accountKey, accountName: `Account ${accountKey}`,
+      accountDisplayName: `Shared ${accountKey}` }));
     const saves = [];
     const composer = createEdgeDockComposer({
       root, itemsApi, t: (key) => key, presentationApi: {},
@@ -459,7 +476,7 @@ test('third-party headline controls persist a specific account independently of 
     assert.equal(radio('lowest').checked, true);
     chooseMode('specific');
     assert.equal(settings.edgeDockItems[0].accountKey, 'a');
-    assert.deepEqual(accountPicker().children.map((option) => option.value), ['a', 'b']);
+    assert.deepEqual(accountPicker().children.map(option => [option.value, option.textContent]), [['a', 'Shared a'], ['b', 'Shared b']]);
     let select = accountPicker();
     global.document.activeElement = select;
     select.value = 'b';

@@ -16,47 +16,57 @@ app.whenReady().then(async () => {
   fs.writeFileSync(fixture, `<!doctype html><html><head><link rel="stylesheet" href="${pathToFileURL(path.join(renderer, 'styles.css')).href}"></head><body><div id="fixture" style="padding:16px"></div></body></html>`);
   await win.loadFile(fixture);
   for (const script of ['i18n.js', 'limits/connectionPresentation.js']) await win.webContents.executeJavaScript(fs.readFileSync(path.join(renderer, script), 'utf8'));
-  const sources = LIMIT_PROVIDER_REGISTRY.filter(p => p.sources?.length).map(p => ({ id: p.id, sources: p.sources, hasUrl: Boolean(p.account?.form?.openUrl) }));
+  const sources = LIMIT_PROVIDER_REGISTRY.filter(p => p.sources?.length).map(p => ({ id: p.id, sources: p.sources, selection: p.sourceSelection, hasUrl: Boolean(p.form?.openUrl && p.id !== 'claude') }));
   // Exercise every metadata lane with a harmless resolver callback, never a real URL.
   const results = [];
   for (const width of [280, 360, 460]) {
     win.setSize(width, 800);
     for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'es', 'pt-BR']) {
-      const metrics = await win.webContents.executeJavaScript(`(() => {
+      const metrics = await win.webContents.executeJavaScript(`(async () => {
         const host = document.getElementById('fixture'); host.replaceChildren();
         const t = (k,p) => TokenMonitorI18n.translate(${JSON.stringify(locale)},k,p);
         const metrics = [];
         for (const entry of ${JSON.stringify(sources)}) {
-          const create = provider => TokenMonitorConnectionPresentation.createConnectionCard({ document, t, sources: entry.sources, provider, label: entry.id, onOpen: () => { window.opened = (window.opened || 0) + 1; } });
-          const panel = create({status:'ok',source:entry.sources[0].id}); host.append(panel);
-          const card = panel.querySelector('.connection-source-card'), details = panel.querySelector('details');
-          const closedHeight = panel.offsetHeight;
-          details.querySelector('summary').click();
-          const expanded = details.open && panel.offsetHeight > closedHeight;
-          const descriptions = entry.sources.every(source => details.textContent.includes(t(source.descriptionKey)));
-          details.open = false;
-          const link = panel.querySelector('button');
+          let savedSelection;
+          const create = provider => TokenMonitorConnectionPresentation.createConnectionCard({
+            document, t, sources: entry.sources, provider, providerId: entry.id, label: entry.id,
+            selection: entry.selection, onSelect: async patch => { savedSelection = patch; return patch[entry.selection.key]; },
+            onOpen: entry.hasUrl ? () => { window.opened = (window.opened || 0) + 1; } : undefined
+          });
+          const choices = entry.sources.filter(source => entry.selection?.sources.includes(source.id) && source.relation === 'alternative');
+          const source = choices[0] || entry.sources[0];
+          const panel = create({status:'ok',source:source.id}); host.append(panel);
+          const card = panel.querySelector('.connection-source-card');
+          const select = panel.querySelector('select');
+          const link = panel.querySelector('.connection-source-get');
           const before = window.opened || 0; link?.click();
-          const linkWorks = !link || window.opened === before + 1;
-          const current = panel.querySelector('.connection-source-actions .settings-item-desc');
-          const stale = create({status:'ok',stale:true,source:entry.sources[0].id});
-          const failed = create({status:'error',source:entry.sources[0].id});
+          const stale = create({status:'ok',stale:true,source:source.id});
+          const failed = create({status:'error',source:source.id});
+          const methodText = node => node.querySelector('.connection-source-method')?.textContent;
+          if (select && choices.length) {
+            select.value = choices.at(-1).id;
+            select.dispatchEvent(new Event('change', { bubbles: true }));
+            await Promise.resolve();
+          }
+          const selected = choices.at(-1);
           const bounds = card.getBoundingClientRect();
-          metrics.push({ id:entry.id, expanded, descriptions, linkWorks,
-            noSelector:!panel.querySelector('select,[role=combobox]'),
-            staleClear:!stale.querySelector('.connection-source-actions .settings-item-desc'),
-            failedClear:!failed.querySelector('.connection-source-actions .settings-item-desc'),
+          metrics.push({ id:entry.id,
+            selector: Boolean(select) === Boolean(entry.selection) && (!select ||
+              JSON.stringify([...select.options].map(option => option.value)) === JSON.stringify(['auto', ...choices.map(choice => choice.id)])),
+            changed: !selected || savedSelection?.[entry.selection.key] === selected.id && select.value === selected.id && !select.disabled,
+            descriptions: !select || choices.every((choice, index) => select.options[index + 1].dataset.selectDescription === choice.descriptionKey),
+            linkWorks: !link || window.opened === before + 1,
+            linkExpected: Boolean(link) === Boolean(entry.hasUrl && entry.sources.some(lane => ['apiKey', 'web'].includes(lane.kind))),
+            staleClear: methodText(stale) === methodText(failed),
             overflow: panel.scrollWidth > panel.clientWidth || bounds.right > innerWidth,
-            stacked:getComputedStyle(card).flexDirection === 'column',
-            exclusive:!current || entry.sources.some(s => s.relation === 'alternative' && s.id === entry.sources[0].id),
-            linkExpected: !['deepseek','openrouter'].includes(entry.id) || !!link
+            stacked:getComputedStyle(card).flexDirection === 'column'
           });
         }
         return metrics;
       })()`);
       for (const row of metrics) {
         assert.equal(row.overflow, false, `${width}/${locale}/${row.id}: overflow`);
-        for (const key of ['expanded', 'descriptions', 'linkWorks', 'noSelector', 'staleClear', 'failedClear', 'exclusive', 'linkExpected']) assert.equal(row[key], true, `${width}/${locale}/${row.id}: ${key}`);
+        for (const key of ['selector', 'changed', 'descriptions', 'linkWorks', 'staleClear', 'linkExpected']) assert.equal(row[key], true, `${width}/${locale}/${row.id}: ${key}`);
       }
       results.push({width,locale,cases:metrics.length,stacked:metrics[0].stacked});
     }
@@ -68,9 +78,9 @@ app.whenReady().then(async () => {
     const entries=${JSON.stringify(sources)};
     for(const id of ['claude','deepseek','codex','cursor']) {
       const heading=document.createElement('h3'); heading.textContent=id; host.append(heading);
-      host.append(TokenMonitorConnectionPresentation.createConnectionCard({document,t:(k,p)=>TokenMonitorI18n.translate('zh-TW',k,p),sources:entries.find(e=>e.id===id).sources,provider:{status:'ok',source:'oauth'},label:id,onOpen:()=>{}}));
+      const entry = entries.find(e=>e.id===id);
+      host.append(TokenMonitorConnectionPresentation.createConnectionCard({document,t:(k,p)=>TokenMonitorI18n.translate('zh-TW',k,p),sources:entry.sources,selection:entry.selection,onSelect:async patch=>Object.values(patch)[0],provider:{status:'ok',source:'oauth'},label:id,onOpen:entry.hasUrl ? ()=>{} : undefined}));
     }
-    host.querySelectorAll('summary')[1].click();
   })()`);
   fs.writeFileSync(path.join(output, 'compact.png'), (await win.webContents.capturePage()).toPNG());
   fs.writeFileSync(path.join(output, 'results.json'), JSON.stringify(results,null,2));

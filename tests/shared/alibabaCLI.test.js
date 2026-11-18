@@ -378,6 +378,17 @@ test('Bailian timeout hard-stops the subprocess before cookie fallback starts', 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
+test('an unproven Alibaba account scope cannot fall back to Cookie in forced CLI mode', async () => {
+  const { LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
+  const { hashKey } = require('../../src/shared/hashKey');
+  const deps = { env: {}, platform: 'linux', existsSync: () => false };
+  const webCalls = webFallback(deps);
+  const options = { alibabaSourcePreference: 'cli', alibabaCookie: 'synthetic=cookie',
+    limitRefreshScope: { provider: 'alibaba', accountKey: hashKey('alibaba', '123') } };
+  assert.deepEqual(await LIMIT_PROVIDER_FETCHERS.alibaba(options, deps), []);
+  assert.equal(webCalls(), 0);
+});
+
 test('Alibaba source switches retire previous Cookie and CLI identities in the real limits runtime', async () => {
   const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
   const deps = cliDeps(() => page([seat('a')]));
