@@ -1133,6 +1133,41 @@ test('dismissing a hovered history card preserves a slower explicit account swit
   assert.equal(f.lastPayload.title, 'B');
 });
 
+for (const event of ['move', 'resize']) {
+  test(`owner ${event} cancels a pending switch after the old history is hidden`, async t => {
+    const f = previewFixture(t);
+    await f.open('a', true);
+    const readB = Promise.withResolvers();
+    f.pending = readB.promise;
+    const switchToB = f.open('b', true);
+
+    f.pending = Promise.resolve(null);
+    await f.controller.refresh();
+    assert.equal(f.shown(), false);
+    f.owner.emit(event);
+
+    readB.resolve({ source: 'a', title: 'B' });
+    assert.equal(await switchToB, false);
+    assert.equal(f.shown(), false);
+  });
+}
+
+test('invalidating the visible history cancels a pending hover preview', async t => {
+  const f = previewFixture(t);
+  await f.open('a');
+  const readB = Promise.withResolvers();
+  f.pending = readB.promise;
+  const hoverB = f.open('b');
+
+  f.pending = Promise.resolve(null);
+  await f.controller.refresh();
+  assert.equal(f.shown(), false);
+
+  readB.resolve({ source: 'a', title: 'B' });
+  assert.equal(await hoverB, false);
+  assert.equal(f.shown(), false);
+});
+
 test('macOS history keeps its screenshot bounds fitted to the moving card', async t => {
   const f = previewFixture(t, { platform: 'darwin' });
   await f.open();
