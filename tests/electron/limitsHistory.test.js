@@ -1050,6 +1050,89 @@ function previewFixture(t, { platform = 'win32', nativeRegions = false } = {}) {
   return f;
 }
 
+test('refreshing the visible history does not cancel an in-flight account switch', async t => {
+  const f = previewFixture(t);
+  await f.open('a', true);
+  assert.equal(f.shown(), true);
+  const readB = Promise.withResolvers();
+  f.pending = readB.promise;
+  const switchToB = f.open('b', true);
+
+  f.pending = Promise.resolve({ source: 'a', title: 'Refreshed A' });
+  await f.controller.refresh();
+  assert.equal(f.lastPayload.title, 'Refreshed A');
+  assert.deepEqual(f.reads.map(({ key }) => key), ['a', 'b', 'a']);
+
+  readB.resolve({ source: 'a', title: 'B' });
+  assert.equal(await switchToB, true);
+  assert.equal(f.lastPayload.title, 'B');
+});
+
+test('pinning the visible history supersedes an earlier explicit account switch', async t => {
+  const f = previewFixture(t);
+  f.pending = Promise.resolve({ source: 'a', title: 'A' });
+  await f.open('a');
+  assert.equal(f.shown(), true);
+  const readB = Promise.withResolvers();
+  f.pending = readB.promise;
+  const switchToB = f.open('b', true);
+  f.fromOwner('leave', 'b');
+
+  assert.equal(await f.open('a', true), true);
+  readB.resolve({ source: 'a', title: 'B' });
+
+  assert.equal(await switchToB, false);
+  assert.equal(f.lastPayload.title, 'A');
+});
+
+test('a refresh finishing after an account switch cannot update the new history card', async t => {
+  const f = previewFixture(t);
+  await f.open('a', true);
+  const readA = Promise.withResolvers();
+  f.pending = readA.promise;
+  const refreshA = f.controller.refresh();
+
+  f.pending = Promise.resolve({ source: 'a', title: 'B' });
+  assert.equal(await f.open('b', true), true);
+  readA.resolve({ source: 'a', title: 'Refreshed A' });
+  await refreshA;
+
+  assert.equal(f.lastPayload.title, 'B');
+});
+
+test('invalidating the visible history preserves an in-flight switch to another account', async t => {
+  const f = previewFixture(t);
+  await f.open('a', true);
+  const readB = Promise.withResolvers();
+  f.pending = readB.promise;
+  const switchToB = f.open('b', true);
+
+  f.pending = Promise.resolve(null);
+  await f.controller.refresh();
+  assert.equal(f.shown(), false);
+
+  readB.resolve({ source: 'a', title: 'B' });
+  assert.equal(await switchToB, true);
+  assert.equal(f.lastPayload.title, 'B');
+  assert.equal(f.shown(), true);
+});
+
+test('dismissing a hovered history card preserves a slower explicit account switch', async t => {
+  const f = previewFixture(t);
+  await f.open('a');
+  f.fromOwner('leave', 'a');
+  const readB = Promise.withResolvers();
+  f.pending = readB.promise;
+  const switchToB = f.open('b', true);
+
+  f.fire();
+  assert.equal(f.shown(), false);
+
+  readB.resolve({ source: 'a', title: 'B' });
+  assert.equal(await switchToB, true);
+  assert.equal(f.lastPayload.title, 'B');
+});
+
 test('macOS history keeps its screenshot bounds fitted to the moving card', async t => {
   const f = previewFixture(t, { platform: 'darwin' });
   await f.open();

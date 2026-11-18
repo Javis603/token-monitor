@@ -39,7 +39,7 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
   let presented = false;
   let timer = null;
   let ownerListeners = [];
-  let revision = 0;
+  let refreshRevision = 0;
   let pendingOpen = null;
   let activated = false;
   let anchor = null;
@@ -156,10 +156,10 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
       layoutWidth: placement.bounds.width / win.webContents.getZoomFactor(), nativeMaterial: getNativeMaterialState(win) });
   }
   function cancelClose() { clearTimer(timer); timer = null; }
-  function hide() {
+  function hide({ keepPendingOpen = false } = {}) {
     const instant = reducedMotion();
-    revision += 1;
-    pendingOpen = null;
+    refreshRevision += 1;
+    if (!keepPendingOpen) pendingOpen = null;
     activated = false;
     anchor = null;
     cancelClose();
@@ -194,19 +194,19 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
       const point = screen.getCursorScreenPoint();
       if (!visible || activated || containsPoint(point) || inside(point, anchor)) return;
       if (crossingGap(point)) return leave();
-      hide();
+      hide({ keepPendingOpen: pendingOpen?.interactive === true });
     }, 600);
   }
   async function refresh() {
     if (getOpenMode() === 'off') return hide();
     if (!visible || !ready) return;
     if (getOpenMode() === 'click' && !activated) return hide();
-    const request = ++revision;
+    const request = ++refreshRevision;
     try {
       const payload = await read(key);
-      if (request !== revision || !visible) return;
+      if (request !== refreshRevision || !visible) return;
       if (payload === undefined) return; // superseded read, not a removed account
-      if (!payload || payload.source !== source) return hide();
+      if (!payload || payload.source !== source) return hide({ keepPendingOpen: true });
       send(payload);
     } catch (error) { logger(`[limits-history] ${error.message}`); }
   }
@@ -255,6 +255,7 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     if (visible && owner === parent && key === request.key) {
       cancelClose();
       if (interactive) {
+        pendingOpen = null;
         if (activated) hide();
         else activated = true;
       }
@@ -262,21 +263,21 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     }
     // Loading the reusable renderer and reading SQLite need not wait for each other.
     const panel = ensureWindow();
-    const requestRevision = ++revision;
-    pendingOpen = { parent, key: request.key, interactive };
+    const openingRequest = { parent, key: request.key, interactive };
+    pendingOpen = openingRequest;
     const cancelPending = () => {
-      if (requestRevision === revision) { pendingOpen = null; revision += 1; }
+      if (pendingOpen === openingRequest) pendingOpen = null;
     };
     parent.once('blur', cancelPending);
     let payload;
     try { payload = await read(request.key); }
     catch (error) {
-      if (requestRevision === revision) pendingOpen = null;
+      cancelPending();
       logger(`[limits-history] ${error.message}`);
       return false;
     }
     finally { parent.removeListener('blur', cancelPending); }
-    if (requestRevision !== revision) return false;
+    if (pendingOpen !== openingRequest) return false;
     pendingOpen = null;
     if (!payload || getOpenMode() === 'off' || parent.isDestroyed() || !parent.isVisible() || !interactive && getOpenMode() === 'click') return false;
     if (owner !== parent) {
@@ -289,6 +290,7 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
       }
     }
     cancelClose();
+    refreshRevision += 1;
     animatePlacement = visible && key !== request.key;
     key = request.key;
     source = payload.source;
@@ -319,14 +321,13 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
     ipcMain.on('limitsHistory:leave', (event, leavingKey) => {
       if (event.sender === pendingOpen?.parent.webContents && leavingKey === pendingOpen.key && !pendingOpen.interactive) {
         pendingOpen = null;
-        revision += 1;
       }
       if (event.sender === win?.webContents || event.sender === owner?.webContents && leavingKey === key) leave();
     });
     ipcMain.on('limitsHistory:enter', (event, enteringKey) => {
       if (event.sender === win?.webContents) {
         cancelClose();
-        if (pendingOpen && !pendingOpen.interactive) { pendingOpen = null; revision += 1; }
+        if (pendingOpen && !pendingOpen.interactive) pendingOpen = null;
       } else if (event.sender === owner?.webContents && enteringKey === key) cancelClose();
     });
     ipcMain.on('limitsHistory:close', event => {
