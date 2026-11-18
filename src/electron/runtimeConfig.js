@@ -109,7 +109,9 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     agentRuntime: context.agentRuntime || 'electron-widget',
     intervalMs: context.intervalMs ?? settings.collectionIntervalMs,
     historyEnabled: settings.historyEnabled !== false,
-    dailyHistoryArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
+    // The daily history calendar is a separate surface from retained session
+    // usage: turning off the session archive must not freeze today's chart.
+    dailyHistoryArchiveEnabled: settings.historyEnabled !== false,
     dailyHistoryArchiveWriteEnabled: context.dailyHistoryArchiveWriteEnabled,
     projectsEnabled: settings.projectsEnabled !== false,
     reasonixNativeSessionsEnabled: context.reasonixNativeSessionsEnabled === true,
