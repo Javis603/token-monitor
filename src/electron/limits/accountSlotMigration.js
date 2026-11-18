@@ -47,6 +47,11 @@ function migrateAccountSlots(store, settings, now = Date.now, env = process.env)
       if (!companion || !(field.key in values) || values[field.key]) continue;
       values[field.key] = field.resolve?.(env) || field.envFallback?.map(key => env[key]).find(Boolean) || field.configDefault || '';
     }
+    // Keep a working fixed lane intact when only the environment completes its credentials.
+    if (entry.limits?.accountSlotMigrationNeedsEnvironment?.(values, env)) {
+      store.writeDocument(mark(document));
+      continue;
+    }
     const fingerprint = accountValuesFingerprint(values);
     const key = accountSlotKey(entry);
     const raw = stored[key] || [];

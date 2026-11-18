@@ -40,6 +40,14 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
     };
     return normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]).sort((a, b) => rank(a) - rank(b));
   };
+  function localLabels(providerId) {
+    const entry = entryFor(providerId);
+    if (!entry) return [];
+    return slots(entry).flatMap(slot => {
+      const label = slot.localLabel ?? slot.label;
+      return label ? [{ provider: providerId, type: 'rename', key: slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`), label }] : [];
+    });
+  }
   const environment = entry => {
     const values = defaultAccountValues(entry, getSettings(), env);
     const cached = environmentIdentities.get(entry.id);
@@ -87,9 +95,10 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
   async function commit(entry, next, notify = true, refresh = true, activate = false) {
     const previous = ordered(entry);
     const normalized = normalizeAccountSlots(entry, next);
-    const keys = slot => [slot.accountKey || hashKey(entry.id, 'account-slot', slot.source ? 'default' : `slot:${slot.id}`), ...(slot.accountKeyAliases || [])];
+    const keys = slot => [slot.accountKey || hashKey(entry.id, 'account-slot', slot.source ? 'default' : `slot:${slot.id}`), ...(slot.accountKeyAliases || []), ...(entry.limits?.accountSlotKeys?.(slot.values) || [])];
     const active = ordered(entry, [...normalized]).filter(slot => slot.enabled);
-    const owned = new Set(active.flatMap(keys));
+    const fixedKeys = entry.limits?.accountSlotKeys?.(getSettings(), env) || [];
+    const owned = new Set([...active.flatMap(keys), ...fixedKeys]);
     const retiredAccountKeys = [...new Set(previous.filter(slot => slot.enabled
       && !active.some(item => item.id === slot.id)).flatMap(keys))].filter(key => !owned.has(key));
     // A saved credential turns collection on for its provider, as the fixed
@@ -174,6 +183,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
         const accountName = provider?.accountName || (key === old?.accountKey ? old?.accountName : '');
         const record = { id: old?.id || randomUUID(), label: old ? old.label : label, enabled: old?.enabled !== false,
           values: candidate, accountKey: key,
+          ...(old?.localLabel !== undefined ? { localLabel: old.localLabel } : {}),
           ...(accountName ? { accountName } : {}),
           accountKeyAliases: [...new Set([...(old?.accountKeyAliases || []),
             ...(old?.accountKey && old.accountKey !== key ? [old.accountKey] : []), ...(provider?.accountKeyAliases || [])])].filter(alias => alias !== key).slice(-8),
@@ -272,7 +282,10 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       const index = next.findIndex(slot => slot.id === id);
       if (index < 0) return failure('accountNotFound');
       if (operation === 'remove') next.splice(index, 1);
-      else if (operation === 'rename' && typeof value === 'string') next[index].label = value;
+      else if (operation === 'rename' && typeof value === 'string') {
+        next[index].label = value;
+        delete next[index].localLabel;
+      }
       else if (operation === 'enabled' && typeof value === 'boolean') next[index].enabled = value;
       else return failure('invalidOperation');
       if (operation !== 'remove') next.find(slot => slot.id === id).updatedAt = new Date(now()).toISOString();
@@ -339,8 +352,14 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       const next = normalizeAccountPresentation({ ...all, [providerId]: group });
       const local = slots(entry, next[providerId].order);
       const stored = normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]);
+      if (operation === 'rename' && !Object.hasOwn(next[providerId]?.labels || {}, accountKey)) return failure('invalidOperation');
+      const renamed = operation === 'rename' && local.find(slot => (slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`)) === accountKey);
+      if (renamed) {
+        renamed.label = next[providerId]?.labels[accountKey] || '';
+        delete renamed.localLabel;
+      }
       const reordered = local.some((slot, index) => slot.id !== stored[index]?.id);
-      await write({ ...sourcePresentationPatch(entry, next[providerId]), limitAccountPresentation: next, ...(reordered ? { [accountSlotKey(entry)]: local } : {}) });
+      await write({ ...sourcePresentationPatch(entry, next[providerId]), limitAccountPresentation: next, ...(renamed || reordered ? { [accountSlotKey(entry)]: local } : {}) });
       publishPresentation([operation === 'rename'
         ? { provider: providerId, type: 'rename', key: accountKey, label: next[providerId]?.labels[accountKey] || '' }
         : { provider: providerId, type: 'order', order: next[providerId].order }]);
@@ -443,6 +462,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
           const labelKey = [slot.accountKey, ...slot.accountKeyAliases.filter(key => !canonicalKeys.has(key))]
             .find(key => Object.hasOwn(labels, key));
           if (!slot.accountKey || labelKey === undefined || labels[labelKey] === slot.label) continue;
+          slot.localLabel ??= slot.label;
           slot.label = labels[labelKey];
           changedAny = true;
         }
@@ -472,7 +492,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       return true;
     });
   }
-  return { ownerTransaction, list, renew, loginAction, presentation, adoptSharedLabels, add: (provider, values, label) => save(provider, values, { label }),
+  return { ownerTransaction, list, localLabels, renew, loginAction, presentation, adoptSharedLabels, add: (provider, values, label) => save(provider, values, { label }),
     replace: (provider, id, values) => save(provider, values, { replacing: true, id }),
     rename: (provider, id, label) => mutate(provider, id, 'rename', label),
     setEnabled: (provider, id, enabled) => mutate(provider, id, 'enabled', enabled),

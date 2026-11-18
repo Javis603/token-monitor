@@ -1183,6 +1183,13 @@ test('Zed compact windows label unlimited Edit Predictions without a fake reset'
   ]);
 });
 
+test('third-party quota account titles prefer a shared display name', () => {
+  const titles = runViewFixture(`${viewBody('namedApiAccountTitle')}
+    [windowOwners.thirdparty.accountTitle({ accountName: 'Original', accountDisplayName: 'Work' }, 0),
+      windowOwners.thirdparty.accountTitle({ accountName: 'Original' }, 0)];`);
+  assert.deepEqual(Array.from(titles), ['Work', 'Original']);
+});
+
 test('WorkBuddy renders unlimited enterprise credits without requiring a numeric balance', () => {
   const valueFunction = viewBody('creditsBalanceValue', 'mimoTokenPlanWindowFromBalance');
   const renderProviderWindows = functionBody(windowOwnerSource('workbuddy'), 'renderWindows');

@@ -156,7 +156,7 @@
     return { markId: family || 'thirdparty', sharedFamily: family };
   };
 
-  const accountTitle = /** @param {any} provider @param {any} index @returns {any} */ (provider, index) => namedApiAccountTitle(provider, index, 'thirdparty');
+  const accountTitle = /** @param {any} provider @param {any} index @returns {any} */ (provider, index) => provider?.accountDisplayName || namedApiAccountTitle(provider, index, 'thirdparty');
 
   return { renderWindows, thirdPartySpendNode, thirdPartyQuotaWindow, rowPolicy, groupPolicy, accountTitle };
 });

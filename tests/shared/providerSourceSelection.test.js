@@ -79,6 +79,15 @@ test('Alibaba snapshot runs CLI once and retains independent saved and env cooki
   assert.equal(rows.filter(r => r.source === 'web').length, 2);
   assert.ok(rows.some(r => r.region === 'intl-personal'));
 });
+test('Volcengine forced CLI without slots does not query an environment API key', async () => {
+  const f = arkcli();
+  f.env.ARK_API_KEY = 'environment-test-key';
+  let http = 0;
+  f.fetch = async () => { http++; return { ok: false, status: 401, headers: { get: () => null }, json: async () => ({}) }; };
+  await LIMIT_PROVIDER_FETCHERS.volcengine({ volcengineSourcePreference: 'cli' }, f);
+  assert.equal(f.calls.filter(a => a[0] === 'auth').length, 1);
+  assert.equal(http, 0);
+});
 test('Volcengine snapshot runs CLI once and independently queries saved API credentials', async () => {
   const f = arkcli(); let http = 0;
   f.fetch = async () => { http++; return { ok: false, status: 401, headers: { get: () => null }, json: async () => ({}), text: async () => '{}'  }; };

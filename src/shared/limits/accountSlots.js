@@ -8,6 +8,7 @@ const { normalizeLimitProvider } = require('./core');
  * @property {any} [owner] Main-only provider metadata and complete credential record.
  * @property {string} id
  * @property {string} label
+ * @property {string} [localLabel] Locally authored name before adopting a shared label.
  * @property {boolean} enabled
  * @property {Record<string, string>} values
  * @property {string} accountKey
@@ -45,6 +46,7 @@ function normalizeAccountSlots(declaration, input) {
     out.push({
       ...(declaration.accountSlotOwner && record.owner && typeof record.owner === 'object' ? { owner: structuredClone(record.owner) } : {}),
       id: record.id, label: identity?.accountLabel || '',
+      ...(typeof record.localLabel === 'string' ? { localLabel: normalizeLimitProvider({ provider: declaration.id, accountLabel: record.localLabel })?.accountLabel || '' } : {}),
       enabled: record.enabled !== false, values,
       accountKey: typeof record.accountKey === 'string' ? record.accountKey.trim() : '',
       ...(identity?.accountName ? { accountName: identity.accountName } : {}),

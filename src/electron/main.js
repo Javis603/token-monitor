@@ -3064,8 +3064,7 @@ function getAccountPresentationSync() {
       saveSettings({ throwOnError: true });
     },
     getLocalLabels: () => LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots).flatMap(entry =>
-      (accountSlotService?.list(entry.id).accounts || []).filter(slot => slot.label).map(slot =>
-        ({ provider: entry.id, type: 'rename', key: slot.accountKey, label: slot.label }))),
+      accountSlotService?.localLabels(entry.id) || []),
     getSeed: () => {
       const seed = structuredClone(settings.limitAccountPresentation || {});
       for (const entry of LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots)) {

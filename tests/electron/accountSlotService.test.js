@@ -110,6 +110,96 @@ test('real settings-change invalidation removes last slot row; pause/resume and 
     assert.equal(runtime.getSnapshot().providers.length, 1); assert.equal(runtime.getSnapshot().multiAccountProviders, undefined);
   } finally { runtime.stop(); }
 });
+test('removing the last Volcengine slot retires both products but keeps environment quota', async () => {
+  const env = { VOLCENGINE_ACCESS_KEY_ID: 'AKLT-env', VOLCENGINE_SECRET_ACCESS_KEY: 'env-secret' };
+  const h = harness({ env });
+  const values = { volcengineAccessKeyId: 'AKLT-saved', volcengineSecretAccessKey: 'saved-secret' };
+  h.settings = { ...h.settings, limitProviders: 'volcengine', volcengineSourcePreference: 'api',
+    volcengineAccountSlots: [{ id: 'saved', values }] };
+  const config = () => ({ ...limitsAccountConfig(h.settings, { env }), limitProviders: 'volcengine' });
+  const runtime = createLimitsRuntime(config(), { env, autoStart: false, autoRetry: false,
+    providerFetchers: { volcengine: LIMIT_PROVIDER_FETCHERS.volcengine },
+    fetch: async url => response(String(url).includes('GetAFPUsage')
+      ? { Result: { PlanType: 'Medium', AFPFiveHour: { Quota: 200, Used: 50 } } }
+      : { Result: { QuotaUsage: [{ Level: 'session', Percent: 10 }] } }) });
+  let refresh;
+  h.changed = (provider, change) => {
+    runtime.reconfigure(config());
+    refresh = invalidateAccountSlotChange({ clearLimits: runtime.clear, refreshLimits: runtime.refresh }, provider, change);
+    return refresh;
+  };
+  try {
+    await runtime.refresh({}, 'settings-change');
+    assert.equal(runtime.getSnapshot().providers.length, 4);
+    const { accountSlotKeys } = require('../../src/shared/providers/volcengine/limits');
+    const owned = accountSlotKeys(values);
+    await h.service.remove('volcengine', 'saved');
+    await refresh;
+    const rows = runtime.getSnapshot().providers;
+    assert.equal(rows.length, 2);
+    assert.ok(rows.every(row => row.status === 'ok' && !owned.includes(row.accountKey)));
+  } finally { runtime.stop(); }
+});
+test('removing a Volcengine slot keeps a shared Agent Plan owned by fixed settings', async () => {
+  const h = harness();
+  const agent = { volcengineAgentAccessKeyId: 'AKLT-agent', volcengineAgentSecretAccessKey: 'agent-secret' };
+  const values = { ...agent, volcengineAccessKeyId: 'AKLT-saved', volcengineSecretAccessKey: 'saved-secret' };
+  h.settings = { ...h.settings, ...agent, volcengineAccessKeyId: 'AKLT-fixed', volcengineSecretAccessKey: 'fixed-secret',
+    volcengineAccountSlots: [{ id: 'saved', values }] };
+  let retired;
+  h.changed = (_provider, change) => { retired = change.retiredAccountKeys; };
+  const { accountSlotKeys } = require('../../src/shared/providers/volcengine/limits');
+  const [coding, sharedAgent] = accountSlotKeys(values);
+  await h.service.remove('volcengine', 'saved');
+  assert.ok(retired.includes(coding));
+  assert.ok(!retired.includes(sharedAgent));
+});
+test('removing the final Volcengine slot under forced CLI retires the fixed API lane', async () => {
+  const h = harness();
+  const agent = { volcengineAgentAccessKeyId: 'AKLT-agent', volcengineAgentSecretAccessKey: 'agent-secret' };
+  const values = { ...agent, volcengineAccessKeyId: 'AKLT-saved', volcengineSecretAccessKey: 'saved-secret' };
+  h.settings = { ...h.settings, ...agent, limitProviders: 'volcengine', volcengineSourcePreference: 'cli',
+    volcengineAccessKeyId: 'AKLT-fixed', volcengineSecretAccessKey: 'fixed-secret',
+    volcengineAccountSlots: [{ id: 'saved', values }] };
+  const config = () => ({ ...limitsAccountConfig(h.settings, { env: {} }), limitProviders: 'volcengine' });
+  let apiRequests = 0;
+  const runtime = createLimitsRuntime(config(), { env: {}, autoStart: false, autoRetry: false,
+    providerFetchers: { volcengine: LIMIT_PROVIDER_FETCHERS.volcengine },
+    runArkcli: async args => {
+      if (args[0] === 'auth') return { logged_in: true, auth_method: 'sso', active_profile: { name: 'personal' } };
+      if (args[0] === 'plans') return { plans: [{ key: 'agent-plan', scope: 'personal', status: 'Running' }] };
+      return { viewer: { account_id: 'cli-viewer', region: 'cn-beijing' }, items: [
+        { product: 'agent-plan', subscribed: true, tier: 'medium', periods: [{ label: '5h', used: 10, total: 100 }] }
+      ] };
+    },
+    fetch: async url => {
+      apiRequests++;
+      return response(String(url).includes('GetAFPUsage')
+        ? { Result: { PlanType: 'Medium', AFPFiveHour: { Quota: 200, Used: 50 } } }
+        : { Result: { QuotaUsage: [{ Level: 'session', Percent: 10 }] } });
+    } });
+  let refresh;
+  h.changed = (provider, change) => {
+    runtime.reconfigure(config());
+    refresh = invalidateAccountSlotChange({ clearLimits: runtime.clear, refreshLimits: runtime.refresh }, provider, change);
+    return refresh;
+  };
+  try {
+    await runtime.refresh({}, 'settings-change');
+    const before = runtime.getSnapshot().providers;
+    assert.equal(before.filter(row => row.source === 'api' && row.status === 'ok').length, 3);
+    const cli = before.find(row => row.source === 'cli');
+    assert.equal(cli?.status, 'ok');
+
+    apiRequests = 0;
+    await h.service.remove('volcengine', 'saved');
+    await refresh;
+
+    assert.equal(apiRequests, 0);
+    assert.deepEqual(runtime.getSnapshot().providers.map(row => [row.accountKey, row.source, row.status]),
+      [[cli.accountKey, 'cli', 'ok']]);
+  } finally { runtime.stop(); }
+});
 test('queued removal cannot overtake an in-flight credential probe', async () => {
   const h = harness(); const a = await add(h); const id = a.accounts[0].id;
   let release; let started;
@@ -528,9 +618,22 @@ test('a shared name, including a clear, becomes the slot label without being rep
   operations.length = 0;
   await h.service.adoptSharedLabels({ deepseek: { labels: { [key]: 'From Windows' }, order: [] } });
   assert.equal(h.service.list('deepseek').accounts[0].label, 'From Windows');
+  assert.deepEqual(h.service.localLabels('deepseek'), [{ provider: 'deepseek', type: 'rename', key, label: 'First' }]);
   await h.service.adoptSharedLabels({ deepseek: { labels: { [key]: '' }, order: [] } });
   assert.equal(h.service.list('deepseek').accounts[0].label, '');
   assert.deepEqual(operations, []);
+});
+
+test('a local presentation rename supersedes the saved name before another Hub seeds', async () => {
+  const h = harness();
+  const { accountKey: key } = (await add(h)).accounts[0];
+  await h.service.adoptSharedLabels({ deepseek: { labels: { [key]: 'From Hub A' }, order: [] } });
+  await h.service.presentation('deepseek', key, 'rename', 'New local name');
+  assert.equal(h.service.localLabels('deepseek')[0].label, 'New local name');
+  assert.equal((await h.service.presentation('deepseek', key, 'rename', '🚀')).ok, false);
+  assert.equal(h.service.localLabels('deepseek')[0].label, 'New local name');
+  await h.service.presentation('deepseek', key, 'rename', '');
+  assert.deepEqual(h.service.localLabels('deepseek'), []);
 });
 
 test('a resolved account key takes over its provisional key in the shared order', async () => {

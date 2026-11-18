@@ -20,6 +20,32 @@ function fixture(t, settings = {}) {
   store.replaceSettingsCredentials(settings);
   return store;
 }
+test('Volcengine migration leaves a stored access key paired with its environment secret', t => {
+  const store = fixture(t, { volcengineAccessKeyId: 'AKLT-test-key' });
+  const env = { VOLCENGINE_SECRET_ACCESS_KEY: 'test-environment-secret' };
+  const settings = migrateAccountSlots(store, {}, Date.now, env);
+  assert.equal(settings.volcengineAccessKeyId, 'AKLT-test-key');
+  assert.equal(settings.volcengineSecretAccessKey, undefined);
+  assert.equal(settings.volcengineAccountSlots, undefined);
+  assert.equal(limitProviderEntry('volcengine').limits.volcengineCredentials(env, settings)?.mode, 'signed');
+});
+test('Volcengine migration retains a complete Coding pair with a split Agent pair', async t => {
+  const stored = { volcengineAccessKeyId: 'AKLT-coding', volcengineSecretAccessKey: 'coding-secret',
+    volcengineAgentAccessKeyId: 'AKLT-agent' };
+  const env = { VOLCENGINE_AGENT_SECRET_ACCESS_KEY: 'agent-environment-secret' };
+  const store = fixture(t, stored);
+  const fetcher = createAccountSlotFetcher(limitProviderEntry('volcengine'));
+  const deps = { env, fetch: async url => ({ ok: true, status: 200, json: async () => String(url).includes('GetAFPUsage')
+    ? { Result: { PlanType: 'Medium', AFPFiveHour: { Quota: 200, Used: 50 } } }
+    : { Result: { QuotaUsage: [{ Level: 'session', Percent: 10 }] } } }) };
+  const before = await fetcher(stored, deps);
+  const migrated = migrateAccountSlots(store, {}, Date.now, env);
+  const after = await fetcher(migrated, deps);
+  assert.equal(migrated.volcengineAccountSlots, undefined);
+  assert.equal(migrated.volcengineAgentSecretAccessKey, undefined);
+  assert.equal(before.length, 2);
+  assert.deepEqual(after.map(row => [row.accountKey, row.status]), before.map(row => [row.accountKey, 'ok']));
+});
 const values = { deepseekApiKey: 'fixture-key', deepseekWebToken: 'fixture-console' };
 for (const known of [false, true]) test(`migration preserves ${known ? 'known identity, aliases and proof' : 'provisional identity'} through failed fetch and renderer`, async t => {
   const identity = { fingerprint: accountValuesFingerprint(values), accountKey: 'known-key', accountKeyAliases: ['old-key'], serverIdentity: true };
