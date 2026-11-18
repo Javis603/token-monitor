@@ -90,6 +90,35 @@ test('Claude save checks draft epoch inside queued transaction', async () => {
   assert.equal((await saving).saved, false); await blocker; await removal;
   assert.equal(settings.claudeAccountSlots?.length || 0, 0);
 });
+for (const [provider, write, read, credential] of [
+  ['claude', 'writeClaudeWebCredential', 'readClaudeWebCredential', 'fixture-cookie'],
+  ['antigravity', 'writeAntigravityCredential', 'readAntigravityCredential', { accessToken: 'fixture-token' }],
+  ['workbuddy', 'writeWorkbuddyCredential', 'readWorkbuddyCredential', { accessToken: 'fixture-token' }]
+]) test(`${provider} waits for the metadata of unimported credentials even after a false completion`, t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'owner-partial-restore-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const store = new CredentialStore(dir);
+  store[write]('present', credential);
+  store[write]('missing', credential);
+  const present = { id: 'present', accountKey: 'present-key', enabled: false };
+  const missing = { id: 'missing', accountKey: 'missing-key', enabled: true };
+  const key = `${provider}ManagedAccounts`;
+  const slots = `${provider}AccountSlots`;
+  const migrate = (metadata) => migrateAccountSlots(store, { [key]: metadata }, () => 1000, {});
+  const first = migrate([present]);
+  assert.deepEqual(first[slots].map(row => row.id), ['present']);
+  assert.equal(store.readDocument().migrations.accountSlots[provider], undefined);
+  assert.deepEqual(store[read]('missing'), credential);
+
+  // A previous app build may already have marked the provider complete.
+  const document = store.readDocument();
+  document.migrations.accountSlots[provider] = 1;
+  store.writeDocument(document);
+  const restored = migrate([missing]);
+  assert.deepEqual(restored[slots].map(row => [row.id, row.enabled]), [['present', false], ['missing', true]]);
+  assert.equal(store.readDocument().migrations.accountSlots[provider], 1);
+  assert.ok(!store[read]('missing'));
+});
 for (const provider of ['claude', 'antigravity', 'workbuddy']) test(`${provider} resumes bounded import after credential cleanup`, t => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'owner-recovery-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

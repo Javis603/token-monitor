@@ -2,6 +2,7 @@
 const { isDeepStrictEqual } = require('node:util');
 const { randomUUID } = require('node:crypto');
 const { hashKey } = require('../../shared/hashKey');
+const { normalizeLimitProvider } = require('../../shared/limits/core');
 const { LIMIT_PROVIDER_REGISTRY } = require('../../shared/limits/registry');
 const { accountSlotKey, defaultIdentityKey, defaultAccountValues, accountValuesFingerprint, normalizeAccountSlots } = require('../../shared/limits/accountSlots');
 
@@ -14,7 +15,10 @@ const ACCOUNT_SLOT_MIGRATION_VERSION = 1;
 function migrateAccountSlots(store, settings, now = Date.now, env = process.env) {
   for (const entry of LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots)) {
     let document = store.readDocument();
-    if (Number(document.migrations.accountSlots?.[entry.id] || 0) >= ACCOUNT_SLOT_MIGRATION_VERSION) continue;
+    const complete = Number(document.migrations.accountSlots?.[entry.id] || 0) >= ACCOUNT_SLOT_MIGRATION_VERSION;
+    const legacyOwnerRecords = entry.accountSlotOwner && entry.id !== 'minimax'
+      && Object.keys(document.credentials.providers?.[entry.id]?.accounts || {}).length > 0;
+    if (complete && !legacyOwnerRecords) continue;
     const mark = (target) => {
       target.migrations.accountSlots = { ...target.migrations.accountSlots, [entry.id]: ACCOUNT_SLOT_MIGRATION_VERSION };
       return target;
@@ -119,7 +123,7 @@ function migrateOpenRouterSlots(store, stored, document, mark, now) {
     const apiKey = entry.limits.openrouterToken({}, profile?.apiKey);
     if (!apiKey) return [];
     const timestamp = new Date(now()).toISOString();
-    return [{ id: hashKey('openrouter', 'legacy-profile', name).slice(7), label: migratedOpenRouterLabel(name), enabled: profile.enabled !== false,
+    return [{ id: hashKey('openrouter', 'legacy-profile', name).slice(7), label: normalizeLimitProvider({ provider: 'openrouter', accountLabel: migratedOpenRouterLabel(name) })?.accountLabel || '', enabled: profile.enabled !== false,
       values: { openrouterApiKey: apiKey }, accountKey: hashKey('openrouter', apiKey), accountKeyAliases: [], serverIdentity: false,
       createdAt: timestamp, updatedAt: timestamp }];
   });
@@ -204,6 +208,7 @@ function migrateOwnerSlots(store, stored, settings, entry, document, mark, now) 
   const key = accountSlotKey(entry);
   const metadataKey = `${provider}ManagedAccounts`;
   let sources;
+  const records = provider === 'minimax' ? {} : document.credentials.providers?.[provider]?.accounts || {};
   if (provider === 'minimax') {
     // Collection merges saved slots into profiles; migration must read only
     // legacy sources still present, including an interrupted destination write.
@@ -211,12 +216,20 @@ function migrateOwnerSlots(store, stored, settings, entry, document, mark, now) 
       metadata: { id, accountKey: hashKey(provider, profile.apiKey), enabled: profile.enabled, billingMode: profile.billingMode, apiRegion: profile.apiRegion }, credential: profile.apiKey
     }));
   } else {
-    const records = document.credentials.providers?.[provider]?.accounts || {};
     sources = (settings[metadataKey] || []).map(metadata => ({ metadata,
       credential: records[metadata.id]?.[provider === 'claude' ? 'cookie' : 'credentials'] ?? null }));
     if (provider === 'claude' && stored.claudeWebCookie) sources.unshift({
       metadata: { id: 'legacy-web-cookie', organizationId: settings.claudeWebOrganizationId || '', enabled: true }, credential: stored.claudeWebCookie
     });
+  }
+  // Credentials can outlive their metadata (for example after a partial
+  // restore). Leave the migration open so restoring that metadata can recover.
+  if (!sources.length && Object.keys(records).length) {
+    if (document.migrations.accountSlots?.[provider]) {
+      delete document.migrations.accountSlots[provider];
+      store.writeDocument(document);
+    }
+    return;
   }
   const raw = stored[key] || [];
   const slots = normalizeAccountSlots(entry, raw);
@@ -255,7 +268,11 @@ function migrateOwnerSlots(store, stored, settings, entry, document, mark, now) 
     if (provider === 'claude' && ids.has('legacy-web-cookie')) verified.claudeWebCookie = '';
   }
   const pending = imported.length < imports.length;
-  store.replaceSettingsCredentials(verified, pending ? document : mark(document));
+  const remainingRecords = provider !== 'minimax' && Object.keys(document.credentials.providers?.[provider]?.accounts || {}).length > 0;
+  if ((pending || remainingRecords) && document.migrations.accountSlots?.[provider]) {
+    delete document.migrations.accountSlots[provider];
+  }
+  store.replaceSettingsCredentials(verified, pending || remainingRecords ? document : mark(document));
   if (pending) console.warn(`[${provider}] Account list is full; remaining legacy accounts are retained and continue collecting.`);
 }
 module.exports = { migrateAccountSlots };

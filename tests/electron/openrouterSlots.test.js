@@ -51,6 +51,18 @@ test('OpenRouter verifies before stripping and retry keeps stable import IDs', t
   assert.deepEqual(after.openrouterAccountSlots, before.openrouterAccountSlots);
   assert.deepEqual(migrateAccountSlots(store, {}), after);
 });
+test('OpenRouter retries a previously written slot whose legacy label needs normalization', t => {
+  const sourceName = 'Work (Team)';
+  const store = fixture(t, { openrouterProfiles: { [sourceName]: profiles.Work }, openrouterAccountSlots: [{
+    id: hashKey('openrouter', 'legacy-profile', sourceName).slice(7),
+    label: sourceName, enabled: true, values: { openrouterApiKey: 'secret-a' },
+    accountKey: key('a'), accountKeyAliases: [], serverIdentity: false, createdAt: '', updatedAt: ''
+  }] });
+  const settings = migrateAccountSlots(store, {});
+  assert.deepEqual(settings.openrouterAccountSlots.map(slot => slot.label), ['Work Team']);
+  assert.equal(settings.openrouterProfiles, undefined);
+  assert.equal(store.readDocument().migrations.accountSlots.openrouter, 1);
+});
 test('OpenRouter real transport isolates accounts, scopes by key and dedupes the winning environment key', async () => {
   const slots = ['a', 'b'].map(n => ({ id: n, label: n, values: { openrouterApiKey: `secret-${n}` }, accountKey: key(n) }));
   const seen = [];
