@@ -4739,11 +4739,14 @@ function limitAccountContext(providerId) {
     devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId,
     providerEnabled: limitProviderEnabled(providerId), presentation: state.settings?.limitAccountPresentation?.[providerId] };
 }
-function refreshAccountSlotPanels() {
+function renderAccountSlotPanels() {
   for (const [id, panel] of accountSlotPanels) {
     panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
       limitAccountContext(id));
   }
+}
+
+function refreshAccountSlotPanels() {
   if (accountSlotListPending) return;
   accountSlotListPending = true;
   const previousSlotLists = JSON.stringify(accountSlotLists);
@@ -4753,11 +4756,10 @@ function refreshAccountSlotPanels() {
   })).then(() => {
     if (previousSlotLists === JSON.stringify(accountSlotLists)) return;
     render();
-    for (const [id, panel] of accountSlotPanels) {
-      panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
-        limitAccountContext(id));
-      renderExternalProviderStatus(id);
-    }
+    preserveSettingsPanelScroll(() => {
+      renderAccountSlotPanels();
+      for (const id of accountSlotPanels.keys()) renderExternalProviderStatus(id);
+    });
   }).catch(() => {}).finally(() => { accountSlotListPending = false; });
 }
 function desktopLimitRecords() {
@@ -10218,17 +10220,17 @@ function syncSettingsForm() {
   if (els.backgroundImageOpacityInput) els.backgroundImageOpacityInput.value = String(state.settings.backgroundImageOpacity ?? defaultAppearance.backgroundImageOpacity);
   els.zoomInput.value = String(Math.round((Number(state.settings.zoomFactor) || 1) * 100));
   syncSliderRows();
-  renderExternalProviderStatus('volcengine');
-  renderExternalProviderStatus('kimi');
-  for (const form of state.settings?.limitAccountForms || []) {
-    if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
-  }
   renderAntigravityStatus();
   renderWorkbuddyStatus();
   renderMimoStatus();
   renderViewPreferences();
   renderToolPreferences();
   renderLimitProviderCheckboxes();
+  renderExternalProviderStatus('volcengine');
+  renderExternalProviderStatus('kimi');
+  for (const form of state.settings?.limitAccountForms || []) {
+    if (limitProviderAccountGroup(form.id)) renderExternalProviderStatus(form.id);
+  }
   renderSettingsSummaries();
   renderOpenCodeProfiles();
   renderMinimaxApiKeys();
@@ -12410,6 +12412,7 @@ function renderLimitProviderCheckboxes() {
 }
 
 function renderLimitProviderCheckboxesNow() {
+  renderAccountSlotPanels();
   refreshAccountSlotPanels();
   for (const [id, panel] of automaticAccountPanels) panel.controller.update(strictLocalProviderStatuses(id));
   const renderSignature = limitProviderSettingsRenderSignature();
@@ -12445,10 +12448,11 @@ function renderLimitProviderCheckboxesNow() {
   const localId = state.settings?.deviceId;
   const remoteProviders = new Set((state.stats?.limits?.providers || [])
     .filter(row => row.accountKey && row.sourceDeviceId && row.sourceDeviceId !== localId).map(row => row.provider));
+  const records = enabled.size ? desktopLimitRecords() : [];
   for (const { id, label, settingsLabel } of providers) {
     const isEnabled = enabled.has(id);
     const provider = isEnabled
-      ? (limitProviderPresentationApi.limitProviderSettingsRecord(desktopLimitRecords(), id)
+      ? (limitProviderPresentationApi.limitProviderSettingsRecord(records, id)
         || { provider: id, ...(state.stats ? { status: missingLimitProviderStatus() } : {}), windows: [] })
       : { provider: id, status: 'disabled', windows: [] };
     const row = document.createElement('div');

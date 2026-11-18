@@ -410,6 +410,7 @@ function rendererSlotContext(stats) {
   const state = { stats, settings: { deviceId: 'local', limitAccountForms: limitAccountFormsForRenderer() } };
   const calls = [];
   const context = { state, limitProviderEnabled: () => true, localDeviceLimitsProviders: () => null, limitAccountForm: id => state.settings.limitAccountForms.find(form => form.id === id), render() {},
+    preserveSettingsPanelScroll: callback => callback(), renderExternalProviderStatus() {},
     localProviderStatuses: id => (stats.limits?.providers || []).filter(row => row.provider === id),
     window: { tokenMonitor: { limits: { accountSlots: { list: async id => { calls.push(id); return { ok: true, accounts: [{ accountKey: 'z' }] }; } } } } } };
   vm.createContext(context);
@@ -423,9 +424,30 @@ test('slot panel readings retain legacy aggregate fallback without devices', asy
   const seen = [];
   context.panel = { update: (...args) => seen.push(args) };
   vm.runInContext("accountSlotPanels.set('qoder', panel)", context);
+  context.renderAccountSlotPanels();
   await context.refreshAccountSlotPanels();
   assert.ok(seen.length >= 2);
   assert.deepEqual(seen[0][1], rows); assert.deepEqual(seen.at(-1)[1], rows);
+});
+
+test('loading unchanged slot metadata does not repaint the account panels', async () => {
+  const { context, vm } = rendererSlotContext({ limits: { providers: [] } });
+  let updates = 0;
+  context.panel = { update() { updates += 1; } };
+  vm.runInContext("accountSlotPanels.set('qoder', panel)", context);
+  await context.refreshAccountSlotPanels();
+  assert.ok(updates > 0, 'the initial slot list reaches the panel');
+  const before = updates;
+  await context.refreshAccountSlotPanels();
+  assert.equal(updates, before, 'the same slot list requires no additional repaint');
+});
+
+test('settings sync updates account panels before reading their connection summaries', () => {
+  const { source } = rendererSlotContext({ limits: { providers: [] } });
+  const form = source.slice(source.indexOf('function syncSettingsForm()'), source.indexOf('function applyVisibleSettingsAppearance()'));
+  const update = form.indexOf('renderLimitProviderCheckboxes();');
+  const summarize = form.indexOf('renderExternalProviderStatus(form.id)');
+  assert.ok(update !== -1 && summarize > update);
 });
 
 test('startup and settings pushes load slot lists with no mounted Settings panels', async () => {
