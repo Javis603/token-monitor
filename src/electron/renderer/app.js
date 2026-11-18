@@ -4830,7 +4830,7 @@ async function openLimitsHistory(key, rect, interactive) {
 }
 function dismissLimitsHistory() {
   pendingLimitsHistoryOpen = null;
-  window.tokenMonitor.limits.closeHistory();
+  window.tokenMonitor.limits.closeHistory(!limitsHistoryOpen);
 }
 document.addEventListener('pointerdown', event => {
   if ((limitsHistoryOpen || pendingLimitsHistoryOpen) && !event.target.closest('[data-limit-history]')) dismissLimitsHistory();

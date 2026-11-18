@@ -1065,7 +1065,7 @@ for (const event of ['keydown', 'pointerdown']) {
         TokenMonitorLimitWindowsView: { createLimitWindowsView: options => options.history },
         tokenMonitor: { limits: {
           openHistory: (key, rect, interactive) => f.open(key, interactive, rect),
-          closeHistory: () => { closeMessages++; f.fromOwner('close'); },
+          closeHistory: pendingOnly => { closeMessages++; f.fromOwner('close', pendingOnly); },
           onHistoryState: callback => {
             f.owner.webContents.send = (channel, ...args) => {
               if (channel === 'limitsHistory:state') callback(...args);
@@ -1091,6 +1091,23 @@ for (const event of ['keydown', 'pointerdown']) {
     assert.equal(closeMessages, 1);
     handlers.get(event)(cancel);
     assert.equal(closeMessages, 1, 'settled opens no longer consume dismissal');
+
+    f.pending = Promise.resolve({ source: 'a', title: 'A' });
+    assert.equal(await history.open('a', rect, true), true);
+    const staleRead = Promise.withResolvers();
+    f.pending = staleRead.promise;
+    const staleOpen = history.open('b', rect, true);
+    f.pending = Promise.resolve(null);
+    await f.controller.refresh();
+    const hoverRead = Promise.withResolvers();
+    f.pending = hoverRead.promise;
+    const hover = history.open('c', rect, false);
+    handlers.get(event)(cancel);
+    staleRead.resolve({ source: 'a', title: 'B' });
+    hoverRead.resolve({ source: 'a', title: 'C' });
+    assert.equal(await staleOpen, false);
+    assert.equal(await hover, true);
+    assert.equal(f.lastPayload.title, 'C');
   });
 }
 

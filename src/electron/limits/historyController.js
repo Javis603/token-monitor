@@ -335,7 +335,11 @@ function createLimitsHistoryController({ BrowserWindow, screen, ipcMain, isOwner
         if (pendingOpen && !pendingOpen.interactive) pendingOpen = null;
       } else if (event.sender === owner?.webContents && enteringKey === key) cancelClose();
     });
-    ipcMain.on('limitsHistory:close', event => {
+    ipcMain.on('limitsHistory:close', (event, pendingOnly) => {
+      if (pendingOnly === true) {
+        if (pendingOpen?.interactive && event.sender === pendingOpen.parent.webContents) pendingOpen = null;
+        return;
+      }
       if (event.sender === win?.webContents || event.sender === owner?.webContents || event.sender === pendingOpen?.parent.webContents) {
         hide();
       }

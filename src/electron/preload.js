@@ -209,7 +209,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     openHistory: (key, rect, interactive = false) => ipcRenderer.invoke('limitsHistory:open', { key, rect, interactive }),
     enterHistory: key => ipcRenderer.send('limitsHistory:enter', key),
     leaveHistory: key => ipcRenderer.send('limitsHistory:leave', key),
-    closeHistory: () => ipcRenderer.send('limitsHistory:close'),
+    closeHistory: (pendingOnly = false) => ipcRenderer.send('limitsHistory:close', pendingOnly),
     onHistoryState: callback => {
       const listener = (_event, open, key) => callback(open, key);
       ipcRenderer.on('limitsHistory:state', listener);
