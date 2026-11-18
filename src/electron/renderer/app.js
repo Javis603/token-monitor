@@ -12529,7 +12529,10 @@ function renderToolPreferencesNow() {
   const detailSignature = JSON.stringify([
     localClientHealth(),
     localDevice(),
-    state.settings?.currencyRatesEffective || null
+    state.settings?.currencyRatesEffective || null,
+    // The open panel's actions read the saved selection, which can land after
+    // the rows already repainted from the pending one.
+    state.settings?.clients || ''
   ]);
   const sourceSignature = clientSourcesPanelKey(state.clientHealthExpanded);
   const { clients, matched } = toolPreferenceRows();
