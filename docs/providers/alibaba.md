@@ -20,6 +20,8 @@ Reads Token Plan quota from the Alibaba Cloud console. One provider id (`alibaba
 
 The variant is one enum rather than separate site and plan settings because host, product code, gateway action and window shape all move together — two settings would let a user pick a combination that does not exist.
 
+Account names, ordering and compact quota controls distinguish the four variants even when they share the same Alibaba account ID. Quota history continues to use the original account ID and variant.
+
 ## Verification status
 
 Only `cn` has been exercised against a real account, from the capture reported on #567 and pinned in `tests/shared/alibabaLimits.test.js`. The other three are implemented from the same published console contract and covered by fixtures, but no one has confirmed them live. Treat a user report about them as authoritative over the fixtures.

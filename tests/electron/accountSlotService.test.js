@@ -200,6 +200,21 @@ test('removing the final Volcengine slot under forced CLI retires the fixed API 
       [[cli.accountKey, 'cli', 'ok']]);
   } finally { runtime.stop(); }
 });
+test('Alibaba accounts with a shared UID rename and order their own console plans', async () => {
+  const h = harness();
+  h.settings = { ...h.settings, alibabaAccountSlots: [
+    { id: 'team', label: 'Team', accountKey: 'same-uid', values: { alibabaCookie: 'team-cookie', alibabaVariant: 'cn' } },
+    { id: 'personal', label: 'Personal', accountKey: 'same-uid', values: { alibabaCookie: 'personal-cookie', alibabaVariant: 'cn-personal' } }
+  ] };
+  assert.equal((await h.service.rename('alibaba', 'personal', 'Solo')).ok, true);
+  const group = h.settings.limitAccountPresentation.alibaba;
+  assert.deepEqual(group.labels, { 'same-uid:cn-personal': 'Solo' });
+  const list = h.service.list('alibaba').accounts;
+  assert.deepEqual(list.map(slot => [slot.accountKey, slot.label]), [['same-uid', 'Team'], ['same-uid', 'Solo']]);
+  const reversed = list.map(slot => slot.presentationKey).reverse();
+  await h.service.presentation('alibaba', reversed[0], 'order', reversed);
+  assert.deepEqual(h.service.list('alibaba').accounts.map(slot => slot.id), ['personal', 'team']);
+});
 test('queued removal cannot overtake an in-flight credential probe', async () => {
   const h = harness(); const a = await add(h); const id = a.accounts[0].id;
   let release; let started;

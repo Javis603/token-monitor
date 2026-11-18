@@ -1,6 +1,7 @@
 'use strict';
 
 const { ambientAccounts } = require('../../shared/limits/ambientAccounts');
+const { accountSelectionKey } = require('../../shared/limits/accountScope');
 const { normalizeAccountPresentation, validKey } = require('./accountPresentation');
 const { hashKey } = require('../../shared/hashKey');
 const { runLimitInvalidation } = require('../deviceRuntimeCoordinator');
@@ -31,11 +32,14 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
   };
   const sameAccount = (a, b) => Boolean(a?.accountKey && b?.accountKey && (a.accountKey === b.accountKey
     || a.accountKeyAliases?.includes(b.accountKey) || b.accountKeyAliases?.includes(a.accountKey)));
+  const slotPresentationKey = (entry, slot, key = slot.accountKey || hashKey(entry.id, 'account-slot', slot.source ? 'default' : `slot:${slot.id}`)) =>
+    accountSelectionKey(entry.id, key, entry.id === 'alibaba' ? accountVariant(entry, slot) : '');
+  const slotPresentationAliases = (entry, slot) =>
+    (slot.accountKeyAliases || []).map(key => slotPresentationKey(entry, slot, key));
   const slots = (entry, order = getSettings().limitAccountPresentation?.[entry.id]?.order || []) => {
-    const keyOf = slot => slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`);
     const rank = slot => {
-      const canonical = order.indexOf(keyOf(slot));
-      const index = canonical >= 0 ? canonical : order.findIndex(key => slot.accountKeyAliases?.includes(key));
+      const canonical = order.indexOf(slotPresentationKey(entry, slot));
+      const index = canonical >= 0 ? canonical : order.findIndex(key => slotPresentationAliases(entry, slot).includes(key));
       return index < 0 ? order.length : index;
     };
     return normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]).sort((a, b) => rank(a) - rank(b));
@@ -45,7 +49,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
     if (!entry) return [];
     return slots(entry).flatMap(slot => {
       const label = slot.localLabel ?? slot.label;
-      return label ? [{ provider: providerId, type: 'rename', key: slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`), label }] : [];
+      return label ? [{ provider: providerId, type: 'rename', key: slotPresentationKey(entry, slot), label }] : [];
     });
   }
   const environment = entry => {
@@ -62,8 +66,8 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       environment(entry) ? { ...environment(entry), order: getSettings()[defaultIdentityKey(entry)]?.order } : null);
     const order = getSettings().limitAccountPresentation?.[entry.id]?.order || [];
     const rank = row => {
-      const canonical = order.indexOf(row.accountKey);
-      const index = canonical >= 0 ? canonical : order.findIndex(key => row.accountKeyAliases?.includes(key));
+      const canonical = order.indexOf(slotPresentationKey(entry, row));
+      const index = canonical >= 0 ? canonical : order.findIndex(key => slotPresentationAliases(entry, row).includes(key));
       return index < 0 ? order.length : index;
     };
     return rows.sort((a, b) => rank(a) - rank(b));
@@ -83,6 +87,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       ...(accountName ? { accountName } : {}),
       ...(source === 'discovered' ? { sourceName, accountName, accountEmail } : {}),
       ...(entry.accountSlotOwner ? { capabilities: { rename: true, move: true, remove: true, pause: true, edit: true }, accountEmail: values?.accountEmail || '' } : {}),
+      ...(entry.id === 'alibaba' ? { presentationKey: slotPresentationKey(entry, { id, source, accountKey, values }) } : {}),
       formValues,
       fingerprint: (source === 'discovered' ? fingerprint : accountValuesFingerprint(values)).slice(7, 19), createdAt, updatedAt };
   });
@@ -190,12 +195,12 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
           // The proof outlives an unproven answer (Qoder without a user id).
           serverIdentity: provenNow || oldProven,
           createdAt: old?.createdAt || timestamp, updatedAt: timestamp };
-        const previousKey = old ? old.accountKey || hashKey(entry.id, 'account-slot', `slot:${old.id}`) : '';
+        const previousKey = old ? slotPresentationKey(entry, old) : '';
         await commit(entry, old ? previous.map(slot => slot.id === old.id ? record : slot) : [...previous, record], true, true, true);
         // Discovery may hide this slot from the visible list. Presentation still
         // belongs to its committed identity and normalized label.
         const account = slots(entry).find(slot => slot.id === record.id);
-        const accountKey = account.accountKey || hashKey(entry.id, 'account-slot', `slot:${account.id}`);
+        const accountKey = slotPresentationKey(entry, account);
         if (old) await migratePresentationKey(providerId, previousKey, accountKey, old.label);
         if (!old && account.label) {
           const operations = [{ provider: providerId, type: 'rename', key: accountKey, label: account.label }];
@@ -247,7 +252,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
           if (item.source === 'environment') patch[defaultIdentityKey(entry)] = { ...getSettings()[defaultIdentityKey(entry)], order };
         });
         if (entry.discoveredAccounts) patch[`${entry.id}AmbientAccounts`] = metadata;
-        const operations = [{ provider: providerId, type: 'order', order: rows.map(row => row.accountKey || hashKey(entry.id, 'account-slot', `slot:${row.id}`)) }];
+        const operations = [{ provider: providerId, type: 'order', order: rows.map(row => slotPresentationKey(entry, row)) }];
         const { replayPresentation } = require('./accountPresentationSync');
         await write({ ...patch, limitAccountPresentation: replayPresentation(getSettings().limitAccountPresentation, operations) });
         publishPresentation(operations);
@@ -293,7 +298,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       if (operation === 'rename') {
         const slot = slots(entry).find(slot => slot.id === id);
         const operations = [{ provider: providerId, type: 'rename',
-          key: slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`), label: slot.label }];
+          key: slotPresentationKey(entry, slot), label: slot.label }];
         const { replayPresentation } = require('./accountPresentationSync');
         await write({ limitAccountPresentation: replayPresentation(getSettings().limitAccountPresentation, operations) });
         publishPresentation(operations);
@@ -307,14 +312,14 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
     const patch = {};
     const metadata = { ...(getSettings()[`${entry.id}AmbientAccounts`] || {}) };
     const rows = ordered(entry);
-    const keyOf = row => row.accountKey || hashKey(entry.id, 'account-slot', row.source ? 'default' : `slot:${row.id}`);
+    const keyOf = row => slotPresentationKey(entry, row);
     const canonicalKeys = new Set(rows.map(keyOf));
     // Remote-only keys and old aliases occupy no position in the local list.
     const sharedOrder = group.order || [];
     const localOrder = [...new Set(sharedOrder.map(key => rows.find(row => keyOf(row) === key)
-      || rows.find(row => !sharedOrder.includes(keyOf(row)) && row.accountKeyAliases?.includes(key))).filter(Boolean))];
+      || rows.find(row => !sharedOrder.includes(keyOf(row)) && slotPresentationAliases(entry, row).includes(key))).filter(Boolean))];
     for (const row of rows.filter(row => row.source)) {
-      const labelKey = [row.accountKey, ...(row.accountKeyAliases || []).filter(key => !canonicalKeys.has(key))]
+      const labelKey = [keyOf(row), ...slotPresentationAliases(entry, row).filter(key => !canonicalKeys.has(key))]
         .find(key => Object.hasOwn(group.labels || {}, key));
       const order = localOrder.indexOf(row);
       if (row.source === 'discovered') metadata[row.fingerprint] = { ...metadata[row.fingerprint],
@@ -353,7 +358,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       const local = slots(entry, next[providerId].order);
       const stored = normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]);
       if (operation === 'rename' && !Object.hasOwn(next[providerId]?.labels || {}, accountKey)) return failure('invalidOperation');
-      const renamed = operation === 'rename' && local.find(slot => (slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`)) === accountKey);
+      const renamed = operation === 'rename' && local.find(slot => slotPresentationKey(entry, slot) === accountKey);
       if (renamed) {
         renamed.label = next[providerId]?.labels[accountKey] || '';
         delete renamed.localLabel;
@@ -374,9 +379,10 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       const fingerprint = accountValuesFingerprint(dispatchedValues);
       if (id === 'environment') {
         if (fingerprint !== accountValuesFingerprint(defaultAccountValues(entry, getSettings(), env))) return false;
-        const previousKey = dto(entry).find(item => item.id === 'environment')?.accountKey || '';
+        const previous = dto(entry).find(item => item.id === 'environment');
+        const previousKey = previous?.presentationKey || previous?.accountKey || '';
         environmentIdentities.set(entry.id, { fingerprint, identity });
-        await migratePresentationKey(providerId, previousKey, identity.accountKey);
+        await migratePresentationKey(providerId, previousKey, accountSelectionKey(entry.id, identity.accountKey, previous?.formValues.alibabaVariant));
         return true;
       }
       if (id?.startsWith('discovered-')) {
@@ -406,7 +412,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
         && identity.accountKey !== hashKey(entry.id, 'account-slot', `slot:${slot.id}`)
         && provesServer(identity.accountKey, slot.values, identity.accountKeyAliases || []));
       slot.serverIdentity = proven || slot.serverIdentity;
-      const previousKey = slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`);
+      const previousKey = slotPresentationKey(entry, slot);
       const label = slot.label;
       // A missing provider name is not an explicit clear. Keep it only while
       // this remains the same identity; another account cannot inherit it.
@@ -415,7 +421,7 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
       if (accountName) slot.accountName = accountName;
       else delete slot.accountName;
       await commit(entry, next, false);
-      await migratePresentationKey(providerId, previousKey, slot.accountKey, label);
+      await migratePresentationKey(providerId, previousKey, slotPresentationKey(entry, slot), label);
       return true;
     });
   }
@@ -456,10 +462,10 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
         const next = slots(entry, group?.order || []);
         const stored = normalizeAccountSlots(entry, getSettings()[accountSlotKey(entry)]);
         let changedAny = next.some((slot, index) => slot.id !== stored[index]?.id);
-        const canonicalKeys = new Set(ordered(entry, next).map(row => row.accountKey));
+        const canonicalKeys = new Set(ordered(entry, next).map(row => slotPresentationKey(entry, row)));
         for (const slot of next) {
           // A retired alias may now be another local account's canonical key.
-          const labelKey = [slot.accountKey, ...slot.accountKeyAliases.filter(key => !canonicalKeys.has(key))]
+          const labelKey = [slotPresentationKey(entry, slot), ...slotPresentationAliases(entry, slot).filter(key => !canonicalKeys.has(key))]
             .find(key => Object.hasOwn(labels, key));
           if (!slot.accountKey || labelKey === undefined || labels[labelKey] === slot.label) continue;
           slot.localLabel ??= slot.label;

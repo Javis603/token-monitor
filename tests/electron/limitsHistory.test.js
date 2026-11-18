@@ -1835,6 +1835,7 @@ for (const change of ['activity', 'quota', 'removed', 'backend']) test(`a pendin
   const context = {
     latestStats: { limits: { providers: [row] } }, statsPushSource: null, hubModeGeneration: 0, scope: 'local',
     currentHubStatsIdentity: () => context.scope, electronPresentationStats: stats => stats,
+    accountSlotService: undefined, applyAccountOrder: records => records,
     historyRowKey, getLimitsHistoryStore: () => ({ query: () => new Promise(resolve => { complete = resolve; }) }),
     settings: {}, historyWindowHidden: () => false, historyMaskEmail: value => value,
     historyProviderCatalog: [], historyVendorColors: () => ({}),

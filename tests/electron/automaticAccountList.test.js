@@ -116,7 +116,7 @@ test('remote-only accounts remain remote presentation rows and never become loca
   h.list.update([remote]);
   const [row] = rows(h.container);
   assert.equal(row.dataset.slotId, 'remote:other:remote-account');
-  assert.equal(row.querySelector('.slot-status').textContent, 'RPC');
+  assert.equal(row.querySelector('.slot-status').textContent, 'CLI');
   assert.match(row.querySelector('.slot-status').attributes['aria-label'], /Connected/);
   assert.ok(row.querySelector('.row-device'));
   assert.equal(h.row('remote-account'), undefined);

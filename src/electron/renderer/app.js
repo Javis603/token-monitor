@@ -819,7 +819,7 @@ function applySettingsSectionDom(id, open) {
   const details = document.getElementById(`${id}SettingsDetails`);
   const group = toggle?.closest('.settings-collapsible-group');
   toggle?.setAttribute('aria-expanded', open ? 'true' : 'false');
-  details?.classList.toggle('hidden', !open);
+  if (details) accountShellApi.setDisclosureBody(toggle, details, open);
   group?.classList.toggle('expanded', open);
 }
 
@@ -4752,6 +4752,7 @@ function refreshAccountSlotPanels() {
     for (const [id, panel] of accountSlotPanels) {
       panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
         limitAccountContext(id));
+      renderExternalProviderStatus(id);
     }
   }).catch(() => {}).finally(() => { accountSlotListPending = false; });
 }
@@ -6844,7 +6845,7 @@ function homeLimitRows() {
     colors: { ...clientColors, factory: clientColors.droid },
     limit: state.settings?.homeLimitAccountCount ?? 3,
     sort: hasConfiguredOrder ? 'configured' : 'remaining',
-    orderedAccountProviders: Object.keys(accountSlotLists),
+    orderedAccountProviders: [...new Set([...Object.keys(accountSlotLists), ...Object.keys(state.settings?.limitAccountPresentation || {})])],
     accountPlan: (provider, index, providerEntries) => limitWindowsView.limitAccountPlan(provider, {
       grouped: providerEntries.length > 1
     }),
@@ -12532,7 +12533,9 @@ function renderLimitProviderCheckboxesNow() {
     if (!accountGroup && sources.some(source => ['cli', 'desktop', 'oauth', 'file'].includes(source.kind))) {
       const mode = document.createElement('span');
       mode.className = 'cursor-status-pill limit-provider-mode-pill';
-      mode.textContent = t('settings.limits.connection.autoDetect');
+      const preference = state.settings?.[`${id}SourcePreference`];
+      const selected = preference !== 'auto' && sources.find(source => source.id === preference && source.relation === 'alternative');
+      mode.textContent = selected ? t(selected.labelKey) : t('settings.limits.connection.autoDetect');
       actions.append(mode);
     }
     const settings = LIMIT_PROVIDER_SETTINGS[id];
@@ -12558,6 +12561,7 @@ function renderLimitProviderCheckboxesNow() {
       optionsContainer = document.createElement('div');
       optionsContainer.id = `limitProviderOptions-${id}`;
       optionsContainer.className = `accordion-animated-container${expanded ? '' : ' hidden'}`;
+      optionsContainer.inert = !expanded;
       main.setAttribute('aria-controls', optionsContainer.id);
       optionsInner = document.createElement('div');
       optionsInner.className = 'accordion-animation-inner limit-provider-options-inner';
@@ -12612,7 +12616,8 @@ function renderLimitProviderCheckboxesNow() {
       automatic.controller.update(strictLocalProviderStatuses(id));
     }
     if (usageItems.length) optionsInner?.append(limitProviderUsageItemsList(id, usageItems, reusableSettingInputs));
-    if (settings) optionsInner.append(limitProviderSettingsList(id, settings, reusableSettingInputs));
+    const settingsList = settings ? limitProviderSettingsList(id, settings, reusableSettingInputs) : null;
+    if (settingsList) optionsInner.append(settingsList);
     if (pluginModule) {
       const authorSettings = pluginLimitSettings?.node(pluginModule);
       if (authorSettings?.isConnected) moveLimitProviderLiveNode(optionsInner, authorSettings);
@@ -12623,7 +12628,7 @@ function renderLimitProviderCheckboxesNow() {
     // thing to set up; it belongs below the accounts, collapsed. Reparented
     // rather than special-cased in the shared renderer so the setting keeps its
     // change tracking and re-render signature.
-    if (id === 'opencode') moveOpenCodeLocalFallbackSetting();
+    if (id === 'opencode') moveOpenCodeLocalFallbackSetting(settingsList);
   }
   if (!matched.size) renderSettingsListEmptyState(els.limitProviderCheckboxes);
   for (const row of previousRows) row.remove();
@@ -12636,9 +12641,8 @@ function renderLimitProviderCheckboxesNow() {
 
 // Moves the OpenCode local-DB toggle into its own collapsed group beneath the
 // account list, and keeps that group's status pill in sync with the setting.
-function moveOpenCodeLocalFallbackSetting() {
+function moveOpenCodeLocalFallbackSetting(list) {
   const target = document.getElementById('opencodeLocalFallbackInner');
-  const list = document.querySelector('#limitProviderOptions-opencode .limit-provider-settings-list');
   if (!target) return;
   if (list) {
     if (list.parentElement !== target) moveLimitProviderLiveNode(target, list);
@@ -12700,6 +12704,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
   if (id === 'claude' && values.claudeWebAccountId && result === undefined) return result;
   if (result?.verdict === 'superseded') return result;
   if (id === 'claude') legacyAccountOwners.claude.editor.revision += 1;
+  if (id === 'claude' && result?.saved) clearInput();
   if (id === 'claude' && result?.choices) renderClaudeOrganizationChoices(result.choices, result.settings?.claudeWebOrganizationId || values.claudeWebOrganizationId);
   if (id === 'claude' && result?.verdict === 'selectionRequired') {
     setAccountPanelMessage(id, { key: 'settings.claude.organizationRequired', tone: 'notice' });
@@ -12720,7 +12725,7 @@ async function saveAccountCredential(id, values, { messages = {}, failedKey, cle
     renderExternalProviderStatus(id);
     return result;
   }
-  clearInput();
+  if (id !== 'claude') clearInput();
   // Marked only once the credential is stored: marking drops the provider's
   // current record, and a rejected key must leave the linked status on screen.
   markExternalProviderCheckPending(id, result.checkedSince);
@@ -12864,7 +12869,7 @@ function setupLimitAccountPanels() {
         document, t, ipc: window.tokenMonitor.limits.accountSlots, forms: limitAccountPanelsApi,
         maskEmail: email => state.settings?.maskLimitAccountEmails === true ? accountIdentityApi.maskEmailAddress(email) : email,
         preserveScroll: preserveSettingsPanelScroll, openExternal: url => window.tokenMonitor.openExternal(url),
-        onChanged: slots => { accountSlotLists[form.id] = slots; render(); void refreshStats(); }
+        onChanged: slots => { accountSlotLists[form.id] = slots; render(); renderExternalProviderStatus(form.id); void refreshStats(); }
       });
       accountSlotPanels.set(form.id, slotsPanel);
       panel.querySelector('.cursor-settings-details').prepend(slotsPanel.element);
@@ -12894,7 +12899,7 @@ function limitProviderAccountStatus(providerId) {
 function limitProviderConnectionDetail(id, sources, provider) {
   const form = limitAccountForm(id);
   return window.TokenMonitorConnectionPresentation.createConnectionCard({
-    document, t, sources, provider,
+    document, t, sources, provider, providerId: id,
     selection: state.settings?.limitConnectionSources?.find(entry => entry.id === id)?.sourceSelection,
     preference: state.settings?.[`${id}SourcePreference`] || 'auto',
     onSelect: async patch => {
@@ -12903,7 +12908,7 @@ function limitProviderConnectionDetail(id, sources, provider) {
     },
     label: LIMIT_PROVIDERS.find(entry => entry.id === id).label,
     onOpen: id !== 'claude' && form?.openUrl ? () => window.tokenMonitor.openExternal(
-      limitAccountPanelsApi.resolveOpenUrl(form, { document, provider: externalProviderForAccount(id) })
+      limitAccountPanelsApi.resolveOpenUrl(form, { document, provider: externalProviderForAccount(id), settings: state.settings })
     ) : undefined
   });
 }
@@ -12921,7 +12926,7 @@ function setLimitProviderSettingsExpanded(providerId) {
     const open = row.dataset.provider === state.limitProviderSettingsExpanded;
     disclosure.setAttribute('aria-expanded', String(open));
     row.classList.toggle('expanded', open);
-    container.classList.toggle('hidden', !open);
+    accountShellApi.setDisclosureBody(disclosure, container, open);
   }
 }
 
@@ -16909,10 +16914,8 @@ function renderExternalProviderStatus(providerName) {
   const manualPanel = document.getElementById(`${providerName}ManualPanel`);
   const errorEl = document.getElementById(`${providerName}ErrorMessage`);
   if (statusEl && limitAccountForm(providerName)?.accountSlots && !limitAccountForm(providerName)?.accountSlotOwner) {
-    const accounts = accountSlotLists[providerName] || [];
-    const readings = localProviderStatuses(providerName);
-    const linked = accounts.filter(slot => slot.enabled && limitProviderEnabled(providerName) && readings.some(row => (row.accountKey === slot.accountKey || slot.accountKeyAliases?.includes(row.accountKey)) && row.status === 'ok' && !row.stale)).length;
-    setCursorStatusText(statusEl, accounts.length ? t('settings.opencode.connected', { linked, total: accounts.length }) : t(limitAccountForm(providerName).emptyKey));
+    const summary = accountSlotPanels.get(providerName)?.summary();
+    setCursorStatusText(statusEl, summary?.total ? t('settings.opencode.connected', summary) : t(limitAccountForm(providerName).emptyKey));
     return;
   }
   if (!config || !statusEl || !openBtn || !logoutBtn || !manualPanel || !errorEl) return;

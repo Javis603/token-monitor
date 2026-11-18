@@ -12,11 +12,11 @@
    * @param {{ document: Document, t: (key: string, params?: Record<string, string>) => string,
    * sources: import('../../../shared/limits/accounts').AccountSource[],
    * provider: {status?: string, stale?: boolean, source?: string, sourceDetail?: string},
-   * label: string, onOpen?: () => void,
+   * providerId?: string, label: string, onOpen?: () => void,
    * selection?: {key: string, sources: string[], autoLabelKey?: string, autoDescriptionKey?: string}, preference?: string,
    * onSelect?: (patch: Record<string, string>) => Promise<string> }} options
    */
-  function createConnectionCard({ document, t, sources, provider, label, onOpen, selection, preference = 'auto', onSelect }) {
+  function createConnectionCard({ document, t, sources, provider, providerId, label, onOpen, selection, preference = 'auto', onSelect }) {
     /** @param {string} tag @param {string} className @param {string} [text] */
     const node = (tag, className, text = '') => {
       const el = document.createElement(tag);
@@ -55,7 +55,8 @@
     if (selection && onSelect) {
       const select = document.createElement('select');
       select.className = 'settings-select connection-source-method';
-      select.setAttribute('aria-label', t('settings.limits.connection.title'));
+      if (providerId) select.id = `limit-connection-source-${providerId}`;
+      select.setAttribute('aria-label', [t('settings.limits.connection.title'), label].filter(Boolean).join(' · '));
       const choices = sources.filter(source => selection.sources.includes(source.id) && source.relation === 'alternative');
       for (const choice of [{ id: 'auto', labelKey: 'settings.limits.connection.autoDetect', descriptionKey: 'settings.limits.sources.auto' }, ...choices]) {
         const option = document.createElement('option');
@@ -79,6 +80,8 @@
       const error = node('span', 'settings-item-desc');
       error.setAttribute('role', 'status');
       select.addEventListener('change', async () => {
+        const focused = document.activeElement;
+        const restoreFocus = select.id && (focused === select || focused?.id === `${select.id}-trigger`);
         select.disabled = true;
         error.textContent = '';
         try {
@@ -89,6 +92,11 @@
           select.value = accepted;
           updateSummary();
           select.disabled = false;
+          if (restoreFocus) document.defaultView?.requestAnimationFrame(() => {
+            if (document.activeElement === document.body) {
+              document.getElementById(`${select.id}-trigger`)?.focus({ preventScroll: true });
+            }
+          });
         }
       });
       actions.append(select, error);

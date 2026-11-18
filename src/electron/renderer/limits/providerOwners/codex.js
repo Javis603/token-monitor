@@ -69,7 +69,7 @@ function renderCodexAccounts() {
         const source = reading?.source === 'rpc' ? reading.sourceDetail : reading?.source;
         return t(`settings.limits.sources.${source === 'app' ? 'desktop' : source === 'cli' ? 'cli' : 'oauth'}`);
       },
-      editor: { isOpen: () => state.codexSignInBusy || state.codexWorkspaceChoices.length > 0 || Boolean(state.codexAccountError), allowBusyCancel: true, nodes: ['codexAccountDescription', 'codexLoginStatus', 'codexWorkspaceSelection', 'codexLoginUrlActions', 'codexLoginDetails', 'codexAccountErrorMessage'], cancel: () => { if (state.codexSignInBusy) document.getElementById('codexCancelLoginButton')?.click(); else { state.codexAccountError = ''; state.codexLoginStatus = ''; renderCodexLoginStatus(); renderCodexAccounts(); } } },
+      editor: { retryAvailable: () => Boolean(state.codexAccountError) && !state.codexWorkspaceChoices.length, isOpen: () => state.codexSignInBusy || state.codexWorkspaceChoices.length > 0 || Boolean(state.codexAccountError), allowBusyCancel: true, nodes: ['codexAccountDescription', 'codexLoginStatus', 'codexWorkspaceSelection', 'codexLoginUrlActions', 'codexLoginDetails', 'codexAccountErrorMessage'], cancel: () => { if (state.codexSignInBusy) document.getElementById('codexCancelLoginButton')?.click(); else { state.codexAccountError = ''; state.codexLoginStatus = ''; renderCodexLoginStatus(); renderCodexAccounts(); } } },
     document, provider: 'codex', label: host.providerLabel || 'Codex', add: startCodexLogin, container: listEl, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
     enabled: (account, value) => window.tokenMonitor.codex.setAccountEnabled(account.id, value),

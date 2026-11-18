@@ -307,6 +307,7 @@
   }
 
   /** @param {any} provider @param {any} index @param {any} providers @returns {any} */ function codexAccountTitle(provider, index, providers = [provider]) {
+    if (provider?.accountDisplayName) return provider.accountDisplayName;
     const label = accountIdentity.codexAccountDisplayLabel(provider, providers, {
       maskEmail: limitAccountEmailsMasked(),
       index,

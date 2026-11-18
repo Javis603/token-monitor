@@ -39,7 +39,7 @@ function renderCursorStatus() {
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
       sourceLabel: account => account.sourceName,
       blocked: () => state.cursorAccount.status?.managementBlocked === true,
-      editor: { submit: 'cursorManualSubmit', nodes: ['cursorManualDetails', 'cursorErrorMessage'], visibility: 'cursorManualDetails', cancel: () => setCursorManualExpanded(false) },
+      editor: { submit: 'cursorManualSubmit', nodes: ['cursorManualDetails'], visibility: 'cursorManualDetails', cancel: () => setCursorManualExpanded(false) },
     document, provider: 'cursor', label: host.providerLabel || 'Cursor',
     add: () => setCursorManualExpanded(document.getElementById('cursorManualDetails')?.classList.contains('hidden')), container: listEl, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
@@ -79,7 +79,7 @@ function renderCursorStatus() {
 async function refreshCursorStatus({ force = false, discover = false } = {}) {
   const revision = ++statusRevision;
   setAccountShellError('cursor', '');
-  state.cursorAccount = { status: null, error: '', busy: true };
+  state.cursorAccount = { ...state.cursorAccount, error: '', busy: true };
   renderCursorStatus();
   try {
     const status = await window.tokenMonitor.cursor.status({ force, discover });
@@ -87,7 +87,7 @@ async function refreshCursorStatus({ force = false, discover = false } = {}) {
     state.cursorAccount = { status, error: '', busy: false };
   } catch (err) {
     if (revision !== statusRevision) return;
-    state.cursorAccount = { status: null, error: err.message, busy: false };
+    state.cursorAccount = { ...state.cursorAccount, error: err.message, busy: false };
   }
   renderCursorStatus();
 }

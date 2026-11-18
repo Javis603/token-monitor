@@ -215,17 +215,22 @@ function renderNamedApiProfiles(config) {
     if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
       busy: () => document.getElementById('thirdpartyProfileSubmit')?.disabled === true,
       sourceLabel: account => t(account.source === 'environment' ? 'settings.limits.sources.env' : 'settings.slots.savedSource'),
-      editor: { submit: 'thirdpartyProfileSubmit', nodes: ['thirdpartyAddDetails', 'thirdpartyErrorMessage'], visibility: 'thirdpartyAddDetails', cancel: () => setThirdPartyAddExpanded(false) },
+      editor: { submit: 'thirdpartyProfileSubmit', nodes: ['thirdpartyAddDetails'], visibility: 'thirdpartyAddDetails', cancel: () => setThirdPartyAddExpanded(false) },
       document, provider: providerId, label: host.providerLabel || providerId,
-      add: () => setThirdPartyAddExpanded(document.getElementById('thirdpartyAddDetails')?.classList.contains('hidden')), container: listEl, t, bridge: window.tokenMonitor,
+      add: () => {
+        resetThirdPartyDraft();
+        setThirdPartyAddExpanded(true);
+      }, container: listEl, t, bridge: window.tokenMonitor,
       getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
       detailText: account => account.source === 'environment' ? '' : detailForProfile(account),
       enabled: (account, value) => api.setProfileEnabled(account.id, value),
       remove: account => api.deleteProfile(account.id), changed: () => {}, refresh: rerender,
       edit: account => {
         const profile = account;
-        document.getElementById('thirdpartyProfileName').value = account.id;
-        for (const field of ['AccessToken', 'RefreshToken', 'ApiKey', 'UserId']) document.getElementById(`thirdparty${field}Input`).value = '';
+        resetThirdPartyDraft();
+        const name = document.getElementById('thirdpartyProfileName');
+        name.value = account.id;
+        name.readOnly = true;
         document.getElementById('thirdpartyBaseUrlInput').value = profile.baseUrl || '';
         document.getElementById('thirdpartyPlatformInput').value = profile.adapter === 'newapi-account' || profile.adapter === 'newapi-token' ? 'newapi' : profile.adapter;
         document.getElementById('thirdpartyModeInput').value = profile.adapter === 'newapi-token' ? 'token' : 'account';
@@ -277,6 +282,23 @@ function renderThirdPartyProfiles() {
     }
   });
 }
+function resetThirdPartyDraft() {
+  const inputs = ['BaseUrl', 'AccessToken', 'RefreshToken', 'ApiKey', 'UserId', 'EndpointPath',
+    'RemainingPath', 'UsedPath', 'TotalPath', 'Currency', 'Divisor'];
+  for (const field of inputs) {
+    const input = document.getElementById(`thirdparty${field}Input`);
+    if (input) input.value = input.defaultValue ?? '';
+  }
+  for (const [id, value] of Object.entries({ thirdpartyPlatformInput: 'newapi', thirdpartyModeInput: 'account', thirdpartyAuthModeInput: 'bearer' })) {
+    const select = document.getElementById(id);
+    if (select) select.value = value;
+  }
+  const name = document.getElementById('thirdpartyProfileName');
+  name.value = '';
+  name.readOnly = false;
+  setThirdPartyAdapterFields();
+  updateThirdPartyHttpWarning();
+}
 function setThirdPartyAddExpanded(expanded) {
   const next = Boolean(expanded);
   document.getElementById('thirdpartyAddToggle')?.setAttribute('aria-expanded', String(next));
@@ -326,6 +348,10 @@ function setup() {
       const userId = String(userIdInput?.value || '').trim();
       const apiKey = String(keyInput?.value || '').trim();
       setAccountShellError('thirdparty', '');
+      if (!nameInput?.readOnly && Object.hasOwn(state.settings.thirdPartyProfiles || {}, name)) {
+        setAccountShellError('thirdparty', t('settings.slots.duplicate'));
+        return;
+      }
       const draftInputs = [...document.querySelectorAll('#thirdpartyAddForm input, #thirdpartyAddForm select')];
       const draftValues = draftInputs.map(input => input.value);
       const result = await window.tokenMonitor.thirdparty.saveProfile({
@@ -347,20 +373,7 @@ function setup() {
       if (result?.ok) {
         const unchanged = draftInputs.every((input, index) => input.value === draftValues[index]);
         if (unchanged) {
-        nameInput.value = '';
-        baseUrlInput.value = '';
-        updateThirdPartyHttpWarning();
-        accessTokenInput.value = '';
-        refreshTokenInput.value = '';
-        userIdInput.value = '';
-        keyInput.value = '';
-        endpointPathInput.value = '/user/balance';
-        authModeInput.value = 'bearer';
-        remainingPathInput.value = '';
-        usedPathInput.value = '';
-        totalPathInput.value = '';
-        currencyInput.value = 'USD';
-        divisorInput.value = '1';
+          resetThirdPartyDraft();
         }
         renderThirdPartyProfiles();
         setAccountShellError(

@@ -153,7 +153,7 @@ test('provider account lists precede guidance with live controls and keyboard or
   const render = source.slice(source.indexOf('function renderLimitProviderCheckboxes('), source.indexOf('function moveOpenCodeLocalFallbackSetting('));
   const connection = render.indexOf('optionsInner.append(limitProviderConnectionDetail(');
   const accounts = render.indexOf('moveLimitProviderLiveNode(optionsInner, accountGroup);');
-  const settings = render.indexOf('optionsInner.append(limitProviderSettingsList(');
+  const settings = render.indexOf('optionsInner.append(settingsList)');
   const usage = render.indexOf('optionsInner?.append(limitProviderUsageItemsList(');
   assert.ok(connection >= 0 && connection < accounts && accounts < usage && usage < settings);
 });

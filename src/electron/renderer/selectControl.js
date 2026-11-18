@@ -70,7 +70,7 @@
     const id = `select-control-${++nextId}`;
     const trigger = document.createElement('button');
     trigger.type = 'button';
-    trigger.id = `${id}-trigger`;
+    trigger.id = `${select.id || id}-trigger`;
     trigger.className = 'select-control-trigger';
     trigger.setAttribute('role', 'combobox');
     trigger.setAttribute('aria-haspopup', 'listbox');

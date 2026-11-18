@@ -104,19 +104,19 @@ test('visible Settings follows quota pushes and defers hidden updates without po
   h.run('renderWorkbuddyStatus()');
   assert.equal(label(), `${MESSAGES.en['settings.slots.unavailable']}`);
   push('ok');
-  assert.equal(label(), MESSAGES.en['settings.limits.sources.oauth']);
+  assert.equal(label(), 'OAuth · China');
   push('unauthorized');
-  assert.equal(label(), `${MESSAGES.en['settings.slots.invalidKey']}`);
+  assert.equal(label(), `${MESSAGES.en['settings.limits.status.signInAgain']}`);
   settingsVisible = false;
   push('ok');
-  assert.equal(label(), `${MESSAGES.en['settings.slots.invalidKey']}`, 'closed Settings does not redraw account controls');
+  assert.equal(label(), `${MESSAGES.en['settings.limits.status.signInAgain']}`, 'closed Settings does not redraw account controls');
   settingsVisible = true;
   hidden = true;
   push('ok');
-  assert.equal(label(), `${MESSAGES.en['settings.slots.invalidKey']}`, 'hidden pushes are coalesced');
+  assert.equal(label(), `${MESSAGES.en['settings.limits.status.signInAgain']}`, 'hidden pushes are coalesced');
   hidden = false;
   scheduler.flush();
-  assert.equal(label(), MESSAGES.en['settings.limits.sources.oauth']);
+  assert.equal(label(), 'OAuth · China');
   assert.deepEqual(h.refreshes, [], 'status rendering requests no extra stats or account polling');
 });
 

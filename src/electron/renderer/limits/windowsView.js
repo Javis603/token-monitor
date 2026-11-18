@@ -1191,7 +1191,7 @@
   function limitAccountRowPolicy(id, provider, color, context) {
     const policy = windowOwners[String(id || '').trim().toLowerCase()]?.rowPolicy;
     const resolved = policy ? policy(provider, color, context) : {};
-    return { color: resolved.color || color, options: resolved.options || {} };
+    return { color: resolved.color || color, options: { ...(context.grouped ? { showIcon: false } : {}), ...resolved.options } };
   }
 
   // Compact surfaces keep the same plan-cell policy as the full account rows.
@@ -1227,7 +1227,7 @@
     return accountIdentity.accountTitleLabel(provider, providerEntries, {
       maskEmail: limitAccountEmailsMasked(),
       index
-    }) || `Account ${index + 1}`;
+    }) || t('settings.limits.accountFallback', { number: index + 1 });
   }
 
   function namedApiAccountTitle(provider, index, providerId) {
@@ -1252,7 +1252,7 @@
     const key = windowOwners[providerId]?.groupCountKey || `settings.${providerId}.nAccounts`;
     const text = t(key, { count });
     // A provider with no key of its own would otherwise print the key itself.
-    return text === key ? '' : text;
+    return text === key ? t('settings.limits.nAccounts', { count }) : text;
   }
 
   function renderLimitProviderGroupFrame(providerId, label, providers, color, { count, markId } = {}) {

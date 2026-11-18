@@ -159,7 +159,7 @@ test('renderer select saves through validated settings and reads canonical prefe
   };
   const render=()=>createConnectionCard({document,t:(key,params)=>translate('zh-TW',key,params),sources:entry.sources,provider:{},label:'Ollama',selection:entry.sourceSelection,preference:persisted.ollamaSourcePreference,onSelect});
   render();const select=document.nodes.find(x=>x.tag==='select');
-  assert.equal(select['aria-label'],translate('zh-TW','settings.limits.connection.title'));
+  assert.equal(select['aria-label'], `${translate('zh-TW','settings.limits.connection.title')} · Ollama`);
   assert.deepEqual(select.children.map(x=>x.value),['auto','api','web']);
   assert.equal(select.value,'auto');select.value='web';await select.change();
   assert.equal(persisted.ollamaSourcePreference,'web');assert.equal(limitsAccountConfig(persisted,{env:{}}).ollamaSourcePreference,'web');

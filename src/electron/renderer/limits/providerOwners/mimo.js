@@ -40,16 +40,10 @@ function renderMimoStatus() {
   const errorEl = document.getElementById('mimoAccountErrorMessage');
   if (!statusEl || !listEl || !emptyEl || !errorEl) return;
   const accounts = state.settings?.mimoManagedAccounts || [];
-  const enabledCount = accounts.filter((account) => account.enabled !== false).length;
-  const statusText = accounts.length === 0
-    ? t('settings.mimo.notConfigured')
-    : t('settings.mimo.connected', { linked: enabledCount, total: accounts.length });
-  accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.mimoAccountError });
-  emptyEl.classList.toggle('hidden', accounts.length > 0);
 
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
       sourceLabel: account => t(account.removable === false ? 'settings.limits.sources.desktop' : 'settings.limits.sources.web'),
-      editor: { submit: 'mimoSaveAccountButton', nodes: ['mimoAddDetails', 'mimoAccountErrorMessage'], visibility: 'mimoAddDetails', cancel: () => setMimoAddExpanded(false) },
+      editor: { submit: 'mimoSaveAccountButton', nodes: ['mimoAddDetails'], visibility: 'mimoAddDetails', cancel: () => setMimoAddExpanded(false) },
     document, provider: 'mimo', label: host.providerLabel || 'MiMo',
     add: () => setMimoAddExpanded(document.getElementById('mimoAddDetails')?.classList.contains('hidden')), container: listEl, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
@@ -58,6 +52,10 @@ function renderMimoStatus() {
     changed: result => { if (result.accounts) state.settings.mimoManagedAccounts = result.accounts; }, refresh: refreshMimoAccounts, busy: () => document.getElementById('mimoSaveAccountButton')?.disabled === true
   });
   accountList.update(accounts.map((account, index) => ({ ...account, canPause: account.removable !== false, accountName: mimoSettingsAccountTitle(account, index) })), host.localProviderStatuses('mimo'));
+  const summary = accountList.summary();
+  const statusText = summary.total ? t('settings.mimo.connected', summary) : t('settings.mimo.notConfigured');
+  accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.mimoAccountError });
+  emptyEl.classList.add('hidden');
   renderSettingsSummaries();
 }
 function setMimoAddExpanded(expanded) {

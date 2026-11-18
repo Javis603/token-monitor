@@ -19,6 +19,7 @@ class Node {
   showPopover() { this.popoverOpen = true; this.listeners.beforetoggle?.({ newState: 'open' }); this.listeners.toggle?.({ newState: 'open' }); }
   hidePopover() { this.popoverOpen = false; this.listeners.beforetoggle?.({ newState: 'closed' }); this.listeners.toggle?.({ newState: 'closed' }); }
   hasAttribute(key) { return Object.hasOwn(this.attributes, key); }
+  removeAttribute(key) { delete this.attributes[key]; }
   setAttribute(key, value) { this.attributes[key] = value; }
   addEventListener(key, fn) { const previous = this.listeners[key]; this.listeners[key] = previous ? event => { previous(event); return fn(event); } : fn; }
   focus() { this.document.activeElement = this; }
@@ -35,7 +36,9 @@ class Node {
   removeEventListener(key, fn) { if (this.listeners[key] === fn) delete this.listeners[key]; }
   get offsetWidth() { return 160; }
   get scrollHeight() { return 208; }
-  querySelectorAll(selector = '') { if (selector === '[data-minimax-key]') return [...this.walk()].filter(n => n.dataset.minimaxKey); return [...this.walk()].filter(n => selector.startsWith('.slot-row') ? n.matches(selector) : ['button', 'input'].includes(n.tagName) && !n.disabled); }
+  get options() { return this.mockOptions || this.children; }
+  set options(options) { this.mockOptions = options; }
+  querySelectorAll(selector = '') { if (selector === 'input' || selector === 'select') return [...this.walk()].filter(n => n.tagName === selector); if (selector === '[data-minimax-key]') return [...this.walk()].filter(n => n.dataset.minimaxKey); return [...this.walk()].filter(n => selector.startsWith('.slot-row') ? n.matches(selector) : ['button', 'input'].includes(n.tagName) && !n.disabled); }
   click() { const result = this.listeners.click?.({ detail: 0 }); if (this.attributes.popovertarget) { const menu = this.document.getElementById(this.attributes.popovertarget); if (menu.popoverOpen) menu.hidePopover(); else menu.showPopover(); } return result; }
   key(key, altKey = false) { return this.listeners.keydown?.({ key, altKey, preventDefault() {}, stopPropagation() {} }); }
 }

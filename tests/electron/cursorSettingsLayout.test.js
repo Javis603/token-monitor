@@ -2783,18 +2783,13 @@ test('Limits groups the Volcengine Coding and Agent plans as rows of one card', 
   const app = readRendererFile('app.js');
   const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
   const view = readRendererFile('limits/windowsView.js');
-  // Both plans are subscriptions on one account, so the rows are titled by the
-  // plan — the plan cell hands back to the status label once the account is not
-  // healthy — and the header counts plans rather than accounts.
+  // Keep account identity separate from the plan so repeated plan names are usable.
   const owner = require('../../src/electron/renderer/providers/volcengine/windows')({});
-  assert.deepEqual(owner.rowPolicy({ status: 'ok' }, '', { grouped: true }).options, { planText: '', showIcon: false });
+  assert.deepEqual(owner.rowPolicy({ status: 'ok', accountLabel: 'Agent Plan' }, '', { grouped: true }).options, { planText: 'Agent Plan' });
   assert.equal(owner.rowPolicy({ status: 'unauthorized' }, '', { grouped: true }).options.planText, undefined);
   assert.equal(owner.groupCountKey, 'settings.volcengine.nPlans');
   assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
   assert.doesNotMatch(app, /renderVolcengineAccountGroup/);
-  // Without an entry here the rows fall back to "Account 1"/"Account 2", since
-  // accountTitleLabel reads accountName/accountEmail and these rows carry
-  // neither — only accountLabel, which holds the plan name.
   assert.equal(typeof owner.accountTitle, 'function');
   assert.match(view, /windowOwners\[String\(id \|\| ''\)\.trim\(\)\.toLowerCase\(\)\]\?\.accountTitle/);
 });
@@ -3240,14 +3235,15 @@ test('MiMo settings passes rejected accounts and detected-account permissions to
   ];
   let providers = accounts.map(account => ({ provider: 'mimo', accountKey: account.accountKey, status: 'unauthorized' }));
   let rows, readings, options;
-  const node = { classList: { toggle() {} } };
+  const node = { classList: { add() {}, toggle() {} } };
   const owner = create({ initial: {}, getSettings: () => ({ mimoManagedAccounts: accounts }),
     document: { getElementById: () => node }, isSettingsSurfaceVisible: () => true,
     accountShellApi: { render() {} }, renderSettingsSummaries() {}, t: key => key,
     localProviderStatuses: () => providers,
     window: { tokenMonitor: {}, TokenMonitorLegacyAccountList: { create(config) {
       options = config;
-      return { update(next, nextReadings) { rows = next; readings = nextReadings; } };
+      return { update(next, nextReadings) { rows = next; readings = nextReadings; },
+        summary: () => ({ total: rows.length, linked: 0 }) };
     } } }
   });
   owner.renderMimoStatus();

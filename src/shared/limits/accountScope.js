@@ -31,6 +31,13 @@
     return null;
   }
 
+  // User-facing selection keys distinguish Alibaba plans without changing the
+  // portable account identity used by collection, history and synchronization.
+  function accountSelectionKey(provider, accountKey, region) {
+    const key = clean(accountKey);
+    return key && provider === 'alibaba' ? `${key}:${clean(region) || 'cn'}` : key;
+  }
+
   function accountIdentityField(value, name) {
     return IDENTITY_FIELD.get(name)?.(value) ?? '';
   }
@@ -62,6 +69,7 @@
 
   return {
     accountIdentityDescriptor,
+    accountSelectionKey,
     accountIdentityField,
     probeAccount,
     probeCoversRow,

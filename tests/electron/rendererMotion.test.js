@@ -11,6 +11,14 @@ function read(name) {
   return fs.readFileSync(path.join(rendererDir, name), 'utf8');
 }
 
+test('Alibaba plan variants get different Notch and Dock quota keys', () => {
+  const { providerKey } = require('../../src/electron/renderer/limits/resetMotion');
+  const team = { provider: 'alibaba', accountKey: 'same-uid', region: 'cn' };
+  const personal = { ...team, region: 'cn-personal' };
+  assert.notEqual(providerKey(team), providerKey(personal));
+  assert.equal([team, personal].find(row => providerKey(row) === providerKey(personal)), personal);
+});
+
 test('period tabs use one sliding selection indicator', () => {
   const html = read('index.html');
   const css = read('styles.css');

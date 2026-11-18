@@ -27,6 +27,7 @@ class Node {
   showPopover() { this.popoverOpen = true; this.listeners.beforetoggle?.({ newState: 'open' }); this.listeners.toggle?.({ newState: 'open' }); }
   hidePopover() { this.popoverOpen = false; this.listeners.beforetoggle?.({ newState: 'closed' }); this.listeners.toggle?.({ newState: 'closed' }); }
   hasAttribute(key) { return Object.hasOwn(this.attributes, key); }
+  removeAttribute(key) { delete this.attributes[key]; }
   setAttribute(key, value) { this.attributes[key] = value; }
   addEventListener(key, fn) { const previous = this.listeners[key]; this.listeners[key] = previous ? event => { previous(event); return fn(event); } : fn; }
   focus() { this.document.activeElement = this; }
@@ -55,7 +56,7 @@ function harness(translateMessage = t, providerId = 'qoder', loginAction) {
   const slots = service.list('qoder').accounts;
   slots.unshift({ id: 'default', label: '', enabled: true, accountKey: 'default', accountKeyAliases: [], fingerprint: 'abc', formValues: { qoderSite: 'cn' } });
   const ipc = Object.fromEntries(['rename', 'move', 'setEnabled', 'remove', 'add', 'replace'].map(op => [op, async (...args) => { calls.push([op, ...args]); return ['add', 'replace'].includes(op) ? verdict : { ok: true, accounts: slots }; }]));
-  ipc.presentation = async (...args) => { calls.push(['presentation', ...args]); return { ok: true, accounts: slots, presentation: { qoder: { labels: {}, order: args[3] } } }; };
+  ipc.presentation = async (...args) => { calls.push(['presentation', ...args]); return { ok: true, accounts: slots, presentation: { qoder: { labels: {}, order: args[2] === 'order' ? args[3] : [] } } }; };
   const host = new Node('div', document);
   const defaultPanel = new Node('div', document);
   const defaultForm = createCredentialPanel(limitAccountFormsForRenderer().find(f => f.id === providerId), { document, translate: t, onToggle() {}, onClear() {}, onOpen() {}, onRefresh() {}, onSave() {} });
@@ -304,7 +305,7 @@ test('default row shares menu and naming and retains default form for replacemen
   const buttons = h.row('default').querySelector('.plugin-menu').children;
   assert.equal(h.row('default').querySelector('.slot-actions').classList.contains('hidden'), false);
   assert.equal(buttons.length, 8);
-  assert.match(h.row('default').textContent, /From environment variable/);
+  assert.match(h.row('default').textContent, /Environment variable/);
 });
 
 test('slot CSS uses defined theme tokens for light and dark surfaces and status', () => {
@@ -314,7 +315,7 @@ test('slot CSS uses defined theme tokens for light and dark surfaces and status'
   assert.match(slots, /\.slot-list \{[^}]*overflow: clip;/);
   assert.match(slots, /grid-template-columns: 14px minmax\(0, 1fr\) minmax\(0, max-content\) 28px/);
   assert.match(slots, /\.slot-status \{ min-width: 0; max-width: 150px; overflow: hidden; text-overflow: ellipsis;/);
-  assert.match(slots, /\.slot-name \{[^}]*text-overflow: ellipsis; white-space: nowrap;/);
+  assert.match(slots, /\.slot-name \{[^}]*overflow-wrap: anywhere; white-space: normal;/);
   assert.match(slots, /\.slot-status \{[^}]*text-align: right;/);
   // These geometry properties are supplied by the shared drag controller.
   for (const key of ['--drag-y', '--drag-shift']) declared.add(key);

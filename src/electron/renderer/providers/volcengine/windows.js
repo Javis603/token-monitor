@@ -24,11 +24,11 @@
   }
 
   /** @param {any} provider @param {any} index @param {any} providers @returns {any} */ function volcenginePlanAccountTitle(provider, index, providers) {
-    return String(provider?.accountLabel || '').trim() || limitAccountDefaultTitle(provider, index, providers);
+    return provider?.accountDisplayName || limitAccountDefaultTitle(provider, index, providers);
   }
 
   const rowPolicy = /** @param {any} provider @param {any} color @param {any} options2 @returns {any} */ (provider, color, { grouped }) => ({
-    options: grouped ? { planText: provider?.status === 'ok' ? '' : undefined, showIcon: false } : {}
+    options: grouped ? { planText: provider?.status === 'ok' ? provider.accountLabel || undefined : undefined } : {}
   });
 
   const accountTitle = /** @param {any} provider @param {any} index @param {any} providers @returns {any} */ (provider, index, providers) => volcenginePlanAccountTitle(provider, index, providers);

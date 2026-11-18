@@ -7,20 +7,25 @@
   const identity = typeof module !== 'undefined' ? require('../accountIdentity') : root.TokenMonitorAccountIdentity;
   const presentationApi = typeof module !== 'undefined' ? require('./providerPresentation') : root.TokenMonitorLimitProviderPresentation;
   const windowLabels = typeof module !== 'undefined' ? require('../../../shared/limits/windowLabels') : root.TokenMonitorLimitWindowLabels;
-  const api = factory(menus, dragController, dragSort, identity, presentationApi, windowLabels);
+  const scope = typeof module !== 'undefined' ? require('../../../shared/limits/accountScope') : root.TokenMonitorLimitAccountScope;
+  const api = factory(menus, dragController, dragSort, identity, presentationApi, windowLabels, scope);
   if (typeof module !== 'undefined') module.exports = api;
   if (root) root.TokenMonitorAccountSlotsPanel = api;
-})(typeof window !== 'undefined' ? window : null, function accountSlotsPanelApi(menus, dragController, dragSort, accountIdentity, presentationApi, windowLabels) {
+})(typeof window !== 'undefined' ? window : null, function accountSlotsPanelApi(menus, dragController, dragSort, accountIdentity, presentationApi, windowLabels, scope) {
   // One precedence rule for local panels, remote panels and reading overlays.
   // An explicit blank overrides an old credential-slot label after a clear.
   function presentationLabel(slot, accountKey, presentation = {}) {
     return Object.hasOwn(presentation.labels || {}, accountKey) ? presentation.labels[accountKey] : slot?.label || '';
   }
-  function accountName(slot, reading, t = (_key, { fingerprint }) => `Account #${fingerprint}`, presentation = {}) {
-    return presentationLabel(slot, slot.accountKey || reading?.accountKey, presentation) || reading?.accountEmail || reading?.email || slot.accountEmail
+  function selectionKey(provider, slot, key = slot?.accountKey) {
+    return scope.accountSelectionKey(provider, key, provider === 'alibaba' && slot ? alibabaVariant(slot) : '');
+  }
+  function accountName(slot, reading, t = (_key, { fingerprint } = {}) => `Account #${fingerprint}`, presentation = {}) {
+    return presentationLabel(slot, slot.presentationKey || slot.accountKey || reading?.accountKey, presentation) || reading?.accountEmail || reading?.email || slot.accountEmail
       || reading?.accountName || slot.accountName
       // The app's name is a proper noun; the phrase around it is localized.
       || (slot.sourceName ? t('settings.slots.discoveredName', { source: slot.sourceName }) : '')
+      || (slot.source === 'environment' ? t('settings.limits.sources.env') : '')
       || t('settings.slots.account', { fingerprint: slot.fingerprint });
   }
   // Plans describe the subscription, never the account's identity or rename.
@@ -39,6 +44,8 @@
     if (slot.sourceSelected === false) return 'notCollected';
     if (reading?.status === 'disabled') return 'disabled';
     if (reading?.status === 'unauthorized') return 'invalid';
+    if (reading?.status === 'rateLimited') return 'limited';
+    if (reading?.status === 'sourceRateLimited') return 'usageApiLimited';
     if (reading?.stale) return 'stale';
     return reading?.status === 'ok' ? 'connected' : 'unavailable';
   }
@@ -52,7 +59,7 @@
       || slots.find(slot => readingAliases.includes(slot.accountKey) || slot.accountKeyAliases?.some(key => readingAliases.includes(key)));
   }
   function alibabaVariant(slot) {
-    return slot.source === 'remote' ? slot.region : slot.formValues?.alibabaVariant || 'cn';
+    return slot.region || slot.formValues?.alibabaVariant || 'cn';
   }
   function readingOwner(slots, row) {
     const candidates = row.provider === 'alibaba'
@@ -65,7 +72,7 @@
       const owner = readingOwner(slots, row);
       // Only a name the user chose becomes the display name. Provider names and
       // emails stay in their own fields, so email masking still applies to them.
-      const key = owner?.accountKey || row.accountKey;
+      const key = selectionKey(row.provider, owner || row, owner?.accountKey || row.accountKey);
       const group = presentation[row.provider];
       const label = presentationLabel(owner, key, group);
       if (label) return { ...row, accountDisplayName: label };
@@ -81,8 +88,9 @@
       const order = presentation[provider]?.order || [];
       const rank = row => {
         const owner = readingOwner(slots, row);
-        const keys = [owner?.accountKey, ...(owner?.accountKeyAliases || []), row.accountKey, ...(row.accountKeyAliases || [])];
-        const canonicalIndex = order.indexOf(owner?.accountKey || row.accountKey);
+        const keys = [owner?.accountKey, ...(owner?.accountKeyAliases || []), row.accountKey, ...(row.accountKeyAliases || [])]
+          .filter(Boolean).map(key => selectionKey(provider, row, key));
+        const canonicalIndex = order.indexOf(selectionKey(provider, owner || row, owner?.accountKey || row.accountKey));
         const sharedIndex = canonicalIndex >= 0 ? canonicalIndex : order.findIndex(key => keys.includes(key));
         if (sharedIndex >= 0) return sharedIndex;
         if (owner) return order.length + slots.indexOf(owner);
@@ -137,10 +145,31 @@
     // Bearer and session tokens (Copilot, Devin, Manus) are not API keys.
     const credentialWord = cookie ? 'Cookie' : form.fields.some(field => /apikey/i.test(field.key)) ? 'Key'
       : form.fields.some(field => /token/i.test(field.key)) ? 'Token' : 'Key';
+    function credentialKind(slot, reading) {
+      if (!customEditor) return credentialWord;
+      if (form.id === 'minimax') return 'Key';
+      if (form.id === 'claude') return 'Cookie';
+      if (form.id === 'thirdparty') return slot?.adapter === 'newapi-account' || slot?.adapter === 'sub2api' ? 'Token'
+        : slot?.adapter === 'newapi-token' ? 'Key' : '';
+      if (form.id === 'mimo' && reading?.source === 'api') return 'Key';
+      return '';
+    }
+    function statusLabel(status, slot, reading) {
+      if (['disabled', 'limited', 'usageApiLimited'].includes(status)) return t(`settings.limits.status.${status}`);
+      if (status !== 'invalid') return tr(status);
+      const kind = credentialKind(slot, reading);
+      return kind === 'Cookie' || kind === 'Key' ? tr(`invalid${kind}`) : t('settings.limits.status.signInAgain');
+    }
     const root = make('div', 'slot-panel');
     const list = make('div', 'slot-list');
     const editorReveal = make('div', 'accordion-animated-container hidden slot-editor-reveal');
     editorReveal.inert = true;
+    editorReveal.addEventListener('keydown', event => {
+      if (event.key !== 'Escape' || event.isComposing || editorOwner === undefined) return;
+      event.stopPropagation();
+      preserveScroll(() => closeEditor());
+      add.focus({ preventScroll: true });
+    });
     const editorInner = make('div', 'accordion-animation-inner');
     const editor = make('div', 'slot-editor');
     editorInner.append(editor); editorReveal.append(editorInner);
@@ -195,6 +224,7 @@
       })),
         { [form.id]: slots }, localDeviceId, { [form.id]: presentation }).map(row => byId.get(row.id));
     }
+    const presentationOrder = accounts => [...new Set(accounts.map(slot => selectionKey(form.id, slot)).filter(Boolean))];
     const run = (operation, ...args) => {
       const slot = activeAccounts().find(slot => slot.id === args[0]);
       const permission = capabilities(slot);
@@ -203,21 +233,22 @@
         if (presentationPending || (operationsPending > 0 && remoteAccounts().some(slot => slot.id === args[0])) || rowDrag.isDragging()) return;
         presentationPending++;
         return enqueue(() => {
-          const accounts = activeAccounts().filter(account => account.accountKey);
-          const index = accounts.findIndex(slot => slot.id === args[0]);
+          const keys = presentationOrder(activeAccounts());
+          const key = selectionKey(form.id, slot);
+          const index = keys.indexOf(key);
           const target = index + (args[1] === 'up' ? -1 : 1);
-          if (index < 0 || target < 0 || target >= accounts.length) return { ok: true };
-          const key = accounts[index].accountKey;
-          [accounts[index], accounts[target]] = [accounts[target], accounts[index]];
-          return ipc.presentation(form.id, key, 'order', [...new Set(accounts.map(slot => slot.accountKey))]);
+          if (index < 0 || target < 0 || target >= keys.length) return { ok: true };
+          [keys[index], keys[target]] = [keys[target], keys[index]];
+          return ipc.presentation(form.id, key, 'order', keys);
         }).finally(() => { presentationPending--; preserveScroll(render); });
       }
       const remote = remoteAccounts().find(slot => slot.id === args[0])
         || (operation === 'rename' && slots.find(slot => slot.id === args[0] && slot.source === 'environment'));
       operationsPending++;
+      preserveScroll(render);
       return enqueue(() => remote
-        ? ipc.presentation(form.id, remote.accountKey, 'rename', args[1])
-        : ipc[operation](form.id, ...args)).finally(() => { operationsPending--; });
+        ? ipc.presentation(form.id, selectionKey(form.id, remote), 'rename', args[1])
+        : ipc[operation](form.id, ...args)).finally(() => { operationsPending--; preserveScroll(render); });
     };
     const rowDrag = dragController.createRowDragController({
       dragSort,
@@ -233,13 +264,13 @@
         const previous = group.map(slot => slot.id);
         if (previous.length !== order.length || previous.some(key => !order.includes(key))) return { changed: false };
         const previousOrder = presentation.order;
-        const next = [...new Set(order.map(id => group.find(slot => slot.id === id).accountKey))];
+        const next = [...new Set(order.map(id => selectionKey(form.id, group.find(slot => slot.id === id))))];
         const changed = order.some((key, index) => key !== previous[index]);
         if (!changed) return { changed: false };
         presentation = { ...presentation, order: next };
         presentationPending++;
         preserveScroll(render);
-        return { changed, previousOrder, next, key: group.find(slot => slot.id === id).accountKey };
+        return { changed, previousOrder, next, key: selectionKey(form.id, group.find(slot => slot.id === id)) };
       },
       applyOrder: order => {
         for (const id of order) list.moveBefore(rows.get(id).el, add);
@@ -299,14 +330,23 @@
         name.dataset.i18nAriaLabel = 'settings.slots.optionalName';
         name.placeholder = tr('optionalName');
         name.setAttribute('aria-label', tr('optionalName'));
-        const verdict = make('div', 'settings-note');
-        verdict.setAttribute('role', 'status');
+        const verdict = make('div', 'settings-note error');
+        verdict.setAttribute('role', 'alert');
+        verdict.id = `${prefix}Verdict`;
         const choices = make('div', 'settings-actions');
         const submit = async (values, clearInput, asNew = false) => {
           const original = Object.fromEntries([...keys].map(([key, mapped]) => [key, values[mapped]]));
           const result = await run(slot && !asNew ? 'replace' : 'add', ...(slot && !asNew ? [slot.id, original] : [original, name.value]));
           if (!result || revision !== editorRevision) return;
           choices.replaceChildren();
+          const credentialInput = [...keys.keys()].filter(key => form.fields.find(field => field.key === key)?.secret)
+            .map(key => document.getElementById(`${keys.get(key)}Input`)).find(input => input && !input.closest('.hidden'));
+          if (result.saved) credentialInput?.removeAttribute('aria-invalid');
+          else if (['required', 'invalidFormat', 'unauthorized'].includes(result.status)) {
+            credentialInput?.setAttribute('aria-invalid', 'true');
+            credentialInput?.setAttribute('aria-describedby', verdict.id);
+            credentialInput?.focus();
+          }
           if (result.verdict === 'duplicate') {
             verdict.textContent = tr('duplicate');
           } else if (result.verdict === 'differentAccount') {
@@ -321,7 +361,7 @@
             choices.append(addDifferent);
           } else if (result.saved) {
             clearInput();
-            preserveScroll(closeEditor);
+            preserveScroll(() => { closeEditor(); add.focus({ preventScroll: true }); });
             message.textContent = result.verdict === 'valid' ? '' : t('settings.common.credentialSavedUnconfirmed', { provider: label });
           } else {
             const key = result.status === 'required' ? 'credentialRequired' : result.status === 'invalidFormat' ? 'credentialInvalidFormat' : 'credentialRejected';
@@ -334,6 +374,10 @@
           onSave: (_form, values, clearInput) => submit(values, clearInput)
         });
         editor.append(title, ...(!slot ? [name] : []), editorPanel, verdict, choices);
+        editorPanel.addEventListener('input', event => {
+          event.target.removeAttribute?.('aria-invalid');
+          if (event.target.getAttribute?.('aria-describedby') === verdict.id) event.target.removeAttribute('aria-describedby');
+        });
         if (!slot && form.loginAction && loginAction) {
           let flowId;
           let unsubscribe;
@@ -414,7 +458,7 @@
         item.editing = true;
         const revision = ++item.renameRevision;
         const input = make('input', 'slot-rename');
-        const initialValue = presentationLabel(item.slot, item.slot.accountKey, presentation);
+        const initialValue = presentationLabel(item.slot, selectionKey(form.id, item.slot), presentation);
         input.value = initialValue;
         input.placeholder = name.textContent;
         input.setAttribute('aria-label', tr('rename'));
@@ -530,7 +574,7 @@
         Object.assign(item, { up, down, pause, fix, replace, remove });
         el.addEventListener('keydown', event => {
           if (event.key === 'Escape' && menu.matches(':popover-open')) { closeMenu(); more.focus(); }
-          if (event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
+          if (!item.editing && event.altKey && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
             event.preventDefault(); event.stopPropagation();
             void run('move', id, event.key === 'ArrowUp' ? 'up' : 'down');
           }
@@ -552,7 +596,11 @@
         return preserveScroll(() => editorToggle.setExpanded(!editorToggle.expanded));
       }
       if (isBusy() && !onAdd) return;
-      if (!onAdd) return openEditor(null);
+      if (!onAdd) {
+        openEditor(null);
+        editor.querySelector('input:not([type="hidden"])')?.focus?.();
+        return;
+      }
       try { return Promise.resolve(onAdd()).catch(error); } catch (_) { error(); }
     }, { provider: label });
     add.className = 'slot-add';
@@ -568,7 +616,8 @@
           return {
             id: `remote:${row.sourceDeviceId}:${row.accountKey}${variant ? `:${variant}` : ''}`,
             source: 'remote', sourceDeviceId: row.sourceDeviceId, accountKey: row.accountKey,
-            accountKeyAliases: row.accountKeyAliases, region: variant, label: presentation.labels?.[row.accountKey] || '',
+            accountKeyAliases: row.accountKeyAliases, region: variant, presentationKey: selectionKey(form.id, row),
+            label: presentation.labels?.[selectionKey(form.id, row)] || '',
             enabled: true, fingerprint: accountIdentity.accountStableFingerprint(row).slice(0, 12)
           };
         });
@@ -664,8 +713,7 @@
         row.name.replaceChildren(deviceToken(member));
         const memberStatus = member.local ? status : accountStatus({ enabled: true }, member.reading);
         const memberSource = member.local ? source : presentationApi.limitProviderSourceLabel(member.reading) || '';
-        const statusText = memberStatus === 'disabled' ? t('settings.limits.status.disabled')
-          : tr(memberStatus === 'invalid' ? (cookie ? 'invalidCookie' : 'invalidKey') : memberStatus);
+        const statusText = statusLabel(memberStatus, slot, member.reading);
         row.state.className = `slot-status slot-${memberStatus}`;
         row.state.textContent = memberStatus === 'connected' ? memberSource || statusText : statusText;
         row.state.setAttribute('aria-label', [statusText, memberSource].filter(Boolean).join(' · '));
@@ -683,9 +731,17 @@
         row.fix.classList.toggle('hidden', !member.local || permission.replace === false || Boolean(slot.source) || !slot.enabled || memberStatus !== 'invalid');
       }
     }
+    function accountReading(slot) {
+      return slot.source === 'remote'
+        ? remoteReadings.find(row => row.provider === form.id && row.sourceDeviceId === slot.sourceDeviceId
+          && row.accountKey === slot.accountKey && (form.id !== 'alibaba' || row.region === slot.region))
+        : localReading(slot);
+    }
     function render() {
       if (rowDrag.deferRender()) return;
       const active = activeAccounts();
+      const ordering = presentationOrder(active);
+      if (editorOwner != null && !active.some(slot => slot.id === editorOwner)) closeEditor(true);
       add.disabled = Boolean(addBlocked()) || (editorOwner === undefined && !addCanToggle() && Boolean(isBusy()));
       for (const [id, item] of rows) if (!active.some(slot => slot.id === id)) { item.el.remove(); rows.delete(id); }
       active.forEach((slot, index) => {
@@ -693,9 +749,7 @@
         item.slot = slot;
         item.el.dataset.slotDraggable = 'true';
         const remote = slot.source === 'remote';
-        const reading = remote ? remoteReadings.find(row => row.provider === form.id && row.sourceDeviceId === slot.sourceDeviceId
-          && row.accountKey === slot.accountKey && (form.id !== 'alibaba' || row.region === slot.region))
-          : localReading(slot);
+        const reading = accountReading(slot);
         if (!item.editing) item.name.textContent = accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') }, reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading, t, presentation);
         const status = accountStatus(slot, statusReading(slot, reading), remote || providerEnabled);
         const source = sourceText(slot, reading) || slot.sourceName || presentationApi.limitProviderSourceLabel(reading) || '';
@@ -721,28 +775,26 @@
         item.name.parentElement.classList.toggle('is-editing', item.editing);
         item.el.classList.toggle('slot-paused', !slot.enabled);
         item.status.className = `slot-status slot-${status}`;
-        const statusText = status === 'disabled' ? t('settings.limits.status.disabled') : tr(status === 'invalid' ? (cookie ? 'invalidCookie' : 'invalidKey') : status);
+        const statusText = statusLabel(status, slot, reading);
         item.status.textContent = status === 'connected' ? source || statusText : statusText;
         item.status.setAttribute('aria-label', [statusText, source].filter(Boolean).join(' · '));
         if (item.pause) {
+          const kind = credentialKind(slot, reading);
+          localized(item.replace, `settings.slots.${kind ? `replace${kind}` : 'replaceTitle'}`);
           item.updateRemove();
           item.pause.dataset.slotAction = slot.enabled ? 'pause' : 'resume';
           localized(item.pause, `settings.slots.${item.pause.dataset.slotAction}`);
-          const pending = presentationPending > 0 || isBusy();
+          const pending = presentationPending > 0 || operationsPending > 0 || isBusy();
           item.pause.disabled = pending; item.replace.disabled = pending; item.remove.disabled = pending;
-          item.up.disabled = pending || index === 0;
-          item.down.disabled = pending || index === active.length - 1;
+          const position = ordering.indexOf(selectionKey(form.id, slot));
+          item.up.disabled = pending || position <= 0;
+          item.down.disabled = pending || position < 0 || position === ordering.length - 1;
           item.replace.classList.toggle('hidden', slot.source === 'environment');
           item.pause.classList.toggle('hidden', slot.source === 'environment');
           item.remove.classList.toggle('hidden', slot.source === 'environment');
           if (slot.source === 'discovered') { item.replace.remove(); item.remove.remove(); }
         }
         item.fix.classList.toggle('hidden', permission.replace === false || Boolean(slot.source) || !slot.enabled || status !== 'invalid');
-        if (slot.source === 'environment' && !item.environmentNote) {
-          item.environmentNote = localized(make('div', 'settings-note'), 'settings.slots.environment');
-          item.el.querySelector('.slot-copy').append(item.environmentNote);
-        }
-        if (item.environmentNote) item.environmentNote.classList.toggle('hidden', slot.source !== 'environment');
         if (slot.source === 'discovered' && !item.discoveredNote) {
           item.discoveredNote = localized(make('div', 'settings-note'), 'settings.slots.discovered', { source: slot.sourceName });
           item.el.querySelector('.plugin-menu')?.append(item.discoveredNote);
@@ -782,6 +834,11 @@
       providerEnabled = context.providerEnabled !== false;
       remoteReadings = context.records || []; devices = context.devices || []; localDeviceId = context.localDeviceId || ''; presentation = context.presentation || {};
       preserveScroll(render);
+    }, summary() {
+      const accounts = activeAccounts();
+      const linked = accounts.filter(slot => accountStatus(slot, statusReading(slot, accountReading(slot)),
+        slot.source === 'remote' || providerEnabled) === 'connected').length;
+      return { total: accounts.length, linked };
     }, openEditor };
   }
   return { presentationLabel, accountName, accountStatus, slotOwner, applyAccountOrder, createPanel, createEditorToggle };

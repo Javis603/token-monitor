@@ -39,7 +39,7 @@ test('Claude Web rows retain controls and removal confirmation across quota and 
   state.settings.claudeWebLoginStatuses.a = 'unauthorized';
   context.renderClaudeWebAccounts();
   await suite.test('Web login rejection remains visible beside healthy OAuth quota', () => {
-    assert.equal(info.textContent, 'settings.slots.invalidKey');
+    assert.equal(info.textContent, 'settings.slots.invalidCookie');
   });
   assert.equal(document.activeElement, remove);
   assert.equal(remove.textContent, 'settings.slots.confirmRemove');

@@ -8,6 +8,7 @@
 })(typeof window !== 'undefined' ? window : null, function createPolicy() {
 
   return /** @satisfies {import('../../limits/presentationPolicies').PresentationPolicy} */ ({
+    sourceLabel: source => source === 'rpc' ? 'CLI' : '',
     statusLabels: { unauthorized: "Re-login", notConfigured: "Run grok login" }
   });
 });

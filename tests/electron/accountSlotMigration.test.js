@@ -136,8 +136,7 @@ test('slot header counts current slots including paused accounts and environment
   const end = source.indexOf('  const source = state.settings?', start);
   let text;
   const context = { externalLimitAccountConfig: {}, limitAccountForm: () => ({ accountSlots: true, status: {}, emptyKey: 'empty' }),
-    document: { getElementById: () => ({}) }, accountSlotLists: { deepseek: [{ enabled: true, accountKey: 'a' }, { enabled: false, accountKey: 'b' }, { enabled: true, accountKey: 'env', source: 'environment' }] },
-    localProviderStatuses: () => [{ accountKey: 'a', status: 'ok' }, { accountKey: 'b', status: 'ok' }, { accountKey: 'env', status: 'ok' }],
+    document: { getElementById: () => ({}) }, accountSlotPanels: new Map([['deepseek', { summary: () => ({ linked: 2, total: 3 }) }]]),
     limitProviderEnabled: () => true, setCursorStatusText: (_el, value) => { text = value; }, t: (_key, value) => value };
   vm.runInNewContext(source.slice(start, end) + '}\nrenderExternalProviderStatus("deepseek");', context);
   assert.equal(text.linked, 2); assert.equal(text.total, 3);

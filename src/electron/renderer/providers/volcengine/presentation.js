@@ -8,6 +8,7 @@
 })(typeof window !== 'undefined' ? window : null, function createPolicy() {
 
   return /** @satisfies {import('../../limits/presentationPolicies').PresentationPolicy} */ ({
+    sourceLabel: source => source === 'cli' ? 'arkcli' : '',
     statusLabels: { unauthorized: "Update API key", notConfigured: "Add API key" }
   });
 });

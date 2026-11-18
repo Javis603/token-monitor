@@ -152,7 +152,7 @@ function renderClaudeWebAccounts() {
     accountList = window.TokenMonitorLegacyAccountList.create({
       busy: () => document.getElementById('claudeCredentialSubmit')?.disabled === true,
       sourceLabel: account => account.source === 'automatic' ? account.sourceName : t(account.id === 'legacy' && state.settings?.claudeWebLegacyCookieSource === 'env' ? 'settings.limits.sources.env' : 'settings.limits.sources.web'),
-      editor: { isOpen: () => Boolean(editor.open), submit: 'claudeCredentialSubmit', nodes: ['claudeOpenBrowser', 'claudeWebOrganizationRow', 'claudeManualPanel', 'claudeErrorMessage'], visibility: 'claudeManualPanel', cancel: () => cancelClaudeWebAccountEdit(true) },
+      editor: { isOpen: () => Boolean(editor.open), submit: 'claudeCredentialSubmit', nodes: ['claudeOpenBrowser', 'claudeWebOrganizationRow', 'claudeManualPanel'], visibility: 'claudeManualPanel', cancel: () => cancelClaudeWebAccountEdit(true) },
       document, provider: 'claude', label: host.providerLabel || 'Claude',
       add: () => claudeAccountActions.run('claude', null, () => editClaudeWebAccount()), container, t, bridge: window.tokenMonitor,
       getContext: host.getAccountContext, preserveScroll: host.preserveScroll,

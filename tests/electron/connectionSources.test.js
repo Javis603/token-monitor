@@ -46,7 +46,7 @@ test('headers derive exactly one connection tag regardless of reading state', ()
   }
   const render = app.slice(app.indexOf('function renderLimitProviderCheckboxes('), app.indexOf('function limitProviderConnectionDetail('));
   assert.match(render, /limitProviderPresentationApi.connectionTag\(id,/);
-  assert.ok(render.indexOf('optionsInner.append(limitProviderConnectionDetail') < render.indexOf('optionsInner.append(limitProviderSettingsList'));
+  assert.ok(render.indexOf('optionsInner.append(limitProviderConnectionDetail') < render.indexOf('optionsInner.append(settingsList)'));
 });
 
 function renderConnection(id, reading = {}, hasOpenControl = true, preference = 'auto') {
@@ -128,14 +128,16 @@ test('all provider headers retain state/action tags separately from the connecti
   }
 });
 
-test('Grok retains its automatic-detection right-side pill without duplicating account summaries', () => {
+test('Grok shows the selected collection source without duplicating account summaries', () => {
   const source = app.slice(app.indexOf('    // Multi-account providers use this space'), app.indexOf('    const settings = LIMIT_PROVIDER_SETTINGS[id];', app.indexOf('    // Multi-account providers use this space')));
-  const render = (accountGroup) => {
+  const render = (accountGroup, preference = 'auto') => {
     const actions = { children: [], append(node) { this.children.push(node); } };
-    vm.runInNewContext(source, { accountGroup, sources: LIMIT_PROVIDER_ACCOUNTS.find(entry => entry.id === 'grok').sources, document: { createElement: () => ({}) }, t: key => translate('zh-TW', key), actions });
+    vm.runInNewContext(source, { accountGroup, id: 'grok', state: { settings: { grokSourcePreference: preference } }, sources: LIMIT_PROVIDER_ACCOUNTS.find(entry => entry.id === 'grok').sources, document: { createElement: () => ({}) }, t: key => translate('zh-TW', key), actions });
     return actions.children;
   };
   assert.equal(render(null)[0]?.textContent, '自動偵測');
+  const web = LIMIT_PROVIDER_ACCOUNTS.find(entry => entry.id === 'grok').sources.find(source => source.id === 'web');
+  assert.equal(render(null, 'web')[0]?.textContent, translate('zh-TW', web.labelKey));
   assert.equal(render({}).length, 0);
 });
 

@@ -48,7 +48,7 @@ function renderAntigravityStatus() {
 
   if (!accountList) accountList = window.TokenMonitorLegacyAccountList.create({
       sourceLabel: () => t('settings.limits.sources.oauth'),
-      editor: { isOpen: () => state.antigravitySignInBusy || Boolean(state.antigravityAccountError), allowBusyCancel: true, nodes: ['antigravityLoginStatus', 'antigravityAccountErrorMessage', 'antigravityCancelLoginButton'], cancel: () => { if (state.antigravitySignInBusy) document.getElementById('antigravityCancelLoginButton')?.click(); else { state.antigravityAccountError = ''; renderAntigravityStatus(); } } },
+      editor: { retryAvailable: () => Boolean(state.antigravityAccountError), isOpen: () => state.antigravitySignInBusy || Boolean(state.antigravityAccountError), allowBusyCancel: true, nodes: ['antigravityLoginStatus', 'antigravityAccountErrorMessage', 'antigravityCancelLoginButton'], cancel: () => { if (state.antigravitySignInBusy) document.getElementById('antigravityCancelLoginButton')?.click(); else { state.antigravityAccountError = ''; renderAntigravityStatus(); } } },
     document, provider: 'antigravity', label: host.providerLabel || 'Antigravity', add: startAntigravityLogin, container: listEl, t, bridge: window.tokenMonitor,
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
     enabled: (account, value) => window.tokenMonitor.antigravity.setAccountEnabled(account.id, value),

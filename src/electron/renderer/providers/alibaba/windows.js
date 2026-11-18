@@ -6,7 +6,7 @@
   if (typeof module === 'object' && module.exports) module.exports = factory;
   if (root) (root.TokenMonitorProviderWindows ||= {}).alibaba = factory;
 })(/** @type {any} */ (typeof window !== 'undefined' ? window : globalThis), /** @param {Record<string, any>} deps */ function createWindows(deps) {
-  const { windowForKind, limitWindowNode, providerWindowLabel } = deps;
+  const { windowForKind, limitWindowNode, providerWindowLabel, t } = deps;
 
   /** @param {any} provider @param {any} color @param {any} windows @returns {any} */ function renderWindows(provider, color, windows) {
     // Alibaba Team / StepFun Token Plan return one credit window; their
@@ -28,5 +28,16 @@
     if (weekly) windows.append(limitWindowNode(providerWindowLabel(provider, weekly), weekly, color, 0.68));
   }
 
-  return { renderWindows };
+  /** @type {Record<string, string>} */
+  const variantLabelKeys = {
+    cn: 'planCn', intl: 'planIntl',
+    'cn-personal': 'planCnPersonal', 'intl-personal': 'planIntlPersonal'
+  };
+
+  const rowPolicy = /** @param {any} provider @param {any} _color @param {any} context */ (provider, _color, { grouped }) => {
+    const key = variantLabelKeys[provider?.region];
+    return { options: grouped && key ? { planText: t(`settings.alibaba.${key}`) } : {} };
+  };
+
+  return { renderWindows, rowPolicy };
 });

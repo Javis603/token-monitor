@@ -17,14 +17,15 @@
 function updateMinimaxApiKeysStatus() {
   const rows = localProviderStatuses('minimax');
   const enabled = limitProviderEnabled('minimax');
-  const provider = enabled ? limitProviderPresentationApi.limitProviderSettingsRecord(rows, 'minimax') : null;
+  const remote = host.getAccountContext().records?.filter(row => row.provider === 'minimax') || [];
+  const provider = enabled ? limitProviderPresentationApi.limitProviderSettingsRecord(rows.length ? rows : remote, 'minimax') : null;
   accountShellApi.render({
     status: document.getElementById('minimaxStatus'),
     statusText: !enabled
       ? t('settings.limits.status.disabled')
       : provider
         ? translatedLimitProviderTag(limitProviderPresentationApi.limitProviderStatusLabel(provider))
-        : t('settings.common.checking')
+        : t(accountList?.summary().total ? 'settings.common.checking' : 'settings.minimax.statusNotSet')
   });
   accountList?.updateReadings(rows.filter(row => row.source === 'api'));
 }

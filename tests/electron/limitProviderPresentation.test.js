@@ -697,7 +697,7 @@ test('detected settings tags show only current source after status', () => {
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'grok', status: 'ok', source: 'rpc', sourceDetail: 'cli' })
       .map((tag) => tag.label),
-    ['Live', 'RPC']
+    ['Live', 'CLI']
   );
   assert.deepEqual(
     limitProviderSettingsTags({ provider: 'grok', status: 'ok', source: 'web' })
@@ -947,7 +947,7 @@ test('every multi-account Limits group uses its provider-localized account count
   // gets its own phrase, and one that does not renders no count rather than the
   // key itself.
   assert.match(view, /const key = windowOwners\[providerId\]\?\.groupCountKey \|\| `settings\.\$\{providerId\}\.nAccounts`;/);
-  assert.match(view, /return text === key \? '' : text;/);
+  assert.match(view, /return text === key \? t\('settings.limits.nAccounts'/);
   assert.match(view, /count \? limitGroupCountText\(providerId, count\) : ''/);
   assert.match(view, /providerId, label, providers, color, \{ count: providers\.length, markId \}/);
   assert.doesNotMatch(view, /settings\.(claude|codex|mimo|opencode|openrouter|thirdparty)\.nAccounts/);
@@ -3156,7 +3156,7 @@ test('Factory, Z.ai, GLM Team, Volcengine, Qoder, Trae, WorkBuddy, and Ollama so
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'factory', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'zai', source: 'api' }), 'API');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'api' }), 'API');
-  assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'cli' }), 'CLI');
+  assert.equal(presentation.limitProviderSourceLabel({ provider: 'volcengine', source: 'cli' }), 'arkcli');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'qoder', source: 'web' }), 'Web');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'trae', source: 'api' }), 'Web');
   assert.equal(presentation.limitProviderSourceLabel({ provider: 'workbuddy', source: 'local' }), 'Local');

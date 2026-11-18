@@ -9,6 +9,7 @@ const { addableLimitProviders, createEdgeDockComposer } = require('../../src/ele
 const itemsApi = require('../../src/electron/renderer/edgeDock/items');
 const { limitWindowLabel, mimoProductLabel, mimoAccountGroups } = require('../../src/shared/limits/windowLabels');
 const accountIdentity = require('../../src/electron/renderer/accountIdentity');
+const { translate } = require('../../src/electron/renderer/i18n');
 const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
 
 const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
@@ -57,6 +58,7 @@ function accountChoices(provider, rows, presentationApi, settings = {}) {
     providerLabel: (id) => id, providerColor: () => '#000000', hasProviderMark: () => false,
     maskEmail: (email) => settings.maskLimitAccountEmails ? accountIdentity.maskEmailAddress(email) : email, mimoProductLabel,
     limitAccountTitle: createLimitWindowsView({ mimoProductLabel, mimoAccountGroups, accountIdentity,
+      t: (key, params) => translate('en', key, params),
       settings: () => settings }).limitAccountTitle,
     createRowDrag: () => ({ deferRender: () => false })
   });

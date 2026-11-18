@@ -379,8 +379,14 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
       const environment = current ? { accountKey: current, accountKeyAliases: [], source: 'environment',
         order: environmentOrder ?? (entry.discoveredAccounts ? undefined : saved.length + ambient.length) } : null;
       const slots = orderAccountRows(saved, ambient, environment).filter(slot => slot.enabled !== false);
-      const owner = row => slots.find(slot => slot.accountKey === row.accountKey)
-        || (row.accountKey === current ? undefined : slots.find(slot => slot.accountKeyAliases.includes(row.accountKey)));
+      const owner = row => {
+        const owners = provider === 'alibaba' ? slots.filter(slot => {
+          const values = slot.source === 'environment' ? config : slot.values;
+          return entry.limits.alibabaVariant(values, slot.source === 'environment' ? deps.env : {}) === (row.region || 'cn');
+        }) : slots;
+        return owners.find(slot => slot.accountKey === row.accountKey)
+          || (row.accountKey === current ? undefined : owners.find(slot => slot.accountKeyAliases.includes(row.accountKey)));
+      };
       for (const row of rows) {
         const slot = owner(row);
         if (slot && slot.source !== 'environment') {

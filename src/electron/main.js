@@ -2445,6 +2445,8 @@ async function limitsHistoryPayload(key) {
   history.windows = history.windows.filter(entry => !historyWindowHidden(settings?.limitProviderHiddenItems, provider.provider, entry.window)
     && !(provider.provider === 'codex' && settings?.showCodexAdditionalLimits === false && entry.window.additional === true));
   if (!history.windows.length) return null;
+  const slots = accountSlotService?.list(provider.provider).accounts || [];
+  const [presented] = applyAccountOrder([provider], { [provider.provider]: slots }, settings?.deviceId, settings?.limitAccountPresentation);
   const email = provider.accountEmail || '';
   const account = settings?.maskLimitAccountEmails === true
     ? historyMaskEmail(email) : email;
@@ -2455,7 +2457,7 @@ async function limitsHistoryPayload(key) {
     source: crypto.createHash('sha256').update(scope).digest('hex'),
     provider: provider.provider,
     label: historyProviderCatalog.find(entry => entry.id === provider.provider)?.label || provider.provider,
-    account: account || provider.accountName || provider.accountLabel || '',
+    account: presented.accountDisplayName || account || provider.accountName || provider.accountLabel || '',
     updatedAt: provider.updatedAt,
     locale: trayMenuLocale(), colors: settings?.themeColors, textScale: fontSettingsApi.textScaleForSize(settings?.textSize),
     color: palette[colorId] || palette.default,
@@ -3071,8 +3073,11 @@ function getAccountPresentationSync() {
         const accounts = accountSlotService?.list(entry.id).accounts || [];
         if (!accounts.length) continue;
         const group = seed[entry.id] ||= { labels: {}, order: [] };
-        for (const slot of accounts) if (slot.label && !Object.hasOwn(group.labels, slot.accountKey)) group.labels[slot.accountKey] = slot.label;
-        group.order = [...new Set([...group.order, ...accounts.map(slot => slot.accountKey)])];
+        for (const slot of accounts) {
+          const key = slot.presentationKey || slot.accountKey;
+          if (slot.label && !Object.hasOwn(group.labels, key)) group.labels[key] = slot.label;
+        }
+        group.order = [...new Set([...group.order, ...accounts.map(slot => slot.presentationKey || slot.accountKey)])];
       }
       return normalizeSharedSyncValue('limitAccountPresentation', normalizeAccountPresentation(seed));
     },

@@ -27,7 +27,7 @@
     return candidates.length === 1 ? candidates[0] : undefined;
   }
   /**
-   * @param {{document: Document, provider: string, label?: string, add?: Function, container: HTMLElement, t: Function, bridge: any, getContext: Function, preserveScroll: Function, refresh: Function, changed: Function, enabled?: Function, remove?: Function, edit?: Function, sourceLabel?: Function, busy?: Function, editor?: {nodes: string[], submit?: string, visibility?: string, replaceVisibility?: string, allowBusyCancel?: boolean, isOpen?: Function, cancel?: Function}, actions?: Function, statusReading?: Function, secondaryText?: Function, detailText?: Function, blocked?: Function}} options
+   * @param {{document: Document, provider: string, label?: string, add?: Function, container: HTMLElement, t: Function, bridge: any, getContext: Function, preserveScroll: Function, refresh: Function, changed: Function, enabled?: Function, remove?: Function, edit?: Function, sourceLabel?: Function, busy?: Function, editor?: {nodes: string[], submit?: string, visibility?: string, replaceVisibility?: string, allowBusyCancel?: boolean, isOpen?: Function, retryAvailable?: Function, cancel?: Function}, actions?: Function, statusReading?: Function, secondaryText?: Function, detailText?: Function, blocked?: Function}} options
    */
   function create(options) {
     let accounts = /** @type {any[]} */ ([]);
@@ -38,7 +38,7 @@
     /** @param {Function | undefined} command @param {any} [account] */
     const open = (command, account = undefined) => {
       if (options.blocked?.()) return;
-      if (!account && sharedEditor?.toggle()) return;
+      if (!account && !options.editor?.retryAvailable?.() && sharedEditor?.toggle()) return;
       if (options.busy?.()) return;
       sharedEditor?.open(Boolean(account));
       const result = command?.(account);
@@ -89,6 +89,7 @@
     if (options.editor) sharedEditor = mountEditor({ ...options, editor: options.editor }, list.element);
 
     return {
+      summary: list.summary,
       /** Refresh status without replacing provider-owned account controls. @param {any[]} nextReadings */
       updateReadings(nextReadings) {
         readings = nextReadings;
@@ -121,7 +122,7 @@
     };
   }
   /** Provider-owned nodes and callbacks remain live across expansion and status updates.
-   * @param {{document: Document, editor: {nodes: string[], submit?: string, visibility?: string, replaceVisibility?: string, allowBusyCancel?: boolean, isOpen?: Function, cancel?: Function}, t: Function, label?: string, provider: string, busy?: Function}} options @param {HTMLElement} root
+   * @param {{document: Document, editor: {nodes: string[], submit?: string, visibility?: string, replaceVisibility?: string, allowBusyCancel?: boolean, isOpen?: Function, retryAvailable?: Function, cancel?: Function}, t: Function, label?: string, provider: string, busy?: Function}} options @param {HTMLElement} root
    */
   function mountEditor(options, root) {
     const { document, editor: config, t } = options;
@@ -211,7 +212,7 @@
     }, focus() {
       if (reveal.contains(document.activeElement)) return;
       const target = [.../** @type {NodeListOf<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement>} */ (card.querySelectorAll('input, textarea, select, button'))].find(node => !node.disabled && !node.closest('.hidden'));
-      target?.focus({ preventScroll: true });
+      target?.focus();
     },
     /** @param {boolean} replace */
     open(replace) {

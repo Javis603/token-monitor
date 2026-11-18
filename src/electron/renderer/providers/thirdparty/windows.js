@@ -146,7 +146,7 @@
       color: visual.color,
       options: {
         planText: presentationApi.thirdPartyGroupPlanText(provider),
-        ...(perRowMark ? { markId: visual.markId } : { showIcon: false })
+        ...(perRowMark ? { markId: visual.markId, showIcon: true } : { showIcon: false })
       }
     };
   };
