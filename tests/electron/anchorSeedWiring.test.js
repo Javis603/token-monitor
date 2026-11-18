@@ -92,7 +92,7 @@ test('first-scan previews are shown, over the seed when there is one, and never 
 test('a client removed during the first scan is archived from the seed, never a preview', () => {
   const update = functionSource('function updateArchivedClientUsage(');
   // A preview's unscanned windows would be archived as zero for that client.
-  assert.match(update, /mode === 'local' && !lastCollectedDevice\s*\? anchorSeedDevice\s*:\s*localDeviceRecord\(\{ forClientArchive: true \}\)/);
+  assert.match(update, /mode === 'local' && !lastCollectedDevice\s*\? anchorSeedDevice\s*:\s*localDeviceRecord\(\{ forClientArchive: settings\.sessionUsageArchiveEnabled !== false \}\)/);
   assert.match(update, /captureArchivedClientUsage\(archive, source, removedClients\)/);
 });
 
@@ -100,7 +100,7 @@ test('untracking with only a Hub snapshot retries after the first complete scan'
   const vm = require('node:vm');
   const deviceId = 'here';
   const context = {
-    settings: { deviceId, clients: 'codex,claude', hubMode: 'client' },
+    settings: { deviceId, clients: 'codex,claude', hubMode: 'client', sessionUsageArchiveEnabled: false },
     mode: 'sync',
     lastCollectedDevice: null,
     isExternalAgentActive: () => false,
@@ -113,12 +113,14 @@ test('untracking with only a Hub snapshot retries after the first complete scan'
     context
   );
   const validate = context.assertClientArchiveCaptureReady;
-  assert.throws(() => validate('codex'), /tracking-scan-pending/);
-  assert.doesNotThrow(() => validate('codex,claude,gemini'));
+  assert.throws(() => validate('codex', true), /tracking-scan-pending/);
+  context.settings.sessionUsageArchiveEnabled = true;
+  assert.doesNotThrow(() => validate('codex', false));
+  assert.doesNotThrow(() => validate('codex,claude,gemini', true));
   context.lastCollectedDevice = { deviceId };
-  assert.doesNotThrow(() => validate('codex'));
+  assert.doesNotThrow(() => validate('codex', true));
 
   const apply = functionSource('function applySettingsPatch(');
-  assert.ok(apply.indexOf('assertClientArchiveCaptureReady(normalizedPatch.clients)') >= 0);
-  assert.ok(apply.indexOf('const nextSettingsState = settings;') > apply.indexOf('assertClientArchiveCaptureReady(normalizedPatch.clients)'));
+  assert.ok(apply.indexOf('assertClientArchiveCaptureReady(normalizedPatch.clients, sessionUsageArchiveEnabled)') >= 0);
+  assert.ok(apply.indexOf('const nextSettingsState = settings;') > apply.indexOf('assertClientArchiveCaptureReady(normalizedPatch.clients, sessionUsageArchiveEnabled)'));
 });

@@ -2184,16 +2184,16 @@ function localDeviceRecord({ forClientArchive = false } = {}) {
   });
 }
 
-function assertClientArchiveCaptureReady(nextClients) {
+function assertClientArchiveCaptureReady(nextClients, sessionUsageArchiveEnabled) {
   const deviceId = settings?.deviceId || defaultDeviceId();
   if (mode !== 'sync' || lastCollectedDevice?.deviceId === deviceId
-    || settings?.sessionUsageArchiveEnabled === false
+    || !sessionUsageArchiveEnabled
     || (isExternalAgentActive() && settings?.hubMode !== 'icloud')
     || !removedTrackedClients(settings?.clients, nextClients).length) return;
 
   // A Hub snapshot can arrive before the first full collection. Its aggregate
   // has no lifetime session IDs to reconcile against the SQLite archive.
-  if (localDeviceRecord({ forClientArchive: true })) throw new Error('tracking-scan-pending');
+  if (localDeviceRecord()) throw new Error('tracking-scan-pending');
 }
 
 function updateArchivedClientUsage(previousClients, nextClients) {
@@ -2205,7 +2205,7 @@ function updateArchivedClientUsage(previousClients, nextClients) {
     // nothing, stands for the client then.
     const source = mode === 'local' && !lastCollectedDevice
       ? anchorSeedDevice
-      : localDeviceRecord({ forClientArchive: true });
+      : localDeviceRecord({ forClientArchive: settings.sessionUsageArchiveEnabled !== false });
     archive = captureArchivedClientUsage(archive, source, removedClients);
   }
   settings.archivedClientUsage = archive;
@@ -7640,9 +7640,10 @@ app.whenReady().then(() => {
     delete normalizedPatch.subscriptionsShared;
     delete normalizedPatch.subscriptionsHub;
     delete normalizedPatch.subscriptionsUpdatedAt;
+    const sessionUsageArchiveEnabled = parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true);
     if (patch.clients !== undefined) {
       normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
-      assertClientArchiveCaptureReady(normalizedPatch.clients);
+      assertClientArchiveCaptureReady(normalizedPatch.clients, sessionUsageArchiveEnabled);
     }
     if (patch.customScanPaths !== undefined) {
       const limitError = customScanPathLimitError(patch.customScanPaths);
@@ -7801,7 +7802,7 @@ app.whenReady().then(() => {
       projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
       projectBreakdownMode: normalizeProjectBreakdownMode(patch.projectBreakdownMode ?? settings.projectBreakdownMode),
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
-      sessionUsageArchiveEnabled: parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true),
+      sessionUsageArchiveEnabled,
       wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, false),
       collectionMode: normalizeCollectionMode(patch.collectionMode ?? settings.collectionMode),
       collectionIntervalMs: normalizeCollectionIntervalMs(patch.collectionIntervalMs ?? settings.collectionIntervalMs),
