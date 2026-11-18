@@ -80,7 +80,7 @@ function providerSelectionIncluding(selection, providerId) {
   return LIMIT_PROVIDER_REGISTRY.map(({ id }) => id).filter((id) => selected.has(id)).join(',');
 }
 
-function createCredentialCommands({ getSettings, applySettingsPatch, commitCredential, probeDeps, env = process.env }) {
+function createCredentialCommands({ getSettings, applySettingsPatch, commitCredential, probeDeps, env = process.env, allowRetainedFixedCredentials = false }) {
   const revisions = new Map();
   // Discovery can rotate a session before the user chooses an organization.
   // Keep that credential in main so the renderer never receives the secret.
@@ -97,7 +97,7 @@ function createCredentialCommands({ getSettings, applySettingsPatch, commitCrede
     return entry?.form ? entry : null;
   }
 
-  const hasRetainedCredential = providerId => hasRetainedFixedCredential(formEntry(providerId), getSettings());
+  const hasRetainedCredential = providerId => allowRetainedFixedCredentials && hasRetainedFixedCredential(formEntry(providerId), getSettings());
 
   // A settings write that reaches a form's fields through any other path makes
   // an in-flight probe stale, so its result must not land over that write.
@@ -119,7 +119,7 @@ function createCredentialCommands({ getSettings, applySettingsPatch, commitCrede
     const revision = nextRevision(entry.id);
     const { candidate, rejected } = draftFor(entry, values, includeIndependentSettings);
     if (rejected) return rejected;
-    const retained = hasRetainedFixedCredential(entry, getSettings());
+    const retained = hasRetainedCredential(entry.id);
     if (retained) {
       // In this compatibility form, blank passwords leave local values in place.
       for (const { key, secret } of formFields(entry)) if (secret && !candidate[key]) delete candidate[key];

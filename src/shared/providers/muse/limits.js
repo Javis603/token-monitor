@@ -164,7 +164,7 @@ async function fetchAccountSlotSnapshot(options, deps, collect) {
   const previousWeb = (options.previousLimits?.providers || []).filter(row => row.provider === 'muse' && row.source === 'web');
   const scoped = Boolean(options.limitRefreshScope?.accountKey);
   if (!options.museAccountSlots?.length) {
-    const rows = await collect(options, deps);
+    const rows = await collect(options, scoped ? { ...deps, accountSlotWebOnly: true } : deps);
     if (!Array.isArray(rows) || scoped || deps.signal?.aborted) return rows;
 
     const web = rows.find(row => row.source === 'web');

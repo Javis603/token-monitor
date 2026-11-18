@@ -263,6 +263,12 @@ for (const cliFails of [false, true]) test(`Muse first/last saved slot transitio
     assert.equal(leaving[0].accountKey, identities.get('environment'));
     assert.equal(leaving[0].status, 'unavailable');
     assert.equal(leaving[0].windows[0]?.usedPercent, 28);
+    const beforeScoped = cliCalls;
+    await runtime.refresh({ provider: 'muse', accountKey: identities.get('environment') }, 'settings-change');
+    assert.equal(cliCalls, beforeScoped, 'a retained keyed Web refresh must stay off the CLI lane');
+    const retained = runtime.getSnapshot().providers.find(row => row.accountKey === identities.get('environment'));
+    assert.equal(retained.source, 'web');
+    assert.equal(retained.windows[0]?.usedPercent, 28);
     environmentOffline = false;
     await runtime.refresh({ provider: 'muse' }, 'settings-change');
     const remaining = runtime.getSnapshot().providers;

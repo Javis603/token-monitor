@@ -39,6 +39,7 @@ test('Volcengine retains controls to replace and clear a fixed key backed by an 
   assert.equal(accountStatusProjection(settings, env).volcengineFixedCredentialsStored, true);
   const signed = [];
   const commands = createCredentialCommands({
+    allowRetainedFixedCredentials: true,
     getSettings: () => settings, env,
     applySettingsPatch(patch) {
       store.replaceSettingsCredentials({ ...settings, ...patch });

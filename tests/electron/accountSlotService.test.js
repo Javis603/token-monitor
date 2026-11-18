@@ -54,6 +54,14 @@ test('probe invalid, incomplete, indeterminate; credential replacement continues
   assert.ok(h.settings.deepseekAccountSlots[0].accountKeyAliases.includes(old));
   assert.ok(!JSON.stringify(replaced).includes('SECRET'));
 });
+test('a new Volcengine slot cannot borrow a retained fixed secret', async () => {
+  const h = harness();
+  h.settings = { ...h.settings, volcengineAccessKeyId: 'AKLT-fixed', volcengineSecretAccessKey: 'fixture-fixed-secret' };
+  h.fetch = async () => response({ Result: { QuotaUsage: [{ Level: 'session', Percent: 10 }] } });
+  const result = await h.service.add('volcengine', { volcengineAccessKeyId: 'AKLT-new-slot' });
+  assert.equal(result.saved, false);
+  assert.equal(h.writes.length, 0);
+});
 test('Qoder proven server identity differs and is never merged; cookie fallback remains replaceable', async () => {
   const h = harness(); let userId = 'one';
   h.fetch = async (url) => url.includes('/organization-shared-usages/') ? response({}, 404) : response({ userId, total_quota: { quota_summary: { limit_value: 100, used_value: 1, remaining_value: 99 } } });

@@ -7430,6 +7430,7 @@ app.whenReady().then(() => {
   ipcMain.handle('syncContent:configure', (_event, options) => getSyncContentRuntime().configure(options));
   ipcMain.handle('syncContent:retryCleanup', () => getSyncContentRuntime().retryCleanup());
   const credentialCommands = createCredentialCommands({
+    allowRetainedFixedCredentials: true,
     getSettings: () => settings,
     applySettingsPatch: applyCredentialSettingsPatch,
     probeDeps: credentialProbeDeps
