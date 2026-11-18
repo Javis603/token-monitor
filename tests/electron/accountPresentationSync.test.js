@@ -71,6 +71,20 @@ test('stats marker refreshes incoming names and order using the local owner prec
   assert.notEqual(accountName(slots[0], null, undefined, { labels: { a: '' } }), 'Old slot');
 });
 
+test('stats without a presentation revision do not reread an already synchronized Hub', async () => {
+  const f = fixture({ document: { revision: 3, value: value() } });
+  await f.runtime.refresh();
+  f.runtime.notifyStats({});
+  f.runtime.notifyStats({ syncSettingsRevisions: { modelAliases: 1 } });
+  f.runtime.notifyStats({ syncSettingsRevisions: { limitAccountPresentation: 3 } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(f.calls.map(call => call.method), ['GET']);
+
+  f.runtime.notifyStats({ syncSettingsRevisions: { limitAccountPresentation: 4 } });
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(f.calls.map(call => call.method), ['GET', 'GET']);
+});
+
 test('simultaneous first initialization keeps both devices chosen names', async () => {
   const f = fixture({ conflict: true });
   await f.runtime.refresh();

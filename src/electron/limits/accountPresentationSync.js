@@ -143,13 +143,20 @@ function createAccountPresentationSync({ getContext, identity, getSeed, getLocal
     return refreshPending;
   }
   return { publish, refresh, notifyStats(/** @type {any} */ stats) {
-    // A Hub upgraded in place starts advertising this kind; try it again.
-    if (unsupported && binding === identity(getContext()) && stats?.syncSettingsRevisions && Object.hasOwn(stats.syncSettingsRevisions, KIND)) unsupported = false;
+    if (!connected()) return;
+    const captured = identity(getContext());
+    // A local stats update can arrive before the Hub snapshot. Only an
+    // advertised revision can indicate a remote change or an upgraded Hub.
+    const advertisedRevision = stats?.syncSettingsRevisions?.[KIND];
+    const hasRevision = Number.isSafeInteger(advertisedRevision) && advertisedRevision >= 0;
+    if (unsupported && binding === captured) {
+      if (!hasRevision) return;
+      unsupported = false;
+    }
     // Pending edits retry on the next frame even when the Hub's revision has
     // not moved, so a transient failure cannot strand them.
-    const captured = identity(getContext());
-    if (unsupported && binding === captured) return;
-    if (connected() && (pending.length || queued.some(item => item.destination === captured) || binding !== captured || stats?.syncSettingsRevisions?.[KIND] !== revision)) {
+    if (pending.length || queued.some(item => item.destination === captured)
+      || binding !== captured || (hasRevision && advertisedRevision !== revision)) {
       if (refreshPending) refreshAgain = true;
       else void refresh();
     }
