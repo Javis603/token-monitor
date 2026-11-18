@@ -182,6 +182,8 @@ function resolveSessionMetadata(sessionIds, context) {
     if (used) meta.lastUsedAt = used;
     const title = cleanTitle(summary.generated_title);
     if (title) meta.title = title;
+    const latestModel = typeof summary.current_model_id === 'string' ? summary.current_model_id.trim() : '';
+    if (latestModel) meta.latestModel = latestModel;
     if (resolveProjects && projectFor) {
       const source = typeof summary.source_workspace_dir === 'string' ? summary.source_workspace_dir.trim() : '';
       const identity = projectFor(source || summary?.info?.cwd || '');
