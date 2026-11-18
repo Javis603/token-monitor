@@ -5,6 +5,7 @@ const os = require('node:os');
 const nodePath = require('node:path');
 const { execFile } = require('node:child_process');
 const { normalizeLimitProvider } = require('../../limits/core');
+const { hashKey } = require('../../hashKey');
 const { abortError } = require('../../probeDeadline');
 const {
   errorWithStatus,
@@ -155,28 +156,43 @@ async function fetchMuseLimits(options = {}, deps = {}) {
   return [code, web];
 }
 
+// Muse Web reports no account identity. The slot fetcher files the environment
+// credential under its default provisional key whenever saved slots exist.
+const defaultWebSlotKey = hashKey('muse', 'account-slot', 'default');
+
 async function fetchAccountSlotSnapshot(options, deps, collect) {
+  const previousWeb = (options.previousLimits?.providers || []).filter(row => row.provider === 'muse' && row.source === 'web');
+  const scoped = Boolean(options.limitRefreshScope?.accountKey);
   if (!options.museAccountSlots?.length) {
     const rows = await collect(options, deps);
-    // Leaving slot mode returns the environment Web cookie to its anonymous
-    // lane. Retire the former keyed Web rows, never the independent CLI.
-    if (Array.isArray(rows) && !options.limitRefreshScope?.accountKey && !deps.signal?.aborted) {
-      for (const row of options.previousLimits?.providers || []) {
-        if (row.provider === 'muse' && row.source === 'web' && row.accountKey) {
-          rows.push({ provider: 'muse', source: 'web', accountKey: row.accountKey, removed: true });
-        }
+    if (!Array.isArray(rows) || scoped || deps.signal?.aborted) return rows;
+
+    const web = rows.find(row => row.source === 'web');
+    for (const old of previousWeb.filter(row => row.accountKey)) {
+      if (old.accountKey === defaultWebSlotKey && web && !web.removed && web.status !== 'ok') {
+        // Keep the failure on the same identity so its last-good windows remain.
+        web.accountKey = old.accountKey;
+      } else {
+        rows.push({ provider: 'muse', source: 'web', accountKey: old.accountKey, removed: true,
+          ...(old.accountKey === defaultWebSlotKey && web?.status === 'ok' ? { replacementAccount: { source: 'web' } } : {}) });
       }
     }
     return rows;
   }
-  const cli = options.limitRefreshScope?.accountKey ? null : await fetchMuseCodeLimits(options, deps);
+
+  const cli = scoped ? null : await fetchMuseCodeLimits(options, deps);
   const previousLimits = { providers: (options.previousLimits?.providers || []).filter(row => row.source !== 'cli') };
   const web = await collect({ ...options, previousLimits }, { ...deps, accountSlotWebOnly: true });
-  // Slot collection owns every Web credential under a keyed row, including
-  // the environment cookie. Retire its former anonymous lane separately from
-  // the independently owned CLI; scoped and aborted passes cannot replace it.
-  if (cli && !deps.signal?.aborted && previousLimits.providers.some(row => row.provider === 'muse' && row.source === 'web' && !row.accountKey)) {
-    web.push({ provider: 'muse', source: 'web', removed: true });
+  if (!scoped && !deps.signal?.aborted && previousWeb.some(row => !row.accountKey)) {
+    const replacement = web.find(row => row.accountKey === defaultWebSlotKey && !row.removed);
+    if (replacement?.status === 'ok') {
+      web.push({ provider: 'muse', source: 'web', removed: true, replacementAccount: { accountKey: defaultWebSlotKey } });
+    } else if (replacement) {
+      // A successful saved cookie cannot replace the environment cookie's quota.
+      replacement.accountKey = '';
+    } else if (!museWebCookie(deps.env || process.env, options)) {
+      web.push({ provider: 'muse', source: 'web', removed: true });
+    }
   }
   return [...(cli ? [cli.status === 'notConfigured' ? { provider: 'muse', source: 'cli', removed: true } : cli] : []), ...web];
 }

@@ -201,6 +201,7 @@ for (const cliFails of [false, true]) test(`Muse first/last saved slot transitio
   const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
   let slots = [];
   let failed = false;
+  let environmentOffline = false;
   let cliCalls = 0;
   const identities = new Map();
   const runtime = createLimitsRuntime({ limitProviders: ['muse'] }, {
@@ -216,16 +217,27 @@ for (const cliFails of [false, true]) test(`Muse first/last saved slot transitio
         JSON.stringify({ schemaVersion: 1, allowance: { window: { usedPercent: 17 } } }), ''));
       return { stdin: { end() {} } };
     },
-    museWebFetch: fixtureFetch()
+    museWebFetch: (url, init) => fixtureFetch({
+      actionStatus: environmentOffline && init.headers.Cookie === 'hatch_sess=environment' ? 503 : 200
+    })(url, init)
   });
   try {
-    await runtime.refresh({ provider: 'muse' });
+    await runtime.refresh({ provider: 'muse' }, 'settings-change');
     const initial = runtime.getSnapshot().providers;
     assert.equal(initial.length, 2);
     assert.equal(initial.find(row => row.source === 'web').accountKey, '');
     slots = [{ id: 'saved', enabled: true, values: { museWebCookie: 'hatch_sess=saved' } }];
     failed = cliFails;
-    await runtime.refresh({ provider: 'muse' });
+    environmentOffline = true;
+    await runtime.refresh({ provider: 'muse' }, 'settings-change');
+    const entering = runtime.getSnapshot().providers.filter(row => row.source === 'web');
+    assert.equal(entering.length, 2);
+    const anonymous = entering.find(row => !row.accountKey);
+    assert.equal(anonymous?.status, 'unavailable');
+    assert.equal(anonymous?.windows[0]?.usedPercent, 28);
+    assert.equal(entering.find(row => row.accountKey)?.status, 'ok');
+    environmentOffline = false;
+    await runtime.refresh({ provider: 'muse' }, 'settings-change');
     const rows = runtime.getSnapshot().providers;
     const web = rows.filter(row => row.source === 'web');
     assert.equal(web.length, 2, 'only the environment and saved Web credentials remain');
@@ -235,16 +247,24 @@ for (const cliFails of [false, true]) test(`Muse first/last saved slot transitio
     assert.equal(cli.length, 1);
     assert.equal(cli[0].windows[0].usedPercent, 17);
     assert.equal(cli[0].status, cliFails ? 'unavailable' : 'ok');
-    assert.equal(cliCalls, 2);
+    assert.equal(cliCalls, 3);
     await runtime.refresh({ provider: 'muse', accountKey: web[0].accountKey });
-    assert.equal(cliCalls, 2, 'scoped Web refresh does not invoke CLI');
+    assert.equal(cliCalls, 3, 'scoped Web refresh does not invoke CLI');
     assert.equal(runtime.getSnapshot().providers.length, 3);
     // Removing the final saved account returns the remaining environment
     // credential to the legacy anonymous lane; its old keyed row must leave.
     assert.ok(identities.get('saved'));
     runtime.clear({ provider: 'muse', accountKey: identities.get('saved') });
     slots = [];
-    await runtime.refresh({ provider: 'muse' });
+    environmentOffline = true;
+    await runtime.refresh({ provider: 'muse' }, 'settings-change');
+    const leaving = runtime.getSnapshot().providers.filter(row => row.source === 'web');
+    assert.equal(leaving.length, 1);
+    assert.equal(leaving[0].accountKey, identities.get('environment'));
+    assert.equal(leaving[0].status, 'unavailable');
+    assert.equal(leaving[0].windows[0]?.usedPercent, 28);
+    environmentOffline = false;
+    await runtime.refresh({ provider: 'muse' }, 'settings-change');
     const remaining = runtime.getSnapshot().providers;
     assert.equal(remaining.filter(row => row.source === 'web').length, 1, 'removing the last slot must not duplicate the environment reading');
     assert.equal(remaining.find(row => row.source === 'web').accountKey, '');
