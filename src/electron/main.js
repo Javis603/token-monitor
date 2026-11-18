@@ -8304,7 +8304,7 @@ app.whenReady().then(() => {
   ipcMain.handle('claude:saveWebAccount', (_event, values) => claudeAccountService().saveAccount(values));
   ipcMain.handle('claude:removeWebAccount', (_event, id) => claudeAccountService().removeAccount(String(id || '')));
   ipcMain.handle('claude:setAccountEnabled', (_event, id, enabled) => claudeAccountService().setAccountEnabled(String(id || ''), enabled));
-  ipcMain.handle('limits:saveCredential', (_event, providerId, values) => ACCOUNT_SLOT_PROVIDER_IDS.has(providerId) ? accountSlotService.add(providerId, values) : credentialCommands.saveCredential(providerId, values));
+  ipcMain.handle('limits:saveCredential', (_event, providerId, values) => ACCOUNT_SLOT_PROVIDER_IDS.has(providerId) && !credentialCommands.hasRetainedCredential(providerId) ? accountSlotService.add(providerId, values) : credentialCommands.saveCredential(providerId, values));
   getLimitsHistoryController().register();
   ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
   ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));

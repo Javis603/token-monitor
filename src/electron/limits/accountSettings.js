@@ -157,6 +157,10 @@ function defaultAccountStatus(entry, settings, env) {
 
 // settingsForRenderer — the *Configured/*Source key pairs plus provider extras
 // (env probes, discovery-driven lanes like zcode-auto and cline-signin).
+function hasRetainedFixedCredential(entry, settings) {
+  return entry?.id === 'volcengine' && accountForm(entry).fields.some(field => field.secret && settings?.[field.key]);
+}
+
 function accountStatusProjection(settings, env = process.env) {
   const out = {};
   for (const entry of LIMIT_PROVIDER_REGISTRY) {
@@ -169,6 +173,7 @@ function accountStatusProjection(settings, env = process.env) {
     if (entry.status && entry.accountSlots && normalizeAccountSlots(entry, settings?.[accountSlotKey(entry)]).length) {
       out[entry.status.configuredKey] = true;
     }
+    if (entry.id === 'volcengine') out.volcengineFixedCredentialsStored = hasRetainedFixedCredential(entry, settings);
     if (entry.envProbe) out[entry.envProbe.key] = entry.envProbe.probe(env);
   }
   return out;
@@ -385,6 +390,7 @@ module.exports = {
   accountForm,
   accountFieldProjection,
   accountStatusProjection,
+  hasRetainedFixedCredential,
   currentAccountField,
   finalAccountSettings,
   initialAccountSettings,

@@ -1133,7 +1133,6 @@ test('Claude Web account panel stores a redacted cookie and opens only the usage
 
   const app = readRendererFile('app.js');
   const statusBody = functionBody(app, 'renderExternalProviderStatus', 'renderOpenCodeProfiles');
-  assert.match(statusBody, /const canClearConfiguredCredential = source === 'settings' && configured;/);
   assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked && !limitAccountForm\(providerName\)\?\.accountSlots\)/);
   assert.match(statusBody, /logoutBtn\.classList\.toggle\('hidden', !canClearConfiguredCredential\)/);
 

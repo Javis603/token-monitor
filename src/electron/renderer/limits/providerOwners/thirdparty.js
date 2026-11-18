@@ -283,7 +283,10 @@ function renderThirdPartyProfiles() {
     }
   });
 }
+let draftRevision = 0;
+
 function resetThirdPartyDraft() {
+  draftRevision += 1;
   const inputs = ['BaseUrl', 'AccessToken', 'RefreshToken', 'ApiKey', 'UserId', 'EndpointPath',
     'RemainingPath', 'UsedPath', 'TotalPath', 'Currency', 'Divisor'];
   for (const field of inputs) {
@@ -302,6 +305,7 @@ function resetThirdPartyDraft() {
 }
 function setThirdPartyAddExpanded(expanded) {
   const next = Boolean(expanded);
+  if (!next) draftRevision += 1;
   document.getElementById('thirdpartyAddToggle')?.setAttribute('aria-expanded', String(next));
   document.getElementById('thirdpartyAddDetails')?.classList.toggle('hidden', !next);
   document.getElementById('thirdpartyAddForm')?.classList.toggle('expanded', next);
@@ -353,7 +357,8 @@ function setup() {
         setAccountShellError('thirdparty', t('settings.slots.duplicate'));
         return;
       }
-      const draftInputs = [...document.querySelectorAll('#thirdpartyAddForm input, #thirdpartyAddForm select')];
+      const revision = draftRevision;
+      const draftInputs = [...document.getElementById('thirdpartyAddDetails').querySelectorAll('input, select')];
       const draftValues = draftInputs.map(input => input.value);
       const result = await window.tokenMonitor.thirdparty.saveProfile({
         name,
@@ -372,7 +377,8 @@ function setup() {
         divisor: String(divisorInput?.value || '').trim()
       });
       if (result?.ok) {
-        const unchanged = draftInputs.every((input, index) => input.value === draftValues[index]);
+        const unchanged = revision === draftRevision
+          && draftInputs.every((input, index) => input.value === draftValues[index]);
         if (unchanged) {
           resetThirdPartyDraft();
         }

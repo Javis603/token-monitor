@@ -165,6 +165,44 @@ test('third-party editing clears another profile draft credentials and restores 
   assert.equal(h.nodes.thirdpartyBaseUrlInput.value, 'http://selected.example');
   assert.equal(h.nodes.thirdpartyHttpWarning.classList.contains('hidden'), false);
 });
+test('a pending third-party save preserves changes in the relocated editor', async () => {
+  let finishSave;
+  const h = harness('thirdparty', { saveProfile: () => new Promise(resolve => { finishSave = resolve; }) });
+  const { thirdpartyAddForm: original, thirdpartyAddDetails: editor, thirdpartyProfileSubmit: submit,
+    thirdpartyProfileName: name, thirdpartyAccessTokenInput: token, thirdpartyPlatformInput: platform } = h.nodes;
+  const inputs = [name, token, platform];
+  inputs[0].tagName = 'input';
+  inputs[1].tagName = 'input';
+  inputs[2].tagName = 'select';
+  editor.append(...inputs, submit);
+  original.append(editor);
+  editor.querySelectorAll = selector => [...editor.walk()].filter(node => node.matches(selector));
+  const query = h.document.querySelectorAll;
+  h.document.querySelectorAll = selector => selector.startsWith('#thirdpartyAddForm ')
+    ? inputs.filter(input => original.contains(input)) : query(selector);
+  h.owner.setup();
+  await h.render();
+  await h.add().click();
+  assert.ok(h.nodes.thirdpartyProfileList.contains(editor));
+  assert.ok(!original.contains(editor));
+  name.value = 'Original';
+  token.value = 'submitted-fixture-token';
+  const pending = submit.click();
+  token.value = 'newer-fixture-token';
+  platform.value = 'sub2api';
+  finishSave({ ok: true });
+  await pending;
+  assert.equal(token.value, 'newer-fixture-token');
+  assert.equal(platform.value, 'sub2api');
+  assert.equal(name.value, 'Original');
+
+  const unchanged = submit.click();
+  finishSave({ ok: true });
+  await unchanged;
+  assert.equal(token.value, '');
+  assert.equal(name.value, '');
+});
+
 test('Cursor discovery response cannot replace a newer successful manual login', async () => {
   let finish;
   const h = harness('cursor', { status: () => new Promise(resolve => { finish = resolve; }), loginManual: async () => ({ ok: true, status: { accounts: [{ id: 'fresh', accountKey: 'fresh' }] } }) });

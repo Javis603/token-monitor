@@ -12731,7 +12731,8 @@ async function refreshLimitAccount(provider) {
       accountEmail: provider.accountEmail,
       accountName: provider.accountName,
       accountLabel: provider.accountLabel,
-      sourceDetail: provider.sourceDetail
+      sourceDetail: provider.sourceDetail,
+      region: provider.region
     });
   } catch (_) {
     result = { ok: false, reason: 'failed' };
@@ -12838,7 +12839,19 @@ function setupLimitAccountPanels() {
     container.insertBefore(panel, nextGroup || null);
     if (form.accountSlots && !form.accountSlotOwner) {
       const details = panel.querySelector('.cursor-settings-details');
-      for (const child of [...details.children]) child.remove();
+      if (form.id === 'volcengine') {
+        // Migration retains local credentials completed by the environment.
+        const retained = document.createElement('details');
+        retained.id = 'volcengineFixedCredentialForm';
+        retained.className = 'hidden';
+        const summary = document.createElement('summary');
+        summary.dataset.i18n = 'settings.slots.savedSource';
+        summary.textContent = t(summary.dataset.i18n);
+        retained.append(summary, ...details.children);
+        details.append(retained);
+      } else {
+        for (const child of [...details.children]) child.remove();
+      }
       const slotsPanel = window.TokenMonitorAccountSlotsPanel.createPanel({
         loginAction: window.tokenMonitor[form.id],
         form, label: LIMIT_PROVIDERS.find(provider => provider.id === form.id).label,
@@ -16898,7 +16911,13 @@ function renderExternalProviderStatus(providerName) {
   const logoutBtn = document.getElementById(`${providerName}LogoutButton`);
   const manualPanel = document.getElementById(`${providerName}ManualPanel`);
   const errorEl = document.getElementById(`${providerName}ErrorMessage`);
-  if (statusEl && limitAccountForm(providerName)?.accountSlots && !limitAccountForm(providerName)?.accountSlotOwner) {
+  const retained = providerName === 'volcengine' && state.settings?.volcengineFixedCredentialsStored === true;
+  if (providerName === 'volcengine') {
+    const fixedForm = document.getElementById('volcengineFixedCredentialForm');
+    fixedForm?.classList.toggle('hidden', !retained);
+    if (fixedForm && !retained) fixedForm.open = false;
+  }
+  if (!retained && statusEl && limitAccountForm(providerName)?.accountSlots && !limitAccountForm(providerName)?.accountSlotOwner) {
     const summary = accountSlotPanels.get(providerName)?.summary();
     setCursorStatusText(statusEl, summary?.total ? t('settings.opencode.connected', summary) : t(limitAccountForm(providerName).emptyKey));
     return;
@@ -16965,7 +16984,7 @@ function renderExternalProviderStatus(providerName) {
     manualPanel.classList.remove('hidden');
     openBtn.classList.remove('hidden');
   }
-  const canClearConfiguredCredential = source === 'settings' && configured;
+  const canClearConfiguredCredential = retained || (source === 'settings' && configured);
   logoutBtn.classList.toggle('hidden', !canClearConfiguredCredential);
   if (providerName === 'claude') logoutBtn.classList.add('hidden');
   renderSettingsSummaries();

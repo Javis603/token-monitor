@@ -69,3 +69,24 @@ test('a probe in flight covers the rows the runtime would file its answer under'
   // Exactly the runtime's own scope match, from the same module.
   assert.ok(accountScope.rowMatchesScope(row, { accountKey: ' k-1 ' }));
 });
+
+test('the Limits renderer refreshes only the selected Alibaba plan for a shared UID', async () => {
+  const fs = require('node:fs');
+  const vm = require('node:vm');
+  const { alibabaAccountSlotsForScope } = require('../../src/shared/providers/alibaba/runtimeIdentity');
+  const app = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
+  const handler = app.slice(app.indexOf('async function refreshLimitAccount('), app.indexOf('async function clearAccountCredential('));
+  const slots = ['cn', 'cn-personal'].map(region => ({
+    accountKey: 'same-uid', accountKeyAliases: [], values: { alibabaVariant: region }
+  }));
+  const rows = [];
+  const refreshLimitAccount = vm.runInNewContext(handler + ';refreshLimitAccount', {
+    window: { tokenMonitor: { limits: { refresh(provider, row) {
+      rows.push(...alibabaAccountSlotsForScope(slots, limitAccountRefreshScope(provider, row)));
+      return { ok: true };
+    } } } },
+    refreshStats() {}
+  });
+  assert.equal((await refreshLimitAccount({ provider: 'alibaba', accountKey: 'same-uid', region: 'cn-personal' })).ok, true);
+  assert.deepEqual(rows, [slots[1]]);
+});

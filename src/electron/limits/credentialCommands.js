@@ -14,7 +14,7 @@
 
 const { parseLimitProviders } = require('../../shared/limits/collector');
 const { LIMIT_PROVIDER_REGISTRY, limitProviderEntry } = require('../../shared/limits/registry');
-const { accountForm, limitsAccountConfig, normalizeAccountField } = require('./accountSettings');
+const { accountForm, hasRetainedFixedCredential, limitsAccountConfig, normalizeAccountField } = require('./accountSettings');
 
 // A probe can only prove a credential wrong when the provider itself says so.
 // Everything else — throttling, an outage, a timeout, a malformed answer — says
@@ -97,6 +97,8 @@ function createCredentialCommands({ getSettings, applySettingsPatch, commitCrede
     return entry?.form ? entry : null;
   }
 
+  const hasRetainedCredential = providerId => hasRetainedFixedCredential(formEntry(providerId), getSettings());
+
   // A settings write that reaches a form's fields through any other path makes
   // an in-flight probe stale, so its result must not land over that write.
   function noteSettingsPatch(patch) {
@@ -117,6 +119,11 @@ function createCredentialCommands({ getSettings, applySettingsPatch, commitCrede
     const revision = nextRevision(entry.id);
     const { candidate, rejected } = draftFor(entry, values, includeIndependentSettings);
     if (rejected) return rejected;
+    const retained = hasRetainedFixedCredential(entry, getSettings());
+    if (retained) {
+      // In this compatibility form, blank passwords leave local values in place.
+      for (const { key, secret } of formFields(entry)) if (secret && !candidate[key]) delete candidate[key];
+    }
     const discover = accountForm(entry).discover;
     const submittedCredential = discover && candidate[discover.credential];
     const pendingRenewal = pendingRenewals.get(entry.id);
@@ -179,7 +186,9 @@ function createCredentialCommands({ getSettings, applySettingsPatch, commitCrede
     let status;
     let errorCode = '';
     try {
-      provider = await entry.fetchLimits({ ...options, ...candidate }, deps);
+      provider = retained
+        ? await entry.limits.probeRetainedCredentials(getSettings(), candidate, { ...deps, env })
+        : await entry.fetchLimits({ ...options, ...candidate }, deps);
       if (Array.isArray(provider)) {
         const rows = provider.filter(row => row && !row.removed);
         provider = rows.find(row => row.status === 'ok')
@@ -226,7 +235,7 @@ function createCredentialCommands({ getSettings, applySettingsPatch, commitCrede
     if (!entry) return { cleared: false };
     // Owner-backed legacy forms clear only their fixed credential lane. Their
     // saved slots remain under the provider's management commands.
-    if (entry.accountSlots && (!entry.accountSlotOwner || accountForm(entry)?.kind === 'custom')) return { cleared: false, errorCode: 'accountSlotRequired' };
+    if (entry.accountSlots && (!entry.accountSlotOwner || accountForm(entry)?.kind === 'custom') && !hasRetainedCredential(entry.id)) return { cleared: false, errorCode: 'accountSlotRequired' };
     // MiniMax's multi-key panel owns a profile store this command cannot write.
     if (entry.id === 'minimax') return { cleared: false, errorCode: 'customForm' };
     pendingRenewals.delete(entry.id);
@@ -254,7 +263,7 @@ function createCredentialCommands({ getSettings, applySettingsPatch, commitCrede
     }
   }
 
-  return { saveCredential, clearCredential, listOrganizationChoices, noteSettingsPatch };
+  return { saveCredential, clearCredential, hasRetainedCredential, listOrganizationChoices, noteSettingsPatch };
 }
 
 module.exports = {

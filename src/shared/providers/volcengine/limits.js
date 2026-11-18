@@ -715,6 +715,47 @@ async function confirmVolcengineArkExhausted(credentials, deps, model, now, init
   }
 }
 
+// Validate only the edited credential lanes. Environment companions are used
+// for the probe, while main persists only the locally submitted fields.
+async function probeRetainedCredentials(settings, draft, deps) {
+  const values = { ...settings, ...draft };
+  const env = deps.env || {};
+  const now = (deps.now || Date.now)();
+  const updatedAt = new Date(now).toISOString();
+  const jobs = [];
+  if (draft.volcengineAccessKeyId || draft.volcengineSecretAccessKey) {
+    const credentials = volcengineCredentials(env, { ...values, volcengineApiKey: '' });
+    if (credentials?.mode === 'signed') {
+      jobs.push(fetchVolcengineLimits({
+        volcengineAccessKeyId: credentials.accessKeyId, volcengineSecretAccessKey: credentials.secretAccessKey,
+        volcengineRegion: credentials.region, volcengineSourcePreference: 'api'
+      }, { ...deps, env: {} }));
+    } else if (draft.volcengineAccessKeyId && credentials?.apiKey === draft.volcengineAccessKeyId) {
+      jobs.push(fetchVolcengineArkLimits(credentials, deps, now, updatedAt));
+    } else {
+      jobs.push([{ status: 'notConfigured' }]);
+    }
+  }
+  if (draft.volcengineApiKey) {
+    const credentials = volcengineCredentials(env, { volcengineApiKey: draft.volcengineApiKey, volcengineRegion: values.volcengineRegion });
+    jobs.push(fetchVolcengineArkLimits({ apiKey: draft.volcengineApiKey, region: credentials.region }, deps, now, updatedAt));
+  }
+  if (draft.volcengineAgentAccessKeyId || draft.volcengineAgentSecretAccessKey) {
+    const agent = volcengineAgentCredentials(env, values);
+    jobs.push(agent?.mode === 'signed' && agent.explicit
+      ? fetchVolcengineAgentPlanLimits(agent, deps, now, updatedAt)
+      : [{ status: 'notConfigured' }]);
+  }
+  const results = await Promise.allSettled(jobs);
+  const rows = results.map(result => {
+    if (result.status === 'rejected') return { status: result.reason?.status || 'unavailable' };
+    const candidates = Array.isArray(result.value) ? result.value : [result.value];
+    return candidates.find(row => row.status === 'ok') || candidates[0] || { status: 'unavailable' };
+  });
+  return rows.find(row => row.status === 'unauthorized' || row.status === 'notConfigured')
+    || rows.find(row => row.status !== 'ok') || rows[0] || { status: 'notConfigured' };
+}
+
 function accountSlotMigrationNeedsEnvironment(values, env) {
   return (volcengineCredentials(env, values)?.mode === 'signed' && volcengineCredentials({}, values)?.mode !== 'signed'
       && Boolean(values.volcengineAccessKeyId || values.volcengineSecretAccessKey))
@@ -752,7 +793,7 @@ function volcengineArkKey(env) { return pickFirst(env, ['ARK_API_KEY', 'VOLCENGI
 function volcenginePrimaryKey(env) { const c = volcengineCredentials(env); return c?.accessKeyId || c?.apiKey || ''; }
 function volcenginePrimarySecret(env) { return volcengineCredentials(env)?.secretAccessKey || ''; }
 
-module.exports = { accountSlotMultiRow: true, accountSlotKeys, accountSlotMigrationNeedsEnvironment, fetchAccountSlotSnapshot, volcenginePrimaryKey, volcenginePrimarySecret, volcengineArkKey,
+module.exports = { probeRetainedCredentials, accountSlotMultiRow: true, accountSlotKeys, accountSlotMigrationNeedsEnvironment, fetchAccountSlotSnapshot, volcenginePrimaryKey, volcenginePrimarySecret, volcengineArkKey,
   VOLCENGINE_FETCH_TIMEOUT_MS,
   VOLCENGINE_CODING_PLAN_URL,
   VOLCENGINE_ARK_CHAT_COMPLETIONS_URL,

@@ -29,6 +29,83 @@ test('Volcengine migration leaves a stored access key paired with its environmen
   assert.equal(settings.volcengineAccountSlots, undefined);
   assert.equal(limitProviderEntry('volcengine').limits.volcengineCredentials(env, settings)?.mode, 'signed');
 });
+test('Volcengine retains controls to replace and clear a fixed key backed by an environment secret', async t => {
+  const { createCredentialCommands } = require('../../src/electron/limits/credentialCommands');
+  const store = fixture(t, { volcengineAccessKeyId: 'AKLT-before-fixture' });
+  const env = { VOLCENGINE_SECRET_ACCESS_KEY: 'environment-fixture-secret' };
+  let settings = migrateAccountSlots(store, {}, Date.now, env);
+  const service = createAccountSlotService({ getSettings: () => settings, env });
+  assert.deepEqual(service.list('volcengine').accounts, []);
+  assert.equal(accountStatusProjection(settings, env).volcengineFixedCredentialsStored, true);
+  const signed = [];
+  const commands = createCredentialCommands({
+    getSettings: () => settings, env,
+    applySettingsPatch(patch) {
+      store.replaceSettingsCredentials({ ...settings, ...patch });
+      settings = { ...settings, ...patch };
+      return accountStatusProjection(settings, env);
+    },
+    probeDeps: () => ({ fetch: async (url, options) => {
+      signed.push(options.headers.Authorization ?? options.headers.authorization);
+      if (String(url).includes('GetAFPUsage')) return { ok: false, status: 403, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({ Result: { QuotaUsage: [{ Level: 'session', Percent: 10 }] } }) };
+    } })
+  });
+  const vm = require('node:vm');
+  const { createDocument } = require('./accountOwnerDom.fixture.cjs');
+  const limitAccountPanelsApi = require('../../src/electron/renderer/limits/accountPanels');
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const document = createDocument();
+  document.root.id = 'accountsSettingsDetails';
+  document.querySelectorAll = () => [...document.root.walk()]
+    .filter(node => node.dataset.credentialForm === 'volcengine' && node.dataset.byField);
+  const app = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'volcengine');
+  const state = { settings: { ...accountStatusProjection(settings, env), limitAccountForms: [form] }, accountPanelMessages: {} };
+  const context = {
+    document, state, limitAccountPanelsApi, limitAccountForm: () => form,
+    LIMIT_PROVIDERS: [{ id: 'volcengine', label: 'Volcengine' }],
+    window: { TokenMonitorAccountSlotsPanel: { createPanel: () => ({
+      element: document.createElement('div'), summary: () => ({ total: 0, linked: 0 })
+    }) }, tokenMonitor: { limits: {} } },
+    accountSlotPanels: new Map(), preserveSettingsPanelScroll: callback => callback(),
+    limitProviderAccountGroup: () => null, setExternalAccountExpanded() {}, initSettingsAnimationWrappers() {},
+    externalProviderForAccount: () => null, externalProviderAccountLinked: () => false,
+    externalProviderCheckSettled: new Set(), limitProviderEnabled: () => true,
+    t: key => key, setCursorStatusText() {}, apiKeyAccountStatusText: () => '', renderSettingsSummaries() {},
+    legacyAccountOwners: { claude: { editor: {} } },
+    saveAccountCredential(id, values) { return commands.saveCredential(id, values); },
+    async clearAccountCredential(id) {
+      const result = await commands.clearCredential(id);
+      state.settings = { ...state.settings, ...result.settings };
+      context.renderExternalProviderStatus(id);
+      return result;
+    }
+  };
+  const setup = app.slice(app.indexOf('function setupLimitAccountPanels('), app.indexOf('function limitProviderAccountGroup('));
+  const status = app.slice(app.indexOf('function renderExternalProviderStatus('), app.indexOf('function renderOpenCodeProfiles('));
+  vm.runInNewContext(setup + status + '\nsetupLimitAccountPanels();', context);
+  const retained = document.getElementById('volcengineFixedCredentialForm');
+  assert.equal(retained.classList.contains('hidden'), false);
+  const input = document.getElementById('volcengineAccessKeyIdInput');
+  assert.equal(input.value, '');
+  assert.ok(retained.contains(input));
+  assert.ok(retained.contains(document.getElementById('volcengineLogoutButton')));
+  input.value = 'AKLT-after-fixture';
+  let saved;
+  context.saveAccountCredential = async (id, values) => { saved = await commands.saveCredential(id, values); return saved; };
+  await document.getElementById('volcengineCredentialSubmit').click();
+  assert.equal(saved.verdict, 'valid');
+  assert.ok(signed.some(header => header?.includes('Credential=AKLT-after-fixture/')));
+  assert.equal(store.settingsCredentials().volcengineAccessKeyId, 'AKLT-after-fixture');
+  assert.equal(store.settingsCredentials().volcengineSecretAccessKey, undefined);
+  assert.equal((await document.getElementById('volcengineLogoutButton').click()).cleared, true);
+  assert.equal(retained.classList.contains('hidden'), true);
+  assert.equal(accountStatusProjection(settings, env).volcengineFixedCredentialsStored, false);
+  assert.equal(env.VOLCENGINE_SECRET_ACCESS_KEY, 'environment-fixture-secret');
+  assert.equal(store.settingsCredentials().volcengineAccessKeyId, undefined);
+});
+
 test('Volcengine migration retains a complete Coding pair with a split Agent pair', async t => {
   const stored = { volcengineAccessKeyId: 'AKLT-coding', volcengineSecretAccessKey: 'coding-secret',
     volcengineAgentAccessKeyId: 'AKLT-agent' };
@@ -142,9 +219,19 @@ test('environment credential is ephemeral and read-only, with movable presentati
   assert.equal(writes, 1);
 });
 
-test('fixed-form IPC routes slot providers to add; settings saves do not re-run the migration', () => {
+test('fixed-form IPC adds ordinary slots and edits retained credentials in place', () => {
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
-  assert.match(main, /ACCOUNT_SLOT_PROVIDER_IDS.has\(providerId\) \? accountSlotService.add\(providerId, values\)/);
+  const vm = require('node:vm');
+  const start = main.indexOf("ipcMain.handle('limits:saveCredential'");
+  let save;
+  vm.runInNewContext(main.slice(start, main.indexOf('\n', start)), {
+    ipcMain: { handle: (_channel, handler) => { save = handler; } },
+    ACCOUNT_SLOT_PROVIDER_IDS: new Set(['volcengine', 'qoder']),
+    credentialCommands: { hasRetainedCredential: id => id === 'volcengine', saveCredential: () => 'fixed' },
+    accountSlotService: { add: () => 'slot' }
+  });
+  assert.equal(save(null, 'volcengine', {}), 'fixed');
+  assert.equal(save(null, 'qoder', {}), 'slot');
   assert.doesNotMatch(main.slice(main.indexOf('function saveSettings('), main.indexOf('function seedInitialLimitProviders(')), /migrateAccountSlots/);
   const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   assert.doesNotMatch(app, /defaultParking|openDefault|defaultPanel/);
