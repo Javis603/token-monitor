@@ -97,13 +97,13 @@ function iconKindFor(rowData, breakdown) {
 
 const LIMIT_PROVIDER_ACCOUNT_NODES = {
   codex: { group: 'codexAccountGroup', status: 'codexAccountStatus' },
-  opencode: { group: 'opencodeCookieGroup', status: 'opencodeCookieStatus' },
-  cursor: { group: 'cursorAccountGroup', status: 'cursorAccountStatus' },
-  antigravity: { group: 'antigravityAccountGroup', status: 'antigravityAccountStatus' },
+  opencode: { group: 'opencodeCookieGroup', status: 'opencodeCookieStatus', localSummary: true },
+  cursor: { group: 'cursorAccountGroup', status: 'cursorAccountStatus', localSummary: true },
+  antigravity: { group: 'antigravityAccountGroup', status: 'antigravityAccountStatus', localSummary: true },
   mimo: { group: 'mimoAccountGroup', status: 'mimoAccountStatus' },
-  workbuddy: { group: 'workbuddyAccountGroup', status: 'workbuddyAccountStatus' },
-  minimax: { group: 'minimaxAccountGroup', status: 'minimaxStatus' },
-  thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
+  workbuddy: { group: 'workbuddyAccountGroup', status: 'workbuddyAccountStatus', localSummary: true },
+  minimax: { group: 'minimaxAccountGroup', status: 'minimaxStatus', localSummary: true },
+  thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus', localSummary: true }
 };
 const TRAY_ICON_VARIANTS = [
   { id: 'claude-brand', label: 'Claude', after: 'claude' },
@@ -12442,6 +12442,9 @@ function renderLimitProviderCheckboxesNow() {
   }
   const enabled = enabledLimitProviderSet();
   const filtering = Boolean(limitProviderQuery());
+  const localId = state.settings?.deviceId;
+  const remoteProviders = new Set((state.stats?.limits?.providers || [])
+    .filter(row => row.accountKey && row.sourceDeviceId && row.sourceDeviceId !== localId).map(row => row.provider));
   for (const { id, label, settingsLabel } of providers) {
     const isEnabled = enabled.has(id);
     const provider = isEnabled
@@ -12513,6 +12516,16 @@ function renderLimitProviderCheckboxesNow() {
     const accountStatus = limitProviderAccountStatus(id);
     if (accountStatus) {
       accountStatus.classList.toggle('hidden', !isEnabled);
+      // Provider-owned login summaries describe this device. Keep a local
+      // failure visible even if a different device can still supply quota.
+      if (localId && (id === 'claude' || LIMIT_PROVIDER_ACCOUNT_NODES[id]?.localSummary) && remoteProviders.has(id)) {
+        const scope = t('settings.sync.panel.thisDevice');
+        accountStatus.dataset.localScope = scope;
+        accountStatus.setAttribute('aria-description', scope);
+      } else if (accountStatus.dataset?.localScope) {
+        delete accountStatus.dataset.localScope;
+        accountStatus.removeAttribute('aria-description');
+      }
       if (!isEnabled) {
         const disabledStatus = document.createElement('span');
         disabledStatus.className = 'cursor-status-pill';

@@ -268,7 +268,9 @@ test('automatic provenance follows managed/app ownership instead of the quota en
   assert.equal(byKey('managed').querySelector('.slot-status').textContent, t('settings.slots.savedSource'));
   assert.equal(byKey('app').querySelector('.slot-status').textContent, t('settings.limits.sources.desktop'));
   assert.equal(byKey('unknown').querySelector('.slot-detail'), undefined);
-  for (const row of rows(container)) assert.equal(row.querySelector('.slot-name').textContent, 'Account');
+  const names = rows(container).map(row => row.querySelector('.slot-name').textContent);
+  assert.equal(new Set(names).size, 3);
+  for (const name of names) assert.match(name, /^Account · #/);
 });
 
 test('automatic and legacy account rows respect provider collection state without overriding remote status', () => {

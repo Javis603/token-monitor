@@ -47,7 +47,7 @@ class Node {
   click() { const result = this.listeners.click?.({ detail: 0 }); if (this.attributes.popovertarget) { const menu = this.document.getElementById(this.attributes.popovertarget); if (menu.popoverOpen) menu.hidePopover(); else menu.showPopover(); } return result; }
   key(key, altKey = false) { return this.listeners.keydown?.({ key, altKey, preventDefault() {}, stopPropagation() {} }); }
 }
-function harness(translateMessage = t, providerId = 'qoder', loginAction) {
+function harness(translateMessage = t, providerId = 'qoder', loginAction, maskEmail) {
   const document = { defaultView: { innerWidth: 400, innerHeight: 400, addEventListener() {}, removeEventListener() {} }, addEventListener() {}, removeEventListener() {}, moves: 0, createElement: tag => new Node(tag, document), createTextNode: text => ({ textContent: text }), getElementById: id => document.root.querySelector(`#${id}`) };
   const calls = []; let verdict = { saved: true, verdict: 'valid', accounts: [] };
   const records = [{ id: 'a', label: 'Zulu', fingerprint: 'aa', accountKey: 'ka', enabled: true }, { id: 'b', label: 'Alpha', fingerprint: 'bb', accountKey: 'kb', enabled: false }];
@@ -62,7 +62,7 @@ function harness(translateMessage = t, providerId = 'qoder', loginAction) {
   const defaultForm = createCredentialPanel(limitAccountFormsForRenderer().find(f => f.id === providerId), { document, translate: t, onToggle() {}, onClear() {}, onOpen() {}, onRefresh() {}, onSave() {} });
   for (const child of [...defaultForm.querySelector('.cursor-settings-details').children]) defaultPanel.append(child);
   host.append(defaultPanel);
-  const panel = createPanel({ loginAction, defaultPanel, form: limitAccountFormsForRenderer().find(f => f.id === providerId), label: 'Qoder', document, t: translateMessage, ipc, forms: { createCredentialPanel, resolveOpenUrl }, preserveScroll: fn => fn(), onChanged() {}, openExternal() {} });
+  const panel = createPanel({ loginAction, maskEmail, defaultPanel, form: limitAccountFormsForRenderer().find(f => f.id === providerId), label: 'Qoder', document, t: translateMessage, ipc, forms: { createCredentialPanel, resolveOpenUrl }, preserveScroll: fn => fn(), onChanged() {}, openExternal() {} });
   host.append(panel.element);
   document.root = host;
   const update = () => panel.update(slots, [{ accountKey: 'ka', status: 'unauthorized', updatedAt: new Date().toISOString() }], true);
@@ -81,6 +81,39 @@ test('slot names and status respect labels, native identity, fingerprint, pause 
   assert.equal(accountStatus({ enabled: true }, { status: 'ok', stale: true }), 'stale');
   assert.equal(accountStatus({ enabled: true }, { status: 'ok' }), 'connected');
 });
+test('account list distinguishes duplicate visible labels without revealing masked addresses', () => {
+  const { maskEmailAddress } = require('../../src/electron/renderer/accountIdentity');
+  const h = harness(t, 'qoder', undefined, maskEmailAddress);
+  const slots = [
+    { id: 'a', accountKey: 'alice@example.test', accountEmail: 'alice@example.test', enabled: true },
+    { id: 'b', accountKey: 'anne@example.test', accountEmail: 'anne@example.test', enabled: true }
+  ];
+  const title = id => h.row(id).querySelector('.slot-name').textContent;
+  h.panel.update(slots, []);
+  const first = title('a');
+  const second = title('b');
+  assert.match(first, /^a\*\*\*e@example\.test · #[a-f0-9]+$/);
+  assert.notEqual(first, second);
+  h.panel.update([...slots].reverse(), []);
+  assert.equal(title('a'), first);
+  assert.equal(title('b'), second);
+  h.panel.update(slots.map(row => ({ ...row, label: 'Work' })), []);
+  assert.match(title('a'), /^Work · #/);
+  assert.notEqual(title('a'), title('b'));
+});
+
+for (const [provider, expected] of [['ollama', 'settings.slots.invalidKey'], ['trae', 'settings.slots.fixToken']]) {
+  test(`${provider} reports the failed credential lane for API and Web rows`, () => {
+    const h = harness(key => key, provider);
+    const slots = [{ id: 'a', accountKey: 'api', enabled: true }, { id: 'b', accountKey: 'web', enabled: true }];
+    h.panel.update(slots, [
+      { accountKey: 'api', source: 'api', status: 'unauthorized' },
+      { accountKey: 'web', source: 'web', status: 'unauthorized' }
+    ]);
+    assert.equal(h.row('a').querySelector('.slot-status').textContent, expected);
+    assert.equal(h.row('b').querySelector('.slot-status').textContent, 'settings.slots.invalidCookie');
+  });
+}
 test('stored account order is applied after name aggregation without mutating input', () => {
   const records = [{ provider: 'qoder', accountKey: 'b' }, { provider: 'deepseek' }, { provider: 'qoder', accountKey: 'default' }, { provider: 'qoder', accountKey: 'a' }];
   const ordered = applyAccountOrder(records, { qoder: [{ accountKey: 'a' }, { accountKey: 'b' }] });

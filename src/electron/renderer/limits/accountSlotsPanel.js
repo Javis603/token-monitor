@@ -143,10 +143,11 @@
     const slotButton = (key, fn, params) => localized(button(tr(key, params), fn), `settings.slots.${key}`, params);
     const cookie = form.fields.some(field => /cookie/i.test(field.key));
     // Bearer and session tokens (Copilot, Devin, Manus) are not API keys.
-    const credentialWord = cookie ? 'Cookie' : form.fields.some(field => /apikey/i.test(field.key)) ? 'Key'
-      : form.fields.some(field => /token/i.test(field.key)) ? 'Token' : 'Key';
+    const apiCredential = form.fields.some(field => /apikey/i.test(field.key)) ? 'Key'
+      : form.fields.some(field => /token/i.test(field.key)) ? 'Token' : '';
+    const credentialWord = cookie ? 'Cookie' : apiCredential || 'Key';
     function credentialKind(slot, reading) {
-      if (!customEditor) return credentialWord;
+      if (!customEditor) return reading?.source === 'api' && apiCredential ? apiCredential : credentialWord;
       if (form.id === 'minimax') return 'Key';
       if (form.id === 'claude') return 'Cookie';
       if (form.id === 'thirdparty') return slot?.adapter === 'newapi-account' || slot?.adapter === 'sub2api' ? 'Token'
@@ -157,7 +158,11 @@
     function statusLabel(status, slot, reading) {
       if (['disabled', 'limited', 'usageApiLimited'].includes(status)) return t(`settings.limits.status.${status}`);
       if (status !== 'invalid') return tr(status);
+      if (form.id === 'antigravity' && reading?.actionRequired === 'accountVerification') {
+        return t('settings.antigravity.verificationRequired');
+      }
       const kind = credentialKind(slot, reading);
+      if (kind === 'Token') return tr('fixToken');
       return kind === 'Cookie' || kind === 'Key' ? tr(`invalid${kind}`) : t('settings.limits.status.signInAgain');
     }
     const root = make('div', 'slot-panel');
@@ -767,13 +772,29 @@
       if (editorOwner != null && !active.some(slot => slot.id === editorOwner)) closeEditor(true);
       add.disabled = Boolean(addBlocked()) || (editorOwner === undefined && !addCanToggle() && Boolean(isBusy()));
       for (const [id, item] of rows) if (!active.some(slot => slot.id === id)) { item.el.remove(); rows.delete(id); }
-      active.forEach((slot, index) => {
+      const displayed = active.map(slot => {
+        const reading = accountReading(slot);
+        const accountDisplayName = accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') },
+          reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading,
+          t, presentation);
+        return { id: slot.id, accountKey: selectionKey(form.id, slot), accountDisplayName, reading, slot };
+      });
+      const peersByName = new Map();
+      for (const account of displayed) {
+        const name = account.accountDisplayName.toLowerCase();
+        if (!peersByName.has(name)) peersByName.set(name, []);
+        peersByName.get(name).push(account);
+      }
+      displayed.forEach((account, index) => {
+        const { slot, reading } = account;
         const item = rowFor(slot.id);
         item.slot = slot;
         item.el.dataset.slotDraggable = 'true';
         const remote = slot.source === 'remote';
-        const reading = accountReading(slot);
-        if (!item.editing) item.name.textContent = accountName({ ...slot, accountEmail: maskEmail(slot.accountEmail || '') }, reading ? { ...reading, accountEmail: maskEmail(reading.accountEmail || ''), email: maskEmail(reading.email || '') } : reading, t, presentation);
+        if (!item.editing) {
+          const name = accountIdentity.accountTitleLabel(account, peersByName.get(account.accountDisplayName.toLowerCase()), { index });
+          if (item.name.children.length || item.name.textContent !== name) item.name.textContent = name;
+        }
         const status = accountStatus(slot, statusReading(slot, reading), remote || providerEnabled);
         const source = sourceText(slot, reading) || slot.sourceName || presentationApi.limitProviderSourceLabel(reading) || '';
         const secondary = secondaryText(slot);

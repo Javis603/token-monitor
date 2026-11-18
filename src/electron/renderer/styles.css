@@ -2785,6 +2785,9 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   overflow-wrap: anywhere;
   text-align: center;
 }
+.limit-provider-actions > .cursor-status-pill[data-local-scope]::before {
+  content: attr(data-local-scope) " · ";
+}
 .limit-provider-row.expanded > .limit-provider-main .cursor-disclosure-icon {
   transform: rotate(180deg);
 }

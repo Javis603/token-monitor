@@ -2187,7 +2187,7 @@ test('AI Tool Limits owns every live account group and its status pill', () => {
   ];
 
   for (const [provider, groupId, statusId] of providers) {
-    assert.match(accountNodes, new RegExp(`${provider}: \\{ group: '${groupId}', status: '${statusId}' \\}`));
+    assert.match(accountNodes, new RegExp(`${provider}: \\{ group: '${groupId}', status: '${statusId}'(?:, localSummary: true)? \\}`));
     assert.match(html, new RegExp(`id="${groupId}"`));
     assert.match(html, new RegExp(`id="${statusId}"[^>]*class="cursor-status-pill`));
   }
