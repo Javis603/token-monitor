@@ -87,4 +87,29 @@ function startWithXWayland({
   if (!packaged) child.once('exit', (code) => { if (spawned) app.exit(code ?? 1); });
 }
 
-module.exports = { shouldUseXWayland, canPositionWindow, startWithXWayland };
+const suppressedSystemContextMenuWindows = new WeakSet();
+
+// Right-clicking a frameless window's `-webkit-app-region: drag` surface on
+// Linux X11 triggers Electron's `system-context-menu` and sends
+// `_GTK_SHOW_WINDOW_MENU` to the window manager. Under GNOME Shell/Mutter X11
+// this hits a BoxPointer NaN allocation and can leave a synchronous
+// `Virtual core pointer` passive grab frozen after the next left click (#1011).
+// Suppressing the WM window menu on X11 preserves native dragging and renderer
+// `contextmenu` handling on `no-drag` controls.
+function suppressLinuxSystemContextMenu(win, { platform = process.platform, env = process.env, argv = process.argv } = {}) {
+  if (platform !== 'linux' || !canPositionWindow({ platform, env, argv })) return false;
+  if (!win || typeof win.on !== 'function' || win.isDestroyed?.()) return false;
+  if (suppressedSystemContextMenuWindows.has(win)) return true;
+  suppressedSystemContextMenuWindows.add(win);
+  win.on('system-context-menu', (event) => {
+    event?.preventDefault?.();
+  });
+  return true;
+}
+
+module.exports = {
+  shouldUseXWayland,
+  canPositionWindow,
+  startWithXWayland,
+  suppressLinuxSystemContextMenu
+};

@@ -376,7 +376,7 @@ const { projectLimitStatsForDisplay } = require('./limits/statsPresentation');
 const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidget/reloader');
 const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidget/demand');
 const linuxAutostart = require('./linuxAutostart');
-const { canPositionWindow } = require('./linuxDisplayServer');
+const { canPositionWindow, suppressLinuxSystemContextMenu } = require('./linuxDisplayServer');
 const { codexAccountIdForProvider, localLiveCodexProvider } = require('./renderer/accountIdentity');
 const {
   buildTrayIcon,
@@ -7933,6 +7933,7 @@ function createWindow(boundsOverride, options = {}) {
   mainWindowChrome = { collapsedFloatingBubble };
   applyMacSpaceBehavior();
   applyWindowsChrome(win, { round: true });
+  suppressLinuxSystemContextMenu(win);
   win.on('maximize', () => {
     if (!shouldTrackWindowMaximized(settings, floatingBubbleState)) {
       // A tray popover is sized from getBounds() on every open, so a maximized
@@ -8150,6 +8151,7 @@ function createDashboardWindow() {
   dashboardWindow = win;
   dashboardWindowReady = false;
   applyWindowsChrome(win, { round: true });
+  suppressLinuxSystemContextMenu(win);
   syncWindowsBackdrop(win, { enabled: nativeBlurEnabled() });
   attachNativeMaterialVisibility(win, () => nativeMaterialOptions(settings, true));
   syncNativeMaterialVisibility(win, nativeMaterialOptions(settings, true));
