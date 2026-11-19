@@ -2344,15 +2344,30 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   flex: 0 1 auto;
 }
 .tool-status-tag {
-  flex: 0 1 auto;
-  max-width: 96px;
-  margin-left: 2px;
+  flex: 0 0 auto;
+  max-width: 100%;
   overflow: hidden;
+  padding: 1px 5px;
+  border: 1px solid rgba(var(--line-rgb), 0.13);
+  border-radius: 5px;
   color: var(--muted);
-  font-size: 0.59375rem;
+  font-size: 0.5625rem;
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* The tracked-tools row is the one place a status shares its line with the
+   switch and the row's own controls, so it drops the chip chrome and reads as
+   text with a tone dot. Its width is capped so a long status cannot push the
+   switch. The WSL panel keeps the chip: it has nothing else on the line. */
+.tool-preference-actions > .tool-status-tag {
+  flex: 0 1 auto;
+  max-width: 96px;
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: 0.59375rem;
 }
 /* Healthy: a dot, matching the limits list. */
 .tool-status-tag.is-dot {
@@ -2363,19 +2378,24 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   background: var(--success);
 }
 .tool-status-tag-ok {
+  border-color: rgba(var(--success-rgb), 0.28);
   color: var(--success);
 }
 .tool-status-tag-neutral {
+  border-color: rgba(var(--line-rgb), 0.2);
   color: var(--muted);
 }
 .tool-status-tag-muted {
+  border-color: rgba(var(--line-rgb), 0.13);
   color: var(--muted);
   opacity: 0.72;
 }
 .tool-status-tag-warn {
+  border-color: rgba(244, 160, 115, 0.42);
   color: var(--orange);
 }
 .tool-status-tag-setup {
+  border-color: rgba(244, 160, 115, 0.32);
   color: var(--orange);
 }
 .tool-preference-row.is-hidden .tool-preference-name,
