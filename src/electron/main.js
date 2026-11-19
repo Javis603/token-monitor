@@ -1162,7 +1162,9 @@ function electronLimitsDeps() {
     onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal,
     onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey,
     onEvent: (event) => {
-      if (event?.type === 'probe-start' || event?.type === 'probe-finish') publishLimitProbes(event.probes);
+      if (event?.type === 'probe-start' || event?.type === 'probe-finish') {
+        publishLimitProbes(event.probes, { finished: event.type === 'probe-finish' });
+      }
     }
   };
 }
@@ -1189,7 +1191,21 @@ async function refreshLimitProvider(providerId, account) {
 // The limits probes running right now, for the quota rows' refresh buttons to
 // show a background refresh as well as one the user started.
 let limitProbes = [];
-function publishLimitProbes(probes) {
+function publishLimitProbes(probes, { finished = false } = {}) {
+  if (settings?.hubMode === 'client') {
+    if (finished && syncStatsPublication.hasPendingLocal()) {
+      // A completed probe's record is already in the batch. Let Settings
+      // receive it before removing the probe that keeps the row Checking.
+      pendingClientLimitProbes = probes;
+      return;
+    }
+    if (pendingClientLimitProbes !== null) {
+      // A fresh probe list supersedes the deferred one, but must still follow
+      // the pending readings before it can remove those completed probes.
+      pendingClientLimitProbes = null;
+      syncStatsPublication.flush();
+    }
+  }
   limitProbes = Array.isArray(probes) ? probes : [];
   edgeDockController?.setLimitProbes(limitProbes);
   if (!mainWindow || mainWindow.isDestroyed()) return;
@@ -3762,6 +3778,7 @@ function stopSyncCollector(options = {}) {
   usageRuntimeReconciler.setActiveKey(null);
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
+  pendingClientLimitProbes = null;
   // A stopped runtime's probes finish unobserved.
   if (limitProbes.length) publishLimitProbes([]);
 }
@@ -3958,6 +3975,7 @@ async function startIcloudCollector() {
 // Well inside the 3–5 s update promise: a watch tick already waits out its own
 // debounce and scan before it gets here.
 const SYNC_STATS_PUBLISH_WINDOW_MS = 1000;
+let pendingClientLimitProbes = null;
 const syncStatsPublication = createStatsPublicationBatcher({
   windowMs: SYNC_STATS_PUBLISH_WINDOW_MS,
   publish: publishSyncDisplayStats
@@ -3976,6 +3994,11 @@ function publishSyncDisplayStats({ reason, at, generation, widgetProducerOwner }
   if (!displayStats) return;
   updateDiscordRpcDisplay(displayStats);
   sendPush({ event: 'stats', data: { type: 'stats', reason, stats: displayStats, at } }, { widgetProducerOwner });
+  if (pendingClientLimitProbes !== null) {
+    const probes = pendingClientLimitProbes;
+    pendingClientLimitProbes = null;
+    publishLimitProbes(probes);
+  }
 }
 
 function startSyncCollector() {

@@ -364,6 +364,65 @@ test('runtime replacement without a mode change invalidates the dock manual sour
   limits.resolve();
 });
 
+test('Client publishes quota results before retiring completed account probes', () => {
+  const { accountStatus } = require('../../src/electron/renderer/limits/accountSlotsPanel');
+  const trace = [];
+  const timers = [];
+  let reading;
+  let active = [];
+  const recordStatus = () => trace.push(accountStatus({ enabled: true }, reading, true, active.length > 0));
+  const context = {
+    hubModeGeneration: 1,
+    settings: { hubMode: 'client' },
+    hubModeRequestIsCurrent: () => true,
+    latestHubStats: {},
+    lastCollectedDevice: {},
+    composeLocalSyncSummary: (_hub, local) => local,
+    updateDiscordRpcDisplay() {},
+    edgeDockController: null,
+    mainWindow: { isDestroyed: () => false, webContents: { send: (_channel, probes) => { active = probes; recordStatus(); } } },
+    sendPush: ({ data }) => { reading = data.stats.reading; recordStatus(); },
+    createStatsPublicationBatcher: (options) => createStatsPublicationBatcher({
+      ...options,
+      setTimeout: (callback) => { timers.push(callback); return timers.length; },
+      clearTimeout() {}
+    })
+  };
+  vm.createContext(context);
+  vm.runInContext(main.slice(main.indexOf('let limitProbes = [];'), main.indexOf('let copilotLoginController')), context);
+  vm.runInContext(main.slice(main.indexOf('const SYNC_STATS_PUBLISH_WINDOW_MS ='), main.indexOf('function startSyncCollector(')), context);
+  const probe = { provider: 'antigravity', account: null };
+  context.publishLimitProbes([probe]);
+  context.lastCollectedDevice = { reading: { status: 'ok' } };
+  context.requestSyncDisplayStats({ reason: 'local', generation: 1 });
+  context.publishLimitProbes([], { finished: true });
+  assert.deepEqual(trace, ['checking'], 'the pending batch stays batched and the account stays checking');
+  timers[0]();
+  assert.deepEqual(trace, ['checking', 'connected', 'connected']);
+
+  reading = undefined;
+  context.lastCollectedDevice = {};
+  context.publishLimitProbes([probe]);
+  context.requestSyncDisplayStats({ reason: 'local', generation: 1 });
+  context.publishLimitProbes([], { finished: true });
+  assert.equal(trace.at(-1), 'checking');
+  timers[1]();
+  assert.deepEqual(trace.slice(-3), ['checking', 'checking', 'unavailable']);
+
+  context.publishLimitProbes([probe]);
+  context.lastCollectedDevice = { reading: { status: 'ok' } };
+  context.requestSyncDisplayStats({ reason: 'local', generation: 1 });
+  context.publishLimitProbes([], { finished: true });
+  context.publishLimitProbes([{ provider: 'cursor', account: null }]);
+  assert.deepEqual(trace.slice(-3), ['checking', 'connected', 'connected'], 'a later probe start cannot overtake the batch');
+
+  reading = undefined;
+  context.settings.hubMode = 'local';
+  context.publishLimitProbes([probe]);
+  context.publishLimitProbes([], { finished: true });
+  assert.deepEqual(trace.slice(-2), ['checking', 'unavailable'], 'a mode without the Client batch retires the probe immediately');
+});
+
 for (const entry of ['App', 'Edge Dock']) {
   test(`${entry} Client refresh adopts fresh Hub stats after its pending local publication batch`, async () => {
     const { context, response } = clientFixture();
