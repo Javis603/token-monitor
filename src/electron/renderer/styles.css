@@ -641,9 +641,11 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .settings-panel .checkbox-label > input[type="checkbox"] { order: 2; }
 /* iOS-style switch, drawn on the native checkbox so keyboard/a11y stay intact.
-   Scoped to .checkbox-label rows: compact list checkboxes (.client-checkbox,
-   .tool-preference-toggle) keep their native accent-color look. */
-.settings-panel .checkbox-label > input[type="checkbox"] {
+   Scoped to .checkbox-label rows and to list rows that opt in with
+   .settings-switch (tracked tools, limit providers); other compact list
+   checkboxes keep their native accent-color look. */
+.settings-panel .checkbox-label > input[type="checkbox"],
+.settings-panel input[type="checkbox"].settings-switch {
   appearance: none;
   -webkit-appearance: none;
   flex: 0 0 auto;
@@ -658,7 +660,8 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   cursor: pointer;
   transition: background 180ms ease, border-color 180ms ease;
 }
-.settings-panel .checkbox-label > input[type="checkbox"]::before {
+.settings-panel .checkbox-label > input[type="checkbox"]::before,
+.settings-panel input[type="checkbox"].settings-switch::before {
   content: "";
   position: absolute;
   top: 2px;
@@ -670,21 +673,34 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
   transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1), background 180ms ease;
 }
-.settings-panel .checkbox-label > input[type="checkbox"]:checked {
+.settings-panel .checkbox-label > input[type="checkbox"]:checked,
+.settings-panel input[type="checkbox"].settings-switch:checked {
   border-color: rgba(var(--accent-rgb), 0.5);
   background: rgba(var(--accent-rgb), 0.88);
 }
-.settings-panel .checkbox-label > input[type="checkbox"]:checked::before {
+.settings-panel .checkbox-label > input[type="checkbox"]:checked::before,
+.settings-panel input[type="checkbox"].settings-switch:checked::before {
   transform: translateX(14px);
   background: rgb(var(--panel-rgb));
 }
-.settings-panel .checkbox-label > input[type="checkbox"]:focus-visible {
+/* Mixed (Qoder tracks one of its two editions): the knob rests mid-track. */
+.settings-panel input[type="checkbox"].settings-switch:indeterminate {
+  border-color: rgba(var(--accent-rgb), 0.38);
+  background: rgba(var(--accent-rgb), 0.32);
+}
+.settings-panel input[type="checkbox"].settings-switch:indeterminate::before {
+  transform: translateX(7px);
+  background: rgb(var(--accent-rgb));
+}
+.settings-panel .checkbox-label > input[type="checkbox"]:focus-visible,
+.settings-panel input[type="checkbox"].settings-switch:focus-visible {
   outline: 1px solid rgba(115, 189, 245, 0.72);
   outline-offset: 2px;
 }
 /* Disabled switch (e.g. Tray-only mode while the tray icon is off): dim it and
    drop the pointer so it doesn't read as an available control. */
-.settings-panel .checkbox-label > input[type="checkbox"]:disabled {
+.settings-panel .checkbox-label > input[type="checkbox"]:disabled,
+.settings-panel input[type="checkbox"].settings-switch:disabled {
   opacity: 0.4;
   cursor: default;
 }
@@ -934,11 +950,11 @@ span.settings-note.settings-item-desc {
 }
 .settings-section-disclosure::before {
   content: "";
-  width: 5px;
-  height: 5px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: translateY(-1.5px) rotate(45deg);
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
 }
 .settings-section-summary,
 .settings-subgroup-summary {
@@ -1263,11 +1279,11 @@ span.settings-note.settings-item-desc {
 }
 .cursor-disclosure-icon::before {
   content: "";
-  width: 5px;
-  height: 5px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: translateY(-1.5px) rotate(45deg);
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
 }
 .cursor-account-group.expanded .cursor-disclosure-icon {
   transform: rotate(180deg);
@@ -2256,9 +2272,9 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .tool-preference-row {
   position: relative;
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) repeat(2, 22px);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  column-gap: 5px;
+  column-gap: 4px;
   margin: 0 -2px;
   padding: 1px 2px;
   border-radius: 6px;
@@ -2319,8 +2335,9 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 }
 .tool-preference-label {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   min-width: 0;
 }
 .tool-preference-label .tool-preference-name {
@@ -2338,6 +2355,27 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* The tracked-tools row is the one place a status shares its line with the
+   switch and the row's own controls, so it drops the chip chrome and reads as
+   text with a tone dot. Its width is capped so a long status cannot push the
+   switch. The WSL panel keeps the chip: it has nothing else on the line. */
+.tool-preference-actions > .tool-status-tag {
+  flex: 0 1 auto;
+  max-width: 96px;
+  margin-left: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: 0.59375rem;
+}
+/* Healthy: a dot, matching the limits list. */
+.tool-status-tag.is-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--success);
 }
 .tool-status-tag-ok {
   border-color: rgba(var(--success-rgb), 0.28);
@@ -2392,25 +2430,45 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 /* Collapsing must land instantly so the drag snapshot measures settled geometry
    rather than a mid-animation height. */
 .tool-preference-list.is-reordering .accordion-animated-container { transition: none; }
-/* The disclosure sits with the row's other controls, so it is sized like them. */
-.tool-preference-row.has-health {
-  grid-template-columns: 22px minmax(0, 1fr) repeat(3, 22px);
-}
+/* The whole leading area — chevron, icon, name, status — opens the row's
+   detail; the eye, pin and switch on the right own their own clicks. */
 .tool-preference-main {
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
   padding: 0;
   border: 0;
   border-radius: 5px;
   background: none;
   color: inherit;
   font: inherit;
-  cursor: pointer;
+  text-align: left;
 }
-.tool-preference-row.expanded .tool-preference-main .cursor-disclosure-icon {
-  transform: rotate(-180deg);
+button.tool-preference-main { cursor: pointer; }
+span.limit-provider-main { cursor: inherit; }
+button.tool-preference-main:focus-visible {
+  outline: 1px solid rgba(var(--accent-rgb), 0.62);
+  outline-offset: 2px;
+}
+/* Chevron column shared by both lists: right-pointing when closed, down when
+   open, and an empty slot when the row has nothing to open. */
+.tool-preference-chevron,
+.limit-provider-chevron {
+  display: inline-grid;
+  flex: 0 0 12px;
+  place-items: center;
+  width: 12px;
+}
+.tool-preference-chevron .cursor-disclosure-icon,
+.limit-provider-chevron .cursor-disclosure-icon {
+  transform: rotate(-90deg);
+}
+.tool-preference-row.expanded .tool-preference-chevron .cursor-disclosure-icon,
+.limit-provider-row.expanded .limit-provider-chevron .cursor-disclosure-icon {
+  transform: none;
 }
 .tool-health-inner {
   display: grid;
@@ -2645,19 +2703,40 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .tool-preference-actions {
   display: contents;
 }
+/* The tracked-tools row groups its controls in one flex run so the status can
+   sit against the switch whether or not the eye and pin are showing. */
+.tool-preference-row > .tool-preference-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+/* Eye and pin stay out of the way until the row is hovered or focused; a tool
+   that is hidden or pinned keeps its icon so the state reads at a glance. The
+   slots stay reserved so the status beside them never shifts. Untracked tools
+   never reach the main list, so the two controls have nothing to say there. */
+.tool-preference-row .tool-visibility-button {
+  color: var(--muted);
+}
+.tool-preference-row .tool-visibility-button:not(.is-hidden),
+.tool-preference-row .tool-pin-button:not(.is-pinned) {
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.tool-preference-row:is(:hover, :focus-within) .tool-visibility-button,
+.tool-preference-row:is(:hover, :focus-within) .tool-pin-button {
+  opacity: 1;
+}
+.tool-preference-row.is-untracked .tool-visibility-button,
+.tool-preference-row.is-untracked .tool-pin-button {
+  display: none;
+}
 .tool-preference-toggle {
   display: flex !important;
   align-items: center;
-  justify-content: center;
-  width: 22px;
   height: 22px;
   min-width: 0;
-  margin: 0;
-}
-.tool-preference-toggle input[type="checkbox"] {
-  width: auto;
-  margin: 0;
-  accent-color: var(--accent);
+  margin: 0 0 0 2px;
 }
 .tool-visibility-button,
 .tool-pin-button {
@@ -2721,7 +2800,7 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .settings-panel .limit-provider-row {
   position: relative;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   margin: 0 -2px;
@@ -2745,10 +2824,10 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .limit-provider-main {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 7px;
   width: 100%;
   min-width: 0;
+  min-height: 28px;
   padding: 0;
   border: 0;
   border-radius: 4px;
@@ -2766,29 +2845,43 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .limit-provider-row.is-disabled .limit-provider-main {
   color: var(--muted);
 }
-.limit-provider-row.is-disabled .limit-provider-tag {
-  border-color: rgba(var(--line-rgb), 0.13);
-  color: var(--muted);
-}
 .limit-provider-actions {
   display: flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   min-width: 0;
   max-width: 58%;
   align-items: center;
   justify-content: flex-end;
-  gap: 4px;
+  gap: 5px;
 }
-.limit-provider-actions > .cursor-status-pill {
+/* Status beside the switch reads as plain text; the switch already says on
+   or off, so a pill border would only add a second frame. */
+.limit-provider-row.has-status-tag .limit-provider-actions > .cursor-status-pill {
+  display: none;
+}
+/* Every status carries a dot in its own tone (setup orange, warning yellow,
+   sync blue), like the green dot of a healthy provider. */
+.limit-provider-actions > .limit-provider-tag-status::before,
+.tool-preference-actions > .tool-status-tag:not(.is-dot)::before {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 5px 1px 0;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: middle;
+  content: "";
+}
+.limit-provider-actions > .cursor-status-pill,
+.limit-provider-actions > .limit-provider-tag {
   flex: 0 1 auto;
-  white-space: normal;
-  text-align: center;
-}
-.limit-provider-actions > .cursor-status-pill[data-local-scope]::before {
-  content: attr(data-local-scope) " · ";
-}
-.limit-provider-row.expanded > .limit-provider-main .cursor-disclosure-icon {
-  transform: rotate(180deg);
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  font-size: 0.59375rem;
+  text-align: right;
 }
 /* Provider options hang under their own row, spanning the full width beneath
    both the label and the actions. The row's spacing is a column gap only: a row
@@ -2834,20 +2927,129 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   border-left: 0;
 }
 .settings-panel .limit-provider-toggle {
-  align-items: flex-start;
+  display: flex;
+  align-items: center;
+  height: 22px;
 }
 .limit-provider-copy {
-  display: grid;
+  display: flex;
   flex: 1 1 auto;
   min-width: 0;
-  gap: 3px;
-  white-space: normal;
 }
 .limit-provider-name-line {
   display: flex;
   min-width: 0;
   align-items: center;
+  gap: 7px;
+}
+/* Provider and tool marks share one size in both settings lists. */
+.settings-panel .settings-list-icon {
+  display: inline-block;
+  flex: 0 0 14px;
+  width: 14px;
+  height: 14px;
+  background-color: currentColor;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+.settings-panel .settings-list-icon-fallback {
+  display: inline-grid;
+  place-items: center;
+  border-radius: 4px;
+  background: none;
+  box-shadow: inset 0 0 0 1px rgba(var(--line-rgb), 0.24);
+  color: var(--muted);
+  font-size: 0.5rem;
+  font-weight: 600;
+  line-height: 1;
+}
+/* Enabled rows above, the rest in a collapsed group (see
+   renderSettingsListGroups in app.js). */
+.settings-list-group-label {
+  margin: 0;
+  color: var(--readable-muted);
+  font-size: 0.5625rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+p.settings-list-group-label { padding: 2px 0 0; }
+.settings-list-group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% + 4px);
+  min-height: 28px;
+  margin: 0 -2px;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.settings-list-group-toggle:hover { background: rgba(var(--overlay-rgb), var(--control-alpha)); }
+.settings-list-group-toggle:focus-visible {
+  outline: 1px solid rgba(var(--accent-rgb), 0.62);
+  outline-offset: 1px;
+}
+.settings-list-group-icons {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  padding-left: 4px;
+}
+.settings-list-group-toggle.expanded .settings-list-group-icons { visibility: hidden; }
+.settings-list-group-icon {
+  display: inline-grid;
+  flex: 0 0 18px;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  margin-left: -4px;
+  border-radius: 50%;
+  background: rgb(var(--panel-rgb));
+  box-shadow: 0 0 0 1px rgba(var(--line-rgb), 0.16);
+  color: var(--muted);
+}
+.settings-panel .settings-list-group-icon > .settings-list-icon {
+  flex-basis: 10px;
+  width: 10px;
+  height: 10px;
+  box-shadow: none;
+}
+.settings-list-group-action {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 0.59375rem;
+}
+.settings-list-group-toggle.expanded .cursor-disclosure-icon { transform: rotate(180deg); }
+/* The animated inner clips; widen it by the rows' negative margin so their
+   edges and focus rings are not cut off. */
+.settings-list-group > .accordion-animation-inner {
+  margin: 0 -2px;
+  padding: 0 2px;
+}
+.settings-list-group-rows {
+  display: grid;
   gap: 6px;
+}
+/* Rows and the group toggle carry their own horizontal margins, which would
+   otherwise cancel the list's 6px spacing; match the limits list's rhythm. */
+.tool-preference-list > * + .tool-preference-row,
+.tool-preference-list > * + .settings-list-group-toggle {
+  margin-top: 6px;
+}
+.settings-list-group .tool-preference-name,
+.settings-list-group .settings-list-icon {
+  color: var(--muted);
 }
 .limit-provider-name {
   overflow: hidden;
@@ -2861,12 +3063,6 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   border-radius: 50%;
   background: var(--success);
   box-shadow: 0 0 0 1px rgba(var(--success-rgb), 0.1);
-}
-.limit-provider-tags {
-  display: flex;
-  min-width: 0;
-  flex-wrap: wrap;
-  gap: 3px;
 }
 .limit-provider-tag {
   max-width: 100%;
@@ -3250,13 +3446,13 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .select-control-icon { display: flex; flex: 0 0 14px; align-items: center; justify-content: center; color: var(--muted); }
 .select-control-icon svg { width: 14px; height: 14px; }
 .select-control-arrow {
-  width: 6px;
-  height: 6px;
-  flex: 0 0 6px;
-  margin: -3px 2px 0 4px;
-  border-right: 1px solid var(--muted);
-  border-bottom: 1px solid var(--muted);
-  transform: rotate(45deg);
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  margin: 0 0 0 2px;
+  background: var(--muted);
+  -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
 }
 .plugin-menu,
 .view-switcher-menu,
@@ -4559,16 +4755,11 @@ html.is-windows .settings-panel select option {
 }
 .session-tool-filter.has-overflow .session-tool-scroll { visibility: visible; }
 .session-tool-scroll .session-page-icon {
-  width: 5px;
-  height: 5px;
-  background: transparent;
-  -webkit-mask: none;
-  mask: none;
-  border-left: 1px solid currentColor;
-  border-bottom: 1px solid currentColor;
-  transform: rotate(45deg);
+  -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  transform: rotate(90deg);
 }
-.session-tool-scroll-next .session-page-icon { transform: rotate(225deg); }
+.session-tool-scroll-next .session-page-icon { transform: rotate(-90deg); }
 .session-tool-scroll:hover:not(:disabled) { color: var(--text); }
 .session-tool-scroll:disabled { opacity: 0; cursor: default; }
 .session-tool-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -6582,15 +6773,15 @@ html.is-windows .limit-live-badge {
 }
 .view-switcher-disclosure::before {
   content: '';
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: translateY(-2px) rotate(45deg);
+  width: 12px;
+  height: 12px;
+  background: currentColor;
+  -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
   transition: transform 140ms ease;
 }
 .view-switcher.is-open .view-switcher-disclosure::before {
-  transform: translateY(2px) rotate(225deg);
+  transform: rotate(180deg);
 }
 .view-switcher-icon {
   display: inline-block;
@@ -7311,10 +7502,10 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .session-detail { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 6px; overflow: hidden auto; scrollbar-width: none; font-size: 0.75rem; }
 .session-detail::-webkit-scrollbar { width: 0; height: 0; }
 .detail-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.75rem; }
-.detail-back { flex-shrink: 0; background: transparent; border: 0; color: var(--muted, #8a8a90); font: inherit; cursor: pointer; padding: 0; }
-/* The whole title is a back target; retain the original `‹ Sessions` spacing. */
-.detail-back-titled { display: flex; align-items: baseline; gap: 1ch; flex: 1; min-width: 0; text-align: start; }
-.detail-back-arrow { flex: 0 0 auto; font: inherit; }
+.detail-back { display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0; background: transparent; border: 0; color: var(--muted, #8a8a90); font: inherit; cursor: pointer; padding: 0; }
+/* The whole title is a back target. */
+.detail-back-titled { display: flex; flex: 1; min-width: 0; text-align: start; }
+.detail-back-arrow { width: 12px; height: 12px; flex: 0 0 12px; background: currentColor; -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; transform: rotate(90deg); }
 .detail-heading { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: inherit; color: var(--muted, #8a8a90); }
 .fade-overflow.is-overflow-enabled { text-overflow: clip; scrollbar-width: none; }
 .fade-overflow.is-overflow-enabled.is-overflow-static { overflow-x: auto; }
@@ -7330,7 +7521,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .detail-exchange { border-bottom: 1px dashed rgba(255,255,255,0.08); padding: 6px 0; }
 .detail-exchange .bar { height: 3px; margin-left: 20px; width: auto; }
 .detail-ex-head { display: flex; align-items: baseline; gap: 8px; cursor: pointer; }
-.detail-chev { width: 12px; flex: 0 0 12px; color: var(--muted, #8a8a90); }
+.detail-chev { align-self: flex-start; width: 12px; height: 12px; flex: 0 0 12px; margin-top: 2px; background: var(--muted, #8a8a90); -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; transform: rotate(-90deg); transition: transform 140ms ease; }
+.detail-exchange.expanded .detail-chev { transform: none; }
 .detail-ex-label { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
 .detail-ex-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .detail-ex-sub { font-size: 0.625rem; color: var(--muted, #8a8a90); }
@@ -7990,9 +8182,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   height: 9px;
 }
 .opencode-profile-item .profile-detail .cursor-disclosure-icon::before {
-  width: 4px;
-  height: 4px;
-  border-width: 0 1.2px 1.2px 0;
+  width: 9px;
+  height: 9px;
 }
 /* Animated like every other disclosure in the panel rather than snapping from
    `display: none`; the container squeezes a single inner wrapper, so the rows
@@ -8818,7 +9009,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.tray-composer-picker-chevron { color: var(--muted); }
+.tray-composer-picker-chevron { width: 12px; height: 12px; flex: 0 0 12px; background: var(--muted); -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; }
 .tray-composer-picker-menu {
   position: fixed;
   inset: auto;
@@ -9026,6 +9217,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   .home-limit-provider-row,
   .status-provider-row { transition: none; }
   .tool-preference-main .cursor-disclosure-icon { transition: none; }
+  :root:not([data-reduce-motion="off"]) .slot-device-list,
+  :root:not([data-reduce-motion="off"]) .slot-device-list > .accordion-animation-inner { transition: none; }
 }
 
 /* One rule for hiding. Before this, each hidden thing carried its own
@@ -9064,8 +9257,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .plugin-placement-summary { min-width: 0; font-size: .625rem; line-height: 1.5; color: var(--muted); overflow-wrap: anywhere; }
 .plugin-manage, .plugin-back { display: inline-flex; align-items: center; gap: 8px; flex-shrink: 0; min-height: 28px; padding: 4px 8px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: .6875rem; cursor: pointer; }
 .plugin-manage { color: var(--muted); padding-right: 2px; }
-.plugin-manage::after, .plugin-back::before { content: ''; width: 5px; height: 5px; border-top: 1px solid currentColor; border-right: 1px solid currentColor; transform: rotate(45deg); }
-.plugin-back::before { transform: rotate(-135deg); }
+.plugin-manage::after, .plugin-back::before { content: ''; width: 12px; height: 12px; flex: 0 0 12px; background: currentColor; -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; transform: rotate(-90deg); }
+.plugin-back::before { transform: rotate(90deg); }
 .plugin-manage:hover, .plugin-back:hover { background: rgba(var(--overlay-rgb), .09); }
 .plugin-manage:focus-visible, .plugin-back:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .plugin-manage:disabled, .plugin-back:disabled { opacity: .5; cursor: default; }
@@ -9339,7 +9532,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .display-settings[data-platform=linux] .display-settings-thumb-tray i { width: 10px; height: 10px; top: 50%; right: auto; left: 50%; transform: translate(-50%, -50%); border-radius: 2px; }
 /* Match the plugin settings' back action and category-tab typography. */
 .display-settings-back { display: inline-flex; align-items: center; gap: 8px; min-height: 28px; padding: 4px 8px; margin: 0 0 12px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text); font: inherit; font-size: .6875rem; cursor: pointer; }
-.display-settings-back::before { content: ''; width: 5px; height: 5px; border-top: 1px solid currentColor; border-right: 1px solid currentColor; transform: rotate(-135deg); }
+.display-settings-back::before { content: ''; width: 12px; height: 12px; flex: 0 0 12px; background: currentColor; -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; transform: rotate(90deg); }
 .display-settings-back:hover { background: rgba(var(--overlay-rgb), .09); }
 .display-settings-quick, .display-settings-states { display: flex; gap: 3px; padding: 3px; border-radius: 8px; background: rgba(var(--line-rgb), .06); }
 .display-settings-quick { margin-bottom: 16px; }
@@ -9371,7 +9564,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 
 .display-settings-open { font-size: .6875rem; cursor: pointer; }
 .display-settings-switch { flex: 0 0 34px; }
-.display-settings-open::after { content: ''; width: 5px; height: 5px; flex: 0 0 5px; border-right: 1px solid var(--muted); border-top: 1px solid var(--muted); transform: rotate(45deg); margin-left: auto; }
+.display-settings-open::after { content: ''; width: 12px; height: 12px; flex: 0 0 12px; background: var(--muted); -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; mask: url("icons/actions/chevron-down.svg") center / contain no-repeat; transform: rotate(-90deg); margin-left: auto; }
 .display-settings button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 .display-settings-preview[data-surface=notch] { height: 100px; }
@@ -9451,12 +9644,12 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .slot-list { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: rgba(var(--panel-rgb), .15); overflow: clip; }
 .slot-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) minmax(0, max-content) 28px; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .slot-copy { min-width: 0; }
-.slot-copy .slot-detail { margin: 4px 0 0; font-size: .59375rem; line-height: 1.4; }
+.slot-copy .slot-detail { margin: 2px 0 0; font-size: .59375rem; line-height: 1.4; }
 .slot-name { overflow-wrap: anywhere; white-space: normal; text-wrap: balance; font-size: .6875rem; font-weight: 500; color: var(--text); }
 .slot-name-line { display: flex; align-items: center; gap: 4px; min-width: 0; }
 .slot-name-line .slot-name { min-width: 0; }
 .slot-name-line.is-editing .slot-name { flex: 1; }
-.slot-rename-button { opacity: 0; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
+.slot-rename-button { opacity: 0; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 24px; margin-block: -4px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
 .slot-row:is(:hover, :focus-within) .slot-rename-button { opacity: 1; }
 .slot-rename-button::before { content: ''; width: 12px; height: 12px; background: currentColor; mask: url("icons/actions/pencil-line.svg") center / contain no-repeat; }
 .slot-rename-button:hover { color: var(--text); background: rgba(var(--overlay-rgb), .06); }
@@ -9570,19 +9763,20 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .legacy-slot-editor.is-replacing > .legacy-replacement-content.hidden { display: block !important; }
 
 /* Account identity, plan and device provenance share one compact rhythm. */
-.slot-row { row-gap: 4px; }
+.slot-row { row-gap: 0; }
 .slot-name-line { min-height: 16px; }
 .slot-name-line.is-editing { height: auto; min-height: 24px; }
-.slot-device-summary { grid-column: 2 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 0; line-height: 1.4; white-space: normal; }
+.slot-device-summary { grid-column: 2 / -1; display: flex; align-items: center; flex-wrap: wrap; gap: 4px 12px; margin-top: 4px; line-height: 1.4; white-space: normal; }
 button.slot-device-toggle { width: 100%; min-height: 0; padding: 0; border: 0; border-radius: 3px; background: transparent; color: var(--muted); font: inherit; font-size: .59375rem; text-align: left; cursor: pointer; }
 .slot-device-toggle:hover { color: var(--text); }
 .slot-device-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .slot-device-token { display: inline-flex; align-items: center; min-width: 0; gap: 4px; overflow-wrap: anywhere; }
 .slot-device-token .device-kind-icon { margin-right: 0; }
-.slot-device-hint { margin-left: auto; font-size: .5625rem; }
-.slot-device-list { margin-top: 4px; grid-column: 2 / -1; min-width: 0; border-top: 1px solid var(--line); }
+.slot-device-list { margin-top: 8px; grid-column: 2 / -1; }
 .slot-device-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 4px 8px; padding: 8px 0; }
-.slot-device-row + .slot-device-row { border-top: 1px solid var(--line); }
+.slot-device-row { border-top: 1px solid var(--line); }
+:root[data-reduce-motion="on"] .slot-device-list,
+:root[data-reduce-motion="on"] .slot-device-list > .accordion-animation-inner { transition: none; }
 .slot-device-name { min-width: 0; font-size: .625rem; }
 .slot-device-note { grid-column: 1 / -1; color: var(--muted); font-size: .59375rem; line-height: 1.4; overflow-wrap: anywhere; }
 .slot-device-fix { grid-column: 1 / -1; justify-self: start; }

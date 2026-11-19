@@ -907,8 +907,6 @@
                 </span>
               </button>
               <div id="opencodeSettingsDetails" class="cursor-settings-details hidden">
-                <p class="settings-note" data-i18n="settings.opencode.accountsNote">Go quota is detected automatically. Save a credential under an existing account's name to say they are the same OpenCode account: quota then comes from the API, with the Zen balance and cross-device identity still coming from the cookie.</p>
-
                 <!-- Profile list -->
                 <div id="opencodeProfileList" class="opencode-profile-list"></div>
 
@@ -922,6 +920,7 @@
                   </button>
                   <div id="opencodeAddDetails" class="opencode-add-details accordion-animated-container hidden">
                     <div class="accordion-animation-inner opencode-add-body">
+                      <p class="settings-note" data-i18n="settings.opencode.accountsNote">OpenCode Go accounts are detected automatically. To link an API key and a cookie for the same account, enter the existing account name and confirm the merge. The API provides Go quota and the cookie provides the Zen balance.</p>
                       <div class="settings-actions">
                         <button id="opencodeOpenBrowser" data-i18n="settings.opencode.openBrowserKeys">Open OpenCode keys in browser</button>
                       </div>
@@ -976,7 +975,6 @@
                 </span>
               </button>
               <div id="cursorSettingsDetails" class="cursor-settings-details hidden">
-                <p class="settings-note" data-i18n="settings.cursor.accountsNote">Token Monitor automatically detects accounts signed in through the Cursor desktop app. Uncheck an account to stop monitoring its limits; account-level token usage still includes every saved account.</p>
                 <p id="cursorAgentActiveNote" class="settings-note hidden" data-i18n="settings.cursor.agentActive">Stop the headless agent before adding or removing Cursor accounts.</p>
                 <div id="cursorAccountList" class="managed-account-list"></div>
                 <div id="cursorManualPanel" class="opencode-add-form">
@@ -988,6 +986,7 @@
                   </button>
                   <div id="cursorManualDetails" class="opencode-add-details accordion-animated-container hidden">
                     <div class="accordion-animation-inner opencode-add-body">
+                      <p class="settings-note" data-i18n="settings.cursor.accountsNote">Token Monitor automatically detects accounts signed in to the Cursor desktop app.</p>
                       <div class="settings-actions">
                         <button id="cursorLoginButton" data-i18n="settings.cursor.openBrowser">Open Cursor dashboard</button>
                       </div>

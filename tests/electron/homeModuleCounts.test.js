@@ -28,6 +28,12 @@ class Element {
   }
   append(...children) { this.children.push(...children); }
   appendChild(child) { this.append(child); }
+  insertBefore(child, before) {
+    const index = this.children.indexOf(before);
+    if (index < 0) this.append(child);
+    else this.children.splice(index, 0, child);
+  }
+  querySelector() { return null; }
   addEventListener(name, fn) { this.events[name] = fn; }
   setAttribute(name, value) { this.attributes[name] = value; }
 }

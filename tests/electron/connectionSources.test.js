@@ -33,19 +33,11 @@ test('every provider declares ordered, localized display sources without credent
   assert.deepEqual(JSON.parse(JSON.stringify(projected)), projected);
 });
 
-test('headers derive exactly one connection tag regardless of reading state', () => {
+test('provider headers omit connection capabilities while expanded options keep the connection card', () => {
   for (const id of LIMIT_PROVIDER_IDS) {
-    const expression = app.slice(app.indexOf('    const tagInfos = pluginModule ?'), app.indexOf('    if (pluginModule) tagInfos.push'));
-    const tags = vm.runInNewContext(expression + '\ntagInfos;', { pluginModule: null, limitProviderPresentationApi: presentation, provider: { provider: id }, provenance: null, id, state: { settings: { limitConnectionSources: limitConnectionSourcesForRenderer() } } });
-    assert.equal(tags.length, 1);
-    const tag = tags[0];
-    assert.equal(tag.kind, 'capability');
-    assert.ok(tag.parts.length);
-    assert.equal(new Set(tag.parts).size, tag.parts.length);
-    assert.doesNotMatch(tag.label, /Plan|Pay-as|Auto|Manual/);
+    assert.equal(headerTags({ provider: id, status: 'ok' }).some(tag => tag.kind === 'capability'), false, id);
   }
   const render = app.slice(app.indexOf('function renderLimitProviderCheckboxes('), app.indexOf('function limitProviderConnectionDetail('));
-  assert.match(render, /limitProviderPresentationApi.connectionTag\(id,/);
   assert.ok(render.indexOf('optionsInner.append(limitProviderConnectionDetail') < render.indexOf('optionsInner.append(settingsList)'));
 });
 
@@ -96,11 +88,11 @@ test('retired provider tag and connection tables stay unused', () => {
 });
 
 function headerTags(provider) {
-  const expression = app.slice(app.indexOf('    const tagInfos = pluginModule ?'), app.indexOf('    if (pluginModule) tagInfos.push'));
+  const expression = app.slice(app.indexOf('    const tagInfos = pluginModule'), app.indexOf('    if (pluginModule) tagInfos.push'));
   return vm.runInNewContext(expression + '\ntagInfos;', { pluginModule: null, limitProviderPresentationApi: presentation, provider, provenance: null, id: provider.provider, state: { settings: { limitConnectionSources: limitConnectionSourcesForRenderer() } } });
 }
 
-test('all provider headers retain state/action tags separately from the connection tag', () => {
+test('provider headers retain state and action tags without connection capability tags', () => {
   for (const id of LIMIT_PROVIDER_IDS) {
     for (const status of ['unauthorized', 'notConfigured', 'unavailable', 'rateLimited', 'sourceRateLimited', 'error', 'disabled', 'noSyncedData']) {
       const provider = { provider: id, status };
@@ -108,18 +100,23 @@ test('all provider headers retain state/action tags separately from the connecti
     }
   }
   for (const [id, label] of [['opencode', 'Sign in again'], ['cline', 'Open Cline']]) {
-    const tags = { children: [], append(node) { this.children.push(node); } };
-    const source = app.slice(app.indexOf('    const tagInfos = pluginModule ?'), app.indexOf('    copy.append(nameLine, tags);'));
+    const tags = { children: [], append(node) { this.children.push(node); }, querySelector(selector) {
+      return this.children.find(node => node.className.includes(selector.slice(1))) || null;
+    } };
+    const row = { classes: new Set(), classList: { toggle(name, on) { if (on) row.classes.add(name); else row.classes.delete(name); } } };
+    const source = app.slice(app.indexOf('    const tagInfos = pluginModule'), app.indexOf('    copy.append(nameLine);'));
     vm.runInNewContext(source, {
       pluginModule: null, provider: { provider: id, status: 'unauthorized', source: 'oauth' },
-      provenance: null, id, isEnabled: true, accountGroup: {}, tags,
+      provenance: null, id, isEnabled: true, accountGroup: {}, actions: tags, row,
       state: { settings: { limitConnectionSources: limitConnectionSourcesForRenderer() } },
       limitProviderPresentationApi: presentation,
       document: { createElement: () => ({ classList: { add() {} } }) },
       translatedLimitProviderTag: tag => tag.label, translatedLimitCapabilityTag: label => label
     });
     assert.equal(tags.children.find(node => node.className.includes('tag-status'))?.textContent, label);
-    assert.equal(tags.children.filter(node => node.className.includes('tag-capability')).length, 1);
+    assert.equal(tags.children.filter(node => node.className.includes('tag-capability')).length, 0);
+    // An action-needed status speaks for the row; the account summary is hidden.
+    assert.equal(row.classes.has('has-status-tag'), true);
   }
   assert.equal(headerTags({ provider: 'opencode', status: 'unauthorized' })[0].label, 'Sign in again');
   assert.equal(headerTags({ provider: 'cline', status: 'unauthorized', source: 'oauth' })[0].label, 'Open Cline');
@@ -130,15 +127,17 @@ test('all provider headers retain state/action tags separately from the connecti
 
 test('Grok shows the selected collection source without duplicating account summaries', () => {
   const source = app.slice(app.indexOf('    // Multi-account providers use this space'), app.indexOf('    const settings = LIMIT_PROVIDER_SETTINGS[id];', app.indexOf('    // Multi-account providers use this space')));
-  const render = (accountGroup, preference = 'auto') => {
+  const render = (accountGroup, preference = 'auto', isEnabled = true) => {
     const actions = { children: [], append(node) { this.children.push(node); } };
-    vm.runInNewContext(source, { accountGroup, id: 'grok', state: { settings: { grokSourcePreference: preference } }, sources: LIMIT_PROVIDER_ACCOUNTS.find(entry => entry.id === 'grok').sources, document: { createElement: () => ({}) }, t: key => translate('zh-TW', key), actions });
+    vm.runInNewContext(source, { accountGroup, isEnabled, id: 'grok', state: { settings: { grokSourcePreference: preference } }, sources: LIMIT_PROVIDER_ACCOUNTS.find(entry => entry.id === 'grok').sources, document: { createElement: () => ({}) }, t: key => translate('zh-TW', key), actions });
     return actions.children;
   };
   assert.equal(render(null)[0]?.textContent, '自動偵測');
   const web = LIMIT_PROVIDER_ACCOUNTS.find(entry => entry.id === 'grok').sources.find(source => source.id === 'web');
   assert.equal(render(null, 'web')[0]?.textContent, translate('zh-TW', web.labelKey));
   assert.equal(render({}).length, 0);
+  // A disabled provider's row carries no status; the switch says it all.
+  assert.equal(render(null, 'auto', false).length, 0);
 });
 
 test('Alibaba connection link follows the open account editor', () => {

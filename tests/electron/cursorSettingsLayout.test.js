@@ -222,6 +222,8 @@ test('Cursor settings use the shared multi-account rows and inline add flow', ()
   assert.match(details, /id="cursorAgentActiveNote" class="settings-note hidden" data-i18n="settings\.cursor\.agentActive"/);
   assert.match(details, /<div id="cursorManualPanel" class="opencode-add-form">/);
   assert.match(details, /<div id="cursorManualDetails" class="opencode-add-details accordion-animated-container hidden">/);
+  assert.doesNotMatch(details.split('id="cursorManualDetails"')[0], /settings\.cursor\.accountsNote/);
+  assert.match(details, /id="cursorManualDetails"[^>]*>\s*<div[^>]*>\s*<p[^>]*data-i18n="settings\.cursor\.accountsNote"/);
   assert.match(details, /data-i18n="settings\.cursor\.addManual">Add account<\/span>/);
   assert.match(details, /using “Open Cursor dashboard”, then sign in/);
   assert.match(details, /<code>cursor\.com<\/code>/);
@@ -303,6 +305,8 @@ test('OpenCode account panel provides multi-profile management', () => {
   assert.match(details, /<div id="opencodeAddForm" class="opencode-add-form">/);
   assert.match(details, /<button id="opencodeAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="opencodeAddDetails">/);
   assert.match(details, /<div id="opencodeAddDetails" class="opencode-add-details accordion-animated-container hidden">/);
+  assert.doesNotMatch(details.split('id="opencodeAddDetails"')[0], /settings\.opencode\.accountsNote/);
+  assert.match(details, /id="opencodeAddDetails"[^>]*>\s*<div[^>]*>\s*<p[^>]*data-i18n="settings\.opencode\.accountsNote"/);
   // The browser button serves both credential types, so it lives above the
   // selector rather than inside either block; the renderer relabels it.
   assert.match(details, /<button id="opencodeOpenBrowser" data-i18n="settings\.opencode\.openBrowserKeys">/);

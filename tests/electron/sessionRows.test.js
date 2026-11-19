@@ -1314,7 +1314,7 @@ test('Grok group rows expose usage without an unsupported transcript action', ()
 
 test('group sections keep main continuations above children without changing usage or counting runs as agents', () => {
   const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-  const body = source.slice(source.indexOf('function renderSessionGroupDetail('), source.indexOf('function detailNote('));
+  const body = source.slice(source.indexOf('function sessionDetailBackArrow('), source.indexOf('function sessionDetailBack(')) + source.slice(source.indexOf('function renderSessionGroupDetail('), source.indexOf('function detailNote('));
   const node = () => ({ children: [], dataset: {}, get childNodes() { return this.children; }, selectors: new Map(), classList: { add() {}, remove() {} },
     replaceChildren(...items) { this.children = items; }, append(...items) { this.children.push(...items); },
     setAttribute() {}, addEventListener() {}, querySelector(selector) {
