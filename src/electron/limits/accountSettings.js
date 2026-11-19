@@ -350,10 +350,7 @@ function assertAccountForm(entry, form) {
 // The renderer only needs the form's display and action schema. Never send
 // field declarations, store paths, resolvers, or credential values over IPC.
 function limitConnectionSourcesForRenderer() {
-  return LIMIT_PROVIDER_REGISTRY.map(({ id, sources, sourceSelection }) => ({ id, sources,
-    ...(sourceSelection ? { sourceSelection: { key: `${id}SourcePreference`, sources: sourceSelection.sources,
-      ...(sourceSelection.autoLabelKey ? { autoLabelKey: sourceSelection.autoLabelKey } : {}),
-      ...(sourceSelection.autoDescriptionKey ? { autoDescriptionKey: sourceSelection.autoDescriptionKey } : {}) } } : {}) }));
+  return LIMIT_PROVIDER_REGISTRY.map(({ id, sources }) => ({ id, sources }));
 }
 
 function limitAccountFormsForRenderer() {

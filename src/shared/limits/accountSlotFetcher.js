@@ -173,7 +173,7 @@ function createAccountSlotFetcher(entry) {
     delete callOptions[`${entry.id}AmbientAccounts`];
     delete callOptions[key];
     if (account.values) {
-      for (const field of entry.fields) if (field.key !== key && field.key !== `${entry.id}SourcePreference`) callOptions[field.key] = '';
+      for (const field of entry.fields) if (field.key !== key) callOptions[field.key] = '';
       Object.assign(callOptions, account.values);
     }
     callOptions.previousLimits = {

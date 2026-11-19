@@ -25,6 +25,6 @@ The legacy endpoint can return 401 with an unexpired IDE JWT on newer Trae CN cl
 
 The widget supports multiple accounts. Each slot uses the same Browser Cookie / Access token choice; its device ID belongs to that slot. Environment credentials remain one read-only account, with the existing Cookie-first precedence.
 
-## Connection source selection
+## Collection sources
 
-Automatic preserves Cookie-first precedence. The connection selector can force the Web session or legacy IDE token route; an absent or rejected selected credential never tries the other route. Reads report Web provenance for Cookie and API/IDE provenance for the legacy token. Existing token-derived identities remain separate when the two credentials cannot prove a common server identity.
+The Web Cookie takes precedence over the legacy IDE token route. Reads report Web provenance for Cookie and API/IDE provenance for the legacy token. Existing token-derived identities remain separate when the two credentials cannot prove a common server identity.

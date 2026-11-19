@@ -1,5 +1,4 @@
 'use strict';
-const { selectedSource } = require('../../limits/sourceSelection');
 
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const { hashKey } = require('../../hashKey');
@@ -135,11 +134,9 @@ async function fetchHarkLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
   const supplied = harkCookie(env, options);
-  const selection = selectedSource('hark', options, deps);
   const lane = deps.accountSource || (supplied ? 'web' : 'local');
-  if ((selection !== 'auto' && selection !== lane) || (deps.probe && !supplied)
-    || (deps.accountSlotSaved && !supplied)) {
-    return normalizeLimitProvider({ provider: 'hark', source: selection === 'auto' ? lane : selection, status: 'notConfigured', updatedAt, windows: [] });
+  if ((deps.probe && !supplied) || (deps.accountSlotSaved && !supplied)) {
+    return normalizeLimitProvider({ provider: 'hark', source: lane, status: 'notConfigured', updatedAt, windows: [] });
   }
   const base = {
     provider: 'hark',

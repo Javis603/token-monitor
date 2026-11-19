@@ -11,7 +11,7 @@ const { isCursorDetectedAccountCurrent } = require('../../../shared/providers/cu
  * @param {object} deps Provider-scoped persistence and named host IO capabilities.
  */
 function createCursorAccountService(deps) {
-  const { isExternalAgentActive, getCursorDisabledAccountIds, getCursorManualAccountIds, getCursorSourcePreference = () => 'auto', setCursorDisabledAccountIds, setCursorManualAccountIds, saveSettings, reconfigureLimits, queueLimitInvalidation, refreshUsage, auth = cursorAuth, probe = cursorProbe } = deps;
+  const { isExternalAgentActive, getCursorDisabledAccountIds, getCursorManualAccountIds, setCursorDisabledAccountIds, setCursorManualAccountIds, saveSettings, reconfigureLimits, queueLimitInvalidation, refreshUsage, auth = cursorAuth, probe = cursorProbe } = deps;
   let cursorStatusCache = { value: null, at: 0 };
   const knownAccountMetadata = new Map();
   const CURSOR_STATUS_TTL_MS = 30 * 1000;
@@ -45,18 +45,12 @@ function createCursorAccountService(deps) {
     const disabled = new Set(normalizeCursorDisabledAccountIds(getCursorDisabledAccountIds()));
     const manual = new Set(normalizeCursorAccountIds(getCursorManualAccountIds()));
     const desktop = auth.readCursorDesktopSignIn();
-    const sourcePreference = getCursorSourcePreference();
     const accountIds = new Set(accounts.map(account => account.id));
     for (const id of knownAccountMetadata.keys()) if (!accountIds.has(id)) knownAccountMetadata.delete(id);
     const listedAccounts = await Promise.all(accounts.map(async (account) => {
       const source = manual.has(account.id) ? 'web' : 'desktop';
-      const sourceSelected = sourcePreference === 'auto' || sourcePreference === source;
-      const known = knownAccountMetadata.get(account.id);
-      const previous = known?.sessionToken === account.sessionToken ? known.metadata : null;
-      // Status probes include quota requests, so excluded sources use only local
-      // ownership and previously verified public metadata for this credential.
-      const probeResult = sourceSelected ? await probe.probe(account.sessionToken) : { ok: false };
-      const expired = !sourceSelected ? previous?.expired === true : !probeResult.ok && probeResult.error?.kind === 'unauthorized';
+      const probeResult = await probe.probe(account.sessionToken);
+      const expired = !probeResult.ok && probeResult.error?.kind === 'unauthorized';
       // Desktop-detected accounts follow the desktop sign-in; manual ones stay
       // until removed. Hidden accounts keep their credentials and usage history.
       if (!manual.has(account.id) && !isCursorDetectedAccountCurrent({
@@ -69,16 +63,15 @@ function createCursorAccountService(deps) {
       const accountKey = accountKeyFor(account, probeResult.ok ? probeResult.user?.sub : '');
       const metadata = {
         id: account.id,
-        accountKey: !sourceSelected && previous ? previous.accountKey : accountKey,
+        accountKey,
         enabled: !disabled.has(account.id),
         removable: manual.has(account.id),
         source,
-        sourceSelected,
-        email: !sourceSelected ? previous?.email || '' : probeResult.ok ? probeResult.user?.email || '' : '',
+        email: probeResult.ok ? probeResult.user?.email || '' : '',
         label: account.label || '',
-        membershipType: !sourceSelected ? previous?.membershipType || '' : probeResult.ok ? probeResult.usage.membershipType || '' : '',
+        membershipType: probeResult.ok ? probeResult.usage.membershipType || '' : '',
         expired,
-        error: !sourceSelected ? previous?.error || '' : probeResult.ok ? '' : probeResult.error?.message || ''
+        error: probeResult.ok ? '' : probeResult.error?.message || ''
       };
       knownAccountMetadata.set(account.id, { sessionToken: account.sessionToken, metadata });
       return metadata;
@@ -87,9 +80,8 @@ function createCursorAccountService(deps) {
     return {
       loggedIn: safeAccounts.length > 0,
       accounts: safeAccounts,
-      linkedCount: safeAccounts.filter((account) => account.enabled && account.sourceSelected && !account.expired && !account.error).length,
-      managementBlocked,
-      sourcePreference
+      linkedCount: safeAccounts.filter((account) => account.enabled && !account.expired && !account.error).length,
+      managementBlocked
     };
   }
 
@@ -169,7 +161,7 @@ function createCursorAccountService(deps) {
 
   async function status(options = {}) {
       const now = Date.now();
-      if (options?.force !== true && options?.discover !== true && cursorStatusCache.value && cursorStatusCache.value.sourcePreference === getCursorSourcePreference() && now - cursorStatusCache.at < CURSOR_STATUS_TTL_MS) {
+      if (options?.force !== true && options?.discover !== true && cursorStatusCache.value && now - cursorStatusCache.at < CURSOR_STATUS_TTL_MS) {
         return cursorStatusCache.value;
       }
       const value = await cursorStatusValue({ discover: options?.discover === true });

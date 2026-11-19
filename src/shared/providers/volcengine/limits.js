@@ -1,6 +1,5 @@
 'use strict';
 
-const { selectedSource } = require('../../limits/sourceSelection');
 
 const crypto = require('node:crypto');
 const { fetchArkcliLimits } = require('./arkcli');
@@ -522,7 +521,9 @@ async function fetchVolcengineLimits(options = {}, deps = {}) {
     windows: [],
     ...(credentials ? { region: credentials.region } : {})
   });
-  const source = deps.accountSlotSaved ? 'api' : selectedSource('volcengine', options, deps);
+  // `volcengineLane` is private to save probes and fetchAccountSlotSnapshot,
+  // which read the CLI and the saved keys as separate lanes.
+  const source = deps.accountSlotSaved ? 'api' : options.volcengineLane || 'auto';
   const credentials = source === 'cli' ? null : volcengineCredentials(env, options);
   if (!credentials) {
     // Never replace an explicitly selected (even incomplete) account with the
@@ -728,7 +729,7 @@ async function probeRetainedCredentials(settings, draft, deps) {
     if (credentials?.mode === 'signed') {
       jobs.push(fetchVolcengineLimits({
         volcengineAccessKeyId: credentials.accessKeyId, volcengineSecretAccessKey: credentials.secretAccessKey,
-        volcengineRegion: credentials.region, volcengineSourcePreference: 'api'
+        volcengineRegion: credentials.region, volcengineLane: 'api'
       }, { ...deps, env: {} }));
     } else if (draft.volcengineAccessKeyId && credentials?.apiKey === draft.volcengineAccessKeyId) {
       jobs.push(fetchVolcengineArkLimits(credentials, deps, now, updatedAt));
@@ -782,23 +783,11 @@ function accountSlotsForScope(accounts, scope, options, deps) {
     || account.accountKeyAliases.includes(scope.accountKey));
 }
 async function fetchAccountSlotSnapshot(options, deps, collect) {
-  const source = selectedSource('volcengine', options, deps);
-  if (deps.probe || source === 'api') return collect(options, deps);
-  const hasSlots = Boolean(options.volcengineAccountSlots?.length);
-  if (!hasSlots && source !== 'cli') return collect(options, deps);
-  const local = await fetchVolcengineLimits({ ...options, volcengineSourcePreference: 'cli' }, deps);
-  if (!hasSlots) {
-    if (options.limitRefreshScope || deps.signal?.aborted) return local;
-    // Forced CLI closes the API lane when the final slot is removed, even
-    // when fixed credentials still exist. Retire only its previously accepted rows.
-    const retired = (options.previousLimits?.providers || [])
-      .filter(row => row.provider === 'volcengine' && row.source === 'api' && row.accountKey)
-      .map(row => ({ provider: 'volcengine', accountKey: row.accountKey, removed: true }));
-    return [...local, ...retired];
-  }
+  if (deps.probe || !options.volcengineAccountSlots?.length) return collect(options, deps);
+  const local = await fetchVolcengineLimits({ ...options, volcengineLane: 'cli' }, deps);
   const previousLimits = { providers: (options.previousLimits?.providers || []).filter(row => row.source !== 'cli') };
   // Confirmed removals carry identity only, without a source field.
-  return [...local.filter(row => row.source === 'cli' || row.removed), ...await collect({ ...options, volcengineSourcePreference: 'api', previousLimits }, deps)];
+  return [...local.filter(row => row.source === 'cli' || row.removed), ...await collect({ ...options, volcengineLane: 'api', previousLimits }, deps)];
 }
 function volcengineArkKey(env) { return pickFirst(env, ['ARK_API_KEY', 'VOLCENGINE_API_KEY', 'DOUBAO_API_KEY']); }
 function volcenginePrimaryKey(env) { const c = volcengineCredentials(env); return c?.accessKeyId || c?.apiKey || ''; }

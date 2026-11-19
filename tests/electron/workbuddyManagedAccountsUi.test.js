@@ -357,7 +357,7 @@ test('WorkBuddy account and total copy is present in every locale and auto conne
   assert.match(html, /id="workbuddyAccountErrorMessage"[^>]*role="alert"/);
   assert.ok(require('../../src/shared/providers/workbuddy/account').sources.some(source => source.kind === 'desktop'));
 
-  assert.match(app, /if \(sources\.length\) optionsInner\.append\(limitProviderConnectionDetail\(id, sources, provider\)\)/);
+  assert.match(app, /if \(sources\.length\) optionsInner\.append\(limitProviderConnectionDetail\(id, sources, isEnabled/);
 });
 
 

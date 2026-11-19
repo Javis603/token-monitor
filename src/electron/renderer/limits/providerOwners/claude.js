@@ -162,7 +162,8 @@ function renderClaudeWebAccounts() {
       refresh: () => renderExternalProviderStatus('claude')
     });
   }
-  accountList.update([...accounts.map(account => ({ ...account, canPause: account.id !== 'legacy',
+  // Saved rows hold a Web session; the reading they match may be the same account's OAuth quota.
+  accountList.update([...accounts.map(account => ({ ...account, sourceIconKind: 'web', canPause: account.id !== 'legacy',
     removable: !(account.id === 'legacy' && state.settings?.claudeWebLegacyCookieSource === 'env') })), ...automatic], providers.filter(row => row.accountKey));
 
 }

@@ -25,7 +25,7 @@ Only accounts added manually by Token Monitor may be removed from its UI. Deskto
 
 A desktop-detected account follows the Cursor desktop sign-in. It leaves the current account list once Cursor rejects its token, the desktop app is signed out, or the desktop app is signed in as a different user. Its credentials and synced usage history stay intact, so it comes back if the desktop signs in to it again. A network failure or an unreadable desktop state keeps it listed. Manually added accounts are not affected and keep their remove action.
 
-The limits source selector defaults to **Auto + manual**. **Desktop App only** monitors desktop-owned accounts; **Manual Web only** monitors accounts explicitly added in Token Monitor. Excluded accounts remain in the shared account list as not collected, with their saved credentials, pause choices and usage history preserved. This preference controls quota collection; Tokscale usage sync remains independent.
+Desktop-owned and manually added accounts are collected together; pausing an account is how to stop collecting one. Both lanes read the same Web API, so readings cannot tell them apart; the account rows name each account's lane from ownership (`sourceId`), and the connection card lights the lanes those rows report. Tokscale usage sync remains independent of quota collection.
 
 The desktop's quota cards follow the same current-account rules as its settings list. Headless collection without desktop account-ownership metadata continues to monitor its saved accounts independently of the Cursor app's sign-in.
 

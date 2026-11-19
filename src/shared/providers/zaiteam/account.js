@@ -6,7 +6,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   id: 'zaiteam',
   accountSlots: true,
   sources: [
-    { id: 'api', kind: 'apiKey', relation: 'single', products: ['zaiteam'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.zaiteam.note', getUrlFromForm: true }
+    { id: 'api', kind: 'apiKey', relation: 'single', products: ['zaiteam'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.zaiteam.note' }
   ],
   fetch: 'fetchZaiTeamLimits',
   serverAccountKey: 'isZaiTeamServerAccountKey',

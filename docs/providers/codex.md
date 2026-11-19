@@ -109,6 +109,6 @@ Run the Codex session, limits, login and account-switching tests when changing t
 node --test tests/shared/codex*.test.js tests/shared/limitCollector.codex*.test.js tests/shared/sessionContext.test.js tests/electron/codex*.test.js
 ```
 
-## Connection source selection
+## Collection sources
 
-The connection selector supports Automatic, OAuth, Desktop app and CLI. Explicit OAuth disables RPC fallback. Explicit app/CLI filters actual executable candidates and rejects mismatched returned provenance. Each RPC process uses the same isolated CODEX_HOME as its account; a selected managed workspace must match the stored authentication workspace before RPC may answer. A missing executable or selected-source failure never tries another source. Reset-credit enrichment remains independent.
+Collection tries OAuth first and falls back to the app-server RPC (desktop app or CLI) where the OAuth failure allows it. Each RPC process uses the same isolated CODEX_HOME as its account. Readings report the RPC lane in `sourceDetail` (`app` or `cli`). Reset-credit enrichment remains independent.

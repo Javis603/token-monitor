@@ -1,5 +1,4 @@
 'use strict';
-const { selectedSource } = require('../../limits/sourceSelection');
 
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const { hashKey } = require('../../hashKey');
@@ -185,9 +184,8 @@ async function fetchTraeWebCredits(cookie, deps) {
 async function fetchTraeLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
-  const selection = selectedSource('trae', options, deps);
-  const accessToken = selection === 'web' ? '' : traeAccessToken(env, options);
-  const cookie = selection === 'ide' ? '' : traeCookie(env, options);
+  const accessToken = traeAccessToken(env, options);
+  const cookie = traeCookie(env, options);
   if (!accessToken && !cookie) {
     return normalizeLimitProvider({
       provider: 'trae',

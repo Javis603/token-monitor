@@ -586,7 +586,7 @@ for (const changedVariant of ['cn', 'cn-personal']) test(`Alibaba slot retiremen
     accountKey: moved && options.alibabaVariant === changedVariant ? 'new-uid' : 'old-uid',
     updatedAt: new Date().toISOString(), windows: [{ kind: 'billing', usedPercent: options.alibabaVariant === changedVariant ? 20 : 40 }]
   }) });
-  const options = { alibabaSourcePreference: 'web', alibabaAccountSlots: ['cn', 'cn-personal'].map(variant => ({
+  const options = { alibabaAccountSlots: ['cn', 'cn-personal'].map(variant => ({
     id: variant, enabled: true, values: { alibabaCookie: `fixture=${variant}`, alibabaVariant: variant }
   })) };
   const d = deps();

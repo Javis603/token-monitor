@@ -13056,9 +13056,7 @@ function renderLimitProviderCheckboxesNow() {
     if (isEnabled && !accountGroup && sources.some(source => ['cli', 'desktop', 'oauth', 'file'].includes(source.kind))) {
       const mode = document.createElement('span');
       mode.className = 'cursor-status-pill limit-provider-mode-pill';
-      const preference = state.settings?.[`${id}SourcePreference`];
-      const selected = preference !== 'auto' && sources.find(source => source.id === preference && source.relation === 'alternative');
-      mode.textContent = selected ? t(selected.labelKey) : t('settings.limits.connection.autoDetect');
+      mode.textContent = t('settings.limits.connection.autoDetect');
       actions.append(mode);
     }
     const settings = LIMIT_PROVIDER_SETTINGS[id];
@@ -13094,7 +13092,7 @@ function renderLimitProviderCheckboxesNow() {
       if (accountGroup) {
         accountGroup.classList.add('limit-provider-account-group');
       }
-      if (sources.length) optionsInner.append(limitProviderConnectionDetail(id, sources, provider));
+      if (sources.length) optionsInner.append(limitProviderConnectionDetail(id, sources, isEnabled ? strictLocalProviderStatuses(id) : []));
       optionsContainer.append(optionsInner);
       const toggleOptions = () => {
         const opening = state.limitProviderSettingsExpanded !== id;
@@ -13391,22 +13389,23 @@ function limitProviderAccountStatus(providerId) {
     : null;
 }
 
-function limitProviderConnectionDetail(id, sources, provider) {
-  const form = limitAccountForm(id);
+// Where to get a credential lives in the add-account editor, beside its form.
+function limitProviderConnectionDetail(id, sources, readings) {
   return window.TokenMonitorConnectionPresentation.createConnectionCard({
-    document, t, sources, provider, providerId: id,
-    selection: state.settings?.limitConnectionSources?.find(entry => entry.id === id)?.sourceSelection,
-    preference: state.settings?.[`${id}SourcePreference`] || 'auto',
-    onSelect: async patch => {
-      await saveSettings(patch);
-      return state.settings?.[`${id}SourcePreference`] || 'auto';
-    },
-    label: LIMIT_PROVIDERS.find(entry => entry.id === id).label,
-    onOpen: id !== 'claude' && form?.openUrl ? () => window.tokenMonitor.openExternal(
-      accountSlotPanels.get(id)?.activeEditorUrl() || limitAccountPanelsApi.resolveOpenUrl(form, { document, provider: externalProviderForAccount(id), settings: state.settings })
-    ) : undefined
+    document, t, sources, readings,
+    liveSourceIds: window.TokenMonitorAccountSlotsPanel.liveSourceIds(id)
   });
 }
+
+// Account rows render after the provider list, so the lanes they attribute
+// arrive later; swap just that provider's card when they change.
+window.TokenMonitorAccountSlotsPanel.onLiveSourcesChange((id) => {
+  const card = els.limitProviderCheckboxes?.querySelector(`.limit-provider-row[data-provider="${id}"] .limit-provider-connection-sources`);
+  if (!card) return;
+  const sources = limitProviderPresentationApi.connectionSources(id, state.settings?.limitConnectionSources || []);
+  const readings = enabledLimitProviderSet().has(id) ? strictLocalProviderStatuses(id) : [];
+  card.replaceWith(limitProviderConnectionDetail(id, sources, readings));
+});
 
 // Single entry point for the provider options accordion. The drag gesture also
 // needs to collapse and restore it, so the class/aria bookkeeping cannot stay
@@ -13499,9 +13498,11 @@ function limitProviderSettingsRenderSignature() {
       settingValues,
       state.limitProviderSettingsExpanded
     ],
-    connectionPreferences: (settings.limitConnectionSources || []).filter(entry => entry.sourceSelection)
-      .map(entry => [entry.id, entry.sourceSelection.sources, settings[entry.sourceSelection.key] || 'auto']),
     usageItems: [...enabledLimitProviderSet()].sort().map((id) => [id, limitProviderUsageItemRows(id)]),
+    // The connection card reads this device's own rows, which the Hub aggregate
+    // can hide behind a newer reading from another device.
+    connectionReadings: [...enabledLimitProviderSet()].sort().map((id) => [id, strictLocalProviderStatuses(id)
+      .map((row) => [row.status || '', Boolean(row.stale), row.source || '', row.sourceDetail || ''])]),
     query: limitProviderQuery(),
     providers: (state.stats?.limits?.providers || []).map(providerSignature),
     devices: (state.stats?.devices || []).map(deviceSignature)
