@@ -42,3 +42,39 @@ test('an unreadable opacity is treated as showing content', () => {
 test('collectIdleRendererHeaps uses the content-visible gate', () => {
   assert.match(main, /for \(const win of BaseWindow\.getAllWindows\(\)\) \{[\s\S]*windowShowsRendererContent\(win\)/);
 });
+
+function runRendererPass(contents, windows = []) {
+  const start = main.indexOf('const IDLE_RENDERER_GC_TIMEOUT_MS');
+  const end = main.indexOf('\nfunction ', main.indexOf('function collectIdleRendererHeaps(') + 10);
+  const context = {
+    BaseWindow: { getAllWindows: () => windows },
+    webContents: { getAllWebContents: () => contents },
+    setTimeout, clearTimeout, Promise, Set
+  };
+  vm.runInNewContext(`${main.slice(start, end)}\nthis.collect = collectIdleRendererHeaps;`, context);
+  return context.collect();
+}
+
+test('a renderer that is still loading is skipped instead of queueing gc for a reveal', async () => {
+  let calls = 0;
+  await runRendererPass([{
+    isDestroyed: () => false,
+    isLoading: () => true,
+    executeJavaScript: () => { calls += 1; return Promise.resolve(); },
+    getOSProcessId: () => 1,
+    id: 1
+  }]);
+  assert.equal(calls, 0);
+});
+
+test('a loaded hidden renderer still collects', async () => {
+  let calls = 0;
+  await runRendererPass([{
+    isDestroyed: () => false,
+    isLoading: () => false,
+    executeJavaScript: () => { calls += 1; return Promise.resolve(true); },
+    getOSProcessId: () => 1,
+    id: 1
+  }]);
+  assert.equal(calls, 1);
+});

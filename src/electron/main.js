@@ -1596,6 +1596,10 @@ function collectIdleRendererHeaps() {
   const jobs = [];
   for (const contents of webContents.getAllWebContents()) {
     if (!contents || contents.isDestroyed()) continue;
+    // executeJavaScript on a loading page is queued until did-stop-loading;
+    // a window revealed in that gap would collect while visible. A later idle
+    // pass picks the renderer up once it has finished loading.
+    if (typeof contents.isLoading === 'function' && contents.isLoading()) continue;
     let key = null;
     try { key = contents.getOSProcessId(); } catch (_) {}
     if (key === null) key = `contents:${contents.id}`;
