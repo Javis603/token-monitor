@@ -4919,6 +4919,7 @@ function focusExistingWindow() {
   applyMacActivationPolicy({ mainWindowVisible: true });
   if (!mainWindow || mainWindow.isDestroyed()) {
     createWindow();
+    if (settings?.trayMode) showPopover();
     return;
   }
   if (mainWindow.isMinimized()) mainWindow.restore();
@@ -5655,6 +5656,7 @@ function ensureEdgeDockController() {
     // The dock card's Switch button runs the same swap the Limits view does,
     // then repaints from the refreshed records.
     onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
+    onOpenHome: () => openViewFromTray('home'),
     canRefreshLimits: () => canRefreshEdgeDockStats(),
     onRefreshLimits: () => refreshStatsFromEdgeDock(),
     onRefreshLimitAccount: (providerId, account) => refreshLimitProvider(providerId, account),
@@ -7199,9 +7201,9 @@ function replaceMainWindow(bounds, options = {}) {
       if (windowsBackdropFallback(old) !== windowsBackdropFallback(next)) pushSettingsToRenderer();
       sendFloatingBubbleState();
       if (old?.isMinimized()) next.minimize();
-      else if (old?.isVisible()) {
+      else if (old?.isVisible() || options.focus === true) {
         restoreWindowMaximized(next, settings, { collapsedFloatingBubble: options.collapsedFloatingBubble === true });
-        revealWindow(next, { inactive: options.focus === false || !wasFocused });
+        revealWindow(next, { inactive: options.focus === false || (!wasFocused && options.focus !== true) });
       }
       if (!next.isVisible() || next.isMinimized()) {
         old?.destroy();

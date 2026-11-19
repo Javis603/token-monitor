@@ -691,9 +691,14 @@ function renderPeek(payload) {
   root.classList.toggle('is-handle-hidden', payload.peeking !== true);
 }
 
-if (surface === 'peek') root.addEventListener('click', () => {
-  if (state.payload?.peekMode !== 'refresh') bridge.click(null);
-});
+if (surface === 'peek') {
+  root.addEventListener('pointerdown', event => {
+    if (event.button === 0 && state.payload?.peekMode === 'handle') bridge.click(null);
+  });
+  root.addEventListener('click', event => {
+    if (event.detail === 0 && state.payload?.peekMode === 'handle') bridge.click(null);
+  });
+}
 
 // On macOS the handle and floating rail pass the pointer through with moves still
 // forwarded here, so reporting them lets the main process take the pointer as
@@ -701,10 +706,19 @@ if (surface === 'peek') root.addEventListener('click', () => {
 // no position: the main process reads the cursor itself.
 if (surface === 'peek' || surface === 'rail' || surface === 'bubble') {
   const reportPointer = () => {
-    if (surface !== 'peek' ? state.payload?.platform === 'darwin' : state.payload?.peekMode !== 'refresh') bridge.pointer();
+    if (state.payload?.platform === 'darwin' && (surface !== 'peek' || state.payload.peekMode !== 'refresh')) bridge.pointer();
   };
   document.addEventListener('mousemove', reportPointer);
   document.documentElement.addEventListener('mouseleave', reportPointer);
+  // Windows clips the actual dock windows. One report at a boundary lets main
+  // react without waiting for its poll or sending every intervening movement.
+  document.addEventListener('pointerover', event => {
+    if (state.payload?.platform !== 'win32') return;
+    if (!event.relatedTarget || (surface === 'rail' && indexFromTarget(event.target) !== indexFromTarget(event.relatedTarget))) bridge.pointer();
+  });
+  document.addEventListener('pointerout', event => {
+    if (state.payload?.platform === 'win32' && !event.relatedTarget) bridge.pointer();
+  });
 }
 
 // The notch window passes the pointer through, with its moves forwarded, until
@@ -1274,6 +1288,7 @@ const cardResetAnimator = limitResetAnimatorApi.createLimitResetAnimator({
 });
 
 let railNode = null;
+let homeButton;
 // `null` until a payload has said: the entrance is keyed to a reveal this page has
 // not seen, so a page that loads with the rail already up shows it instead of
 // replaying the slide.
@@ -1309,10 +1324,23 @@ function renderRail(payload) {
   railReveal = reveal;
   if (!railNode) {
     railNode = el('div', 'edge-dock-rail');
-    contentLayer.append(railNode);
+    homeButton = el('button', 'edge-dock-home');
+    homeButton.type = 'button';
+    homeButton.disabled = bridge.isSettingsPreview === true;
+    const homeIcon = el('span', 'view-switcher-icon view-icon-home');
+    homeIcon.setAttribute('aria-hidden', 'true');
+    homeButton.append(homeIcon);
+    homeButton.addEventListener('click', () => bridge.openHome());
+    contentLayer.append(railNode, homeButton);
     bindRailGestures(railNode);
   }
   const layout = payload.cellLayout || null;
+  homeButton.hidden = !layout;
+  if (layout) {
+    homeButton.style.top = `${layout.homeTop}px`;
+    homeButton.style.height = `${layout.homeHeight}px`;
+    homeButton.setAttribute('aria-label', t('views.backHome'));
+  }
   railNode.classList.toggle('is-compact', layout?.compact === true);
   const retainedPlugins = new Map([...railNode.children].filter(node => node.dataset.pluginRef).map(node => [node.dataset.cellId, node]));
   const ringSnapshot = captureRingResetMotion();
@@ -1387,6 +1415,8 @@ bridge.onDragEnded?.(({ gestureId }) => {
 function bindRailGestures(rail) {
   rail.addEventListener('pointerdown', (event) => {
     if (event.button !== 0 || gesture) return;
+    // Plugin buttons keep their press and release on the same control.
+    if (event.target?.closest?.('button, a[href], input, select, textarea, summary, [role="button"], [contenteditable="true"]')) return;
     gesture = {
       id: ++nextGestureId,
       pointerId: event.pointerId,

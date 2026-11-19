@@ -6298,6 +6298,7 @@ function openSettingsPanel(section) {
 
 function openViewFromTray(viewId) {
   if (!availableBreakdownIds().includes(viewId)) return;
+  initialBreakdownPreferenceApplied = true;
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   stopWindowShortcutRecording();
   resetSettingsListSearch();

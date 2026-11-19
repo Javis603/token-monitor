@@ -137,6 +137,11 @@ function paintedCardBounds(win) {
   return frame ? { ...bounds, y: bounds.y + frame.y, height: frame.height } : bounds;
 }
 
+function cellCenterY(rail, index) {
+  const { tops, heights } = sentPayload(rail, 'rail').cellLayout;
+  return rail.bounds.y + (tops[index] + heights[index] / 2) * rail.webContents.getZoomFactor();
+}
+
 // Drive the controller's polling, intent grace and animation frames on one clock.
 function mockDockClock(t) {
   t.mock.timers.enable({ apis: ['Date', 'setTimeout', 'setInterval'], now: 0 });
@@ -188,6 +193,7 @@ function createFixture(options = {}) {
     windowsBackdrop: options.windowsBackdrop,
     canRefreshLimits: options.canRefreshLimits,
     onRefreshLimits: options.onRefreshLimits,
+    onOpenHome: options.onOpenHome,
     onRefreshLimitAccount: options.onRefreshLimitAccount,
     limitProbes: options.limitProbes,
     onWebSurfaceChanged: options.onWebSurfaceChanged,
@@ -553,7 +559,7 @@ test('auto-hide haptics distinguish the handle reveal from the first hovered ite
 
   fixture.screen.point = {
     x: rail.bounds.x + rail.bounds.width / 2,
-    y: rail.bounds.y + 40
+    y: cellCenterY(rail, 0)
   };
   await new Promise((resolve) => setTimeout(resolve, 105));
   assert.deepEqual(fixture.haptics, ['generic', 'alignment']);
@@ -577,21 +583,21 @@ test('rail haptics once whenever the pointer enters an item', async (t) => {
   const rail = fixture.windowFor('rail');
   const centerX = rail.bounds.x + rail.bounds.width / 2;
 
-  fixture.screen.point = { x: centerX, y: rail.bounds.y + 40 };
+  fixture.screen.point = { x: centerX, y: cellCenterY(rail, 0) };
   await new Promise((resolve) => setTimeout(resolve, 105));
   assert.deepEqual(fixture.haptics, ['alignment']);
   assert.deepEqual(fixture.hapticCalls, [{ pattern: 'alignment', performanceTime: 'now' }]);
 
-  fixture.screen.point = { x: centerX, y: rail.bounds.y + 112 };
+  fixture.screen.point = { x: centerX, y: cellCenterY(rail, 1) };
   await new Promise((resolve) => setTimeout(resolve, 55));
   assert.deepEqual(fixture.haptics, ['alignment', 'alignment']);
 
   await new Promise((resolve) => setTimeout(resolve, 55));
   assert.deepEqual(fixture.haptics, ['alignment', 'alignment']);
 
-  fixture.screen.point = { x: rail.bounds.x - 20, y: rail.bounds.y + 40 };
+  fixture.screen.point = { x: rail.bounds.x - 20, y: cellCenterY(rail, 0) };
   await new Promise((resolve) => setTimeout(resolve, 55));
-  fixture.screen.point = { x: centerX, y: rail.bounds.y + 40 };
+  fixture.screen.point = { x: centerX, y: cellCenterY(rail, 0) };
   await new Promise((resolve) => setTimeout(resolve, 55));
   assert.deepEqual(fixture.haptics, ['alignment', 'alignment', 'alignment']);
 });
@@ -602,7 +608,7 @@ test('structural updates only haptic when the item under the pointer changes', a
   const rail = fixture.windowFor('rail');
   fixture.screen.point = {
     x: rail.bounds.x + rail.bounds.width / 2,
-    y: rail.bounds.y + 40
+    y: cellCenterY(rail, 0)
   };
 
   await new Promise((resolve) => setTimeout(resolve, 105));
@@ -1281,6 +1287,30 @@ test('a pointer report from the page takes the pointer without waiting for the c
   assert.equal(peek.ignoreMouse, true);
 });
 
+test('Windows starts handle and card dwell on pointer entry and respects both deadlines', (t) => {
+  const advance = mockDockClock(t);
+  const fixture = createFixture({ platform: 'win32', settings: { edgeDockMode: 'autoHide' } });
+  t.after(() => fixture.controller.stop());
+  const peek = fixture.windowFor('peek'), rail = fixture.windowFor('rail'), card = fixture.windowFor('bubble');
+  fixture.paintPeek();
+  fixture.screen.point = { x: peek.bounds.x + peek.bounds.width - 1, y: peek.bounds.y + peek.bounds.height / 2 };
+  fixture.ipcMain.emit('edgeDock:pointer', { sender: peek.webContents });
+  const handleDwell = Math.min(60, EDGE_DOCK_TIMING.revealDelayMs);
+  advance(handleDwell - 1);
+  assert.equal(sentPayload(rail, 'rail').reveal, 0);
+  advance(1);
+  assert.equal(sentPayload(rail, 'rail').reveal, 1);
+
+  const layout = sentPayload(rail, 'rail').cellLayout;
+  fixture.screen.point = { x: rail.bounds.x + rail.bounds.width / 2,
+    y: rail.bounds.y + layout.tops[0] + layout.heights[0] / 2 };
+  fixture.ipcMain.emit('edgeDock:pointer', { sender: rail.webContents });
+  advance(EDGE_DOCK_TIMING.bubbleDelayMs - 1);
+  assert.equal(sentPayload(card, 'bubble').cell, null);
+  advance(1);
+  assert.equal(sentPayload(card, 'bubble').cell.id, 'claude');
+});
+
 test('the Windows handle window takes the pointer and leaves the margin to its region', async (t) => {
   const fixture = createFixture({ platform: 'win32', settings: { edgeDockMode: 'autoHide' } });
   t.after(() => fixture.controller.stop());
@@ -1360,6 +1390,23 @@ test('the handle grows through intermediate silhouettes unless motion is reduced
   assert.ok(masks() - before > 2, `the mask follows the growth in steps (${masks() - before})`);
   const grown = sentPayload(peek, 'peek').shape;
   assert.equal(grown.key.endsWith(`:${EDGE_DOCK_METRICS.handleNearWidth}x${EDGE_DOCK_METRICS.handleNearLength}`), true);
+});
+
+test('only the revealed stationary rail can request the main home view', (t) => {
+  let opens = 0;
+  const fixture = createFixture({ settings: { edgeDockMode: 'autoHide' }, onOpenHome: () => { opens++; } });
+  t.after(() => fixture.controller.stop());
+  const rail = fixture.windowFor('rail'), peek = fixture.windowFor('peek'), card = fixture.windowFor('bubble');
+  const request = win => fixture.ipcMain.emit('edgeDock:openHome', { sender: win.webContents });
+  request(rail);
+  fixture.ipcMain.emit('edgeDock:click', { sender: peek.webContents });
+  for (const wrong of [peek, card, { webContents: new FakeWebContents() }]) request(wrong);
+  assert.equal(opens, 0);
+  request(rail);
+  assert.equal(opens, 1);
+  fixture.ipcMain.emit('edgeDock:dragStart', { sender: rail.webContents }, { grabOffsetX: 24, grabOffsetY: 55, gestureId: 1 });
+  request(rail);
+  assert.equal(opens, 1);
 });
 
 test('a rail payload carries the reveal that keys the entrance', (t) => {
@@ -1691,6 +1738,9 @@ for (const side of ['left', 'right']) {
     assert.equal(sentPayload(rail, 'rail').focusCellId, 'provider-11');
     fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'provider-11', height: 180 });
     assert.equal(bubble.ignoreMouse, false);
+    const edgeX = side === 'left' ? rail.bounds.x + 8 : rail.bounds.x + rail.bounds.width - 8;
+    assert.equal(FakeBrowserWindow.atPoint({ x: edgeX, y: peek.bounds.y + 6 }), rail,
+      'the bottom readout remains clickable beside refresh, inside the painted shoulder');
   });
 }
 
@@ -1779,7 +1829,7 @@ for (const { platform, enabled, expected } of [
     assert.equal((await first).ok, false);
     assert.equal((await duplicate).ok, false);
     assert.deepEqual(fixture.hapticCalls, expected, 'failure does not trigger more feedback');
-    fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 40 };
+    fixture.screen.point = { x: rail.bounds.x + 32, y: cellCenterY(rail, 0) };
     await new Promise((resolve) => setTimeout(resolve, 105));
     assert.deepEqual(fixture.hapticCalls, [...expected, ...expected], 'returning to a readout gets its own hover feedback');
     fixture.screen.point = { x: peek.bounds.x + 16, y: peek.bounds.y + 16 };
@@ -1841,7 +1891,7 @@ for (const mode of ['always', 'alwaysExceptFullScreen']) {
       t.after(() => fixture.controller.stop());
       const peek = fixture.windowFor('peek');
       const rail = fixture.windowFor('rail');
-      fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 40 };
+      fixture.screen.point = { x: rail.bounds.x + 32, y: cellCenterY(rail, 0) };
       advance(105);
       fixture.paintPeek();
       const request = fixture.ipcMain.handlers.get('edgeDock:refreshLimits')({ sender: peek.webContents });
@@ -1879,7 +1929,7 @@ test('busy visibility yields to dragging and removing the action', async (t) => 
   t.after(() => fixture.controller.stop());
   const peek = fixture.windowFor('peek');
   const rail = fixture.windowFor('rail');
-  fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 40 };
+  fixture.screen.point = { x: rail.bounds.x + 32, y: cellCenterY(rail, 0) };
   advance(105);
   fixture.paintPeek();
   const request = fixture.ipcMain.handlers.get('edgeDock:refreshLimits')({ sender: peek.webContents });
@@ -1915,7 +1965,7 @@ for (const rebuild of ['material', 'restart']) {
     t.after(() => fixture.controller.stop());
     let peek = fixture.windowFor('peek');
     let rail = fixture.windowFor('rail');
-    fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 40 };
+    fixture.screen.point = { x: rail.bounds.x + 32, y: cellCenterY(rail, 0) };
     advance(105);
     fixture.paintPeek();
     const handler = fixture.ipcMain.handlers.get('edgeDock:refreshLimits');
@@ -1929,7 +1979,7 @@ for (const rebuild of ['material', 'restart']) {
     peek = fixture.windowFor('peek');
     rail = fixture.windowFor('rail');
     assert.notEqual(peek, oldPeek);
-    fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 40 };
+    fixture.screen.point = { x: rail.bounds.x + 32, y: cellCenterY(rail, 0) };
     advance(105);
     fixture.paintPeek();
     const joined = handler({ sender: peek.webContents });
@@ -2399,7 +2449,7 @@ for (const railX of [350, 800]) {
     const rail = fixture.windowFor('rail');
     const bubble = fixture.windowFor('bubble');
     const refresh = fixture.windowFor('peek');
-    fixture.screen.point = { x: rail.bounds.x + 32, y: rail.bounds.y + 211 };
+    fixture.screen.point = { x: rail.bounds.x + 32, y: cellCenterY(rail, 2) };
     advance(100);
     fixture.ipcMain.emit('edgeDock:click', { sender: rail.webContents }, { cellIndex: 2 });
     fixture.ipcMain.emit('edgeDock:bubbleSize', { sender: bubble.webContents }, { cellId: 'cursor', height: 180 });

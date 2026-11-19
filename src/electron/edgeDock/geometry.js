@@ -17,6 +17,7 @@ const EDGE_DOCK_METRICS = Object.freeze({
   shoulder: 28,
   railRadius: 20,
   padding: 4,
+  homeHeight: 32,
   cellHeight: 70,
   // Floor for the compressed density used when every cell cannot fit at full
   // height; below it the rail clips its last cells rather than shrinking rings
@@ -201,19 +202,29 @@ function naturalHeight(kind, metrics, compact) {
 // past that the rail is clipped by the work area rather than shrunk further.
 function edgeDockCellLayout(workArea, cellKinds, metrics = EDGE_DOCK_METRICS) {
   const kinds = cellKindsFrom(cellKinds);
-  const chrome = metrics.shoulder * 2 + metrics.padding * 2;
+  const homeTop = metrics.shoulder + metrics.padding;
+  const homeSpace = metrics.homeHeight + (kinds.length ? metrics.cellGap : 0);
+  const chrome = homeTop * 2 + homeSpace;
   const measure = (compact) => kinds.reduce((sum, kind) => sum + naturalHeight(kind, metrics, compact), 0)
     + Math.max(0, kinds.length - 1) * metrics.cellGap;
   const available = workArea ? workArea.height - metrics.screenMargin * 2 - chrome : Infinity;
   const compact = measure(false) > available;
-  const heights = kinds.map((kind) => naturalHeight(kind, metrics, compact));
+  // Reclaim padding from the top down: off-screen rows cannot make space for
+  // a quota that was still clickable at the bottom of a clipped rail.
+  let overflow = Math.max(0, Math.min(homeSpace, measure(true) - available));
+  const heights = kinds.map(kind => {
+    const trim = Math.min(metrics.padding, overflow);
+    overflow -= trim;
+    return naturalHeight(kind, metrics, compact) - trim;
+  });
   const tops = [];
-  let cursor = metrics.shoulder + metrics.padding;
+  let cursor = homeTop + homeSpace;
   for (const height of heights) {
     tops.push(cursor);
     cursor += height + metrics.cellGap;
   }
-  return { kinds, heights, tops, compact, length: chrome + measure(compact) };
+  const length = cursor + homeTop - (kinds.length ? metrics.cellGap : 0);
+  return { kinds, heights, tops, homeTop, homeHeight: metrics.homeHeight, compact, length };
 }
 
 // The strip between the card and the rail, as tall as the card. Crossing it
@@ -419,7 +430,8 @@ function createEdgeDockIntent(timing = EDGE_DOCK_TIMING) {
     leaveSince: null,
     cell: null,
     candidate: null,
-    candidateSince: null
+    candidateSince: null,
+    checkAt: Infinity
   };
 
   function reset() {
@@ -428,10 +440,19 @@ function createEdgeDockIntent(timing = EDGE_DOCK_TIMING) {
     state.cell = null;
     state.candidate = null;
     state.candidateSince = null;
+    state.checkAt = Infinity;
+  }
+
+  function waited(since, delay, now) {
+    const deadline = since + delay;
+    if (now >= deadline) return true;
+    state.checkAt = deadline;
+    return false;
   }
 
   function tick(input = {}, now = Date.now()) {
     const effects = [];
+    state.checkAt = Infinity;
     if (input.dragging) {
       state.leaveSince = null;
       return effects;
@@ -440,7 +461,7 @@ function createEdgeDockIntent(timing = EDGE_DOCK_TIMING) {
       if (input.inTrigger || input.inPeek || input.inWake) {
         if (state.dwellSince === null) state.dwellSince = now;
         const delay = input.inPeek ? Math.min(60, timing.revealDelayMs) : timing.revealDelayMs;
-        if (now - state.dwellSince >= delay) {
+        if (waited(state.dwellSince, delay, now)) {
           state.revealed = true;
           reset();
           effects.push({ type: 'reveal' });
@@ -452,16 +473,19 @@ function createEdgeDockIntent(timing = EDGE_DOCK_TIMING) {
     }
 
     const inside = Boolean(input.inRail || input.inBubble || input.inCorridor || input.inTrigger);
-    if (inside) {
+    const holdsRail = state.pinned || state.always;
+    if (inside || (holdsRail && state.cell === null)) {
       state.leaveSince = null;
-    } else if (!state.pinned && !state.always) {
+    } else {
       if (state.leaveSince === null) state.leaveSince = now;
-      if (now - state.leaveSince >= timing.hideDelayMs) {
-        state.revealed = false;
+      if (waited(state.leaveSince, timing.hideDelayMs, now)) {
         const hadBubble = state.cell !== null;
         reset();
         if (hadBubble) effects.push({ type: 'bubble', cell: null });
-        effects.push({ type: 'retract' });
+        if (!holdsRail) {
+          state.revealed = false;
+          effects.push({ type: 'retract' });
+        }
         return effects;
       }
     }
@@ -480,26 +504,17 @@ function createEdgeDockIntent(timing = EDGE_DOCK_TIMING) {
           state.candidate = input.cellIndex;
           state.candidateSince = now;
         }
-        if (now - state.candidateSince >= timing.bubbleDelayMs) {
+        if (waited(state.candidateSince, timing.bubbleDelayMs, now)) {
           state.cell = input.cellIndex;
           state.candidate = null;
           state.candidateSince = null;
           effects.push({ type: 'bubble', cell: state.cell });
         }
       }
-    } else if (!input.inRail && !input.inBubble && !input.inCorridor) {
+    } else {
+      // Time spent on the rail's unmarked shoulder is not a dwell on a cell.
       state.candidate = null;
       state.candidateSince = null;
-      // A pinned or always-visible dock keeps the rail but lets the card go
-      // once the pointer has clearly left, so it never covers content.
-      const holdsRail = state.pinned || state.always;
-      if (holdsRail && state.cell !== null && state.leaveSince === null) {
-        state.leaveSince = now;
-      }
-      if (holdsRail && state.cell !== null && now - state.leaveSince >= timing.hideDelayMs) {
-        state.cell = null;
-        effects.push({ type: 'bubble', cell: null });
-      }
     }
     return effects;
   }

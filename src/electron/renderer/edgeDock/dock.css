@@ -148,13 +148,32 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   cursor: default;
 }
 .edge-dock-rail.is-dragging { cursor: grabbing; }
+.edge-dock-rail:not(.is-dragging) .edge-dock-cell { cursor: pointer; }
 
+.edge-dock-home:not([hidden]) {
+  position: absolute;
+  inset-inline: 3px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+.edge-dock-home .view-icon-home { width: 20px; height: 20px; }
+.edge-dock-home:disabled { cursor: default; }
+.edge-dock-home:is(:hover, :focus-visible):enabled { background: var(--glass-soft); color: var(--accent); }
+.edge-dock-home:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.edge-dock-home:active:enabled { background: var(--line); }
 
 .edge-dock-cell {
   /* Top and height come from the main process's layout (edgeDockCellLayout). */
   position: absolute;
-  left: 4px;
-  right: 4px;
+  left: 0;
+  right: 0;
+  padding-inline: 4px;
   height: 70px;
   display: flex;
   flex-direction: column;
@@ -164,9 +183,15 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   border-radius: 12px;
   transition: background-color 140ms ease;
 }
+.edge-dock-rail:not(.is-dragging) .edge-dock-cell:active {
+  background-color: rgba(var(--overlay-rgb), 0.12);
+  transition-duration: 0s;
+}
+.edge-dock-cell :focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 /* Hover is carried by the mark itself rather than a selection box: the focused
    ring thickens and glows in its own colour. */
-.edge-dock-cell.is-focused .edge-dock-ring-fill {
+.edge-dock-cell.is-focused .edge-dock-ring-fill,
+.edge-dock-rail:not(.is-dragging) .edge-dock-cell:hover .edge-dock-ring-fill {
   filter: drop-shadow(0 0 3px var(--ring-glow-color));
 }
 
@@ -379,7 +404,8 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
 .edge-dock-cell-rate-unit { color: var(--muted); font-weight: 600; }
 .edge-dock-cell-rate.is-idle .edge-dock-cell-rate-value { color: var(--muted); }
 .edge-dock-rail.is-compact .edge-dock-cell-rate { font-size: 8.5px; }
-.edge-dock-cell-stat.is-focused .edge-dock-stat-value {
+.edge-dock-cell-stat.is-focused .edge-dock-stat-value,
+.edge-dock-rail:not(.is-dragging) .edge-dock-cell-stat:hover .edge-dock-stat-value {
   color: var(--accent);
   text-shadow: 0 0 6px rgba(var(--accent-rgb), 0.25);
 }
