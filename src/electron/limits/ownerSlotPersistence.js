@@ -44,7 +44,9 @@ function createOwnerSlotPersistence(provider, getSettings, service, legacyRead =
           || isDeepStrictEqual(account, projected.find(item => item.id === account.id)))) {
           return update ? { ...previous, owner: { ...previous.owner, credential: update.credential } } : previous;
         }
-        return { ...previous, id: account.id, label: previous?.label || account.accountLabel || '',
+        // Owner `accountLabel` is provider-reported (a plan or profile name),
+        // never a rename, so it must not seed the user's display label.
+        return { ...previous, id: account.id, label: previous?.label || '',
           enabled: account.enabled !== false, values: {}, accountKey: account.accountKey || '',
           accountKeyAliases: account.accountKeyAliases || previous?.accountKeyAliases || [], serverIdentity: Boolean(account.accountKey),
           createdAt: previous?.createdAt || account.addedAt || new Date().toISOString(), updatedAt: account.updatedAt || new Date().toISOString(),

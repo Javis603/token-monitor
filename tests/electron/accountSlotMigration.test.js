@@ -81,6 +81,19 @@ test('startup makes a conflicting legacy owner reachable even when saved slots a
   assert.notEqual(savedCopy.id, legacy.id);
 });
 
+test('owner imports never turn a provider-reported label into a rename', t => {
+  const store = fixture(t);
+  store.writeClaudeWebCredential('claude-web', 'fixture-cookie');
+  store.writeAntigravityCredential('antigravity-login', { accessToken: 'fixture-token' });
+  const settings = migrateAccountSlots(store, {
+    claudeManagedAccounts: [{ id: 'claude-web', organizationId: 'org', accountKey: 'claude-key', accountLabel: 'Max 20x', enabled: true }],
+    antigravityManagedAccounts: [{ id: 'antigravity-login', accountEmail: 'person@example.com', accountKey: 'ag-key', accountLabel: 'Profile Name', enabled: true }]
+  }, Date.now, {});
+  assert.equal(settings.claudeAccountSlots[0].label, '');
+  assert.equal(settings.claudeAccountSlots[0].owner.metadata.accountLabel, 'Max 20x');
+  assert.equal(settings.antigravityAccountSlots[0].label, '');
+});
+
 test('successive Claude restores preserve each credential when the legacy ID is reused', t => {
   const id = 'same';
   const saved = { id, organizationId: 'saved-org', enabled: true };

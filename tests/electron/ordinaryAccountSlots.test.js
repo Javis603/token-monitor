@@ -80,7 +80,7 @@ test('presentation adapter admits only trusted non-slot identities and leaves ma
 });
 test('owner collector projection keeps disabled context without exposing it through generic DTO', () => {
   const options = { workbuddyAccountSlots: [{ id: 'a', enabled: false, label: 'Name', accountKey: 'canonical', accountKeyAliases: ['previous'], owner: { metadata: { realm: 'international', domain: 'enterprise', departmentInfo: 'dept' }, credential: { accessToken: 'secret' } } }] };
-  assert.deepEqual(ownerSlotAccounts(options, 'workbuddy')[0], { id: 'a', enabled: false, accountLabel: 'Name', accountKey: 'canonical', accountKeyAliases: ['previous'], realm: 'international', domain: 'enterprise', departmentInfo: 'dept', credentials: { accessToken: 'secret' } });
+  assert.deepEqual(ownerSlotAccounts(options, 'workbuddy')[0], { id: 'a', enabled: false, accountKey: 'canonical', accountKeyAliases: ['previous'], realm: 'international', domain: 'enterprise', departmentInfo: 'dept', credentials: { accessToken: 'secret' } });
 });
 
  test('Claude login publishes fresh safe metadata from slots and renewed cookie stays main-only', async () => {
@@ -170,6 +170,28 @@ test('Antigravity renewal, state, login and removal preserve metadata-only repai
   assert.equal((await api.removeAntigravityManagedAccount('ok')).ok, true);
   assert(!h.settings().antigravityAccountSlots.some(slot => slot.id === 'ok'));
   assert.deepEqual(h.settings().antigravityAccountSlots.find(slot => slot.id === 'repair'), repair);
+});
+test('Antigravity login keeps the Google profile name out of the display label', async () => {
+  const { createAntigravityAccountService } = require('../../src/electron/providers/antigravity/accountService');
+  const h = ownerHarness('antigravity', []);
+  const api = createAntigravityAccountService({ slotPersistence: h.persistence, electronLimitsFetch: () => {}, openExternal() {}, pushSettingsToRenderer() {}, sendAntigravityAccountsPush() {}, queueLimitInvalidation() {},
+    oauthLogin: async () => ({ credential: { accessToken: 'login' }, identity: { email: 'person@example.com', name: 'Profile Name' } }) });
+  assert.equal((await api.addAntigravityManagedAccount()).ok, true);
+  const [slot] = h.settings().antigravityAccountSlots;
+  assert.equal(slot.label, '');
+  assert.equal(slot.owner.metadata.accountName, 'Profile Name');
+  assert.equal(slot.owner.metadata.accountLabel, '');
+  assert.equal(api.antigravityAccountsForRenderer()[0].accountName, 'Profile Name');
+});
+test('Claude Web identity updates keep the plan out of the display label and settle a rename', async () => {
+  const h = ownerHarness('claude', [ownerRecord('web', { organizationId: 'org', accountKey: 'web-key' }, 'cookie')]);
+  const resolved = h.persistence.accounts().map(account => ({ ...account, accountEmail: 'person@example.com', accountLabel: 'Max 20x' }));
+  await h.persistence.commit(resolved, []);
+  assert.equal(h.settings().claudeAccountSlots[0].label, '');
+  h.settings().claudeAccountSlots[0].label = 'Work';
+  // A renamed account must project the same provider facts it stored, or every
+  // identity check would see a change and write again.
+  assert.equal(h.persistence.accounts()[0].accountLabel, 'Max 20x');
 });
 for (const provider of ['claude', 'workbuddy']) test(`${provider} projected owner updates preserve raw siblings and explicit removal stays removed`, async () => {
   const normalize = provider === 'claude' ? require('../../src/shared/providers/claude/webAccounts').normalizeClaudeManagedAccounts : require('../../src/shared/providers/workbuddy/oauth').normalizeManagedAccounts;
