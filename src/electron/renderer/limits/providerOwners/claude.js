@@ -118,26 +118,11 @@ function claudeAutomaticAccounts(providers, accounts) {
   });
 }
 
-function claudeAccountStatusText(fallback, enabled) {
-  const providers = (host.strictLocalProviderStatuses || localProviderStatuses)('claude');
-  const accounts = claudeWebSettingsAccounts(providers);
-  // Count configured Web logins even before their first result, and include
-  // discovered local identities without double-counting the same subscription.
-  const identities = new Map();
-  for (const account of accounts) {
-    const key = account.accountKey || `managed:${account.id}`;
-    const reading = window.TokenMonitorLegacyAccountList.readingFor(account, providers);
-    const linked = enabled && account.enabled !== false && reading?.status === 'ok';
-    identities.set(key, identities.get(key) === true || linked);
-  }
-  for (const account of claudeAutomaticAccounts(providers, accounts)) {
-    const provider = account.observation;
-    if (!provider.accountKey) continue;
-    identities.set(provider.accountKey, identities.get(provider.accountKey) === true || (enabled && provider.status === 'ok'));
-  }
-  return identities.size ? t('settings.opencode.connected', {
-    linked: [...identities.values()].filter(Boolean).length, total: identities.size
-  }) : fallback;
+// Runs after renderClaudeWebAccounts(), so the list already holds this tick's
+// accounts and readings, other devices' included.
+function claudeAccountStatusText(fallback) {
+  const summary = accountList?.summary();
+  return summary?.total ? t('settings.slots.connectedCount', summary) : fallback;
 }
 
 function renderClaudeWebAccounts() {
@@ -177,7 +162,8 @@ function renderClaudeWebAccounts() {
       refresh: () => renderExternalProviderStatus('claude')
     });
   }
-  accountList.update([...accounts.map(account => ({ ...account, canPause: account.id !== 'legacy',
+  // Saved rows hold a Web session; the reading they match may be the same account's OAuth quota.
+  accountList.update([...accounts.map(account => ({ ...account, sourceIconKind: 'web', canPause: account.id !== 'legacy',
     removable: !(account.id === 'legacy' && state.settings?.claudeWebLegacyCookieSource === 'env') })), ...automatic], providers.filter(row => row.accountKey));
 
 }

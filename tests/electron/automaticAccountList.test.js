@@ -134,8 +134,9 @@ test('Claude combines Web management with strict local OAuth/CLI rows without du
     reading('cli-other', { provider: 'claude', source: 'cli', accountEmail: 'same@example.com' }),
     reading('resolved-saved', { provider: 'claude', source: 'oauth', accountKeyAliases: ['saved-key'] })];
   const remote = reading('remote', { provider: 'claude', source: 'oauth', sourceDeviceId: 'other' });
+  let providerEnabled = true;
   const owner = claudeOwner.create({ document, initial: {}, getSettings: () => settings,
-    getAccountContext: () => ({ settings, localDeviceId: 'local', records: [remote], devices: [] }), preserveScroll: fn => fn(),
+    getAccountContext: () => ({ settings, localDeviceId: 'local', records: [remote], devices: [], providerEnabled }), preserveScroll: fn => fn(),
     localProviderStatuses: () => [...local, remote], strictLocalProviderStatuses: () => local,
     accountShellApi: { createBusyGuard }, providerLabel: 'Claude', t,
     window: { TokenMonitorLegacyAccountList: legacy, tokenMonitor: {} } });
@@ -146,11 +147,14 @@ test('Claude combines Web management with strict local OAuth/CLI rows without du
   assert.match(automaticRow.querySelector('.slot-status').attributes['aria-label'], /Connected/);
   assert.deepEqual(actions(automaticRow).map(node => node.dataset.slotAction), ['rename', 'up', 'down']);
   assert.equal(container.querySelector('.slot-add').classList.contains('hidden'), false, 'Web add entry remains visible');
-  assert.equal(owner.claudeAccountStatusText('', true), t('settings.opencode.connected', { linked: 2, total: 2 }), 'summary counts the same resolved identities as the local rows');
-  settings.claudeManagedAccounts[0].enabled = false;
-  assert.equal(owner.claudeAccountStatusText('', true), t('settings.opencode.connected', { linked: 1, total: 2 }));
-  assert.equal(owner.claudeAccountStatusText('', false), t('settings.opencode.connected', { linked: 0, total: 2 }));
-  settings.claudeManagedAccounts[0].enabled = true;
+  // The header counts the rows shown, the other device's included. The saved
+  // Web login has no Web reading of its own, so neither it nor its header is connected.
+  assert.equal(owner.claudeAccountStatusText(''), t('settings.slots.connectedCount', { linked: 2, total: 3 }), 'summary counts the rows the list shows');
+  providerEnabled = false;
+  owner.renderClaudeWebAccounts();
+  assert.equal(owner.claudeAccountStatusText(''), t('settings.slots.connectedCount', { linked: 1, total: 3 }), 'only the other device still reads quota');
+  providerEnabled = true;
+  owner.renderClaudeWebAccounts();
   assert.equal(allRows[2].querySelector('.slot-status').textContent, 'OAuth', 'remote OAuth keeps its own source');
   assert.equal(allRows[2].querySelector('.slot-status').classList.contains('slot-connected'), true);
   assert.ok(actions(allRows[0]).some(node => node.dataset.slotAction === 'remove'), 'saved Web controls remain reachable');
@@ -258,14 +262,14 @@ test('automatic account menu has no trailing divider when removal is unavailable
   assert.equal(visible.filter(node => node.classList.contains('action-menu-separator')).length, 1);
 });
 
-test('automatic provenance follows managed/app ownership instead of the quota endpoint', () => {
+test('automatic rows name the lane: managed logins fall through to their source, app detail to the desktop lane', () => {
   const document = createDocument(), container = document.createElement('div'); document.root.append(container);
   const sources = require('../../src/electron/limits/accountSettings').limitConnectionSourcesForRenderer().find(entry => entry.id === 'workbuddy').sources;
   const list = automatic.create({ document, provider: 'workbuddy', label: 'WorkBuddy', container, t, bridge: {},
     getContext: () => ({ settings: {}, localDeviceId: 'local' }), preserveScroll: fn => fn(), sources });
   list.update(['managed', 'app', 'unknown'].map(sourceDetail => reading(sourceDetail, { provider: 'workbuddy', source: 'api', sourceDetail, accountName: 'Account' })));
   const byKey = key => rows(container).find(row => row.dataset.slotId === `automatic:${key}`);
-  assert.equal(byKey('managed').querySelector('.slot-status').textContent, t('settings.slots.savedSource'));
+  assert.equal(byKey('managed').querySelector('.slot-status').textContent, t('settings.limits.sources.web'));
   assert.equal(byKey('app').querySelector('.slot-status').textContent, t('settings.limits.sources.desktop'));
   assert.equal(byKey('unknown').querySelector('.slot-detail'), undefined);
   const names = rows(container).map(row => row.querySelector('.slot-name').textContent);

@@ -1046,7 +1046,7 @@ function createLimitsRuntime(initialOptions = {}, deps = {}) {
         const state = lane.identities.get(identityKey);
         // Saved Cookie changes do not retire an independent CLI login. Restore
         // its own quota/attempt while still fencing the old Cookie dispatch.
-        if (provider === 'alibaba' && reason === 'settings-change' && config.alibabaSourcePreference !== 'web' && state?.alibabaCliLastGood) {
+        if (provider === 'alibaba' && reason === 'settings-change' && state?.alibabaCliLastGood) {
           state.lastGood = state.alibabaCliLastGood;
           state.lastAttempt = state.alibabaCliLastAttempt;
         } else lane.identities.delete(identityKey);

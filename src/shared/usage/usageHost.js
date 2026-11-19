@@ -37,7 +37,8 @@ const WORKER_PATH = require.resolve('./usageWorker');
 // How long a stopping worker gets to stop its collector (which terminates its
 // tokscale subprocesses) and close the archive before it is terminated anyway.
 const STOP_GRACE_MS = 5000;
-const TRANSFORMED = Object.freeze({ transformed: true });
+// The receiver owns the deserialized summary; the worker keeps its own copy.
+const TRANSFORMED = Object.freeze({ transformed: true, ownsSummary: true });
 const CALLER_OPTION_KEYS = Object.freeze([
   'onUpdate',
   'onSessionActivity',

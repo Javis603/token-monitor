@@ -1,5 +1,4 @@
 'use strict';
-const { selectedSource } = require('../../limits/sourceSelection');
 
 // Codex limits provider: ChatGPT/Codex backend usage, the CLI RPC fallback and
 // login flow, managed-account normalization, and the rate-limit → provider-window
@@ -1122,8 +1121,7 @@ async function readCodexRpcWithCommand(command, deps = {}) {
 }
 
 async function readCodexRpc(deps = {}) {
-  const commands = codexRpcCommandCandidates(deps).filter(command => !['app', 'cli'].includes(deps.codexSelectedSource)
-    || codexCommandSourceDetail(command, deps.platform || process.platform) === deps.codexSelectedSource);
+  const commands = codexRpcCommandCandidates(deps);
   if (commands.length === 0) throw errorWithStatus('notConfigured', 'Codex CLI not found');
   let lastError = null;
   for (const command of commands) {
@@ -1232,24 +1230,11 @@ async function readCodexUsageOrRpc(deps = {}) {
       oauthAuthSnapshot
     };
   };
-  if (['app', 'cli'].includes(deps.codexSelectedSource)) {
-    // The RPC process uses this account's isolated CODEX_HOME. A selected
-    // workspace must also match the stored workspace before RPC can answer it.
-    if (deps.codexAccountId && !codexManagedRpcMatchesSelectedWorkspace(deps, readCodexOAuthAuth(deps))) {
-      throw errorWithStatus('unavailable', 'Selected Codex workspace does not match RPC authentication');
-    }
-    const payload = await rpcReader(deps);
-    if (payload.sourceDetail !== deps.codexSelectedSource) {
-      throw errorWithStatus('unavailable', 'Codex RPC did not answer from the selected source');
-    }
-    return { payload, source: 'rpc', sourceDetail: payload.sourceDetail };
-  }
   let oauthError;
   let transientRpcFallback;
   try {
     return await readOAuth();
   } catch (error) {
-    if (deps.codexSelectedSource === 'oauth') { error.codexSource = 'oauth'; throw error; }
     oauthError = error;
     transientRpcFallback = codexOAuthCanFallbackToRpc(
       error,
@@ -1396,7 +1381,6 @@ async function fetchLiveCodexAccount(deps = {}, nowMs = Date.now(), managedAccou
 }
 
 async function fetchCodexLimits(options = {}, deps = {}) {
-  deps = { ...deps, codexSelectedSource: selectedSource('codex', options, deps) };
   const nowMs = (deps.now || Date.now)();
   const scope = options.limitRefreshScope?.provider === 'codex'
     ? options.limitRefreshScope

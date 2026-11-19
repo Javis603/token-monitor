@@ -1,5 +1,4 @@
 'use strict';
-const { selectedSource } = require('../../limits/sourceSelection');
 
 const { normalizeLimitProvider } = require('../../limits/core');
 const {
@@ -580,13 +579,12 @@ async function fetchOllamaLimits(options = {}, deps = {}) {
   const env = deps.env || process.env;
   const now = (deps.now || Date.now)();
   const updatedAt = new Date(now).toISOString();
-  const selection = selectedSource('ollama', options, deps);
-  const apiKey = selection === 'web' ? '' : ollamaApiKey(env, options);
+  const apiKey = ollamaApiKey(env, options);
   if (apiKey) return fetchOllamaApiLimits(apiKey, options, deps, now, updatedAt);
 
-  const cookieHeader = selection === 'api' ? '' : ollamaSessionCookie(env, options);
+  const cookieHeader = ollamaSessionCookie(env, options);
   if (!cookieHeader) {
-    return normalizeLimitProvider({ provider: 'ollama', source: selection === 'api' ? 'api' : 'web', status: 'notConfigured', updatedAt, windows: [] });
+    return normalizeLimitProvider({ provider: 'ollama', source: 'web', status: 'notConfigured', updatedAt, windows: [] });
   }
 
   if (!deps.bypassValidationCache) {

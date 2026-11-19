@@ -45,10 +45,13 @@ function renderCursorStatus() {
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
     enabled: (account, value) => window.tokenMonitor.cursor.setAccountEnabled(account.id, value),
     remove: account => window.tokenMonitor.cursor.logout(account.id),
-    changed: result => { if (result.status) { statusRevision++; state.cursorAccount = { status: result.status, error: "", busy: false }; } }, refresh: refreshCursorStatus, busy: () => state.cursorAccount.busy || state.cursorAccount.status?.managementBlocked
+    changed: result => { if (result.status) { statusRevision++; state.cursorAccount = { status: result.status, error: "", busy: false }; } }, refresh: refreshCursorStatus, busy: () => state.cursorAccount.busy || state.cursorAccount.status?.managementBlocked,
+    readings: () => host.localProviderStatuses('cursor'),
+    // A failed or pending status check says so in place of the count.
+    status: { element: () => document.getElementById('cursorAccountStatus'), empty: () => t('settings.cursor.notLoggedIn'),
+      active: () => !state.cursorAccount.error && Boolean(state.cursorAccount.status) }
   });
-  const sourceSelected = account => (state.settings.cursorSourcePreference || 'auto') === 'auto' || state.settings.cursorSourcePreference === (account.removable ? 'web' : 'desktop');
-  accountList.update(accounts.map(account => ({ ...account, sourceSelected: sourceSelected(account), sourceName: t(account.removable ? 'settings.limits.sources.web' : 'settings.limits.sources.desktop'), canPause: !managementBlocked, removable: account.removable === true && !managementBlocked })), host.localProviderStatuses('cursor'));
+  accountList.update(accounts.map(account => ({ ...account, sourceId: account.removable ? 'manual' : 'desktop', sourceName: t(account.removable ? 'settings.limits.sources.web' : 'settings.limits.sources.desktop'), canPause: !managementBlocked, removable: account.removable === true && !managementBlocked })), host.localProviderStatuses('cursor'));
 
   if (state.cursorAccount.error) {
     setCursorStatusText(statusEl, t('settings.common.error'));
@@ -68,10 +71,6 @@ function renderCursorStatus() {
   document.getElementById('cursorAgentActiveNote')?.classList.toggle('hidden', !managementBlocked);
   const addButton = document.getElementById('cursorAddAccountButton');
   if (addButton) addButton.disabled = managementBlocked;
-  const summary = accounts.length === 0
-    ? t('settings.cursor.notLoggedIn')
-    : t('settings.cursor.connected', { linked: accounts.filter(account => sourceSelected(account) && account.enabled && !account.expired && !account.error).length, total: accounts.length });
-  setCursorStatusText(statusEl, summary);
   setCursorCheckboxesEnabled(accounts.some((account) => !account.expired && !account.error));
   renderSettingsSummaries();
 }
@@ -155,5 +154,5 @@ function setup() {
 
 
 }
- return { state, setCursorAccountExpanded, renderCursorStatus, refreshCursorStatus, setCursorCheckboxesEnabled, setup };
+ return { state, setCursorAccountExpanded, renderCursorStatus, refreshReadings: () => accountList?.refreshReadings(), refreshCursorStatus, setCursorCheckboxesEnabled, setup };
 });

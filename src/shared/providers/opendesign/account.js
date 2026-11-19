@@ -7,7 +7,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   accountSlots: true,
   serverAccountKey: 'isOpendesignServerAccountKey',
   sources: [
-    { id: 'web', kind: 'web', relation: 'single', products: ['opendesign'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription', getUrlFromForm: true }
+    { id: 'web', kind: 'web', relation: 'single', products: ['opendesign'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
   ],
   fetch: 'fetchOpendesignLimits',
   fields: [

@@ -740,8 +740,9 @@ test('known npm install locations survive Electron-style truncated PATH', (t) =>
   assert.equal(resolveArkcliCommand(env), fs.realpathSync(binary));
 });
 
-for (const [source, saved] of [['auto', true], ['cli', true], ['cli', false]]) {
-  for (const scoped of [false, true]) test(`slot snapshot retires absent CLI plan: ${source}, saved=${saved}, scoped=${scoped}`, async () => {
+{
+  const saved = true;
+  for (const scoped of [false, true]) test(`slot snapshot retires absent CLI plan: scoped=${scoped}`, async () => {
     const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
     const { createAccountSlotFetcher } = require('../../src/shared/limits/accountSlotFetcher');
     const { limitProviderEntry } = require('../../src/shared/limits/registry');
@@ -759,7 +760,7 @@ for (const [source, saved] of [['auto', true], ['cli', true], ['cli', false]]) {
       }
       return response();
     } };
-    const runtime = createLimitsRuntime({ limitProviders: ['volcengine'], volcengineSourcePreference: source,
+    const runtime = createLimitsRuntime({ limitProviders: ['volcengine'],
       ...(saved ? { volcengineAccountSlots: [{ id: 'api', enabled: true, values: { volcengineAccessKeyId: 'ark-fixture' } }] } : {})
     }, { autoStart: false, autoRetry: false, now: () => time, probeProvider: (_provider, options) => fetcher(options, deps) });
     try {

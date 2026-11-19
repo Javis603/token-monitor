@@ -2711,7 +2711,7 @@ button.tool-preference-main:focus-visible {
   gap: 4px;
   min-width: 0;
 }
-/* Eye and pin stay out of the way until the row is hovered or focused; a tool
+/* Eye and pin stay out of the way until hover or visible focus; a tool
    that is hidden or pinned keeps its icon so the state reads at a glance. The
    slots stay reserved so the status beside them never shifts. Untracked tools
    never reach the main list, so the two controls have nothing to say there. */
@@ -2723,8 +2723,8 @@ button.tool-preference-main:focus-visible {
   opacity: 0;
   transition: opacity 120ms ease;
 }
-.tool-preference-row:is(:hover, :focus-within) .tool-visibility-button,
-.tool-preference-row:is(:hover, :focus-within) .tool-pin-button {
+.tool-preference-row:is(:hover, :has(:focus-visible)) .tool-visibility-button,
+.tool-preference-row:is(:hover, :has(:focus-visible)) .tool-pin-button {
   opacity: 1;
 }
 .tool-preference-row.is-untracked .tool-visibility-button,
@@ -2783,15 +2783,28 @@ button.tool-preference-main:focus-visible {
   background: rgba(var(--accent-rgb), 0.06);
   color: var(--accent);
 }
-.tool-visibility-button svg,
-.tool-pin-button svg {
+.tool-visibility-button::before,
+.tool-pin-button::before {
+  content: "";
   width: 13px;
   height: 13px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  background: currentColor;
+  mask: center / contain no-repeat;
+}
+.tool-visibility-button::before {
+  mask-image: url("icons/actions/eye.svg");
+}
+.tool-visibility-button.is-hidden::before {
+  mask-image: url("icons/actions/eye-off.svg");
+}
+.tool-pin-button::before {
+  mask-image: url("icons/actions/pin.svg");
+}
+@media (forced-colors: active) {
+  .tool-visibility-button::before,
+  .tool-pin-button::before {
+    background: ButtonText;
+  }
 }
 .settings-panel .limit-provider-list {
   grid-template-columns: 1fr;
@@ -3486,12 +3499,6 @@ p.settings-list-group-label { padding: 2px 0 0; }
   -webkit-app-region: no-drag;
 }
 .select-control-popup.has-search { overflow: hidden; }
-.select-control-hint {
-  padding: 6px 8px;
-  max-height: calc(100vh - 16px);
-  pointer-events: none;
-  overflow-wrap: anywhere;
-}
 .select-control-search {
   display: block;
   box-sizing: border-box;
@@ -4169,8 +4176,9 @@ html.is-windows .settings-panel select option {
 .home-session-meta .home-list-sub { min-width: 0; }
 .home-session-cache { margin-left: auto; flex: 0 0 auto; color: var(--muted); font-size: 0.625rem; white-space: nowrap; }
 .home-session-context { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; margin-left: auto; color: var(--muted); font-size: 0.625rem; }
-.home-session-context-meter { width: 16px; height: 3px; overflow: hidden; border-radius: 2px; background: rgba(var(--overlay-rgb), 0.18); }
+.home-session-context-meter { flex: 0 0 16px; width: 16px; height: 3px; overflow: hidden; border-radius: 2px; background: rgba(var(--overlay-rgb), 0.18); }
 .home-session-context-fill { display: block; width: 100%; height: 100%; background: rgba(var(--overlay-rgb), 0.5); transform: scaleX(var(--bar-scale, 0)); transform-origin: left center; }
+.home-session-context-value { min-width: 3ch; text-align: right; font-variant-numeric: tabular-nums; }
 .home-session-context[data-tone="caution"] { color: var(--yellow); }
 .home-session-context[data-tone="caution"] .home-session-context-fill { background: var(--yellow); }
 .home-session-context[data-tone="low"] { color: var(--orange); }
@@ -5084,11 +5092,17 @@ html.is-windows .settings-panel select option {
   white-space: nowrap;
 }
 .row-context-meter {
+  flex: 0 0 20px;
   width: 20px;
   height: 3px;
   overflow: hidden;
   border-radius: 2px;
   background: rgba(var(--sunken-rgb), 0.46);
+}
+.row-context-meter:not(.hidden) + .row-context-value {
+  min-width: 3ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .row-context-fill {
@@ -9642,7 +9656,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 /* Local account slots keep live controls mounted across provider redraws. */
 .slot-panel { min-width: 0; max-width: 100%; margin-bottom: 0; }
 .slot-list { min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: rgba(var(--panel-rgb), .15); overflow: clip; }
-.slot-row { display: grid; grid-template-columns: 14px minmax(0, 1fr) minmax(0, max-content) 28px; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+.slot-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) minmax(0, max-content) 28px; align-items: center; gap: 8px; min-height: 44px; box-sizing: border-box; padding: 6px 10px; border-bottom: 1px solid var(--line); }
 .slot-copy { min-width: 0; }
 .slot-copy .slot-detail { margin: 2px 0 0; font-size: .59375rem; line-height: 1.4; }
 .slot-name { overflow-wrap: anywhere; white-space: normal; text-wrap: balance; font-size: .6875rem; font-weight: 500; color: var(--text); }
@@ -9650,7 +9664,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .slot-name-line .slot-name { min-width: 0; }
 .slot-name-line.is-editing .slot-name { flex: 1; }
 .slot-rename-button { opacity: 0; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 24px; margin-block: -4px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
-.slot-row:is(:hover, :focus-within) .slot-rename-button { opacity: 1; }
+.slot-row:is(:hover, :focus-visible, :has(:focus-visible)) .slot-rename-button { opacity: 1; }
 .slot-rename-button::before { content: ''; width: 12px; height: 12px; background: currentColor; mask: url("icons/actions/pencil-line.svg") center / contain no-repeat; }
 .slot-rename-button:hover { color: var(--text); background: rgba(var(--overlay-rgb), .06); }
 .slot-rename-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -9661,8 +9675,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .slot-connected { --slot-status-icon: url("icons/actions/check.svg"); }
 .slot-status.slot-paused { --slot-status-icon: url("icons/actions/pause.svg"); }
 .slot-invalid, .slot-unavailable { --slot-status-icon: url("icons/actions/circle-exclamation-point.svg"); }
+.slot-checking { --slot-status-icon: url("icons/actions/spinner.svg"); }
 .slot-stale { --slot-status-icon: url("icons/actions/clock.svg"); }
-.slot-notCollected, .slot-disabled { --slot-status-icon: url("icons/actions/circle-minus.svg"); }
+.slot-disabled { --slot-status-icon: url("icons/actions/circle-minus.svg"); }
 .slot-invalid { color: var(--red); }
 .slot-limited, .slot-usageApiLimited { color: var(--yellow); }
 .slot-stale { color: var(--yellow); }
@@ -9715,9 +9730,14 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 
 /* Account rows share the settings-list drag transforms and six-dot grip. */
 .slot-row { position: relative; transform: translateY(calc(var(--drag-y, 0px) + var(--drag-shift, 0px))); transition: transform 170ms cubic-bezier(0.22, 1, 0.36, 1), opacity 120ms ease; }
-.slot-drag-handle { width: 14px; opacity: 0; }
-.slot-row:is(:hover, :focus-within, .dragging) .slot-drag-handle { opacity: 1; }
+.slot-drag-handle { grid-row: 1; grid-column: 1; justify-self: center; width: 14px; opacity: 0; }
+.slot-row:is(:hover, :focus-visible, :has(:focus-visible), .dragging) .slot-drag-handle { opacity: 1; }
 .slot-row[data-slot-draggable="false"] .slot-drag-handle { visibility: hidden; }
+.slot-source-icon { grid-row: 1; grid-column: 1; display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; box-sizing: border-box; border-radius: 6px; background: rgba(var(--overlay-rgb), .045); box-shadow: inset 0 0 0 1px var(--line); color: var(--muted); pointer-events: none; }
+.slot-source-icon:not([data-kind]) { visibility: hidden; }
+.slot-source-icon::before { content: ''; }
+.slot-source-icon.is-live { color: var(--accent); background: rgba(var(--accent-rgb), .08); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .22); }
+.slot-row[data-slot-draggable="true"]:is(:hover, :focus-visible, :has(:focus-visible), .dragging) .slot-source-icon { visibility: hidden; }
 .slot-row.dragging { z-index: 2; background: rgba(var(--panel-rgb), .96); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .62); cursor: grabbing; transition: none; will-change: transform; }
 .slot-row.dragging .slot-drag-handle { cursor: grabbing; }
 .slot-list.drag-active .slot-row:not(.dragging) { opacity: .78; }
@@ -9734,15 +9754,25 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .connection-source-copy .settings-item-desc { margin-top: 3px; font-size: .59375rem; line-height: 1.4; }
 .connection-source-actions > .settings-item-desc:empty { display: none; }
 .connection-source-actions { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; min-width: 0; max-width: 52%; text-align: right; overflow-wrap: anywhere; }
-.connection-source-actions > span.connection-source-method { font-size: .6875rem; font-weight: 500; line-height: 1.4; }
-.connection-source-actions :is(select, .select-control-trigger) { font-size: .6875rem; }
-.connection-source-get { display: inline-flex; align-items: center; justify-content: flex-end; gap: 3px; font: inherit; font-size: .625rem; line-height: 1.4; text-align: right; }
-.connection-source-icon { width: 10px; height: 10px; flex-shrink: 0; background: currentColor; mask: url("icons/actions/external-link.svg") center / contain no-repeat; }
-.connection-source-get:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.connection-source-list { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 2px 5px; color: var(--readable-muted); font-size: .65625rem; font-weight: 500; line-height: 1.4; }
+.connection-source-list.is-idle { color: var(--muted); }
+.connection-source-list:has(.is-live) .connection-source-item:not(.is-live) { color: var(--muted); opacity: .72; }
+.connection-source-segment { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.connection-source-item { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.connection-source-item.is-live { color: var(--accent); }
+.connection-source-joint { opacity: .45; }
+.connection-source-icon-glyph, .slot-source-icon::before { width: 11px; height: 11px; flex-shrink: 0; background: currentColor; mask: var(--source-icon, none) center / contain no-repeat; }
+:is(.connection-source-item, .slot-source-icon)[data-kind="cli"] { --source-icon: url("icons/sources/terminal.svg"); }
+:is(.connection-source-item, .slot-source-icon)[data-kind="desktop"] { --source-icon: url("icons/sources/monitor.svg"); }
+:is(.connection-source-item, .slot-source-icon)[data-kind="web"] { --source-icon: url("icons/sources/globe.svg"); }
+:is(.connection-source-item, .slot-source-icon)[data-kind="apiKey"] { --source-icon: url("icons/actions/key.svg"); }
+:is(.connection-source-item, .slot-source-icon)[data-kind="env"] { --source-icon: url("icons/sources/variable.svg"); }
+:is(.connection-source-item, .slot-source-icon)[data-kind="file"] { --source-icon: url("icons/sources/file.svg"); }
+:is(.connection-source-item, .slot-source-icon)[data-kind="oauth"] { --source-icon: url("icons/sources/lock.svg"); }
 @container (max-width: 300px) {
   .connection-source-card { align-items: flex-start; flex-direction: column; gap: 8px; }
   .connection-source-actions { align-items: flex-start; max-width: 100%; text-align: left; }
-  .connection-source-get { text-align: left; }
+  .connection-source-list { justify-content: flex-start; }
 }
 
 /* Provider editors retain their own controls inside the shared account card. */

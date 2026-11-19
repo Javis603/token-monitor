@@ -39,7 +39,7 @@ The shared metadata scanner still skips records above 64 KiB, so oversized user 
 
 `parsePersonalUsage()` fails closed when any active package carries unusable quota data: a partial aggregate would look plausible while silently omitting a package. An account with no active package stays a configured row with zero resources instead of becoming an error.
 
-### Source selection
+### Account sources
 
 The widget keeps app-owned discovery and adds explicit managed accounts. `workbuddyDesktopSessionOnly` continues to suppress legacy settings/env tokens: a stale `.env` must not silently outrank the discovered session. Managed accounts enter a separate runtime context, with secrets resolved in main through the existing `CredentialStore`. The headless agent and CLI retain their existing `TOKEN_MONITOR_WORKBUDDY_*` path and never read widget credentials.
 

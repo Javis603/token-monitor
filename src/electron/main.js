@@ -1022,7 +1022,6 @@ function cursorAccountService() {
     isExternalAgentActive,
     getCursorDisabledAccountIds: () => settings?.cursorDisabledAccountIds,
     getCursorManualAccountIds: () => settings?.cursorManualAccountIds,
-    getCursorSourcePreference: () => settings?.cursorSourcePreference || 'auto',
     setCursorDisabledAccountIds: value => { settings.cursorDisabledAccountIds = value; },
     setCursorManualAccountIds: value => { settings.cursorManualAccountIds = value; },
     saveSettings,
@@ -1161,6 +1160,7 @@ function electronLimitsDeps() {
     resolveWorkbuddyManagedCredential: (account, options) => workbuddyAccountService().resolveCredential(account, options),
     onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal,
     onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey,
+    onUpdate: updateSettingsLocalLimits,
     onEvent: (event) => {
       if (event?.type === 'probe-start' || event?.type === 'probe-finish') publishLimitProbes(event.probes);
     }
@@ -1189,13 +1189,38 @@ async function refreshLimitProvider(providerId, account) {
 // The limits probes running right now, for the quota rows' refresh buttons to
 // show a background refresh as well as one the user started.
 let limitProbes = [];
+let settingsLocalLimits = null;
+let settingsLimitsRevision = 0;
+let settingsLimitsPushQueued = false;
+function updateSettingsLocalLimits(limits) {
+  settingsLocalLimits = { deviceId: settings.deviceId, limits, revision: ++settingsLimitsRevision };
+  if (settingsLimitsPushQueued) return;
+  settingsLimitsPushQueued = true;
+  // Limit rows commit before probe-finish. Send the result and the final probe
+  // list together. Changes without a lifecycle event still reach Settings.
+  queueMicrotask(() => {
+    if (settingsLimitsPushQueued) pushSettingsLimitState();
+  });
+}
+function settingsLimitState() {
+  return { probes: limitProbes, local: settingsLocalLimits };
+}
+function pushSettingsLimitState() {
+  settingsLimitsPushQueued = false;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.webContents.send('limits:probes', settingsLimitState());
+  } catch (_) {}
+}
 function publishLimitProbes(probes) {
   limitProbes = Array.isArray(probes) ? probes : [];
   edgeDockController?.setLimitProbes(limitProbes);
-  if (!mainWindow || mainWindow.isDestroyed()) return;
-  try {
-    mainWindow.webContents.send('limits:probes', limitProbes);
-  } catch (_) {}
+  pushSettingsLimitState();
+}
+function clearSettingsLimitState() {
+  if (!settingsLocalLimits && !limitProbes.length) return;
+  settingsLocalLimits = null;
+  publishLimitProbes([]);
 }
 
 
@@ -3763,7 +3788,7 @@ function stopSyncCollector(options = {}) {
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
   // A stopped runtime's probes finish unobserved.
-  if (limitProbes.length) publishLimitProbes([]);
+  clearSettingsLimitState();
 }
 
 async function stopIcloudRuntime() {
@@ -4134,10 +4159,11 @@ function injectLocalDeviceStatus(stats) {
     const activity = localActivityPatch(lastCollectedDevice);
     if (activity) stats = projectLocalActivity(stats, activity);
   }
-  // Per-device rows remain authoritative for account disclosures, including
-  // failures hidden by a healthy aggregate. Share the aggregate freshness rule.
-  for (const device of stats.devices) if (device.limits) device.limits = { ...device.limits, providers: device.limits.providers.map(row => !ACCOUNT_SLOT_PROVIDER_IDS.has(row.provider) ? row : ({
-    ...row, stale: isProviderStale(row, device.limits, device, stats.staleAfterMs, Date.now())
+  // Account disclosures and connection sources use per-device quota rows.
+  // Apply the aggregate freshness rule to those rows for every provider.
+  const now = Date.now();
+  for (const device of stats.devices) if (device.limits) device.limits = { ...device.limits, providers: device.limits.providers.map(row => ({
+    ...row, stale: isProviderStale(row, device.limits, device, stats.staleAfterMs, now)
   })) };
   if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
   return stats;
@@ -4627,7 +4653,7 @@ function stopLocalCollector(options = {}) {
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
   // A stopped runtime's probes finish unobserved.
-  if (limitProbes.length) publishLimitProbes([]);
+  clearSettingsLimitState();
   localDevice = null;
   localStats = null;
   anchorSeedDevice = null;
@@ -8352,7 +8378,7 @@ app.whenReady().then(() => {
   // the refresh scheduled by the credential settings write above. A quota row's
   // own refresh button also names its account, which narrows the probe to that
   // account where the provider supports it.
-  ipcMain.handle('limits:probes', () => limitProbes);
+  ipcMain.handle('limits:probes', settingsLimitState);
   ipcMain.handle('limits:refresh', (_event, providerId, account) => refreshLimitProvider(providerId, account));
   ipcMain.handle('opencode:saveCookie', (_event, ...args) => opencodeAccountService().saveCookie(...args));
   ipcMain.handle('cursor:setAccountEnabled', (_event, ...args) => cursorAccountService().setAccountEnabled(...args));

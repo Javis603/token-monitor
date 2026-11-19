@@ -139,10 +139,6 @@ function renderWorkbuddyStatus() {
   const accounts = Array.isArray(state.settings.workbuddyManagedAccounts) ? state.settings.workbuddyManagedAccounts : [];
   const busy = Boolean(state.workbuddySignInBusy || state.workbuddyCancelBusy || state.workbuddyMutationBusy);
   accountShellApi.render({
-    status: document.getElementById('workbuddyAccountStatus'),
-    statusText: accounts.length
-      ? t('settings.workbuddy.connected', { linked: accounts.filter((a) => a.enabled !== false).length, total: accounts.length })
-      : t('settings.workbuddy.notConfigured'),
     progress: document.getElementById('workbuddyLoginStatus'),
     progressText: state.workbuddyCancelBusy
       ? t('settings.workbuddy.cancelling')
@@ -171,10 +167,11 @@ function renderWorkbuddyStatus() {
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
     enabled: (account, value) => mutateWorkbuddyAccount(account.id, 'enabled', value),
     remove: account => mutateWorkbuddyAccount(account.id, 'remove'),
-    changed: result => { if (result.accounts) state.settings.workbuddyManagedAccounts = result.accounts; }, refresh: renderWorkbuddyStatus, busy: () => state.workbuddySignInBusy || state.workbuddyCancelBusy || state.workbuddyMutationBusy
+    changed: result => { if (result.accounts) state.settings.workbuddyManagedAccounts = result.accounts; }, refresh: renderWorkbuddyStatus, busy: () => state.workbuddySignInBusy || state.workbuddyCancelBusy || state.workbuddyMutationBusy,
+    readings: () => host.localProviderStatuses('workbuddy'),
+    status: { element: () => document.getElementById('workbuddyAccountStatus'), empty: () => t('settings.workbuddy.notConfigured') }
   });
   accountList.update(accounts, host.localProviderStatuses('workbuddy'));
-
 }
 
 function initWorkbuddyAccountSettings() {
@@ -202,5 +199,5 @@ function setup() {
 
 
 }
- return { state, workbuddyAccountError, applyWorkbuddyAccounts, mutateWorkbuddyAccount, finishWorkbuddyLogin, startWorkbuddyLogin, cancelWorkbuddyLogin, renderWorkbuddyStatus, initWorkbuddyAccountSettings, setup };
+ return { state, workbuddyAccountError, applyWorkbuddyAccounts, mutateWorkbuddyAccount, finishWorkbuddyLogin, startWorkbuddyLogin, cancelWorkbuddyLogin, renderWorkbuddyStatus, refreshReadings: () => accountList?.refreshReadings(), initWorkbuddyAccountSettings, setup };
 });

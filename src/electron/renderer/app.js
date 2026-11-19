@@ -97,13 +97,14 @@ function iconKindFor(rowData, breakdown) {
 
 const LIMIT_PROVIDER_ACCOUNT_NODES = {
   codex: { group: 'codexAccountGroup', status: 'codexAccountStatus' },
-  opencode: { group: 'opencodeCookieGroup', status: 'opencodeCookieStatus', localSummary: true },
-  cursor: { group: 'cursorAccountGroup', status: 'cursorAccountStatus', localSummary: true },
-  antigravity: { group: 'antigravityAccountGroup', status: 'antigravityAccountStatus', localSummary: true },
+  opencode: { group: 'opencodeCookieGroup', status: 'opencodeCookieStatus' },
+  cursor: { group: 'cursorAccountGroup', status: 'cursorAccountStatus' },
+  antigravity: { group: 'antigravityAccountGroup', status: 'antigravityAccountStatus' },
   mimo: { group: 'mimoAccountGroup', status: 'mimoAccountStatus' },
-  workbuddy: { group: 'workbuddyAccountGroup', status: 'workbuddyAccountStatus', localSummary: true },
+  workbuddy: { group: 'workbuddyAccountGroup', status: 'workbuddyAccountStatus' },
+  // The only header still summarising this device; the others count every device's accounts.
   minimax: { group: 'minimaxAccountGroup', status: 'minimaxStatus', localSummary: true },
-  thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus', localSummary: true }
+  thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
 };
 const TRAY_ICON_VARIANTS = [
   { id: 'claude-brand', label: 'Claude', after: 'claude' },
@@ -3527,16 +3528,17 @@ function sessionPresentationOptions() {
   };
 }
 
-function rawSessionRowsForPeriod(period) {
-  return sessionRowsApi.sessionRowsForPeriod(period, sessionPresentationOptions());
+function rawSessionRowsForPeriod(period, options = sessionPresentationOptions()) {
+  return sessionRowsApi.sessionRowsForPeriod(period, options);
 }
 
+const sessionRowLabelCache = {};
+
 function sessionRowsForPeriod(period) {
-  const rows = rawSessionRowsForPeriod(period);
-  if (rows.length > 0) {
-    rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
-    return sessionRowsApi.groupSessionRows(rows, sessionPresentationOptions());
-  }
+  const options = sessionPresentationOptions();
+  if (state.breakdown === 'session') options.rowLabelCache = sessionRowLabelCache;
+  const rows = rawSessionRowsForPeriod(period, options);
+  if (rows.length > 0) return sessionRowsApi.groupSessionRows(rows, options);
   if (Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
 }
@@ -4736,7 +4738,7 @@ const accountSlotLists = {};
 let accountSlotListPending = false;
 function limitAccountContext(providerId) {
   return { settings: state.settings, records: state.stats?.limits?.providers || [],
-    devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId,
+    devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId, probes: limitProbes,
     providerEnabled: limitProviderEnabled(providerId), presentation: state.settings?.limitAccountPresentation?.[providerId] };
 }
 function renderAccountSlotPanels() {
@@ -4853,6 +4855,7 @@ document.addEventListener('keydown', event => {
 
 // Probes the limits runtime is running right now, whoever started them.
 let limitProbes = [];
+let settingsLocalLimits = null;
 
 const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsView({
   document,
@@ -4944,18 +4947,52 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   }
 });
 
-function setLimitProbes(probes) {
+function setLimitProbes(probes, local = settingsLocalLimits) {
+  const previous = limitProbes;
+  const previousLocal = settingsLocalLimits;
   limitProbes = Array.isArray(probes) ? probes : [];
+  settingsLocalLimits = local;
+  // Settings account rows without a reading say "Checking" while a probe for
+  // them runs, so a probe starting or finishing repaints its provider's rows.
+  if (isSettingsSurfaceVisible()) {
+    const changed = new Set();
+    const collectChanges = (before, after, sourceChanged = false) => {
+      const previousByProvider = Map.groupBy(before, row => row?.provider);
+      const nextByProvider = Map.groupBy(after, row => row?.provider);
+      for (const id of new Set([...previousByProvider.keys(), ...nextByProvider.keys()])) {
+        if (sourceChanged || JSON.stringify(previousByProvider.get(id)) !== JSON.stringify(nextByProvider.get(id))) {
+          changed.add(id);
+        }
+      }
+    };
+    collectChanges(previous, limitProbes);
+    if (previousLocal?.revision !== local?.revision) {
+      collectChanges(previousLocal?.limits.providers || [], local?.limits.providers || [],
+        previousLocal?.deviceId !== local?.deviceId);
+    }
+    if (changed.size) preserveSettingsPanelScroll(() => {
+      for (const [id, panel] of accountSlotPanels) {
+        if (!changed.has(id)) continue;
+        panel.update(accountSlotLists[id] || [], localProviderStatuses(id), limitAccountContext(id));
+        renderExternalProviderStatus(id);
+      }
+      for (const [id, panel] of automaticAccountPanels) {
+        if (changed.has(id)) panel.controller.update(strictLocalProviderStatuses(id));
+      }
+      for (const [id, owner] of Object.entries(legacyAccountOwners || {})) if (changed.has(id)) owner.refreshReadings?.();
+      if (changed.has('claude')) renderExternalProviderStatus('claude');
+    });
+  }
   limitWindowsView.syncLimitRefreshButtons();
 }
 let limitProbesPushed = false;
-window.tokenMonitor?.limits?.onProbes?.((probes) => {
+window.tokenMonitor?.limits?.onProbes?.(({ probes, local }) => {
   limitProbesPushed = true;
-  setLimitProbes(probes);
+  setLimitProbes(probes, local);
 });
 // The probes already running when this page loaded; a push that arrived first is newer.
-void window.tokenMonitor?.limits?.probes?.().then((probes) => {
-  if (!limitProbesPushed) setLimitProbes(probes);
+void window.tokenMonitor?.limits?.probes?.().then(({ probes, local }) => {
+  if (!limitProbesPushed) setLimitProbes(probes, local);
 }, () => {});
 
 const {
@@ -10514,35 +10551,6 @@ function pinnedClientSet() {
   return new Set(clientDisplayPreferencesApi.normalizePinnedClients(state.settings?.pinnedClients, KNOWN_CLIENTS).split(',').filter(Boolean));
 }
 
-function visibilityIcon(hidden) {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('aria-hidden', 'true');
-  const paths = [
-    'M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z',
-    'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z'
-  ];
-  if (hidden) paths.push('M4 4l16 16');
-  for (const d of paths) {
-    const path = document.createElementNS(ns, 'path');
-    path.setAttribute('d', d);
-    svg.appendChild(path);
-  }
-  return svg;
-}
-
-function pinIcon() {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('aria-hidden', 'true');
-  const path = document.createElementNS(ns, 'path');
-  path.setAttribute('d', 'M14 3l7 7-3 1-4 4 .5 3-2 2-3-5-5-3 2-2 3 .5 4-4 1-3Z');
-  svg.appendChild(path);
-  return svg;
-}
-
 function preferenceListForKind(kind) {
   if (kind === 'client') return els.clientDisplayList;
   if (kind === 'view') return els.viewDisplayList;
@@ -10820,7 +10828,6 @@ function renderViewPreferences() {
     visibility.setAttribute('aria-label', t(isEffectivelyHidden ? 'settings.views.showView' : 'settings.views.hideView', { name: label }));
     visibility.setAttribute('aria-pressed', String(!isEffectivelyHidden));
     visibility.disabled = !isEffectivelyHidden && visibleCount <= 1;
-    visibility.append(visibilityIcon(isEffectivelyHidden));
     visibility.addEventListener('click', () => {
       if (id === 'trends') return onTrendVisibilityToggle();
       if (id === 'project') return onProjectVisibilityToggle();
@@ -11102,7 +11109,6 @@ function renderHomeLimitProviderList() {
     visibility.className = `tool-visibility-button${isHidden ? ' is-hidden' : ''}`;
     visibility.setAttribute('aria-label', t(isHidden ? 'settings.home.showProvider' : 'settings.home.hideProvider', { name: settingsLabel || label }));
     visibility.setAttribute('aria-pressed', String(!isHidden));
-    visibility.append(visibilityIcon(isHidden));
     visibility.addEventListener('click', () => onHomeLimitProviderVisibilityToggle(id));
     const handle = createPreferenceOrderHandle({ kind: 'homeLimitProvider', id, label: settingsLabel || label, count: providers.length });
     const actions = document.createElement('div');
@@ -11225,7 +11231,6 @@ function renderHomeSettingsList() {
     visibility.className = `tool-visibility-button${isHidden ? ' is-hidden' : ''}`;
     visibility.setAttribute('aria-label', t(isHidden ? 'settings.home.showModule' : 'settings.home.hideModule', { name: label }));
     visibility.setAttribute('aria-pressed', String(!isHidden));
-    visibility.append(visibilityIcon(isHidden));
     visibility.addEventListener('click', () => onHomeModuleVisibilityToggle(id));
     const handle = createPreferenceOrderHandle({ kind: 'homeModule', id, label, count: modules.length });
     actions.append(visibility, handle);
@@ -11588,7 +11593,6 @@ function renderServiceProviderList() {
     visibility.dataset.statusProvider = id;
     visibility.setAttribute('aria-label', t(isHidden ? 'serviceStatus.showProvider' : 'serviceStatus.hideProvider', { name: label }));
     visibility.setAttribute('aria-pressed', String(!isHidden));
-    visibility.append(visibilityIcon(isHidden));
     visibility.addEventListener('click', () => onServiceProviderVisibilityToggle(id));
     const handle = createPreferenceOrderHandle({ kind: 'statusProvider', id, label, count: providers.length });
     const actions = document.createElement('div');
@@ -11928,7 +11932,6 @@ function qoderCollectionControls(group) {
     document, t, editions: group.editions, clients: current.clients,
     separate: current.separateQoderClients === true,
     hidden: hiddenClientSet(), pinned: pinnedClientSet(),
-    visibilityIcon, pinIcon,
     onTrack: async (id, checked) => {
       const clients = Object.assign({}, state.settings, ...pendingSettingsPatches).clients;
       const selected = new Set(String(clients || '').split(',').filter(Boolean));
@@ -12743,7 +12746,6 @@ function renderToolPreferencesNow() {
     visibility.dataset.client = id;
     visibility.setAttribute('aria-label', t(isHidden ? 'settings.tools.showClient' : 'settings.tools.hideClient', { name: label }));
     visibility.setAttribute('aria-pressed', String(!isHidden));
-    visibility.append(visibilityIcon(isHidden));
     visibility.addEventListener('click', () => id === 'qoder' ? onQoderPreferenceToggle('hiddenClients') : onClientVisibilityToggle(id));
     const pin = document.createElement('button');
     pin.type = 'button';
@@ -12752,7 +12754,6 @@ function renderToolPreferencesNow() {
     pin.dataset.client = id;
     pin.setAttribute('aria-label', t(isPinned ? 'settings.tools.unpinClient' : 'settings.tools.pinClient', { name: label }));
     pin.setAttribute('aria-pressed', String(isPinned));
-    pin.append(pinIcon());
     pin.addEventListener('click', () => id === 'qoder' ? onQoderPreferenceToggle('pinnedClients') : onClientPinnedToggle(id));
     // Status sits against the switch, as on the limits list; the eye and pin
     // appear to its left on hover.
@@ -12994,7 +12995,7 @@ function renderLimitProviderCheckboxesNow() {
       accountStatus.classList.toggle('hidden', !isEnabled);
       // Provider-owned login summaries describe this device. Keep a local
       // failure visible even if a different device can still supply quota.
-      if (localId && (id === 'claude' || LIMIT_PROVIDER_ACCOUNT_NODES[id]?.localSummary) && remoteProviders.has(id)) {
+      if (localId && LIMIT_PROVIDER_ACCOUNT_NODES[id]?.localSummary && remoteProviders.has(id)) {
         const scope = t('settings.sync.panel.thisDevice');
         accountStatus.dataset.localScope = scope;
         accountStatus.setAttribute('aria-description', scope);
@@ -13020,9 +13021,7 @@ function renderLimitProviderCheckboxesNow() {
     if (isEnabled && !accountGroup && sources.some(source => ['cli', 'desktop', 'oauth', 'file'].includes(source.kind))) {
       const mode = document.createElement('span');
       mode.className = 'cursor-status-pill limit-provider-mode-pill';
-      const preference = state.settings?.[`${id}SourcePreference`];
-      const selected = preference !== 'auto' && sources.find(source => source.id === preference && source.relation === 'alternative');
-      mode.textContent = selected ? t(selected.labelKey) : t('settings.limits.connection.autoDetect');
+      mode.textContent = t('settings.limits.connection.autoDetect');
       actions.append(mode);
     }
     const settings = LIMIT_PROVIDER_SETTINGS[id];
@@ -13058,7 +13057,7 @@ function renderLimitProviderCheckboxesNow() {
       if (accountGroup) {
         accountGroup.classList.add('limit-provider-account-group');
       }
-      if (sources.length) optionsInner.append(limitProviderConnectionDetail(id, sources, provider));
+      if (sources.length) optionsInner.append(limitProviderConnectionDetail(id, sources, isEnabled ? strictLocalProviderStatuses(id) : []));
       optionsContainer.append(optionsInner);
       const toggleOptions = () => {
         const opening = state.limitProviderSettingsExpanded !== id;
@@ -13355,22 +13354,23 @@ function limitProviderAccountStatus(providerId) {
     : null;
 }
 
-function limitProviderConnectionDetail(id, sources, provider) {
-  const form = limitAccountForm(id);
+// Where to get a credential lives in the add-account editor, beside its form.
+function limitProviderConnectionDetail(id, sources, readings) {
   return window.TokenMonitorConnectionPresentation.createConnectionCard({
-    document, t, sources, provider, providerId: id,
-    selection: state.settings?.limitConnectionSources?.find(entry => entry.id === id)?.sourceSelection,
-    preference: state.settings?.[`${id}SourcePreference`] || 'auto',
-    onSelect: async patch => {
-      await saveSettings(patch);
-      return state.settings?.[`${id}SourcePreference`] || 'auto';
-    },
-    label: LIMIT_PROVIDERS.find(entry => entry.id === id).label,
-    onOpen: id !== 'claude' && form?.openUrl ? () => window.tokenMonitor.openExternal(
-      accountSlotPanels.get(id)?.activeEditorUrl() || limitAccountPanelsApi.resolveOpenUrl(form, { document, provider: externalProviderForAccount(id), settings: state.settings })
-    ) : undefined
+    document, t, sources, readings,
+    liveSourceIds: window.TokenMonitorAccountSlotsPanel.liveSourceIds(id)
   });
 }
+
+// Account rows render after the provider list, so the lanes they attribute
+// arrive later; swap just that provider's card when they change.
+window.TokenMonitorAccountSlotsPanel.onLiveSourcesChange((id) => {
+  const card = els.limitProviderCheckboxes?.querySelector(`.limit-provider-row[data-provider="${id}"] .limit-provider-connection-sources`);
+  if (!card) return;
+  const sources = limitProviderPresentationApi.connectionSources(id, state.settings?.limitConnectionSources || []);
+  const readings = enabledLimitProviderSet().has(id) ? strictLocalProviderStatuses(id) : [];
+  card.replaceWith(limitProviderConnectionDetail(id, sources, readings));
+});
 
 // Single entry point for the provider options accordion. The drag gesture also
 // needs to collapse and restore it, so the class/aria bookkeeping cannot stay
@@ -13463,9 +13463,11 @@ function limitProviderSettingsRenderSignature() {
       settingValues,
       state.limitProviderSettingsExpanded
     ],
-    connectionPreferences: (settings.limitConnectionSources || []).filter(entry => entry.sourceSelection)
-      .map(entry => [entry.id, entry.sourceSelection.sources, settings[entry.sourceSelection.key] || 'auto']),
     usageItems: [...enabledLimitProviderSet()].sort().map((id) => [id, limitProviderUsageItemRows(id)]),
+    // The connection card reads this device's own rows, which the Hub aggregate
+    // can hide behind a newer reading from another device.
+    connectionReadings: [...enabledLimitProviderSet()].sort().map((id) => [id, strictLocalProviderStatuses(id)
+      .map((row) => [row.status || '', Boolean(row.stale), row.source || '', row.sourceDetail || ''])]),
     query: limitProviderQuery(),
     providers: (state.stats?.limits?.providers || []).map(providerSignature),
     devices: (state.stats?.devices || []).map(deviceSignature)
@@ -15777,15 +15779,11 @@ function renderStatsUpdate() {
   render();
   if (!isSettingsSurfaceVisible()) return;
   preserveSettingsPanelScroll(() => {
-    renderCodexAccounts();
-    renderMimoStatus();
-    renderWorkbuddyStatus();
+    refreshAccountOwnerReadings();
     renderSettingsSummaries();
     renderLimitProviderCheckboxes();
     renderToolPreferences();
     renderWslPanel();
-    updateMinimaxApiKeysStatus();
-    updateThirdPartyProfilesStatus();
     renderExternalProviderStatus('volcengine');
     renderExternalProviderStatus('kimi');
     for (const form of state.settings?.limitAccountForms || []) {
@@ -17206,6 +17204,23 @@ function localDeviceLimitsProviders() {
   );
 }
 
+// Settings can paint a just-completed local probe before the usage/Hub
+// snapshot catches up. Keep the per-device presentation once it has caught up.
+function settingsLocalDeviceLimitsProviders() {
+  const deviceId = state.settings?.deviceId || '';
+  if (settingsLocalLimits?.deviceId !== deviceId) return localDeviceLimitsProviders();
+  const local = settingsLocalLimits.limits;
+  const published = state.stats?.devices?.find(device => device.deviceId === deviceId)?.limits;
+  if (published?.updatedAt && published.updatedAt >= local.updatedAt) {
+    if (published.updatedAt > local.updatedAt) return localDeviceLimitsProviders();
+    // Millisecond timestamps can tie across different quota results. Only
+    // hand back to the published presentation when it contains the result.
+    const publishedRows = (published.providers || []).map(({ stale: _stale, ...row }) => row);
+    if (JSON.stringify(publishedRows) === JSON.stringify(local.providers)) return localDeviceLimitsProviders();
+  }
+  return accountIdentityApi.localDeviceLimitsProviders({ devices: [settingsLocalLimits] }, deviceId);
+}
+
 function localProviderStatus(name) {
   const localProviders = localDeviceLimitsProviders();
   if (localProviders !== null) {
@@ -17218,7 +17233,7 @@ function localProviderStatus(name) {
 function strictLocalProviderStatuses(name) {
   const localDeviceId = state.settings?.deviceId || '';
   if (!localDeviceId && Array.isArray(state.stats?.devices)) return [];
-  const local = localDeviceLimitsProviders();
+  const local = settingsLocalDeviceLimitsProviders();
   const providers = local !== null ? local
     : state.mode !== 'sync' && (!state.settings?.hubMode || state.settings.hubMode === 'local')
       ? state.stats?.limits?.providers || [] : [];
@@ -17227,7 +17242,7 @@ function strictLocalProviderStatuses(name) {
 }
 
 function localProviderStatuses(name) {
-  const localProviders = localDeviceLimitsProviders();
+  const localProviders = settingsLocalDeviceLimitsProviders();
   const providers = localProviders !== null
     ? localProviders
     : (state.stats?.limits?.providers || []);
@@ -17432,7 +17447,7 @@ function renderExternalProviderStatus(providerName) {
   }
   if (!retained && statusEl && limitAccountForm(providerName)?.accountSlots && !limitAccountForm(providerName)?.accountSlotOwner) {
     const summary = accountSlotPanels.get(providerName)?.summary();
-    setCursorStatusText(statusEl, summary?.total ? t('settings.opencode.connected', summary) : t(limitAccountForm(providerName).emptyKey));
+    setCursorStatusText(statusEl, summary?.total ? t('settings.slots.connectedCount', summary) : t(limitAccountForm(providerName).emptyKey));
     return;
   }
   if (!config || !statusEl || !openBtn || !logoutBtn || !manualPanel || !errorEl) return;
@@ -17471,7 +17486,7 @@ function renderExternalProviderStatus(providerName) {
     : apiKeyAccountStatusText(providerName, statusProvider, configured, source, enabled);
   if (cliAccount && !pending) statusText = `CLI · ${statusText}`;
   setCursorStatusText(statusEl, providerName === 'claude' && !pending
-    ? claudeAccountStatusText(statusText, enabled) : statusText);
+    ? claudeAccountStatusText(statusText) : statusText);
   // A local ZCode install keeps the Z.ai row honest when unchecked: the
   // auto-discovered plans still exist, so the pill shows auto-detect instead
   // of the final "disabled" state the generic seven-state map lands on.
@@ -17551,12 +17566,10 @@ function renderOpenCodeProfiles(...args) { return legacyAccountOwners.opencode.r
 
 
 
-function updateMinimaxApiKeysStatus(...args) { return legacyAccountOwners.minimax.updateMinimaxApiKeysStatus(...args); }
 
 
 
 
-function updateThirdPartyProfilesStatus(...args) { return legacyAccountOwners.thirdparty.updateThirdPartyProfilesStatus(...args); }
 
 
 
@@ -17568,6 +17581,14 @@ function renderMinimaxApiKeys(...args) { return legacyAccountOwners.minimax.rend
 function renderThirdPartyProfiles(...args) { return legacyAccountOwners.thirdparty.renderThirdPartyProfiles(...args); }
 
 function renderCursorStatus(...args) { return legacyAccountOwners.cursor.renderCursorStatus(...args); }
+
+// Every quota push reaches every account owner through one interface, so no
+// owner's rows or header can keep the status they had before a refresh
+// answered. Claude is the exception: its rows are derived from the readings,
+// so renderExternalProviderStatus('claude') rebuilds them with its header.
+function refreshAccountOwnerReadings() {
+  for (const owner of Object.values(legacyAccountOwners)) owner.refreshReadings?.();
+}
 
 
 

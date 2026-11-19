@@ -159,9 +159,10 @@ for (const variant of variants) for (const settingOverride of [false, true]) {
       return row(region);
     } });
     const sibling = variant === 'cn' ? 'intl' : 'cn';
-    const config = { alibabaSourcePreference: 'web', ...(settingOverride ? { alibabaVariant: variant } : {}),
+    const config = { ...(settingOverride ? { alibabaVariant: variant } : {}),
       alibabaAccountSlots: [{ id: 'saved', enabled: true, values: { alibabaCookie: 'session=saved', alibabaVariant: sibling } }] };
-    const deps = { env: { ALIBABA_TOKEN_PLAN_COOKIE: 'session=environment', ALIBABA_TOKEN_PLAN_VARIANT: settingOverride ? sibling : variant }, providerRuntimeState: new Map() };
+    // Cookie ownership only: keep the snapshot from discovering a real Bailian CLI.
+    const deps = { env: { ALIBABA_TOKEN_PLAN_COOKIE: 'session=environment', ALIBABA_TOKEN_PLAN_VARIANT: settingOverride ? sibling : variant }, existsSync: () => false, providerRuntimeState: new Map() };
     const full = await fetcher(config, deps);
     assert.deepEqual(full.map(item => item.region).sort(), [variant, sibling].sort());
     calls.length = 0;
@@ -185,10 +186,10 @@ for (const variant of variants) for (const operation of ['remove', 'pause']) for
     } });
     const duplicate = { id: 'duplicate', accountKey: 'same-uid', enabled: true, values: { alibabaCookie: 'session=duplicate', alibabaVariant: variant } };
     const other = { id: 'other', accountKey: 'same-uid', enabled: true, values: { alibabaCookie: 'session=other', alibabaVariant: sibling } };
-    const rt = createLimitsRuntime({ limitProviders: ['alibaba'], alibabaSourcePreference: 'web',
+    const rt = createLimitsRuntime({ limitProviders: ['alibaba'],
       ...(settingOverride ? { alibabaVariant: variant } : {}), alibabaAccountSlots: [duplicate, other] }, {
       autoStart: false, autoRetry: false, env,
-      probeProvider: (_provider, options, context, deps) => fetcher(options, { ...deps, signal: context.signal })
+      probeProvider: (_provider, options, context, deps) => fetcher(options, { ...deps, existsSync: () => false, signal: context.signal })
     });
     try {
       await rt.refresh();
@@ -206,16 +207,16 @@ for (const variant of variants) for (const operation of ['remove', 'pause']) for
 }
 
 
-for (const source of ['auto', 'cli', 'web']) test(`Alibaba seeded CLI ownership honors ${source} preference and exact variant`, () => {
+test('Alibaba seeded CLI ownership survives slot removal for its exact variant', () => {
   const slot = variant => ({ id: variant, accountKey: 'same-uid', enabled: true, values: { alibabaCookie: 'fixture=saved', alibabaVariant: variant } });
-  const rt = createLimitsRuntime({ limitProviders: ['alibaba'], alibabaSourcePreference: source,
+  const rt = createLimitsRuntime({ limitProviders: ['alibaba'],
     alibabaAccountSlots: [slot('cn-personal'), slot('intl-personal')],
     previousLimits: { providers: [{ ...row('cn-personal', 70), source: 'cli', status: 'unavailable' }, row('intl-personal', 25)] }
   }, { autoStart: false, autoRetry: false, env: {} });
   try {
     rt.reconfigure({ alibabaAccountSlots: [] });
-    assert.deepEqual(rt.getSnapshot().providers.map(row => row.region), source === 'web' ? [] : ['cn-personal']);
-    if (source !== 'web') assert.equal(rt.getSnapshot().providers[0].windows[0].usedPercent, 70);
+    assert.deepEqual(rt.getSnapshot().providers.map(row => row.region), ['cn-personal']);
+    assert.equal(rt.getSnapshot().providers[0].windows[0].usedPercent, 70);
   } finally { rt.stop(); }
 });
 

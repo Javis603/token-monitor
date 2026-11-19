@@ -14,6 +14,10 @@ Sources:
   - actions/pause.svg: pause
   - actions/play.svg: play
     (key, pause and play copied from upstream commit `f8feea7a02ea461c9f2a4b4d851512aae6ec933f`)
+  - actions/eye.svg: eye
+  - actions/eye-off.svg: eye-off
+  - actions/pin.svg: pin
+    (eye, eye-off and pin copied from upstream commit `149eba0aea48178a5ab1efe2c701de1da94f4be8`)
   - actions/trash.svg: trash
   - actions/download.svg: download
   - actions/rotate-cw.svg: rotate-cw
@@ -22,6 +26,13 @@ Sources:
   - actions/ellipsis.svg: ellipsis
   - actions/shield-check.svg: shield-check
   - actions/check.svg: check (stroke widened to 3 for legibility as a small badge)
+  - sources/terminal.svg: terminal
+  - sources/monitor.svg: monitor
+  - sources/globe.svg: globe
+  - sources/lock.svg: lock
+  - sources/file.svg: file
+  - sources/variable.svg: variable
+    (sources/* copied from lucide-static v0.460.0)
   - settings/general.svg: sliders-horizontal
   - settings/main.svg: panels-top-left
   - settings/collection.svg: database

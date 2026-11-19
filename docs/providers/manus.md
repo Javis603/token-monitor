@@ -56,6 +56,6 @@ Connect's JSON mapping omits zero-valued fields, so an absent count is read as z
 
 `node --test tests/shared/manusLimits.test.js` covers cookie discovery, a real SQLite/WAL snapshot, manual/environment session selection, monthly and refresh parsing (including omitted zero fields), the request shape and the HTTP status mapping, using the sanitized fixture `tests/fixtures/manusAvailableCredits.json` (invented values, real field names). `tests/electron/edgeDockLimitCard.test.js` renders the card. Registration, locale keys, vendor presentation and README entries are covered by the provider-order, i18n, vendor-presentation and README consistency checks.
 
-## Connection source selection
+## Collection sources
 
-The connection selector supports Automatic, Web and Desktop. Automatic keeps independent saved, environment and discovered accounts. Web reads only supplied sessions; Desktop reads only the discovered account. A saved account with an incompatible selected origin reports not configured rather than adopting a desktop identity. Draft validation always checks only its submitted session.
+Saved, environment and discovered accounts are collected independently. A saved account reads only its supplied session and reports not configured rather than adopting a desktop identity. Draft validation always checks only its submitted session.

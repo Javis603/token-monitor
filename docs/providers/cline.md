@@ -218,8 +218,6 @@ from a key, which has to learn its account id first:
 node -e "require('./src/shared/providers/cline/limits').fetchClineLimits().then(r => console.log(r.status, JSON.stringify(r.windows)))"
 ```
 
-## Connection source selection
+## Collection sources
 
-The connection selector supports Automatic, API key and local sign-in. Automatic collects saved, environment and discovered accounts independently. An explicit source limits each fetch to that origin; it never reads a different local account to repair a saved key. The preference does not affect draft validation or credential fingerprints.
-
-Settings marks accounts excluded by the selected source as Not collected. A saved key stays editable and removable when the same quota account is also available through a detected sign-in.
+Saved, environment and discovered accounts are collected independently. A saved key never reads a different local account to repair itself, and draft validation checks only the submitted key. A saved key stays editable and removable when the same quota account is also available through a detected sign-in.

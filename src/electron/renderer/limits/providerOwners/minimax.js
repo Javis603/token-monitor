@@ -114,5 +114,5 @@ function setup() {
 
 
 }
- return { state, updateMinimaxApiKeysStatus, minimaxKeyErrorText, minimaxBillingUrl, renderMinimaxApiKeys, setup };
+ return { state, updateMinimaxApiKeysStatus, refreshReadings: updateMinimaxApiKeysStatus, minimaxKeyErrorText, minimaxBillingUrl, renderMinimaxApiKeys, setup };
 });

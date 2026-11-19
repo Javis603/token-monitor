@@ -1,5 +1,4 @@
 'use strict';
-const { selectedSource } = require('../../limits/sourceSelection');
 
 const { BROWSER_USER_AGENT } = require('../../browserUserAgent');
 const { hashKey } = require('../../hashKey');
@@ -135,11 +134,9 @@ function statusForResponse(status) {
 async function fetchManusLimits(options = {}, deps = {}) {
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
   const supplied = manusSessionValue(deps.env || process.env, options);
-  const selection = selectedSource('manus', options, deps);
   const lane = deps.accountSource || (supplied ? 'web' : 'local');
-  if ((selection !== 'auto' && selection !== lane) || (deps.probe && !supplied)
-    || (deps.accountSlotSaved && !supplied)) {
-    return normalizeLimitProvider({ provider: 'manus', source: selection === 'auto' ? lane : selection, status: 'notConfigured', updatedAt, windows: [] });
+  if ((deps.probe && !supplied) || (deps.accountSlotSaved && !supplied)) {
+    return normalizeLimitProvider({ provider: 'manus', source: lane, status: 'notConfigured', updatedAt, windows: [] });
   }
   const base = {
     provider: 'manus',

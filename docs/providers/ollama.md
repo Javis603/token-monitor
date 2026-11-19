@@ -52,6 +52,6 @@ Saved accounts use the shared account-slot panel, with one credential lane per a
 
 Run `node --test tests/shared/ollamaLimits.test.js tests/shared/ollamaCookieCredits.test.js tests/shared/limitBalanceDisplay.test.js tests/electron/edgeDockLimitCard.test.js tests/electron/homeOverview.test.js tests/electron/accountSlotsBatch.test.js`.
 
-## Connection source selection
+## Collection sources
 
-Automatic preserves API-key-first precedence. The connection selector can force API key or Web Cookie; an absent or rejected selected credential never tries the other lane. The collector preference does not change the credential-type draft selector or save validation.
+An API key takes precedence over the Web Cookie; a rejected API key never falls back to the Cookie. Save validation checks only the submitted credential type.

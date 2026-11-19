@@ -5,7 +5,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   id: 'stepfun',
   accountSlots: true,
   sources: [
-    { id: 'web', kind: 'web', relation: 'single', products: ['stepfun'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.stepfunWebDescription', getUrlFromForm: true }
+    { id: 'web', kind: 'web', relation: 'single', products: ['stepfun'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.stepfunWebDescription' }
   ],
   fetch: 'fetchStepfunLimits',
   fields: [{
