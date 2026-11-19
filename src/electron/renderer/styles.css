@@ -7726,10 +7726,10 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .main-view-tab .view-switcher-icon { width: 13px; height: 13px; }
 .main-view-tab .tool-preference-name { color: inherit; font-weight: 400; }
 .main-view-tab:focus-visible { outline: none; }
-.view-preference-row:has(.main-view-tab:focus-visible) { box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.72); }
 .view-preference-row:hover { background: rgba(var(--overlay-rgb), 0.05); color: var(--text); }
 .view-preference-row.is-current { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); }
 .view-preference-row.is-hidden:not(.is-current) { box-shadow: inset 0 0 0 1px rgba(var(--line-rgb), 0.16); }
+.view-preference-row:has(.main-view-tab:focus-visible) { box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.72); }
 .view-preference-row.is-hidden .tool-preference-name,
 .view-preference-row.is-disabled .tool-preference-name { opacity: 0.72; }
 .view-preference-row.is-current .tool-preference-name { opacity: 1; }
@@ -7904,7 +7904,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 }
 .main-view-link:hover,
 .main-view-link:focus-visible { color: var(--accent); }
-.main-view-link:focus-visible { outline: 1px solid rgba(var(--accent-rgb), 0.72); outline-offset: 1px; }
+:is(.main-view-link, .main-view-back):focus-visible { outline: 1px solid rgba(var(--accent-rgb), 0.72); outline-offset: 1px; }
 .main-view-subpage { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .main-view-inspector .main-view-back { justify-self: start; margin: -4px 0 6px -6px; }
 .main-view-subpage-title { margin: 0 0 4px; color: var(--text); font-size: 0.75rem; font-weight: 600; }

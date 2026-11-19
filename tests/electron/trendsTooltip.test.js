@@ -335,7 +335,7 @@ test('opening Settings dismisses focused Home trend details before refreshing th
   context.syncSettingsForm = () => assert.equal(tooltip.dataset.visible, 'false');
   context.ensureServiceStatusTicker = () => {};
   context.requestAnimationFrame = callback => callback();
-  vm.runInNewContext(source.slice(source.indexOf('function openSettingsPanel('),
+  vm.runInNewContext(source.slice(source.indexOf('function resetMainViewSettings('),
     source.indexOf('function openViewFromTray(')), context);
   context.openSettingsPanel();
   assert.equal(chart.getAttribute('data-active'), null);

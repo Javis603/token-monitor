@@ -331,7 +331,7 @@ test('Main Screen pairs the switcher views with the selected view settings', () 
   const app = readRendererFile('app.js');
   const render = functionBody(app, 'renderViewPreferences', 'renderMainViewInspector');
   // Only the switcher's own views are ordered; hidden and disabled ones sit below.
-  assert.match(render, /const isOff = \(id\) => hidden\.has\(id\) \|\| disabled\.has\(id\)/);
+  assert.match(render, /const shownIds = new Set\(shownViewDisplayOrder\(\).shown\)/);
   assert.match(render, /els\.viewDisplayList\.replaceChildren\(\.\.\.shown\.map\(\(view\) => row\(view, true\)\)\)/);
   assert.match(render, /els\.hiddenViewList\?\.replaceChildren\(\.\.\.off\.map\(\(view\) => row\(view, false\)\)\)/);
   assert.match(render, /if \(!views\.some\(\(\{ id \}\) => id === state\.mainSettingsView\)\) state\.mainSettingsView = 'home'/);
@@ -346,13 +346,15 @@ test('Main Screen pairs the switcher views with the selected view settings', () 
   assert.match(inspector, /visibilityInput\.disabled = lastVisible \|\| unavailable/);
   assert.match(inspector, /const settings = MAIN_VIEW_SETTINGS\[view\.id\]/);
   // Each visit starts on Home.
-  assert.match(functionBody(app, 'openSettingsPanel', 'openViewFromTray'), /state\.mainSettingsView = 'home';/);
+  assert.match(functionBody(app, 'openSettingsPanel', 'openViewFromTray'), /resetMainViewSettings\(\)/);
+  assert.match(functionBody(app, 'resetMainViewSettings', 'openSettingsPanel'), /state\.mainSettingsView = 'home';/);
 });
 
 test('unavailable Limits does not let the last visible view be hidden', () => {
   const app = readRendererFile('app.js');
   const disabled = functionBody(app, 'disabledViewIds', 'hiddenHomeModuleSet');
   const render = functionBody(app, 'renderViewPreferences', 'renderMainViewInspector');
+  const order = app.slice(app.indexOf('function shownViewDisplayOrder('), app.indexOf('async function onViewDisplayMove('));
   const shown = [];
   const hidden = [];
   const inspectors = [];
@@ -360,6 +362,7 @@ test('unavailable Limits does not let the last visible view be hidden', () => {
     VIEW_DISPLAY_OPTIONS: ['home', 'limits', 'status'].map((id) => ({ id })),
     viewDisplayPreferencesApi: require('../../src/electron/renderer/viewDisplayPreferences'),
     state: { mainSettingsView: 'home', settings: { hiddenViews: 'status' } },
+    document: { activeElement: null },
     els: {
       viewDisplayList: { replaceChildren: (...rows) => shown.push(rows) },
       hiddenViewList: { replaceChildren: (...rows) => hidden.push(rows) }
@@ -371,11 +374,17 @@ test('unavailable Limits does not let the last visible view be hidden', () => {
     createMainViewRow: ({ id }) => id,
     renderMainViewInspector: ({ id }, flags) => inspectors.push([id, flags.lastVisible, flags.unavailable])
   };
-  vm.runInNewContext(`${disabled}\n${render}\nrenderViewPreferences(); state.mainSettingsView = 'limits'; renderViewPreferences();`, context);
+  vm.runInNewContext(`${disabled}\n${order}\n${render}\nrenderViewPreferences(); state.mainSettingsView = 'limits'; renderViewPreferences();`, context);
   assert.deepEqual(shown.at(-1), ['home']);
   assert.deepEqual(hidden.at(-1), ['limits', 'status']);
   assert.deepEqual(inspectors, [['home', true, false], ['limits', false, true]]);
   assert.equal(context.state.settings.hiddenViews, 'status');
+  context.state.settings.hiddenViews = 'home,status';
+  context.state.mainSettingsView = 'home';
+  vm.runInNewContext('renderViewPreferences();', context);
+  assert.deepEqual(shown.at(-1), ['home'], 'the runtime fallback stays in the shown list');
+  assert.deepEqual(inspectors.at(-1), ['home', true, false]);
+  assert.equal(context.state.settings.hiddenViews, 'home,status', 'fallback does not rewrite preferences');
 });
 
 test('keyboard reordering moves a view among the shown views and keeps hidden slots', async () => {
@@ -387,7 +396,7 @@ test('keyboard reordering moves a view among the shown views and keeps hidden sl
     viewDisplayPreferencesApi: require('../../src/electron/renderer/viewDisplayPreferences'),
     settingsListFilterApi: require('../../src/electron/renderer/settingsListFilter'),
     effectiveViewDisplayOrderValue: () => saves.at(-1)?.viewDisplayOrder || 'home,limits,tool,status,model',
-    hiddenViewSet: () => new Set(['status']),
+    state: { settings: { hiddenViews: 'status' } },
     disabledViewIds: () => [],
     saveSettings: async (patch) => { saves.push(patch); }
   };
@@ -400,6 +409,22 @@ test('keyboard reordering moves a view among the shown views and keeps hidden sl
   await context.move('limits', 'up');
   await context.reorder('status', 0);
   assert.equal(saves.length, count, 'a move to the same slot or of a hidden view writes nothing');
+});
+
+test('a view that becomes unavailable during a drag keeps its saved slot', () => {
+  const app = readRendererFile('app.js');
+  const source = app.slice(app.indexOf('function createMainPreferenceRowDrag('), app.indexOf('const viewPreferenceRowDrag ='));
+  const context = {
+    rowDragControllerApi: { createRowDragController: (options) => options },
+    verticalDragSortApi: {},
+    MAIN_PREFERENCE_DRAG_EXCLUDED: '',
+    preserveSettingsPanelScroll: () => {},
+    shownViewDisplayOrder: () => ({ order: ['home', 'limits', 'tool'], shown: ['home', 'tool'] }),
+    settingsListFilterApi: require('../../src/electron/renderer/settingsListFilter'),
+    state: { settings: {} }
+  };
+  assert.equal(vm.runInNewContext(`${source}\ncreateMainPreferenceRowDrag({ kind: 'view', settingKey: 'viewDisplayOrder' }).mirrorOrder(['tool', 'home', 'limits']);`, context),
+    'tool,limits,home');
 });
 
 test('settings page uses collapsible icon sections with summaries', () => {

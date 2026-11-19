@@ -247,7 +247,7 @@ test('leaving Settings no longer needs a catch-up repaint', () => {
   // The main surface keeps rendering behind the overlay, so neither exit path
   // may repaint merely because Settings happened to be open.
   assert.doesNotMatch(settingsToggle, /render\(\)/);
-  assert.match(settingsToggle, /if \(settingsOpen\) \{\s+hideHomeTrendTooltip\(\);\s+syncSettingsForm\(\);\s+\} else \{/);
+  assert.match(settingsToggle, /if \(settingsOpen\) \{\s+hideHomeTrendTooltip\(\);\s+resetMainViewSettings\(\);\s+syncSettingsForm\(\);\s+\} else \{/);
   assert.doesNotMatch(trayView, /settingsWasOpen/);
   // Tray navigation to the view already on screen still repaints, because it
   // clears the open session and nothing else redraws that.

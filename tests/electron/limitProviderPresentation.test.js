@@ -2421,13 +2421,16 @@ function createLimitProviderToggleHarness({
   saveSettings
 } = {}) {
   const app = readRendererFile('app.js');
-  const providerSelection = functionBody(app, 'desktopLimitProviders', 'refreshPluginLimitCredentialStatuses') + functionBody(app, 'configuredLimitProviderSelection', 'missingLimitProviderStatus');
+  const providerSelection = functionBody(app, 'desktopLimitProviders', 'refreshPluginLimitCredentialStatuses')
+    + functionBody(app, 'configuredLimitProviderSelection', 'missingLimitProviderStatus')
+    + functionBody(app, 'limitViewAvailable', 'effectiveViewDisplayOrderValue');
   const enabledProviderSelection = functionBody(app, 'enabledLimitProviderSet', 'limitProviderEnabled');
   const toggleStart = app.indexOf('async function onLimitProviderToggle()');
   const toggleEnd = app.indexOf('async function onLimitProviderMove(', toggleStart);
   assert.ok(toggleStart >= 0 && toggleEnd > toggleStart);
   const toggle = app.slice(toggleStart, toggleEnd);
   let checkedProviders = [];
+  const refreshed = [];
   const context = {
     DEFAULT_LIMIT_PROVIDER_ORDER: 'codex',
     LIMIT_PROVIDERS: providerIds.map((id) => ({ id })),
@@ -2449,6 +2452,8 @@ function createLimitProviderToggleHarness({
     },
     saveSettings,
     renderLimitProviderCheckboxes() {},
+    renderViewPreferences: () => refreshed.push('views'),
+    renderSettingsSummaries: () => refreshed.push('summaries'),
     clearDisabledLimitProviderPendingChecks() {},
     setBreakdown() {}
   };
@@ -2458,6 +2463,7 @@ function createLimitProviderToggleHarness({
   context.configuredLimitProviderSelection = vm.runInContext('configuredLimitProviderSelection', context);
   return {
     context,
+    refreshed,
     selection: () => Array.from(context.configuredLimitProviderSelection()),
     setChecked: (ids) => { checkedProviders = ids; },
     toggle: () => vm.runInContext('onLimitProviderToggle()', context)
@@ -2490,6 +2496,7 @@ test('provider toggle restores the confirmed selection when persistence and reco
   await assert.rejects(harness.toggle(), /persist failed/);
 
   assert.deepEqual(harness.selection(), ['codex']);
+  assert.deepEqual(harness.refreshed, ['views', 'summaries']);
 });
 
 test('overlapping failures preserve the latest toggle, then fall back to a newer settings push', async () => {

@@ -6283,6 +6283,11 @@ function resetSettingsListSearch() {
   if (els.limitProviderSearchInput) els.limitProviderSearchInput.value = '';
 }
 
+function resetMainViewSettings() {
+  state.mainSettingsView = 'home';
+  state.homeLimitProvidersOpen = false;
+}
+
 function openSettingsPanel(section) {
   if (!els.settingsPanel) return;
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
@@ -6290,8 +6295,7 @@ function openSettingsPanel(section) {
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   syncPluginLimitsDemand();
-  state.mainSettingsView = 'home';
-  state.homeLimitProvidersOpen = false;
+  resetMainViewSettings();
   syncSettingsForm();
   ensureServiceStatusTicker();
   if (section === 'notch') {
@@ -10656,7 +10660,11 @@ function setPreferenceSubgroupsExpanded(definitions, rowSelector, value) {
     const toggle = row?.querySelector('.view-subgroup-toggle, .home-module-disclosure');
     toggle?.classList.toggle('is-expanded', open);
     toggle?.setAttribute('aria-expanded', String(open));
-    document.getElementById(containerId)?.classList.toggle('hidden', !open);
+    const container = document.getElementById(containerId);
+    if (container) {
+      container.inert = !open;
+      container.classList.toggle('hidden', !open);
+    }
   }
 }
 
@@ -10695,10 +10703,8 @@ function createMainPreferenceRowDrag({ kind, rowSelector, idKey, settingKey, get
       let merged = order;
       // Hidden views are not rendered in the ordered list but keep their slots.
       if (kind === 'view') {
-        merged = settingsListFilterApi.mergeSubsetOrder(
-          viewDisplayPreferencesApi.normalizeViewDisplayOrder(effectiveViewDisplayOrderValue(), VIEW_DISPLAY_OPTIONS),
-          order
-        );
+        const { order: savedOrder, shown } = shownViewDisplayOrder();
+        merged = settingsListFilterApi.mergeSubsetOrder(savedOrder, order.filter((id) => shown.includes(id)));
       }
       if (kind === 'homeModule') {
         const visible = new Set(order);
@@ -10856,15 +10862,10 @@ function renderViewPreferences() {
   const hasCustomOrder = viewDisplayPreferencesApi.hasCustomViewDisplayOrder(state.settings?.viewDisplayOrder);
   if (els.resetViewDisplayOrderButton) els.resetViewDisplayOrderButton.disabled = !hasCustomOrder;
   if (els.showAllViewsButton) els.showAllViewsButton.disabled = hidden.size === 0;
-  const visibleCount = viewDisplayPreferencesApi.visibleViewCount({
-    views,
-    hiddenValue: state.settings?.hiddenViews,
-    disabledIds: [...disabled]
-  });
-  const isOff = (id) => hidden.has(id) || disabled.has(id);
+  const shownIds = new Set(shownViewDisplayOrder().shown);
   if (!views.some(({ id }) => id === state.mainSettingsView)) state.mainSettingsView = 'home';
-  const shown = views.filter(({ id }) => !isOff(id));
-  const off = views.filter(({ id }) => isOff(id));
+  const shown = views.filter(({ id }) => shownIds.has(id));
+  const off = views.filter(({ id }) => !shownIds.has(id));
   const row = (view, orderable) => createMainViewRow(view, {
     selected: view.id === state.mainSettingsView,
     disabled: disabled.has(view.id),
@@ -10873,13 +10874,18 @@ function renderViewPreferences() {
   });
   // Only the switcher's own views reorder; the saved order still covers the
   // hidden ones, so a view shown again returns to its slot.
+  const focusedView = document.activeElement?.matches('[data-preference-order-handle="view"]')
+    ? document.activeElement.closest('.view-preference-row')?.dataset.view : null;
   els.viewDisplayList.replaceChildren(...shown.map((view) => row(view, true)));
   els.hiddenViewList?.replaceChildren(...off.map((view) => row(view, false)));
   if (els.hiddenViewGroup) els.hiddenViewGroup.hidden = off.length === 0;
   const selected = views.find(({ id }) => id === state.mainSettingsView);
-  const selectedOff = isOff(selected.id);
-  renderMainViewInspector(selected, { off: selectedOff, lastVisible: !selectedOff && visibleCount <= 1,
+  const selectedOff = !shownIds.has(selected.id);
+  renderMainViewInspector(selected, { off: selectedOff, lastVisible: !selectedOff && shown.length === 1,
     unavailable: selected.id === 'limits' && disabled.has(selected.id) });
+  if (focusedView && document.activeElement === document.body) {
+    els.viewDisplayList.querySelector(`[data-view="${focusedView}"] .preference-order-handle`)?.focus({ preventScroll: true });
+  }
 }
 
 function renderMainViewInspector(view, { off, lastVisible, unavailable }) {
@@ -10937,7 +10943,7 @@ function setHomeLimitProvidersOpen(open) {
   state.homeLimitProvidersOpen = open;
   renderViewPreferences();
   const target = open ? '.main-view-back' : '.home-limit-providers-link';
-  els.mainViewInspector?.querySelector(target)?.focus({ preventScroll: true });
+  els.mainViewInspector?.querySelector(target)?.focus();
 }
 
 // The Home limits module's own options. Its provider list is long enough to
@@ -11259,6 +11265,7 @@ function renderHomeSettingsList() {
       const listContainer = document.createElement('div');
       listContainer.id = subgroup[1];
       listContainer.className = `accordion-animated-container${state[subgroup[0]] ? '' : ' hidden'}`;
+      listContainer.inert = !state[subgroup[0]];
       const inner = document.createElement('div');
       inner.className = 'accordion-animation-inner';
       inner.appendChild(id === 'limits' ? renderHomeLimitSettings()
@@ -13735,8 +13742,13 @@ async function onLimitProviderToggle() {
     // collection work.
   } finally {
     if (state.pendingLimitProviderSelection?.revision === revision) {
+      const wasLimitsAvailable = limitViewAvailable();
       state.pendingLimitProviderSelection = null;
       renderLimitProviderCheckboxes();
+      if (wasLimitsAvailable !== limitViewAvailable()) {
+        renderViewPreferences();
+        renderSettingsSummaries();
+      }
     }
   }
 }
@@ -13772,9 +13784,16 @@ async function onLimitProviderReorder(providerId, targetIndex) {
 
 // Settings reorder only the views in the switcher; hidden ones keep their slots.
 function shownViewDisplayOrder() {
-  const order = viewDisplayPreferencesApi.normalizeViewDisplayOrder(effectiveViewDisplayOrderValue(), VIEW_DISPLAY_OPTIONS);
-  const off = new Set([...hiddenViewSet(), ...disabledViewIds()]);
-  return { order, shown: order.filter((id) => !off.has(id)) };
+  const orderValue = effectiveViewDisplayOrderValue();
+  const order = viewDisplayPreferencesApi.normalizeViewDisplayOrder(orderValue, VIEW_DISPLAY_OPTIONS);
+  const disabled = new Set(disabledViewIds());
+  const shown = viewDisplayPreferencesApi.visibleViewOrder({
+    views: VIEW_DISPLAY_OPTIONS,
+    orderValue,
+    hiddenValue: state.settings?.hiddenViews,
+    availableIds: order.filter((id) => !disabled.has(id))
+  });
+  return { order, shown };
 }
 
 async function onViewDisplayMove(viewId, direction) {
@@ -14621,6 +14640,7 @@ els.settingsButton.addEventListener('click', (event) => {
   // caught up when it opens, because its renderers idle while it is closed.
   if (settingsOpen) {
     hideHomeTrendTooltip();
+    resetMainViewSettings();
     syncSettingsForm();
   } else {
     syncModeSelect?.close();

@@ -251,7 +251,9 @@ test('Home limit provider settings expand with the shared accordion transition',
   assert.match(renderHomeSettingsList, /accordion-animation-inner/);
   assert.match(renderHomeSettingsList, /togglePreferenceSubgroup\(HOME_MODULE_SUBGROUPS, '\.home-module-preference-row', id\)/);
   const sharedExpansion = functionBody(app, 'setPreferenceSubgroupsExpanded', 'togglePreferenceSubgroup');
-  assert.match(sharedExpansion, /document\.getElementById\(containerId\)\?\.classList\.toggle\('hidden', !open\)/);
+  assert.match(sharedExpansion, /container\.classList\.toggle\('hidden', !open\)/);
+  assert.match(sharedExpansion, /container\.inert = !open/);
+  assert.match(renderHomeSettingsList, /listContainer\.inert = !state\[subgroup\[0\]\]/);
   assert.doesNotMatch(renderHomeSettingsList, /if \(id === 'limits' && state\.homeLimitSettingsExpanded\) wrap\.append\(renderHomeLimitProviderList\(\)\)/);
   assert.match(css, /\.tool-preference-list,\s*\.settings-nested-list,\s*\.cursor-settings-details-inner/);
   assert.match(css, /\.tool-preference-list > \* \+ \*,\s*\.settings-nested-list > \* \+ \*/);
