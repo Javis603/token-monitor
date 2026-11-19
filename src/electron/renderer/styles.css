@@ -9661,6 +9661,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .slot-connected { --slot-status-icon: url("icons/actions/check.svg"); }
 .slot-status.slot-paused { --slot-status-icon: url("icons/actions/pause.svg"); }
 .slot-invalid, .slot-unavailable { --slot-status-icon: url("icons/actions/circle-exclamation-point.svg"); }
+.slot-checking { --slot-status-icon: url("icons/actions/spinner.svg"); }
 .slot-stale { --slot-status-icon: url("icons/actions/clock.svg"); }
 .slot-notCollected, .slot-disabled { --slot-status-icon: url("icons/actions/circle-minus.svg"); }
 .slot-invalid { color: var(--red); }

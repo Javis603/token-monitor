@@ -4737,7 +4737,7 @@ const accountSlotLists = {};
 let accountSlotListPending = false;
 function limitAccountContext(providerId) {
   return { settings: state.settings, records: state.stats?.limits?.providers || [],
-    devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId,
+    devices: state.stats?.devices || [], localDeviceId: state.settings?.deviceId, probes: limitProbes,
     providerEnabled: limitProviderEnabled(providerId), presentation: state.settings?.limitAccountPresentation?.[providerId] };
 }
 function renderAccountSlotPanels() {
@@ -4946,7 +4946,20 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
 });
 
 function setLimitProbes(probes) {
+  const previous = limitProbes;
   limitProbes = Array.isArray(probes) ? probes : [];
+  // Settings account rows without a reading say "Checking" while a probe for
+  // them runs, so a probe starting or finishing repaints its provider's rows.
+  if (isSettingsSurfaceVisible()) {
+    const changed = new Set([...previous, ...limitProbes].map(probe => probe?.provider));
+    preserveSettingsPanelScroll(() => {
+      for (const [id, panel] of accountSlotPanels) {
+        if (changed.has(id)) panel.update(accountSlotLists[id] || [], localProviderStatuses(id), limitAccountContext(id));
+      }
+      for (const [id, owner] of Object.entries(legacyAccountOwners || {})) if (changed.has(id)) owner.refreshReadings?.();
+      if (changed.has('claude')) renderExternalProviderStatus('claude');
+    });
+  }
   limitWindowsView.syncLimitRefreshButtons();
 }
 let limitProbesPushed = false;
