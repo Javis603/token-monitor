@@ -17227,12 +17227,17 @@ function localDeviceLimitsProviders() {
 // snapshot catches up. Keep the per-device presentation once it has caught up.
 function settingsLocalDeviceLimitsProviders() {
   const deviceId = state.settings?.deviceId || '';
+  if (settingsLocalLimits?.deviceId !== deviceId) return localDeviceLimitsProviders();
+  const local = settingsLocalLimits.limits;
   const published = state.stats?.devices?.find(device => device.deviceId === deviceId)?.limits;
-  if (settingsLocalLimits?.deviceId === deviceId
-      && (!published?.updatedAt || settingsLocalLimits.limits.updatedAt > published.updatedAt)) {
-    return accountIdentityApi.localDeviceLimitsProviders({ devices: [settingsLocalLimits] }, deviceId);
+  if (published?.updatedAt && published.updatedAt >= local.updatedAt) {
+    if (published.updatedAt > local.updatedAt) return localDeviceLimitsProviders();
+    // Millisecond timestamps can tie across different quota results. Only
+    // hand back to the published presentation when it contains the result.
+    const publishedRows = (published.providers || []).map(({ stale: _stale, ...row }) => row);
+    if (JSON.stringify(publishedRows) === JSON.stringify(local.providers)) return localDeviceLimitsProviders();
   }
-  return localDeviceLimitsProviders();
+  return accountIdentityApi.localDeviceLimitsProviders({ devices: [settingsLocalLimits] }, deviceId);
 }
 
 function localProviderStatus(name) {

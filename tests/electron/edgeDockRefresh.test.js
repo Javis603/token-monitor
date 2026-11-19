@@ -369,9 +369,9 @@ test('Settings gets completed local quotas before Host, iCloud, or cold Client s
   const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
   const app = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
   const scope = { provider: 'antigravity', account: null };
-  const oldLimits = { updatedAt: '2026-11-19T10:00:00.000Z', providers: [] };
   const reading = { provider: 'antigravity', status: 'ok' };
   const result = { updatedAt: '2026-11-19T10:01:00.000Z', providers: [reading] };
+  const oldLimits = { updatedAt: result.updatedAt, providers: [] };
 
   for (const hubMode of ['host', 'icloud', 'client']) {
     const trace = [];
