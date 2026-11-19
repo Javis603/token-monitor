@@ -872,6 +872,11 @@ function sessionFromRow(row) {
   Object.assign(session, entryThroughput(row, session.outputTokens, client));
   session.startedAt = normalizeIsoTimestamp(firstString(row, STARTED_AT_KEYS));
   session.lastUsedAt = normalizeIsoTimestamp(firstString(row, LAST_USED_AT_KEYS));
+  // Some report producers already measured context occupancy on the entry. It
+  // is a snapshot, not a sum: only a complete pair is carried, and provider
+  // metadata may still replace it with a fresher reading later.
+  session.contextTokens = Math.max(0, Math.round(asNumber(row.contextTokens ?? row.context_tokens ?? 0)));
+  session.contextWindow = Math.max(0, Math.round(asNumber(row.contextWindow ?? row.context_window ?? 0)));
   session.projectId = String(row.projectId || row.project_id || '').trim();
   session.projectLabel = String(row.projectLabel || row.project_label || '').trim();
   session.title = normalizeSessionTitle(firstString(row, SESSION_TITLE_KEYS));

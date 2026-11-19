@@ -32,7 +32,7 @@ function assertEveryCollectorModeUsesUsageConfig() {
   }
 }
 
-test('every Electron collector mode follows the retained-session setting for daily history', () => {
+test('every Electron collector mode takes daily history from the history switch', () => {
   assert.match(main, /function electronUsageConfig/);
   assert.match(main, /usageConfigFromSettings\(settings, \{/);
   assertEveryCollectorModeUsesUsageConfig();
@@ -48,7 +48,7 @@ test('clearing retained session usage also clears retained daily history', () =>
 });
 
 test('the headless agent retains daily history without mutating storage in dry-run mode', () => {
-  assert.match(agent, /dailyHistoryArchiveEnabled:\s*sessionUsageArchiveEnabled/);
+  assert.match(agent, /dailyHistoryArchiveEnabled:\s*historyEnabled/);
   assert.match(agent, /dailyHistoryArchiveWriteEnabled:\s*!dryRun/);
 });
 

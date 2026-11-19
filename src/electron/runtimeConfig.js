@@ -50,6 +50,7 @@ const USAGE_CONFIG_FINGERPRINT_KEYS = Object.freeze([
   'intervalMs',
   'historyEnabled',
   'dailyHistoryArchiveEnabled',
+  'sessionUsageArchiveEnabled',
   'projectsEnabled',
   'historyIntervalMs',
   'watchEnabled',
@@ -109,7 +110,12 @@ function usageConfigFromSettings(settings = {}, context = {}) {
     agentRuntime: context.agentRuntime || 'electron-widget',
     intervalMs: context.intervalMs ?? settings.collectionIntervalMs,
     historyEnabled: settings.historyEnabled !== false,
-    dailyHistoryArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
+    // The daily history calendar is a separate surface from retained session
+    // usage: turning off the session archive must not freeze today's chart.
+    dailyHistoryArchiveEnabled: settings.historyEnabled !== false,
+    // Still part of the runtime's capture work even though the calendar no
+    // longer follows it, so a change must reconfigure the collector.
+    sessionUsageArchiveEnabled: settings.sessionUsageArchiveEnabled !== false,
     dailyHistoryArchiveWriteEnabled: context.dailyHistoryArchiveWriteEnabled,
     projectsEnabled: settings.projectsEnabled !== false,
     reasonixNativeSessionsEnabled: context.reasonixNativeSessionsEnabled === true,

@@ -1,0 +1,259 @@
+/* ---------------------------------------------------------------------------
+   Token Monitor polish layer.
+
+   Appended after the base stylesheet. Everything here is additive: the total
+   headline gets depth, the cost becomes a quiet pill, rows gain a hover plate,
+   bars get a leading-edge sheen, and home modules enter with a short stagger.
+   Motion is transform/opacity only and follows both the in-app Reduce motion
+   setting and the OS preference.
+--------------------------------------------------------------------------- */
+
+:root {
+  --polish-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --polish-fast: 140ms;
+  --polish-base: 240ms;
+}
+
+/* The headline sits on a faint accent wash; a hairline keeps it separate from
+   the model list without adding another box. */
+.total-panel {
+  --total-cost-gap: 9px;
+  isolation: isolate;
+}
+.total-panel::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: -18px -10px -4px;
+  border-radius: 22px;
+  background: radial-gradient(72% 92% at 12% 16%, rgba(var(--accent-rgb), 0.10), transparent 68%);
+  opacity: 0.9;
+  pointer-events: none;
+}
+.total-panel::after {
+  content: '';
+  display: block;
+  height: 1px;
+  margin-top: 12px;
+  background: linear-gradient(90deg, transparent, rgba(var(--line-rgb), 0.20) 18%, rgba(var(--line-rgb), 0.20) 82%, transparent);
+  opacity: 0.85;
+}
+
+/* Cost becomes a small readable chip. The value and tooltip still come from
+   the renderer; only the surface around them changes. */
+#cost.cost {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  margin-top: 9px;
+  padding: 3px 8px;
+  border: 1px solid rgba(var(--line-rgb), 0.12);
+  border-radius: 999px;
+  background: rgba(var(--overlay-rgb), 0.04);
+  color: var(--readable-muted);
+  font-size: 0.6875rem;
+  line-height: 1.2;
+  transition: background-color var(--polish-fast) ease, border-color var(--polish-fast) ease, color var(--polish-fast) ease;
+}
+#cost.cost:hover {
+  border-color: rgba(var(--line-rgb), 0.18);
+  background: rgba(var(--overlay-rgb), 0.07);
+}
+#cost .usage-cost-info {
+  opacity: 0.55;
+  transition: opacity var(--polish-fast) ease;
+}
+#cost:hover .usage-cost-info { opacity: 0.9; }
+
+/* Hover plates are pseudo-elements so the row grid, border and bar geometry
+   never move while the pointer travels over the list. */
+.breakdown > .row,
+.home-list-row {
+  position: relative;
+  isolation: isolate;
+}
+.breakdown > .row::before,
+.home-list-row::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: -5px -7px;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(var(--overlay-rgb), 0.06), rgba(var(--overlay-rgb), 0.025));
+  opacity: 0;
+  transform: scale(0.995);
+  transition: opacity var(--polish-fast) ease, transform var(--polish-base) var(--polish-ease);
+  pointer-events: none;
+}
+.breakdown > .row:hover::before,
+.home-list-row:hover::before {
+  opacity: 1;
+  transform: none;
+}
+.breakdown > .row .row-icon { transition: filter var(--polish-fast) ease; }
+.breakdown > .row:hover .row-icon {
+  filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), 0.38));
+}
+
+/* A narrow sheen at the leading edge makes the bar read as a live measure
+   while the existing scaleX animation continues to own the width. */
+.breakdown > .row .bar-fill { position: relative; }
+.breakdown > .row .bar-fill::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 0 auto;
+  width: 16%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.30));
+  opacity: 0.55;
+  pointer-events: none;
+}
+.breakdown > .row:hover .bar-fill {
+  filter: brightness(1.06);
+  transition: filter var(--polish-fast) ease;
+}
+
+/* Home modules and their rows enter together. @starting-style only applies to
+   inserted elements, so a live stats update does not replay the entrance. */
+@starting-style {
+  .home-module { opacity: 0; transform: translate3d(0, 6px, 0); }
+  .home-list-row { opacity: 0; transform: translate3d(0, 3px, 0); }
+}
+.home-module {
+  transition: opacity var(--polish-base) var(--polish-ease), transform var(--polish-base) var(--polish-ease);
+}
+.home-list-row {
+  transition: opacity var(--polish-base) var(--polish-ease), transform var(--polish-base) var(--polish-ease);
+}
+.home-list-row:nth-child(2) { transition-delay: 18ms; }
+.home-list-row:nth-child(3) { transition-delay: 36ms; }
+.home-list-row:nth-child(4) { transition-delay: 54ms; }
+.home-list-row:nth-child(5) { transition-delay: 72ms; }
+.home-list-row:nth-child(6) { transition-delay: 90ms; }
+
+/* A single quiet highlight when a converted cost lands. The class is applied
+   by design-polish.js only after the first reading, so boot does not flicker. */
+@keyframes polish-value-tick {
+  0% { color: var(--accent); transform: translate3d(0, -1px, 0); }
+  55% { color: var(--text); transform: none; }
+  100% { color: inherit; }
+}
+#cost.is-value-tick,
+.row-cost.is-value-tick {
+  animation: polish-value-tick 520ms var(--polish-ease);
+}
+
+/* Slightly softer press feedback for the small chrome. */
+.tab,
+.refresh-button,
+.settings-icon-button,
+.view-switcher button,
+.back-home-button {
+  transition: transform var(--polish-fast) var(--polish-ease), color var(--polish-fast) ease, background-color var(--polish-fast) ease, border-color var(--polish-fast) ease;
+}
+.tab:active,
+.refresh-button:active,
+.settings-icon-button:active,
+.view-switcher button:active,
+.back-home-button:active { transform: scale(0.94); }
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .home-module,
+  :root:not([data-reduce-motion="off"]) .home-list-row,
+  :root:not([data-reduce-motion="off"]) .breakdown > .row::before,
+  :root:not([data-reduce-motion="off"]) .home-list-row::before,
+  :root:not([data-reduce-motion="off"]) .tab,
+  :root:not([data-reduce-motion="off"]) .refresh-button,
+  :root:not([data-reduce-motion="off"]) .settings-icon-button,
+  :root:not([data-reduce-motion="off"]) .view-switcher button,
+  :root:not([data-reduce-motion="off"]) .back-home-button {
+    transition: none !important;
+  }
+  :root:not([data-reduce-motion="off"]) .home-module,
+  :root:not([data-reduce-motion="off"]) .home-list-row {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+  :root:not([data-reduce-motion="off"]) #cost.is-value-tick,
+  :root:not([data-reduce-motion="off"]) .row-cost.is-value-tick,
+  :root:not([data-reduce-motion="off"]) .live-token-rate.is-fresh .live-token-rate-value {
+    animation: none !important;
+  }
+}
+:root[data-reduce-motion="on"] .home-module,
+:root[data-reduce-motion="on"] .home-list-row {
+  opacity: 1 !important;
+  transform: none !important;
+  transition: none !important;
+}
+:root[data-reduce-motion="on"] #cost.is-value-tick,
+:root[data-reduce-motion="on"] .row-cost.is-value-tick,
+:root[data-reduce-motion="on"] .live-token-rate.is-fresh .live-token-rate-value { animation: none !important; }
+
+/* ---------------------------------------------------------------------------
+   View entrance
+
+   `is-surface-entering` is applied by motion.js only when a hidden surface
+   becomes visible again. Animating the children (not the scroller) keeps the
+   scroll container stable, so restoring its offset cannot race the motion.
+--------------------------------------------------------------------------- */
+.breakdown.is-surface-entering > .row,
+.home-panel.is-surface-entering > .home-module,
+.limits-panel.is-surface-entering > *,
+.trends-panel.is-surface-entering > *,
+.service-status-panel.is-surface-entering > * {
+  animation: polish-surface-rise 220ms var(--polish-ease) both;
+}
+.breakdown.is-surface-entering > :nth-child(2),
+.home-panel.is-surface-entering > :nth-child(2),
+.limits-panel.is-surface-entering > :nth-child(2),
+.trends-panel.is-surface-entering > :nth-child(2),
+.service-status-panel.is-surface-entering > :nth-child(2) { animation-delay: 18ms; }
+.breakdown.is-surface-entering > :nth-child(3),
+.home-panel.is-surface-entering > :nth-child(3),
+.limits-panel.is-surface-entering > :nth-child(3),
+.trends-panel.is-surface-entering > :nth-child(3),
+.service-status-panel.is-surface-entering > :nth-child(3) { animation-delay: 36ms; }
+.breakdown.is-surface-entering > :nth-child(4),
+.home-panel.is-surface-entering > :nth-child(4),
+.limits-panel.is-surface-entering > :nth-child(4),
+.trends-panel.is-surface-entering > :nth-child(4),
+.service-status-panel.is-surface-entering > :nth-child(4) { animation-delay: 54ms; }
+.breakdown.is-surface-entering > :nth-child(5),
+.home-panel.is-surface-entering > :nth-child(5),
+.limits-panel.is-surface-entering > :nth-child(5),
+.trends-panel.is-surface-entering > :nth-child(5),
+.service-status-panel.is-surface-entering > :nth-child(5) { animation-delay: 72ms; }
+.breakdown.is-surface-entering > :nth-child(n+6),
+.home-panel.is-surface-entering > :nth-child(n+6),
+.limits-panel.is-surface-entering > :nth-child(n+6),
+.trends-panel.is-surface-entering > :nth-child(n+6),
+.service-status-panel.is-surface-entering > :nth-child(n+6) { animation-delay: 90ms; }
+
+@keyframes polish-surface-rise {
+  from { opacity: 0; transform: translate3d(0, 3px, 0); }
+  to { opacity: 1; transform: none; }
+}
+
+/* The footer rate already flashes its icon when a new sample lands. A short
+   lift on the reading itself makes that change legible without adding a loop
+   or a second source of samples. */
+.live-token-rate.is-fresh .live-token-rate-value {
+  animation: polish-rate-tick 160ms var(--polish-ease);
+}
+
+@keyframes polish-rate-tick {
+  0% { opacity: 0.55; transform: translate3d(0, 1px, 0); }
+  45% { opacity: 1; transform: translate3d(0, -1px, 0); }
+  100% { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .is-surface-entering > * {
+    animation: none !important;
+  }
+}
+:root[data-reduce-motion="on"] .is-surface-entering > * {
+  animation: none !important;
+}
