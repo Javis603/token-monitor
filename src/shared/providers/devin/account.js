@@ -6,7 +6,7 @@ module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclarat
   id: 'devin',
   accountSlots: true,
   sources: [
-    { id: 'web', kind: 'web', relation: 'single', products: ['devin'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription', getUrlFromForm: true }
+    { id: 'web', kind: 'web', relation: 'single', products: ['devin'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
   ],
   fetch: 'fetchDevinLimits',
   fields: [

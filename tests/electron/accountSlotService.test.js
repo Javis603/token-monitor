@@ -167,8 +167,8 @@ test('scoped Volcengine Agent refresh can use a second matching owner', async ()
   } }));
   const [, agent] = require('../../src/shared/providers/volcengine/limits').accountSlotKeys(slots[0].values);
   let agentCalls = 0, calls = 0;
-  const rows = await LIMIT_PROVIDER_FETCHERS.volcengine({ volcengineSourcePreference: 'api', volcengineAccountSlots: slots,
-    limitRefreshScope: { provider: 'volcengine', accountKey: agent } }, { env: {}, fetch: async url => {
+  const rows = await LIMIT_PROVIDER_FETCHERS.volcengine({ volcengineAccountSlots: slots,
+    limitRefreshScope: { provider: 'volcengine', accountKey: agent } }, { env: { TOKEN_MONITOR_VOLCENGINE_ARKCLI: '0' }, fetch: async url => {
     calls++;
     if (!String(url).includes('GetAFPUsage')) return response({}, 503);
     return ++agentCalls === 1 ? response({}, 403) : response({ Result: { PlanType: 'Medium', AFPFiveHour: { Quota: 200, Used: 50 } } });
@@ -181,8 +181,8 @@ test('scoped Volcengine Ark fallback refresh finds a signed slot without a remem
   const values = { volcengineAccessKeyId: 'AKLT-fixture', volcengineSecretAccessKey: 'fixture-secret', volcengineApiKey: 'fixture-ark' };
   const ark = hashKey('volcengine', values.volcengineApiKey, 'cn-beijing');
   const calls = [];
-  const rows = await LIMIT_PROVIDER_FETCHERS.volcengine({ volcengineSourcePreference: 'api', volcengineAccountSlots: [{ id: 'fixture', values }],
-    limitRefreshScope: { provider: 'volcengine', accountKey: ark } }, { env: {}, fetch: async url => {
+  const rows = await LIMIT_PROVIDER_FETCHERS.volcengine({ volcengineAccountSlots: [{ id: 'fixture', values }],
+    limitRefreshScope: { provider: 'volcengine', accountKey: ark } }, { env: { TOKEN_MONITOR_VOLCENGINE_ARKCLI: '0' }, fetch: async url => {
     calls.push(String(url));
     if (String(url).includes('chat/completions')) return { ...response({}), headers: new Headers({
       'x-ratelimit-limit-requests': '10', 'x-ratelimit-remaining-requests': '7'
@@ -194,10 +194,10 @@ test('scoped Volcengine Ark fallback refresh finds a signed slot without a remem
 });
 
 test('removing the last Volcengine slot retires both products but keeps environment quota', async () => {
-  const env = { VOLCENGINE_ACCESS_KEY_ID: 'AKLT-env', VOLCENGINE_SECRET_ACCESS_KEY: 'env-secret' };
+  const env = { VOLCENGINE_ACCESS_KEY_ID: 'AKLT-env', VOLCENGINE_SECRET_ACCESS_KEY: 'env-secret', TOKEN_MONITOR_VOLCENGINE_ARKCLI: '0' };
   const h = harness({ env });
   const values = { volcengineAccessKeyId: 'AKLT-saved', volcengineSecretAccessKey: 'saved-secret' };
-  h.settings = { ...h.settings, limitProviders: 'volcengine', volcengineSourcePreference: 'api',
+  h.settings = { ...h.settings, limitProviders: 'volcengine',
     volcengineAccountSlots: [{ id: 'saved', values }] };
   const config = () => ({ ...limitsAccountConfig(h.settings, { env }), limitProviders: 'volcengine' });
   const runtime = createLimitsRuntime(config(), { env, autoStart: false, autoRetry: false,
@@ -236,52 +236,6 @@ test('removing a Volcengine slot keeps a shared Agent Plan owned by fixed settin
   await h.service.remove('volcengine', 'saved');
   assert.ok(retired.includes(coding));
   assert.ok(!retired.includes(sharedAgent));
-});
-test('removing the final Volcengine slot under forced CLI retires the fixed API lane', async () => {
-  const h = harness();
-  const agent = { volcengineAgentAccessKeyId: 'AKLT-agent', volcengineAgentSecretAccessKey: 'agent-secret' };
-  const values = { ...agent, volcengineAccessKeyId: 'AKLT-saved', volcengineSecretAccessKey: 'saved-secret' };
-  h.settings = { ...h.settings, ...agent, limitProviders: 'volcengine', volcengineSourcePreference: 'cli',
-    volcengineAccessKeyId: 'AKLT-fixed', volcengineSecretAccessKey: 'fixed-secret',
-    volcengineAccountSlots: [{ id: 'saved', values }] };
-  const config = () => ({ ...limitsAccountConfig(h.settings, { env: {} }), limitProviders: 'volcengine' });
-  let apiRequests = 0;
-  const runtime = createLimitsRuntime(config(), { env: {}, autoStart: false, autoRetry: false,
-    providerFetchers: { volcengine: LIMIT_PROVIDER_FETCHERS.volcengine },
-    runArkcli: async args => {
-      if (args[0] === 'auth') return { logged_in: true, auth_method: 'sso', active_profile: { name: 'personal' } };
-      if (args[0] === 'plans') return { plans: [{ key: 'agent-plan', scope: 'personal', status: 'Running' }] };
-      return { viewer: { account_id: 'cli-viewer', region: 'cn-beijing' }, items: [
-        { product: 'agent-plan', subscribed: true, tier: 'medium', periods: [{ label: '5h', used: 10, total: 100 }] }
-      ] };
-    },
-    fetch: async url => {
-      apiRequests++;
-      return response(String(url).includes('GetAFPUsage')
-        ? { Result: { PlanType: 'Medium', AFPFiveHour: { Quota: 200, Used: 50 } } }
-        : { Result: { QuotaUsage: [{ Level: 'session', Percent: 10 }] } });
-    } });
-  let refresh;
-  h.changed = (provider, change) => {
-    runtime.reconfigure(config());
-    refresh = invalidateAccountSlotChange({ clearLimits: runtime.clear, refreshLimits: runtime.refresh }, provider, change);
-    return refresh;
-  };
-  try {
-    await runtime.refresh({}, 'settings-change');
-    const before = runtime.getSnapshot().providers;
-    assert.equal(before.filter(row => row.source === 'api' && row.status === 'ok').length, 3);
-    const cli = before.find(row => row.source === 'cli');
-    assert.equal(cli?.status, 'ok');
-
-    apiRequests = 0;
-    await h.service.remove('volcengine', 'saved');
-    await refresh;
-
-    assert.equal(apiRequests, 0);
-    assert.deepEqual(runtime.getSnapshot().providers.map(row => [row.accountKey, row.source, row.status]),
-      [[cli.accountKey, 'cli', 'ok']]);
-  } finally { runtime.stop(); }
 });
 test('Alibaba accounts with a shared UID rename and order their own console plans', async () => {
   const h = harness();

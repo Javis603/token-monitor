@@ -119,7 +119,3 @@ For retained Desktop discovery and watch rules, run `node --test tests/shared/cl
 ```bash
 node --test tests/shared/claudeProbe.test.js tests/shared/claudePrintedUsage.test.js tests/shared/claudeSessionActivity.test.js tests/shared/claudeSessionMetadata.test.js tests/shared/limitCollector.claude.test.js tests/electron/claudeWebFetch.test.js
 ```
-
-## Connection source selection
-
-Claude offers Auto, OAuth and CLI source selection for the automatically detected account. Auto keeps the source order above. Explicit OAuth does not fall back to CLI; explicit CLI requires readable OAuth credentials and a fresh profile whose account email and organization match the CLI sign-in before and after reading usage. It reuses that verified account identity and fails without substituting OAuth quota if verification or CLI usage fails. The CLI-disable setting also blocks explicit CLI. Web organizations remain independently collected complementary accounts for every selection.

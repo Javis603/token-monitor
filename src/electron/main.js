@@ -1022,7 +1022,6 @@ function cursorAccountService() {
     isExternalAgentActive,
     getCursorDisabledAccountIds: () => settings?.cursorDisabledAccountIds,
     getCursorManualAccountIds: () => settings?.cursorManualAccountIds,
-    getCursorSourcePreference: () => settings?.cursorSourcePreference || 'auto',
     setCursorDisabledAccountIds: value => { settings.cursorDisabledAccountIds = value; },
     setCursorManualAccountIds: value => { settings.cursorManualAccountIds = value; },
     saveSettings,

@@ -262,14 +262,14 @@ test('automatic account menu has no trailing divider when removal is unavailable
   assert.equal(visible.filter(node => node.classList.contains('action-menu-separator')).length, 1);
 });
 
-test('automatic provenance follows managed/app ownership instead of the quota endpoint', () => {
+test('automatic rows name the lane: managed logins fall through to their source, app detail to the desktop lane', () => {
   const document = createDocument(), container = document.createElement('div'); document.root.append(container);
   const sources = require('../../src/electron/limits/accountSettings').limitConnectionSourcesForRenderer().find(entry => entry.id === 'workbuddy').sources;
   const list = automatic.create({ document, provider: 'workbuddy', label: 'WorkBuddy', container, t, bridge: {},
     getContext: () => ({ settings: {}, localDeviceId: 'local' }), preserveScroll: fn => fn(), sources });
   list.update(['managed', 'app', 'unknown'].map(sourceDetail => reading(sourceDetail, { provider: 'workbuddy', source: 'api', sourceDetail, accountName: 'Account' })));
   const byKey = key => rows(container).find(row => row.dataset.slotId === `automatic:${key}`);
-  assert.equal(byKey('managed').querySelector('.slot-status').textContent, t('settings.slots.savedSource'));
+  assert.equal(byKey('managed').querySelector('.slot-status').textContent, t('settings.limits.sources.web'));
   assert.equal(byKey('app').querySelector('.slot-status').textContent, t('settings.limits.sources.desktop'));
   assert.equal(byKey('unknown').querySelector('.slot-detail'), undefined);
   const names = rows(container).map(row => row.querySelector('.slot-name').textContent);

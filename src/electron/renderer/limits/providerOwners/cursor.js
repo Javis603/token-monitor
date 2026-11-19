@@ -51,8 +51,7 @@ function renderCursorStatus() {
     status: { element: () => document.getElementById('cursorAccountStatus'), empty: () => t('settings.cursor.notLoggedIn'),
       active: () => !state.cursorAccount.error && Boolean(state.cursorAccount.status) }
   });
-  const sourceSelected = account => (state.settings.cursorSourcePreference || 'auto') === 'auto' || state.settings.cursorSourcePreference === (account.removable ? 'web' : 'desktop');
-  accountList.update(accounts.map(account => ({ ...account, sourceSelected: sourceSelected(account), sourceName: t(account.removable ? 'settings.limits.sources.web' : 'settings.limits.sources.desktop'), canPause: !managementBlocked, removable: account.removable === true && !managementBlocked })), host.localProviderStatuses('cursor'));
+  accountList.update(accounts.map(account => ({ ...account, sourceId: account.removable ? 'manual' : 'desktop', sourceName: t(account.removable ? 'settings.limits.sources.web' : 'settings.limits.sources.desktop'), canPause: !managementBlocked, removable: account.removable === true && !managementBlocked })), host.localProviderStatuses('cursor'));
 
   if (state.cursorAccount.error) {
     setCursorStatusText(statusEl, t('settings.common.error'));

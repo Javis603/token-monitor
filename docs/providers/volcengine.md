@@ -33,6 +33,6 @@ Subprocesses run without a shell or stdin, with implicit arkcli updates disabled
 
 Saved accounts preserve independent Coding and Agent Plan rows and the existing Ark fallback. An AKLT key requires its secret before it constitutes a configured primary lane; an independent Ark API key can answer when that pair is incomplete. The legacy combined key field continues to accept Ark API keys. With saved slots, local arkcli discovery remains a separate default lane alongside saved and environment credentials.
 
-## Source preference
+## Collection sources
 
-`volcengineSourcePreference` supports `auto`, `api` and `cli`. The preference chooses the default local discovery path; forced API never runs arkcli and forced CLI never falls back to API credentials. API retains its existing Coding/Agent composition and Ark fallback. Saved accounts and environment credentials remain independent API owners when a slot snapshot is collected; they are never authenticated using the CLI login. The snapshot reads arkcli once per refresh, not once per saved account. Save-time probes validate only the submitted credentials. Existing CLI disablement still applies.
+Without saved accounts, collection uses configured API credentials, or the arkcli login when none are configured; existing CLI disablement still applies. API retains its existing Coding/Agent composition and Ark fallback. With saved accounts, a slot snapshot reads arkcli once per refresh, not once per saved account, and saved accounts and environment credentials remain independent API owners that are never authenticated using the CLI login. Save-time probes validate only the submitted credentials.

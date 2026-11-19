@@ -22,6 +22,13 @@ Sources:
   - actions/ellipsis.svg: ellipsis
   - actions/shield-check.svg: shield-check
   - actions/check.svg: check (stroke widened to 3 for legibility as a small badge)
+  - sources/terminal.svg: terminal
+  - sources/monitor.svg: monitor
+  - sources/globe.svg: globe
+  - sources/lock.svg: lock
+  - sources/file.svg: file
+  - sources/variable.svg: variable
+    (sources/* copied from lucide-static v0.460.0)
   - settings/general.svg: sliders-horizontal
   - settings/main.svg: panels-top-left
   - settings/collection.svg: database

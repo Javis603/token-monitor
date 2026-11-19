@@ -693,12 +693,12 @@ for (const failure of ['http503', 'empty', 'arkFallbackFailed']) test(`Volcengin
   const fetcher = createAccountSlotFetcher(limitProviderEntry('volcengine'));
   const values = { volcengineAccessKeyId: 'AKLT-partial', volcengineSecretAccessKey: 'test-secret',
     ...(failure === 'arkFallbackFailed' ? { volcengineApiKey: 'test-ark' } : {}) };
-  const options = { limitProviders: ['volcengine'], volcengineSourcePreference: 'api',
-    volcengineAccountSlots: [{ id: 'saved', enabled: true, values }] };
+  const options = { limitProviders: ['volcengine'], volcengineAccountSlots: [{ id: 'saved', enabled: true, values }] };
   let failing = false;
   const requests = [];
   let now = Date.parse('2026-07-06T00:00:00Z');
-  const deps = { env: {}, now: () => now, providerRuntimeState: new Map(), fetch: async url => {
+  // Saved keys only: keep the local arkcli lane out of the snapshot.
+  const deps = { env: { TOKEN_MONITOR_VOLCENGINE_ARKCLI: '0' }, now: () => now, providerRuntimeState: new Map(), fetch: async url => {
     requests.push(String(url));
     const agent = String(url).includes('GetAFPUsage');
     if (failing && !agent && failure !== 'empty') return { ok: false, status: 503, json: async () => ({}) };

@@ -71,7 +71,7 @@ Antigravity quota collection starts in `fetchAntigravityLimits()` in `src/shared
 1. local RPC from a running Antigravity app, CLI, or IDE process;
 2. standalone OAuth for GUI-managed Google accounts, which continues working while Antigravity is closed.
 
-### Source selection
+### Source order
 
 Local RPC probes prefer process kinds in this order:
 

@@ -1,6 +1,5 @@
 'use strict';
 
-const { selectedSource } = require('../../limits/sourceSelection');
 
 // Alibaba Cloud Token Plan limits.
 //
@@ -945,7 +944,9 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
   const updatedAt = new Date((deps.now || Date.now)()).toISOString();
   const variantId = alibabaVariant(options, env);
   const variant = alibabaVariantConfig(variantId);
-  const source = deps.accountSlotSaved ? 'web' : selectedSource('alibaba', options, deps);
+  // `alibabaLane` is private to fetchAccountSlotSnapshot, which reads the CLI and
+  // the saved Cookies as separate lanes; every other caller tries CLI first.
+  const source = deps.accountSlotSaved ? 'web' : options.alibabaLane || 'auto';
   const cookieHeader = source === 'cli' ? '' : alibabaCookie(env, options);
 
   // A save-time probe validates the submitted cookie alone. An unrelated CLI
@@ -1028,8 +1029,7 @@ async function fetchAlibabaLimits(options = {}, deps = {}) {
 }
 
 async function fetchAccountSlotSnapshot(options, deps, collect) {
-  const source = selectedSource('alibaba', options, deps);
-  if (deps.probe || source === 'web') return collect(options, deps);
+  if (deps.probe) return collect(options, deps);
   const previous = options.previousLimits?.providers || [];
   const cliPrevious = previous.filter(row => row.provider === 'alibaba' && row.source === 'cli');
   const previousLimits = { providers: previous.filter(row => row.source !== 'cli') };
@@ -1037,16 +1037,11 @@ async function fetchAccountSlotSnapshot(options, deps, collect) {
   const localOptions = scope?.provider === 'alibaba' && scope.region
     ? { ...options, alibabaVariant: scope.region } : options;
   const unprovenCliScope = scope?.provider === 'alibaba' && scope.accountKey && !cliPrevious.some(row => rowMatchesScope(row, scope));
-  // Without saved slots, explicit CLI owns the whole provider. An unmatched
-  // account scope cannot fall through to Cookie or claim a keyless CLI result.
-  if (source === 'cli' && !options.alibabaAccountSlots?.length) {
-    return unprovenCliScope ? [] : fetchAlibabaLimits(localOptions, deps);
-  }
-  if (unprovenCliScope) return collect({ ...options, alibabaSourcePreference: 'web', previousLimits }, deps);
+  if (unprovenCliScope) return collect({ ...options, alibabaLane: 'web', previousLimits }, deps);
   if (!options.alibabaAccountSlots?.length) return collect(localOptions, deps);
-  const local = await fetchAlibabaLimits({ ...localOptions, alibabaSourcePreference: 'cli', previousLimits: { providers: cliPrevious } }, deps);
+  const local = await fetchAlibabaLimits({ ...localOptions, alibabaLane: 'cli', previousLimits: { providers: cliPrevious } }, deps);
   // Replacement removals carry identity only, without a source field.
-  return [...local.filter(row => row.removed || row.source === 'cli' && (source === 'cli' || row.status !== 'notConfigured')), ...await collect({ ...options, alibabaSourcePreference: 'web', previousLimits }, deps)];
+  return [...local.filter(row => row.removed || row.source === 'cli' && row.status !== 'notConfigured'), ...await collect({ ...options, alibabaLane: 'web', previousLimits }, deps)];
 }
 
 module.exports = { accountSlotsForScope: (accounts, scope, options, deps) => alibabaAccountSlotsForScope(accounts, scope, alibabaVariant(options, deps.env)), accountSlotRowKey: row => `${row.accountKey}:${row.region || ''}`, fetchAccountSlotSnapshot,

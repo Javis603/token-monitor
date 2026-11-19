@@ -330,7 +330,9 @@ function renderOpenCodeProfiles() {
       listEl.before(common);
       accountList = window.TokenMonitorLegacyAccountList.create({
       busy: () => document.getElementById('opencodeCookieSubmit')?.disabled === true,
-      sourceLabel: account => account.source === 'ambient' ? t('settings.limits.sources.file') : account.source === 'environment' ? t('settings.limits.sources.env') : t('settings.slots.savedSource'),
+      // A saved profile may hold an API key, a Web cookie or both; its reading names the lane.
+      sourceLabel: (account, reading) => account.source === 'ambient' ? t('settings.limits.sources.file') : account.source === 'environment' ? t('settings.limits.sources.env')
+        : reading?.source === 'web' ? t('settings.limits.sources.web') : reading?.source === 'api' ? t('settings.limits.sources.apiKey') : '',
       editor: { submit: 'opencodeCookieSubmit', nodes: ['opencodeAddDetails', 'opencodeProfileList'], visibility: 'opencodeAddDetails', replaceVisibility: 'opencodeProfileList', cancel: () => setOpenCodeAddExpanded(false) },
         document, provider: 'opencode', label: host.providerLabel || 'OpenCode',
     add: () => setOpenCodeAddExpanded(document.getElementById('opencodeAddDetails')?.classList.contains('hidden')), container: common, t, bridge: window.tokenMonitor,

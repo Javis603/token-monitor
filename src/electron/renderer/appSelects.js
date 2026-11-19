@@ -15,7 +15,6 @@
       const models = /^(modelAliases.*Select|customPricingModelSelect)$/.test(select.id);
       const displayPresets = select.id === 'trayContentInput' || select.id === 'floatingBubbleContentInput';
       return {
-        compactDescriptions: select.classList.contains('connection-source-method'),
         searchable: models ? true : displayPresets ? false : 'auto',
         searchLabel: () => t('trayComposer.search'),
         emptyLabel: () => t('settings.search.noMatches'),

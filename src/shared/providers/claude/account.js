@@ -5,7 +5,6 @@
 // src/shared/limits/accounts.js for the field schema.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'claude',
-  sourceSelection: { sources: ['oauth', 'cli'] },
   accountSlots: true,
   accountSlotOwner: true,
   sources: [

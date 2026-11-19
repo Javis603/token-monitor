@@ -84,8 +84,8 @@
       const accounts = accountsFromReadings(options.provider, readings, {
         localDeviceId: context.localDeviceId, label: options.label,
         sourceName: row => {
-          // Provenance details name the acquisition owner; the quota endpoint alone may not.
-          if (row.sourceDetail === 'managed') return options.t('settings.slots.savedSource');
+          // Name the lane the quota came through; `managed` only says Token
+          // Monitor holds the login, so it falls through to the source itself.
           if (row.sourceDetail === 'unknown') return '';
           const source = row.sourceDetail === 'app'
             ? options.sources.find(source => source.kind === 'desktop')
