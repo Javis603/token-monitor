@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 const { setTimeout: delay } = require('node:timers/promises');
 const { watchIgnoreMatcher, startCollector } = require('../../src/shared/collector');
+const { clientsForWatchPath } = require('../../src/shared/watchPolicy');
 const { installSourceEnvGuard, SOURCE_ENV_KEYS } = require('../helpers/sourceEnv');
 const { installInProcessWatchHost } = require('../helpers/watchHost');
 
@@ -96,6 +97,55 @@ test('source file policies preserve symlinked transcripts and recursive custom/o
       assert.equal(ignored(sourceNamedDirectoryLink), true, 'a source filename cannot admit a directory link');
     }
   }
+});
+
+test('a nested Codex home owns its catalog inside an enclosing custom root', (t) => {
+  const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'tm-codex-nested-')));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const imports = path.join(home, 'imports');
+  const one = path.join(imports, 'one');
+  for (const name of ['sqlite/state_5.sqlite', 'sessions/rollout.jsonl']) {
+    const file = path.join(one, name);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, 'fixture');
+  }
+  fs.mkdirSync(imports, { recursive: true });
+  fs.writeFileSync(path.join(imports, 'other.jsonl'), 'fixture');
+  const ignored = watchIgnoreMatcher('codex', {
+    homeDir: home, env: {}, customScanPaths: { codex: [imports, one] }
+  });
+  assert.equal(ignored(path.join(one, 'sqlite', 'state_5.sqlite-shm')), true, 'a catalog sidecar is not a source');
+  assert.equal(ignored(path.join(one, 'sqlite', 'state_5.sqlite-wal')), true);
+  assert.equal(ignored(path.join(one, 'sessions', 'rollout.jsonl')), false);
+  assert.equal(ignored(path.join(imports, 'other.jsonl')), false);
+  assert.equal(ignored(path.join(imports, 'node_modules', 'pkg', 'index.js')), true);
+});
+
+test('a Copilot exporter parent named like a workspace root keeps only the exporter file', (t) => {
+  const home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'tm-copilot-exporter-')));
+  t.after(() => fs.rmSync(home, { recursive: true, force: true }));
+  const exporterDir = path.join(home, 'workspaceStorage');
+  const exporter = path.join(exporterDir, 'export.jsonl');
+  fs.mkdirSync(path.join(exporterDir, 'project'), { recursive: true });
+  fs.writeFileSync(exporter, 'fixture');
+  fs.writeFileSync(path.join(exporterDir, 'project', 'workspace.json'), 'fixture');
+  fs.writeFileSync(path.join(exporterDir, 'other.txt'), 'fixture');
+  const previous = process.env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+  process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = exporter;
+  t.after(() => {
+    if (previous === undefined) delete process.env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+    else process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = previous;
+  });
+  const ignored = watchIgnoreMatcher('copilot', { homeDir: home, env: process.env });
+  assert.equal(ignored(exporter) ?? false, false);
+  assert.equal(ignored(path.join(exporterDir, 'project', 'workspace.json')), true);
+  assert.equal(ignored(path.join(exporterDir, 'other.txt')), true);
+});
+
+test('a volume root matches its descendants in watch attribution', () => {
+  const volumeRoot = path.parse(process.cwd()).root;
+  const target = path.join(volumeRoot, 'some', 'nested', 'session.jsonl');
+  assert.deepEqual(clientsForWatchPath(target, { codex: [volumeRoot] }), ['codex']);
 });
 
 for (const entry of [

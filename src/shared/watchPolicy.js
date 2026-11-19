@@ -30,6 +30,12 @@ const {
 } = require('./providers/reasonix/watchPaths');
 const { SELF_SYNC_KINDS } = require('./selfSyncThrottle');
 
+// A volume root already ends with the platform separator ("/" or "D:\"), so
+// appending another one would build a prefix no descendant can match.
+function descendantPrefix(root) {
+  return root.endsWith(path.sep) ? root : root + path.sep;
+}
+
 // GlobalStorage contains legacy conversations beside arbitrary project-file
 // checkpoints. Tokscale still traverses the complete tree on each Kiro scan;
 // pruning watcher paths alone cannot make frequent scans cheap. Keep this
@@ -200,7 +206,7 @@ function clientsForWatchPath(filePath, rootsByClient, ignoreByClient = null) {
     if (ignoreByClient?.[client]?.(resolved)) continue;
     if (roots.some((root) => {
       const resolvedRoot = path.resolve(root);
-      return resolved === resolvedRoot || resolved.startsWith(resolvedRoot + path.sep);
+      return resolved === resolvedRoot || resolved.startsWith(descendantPrefix(resolvedRoot));
     })) matched.push(client);
   }
   return matched;
@@ -434,7 +440,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
     const boundedDirs = dirs.filter((dir) => !customRoots.get(client)?.has(canonicalRoot(dir)));
     for (const dir of boundedDirs) seen.add(dir);
     for (const root of new Set(boundedDirs.map(canonicalRoot))) {
-      entries.push({ root, prefix: root + path.sep, policy });
+      entries.push({ root, prefix: descendantPrefix(root), policy });
       boundedCount += 1;
     }
   };
@@ -531,7 +537,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
     return !CODEX_HOME_TRANSCRIPT_DIRS.has(parts[5]);
   });
 
-  bound('copilot', withBasename('copilot', '.copilot'), (parts) => {
+  bound('copilot', sourceRoots('copilot', 'copilot-data', 'copilot-session-store'), (parts) => {
     if (parts[0] === 'otel') return false;
     if (parts[0] === 'session-state') {
       // Native CLI sessions can appear after the watcher starts. Keep their
@@ -542,13 +548,13 @@ function watchPolicyEntries(clientsCsv, options = {}) {
     if (parts.length === 1) return !COPILOT_DB_WATCH_PATTERN.test(parts[0]);
     return true;
   });
-  bound('copilot', withBasename('copilot', 'workspaceStorage'), (parts) => {
+  bound('copilot', sourceRoots('copilot', 'vscode-workspace-storage'), (parts) => {
     if (parts.length === 1) return false; // workspace hash dir
     if (parts[1] === 'chatSessions') return false;
     if (parts.length === 2 && parts[1] === 'workspace.json') return false;
     return true;
   });
-  bound('copilot', withBasename('copilot', 'emptyWindowChatSessions'),
+  bound('copilot', sourceRoots('copilot', 'vscode-empty-window-sessions'),
     (parts) => parts.length !== 1 || !parts[0].endsWith('.jsonl'));
   // Tokscale ingests exactly the file COPILOT_OTEL_FILE_EXPORTER_PATH names
   // (`path.is_file()`, no glob), but that file need not exist yet, so its parent
@@ -705,19 +711,40 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // built-in contract is the one that must hold.
   const builtInRoots = new Set(recursive.filter((entry) => !entry.custom).map((entry) => entry.root));
   for (const root of builtInRoots) {
-    entries.push({ root, prefix: root + path.sep, policy: KEEP_EVERYTHING });
+    entries.push({ root, prefix: descendantPrefix(root), policy: KEEP_EVERYTHING });
   }
   // A path stays watched while any policy on its root keeps it, so a root
   // named by two clients keeps the union of their contracts.
+  const codexHomes = new Set(recursive
+    .filter(({ client, custom, root }) => client === 'codex' && custom && isCodexHome(root))
+    .map(({ root }) => root));
+  const codexCustomPolicy = (root) => {
+    if (codexHomes.has(root)) return pruneCodexHome;
+    const nestedHomes = [...codexHomes]
+      .filter((home) => home !== root && home.startsWith(descendantPrefix(root)))
+      .sort((a, b) => b.length - a.length);
+    if (nestedHomes.length === 0) return pruneDependencyTrees;
+    return (parts, resolved) => {
+      const target = path.resolve(resolved);
+      for (const home of nestedHomes) {
+        if (!target.startsWith(descendantPrefix(home))) continue;
+        // A recognized home owns its catalog. Without this, an enclosing
+        // generic custom root keeps state_*.sqlite(-wal|-shm) watched and the
+        // title lookup's own read schedules another collection.
+        return pruneCodexHome(path.relative(home, target).split(path.sep), target);
+      }
+      return pruneDependencyTrees(parts);
+    };
+  };
   const customPolicies = new Map();
   for (const { client, root, custom } of recursive) {
     if (!custom || builtInRoots.has(root)) continue;
-    const policy = client === 'codex' && isCodexHome(root) ? pruneCodexHome : pruneDependencyTrees;
+    const policy = client === 'codex' ? codexCustomPolicy(root) : pruneDependencyTrees;
     if (!customPolicies.has(root)) customPolicies.set(root, new Set());
     customPolicies.get(root).add(policy);
   }
   for (const [root, policies] of customPolicies) for (const policy of policies) {
-    entries.push({ root, prefix: root + path.sep, policy });
+    entries.push({ root, prefix: descendantPrefix(root), policy });
     boundedCount += 1;
   }
   return { entries, boundedCount };
@@ -957,7 +984,7 @@ function isSelfWatchSqliteSidecarEvent(filePath, rootsByClient = {}) {
   if (!/^[^/]+\.(?:db|sqlite|sqlite3|vscdb)-shm$/.test(name)) return false;
   const resolved = path.resolve(filePath);
   return SELF_WATCHED_SQLITE_SIDECAR_CLIENTS.some((client) => (rootsByClient[client] || [])
-    .some((root) => resolved.startsWith(path.resolve(root) + path.sep)));
+    .some((root) => resolved.startsWith(descendantPrefix(path.resolve(root)))));
 }
 
 module.exports = {
