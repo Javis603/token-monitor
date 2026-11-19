@@ -1,0 +1,1983 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const {
+  aggregateDevices,
+  extractUsageBundleFromTokscale,
+  extractUsageFromTokscale,
+  mergeDeviceRecord,
+  mergePeriods,
+  normalizeClientName,
+  normalizePeriod,
+  stripSessionTextFromDeviceRecord,
+  UNATTRIBUTED_USAGE_CLIENT
+} = require('../../src/shared/usage');
+
+test('session normalization preserves bounded titles and recognized background-review metadata', () => {
+  const period = normalizePeriod({ sessions: {
+    'codex:review': {
+      client: 'codex',
+      sessionId: 'review',
+      totalTokens: 10,
+      title: '  Review   the change  ',
+      sessionKind: 'background-review'
+    },
+    'codex:unknown': {
+      client: 'codex',
+      sessionId: 'unknown',
+      totalTokens: 5,
+      title: 'x'.repeat(200),
+      sessionKind: 'untrusted-kind'
+    }
+  } });
+
+  assert.equal(period.sessions['codex:review'].title, 'Review the change');
+  assert.equal(period.sessions['codex:review'].sessionKind, 'background-review');
+  assert.equal(period.sessions['codex:unknown'].title.length, 160);
+  assert.equal(period.sessions['codex:unknown'].sessionKind, '');
+});
+
+test('a parent link is carried only when present, survives Hub ingress and merges first-wins', () => {
+  const period = normalizePeriod({ sessions: {
+    'codex:child': { client: 'codex', sessionId: 'child', totalTokens: 10, parentSessionId: ' parent ' },
+    'codex:self': { client: 'codex', sessionId: 'self', totalTokens: 5, parentSessionId: 'self' },
+    'codex:top': { client: 'codex', sessionId: 'top', totalTokens: 5 }
+  } });
+  assert.equal(period.sessions['codex:child'].parentSessionId, 'parent');
+  assert.equal(Object.hasOwn(period.sessions['codex:self'], 'parentSessionId'), false);
+  assert.equal(Object.hasOwn(period.sessions['codex:top'], 'parentSessionId'), false);
+
+  const stripped = stripSessionTextFromDeviceRecord({ today: period });
+  assert.equal(stripped.today.sessions['codex:child'].parentSessionId, 'parent');
+
+  const merged = mergePeriods(
+    { sessions: { 'codex:child': { client: 'codex', sessionId: 'child', totalTokens: 1 } } },
+    period,
+    { sessions: { 'codex:child': { client: 'codex', sessionId: 'child', totalTokens: 2, parentSessionId: 'other' } } }
+  );
+  assert.equal(merged.sessions['codex:child'].parentSessionId, 'parent');
+  assert.equal(merged.sessions['codex:child'].totalTokens, 13);
+});
+
+test('unpriced attribution maps stay within period and per-client token allowances', () => {
+  const total = (map) => Object.values(map || {}).reduce((sum, value) => sum + value, 0);
+  const input = {
+    totalTokens: 50,
+    unpricedTokens: 50,
+    clientUnpricedTokens: { codex: 20, claude: 30 },
+    modelUnpricedTokens: { 'model-a': 40, 'model-b': 40 },
+    clientModelUnpricedTokens: {
+      codex: { 'model-a': 15, 'model-b': 15 },
+      claude: { 'model-c': 30 }
+    }
+  };
+  const period = normalizePeriod(input);
+  const clientModelTotal = (maps) => Object.values(maps || {}).reduce((sum, models) => sum + total(models), 0);
+
+  assert.equal(total(period.clientUnpricedTokens), period.unpricedTokens);
+  assert.equal(total(period.modelUnpricedTokens), period.unpricedTokens);
+  assert.equal(clientModelTotal(period.clientModelUnpricedTokens), period.unpricedTokens);
+  for (const [client, models] of Object.entries(period.clientModelUnpricedTokens)) {
+    assert.ok(total(models) <= period.clientUnpricedTokens[client]);
+  }
+  assert.deepEqual(normalizePeriod(period), period);
+
+  const merged = mergePeriods(period, period);
+  assert.equal(merged.unpricedTokens, 100);
+  assert.equal(total(merged.clientUnpricedTokens), merged.unpricedTokens);
+  assert.equal(total(merged.modelUnpricedTokens), merged.unpricedTokens);
+  assert.equal(clientModelTotal(merged.clientModelUnpricedTokens), merged.unpricedTokens);
+  for (const [client, models] of Object.entries(merged.clientModelUnpricedTokens)) {
+    assert.ok(total(models) <= merged.clientUnpricedTokens[client]);
+  }
+});
+
+test('Hub ingress projection strips session text without mutating local records', () => {
+  const record = {
+    deviceId: 'macbook',
+    today: { sessions: {
+      'codex:s1': {
+        client: 'codex', sessionId: 's1', totalTokens: 10,
+        title: 'Private title', preview: 'Private preview', first_user_message: 'Private prompt',
+        sessionKind: 'background-review'
+      }
+    } },
+    periods: { month: { sessions: {
+      'claude:s2': {
+        client: 'claude', sessionId: 's2', totalTokens: 20,
+        sessionTitle: 'Private title', customTitle: 'Private custom title', aiTitle: 'Private AI title'
+      }
+    } } }
+  };
+
+  const stripped = stripSessionTextFromDeviceRecord(record);
+
+  assert.equal(record.today.sessions['codex:s1'].title, 'Private title');
+  assert.equal(stripped.today.sessions['codex:s1'].sessionKind, 'background-review');
+  assert.deepEqual(
+    Object.keys(stripped.today.sessions['codex:s1']).sort(),
+    ['client', 'sessionId', 'sessionKind', 'totalTokens'].sort()
+  );
+  assert.deepEqual(
+    Object.keys(stripped.periods.month.sessions['claude:s2']).sort(),
+    ['client', 'sessionId', 'totalTokens'].sort()
+  );
+});
+
+function recordWithLimits(extra = {}) {
+  return {
+    deviceId: 'macbook',
+    hostname: 'macbook.local',
+    platform: 'darwin',
+    updatedAt: '2026-05-27T00:00:00.000Z',
+    receivedAt: '2026-05-27T00:00:00.000Z',
+    today: { totalTokens: 1, costUsd: 0, clients: { cursor: 1 }, clientCosts: {} },
+    month: { totalTokens: 1, costUsd: 0, clients: {}, clientCosts: {} },
+    allTime: { totalTokens: 1, costUsd: 0, clients: {}, clientCosts: {} },
+    limits: {
+      updatedAt: '2026-05-27T00:00:00.000Z',
+      refreshMs: 300000,
+      providers: [
+        {
+          provider: 'cursor',
+          accountKey: 'sha256:cursor',
+          accountLabel: 'Free',
+          status: 'ok',
+          source: 'web',
+          updatedAt: '2026-05-27T00:00:00.000Z',
+          windows: [{ kind: 'billing', label: 'Total', usedPercent: 12 }]
+        }
+      ]
+    },
+    ...extra
+  };
+}
+
+test('mergeDeviceRecord preserves existing limits when incoming payload omits limits', () => {
+  const existing = recordWithLimits();
+  const incoming = {
+    deviceId: 'macbook',
+    hostname: 'macbook.local',
+    platform: 'darwin',
+    updatedAt: '2026-05-27T00:01:00.000Z',
+    receivedAt: '2026-05-27T00:01:00.000Z',
+    today: { totalTokens: 5, costUsd: 0, clients: { cursor: 5 }, clientCosts: {} }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.equal(merged.periods.today.totalTokens, 5);
+  assert.equal(merged.limits.providers.length, 1);
+  assert.equal(merged.limits.providers[0].provider, 'cursor');
+  assert.equal(merged.limits.providers[0].status, 'ok');
+});
+
+test('mergeDeviceRecord allows explicit empty limits to clear stale provider state', () => {
+  const existing = recordWithLimits();
+  const incoming = {
+    deviceId: 'macbook',
+    updatedAt: '2026-05-27T00:01:00.000Z',
+    receivedAt: '2026-05-27T00:01:00.000Z',
+    limits: { updatedAt: '2026-05-27T00:01:00.000Z', refreshMs: 300000, providers: [] }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.deepEqual(merged.limits.providers, []);
+});
+
+test('device records carry, expose, and preserve friendly OS metadata', () => {
+  const existing = recordWithLimits({ osName: 'macOS', osVersion: '15.6' });
+  const updated = mergeDeviceRecord(existing, {
+    deviceId: 'macbook',
+    osName: 'macOS',
+    osVersion: '26.0',
+    updatedAt: '2026-05-27T00:01:00.000Z'
+  });
+  assert.equal(updated.osName, 'macOS');
+  assert.equal(updated.osVersion, '26.0');
+  assert.equal(aggregateDevices([updated], 0).devices[0].osName, 'macOS');
+  assert.equal(aggregateDevices([updated], 0).devices[0].osVersion, '26.0');
+
+  const limitsOnly = mergeDeviceRecord(updated, {
+    deviceId: 'macbook',
+    limitsOnly: true,
+    limits: { providers: [] },
+    updatedAt: '2026-05-27T00:02:00.000Z'
+  });
+  assert.equal(limitsOnly.osName, 'macOS');
+  assert.equal(limitsOnly.osVersion, '26.0');
+});
+
+test('aggregateDevices does not let an orphaned stale device id override the current limits state', () => {
+  const oldDevice = recordWithLimits({
+    deviceId: 'old-device-id',
+    updatedAt: '2026-07-08T13:08:54.000Z',
+    receivedAt: '2026-07-08T13:08:54.000Z',
+    limits: {
+      updatedAt: '2026-07-08T13:04:49.000Z',
+      refreshMs: 300000,
+      providers: [{
+        provider: 'codex',
+        accountKey: 'sha256:old-codex',
+        status: 'ok',
+        source: 'rpc',
+        updatedAt: '2026-07-08T13:04:49.000Z',
+        windows: [
+          { kind: 'session', usedPercent: 59, resetsAt: '2026-07-08T15:37:24.000Z', windowMinutes: 300 },
+          { kind: 'weekly', usedPercent: 54, resetsAt: '2026-07-14T04:16:57.000Z', windowMinutes: 10080 }
+        ]
+      }]
+    }
+  });
+  const currentDevice = recordWithLimits({
+    deviceId: 'current-device-id',
+    updatedAt: '2026-07-10T02:58:40.000Z',
+    receivedAt: '2026-07-10T02:58:41.000Z',
+    limits: {
+      updatedAt: '2026-07-10T02:55:17.000Z',
+      refreshMs: 300000,
+      providers: [{
+        provider: 'codex',
+        status: 'notConfigured',
+        updatedAt: '2026-07-10T02:55:17.000Z',
+        windows: []
+      }]
+    }
+  });
+
+  const aggregate = aggregateDevices(
+    [oldDevice, currentDevice],
+    10 * 60 * 1000,
+    Date.parse('2026-07-10T03:00:00.000Z')
+  );
+
+  assert.equal(aggregate.devices.find((device) => device.deviceId === 'old-device-id').stale, true);
+  assert.equal(aggregate.devices.find((device) => device.deviceId === 'current-device-id').stale, false);
+  assert.equal(aggregate.limits.providers.length, 1);
+  assert.equal(aggregate.limits.providers[0].provider, 'codex');
+  assert.equal(aggregate.limits.providers[0].status, 'notConfigured');
+  assert.equal(aggregate.limits.providers[0].sourceDeviceId, 'current-device-id');
+  assert.deepEqual(aggregate.limits.providers[0].windows, []);
+});
+
+test('aggregateDevices keeps interval-synced devices and limits fresh through their upload window', () => {
+  const device = recordWithLimits({ syncUploadIntervalMs: 20 * 60 * 1000 });
+  const active = aggregateDevices(
+    [device],
+    10 * 60 * 1000,
+    Date.parse('2026-05-27T00:30:00.000Z')
+  );
+
+  assert.equal(active.devices[0].syncUploadIntervalMs, 20 * 60 * 1000);
+  assert.equal(active.devices[0].stale, false);
+  assert.equal(active.limits.providers[0].stale, false);
+
+  const stale = aggregateDevices(
+    [device],
+    10 * 60 * 1000,
+    Date.parse('2026-05-27T00:41:00.000Z')
+  );
+  assert.equal(stale.devices[0].stale, true);
+  assert.equal(stale.limits.providers[0].stale, true);
+});
+
+test('aggregateDevices keeps device staleness disabled when staleAfterMs is zero', () => {
+  const aggregate = aggregateDevices(
+    [recordWithLimits({ syncUploadIntervalMs: 20 * 60 * 1000 })],
+    0,
+    Date.parse('2026-05-27T02:00:00.000Z')
+  );
+
+  assert.equal(aggregate.devices[0].stale, false);
+});
+
+test('mergeDeviceRecord supports limitsOnly updates without wiping usage periods', () => {
+  const existing = recordWithLimits({
+    projectsEnabled: false,
+    allTimeProjectsOmitted: true,
+    allTimeProjectsIncomplete: true,
+    sessionDetailsOmitted: { month: 12 },
+    periodProjectsOmitted: { month: 4 },
+    syncUploadIntervalMs: 20 * 60 * 1000
+  });
+  const incoming = {
+    deviceId: 'macbook',
+    receivedAt: '2026-05-27T00:02:00.000Z',
+    limitsOnly: true,
+    limits: {
+      updatedAt: '2026-05-27T00:02:00.000Z',
+      refreshMs: 300000,
+      providers: [{ provider: 'cursor', status: 'unauthorized', source: 'web', updatedAt: '2026-05-27T00:02:00.000Z', windows: [] }]
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.equal(merged.periods.today.totalTokens, 1);
+  assert.equal(merged.limits.providers[0].status, 'unauthorized');
+  assert.equal(merged.projectsEnabled, false);
+  assert.equal(merged.allTimeProjectsOmitted, true);
+  assert.equal(merged.allTimeProjectsIncomplete, true);
+  assert.deepEqual(merged.sessionDetailsOmitted, { month: 12 });
+  assert.deepEqual(merged.periodProjectsOmitted, { month: 4 });
+  assert.equal(merged.syncUploadIntervalMs, 20 * 60 * 1000);
+});
+
+test('normal device updates replace all-time project diagnostics', () => {
+  const existing = recordWithLimits({ allTimeProjectsOmitted: true, allTimeProjectsIncomplete: true });
+  const merged = mergeDeviceRecord(existing, {
+    deviceId: 'macbook',
+    updatedAt: '2026-05-27T00:03:00.000Z',
+    allTime: {
+      totalTokens: 10,
+      projects: { app: { label: 'App', tokens: 10, costUsd: 0.1, clients: { codex: 10 } } }
+    }
+  });
+
+  assert.equal(Object.hasOwn(merged, 'allTimeProjectsOmitted'), false);
+  assert.equal(Object.hasOwn(merged, 'allTimeProjectsIncomplete'), false);
+  assert.equal(merged.periods.allTime.projects.app.tokens, 10);
+});
+
+test('aggregateDevices merges project rollups and exposes incomplete-device diagnostics', () => {
+  const aggregate = aggregateDevices([
+    {
+      deviceId: 'a',
+      allTimeProjectsOmitted: true,
+      allTime: {
+        totalTokens: 100,
+        projects: { app: { label: 'App', tokens: 60, costUsd: 0.3333333, clients: { codex: 60 } } }
+      }
+    },
+    {
+      deviceId: 'b',
+      allTime: {
+        totalTokens: 200,
+        projects: { APP: { label: 'APP', tokens: 140, costUsd: 0.6666666, clients: { claude: 140 } } }
+      }
+    }
+  ], 60000);
+
+  assert.equal(aggregate.projectsIncomplete, true);
+  assert.equal(aggregate.devices.find((device) => device.deviceId === 'a').allTimeProjectsOmitted, true);
+  assert.deepEqual(JSON.parse(JSON.stringify(aggregate.periods.allTime.projects.app)), {
+    label: 'APP',
+    tokens: 200,
+    costUsd: 1,
+    clients: { codex: 60, claude: 140 }
+  });
+});
+
+test('aggregateDevices exposes bounded session-detail diagnostics without changing totals', () => {
+  const aggregate = aggregateDevices([
+    {
+      deviceId: 'a',
+      month: {
+        totalTokens: 100,
+        sessions: { 'codex:recent': { client: 'codex', sessionId: 'recent', totalTokens: 40, projectId: 'sha256:app', projectLabel: 'App' } },
+        projects: { app: { label: 'App', tokens: 100, costUsd: 0.5, clients: { codex: 100 } } }
+      },
+      sessionDetailsOmitted: { month: 7 },
+      periodProjectsOmitted: { month: 2 }
+    },
+    { deviceId: 'b', month: { totalTokens: 200 }, sessionDetailsOmitted: { month: 3, today: 1 }, periodProjectsOmitted: { month: 5, today: 1 } }
+  ], 60000);
+
+  assert.equal(aggregate.periods.month.totalTokens, 300);
+  assert.equal(aggregate.periods.month.sessions['codex:recent'].totalTokens, 40);
+  assert.equal(aggregate.periods.month.projects.app.tokens, 100);
+  assert.deepEqual(aggregate.sessionDetailsOmitted, { month: 10, today: 1 });
+  assert.deepEqual(aggregate.periodProjectsOmitted, { month: 7, today: 1 });
+  assert.deepEqual(aggregate.devices.find((device) => device.deviceId === 'a').sessionDetailsOmitted, { month: 7 });
+  assert.deepEqual(aggregate.devices.find((device) => device.deviceId === 'a').periodProjectsOmitted, { month: 2 });
+});
+
+test('stale project omissions remain incomplete while stale all-time usage is aggregated', () => {
+  const aggregate = aggregateDevices([{
+    deviceId: 'stale',
+    receivedAt: '2026-07-13T00:00:00.000Z',
+    allTimeProjectsOmitted: true,
+    allTime: { totalTokens: 100 }
+  }], 10 * 60 * 1000, Date.parse('2026-07-13T01:00:00.000Z'));
+
+  assert.equal(aggregate.devices[0].stale, true);
+  assert.equal(aggregate.periods.allTime.totalTokens, 100);
+  assert.equal(aggregate.projectsIncomplete, true);
+});
+
+test('mergeDeviceRecord keeps widget Copilot limits when a headless agent reports no local token', () => {
+  const existing = recordWithLimits({
+    agentRuntime: 'electron-widget',
+    limits: {
+      updatedAt: '2026-06-26T08:00:00.000Z',
+      refreshMs: 300000,
+      providers: [
+        {
+          provider: 'copilot',
+          accountKey: 'sha256:copilot-token',
+          accountLabel: 'Pro',
+          status: 'ok',
+          source: 'api',
+          updatedAt: '2026-06-26T08:00:00.000Z',
+          windows: [{ kind: 'billing', label: 'Premium requests', usedPercent: 20 }]
+        }
+      ]
+    }
+  });
+  const incoming = {
+    deviceId: 'macbook',
+    agentRuntime: 'headless-agent',
+    updatedAt: '2026-06-26T08:01:00.000Z',
+    receivedAt: '2026-06-26T08:01:00.000Z',
+    limits: {
+      updatedAt: '2026-06-26T08:01:00.000Z',
+      refreshMs: 300000,
+      providers: [{ provider: 'copilot', status: 'notConfigured', source: 'api', updatedAt: '2026-06-26T08:01:00.000Z', windows: [] }]
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.equal(merged.limits.providers.length, 1);
+  assert.equal(merged.limits.providers[0].provider, 'copilot');
+  assert.equal(merged.limits.providers[0].status, 'ok');
+  assert.equal(merged.limits.providers[0].accountKey, 'sha256:copilot-token');
+});
+
+test('mergeDeviceRecord allows the same runtime to clear Copilot limits', () => {
+  const existing = recordWithLimits({
+    agentRuntime: 'electron-widget',
+    limits: {
+      updatedAt: '2026-06-26T08:00:00.000Z',
+      refreshMs: 300000,
+      providers: [
+        { provider: 'copilot', accountKey: 'sha256:copilot-token', status: 'ok', source: 'api', updatedAt: '2026-06-26T08:00:00.000Z', windows: [] }
+      ]
+    }
+  });
+  const incoming = {
+    deviceId: 'macbook',
+    agentRuntime: 'electron-widget',
+    updatedAt: '2026-06-26T08:01:00.000Z',
+    receivedAt: '2026-06-26T08:01:00.000Z',
+    limits: {
+      updatedAt: '2026-06-26T08:01:00.000Z',
+      refreshMs: 300000,
+      providers: [{ provider: 'copilot', status: 'notConfigured', source: 'api', updatedAt: '2026-06-26T08:01:00.000Z', windows: [] }]
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.equal(merged.limits.providers.length, 1);
+  assert.equal(merged.limits.providers[0].provider, 'copilot');
+  assert.equal(merged.limits.providers[0].status, 'notConfigured');
+});
+
+test('mergeDeviceRecord keeps widget Factory limits when a headless agent reports no local API key', () => {
+  const existing = recordWithLimits({
+    agentRuntime: 'electron-widget',
+    limits: {
+      updatedAt: '2026-06-26T08:00:00.000Z',
+      refreshMs: 300000,
+      providers: [
+        {
+          provider: 'factory',
+          accountKey: 'sha256:factory-user',
+          accountLabel: 'Factory Pro',
+          status: 'ok',
+          source: 'api',
+          updatedAt: '2026-06-26T08:00:00.000Z',
+          windows: [{ kind: 'session', label: '5-hour', usedPercent: 20 }]
+        }
+      ]
+    }
+  });
+  const incoming = {
+    deviceId: 'macbook',
+    agentRuntime: 'headless-agent',
+    updatedAt: '2026-06-26T08:01:00.000Z',
+    receivedAt: '2026-06-26T08:01:00.000Z',
+    limits: {
+      updatedAt: '2026-06-26T08:01:00.000Z',
+      refreshMs: 300000,
+      providers: [{ provider: 'factory', status: 'notConfigured', source: '', updatedAt: '2026-06-26T08:01:00.000Z', windows: [] }]
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.equal(merged.limits.providers.length, 1);
+  assert.equal(merged.limits.providers[0].provider, 'factory');
+  assert.equal(merged.limits.providers[0].status, 'ok');
+  assert.equal(merged.limits.providers[0].accountKey, 'sha256:factory-user');
+});
+
+test('mergeDeviceRecord allows the same runtime to clear Factory limits', () => {
+  const existing = recordWithLimits({
+    agentRuntime: 'electron-widget',
+    limits: {
+      updatedAt: '2026-06-26T08:00:00.000Z',
+      refreshMs: 300000,
+      providers: [
+        { provider: 'factory', accountKey: 'sha256:factory-user', status: 'ok', source: 'api', updatedAt: '2026-06-26T08:00:00.000Z', windows: [] }
+      ]
+    }
+  });
+  const incoming = {
+    deviceId: 'macbook',
+    agentRuntime: 'electron-widget',
+    updatedAt: '2026-06-26T08:01:00.000Z',
+    receivedAt: '2026-06-26T08:01:00.000Z',
+    limits: {
+      updatedAt: '2026-06-26T08:01:00.000Z',
+      refreshMs: 300000,
+      providers: [{ provider: 'factory', status: 'notConfigured', source: '', updatedAt: '2026-06-26T08:01:00.000Z', windows: [] }]
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.equal(merged.limits.providers.length, 1);
+  assert.equal(merged.limits.providers[0].provider, 'factory');
+  assert.equal(merged.limits.providers[0].status, 'notConfigured');
+});
+
+test('mergeDeviceRecord preserves distinct Codex and OpenCode accounts from the same incoming limits payload', () => {
+  const existing = recordWithLimits({
+    limits: {
+      updatedAt: '2026-06-26T08:00:00.000Z',
+      refreshMs: 300000,
+      providers: []
+    }
+  });
+  const incoming = {
+    deviceId: 'macbook',
+    updatedAt: '2026-06-26T08:01:00.000Z',
+    receivedAt: '2026-06-26T08:01:00.000Z',
+    limits: {
+      updatedAt: '2026-06-26T08:01:00.000Z',
+      refreshMs: 300000,
+      providers: [
+        { provider: 'codex', accountKey: 'sha256:codex-a', accountEmail: 'a@example.com', status: 'ok', source: 'rpc', updatedAt: '2026-06-26T08:01:00.000Z', windows: [] },
+        { provider: 'codex', accountKey: 'sha256:codex-b', accountEmail: 'b@example.com', status: 'ok', source: 'rpc', updatedAt: '2026-06-26T08:01:00.000Z', windows: [] },
+        { provider: 'opencode', accountKey: 'sha256:opencode-a', accountLabel: 'work', status: 'ok', source: 'web', updatedAt: '2026-06-26T08:01:00.000Z', windows: [] },
+        { provider: 'opencode', accountKey: 'sha256:opencode-b', accountLabel: 'personal', status: 'ok', source: 'web', updatedAt: '2026-06-26T08:01:00.000Z', windows: [] }
+      ]
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.deepEqual(
+    merged.limits.providers.map((provider) => `${provider.provider}:${provider.accountKey}`),
+    ['codex:sha256:codex-a', 'codex:sha256:codex-b', 'opencode:sha256:opencode-a', 'opencode:sha256:opencode-b']
+  );
+});
+
+test('mergeDeviceRecord preserves usage for clients omitted by the active tracked-client list', () => {
+  const existing = {
+    deviceId: 'macbook',
+    trackedClients: ['codex', 'hermes'],
+    updatedAt: '2026-05-30T12:00:00.000Z',
+    today: {
+      capabilities: { tokenComponents: true },
+      totalTokens: 150,
+      costUsd: 1.5,
+      cacheReadTokens: 80,
+      cacheWriteTokens: 15,
+      outputTokens: 30,
+      clients: { hermes: 100, codex: 50 },
+      clientCosts: { hermes: 1.25, codex: 0.25 },
+      clientCacheReads: { hermes: 60, codex: 20 },
+      clientCacheWrites: { hermes: 10, codex: 5 },
+      clientOutputs: { hermes: 20, codex: 10 },
+      models: { 'claude-3-5-sonnet': 100, 'gpt-5': 50 },
+      modelCosts: { 'claude-3-5-sonnet': 1.25, 'gpt-5': 0.25 },
+      modelCacheReads: { 'claude-3-5-sonnet': 60, 'gpt-5': 20 },
+      modelCacheWrites: { 'claude-3-5-sonnet': 10, 'gpt-5': 5 },
+      modelOutputs: { 'claude-3-5-sonnet': 20, 'gpt-5': 10 },
+      clientModels: { hermes: { 'claude-3-5-sonnet': 100 }, codex: { 'gpt-5': 50 } },
+      clientModelCosts: { hermes: { 'claude-3-5-sonnet': 1.25 }, codex: { 'gpt-5': 0.25 } },
+      sessions: {
+        'hermes:h1': {
+          client: 'hermes',
+          sessionId: 'h1',
+          totalTokens: 100,
+          costUsd: 1.25,
+          messageCount: 4,
+          projectLabel: 'Shared App',
+          models: { 'claude-3-5-sonnet': 100 },
+          modelCosts: { 'claude-3-5-sonnet': 1.25 }
+        },
+        'codex:c1': {
+          client: 'codex',
+          sessionId: 'c1',
+          totalTokens: 50,
+          costUsd: 0.25,
+          messageCount: 2,
+          models: { 'gpt-5': 50 },
+          modelCosts: { 'gpt-5': 0.25 }
+        }
+      }
+    }
+  };
+  const incoming = {
+    deviceId: 'macbook',
+    trackedClients: ['codex'],
+    updatedAt: '2026-05-30T12:01:00.000Z',
+    today: {
+      capabilities: { tokenComponents: true },
+      totalTokens: 75,
+      costUsd: 0.5,
+      cacheReadTokens: 30,
+      cacheWriteTokens: 5,
+      outputTokens: 15,
+      clients: { codex: 75 },
+      clientCosts: { codex: 0.5 },
+      clientCacheReads: { codex: 30 },
+      clientCacheWrites: { codex: 5 },
+      clientOutputs: { codex: 15 },
+      models: { 'gpt-5': 75 },
+      modelCosts: { 'gpt-5': 0.5 },
+      modelCacheReads: { 'gpt-5': 30 },
+      modelCacheWrites: { 'gpt-5': 5 },
+      modelOutputs: { 'gpt-5': 15 },
+      clientModels: { codex: { 'gpt-5': 75 } },
+      clientModelCosts: { codex: { 'gpt-5': 0.5 } },
+      sessions: {
+        'codex:c2': {
+          client: 'codex',
+          sessionId: 'c2',
+          totalTokens: 75,
+          costUsd: 0.5,
+          projectLabel: 'shared app',
+          models: { 'gpt-5': 75 },
+          modelCosts: { 'gpt-5': 0.5 }
+        }
+      }
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  assert.equal(merged.trackedClients.join(','), 'codex');
+  assert.equal(merged.periods.today.totalTokens, 175);
+  assert.equal(merged.periods.today.clients.codex, 75);
+  assert.equal(merged.periods.today.clients.hermes, 100);
+  assert.equal(merged.periods.today.models['gpt-5'], 75);
+  assert.equal(merged.periods.today.models['claude-3-5-sonnet'], 100);
+  assert.equal(merged.periods.today.clientModels.hermes['claude-3-5-sonnet'], 100);
+  assert.equal(merged.periods.today.capabilities.tokenComponents, true);
+  assert.equal(merged.periods.today.cacheReadTokens, 90);
+  assert.equal(merged.periods.today.clientCacheReads.hermes, 60);
+  assert.equal(merged.periods.today.modelOutputs['claude-3-5-sonnet'], 20);
+  assert.equal(merged.periods.today.unclassifiedTokens, 0);
+  assert.equal(merged.periods.today.sessions['hermes:h1'].totalTokens, 100);
+  assert.equal(merged.periods.today.sessions['codex:c1'], undefined);
+  assert.deepEqual(JSON.parse(JSON.stringify(merged.periods.today.projects['shared app'])), {
+    label: 'Shared App',
+    tokens: 175,
+    costUsd: 1.75,
+    clients: { codex: 75, hermes: 100 },
+    models: { 'gpt-5': 75, 'claude-3-5-sonnet': 100 }
+  });
+});
+
+test('preserved missing-price maps cannot exceed the untracked client token contribution', () => {
+  const merged = mergeDeviceRecord({
+    deviceId: 'fixture',
+    allTime: {
+      totalTokens: 100, unpricedTokens: 80,
+      clients: { codex: 20, claude: 80 },
+      clientUnpricedTokens: { codex: 80 },
+      models: { unknown: 100 }, modelUnpricedTokens: { unknown: 80 },
+      clientModels: { codex: { unknown: 20 }, claude: { unknown: 80 } },
+      clientModelUnpricedTokens: { codex: { unknown: 80 } }
+    }
+  }, {
+    deviceId: 'fixture', trackedClients: ['claude'],
+    allTime: {
+      totalTokens: 10, unpricedTokens: 10, clients: { claude: 10 }
+    }
+  });
+  const period = merged.periods.allTime;
+  assert.equal(period.totalTokens, 30);
+  assert.equal(period.unpricedTokens, 30);
+  assert.equal(period.clientUnpricedTokens.codex, 20);
+  assert.equal(period.modelUnpricedTokens.unknown, 20);
+  assert.equal(period.clientModelUnpricedTokens.codex.unknown, 20);
+});
+
+test('mergeDeviceRecord marks unrecoverable all-time project attribution incomplete', () => {
+  const existing = {
+    deviceId: 'macbook',
+    projectsEnabled: true,
+    trackedClients: ['codex', 'hermes'],
+    allTime: {
+      totalTokens: 150,
+      costUsd: 1.5,
+      clients: { codex: 50, hermes: 100 },
+      clientCosts: { codex: 0.5, hermes: 1 },
+      projects: { legacy: { label: 'Legacy App', tokens: 100, costUsd: 1, clients: { hermes: 100 } } }
+    }
+  };
+  const incoming = {
+    deviceId: 'macbook',
+    projectsEnabled: true,
+    trackedClients: ['codex'],
+    allTime: {
+      totalTokens: 75,
+      costUsd: 0.75,
+      clients: { codex: 75 },
+      clientCosts: { codex: 0.75 },
+      projects: { current: { label: 'Current App', tokens: 75, costUsd: 0.75, clients: { codex: 75 } } }
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  const aggregate = aggregateDevices([merged], 60000);
+
+  assert.equal(merged.periods.allTime.totalTokens, 175);
+  assert.equal(merged.periods.allTime.clients.hermes, 100);
+  assert.equal(Object.hasOwn(merged.periods.allTime.projects, 'legacy'), false);
+  assert.equal(merged.allTimeProjectsIncomplete, true);
+  assert.equal(aggregate.projectsIncomplete, true);
+  assert.equal(aggregate.devices[0].allTimeProjectsIncomplete, true);
+});
+
+test('mergeDeviceRecord converts a prior omitted rollup into incomplete preserved history', () => {
+  const existing = {
+    deviceId: 'macbook',
+    projectsEnabled: true,
+    allTimeProjectsOmitted: true,
+    trackedClients: ['codex', 'hermes'],
+    allTime: {
+      totalTokens: 150,
+      clients: { codex: 50, hermes: 100 },
+      clientCosts: { codex: 0.5, hermes: 1 }
+    }
+  };
+  const incoming = {
+    deviceId: 'macbook',
+    projectsEnabled: true,
+    trackedClients: ['codex'],
+    allTime: {
+      totalTokens: 75,
+      clients: { codex: 75 },
+      clientCosts: { codex: 0.75 },
+      projects: { current: { label: 'Current App', tokens: 75, costUsd: 0.75, clients: { codex: 75 } } }
+    }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+
+  assert.equal(Object.hasOwn(merged, 'allTimeProjectsOmitted'), false);
+  assert.equal(merged.allTimeProjectsIncomplete, true);
+});
+
+test('mergeDeviceRecord does not restore project metadata when tracking is disabled', () => {
+  const existing = {
+    deviceId: 'macbook',
+    projectsEnabled: true,
+    trackedClients: ['codex', 'hermes'],
+    today: {
+      totalTokens: 100,
+      clients: { hermes: 100 },
+      sessions: {
+        'hermes:h1': { client: 'hermes', sessionId: 'h1', totalTokens: 100, projectId: 'sha256:old', projectLabel: 'Old App' }
+      }
+    },
+    allTime: {
+      totalTokens: 100,
+      clients: { hermes: 100 },
+      projects: { old: { label: 'Old App', tokens: 100, costUsd: 1, clients: { hermes: 100 } } }
+    }
+  };
+  const incoming = {
+    deviceId: 'macbook',
+    projectsEnabled: false,
+    trackedClients: ['codex'],
+    today: {
+      totalTokens: 50,
+      clients: { codex: 50 },
+      sessions: {
+        'codex:c1': { client: 'codex', sessionId: 'c1', totalTokens: 50, projectId: 'sha256:new', projectLabel: 'New App' }
+      }
+    },
+    allTime: { totalTokens: 50, clients: { codex: 50 } }
+  };
+
+  const merged = mergeDeviceRecord(existing, incoming);
+  const aggregate = aggregateDevices([merged], 60000);
+
+  assert.equal(merged.projectsEnabled, false);
+  assert.deepEqual(Object.keys(merged.periods.today.projects), []);
+  assert.deepEqual(Object.keys(merged.periods.allTime.projects), []);
+  assert.equal(merged.periods.today.sessions['codex:c1'].projectLabel, '');
+  assert.equal(merged.periods.today.sessions['hermes:h1'].projectLabel, '');
+  assert.equal(Object.hasOwn(merged, 'allTimeProjectsIncomplete'), false);
+  assert.equal(aggregate.projectsIncomplete, true);
+  assert.equal(aggregate.devices[0].projectsEnabled, false);
+});
+
+test('mergeDeviceRecord preserves omitted-client day and month usage only inside matching calendar periods', () => {
+  const existing = {
+    deviceId: 'macbook',
+    trackedClients: ['codex', 'hermes'],
+    updatedAt: '2026-05-30T12:00:00.000Z',
+    today: {
+      totalTokens: 150,
+      costUsd: 1.5,
+      clients: { hermes: 100, codex: 50 },
+      clientCosts: { hermes: 1.25, codex: 0.25 },
+      models: { 'claude-3-5-sonnet': 100, 'gpt-5': 50 },
+      modelCosts: { 'claude-3-5-sonnet': 1.25, 'gpt-5': 0.25 },
+      clientModels: { hermes: { 'claude-3-5-sonnet': 100 }, codex: { 'gpt-5': 50 } },
+      clientModelCosts: { hermes: { 'claude-3-5-sonnet': 1.25 }, codex: { 'gpt-5': 0.25 } }
+    },
+    month: {
+      totalTokens: 450,
+      costUsd: 4.5,
+      clients: { hermes: 300, codex: 150 },
+      clientCosts: { hermes: 3.75, codex: 0.75 },
+      models: { 'claude-3-5-sonnet': 300, 'gpt-5': 150 },
+      modelCosts: { 'claude-3-5-sonnet': 3.75, 'gpt-5': 0.75 },
+      clientModels: { hermes: { 'claude-3-5-sonnet': 300 }, codex: { 'gpt-5': 150 } },
+      clientModelCosts: { hermes: { 'claude-3-5-sonnet': 3.75 }, codex: { 'gpt-5': 0.75 } }
+    },
+    allTime: {
+      totalTokens: 1200,
+      costUsd: 12,
+      clients: { hermes: 900, codex: 300 },
+      clientCosts: { hermes: 11.25, codex: 0.75 },
+      models: { 'claude-3-5-sonnet': 900, 'gpt-5': 300 },
+      modelCosts: { 'claude-3-5-sonnet': 11.25, 'gpt-5': 0.75 },
+      clientModels: { hermes: { 'claude-3-5-sonnet': 900 }, codex: { 'gpt-5': 300 } },
+      clientModelCosts: { hermes: { 'claude-3-5-sonnet': 11.25 }, codex: { 'gpt-5': 0.75 } }
+    }
+  };
+  const incoming = {
+    deviceId: 'macbook',
+    trackedClients: ['codex'],
+    updatedAt: '2026-05-31T00:01:00.000Z',
+    today: {
+      totalTokens: 75,
+      costUsd: 0.5,
+      clients: { codex: 75 },
+      clientCosts: { codex: 0.5 },
+      models: { 'gpt-5': 75 },
+      modelCosts: { 'gpt-5': 0.5 },
+      clientModels: { codex: { 'gpt-5': 75 } },
+      clientModelCosts: { codex: { 'gpt-5': 0.5 } }
+    },
+    month: {
+      totalTokens: 175,
+      costUsd: 0.75,
+      clients: { codex: 175 },
+      clientCosts: { codex: 0.75 },
+      models: { 'gpt-5': 175 },
+      modelCosts: { 'gpt-5': 0.75 },
+      clientModels: { codex: { 'gpt-5': 175 } },
+      clientModelCosts: { codex: { 'gpt-5': 0.75 } }
+    },
+    allTime: {
+      totalTokens: 350,
+      costUsd: 1,
+      clients: { codex: 350 },
+      clientCosts: { codex: 1 },
+      models: { 'gpt-5': 350 },
+      modelCosts: { 'gpt-5': 1 },
+      clientModels: { codex: { 'gpt-5': 350 } },
+      clientModelCosts: { codex: { 'gpt-5': 1 } }
+    }
+  };
+
+  const nextDay = mergeDeviceRecord(existing, incoming);
+  assert.equal(nextDay.periods.today.clients.hermes, undefined);
+  assert.equal(nextDay.periods.today.models['claude-3-5-sonnet'], undefined);
+  assert.equal(nextDay.periods.month.clients.hermes, 300);
+  assert.equal(nextDay.periods.month.models['claude-3-5-sonnet'], 300);
+  assert.equal(nextDay.periods.allTime.clients.hermes, 900);
+  assert.equal(nextDay.periods.allTime.models['claude-3-5-sonnet'], 900);
+
+  const nextMonth = mergeDeviceRecord(existing, {
+    ...incoming,
+    updatedAt: '2026-06-01T00:01:00.000Z',
+    month: incoming.today
+  });
+  assert.equal(nextMonth.periods.today.clients.hermes, undefined);
+  assert.equal(nextMonth.periods.month.clients.hermes, undefined);
+  assert.equal(nextMonth.periods.month.models['claude-3-5-sonnet'], undefined);
+  assert.equal(nextMonth.periods.allTime.clients.hermes, 900);
+});
+
+test('extractUsageFromTokscale normalizes Antigravity client names', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'Google Antigravity', model: 'gemini-3-pro', totalTokens: 42, costUsd: 0.125 }
+  ]);
+
+  assert.equal(period.clients.antigravity, 42);
+  assert.equal(period.clientCosts.antigravity, 0.125);
+});
+
+test('extractUsageFromTokscale normalizes Kimi, Qwen, and Grok Build client names', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'Kimi CLI', model: 'kimi-code/kimi-for-coding', totalTokens: 11 },
+    { client: 'Kimi Code', model: 'kimi-code/kimi-for-coding', totalTokens: 13 },
+    { client: 'Qwen CLI', model: 'qwen3.5-plus', totalTokens: 17 },
+    { client: 'Grok Build', model: 'grok-composer-2.5-fast', totalTokens: 19 }
+  ]);
+
+  assert.equal(period.clients.kimi, 24);
+  assert.equal(period.clients.qwen, 17);
+  assert.equal(period.clients.grok, 19);
+});
+
+test('extractUsageFromTokscale normalizes GitHub Copilot client names', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'GitHub Copilot', model: 'gpt-4.1', totalTokens: 21 },
+    { client: 'Copilot CLI', model: 'gpt-4.1', totalTokens: 9 }
+  ]);
+
+  assert.equal(period.clients.copilot, 30);
+});
+
+test('extractUsageFromTokscale normalizes Pi, Zed, and Kilo, keeping Copilot distinct', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'pi', model: 'claude-opus-4-8', totalTokens: 11 },
+    { client: 'copilot', model: 'gpt-5.5', totalTokens: 13 },
+    { client: 'zed', model: 'claude-opus-4-8', totalTokens: 17 },
+    { client: 'kilocode', model: 'gpt-5.5', totalTokens: 19 }
+  ]);
+
+  assert.equal(period.clients.pi, 11);
+  assert.equal(period.clients.copilot, 13);
+  assert.equal(period.clients.zed, 17);
+  assert.equal(period.clients.kilo, 19);
+});
+
+test('extractUsageFromTokscale normalizes MiMo and ZCode client ids', () => {
+  // `micode` is tokscale's id for MiMo — a fossil of the path typo upstream
+  // fixed in its PR #784, which left the id behind. Token Monitor's id is
+  // `mimo`, shared with the limits provider for the same product, so both
+  // upstream spellings have to land there.
+  const period = extractUsageFromTokscale([
+    { client: 'micode', model: 'mimo-v2.5-pro', totalTokens: 23 },
+    { client: 'micode-desktop', model: 'mimo-v2.5-pro', totalTokens: 5 },
+    { client: 'ZCode', model: 'glm-4.7', totalTokens: 29 }
+  ]);
+
+  assert.equal(period.clients.mimo, 28);
+  assert.equal(period.clients.micode, undefined);
+  assert.equal(period.clients.zcode, 29);
+});
+
+test('extractUsageFromTokscale passes zcode input straight through and folds disjoint reasoning into output', () => {
+  // tokscale >= 4.0.11 emits zcode rows whose `input` already excludes cache
+  // overlap (junhoyeo/tokscale#825), so zcode is aggregated like any other
+  // client with no local subtraction. If the removed workaround still ran it
+  // would subtract cache a second time (200 - 800 clamped to 0) and under-count.
+  // tokscale 4.17.0 also emits zcode `reasoning` as a disjoint bucket subtracted
+  // out of `output`, so it is added back into the reasoning-inclusive output
+  // family: output 50 + reasoning 10 = 60, total 200 + 60 + 800 = 1060 (#797).
+  const period = extractUsageFromTokscale({
+    groupBy: 'client,session,model',
+    entries: [
+      {
+        client: 'ZCode',
+        sessionId: 'sess-z1',
+        model: 'glm-5.2',
+        provider: 'zhipu',
+        input: 200,
+        output: 50,
+        cacheRead: 800,
+        cacheWrite: 0,
+        reasoning: 10,
+        messageCount: 1,
+        cost: 0.1,
+        timestamp: '2026-07-05T00:00:00.000Z'
+      }
+    ]
+  });
+
+  assert.equal(period.clients.zcode, 1060);
+  assert.equal(period.totalTokens, 1060);
+  assert.equal(period.cacheReadTokens, 800);
+  assert.equal(period.clientCacheReads.zcode, 800);
+  assert.equal(period.clientOutputs.zcode, 60);
+
+  const session = period.sessions['zcode:sess-z1'];
+  assert.equal(session.totalTokens, 1060);
+  assert.equal(session.inputTokens, 200);
+  assert.equal(session.cacheReadTokens, 800);
+  assert.equal(session.outputTokens, 60);
+  assert.equal(session.reasoningTokens, 10);
+  assert.equal(session.models['glm-5.2'], 1060);
+});
+
+test('extractUsageFromTokscale normalizes Kiro client ids', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'kiro', model: 'claude-sonnet-4', totalTokens: 31 },
+    { client: 'Kiro', model: 'claude-sonnet-4', totalTokens: 7 }
+  ]);
+
+  assert.equal(period.clients.kiro, 38);
+});
+
+test('extractUsageFromTokscale normalizes CodeBuddy and WorkBuddy client ids', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'codebuddy', model: 'glm-5.2', totalTokens: 24 },
+    { client: 'WorkBuddy', model: 'deepseek-v4-pro', totalTokens: 12 }
+  ]);
+
+  assert.equal(period.clients.codebuddy, 24);
+  assert.equal(period.clients.workbuddy, 12);
+});
+
+test('extractUsageFromTokscale keeps the canonical Command Code client id', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'Command Code', model: 'deepseek/deepseek-v4-flash', totalTokens: 19 }
+  ]);
+
+  assert.equal(period.clients.commandcode, 19);
+});
+
+test('normalizeClientName folds both Kilo sources together and keeps Oh My Pi separate from Pi', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'kilo', model: 'x', totalTokens: 5 },
+    { client: 'kilocode', model: 'x', totalTokens: 13 },
+    { client: 'Oh My Pi', model: 'x', totalTokens: 7 },
+    { client: 'omp', model: 'x', totalTokens: 11 }
+  ]);
+
+  assert.equal(period.clients.kilo, 18);
+  // Oh My Pi and Pi are two products with two roots. Both of its spellings
+  // resolve to the `omp` id, which must stay distinct from `pi` so the two rows
+  // do not silently re-merge on the way to the dashboard.
+  assert.equal(period.clients.omp, 18);
+  assert.equal(period.clients.pi, undefined);
+  assert.ok(!('kilocode' in period.clients));
+  assert.equal(normalizeClientName('senpi'), 'senpi');
+  assert.equal(normalizeClientName('OmO Native'), 'senpi');
+  assert.equal(normalizeClientName('Senpi (OmO Native)'), 'senpi');
+  assert.notEqual(normalizeClientName('senpi'), 'pi');
+});
+
+test('normalizeClientName trims edge dashes without slowing down on long dash runs', () => {
+  assert.equal(normalizeClientName(' --My Tool!-- '), 'my-tool');
+  assert.equal(normalizeClientName('a--b'), 'a--b');
+  assert.equal(normalizeClientName('---'), null);
+  const started = process.hrtime.bigint();
+  assert.equal(normalizeClientName(`a${'-'.repeat(100_000)}a!`), `a${'-'.repeat(100_000)}a`);
+  assert.ok(process.hrtime.bigint() - started < 1_000_000_000n);
+});
+
+test('normalizeClientName keeps Qoder CN distinct from international Qoder', () => {
+  assert.equal(normalizeClientName('Qoder CN'), 'qodercn');
+  assert.equal(normalizeClientName('qoder-cn'), 'qodercn');
+  assert.equal(normalizeClientName('Qoder'), 'qoder');
+});
+
+test('Muse scan rows and display names share the tracked client id', () => {
+  assert.equal(normalizeClientName('muse'), 'muse');
+  assert.equal(normalizeClientName('Muse Code'), 'muse');
+  const period = extractUsageFromTokscale([{ client: 'muse', model: 'muse-spark', totalTokens: 12 }]);
+  assert.equal(period.clients.muse, 12);
+});
+
+test('Muse rows fold Tokscale disjoint reasoning into output and totals', () => {
+  // Tokscale splits a Responses-shaped usage record: 379 output includes 278
+  // reasoning at the source, but its JSON row reports output 101 and reasoning
+  // 278 as additive buckets, with no explicit total.
+  const period = extractUsageFromTokscale({
+    groupBy: 'client,session,model',
+    entries: [{
+      client: 'muse', sessionId: 'muse-session', model: 'muse-spark-1.3-contributor',
+      input: 21859, output: 101, cacheRead: 5105, cacheWrite: 0,
+      reasoning: 278, messageCount: 1, cost: 0.1,
+      timestamp: '2026-09-28T00:00:00.000Z'
+    }]
+  });
+  assert.equal(period.totalTokens, 27343);
+  assert.equal(period.clients.muse, 27343);
+  assert.equal(period.clientOutputs.muse, 379);
+  const session = period.sessions['muse:muse-session'];
+  assert.equal(session.totalTokens, 27343);
+  assert.equal(session.outputTokens, 379);
+  assert.equal(session.reasoningTokens, 278);
+});
+
+test('Hermes disjoint reasoning closes the public token buckets without changing cost', () => {
+  const row = {
+    client: 'hermes', sessionId: 'hermes-contract', model: 'claude-sonnet-4-5',
+    input: 1000, output: 250, cacheRead: 200, cacheWrite: 50, reasoning: 150,
+    messageCount: 1, cost: 1.25
+  };
+  for (const entry of [row, { ...row, totalTokens: 1650 }]) {
+    const period = extractUsageFromTokscale({ entries: [entry] });
+    assert.equal(period.totalTokens, 1650);
+    assert.equal(period.clients.hermes, 1650);
+    assert.equal(period.clientOutputs.hermes, 400);
+    assert.equal(period.costUsd, 1.25);
+    const session = period.sessions['hermes:hermes-contract'];
+    assert.equal(session.totalTokens, 1650);
+    assert.equal(session.outputTokens, 400);
+    assert.equal(session.reasoningTokens, 150);
+    assert.equal(session.costUsd, 1.25);
+    assert.equal(session.inputTokens + session.outputTokens + session.cacheReadTokens + session.cacheWriteTokens, session.totalTokens);
+    assert.deepEqual(normalizePeriod(period), period);
+  }
+});
+
+test('fx scan rows and the display name share the tracked client id', () => {
+  assert.equal(normalizeClientName('fx'), 'fx');
+  assert.equal(normalizeClientName('Fx'), 'fx');
+  const period = extractUsageFromTokscale([{ client: 'fx', model: 'glm-5.2', totalTokens: 12 }]);
+  assert.equal(period.clients.fx, 12);
+});
+
+test('fx rows keep Tokscale reasoning inside the output bucket', () => {
+  // fx's snapshot already counts reasoning inside output_tokens (the wire
+  // schema rejects reasoning > output) and the parser emits both buckets
+  // verbatim — so unlike muse/dsh nothing is added back here.
+  const period = extractUsageFromTokscale({
+    groupBy: 'client,session,model',
+    entries: [{
+      client: 'fx', sessionId: 'fx-session', model: 'glm-5.2',
+      input: 1200, output: 340, cacheRead: 500, cacheWrite: 80,
+      reasoning: 60, messageCount: 4, cost: 0.0314,
+      timestamp: '2026-09-29T00:00:00.000Z'
+    }]
+  });
+  assert.equal(period.totalTokens, 2120);
+  assert.equal(period.clients.fx, 2120);
+  assert.equal(period.clientOutputs.fx, 340);
+  const session = period.sessions['fx:fx-session'];
+  assert.equal(session.totalTokens, 2120);
+  assert.equal(session.outputTokens, 340);
+  assert.equal(session.reasoningTokens, 60);
+});
+
+test('MiniMax Code rows keep the tracked id apart from the MiniMax vendor', () => {
+  assert.equal(normalizeClientName('mcode'), 'mcode');
+  assert.equal(normalizeClientName('MiniMax Code'), 'mcode');
+  assert.equal(normalizeClientName('minimax-code'), 'mcode');
+  assert.equal(normalizeClientName('minimax'), 'minimax');
+  const period = extractUsageFromTokscale([{ client: 'mcode', model: 'MiniMax-M2.5', totalTokens: 12 }]);
+  assert.equal(period.clients.mcode, 12);
+});
+
+test('extractUsageFromTokscale keeps model usage grouped by client', () => {
+  const period = extractUsageFromTokscale([
+    { client: 'Hermes', model: 'claude-3-5-sonnet', totalTokens: 100, costUsd: 1.25 },
+    { client: 'Codex', model: 'gpt-5', totalTokens: 50, costUsd: 0.25 }
+  ]);
+
+  assert.equal(period.models['claude-3-5-sonnet'], 100);
+  assert.equal(period.clientModels.hermes['claude-3-5-sonnet'], 100);
+  assert.equal(period.clientModelCosts.hermes['claude-3-5-sonnet'], 1.25);
+  assert.equal(period.clientModels.codex['gpt-5'], 50);
+});
+
+test('extractUsageBundleFromTokscale partitions every aggregate field exactly by client', () => {
+  const bundle = extractUsageBundleFromTokscale({
+    entries: [
+      { client: 'Claude', sessionId: 'c1', model: 'shared', totalTokens: 10, cacheRead: 4, cacheWrite: 2, output: 3, costUsd: 0.1 },
+      { client: 'Codex', sessionId: 'x1', model: 'shared', totalTokens: 20, cacheRead: 8, cacheWrite: 1, output: 5, costUsd: 0.2 }
+    ]
+  });
+
+  assert.equal(bundle.byClient.claude.totalTokens, 10);
+  assert.equal(bundle.byClient.claude.modelCacheReads.shared, 4);
+  assert.equal(bundle.byClient.codex.totalTokens, 20);
+  assert.equal(bundle.byClient.codex.modelCacheWrites.shared, 1);
+  assert.deepEqual(
+    mergePeriods(bundle.byClient.claude, bundle.byClient.codex),
+    bundle.period
+  );
+});
+
+test('extractUsageBundleFromTokscale isolates rows without a client for safe fallback', () => {
+  const bundle = extractUsageBundleFromTokscale({
+    entries: [{ model: 'unknown', totalTokens: 7, costUsd: 0.07 }]
+  });
+
+  assert.equal(bundle.byClient[UNATTRIBUTED_USAGE_CLIENT].totalTokens, 7);
+  assert.equal(bundle.period.totalTokens, 7);
+});
+
+test('extractUsageFromTokscale folds disjoint Codex reasoning into the public output bucket', () => {
+  const period = extractUsageFromTokscale({
+    groupBy: 'client,session,model',
+    entries: [
+      {
+        client: 'Codex',
+        sessionId: 'rollout-1',
+        model: 'gpt-5',
+        provider: 'openai',
+        input: 10,
+        output: 5,
+        cacheRead: 100,
+        reasoning: 2,
+        messageCount: 3,
+        cost: 0.25,
+        timestamp: '2026-05-30T04:00:00.000Z'
+      },
+      {
+        client: 'Codex',
+        sessionId: 'rollout-1',
+        model: 'gpt-4o',
+        provider: 'openai',
+        input: 2,
+        output: 3,
+        messageCount: 1,
+        cost: 0.05
+      },
+      {
+        client: 'Cursor',
+        sessionId: 'cursor-active',
+        model: 'auto',
+        provider: 'cursor',
+        input: 1,
+        output: 2,
+        cost: 0.01
+      }
+    ]
+  });
+
+  const codex = period.sessions['codex:rollout-1'];
+  // Tokscale's latest JSON makes output (5) and reasoning (2) disjoint. Token
+  // Monitor's public wire keeps output reasoning-inclusive, so entry 1 is
+  // 10 + (5 + 2) + 100 = 117 and entry 2 is 2 + 3 = 5.
+  assert.equal(codex.totalTokens, 122);
+  assert.equal(codex.costUsd, 0.3);
+  assert.equal(codex.messageCount, 4);
+  assert.equal(codex.inputTokens, 12);
+  assert.equal(codex.outputTokens, 10);
+  assert.equal(codex.cacheReadTokens, 100);
+  assert.equal(codex.reasoningTokens, 2);
+  assert.equal(codex.lastUsedAt, '2026-05-30T04:00:00.000Z');
+  assert.equal(codex.models['gpt-5'], 117);
+  assert.equal(codex.models['gpt-4o'], 5);
+  assert.equal(codex.providers.openai, 122);
+  assert.equal(period.sessions['cursor:cursor-active'].models['cursor-auto'], 3);
+});
+
+test('extractUsageFromTokscale maps Cursor `default` to cursor-auto without touching other clients', () => {
+  // tokscale's JSON usage cache renames Cursor Auto requests from `auto` to
+  // `default`; both must fold onto cursor-auto so history is not split in two.
+  // The rename stays scoped to Cursor: a `default` model on any other client
+  // is a real (if generic) label and passes through unchanged (#842).
+  const period = extractUsageFromTokscale({
+    groupBy: 'client,session,model',
+    entries: [
+      { client: 'Cursor', sessionId: 'c-default', model: 'default', provider: 'cursor', input: 1, output: 2, cost: 0.01 },
+      { client: 'Cursor', sessionId: 'c-auto', model: 'auto', provider: 'cursor', input: 3, output: 4, cost: 0.02 },
+      { client: 'claude', sessionId: 'x-default', model: 'default', provider: 'anthropic', input: 5, output: 6, cost: 0.03 }
+    ]
+  });
+
+  assert.equal(period.sessions['cursor:c-default'].models['cursor-auto'], 3);
+  assert.equal(period.sessions['cursor:c-default'].models.default, undefined);
+  assert.equal(period.sessions['cursor:c-auto'].models['cursor-auto'], 7);
+  assert.equal(period.sessions['claude:x-default'].models.default, 11);
+  assert.equal(period.sessions['claude:x-default'].models['cursor-auto'], undefined);
+  assert.equal(period.models['cursor-auto'], 10);
+  assert.equal(period.models.default, 11);
+});
+
+test('normalizePeriod reconciles old Cursor default global models using client attribution', () => {
+  const old = {
+    totalTokens: 10,
+    clients: { cursor: 7, claude: 3 },
+    models: { default: 10 },
+    modelCosts: { default: 1 },
+    modelCacheReads: { default: 4 },
+    modelOutputs: { default: 6 },
+    clientModels: { cursor: { default: 7 }, claude: { default: 3 } },
+    clientModelCosts: { cursor: { default: 0.7 }, claude: { default: 0.3 } }
+  };
+  const mixed = normalizePeriod(old);
+  assert.deepEqual({ ...mixed.models }, { default: 3, 'cursor-auto': 7 });
+  assert.equal(mixed.modelCosts['cursor-auto'], 0.7);
+  assert.ok(Math.abs(mixed.modelCosts.default - 0.3) < 1e-9);
+  assert.equal(mixed.modelUnclassifiedTokens.default, 3);
+  assert.equal(mixed.modelUnclassifiedTokens['cursor-auto'], 7);
+  assert.equal(mixed.capabilities.tokenComponents, false);
+  assert.deepEqual(normalizePeriod(mixed), mixed);
+
+  const cursorOnly = normalizePeriod({
+    ...old,
+    totalTokens: 7,
+    unpricedTokens: 4,
+    clients: { cursor: 7 },
+    models: { default: 7 },
+    modelCosts: { default: 0.7 },
+    clientUnpricedTokens: { cursor: 4 },
+    modelUnpricedTokens: { default: 4 },
+    clientModelUnpricedTokens: { cursor: { default: 4 } },
+    clientModels: { cursor: { default: 7 } },
+    clientModelCosts: { cursor: { default: 0.7 } }
+  });
+  assert.equal(cursorOnly.models.default, undefined);
+  assert.equal(cursorOnly.modelCacheReads['cursor-auto'], 4);
+  assert.equal(cursorOnly.modelOutputs['cursor-auto'], 6);
+  assert.equal(cursorOnly.modelUnpricedTokens.default, undefined);
+  assert.equal(cursorOnly.modelUnpricedTokens['cursor-auto'], 4);
+  assert.equal(cursorOnly.clientModelUnpricedTokens.cursor.default, undefined);
+  assert.equal(cursorOnly.clientModelUnpricedTokens.cursor['cursor-auto'], 4);
+  assert.deepEqual(normalizePeriod(cursorOnly), cursorOnly);
+
+  const cursorOnlyWithoutUnpriced = normalizePeriod({
+    totalTokens: 7,
+    models: { default: 7 },
+    clientModels: { cursor: { default: 7 } }
+  });
+  assert.equal(cursorOnlyWithoutUnpriced.models.default, undefined);
+  assert.equal(cursorOnlyWithoutUnpriced.models['cursor-auto'], 7);
+  assert.equal(cursorOnlyWithoutUnpriced.modelUnpricedTokens, undefined);
+  assert.deepEqual(normalizePeriod(cursorOnlyWithoutUnpriced), cursorOnlyWithoutUnpriced);
+});
+
+test('extractUsageFromTokscale folds disjoint DSH reasoning into totals and output', () => {
+  const period = extractUsageFromTokscale({
+    entries: [{
+      client: 'dsh',
+      sessionId: 'session-reasoning',
+      model: 'deepseek-reasoner',
+      input: 2885,
+      output: 2,
+      reasoning: 23
+    }]
+  });
+
+  assert.equal(period.totalTokens, 2910);
+  assert.equal(period.outputTokens, 25);
+  assert.equal(period.clientOutputs.dsh, 25);
+  assert.equal(period.sessions['dsh:session-reasoning'].totalTokens, 2910);
+  assert.equal(period.sessions['dsh:session-reasoning'].outputTokens, 25);
+  assert.equal(period.sessions['dsh:session-reasoning'].reasoningTokens, 23);
+});
+
+test('aggregateDevices combines session usage across devices', () => {
+  const aggregate = aggregateDevices([
+    {
+      deviceId: 'one',
+      updatedAt: '2026-05-30T00:00:00.000Z',
+      receivedAt: '2026-05-30T00:00:00.000Z',
+      today: {
+        totalTokens: 10,
+        costUsd: 0.1,
+        clients: { codex: 10 },
+        clientCosts: { codex: 0.1 },
+        sessions: {
+          'codex:s1': {
+            client: 'codex',
+            sessionId: 's1',
+            totalTokens: 10,
+            costUsd: 0.1,
+            messageCount: 1,
+            inputTokens: 4,
+            outputTokens: 6,
+            models: { 'gpt-5': 10 },
+            modelCosts: { 'gpt-5': 0.1 }
+          }
+        }
+      }
+    },
+    {
+      deviceId: 'two',
+      updatedAt: '2026-05-30T00:00:00.000Z',
+      receivedAt: '2026-05-30T00:00:00.000Z',
+      today: {
+        totalTokens: 5,
+        costUsd: 0.2,
+        clients: { codex: 5 },
+        clientCosts: { codex: 0.2 },
+        sessions: {
+          'codex:s1': {
+            client: 'codex',
+            sessionId: 's1',
+            totalTokens: 5,
+            costUsd: 0.2,
+            messageCount: 2,
+            inputTokens: 2,
+            outputTokens: 3,
+            models: { 'gpt-5': 5 },
+            modelCosts: { 'gpt-5': 0.2 }
+          }
+        }
+      }
+    }
+  ], 0, Date.parse('2026-05-30T00:01:00.000Z'));
+
+  const session = aggregate.periods.today.sessions['codex:s1'];
+  assert.equal(session.totalTokens, 15);
+  assert.equal(session.costUsd, 0.3);
+  assert.equal(session.messageCount, 3);
+  assert.equal(session.inputTokens, 6);
+  assert.equal(session.outputTokens, 9);
+  assert.equal(session.models['gpt-5'], 15);
+  assert.equal(session.modelCosts['gpt-5'], 0.3);
+});
+
+test('aggregateDevices keeps a zero-usage live session unarchived in either merge order', () => {
+  const archived = { deviceId: 'archived', allTime: { sessions: { 'codex:s1': { client: 'codex', sessionId: 's1', totalTokens: 10, archived: true } } } };
+  const live = { deviceId: 'live', allTime: { sessions: { 'codex:s1': { client: 'codex', sessionId: 's1', totalTokens: 0 } } } };
+
+  assert.equal(aggregateDevices([live, archived], 0).periods.allTime.sessions['codex:s1'].archived, undefined);
+  assert.equal(aggregateDevices([archived, live], 0).periods.allTime.sessions['codex:s1'].archived, undefined);
+});
+
+// aggregateDevices() adds each device's periods exactly as normalizeDeviceRecord()
+// left them. It used to normalize them a second time with default options, so
+// this is the property that makes dropping that pass output-preserving.
+test('normalizePeriod is idempotent, including under default options on a second pass', () => {
+  const legacyAndRich = {
+    total_tokens: 1000.6,
+    cost_usd: 1.25,
+    cache_read_tokens: 400,
+    cache_write_tokens: 100,
+    output_tokens: 300,
+    unclassified_tokens: 101,
+    timed_tokens: 200,
+    timed_output_tokens: 900,
+    timed_duration_ms: 4000,
+    clients: { 'Claude Code': 600, codex: 400.4, '': 5 },
+    clientCacheReads: { 'Claude Code': 300 },
+    clientOutputs: { codex: 150 },
+    clientCosts: { 'Claude Code': 1, codex: 0.25 },
+    models: { 'GPT-5': 400, 'claude-sonnet-4': 600 },
+    modelCacheReads: { 'claude-sonnet-4': 300 },
+    modelCosts: { 'GPT-5': 0.25 },
+    clientModels: { codex: { 'GPT-5': 400 } },
+    clientModelCosts: { codex: { 'GPT-5': 0.25 } },
+    projects: { '/work/app': { label: ' app ', tokens: 700, costUsd: 1, clients: { codex: 400 } } },
+    sessions: {
+      'codex:live': {
+        client: 'codex',
+        session_id: 'live',
+        total_tokens: 400,
+        input_tokens: 100,
+        output_tokens: 150,
+        cache_read_tokens: 150,
+        cost_usd: 0.25,
+        startedAt: '2026-05-30T00:00:00Z',
+        lastUsedAt: '2026-05-30T01:00:00Z',
+        contextTokens: 50000,
+        contextWindow: 200000,
+        turnEnded: true,
+        projectLabel: 'app',
+        title: '  Fix   the build  ',
+        models: { 'GPT-5': 400 },
+        providers: { OpenAI: 400 }
+      },
+      'claude:gone': {
+        client: 'Claude Code',
+        sessionId: 'gone',
+        totalTokens: 600,
+        archived: true,
+        turnEnded: false,
+        projectLabel: 'app'
+      },
+      'claude:gone-again': { client: 'claude', sessionId: 'gone', totalTokens: 1, deleted: true }
+    }
+  };
+  const aggregateOnly = { totalTokens: 50, costUsd: 0.1, unclassifiedTokens: 50, capabilities: { tokenComponents: false, throughput: false } };
+
+  for (const input of [legacyAndRich, aggregateOnly, undefined]) {
+    for (const options of [{}, { projectsEnabled: true }, { projectsEnabled: false }]) {
+      const once = normalizePeriod(input, options);
+      assert.deepEqual(normalizePeriod(once, options), once);
+      assert.deepEqual(normalizePeriod(once), once);
+    }
+  }
+  // The fixture has to exercise what normalization actually changes, or the
+  // equalities above hold trivially.
+  const once = normalizePeriod(legacyAndRich);
+  assert.equal(once.capabilities.tokenComponents, false);
+  assert.equal(once.capabilities.throughput, true);
+  assert.equal(once.timedOutputTokens, 300);
+  assert.ok(once.models['gpt-5']);
+  assert.equal(once.sessions['codex:live'].title, 'Fix the build');
+  assert.equal(once.sessions['claude:gone'].archived, true);
+  assert.ok(Object.keys(once.projects).length > 0);
+  assert.equal(Object.keys(normalizePeriod(legacyAndRich, { projectsEnabled: false }).projects).length, 0);
+});
+
+const { normalizeDeviceRecord, aggregateHistory, carryDeviceHistory } = require('../../src/shared/usage');
+
+test('normalizeDeviceRecord carries a history field when present', () => {
+  const rec = normalizeDeviceRecord({
+    deviceId: 'm1',
+    history: { daily: [{ date: '2026-06-07', tokens: 5 }], monthly: [], summary: { totalTokens: 5 } }
+  });
+  assert.equal(rec.history.daily[0].tokens, 5);
+  const bare = normalizeDeviceRecord({ deviceId: 'm1' });
+  assert.equal('history' in bare, false);
+  const unavailable = normalizeDeviceRecord({ deviceId: 'm1', history: null });
+  assert.equal(unavailable.history, null);
+  const capable = normalizeDeviceRecord({ deviceId: 'm1', historyAvailable: true });
+  assert.equal(capable.historyAvailable, true);
+  assert.equal(Object.hasOwn(normalizeDeviceRecord({ deviceId: 'm1' }), 'historyAvailable'), false);
+});
+
+test('mergeDeviceRecord preserves prior history when the incoming post omits it', () => {
+  const existing = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 1, costUsd: 0, clients: {}, clientCosts: {} },
+    historyAvailable: true,
+    history: { daily: [{ date: '2026-06-07', tokens: 5 }], monthly: [], summary: { totalTokens: 5 } }
+  });
+  const merged = mergeDeviceRecord(existing, { deviceId: 'm1', limitsOnly: true });
+  assert.equal(merged.history.daily[0].tokens, 5);
+  assert.equal(merged.historyAvailable, true);
+});
+
+test('mergeDeviceRecord clears prior history when incoming history is explicitly null', () => {
+  const existing = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 1, costUsd: 0, clients: {}, clientCosts: {} },
+    history: { daily: [{ date: '2026-06-07', tokens: 5 }], monthly: [], summary: { totalTokens: 5 } }
+  });
+  const merged = mergeDeviceRecord(existing, { deviceId: 'm1', history: null });
+  assert.equal(merged.history, null);
+});
+
+test('aggregateHistory retains stored history from stale devices', () => {
+  const fresh = {
+    deviceId: 'm1', receivedAt: '2026-06-07T11:59:00.000Z',
+    history: { daily: [{ date: '2026-06-07', tokens: 10, cost: 1, perClient: { claude: { tokens: 10, cost: 1, messages: 1 } }, perModel: {} }],
+      monthly: [{ month: '2026-06', tokens: 10, cost: 1, perClient: { claude: { tokens: 10, cost: 1, messages: 1 } }, perModel: {} }], summary: {} }
+  };
+  const stale = {
+    deviceId: 'm2', receivedAt: '2026-06-01T00:00:00.000Z',
+    history: { daily: [{ date: '2026-06-07', tokens: 999, cost: 99, perClient: {}, perModel: {} }],
+      monthly: [{ month: '2026-06', tokens: 999, cost: 99, perClient: {}, perModel: {} }], summary: {} }
+  };
+  const merged = aggregateHistory([fresh, stale], { todayKey: '2026-06-08' });
+  assert.equal(merged.daily.length, 1);
+  assert.equal(merged.daily[0].tokens, 1009);
+  assert.equal(merged.summary.totalTokens, 1009);
+});
+
+test('aggregateHistory tolerates devices without history', () => {
+  const merged = aggregateHistory([{ deviceId: 'm1', receivedAt: new Date().toISOString() }]);
+  assert.deepEqual(merged.daily, []);
+});
+
+test('aggregateHistory fails closed when a usage-contributing device has no history', () => {
+  const merged = aggregateHistory([
+    {
+      deviceId: 'new-agent',
+      allTime: { totalTokens: 10 },
+      history: {
+        daily: [{ date: '2026-06-07', tokens: 10, cost: 1, perClient: {}, perModel: {} }],
+        dailyTotals: [{ date: '2026-06-07', tokens: 10, cost: 1, activeTimeMs: 0 }],
+        monthly: [],
+        summary: { activeDaysComplete: true }
+      }
+    },
+    {
+      deviceId: 'old-agent',
+      allTime: { totalTokens: 20 }
+    }
+  ]);
+
+  assert.equal(merged.summary.activeDaysComplete, false);
+  assert.equal('dailyTotals' in merged, false);
+});
+
+test('aggregateHistory fails closed when a usage-contributing device explicitly disables history', () => {
+  const merged = aggregateHistory([
+    {
+      deviceId: 'new-agent',
+      allTime: { totalTokens: 10 },
+      history: {
+        daily: [{ date: '2026-06-07', tokens: 10, cost: 1, perClient: {}, perModel: {} }],
+        dailyTotals: [{ date: '2026-06-07', tokens: 10, cost: 1, activeTimeMs: 0 }],
+        monthly: [],
+        summary: { activeDaysComplete: true }
+      }
+    },
+    {
+      deviceId: 'old-agent',
+      historyAvailable: false,
+      history: null,
+      allTime: { totalTokens: 20 }
+    }
+  ]);
+
+  assert.equal(merged.summary.activeDaysComplete, false);
+  assert.equal('dailyTotals' in merged, false);
+});
+
+test('carryDeviceHistory carries prior history forward when the incoming snapshot omits it', () => {
+  const previous = {
+    deviceId: 'm1', receivedAt: '2026-06-08T00:00:00.000Z',
+    history: { daily: [{ date: '2026-06-07', tokens: 5 }], monthly: [], summary: { totalTokens: 5 } }
+  };
+  const incoming = { deviceId: 'm1', receivedAt: '2026-06-08T00:05:00.000Z', today: { totalTokens: 9 } };
+  const next = carryDeviceHistory(previous, incoming);
+  assert.equal(next.history.daily[0].tokens, 5);  // carried from the previous snapshot
+  assert.equal(next.today.totalTokens, 9);         // incoming fields untouched
+  assert.equal(next.receivedAt, '2026-06-08T00:05:00.000Z');
+});
+
+test('carryDeviceHistory keeps the incoming history when the tick brings its own', () => {
+  const previous = { history: { daily: [{ date: '2026-06-07', tokens: 5 }], monthly: [], summary: {} } };
+  const incoming = { history: { daily: [{ date: '2026-06-08', tokens: 7 }], monthly: [], summary: {} } };
+  assert.equal(carryDeviceHistory(previous, incoming).history.daily[0].tokens, 7);
+});
+
+test('carryDeviceHistory does not resurrect history when the tick clears it with null', () => {
+  const previous = { history: { daily: [{ date: '2026-06-07', tokens: 5 }], monthly: [], summary: {} } };
+  const incoming = { history: null };
+  assert.equal(carryDeviceHistory(previous, incoming).history, null);
+});
+
+test('carryDeviceHistory leaves the snapshot untouched when there is no prior history', () => {
+  assert.equal('history' in carryDeviceHistory(null, { deviceId: 'm1' }), false);
+});
+
+test('a history-less local tick keeps the trends dashboard populated', () => {
+  // Reproduces the local-mode regression: the collector attaches history only on
+  // interval-gated ticks, so a later history-less tick must not blank the snapshot
+  // (the hub gets this for free via mergeDeviceRecord; local mode replaces wholesale).
+  const first = {
+    deviceId: 'm1', receivedAt: '2026-06-08T00:00:00.000Z',
+    history: { daily: [{ date: '2026-06-07', tokens: 5, cost: 1, perClient: {}, perModel: {} }],
+      monthly: [{ month: '2026-06', tokens: 5, cost: 1, perClient: {}, perModel: {} }], summary: {} }
+  };
+  const second = carryDeviceHistory(first, { deviceId: 'm1', receivedAt: '2026-06-08T00:05:00.000Z' });
+  const agg = aggregateHistory([second], { todayKey: '2026-06-08' });
+  assert.equal(agg.daily.length, 1);
+  assert.equal(agg.daily[0].tokens, 5);
+});
+
+// A device's today/month snapshot is a wall-clock window. Once it has rolled
+// over (the device went offline before re-posting a fresh window) the frozen
+// snapshot no longer belongs to "now" and must not pollute the aggregate. The
+// device carries periodWindows.{today,month}.endsAt computed in its own local
+// time; the hub just checks nowMs < endsAt. allTime is cumulative and never
+// expires. See issue #37.
+function staleSnapshotDevice(extra = {}) {
+  return {
+    deviceId: 'mac-mini-office',
+    updatedAt: '2026-06-21T05:00:00.000Z',
+    receivedAt: '2026-06-21T05:00:00.000Z',
+    periodWindows: {
+      timeZone: 'Asia/Hong_Kong',
+      today: { key: '2026-06-21', endsAt: '2026-06-22T00:00:00.000Z' },
+      month: { key: '2026-06', endsAt: '2026-07-01T00:00:00.000Z' }
+    },
+    today: { totalTokens: 4029210, clients: { codex: 4029210 } },
+    month: { totalTokens: 4029210, clients: { codex: 4029210 } },
+    allTime: { totalTokens: 4029210, clients: { codex: 4029210 } },
+    ...extra
+  };
+}
+
+test('aggregateDevices drops today usage once a device today window has ended', () => {
+  const aggregate = aggregateDevices([staleSnapshotDevice()], 10 * 60 * 1000, Date.parse('2026-06-26T05:00:00.000Z'));
+  assert.equal(aggregate.periods.today.totalTokens, 0);
+  assert.equal(aggregate.periods.today.clients.codex, undefined);
+  assert.deepEqual(aggregate.devices[0].periodWindows, staleSnapshotDevice().periodWindows);
+});
+
+test('aggregateDevices omits an invalid producer timezone', () => {
+  const device = staleSnapshotDevice();
+  device.periodWindows.timeZone = 'Not/A_TimeZone';
+  const aggregate = aggregateDevices([device], 10 * 60 * 1000, Date.parse('2026-06-21T12:00:00.000Z'));
+  assert.equal(aggregate.devices[0].periodWindows.timeZone, undefined);
+});
+
+test('aggregateDevices keeps allTime from a device whose today window has ended', () => {
+  const aggregate = aggregateDevices([staleSnapshotDevice()], 10 * 60 * 1000, Date.parse('2026-06-26T05:00:00.000Z'));
+  assert.equal(aggregate.periods.allTime.totalTokens, 4029210);
+});
+
+test('aggregateDevices keeps month while the device month window is still open', () => {
+  const aggregate = aggregateDevices([staleSnapshotDevice()], 10 * 60 * 1000, Date.parse('2026-06-26T05:00:00.000Z'));
+  assert.equal(aggregate.periods.month.totalTokens, 4029210);
+});
+
+test('aggregateDevices drops month once the device month window has ended', () => {
+  const device = staleSnapshotDevice({
+    updatedAt: '2026-05-30T05:00:00.000Z',
+    receivedAt: '2026-05-30T05:00:00.000Z',
+    periodWindows: {
+      today: { key: '2026-05-30', endsAt: '2026-05-31T00:00:00.000Z' },
+      month: { key: '2026-05', endsAt: '2026-06-01T00:00:00.000Z' }
+    }
+  });
+  const aggregate = aggregateDevices([device], 10 * 60 * 1000, Date.parse('2026-06-15T05:00:00.000Z'));
+  assert.equal(aggregate.periods.month.totalTokens, 0);
+  assert.equal(aggregate.periods.allTime.totalTokens, 4029210);
+});
+
+test('aggregateDevices keeps today for an offline-but-same-day device (window not stale flag)', () => {
+  const now = Date.parse('2026-06-26T05:00:00.000Z');
+  const device = {
+    deviceId: 'napping-mac',
+    // 20 minutes old: stale by the 10-minute threshold, but today has not rolled over
+    updatedAt: '2026-06-26T04:40:00.000Z',
+    receivedAt: '2026-06-26T04:40:00.000Z',
+    periodWindows: { today: { key: '2026-06-26', endsAt: '2026-06-27T00:00:00.000Z' } },
+    today: { totalTokens: 500 }
+  };
+  const aggregate = aggregateDevices([device], 10 * 60 * 1000, now);
+  assert.equal(aggregate.periods.today.totalTokens, 500);
+});
+
+test('aggregateDevices keeps today across UTC midnight when device local day is unchanged', () => {
+  // UTC+8 device: snapshot at local 06-27 02:00 (UTC 06-26 18:00),
+  // now is local 06-27 10:00 (UTC 06-27 02:00) — same local day, different UTC day.
+  // A UTC-day comparison would wrongly drop it; the local endsAt keeps it.
+  const device = {
+    deviceId: 'tw-mac',
+    updatedAt: '2026-06-26T18:00:00.000Z',
+    receivedAt: '2026-06-26T18:00:00.000Z',
+    periodWindows: { today: { key: '2026-06-27', endsAt: '2026-06-27T16:00:00.000Z' } },
+    today: { totalTokens: 123 }
+  };
+  const aggregate = aggregateDevices([device], 10 * 60 * 1000, Date.parse('2026-06-27T02:00:00.000Z'));
+  assert.equal(aggregate.periods.today.totalTokens, 123);
+});
+
+test('aggregateDevices falls back to UTC-day compare for old agents without periodWindows', () => {
+  const dropped = aggregateDevices([{
+    deviceId: 'old', updatedAt: '2026-06-21T05:00:00.000Z', receivedAt: '2026-06-21T05:00:00.000Z',
+    today: { totalTokens: 99 }, allTime: { totalTokens: 99 }
+  }], 10 * 60 * 1000, Date.parse('2026-06-26T05:00:00.000Z'));
+  assert.equal(dropped.periods.today.totalTokens, 0);
+  assert.equal(dropped.periods.allTime.totalTokens, 99);
+
+  const kept = aggregateDevices([{
+    deviceId: 'old2', updatedAt: '2026-06-26T05:00:00.000Z', receivedAt: '2026-06-26T05:00:00.000Z',
+    today: { totalTokens: 7 }
+  }], 10 * 60 * 1000, Date.parse('2026-06-26T06:00:00.000Z'));
+  assert.equal(kept.periods.today.totalTokens, 7);
+});
+
+test('a session carries its context occupancy through the device record', () => {
+  const record = normalizeDeviceRecord({
+    deviceId: 'm1',
+    updatedAt: '2026-09-18T06:00:00.000Z',
+    today: {
+      totalTokens: 10,
+      sessions: {
+        'codex:live': {
+          client: 'codex',
+          sessionId: 'rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111',
+          totalTokens: 10,
+          contextTokens: 190_867,
+          contextWindow: 950_000
+        }
+      }
+    }
+  });
+  const session = record.periods.today.sessions['codex:rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111'];
+  assert.equal(session.contextTokens, 190_867);
+  assert.equal(session.contextWindow, 950_000);
+});
+
+test('merging a session keeps one source occupancy rather than summing two', () => {
+  const session = (contextTokens, contextWindow) => ({
+    client: 'codex',
+    sessionId: 'rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111',
+    totalTokens: 5,
+    ...(contextWindow ? { contextTokens, contextWindow } : {})
+  });
+  const merged = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 10, sessions: { a: session(100, 200_000), b: session(140, 200_000) } }
+  });
+  const key = 'codex:rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111';
+  assert.equal(merged.periods.today.sessions[key].contextTokens, 140);
+  assert.equal(merged.periods.today.sessions[key].contextWindow, 200_000);
+
+  // A partition with no reading leaves the one that has it alone, instead of
+  // zeroing a live session every time it is merged with a period that only
+  // carries totals.
+  const partial = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 10, sessions: { a: session(100, 200_000), b: session(0, 0) } }
+  });
+  assert.equal(partial.periods.today.sessions[key].contextTokens, 100);
+  assert.equal(partial.periods.today.sessions[key].contextWindow, 200_000);
+
+  // A snapshot is freshest-wins, not last-merge-wins. The same session arrives
+  // from several periods and synced devices; without this the older reading won
+  // whenever it happened to be merged last, which made the gauge depend on
+  // iteration order. Here the stale reading is merged after the fresh one and
+  // must still lose.
+  const timed = (contextTokens, contextWindow, lastUsedAt) => ({
+    client: 'codex',
+    sessionId: 'rollout-2026-09-18T05-00-00-019e76fc-aaaa-bbbb-cccc-111111111111',
+    totalTokens: 5,
+    contextTokens,
+    contextWindow,
+    lastUsedAt
+  });
+  const fresh = timed(140, 200_000, '2026-09-18T05:10:00.000Z');
+  const stale = timed(20, 200_000, '2026-09-18T05:00:00.000Z');
+  const ordered = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 10, sessions: { a: fresh, b: stale } }
+  });
+  assert.equal(ordered.periods.today.sessions[key].contextTokens, 140, 'a stale snapshot merged last must not win');
+
+  // A device that never read a transcript has no reading at all, which is not
+  // the same as an empty one, so it must not block a real reading either way.
+  const unknown = normalizeDeviceRecord({
+    deviceId: 'm1',
+    today: { totalTokens: 10, sessions: { a: session(0, 0), b: fresh } }
+  });
+  assert.equal(unknown.periods.today.sessions[key].contextTokens, 140);
+  assert.equal(unknown.periods.today.sessions[key].contextWindow, 200_000);
+});
+
+test('aggregateDevices folds a pre-rename micode device into the mimo row', () => {
+  // The tracked-client id was renamed from tokscale's `micode` to `mimo`. A hub
+  // outlives any single device update, so it holds records posted by agents on
+  // both sides of that rename — and aggregateDevices normalizes on *read*, not
+  // only on ingest, so a record already sitting in data/devices.json folds too.
+  // Without that the same tool would show as two rows until every device
+  // upgraded.
+  const now = Date.parse('2026-09-23T00:00:00.000Z');
+  const deviceAt = (deviceId, client, tokens, cost) => ({
+    deviceId,
+    hostname: deviceId,
+    updatedAt: '2026-09-23T00:00:00.000Z',
+    receivedAt: '2026-09-23T00:00:00.000Z',
+    today: { totalTokens: tokens, costUsd: cost, clients: { [client]: tokens }, clientCosts: { [client]: cost } }
+  });
+
+  const aggregate = aggregateDevices(
+    [deviceAt('old-agent', 'micode', 100, 1.5), deviceAt('new-agent', 'mimo', 40, 0.5)],
+    0,
+    now
+  );
+
+  assert.equal(aggregate.periods.today.clients.mimo, 140);
+  assert.equal(aggregate.periods.today.clients.micode, undefined);
+  assert.equal(aggregate.periods.today.clientCosts.mimo, 2);
+});
+
+test('aggregateHistory ignores only confirmed empty legacy devices when computing completeness', () => {
+  const complete = {
+    deviceId: 'complete', allTime: { totalTokens: 30 },
+    history: {
+      daily: [{ date: '2026-06-07', tokens: 20 }],
+      dailyTotals: [{ date: '2024-01-01', tokens: 10 }, { date: '2026-06-07', tokens: 20 }],
+      monthly: [], summary: { activeDays: 2, activeDaysComplete: true }
+    }
+  };
+  for (const aggregate of [aggregateHistory, require('../../worker/src/shared/usage').aggregateHistory]) {
+    const emptyCurrent = aggregate([{ allTime: { totalTokens: 0 }, history: {
+      daily: [], monthly: [], dailyTotals: [], summary: { activeDaysComplete: true }
+    } }]);
+    assert.equal(emptyCurrent.summary.activeDaysComplete, true);
+    for (const allTime of [{ totalTokens: 0 }, { total_tokens: '0' }]) {
+      const legacy = { deviceId: 'empty', periods: { allTime }, history: { daily: [], monthly: [], summary: {} } };
+      const merged = aggregate([complete, legacy], { todayKey: '2026-06-07' });
+      assert.equal(merged.summary.activeDaysComplete, true);
+      assert.equal(merged.summary.activeDays, 2);
+    }
+    for (const legacy of [
+      {},
+      { history: null },
+      { allTime: { totalTokens: 10 }, history: { daily: [], monthly: [], summary: {} } },
+      { history: { daily: [], monthly: [], summary: {} } },
+      { allTime: { totalTokens: 0 }, history: { summary: { activeDays: 1 } } },
+      { allTime: { totalTokens: 0 }, history: { summary: { totalTokens: 10 } } },
+      { allTime: { totalTokens: 0 }, history: { monthly: [{ month: '2024-01', tokens: 10 }] } },
+      { allTime: { totalTokens: 0 }, history: { daily: [{ date: '2024-01-01', tokens: 10 }] } },
+      { allTime: { totalTokens: 0 }, history: { dailyTotalsOmitted: 500, summary: { activeDaysComplete: false } } }
+    ]) {
+      const merged = aggregate([complete, { deviceId: 'legacy', ...legacy }], { todayKey: '2026-06-07' });
+      assert.equal(merged.summary.activeDaysComplete, false, JSON.stringify(legacy));
+    }
+  }
+});
+
+test('aggregateHistory checks usage counters without traversing unrelated device detail', () => {
+  const unrelated = () => { throw new Error('History aggregation must not normalize unrelated detail'); };
+  for (const aggregate of [aggregateHistory, require('../../worker/src/shared/usage').aggregateHistory]) {
+    for (const nested of [false, true]) {
+      for (const history of [undefined, null, { daily: [], monthly: [], summary: {} }]) {
+        const allTime = { total_tokens: '20' };
+        Object.defineProperty(allTime, 'sessions', { get: unrelated });
+        Object.defineProperty(allTime, 'projects', { get: unrelated });
+        const record = { deviceId: 'legacy', history, ...(nested ? { periods: { allTime } } : { allTime }) };
+        Object.defineProperty(record, 'limits', { get: unrelated });
+        Object.defineProperty(record, 'today', { get: unrelated });
+        const merged = aggregate([record]);
+        assert.equal(merged.summary.activeDaysComplete, false);
+      }
+    }
+  }
+});
+
+test('ingress retains missing lifetime counter provenance across storage and limits-only updates', () => {
+  for (const api of [require('../../src/shared/usage'), require('../../worker/src/shared/usage')]) {
+    const complete = { deviceId: 'complete', allTime: { totalTokens: 10 }, history: {
+      daily: [], monthly: [], dailyTotals: [{ date: '2024-01-01', tokens: 10 }],
+      summary: { activeDaysComplete: true }
+    } };
+    for (const history of [undefined, null, { daily: [], monthly: [], summary: {} }]) {
+      let record = api.mergeSyncDeviceRecord(null, { deviceId: 'partial', today: { totalTokens: 5 }, history });
+      record = api.normalizeDeviceRecord(JSON.parse(JSON.stringify(record)));
+      assert.equal(api.aggregateHistory([complete, record]).summary.activeDaysComplete, false);
+      record = api.mergeSyncDeviceRecord(record, { deviceId: 'partial', limitsOnly: true, limits: { providers: [] } });
+      assert.equal(api.aggregateHistory([complete, record]).summary.activeDaysComplete, false);
+      record = api.mergeSyncDeviceRecord(record, { deviceId: 'partial', allTime: { totalTokens: 0 }, history: null });
+      assert.equal(record.allTimeTokensUnavailable, undefined);
+      record = api.mergeSyncDeviceRecord(record, { deviceId: 'partial', limitsOnly: true, limits: { providers: [] } });
+      assert.equal(api.aggregateHistory([complete, record]).summary.activeDaysComplete, true);
+    }
+  }
+});
+
+test('lifetime completeness rejects malformed counters and contradictory stored zeros', () => {
+  for (const api of [require('../../src/shared/usage'), require('../../worker/src/shared/usage')]) {
+    const complete = { deviceId: 'complete', allTime: { totalTokens: 10 }, history: {
+      daily: [], monthly: [], dailyTotals: [{ date: '2024-01-01', tokens: 10 }],
+      summary: { activeDaysComplete: true }
+    } };
+    for (const value of ['unknown', '', ' ', {}, [], false, Infinity]) {
+      const record = api.mergeSyncDeviceRecord(null, { deviceId: 'malformed', allTime: { totalTokens: value } });
+      assert.equal(record.allTimeTokensUnavailable, true, String(value));
+      assert.equal(api.aggregateHistory([complete, record]).summary.activeDaysComplete, false);
+    }
+    for (const value of [0, '0', '0.0', '1,000', 20]) {
+      const record = api.normalizeDeviceRecord({ allTime: { totalTokens: value } });
+      assert.equal(record.allTimeTokensUnavailable, undefined, String(value));
+    }
+    for (const period of ['today', 'month']) {
+      for (const history of [undefined, null, { daily: [], monthly: [], summary: {} }]) {
+        const stored = { deviceId: 'stored-legacy', periods: { allTime: { totalTokens: 0 }, [period]: { totalTokens: 5 } }, history };
+        assert.equal(api.aggregateHistory([complete, stored]).summary.activeDaysComplete, false);
+      }
+    }
+    const empty = api.normalizeDeviceRecord({ allTime: { totalTokens: '0.0' } });
+    assert.equal(api.aggregateHistory([complete, empty]).summary.activeDaysComplete, true);
+  }
+});
+
+test('disabled retained History stays incomplete after re-enabling until a fresh History arrives', () => {
+  for (const api of [require('../../src/shared/usage'), require('../../worker/src/shared/usage')]) {
+    const complete = { deviceId: 'switch-history', allTime: { totalTokens: 10 }, historyAvailable: true,
+      history: { daily: [{ date: '2026-06-07', tokens: 10 }], monthly: [],
+        dailyTotals: [{ date: '2026-06-07', tokens: 10 }], summary: { activeDaysComplete: true } } };
+    const original = api.mergeSyncDeviceRecord(null, complete);
+    const disabled = api.mergeSyncDeviceRecord(original, {
+      deviceId: complete.deviceId, allTime: { totalTokens: 20 }, historyAvailable: false
+    });
+    assert.equal(disabled.history.summary.activeDaysComplete, false);
+    assert.equal(original.history.summary.activeDaysComplete, true, 'do not mutate the prior snapshot');
+    assert.deepEqual(disabled.history.daily, original.history.daily);
+    let retained = JSON.parse(JSON.stringify(disabled));
+    retained = api.mergeSyncDeviceRecord(retained, { deviceId: complete.deviceId, allTime: { totalTokens: 20 }, historyAvailable: true });
+    assert.equal(api.aggregateHistory([retained]).summary.activeDaysComplete, false);
+    assert.equal(api.aggregateHistory([{ ...original, historyAvailable: false }]).summary.activeDaysComplete, false, 'old persisted records also fail closed');
+    const refreshed = api.mergeSyncDeviceRecord(retained, complete);
+    assert.equal(api.aggregateHistory([refreshed]).summary.activeDaysComplete, true);
+  }
+});

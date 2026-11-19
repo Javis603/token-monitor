@@ -1,0 +1,31 @@
+.qa-settings { color:var(--plugin-default,inherit); font-family:var(--pv-font,inherit); line-height:1.5; padding:0 10px; min-width:0; }
+.qa-settings * { box-sizing:border-box; }
+.qa-settings .qa-setting { display:flex; align-items:center; justify-content:space-between; flex-wrap:nowrap; gap:12px; min-width:0; padding:8px 0; }
+.qa-settings .qa-note { margin:8px 0; font-size:var(--qa-note-size,.85em); line-height:1.5; color:var(--plugin-muted,inherit); overflow-wrap:anywhere; }
+.qa-settings input { font:inherit; color:inherit; }
+.qa-settings input:not([type=checkbox]) { background:transparent; border:1px solid color-mix(in srgb,currentColor 35%,transparent); border-radius:6px; padding:6px 8px; max-width:100%; }
+.qa-settings input[type=number] { width:64px; flex:0 0 64px; }
+.qa-settings:not(:where(.settings-panel *)) .qa-switch { appearance:none; position:relative; margin:0; width:38px; height:22px; border-radius:12px; background:color-mix(in srgb,currentColor 25%,transparent); cursor:pointer; flex:none; }
+.qa-settings:not(:where(.settings-panel *)) .qa-switch::after { content:''; position:absolute; width:16px; height:16px; top:3px; left:3px; border-radius:50%; background:var(--plugin-default,CanvasText); }
+.qa-settings:not(:where(.settings-panel *)) .qa-switch:checked { background:var(--plugin-accent,Highlight); }
+.qa-settings:not(:where(.settings-panel *)) .qa-switch:checked::after { left:19px; background:Canvas; }
+.qa-settings input:disabled { opacity:.55; cursor:wait; }
+.qa-settings :focus-visible { outline:2px solid var(--plugin-accent,Highlight); outline-offset:3px; }
+.qa-settings details { margin-top:12px; }
+.qa-settings summary { cursor:pointer; font-weight:600; }
+.qa-settings [role=status] { overflow-wrap:anywhere; }
+.qa-settings p:empty { display:none; }
+
+.qa-settings button { font:inherit; color:var(--text,inherit); background:var(--bg,transparent); border:1px solid rgba(var(--line-rgb,128,128,128),.25); border-radius:6px; padding:6px 10px; cursor:pointer; }
+.qa-settings button:disabled { opacity:.55; cursor:default; }
+
+/* Leave native switch styling to the settings host. Scope only spacing here. */
+.settings-panel .qa-settings { --qa-note-size:.59375rem; }
+.settings-panel .qa-settings .qa-setting { padding:7px 0; }
+.qa-settings .qa-setting > .settings-item-title { flex:1 1 auto; min-width:0; overflow-wrap:anywhere; }
+.qa-settings .qa-fields { min-width:0; }
+.qa-settings .qa-state { margin:0 0 10px; font-size:inherit; font-weight:600; }
+.qa-settings .qa-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-top:10px; }
+.qa-settings .qa-feedback { margin:0; font-size:.85em; flex:1 1 120px; }
+.qa-settings .qa-test-info { font-size:.85em; color:var(--plugin-muted,var(--muted,inherit)); }
+@media (max-width:320px) { .qa-settings { padding-inline:4px; } }

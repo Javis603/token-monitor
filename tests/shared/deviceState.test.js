@@ -1,0 +1,282 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const { createDeviceState } = require('../../src/shared/usage/deviceState');
+const { seedWithColdPreview } = require('../../src/shared/anchorSeed');
+const { isPeriodExpired } = require('../../src/shared/usage');
+
+function usage(updatedAt = '2026-07-21T01:00:00.000Z', extra = {}) {
+  return {
+    deviceId: 'producer-device',
+    updatedAt,
+    today: { totalTokens: 10 },
+    month: { totalTokens: 20 },
+    allTime: { totalTokens: 30 },
+    history: { daily: [{ date: '2026-07-21', tokens: 10 }], monthly: [], summary: {} },
+    clientStatus: { codex: 'active' },
+    clientHealth: { version: 1, clients: { codex: { overall: 'healthy' } } },
+    wslStatus: { state: 'active' },
+    ...extra
+  };
+}
+
+function limits(updatedAt = '2026-07-21T01:00:05.000Z', status = 'ok') {
+  return {
+    updatedAt,
+    refreshMs: 300000,
+    providers: [{ provider: 'codex', status, updatedAt, windows: [] }]
+  };
+}
+
+test('buffers limits until usage exists instead of emitting a zero-period record', () => {
+  const emitted = [];
+  const state = createDeviceState({
+    epoch: 7,
+    envelope: { deviceId: 'configured-device', hostname: 'macbook.local' },
+    onRecord: (record, meta) => emitted.push({ record, meta })
+  });
+
+  assert.equal(state.updateLimits(limits(), 'startup', { epoch: 7 }), null);
+  assert.equal(state.getSnapshot(), null);
+  assert.equal(emitted.length, 0);
+
+  const record = state.updateUsage(usage(), 'startup', { epoch: 7 });
+  assert.equal(record.deviceId, 'configured-device');
+  assert.equal(record.today.totalTokens, 10);
+  assert.equal(record.limits.providers[0].provider, 'codex');
+  assert.equal(emitted.length, 1);
+  assert.deepEqual(emitted[0].meta, { revision: 1, source: 'usage', reason: 'startup', epoch: 7 });
+});
+
+test('usage emits immediately and a later limits update emits a second full record', () => {
+  const emitted = [];
+  const state = createDeviceState({ onRecord: (record, meta) => emitted.push({ record, meta }) });
+
+  const usageRecord = state.updateUsage(usage(), 'interval');
+  assert.equal(Object.hasOwn(usageRecord, 'limits'), false);
+
+  const limitsRecord = state.updateLimits(limits(), 'scheduled');
+  assert.equal(limitsRecord.today.totalTokens, 10);
+  assert.equal(limitsRecord.month.totalTokens, 20);
+  assert.equal(limitsRecord.limits.providers[0].status, 'ok');
+  assert.equal(emitted.length, 2);
+  assert.equal(emitted[1].meta.revision, 2);
+  assert.equal(emitted[1].meta.source, 'limits');
+});
+
+test('initial limits seed waits for first usage and is copied defensively', () => {
+  const initialLimits = limits();
+  const state = createDeviceState({ initialLimits });
+  initialLimits.providers[0].status = 'mutated';
+
+  assert.equal(state.getSnapshot(), null);
+  const record = state.updateUsage(usage(), 'startup');
+  assert.equal(record.limits.providers[0].status, 'ok');
+});
+
+test('limits-only updates preserve usage updatedAt and usage metadata', () => {
+  const state = createDeviceState();
+  state.updateUsage(usage('2026-07-21T01:00:00.000Z'), 'interval');
+
+  const record = state.updateLimits(limits('2026-07-21T01:05:00.000Z', 'timeout'), 'timeout');
+  assert.equal(record.updatedAt, '2026-07-21T01:00:00.000Z');
+  assert.equal(record.history.daily[0].tokens, 10);
+  assert.equal(record.clientStatus.codex, 'active');
+  assert.equal(record.wslStatus.state, 'active');
+  assert.equal(record.limits.updatedAt, '2026-07-21T01:05:00.000Z');
+
+  record.today.totalTokens = 999;
+  assert.equal(state.getSnapshot().today.totalTokens, 10);
+});
+
+// Carried fields are shared between successive usage parts rather than copied
+// on every tick, so this pins that nothing handed in or out can reach them: the
+// observer keeps what it is given (the Hub queue does), and the input stays the
+// caller's.
+test('published records and inputs never reach the state later records carry forward', () => {
+  const emitted = [];
+  const state = createDeviceState({ onRecord: (record) => emitted.push(record) });
+  const summary = usage();
+  const limitsInput = limits();
+  state.updateUsage(summary, 'interval');
+  state.updateLimits(limitsInput, 'scheduled');
+
+  for (const record of emitted) {
+    record.month.totalTokens = 999;
+    record.allTime.totalTokens = 999;
+    record.history.daily[0].tokens = 999;
+    record.clientStatus.codex = 'missing';
+  }
+  emitted[1].limits.providers[0].status = 'mutated';
+  summary.month.totalTokens = 888;
+  summary.history.daily[0].tokens = 888;
+  limitsInput.providers[0].status = 'mutated';
+
+  const preview = state.updateUsage({
+    updatedAt: '2026-07-21T01:00:01.000Z',
+    today: { totalTokens: 11 }
+  }, 'progress', { preview: true });
+  assert.equal(preview.month.totalTokens, 20);
+  assert.equal(preview.allTime.totalTokens, 30);
+  assert.equal(preview.history.daily[0].tokens, 10);
+  assert.equal(preview.clientStatus.codex, 'active');
+  assert.equal(preview.limits.providers[0].status, 'ok');
+  assert.equal(emitted[2], preview);
+
+  preview.month.totalTokens = 777;
+  preview.history.daily[0].tokens = 777;
+  const snapshot = state.getSnapshot();
+  assert.equal(snapshot.today.totalTokens, 11);
+  assert.equal(snapshot.month.totalTokens, 20);
+  assert.equal(snapshot.history.daily[0].tokens, 10);
+  assert.notEqual(snapshot.history, preview.history);
+});
+
+test('partial usage previews carry broader periods and optional usage state', () => {
+  const state = createDeviceState();
+  state.updateUsage(usage('2026-07-21T01:00:00.000Z', {
+    periodWindows: { today: { startsAt: '2026-07-21T00:00:00.000Z', endsAt: '2026-07-22T00:00:00.000Z' } },
+    historyAvailable: true,
+    allTimeProjectsIncomplete: true
+  }), 'interval');
+
+  const preview = state.updateUsage({
+    updatedAt: '2026-07-21T01:00:01.000Z',
+    today: { totalTokens: 11 }
+  }, 'progress', { preview: true });
+
+  assert.equal(preview.today.totalTokens, 11);
+  assert.equal(preview.month.totalTokens, 20);
+  assert.equal(preview.allTime.totalTokens, 30);
+  assert.equal(preview.history.daily[0].tokens, 10);
+  assert.equal(preview.historyAvailable, true);
+  assert.equal(preview.clientStatus.codex, 'active');
+  // Status and health carry together. They are what the tool rows and the
+  // diagnostics panel are drawn from, and a preview that kept one but dropped
+  // the other would close the panel on every full scan.
+  assert.equal(preview.clientHealth.clients.codex.overall, 'healthy');
+  assert.equal(preview.wslStatus.state, 'active');
+  assert.equal(preview.periodWindows.today.endsAt, '2026-07-22T00:00:00.000Z');
+  assert.equal(preview.allTimeProjectsIncomplete, true);
+});
+
+test('a partial preview applies its windows only to the periods it carries', () => {
+  // Across a month boundary the Today-stage preview brings the new month's
+  // windows while Month is still last month's total.
+  const october = {
+    timeZone: 'UTC',
+    today: { key: '2026-10-31', endsAt: '2026-11-01T00:00:00.000Z' },
+    month: { key: '2026-10', endsAt: '2026-11-01T00:00:00.000Z' }
+  };
+  const november = {
+    timeZone: 'UTC',
+    today: { key: '2026-11-01', endsAt: '2026-11-02T00:00:00.000Z' },
+    month: { key: '2026-11', endsAt: '2026-12-01T00:00:00.000Z' }
+  };
+  const state = createDeviceState();
+  state.updateUsage(usage('2026-10-31T23:00:00.000Z', { periodWindows: october }), 'interval');
+  const preview = state.updateUsage({ updatedAt: '2026-11-01T00:00:05.000Z', periodWindows: november, today: { totalTokens: 3 } }, 'progress', { preview: true });
+  assert.equal(preview.today.totalTokens, 3);
+  assert.deepEqual(preview.periodWindows.today, november.today);
+  assert.equal(preview.month.totalTokens, 20);
+  assert.deepEqual(preview.periodWindows.month, october.month, 'the carried Month keeps its own window');
+
+  const monthStage = state.updateUsage({ updatedAt: '2026-11-01T00:00:20.000Z', periodWindows: november, today: { totalTokens: 3 }, month: { totalTokens: 3 } }, 'progress', { preview: true });
+  assert.deepEqual(monthStage.periodWindows.month, november.month);
+});
+
+test('a cold Today preview keeps its scan window when limits land after midnight', () => {
+  const cold = [];
+  const state = createDeviceState({ onColdPreview: (record) => cold.push(record) });
+  const windows = { timeZone: 'UTC', today: { key: '2026-11-12', endsAt: '2026-11-13T00:00:00.000Z' } };
+  state.updateUsage({ updatedAt: '2026-11-12T23:59:55.000Z', periodWindows: windows, today: { totalTokens: 250 } }, 'progress', { preview: true });
+  state.updateLimits(limits('2026-11-13T00:00:05.000Z'));
+  assert.equal(cold.length, 2);
+  assert.deepEqual(cold[1].periodWindows.today, windows.today, 'the observer can tell the usage belongs to the scan day');
+  // Shown after midnight, yesterday's 250 tokens are an ended Today, not today's.
+  const now = new Date('2026-11-13T00:00:05.000Z');
+  const shown = seedWithColdPreview({ deviceId: 'seed', periodWindows: {} }, cold[1], now);
+  assert.equal(isPeriodExpired(shown, 'today', now.getTime()), true);
+});
+
+test('cold-start partial previews wait for a complete usage baseline', () => {
+  const emitted = [];
+  const state = createDeviceState({ onRecord: (record) => emitted.push(record) });
+
+  assert.equal(state.updateUsage({
+    updatedAt: '2026-07-21T01:00:00.000Z',
+    today: { totalTokens: 10 }
+  }, 'progress', { preview: true }), null);
+  assert.equal(state.getSnapshot(), null);
+  assert.equal(emitted.length, 0);
+
+  const record = state.updateUsage(usage(), 'startup', { preview: false });
+  assert.equal(record.month.totalTokens, 20);
+  assert.equal(record.allTime.totalTokens, 30);
+  assert.equal(emitted.length, 1);
+});
+
+test('a limits update during a cold start does not publish the held-back preview', () => {
+  // Limits probes land within seconds while all-time can take minutes. The
+  // Today-only preview must not ride out on the limits publish: downstream that
+  // record reads as a device whose month and all-time are zero.
+  const emitted = [];
+  const cold = [];
+  const state = createDeviceState({
+    onRecord: (record) => emitted.push(record),
+    onColdPreview: (record, meta) => cold.push({ record, meta })
+  });
+  state.updateUsage({ updatedAt: '2026-07-21T01:00:00.000Z', today: { totalTokens: 10 } }, 'progress', { preview: true });
+  assert.equal(state.updateLimits(limits()), null);
+  assert.equal(emitted.length, 0);
+  assert.equal(state.getSnapshot(), null);
+
+  // The observer shows the limits with the held-back usage instead.
+  assert.equal(cold.length, 2);
+  assert.equal(cold[1].meta.source, 'limits');
+  assert.equal(cold[1].record.today.totalTokens, 10);
+  assert.equal(cold[1].record.limits.providers[0].status, 'ok');
+
+  // The next preview builds on the first and keeps the limits.
+  state.updateUsage({ updatedAt: '2026-07-21T01:00:01.000Z', today: { totalTokens: 11 }, month: { totalTokens: 21 } }, 'progress', { preview: true });
+  assert.equal(cold.length, 3);
+  assert.equal(cold[2].record.today.totalTokens, 11);
+  assert.equal(cold[2].record.month.totalTokens, 21);
+  assert.equal(cold[2].record.limits.providers[0].status, 'ok');
+  assert.equal(cold[2].meta.reason, 'progress');
+
+  const record = state.updateUsage(usage(), 'startup', { preview: false });
+  assert.equal(record.allTime.totalTokens, 30);
+  assert.equal(record.limits.providers[0].status, 'ok');
+  assert.equal(emitted.length, 1);
+  // Once complete, limits publish as records again.
+  state.updateLimits(limits('2026-07-21T01:00:09.000Z'));
+  assert.equal(cold.length, 3);
+  assert.equal(emitted.length, 2);
+});
+
+test('limits that land before any usage reach the cold-preview observer', () => {
+  const cold = [];
+  const state = createDeviceState({ onColdPreview: (record) => cold.push(record) });
+  assert.equal(state.updateLimits(limits()), null, 'still no record');
+  assert.equal(cold.length, 1);
+  assert.equal(cold[0].limits.providers[0].status, 'ok');
+  assert.equal(Object.prototype.hasOwnProperty.call(cold[0], 'today'), false);
+});
+
+test('rejects stale epoch updates and stops publishing synchronously', () => {
+  const emitted = [];
+  const state = createDeviceState({ epoch: 4, onRecord: (record) => emitted.push(record) });
+
+  assert.equal(state.updateUsage(usage(), 'stale', { epoch: 3 }), null);
+  assert.equal(emitted.length, 0);
+  state.updateUsage(usage(), 'current', { epoch: 4 });
+  assert.equal(emitted.length, 1);
+
+  state.stop();
+  assert.equal(state.updateLimits(limits(), 'late', { epoch: 4 }), null);
+  assert.equal(state.updateUsage(usage(), 'late', { epoch: 4 }), null);
+  assert.equal(emitted.length, 1);
+});

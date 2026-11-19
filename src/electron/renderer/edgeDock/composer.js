@@ -1,0 +1,608 @@
+'use strict';
+
+// Settings composer for the edge dock's contents. It borrows the tray
+// composer's idea (a live strip you drag to reorder, click to configure and
+// extend with +) but is laid out for the dock: a vertical miniature rail on the
+// left, the selected item's options on the right.
+(function exposeEdgeDockComposer(root, factory) {
+  const scope = typeof module === 'object' && module.exports ? require('../../../shared/limits/accountScope') : root.TokenMonitorLimitAccountScope;
+  const api = factory(scope);
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  if (root) root.TokenMonitorEdgeDockComposer = api;
+})(typeof window !== 'undefined' ? window : null, function createEdgeDockComposerApi(scope) {
+  const selectionKey = record => scope.accountSelectionKey(record.provider, record.accountKey, record.region);
+  function createEdgeDockComposer(deps) {
+    const {
+      root,
+      t,
+      itemsApi,
+      presentationApi,
+      getSettings,
+      itemsKey = 'edgeDockItems',
+      getStats,
+      save,
+      providerLabel,
+      pluginLabel = (ref) => ref,
+      pluginView, pluginMark, moduleView, moduleMark,
+      providerColor,
+      windowLabel,
+      hasProviderMark,
+      maskEmail,
+      mimoProductLabel,
+      limitAccountTitle,
+      createRowDrag,
+      enabledLimitProviders,
+      isWindowHidden = () => false
+    } = deps;
+
+    // Selection and the open add menu live here rather than in the DOM, because
+    // every settings save repaints the whole form.
+    const ui = { selected: '', menuOpen: false };
+    const limitsOnly = itemsKey === 'notchItems';
+    const refreshItem = { type: 'action', action: 'refresh' };
+    const idFor = (item) => item.type === 'action' ? 'action:refresh' : itemsApi.itemId(item);
+    const refreshKey = itemsKey === 'notchItems' ? 'notchRefreshEnabled' : 'edgeDockRefreshEnabled';
+    const refreshEnabled = () => getSettings()?.[refreshKey] === true;
+    let drag = null;
+    let renderedSignature = '';
+    let renderedRail = null;
+
+    function el(tag, className, text) {
+      const node = document.createElement(tag);
+      if (className) node.className = className;
+      if (text !== undefined && text !== null) node.textContent = String(text);
+      return node;
+    }
+
+    function storedItems() {
+      const items = itemsApi.normalizeEdgeDockItems(getSettings()?.[itemsKey]);
+      return limitsOnly && items ? items.filter((item) => item.type === 'limit') : items;
+    }
+
+    function isAutomatic() {
+      return storedItems() === null;
+    }
+
+    function limitOptions() {
+      const settings = getSettings() || {};
+      return {
+        limitsEnabled: settings.limitsEnabled !== false,
+        limitProviders: settings.limitProviders,
+        limitProviderOrder: settings.limitProviderOrder
+      };
+    }
+
+    function connectedProviders() {
+      return presentationApi.connectedLimitProviders(getStats(), limitOptions());
+    }
+
+    // What the dock shows right now: the stored list, or the automatic default
+    // materialized from the current stats.
+    function effectiveItems() {
+      const items = storedItems() ?? itemsApi.defaultEdgeDockItems(connectedProviders());
+      return limitsOnly ? items.filter((item) => item.type === 'limit') : items;
+    }
+
+    function persist(items) {
+      return save({ [itemsKey]: items });
+    }
+
+    function updateItem(id, change) {
+      const items = effectiveItems().map((item) => (itemsApi.itemId(item) === id ? { ...item, ...change } : item));
+      return persist(items);
+    }
+
+    function accountsFor(provider) {
+      const providers = Array.isArray(getStats()?.limits?.providers) ? getStats().limits.providers : [];
+      const seen = new Set();
+      return providers
+        .filter((record) => String(record?.provider || '').toLowerCase() === provider && record.accountKey)
+        .filter((record) => {
+          const key = selectionKey(record);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+    }
+
+    function itemStatus(item) {
+      if (item.type === 'plugin' && pluginView) return pluginView(item.ref)?.status || 'missing';
+      if (item.type === 'limit' && item.provider.startsWith('plugin:') && moduleView) return moduleView(item.provider)?.status || 'missing';
+      return 'active';
+    }
+
+    function itemAvailable(item) {
+      return itemStatus(item) === 'active';
+    }
+
+    function itemLabel(item) {
+      if (item.type === 'action') return t('settings.common.refresh');
+      if (item.type === 'stat') {
+        if (item.metric === 'liveRate') return t('edgeDock.stat.liveRate');
+        if (item.metric === itemsApi.SESSIONS_METRIC) return t('edgeDock.sessions');
+        return t(`edgeDock.period.${item.metric}`);
+      }
+      if (item.type === 'plugin') return pluginLabel(item.ref) || item.ref;
+      return providerLabel(item.provider);
+    }
+
+    function markFor(item, { small = false } = {}) {
+      const mark = el('span', 'edge-dock-composer-mark' + (small ? ' is-small' : ''));
+      const size = small ? 13 : 16;
+      if (item.type === 'action') {
+        mark.classList.add('is-refresh');
+        return mark;
+      }
+      if (item.type === 'stat') {
+        mark.classList.add('is-stat');
+        mark.textContent = item.metric === 'liveRate'
+          ? t('edgeDock.statGlyph.liveRate')
+          : item.metric === itemsApi.SESSIONS_METRIC
+            ? t('edgeDock.statGlyph.sessions')
+            : t(`edgeDock.periodShort.${item.metric}`);
+        return mark;
+      }
+      if (item.type === 'plugin') {
+        const view = pluginView?.(item.ref), icon = view && pluginMark?.(view, size);
+        if (icon) { mark.classList.add('is-plugin'); mark.append(icon); } else mark.classList.add('is-fallback');
+        return mark;
+      }
+      const moduleIcon = moduleMark?.(item.provider, size);
+      if (moduleIcon) { mark.classList.add('is-plugin'); mark.append(moduleIcon); return mark; }
+      if (hasProviderMark(item.provider)) mark.classList.add(`row-icon-${item.provider}`);
+      else mark.classList.add('is-fallback');
+      mark.style.setProperty('--composer-color', providerColor(item.provider));
+      return mark;
+    }
+
+    function railItem(item, count) {
+      const id = idFor(item);
+      const button = el('button', 'edge-dock-composer-item');
+      button.type = 'button';
+      if (item.type === 'action') button.classList.add('is-action');
+      else button.dataset.itemId = id;
+      button.classList.toggle('is-selected', ui.selected === id);
+      button.classList.toggle('is-stat', item.type === 'stat');
+      button.setAttribute('aria-label', itemLabel(item));
+      button.setAttribute('aria-pressed', String(ui.selected === id));
+      button.append(markFor(item));
+      button.addEventListener('click', () => {
+        ui.selected = ui.selected === id ? '' : id;
+        ui.menuOpen = false;
+        render();
+      });
+      if (count > 1 && item.type !== 'action') button.addEventListener('pointerdown', (event) => drag?.startRowDrag(event, id));
+      return button;
+    }
+
+    function addMenu(items) {
+      const menu = el('div', 'edge-dock-composer-menu');
+      const present = new Set(items.map((item) => itemsApi.itemId(item)));
+      const section = (titleKey, entries) => {
+        if (!entries.length) return;
+        const group = el('div', 'edge-dock-composer-menu-group');
+        group.append(el('div', 'edge-dock-composer-menu-title', t(titleKey)));
+        for (const item of entries) {
+          const option = el('button', 'edge-dock-composer-menu-option');
+          option.type = 'button';
+          // Usage entries are named in full here, so their rail glyph would only repeat it.
+          if (item.type === 'limit') option.append(markFor(item, { small: true }));
+          option.append(el('span', '', itemLabel(item)));
+          option.addEventListener('click', () => {
+            ui.menuOpen = false;
+            ui.selected = idFor(item);
+            if (item.type === 'action') void save({ [refreshKey]: true });
+            else void persist([...effectiveItems(), item]);
+          });
+          group.append(option);
+        }
+        menu.append(group);
+      };
+      // Keep every enabled provider in one list and in the user's limits order.
+      // A provider without quota data can still be pinned; the menu need not
+      // label it as temporarily unavailable.
+      section('settings.edgeDock.addLimits', addableLimitProviders(
+        enabledLimitProviders?.() || connectedProviders(),
+        items.filter((item) => item.type === 'limit').map((item) => item.provider)
+      ).map((provider) => ({ type: 'limit', provider, hiddenAccounts: [], showUsage: true, windowKey: '' })));
+      if (!limitsOnly) section('settings.edgeDock.addUsage', itemsApi.STAT_METRICS
+        .filter((metric) => metric !== itemsApi.SESSIONS_METRIC)
+        .map((metric) => ({ type: 'stat', metric }))
+        .filter((item) => !present.has(itemsApi.itemId(item))));
+      // Sessions is its own section rather than another usage figure: it lists
+      // the tracked clients' work, not a period's spend, and it is the only
+      // item that can show a client with no limits provider.
+      if (!limitsOnly) section('settings.edgeDock.addSessions', present.has(itemsApi.itemId({ type: 'stat', metric: itemsApi.SESSIONS_METRIC }))
+        ? []
+        : [{ type: 'stat', metric: itemsApi.SESSIONS_METRIC, runningOnly: false, groupBy: 'none' }]);
+      section('settings.edgeDock.addActions', refreshEnabled() ? [] : [refreshItem]);
+      if (!menu.childElementCount) menu.append(el('div', 'edge-dock-composer-empty', t('settings.edgeDock.nothingToAdd')));
+      return menu;
+    }
+
+    function switchRow(titleKey, checked, onChange) {
+      const label = el('label', 'checkbox-label settings-item edge-dock-composer-switch');
+      const text = el('span', 'settings-item-text');
+      text.append(el('span', 'settings-item-title', t(titleKey)));
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = checked;
+      input.addEventListener('change', () => onChange(input.checked));
+      label.append(text, input);
+      return label;
+    }
+
+    function choiceRow(titleKey, value, choices, onChange) {
+      const row = el('div', 'settings-item edge-dock-composer-choice');
+      const text = el('span', 'settings-item-text');
+      text.append(el('span', 'settings-item-title', t(titleKey)));
+      const options = el('span', 'inline-options');
+      for (const choice of choices) {
+        const label = el('label', 'inline-option');
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.name = `edgeDock-${ui.selected}-${titleKey}`;
+        input.value = choice.value;
+        input.checked = value === choice.value;
+        input.addEventListener('change', () => {
+          if (input.checked) onChange(input.value);
+        });
+        label.append(input, el('span', '', t(choice.labelKey)));
+        options.append(label);
+      }
+      row.append(text, options);
+      return row;
+    }
+
+    function headlineAccountChoices(item) {
+      const hidden = new Set(item.hiddenAccounts || []);
+      return accountsFor(item.provider).filter((account) => !hidden.has(selectionKey(account)) && !hidden.has(account.accountKey));
+    }
+
+    function refreshAccountPicker(select, item) {
+      const accounts = headlineAccountChoices(item);
+      const options = accounts.map((account) => {
+        const option = document.createElement('option');
+        option.value = account.accountKey;
+        option.textContent = account.accountDisplayName || account.accountName || maskEmail(account.accountEmail)
+          || account.planLabel || providerLabel(item.provider);
+        return option;
+      });
+      if (!accounts.some((account) => account.accountKey === item.accountKey)) {
+        const missing = document.createElement('option');
+        missing.value = item.accountKey || '';
+        missing.textContent = t('trayComposer.account.none');
+        missing.disabled = true;
+        options.unshift(missing);
+      }
+      select.replaceChildren(...options);
+      select.value = item.accountKey || '';
+    }
+
+    function accountRow(item, id) {
+      const row = el('label', 'settings-item edge-dock-composer-window');
+      row.append(el('span', 'settings-item-title', t('trayComposer.account.specificLabel')));
+      const select = document.createElement('select');
+      refreshAccountPicker(select, item);
+      select.addEventListener('change', () => { void updateItem(id, { accountKey: select.value }); });
+      select.addEventListener('blur', () => {
+        const currentItem = effectiveItems().find((entry) => itemsApi.itemId(entry) === id);
+        if (currentItem && root.contains(select)) refreshAccountPicker(select, currentItem);
+      });
+      row.append(select);
+      return row;
+    }
+
+    function windowChoices(item) {
+      const hidden = new Set(item.hiddenAccounts || []);
+      const choices = new Map();
+      for (const record of getStats()?.limits?.providers || []) {
+        if (String(record?.provider || '').toLowerCase() !== item.provider
+          || (record.accountKey && (hidden.has(selectionKey(record)) || hidden.has(record.accountKey)))) continue;
+        for (const window of itemsApi.selectableLimitWindows(record, getSettings())) {
+          const key = itemsApi.limitWindowKey(window);
+          if (!key || choices.has(key)) continue;
+          // A row hidden from the provider's card is not offered as a new pin;
+          // a pin made before it was hidden keeps its name rather than turning
+          // into "unavailable".
+          const keys = itemsApi.limitWindowKeys(window);
+          if (isWindowHidden(item.provider, window) && !keys.includes(item.windowKey)) continue;
+          choices.set(key, {
+            value: key,
+            keys,
+            label: windowLabel(record, window)
+          });
+        }
+      }
+      return [...choices.values()];
+    }
+
+    function refreshWindowPicker(select, item) {
+      const choices = [{ value: '', label: t('settings.edgeDock.window.auto') }, ...windowChoices(item)];
+      const matchingChoices = item.windowKey ? choices.filter((choice) => choice.keys?.includes(item.windowKey)) : [];
+      const selectedValue = matchingChoices.length === 1 ? matchingChoices[0].value : item.windowKey || '';
+      if (item.windowKey && matchingChoices.length !== 1) {
+        choices.push({ value: item.windowKey, label: t('settings.edgeDock.window.unavailable') });
+      }
+      const options = choices.map((choice) => {
+        const option = document.createElement('option');
+        option.value = choice.value;
+        option.textContent = choice.label;
+        return option;
+      });
+      select.replaceChildren(...options);
+      select.value = selectedValue;
+    }
+
+    function windowRow(item, id) {
+      const row = el('label', 'settings-item edge-dock-composer-window');
+      row.append(el('span', 'settings-item-title', t('settings.edgeDock.window')));
+      const select = document.createElement('select');
+      refreshWindowPicker(select, item);
+      select.addEventListener('change', () => { void updateItem(id, { windowKey: select.value }); });
+      select.addEventListener('blur', () => {
+        // Blur precedes the click on the next control. Refresh only the options
+        // so that control stays attached and receives its click and focus.
+        const currentItem = effectiveItems().find((entry) => itemsApi.itemId(entry) === id);
+        if (currentItem && root.contains(select)) refreshWindowPicker(select, currentItem);
+      });
+      row.append(select);
+      return row;
+    }
+
+    function detail(items) {
+      const pane = el('div', 'edge-dock-composer-detail');
+      if (ui.menuOpen) {
+        pane.append(addMenu(items));
+        return pane;
+      }
+      const item = items.find((entry) => idFor(entry) === ui.selected);
+      if (!item) {
+        pane.append(el('p', 'edge-dock-composer-hint', t(isAutomatic()
+          ? limitsOnly ? 'settings.notch.limitsHint' : 'settings.edgeDock.automaticHint'
+          : (items.length ? 'settings.edgeDock.selectHint' : 'settings.edgeDock.emptyHint'))));
+        return pane;
+      }
+      const id = idFor(item);
+      const head = el('div', 'edge-dock-composer-detail-head');
+      head.append(markFor(item, { small: true }), el('span', 'edge-dock-composer-detail-title', itemLabel(item)));
+      const remove = el('button', 'edge-dock-composer-remove', t('settings.edgeDock.remove'));
+      remove.type = 'button';
+      remove.addEventListener('click', () => {
+        ui.selected = '';
+        if (item.type === 'action') void save({ [refreshKey]: false });
+        else void persist(effectiveItems().filter((entry) => idFor(entry) !== id));
+      });
+      head.append(remove);
+      pane.append(head);
+
+      if (item.type === 'plugin') {
+        pane.append(el('p', 'edge-dock-composer-hint', item.ref));
+        return pane;
+      }
+      if (item.type === 'action') {
+        pane.append(el('p', 'edge-dock-composer-hint', t(itemsKey === 'notchItems' ? 'settings.notch.refreshNote' : 'settings.edgeDock.refreshNote')));
+        return pane;
+      }
+      if (item.type === 'stat') {
+        if (item.metric === itemsApi.SESSIONS_METRIC) {
+          pane.append(el('p', 'edge-dock-composer-hint', t('settings.edgeDock.statNote.sessions')));
+          pane.append(switchRow('settings.edgeDock.runningOnly', item.runningOnly === true, (checked) => {
+            void updateItem(id, { runningOnly: checked });
+          }));
+          pane.append(choiceRow('settings.edgeDock.groupBy', item.groupBy === 'client' ? 'client' : 'none', [
+            { value: 'none', labelKey: 'settings.edgeDock.groupBy.none' },
+            { value: 'client', labelKey: 'settings.edgeDock.groupBy.client' }
+          ], (groupBy) => {
+            void updateItem(id, { groupBy });
+          }));
+          // What the rail cell's third line carries. Only the cell changes: the
+          // card is the same list either way, which is why this is named after the
+          // rail rather than the item.
+          pane.append(choiceRow('settings.edgeDock.cellDetail', item.cellDetail === 'rate' ? 'rate' : 'clients', [
+            { value: 'clients', labelKey: 'settings.edgeDock.cellDetail.clients' },
+            { value: 'rate', labelKey: 'settings.edgeDock.cellDetail.rate' }
+          ], (cellDetail) => {
+            void updateItem(id, { cellDetail });
+          }));
+          return pane;
+        }
+        const noteKey = item.metric === 'liveRate'
+          ? 'settings.edgeDock.statNote.liveRate'
+          : itemsApi.DERIVED_PERIODS.includes(item.metric)
+            ? 'settings.edgeDock.statNote.derived'
+            : 'settings.edgeDock.statNote.usage';
+        pane.append(el('p', 'edge-dock-composer-hint', t(noteKey)));
+        return pane;
+      }
+      if (!limitsOnly) pane.append(switchRow('settings.edgeDock.showUsage', item.showUsage !== false, (checked) => {
+        void updateItem(id, { showUsage: checked });
+      }));
+      if (!limitsOnly) pane.append(switchRow('settings.edgeDock.showSessions', item.showSessions !== false, (checked) => {
+        void updateItem(id, { showSessions: checked });
+      }));
+      if (!limitsOnly) pane.append(windowRow(item, id));
+      if (item.provider === 'codex') {
+        pane.append(choiceRow(limitsOnly ? 'settings.notch.accountTitle' : 'settings.edgeDock.limitValue', item.accountMode === 'lowest' ? 'lowest' : 'active', [
+          { value: 'active', labelKey: 'trayComposer.account.active' },
+          { value: 'lowest', labelKey: 'trayComposer.account.lowest' }
+        ], (accountMode) => {
+          void updateItem(id, { accountMode });
+        }));
+      }
+      if (!limitsOnly && item.provider === 'thirdparty') {
+        pane.append(choiceRow('settings.edgeDock.limitValue', item.accountMode, [
+          { value: 'lowest', labelKey: 'trayComposer.account.lowest' },
+          { value: 'specific', labelKey: 'trayComposer.account.specific' }
+        ], (accountMode) => {
+          const change = { accountMode };
+          if (accountMode === 'specific') {
+            const currentItem = effectiveItems().find((entry) => itemsApi.itemId(entry) === id);
+            change.accountKey = currentItem.accountKey || headlineAccountChoices(currentItem)[0]?.accountKey || '';
+          }
+          void updateItem(id, change);
+        }));
+        if (item.accountMode === 'specific') pane.append(accountRow(item, id));
+      }
+      const accounts = accountsFor(item.provider);
+      if (accounts.length > 1) {
+        const hidden = new Set(item.hiddenAccounts || []);
+        const group = el('div', 'edge-dock-composer-accounts');
+        group.append(el('div', 'edge-dock-composer-menu-title', t('settings.edgeDock.accounts')));
+        for (const account of accounts) {
+          const label = el('label', 'edge-dock-composer-account');
+          const input = document.createElement('input');
+          input.type = 'checkbox';
+          input.checked = !hidden.has(selectionKey(account)) && !hidden.has(account.accountKey);
+          input.addEventListener('change', () => {
+            const next = new Set(item.hiddenAccounts || []);
+            if (input.checked) {
+              if (next.delete(account.accountKey) && account.provider === 'alibaba') {
+                for (const other of accountsFor(item.provider)) {
+                  if (other.accountKey === account.accountKey && selectionKey(other) !== selectionKey(account)) next.add(selectionKey(other));
+                }
+              }
+              next.delete(selectionKey(account));
+            } else next.add(selectionKey(account));
+            void updateItem(id, { hiddenAccounts: [...next] });
+          });
+          const identity = account.accountDisplayName || account.accountName || maskEmail(account.accountEmail);
+          const product = item.provider === 'mimo' ? mimoProductLabel(account) : '';
+          const name = product || item.provider === 'alibaba'
+            ? limitAccountTitle(item.provider, account, accounts.indexOf(account), accounts)
+            : identity || account.planLabel || providerLabel(item.provider);
+          const text = el('span', 'edge-dock-composer-account-name', name);
+          text.setAttribute('aria-label', name);
+          const planText = item.provider === 'alibaba'
+            ? t(`settings.alibaba.${{ cn: 'planCn', intl: 'planIntl', 'cn-personal': 'planCnPersonal', 'intl-personal': 'planIntlPersonal' }[account.region] || 'planCn'}`)
+            : account.planLabel;
+          const plan = planText && name !== planText ? el('span', 'edge-dock-composer-account-plan', planText) : null;
+          label.append(input, text);
+          if (plan) label.append(plan);
+          group.append(label);
+        }
+        pane.append(group);
+      }
+      return pane;
+    }
+
+    function render() {
+      if (!root) return;
+      if (drag?.deferRender()) return;
+      // Refresh is a fixed footer action; it does not freeze the automatic provider list.
+      const allItems = [...effectiveItems(), ...(refreshEnabled() ? [refreshItem] : [])];
+      const items = allItems.filter(itemAvailable);
+      if (ui.selected && !items.some((item) => idFor(item) === ui.selected)) ui.selected = '';
+      const selectedItem = items.find((item) => idFor(item) === ui.selected);
+      // A stats tick can change token totals without changing any control here.
+      // Replacing a focused picker on every tick interrupts its selection.
+      const signature = JSON.stringify({
+        items,
+        labels: items.map(itemLabel),
+        pluginMetadata: items.map(item => item.type === 'plugin' ? pluginView?.(item.ref) : moduleView?.(item.provider)),
+        selected: ui.selected,
+        menuOpen: ui.menuOpen,
+        automatic: isAutomatic(),
+        connected: isAutomatic() ? connectedProviders() : null,
+        addable: ui.menuOpen ? enabledLimitProviders?.() : null,
+        windows: selectedItem?.type === 'limit' ? windowChoices(selectedItem) : null,
+        accounts: selectedItem?.type === 'limit' ? accountsFor(selectedItem.provider).map((account, index, accounts) => {
+          const identity = [selectionKey(account), account.accountDisplayName, account.accountName, maskEmail(account.accountEmail), account.planLabel, account.accountLabel];
+          if (selectedItem.provider === 'mimo' && mimoProductLabel(account)) {
+            identity.push(limitAccountTitle('mimo', account, index, accounts));
+          }
+          return identity;
+        }) : null,
+        wording: [t('settings.edgeDock.window'), t('settings.edgeDock.window.auto'), t('settings.edgeDock.window.unavailable')]
+      });
+      if (signature === renderedSignature && root.firstChild) return;
+      if (root.contains(document.activeElement) && (document.activeElement?.tagName === 'SELECT'
+        || document.activeElement?.classList.contains('select-control-trigger'))) return;
+      if (root.querySelector('.select-control-trigger[aria-expanded="true"]')) return;
+
+      const heading = el('div', 'edge-dock-composer-heading');
+      heading.append(el('span', '', t(limitsOnly ? 'notch.tab.limits' : 'settings.edgeDock.items')));
+      const actions = el('span', 'edge-dock-composer-heading-actions');
+      actions.append(el('span', 'edge-dock-composer-heading-hint', t('settings.edgeDock.itemsHint')));
+      if (!isAutomatic() || refreshEnabled()) {
+        const reset = el('button', 'edge-dock-composer-reset', t('settings.edgeDock.reset'));
+        reset.type = 'button';
+        reset.addEventListener('click', () => {
+          ui.selected = '';
+          ui.menuOpen = false;
+          void save({ [itemsKey]: null, [refreshKey]: false });
+        });
+        actions.append(reset);
+      }
+      heading.append(actions);
+
+      const body = el('div', 'edge-dock-composer-body');
+      const rail = el('div', 'edge-dock-composer-rail');
+      for (const item of items) rail.append(railItem(item, items.length));
+      const add = el('button', 'edge-dock-composer-add', '+');
+      add.type = 'button';
+      add.setAttribute('aria-label', t('settings.edgeDock.add'));
+      add.setAttribute('aria-expanded', String(ui.menuOpen));
+      add.classList.toggle('is-open', ui.menuOpen);
+      add.addEventListener('click', () => {
+        ui.menuOpen = !ui.menuOpen;
+        if (ui.menuOpen) ui.selected = '';
+        render();
+      });
+      rail.append(add);
+      body.append(rail, detail(items));
+      // A horizontal rail keeps its scroll position when selection or sorting rebuilds it.
+      const scrollLeft = renderedRail?.scrollLeft || 0;
+      root.replaceChildren(heading, body);
+      if (scrollLeft) rail.scrollLeft = scrollLeft;
+      renderedRail = rail;
+      renderedSignature = signature;
+    }
+
+    drag = createRowDrag({
+      getList: () => root.querySelector('.edge-dock-composer-rail'),
+      ...(limitsOnly ? { axis: 'x', getScrollPanel: () => root.querySelector('.edge-dock-composer-rail') } : {}),
+      rowSelector: '.edge-dock-composer-item[data-item-id]',
+      idKey: 'itemId',
+      dragExcluded: '.edge-dock-composer-add',
+      // Ids come back lower-cased from the drag sort; see reorderEdgeDockItems.
+      applyOrder: (order) => {
+        const rail = root.querySelector('.edge-dock-composer-rail');
+        const add = rail?.querySelector('.edge-dock-composer-item.is-action')
+          || rail?.querySelector('.edge-dock-composer-add');
+        const nodes = new Map([...(rail?.querySelectorAll('[data-item-id]') || [])]
+          .map((node) => [node.dataset.itemId.toLowerCase(), node]));
+        for (const id of order) {
+          const node = nodes.get(String(id).toLowerCase());
+          if (node) rail.insertBefore(node, add);
+        }
+      },
+      persistOrder: (order) => {
+        const items = effectiveItems();
+        const visible = itemsApi.reorderEdgeDockItems(items.filter(itemAvailable), order);
+        let index = 0;
+        void persist(items.map(item => itemAvailable(item) ? visible[index++] : item));
+      },
+      requestRender: () => render()
+    });
+
+    return { render };
+  }
+
+  function normalizeProviderId(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  // Providers still available to add, in the order the Limits page lists them.
+  // `added` is what the dock already shows.
+  //
+  // A plain function rather than a few lines inside the menu because the menu is
+  // DOM and this is the part worth testing: this rule is what decides whether a
+  // provider with no quota can be pinned at all.
+  function addableLimitProviders(enabled, added) {
+    const skip = new Set((added || []).map(normalizeProviderId));
+    return (enabled || []).map(normalizeProviderId).filter((id) => id && !skip.has(id));
+  }
+
+  return { createEdgeDockComposer, addableLimitProviders };
+});

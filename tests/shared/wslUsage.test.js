@@ -1,0 +1,521 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const {
+  isWslInstalled,
+  listRunningWslDistros,
+  emptyWslBundle,
+  wslUsageHomes,
+  homeHasData,
+  collectWslUsage
+} = require('../../src/shared/wslUsage');
+
+test('homeHasData returns the client ids whose markers are present', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const present = new Set([
+    `${home}\\.local\\share\\goose\\sessions\\sessions.db`,
+    `${home}\\.codex\\sessions`,
+    `${home}\\.hermes`,
+    `${home}\\.local\\share\\opencode`,
+    `${home}\\.zcode\\cli\\db`
+  ]);
+  const existsSync = (p) => present.has(p);
+  const ids = homeHasData(home, existsSync);
+  assert.deepEqual([...ids].sort(), ['codex', 'goose', 'hermes', 'opencode', 'zcode']);
+});
+
+test('each shared host directory discovers and attributes a WSL-only home', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\alice';
+  const entries = [
+    ['.factory/sessions', 'droid'],
+    ['.qwen/projects', 'qwen'],
+    ['.pi/agent/sessions', 'pi'],
+    ['.omp/agent/sessions', 'omp'],
+    ['.omo/agent/sessions', 'senpi'],
+    ['.senpi/agent/sessions', 'senpi'],
+    ['.omo/senpi-task', 'senpi'],
+    ['.commandcode/projects', 'commandcode']
+  ];
+  for (const [marker, client] of entries) {
+    const markerPath = `${home}\\${marker.replace(/\//g, '\\')}`;
+    const deps = {
+      platform: 'win32',
+      exec: (cmd) => cmd === 'reg' ? 'Lxss' : 'Ubuntu\n',
+      readdirSync: (dir) => dir === '\\\\wsl$\\Ubuntu\\home' ? ['alice'] : [],
+      existsSync: (value) => value === markerPath
+    };
+    assert.deepEqual(homeHasData(home, deps.existsSync, deps.readdirSync), [client]);
+    assert.deepEqual(wslUsageHomes(deps), [home]);
+    const { detected } = await collectWslUsage({ clients: client, runTokscale: async () => ({ entries: [] }) }, deps);
+    assert.deepEqual(detected, [client]);
+  }
+});
+
+test('native-only Copilot WSL home is discovered and its usage is collected', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\alice';
+  const marker = require('node:path').win32.join(home, '.copilot', 'session-state');
+  const deps = {
+    platform: 'win32',
+    exec: (cmd) => cmd === 'reg' ? 'Lxss' : 'Ubuntu\n',
+    readdirSync: (dir) => dir === '\\\\wsl$\\Ubuntu\\home' ? ['alice'] : [],
+    existsSync: (value) => value === marker
+  };
+  assert.deepEqual(homeHasData(home, deps.existsSync, deps.readdirSync), ['copilot']);
+  assert.deepEqual(wslUsageHomes(deps), [home]);
+  const calls = [];
+  const { bundle, detected } = await collectWslUsage({
+    clients: 'copilot',
+    commandTimeoutMs: 120000,
+    allTimeTimeoutMs: 1800000,
+    runTokscale: async (args) => {
+      calls.push(args);
+      return { entries: [{ client: 'copilot', model: 'gpt-5', inputTokens: 75, outputTokens: 25 }] };
+    }
+  }, deps);
+  assert.deepEqual(detected, ['copilot']);
+  assert.equal(calls.length, 3);
+  assert.deepEqual(calls.map(call => call.commandTimeoutMs), [120000, 120000, 1800000]);
+  assert.ok(calls.every(args => args.clients === 'copilot' && args.flags.includes(home)));
+  for (const period of ['today', 'month', 'allTime']) {
+    assert.equal(bundle[period].totalTokens, 100);
+    assert.equal(bundle[period].clients.copilot, 100);
+  }
+});
+
+test('homeHasData maps an alternate-root marker to its client id', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const present = new Set([`${home}\\.kimi-code\\sessions`]);
+  const ids = homeHasData(home, (p) => present.has(p));
+  assert.deepEqual([...ids], ['kimi']);
+});
+
+test('homeHasData detects Muse sessions in a WSL home', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const marker = `${home}\\.local\\share\\muse\\sessions`;
+  assert.deepEqual(homeHasData(home, (path) => path === marker), ['muse']);
+});
+
+test('homeHasData detects fx sessions in a WSL home', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const marker = `${home}\\.fx\\sessions`;
+  assert.deepEqual(homeHasData(home, (path) => path === marker), ['fx']);
+});
+
+test('homeHasData detects MiniMax Code runtime stores in a WSL home', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  for (const dir of ['.minimax', '.mavis']) {
+    const marker = `${home}\\${dir}\\v2\\sessions`;
+    assert.deepEqual(homeHasData(home, (path) => path === marker), ['mcode']);
+  }
+});
+
+test('homeHasData detects a WSL home that only has a MiniMax Code profile', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  for (const dir of ['.minimax-work', '.mavis-team']) {
+    const marker = `${home}\\${dir}\\v2\\sessions`;
+    const readdirSync = (p) => (p === home ? ['.bashrc', '.minimax-', dir] : []);
+    assert.deepEqual(homeHasData(home, (path) => path === marker, readdirSync), ['mcode']);
+  }
+  // A profile-looking name without a session store does not mark the home.
+  assert.deepEqual(homeHasData(home, () => false, (p) => (p === home ? ['.minimax-work'] : [])), []);
+});
+
+test('homeHasData attributes Kilo CLI and extension markers to one client', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  for (const marker of [
+    '.local\\share\\kilo\\kilo.db',
+    '.config\\Code\\User\\globalStorage\\kilocode.kilo-code\\tasks',
+    '.vscode-server\\data\\User\\globalStorage\\kilocode.kilo-code\\tasks'
+  ]) {
+    assert.deepEqual(homeHasData(home, (p) => p === `${home}\\${marker}`), ['kilo']);
+  }
+});
+
+test('homeHasData maps Proma agent sessions to proma', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const present = new Set([`${home}\\.proma\\agent-sessions`]);
+  const ids = homeHasData(home, (p) => present.has(p));
+  assert.deepEqual(ids, ['proma']);
+});
+
+test('homeHasData maps LM Studio server logs to lmstudio', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const present = new Set([`${home}\\.lmstudio\\server-logs`]);
+  assert.deepEqual(homeHasData(home, (p) => present.has(p)), ['lmstudio']);
+});
+
+test('homeHasData maps VS Code Copilot workspace storage to copilot', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const workspaceRoot = `${home}\\.config\\Code\\User\\workspaceStorage`;
+  const present = new Set([`${workspaceRoot}\\abc\\chatSessions`]);
+  assert.deepEqual(homeHasData(home, (p) => present.has(p), (p) => p === workspaceRoot ? ['abc'] : []), ['copilot']);
+});
+
+test('homeHasData returns empty array when no markers present', () => {
+  const ids = homeHasData('\\\\wsl$\\Ubuntu\\home\\u', () => false);
+  assert.deepEqual(ids, []);
+});
+
+test('WSL marker discovery deliberately excludes Reasonix', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const reasonixStats = `${home}\\.reasonix\\stats`;
+  assert.deepEqual(homeHasData(home, (p) => p === reasonixStats), []);
+});
+
+test('isWslInstalled is false on non-win32 without calling exec', () => {
+  let called = false;
+  const ok = isWslInstalled({ platform: 'darwin', exec: () => { called = true; return ''; } });
+  assert.equal(ok, false);
+  assert.equal(called, false);
+});
+
+test('isWslInstalled false when reg query throws (key missing)', () => {
+  const ok = isWslInstalled({ platform: 'win32', exec: () => { throw new Error('key not found'); } });
+  assert.equal(ok, false);
+});
+
+test('isWslInstalled true when reg query succeeds', () => {
+  const ok = isWslInstalled({ platform: 'win32', exec: () => 'HKEY_CURRENT_USER\\...\\Lxss\\{guid}' });
+  assert.equal(ok, true);
+});
+
+test('listRunningWslDistros never calls wsl.exe when WSL not installed', () => {
+  const calls = [];
+  const out = listRunningWslDistros({
+    platform: 'win32',
+    exec: (cmd) => { calls.push(cmd); if (cmd === 'reg') throw new Error('missing'); return ''; }
+  });
+  assert.deepEqual(out, []);
+  assert.deepEqual(calls, ['reg']); // reg only, wsl.exe never reached
+});
+
+test('listRunningWslDistros parses running names when installed', () => {
+  const out = listRunningWslDistros({
+    platform: 'win32',
+    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\nDebian\n')
+  });
+  assert.deepEqual(out, ['Ubuntu', 'Debian']);
+});
+
+test('listRunningWslDistros returns [] when wsl.exe throws', () => {
+  const out = listRunningWslDistros({
+    platform: 'win32',
+    exec: (cmd) => { if (cmd === 'reg') return 'Lxss'; throw new Error('boom'); }
+  });
+  assert.deepEqual(out, []);
+});
+
+test('emptyWslBundle has three empty periods', () => {
+  const b = emptyWslBundle();
+  assert.equal(b.today.totalTokens, 0);
+  assert.equal(b.month.totalTokens, 0);
+  assert.equal(b.allTime.totalTokens, 0);
+});
+
+test('wslUsageHomes keeps homes with a data marker, drops empty ones', () => {
+  const homes = wslUsageHomes({
+    platform: 'win32',
+    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    readdirSync: (dir) => {
+      if (dir === '\\\\wsl$\\Ubuntu\\home') return ['alice', 'bob'];
+      throw new Error('unreadable');
+    },
+    existsSync: (p) => p === '\\\\wsl$\\Ubuntu\\home\\alice\\.claude\\projects'
+  });
+  assert.deepEqual(homes, ['\\\\wsl$\\Ubuntu\\home\\alice']);
+});
+
+test('wslUsageHomes checks the root home too', () => {
+  const homes = wslUsageHomes({
+    platform: 'win32',
+    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Debian\n'),
+    readdirSync: () => [],
+    existsSync: (p) => p === '\\\\wsl$\\Debian\\root\\.codex\\sessions'
+  });
+  assert.deepEqual(homes, ['\\\\wsl$\\Debian\\root']);
+});
+
+test('wslUsageHomes returns [] when no distro is running', () => {
+  const homes = wslUsageHomes({
+    platform: 'win32',
+    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : ''),
+    readdirSync: () => [],
+    existsSync: () => true
+  });
+  assert.deepEqual(homes, []);
+});
+
+// A WSL home that only holds a new A-class client's data (pi, Oh My Pi, zed,
+// Kilo, Command Code, DSH, mimo, zcode, kiro, LM Studio) must still be discovered — mirroring the sync
+// point each new tracked client adds (see docs/providers/README.md "Adding a tracked
+// client"). Zed's marker is the threads.db file, not the directory
+// (tokscale checks is_file()).
+test('wslUsageHomes keeps a home whose only tracked-client data is pi, zed, Kilo, Command Code, DSH, mimo, zcode, kiro, or LM Studio', () => {
+  function homesFor(markerRel) {
+    return wslUsageHomes({
+      platform: 'win32',
+      exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+      readdirSync: () => ['alice'],
+      existsSync: (p) => p === `\\\\wsl$\\Ubuntu\\home\\alice\\${markerRel.replace(/\//g, '\\')}`
+    });
+  }
+  assert.deepEqual(homesFor('.pi/agent/sessions'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.omp/agent/sessions'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.local/share/zed/threads/threads.db'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.local/share/kilo/kilo.db'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.config/Code/User/globalStorage/kilocode.kilo-code/tasks'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.commandcode/projects'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.dsh/sessions'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.local/share/mimocode/mimocode.db'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.zcode/projects'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.zcode/cli/db'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.kiro/sessions'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.local/share/kiro-cli/data.sqlite3'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.config/Kiro/User/globalStorage/kiro.kiroagent'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  // WSL is case-sensitive, so the lowercase Kiro IDE root must be matched too.
+  assert.deepEqual(homesFor('.config/kiro/User/globalStorage/kiro.kiroagent'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.codebuddy/projects'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.workbuddy'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.workbuddy-ai'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+  assert.deepEqual(homesFor('.lmstudio/server-logs'), ['\\\\wsl$\\Ubuntu\\home\\alice']);
+});
+
+test('wslUsageHomes keeps a home whose only data is VS Code Copilot Chat', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\alice';
+  const workspaceRoot = `${home}\\.config\\Code\\User\\workspaceStorage`;
+  const homes = wslUsageHomes({
+    platform: 'win32',
+    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    readdirSync: (dir) => {
+      if (dir === '\\\\wsl$\\Ubuntu\\home') return ['alice'];
+      if (dir === workspaceRoot) return ['abc'];
+      throw new Error('unreadable');
+    },
+    existsSync: (p) => p === `${workspaceRoot}\\abc\\chatSessions`
+  });
+  assert.deepEqual(homes, [home]);
+});
+
+// Antigravity CLI (`agy`) stores conversations as SQLite under
+// ~/.gemini/antigravity-cli/conversations. A WSL home holding only that must
+// still be kept and attributed to the umbrella `antigravity` client, otherwise a
+// CLI-only WSL user is dropped before the scan can request the antigravity-cli id.
+test('homeHasData attributes a CLI-only Antigravity home to antigravity', () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\alice';
+  const existsSync = (p) => p === `${home}\\.gemini\\antigravity-cli\\conversations`;
+  assert.deepEqual(homeHasData(home, existsSync), ['antigravity']);
+});
+
+// A home holding only an alternate-root client (Claude transcripts, Kimi Code,
+// legacy OpenClaw bot dirs) tokscale 3.1.3 still supports must be discovered too.
+test('wslUsageHomes keeps a home whose only data is an alternate root', () => {
+  function homesFor(markerRel) {
+    return wslUsageHomes({
+      platform: 'win32',
+      exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+      readdirSync: () => ['alice'],
+      existsSync: (p) => p === `\\\\wsl$\\Ubuntu\\home\\alice\\${markerRel.replace(/\//g, '\\')}`
+    });
+  }
+  for (const rel of ['.claude/transcripts', '.kimi-code/sessions', '.clawdbot/agents', '.moltbot/agents', '.moldbot/agents']) {
+    assert.deepEqual(homesFor(rel), ['\\\\wsl$\\Ubuntu\\home\\alice'], `alt root not discovered: ${rel}`);
+  }
+});
+
+function entriesJson(tokens) {
+  return { entries: [{ client: 'claude', sessionId: 's1', model: 'claude-opus-4-8', input: tokens, output: 0, cost: 0 }] };
+}
+
+function tokscaleStub(map) {
+  return async ({ flags }) => {
+    const home = flags[flags.indexOf('--home') + 1];
+    const period = flags.includes('--today') ? 'today' : flags.includes('--month') ? 'month' : 'allTime';
+    return entriesJson(map[home][period]);
+  };
+}
+
+test('collectWslUsage passes every requested client to each discovered home', async () => {
+  const seenClientsPerHome = {};
+  const runTokscale = async ({ clients, flags }) => {
+    const home = flags[flags.indexOf('--home') + 1];
+    (seenClientsPerHome[home] ??= []).push(clients);
+    return { entries: [] };
+  };
+  const deps = {
+    platform: 'win32',
+    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    readdirSync: () => ['alice', 'carol'],
+    existsSync: (p) =>
+      p.endsWith('\\alice\\.claude\\projects') ||
+      p === '\\\\wsl$\\Ubuntu\\home\\carol\\.local\\share\\zed\\threads\\threads.db'
+  };
+  await collectWslUsage(
+    { clients: ' claude, zed ', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale },
+    deps
+  );
+  for (const home of ['\\\\wsl$\\Ubuntu\\home\\alice', '\\\\wsl$\\Ubuntu\\home\\carol']) {
+    assert.deepEqual(seenClientsPerHome[home], ['claude,zed', 'claude,zed', 'claude,zed']);
+  }
+});
+
+test('collectWslUsage sums two homes per period', async () => {
+  const deps = {
+    platform: 'win32',
+    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    readdirSync: () => ['alice', 'bob'],
+    existsSync: (p) => p.endsWith('\\.claude\\projects')
+  };
+  const map = {
+    '\\\\wsl$\\Ubuntu\\home\\alice': { today: 10, month: 100, allTime: 1000 },
+    '\\\\wsl$\\Ubuntu\\home\\bob': { today: 5, month: 50, allTime: 500 }
+  };
+  const { bundle } = await collectWslUsage(
+    { clients: 'claude', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale: tokscaleStub(map) },
+    deps
+  );
+  assert.equal(bundle.today.totalTokens, 15);
+  assert.equal(bundle.month.totalTokens, 150);
+  assert.equal(bundle.allTime.totalTokens, 1500);
+  assert.deepEqual(bundle.today.clients, { claude: 15 });
+});
+
+test('collectWslUsage decorates each home before merging periods', async () => {
+  const homes = ['\\\\wsl$\\Ubuntu\\home\\alice'];
+  const decorated = [];
+  const { bundle } = await collectWslUsage({
+    clients: 'claude', allTimeSince: '2026-01-01', runTokscale: async () => ({ rows: [{ client: 'claude', session: 's1', totalTokens: 1 }] }),
+    decoratePeriods(periods, home) {
+      decorated.push(home);
+      for (const period of Object.values(periods)) {
+        period.sessions['claude:s1'].projectId = 'sha256:wsl';
+        period.sessions['claude:s1'].projectLabel = 'repo';
+      }
+    }
+  }, {
+    platform: 'win32', exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    readdirSync: () => ['alice'], existsSync: (value) => value.startsWith(homes[0]) && value.endsWith('\\.claude\\projects')
+  });
+  assert.deepEqual(decorated, homes);
+  assert.equal(bundle.today.sessions['claude:s1'].projectId, 'sha256:wsl');
+});
+
+test('collectWslUsage reports detected clients separate from those with data', async () => {
+  // One running distro, one home with BOTH .codex and .hermes markers, but
+  // tokscale only returns tokens for codex (hermes SQLite reads empty over 9P).
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const deps = {
+    platform: 'win32',
+    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    readdirSync: () => ['u'],
+    existsSync: (p) => p.startsWith(`${home}\\.codex`) || p.startsWith(`${home}\\.hermes`)
+  };
+  const runTokscale = async () => ({ entries: [{ client: 'codex', sessionId: 's', model: 'm', input: 5, output: 0, cost: 0 }] });
+  const { bundle, detected } = await collectWslUsage(
+    { clients: 'codex,hermes', allTimeSince: '2024-01-01', commandTimeoutMs: 1000, runTokscale },
+    deps
+  );
+  assert.deepEqual([...detected].sort(), ['codex', 'hermes']); // both markers found
+  assert.deepEqual(Object.keys(bundle.allTime.clients), ['codex']); // only codex returned tokens
+});
+
+test('collectWslUsage does not report detected clients the user is not tracking', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const deps = {
+    platform: 'win32',
+    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+    readdirSync: () => ['u'],
+    // Home holds BOTH codex and openclaw markers, but only codex is tracked.
+    existsSync: (p) => p.startsWith(`${home}\\.codex`) || p.startsWith(`${home}\\.openclaw`)
+  };
+  const runTokscale = async () => ({ entries: [] });
+  const { detected } = await collectWslUsage(
+    { clients: 'codex', allTimeSince: '2024-01-01', commandTimeoutMs: 1000, runTokscale },
+    deps
+  );
+  assert.deepEqual(detected, ['codex']); // openclaw marker present but untracked -> excluded
+});
+
+test('collectWslUsage scans a Proma-only WSL home through tokscale --home', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const calls = [];
+  const { bundle, detected } = await collectWslUsage(
+    {
+      clients: 'proma',
+      trackedClients: 'proma',
+      allTimeSince: '2025-01-01',
+      commandTimeoutMs: 1000,
+      runTokscale: async ({ clients, flags }) => {
+        calls.push({ clients, flags });
+        return { entries: [{ client: 'proma', model: 'm', input: 9, output: 1 }] };
+      }
+    },
+    {
+      platform: 'win32',
+      exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+      readdirSync: () => ['u'],
+      existsSync: (p) => p === `${home}\\.proma\\agent-sessions`
+    }
+  );
+  assert.deepEqual(detected, ['proma']);
+  assert.deepEqual(calls.map(({ clients }) => clients), ['proma', 'proma', 'proma']);
+  assert.ok(calls.every(({ flags }) => flags[flags.indexOf('--home') + 1] === home));
+  assert.equal(bundle.today.clients.proma, 10);
+});
+
+test('collectWslUsage includes JSONL-only Qoder CN but excludes CatPaw', async () => {
+  const home = '\\\\wsl$\\Ubuntu\\home\\u';
+  const seen = [];
+  const { detected } = await collectWslUsage(
+    {
+      clients: 'claude,catpaw,qodercn',
+      trackedClients: 'claude,catpaw,qodercn',
+      allTimeSince: '2025-01-01',
+      commandTimeoutMs: 1000,
+      runTokscale: async ({ clients }) => {
+        seen.push(clients);
+        return { entries: [] };
+      }
+    },
+    {
+      platform: 'win32',
+      exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\n'),
+      readdirSync: () => ['u'],
+      existsSync: (p) => p === `${home}\\.claude\\projects` || p === `${home}\\.qoder-cn\\projects`
+    }
+  );
+  assert.deepEqual(detected, ['claude', 'qodercn']);
+  assert.deepEqual(seen, ['claude,qodercn', 'claude,qodercn', 'claude,qodercn']);
+});
+
+test('collectWslUsage returns empty bundle when no homes', async () => {
+  const { bundle } = await collectWslUsage(
+    { clients: 'claude', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale: async () => ({}) },
+    { platform: 'darwin' }
+  );
+  assert.equal(bundle.today.totalTokens, 0);
+});
+
+test('collectWslUsage logs and skips a home that throws, keeps others', async () => {
+  const logs = [];
+  const deps = {
+    platform: 'win32',
+    exec: (cmd) => (cmd === 'reg' ? 'Lxss' : 'Ubuntu\nDebian\n'),
+    readdirSync: () => [],
+    existsSync: (p) => p.endsWith('\\root\\.claude\\projects')
+  };
+  const runTokscale = async ({ flags }) => {
+    const home = flags[flags.indexOf('--home') + 1];
+    if (home.includes('Debian')) throw new Error('9p down');
+    return entriesJson(7);
+  };
+  const { bundle } = await collectWslUsage(
+    { clients: 'claude', allTimeSince: '2025-01-01', commandTimeoutMs: 1000, runTokscale, logger: (m) => logs.push(m) },
+    deps
+  );
+  assert.equal(bundle.today.totalTokens, 7); // Ubuntu counted, Debian skipped
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /Debian/);
+});

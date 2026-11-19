@@ -1,0 +1,562 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const { EventEmitter } = require('node:events');
+const test = require('node:test');
+const { referencedTerminationOptions } = require('../helpers/referencedTerminationTimers');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const {
+  CURSOR_EXPLICIT_SYNC_TIMEOUT_MS,
+  CURSOR_BACKGROUND_SYNC_TIMEOUT_MS,
+  canonicalCursorUserId,
+  listAccounts,
+  normalizeCursorSessionToken,
+  readActiveAccount,
+  readCursorDesktopSignIn,
+  runCursorDiscover,
+  runCursorLogin,
+  runCursorLogout,
+  runCursorSync
+} = require('../../src/shared/providers/cursor/auth');
+const { isCursorDetectedAccountCurrent } = require('../../src/shared/providers/cursor/account');
+
+async function waitFor(predicate, timeoutMs = 2000) {
+  const startedAt = Date.now();
+  while (!predicate()) {
+    if (Date.now() - startedAt >= timeoutMs) throw new Error('Timed out waiting for Cursor subprocess state');
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+function withTempHome(payload) {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cursorauth-'));
+  const credPath = path.join(tmp, '.config', 'tokscale', 'cursor-credentials.json');
+  fs.mkdirSync(path.dirname(credPath), { recursive: true });
+  if (payload !== undefined) fs.writeFileSync(credPath, JSON.stringify(payload));
+  return { home: tmp, credPath, cleanup: () => fs.rmSync(tmp, { recursive: true, force: true }) };
+}
+
+function sqliteReturning(value) {
+  return {
+    DatabaseSync: class {
+      prepare() { return { get: () => ({ value }) }; }
+      close() {}
+    }
+  };
+}
+
+test('readActiveAccount returns null when file is missing', () => {
+  const { home, cleanup } = withTempHome(undefined);
+  try {
+    assert.equal(readActiveAccount({ home }), null);
+  } finally { cleanup(); }
+});
+
+test('readActiveAccount returns active account when present', () => {
+  const payload = {
+    version: 1,
+    activeAccountId: 'a1',
+    accounts: {
+      a1: { sessionToken: 'tok-a1', userId: 'u1', createdAt: '2026-05-26T00:00:00Z', label: 'work' },
+      a2: { sessionToken: 'tok-a2', userId: 'u2', createdAt: '2026-05-25T00:00:00Z' }
+    }
+  };
+  const { home, cleanup } = withTempHome(payload);
+  try {
+    const acct = readActiveAccount({ home });
+    assert.equal(acct.id, 'a1');
+    assert.equal(acct.sessionToken, 'tok-a1');
+    assert.equal(acct.userId, 'u1');
+    assert.equal(acct.label, 'work');
+  } finally { cleanup(); }
+});
+
+test('listAccounts returns every account with the Tokscale active account first', () => {
+  const payload = {
+    version: 1,
+    activeAccountId: 'desktop',
+    accounts: {
+      desktop: { sessionToken: 'tok-desktop', userId: 'desktop' },
+      pinned: { sessionToken: 'tok-pinned', userId: 'pinned', label: 'work' }
+    }
+  };
+  const { home, credPath, cleanup } = withTempHome(payload);
+  try {
+    assert.equal(JSON.parse(fs.readFileSync(credPath, 'utf8')).activeAccountId, 'desktop');
+    assert.deepEqual(listAccounts({ home }).map((account) => account.id), ['desktop', 'pinned']);
+  } finally { cleanup(); }
+});
+
+test('readActiveAccount returns null when activeAccountId is missing from accounts map', () => {
+  const payload = { version: 1, activeAccountId: 'ghost', accounts: { a1: { sessionToken: 't' } } };
+  const { home, cleanup } = withTempHome(payload);
+  try {
+    assert.equal(readActiveAccount({ home }), null);
+  } finally { cleanup(); }
+});
+
+test('readActiveAccount returns null on malformed JSON', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cursorauth-'));
+  const credPath = path.join(tmp, '.config', 'tokscale', 'cursor-credentials.json');
+  fs.mkdirSync(path.dirname(credPath), { recursive: true });
+  fs.writeFileSync(credPath, '{not json');
+  try {
+    assert.equal(readActiveAccount({ home: tmp }), null);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('readActiveAccount returns null on empty accounts map', () => {
+  const { home, cleanup } = withTempHome({ version: 1, activeAccountId: '', accounts: {} });
+  try {
+    assert.equal(readActiveAccount({ home }), null);
+  } finally { cleanup(); }
+});
+
+test('runCursorLogin writes credentials file with extracted user id from "::" delimiter', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  try {
+    await runCursorLogin('user_01HXYZ::tok-value-here', { home });
+    const acct = readActiveAccount({ home });
+    assert.equal(acct.id, 'user_01HXYZ');
+    assert.equal(acct.sessionToken, 'user_01HXYZ%3A%3Atok-value-here');
+    assert.equal(acct.userId, 'user_01HXYZ');
+  } finally { cleanup(); }
+});
+
+test('runCursorLogin derives anon-* account id when no delimiter', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  try {
+    await runCursorLogin('plain-token-no-delimiter', { home });
+    const acct = readActiveAccount({ home });
+    assert.match(acct.id, /^anon-[0-9a-f]{12}$/);
+    assert.equal(acct.userId, null);
+  } finally { cleanup(); }
+});
+
+test('runCursorLogin handles URL-encoded :: delimiter (%3A%3A)', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  try {
+    await runCursorLogin('user_01ABC%3A%3Aopaque-token', { home });
+    const acct = readActiveAccount({ home });
+    assert.equal(acct.id, 'user_01ABC');
+    assert.equal(acct.userId, 'user_01ABC');
+  } finally { cleanup(); }
+});
+
+test('normalizeCursorSessionToken accepts a full cookie header and canonicalizes separators', () => {
+  assert.equal(
+    normalizeCursorSessionToken('Cookie: other=x; WorkosCursorSessionToken=user_01ABC::opaque; next=y'),
+    'user_01ABC%3A%3Aopaque'
+  );
+});
+
+test('normalizeCursorSessionToken converts a local Cursor access-token JWT', () => {
+  const payload = Buffer.from(JSON.stringify({ sub: 'auth0|user_01LOCAL' })).toString('base64url');
+  const jwt = `header.${payload}.signature`;
+  assert.equal(normalizeCursorSessionToken(jwt), `user_01LOCAL%3A%3A${jwt}`);
+});
+
+test('runCursorDiscover imports the local desktop account without syncing usage', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  const dbPath = path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  fs.writeFileSync(dbPath, 'fixture');
+  const payload = Buffer.from(JSON.stringify({ sub: 'auth0|user_01DESKTOP' })).toString('base64url');
+  const accessToken = `header.${payload}.signature`;
+  let closed = false;
+  const sqlite = {
+    DatabaseSync: class {
+      prepare() { return { get: () => ({ value: accessToken }) }; }
+      close() { closed = true; }
+    }
+  };
+
+  try {
+    const result = await runCursorDiscover({ home, platform: 'linux', sqlite });
+    assert.deepEqual(result, { discovered: true, accountId: 'user_01DESKTOP' });
+    assert.equal(readActiveAccount({ home }).sessionToken, `user_01DESKTOP%3A%3A${accessToken}`);
+    assert.equal(closed, true);
+    assert.equal(fs.existsSync(path.join(home, '.config', 'tokscale', 'cursor-cache')), false);
+  } finally { cleanup(); }
+});
+
+test('runCursorDiscover reports a signed-out desktop without mutating credentials', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  let loginCalls = 0;
+  try {
+    const result = await runCursorDiscover({
+      home,
+      platform: 'linux',
+      runLogin: async () => { loginCalls += 1; }
+    });
+    assert.deepEqual(result, { discovered: false, reason: 'not-signed-in' });
+    assert.equal(loginCalls, 0);
+    assert.equal(readActiveAccount({ home }), null);
+  } finally { cleanup(); }
+});
+
+test('runCursorDiscover keeps an existing valid active account', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  const dbPath = path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  fs.writeFileSync(dbPath, 'fixture');
+  const payload = Buffer.from(JSON.stringify({ sub: 'auth0|user_01DESKTOP_B' })).toString('base64url');
+  const accessToken = `header.${payload}.signature`;
+
+  try {
+    await runCursorLogin('user_01ACTIVE_A%3A%3Atoken-a', { home });
+    await runCursorDiscover({ home, platform: 'linux', sqlite: sqliteReturning(accessToken) });
+    assert.equal(readActiveAccount({ home }).id, 'user_01ACTIVE_A');
+    assert.deepEqual(
+      listAccounts({ home }).map((account) => account.id),
+      ['user_01ACTIVE_A', 'user_01DESKTOP_B']
+    );
+  } finally { cleanup(); }
+});
+
+test('runCursorDiscover refreshes a token without replacing account metadata', async () => {
+  const createdAt = '2026-01-02T03:04:05.000Z';
+  const accountId = 'user_01DESKTOP';
+  const { home, credPath, cleanup } = withTempHome({
+    version: 1,
+    activeAccountId: accountId,
+    accounts: {
+      [accountId]: {
+        sessionToken: `${accountId}%3A%3Aold-token`,
+        userId: accountId,
+        createdAt,
+        expiresAt: null,
+        label: 'work'
+      }
+    }
+  });
+  const dbPath = path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  fs.writeFileSync(dbPath, 'fixture');
+  const payload = Buffer.from(JSON.stringify({ sub: `auth0|${accountId}` })).toString('base64url');
+  const accessToken = `header.${payload}.refreshed`;
+
+  try {
+    await runCursorDiscover({ home, platform: 'linux', sqlite: sqliteReturning(accessToken) });
+    const account = JSON.parse(fs.readFileSync(credPath, 'utf8')).accounts[accountId];
+    assert.equal(account.sessionToken, `${accountId}%3A%3A${accessToken}`);
+    assert.equal(account.label, 'work');
+    assert.equal(account.createdAt, createdAt);
+  } finally { cleanup(); }
+});
+
+test('canonicalCursorUserId normalizes Cursor API and stored identities', () => {
+  assert.equal(canonicalCursorUserId('auth0|user_01ABC'), 'user_01ABC');
+  assert.equal(canonicalCursorUserId('user_01ABC'), 'user_01ABC');
+  assert.equal(canonicalCursorUserId('auth0|other'), '');
+});
+
+test('runCursorLogout delegates account and cache reconciliation to Tokscale', async () => {
+  const calls = [];
+  await runCursorLogout({
+    accountId: 'user_a',
+    timeoutMs: 1234,
+    runSubcommand: async (args, options) => { calls.push({ args, timeoutMs: options.timeoutMs }); }
+  });
+  assert.deepEqual(calls, [{ args: ['logout', '--name', 'user_a'], timeoutMs: 1234 }]);
+});
+
+test('Cursor sync, logout, and login share one lifecycle lane', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.end = () => {};
+  child.kill = () => true;
+  const events = [];
+  let releaseLogout;
+  const logoutGate = new Promise((resolve) => { releaseLogout = resolve; });
+
+  try {
+    const sync = runCursorSync({
+      spawn: () => {
+        events.push('sync');
+        return child;
+      },
+      tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} }),
+      timeoutMs: 60_000
+    });
+    await waitFor(() => events.includes('sync'));
+
+    const logout = runCursorLogout({
+      accountId: 'user_b',
+      runSubcommand: async () => {
+        events.push('logout');
+        await logoutGate;
+      }
+    });
+    const login = runCursorLogin('user_a::token-a', { home });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(events, ['sync']);
+    assert.equal(readActiveAccount({ home }), null, 'login waits behind the active sync');
+
+    child.stdout.emit('data', Buffer.from('{"synced":true,"rows":0,"error":null}'));
+    child.emit('close', 0);
+    await waitFor(() => events.includes('logout'));
+    assert.equal(readActiveAccount({ home }), null, 'login waits behind the active logout');
+
+    releaseLogout();
+    await Promise.all([sync, logout, login]);
+    assert.deepEqual(events, ['sync', 'logout']);
+    assert.equal(readActiveAccount({ home }).id, 'user_a');
+  } finally {
+    releaseLogout?.();
+    cleanup();
+  }
+});
+
+test('an aborted Cursor lifecycle waiter leaves the local queue immediately', async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.end = () => {};
+  child.kill = () => true;
+  const controller = new AbortController();
+  const reason = new Error('collector stopped');
+  let logoutStarted = false;
+
+  const sync = runCursorSync({
+    spawn: () => child,
+    tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} }),
+    timeoutMs: 60_000
+  });
+  const logout = runCursorLogout({
+    accountId: 'user_b',
+    signal: controller.signal,
+    runSubcommand: async () => { logoutStarted = true; }
+  });
+
+  controller.abort(reason);
+  await assert.rejects(logout, (error) => error === reason);
+  assert.equal(logoutStarted, false);
+
+  child.stdout.emit('data', Buffer.from('{"synced":true,"rows":0,"error":null}'));
+  child.emit('close', 0);
+  await sync;
+});
+
+test('Cursor lifecycle lane continues after an operation fails', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  try {
+    await assert.rejects(
+      runCursorLogout({ runSubcommand: async () => { throw new Error('logout failed'); } }),
+      /logout failed/
+    );
+    await runCursorLogin('user_after_failure::token', { home });
+    assert.equal(readActiveAccount({ home }).id, 'user_after_failure');
+  } finally { cleanup(); }
+});
+
+test('runCursorLogin throws on empty token', async () => {
+  const { home, cleanup } = withTempHome(undefined);
+  try {
+    await assert.rejects(() => runCursorLogin('', { home }), /token/i);
+  } finally { cleanup(); }
+});
+
+test('manual Cursor sync covers the upstream dynamic budget and preserves a custom budget', async () => {
+  const calls = [];
+  const runSubcommand = async (args, options) => {
+    calls.push({ args, timeoutMs: options.timeoutMs });
+    return JSON.stringify({ synced: true, rows: 1 });
+  };
+  await runCursorSync({ runSubcommand });
+  await runCursorSync({ runSubcommand, timeoutMs: 1234 });
+  assert.equal(CURSOR_EXPLICIT_SYNC_TIMEOUT_MS, 1_830_000);
+  assert.deepEqual(calls, [
+    { args: ['sync', '--json'], timeoutMs: 1_830_000 },
+    { args: ['sync', '--json'], timeoutMs: 1234 }
+  ]);
+});
+
+test('Cursor self-sync applies the explicit budget only to forced refresh and preserves overrides', async t => {
+  const auth = require('../../src/shared/providers/cursor/auth');
+  const { createCursorSelfSync } = require('../../src/shared/providers/cursor/selfSync');
+  const { createSelfSyncThrottle } = require('../../src/shared/selfSyncThrottle');
+  const calls = [];
+  t.mock.method(auth, 'runCursorSync', async options => calls.push(options.timeoutMs));
+  for (const options of [{}, { explicit: true }, { timeoutMs: 4321 }, { explicit: true, timeoutMs: 1234 }]) {
+    const sync = createCursorSelfSync({ selfSyncThrottle: createSelfSyncThrottle() });
+    await sync.maybeSyncCursor('cursor', undefined, options);
+  }
+  assert.equal(CURSOR_BACKGROUND_SYNC_TIMEOUT_MS, 150_000);
+  assert.deepEqual(calls, [150_000, 1_830_000, 4321, 1234]);
+});
+
+test('runCursorSync distinguishes no account from transient JSON failures', async () => {
+  const signedOut = await runCursorSync({
+    runSubcommand: async () => JSON.stringify({ synced: false, rows: 0, error: 'Not authenticated' })
+  });
+  assert.equal(signedOut.notAuthenticated, true);
+
+  await assert.rejects(
+    runCursorSync({
+      runSubcommand: async () => JSON.stringify({ synced: false, rows: 0, error: 'network request timed out' })
+    }),
+    (error) => {
+      assert.equal(error.syncFailureStage, 'unknown');
+      assert.equal(error.syncDetailCode, 'network-timeout');
+      return true;
+    }
+  );
+});
+
+test('runCursorSync rejects when the tokscale stdin pipe breaks', async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.end = () => {};
+  let killed = false;
+  child.kill = () => { killed = true; };
+  const pending = runCursorSync({
+    spawn: () => child,
+    tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} }),
+    timeoutMs: 60_000
+  });
+  const error = Object.assign(new Error('write EPIPE'), { code: 'EPIPE' });
+
+  child.stdin.emit('error', error);
+  let settled = false;
+  pending.catch(() => { settled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false, 'stdin failure waits for physical process close');
+  child.emit('close', 1);
+
+  await assert.rejects(pending, (caught) => {
+    assert.match(caught.message, /write EPIPE/);
+    assert.equal(caught.syncFailureStage, 'process-exit');
+    return true;
+  });
+  assert.equal(killed, true);
+});
+
+test('runCursorSync timeout requests termination and waits for child close', async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.end = () => {};
+  const signals = [];
+  child.kill = (signal) => { signals.push(signal); return true; };
+  const pending = runCursorSync({
+    spawn: () => child,
+    tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} }),
+    timeoutMs: 1
+  });
+  let settled = false;
+  pending.catch(() => { settled = true; });
+
+  await waitFor(() => signals.includes('SIGTERM'));
+  assert.equal(settled, false, 'timeout delivery is not physical process exit');
+  child.emit('close', null, 'SIGTERM');
+
+  await assert.rejects(pending, (caught) => {
+    assert.match(caught.message, /timed out after 1ms/);
+    assert.equal(caught.syncFailureStage, 'timeout');
+    return true;
+  });
+});
+
+test('runCursorSync stops waiting when forced termination never reports close', async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.end = () => {};
+  const signals = [];
+  const diagnostics = [];
+  child.kill = (signal) => { signals.push(signal); return true; };
+  const pending = runCursorSync({
+    spawn: () => child,
+    tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} }),
+    timeoutMs: 1,
+    terminationOptions: referencedTerminationOptions({ graceMs: 1, closeGraceMs: 1 }),
+    onTerminationUnconfirmed: (error) => diagnostics.push(error.code)
+  });
+
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.code, 'termination-unconfirmed');
+    assert.match(error.cause?.message || '', /timed out after 1ms/);
+    assert.equal(error.syncFailureStage, 'timeout');
+    return true;
+  });
+  assert.deepEqual(signals, ['SIGTERM', 'SIGKILL']);
+  assert.deepEqual(diagnostics, ['termination-unconfirmed']);
+
+  child.emit('close', null, 'SIGKILL');
+});
+
+test('runCursorSync kills the child and keeps the abort error when superseded', async () => {
+  const child = new EventEmitter();
+  child.stdout = new EventEmitter();
+  child.stderr = new EventEmitter();
+  child.stdin = new EventEmitter();
+  child.stdin.end = () => {};
+  let killed = 0;
+  child.kill = () => { killed += 1; };
+  const controller = new AbortController();
+  const reason = new Error('collector stopped');
+  const pending = runCursorSync({
+    signal: controller.signal,
+    spawn: () => child,
+    tokscaleCommand: () => ({ bin: 'tokscale', prefixArgs: [], env: {} }),
+    timeoutMs: 60_000
+  });
+  let settled = false;
+  pending.catch(() => { settled = true; });
+
+  controller.abort(reason);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(settled, false, 'SIGTERM delivery is not physical process exit');
+  child.emit('close', 143);
+
+  await assert.rejects(pending, (caught) => caught === reason);
+  assert.equal(killed, 1);
+});
+
+function withDesktopState(home) {
+  const dbPath = path.join(home, '.config', 'Cursor', 'User', 'globalStorage', 'state.vscdb');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  fs.writeFileSync(dbPath, 'fixture');
+}
+
+test('readCursorDesktopSignIn reports the desktop user, a signed-out desktop, and unknown state', () => {
+  const { home, cleanup } = withTempHome(undefined);
+  try {
+    assert.deepEqual(readCursorDesktopSignIn({ home, platform: 'linux', sqlite: sqliteReturning('x') }), { state: 'unknown' });
+    withDesktopState(home);
+    const payload = Buffer.from(JSON.stringify({ sub: 'auth0|user_01DESKTOP' })).toString('base64url');
+    assert.deepEqual(
+      readCursorDesktopSignIn({ home, platform: 'linux', sqlite: sqliteReturning(`header.${payload}.signature`) }),
+      { state: 'signed-in', userId: 'user_01DESKTOP' }
+    );
+    assert.deepEqual(readCursorDesktopSignIn({ home, platform: 'linux', sqlite: sqliteReturning('') }), { state: 'signed-out' });
+    assert.deepEqual(readCursorDesktopSignIn({ home, platform: 'linux', sqlite: null }), { state: 'unknown' });
+    const broken = { DatabaseSync: class { constructor() { throw new Error('locked'); } } };
+    assert.deepEqual(readCursorDesktopSignIn({ home, platform: 'linux', sqlite: broken }), { state: 'unknown' });
+  } finally { cleanup(); }
+});
+
+test('desktop-detected Cursor accounts follow the desktop sign-in state', () => {
+  const signedIn = { state: 'signed-in', userId: 'user_A' };
+  assert.equal(isCursorDetectedAccountCurrent({ desktop: signedIn, userId: 'user_A' }), true);
+  assert.equal(isCursorDetectedAccountCurrent({ desktop: signedIn, userId: 'user_A', unauthorized: true }), false);
+  assert.equal(isCursorDetectedAccountCurrent({ desktop: signedIn, userId: 'user_B' }), false);
+  assert.equal(isCursorDetectedAccountCurrent({ desktop: { state: 'signed-out' }, userId: 'user_A' }), false);
+  // A temporary probe failure or an unreadable desktop state keeps the account listed.
+  assert.equal(isCursorDetectedAccountCurrent({ desktop: { state: 'unknown' }, userId: 'user_A' }), true);
+  assert.equal(isCursorDetectedAccountCurrent({ desktop: { state: 'unknown' }, userId: 'user_A', unauthorized: true }), false);
+  assert.equal(isCursorDetectedAccountCurrent({ desktop: signedIn, userId: '' }), true);
+});

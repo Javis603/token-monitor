@@ -1,0 +1,198 @@
+'use strict';
+
+const hasOwn = (value, key) => Object.prototype.hasOwnProperty.call(value || {}, key);
+const { filterReasonixSyntheticSessions } = require('../providers/reasonix/sessionGuard');
+const { applyActivityPatch, materializeActivity } = require('../sessionActivityProjection');
+
+const PARTIAL_USAGE_CARRY_FIELDS = Object.freeze([
+  'month',
+  'allTime',
+  'clientStatus',
+  'clientHealth',
+  'wslStatus',
+  'periodWindows',
+  'historyAvailable',
+  'projectsEnabled',
+  'allTimeProjectsOmitted',
+  'allTimeProjectsIncomplete',
+  'sessionDetailsOmitted',
+  'periodProjectsOmitted',
+  'nativeSessions',
+  'nativeProjects',
+  'syncUploadIntervalMs'
+]);
+
+function cloneValue(value, seen = new Map()) {
+  if (value === null || typeof value !== 'object') return value;
+  if (seen.has(value)) return seen.get(value);
+  if (Array.isArray(value)) {
+    const copy = [];
+    seen.set(value, copy);
+    for (const entry of value) copy.push(cloneValue(entry, seen));
+    return copy;
+  }
+  const copy = Object.create(Object.getPrototypeOf(value) === null ? null : Object.prototype);
+  seen.set(value, copy);
+  for (const key of Object.keys(value)) copy[key] = cloneValue(value[key], seen);
+  return copy;
+}
+
+function sanitizeUsagePeriods(value) {
+  const next = cloneValue(value || {});
+  const periods = next?.periods && typeof next.periods === 'object' ? next.periods : next;
+  for (const periodName of ['today', 'month', 'allTime']) {
+    const period = periods?.[periodName];
+    if (period && typeof period === 'object' && hasOwn(period, 'sessions')) {
+      period.sessions = filterReasonixSyntheticSessions(period.sessions);
+    }
+  }
+  return next;
+}
+
+function normalizedEnvelope(value) {
+  const envelope = {};
+  for (const [key, entry] of Object.entries(value || {})) {
+    if (entry !== undefined) envelope[key] = cloneValue(entry);
+  }
+  return envelope;
+}
+
+// The usage part is copied once on the way in and never mutated afterwards:
+// every update builds a new part, and everything handed out is a copy. That is
+// what lets a carried field be shared with the previous part by reference. A
+// carried period in particular needs no second sanitize, because it was
+// filtered when it arrived.
+function mergeUsagePart(previous, incoming) {
+  const next = sanitizeUsagePeriods(incoming || {});
+  delete next.limits;
+  if (!previous) return next;
+
+  if (!hasOwn(next, 'history') && hasOwn(previous, 'history')) {
+    next.history = previous.history;
+  }
+
+  const partial = !hasOwn(next, 'month') || !hasOwn(next, 'allTime');
+  if (partial) {
+    // A carried period keeps the window it was collected under; only the
+    // periods this update scanned take its windows. Otherwise last month's
+    // total would read as this month's after a month boundary.
+    if (hasOwn(next, 'periodWindows') && hasOwn(previous, 'periodWindows')) {
+      const windows = { ...previous.periodWindows };
+      for (const period of ['today', 'month', 'allTime']) {
+        if (hasOwn(next, period) && next.periodWindows?.[period]) windows[period] = next.periodWindows[period];
+      }
+      next.periodWindows = windows;
+    }
+    for (const field of PARTIAL_USAGE_CARRY_FIELDS) {
+      if (!hasOwn(next, field) && hasOwn(previous, field)) {
+        next[field] = previous[field];
+      }
+    }
+  }
+  return next;
+}
+
+function createDeviceState(options = {}) {
+  const epoch = options.epoch ?? 0;
+  const envelope = normalizedEnvelope(options.envelope);
+  const onRecord = typeof options.onRecord === 'function' ? options.onRecord : null;
+  const onColdPreview = typeof options.onColdPreview === 'function' ? options.onColdPreview : null;
+  let usagePart = null;
+  // Previews received before the first complete baseline. Kept out of usagePart
+  // because every publish, limits-only ones included, sends usagePart, and a
+  // record is taken as complete by everything downstream (display, exports,
+  // archive capture, uploads): a Today-only part there reads as a device whose
+  // month and all-time are zero.
+  let coldUsagePart = null;
+  let limitsPart = hasOwn(options, 'initialLimits') ? cloneValue(options.initialLimits) : undefined;
+  // The parts as of the last publish. The parts are never mutated in place, so
+  // holding them is enough to rebuild that record on demand.
+  let published = null;
+  let hasCompleteUsageBaseline = false;
+  let revision = 0;
+  let stopped = false;
+
+  function accepts(meta) {
+    if (stopped) return false;
+    return !hasOwn(meta, 'epoch') || meta.epoch === epoch;
+  }
+
+  function recordFrom(parts) {
+    const record = { ...cloneValue(materializeActivity(parts.usagePart)), ...cloneValue(envelope) };
+    if (parts.limitsPart !== undefined) record.limits = cloneValue(parts.limitsPart);
+    return record;
+  }
+
+  // One copy per publish. Every tick lands here, limits-only updates included,
+  // and on a long history the record runs to megabytes, so each extra
+  // defensive copy was a measurable stall on the main process. The observer and
+  // the caller share that one copy; neither can reach the parts behind it.
+  function publish(source, reason) {
+    if (!usagePart || stopped) return null;
+    published = { usagePart, limitsPart };
+    const record = recordFrom(published);
+    revision += 1;
+    const meta = { revision, source, reason, epoch };
+    if (onRecord) onRecord(record, meta);
+    return record;
+  }
+
+  function updateUsage(summary, reason = 'usage', meta = {}) {
+    if (!accepts(meta)) return null;
+    const cold = meta.preview === true && !hasCompleteUsageBaseline;
+    const next = mergeUsagePart(cold ? coldUsagePart : usagePart, summary);
+    if (hasOwn(next, 'month') && hasOwn(next, 'allTime')) {
+      hasCompleteUsageBaseline = true;
+    }
+    if (cold && !hasCompleteUsageBaseline) {
+      coldUsagePart = next;
+      // Not a record, for the same reason. A caller holding last-known values
+      // for the missing windows can still show the fresh ones, unexported.
+      if (onColdPreview) onColdPreview(recordFrom({ usagePart: next, limitsPart }), { source: 'usage', reason, epoch });
+      return null;
+    }
+    coldUsagePart = null;
+    usagePart = next;
+    return publish('usage', reason);
+  }
+
+  function updateLimits(limits, reason = 'limits', meta = {}) {
+    if (!accepts(meta)) return null;
+    limitsPart = cloneValue(limits);
+    // Limits often land long before the first complete usage. They cannot ride
+    // a record yet, but the cold-preview observer can show them.
+    if (!hasCompleteUsageBaseline && onColdPreview) {
+      onColdPreview(recordFrom({ usagePart: coldUsagePart || {}, limitsPart }), { source: 'limits', reason, epoch });
+    }
+    return publish('limits', reason);
+  }
+
+  function updateActivity(patch, meta = {}) {
+    if (!accepts(meta) || !usagePart || !hasCompleteUsageBaseline) return false;
+    // Copy only the bounded patch. Accounting maps remain shared; ordinary
+    // session rows are materialized only for a real publish/snapshot request.
+    usagePart = applyActivityPatch(usagePart, cloneValue(patch));
+    if (published) published = { usagePart, limitsPart: published.limitsPart };
+    return true;
+  }
+
+  function getSnapshot() {
+    return published ? recordFrom(published) : null;
+  }
+
+  function stop() {
+    stopped = true;
+  }
+
+  return {
+    getSnapshot,
+    stop,
+    updateLimits,
+    updateActivity,
+    updateUsage
+  };
+}
+
+module.exports = {
+  createDeviceState
+};

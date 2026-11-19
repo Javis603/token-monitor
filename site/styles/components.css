@@ -1,0 +1,1127 @@
+/* components.css: nav, switches, buttons, cards, meters, windows, icons */
+
+/* header / nav */
+.site-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  padding: 0.85rem 0 0.35rem;
+  background: transparent;
+  border-bottom: 0;
+  color: #f4f8ff;
+  pointer-events: none;
+}
+.nav {
+  width: var(--navw);
+  min-height: 60px;
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.48rem 0.58rem 0.48rem 0.62rem;
+  border: 1px solid var(--nav-border);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.025)),
+    var(--nav-bg);
+  box-shadow: 0 14px 34px rgba(0,0,0,0.20), inset 0 1px 0 rgba(255,255,255,0.10);
+  backdrop-filter: blur(22px) saturate(145%);
+  pointer-events: auto;
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.62rem;
+  min-width: 0;
+  text-decoration: none;
+  font-weight: 780;
+  letter-spacing: 0;
+  color: var(--text-strong);
+}
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  margin: -4px 0; /* the glyph has built-in glow padding; pull it back to the cap height */
+  object-fit: contain;
+  flex: none;
+}
+.nav-menu {
+  justify-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.08rem;
+  min-height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.nav-menu a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 0.78rem;
+  border-radius: 12px;
+  color: var(--nav-muted);
+  font-weight: 750;
+  font-size: 0.88rem;
+  text-decoration: none;
+  transition: color .18s ease, background .18s ease;
+}
+.nav-menu a:hover {
+  color: #f4f8ff;
+  background: var(--nav-control-hover);
+}
+.nav-actions {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+/* compact navigation controls */
+.nav-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  height: 38px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--nav-muted);
+  text-decoration: none;
+  cursor: pointer;
+  transition: color .15s ease;
+}
+.nav-icon-btn:hover { color: var(--nav-text); background: transparent; }
+.nav-github-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.48rem;
+  width: auto;
+  height: 38px;
+  min-height: 38px;
+  margin-left: 0;
+  padding: 0.24rem 0.68rem;
+  border: 1px solid var(--nav-control-border);
+  border-radius: 12px;
+  background: var(--nav-control-bg);
+  color: var(--nav-muted);
+  font-size: 0.8rem;
+  font-weight: 650;
+  text-decoration: none;
+  transition: color .15s ease, background .15s ease, border-color .15s ease;
+}
+.nav-github-link:hover {
+  color: var(--nav-text);
+  border-color: color-mix(in srgb, var(--nav-control-border) 55%, #fff 45%);
+  background: var(--nav-control-hover);
+}
+.nav-github-link .ico { width: 18px; height: 18px; }
+.nav-github-count {
+  color: var(--nav-text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+/* Docs entry in the actions cluster: .nav-menu hides on phones, this stays. */
+.nav-docs-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 38px;
+  padding: 0 0.7rem;
+  border-radius: 12px;
+  color: var(--nav-muted);
+  font-size: 0.88rem;
+  font-weight: 750;
+  text-decoration: none;
+  transition: color .15s ease, background .15s ease;
+}
+.nav-docs-link:hover,
+.nav-docs-link[aria-current="page"] { color: var(--nav-text); background: var(--nav-control-hover); }
+.nav-docs-link:focus-visible { outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 3px; }
+.site-header .brand { color: var(--nav-text); }
+.site-header .nav-menu a:hover { color: var(--nav-text); }
+
+/* icons */
+.ico { width: 1.1em; height: 1.1em; display: inline-block; flex: none; }
+.nav-icon-btn .ico { width: 18px; height: 18px; }
+
+/* Language dropdown — native details keeps click/touch and no-JS behavior;
+   main.js adds hover intent, focus handling, outside-click and Escape. */
+.lang-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 38px;
+  padding-left: 0;
+}
+.lang-btn {
+  min-width: 38px;
+  width: auto;
+  gap: 0.34rem;
+  padding: 0 0.1rem;
+  list-style: none;
+  user-select: none;
+}
+.lang-btn::-webkit-details-marker { display: none; }
+.lang-symbol {
+  width: 19px;
+  height: 19px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.lang-chevron {
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  transform: translateY(-2px) rotate(45deg);
+  opacity: 0.7;
+  transition: opacity .18s ease;
+}
+.lang-menu[open] .lang-chevron {
+  opacity: 1;
+}
+.lang-menu[open] .lang-btn { color: var(--nav-text); background: transparent; }
+.lang-pop {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 30;
+  min-width: 172px;
+  padding: 8px;
+  border: 1px solid var(--nav-control-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--nav-bg) 96%, #202127);
+  box-shadow: 0 6px 8px rgba(0,0,0,0.34);
+  backdrop-filter: blur(22px) saturate(145%);
+  -webkit-backdrop-filter: blur(22px) saturate(145%);
+}
+.lang-pop::before {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  height: 8px;
+  content: "";
+}
+.lang-menu[open] .lang-pop {
+  animation: lang-pop-in .16s cubic-bezier(.22, 1, .36, 1) both;
+  transform-origin: top right;
+}
+@keyframes lang-pop-in {
+  from { opacity: 0; transform: translateY(-4px) scale(.98); }
+  to { opacity: 1; transform: none; }
+}
+.lang-pop button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  min-height: 42px;
+  padding: 0 0.8rem;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--nav-muted);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 650;
+  text-align: left;
+  cursor: pointer;
+  transition: color .15s ease, background .15s ease;
+}
+.lang-pop button:hover { color: var(--nav-text); background: var(--nav-control-hover); }
+.lang-pop button::after { content: "\2713"; font-size: 0.78rem; opacity: 0; }
+.lang-pop button[aria-checked="true"] { color: var(--nav-text); }
+.lang-pop button[aria-checked="true"]::after { opacity: 1; }
+.lang-pop button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: -3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .lang-menu[open] .lang-pop { animation: none; }
+  .lang-chevron { transition: none; }
+}
+
+/* buttons */
+.btn { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 0.55rem; min-height: 48px; padding: 0 1.25rem; border-radius: var(--r-md); font-weight: 800; text-decoration: none; transition: transform .18s ease, box-shadow .18s ease, opacity .18s ease, border-color .18s ease, background .18s ease; }
+.btn:hover { transform: translateY(-2px); }
+.btn:active { transform: translateY(0) scale(0.985); }
+.btn-primary { background: var(--btn-primary-bg); color: var(--btn-primary-fg); box-shadow: 0 12px 30px rgba(0,0,0,0.22), inset 0 1px 0 rgba(255,255,255,0.82); }
+.btn-secondary { background: var(--btn-secondary-bg); border: 1px solid var(--btn-secondary-border); color: var(--btn-secondary-fg); box-shadow: inset 0 1px 0 rgba(255,255,255,0.055); }
+
+/* focus */
+.btn:focus-visible, .brand:focus-visible, .nav-icon-btn:focus-visible, .nav-github-link:focus-visible, .nav-menu a:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 3px;
+}
+
+/* generic card */
+.card {
+  border: 1px solid var(--surface-border);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 76%, transparent);
+  box-shadow: none;
+}
+
+/* window (frames product panels as the real app window) */
+.window {
+  border: 1px solid var(--surface-border);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+}
+.window-bar { display: flex; align-items: center; gap: 0.75rem; padding: 0.55rem 0.8rem; border-bottom: 1px solid var(--surface-border); }
+.window-dots { display: flex; gap: 0.4rem; }
+.window-dots i { width: 11px; height: 11px; border-radius: 50%; }
+.window-dots .r { background: #ff5f57; }
+.window-dots .a { background: #febc2e; }
+.window-dots .g { background: #28c840; }
+.window-title { font-family: var(--mono); font-size: 0.7rem; color: var(--muted); letter-spacing: 0; }
+.window-body { padding: 1.1rem 1.2rem; }
+
+/* small uppercase label reused by the iOS surface mock */
+.panel-label { font-size: 0.62rem; font-weight: 800; letter-spacing: 0; text-transform: uppercase; color: var(--muted); }
+
+/* hero product stack — three real widget replicas at staggered 3D depths.
+   setupHeroTilt in main.js sets --rx/--ry (main-card tilt) and --px/--py
+   (parallax shift; outer cards consume them at opposite signs/strengths) on
+   .product-stack. Without JS the stack is a clean static product shot. */
+.product-stack {
+  position: relative;
+  min-height: 610px;
+  perspective: 1200px;
+}
+.product-stack::before { /* soft accent glow behind the stack */
+  content: "";
+  position: absolute;
+  inset: 4% -4% 2% 6%;
+  z-index: 0;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--accent-from) 16%, transparent), transparent 72%);
+  filter: blur(12px);
+  pointer-events: none;
+}
+
+.app-widget {
+  position: absolute;
+  overflow: hidden;
+  border: 1px solid var(--widget-border);
+  border-radius: 23px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.022)),
+    linear-gradient(135deg, rgba(255,255,255,0.035), rgba(0,0,0,0.09)),
+    var(--widget-bg);
+  box-shadow: var(--widget-shadow);
+  backdrop-filter: blur(28px) saturate(116%);
+  -webkit-backdrop-filter: blur(28px) saturate(116%);
+  color: var(--widget-text);
+  font-family: var(--mono);
+  will-change: transform;
+}
+
+.app-widget-main {
+  inset: 44px 18px 18px 52px;
+  z-index: 3;
+  transform: rotateY(calc(-7deg + var(--ry, 0deg))) rotateX(calc(3deg + var(--rx, 0deg)));
+}
+.app-widget-main .tm-total { font-size: 50px; }
+
+.app-widget-back {
+  inset: 18px 86px 176px 2px;
+  z-index: 1;
+  opacity: 0.62;
+  transform: translate3d(calc(var(--px, 0px) * -0.6), calc(var(--py, 0px) * -0.6), 0) rotateY(-12deg) rotateX(5deg) rotateZ(-5deg);
+}
+
+.app-widget-front {
+  right: 0;
+  bottom: 20px;
+  z-index: 4;
+  width: 55%;
+  min-height: 190px;
+  transform: translate3d(calc(var(--px, 0px) * 1.6), calc(var(--py, 0px) * 1.6), 0) rotateY(-5deg) rotateZ(3deg);
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.022)),
+    linear-gradient(135deg, rgba(255,255,255,0.035), rgba(0,0,0,0.09)),
+    var(--widget-bg-strong);
+}
+
+/* specular sheen that sweeps the main card once after it lands */
+.app-widget-main::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(115deg, transparent 40%, rgba(255,255,255,0.13) 50%, transparent 60%);
+  transform: translateX(-130%);
+  pointer-events: none;
+}
+
+/* staged entrance once the hero reveals. The keyframes only declare `from`,
+   so each card settles into its var-driven base transform (no frozen value to
+   fight the pointer parallax that starts afterwards). */
+@media (prefers-reduced-motion: no-preference) {
+  .js .hero-visual:not(.is-visible) .app-widget { opacity: 0; }
+  .js .hero-visual.is-visible .app-widget-main { animation: stack-in-main 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.08s backwards; }
+  .js .hero-visual.is-visible .app-widget-back { animation: stack-in-back 0.85s cubic-bezier(0.16, 1, 0.3, 1) 0.34s backwards; }
+  .js .hero-visual.is-visible .app-widget-front { animation: stack-in-front 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.58s backwards; }
+  .js .hero-visual.is-visible .app-widget-main::before { animation: stack-sheen 1.3s ease-in-out 1.3s both; }
+}
+@keyframes stack-in-main {
+  from { opacity: 0; transform: rotateY(-7deg) rotateX(3deg) translate3d(0, 54px, -60px) scale(0.965); filter: blur(10px); }
+}
+@keyframes stack-in-back {
+  from { opacity: 0; transform: rotateY(-12deg) rotateX(5deg) rotateZ(-5deg) translate3d(-64px, 26px, -90px); filter: blur(12px); }
+}
+@keyframes stack-in-front {
+  from { opacity: 0; transform: rotateY(-5deg) rotateZ(3deg) translate3d(34px, 46px, 30px) scale(0.94); filter: blur(8px); }
+}
+@keyframes stack-sheen {
+  from { transform: translateX(-130%); }
+  to { transform: translateX(135%); }
+}
+
+/* bars inside the stack fill in sequence after their card lands */
+@media (prefers-reduced-motion: no-preference) {
+  .js .hero-visual .app-widget-main .tm-row:nth-child(1) .tm-bar span { transition-delay: 0.8s; }
+  .js .hero-visual .app-widget-main .tm-row:nth-child(2) .tm-bar span { transition-delay: 0.92s; }
+  .js .hero-visual .app-widget-main .tm-row:nth-child(3) .tm-bar span { transition-delay: 1.04s; }
+  .js .hero-visual .app-widget-main .tm-row:nth-child(4) .tm-bar span { transition-delay: 1.16s; }
+  .js .hero-visual .app-widget-back .tm-bar span { transition-delay: 1.1s; }
+  .js .hero-visual .app-widget-front .tm-bar span { transition-delay: 1.35s; }
+}
+
+.tm-inner { padding: 20px 22px 21px; }
+
+.tm-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 30px;
+}
+
+.tm-title {
+  display: inline-flex;
+  align-items: baseline;
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 1px 10px rgba(0,0,0,0.30);
+  white-space: nowrap;
+}
+
+.tm-title-icon {
+  flex: none;
+  color: #dbeafe;
+  font-size: 25px;
+}
+
+.tm-title-icon .tm-live {
+  margin-left: 7px;
+  vertical-align: baseline;
+}
+
+.tm-live {
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  margin-left: 5px;
+  border-radius: 50%;
+  background: #b7ead4;
+  box-shadow: 0 0 7px rgba(183,234,212,0.85);
+  vertical-align: middle;
+  animation: live-pulse 2.6s ease-in-out infinite;
+}
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .tm-live { animation: none; }
+}
+
+.tm-tabs {
+  display: inline-flex;
+  padding: 4px;
+  border: 1px solid rgba(232,238,244,0.16);
+  border-radius: 17px;
+  background: rgba(255,255,255,0.045);
+}
+
+.tm-tabs span {
+  border-radius: 12px;
+  padding: 9px 14px;
+  color: var(--widget-muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.tm-tabs .active {
+  color: #c8f7df;
+  background: rgba(255,255,255,0.10);
+  box-shadow: inset 0 0 0 1px rgba(232,238,244,0.16);
+}
+
+.tm-label {
+  color: var(--widget-muted);
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.tm-total {
+  margin-top: 12px;
+  color: var(--widget-text);
+  /* The real widget gives only this number a tuned sans face; everything else stays mono. */
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif;
+  font-size: 60px;
+  line-height: 0.96;
+  font-weight: 700;
+}
+
+.tm-cost {
+  margin-top: 8px;
+  color: #b8c0ce;
+  font-size: 16px;
+  font-weight: 800;
+}
+
+.tm-breakdown { margin-top: 30px; }
+
+.tm-row {
+  padding: 0 0 15px;
+  margin-top: 16px;
+  border-bottom: 1px solid rgba(232,238,244,0.12);
+}
+
+.tm-row:first-child { margin-top: 0; }
+
+/* stale device rows grey out but stay listed, exactly like the app */
+.tm-row.is-stale .tm-row-head,
+.tm-row.is-stale .tm-bar { opacity: 0.55; }
+
+/* the app's click-to-expand cache accordion under a usage row: open by
+   default; the tour pins it shut on inactive screens so the reveal replays */
+.tm-acc {
+  display: grid;
+  grid-template-rows: 1fr;
+  width: 100%;
+}
+.tm-acc-inner {
+  overflow: hidden;
+  min-height: 0;
+  margin-left: 4px;
+  padding-left: 12px;
+  border-left: 1px solid rgba(232,238,244,0.1);
+}
+.tm-acc-content {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-top: 8px;
+  padding-bottom: 2px;
+}
+.tm-acc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 11px;
+}
+.tm-acc-row .lbl {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  color: var(--widget-muted);
+  white-space: nowrap;
+}
+.tm-acc-row .lbl i {
+  font-style: normal;
+  font-size: 10px;
+  opacity: 0.6;
+}
+.tm-acc-row .val {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+.tm-row-head {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 11px;
+}
+
+.tm-icon {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+}
+
+.tm-icon img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
+  opacity: 0.94;
+}
+
+.tm-row-name,
+.tm-row-value {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.tm-row-value {
+  text-align: right;
+}
+
+.tm-row-value span {
+  display: block;
+  margin-top: 4px;
+  color: #b8c0ce;
+  font-size: 13px;
+}
+
+.tm-bar {
+  height: 7px;
+  margin-top: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(14,17,21,0.55);
+}
+
+.tm-bar span {
+  display: block;
+  width: var(--w, 0%);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--bar, #58bfca);
+}
+
+.tm-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 23px;
+}
+
+.tm-footer > span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid rgba(232,238,244,0.16);
+  border-radius: 13px;
+  background: rgba(255,255,255,0.045);
+  color: #b8c0ce;
+  font-weight: 800;
+}
+
+.tm-footer > span:last-child {
+  width: 44px;
+  padding: 0;
+  color: var(--widget-text);
+}
+
+/* mini widgets riding the back/front of the hero stack */
+.mini-widget {
+  padding: 17px;
+}
+
+.mini-top,
+.mini-line {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mini-top {
+  color: rgba(255,255,255,0.78);
+  font-weight: 800;
+}
+
+.mini-line {
+  margin-top: 15px;
+  color: rgba(255,255,255,0.64);
+  font-size: 13px;
+}
+
+.mini-line strong { color: #fff; }
+
+.mini-session-widget {
+  padding: 14px 16px 15px;
+}
+
+.mini-session-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.mini-back {
+  color: var(--widget-muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.mini-pill {
+  flex: none;
+  padding: 5px 9px;
+  border: 1px solid rgba(232,238,244,0.16);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.055);
+  color: var(--widget-muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.mini-session-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 13px;
+  margin-top: 13px;
+}
+
+.mini-session-copy {
+  min-width: 0;
+  color: rgba(255,255,255,0.66);
+}
+
+.mini-session-title,
+.mini-session-meta,
+.mini-session-value span {
+  display: block;
+}
+
+.mini-session-title {
+  overflow: hidden;
+  color: rgba(255,255,255,0.72);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.22;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-session-meta {
+  margin-top: 3px;
+  overflow: hidden;
+  color: #8b94a1;
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mini-session-value {
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.15;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.mini-session-value span {
+  margin-top: 3px;
+  color: #b8c0ce;
+  font-size: 10.5px;
+}
+
+.mini-session-widget .tm-bar {
+  height: 6px;
+  margin-top: 7px;
+}
+
+/* flat glass app widget — the tour screens' surface; same .tm-* type system
+   as the hero stack so every mock mirrors a real view of the desktop app */
+.app-frame {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  max-width: 432px;
+  margin-inline: auto;
+  border: 1px solid var(--widget-border);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(255,255,255,0.08), rgba(255,255,255,0.022)),
+    linear-gradient(135deg, rgba(255,255,255,0.035), rgba(0,0,0,0.09)),
+    var(--widget-bg);
+  box-shadow: var(--widget-shadow);
+  backdrop-filter: blur(42px) saturate(132%);
+  -webkit-backdrop-filter: blur(42px) saturate(132%);
+  color: var(--widget-text);
+  font-family: var(--mono);
+}
+
+/* the hero widget runs large; the feature widgets are tuned for the ~432px slot */
+.app-frame .tm-inner { padding: 18px 20px 19px; }
+.app-frame .tm-titlebar { margin-bottom: 18px; }
+.app-frame .tm-title { font-size: 21px; }
+.app-frame .tm-tabs { padding: 3px; border-radius: 14px; }
+.app-frame .tm-tabs span { padding: 7px 11px; font-size: 11px; border-radius: 10px; }
+.app-frame .tm-label { font-size: 13px; }
+/* matches the desktop widget's .total-number (SF Pro Display 500, up to 46px) */
+.app-frame .tm-total { margin-top: 9px; font-size: 42px; }
+.app-frame .tm-cost { margin-top: 6px; font-size: 14px; }
+.app-frame .tm-breakdown { margin-top: 18px; }
+.app-frame .tm-row { margin-top: 13px; padding-bottom: 13px; }
+.app-frame .tm-row:last-child { padding-bottom: 0; border-bottom: 0; }
+.app-frame .tm-row-name,
+.app-frame .tm-row-value { font-size: 15px; }
+.app-frame .tm-row-value span { margin-top: 3px; font-size: 11px; }
+.app-frame .tm-icon { width: 18px; height: 18px; }
+.app-frame .tm-icon img { width: 16px; height: 16px; }
+.app-frame .tm-bar { height: 6px; margin-top: 11px; }
+/* every view keeps the real footer: current view pill + settings gear */
+.app-frame .tm-footer { margin-top: 19px; }
+.app-frame .tm-footer > span { min-height: 36px; padding: 0 12px; border-radius: 11px; font-size: 13px; }
+.app-frame .tm-footer > span:last-child { width: 36px; padding: 0; }
+
+/* Exact copies of the desktop widget's view glyphs, recolored through masks in
+   the same way the renderer does. Keeping one primitive here prevents the Home
+   panel, the feature views, and the view menu from drifting apart. */
+.app-view-icon {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  background: currentColor;
+  -webkit-mask: var(--view-icon) center / contain no-repeat;
+  mask: var(--view-icon) center / contain no-repeat;
+}
+.view-icon-home { --view-icon: url("../assets/icons/views/home.svg"); }
+.view-icon-limits { --view-icon: url("../assets/icons/views/limits.svg"); }
+.view-icon-tool { --view-icon: url("../assets/icons/views/tool.svg"); }
+.view-icon-model { --view-icon: url("../assets/icons/views/model.svg"); }
+.view-icon-device { --view-icon: url("../assets/icons/views/device.svg"); }
+.view-icon-session { --view-icon: url("../assets/icons/views/session.svg"); }
+.view-icon-project { --view-icon: url("../assets/icons/views/project.svg"); }
+.view-icon-trends { --view-icon: url("../assets/icons/views/trends.svg"); }
+.view-icon-status { --view-icon: url("../assets/icons/views/status.svg"); }
+
+.tm-app-footer {
+  position: relative;
+  overflow: visible;
+}
+.tm-view-control {
+  position: relative;
+  display: flex;
+  height: 30px;
+  color: #b8c0ce;
+}
+.tm-app-footer button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 30px;
+  margin: 0;
+  border: 0;
+  background: rgba(4, 8, 13, .16);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px rgba(228, 238, 248, .12);
+}
+.tm-app-footer .tm-view-current {
+  gap: 6px;
+  min-width: 82px;
+  padding: 0 9px;
+  border-radius: 7px 0 0 7px;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+.tm-view-disclosure {
+  width: 24px;
+  margin-left: -1px !important;
+  border-radius: 0 7px 7px 0;
+}
+.tm-view-disclosure > span {
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  /* The flip's optical nudge rides in translateY rather than margin-top, so the
+     transition animates transform alone. */
+  transform: translateY(-1.5px) rotate(45deg);
+  transition: transform 180ms cubic-bezier(.16, 1, .3, 1);
+}
+.tm-view-control.is-open .tm-view-disclosure > span {
+  transform: translateY(1.5px) rotate(225deg);
+}
+.tm-settings-button {
+  width: 34px;
+  border-radius: 7px;
+  color: #e9f3ff !important;
+}
+.tm-settings-glyph::before {
+  content: "⚙";
+  font-size: 15px;
+  line-height: 1;
+}
+.tm-app-footer button:hover,
+.tm-app-footer button:focus-visible,
+.tm-view-control.is-open > button {
+  background: rgba(128, 183, 255, .13);
+  color: #fff;
+}
+.tm-app-footer button:focus-visible {
+  outline: 2px solid rgba(125, 190, 255, .7);
+  outline-offset: 1px;
+}
+.tm-view-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 8;
+  display: grid;
+  width: 118px;
+  padding: 4px;
+  border: 1px solid rgba(228, 238, 248, .13);
+  border-radius: 9px;
+  background: rgba(20, 23, 29, .88);
+  box-shadow: 0 16px 38px rgba(0, 0, 0, .42), inset 0 1px 0 rgba(255, 255, 255, .06);
+  backdrop-filter: blur(28px) saturate(1.18);
+  -webkit-backdrop-filter: blur(28px) saturate(1.18);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translateY(6px) scale(.985);
+  transform-origin: bottom left;
+  filter: blur(2px);
+  transition:
+    opacity 130ms ease,
+    transform 130ms ease,
+    filter 130ms ease,
+    visibility 0s linear 130ms;
+}
+.tm-view-control.is-open .tm-view-menu {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: none;
+  filter: none;
+  transition:
+    opacity 190ms cubic-bezier(.16, 1, .3, 1),
+    transform 190ms cubic-bezier(.16, 1, .3, 1),
+    filter 190ms cubic-bezier(.16, 1, .3, 1),
+    visibility 0s;
+}
+.tm-view-menu button {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 7px;
+  width: 100%;
+  height: 28px;
+  padding: 0 7px;
+  border-radius: 6px;
+  background: transparent;
+  box-shadow: none;
+  color: #aeb8c6;
+  font-size: 11px;
+  text-align: left;
+}
+.tm-view-menu button > span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tm-view-menu button:hover,
+.tm-view-menu button:focus-visible,
+.tm-view-menu button.is-current {
+  background: rgba(128, 183, 255, .11);
+  color: #f4f8ff;
+}
+/* the view body sits below the always-visible total panel, like the app */
+.app-frame .tm-limits,
+.app-frame .tm-statuslist,
+.app-frame .tm-trends-cap { margin-top: 19px; }
+.app-frame .tm-crumb { margin-top: 17px; }
+
+/* in-widget Trends preview (mirrors the app's .trends-* panel) */
+.tm-trends-cap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--widget-muted);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.tm-trends-hint { font-size: 13px; }
+.tm-spark { margin-top: 10px; padding: 4px 2px; border-radius: 8px; }
+.tm-spark svg { display: block; width: 100%; height: 92px; }
+.tm-spark rect { fill: #6ab4f0; opacity: 0.5; }
+.tm-spark rect:last-child { opacity: 1; }
+.tm-axis {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 3px;
+  margin-top: 4px;
+  color: var(--widget-muted);
+  font-size: 10px;
+}
+.tm-trend-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 13px; }
+.tm-trend-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 9px 11px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.05);
+}
+.tm-trend-stat .v { color: var(--widget-text); font-size: 16px; font-weight: 800; line-height: 1; }
+.tm-trend-stat .k { color: var(--widget-muted); font-size: 10px; font-weight: 700; }
+
+/* bars fill as their .reveal container scrolls into view (main.js adds .is-visible) */
+.js .reveal .tm-bar span {
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 1s cubic-bezier(.2,.8,.2,1) .2s;
+}
+.js .reveal.is-visible .tm-bar span { transform: scaleX(1); }
+@media (prefers-reduced-motion: reduce) {
+  .js .reveal .tm-bar span { transition: none; }
+}
+
+/* AI Tool Limits view */
+.tm-limit { margin-top: 13px; padding-bottom: 12px; border-bottom: 1px solid rgba(232,238,244,0.12); }
+.tm-limit:first-child { margin-top: 0; }
+.tm-limit:last-child { padding-bottom: 0; border-bottom: 0; }
+.tm-limit-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.tm-limit-name { display: inline-flex; align-items: center; gap: 9px; font-size: 15px; font-weight: 800; }
+.tm-plan { color: var(--widget-muted); font-size: 11px; font-weight: 800; }
+.tm-updated { margin-top: 4px; color: #8b94a1; font-size: 11px; }
+.tm-windows { display: grid; grid-template-columns: 1fr 1fr; gap: 9px 16px; margin-top: 9px; }
+.tm-windows.single { grid-template-columns: 1fr; }
+.tm-windows.stacked { grid-template-columns: 1fr; gap: 10px; }
+.app-frame .tm-windows .tm-bar { margin-top: 6px; }
+.tm-window-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 12px; font-weight: 800; }
+.tm-window-top .lbl { color: var(--widget-muted); }
+.tm-window-top .pct { color: var(--widget-text); }
+.tm-reset { margin-top: 4px; color: #8b94a1; font-size: 11px; }
+.tm-balance { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 12px; font-weight: 800; }
+.tm-balance .lbl { color: var(--widget-muted); }
+.tm-balance .val { color: var(--widget-text); }
+
+/* sessions view header: sort pill row above the live session list */
+.tm-crumb { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.tm-pill { padding: 6px 11px; border: 1px solid rgba(232,238,244,0.16); border-radius: 999px; background: rgba(255,255,255,0.045); color: var(--widget-muted); font-size: 11px; font-weight: 800; }
+
+/* terminal (always-dark window for shell commands) */
+.window.term { background: #0d1117; border-color: rgba(255,255,255,0.08); backdrop-filter: none; }
+.window.term .window-bar { border-color: rgba(255,255,255,0.07); }
+.window.term .window-title { color: #8b949e; }
+.term-body { margin: 0; padding: 1rem 1.2rem; font-family: var(--mono); font-size: 0.9rem; line-height: 1.8; color: #c9d1d9; overflow-x: auto; }
+.term-body .tok-prompt { color: #7ee787; user-select: none; margin-right: 0.5rem; }
+
+/* supported-tool marks */
+.tool-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+}
+
+.tool-mark img {
+  display: block;
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
+/* Marks whose own art renders dark, flattened to white so the marquee stays legible
+   on the dark hero. A brand-colored mark (Claude, Amp, MiniMax, …) is left alone. */
+.tool-chip img[src$="codebuddy.svg"],
+.tool-chip img[src$="codex.svg"],
+.tool-chip img[src$="copilot.svg"],
+.tool-chip img[src$="cursor.svg"],
+.tool-chip img[src$="deepseek.svg"],
+.tool-chip img[src$="dsh.svg"],
+.tool-chip img[src$="gemini.svg"],
+.tool-chip img[src$="hermes-agent.svg"],
+.tool-chip img[src$="kilo.svg"],
+.tool-chip img[src$="kiro.svg"],
+.tool-chip img[src$="meta.svg"],
+.tool-chip img[src$="mimo.svg"],
+.tool-chip img[src$="mistral.svg"],
+.tool-chip img[src$="kimi.svg"],
+.tool-chip img[src$="opencode.svg"],
+.tool-chip img[src$="openrouter.svg"],
+.tool-chip img[src$="pi.svg"],
+.tool-chip img[src$="workbuddy.svg"],
+.tool-chip img[src$="xai.svg"],
+.tool-chip img[src$="zai.svg"],
+.tool-chip img[src$="cline.svg"],
+.tool-chip img[src$="devin.svg"],
+.tool-chip img[src$="droid.svg"],
+.tool-chip img[src$="ollama.svg"],
+.tool-chip img[src$="typesafe.svg"],
+.tool-chip img[src$="catpaw.svg"],
+.tool-chip img[src$="fx.svg"],
+.tool-chip img[src$="stepfun.svg"],
+.tool-chip img[src$="goose.svg"],
+.tool-chip img[src$="jcode.svg"],
+.tool-chip img[src$="manus.svg"],
+.tool-chip img[src$="notion.svg"],
+.tool-chip img[src$="opendesign.svg"],
+.tool-chip img[src$="prime-agent.svg"],
+.tool-chip img[src$="thirdparty.svg"] {
+  filter: brightness(0) invert(1);
+  opacity: .88;
+}
+
+@media (max-width: 980px) {
+  .nav {
+    grid-template-columns: minmax(170px, 1fr) auto;
+  }
+  .nav-menu { display: none; }
+}
+
+@media (max-width: 680px) {
+  .site-header { padding: 0.6rem 0 0.3rem; }
+  .nav {
+    width: var(--navw);
+    grid-template-columns: auto 1fr;
+    min-height: 54px;
+    padding: 0.34rem 0.38rem;
+    gap: 0.45rem;
+  }
+  .brand span { display: none; }
+  .brand-mark { width: 34px; height: 34px; }
+  .nav-menu { display: none; }
+  .nav-actions { gap: 0.8rem; }
+}
+
+@media (max-width: 480px) {
+  .nav-github-label { display: none; }
+}

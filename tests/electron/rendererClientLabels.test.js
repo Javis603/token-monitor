@@ -1,0 +1,233 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const { sessionRowsForPeriod } = require('../../src/electron/renderer/sessionRows');
+const { CLIENT_LABELS, CLIENT_IDS } = require('../../src/shared/clientCatalog');
+const { VENDOR_IDS } = require('../../src/shared/vendorPresentation');
+const { rendererStyles } = require('../helpers/rendererStyles');
+
+function rendererSource() {
+  return fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js'), 'utf8');
+}
+
+// app.js builds clientsWithIcon from the vendor table's coloured ids, which
+// app.js itself asserts below; the membership checks read the table.
+const usageMarkIds = new Set(VENDOR_IDS);
+
+function assertUsageMarks(...ids) {
+  for (const id of ids) assert.ok(usageMarkIds.has(id), `${id} should be a usage-row mark`);
+}
+
+test('app.js takes its mark sets from the vendor presentation table', () => {
+  const source = rendererSource();
+  assert.match(source, /const clientsWithIcon = new Set\(vendorPresentationApi\.VENDOR_IDS\);/);
+  assert.match(source, /const limitMarksWithIcon = new Set\(vendorPresentationApi\.MARK_IDS\);/);
+});
+
+// clientLabels and KNOWN_CLIENTS are destructured out of the shared catalog
+// now, so read that contract directly instead of regex-scraping app.js for
+// declarations that have moved.
+function clientLabelIds() {
+  return new Set(Object.keys(CLIENT_LABELS));
+}
+
+function knownClientIds() {
+  return [...CLIENT_IDS];
+}
+
+test('app.js takes client identity from the catalog and keeps no copy of it', () => {
+  // An ownership boundary, not a data layout: that CLIENT_LABELS covers every
+  // catalog id is asserted in tests/shared/clientCatalog.test.js, so repeating it
+  // here would only compare the catalog with itself. What is worth guarding is
+  // that the renderer still sources identity from the catalog and has not grown a
+  // second copy of the list.
+  const source = rendererSource();
+  assert.match(source, /window\.TokenMonitorClientCatalog/);
+  assert.doesNotMatch(source, /const clientLabels = \{/);
+  assert.doesNotMatch(source, /const KNOWN_CLIENTS = \[/);
+});
+
+test('renderer known clients include current tokscale-supported tools', () => {
+  const clients = knownClientIds();
+  for (const client of ['cline', 'amp', 'kimi', 'qwen', 'grok', 'copilot', 'pi', 'zed', 'kilo', 'commandcode', 'mimo', 'zcode', 'kiro', 'codebuddy', 'workbuddy', 'reasonix', 'dsh']) {
+    assert.ok(clients.includes(client), `${client} should be a known renderer client`);
+  }
+});
+
+test('renderer distinguishes Grok model and Grok Build tool icons', () => {
+  const styles = rendererStyles();
+  assert.match(styles, /\.row-icon-xai\s*\{[^}]*assets\/icons\/grok\.svg/s);
+  assert.match(styles, /\.row-icon-grok\s*\{[^}]*assets\/icons\/xai\.svg/s);
+  assert.match(styles, /\.limit-icon\.row-icon-grok\s*\{[^}]*assets\/icons\/grok\.svg/s);
+  assert.match(styles, /^\.row-icon-copilot\s*\{[^}]*assets\/icons\/copilot\.svg/m);
+});
+
+test('renderer reuses vendor icons for MiMo and ZCode tool rows', () => {
+  const styles = rendererStyles();
+  assert.match(styles, /\.row-icon-mimo\s*\{[^}]*assets\/icons\/xiaomi\.svg/s);
+  assert.match(styles, /\.row-icon-zcode\s*\{[^}]*assets\/icons\/zai\.svg/s);
+});
+
+test('renderer uses the Kiro brand icon for the Kiro tool row', () => {
+  const styles = rendererStyles();
+  assert.match(styles, /\.row-icon-kiro\s*\{[^}]*assets\/icons\/kiro\.svg/s);
+});
+
+test('renderer wires limit provider brand icons for Z.ai, Volcengine, and Qoder', () => {
+  const styles = rendererStyles();
+
+  assertUsageMarks('zai', 'volcengine', 'qoder');
+  assert.match(styles, /^\.row-icon-zai\s*\{[^}]*assets\/icons\/zai\.svg/m);
+  assert.match(styles, /^\.row-icon-volcengine\s*\{[^}]*assets\/icons\/volcengine\.svg/m);
+  assert.match(styles, /^\.row-icon-qoder\s*\{[^}]*assets\/icons\/qoder\.svg/m);
+  assert.match(styles, /^\.row-icon-ollama\s*\{[^}]*assets\/icons\/ollama\.svg/m);
+});
+
+test('renderer wires the Doubao vendor icon for Doubao model rows', () => {
+  const styles = rendererStyles();
+
+  assertUsageMarks('doubao', 'volcengine', 'qoder');
+  assert.match(styles, /\.row-icon-doubao\s*\{[^}]*assets\/icons\/doubao\.svg/s);
+});
+
+test('renderer wires the Hunyuan vendor icon for Hunyuan model rows', () => {
+  const styles = rendererStyles();
+
+  assertUsageMarks('hunyuan');
+  assert.match(styles, /\.row-icon-hunyuan\s*\{[^}]*assets\/icons\/hunyuan\.svg/s);
+  assert.equal(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'hunyuan.svg')), true);
+});
+
+test('renderer maps MiMo provider rows to the Xiaomi brand icon', () => {
+  const styles = rendererStyles();
+
+  // `mimo` is a tracked client and a limits provider under one id, while
+  // `xiaomi` is the model vendor. Both mask with the same Xiaomi artwork.
+  assertUsageMarks('mimo', 'xiaomi');
+  assert.match(styles, /\.row-icon-xiaomi\s*\{[^}]*assets\/icons\/xiaomi\.svg/s);
+  assert.match(styles, /\.row-icon-mimo\s*\{[^}]*assets\/icons\/xiaomi\.svg/s);
+});
+
+test('renderer uses the CodeBuddy and WorkBuddy brand icons for their tool rows', () => {
+  const styles = rendererStyles();
+  assert.match(styles, /\.row-icon-codebuddy\s*\{[^}]*assets\/icons\/codebuddy\.svg/s);
+  assert.match(styles, /\.row-icon-workbuddy\s*\{[^}]*assets\/icons\/workbuddy\.svg/s);
+});
+
+test('renderer uses the Reasonix icon for the Reasonix tool row', () => {
+  const styles = rendererStyles();
+  assert.match(styles, /\.row-icon-reasonix\s*\{[^}]*assets\/icons\/reasonix\.svg/s);
+});
+
+test('renderer uses the DeepSeek Harness icon for the DSH tool row', () => {
+  const styles = rendererStyles();
+  assert.match(styles, /\.row-icon-dsh\s*\{[^}]*assets\/icons\/dsh\.svg/s);
+});
+
+test('renderer uses the mask-safe Command Code icon for its tool row', () => {
+  const styles = rendererStyles();
+  const icon = fs.readFileSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'commandcode.svg'), 'utf8');
+
+  assertUsageMarks('commandcode');
+  assert.match(styles, /\.row-icon-commandcode\s*\{[^}]*assets\/icons\/commandcode\.svg/s);
+  // Cropped to the glyph: the outer rounded-square frame was dropped so the
+  // mark fills the icon box like every other tool row.
+  assert.match(icon, /viewBox="26\.1784 26\.1784 83\.7708 83\.7708"/);
+  assert.doesNotMatch(icon, /fill="#(?:000|fff)"/i);
+  assert.equal((icon.match(/<path\b/g) || []).length, 1);
+});
+
+test('Reasonix icon keeps the official color in a mask-safe SVG path', () => {
+  const icon = fs.readFileSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'reasonix.svg'), 'utf8');
+  assert.match(icon, /fill="#0153e5"/);
+  assert.match(icon, /fill-rule="evenodd"/);
+  assert.doesNotMatch(icon, /stroke=/);
+});
+
+test('Reasonix native session keeps presentation identity for the brand icon path', () => {
+  const source = rendererSource();
+  assertUsageMarks('reasonix');
+  assert.match(source, /if \(breakdown === 'session'\) \{[\s\S]*rowData\.client && clientsWithIcon\.has\(rowData\.client\)[\s\S]*row-icon-\$\{rowData\.client\}/);
+
+  const [row] = sessionRowsForPeriod({ sessions: {} }, {
+    nativeSessions: {
+      'reasonix:branch-id': {
+        client: 'reasonix',
+        sessionId: 'reasonix:branch-id',
+        model: 'deepseek/deepseek-v4-flash',
+        totalTokens: 140
+      }
+    },
+    clientLabels: { reasonix: 'Reasonix' },
+    clientColors: { reasonix: '#4d6bfe' }
+  });
+  assert.equal(row.client, 'reasonix');
+  assert.equal(row.name, 'Reasonix · deepseek/deepseek-v4-flash');
+});
+
+test('LM Studio has a label and uses the standard mask-safe icon path', () => {
+  const styles = rendererStyles();
+
+  assert.ok(clientLabelIds().has('lmstudio'));
+  assertUsageMarks('lmstudio');
+  assert.match(styles, /\.row-icon-lmstudio\s*\{[^}]*mask-image:\s*url\(["']?[^)]*assets\/icons\/lmstudio\.svg["']?\)/s);
+  assert.doesNotMatch(styles, /\.row-icon-lmstudio\s*\{[^}]*background-image:/s);
+  assert.equal(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'lmstudio.svg')), true);
+  assert.equal(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'lmstudio.png')), true);
+});
+
+test('Unsloth has a label and uses the standard mask-safe icon path', () => {
+  const styles = rendererStyles();
+  assert.ok(clientLabelIds().has('unsloth'));
+  assertUsageMarks('unsloth');
+  assert.match(styles, /\.row-icon-unsloth\s*\{[^}]*mask-image:\s*url\(["']?[^)]*assets\/icons\/unsloth\.svg["']?\)/s);
+  assert.doesNotMatch(styles, /\.row-icon-unsloth\s*\{[^}]*background-image:/s);
+  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'unsloth.svg')));
+  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'unsloth.png')));
+});
+
+test('Devin has a label and uses the standard mask-safe icon path', () => {
+  const styles = rendererStyles();
+  assert.ok(clientLabelIds().has('devin'));
+  assertUsageMarks('devin');
+  assert.match(styles, /\.row-icon-devin\s*\{[^}]*mask-image:\s*url\(["']?[^)]*assets\/icons\/devin\.svg["']?\)/s);
+  assert.doesNotMatch(styles, /\.row-icon-devin\s*\{[^}]*background-image:/s);
+  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'devin.svg')));
+  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'devin.png')));
+});
+
+test('OmO Native has a label and a mask-safe app icon', () => {
+  assert.equal(CLIENT_LABELS.senpi, 'OmO Native');
+  assertUsageMarks('senpi');
+  assert.match(rendererStyles(), /\.row-icon-senpi\s*\{[^}]*mask-image:\s*url\(["']?[^)]*assets\/icons\/senpi\.svg["']?\)/s);
+  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'senpi.svg')));
+});
+
+test('Cline carries the Cline brand purple', () => {
+  const { clientColors } = require('../../src/electron/renderer/usageCharts');
+  // Cline's own docs theme declares it (docs/docs.json: colors.primary #9D4EDD), and
+  // it is the purple its dashboard paints its accents with.
+  assert.equal(clientColors.cline, '#9D4EDD', 'Cline chart colour is the Cline brand purple');
+});
+
+test('Amp carries its own brand colour and mask-safe icon assets', () => {
+  const styles = rendererStyles();
+  const { clientColors } = require('../../src/electron/renderer/usageCharts');
+
+  assert.ok(clientLabelIds().has('amp'));
+  assert.equal(clientColors.amp, '#F34E3F', 'Amp chart colour is the Amp brand red');
+  assertUsageMarks('amp');
+  assert.match(styles, /\.row-icon-amp\s*\{[^}]*mask-image:\s*url\(["']?[^)]*assets\/icons\/amp\.svg["']?\)/s);
+  assert.doesNotMatch(styles, /\.row-icon-amp\s*\{[^}]*background-image:/s);
+  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'amp.svg')));
+  assert.ok(fs.existsSync(path.join(__dirname, '..', '..', '.github', 'assets', 'tools-icon', 'amp.png')));
+
+  // The mark is a single flat ink, so the tray's re-ink path can recolour it
+  // instead of drawing it in the SVG's own fill.
+  const icon = fs.readFileSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'amp.svg'), 'utf8');
+  assert.match(icon, /fill="#F34E3F"/);
+  assert.doesNotMatch(icon, /<linearGradient|<radialGradient|stroke=/);
+});

@@ -1,0 +1,147 @@
+* { box-sizing: border-box; }
+/* The dashboard is a separate window with its own stylesheet, so it needs the
+   same theme-variable foundation as the widget. JS (themeCssVarEntries) flips
+   these on a light theme; the defaults here mirror the widget's :root. */
+:root {
+  color-scheme: dark;
+  --glass-rgb: 48, 52, 56;
+  --glass-alpha: 0.68;
+  --glass: rgba(var(--glass-rgb), var(--glass-alpha));
+  --overlay-rgb: 255, 255, 255;
+  --line-rgb: 232, 238, 244;
+  --line-alpha: 0.14;
+  --line: rgba(var(--line-rgb), var(--line-alpha));
+  --panel-rgb: 16, 21, 30;
+  --text: #eef5fb;
+}
+/* This window links styles.css before this file, so it inherits that sheet's
+   base type size and its single `.hidden` rule; nothing here restates either. */
+html, body { margin: 0; height: 100%; }
+body {
+  font-family: var(--ui-font, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+  color: var(--text);
+  background: var(--glass);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+body.flat { background: rgb(var(--glass-rgb)); }
+html.native-liquid-glass body { background: transparent; }
+html.native-liquid-glass body.flat { background: rgb(var(--glass-rgb)); }
+html.native-material-opaque body,
+html.native-reduced-transparency body { background: rgb(var(--glass-rgb)); }
+html.native-reduced-transparency body * {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+html.native-high-contrast .dash-header,
+html.native-high-contrast .dash-cards { border-color: var(--line-strong); }
+
+.dash-header {
+  -webkit-app-region: drag;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border-bottom: 1px solid var(--line, rgba(var(--line-rgb), 0.14));
+}
+.dash-title { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
+.dash-header-actions { -webkit-app-region: no-drag; display: flex; gap: 6px; }
+.icon-button {
+  -webkit-app-region: no-drag;
+  background: rgba(var(--overlay-rgb), 0.05); color: inherit; border: none; cursor: pointer;
+  width: 26px; height: 26px; border-radius: 6px; font-size: 14px; line-height: 1;
+}
+.icon-button:hover { background: rgba(var(--overlay-rgb), 0.12); }
+
+.dash-tabs { display: flex; gap: 4px; padding: 10px 14px 0; }
+.dash-tab {
+  background: none; border: none; color: inherit; opacity: 0.55; cursor: pointer;
+  font-size: 12px; padding: 6px 12px; border-radius: 7px 7px 0 0;
+}
+.dash-tab.active { opacity: 1; background: rgba(var(--overlay-rgb), 0.06); }
+
+.dash-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 14px; }
+/* The overview reads as a centred content column (like a profile page) so the summary
+   strip and heatmap share one width and a wide window gets symmetric margins, not a right gap. */
+#activityPane { align-self: center; width: 100%; max-width: 1200px; margin-inline: auto; }
+.dash-heatmap-block { flex: none; display: flex; flex-direction: column; gap: 10px; }
+.dash-heatmap-title { font-size: 13px; font-weight: 600; opacity: 0.9; }
+.dash-heatmap-title-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.seg--sm .seg-btn { font-size: 10px; padding: 3px 8px; }
+
+.dash-controls { flex: none; }
+.dash-control-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dash-range-group { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.range-btn {
+  background: none; border: 1px solid transparent; color: inherit; opacity: 0.65; cursor: pointer;
+  font-size: 12px; padding: 3px 10px; border-radius: 6px; font-family: inherit; transition: 0.2s;
+}
+.range-btn:hover { opacity: 1; }
+.range-btn.active { opacity: 1; border-color: transparent; color: var(--text); background: rgba(var(--overlay-rgb), 0.12); }
+.seg { display: inline-flex; background: rgba(var(--overlay-rgb), 0.05); border-radius: 7px; padding: 2px; }
+.seg-btn { background: none; border: none; color: inherit; opacity: 0.6; cursor: pointer; font-size: 11px; padding: 5px 10px; border-radius: 5px; }
+.seg-btn.active { opacity: 1; background: rgba(var(--overlay-rgb), 0.12); }
+
+.dash-chart-wrap { flex: 1; min-height: 0; }
+.dash-chart { width: 100%; height: 100%; display: block; }
+.axis-base { stroke: rgba(var(--line-rgb), 0.18); stroke-width: 1; }
+.grid-line { stroke: rgba(var(--line-rgb), 0.07); stroke-width: 1; }
+.axis-label, .heat-month { fill: rgba(var(--line-rgb), 0.5); font-size: 10px; }
+.bar-seg { transition: opacity 0.1s ease; }
+.bar-stack { transform-box: fill-box; transform-origin: center bottom; }
+.bar-hover { fill: transparent; pointer-events: all; cursor: default; }
+.bar-hover:hover { fill: rgba(var(--overlay-rgb), 0.08); }
+.candle-wick { stroke-width: 1.5; }
+.candle-body { stroke: none; transform-box: fill-box; transform-origin: center center; }
+.candle-up { stroke: #4ec77f; fill: #4ec77f; }
+.candle-down { stroke: #f06a7b; fill: #f06a7b; }
+
+.dash-legend { flex: none; display: flex; flex-direction: column; gap: 1px; max-height: 136px; overflow-y: auto; scrollbar-width: none; }
+.dash-legend::-webkit-scrollbar { display: none; }
+.dash-legend-row { display: grid; grid-template-columns: 1fr auto auto; gap: 12px; align-items: center; padding: 4px 6px; border-radius: 6px; font-size: 12px; }
+.dash-legend-row:hover { background: rgba(var(--overlay-rgb), 0.04); }
+.dash-legend-name { display: inline-flex; align-items: center; gap: 8px; opacity: 0.9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-legend-swatch { width: 11px; height: 11px; border-radius: 3px; display: inline-block; flex: none; box-shadow: inset 0 0 0 1px rgba(var(--overlay-rgb), 0.18); }
+.dash-legend-val { font-variant-numeric: tabular-nums; opacity: 0.8; }
+.dash-legend-pct { font-variant-numeric: tabular-nums; opacity: 0.55; min-width: 50px; text-align: right; }
+
+.dash-heatmap-wrap { flex: none; overflow-x: auto; }
+.dash-heatmap-wrap.is-motion-pending .heat-base-layer .heat { opacity: 0; }
+.heat { stroke: none; stroke-width: 0; }
+.heat.lvl-0 { fill: rgba(var(--overlay-rgb), 0.03); }
+.heat.lvl-1 { fill: rgba(var(--chart-heat-1-rgb), 0.18); }
+.heat.lvl-2 { fill: rgba(var(--chart-heat-2-rgb), 0.45); }
+.heat.lvl-3 { fill: rgba(var(--chart-heat-3-rgb), 0.8); }
+.heat.lvl-4 { fill: rgba(var(--chart-heat-4-rgb), 1); }
+
+.dash-cards { flex: none; display: grid; grid-template-columns: repeat(var(--stat-count, 8), minmax(0, 1fr)); overflow: hidden; border: 1px solid rgba(var(--overlay-rgb), 0.08); border-radius: 12px; background: rgba(var(--overlay-rgb), 0.03); }
+.dash-card { min-width: 0; display: flex; flex-direction: column; gap: 5px; padding: 14px clamp(12px, 1.35vw, 18px); border-right: 1px solid rgba(var(--overlay-rgb), 0.06); }
+.dash-card:last-child { border-right: none; }
+.dash-card-v { font-family: var(--display-font, inherit); font-size: 19px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-card-k { font-size: 10px; opacity: 0.55; text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.dash-breakdown { flex: none; display: flex; gap: 32px; padding-top: 6px; }
+.dash-breakdown-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.dash-breakdown-title { font-size: 12px; font-weight: 600; opacity: 0.6; margin-bottom: 2px; text-transform: uppercase; letter-spacing: 0.04em; }
+.dash-bd-row { display: flex; align-items: center; gap: 12px; font-size: 12px; padding: 2px 0; }
+.dash-bd-name { flex: none; width: 110px; display: flex; align-items: center; gap: 8px; opacity: 0.9; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dash-bd-bar-bg { flex: 1; height: 4px; background: rgba(var(--overlay-rgb), 0.06); border-radius: 2px; overflow: hidden; }
+.dash-bd-bar-fill { width: 100%; height: 100%; border-radius: 2px; transform: scaleX(var(--bar-scale, 0)); transform-origin: left center; }
+.dash-bd-val { flex: none; font-variant-numeric: tabular-nums; opacity: 0.8; text-align: right; }
+.dash-bd-pct { flex: none; width: 42px; font-variant-numeric: tabular-nums; opacity: 0.55; text-align: right; }
+
+.dash-tooltip { position: fixed; z-index: 50; pointer-events: none; min-width: 130px; padding: 9px 11px; border-radius: 9px; font-size: 12px; background: rgba(var(--panel-rgb), 0.96); border: 1px solid rgba(var(--overlay-rgb), 0.1); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45); }
+.tt-head { font-weight: 600; margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+.tt-row { display: flex; align-items: center; gap: 8px; padding: 2px 0; }
+.tt-dot { width: 9px; height: 9px; border-radius: 2px; flex: none; box-shadow: inset 0 0 0 1px rgba(var(--overlay-rgb), 0.18); }
+.tt-name { flex: 1; opacity: 0.85; white-space: nowrap; }
+.tt-val { font-variant-numeric: tabular-nums; opacity: 0.95; padding-left: 12px; }
+
+/* Spans the whole window (inset: 0); keep it click-through so the header buttons
+   still work when there's no history. */
+.dash-empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; opacity: 0.6; font-size: 13px; pointer-events: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .range-btn,
+  :root:not([data-reduce-motion="off"]) .bar-seg { transition: none; }
+}
+
+.dash-card-v .usage-cost-info { margin-inline-start: 3px; }

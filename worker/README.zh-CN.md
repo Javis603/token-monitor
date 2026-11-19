@@ -1,0 +1,277 @@
+<p align="right">
+   <a href="./README.md">EN</a> | <strong>简</strong> | <a href="./README.zh-TW.md">繁</a>
+</p>
+
+# Token Monitor Hub — Cloudflare Worker
+
+> 属于 **[Token Monitor](https://github.com/Javis603/token-monitor)** 项目。这个目录只是 Cloudflare Worker hub；桌面小部件、无头 agent 和完整文档都在主仓库。一键部署会创建一份独立副本，不会自动更新，所以请回主仓库查看新版本。
+
+自托管 Node hub 的即插即用替代品，以 Cloudflare Worker 部署，用 Durable Object 保存设备状态。它讲的是同一套 HTTP 协议（`/api/ingest`、`/api/stats`、`/api/stats/stream`），所以小部件和 agent 无需改动即可使用，只是 Hub URL 不同。
+
+相比 Node hub，用它的理由：
+
+- 不需要一直开机的机器，Cloudflare 帮你跑。
+- 默认公开 HTTPS。跨网络可达，也能被 iOS 小部件（Widgy、Scriptable）访问。
+- 免费额度轻松覆盖小团队的用量。
+
+## 前置条件
+
+- Cloudflare 账号（免费）。
+- Node.js 22+（Wrangler v4 要求 `>=22.0.0`）。
+
+## 部署
+
+```bash
+cd worker
+npm install
+npx wrangler login          # one-time browser auth
+npx wrangler secret put TOKEN_MONITOR_SECRET   # paste a long random string
+npx wrangler deploy
+```
+
+Wrangler 会打印部署后的 URL，例如：
+
+```
+https://token-monitor-hub.<your-subdomain>.workers.dev
+```
+
+把每个 agent 和小部件都指向这个 URL。
+
+### 一键部署故障排除
+
+Cloudflare 的 **Deploy to Cloudflare** 按钮很方便，但一直有两种间歇性故障：
+
+- **部署页报「无法解析 Wrangler 配置文件」**——从 `worker/` 子目录读取配置时出的
+  岔子。
+- **部署后的 Worker 只返回纯文本 `Hello world`**——踩中了 Cloudflare 的已知导入
+  故障，生成的仓库*没有* Worker 源码（只有 `README.md` + `wrangler.toml`）。它会
+  显示成功，但背后根本没有代码。把 Workers Builds 重新连到包含完整 `worker/` 目录
+  的仓库，或直接改用手动部署。
+
+两者都是 CF 侧的问题。故障在同一个浏览器会话里往往有「粘性」，所以先用无痕/隐私
+窗口（或换个浏览器）重开部署链接再试。若仍失败，就跳过按钮——上面的手动
+`cd worker && npx wrangler deploy` 一定能成：同一份代码，只是没有 CF 那个不稳定的
+导入步骤。
+
+## 本地开发
+
+```bash
+npm run dev   # wrangler dev — local Worker with a real Durable Object
+```
+
+各端点与生产环境行为一致。如有需要，用 `wrangler secret put TOKEN_MONITOR_SECRET --env dev` 设置一个独立的开发密钥。
+
+## 配置小部件
+
+设置 → Multi-device Sync：
+
+- Hub URL：`https://token-monitor-hub.<your-subdomain>.workers.dev`
+- Secret：你用 `wrangler secret put` 设置的值
+
+保存。SSE 流连上后，状态标签会从 `Local` 切换为 `Live`。
+
+## 配置 agent
+
+可以通过项目根目录的 `.env`（从 `.env.example` 复制）：
+
+```env
+TOKEN_MONITOR_HUB_URL=https://token-monitor-hub.<your-subdomain>.workers.dev
+TOKEN_MONITOR_SECRET=<the same secret>
+TOKEN_MONITOR_DEVICE_ID=             # optional — defaults to hostname
+```
+
+或在启动时内联导出：
+
+```bash
+TOKEN_MONITOR_HUB_URL=https://token-monitor-hub.<your-subdomain>.workers.dev \
+TOKEN_MONITOR_SECRET=<the same secret> \
+npm run agent
+```
+
+## 通过 Widgy 或 Scriptable 在 iPhone 上使用
+
+Worker 以开放 CORS 的纯 JSON 暴露 `GET /api/stats`，所以 iOS 小部件运行时可以直接调用。当 `PUBLIC_STATS_ENABLED=1` 时，它也能暴露无需鉴权的 `GET /api/public/stats` 供公开看板使用；该响应会省略每设备记录和账号标识。
+
+开启公开端点：
+
+```bash
+npx wrangler secret put PUBLIC_STATS_ENABLED   # enter 1
+```
+
+不设置则保持 `/api/public/stats` 关闭。
+
+### Widgy
+
+选 **async / no main()** 模板。使用 `?secret=` 查询字符串鉴权：Widgy 那个隐藏的 WKWebView 可能会卡在 `Authorization: Bearer` 触发的 CORS 预检上。这是有限兼容路径：URL 里的密钥可能进入代理、平台或历史日志。能设 Header 的客户端请走 Header。
+
+最简版本，只要一个数字：
+
+```js
+const HUB = 'https://token-monitor-hub.<your-subdomain>.workers.dev';
+const SECRET = '<the same secret>';
+const url = HUB + '/api/stats?secret=' + SECRET;
+fetch(url)
+  .then(r => r.json())
+  .then(s => sendToWidgy(
+    Number(s.periods.today.totalTokens).toLocaleString('en-US')
+  ))
+  .catch(e => sendToWidgy('err:' + e.message));
+```
+
+改最后那行 `sendToWidgy(...)` 即可选择任意字段：
+
+| 想显示             | 把内层表达式替换为                                          |
+|--------------------|------------------------------------------------------------|
+| 今日 tokens        | `Number(s.periods.today.totalTokens).toLocaleString('en-US')`     |
+| 今日成本           | `'$' + s.periods.today.costUsd.toFixed(2)`                 |
+| 本月 tokens        | `Number(s.periods.month.totalTokens).toLocaleString('en-US')`     |
+| 本月成本           | `'$' + s.periods.month.costUsd.toFixed(2)`                 |
+| 累计 tokens        | `Number(s.periods.allTime.totalTokens).toLocaleString('en-US')`   |
+| 累计成本           | `'$' + s.periods.allTime.costUsd.toFixed(2)`               |
+
+带配置块、并对 token 做紧凑 `K / M / B` 格式化的组合版本，适合窄小部件布局：
+
+```js
+const HUB = 'https://token-monitor-hub.<your-subdomain>.workers.dev';
+const SECRET = '<the same secret>';
+const PERIOD = 'today';        // 'today' | 'month' | 'allTime'
+const SHOW = 'tokens+cost';    // 'tokens' | 'cost' | 'tokens+cost'
+
+function fmtTokens(n) {
+  if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+  if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+  if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+  return String(Math.round(n));
+}
+function fmtCost(n) {
+  return '$' + (n >= 10 ? n.toFixed(2) : n.toFixed(4));
+}
+
+fetch(HUB + '/api/stats?secret=' + SECRET)
+  .then(r => r.json())
+  .then(stats => {
+    const p = stats.periods[PERIOD] || { totalTokens: 0, costUsd: 0 };
+    const t = fmtTokens(p.totalTokens || 0);
+    const c = fmtCost(p.costUsd || 0);
+    if (SHOW === 'tokens') sendToWidgy(t);
+    else if (SHOW === 'cost') sendToWidgy(c);
+    else sendToWidgy(t + ' · ' + c);
+  })
+  .catch(e => sendToWidgy('err:' + e.message));
+```
+
+每个 Widgy 文本元素各用一个脚本：复制它并修改 `PERIOD` / `SHOW` 来驱动不同字段。
+
+### Scriptable
+
+```js
+const req = new Request('https://token-monitor-hub.<your-subdomain>.workers.dev/api/stats');
+req.headers = { authorization: 'Bearer <the same secret>' };
+const stats = await req.loadJSON();
+const todayTokens = stats.periods.today.totalTokens;
+```
+
+iOS 小部件没有省电的推送通道，所以运行时会自行每隔几分钟重新拉取。
+
+## Stats 响应结构
+
+`GET /api/stats` 返回聚合快照。挑你小部件需要的字段即可：
+
+```jsonc
+{
+  "updatedAt": "2026-05-18T18:02:19.459Z",
+  "periods": {
+    "today":   { /* see PeriodSummary below */ },
+    "month":   { /* ... */ },
+    "allTime": { /* ... */ }
+  },
+  "limits": {
+    "updatedAt": "2026-05-18T18:02:19.459Z",
+    "providers": [
+      {
+        "provider": "claude",
+        "accountKey": "sha256:...",
+        "sourceDeviceId": "macbook",
+        "stale": false,
+        "status": "ok",
+        "windows": [
+          { "kind": "session", "usedPercent": 42, "remainingPercent": 58, "resetsAt": "2026-05-18T21:00:00.000Z" },
+          { "kind": "weekly", "usedPercent": 20, "remainingPercent": 80, "resetsAt": "2026-05-25T00:00:00.000Z" }
+        ]
+      }
+    ]
+  },
+  "devices": [
+    {
+      "deviceId":   "macbook",
+      "hostname":   "macbook.local",
+      "platform":   "darwin-arm64",
+      "updatedAt":  "2026-05-18T18:01:50.000Z",
+      "receivedAt": "2026-05-18T18:01:51.012Z",
+      "ageMs":      28447,
+      "stale":      false,
+      "periods":    { "today": {...}, "month": {...}, "allTime": {...} }
+    }
+  ]
+}
+```
+
+`PeriodSummary`：
+
+```jsonc
+{
+  "totalTokens":  1234567,        // sum across all devices for this period
+  "costUsd":      12.345678,
+  "clients":      { "claude": 800000, "codex": 400000, "hermes": 34567 },
+  "clientCosts":  { "claude": 8.12,   "codex": 4.10,   "hermes": 0.12  },
+  "models":       { "claude-opus-4-7": 600000, "gpt-5-thinking-medium": 400000, ... },
+  "modelCosts":   { "claude-opus-4-7": 7.50,   "gpt-5-thinking-medium": 4.00,   ... }
+}
+```
+
+如果想做每设备的小部件，每个设备也在 `devices[i].periods[period]` 下带有自己的每周期数值。当某设备的 `receivedAt` 早于 `STALE_AFTER_MS`（默认 10 分钟）时会被标记为 `stale: true`，想显示「离线」状态时很有用。
+
+`limits.providers` 按 provider 账号聚合。带鉴权的 stats 端点包含用于去重的账号哈希。开启后，`/api/public/stats` 会剥离这些哈希、标签、来源设备 id，以及完整的 `devices` 列表。
+
+## 端点
+
+| 方法   | 路径                       | 鉴权   | 说明                                       |
+|--------|----------------------------|--------|--------------------------------------------|
+| GET    | `/api/health`              | 无     | 存活探针 + 设备数                          |
+| GET    | `/api/public/stats`        | 无     | `PUBLIC_STATS_ENABLED=1` 时提供不含 devices/账号 id 的公开聚合统计 |
+| GET    | `/api/stats`               | 密钥   | 聚合统计（today / month / allTime）        |
+| GET    | `/api/stats/stream`        | 密钥   | SSE 快照与合并后的实时变更                 |
+| GET    | `/api/devices`             | 密钥   | 原始的每设备记录                          |
+| POST   | `/api/ingest`              | 密钥   | 更新某个设备的用量摘要                    |
+| DELETE | `/api/devices/{deviceId}`  | 密钥   | 删除一条设备记录                          |
+
+密钥有三种接受方式（任一即可）。请优先使用 Header；`?secret=` 仅作为有限兼容 / 迁移路径保留：
+
+1. `Authorization: Bearer <secret>`：agent、小部件，以及任何服务器 / 桌面客户端首选。
+2. `x-token-monitor-secret: <secret>`：无法设置 `Authorization` 的客户端的后备方案。
+3. `?secret=<secret>` 查询字符串：iOS 小部件运行时（Widgy、Scriptable）的有限兼容 / 迁移路径，它们的 WKWebView 难以处理 `Authorization` 头的 CORS 预检。URL 里的密钥可能进入代理、平台或历史日志。新客户端应改走 Header。
+
+密钥是必需的。当 `TOKEN_MONITOR_SECRET` 未设置时，所有数据路由都返回 `503 secret_required`，只有 `/api/health` 和可选开启的 `/api/public/stats` 会响应。请在部署前（或部署时）设置它。
+
+## 存储与成本
+
+设备记录存放在 Durable Object 的 SQLite 存储里，以 `dev:<deviceId>` 为键。每次 ingest 写一行；读取时在内存中聚合所有行。对于小团队（≤ 10 台设备，每台每分钟一次 ingest），这远在免费计划限额之内：
+
+- Worker 请求：≤ 15k/天，免费额度为 100k/天
+- DO SQL 读/写：≤ 30k/天，免费额度为数百万
+- DO 存储：总共几 KB
+
+## Tail 日志
+
+```bash
+npm run tail
+```
+
+实时流式输出 Worker + Durable Object 日志。
+
+
+## 可选共享内容
+
+`TOKEN_MONITOR_SYNC_SESSION_TITLES` 是服务端标题接收权限，未设置时默认关闭。请在 Cloudflare dashboard 管理；`keep_vars = true` 会在重新部署时保留 dashboard 变量。`wrangler.toml` 中明确声明的变量仍会覆盖 dashboard 值。只有需要允许设备发送标题时才设为 `"true"`；设备仍需单独选择加入，通过身份验证访问 `/api/sync/content`，并与 `/api/sync/titles/:deviceId` 协商。关闭权限会清除离线设备已保存的标题，并使已启用的代次令牌失效。公开统计始终不包含标题、共享设置及其版本标记。
+
+经过身份验证的 `/api/sync/settings/modelAliases`、`/api/sync/settings/customPricing` 和 `/api/sync/settings/limitAccountPresentation` 只保存有大小限制的共享分组，使用整数 `baseRevision` 进行比较并交换（CAS）。从未初始化的值为 `null`；主动清空的分组具有正数修订版本。过期写入返回 `409` 和当前分组，客户端必须先刷新并处理冲突。私有统计和 SSE 通过 `syncSettingsRevisions` 通知变化。设置和标题策略使用独立于 `dev:` 的存储前缀；删除设备仍会保留已禁用的策略记录，防止旧上传恢复标题。完整请求格式见主项目的 `docs/API.md`。Hub 客户端／主机模式的缓存与同步、本地模式行为、共享名称优先级及绑定目标的重试，请见[自动账号呈现](../docs/API.md#automatic-account-presentation)。

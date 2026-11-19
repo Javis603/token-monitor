@@ -1,0 +1,145 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const {
+  FIVE_HOUR_WINDOW_PROVIDERS,
+  limitWindowKindLabel,
+  limitWindowLabel
+} = require('../../src/shared/limits/windowLabels');
+
+function read(relativePath) {
+  return fs.readFileSync(path.join(__dirname, '../..', relativePath), 'utf8');
+}
+
+test('the collector label always wins over the kind default', () => {
+  assert.equal(limitWindowLabel('claude', { kind: 'weekly', label: 'Fable' }), 'Fable');
+  assert.equal(limitWindowLabel('kiro', { kind: 'billing', label: 'Overage' }), 'Overage');
+  // Whitespace-only is not a name.
+  assert.equal(limitWindowLabel('codex', { kind: 'session', label: '   ' }), 'Session');
+});
+
+test('Cursor included quota displays its period without renaming its stored identity', () => {
+  for (const [kind, expected] of [['weekly', 'Weekly'], ['billing', 'Monthly']]) {
+    const window = Object.freeze({ kind, label: 'Included usage' });
+    assert.equal(limitWindowLabel('cursor', window), expected);
+    assert.equal(window.label, 'Included usage');
+  }
+  assert.equal(limitWindowLabel('cursor', { kind: 'weekly', label: 'Team pool' }), 'Team pool');
+  assert.equal(limitWindowLabel('cursor', { kind: 'billing', label: 'Prepaid balance' }), 'Prepaid balance');
+  assert.equal(limitWindowLabel('cursor', { kind: 'quarterly', label: 'Included usage' }), 'Included usage');
+  assert.equal(limitWindowLabel('other', { kind: 'weekly', label: 'Included usage' }), 'Included usage');
+});
+
+test('rolling windows are named the way their vendor names them', () => {
+  for (const id of ['alibaba', 'antigravity', 'cline', 'commandcode', 'kimi', 'volcengine', 'zai', 'zaiteam']) {
+    assert.equal(limitWindowKindLabel(id, 'session'), '5-hour', `${id} publishes a 5-hour window`);
+  }
+  for (const id of ['codex', 'claude', 'opencode', 'ollama', 'minimax']) {
+    assert.equal(limitWindowKindLabel(id, 'session'), 'Session', `${id} publishes a session window`);
+  }
+});
+
+test('the remaining kinds are named the same for every provider', () => {
+  for (const id of ['codex', 'commandcode', 'volcengine']) {
+    assert.equal(limitWindowKindLabel(id, 'daily'), 'Daily');
+    assert.equal(limitWindowKindLabel(id, 'weekly'), 'Weekly');
+    assert.equal(limitWindowKindLabel(id, 'billing'), 'Monthly');
+  }
+});
+
+test('an unknown kind falls back to the caller, never to a wrong name', () => {
+  assert.equal(limitWindowKindLabel('codex', 'quarterly'), '');
+  assert.equal(limitWindowLabel('cursor', { kind: 'quarterly' }, 'Quota'), 'Quota');
+  assert.equal(limitWindowLabel('cursor', null, 'Quota'), 'Quota');
+  assert.equal(limitWindowLabel('cursor', null), '');
+});
+
+// Command Code's rolling windows ship with no label at all (rollingWindow() in
+// providers/commandcode/limits.js emits kind only), which is why the Limits
+// view used to hard-code "5-hour" and the edge dock — reading the same record —
+// showed "Session". Both now resolve the name the same way.
+test('Command Code rolling windows resolve to 5-hour from the kind alone', () => {
+  assert.equal(limitWindowLabel('commandcode', { kind: 'session', label: '' }), '5-hour');
+  assert.equal(limitWindowLabel('commandcode', { kind: 'weekly', label: '' }), 'Weekly');
+});
+
+test('every surface that paints a window label routes through the helper', () => {
+  const app = read('src/electron/renderer/app.js');
+  const dock = read('src/electron/renderer/edgeDock/dock.js');
+  const widget = read('src/shared/macWidgetSnapshot.js');
+
+  assert.match(app, /const \{[^}]*limitWindowLabel[^}]*\} = window\.TokenMonitorLimitWindowLabels;/);
+  assert.match(dock, /const limitWindowLabels = window\.TokenMonitorLimitWindowLabels;/);
+  assert.match(widget, /require\('\.\/limits\/windowLabels'\)/);
+
+  // The duplicated per-provider knowledge is gone from the widget snapshot.
+  assert.doesNotMatch(widget, /FIVE_HOUR_WINDOW_PROVIDERS/);
+  // The dock no longer keeps a kind table of its own.
+  assert.doesNotMatch(dock, /WINDOW_KIND_LABELS/);
+  // The Limits view no longer hard-codes a rolling-window name.
+  assert.doesNotMatch(app, /limitWindowNode\('5-hour'/);
+
+  for (const page of ['src/electron/renderer/index.html', 'src/electron/renderer/edgeDock/index.html']) {
+    assert.match(read(page), /limits\/windowLabels\.js/, `${page} should load the helper`);
+  }
+
+});
+
+test('MiMo rows group into logical accounts by suffix, then address', () => {
+  // The two products of one account are two rows wherever they come from —
+  // two devices may report different profile names, but the identity suffix
+  // both carry wins. A row with no suffix falls back to its address; an
+  // address beside a suffix is a separate group until the collector rewrites
+  // the row, because folding an anonymous row into a named one would merge
+  // two devices' accounts that merely share a mask (the considered and
+  // rejected heuristic).
+  const { mimoAccountGroups } = require('../../src/shared/limits/windowLabels');
+  const sameSuffix = mimoAccountGroups([
+    { accountKey: 'console', accountEmail: 'a@example.com', accountName: 'Alice · MiMo abcdef1' },
+    { accountKey: 'membership', accountEmail: 'b@example.com', accountName: 'Renamed · MiMo abcdef1' }
+  ]);
+  assert.equal(sameSuffix.length, 1, 'the suffix ties two devices\' rows together');
+  const { normalizeLimitProvider } = require('../../src/shared/limits/core');
+  assert.equal(mimoAccountGroups([
+    { provider: 'mimo', accountKey: 'console', accountEmail: 'a@example.com', accountName: 'Alice · MiMo abcdef1' },
+    { provider: 'mimo', accountKey: 'membership', accountEmail: 'b@example.com', accountName: 'Renamed · MiMo abcdef1' }
+  ].map(normalizeLimitProvider)).length, 1, 'the identity survives shared name normalization');
+  assert.equal(mimoAccountGroups([
+    { accountKey: 'one', accountEmail: 'a@example.com', accountName: 'Alice' },
+    { accountKey: 'two', accountEmail: 'a@example.com', accountName: '' }
+  ]).length, 1, 'rows without a suffix group by the address they share');
+  assert.equal(mimoAccountGroups([
+    { accountKey: 'legacy', accountEmail: 'a@example.com', accountName: '' },
+    { accountKey: 'membership', accountEmail: 'a@example.com', accountName: 'Alice · MiMo abcdef1' }
+  ]).length, 2, 'a legacy address-only row groups apart from a suffix-named row');
+  assert.equal(mimoAccountGroups([
+    { accountKey: 'one', accountEmail: 'a@example.com', accountName: 'Alice' },
+    { accountKey: 'two', accountEmail: 'b@example.com', accountName: 'Bob' }
+  ]).length, 2);
+});
+
+test('the default is display-only and never written onto the wire', () => {
+  // Two renderers read "no label" as real information — Claude's unlabelled
+  // all-models weekly pairs with Session while the labelled promo weekly takes
+  // a full row, and third-party presets title their balance from the label the
+  // collector set. Defaulting inside normalizeLimitWindow would erase that.
+  const core = read('src/shared/limits/core.js');
+  assert.doesNotMatch(core, /limitWindowLabels/);
+  assert.match(read('src/electron/renderer/providers/claude/windows.js'), /if \(weekly\.label\) node\.classList\.add\('limit-window-wide'\)/);
+
+  const { normalizeLimitWindow } = require('../../src/shared/limits/core');
+  const normalized = normalizeLimitWindow({ kind: 'session', used: 1, limit: 4 });
+  assert.equal(normalized.label, '', 'an unnamed window stays unnamed on the wire');
+});
+
+test('the helper carries no knowledge that contradicts the provider catalogue', () => {
+  const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
+  const known = new Set(LIMIT_PROVIDER_IDS);
+  for (const id of FIVE_HOUR_WINDOW_PROVIDERS) {
+    assert.ok(known.has(id), `${id} should be a registered limit provider`);
+  }
+});

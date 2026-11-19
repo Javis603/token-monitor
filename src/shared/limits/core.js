@@ -1,0 +1,805 @@
+'use strict';
+
+const { normalizeLimitProductId } = require('./products');
+const { staleAfterMsForSyncUpload } = require('../syncUploadInterval');
+const { LIMIT_PROVIDER_CATALOG, LIMIT_PROVIDER_IDS, VALID_LIMIT_WINDOW_METRICS } = require('./providers');
+const { providerPolicies } = require('./providerPolicies');
+const { mergeCodexTransientWindows } = require('../providers/codex/corePolicy').createRetentionPolicy({ normalizeLimitsSummary, timestampMs });
+const { openCodeWindowKey, groupOpenCodeCandidates, mergeOpenCodeProviderComponents } = require('../providers/opencode/corePolicy').createComponentPolicy({
+  normalizeLimitWindow, normalizeAccountKeyAliases, statusRank, timestampMs, providerWindowRank, windowOrder: ['session', 'daily', 'weekly', 'billing']
+});
+
+const DEFAULT_LIMITS_REFRESH_MS = 5 * 60 * 1000;
+const PORTABLE_ACCOUNT_PROVIDERS = new Set(LIMIT_PROVIDER_CATALOG.filter(provider => provider.portableAccountKey).map(provider => provider.id));
+const VALID_PROVIDERS = new Set(LIMIT_PROVIDER_IDS);
+const VALID_STATUSES = new Set(['ok', 'disabled', 'notConfigured', 'unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error']);
+const VALID_SOURCES = new Set(['oauth', 'cli', 'web', 'rpc', 'local', 'api']);
+const VALID_LIMIT_WINDOW_SOURCES = new Set(['web', 'local']);
+const VALID_LIMIT_BOUNDARY_KINDS = new Set(['reset', 'expiry', 'mixed']);
+const VALID_SOURCE_DETAILS = new Set(['app', 'cli', 'ide', 'managed', 'unknown']);
+const VALID_ACTION_REQUIREMENTS = new Set(['accountVerification', 'appSessionEncrypted']);
+const WINDOW_ORDER = ['session', 'daily', 'weekly', 'billing'];
+const MAX_ACCOUNT_LABEL_INPUT_LENGTH = 256;
+const MAX_ACCOUNT_NAME_INPUT_LENGTH = 512;
+// A provider can name one account by several keys: the stable key it reports
+// today and the credential-derived keys it reported before. They travel with
+// the row so the renderer and the quota history read every name as one account.
+const MAX_ACCOUNT_KEY_ALIASES = 8;
+
+function asNumber(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '') {
+    const parsed = Number(value.replace(/[%,$]/g, ''));
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function normalizeProviderId(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!VALID_PROVIDERS.has(raw)) return null;
+  return raw;
+}
+
+function normalizeStatus(value) {
+  const raw = String(value || '').trim();
+  return VALID_STATUSES.has(raw) ? raw : 'error';
+}
+
+function normalizeSource(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  return VALID_SOURCES.has(raw) ? raw : '';
+}
+
+function normalizeSourceDetail(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  return VALID_SOURCE_DETAILS.has(raw) ? raw : '';
+}
+
+function normalizeActionRequired(value) {
+  const raw = String(value || '').trim();
+  return VALID_ACTION_REQUIREMENTS.has(raw) ? raw : '';
+}
+
+function containsSensitiveAccountText(value) {
+  const normalized = value.normalize('NFKC');
+  return normalized.includes('@') || /https?:\/\//i.test(normalized);
+}
+
+function normalizeAccountLabel(value) {
+  const raw = String(value || '').trim();
+  if (
+    !raw
+    || raw.length > MAX_ACCOUNT_LABEL_INPUT_LENGTH
+    || containsSensitiveAccountText(raw)
+  ) return '';
+  const clean = raw
+    .normalize('NFC')
+    .replace(/[^\p{L}\p{M}\p{N} +._-]/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  return clean && [...clean].length <= 32 ? clean : '';
+}
+
+function normalizeAccountName(value) {
+  const raw = String(value || '').trim();
+  if (
+    !raw
+    || raw.length > MAX_ACCOUNT_NAME_INPUT_LENGTH
+    || containsSensitiveAccountText(raw)
+  ) return '';
+  const clean = raw
+    .normalize('NFC')
+    .replace(/[^\p{L}\p{M}\p{N} ._-]/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim();
+  return clean && [...clean].length <= 64 ? clean : '';
+}
+
+function normalizeAccountEmail(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw || raw.length > 254 || !raw.includes('@')) return '';
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw) ? raw : '';
+}
+
+function normalizeWindowKind(value) {
+  const raw = String(value || '').trim().toLowerCase().replace(/[_\s-]+/g, '');
+  if (raw === 'session') return 'session';
+  if (raw === 'daily') return 'daily';
+  if (raw === 'weekly') return 'weekly';
+  if (raw === 'billing' || raw === 'billingcycle' || raw === 'monthly') return 'billing';
+  return null;
+}
+
+function normalizeLimitBoundaryKind(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  return VALID_LIMIT_BOUNDARY_KINDS.has(raw) ? raw : '';
+}
+
+function normalizeWindowLabel(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.length > 32) return '';
+  const clean = raw.replace(/[^a-z0-9 +._/-]/gi, '').replace(/\s+/g, ' ').trim();
+  return clean.length <= 32 ? clean : '';
+}
+
+function normalizeWindowLimitId(value) {
+  const raw = String(value || '').replace(/[\u0000-\u001f\u007f]/g, '').trim();
+  return raw && raw.length <= 128 ? raw : '';
+}
+
+function normalizeWindowDetail(value) {
+  const raw = String(value || '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim();
+  return raw.slice(0, 96);
+}
+
+function normalizeWindowCurrency(value) {
+  return String(value || '').trim().toUpperCase().slice(0, 8) || null;
+}
+
+function normalizeIsoTimestamp(value) {
+  if (value === null || value === undefined || value === '') return null;
+  let date;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    date = new Date(value < 20_000_000_000 ? value * 1000 : value);
+  } else {
+    date = new Date(String(value));
+  }
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function normalizeDateText(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const iso = normalizeIsoTimestamp(raw);
+  if (iso) return iso.slice(0, 10);
+  return raw.length <= 32 ? raw : '';
+}
+
+function numberOrNull(value) {
+  const number = asNumber(value);
+  return number === null ? null : number;
+}
+
+function percentFromWindow(input, used, limit) {
+  const explicit = numberOrNull(input.usedPercent ?? input.used_percent ?? input.utilization ?? input.percent);
+  if (explicit !== null) return clamp(explicit, 0, 100);
+  if (used !== null && limit !== null && limit > 0) return clamp((used / limit) * 100, 0, 100);
+  return null;
+}
+
+function normalizeLimitWindow(input) {
+  if (!input || typeof input !== 'object') return null;
+  const kind = normalizeWindowKind(input.kind || input.type || input.name || input.window || input.windowKind);
+  if (!kind) return null;
+  const metricValue = String(input.metric || '').trim().toLowerCase();
+  const metric = VALID_LIMIT_WINDOW_METRICS.has(metricValue) ? metricValue : null;
+  const sourceValue = String(input.source || '').trim().toLowerCase();
+  const source = VALID_LIMIT_WINDOW_SOURCES.has(sourceValue) ? sourceValue : null;
+  const used = numberOrNull(input.used);
+  const limit = numberOrNull(input.limit);
+  const remaining = numberOrNull(input.remaining);
+  const usedPercent = percentFromWindow(input, used, limit);
+  const limitId = normalizeWindowLimitId(input.limitId ?? input.limit_id);
+  const boundaryKind = normalizeLimitBoundaryKind(input.boundaryKind ?? input.boundary_kind);
+  return {
+    kind,
+    ...(metric ? { metric } : {}),
+    ...(source ? { source } : {}),
+    ...(limitId ? { limitId } : {}),
+    ...(normalizeLimitProductId(input.productId) ? { productId: normalizeLimitProductId(input.productId) } : {}),
+    ...(boundaryKind ? { boundaryKind } : {}),
+    ...(input.additional === true ? { additional: true } : {}),
+    label: normalizeWindowLabel(input.label || input.displayLabel || input.title),
+    used,
+    limit,
+    remaining,
+    usedPercent,
+    remainingPercent: usedPercent === null ? null : Number((100 - usedPercent).toFixed(3)),
+    resetsAt: normalizeIsoTimestamp(input.resetsAt ?? input.resets_at ?? input.resetAt ?? input.reset_at),
+    windowMinutes: numberOrNull(input.windowMinutes ?? input.window_minutes ?? input.windowDurationMins),
+    resetDescription: input.resetDescription ? String(input.resetDescription) : '',
+    detail: normalizeWindowDetail(input.detail ?? input.detailText ?? input.detail_text),
+    currency: normalizeWindowCurrency(input.currency),
+    showMeter: input.showMeter !== false && input.meter !== false
+  };
+}
+
+// Prepaid credit grants, each with its own expiry. Soonest expiry first so the
+// renderer can list them without re-sorting; grants with no expiry sort last.
+function normalizeBalanceTranches(input) {
+  const raw = input?.tranches;
+  if (!Array.isArray(raw)) return [];
+  const tranches = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const amount = numberOrNull(entry.amount);
+    if (amount === null) continue;
+    tranches.push({
+      amount,
+      currency: String(entry.currency || '').trim().toUpperCase().slice(0, 8) || null,
+      expiresAt: normalizeIsoTimestamp(entry.expiresAt ?? entry.expires_at)
+    });
+  }
+  tranches.sort((a, b) => {
+    if (!a.expiresAt && !b.expiresAt) return 0;
+    if (!a.expiresAt) return 1;
+    if (!b.expiresAt) return -1;
+    return Date.parse(a.expiresAt) - Date.parse(b.expiresAt);
+  });
+  return tranches;
+}
+
+function normalizeProviderBalance(input) {
+  if (!input || typeof input !== 'object') return null;
+  const amount = numberOrNull(input.amount ?? input.balance ?? input.accountBalance ?? input.account_balance);
+  const currency = String(
+    input.currency
+    || input.balanceCurrency
+    || input.balance_currency
+    || input.accountCurrency
+    || input.account_currency
+    || ''
+  ).trim().toUpperCase().slice(0, 8) || null;
+  const todaySpend = numberOrNull(input.todaySpend ?? input.today_spend);
+  const weekSpend = numberOrNull(input.weekSpend ?? input.week_spend);
+  const monthSpend = numberOrNull(input.monthSpend ?? input.month_spend);
+  const allTimeSpend = numberOrNull(input.allTimeSpend ?? input.all_time_spend);
+  const searchSpend = numberOrNull(input.searchSpend ?? input.search_spend);
+  const fetchSpend = numberOrNull(input.fetchSpend ?? input.fetch_spend);
+  const requestCountRaw = numberOrNull(input.requestCount ?? input.request_count);
+  const requestCount = requestCountRaw === null ? null : Math.max(0, Math.trunc(requestCountRaw));
+  const quotaGroup = String(input.quotaGroup ?? input.quota_group ?? '').trim().slice(0, 64);
+  const expiresAt = normalizeIsoTimestamp(input.expiresAt ?? input.expires_at);
+  const trackingSince = normalizeIsoTimestamp(input.trackingSince ?? input.tracking_since);
+  const monthSinceTracking = input.monthSinceTracking ?? input.month_since_tracking;
+  const giftBalance = numberOrNull(input.giftBalance ?? input.gift_balance);
+  const cashBalance = numberOrNull(input.cashBalance ?? input.cash_balance);
+  const planUsed = numberOrNull(input.planUsed ?? input.plan_used);
+  const planLimit = numberOrNull(input.planLimit ?? input.plan_limit);
+  const planPercent = numberOrNull(input.planPercent ?? input.plan_percent);
+  const planStatus = ['active', 'expired'].includes(String(input.planStatus ?? input.plan_status ?? '').trim().toLowerCase())
+    ? String(input.planStatus ?? input.plan_status).trim().toLowerCase()
+    : null;
+  const todayTokenTotal = numberOrNull(input.todayTokenTotal ?? input.today_token_total);
+  const todayUsageDate = normalizeDateText(input.todayUsageDate ?? input.today_usage_date);
+  const latestModelUsageDate = normalizeDateText(input.latestModelUsageDate ?? input.latest_model_usage_date);
+  const todayUsageBasis = String(input.todayUsageBasis ?? input.today_usage_basis ?? '').trim().slice(0, 64);
+  const snapshotDate = normalizeDateText(input.snapshotDate ?? input.snapshot_date ?? input.date);
+  const tranches = normalizeBalanceTranches(input);
+  if (
+    amount === null
+    && !currency
+    && todaySpend === null
+    && weekSpend === null
+    && monthSpend === null
+    && allTimeSpend === null
+    && searchSpend === null
+    && fetchSpend === null
+    && requestCount === null
+    && !quotaGroup
+    && !expiresAt
+    && !trackingSince
+    && monthSinceTracking === undefined
+    && giftBalance === null
+    && cashBalance === null
+    && planUsed === null
+    && planLimit === null
+    && planPercent === null
+    && planStatus === null
+    && todayTokenTotal === null
+    && !todayUsageDate
+    && !latestModelUsageDate
+    && !todayUsageBasis
+    && !snapshotDate
+    && tranches.length === 0
+  ) return null;
+  return {
+    amount,
+    currency,
+    todaySpend,
+    weekSpend,
+    monthSpend,
+    allTimeSpend,
+    ...(searchSpend !== null ? { searchSpend } : {}),
+    ...(fetchSpend !== null ? { fetchSpend } : {}),
+    requestCount,
+    quotaGroup,
+    expiresAt,
+    trackingSince,
+    monthSinceTracking: Boolean(monthSinceTracking),
+    giftBalance,
+    cashBalance,
+    planUsed,
+    planLimit,
+    planPercent,
+    planStatus,
+    todayTokenTotal,
+    todayUsageDate,
+    latestModelUsageDate,
+    todayUsageBasis,
+    snapshotDate,
+    ...(tranches.length > 0 ? { tranches } : {})
+  };
+}
+
+function normalizeResetCreditExpirations(input) {
+  const raw = input?.expirations ?? input?.expirationTimes ?? input?.expiresAtList ?? input?.expires_at_list ?? input?.credits;
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const expirations = [];
+  for (const value of raw) {
+    if (value && typeof value === 'object') {
+      const status = String(value.status || '').toLowerCase();
+      if (status && status !== 'available') continue;
+    }
+    const sourceValue = value && typeof value === 'object'
+      ? value.expiresAt ?? value.expires_at ?? value.nextExpiresAt ?? value.next_expires_at
+      : value;
+    const normalized = normalizeIsoTimestamp(sourceValue);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    expirations.push(normalized);
+  }
+  expirations.sort((a, b) => Date.parse(a) - Date.parse(b));
+  return expirations;
+}
+
+function normalizeProviderResetCredits(input) {
+  if (!input || typeof input !== 'object') return null;
+  const available = numberOrNull(
+    input.availableCount
+    ?? input.available_count
+    ?? input.available
+    ?? input.remainingCount
+    ?? input.remaining_count
+  );
+  const nextExpiresAt = normalizeIsoTimestamp(
+    input.nextExpiresAt
+    ?? input.next_expires_at
+    ?? input.nextExpirationAt
+    ?? input.next_expiration_at
+    ?? input.expiresAt
+    ?? input.expires_at
+  );
+  const expirations = normalizeResetCreditExpirations(input);
+  const firstExpiration = expirations[0] || null;
+  const effectiveNextExpiresAt = [nextExpiresAt, firstExpiration]
+    .filter(Boolean)
+    .sort((a, b) => Date.parse(a) - Date.parse(b))[0] || null;
+  const grants = normalizeResetCreditGrants(input.grants);
+  if (available === null && !effectiveNextExpiresAt && expirations.length === 0 && grants.length === 0) return null;
+  return {
+    availableCount: available === null ? null : Math.max(0, Math.floor(available)),
+    nextExpiresAt: effectiveNextExpiresAt,
+    ...(expirations.length > 0 ? { expirations } : {}),
+    ...(grants.length > 0 ? { grants } : {})
+  };
+}
+
+// Optional per-grant detail riders on resetCredits. Claude's reset coupons are
+// labelled grants (why it was issued, what it clears, whether it is spendable
+// right now); Codex's are anonymous, so nothing but Claude sets this today.
+function normalizeResetCreditGrants(input) {
+  if (!Array.isArray(input)) return [];
+  const grants = [];
+  for (const entry of input) {
+    if (!entry || typeof entry !== 'object') continue;
+    const resetsLeft = numberOrNull(entry.resetsLeft ?? entry.resets_left);
+    const resetsTotal = numberOrNull(entry.resetsTotal ?? entry.resets_total);
+    const startsAt = normalizeIsoTimestamp(entry.startsAt ?? entry.starts_at);
+    const endsAt = normalizeIsoTimestamp(entry.endsAt ?? entry.ends_at);
+    const clears = Array.isArray(entry.clears)
+      ? [...new Set(entry.clears.map((value) => String(value || '').trim()).filter(Boolean))]
+      : [];
+    grants.push({
+      ...(entry.id ? { id: String(entry.id) } : {}),
+      ...(entry.label ? { label: String(entry.label) } : {}),
+      ...(resetsLeft !== null ? { resetsLeft: Math.max(0, Math.floor(resetsLeft)) } : {}),
+      ...(resetsTotal !== null ? { resetsTotal: Math.max(0, Math.floor(resetsTotal)) } : {}),
+      ...(startsAt ? { startsAt } : {}),
+      ...(endsAt ? { endsAt } : {}),
+      ...(clears.length > 0 ? { clears } : {}),
+      ...((entry.usableNow ?? entry.usable_now) !== undefined
+        ? { usableNow: Boolean(entry.usableNow ?? entry.usable_now) }
+        : {}),
+      ...((entry.useRequiresLimit ?? entry.use_requires_limit) !== undefined
+        ? { useRequiresLimit: Boolean(entry.useRequiresLimit ?? entry.use_requires_limit) }
+        : {}),
+      ...(entry.paused !== undefined ? { paused: Boolean(entry.paused) } : {})
+    });
+  }
+  return grants;
+}
+
+function normalizeRegion(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (raw === 'cn' || raw === 'en' || raw === 'global') return raw;
+  return raw.length <= 16 ? raw : '';
+}
+
+function normalizeWorkspaceKind(value) {
+  return String(value || '').trim().toLowerCase() === 'personal' ? 'personal' : '';
+}
+
+function normalizeAdapterId(value) {
+  const raw = String(value || '').trim().toLowerCase();
+  return /^[a-z0-9-]{1,32}$/u.test(raw) ? raw : '';
+}
+
+function normalizeProviderUsageSummary(input) {
+  if (!input || typeof input !== 'object') return null;
+  const periodValue = String(input.period || '').trim();
+  const period = ['today', 'week', 'month', 'allTime'].includes(periodValue) ? periodValue : '';
+  const count = (value) => {
+    const number = numberOrNull(value);
+    return number === null ? null : Math.max(0, Math.trunc(number));
+  };
+  const nonNegative = (value) => {
+    const number = numberOrNull(value);
+    return number === null ? null : Math.max(0, number);
+  };
+  const summary = {
+    period,
+    requests: count(input.requests),
+    todayTokens: count(input.todayTokens ?? input.today_tokens),
+    weekTokens: count(input.weekTokens ?? input.week_tokens),
+    inputTokens: count(input.inputTokens ?? input.input_tokens),
+    outputTokens: count(input.outputTokens ?? input.output_tokens),
+    cacheReadTokens: count(input.cacheReadTokens ?? input.cache_read_tokens),
+    cacheCreationTokens: count(input.cacheCreationTokens ?? input.cache_creation_tokens),
+    totalTokens: count(input.totalTokens ?? input.total_tokens),
+    standardCost: nonNegative(input.standardCost ?? input.standard_cost),
+    actualCost: nonNegative(input.actualCost ?? input.actual_cost),
+    averageDurationMs: nonNegative(input.averageDurationMs ?? input.average_duration_ms)
+  };
+  return Object.values(summary).some((value) => value !== null && value !== '') ? summary : null;
+}
+
+function normalizeAccountKeyAliases(values, accountKey = '') {
+  if (!Array.isArray(values)) return [];
+  const canonical = String(accountKey || '').trim();
+  return [...new Set(values
+    .map((value) => String(value || '').trim())
+    .filter((value) => value && value !== canonical && value.length <= 128))]
+    .sort()
+    .slice(0, MAX_ACCOUNT_KEY_ALIASES);
+}
+
+function normalizeLimitProvider(input) {
+  if (!input || typeof input !== 'object') return null;
+  const provider = normalizeProviderId(input.provider);
+  if (!provider) return null;
+  const accountKey = input.accountKey ? String(input.accountKey) : '';
+  const source = normalizeSource(input.source);
+  const relatedAccountKey = provider === 'minimax' && source === 'api' && typeof input.relatedAccountKey === 'string'
+    && /^sha256:[a-f0-9]{64}$/.test(input.relatedAccountKey) && input.relatedAccountKey !== accountKey
+    ? input.relatedAccountKey : '';
+  const accountKeyAliases = normalizeAccountKeyAliases(input.accountKeyAliases, accountKey);
+  const accountLabel = normalizeAccountLabel(input.accountLabel);
+  const windows = Array.isArray(input.windows)
+    ? input.windows.map(normalizeLimitWindow).filter(Boolean)
+    : [];
+  const rank = providerPolicies[provider]?.windowRank || ((window) => WINDOW_ORDER.indexOf(window.kind));
+  windows.sort((a, b) => rank(a, WINDOW_ORDER) - rank(b, WINDOW_ORDER));
+  const balance = normalizeProviderBalance(input.balance);
+  const adapterId = provider === 'thirdparty' ? normalizeAdapterId(input.adapterId ?? input.adapter_id) : '';
+  const usageSummary = normalizeProviderUsageSummary(input.usageSummary ?? input.usage_summary);
+  // Compatibility shim: devices older than the credits-window change post a
+  // balance with no window at all, so every renderer would drop the row.
+  // Synthesize the window here — the one funnel both the local collector and
+  // hub ingest pass through — so no surface has to remember to do it. Only the
+  // amount is restored; the meter percentage stays a display-layer derivation.
+  // Removable once no supported device predates that change.
+  if (balance && balance.amount !== null && !windows.some((window) => window.metric === 'credits')) {
+    windows.push(normalizeLimitWindow({
+      kind: 'billing',
+      metric: 'credits',
+      label: 'Balance',
+      remaining: balance.amount,
+      currency: balance.currency
+    }));
+  }
+  const actionRequired = normalizeActionRequired(input.actionRequired);
+  return {
+    provider,
+    ...(adapterId ? { adapterId } : {}),
+    accountKey,
+    ...(relatedAccountKey ? { relatedAccountKey } : {}),
+    ...(provider === 'opencode' && input.webAccountKey
+      ? { webAccountKey: String(input.webAccountKey) }
+      : {}),
+    ...(accountKeyAliases.length > 0 ? { accountKeyAliases } : {}),
+    accountLabel,
+    planLabel: normalizeAccountLabel(input.planLabel),
+    accountName: normalizeAccountName(input.accountName ?? input.accountLogin ?? input.login),
+    accountEmail: normalizeAccountEmail(input.accountEmail ?? input.email),
+    workspaceKind: normalizeWorkspaceKind(input.workspaceKind),
+    status: normalizeStatus(input.status),
+    ...(actionRequired ? { actionRequired } : {}),
+    source,
+    sourceDetail: normalizeSourceDetail(input.sourceDetail ?? input.source_detail),
+    updatedAt: normalizeIsoTimestamp(input.updatedAt) || normalizeIsoTimestamp(input.checkedAt),
+    windows,
+    balanceUsd: numberOrNull(input.balanceUsd),
+    balance,
+    ...(usageSummary ? { usageSummary } : {}),
+    resetCredits: normalizeProviderResetCredits(input.resetCredits ?? input.rateLimitResetCredits ?? input.rate_limit_reset_credits),
+    region: normalizeRegion(input.region)
+  };
+}
+
+function normalizeRefreshMs(value) {
+  const parsed = asNumber(value);
+  return parsed && parsed > 0 ? Math.round(parsed) : DEFAULT_LIMITS_REFRESH_MS;
+}
+
+function normalizeLimitsSummary(input) {
+  const source = input && typeof input === 'object' ? input : {};
+  const providers = Array.isArray(source.providers)
+    ? source.providers.map(normalizeLimitProvider).filter(Boolean)
+    : [];
+  const multiAccountProviders = LIMIT_PROVIDER_IDS.filter(id => Array.isArray(source.multiAccountProviders)
+    && source.multiAccountProviders.includes(id));
+  return {
+    ...(multiAccountProviders.length ? { multiAccountProviders } : {}),
+    updatedAt: normalizeIsoTimestamp(source.updatedAt),
+    refreshMs: normalizeRefreshMs(source.refreshMs),
+    providers
+  };
+}
+
+function statusRank(status) {
+  if (status === 'ok') return 3;
+  if (status === 'rateLimited') return 2;
+  if (status === 'sourceRateLimited' || status === 'unauthorized' || status === 'unavailable' || status === 'error') return 1;
+  return 0;
+}
+
+function timestampMs(value) {
+  const parsed = Date.parse(value || '');
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isProviderStale(provider, summary, device, staleAfterMs, nowMs) {
+  if (device?.stale) return true;
+  const updatedAt = timestampMs(provider.updatedAt || summary.updatedAt);
+  if (!updatedAt) return false;
+  const threshold = Math.max(
+    normalizeRefreshMs(summary.refreshMs) * 2,
+    staleAfterMsForSyncUpload(device?.syncUploadIntervalMs, staleAfterMs)
+  );
+  return threshold > 0 ? nowMs - updatedAt > threshold : false;
+}
+
+function providerAggregateKey(provider) {
+  const key = `${provider.provider}:${provider.accountKey || provider.status}`;
+  return providerPolicies[provider.provider]?.aggregateKey?.(provider, key, isConfiguredProvider(provider)) || key;
+}
+
+function isConfiguredProvider(provider) {
+  return Boolean(provider.accountKey && provider.status !== 'notConfigured' && provider.status !== 'disabled'
+    && !providerPolicies[provider.provider]?.isPlaceholder?.(provider));
+}
+
+function providerCollapseKey(provider, multiAccount = false) {
+  // A device that reports several accounts keeps every keyed row per account,
+  // ahead of the provider-specific rules below.
+  if (multiAccount && provider.accountKey) return providerAggregateKey(provider);
+  const policy = providerPolicies[provider.provider];
+  if (policy?.preserveAccount && provider.accountKey) return providerAggregateKey(provider);
+  const key = policy?.collapseKey?.(provider, providerAggregateKey(provider));
+  if (key) return key;
+  if (PORTABLE_ACCOUNT_PROVIDERS.has(provider.provider) && isConfiguredProvider(provider)) {
+    return providerAggregateKey(provider);
+  }
+  return provider.provider;
+}
+
+function providerWindowRank(provider) {
+  const windowCount = Array.isArray(provider?.windows) ? provider.windows.length : 0;
+  return providerPolicies[provider?.provider]?.snapshotRank?.(windowCount) || 0;
+}
+
+// A prepaid balance is an account-level fact that only one device can usually
+// observe — Claude's pool is readable solely through a claude.ai Web session, so
+// the same account collected over OAuth elsewhere reports no balance at all.
+// Without this, the freshest record wins and the balance blinks in and out as
+// devices take turns posting. Carry it onto the winner instead; a stale observer
+// is not carried forward, so an offline device cannot pin an old balance.
+function carryProviderBalance(winner, loser) {
+  if (!loser || winner.balance || !loser.balance || loser.stale) return winner;
+  const creditsWindow = (loser.windows || []).find((window) => window?.metric === 'credits');
+  const windows = creditsWindow && !(winner.windows || []).some((window) => window?.metric === 'credits')
+    ? [...(winner.windows || []), creditsWindow]
+    : winner.windows;
+  return { ...winner, balance: loser.balance, windows };
+}
+
+function pickBetterProvider(current, candidate, multiAccount = false) {
+  if (!current) return candidate;
+  const winner = betterProvider(current, candidate);
+  const loser = winner === current ? candidate : current;
+  // In multi-account mode a balance and its credits window belong only to
+  // their exact account, in both aggregation passes.
+  if (multiAccount && winner.accountKey !== loser.accountKey) return winner;
+  const balanced = carryProviderBalance(winner, loser);
+  return providerPolicies[winner.provider]?.carryObservation?.(balanced, loser) || balanced;
+}
+
+function betterProvider(current, candidate) {
+  if (current.stale !== candidate.stale) return current.stale ? candidate : current;
+  const rankDiff = statusRank(candidate.status) - statusRank(current.status);
+  if (rankDiff !== 0) return rankDiff > 0 ? candidate : current;
+  const windowRankDiff = providerWindowRank(candidate) - providerWindowRank(current);
+  if (windowRankDiff !== 0) return windowRankDiff > 0 ? candidate : current;
+  return timestampMs(candidate.updatedAt) >= timestampMs(current.updatedAt) ? candidate : current;
+}
+
+// Muse/MiniMax lanes refresh by source; OpenDesign workspaces refresh by account.
+// A fresh sibling cannot retire another lane's last-good quota.
+function providerFreshnessKey(provider) {
+  return providerPolicies[provider.provider]?.freshnessKey?.(provider) || provider.provider;
+}
+
+function aggregateLimits(devices, staleAfterMs = 0, nowMs = Date.now()) {
+  const aggregate = { updatedAt: new Date(nowMs).toISOString(), providers: [] };
+  const multiAccountProviders = new Set((devices || []).flatMap(device =>
+    normalizeLimitsSummary(device?.limits).multiAccountProviders || []));
+  const byKey = new Map();
+  const candidatesByKey = new Map();
+  const openCodeCandidates = [];
+  const providersWithConfiguredAccounts = new Set();
+  const providersWithFreshConfiguredAccounts = new Set();
+  const providersWithFreshObservations = new Set();
+  // Lanes with a configured account: the freshness key without its account
+  // part, so a source-scoped provider keeps its lanes apart and an
+  // account-scoped one is still one lane.
+  const configuredLanes = new Set();
+
+  for (const device of devices || []) {
+    const summary = normalizeLimitsSummary(device?.limits);
+    for (const provider of summary.providers) {
+      const candidate = {
+        ...provider,
+        sourceDeviceId: String(device?.deviceId || ''),
+        stale: isProviderStale(provider, summary, device, staleAfterMs, nowMs)
+      };
+      const freshnessKey = providerFreshnessKey(provider);
+      if (isConfiguredProvider(provider)) {
+        providersWithConfiguredAccounts.add(freshnessKey);
+        configuredLanes.add(providerFreshnessKey({ ...provider, accountKey: '' }));
+      }
+      if (!candidate.stale) {
+        providersWithFreshObservations.add(freshnessKey);
+        if (isConfiguredProvider(provider)) providersWithFreshConfiguredAccounts.add(freshnessKey);
+      }
+      const key = providerAggregateKey(candidate);
+      if (candidate.provider === 'opencode' && isConfiguredProvider(candidate)) {
+        openCodeCandidates.push(candidate);
+        continue;
+      }
+      const candidates = candidatesByKey.get(key) || [];
+      candidates.push(candidate);
+      candidatesByKey.set(key, candidates);
+    }
+  }
+
+  for (const [key, candidates] of candidatesByKey) {
+    byKey.set(key, candidates.reduce((current, candidate) =>
+      pickBetterProvider(current, candidate, multiAccountProviders.has(candidate.provider)), null));
+  }
+  for (const candidates of groupOpenCodeCandidates(openCodeCandidates)) {
+    const provider = mergeOpenCodeProviderComponents(candidates);
+    byKey.set(providerAggregateKey(provider), provider);
+  }
+
+  // Second pass: collapse device-local credential identities by provider.
+  // Portable accounts and explicitly reported multi-account providers keep each
+  // account's best observation, but a stale portable account still yields to a
+  // fresh account of the same provider.
+  const rowsByProvider = new Map();
+  for (const row of byKey.values()) {
+    const rows = rowsByProvider.get(row.provider) || [];
+    rows.push(row);
+    rowsByProvider.set(row.provider, rows);
+  }
+  const suppressed = new Set();
+  for (const [id, rows] of rowsByProvider) {
+    const omitted = providerPolicies[id]?.suppressCandidates?.(rows, multiAccountProviders.has(id), isConfiguredProvider) || [];
+    for (const row of omitted) suppressed.add(row);
+  }
+  const byProvider = new Map();
+  for (const candidate of byKey.values()) {
+    if (suppressed.has(candidate)) continue;
+    const multiAccount = multiAccountProviders.has(candidate.provider);
+    const knownAccount = candidate.accountKey && (multiAccount
+      || providerPolicies[candidate.provider]?.preserveStaleAccount?.(candidate));
+    const freshnessKey = providerFreshnessKey(candidate);
+    // A keyless row says nothing once its lane has a configured account. A lane
+    // with no stable identity of its own (Muse Code beside web accounts) stays.
+    if (multiAccount && !candidate.accountKey
+      && configuredLanes.has(providerFreshnessKey({ ...candidate, accountKey: '' }))) continue;
+    const hasFreshObservation = providersWithFreshObservations.has(freshnessKey);
+    // Fresh siblings cannot establish freshness for a different account. The
+    // first pass already chooses the best observation of each exact identity.
+    if (!knownAccount && candidate.stale && hasFreshObservation) continue;
+    const configuredProviders = hasFreshObservation
+      ? providersWithFreshConfiguredAccounts
+      : providersWithConfiguredAccounts;
+    if (!knownAccount && !isConfiguredProvider(candidate) && configuredProviders.has(freshnessKey)) continue;
+    const collapseKey = providerCollapseKey(candidate, multiAccount);
+    byProvider.set(collapseKey, pickBetterProvider(byProvider.get(collapseKey), candidate, multiAccount));
+  }
+  aggregate.providers = Array.from(byProvider.values())
+    .sort((a, b) => {
+      const providerSort = a.provider.localeCompare(b.provider);
+      if (providerSort !== 0) return providerSort;
+      const aLabel = a.accountEmail || a.accountName || a.accountLabel || a.accountKey;
+      const bLabel = b.accountEmail || b.accountName || b.accountLabel || b.accountKey;
+      return aLabel.localeCompare(bLabel);
+    });
+  return aggregate;
+}
+
+function publicLimits(limits) {
+  const normalized = normalizeLimitsSummary(limits);
+  return {
+    updatedAt: normalized.updatedAt,
+    refreshMs: normalized.refreshMs,
+    providers: normalized.providers.map(({
+      accountKey,
+      relatedAccountKey,
+      webAccountKey,
+      accountKeyAliases,
+      accountEmail,
+      accountName,
+      accountLabel,
+      planLabel,
+      workspaceKind,
+      usageSummary,
+      ...provider
+    }) => {
+      if (!provider.balance) return provider;
+      // `tranches` carries per-grant amounts and expiry dates — billing detail
+      // with no public value, dropped alongside the custom group label.
+      const { quotaGroup, tranches, searchSpend, fetchSpend, ...publicBalance } = provider.balance;
+      return { ...provider, balance: publicBalance };
+    })
+  };
+}
+
+// Sync to the authenticated hub carries the full account identity (key, email,
+// display name, legacy label, and explicit plan label) so other devices can show
+// which managed account each limit belongs to. Hub ingest is Secret-protected;
+// the PUBLIC surface is still scrubbed by publicLimits() above, which drops all
+// account and plan labels together with the account identifiers.
+function syncLimits(limits) {
+  const normalized = normalizeLimitsSummary(limits);
+  return {
+    ...(normalized.multiAccountProviders ? { multiAccountProviders: normalized.multiAccountProviders } : {}),
+    updatedAt: normalized.updatedAt,
+    refreshMs: normalized.refreshMs,
+    providers: normalized.providers
+  };
+}
+
+module.exports = {
+  DEFAULT_LIMITS_REFRESH_MS,
+  aggregateLimits,
+  isProviderStale,
+  mergeCodexTransientWindows,
+  normalizeLimitProvider,
+  normalizeLimitsSummary,
+  normalizeLimitWindow,
+  normalizeProviderUsageSummary,
+  openCodeWindowKey,
+  publicLimits,
+  syncLimits
+};

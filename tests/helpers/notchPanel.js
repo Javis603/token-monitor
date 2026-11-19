@@ -1,0 +1,243 @@
+'use strict';
+
+const { createNotchPanel } = require('../../src/electron/renderer/notch/panel');
+const i18n = require('../../src/electron/renderer/i18n');
+const fs = require('node:fs');
+
+class Element {
+  constructor(tag = 'div', document) {
+    this.tagName = tag.toUpperCase(); this.ownerDocument = document;
+    this.children = []; this.attributes = {}; this.listeners = {};
+    const attrName = key => 'data-' + key.replace(/[A-Z]/g, letter => '-' + letter.toLowerCase());
+    this.dataset = new Proxy({}, {
+      set: (target, key, value) => { target[key] = String(value); this.attributes[attrName(key)] = String(value); return true; },
+      deleteProperty: (target, key) => { delete target[key]; delete this.attributes[attrName(key)]; return true; }
+    });
+    this.style = { setProperty(key, value) { this[key] = value; } };
+    this.nodeType = tag === '#text' ? 3 : 1;
+    this.localName = tag; this.namespaceURI = 'html';
+    const node = this;
+    Object.defineProperty(this.attributes, Symbol.iterator, { configurable: true, writable: true, value: function* () {
+      yield { name: 'class', value: node.className };
+      for (const [name, value] of Object.entries(this)) if (name !== 'class') yield { name, value };
+    } });
+    this.style.getPropertyValue = key => this.style[key] || '';
+    this.style.getPropertyPriority = () => '';
+    this.style.removeProperty = key => { delete this.style[key]; };
+    this.style[Symbol.iterator] = function* () { for (const key of Object.keys(this)) if (typeof this[key] !== 'function') yield key; };
+    this.classes = new Set();
+    this.scrollLeft = 0; this.offsetWidth = 0; this.clientWidth = 0;
+    this.classList = {
+      add: (...names) => names.forEach(name => this.classes.add(name)),
+      remove: (...names) => names.forEach(name => this.classes.delete(name)),
+      contains: name => this.classes.has(name),
+      toggle: (name, on = !this.classes.has(name)) => on ? this.classes.add(name) : this.classes.delete(name)
+    };
+    Object.defineProperty(this.classList, '0', { get: () => [...this.classes][0] });
+  }
+  get nodeValue() { return this.nodeType === 3 ? this.value : null; }
+  set nodeValue(value) { this.value = value; }
+  get firstChild() { return this.childNodes[0] || null; }
+  get childNodes() {
+    if (this.nodeType === 3) return [];
+    if (!this.value) return this.children;
+    this._textNode ||= {
+      owner: this, nodeType: 3, childNodes: [],
+      get nodeValue() { return this.owner.value; },
+      set nodeValue(value) { this.owner.value = value; },
+      get parentNode() { return this.owner; },
+      remove() { this.owner.value = ''; }
+    };
+    return [this._textNode, ...this.children];
+  }
+  insertBefore(child, before) {
+    if (child === before) return;
+    if (child.owner) {
+      const value = child.nodeValue; child.owner.value = '';
+      child.owner = this; this.value = value; this._textNode = child; return;
+    }
+    child.remove();
+    const index = before ? this.children.indexOf(before) : this.children.length;
+    this.children.splice(Math.max(0, index), 0, child); child.parent = this;
+  }
+  moveBefore(child, before) {
+    if (child === before) return;
+    child.parent.children.splice(child.parent.children.indexOf(child), 1);
+    const index = before ? this.children.indexOf(before) : this.children.length;
+    this.children.splice(Math.max(0, index), 0, child); child.parent = this;
+  }
+  set className(value) { this.classes = new Set(String(value).split(' ').filter(Boolean)); }
+  get className() { return [...this.classes].join(' '); }
+  set textContent(value) { this.value = String(value ?? ''); this.replaceChildren(); }
+  get textContent() { return (this.value || '') + this.children.map(node => node.textContent).join(''); }
+  get childElementCount() { return this.children.length; }
+  append(...nodes) {
+    for (const node of nodes) {
+      if (node.parent) node.parent.children.splice(node.parent.children.indexOf(node), 1);
+      node.parent = this; this.children.push(node);
+    }
+  }
+  remove() { if (this.parent) this.parent.children.splice(this.parent.children.indexOf(this), 1); this.parent = null; }
+  replaceChildren(...nodes) { this.children.forEach(node => { node.parent = null; }); this.children = []; this.append(...nodes); }
+  setAttribute(key, value) { this.attributes[key] = String(value); if (key === 'class') this.className = value; if (key.startsWith('data-')) this.dataset[key.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())] = value; }
+  getAttribute(key) { return this.attributes[key]; }
+  removeAttribute(key) { delete this.attributes[key]; if (key.startsWith('data-')) delete this.dataset[key.slice(5).replace(/-([a-z])/g, (_, c) => c.toUpperCase())]; }
+  addEventListener(name, fn) { (this.listeners[name] ||= []).push(fn); }
+  fire(name, event = {}) { event.currentTarget ||= this; event.target ||= this; for (const fn of this.listeners[name] || []) fn(event); }
+  scrollTo({ left }) { this.scrollLeft = left; this.fire('scroll'); }
+  // Every child is laid out 40 units after the previous one.
+  get parentNode() { return this.parent || null; }
+  closest(selector) {
+    for (let node = this; node; node = node.parentNode) {
+      if (node.classList.contains(selector.slice(1))) return node;
+    }
+    return null;
+  }
+  get offsetLeft() { return this.parent ? this.parent.children.indexOf(this) * 40 : 0; }
+  contains(node) { return this === node || this.children.some(child => child.contains(node)); }
+  focus() {
+    if (this.ownerDocument.activeElement === this) return;
+    this.ownerDocument.activeElement?.fire('blur');
+    this.ownerDocument.activeElement = this; this.fire('focus');
+  }
+  querySelectorAll(selector) {
+    if (selector.includes(' ')) { const [parent, ...rest] = selector.split(' '); return this.querySelectorAll(parent).flatMap(node => node.querySelectorAll(rest.join(' '))); }
+    const match = node => selector === '[data-roll-key]:not([data-pv-roll])'
+      ? Object.hasOwn(node.dataset, 'rollKey') && !Object.hasOwn(node.dataset, 'pvRoll')
+      : selector[0] === '.' ? node.classes.has(selector.slice(1))
+      : selector.startsWith('[data-') ? Object.hasOwn(node.dataset, selector.slice(6, -1).replace(/-([a-z])/g, (_, char) => char.toUpperCase()))
+        : selector === 'button.is-selected' ? node.tagName === 'BUTTON' && node.classes.has('is-selected') : node.tagName.toLowerCase() === selector;
+    return this.children.flatMap(node => [...(match(node) ? [node] : []), ...node.querySelectorAll(selector)]);
+  }
+  querySelector(selector) { return this.querySelectorAll(selector)[0] || null; }
+}
+
+function panelFixture(t, settings = {}, { viaRenderer = false, pluginHost = null, pluginViews = null } = {}) {
+  t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: Date.parse('2026-10-18T10:00:00Z') });
+  const savedRaf = global.requestAnimationFrame, savedCancel = global.cancelAnimationFrame;
+  global.requestAnimationFrame = () => 1; global.cancelAnimationFrame = () => {};
+  t.after(() => { global.requestAnimationFrame = savedRaf; global.cancelAnimationFrame = savedCancel; });
+  const document = { activeElement: null, listeners: {} };
+  document.addEventListener = (name, fn) => { (document.listeners[name] ||= []).push(fn); };
+  document.fire = (name, event = {}) => { for (const fn of document.listeners[name] || []) fn(event); };
+  document.createElementNS = (_ns, tag) => new Element(tag, document);
+  document.createElement = (tag) => new Element(tag, document);
+  document.createTextNode = value => { const node = new Element('#text', document); node.textContent = value; return node; };
+  const el = (tag, className = '', value) => {
+    const node = new Element(tag, document); node.className = className;
+    if (value !== undefined) node.textContent = value;
+    return node;
+  };
+  const rolls = [], settled = [];
+  const resizeObservers = [];
+  const pageEvents = new EventTarget();
+  let scrollListener = null;
+  const pageHide = () => pageEvents.dispatchEvent(new Event('pagehide'));
+  const window = {
+    addEventListener: (...args) => pageEvents.addEventListener(...args),
+    getComputedStyle: () => ({ width: '600px', columnGap: '40px', getPropertyValue: name => name === '--notch-page-gap' ? '40px' : '' }),
+    ResizeObserver: class {
+      constructor(callback) { this.callback = callback; resizeObservers.push(this); }
+      observe(node) { this.node = node; }
+      disconnect() { this.node = null; }
+    },
+    TokenMonitorEdgeDockPresentation: require('../../src/electron/renderer/edgeDock/presentation'),
+    TokenMonitorTrayText: require('../../src/shared/trayText'),
+    TokenMonitorTrayLayout: require('../../src/shared/trayLayout'),
+    TokenMonitorLimitBalanceDisplay: require('../../src/shared/limits/balanceDisplay'),
+    TokenMonitorLimitWindowLabels: require('../../src/shared/limits/windowLabels'),
+    TokenMonitorLimitWindowText: require('../../src/shared/limits/windowText'),
+    TokenMonitorLimitResetMotion: require('../../src/electron/renderer/limits/resetMotion'),
+    TokenMonitorAccountIdentity: require('../../src/electron/renderer/accountIdentity'),
+    TokenMonitorSessionRows: require('../../src/electron/renderer/sessionRows'),
+    TokenMonitorSessionLive: require('../../src/shared/sessionLive'),
+    TokenMonitorUsageCharts: require('../../src/electron/renderer/usageCharts'),
+    TokenMonitorClientCatalog: require('../../src/shared/clientCatalog'),
+    TokenMonitorPressActivation: require('../../src/electron/renderer/pressActivation'),
+    TokenMonitorHomeOverview: require('../../src/electron/renderer/homeOverview'),
+    TokenMonitorLimitUsageItems: require('../../src/shared/limits/usageItems'),
+    TokenMonitorLimitProviderPresentation: require('../../src/electron/renderer/limits/providerPresentation'),
+    TokenMonitorTokenNumberAnimation: {
+      duration: 1000, normalize: value => value === 'count' ? 'count' : 'roll',
+      capture: node => node.rolling ? ['in-flight'] : null,
+      beginRoll(node, from, to, increasing, _prepare, glyphs) {
+        rolls.push({ from, to, increasing, glyphs }); node.rolling = true;
+        return () => { settled.push(node); node.rolling = false; node.textContent = to; };
+      }
+    }
+  };
+  if (pluginViews) window.TokenMonitorPluginViews = pluginViews;
+  const state = { locale: 'en', appearanceKey: 'initial' };
+  const overflowText = {
+    bound: [], stopped: [], preserved: [],
+    bind(node) { node.classList.add('fade-overflow'); this.bound.push(node); },
+    stop(node) { this.stopped.push(node); },
+    preserveReading(previous, next) { this.preserved.push({ previous, next }); },
+    refresh() {}
+  };
+  // The real Limits-view plan text, so the panel is held to the same labels.
+  const plans = require('../../src/electron/renderer/limits/windowsView').createLimitWindowsView({
+    document, t: (key, params) => i18n.translate(state.locale, key, params), settings: () => settings,
+    currentLocale: () => state.locale, presentation: window.TokenMonitorLimitProviderPresentation,
+    accountIdentity: window.TokenMonitorAccountIdentity,
+    motion: window.TokenMonitorLimitResetMotion,
+    tooltip: { hasOpened: () => false, markOpened() {}, release() {} }
+  });
+  const shared = {
+    overflowText,
+    limitWindowsView: {
+      // Like the real one, the tooltip names its entries as the element's label.
+      setDetailTooltip(node, entries, options) {
+        node.setAttribute('data-test-tooltip', JSON.stringify(entries));
+        node.setAttribute('data-test-tooltip-options', JSON.stringify(options));
+        Object.defineProperty(node, 'tooltipEntries', { configurable: true, get: () => JSON.parse(node.getAttribute('data-test-tooltip')) });
+        Object.defineProperty(node, 'tooltipOptions', { configurable: true, get: () => JSON.parse(node.getAttribute('data-test-tooltip-options')) });
+        node.setAttribute('aria-label', entries.map(entry => Array.isArray(entry) ? entry.join(': ') : entry.full).join(', '));
+      },
+      limitAccountPlan: (...args) => plans.limitAccountPlan(...args),
+      limitDetailInfoNode: (...args) => plans.limitDetailInfoNode(...args)
+    },
+    markNode: id => el('span', 'edge-dock-mark', id), hasMask: () => true, pluginHost,
+    providerLabel: id => id, limitProviderColor: () => '#888',
+    limitAccountTitle: (...args) => plans.limitAccountTitle(...args),
+    formatTokens: value => String(value), formatCardTokens: value => String(value), formatBreakdownTokens: value => String(value), formatCost: value => `$${value}`,
+    formatRate: value => value > 0 && value < 0.1 ? '<0.1' : value > 0 && value < 1
+      ? value.toLocaleString(state.locale, { maximumFractionDigits: 1 })
+      : window.TokenMonitorTrayText.formatCompactNumber(value, { compactTokenUnits: settings.compactTokenUnits, locale: state.locale }),
+    appearance: () => settings, prefersReducedMotion: () => settings.reduceMotion === true,
+    ensureRefreshButton: () => el('button', 'edge-dock-refresh')
+  };
+  // Exercise the production cost builder supplied by the dock script, whose
+  // top-level boot requires Electron. Do not mirror its partial-pricing policy.
+  const dockSource = fs.readFileSync(require.resolve('../../src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const costSource = dockSource.match(/function usageCostNode\([^]*?\n\}/)[0];
+  shared.usageCostNode = Function('el', 'formatCost', 't', 'formatCardTokens', 'limitWindowsView', `return (${costSource})`)(
+    el, shared.formatCost, (key, params) => i18n.translate(state.locale, key, params), shared.formatCardTokens, shared.limitWindowsView
+  );
+  const deps = { document, window, el, t: (key, params) => i18n.translate(state.locale, key, params), state,
+    bridge: { toggleRateMode() {}, onAnimate() {}, onMotion() {},
+      onScroll(callback) { scrollListener = callback; return () => { scrollListener = null; }; }
+    }, shared };
+  let panel;
+  if (viaRenderer) {
+    // Exercise the real dependency handoff instead of giving the panel helpers
+    // directly: the renderer must forward everything its child needs.
+    window.TokenMonitorNotchPanel = { createNotchPanel: options => (panel = createNotchPanel(options)) };
+    const { createNotchRenderer } = require('../../src/electron/renderer/notch/renderer');
+    const previousObserver = global.ResizeObserver;
+    global.ResizeObserver = window.ResizeObserver;
+    try {
+      createNotchRenderer({ ...deps, surface: 'notch', root: el('main'), shapeLayer: el('svg'), contentLayer: el('div'),
+        shared: { ...shared, el, t: deps.t } });
+    } finally { global.ResizeObserver = previousObserver; }
+  } else panel = createNotchPanel(deps);
+  t.after(pageHide);
+  return { panel, document, window, state, settings, rolls, settled, el, overflowText, pageHide,
+    scroll: record => scrollListener?.(record),
+    get scrollSubscribed() { return scrollListener !== null; },
+    resize: () => resizeObservers.forEach(observer => { if (observer.node) observer.callback(); }),
+    find: className => panel.node.querySelector(`.${className}`),
+    all: className => panel.node.querySelectorAll(`.${className}`) };
+}
+
+module.exports = { Element, panelFixture };

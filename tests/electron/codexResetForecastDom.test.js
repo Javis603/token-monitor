@@ -1,0 +1,493 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
+
+const root = path.resolve(__dirname, '../..');
+const main = fs.readFileSync(path.join(root, 'src/electron/main.js'), 'utf8');
+const preload = fs.readFileSync(path.join(root, 'src/electron/preload.js'), 'utf8');
+const app = fs.readFileSync(path.join(root, 'src/electron/renderer/app.js'), 'utf8');
+// The Codex forecast row is one of the Limits rows, so the view builds it and
+// the page only holds the fetch/cache machinery behind it. Guards that slice a
+// builder read the view; the ones about state read the page.
+const view = fs.readFileSync(path.join(root, 'src/electron/renderer/providers/codex/windows.js'), 'utf8').replace(/\/\*\*[\s\S]*?\*\/ /g, '')
+  + '\n' + fs.readFileSync(path.join(root, 'src/electron/renderer/limits/windowsView.js'), 'utf8');
+const styles = fs.readFileSync(path.join(root, 'src/electron/renderer/styles.css'), 'utf8');
+
+test('Codex reset forecast is opt-in at both persistence and provider UI boundaries', () => {
+  assert.match(main, /codexResetForecastEnabled: false/);
+  assert.match(app, /key: 'codexResetForecastEnabled',[\s\S]*?defaultValue: false/);
+  assert.match(main, /settings\?\.codexResetForecastEnabled !== true/);
+  assert.equal((main.match(/codexResetForecastEnabled = parseBoolean/g) || []).length, 1);
+  assert.match(main, /codexResetForecastEnabled: parseBoolean\(patch\.codexResetForecastEnabled \?\? settings\.codexResetForecastEnabled, false\)/);
+});
+
+test('Codex reset forecast stays local to the renderer and uses a narrow IPC bridge', () => {
+  assert.match(preload, /getCodexResetForecast: \(options\) => ipcRenderer\.invoke\('codexResetForecast:get', options\)/);
+  assert.match(app, /window\.tokenMonitor\.getCodexResetForecast/);
+  assert.match(view, /openExternal\('https:\/\/codex-resets\.com\/'\)/);
+  assert.doesNotMatch(view, /openExternal\((?:forecast|info\.dataset)/);
+  assert.match(main, /parsed\.hostname === 'codex-resets\.com' && \(parsed\.pathname === '' \|\| parsed\.pathname === '\/'\)/);
+});
+
+test('single and multi-account Codex rows share the forecast divider styling', () => {
+  assert.match(styles, /\.codex-reset-forecast \{/);
+  assert.match(styles, /\.limit-row:has\(> \.codex-reset-forecast\)\s*\{[^}]*padding-bottom: 7px;/s);
+  assert.doesNotMatch(styles, /\.codex-reset-forecast\s*\{[^}]*border-top:/s);
+  // Unscoped, because the forecast has exactly two parents — a solo row and a
+  // group — and it is appended to neither as an account row, so one selector
+  // reaches every shape it is drawn in. Scoping it to the group is what made the
+  // rule appear under several accounts and go missing under one; the dock card,
+  // which is built on this same row, then showed only the missing half. The
+  // card's half of that is asserted in edgeDock.test.js.
+  assert.match(styles, /\.limit-account-row \+ \.limit-account-row::before,\s*\.codex-reset-forecast::before\s*\{[^}]*linear-gradient/s);
+  assert.doesNotMatch(styles, /\.limit-row-group > \.codex-reset-forecast/);
+});
+
+test('forecast details use the shared accessible tooltip without repeating third-party copy in the row', () => {
+  const renderer = view.slice(view.indexOf('function codexResetForecastTooltip'), view.indexOf('function appendCodexResetForecast'));
+  assert.match(renderer, /limitDetailInfoNode\([\s\S]*?'codex-reset-forecast-info-wrap'/);
+  assert.match(renderer, /limits\.codexResetForecast\.lastReset/);
+  assert.match(renderer, /limits\.codexResetForecast\.scheduled'/);
+  assert.match(renderer, /if \(forecast\?\.error\)[\s\S]*?limits\.codexResetForecast\.lastAttempt/);
+  assert.doesNotMatch(renderer, /limits\.codexResetForecast\.checked/);
+  assert.match(renderer, /limits\.codexResetForecast\.expiresLabel/);
+  assert.match(renderer, /\[expiresAt, expiresIn\]\.filter\(Boolean\)\.join\(' · '\)/);
+  assert.match(renderer, /forecast\?\.error/);
+  assert.match(renderer, /limits\.codexResetForecast\.connectionFailed/);
+  assert.match(renderer, /limits\.codexResetForecast\.connectionHelp/);
+  assert.match(renderer, /limits\.codexResetForecast\.disclaimer/);
+  assert.match(renderer, /codex-reset-forecast-disclaimer/);
+  assert.doesNotMatch(renderer, /limits\.codexResetForecast\.source['"]/);
+  assert.doesNotMatch(renderer, /limits\.codexResetForecast\.thirdParty/);
+  assert.doesNotMatch(renderer, /sourceText/);
+  assert.match(renderer, /const chance = forecast\.chancePercent;/);
+  assert.doesNotMatch(renderer, /Number\(forecast\.chancePercent\)/);
+  assert.equal((renderer.match(/limits\.codexResetForecast\.expected/g) || []).length, 2);
+  assert.doesNotMatch(renderer, /limits\.codexResetForecast\.expectedReset/);
+  assert.match(renderer, /: \(expiresAt \|\| ''\)/);
+  assert.doesNotMatch(renderer, /limits\.codexResetForecast\.expires['"]/);
+  assert.doesNotMatch(renderer, /forecast\.predictedAt \|\| forecast\.expiresAt/);
+  // Positioning is the shared top-layer mechanism, not a per-row one: the row
+  // goes through limitDetailInfoNode, which anchors a popover to its own trigger
+  // and flips it when the window has no room below. A tooltip that positioned
+  // itself would be the one clipped by the panel it scrolls in.
+  assert.match(view, /function limitDetailInfoNode[\s\S]*?attachLimitDetailTooltip\(infoWrap, tooltip\);/);
+  assert.match(view, /tooltip\.classList\.toggle\('is-below', wrap\.getBoundingClientRect\(\)\.top - top < tooltip\.offsetHeight \+ 8\)/);
+  assert.match(styles, /\.limit-detail-tooltip\s*\{[^}]*position: fixed;/s);
+  assert.match(styles, /\.limit-detail-tooltip:\s*popover-open\s*\{/);
+  // What stays per-caller is which side it hangs from and how tightly it sets.
+  assert.match(styles, /\.codex-reset-forecast-info-wrap \.limit-detail-tooltip\s*\{[^}]*left: calc\(anchor\(left\) - 1px\);/s);
+  assert.match(styles, /max-width: min\(230px, calc\(100vw - 48px\)\)/);
+  assert.match(styles, /\.codex-reset-forecast-info-wrap \.limit-detail-tooltip\s*\{[^}]*font-size: 0\.625rem;[^}]*font-weight: 400;[^}]*line-height: 1\.2;/s);
+  assert.match(styles, /\.codex-reset-forecast-disclaimer\s*\{[^}]*font-size: 0\.5rem;[^}]*white-space: normal;/s);
+});
+
+test('forecast date uses a compact relative calendar label for nearby dates', () => {
+  const start = view.indexOf('function codexResetForecastDate');
+  const end = view.indexOf('\n  function codexResetForecastTimeUntil', start);
+  const formatDate = vm.runInNewContext(`(${view.slice(start, end)})`, {
+    Date,
+    Intl,
+    Number,
+    Object,
+    currentLocale: () => 'zh-TW',
+    expiryDateLabel: () => 'absolute'
+  });
+  assert.equal(formatDate('2026-08-31T07:00:00.000Z', {
+    nowMs: Date.parse('2026-08-30T04:00:00.000Z'),
+    locale: 'zh-TW',
+    timeZone: 'Asia/Hong_Kong'
+  }), '明天 15:00');
+});
+
+test('forecast tooltip supplements the exact expiry with an approximate countdown', () => {
+  const start = view.indexOf('function codexResetForecastTimeUntil');
+  const end = view.indexOf('\n  function codexResetForecastAge', start);
+  const timeUntil = vm.runInNewContext(`(${view.slice(start, end)})`, {
+    Date,
+    Intl,
+    Math,
+    Number,
+    currentLocale: () => 'zh-TW',
+    t: (_key, values) => `約 ${values.duration}`
+  });
+  assert.equal(timeUntil('2026-08-31T07:00:00.000Z', {
+    nowMs: Date.parse('2026-08-30T08:00:00.000Z'),
+    locale: 'zh-TW'
+  }), '約 23 小時');
+  assert.equal(timeUntil('2026-08-30T07:59:00.000Z', {
+    nowMs: Date.parse('2026-08-30T08:00:00.000Z'),
+    locale: 'zh-TW'
+  }), '');
+});
+
+test('forecast tooltip safely stays absent before the first response arrives', () => {
+  const start = view.indexOf('function codexResetForecastTooltip');
+  const end = view.indexOf('\n  function renderCodexResetForecast', start);
+  let detailHelperCalled = false;
+  const tooltip = vm.runInNewContext(`(${view.slice(start, end)})`, {
+    t: (key) => key,
+    codexResetForecastDate: () => '',
+    codexResetForecastExpired: () => false,
+    codexResetForecastTimeUntil: () => '',
+    codexResetForecastAge: () => '',
+    codexResetForecastSourceAuthor: () => '',
+    codexResetForecastType: () => '',
+    limitDetailInfoNode: () => {
+      detailHelperCalled = true;
+      return null;
+    },
+    document: {},
+    openExternal: () => {}
+  });
+  assert.equal(tooltip(null), null);
+  assert.equal(detailHelperCalled, false);
+  const renderer = view.slice(view.indexOf('function renderCodexResetForecast'), view.indexOf('function appendCodexResetForecast'));
+  assert.match(renderer, /const forecastInfo = codexResetForecastTooltip\(forecast\);\s*if \(forecastInfo\) title\.append\(forecastInfo\);/);
+});
+
+test('renderer hides an active forecast at its expiry boundary', () => {
+  const start = view.indexOf('function codexResetForecastExpired');
+  const end = view.indexOf('\n  }', start) + 4;
+  const expired = vm.runInNewContext(`(${view.slice(start, end)})`, { Date, Number });
+  const forecast = { status: 'active', expiresAt: '2026-08-30T04:01:00.000Z' };
+
+  assert.equal(expired(forecast, Date.parse('2026-08-30T04:00:59.999Z')), false);
+  assert.equal(expired(forecast, Date.parse('2026-08-30T04:01:00.000Z')), true);
+  assert.equal(expired({ status: 'inactive', expiresAt: forecast.expiresAt }, Date.parse('2026-08-30T04:01:00.000Z')), false);
+
+  const renderer = view.slice(view.indexOf('function renderCodexResetForecast'), view.indexOf('function appendCodexResetForecast'));
+  assert.match(renderer, /forecast\?\.status === 'active' && !expired/);
+  assert.match(renderer, /forecast\?\.status === 'inactive' \|\| expired/);
+  assert.match(renderer, /forecast\?\.status === 'scheduled'/);
+  assert.match(renderer, /limits\.codexResetForecast\.scheduled'/);
+  assert.match(renderer, /limits\.codexResetForecast\.expected/);
+  assert.match(renderer, /limits\.codexResetForecast\.schedulePending/);
+});
+
+test('scheduled reset labels exist in every locale', () => {
+  const i18n = fs.readFileSync(path.join(root, 'src/electron/renderer/i18n.js'), 'utf8');
+  for (const key of [
+    'limits.codexResetForecast.scheduled',
+    'limits.codexResetForecast.schedulePending',
+    'limits.codexResetForecast.expected'
+  ]) {
+    assert.equal(i18n.split(`'${key}':`).length - 1, 6, `${key} should exist in all bundled locales`);
+  }
+  assert.match(i18n, /'limits\.codexResetForecast\.scheduled': '已排程'/);
+  assert.doesNotMatch(i18n, /'limits\.codexResetForecast\.scheduled': '重置已排程'/);
+});
+
+test('forecast source author is displayed as an X handle without duplicating @', () => {
+  const start = view.indexOf('function codexResetForecastSourceAuthor');
+  const end = view.indexOf('\n  function codexResetForecastPercent', start);
+  const sourceAuthor = vm.runInNewContext(`(${view.slice(start, end)})`, { String });
+  assert.equal(sourceAuthor('thsottiaux'), '@thsottiaux');
+  assert.equal(sourceAuthor('@thsottiaux'), '@thsottiaux');
+  assert.equal(sourceAuthor('  @@thsottiaux  '), '@thsottiaux');
+  assert.equal(sourceAuthor(''), '');
+});
+
+test('forecast percentage display preserves fractional percent semantics', () => {
+  const start = view.indexOf('function codexResetForecastPercent');
+  const end = view.indexOf('\n  function codexResetForecastType', start);
+  const formatPercent = vm.runInNewContext(`(${view.slice(start, end)})`, { Intl });
+  assert.equal(formatPercent(0.5, 'en-US'), '0.5');
+  assert.equal(formatPercent(75, 'en-US'), '75');
+  assert.equal(formatPercent(75.125, 'en-US'), '75.13');
+});
+
+test('forecast reset type uses localized labels only for supported API values', () => {
+  const start = view.indexOf('function codexResetForecastType');
+  const end = view.indexOf('\n  function codexResetForecastTooltip', start);
+  const typeLabel = vm.runInNewContext(`(${view.slice(start, end)})`, {
+    String,
+    t: (key) => key
+  });
+
+  assert.equal(typeLabel('banked'), 'limits.codexResetForecast.resetType.banked');
+  assert.equal(typeLabel('regular'), 'limits.codexResetForecast.resetType.regular');
+  assert.equal(typeLabel('surprise'), '');
+});
+
+test('forecast tooltip keeps scheduled and historical reset types distinct', () => {
+  const start = view.indexOf('function codexResetForecastTooltip');
+  const end = view.indexOf('\n  function renderCodexResetForecast', start);
+  const { translate } = require('../../src/electron/renderer/i18n');
+  let entries;
+  const tooltip = vm.runInNewContext(`(${view.slice(start, end)})`, {
+    t: (key) => translate('zh-TW', key),
+    codexResetForecastType: (type) => ['regular', 'banked'].includes(type)
+      ? translate('zh-TW', `limits.codexResetForecast.resetType.${type}`) : '',
+    codexResetForecastDate: (value) => value || '',
+    codexResetForecastExpired: () => false,
+    codexResetForecastTimeUntil: () => '',
+    codexResetForecastAge: () => '',
+    codexResetForecastSourceAuthor: (value) => value ? `@${value}` : '',
+    limitDetailInfoNode: (values) => {
+      entries = JSON.parse(JSON.stringify(values));
+      return { querySelector: () => null };
+    }
+  });
+  const forecast = {
+    status: 'scheduled',
+    scheduledResetType: 'regular',
+    sourceAuthor: 'thsottiaux',
+    scheduledFor: '2026-10-02T17:00:00Z',
+    latestResetType: 'banked',
+    latestResetAt: '2026-09-29T19:00:00Z'
+  };
+  tooltip(forecast);
+  assert.deepEqual(entries, [
+    { full: '已排程 · 一般重置', heading: true },
+    { full: forecast.scheduledFor },
+    { full: '@thsottiaux', caption: true },
+    { full: '上次重置', heading: true, separated: true },
+    { full: `備用重置額度 · ${forecast.latestResetAt}` }
+  ]);
+  tooltip({ ...forecast, scheduledResetType: '' });
+  assert.equal(entries[0].full, '已排程', 'unknown scheduled type must not inherit the historical type');
+  tooltip({ ...forecast, status: 'active', scheduledFor: '', expiresAt: '2026-10-03T16:00:00Z' });
+  assert.deepEqual(entries, [
+    { full: '偵測到訊號', heading: true },
+    { full: '有效至 2026-10-03T16:00:00Z' },
+    { full: '@thsottiaux', caption: true },
+    { full: '上次重置', heading: true, separated: true },
+    { full: `備用重置額度 · ${forecast.latestResetAt}` }
+  ]);
+  tooltip({ status: 'inactive', latestResetType: 'regular', latestResetAt: forecast.latestResetAt });
+  assert.deepEqual(entries, [
+    { full: '上次重置', heading: true, separated: false },
+    { full: `一般重置 · ${forecast.latestResetAt}` }
+  ]);
+
+});
+
+test('forecast tooltip gates retained metadata by the current signal state', () => {
+  const { translate } = require('../../src/electron/renderer/i18n');
+  const nowMs = Date.parse('2026-10-02T04:00:00Z');
+  const expiredStart = view.indexOf('function codexResetForecastExpired');
+  const expiredEnd = view.indexOf('\n  }', expiredStart) + 4;
+  const expired = vm.runInNewContext(`(${view.slice(expiredStart, expiredEnd)})`, { Date, Number });
+  const start = view.indexOf('function codexResetForecastTooltip');
+  const end = view.indexOf('\n  function renderCodexResetForecast', start);
+  let entries;
+  const tooltip = vm.runInNewContext(`(${view.slice(start, end)})`, {
+    t: (key) => translate('zh-TW', key),
+    codexResetForecastType: (type) => translate('zh-TW', `limits.codexResetForecast.resetType.${type}`),
+    codexResetForecastDate: (value) => value || '',
+    codexResetForecastExpired: (forecast) => expired(forecast, nowMs),
+    codexResetForecastTimeUntil: () => '',
+    codexResetForecastAge: (value) => value === 'attempt' ? '1 分鐘前' : '',
+    codexResetForecastSourceAuthor: (value) => value ? `@${value}` : '',
+    limitDetailInfoNode: (values) => {
+      entries = JSON.parse(JSON.stringify(values));
+      return { querySelector: () => null };
+    }
+  });
+  const forecast = {
+    scheduledFor: '2026-10-02T17:00:00Z',
+    scheduledAnnouncedAt: '2026-10-02T02:00:00Z',
+    scheduledResetType: 'regular',
+    expiresAt: '2026-10-02T04:00:00Z',
+    observedAt: '2026-10-02T01:00:00Z',
+    sourceAuthor: 'thsottiaux',
+    latestResetAt: '2026-09-29T19:00:00Z',
+    latestResetType: 'banked'
+  };
+  const history = [
+    { full: '上次重置', heading: true, separated: false },
+    { full: `備用重置額度 · ${forecast.latestResetAt}` }
+  ];
+  for (const status of ['inactive', 'active', 'unavailable']) {
+    tooltip({ ...forecast, status });
+    assert.deepEqual(entries, history, `${status} at expiry must omit all upcoming metadata`);
+    tooltip({ ...forecast, status, error: 'offline', checkedAt: 'attempt' });
+    assert.deepEqual(entries, [
+      ...history,
+      ['連線失敗', '請檢查網路或 DNS 設定'],
+      ['最後嘗試', '1 分鐘前']
+    ], `${status} still reports explicit request errors`);
+  }
+  tooltip({ ...forecast, status: 'scheduled' });
+  assert.deepEqual(entries.slice(0, 3), [
+    { full: '已排程 · 一般重置', heading: true },
+    { full: forecast.scheduledFor },
+    { full: '@thsottiaux', caption: true }
+  ], 'scheduled resets must not carry an old watch expiry');
+  assert.equal(entries.length, 5);
+  tooltip({ ...forecast, status: 'active', expiresAt: '2026-10-03T04:00:00Z' });
+  assert.deepEqual(entries.slice(0, 3), [
+    { full: '偵測到訊號', heading: true },
+    { full: '有效至 2026-10-03T04:00:00Z' },
+    { full: '@thsottiaux', caption: true }
+  ], 'active forecasts must not carry an old scheduled time');
+  assert.equal(entries.length, 5);
+});
+
+test('forecast requests use the widget outbound transport', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  assert.match(main, /createCodexResetForecastClient\(\{\s*fetchImpl: electronLimitsFetch\(\)\s*\}\)/);
+});
+
+test('forecast refresh cadence follows the cache policy returned by the main process', () => {
+  const renderer = app.slice(app.indexOf('function clearCodexResetForecastRetryTimer'), app.indexOf('\nfunction captureLimitResetMotion'));
+  assert.match(renderer, /const retryAfterMs = Number\(state\.codexResetForecast\?\.retryAfterMs\);/);
+  assert.match(renderer, /state\.codexResetForecast\?\.error \? 30 \* 1000 : 15 \* 60 \* 1000/);
+  assert.match(renderer, /const checkedAtMs = Date\.parse\(state\.codexResetForecast\?\.checkedAt \|\| ''\);/);
+  assert.match(renderer, /const remainingMs = Math\.max\(0, baseMs \+ refreshMs - nowMs\);/);
+  assert.doesNotMatch(renderer, /const age =/);
+  assert.match(renderer, /setTimeout\(\(\) => \{[\s\S]*?state\.breakdown === 'limits' && visibleStatsSurface\(\) === 'main'/);
+});
+
+test('first forecast response follows the active surface and schedules only on main', async () => {
+  const start = app.indexOf('function clearCodexResetForecastRetryTimer');
+  const end = app.indexOf('\nfunction captureLimitResetMotion', start);
+  const source = app.slice(start, end);
+
+  async function settleForecast(result, surface = 'main') {
+    const scheduled = [];
+    let renderCount = 0;
+    let schedulerRequests = 0;
+    const state = {
+      settings: { codexResetForecastEnabled: true },
+      breakdown: 'limits',
+      codexResetForecast: null,
+      codexResetForecastBusy: false,
+      codexResetForecastRequestedAt: 0,
+      codexResetForecastRetryTimer: null
+    };
+    const api = vm.runInNewContext(`(() => { ${source}; return { maybeFetchCodexResetForecast }; })()`, {
+      Date: class FixedDate extends Date {
+        static now() { return 1_000_000; }
+      },
+      Number,
+      clearTimeout: () => {},
+      renderLimits: () => { renderCount += 1; },
+      setTimeout: (_callback, delay) => {
+        scheduled.push(delay);
+        return scheduled.length;
+      },
+      state,
+      statsRenderScheduler: {
+        request: () => { schedulerRequests += 1; }
+      },
+      visibleStatsSurface: () => surface,
+      window: {
+        tokenMonitor: {
+          getCodexResetForecast: async () => result
+        }
+      }
+    });
+
+    api.maybeFetchCodexResetForecast();
+    await new Promise(setImmediate);
+    return { renderCount, scheduled, schedulerRequests };
+  }
+
+  assert.deepEqual(await settleForecast({
+    status: 'unavailable',
+    error: 'offline',
+    retryAfterMs: 30_000
+  }), { renderCount: 1, scheduled: [30_000], schedulerRequests: 0 });
+  assert.deepEqual(await settleForecast({
+    status: 'active',
+    chancePercent: 75,
+    retryAfterMs: 15 * 60 * 1000
+  }), { renderCount: 1, scheduled: [15 * 60 * 1000], schedulerRequests: 0 });
+
+  const hidden = await settleForecast({ status: 'unavailable', error: 'offline', retryAfterMs: 30_000 }, null);
+  assert.deepEqual(hidden, { renderCount: 0, scheduled: [], schedulerRequests: 1 });
+  for (const surface of ['settings', 'bubble']) {
+    const inactive = await settleForecast({ status: 'active', retryAfterMs: 15 * 60 * 1000 }, surface);
+    assert.deepEqual(inactive, { renderCount: 0, scheduled: [], schedulerRequests: 0 });
+  }
+});
+
+test('forecast deadline stays anchored to response settlement across latency and an early cache hit', async () => {
+  const start = app.indexOf('function clearCodexResetForecastRetryTimer');
+  const end = app.indexOf('\nfunction captureLimitResetMotion', start);
+  // The page's fetch machinery calls the view's expiry predicate, so the
+  // sandbox needs both.
+  const expiryBody = view.slice(view.indexOf('function codexResetForecastExpired'), view.indexOf('\n  }', view.indexOf('function codexResetForecastExpired')) + 4);
+  const source = `${expiryBody}\n${app.slice(start, end)}`;
+  const scheduled = [];
+  let nowMs = 1_000_000;
+  let calls = 0;
+  let renderCount = 0;
+  const cached = {
+    status: 'active',
+    chancePercent: 75,
+    checkedAt: new Date(1_001_000).toISOString(),
+    expiresAt: new Date(1_060_000).toISOString(),
+    retryAfterMs: 59_000
+  };
+  const state = {
+    settings: { codexResetForecastEnabled: true },
+    breakdown: 'limits',
+    codexResetForecast: null,
+    codexResetForecastBusy: false,
+    codexResetForecastRequestedAt: 0,
+    codexResetForecastRetryTimer: null
+  };
+  class MutableDate extends Date {
+    constructor(value) {
+      super(value === undefined ? nowMs : value);
+    }
+
+    static now() {
+      return nowMs;
+    }
+  }
+  const api = vm.runInNewContext(`(() => { ${source}; return { maybeFetchCodexResetForecast, refreshCodexResetForecast }; })()`, {
+    Date: MutableDate,
+    Math,
+    Number,
+    clearTimeout: () => {},
+    renderLimits: () => { renderCount += 1; },
+    setTimeout: (callback, delay) => {
+      scheduled.push({ callback, delay });
+      return scheduled.length;
+    },
+    state,
+    statsRenderScheduler: { request: () => {} },
+    visibleStatsSurface: () => 'main',
+    window: {
+      tokenMonitor: {
+        getCodexResetForecast: async () => {
+          calls += 1;
+          if (calls === 1) {
+            nowMs += 1000;
+            return cached;
+          }
+          if (calls === 2) return cached;
+          return {
+            status: 'inactive',
+            checkedAt: new Date(nowMs).toISOString(),
+            retryAfterMs: 15 * 60 * 1000
+          };
+        }
+      }
+    }
+  });
+
+  api.maybeFetchCodexResetForecast();
+  await new Promise(setImmediate);
+  assert.equal(scheduled.at(-1).delay, 59_000);
+
+  nowMs = 1_059_000;
+  await api.refreshCodexResetForecast();
+  assert.equal(calls, 2);
+  assert.equal(scheduled.at(-1).delay, 1000);
+
+  nowMs = 1_060_000;
+  scheduled.at(-1).callback();
+  await new Promise(setImmediate);
+  assert.equal(calls, 3);
+  assert.equal(state.codexResetForecast.status, 'inactive');
+  assert.ok(renderCount >= 4, 'expiry renders no-signal before and after the refresh settles');
+});

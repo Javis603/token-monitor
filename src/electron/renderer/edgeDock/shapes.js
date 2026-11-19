@@ -1,0 +1,192 @@
+'use strict';
+
+// Silhouettes for the edge dock surfaces, as plain command lists. The same
+// commands drive two consumers that must agree to the pixel: the renderer turns
+// them into the SVG that tints each surface, and the macOS main process
+// rasterizes them into the mask that clips the native material to that shape.
+(function exposeEdgeDockShapes(root, factory) {
+  const api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  if (root) root.TokenMonitorEdgeDockShapes = api;
+})(typeof window !== 'undefined' ? window : null, function createEdgeDockShapes() {
+  // Distance from a corner to its cubic control point, as a share of the radius,
+  // that best approximates a quarter circle.
+  const ARC = 0.448;
+
+  function mirrorX(commands, width) {
+    return commands.map(([op, ...points]) => {
+      const next = [op];
+      for (let index = 0; index < points.length; index += 2) {
+        next.push(width - points[index], points[index + 1]);
+      }
+      return next;
+    });
+  }
+
+  // A rail flush with the screen edge whose body flows into that edge through
+  // two concave shoulders, so it reads as growing out of the display rather
+  // than floating next to it. Drawn for the right edge and mirrored for the left.
+  // The first and last points sit on the screen edge; `open: true` drops the
+  // closing segment so an outline is never stroked along the display edge.
+  function railCommands({ width, height, side = 'right', shoulder, radius, open = false, floating = false, floatingProgress = floating ? 1 : 0 }) {
+    const w = width;
+    const h = height;
+    const s = Math.max(0, Math.min(shoulder, h / 2));
+    const spread = Math.min(w * 0.53, w - radius);
+    const r = Math.max(0, Math.min(radius, (h - 2 * s) / 2, w - spread));
+    const commands = [
+      ['M', w, 0],
+      ['C', w, s * 0.76, w - w * 0.25, s, w - spread, s],
+      ['L', r, s],
+      ['C', r * ARC, s, 0, s + r * ARC, 0, s + r],
+      ['L', 0, h - s - r],
+      ['C', 0, h - s - r * ARC, r * ARC, h - s, r, h - s],
+      ['L', w - spread, h - s],
+      ['C', w - w * 0.25, h - s, w, h - s * 0.76, w, h]
+    ];
+    // Keep the cells exactly where they are in the attached rail. Its shoulders
+    // become transparent rather than becoming extra padding inside the capsule.
+    // Matching command topology lets native masks and SVG share the same morph.
+    const cap = Math.min(w / 2, (h - 2 * s) / 2);
+    const capsule = [
+      ['M', w, s + cap],
+      ['C', w, s + cap * ARC, w - cap * ARC, s, w - cap, s],
+      ['L', cap, s],
+      ['C', cap * ARC, s, 0, s + cap * ARC, 0, s + cap],
+      ['L', 0, h - s - cap],
+      ['C', 0, h - s - cap * ARC, cap * ARC, h - s, cap, h - s],
+      ['L', w - cap, h - s],
+      ['C', w - cap * ARC, h - s, w, h - s - cap * ARC, w, h - s - cap]
+    ];
+    const progress = Math.max(0, Math.min(1, floatingProgress));
+    if (progress > 0) {
+      for (let i = 0; i < commands.length; i += 1) {
+        for (let j = 1; j < commands[i].length; j += 1) commands[i][j] += (capsule[i][j] - commands[i][j]) * progress;
+      }
+    }
+    if (!open || progress > 0) commands.push(['Z']);
+    return side === 'left' ? mirrorX(commands, w) : commands;
+  }
+
+  // The handle: a tab flush with the screen edge, rounded on the side facing the
+  // desktop and centred along the window, which is larger to leave it room to
+  // grow. Drawn for the right edge and mirrored for the left; `open: true` drops
+  // the segment along the display edge, as the rail's outline does.
+  function peekCommands({ width, height, side = 'right', open = false, handleWidth = width, handleLength = height }) {
+    const w = width;
+    const x = w - Math.min(handleWidth, w);
+    const top = Math.max(0, (height - handleLength) / 2);
+    const bottom = height - top;
+    const r = Math.min(w - x, (bottom - top) / 2, 5);
+    const commands = [
+      ['M', w, top],
+      ['L', x + r, top],
+      ['C', x + r * ARC, top, x, top + r * ARC, x, top + r],
+      ['L', x, bottom - r],
+      ['C', x, bottom - r * ARC, x + r * ARC, bottom, x + r, bottom],
+      ['L', w, bottom]
+    ];
+    if (!open) commands.push(['Z']);
+    return side === 'left' ? mirrorX(commands, w) : commands;
+  }
+
+  // A rounded card with a broad-necked tail pointing at the rail. `tailY` is the
+  // tip's offset from the top; it is clamped so the neck never runs into a
+  // corner. Drawn with the tail on the right and mirrored for a left rail.
+  function bubbleCommands({ width, height, side = 'right', tail, tailY, neck, radius }) {
+    const bw = width - tail;
+    // Leave the point inside the BrowserWindow. A tip exactly on its outer edge
+    // clips half of the antialiased outline and leaves a notch on both Chromium
+    // and the macOS native-material mask.
+    const tipX = Math.max(bw, width - 1);
+    const h = height;
+    const r = Math.max(0, Math.min(radius, h / 2, bw / 2));
+    const n = Math.max(0, Math.min(neck, (h - 2 * r) / 2));
+    const ty = Math.max(r + n, Math.min(h - r - n, Number(tailY) || h / 2));
+    const commands = [
+      ['M', r, 0],
+      ['L', bw - r, 0],
+      ['C', bw - r * ARC, 0, bw, r * ARC, bw, r],
+      ['L', bw, ty - n],
+      ['C', bw, ty - n * 0.4, bw + tail * 0.5, ty - 1.5, tipX, ty],
+      ['C', bw + tail * 0.5, ty + 1.5, bw, ty + n * 0.4, bw, ty + n],
+      ['L', bw, h - r],
+      ['C', bw, h - r * ARC, bw - r * ARC, h, bw - r, h],
+      ['L', r, h],
+      ['C', r * ARC, h, 0, h - r * ARC, 0, h - r],
+      ['L', 0, r],
+      ['C', 0, r * ARC, r * ARC, 0, r, 0],
+      ['Z']
+    ];
+    return side === 'left' ? mirrorX(commands, width) : commands;
+  }
+
+  function round(value) {
+    return Math.round(value * 100) / 100;
+  }
+
+  function cardCommands({ width, height, y = 0, radius = 14 }) {
+    const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+    return [
+      ['M', r, y], ['L', width - r, y],
+      ['C', width - r * ARC, y, width, y + r * ARC, width, y + r],
+      ['L', width, y + height - r],
+      ['C', width, y + height - r * ARC, width - r * ARC, y + height, width - r, y + height],
+      ['L', r, y + height],
+      ['C', r * ARC, y + height, 0, y + height - r * ARC, 0, y + height - r],
+      ['L', 0, y + r], ['C', 0, y + r * ARC, r * ARC, y, r, y], ['Z']
+    ];
+  }
+
+  function toSvgPath(commands) {
+    return commands.map(([op, ...points]) => `${op}${points.map(round).join(' ')}`).join(' ');
+  }
+
+  // Flattens the commands into closed polygons for scanline filling.
+  function toPolygons(commands, segments = 24) {
+    const polygons = [];
+    let current = null;
+    let x = 0;
+    let y = 0;
+    for (const [op, ...p] of commands) {
+      if (op === 'M') {
+        current = [[p[0], p[1]]];
+        polygons.push(current);
+        [x, y] = p;
+      } else if (op === 'L') {
+        current.push([p[0], p[1]]);
+        [x, y] = p;
+      } else if (op === 'C') {
+        for (let step = 1; step <= segments; step += 1) {
+          const t = step / segments;
+          const u = 1 - t;
+          current.push([
+            u * u * u * x + 3 * u * u * t * p[0] + 3 * u * t * t * p[2] + t * t * t * p[4],
+            u * u * u * y + 3 * u * u * t * p[1] + 3 * u * t * t * p[3] + t * t * t * p[5]
+          ]);
+        }
+        [x, y] = [p[4], p[5]];
+      }
+    }
+    return polygons;
+  }
+
+  return {
+    refreshCommands({ width, height }) {
+      const x = width / 2;
+      const y = height / 2;
+      const r = Math.min(x, y) - 0.5;
+      const k = r * 0.5522847498;
+      return [['M', x, y - r], ['C', x + k, y - r, x + r, y - k, x + r, y],
+        ['C', x + r, y + k, x + k, y + r, x, y + r],
+        ['C', x - k, y + r, x - r, y + k, x - r, y],
+        ['C', x - r, y - k, x - k, y - r, x, y - r], ['Z']];
+    },
+    bubbleCommands,
+    cardCommands,
+    peekCommands,
+    railCommands,
+    toPolygons,
+    toSvgPath
+  };
+});

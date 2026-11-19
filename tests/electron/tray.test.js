@@ -1,0 +1,1486 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const zlib = require('node:zlib');
+
+const {
+  buildTrayIcon,
+  buildTrayMenuTemplate,
+  createTray,
+  formatTrayText,
+  reconcileCodexAccountSelection,
+  pickUsageTrayIconId,
+  runTrayMenuAction,
+  shouldUseTemplateTrayIcon,
+  sortCodexAccountsForDisplay
+} = require('../../src/electron/tray');
+const { LANGUAGE_OPTIONS, MESSAGES, translate } = require('../../src/electron/renderer/i18n');
+const {
+  compactLimitSelection,
+  isBarsTrayIconMode,
+  isGeneratedTrayIconMode,
+  pickConfiguredLimitProviders,
+  pickConfiguredSessionLimits,
+  pickLimitProviderByKindPriority,
+  pickRecentUsageActivity,
+  pickRecentUsageProviderId,
+  pickWorstLimitProvider,
+  trayShowsTitle,
+  usageSessionActivityTimestampMs
+} = require('../../src/shared/trayText');
+
+const stats = {
+  periods: {
+    today: {
+      clients: { claude: 10, codex: 25 },
+      clientCosts: { claude: 0.5, codex: 0.2 }
+    },
+    month: {
+      clients: { claude: 50, codex: 75 },
+      clientCosts: { claude: 1.5, codex: 1.2 }
+    },
+    allTime: {
+      clients: { claude: 100, codex: 40 },
+      clientCosts: { claude: 1, codex: 2 }
+    }
+  }
+};
+
+function fakeTrayElectron(calls) {
+  class FakeTray {
+    constructor(icon) {
+      this.destroyed = false;
+      this.handlers = {};
+      calls.icons.push(icon);
+    }
+
+    isDestroyed() { return this.destroyed; }
+    on(name, callback) { this.handlers[name] = callback; }
+    popUpContextMenu(menu) { calls.popups.push(menu); }
+    setContextMenu(menu) { calls.contextMenus.push(menu); }
+    setToolTip(value) { calls.tooltips.push(value); }
+  }
+
+  return {
+    Menu: {
+      buildFromTemplate(template) {
+        calls.templates.push(template);
+        return { template };
+      }
+    },
+    Tray: FakeTray,
+    nativeImage: {
+      createFromPath(iconPath) {
+        calls.iconPaths.push(iconPath);
+        return { resize: (size) => ({ iconPath, size }) };
+      }
+    }
+  };
+}
+
+function trayCalls() {
+  return {
+    contextMenus: [],
+    iconPaths: [],
+    icons: [],
+    popups: [],
+    templates: [],
+    tooltips: []
+  };
+}
+
+test('system tray has no native tooltip on any platform', () => {
+  for (const platform of ['darwin', 'win32', 'linux']) {
+    const calls = trayCalls();
+    const electron = fakeTrayElectron(calls);
+    electron.nativeImage.createFromPath = () => ({ resize: () => ({ setTemplateImage() {} }) });
+    createTray({ electron, platform });
+    assert.deepEqual(calls.tooltips, [''], platform);
+  }
+});
+
+test('recent usage provider follows the newest valid session timestamp', () => {
+  const recentStats = {
+    periods: {
+      today: {
+        sessions: {
+          'claude:older': { client: 'claude', lastUsedAt: '2026-08-12T10:00:00.000Z' },
+          'openclaw:newer': { client: 'openclaw', lastUsedAt: '2026-08-12T10:01:00.000Z' },
+          'unknown:newest': { client: 'unknown', lastUsedAt: '2026-08-12T10:02:00.000Z' }
+        }
+      },
+      allTime: {
+        sessions: {
+          'codex:invalid': { client: 'codex', lastUsedAt: 'not-a-date' }
+        }
+      }
+    }
+  };
+
+  assert.deepEqual(pickRecentUsageActivity(recentStats), {
+    provider: 'unknown',
+    timestampMs: Date.parse('2026-08-12T10:02:00.000Z')
+  });
+  recentStats.localRecentUsageActivity = pickRecentUsageActivity(recentStats);
+  assert.equal(pickRecentUsageProviderId(recentStats), 'unknown');
+  assert.equal(
+    pickRecentUsageProviderId(recentStats, ['claude', 'openclaw', 'codex']),
+    null
+  );
+  assert.equal(pickRecentUsageProviderId({ periods: { today: {} } }), null);
+});
+
+test('recent usage provider includes the local Reasonix native session view', () => {
+  const recentStats = {
+    periods: {
+      today: {
+        sessions: {
+          'claude:older': { client: 'claude', lastUsedAt: '2026-08-12T10:00:00.000Z' }
+        }
+      }
+    },
+    nativeSessions: {
+      today: {
+        'reasonix:newer': {
+          client: 'reasonix',
+          lastMessageAt: '2026-08-12T10:05:00.000Z',
+          lastUsedAt: '2026-08-12T10:06:00.000Z'
+        }
+      },
+      month: {},
+      allTime: {}
+    }
+  };
+
+  recentStats.localRecentUsageActivity = pickRecentUsageActivity(recentStats);
+  assert.equal(pickRecentUsageProviderId(recentStats), 'reasonix');
+  assert.equal(pickRecentUsageProviderId(recentStats, ['claude', 'reasonix']), 'reasonix');
+});
+
+test('Reasonix title metadata cannot masquerade as recent activity', () => {
+  const renamedReasonix = {
+    client: 'reasonix',
+    createdAt: '2026-08-12T09:00:00.000Z',
+    lastUsedAt: '2026-08-12T10:05:00.000Z',
+    updatedAt: '2026-08-12T10:05:00.000Z'
+  };
+  assert.equal(
+    usageSessionActivityTimestampMs(renamedReasonix, 'native'),
+    Date.parse('2026-08-12T09:00:00.000Z')
+  );
+
+  const statsAfterRename = {
+    periods: {
+      today: {
+        sessions: {
+          'claude:active': { client: 'claude', lastUsedAt: '2026-08-12T10:00:00.000Z' }
+        }
+      }
+    },
+    nativeSessions: {
+      today: {},
+      month: {},
+      allTime: { 'reasonix:renamed': renamedReasonix }
+    }
+  };
+  assert.equal(pickRecentUsageActivity(statsAfterRename)?.provider, 'claude');
+
+  statsAfterRename.nativeSessions.allTime['reasonix:renamed'].lastMessageAt = '2026-08-12T10:10:00.000Z';
+  assert.equal(pickRecentUsageActivity(statsAfterRename)?.provider, 'reasonix');
+});
+
+test('fallback tray icon source stays transparent and high-resolution', () => {
+  const icon = fs.readFileSync(path.join(__dirname, '..', '..', 'assets', 'icons', 'tray-token-monitor.png'));
+  assert.equal(icon.toString('ascii', 1, 4), 'PNG');
+  assert.deepEqual([icon.readUInt32BE(16), icon.readUInt32BE(20)], [44, 44]);
+  assert.equal(icon[25], 6, 'tray PNG should use RGBA color');
+  assert.equal(icon[28], 0, 'tray PNG should not be interlaced');
+
+  const idat = [];
+  for (let offset = 8; offset < icon.length;) {
+    const length = icon.readUInt32BE(offset);
+    const type = icon.toString('ascii', offset + 4, offset + 8);
+    if (type === 'IDAT') idat.push(icon.subarray(offset + 8, offset + 8 + length));
+    offset += 12 + length;
+  }
+  const scanlines = zlib.inflateSync(Buffer.concat(idat));
+  assert.equal(scanlines[4], 0, 'tray PNG corner should remain fully transparent');
+});
+
+test('macOS tray icon downsamples the high-resolution template like provider icons', () => {
+  const calls = [];
+  const resized = {
+    setTemplateImage(value) { calls.push(['template', value]); }
+  };
+  const image = {
+    resize(size) { calls.push(['resize', size]); return resized; }
+  };
+
+  assert.equal(buildTrayIcon({
+    platform: 'darwin',
+    nativeImage: {
+      createFromPath(iconPath) {
+        calls.push(['path', iconPath]);
+        return image;
+      }
+    }
+  }), resized);
+
+  assert.match(calls[0][1], /assets[\\/]icons[\\/]tray-token-monitor\.png$/);
+  assert.deepEqual(calls.slice(1), [
+    ['resize', { height: 20, quality: 'best' }],
+    ['template', true]
+  ]);
+});
+
+test('Linux tray icon keeps the resized full-color app asset at the unchanged square size', () => {
+  // Windows now gets its own small-icon metric branch (see
+  // trayIconSizing.test.js); Linux remains the square 20x20 catch-all.
+  const calls = [];
+  const resized = {};
+  const image = {
+    setTemplateImage(value) { calls.push(['template', value]); },
+    resize(size) { calls.push(['resize', size]); return resized; }
+  };
+
+  assert.equal(buildTrayIcon({
+    platform: 'linux',
+    nativeImage: {
+      createFromPath(iconPath) {
+        calls.push(['path', iconPath]);
+        return image;
+      }
+    }
+  }), resized);
+
+  assert.match(calls[0][1], /assets[\\/]icon\.png$/);
+  assert.deepEqual(calls.slice(1), [['resize', { width: 20, height: 20 }]]);
+});
+
+test('macOS tray click passes the screen cursor, not its window-relative event position', () => {
+  const calls = trayCalls();
+  const electron = fakeTrayElectron(calls);
+  electron.screen = { getCursorScreenPoint: () => ({ x: 1200, y: -1060 }) };
+  electron.nativeImage.createFromPath = () => ({
+    resize: () => ({ setTemplateImage() {} })
+  });
+  let clickPoint = null;
+  const tray = createTray({
+    electron,
+    onToggle: (_tray, point) => { clickPoint = point; },
+    platform: 'darwin'
+  });
+
+  tray.handlers.click({}, { x: 900, y: 0, width: 24, height: 24 }, { x: 12, y: 900 });
+  assert.deepEqual(clickPoint, { x: 1200, y: -1060 });
+});
+
+test('macOS tray click keeps the visibility from mouse-down across a window blur', () => {
+  const calls = trayCalls();
+  const electron = fakeTrayElectron(calls);
+  electron.screen = { getCursorScreenPoint: () => ({ x: 100, y: 10 }) };
+  electron.nativeImage.createFromPath = () => ({ resize: () => ({ setTemplateImage() {} }) });
+  let visible = true;
+  const snapshots = [];
+  const tray = createTray({
+    electron,
+    getWindowVisible: () => visible,
+    onToggle: (_tray, _point, wasVisible) => snapshots.push(wasVisible),
+    platform: 'darwin'
+  });
+
+  tray.handlers['mouse-down']();
+  visible = false; // Window blur hides the popover before Tray.click arrives.
+  tray.handlers['mouse-up']();
+  tray.handlers.click({}, {}, {});
+  assert.deepEqual(snapshots, [true]);
+
+  tray.handlers['mouse-down']();
+  tray.handlers['mouse-up']();
+  tray.handlers.click({}, {}, {});
+  assert.deepEqual(snapshots, [true, false]);
+});
+
+test('macOS tray records blur candidates only while the pointer is on its icon', () => {
+  const calls = trayCalls();
+  const electron = fakeTrayElectron(calls);
+  electron.nativeImage.createFromPath = () => ({ resize: () => ({ setTemplateImage() {} }) });
+  const tray = createTray({ electron, platform: 'darwin' });
+  tray.getBounds = () => ({ x: 100, y: 0, width: 20, height: 24 });
+
+  assert.equal(tray.isPointerOverIcon({ x: 90, y: 10 }), false);
+  assert.equal(tray.isPointerOverIcon({ x: 110, y: 10 }), true);
+  tray.handlers['mouse-enter']();
+  assert.equal(tray.isPointerOverIcon({ x: 900, y: 10 }), true); // Secondary display.
+  tray.handlers['mouse-leave']();
+  assert.equal(tray.isPointerOverIcon({ x: 90, y: 10 }), false);
+});
+
+test('a canceled macOS tray press cannot reuse its blur for the next click', () => {
+  const calls = trayCalls();
+  const electron = fakeTrayElectron(calls);
+  electron.screen = { getCursorScreenPoint: () => ({ x: 100, y: 10 }) };
+  electron.nativeImage.createFromPath = () => ({ resize: () => ({ setTemplateImage() {} }) });
+  let recentBlur = true;
+  const toggles = [];
+  const tray = createTray({
+    electron,
+    platform: 'darwin',
+    onMouseDown: () => {
+      const matched = recentBlur;
+      recentBlur = false;
+      return matched;
+    },
+    onCancelMouseDown: () => { recentBlur = false; },
+    onToggle: (_tray, _point, _visible, matched) => toggles.push(matched)
+  });
+
+  tray.handlers['mouse-enter']();
+  tray.handlers['mouse-down']();
+  recentBlur = true; // Blur from the first press arrives before it is canceled.
+  tray.handlers['mouse-leave']();
+  tray.handlers['mouse-enter']();
+  tray.handlers['mouse-down']();
+  tray.handlers['mouse-up']();
+  tray.handlers.click({}, {}, {});
+  assert.deepEqual(toggles, [false]);
+});
+
+test('Linux tray exports current menu state and skips unchanged D-Bus rebuilds', () => {
+  const calls = trayCalls();
+  let state = {
+    activeCodexAccountId: 'one',
+    codexAccounts: [
+      { id: 'one', email: 'one@example.com' },
+      { id: 'two', email: 'two@example.com' }
+    ],
+    codexSwitching: false,
+    locale: 'en',
+    maskAccountEmails: false,
+    refreshing: false,
+    trayContent: 'tokens',
+    trayMode: true,
+    viewEnabled: { project: true }
+  };
+  const tray = createTray({
+    electron: fakeTrayElectron(calls),
+    getMenuState: () => state,
+    onToggle() {},
+    platform: 'linux'
+  });
+
+  assert.equal(calls.contextMenus.length, 1);
+  assert.equal(calls.contextMenus[0].template[0].label, 'Refresh Now');
+  tray.refreshContextMenu();
+  assert.equal(calls.contextMenus.length, 1, 'unchanged menu state should not be exported again');
+
+  state = { ...state, refreshing: true };
+  tray.refreshContextMenu();
+  assert.equal(calls.contextMenus.length, 2);
+  assert.equal(calls.contextMenus[1].template[0].label, 'Refreshing…');
+  assert.equal(calls.contextMenus[1].template[0].enabled, false);
+
+  state = { ...state, refreshing: false };
+  tray.refreshContextMenu();
+  assert.equal(calls.contextMenus.length, 3);
+  assert.equal(calls.contextMenus[2].template[0].label, 'Refresh Now');
+  assert.equal(calls.contextMenus[2].template[0].enabled, true);
+
+  state = { ...state, codexSwitching: true };
+  tray.refreshContextMenu();
+  assert.equal(calls.contextMenus.length, 4);
+  assert.equal(calls.contextMenus[3].template[2].submenu.every((item) => item.enabled === false), true);
+
+  state = { ...state, activeCodexAccountId: 'two', codexSwitching: false };
+  tray.refreshContextMenu();
+  assert.equal(calls.contextMenus.length, 5);
+  assert.deepEqual(
+    calls.contextMenus[4].template[2].submenu.map((item) => item.checked),
+    [false, true]
+  );
+
+  state = {
+    ...state,
+    activeCodexAccountId: 'three',
+    codexAccounts: [
+      { id: 'one', email: 'one@example.com' },
+      { id: 'three', email: 'three@example.com' }
+    ],
+    maskAccountEmails: true,
+    viewEnabled: { project: false }
+  };
+  tray.refreshContextMenu();
+  assert.equal(calls.contextMenus.length, 6);
+  const settingsMenu = calls.contextMenus[5].template;
+  assert.equal(
+    settingsMenu[1].submenu.find((item) => item.label === 'Projects').enabled,
+    false
+  );
+  assert.doesNotMatch(JSON.stringify(settingsMenu[2]), /one@example\.com|three@example\.com|two@example\.com/);
+  assert.deepEqual(settingsMenu[2].submenu.map((item) => item.checked), [false, true]);
+
+  tray.destroyed = true;
+  state = { ...state, refreshing: true };
+  tray.refreshContextMenu();
+  assert.equal(calls.contextMenus.length, 6);
+});
+
+test('Windows tray keeps building its menu when right-clicked', () => {
+  const calls = trayCalls();
+  let state = { refreshing: false, trayContent: 'tokens', trayMode: true };
+  const tray = createTray({
+    electron: fakeTrayElectron(calls),
+    getMenuState: () => state,
+    onToggle() {},
+    platform: 'win32'
+  });
+
+  assert.equal(calls.contextMenus.length, 0);
+  tray.refreshContextMenu();
+  assert.equal(calls.contextMenus.length, 0);
+
+  state = { ...state, refreshing: true };
+  tray.handlers['right-click']();
+  assert.equal(calls.popups.length, 1);
+  assert.equal(calls.popups[0].template[0].label, 'Refreshing…');
+});
+
+test('Linux tray re-exports the checked window presentation after a menu action', () => {
+  const calls = trayCalls();
+  let state = {
+    locale: 'en',
+    trayContent: 'tokens',
+    trayMode: false,
+    windowBehavior: 'floating'
+  };
+  createTray({
+    electron: fakeTrayElectron(calls),
+    getMenuState: () => state,
+    onSetWindowPresentation(value) {
+      state = {
+        ...state,
+        trayMode: value === 'tray',
+        ...(value === 'tray' ? {} : { windowBehavior: value })
+      };
+    },
+    onToggle() {},
+    platform: 'linux'
+  });
+
+  const presentationItems = calls.contextMenus[0].template
+    .find((item) => item.label === 'Window Presentation').submenu;
+  assert.deepEqual(presentationItems.map((item) => item.checked), [false, true, false, false]);
+
+  presentationItems.find((item) => item.label === 'Normal Window').click();
+
+  assert.equal(calls.contextMenus.length, 2);
+  const refreshedItems = calls.contextMenus[1].template
+    .find((item) => item.label === 'Window Presentation').submenu;
+  assert.deepEqual(refreshedItems.map((item) => item.checked), [false, false, true, false]);
+});
+
+test('tray menu actions publish both in-flight transitions', async () => {
+  let inFlight = false;
+  let finish;
+  const published = [];
+  const result = runTrayMenuAction({
+    setInFlight: (value) => { inFlight = value; },
+    refreshContextMenu: () => published.push(inFlight),
+    action: () => new Promise((resolve) => { finish = resolve; })
+  });
+
+  assert.equal(inFlight, true);
+  assert.deepEqual(published, [true]);
+  finish('done');
+  assert.equal(await result, 'done');
+  assert.equal(inFlight, false);
+  assert.deepEqual(published, [true, false]);
+});
+
+test('tray menu actions clear in-flight state after failure', async () => {
+  let inFlight = false;
+  const published = [];
+
+  await assert.rejects(
+    runTrayMenuAction({
+      setInFlight: (value) => { inFlight = value; },
+      refreshContextMenu: () => published.push(inFlight),
+      action: async () => { throw new Error('failed'); }
+    }),
+    /failed/
+  );
+  assert.equal(inFlight, false);
+  assert.deepEqual(published, [true, false]);
+});
+
+test('tray context menu complements the primary click with useful commands', () => {
+  const calls = [];
+  const template = buildTrayMenuTemplate({
+    state: { appVersion: '0.27.0', trayContent: 'both', trayMode: true, windowBehavior: 'floating' },
+    onRefresh: () => calls.push(['refresh']),
+    onOpenView: (value) => calls.push(['view', value]),
+    onSetTrayContent: (value) => calls.push(['content', value]),
+    onSetWindowPresentation: (value) => calls.push(['presentation', value]),
+    onOpenSettings: () => calls.push(['settings']),
+    onQuit: () => calls.push(['quit'])
+  });
+
+  assert.deepEqual(template.map((item) => item.label || item.type), [
+    'Refresh Now', 'Open View', 'separator', 'Tray Display', 'Window Presentation', 'separator', 'Version 0.27.0', 'Settings…', 'Restart without plugins', 'Quit Token Monitor'
+  ]);
+  assert.equal(template.some((item) => item.label === 'Show / Hide'), false);
+  assert.equal(template[3].submenu.find((item) => item.label === 'Today Tokens + Cost').checked, true);
+  assert.equal(template[3].submenu.find((item) => item.label === 'Live rate (tok/s)').checked, false);
+  assert.equal(template[4].submenu.find((item) => item.label === 'Tray Popover').checked, true);
+
+  template[0].click();
+  template[1].submenu.find((item) => item.label === 'Projects').click();
+  template[3].submenu.find((item) => item.label === 'App Icon Only').click();
+  template[4].submenu.find((item) => item.label === 'Desktop Pinned').click();
+  assert.equal(template[6].enabled, false);
+  template[7].click();
+  template[9].click();
+  assert.deepEqual(calls, [
+    ['refresh'], ['view', 'project'], ['content', 'icon'], ['presentation', 'desktop'], ['settings'], ['quit']
+  ]);
+});
+
+test('monthly tray menu presets are selectable radio items with exactly one checked mode', () => {
+  const monthlyItems = [
+    ['tokensMonth', 'Tokens This Month'],
+    ['costMonth', 'Cost This Month'],
+    ['bothMonth', 'Tokens + Cost This Month']
+  ];
+  for (const [selectedMode, selectedLabel] of monthlyItems) {
+    const calls = [];
+    const template = buildTrayMenuTemplate({
+      state: { trayContent: selectedMode },
+      onSetTrayContent: mode => calls.push(mode)
+    });
+    const { submenu } = template.find(item => item.label === 'Tray Display');
+    assert.deepEqual(submenu.filter(item => item.checked).map(item => item.label), [selectedLabel], selectedMode);
+    for (const [mode, label] of monthlyItems) {
+      const item = submenu.find(entry => entry.label === label);
+      assert.ok(item, label);
+      assert.equal(item.type, 'radio', label);
+      assert.equal(item.checked, mode === selectedMode, label);
+      item.click();
+    }
+    assert.deepEqual(calls, monthlyItems.map(([mode]) => mode), selectedMode);
+  }
+});
+
+test('monthly tray menu labels are localized in every supported language', async (t) => {
+  const keys = ['tokensMonth', 'costMonth', 'bothMonth'].map(mode => `trayMenu.content.${mode}`);
+  for (const { value: locale } of LANGUAGE_OPTIONS.filter(option => option.value !== 'auto')) {
+    await t.test(locale, () => {
+      assert.deepEqual(keys.filter(key => !MESSAGES[locale][key]), [], `${locale}: missing monthly labels`);
+      const template = buildTrayMenuTemplate({
+        state: { trayContent: 'tokensMonth' },
+        translate: (key, params) => translate(locale, key, params)
+      });
+      const { submenu } = template.find(item => item.label === translate(locale, 'trayMenu.trayDisplay'));
+      for (const key of keys) {
+        const label = MESSAGES[locale][key];
+        assert.equal(submenu.filter(item => item.label === label).length, 1, `${locale}: ${key}`);
+        if (locale !== 'en') assert.notEqual(label, MESSAGES.en[key], `${locale}: ${key} must not fall back to English`);
+      }
+    });
+  }
+});
+
+test('tray context menu offers edge dock controls only where the dock is supported', () => {
+  const patches = [];
+  const unsupported = buildTrayMenuTemplate({ state: { trayContent: 'tokens', windowBehavior: 'floating' } });
+  assert.equal(unsupported.some((item) => item.label === 'Edge Dock'), false);
+
+  const template = buildTrayMenuTemplate({
+    state: { trayContent: 'tokens', windowBehavior: 'floating', edgeDockSupported: true, edgeDockEnabled: false, edgeDockMode: 'always', edgeDockSide: 'left' },
+    onSetEdgeDock: (patch) => patches.push(patch)
+  });
+  const dock = template.find((item) => item.label === 'Edge Dock');
+  assert.ok(dock);
+  assert.equal(template.indexOf(dock), template.findIndex((item) => item.label === 'Window Presentation') + 1);
+  const [show, , autoHide, always, exceptFullScreen, , left, right] = dock.submenu;
+  assert.equal(show.checked, false);
+  assert.equal(always.checked, true);
+  assert.equal(autoHide.checked, false);
+  assert.equal(exceptFullScreen.label, 'Fullscreen auto-hide');
+  assert.equal(exceptFullScreen.checked, false);
+  assert.equal(left.checked, true);
+  show.click();
+  autoHide.click();
+  exceptFullScreen.click();
+  right.click();
+  assert.deepEqual(patches, [
+    { edgeDockEnabled: true },
+    { edgeDockMode: 'autoHide' },
+    { edgeDockMode: 'alwaysExceptFullScreen' },
+    { edgeDockSide: 'right' }
+  ]);
+});
+
+test('tray context menu exposes refresh progress and current window mode', () => {
+  const template = buildTrayMenuTemplate({
+    state: { refreshing: true, trayContent: 'tokens', trayMode: false, windowBehavior: 'desktop' }
+  });
+
+  assert.equal(template[0].label, 'Refreshing…');
+  assert.equal(template[0].enabled, false);
+  assert.equal(template[4].submenu.find((item) => item.label === 'Desktop Pinned').checked, true);
+  assert.equal(template[4].submenu.find((item) => item.label === 'Tray Popover').checked, false);
+});
+
+test('tray context menu uses the selected locale for every visible level', () => {
+  const template = buildTrayMenuTemplate({
+    state: { appVersion: '0.27.0', trayContent: 'tokens', trayMode: true, windowBehavior: 'floating' },
+    translate: (key, params) => translate('zh-TW', key, params)
+  });
+
+  assert.deepEqual(template.map((item) => item.label || item.type), [
+    '立即重新整理', '開啟頁面', 'separator', '托盤顯示', '視窗呈現方式', 'separator', '版本 0.27.0', '設定…', '不載入外掛並重新啟動', '結束 Token Monitor'
+  ]);
+  assert.equal(template[1].submenu[0].label, '主頁');
+  assert.equal(template[3].submenu[0].label, '今日 Tokens');
+  assert.equal(template[3].submenu.find((item) => item.label === '即時速度（tok/s）').checked, false);
+  assert.deepEqual(template[3].submenu.slice(-3).map((item) => item.label), [
+    '最低剩餘額度條',
+    '僅顯示 App 圖示',
+    '自訂'
+  ]);
+  assert.equal(template[4].submenu[0].label, '托盤彈出視窗');
+  assert.equal(template[4].submenu.at(-1).label, '固定於桌面');
+});
+
+test('tray context menu shows the macOS Quit shortcut on macOS only', () => {
+  const darwin = buildTrayMenuTemplate({
+    state: { appVersion: '0.58.0', trayContent: 'tokens', trayMode: true },
+    platform: 'darwin'
+  });
+  const quit = darwin.at(-1);
+  assert.equal(quit.label, 'Quit Token Monitor');
+  assert.equal(quit.accelerator, 'Command+Q');
+  // Scoped to macOS because that is where the shortcut is worth echoing, not
+  // because a menu accelerator elsewhere would be unsafe: menu accelerators are
+  // local shortcuts, so they cannot take a key from another application.
+  for (const platform of ['win32', 'linux']) {
+    const template = buildTrayMenuTemplate({
+      state: { appVersion: '0.58.0', trayContent: 'tokens', trayMode: true },
+      platform
+    });
+    assert.equal(template.at(-1).accelerator, undefined);
+  }
+});
+
+test('tray context menu disables unavailable views', () => {
+  const template = buildTrayMenuTemplate({
+    state: {
+      trayContent: 'tokens',
+      trayMode: true,
+      viewEnabled: { project: false, limits: false, trends: false }
+    }
+  });
+
+  assert.equal(template[1].submenu.find((item) => item.label === 'Projects').enabled, false);
+  assert.equal(template[1].submenu.find((item) => item.label === 'Sessions').enabled, true);
+});
+
+test('tray context menu switches between enabled Codex accounts', () => {
+  const calls = [];
+  const template = buildTrayMenuTemplate({
+    state: {
+      trayContent: 'tokens',
+      trayMode: true,
+      codexAccounts: [
+        { id: 'one', email: 'primary.user@example.com', workspaceLabel: 'Personal' },
+        { id: 'two', email: 'power@example.com', workspaceLabel: 'Team' }
+      ],
+      activeCodexAccountId: 'one',
+      maskAccountEmails: true
+    },
+    onSwitchCodexAccount: (id) => calls.push(id)
+  });
+
+  assert.equal(template[2].label, 'Codex · p***r@example.com · Personal');
+  assert.deepEqual(template[2].submenu.map((item) => [item.label, item.checked]), [
+    ['p***r@example.com · Personal', true],
+    ['p***r@example.com · Team', false]
+  ]);
+  template[2].submenu[0].click();
+  template[2].submenu[1].click();
+  assert.deepEqual(calls, ['two']);
+});
+
+test('tray Codex account labels keep unique emails compact and disambiguate duplicate emails', () => {
+  const unique = buildTrayMenuTemplate({
+    state: {
+      trayContent: 'tokens',
+      trayMode: true,
+      codexAccounts: [
+        { id: 'one', email: 'one@example.com', workspaceLabel: 'Personal' },
+        { id: 'two', email: 'two@example.com', workspaceLabel: 'Team' }
+      ],
+      activeCodexAccountId: 'one'
+    }
+  });
+  assert.deepEqual(unique[2].submenu.map((item) => item.label), [
+    'one@example.com',
+    'two@example.com'
+  ]);
+
+  const duplicate = buildTrayMenuTemplate({
+    state: {
+      trayContent: 'tokens',
+      trayMode: true,
+      codexAccounts: [
+        { id: 'personal', email: 'member@example.com', workspaceKind: 'personal' },
+        { id: 'team', email: 'member@example.com', workspaceLabel: 'Team' }
+      ],
+      activeCodexAccountId: 'personal'
+    },
+    translate: (key, params) => translate('zh-TW', key, params)
+  });
+  assert.deepEqual(duplicate[2].submenu.map((item) => item.label), [
+    'member@example.com · 個人',
+    'member@example.com · Team'
+  ]);
+
+  const duplicateWorkspaceNames = buildTrayMenuTemplate({
+    state: {
+      trayContent: 'tokens',
+      trayMode: true,
+      codexAccounts: [
+        {
+          id: 'team-one',
+          email: 'member@example.com',
+          workspaceLabel: 'Acme Team',
+          accountKey: 'sha256:abcdef123456'
+        },
+        {
+          id: 'team-two',
+          email: 'member@example.com',
+          workspaceLabel: 'Acme Team',
+          accountKey: 'sha256:abcdef654321'
+        }
+      ],
+      activeCodexAccountId: 'team-one'
+    }
+  });
+  assert.deepEqual(duplicateWorkspaceNames[2].submenu.map((item) => item.label), [
+    'member@example.com · Acme Team · #abcdef1',
+    'member@example.com · Acme Team · #abcdef6'
+  ]);
+});
+
+test('tray context menu hides Codex switching until two accounts are enabled', () => {
+  const template = buildTrayMenuTemplate({
+    state: {
+      trayContent: 'tokens',
+      trayMode: true,
+      codexAccounts: [{ id: 'one', email: 'one@example.com' }],
+      activeCodexAccountId: 'one'
+    }
+  });
+
+  assert.equal(template.some((item) => item.label?.startsWith('Codex Account')), false);
+});
+
+test('Codex tray accounts use the same stable label order as Limits', () => {
+  const accounts = [
+    { id: 'gamma', email: 'gamma@example.com' },
+    { id: 'beta', email: 'beta@example.com' },
+    { id: 'alpha', email: 'alpha@example.com' }
+  ];
+
+  assert.deepEqual(
+    sortCodexAccountsForDisplay(accounts).map((account) => account.id),
+    ['alpha', 'beta', 'gamma']
+  );
+  assert.deepEqual(accounts.map((account) => account.id), ['gamma', 'beta', 'alpha']);
+});
+
+test('Codex tray account selection waits for a post-switch local provider snapshot', () => {
+  assert.deepEqual(reconcileCodexAccountSelection({
+    detectedAccountId: 'new',
+    detectedAt: '2026-07-14T03:00:00.000Z',
+    pendingAccountId: 'new',
+    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
+  }), { activeAccountId: 'new', pendingAccountId: 'new' });
+
+  assert.deepEqual(reconcileCodexAccountSelection({
+    detectedAccountId: 'old',
+    detectedAt: '2026-07-14T03:00:00.000Z',
+    pendingAccountId: 'new',
+    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
+  }), { activeAccountId: 'new', pendingAccountId: 'new' });
+
+  assert.deepEqual(reconcileCodexAccountSelection({
+    detectedAccountId: '',
+    pendingAccountId: 'new',
+    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
+  }), { activeAccountId: 'new', pendingAccountId: 'new' });
+
+  assert.deepEqual(reconcileCodexAccountSelection({
+    detectedAccountId: 'new',
+    detectedAt: '2026-07-14T03:02:00.000Z',
+    pendingAccountId: 'new',
+    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
+  }), { activeAccountId: 'new', pendingAccountId: '' });
+
+  assert.deepEqual(reconcileCodexAccountSelection({
+    detectedAccountId: 'other',
+    detectedAt: '2026-07-14T03:02:00.000Z',
+    pendingAccountId: 'new',
+    pendingSince: Date.parse('2026-07-14T03:01:00.000Z')
+  }), { activeAccountId: 'other', pendingAccountId: '' });
+});
+
+test('tray main-process actions surface refresh errors and expand a collapsed bubble before tray mode', () => {
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const refreshAction = source.slice(
+    source.indexOf('async function refreshFromTray'),
+    source.indexOf('function setTrayContentFromMenu')
+  );
+  const codexSwitchAction = source.slice(
+    source.indexOf('async function switchCodexAccountFromTray'),
+    source.indexOf('function configureWindowToggleShortcut')
+  );
+  assert.match(refreshAction, /catch \(error\)[\s\S]*?showTrayRefreshError\(error\?\.message \|\| error\)/);
+  assert.match(refreshAction, /return runTrayMenuAction\(\{[\s\S]*?trayRefreshInFlight = value;[\s\S]*?refreshContextMenu: refreshTrayContextMenu/);
+  assert.match(codexSwitchAction, /return runTrayMenuAction\(\{[\s\S]*?trayCodexSwitchInFlight = value;[\s\S]*?refreshContextMenu: refreshTrayContextMenu/);
+  assert.match(source, /if \(value === 'tray'\)[\s\S]*?saveSettings\(\);\s*syncFloatingBubbleAvailability\(\);\s*enterTrayMode\(\);/);
+});
+
+test('usage tray icon picks the top token client for day, month and total token modes', () => {
+  assert.equal(pickUsageTrayIconId(stats, 'tokens', ['claude', 'codex']), 'codex');
+  assert.equal(pickUsageTrayIconId(stats, 'both', ['claude', 'codex']), 'codex');
+  assert.equal(pickUsageTrayIconId(stats, 'tokensMonth', ['claude', 'codex']), 'codex');
+  assert.equal(pickUsageTrayIconId(stats, 'bothMonth', ['claude', 'codex']), 'codex');
+  assert.equal(pickUsageTrayIconId(stats, 'tokensAll', ['claude', 'codex']), 'claude');
+  assert.equal(pickUsageTrayIconId(stats, 'bothAll', ['claude', 'codex']), 'claude');
+});
+
+test('usage tray icon picks the top cost client for day, month and total cost modes', () => {
+  assert.equal(pickUsageTrayIconId(stats, 'cost', ['claude', 'codex']), 'claude');
+  assert.equal(pickUsageTrayIconId(stats, 'costMonth', ['claude', 'codex']), 'claude');
+  assert.equal(pickUsageTrayIconId(stats, 'costAll', ['claude', 'codex']), 'codex');
+});
+
+test('usage tray icon falls back to token usage when cost breakdown is unavailable', () => {
+  assert.equal(
+    pickUsageTrayIconId({ periods: { today: { clients: { claude: 3, codex: 9 } } } }, 'cost', ['claude', 'codex']),
+    'codex'
+  );
+});
+
+test('usage tray icon leaves pure icon and bar modes to their existing icon paths', () => {
+  assert.equal(pickUsageTrayIconId(stats, 'icon', ['claude', 'codex']), null);
+  assert.equal(pickUsageTrayIconId(stats, 'bars', ['claude', 'codex']), null);
+  assert.equal(pickUsageTrayIconId(stats, 'barsSession', ['claude', 'codex']), null);
+});
+
+test('usage tray icon returns null when the top client has no available icon', () => {
+  assert.equal(
+    pickUsageTrayIconId({ periods: { today: { clients: { unknown: 20, codex: 10 } } } }, 'tokens', ['codex']),
+    null
+  );
+});
+
+test('macOS templates provider icons unless the colored badge is enabled', () => {
+  for (const id of ['bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'limitsAllSessions', 'custom']) {
+    assert.equal(isGeneratedTrayIconMode(id), true, `${id} should be classified as a generated image`);
+    assert.equal(shouldUseTemplateTrayIcon(id, 'darwin', false), true, `${id} should follow the menu bar tint`);
+    assert.equal(shouldUseTemplateTrayIcon(id, 'darwin', true), true, `${id} should stay a generated template`);
+  }
+  assert.equal(isBarsTrayIconMode('limitsAllSessions'), false);
+  assert.equal(isBarsTrayIconMode('barsWeekly'), true);
+  for (const id of ['codex', 'antigravity', 'claude']) {
+    assert.equal(isGeneratedTrayIconMode(id), false, `${id} should be classified as a provider image`);
+    assert.equal(shouldUseTemplateTrayIcon(id, 'darwin', false), true, `${id} should preserve the default template behavior`);
+    assert.equal(shouldUseTemplateTrayIcon(id, 'darwin', true), false, `${id} should preserve its colored badge`);
+  }
+  assert.equal(shouldUseTemplateTrayIcon('bars', 'win32'), false);
+  assert.equal(shouldUseTemplateTrayIcon('bars', 'linux'), false);
+});
+
+test('tray can show the first two configured session quotas as percentages', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        { provider: 'codex', status: 'ok', windows: [{ kind: 'session', remainingPercent: 57 }] },
+        { provider: 'claude', status: 'ok', windows: [{ kind: 'session', remainingPercent: 24 }] },
+        { provider: 'cursor', status: 'ok', windows: [{ kind: 'session', remainingPercent: 91 }] }
+      ]
+    }
+  };
+
+  assert.equal(
+    formatTrayText(limitStats, 'limitsAllSessions', 'USD', {
+      limitProviderOrder: 'claude,codex,cursor',
+      limitProviders: 'claude,codex,cursor',
+      showLimitUsed: false
+    }),
+    '24% · 57%'
+  );
+});
+
+test('configured session quota picks keep provider ids for icon rendering', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        { provider: 'codex', status: 'ok', windows: [{ kind: 'session', remainingPercent: 57 }] },
+        { provider: 'claude', status: 'ok', windows: [{ kind: 'session', remainingPercent: 24 }] },
+        { provider: 'cursor', status: 'ok', windows: [{ kind: 'session', remainingPercent: 91 }] }
+      ]
+    }
+  };
+
+  assert.deepEqual(
+    pickConfiguredSessionLimits(limitStats, {
+      limitProviderOrder: 'claude,codex,cursor',
+      limitProviders: 'claude,codex,cursor',
+      showLimitUsed: false
+    }).map((pick) => [pick.provider, pick.percent]),
+    [['claude', 24], ['codex', 57]]
+  );
+});
+
+test('tray session quota text falls back to one provider session and weekly windows', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        {
+          provider: 'codex',
+          status: 'ok',
+          windows: [
+            { kind: 'session', remainingPercent: 6, usedPercent: 94 },
+            { kind: 'weekly', remainingPercent: 1, usedPercent: 99 }
+          ]
+        },
+        { provider: 'claude', status: 'notConfigured', windows: [] }
+      ]
+    }
+  };
+
+  assert.equal(
+    formatTrayText(limitStats, 'limitsAllSessions', 'USD', {
+      limitProviderOrder: 'codex,claude',
+      limitProviders: 'codex,claude',
+      showLimitUsed: false
+    }),
+    '6% · 1%'
+  );
+  assert.equal(
+    formatTrayText(limitStats, 'limitsAllSessions', 'USD', {
+      limitProviderOrder: 'codex,claude',
+      limitProviders: 'codex,claude',
+      showLimitUsed: true
+    }),
+    '94% · 99%'
+  );
+});
+
+test('tray session quota text omits an unavailable weekly window', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        { provider: 'codex', status: 'ok', windows: [{ kind: 'session', remainingPercent: 6 }] }
+      ]
+    }
+  };
+
+  assert.equal(
+    formatTrayText(limitStats, 'limitsAllSessions', 'USD', {
+      limitProviderOrder: 'codex',
+      limitProviders: 'codex',
+      showLimitUsed: false
+    }),
+    '6%'
+  );
+});
+
+test('tray primary quota modes promote a weekly-only provider', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        { provider: 'codex', status: 'ok', windows: [{ kind: 'weekly', remainingPercent: 64, usedPercent: 36 }] }
+      ]
+    }
+  };
+
+  const [pick] = pickConfiguredLimitProviders(limitStats, {
+    limitProviderOrder: 'codex',
+    limitProviders: 'codex'
+  });
+  assert.equal(pick.primaryWindow.kind, 'weekly');
+  assert.equal(pick.secondaryWindow, null);
+  assert.equal(formatTrayText(limitStats, 'limitsAllSessions', 'USD', {
+    limitProviderOrder: 'codex',
+    limitProviders: 'codex',
+    showLimitUsed: false
+  }), '64%');
+  assert.equal(formatTrayText(limitStats, 'limitsAllSessions', 'USD', {
+    limitProviderOrder: 'codex',
+    limitProviders: 'codex',
+    showLimitUsed: true
+  }), '36%');
+});
+
+test('session bar mode falls back to weekly only when no session exists', () => {
+  const weeklyOnlyStats = {
+    limits: {
+      providers: [
+        { provider: 'codex', status: 'ok', windows: [{ kind: 'weekly', remainingPercent: 82 }] },
+        { provider: 'codex', status: 'ok', windows: [{ kind: 'weekly', remainingPercent: 4 }] }
+      ]
+    }
+  };
+  const mixedStats = {
+    limits: {
+      providers: [
+        { provider: 'codex', status: 'ok', windows: [{ kind: 'weekly', remainingPercent: 4 }] },
+        { provider: 'claude', status: 'ok', windows: [{ kind: 'session', remainingPercent: 90 }] }
+      ]
+    }
+  };
+
+  const weeklyPick = pickLimitProviderByKindPriority(weeklyOnlyStats, ['session', 'weekly']);
+  assert.equal(weeklyPick.provider, 'codex');
+  assert.equal(weeklyPick.primaryWindow.kind, 'weekly');
+  assert.equal(weeklyPick.primaryWindow.remainingPercent, 4);
+  assert.equal(weeklyPick.secondaryWindow, null);
+
+  const sessionPick = pickLimitProviderByKindPriority(mixedStats, ['session', 'weekly']);
+  assert.equal(sessionPick.provider, 'claude');
+  assert.equal(sessionPick.primaryWindow.kind, 'session');
+});
+
+test('configured provider account selection prefers session over fallback windows', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        { provider: 'codex', status: 'ok', accountLabel: 'weekly', windows: [{ kind: 'weekly', remainingPercent: 5 }] },
+        { provider: 'codex', status: 'ok', accountLabel: 'session', windows: [{ kind: 'session', remainingPercent: 80 }] }
+      ]
+    }
+  };
+
+  const [pick] = pickConfiguredLimitProviders(limitStats, {
+    limitProviderOrder: 'codex',
+    limitProviders: 'codex'
+  });
+  assert.equal(pick.providerRecord.accountLabel, 'session');
+  assert.equal(pick.primaryWindow.kind, 'session');
+});
+
+test('configured provider selection preserves an explicit empty filter', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        { provider: 'codex', status: 'ok', windows: [{ kind: 'weekly', remainingPercent: 25 }] }
+      ]
+    }
+  };
+
+  assert.deepEqual(pickConfiguredLimitProviders(limitStats, {
+    limitProviderOrder: [],
+    limitProviders: []
+  }), []);
+  assert.deepEqual(pickConfiguredLimitProviders(limitStats, {
+    limitProviderOrder: '',
+    limitProviders: ''
+  }), []);
+});
+
+test('compact provider windows preserve Claude session plus general weekly', () => {
+  const selection = compactLimitSelection({
+    provider: 'claude',
+    status: 'ok',
+    windows: [
+      { kind: 'session', remainingPercent: 70 },
+      { kind: 'weekly', remainingPercent: 80 },
+      { kind: 'weekly', label: 'Fable', remainingPercent: 5 }
+    ]
+  });
+
+  assert.equal(selection.primaryWindow.kind, 'session');
+  assert.equal(selection.secondaryWindow.remainingPercent, 80);
+  assert.equal(selection.secondaryWindow.label, undefined);
+});
+
+test('compact provider windows keep Codex main quotas ahead of named reserve quotas', () => {
+  const selection = compactLimitSelection({
+    provider: 'codex',
+    status: 'ok',
+    windows: [
+      { kind: 'session', remainingPercent: 70 },
+      { kind: 'weekly', remainingPercent: 80 },
+      { kind: 'session', label: 'Session', limitId: 'gpt-reserve', additional: true, remainingPercent: 10 },
+      { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, remainingPercent: 20 }
+    ]
+  });
+
+  assert.equal(selection.primaryWindow.kind, 'session');
+  assert.equal(selection.primaryWindow.label, undefined);
+  assert.equal(selection.secondaryWindow.kind, 'weekly');
+  assert.equal(selection.secondaryWindow.label, undefined);
+});
+
+test('compact Codex windows do not promote an additional session over a canonical weekly quota', () => {
+  const selection = compactLimitSelection({
+    provider: 'codex',
+    status: 'ok',
+    windows: [
+      { kind: 'weekly', remainingPercent: 80 },
+      { kind: 'session', label: '', limitId: 'gpt-reserve', additional: true, remainingPercent: 10 }
+    ]
+  });
+
+  assert.equal(selection.primaryWindow.kind, 'weekly');
+  assert.equal(selection.primaryWindow.label, undefined);
+  assert.equal(selection.secondaryWindow, null);
+});
+
+test('compact Codex windows do not use an additional weekly quota as a secondary window', () => {
+  const selection = compactLimitSelection({
+    provider: 'codex',
+    status: 'ok',
+    windows: [
+      { kind: 'session', remainingPercent: 70 },
+      { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, remainingPercent: 20 }
+    ]
+  });
+
+  assert.equal(selection.primaryWindow.kind, 'session');
+  assert.equal(selection.primaryWindow.label, undefined);
+  assert.equal(selection.secondaryWindow, null);
+});
+
+test('compact Codex selection ignores providers with additional quota windows only', () => {
+  assert.equal(compactLimitSelection({
+    provider: 'codex',
+    status: 'ok',
+    windows: [
+      { kind: 'session', label: 'Session', limitId: 'gpt-reserve', additional: true, remainingPercent: 10 },
+      { kind: 'weekly', label: 'Weekly', limitId: 'gpt-reserve', additional: true, remainingPercent: 20 }
+    ]
+  }), null);
+});
+
+test('compact provider windows show Volcengine 5-hour plus Daily before broader windows', () => {
+  const selection = compactLimitSelection({
+    provider: 'volcengine',
+    status: 'ok',
+    windows: [
+      { kind: 'session', remainingPercent: 70 },
+      { kind: 'daily', remainingPercent: 60 },
+      { kind: 'weekly', remainingPercent: 50 },
+      { kind: 'billing', remainingPercent: 40 }
+    ]
+  });
+
+  assert.equal(selection.primaryWindow.kind, 'session');
+  assert.equal(selection.secondaryWindow.kind, 'daily');
+  assert.equal(selection.primaryPercent, 70);
+  assert.equal(selection.secondaryPercent, 60);
+});
+
+test('compact provider windows use billing as a final fallback and ignore non-meter rows', () => {
+  const selection = compactLimitSelection({
+    provider: 'cursor',
+    status: 'ok',
+    windows: [
+      { kind: 'billing', label: 'Total', remainingPercent: 72 },
+      { kind: 'billing', label: 'API', remainingPercent: 4 },
+      { kind: 'billing', label: 'Credits', remainingPercent: 1, showMeter: false }
+    ]
+  });
+
+  assert.equal(selection.primaryWindow.label, 'Total');
+  assert.equal(selection.secondaryWindow, null);
+});
+
+test('compact provider windows choose the lowest pool when no aggregate exists', () => {
+  const selection = compactLimitSelection({
+    provider: 'antigravity',
+    status: 'ok',
+    windows: [
+      { kind: 'weekly', label: 'Gemini Pro', remainingPercent: 72 },
+      { kind: 'weekly', label: 'Gemini Flash', remainingPercent: 0 },
+      { kind: 'weekly', label: 'Claude', remainingPercent: 35 }
+    ]
+  });
+
+  assert.equal(selection.primaryWindow.label, 'Gemini Flash');
+  assert.equal(selection.primaryWindow.remainingPercent, 0);
+});
+
+test('compact window policy covers every supported limits provider shape', () => {
+  const sessionWeekly = ['claude', 'codex', 'minimax', 'zai', 'zaiteam', 'volcengine', 'kimi', 'ollama'];
+  const billing = ['cursor', 'mimo', 'grok', 'copilot', 'kiro', 'qoder'];
+
+  for (const provider of sessionWeekly) {
+    const selection = compactLimitSelection({
+      provider,
+      status: 'ok',
+      windows: [{ kind: 'session', remainingPercent: 70 }, { kind: 'weekly', remainingPercent: 60 }]
+    });
+    assert.equal(selection.primaryWindow.kind, 'session', provider);
+    assert.equal(selection.secondaryWindow.kind, 'weekly', provider);
+  }
+
+  for (const provider of billing) {
+    const selection = compactLimitSelection({
+      provider,
+      status: 'ok',
+      windows: [{ kind: 'billing', remainingPercent: 55 }]
+    });
+    assert.equal(selection.primaryWindow.kind, 'billing', provider);
+    assert.equal(selection.secondaryWindow, null, provider);
+  }
+
+  const antigravity = compactLimitSelection({
+    provider: 'antigravity',
+    status: 'ok',
+    windows: [{ kind: 'weekly', label: 'Gemini', remainingPercent: 45 }]
+  });
+  assert.equal(antigravity.primaryWindow.kind, 'weekly');
+  assert.equal(antigravity.secondaryWindow, null);
+
+  const opencode = compactLimitSelection({
+    provider: 'opencode',
+    status: 'ok',
+    windows: [{ kind: 'session', remainingPercent: 40 }, { kind: 'weekly', remainingPercent: 30 }, { kind: 'billing', remainingPercent: 20 }]
+  });
+  assert.equal(opencode.primaryWindow.kind, 'session');
+  assert.equal(opencode.secondaryWindow.kind, 'weekly');
+
+  assert.equal(compactLimitSelection({ provider: 'deepseek', status: 'ok', windows: [] }), null);
+});
+
+test('worst-provider resolver returns the window it actually selected', () => {
+  const weekly = { kind: 'weekly', remainingPercent: 12 };
+  const limitStats = {
+    limits: {
+      providers: [
+        { provider: 'claude', status: 'ok', windows: [{ kind: 'session', remainingPercent: 60 }, weekly] },
+        { provider: 'codex', status: 'ok', windows: [{ kind: 'session', remainingPercent: 30 }] }
+      ]
+    }
+  };
+
+  const pick = pickWorstLimitProvider(limitStats, { kind: 'weekly' });
+  assert.equal(pick.provider, 'claude');
+  assert.equal(pick.selectedWindow, weekly);
+  assert.equal(pick.secondaryWindow, weekly);
+});
+
+test('kind-specific resolver can select billing from a mixed-window provider', () => {
+  const billing = { kind: 'billing', label: 'Monthly', remainingPercent: 9 };
+  const pick = pickWorstLimitProvider({
+    limits: {
+      providers: [{
+        provider: 'opencode',
+        status: 'ok',
+        windows: [
+          { kind: 'session', remainingPercent: 80 },
+          { kind: 'weekly', remainingPercent: 70 },
+          billing
+        ]
+      }]
+    }
+  }, { kind: 'billing' });
+
+  assert.equal(pick.selectedWindow, billing);
+  assert.equal(pick.remaining, 9);
+});
+
+test('the exhaustion gate stays on the dock rail; tray picks keep their own windows', () => {
+  const monthly = { kind: 'billing', label: 'Monthly', remainingPercent: 0 };
+  const limitStats = {
+    limits: {
+      providers: [{
+        provider: 'opencode',
+        status: 'ok',
+        windows: [
+          { kind: 'session', remainingPercent: 80 },
+          monthly
+        ]
+      }]
+    }
+  };
+
+  // The selection still reports the gate — the dock rail reads it — but the
+  // default tray pick deliberately keeps its own primary/secondary reading:
+  // the two-lane icon cannot draw a billing gate, and the tray's job is the
+  // tightest headline pool, not the account verdict.
+  const pick = pickWorstLimitProvider(limitStats);
+  assert.equal(pick.exhaustedWindow, monthly);
+  assert.equal(pick.remaining, 80);
+
+  // A kind-pinned pick stays on its own pool — the pin is a request for that
+  // window's number, not for the account verdict.
+  const pinned = pickWorstLimitProvider(limitStats, { kind: 'session' });
+  assert.equal(pinned.remaining, 80);
+
+  // Scoped or money windows still never gate: a legacy spend row (no metric)
+  // and a model-scoped weekly at 0% both leave the default pick alone.
+  const legacySpend = pickWorstLimitProvider({
+    limits: {
+      providers: [{
+        provider: 'codex',
+        status: 'ok',
+        windows: [
+          { kind: 'session', remainingPercent: 80 },
+          { kind: 'billing', label: 'Usage credits', usedPercent: 100 }
+        ]
+      }]
+    }
+  });
+  assert.equal(legacySpend.remaining, 80);
+
+  const scoped = pickWorstLimitProvider({
+    limits: {
+      providers: [{
+        provider: 'claude',
+        status: 'ok',
+        windows: [
+          { kind: 'weekly', label: 'Weekly', remainingPercent: 80 },
+          { kind: 'weekly', label: 'Fable', remainingPercent: 0 }
+        ]
+      }]
+    }
+  });
+  assert.equal(scoped.remaining, 80);
+
+  // A lone scoped pool also cannot become the exhaustion gate — but note it
+  // still lands in the secondary slot, and the default pick reports the
+  // tighter of primary/secondary by design (pre-existing semantics, not the
+  // new gate), so the figure is 0% either way.
+  const scopedOnly = pickWorstLimitProvider({
+    limits: {
+      providers: [{
+        provider: 'claude',
+        status: 'ok',
+        windows: [
+          { kind: 'session', remainingPercent: 80 },
+          { kind: 'weekly', label: 'Fable', remainingPercent: 0 }
+        ]
+      }]
+    }
+  });
+  assert.equal(scopedOnly.remaining, 0);
+  assert.equal(scopedOnly.exhaustedWindow, null);
+
+  // Provider-declared additional pools (Factory Core/Premium) never gate,
+  // whatever their kind. The default pick stays on the session headline
+  // because billing windows never join the primary/secondary pair.
+  const additionalPool = pickWorstLimitProvider({
+    limits: {
+      providers: [{
+        provider: 'factory',
+        status: 'ok',
+        windows: [
+          { kind: 'session', remainingPercent: 80 },
+          { kind: 'billing', label: 'Monthly', remainingPercent: 50 },
+          { kind: 'billing', label: 'Core Monthly', remainingPercent: 0, additional: true }
+        ]
+      }]
+    }
+  });
+  assert.equal(additionalPool.remaining, 80);
+  assert.equal(additionalPool.exhaustedWindow, null);
+});
+
+test('tray session quota text keeps lowest-remaining account selection when showing used percent', () => {
+  const limitStats = {
+    limits: {
+      providers: [
+        { provider: 'codex', status: 'ok', accountLabel: 'main', windows: [{ kind: 'session', remainingPercent: 80 }] },
+        { provider: 'codex', status: 'ok', accountLabel: 'work', windows: [{ kind: 'session', remainingPercent: 30 }] },
+        { provider: 'claude', status: 'ok', windows: [{ kind: 'session', remainingPercent: 40 }] }
+      ]
+    }
+  };
+
+  assert.equal(
+    formatTrayText(limitStats, 'limitsAllSessions', 'USD', {
+      limitProviderOrder: 'codex,claude',
+      limitProviders: 'codex,claude',
+      showLimitUsed: true
+    }),
+    '70% · 60%'
+  );
+});
+
+test('tray cost text uses the selected display currency', () => {
+  assert.equal(formatTrayText({ periods: { today: { costUsd: 1, totalTokens: 12_000 } } }, 'cost'), '$1.0000');
+  assert.equal(formatTrayText({ periods: { today: { costUsd: 1, totalTokens: 12_000 } } }, 'cost', 'TWD'), 'NT$31.50');
+  assert.equal(formatTrayText({ periods: { today: { costUsd: 1, totalTokens: 12_000 } } }, 'both', 'HKD'), '12.0K · HK$7.80');
+});
+
+test('tray month modes use monthly token and cost totals', () => {
+  const monthlyStats = { periods: { month: { costUsd: 12, totalTokens: 345_000 } } };
+  assert.equal(formatTrayText(monthlyStats, 'tokensMonth'), '345.0K');
+  assert.equal(formatTrayText(monthlyStats, 'costMonth'), '$12.00');
+  assert.equal(formatTrayText(monthlyStats, 'bothMonth', 'HKD'), '345.0K · HK$93.60');
+});
+
+test('tray token text follows the shared localized unit setting', () => {
+  assert.equal(
+    formatTrayText(
+      { periods: { today: { totalTokens: 12_000, costUsd: 1 } } },
+      'both',
+      'HKD',
+      { compactTokenUnits: 'localized', locale: 'zh-TW' }
+    ),
+    '1.2萬 · HK$7.80'
+  );
+});
+
+test('live rate is a generated tray mode with no legacy token title', () => {
+  assert.equal(isGeneratedTrayIconMode('liveTokenRate'), true);
+  assert.equal(formatTrayText({ periods: { today: { totalTokens: 12_000 } } }, 'liveTokenRate'), '');
+});
+
+test('only macOS draws a tray title beside the icon', () => {
+  // main.js gates tray.setTitle() on darwin; Windows and Linux show the icon
+  // alone. The settings Live preview reads the
+  // same helper so it cannot promise text the platform will never render.
+  assert.equal(trayShowsTitle('darwin'), true);
+  assert.equal(trayShowsTitle('win32'), false);
+  assert.equal(trayShowsTitle('linux'), false);
+  assert.equal(trayShowsTitle(undefined), false);
+});
+
+test('every tray helper main.js destructures is actually exported', () => {
+  // main.js pulls its tray helpers off ./tray, which re-exports a chosen subset
+  // of ../shared/trayText. Adding a helper to the shared module and to main.js
+  // without widening that re-export leaves main.js holding undefined, and no
+  // test drives updateTrayDisplay(), so the suite stays green while the real
+  // tray throws on every refresh.
+  const trayModule = require('../../src/electron/tray');
+  const mainSource = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'src', 'electron', 'main.js'),
+    'utf8'
+  );
+  const block = mainSource.match(/const \{([^}]+)\} = require\('\.\/tray'\);/);
+  assert.ok(block, 'main.js should destructure its tray helpers from ./tray');
+  const names = block[1]
+    .split(',')
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  assert.ok(names.length > 0);
+  const missing = names.filter((name) => typeof trayModule[name] === 'undefined');
+  assert.deepEqual(missing, []);
+});
+test('plugin menu callbacks keep native Settings, recovery and Quit entries available', () => {
+  const calls = [];
+  const template = buildTrayMenuTemplate({ state: { pluginMenu: [{ pluginId: 'fixture', id: 'ping', pluginName: 'Fixture', label: 'Ping' }] }, onPluginMenu: (...args) => calls.push(args) });
+  template.find(item => item.label === 'Fixture: Ping').click();
+  assert.deepEqual(calls, [['fixture', 'ping']]);
+  for (const label of ['Settings…', 'Restart without plugins', 'Quit Token Monitor']) assert.ok(template.some(item => item.label === label));
+});

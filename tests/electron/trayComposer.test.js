@@ -1,0 +1,625 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
+
+const trayLayoutApi = require('../../src/shared/trayLayout');
+const trayTextApi = require('../../src/shared/trayText');
+const {
+  accountModeSourcePatch,
+  costDisplayPatch,
+  createTrayComposer,
+  duplicateTrayLayoutItem,
+  floatingBubbleBitmapHeight,
+  handlePickerDocumentScroll,
+  moveTrayLayoutItemByKey,
+  periodItemPatch,
+  syncTrayComposerSurfaces,
+  usageScopePatch,
+  watchDeviceScaleChanges
+} = require('../../src/electron/renderer/trayComposer');
+
+test('floating bubble bitmap height tracks CSS pixels at the current device scale', () => {
+  assert.equal(floatingBubbleBitmapHeight(1), 24);
+  assert.equal(floatingBubbleBitmapHeight(1.25), 30);
+  assert.equal(floatingBubbleBitmapHeight(1.5), 36);
+  assert.equal(floatingBubbleBitmapHeight(2), 48);
+  assert.equal(floatingBubbleBitmapHeight(2.5), 60);
+  assert.equal(floatingBubbleBitmapHeight(0), 24);
+  assert.equal(floatingBubbleBitmapHeight('invalid'), 24);
+  assert.equal(floatingBubbleBitmapHeight(1.5, 20), 30);
+});
+
+test('device scale watcher rearms its resolution query and notifies on DPR changes', () => {
+  const queries = [];
+  let ratio = 1.5;
+  let notifications = 0;
+  const matchMedia = (media) => {
+    const listeners = new Set();
+    const query = {
+      media,
+      addEventListener(type, listener) {
+        assert.equal(type, 'change');
+        listeners.add(listener);
+      },
+      removeEventListener(type, listener) {
+        assert.equal(type, 'change');
+        listeners.delete(listener);
+      },
+      dispatchChange() {
+        for (const listener of [...listeners]) listener({ matches: false, media });
+      },
+      listenerCount() {
+        return listeners.size;
+      }
+    };
+    queries.push(query);
+    return query;
+  };
+
+  const stop = watchDeviceScaleChanges({
+    matchMedia,
+    getDevicePixelRatio: () => ratio,
+    onChange: () => { notifications += 1; }
+  });
+
+  assert.equal(queries[0].media, '(resolution: 1.5dppx)');
+  assert.equal(queries[0].listenerCount(), 1);
+  assert.equal(notifications, 0);
+
+  ratio = 1;
+  queries[0].dispatchChange();
+  assert.equal(queries[0].listenerCount(), 0);
+  assert.equal(queries[1].media, '(resolution: 1dppx)');
+  assert.equal(queries[1].listenerCount(), 1);
+  assert.equal(notifications, 1);
+
+  stop();
+  assert.equal(queries[1].listenerCount(), 0);
+  queries[1].dispatchChange();
+  assert.equal(queries.length, 2);
+  assert.equal(notifications, 1);
+});
+
+function layoutWithIds(...ids) {
+  return {
+    version: trayLayoutApi.VERSION,
+    items: ids.map((id) => {
+      const item = trayLayoutApi.createTrayLayoutItem('tokens', { idFactory: () => id });
+      if (id !== 'selected') return item;
+      return {
+        ...item,
+        fontStyle: 'compactMono',
+        period: 'month',
+        source: {
+          provider: 'claude',
+          accountMode: 'specific',
+          accountKey: 'team',
+          window: 'weekly',
+          valueMode: 'used'
+        }
+      };
+    })
+  };
+}
+
+test('duplicating an item copies its configuration under a fresh id', () => {
+  const layout = layoutWithIds('first', 'selected', 'last');
+  const duplicated = duplicateTrayLayoutItem(trayLayoutApi, layout, 'selected', {
+    idFactory: () => 'duplicate'
+  });
+
+  assert.deepEqual(duplicated.items.map((item) => item.id), [
+    'first',
+    'selected',
+    'last',
+    'duplicate'
+  ]);
+  const selected = trayLayoutApi.normalizeTrayLayout(layout).items[1];
+  assert.deepEqual(duplicated.items.at(-1), {
+    ...selected,
+    id: 'duplicate'
+  });
+});
+
+test('duplicating at the item limit leaves every configured item unchanged', () => {
+  const ids = Array.from({ length: trayLayoutApi.MAX_ITEMS }, (_, index) => (
+    index === trayLayoutApi.MAX_ITEMS - 1 ? 'selected' : `item-${index}`
+  ));
+  const layout = layoutWithIds(...ids);
+  const before = structuredClone(layout);
+  const duplicated = duplicateTrayLayoutItem(trayLayoutApi, layout, 'selected');
+
+  assert.deepEqual(duplicated, before);
+  assert.equal(duplicated.items.at(-1).id, 'selected');
+  assert.equal(duplicated.items.at(-1).period, 'month');
+});
+
+test('choosing a specific account commits the account shown by the picker immediately', () => {
+  const accounts = [
+    { value: 'personal', label: 'personal@example.com' },
+    { value: 'team', label: 'Team' }
+  ];
+  assert.deepEqual(
+    accountModeSourcePatch({ accountKey: '', window: 'secondary' }, accounts, 'specific'),
+    { accountMode: 'specific', accountKey: 'personal', window: 'primary' }
+  );
+  assert.deepEqual(
+    accountModeSourcePatch({ accountKey: 'team', window: 'weekly' }, accounts, 'specific'),
+    { accountMode: 'specific', accountKey: 'team', window: 'primary' }
+  );
+  assert.deepEqual(
+    accountModeSourcePatch({ accountKey: 'team', window: 'weekly' }, accounts, 'lowest'),
+    { accountMode: 'lowest', accountKey: '', window: 'weekly' }
+  );
+});
+
+test('period updates target the item for single text and the source for stacked text', () => {
+  const single = trayLayoutApi.createTrayLayoutItem('tokens', { idFactory: () => 'single' });
+  const stacked = trayLayoutApi.createTrayLayoutItem('doubleInfo', { idFactory: () => 'stacked' });
+
+  const singleUpdated = periodItemPatch(single, 0, 'month');
+  assert.equal(singleUpdated.period, 'month');
+  assert.equal(singleUpdated.source.period, undefined);
+
+  const stackedUpdated = periodItemPatch(stacked, 1, 'allTime');
+  assert.equal(stackedUpdated.rows[0].period, 'today');
+  assert.equal(stackedUpdated.rows[1].period, 'allTime');
+});
+
+test('cost display updates target a single item or one mixed-information row', () => {
+  const single = trayLayoutApi.createTrayLayoutItem('cost', { idFactory: () => 'single-cost' });
+  const singleUpdated = costDisplayPatch(single, 0, { costFormat: 'full', costDecimals: 'auto' });
+  assert.equal(singleUpdated.costFormat, 'full');
+  assert.equal(singleUpdated.costDecimals, 'auto');
+  assert.equal(singleUpdated.source.costFormat, undefined);
+
+  const stacked = trayLayoutApi.createTrayLayoutItem('doubleInfo', { idFactory: () => 'stacked-cost' });
+  const stackedUpdated = costDisplayPatch(stacked, 1, { costFormat: 'compact', costDecimals: 3 });
+  assert.equal(stackedUpdated.rows[0].costFormat, undefined);
+  assert.equal(stackedUpdated.rows[1].costFormat, 'compact');
+  assert.equal(stackedUpdated.rows[1].costDecimals, 3);
+
+  const normalized = trayLayoutApi.normalizeTrayLayout({
+    version: trayLayoutApi.VERSION,
+    items: [{ ...stackedUpdated, rows: [stackedUpdated.rows[0], { ...stackedUpdated.rows[1], metric: 'cost' }] }]
+  });
+  assert.equal(normalized.items[0].rows[1].costFormat, 'compact');
+  assert.equal(normalized.items[0].rows[1].costDecimals, 3);
+});
+
+test('usage source updates target a single item or one mixed-information row', () => {
+  const single = trayLayoutApi.createTrayLayoutItem('tokens', { idFactory: () => 'single-tokens' });
+  const singleUpdated = usageScopePatch(single, 0, 'recent');
+  assert.equal(singleUpdated.usageScope, 'recent');
+  assert.equal(singleUpdated.source.usageScope, undefined);
+
+  const stacked = trayLayoutApi.createTrayLayoutItem('doubleInfo', { idFactory: () => 'stacked-tokens' });
+  const stackedUpdated = usageScopePatch(stacked, 1, 'recent');
+  assert.equal(stackedUpdated.rows[0].usageScope, undefined);
+  assert.equal(stackedUpdated.rows[1].usageScope, 'recent');
+
+  const normalized = trayLayoutApi.normalizeTrayLayout({
+    version: trayLayoutApi.VERSION,
+    items: [{ ...stackedUpdated, rows: [stackedUpdated.rows[0], { ...stackedUpdated.rows[1], metric: 'tokens' }] }]
+  });
+  assert.equal(normalized.items[0].rows[1].usageScope, 'recent');
+});
+
+test('keyboard movement returns the reordered layout and respects boundaries', () => {
+  const layout = layoutWithIds('first', 'selected', 'last');
+  const moved = moveTrayLayoutItemByKey(trayLayoutApi, layout, 'selected', 'ArrowRight');
+
+  assert.equal(moved.moved, true);
+  assert.deepEqual(moved.layout.items.map((item) => item.id), ['first', 'last', 'selected']);
+
+  const boundary = moveTrayLayoutItemByKey(trayLayoutApi, moved.layout, 'selected', 'ArrowRight');
+  assert.equal(boundary.moved, false);
+  assert.deepEqual(boundary.layout, moved.layout);
+});
+
+test('an open picker follows outer scroll updates while its trigger stays connected', () => {
+  const menu = { contains: (target) => target === 'menu-scroll' };
+  const connected = {
+    menu,
+    owner: { isConnected: true },
+    trigger: { isConnected: true }
+  };
+  const calls = [];
+  const actions = {
+    close: () => calls.push('close'),
+    reposition: () => calls.push('reposition')
+  };
+
+  assert.equal(handlePickerDocumentScroll(connected, 'menu-scroll', actions), 'ignore');
+  assert.deepEqual(calls, []);
+  assert.equal(handlePickerDocumentScroll(connected, 'settings-scroll', actions), 'reposition');
+  assert.deepEqual(calls, ['reposition']);
+  assert.equal(
+    handlePickerDocumentScroll(
+      { ...connected, trigger: { isConnected: false } },
+      'settings-scroll',
+      actions
+    ),
+    'close'
+  );
+  assert.deepEqual(calls, ['reposition', 'close']);
+  assert.equal(
+    handlePickerDocumentScroll(
+      { ...connected, owner: { isConnected: false } },
+      'settings-scroll',
+      actions
+    ),
+    'close'
+  );
+  assert.deepEqual(calls, ['reposition', 'close', 'close']);
+});
+
+test('composer visibility destroys hidden surfaces and creates newly visible surfaces', () => {
+  const toggles = [];
+  const destroyed = [];
+  const composers = {
+    tray: { destroy: () => destroyed.push('tray') }
+  };
+  const surfaces = [
+    {
+      id: 'tray',
+      visible: false,
+      root: { classList: { toggle: (...args) => toggles.push(['tray', ...args]) } }
+    },
+    {
+      id: 'floatingBubble',
+      visible: true,
+      root: { classList: { toggle: (...args) => toggles.push(['floatingBubble', ...args]) } }
+    }
+  ];
+
+  const clockNeeded = syncTrayComposerSurfaces(
+    surfaces,
+    composers,
+    (id) => ({ id, destroy() {} })
+  );
+
+  assert.equal(clockNeeded, true);
+  assert.deepEqual(destroyed, ['tray']);
+  assert.equal('tray' in composers, false);
+  assert.equal(composers.floatingBubble.id, 'floatingBubble');
+  assert.deepEqual(toggles, [
+    ['tray', 'hidden', true],
+    ['floatingBubble', 'hidden', false]
+  ]);
+});
+
+test('animated composer visibility collapses its disclosure and releases the editor without clearing its frame', () => {
+  const root = fakeElement('div');
+  const disclosure = fakeElement('div');
+  const composers = {};
+  const destroyed = [];
+  let created = 0;
+  const create = () => { created += 1; return { destroy: (options) => destroyed.push(options) }; };
+  const surface = { id: 'notch', root, visibilityRoot: disclosure, visible: true };
+  syncTrayComposerSurfaces([surface], composers, create);
+  assert.equal(disclosure.inert, false);
+  surface.visible = false;
+  syncTrayComposerSurfaces([surface], composers, create);
+  syncTrayComposerSurfaces([surface], composers, create);
+  assert.equal(disclosure.classList.contains('hidden'), true);
+  assert.equal(disclosure.inert, true);
+  assert.deepEqual(destroyed, [{ preserveContent: true }]);
+  assert.equal('notch' in composers, false);
+  surface.visible = true;
+  syncTrayComposerSurfaces([surface], composers, create);
+  assert.equal(disclosure.classList.contains('hidden'), false);
+  assert.equal(disclosure.inert, false);
+  assert.equal(created, 2);
+});
+
+const balanceStats = {
+  periods: { today: {}, month: {}, allTime: {} },
+  limits: {
+    providers: [{
+      provider: 'deepseek',
+      accountKey: 'ds1',
+      accountLabel: 'Pay-as-you-go',
+      status: 'ok',
+      stale: false,
+      windows: [{
+        kind: 'billing',
+        metric: 'credits',
+        label: 'Balance',
+        remaining: 4,
+        currency: 'CNY',
+        showMeter: true
+      }],
+      balance: { amount: 4, currency: 'CNY', monthSpend: 6 }
+    }]
+  }
+};
+
+function balanceSource(creditsDisplay = '') {
+  const source = {
+    provider: 'deepseek',
+    accountMode: 'lowest',
+    accountKey: '',
+    window: 'primary',
+    valueMode: 'remaining'
+  };
+  if (creditsDisplay) source.creditsDisplay = creditsDisplay;
+  return source;
+}
+
+test('a balance-only provider is offered in the tray window picker', () => {
+  const options = trayLayoutApi.windowOptions(balanceStats, 'deepseek');
+  assert.equal(options.length, 1);
+  assert.equal(options[0].kind, 'billing');
+  assert.equal(options[0].label, 'Balance');
+});
+
+test('a tray percent item prints a balance as compact money', () => {
+  const resolved = trayLayoutApi.resolveTrayLayout({
+    version: trayLayoutApi.VERSION,
+    items: [{ id: 'a', type: 'text', metric: 'percent', source: balanceSource() }]
+  }, balanceStats, {});
+
+  assert.equal(resolved.items[0].available, true);
+  assert.equal(resolved.items[0].text, '¥4.00');
+});
+
+test('balance percentage opt-in applies consistently to text and stacked items', () => {
+  const statsWithReset = structuredClone(balanceStats);
+  statsWithReset.limits.providers[0].windows[0].resetsAt = '2026-07-23T09:00:00.000Z';
+  const percentSource = balanceSource('percent');
+  const doublePercent = trayLayoutApi.createTrayLayoutItem('doublePercent', { idFactory: () => 'double' });
+  doublePercent.rows = [balanceSource(), percentSource];
+  const doubleInfo = trayLayoutApi.createTrayLayoutItem('doubleInfo', { idFactory: () => 'info' });
+  doubleInfo.rows = [
+    { ...percentSource, metric: 'percent' },
+    { ...percentSource, metric: 'percentReset' }
+  ];
+
+  const resolved = trayLayoutApi.resolveTrayLayout({
+    version: trayLayoutApi.VERSION,
+    items: [
+      { id: 'percent', type: 'text', metric: 'percent', source: percentSource },
+      { id: 'percent-reset', type: 'text', metric: 'percentReset', source: percentSource },
+      doublePercent,
+      doubleInfo
+    ]
+  }, statsWithReset, { nowMs: Date.parse('2026-07-23T08:00:00.000Z') });
+
+  assert.equal(resolved.items[0].text, '40%');
+  assert.equal(resolved.items[1].text, '40% · 1h 00m');
+  assert.deepEqual(resolved.items[2].rows.map((row) => row.text), ['¥4.00', '40%']);
+  assert.deepEqual(resolved.items[3].rows.map((row) => row.text), ['40%', '40% · 1h 00m']);
+});
+
+test('tray layouts persist only the explicit balance percentage opt-in', () => {
+  const percent = trayLayoutApi.normalizeTrayLayout({
+    items: [{ id: 'percent', type: 'text', metric: 'percent', source: balanceSource('percent') }]
+  });
+  const invalid = trayLayoutApi.normalizeTrayLayout({
+    items: [{ id: 'invalid', type: 'text', metric: 'percent', source: balanceSource('ratio') }]
+  });
+
+  assert.equal(percent.items[0].source.creditsDisplay, 'percent');
+  assert.equal('creditsDisplay' in invalid.items[0].source, false);
+});
+
+test('a tray bar item meters a balance against its derived percentage', () => {
+  const resolved = trayLayoutApi.resolveTrayLayout({
+    version: trayLayoutApi.VERSION,
+    items: [{ id: 'a', type: 'bars', rows: [balanceSource()] }]
+  }, balanceStats, {});
+
+  // 4 / (4 + 6) = 40%
+  assert.equal(resolved.items[0].rows[0].percent, 40);
+});
+
+test('a balance selection carries resolved percentages so tray icons never fabricate 0%', () => {
+  const { compactLimitSelection, pickConfiguredLimitProviders } = require('../../src/shared/trayText');
+
+  const provider = balanceStats.limits.providers[0];
+  const selection = compactLimitSelection(provider);
+  // 4 / (4 + 6) = 40% — the raw window carries no percentage at all.
+  assert.equal(selection.primaryWindow.remainingPercent, undefined);
+  assert.equal(selection.primaryPercent, 40);
+  assert.equal(selection.secondaryPercent, null);
+
+  const [pick] = pickConfiguredLimitProviders(balanceStats, {});
+  assert.equal(pick.percent, 40);
+});
+
+// The read-only preview path of render() only touches a handful of DOM APIs, so
+// a shim covers it without pulling in a headless-browser dependency.
+function fakeElement(tag) {
+  const el = {
+    tagName: String(tag).toUpperCase(),
+    className: '',
+    textContent: '',
+    src: '',
+    style: {},
+    dataset: {},
+    children: [],
+    attributes: {},
+    clickHandlers: []
+  };
+  const classes = () => el.className.split(' ').filter(Boolean);
+  el.classList = {
+    add: (...names) => { el.className = [...new Set([...classes(), ...names])].join(' '); },
+    remove: (...names) => { el.className = classes().filter((name) => !names.includes(name)).join(' '); },
+    contains: (name) => classes().includes(name),
+    toggle: (name, force) => {
+      const on = force === undefined ? !el.classList.contains(name) : Boolean(force);
+      if (on) el.classList.add(name);
+      else el.classList.remove(name);
+    }
+  };
+  el.append = (...nodes) => { el.children.push(...nodes); };
+  el.replaceChildren = (...nodes) => { el.children = [...nodes]; };
+  el.setAttribute = (name, value) => { el.attributes[name] = value; };
+  el.addEventListener = (type, handler) => { if (type === 'click') el.clickHandlers.push(handler); };
+  el.querySelector = () => null;
+  return el;
+}
+
+function renderComposer({ preview = {}, editable = false, onCustomize = () => {}, onRendered = () => {} }) {
+  const saved = { document: global.document, window: global.window, Image: global.Image };
+  global.document = { createElement: (tag) => fakeElement(tag) };
+  global.window = { addEventListener() {}, removeEventListener() {} };
+  global.Image = function FakeImage() { return fakeElement('img'); };
+  const root = fakeElement('div');
+  try {
+    const composer = createTrayComposer({
+      root,
+      surface: 'tray',
+      layoutApi: trayLayoutApi,
+      getLayout: () => layoutWithIds(),
+      getPreview: () => preview,
+      isEditable: () => editable,
+      onCustomize,
+      onLayoutChange() {},
+      label: (key) => key
+    });
+    onRendered(composer, root);
+  } finally {
+    global.document = saved.document;
+    global.window = saved.window;
+    global.Image = saved.Image;
+  }
+  const [heading, strip] = root.children;
+  return { root, heading, strip, content: strip?.children[0]?.children[0] };
+}
+
+test('destroy retains the closing frame only when requested; normal teardown clears it', () => {
+  renderComposer({
+    onRendered(composer, root) {
+      const children = [...root.children];
+      composer.destroy({ preserveContent: true });
+      assert.deepEqual(root.children, children);
+      composer.destroy();
+      assert.deepEqual(root.children, []);
+    }
+  });
+});
+
+test('a non-custom surface previews the real tray image behind a Customize button', () => {
+  const { root, heading, strip, content } = renderComposer({
+    preview: { generatedSrc: 'data:image/png;base64,GENERATED' }
+  });
+
+  assert.equal(heading.children[0].textContent, 'Live preview');
+  assert.equal(heading.children[1].tagName, 'BUTTON');
+  assert.equal(heading.children[1].textContent, 'Customize…');
+  assert.equal(root.classList.contains('is-editing'), false);
+  // No add button: nothing on this surface is editable yet.
+  assert.equal(strip.children.length, 1);
+
+  assert.equal(content.classList.contains('is-menubar'), true);
+  assert.equal(content.children[0].className, 'tray-composer-menubar-generated');
+  assert.equal(content.children[0].src, 'data:image/png;base64,GENERATED');
+});
+
+test('monthly composer previews render the month provider and matching token or cost title', () => {
+  const stats = { periods: {
+    today: { totalTokens: 10000, costUsd: 1, clients: { claude: 9000, codex: 1000 }, clientCosts: { claude: 0.8, codex: 0.2 } },
+    month: { totalTokens: 80000, costUsd: 16, clients: { claude: 20000, codex: 54000, hermes: 6000 }, clientCosts: { claude: 2, codex: 3, hermes: 11 } },
+    allTime: { totalTokens: 900000, costUsd: 123, clients: { claude: 100000, codex: 200000, hermes: 600000 }, clientCosts: { claude: 100, codex: 20, hermes: 3 } }
+  } };
+  const source = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
+  const start = source.indexOf('function trayPreviewUsageIconId(');
+  const end = source.indexOf('function activateTrayComposer(', start);
+  assert.ok(start >= 0 && end > start, 'renderer preview function boundaries exist');
+  const rendered = [];
+  const state = { settings: {}, appInfo: { platform: 'darwin' } };
+  const preview = vm.runInNewContext(`${source.slice(start, end)}; trayComposerPreview`, {
+    state,
+    window: { TokenMonitorTrayText: trayTextApi },
+    trayProviderImages: { claude: {}, codex: {}, hermes: {} },
+    statsForTrayComposer: () => stats,
+    floatingBubbleGeneratedColors: () => ({ text: '#ffffff' }),
+    currentCurrency: () => 'USD',
+    compactTokenDisplayOptions: () => ({}),
+    renderCustomTrayItemCanvas(item) {
+      rendered.push({ ...item });
+      return { width: 44 };
+    },
+    document: {
+      createElement(tag) {
+        assert.equal(tag, 'canvas');
+        return {
+          getContext: () => ({ drawImage() {} }),
+          toDataURL: () => 'data:image/png;base64,MONTHLY'
+        };
+      }
+    }
+  });
+  for (const [mode, provider, text] of [
+    ['tokensMonth', 'codex', '80.0K'],
+    ['costMonth', 'hermes', '$16.00'],
+    ['bothMonth', 'codex', '80.0K · $16.00']
+  ]) {
+    state.settings.trayContent = mode;
+    rendered.length = 0;
+    assert.equal(preview('tray').src, 'data:image/png;base64,MONTHLY', mode);
+    assert.deepEqual(rendered, [
+      { type: 'icon', provider },
+      { type: 'text', text, fontStyle: 'normal' }
+    ], mode);
+  }
+});
+
+test('the preview falls back from a rendered image to text to the app mark', () => {
+  const image = renderComposer({ preview: { src: 'data:image/png;base64,PLAIN' } });
+  assert.equal(image.content.classList.contains('is-menubar'), false);
+  assert.equal(image.content.children[0].className, 'tray-composer-preview-image');
+  assert.equal(image.content.children[0].src, 'data:image/png;base64,PLAIN');
+
+  const text = renderComposer({ preview: { text: '24.9M' } });
+  assert.equal(text.content.classList.contains('is-text'), true);
+  assert.equal(text.content.textContent, '24.9M');
+
+  const empty = renderComposer({ preview: {} });
+  assert.equal(empty.content.textContent, 'Σ');
+});
+
+test('Customize hands the surface back to the editor', () => {
+  let customized = 0;
+  const { heading } = renderComposer({ onCustomize: () => { customized += 1; } });
+
+  heading.children[1].clickHandlers.forEach((handler) => handler());
+  assert.equal(customized, 1);
+});
+
+test('a custom surface keeps the editor affordances instead of a preview', () => {
+  const { root, heading, strip } = renderComposer({
+    editable: true,
+    preview: { generatedSrc: 'data:image/png;base64,GENERATED' }
+  });
+
+  assert.equal(heading.children[1].textContent, 'Drag to reorder · Click to configure');
+  assert.equal(root.classList.contains('is-editing'), true);
+  assert.equal(strip.children.at(-1).className, 'tray-composer-add');
+  assert.equal(strip.children[0].children[0].textContent, 'Add your first item');
+});
+
+// A capture listener on `window` sees every element's blur, not just the
+// window's. The press moves focus off whatever was clicked last, so the chip
+// drag died on its own first pointerdown whenever a control still held focus.
+test('only the window own blur cancels the chip drag', () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'trayComposer.js'),
+    'utf8'
+  );
+  assert.match(source, /window\.addEventListener\('blur', cancelDrag\);/);
+  assert.match(source, /window\.removeEventListener\('blur', cancelDrag\);/);
+  assert.doesNotMatch(source, /'blur', cancelDrag, true/);
+});
+
+test('installed bitmap choices can be duplicated without losing their plugin reference', () => {
+  const layout = { items: [trayLayoutApi.createTrayLayoutItem('plugin', { ref: 'fixture/bitmap', idFactory: () => 'first' })] };
+  const next = duplicateTrayLayoutItem(trayLayoutApi, layout, 'first', { idFactory: () => 'second' });
+  assert.deepEqual(next.items.map(item => [item.id,item.ref]), [['first','fixture/bitmap'],['second','fixture/bitmap']]);
+});

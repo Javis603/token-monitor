@@ -1,0 +1,504 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const {
+  canUseFloatingBubble,
+  collapsedFloatingBubbleBounds,
+  dragFloatingBubbleBounds,
+  expandedFloatingBubbleBounds,
+  floatingBubbleCollapsedArea,
+  floatingBubbleCollapsedMargin,
+  floatingBubbleCollapsePlan,
+  floatingBubbleInitialRendererQuery,
+  floatingBubbleNativeGlassEnabled,
+  floatingBubbleWindowChrome,
+  moveFloatingBubbleBounds,
+  normalizeInitialRendererViewState,
+  applyWindowSizeLimits,
+  restoreFloatingBubbleWindow
+} = require('../../src/electron/floatingBubble');
+
+const workArea = { x: 0, y: 24, width: 1440, height: 876 };
+const windowsDisplay = {
+  bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+  workArea: { x: 0, y: 0, width: 1840, height: 1040 }
+};
+const stylesPath = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'styles.css');
+const appPath = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'app.js');
+const indexPath = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'index.html');
+const bootPath = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer', 'floatingBubbleBoot.js');
+
+function cssBlock(css, selectorPattern) {
+  const match = css.match(new RegExp(`^${selectorPattern}\\s*\\{([\\s\\S]*?)\\}`, 'm'));
+  return match?.[1] || '';
+}
+
+test('floating bubble is available only for enabled movable window modes', () => {
+  assert.equal(canUseFloatingBubble({ floatingBubbleEnabled: true, windowBehavior: 'floating', trayMode: false }), true);
+  assert.equal(canUseFloatingBubble({ floatingBubbleEnabled: true, windowBehavior: 'normal', trayMode: false }), true);
+  assert.equal(canUseFloatingBubble({ floatingBubbleEnabled: false, windowBehavior: 'floating', trayMode: false }), false);
+  assert.equal(canUseFloatingBubble({ floatingBubbleEnabled: true, windowBehavior: 'desktop', trayMode: false }), false);
+  assert.equal(canUseFloatingBubble({ floatingBubbleEnabled: true, windowBehavior: 'floating', trayMode: true }), false);
+});
+
+test('floating bubble native glass follows the system glass setting', () => {
+  assert.equal(floatingBubbleNativeGlassEnabled({ systemGlass: true }), true);
+  assert.equal(floatingBubbleNativeGlassEnabled({ systemGlass: false }), false);
+});
+
+test('floatingBubbleCollapsedArea uses physical display bounds on Windows', () => {
+  assert.equal(floatingBubbleCollapsedArea(windowsDisplay, 'win32'), windowsDisplay.bounds);
+  assert.equal(floatingBubbleCollapsedArea(windowsDisplay, 'darwin'), windowsDisplay.workArea);
+  assert.equal(floatingBubbleCollapsedArea(windowsDisplay, 'linux'), windowsDisplay.workArea);
+  assert.deepEqual(floatingBubbleCollapsedMargin('win32'), { x: 0, y: 0 });
+  assert.deepEqual(floatingBubbleCollapsedMargin('darwin'), { x: 0, y: 8 });
+});
+
+test('floatingBubbleWindowChrome removes Windows native frame only for collapsed mini-window', () => {
+  assert.deepEqual(floatingBubbleWindowChrome('win32', true), {
+    hasShadow: false,
+    roundedCorners: true,
+    thickFrame: false
+  });
+  assert.deepEqual(floatingBubbleWindowChrome('win32', false), {});
+  assert.deepEqual(floatingBubbleWindowChrome('darwin', true), {});
+});
+
+test('normalizeInitialRendererViewState restores a persisted last-used view', () => {
+  // All main views (incl. Home and Trends) must round-trip so a cold start can
+  // reopen exactly where the user left off.
+  assert.deepEqual(
+    normalizeInitialRendererViewState({ period: 'today', breakdown: 'home' }),
+    { period: 'today', breakdown: 'home' }
+  );
+  assert.deepEqual(
+    normalizeInitialRendererViewState({ period: 'month', breakdown: 'trends' }),
+    { period: 'month', breakdown: 'trends' }
+  );
+  assert.deepEqual(
+    normalizeInitialRendererViewState({ period: 'last7', breakdown: 'model' }),
+    { period: 'last7', breakdown: 'model' }
+  );
+  assert.deepEqual(
+    normalizeInitialRendererViewState({ period: 'allTime', breakdown: 'project' }),
+    { period: 'allTime', breakdown: 'project' }
+  );
+  // A bogus saved snapshot collapses onto the provided fallback rather than the
+  // hard default, so a partial/corrupt value can't wipe the live state.
+  assert.deepEqual(
+    normalizeInitialRendererViewState({ period: 'bad', breakdown: 'bad' }, { period: 'allTime', breakdown: 'session' }),
+    { period: 'allTime', breakdown: 'session' }
+  );
+  // Empty snapshot (fresh install) falls back to the today/home defaults.
+  assert.deepEqual(
+    normalizeInitialRendererViewState(undefined),
+    { period: 'today', breakdown: 'home' }
+  );
+});
+
+test('floatingBubbleInitialRendererQuery primes the first collapsed mini-window paint', () => {
+  // The view state always rides along (default today/home when none is given)
+  // so a persisted last view of home/today is never mistaken for "no view".
+  assert.deepEqual(
+    floatingBubbleInitialRendererQuery({ collapsed: true, side: 'right' }, true),
+    { period: 'today', breakdown: 'home', floatingBubbleSide: 'right' }
+  );
+  assert.deepEqual(
+    floatingBubbleInitialRendererQuery({ collapsed: true, side: 'top' }, true),
+    { period: 'today', breakdown: 'home' }
+  );
+  assert.deepEqual(
+    floatingBubbleInitialRendererQuery({ collapsed: false, side: 'right' }, true),
+    { period: 'today', breakdown: 'home' }
+  );
+  assert.deepEqual(
+    floatingBubbleInitialRendererQuery({ collapsed: true, side: 'right' }, false),
+    { period: 'today', breakdown: 'home' }
+  );
+  assert.deepEqual(
+    floatingBubbleInitialRendererQuery(
+      { collapsed: false, side: null },
+      { suppressInitialNumberAnimation: true }
+    ),
+    { period: 'today', breakdown: 'home', suppressInitialNumberAnimation: '1' }
+  );
+  assert.deepEqual(
+    floatingBubbleInitialRendererQuery(
+      { collapsed: true, side: 'left' },
+      { collapsedWindow: true, suppressInitialNumberAnimation: true }
+    ),
+    { period: 'today', breakdown: 'home', floatingBubbleSide: 'left', suppressInitialNumberAnimation: '1' }
+  );
+});
+
+test('floatingBubbleInitialRendererQuery preserves renderer view state across window rebuilds', () => {
+  assert.deepEqual(
+    floatingBubbleInitialRendererQuery(
+      { collapsed: false, side: null },
+      {
+        suppressInitialNumberAnimation: true,
+        viewState: { period: 'month', breakdown: 'limits' }
+      }
+    ),
+    { suppressInitialNumberAnimation: '1', period: 'month', breakdown: 'limits' }
+  );
+  // A last view of trends must survive the round-trip too (was dropped before).
+  assert.deepEqual(
+    floatingBubbleInitialRendererQuery(
+      { collapsed: false, side: null },
+      { viewState: { period: 'allTime', breakdown: 'trends' } }
+    ),
+    { period: 'allTime', breakdown: 'trends' }
+  );
+  // A default last view of today/home is carried explicitly, not omitted.
+  assert.deepEqual(
+    floatingBubbleInitialRendererQuery(
+      { collapsed: false, side: null },
+      {
+        viewState: { period: 'today', breakdown: 'home' }
+      }
+    ),
+    { period: 'today', breakdown: 'home' }
+  );
+  // A corrupt snapshot collapses to today/home, still carried explicitly.
+  assert.deepEqual(
+    floatingBubbleInitialRendererQuery(
+      { collapsed: true, side: 'left' },
+      {
+        collapsedWindow: true,
+        viewState: { period: 'bad', breakdown: 'bad' }
+      }
+    ),
+    { period: 'today', breakdown: 'home', floatingBubbleSide: 'left' }
+  );
+});
+
+test('collapsedFloatingBubbleBounds keeps the current narrow mini-window shape without requiring an edge', () => {
+  const bounds = { x: 120, y: 80, width: 360, height: 520 };
+  assert.deepEqual(collapsedFloatingBubbleBounds(bounds, workArea), {
+    x: 120,
+    y: 323,
+    width: 18,
+    height: 34
+  });
+  assert.deepEqual(collapsedFloatingBubbleBounds({ x: 1000, y: 80, width: 360, height: 520 }, workArea), {
+    x: 1342,
+    y: 323,
+    width: 18,
+    height: 34
+  });
+});
+
+test('floatingBubbleCollapsePlan can collapse from the current position without edge docking', () => {
+  assert.equal(
+    floatingBubbleCollapsePlan(
+      { x: 120, y: 120, width: 360, height: 520 },
+      workArea,
+      { floatingBubbleEnabled: true, windowBehavior: 'floating' },
+      { suppressNextCollapse: true }
+    ),
+    null
+  );
+  assert.deepEqual(
+    floatingBubbleCollapsePlan(
+      { x: 120, y: 120, width: 360, height: 520 },
+      workArea,
+      { floatingBubbleEnabled: true, windowBehavior: 'floating' }
+    ),
+    {
+      side: 'left',
+      expandedBounds: { x: 120, y: 120, width: 360, height: 520 },
+      collapsedBounds: { x: 120, y: 363, width: 18, height: 34 }
+    }
+  );
+});
+
+test('floatingBubbleCollapsePlan reuses the last dragged mini-window position', () => {
+  assert.deepEqual(
+    floatingBubbleCollapsePlan(
+      { x: 120, y: 120, width: 360, height: 520 },
+      workArea,
+      { floatingBubbleEnabled: true, windowBehavior: 'normal' },
+      { collapsedBounds: { x: 640, y: 220, width: 18, height: 34 } }
+    ),
+    {
+      side: 'left',
+      expandedBounds: { x: 120, y: 120, width: 360, height: 520 },
+      collapsedBounds: { x: 640, y: 220, width: 18, height: 34 }
+    }
+  );
+  assert.deepEqual(
+    floatingBubbleCollapsePlan(
+      { x: 120, y: 120, width: 360, height: 520 },
+      workArea,
+      { floatingBubbleEnabled: true, windowBehavior: 'normal' },
+      { collapsedBounds: { x: 1414, y: 220, width: 18, height: 34 } }
+    ),
+    {
+      side: 'right',
+      expandedBounds: { x: 120, y: 120, width: 360, height: 520 },
+      collapsedBounds: { x: 1422, y: 220, width: 18, height: 34 }
+    }
+  );
+  assert.deepEqual(
+    floatingBubbleCollapsePlan(
+      { x: 120, y: 120, width: 360, height: 520 },
+      workArea,
+      { floatingBubbleEnabled: true, windowBehavior: 'normal' },
+      { collapsedBounds: { x: 2000, y: 220, width: 18, height: 34 } }
+    ),
+    {
+      side: 'right',
+      expandedBounds: { x: 120, y: 120, width: 360, height: 520 },
+      collapsedBounds: { x: 1422, y: 220, width: 18, height: 34 }
+    }
+  );
+});
+
+test('floatingBubbleCollapsePlan can clamp the mini-window against Windows physical edges', () => {
+  assert.deepEqual(
+    floatingBubbleCollapsePlan(
+      { x: 120, y: 120, width: 360, height: 520 },
+      windowsDisplay.workArea,
+      { floatingBubbleEnabled: true, windowBehavior: 'normal' },
+      {
+        collapsedArea: windowsDisplay.bounds,
+        collapsedMargin: floatingBubbleCollapsedMargin('win32'),
+        collapsedBounds: { x: 1902, y: 1060, width: 18, height: 34 }
+      }
+    ),
+    {
+      side: 'right',
+      expandedBounds: { x: 120, y: 120, width: 360, height: 520 },
+      collapsedBounds: { x: 1902, y: 1046, width: 18, height: 34 }
+    }
+  );
+});
+
+test('expandedFloatingBubbleBounds opens near the mini-window and stays inside the work area', () => {
+  assert.deepEqual(expandedFloatingBubbleBounds({ x: 1100, y: 500, width: 18, height: 34 }, workArea, { width: 360, height: 520 }), {
+    x: 758,
+    y: 257,
+    width: 360,
+    height: 520
+  });
+  assert.deepEqual(expandedFloatingBubbleBounds({ x: 8, y: 8, width: 18, height: 34 }, workArea, { width: 360, height: 520 }), {
+    x: 8,
+    y: 32,
+    width: 360,
+    height: 520
+  });
+});
+
+test('restoreFloatingBubbleWindow unlocks the collapsed window before resizing it', () => {
+  const calls = [];
+  const bounds = { x: 8, y: 32, width: 360, height: 520 };
+  const limits = { minWidth: 280, minHeight: 360, maxWidth: 720, maxHeight: 900 };
+  const win = {
+    setResizable(value) { calls.push(['resizable', value]); },
+    setMinimumSize(width, height) { calls.push(['minimum', width, height]); },
+    setMaximumSize(width, height) { calls.push(['maximum', width, height]); },
+    setBounds(value) { calls.push(['bounds', value]); }
+  };
+
+  assert.equal(restoreFloatingBubbleWindow(win, bounds, limits), true);
+  assert.deepEqual(calls, [
+    ['resizable', true],
+    ['minimum', 280, 360],
+    ['maximum', 720, 900],
+    ['bounds', bounds]
+  ]);
+});
+
+test('restoreFloatingBubbleWindow touches nothing without a live window or real limits', () => {
+  const calls = [];
+  const bounds = { x: 8, y: 32, width: 360, height: 520 };
+  const limits = { minWidth: 280, minHeight: 360, maxWidth: 720, maxHeight: 900 };
+  const win = (destroyed) => ({
+    isDestroyed() { return destroyed; },
+    setResizable(value) { calls.push(['resizable', value]); },
+    setMinimumSize(width, height) { calls.push(['minimum', width, height]); },
+    setMaximumSize(width, height) { calls.push(['maximum', width, height]); },
+    setBounds(value) { calls.push(['bounds', value]); }
+  });
+
+  assert.equal(restoreFloatingBubbleWindow(win(true), bounds, limits), false);
+  // Half-applied limits are worse than none: an omitted pair would otherwise
+  // reach setMinimumSize(undefined, undefined).
+  assert.equal(restoreFloatingBubbleWindow(win(false), bounds, undefined), false);
+  assert.equal(restoreFloatingBubbleWindow(null, bounds, limits), false);
+  assert.deepEqual(calls, []);
+});
+
+test('applyWindowSizeLimits restores the normal hints without unlocking the window', () => {
+  const calls = [];
+  const win = {
+    isDestroyed() { return false; },
+    setResizable(value) { calls.push(['resizable', value]); },
+    setMinimumSize(width, height) { calls.push(['minimum', width, height]); },
+    setMaximumSize(width, height) { calls.push(['maximum', width, height]); }
+  };
+
+  assert.equal(applyWindowSizeLimits(win, { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 }), true);
+  assert.deepEqual(calls, [
+    ['minimum', 240, 140],
+    ['maximum', 1200, 1400]
+  ]);
+});
+
+test('moveFloatingBubbleBounds drags the mini-window while clamping it inside the work area', () => {
+  assert.deepEqual(moveFloatingBubbleBounds({ x: 640, y: 220, width: 18, height: 34 }, workArea, { dx: 40, dy: -30 }), {
+    x: 680,
+    y: 190,
+    width: 18,
+    height: 34
+  });
+  assert.deepEqual(moveFloatingBubbleBounds({ x: 8, y: 30, width: 18, height: 34 }, workArea, { dx: -80, dy: -80 }), {
+    x: 0,
+    y: 32,
+    width: 18,
+    height: 34
+  });
+  assert.deepEqual(moveFloatingBubbleBounds({ x: 1420, y: 220, width: 18, height: 34 }, workArea, { dx: 80, dy: 0 }), {
+    x: 1422,
+    y: 220,
+    width: 18,
+    height: 34
+  });
+  assert.deepEqual(moveFloatingBubbleBounds({ x: 1414, y: 220, width: 18, height: 34 }, workArea, { dx: 0, dy: 0 }), {
+    x: 1422,
+    y: 220,
+    width: 18,
+    height: 34
+  });
+});
+
+test('dragFloatingBubbleBounds anchors the mini-window to the OS cursor point', () => {
+  assert.deepEqual(
+    dragFloatingBubbleBounds(
+      { x: 640, y: 220, width: 18, height: 34 },
+      workArea,
+      { x: 700, y: 250 },
+      { offsetX: 6, offsetY: 12 }
+    ),
+    {
+      x: 694,
+      y: 238,
+      width: 18,
+      height: 34
+    }
+  );
+  assert.deepEqual(
+    dragFloatingBubbleBounds(
+      { x: 640, y: 220, width: 18, height: 34 },
+      workArea,
+      { x: 5000, y: -200 },
+      { offsetX: 9, offsetY: 17 }
+    ),
+    {
+      x: 1422,
+      y: 32,
+      width: 18,
+      height: 34
+    }
+  );
+  assert.deepEqual(
+    dragFloatingBubbleBounds(
+      { x: 640, y: 220, width: 18, height: 34 },
+      workArea,
+      { x: 700, y: 250 },
+      { offsetX: 3, offsetY: 5, offsetRatioX: 0.5, offsetRatioY: 0.25 }
+    ),
+    {
+      x: 691,
+      y: 242,
+      width: 18,
+      height: 34
+    }
+  );
+});
+
+test('glass surfaces keep the shared tint and blur without decorative chrome', () => {
+  const css = fs.readFileSync(stylesPath, 'utf8');
+  const app = fs.readFileSync(appPath, 'utf8');
+  const html = fs.readFileSync(indexPath, 'utf8');
+  const boot = fs.readFileSync(bootPath, 'utf8');
+  assert.ok(html.indexOf('floatingBubbleBoot.js') < html.indexOf('styles.css'));
+  assert.match(boot, /floatingBubbleSide/);
+  assert.match(boot, /suppressInitialNumberAnimation/);
+  assert.match(boot, /__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__/);
+  assert.match(boot, /\['home', 'tool', 'status', 'device', 'model', 'project', 'session', 'limits', 'trends'\]\.includes\(breakdown\)/);
+  assert.match(boot, /document\.documentElement\.classList\.add/);
+  assert.match(css, /html\.floating-bubble-collapsed-left,\s*body\.floating-bubble-collapsed-left/);
+  assert.match(css, /html\.floating-bubble-collapsed-right,\s*body\.floating-bubble-collapsed-right/);
+  const collapsedBlock = cssBlock(css, 'html\\.floating-bubble-collapsed-left,\\s*body\\.floating-bubble-collapsed-left,\\s*html\\.floating-bubble-collapsed-right,\\s*body\\.floating-bubble-collapsed-right');
+  const shellBlock = cssBlock(css, '\\.shell');
+  const tabBlock = cssBlock(css, '\\.floating-bubble-tab');
+  const flatTabBlock = cssBlock(css, '\\.system-glass-disabled \\.floating-bubble-tab');
+  assert.match(collapsedBlock, /background:\s*transparent;/);
+  assert.match(shellBlock, /background:\s*var\(--glass\);/);
+  assert.match(shellBlock, /box-shadow:\s*0 22px 55px var\(--shadow\);/);
+  assert.doesNotMatch(shellBlock, /(?:^|\n)\s*border\s*:/);
+  assert.doesNotMatch(shellBlock, /box-shadow:[^;]*\binset\b/);
+  assert.match(tabBlock, /appearance:\s*none;/);
+  assert.match(tabBlock, /border:\s*0;/);
+  assert.match(tabBlock, /border-radius:\s*var\(--floating-bubble-radius\);/);
+  assert.match(app, /const BUBBLE_CONTENT_MIN_W = 34;/);
+  assert.match(tabBlock, /background:\s*var\(--glass\);/);
+  assert.match(tabBlock, /color:\s*var\(--number\);/);
+  assert.match(tabBlock, /backdrop-filter:\s*var\(--glass-filter\);/);
+  assert.doesNotMatch(tabBlock, /box-shadow/);
+  assert.match(flatTabBlock, /backdrop-filter:\s*none;/);
+  assert.doesNotMatch(flatTabBlock, /box-shadow/);
+  assert.match(app, /classList\.toggle\('system-glass-disabled', systemGlassDisabled\)/);
+  assert.match(boot, /query\.get\('systemGlassDisabled'\) === '1'/);
+  assert.match(css, /--glass-filter:\s*blur\(32px\) saturate\(115%\);/);
+  assert.doesNotMatch(css, /--glass-surface|--highlight-alpha|\.shell::after/);
+  assert.doesNotMatch(app, /--highlight-alpha/);
+  assert.doesNotMatch(css, /--bubble-(?:alpha|blur)/);
+  assert.doesNotMatch(app, /--bubble-(?:alpha|blur)/);
+  assert.match(css, /html\.floating-bubble-collapsed-left body \.shell,\s*html\.floating-bubble-collapsed-right body \.shell/);
+  assert.match(css, /html\.floating-bubble-collapsed-left body \.floating-bubble-tab/);
+  assert.match(css, /html\.floating-bubble-collapsed-left,\s*body\.floating-bubble-collapsed-left\s*\{[\s\S]*border-radius:\s*var\(--floating-bubble-radius\);/);
+});
+
+test('generated floating bubble images use a device-scale-aware bitmap', () => {
+  const css = fs.readFileSync(stylesPath, 'utf8');
+  const app = fs.readFileSync(appPath, 'utf8');
+  const imageBlock = cssBlock(css, '\\.floating-bubble-tab span\\.bars img');
+  const renderStart = app.indexOf('function renderFloatingBubbleContent()');
+  const renderEnd = app.indexOf('function reportFloatingBubbleSize()', renderStart);
+  const renderBody = app.slice(renderStart, renderEnd);
+  const previewStart = app.indexOf('function trayComposerPreview(surface)');
+  const previewEnd = app.indexOf('function activateTrayComposer(surface)', previewStart);
+  const previewBody = app.slice(previewStart, previewEnd);
+
+  assert.match(imageBlock, /height:\s*24px;/);
+  assert.match(app, /const BUBBLE_GENERATED_IMAGE_CSS_HEIGHT = 24;/);
+  assert.match(
+    app,
+    /floatingBubbleBitmapHeight\(\s*window\.devicePixelRatio,\s*BUBBLE_GENERATED_IMAGE_CSS_HEIGHT\s*\)/
+  );
+  assert.match(renderBody, /const bitmapHeight = currentFloatingBubbleBitmapHeight\(\);/);
+  assert.match(renderBody, /trayDataUrlForMode\(mode, bitmapHeight,/);
+  assert.doesNotMatch(renderBody, /trayDataUrlForMode\(mode, 44,/);
+  assert.match(previewBody, /trayDataUrlForMode\(mode, currentFloatingBubbleBitmapHeight\(\),/);
+  assert.match(app, /watchDeviceScaleChanges\(\{[\s\S]*onChange:\s*refreshFloatingBubbleBitmapForDeviceScale/);
+  assert.match(app, /window\.addEventListener\('resize',[\s\S]*refreshFloatingBubbleBitmapForDeviceScale\(\);/);
+});
+
+test('floatingBubbleCollapsePlan honors a custom handle size', () => {
+  const settings = { floatingBubbleEnabled: true };
+  const workArea = { x: 0, y: 0, width: 1000, height: 800 };
+  const bounds = { x: 700, y: 300, width: 260, height: 360 };
+  const plan = floatingBubbleCollapsePlan(bounds, workArea, settings, {
+    handleWidth: 80,
+    handleHeight: 30
+  });
+  assert.equal(plan.collapsedBounds.width, 80);
+  assert.equal(plan.collapsedBounds.height, 32); // normalizeHandleSize floors height at 32
+});

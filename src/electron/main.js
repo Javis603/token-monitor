@@ -1,0 +1,8650 @@
+'use strict';
+
+const fs = require('node:fs');
+const crypto = require('node:crypto');
+const os = require('node:os');
+const path = require('node:path');
+const { contentSecurityPolicyForRequest } = require('./contentSecurityPolicy');
+const { initializeHubProfiles, hubProfilesForRenderer, prepareHubProfilePatch } = require('./hubProfiles');
+const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences } = require('electron');
+
+// All of the app's pages are the same local bundle, and every window Chromium
+// gives its own renderer costs a process baseline plus a compositor for what is
+// often a small card. Process-per-site shares one renderer across them; heavy
+// work already runs in the usage worker, so the shared main thread carries UI
+// only. A renderer crash now takes every window down instead of one surface.
+app.commandLine.appendSwitch('process-per-site');
+
+const { createRetainedWindow, captureRetainedWindowState, restoreRetainedWindowState } = require('./retainedWindow');
+const { autoUpdater } = require('electron-updater');
+const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
+const { CredentialStore, credentialSettingsForRenderer, hasCredentialSettings, persistSettingsAndCredentials, stripCredentialSettings, writePrivateJsonAtomic } = require('../shared/credentialStore');
+const { installSafeStdout } = require('../shared/safeStdio');
+const { appVersion } = require('../shared/appVersion');
+const { macWidgetRuntimeSupport } = require('../shared/macSystemRequirements');
+const { exportFileSet, exportSignature, EXPORT_FILENAMES } = require('../shared/exporter');
+const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/trayLayout');
+const fontSettingsApi = require('../shared/fontSettings');
+const motionPreferenceApi = require('./motionPreference');
+const tokenNumberAnimationApi = require('./tokenNumberAnimation');
+const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
+const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
+const { createClaudeWebFetch } = require('./providers/claude/webFetch');
+const { createMimoExchangeFetch } = require('./providers/mimo/exchangeFetch');
+
+
+const workbuddyOAuth = require('../shared/providers/workbuddy/oauth');
+const { createWorkbuddyManagedAccounts } = require('./providers/workbuddy/managedAccounts');
+const {
+  createWorkbuddyLocalAuth,
+  isSupportedWorkbuddyLocalAppPlatform
+} = require('./providers/workbuddy/localAuth');
+const { createElectronLimitsFetch } = require('./limits/fetch');
+const { createLimitsHistoryStore } = require('./limits/historyStore');
+const { historyRowKey } = require('./limits/historyIdentity');
+const { createLimitsHistoryController } = require('./limits/historyController');
+const { LIMIT_PROVIDER_CATALOG: historyProviderCatalog } = require('../shared/limits/providers');
+const { isLimitWindowHidden: historyWindowHidden } = require('../shared/limits/usageItems');
+const { maskEmailAddress: historyMaskEmail } = require('./renderer/accountIdentity');
+const { vendorColors: historyVendorColors } = require('../shared/vendorPresentation');
+const {
+  createSessionProxyApplier,
+  createProxyReadyFetch,
+  networkProxySource,
+  normalizeNoProxy,
+  noProxyError,
+  normalizeProxyUrl,
+  outboundRouteForSettings,
+  proxyUrlError,
+  sessionProxyConfig
+} = require('./networkProxy');
+const {
+  expandedBoundsForCollapse,
+  normalWindowBounds,
+  persistWindowState,
+  restoreWindowMaximized,
+  restoreWindowMaximizedForReveal,
+  setWindowMaximizable,
+  shouldPersistWindowBounds,
+  shouldTrackWindowMaximized,
+  suspendWindowMaximized
+} = require('./windowState');
+
+// Install EPIPE suppression before anything that might log. Without this,
+// a closed parent pipe turns the next log call into an unhandled 'error'
+// event and Electron pops a "JavaScript error in the main process" dialog.
+installSafeStdout();
+const electronClaudeWebFetch = createProxyReadyFetch(createClaudeWebFetch(net), () => sessionProxy.ensureReady());
+const electronWorkbuddyLocalAuth = createWorkbuddyLocalAuth({
+  fetch: electronLimitsFetch()
+});
+// One transport for every widget provider call that resolves through
+// `deps.fetch` — see limits/fetch.js for why the branch and the request options
+// are what they are. Probes that build their own transport inherit neither
+// branch: cursorProbe and antigravityProbe on node:https, Claude Web on the
+// claudeWebFetch above, the CLI fallbacks on a spawned binary, and MiMo's
+// exchange on the mimoExchangeFetch below, which keeps undici for the per-hop
+// request it needs but still asks Chromium which proxy to use.
+function electronLimitsFetch() {
+  return createElectronLimitsFetch({
+    net: { fetch: createProxyReadyFetch(net.fetch.bind(net), () => sessionProxy.ensureReady()) },
+    getRoute: networkProxyRoute
+  });
+}
+
+// Read per request: the app proxy setting can change after a caller captured
+// its fetch, and `settings` is still null while this module loads.
+function networkProxyRoute() {
+  return outboundRouteForSettings(settings || {}, process.env);
+}
+
+// The Chromium half of the app proxy setting, so net.fetch/net.request callers
+// and MiMo's resolveProxy route the same way as the Node-side transport.
+// Untouched until a proxy is configured, so an install without one keeps
+// Electron's own default; clearing it restores that default.
+const sessionProxy = createSessionProxyApplier({
+  getSession: () => session.defaultSession,
+  getConfig: () => sessionProxyConfig(settings || {}),
+  log: (message) => console.log(message)
+});
+
+// Lazy because `session.defaultSession` only exists once the app is ready, and
+// process-wide because the transport caches one proxy agent per proxy URL.
+let mimoExchangeFetch = null;
+function ensureMimoExchangeFetch() {
+  if (!mimoExchangeFetch) mimoExchangeFetch = createMimoExchangeFetch({
+    session: { resolveProxy: createProxyReadyFetch((url) => session.defaultSession.resolveProxy(url), () => sessionProxy.ensureReady()) },
+    getRoute: networkProxyRoute
+  });
+  return mimoExchangeFetch;
+}
+
+// Muse's web action also needs Node headers and manual redirects. Reuse the
+// exchange transport so its requests inherit the same app/env/system proxy route.
+// Settings-side provider probes take the same transport as the collector's.
+// Most of them are what an account save is gated on, so leaving one on the
+// global fetch refuses to save an account on exactly the machines this
+// transport exists for.
+function electronProviderDeps(deps = {}) {
+  return { ...deps, fetch: electronLimitsFetch(), mimoExchangeFetch: ensureMimoExchangeFetch(), museWebFetch: ensureMimoExchangeFetch() };
+}
+const {
+  DEFAULT_CLIENTS,
+  KNOWN_CLIENTS,
+  clientsCsvForSetting,
+  normalizeClientsCsv
+} = require('../shared/clientTracking');
+const { seedSplitClients } = require('../shared/clientIdentitySplits');
+const {
+  clientDiagnosticRoots,
+  getTokscaleStatus,
+  lookupModelPricing,
+  pricingFingerprint,
+  normalizeHistoryIntervalMs,
+  visibleDiagnosticRoots
+} = require('../shared/collector');
+const {
+  antigravitySyncLockPath,
+  repairAntigravitySyncLock
+} = require('../shared/providers/antigravity/selfSync');
+const { deviceRecordFromAnchor, seedWithColdPreview } = require('../shared/anchorSeed');
+const { sendWhenRendererReady } = require('./deferredWindowSend');
+const { actionWindowForEvent, activateWindowAction, handoffWindow, showWindow } = require('./windowLifecycle');
+const { applyInitialLimitProviderSeed } = require('./initialLimitProviderSeed');
+const { applyCodexAdditionalLimitsMigration } = require('./codexAdditionalLimitsMigration');
+const { applyActivityPatch, materializeActivity } = require('../shared/sessionActivityProjection');
+const { createDeviceRuntime } = require('../shared/usage/deviceRuntime');
+const { externalAgentActive } = require('../shared/usage/agentPid');
+const { createDiagnosticJournal } = require('../shared/diagnosticJournal');
+const { createDiagnosticReportGenerator } = require('./diagnostics');
+const { createDiagnosticSnapshotBuilder, diagnosticStreamDetailCode, selectLocalDeviceRecord } = require('./diagnosticSnapshot');
+const { customPricingPath } = require('../shared/tokscaleConfig');
+const { normalizeSharedSyncValue } = require('../shared/syncContent');
+const { createSyncContentRuntime, normalizeSyncContentState, sameDestination } = require('./syncContentRuntime');
+const { createSyncContentCredentialQueue } = require('./syncContentCredentials');
+const { applyCustomPricing, normalizeCustomPricingSetting } = require('../shared/tokscaleCustomPricing');
+const {
+  normalizeModelAliases,
+  normalizeModelAliasGrouping,
+  projectModelAliasStats,
+  projectModelAliasSessions,
+  projectModelAliasHistory
+} = require('./modelAliasPresentation');
+const { createHub } = require('../hub/server');
+const { probeHubBuild } = require('./hubBuildStatus');
+const { normalizeLimitsRefreshMode, normalizeLimitsRefreshMs, parseBoolean, parseLimitProviders } = require('../shared/limits/collector');
+const { createCursorUsageEventIndex } = require('../shared/providers/cursor/usageEvents');
+const { limitAccountRefreshScope, limitProviderUrlAllowed } = require('../shared/limits/accounts');
+const { normalizeLimitProviderHiddenItems } = require('../shared/limits/usageItems');
+const { accountFieldProjection, accountStatusProjection, currentAccountField, finalAccountSettings, initialAccountSettings, limitAccountFormsForRenderer, limitConnectionSourcesForRenderer, normalizeAccountPatch, rendererOmittedAccountKeys } = require('./limits/accountSettings');
+const { createOwnerSlotPersistence } = require('./limits/ownerSlotPersistence');
+function ordinarySlotPersistence(provider) {
+  return createOwnerSlotPersistence(provider, () => settings, () => accountSlotService, id => {
+    const store = ensureCredentialStore();
+    if (provider === 'claude') return store.readClaudeWebCredential(id);
+    if (provider === 'antigravity') return store.readAntigravityCredential(id);
+    if (provider === 'workbuddy') return store.readWorkbuddyCredential(id);
+    return null;
+  });
+}
+const { migrateAccountSlots } = require('./limits/accountSlotMigration');
+const { createAccountSlotService, invalidateAccountSlotChange } = require('./limits/accountSlotService');
+const { LIMIT_PROVIDER_REGISTRY } = require('../shared/limits/registry');
+const { isProviderStale } = require('../shared/limits/core');
+const ACCOUNT_SLOT_PROVIDER_IDS = new Set(LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots).map(entry => entry.id));
+const { normalizeAccountPresentation } = require('./limits/accountPresentation');
+const { applyAccountOrder } = require('./renderer/limits/accountSlotsPanel');
+let accountSlotService;
+const { createCredentialCommands } = require('./limits/credentialCommands');
+const { createCopilotAccounts } = require('./providers/copilot/accounts');
+const { createMinimaxApiKeys } = require('./providers/minimax/apiKeys');
+const { createClaudeManagedAccounts, claudeAccountChangeScope } = require('./providers/claude/managedAccounts');
+const { copilotLoginErrorMessage, isAllowedVerificationUrl, runCopilotDeviceFlowLogin } = require('../shared/providers/copilot/deviceFlow');
+
+const { isAllowedCodexLoginUrl } = require('../shared/providers/codex/login');
+
+
+const {
+  normalizeClientDisplayOrder,
+  normalizeHiddenClients,
+  normalizePinnedClients
+} = require('./renderer/clientDisplayPreferences');
+const { normalizeRankingMetric } = require('./renderer/usageAttributionRows');
+const { LANGUAGE_OPTIONS, resolveLocale, resolveRegionalLocale, translate } = require('./renderer/i18n');
+const {
+  defaultViewDisplayPreferences,
+  normalizeHiddenViews,
+  normalizeViewDisplayOrder
+} = require('./renderer/viewDisplayPreferences');
+const {
+  defaultHomeModulePreferences,
+  normalizeHiddenHomeModules,
+  normalizeHomeLimitDisplayMode,
+  normalizeHomeModuleCounts,
+  normalizeHomeModuleOrder
+} = require('./renderer/homeModulePreferences');
+const {
+  APP_UPDATE_STARTUP_DELAY_MS,
+  appUpdateInstallSupport,
+  classifyAppUpdateError,
+  checkLatestRelease,
+  deriveAppUpdateAvailability,
+  downloadedAppUpdateMatchesLatest,
+  installFailureErrorKind,
+  latestForCurrentVersion,
+  latestFromUpdaterInfo,
+  mergeLatestReleaseMetadata,
+  providerUpdateCheckAvailability,
+  RELEASES_URL,
+  resolveAppUpdateCheckError,
+  shouldDownloadAutomaticAppUpdate,
+  shouldSkipAppUpdateCheck,
+  updateInstallQuitPolicy
+} = require('../shared/appUpdater');
+
+
+const { stepfunToken } = require('../shared/providers/stepfun/limits');
+
+// The collector reaches the usage API behind a probe deadline; these settings
+// paths call it directly, so they need their own bound or a hung request leaves
+// the account panel spinning and "Save account" pending forever.
+
+// The auto-detected key has an account of its own for exactly as long as no
+// stored account claims it. Ownership is the shared predicate the collector
+// uses, so the panel never offers a row the collector is not scanning.
+// The auto-detected account is not addressable by name, because it has none.
+// Every credential mutation queues an account-scoped refresh, and a scoped
+// refresh rebuilds only the account it names, so nothing could ever create its
+// row or retire it: removing the credential that claimed the key left the card
+// without the account that took it over, and naming it left the old synthetic
+// row behind. When ownership of the key changes, the whole provider is rebuilt.
+
+const subscriptionDisplay = require('../shared/subscriptionDisplay');
+const { CURRENCY_CODES, normalizeCurrency, resolveEffectiveRates, configureRates } = require('../shared/currency');
+const { normalizeCompactTokenUnits } = require('../shared/compactTokens');
+const { fetchRates, isCacheStale } = require('../shared/exchangeRates');
+const {
+  captureArchivedClientUsage,
+  normalizeArchivedClientUsage,
+  pruneArchivedClientUsage
+} = require('../shared/usage/clientUsageArchive');
+const { sessionUsageArchiveDate } = require('../shared/usage/sessionUsageArchive');
+const {
+  createSessionUsageArchiveStore,
+  sessionUsageArchiveDatabasePath
+} = require('../shared/usage/sessionUsageArchiveStore');
+const { createUsageTransform, usageTransformSettings } = require('../shared/usage/usageTransform');
+const { createUsageHost, terminateUsageHostSubprocesses, whenUsageHostsIdle } = require('../shared/usage/usageHost');
+const { clearDailyHistoryArchive } = require('../shared/dailyHistoryArchive');
+const { aggregateDevices, aggregateHistory } = require('../shared/usage');
+const {
+  HUB_RESPONSE_HEADER,
+  HUB_RESPONSE_MINIMAL,
+  HUB_STREAM_HEADER,
+  HUB_STREAM_VERSION,
+  createStatsStreamReceiver
+} = require('../shared/hubProtocol');
+const { createSyncPayloadUploader, syncPayload } = require('../shared/syncPayload');
+const postSyncPayload = createSyncPayloadUploader();
+const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
+const { MIMO_PLATFORM_CONSOLE_URL } = require('../shared/providers/mimo/limits');
+
+const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
+const { completeHistorySource, resolveCompleteHistory, resolveCompleteHistoryWithDevices } = require('./historySource');
+const { fixedPeriodHistoryMeta } = require('./fixedPeriodHistory');
+const { readSessionDetailForPlatform } = require('../shared/sessionDetailResolver');
+const { startDiscordRpc, stopDiscordRpc, updateDiscordRpc } = require('./discordRpc');
+const {
+  commitMacWidgetSnapshot,
+  discardMacWidgetSnapshot,
+  prepareMacWidgetSnapshotUpdate,
+  resolveMacWidgetSnapshotPath,
+  syncMacWidgetSnapshotDirectory
+} = require('./macWidget/bridge');
+const { createMacWidgetSnapshotController } = require('./macWidget/snapshotController');
+const { macWidgetHistorySourceKey, resolveMacWidgetHistory } = require('./macWidget/history');
+const {
+  macWidgetHistoryCachePath,
+  readMacWidgetHistoryCache,
+  writeMacWidgetHistoryCache
+} = require('./macWidget/historyStore');
+const { createMacWidgetLaunchServicesRecovery } = require('./macWidget/launchServicesRecovery');
+const { projectLimitStatsForDisplay } = require('./limits/statsPresentation');
+const { DEFAULT_WIDGET_KIND, requestMacWidgetReload, resetMacWidgetReloadThrottle } = require('./macWidget/reloader');
+const { WIDGET_DEMAND_MARKER, WIDGET_DEMAND_PROVISIONAL_MARKER, createMacWidgetDemandState } = require('./macWidget/demand');
+const linuxAutostart = require('./linuxAutostart');
+const { canPositionWindow, suppressLinuxSystemContextMenu } = require('./linuxDisplayServer');
+const { codexAccountIdForProvider, localLiveCodexProvider } = require('./renderer/accountIdentity');
+const {
+  buildTrayIcon,
+  createTray,
+  formatTrayText,
+  isBarsTrayIconMode,
+  pickUsageTrayIconId,
+  parseWindowsSystemUsesLightTheme,
+  popoverBounds,
+  prepareTrayIconForPlatform,
+  reconcileCodexAccountSelection,
+  runTrayMenuAction,
+  watchSystemDarkUi,
+  sortCodexAccountsForDisplay,
+  shouldUseTemplateTrayIcon,
+  trayShowsTitle
+} = require('./tray');
+const {
+  macActivationPolicyMode,
+  mainWindowCloseAction,
+  normalizeTrayModeSettings,
+  popoverBlurMatchesPress,
+  popoverToggleAction,
+  shouldCreateTray,
+  skipTaskbarForSettings,
+  trayToggleAction
+} = require('./trayModeSettings');
+const { SERVICE_STATUS_PROVIDERS, createServiceStatusClient } = require('./serviceStatus');
+const { createCodexResetForecastClient } = require('./providers/codex/resetForecast');
+const { createUpdateInstallQuitGuard, observeUpdateInstallHandoff } = require('./updateInstallQuit');
+const { classifyStreamFailure } = require('./syncConnection');
+const {
+  attachLocalNativeViews,
+  attachLocalPresentationNativeViews,
+  completeLocalSyncStats,
+  composeLocalOnlySummary,
+  composeLocalSyncSummary,
+  projectLocalActivity,
+  localActivityPatch
+} = require('./syncDisplayStats');
+const {
+  createRendererSnapshots,
+  createStatsPresentationCache,
+  createStatsPublicationBatcher,
+  rendererStats
+} = require('./statsPublisher');
+const { withoutSessionTitleStats, withoutSessionTitles } = require('./sessionTitleDisplay');
+const { createSseBlockReader, parseSseBlock } = require('./sseEventReader');
+const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
+const { createLatestWinsReconciler } = require('./latestWinsReconciler');
+const { createIcloudSyncStore } = require('./icloudSync');
+const { createIcloudSyncRuntime } = require('./icloudSyncRuntime');
+
+const {
+  classifySettingsChange,
+  diagnosticConfigurationFromSettings,
+  envelopeFromSettings,
+  limitsConfigFromSettings,
+  normalizeCursorAccountIds,
+  normalizeCursorDisabledAccountIds,
+  usageConfigFingerprint,
+  usageConfigFromSettings
+} = require('./runtimeConfig');
+const {
+  CUSTOM_SCAN_CLIENT_IDS,
+  customScanPathLimitError,
+  normalizeCustomScanPaths
+} = require('../shared/customScanPaths');
+const {
+  canRefreshUsageRuntime,
+  drainPendingUsageClientRefreshes: drainPendingUsageClientRefreshQueue,
+  limitRefreshOutcome,
+  runLimitInvalidation,
+  runManualDeviceRefresh,
+  settingsLimitInvalidationPlan
+} = require('./deviceRuntimeCoordinator');
+const {
+  describeWindowBehavior,
+  floatingAlwaysOnTopLevel,
+  normalizeWindowBehaviorSettings,
+  windowBehaviorSelection
+} = require('./windowBehavior');
+const { createTaskbarZOrderKeeper, taskbarZOrderEnabled } = require('./windowsTaskbarZOrder');
+const { subscribeForegroundChange } = require('./windowsForegroundHook');
+const {
+  normalizeWindowToggleShortcut,
+  windowToggleShortcutAction,
+  windowToggleShortcutStatus
+} = require('./windowShortcut');
+const {
+  FLOATING_BUBBLE_HANDLE_HEIGHT,
+  FLOATING_BUBBLE_HANDLE_WIDTH,
+  canUseFloatingBubble,
+  collapsedFloatingBubbleBounds,
+  dragFloatingBubbleBounds,
+  expandedFloatingBubbleBounds,
+  floatingBubbleCollapsedArea,
+  floatingBubbleCollapsedMargin,
+  floatingBubbleCollapsePlan,
+  floatingBubbleInitialRendererQuery,
+  floatingBubbleNativeGlassEnabled,
+  floatingBubbleSide,
+  floatingBubbleWindowChrome,
+  normalizeInitialRendererViewState,
+  moveFloatingBubbleBounds,
+  applyWindowSizeLimits,
+  restoreFloatingBubbleWindow
+} = require('./floatingBubble');
+const { applyWindowsChrome } = require('./windowsChrome');
+const { installWindowsNonActivatingInput } = require('./windowsNonActivatingInput');
+const { canUseEdgeDock, createEdgeDockController, edgeDockSupported } = require('./edgeDock/controller');
+const { createWindowsDockBackdrop } = require('./edgeDock/windowsBackdrop');
+const { createNotchController, normalizeNotchStyle, normalizeNotchShape, normalizeNotchHoverAction, normalizeNotchHoverDelay } = require('./notch/controller');
+const { buildNotchData, notchSummaryMode, summaryLayout: notchSummaryLayout } = require('./notch/data');
+const { NOTCH_PANEL_STAT_ITEMS, notchLimitItems, notchPanelItems, notchWeek } = require('./notch/panel');
+const { createNotchHistory } = require('./notch/history');
+const trayLayoutApi = require('../shared/trayLayout');
+const { createFullScreenProbe } = require('./edgeDock/fullScreenProbe');
+const {
+  normalizeEdgeDockCustomScale,
+  normalizeEdgeDockDisplayId,
+  normalizeEdgeDockFloatingX,
+  normalizeEdgeDockMode,
+  normalizeEdgeDockOffset,
+  normalizeEdgeDockSide,
+  normalizeEdgeDockSize,
+  normalizeEdgeDockBubbleSize
+} = require('./edgeDock/geometry');
+const { buildEdgeDockCells } = require('./renderer/edgeDock/presentation');
+const edgeDockPresentationApi = require('./renderer/edgeDock/presentation');
+const { createPluginRuntime, registerPluginScheme, normalizePluginAuthorSkin } = require('./plugins/runtime');
+const { prepareSkinSettings } = require('./plugins/skinSettings');
+const { normalizePluginStates } = require('./plugins/manager');
+const pluginPlacements = require('../shared/plugins/placements');
+// Created after 'ready' by startPluginRuntime(); null in safe paths and tests.
+let pluginRuntime = null;
+const { createWindowVisibilityActions } = require('./plugins/windowVisibility');
+const pluginWindowActions = createWindowVisibilityActions(syncPluginWindowVisibility);
+const { DERIVED_PERIODS: EDGE_DOCK_DERIVED_PERIODS, normalizeEdgeDockItems } = require('./renderer/edgeDock/items');
+const fixedPeriodRangesApi = require('./renderer/fixedPeriodRanges');
+const { normalizeBackgroundImageOpacity } = require('./renderer/glassRendering');
+const tokenRateApi = require('./renderer/tokenRatePresentation');
+const { toPolygons } = require('./renderer/edgeDock/shapes');
+const { rasterizeMask } = require('./edgeDock/mask');
+const { NOTCH_BLUR_ALPHA, NOTCH_BLUR_RADIUS, NOTCH_BLUR_STRENGTH, notchBlurMask } = require('./notch/blur');
+const { applyProgressiveBlur } = require('./notch/macProgressiveBlur');
+const { monitorMacScrollGesture } = require('./notch/macScrollGesture');
+const { applyVibrancyMask } = require('./edgeDock/macVibrancyMask');
+const { maskCardMaterial } = require('./cardCanvas');
+const { performMacHaptic } = require('./edgeDock/macHaptics');
+const { primaryButtonDown } = require('./edgeDock/pointerButtons');
+const { preventAppActivation, setMoveToActiveSpace } = require('./macosSpaceBehavior');
+const {
+  normalizeWindowsBackdropMode,
+  normalizeWindowsDockBackdropMode
+} = require('./windowsBackdropMode');
+const { refreshWindowsBackdrop, syncWindowsBackdrop, windowsBackdropFallback } = require('./windowsBackdrop');
+const {
+  isLiquidGlassBackdrop,
+  liquidGlassStyle,
+  liquidGlassTint,
+  normalizeLiquidGlassTint,
+  normalizeMacBackdropMode,
+  normalizeEdgeDockBackdropMode,
+  edgeDockBackdropMode
+} = require('./macBackdropMode');
+const {
+  attachNativeMaterialVisibility,
+  syncNativeMaterialVisibility,
+  getNativeMaterialState
+} = require('./nativeMaterialVisibility');
+const { createMacLiquidGlass } = require('./macLiquidGlass');
+const { isLightHex } = require('./renderer/themePresets');
+
+if (!app.isPackaged) loadDotEnv();
+
+const APP_NAME = 'Token Monitor';
+const APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
+const WINDOWS_APP_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon-win.png');
+
+// Electron's own documentation says a window given no icon falls back to the
+// executable's, and recommends ICO on Windows; electron-builder already
+// converts `win.icon` into the ICO embedded in that executable, which is the
+// icon built for this platform rather than one PNG scaled at runtime. So a
+// packaged window deliberately sets
+// nothing here: whatever it set could only override that, which is exactly what
+// naming the macOS artwork was doing to the taskbar button and Alt-Tab entry
+// (it carries the Dock's inset margin — see WINDOWS_ICON_PATH in tray.js). An
+// unpackaged run has no icon of ours inside electron.exe to inherit, so it names
+// the same full-bleed artwork the installer is built from.
+function appWindowIcon() {
+  if (process.platform !== 'win32') return { icon: APP_ICON_PATH };
+  return app.isPackaged ? {} : { icon: WINDOWS_APP_ICON_PATH };
+}
+
+const DEFAULT_WINDOW = { width: 340, height: 650 };
+const WINDOW_LIMITS = { minWidth: 240, minHeight: 140, maxWidth: 1200, maxHeight: 1400 };
+const ZOOM_LIMITS = { min: 0.7, max: 1.6, step: 0.1 };
+const TRAY_CONTENT_VALUES = new Set(['tokens', 'cost', 'both', 'tokensMonth', 'costMonth', 'bothMonth', 'tokensAll', 'costAll', 'bothAll', 'limitsAllSessions', 'liveTokenRate', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions', 'icon', 'custom']);
+const HUB_MODE_VALUES = new Set(['local', 'client', 'host', 'icloud']);
+const LANGUAGE_VALUES = new Set(LANGUAGE_OPTIONS.map((option) => option.value));
+const COLLECTION_MODE_VALUES = new Set(['live', 'smart', 'interval']);
+const COLLECTION_INTERVAL_OPTIONS = [5 * 60 * 1000, 15 * 60 * 1000, 30 * 60 * 1000];
+// Smart mode's cadence is fixed and resolved directly in collectorIntervalMs(),
+// so it stays out of COLLECTION_INTERVAL_OPTIONS: that list validates the
+// persisted collectionIntervalMs, and admitting 10m there would let a
+// smart-mode value survive a switch back to live/interval and silently
+// change that mode's backstop interval.
+const SMART_COLLECTION_INTERVAL_MS = 10 * 60 * 1000;
+const DEFAULT_COLLECTION_INTERVAL_MS = 5 * 60 * 1000;
+const HUB_DEFAULT_PORT = 17321;
+const KNOWN_CLIENT_LIST = KNOWN_CLIENTS.split(',').map((id) => ({ id }));
+const DEFAULT_VIEW_LIST = ['home', 'limits', 'tool', 'model', 'project', 'session', 'device', 'trends', 'status'].map((id) => ({ id }));
+const DEFAULT_HOME_MODULE_LIST = ['limits', 'tool', 'model', 'session', 'device', 'trends'].map((id) => ({ id }));
+const TRAY_OPEN_VIEW_IDS = new Set(['home', 'project', 'session', 'limits', 'trends', 'status']);
+
+let mainWindow = null;
+let dashboardWindow = null;
+let dashboardWindowReady = false;
+let settingsPath = null;
+let settings = null;
+let initialLimitProvidersPending = false;
+// Set by readSettings() when a client identity split was seeded into the tracked
+// CSV. The addition has to reach disk (the seed is persisted, not recomputed), but
+// settings are written through saveSettings() after the window exists, so the flag
+// carries the decision from the read to that first save.
+let seededClientSplitsPending = false;
+let persistedSettingsSnapshot = null;
+let credentialStore = null;
+let openrouterSlotsMigrated = false;
+let copilotSlotsMigrated = false;
+let credentialStorageErrorShown = false;
+
+const sessionUsageArchiveStore = createSessionUsageArchiveStore({ cursorUsageEvents: createCursorUsageEventIndex() });
+let rendererViewState = normalizeInitialRendererViewState();
+// Cursor's status page now redirects to status.x.ai, which is unreachable from
+// mainland China without a proxy — on the global fetch that card would read
+// "Unable to check status" on exactly the networks this transport exists for.
+const serviceStatusClient = createServiceStatusClient({ fetchImpl: electronLimitsFetch() });
+const codexResetForecastClient = createCodexResetForecastClient({
+  fetchImpl: electronLimitsFetch()
+});
+const STATUS_PAGE_HOSTS = new Set(SERVICE_STATUS_PROVIDERS.map((provider) => new URL(provider.pageUrl).hostname));
+const diagnosticJournal = createDiagnosticJournal();
+const recoverMacWidgetLaunchServicesRegistration = createMacWidgetLaunchServicesRecovery();
+
+app.setName(APP_NAME);
+if (process.platform === 'win32') app.setAppUserModelId('com.javis.tokenmonitor');
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) app.exit(0);
+
+const HOME_LIMIT_ACCOUNT_COUNT_DEFAULT = 3;
+const HOME_LIMIT_ACCOUNT_COUNT_MAX = 12;
+const PERIOD_MONTH_MODES = new Set(['month', 'week', 'last7', 'last30']);
+
+function normalizePeriodMonthMode(value) {
+  return PERIOD_MONTH_MODES.has(value) ? value : 'month';
+}
+
+function normalizeProjectBreakdownMode(value) {
+  return value === 'model' ? 'model' : 'tool';
+}
+
+function normalizeHomeLimitAccountCount(value) {
+  const count = Math.trunc(Number(value));
+  if (!Number.isFinite(count)) return HOME_LIMIT_ACCOUNT_COUNT_DEFAULT;
+  return Math.max(1, Math.min(HOME_LIMIT_ACCOUNT_COUNT_MAX, count));
+}
+
+function defaultSettings() {
+  const envHubUrl = process.env.TOKEN_MONITOR_HUB_URL || '';
+  const windowBehavior = process.env.TOKEN_MONITOR_ALWAYS_ON_TOP === '0' ? 'normal' : 'floating';
+  return {
+    hubMode: envHubUrl ? 'client' : 'local',
+    hubUrl: envHubUrl,
+    hubProfiles: [],
+    activeHubProfileId: '',
+    hubHostPort: Math.max(1, Math.min(65535, Number(process.env.TOKEN_MONITOR_PORT) || HUB_DEFAULT_PORT)),
+    // Default to TOKEN_MONITOR_SECRET so agents that already trust this env
+    // value (matching what the CLI hub uses) can connect to the widget's
+    // embedded hub without a fresh round of credential sharing. Falls back
+    // to a random secret generated in startEmbeddedHub() if env is empty.
+    hubHostSecret: process.env.TOKEN_MONITOR_SECRET || '',
+    secret: process.env.TOKEN_MONITOR_SECRET || '',
+    hubSyncSessionTitles: parseBoolean(process.env.TOKEN_MONITOR_SYNC_SESSION_TITLES, false),
+    syncContentState: normalizeSyncContentState(null),
+    windowBehavior,
+    alwaysOnTop: windowBehavior === 'floating',
+    keepAboveTaskbar: false,
+    refreshMs: Number(process.env.TOKEN_MONITOR_WIDGET_REFRESH_MS || 15000),
+    glassOpacity: 68,
+    glassBlur: 32,
+    macGlassTint: 0,
+    macClearGlassTint: 35,
+    backgroundImageOpacity: 28,
+    systemGlass: true,
+    windowsBackdrop: 'acrylic',
+    macBackdrop: 'vibrancy',
+    reduceMotion: 'system',
+    tokenNumberAnimation: 'roll',
+    showLiveDot: true,
+    showToolIcons: true,
+    titleIconOnly: true,
+    showCompactTotalTokens: false,
+    showLiveTokenRate: false,
+    liveTokenRateScope: 'all',
+    compactTokenUnits: 'western',
+    tokenRateMode: 'speed',
+    heatmapMetric: 'cost',
+    modelRankingMetric: 'tokens',
+    homeActiveDaysWindow: 'all',
+    showExactHomeTrendTokens: false,
+    // How a live session's context gauge reads. That direction is a choice the
+    // gauge cannot make on its own, so it is stated here rather than assumed:
+    // `used` is what the Sessions view and this app's own readouts show, while
+    // the clients' default footers tend to lead with what is left.
+    sessionContextMetric: 'used',
+    sessionTitlesEnabled: true,
+    periodMonthMode: 'month',
+    themeColors: {},
+    vendorColors: {},
+    textSize: 'standard',
+    interfaceFontFamily: '',
+    displayFontFamily: fontSettingsApi.DEFAULT_DISPLAY_FONT,
+    floatingBubbleEnabled: false,
+    floatingBubbleTrigger: 'click',
+    floatingBubbleContent: 'icon',
+    floatingBubbleCustomLayout: createDefaultTrayLayout(),
+    floatingBubbleBounds: null,
+    notchEnabled: false,
+    notchStyle: 'inherit',
+    notchShape: 'auto',
+    notchSummaryMode: 'sessions',
+    notchSummaryEnabled: true,
+    notchCustomLayout: createDefaultTrayLayout(),
+    notchDisplayId: null,
+    notchItems: null,
+    notchRunningIndicatorEnabled: false,
+    notchWarnColors: false,
+    notchHoverAction: 'peek',
+    notchHoverDelay: 0,
+    notchSwipeGestures: true,
+    notchHaptic: true,
+    notchProgressiveBlur: true,
+    notchHideSummaryInFullScreen: true,
+    notchRefreshEnabled: false,
+    notchSize: 'medium',
+    notchCustomScale: 1,
+    edgeDockEnabled: false,
+    edgeDockRefreshEnabled: false,
+    edgeDockRunningIndicatorEnabled: true,
+    edgeDockMode: 'autoHide',
+    edgeDockHaptic: true,
+    edgeDockWarnColors: false,
+    edgeDockMacBackdrop: 'inherit',
+    edgeDockWindowsBackdrop: 'inherit',
+    edgeDockSize: 'medium',
+    edgeDockBubbleSize: 'inherit',
+    edgeDockBubbleCustomScale: 1,
+    edgeDockCustomScale: 1,
+    edgeDockSide: 'right',
+    edgeDockFloatingX: null,
+    edgeDockOffset: null,
+    edgeDockDisplayId: null,
+    edgeDockItems: null,
+    pluginsEnabled: true,
+    pluginStates: {},
+    pluginInitialSetup: {},
+    pluginAuthorSkin: null,
+    notchPluginPages: [],
+    notchPageOrder: [],
+    notchBuiltinPages: [...pluginPlacements.NOTCH_BUILTIN_PAGES],
+    pluginMainPages: [],
+    pluginContentSelections: {},
+    pluginContentOrder: {},
+    lastViewState: { period: 'today', breakdown: 'home' },
+    discordRpcEnabled: false,
+    deviceId: process.env.TOKEN_MONITOR_DEVICE_ID || defaultDeviceId(),
+    deviceIconOverrides: {},
+    icloudWriterId: '',
+    lastPostedDeviceId: '',
+    clients: clientsCsvForSetting(process.env.TOKEN_MONITOR_CLIENTS),
+    codexDotsEnabled: process.env.TOKEN_MONITOR_CODEX_LOCAL_USAGE === '1',
+    codexDotsVisible: true,
+    customScanPaths: {},
+    clientDisplayOrder: '',
+    separateQoderClients: false,
+    hiddenClients: '',
+    pinnedClients: '',
+    viewDisplayOrder: '',
+    hiddenViews: defaultViewDisplayPreferences().hiddenViews,
+    homeModuleOrder: defaultHomeModulePreferences().homeModuleOrder,
+    hiddenHomeModules: defaultHomeModulePreferences().hiddenHomeModules,
+    homeModuleCounts: normalizeHomeModuleCounts(),
+    showHomeLimitBars: false,
+    homeLimitDisplayMode: 'text',
+    showHomeLimitProviderNames: false,
+    projectsEnabled: parseBoolean(process.env.TOKEN_MONITOR_PROJECTS_ENABLED, true),
+    projectBreakdownMode: 'tool',
+    historyEnabled: true,
+    historyIntervalMs: normalizeHistoryIntervalMs(process.env.TOKEN_MONITOR_HISTORY_INTERVAL_MS),
+    sessionUsageArchiveEnabled: parseBoolean(process.env.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED, true),
+    wslScanEnabled: parseBoolean(process.env.TOKEN_MONITOR_WSL_SCAN, false),
+    exportAutoEnabled: false,
+    exportDir: '',
+    exportIntervalMs: 60 * 1000,
+    collectionMode: 'live',
+    collectionIntervalMs: 5 * 60 * 1000,
+    syncUploadIntervalMs: normalizeSyncUploadIntervalMs(process.env.TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS),
+    serviceProviderDisplayOrder: '',
+    hiddenServiceProviders: '',
+    serviceStatusRefreshMs: 60000,
+    archivedClientUsage: { version: 1, clients: {} },
+    seededClientSplits: '',
+    allTimeSince: process.env.TOKEN_MONITOR_ALL_TIME_SINCE || '2024-01-01',
+    customModelPricing: [],
+    modelAliases: {},
+    modelAliasGrouping: 'off',
+    limitsEnabled: parseBoolean(process.env.TOKEN_MONITOR_LIMITS_ENABLED, true),
+    limitAccountPresentation: {},
+    limitProviders: parseLimitProviders(process.env.TOKEN_MONITOR_LIMIT_PROVIDERS).join(','),
+    limitProviderOrder: defaultLimitProviderOrder(),
+    homeLimitProviderOrder: '',
+    hiddenHomeLimitProviders: '',
+    // Rows of a provider's limits card the user has hidden, as
+    // `{ providerId: [itemId, ...] }` (see shared/limits/usageItems).
+    limitProviderHiddenItems: {},
+    homeLimitAccountCount: HOME_LIMIT_ACCOUNT_COUNT_DEFAULT,
+    limitsRefreshMode: normalizeLimitsRefreshMode(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MODE),
+    limitsRefreshMs: normalizeLimitsRefreshMs(process.env.TOKEN_MONITOR_LIMITS_REFRESH_MS),
+    cursorManualAccountIds: [],
+    showLimitSource: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_SOURCE, false),
+    maskLimitAccountEmails: false,
+    limitsHistoryOpenMode: 'hover',
+    claudePrepaidBalanceEnabled: parseBoolean(process.env.TOKEN_MONITOR_CLAUDE_PREPAID_BALANCE, true),
+    claudeCliFallbackEnabled: true,
+    // The key OpenCode stores for itself needs no setup, so tracking it is the
+    // default. This turns that off for a machine that is signed in to an account
+    // the user does not want reported.
+    opencodeAmbientEnabled: parseBoolean(process.env.TOKEN_MONITOR_OPENCODE_AMBIENT, true),
+    opencodeLocalLimitsEnabled: false,
+    // Third-party global reset predictions are opt-in and remain separate from
+    // the account-specific limits wire shape.
+    codexResetForecastEnabled: false,
+    workbuddyQuotaTotalEnabled: false,
+    showCodexAdditionalLimits: true,
+    showLimitUsed: parseBoolean(process.env.TOKEN_MONITOR_SHOW_LIMIT_USED, false),
+    // Manual subscription metadata. Plain preferences, not credentials, so they
+    // live in settings.json and cross to the renderer unredacted.
+    subscriptions: [],
+    // Local records left behind when this device joined a hub that already had a
+    // list, with the hub they were held back from. Kept until the user says
+    // whether to add or drop them.
+    subscriptionsOrphaned: { hubUrl: '', records: [] },
+    // Which hub `subscriptions` is currently a cache of, or '' when this device
+    // owns the list outright.
+    subscriptionsCacheHub: '',
+    windowBounds: null,
+    windowMaximized: false,
+    zoomFactor: 1,
+    showTrayIcon: true,
+    trayMode: false,
+    hideAppIcon: false,
+    trayContent: 'tokens',
+    trayCustomLayout: createDefaultTrayLayout(),
+    showTrayProviderBadge: false,
+    windowToggleShortcut: '',
+    currency: normalizeCurrency(process.env.TOKEN_MONITOR_CURRENCY || 'USD'),
+    currencyRates: {},
+    startAtLogin: false,
+    automaticAppUpdates: false,
+    proxyUrl: '',
+    noProxy: '',
+    language: 'auto',
+    ...initialAccountSettings(process.env),
+    appUpdate: {
+      lastCheckedAt: null,
+      lastKnownLatest: null,
+      dismissedVersion: null
+    }
+  };
+}
+
+function normalizeCollectionMode(value, fallback = 'live') {
+  const next = String(value || '').trim();
+  if (COLLECTION_MODE_VALUES.has(next)) return next;
+  return COLLECTION_MODE_VALUES.has(fallback) ? fallback : 'live';
+}
+
+// Which throughput reading the title-mark reveal shows. 'speed' is estimated output tokens
+// per second of model-busy time; 'burn' is every token per minute of the same window. Both
+// derive from the timed totals the collector already puts on the period — this only picks
+// the framing, and neither costs an extra scan.
+function normalizeTokenRateMode(value) {
+  return value === 'burn' ? 'burn' : 'speed';
+}
+
+function normalizeLiveTokenRateScope(value) {
+  return value === 'device' ? 'device' : 'all';
+}
+
+function normalizeHeatmapMetric(value, fallback = 'cost') {
+  const next = String(value || '').trim();
+  if (next === 'tokens' || next === 'cost') return next;
+  return fallback === 'tokens' ? 'tokens' : 'cost';
+}
+
+function normalizeHomeActiveDaysWindow(value, fallback = 'all') {
+  const next = String(value || '').trim();
+  if (next === 'year') return 'year';
+  if (next === 'all') return 'all';
+  return fallback === 'year' ? 'year' : 'all';
+}
+
+// The context gauge's own preference, deliberately separate from
+// showLimitUsed (AI Tool Limits): that one describes provider quota meters,
+// where 'remaining' is the headline number a plan is sold on. A session's
+// context window is a working budget the model is spending down, and the
+// clients themselves lead with used, so the two do not have to agree.
+function normalizeSessionContextMetric(value, fallback = 'used') {
+  const next = String(value || '').trim();
+  if (next === 'used' || next === 'remaining') return next;
+  return fallback === 'remaining' ? 'remaining' : 'used';
+}
+
+function normalizeCollectionIntervalMs(value, fallback = DEFAULT_COLLECTION_INTERVAL_MS) {
+  const numeric = Number(value);
+  if (COLLECTION_INTERVAL_OPTIONS.includes(numeric)) return numeric;
+  const fallbackNumeric = Number(fallback);
+  return COLLECTION_INTERVAL_OPTIONS.includes(fallbackNumeric) ? fallbackNumeric : DEFAULT_COLLECTION_INTERVAL_MS;
+}
+
+function collectorIntervalMs() {
+  return normalizeCollectionMode(settings?.collectionMode) === 'smart'
+    ? SMART_COLLECTION_INTERVAL_MS
+    : normalizeCollectionIntervalMs(settings?.collectionIntervalMs);
+}
+
+function collectorWatchEnabled() {
+  return normalizeCollectionMode(settings?.collectionMode) !== 'interval';
+}
+
+function collectorWatchTriggersCollection() {
+  return normalizeCollectionMode(settings?.collectionMode) === 'live';
+}
+
+function collectorIntervalRequiresActivity() {
+  return normalizeCollectionMode(settings?.collectionMode) === 'smart';
+}
+
+function syncUploadIntervalMs() {
+  return normalizeSyncUploadIntervalMs(settings?.syncUploadIntervalMs);
+}
+
+function electronUsageConfig(errorPrefix) {
+  return usageConfigFromSettings(settings, {
+    agentVersion: appVersion(),
+    agentRuntime: 'electron-widget',
+    commandTimeoutMs: 120 * 1000,
+    defaultDeviceId: defaultDeviceId(),
+    intervalMs: collectorIntervalMs(),
+    historyIntervalMs: normalizeHistoryIntervalMs(settings.historyIntervalMs),
+    reasonixNativeSessionsEnabled: true,
+    watchEnabled: collectorWatchEnabled(),
+    // No watchUsePolling on purpose. The widget states no preference so the
+    // shared default in resolveWatchUsePolling() governs and the widget cannot
+    // drift from the headless agent, which has never passed one. That default
+    // is native events on every platform: chokidar 4 dropped the bundled
+    // fsevents backend, so every platform now watches through the same
+    // per-directory fs.watch path, and the earlier attempt that observed missed
+    // events ran on the chokidar 3 backend that no longer exists. Where the
+    // kernel cannot supply watch descriptors the collector degrades to polling
+    // by itself; TOKEN_MONITOR_WATCH_POLLING overrides in both directions.
+    watchTriggersCollection: collectorWatchTriggersCollection(),
+    intervalRequiresActivity: collectorIntervalRequiresActivity(),
+    watchDebounceMs: 1500,
+    dailyHistoryArchiveWriteEnabled: () => !isExternalAgentActive(),
+    onError: (error, reason) => console.log(`[${errorPrefix}] ${reason}: ${error.message}`),
+    logger: (message) => console.log(`[${errorPrefix}] ${message}`)
+  });
+}
+
+function electronLimitsConfig() {
+  const workbuddyEnabled = settings?.limitsEnabled !== false
+    && parseLimitProviders(settings?.limitProviders).includes('workbuddy');
+  const workbuddyDesktopSessionSupported = isSupportedWorkbuddyLocalAppPlatform();
+  const workbuddyDesktopSessionEnabled = workbuddyEnabled && workbuddyDesktopSessionSupported;
+  return limitsConfigFromSettings(settings, {
+    env: process.env,
+    openrouterSlotsMigrated,
+    copilotSlotsMigrated,
+    workbuddyDesktopSessionOnly: true,
+    workbuddyDesktopSessionSupported,
+    workbuddyDesktopSessionEnabled,
+    workbuddyLocalSession: workbuddyDesktopSessionEnabled ? electronWorkbuddyLocalAuth.getSessionInfo() : {},
+    workbuddyLocalSessions: workbuddyDesktopSessionEnabled ? electronWorkbuddyLocalAuth.getSessionInfos() : [],
+    workbuddyManagedAccounts: workbuddyAccountsForRenderer(),
+    defaultLimitProviders: defaultLimitProviders(),
+    codexManagedAccounts: codexManagedAccountsForCollector(),
+    antigravityManagedAccounts: antigravityManagedAccountsForCollector(),
+    mimoManagedAccounts: mimoManagedAccountsForCollector()
+  });
+}
+
+function electronDeviceEnvelope() {
+  return envelopeFromSettings(settings, {
+    agentVersion: appVersion(),
+    agentRuntime: 'electron-widget',
+    defaultDeviceId: defaultDeviceId()
+  });
+}
+
+function defaultLimitProviders() {
+  return parseLimitProviders(process.env.TOKEN_MONITOR_LIMIT_PROVIDERS).join(',');
+}
+
+function defaultLimitProviderOrder() {
+  return parseLimitProviders().join(',');
+}
+
+const { createAntigravityAccountService } = require('./providers/antigravity/accountService');
+let antigravityAccountsOwner;
+function antigravityAccountService() {
+  return antigravityAccountsOwner ||= createAntigravityAccountService({
+    slotPersistence: ordinarySlotPersistence('antigravity'),
+    getAntigravityManagedAccounts: () => settings?.antigravityManagedAccounts,
+    getCredentialStore: ensureCredentialStore,
+    electronLimitsFetch,
+    openExternal: url => shell.openExternal(url),
+    setAntigravityManagedAccounts: value => { settings.antigravityManagedAccounts = value; },
+    saveSettings,
+    pushSettingsToRenderer,
+    sendAntigravityAccountsPush,
+    queueLimitInvalidation,
+  });
+}
+function normalizeAntigravityManagedAccounts(...args) { return antigravityAccountService().normalizeAntigravityManagedAccounts(...args); }
+function antigravityAccountsForRenderer(...args) { return antigravityAccountService().antigravityAccountsForRenderer(...args); }
+
+function antigravityManagedAccountsForCollector(...args) { return antigravityAccountService().antigravityManagedAccountsForCollector(...args); }
+function persistAntigravityCredentialsRenewal(...args) { return antigravityAccountService().persistAntigravityCredentialsRenewal(...args); }
+function addAntigravityManagedAccount(...args) { return antigravityAccountService().addAntigravityManagedAccount(...args); }
+function cancelAntigravityManagedAccountLogin(...args) { return antigravityAccountService().cancelAntigravityManagedAccountLogin(...args); }
+function removeAntigravityManagedAccount(...args) { return antigravityAccountService().removeAntigravityManagedAccount(...args); }
+function setAntigravityManagedAccountEnabled(...args) { return antigravityAccountService().setAntigravityManagedAccountEnabled(...args); }
+
+const { createMimoAccountService } = require('./providers/mimo/accountService');
+let mimoAccountsOwner;
+function mimoAccountService() {
+  return mimoAccountsOwner ||= createMimoAccountService({
+    getMimoManagedAccounts: () => settings?.mimoManagedAccounts,
+    getUserDataPath: () => app.getPath('userData'),
+    getCredentialStore: ensureCredentialStore,
+    credentialProbeDeps,
+    setMimoManagedAccounts: value => { settings.mimoManagedAccounts = value; },
+    saveSettings,
+    pushSettingsToRenderer,
+    sendMimoAccountsPush,
+    queueLimitInvalidation,
+  });
+}
+function normalizeMimoManagedAccounts(...args) { return mimoAccountService().normalizeMimoManagedAccounts(...args); }
+
+function mimoAccountsForRenderer(...args) { return mimoAccountService().mimoAccountsForRenderer(...args); }
+function mimoManagedAccountsForCollector(...args) { return mimoAccountService().mimoManagedAccountsForCollector(...args); }
+
+function addMimoManagedAccount(...args) { return mimoAccountService().addMimoManagedAccount(...args); }
+function removeMimoManagedAccount(...args) { return mimoAccountService().removeMimoManagedAccount(...args); }
+function setMimoManagedAccountEnabled(...args) { return mimoAccountService().setMimoManagedAccountEnabled(...args); }
+function migrateLegacyMimoCredentialFiles(...args) { return mimoAccountService().migrateLegacyMimoCredentialFiles(...args); }
+
+const { createCodexAccountService } = require('./providers/codex/accountService');
+let codexAccountsOwner;
+function codexAccountService() {
+  return codexAccountsOwner ||= createCodexAccountService({
+    getLimitsRuntime: () => deviceRuntimeHandle,
+    isEnabled: () => settings?.limitsEnabled !== false && parseLimitProviders(settings?.limitProviders).includes('codex'),
+    getCodexManagedAccounts: () => settings?.codexManagedAccounts,
+    electronProviderDeps,
+    setCodexManagedAccounts: value => { settings.codexManagedAccounts = value; },
+    saveSettings,
+    pushSettingsToRenderer,
+    queueLimitInvalidation,
+    getUserDataPath: () => app.getPath('userData'),
+  });
+}
+function normalizeCodexManagedAccounts(...args) { return codexAccountService().normalizeCodexManagedAccounts(...args); }
+function hydrateCodexManagedAccounts(...args) { return codexAccountService().hydrateCodexManagedAccounts(...args); }
+function hydrateCodexManagedWorkspaceLabels(...args) { return codexAccountService().hydrateCodexManagedWorkspaceLabels(...args); }
+
+function codexAccountsForRenderer(...args) { return codexAccountService().codexAccountsForRenderer(...args); }
+function codexManagedAccountsForCollector(...args) { return codexAccountService().codexManagedAccountsForCollector(...args); }
+
+
+
+
+function removeCodexManagedAccount(...args) { return codexAccountService().removeCodexManagedAccount(...args); }
+function setCodexManagedAccountEnabled(...args) { return codexAccountService().setCodexManagedAccountEnabled(...args); }
+
+
+const { createCursorAccountService } = require('./providers/cursor/accountService');
+let cursorAccountsOwner;
+function cursorAccountService() {
+  return cursorAccountsOwner ||= createCursorAccountService({
+    isExternalAgentActive,
+    getCursorDisabledAccountIds: () => settings?.cursorDisabledAccountIds,
+    getCursorManualAccountIds: () => settings?.cursorManualAccountIds,
+    getCursorSourcePreference: () => settings?.cursorSourcePreference || 'auto',
+    setCursorDisabledAccountIds: value => { settings.cursorDisabledAccountIds = value; },
+    setCursorManualAccountIds: value => { settings.cursorManualAccountIds = value; },
+    saveSettings,
+    reconfigureLimits: () => deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig()),
+    queueLimitInvalidation,
+    refreshUsage: () => bestEffortTrackedUsageRefresh('cursor', { forceSync: true }),
+  });
+}
+
+
+const { createOpencodeAccountService } = require('./providers/opencode/accountService');
+let opencodeAccountsOwner;
+function opencodeAccountService() {
+  return opencodeAccountsOwner ||= createOpencodeAccountService({
+    getOpencodeProfiles: () => settings?.opencodeProfiles,
+    queueLimitInvalidation,
+    electronLimitsFetch,
+    setOpencodeProfiles: value => { settings.opencodeProfiles = value; },
+    setOpencodeCookie: value => { settings.opencodeCookie = value; },
+    saveSettings,
+    electronProviderDeps,
+    getOpencodeAmbientEnabled: () => settings?.opencodeAmbientEnabled,
+    getOpencodeCookie: () => settings?.opencodeCookie,
+    setOpencodeAmbientEnabled: value => { settings.opencodeAmbientEnabled = value; },
+  });
+}
+
+const { createThirdpartyAccountService } = require('./providers/thirdparty/accountService');
+let thirdpartyAccountsOwner;
+function thirdpartyAccountService() {
+  return thirdpartyAccountsOwner ||= createThirdpartyAccountService({
+    getThirdPartyProfiles: () => settings?.thirdPartyProfiles,
+    setThirdPartyProfiles: value => { settings.thirdPartyProfiles = value; },
+    saveSettings,
+    electronProviderDeps,
+    queueLimitInvalidation,
+  });
+}
+function persistThirdPartyCredentialsRenewal(...args) { return thirdpartyAccountService().persistThirdPartyCredentialsRenewal(...args); }
+function persistThirdPartyAccountKey(...args) { return thirdpartyAccountService().persistThirdPartyAccountKey(...args); }
+
+let claudeManagedAccountService = null;
+
+function claudeAccountService() {
+  if (!claudeManagedAccountService) {
+    claudeManagedAccountService = createClaudeManagedAccounts({
+      slotPersistence: ordinarySlotPersistence('claude'),
+      getSettings: () => settings,
+      setSettings: (next) => { settings = next; },
+      saveSettings: () => saveSettings({ throwOnError: true }),
+      credentialStore: ensureCredentialStore(),
+      getLegacyCredential: () => currentAccountField('claudeWebCookie', settings, process.env),
+      probeDeps: credentialProbeDeps,
+      projectSettings: settingsForRenderer,
+      onChanged: (account, reason, options) => {
+        pushSettingsToRenderer();
+        if (reason === 'login-status') return;
+        deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+        const scope = claudeAccountChangeScope(account, options);
+        return queueLimitInvalidation(scope, reason, options);
+      }
+    });
+  }
+  return claudeManagedAccountService;
+}
+
+function persistClaudeWebCookieRenewal(renewal = {}) {
+  return claudeAccountService().renewCookie(renewal);
+}
+
+// The StepFun Oasis token's access half expires every 30 minutes; the limits
+// fetcher rotates it through the platform's own RefreshToken endpoint. The
+// rotated pair lands here and is stored only while the setting still holds the
+// token that was refreshed, so a fresh paste landing mid-flight always wins.
+// Values are compared in the fetcher's normalized form (a pasted raw cookie
+// header and its bare token compare equal), and the stored value is normalized
+// on the way in.
+function persistStepfunTokenRenewal({ previousToken, token } = {}) {
+  if (!settings?.stepfunToken) return false;
+  const expected = stepfunToken({}, { stepfunToken: previousToken });
+  const renewed = stepfunToken({}, { stepfunToken: token });
+  if (!expected || !renewed) return false;
+  if (stepfunToken({}, { stepfunToken: settings.stepfunToken }) !== expected) return false;
+  if (settings.stepfunToken === renewed) return true;
+  settings.stepfunToken = renewed;
+  saveSettings({ throwOnError: true });
+  return true;
+}
+
+// A save-time probe gets the collector's transports but none of its write-backs:
+// a credential that has not been saved yet must not renew itself into
+// settings, so a rotation is reported into `renewed` and stored with the rest
+// of the draft. A fresh runtime state keeps the probe from reading or seeding
+// the collector's caches; `probe` tells fetchers with persistent bookkeeping
+// (the DeepSeek balance history) to skip it, and `bypassValidationCache` stops
+// Ollama answering from a cached check of a different save.
+function credentialProbeDeps(renewed = {}) {
+  return electronProviderDeps({
+    claudeWebFetch: electronClaudeWebFetch,
+    onClaudeWebCookieRenewed: ({ cookie }) => {
+      renewed.claudeWebCookie = cookie;
+      return true;
+    },
+    onStepfunTokenRenewed: ({ token }) => {
+      renewed.stepfunToken = token;
+      return true;
+    },
+    providerRuntimeState: new Map(),
+    bypassValidationCache: true,
+    probe: true
+  });
+}
+
+function electronLimitsDeps() {
+  return {
+    fetch: electronLimitsFetch(),
+    mimoExchangeFetch: ensureMimoExchangeFetch(),
+    museWebFetch: ensureMimoExchangeFetch(),
+    claudeWebFetch: electronClaudeWebFetch,
+    workbuddyFetch: async (url, init = {}, expectedSession = null) => {
+      const result = await electronWorkbuddyLocalAuth.request(url, init, expectedSession);
+      return {
+        status: result.status,
+        ok: result.ok,
+        json: () => result.json()
+      };
+    },
+    onAccountSlotResolved: (...args) => { void accountSlotService?.resolved(...args).catch(() => {}); },
+    onAccountSlotCredentialRenewed: renewal => accountSlotService?.renew(renewal),
+    resolveConfigSnapshot: () => electronLimitsConfig(),
+    onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal,
+    onClaudeWebAccountResolved: (observation) => claudeAccountService().resolved(observation),
+    resolveClaudeWebCredential: (account) => claudeAccountService().resolveCredential(account),
+    onStepfunTokenRenewed: persistStepfunTokenRenewal,
+    onAntigravityCredentialsRenewed: persistAntigravityCredentialsRenewal,
+    resolveWorkbuddyManagedCredential: (account, options) => workbuddyAccountService().resolveCredential(account, options),
+    onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal,
+    onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey,
+    onEvent: (event) => {
+      if (event?.type === 'probe-start' || event?.type === 'probe-finish') publishLimitProbes(event.probes);
+    }
+  };
+}
+
+// One provider's quota, or one account's where the provider can narrow to it:
+// the settings panel's refresh and a quota row's own button, on any surface.
+// The rows repaint from the limits update the probe publishes; the answer says
+// whether one is coming (limitRefreshOutcome).
+async function refreshLimitProvider(providerId, account) {
+  const provider = String(providerId || '').trim();
+  const parsed = parseLimitProviders(provider);
+  if (parsed.length !== 1 || parsed[0] !== provider) return { ok: false, reason: 'unavailable', error: 'unknown provider' };
+  if (!deviceRuntimeHandle) return { ok: false, reason: 'unavailable', error: 'limits runtime is not ready' };
+  const scope = account && typeof account === 'object'
+    ? limitAccountRefreshScope(provider, account)
+    : { provider };
+  try {
+    return limitRefreshOutcome(await runLimitInvalidation(deviceRuntimeHandle, scope, 'account-panel', { clear: false }));
+  } catch (error) {
+    return { ok: false, reason: 'failed', error: error?.message || String(error) };
+  }
+}
+
+// The limits probes running right now, for the quota rows' refresh buttons to
+// show a background refresh as well as one the user started.
+let limitProbes = [];
+function publishLimitProbes(probes) {
+  limitProbes = Array.isArray(probes) ? probes : [];
+  edgeDockController?.setLimitProbes(limitProbes);
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.webContents.send('limits:probes', limitProbes);
+  } catch (_) {}
+}
+
+
+
+
+
+
+
+let copilotLoginController = null;
+let copilotLoginFlowId = '';
+
+
+// Startup label hydration is a small one-shot map. LimitsRuntime's bounded
+// executor owns lane-aware provider refresh state, so it is not reusable here.
+
+let workbuddyManagedAccountService = null;
+
+function workbuddyAccountsForRenderer() {
+  return workbuddyOAuth.normalizeManagedAccounts(ordinarySlotPersistence('workbuddy').accounts());
+}
+
+function workbuddyAccountService() {
+  if (!workbuddyManagedAccountService) {
+    workbuddyManagedAccountService = createWorkbuddyManagedAccounts({
+      slotPersistence: ordinarySlotPersistence('workbuddy'),
+      getAccounts: () => settings?.workbuddyManagedAccounts,
+      setAccounts: (accounts) => { settings.workbuddyManagedAccounts = accounts; },
+      saveSettings: () => saveSettings({ throwOnError: true }),
+      credentialStore: ensureCredentialStore(),
+      fetch: electronLimitsFetch(),
+      openExternal: (url) => shell.openExternal(url),
+      onChanged: (account, reason, options = {}) => {
+        pushSettingsToRenderer();
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          try { mainWindow.webContents.send('workbuddy:accounts', workbuddyAccountsForRenderer()); } catch (_) {}
+        }
+        const scope = { provider: 'workbuddy', accountId: account.id, accountKey: account.accountKey };
+        // Removal can uncover an independent app-owned session for this identity.
+        // Clear only the removed row, then rebuild the complete discovery union.
+        void queueLimitInvalidation(scope, reason === 'account-enabled' ? 'account-state' : reason, options)
+          .then(() => reason === 'account-removed'
+            ? queueLimitInvalidation({ provider: 'workbuddy' }, 'account-state', { refresh: true })
+            : undefined)
+          .catch(() => {});
+      }
+    });
+  }
+  return workbuddyManagedAccountService;
+}
+
+async function workbuddyAccountOperation(operation) {
+  try {
+    return await operation(workbuddyAccountService());
+  } catch (_) {
+    // Storage/transport errors may contain paths or credential material. IPC
+    // returns the bounded setup error and never forwards their raw message.
+    return { ok: false, errorCode: 'credentialStorageUnavailable' };
+  }
+}
+
+
+function pushCodexActiveAccountToRenderer(account) {
+  if (!account || !mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('codex:activeAccount', account); } catch (_) {}
+}
+
+// Every surface reaches the same credential-swap lane. The renderer-level
+// locks keep each button tidy; this process-wide guard prevents two windows or
+// the tray from writing the live auth file at the same time.
+async function switchCodexSystemAccount(id) {
+  return codexAccountService().switchSystemAccount(id, async result => {
+    if (result?.ok) {
+      // Publish the optimistic selection from the shared lane so the App,
+      // Edge Dock and tray agree immediately regardless of which one initiated
+      // the switch. Quota data catches up through one targeted refresh below.
+      codexPresentationActiveAccountId = result.activeAccountId || id;
+      codexPresentationPendingAccountId = codexPresentationActiveAccountId;
+      codexPresentationPendingSince = Date.now();
+      pushCodexActiveAccountToRenderer(result.activeAccount);
+      pushSettingsToRenderer();
+      if (latestStats) refreshLimitStatsPresentation();
+      void refreshCodexManagedAccountLimits(id, 'system-account-switch')
+        .then((refreshResult) => {
+          if (!refreshResult?.ok) {
+            console.log(`[codex] post-switch refresh failed: ${refreshResult?.error || 'unknown error'}`);
+          }
+          if (latestStats) refreshLimitStatsPresentation();
+        })
+        .catch((error) => {
+          console.log(`[codex] post-switch refresh failed: ${error?.message || error}`);
+        });
+    }
+  });
+}
+
+// The Edge Dock uses the same shared switch lane as the App and tray. That lane
+// broadcasts the optimistic account and refreshes its quota in the background;
+// this wrapper only keeps the dock-specific error log.
+async function switchCodexAccountFromEdgeDock(accountId) {
+  const result = await switchCodexSystemAccount(accountId);
+  if (!result?.ok) {
+    console.log(`[edge-dock] codex account switch failed: ${result?.error || 'unknown error'}`);
+    return result;
+  }
+  return result;
+}
+
+function refreshCodexManagedAccountLimits(...args) { return codexAccountService().refreshCodexManagedAccountLimits(...args); }
+
+function migrateLimitProviders(value) {
+  // Saved provider selections are user intent. Normalize ids, but do not expand
+  // older defaults into today's full provider list because the saved shape is
+  // indistinguishable from a deliberate "only these providers" choice.
+  return require('./plugins/limits').desktopProviderPreference(value, parseLimitProviders);
+}
+
+function migrateLimitProviderOrder(value) {
+  return require('./plugins/limits').desktopProviderPreference(value, parseLimitProviders) || defaultLimitProviderOrder();
+}
+
+function migrateHomeLimitProviderOrder(value) {
+  const isEmpty = value === undefined || value === null || value === ''
+    || (Array.isArray(value) && value.length === 0);
+  if (isEmpty) return '';
+  const normalized = require('./plugins/limits').desktopProviderPreference(value, parseLimitProviders);
+  return normalized && normalized !== defaultLimitProviderOrder() ? normalized : '';
+}
+
+function normalizeHiddenLimitProviders(value) {
+  const known = new Set(parseLimitProviders());
+  const raw = Array.isArray(value) ? value : String(value || '').split(',');
+  const seen = new Set();
+  const hidden = [];
+  for (const item of raw) {
+    const id = String(item || '').trim().toLowerCase();
+    if ((!known.has(id) && !require('../shared/limits/providers').isPluginLimitModuleId(id)) || seen.has(id)) continue;
+    seen.add(id);
+    hidden.push(id);
+  }
+  return hidden.join(',');
+}
+
+function migrateClientDisplayOrder(value) {
+  const known = new Set(KNOWN_CLIENTS.split(','));
+  const migrated = normalizeClientsCsv(value);
+  const hasKnownClient = migrated.split(',').some((item) => known.has(item));
+  return hasKnownClient ? normalizeClientDisplayOrder(migrated, KNOWN_CLIENT_LIST).join(',') : '';
+}
+
+function migrateClientSelection(value, normalizeSelection) {
+  return normalizeSelection(normalizeClientsCsv(value), KNOWN_CLIENT_LIST);
+}
+
+function migrateVendorColors(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const colors = { ...value };
+  if (colors.kilo === undefined && colors.kilocode !== undefined) colors.kilo = colors.kilocode;
+  delete colors.kilocode;
+  // `micode` was the tracked-client id for MiMo before it was unified with the
+  // limits-provider id. The `xiaomi` key beside it is a different axis (the
+  // model vendor) and deliberately keeps its own override.
+  if (colors.mimo === undefined && colors.micode !== undefined) colors.mimo = colors.micode;
+  delete colors.micode;
+  return colors;
+}
+
+const SERVICE_STATUS_REFRESH_VALUES = new Set([0, 60000, 120000, 300000, 900000, 1800000]);
+function normalizeServiceStatusRefreshMs(value) {
+  const n = Number(value);
+  return SERVICE_STATUS_REFRESH_VALUES.has(n) ? n : 60000;
+}
+
+function migrateViewDisplayOrder(value) {
+  const known = new Set(DEFAULT_VIEW_LIST.map((view) => view.id));
+  const raw = Array.isArray(value) ? value : String(value || '').split(',');
+  const hasKnownView = raw.some((item) => known.has(String(item || '').trim().toLowerCase()));
+  return hasKnownView ? normalizeViewDisplayOrder(value, DEFAULT_VIEW_LIST).join(',') : '';
+}
+
+function normalizeTrayContent(value, fallback = 'tokens', allowedValues = TRAY_CONTENT_VALUES) {
+  const v = String(value || '').trim();
+  return allowedValues.has(v) ? v : fallback;
+}
+
+function normalizeHubMode(value, fallback = 'local', platform = process.platform) {
+  const v = String(value || '').trim();
+  if (v === 'icloud' && platform !== 'darwin') {
+    return fallback === 'icloud' ? 'local' : fallback;
+  }
+  return HUB_MODE_VALUES.has(v) ? v : fallback;
+}
+
+function normalizeLanguageSetting(value, fallback = 'auto') {
+  const raw = String(value || '').replace(/_/g, '-').trim();
+  const lower = raw.toLowerCase();
+  if (lower === 'auto') return 'auto';
+  if (lower === 'en' || lower.startsWith('en-')) return 'en';
+  if (lower === 'zh-tw' || lower.startsWith('zh-hant') || /-(tw|hk|mo)\b/i.test(raw)) return 'zh-TW';
+  if (lower === 'zh-cn' || lower.startsWith('zh-hans') || /-(cn|sg|my)\b/i.test(raw)) return 'zh-CN';
+  if (lower === 'pt' || lower.startsWith('pt-')) return 'pt-BR';
+  if (lower === 'es' || lower.startsWith('es-')) return 'es';
+  return LANGUAGE_VALUES.has(raw) ? raw : fallback;
+}
+
+function normalizeHubPort(value, fallback = HUB_DEFAULT_PORT) {
+  const n = Math.floor(Number(value));
+  if (!Number.isFinite(n) || n < 1 || n > 65535) return fallback;
+  return n;
+}
+
+function clampZoom(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(ZOOM_LIMITS.max, Math.max(ZOOM_LIMITS.min, Number(n.toFixed(2))));
+}
+
+function isBoundsOnScreen(bounds) {
+  if (!bounds || typeof bounds.x !== 'number' || typeof bounds.y !== 'number') return false;
+  try {
+    const display = screen.getDisplayMatching({
+      x: bounds.x, y: bounds.y, width: bounds.width || 1, height: bounds.height || 1
+    });
+    const wa = display.workArea;
+    return bounds.x + bounds.width > wa.x &&
+      bounds.x < wa.x + wa.width &&
+      bounds.y + bounds.height > wa.y &&
+      bounds.y < wa.y + wa.height;
+  } catch (_) { return false; }
+}
+
+function restoredBounds() {
+  const saved = settings?.windowBounds;
+  if (!saved || typeof saved.width !== 'number' || typeof saved.height !== 'number') return null;
+  const width = Math.min(WINDOW_LIMITS.maxWidth, Math.max(WINDOW_LIMITS.minWidth, saved.width));
+  const height = Math.min(WINDOW_LIMITS.maxHeight, Math.max(WINDOW_LIMITS.minHeight, saved.height));
+  if (!isBoundsOnScreen({ ...saved, width, height })) return { width, height };
+  return { x: saved.x, y: saved.y, width, height };
+}
+
+let persistBoundsTimer = null;
+let floatingBubbleAutoCollapseTimer = null;
+const floatingBubbleState = { collapsed: false, side: null, collapsedBounds: null, expandedBounds: null, suppressNextCollapse: false, contentSize: null };
+let mainWindowChrome = { collapsedFloatingBubble: false };
+let mainWindowReplacementEpoch = 0;
+let mainWindowReplacementTask = Promise.resolve();
+
+function stopPersistBoundsTimer() {
+  if (persistBoundsTimer) clearTimeout(persistBoundsTimer);
+  persistBoundsTimer = null;
+}
+
+function floatingBubblePayload() {
+  return {
+    enabled: canUseFloatingBubble(settings),
+    collapsed: floatingBubbleState.collapsed,
+    side: floatingBubbleState.side
+  };
+}
+
+// Load settings once and, on that first load, seed the in-memory view state
+// from the persisted snapshot so a cold start reopens the last-used view.
+function ensureSettingsLoaded() {
+  if (settings) return settings;
+  settings = readSettings();
+  const persistedCodexAccounts = settings.codexManagedAccounts;
+  const hydratedCodexAccounts = hydrateCodexManagedAccounts(persistedCodexAccounts);
+  persistedSettingsSnapshot = cloneSettingsSnapshot(settings);
+  if (JSON.stringify(hydratedCodexAccounts) !== JSON.stringify(persistedCodexAccounts)) {
+    settings.codexManagedAccounts = hydratedCodexAccounts;
+    if (!saveSettings()) {
+      // Keep the runtime identity coherent even if the migration cannot be
+      // persisted yet; the next ordinary settings save will retry it.
+      settings.codexManagedAccounts = hydratedCodexAccounts;
+    }
+  }
+  // A seeded client identity split is an in-memory addition at this point.
+  // Persist it with the same retry-on-next-save tolerance as the migration
+  // above, so a read-only or failing settings file delays the write instead of
+  // losing the tracked client.
+  if (seededClientSplitsPending) {
+    seededClientSplitsPending = false;
+    saveSettings();
+  }
+  rendererViewState = normalizeInitialRendererViewState(settings.lastViewState, rendererViewState);
+  return settings;
+}
+
+function updateRendererViewState(patch) {
+  const previous = rendererViewState;
+  rendererViewState = normalizeInitialRendererViewState({
+    ...rendererViewState,
+    ...(patch || {})
+  }, rendererViewState);
+  const changed = previous.period !== rendererViewState.period
+    || previous.breakdown !== rendererViewState.breakdown;
+  if (changed && settings) {
+    settings.lastViewState = { ...rendererViewState };
+    saveSettings();
+  }
+  return rendererViewState;
+}
+
+function sendFloatingBubbleState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('floatingBubble:state', floatingBubblePayload()); } catch (_) {}
+}
+
+function syncPluginWindowVisibility(win) {
+  pluginRuntime?.refreshWindowVisibility(win);
+  sendMainWindowVisibility(win);
+}
+
+function sendMainWindowVisibility(win = mainWindow) {
+  if (!win || win !== mainWindow || win.isDestroyed() || win.webContents.isDestroyed()) return;
+  win.webContents.send('window:visibility', win.isVisible() && !win.isMinimized());
+}
+
+function stopFloatingBubbleAutoCollapseTimer() {
+  if (floatingBubbleAutoCollapseTimer) clearTimeout(floatingBubbleAutoCollapseTimer);
+  floatingBubbleAutoCollapseTimer = null;
+}
+
+function restoreWindowSizeLimits() {
+  applyWindowSizeLimits(mainWindow, WINDOW_LIMITS);
+}
+
+function applyCollapsedFloatingBubbleLimits(bounds) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (typeof mainWindow.setMinimumSize === 'function') {
+    mainWindow.setMinimumSize(bounds?.width || FLOATING_BUBBLE_HANDLE_WIDTH, bounds?.height || FLOATING_BUBBLE_HANDLE_HEIGHT);
+  }
+  if (typeof mainWindow.setMaximumSize === 'function') {
+    mainWindow.setMaximumSize(bounds?.width || FLOATING_BUBBLE_HANDLE_WIDTH, bounds?.height || FLOATING_BUBBLE_HANDLE_HEIGHT);
+  }
+  if (typeof mainWindow.setResizable === 'function') mainWindow.setResizable(false);
+  mainWindow.setAlwaysOnTop(true, floatingAlwaysOnTopLevel());
+  if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(true);
+  syncTaskbarZOrder();
+}
+
+function displayForBounds(bounds) {
+  if (!bounds || typeof bounds.x !== 'number' || typeof bounds.y !== 'number') return null;
+  try {
+    return screen.getDisplayMatching({
+      x: bounds.x,
+      y: bounds.y,
+      width: bounds.width || 1,
+      height: bounds.height || 1
+    });
+  } catch (_) {
+    return null;
+  }
+}
+
+function displayForPoint(point) {
+  if (!point || !Number.isFinite(Number(point.x)) || !Number.isFinite(Number(point.y))) return null;
+  try {
+    return screen.getDisplayNearestPoint({ x: Number(point.x), y: Number(point.y) });
+  } catch (_) {
+    return null;
+  }
+}
+
+function collapsedAreaForDisplay(display) {
+  return floatingBubbleCollapsedArea(display, process.platform) || display?.workArea || display?.bounds || null;
+}
+
+function collapsedMargin() {
+  return floatingBubbleCollapsedMargin(process.platform);
+}
+
+function persistWindowBounds(next) {
+  const prev = settings.windowBounds || {};
+  if (prev.x === next.x && prev.y === next.y && prev.width === next.width && prev.height === next.height) return false;
+  settings.windowBounds = next;
+  saveSettings();
+  return true;
+}
+
+function collapseFloatingBubble(plan) {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  stopFloatingBubbleAutoCollapseTimer();
+  const { side, expandedBounds, collapsedBounds } = plan || {};
+  if (!expandedBounds || !collapsedBounds) return false;
+  floatingBubbleState.collapsed = true;
+  floatingBubbleState.side = side;
+  floatingBubbleState.collapsedBounds = collapsedBounds;
+  floatingBubbleState.expandedBounds = expandedBounds;
+  settings.floatingBubbleBounds = collapsedBounds;
+  applyNativeMaterial();
+  if (process.platform === 'win32') {
+    persistWindowBounds(expandedBounds);
+    replaceMainWindow(collapsedBounds, {
+      collapsedFloatingBubble: true,
+      focus: false,
+      waitForContent: settings.floatingBubbleContent !== 'icon'
+    });
+    return true;
+  }
+  applyCollapsedFloatingBubbleLimits(collapsedBounds);
+  mainWindow.setBounds(collapsedBounds);
+  persistWindowBounds(expandedBounds);
+  sendFloatingBubbleState();
+  return true;
+}
+
+function maybeCollapseFloatingBubble(bounds) {
+  // The display comes from where the window actually sits, but the bounds the
+  // plan remembers as "expanded" must be the normal ones: collapsing a
+  // maximized window would otherwise persist the whole screen as its size.
+  const display = displayForBounds(bounds);
+  if (!display) return false;
+  const collapsedArea = collapsedAreaForDisplay(display);
+  const plan = floatingBubbleCollapsePlan(expandedBoundsForCollapse(mainWindow, bounds), display.workArea, settings, {
+    collapsed: floatingBubbleState.collapsed,
+    suppressNextCollapse: floatingBubbleState.suppressNextCollapse,
+    collapsedArea,
+    collapsedMargin: collapsedMargin(),
+    collapsedBounds: settings?.floatingBubbleBounds || floatingBubbleState.collapsedBounds,
+    handleWidth: floatingBubbleState.contentSize?.width,
+    handleHeight: floatingBubbleState.contentSize?.height
+  });
+  floatingBubbleState.suppressNextCollapse = false;
+  if (!plan) return false;
+  return collapseFloatingBubble(plan);
+}
+
+function expandFloatingBubble(options = {}) {
+  if (!mainWindow || mainWindow.isDestroyed() || !floatingBubbleState.collapsed) return false;
+  stopFloatingBubbleAutoCollapseTimer();
+  const current = mainWindow.getBounds();
+  const display = displayForBounds(floatingBubbleState.expandedBounds || current) || displayForBounds(current);
+  const target = display
+    ? expandedFloatingBubbleBounds(current, display.workArea, floatingBubbleState.expandedBounds)
+    : floatingBubbleState.expandedBounds;
+  floatingBubbleState.collapsed = false;
+  floatingBubbleState.side = null;
+  floatingBubbleState.collapsedBounds = current;
+  floatingBubbleState.expandedBounds = target;
+  applyNativeMaterial();
+  if (target) {
+    floatingBubbleState.suppressNextCollapse = true;
+    if (process.platform === 'win32' && mainWindowChrome.collapsedFloatingBubble) {
+      persistWindowBounds(target);
+      replaceMainWindow(target, {
+        collapsedFloatingBubble: false,
+        focus: options.focus !== false,
+        suppressInitialNumberAnimation: true,
+        waitForContent: true,
+        inactive: options.focus === false
+      });
+      setTimeout(() => { floatingBubbleState.suppressNextCollapse = false; }, 300);
+      return true;
+    }
+    // Unlock, re-limit and resize in one helper rather than inline: the order
+    // is what fixes the collapsed window refusing to grow again on Linux, and
+    // an inline `restoreWindowSizeLimits(); setBounds()` reads like it works.
+    restoreFloatingBubbleWindow(mainWindow, target, WINDOW_LIMITS);
+    persistWindowBounds(target);
+    setTimeout(() => { floatingBubbleState.suppressNextCollapse = false; }, 300);
+  }
+  applyWindowSettings();
+  sendFloatingBubbleState();
+  if (options.focus !== false) {
+    mainWindow.show();
+    restoreWindowMaximized(mainWindow, settings);
+  }
+  return true;
+}
+
+function scheduleFloatingBubbleAutoCollapse() {
+  stopFloatingBubbleAutoCollapseTimer();
+  if (!canUseFloatingBubble(settings) || floatingBubbleState.collapsed) return;
+  floatingBubbleAutoCollapseTimer = setTimeout(() => {
+    floatingBubbleAutoCollapseTimer = null;
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isFocused()) return;
+    maybeCollapseFloatingBubble(mainWindow.getBounds());
+  }, 180);
+}
+
+function syncFloatingBubbleAvailability() {
+  if (!canUseFloatingBubble(settings)) {
+    if (floatingBubbleState.collapsed) expandFloatingBubble({ focus: false });
+    else {
+      floatingBubbleState.side = null;
+      floatingBubbleState.collapsedBounds = null;
+      floatingBubbleState.expandedBounds = null;
+      floatingBubbleState.suppressNextCollapse = false;
+      stopFloatingBubbleAutoCollapseTimer();
+      restoreWindowSizeLimits();
+    }
+    sendFloatingBubbleState();
+    return;
+  }
+  sendFloatingBubbleState();
+}
+
+function persistBoundsSoon() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!shouldPersistWindowBounds(mainWindow)) {
+    stopPersistBoundsTimer();
+    return;
+  }
+  stopPersistBoundsTimer();
+  persistBoundsTimer = setTimeout(() => {
+    persistBoundsTimer = null;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (!shouldPersistWindowBounds(mainWindow)) return;
+    const next = mainWindow.getBounds();
+    const prev = settings.windowBounds || {};
+    if (settings?.trayMode) {
+      // Popover x/y is anchored to the tray icon each open; only the size carries over.
+      if (prev.width === next.width && prev.height === next.height) return;
+      settings.windowBounds = { ...prev, width: next.width, height: next.height };
+    } else if (floatingBubbleState.collapsed && floatingBubbleState.expandedBounds) {
+      floatingBubbleState.collapsedBounds = next;
+      const display = displayForBounds(next);
+      const nextSide = display ? floatingBubbleSide(next, collapsedAreaForDisplay(display)) : floatingBubbleState.side;
+      if (nextSide !== floatingBubbleState.side) {
+        floatingBubbleState.side = nextSide;
+        sendFloatingBubbleState();
+      }
+      const previousBubble = settings.floatingBubbleBounds || {};
+      if (previousBubble.x === next.x &&
+        previousBubble.y === next.y &&
+        previousBubble.width === next.width &&
+        previousBubble.height === next.height) return;
+      settings.floatingBubbleBounds = next;
+    } else {
+      if (!canPositionWindow()) {
+        next.x = prev.x;
+        next.y = prev.y;
+      }
+      if (prev.x === next.x && prev.y === next.y && prev.width === next.width && prev.height === next.height) return;
+      settings.windowBounds = next;
+    }
+    saveSettings();
+  }, 400);
+}
+
+function applyZoomFactor(target = mainWindow) {
+  if (!target || target.isDestroyed()) return;
+  target.webContents.setZoomFactor(clampZoom(settings.zoomFactor));
+}
+
+function setZoomFactor(value) {
+  const next = clampZoom(value);
+  if (next === clampZoom(settings.zoomFactor)) return;
+  settings.zoomFactor = next;
+  saveSettings();
+  applyZoomFactor();
+  if (notchController?.isRunning()) syncNotch(settingsForRenderer());
+}
+
+function adjustZoom(delta) {
+  setZoomFactor(clampZoom(settings.zoomFactor) + delta);
+}
+
+function normalizeCurrencyOverrides(value) {
+  const out = {};
+  if (value && typeof value === 'object') {
+    for (const [code, raw] of Object.entries(value)) {
+      const key = normalizeCurrency(code, '');
+      const num = Number(raw);
+      // normalizeCurrency falls back to 'USD' for unknown codes; excluding 'USD'
+      // drops both unknown codes and any attempt to override the USD base (always 1).
+      if (key !== 'USD' && Number.isFinite(num) && num > 0) out[key] = num;
+    }
+  }
+  return out;
+}
+
+function ensureCredentialStore() {
+  if (!credentialStore) credentialStore = new CredentialStore(app.getPath('userData'));
+  return credentialStore;
+}
+
+function reportCredentialStorageError(context, error) {
+  const detail = error?.message || String(error || 'Unknown error');
+  console.error(`[credentials] ${context}: ${detail}`);
+  if (credentialStorageErrorShown || !app.isReady()) return;
+  credentialStorageErrorShown = true;
+  try {
+    dialog.showErrorBox(
+      'Credential storage error',
+      `Token Monitor could not safely access credentials.json (${context}). The save was stopped and previous data was restored where possible. Check the file's JSON and permissions, then restart the app.\n\n${detail}`
+    );
+  } catch (_) {}
+}
+
+function loadCredentialSettings(saved) {
+  try {
+    const store = ensureCredentialStore();
+    store.migrateLegacySettings(saved);
+    // A failed slot migration leaves its source untouched; it must not hide
+    // every other provider's credentials for this session.
+    let stored;
+    try {
+      stored = migrateAccountSlots(store, saved, Date.now, process.env);
+    } catch (error) {
+      reportCredentialStorageError('could not move saved accounts into the account list', error);
+      stored = store.settingsCredentials();
+    }
+    // A destination with a matching ID can also be an import conflict.
+    // A matching copy and no remaining source credential prove cleanup.
+    const document = store.readDocument();
+    for (const provider of ['claude', 'antigravity', 'workbuddy']) {
+      const records = document.credentials.providers?.[provider]?.accounts || {};
+      const moved = new Map((stored[`${provider}AccountSlots`] || []).map(slot => [slot.owner?.metadata?.id, slot.owner?.metadata]));
+      saved[`${provider}ManagedAccounts`] = (saved[`${provider}ManagedAccounts`] || []).filter(account =>
+        Object.hasOwn(records, account.id) || !require('node:util').isDeepStrictEqual(moved.get(account.id), account));
+    }
+    openrouterSlotsMigrated = Number(document.migrations.accountSlots?.openrouter || 0) >= 1;
+    copilotSlotsMigrated = Number(document.migrations.accountSlots?.copilot || 0) >= 1;
+    for (const entry of LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots)) {
+      for (const field of entry.fields.filter(field => field.kind === 'credential')) saved[field.key] = '';
+      delete saved[`${entry.id}DefaultAccountIdentity`];
+    }
+    // Cleanup is intentionally independent from the migration marker. If the
+    // first cleanup write fails after credentials.json was committed, retry on
+    // every startup until no credential keys remain in settings.json.
+    if (hasCredentialSettings(saved)) {
+      try {
+        writePrivateJsonAtomic(settingsPath, stripCredentialSettings(saved));
+      } catch (error) {
+        reportCredentialStorageError('could not remove migrated credentials from settings.json', error);
+      }
+    }
+    return stored;
+  } catch (error) {
+    reportCredentialStorageError('could not load credentials.json', error);
+    return {};
+  }
+}
+
+function readSettings() {
+  settingsPath = path.join(app.getPath('userData'), 'settings.json');
+  const settingsFileExisted = fs.existsSync(settingsPath);
+  try {
+    const defaults = defaultSettings();
+    let saved = {};
+    try {
+      saved = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+      if (!saved || typeof saved !== 'object' || Array.isArray(saved)) saved = {};
+    } catch (error) {
+      if (error.code !== 'ENOENT') console.warn(`[settings] Could not load settings.json: ${error.message}`);
+    }
+    if (process.platform !== 'win32') {
+      try {
+        const stat = fs.lstatSync(settingsPath);
+        if (stat.isFile() && !stat.isSymbolicLink()) fs.chmodSync(settingsPath, 0o600);
+      } catch (_) {}
+    }
+    const storedCredentials = loadCredentialSettings(saved);
+    if (!saved.secret && defaults.secret) delete saved.secret;
+    const merged = { ...defaults, ...saved, ...storedCredentials };
+    Object.assign(merged, initializeHubProfiles(merged));
+    merged.limitAccountPresentation = normalizeAccountPresentation(merged.limitAccountPresentation);
+    merged.clients = clientsCsvForSetting(merged.clients);
+    merged.separateQoderClients = parseBoolean(merged.separateQoderClients, false);
+    // A client identity split (see clientIdentitySplits.js) is not a new tool:
+    // the user tracking its parent was already counting it, so the split has to
+    // be seeded or their usage drops. `seededClientSplits` makes that a one-time
+    // addition, so untracking the row afterwards is not undone on next launch.
+    //
+    // Every launch is evaluated, fresh installs included. Restricting this to an
+    // existing settings file with an explicit `clients` field left two installs
+    // un-marked: one whose file predates that field, and a fresh install, which
+    // takes the split client from DEFAULT_CLIENTS without ever recording that it
+    // did. Both would then be migrated on a later launch, and the seed would fire
+    // on a deliberate untrack — the user drops Oh My Pi and it reappears next start.
+    // Evaluating unconditionally is also cheap: with the split client already
+    // present nothing is inserted, and the marker is what makes that a decision
+    // rather than an absence.
+    const seeded = seedSplitClients(merged.clients, { applied: merged.seededClientSplits });
+    // The marker records that this install has been through the migration, not
+    // that it gained a client. Recording it only on a successful insert would
+    // leave an install that tracks the parent later still un-migrated, so the
+    // seed would fire on a deliberate post-split choice instead of on the
+    // upgrade. `evaluated` is what makes the decision belong to this launch.
+    if (seeded.evaluated.length > 0) {
+      merged.clients = seeded.clients;
+      merged.seededClientSplits = [...new Set([
+        ...String(merged.seededClientSplits || '').split(',').map((value) => value.trim()).filter(Boolean),
+        ...seeded.evaluated
+      ])].join(',');
+      seededClientSplitsPending = true;
+    }
+    merged.customScanPaths = normalizeCustomScanPaths(merged.customScanPaths);
+    merged.backgroundImageOpacity = normalizeBackgroundImageOpacity(merged.backgroundImageOpacity);
+    // A missing settings file is the only reliable fresh-install signal: a
+    // missing limitProviders field also occurs when an existing installation
+    // upgrades, where changing the user's effective defaults would be wrong.
+    initialLimitProvidersPending = !settingsFileExisted
+      && process.env.TOKEN_MONITOR_LIMIT_PROVIDERS === undefined;
+    // Migrate older configs that predate hubMode: infer from hubUrl.
+    if (saved.hubMode === undefined) {
+      merged.hubMode = (saved.hubUrl && String(saved.hubUrl).trim()) ? 'client' : 'local';
+    }
+    if (saved.limitProviders !== undefined) {
+      merged.limitProviders = migrateLimitProviders(saved.limitProviders);
+    }
+    if (saved.limitProviderOrder !== undefined) {
+      merged.limitProviderOrder = migrateLimitProviderOrder(saved.limitProviderOrder);
+    }
+    if (saved.clientDisplayOrder !== undefined) {
+      merged.clientDisplayOrder = migrateClientDisplayOrder(saved.clientDisplayOrder);
+    }
+    if (saved.hiddenClients !== undefined) {
+      merged.hiddenClients = migrateClientSelection(saved.hiddenClients, normalizeHiddenClients);
+    }
+    if (saved.pinnedClients !== undefined) {
+      merged.pinnedClients = migrateClientSelection(saved.pinnedClients, normalizePinnedClients);
+    }
+    if (saved.viewDisplayOrder !== undefined) {
+      merged.viewDisplayOrder = migrateViewDisplayOrder(saved.viewDisplayOrder);
+    }
+    if (saved.hiddenViews !== undefined) {
+      merged.hiddenViews = normalizeHiddenViews(saved.hiddenViews, DEFAULT_VIEW_LIST);
+    }
+    if (saved.homeModuleOrder !== undefined) {
+      merged.homeModuleOrder = normalizeHomeModuleOrder(saved.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',');
+    }
+    if (saved.hiddenHomeModules !== undefined) {
+      merged.hiddenHomeModules = normalizeHiddenHomeModules(saved.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST);
+    }
+    merged.showHomeLimitBars = parseBoolean(merged.showHomeLimitBars, false);
+    merged.homeModuleCounts = normalizeHomeModuleCounts(merged.homeModuleCounts);
+    merged.homeLimitDisplayMode = normalizeHomeLimitDisplayMode(merged.homeLimitDisplayMode);
+    merged.showHomeLimitProviderNames = parseBoolean(merged.showHomeLimitProviderNames, false);
+    merged.claudeCliFallbackEnabled = parseBoolean(merged.claudeCliFallbackEnabled, true);
+    merged.codexResetForecastEnabled = parseBoolean(merged.codexResetForecastEnabled, false);
+    merged.workbuddyQuotaTotalEnabled = parseBoolean(merged.workbuddyQuotaTotalEnabled, false);
+    merged.limitsHistoryOpenMode = ['hover', 'click', 'off'].includes(merged.limitsHistoryOpenMode) ? merged.limitsHistoryOpenMode : 'hover';
+    merged.showCodexAdditionalLimits = parseBoolean(merged.showCodexAdditionalLimits, true);
+    merged.opencodeLocalLimitsEnabled = parseBoolean(merged.opencodeLocalLimitsEnabled, false);
+    delete merged.workbuddyLocalAppEnabled;
+    merged.windowMaximized = parseBoolean(merged.windowMaximized, false);
+    merged.automaticAppUpdates = parseBoolean(merged.automaticAppUpdates, false);
+    if (saved.homeLimitProviderOrder !== undefined) {
+      merged.homeLimitProviderOrder = migrateHomeLimitProviderOrder(saved.homeLimitProviderOrder);
+    }
+    if (saved.hiddenHomeLimitProviders !== undefined) {
+      merged.hiddenHomeLimitProviders = normalizeHiddenLimitProviders(saved.hiddenHomeLimitProviders);
+    }
+    merged.limitProviderHiddenItems = normalizeLimitProviderHiddenItems(merged.limitProviderHiddenItems);
+    merged.homeLimitAccountCount = normalizeHomeLimitAccountCount(merged.homeLimitAccountCount);
+    merged.periodMonthMode = normalizePeriodMonthMode(merged.periodMonthMode);
+    if (saved.historyEnabled !== undefined) {
+      merged.historyEnabled = parseBoolean(saved.historyEnabled, false);
+    }
+    if (saved.projectsEnabled !== undefined) {
+      merged.projectsEnabled = parseBoolean(saved.projectsEnabled, true);
+    }
+    merged.projectBreakdownMode = normalizeProjectBreakdownMode(merged.projectBreakdownMode);
+    if (saved.sessionUsageArchiveEnabled !== undefined) {
+      merged.sessionUsageArchiveEnabled = parseBoolean(saved.sessionUsageArchiveEnabled, true);
+    }
+    if (saved.wslScanEnabled !== undefined) {
+      merged.wslScanEnabled = parseBoolean(saved.wslScanEnabled, false);
+    }
+    merged.codexDotsEnabled = parseBoolean(merged.codexDotsEnabled, false);
+    merged.codexDotsVisible = parseBoolean(merged.codexDotsVisible, true);
+    merged.collectionMode = normalizeCollectionMode(merged.collectionMode);
+    merged.collectionIntervalMs = normalizeCollectionIntervalMs(merged.collectionIntervalMs);
+    merged.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(merged.syncUploadIntervalMs);
+    merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
+    merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
+    merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
+    merged.showExactHomeTrendTokens = parseBoolean(merged.showExactHomeTrendTokens, false);
+    merged.sessionTitlesEnabled = parseBoolean(merged.sessionTitlesEnabled, true);
+    merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
+    merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
+    merged.macGlassTint = normalizeLiquidGlassTint(merged.macGlassTint, 'liquid-glass');
+    merged.macClearGlassTint = normalizeLiquidGlassTint(merged.macClearGlassTint, 'liquid-glass-clear');
+    merged.tokenNumberAnimation = tokenNumberAnimationApi.normalize(merged.tokenNumberAnimation);
+    merged.showLiveTokenRate = parseBoolean(merged.showLiveTokenRate, false);
+    merged.liveTokenRateScope = normalizeLiveTokenRateScope(merged.liveTokenRateScope);
+    merged.compactTokenUnits = normalizeCompactTokenUnits(merged.compactTokenUnits);
+    merged.modelAliases = normalizeModelAliases(merged.modelAliases);
+    merged.syncContentState = normalizeSyncContentState(merged.syncContentState);
+    merged.hubSyncSessionTitles = parseBoolean(merged.hubSyncSessionTitles, false);
+    merged.modelAliasGrouping = normalizeModelAliasGrouping(merged.modelAliasGrouping);
+    merged.textSize = fontSettingsApi.normalizeTextSize(merged.textSize);
+    merged.interfaceFontFamily = fontSettingsApi.normalizeFontFamily(merged.interfaceFontFamily);
+    merged.displayFontFamily = fontSettingsApi.normalizeFontFamily(merged.displayFontFamily);
+    merged.tokenRateMode = normalizeTokenRateMode(merged.tokenRateMode);
+    if (saved.serviceProviderDisplayOrder !== undefined) {
+      merged.serviceProviderDisplayOrder = String(saved.serviceProviderDisplayOrder || '');
+    }
+    if (saved.hiddenServiceProviders !== undefined) {
+      merged.hiddenServiceProviders = String(saved.hiddenServiceProviders || '');
+    }
+    if (saved.serviceStatusRefreshMs !== undefined) {
+      merged.serviceStatusRefreshMs = normalizeServiceStatusRefreshMs(saved.serviceStatusRefreshMs);
+    }
+    merged.codexManagedAccounts = normalizeCodexManagedAccounts(merged.codexManagedAccounts);
+    merged.antigravityManagedAccounts = normalizeAntigravityManagedAccounts(merged.antigravityManagedAccounts);
+    merged.workbuddyManagedAccounts = workbuddyOAuth.normalizeManagedAccounts(merged.workbuddyManagedAccounts);
+    merged.mimoManagedAccounts = normalizeMimoManagedAccounts(merged.mimoManagedAccounts);
+    if (saved.keepAboveTaskbar !== undefined) {
+      merged.keepAboveTaskbar = parseBoolean(saved.keepAboveTaskbar, false);
+    }
+    if (saved.windowBehavior === undefined && saved.alwaysOnTop !== undefined) {
+      merged.windowBehavior = saved.alwaysOnTop ? 'floating' : 'normal';
+    }
+    if (saved.lastViewState !== undefined) {
+      merged.lastViewState = normalizeInitialRendererViewState(saved.lastViewState);
+    }
+    merged.hubMode = normalizeHubMode(merged.hubMode, 'local', process.platform);
+    merged.language = normalizeLanguageSetting(merged.language);
+    merged.currency = normalizeCurrency(merged.currency);
+    merged.currencyRates = normalizeCurrencyOverrides(merged.currencyRates);
+    merged.vendorColors = migrateVendorColors(merged.vendorColors);
+    merged.cursorDisabledAccountIds = normalizeCursorDisabledAccountIds(merged.cursorDisabledAccountIds);
+    merged.cursorManualAccountIds = normalizeCursorAccountIds(merged.cursorManualAccountIds);
+    merged.hubHostPort = normalizeHubPort(merged.hubHostPort);
+    merged.hubHostSecret = typeof merged.hubHostSecret === 'string' ? merged.hubHostSecret : '';
+    delete merged.workbuddyEndpoint;
+    merged.floatingBubbleEnabled = parseBoolean(merged.floatingBubbleEnabled ?? merged.edgeDrawerEnabled, false);
+    merged.archivedClientUsage = normalizeArchivedClientUsage(merged.archivedClientUsage);
+    delete merged.edgeDrawerEnabled;
+    merged.floatingBubbleTrigger = merged.floatingBubbleTrigger === 'hover' ? 'hover' : 'click';
+    merged.floatingBubbleContent = normalizeTrayContent(merged.floatingBubbleContent, 'icon');
+    merged.floatingBubbleCustomLayout = normalizeTrayLayout(merged.floatingBubbleCustomLayout);
+    merged.notchEnabled = parseBoolean(merged.notchEnabled, false);
+    merged.notchStyle = normalizeNotchStyle(merged.notchStyle);
+    merged.notchShape = normalizeNotchShape(merged.notchShape);
+    merged.notchSize = normalizeEdgeDockSize(merged.notchSize);
+    merged.notchCustomScale = normalizeEdgeDockCustomScale(merged.notchCustomScale);
+    merged.notchItems = normalizeEdgeDockItems(merged.notchItems);
+    merged.notchRunningIndicatorEnabled = parseBoolean(merged.notchRunningIndicatorEnabled, false);
+    merged.notchWarnColors = parseBoolean(merged.notchWarnColors, false);
+    merged.notchHoverAction = normalizeNotchHoverAction(merged.notchHoverAction);
+    merged.notchHoverDelay = normalizeNotchHoverDelay(merged.notchHoverDelay);
+    merged.notchSwipeGestures = parseBoolean(merged.notchSwipeGestures, true);
+    merged.notchHaptic = parseBoolean(merged.notchHaptic, true);
+    merged.notchProgressiveBlur = parseBoolean(merged.notchProgressiveBlur, true);
+    merged.notchHideSummaryInFullScreen = parseBoolean(merged.notchHideSummaryInFullScreen, true);
+    merged.notchRefreshEnabled = parseBoolean(merged.notchRefreshEnabled, false);
+    merged.notchSummaryMode = notchSummaryMode(merged);
+    merged.notchSummaryEnabled = parseBoolean(merged.notchSummaryEnabled, true);
+    merged.notchCustomLayout = normalizeTrayLayout(merged.notchCustomLayout);
+    merged.notchDisplayId = normalizeEdgeDockDisplayId(merged.notchDisplayId);
+    merged.edgeDockEnabled = parseBoolean(merged.edgeDockEnabled, false);
+    merged.edgeDockRefreshEnabled = parseBoolean(merged.edgeDockRefreshEnabled, false);
+    merged.edgeDockRunningIndicatorEnabled = parseBoolean(merged.edgeDockRunningIndicatorEnabled, true);
+    merged.edgeDockSide = normalizeEdgeDockSide(merged.edgeDockSide);
+    merged.edgeDockFloatingX = normalizeEdgeDockFloatingX(merged.edgeDockFloatingX);
+    merged.edgeDockOffset = normalizeEdgeDockOffset(merged.edgeDockOffset);
+    merged.edgeDockDisplayId = normalizeEdgeDockDisplayId(merged.edgeDockDisplayId);
+    merged.edgeDockMode = normalizeEdgeDockMode(merged.edgeDockMode);
+    merged.edgeDockHaptic = parseBoolean(merged.edgeDockHaptic, true);
+    merged.edgeDockWarnColors = parseBoolean(merged.edgeDockWarnColors, false);
+    merged.edgeDockMacBackdrop = normalizeEdgeDockBackdropMode(merged.edgeDockMacBackdrop);
+    merged.edgeDockWindowsBackdrop = normalizeWindowsDockBackdropMode(merged.edgeDockWindowsBackdrop);
+    merged.edgeDockBubbleSize = normalizeEdgeDockBubbleSize(merged.edgeDockBubbleSize);
+    merged.edgeDockBubbleCustomScale = normalizeEdgeDockCustomScale(merged.edgeDockBubbleCustomScale);
+    merged.edgeDockSize = normalizeEdgeDockSize(merged.edgeDockSize);
+    merged.edgeDockCustomScale = normalizeEdgeDockCustomScale(merged.edgeDockCustomScale);
+    merged.edgeDockItems = normalizeEdgeDockItems(merged.edgeDockItems);
+    merged.pluginsEnabled = parseBoolean(merged.pluginsEnabled, true);
+    merged.deviceIconOverrides = require('./renderer/deviceIcons').normalizeDeviceIconOverrides(merged.deviceIconOverrides);
+    merged.pluginStates = normalizePluginStates(merged.pluginStates);
+    merged.pluginInitialSetup = require('./plugins/initialSetup').normalizeInitialSetup(merged.pluginInitialSetup);
+    merged.pluginContentOrder = pluginPlacements.normalizeContentOrder(merged.pluginContentOrder);
+    merged.pluginContentSelections = pluginPlacements.normalizeContentSelections(merged.pluginContentSelections);
+    merged.pluginAuthorSkin = normalizePluginAuthorSkin(merged.pluginAuthorSkin);
+    delete merged.pluginSkinRef;
+    merged.pluginMainPages = pluginPlacements.normalizeRefList(merged.pluginMainPages, 32);
+    merged.notchPageOrder = pluginPlacements.normalizeNotchPageOrder(merged.notchPageOrder);
+    merged.notchBuiltinPages = pluginPlacements.normalizeNotchBuiltinPages(merged.notchBuiltinPages);
+    merged.notchPluginPages = pluginPlacements.normalizeNotchPluginPages(merged.notchPluginPages);
+    merged.trayCustomLayout = normalizeTrayLayout(merged.trayCustomLayout);
+    merged.showTrayProviderBadge = parseBoolean(merged.showTrayProviderBadge, false);
+    merged.windowToggleShortcut = normalizeWindowToggleShortcut(merged.windowToggleShortcut);
+    // 如果设置了 opencodeCookie 但没有 profiles，自动迁移
+    if (merged.opencodeCookie && Object.keys(merged.opencodeProfiles || {}).length === 0) {
+      merged.opencodeProfiles = { default: { cookie: merged.opencodeCookie, enabled: true } };
+    }
+    migrateLegacyMimoCredentialFiles(merged.mimoManagedAccounts);
+    Object.assign(merged, normalizeTrayModeSettings(merged));
+    return normalizeWindowBehaviorSettings(merged);
+  }
+  catch (_error) {
+    const defaults = defaultSettings();
+    Object.assign(defaults, normalizeTrayModeSettings(defaults));
+    return normalizeWindowBehaviorSettings(defaults);
+  }
+}
+
+function cloneSettingsSnapshot(value) {
+  return JSON.parse(JSON.stringify(value || {}));
+}
+
+function saveSettings(options = {}) {
+  const previousSettings = cloneSettingsSnapshot(persistedSettingsSnapshot || settings);
+  try {
+    persistSettingsAndCredentials({
+      store: ensureCredentialStore(),
+      settingsPath,
+      settings,
+      previousSettings
+    });
+    persistedSettingsSnapshot = cloneSettingsSnapshot(settings);
+    refreshTrayContextMenu();
+    return true;
+  } catch (error) {
+    settings = previousSettings;
+    reportCredentialStorageError('could not persist settings', error);
+    if (options.throwOnError) throw error;
+    return false;
+  }
+}
+
+function seedInitialLimitProviders(summary) {
+  return applyInitialLimitProviderSeed(initialLimitProvidersPending, summary, {
+    settings,
+    saveSettings,
+    onPersisted() {
+      // Consume the one-shot seed before reconfiguration can publish again.
+      initialLimitProvidersPending = false;
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      pushSettingsToRenderer();
+    }
+  });
+}
+
+// Runs on the presented stats rather than this device's record, so a Codex
+// account another device reports carries the switch over too.
+function migrateCodexAdditionalLimits(visibleStats) {
+  return applyCodexAdditionalLimitsMigration(visibleStats, {
+    settings,
+    saveSettings,
+    onPersisted: pushSettingsToRenderer
+  });
+}
+
+function loginItemEnabledHere() {
+  if (!app.isPackaged) return false;
+  // Electron login items only cover macOS/Windows; on Linux we manage an XDG
+  // autostart entry ourselves, which needs the AppImage runtime ($APPIMAGE).
+  if (process.platform === 'linux') return linuxAutostart.autostartSupported();
+  return true;
+}
+
+function currentLoginItemState() {
+  if (!loginItemEnabledHere()) return false;
+  if (process.platform === 'linux') return linuxAutostart.isAutostartEnabled();
+  try { return Boolean(app.getLoginItemSettings().openAtLogin); }
+  catch (_) { return false; }
+}
+
+function applyLoginItem(startAtLogin) {
+  if (!loginItemEnabledHere()) return false;
+  if (process.platform === 'linux') return linuxAutostart.setAutostartEnabled(Boolean(startAtLogin));
+  app.setLoginItemSettings({ openAtLogin: Boolean(startAtLogin) });
+  return currentLoginItemState();
+}
+
+function syncLoginItemSettingFromOs() {
+  if (!settings) return;
+  const actual = currentLoginItemState();
+  if (settings.startAtLogin === actual) return;
+  settings.startAtLogin = actual;
+  saveSettings();
+}
+
+function trackedClientSet(value) {
+  return new Set(String(value || '').split(',').map((item) => item.trim().toLowerCase()).filter(Boolean));
+}
+
+function removedTrackedClients(previousClients, nextClients) {
+  const previous = trackedClientSet(previousClients);
+  const next = trackedClientSet(nextClients);
+  return Array.from(previous).filter((client) => !next.has(client));
+}
+
+function localDeviceRecord({ forClientArchive = false } = {}) {
+  return selectLocalDeviceRecord({
+    forClientArchive,
+    deviceId: settings?.deviceId || defaultDeviceId(),
+    externalAgentActive: isExternalAgentActive(),
+    hubMode: settings?.hubMode,
+    lastCollectedDevice,
+    localDevice,
+    latestHubStats: currentHubStatsCache(),
+    latestStats
+  });
+}
+
+function assertClientArchiveCaptureReady(nextClients, sessionUsageArchiveEnabled) {
+  const deviceId = settings?.deviceId || defaultDeviceId();
+  if (mode !== 'sync' || lastCollectedDevice?.deviceId === deviceId
+    || !sessionUsageArchiveEnabled
+    || (isExternalAgentActive() && settings?.hubMode !== 'icloud')
+    || !removedTrackedClients(settings?.clients, nextClients).length) return;
+
+  // A Hub snapshot can arrive before the first full collection. Its aggregate
+  // has no lifetime session IDs to reconcile against the SQLite archive.
+  if (localDeviceRecord()) throw new Error('tracking-scan-pending');
+}
+
+function updateArchivedClientUsage(previousClients, nextClients) {
+  const removedClients = removedTrackedClients(previousClients, nextClients);
+  let archive = pruneArchivedClientUsage(settings.archivedClientUsage, nextClients);
+  if (removedClients.length > 0) {
+    // Before this run's first complete record, localDevice may be a first-scan
+    // preview whose unscanned windows would archive as zero. Only the seed, or
+    // nothing, stands for the client then.
+    const source = mode === 'local' && !lastCollectedDevice
+      ? anchorSeedDevice
+      : localDeviceRecord({ forClientArchive: settings.sessionUsageArchiveEnabled !== false });
+    archive = captureArchivedClientUsage(archive, source, removedClients);
+  }
+  settings.archivedClientUsage = archive;
+}
+
+const usageTransform = createUsageTransform({
+  store: sessionUsageArchiveStore,
+  getSettings: () => settings,
+  isExternalAgentActive,
+  onCaptureFailure: () => diagnosticJournal.record({ subsystem: 'storage', code: 'storage-archive-update-failed' })
+});
+
+// The usage runtime every device runtime starts. Collection and the transform
+// run on a worker thread (usageHost.js) and summaries arrive transformed. With
+// TOKEN_MONITOR_USAGE_WORKER=0, or once the worker has failed, it is the
+// in-process collector and `usageTransform` above runs on this thread.
+let latestUsageHost = null;
+function createElectronUsageRuntime(options) {
+  // A transformed delivery confirms the worker has taken over projection.
+  // The cold anchor's main-thread archive is then redundant. In-process
+  // deliveries have no such marker and keep/reload their own archive instead.
+  const releaseOnWorkerDelivery = (callback) => (summary, reason, meta) => {
+    if (meta?.transformed === true) {
+      try { usageTransform.release(); } catch (error) {
+        console.log(`[session-archive] release failed: ${error.message}`);
+      }
+    }
+    return callback?.(summary, reason, meta);
+  };
+  latestUsageHost = createUsageHost({
+    ...options,
+    onUpdate: releaseOnWorkerDelivery(options.onUpdate),
+    ...(options.onPreview ? { onPreview: releaseOnWorkerDelivery(options.onPreview) } : {})
+  }, {
+    agentPidPath: AGENT_PID_PATH,
+    transformSettings: usageTransformSettings(settings)
+  });
+  return latestUsageHost;
+}
+
+function applyMacActivationPolicy(state = {}) {
+  if (process.platform !== 'darwin') return;
+  const mainWindowVisible = state.mainWindowVisible !== undefined
+    ? state.mainWindowVisible
+    : mainWindow && !mainWindow.isDestroyed()
+      ? mainWindow.isVisible()
+      : true;
+  const mode = macActivationPolicyMode(settings, { mainWindowVisible });
+  if (typeof app.setActivationPolicy === 'function') {
+    try { app.setActivationPolicy(mode); } catch (_) {}
+  }
+  if (!app.dock) return;
+  if (mode === 'accessory') app.dock.hide();
+  else app.dock.show();
+}
+
+function applyMacSpaceBehavior(trayMode = Boolean(settings?.trayMode)) {
+  if (process.platform !== 'darwin' || !mainWindow || mainWindow.isDestroyed()) return;
+  if (trayMode) {
+    setMoveToActiveSpace(mainWindow, false);
+    if (typeof mainWindow.setVisibleOnAllWorkspaces === 'function') {
+      mainWindow.setVisibleOnAllWorkspaces(true, {
+        visibleOnFullScreen: true,
+        skipTransformProcessType: true
+      });
+    }
+    if (typeof mainWindow.setHiddenInMissionControl === 'function') {
+      mainWindow.setHiddenInMissionControl(true);
+    }
+  } else {
+    if (typeof mainWindow.setVisibleOnAllWorkspaces === 'function') {
+      // skipTransformProcessType is not just a flicker optimisation here. Left
+      // at its default, Electron transforms the process back to a foreground
+      // app on this call, which re-shows the Dock icon and silently undoes the
+      // accessory policy hideAppIcon depends on. The invariant that makes
+      // skipping safe is that applyMacActivationPolicy() is the only thing that
+      // decides the process type and has already run on every path into here —
+      // enumerating those paths is what rots, so anything new that reaches this
+      // function has to apply the policy first rather than be added to a list.
+      mainWindow.setVisibleOnAllWorkspaces(false, { skipTransformProcessType: true });
+    }
+    if (typeof mainWindow.setHiddenInMissionControl === 'function') {
+      mainWindow.setHiddenInMissionControl(false);
+    }
+    // Apply this last because Electron's workspace/Mission Control setters also
+    // update NSWindow.collectionBehavior.
+    setMoveToActiveSpace(mainWindow, true);
+  }
+}
+
+// Windows re-raises its taskbar over an always-on-top widget that overlaps it
+// and gives us no event for the common case, so keeping the widget above it
+// costs a timer and can briefly flicker during some app switches. That price
+// only makes sense for someone who deliberately parked the widget on the
+// taskbar, which is why it is opt-in. windowsTaskbarZOrder.js explains the
+// mechanics. Everything that can change whether the widget still overlaps the
+// taskbar — or is still on top, or still visible — calls this, and the keeper
+// decides for itself.
+let taskbarZOrderKeeper = null;
+
+function stopTaskbarZOrderKeeper() {
+  if (taskbarZOrderKeeper) taskbarZOrderKeeper.stop();
+}
+
+function syncTaskbarZOrder() {
+  if (!taskbarZOrderEnabled(settings)) {
+    stopTaskbarZOrderKeeper();
+    return;
+  }
+  if (!taskbarZOrderKeeper) {
+    taskbarZOrderKeeper = createTaskbarZOrderKeeper({
+      screen,
+      subscribeForeground: subscribeForegroundChange,
+      log: process.env.TOKEN_MONITOR_TASKBAR_ZORDER_DEBUG === '1'
+        ? (message) => console.log(`[taskbar-zorder ${Date.now() % 100000}] ${message}`)
+        : null
+    });
+  }
+  taskbarZOrderKeeper.sync(mainWindow);
+}
+
+// Losing activation to the taskbar is the one transition Windows raises it on
+// that reaches us as an event, so it gets the fast path.
+function nudgeTaskbarZOrder() {
+  if (!taskbarZOrderEnabled(settings) || !taskbarZOrderKeeper) return;
+  taskbarZOrderKeeper.nudge(mainWindow);
+}
+
+function applyWindowSettings() {
+  if (!mainWindow) return;
+  if (floatingBubbleState.collapsed) {
+    applyCollapsedFloatingBubbleLimits(mainWindow.getBounds());
+    return;
+  }
+  const behavior = describeWindowBehavior(settings);
+  mainWindow.setAlwaysOnTop(behavior.alwaysOnTop, floatingAlwaysOnTopLevel());
+  if (typeof mainWindow.setMovable === 'function') mainWindow.setMovable(behavior.draggable);
+  if (typeof mainWindow.setResizable === 'function') mainWindow.setResizable(behavior.resizable);
+  if (typeof mainWindow.setIgnoreMouseEvents === 'function') {
+    mainWindow.setIgnoreMouseEvents(behavior.mousePassthrough);
+  }
+  if (typeof mainWindow.setFocusable === 'function') mainWindow.setFocusable(behavior.focusable);
+  if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(skipTaskbarForSettings(settings));
+  if (!behavior.focusable && typeof mainWindow.blur === 'function') mainWindow.blur();
+  syncTaskbarZOrder();
+}
+
+function nativeBlurEnabled(source = settings) {
+  return floatingBubbleNativeGlassEnabled(source);
+}
+
+function nativeMaterialOptions(source = settings, dashboard = false) {
+  return {
+    enabled: nativeBlurEnabled(source),
+    liquidGlass: isLiquidGlassBackdrop(source.macBackdrop),
+    style: liquidGlassStyle(source.macBackdrop),
+    tintOpacity: liquidGlassTint(source),
+    opaque: dashboard && source.dashboardFlat === true,
+    reducedTransparency: nativeTheme.prefersReducedTransparency === true,
+    highContrast: nativeTheme.shouldUseHighContrastColors === true,
+    dark: !isLightHex(source.themeColors?.bg),
+    radius: !dashboard && floatingBubbleState.collapsed ? 17 : 14
+  };
+}
+
+function applyNativeMaterial(source = settings) {
+  syncNativeMaterialVisibility(mainWindow, nativeMaterialOptions(source));
+  syncNativeMaterialVisibility(dashboardWindow, nativeMaterialOptions(source, true));
+  syncWindowsBackdrop(mainWindow, { enabled: nativeBlurEnabled(source), mode: source.windowsBackdrop });
+  syncWindowsBackdrop(dashboardWindow, { enabled: nativeBlurEnabled(source) });
+  limitsHistoryController?.syncMaterial();
+}
+
+function withHistoryPreview(stats, devices) {
+  const historyDevices = settings?.historyEnabled === false ? [] : devices;
+  const history = aggregateHistory(historyDevices);
+  stats.historyPreview = historyPreview(history);
+  stats.historyRevision = historyRevision(history);
+  stats.deviceHistoryRevision = deviceHistoryRevision(historyDevices);
+  return stats;
+}
+
+let mode = 'idle';
+let deviceRuntimeHandle = null;
+let icloudRuntimeHandle = null;
+let icloudRuntimeEpoch = 0;
+let icloudRuntimeStopPromise = Promise.resolve();
+const USAGE_RECONFIGURE_SETTLE_MS = 750;
+const USAGE_RECONFIGURE_RETRY_DELAYS_MS = Object.freeze([1000, 3000, 10_000]);
+const usageRuntimeReconciler = createLatestWinsReconciler({
+  delayMs: USAGE_RECONFIGURE_SETTLE_MS,
+  retryDelaysMs: USAGE_RECONFIGURE_RETRY_DELAYS_MS,
+  apply: () => applyUsageRuntimeForMode(),
+  onError: (error) => console.log(`[usage-runtime] settings reconciliation failed: ${error.message}`),
+  onExhausted: ({ attempts }) => recordDiagnosticEvent({
+    subsystem: 'usage-runtime',
+    code: 'usage-reconfigure-exhausted',
+    attempts
+  })
+});
+let localDevice = null;
+let localStats = null;
+// The cold-start seed as projected, kept until this run's first complete record
+// so each preview of the first scan is laid over it rather than over the last.
+let anchorSeedDevice = null;
+let sseAbortController = null;
+let sseRetryTimer = null;
+let streamConnected = false;
+let streamFailure = null;
+let lastCollectedDevice = null;
+let latestHubStats = null;
+let latestHubStatsReceivedAt = null;
+// Matches the renderer's connected-stream fallback interval.
+const HUB_STREAM_CACHE_FRESH_MS = 5 * 60 * 1000;
+let latestHubStatsSource = 'none';
+let latestHubStatsGeneration = null;
+let latestHubStatsIdentity = null;
+let hubModeGeneration = 0;
+let tray = null;
+let latestStats = null;
+let limitsHistoryStore = null;
+let limitsHistoryController = null;
+
+function getLimitsHistoryStore() {
+  if (!limitsHistoryStore) limitsHistoryStore = createLimitsHistoryStore(path.join(app.getPath('userData'), 'limits-history.sqlite'), {
+    onError: error => console.log(`[limits-history] ${error.message}`),
+    onChange: () => limitsHistoryController?.refresh(),
+    legacyScopes: () => {
+      const urls = [...new Set(['none',
+        effectiveHubConfig({ ...settings, hubMode: 'client' }).url,
+        effectiveHubConfig({ ...settings, hubMode: 'host' }).url
+      ].filter(Boolean).map(url => String(url).replace(/\/$/, '')))];
+      return ['local', 'client', 'host', 'icloud'].flatMap(mode => urls.map(url => `${mode}|${url}`));
+    }
+  });
+  return limitsHistoryStore;
+}
+
+async function limitsHistoryPayload(key) {
+  if (statsPushSource && (statsPushSource.generation !== hubModeGeneration
+    || statsPushSource.identity !== currentHubStatsIdentity())) return null;
+  const publication = latestStats;
+  const stats = electronPresentationStats(publication);
+  const provider = stats?.limits?.providers?.find(row => historyRowKey(row) === key);
+  if (!provider) return null;
+  const scope = currentHubStatsIdentity();
+  const history = await getLimitsHistoryStore().query(scope, provider);
+  // Activity-only publications retain the quota snapshot and do not invalidate this read.
+  if (scope !== currentHubStatsIdentity()) return null;
+  // A newer quota publication will trigger its own history refresh. Keep the
+  // current card visible while discarding this superseded query.
+  if (publication?.limits !== latestStats?.limits) {
+    const stillPresent = electronPresentationStats(latestStats)?.limits?.providers?.some(row => historyRowKey(row) === key);
+    return stillPresent ? undefined : null;
+  }
+  history.windows = history.windows.filter(entry => !historyWindowHidden(settings?.limitProviderHiddenItems, provider.provider, entry.window)
+    && !(provider.provider === 'codex' && settings?.showCodexAdditionalLimits === false && entry.window.additional === true));
+  if (!history.windows.length) return null;
+  const slots = accountSlotService?.list(provider.provider).accounts || [];
+  const [presented] = applyAccountOrder([provider], { [provider.provider]: slots }, settings?.deviceId, settings?.limitAccountPresentation);
+  const email = provider.accountEmail || '';
+  const account = settings?.maskLimitAccountEmails === true
+    ? historyMaskEmail(email) : email;
+  const colorId = provider.provider === 'factory' ? 'droid' : provider.provider;
+  const palette = { ...historyVendorColors(), ...settings?.vendorColors };
+  return {
+    ...history, key,
+    source: crypto.createHash('sha256').update(scope).digest('hex'),
+    provider: provider.provider,
+    label: historyProviderCatalog.find(entry => entry.id === provider.provider)?.label || provider.provider,
+    account: presented.accountDisplayName || account || provider.accountName || provider.accountLabel || '',
+    updatedAt: provider.updatedAt,
+    locale: trayMenuLocale(), colors: settings?.themeColors, textScale: fontSettingsApi.textScaleForSize(settings?.textSize),
+    color: palette[colorId] || palette.default,
+    interfaceFont: fontSettingsApi.resolveEffectiveFontSettings(settings).interfaceFont,
+    appearance: {
+      glassOpacity: settings.glassOpacity, glassBlur: settings.glassBlur, systemGlass: settings.systemGlass, reduceMotion: settings.reduceMotion,
+      systemReducedMotion: systemPreferences.getAnimationSettings?.().prefersReducedMotion === true,
+    }
+  };
+}
+
+function getLimitsHistoryController() {
+  if (!limitsHistoryController) limitsHistoryController = createLimitsHistoryController({
+    BrowserWindow, screen, ipcMain,
+    isOwner: win => win === mainWindow || win === dashboardWindow,
+    read: limitsHistoryPayload,
+    getOpenMode: () => settings.limitsHistoryOpenMode,
+    getMaterialOptions: () => ({ ...nativeMaterialOptions(), windowsBackdrop: settings.windowsBackdrop, radius: 14 })
+  });
+  return limitsHistoryController;
+}
+let statsPushSource = null;
+let statsPushRevision = 0;
+let macWidgetSnapshotController = null;
+let macWidgetDemand = null;
+let macWidgetPublicationReady = false;
+let cachedMacWidgetConfiguration;
+let trayRefreshInFlight = false;
+let codexPresentationActiveAccountId = '';
+let codexPresentationPendingAccountId = '';
+
+// One answer, because two of them is how a row ends up naming the device it
+// came from on one surface and not on the other: the presentation projection
+// and the edge dock's cells both need it.
+function syncProvenanceActive() {
+  return mode === 'sync' || Boolean(String(settings?.hubUrl || '').trim());
+}
+
+const presentationCache = createStatsPresentationCache();
+const { projectSessionDeviceSessions, projectSessionDeviceStats } = require('./sessionDeviceSources');
+
+// Every input besides `stats` belongs in the cache key, or a settings change
+// would keep serving the projection it replaced.
+function electronPresentationStats(stats) {
+  const limitOptions = {
+    localDeviceId: settings?.deviceId,
+    syncActive: syncProvenanceActive(),
+    opencodeLocalLimitsEnabled: settings?.opencodeLocalLimitsEnabled === true
+  };
+  const aliases = settings?.modelAliases;
+  const grouping = settings?.modelAliasGrouping;
+  const key = JSON.stringify([limitOptions, aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
+  return presentationCache.get(stats, key, () => {
+    const sourced = projectSessionDeviceStats(stats, settings?.deviceId);
+    return projectModelAliasStats(
+      projectLimitStatsForDisplay(settings?.sessionTitlesEnabled === false ? withoutSessionTitleStats(sourced) : sourced, limitOptions),
+      aliases,
+      { grouping }
+    );
+  });
+}
+
+const allTimeSessionsCache = createStatsPresentationCache();
+const rendererSnapshots = createRendererSnapshots({ source: () => hubModeGeneration });
+// The local record each Hub snapshot was shown with, captured where the
+// snapshot was built. The collector replaces the live one between publishes.
+const snapshotLocalDevices = new WeakMap();
+
+// The renderer's all-time session list, which rendererStats() keeps out of every
+// push, for the snapshot the renderer is showing. A Hub aggregate carries no
+// all-time session detail (syncPayload drops it from uploads, #118), so a Hub
+// snapshot rebuilds the list: the Hub's cross-device month sessions, then this
+// machine's own full all-time list as it stood when the snapshot was built.
+function rendererAllTimeSessions(stats) {
+  if (!stats) return null;
+  const aliases = settings?.modelAliases;
+  const grouping = settings?.modelAliasGrouping;
+  const key = JSON.stringify([aliases ?? null, grouping ?? null, settings?.sessionTitlesEnabled !== false]);
+  return allTimeSessionsCache.get(stats, key, () => {
+    const complete = completeLocalSyncStats(stats);
+    const hubSnapshot = snapshotLocalDevices.get(stats);
+    const sessions = hubSnapshot
+      ? mergedLocalAllTimeSessions(complete.periods, materializeActivity(hubSnapshot.localDevice))
+      : complete.periods?.allTime?.sessions || {};
+    const devices = hubSnapshot?.localDevice
+      ? [...(complete.devices || []).filter(device => device.deviceId !== hubSnapshot.localDevice.deviceId), hubSnapshot.localDevice]
+      : complete.devices;
+    const sourced = projectSessionDeviceSessions(sessions, devices, ['month', 'allTime']);
+    return projectModelAliasSessions(stats, settings?.sessionTitlesEnabled === false ? withoutSessionTitles(sourced) : sourced, aliases, { grouping });
+  });
+}
+
+let codexPresentationPendingSince = 0;
+let trayCodexSwitchInFlight = false;
+const DEFAULT_EXPORT_INTERVAL_MS = 60 * 1000;
+let lastExportAt = 0;
+let lastAutoExport = { dir: null, signature: null };
+
+// User-chosen auto-export throttle (Settings), clamped to a sane floor.
+function exportIntervalMs() {
+  const v = Number(settings.exportIntervalMs);
+  return Number.isFinite(v) && v >= 1000 ? v : DEFAULT_EXPORT_INTERVAL_MS;
+}
+let suppressNextBlurHide = false;
+let recentPopoverBlur = null;
+const providerTrayIcons = {};
+let registeredWindowToggleShortcut = '';
+let windowToggleShortcutRegistered = false;
+let defaultTrayIcon = null;
+function getDefaultTrayIcon() {
+  if (!defaultTrayIcon) defaultTrayIcon = buildTrayIcon();
+  return defaultTrayIcon;
+}
+const AGENT_PID_PATH = pidFilePath();
+let embeddedHub = null;
+let embeddedHubError = null;
+let embeddedHubUnsub = null;
+let modeQueue = Promise.resolve();
+const pendingLimitInvalidations = new Map();
+const pendingUsageClientRefreshes = new Map();
+
+function hubModeRequestIsCurrent(generation, expectedMode, expectedIdentity = null) {
+  return generation === hubModeGeneration
+    && settings?.hubMode === expectedMode
+    && (expectedIdentity === null || currentHubStatsIdentity(expectedMode) === expectedIdentity);
+}
+
+function currentHubStatsIdentity(expectedMode = settings?.hubMode) {
+  const { url } = effectiveHubConfig();
+  return `${String(expectedMode || 'none')}|${String(url || 'none').replace(/\/$/, '')}`;
+}
+
+function currentHubStatsCache() {
+  const hubMode = settings?.hubMode || 'local';
+  const expectedSource = hubMode === 'host'
+    ? 'host'
+    : hubMode === 'client'
+      ? 'client'
+      : hubMode === 'icloud'
+        ? 'icloud'
+        : 'none';
+  if (!latestHubStats
+    || latestHubStatsSource !== expectedSource
+    || latestHubStatsGeneration !== hubModeGeneration
+    || latestHubStatsIdentity !== currentHubStatsIdentity(hubMode)) {
+    return null;
+  }
+  return latestHubStats;
+}
+
+function clearLatestHubStatsCache() {
+  latestHubStats = null;
+  latestHubStatsReceivedAt = null;
+  latestHubStatsSource = 'none';
+  latestHubStatsGeneration = null;
+  latestHubStatsIdentity = null;
+}
+
+function setLatestHubStatsCache(stats, source, generation, identity) {
+  latestHubStats = stats;
+  latestHubStatsReceivedAt = new Date().toISOString();
+  latestHubStatsSource = source;
+  latestHubStatsGeneration = generation;
+  latestHubStatsIdentity = identity;
+}
+
+const diagnosticSnapshotBuilder = createDiagnosticSnapshotBuilder({
+  getSettings: () => settings,
+  getMode: () => mode,
+  getEffectiveHubConfig: effectiveHubConfig,
+  getExternalAgentActive: isExternalAgentActive,
+  getDeviceRuntime: () => deviceRuntimeHandle,
+  getEmbeddedHub: () => embeddedHub,
+  getIcloudSync: () => icloudRuntimeHandle?.getStatus?.() || null,
+  getStreamState: () => ({ connected: streamConnected, failure: streamFailure }),
+  getLatestHubStats: () => latestHubStats,
+  getLatestHubStatsReceivedAt: () => latestHubStatsReceivedAt,
+  getLatestHubStatsSource: () => latestHubStatsSource,
+  getLatestHubStatsGeneration: () => latestHubStatsGeneration,
+  getLatestHubStatsIdentity: () => latestHubStatsIdentity,
+  getHubModeGeneration: () => hubModeGeneration,
+  getCurrentHubStatsIdentity: (hubMode) => currentHubStatsIdentity(hubMode),
+  getLocalRecord: localDeviceRecord,
+  getTokscaleStatus,
+  getConfiguration: () => diagnosticConfigurationFromSettings(settings || {}, {
+    usage: {
+      agentVersion: appVersion(),
+      agentRuntime: 'electron-widget',
+      commandTimeoutMs: 120 * 1000,
+      defaultDeviceId: defaultDeviceId(),
+      intervalMs: collectorIntervalMs(),
+      historyIntervalMs: normalizeHistoryIntervalMs(settings?.historyIntervalMs)
+    },
+    limits: {
+      env: process.env,
+      defaultLimitProviders: defaultLimitProviders()
+    },
+    syncUploadIntervalMs: syncUploadIntervalMs()
+  }),
+  getJournalSnapshot: () => diagnosticJournal.getSnapshot(),
+  getArchiveState: () => {
+    const enabled = settings?.sessionUsageArchiveEnabled !== false;
+    const { loaded, sessionCount, lastUpdate } = latestUsageHost?.getArchiveState?.() || usageTransform.getState();
+    return {
+      enabled,
+      loaded,
+      sessionCount,
+      countSource: loaded ? 'loaded-memory' : enabled ? 'not-loaded' : 'not-enabled',
+      lastUpdate
+    };
+  },
+  getAppVersion: appVersion,
+  getDefaultDeviceId: defaultDeviceId,
+  canRefreshUsageRuntime,
+  getAppState: () => ({
+    packaged: app.isPackaged,
+    preferredLanguages: typeof app.getPreferredSystemLanguages === 'function'
+      ? app.getPreferredSystemLanguages()
+      : [app.getLocale?.() || 'en'],
+    locale: app.getLocale?.() || 'en'
+  })
+});
+
+const diagnosticReportGenerator = createDiagnosticReportGenerator({
+  getAppMetrics: () => app.getAppMetrics(),
+  getSystemMemory: () => ({ total: os.totalmem(), free: os.freemem() }),
+  privateMemorySupported: process.platform === 'win32',
+  getSnapshot: ({ generatedAt }) => diagnosticSnapshotBuilder.build(generatedAt),
+  getArchiveFileStat: async () => {
+    if (settings?.sessionUsageArchiveEnabled === false) return { ok: false, code: 'archive-not-enabled' };
+    try {
+      const stat = await fs.promises.stat(sessionUsageArchiveDatabasePath());
+      return { ok: true, stat };
+    } catch (error) {
+      return { ok: false, code: error?.code === 'ENOENT' ? 'archive-not-present' : 'archive-stat-failed' };
+    }
+  }
+});
+
+function limitInvalidationKey(scope) {
+  const provider = String(scope?.provider || '').trim().toLowerCase();
+  const account = String(
+    scope?.accountKey
+    || scope?.accountId
+    || scope?.id
+    || scope?.accountName
+    || scope?.accountEmail
+    || scope?.accountLabel
+    || ''
+  ).trim();
+  if (account) return `${provider}:${account}`;
+  return provider === 'minimax' && scope?.source === 'api' ? `${provider}:source:api` : `${provider}:*`;
+}
+
+function rememberPendingLimitInvalidation(scope, reason, options = {}) {
+  const refresh = options.refresh !== false;
+  const normalized = { ...scope, provider: String(scope?.provider || '').trim().toLowerCase() };
+  const key = limitInvalidationKey(normalized);
+  const broad = pendingLimitInvalidations.get(`${normalized.provider}:*`);
+  if (normalized.provider === 'minimax' && normalized.source === 'api' && broad?.clear) {
+    broad.refresh ||= refresh;
+    return;
+  }
+  let clear = options.clear === true || pendingLimitInvalidations.get(key)?.clear === true;
+  if (key.endsWith(':*')) {
+    for (const pendingKey of pendingLimitInvalidations.keys()) {
+      if (pendingKey.startsWith(`${normalized.provider}:`)) {
+        clear = clear || pendingLimitInvalidations.get(pendingKey).clear;
+        pendingLimitInvalidations.delete(pendingKey);
+      }
+    }
+  }
+  pendingLimitInvalidations.set(key, { scope: normalized, reason, clear, refresh });
+}
+
+function queueLimitInvalidation(scope, reason = 'credential-change', options = {}) {
+  const clear = options.clear === true;
+  const refresh = options.refresh !== false;
+  if (!deviceRuntimeHandle) {
+    rememberPendingLimitInvalidation(scope, reason, { clear, refresh });
+    return Promise.resolve({ queued: true });
+  }
+  return runLimitInvalidation(deviceRuntimeHandle, scope, reason, { clear, refresh });
+}
+
+function drainPendingLimitInvalidations(runtime) {
+  const pending = [...pendingLimitInvalidations.values()];
+  pendingLimitInvalidations.clear();
+  for (const entry of pending) {
+    void runLimitInvalidation(runtime, entry.scope, entry.reason, entry).catch((error) => {
+      console.log(`[limits-runtime] pending refresh failed: ${error.message}`);
+    });
+  }
+}
+
+function refreshUsageClient(clientId, options = {}) {
+  const client = String(clientId || '').trim().toLowerCase();
+  const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
+  if (!client || !KNOWN_CLIENTS.split(',').includes(client) || !tracked.has(client)) {
+    throw new TypeError(`Unsupported targeted usage client: ${client || '(empty)'}`);
+  }
+  if (!deviceRuntimeHandle) {
+    pendingUsageClientRefreshes.set(client, { clientId: client, options: { ...options } });
+    return Promise.resolve({ queued: true });
+  }
+  return Promise.resolve(deviceRuntimeHandle.refreshClient(client, options));
+}
+
+function bestEffortTrackedUsageRefresh(clientId, options = {}) {
+  const client = String(clientId || '').trim().toLowerCase();
+  const tracked = trackedClientSet(clientsCsvForSetting(settings?.clients));
+  if (
+    !tracked.has(client)
+    || (settings?.hubMode !== 'icloud' && !canRefreshUsageRuntime(mode, isExternalAgentActive))
+  ) return;
+  try {
+    void refreshUsageClient(client, options).catch((error) => {
+      console.log(`[usage-runtime] credential refresh failed: ${error.message}`);
+    });
+  } catch (error) {
+    console.log(`[usage-runtime] credential refresh failed: ${error.message}`);
+  }
+}
+
+function drainPendingUsageClientRefreshes(runtime) {
+  drainPendingUsageClientRefreshQueue(
+    pendingUsageClientRefreshes,
+    runtime,
+    (error) => {
+      console.log(`[usage-runtime] pending client refresh failed: ${error.message}`);
+    },
+    { enabled: settings?.hubMode === 'icloud' || canRefreshUsageRuntime(mode, isExternalAgentActive) }
+  );
+}
+
+function drainPendingRuntimeActions(runtime) {
+  drainPendingLimitInvalidations(runtime);
+  drainPendingUsageClientRefreshes(runtime);
+}
+
+function effectiveHubConfig(sourceSettings = settings) {
+  if (sourceSettings?.hubMode === 'host') {
+    return {
+      url: `http://127.0.0.1:${normalizeHubPort(sourceSettings.hubHostPort)}`,
+      secret: sourceSettings.hubHostSecret || ''
+    };
+  }
+  if (sourceSettings?.hubMode === 'client') {
+    const url = String(sourceSettings.hubUrl || '').trim();
+    return { url: url || null, secret: sourceSettings.secret || '' };
+  }
+  return { url: null, secret: '' };
+}
+
+function hubDataFile() {
+  return path.join(app.getPath('userData'), 'hub-devices.json');
+}
+
+function sendHubPush(payload) {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try { mainWindow.webContents.send('hub:push', payload); } catch (_) {}
+  }
+}
+
+function getHubInfo() {
+  const port = normalizeHubPort(settings?.hubHostPort);
+  return {
+    mode: settings?.hubMode || 'local',
+    port,
+    secret: settings?.hubHostSecret || '',
+    listening: Boolean(embeddedHub),
+    listeningPort: embeddedHub ? embeddedHub.port : null,
+    error: embeddedHubError,
+    lanAddresses: lanIpv4Addresses(),
+    icloud: icloudRuntimeHandle?.getStatus?.() || {
+      state: process.platform === 'darwin' ? 'waiting' : 'unavailable',
+      availability: process.platform === 'darwin' ? 'unknown' : 'unavailable',
+      supported: process.platform === 'darwin',
+      root: '[redacted]/Token Monitor/sync-v1',
+      deviceCount: 0,
+      watcher: 'inactive',
+      reconciliation: 'idle'
+    }
+  };
+}
+
+async function getHubBuildStatus() {
+  if (settings?.hubMode !== 'client') return { status: 'notConfigured', runtime: '', hubUrl: '' };
+  const hubUrl = String(settings.hubUrl || '').trim();
+  return probeHubBuild(hubUrl);
+}
+
+async function startEmbeddedHub() {
+  if (embeddedHub) return embeddedHub;
+  embeddedHubError = null;
+  const port = normalizeHubPort(settings.hubHostPort);
+  try {
+    if (!settings.hubHostSecret) {
+      const previous = settings;
+      try {
+        const next = { ...settings, hubHostSecret: generateHubSecret() };
+        getSyncContentRuntime().beforeDestinationChange(syncContentContext(next));
+        next.syncContentState = normalizeSyncContentState(settings.syncContentState);
+        settings = next;
+        saveSettings({ throwOnError: true });
+      } catch (error) {
+        // Restore connection settings without undoing a preflight OFF/journal.
+        settings = { ...previous, syncContentState: normalizeSyncContentState(settings.syncContentState) };
+        throw error;
+      }
+      getSyncContentRuntime().invalidate();
+    }
+    const hub = createHub({
+      port,
+      host: '0.0.0.0',
+      secret: settings.hubHostSecret,
+      syncSessionTitles: settings.hubSyncSessionTitles === true,
+      dataFile: hubDataFile(),
+      logger: { error: (err) => console.log(`[hub] ${err?.message || err}`) }
+    });
+    await hub.start();
+    embeddedHub = { hub, port, secret: settings.hubHostSecret };
+    console.log(`[hub] listening on 0.0.0.0:${port}`);
+    sendHubPush({ type: 'listening', info: getHubInfo() });
+    return embeddedHub;
+  } catch (error) {
+    embeddedHubError = { code: error.code || 'error', message: error.message, port };
+    console.log(`[hub] failed to start on port ${port}: ${error.message}`);
+    sendHubPush({ type: 'error', info: getHubInfo() });
+    return null;
+  }
+}
+
+async function stopEmbeddedHub() {
+  if (!embeddedHub) return;
+  const handle = embeddedHub;
+  embeddedHub = null;
+  try { await handle.hub.stop(); } catch (_) {}
+  sendHubPush({ type: 'stopped', info: getHubInfo() });
+}
+
+function isExternalAgentActive() {
+  return externalAgentActive(AGENT_PID_PATH);
+}
+
+function ownsUsageRuntime() {
+  return Boolean(
+    deviceRuntimeHandle
+    && (settings?.hubMode === 'icloud' || canRefreshUsageRuntime(mode, isExternalAgentActive))
+  );
+}
+
+async function deleteDeviceFromHub(deviceId) {
+  const { url: hubUrl, secret } = effectiveHubConfig();
+  if (!hubUrl) return;
+  const base = hubUrl.replace(/\/$/, '');
+  const response = await fetch(`${base}/api/devices/${encodeURIComponent(deviceId)}`, {
+    method: 'DELETE',
+    headers: secret ? { authorization: `Bearer ${secret}` } : {}
+  });
+  if (!response.ok && response.status !== 404) throw new Error(`DELETE ${response.status}`);
+}
+
+function normalizeDeviceIdForDeletion(deviceId) {
+  const id = String(deviceId ?? '').trim();
+  if (!id) throw Object.assign(new Error('invalid_device_id'), { code: 'invalid_device_id' });
+  return id;
+}
+
+async function deleteDeviceFromCurrentSync(deviceId) {
+  const hubMode = settings?.hubMode;
+  if (hubMode !== 'icloud' && hubMode !== 'client' && hubMode !== 'host') {
+    throw Object.assign(new Error('Device deletion is only available in shared sync mode'), { code: 'not_shared' });
+  }
+  const hubIdentity = currentHubIdentity();
+  const runtime = hubMode === 'icloud' ? icloudRuntimeHandle : null;
+  if (hubMode === 'icloud' && !runtime) {
+    throw Object.assign(new Error('iCloud sync is unavailable'), { code: 'icloud_unavailable' });
+  }
+
+  const stats = await fetchStats();
+  if (
+    settings?.hubMode !== hubMode
+    || currentHubIdentity() !== hubIdentity
+    || (hubMode === 'icloud' && icloudRuntimeHandle !== runtime)
+  ) {
+    throw Object.assign(new Error('hub changed'), { code: 'hub_changed' });
+  }
+  const localDeviceId = String(settings?.deviceId || defaultDeviceId()).trim();
+  if (deviceId === localDeviceId) {
+    throw Object.assign(new Error('local_device_delete_not_allowed'), { code: 'local_device_delete_not_allowed' });
+  }
+  const devices = Array.isArray(stats?.devices) ? stats.devices : [];
+  const target = devices.find((device) => device?.deviceId === deviceId);
+  if (!target) {
+    throw Object.assign(new Error('device_not_found'), { code: 'device_not_found' });
+  }
+  if (target.stale !== true) {
+    throw Object.assign(new Error('device_not_stale'), { code: 'device_not_stale' });
+  }
+
+  if (hubMode === 'icloud') return runtime.deleteDevice(deviceId);
+  return deleteDeviceFromHub(deviceId);
+}
+
+async function postToHub(summary) {
+  const { url: hubUrl, secret } = effectiveHubConfig();
+  const uploadIdentity = getSyncContentRuntime().status().identity;
+  const uploadContext = syncContentContext();
+  if (!hubUrl) throw new Error('hub not configured');
+  const stale = settings.lastPostedDeviceId;
+  if (stale && stale !== summary.deviceId) {
+    try { await deleteDeviceFromHub(stale); }
+    catch (error) { console.log(`[sync] cleanup of old deviceId ${stale} failed: ${error.message}`); }
+  }
+  const url = `${hubUrl.replace(/\/$/, '')}/api/ingest`;
+  const runtime = getSyncContentRuntime();
+  const syncOptions = await runtime.prepareUpload();
+  if (syncOptions.identity !== uploadIdentity || syncOptions.signal.aborted
+    || syncOptions.identity !== getSyncContentRuntime().status().identity
+    || !sameDestination(uploadContext, syncContentContext())
+    || summary.deviceId !== syncContentContext().deviceId) throw new Error('hub_changed');
+  const fetchForUpload = (target, options) => fetch(target, { ...options, redirect: 'error',
+    signal: AbortSignal.any([syncOptions.signal, AbortSignal.timeout(15_000)]) });
+  const { response } = await postSyncPayload(fetchForUpload, url, {
+    syncSessionTitles: syncOptions.syncSessionTitles,
+    sessionTitleSyncGeneration: syncOptions.sessionTitleSyncGeneration,
+    headers: {
+      'content-type': 'application/json',
+      [HUB_RESPONSE_HEADER]: HUB_RESPONSE_MINIMAL,
+      ...(secret ? { authorization: `Bearer ${secret}` } : {})
+    },
+    summary,
+    logger: (message) => console.log(`[sync] ${message}`)
+  });
+  if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  if (settings.lastPostedDeviceId !== summary.deviceId) {
+    settings.lastPostedDeviceId = summary.deviceId;
+    saveSettings();
+  }
+  return response.json();
+}
+
+let syncContentRuntime = null;
+let applySyncSettingsPatch = null;
+
+function syncContentContext(sourceSettings = settings) {
+  const endpoint = effectiveHubConfig(sourceSettings);
+  return { ...endpoint, mode: sourceSettings?.hubMode, deviceId: sourceSettings?.deviceId || defaultDeviceId() };
+}
+
+async function requestSyncContent(context, pathname, method, body) {
+  // The embedded Hub uses the same authenticated protocol in-process. Its
+  // own usage must keep working when outbound loopback traffic is blocked.
+  if (context.mode === 'host' && embeddedHub
+    && ((context.url === `http://127.0.0.1:${embeddedHub.port}` && context.secret === embeddedHub.secret)
+      // Every embedded host generation shares this app's hubDataFile. Old
+      // host journals may scrub that same store after port/secret rotation;
+      // they cannot read or admit a new generation through this exception.
+      || (method === 'PUT' && /^\/api\/sync\/titles\//.test(pathname) && body?.enabled === false))) {
+    const hub = embeddedHub.hub;
+    try {
+      if (pathname === '/api/sync/content') return { status: 200, body: hub.getSyncContent() };
+      const match = pathname.match(/^\/api\/sync\/settings\/(modelAliases|customPricing|limitAccountPresentation)$/);
+      if (match) return { status: 200, body: { ok: true, ...(method === 'PUT'
+        ? hub.setSyncSettings(match[1], body) : hub.getSyncSettings(match[1])) } };
+      const titleMatch = pathname.match(/^\/api\/sync\/titles\/([^/]+)$/);
+      if (titleMatch && method === 'PUT') return { status: 200,
+        body: { ok: true, ...hub.setSyncTitlePolicy(decodeURIComponent(titleMatch[1]), body.enabled) } };
+      return { status: 404, body: null };
+    } catch (error) {
+      return { status: error.code === 'stale_write' ? 409 : error.code === 'forbidden' ? 403 : 400,
+        body: error.current || null };
+    }
+  }
+  const response = await fetch(`${context.url.replace(/\/$/, '')}${pathname}`, {
+    method, redirect: 'error',
+    headers: { 'content-type': 'application/json', ...(context.secret ? { authorization: `Bearer ${context.secret}` } : {}) },
+    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    signal: AbortSignal.timeout(15_000)
+  });
+  let data;
+  try { data = await response.json(); } catch (_) { data = null; }
+  return { status: response.status, body: data };
+
+}
+
+let syncContentCredentials;
+// Destination bindings stay in CredentialStore; preferences contain only opaque IDs.
+function getSyncContentCredentials() {
+  return syncContentCredentials ||= createSyncContentCredentialQueue(ensureCredentialStore);
+}
+
+const { createAccountPresentationSync } = require('./limits/accountPresentationSync');
+let accountPresentationSync;
+function getAccountPresentationSync() {
+  return accountPresentationSync ||= createAccountPresentationSync({
+    getContext: syncContentContext,
+    identity: (context) => {
+      try { return getSyncContentCredentials().resolvePresentationIdentity(context); } catch (_) { return ''; }
+    },
+    getCacheIdentity: () => settings.limitAccountPresentationCacheIdentity || '',
+    loadJournal: () => (Array.isArray(settings.limitAccountPresentationPending) ? settings.limitAccountPresentationPending : []),
+    saveJournal: (journal) => {
+      settings = { ...settings, limitAccountPresentationPending: journal };
+      saveSettings({ throwOnError: true });
+    },
+    getLocalLabels: () => LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots).flatMap(entry =>
+      accountSlotService?.localLabels(entry.id) || []),
+    getSeed: () => {
+      const seed = structuredClone(settings.limitAccountPresentation || {});
+      for (const entry of LIMIT_PROVIDER_REGISTRY.filter(entry => entry.accountSlots)) {
+        const accounts = accountSlotService?.list(entry.id).accounts || [];
+        if (!accounts.length) continue;
+        const group = seed[entry.id] ||= { labels: {}, order: [] };
+        for (const slot of accounts) {
+          const key = slot.presentationKey || slot.accountKey;
+          if (slot.label && !Object.hasOwn(group.labels, key)) group.labels[key] = slot.label;
+        }
+        group.order = [...new Set([...group.order, ...accounts.map(slot => slot.presentationKey || slot.accountKey)])];
+      }
+      return normalizeSharedSyncValue('limitAccountPresentation', normalizeAccountPresentation(seed));
+    },
+    request: requestSyncContent,
+    apply: (value, identity) => {
+      settings = { ...settings, limitAccountPresentation: value, limitAccountPresentationCacheIdentity: identity };
+      saveSettings({ throwOnError: true });
+      pushSettingsToRenderer();
+      void accountSlotService?.adoptSharedLabels(value);
+    }
+  });
+}
+
+function getSyncContentRuntime() {
+  if (syncContentRuntime) return syncContentRuntime;
+  const cleanupCredentials = getSyncContentCredentials();
+  syncContentRuntime = createSyncContentRuntime({
+    resolveIdentity: cleanupCredentials.resolveIdentity,
+    loadCleanupContexts: cleanupCredentials.read,
+    saveCleanupContext: cleanupCredentials.save,
+    removeCleanupContext: cleanupCredentials.remove,
+    getContext: syncContentContext,
+    getState: () => settings?.syncContentState,
+    saveState: (next) => {
+      const previous = settings;
+      settings = { ...settings, syncContentState: next };
+      try {
+        // Sync policy changes never alter credentials. Persist OFF independently
+        // so a failed private journal write cannot block the preference journal.
+        writePrivateJsonAtomic(settingsPath, stripCredentialSettings(settings));
+        persistedSettingsSnapshot = cloneSettingsSnapshot(settings);
+      } catch (error) { settings = previous; throw error; }
+    },
+    getLocalValue: (kind) => kind === 'modelAliases'
+      ? { modelAliases: settings.modelAliases, modelAliasGrouping: settings.modelAliasGrouping }
+      : settings.customModelPricing,
+    applyLocalValue: (kind, value) => {
+      if (!applySyncSettingsPatch) throw new Error('settings_not_ready');
+      return applySyncSettingsPatch(kind === 'modelAliases' ? value : { customModelPricing: value });
+    },
+    normalizeValue: normalizeSharedSyncValue,
+    request: requestSyncContent,
+    onStatus: (status) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        try { mainWindow.webContents.send('syncContent:push', status); } catch (_) {}
+      }
+    }
+  });
+  return syncContentRuntime;
+}
+
+// ---------------------------------------------------------------------------
+// Shared subscriptions
+//
+// A subscription describes an account, not a machine, so devices that share a hub
+// share ONE list rather than each carrying a copy. settings.subscriptions stays
+// the local store in local mode, and doubles as the last-known cache in sync mode
+// so a hub that is unreachable at startup shows the records instead of an empty
+// list. The hub is the authority whenever it answers; writes made while it does
+// not answer are refused rather than written locally, because a local write would
+// fork the shared list with no way to tell later which side was right.
+// ---------------------------------------------------------------------------
+
+let hubSubscriptions = null;
+// Which hub the document in hand came from. Without it, switching to a hub that
+// cannot be reached kept showing the previous hub's records as though they were
+// this one's.
+let hubSubscriptionsHub = '';
+// One lane per hub for its reads and writes, the same way startMode() serializes
+// hub-side work. Discarding whichever answer came back last is not enough: a read
+// that STARTS after a write can still observe the state before it, come back
+// first, and leave the write invisible on screen and in settings.json. Only
+// ordering the operations themselves removes that.
+//
+// Ordering is not re-basing, though. A write queued behind another does NOT adopt
+// whatever version that one left: its list was built from a particular version,
+// and if what ran ahead of it pulled in another device's records, writing over
+// them under their own token is the silent erase this design exists to prevent.
+// Each write carries the version it was built from and is refused if that has
+// moved on.
+//
+// Per hub rather than one lane for all of them, because ordering is only worth
+// anything against a single shared document: two hubs hold two documents with no
+// ordering between them, and a hub that accepts the connection but answers
+// slowly would otherwise hold up the hub the user is actually looking at.
+const subscriptionQueues = new Map();
+// The last version this device tried to catch up to, and when. Only a failed
+// attempt is ever seen twice — a successful one leaves the document in hand
+// matching the stamp, which settles it before this is consulted.
+let lastSubscriptionCatchUp = { hub: '', version: '', at: 0 };
+const SUBSCRIPTION_RETRY_MS = 60000;
+
+function subscriptionsAreShared() {
+  return settings?.hubMode === 'client' || settings?.hubMode === 'host' || settings?.hubMode === 'icloud';
+}
+
+// The document in hand, but only when it is the one this hub answered with.
+// Everything that reads it has to ask, because the two are not kept in step: a
+// switch to another hub and back leaves that hub's document installed while the
+// first is in front of the user again, until its own refresh replaces it.
+// Neither the records in it nor the updatedAt on it describe the hub being asked
+// about, and both are load-bearing — one is what gets written, the other is what
+// the hub checks it against.
+function subscriptionsDocumentFor(hub) {
+  return hubSubscriptionsHub === hub ? hubSubscriptions : null;
+}
+
+function effectiveSubscriptions() {
+  if (!subscriptionsAreShared()) return settings.subscriptions || [];
+  const hub = currentHubIdentity();
+  const doc = subscriptionsDocumentFor(hub);
+  if (doc) return doc.subscriptions;
+  // The on-disk copy only answers for this hub, or for no hub at all — in which
+  // case it is this device's own list, waiting to be seeded. Another hub's
+  // records are not an answer to "what is on this one", so nothing is shown
+  // rather than something wrong.
+  const cacheHub = String(settings.subscriptionsCacheHub || '');
+  return cacheHub === hub || cacheHub === '' ? (settings.subscriptions || []) : [];
+}
+
+// Returns whether anything actually changed. Callers use that to decide whether
+// to push settings at the renderer: a push re-renders the whole settings form,
+// which would fight whatever the user is typing in it.
+function cacheSharedSubscriptions(doc, hub) {
+  // Identity counts as a change on its own: two hubs can hold the same
+  // updatedAt — an empty one, most obviously, when neither has been written to —
+  // and comparing timestamps alone left the marker pointing at the previous hub,
+  // so an offline restart came back showing its records.
+  const changed = (hubSubscriptions?.updatedAt || '') !== (doc.updatedAt || '')
+    || (hubSubscriptions?.revisionToken || '') !== (doc.revisionToken || '')
+    || String(settings.subscriptionsCacheHub || '') !== hub;
+  hubSubscriptions = doc;
+  hubSubscriptionsHub = hub;
+  if (changed) {
+    settings.subscriptions = doc.subscriptions;
+    settings.subscriptionsCacheHub = hub;
+    persistSubscriptionState();
+  }
+  // Cache ownership commits in memory even when disk persistence fails. Only
+  // the currently selected backend may invalidate its captured business data.
+  if (hub === currentHubIdentity()) pluginRuntime?.refreshBusinessData();
+  return changed;
+}
+
+// saveSettings() rolls the WHOLE settings object back to its last persisted
+// snapshot when the file cannot be written, so a failed write here would discard
+// the set-aside records this refresh just computed along with the cache — and
+// their notice would vanish until the next restart, with nothing on screen
+// saying anything went wrong. Re-apply both: disk is behind, but what the user
+// still has to decide about stays in front of them.
+function persistSubscriptionState() {
+  const subscriptions = settings.subscriptions;
+  const orphaned = settings.subscriptionsOrphaned;
+  const cacheHub = settings.subscriptionsCacheHub;
+  if (saveSettings()) return true;
+  settings.subscriptions = subscriptions;
+  settings.subscriptionsOrphaned = orphaned;
+  settings.subscriptionsCacheHub = cacheHub;
+  console.log('[sync] subscription state could not be written to disk');
+  return false;
+}
+
+function queueSubscriptionOp(run) {
+  // Captured on the way in, not when the operation runs: it was decided against
+  // the hub in front of the user now, and a switch before it starts turns it
+  // into work about a hub they have left. Each operation is handed the identity
+  // it was queued for so it can say what to do about that.
+  const hub = currentHubIdentity();
+  const previous = subscriptionQueues.get(hub) || Promise.resolve();
+  const result = previous.then(() => run(hub), () => run(hub));
+  // The lane has to survive a failed operation; the caller still sees the error.
+  const lane = result.then(() => {}, () => {});
+  subscriptionQueues.set(hub, lane);
+  // Dropped once idle, so the map holds the hub in use and, briefly, whichever
+  // one is still draining — not an entry per hub the user has ever typed.
+  lane.then(() => { if (subscriptionQueues.get(hub) === lane) subscriptionQueues.delete(hub); });
+  return result;
+}
+
+// The user can switch hubs while an operation is queued or in flight, and an
+// answer about the hub they left is not an answer about the one they are on.
+function subscriptionOpIsCurrent(hub) {
+  return hub === currentHubIdentity();
+}
+
+// Reported rather than dropped: whatever the user was acting on is still on
+// screen, and silence would read as done.
+function hubChangedError() {
+  return Object.assign(new Error('hub changed'), { code: 'hub_changed' });
+}
+
+function subscriptionsEndpoint() {
+  const { url: hubUrl, secret } = effectiveHubConfig();
+  if (!hubUrl) return null;
+  return {
+    url: `${hubUrl.replace(/\/$/, '')}/api/subscriptions`,
+    headers: secret ? { authorization: `Bearer ${secret}` } : {}
+  };
+}
+
+async function fetchSharedSubscriptions() {
+  // A host-mode widget is the hub, so it reads its own store rather than looping
+  // back over HTTP to itself — the same shortcut fetchHubStats() takes.
+  if (settings.hubMode === 'host' && embeddedHub) return embeddedHub.hub.getSubscriptions();
+  const endpoint = subscriptionsEndpoint();
+  if (!endpoint) return null;
+  // A hub that accepts the connection and then never answers would hold this
+  // lane open for the rest of the session, and every later read and save for that
+  // hub behind it. fetch() has no deadline of its own, so it gets the same 15s
+  // the other hub requests use.
+  const response = await fetch(endpoint.url, { headers: endpoint.headers, signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  return response.json();
+}
+
+// The 409 body is the hub's current list, worth caching — but only while this is
+// still the newest operation. A late rejection carrying an older document would
+// otherwise overwrite a write that has already landed.
+function staleSubscriptionWriteError(current, hub) {
+  const error = new Error('stale_write');
+  error.code = 'stale_write';
+  if (current && subscriptionOpIsCurrent(hub)) cacheSharedSubscriptions(current, hub);
+  return error;
+}
+
+function writeSharedSubscriptions(list, baseUpdatedAt) {
+  return queueSubscriptionOp((hub) => {
+    // Queued against one hub, reached the front of the lane after the user moved
+    // to another. The list in hand is the one they were editing on the hub they
+    // left, and hubSubscriptions now holds the new hub's updatedAt to base on, so
+    // sending it would write one hub's records into another against a base that
+    // was never read from it.
+    if (!subscriptionOpIsCurrent(hub)) throw hubChangedError();
+    return writeSharedSubscriptionsNow(list, hub, baseUpdatedAt);
+  });
+}
+
+// Takes the hub and the base rather than reading either. The identity is the one
+// this write was queued against; the base is the version the list was built from,
+// which is the whole meaning of the token. Reading it here instead would answer
+// "the newest version this process knows of", and pairing that with a list made
+// from an older one is a write the hub has no way to refuse: the token is
+// current, so it accepts, and whatever arrived in between is gone.
+async function writeSharedSubscriptionsNow(list, hub, baseUpdatedAt) {
+  // Which makes the base worth checking, not just carrying. A list built on a
+  // version this process has already moved past is stale for exactly the reason
+  // another device's write is, and the answer is the same one the hub would give:
+  // re-read and redo. Held nothing for this hub and the caller claims a version,
+  // and they read it somewhere else — another hub, before a switch back to this
+  // one — which is not a version of this list at all.
+  if (baseUpdatedAt !== (subscriptionsDocumentFor(hub)?.updatedAt || '')) {
+    throw Object.assign(new Error('stale_write'), { code: 'stale_write' });
+  }
+  if (settings.hubMode === 'host' && embeddedHub) {
+    try {
+      const stored = embeddedHub.hub.setSubscriptions(list, baseUpdatedAt);
+      if (subscriptionOpIsCurrent(hub)) cacheSharedSubscriptions(stored, hub);
+      return;
+    } catch (error) {
+      if (error.code === 'stale_write') throw staleSubscriptionWriteError(error.current, hub);
+      throw error;
+    }
+  }
+  const endpoint = subscriptionsEndpoint();
+  if (!endpoint) throw new Error('hub not configured');
+  const response = await fetch(endpoint.url, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', ...endpoint.headers },
+    body: JSON.stringify({ subscriptions: list, baseUpdatedAt }),
+    signal: AbortSignal.timeout(15_000)
+  });
+  // Someone else wrote the list since this device last read it. Overwriting would
+  // erase their records silently, and they exist nowhere else.
+  if (response.status === 409) throw staleSubscriptionWriteError(await response.json().catch(() => null), hub);
+  if (!response.ok) {
+    // The hub answered, so it is reachable — a 401 is the wrong secret and a 400
+    // is a bad payload. Reporting either as "could not reach the hub" sends the
+    // user looking at their network instead of their settings.
+    const rejected = new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+    rejected.code = 'rejected';
+    rejected.status = response.status;
+    throw rejected;
+  }
+  const stored = await response.json();
+  // The write succeeded, but if the user moved to another hub while it was in
+  // flight this answer no longer describes what is in front of them.
+  if (!subscriptionOpIsCurrent(hub)) return;
+  cacheSharedSubscriptions(stored, hub);
+}
+
+// Records this device holds that the shared list does not have, or has
+// differently. Comparing ids alone is not enough: a record edited here while the
+// device was in local mode keeps its id, so the shared copy would silently win
+// and the edit would be gone. Neither is folding them in automatically — the
+// same plan entered separately on two machines has two ids, and merging those
+// would double the monthly total. So both cases are set aside for the one person
+// who can tell them apart.
+function rememberOrphanedSubscriptions(local, doc) {
+  const shared = new Map((doc.subscriptions || []).map((entry) => [entry.id, entry]));
+  const orphans = (local || []).filter((entry) => {
+    if (!entry?.id) return false;
+    const match = shared.get(entry.id);
+    return !match || JSON.stringify(match) !== JSON.stringify(entry);
+  });
+  const next = orphans.length > 0
+    ? { hubUrl: currentHubIdentity(), records: orphans }
+    : { hubUrl: '', records: [] };
+  if (JSON.stringify(next) === JSON.stringify(orphanedSubscriptions())) return false;
+  settings.subscriptionsOrphaned = next;
+  return true;
+}
+
+// Which hub the set-aside records were held back from. Offering them to a
+// different hub would file this device's records somewhere they never belonged.
+// Trimmed the same way subscriptionsEndpoint() trims it, so a trailing slash the
+// user typed does not read as a different hub and strand them.
+function currentHubIdentity() {
+  if (typeof settings !== 'undefined' && settings?.hubMode === 'icloud') return 'icloud';
+  return String(effectiveHubConfig().url || '').replace(/\/$/, '');
+}
+
+function subscriptionDocumentVersion(doc) {
+  if (!doc) return '';
+  return settings?.hubMode === 'icloud'
+    ? String(doc.revisionToken || '')
+    : String(doc.updatedAt || '');
+}
+
+function orphanedSubscriptions() {
+  const stored = settings.subscriptionsOrphaned;
+  // Tolerates the bare array this field held before it carried a hub.
+  if (Array.isArray(stored)) return { hubUrl: '', records: stored };
+  return { hubUrl: String(stored?.hubUrl || ''), records: Array.isArray(stored?.records) ? stored.records : [] };
+}
+
+// Empty unless they belong to the hub in front of the user right now: a set held
+// back from another hub, or from before a switch to local mode, has nowhere to
+// go, and offering to adopt it promises something that cannot happen.
+function pendingOrphanedSubscriptions() {
+  const { hubUrl, records } = orphanedSubscriptions();
+  if (!subscriptionsAreShared() || hubUrl !== currentHubIdentity()) return [];
+  return records;
+}
+
+async function adoptOrphanedSubscriptions() {
+  // Nothing to decide about; the answer that counts is taken inside the lane.
+  if (pendingOrphanedSubscriptions().length === 0) return settingsForRenderer();
+  // Reading, merging and writing is one operation, so all three happen in one
+  // turn of the lane. Merging outside it took the document as it stood before
+  // whatever was already queued, and the write that followed then carried the
+  // base that operation left behind — a pairing the hub has no way to refuse,
+  // because the token is current. It accepts the write, and the records the other
+  // operation added in between are gone with nothing to say they were dropped.
+  await queueSubscriptionOp(async (hub) => {
+    if (!subscriptionOpIsCurrent(hub)) throw hubChangedError();
+    const orphans = pendingOrphanedSubscriptions();
+    if (orphans.length === 0) return;
+    // Same-id records replace rather than append: two entries sharing an id would
+    // collapse on normalization anyway, and the local edit is the one being
+    // adopted. Merging into another hub's document would carry its records into
+    // this one as though they had been entered here; with none in hand the write
+    // goes out claiming no base, which the hub answers with 409 rather than an
+    // overwrite.
+    if (settings.hubMode === 'icloud') {
+      const runtime = icloudRuntimeHandle;
+      if (!runtime) throw Object.assign(new Error('iCloud sync is unavailable'), { code: 'icloud_unavailable' });
+      const held = runtime.getSubscriptions?.();
+      const merged = new Map((held?.subscriptions || []).map((entry) => [entry.id, entry]));
+      for (const orphan of orphans) merged.set(orphan.id, orphan);
+      const result = await runtime.saveSubscriptions([...merged.values()], held?.revisionToken || '');
+      if (!subscriptionOpIsCurrent(hub) || icloudRuntimeHandle !== runtime) throw hubChangedError();
+      if (result?.winner) {
+        cacheSharedSubscriptions({
+          version: 1,
+          updatedAt: result.winner.updatedAt || '',
+          subscriptions: result.winner.subscriptions || [],
+          revisionToken: result.revisionToken || ''
+        }, hub);
+      }
+      // iCloud may discover a competing writer's snapshot after publishing ours.
+      // Unlike the Hub's accepted write, that result does not prove adoption.
+      const winningRecords = new Map((result?.winner?.subscriptions || []).map((entry) => [entry.id, entry]));
+      if (result?.errors?.length || !result?.winner || orphans.some((entry) =>
+        JSON.stringify(winningRecords.get(entry.id)) !== JSON.stringify(entry)
+      )) {
+        const code = result?.errors?.length || !result?.winner ? 'icloud_adoption_unconfirmed' : 'stale_write';
+        throw Object.assign(new Error(code), { code });
+      }
+    } else {
+      const held = subscriptionsDocumentFor(hub);
+      const merged = new Map((held?.subscriptions || []).map((entry) => [entry.id, entry]));
+      for (const orphan of orphans) merged.set(orphan.id, orphan);
+      await writeSharedSubscriptionsNow([...merged.values()], hub, held?.updatedAt || '');
+    }
+    // Cleared in the same turn: between the write landing and this, the records
+    // are on the hub and still marked as waiting for a decision here.
+    settings.subscriptionsOrphaned = { hubUrl: '', records: [] };
+    if (!saveSettings()) throw Object.assign(new Error('settings write failed'), { code: 'write_failed' });
+  });
+  return settingsForRenderer();
+}
+
+// Only the message survives the IPC boundary, so the outcome goes in it. The
+// renderer needs these apart: another device winning means re-read and redo, a
+// rejected write means fix the secret, and an unreachable hub means try later.
+function subscriptionWriteFailureCode(error) {
+  if (error?.code === 'stale_write') return 'stale_write';
+  if (error?.code === 'rejected') return 'hub_rejected';
+  if (error?.code === 'write_failed') return 'write_failed';
+  if (error?.code === 'hub_changed') return 'hub_changed';
+  if (typeof settings !== 'undefined' && settings?.hubMode === 'icloud') {
+    return error?.code === 'icloud_unavailable' || error?.code === 'icloud_stopped' || error?.code === 'icloud_adoption_unconfirmed'
+      ? error.code
+      : 'icloud_write_failed';
+  }
+  return 'hub_unreachable';
+}
+
+function discardOrphanedSubscriptions() {
+  settings.subscriptionsOrphaned = { hubUrl: '', records: [] };
+  if (!saveSettings()) throw Object.assign(new Error('settings write failed'), { code: 'write_failed' });
+  return settingsForRenderer();
+}
+
+function refreshSharedSubscriptions(options = {}) {
+  // Nothing left to answer for a hub the user has moved off: the switch enqueues
+  // its own refresh for the hub they moved to, and this one would only spend a
+  // request to be discarded on arrival.
+  return queueSubscriptionOp((hub) => (subscriptionOpIsCurrent(hub) ? refreshSharedSubscriptionsNow(options) : false));
+}
+
+async function refreshSharedSubscriptionsNow({ seedFromLocal = false } = {}) {
+  if (!subscriptionsAreShared()) {
+    const had = Boolean(hubSubscriptions);
+    hubSubscriptions = null;
+    hubSubscriptionsHub = '';
+    return had;
+  }
+  // A document fetched from another hub is not an answer about this one, and
+  // holding on to it is what made an unreachable new hub show the old one's list.
+  const hub = currentHubIdentity();
+  if (hubSubscriptions && hubSubscriptionsHub !== hub) {
+    hubSubscriptions = null;
+    hubSubscriptionsHub = '';
+  }
+
+  if (settings.hubMode === 'icloud') {
+    const runtime = icloudRuntimeHandle;
+    if (!runtime) return false;
+    await runtime.reconcile('subscription-refresh');
+    if (!subscriptionOpIsCurrent(hub) || icloudRuntimeHandle !== runtime) return false;
+    const local = settings.subscriptionsCacheHub ? [] : (settings.subscriptions || []);
+    let document = runtime.getSubscriptions?.() || null;
+    if (!document && seedFromLocal && local.length > 0) {
+      const written = await runtime.saveSubscriptions(local, '');
+      if (!subscriptionOpIsCurrent(hub) || icloudRuntimeHandle !== runtime) return false;
+      document = written?.winner
+        ? { ...written.winner, revisionToken: written.revisionToken || '' }
+        : null;
+    }
+    // No winner means no valid snapshot exists. Missing, malformed, or
+    // temporarily unavailable files are not an authoritative empty list; only
+    // a valid winner whose subscriptions array is [] can clear the cache.
+    if (!document) return false;
+    const normalizedDocument = {
+      version: 1,
+      updatedAt: document.updatedAt || '',
+      subscriptions: document.subscriptions || [],
+      revisionToken: document.revisionToken || ''
+    };
+    const orphansChanged = seedFromLocal && local.length > 0
+      ? rememberOrphanedSubscriptions(local, normalizedDocument)
+      : false;
+    const changed = cacheSharedSubscriptions(normalizedDocument, hub);
+    if (orphansChanged && !changed) persistSubscriptionState();
+    return changed || orphansChanged;
+  }
+
+  try {
+    // Only records this device actually owns may be seeded or set aside. Once
+    // settings.subscriptions is a cache of some hub it is that hub's data, and
+    // carrying it into the next hub would file one hub's records on another —
+    // duplicating accounts that were never entered here. Switching to local mode
+    // and editing hands ownership back, which is what clears the marker.
+    // A marked cache is some hub's data, never this device's — including the hub
+    // in front of us, whose own list is exactly what the cache holds. Only an
+    // unmarked list is owned here and eligible to be seeded or set aside.
+    const local = settings.subscriptionsCacheHub ? [] : (settings.subscriptions || []);
+    const doc = await fetchSharedSubscriptions();
+    if (!doc) return false;
+    // Nothing else can have run against the hub in the meantime — the lane saw to
+    // that — but the user may have switched hubs while this request was waiting,
+    // and applying it would show one hub's records under another's name.
+    if (!subscriptionOpIsCurrent(hub)) return false;
+    // A hub nobody has ever written to: adopt this device's records rather than
+    // replacing them with nothing. Keyed on updatedAt rather than on the list
+    // being empty — an empty list WITH a timestamp is somebody's delete, and
+    // re-uploading a stale cache over it resurrects what they removed.
+    if (seedFromLocal && !doc.updatedAt && local.length > 0) {
+      const previous = hubSubscriptions;
+      const previousHub = hubSubscriptionsHub;
+      hubSubscriptions = doc;
+      hubSubscriptionsHub = hub;
+      try {
+        // The document just fetched is the base by definition: it is what this
+        // hub answered a moment ago, and an unwritten hub answers with no token.
+        await writeSharedSubscriptionsNow(local, hub, doc.updatedAt || '');
+        return true;
+      } catch (error) {
+        // The seed failed, so the empty document must not stay installed: in
+        // shared mode it is what the UI reads, and the user would watch every
+        // record they entered vanish with only a console line to explain it.
+        hubSubscriptions = previous;
+        hubSubscriptionsHub = previousHub;
+        throw error;
+      }
+    }
+    // Joining a hub that already holds records. Until this moment the local list
+    // was this device's own data, not a cache of the hub's, so anything missing
+    // from the shared list is set aside for the user rather than overwritten.
+    // Only recompute while there is something owned here to compare. Running it
+    // against an empty list would answer "no differences" and quietly clear a set
+    // of records the user has not decided about yet — which is what a second
+    // reconcile against the same hub used to do.
+    const orphansChanged = seedFromLocal && local.length > 0
+      ? rememberOrphanedSubscriptions(local, doc)
+      : false;
+    const changed = cacheSharedSubscriptions(doc, hub);
+    if (orphansChanged && !changed) persistSubscriptionState();
+    return changed || orphansChanged;
+  } catch (error) {
+    console.log(`[sync] subscriptions unavailable: ${error.message}`);
+    return false;
+  }
+}
+
+// Every hub stamps its stats with the version of the list it holds, so an edit
+// made on another device announces itself on the frames this one already
+// receives instead of being polled for. Both paths carry it — the stream while
+// it is up, and the widget's own stats read when it is not — and nothing is
+// fetched unless the versions disagree, so the steady state costs no requests at
+// all. This is the whole mechanism; there is no periodic subscription read
+// behind it.
+//
+// A missing stamp means no news rather than an empty list: it is also what a
+// local collector's own stats look like. Reading it as "the hub has nothing"
+// would throw away the records on screen.
+//
+// The stamp is not compared against an operation already in flight for this hub,
+// because what that operation will leave behind is not known yet. It is carried
+// into the lane and compared there instead — see runSubscriptionCatchUp().
+function maybeAdoptSharedSubscriptionRevision(stats) {
+  if (!subscriptionsAreShared()) return;
+  const revision = stats?.subscriptionsUpdatedAt;
+  if (typeof revision !== 'string') return;
+  const hub = currentHubIdentity();
+  if (revision === (subscriptionsDocumentFor(hub)?.updatedAt || '')) return;
+  // Getting this far twice for the same version means the last attempt did not
+  // land it. Frames arrive on every ingest from every device, so retrying on each
+  // one would turn a hub that serves /api/stats but not /api/subscriptions into a
+  // request loop. A version that moves is news again and is tried at once — the
+  // wait is a floor on retries, not a polling interval. Paired with its hub for
+  // the reason every version here is: on its own it cannot say which list it
+  // describes.
+  const now = Date.now();
+  if (hub === lastSubscriptionCatchUp.hub
+    && revision === lastSubscriptionCatchUp.version
+    && now - lastSubscriptionCatchUp.at < SUBSCRIPTION_RETRY_MS) return;
+  lastSubscriptionCatchUp = { hub, version: revision, at: now };
+  runSubscriptionCatchUp(revision);
+}
+
+// Queued rather than run, and the version is compared again once it is this
+// operation's turn. By then whatever was in flight has finished and cached its
+// result, which is the only thing that can tell the two cases apart: this
+// device's own write leaves the document at exactly the version the hub
+// broadcast, so there is nothing left to fetch, while a read that was already in
+// flight when the broadcast landed leaves an older one and the fetch happens.
+// Comparing before queueing cannot distinguish them — it would either re-fetch
+// every write this device makes, or discard the only notice of another device's.
+//
+// refreshSharedSubscriptionsNow() rather than refreshSharedSubscriptions(): the
+// lane is held by this operation, so the queueing wrapper would wait on itself.
+//
+// Deliberately not seeded from local: seeding and setting records aside belong
+// to joining a hub, and doing either here would re-answer a question the user
+// has already been asked.
+function runSubscriptionCatchUp(revision) {
+  return queueSubscriptionOp((hub) => {
+    if (!subscriptionOpIsCurrent(hub)) return false;
+    if (revision === (subscriptionsDocumentFor(hub)?.updatedAt || '')) return false;
+    return refreshSharedSubscriptionsNow();
+  })
+    .then((changed) => { if (changed) pushSettingsToRenderer(); })
+    .catch(() => {});
+}
+
+// base is the version the renderer's list was built from AND the hub that issued
+// it, sent back together. The alternative is to read the current version here,
+// which would let an edit made against the list on screen go out claiming a
+// version that arrived after it — the hub accepts that, and whatever the newer
+// version added is lost.
+async function saveSubscriptions(list, base) {
+  // Before the modes divide, because the answer applies to both. Local mode has
+  // no hub, so its identity is the empty one — which makes it a context of its
+  // own rather than a continuation of whichever hub was last configured, and an
+  // edit composed against a hub's list is not an edit to this device's own. The
+  // check below could not do this on its own: it only runs once a hub is
+  // configured, and the write it guards is the one that never reaches a hub.
+  if (String(base?.hub || '') !== currentHubIdentity()) throw hubChangedError();
+  if (!subscriptionsAreShared()) {
+    settings.subscriptions = subscriptionDisplay.normalizeSubscriptions(list, { currencyApi: { normalizeCurrency } });
+    // Editing here makes the list this device's own again, so a later hub join
+    // offers these records instead of treating them as some other hub's cache.
+    settings.subscriptionsCacheHub = '';
+    // saveSettings() rolls the whole object back when the file cannot be
+    // written, so reporting success here would tell the user their record was
+    // stored while it was being discarded.
+    if (!saveSettings()) {
+      const error = new Error('settings write failed');
+      error.code = 'write_failed';
+      throw error;
+    }
+    pluginRuntime?.refreshBusinessData();
+    return settingsForRenderer();
+  }
+  // The hub is checked at all — rather than left to the version — because a
+  // version cannot answer for it: two hubs that have never been written to both
+  // report no version, so an edit made against one would pass a version check
+  // against the other and be written into a list it was never meant for.
+  if (settings.hubMode === 'icloud') {
+    return queueSubscriptionOp(async (hub) => {
+      if (!subscriptionOpIsCurrent(hub) || settings.hubMode !== 'icloud') throw hubChangedError();
+      const runtime = icloudRuntimeHandle;
+      if (!runtime) throw Object.assign(new Error('iCloud sync is unavailable'), { code: 'icloud_unavailable' });
+      const result = await runtime.saveSubscriptions(list, String(base?.updatedAt || ''));
+      if (!subscriptionOpIsCurrent(hub) || icloudRuntimeHandle !== runtime) throw hubChangedError();
+      if (result?.winner) {
+        cacheSharedSubscriptions({
+          version: 1,
+          updatedAt: result.winner.updatedAt || '',
+          subscriptions: result.winner.subscriptions || [],
+          revisionToken: result.revisionToken || ''
+        }, hub);
+      }
+      pushSettingsToRenderer();
+      return settingsForRenderer();
+    });
+  }
+  await writeSharedSubscriptions(list, String(base?.updatedAt || ''));
+  return settingsForRenderer();
+}
+
+// `options` is forwarded verbatim to the runtime; the quit path passes
+// `skipCloseWatchers` (see stopAll).
+function stopSyncCollector(options = {}) {
+  usageRuntimeReconciler.cancel();
+  usageRuntimeReconciler.setActiveKey(null);
+  if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
+  deviceRuntimeHandle = null;
+  // A stopped runtime's probes finish unobserved.
+  if (limitProbes.length) publishLimitProbes([]);
+}
+
+async function stopIcloudRuntime() {
+  // The hub-mode generation changes for mode switches, but a sink-only restart
+  // (for example, changing the upload cadence) keeps that generation. This
+  // separate epoch fences callbacks from the replaced filesystem runtime too.
+  icloudRuntimeEpoch += 1;
+  const oldRuntime = icloudRuntimeHandle;
+  icloudRuntimeHandle = null;
+  if (!oldRuntime) return icloudRuntimeStopPromise;
+  icloudRuntimeStopPromise = icloudRuntimeStopPromise.then(async () => {
+    try {
+      await oldRuntime.stop();
+    } catch (error) {
+      // A failed watcher close or store cleanup must not prevent the next mode
+      // from starting. The runtime has fenced its callbacks; keep the error
+      // visible and let the replacement proceed.
+      console.log(`[icloud] runtime teardown failed: ${error?.message || error}`);
+    }
+  });
+  return icloudRuntimeStopPromise;
+}
+
+function retainIcloudDeviceIdentity(previous, next) {
+  const retired = new Set(previous.icloudRetiredDeviceIds || []);
+  if (previous.hubMode === 'icloud'
+    && (previous.deviceId !== next.deviceId || next.hubMode !== 'icloud')) {
+    retired.add(previous.deviceId);
+  }
+  next.icloudRetiredDeviceIds = [...retired].filter(Boolean);
+}
+
+// iCloud mode keeps the normal Electron collector and limits runtime, but its
+// sink is a local, atomic file write rather than an HTTP upload.  The runtime
+// below owns reconciliation and aggregation, so a temporarily absent iCloud
+// Drive never turns a last-good multi-device snapshot into zeroes.
+async function startIcloudCollector() {
+  await stopIcloudRuntime();
+  stopSyncCollector();
+  if (process.platform !== 'darwin') return;
+  const generation = hubModeGeneration;
+  const runtimeEpoch = ++icloudRuntimeEpoch;
+  const icloudRequestIsCurrent = () => hubModeRequestIsCurrent(
+    generation,
+    'icloud',
+    currentHubStatsIdentity('icloud')
+  ) && runtimeEpoch === icloudRuntimeEpoch;
+  const widgetProducerOwner = captureMacWidgetProducerOwner();
+  let lastIcloudStatusState = '';
+  // The writer owns subscription and deletion snapshots across Device ID edits.
+  // Persist its identity before publishing anything under it.
+  if (!settings.icloudWriterId) {
+    settings.icloudWriterId = settings.deviceId;
+    if (!saveSettings()) throw new Error('Could not persist iCloud writer identity');
+  }
+  const store = createIcloudSyncStore({
+    platform: process.platform,
+    home: app.getPath('home'),
+    deviceId: settings.deviceId,
+    writerId: settings.icloudWriterId,
+    revisionLedgerPath: path.join(app.getPath('userData'), 'icloud-revisions.json'),
+    staleAfterMs: 10 * 60 * 1000
+  });
+  const runtime = createIcloudSyncRuntime({
+    store,
+    deviceId: settings.deviceId,
+    retiredDeviceIds: settings.icloudRetiredDeviceIds || [],
+    historyEnabled: () => settings?.historyEnabled !== false,
+    staleAfterMs: 10 * 60 * 1000,
+    onStats: (stats) => {
+      if (!icloudRequestIsCurrent()) return;
+      const identity = currentHubStatsIdentity('icloud');
+      setLatestHubStatsCache(stats, 'icloud', generation, identity);
+      updateDiscordRpcDisplay(stats);
+      sendPush({ event: 'stats', data: { type: 'stats', reason: 'local', stats, at: new Date().toISOString() } }, { widgetProducerOwner });
+    },
+    onStatus: (status) => {
+      if (!icloudRequestIsCurrent()) return;
+      const connected = status.state === 'available';
+      sendStatus(connected, {
+        provider: 'icloud',
+        reason: status.reason || (connected ? 'icloud-ready' : 'icloud-waiting'),
+        icloud: status
+      });
+      const stateChanged = status.state !== lastIcloudStatusState;
+      lastIcloudStatusState = status.state;
+      if (connected && stateChanged && status.lastSuccessfulReconciliation && !subscriptionsDocumentFor('icloud')) {
+        void reconcileSharedSubscriptions();
+      }
+      sendHubPush({ type: 'icloud', info: getHubInfo() });
+    },
+    onSubscriptions: (document) => {
+      if (!icloudRequestIsCurrent()) return;
+      // On the first switch from Local, settings.subscriptions is still this
+      // device's owned list. The runtime may finish its initial discovery before
+      // the mode queue reaches reconcileSharedSubscriptions(seedFromLocal), so
+      // do not let that callback turn a remote winner (or an authoritative empty
+      // directory) into a cache and erase the list before the adoption decision.
+      // Once the reconcile has cached the iCloud document, later callbacks are
+      // ordinary cross-device updates and must be applied normally.
+      const localOwnedSubscriptions = !settings.subscriptionsCacheHub
+        && Array.isArray(settings.subscriptions)
+        && settings.subscriptions.length > 0
+        && !subscriptionsDocumentFor('icloud');
+      if (localOwnedSubscriptions) return;
+      if (!document) {
+        const changed = cacheSharedSubscriptions({
+          version: 1,
+          updatedAt: '',
+          subscriptions: [],
+          revisionToken: ''
+        }, 'icloud');
+        if (changed) pushSettingsToRenderer();
+        return;
+      }
+      const changed = cacheSharedSubscriptions({
+        version: 1,
+        updatedAt: document.updatedAt || '',
+        subscriptions: document.subscriptions || [],
+        revisionToken: document.revisionToken || ''
+      }, 'icloud');
+      if (changed) pushSettingsToRenderer();
+    },
+    onError: ({ category }) => {
+      if (icloudRequestIsCurrent()) {
+        recordDiagnosticEvent({ subsystem: 'icloud', code: category || 'icloud-sync-error' });
+      }
+    }
+  });
+  icloudRuntimeHandle = runtime;
+  let createdDeviceRuntime = null;
+  try {
+    mode = 'sync';
+    sendStatus(false, { provider: 'icloud', reason: 'icloud-initializing', icloud: runtime.getStatus() });
+    await runtime.start();
+    if (!icloudRequestIsCurrent()) {
+      await runtime.stop();
+      if (icloudRuntimeHandle === runtime) icloudRuntimeHandle = null;
+      return;
+    }
+    const sink = {
+      async enqueue(summary) {
+        seedInitialLimitProviders(summary);
+        // The headless agent has no iCloud sink. The widget still publishes
+        // this device's record while the agent owns the local history archive.
+        const visibleSummary = {
+          ...summary,
+          syncUploadIntervalMs: 0
+        };
+        lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
+        const retiredDeviceIds = settings.icloudRetiredDeviceIds || [];
+        const written = await runtime.writeDevice(visibleSummary, { retiredDeviceIds });
+        if (written && icloudRequestIsCurrent() && settings.deviceId === visibleSummary.deviceId) {
+          settings.icloudRetiredDeviceIds = (settings.icloudRetiredDeviceIds || [])
+            .filter((id) => !retiredDeviceIds.includes(id));
+          if (retiredDeviceIds.length) saveSettings();
+        }
+      },
+      flush: () => runtime.flush(),
+      stop: () => runtime.stop()
+    };
+    const usageOptions = electronUsageConfig('icloud-collector');
+    createdDeviceRuntime = createDeviceRuntime({
+      envelope: electronDeviceEnvelope(),
+      initialLimits: lastCollectedDevice?.limits,
+      limitsOptions: electronLimitsConfig(),
+      transformUsage: usageTransform.transform,
+      usageOptions,
+      sink,
+      onSessionActivity: publishLocalSessionActivity,
+      onDiagnosticEvent: recordDiagnosticEvent,
+      onError: (error, reason) => console.log(`[icloud-collector] ${reason}: ${error.message}`)
+    }, {
+      createUsageRuntime: createElectronUsageRuntime,
+      limitsDeps: electronLimitsDeps()
+    });
+    deviceRuntimeHandle = createdDeviceRuntime;
+    usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
+    drainPendingRuntimeActions(createdDeviceRuntime);
+  } catch (error) {
+    if (icloudRuntimeHandle === runtime) {
+      if (createdDeviceRuntime && deviceRuntimeHandle === createdDeviceRuntime) stopSyncCollector();
+      icloudRuntimeHandle = null;
+    }
+    try { await runtime.stop(); } catch (stopError) {
+      console.log(`[icloud] failed-start teardown failed: ${stopError?.message || stopError}`);
+    }
+    throw error;
+  }
+}
+
+// Well inside the 3–5 s update promise: a watch tick already waits out its own
+// debounce and scan before it gets here.
+const SYNC_STATS_PUBLISH_WINDOW_MS = 1000;
+const syncStatsPublication = createStatsPublicationBatcher({
+  windowMs: SYNC_STATS_PUBLISH_WINDOW_MS,
+  publish: publishSyncDisplayStats
+});
+
+// Client mode's local ticks and Hub events both land here. The composition reads
+// the newest Hub cache and local record when the window closes, so a request
+// only has to say why it was made.
+function requestSyncDisplayStats(request) {
+  syncStatsPublication.request(request);
+}
+
+function publishSyncDisplayStats({ reason, at, generation, widgetProducerOwner }) {
+  if (!hubModeRequestIsCurrent(generation, 'client')) return;
+  const displayStats = composeLocalSyncSummary(latestHubStats, lastCollectedDevice);
+  if (!displayStats) return;
+  updateDiscordRpcDisplay(displayStats);
+  sendPush({ event: 'stats', data: { type: 'stats', reason, stats: displayStats, at } }, { widgetProducerOwner });
+}
+
+function startSyncCollector() {
+  stopSyncCollector();
+  if (!effectiveHubConfig().url) return;
+  const widgetProducerOwner = captureMacWidgetProducerOwner();
+  const syncUploadScheduler = createSyncUploadScheduler({
+    intervalMs: syncUploadIntervalMs(),
+    upload: postToHub,
+    onError: (error) => console.log(`[sync-collector] post failed: ${error.message}`)
+  });
+  const sink = {
+    async enqueue(summary, revision) {
+      seedInitialLimitProviders(summary);
+      if (isExternalAgentActive()) { usageTransform.forget(); return; }
+      const visibleSummary = {
+        ...summary,
+        syncUploadIntervalMs: syncUploadIntervalMs()
+      };
+      lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
+      requestSyncDisplayStats({
+        reason: 'local',
+        at: new Date().toISOString(),
+        generation: hubModeGeneration,
+        widgetProducerOwner
+      });
+      await syncUploadScheduler.enqueue(visibleSummary, revision);
+    },
+    flush: () => syncUploadScheduler.flush(),
+    stop: () => syncUploadScheduler.stop()
+  };
+  const usageOptions = electronUsageConfig('sync-collector');
+  deviceRuntimeHandle = createDeviceRuntime({
+    envelope: electronDeviceEnvelope(),
+    initialLimits: lastCollectedDevice?.limits,
+    limitsOptions: electronLimitsConfig(),
+    transformUsage: usageTransform.transform,
+    usageOptions,
+    sink,
+    onSessionActivity: publishLocalSessionActivity,
+    onDiagnosticEvent: recordDiagnosticEvent,
+    onError: (error, reason) => console.log(`[sync-collector] ${reason}: ${error.message}`)
+  }, {
+    createUsageRuntime: createElectronUsageRuntime,
+    limitsDeps: electronLimitsDeps()
+  });
+  usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
+  drainPendingRuntimeActions(deviceRuntimeHandle);
+}
+
+// Host mode: this device's own usage goes straight into the embedded hub's store
+// in-process. No loopback HTTP, so a local firewall / proxy that blocks Token
+// Monitor's own outbound connections can't zero out the widget's own usage (#17).
+function startHostCollector() {
+  stopSyncCollector();
+  const sink = {
+    enqueue(summary) {
+      seedInitialLimitProviders(summary);
+      if (isExternalAgentActive()) { usageTransform.forget(); return; }
+      const visibleSummary = summary;
+      lastCollectedDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
+      if (!embeddedHub) return;
+      const handle = embeddedHub;
+      const uploadIdentity = getSyncContentRuntime().status().identity;
+      const uploadContext = syncContentContext();
+      void (async () => {
+        const options = await getSyncContentRuntime().prepareUpload();
+        if (handle !== embeddedHub || options.identity !== uploadIdentity || options.signal.aborted
+          || options.identity !== getSyncContentRuntime().status().identity
+          || !sameDestination(uploadContext, syncContentContext())
+          || visibleSummary.deviceId !== syncContentContext().deviceId) return;
+        const stale = settings.lastPostedDeviceId;
+        if (stale && stale !== visibleSummary.deviceId) {
+          handle.hub.deleteDevice(stale);
+        }
+        const payload = syncPayload(visibleSummary, options);
+        if (payload.allTimeProjectsOmitted === true) {
+          console.log('[host-ingest] all-time project breakdown omitted to reduce the sync snapshot size');
+        }
+        embeddedHub.hub.ingest(payload);
+        if (settings.lastPostedDeviceId !== visibleSummary.deviceId) {
+          settings.lastPostedDeviceId = visibleSummary.deviceId;
+          saveSettings();
+        }
+      })().catch((error) => {
+        console.log(`[host-ingest] failed: ${error.message}`);
+      });
+    }
+  };
+  const usageOptions = electronUsageConfig('host-collector');
+  deviceRuntimeHandle = createDeviceRuntime({
+    envelope: electronDeviceEnvelope(),
+    initialLimits: lastCollectedDevice?.limits,
+    limitsOptions: electronLimitsConfig(),
+    transformUsage: usageTransform.transform,
+    usageOptions,
+    sink,
+    onSessionActivity: publishLocalSessionActivity,
+    onDiagnosticEvent: recordDiagnosticEvent,
+    onError: (error, reason) => console.log(`[host-collector] ${reason}: ${error.message}`)
+  }, {
+    createUsageRuntime: createElectronUsageRuntime,
+    limitsDeps: electronLimitsDeps()
+  });
+  usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
+  drainPendingRuntimeActions(deviceRuntimeHandle);
+}
+
+function stopHostStats() {
+  if (embeddedHubUnsub) { try { embeddedHubUnsub(); } catch (_) {} }
+  embeddedHubUnsub = null;
+}
+
+function startHostStats() {
+  stopHostStats();
+  if (!embeddedHub) return;
+  const generation = hubModeGeneration;
+  const widgetProducerOwner = captureMacWidgetProducerOwner();
+  const cacheIdentity = currentHubStatsIdentity('host');
+  // Host mode presents the same multi-device hub aggregate as connecting to a
+  // remote hub, so it reuses the renderer's 'sync' status path (Live / synced
+  // data). The in-process vs loopback distinction is internal to fetchStats.
+  mode = 'sync';
+  sendStatus(true);
+  const emit = (stats, reason = 'hub') => {
+    if (!hubModeRequestIsCurrent(generation, 'host', cacheIdentity)) return;
+    setLatestHubStatsCache(stats, 'host', generation, cacheIdentity);
+    updateDiscordRpcDisplay(stats);
+    sendPush({ event: 'stats', data: { type: 'stats', reason, stats, at: new Date().toISOString() } }, { widgetProducerOwner });
+  };
+  embeddedHubUnsub = embeddedHub.hub.onStats((stats, reason) => emit(stats, reason || 'hub'));
+  // Prime the renderer with the current snapshot so it isn't blank until the
+  // first collector tick lands.
+  emit(embeddedHub.hub.getStats(), 'snapshot');
+}
+
+// Detection status is about this machine's local files, so stamp the freshly
+// collected local clientStatus, clientHealth AND wslStatus onto the local device
+// in whatever stats we hand the renderer. This keeps the 采集 tags + WSL panel
+// correct in sync/host mode without depending on the hub (or a remote Worker)
+// being redeployed to preserve these fields.
+function injectLocalDeviceStatus(stats) {
+  if (!stats || !Array.isArray(stats.devices)) return stats;
+  attachLocalPresentationNativeViews(stats, {
+    lastCollectedDevice,
+    seededLocalDevice: localDevice,
+    mode
+  });
+  if (lastCollectedDevice) {
+    const device = stats.devices.find((entry) => entry.deviceId === lastCollectedDevice.deviceId);
+    if (device) {
+      if (lastCollectedDevice.clientStatus) device.clientStatus = lastCollectedDevice.clientStatus;
+      if (lastCollectedDevice.clientHealth) device.clientHealth = lastCollectedDevice.clientHealth;
+      if (lastCollectedDevice.wslStatus) device.wslStatus = lastCollectedDevice.wslStatus;
+    }
+    const activity = localActivityPatch(lastCollectedDevice);
+    if (activity) stats = projectLocalActivity(stats, activity);
+  }
+  // Per-device rows remain authoritative for account disclosures, including
+  // failures hidden by a healthy aggregate. Share the aggregate freshness rule.
+  for (const device of stats.devices) if (device.limits) device.limits = { ...device.limits, providers: device.limits.providers.map(row => !ACCOUNT_SLOT_PROVIDER_IDS.has(row.provider) ? row : ({
+    ...row, stale: isProviderStale(row, device.limits, device, stats.staleAfterMs, Date.now())
+  })) };
+  if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
+  return stats;
+}
+
+function macWidgetConfiguration() {
+  if (!macWidgetRuntimeSupported()) return null;
+  if (cachedMacWidgetConfiguration !== undefined) return cachedMacWidgetConfiguration;
+
+  let appGroup = String(process.env.TOKEN_MONITOR_APP_GROUP || '').trim();
+  let snapshotFileName = 'snapshot.json';
+  let widgetKind = DEFAULT_WIDGET_KIND;
+  const configCandidates = [
+    path.join(process.resourcesPath, 'token-monitor-widget.json'),
+    path.resolve(__dirname, '..', '..', 'build', 'macos-widget', 'widget-config.json')
+  ];
+  if (!appGroup) {
+    for (const configPath of configCandidates) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        appGroup = String(config.appGroup || '').trim();
+        widgetKind = String(config.widgetKind || widgetKind).trim();
+        snapshotFileName = String(config.snapshotFileName || snapshotFileName).trim();
+        if (appGroup) break;
+      } catch (_) {}
+    }
+  }
+  const snapshotPath = resolveMacWidgetSnapshotPath({
+    appGroup,
+    snapshotFileName,
+    logger: (message) => console.warn(message)
+  });
+  if (!snapshotPath) {
+    cachedMacWidgetConfiguration = null;
+    return cachedMacWidgetConfiguration;
+  }
+  cachedMacWidgetConfiguration = {
+    appGroup,
+    snapshotPath,
+    widgetKind
+  };
+  return cachedMacWidgetConfiguration;
+}
+
+function macWidgetRuntimeSupported(
+  platform = process.platform,
+  osRelease = platform === 'darwin' ? os.release() : ''
+) {
+  return macWidgetRuntimeSupport({ platform, osRelease }).supported;
+}
+
+function historyResolverOptions() {
+  const { url: hubUrl, secret } = effectiveHubConfig();
+  return {
+    aggregateHistory,
+    embeddedHub,
+    historyEnabled: settings?.historyEnabled !== false,
+    hubMode: settings?.hubMode,
+    hubUrl,
+    icloudSync: settings?.hubMode === 'icloud' ? icloudRuntimeHandle : null,
+    // In sync/host mode the headless agent owns this machine's producer while its
+    // PID is live. Do not let the widget's last pre-handoff snapshot compete with
+    // the newer Hub record; local mode always owns its collector by contract.
+    localDevice: ownsUsageRuntime() ? (lastCollectedDevice || localDevice) : null,
+    mode,
+    secret
+  };
+}
+
+function getCompleteHistory() {
+  return resolveCompleteHistory(historyResolverOptions());
+}
+
+function macWidgetPresentation() {
+  return Object.freeze({
+    currencyCode: settings?.currency,
+    currencyRate: effectiveRates?.[normalizeCurrency(settings?.currency)] || 1,
+    compactNumbers: settings?.showCompactTotalTokens !== false,
+    compactTokenUnits: settings?.compactTokenUnits,
+    showCost: true,
+    locale: settings?.language,
+    theme: Object.keys(settings?.themeColors || {}).length ? 'custom' : 'system'
+  });
+}
+
+function macWidgetActiveCodexAccount() {
+  const provider = localLiveCodexProvider(latestStats, settings?.deviceId || '');
+  if (!provider) return null;
+  return Object.freeze({
+    accountKey: String(provider.accountKey || '').trim(),
+    accountEmail: String(provider.accountEmail || '').trim()
+  });
+}
+
+function ensureMacWidgetDemand() {
+  if (process.platform !== 'darwin') return null;
+  if (macWidgetDemand) return macWidgetDemand;
+  const widget = macWidgetConfiguration();
+  if (!widget) return null;
+  // The demand leases live beside the snapshot in the app group container. The
+  // widget extension touches the full marker on every timeline() request and
+  // the short provisional marker on a non-gallery snapshot() (the add flow),
+  // so a fresh marker here means "a Widget is on screen or being placed". The
+  // watcher arms immediately so a first placement primes the initial snapshot
+  // within moments; the reconcile poll catches anything the watcher missed.
+  const markerDirectory = path.dirname(widget.snapshotPath);
+  macWidgetDemand = createMacWidgetDemandState({
+    markerPath: path.join(markerDirectory, WIDGET_DEMAND_MARKER),
+    provisionalMarkerPath: path.join(markerDirectory, WIDGET_DEMAND_PROVISIONAL_MARKER),
+    onActivation: () => {
+      const visibleStats = electronPresentationStats(latestStats);
+      scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
+    },
+    logger: (message) => console.warn(message)
+  });
+  macWidgetDemand.start();
+  return macWidgetDemand;
+}
+
+function captureMacWidgetWork({ stats, owner }) {
+  const widget = macWidgetConfiguration();
+  if (!widget) return null;
+  // No Widget on screen means no WidgetKit render loop is asking for data, so
+  // the whole snapshot pipeline (history resolution, serialization, fsync and
+  // the reload helper spawn) can be skipped. Only a confirmed missing or stale
+  // demand marker closes this gate; an unarmed state must not starve someone
+  // who does have a Widget.
+  if (macWidgetDemand && !macWidgetDemand.isInstalled()) return null;
+  const resolverConfig = Object.freeze({ ...historyResolverOptions() });
+  const sourceKey = macWidgetHistorySourceKey(resolverConfig);
+  return {
+    stats,
+    owner: Object.freeze({
+      epoch: owner.epoch,
+      sourceKey
+    }),
+    resolverConfig,
+    historyCachePath: completeHistorySource(resolverConfig) === 'remote'
+      ? macWidgetHistoryCachePath(app.getPath('userData'), sourceKey)
+      : null,
+    activeCodexAccount: macWidgetActiveCodexAccount(),
+    presentation: macWidgetPresentation(),
+    modelAliases: Object.freeze(normalizeModelAliases(settings?.modelAliases)),
+    modelAliasGrouping: normalizeModelAliasGrouping(settings?.modelAliasGrouping),
+    snapshotPath: widget.snapshotPath,
+    widgetKind: widget.widgetKind
+  };
+}
+
+function ensureMacWidgetSnapshotController() {
+  if (!macWidgetRuntimeSupported()) return null;
+  if (macWidgetSnapshotController) return macWidgetSnapshotController;
+  macWidgetSnapshotController = createMacWidgetSnapshotController({
+    startPaused: !macWidgetPublicationReady,
+    captureWork: captureMacWidgetWork,
+    resolveHistory: (work) => resolveMacWidgetHistory({
+      generation: work.owner.epoch,
+      sourceKey: work.owner.sourceKey,
+      revision: work.stats?.historyRevision,
+      fetchHistory: () => resolveCompleteHistory(work.resolverConfig),
+      ...(work.historyCachePath ? {
+        loadCachedHistory: () => readMacWidgetHistoryCache(
+          work.historyCachePath,
+          work.owner.sourceKey,
+          { logger: (message) => console.warn(message) }
+        ),
+        saveCachedHistory: (history) => writeMacWidgetHistoryCache(
+          work.historyCachePath,
+          work.owner.sourceKey,
+          history,
+          { logger: (message) => console.warn(message) }
+        )
+      } : {}),
+      minIntervalMs: completeHistorySource(work.resolverConfig) === 'remote' ? undefined : 0,
+      logger: (message) => console.warn(message)
+    }),
+    prepareSnapshot: (work, history) => prepareMacWidgetSnapshotUpdate(work.stats, {
+      snapshotPath: work.snapshotPath,
+      snapshotOptions: {
+        activeCodexAccount: work.activeCodexAccount,
+        presentation: work.presentation,
+        history: projectModelAliasHistory(history, work.modelAliases, { grouping: work.modelAliasGrouping })
+      },
+      logger: (message) => console.warn(message)
+    }),
+    commitSnapshot: (prepared, options) => commitMacWidgetSnapshot(prepared, {
+      isCurrent: options.isCurrent,
+      logger: (message) => console.warn(message)
+    }),
+    syncSnapshot: (_work, committed, prepared) => syncMacWidgetSnapshotDirectory({
+      ...committed,
+      fs: prepared?.fs
+    }),
+    discardSnapshot: discardMacWidgetSnapshot,
+    reloadSnapshot: (work, options) => requestMacWidgetReload({
+      widgetKind: work.widgetKind,
+      isCurrent: options.isCurrent,
+      runtimeSupported: macWidgetRuntimeSupported(),
+      logger: (message) => console.warn(message)
+    }),
+    logger: (message) => console.warn(message)
+  });
+  return macWidgetSnapshotController;
+}
+
+function captureMacWidgetProducerOwner() {
+  return ensureMacWidgetSnapshotController()?.captureProducerOwner() || null;
+}
+
+function advanceMacWidgetProducerAndSourceEpoch() {
+  ensureMacWidgetSnapshotController()?.advanceProducerAndSourceEpoch();
+}
+
+function advanceMacWidgetSourceEpoch() {
+  ensureMacWidgetSnapshotController()?.advanceSourceEpoch();
+}
+
+function refreshMacWidgetHistorySource() {
+  advanceMacWidgetSourceEpoch();
+  const visibleStats = electronPresentationStats(latestStats);
+  scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
+}
+
+function scheduleMacWidgetSnapshot(stats, producerOwner) {
+  if (!macWidgetRuntimeSupported() || !stats) return false;
+  return ensureMacWidgetSnapshotController()?.enqueue({ stats, producerOwner }) || false;
+}
+
+function publishLocalSessionActivity(patch) {
+  if (!lastCollectedDevice || !ownsUsageRuntime()) return;
+  const previousDevice = lastCollectedDevice;
+  lastCollectedDevice = projectLocalActivity(lastCollectedDevice, patch);
+  if (localDevice) localDevice = localDevice === previousDevice ? lastCollectedDevice : applyActivityPatch(localDevice, patch);
+  if (!latestStats) return;
+  const previous = latestStats;
+  latestStats = projectLocalActivity(previous, patch);
+  const localSnapshot = snapshotLocalDevices.get(previous);
+  if (localSnapshot) snapshotLocalDevices.set(latestStats, {
+    ...localSnapshot, localDevice: applyActivityPatch(localSnapshot.localDevice, patch)
+  });
+  if (localStats === previous) localStats = latestStats;
+  const snapshot = rendererSnapshots.updateActivity(previous, latestStats);
+  edgeDockManualStats = null;
+  // Only activity metadata crosses IPC. Accounting freshness, sync uploads,
+  // exports, History and rate samples remain on the usage publication lane.
+  const displayPatch = localActivityPatch(latestStats);
+  const visiblePatch = settings.sessionTitlesEnabled === false
+    ? { ...displayPatch, nativeSessions: Object.fromEntries(Object.entries(displayPatch.nativeSessions)
+        .map(([name, sessions]) => [name, withoutSessionTitles(sessions)])) }
+    : displayPatch;
+  presentationCache.updateActivity(previous, latestStats, (stats) => applyActivityPatch(stats, visiblePatch));
+  const activityStats = electronPresentationStats(latestStats);
+  pluginRuntime?.publishStats(activityStats, latestStats);
+  updateEdgeDockCells(activityStats);
+  sendPush({ event: 'session-activity', data: { patch: visiblePatch, snapshot } });
+}
+
+// Two options, both for the cold-start seed and neither for live stats.
+// `skipExport` keeps a republished snapshot from spending the auto-export
+// interval that this run's first real scan needs. `deferToRenderer` waits for
+// the renderer to finish loading, and is deliberately not the default: a live
+// push that lands mid-load is already covered by the refreshStats() the renderer
+// runs on init, so deferring every one of them would only queue a listener per
+// frame against a slow load and then replay a burst of superseded stats.
+function sendPush(payload, options = {}) {
+  const previousHistoryRevision = statsHistoryRevision(latestStats);
+  let rendererPayload = payload;
+  if (payload?.data?.stats) {
+    payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
+    latestStats = payload.data.stats;
+    // Client local batches overlay usage on the cached Hub snapshot; they do
+    // not supersede an in-flight read of fresh remote stats.
+    if (!(settings?.hubMode === 'client' && payload.data.reason === 'local')) {
+      statsPushRevision += 1;
+      statsPushSource = { generation: hubModeGeneration, identity: currentHubStatsIdentity() };
+    }
+    edgeDockManualStats = null;
+    getSyncContentRuntime().notifyStats(latestStats);
+    getAccountPresentationSync().notifyStats(latestStats);
+    const visibleStats = electronPresentationStats(latestStats);
+    getLimitsHistoryStore().record(currentHubStatsIdentity(), visibleStats.limits);
+    limitsHistoryController?.refresh();
+    migrateCodexAdditionalLimits(visibleStats);
+    rendererPayload = {
+      ...payload,
+      data: { ...payload.data, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
+    };
+    scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
+    pluginRuntime?.publishStats(visibleStats, latestStats);
+    updateEdgeDockCells(visibleStats);
+    syncCodexPresentationActiveAccount();
+    updateTrayDisplay();
+    if (!options.skipExport && settings.exportAutoEnabled && settings.exportDir && Date.now() - lastExportAt >= exportIntervalMs()) {
+      lastExportAt = Date.now();
+      writeExportTo(settings.exportDir, completeLocalSyncStats(payload.data.stats).periods, { skipUnchanged: true })
+        .catch((err) => console.warn(`[export] auto-export failed: ${err.message}`));
+    }
+  }
+  if (options.deferToRenderer) {
+    // Only while it is still the newest thing published. A slow load can outlast
+    // the first real collection, and delivering the queued snapshot then would
+    // walk the numbers backwards until the next push.
+    const deferred = payload?.data?.stats;
+    sendMainWindowEvent('stats:push', rendererPayload, () => !deferred || latestStats === deferred);
+  } else if (mainWindow && !mainWindow.isDestroyed()) {
+    try { mainWindow.webContents.send('stats:push', rendererPayload); } catch (_) {}
+  }
+  if (payload?.data?.stats) {
+    const nextHistoryRevision = statsHistoryRevision(payload.data.stats);
+    if (nextHistoryRevision !== previousHistoryRevision && dashboardWindow && !dashboardWindow.isDestroyed()) {
+      try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
+    }
+    maybeAdoptSharedSubscriptionRevision(payload.data.stats);
+  }
+}
+
+function statsHistoryRevision(stats) {
+  const revision = String(stats?.historyRevision || '').trim();
+  if (revision) return revision;
+  // Compatibility with an older remote hub that has not shipped revisions yet.
+  return JSON.stringify(stats?.historyPreview || null);
+}
+
+let rateCache = null;            // { rates, date, source, fetchedAt }
+let effectiveRates = null;       // { CODE: number }
+let rateRefreshTimer = null;
+
+function exchangeRateCachePath() {
+  return path.join(app.getPath('userData'), 'exchange-rates.json');
+}
+
+function readRateCache() {
+  try { return JSON.parse(fs.readFileSync(exchangeRateCachePath(), 'utf8')); }
+  catch (_) { return null; }
+}
+
+function writeRateCache(data) {
+  try { fs.writeFileSync(exchangeRateCachePath(), JSON.stringify(data)); }
+  catch (_) {}
+}
+
+function applyEffectiveRates() {
+  const next = resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {});
+  const changed = CURRENCY_CODES.some(code => effectiveRates?.[code] !== next[code]);
+  effectiveRates = next;
+  configureRates(effectiveRates);          // main process's own currency module
+  if (changed) pluginRuntime?.refreshBusinessData();
+  return effectiveRates;
+}
+
+async function refreshExchangeRates({ force = false } = {}) {
+  if (rateCache === null) rateCache = readRateCache();
+  if (force || isCacheStale(rateCache)) {
+    try {
+      const result = await fetchRates();
+      rateCache = { rates: result.rates, date: result.date, source: result.source, fetchedAt: Date.now() };
+      writeRateCache(rateCache);
+    } catch (_) { /* silent: keep last cache / built-in defaults */ }
+  }
+  applyEffectiveRates();
+  updateTrayDisplay();
+  if (settings?.discordRpcEnabled && latestStats) updateDiscordRpcDisplay(latestStats);
+  pushSettingsToRenderer();
+}
+
+function compactTokenDisplayOptions() {
+  return {
+    compactTokenUnits: settings?.compactTokenUnits,
+    locale: trayMenuLocale()
+  };
+}
+
+function updateDiscordRpcDisplay(stats) {
+  updateDiscordRpc(stats, settings?.currency, compactTokenDisplayOptions());
+}
+
+function refreshTrayContextMenu() {
+  if (!tray || tray.isDestroyed()) return;
+  if (typeof tray.refreshContextMenu === 'function') tray.refreshContextMenu();
+}
+
+function desktopQuotaStats(stats) {
+  const projected = require('./plugins/limitsPresentation').projectPluginLimits(stats, pluginRuntime?.limitsSnapshot());
+  if (!projected?.limits) return projected;
+  const slotLists = Object.fromEntries(LIMIT_PROVIDER_REGISTRY
+    .filter(entry => entry.accountSlots)
+    .map(entry => [entry.id, accountSlotService?.list(entry.id).accounts || []]));
+  return { ...projected, limits: { ...projected.limits,
+    providers: applyAccountOrder(projected.limits.providers || [], slotLists, settings.deviceId, settings.limitAccountPresentation) } };
+}
+
+function syncPluginQuotaSurfaceDemand() {
+  if (!pluginRuntime) return;
+  const trayNeeds = settings?.showTrayIcon !== false && (['limitsAllSessions', 'bars', 'barsSession', 'barsWeekly', 'barsAllSessions'].includes(settings?.trayContent)
+    || (settings?.trayContent === 'custom' && trayLayoutApi.usesLimits(settings?.trayCustomLayout)));
+  const dockNeeds = edgeDockController?.limitsVisible?.() && (settings.edgeDockItems === null || (settings.edgeDockItems || []).some(item => item.type === 'limit'));
+  const notch = notchController?.quotaVisibility?.();
+  const summaryMode = notchSummaryMode(settings);
+  const notchNeeds = notch?.panel || (notch?.summary && (summaryMode === 'auto'
+    || (['tray', 'custom'].includes(summaryMode) && trayLayoutApi.usesLimits(notchSummaryLayout(settings)))));
+  pluginRuntime.demandLimits(Boolean(settings?.limitsEnabled !== false && (trayNeeds || dockNeeds || notchNeeds)), 'desktop.native');
+}
+
+let pluginQuotaRepaintPending = false;
+function pluginQuotaChanged() {
+  if (pluginQuotaRepaintPending) return;
+  pluginQuotaRepaintPending = true;
+  setImmediate(() => {
+    pluginQuotaRepaintPending = false;
+    syncPluginQuotaSurfaceDemand();
+    repaintDockSurfaces();
+    updateTrayDisplay();
+  });
+}
+
+function updateTrayDisplay() {
+  if (!tray || tray.isDestroyed()) return;
+  // Keep the exported D-Bus menu in sync (radio checks, refresh state, Codex
+  // accounts) — see the Linux note in createTray().
+  refreshTrayContextMenu();
+  syncPluginQuotaSurfaceDemand();
+  const visibleStats = desktopQuotaStats(electronPresentationStats(latestStats));
+  const mode = settings?.trayContent || 'tokens';
+  const currency = normalizeCurrency(settings?.currency);
+  const compactOptions = compactTokenDisplayOptions();
+  const limitText = formatTrayText(visibleStats, mode, currency, {
+    limitProviderOrder: settings?.limitProviderOrder,
+    limitProviders: settings?.limitProviders,
+    showLimitUsed: settings?.showLimitUsed,
+    ...compactOptions
+  });
+  const barsImageMode = isBarsTrayIconMode(mode) && !limitText && providerTrayIcons[mode];
+  // A renderer-generated icon is cached in the main process. Only reuse it
+  // while the current stats still have quota text; otherwise it can outlive
+  // the provider data that generated it.
+  const trayImageMode = (mode === 'limitsAllSessions' && Boolean(limitText) || mode === 'liveTokenRate')
+    && providerTrayIcons[mode];
+  const customImageMode = mode === 'custom' && providerTrayIcons.custom;
+  const text = trayImageMode || customImageMode ? '' : limitText;
+  if (trayShowsTitle(process.platform)) tray.setTitle(text);
+  tray.setToolTip('');
+  // Icon: rendered bars image in bar modes, otherwise the app icon.
+  let icon = null;
+  if (barsImageMode || trayImageMode || customImageMode) {
+    icon = providerTrayIcons[mode];
+  } else {
+    const usageIconId = pickUsageTrayIconId(visibleStats, mode, Object.keys(providerTrayIcons));
+    if (usageIconId) icon = providerTrayIcons[usageIconId];
+  }
+  tray.setImage(icon || getDefaultTrayIcon());
+}
+
+function recordDiagnosticEvent(event) {
+  diagnosticJournal.record({
+    ...event,
+    modeAtEvent: settings?.hubMode || 'local'
+  });
+}
+
+function sendStatus(connected, extra) {
+  const previous = streamConnected;
+  streamConnected = Boolean(connected);
+  streamFailure = streamConnected ? null : ((extra && extra.reason) ? { reason: extra.reason, detail: extra.detail ?? null } : streamFailure);
+  if (mode === 'sync' && settings?.hubMode !== 'icloud') {
+    if (streamConnected && !previous) {
+      recordDiagnosticEvent({ subsystem: 'stream', code: 'stream-reconnected' });
+    } else if (!streamConnected && (previous || extra?.reason)) {
+      recordDiagnosticEvent({
+        subsystem: 'stream',
+        code: 'stream-disconnected',
+        detailCode: diagnosticStreamDetailCode(extra || streamFailure || {})
+      });
+    }
+  }
+  // Hub events received before this status still have to reach the renderer
+  // ahead of it: a batched remote reason arriving after a disconnect would mark
+  // the stream connected again.
+  syncStatsPublication.flush();
+  sendPush({ event: 'status', data: { connected: streamConnected, mode, ...(extra || {}) } });
+}
+
+// `options` is forwarded verbatim to the runtime; the quit path passes
+// `skipCloseWatchers` (see stopAll).
+function stopLocalCollector(options = {}) {
+  usageRuntimeReconciler.cancel();
+  usageRuntimeReconciler.setActiveKey(null);
+  if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
+  deviceRuntimeHandle = null;
+  // A stopped runtime's probes finish unobserved.
+  if (limitProbes.length) publishLimitProbes([]);
+  localDevice = null;
+  localStats = null;
+  anchorSeedDevice = null;
+}
+
+// Show the last full scan's totals while the first one of this run is still
+// going, instead of zeros for the tens of seconds it takes. deviceRecordFromAnchor
+// owns the trust rules; anything it rejects leaves the renderer on its normal
+// wait-for-real-data path.
+function primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner) {
+  // Cold start only. startMode() re-enters here on structural settings changes
+  // as well, and there the numbers already collected are newer than any anchor.
+  if (lastCollectedDevice) return;
+  const deviceRecord = deviceRecordFromAnchor(
+    readJson(path.join(sharedDataDir(), 'collector-anchor.json'), null),
+    {
+      envelope: electronDeviceEnvelope(),
+      clients: usageOptions.clients,
+      allTimeSince: usageOptions.allTimeSince,
+      projectsEnabled: usageOptions.projectsEnabled,
+      customScanPaths: usageOptions.customScanPaths,
+      wslScanEnabled: usageOptions.wslScanEnabled,
+      wslSupported: process.platform === 'win32',
+      historyEnabled: usageOptions.historyEnabled,
+      dailyHistoryArchiveEnabled: usageOptions.dailyHistoryArchiveEnabled,
+      hostname: os.hostname(),
+      platform: `${process.platform}-${process.arch}`
+    }
+  );
+  if (!deviceRecord) return;
+  // The anchor holds raw collector output, while everything the renderer is ever
+  // shown has been through the archives first. Project the same way or the seed
+  // reads low for anyone with an un-tracked client or retained sessions, and then
+  // jumps when the first scan lands. Read-only on purpose: the capture step
+  // records a fresh observation, and an anchor from hours ago is not one.
+  let visible;
+  try {
+    visible = usageTransform.project(
+      deviceRecord,
+      settings?.sessionUsageArchiveEnabled === false ? null : usageTransform.ensureLoaded(),
+      sessionUsageArchiveDate(deviceRecord)
+    );
+  } catch (error) {
+    sendStatus(false, { reason: `session-archive:${error.message}` });
+    return;
+  }
+  anchorSeedDevice = visible;
+  localDevice = visible;
+  localStats = withHistoryPreview(aggregateDevices([visible], 0), [visible]);
+  // Through the normal publisher, not straight to the renderer: the tray reads
+  // what sendPush sets, and in tray mode the window is hidden, so a seed that
+  // only reached the renderer would leave the one visible surface on zero.
+  // This one waits for the renderer: it is the only stats push whose whole point
+  // is to be on screen before the first scan, so it cannot be left to the
+  // refreshStats() that covers the rest. It must also not spend the export
+  // interval this run's first live scan needs on a snapshot it is republishing.
+  sendPush({
+    event: 'stats',
+    data: { type: 'stats', reason: 'anchor', stats: localStats, at: deviceRecord.receivedAt }
+  }, { skipExport: true, deferToRenderer: true, widgetProducerOwner });
+}
+
+// The first scan holds its record back until all-time is in, which on a long
+// history is minutes after Today was ready. Show each window as it lands, over
+// the seed's last known values when there is one. Display only: nothing here is
+// exported, because a record missing windows reads as zero wherever it lands.
+function publishColdPreview(preview, reason, widgetProducerOwner) {
+  if (lastCollectedDevice) return;
+  const device = seedWithColdPreview(anchorSeedDevice || preview, preview);
+  localDevice = device;
+  localStats = withHistoryPreview(aggregateDevices([device], 0), [device]);
+  sendPush({
+    event: 'stats',
+    data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() }
+  }, { skipExport: true, widgetProducerOwner });
+}
+
+function startLocalCollector() {
+  stopLocalCollector();
+  const widgetProducerOwner = captureMacWidgetProducerOwner();
+  mode = 'local';
+  sendStatus(false, { reason: 'collecting' });
+  // One config object for both, so the fingerprint the seed validates against
+  // cannot drift from the one the collector will compute.
+  const usageOptions = electronUsageConfig('collector');
+  primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner);
+  deviceRuntimeHandle = createDeviceRuntime({
+    envelope: electronDeviceEnvelope(),
+    initialLimits: lastCollectedDevice?.limits,
+    limitsOptions: electronLimitsConfig(),
+    transformUsage: usageTransform.transform,
+    usageOptions,
+    progressive: true,
+    onSessionActivity: publishLocalSessionActivity,
+    onColdPreview: (preview, meta) => publishColdPreview(preview, meta.reason, widgetProducerOwner),
+    onRecord: (summary, meta) => {
+      anchorSeedDevice = null;
+      seedInitialLimitProviders(summary);
+      const reason = meta.reason;
+      const visibleSummary = summary;
+      localDevice = { ...visibleSummary, receivedAt: new Date().toISOString() };
+      lastCollectedDevice = localDevice;
+      localStats = composeLocalOnlySummary(localDevice, (stats) => {
+        withHistoryPreview(stats, [localDevice]);
+        attachLocalNativeViews(stats, localDevice);
+        return stats;
+      });
+      updateDiscordRpcDisplay(localStats);
+      sendPush({ event: 'stats', data: { type: 'stats', reason, stats: localStats, at: new Date().toISOString() } }, { widgetProducerOwner });
+      sendStatus(true, { reason });
+    },
+    onDiagnosticEvent: recordDiagnosticEvent,
+    onError: (error, reason) => sendStatus(false, { reason: `${reason}:${error.message}` })
+  }, {
+    createUsageRuntime: createElectronUsageRuntime,
+    limitsDeps: electronLimitsDeps()
+  });
+  usageRuntimeReconciler.setActiveKey(usageConfigFingerprint(usageOptions));
+  drainPendingRuntimeActions(deviceRuntimeHandle);
+}
+
+function scheduleStreamRetry(delayMs = 3000) {
+  if (sseRetryTimer) return;
+  sseRetryTimer = setTimeout(() => { sseRetryTimer = null; startStatsStream(); }, delayMs);
+}
+
+function stopStatsStream() {
+  if (sseAbortController) { try { sseAbortController.abort(); } catch (_) {} }
+  sseAbortController = null;
+  if (sseRetryTimer) { clearTimeout(sseRetryTimer); sseRetryTimer = null; }
+}
+
+async function startStatsStream(options = {}) {
+  stopStatsStream();
+  // Legacy History needs reconciliation after reconnect. Negotiated uploads
+  // keep their independent baseline and recover through 409 if the Hub lost it.
+  postSyncPayload.resetHistory({ preserveDelta: !options.resetSnapshot });
+  const generation = hubModeGeneration;
+  const widgetProducerOwner = captureMacWidgetProducerOwner();
+  if (settings?.hubMode !== 'client') return;
+  const cacheIdentity = currentHubStatsIdentity('client');
+  if (options.resetSnapshot) {
+    clearLatestHubStatsCache();
+  }
+  const { url: hubUrl, secret } = effectiveHubConfig();
+  if (!hubUrl) return;
+  mode = 'sync';
+  const url = `${hubUrl.replace(/\/$/, '')}/api/stats/stream`;
+  const controller = new AbortController();
+  sseAbortController = controller;
+  let activityTimer = null;
+  let timedOut = false;
+  // Hubs send a heartbeat every 30s. Bound both opening the request and waiting
+  // for bytes, since a half-open connection may never report an error or EOF.
+  function armActivityTimeout(delayMs) {
+    clearTimeout(activityTimer);
+    activityTimer = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, delayMs);
+    activityTimer.unref?.();
+  }
+  controller.signal.addEventListener('abort', () => clearTimeout(activityTimer), { once: true });
+  try {
+    armActivityTimeout(15_000);
+    const response = await fetch(url, {
+      headers: {
+        accept: 'text/event-stream',
+        [HUB_STREAM_HEADER]: HUB_STREAM_VERSION,
+        ...(secret ? { authorization: `Bearer ${secret}` } : {})
+      },
+      signal: controller.signal
+    });
+    if (controller !== sseAbortController || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+    controller.signal.throwIfAborted();
+    if (!response.ok || !response.body) {
+      sendStatus(false, classifyStreamFailure({ status: response.status }));
+      scheduleStreamRetry();
+      return;
+    }
+    armActivityTimeout(90_000);
+    sendStatus(true);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const blocks = createSseBlockReader();
+    const streamSnapshot = createStatsStreamReceiver();
+    for (;;) {
+      if (controller !== sseAbortController || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+      const { value, done } = await reader.read();
+      if (controller !== sseAbortController || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+      controller.signal.throwIfAborted();
+      if (done) break;
+      // Count comments and partial frames too: large snapshots may span reads.
+      if (value.byteLength) armActivityTimeout(90_000);
+      for (const block of blocks.push(decoder.decode(value, { stream: true }))) {
+        const parsed = parseSseBlock(block);
+        if (parsed) {
+          if (['snapshot', 'stats', 'freshness', 'delta'].includes(parsed.event)) {
+            const refreshed = streamSnapshot.receive(parsed.event, parsed.data);
+            if (!refreshed) continue;
+            // Presentation overlays mutate root/device metadata. The delta base
+            // belongs to the connection, so keep those containers private.
+            const displayCache = { ...refreshed, devices: refreshed.devices.map(device => ({ ...device })) };
+            setLatestHubStatsCache(displayCache, 'client', generation, cacheIdentity);
+            requestSyncDisplayStats({ reason: parsed.data?.reason || 'ingest', at: parsed.data?.at, generation, widgetProducerOwner });
+          } else {
+            sendPush(parsed, { widgetProducerOwner });
+          }
+        }
+      }
+    }
+    if (controller !== sseAbortController || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+    sendStatus(false, classifyStreamFailure({ eof: true }));
+    scheduleStreamRetry();
+  } catch (error) {
+    if ((controller.signal.aborted && !timedOut) || controller !== sseAbortController
+      || !hubModeRequestIsCurrent(generation, 'client', cacheIdentity)) return;
+    sendStatus(false, classifyStreamFailure({ errorCode: timedOut ? 'ETIMEDOUT' : error?.cause?.code || error?.code, message: error?.message }));
+    scheduleStreamRetry();
+  } finally {
+    clearTimeout(activityTimer);
+    controller.abort();
+  }
+}
+
+function showPopover(clickPoint = null) {
+  if (!mainWindow || mainWindow.isDestroyed() || !tray) return;
+  recentPopoverBlur = null;
+  applyMacActivationPolicy();
+  applyMacSpaceBehavior(true);
+  applyWindowSettings();
+  const current = mainWindow.getBounds();
+  const target = popoverBounds(tray, current.width, current.height, { clickPoint });
+  mainWindow.setBounds(target);
+  suppressNextBlurHide = true;
+  mainWindow.show();
+  // The focus event itself may not fire a blur; the suppress flag covers the
+  // case where macOS fires blur immediately after show because the click that
+  // opened us still has the menu bar as the focused element.
+  setTimeout(() => { suppressNextBlurHide = false; }, 250);
+}
+
+function hidePopover() {
+  recentPopoverBlur = null;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (mainWindow.isVisible()) pluginWindowActions.hide(mainWindow);
+}
+
+function togglePopover(clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const action = popoverToggleAction({
+    visible: mainWindow.isVisible(),
+    focused: mainWindow.isFocused(),
+    visibleAtMouseDown: wasVisibleAtMouseDown,
+    blurMatchedAtMouseDown
+  });
+  recentPopoverBlur = null;
+  if (action === 'hide') hidePopover();
+  else showPopover(clickPoint);
+}
+
+function focusExistingWindow() {
+  applyMacActivationPolicy({ mainWindowVisible: true });
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  if (settings?.trayMode) showPopover();
+  else {
+    applyMacSpaceBehavior(false);
+    if (floatingBubbleState.collapsed) expandFloatingBubble();
+    else {
+      mainWindow.show();
+      restoreWindowMaximized(mainWindow, settings);
+    }
+  }
+}
+
+function currentWindowToggleShortcutStatus() {
+  const shortcut = normalizeWindowToggleShortcut(settings?.windowToggleShortcut);
+  const registered = windowToggleShortcutRegistered && registeredWindowToggleShortcut === shortcut;
+  return windowToggleShortcutStatus(shortcut, registered);
+}
+
+// Strip OpenCode session cookies from a profiles map before it reaches the
+// renderer; the UI only needs the profile name and enabled flag, not the value.
+// Default-deny: name every field allowed through instead of spreading the stored
+// profile. A spread hands any field added later to the renderer verbatim, which
+// is exactly how a credential leaks.
+
+// The command carries identity only. Resolve at commit time, after any IPC
+// awaits, and persist the host-declared palette and finite tokens together.
+function preparePluginSkinSettings(patch, current, runtime) {
+  if (Object.hasOwn(patch, 'pluginAuthorSkin')) throw new Error('author skin snapshots are host-owned');
+  if (!Object.hasOwn(patch, 'pluginSkinRef')) return { patch, authorSkin: normalizePluginAuthorSkin(current.pluginAuthorSkin) };
+  if (patch.pluginSkinRef === null && Object.keys(patch).every(key => ['pluginSkinRef', 'themeColors'].includes(key))) {
+    const { pluginSkinRef: _reset, ...colors } = patch;
+    return { patch: colors, authorSkin: null };
+  }
+  if (Object.keys(patch).length !== 1) throw new Error('plugin skin selection must be a standalone command');
+  const skin = runtime?.resolveSkin(patch.pluginSkinRef);
+  if (!skin) throw new Error('plugin skin is unavailable');
+  const authorSkin = normalizePluginAuthorSkin({ ref: skin.ref, appearance: skin.appearance || {} });
+  if (!authorSkin) throw new Error('invalid author skin');
+  return prepareSkinSettings(current, { ...skin, appearance: authorSkin.appearance });
+}
+
+function assertPluginSkinRequest(event, patch) {
+  if (Object.hasOwn(patch, 'pluginAuthorSkin')) throw new Error('author skin snapshots are host-owned');
+  if (!Object.hasOwn(patch, 'pluginSkinRef')) return;
+  if (Object.keys(patch).length !== 1 && !(patch.pluginSkinRef === null && Object.keys(patch).every(key => ['pluginSkinRef', 'themeColors'].includes(key)))) throw new Error('plugin skin selection must be a standalone command');
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents
+    || !event.senderFrame || event.senderFrame !== event.sender.mainFrame) throw new Error('plugin skin selection requires the main window');
+}
+
+function settingsForRenderer() {
+  // Default-deny every credential field added to the canonical store. The two
+  // hub secrets remain explicit exceptions because the existing sync UI must
+  // prefill/copy them; provider credentials only cross as blank/configured state.
+  const redactedCredentials = credentialSettingsForRenderer(settings, {
+    expose: ['hubHostSecret', 'secret']
+  });
+  const rendererSettings = { ...settings };
+  delete rendererSettings.icloudRetiredDeviceIds;
+  delete rendererSettings.icloudWriterId;
+  delete rendererSettings.limitAccountPresentationCacheIdentity;
+  delete rendererSettings.limitAccountPresentationPending;
+  delete rendererSettings.syncContentState;
+  delete rendererSettings.pluginSkinRef;
+  // Usage retained for untracked clients: only the collector transform reads
+  // it, and it is most of the settings payload a renderer would clone and keep.
+  delete rendererSettings.archivedClientUsage;
+  rendererSettings.pluginAuthorSkin = normalizePluginAuthorSkin(settings.pluginAuthorSkin);
+  for (const key of rendererOmittedAccountKeys()) delete rendererSettings[key];
+  return {
+    ...rendererSettings,
+    windowsBackdropFallback: windowsBackdropFallback(mainWindow),
+    syncContentStatus: getSyncContentRuntime().status(),
+    locale: trayMenuLocale(),
+    deviceIconScope: currentHubIdentity() || 'local',
+    ...redactedCredentials,
+    hubProfiles: hubProfilesForRenderer(settings),
+    // On a hub the shared list is the truth; settings.subscriptions is only the
+    // last-known cache behind it.
+    subscriptions: effectiveSubscriptions(),
+    subscriptionsShared: subscriptionsAreShared(),
+    // Which version of the shared list the one above was taken from, so an edit
+    // built on it can say what it was built on rather than inheriting whatever
+    // this process holds by the time the write goes out — and which hub issued
+    // that version, because it does not mean anything without one.
+    subscriptionsHub: currentHubIdentity(),
+    subscriptionsUpdatedAt: subscriptionDocumentVersion(subscriptionsDocumentFor(currentHubIdentity())),
+    subscriptionsOrphaned: pendingOrphanedSubscriptions(),
+    ...accountFieldProjection(settings, process.env),
+    claudeManagedAccounts: claudeAccountService().accounts(),
+    codexManagedAccounts: codexAccountsForRenderer(),
+    antigravityManagedAccounts: antigravityAccountsForRenderer(),
+    workbuddyManagedAccounts: workbuddyAccountsForRenderer(),
+    mimoManagedAccounts: mimoAccountsForRenderer(),
+    ...accountStatusProjection(settings, process.env),
+    claudeWebLegacyAccount: claudeAccountService().legacyAccount(),
+    claudeWebLoginStatuses: claudeAccountService().loginStatuses(),
+    limitAccountForms: limitAccountFormsForRenderer(),
+    limitConnectionSources: limitConnectionSourcesForRenderer(),
+    currencyRatesEffective: effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {}),
+    currencyRateInfo: rateCache ? { source: rateCache.source, date: rateCache.date, fetchedAt: rateCache.fetchedAt } : null,
+    windowToggleShortcutStatus: currentWindowToggleShortcutStatus(),
+    networkProxySource: networkProxySource(settings, process.env)
+  };
+}
+
+// The tray sits in system-integrated UI (menubar / taskbar / panel), whose theme
+// is independent of the app's own: Windows lets the system be dark while apps
+// stay light, which is exactly the case a plain `shouldUseDarkColors` gets wrong.
+// That dedicated property only exists on darwin and win32, so elsewhere the app
+// theme is the closest signal available.
+function systemDarkTrayUi() {
+  try {
+    if (process.platform === 'darwin' || process.platform === 'win32') {
+      const systemIntegrated = nativeTheme.shouldUseDarkColorsForSystemIntegratedUI;
+      if (typeof systemIntegrated === 'boolean') return systemIntegrated;
+    }
+    return nativeTheme.shouldUseDarkColors === true;
+  } catch (_) {
+    return false;
+  }
+}
+
+const WINDOWS_PERSONALIZE_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize';
+
+function readWindowsSystemDarkUi() {
+  return new Promise((resolve) => {
+    try {
+      require('node:child_process').execFile(
+        'reg',
+        ['query', WINDOWS_PERSONALIZE_KEY, '/v', 'SystemUsesLightTheme'],
+        { windowsHide: true, timeout: 5000 },
+        (error, stdout) => resolve(error ? null : parseWindowsSystemUsesLightTheme(stdout))
+      );
+    } catch (_) {
+      resolve(null);
+    }
+  });
+}
+
+// The value the renderer last heard, so a settled reading can be told from a
+// repeat of the one we already published.
+let currentSystemDarkUi = null;
+
+function currentSystemDarkTrayUi() {
+  if (currentSystemDarkUi === null) currentSystemDarkUi = systemDarkTrayUi();
+  return currentSystemDarkUi;
+}
+
+function pushSystemUiThemeToRenderer(dark) {
+  const value = typeof dark === 'boolean' ? dark : currentSystemDarkTrayUi();
+  currentSystemDarkUi = value;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('theme:systemUi', { dark: value }); } catch (_) {}
+}
+
+// Windows cannot answer this at event time — see watchSystemDarkUi in tray.js
+// for what was measured. Everywhere else the event already carries the truth.
+let systemUiThemeRevision = 0;
+
+async function pushSystemUiThemeAfterChange() {
+  if (process.platform !== 'win32') {
+    pushSystemUiThemeToRenderer(systemDarkTrayUi());
+    return;
+  }
+  const revision = ++systemUiThemeRevision;
+  await watchSystemDarkUi({
+    read: readWindowsSystemDarkUi,
+    wait: (ms) => new Promise((resolve) => { setTimeout(resolve, ms); }),
+    isCurrent: () => revision === systemUiThemeRevision,
+    held: currentSystemDarkTrayUi(),
+    publish: (dark) => pushSystemUiThemeToRenderer(dark)
+  });
+}
+
+function pushSettingsToRenderer() {
+  const payload = settingsForRenderer();
+  limitsHistoryController?.refresh();
+  syncDockSurfaces(payload);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try { mainWindow.webContents.send('settings:push', payload); } catch (_) {}
+  }
+  // The trends dashboard is a separate renderer with its own currency module
+  // instance; it must receive effective-rate updates too, otherwise an
+  // already-open dashboard keeps showing the previous rate after an auto
+  // refresh or manual override until it is reopened.
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    try { dashboardWindow.webContents.send('settings:push', payload); } catch (_) {}
+  }
+}
+
+let edgeDockController = null;
+let notchController = null;
+let dockAppearancePreview = null;
+
+function dockAppearanceSettings() {
+  return dockAppearancePreview ? { ...settings, ...dockAppearancePreview } : settings;
+}
+
+function previewDockAppearance(patch) {
+  const preview = {};
+  for (const key of ['glassOpacity', 'glassBlur']) {
+    const value = Number(patch?.[key]);
+    if (patch?.[key] !== undefined && Number.isFinite(value)) preview[key] = Math.max(0, Math.min(100, value));
+  }
+  for (const [key, mode] of [['macGlassTint', 'liquid-glass'], ['macClearGlassTint', 'liquid-glass-clear']]) {
+    if (patch?.[key] !== undefined) preview[key] = normalizeLiquidGlassTint(patch[key], mode);
+  }
+  if (Object.keys(preview).length === 0) return;
+  // A range input previews before its change event commits the preference.
+  // Share glass controls with the floating surfaces, keeping their own styles
+  // and saved settings intact until the ordinary settings sync replaces it.
+  dockAppearancePreview = { ...dockAppearancePreview, ...preview };
+  for (const controller of [edgeDockController, notchController]) {
+    if (controller?.isRunning()) controller.setAppearance(dockAppearancePreview, { preview: true });
+  }
+}
+
+let notchRateTimer = null;
+const notchRateTrackers = new Map();
+
+function notchDataFor(visibleStats, cells) {
+  clearTimeout(notchRateTimer);
+  notchRateTimer = null;
+  if (settings.notchSummaryEnabled === false) {
+    notchRateTrackers.clear();
+    return buildNotchData(visibleStats, cells, settings);
+  }
+  // Only an explicit tray or custom layout can request a rate.
+  const rateItems = ['tray', 'custom'].includes(notchSummaryMode(settings)) ? trayLayoutApi.liveTokenRateItems(notchSummaryLayout(settings)) : [];
+  const liveTokenRates = {};
+  let nextExpiry = 0;
+  const scopes = new Set(rateItems.map((item) => item.rateScope));
+  for (const scope of notchRateTrackers.keys()) {
+    if (!scopes.has(scope)) notchRateTrackers.delete(scope);
+  }
+  for (const scope of scopes) {
+    const selection = tokenRateApi.selectLiveTokenRatePeriods(visibleStats, settings.deviceId, settings.hubMode, scope);
+    const context = [mode, settings.hubMode, settings.hubUrl, settings.deviceId, selection.source].join('|');
+    let held = notchRateTrackers.get(scope);
+    if (!held || held.context !== context) {
+      held = { context, tracker: tokenRateApi.createLiveTokenRateGroupTracker({ now: Date.now }) };
+      held.tracker.reset(selection.entries);
+      notchRateTrackers.set(scope, held);
+    } else held.tracker.observe(selection.entries);
+    liveTokenRates[scope] = held.tracker.getSample();
+    const expiry = held.tracker.nextExpiryAt();
+    if (expiry && (!nextExpiry || expiry < nextExpiry)) nextExpiry = expiry;
+  }
+  if (nextExpiry && notchController?.isRunning()) {
+    notchRateTimer = setTimeout(() => {
+      notchRateTimer = null;
+      repaintDockSurfaces();
+    }, Math.max(1000, nextExpiry - Date.now() + 20));
+  }
+  const codexManagedAccounts = codexAccountsForRenderer();
+  const activeCodexAccountId = codexPresentationPendingAccountId || codexPresentationActiveAccountId;
+  return buildNotchData(visibleStats, cells, settings, {
+    ...compactTokenDisplayOptions(), currency: normalizeCurrency(settings.currency), liveTokenRates,
+    activeAccountKeys: { codex: codexManagedAccounts.find((account) => account.id === activeCodexAccountId)?.accountKey },
+    cellOptions: { codexManagedAccounts, activeCodexAccountId, localDeviceId: settings.deviceId, syncActive: syncProvenanceActive() }
+  });
+}
+
+function toggleDockRateMode() {
+  settings.tokenRateMode = settings.tokenRateMode === 'burn' ? 'speed' : 'burn';
+  saveSettings();
+  pushSettingsToRenderer();
+}
+
+let notchBlurMasks = null;
+
+function ensureNotchController() {
+  if (notchController) return notchController;
+  notchController = createNotchController({
+    BrowserWindow, ipcMain, screen, platform: process.platform,
+    rendererDir: path.join(__dirname, 'renderer'),
+    preloadPath: path.join(__dirname, 'notch', 'preload.js'),
+    getSettings: () => dockAppearanceSettings(),
+    onCapabilitiesChanged: (value) => sendMainWindowEvent('topNotch:capabilities', value, () => notchController?.getCapabilities() === value),
+    nativeGlass: () => nativeBlurEnabled(),
+    liquidGlass: () => {
+      const options = nativeMaterialOptions();
+      return !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25
+        ? { dark: options.dark } : null;
+    },
+    createGlass: (win) => createMacLiquidGlass(win, { shaped: true }),
+    applyShapeMask: (win, commands, width, height, display) => {
+      const { buffer, pixelWidth, pixelHeight } = rasterizeMask(toPolygons(commands), width, height, display?.scaleFactor || 2);
+      return applyVibrancyMask(win, { buffer, pixelWidth, pixelHeight }, width, height);
+    },
+    prefersReducedMotion: () => motionPreferenceApi.shouldReduceMotion(settings?.reduceMotion, systemPreferences.getAnimationSettings?.().prefersReducedMotion === true),
+    onToggleRateMode: toggleDockRateMode,
+    canRefreshLimits: () => canRefreshEdgeDockStats(),
+    onRefreshLimits: () => refreshStatsFromEdgeDock(),
+    onWebSurfaceChanged: () => { pluginRuntime?.refreshSurfaces(); syncPluginQuotaSurfaceDemand(); },
+    installNonActivatingInput: (win) => preventAppActivation(win),
+    blurAvailable: () => nativeTheme.prefersReducedTransparency !== true,
+    applyBlurMask: (win, mask, display) => {
+      const scale = display?.scaleFactor || 2;
+      const key = JSON.stringify([mask, scale]);
+      if (notchBlurMasks?.key !== key) {
+        const png = (options) => {
+          const { buffer, pixelWidth, pixelHeight } = notchBlurMask({ ...mask, ...options });
+          return nativeImage.createFromBitmap(buffer, { width: pixelWidth, height: pixelHeight }).toPNG();
+        };
+        // The blur mask is sampled per point; the visible fade is drawn at device scale.
+        notchBlurMasks = { key, alphaPng: png({ scale, curve: NOTCH_BLUR_ALPHA }), blurPng: png({ scale: 1, curve: NOTCH_BLUR_STRENGTH }) };
+      }
+      return applyProgressiveBlur(win, { alphaPng: notchBlurMasks.alphaPng, blurPng: notchBlurMasks.blurPng,
+        width: mask.width, height: mask.height, radius: NOTCH_BLUR_RADIUS });
+    },
+    primaryButtonDown: () => primaryButtonDown(process.platform),
+    monitorScrollGesture: (onEvent, options) => monitorMacScrollGesture(onEvent, { ...options, logger: (message) => console.log(message) }),
+    // An absent key is the system default, natural scrolling on.
+    naturalScrolling: () => systemPreferences.getUserDefault?.('com.apple.swipescrolldirection', 'string') !== '0',
+    performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
+    isFullScreen: createFullScreenProbe({ platform: process.platform, screen, logger: (message) => console.log(message) }),
+    onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
+    logger: (message) => console.log(message)
+  });
+  return notchController;
+}
+
+function syncNotch(rendererSettings) {
+  if (process.platform !== 'darwin' || settings?.notchEnabled !== true) {
+    notchController?.stop();
+    clearTimeout(notchRateTimer);
+    notchRateTimer = null;
+    notchRateTrackers.clear();
+    return;
+  }
+  const controller = ensureNotchController();
+  controller.setAppearance(edgeDockAppearance(rendererSettings));
+  controller.sync();
+  const stats = edgeDockStats();
+  if (stats) pushNotchCells(electronPresentationStats(stats));
+}
+
+// The dock renderer is a floating surface outside the widget, so it gets an
+// allowlisted appearance projection instead of the full renderer settings.
+function edgeDockAppearance(rendererSettings = settingsForRenderer()) {
+  const source = rendererSettings || {};
+  return {
+    language: source.language,
+    currency: source.currency,
+    currencyRatesEffective: source.currencyRatesEffective,
+    compactTokenUnits: source.compactTokenUnits,
+    showCompactTotalTokens: source.showCompactTotalTokens,
+    themeColors: source.themeColors,
+    vendorColors: source.vendorColors,
+    glassOpacity: source.glassOpacity,
+    glassBlur: source.glassBlur,
+    systemGlass: source.systemGlass,
+    reduceMotion: source.reduceMotion,
+    tokenNumberAnimation: source.tokenNumberAnimation,
+    interfaceFontFamily: source.interfaceFontFamily,
+    displayFontFamily: source.displayFontFamily,
+    showLimitUsed: source.showLimitUsed,
+    // The card's quota rows are built by the same view as the Limits page, so
+    // every preference that view reads has to reach this renderer as well —
+    // otherwise the card silently renders a different page's answer.
+    showCodexAdditionalLimits: source.showCodexAdditionalLimits,
+    limitProviderHiddenItems: source.limitProviderHiddenItems,
+    showLimitSource: source.showLimitSource,
+    codexResetForecastEnabled: source.codexResetForecastEnabled,
+    workbuddyQuotaTotalEnabled: source.workbuddyQuotaTotalEnabled,
+    claudePrepaidBalanceEnabled: source.claudePrepaidBalanceEnabled,
+    // The dock's session rows carry the same context gauge as the Sessions
+    // list, so its Remaining/Used preference has to reach this renderer too.
+    sessionContextMetric: source.sessionContextMetric,
+    maskLimitAccountEmails: source.maskLimitAccountEmails,
+    limitsHistoryOpenMode: source.limitsHistoryOpenMode,
+    edgeDockWarnColors: source.edgeDockWarnColors === true,
+    edgeDockRunningIndicatorEnabled: source.edgeDockRunningIndicatorEnabled !== false,
+    // The user's own subscription records, so the card's plan cell can decorate
+    // itself exactly as the page's does. They belong here rather than on a cell
+    // because a record is not a property of a provider: it binds to one account
+    // of one, and the card also shows the provider-wide rollup that spans them.
+    // The same list the widget renders — in client mode that is the hub's copy,
+    // not this device's cache.
+    subscriptions: source.subscriptions || []
+  };
+}
+
+// The dock's live-rate readout keeps its own tracker, fed from the same stats
+// pushes, so it works whether or not the widget's footer rate is switched on.
+const EDGE_DOCK_RATE_ACTIVE_MS = 8000;
+const EDGE_DOCK_RATE_CLEAR_MS = 3 * 60 * 1000;
+let edgeDockRateTracker = null;
+const edgeDockRateHistory = tokenRateApi.createLiveTokenRateHistory();
+let edgeDockRateContext = '';
+let edgeDockRateTimer = null;
+
+function configuredDockItemLists() {
+  return [...(settings?.edgeDockEnabled !== false ? [settings?.edgeDockItems] : []),
+    // The notch panel's fixed readouts plus its limit selection (null: automatic).
+    ...(settings?.notchEnabled === true && process.platform === 'darwin' ? [notchLimitItems(settings), NOTCH_PANEL_STAT_ITEMS] : [])];
+}
+
+function edgeDockShowsLiveRate() {
+  const items = configuredDockItemLists().flatMap((list) => Array.isArray(list) ? list : []);
+  // A live-rate item needs the sample for its own headline; a sessions item needs
+  // it only when its rail cell was set to show the rate instead of tool marks. The
+  // tracker is the same either way, so this is the one gate that has to know both.
+  return items.some((item) => item.type === 'stat' && (
+    item.metric === 'liveRate'
+    || (item.metric === 'sessions' && item.cellDetail === 'rate')
+  ));
+}
+
+function edgeDockLiveRateSample(visibleStats) {
+  if (edgeDockRateTimer) clearTimeout(edgeDockRateTimer);
+  edgeDockRateTimer = null;
+  if (!edgeDockShowsLiveRate()) {
+    edgeDockRateTracker = null;
+    edgeDockRateHistory.reset();
+    edgeDockRateContext = '';
+    return null;
+  }
+  const hubMode = settings?.hubMode;
+  const syncMode = tokenRateApi.isSharedSyncMode(hubMode);
+  const scope = syncMode && settings?.liveTokenRateScope !== 'device' ? 'all' : 'device';
+  const selection = tokenRateApi.selectLiveTokenRatePeriods(visibleStats, settings?.deviceId, hubMode, scope);
+  const context = [mode, hubMode || '', settings?.hubUrl || '', settings?.deviceId || '', settings?.clients || '', scope, selection.source].join('|');
+  if (!edgeDockRateTracker) {
+    edgeDockRateTracker = tokenRateApi.createLiveTokenRateGroupTracker({
+      // Expiry timers subtract Date.now(), so samples must use epoch time too.
+      // The default monotonic clock would produce a negative delay and repeatedly
+      // repaint at the timer floor while a sample is retained.
+      now: Date.now,
+      activeMs: EDGE_DOCK_RATE_ACTIVE_MS,
+      clearMs: EDGE_DOCK_RATE_CLEAR_MS
+    });
+  }
+  if (context !== edgeDockRateContext) {
+    edgeDockRateContext = context;
+    edgeDockRateTracker.reset(selection.entries);
+    edgeDockRateHistory.reset();
+  } else {
+    const result = edgeDockRateTracker.observe(selection.entries);
+    if (result.changed && !result.sample) edgeDockRateHistory.reset();
+    // Only the side dock's speed card draws history. The Notch and sessions
+    // readouts share the live sample but do not create a chart demand.
+    const historyEnabled = settings?.edgeDockEnabled !== false && settings?.edgeDockItems?.some(item => item.type === 'stat' && item.metric === 'liveRate');
+    if (historyEnabled) edgeDockRateHistory.observe(result.sample);
+    else edgeDockRateHistory.reset();
+  }
+  // A sample goes idle and then clears without any new push; re-project then.
+  const expiresAt = Math.min(...[edgeDockRateTracker.nextExpiryAt(), edgeDockRateHistory.nextExpiryAt()].filter(Boolean));
+  if (Number.isFinite(expiresAt)) {
+    edgeDockRateTimer = setTimeout(() => {
+      edgeDockRateTimer = null;
+      repaintDockSurfaces();
+    }, Math.max(0, expiresAt - Date.now()) + 20);
+  }
+  return edgeDockRateTracker.getSample();
+}
+
+// Week / last-7 / last-30 are not collector periods; the widget sums them from
+// History. The dock does the same, once per History revision and day, and
+// re-projects when the answer lands. Until then those readouts show unknown.
+let edgeDockDerivedPeriods = {};
+let edgeDockDerivedSignature = '';
+
+// A manual read is not a shared push snapshot. Keep it for dock re-projections
+// until the next push, without changing the renderer/widget snapshot source.
+let edgeDockManualStats = null;
+
+function edgeDockStats() {
+  return edgeDockManualStats?.generation === hubModeGeneration && edgeDockManualStats.runtime === deviceRuntimeHandle
+    ? edgeDockManualStats.stats : latestStats;
+}
+
+function repaintDockSurfaces() {
+  const stats = edgeDockStats();
+  if (stats) updateEdgeDockCells(electronPresentationStats(stats));
+}
+
+function edgeDockDerivedSelections() {
+  const items = configuredDockItemLists().flatMap((list) => Array.isArray(list) ? list : []);
+  return EDGE_DOCK_DERIVED_PERIODS.filter((period) => items.some((item) => item.type === 'stat' && item.metric === period));
+}
+
+function refreshEdgeDockDerivedPeriods(visibleStats) {
+  const selections = edgeDockDerivedSelections();
+  if (!selections.length || !visibleStats) {
+    edgeDockDerivedPeriods = {};
+    edgeDockDerivedSignature = '';
+    return;
+  }
+  const todayKey = fixedPeriodRangesApi.localDayKey();
+  const signature = [
+    selections.join(','),
+    todayKey,
+    settings?.historyEnabled !== false,
+    fixedPeriodRangesApi.deviceInventorySignature(visibleStats.devices || []),
+    visibleStats.deviceHistoryRevision || visibleStats.historyRevision || ''
+  ].join('|');
+  if (signature === edgeDockDerivedSignature) return;
+  edgeDockDerivedSignature = signature;
+  getDashboardHistory({ includeDevices: true })
+    .then((history) => {
+      const source = edgeDockStats();
+      if (signature !== edgeDockDerivedSignature || !source) return;
+      const stats = electronPresentationStats(source);
+      const sources = fixedPeriodRangesApi.joinDeviceHistorySources(history?.deviceHistories || [], stats.devices || []);
+      const preferred = typeof app.getPreferredSystemLanguages === 'function' ? app.getPreferredSystemLanguages() : [app.getLocale()];
+      const next = {};
+      for (const selection of selections) {
+        const snapshot = fixedPeriodRangesApi.fixedPeriodSnapshotFromDevices(selection, sources, {
+          historyEnabled: settings?.historyEnabled !== false,
+          historyAvailable: history?.fixedPeriods?.historyTransportAvailable === true,
+          todayKey,
+          locale: resolveRegionalLocale([...preferred, trayMenuLocale()])
+        });
+        if (snapshot?.status === 'ready' && snapshot.period) next[selection] = snapshot.period;
+      }
+      edgeDockDerivedPeriods = next;
+      updateEdgeDockCells(stats);
+    })
+    .catch((error) => {
+      console.log(`[edge-dock] history for derived periods failed: ${error.message}`);
+      // Let the next stats push retry rather than pinning the failure.
+      if (signature === edgeDockDerivedSignature) edgeDockDerivedSignature = '';
+    });
+}
+
+// The Codex reset forecast is the Limits view's opt-in; the dock shows it on the
+// Codex card when that option is on. Fetched through the same cached client,
+// no more than every few minutes, and re-projected only when it changes.
+const EDGE_DOCK_FORECAST_REFRESH_MS = 5 * 60 * 1000;
+let edgeDockForecast = null;
+let edgeDockForecastAt = 0;
+let edgeDockForecastInFlight = false;
+
+function edgeDockForecastWanted() {
+  if (settings?.codexResetForecastEnabled !== true || settings?.edgeDockEnabled === false) return false;
+  // The Notch's fixed readouts do not draw the dock card's forecast.
+  const items = settings?.edgeDockItems;
+  return !Array.isArray(items) || items.some((item) => item.type === 'limit' && item.provider === 'codex');
+}
+
+function refreshEdgeDockForecast() {
+  if (!edgeDockForecastWanted()) {
+    edgeDockForecast = null;
+    edgeDockForecastAt = 0;
+    return;
+  }
+  if (edgeDockForecastInFlight || Date.now() - edgeDockForecastAt < EDGE_DOCK_FORECAST_REFRESH_MS) return;
+  edgeDockForecastInFlight = true;
+  edgeDockForecastAt = Date.now();
+  Promise.resolve(codexResetForecastClient.getForecast({ force: false }))
+    .then((forecast) => {
+      if (!edgeDockForecastWanted()) return;
+      const changed = JSON.stringify(forecast || null) !== JSON.stringify(edgeDockForecast);
+      edgeDockForecast = forecast || null;
+      if (changed) repaintDockSurfaces();
+    })
+    .catch((error) => console.log(`[edge-dock] reset forecast failed: ${error.message}`))
+    .finally(() => { edgeDockForecastInFlight = false; });
+}
+
+function canRefreshEdgeDockStats() {
+  return true;
+}
+
+async function refreshStatsFromEdgeDock() {
+  await refreshManualStats();
+  return { ok: true };
+}
+
+function edgeDockCellsFor(visibleStats, items = settings?.edgeDockItems, options = {}) {
+  visibleStats = desktopQuotaStats(visibleStats);
+  refreshEdgeDockDerivedPeriods(visibleStats);
+  refreshEdgeDockForecast();
+  syncCodexPresentationActiveAccount();
+  return buildEdgeDockCells(visibleStats, {
+    includeUnavailableAccounts: options.includeUnavailableAccounts === true,
+    availablePluginRefs: (pluginRuntime?.manager.surfaceCatalog('edgeDock') || []).map(view => view.ref),
+    derivedPeriods: edgeDockDerivedPeriods,
+    codexResetForecast: edgeDockForecastWanted() ? edgeDockForecast : null,
+    localDeviceId: settings?.deviceId,
+    // What the card's rows need to name the device a reading came from. The
+    // dock window is handed cells and nothing else, so both ride the cell.
+    syncActive: syncProvenanceActive(),
+    items,
+    showCodexAdditionalLimits: settings?.showCodexAdditionalLimits,
+    codexManagedAccounts: codexAccountsForRenderer(),
+    activeCodexAccountId: codexPresentationPendingAccountId || codexPresentationActiveAccountId,
+    limitsEnabled: settings?.limitsEnabled !== false,
+    limitProviders: settings?.limitProviders,
+    limitProviderOrder: settings?.limitProviderOrder,
+    liveRate: edgeDockLiveRateSample(visibleStats),
+    liveRateHistory: edgeDockRateHistory.getSamples(),
+    tokenRateMode: settings?.tokenRateMode
+  });
+}
+
+function updateEdgeDockCells(visibleStats) {
+  if ((!edgeDockController?.isRunning() && !notchController?.isRunning()) || !visibleStats) return;
+  if (edgeDockController?.isRunning()) pushEdgeDockCells(edgeDockCellsFor(visibleStats));
+  if (notchController?.isRunning()) pushNotchCells(visibleStats);
+}
+
+// Hand cells to the controller and arm the expiry timer from them. Split out from
+// the guard above because the settings path calls it before the controller is
+// running: `setCells` stores the list regardless, and `sync()` starts the windows
+// afterwards, so the timer is armed there once the surface actually exists.
+function pushEdgeDockCells(cells) {
+  edgeDockLastCells = cells;
+  edgeDockController?.setCells(cells);
+  scheduleSessionExpiry();
+}
+
+// Running is a function of time: a session crosses the ten-minute window with no
+// new data at all, so the cells pushed at the last tick go stale on their own. The
+// renderer re-derives what it draws from the rows it already holds, but the cells
+// themselves (and the rail's height, which depends on the cell list) only change
+// when the main process re-projects. This wakes exactly when the soonest running
+// row in the current cells expires, instead of polling on a fixed period.
+let edgeDockSessionExpiryTimer = null;
+const EDGE_DOCK_EXPIRY_FLOOR_MS = 1_000;
+
+// The cells most recently handed to the controller, so the expiry timer can be
+// armed from what is actually on screen rather than re-projecting to find out.
+let edgeDockLastCells = [];
+let notchLastCells = [];
+// Remote History reloads are throttled: past days move at most once per collection.
+const NOTCH_REMOTE_HISTORY_INTERVAL_MS = 60 * 1000;
+const notchHistory = createNotchHistory({
+  load: async (stats) => {
+    const history = await getDashboardHistory({ includeDevices: true });
+    const sources = fixedPeriodRangesApi.joinDeviceHistorySources(history?.deviceHistories || [], stats?.devices || []);
+    return { ...history, devicesComplete: sources.every((source) => source.historyAvailable === true) };
+  },
+  minIntervalMs: () => completeHistorySource(historyResolverOptions()) === 'remote' ? NOTCH_REMOTE_HISTORY_INTERVAL_MS : 0,
+  changed: () => repaintDockSurfaces(),
+  onError: (error) => console.log(`[notch] history failed: ${error.message}`)
+});
+
+function pushNotchCells(visibleStats) {
+  visibleStats = desktopQuotaStats(visibleStats);
+  notchLastCells = edgeDockCellsFor(visibleStats, notchPanelItems(visibleStats, settings), { includeUnavailableAccounts: true });
+  const data = notchDataFor(visibleStats, notchLastCells);
+  // Tab names and icons are metadata; opening a page alone requests its data.
+  if (pluginRuntime) data.panel.pluginCatalog = Object.fromEntries(pluginRuntime.manager.surfaceCatalog('notch')
+    .map(view => [view.ref, { title: view.title, icon: view.icon, identityIcon: view.identityIcon }]));
+  data.panel.pluginPages = data.panel.pluginPages.filter(ref => Object.hasOwn(data.panel.pluginCatalog || {}, ref));
+  const history = notchHistory.read(visibleStats, { enabled: settings.historyEnabled !== false, generation: hubModeGeneration });
+  if (history) data.panel.week = notchWeek(visibleStats, new Date(), history);
+  notchController.setData(data);
+  scheduleSessionExpiry();
+}
+
+// The soonest moment any sessions cell stops reading as running, or 0 when none
+// of them does. A quiet cell never becomes running on its own, so 0 means there
+// is nothing to wake for and the timer must not be armed.
+function edgeDockNextSessionExpiry(cells) {
+  let soonest = 0;
+  // A stale expiry is not a wake-up: taking one would clamp the delay to the floor
+  // and re-project on every pass. Only a moment still ahead can schedule anything,
+  // and the re-projection that follows a real expiry drops the row's expiry to 0.
+  const now = Date.now();
+  for (const cell of Array.isArray(cells) ? cells : []) {
+    if (cell?.metric !== 'sessions') continue;
+    const expiresAt = Number(cell.runningExpiresAt) || 0;
+    if (expiresAt > now && (!soonest || expiresAt < soonest)) soonest = expiresAt;
+  }
+  return soonest;
+}
+
+function scheduleSessionExpiry() {
+  if (edgeDockSessionExpiryTimer) clearTimeout(edgeDockSessionExpiryTimer);
+  edgeDockSessionExpiryTimer = null;
+  if (!edgeDockController?.isRunning() && !notchController?.isRunning()) return;
+  const cells = [...(edgeDockController?.isRunning() ? edgeDockLastCells : []),
+    ...(notchController?.isRunning() ? notchLastCells : [])];
+  const expiresAt = edgeDockNextSessionExpiry(cells);
+  if (!expiresAt) return;
+  const delay = Math.max(EDGE_DOCK_EXPIRY_FLOOR_MS, expiresAt - Date.now() + 50);
+  edgeDockSessionExpiryTimer = setTimeout(() => {
+    edgeDockSessionExpiryTimer = null;
+    repaintDockSurfaces();
+  }, delay);
+}
+
+function ensureEdgeDockController() {
+  if (edgeDockController) return edgeDockController;
+  edgeDockController = createEdgeDockController({
+    windowsBackdrop: process.platform === 'win32'
+      ? createWindowsDockBackdrop({ app, screen, logger: (message) => console.log(message) }) : null,
+    BrowserWindow,
+    ipcMain,
+    powerMonitor,
+    screen,
+    platform: process.platform,
+    rendererDir: path.join(__dirname, 'renderer'),
+    preloadPath: path.join(__dirname, 'edgeDock', 'preload.js'),
+    getSettings: () => settings,
+    nativeGlass: () => nativeBlurEnabled(),
+    // The dock follows the widget's glass style unless it has its own; the
+    // controller decides whether there is material at all. Reduce Transparency
+    // still hands the surface back to the HUD material.
+    liquidGlass: () => {
+      const source = dockAppearanceSettings();
+      const options = nativeMaterialOptions(source);
+      const wanted = process.platform === 'darwin'
+        && isLiquidGlassBackdrop(edgeDockBackdropMode(source))
+        && !options.reducedTransparency && Number.parseInt(os.release(), 10) >= 25;
+      const mode = edgeDockBackdropMode(source);
+      return wanted ? { dark: options.dark, style: liquidGlassStyle(mode), tintOpacity: liquidGlassTint(source, mode) } : null;
+    },
+    createGlass: (win) => createMacLiquidGlass(win, { shaped: true }),
+    // The renderer reads this preference through a media query, which works on both
+    // platforms, but the dock's window fade is this process's own animation and can only
+    // see it through Electron. Windows reports the same OS-level setting here as macOS, so
+    // the gate is where the dock runs rather than where the API was first wired up.
+    prefersReducedMotion: () => motionPreferenceApi.shouldReduceMotion(
+      settings?.reduceMotion,
+      edgeDockSupported(process.platform) && systemPreferences?.getAnimationSettings?.().prefersReducedMotion === true
+    ),
+    applyShapeMask: (win, commands, width, height, currentDisplay) => {
+      const scale = currentDisplay?.scaleFactor || screen.getDisplayMatching?.(win.getBounds())?.scaleFactor || 2;
+      return maskCardMaterial(win, commands, width, height, scale);
+    },
+    primaryButtonDown: () => primaryButtonDown(process.platform),
+    onWebSurfaceChanged: () => { pluginRuntime?.refreshSurfaces(); syncPluginQuotaSurfaceDemand(); },
+    installNonActivatingInput: (win) => process.platform === 'darwin' ? preventAppActivation(win)
+      : installWindowsNonActivatingInput(win, { logger: (message) => console.log(message) }),
+    performHaptic: (pattern, performanceTime) => performMacHaptic({ pattern, performanceTime }),
+    isFullScreen: createFullScreenProbe({ platform: process.platform, screen, logger: (message) => console.log(message) }),
+    // The dock card's Switch button runs the same swap the Limits view does,
+    // then repaints from the refreshed records.
+    onSwitchCodexAccount: (accountId) => switchCodexAccountFromEdgeDock(accountId),
+    canRefreshLimits: () => canRefreshEdgeDockStats(),
+    onRefreshLimits: () => refreshStatsFromEdgeDock(),
+    onRefreshLimitAccount: (providerId, account) => refreshLimitProvider(providerId, account),
+    limitProbes: () => limitProbes,
+    onOpenResetForecastSource: () => {
+      if (isAllowedExternalUrl(CODEX_RESET_FORECAST_SOURCE_URL)) void shell.openExternal(CODEX_RESET_FORECAST_SOURCE_URL);
+    },
+    // The same setting the widget's rate readout toggles, so both stay in step.
+    onToggleRateMode: toggleDockRateMode,
+    onPlacementChange: ({ side, offset, displayId, floatingX }) => {
+      settings.edgeDockSide = normalizeEdgeDockSide(side);
+      settings.edgeDockFloatingX = normalizeEdgeDockFloatingX(floatingX);
+      settings.edgeDockOffset = normalizeEdgeDockOffset(offset);
+      settings.edgeDockDisplayId = normalizeEdgeDockDisplayId(displayId);
+      saveSettings();
+      pushSettingsToRenderer();
+    },
+    logger: (message) => console.log(message)
+  });
+  return edgeDockController;
+}
+
+function syncDockSurfaces(rendererSettings) {
+  dockAppearancePreview = null;
+  if (!settings) return;
+  syncNotch(rendererSettings);
+  if (!canUseEdgeDock(settings)) {
+    edgeDockController?.stop();
+    // The same sample feeds top-only rate and sessions items.
+    if (!notchController?.isRunning()) {
+      if (edgeDockRateTimer) clearTimeout(edgeDockRateTimer);
+      edgeDockRateTimer = null;
+      edgeDockRateTracker = null;
+      edgeDockRateContext = '';
+      edgeDockRateHistory.reset();
+    }
+    syncPluginQuotaSurfaceDemand();
+    return;
+  }
+  const controller = ensureEdgeDockController();
+  controller.setAppearance(edgeDockAppearance(rendererSettings));
+  // Provider selection and order are settings too, so re-project on every sync
+  // rather than waiting for the next stats push to reorder the rail.
+  // Through the same path as a stats push, so the session-expiry timer is armed
+  // from these cells too: a settings change replaces what is on screen just as a
+  // push does, and skipping the reschedule here left the rail on a stale reading.
+  const stats = edgeDockStats();
+  if (stats) pushEdgeDockCells(edgeDockCellsFor(electronPresentationStats(stats)));
+  controller.sync();
+  // Now that the controller is running (sync() starts it when enabled), arm the
+  // timer against the cells that were just handed over.
+  scheduleSessionExpiry();
+  syncPluginQuotaSurfaceDemand();
+}
+
+function refreshLimitStatsPresentation() {
+  if (!latestStats) return;
+  const visibleStats = electronPresentationStats(latestStats);
+  migrateCodexAdditionalLimits(visibleStats);
+  scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
+  repaintDockSurfaces();
+  updateTrayDisplay();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    try {
+      mainWindow.webContents.send('stats:push', {
+        event: 'stats',
+        data: { type: 'stats', reason: 'presentation', mode, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
+      });
+    } catch (_) {}
+  }
+}
+
+function sendMimoAccountsPush() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('mimo:accounts', mimoAccountsForRenderer()); } catch (_) {}
+}
+
+function sendAntigravityAccountsPush() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try { mainWindow.webContents.send('antigravity:accounts', antigravityAccountsForRenderer()); } catch (_) {}
+}
+
+function unregisterWindowToggleShortcut() {
+  if (registeredWindowToggleShortcut) {
+    try { globalShortcut.unregister(registeredWindowToggleShortcut); } catch (_) {}
+  }
+  registeredWindowToggleShortcut = '';
+  windowToggleShortcutRegistered = false;
+}
+
+function handleWindowToggleShortcut() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const action = windowToggleShortcutAction({
+    trayMode: Boolean(settings?.trayMode),
+    floatingBubbleCollapsed: Boolean(floatingBubbleState.collapsed),
+    visible: mainWindow.isVisible(),
+    minimized: typeof mainWindow.isMinimized === 'function' ? mainWindow.isMinimized() : false
+  });
+  if (action === 'togglePopover') togglePopover();
+  else if (action === 'expandFloatingBubble') expandFloatingBubble();
+  else if (action === 'hideWindow') pluginWindowActions.hide(mainWindow);
+  else focusExistingWindow();
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) sendMainWindowEvent('window:summoned');
+}
+
+function handleTrayToggle(_tray, clickPoint = null, wasVisibleAtMouseDown = null, blurMatchedAtMouseDown = false, pointerActivation = false) {
+  const action = trayToggleAction(settings);
+  if (action === 'togglePopover') togglePopover(clickPoint, wasVisibleAtMouseDown, blurMatchedAtMouseDown);
+  else if (action === 'focusWindow') focusExistingWindow();
+  // Explicit summons share one focus policy. OS app switching and accessibility
+  // activation preserve their existing focus without requesting a reset.
+  if (pointerActivation && mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) sendMainWindowEvent('window:summoned');
+}
+
+function trayMenuLocale() {
+  const preferredLanguages = typeof app.getPreferredSystemLanguages === 'function'
+    ? app.getPreferredSystemLanguages()
+    : [app.getLocale()];
+  return resolveLocale(settings?.language || 'auto', preferredLanguages);
+}
+
+// `isStillCurrent`, when given, is re-checked after the wait: see
+// deferredWindowSend.js.
+function sendMainWindowEvent(channel, payload, isStillCurrent) {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  sendWhenRendererReady(mainWindow.webContents, channel, payload, isStillCurrent);
+}
+
+async function refreshFromTray() {
+  if (trayRefreshInFlight) return;
+  const widgetProducerOwner = captureMacWidgetProducerOwner();
+  return runTrayMenuAction({
+    setInFlight: (value) => { trayRefreshInFlight = value; },
+    refreshContextMenu: refreshTrayContextMenu,
+    action: async () => {
+      try {
+        void pluginRuntime?.refreshLimits().catch(error => console.log(`[plugins] Limits refresh failed: ${error.message}`));
+        const stats = await fetchStats({ force: true, forceUsage: true });
+        // Collector ticks normally publish their own final snapshot. Only bridge the
+        // result when fetchStats returned a different object (for example, a remote hub
+        // fetch while an external headless agent owns collection).
+        if (stats && stats !== latestStats) {
+          sendPush({ event: 'stats', data: { stats, mode, reason: 'manual' } }, { widgetProducerOwner });
+        }
+      } catch (error) {
+        console.warn(`[tray] refresh failed: ${error.message}`);
+        showTrayRefreshError(error?.message || error);
+      }
+    }
+  });
+}
+
+function setTrayContentFromMenu(value) {
+  const next = normalizeTrayContent(value, settings?.trayContent || 'tokens');
+  if (next === settings?.trayContent) return;
+  settings.trayContent = next;
+  saveSettings();
+  updateTrayDisplay();
+  pushSettingsToRenderer();
+}
+
+function setEdgeDockFromMenu(patch = {}) {
+  if (patch.edgeDockEnabled !== undefined) settings.edgeDockEnabled = parseBoolean(patch.edgeDockEnabled, false);
+  if (patch.edgeDockMode !== undefined) settings.edgeDockMode = normalizeEdgeDockMode(patch.edgeDockMode);
+  if (patch.edgeDockSide !== undefined) {
+    settings.edgeDockSide = normalizeEdgeDockSide(patch.edgeDockSide);
+    settings.edgeDockFloatingX = null;
+  }
+  saveSettings();
+  // Also re-syncs the dock itself (pushSettingsToRenderer → syncEdgeDock).
+  pushSettingsToRenderer();
+}
+
+function setNotchFromMenu(patch = {}) {
+  const normalizers = {
+    notchEnabled: value => parseBoolean(value, false),
+    notchHoverAction: normalizeNotchHoverAction,
+    notchSummaryEnabled: value => parseBoolean(value, true),
+    notchHideSummaryInFullScreen: value => parseBoolean(value, true),
+  };
+  for (const [key, normalize] of Object.entries(normalizers)) {
+    if (patch[key] !== undefined) settings[key] = normalize(patch[key]);
+  }
+  saveSettings();
+  pushSettingsToRenderer();
+}
+
+function setWindowPresentationFromMenu(value) {
+  if (value === 'tray') {
+    if (settings.trayMode) return;
+    settings.trayMode = true;
+    saveSettings();
+    syncFloatingBubbleAvailability();
+    enterTrayMode();
+    pushSettingsToRenderer();
+    return;
+  }
+
+  const previousTrayMode = settings.trayMode;
+  settings = normalizeWindowBehaviorSettings(settings, {
+    trayMode: false,
+    windowBehavior: value
+  });
+  saveSettings();
+  if (previousTrayMode) exitTrayMode();
+  else {
+    applyWindowSettings();
+    focusExistingWindow();
+  }
+  pushSettingsToRenderer();
+}
+
+function openSettingsFromTray(section) {
+  focusExistingWindow();
+  sendMainWindowEvent('settings:open', section === 'notch' ? 'notch' : undefined);
+}
+
+function openViewFromTray(viewId) {
+  const normalized = String(viewId || '').trim().toLowerCase();
+  if (!TRAY_OPEN_VIEW_IDS.has(normalized)) return;
+  focusExistingWindow();
+  sendMainWindowEvent('view:open', normalized);
+}
+
+function enabledTrayCodexAccounts() {
+  return sortCodexAccountsForDisplay(
+    codexAccountsForRenderer().filter((account) => account.enabled !== false)
+  );
+}
+
+function syncCodexPresentationActiveAccount() {
+  const accounts = enabledTrayCodexAccounts();
+  const localDeviceId = settings?.deviceId || '';
+  const liveProvider = localLiveCodexProvider(latestStats, localDeviceId);
+  const selection = reconcileCodexAccountSelection({
+    detectedAccountId: codexAccountIdForProvider(accounts, liveProvider),
+    detectedAt: liveProvider?.updatedAt,
+    pendingAccountId: codexPresentationPendingAccountId,
+    pendingSince: codexPresentationPendingSince
+  });
+  codexPresentationActiveAccountId = selection.activeAccountId;
+  codexPresentationPendingAccountId = selection.pendingAccountId;
+  if (!codexPresentationPendingAccountId) codexPresentationPendingSince = 0;
+}
+
+function trayCodexMenuState() {
+  syncCodexPresentationActiveAccount();
+  const accounts = enabledTrayCodexAccounts();
+  return {
+    accounts,
+    activeAccountId: codexPresentationPendingAccountId || codexPresentationActiveAccountId,
+    switching: trayCodexSwitchInFlight
+  };
+}
+
+function showTrayCodexSwitchError(error) {
+  const locale = trayMenuLocale();
+  const title = translate(locale, 'trayMenu.codexSwitchFailedTitle');
+  const body = translate(locale, 'trayMenu.codexSwitchFailedBody', { error: String(error || '') });
+  if (Notification.isSupported()) {
+    new Notification({ title, body }).show();
+  } else {
+    dialog.showErrorBox(title, body);
+  }
+}
+
+function showTrayRefreshError(error) {
+  const locale = trayMenuLocale();
+  const title = translate(locale, 'trayMenu.refreshFailedTitle');
+  const body = translate(locale, 'trayMenu.refreshFailedBody', { error: String(error || '') });
+  if (Notification.isSupported()) {
+    new Notification({ title, body }).show();
+  } else {
+    dialog.showErrorBox(title, body);
+  }
+}
+
+async function switchCodexAccountFromTray(accountId) {
+  if (trayCodexSwitchInFlight || !accountId) return;
+  const currentId = codexPresentationPendingAccountId || codexPresentationActiveAccountId;
+  if (accountId === currentId) return;
+  return runTrayMenuAction({
+    setInFlight: (value) => { trayCodexSwitchInFlight = value; },
+    refreshContextMenu: refreshTrayContextMenu,
+    action: async () => {
+      try {
+        const result = await switchCodexSystemAccount(accountId);
+        if (!result?.ok) {
+          showTrayCodexSwitchError(result?.error);
+          return;
+        }
+      } catch (error) {
+        showTrayCodexSwitchError(error?.message || error);
+      }
+    }
+  });
+}
+
+function configureWindowToggleShortcut() {
+  unregisterWindowToggleShortcut();
+  const shortcut = normalizeWindowToggleShortcut(settings?.windowToggleShortcut);
+  settings.windowToggleShortcut = shortcut;
+  if (!shortcut || !app.isReady()) return false;
+  try {
+    windowToggleShortcutRegistered = globalShortcut.register(shortcut, handleWindowToggleShortcut);
+    if (windowToggleShortcutRegistered) {
+      registeredWindowToggleShortcut = shortcut;
+      return true;
+    }
+  } catch (error) {
+    console.log(`[shortcut] failed to register ${shortcut}: ${error.message}`);
+    return false;
+  }
+  console.log(`[shortcut] failed to register ${shortcut}`);
+  return false;
+}
+
+function ensureTray() {
+  if (!shouldCreateTray(settings)) return false;
+  if (tray && !tray.isDestroyed()) return;
+  tray = createTray({
+    onPluginMenu: (id, action) => { void pluginRuntime?.trayAction(id, action).catch(error => console.warn(`[plugins] Tray action: ${error.message}`)); },
+    onRestartPluginsSafe: () => {
+      app.relaunch({ args: [...process.argv.slice(1).filter(arg => arg !== '--plugins-safe-mode'), '--plugins-safe-mode'] });
+      requestAppQuit();
+    },
+    getMenuState: () => {
+      const codex = trayCodexMenuState();
+      return {
+        appVersion: appVersion(),
+        pluginMenu: pluginRuntime?.trayMenu() || [],
+        locale: trayMenuLocale(),
+        refreshing: trayRefreshInFlight,
+        trayContent: settings?.trayContent || 'tokens',
+        trayMode: Boolean(settings?.trayMode),
+        windowBehavior: settings?.windowBehavior || 'floating',
+        codexAccounts: codex.accounts,
+        activeCodexAccountId: codex.activeAccountId,
+        codexSwitching: codex.switching,
+        maskAccountEmails: Boolean(settings?.maskLimitAccountEmails),
+        edgeDockSupported: edgeDockSupported(process.platform),
+        notchSupported: process.platform === 'darwin',
+        notchEnabled: settings?.notchEnabled === true,
+        notchHoverAction: settings?.notchHoverAction,
+        notchSummaryEnabled: settings?.notchSummaryEnabled,
+        notchHideSummaryInFullScreen: settings?.notchHideSummaryInFullScreen,
+        edgeDockEnabled: settings?.edgeDockEnabled === true,
+        edgeDockMode: settings?.edgeDockMode,
+        edgeDockSide: settings?.edgeDockSide,
+        viewEnabled: {
+          home: true,
+          project: settings?.projectsEnabled !== false,
+          session: true,
+          limits: settings?.limitsEnabled !== false && migrateLimitProviders(settings?.limitProviders).length > 0,
+          trends: settings?.historyEnabled !== false,
+          status: true
+        }
+      };
+    },
+    onToggle: handleTrayToggle,
+    getWindowVisible: () => Boolean(mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()),
+    onMouseDown: (pressPoint) => {
+      const matched = popoverBlurMatchesPress({ recentBlur: recentPopoverBlur, pressPoint, now: performance.now() });
+      recentPopoverBlur = null;
+      return matched;
+    },
+    onCancelMouseDown: () => { recentPopoverBlur = null; },
+    onOpenView: openViewFromTray,
+    onRefresh: () => { void refreshFromTray(); },
+    onSetTrayContent: setTrayContentFromMenu,
+    onSetWindowPresentation: setWindowPresentationFromMenu,
+    onSetEdgeDock: setEdgeDockFromMenu,
+    onSetNotch: setNotchFromMenu,
+    onSwitchCodexAccount: (accountId) => { void switchCodexAccountFromTray(accountId); },
+    onOpenSettings: openSettingsFromTray,
+    onQuit: requestAppQuit,
+    translateMenu: (key, params) => translate(trayMenuLocale(), key, params)
+  });
+  updateTrayDisplay();
+  return true;
+}
+
+function destroyTray() {
+  if (tray && !tray.isDestroyed()) tray.destroy();
+  tray = null;
+}
+
+function enterTrayMode() {
+  applyMacActivationPolicy();
+  ensureTray();
+  updateTrayDisplay();
+  applyWindowSettings();
+  applyMacActivationPolicy();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(true);
+    // settings.trayMode is already true here, so this unmaximize is ignored by
+    // the native handler and settings.windowMaximized keeps describing the
+    // window exitTrayMode() will hand back.
+    suspendWindowMaximized(mainWindow);
+    setWindowMaximizable(mainWindow, false);
+    applyMacSpaceBehavior(true);
+    pluginWindowActions.hide(mainWindow);
+  }
+}
+
+function exitTrayMode() {
+  applyMacActivationPolicy({ mainWindowVisible: true });
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    // Not an unconditional false: leaving tray-only mode with hideAppIcon still
+    // on keeps the widget off the taskbar. applyWindowSettings() below would
+    // correct it either way, but only after a visible flash of the entry.
+    if (typeof mainWindow.setSkipTaskbar === 'function') mainWindow.setSkipTaskbar(skipTaskbarForSettings(settings));
+    setWindowMaximizable(mainWindow, true);
+    applyMacSpaceBehavior(false);
+    const restore = restoredBounds() || DEFAULT_WINDOW;
+    mainWindow.setBounds({
+      width: restore.width,
+      height: restore.height,
+      ...(typeof restore.x === 'number' ? { x: restore.x, y: restore.y } : {})
+    });
+    applyWindowSettings();
+    mainWindow.show();
+    restoreWindowMaximized(mainWindow, settings);
+  }
+  if (!shouldCreateTray(settings)) destroyTray();
+  else ensureTray();
+}
+
+function startMode() {
+  getSyncContentRuntime().invalidate();
+  hubModeGeneration += 1;
+  advanceMacWidgetProducerAndSourceEpoch();
+  clearLatestHubStatsCache();
+  edgeDockManualStats = null;
+  const icloudStop = stopIcloudRuntime();
+  // Tear down collectors synchronously so they can't double-run while the
+  // async reconciliation below is queued. iCloud's filesystem teardown is
+  // awaited by the mode lane before any replacement runtime is created.
+  stopLocalCollector();
+  stopStatsStream();
+  stopHostStats();
+  stopSyncCollector();
+  syncStatsPublication.cancel();
+  // Serialize the hub-side work so rapid UI events (mode change immediately
+  // followed by a port edit or secret regenerate) reconcile in order rather
+  // than racing — otherwise an in-flight start could finish with the old
+  // port/secret after the UI already advertises the new ones.
+  modeQueue = modeQueue.then(async () => {
+    await icloudStop;
+    // A prior queued mode may have created an iCloud runtime after this call's
+    // initial stop. Drain that runtime as well before applying the latest mode.
+    await stopIcloudRuntime();
+    if (settings.hubMode === 'host') {
+      await stopEmbeddedHub();
+      const handle = await startEmbeddedHub();
+      if (settings.hubMode !== 'host') {
+        await stopEmbeddedHub();
+        return;
+      }
+      if (!handle) {
+        // Hub startup or secret persistence failed. The error is already
+        // surfaced via hub:push; keep local collection available while the
+        // user resolves the startup failure.
+        startLocalCollector();
+        return;
+      }
+      startHostStats();
+      startHostCollector();
+      void getSyncContentRuntime().refresh();
+      void getAccountPresentationSync().refresh();
+      reconcileSharedSubscriptions();
+      return;
+    }
+    await stopEmbeddedHub();
+    if (settings.hubMode === 'icloud') {
+      await startIcloudCollector();
+      if (settings.hubMode === 'icloud') void reconcileSharedSubscriptions();
+      return;
+    }
+    if (effectiveHubConfig().url) {
+      startStatsStream({ resetSnapshot: true });
+      startSyncCollector();
+      void getSyncContentRuntime().refresh();
+      void getAccountPresentationSync().refresh();
+      reconcileSharedSubscriptions();
+    } else {
+      startLocalCollector();
+      reconcileSharedSubscriptions();
+    }
+  }).catch((err) => {
+    console.log(`[mode] reconciliation failed: ${err?.message || err}`);
+  });
+}
+
+// Reconciled on every mode change, because switching into a hub adopts a
+// different list and switching out of one falls back to the local cache — the
+// renderer is showing whichever list the previous mode had.
+//
+// Started by the mode queue but not awaited by it. Subscriptions have a lane of
+// their own, per hub, so nothing here needs the queue to order it — while holding
+// the queue open for a hub request means the next hub the user picks waits out
+// this one's 15s deadline before its stream and collector start, with no data on
+// screen in the meantime. Its failures stay here for the same reason: nothing
+// downstream is waiting to hear about them.
+async function reconcileSharedSubscriptions() {
+  try {
+    await refreshSharedSubscriptions({ seedFromLocal: true });
+    // Unconditional, unlike the stamp comparison: a mode change swaps which list
+    // is showing, and the renderer is holding the previous mode's one.
+    pushSettingsToRenderer();
+  } catch (error) {
+    console.log(`[sync] subscription reconcile failed: ${error?.message || error}`);
+  }
+}
+
+function restartDeviceRuntimeForMode() {
+  if (mode === 'local') {
+    startLocalCollector();
+    return;
+  }
+  if (settings.hubMode === 'host' && embeddedHub) {
+    startHostCollector();
+    return;
+  }
+  if (settings.hubMode === 'icloud') {
+    return startIcloudCollector().catch((error) => {
+      console.log(`[icloud] collector restart failed: ${error?.message || error}`);
+      recordDiagnosticEvent({ subsystem: 'icloud', code: 'icloud-start-failed' });
+    });
+  }
+  if (effectiveHubConfig().url) startSyncCollector();
+  else startLocalCollector();
+}
+
+function usageCollectorNameForMode() {
+  return mode === 'local'
+    ? 'collector'
+    : (settings.hubMode === 'host' && embeddedHub
+      ? 'host-collector'
+      : settings.hubMode === 'icloud' ? 'icloud-collector' : 'sync-collector');
+}
+
+function usageConfigForMode() {
+  return electronUsageConfig(usageCollectorNameForMode());
+}
+
+function applyUsageRuntimeForMode() {
+  if (!deviceRuntimeHandle?.reconfigureUsage) {
+    restartDeviceRuntimeForMode();
+    return Boolean(deviceRuntimeHandle);
+  }
+  return deviceRuntimeHandle.reconfigureUsage(usageConfigForMode()) === true;
+}
+
+function reconfigureUsageRuntimeForMode() {
+  return usageRuntimeReconciler.schedule(usageConfigFingerprint(usageConfigForMode()));
+}
+
+// Quit-path teardown. Every step here must be synchronous, because performQuit
+// exits on the next line and anything awaited in between is a chance to never
+// get there. `skipCloseWatchers` is what buys that: chokidar's close() returns a
+// promise, but not before an O(N) synchronous pass over every watched entry, and
+// on a tree the size of ~/.claude/projects that pass alone blocks the main
+// thread long enough to look like a hang. The descriptors go with the process.
+// Mode switches deliberately do NOT come through here: they keep the default
+// stopLocalCollector() / stopSyncCollector() behaviour so the old watcher is
+// really gone before a new one starts on the same paths.
+function stopAll() {
+  disposePluginRuntime();
+  stopPersistBoundsTimer();
+  stopLocalCollector({ skipCloseWatchers: true });
+  stopStatsStream();
+  stopHostStats();
+  stopSyncCollector({ skipCloseWatchers: true });
+  stopIcloudRuntime();
+  // A collector on the usage worker stops by message, which nothing guarantees
+  // the worker handles before the exit below; its tokscale subprocesses would
+  // outlive us.
+  terminateUsageHostSubprocesses();
+  syncStatsPublication.cancel();
+  macWidgetSnapshotController?.stop();
+  if (macWidgetDemand) {
+    macWidgetDemand.stop();
+    macWidgetDemand = null;
+  }
+  // Fire-and-forget on purpose. server.close() does not complete until every
+  // in-flight request does, so awaiting it hands a remote device on the embedded
+  // hub the power to hold our own exit open. The listening socket closes with
+  // the process, and a graceful hub close buys nothing on the way out.
+  void stopEmbeddedHub();
+  stopDiscordRpc();
+  try { sessionUsageArchiveStore.close(); } catch (error) {
+    console.log(`[session-archive] close failed: ${error?.message || error}`);
+  }
+  limitsHistoryController?.dispose();
+  limitsHistoryStore?.closeSync();
+  if (tray && !tray.isDestroyed()) tray.destroy();
+  tray = null;
+}
+
+// Plugin teardown must never skip the host's own collector and stream shutdown.
+function disposePluginRuntime() {
+  try {
+    const pending = pluginRuntime?.dispose();
+    pending?.catch(error => console.warn(`[plugins] dispose failed: ${error.message}`));
+  } catch (error) { console.warn(`[plugins] dispose failed: ${error.message}`); }
+}
+
+let quitRequested = false;
+let quitInProgress = false;
+// Owned by the update-install guard below and by nothing else: electron-updater
+// restarts the process itself, so the exit has to stand down or the install
+// never runs.
+let skipForcedQuit = false;
+
+// An install request stands the forced exit down, and quitAndInstall() never
+// reports back whether the installer actually took over. The guard owns that
+// unconfirmed window; these two flags are all it touches here. See
+// updateInstallQuit.js for why the claim expires and what promotes it.
+// Set once the hand-off listener is actually attached; see the guard's watchdog.
+let updateHandoffObserved = false;
+
+const updateInstallQuit = createUpdateInstallQuitGuard({
+  ...updateInstallQuitPolicy(),
+  watchdogEnabled: () => updateHandoffObserved,
+  claim: () => { quitRequested = true; skipForcedQuit = true; },
+  release: () => { quitRequested = false; skipForcedQuit = false; },
+  onStalled: () => {
+    // The bound is far enough out that reaching it means the install genuinely
+    // stalled, which is exactly what the user is looking at: they pressed Install
+    // and the app neither restarted nor complained. What to do about it depends on
+    // whether the attempt survived: where the guard handed it back the update is
+    // still one press away, and only where it did not is a restart the way out.
+    setNativeAppUpdateState({
+      phase: 'error',
+      progress: null,
+      error: 'Update installer did not start',
+      errorKind: installFailureErrorKind({ spent: updateInstallQuit.isSpent(), stalled: true })
+    });
+  },
+  onHandoff: (afterStalledReport) => {
+    // The bound is a decision to stop waiting, not proof the installer is dead, so
+    // a hand-off that turns up later withdraws the report rather than leaving the
+    // app advising a restart it is about to perform itself.
+    if (!afterStalledReport) return;
+    setNativeAppUpdateState({ phase: 'downloaded', progress: 100, error: null });
+  }
+});
+
+// The single quit path. Teardown above is what used to hang, so it runs
+// synchronously and cheaply, and then app.exit() ends the process without
+// another trip through Electron's shutdown events.
+function performQuit() {
+  if (quitInProgress) return;
+  quitInProgress = true;
+  try {
+    stopAll();
+  } catch (error) {
+    console.log(`[quit] stopAll failed: ${error?.message || error}`);
+  }
+  app.exit(0);
+}
+
+function requestAppQuit() {
+  if (quitRequested) return;
+  quitRequested = true;
+  performQuit();
+}
+
+// Write the export file set (JSON + CSVs) into `dir`, atomically (temp + rename)
+// so a synced vault / iCloud never reads a half-written file. Pulls history
+// itself; callers pass only `periods` (privacy: devices/limits never enter).
+async function writeExportTo(dir, periods, options = {}) {
+  if (!dir) return { ok: false, reason: 'no-dir' };
+  // Export remains lossless: local display aliases never rewrite exported IDs.
+  const history = await getCompleteHistory().catch(() => null);
+  // History unavailable (e.g. a transient hub fetch failure) is NOT the same as
+  // "no history": writing a snapshot-only set would emit empty time-series JSON
+  // AND the orphan cleanup below would delete an existing daily.csv. Never write a
+  // destructive partial — skip and report, so auto-export retries next tick and
+  // manual export can surface the failure instead of silently losing data.
+  if (!history) return { ok: false, reason: 'history-unavailable' };
+  // Auto-export skips rewriting a synced folder when the data is unchanged
+  // (keyed by dir so pointing at a fresh folder always writes). Manual export
+  // never skips. Signature compares inputs, not files, to ignore the volatile
+  // generatedAt in the JSON.
+  let signature = null;
+  if (options.skipUnchanged) {
+    signature = exportSignature(periods || {}, history);
+    if (dir === lastAutoExport.dir && signature === lastAutoExport.signature) return { ok: true, skipped: true };
+  }
+  const files = exportFileSet({
+    periods: periods || {},
+    history,
+    meta: { generatedAt: new Date().toISOString(), app: { name: 'token-monitor', version: appVersion() } }
+  });
+  await fs.promises.mkdir(dir, { recursive: true });
+  // Per-call token so a concurrent auto + manual export to the same folder never
+  // share a temp filename (which would break one side's rename or write half an update).
+  const runToken = crypto.randomUUID();
+  const written = new Set();
+  for (const file of files) {
+    const dest = path.join(dir, file.name);
+    const tmp = `${dest}.tmp-${process.pid}-${runToken}`;
+    await fs.promises.writeFile(tmp, file.contents);
+    await fs.promises.rename(tmp, dest);
+    written.add(file.name);
+  }
+  // Remove orphaned generated files (e.g. a stale daily.csv once history empties)
+  // so consumers never read outdated data.
+  for (const name of EXPORT_FILENAMES) {
+    if (!written.has(name)) await fs.promises.rm(path.join(dir, name), { force: true });
+  }
+  // Record the signature only after a fully successful write, so a failed write
+  // retries next tick instead of being skipped forever.
+  if (options.skipUnchanged) lastAutoExport = { dir, signature };
+  return { ok: true };
+}
+
+let manualStatsRefreshInFlight = null;
+
+function refreshManualStats() {
+  const runtime = deviceRuntimeHandle;
+  const generation = hubModeGeneration;
+  if (manualStatsRefreshInFlight?.runtime === runtime && manualStatsRefreshInFlight.generation === generation) {
+    return manualStatsRefreshInFlight.promise;
+  }
+  void pluginRuntime?.refreshLimits().catch(error => console.log(`[plugins] Limits refresh failed: ${error.message}`));
+  const revision = statsPushRevision;
+  const request = { runtime, generation, promise: null };
+  request.promise = fetchStats({ force: true, forceHistory: true, forceSelfSync: true }).then((stats) => {
+    // Both buttons update the dock once. A push received while this read was
+    // pending has already taken over, so a late read must not replace it.
+    if (runtime === deviceRuntimeHandle && generation === hubModeGeneration && revision === statsPushRevision) {
+      edgeDockManualStats = { stats, generation, runtime };
+      repaintDockSurfaces();
+    }
+    return stats;
+  }).finally(() => {
+    if (manualStatsRefreshInFlight === request) manualStatsRefreshInFlight = null;
+  });
+  manualStatsRefreshInFlight = request;
+  return request.promise;
+}
+
+async function fetchStats(options = {}) {
+  const requestGeneration = hubModeGeneration;
+  const requestHubIdentity = currentHubStatsIdentity(settings?.hubMode === 'icloud' ? 'icloud' : 'client');
+  const force = Boolean(options?.force);
+  // Generic `{ force: true }` calls from settings and account forms only need
+  // fresh limits. A full usage tick reads every tracked source and can take
+  // seconds, so only an explicit usage request may start it. The refresh button
+  // keeps its full usage/History rescan and self-sync so imported or corrected
+  // older usage updates Month/All Time as well as the History graph.
+  if (force && ownsUsageRuntime()) {
+    const refreshUsage = options?.forceUsage === true
+      || options?.forceHistory === true
+      || options?.forceSelfSync === true;
+    await runManualDeviceRefresh(deviceRuntimeHandle, {
+      refreshUsage,
+      forceHistory: Boolean(options?.forceHistory),
+      forceSelfSync: Boolean(options?.forceSelfSync),
+      onLimitsError: (error) => console.log(`[limits-runtime] manual refresh failed: ${error.message}`)
+    });
+  }
+  if (mode === 'local') {
+    if (localStats) return localStats;
+    return withHistoryPreview(aggregateDevices(localDevice ? [localDevice] : [], 0), localDevice ? [localDevice] : []);
+  }
+  if (settings.hubMode === 'host' && embeddedHub) {
+    return injectLocalDeviceStatus(embeddedHub.hub.getStats());
+  }
+  if (settings.hubMode === 'icloud') {
+    const stats = icloudRuntimeHandle?.getStats?.()
+      || currentHubStatsCache()
+      || withHistoryPreview(aggregateDevices([], 0), []);
+    return injectLocalDeviceStatus(stats);
+  }
+  const { url: hubUrl, secret } = effectiveHubConfig();
+  if (!hubUrl) return withHistoryPreview(aggregateDevices([], 0), []);
+  // A connected stream keeps this cache current. The renderer's periodic
+  // fallback only needs a full download once stream data has gone quiet. Other
+  // reads, such as deletion eligibility checks, always read the Hub.
+  if (options?.streamCache === true && streamConnected) {
+    const cached = currentHubStatsCache();
+    if (cached && Date.now() - Date.parse(latestHubStatsReceivedAt) < HUB_STREAM_CACHE_FRESH_MS) {
+      return injectLocalDeviceStatus(composeLocalSyncSummary(cached, lastCollectedDevice));
+    }
+  }
+  const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
+  const response = await fetch(url, { headers: secret ? { authorization: `Bearer ${secret}` } : {} });
+  if (!response.ok) throw new Error(`Hub ${response.status}: ${(await response.text()).slice(0, 200)}`);
+  const stats = await response.json();
+  if (!hubModeRequestIsCurrent(requestGeneration, 'client', requestHubIdentity)) {
+    // The response belongs to a mode that is no longer active. Wait for the
+    // queued mode reconciliation before re-reading: Client -> Host may still
+    // be binding the embedded hub, and an immediate retry would hit its
+    // loopback URL before it is listening.
+    await modeQueue;
+    return fetchStats({
+      ...options,
+      force: false,
+      forceHistory: false,
+      forceSelfSync: false
+    });
+  }
+  setLatestHubStatsCache(stats, 'client', requestGeneration, requestHubIdentity);
+  return injectLocalDeviceStatus(composeLocalSyncSummary(stats, lastCollectedDevice));
+}
+
+function managedPricingSidecarPath() {
+  return path.join(app.getPath('userData'), 'tokscale-managed-pricing.json');
+}
+
+function regenerateTokscalePricing() {
+  try {
+    applyCustomPricing(settings.customModelPricing || [], {
+      pricingPath: customPricingPath(),
+      sidecarPath: managedPricingSidecarPath()
+    });
+  } catch (error) {
+    console.warn(`[pricing] failed to write custom-pricing.json: ${error.message}`);
+  }
+}
+
+async function refreshAfterPricingChange() {
+  try {
+    if (ownsUsageRuntime()) {
+      await deviceRuntimeHandle.tick('manual', { forceHistory: true });
+    }
+  } catch (error) {
+    console.warn(`[pricing] refresh after pricing change failed: ${error.message}`);
+  }
+}
+
+let appUpdateCheckInFlight = false;
+let appUpdateCheckPromise = null;
+let appUpdateLastError = null;
+let appUpdateLastAttemptAt = null;
+let appUpdateBackgroundTimer = null;
+let appUpdateNativeBusy = false;
+let appUpdateNativeConfigured = false;
+let appUpdateNativeState = {
+  phase: 'idle',
+  version: null,
+  progress: null,
+  error: null,
+  errorKind: null
+};
+
+function rememberSuccessfulAppUpdateCheck(latest, checkedAt = new Date().toISOString(), { clearLatest = false } = {}) {
+  if (!latest && !clearLatest) return null;
+  const remembered = latest
+    ? mergeLatestReleaseMetadata(settings?.appUpdate?.lastKnownLatest, latest)
+    : null;
+  settings.appUpdate = {
+    ...(settings.appUpdate || {}),
+    lastCheckedAt: checkedAt,
+    lastKnownLatest: remembered
+  };
+  saveSettings();
+  appUpdateLastAttemptAt = checkedAt;
+  appUpdateLastError = null;
+  return remembered;
+}
+
+function setNativeAppUpdateState(patch = {}) {
+  const next = { ...appUpdateNativeState, ...patch };
+  // A kind belongs to the error it arrived with and must never outlive it, so any
+  // patch that touches `error` without naming one clears it. That keeps the
+  // ordinary updater failures generic without every call site restating it.
+  if ('error' in patch && !('errorKind' in patch)) next.errorKind = null;
+  appUpdateNativeState = next;
+  sendAppUpdatePush();
+}
+
+function configureNativeAppUpdater() {
+  if (appUpdateNativeConfigured) return;
+  appUpdateNativeConfigured = true;
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = false;
+  if (process.platform === 'win32' && appUpdateInstallSupport({
+    isPackaged: app.isPackaged, platform: process.platform, env: process.env
+  }).supported) {
+    // Keep NSIS updates in the running installation even if its registry records
+    // are missing. NsisUpdater forwards this through the installer's /D= option.
+    autoUpdater.installDirectory = path.dirname(process.execPath);
+  }
+  // Notes for every release between this version and the latest, not only the
+  // latest's, so the update card covers everything the user is about to receive.
+  autoUpdater.fullChangelog = true;
+  autoUpdater.logger = console;
+  autoUpdater.on('download-progress', (progress) => {
+    setNativeAppUpdateState({
+      phase: 'downloading',
+      progress: Number.isFinite(progress?.percent) ? Math.max(0, Math.min(100, progress.percent)) : null,
+      error: null
+    });
+  });
+  autoUpdater.on('update-downloaded', (info) => {
+    appUpdateNativeBusy = false;
+    const latest = latestFromUpdaterInfo(info);
+    setNativeAppUpdateState({ phase: 'downloaded', version: latest?.version || info?.version || appUpdateNativeState.version || null, progress: 100, error: null });
+  });
+  // The hand-off is emitted on Electron's own autoUpdater, not electron-updater's:
+  // BaseUpdater re-emits it there to mimic what Squirrel does natively. Losing it
+  // is not merely losing a confirmation, so the flag records a verified
+  // registration and nothing weaker: without the listener nothing could re-claim
+  // the flags after the grace period, and the guard would expire into a state a
+  // late hand-off could not recover from. It stops arming the watchdog instead.
+  try {
+    updateHandoffObserved = observeUpdateInstallHandoff(
+      require('electron').autoUpdater,
+      () => updateInstallQuit.noteHandoff()
+    );
+  } catch (error) {
+    updateHandoffObserved = false;
+    console.log(`[update] cannot observe the install hand-off: ${error?.message || error}`);
+  }
+  if (!updateHandoffObserved) console.log('[update] no install hand-off signal; quit recovery disabled');
+  autoUpdater.on('error', (error) => {
+    // Released before the busy guard below, deliberately: update-downloaded has
+    // already cleared appUpdateNativeBusy by the time an install can fail, so a
+    // rollback behind that guard would never run and the quit flags would stay
+    // stuck for the rest of the session.
+    const wasInstalling = updateInstallQuit.abort();
+    // Availability checks use the same provider but report through
+    // appUpdateLastError. Only a real download or install attempt owns installError.
+    if (!appUpdateNativeBusy && !wasInstalling) return;
+    appUpdateNativeBusy = false;
+    setNativeAppUpdateState({
+      phase: 'error',
+      progress: null,
+      error: error?.message || String(error || 'Update failed'),
+      // Where the attempt was single-use, a failed install also closed the in-app
+      // path: the controls below now offer the release page instead of a retry, and
+      // a generic "couldn't install" leaves that looking like the end of the road.
+      // A restart is what brings the retry back, so the message has to say so.
+      // `wasInstalling` is the part the helper cannot know: without it a check
+      // failure arriving after an earlier spent attempt borrows its explanation.
+      errorKind: wasInstalling
+        ? installFailureErrorKind({ spent: updateInstallQuit.isSpent() })
+        : null
+    });
+  });
+}
+
+async function checkAppUpdateProvider() {
+  if (!app.isPackaged) return checkLatestRelease(app.getVersion());
+  const checkedAt = new Date().toISOString();
+  configureNativeAppUpdater();
+  const result = await autoUpdater.checkForUpdates();
+  const availability = providerUpdateCheckAvailability(result, app.getVersion());
+  if (!availability.valid) {
+    return {
+      ok: false,
+      newer: false,
+      latest: null,
+      error: 'Update metadata missing or invalid',
+      errorKind: 'metadata',
+      checkedAt
+    };
+  }
+  return {
+    ok: true,
+    newer: availability.newer,
+    latest: availability.latest,
+    clearLatest: availability.clearLatest,
+    error: null,
+    errorKind: null,
+    checkedAt
+  };
+}
+
+function deriveAppUpdateState() {
+  const block = settings?.appUpdate || {};
+  const currentVersion = app.getVersion();
+  const latest = latestForCurrentVersion(block.lastKnownLatest || null, currentVersion);
+  const dismissedVersion = block.dismissedVersion || null;
+  const installSupport = appUpdateInstallSupport({ isPackaged: app.isPackaged, platform: process.platform, env: process.env });
+  const availability = deriveAppUpdateAvailability({
+    currentVersion,
+    latest,
+    dismissedVersion,
+    phase: appUpdateNativeState.phase,
+    downloadedVersion: appUpdateNativeState.version
+  });
+  return {
+    currentVersion,
+    latest,
+    releasesUrl: RELEASES_URL,
+    hasUpdate: availability.hasUpdate,
+    showUpdateNotice: availability.showUpdateNotice,
+    dismissedVersion,
+    lastCheckedAt: block.lastCheckedAt || null,
+    lastAttemptAt: appUpdateLastAttemptAt,
+    checking: appUpdateCheckInFlight,
+    lastError: appUpdateLastError?.message || null,
+    lastErrorKind: appUpdateLastError?.kind || null,
+    installSupported: installSupport.supported,
+    installSupportReason: installSupport.reason,
+    installPhase: appUpdateNativeState.phase,
+    installProgress: appUpdateNativeState.progress,
+    installVersion: appUpdateNativeState.version,
+    installError: appUpdateNativeState.error,
+    installErrorKind: appUpdateNativeState.errorKind || null,
+    downloaded: availability.downloaded,
+    // The hand-off window, straight from the state machine rather than inferred
+    // from a pair of booleans downstream: between the press and the installer
+    // taking over there is nothing else to tell the user.
+    installStarting: updateInstallQuit.isInstalling(),
+    // No further attempt is possible until a restart, so the action policy and the
+    // automatic downloader both have to stop offering one.
+    installRetryBlocked: updateInstallQuit.isSpent(),
+    // An install the guard is still trying to complete counts as busy: on macOS
+    // Squirrel can take tens of seconds, and leaving the control live for that long
+    // invites a second press the guard can only refuse.
+    installBusy: appUpdateNativeBusy
+      || updateInstallQuit.isInstalling()
+      || appUpdateNativeState.phase === 'checking'
+      || appUpdateNativeState.phase === 'downloading'
+  };
+}
+
+function restoreDismissedAppUpdate(version) {
+  const block = settings?.appUpdate || {};
+  if (!version || block.dismissedVersion !== version) return false;
+  settings.appUpdate = {
+    ...block,
+    dismissedVersion: null
+  };
+  saveSettings();
+  return true;
+}
+
+function sendAppUpdatePush() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  mainWindow.webContents.send('appUpdate:push', deriveAppUpdateState());
+}
+
+async function runAppUpdateCheck({ force = false, bypassCooldown = false } = {}) {
+  // An outstanding install owns the updater until the guard is idle again.
+  // electron-updater reports a failed check by emitting on the same global 'error'
+  // event an install failure arrives on -- checkForUpdates() emits there and
+  // rethrows -- and the handler below has nothing to tell them apart. Treating a
+  // check's failure as the install's would tear down the install, which is what the
+  // hourly check made an ordinary overlap on macOS, where an install is outstanding
+  // for as long as minutes.
+  //
+  // `isOutstanding` rather than `isInstalling`, so this covers a spent attempt too.
+  // Spent is not terminal: the bound is only where we stopped waiting, and a late
+  // hand-off still promotes it back to `handoff` and re-claims the flags. A check
+  // allowed to start in the meantime would then be in flight during a genuine
+  // hand-off, and its failure would release `skipForcedQuit` with the installer
+  // owning the exit -- the one outcome this whole path exists to prevent. Checking
+  // is worth less than that: after a spent attempt it can only find a version this
+  // process is already refusing to download.
+  if (updateInstallQuit.isOutstanding()) return deriveAppUpdateState();
+  if (appUpdateCheckPromise) {
+    if (force) sendAppUpdatePush();
+    const activeResult = await appUpdateCheckPromise;
+    if (force) {
+      appUpdateLastAttemptAt = activeResult?.checkedAt || new Date().toISOString();
+      appUpdateLastError = resolveAppUpdateCheckError(appUpdateLastError, activeResult, { force: true });
+      if (activeResult?.ok) {
+        if (activeResult.newer) restoreDismissedAppUpdate(activeResult.latest?.version);
+      }
+      sendAppUpdatePush();
+    }
+    return maybeDownloadAutomaticAppUpdate(deriveAppUpdateState());
+  }
+  const block = settings?.appUpdate || {};
+  if (!bypassCooldown && shouldSkipAppUpdateCheck({
+    force,
+    lastCheckedAt: block.lastCheckedAt,
+    latest: block.lastKnownLatest,
+    dismissedVersion: block.dismissedVersion,
+    currentVersion: app.getVersion()
+  })) {
+    return maybeDownloadAutomaticAppUpdate(deriveAppUpdateState());
+  }
+  const checkTask = (async () => {
+    appUpdateCheckInFlight = true;
+    appUpdateLastAttemptAt = new Date().toISOString();
+    if (force) sendAppUpdatePush();
+    let result;
+    try {
+      result = await checkAppUpdateProvider();
+      appUpdateLastAttemptAt = result.checkedAt || appUpdateLastAttemptAt;
+      if (result.ok) {
+        rememberSuccessfulAppUpdateCheck(result.latest, result.checkedAt, { clearLatest: result.clearLatest });
+        if (force && result.newer) restoreDismissedAppUpdate(result.latest?.version);
+      } else {
+        appUpdateLastError = resolveAppUpdateCheckError(appUpdateLastError, result, { force });
+        if (!force) console.warn('App update check failed:', result.error);
+      }
+    } catch (error) {
+      const classified = classifyAppUpdateError(error);
+      appUpdateLastError = resolveAppUpdateCheckError(appUpdateLastError, {
+        ok: false,
+        error: classified.message,
+        errorKind: classified.kind
+      }, { force });
+      if (!force) console.warn('App update check threw:', error);
+      return {
+        ok: false,
+        newer: false,
+        latest: null,
+        error: classified.message,
+        errorKind: classified.kind,
+        checkedAt: appUpdateLastAttemptAt
+      };
+    } finally {
+      appUpdateCheckInFlight = false;
+      sendAppUpdatePush();
+    }
+    return result;
+  })();
+  appUpdateCheckPromise = checkTask;
+  try {
+    await checkTask;
+  } finally {
+    if (appUpdateCheckPromise === checkTask) appUpdateCheckPromise = null;
+  }
+  return maybeDownloadAutomaticAppUpdate(deriveAppUpdateState());
+}
+
+async function maybeDownloadAutomaticAppUpdate(updateState) {
+  if (!shouldDownloadAutomaticAppUpdate({
+    automaticAppUpdates: settings?.automaticAppUpdates,
+    updateState
+  })) return updateState;
+  return downloadAndPrepareAppUpdate();
+}
+
+function maybeRunBackgroundUpdateCheck() {
+  runAppUpdateCheck({ force: false }).catch(() => {});
+}
+
+function scheduleStartupAppUpdateCheck() {
+  const timer = setTimeout(() => {
+    runAppUpdateCheck({ bypassCooldown: true }).catch(() => {});
+  }, APP_UPDATE_STARTUP_DELAY_MS);
+  timer.unref?.();
+}
+
+function startAppUpdateBackgroundChecks() {
+  if (appUpdateBackgroundTimer) return;
+  appUpdateBackgroundTimer = setInterval(maybeRunBackgroundUpdateCheck, 60 * 60 * 1000);
+  appUpdateBackgroundTimer.unref?.();
+  // A machine that slept overnight should not wait for the next hourly tick to
+  // notice a release. Both still go through the cooldown.
+  powerMonitor.on('resume', maybeRunBackgroundUpdateCheck);
+  powerMonitor.on('unlock-screen', maybeRunBackgroundUpdateCheck);
+}
+
+function dismissAppUpdateVersion(version) {
+  if (typeof version !== 'string' || !version) return deriveAppUpdateState();
+  settings.appUpdate = {
+    ...(settings.appUpdate || {}),
+    dismissedVersion: version
+  };
+  saveSettings();
+  sendAppUpdatePush();
+  return deriveAppUpdateState();
+}
+
+async function downloadAndPrepareAppUpdate() {
+  const support = appUpdateInstallSupport({ isPackaged: app.isPackaged, platform: process.platform, env: process.env });
+  if (!support.supported) {
+    setNativeAppUpdateState({ phase: 'error', error: support.reason || 'unsupported-platform', progress: null });
+    return deriveAppUpdateState();
+  }
+  // Same ownership rule as the check path, and one more: a spent attempt can never
+  // be installed by this process either, so re-entering the download lifecycle
+  // rebuilds MacUpdater's local proxy while the listener the first quitAndInstall()
+  // attached is still on the native updater. The renderer stops offering this and
+  // the automatic downloader stands down, but neither of those is the boundary --
+  // this is, and an IPC action queued before the attempt ended still arrives here.
+  //
+  // Every entry point uses the same rule, for the same reason (see
+  // runAppUpdateCheck): while the guard holds anything, nothing else drives the
+  // updater.
+  if (updateInstallQuit.isOutstanding()) return deriveAppUpdateState();
+  if (appUpdateCheckPromise) await appUpdateCheckPromise;
+  if (appUpdateNativeBusy) return deriveAppUpdateState();
+  const latest = settings?.appUpdate?.lastKnownLatest || null;
+  if (downloadedAppUpdateMatchesLatest({
+    phase: appUpdateNativeState.phase,
+    downloadedVersion: appUpdateNativeState.version,
+    latest
+  })) return deriveAppUpdateState();
+  configureNativeAppUpdater();
+  appUpdateNativeBusy = true;
+  setNativeAppUpdateState({ phase: 'checking', progress: null, error: null });
+  try {
+    const result = await autoUpdater.checkForUpdates();
+    const availability = providerUpdateCheckAvailability(result, app.getVersion());
+    if (!availability.valid) throw new Error('Update metadata missing or invalid');
+    const checkedAt = new Date().toISOString();
+    const latestFromCheck = rememberSuccessfulAppUpdateCheck(
+      availability.latest,
+      checkedAt,
+      { clearLatest: availability.clearLatest }
+    );
+    const version = latestFromCheck?.version || null;
+    if (!availability.newer || !version) {
+      appUpdateNativeBusy = false;
+      setNativeAppUpdateState({ phase: 'idle', version, progress: null, error: null });
+      return deriveAppUpdateState();
+    }
+    restoreDismissedAppUpdate(version);
+    setNativeAppUpdateState({ phase: 'downloading', version, progress: 0, error: null });
+    await autoUpdater.downloadUpdate();
+  } catch (error) {
+    appUpdateNativeBusy = false;
+    setNativeAppUpdateState({ phase: 'error', progress: null, error: error?.message || String(error) });
+  }
+  return deriveAppUpdateState();
+}
+
+async function installDownloadedAppUpdate() {
+  // The other half of the same rule. Refusing new operations during the install
+  // only holds the boundary if nothing was already running when it started, and a
+  // check begun a moment earlier would still be reporting on the shared event.
+  // Waiting rather than refusing, since this one is a button press: the checks
+  // below are read afterwards, when the update it is about to install is settled.
+  if (appUpdateCheckPromise) await appUpdateCheckPromise;
+  const latest = settings?.appUpdate?.lastKnownLatest || null;
+  if (!downloadedAppUpdateMatchesLatest({
+    phase: appUpdateNativeState.phase,
+    downloadedVersion: appUpdateNativeState.version,
+    latest
+  })) return deriveAppUpdateState();
+  // quitAndInstall goes through before-quit, and electron-updater owns the
+  // restart from there. Stand the forced exit down or the installer never runs.
+  // Refused while an earlier request is still outstanding, and permanently once an
+  // attempt is spent, so a second press can never stack install attempts.
+  if (!updateInstallQuit.request()) {
+    // Say so rather than leave a button that quietly does nothing: a spent attempt
+    // cannot be retried in this process at all.
+    if (updateInstallQuit.phase() === 'spent') {
+      setNativeAppUpdateState({
+        phase: 'error',
+        progress: null,
+        error: 'Update install was already attempted',
+        errorKind: 'attempt-spent'
+      });
+    }
+    return deriveAppUpdateState();
+  }
+  try {
+    // isSilent: skip the NSIS installer UI on Windows so the update feels seamless
+    // (per-user install needs no elevation); isForceRunAfter relaunches the app.
+    autoUpdater.quitAndInstall(true, true);
+  } catch (error) {
+    // The abort above ended the attempt this call had just made, so unlike the
+    // updater's own error handler there is nothing else this failure could belong
+    // to, and the same recovery applies.
+    updateInstallQuit.abort();
+    setNativeAppUpdateState({
+      phase: 'error',
+      progress: null,
+      error: error?.message || String(error || 'Update failed'),
+      errorKind: installFailureErrorKind({ spent: updateInstallQuit.isSpent() })
+    });
+  }
+  return deriveAppUpdateState();
+}
+
+// The one URL the edge dock can ask for: the Codex reset forecast row is the
+// Limits page's row, and that row is a link to its source.
+const CODEX_RESET_FORECAST_SOURCE_URL = 'https://codex-resets.com/';
+
+function isAllowedExternalUrl(value) {
+  let parsed;
+  try { parsed = new URL(String(value || '')); }
+  catch (_) { return false; }
+  if (parsed.protocol !== 'https:') return false;
+  const enterpriseHost = settings?.copilotEnterpriseHost || process.env.COPILOT_ENTERPRISE_HOST || process.env.GITHUB_ENTERPRISE_HOST || '';
+  if (isAllowedVerificationUrl(value, enterpriseHost)) return true;
+  if (isAllowedCodexLoginUrl(value)) return true;
+  if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/junhoyeo/tokscale')) return true;
+  if (parsed.hostname === 'www.npmjs.com' && parsed.pathname.startsWith('/package/@tokscale/')) return true;
+  if (parsed.hostname === 'github.com' && parsed.pathname.startsWith('/Javis603/token-monitor')) return true;
+  if (parsed.hostname === 'codex-resets.com' && (parsed.pathname === '' || parsed.pathname === '/')) return true;
+  if (
+    (parsed.hostname === 'javis-ai.com' || parsed.hostname === 'www.javis-ai.com')
+    && (parsed.pathname === '/token-monitor' || parsed.pathname.startsWith('/token-monitor/'))
+  ) return true;
+  // Provider console links come from each account declaration's urlPolicy.
+  if (limitProviderUrlAllowed(parsed.hostname, parsed.pathname)) return true;
+  if (STATUS_PAGE_HOSTS.has(parsed.hostname) && (parsed.pathname === '' || parsed.pathname === '/')) return true;
+  return false;
+}
+
+function revealWindow(target = mainWindow, options = {}) {
+  const inactive = options.inactive === true || (target === mainWindow && floatingBubbleState.collapsed);
+  showWindow(target, inactive);
+}
+
+function loadWindowFile(target, options = {}) {
+  let revealed = false;
+  const reveal = () => {
+    if (revealed) return;
+    revealed = true;
+    if (settings?.trayMode) return; // stay hidden until tray click
+    if (restoreWindowMaximizedForReveal(target, settings, {
+      restoreMaximized: options.restoreMaximized === true,
+      inactive: options.inactive === true,
+      collapsedFloatingBubble: options.collapsedFloatingBubble === true
+    })) return;
+    revealWindow(target, { inactive: options.inactive === true });
+  };
+  const waitForContent = options.waitForContent === true;
+  const readyChannel = waitForContent ? 'window:contentReady' : 'window:appearanceReady';
+  const onContentReady = (event) => {
+    if (event.sender === target.webContents) reveal();
+  };
+  const fallbackTimer = setTimeout(reveal, 2500);
+  const cleanup = () => {
+    clearTimeout(fallbackTimer);
+    ipcMain.removeListener(readyChannel, onContentReady);
+  };
+  target.once('show', cleanup);
+  target.once('closed', cleanup);
+  // Startup needs the saved appearance, not stats or provider/network work.
+  // Window replacements can still wait for real content to avoid empty flashes.
+  ipcMain.on(readyChannel, onContentReady);
+  target.webContents.once('did-finish-load', () => applyZoomFactor(target));
+  target.webContents.once('did-fail-load', (_event, code, description) => {
+    console.log(`[window] renderer load failed: ${code} ${description}`);
+    reveal();
+  });
+  const filePath = path.join(__dirname, 'renderer', 'index.html');
+  const load = options.query ? target.webContents.loadFile(filePath, { query: options.query }) : target.webContents.loadFile(filePath);
+  load.catch((error) => {
+    console.log(`[window] renderer load failed: ${error.message}`);
+    reveal();
+  });
+}
+
+function createWindow(boundsOverride, options = {}) {
+  ensureSettingsLoaded();
+  const collapsedFloatingBubble = options.collapsedFloatingBubble === true;
+  const bounds = boundsOverride || restoredBounds() || DEFAULT_WINDOW;
+  const collapsedSizeLimits = {
+    minWidth: bounds.width,
+    minHeight: bounds.height,
+    maxWidth: bounds.width,
+    maxHeight: bounds.height
+  };
+  const windowOptions = {
+    width: bounds.width,
+    height: bounds.height,
+    ...(typeof bounds.x === 'number' ? { x: bounds.x, y: bounds.y } : {}),
+    ...(collapsedFloatingBubble ? collapsedSizeLimits : WINDOW_LIMITS),
+    frame: false,
+    transparent: true,
+    resizable: !collapsedFloatingBubble,
+    show: false,
+    backgroundColor: '#00000000',
+    ...appWindowIcon(),
+    skipTaskbar: collapsedFloatingBubble || skipTaskbarForSettings(settings),
+    ...(collapsedFloatingBubble ? { fullscreenable: false, maximizable: false, minimizable: false } : {}),
+    // Keeps a popover unmaximizable across rebuilds, which never re-run enterTrayMode().
+    ...(settings?.trayMode ? { maximizable: false } : {}),
+    ...floatingBubbleWindowChrome(process.platform, collapsedFloatingBubble),
+    // Seed the legacy fallback's construction-only active state. The material
+    // manager immediately replaces HUD with Liquid Glass when supported.
+    ...(process.platform === 'darwin' ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      zoomFactor: clampZoom(settings.zoomFactor),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  };
+  const win = process.platform === 'win32'
+    ? createRetainedWindow({ BaseWindow, WebContentsView }, windowOptions, options.previousWindow, {
+      beforeReveal: refreshWindowsBackdrop
+    })
+    : new BrowserWindow(windowOptions);
+  mainWindow = win;
+  mainWindowChrome = { collapsedFloatingBubble };
+  applyMacSpaceBehavior();
+  applyWindowsChrome(win, { round: true });
+  suppressLinuxSystemContextMenu(win);
+  win.on('maximize', () => {
+    if (!shouldTrackWindowMaximized(settings, floatingBubbleState)) {
+      // A tray popover is sized from getBounds() on every open, so a maximized
+      // one would open full-screen. setMaximizable() covers Windows and macOS;
+      // it is a no-op on Linux, which is why this bounce still has to exist.
+      if (settings?.trayMode) suspendWindowMaximized(win);
+      return;
+    }
+    stopPersistBoundsTimer();
+    persistWindowState(settings, saveSettings, normalWindowBounds(win), true);
+  });
+  win.on('unmaximize', () => {
+    if (!shouldTrackWindowMaximized(settings, floatingBubbleState)) return;
+    persistWindowState(settings, saveSettings, normalWindowBounds(win), false);
+    persistBoundsSoon();
+  });
+  if (!options.previousWindow) win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedExternalUrl(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  if (!options.previousWindow) win.webContents.on('will-navigate', (event, url) => {
+    event.preventDefault();
+    if (isAllowedExternalUrl(url)) shell.openExternal(url);
+  });
+  applyWindowSettings();
+  attachNativeMaterialVisibility(win, () => nativeMaterialOptions());
+  applyNativeMaterial();
+  win.on('focus', () => {
+    stopFloatingBubbleAutoCollapseTimer();
+  });
+  win.on('blur', () => {
+    limitsHistoryController?.hide();
+    nudgeTaskbarZOrder();
+    if (!suppressNextBlurHide) sendMainWindowEvent('window:summonCancelled');
+    if (settings?.trayMode && !suppressNextBlurHide && !quitRequested) {
+      const wasVisible = win.isVisible();
+      const point = wasVisible && process.platform === 'darwin' ? screen.getCursorScreenPoint() : null;
+      if (wasVisible) {
+        hidePopover();
+        // Cocoa can send this blur before Tray.mouse-down for the same click.
+        // Retain its cursor point for that later tray press.
+        if (point && tray?.isPointerOverIcon?.(point)) recentPopoverBlur = { at: performance.now(), point };
+      }
+    }
+    else if (!quitRequested) scheduleFloatingBubbleAutoCollapse();
+  });
+  const onBoundsChange = () => { persistBoundsSoon(); syncTaskbarZOrder(); };
+  for (const eventName of ['resize', 'resized', 'move', 'moved']) win.on(eventName, onBoundsChange);
+  win.on('show', syncTaskbarZOrder);
+  win.on('restore', syncTaskbarZOrder);
+  win.on('hide', stopTaskbarZOrderKeeper);
+  win.on('minimize', stopTaskbarZOrderKeeper);
+  win.on('close', (event) => {
+    if (quitRequested) return;
+    const action = mainWindowCloseAction(settings, { platform: process.platform });
+    if (action === 'hidePopover') {
+      event.preventDefault();
+      hidePopover();
+    } else if (action === 'hideWindow') {
+      event.preventDefault();
+      pluginWindowActions.hide(win);
+      applyMacActivationPolicy({ mainWindowVisible: false });
+    }
+  });
+  if (!options.previousWindow) win.webContents.on('before-input-event', handleZoomShortcut);
+  // The dock's own windows would otherwise keep the process alive after the
+  // last real window closes, which window-all-closed relies on for quitting.
+  win.on('closed', () => {
+    if (quitRequested || process.platform === 'darwin') return;
+    if (BaseWindow.getAllWindows().every((other) => (edgeDockController?.owns(other) || notchController?.owns(other)))) app.quit();
+  });
+  win.on('show', () => syncPluginWindowVisibility(win));
+  win.on('hide', () => syncPluginWindowVisibility(win));
+  win.on('minimize', () => syncPluginWindowVisibility(win));
+  win.on('restore', () => syncPluginWindowVisibility(win));
+  if (!options.previousWindow) win.webContents.on('did-finish-load', () => {
+    sendFloatingBubbleState();
+    // Only report a window that is already on screen. A window still awaiting its
+    // reveal reports isVisible() === false. loadWindowFile waits for renderer
+    // appearance/content readiness; pushing "hidden" here prevents that work,
+    // leaving only the 2.5s fallback. Electron reports visibilityState 'visible' for a show:false
+    // window, which is the default the renderer keeps; trayMode instead seeds the
+    // hidden state through the windowHidden query flag. Keep this listener for
+    // later loads too: Cmd+Shift+R retains that query flag, so a visible tray
+    // window needs its native visibility resynced after every renderer reload.
+    if (mainWindow?.isVisible()) sendMainWindowVisibility(mainWindow);
+  });
+  if (options.previousWindow) return win;
+  loadWindowFile(win, {
+    waitForContent: options.waitForContent === true,
+    inactive: options.inactive === true,
+    collapsedFloatingBubble,
+    restoreMaximized: !collapsedFloatingBubble,
+    query: {
+      ...floatingBubbleInitialRendererQuery(floatingBubbleState, {
+        collapsedWindow: collapsedFloatingBubble,
+        suppressInitialNumberAnimation: options.suppressInitialNumberAnimation === true,
+        viewState: rendererViewState
+      }),
+      ...(settings?.trayMode ? { windowHidden: '1' } : {}),
+      ...(settings?.systemGlass === false ? { systemGlassDisabled: '1' } : {})
+    }
+  });
+}
+
+function handleZoomShortcut(event, input) {
+  if (input.type !== 'keyDown') return;
+  const key = input.key;
+  if (key === 'Escape' && !input.control && !input.meta && !input.alt && !input.shift && canUseFloatingBubble(settings)) {
+    event.preventDefault();
+    maybeCollapseFloatingBubble(mainWindow.getBounds());
+    return;
+  }
+  if (!(input.control || input.meta)) return;
+  if (key === '=' || key === '+') { event.preventDefault(); adjustZoom(ZOOM_LIMITS.step); }
+  else if (key === '-' || key === '_') { event.preventDefault(); adjustZoom(-ZOOM_LIMITS.step); }
+  else if (key === '0') { event.preventDefault(); setZoomFactor(1); }
+}
+
+function replaceMainWindow(bounds, options = {}) {
+  const epoch = ++mainWindowReplacementEpoch;
+  mainWindowReplacementTask = mainWindowReplacementTask.then(async () => {
+    if (epoch !== mainWindowReplacementEpoch) return;
+    const old = mainWindow;
+    if (process.platform === 'win32') {
+      if (!mainWindowChrome.collapsedFloatingBubble) {
+        await captureRetainedWindowState(old)
+          .catch(error => console.warn(`[window] view capture failed: ${error.message}`));
+      }
+      if (epoch !== mainWindowReplacementEpoch || old !== mainWindow || old.isDestroyed()
+        || (options.collapsedFloatingBubble === true) !== floatingBubbleState.collapsed) {
+        // An in-place expansion can supersede a collapse while capture is in
+        // flight without requesting another native host. Release its snapshot.
+        if (old === mainWindow && !old.isDestroyed() && !mainWindowChrome.collapsedFloatingBubble) {
+          await restoreRetainedWindowState(old);
+        }
+        return;
+      }
+    }
+    const wasFocused = old && !old.isDestroyed() ? old.isFocused() : false;
+    if (old && !old.isDestroyed()) old.removeAllListeners('close');
+    if (old && !old.isDestroyed()) old.removeAllListeners('blur');
+    // Build the new window first so total window count never drops to 0
+    // (otherwise window-all-closed fires and quits the app on Windows).
+    createWindow(bounds, {
+      previousWindow: process.platform === 'win32' ? old : undefined,
+      collapsedFloatingBubble: options.collapsedFloatingBubble === true,
+      suppressInitialNumberAnimation: options.suppressInitialNumberAnimation === true,
+      waitForContent: options.waitForContent === true,
+      inactive: options.inactive === true
+    });
+    const next = mainWindow;
+    if (process.platform === 'win32') {
+      if (windowsBackdropFallback(old) !== windowsBackdropFallback(next)) pushSettingsToRenderer();
+      sendFloatingBubbleState();
+      if (old?.isMinimized()) next.minimize();
+      else if (old?.isVisible()) {
+        restoreWindowMaximized(next, settings, { collapsedFloatingBubble: options.collapsedFloatingBubble === true });
+        revealWindow(next, { inactive: options.focus === false || !wasFocused });
+      }
+      if (!next.isVisible() || next.isMinimized()) {
+        old?.destroy();
+        await restoreRetainedWindowState(next, !options.collapsedFloatingBubble);
+        return;
+      }
+    }
+    handoffWindow(old, next, {
+      focus: options.focus === true || (options.focus !== false && wasFocused)
+    });
+    if (process.platform === 'win32') await restoreRetainedWindowState(next, !options.collapsedFloatingBubble);
+  }).catch(error => {
+    console.warn(`[window] host replacement failed: ${error.message}`);
+  });
+  return mainWindowReplacementTask;
+}
+
+function discardFailedDashboardWindow(win, reason) {
+  if (!win || win !== dashboardWindow || win.isDestroyed()) return;
+  console.log(`[dashboard] ${reason}`);
+  win.destroy();
+}
+
+function showDashboardWindow(win) {
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+function createDashboardWindow() {
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    // Focus/visibility already refresh history in place. Preserve the selected
+    // view, and let the initial ready event reveal a still-loading Dashboard.
+    if (dashboardWindowReady) showDashboardWindow(dashboardWindow);
+    return dashboardWindow;
+  }
+  const windowOptions = {
+    width: 920,
+    height: 620,
+    minWidth: 560,
+    minHeight: 420,
+    frame: false,
+    transparent: true,
+    show: false,
+    backgroundColor: '#00000000',
+    ...appWindowIcon(),
+    skipTaskbar: false,
+    ...(process.platform === 'darwin' ? { vibrancy: 'hud', visualEffectState: 'active' } : {}),
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  };
+  const win = new BrowserWindow(windowOptions);
+  dashboardWindow = win;
+  dashboardWindowReady = false;
+  applyWindowsChrome(win, { round: true });
+  suppressLinuxSystemContextMenu(win);
+  syncWindowsBackdrop(win, { enabled: nativeBlurEnabled() });
+  attachNativeMaterialVisibility(win, () => nativeMaterialOptions(settings, true));
+  syncNativeMaterialVisibility(win, nativeMaterialOptions(settings, true));
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isAllowedExternalUrl(url)) shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  win.webContents.on('will-navigate', (event, url) => {
+    event.preventDefault();
+    if (isAllowedExternalUrl(url)) shell.openExternal(url);
+  });
+  // Only dashboard:ready may first reveal a healthy window. Slow hub history must not
+  // race a wall-clock fallback and expose the unprepared heatmap. Actual load
+  // failures discard the hidden window so the next open starts cleanly.
+  // Renderer crashes use the shared app recovery handler instead.
+  win.webContents.on('did-fail-load', (_event, errorCode, errorDescription, _url, isMainFrame) => {
+    if (!isMainFrame || errorCode === -3) return; // ERR_ABORTED is expected during reloads.
+    discardFailedDashboardWindow(win, `load failed: ${errorDescription}`);
+  });
+  win.on('unresponsive', () => {
+    if (!win.isVisible()) discardFailedDashboardWindow(win, 'renderer became unresponsive while opening');
+  });
+  win.on('closed', () => {
+    if (dashboardWindow === win) {
+      dashboardWindow = null;
+      dashboardWindowReady = false;
+    }
+  });
+  win.loadFile(path.join(__dirname, 'renderer', 'dashboard.html'))
+    .catch((error) => discardFailedDashboardWindow(win, `load failed: ${error.message}`));
+  return win;
+}
+
+async function getDashboardHistory(options = {}) {
+  const includeDevices = options?.includeDevices === true;
+  const resolved = includeDevices
+    ? await resolveCompleteHistoryWithDevices(historyResolverOptions())
+    : { history: await getCompleteHistory(), deviceHistories: undefined };
+  const history = resolved.history;
+  const source = completeHistorySource(historyResolverOptions());
+  return projectModelAliasHistory({
+    ...history,
+    ...(includeDevices ? { deviceHistories: resolved.deviceHistories } : {}),
+    fixedPeriods: fixedPeriodHistoryMeta({
+      source
+    })
+  }, settings?.modelAliases, { grouping: settings?.modelAliasGrouping });
+}
+
+// Plugin hosts load from their own privileged scheme, which Chromium only
+// accepts before 'ready'.
+registerPluginScheme(protocol);
+
+app.whenReady().then(() => {
+  if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
+  ensureSettingsLoaded();
+  powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
+  powerMonitor.on('unlock-screen', () => notchController?.setLocked(false));
+  void sessionProxy.apply();
+  // Switching the OS between light and dark repaints the taskbar underneath an
+  // icon we have already handed to the shell, so the renderer has to recompose
+  // it — nothing else in the app would notice the change.
+  nativeTheme.on('updated', () => {
+    applyNativeMaterial();
+    // Rebuilds the dock only when Reduce Transparency moved its material.
+    if (edgeDockController?.isRunning()) edgeDockController.sync();
+    if (notchController?.isRunning()) notchController.sync();
+    void pushSystemUiThemeAfterChange();
+  });
+  const widgetRuntime = macWidgetRuntimeSupport({
+    platform: process.platform,
+    osRelease: process.platform === 'darwin' ? os.release() : ''
+  });
+  const widgetRuntimeSupported = widgetRuntime.supported;
+  const widgetRecoveryAbort = widgetRuntimeSupported ? new AbortController() : null;
+  const abortWidgetRecovery = () => widgetRecoveryAbort?.abort();
+  if (widgetRecoveryAbort) app.once('before-quit', abortWidgetRecovery);
+  const widgetRecovery = widgetRuntimeSupported
+    ? recoverMacWidgetLaunchServicesRegistration({
+      platform: process.platform,
+      runtimeSupported: true,
+      isPackaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      userDataPath: app.getPath('userData'),
+      signal: widgetRecoveryAbort.signal,
+      logger: (message) => console.warn(message)
+    })
+    : Promise.resolve({ status: 'skipped', reason: widgetRuntime.reason });
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [contentSecurityPolicyForRequest(details)]
+      }
+    });
+  });
+  applyMacActivationPolicy();
+  createWindow();
+  syncLoginItemSettingFromOs();
+  configureWindowToggleShortcut();
+  // The retired in-app npm updater kept upstream tokscale builds here; the
+  // collector no longer reads them, so drop the leftovers.
+  fs.promises.rm(path.join(sharedDataDir(), 'tokscale'), { recursive: true, force: true })
+    .catch((error) => console.log(`[tokscale] removing retired npm downloads failed: ${error.message}`));
+  ensureTray();
+  if (settings.trayMode) enterTrayMode();
+  regenerateTokscalePricing();
+  if (widgetRuntimeSupported) ensureMacWidgetDemand();
+  startMode();
+  void widgetRecovery.then((result) => {
+    if (result.status !== 'completed' || widgetRecoveryAbort?.signal.aborted) return;
+    const config = macWidgetConfiguration();
+    if (!config) return;
+    // The retained snapshot may be unchanged after an update, so publication
+    // deduplication alone cannot wake the newly registered extension. Do not
+    // require a recent demand heartbeat from the extension we just retired.
+    requestMacWidgetReload({
+      widgetKind: config.widgetKind,
+      isCurrent: () => !widgetRecoveryAbort?.signal.aborted,
+      logger: (message) => console.warn(message)
+    });
+  }).finally(() => {
+    if (widgetRecoveryAbort) app.removeListener('before-quit', abortWidgetRecovery);
+    if (!widgetRecoveryAbort?.signal.aborted) {
+      macWidgetPublicationReady = true;
+      macWidgetSnapshotController?.resume();
+    }
+  });
+  void hydrateCodexManagedWorkspaceLabels();
+  if (settings.discordRpcEnabled) startDiscordRpc();
+  rateCache = readRateCache();
+  applyEffectiveRates();                 // use cache/defaults immediately, avoid first-paint gap
+  refreshExchangeRates();                // non-blocking: only fetches when stale
+  rateRefreshTimer = setInterval(() => { refreshExchangeRates(); }, 6 * 60 * 60 * 1000);
+  syncDockSurfaces();
+  ipcMain.handle('settings:get', () => settingsForRenderer());
+  ipcMain.handle('appearance:getBackgroundImage', () => getBackgroundImage(app.getPath('userData')));
+  ipcMain.handle('appearance:chooseBackgroundImage', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg'] }]
+    });
+    if (result.canceled || !result.filePaths[0]) return { canceled: true };
+    return { bytes: await importBackgroundImage(result.filePaths[0], app.getPath('userData'), nativeImage) };
+  });
+  ipcMain.handle('appearance:clearBackgroundImage', async () => {
+    await clearBackgroundImage(app.getPath('userData'));
+    return true;
+  });
+
+  // The dock card decorates its plan cell from the subscription records the
+  // appearance carries, and only a settings push re-sends that appearance — while
+  // a subscription write is not a settings save, so it went out unseen and the
+  // card kept the list as it stood before the edit until something else pushed.
+  // The dock alone is re-synced rather than pushing the settings: the renderer
+  // already holds what it wrote back, and a push would re-render the form the
+  // user is editing.
+  ipcMain.handle('subscriptions:adoptOrphans', async () => {
+    try {
+      const next = await adoptOrphanedSubscriptions();
+      syncDockSurfaces();
+      return next;
+    } catch (error) {
+      throw new Error(subscriptionWriteFailureCode(error), { cause: error });
+    }
+  });
+
+  ipcMain.handle('subscriptions:discardOrphans', () => {
+    const next = discardOrphanedSubscriptions();
+    syncDockSurfaces();
+    return next;
+  });
+
+  ipcMain.handle('subscriptions:save', async (_event, subscriptions, base) => {
+    try {
+      const next = await saveSubscriptions(subscriptions, base);
+      syncDockSurfaces();
+      return next;
+    } catch (error) {
+      // The renderer has to tell "another device won" apart from "the hub is
+      // down": one means re-read and redo, the other means try again later. Only
+      // the message survives the IPC boundary, so the code goes in it.
+      throw new Error(subscriptionWriteFailureCode(error), { cause: error });
+    }
+  });
+  ipcMain.handle('sessionUsageArchive:clear', async () => {
+    if (isExternalAgentActive()) return { ok: false, error: 'agentActive' };
+    // A worker-hosted collector writes both archives from its own thread, so it
+    // has to be gone before they are deleted or its next tick writes them back.
+    stopLocalCollector();
+    stopSyncCollector();
+    await whenUsageHostsIdle();
+    try {
+      // The agent may have started while the worker was stopping.
+      if (isExternalAgentActive()) return { ok: false, error: 'agentActive' };
+      sessionUsageArchiveStore.clear();
+      clearDailyHistoryArchive();
+      usageTransform.reset();
+      return { ok: true };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    } finally {
+      startMode();
+      pushSettingsToRenderer();
+    }
+  });
+  ipcMain.handle('pricing:lookup', async (_event, modelId) => {
+    try {
+      return { ok: true, result: await lookupModelPricing(modelId) };
+    } catch (error) {
+      return { ok: false, error: error.message };
+    }
+  });
+  applySyncSettingsPatch = applySettingsPatch;
+  ipcMain.handle('syncContent:status', (_event, refresh = true) => refresh ? getSyncContentRuntime().refresh() : getSyncContentRuntime().status());
+  ipcMain.handle('syncContent:preview', (_event, kind) => getSyncContentRuntime().preview(kind));
+  ipcMain.handle('syncContent:configure', (_event, options) => getSyncContentRuntime().configure(options));
+  ipcMain.handle('syncContent:retryCleanup', () => getSyncContentRuntime().retryCleanup());
+  const credentialCommands = createCredentialCommands({
+    allowRetainedFixedCredentials: true,
+    getSettings: () => settings,
+    applySettingsPatch: applyCredentialSettingsPatch,
+    probeDeps: credentialProbeDeps
+  });
+  accountSlotService = createAccountSlotService({
+    getSettings: () => settings,
+    ownerWrite: (provider, patch, legacyMetadata, legacyWrites) => {
+      const store = legacyMetadata !== undefined && provider !== 'minimax' ? ensureCredentialStore() : null;
+      const previousDocument = store?.readDocument();
+      const previousSettings = settings;
+      try {
+        if (store) {
+          const document = structuredClone(previousDocument);
+          const records = document.credentials.providers?.[provider]?.accounts;
+          for (const { id, credential } of legacyWrites) {
+            if (!records) throw new Error('Legacy credential context missing');
+            if (credential === null) delete records[id];
+            else records[id] = { ...records[id], [provider === 'claude' ? 'cookie' : 'credentials']: credential };
+          }
+          store.writeDocument(document);
+        }
+        const legacyPatch = legacyMetadata === undefined ? {} : (provider === 'minimax'
+          ? { minimaxApiProfiles: legacyMetadata, minimaxApiKey: '' }
+          : { [`${provider}ManagedAccounts`]: legacyMetadata });
+        settings = { ...settings, ...patch, ...legacyPatch };
+        saveSettings({ throwOnError: true });
+      } catch (error) {
+        settings = previousSettings;
+        store?.writeDocument(previousDocument);
+        throw error;
+      }
+    },
+    presentationAccounts: async provider => {
+      const rows = [...(localStats?.limits?.providers || []), ...(latestStats?.limits?.providers || [])].filter(row => row.provider === provider);
+      if (provider === 'codex') rows.push(...codexAccountsForRenderer());
+      if (provider === 'cursor') rows.push(...cursorAccountService().presentationAccounts());
+      if (provider === 'mimo') rows.push(...mimoAccountsForRenderer());
+      if (provider === 'opencode') {
+        const result = await opencodeAccountService().getProfiles();
+        rows.push(...Object.values(result?.profiles || {}));
+        if (result?.ambientAccountKey) rows.push({ accountKey: result.ambientAccountKey });
+      }
+      if (provider === 'thirdparty') {
+        const result = await thirdpartyAccountService().getProfiles();
+        rows.push(...Object.values(result?.profiles || {}));
+        if (result?.environmentAccountKey) rows.push({ accountKey: result.environmentAccountKey });
+      }
+      return rows.map(row => row.accountKey || row.canonicalAccountKey).filter(Boolean);
+    },
+    write: (patch) => {
+      const { limitProviders, limitsEnabled, ...slotPatch } = patch;
+      settings = { ...settings, ...slotPatch };
+      saveSettings({ throwOnError: true });
+      if (patch.limitAccountPresentation) pushSettingsToRenderer();
+      // Turning a provider on takes the ordinary settings path (selection
+      // normalization, runtime start) and is published to the renderer.
+      // The account is already durable here: an activation failure is reported
+      // but must not turn the save into a failure the user retries as a duplicate.
+      if (limitProviders !== undefined && (limitProviders !== settings.limitProviders || limitsEnabled !== settings.limitsEnabled)) {
+        try {
+          applySettingsPatch({ limitProviders, limitsEnabled });
+          pushSettingsToRenderer();
+        } catch (error) {
+          console.error(`[limits] could not turn on collection after saving an account: ${error?.message || error}`);
+        }
+      }
+    },
+    owners: {
+      claude: (id, operation, value) => operation === 'remove' ? claudeAccountService().removeAccount(id) : claudeAccountService().setAccountEnabled(id, value),
+      workbuddy: (id, operation, value) => operation === 'remove' ? workbuddyAccountService().removeAccount(id) : workbuddyAccountService().setAccountEnabled(id, value),
+      antigravity: (id, operation, value) => operation === 'remove' ? antigravityAccountService().removeAntigravityManagedAccount(id) : antigravityAccountService().setAntigravityManagedAccountEnabled(id, value)
+    },
+    onPresentation: (operations) => getAccountPresentationSync().publish(operations),
+    probeDeps: credentialProbeDeps,
+    onChanged: (provider, change) => {
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      // A rename or reorder is re-projected by the reconfigure above; asking the
+      // provider again would only spend its rate limit.
+      if (change?.refresh === false) return;
+      if (deviceRuntimeHandle) return invalidateAccountSlotChange(deviceRuntimeHandle, provider, change);
+      // No runtime yet: the retired accounts are cleared once one starts.
+      for (const accountKey of change?.retiredAccountKeys || []) {
+        void queueLimitInvalidation({ provider, accountKey }, 'settings-change', { clear: true, refresh: false });
+      }
+    }
+  });
+  for (const operation of ['list', 'add', 'replace', 'rename', 'setEnabled', 'remove', 'move', 'presentation']) {
+    ipcMain.handle(`limits:accountSlots:${operation}`, (_event, ...args) => accountSlotService[operation](...args));
+  }
+  // Resolves only once a worker-hosted transform runs with the saved settings:
+  // pausing the session archive must not be reported done while the worker can
+  // still capture under the old value.
+  ipcMain.handle('settings:update', async (event, patch) => {
+    const finishPluginChange = await pluginRuntime?.beforeSettingsChange(event, patch);
+    assertPluginSkinRequest(event, patch);
+    const contentRuntime = getSyncContentRuntime();
+    const sharedEdit = patch.modelAliases !== undefined || patch.modelAliasGrouping !== undefined
+      || patch.customModelPricing !== undefined;
+    const settingsIdentity = contentRuntime.status().identity;
+    await contentRuntime.publishPatch(patch, patch?.syncContentBase);
+    if (sharedEdit && settingsIdentity !== contentRuntime.status().identity) throw new Error('hub_changed');
+    assertPluginSkinRequest(event, patch);
+    let dotsVisibilityApplied = Promise.resolve();
+    applySettingsPatch(patch, (refresh) => { dotsVisibilityApplied = refresh; });
+    await latestUsageHost?.transformSettingsApplied?.();
+    await dotsVisibilityApplied;
+    await finishPluginChange?.();
+    // Other settings writes may finish while this visibility projection waits.
+    // Return the latest saved selection rather than restoring an older one.
+    return settingsForRenderer();
+  });
+  async function applyCredentialSettingsPatch(patch, { provider }) {
+    const refreshes = [];
+    applySettingsPatch(patch, undefined, {
+      ensureLimitProvider: provider,
+      onLimitsRefresh: (_scope, refresh) => refreshes.push(refresh)
+    });
+    // The write is already durable; a refresh failure must not report it as an
+    // unsuccessful save or launch a second check from the renderer.
+    await Promise.all(refreshes).catch((error) => {
+      console.log(`[limits-runtime] credential refresh failed: ${error.message}`);
+    });
+    return settingsForRenderer();
+  }
+
+  // The settings:update body, named so a credential save persists through the
+  // exact same normalization, runtime reconfigure and limit invalidation.
+  function applySettingsPatch(patch, onDotsVisibilityRefresh = () => {}, limitContext = {}) {
+    patch = prepareHubProfilePatch(settings, patch);
+    const skinSelection = preparePluginSkinSettings(patch, settings, pluginRuntime);
+    patch = skinSelection.patch;
+    const contentRuntime = getSyncContentRuntime();
+    credentialCommands.noteSettingsPatch(patch);
+    minimaxApiKeys.noteSettingsPatch(patch);
+    const previousSettingsState = settings;
+    const previousRuntimeSettings = JSON.parse(JSON.stringify(settings));
+    const previousClients = settings.clients;
+    const previousDiscordRpcEnabled = settings.discordRpcEnabled;
+    const previousShowTrayIcon = settings.showTrayIcon;
+    const previousTrayMode = settings.trayMode;
+    const previousHideAppIcon = settings.hideAppIcon;
+    const previousTrayContent = settings.trayContent;
+    const previousTrayCustomLayout = JSON.stringify(settings.trayCustomLayout || {});
+    const previousFloatingBubbleCustomLayout = JSON.stringify(settings.floatingBubbleCustomLayout || {});
+    const previousShowTrayProviderBadge = settings.showTrayProviderBadge;
+    const previousOpenCodeLocalLimitsEnabled = settings.opencodeLocalLimitsEnabled === true;
+    const previousCurrency = settings.currency;
+    const previousCompactTokenUnits = settings.compactTokenUnits;
+    const previousLanguage = settings.language;
+    const previousStartAtLogin = settings.startAtLogin;
+    const previousAutomaticAppUpdates = settings.automaticAppUpdates;
+    const previousCustomModelPricing = JSON.stringify(settings.customModelPricing || []);
+    const previousProxyKey = JSON.stringify([settings.proxyUrl || '', settings.noProxy || '']);
+    const normalizedCurrency = patch.currency !== undefined ? normalizeCurrency(patch.currency, settings.currency) : normalizeCurrency(settings.currency);
+    const normalizedPatch = { ...patch, currency: normalizedCurrency };
+    // Only Cursor's explicit account lifecycle can assign manual ownership.
+    delete normalizedPatch.cursorManualAccountIds;
+    delete normalizedPatch.windowMaximized;
+    delete normalizedPatch.workbuddyEndpoint;
+    delete normalizedPatch.workbuddyLocalAppEnabled;
+    delete normalizedPatch.customModelPricing;
+    delete normalizedPatch.syncContentState;
+    delete normalizedPatch.syncContentStatus;
+    delete normalizedPatch.syncContentBase;
+    delete normalizedPatch.pluginStates;
+    delete normalizedPatch.pluginInitialSetup;
+    delete normalizedPatch.pluginContentSelections;
+    delete normalizedPatch.pluginContentOrder;
+    // Account fields declared persist:'never' (managed account lists, profile
+    // maps, workbuddy session fields) are stripped by the registry walk below.
+    normalizeAccountPatch(patch, normalizedPatch);
+    // Subscriptions go through subscriptions:save, which knows whether this
+    // device owns the list or shares it with a hub. The explicit fields further
+    // down are what actually hold the line — they are applied after the spread
+    // and source from settings — but stripping the keys here keeps a future
+    // reorder from quietly turning the spread back into a second way in.
+    delete normalizedPatch.subscriptions;
+    delete normalizedPatch.subscriptionsOrphaned;
+    delete normalizedPatch.subscriptionsCacheHub;
+    delete normalizedPatch.icloudWriterId;
+    // Presentation writes use the serialized account command lane.
+    delete normalizedPatch.limitAccountPresentation;
+    delete normalizedPatch.limitAccountPresentationCacheIdentity;
+    delete normalizedPatch.limitAccountPresentationPending;
+    // Derived for the renderer from the hub document, not settings. Persisting a
+    // copy would leave a key on disk that describes a hub as of whenever a form
+    // was last saved, waiting to be mistaken for the real thing.
+    delete normalizedPatch.subscriptionsShared;
+    delete normalizedPatch.subscriptionsHub;
+    delete normalizedPatch.subscriptionsUpdatedAt;
+    const sessionUsageArchiveEnabled = parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true);
+    if (patch.clients !== undefined) {
+      normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
+      assertClientArchiveCaptureReady(normalizedPatch.clients, sessionUsageArchiveEnabled);
+    }
+    if (patch.customScanPaths !== undefined) {
+      const limitError = customScanPathLimitError(patch.customScanPaths);
+      if (limitError) throw new Error(limitError);
+      normalizedPatch.customScanPaths = normalizeCustomScanPaths(patch.customScanPaths);
+    }
+    if (patch.proxyUrl !== undefined) {
+      const proxyError = proxyUrlError(patch.proxyUrl);
+      if (proxyError) throw new Error(proxyError);
+    }
+    if (patch.noProxy !== undefined) {
+      const bypassError = noProxyError(patch.noProxy);
+      if (bypassError) throw new Error(bypassError);
+    }
+    if (patch.vendorColors !== undefined) normalizedPatch.vendorColors = migrateVendorColors(patch.vendorColors);
+    if (patch.deviceIconOverrides !== undefined) normalizedPatch.deviceIconOverrides = require('./renderer/deviceIcons').normalizeDeviceIconOverrides(patch.deviceIconOverrides);
+    if (patch.collectionMode !== undefined) normalizedPatch.collectionMode = normalizeCollectionMode(patch.collectionMode, settings.collectionMode);
+    if (patch.collectionIntervalMs !== undefined) normalizedPatch.collectionIntervalMs = normalizeCollectionIntervalMs(patch.collectionIntervalMs, settings.collectionIntervalMs);
+    if (patch.syncUploadIntervalMs !== undefined) normalizedPatch.syncUploadIntervalMs = normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs, settings.syncUploadIntervalMs);
+    if (patch.heatmapMetric !== undefined) normalizedPatch.heatmapMetric = normalizeHeatmapMetric(patch.heatmapMetric, settings.heatmapMetric);
+    if (patch.homeActiveDaysWindow !== undefined) normalizedPatch.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(patch.homeActiveDaysWindow, settings.homeActiveDaysWindow);
+    if (patch.sessionContextMetric !== undefined) normalizedPatch.sessionContextMetric = normalizeSessionContextMetric(patch.sessionContextMetric, settings.sessionContextMetric);
+    settings = normalizeWindowBehaviorSettings({
+      ...settings,
+      ...normalizedPatch,
+      hubMode: patch.hubMode !== undefined
+        ? normalizeHubMode(patch.hubMode, settings.hubMode, process.platform)
+        : normalizeHubMode(settings.hubMode, 'local', process.platform),
+      hubHostPort: patch.hubHostPort !== undefined ? normalizeHubPort(patch.hubHostPort, settings.hubHostPort) : settings.hubHostPort,
+      hubHostSecret: patch.hubHostSecret !== undefined ? String(patch.hubHostSecret) : settings.hubHostSecret,
+      hubSyncSessionTitles: parseBoolean(patch.hubSyncSessionTitles ?? settings.hubSyncSessionTitles, false),
+      syncContentState: normalizeSyncContentState(settings.syncContentState),
+      deviceId: (patch.deviceId !== undefined ? String(patch.deviceId).trim() : settings.deviceId) || defaultDeviceId(),
+      clients: patch.clients !== undefined ? clientsCsvForSetting(patch.clients, '') : clientsCsvForSetting(settings.clients, DEFAULT_CLIENTS),
+      codexDotsEnabled: parseBoolean(patch.codexDotsEnabled ?? settings.codexDotsEnabled, false),
+      codexDotsVisible: parseBoolean(patch.codexDotsVisible ?? settings.codexDotsVisible, true),
+      customScanPaths: normalizeCustomScanPaths(patch.customScanPaths ?? settings.customScanPaths),
+      refreshMs: Math.max(5000, Number(patch.refreshMs ?? settings.refreshMs ?? 15000)),
+      glassOpacity: Math.max(0, Math.min(100, Number(patch.glassOpacity ?? settings.glassOpacity ?? 68))),
+      glassBlur: Math.max(0, Math.min(100, Number(patch.glassBlur ?? settings.glassBlur ?? 32))),
+      macGlassTint: normalizeLiquidGlassTint(patch.macGlassTint ?? settings.macGlassTint, 'liquid-glass'),
+      macClearGlassTint: normalizeLiquidGlassTint(patch.macClearGlassTint ?? settings.macClearGlassTint, 'liquid-glass-clear'),
+      backgroundImageOpacity: normalizeBackgroundImageOpacity(patch.backgroundImageOpacity ?? settings.backgroundImageOpacity),
+      systemGlass: patch.systemGlass ?? settings.systemGlass ?? true,
+      windowsBackdrop: normalizeWindowsBackdropMode(patch.windowsBackdrop ?? settings.windowsBackdrop),
+      macBackdrop: normalizeMacBackdropMode(patch.macBackdrop ?? settings.macBackdrop),
+      reduceMotion: motionPreferenceApi.normalize(patch.reduceMotion ?? settings.reduceMotion),
+      tokenNumberAnimation: tokenNumberAnimationApi.normalize(patch.tokenNumberAnimation ?? settings.tokenNumberAnimation),
+      showLiveDot: patch.showLiveDot ?? settings.showLiveDot ?? true,
+      showToolIcons: patch.showToolIcons ?? settings.showToolIcons ?? true,
+      titleIconOnly: parseBoolean(patch.titleIconOnly ?? settings.titleIconOnly, false),
+      showCompactTotalTokens: parseBoolean(patch.showCompactTotalTokens ?? settings.showCompactTotalTokens, false),
+      showLiveTokenRate: parseBoolean(patch.showLiveTokenRate ?? settings.showLiveTokenRate, false),
+      liveTokenRateScope: normalizeLiveTokenRateScope(patch.liveTokenRateScope ?? settings.liveTokenRateScope),
+      compactTokenUnits: normalizeCompactTokenUnits(patch.compactTokenUnits ?? settings.compactTokenUnits),
+      modelAliases: normalizeModelAliases(patch.modelAliases ?? settings.modelAliases),
+      modelAliasGrouping: normalizeModelAliasGrouping(patch.modelAliasGrouping ?? settings.modelAliasGrouping),
+      textSize: fontSettingsApi.normalizeTextSize(patch.textSize ?? settings.textSize),
+      interfaceFontFamily: fontSettingsApi.normalizeFontFamily(
+        patch.interfaceFontFamily ?? settings.interfaceFontFamily
+      ),
+      displayFontFamily: fontSettingsApi.normalizeFontFamily(
+        patch.displayFontFamily ?? settings.displayFontFamily
+      ),
+      tokenRateMode: normalizeTokenRateMode(patch.tokenRateMode ?? settings.tokenRateMode),
+      floatingBubbleEnabled: parseBoolean(patch.floatingBubbleEnabled ?? settings.floatingBubbleEnabled, false),
+      notchEnabled: parseBoolean(patch.notchEnabled ?? settings.notchEnabled, false),
+      notchStyle: normalizeNotchStyle(patch.notchStyle ?? settings.notchStyle),
+      notchShape: normalizeNotchShape(patch.notchShape ?? settings.notchShape),
+      notchSize: normalizeEdgeDockSize(patch.notchSize ?? settings.notchSize),
+      notchCustomScale: normalizeEdgeDockCustomScale(patch.notchCustomScale ?? settings.notchCustomScale),
+      notchItems: normalizeEdgeDockItems('notchItems' in (patch || {}) ? patch.notchItems : settings.notchItems),
+      notchPageOrder: pluginPlacements.normalizeNotchPageOrder(patch.notchPageOrder ?? settings.notchPageOrder),
+      notchBuiltinPages: pluginPlacements.normalizeNotchBuiltinPages(patch.notchBuiltinPages ?? settings.notchBuiltinPages),
+      notchPluginPages: pluginPlacements.normalizeNotchPluginPages('notchPluginPages' in (patch || {}) ? patch.notchPluginPages : settings.notchPluginPages),
+      pluginMainPages: pluginPlacements.normalizeRefList('pluginMainPages' in (patch || {}) ? patch.pluginMainPages : settings.pluginMainPages, 32),
+      pluginsEnabled: parseBoolean(patch.pluginsEnabled ?? settings.pluginsEnabled, true),
+      // Consent is written only by the plugin manager (plugins:setEnabled),
+      // never by a generic settings patch from a renderer.
+      pluginStates: normalizePluginStates(settings.pluginStates),
+      pluginAuthorSkin: skinSelection.authorSkin,
+      notchRunningIndicatorEnabled: parseBoolean(patch.notchRunningIndicatorEnabled ?? settings.notchRunningIndicatorEnabled, false),
+      notchWarnColors: parseBoolean(patch.notchWarnColors ?? settings.notchWarnColors, false),
+      notchHoverAction: normalizeNotchHoverAction(patch.notchHoverAction ?? settings.notchHoverAction),
+      notchHoverDelay: normalizeNotchHoverDelay(patch.notchHoverDelay ?? settings.notchHoverDelay),
+      notchSwipeGestures: parseBoolean(patch.notchSwipeGestures ?? settings.notchSwipeGestures, true),
+      notchHaptic: parseBoolean(patch.notchHaptic ?? settings.notchHaptic, true),
+      notchProgressiveBlur: parseBoolean(patch.notchProgressiveBlur ?? settings.notchProgressiveBlur, true),
+      notchHideSummaryInFullScreen: parseBoolean(patch.notchHideSummaryInFullScreen ?? settings.notchHideSummaryInFullScreen, true),
+      notchRefreshEnabled: parseBoolean(patch.notchRefreshEnabled ?? settings.notchRefreshEnabled, false),
+      notchSummaryMode: notchSummaryMode({ notchSummaryMode: patch.notchSummaryMode ?? settings.notchSummaryMode }),
+      notchSummaryEnabled: parseBoolean(patch.notchSummaryEnabled ?? settings.notchSummaryEnabled, true),
+      notchCustomLayout: normalizeTrayLayout(patch.notchCustomLayout ?? settings.notchCustomLayout),
+      notchDisplayId: normalizeEdgeDockDisplayId(patch.notchDisplayId ?? settings.notchDisplayId),
+      edgeDockEnabled: parseBoolean(patch.edgeDockEnabled ?? settings.edgeDockEnabled, false),
+      edgeDockRefreshEnabled: parseBoolean(patch.edgeDockRefreshEnabled ?? settings.edgeDockRefreshEnabled, false),
+      edgeDockRunningIndicatorEnabled: parseBoolean(patch.edgeDockRunningIndicatorEnabled ?? settings.edgeDockRunningIndicatorEnabled, true),
+      edgeDockSide: normalizeEdgeDockSide(patch.edgeDockSide ?? settings.edgeDockSide),
+      edgeDockFloatingX: patch.edgeDockSide !== undefined ? null : normalizeEdgeDockFloatingX(settings.edgeDockFloatingX),
+      edgeDockOffset: normalizeEdgeDockOffset(patch.edgeDockOffset ?? settings.edgeDockOffset),
+      edgeDockDisplayId: normalizeEdgeDockDisplayId(patch.edgeDockDisplayId ?? settings.edgeDockDisplayId),
+      edgeDockMode: normalizeEdgeDockMode(patch.edgeDockMode ?? settings.edgeDockMode),
+      edgeDockHaptic: parseBoolean(patch.edgeDockHaptic ?? settings.edgeDockHaptic, true),
+      edgeDockWarnColors: parseBoolean(patch.edgeDockWarnColors ?? settings.edgeDockWarnColors, false),
+      edgeDockMacBackdrop: normalizeEdgeDockBackdropMode(patch.edgeDockMacBackdrop ?? settings.edgeDockMacBackdrop),
+      edgeDockWindowsBackdrop: normalizeWindowsDockBackdropMode(patch.edgeDockWindowsBackdrop ?? settings.edgeDockWindowsBackdrop),
+      edgeDockBubbleSize: normalizeEdgeDockBubbleSize(patch.edgeDockBubbleSize ?? settings.edgeDockBubbleSize),
+      edgeDockBubbleCustomScale: normalizeEdgeDockCustomScale(patch.edgeDockBubbleCustomScale ?? settings.edgeDockBubbleCustomScale),
+      edgeDockSize: normalizeEdgeDockSize(patch.edgeDockSize ?? settings.edgeDockSize),
+      edgeDockCustomScale: normalizeEdgeDockCustomScale(patch.edgeDockCustomScale ?? settings.edgeDockCustomScale),
+      // `null` is a real value here (back to the automatic default), so the
+      // patch is checked for presence rather than coalesced.
+      edgeDockItems: normalizeEdgeDockItems('edgeDockItems' in (patch || {}) ? patch.edgeDockItems : settings.edgeDockItems),
+      discordRpcEnabled: patch.discordRpcEnabled ?? settings.discordRpcEnabled ?? false,
+      limitsEnabled: parseBoolean(patch.limitsEnabled ?? settings.limitsEnabled, true),
+      // Sourced from settings only, never from the patch: subscriptions:save is
+      // the one write path, because it knows whether this device owns the list
+      // or shares it with a hub. Reading the patch here would let any caller
+      // fork the shared list past that decision.
+      subscriptions: subscriptionDisplay.normalizeSubscriptions(
+        settings.subscriptions,
+        { currencyApi: { normalizeCurrency } }
+      ),
+      subscriptionsCacheHub: String(settings.subscriptionsCacheHub || ''),
+      icloudWriterId: String(settings.icloudWriterId || ''),
+      subscriptionsOrphaned: {
+        hubUrl: orphanedSubscriptions().hubUrl,
+        records: subscriptionDisplay.normalizeSubscriptions(
+          orphanedSubscriptions().records,
+          { currencyApi: { normalizeCurrency } }
+        )
+      },
+      limitProviders: patch.limitProviders !== undefined ? migrateLimitProviders(patch.limitProviders) : settings.limitProviders,
+      limitProviderOrder: patch.limitProviderOrder !== undefined ? migrateLimitProviderOrder(patch.limitProviderOrder) : settings.limitProviderOrder,
+      clientDisplayOrder: patch.clientDisplayOrder !== undefined ? migrateClientDisplayOrder(patch.clientDisplayOrder) : (settings.clientDisplayOrder || ''),
+      separateQoderClients: parseBoolean(patch.separateQoderClients ?? settings.separateQoderClients, false),
+      hiddenClients: patch.hiddenClients !== undefined ? migrateClientSelection(patch.hiddenClients, normalizeHiddenClients) : migrateClientSelection(settings.hiddenClients, normalizeHiddenClients),
+      pinnedClients: patch.pinnedClients !== undefined ? migrateClientSelection(patch.pinnedClients, normalizePinnedClients) : migrateClientSelection(settings.pinnedClients, normalizePinnedClients),
+      viewDisplayOrder: patch.viewDisplayOrder !== undefined ? migrateViewDisplayOrder(patch.viewDisplayOrder) : (settings.viewDisplayOrder || ''),
+      hiddenViews: patch.hiddenViews !== undefined ? normalizeHiddenViews(patch.hiddenViews, DEFAULT_VIEW_LIST) : normalizeHiddenViews(settings.hiddenViews, DEFAULT_VIEW_LIST),
+      homeModuleOrder: patch.homeModuleOrder !== undefined ? normalizeHomeModuleOrder(patch.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(',') : normalizeHomeModuleOrder(settings.homeModuleOrder, DEFAULT_HOME_MODULE_LIST).join(','),
+      hiddenHomeModules: patch.hiddenHomeModules !== undefined ? normalizeHiddenHomeModules(patch.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST) : normalizeHiddenHomeModules(settings.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST),
+      homeModuleCounts: normalizeHomeModuleCounts(patch.homeModuleCounts, settings.homeModuleCounts),
+      showHomeLimitBars: parseBoolean(patch.showHomeLimitBars ?? settings.showHomeLimitBars, false),
+      showExactHomeTrendTokens: parseBoolean(patch.showExactHomeTrendTokens ?? settings.showExactHomeTrendTokens, false),
+      homeLimitDisplayMode: normalizeHomeLimitDisplayMode(patch.homeLimitDisplayMode ?? settings.homeLimitDisplayMode),
+      showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, false),
+      homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
+      hiddenHomeLimitProviders: patch.hiddenHomeLimitProviders !== undefined ? normalizeHiddenLimitProviders(patch.hiddenHomeLimitProviders) : normalizeHiddenLimitProviders(settings.hiddenHomeLimitProviders),
+      limitProviderHiddenItems: normalizeLimitProviderHiddenItems(patch.limitProviderHiddenItems ?? settings.limitProviderHiddenItems),
+      homeLimitAccountCount: normalizeHomeLimitAccountCount(patch.homeLimitAccountCount ?? settings.homeLimitAccountCount),
+      periodMonthMode: normalizePeriodMonthMode(patch.periodMonthMode ?? settings.periodMonthMode),
+      modelRankingMetric: normalizeRankingMetric(patch.modelRankingMetric ?? settings.modelRankingMetric),
+      sessionTitlesEnabled: parseBoolean(patch.sessionTitlesEnabled ?? settings.sessionTitlesEnabled, true),
+      sessionContextMetric: normalizeSessionContextMetric(patch.sessionContextMetric ?? settings.sessionContextMetric),
+      historyEnabled: parseBoolean(patch.historyEnabled ?? settings.historyEnabled, false),
+      projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
+      projectBreakdownMode: normalizeProjectBreakdownMode(patch.projectBreakdownMode ?? settings.projectBreakdownMode),
+      historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
+      sessionUsageArchiveEnabled,
+      wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, false),
+      collectionMode: normalizeCollectionMode(patch.collectionMode ?? settings.collectionMode),
+      collectionIntervalMs: normalizeCollectionIntervalMs(patch.collectionIntervalMs ?? settings.collectionIntervalMs),
+      syncUploadIntervalMs: normalizeSyncUploadIntervalMs(patch.syncUploadIntervalMs ?? settings.syncUploadIntervalMs),
+      serviceProviderDisplayOrder: patch.serviceProviderDisplayOrder !== undefined ? String(patch.serviceProviderDisplayOrder || '') : (settings.serviceProviderDisplayOrder || ''),
+      hiddenServiceProviders: patch.hiddenServiceProviders !== undefined ? String(patch.hiddenServiceProviders || '') : (settings.hiddenServiceProviders || ''),
+      serviceStatusRefreshMs: normalizeServiceStatusRefreshMs(patch.serviceStatusRefreshMs ?? settings.serviceStatusRefreshMs),
+      limitsRefreshMode: normalizeLimitsRefreshMode(patch.limitsRefreshMode ?? settings.limitsRefreshMode),
+      limitsRefreshMs: normalizeLimitsRefreshMs(patch.limitsRefreshMs ?? settings.limitsRefreshMs),
+      showLimitSource: parseBoolean(patch.showLimitSource ?? settings.showLimitSource, false),
+      maskLimitAccountEmails: parseBoolean(patch.maskLimitAccountEmails ?? settings.maskLimitAccountEmails, false),
+      limitsHistoryOpenMode: ['hover', 'click', 'off'].includes(patch.limitsHistoryOpenMode ?? settings.limitsHistoryOpenMode) ? (patch.limitsHistoryOpenMode ?? settings.limitsHistoryOpenMode) : 'hover',
+      claudePrepaidBalanceEnabled: parseBoolean(patch.claudePrepaidBalanceEnabled ?? settings.claudePrepaidBalanceEnabled, true),
+      claudeCliFallbackEnabled: parseBoolean(patch.claudeCliFallbackEnabled ?? settings.claudeCliFallbackEnabled, true),
+      codexResetForecastEnabled: parseBoolean(patch.codexResetForecastEnabled ?? settings.codexResetForecastEnabled, false),
+      workbuddyQuotaTotalEnabled: parseBoolean(patch.workbuddyQuotaTotalEnabled ?? settings.workbuddyQuotaTotalEnabled, false),
+      showCodexAdditionalLimits: parseBoolean(patch.showCodexAdditionalLimits ?? settings.showCodexAdditionalLimits, true),
+      opencodeAmbientEnabled: parseBoolean(patch.opencodeAmbientEnabled ?? settings.opencodeAmbientEnabled, true),
+      opencodeLocalLimitsEnabled: parseBoolean(patch.opencodeLocalLimitsEnabled ?? settings.opencodeLocalLimitsEnabled, false),
+      showLimitUsed: parseBoolean(patch.showLimitUsed ?? settings.showLimitUsed, false),
+      keepAboveTaskbar: parseBoolean(patch.keepAboveTaskbar ?? settings.keepAboveTaskbar, false),
+      windowMaximized: parseBoolean(settings.windowMaximized, false),
+      zoomFactor: clampZoom(patch.zoomFactor ?? settings.zoomFactor),
+      ...normalizeTrayModeSettings({
+        showTrayIcon: patch.showTrayIcon ?? settings.showTrayIcon,
+        trayMode: patch.trayMode ?? settings.trayMode,
+        hideAppIcon: patch.hideAppIcon ?? settings.hideAppIcon
+      }),
+      trayContent: normalizeTrayContent(patch.trayContent ?? settings.trayContent),
+      trayCustomLayout: normalizeTrayLayout(patch.trayCustomLayout ?? settings.trayCustomLayout),
+      showTrayProviderBadge: parseBoolean(patch.showTrayProviderBadge ?? settings.showTrayProviderBadge, false),
+      floatingBubbleContent: normalizeTrayContent(patch.floatingBubbleContent ?? settings.floatingBubbleContent, 'icon'),
+      floatingBubbleCustomLayout: normalizeTrayLayout(patch.floatingBubbleCustomLayout ?? settings.floatingBubbleCustomLayout),
+      windowToggleShortcut: normalizeWindowToggleShortcut(patch.windowToggleShortcut ?? settings.windowToggleShortcut),
+      currency: normalizedCurrency,
+      currencyRates: patch.currencyRates !== undefined ? normalizeCurrencyOverrides(patch.currencyRates) : normalizeCurrencyOverrides(settings.currencyRates),
+      language: patch.language !== undefined ? normalizeLanguageSetting(patch.language, settings.language) : normalizeLanguageSetting(settings.language),
+      startAtLogin: loginItemEnabledHere() ? parseBoolean(patch.startAtLogin ?? settings.startAtLogin, false) : false,
+      automaticAppUpdates: parseBoolean(patch.automaticAppUpdates ?? settings.automaticAppUpdates, false),
+      // A hand-edited settings.json value the form would refuse is kept as-is
+      // so the transport fails closed on it rather than silently going direct.
+      proxyUrl: patch.proxyUrl !== undefined ? normalizeProxyUrl(patch.proxyUrl) : String(settings.proxyUrl || ''),
+      noProxy: patch.noProxy !== undefined ? normalizeNoProxy(patch.noProxy) : String(settings.noProxy || ''),
+      ...finalAccountSettings(patch, settings),
+      customModelPricing: patch.customModelPricing !== undefined
+        ? normalizeCustomPricingSetting(patch.customModelPricing)
+        : normalizeCustomPricingSetting(settings.customModelPricing)
+    }, windowBehaviorSelection(normalizedPatch));
+    retainIcloudDeviceIdentity(previousSettingsState, settings);
+    settings.archivedClientUsage = normalizeArchivedClientUsage(settings.archivedClientUsage);
+    if (settings.clients !== previousClients) updateArchivedClientUsage(previousClients, settings.clients);
+    delete settings.edgeDrawerEnabled;
+    const nextSettingsState = settings;
+    settings = previousSettingsState;
+    try {
+      // Journal the previous title context and OFF while the old connection is
+      // still active. No replacement credentials/device may commit before this.
+      contentRuntime.beforeDestinationChange(syncContentContext(nextSettingsState));
+      nextSettingsState.syncContentState = normalizeSyncContentState(settings.syncContentState);
+      settings = nextSettingsState;
+      saveSettings({ throwOnError: true });
+    } catch (error) {
+      // Keep any OFF/cleanup journal already committed by the preflight.
+      settings = { ...previousSettingsState,
+        syncContentState: normalizeSyncContentState(persistedSettingsSnapshot?.syncContentState || settings.syncContentState) };
+      throw error;
+    }
+    contentRuntime.invalidate();
+    const receiverPermissionChanged = settings.hubSyncSessionTitles !== previousSettingsState.hubSyncSessionTitles;
+    if (receiverPermissionChanged) contentRuntime.receiverPermissionChanged(settings.hubSyncSessionTitles);
+    // A worker-hosted transform holds its own copy of the settings it reads.
+    // Update it now rather than when the usage reconfigure settles: pausing the
+    // session archive must stop captures from the next summary on.
+    latestUsageHost?.updateTransformSettings?.(usageTransformSettings(settings));
+    if (patch?.limitProviders !== undefined) initialLimitProvidersPending = false;
+    if (JSON.stringify(settings.customModelPricing || []) !== previousCustomModelPricing) {
+      regenerateTokscalePricing();
+      refreshAfterPricingChange();
+    }
+    configureWindowToggleShortcut();
+    if (settings.startAtLogin !== previousStartAtLogin) {
+      settings.startAtLogin = applyLoginItem(settings.startAtLogin);
+      saveSettings({ throwOnError: true });
+    }
+    // Every save re-applies, so re-saving the same proxy retries a session
+    // apply that failed earlier. Every provider answer so far came over the
+    // previous route; ask again over the new one instead of waiting out each
+    // provider's interval.
+    const proxySettingChanged = JSON.stringify([settings.proxyUrl || '', settings.noProxy || '']) !== previousProxyKey;
+    void sessionProxy.apply().then((sessionChanged) => {
+      if (proxySettingChanged || sessionChanged) return queueLimitInvalidation({ all: true }, 'settings-change');
+      return null;
+    }).catch((error) => console.log(`[limits-runtime] proxy refresh failed: ${error.message}`));
+    if (settings.automaticAppUpdates && !previousAutomaticAppUpdates) {
+      runAppUpdateCheck({ bypassCooldown: true }).catch(() => {});
+    }
+    if (patch.zoomFactor !== undefined) applyZoomFactor();
+    if (settings.discordRpcEnabled && !previousDiscordRpcEnabled) {
+      startDiscordRpc();
+      if (latestStats) updateDiscordRpcDisplay(latestStats);
+    }
+    else if (!settings.discordRpcEnabled && previousDiscordRpcEnabled) stopDiscordRpc();
+    else if (settings.discordRpcEnabled && (
+      settings.currency !== previousCurrency
+      || settings.compactTokenUnits !== previousCompactTokenUnits
+      || settings.language !== previousLanguage
+    ) && latestStats) updateDiscordRpcDisplay(latestStats);
+    applyWindowSettings();
+    syncFloatingBubbleAvailability();
+    syncDockSurfaces();
+    applyNativeMaterial();
+    const runtimeChange = classifySettingsChange(previousRuntimeSettings, settings);
+    const widgetHistorySourceChanged = previousRuntimeSettings.historyEnabled !== settings.historyEnabled;
+    if (widgetHistorySourceChanged && !runtimeChange.modeStructural) {
+      refreshMacWidgetHistorySource();
+    }
+    const limitInvalidations = settingsLimitInvalidationPlan(runtimeChange, limitContext.ensureLimitProvider);
+    if (runtimeChange.modeStructural || (receiverPermissionChanged && settings.hubMode === 'host')) {
+      for (const { scope, reason, options } of limitInvalidations) {
+        rememberPendingLimitInvalidation(scope, reason, options);
+        limitContext.onLimitsRefresh?.(scope, Promise.resolve({ queued: true }));
+      }
+      startMode();
+    } else if (runtimeChange.sinkStructural) {
+      for (const { scope, reason, options } of limitInvalidations) {
+        rememberPendingLimitInvalidation(scope, reason, options);
+        limitContext.onLimitsRefresh?.(scope, Promise.resolve({ queued: true }));
+      }
+      restartDeviceRuntimeForMode();
+    } else {
+      if (runtimeChange.usageStructural) {
+        reconfigureUsageRuntimeForMode();
+      } else if (previousRuntimeSettings.codexDotsVisible !== settings.codexDotsVisible) {
+        const dotsVisibilityApplied = Promise.resolve(deviceRuntimeHandle?.setCodexDotsVisible(settings.codexDotsVisible));
+        onDotsVisibilityRefresh(dotsVisibilityApplied);
+        // Keep failure observable to settings:update without an unhandled
+        // rejection for callers that use the synchronous settings path.
+        dotsVisibilityApplied.catch((error) => {
+          console.log(`[collector] Dots visibility refresh failed: ${error.message}`);
+        });
+      }
+      if (runtimeChange.limitsReconfigure && deviceRuntimeHandle) {
+        deviceRuntimeHandle.reconfigureLimits(electronLimitsConfig());
+      }
+      for (const { scope, reason, options } of limitInvalidations) {
+        const refresh = queueLimitInvalidation(scope, reason, options);
+        limitContext.onLimitsRefresh?.(scope, refresh);
+        void refresh.catch((error) => {
+          console.log(`[limits-runtime] settings refresh failed: ${error.message}`);
+        });
+      }
+    }
+    if (settings.showTrayIcon !== previousShowTrayIcon) {
+      if (settings.showTrayIcon) ensureTray();
+      else destroyTray();
+    }
+    if (settings.trayMode !== previousTrayMode) {
+      if (settings.trayMode) enterTrayMode();
+      else exitTrayMode();
+    } else if (
+      settings.trayContent !== previousTrayContent ||
+      JSON.stringify(settings.trayCustomLayout || {}) !== previousTrayCustomLayout ||
+      JSON.stringify(settings.floatingBubbleCustomLayout || {}) !== previousFloatingBubbleCustomLayout ||
+      settings.showTrayProviderBadge !== previousShowTrayProviderBadge ||
+      settings.currency !== previousCurrency ||
+      settings.compactTokenUnits !== previousCompactTokenUnits ||
+      settings.language !== previousLanguage
+    ) {
+      updateTrayDisplay();
+    }
+    // enterTrayMode()/exitTrayMode() already re-apply the policy; this covers a
+    // hideAppIcon flip on its own, which is the only other input to it.
+    if (settings.hideAppIcon !== previousHideAppIcon && settings.trayMode === previousTrayMode) {
+      applyMacActivationPolicy();
+    }
+    if (patch.currency !== undefined || patch.currencyRates !== undefined) {
+      applyEffectiveRates();               // sync: settingsForRenderer() below sees fresh effective map
+      updateTrayDisplay();
+      if (settings.discordRpcEnabled && latestStats) updateDiscordRpcDisplay(latestStats);
+      refreshExchangeRates();              // async: fetch if stale, then re-push
+    }
+    if ((settings.opencodeLocalLimitsEnabled === true) !== previousOpenCodeLocalLimitsEnabled) {
+      // Re-project the cached aggregate immediately. The Hub can be offline and
+      // therefore may not send another frame after this local-only setting changes.
+      refreshLimitStatsPresentation();
+    }
+    if (JSON.stringify(settings.modelAliases) !== JSON.stringify(previousSettingsState.modelAliases)
+      || settings.modelAliasGrouping !== previousSettingsState.modelAliasGrouping) {
+      // No collection/pricing refresh: regroup the cached source immediately,
+      // including when the hub is offline. Revision decoration invalidates the
+      // main renderer's full-history caches; the dashboard has its own event.
+      refreshLimitStatsPresentation();
+      if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+        try { dashboardWindow.webContents.send('dashboard:historyChanged'); } catch (_) {}
+      }
+    }
+    pushSettingsToRenderer();
+    if (settings.sessionTitlesEnabled !== previousSettingsState.sessionTitlesEnabled) {
+      refreshLimitStatsPresentation();
+    }
+    pluginRuntime?.settingsChanged();
+    return settingsForRenderer();
+  }
+  ipcMain.handle('appearance:preview', (event, patch) => {
+    // Other document windows retain their saved theme; glass previews
+    // also reach the floating surfaces so the range control has one meaning.
+    const win = BrowserWindow.fromWebContents(event.sender);
+    syncNativeMaterialVisibility(win, nativeMaterialOptions({ ...settings, ...patch }, win === dashboardWindow));
+    if (win === mainWindow || win === dashboardWindow) previewDockAppearance(patch);
+    if (patch && patch.zoomFactor !== undefined && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.setZoomFactor(clampZoom(patch.zoomFactor));
+    }
+    if (patch && patch.edgeDockCustomScale !== undefined && edgeDockController?.isRunning()) {
+      edgeDockController.previewScale(patch.edgeDockCustomScale);
+    }
+    if (patch && patch.edgeDockBubbleCustomScale !== undefined && edgeDockController?.isRunning()) {
+      edgeDockController.previewScale(patch.edgeDockBubbleCustomScale, 'bubble');
+    }
+    if (patch && patch.notchCustomScale !== undefined && notchController?.isRunning()) {
+      notchController.previewScale(patch.notchCustomScale);
+    }
+    return true;
+  });
+  ipcMain.handle('settings:displayPreview', (event, surface, phase, slots) => {
+    if (event.sender !== mainWindow?.webContents) return null;
+    return require('./displayPreview').buildDisplayPreview(settingsForRenderer(), surface, phase, process.platform, Date.now(), slots, pluginRuntime?.limitsSnapshot());
+  });
+  ipcMain.on('window:viewState', (_event, patch) => {
+    updateRendererViewState(patch);
+  });
+  ipcMain.handle('floatingBubble:expand', () => expandFloatingBubble());
+  ipcMain.handle('floatingBubble:peek', () => expandFloatingBubble({ focus: false }));
+  ipcMain.handle('floatingBubble:collapseIfIdle', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return false;
+    if (floatingBubbleState.collapsed || !canUseFloatingBubble(settings)) return false;
+    if (mainWindow.isFocused()) return false; // promoted to a focused window; let blur handle collapse
+    const bounds = mainWindow.getBounds();
+    if (typeof screen.getCursorScreenPoint === 'function') {
+      const pt = screen.getCursorScreenPoint();
+      const inside = pt.x >= bounds.x && pt.x < bounds.x + bounds.width &&
+        pt.y >= bounds.y && pt.y < bounds.y + bounds.height;
+      if (inside) return false; // cursor returned during the grace window
+    }
+    // A hover peek never receives focus and never blurs, so a stale suppress flag
+    // must not be allowed to wedge it open.
+    floatingBubbleState.suppressNextCollapse = false;
+    return maybeCollapseFloatingBubble(bounds);
+  });
+  ipcMain.handle('floatingBubble:setCollapsedSize', (_event, size) => {
+    if (!size || !canUseFloatingBubble(settings)) return false;
+    const width = Math.round(Number(size.width));
+    const height = Math.round(Number(size.height));
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return false;
+    floatingBubbleState.contentSize = { width, height }; // used by the next collapse
+    if (!floatingBubbleState.collapsed || !mainWindow || mainWindow.isDestroyed()) return true;
+    const current = mainWindow.getBounds();
+    if (current.width === width && current.height === height) return true;
+    const display = displayForBounds(current);
+    if (!display) return true;
+    const collapsedArea = collapsedAreaForDisplay(display);
+    // Keep the docked edge fixed while resizing: collapsedFloatingBubbleBounds re-clamps the
+    // current x/y against the new size (right-docked snaps flush to the edge).
+    const target = collapsedFloatingBubbleBounds(current, collapsedArea, {
+      margin: collapsedMargin(),
+      collapsedBounds: current,
+      handleWidth: width,
+      handleHeight: height
+    });
+    if (!target) return true;
+    applyCollapsedFloatingBubbleLimits(target);
+    mainWindow.setBounds(target);
+    floatingBubbleState.collapsedBounds = target;
+    settings.floatingBubbleBounds = target;
+    saveSettings();
+    return true;
+  });
+  ipcMain.handle('floatingBubble:move', (_event, delta) => {
+    if (!mainWindow || mainWindow.isDestroyed() || !floatingBubbleState.collapsed) return false;
+    const current = mainWindow.getBounds();
+    const hasDragOffset = delta && (
+      Object.hasOwn(delta, 'offsetX') ||
+      Object.hasOwn(delta, 'offsetY') ||
+      Object.hasOwn(delta, 'offsetRatioX') ||
+      Object.hasOwn(delta, 'offsetRatioY')
+    );
+    const cursor = hasDragOffset && typeof screen.getCursorScreenPoint === 'function'
+      ? screen.getCursorScreenPoint()
+      : null;
+    const display = (cursor && displayForPoint(cursor)) || displayForBounds(current);
+    if (!display) return false;
+    const collapsedArea = collapsedAreaForDisplay(display);
+    const margin = collapsedMargin();
+    const target = cursor
+      ? dragFloatingBubbleBounds(current, collapsedArea, cursor, delta, margin)
+      : moveFloatingBubbleBounds(current, collapsedArea, delta, margin);
+    if (!target) return false;
+    floatingBubbleState.collapsedBounds = target;
+    floatingBubbleState.side = floatingBubbleSide(target, collapsedArea);
+    if (target.width === current.width && target.height === current.height && typeof mainWindow.setPosition === 'function') {
+      mainWindow.setPosition(target.x, target.y, false);
+    } else {
+      mainWindow.setBounds(target);
+    }
+    persistBoundsSoon();
+    sendFloatingBubbleState();
+    return true;
+  });
+  ipcMain.handle('tray:setIcons', (_event, icons) => {
+    if (!icons || typeof icons !== 'object') return false;
+    for (const [id, dataUrl] of Object.entries(icons)) {
+      if (dataUrl === null) {
+        delete providerTrayIcons[id];
+        continue;
+      }
+      if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png')) continue;
+      const img = nativeImage.createFromDataURL(dataUrl);
+      if (img.isEmpty()) continue;
+      // Resize by height only; aspect ratio is preserved, so wide bar-style
+      // icons keep their width while square provider icons stay square.
+      // Windows targets its own small-icon metric (16px x the display scale
+      // factor) rather than the macOS menubar height, so a single high-quality
+      // downscale of the 44px-tall renderer source stays crisp in the
+      // notification area instead of the old fixed 20px-for-all blur, and its
+      // square cell gets the bitmap trimmed to the pixels the renderer drew.
+      const sized = prepareTrayIconForPlatform(img, {
+        platform: process.platform,
+        scaleFactor: screen.getPrimaryDisplay().scaleFactor
+      });
+      if (shouldUseTemplateTrayIcon(id, process.platform, settings?.showTrayProviderBadge)) sized.setTemplateImage(true);
+      providerTrayIcons[id] = sized;
+    }
+    updateTrayDisplay();
+    return true;
+  });
+  ipcMain.handle('stats:get', async (_event, options) => {
+    const revision = statsPushRevision;
+    const fetched = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
+    // A push from the same source/generation supersedes its pending read. A
+    // retried read after a Hub switch must adopt the new source instead.
+    // Compare the source of the revision, not the latest local composition:
+    // a local B publication must not relabel a revision advanced by Hub A.
+    const sameSource = statsPushSource?.generation === hubModeGeneration
+      && statsPushSource.identity === currentHubStatsIdentity();
+    const current = sameSource && statsPushRevision !== revision && latestStats ? latestStats : fetched;
+    if (current !== latestStats) sendPush({ event: 'stats', data: { stats: current, reason: 'read' } }, { skipExport: true });
+    const stats = latestStats || current;
+    // The stream normally carries the stamp, but it is precisely when the stream
+    // is down that this read is the only thing still arriving from the hub.
+    maybeAdoptSharedSubscriptionRevision(stats);
+    return rendererSnapshots.stamp(stats, rendererStats(electronPresentationStats(stats)));
+  });
+  ipcMain.handle('devices:delete', async (_event, deviceId) => {
+    try {
+      await deleteDeviceFromCurrentSync(normalizeDeviceIdForDeletion(deviceId));
+      return { ok: true };
+    } catch (error) {
+      throw new Error(error.code || error.message, { cause: error });
+    }
+  });
+  ipcMain.handle('stats:allTimeSessions', (_event, snapshotId) => rendererAllTimeSessions(rendererSnapshots.get(snapshotId)));
+  ipcMain.handle('export:now', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: settings.exportDir || app.getPath('home')
+    });
+    if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
+    const stats = await fetchStats();
+    const written = await writeExportTo(result.filePaths[0], completeLocalSyncStats(stats).periods);
+    if (!written.ok) return { ok: false, dir: result.filePaths[0], reason: written.reason || 'write-failed' };
+    return { ok: true, dir: result.filePaths[0] };
+  });
+  ipcMain.handle('export:pickAutoDir', async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory', 'createDirectory'],
+      defaultPath: settings.exportDir || app.getPath('home')
+    });
+    if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
+    return { ok: true, dir: result.filePaths[0] };
+  });
+  ipcMain.handle('session:getDetail', (_event, args) => {
+    const { client, sessionId, period, sessionCost } = args || {};
+    return readSessionDetailForPlatform({ client, sessionId, period, sessionCost }, {
+      lookupModelPricing, getPricingRevision: () => pricingFingerprint({ pricingPath: customPricingPath() })
+    });
+  });
+  ipcMain.handle('stream:status', () => ({ connected: streamConnected, mode, ...(streamFailure || {}) }));
+  ipcMain.handle('serviceStatus:get', (_event, options) => serviceStatusClient.getServiceStatus({
+    force: Boolean(options?.force),
+    providerIds: Array.isArray(options?.providerIds) ? options.providerIds : null
+  }));
+  ipcMain.handle('codexResetForecast:get', (_event, options) => {
+    if (settings?.codexResetForecastEnabled !== true) {
+      return { status: 'disabled', checkedAt: new Date().toISOString() };
+    }
+    return codexResetForecastClient.getForecast({ force: Boolean(options?.force) });
+  });
+  ipcMain.handle('hub:getInfo', () => getHubInfo());
+  ipcMain.handle('hub:getBuildStatus', () => getHubBuildStatus());
+  ipcMain.handle('hub:regenerateSecret', () => {
+    applySettingsPatch({ hubHostSecret: generateHubSecret() });
+    return getHubInfo();
+  });
+  ipcMain.handle('appearance:getNativeMaterial', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    return getNativeMaterialState(win);
+  });
+  ipcMain.handle('app:getInfo', () => ({
+    notchCapabilities: notchController?.getCapabilities() || null,
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    osRelease: require('os').release(),
+    isPackaged: app.isPackaged,
+    userData: app.getPath('userData'),
+    // So the diagnostics panel can print ~/… instead of the user's account name.
+    homeDir: require('os').homedir(),
+    sharedDataDir: sharedDataDir(),
+    customScanClientIds: CUSTOM_SCAN_CLIENT_IDS,
+    loginItemSupported: loginItemEnabledHere(),
+    loginItemOpenAtLogin: currentLoginItemState(),
+    systemDarkUi: currentSystemDarkTrayUi()
+  }));
+  ipcMain.handle('diagnostics:generate', async () => {
+    const report = await diagnosticReportGenerator.generate();
+    return {
+      generatedAt: report.generatedAt,
+      completeness: report.completeness,
+      text: report.text,
+      bytes: report.bytes,
+      truncated: report.truncated,
+      includedClientCount: report.includedClientCount,
+      omittedClientCount: report.omittedClientCount,
+      includedLimitProviderCount: report.includedLimitProviderCount,
+      omittedLimitProviderCount: report.omittedLimitProviderCount,
+      includedRemoteGroupCount: report.includedRemoteGroupCount,
+      omittedRemoteGroupCount: report.omittedRemoteGroupCount,
+      includedJournalEventCount: report.includedJournalEventCount,
+      journalOmittedCount: report.journalOmittedCount
+    };
+  });
+  // Where each known tool's data is read from on THIS machine. The absolute
+  // paths stay local by design — they carry the user's home directory and never
+  // go on the wire — so the renderer asks the main process for them instead.
+  //
+  // Probe only the client whose detail panel is open. The renderer caches the
+  // result for the current health snapshot, or for the current device/client
+  // pair when the tool is not tracked, avoiding eager filesystem work.
+  const clientSourceIpcHandlers = createClientSourceIpcHandlers({
+    knownClients: KNOWN_CLIENTS,
+    trackedClients: () => trackedClientSet(clientsCsvForSetting(settings?.clients)),
+    visibleDiagnosticRoots: (clients) => visibleDiagnosticRoots(clients, { customScanPaths: settings?.customScanPaths }),
+    clientDiagnosticRoots: (clients) => clientDiagnosticRoots(clients, { customScanPaths: settings?.customScanPaths }),
+    showItemInFolder: (target) => shell.showItemInFolder(target),
+    openPath: (target) => shell.openPath(target),
+    revealClientSyncLock: () => {
+      const lockPath = antigravitySyncLockPath(os.homedir());
+      if (!fs.existsSync(lockPath)) return false;
+      shell.showItemInFolder(lockPath);
+      return true;
+    },
+    canRunRescan: () => ownsUsageRuntime(),
+    rescanClient: (client) => refreshUsageClient(client, { forceSync: true }),
+    repairClientSyncLock: () => repairAntigravitySyncLock({
+      lockPath: antigravitySyncLockPath(os.homedir())
+    }),
+    onRescanError: (error) => console.log(`[usage-runtime] rescan failed: ${error.message}`)
+  });
+  ipcMain.handle('usage:clientSources', (_event, clientId) => clientSourceIpcHandlers.clientSources(clientId));
+  ipcMain.handle('usage:pickCustomScanPath', async (_event, clientId) => {
+    const client = String(clientId || '').trim().toLowerCase();
+    if (!CUSTOM_SCAN_CLIENT_IDS.includes(client)) return { ok: false, error: 'unsupported-client' };
+    const result = await dialog.showOpenDialog({
+      properties: ['openDirectory'],
+      defaultPath: app.getPath('home')
+    });
+    if (result.canceled || !result.filePaths[0]) return { ok: false, canceled: true };
+    const dir = result.filePaths[0];
+    const normalized = normalizeCustomScanPaths({ [client]: [dir] });
+    if (!normalized[client]?.[0]) return { ok: false, error: 'unsupported-path' };
+    return { ok: true, dir: normalized[client][0] };
+  });
+  // The renderer sends a client id, never a path: anything it could send would
+  // otherwise become an arbitrary filesystem open.
+  ipcMain.handle('usage:revealClientSource', (_event, clientId) => clientSourceIpcHandlers.revealClientSource(clientId));
+  ipcMain.handle('usage:revealClientSyncLock', (_event, clientId) => clientSourceIpcHandlers.revealClientSyncLock(clientId));
+  ipcMain.handle('usage:rescanClient', (_event, clientId) => clientSourceIpcHandlers.rescanClient(clientId));
+  ipcMain.handle('usage:repairClientSyncLock', (_event, clientId) => clientSourceIpcHandlers.repairClientSyncLock(clientId));
+  ipcMain.handle('clipboard:write', async (_event, text) => {
+    await clipboard.writeText(String(text || ''));
+    return true;
+  });
+  ipcMain.handle('app:openExternal', (_event, url) => {
+    if (!isAllowedExternalUrl(url)) return { ok: false, error: 'url not in allowlist' };
+    return shell.openExternal(url)
+      .then(() => ({ ok: true }))
+      .catch((error) => ({ ok: false, error: error.message }));
+  });
+  ipcMain.handle('app:openUserData', () => shell.openPath(app.getPath('userData')));
+  ipcMain.handle('antigravity:accounts', () => antigravityAccountsForRenderer());
+  ipcMain.handle('workbuddy:accounts', () => workbuddyAccountsForRenderer());
+  ipcMain.handle('workbuddy:addAccount', (_event, realm) => workbuddyAccountOperation((service) => service.addAccount(realm)));
+  ipcMain.handle('workbuddy:cancelLogin', () => workbuddyManagedAccountService?.cancelLogin() || false);
+  ipcMain.handle('workbuddy:removeAccount', (_event, id) => workbuddyAccountOperation((service) => service.removeAccount(id)));
+  ipcMain.handle('workbuddy:setAccountEnabled', (_event, id, enabled) => workbuddyAccountOperation((service) => service.setAccountEnabled(id, enabled)));
+  ipcMain.handle('antigravity:addAccount', () => addAntigravityManagedAccount());
+  ipcMain.handle('antigravity:cancelLogin', () => cancelAntigravityManagedAccountLogin());
+  ipcMain.handle('antigravity:setAccountEnabled', (_event, id, enabled) => setAntigravityManagedAccountEnabled(id, enabled));
+  ipcMain.handle('antigravity:removeAccount', (_event, id) => removeAntigravityManagedAccount(id));
+  ipcMain.handle('mimo:accounts', () => mimoAccountsForRenderer());
+  ipcMain.handle('mimo:addAccount', (_event, cookieHeader) => addMimoManagedAccount(cookieHeader));
+  ipcMain.handle('mimo:openConsole', () => shell.openExternal(MIMO_PLATFORM_CONSOLE_URL)
+    .then(() => ({ ok: true }))
+    .catch((error) => ({ ok: false, error: error.message })));
+  ipcMain.handle('mimo:setAccountEnabled', (_event, id, enabled) => setMimoManagedAccountEnabled(id, enabled));
+  ipcMain.handle('mimo:removeAccount', async (_event, id) => removeMimoManagedAccount(id));
+  ipcMain.handle('tokscale:getStatus', () => getTokscaleStatus());
+  ipcMain.handle('appUpdate:getState', () => deriveAppUpdateState());
+  ipcMain.handle('appUpdate:checkNow', () => runAppUpdateCheck({ force: true }));
+  ipcMain.handle('appUpdate:download', () => downloadAndPrepareAppUpdate());
+  ipcMain.handle('appUpdate:install', () => installDownloadedAppUpdate());
+  ipcMain.handle('appUpdate:dismiss', (_event, version) => dismissAppUpdateVersion(version));
+  ipcMain.handle('cursor:loginManual', (_event, ...args) => cursorAccountService().loginManual(...args));
+  ipcMain.handle('claude:accounts', () => claudeAccountService().accounts());
+  ipcMain.handle('claude:saveWebAccount', (_event, values) => claudeAccountService().saveAccount(values));
+  ipcMain.handle('claude:removeWebAccount', (_event, id) => claudeAccountService().removeAccount(String(id || '')));
+  ipcMain.handle('claude:setAccountEnabled', (_event, id, enabled) => claudeAccountService().setAccountEnabled(String(id || ''), enabled));
+  // Claude managed accounts have their own IPC. This form serves the legacy Web lane.
+  ipcMain.handle('limits:saveCredential', (_event, providerId, values) => providerId !== 'claude' && ACCOUNT_SLOT_PROVIDER_IDS.has(providerId) && !credentialCommands.hasRetainedCredential(providerId) ? accountSlotService.add(providerId, values) : credentialCommands.saveCredential(providerId, values));
+  getLimitsHistoryController().register();
+  ipcMain.handle('limits:listOrganizationChoices', (_event, providerId) => credentialCommands.listOrganizationChoices(providerId));
+  ipcMain.handle('limits:clearCredential', (_event, providerId) => credentialCommands.clearCredential(providerId));
+  // Explicit panel refreshes collect only their provider. Save and clear reuse
+  // the refresh scheduled by the credential settings write above. A quota row's
+  // own refresh button also names its account, which narrows the probe to that
+  // account where the provider supports it.
+  ipcMain.handle('limits:probes', () => limitProbes);
+  ipcMain.handle('limits:refresh', (_event, providerId, account) => refreshLimitProvider(providerId, account));
+  ipcMain.handle('opencode:saveCookie', (_event, ...args) => opencodeAccountService().saveCookie(...args));
+  ipcMain.handle('cursor:setAccountEnabled', (_event, ...args) => cursorAccountService().setAccountEnabled(...args));
+  ipcMain.handle('cursor:logout', (_event, ...args) => cursorAccountService().logout(...args));
+  ipcMain.handle('opencode:logout', (_event, ...args) => opencodeAccountService().logout(...args));
+  ipcMain.handle('cursor:status', (_event, ...args) => cursorAccountService().status(...args));
+  ipcMain.handle('opencode:status', (_event, ...args) => opencodeAccountService().status(...args));
+  ipcMain.handle('opencode:getProfiles', (_event, ...args) => opencodeAccountService().getProfiles(...args));
+  // `kind` defaults to 'cookie' so an older renderer calling with two arguments
+  // keeps its existing behavior.
+  ipcMain.handle('opencode:saveProfile', (_event, ...args) => opencodeAccountService().saveProfile(...args));
+  ipcMain.handle('opencode:deleteProfile', (_event, ...args) => opencodeAccountService().deleteProfile(...args));
+  // Removes one credential from an account, leaving the others. Deleting the
+  // account removes all of them; this is how a binding is undone without
+  // losing the credential the user wanted to keep.
+  ipcMain.handle('opencode:removeCredential', (_event, ...args) => opencodeAccountService().removeCredential(...args));
+  // Moves one credential to another account name, creating it when needed. This
+  // is what "rename a credential" means in a model where the name is the
+  // account: moving it to a fresh name splits it off, moving it onto an
+  // existing name binds it there. The value never crosses to the renderer.
+  ipcMain.handle('opencode:moveCredential', (_event, ...args) => opencodeAccountService().moveCredential(...args));
+  // `merge` is the caller confirming that renaming onto an existing account
+  // asserts the two are the same OpenCode account — the same claim as saving a
+  // second credential under one name, and the only thing that licenses reading
+  // quota from one credential while identity comes from another. Without it an
+  // existing name is refused, so the assertion is never made by accident.
+  ipcMain.handle('opencode:renameProfile', (_event, ...args) => opencodeAccountService().renameProfile(...args));
+  ipcMain.handle('opencode:setProfileEnabled', (_event, ...args) => opencodeAccountService().setProfileEnabled(...args));
+  // The auto-detected account has no stored record to carry an enabled flag, so
+  // its switch is a device preference rather than a credential. Writing one
+  // instead would mean a toggle that creates an account under a name the user
+  // can also type, cannot be undone symmetrically once that account is edited,
+  // and quietly comes back enabled when the key it pinned is rotated.
+  ipcMain.handle('opencode:setAmbientEnabled', (_event, ...args) => opencodeAccountService().setAmbientEnabled(...args));
+  const minimaxApiKeys = createMinimaxApiKeys({
+    slotPersistence: ordinarySlotPersistence('minimax'),
+    getSettings: () => settings, saveSettings,
+    probeDeps: () => electronProviderDeps({ env: {}, signal: AbortSignal.timeout(15_000) }),
+    changed: (accountKey, refresh, reason) => {
+      credentialCommands.noteSettingsPatch({ minimaxApiKey: '' });
+      deviceRuntimeHandle?.reconfigureLimits(electronLimitsConfig());
+      void queueLimitInvalidation({ provider: 'minimax', source: 'api', accountKey }, reason, { clear: true, refresh });
+      pushSettingsToRenderer();
+    }
+  });
+  ipcMain.handle('minimax:getKeys', () => minimaxApiKeys.getKeys());
+  for (const method of ['addKey', 'removeKey']) {
+    ipcMain.handle(`minimax:${method}`, async (_event, ...args) => {
+      try { return await minimaxApiKeys[method](...args); }
+      catch (error) { return { ok: false, error: error?.message || 'Could not save MiniMax API key' }; }
+    });
+  }
+  ipcMain.handle('thirdparty:getProfiles', (_event, ...args) => thirdpartyAccountService().getProfiles(...args));
+  ipcMain.handle('thirdparty:saveProfile', (_event, ...args) => thirdpartyAccountService().saveProfile(...args));
+  ipcMain.handle('thirdparty:deleteProfile', (_event, ...args) => thirdpartyAccountService().deleteProfile(...args));
+  ipcMain.handle('thirdparty:renameProfile', (_event, ...args) => thirdpartyAccountService().renameProfile(...args));
+  ipcMain.handle('thirdparty:setProfileEnabled', (_event, ...args) => thirdpartyAccountService().setProfileEnabled(...args));
+  ipcMain.handle('codex:accounts', () => codexAccountsForRenderer());
+  ipcMain.handle('codex:setAccountEnabled', (_event, id, enabled) => setCodexManagedAccountEnabled(id, enabled));
+  ipcMain.handle('codex:addAccount', (event, request = {}) => codexAccountService().login(request, {
+    ownerId: event.sender.id,
+    onStatus: payload => {
+      if (!event.sender.isDestroyed()) event.sender.send('codex:loginStatus', payload);
+    }
+  }));
+  ipcMain.handle('codex:selectWorkspace', (event, request = {}) => codexAccountService().selectWorkspace(request, event.sender.id));
+  ipcMain.handle('codex:cancelLogin', (_event, request = {}) => codexAccountService().cancelLogin(request));
+  ipcMain.handle('codex:removeAccount', async (_event, id) => removeCodexManagedAccount(id));
+  ipcMain.handle('codex:switchSystemAccount', async (_event, id) => switchCodexSystemAccount(id));
+  ipcMain.handle('codex:refreshAccountLimits', async (_event, id) => refreshCodexManagedAccountLimits(id));
+  const copilotAccounts = createCopilotAccounts({
+    getSettings: () => settings, service: accountSlotService,
+    probeDeps: () => electronProviderDeps({ env: {}, signal: AbortSignal.timeout(15_000) })
+  });
+  ipcMain.handle('copilot:getAccounts', () => copilotAccounts.getAccounts());
+  for (const method of ['addAccount', 'removeAccount', 'setEnabled']) {
+    ipcMain.handle(`copilot:${method}`, async (_event, ...args) => {
+      try { return await copilotAccounts[method](...args); }
+      catch (_) { return { ok: false, error: 'Could not update GitHub Copilot account. Please try again.' }; }
+    });
+  }
+  ipcMain.handle('copilot:signIn', async (event, request = {}) => {
+    if (copilotLoginController) return { ok: false, error: 'A GitHub Copilot sign-in is already in progress.', flowId: copilotLoginFlowId };
+    const controller = new AbortController();
+    const flowId = String(request?.flowId || '').trim();
+    copilotLoginController = controller;
+    copilotLoginFlowId = flowId;
+    const sendStatus = (payload) => {
+      if (copilotLoginController !== controller) return;
+      if (!event.sender.isDestroyed()) event.sender.send('copilot:loginStatus', { ...payload, flowId });
+    };
+    try {
+      const enterpriseHost = request.values?.copilotEnterpriseHost ?? request.enterpriseHost
+        ?? (settings?.copilotEnterpriseHost || process.env.COPILOT_ENTERPRISE_HOST || process.env.GITHUB_ENTERPRISE_HOST || '');
+      const result = await runCopilotDeviceFlowLogin({
+        enterpriseHost,
+        signal: controller.signal,
+        onStatus: sendStatus
+      }, {
+        openExternal: (url) => shell.openExternal(url),
+        copyToClipboard: (text) => clipboard.writeText(String(text || '')),
+        fetch
+      });
+      if (copilotLoginController !== controller) {
+        return { ok: false, error: copilotLoginErrorMessage({ status: 'cancelled' }), flowId };
+      }
+      const saved = await copilotAccounts.addAccount(result.accessToken, () => copilotLoginController === controller && !controller.signal.aborted, controller.signal, enterpriseHost, request.label);
+      if (!saved.ok) throw new Error('Could not save GitHub Copilot account.');
+      return { ok: true, flowId };
+    } catch (error) {
+      const message = copilotLoginErrorMessage(error);
+      sendStatus({ phase: 'error', error: message });
+      return { ok: false, error: message, flowId };
+    } finally {
+      if (copilotLoginController === controller) {
+        copilotLoginController = null;
+        copilotLoginFlowId = '';
+      }
+    }
+  });
+  ipcMain.handle('copilot:cancelSignIn', (_event, request = {}) => {
+    const flowId = String(request?.flowId || '').trim();
+    if (flowId && copilotLoginFlowId && flowId !== copilotLoginFlowId) return { ok: true };
+    const controller = copilotLoginController;
+    controller?.abort();
+    if (copilotLoginController === controller) {
+      copilotLoginController = null;
+      copilotLoginFlowId = '';
+    }
+    return { ok: true };
+  });
+  ipcMain.on('window:minimize', (event) => {
+    if (settings?.trayMode) {
+      hidePopover();
+      return;
+    }
+    pluginWindowActions.minimize(actionWindowForEvent(BrowserWindow, event, mainWindow));
+  });
+  ipcMain.on('window:close', (event) => {
+    if (settings?.trayMode) {
+      hidePopover();
+      return;
+    }
+    actionWindowForEvent(BrowserWindow, event, mainWindow)?.close();
+  });
+  ipcMain.handle('dashboard:open', () => { createDashboardWindow(); return true; });
+  ipcMain.handle('dashboard:getHistory', (_event, options) => getDashboardHistory(options));
+  ipcMain.on('dashboard:ready', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || win !== dashboardWindow || win.isDestroyed()) return;
+    // A shared renderer can retain an opaque canvas over the native material.
+    // Restore transparency after load, before revealing the prepared Dashboard.
+    if (process.platform === 'darwin') win.setBackgroundColor('#00000000');
+    dashboardWindowReady = true;
+    showDashboardWindow(win);
+  });
+  ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
+  ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
+  app.on('activate', () => {
+    const action = activateWindowAction({
+      mainWindow,
+      windows: BaseWindow.getAllWindows(),
+      isDockOwned: (win) => Boolean(edgeDockController?.owns(win) || notchController?.owns(win))
+    });
+    if (action === 'focusWindow') focusExistingWindow();
+    else if (action === 'createWindow') {
+      // The window this builds is about to be on screen, so the policy is resolved
+      // for a visible window exactly as focusExistingWindow() does. Without it this
+      // was the one path reaching applyMacSpaceBehavior() with a process type
+      // nothing had decided, which skipTransformProcessType now preserves.
+      applyMacActivationPolicy({ mainWindowVisible: true });
+      createWindow();
+    }
+  });
+  startPluginRuntime();
+  function startPluginRuntime() {
+    try {
+      pluginRuntime = createPluginRuntime({
+        fetchImpl: electronLimitsFetch(),
+        onLimitsChanged: pluginQuotaChanged,
+        getAppSettings: settingsForRenderer,
+        electron: { app, BrowserWindow, utilityProcess: require('electron').utilityProcess, Notification, ipcMain, nativeImage, session, shell, dialog },
+        userDataDir: app.getPath('userData'),
+        getSettings: () => settings,
+        applySettingsPatch,
+        persistPluginStates: (states) => {
+          settings = { ...settings, pluginStates: normalizePluginStates(states) };
+          saveSettings({ throwOnError: true });
+          pushSettingsToRenderer();
+        },
+        persistManagementSettings: (patch) => {
+          // Main-owned transaction state only; never exposed as generic renderer settings.
+          const allowed = ['pluginStates', 'pluginInitialSetup', 'themeColors', 'vendorColors', 'pluginAuthorSkin', 'trayContent', 'homeModuleOrder', 'hiddenHomeModules', 'edgeDockItems', 'trayCustomLayout', 'floatingBubbleCustomLayout', 'notchCustomLayout', 'notchPageOrder', 'notchPluginPages', 'pluginMainPages', 'pluginContentSelections', 'pluginContentOrder'];
+          settings = { ...settings, ...Object.fromEntries(allowed.filter(key => Object.hasOwn(patch, key)).map(key => [key, patch[key]])) };
+          settings.pluginStates = normalizePluginStates(settings.pluginStates);
+          saveSettings({ throwOnError: true });
+          if (Object.hasOwn(patch, 'trayContent') || Object.hasOwn(patch, 'trayCustomLayout')) updateTrayDisplay();
+          pushSettingsToRenderer();
+        },
+        getLocale: () => trayMenuLocale(),
+        getContext: () => ({ mode, hubMode: settings.hubMode, hubUrl: settings.hubUrl, deviceId: settings.deviceId }),
+        // Business reads use captured host records, not renderer DTOs or provider
+        // credentials. These adapters never refresh the collector or limits.
+        businessAdapters: {
+          sourceId: () => `${hubModeGeneration}:${mode}:${settings.hubMode}`,
+          extras: stats => ({
+            liveRateContext: { hubMode: settings.hubMode, deviceId: settings.deviceId, clients: settings.clients },
+            historyRevision: JSON.stringify([settings.historyEnabled !== false, stats?.deviceHistoryRevision || statsHistoryRevision(stats)]),
+            subscriptions: effectiveSubscriptions(),
+            subscriptionContext: { date: subscriptionDisplay.todayString(), rates: { ...(effectiveRates || resolveEffectiveRates(rateCache?.rates || {}, settings?.currencyRates || {})) } },
+            preferences: { currency: settings.currency, locale: trayMenuLocale(), timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, sessionTitlesEnabled: settings.sessionTitlesEnabled !== false, historyEnabled: settings.historyEnabled !== false, projectsEnabled: settings.projectsEnabled !== false }
+          }),
+          loadAllTime: ({ stats }) => {
+            const complete = completeLocalSyncStats(stats);
+            if (!complete?.periods?.allTime) return null;
+            const captured = snapshotLocalDevices.get(stats);
+            // Wire records omit lifetime detail by design. The native Month
+            // fallback is display-only and must not enter this accounting API.
+            return {
+              ...complete?.periods?.allTime,
+              sessionSources: (complete?.devices || []).map(device => ({
+                ...device,
+                sessionDetailAvailable: !captured || device.deviceId === captured.localDevice?.deviceId
+              }))
+            };
+          },
+          loadHistory: () => getCompleteHistory(),
+          loadSubscriptions: () => effectiveSubscriptions()
+        },
+        isMainSender: (event) => Boolean(mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents),
+        surfaceContext: (event, surface) => surface === 'edgeDock' ? edgeDockController?.webSurface(event.sender) : surface === 'notch' ? notchController?.webSurface(event.sender) : null,
+        isSurfaceSender: (event, surface) => {
+          const win = BrowserWindow.fromWebContents(event.sender);
+          return Boolean(win && (surface === 'edgeDock' ? edgeDockController?.owns(win) : notchController?.owns(win)));
+        },
+        placementContext: () => {
+          const stats = latestStats ? electronPresentationStats(latestStats) : null;
+          return {
+            defaultEdgeDockProviders: edgeDockPresentationApi.connectedLimitProviders(stats, {
+              limitsEnabled: settings.limitsEnabled !== false,
+              limitProviders: settings.limitProviders,
+              limitProviderOrder: settings.limitProviderOrder
+            }),
+            trayPresetLayout: notchSummaryLayout({ ...settings, notchSummaryMode: 'tray' }, stats)
+          };
+        },
+      });
+      void pluginRuntime.start().catch(error => console.warn(`[plugins] startup: ${error.message}`));
+      pluginRuntime.manager.onChanged(() => { repaintDockSurfaces(); refreshTrayContextMenu(); });
+      if (latestStats) pluginRuntime.publishStats(electronPresentationStats(latestStats), latestStats);
+    } catch (error) {
+      pluginRuntime = null;
+      console.warn(`[plugins] runtime failed to start: ${error.message}`);
+    }
+  }
+  scheduleStartupAppUpdateCheck();
+  startAppUpdateBackgroundChecks();
+});
+
+app.on('second-instance', focusExistingWindow);
+app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+// Every window shares one renderer, so a crash blanks them all. Main is the
+// source of truth and republishes settings and stats on load, so reload each
+// crashed page rather than leaving the widget dead. A page that crashes again
+// within the cooldown is left alone: reloading a deterministic failure would
+// only loop.
+const rendererCrashReloadAt = new Map();
+app.on('render-process-gone', (_event, contents, details) => {
+  if (quitRequested || details.reason === 'clean-exit') return;
+  if (!contents || contents.isDestroyed()) return;
+  const reloadAt = rendererCrashReloadAt.get(contents.id) || 0;
+  if (Date.now() - reloadAt < 30_000) return;
+  rendererCrashReloadAt.set(contents.id, Date.now());
+  // Let the crashed host finish tearing down before recreating the page.
+  setTimeout(() => {
+    if (contents.isDestroyed()) return;
+    try { contents.reload(); } catch (_) {}
+  }, 250);
+});
+// Every quit route (Cmd+Q, last window closed, system shutdown) lands here.
+// Drain queued quota-history writes with a bounded synchronous worker barrier,
+// then keep performQuit synchronous through to the exit. No preventDefault:
+// taking the quit over would cancel an OS-initiated logout or restart on macOS.
+app.on('before-quit', () => {
+  quitRequested = true;
+  limitsHistoryController?.dispose();
+  limitsHistoryStore?.closeSync();
+  // An updater can abort this quit; subsequent reads need an open store.
+  limitsHistoryStore = null;
+  cancelAntigravityManagedAccountLogin();
+  workbuddyManagedAccountService?.cancelLogin();
+  resetMacWidgetReloadThrottle();
+  if (rateRefreshTimer) clearInterval(rateRefreshTimer);
+  if (appUpdateBackgroundTimer) clearInterval(appUpdateBackgroundTimer);
+  stopTaskbarZOrderKeeper();
+  unregisterWindowToggleShortcut();
+  edgeDockController?.stop();
+  notchController?.dispose();
+  clearTimeout(notchRateTimer);
+  electronWorkbuddyLocalAuth.dispose();
+  if (skipForcedQuit) { disposePluginRuntime(); return; }
+  performQuit();
+});
+for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.once(signal, requestAppQuit);
+}

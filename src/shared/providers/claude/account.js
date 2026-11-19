@@ -1,0 +1,94 @@
+// @ts-check
+'use strict';
+
+// Claude limits account wiring. Leaf module: no requires — see
+// src/shared/limits/accounts.js for the field schema.
+module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
+  id: 'claude',
+  sourceSelection: { sources: ['oauth', 'cli'] },
+  accountSlots: true,
+  accountSlotOwner: true,
+  sources: [
+    { id: 'oauth', kind: 'oauth', relation: 'alternative', products: ['claude'], labelKey: 'settings.limits.sources.oauth', descriptionKey: 'settings.limits.sources.oauthDescription' },
+    { id: 'cli', kind: 'cli', relation: 'alternative', products: ['claude'], labelKey: 'settings.limits.sources.cli', descriptionKey: 'settings.limits.sources.cliDescription' },
+    { id: 'web', kind: 'web', relation: 'complement', products: ['claude'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
+  ],
+  fetch: 'fetchClaudeAccountsLimits',
+  accountRefresh: true,
+  fields: [
+    {
+      key: 'claudeManagedAccounts',
+      kind: 'managed',
+      contextOverride: true,
+      persist: 'never',
+      watch: false,
+      initial: [],
+      project: (value, limits) => limits.normalizeClaudeManagedAccounts(value)
+    },
+    {
+      key: 'claudeWebCookie',
+      kind: 'credential',
+      storePath: ['providers', 'claude', 'webCookie'],
+      resolve: 'claudeWebCookie',
+      normalize: { fn: 'normalizeClaudeWebCookieInput', style: 'value' },
+      envFallback: ['CLAUDE_WEB_COOKIE'],
+      project: 'set'
+    },
+    {
+      key: 'claudeWebOrganizationId',
+      kind: 'setting',
+      normalize: { fn: 'normalizeClaudeWebOrganizationId', style: 'value' },
+      project: 'value',
+      clearWithCredential: true
+    }
+  ],
+  extraSettingKeys: ['claudeCliFallbackEnabled'],
+  status: {
+    credential: 'claudeWebCookie',
+    configuredKey: 'claudeWebCookieConfigured',
+    sourceKey: 'claudeWebCookieSource',
+    pendingKey: 'claudePendingCheckSince'
+  },
+  accountStatus({ settings, env, limits }) {
+    const stored = Boolean(settings?.claudeWebCookie);
+    const external = Boolean(limits.claudeWebCookie(env));
+    const managed = Boolean(settings?.claudeAccountSlots?.length) || limits.normalizeClaudeManagedAccounts(settings?.claudeManagedAccounts).length > 0;
+    return {
+      claudeWebCookieConfigured: stored || external || managed,
+      claudeWebCookieSource: stored || managed ? 'settings' : external ? 'env' : '',
+      claudeWebLegacyCookieConfigured: stored || external,
+      claudeWebLegacyCookieSource: stored ? 'settings' : external ? 'env' : ''
+    };
+  },
+  form: {
+    multipleAccounts: true,
+    discover: { fn: 'listClaudeWebOrganizations', credential: 'claudeWebCookie', selection: 'claudeWebOrganizationId' },
+    titleKey: 'settings.claude.title',
+    openKey: 'settings.claude.openBrowser',
+    clearKey: 'settings.claude.clearCookie',
+    saveKey: 'settings.claude.saveCookie',
+    emptyKey: 'settings.claude.statusNotSet',
+    failedKey: 'settings.claude.saveFailed',
+    fields: [
+      { key: 'claudeWebCookie', input: 'textarea', placeholderKey: 'settings.claude.cookiePlaceholder', required: true },
+      { key: 'claudeWebOrganizationId', input: 'select', labelKey: 'settings.claude.organization', options: [
+        { value: '', labelKey: 'settings.claude.organizationChoose' }
+      ] }
+    ],
+    top: [{ field: 'claudeWebOrganizationId' }],
+    manual: [
+      { note: 'settings.claude.note' },
+      { steps: ['settings.claude.step1', 'settings.claude.step2', 'settings.claude.step3', 'settings.claude.step4'] },
+      { field: 'claudeWebCookie' }
+    ],
+    openUrl: { url: 'https://claude.ai/settings/usage' },
+    messages: {
+      required: 'settings.claude.cookieRequired',
+      invalidFormat: 'settings.claude.cookieInvalidFormat',
+      rejected: 'settings.claude.cookieRejected'
+    }
+  },
+  urlPolicy: [
+    { hosts: ['claude.ai'], pathPrefixes: ['/settings'] }
+  ]
+});

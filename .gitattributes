@@ -1,0 +1,5 @@
+# Force LF line endings on checkout across every platform. Without this,
+# Windows CI checks out source with CRLF (autocrlf) and tests that match
+# against source-file content — regexes with hardcoded \n — fail. text=auto
+# lets git keep detected binaries (icons, tokscale binaries) untouched.
+* text=auto eol=lf

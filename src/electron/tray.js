@@ -1,0 +1,707 @@
+'use strict';
+
+const path = require('node:path');
+const {
+  formatTrayText,
+  isBarsTrayIconMode,
+  isGeneratedTrayIconMode,
+  pickUsageProviderId,
+  pickWorstLimit,
+  trayShowsTitle
+} = require('../shared/trayText');
+const { codexAccountDisplayLabel } = require('./renderer/accountIdentity');
+const { EDGE_DOCK_MODES, normalizeEdgeDockMode } = require('./edgeDock/geometry');
+const { normalizeNotchHoverAction } = require('./notch/controller');
+const { translate: translateMessage } = require('./renderer/i18n');
+
+const ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon.png');
+// icon.png is authored to the macOS icon grid, where the squircle is inset from
+// its canvas — the artwork covers ~75% of the 1024px square and the Dock reads
+// the margin as spacing. The Windows notification area spaces the cells itself
+// and expects full-bleed artwork, so downscaling that padded canvas into the
+// small-icon metric spends a quarter of the cell on nothing at every scale,
+// which is why #314 reads as undersized at 100% (12px of mark in a 16px cell)
+// as much as at 150% (18px in 24px). icon-win.png is the full-bleed variant
+// electron-builder already ships to the Windows installer.
+const WINDOWS_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icon-win.png');
+const TRAY_ICON_PATH = path.join(__dirname, '..', '..', 'assets', 'icons', 'tray-token-monitor.png');
+
+// Windows keeps the taskbar's theme in SystemUsesLightTheme, separate from the
+// AppsUseLightTheme that drives the app theme. Measured on Windows 11 with
+// Electron 43.3.0, a system-theme flip lands like this:
+//
+//   nativeTheme 'updated' fires -> AppsUseLightTheme and shouldUseDarkColors are
+//   already new, SystemUsesLightTheme is still the OLD value and only lands a
+//   moment later (~250ms), while Chromium's cached
+//   shouldUseDarkColorsForSystemIntegratedUI never catches up at all until the
+//   NEXT flip.
+//
+// So neither reading the cached property nor a single registry read at event
+// time can answer: both report the state before the flip, which is what left the
+// tray one theme change behind. Re-read until the value actually moves.
+// Returns true for a dark system surface, false for light, null if unreadable.
+function parseWindowsSystemUsesLightTheme(output) {
+  const match = /SystemUsesLightTheme\s+REG_DWORD\s+0x([0-9a-fA-F]+)/.exec(String(output || ''));
+  if (!match) return null;
+  const value = Number.parseInt(match[1], 16);
+  // Windows only ever writes 0 or 1 here. Anything else is a value we do not
+  // understand, and guessing "light" from it would repaint the tray on a reading
+  // we cannot justify.
+  if (value === 0) return true;
+  if (value === 1) return false;
+  return null;
+}
+
+// Delays BETWEEN reads, not deadlines measured from the event — so these sample
+// at 150, 300, 450, 700, 1100, 1700, 2600 and 4000ms. Tight while the write is
+// expected (measured at ~250ms, so the typical flip is answered by the third
+// read), then stretching out: the tail is there for a machine slower than the
+// one this was measured on, and polling it at 150ms throughout would spawn
+// reg.exe two dozen times for a flip that never touched the system surface.
+const SYSTEM_UI_THEME_SETTLE_MS = [150, 150, 150, 250, 400, 600, 900, 1400];
+
+// One extra read after the window closes. Without it a value first seen on the
+// last sample has nothing to confirm it, so the window would only really cover
+// writes landing by 2600ms — a boundary short of the four seconds it claims.
+const SYSTEM_UI_THEME_CONFIRM_MS = 150;
+
+// Publishes as soon as a reading looks settled, then keeps watching to the end
+// of the window instead of stopping there. Two readings that agree only prove
+// nothing moved between those two samples — they cannot prove Windows has no
+// write still to land, in either direction. The old value is stable before the
+// first write arrives, and an intermediate value is stable between the two
+// writes of a fast flip back. Stopping on either leaves the tray on a theme the
+// user has already left, with no further event coming to correct it.
+//
+// So publishing is not the end of the watch, it is the current best answer: the
+// measured shape is answered on the third read, keeping a flip under half a
+// second, and anything that lands afterwards corrects it. `held` tracks what the
+// renderer has been told so the same value is never published twice, which is
+// also what keeps an app-theme-only flip — the same event, no movement on the
+// system surface — from repainting anything at all.
+async function watchSystemDarkUi({ read, wait, publish, isCurrent = () => true, held, schedule = SYSTEM_UI_THEME_SETTLE_MS, confirmMs = SYSTEM_UI_THEME_CONFIRM_MS }) {
+  let current = held;
+  let candidate = null;
+  for (const ms of [...schedule, confirmMs]) {
+    await wait(ms);
+    if (!isCurrent()) return current;
+    const value = await read();
+    if (!isCurrent()) return current;
+    if (typeof value !== 'boolean') continue;
+    if (value === candidate && value !== current) {
+      current = value;
+      publish(value);
+    }
+    candidate = value;
+  }
+  return current;
+}
+
+// Each platform renders the notification-area / menubar icon at a different
+// logical size, so the resize target is platform-specific instead of the old
+// one-size-fits-all height: 20.
+//   - macOS menubar icons sit at ~22 pt and use template tinting.
+//   - Windows draws the notification-area icon at the small-icon system metric
+//     (SM_CXSMICON): 16 px at 100%, scaling with the display's DPI factor
+//     (24 @150%, 32 @200%, 40 @250%, 48 @300%) — track the metric, no cap.
+// https://learn.microsoft.com/en-us/windows/win32/shell/notification-area
+const DARWIN_TRAY_ICON_HEIGHT = 20;
+const WINDOWS_SMALL_ICON_BASE_PX = 16;
+
+function windowsTrayIconHeight(scaleFactor) {
+  const factor = Math.max(1, Number(scaleFactor) || 1);
+  return Math.max(WINDOWS_SMALL_ICON_BASE_PX, Math.round(WINDOWS_SMALL_ICON_BASE_PX * factor));
+}
+
+function primaryDisplayScaleFactor() {
+  // Best-effort: the tray lives on the primary display's taskbar. In contexts
+  // without a live Electron screen (tests), fall back to 1 (= 100% metric).
+  try {
+    return require('electron').screen.getPrimaryDisplay().scaleFactor || 1;
+  } catch (_) {
+    return 1;
+  }
+}
+
+// Resize a tray source image to the platform's metric. `height`-only resizing
+// preserves aspect ratio, so wide bar-style icons keep their width while square
+// provider icons stay square. Windows keeps a larger, metric-matched source so
+// the OS never has to blur-upscale an undersized icon on HiDPI.
+function resizeTrayIconForPlatform(img, { platform = process.platform, scaleFactor, square = false } = {}) {
+  if (platform === 'darwin') {
+    return img.resize({ height: DARWIN_TRAY_ICON_HEIGHT, quality: 'best' });
+  }
+  if (platform === 'win32') {
+    const factor = scaleFactor == null ? primaryDisplayScaleFactor() : scaleFactor;
+    return img.resize({ height: windowsTrayIconHeight(factor), quality: 'best' });
+  }
+  // Linux and anything else. Generated tray icons (bars / sessions / limits) are
+  // wider than tall, so default to the aspect-preserving height-only resize the
+  // tray:setIcons handler always used. The bundled default app icon is square
+  // and opts into force-square sizing via `square` to guarantee a 20x20 tile
+  // regardless of the source aspect (the historical buildTrayIcon sizing).
+  return square
+    ? img.resize({ width: 20, height: 20 })
+    : img.resize({ height: 20, quality: 'best' });
+}
+
+// The tightest rectangle covering every drawn pixel, or null when nothing is
+// drawn. `bitmap` is Electron's raw 4-bytes-per-pixel buffer; only the alpha
+// byte matters, and its offset is the same whether the transport is RGBA or
+// BGRA. The threshold ignores the near-invisible tail of an antialiased edge,
+// which would otherwise pin the bounds to a pixel nobody can see.
+function trayIconOpaqueBounds(bitmap, width, height, alphaThreshold = 12) {
+  if (!bitmap || !(width > 0) || !(height > 0)) return null;
+  if (bitmap.length < width * height * 4) return null;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      if (bitmap[(y * width + x) * 4 + 3] <= alphaThreshold) continue;
+      if (x < minX) minX = x;
+      if (x > maxX) maxX = x;
+      if (y < minY) minY = y;
+      if (y > maxY) maxY = y;
+    }
+  }
+  if (maxX < minX || maxY < minY) return null;
+  return { x: minX, y: minY, width: maxX - minX + 1, height: maxY - minY + 1 };
+}
+
+// Windows fits the whole bitmap into one square cell of the small-icon metric,
+// so every transparent row and column the renderer left around the artwork is
+// cell space the icon does not get. The renderer composes at 44px with the macOS
+// menubar's breathing room built in — a provider mark sits at 78% of its box, a
+// text segment's ink at about half its canvas height — which on a 24px cell is a
+// quarter of the icon spent on nothing, while every neighbouring app draws edge
+// to edge. Trimming to the drawn pixels is a no-op for a bitmap that already
+// reaches its edges, and is deliberately not applied on macOS: the menubar has
+// no cell to fill and that breathing room is what keeps the icon off the text
+// beside it.
+function trimTrayIconPadding(img) {
+  const { width, height } = img.getSize();
+  const bounds = trayIconOpaqueBounds(img.toBitmap(), width, height);
+  if (!bounds) return img;
+  if (bounds.width === width && bounds.height === height) return img;
+  return img.crop(bounds);
+}
+
+// The whole path from a renderer-composed bitmap to the one the shell draws, so
+// the Windows-only trim travels with the resize it belongs to instead of living
+// at the IPC boundary.
+function prepareTrayIconForPlatform(img, { platform = process.platform, scaleFactor, square = false } = {}) {
+  const source = platform === 'win32' ? trimTrayIconPadding(img) : img;
+  return resizeTrayIconForPlatform(source, { platform, scaleFactor, square });
+}
+
+function buildTrayIcon(options = {}) {
+  const platform = options.platform || process.platform;
+  const nativeImage = options.nativeImage || require('electron').nativeImage;
+  if (platform === 'darwin') {
+    const image = nativeImage.createFromPath(TRAY_ICON_PATH);
+    const sized = resizeTrayIconForPlatform(image, { platform, scaleFactor: options.scaleFactor });
+    sized.setTemplateImage(true);
+    return sized;
+  }
+  // Windows / Linux: the bundled app icon is already high-resolution, so a
+  // single best-quality downscale to the platform metric keeps the small
+  // notification-area icon crisp on HiDPI instead of the old fixed 20x20.
+  // Windows takes the full-bleed variant so the mark fills its cell; both
+  // canvases are square, so the force-square 20x20 tile still applies.
+  const image = nativeImage.createFromPath(platform === 'win32' ? WINDOWS_ICON_PATH : ICON_PATH);
+  return resizeTrayIconForPlatform(image, { platform, scaleFactor: options.scaleFactor, square: true });
+}
+
+function trayUsagePeriod(contentMode) {
+  if (contentMode === 'tokensAll' || contentMode === 'costAll' || contentMode === 'bothAll') return 'allTime';
+  if (contentMode === 'tokensMonth' || contentMode === 'costMonth' || contentMode === 'bothMonth') return 'month';
+  if (contentMode === 'tokens' || contentMode === 'cost' || contentMode === 'both') return 'today';
+  return null;
+}
+
+function pickUsageTrayIconId(stats, contentMode = 'tokens', availableIconIds = []) {
+  const periodKey = trayUsagePeriod(contentMode);
+  if (!periodKey) return null;
+  const metric = contentMode === 'cost' || contentMode === 'costMonth' || contentMode === 'costAll' ? 'cost' : 'tokens';
+  return pickUsageProviderId(stats, metric, periodKey, availableIconIds);
+}
+
+function shouldUseTemplateTrayIcon(id, platform = process.platform, showProviderBadge = false) {
+  return platform === 'darwin' && (isGeneratedTrayIconMode(id) || !showProviderBadge);
+}
+
+function sortCodexAccountsForDisplay(accounts) {
+  const label = (account) => String(
+    account?.email
+    || account?.accountName
+    || account?.accountLabel
+    || account?.accountKey
+    || account?.id
+    || ''
+  );
+  return [...(accounts || [])].sort((left, right) => label(left).localeCompare(label(right)));
+}
+
+function reconcileCodexAccountSelection({ detectedAccountId, detectedAt, pendingAccountId, pendingSince } = {}) {
+  const detected = String(detectedAccountId || '').trim();
+  const pending = String(pendingAccountId || '').trim();
+  if (!pending) return { activeAccountId: detected, pendingAccountId: '' };
+  const detectedTime = typeof detectedAt === 'number' ? detectedAt : Date.parse(detectedAt || '');
+  if (!detected || !Number.isFinite(detectedTime) || detectedTime < Number(pendingSince || 0)) {
+    return { activeAccountId: pending, pendingAccountId: pending };
+  }
+  return { activeAccountId: detected, pendingAccountId: '' };
+}
+
+const TRAY_CONTENT_MENU_ITEMS = [
+  ['tokens', 'trayMenu.content.todayTokens'],
+  ['cost', 'trayMenu.content.todayCost'],
+  ['both', 'trayMenu.content.todayBoth'],
+  ['tokensMonth', 'trayMenu.content.tokensMonth'],
+  ['costMonth', 'trayMenu.content.costMonth'],
+  ['bothMonth', 'trayMenu.content.bothMonth'],
+  ['tokensAll', 'trayMenu.content.totalTokens'],
+  ['costAll', 'trayMenu.content.totalCost'],
+  ['bothAll', 'trayMenu.content.totalBoth'],
+  ['limitsAllSessions', 'trayMenu.content.aiToolLimits'],
+  ['liveTokenRate', 'trayMenu.content.liveTokenRate'],
+  ['barsSession', 'trayMenu.content.sessionLimitBar'],
+  ['barsWeekly', 'trayMenu.content.weeklyLimitBar'],
+  ['barsAllSessions', 'trayMenu.content.allToolsLimitBars'],
+  ['bars', 'trayMenu.content.lowestRemainingLimitBar'],
+  ['icon', 'trayMenu.content.appIconOnly'],
+  ['custom', 'trayMenu.content.custom']
+];
+
+const WINDOW_PRESENTATION_MENU_ITEMS = [
+  ['tray', 'trayMenu.presentation.tray'],
+  ['floating', 'trayMenu.presentation.floating'],
+  ['normal', 'trayMenu.presentation.normal'],
+  ['desktop', 'trayMenu.presentation.desktop']
+];
+
+const OPEN_VIEW_MENU_ITEMS = [
+  ['home', 'views.home'],
+  ['project', 'views.project'],
+  ['session', 'views.session'],
+  ['limits', 'views.limits'],
+  ['trends', 'views.trends'],
+  ['status', 'views.status']
+];
+
+function buildTrayMenuTemplate(options = {}) {
+  const state = options.state || {};
+  const platform = options.platform || process.platform;
+  const presentation = state.trayMode ? 'tray' : state.windowBehavior;
+  const callback = (name) => (typeof options[name] === 'function' ? options[name] : () => {});
+  const t = (key, params) => {
+    const translated = typeof options.translate === 'function' ? options.translate(key, params) : '';
+    return translated && translated !== key ? translated : translateMessage('en', key, params);
+  };
+  const codexAccounts = Array.isArray(state.codexAccounts) ? state.codexAccounts : [];
+  const codexItem = codexAccounts.length >= 2 ? (() => {
+    const labelFor = (account, index) => {
+      return codexAccountDisplayLabel(account, codexAccounts, {
+        maskEmail: state.maskAccountEmails,
+        personalWorkspaceLabel: t('settings.codex.personalWorkspace')
+      }) || t('trayMenu.codexAccountFallback', { number: index + 1 });
+    };
+    const activeIndex = codexAccounts.findIndex((account) => account.id === state.activeCodexAccountId);
+    const label = activeIndex >= 0
+      ? t('trayMenu.codexAccountCurrent', { account: labelFor(codexAccounts[activeIndex], activeIndex) })
+      : t('trayMenu.codexAccount');
+    return {
+      label,
+      submenu: codexAccounts.map((account, index) => ({
+        label: labelFor(account, index),
+        type: 'radio',
+        checked: account.id === state.activeCodexAccountId,
+        enabled: !state.codexSwitching,
+        click: () => {
+          if (account.id !== state.activeCodexAccountId) callback('onSwitchCodexAccount')(account.id);
+        }
+      }))
+    };
+  })() : null;
+  // Edge dock quick controls. Offered only where the dock itself is supported;
+  // mode and edge stay usable while the dock is off so it opens the way the
+  // user wants when switched on.
+  const edgeDockItem = state.edgeDockSupported ? (() => {
+    const setDock = callback('onSetEdgeDock');
+    const mode = normalizeEdgeDockMode(state.edgeDockMode);
+    const side = state.edgeDockSide === 'left' ? 'left' : 'right';
+    return {
+      label: t('trayMenu.edgeDock'),
+      submenu: [
+        {
+          label: t('trayMenu.edgeDockShow'),
+          type: 'checkbox',
+          checked: state.edgeDockEnabled === true,
+          click: () => setDock({ edgeDockEnabled: state.edgeDockEnabled !== true })
+        },
+        { type: 'separator' },
+        ...EDGE_DOCK_MODES.map((value) => [value, `settings.edgeDock.mode.${value}`]).map(([value, labelKey]) => ({
+          label: t(labelKey),
+          type: 'radio',
+          checked: mode === value,
+          click: () => setDock({ edgeDockMode: value })
+        })),
+        { type: 'separator' },
+        ...[['left', 'settings.edgeDockSide.left'], ['right', 'settings.edgeDockSide.right']].map(([value, labelKey]) => ({
+          label: t(labelKey),
+          type: 'radio',
+          checked: side === value,
+          click: () => setDock({ edgeDockSide: value })
+        }))
+      ]
+    };
+  })() : null;
+  const notchItem = platform === 'darwin' && state.notchSupported ? (() => {
+    const setNotch = callback('onSetNotch');
+    const toggle = (key, labelKey, fallback = true) => {
+      const checked = typeof state[key] === 'boolean' ? state[key] : fallback;
+      return { label: t(labelKey), type: 'checkbox', checked, click: () => setNotch({ [key]: !checked }) };
+    };
+    return {
+      label: t('settings.notch.title'),
+      submenu: [
+        toggle('notchEnabled', 'trayMenu.notchShow', false),
+        { type: 'separator' },
+        ...[['peek', 'trayMenu.notchHoverPeek'], ['open', 'trayMenu.notchHoverOpen']].map(([value, labelKey]) => ({
+          label: t(labelKey), type: 'radio', checked: normalizeNotchHoverAction(state.notchHoverAction) === value,
+          click: () => setNotch({ notchHoverAction: value })
+        })),
+        { type: 'separator' },
+        toggle('notchSummaryEnabled', 'settings.notch.showSummary'),
+        toggle('notchHideSummaryInFullScreen', 'settings.notch.hideSummaryInFullScreen'),
+        { type: 'separator' },
+        { label: t('trayMenu.settings'), click: () => callback('onOpenSettings')('notch') }
+      ]
+    };
+  })() : null;
+  return [
+    {
+      label: t(state.refreshing ? 'trayMenu.refreshing' : 'trayMenu.refreshNow'),
+      enabled: !state.refreshing,
+      click: callback('onRefresh')
+    },
+    {
+      label: t('trayMenu.openView'),
+      submenu: OPEN_VIEW_MENU_ITEMS.map(([value, labelKey]) => ({
+        label: t(labelKey),
+        enabled: state.viewEnabled?.[value] !== false,
+        click: () => callback('onOpenView')(value)
+      }))
+    },
+    ...(codexItem ? [codexItem] : []),
+    { type: 'separator' },
+    {
+      label: t('trayMenu.trayDisplay'),
+      submenu: TRAY_CONTENT_MENU_ITEMS.map(([value, labelKey]) => ({
+        label: t(labelKey),
+        type: 'radio',
+        checked: state.trayContent === value,
+        click: () => callback('onSetTrayContent')(value)
+      }))
+    },
+    {
+      label: t('trayMenu.windowPresentation'),
+      submenu: WINDOW_PRESENTATION_MENU_ITEMS.map(([value, labelKey]) => ({
+        label: t(labelKey),
+        type: 'radio',
+        checked: presentation === value,
+        click: () => callback('onSetWindowPresentation')(value)
+      }))
+    },
+    ...(edgeDockItem ? [edgeDockItem] : []),
+    ...(notchItem ? [notchItem] : []),
+    ...(state.pluginMenu || []).map(item => ({ label: `${item.pluginName}: ${item.label}`, click: () => callback('onPluginMenu')(item.pluginId, item.id) })),
+    { type: 'separator' },
+    { label: t('trayMenu.version', { version: state.appVersion || '' }), enabled: false },
+    { label: t('trayMenu.settings'), click: callback('onOpenSettings') },
+    { label: t('plugins.trusted.safeMode'), click: callback('onRestartPluginsSafe') },
+    {
+      label: t('trayMenu.quit'),
+      // macOS draws a menu item's shortcut from `accelerator` as that item's key
+      // equivalent, which is how the platform convention of Cmd+Q beside Quit is
+      // shown. Electron's default application menu already binds Cmd+Q to its
+      // quit role and this app never replaces it, so this documents the binding
+      // that is actually live rather than inventing one.
+      //
+      // macOS-only as a scope decision, not a safety one. Menu accelerators are
+      // local shortcuts, active only while the app is focused, so adding one on
+      // Windows or Linux would not take the key away from other applications --
+      // `globalShortcut` is the API that does that, and this does not use it.
+      // There is simply less to echo elsewhere: Windows declares no default quit
+      // accelerator, and Linux already shows Ctrl+Q through its own application
+      // menu.
+      ...(platform === 'darwin' ? { accelerator: 'Command+Q' } : {}),
+      click: callback('onQuit')
+    }
+  ];
+}
+
+async function runTrayMenuAction({ setInFlight, refreshContextMenu, action }) {
+  setInFlight(true);
+  try {
+    refreshContextMenu();
+    return await action();
+  } finally {
+    setInFlight(false);
+    refreshContextMenu();
+  }
+}
+
+function createTray({
+  electron = require('electron'),
+  getMenuState,
+  onOpenSettings,
+  onRestartPluginsSafe,
+  onPluginMenu,
+  onOpenView,
+  onQuit,
+  onRefresh,
+  onSetTrayContent,
+  onSetWindowPresentation,
+  onSetEdgeDock,
+  onSetNotch,
+  onSwitchCodexAccount,
+  onToggle,
+  getWindowVisible,
+  onMouseDown,
+  onCancelMouseDown,
+  platform = process.platform,
+  translateMenu
+}) {
+  const { Tray, Menu, nativeImage } = electron;
+  const tray = new Tray(buildTrayIcon({ platform, nativeImage }));
+  tray.setToolTip('');
+
+  const menuState = () => (typeof getMenuState === 'function' ? getMenuState() : {});
+  const buildMenu = (state = menuState()) => Menu.buildFromTemplate(buildTrayMenuTemplate({
+    state,
+    platform,
+    onOpenSettings,
+    onRestartPluginsSafe,
+    onPluginMenu,
+    onOpenView,
+    onQuit,
+    onRefresh,
+    onSetTrayContent,
+    // Non-tray presentation changes can keep an existing Linux tray alive,
+    // so re-export the D-Bus menu after the callback mutates settings.
+    onSetWindowPresentation: (value) => {
+      try {
+        return typeof onSetWindowPresentation === 'function'
+          ? onSetWindowPresentation(value)
+          : undefined;
+      } finally {
+        refreshContextMenu();
+      }
+    },
+    onSetEdgeDock: (patch) => {
+      try {
+        return typeof onSetEdgeDock === 'function' ? onSetEdgeDock(patch) : undefined;
+      } finally {
+        refreshContextMenu();
+      }
+    },
+    onSetNotch,
+    onSwitchCodexAccount,
+    translate: translateMenu
+  }));
+
+  // Linux tray hosts (GNOME AppIndicator/KStatusNotifier, KDE Plasma) display
+  // the D-Bus menu exported via com.canonical.dbusmenu on right-click and never
+  // deliver a 'right-click' event, so the menu has to be attached with
+  // setContextMenu() to be reachable; popUpContextMenu() alone shows nothing.
+  let exportedMenuState = '';
+  const refreshContextMenu = () => {
+    if (platform !== 'linux' || tray.isDestroyed()) return;
+    const state = menuState();
+    const stateKey = JSON.stringify(state);
+    if (stateKey === exportedMenuState) return;
+    tray.setContextMenu(buildMenu(state));
+    exportedMenuState = stateKey;
+  };
+  refreshContextMenu();
+
+  // On macOS the event position is window-relative, while the screen cursor is
+  // in the coordinates popoverBounds uses. Read it while handling the click.
+  // A menu-bar press can blur and hide the popover before Cocoa emits click.
+  // Remember the state at mouse-down so that same click still closes it.
+  let press = null;
+  let releasedPress = null;
+  if (platform === 'darwin') {
+    let pointerOverIcon = false;
+    // The hover event follows the icon across displays, where getBounds() can
+    // still describe the primary display. Bounds cover a missed hover event.
+    tray.isPointerOverIcon = (point) => pointerOverIcon || pointInside(point, tray.getBounds?.());
+    tray.on('mouse-enter', () => { pointerOverIcon = true; });
+    tray.on('mouse-down', (_event, position) => {
+      pointerOverIcon = true;
+      releasedPress = null;
+      press = {
+        visible: typeof getWindowVisible === 'function' ? getWindowVisible() : null,
+        matchedBlur: onMouseDown?.(pointerPoint(position, electron, platform)) === true,
+        canceled: false
+      };
+    });
+    tray.on('mouse-up', () => {
+      releasedPress = press;
+      press = null;
+      onCancelMouseDown?.();
+      const completed = releasedPress;
+      // Cocoa emits click/double-click synchronously after mouse-up. Expire
+      // any unused release at the event-loop boundary (e.g. clickCount > 2),
+      // so a later accessibility activation cannot consume it.
+      setImmediate(() => {
+        if (releasedPress === completed) releasedPress = null;
+      });
+    });
+    tray.on('mouse-leave', () => {
+      pointerOverIcon = false;
+      // Cocoa still emits click on mouse-up after leaving the icon. Preserve
+      // cancellation until that click is consumed, or a fresh press starts.
+      if (press) press.canceled = true;
+      if (releasedPress) releasedPress.canceled = true;
+      onCancelMouseDown?.();
+    });
+  }
+  tray.on('click', (_event, _bounds, position) => {
+    // VoiceOver emits click then mouse-down, without mouse-up. Its activation
+    // must use current visibility, never an unpaired down from a previous one.
+    const completedPress = releasedPress;
+    press = null;
+    releasedPress = null;
+    if (completedPress?.canceled) return;
+    onToggle(tray, pointerPoint(position, electron, platform), completedPress?.visible ?? null, completedPress?.matchedBlur === true, Boolean(completedPress));
+  });
+  tray.on('double-click', () => {
+    press = null;
+    releasedPress = null;
+    onCancelMouseDown?.();
+  });
+  tray.on('right-click', () => {
+    press = null;
+    releasedPress = null;
+    onCancelMouseDown?.();
+    tray.popUpContextMenu(buildMenu());
+  });
+
+  tray.refreshContextMenu = refreshContextMenu;
+
+  return tray;
+}
+
+// Cocoa derives the tray click position from event.locationInWindow. Converting
+// that point without the tray window's origin cannot yield a screen location.
+// If the cursor is unavailable, return null so the popover uses its existing
+// tray-rectangle lookup instead of treating local coordinates as global ones.
+function pointerPoint(position, electron = require('electron'), platform = process.platform) {
+  if (platform !== 'darwin' && position && Number.isFinite(Number(position.x)) && Number.isFinite(Number(position.y))) {
+    return { x: Number(position.x), y: Number(position.y) };
+  }
+  try {
+    const cursor = electron?.screen?.getCursorScreenPoint?.();
+    if (cursor && Number.isFinite(Number(cursor.x)) && Number.isFinite(Number(cursor.y))) {
+      return { x: Number(cursor.x), y: Number(cursor.y) };
+    }
+  } catch (_) { /* no usable point */ }
+  return null;
+}
+
+function pointInside(point, area) {
+  return Boolean(point && area) &&
+    point.x >= area.x && point.x < area.x + area.width &&
+    point.y >= area.y && point.y < area.y + area.height;
+}
+
+// Where on the chosen display to hang the popover from.
+//
+// The tray rectangle is still the better horizontal anchor when it genuinely sits
+// on the display we chose, so it is used there and ignored otherwise. `onTray`
+// tells the caller which case it got, since the vertical placement differs: a
+// usable rectangle gives the icon's bottom edge, a fallback gives the menu bar.
+function popoverAnchor({ trayBounds, cursor, display }) {
+  const icon = trayBounds && trayBounds.width > 0
+    ? { x: trayBounds.x + trayBounds.width / 2, y: trayBounds.y }
+    : null;
+  if (icon && pointInside(icon, display.bounds)) {
+    return { x: icon.x, top: trayBounds.y + (trayBounds.height || 0), onTray: true };
+  }
+  return { x: cursor.x, top: cursor.y, onTray: false };
+}
+
+function popoverBounds(tray, popoverWidth, popoverHeight, options = {}) {
+  const {
+    screen = require('electron').screen,
+    clickPoint = null,
+    platform = process.platform
+  } = options;
+  const trayBounds = tray?.getBounds?.() || { x: 0, y: 0, width: 0, height: 0 };
+  const cursor = clickPoint || screen.getCursorScreenPoint();
+  // On a real click the pointer decides the display: on macOS Tray.getBounds()
+  // resolves `[status_item_view_ window].frame` — one view inside one window,
+  // with no display parameter — so it can describe the primary display's menu
+  // bar even when the icon was clicked on another screen. Without a click
+  // (keyboard shortcut, VoiceOver) keep the pre-fix lookup from the tray
+  // rectangle, falling back to the cursor only when there is no rectangle.
+  const displayPoint = clickPoint || (
+    trayBounds.width > 0
+      ? { x: trayBounds.x + trayBounds.width / 2, y: trayBounds.y }
+      : cursor
+  );
+  const display = screen.getDisplayNearestPoint(displayPoint);
+  const wa = display.workArea;
+  const anchor = popoverAnchor({ trayBounds, cursor, display });
+
+  let x = Math.round(anchor.x - popoverWidth / 2);
+  x = Math.max(wa.x + 4, Math.min(x, wa.x + wa.width - popoverWidth - 4));
+
+  let y;
+  if (platform === 'darwin') {
+    // Every display runs its own menu bar on macOS, so workArea.y is the lower
+    // edge of this display's menu bar whether or not the tray rectangle was
+    // usable as an anchor.
+    y = Math.round((anchor.onTray ? anchor.top : wa.y) + 4);
+  } else {
+    // Windows / Linux: tray icon usually sits near the bottom; open above.
+    y = Math.round(anchor.top - popoverHeight - 8);
+    if (y < wa.y + 4) y = Math.round(anchor.top + 8);
+  }
+  y = Math.max(wa.y + 4, Math.min(y, wa.y + wa.height - popoverHeight - 4));
+
+  return { x, y, width: popoverWidth, height: popoverHeight };
+}
+
+module.exports = {
+  SYSTEM_UI_THEME_CONFIRM_MS,
+  SYSTEM_UI_THEME_SETTLE_MS,
+  buildTrayIcon,
+  buildTrayMenuTemplate,
+  createTray,
+  parseWindowsSystemUsesLightTheme,
+  watchSystemDarkUi,
+  formatTrayText,
+  isBarsTrayIconMode,
+  pickUsageTrayIconId,
+  pickWorstLimit,
+  pointInside,
+  pointerPoint,
+  popoverAnchor,
+  popoverBounds,
+  prepareTrayIconForPlatform,
+  primaryDisplayScaleFactor,
+  reconcileCodexAccountSelection,
+  resizeTrayIconForPlatform,
+  runTrayMenuAction,
+  shouldUseTemplateTrayIcon,
+  sortCodexAccountsForDisplay,
+  trayIconOpaqueBounds,
+  trayShowsTitle,
+  trimTrayIconPadding,
+  windowsTrayIconHeight
+};

@@ -1,0 +1,126 @@
+'use strict';
+
+// The cold-start seed has to reach the same places a collected record does. Two
+// of them are easy to lose: the tray, which reads what sendPush sets and is the
+// only visible surface in tray mode, and a renderer that has not finished
+// loading, which silently drops anything sent to it. main.js cannot be required
+// outside Electron, hence the source-level contract.
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const ROOT = path.resolve(__dirname, '../..');
+const main = fs.readFileSync(path.join(ROOT, 'src/electron/main.js'), 'utf8');
+
+function functionSource(signature) {
+  const start = main.indexOf(signature);
+  assert.ok(start >= 0, `${signature} not found`);
+  const end = main.indexOf('\nfunction ', start + signature.length);
+  return main.slice(start, end === -1 ? main.length : end);
+}
+
+test('the anchor seed publishes through sendPush, not straight to the renderer', () => {
+  const prime = functionSource('function primeLocalStatsFromAnchor(');
+  assert.match(prime, /sendPush\(/);
+  // Going direct would leave latestStats, the tray and the local status
+  // injection on the empty state, which in tray mode is the whole UI.
+  assert.doesNotMatch(prime, /sendMainWindowEvent\(/);
+  // A republished snapshot must not spend the export interval the first live
+  // scan of this run needs.
+  assert.match(prime, /skipExport: true/);
+  assert.match(prime, /deferToRenderer: true/);
+});
+
+// The read-only rule itself is covered in tests/shared/usageTransform.test.js;
+// this pins that main hands the transform the real agent check and store.
+test('an external agent keeps anchor archive loading read-only', () => {
+  const start = main.indexOf('const usageTransform = createUsageTransform({');
+  assert.ok(start >= 0, 'createUsageTransform call not found');
+  const call = main.slice(start, main.indexOf('});', start));
+  assert.match(call, /store: sessionUsageArchiveStore/);
+  assert.match(call, /isExternalAgentActive[,\n]/);
+  const prime = functionSource('function primeLocalStatsFromAnchor(');
+  assert.match(prime, /usageTransform\.ensureLoaded\(\)/);
+});
+
+test('only the seed waits for the renderer, so the deferral cannot queue up', () => {
+  const push = functionSource('function sendPush(');
+  // Live stats send directly. Deferring all of them would add a
+  // did-finish-load listener per frame while the renderer loads, and the
+  // renderer's own refreshStats() on init already covers what gets dropped.
+  assert.match(push, /if \(options\.deferToRenderer\)/);
+  assert.match(push, /else if \(mainWindow && !mainWindow\.isDestroyed\(\)\)/);
+  assert.equal((main.match(/deferToRenderer: true/g) || []).length, 1, 'exactly one caller may defer');
+  // The queued snapshot is only delivered while it is still what was published
+  // last; deferredWindowSend.test.js covers the behaviour.
+  assert.match(push, /latestStats === deferred/);
+});
+
+test('the seed runs before the collector and only on a cold start', () => {
+  const localCollector = functionSource('function startLocalCollector()');
+  const seedAt = localCollector.indexOf('primeLocalStatsFromAnchor(usageOptions, widgetProducerOwner);');
+  const runtimeAt = localCollector.indexOf('createDeviceRuntime(');
+  assert.ok(seedAt >= 0, 'the seed has to run');
+  assert.ok(runtimeAt > seedAt, 'the seed has to land before the first scan starts');
+
+  // Without this guard a settings change would replace lastCollectedDevice with
+  // an anchor record carrying no limits, and initialLimits below reads from it.
+  const prime = functionSource('function primeLocalStatsFromAnchor(');
+  assert.match(prime, /if \(lastCollectedDevice\) return;/);
+  assert.doesNotMatch(prime, /lastCollectedDevice =/);
+});
+
+test('first-scan previews are shown, over the seed when there is one, and never exported', () => {
+  const publish = functionSource('function publishColdPreview(');
+  // A collected record means the first scan has already finished.
+  assert.match(publish, /if \(lastCollectedDevice\) return;/);
+  assert.match(publish, /seedWithColdPreview\(anchorSeedDevice \|\| preview, preview\)/);
+  assert.match(publish, /sendPush\(/);
+  assert.match(publish, /skipExport: true/);
+
+  const localCollector = functionSource('function startLocalCollector()');
+  assert.match(localCollector, /onColdPreview: \(preview, meta\) => publishColdPreview\(/);
+  // The first complete record retires the seed, so a later cold runtime (a
+  // settings restart) cannot lay its previews over a stale snapshot.
+  assert.match(localCollector, /onRecord: \(summary, meta\) => \{\n\s+anchorSeedDevice = null;/);
+  assert.match(functionSource('function stopLocalCollector('), /anchorSeedDevice = null;/);
+  assert.match(functionSource('function primeLocalStatsFromAnchor('), /anchorSeedDevice = visible;/);
+});
+
+test('a client removed during the first scan is archived from the seed, never a preview', () => {
+  const update = functionSource('function updateArchivedClientUsage(');
+  // A preview's unscanned windows would be archived as zero for that client.
+  assert.match(update, /mode === 'local' && !lastCollectedDevice\s*\? anchorSeedDevice\s*:\s*localDeviceRecord\(\{ forClientArchive: settings\.sessionUsageArchiveEnabled !== false \}\)/);
+  assert.match(update, /captureArchivedClientUsage\(archive, source, removedClients\)/);
+});
+
+test('untracking with only a Hub snapshot retries after the first complete scan', () => {
+  const vm = require('node:vm');
+  const deviceId = 'here';
+  const context = {
+    settings: { deviceId, clients: 'codex,claude', hubMode: 'client', sessionUsageArchiveEnabled: false },
+    mode: 'sync',
+    lastCollectedDevice: null,
+    isExternalAgentActive: () => false,
+    localDeviceRecord: () => ({ deviceId, periods: { allTime: { sessions: {} } } })
+  };
+  vm.runInNewContext(
+    functionSource('function trackedClientSet(')
+      + functionSource('function removedTrackedClients(')
+      + functionSource('function assertClientArchiveCaptureReady('),
+    context
+  );
+  const validate = context.assertClientArchiveCaptureReady;
+  assert.throws(() => validate('codex', true), /tracking-scan-pending/);
+  context.settings.sessionUsageArchiveEnabled = true;
+  assert.doesNotThrow(() => validate('codex', false));
+  assert.doesNotThrow(() => validate('codex,claude,gemini', true));
+  context.lastCollectedDevice = { deviceId };
+  assert.doesNotThrow(() => validate('codex', true));
+
+  const apply = functionSource('function applySettingsPatch(');
+  assert.ok(apply.indexOf('assertClientArchiveCaptureReady(normalizedPatch.clients, sessionUsageArchiveEnabled)') >= 0);
+  assert.ok(apply.indexOf('const nextSettingsState = settings;') > apply.indexOf('assertClientArchiveCaptureReady(normalizedPatch.clients, sessionUsageArchiveEnabled)'));
+});

@@ -1,0 +1,109 @@
+'use strict';
+
+// Consistency checks over the per-client wiring that is still maintained
+// independently of the tracked-client catalog. Client identity itself now comes
+// from CLIENT_CATALOG (src/shared/clientCatalog.js), but the WSL marker tables
+// remain a separate source that must still agree with it by hand.
+//
+// Each check tests an *invariant* between two independently-maintained lists
+// rather than a pinned snapshot of either one's contents, so it keeps protecting
+// the remaining #550 steps even after those lists change.
+//
+// clientTracking.test.js already covers: DEFAULT_CLIENTS/KNOWN_CLIENTS shape and
+// the defaults/README display-order agreement. clientCatalog.test.js covers the
+// catalog's own invariants and the renderer's use of it. clientHealth.test.js
+// covers CLIENT_SOURCE_CHECK_IDS vs. the ids clientSourceRoots() actually emits.
+// None of those are duplicated here.
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const { KNOWN_CLIENTS } = require('../../src/shared/clientTracking');
+const { SOURCE_MARKERS } = require('../../src/shared/clientSourceRegistration');
+const { WSL_DATA_MARKERS, MARKER_CLIENTS } = require('../../src/shared/wslUsage');
+
+const knownClientIds = new Set(KNOWN_CLIENTS.split(','));
+
+// --- WSL markers <-> the client each marker is attributed to -----------------
+
+test('every WSL_DATA_MARKERS entry has a MARKER_CLIENTS attribution, and vice versa', () => {
+  const markerSet = new Set(WSL_DATA_MARKERS);
+  const attributedSet = new Set(Object.keys(MARKER_CLIENTS));
+
+  for (const marker of WSL_DATA_MARKERS) {
+    assert.ok(
+      Object.prototype.hasOwnProperty.call(MARKER_CLIENTS, marker),
+      `WSL marker '${marker}' has no MARKER_CLIENTS attribution — it would ` +
+      `be detected but "attribute to nothing" per wslUsage.js's own doc comment`
+    );
+  }
+  for (const marker of attributedSet) {
+    assert.ok(
+      markerSet.has(marker),
+      `MARKER_CLIENTS has an attribution for '${marker}', which is not (or ` +
+      `no longer) in WSL_DATA_MARKERS — dead entry`
+    );
+  }
+});
+
+test('every MARKER_CLIENTS attribution points at a real tracked-client id', () => {
+  for (const [marker, clientId] of Object.entries(MARKER_CLIENTS)) {
+    assert.ok(
+      knownClientIds.has(clientId),
+      `MARKER_CLIENTS['${marker}'] = '${clientId}', which is not a KNOWN_CLIENTS id`
+    );
+  }
+});
+
+test('source markers declare each WSL path once and preserve discovery order', () => {
+  assert.equal(new Set(SOURCE_MARKERS.map(({ marker }) => marker)).size, SOURCE_MARKERS.length);
+  assert.deepEqual(WSL_DATA_MARKERS, SOURCE_MARKERS.map(({ marker }) => marker));
+  assert.deepEqual(Object.entries(MARKER_CLIENTS), SOURCE_MARKERS.map(({ marker, client }) => [marker, client]));
+  assert.deepEqual([...new Set(SOURCE_MARKERS.filter(({ hostCheckId }) => hostCheckId).map(({ client }) => client))], [
+    'qwen', 'pi', 'omp', 'senpi', 'commandcode', 'droid', 'fx', 'claude'
+  ]);
+  assert.deepEqual(WSL_DATA_MARKERS, [
+    '.claude/projects', '.claude/transcripts', '.codex/sessions', '.local/share/opencode',
+    '.openclaw/agents', '.clawdbot/agents', '.moltbot/agents', '.moldbot/agents',
+    '.local/share/goose/sessions/sessions.db', '.local/share/Block/goose/sessions/sessions.db',
+    '.hermes', '.kimi/sessions', '.kimi-code/sessions', '.qwen/projects',
+    '.grok/sessions', '.copilot/otel', '.copilot/session-state', '.gemini/antigravity-cli/conversations',
+    '.gemini/antigravity/conversations', '.gemini/tmp',
+    '.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks',
+    '.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev/tasks',
+    '.local/share/amp/threads', '.config/tokscale/amp-cache/threads', '.pi/agent/sessions', '.omp/agent/sessions',
+    '.omo/agent/projects', '.omo/memory', '.config/Code/User/globalStorage/emptyWindowChatSessions',
+    '.omo/agent/sessions', '.senpi/agent/sessions', '.omo/senpi-task',
+    '.local/share/zed/threads/threads.db', '.local/share/kilo/kilo.db',
+    '.config/Code/User/globalStorage/kilocode.kilo-code/tasks',
+    'Library/Application Support/Code/User/globalStorage/kilocode.kilo-code/tasks',
+    'AppData/Roaming/Code/User/globalStorage/kilocode.kilo-code/tasks',
+    '.vscode-server/data/User/globalStorage/kilocode.kilo-code/tasks',
+    '.commandcode/projects', '.dsh/sessions', '.factory/sessions',
+    '.local/share/mimocode/mimocode.db', '.local/share/muse/sessions', '.zcode/projects', '.zcode/cli/db',
+    '.kiro/sessions', '.local/share/kiro-cli/data.sqlite3',
+    '.config/Kiro/User/globalStorage/kiro.kiroagent',
+    '.config/kiro/User/globalStorage/kiro.kiroagent', '.codebuddy/projects',
+    '.workbuddy', '.workbuddy-ai', '.proma/agent-sessions',
+    '.proma/sdk-config/sessions', '.proma/sdk-config/projects', '.proma-dev/agent-sessions',
+    '.proma-dev/sdk-config/sessions', '.proma-dev/sdk-config/projects',
+    '.lmstudio/server-logs', '.unsloth/studio/studio.db',
+    '.local/share/devin/cli/sessions.db', 'AppData/Roaming/devin/cli/sessions.db',
+    '.config/Devin/User/acp-events', '.config/devin/User/acp-events',
+    'AppData/Roaming/Devin/User/acp-events', 'Library/Application Support/Devin/User/acp-events',
+    '.fx/sessions', '.minimax/v2/sessions', '.mavis/v2/sessions', '.vibe/logs/session',
+    '.prime/agent/sessions', '.prime/agent/session-artifacts', '.qoder/projects', '.qoder-cn/projects', '.jcode/sessions',
+    'Library/Application Support/Claude/local-agent-mode-sessions',
+    'Library/Application Support/Claude/claude-code-sessions',
+    'Library/Application Support/Claude/IndexedDB/https_claude.ai_0.indexeddb.leveldb',
+    'Library/Application Support/Claude/IndexedDB/https_claude.ai_0.indexeddb.blob',
+    'AppData/Roaming/Claude/local-agent-mode-sessions',
+    'AppData/Roaming/Claude/claude-code-sessions',
+    'AppData/Roaming/Claude/IndexedDB/https_claude.ai_0.indexeddb.leveldb',
+    'AppData/Roaming/Claude/IndexedDB/https_claude.ai_0.indexeddb.blob',
+    '.config/Claude/local-agent-mode-sessions',
+    '.config/Claude/claude-code-sessions',
+    '.config/Claude/IndexedDB/https_claude.ai_0.indexeddb.leveldb',
+    '.config/Claude/IndexedDB/https_claude.ai_0.indexeddb.blob'
+  ]);
+});

@@ -1,0 +1,151 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const {
+  moveLimitProvider,
+  normalizeLimitProviderOrder,
+  normalizeLimitProviderSelection,
+  orderedLimitProviders,
+  reorderLimitProvider
+} = require('../../src/electron/renderer/limits/providerOrder');
+const { LIMIT_PROVIDER_CATALOG } = require('../../src/shared/limits/providers');
+
+const providers = [
+  { id: 'claude', label: 'Claude' },
+  { id: 'codex', label: 'Codex' },
+  { id: 'cursor', label: 'Cursor' },
+  { id: 'antigravity', label: 'Antigravity' }
+];
+
+// The expected list stays spelled out rather than derived: this order is the
+// default a fresh install writes to settings.limitProviderOrder, so changing it
+// is a compatibility decision that should have to be made in a diff. Since the
+// catalog became the single source for both the ids and the renderer's list,
+// this hand-written copy is the only independent check left on that order —
+// comparing the catalog against anything derived from it proves nothing.
+test('default provider order follows tracked tools, named services, then third-party fallback', () => {
+  const ids = LIMIT_PROVIDER_CATALOG.map((provider) => provider.id);
+
+  assert.deepEqual(ids, [
+    'claude',
+    'codex',
+    'opencode',
+    'cursor',
+    'antigravity',
+    'cline',
+    'factory',
+    'kimi',
+    'grok',
+    'copilot',
+    'zed',
+    'commandcode',
+    'mimo',
+    'muse',
+    'zai',
+    'zaiteam',
+    'kiro',
+    'workbuddy',
+    'qoder',
+    'deepseek',
+    'devin',
+    'minimax',
+    'mistral',
+    'typesafe',
+    'openrouter',
+    'volcengine',
+    'ollama',
+    'trae',
+    'alibaba',
+    'stepfun',
+    'notion',
+    'manus',
+    'hark',
+    'opendesign',
+    'thirdparty'
+  ]);
+});
+
+test('normalizeLimitProviderOrder drops invalid entries and appends missing providers', () => {
+  assert.deepEqual(
+    normalizeLimitProviderOrder('codex,unknown,codex,claude', providers),
+    ['codex', 'claude', 'cursor', 'antigravity']
+  );
+});
+
+test('normalizeLimitProviderSelection preserves disabled providers', () => {
+  assert.deepEqual(
+    normalizeLimitProviderSelection('codex,unknown,codex', providers),
+    ['codex']
+  );
+});
+
+test('orderedLimitProviders returns provider objects in the saved order', () => {
+  assert.deepEqual(
+    orderedLimitProviders(providers, 'cursor,codex').map((provider) => provider.id),
+    ['cursor', 'codex', 'claude', 'antigravity']
+  );
+});
+
+test('moveLimitProvider swaps a provider with its neighbor only when possible', () => {
+  assert.equal(
+    moveLimitProvider('claude,codex,cursor,antigravity', providers, 'cursor', 'up'),
+    'claude,cursor,codex,antigravity'
+  );
+  assert.equal(
+    moveLimitProvider('claude,codex,cursor,antigravity', providers, 'claude', 'up'),
+    'claude,codex,cursor,antigravity'
+  );
+});
+
+test('reorderLimitProvider moves a provider to a target index', () => {
+  assert.equal(
+    reorderLimitProvider('claude,codex,cursor,antigravity', providers, 'cursor', 0),
+    'cursor,claude,codex,antigravity'
+  );
+  assert.equal(
+    reorderLimitProvider('claude,codex,cursor,antigravity', providers, 'claude', 99),
+    'codex,cursor,antigravity,claude'
+  );
+  assert.equal(
+    reorderLimitProvider('claude,codex,cursor,antigravity', providers, 'unknown', 1),
+    'claude,codex,cursor,antigravity'
+  );
+});
+
+// These hand-wired surfaces used to insert new providers independently of the
+// README-backed catalog, making the source and account layout disagree.
+test('provider registration and account layout order follows the catalog', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const read = (file) => fs.readFileSync(path.join(__dirname, '../..', file), 'utf8');
+  const canonical = LIMIT_PROVIDER_CATALOG.map(({ id }) => id);
+  const check = (ids, label) => {
+    assert.ok(ids.length > 0, `${label} must contain providers`);
+    assert.deepEqual(ids, canonical.filter((id) => ids.includes(id)), label);
+  };
+  for (const [file, names, indent] of [
+    ['src/electron/renderer/app.js', ['LIMIT_PROVIDER_ACCOUNT_NODES'], '  ']
+  ]) {
+    const source = read(file);
+    for (const name of names) {
+      const start = source.indexOf(`const ${name} =`);
+      assert.notEqual(start, -1, name);
+      const body = source.slice(start).split(new RegExp(`\\n${indent.slice(2)}\\}`))[0];
+      check([...body.matchAll(new RegExp(`^${indent}(\\w+):`, 'gm'))].map((match) => match[1]), name);
+    }
+  }
+  const { LIMIT_PROVIDER_SETTING_KEYS } = require('../../src/electron/runtimeConfig');
+  check(Object.keys(LIMIT_PROVIDER_SETTING_KEYS), 'LIMIT_PROVIDER_SETTING_KEYS');
+  const { LIMIT_PROVIDER_REGISTRY, LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
+  assert.deepEqual(LIMIT_PROVIDER_REGISTRY.map(({ id }) => id), canonical, 'limits registry');
+  check(Object.keys(LIMIT_PROVIDER_FETCHERS), 'provider fetchers');
+  const html = read('src/electron/renderer/index.html');
+  check([...html.matchAll(/^ {12}<div id="(\w+)(?:AccountGroup|CookieGroup)"/gm)]
+    .map((match) => match[1]).filter((id) => canonical.includes(id)), 'HTML account groups');
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  check(limitAccountFormsForRenderer().map((form) => form.id), 'generated account forms');
+  const collector = read('src/shared/limits/collector.js');
+  assert.match(collector, /\.\.\.LIMIT_PROVIDER_FETCHERS/);
+});

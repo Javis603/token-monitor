@@ -1,0 +1,1263 @@
+'use strict';
+
+const { orderAccountRows, defaultIdentityKey, configuredMultiAccountProviders, normalizeAccountSlots, accountSlotKey, defaultAccountValues, accountValuesFingerprint } = require('./accountSlots');
+const { alibabaVariantIdentityPart, alibabaRetiredVariantScopes } = require('../providers/alibaba/runtimeIdentity');
+const { LIMIT_PROVIDER_REGISTRY } = require('./registry');
+
+const crypto = require('node:crypto');
+const { hashKey } = require('../hashKey');
+const {
+  PROVIDER_CLEANUP_GRACE_MS,
+  normalizeLimitsRefreshMode,
+  normalizeLimitsRefreshMs,
+  parseBoolean,
+  parseLimitProviders: builtinParseProviders,
+  probeLimitProvider,
+  providerPhysicalBoundMs
+} = require('./collector');
+const { normalizeLimitProvider: builtinNormalizeProvider, normalizeLimitsSummary: builtinNormalizeSummary } = require('./core');
+const {
+  nextLimitsResetBoundary,
+  pruneAttemptedResetBoundaries
+} = require('./resetBoundary');
+const {
+  LIMITS_ADAPTIVE_BASE_MS,
+  createLimitsBurnState,
+  markLimitsProbeSuccess,
+  nextLimitsUrgencyRefresh,
+  pruneLimitsBurnState,
+  recordLimitsSample,
+  recordLimitsUrgencyAttempt
+} = require('./burnRate');
+const { runWithProbeDeadline } = require('../probeDeadline');
+const { limitFailureDetail } = require('./failureDetail');
+const { providerStatusFromError } = require('./providerHelpers');
+const { accountIdentityDescriptor, probeAccount, rowMatchesScope } = require('./accountScope');
+const {
+  DEFAULT_LIMITS_RETRY_BASE_MS,
+  DEFAULT_LIMITS_RETRY_MAX_MS,
+  computeRetryDelayMs,
+  isRetryableLimitStatus
+} = require('./retryPolicy');
+
+const DEFAULT_LIMITS_MAX_CONCURRENCY = 3;
+// Per list in a provider's diagnostic failure detail; enough to tell sources
+// apart without letting one noisy probe fill the report.
+const MAX_FAILURE_DETAIL_ENTRIES = 4;
+const NON_FAILURE_STATUSES = new Set(['ok', 'notConfigured', 'disabled']);
+
+const TRANSIENT_STATUSES = new Set([
+  'timeout',
+  'rateLimited',
+  'sourceRateLimited',
+  'unavailable',
+  'error'
+]);
+
+const COOLDOWN_BYPASS_REASONS = new Set([
+  'account-added',
+  'account-state',
+  'credential-change',
+  'credential-edit',
+  'credential-save',
+  'enabled',
+  'identity-switch',
+  'login',
+  'profile-rename',
+  'profile-save',
+  'profile-state',
+  'provider-added',
+  'settings-change',
+  'system-account-switch'
+]);
+
+function cloneValue(value) {
+  if (Array.isArray(value)) return value.map(cloneValue);
+  if (!value || typeof value !== 'object') return value;
+  const copy = {};
+  for (const [key, child] of Object.entries(value)) copy[key] = cloneValue(child);
+  return copy;
+}
+
+function clean(value) {
+  return String(value || '').trim();
+}
+
+function providerId(value) {
+  return clean(value).toLowerCase();
+}
+
+function privateCredentialDigest(provider, value) {
+  return crypto.createHash('sha256').update(`${provider}\0${value}`).digest('hex').slice(0, 24);
+}
+
+function accountIdentityPart(value) {
+  return accountIdentityDescriptor(value)?.part || '';
+}
+
+function credentialIdentityPart(provider, value) {
+  for (const field of ['credential', 'token', 'apiKey', 'cookie', 'accessToken', 'refreshToken']) {
+    const raw = clean(value?.[field]);
+    if (raw) return `private:${privateCredentialDigest(provider, raw)}`;
+  }
+  return '';
+}
+
+function scopeIdentityKey(scope) {
+  const provider = providerId(scope?.provider);
+  const identity = accountIdentityPart(scope) || credentialIdentityPart(provider, scope);
+  return identity ? `${provider}:${identity}${provider === 'alibaba' ? alibabaVariantIdentityPart(scope) : ''}` : `${provider}:*`;
+}
+
+function isAccountScope(scope) {
+  return Boolean(accountIdentityPart(scope) || credentialIdentityPart(providerId(scope?.provider), scope));
+}
+
+function normalizedScope(scope) {
+  if (!scope || typeof scope !== 'object') return { provider: '' };
+  const provider = providerId(scope.provider);
+  // Legacy anonymous Muse rows address sources; saved web slots address accounts.
+  // Display labels alone still cannot narrow an anonymous refresh.
+  return provider === 'muse' && !scope.accountKey ? { provider } : { ...cloneValue(scope), provider };
+}
+
+function rowIdentityKey(row) {
+  const provider = providerId(row?.provider);
+  if (provider === 'muse' && row?.source && !row.accountKey) return `${provider}:source:${row.source}`;
+  const identity = accountIdentityPart(row);
+  return identity ? `${provider}:${identity}${provider === 'alibaba' ? alibabaVariantIdentityPart(row) : ''}` : `${provider}:*`;
+}
+
+function publicAttemptStatus(status) {
+  return status === 'timeout' ? 'error' : status || 'unavailable';
+}
+
+function bypassesProviderCooldown(reason) {
+  return COOLDOWN_BYPASS_REASONS.has(String(reason || ''));
+}
+
+function createLimitsRuntime(initialOptions = {}, deps = {}) {
+  // Desktop extensions supply their own closed registry and DTO normalization.
+  // Default collectors retain the built-in, wire-compatible provider allowlist.
+  const parseLimitProviders = deps.parseProviders || builtinParseProviders;
+  const normalizeLimitProvider = deps.normalizeProvider || builtinNormalizeProvider;
+  const normalizeLimitsSummary = deps.normalizeSummary || builtinNormalizeSummary;
+  const now = deps.now || Date.now;
+  const setTimer = deps.setTimeout || setTimeout;
+  const clearTimer = deps.clearTimeout || clearTimeout;
+  const scheduleMicrotask = deps.queueMicrotask || queueMicrotask;
+  const probeProvider = deps.probeProvider || probeLimitProvider;
+  const physicalBound = deps.providerPhysicalBoundMs || providerPhysicalBoundMs;
+  const resetBoundary = deps.nextLimitsResetBoundary || nextLimitsResetBoundary;
+  const cleanupGraceMs = Number.isFinite(Number(deps.cleanupGraceMs))
+    ? Math.max(0, Number(deps.cleanupGraceMs))
+    : PROVIDER_CLEANUP_GRACE_MS;
+  const maxConcurrency = Number.isFinite(Number(deps.maxConcurrency))
+    ? Math.max(1, Math.floor(Number(deps.maxConcurrency)))
+    : DEFAULT_LIMITS_MAX_CONCURRENCY;
+  const retryBaseMs = Number.isFinite(Number(deps.retryBaseMs))
+    ? Math.max(1, Number(deps.retryBaseMs))
+    : DEFAULT_LIMITS_RETRY_BASE_MS;
+  const retryMaxMs = Number.isFinite(Number(deps.retryMaxMs))
+    ? Math.max(retryBaseMs, Number(deps.retryMaxMs))
+    : DEFAULT_LIMITS_RETRY_MAX_MS;
+  const autoRetry = deps.autoRetry !== false;
+  const random = deps.random || Math.random;
+  const providerRuntimeState = deps.providerRuntimeState instanceof Map
+    ? deps.providerRuntimeState
+    : new Map();
+
+  let config = cloneValue(initialOptions);
+  let enabled = parseBoolean(config.limitsEnabled ?? config.enabled, true);
+  let refreshMode = normalizeLimitsRefreshMode(config.limitsRefreshMode);
+  // Adaptive replaces the chosen interval with its own baseline rather than
+  // modifying it, so the stored limitsRefreshMs survives a round trip through
+  // adaptive and back. Everything downstream, including the refreshMs published
+  // on the wire, then describes the cadence actually in effect.
+  let refreshMs = refreshMode === 'adaptive'
+    ? LIMITS_ADAPTIVE_BASE_MS
+    : normalizeLimitsRefreshMs(config.limitsRefreshMs ?? config.refreshMs);
+  let configuredProviders = new Set(parseLimitProviders(config.limitProviders ?? config.providers));
+  let runtimeEpoch = 1;
+  let stopped = false;
+  let started = false;
+  let sequence = 0;
+  let executorActive = 0;
+  let pumpQueued = false;
+  let intervalTimer = null;
+  let resetTimer = null;
+  let urgencyTimer = null;
+  let lastScheduledFullAt = 0;
+  const burnState = createLimitsBurnState();
+  const listeners = new Set();
+  const lanes = new Map();
+  const providerQueue = [];
+  const queuedProviders = new Set();
+  const attemptedResetBoundaries = new Set();
+  let snapshot = normalizeLimitsSummary({ updatedAt: null, refreshMs, providers: [] });
+
+  function laneFor(provider) {
+    if (!lanes.has(provider)) {
+      lanes.set(provider, {
+        provider,
+        epoch: 0,
+        accountRevisions: new Map(),
+        pending: new Map(),
+        active: null,
+        identities: new Map(),
+        retryAttempt: 0,
+        retryNotBefore: 0,
+        retryScope: null,
+        retryTimer: null,
+        failureDetail: null
+      });
+    }
+    return lanes.get(provider);
+  }
+
+  // Diagnostic detail is gathered per dispatch and kept only for the latest
+  // committed attempt, so a recovered provider stops reporting an old cause.
+  function addFailureDetail(dispatch, detail) {
+    // The same cause can arrive first without its source (the thrown error) and
+    // then with it (the provider that caught it). Keep the entry that says more.
+    const sameCause = (entry) => ['stage', 'kind', 'httpStatus', 'code']
+      .every((field) => entry[field] === detail[field]);
+    // Two accounts failing the same way are one cause; only different sources
+    // earn separate entries, unless one of them has no source at all.
+    const mergeable = (entry) => sameCause(entry)
+      && (!entry.source || !detail.source || entry.source === detail.source);
+    const index = dispatch.failures.findIndex(mergeable);
+    if (index !== -1) {
+      const existing = dispatch.failures[index];
+      if (!existing.source && detail.source) dispatch.failures[index] = detail;
+      return;
+    }
+    dispatch.failures.push(detail);
+  }
+
+  function noteFailure(dispatch, error, meta) {
+    if (NON_FAILURE_STATUSES.has(error?.status || providerStatusFromError(error))) return;
+    addFailureDetail(dispatch, limitFailureDetail(error, meta));
+  }
+
+  function recordFailureDetail(lane, dispatch, at, failed) {
+    lane.failureDetail = failed || dispatch.failures.length
+      ? {
+          at,
+          failures: dispatch.failures.slice(0, MAX_FAILURE_DETAIL_ENTRIES),
+          httpStatuses: [...dispatch.httpStatuses].slice(0, MAX_FAILURE_DETAIL_ENTRIES),
+          networkCodes: [...dispatch.networkCodes].slice(0, MAX_FAILURE_DETAIL_ENTRIES)
+        }
+      : null;
+  }
+
+  function finishIntent(intent, result) {
+    if (!intent || intent.settled) return;
+    intent.settled = true;
+    intent.resolve(result);
+  }
+
+  // Every probe in flight, whole rather than as a delta, so an observer that
+  // missed an event (or outlived a stopped runtime) is corrected by the next.
+  function activeProbes() {
+    const probes = [];
+    for (const lane of lanes.values()) {
+      const intent = lane.active?.intent;
+      if (intent) probes.push({ provider: lane.provider, account: intent.accountScoped ? probeAccount(intent.scope) : null });
+    }
+    return probes;
+  }
+
+  function emitEvent(type, provider, detail = {}) {
+    try {
+      deps.onEvent?.({
+        type,
+        provider,
+        active: executorActive,
+        queued: providerQueue.length,
+        ...detail
+      });
+    } catch (_) {
+      // Diagnostics observers must never affect collection or retry state.
+    }
+  }
+
+  function clearRetryTimer(lane) {
+    if (lane.retryTimer !== null) clearTimer(lane.retryTimer);
+    lane.retryTimer = null;
+  }
+
+  function resetRetryPolicy(lane) {
+    clearRetryTimer(lane);
+    lane.retryAttempt = 0;
+    lane.retryNotBefore = 0;
+    lane.retryScope = null;
+  }
+
+  function scheduleRetryTimer(lane) {
+    clearRetryTimer(lane);
+    if (!autoRetry || stopped || !enabled || !configuredProviders.has(lane.provider) || !lane.retryScope) return;
+    const delayMs = Math.max(0, lane.retryNotBefore - now());
+    lane.retryTimer = setTimer(() => {
+      lane.retryTimer = null;
+      if (stopped || !enabled || !configuredProviders.has(lane.provider)) return;
+      lane.retryNotBefore = 0;
+      void queueScope(cloneValue(lane.retryScope), 'retry');
+    }, delayMs);
+  }
+
+  function retryStatus(rawRows, error) {
+    if (error) {
+      const status = error.status || (error.code === 'PROBE_TIMEOUT' ? 'timeout' : 'unavailable');
+      return isRetryableLimitStatus(status) ? status : '';
+    }
+    const rows = Array.isArray(rawRows) ? rawRows : rawRows?.providers || [];
+    return rows.map((row) => String(row?.status || '')).find(isRetryableLimitStatus) || '';
+  }
+
+  function applyRetryPolicy(lane, intent, rawRows, error, retryAfterMs) {
+    const status = retryStatus(rawRows, error);
+    if (!status) {
+      resetRetryPolicy(lane);
+      return;
+    }
+    lane.retryAttempt += 1;
+    const delayMs = computeRetryDelayMs(lane.retryAttempt, {
+      baseMs: retryBaseMs,
+      maxMs: retryMaxMs,
+      random,
+      retryAfterMs
+    });
+    lane.retryNotBefore = now() + delayMs;
+    lane.retryScope = cloneValue(intent.scope);
+    scheduleRetryTimer(lane);
+    emitEvent('retry-scheduled', lane.provider, {
+      attempt: lane.retryAttempt,
+      delayMs,
+      reason: status,
+      retryAfter: Number.isFinite(Number(retryAfterMs)) && Number(retryAfterMs) > 0
+    });
+  }
+
+  function cancelLane(lane, reason = 'superseded') {
+    lane.epoch += 1;
+    lane.active?.controller.abort(new Error(reason));
+    finishIntent(lane.active?.intent, { superseded: true, reason });
+    for (const intent of lane.pending.values()) {
+      finishIntent(intent, { superseded: true, reason });
+    }
+    lane.pending.clear();
+  }
+
+  function providerRows(provider) {
+    const lane = lanes.get(provider);
+    if (!lane) return [];
+    const rows = [];
+    for (const state of lane.identities.values()) {
+      const attempt = state.lastAttempt;
+      if (!attempt) continue;
+      const status = publicAttemptStatus(attempt.status);
+      const row = state.lastGood
+        ? normalizeLimitProvider({ ...state.lastGood, status })
+        : normalizeLimitProvider({
+            ...(attempt.row || {}),
+            provider,
+            status,
+            updatedAt: attempt.at,
+            windows: []
+          });
+      if (row) rows.push(row);
+    }
+    const entry = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === provider && entry.accountSlots);
+    if (entry) {
+      const current = providerRuntimeState.get(`account-slot:${entry.id}:default:${accountValuesFingerprint(defaultAccountValues(entry, config, deps.env || process.env))}`)?.accountKey;
+      const saved = normalizeAccountSlots(entry, config[accountSlotKey(entry)]).map(slot => ({ ...slot,
+        accountKey: slot.accountKey || hashKey(entry.id, 'account-slot', `slot:${slot.id}`) }));
+      const ambient = Object.values(config[`${entry.id}AmbientAccounts`] || {});
+      const environmentOrder = config[defaultIdentityKey(entry)]?.order;
+      // Legacy fixed accounts without discovery retain their trailing position.
+      const environment = current ? { accountKey: current, accountKeyAliases: [], source: 'environment',
+        order: environmentOrder ?? (entry.discoveredAccounts ? undefined : saved.length + ambient.length) } : null;
+      const slots = orderAccountRows(saved, ambient, environment).filter(slot => slot.enabled !== false);
+      const owner = row => {
+        const owners = provider === 'alibaba' ? slots.filter(slot => {
+          const values = slot.source === 'environment' ? config : slot.values;
+          return entry.limits.alibabaVariant(values, slot.source === 'environment' ? deps.env : {}) === (row.region || 'cn');
+        }) : slots;
+        return owners.find(slot => slot.accountKey === row.accountKey)
+          || (row.accountKey === current ? undefined : owners.find(slot => slot.accountKeyAliases.includes(row.accountKey)));
+      };
+      for (const row of rows) {
+        const slot = owner(row);
+        if (slot && slot.source !== 'environment') {
+          // Labels are local metadata; changing them never replaces quota data.
+          // A slot's local name is its accountName, also while a retained
+          // reading answers for it; the provider's accountLabel (Qoder's plan)
+          // is never touched.
+          if (slot.label) row.accountName = slot.label;
+          else {
+            const nativeName = providerRuntimeState.get(`account-name:${entry.id}:${row.accountKey}`);
+            if (nativeName) row.accountName = nativeName;
+            else delete row.accountName;
+          }
+
+        }
+      }
+      rows.sort((a, b) => (owner(a) ? slots.indexOf(owner(a)) : slots.length) - (owner(b) ? slots.indexOf(owner(b)) : slots.length));
+    }
+    return rows;
+  }
+
+  function rebuildSnapshot() {
+    const providers = [];
+    if (enabled && !stopped) {
+      for (const provider of configuredProviders) providers.push(...providerRows(provider));
+    }
+    snapshot = normalizeLimitsSummary({
+      updatedAt: new Date(now()).toISOString(),
+      refreshMs,
+      multiAccountProviders: enabled && !stopped ? configuredMultiAccountProviders(LIMIT_PROVIDER_REGISTRY.filter(entry => configuredProviders.has(entry.id)), config, deps.env || process.env, deps) : [],
+      providers
+    });
+    pruneAttemptedResetBoundaries(snapshot, attemptedResetBoundaries);
+    // Only sample once this runtime is actually polling. The constructor seeds
+    // rows from previousLimits that can be arbitrarily old, and pairing that
+    // seed with the first live probe would read a whole offline session's
+    // consumption as having happened in the milliseconds between the two.
+    if (started && !stopped) {
+      recordLimitsSample(burnState, snapshot, now());
+      pruneLimitsBurnState(burnState, snapshot);
+    }
+    scheduleResetTimer();
+    scheduleUrgencyTimer();
+    const published = cloneValue(snapshot);
+    deps.onUpdate?.(published);
+    for (const listener of listeners) listener(published);
+    return published;
+  }
+
+  function scheduleResetTimer() {
+    if (resetTimer !== null) {
+      clearTimer(resetTimer);
+      resetTimer = null;
+    }
+    if (!started || stopped || !enabled) return;
+    const next = resetBoundary(snapshot, now(), attemptedResetBoundaries);
+    if (!next) return;
+    resetTimer = setTimer(() => {
+      resetTimer = null;
+      for (const key of next.keys || []) attemptedResetBoundaries.add(key);
+      const scopes = new Map((next.scopes || []).map((scope) => {
+        const normalized = normalizedScope(scope);
+        return [JSON.stringify(normalized), normalized];
+      }));
+      for (const scope of scopes.values()) {
+        const provider = providerId(scope.provider);
+        const rows = snapshot.providers.filter((row) => row.provider === provider);
+        const strongIdentity = clean(scope.accountKey || scope.accountEmail || scope.accountName);
+        if (!configuredProviders.has(provider) || (provider !== 'muse' && rows.length > 1 && !strongIdentity)) continue;
+        void refresh(scope, 'reset-boundary');
+      }
+      scheduleResetTimer();
+    }, next.delayMs);
+  }
+
+  // An urgency probe must stand down only when the lane is already doing work
+  // that covers this exact scope. A lane serialises probes, but account-scoped
+  // work queues behind other accounts without cancelling them, so an account
+  // close to exhaustion has to be allowed to take its place in that queue rather
+  // than forfeit its turn and wait another floor for a probe that was never
+  // about it.
+  function urgencyScopeCovered(lane, scope) {
+    if (!lane) return false;
+    const active = lane.active?.intent;
+    const pending = [...lane.pending.values()];
+    // A provider-wide dispatch aborts whatever is running and empties the queue,
+    // so anything in progress makes it destructive rather than merely redundant.
+    if (!isAccountScope(scope)) return Boolean(active) || pending.length > 0;
+    // A provider-wide refresh, running or queued, answers for every account.
+    if (active && !active.accountScoped) return true;
+    if (lane.pending.has(`${lane.provider}:*`)) return true;
+    // Work already aimed at this same account, which dispatching would supersede.
+    if (active?.accountScoped && rowMatchesScope(scope, active.scope)) return true;
+    return pending.some((intent) => rowMatchesScope(scope, intent.scope));
+  }
+
+  function clearUrgencyTimer() {
+    if (urgencyTimer !== null) clearTimer(urgencyTimer);
+    urgencyTimer = null;
+  }
+
+  // A second data-driven timer alongside scheduleResetTimer(), active only in
+  // adaptive mode. The 5-minute baseline still applies to every provider; this
+  // inserts an earlier, provider-scoped probe for a quota whose burn rate says
+  // it is close to running out, never faster than the floor in burnRate.js.
+  // 'burn-rate' is deliberately absent from COOLDOWN_BYPASS_REASONS, so
+  // queueScope defers it whenever the lane is already backing off, and it has
+  // no circuit breaker of its own: a 429 is transient traffic control, not
+  // proof that a provider is unsuited to adaptive polling.
+  //
+  // Local token usage is deliberately not a trigger either. A client's tokens
+  // may be billed to a third-party key or endpoint rather than the metered
+  // subscription, and quota can be consumed from another device or the web,
+  // so the correlation breaks in both directions.
+  function scheduleUrgencyTimer() {
+    clearUrgencyTimer();
+    if (!started || stopped || !enabled || refreshMode !== 'adaptive') return;
+    const due = nextLimitsUrgencyRefresh(snapshot, burnState, now(), { baseRefreshMs: refreshMs });
+    if (!due) return;
+    urgencyTimer = setTimer(() => {
+      urgencyTimer = null;
+      // Recorded for every key rather than only the dispatched ones, so a scope
+      // skipped below still consumes its deadline instead of re-firing at once.
+      recordLimitsUrgencyAttempt(burnState, due.keys, now());
+      for (const [index, inputScope] of (due.scopes || []).entries()) {
+        const scope = normalizedScope(inputScope);
+        const provider = providerId(scope.provider);
+        const rows = snapshot.providers.filter((row) => row.provider === provider);
+        const strongIdentity = clean(scope.accountKey || scope.accountEmail || scope.accountName);
+        if (!configuredProviders.has(provider) || (provider !== 'muse' && rows.length > 1 && !strongIdentity)) continue;
+        // A lane already running a probe is skipped whatever queued it: an
+        // intent superseded by another refresh resolves its promise at once
+        // while the physical probe keeps running, so inFlight alone would let an
+        // urgency tick disturb work the lane is already doing. The attempt above
+        // was already recorded for this key, so a scope that stands down waits a
+        // floor rather than retrying against a lane that already covers it.
+        //
+        // urgencyScopeCovered compares through rowMatchesScope rather than by
+        // identity key, because an account is addressable by several aliases and
+        // callers enqueue whichever one they hold: a row carrying both
+        // accountKey and accountName yields the accountKey form here, while a
+        // profile refresh enqueues the name form.
+        if (urgencyScopeCovered(lanes.get(provider), scope)) continue;
+        // Held until the probe settles, not merely until it is dispatched. The
+        // lane is latest-wins, so re-scheduling a scope whose probe is still
+        // running aborts that probe: a provider slower than the floor would
+        // otherwise never publish a reading, only cancelled requests.
+        const key = due.keys[index];
+        burnState.inFlight.add(key);
+        void refresh(scope, 'burn-rate').finally(() => {
+          burnState.inFlight.delete(key);
+          scheduleUrgencyTimer();
+        });
+      }
+      // Re-armed unconditionally: whatever was just dispatched is now in
+      // inFlight and skipped, so this picks up the next provider due rather than
+      // leaving it to wait behind a probe that can legitimately run for two
+      // minutes. Lanes are per provider and the executor is concurrent, so there
+      // is nothing to serialise across them.
+      scheduleUrgencyTimer();
+    }, due.delayMs);
+  }
+
+  function clearIntervalTimer() {
+    if (intervalTimer !== null) clearTimer(intervalTimer);
+    intervalTimer = null;
+  }
+
+  function scheduleInterval(delayMs = refreshMs) {
+    clearIntervalTimer();
+    if (!started || stopped || !enabled) return;
+    intervalTimer = setTimer(() => {
+      intervalTimer = null;
+      runScheduledFullRefresh();
+    }, Math.max(0, delayMs));
+  }
+
+  function runScheduledFullRefresh() {
+    if (!started || stopped || !enabled) return;
+    lastScheduledFullAt = now();
+    void refresh({}, 'interval');
+    scheduleInterval(refreshMs);
+  }
+
+  function enqueueProvider(provider) {
+    const lane = lanes.get(provider);
+    if (!lane || lane.active || lane.pending.size === 0 || queuedProviders.has(provider)) return;
+    queuedProviders.add(provider);
+    providerQueue.push(provider);
+    if (!pumpQueued) {
+      pumpQueued = true;
+      scheduleMicrotask(() => {
+        pumpQueued = false;
+        void pump();
+      });
+    }
+  }
+
+  function nextIntent(lane) {
+    let selected = null;
+    for (const intent of lane.pending.values()) {
+      if (!selected || intent.sequence < selected.sequence) selected = intent;
+    }
+    if (selected) lane.pending.delete(selected.key);
+    return selected;
+  }
+
+  function accountRevisionStillCurrent(lane, identityKey, dispatch) {
+    const keys = [identityKey];
+    // An account-wide clear also fences variants first discovered by this probe.
+    if (lane.provider === 'alibaba' && identityKey.includes(':region:')) keys.push(identityKey.slice(0, identityKey.lastIndexOf(':region:')));
+    return keys.every(key => (lane.accountRevisions.get(key) || 0) === (dispatch.accountRevisions.get(key) || 0));
+  }
+
+  function applyAttempt(lane, identityKey, row, status, at, invalidatedWindowLabels) {
+    const existing = lane.identities.get(identityKey) || {
+      identityKey,
+      lastGood: null,
+      lastAttempt: null
+    };
+    if (lane.provider === 'alibaba' && row.source === 'cli' && row.region) {
+      // CLI and Cookie can report the same identity. Keep the CLI's own quota
+      // when a later Cookie result becomes the displayed row. A confirmed CLI
+      // login replacement relinquishes only that variant's previous ownership.
+      if (status === 'ok' || !TRANSIENT_STATUSES.has(status)) {
+        for (const state of lane.identities.values()) {
+          if (state.alibabaCliLastGood?.region === row.region) {
+            delete state.alibabaCliLastGood;
+            delete state.alibabaCliLastAttempt;
+          }
+        }
+      }
+      if (status === 'ok' && row.accountKey) existing.alibabaCliLastGood = row;
+    }
+    if (status === 'ok') {
+      const retainedWindows = existing.lastGood && invalidatedWindowLabels
+        ? existing.lastGood.windows.filter((window) => !invalidatedWindowLabels.has(window.label)
+          && !row.windows.some((current) => current.label === window.label))
+        : [];
+      if (retainedWindows.length) {
+        // The wire has row-level freshness only. Update independently reported
+        // windows, but keep cached windows visibly stale and eligible for retry.
+        status = 'unavailable';
+        row = { ...row, status, updatedAt: existing.lastGood.updatedAt, windows: [...retainedWindows, ...row.windows],
+          ...(!row.balance && retainedWindows.some((window) => window.metric === 'credits') ? { balance: existing.lastGood.balance } : {}) };
+      }
+      existing.lastGood = row;
+    } else if (!TRANSIENT_STATUSES.has(status)) {
+      existing.lastGood = null;
+    } else if (existing.lastGood && invalidatedWindowLabels) {
+      existing.lastGood = {
+        ...existing.lastGood,
+        windows: existing.lastGood.windows.filter((window) => !invalidatedWindowLabels.has(window.label))
+      };
+    }
+    if (lane.provider === 'minimax' && !row.source && !row.accountKey) {
+      const previous = existing.lastAttempt?.row || existing.lastGood;
+      if (previous?.source) row = { ...row, source: previous.source };
+    }
+    if (['workbuddy', 'alibaba'].includes(lane.provider) && TRANSIENT_STATUSES.has(status) && !row.accountKey) {
+      // A partial discovery can miss an encrypted identity which has never
+      // produced lastGood quota. Preserve its last known metadata as well as
+      // identities with successful readings until explicit removal confirms
+      // absence; the failed attempt must not erase the subscription key.
+      const previous = existing.lastAttempt?.row || existing.lastGood;
+      row = { ...row };
+      for (const field of ['accountKey', 'accountName', 'accountEmail', 'accountLabel', 'region', 'source', 'sourceDetail']) {
+        if (!row[field] && previous?.[field]) row[field] = previous[field];
+      }
+    }
+    existing.lastAttempt = { status, at, row };
+    if (lane.provider === 'alibaba' && row.source === 'cli' && existing.alibabaCliLastGood) {
+      existing.alibabaCliLastAttempt = existing.lastAttempt;
+    }
+    lane.identities.set(identityKey, existing);
+    return row;
+  }
+
+  function matchingIdentityKeys(lane, scope) {
+    const keys = new Set([scopeIdentityKey(scope)]);
+    for (const [identityKey, state] of lane.identities) {
+      if (rowMatchesScope(state.lastGood, scope) || rowMatchesScope(state.lastAttempt?.row, scope)) {
+        keys.add(identityKey);
+      }
+    }
+    return keys;
+  }
+
+  function commitRows(lane, dispatch, rawRows, attemptError = null) {
+    if (stopped || runtimeEpoch !== dispatch.runtimeEpoch || !enabled || !configuredProviders.has(lane.provider)) return false;
+    if (lane.epoch !== dispatch.providerEpoch) return false;
+    if (dispatch.accountScoped) {
+      const currentRevision = lane.accountRevisions.get(dispatch.identityKey) || 0;
+      if (currentRevision !== dispatch.accountRevision) return false;
+    }
+
+    const attemptAt = new Date(now()).toISOString();
+    const inputRows = Array.isArray(rawRows) ? rawRows : rawRows?.providers || [];
+    // A provider that discovers identities locally can see one disappear while
+    // other identities from the same provider still answer. Missing rows are
+    // normally retained as transient (a partial response must not erase good
+    // data), so an explicit removal is the narrow way to delete that identity.
+    // It is consumed here and never enters the normalized or synced wire shape.
+    const removals = inputRows.filter((row) => row?.removed === true);
+    const cacheInvalidations = new Map();
+    const normalizedRows = inputRows
+      .filter((row) => row?.removed !== true)
+      .map((input) => {
+        const row = normalizeLimitProvider({ ...input, provider: lane.provider });
+        // An explicit provider result can invalidate known-bad windows without
+        // disabling transient retention for its other windows or other accounts.
+        // Require an account key; a generic failure cannot invalidate a lane.
+        if (row?.accountKey && Array.isArray(input.invalidateCachedWindowLabels)) {
+          cacheInvalidations.set(rowIdentityKey(row), new Set(input.invalidateCachedWindowLabels
+            .filter((label) => typeof label === 'string' && label)));
+        }
+        return row;
+      })
+      .filter(Boolean);
+    // A MiniMax API-only settings refresh shares the provider executor with Code,
+    // but it does not own Code's retained identity or freshness.
+    const apiOnly = lane.provider === 'minimax' && dispatch.scope.source === 'api' && !dispatch.accountScoped;
+    const belongsToApi = (identityKey) => {
+      if (!apiOnly) return true;
+      const state = lane.identities.get(identityKey);
+      return (state?.lastAttempt?.row?.source || state?.lastGood?.source) === 'api';
+    };
+    const expected = new Set(dispatch.expectedIdentityKeys.filter(key => belongsToApi(key)
+      && (!dispatch.accountScoped || rowMatchesScope(lane.identities.get(key)?.lastGood || lane.identities.get(key)?.lastAttempt?.row, dispatch.scope))));
+    const represented = new Set();
+    const committedRows = [];
+
+    if (attemptError) {
+      const status = attemptError.status || (attemptError.code === 'PROBE_TIMEOUT' ? 'timeout' : 'unavailable');
+      const targets = dispatch.accountScoped
+        ? (expected.size ? [...expected] : [dispatch.identityKey])
+        : expected.size ? [...expected] : apiOnly && lane.identities.size ? [] : [`${lane.provider}:*`];
+      for (const identityKey of targets) {
+        if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
+        applyAttempt(lane, identityKey, { provider: lane.provider, source: dispatch.scope.source }, status, attemptAt);
+      }
+      addFailureDetail(dispatch, limitFailureDetail(attemptError));
+      recordFailureDetail(lane, dispatch, attemptAt, true);
+      rebuildSnapshot();
+      return [];
+    }
+
+    const genericTerminal = normalizedRows.length === 1
+      && rowIdentityKey(normalizedRows[0]) === `${lane.provider}:*`
+      && !TRANSIENT_STATUSES.has(normalizedRows[0].status)
+      && normalizedRows[0].status !== 'ok';
+    if (genericTerminal && !dispatch.accountScoped) {
+      if (apiOnly) {
+        for (const identityKey of expected) lane.identities.delete(identityKey);
+        // Without API credentials, the collector hides this optional placeholder
+        // whenever a real Code account is already present.
+        if ([...lane.identities.values()].some(state =>
+          (state.lastAttempt?.row?.source || state.lastGood?.source) === 'oauth')) {
+          // Nothing failed here, so the previous API outage must not stay on
+          // record for a lane this dispatch does not own.
+          recordFailureDetail(lane, dispatch, attemptAt, false);
+          rebuildSnapshot();
+          return [];
+        }
+      } else lane.identities.clear();
+    }
+
+    let removeAnonymous = false;
+    const replacementRemovals = [];
+    for (const removal of removals) {
+      let identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
+      if (removal.replacementAccount) { replacementRemovals.push(removal); continue; }
+      if (identityKey === `${lane.provider}:*`) { removeAnonymous = true; continue; }
+      if (dispatch.accountScoped && identityKey !== dispatch.identityKey
+        && !rowMatchesScope({ ...removal, provider: lane.provider }, dispatch.scope)) continue;
+      if (apiOnly && !belongsToApi(identityKey)) continue;
+      if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
+      represented.add(identityKey);
+      lane.identities.delete(identityKey);
+    }
+
+    for (const row of normalizedRows) {
+      let identityKey = rowIdentityKey(row);
+      if (identityKey === `${lane.provider}:*` && dispatch.accountScoped) {
+        if (lane.provider === 'alibaba' && expected.size) {
+          for (const expectedKey of expected) {
+            if (!accountRevisionStillCurrent(lane, expectedKey, dispatch)) continue;
+            represented.add(expectedKey);
+            committedRows.push(applyAttempt(lane, expectedKey, row, row.status, attemptAt));
+          }
+          continue;
+        }
+        identityKey = dispatch.identityKey;
+      }
+      if (apiOnly && identityKey !== `${lane.provider}:*`
+        && lane.identities.has(identityKey) && !belongsToApi(identityKey)) continue;
+      if (!accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
+      if (dispatch.accountScoped && identityKey !== dispatch.identityKey) {
+        if (lane.provider === 'alibaba' && row.accountKey) {
+          if (!rowMatchesScope(row, dispatch.scope)) continue;
+        } else identityKey = dispatch.identityKey;
+      }
+
+      if (identityKey === `${lane.provider}:*` && TRANSIENT_STATUSES.has(row.status) && expected.size > 0) {
+        for (const expectedKey of expected) {
+          if (!accountRevisionStillCurrent(lane, expectedKey, dispatch)) continue;
+          represented.add(expectedKey);
+          committedRows.push(applyAttempt(lane, expectedKey, row, row.status, attemptAt));
+        }
+        continue;
+      }
+
+      represented.add(identityKey);
+      const committedRow = applyAttempt(lane, identityKey, row, row.status, attemptAt, cacheInvalidations.get(rowIdentityKey(row)));
+      committedRows.push(committedRow);
+      // An answer that dropped windows still on screen is published as stale
+      // `unavailable`; say so, or the report reads it as a failed request.
+      if (row.status === 'ok' && committedRow.status !== 'ok') addFailureDetail(dispatch, { kind: 'stale-windows' });
+      // Marks the row as measurable by this runtime, so a persisted seed for a
+      // provider that has not answered yet can never become a burn baseline.
+      if (committedRow.status === 'ok') markLimitsProbeSuccess(burnState, committedRow);
+    }
+
+    // Retire anonymous state only after its healthy replacement actually commits;
+    // a result invalidated by a concurrent account clear cannot replace it.
+    if (removeAnonymous && !dispatch.accountScoped && committedRows.some(row => row.status === 'ok')
+      && accountRevisionStillCurrent(lane, `${lane.provider}:*`, dispatch)) {
+      represented.add(`${lane.provider}:*`);
+      lane.identities.delete(`${lane.provider}:*`);
+    }
+
+    // Source replacement differs from confirmed account disappearance: retire
+    // the old row only when its specific replacement survived the commit fences.
+    for (const removal of replacementRemovals) {
+      const identityKey = rowIdentityKey({ ...removal, provider: lane.provider });
+      const replacementKey = rowIdentityKey({ ...removal.replacementAccount, provider: lane.provider });
+      if (dispatch.accountScoped || !accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
+      if (apiOnly && !belongsToApi(identityKey)) continue;
+      if (!committedRows.some(row => row.status === 'ok' && rowIdentityKey(row) === replacementKey)) continue;
+      if (committedRows.some(row => row.status === 'ok' && rowIdentityKey(row) === identityKey)) continue;
+      represented.add(identityKey);
+      lane.identities.delete(identityKey);
+    }
+
+    if (!dispatch.accountScoped && !genericTerminal) {
+      for (const identityKey of expected) {
+        if (represented.has(identityKey) || !accountRevisionStillCurrent(lane, identityKey, dispatch)) continue;
+        applyAttempt(lane, identityKey, { provider: lane.provider }, 'unavailable', attemptAt);
+        addFailureDetail(dispatch, { kind: 'not-returned' });
+      }
+    }
+    recordFailureDetail(lane, dispatch, attemptAt,
+      committedRows.some((row) => !NON_FAILURE_STATUSES.has(row?.status))
+      || dispatch.failures.some((entry) => entry.kind === 'not-returned'));
+    rebuildSnapshot();
+    // Retry decisions must follow the published status, including partial
+    // successes that still retain stale windows, rather than the raw probe.
+    return committedRows;
+  }
+
+  async function dispatchIntent(lane, intent) {
+    const controller = new AbortController();
+    const dispatch = {
+      runtimeEpoch,
+      providerEpoch: lane.epoch,
+      accountScoped: intent.accountScoped,
+      scope: intent.scope,
+      identityKey: intent.identityKey,
+      accountRevision: lane.accountRevisions.get(intent.identityKey) || 0,
+      accountRevisions: new Map(lane.accountRevisions),
+      expectedIdentityKeys: [...lane.identities.keys()],
+      failures: [],
+      httpStatuses: new Set(),
+      networkCodes: new Set()
+    };
+    lane.active = { intent, controller, dispatch };
+    emitEvent('probe-start', lane.provider, { reason: intent.reason, probes: activeProbes() });
+    let reportedRetryAfterMs = null;
+    try {
+      const resolved = deps.resolveConfigSnapshot
+        ? await deps.resolveConfigSnapshot(cloneValue(intent.scope), cloneValue(config))
+        : config;
+      const configSnapshot = cloneValue(resolved || config);
+      configSnapshot.limitProviders = [lane.provider];
+      if (intent.accountScoped || (lane.provider === 'minimax' && intent.scope.source === 'api')) {
+        configSnapshot.limitRefreshScope = cloneValue(intent.scope);
+      } else delete configSnapshot.limitRefreshScope;
+      // A provider that must remove a vanished local identity compares against
+      // the rows this runtime actually accepted, not a mutable probe-side cache.
+      // A superseded probe therefore cannot consume a removal before commit.
+      configSnapshot.previousLimits = { providers: providerRows(lane.provider) };
+      const physicalMs = Number(physicalBound(lane.provider, configSnapshot, deps));
+      const deadlineMs = physicalMs + cleanupGraceMs;
+      const rows = await runWithProbeDeadline(
+        ({ signal }) => probeProvider(lane.provider, configSnapshot, {
+          signal: AbortSignal.any([signal, controller.signal]),
+          deadlineMs,
+          scope: cloneValue(intent.scope),
+          reason: intent.reason,
+          onRetryAfter(value) {
+            const parsed = Number(value);
+            if (!Number.isFinite(parsed) || parsed <= 0) return;
+            reportedRetryAfterMs = Math.max(reportedRetryAfterMs || 0, parsed);
+          },
+          onFailure(error, meta) {
+            noteFailure(dispatch, error, meta);
+          },
+          onHttpStatus(value) {
+            if (Number.isInteger(value) && value >= 400 && value <= 599) dispatch.httpStatuses.add(value);
+          },
+          onTransportError(error) {
+            const detail = limitFailureDetail(error);
+            if (detail.kind === 'network') dispatch.networkCodes.add(detail.code);
+          }
+        }, { ...deps, providerRuntimeState }),
+        { deadlineMs }
+      );
+      const committed = commitRows(lane, dispatch, rows);
+      if (committed) applyRetryPolicy(lane, intent, committed, null, reportedRetryAfterMs);
+      finishIntent(intent, { superseded: !committed, snapshot: getSnapshot() });
+    } catch (error) {
+      const committed = commitRows(lane, dispatch, [], error);
+      if (committed) applyRetryPolicy(lane, intent, [], error, reportedRetryAfterMs || error?.retryAfterMs);
+      finishIntent(intent, { superseded: !committed, error, snapshot: getSnapshot() });
+    } finally {
+      if (lane.active?.intent === intent) lane.active = null;
+      emitEvent('probe-finish', lane.provider, { reason: intent.reason, probes: activeProbes() });
+    }
+  }
+
+  function pump() {
+    if (stopped) return;
+    while (executorActive < maxConcurrency && providerQueue.length > 0) {
+      const provider = providerQueue.shift();
+      queuedProviders.delete(provider);
+      const lane = lanes.get(provider);
+      if (!lane || lane.active || lane.pending.size === 0 || !configuredProviders.has(provider)) continue;
+      const intent = nextIntent(lane);
+      if (!intent) continue;
+      executorActive += 1;
+      void dispatchIntent(lane, intent).finally(() => {
+        executorActive = Math.max(0, executorActive - 1);
+        if (lane.pending.size > 0) enqueueProvider(provider);
+        pump();
+      });
+    }
+  }
+
+  function queueScope(scope, reason) {
+    const provider = providerId(scope.provider);
+    if (!provider || stopped || !enabled || !configuredProviders.has(provider)) {
+      return Promise.resolve({ superseded: true, reason: 'disabled' });
+    }
+    const lane = laneFor(provider);
+    if (bypassesProviderCooldown(reason)) {
+      resetRetryPolicy(lane);
+    } else if (lane.retryNotBefore > now()) {
+      scheduleRetryTimer(lane);
+      return Promise.resolve({
+        deferred: true,
+        provider,
+        retryAt: new Date(lane.retryNotBefore).toISOString()
+      });
+    }
+    const accountScoped = isAccountScope(scope);
+    const identityKey = scopeIdentityKey(scope);
+    const key = accountScoped ? identityKey : `${provider}:*`;
+
+    if (accountScoped) {
+      lane.accountRevisions.set(identityKey, (lane.accountRevisions.get(identityKey) || 0) + 1);
+      if (lane.active?.intent.key === key) {
+        lane.active.controller.abort(new Error('superseded'));
+        finishIntent(lane.active.intent, { superseded: true, reason: 'superseded' });
+      }
+    } else {
+      lane.epoch += 1;
+      lane.active?.controller.abort(new Error('superseded'));
+      finishIntent(lane.active?.intent, { superseded: true, reason: 'superseded' });
+      for (const pending of lane.pending.values()) {
+        finishIntent(pending, { superseded: true, reason: 'provider-wide' });
+      }
+      lane.pending.clear();
+    }
+
+    const previous = lane.pending.get(key);
+    finishIntent(previous, { superseded: true, reason: 'superseded' });
+    let resolve;
+    const promise = new Promise((done) => { resolve = done; });
+    const intent = {
+      sequence: ++sequence,
+      key,
+      identityKey,
+      accountScoped,
+      scope: cloneValue(scope),
+      reason,
+      resolve,
+      settled: false
+    };
+    lane.pending.set(key, intent);
+    enqueueProvider(provider);
+    return promise;
+  }
+
+  function refresh(scope = {}, reason = 'manual') {
+    const normalized = normalizedScope(scope);
+    if (normalized.provider) return queueScope(normalized, reason);
+    if (reason === 'manual' && started && enabled && !stopped) {
+      lastScheduledFullAt = now();
+      scheduleInterval(refreshMs);
+    }
+    return Promise.all([...configuredProviders].map((provider) => queueScope({ provider }, reason)))
+      .then(() => getSnapshot());
+  }
+
+  function clear(scope = {}, reason = 'removed') {
+    const normalized = normalizedScope(scope);
+    const providers = normalized.provider ? [normalized.provider] : [...configuredProviders];
+    for (const provider of providers) {
+      const lane = lanes.get(provider);
+      if (!lane) continue;
+      if (!isAccountScope(normalized)) {
+        // cancelLane empties pending, so capture API work before cancelling.
+        const pendingApi = provider === 'minimax' && normalized.source === 'api'
+          ? [...lane.pending.values(), lane.active?.intent]
+            .filter(intent => intent?.scope.source === 'api').map(intent => intent.identityKey)
+          : [];
+        cancelLane(lane, reason);
+        resetRetryPolicy(lane);
+        if (provider === 'minimax' && normalized.source === 'api') {
+          // Fence only API identities, retaining OAuth revisions.
+          const removed = new Set(pendingApi);
+          for (const [identityKey, state] of lane.identities) {
+            const row = state.lastAttempt?.row || state.lastGood;
+            if (row?.source === 'api') {
+              lane.identities.delete(identityKey);
+              removed.add(identityKey);
+            }
+          }
+          for (const identityKey of removed) {
+            lane.accountRevisions.set(identityKey, (lane.accountRevisions.get(identityKey) || 0) + 1);
+          }
+        } else if (provider === 'muse' && scope.source === 'web') {
+          for (const [key, state] of lane.identities) {
+            if ((state.lastAttempt?.row?.source || state.lastGood?.source) === 'web') lane.identities.delete(key);
+          }
+          lane.accountRevisions.clear();
+        } else {
+          lane.identities.clear();
+          lane.accountRevisions.clear();
+        }
+        continue;
+      }
+      const identityKeys = matchingIdentityKeys(lane, normalized);
+      resetRetryPolicy(lane);
+      for (const identityKey of identityKeys) {
+        lane.accountRevisions.set(identityKey, (lane.accountRevisions.get(identityKey) || 0) + 1);
+        const state = lane.identities.get(identityKey);
+        // Saved Cookie changes do not retire an independent CLI login. Restore
+        // its own quota/attempt while still fencing the old Cookie dispatch.
+        if (provider === 'alibaba' && reason === 'settings-change' && config.alibabaSourcePreference !== 'web' && state?.alibabaCliLastGood) {
+          state.lastGood = state.alibabaCliLastGood;
+          state.lastAttempt = state.alibabaCliLastAttempt;
+        } else lane.identities.delete(identityKey);
+        const pending = lane.pending.get(identityKey);
+        finishIntent(pending, { superseded: true, reason });
+        lane.pending.delete(identityKey);
+      }
+      if (identityKeys.has(lane.active?.intent.identityKey)) {
+        lane.active.controller.abort(new Error(reason));
+        finishIntent(lane.active.intent, { superseded: true, reason });
+      }
+    }
+    return rebuildSnapshot();
+  }
+
+  function reconfigure(nextOptions = {}) {
+    const previousEnabled = enabled;
+    const previousRefreshMs = refreshMs;
+    const previousProviders = configuredProviders;
+    const previousConfig = config;
+    config = { ...config, ...cloneValue(nextOptions) };
+    const alibaba = LIMIT_PROVIDER_REGISTRY.find(entry => entry.id === 'alibaba');
+    if (alibaba && Object.hasOwn(nextOptions, accountSlotKey(alibaba))) {
+      const describe = options => normalizeAccountSlots(alibaba, options[accountSlotKey(alibaba)]).map(slot => ({ ...slot,
+        accountKey: providerRuntimeState.get(`account-slot:alibaba:slot:${slot.id}:${accountValuesFingerprint(slot.values)}`)?.accountKey || slot.accountKey }));
+      const environmentKey = providerRuntimeState.get(`account-slot:alibaba:default:${accountValuesFingerprint(defaultAccountValues(alibaba, config, deps.env || process.env))}`)?.accountKey;
+      const environment = environmentKey ? { accountKey: environmentKey, region: alibaba.limits.alibabaVariant(config, deps.env || process.env) } : null;
+      for (const scope of alibabaRetiredVariantScopes(describe(previousConfig), describe(config), environment)) clear(scope, 'settings-change');
+    }
+    enabled = parseBoolean(config.limitsEnabled ?? config.enabled, true);
+    refreshMode = normalizeLimitsRefreshMode(config.limitsRefreshMode);
+    refreshMs = refreshMode === 'adaptive'
+      ? LIMITS_ADAPTIVE_BASE_MS
+      : normalizeLimitsRefreshMs(config.limitsRefreshMs ?? config.refreshMs);
+    configuredProviders = new Set(parseLimitProviders(config.limitProviders ?? config.providers));
+
+    for (const provider of previousProviders) {
+      if (configuredProviders.has(provider)) continue;
+      const lane = lanes.get(provider);
+      if (lane) {
+        cancelLane(lane, 'provider removed');
+        resetRetryPolicy(lane);
+        lane.identities.clear();
+      }
+      lanes.delete(provider);
+    }
+
+    if (!enabled) {
+      clearIntervalTimer();
+      clearUrgencyTimer();
+      if (resetTimer !== null) clearTimer(resetTimer);
+      resetTimer = null;
+      for (const lane of lanes.values()) {
+        cancelLane(lane, 'limits disabled');
+        resetRetryPolicy(lane);
+        lane.identities.clear();
+      }
+      rebuildSnapshot();
+      return getSnapshot();
+    }
+
+    if (!previousEnabled && enabled) {
+      for (const provider of configuredProviders) void queueScope({ provider }, 'enabled');
+      lastScheduledFullAt = now();
+    } else {
+      for (const provider of configuredProviders) {
+        if (!previousProviders.has(provider)) void queueScope({ provider }, 'provider-added');
+      }
+    }
+
+    if (started) {
+      const elapsed = lastScheduledFullAt ? Math.max(0, now() - lastScheduledFullAt) : 0;
+      if (refreshMs !== previousRefreshMs && lastScheduledFullAt && elapsed >= refreshMs) {
+        runScheduledFullRefresh();
+      } else {
+        scheduleInterval(lastScheduledFullAt ? Math.max(0, refreshMs - elapsed) : refreshMs);
+      }
+    }
+    rebuildSnapshot();
+    return getSnapshot();
+  }
+
+  function getSnapshot() {
+    return cloneValue(snapshot);
+  }
+
+  function getDiagnostics() {
+    const providers = [...configuredProviders].map((provider) => {
+      const lane = lanes.get(provider);
+      const identities = lane ? [...lane.identities.values()] : [];
+      const attempts = identities
+        .map((identity) => identity.lastAttempt)
+        .filter(Boolean);
+      const successful = identities
+        .map((identity) => identity.lastGood)
+        .filter(Boolean);
+      const latestAttempt = attempts
+        .map((attempt) => attempt.at)
+        .filter(Boolean)
+        .sort()
+        .at(-1) || null;
+      const latestSuccess = successful
+        .map((row) => row.updatedAt)
+        .filter(Boolean)
+        .sort()
+        .at(-1)
+        || attempts
+          .filter((attempt) => publicAttemptStatus(attempt.status) === 'ok')
+          .map((attempt) => attempt.at)
+          .filter(Boolean)
+          .sort()
+          .at(-1)
+        || null;
+      const latestFailure = attempts
+        .filter((attempt) => publicAttemptStatus(attempt.status) !== 'ok')
+        .sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')))
+        .at(-1);
+      return {
+        provider,
+        configured: true,
+        active: Boolean(lane?.active),
+        pending: lane?.pending.size || 0,
+        accountCount: identities.length,
+        retryAttempt: lane?.retryAttempt || 0,
+        retryAt: lane?.retryNotBefore > 0 ? new Date(lane.retryNotBefore).toISOString() : null,
+        lastAttemptAt: latestAttempt,
+        lastSuccessAt: latestSuccess,
+        lastFailureCode: latestFailure ? publicAttemptStatus(latestFailure.status) : null,
+        lastFailureDetail: lane?.failureDetail ? cloneValue(lane.failureDetail) : null
+      };
+    });
+    return {
+      enabled,
+      active: executorActive,
+      maxConcurrency,
+      queued: providerQueue.length,
+      providers
+    };
+  }
+
+  function subscribe(listener) {
+    if (typeof listener !== 'function') throw new TypeError('listener must be a function');
+    listeners.add(listener);
+    return () => listeners.delete(listener);
+  }
+
+  function start() {
+    if (started || stopped) return;
+    started = true;
+    if (!enabled) return;
+    lastScheduledFullAt = now();
+    void refresh({}, 'startup');
+    scheduleInterval(refreshMs);
+    scheduleResetTimer();
+    scheduleUrgencyTimer();
+  }
+
+  function stop() {
+    if (stopped) return;
+    stopped = true;
+    runtimeEpoch += 1;
+    clearIntervalTimer();
+    clearUrgencyTimer();
+    if (resetTimer !== null) clearTimer(resetTimer);
+    resetTimer = null;
+    for (const lane of lanes.values()) {
+      cancelLane(lane, 'runtime stopped');
+      resetRetryPolicy(lane);
+    }
+    providerQueue.length = 0;
+    queuedProviders.clear();
+    listeners.clear();
+  }
+
+  for (const row of normalizeLimitsSummary(config.previousLimits || {}).providers) {
+    if (!configuredProviders.has(row.provider)) continue;
+    const lane = laneFor(row.provider);
+    const identityKey = rowIdentityKey(row);
+    const at = row.updatedAt || new Date(now()).toISOString();
+    if (TRANSIENT_STATUSES.has(row.status) && row.windows.length > 0) {
+      lane.identities.set(identityKey, {
+        identityKey,
+        lastGood: normalizeLimitProvider({ ...row, status: 'ok' }),
+        ...(row.provider === 'alibaba' && row.source === 'cli' && row.accountKey
+          ? { alibabaCliLastGood: normalizeLimitProvider({ ...row, status: 'ok' }), alibabaCliLastAttempt: { status: row.status, at, row } } : {}),
+        lastAttempt: { status: row.status, at, row }
+      });
+    } else {
+      applyAttempt(lane, identityKey, row, row.status, at);
+    }
+  }
+  rebuildSnapshot();
+  if (deps.autoStart !== false) start();
+
+  return {
+    clear,
+    getDiagnostics,
+    getSnapshot,
+    reconfigure,
+    refresh,
+    start,
+    stop,
+    subscribe
+  };
+}
+
+module.exports = {
+  DEFAULT_LIMITS_MAX_CONCURRENCY,
+  TRANSIENT_STATUSES,
+  accountIdentityPart,
+  createLimitsRuntime,
+  rowIdentityKey,
+  scopeIdentityKey
+};

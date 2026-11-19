@@ -1,0 +1,126 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const {
+  NS_WINDOW_COLLECTION_BEHAVIOR_MOVE_TO_ACTIVE_SPACE,
+  createMacSpaceApi,
+  preventAppActivation,
+  setMoveToActiveSpace
+} = require('../../src/electron/macosSpaceBehavior');
+
+function fakeKoffi(initialBehavior) {
+  const selectors = new Map([
+    ['window', 11n],
+    ['collectionBehavior', 12n],
+    ['setCollectionBehavior:', 13n]
+  ]);
+  const calls = [];
+  return {
+    calls,
+    load() {
+      return {
+        func(name, returnType, argumentTypes) {
+          if (name === 'sel_registerName') return (selector) => selectors.get(selector);
+          if (name === 'objc_msgSend' && returnType === 'uintptr_t') {
+            return (receiver, selector) => selector === 11n ? 101n : initialBehavior;
+          }
+          if (name === 'objc_msgSend' && argumentTypes.length === 3) {
+            return (receiver, selector, behavior) => calls.push({ receiver, selector, behavior });
+          }
+          throw new Error(`Unexpected native function: ${name}`);
+        }
+      };
+    }
+  };
+}
+
+test('AppKit bridge adds and removes moveToActiveSpace without changing other flags', () => {
+  const addKoffi = fakeKoffi(8n);
+  assert.equal(createMacSpaceApi(addKoffi).setMoveToActiveSpace(100n, true), true);
+  assert.deepEqual(addKoffi.calls, [{
+    receiver: 101n,
+    selector: 13n,
+    behavior: 8n | NS_WINDOW_COLLECTION_BEHAVIOR_MOVE_TO_ACTIVE_SPACE
+  }]);
+
+  const removeKoffi = fakeKoffi(10n);
+  assert.equal(createMacSpaceApi(removeKoffi).setMoveToActiveSpace(100n, false), true);
+  assert.deepEqual(removeKoffi.calls, [{ receiver: 101n, selector: 13n, behavior: 8n }]);
+});
+
+test('native bridge is a no-op away from macOS', () => {
+  const win = {
+    getNativeWindowHandle() {
+      throw new Error('must not read a native handle');
+    }
+  };
+  assert.equal(setMoveToActiveSpace(win, true, { platform: 'linux' }), false);
+});
+
+function fakeActivationKoffi(responds) {
+  const selectors = new Map([['window', 11n], ['respondsToSelector:', 21n], ['_setPreventsActivation:', 22n]]);
+  const calls = [];
+  return {
+    calls,
+    load() {
+      return {
+        func(name, returnType, argumentTypes) {
+          if (name === 'sel_registerName') return (selector) => selectors.get(selector) ?? 0n;
+          if (name !== 'objc_msgSend') throw new Error(`Unexpected native function: ${name}`);
+          if (returnType === 'uintptr_t') return (receiver, selector) => selector === 11n ? 101n : 0n;
+          if (returnType === 'bool') return (receiver, selector, query) => { calls.push(['responds', receiver, query]); return responds; };
+          if (argumentTypes[2] === 'bool') return (receiver, selector, value) => calls.push(['set', receiver, selector, value]);
+          return () => {};
+        }
+      };
+    }
+  };
+}
+
+test('AppKit bridge sets the window activation guard only where AppKit has it', () => {
+  const supported = fakeActivationKoffi(true);
+  assert.equal(createMacSpaceApi(supported).setPreventsActivation(100n), true);
+  assert.deepEqual(supported.calls, [['responds', 101n, 22n], ['set', 101n, 22n, true]]);
+
+  const missing = fakeActivationKoffi(false);
+  assert.equal(createMacSpaceApi(missing).setPreventsActivation(100n), false);
+  assert.deepEqual(missing.calls, [['responds', 101n, 22n]]);
+});
+
+test('activation guard is a no-op away from macOS and never throws', () => {
+  const win = { getNativeWindowHandle() { throw new Error('must not read a native handle'); } };
+  assert.equal(preventAppActivation(win, { platform: 'win32' }), false);
+  assert.equal(preventAppActivation(win, { platform: 'darwin', api: { setPreventsActivation: () => true } }), false);
+  assert.equal(preventAppActivation({ isDestroyed: () => true }, { platform: 'darwin' }), false);
+});
+
+test('main process reapplies the complete Space policy before showing either mode', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+  const policy = main.match(/function applyMacSpaceBehavior[\s\S]*?\n}\n\nfunction applyWindowSettings/)[0];
+  const popover = main.match(/function showPopover[\s\S]*?\n}\n\nfunction hidePopover/)[0];
+  const focusWindow = main.match(/function focusExistingWindow[\s\S]*?\n}\n\nfunction currentWindowToggleShortcutStatus/)[0];
+
+  assert.match(policy, /setMoveToActiveSpace\(mainWindow, false\)[\s\S]*setVisibleOnAllWorkspaces\(true, \{[\s\S]*visibleOnFullScreen: true,[\s\S]*skipTransformProcessType: true/);
+  assert.match(policy, /setVisibleOnAllWorkspaces\(false, \{ skipTransformProcessType: true \}\)[\s\S]*setHiddenInMissionControl\(false\)[\s\S]*setMoveToActiveSpace\(mainWindow, true\)/);
+  // Both directions skip the process-type transform. Electron performs it to
+  // keep its own Dock/activation state consistent, but this app decides that in
+  // applyMacActivationPolicy() — and every caller runs that first. Dropping the
+  // option from the leave-tray-mode branch re-shows the Dock icon and undoes a
+  // hideAppIcon that is still switched on.
+  assert.equal((policy.match(/skipTransformProcessType: true/g) || []).length, 2);
+  // Skipping the transform is only safe because applyMacActivationPolicy() has
+  // decided the process type first on every path in. createWindow() is reached
+  // from the activate handler too, which had no policy call of its own.
+  assert.match(
+    main,
+    /app\.on\('activate', \(\) => \{[\s\S]*?applyMacActivationPolicy\(\{ mainWindowVisible: true \}\);[\s\S]*?createWindow\(\);/
+  );
+  assert.match(policy, /setHiddenInMissionControl\(true\)/);
+  assert.match(popover, /applyMacSpaceBehavior\(true\)[\s\S]*mainWindow\.show\(\)/);
+  assert.match(focusWindow, /applyMacSpaceBehavior\(false\)[\s\S]*mainWindow\.show\(\)/);
+  assert.doesNotMatch(main, /mainWindow\.show\(\);\s*mainWindow\.focus\(\);/);
+});

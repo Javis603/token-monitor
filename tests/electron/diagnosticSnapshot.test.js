@@ -1,0 +1,351 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const {
+  createDiagnosticSnapshotBuilder,
+  diagnosticHubTarget,
+  diagnosticStreamDetailCode,
+  selectLocalDeviceRecord
+} = require('../../src/electron/diagnosticSnapshot');
+
+function createBuilder(overrides = {}) {
+  const nowMs = Date.parse('2026-08-06T10:00:00.000Z');
+  const localRecord = {
+    deviceId: 'local-device',
+    agentVersion: '0.41.0',
+    agentRuntime: 'electron-widget',
+    platform: 'darwin-arm64',
+    osName: 'macOS',
+    osVersion: '15.1.1',
+    receivedAt: new Date(nowMs - 8000).toISOString(),
+    updatedAt: new Date(nowMs - 8000).toISOString(),
+    syncUploadIntervalMs: 0,
+    trackedClients: ['codex'],
+    clientHealth: {
+      observedAt: new Date(nowMs - 5000).toISOString(),
+      clients: {
+        codex: {
+          overall: 'healthy',
+          source: { state: 'detected', detectedCount: 1, checkedCount: 1, checks: [] },
+          collection: {
+            state: 'ok',
+            lastAttemptAt: new Date(nowMs - 6000).toISOString(),
+            lastSuccessAt: new Date(nowMs - 5000).toISOString()
+          },
+          data: { lastActivityDay: '2026-08-06' },
+          diagnostics: []
+        }
+      }
+    },
+    today: { clients: { codex: 12 } },
+    month: { clients: { codex: 34 } },
+    allTime: { clients: { codex: 56 } }
+  };
+  const cachedHubStats = {
+    staleAfterMs: 600000,
+    devices: [
+      localRecord,
+      {
+        deviceId: 'remote-device',
+        agentVersion: '0.40.0',
+        agentRuntime: 'headless-agent',
+        platform: 'win32-x64',
+        osName: 'Windows',
+        osVersion: '11.0.26100',
+        receivedAt: new Date(nowMs - 42000).toISOString(),
+        stale: false
+      }
+    ]
+  };
+  let hubGetStatsCalls = 0;
+  const builder = createDiagnosticSnapshotBuilder({
+    getSettings: () => ({ hubMode: 'host', deviceId: 'local-device', clients: 'codex', language: 'zh-TW' }),
+    getMode: () => 'host',
+    getEffectiveHubConfig: () => ({ url: 'http://127.0.0.1:17321' }),
+    getExternalAgentActive: () => false,
+    getDeviceRuntime: () => ({
+      getDiagnostics: () => ({
+        usage: {
+          state: 'idle',
+          intervalMs: 300000,
+          lastTickSuccessAt: new Date(nowMs - 5000).toISOString(),
+          lastTickDurationMs: 120
+        },
+        limits: { enabled: true, providers: [] }
+      })
+    }),
+    getEmbeddedHub: () => ({ hub: { getStats: () => { hubGetStatsCalls += 1; throw new Error('must use cache'); } } }),
+    getStreamState: () => ({ connected: true, failure: null }),
+    getLatestHubStats: () => cachedHubStats,
+    getLatestHubStatsReceivedAt: () => new Date(nowMs - 4000).toISOString(),
+    getLatestHubStatsSource: () => 'host',
+    getLatestHubStatsGeneration: () => 7,
+    getLatestHubStatsIdentity: () => 'host|http://127.0.0.1:17321',
+    getHubModeGeneration: () => 7,
+    getCurrentHubStatsIdentity: () => 'host|http://127.0.0.1:17321',
+    getLocalRecord: () => localRecord,
+    getTokscaleStatus: () => ({ current: { version: '4.10.0', source: 'bundled' }, bundledBuild: { releaseTag: 'token-monitor-ab1067f3', commit: 'ab1067f3' } }),
+    getConfiguration: () => ({ configurationSource: 'effective-normalized', allTimeSince: '2024-01-01' }),
+    getJournalSnapshot: () => ({ startedAt: '2026-08-06T09:00:00.000Z', events: [] }),
+    getArchiveState: () => ({ enabled: true, loaded: false, countSource: 'not-loaded' }),
+    getAppVersion: () => '0.41.0',
+    getDefaultDeviceId: () => 'local-device',
+    canRefreshUsageRuntime: () => true,
+    getAppState: () => ({ packaged: true, preferredLanguages: ['zh-TW'], locale: 'zh-TW' }),
+    getProcessVersions: () => ({ electron: '43.0.0', node: '22.13.0', chrome: '134.0.0' }),
+    getPlatform: () => 'darwin',
+    getArchitecture: () => 'arm64',
+    getUptimeSeconds: () => 600,
+    getOsRelease: () => '25.1.0',
+    getNowMs: () => nowMs,
+    ...overrides
+  });
+  return { builder, getHubGetStatsCalls: () => hubGetStatsCalls };
+}
+
+test('host snapshots use the cached Hub stats without rebuilding aggregates', () => {
+  const { builder, getHubGetStatsCalls } = createBuilder();
+  const snapshot = builder.build(new Date('2026-08-06T10:00:00.000Z'));
+
+  assert.equal(getHubGetStatsCalls(), 0);
+  assert.equal(snapshot.hub.runtime.hubKind, 'embedded-node');
+  assert.equal(snapshot.hub.devices.summarySource, 'same-process-hub-cache');
+  assert.equal(snapshot.hub.devices.deviceCount, 2);
+  assert.equal(snapshot.hub.devices.remoteGroups[0].osVersion, '11.0.26100');
+  assert.equal(snapshot.environment.resolvedLocale, 'zh-TW');
+  assert.equal(snapshot.environment.tokscaleBundledBuild, 'token-monitor-ab1067f3');
+  assert.equal(snapshot.configuration.allTimeSince, '2024-01-01');
+  assert.equal(snapshot.usage.usageOwner, 'electron-widget');
+});
+
+test('host snapshots keep Hub Devices applicable when the embedded Hub is unavailable', () => {
+  const { builder } = createBuilder({
+    getEmbeddedHub: () => null,
+    getLatestHubStats: () => null
+  });
+  const snapshot = builder.build(new Date('2026-08-06T10:00:00.000Z'));
+
+  assert.equal(snapshot.hub.devices.summarySource, 'same-process-hub-cache');
+  assert.equal(snapshot.hub.devices.summaryAvailable, false);
+  assert.equal(snapshot.hub.devices.notApplicable, false);
+});
+
+test('host snapshots ignore a cached client Hub after switching modes', () => {
+  const { builder } = createBuilder({
+    getLatestHubStatsSource: () => 'client'
+  });
+  const snapshot = builder.build(new Date('2026-08-06T10:00:00.000Z'));
+
+  assert.equal(snapshot.hub.devices.summarySource, 'same-process-hub-cache');
+  assert.equal(snapshot.hub.devices.summaryAvailable, false);
+  assert.equal(snapshot.hub.devices.deviceCount, 0);
+  assert.equal(snapshot.hub.runtime.hubStatsCacheAgeSeconds, 'not-applicable');
+});
+
+test('host snapshots ignore a cache from an older generation or Hub endpoint', () => {
+  const { builder } = createBuilder({
+    getLatestHubStatsGeneration: () => 6
+  });
+  const snapshot = builder.build(new Date('2026-08-06T10:00:00.000Z'));
+
+  assert.equal(snapshot.hub.devices.summaryAvailable, false);
+  assert.equal(snapshot.hub.runtime.hubStatsCacheAgeSeconds, 'not-applicable');
+
+  const endpointSnapshot = createBuilder({
+    getLatestHubStatsIdentity: () => 'host|http://127.0.0.1:17322'
+  }).builder.build(new Date('2026-08-06T10:00:00.000Z'));
+  assert.equal(endpointSnapshot.hub.devices.summaryAvailable, false);
+});
+
+test('external-agent freshness uses the received local record, not the widget tick', () => {
+  const nowMs = Date.parse('2026-08-06T10:00:00.000Z');
+  const snapshot = createBuilder({
+    getExternalAgentActive: () => true,
+    getDeviceRuntime: () => ({
+      getDiagnostics: () => ({
+        usage: { lastTickSuccessAt: new Date(nowMs - 1000).toISOString() },
+        limits: { enabled: true, providers: [] }
+      })
+    }),
+    getLocalRecord: () => ({
+      deviceId: 'local-device',
+      receivedAt: new Date(nowMs - 3600 * 1000).toISOString(),
+      updatedAt: new Date(nowMs - 3600 * 1000).toISOString(),
+      trackedClients: ['codex'],
+      clientHealth: { observedAt: new Date(nowMs - 3600 * 1000).toISOString(), clients: {} }
+    })
+  }).builder.build(new Date(nowMs));
+
+  assert.equal(snapshot.usage.usageOwner, 'external-agent');
+  assert.equal(snapshot.usage.usageObservationAgeSeconds, 3600);
+});
+
+test('external-agent record selection prefers the raw Hub record over a composed widget record', () => {
+  const widgetRecord = {
+    deviceId: 'local-device',
+    agentRuntime: 'electron-widget',
+    receivedAt: '2026-08-06T08:00:00.000Z'
+  };
+  const agentRecord = {
+    deviceId: 'local-device',
+    agentRuntime: 'headless-agent',
+    receivedAt: '2026-08-06T09:59:00.000Z'
+  };
+
+  assert.equal(selectLocalDeviceRecord({
+    deviceId: 'local-device',
+    externalAgentActive: true,
+    lastCollectedDevice: widgetRecord,
+    latestHubStats: { devices: [agentRecord] },
+    latestStats: { devices: [widgetRecord] }
+  }), agentRecord);
+});
+
+test('stream diagnostics map HTTP failures to the stable diagnostic code', () => {
+  assert.equal(diagnosticStreamDetailCode({ reason: 'server_error' }), 'http-error');
+  assert.equal(diagnosticStreamDetailCode({ reason: 'unauthorized' }), 'unauthorized');
+  assert.equal(diagnosticStreamDetailCode({ reason: 'unreachable' }), 'unreachable');
+  assert.equal(diagnosticStreamDetailCode({ reason: 'network', detail: 'ECONNRESET' }), 'connection-reset');
+  assert.equal(diagnosticStreamDetailCode({ reason: 'network', detail: 'EHOSTUNREACH' }), 'unreachable');
+  assert.equal(diagnosticStreamDetailCode({ reason: 'unexpected' }), 'unknown');
+});
+
+test('Hub target classification handles IPv6 loopback and local ranges', () => {
+  assert.equal(diagnosticHubTarget('http://[::1]:17321'), 'loopback');
+  assert.equal(diagnosticHubTarget('http://[fd12::1]:17321'), 'lan');
+  assert.equal(diagnosticHubTarget('http://[fe80::1]:17321'), 'lan');
+  assert.equal(diagnosticHubTarget('https://fda.gov'), 'remote');
+  assert.equal(diagnosticHubTarget('https://fc.example.com'), 'remote');
+  assert.equal(diagnosticHubTarget('https://fe8.example.com'), 'remote');
+});
+
+test('iCloud snapshots expose safe sync diagnostics without a Hub URL', () => {
+  const nowMs = Date.parse('2026-08-06T10:00:00.000Z');
+  const { builder } = createBuilder({
+    getSettings: () => ({ hubMode: 'icloud', deviceId: 'local-device', clients: 'codex', language: 'en' }),
+    getEffectiveHubConfig: () => ({ url: null }),
+    getLatestHubStatsSource: () => 'icloud',
+    getLatestHubStatsGeneration: () => 7,
+    getLatestHubStatsIdentity: () => 'icloud|none',
+    getCurrentHubStatsIdentity: () => 'icloud|none',
+    getIcloudSync: () => ({
+      state: 'available',
+      availability: 'available',
+      supported: true,
+      root: '~/Library/Mobile Documents/com~apple~CloudDocs/Token Monitor/sync-v1',
+      deviceCount: 2,
+      lastSuccessfulReconciliation: new Date(nowMs - 1000).toISOString(),
+      lastWriteAt: new Date(nowMs - 2000).toISOString(),
+      lastErrorCategory: 'none',
+      watcher: 'active',
+      reconciliation: 'idle'
+    }),
+    getNowMs: () => nowMs
+  });
+  const snapshot = builder.build(new Date(nowMs));
+  assert.equal(snapshot.hub.runtime.hubTransport, 'filesystem');
+  assert.equal(snapshot.hub.devices.summarySource, 'icloud-sync-cache');
+  assert.equal(snapshot.icloud.deviceCount, 2);
+  assert.equal(snapshot.icloud.root, '~/Library/Mobile Documents/com~apple~CloudDocs/Token Monitor/sync-v1');
+});
+
+test('iCloud keeps the widget as the usage producer when an external agent is alive', () => {
+  const nowMs = Date.parse('2026-08-06T10:00:00.000Z');
+  const { builder } = createBuilder({
+    getSettings: () => ({ hubMode: 'icloud', deviceId: 'local-device', clients: 'codex', language: 'en' }),
+    getMode: () => 'sync',
+    getExternalAgentActive: () => true,
+    getDeviceRuntime: () => ({
+      getDiagnostics: () => ({
+        usage: {
+          state: 'idle',
+          lastTickSuccessAt: new Date(nowMs - 1000).toISOString()
+        },
+        limits: { enabled: true, providers: [] }
+      })
+    }),
+    getIcloudSync: () => ({ state: 'available', availability: 'available', supported: true }),
+    getNowMs: () => nowMs
+  });
+
+  const snapshot = builder.build(new Date(nowMs));
+  assert.equal(snapshot.usage.usageOwner, 'electron-widget');
+  assert.equal(snapshot.usage.usageCompleteness, 'full');
+  assert.equal(snapshot.topology.icloudWidgetProducerActive, true);
+  assert.equal(snapshot.collector.detailsAvailable, true);
+});
+
+test('client archive capture uses the full local observation over its later Hub receipt', () => {
+  const { serializeSyncPayload } = require('../../src/shared/syncPayload');
+  const { emptyPeriod, extractUsageFromTokscale, mergeSyncDeviceRecord } = require('../../src/shared/usage');
+  const { captureArchivedClientUsage } = require('../../src/shared/usage/clientUsageArchive');
+  const { captureSessionUsageArchive } = require('../../src/shared/usage/sessionUsageArchive');
+  const { createUsageTransform } = require('../../src/shared/usage/usageTransform');
+  const now = new Date('2026-11-18T12:00:00.000Z');
+  const usage = () => extractUsageFromTokscale({ entries: [
+    { client: 'claude', sessionId: 'current', model: 'shared', input: 200, cost: 0.3 }
+  ] });
+  const local = {
+    deviceId: 'local-device', updatedAt: now.toISOString(), receivedAt: now.toISOString(),
+    clientHealth: { observedAt: now.toISOString(), clients: { claude: { source: { state: 'detected' } } } },
+    today: usage(), month: usage(),
+    allTime: extractUsageFromTokscale({ entries: [
+      { client: 'claude', sessionId: 'current', model: 'shared', input: 200, cost: 0.3 },
+      { client: 'claude', sessionId: 'earlier', model: 'shared', input: 800, cost: 1.2 }
+    ] })
+  };
+  const { payload } = serializeSyncPayload(local);
+  const hub = mergeSyncDeviceRecord(null, { ...payload, receivedAt: '2026-11-18T12:00:01.000Z' });
+  const later = '2026-11-18T12:00:02.000Z';
+  const afterLimits = mergeSyncDeviceRecord(hub, {
+    deviceId: local.deviceId, updatedAt: later, receivedAt: '2026-11-18T12:00:03.000Z', limitsOnly: true, limits: {}
+  });
+  assert.equal(afterLimits.updatedAt, later);
+  assert.equal(afterLimits.clientHealth.observedAt, now.toISOString());
+  assert.equal(selectLocalDeviceRecord({
+    deviceId: local.deviceId, lastCollectedDevice: local, latestHubStats: { devices: [afterLimits] },
+    forClientArchive: true
+  }), local, 'a limits-only update advances the envelope but retains the usage observation');
+  const legacyLocal = { ...local, clientHealth: undefined };
+  const legacyHub = { ...afterLimits, clientHealth: undefined };
+  for (const [lastCollectedDevice, hubRecord] of [
+    [legacyLocal, legacyHub], [local, legacyHub], [legacyLocal, afterLimits]
+  ]) {
+    assert.equal(selectLocalDeviceRecord({
+      deviceId: local.deviceId, lastCollectedDevice, latestHubStats: { devices: [hubRecord] },
+      forClientArchive: true
+    }) === lastCollectedDevice, true, 'the complete local record wins even when observation times are unknown');
+  }
+  assert.deepEqual(Object.keys(hub.periods.allTime.sessions), []);
+  const options = { deviceId: local.deviceId, lastCollectedDevice: local, latestHubStats: { devices: [hub] } };
+  assert.equal(selectLocalDeviceRecord(options), hub, 'diagnostics still report the later receipt');
+  assert.equal(selectLocalDeviceRecord({
+    ...options, forClientArchive: true, lastCollectedDevice: null, latestHubStats: { devices: [legacyHub] }
+  }), legacyHub, 'Hub-only capture retains the available snapshot');
+  const source = selectLocalDeviceRecord({ ...options, forClientArchive: true });
+  const archivedClientUsage = captureArchivedClientUsage(null, source, ['claude'], now);
+  const retained = captureSessionUsageArchive(null, local, now);
+  const transform = createUsageTransform({
+    getSettings: () => ({ clients: 'codex', archivedClientUsage })
+  });
+  const summary = transform.project({ today: emptyPeriod(), month: emptyPeriod(), allTime: emptyPeriod() }, retained, now);
+  assert.deepEqual(
+    [summary.allTime.totalTokens, summary.allTime.costUsd, summary.allTime.unclassifiedTokens],
+    [1000, 1.5, 0]
+  );
+  assert.deepEqual([summary.month.totalTokens, summary.month.costUsd], [200, 0.3]);
+
+  const newerHub = { ...hub, updatedAt: later, clientHealth: { ...hub.clientHealth, observedAt: later } };
+  assert.equal(selectLocalDeviceRecord({
+    ...options, forClientArchive: true, latestHubStats: { devices: [newerHub] }
+  }), local, 'the widget archives its complete collector record even if Hub usage is newer');
+  assert.equal(selectLocalDeviceRecord({
+    ...options, forClientArchive: true, lastCollectedDevice: null,
+    latestStats: { devices: [newerHub] }, latestHubStats: { devices: [afterLimits] }
+  }), afterLimits, 'Hub-only capture keeps the ordinary freshness order');
+  assert.equal(selectLocalDeviceRecord({
+    ...options, forClientArchive: true, externalAgentActive: true, hubMode: 'client'
+  }), hub, 'the active external agent owns its record');
+});

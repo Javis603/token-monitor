@@ -1,0 +1,493 @@
+<p align="right">
+   <a href="./README.md">EN</a> | <a href="./README.zh-CN.md">简</a> | <a href="./README.zh-TW.md">繁</a> | <a href="./README.ko.md">KO</a> | <a href="./README.ja.md">JA</a> | <strong>PT</strong>
+</p>
+<div align="center">
+    <img src=".github/assets/app.png" alt="Token Monitor logo" width="120">
+    <h1>Token Monitor</h1>
+</div>
+
+<p align="center">
+    <em>Um painel ao vivo para cada ferramenta de programação com IA, sincronizado entre todas as máquinas.</em>
+</p>
+
+<p align="center">
+    <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/v/release/Javis603/token-monitor?include_prereleases&style=flat-square&label=release&color=22c55e" alt="Latest release" /></a>
+    <a href="https://github.com/Javis603/token-monitor/releases"><img src="https://img.shields.io/github/downloads/Javis603/token-monitor/total?style=flat-square&color=22c55e" alt="Total downloads" /></a>
+    <img src="https://img.shields.io/badge/Windows-10%2B-0078D4?style=flat-square" alt="Windows 10 or later" />
+    <img src="https://img.shields.io/badge/macOS-13%2B-0A84FF?style=flat-square&logo=apple&logoColor=white" alt="macOS 13 or later" />
+    <img src="https://img.shields.io/badge/Linux-x64-64748b?style=flat-square&logo=linux&logoColor=white" alt="Linux x64" />
+    <a href="https://discord.gg/HmdNVVvw5P"><img src="https://img.shields.io/discord/1344259784219689031?color=5865F2&label=Discord&logo=discord&logoColor=white&style=flat-square" alt="Discord"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-A855F7?style=flat-square" alt="License: MIT" /></a>
+</p>
+
+<p align="center">
+    <a href="https://trendshift.io/repositories/47497?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-47497" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/47497" alt="Javis603%2Ftoken-monitor | Trendshift" width="250" height="55"/></a>
+</p>
+
+<div align="center">
+    <img src=".github/assets/demo.gif">
+</div>
+
+## O que é o Token Monitor?
+
+Um app de desktop que mostra o uso de tokens ao vivo e os Limites de Ferramentas de IA em 54+ ferramentas de programação com IA — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio e muitas outras — com sincronização multidispositivo em tempo real, tendências de uso histórico e detalhamentos por ferramenta, dispositivo, modelo, sessão ou projeto. Ele aparece onde você estiver olhando: a janela principal, o notch do MacBook, a barra de menus ou a bandeja do sistema, a borda da tela, uma bolha flutuante e widgets nativos do macOS.
+
+## Ferramentas suportadas
+
+Uso de tokens, limites de ferramentas de IA e detalhes de sessão das ferramentas de programação com IA e provedores que você já usa:
+
+<p align="center">
+    <img src=".github/assets/tools-icon/claude.png" width="40" alt="Claude Code" title="Claude Code" />
+    <img src=".github/assets/tools-icon/codex.png" width="40" alt="Codex" title="Codex" />
+    <img src=".github/assets/tools-icon/opencode.png" width="40" alt="OpenCode" title="OpenCode" />
+    <img src=".github/assets/tools-icon/hermes-agent.png" width="40" alt="Hermes Agent" title="Hermes Agent" />
+    <img src=".github/assets/tools-icon/openclaw.png" width="40" alt="OpenClaw" title="OpenClaw" />
+    <img src=".github/assets/tools-icon/cursor.png" width="40" alt="Cursor" title="Cursor" />
+    <img src=".github/assets/tools-icon/antigravity.png" width="40" alt="Antigravity" title="Antigravity" />
+    <img src=".github/assets/tools-icon/gemini-cli.png" width="40" alt="Gemini CLI" title="Gemini CLI" />
+    <img src=".github/assets/tools-icon/cline.png" width="40" alt="Cline" title="Cline" />
+    <img src=".github/assets/tools-icon/amp.png" width="40" alt="Amp" title="Amp" />
+    <img src=".github/assets/tools-icon/droid.png" width="40" alt="Factory Droid" title="Factory Droid" />
+    <img src=".github/assets/tools-icon/kimi.png" width="40" alt="Kimi" title="Kimi" />
+    <img src=".github/assets/tools-icon/qwen.png" width="40" alt="Qwen" title="Qwen" />
+    <img src=".github/assets/tools-icon/xai.png" width="40" alt="Grok Build" title="Grok Build" />
+    <img src=".github/assets/tools-icon/copilot.png" width="40" alt="GitHub Copilot" title="GitHub Copilot" />
+    <img src=".github/assets/tools-icon/pi.png" width="40" alt="Pi" title="Pi" />
+    <img src=".github/assets/tools-icon/omp.png" width="40" alt="Oh My Pi" title="Oh My Pi" />
+    <img src=".github/assets/tools-icon/senpi.png" width="40" alt="OmO Native" title="OmO Native" />
+    <img src=".github/assets/tools-icon/goose.png" width="40" alt="Goose" title="Goose" />
+    <img src=".github/assets/tools-icon/zed.png" width="40" alt="Zed" title="Zed" />
+    <img src=".github/assets/tools-icon/kilo.png" width="40" alt="Kilo" title="Kilo" />
+    <img src=".github/assets/tools-icon/commandcode.png" width="40" alt="Command Code" title="Command Code" />
+    <img src=".github/assets/tools-icon/mimo.png" width="40" alt="MiMo" title="MiMo" />
+    <img src=".github/assets/tools-icon/muse.png" width="40" alt="Muse / Muse Code" title="Muse / Muse Code" />
+    <img src=".github/assets/tools-icon/zcode.png" width="40" alt="ZCode" title="ZCode" />
+    <img src=".github/assets/tools-icon/kiro.png" width="40" alt="Kiro" title="Kiro" />
+    <img src=".github/assets/tools-icon/codebuddy.png" width="40" alt="CodeBuddy" title="CodeBuddy" />
+    <img src=".github/assets/tools-icon/workbuddy.png" width="40" alt="WorkBuddy" title="WorkBuddy" />
+    <img src=".github/assets/tools-icon/proma.png" width="40" alt="Proma" title="Proma" />
+    <img src=".github/assets/tools-icon/catpaw.png" width="40" alt="CatPaw" title="CatPaw" />
+    <img src=".github/assets/tools-icon/qoder.png" width="40" alt="Qoder" title="Qoder" />
+    <img src=".github/assets/tools-icon/reasonix.png" width="40" alt="Reasonix" title="Reasonix" />
+    <img src=".github/assets/tools-icon/deepseek.png" width="40" alt="DeepSeek" title="DeepSeek" />
+    <img src=".github/assets/tools-icon/cherrystudio.png" width="40" alt="Cherry Studio" title="Cherry Studio" />
+    <img src=".github/assets/tools-icon/lmstudio.png" width="40" alt="LM Studio" title="LM Studio" />
+    <img src=".github/assets/tools-icon/unsloth.png" width="40" alt="Unsloth" title="Unsloth" />
+    <img src=".github/assets/tools-icon/devin.png" width="40" alt="Devin" title="Devin" />
+    <img src=".github/assets/tools-icon/fx.png" width="40" alt="fx" title="fx" />
+    <img src=".github/assets/tools-icon/minimax.png" width="40" alt="MiniMax" title="MiniMax" />
+    <img src=".github/assets/tools-icon/mistral.png" width="40" alt="Mistral Vibe" title="Mistral Vibe" />
+    <img src=".github/assets/tools-icon/prime-agent.png" width="40" alt="Prime Agent" title="Prime Agent" />
+    <img src=".github/assets/tools-icon/jcode.png" width="40" alt="Jcode" title="Jcode" />
+    <img src=".github/assets/tools-icon/typesafe.png" width="40" alt="TypeSafe" title="TypeSafe" />
+    <img src=".github/assets/tools-icon/openrouter.png" width="40" alt="OpenRouter" title="OpenRouter" />
+    <img src=".github/assets/tools-icon/volcengine.png" width="40" alt="Volcengine" title="Volcengine" />
+    <img src=".github/assets/tools-icon/ollama.png" width="40" alt="Ollama" title="Ollama" />
+    <img src=".github/assets/tools-icon/trae.png" width="40" alt="Trae CN" title="Trae CN" />
+    <img src=".github/assets/tools-icon/alibaba.png" width="40" alt="Alibaba Cloud" title="Alibaba Cloud" />
+    <img src=".github/assets/tools-icon/stepfun.png" width="40" alt="StepFun" title="StepFun" />
+    <img src=".github/assets/tools-icon/notion.png" width="40" alt="Notion AI" title="Notion AI" />
+    <img src=".github/assets/tools-icon/manus.png" width="40" alt="Manus" title="Manus" />
+    <img src=".github/assets/tools-icon/hark.png" width="40" alt="Hark" title="Hark" />
+    <img src=".github/assets/tools-icon/opendesign.png" width="40" alt="OpenDesign" title="OpenDesign" />
+    <img src=".github/assets/tools-icon/thirdparty.gif" width="40" alt="Third-party APIs" title="Third-party APIs" />
+</p>
+
+<p align="center"><a href="#ferramentas-suportadas-em-detalhe">Veja o que cada ferramenta suporta e de onde os dados são lidos →</a></p>
+
+## Vitrine
+
+### Na sua área de trabalho
+
+<table>
+<tr>
+<td colspan="2" width="870" align="center"><img src=".github/assets/showcase/notch-panel.gif" width="800" alt="Notch Panel"><br><sub><b>Painel do notch</b> — sessões em andamento ao lado do notch; deslize para baixo para ver o uso de hoje, os limites de cada conta, sessões e detalhamentos</sub></td>
+</tr>
+<tr>
+<td width="435" align="center"><img src=".github/assets/showcase/edge-dock.png" height="540" alt="Edge Dock"><br><sub><b>Edge Dock</b> — cotas e uso fixados na borda da tela; passe o mouse para ver limites, sessões recentes e tokens</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/menu-bar.png" height="540" alt="Menu bar and popover"><br><sub><b>Barra de menus e bandeja</b> — escolha uma predefinição ou monte a sua: ícones de ferramentas, barras de cota, horários de reset, custo ou tok/s ao vivo</sub></td>
+</tr>
+</table>
+
+### Dentro do app
+
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/showcase/limits-view.png" width="250" alt="Limits View"><br><sub>Várias contas lado a lado e troca da conta ativa do Codex com um clique</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/tools-view.png" width="250" alt="Tools View"><br><sub>Clique em qualquer ferramenta para expandir os detalhes de entrada / saída e acertos de cache</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/sessions-view.png" width="250" alt="Session View"><br><sub>Abra uma sessão para decompor cada prompt em tokens e ferramentas usadas</sub></td>
+</tr>
+</table>
+
+<details>
+<summary>Mais visualizações — projetos, modelos e dispositivos</summary>
+
+<table>
+<tr>
+<td width="290" align="center"><img src=".github/assets/showcase/projects-view.png" width="250" alt="Projects View"><br><sub>Uso e custo por projeto, agregados entre ferramentas e dispositivos</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/models-view.png" width="250" alt="Models View"><br><sub>Uso e custo de cada modelo, agregados entre todas as ferramentas</sub></td>
+<td width="290" align="center"><img src=".github/assets/showcase/devices-view.png" width="250" alt="Devices View"><br><sub>Uso, custo e status de sincronização de cada dispositivo — expanda para ver os detalhes por máquina</sub></td>
+</tr>
+</table>
+</details>
+
+### Painel de uso
+
+<table>
+<tr>
+<td width="435" align="center"><img src=".github/assets/showcase/dashboard-overview.png" width="400" alt="Usage Dashboard Overview"><br><sub>Um ano de mapa de calor de atividade e sequências, agregado entre todos os dispositivos</sub></td>
+<td width="435" align="center"><img src=".github/assets/showcase/dashboard-trends.png" width="400" alt="Usage Dashboard Trends"><br><sub>Um ano de tendências diárias, empilhadas por ferramenta / modelo, com linha K</sub></td>
+</tr>
+</table>
+
+## Por que o Token Monitor?
+
+A maioria dos monitores de uso só é útil na máquina em que roda. O Token Monitor foi feito para o trabalho multidispositivo: cada dispositivo observa seus próprios registros locais, envia resumos ao seu hub e todos os widgets conectados veem as mudanças de tokens quase imediatamente.
+
+## Instalação rápida
+
+No macOS, instale pelo [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor) oficial:
+
+```bash
+brew install --cask token-monitor
+```
+
+Ou baixe o app para macOS, Windows ou Linux nas [GitHub Releases](https://github.com/Javis603/token-monitor/releases).
+
+Abra o app para começar a acompanhar o uso local deste dispositivo, sem configurar um hub. Veja os detalhes em [Instalação](#instalação).
+
+## Recursos
+
+### Acompanhamento de uso
+
+- **Rastreamento de tokens ao vivo** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode e 42+ ferramentas de IA, com a interface atualizando poucos segundos após cada turno (lista completa na tabela acima)
+- **Taxa de tokens ao vivo** — uma leitura opcional da velocidade de geração em `tok/s` ou do consumo total em `tok/min`
+- **Detalhes por sessão** — abra uma sessão para ver os tokens por prompt, expansível até a divisão exata de tokens de cada resposta e as ferramentas usadas (lido sob demanda de transcrições ou bancos locais, nunca sincronizado)
+- **Estatísticas de acerto de cache** — clique em qualquer ferramenta ou modelo para expandir um detalhamento completo dos tokens de entrada (acerto no cache vs. fora do cache), tokens de saída e as porcentagens de acerto
+- **Custo e moeda** — o custo ao lado das contagens de tokens, exibido em USD, CNY, TWD, HKD, KRW, JPY, BRL e outras moedas suportadas; as taxas de câmbio são atualizadas automaticamente todos os dias e podem ser alteradas manualmente nas Configurações
+- **Caminhos de verificação personalizados** — aponte uma ferramenta para pastas de sessões extras quando as suas estiverem fora dos locais padrão
+- **WSL (Windows)** — o uso baseado em arquivos de distros WSL em execução é mesclado a cada 5 minutos; ferramentas com backend SQLite, como OpenCode e Hermes, podem exigir um [agente headless dentro do WSL](docs/wsl-sqlite-setup.md)
+
+### Limites, tendências e exportação
+
+- **Detecção de Limites de Ferramentas de IA** — janelas de sessão, diária, semanal, de cobrança e de créditos específicas de cada provedor para Claude Code, Codex, Cursor, OpenRouter, APIs de terceiros, GLM, Kimi e 34+ provedores, incluindo vários perfis do OpenRouter/de terceiros e contas no estilo de saldo (créditos do Claude, saldo pré-pago e histórico de gastos do DeepSeek, saldos de terceiros)
+- **Várias contas e troca do Codex** — acompanhe várias contas por provedor, cada uma com seus próprios limites; uma conta do Codex acompanhada pode ser definida como a conta local ativa com um clique, sem precisar autenticar de novo
+- **Previsão de reset do Codex** — uma previsão opcional de terceiros abaixo dos limites do Codex, mostrando o horário previsto do reset, o tipo de reset (Regular ou Acumulado) e quando a janela fez o último reset
+- **Preservar o uso de sessões excluídas** — muitas ferramentas eliminam sessões antigas (o Claude Code descarta transcrições após 30 dias por padrão), perdendo esse histórico. Quando ativado, o Token Monitor arquiva localmente o uso diário observado por ferramenta/modelo para que o mapa de calor e as tendências sobrevivam mesmo depois que os arquivos de origem sumirem (veja [Retenção de dados de sessão](#retenção-de-dados-de-sessão) abaixo)
+- **Tendências de Uso e Painel** — um mapa de calor de atividade na tela inicial e um gráfico de tendências, além de uma janela de painel dedicada com sequências e histórico empilhado por ferramenta/modelo (visualizações em barra e linha K) em todos os seus dispositivos
+- **Intervalos de uso fixos** — alterne entre Esta semana, Últimos 7 dias e Últimos 30 dias junto dos períodos nativos de dia, mês e total
+- **Tela de Status opcional** — páginas de status do Claude, OpenAI, Cursor e DeepSeek, com reverificações manuais ou por intervalo
+- **Exportação de dados** — exporte o uso como CSV + JSON independente de ferramenta, manualmente ou gravado automaticamente em uma pasta, para planilhas, Obsidian, Grafana ou scripts; veja [docs/export.md](docs/export.md)
+- **Registros de assinaturas** — anote à mão quanto cada conta de IA realmente custa; a dica do rótulo do plano passa a informar o preço, a próxima renovação ou data de término, o tempo de assinatura e o custo de uso do mês como um múltiplo do que o plano custa, tanto para planos recorrentes quanto para livros-caixa de recargas
+
+### Multidispositivo e implantação
+
+- **Sincronização multidispositivo em tempo real** — a sincronização via hub usa Server-Sent Events para enviar atualizações a outros dispositivos em segundos; a sincronização pelo iCloud Drive é eventualmente consistente
+- **Local-first** — nenhum servidor é necessário para uso em um único dispositivo
+- **Backend de sincronização auto-hospedado** — hub dentro do widget, hub em CLI Node ou Cloudflare Worker
+- **Agente headless** — envia o uso de servidores, hosts SSH e WSL sem o app de desktop; veja [Agente headless](#agente-headless)
+- **Suporte a widgets do iOS** — Widgy e Scriptable através do hub do Worker
+- **Privacidade em primeiro lugar** — prompts, respostas, código-fonte e conteúdo dos arquivos ficam na sua máquina
+
+### Interface e superfícies
+
+- **Painel do notch (macOS)** — sessões em andamento e aguardando ficam ao lado do notch (ou em uma pílula em telas sem notch); passe o mouse ou deslize para baixo para abrir páginas com o uso de hoje e dos últimos sete dias, os limites de cada conta lado a lado, sessões ativas e recentes, e detalhamentos por ferramenta / modelo
+- **Edge Dock (macOS e Windows)** — mantém cotas e uso na borda da tela, com modos de ocultar automaticamente, sempre visível ou ocultar em tela cheia. Os cartões ao passar o mouse mostram limites da conta, sessões recentes e uso de tokens. Escolha, reordene e configure itens nas Configurações e ative/desative pela barra de menus ou bandeja do sistema
+- **Popover da barra de menus (macOS) e da bandeja do sistema (Windows)** — custo ao vivo, tokens ou o limite do provedor mais perto de acabar em %, ao lado do ícone
+- **Compositor de layout da barra de menus** — a barra de menus e a bolha flutuante podem usar uma predefinição embutida ou um layout montado por você: escolha "Personalizado…" para adicionar ícones de ferramentas de IA, barras de cota, porcentagens, horários de reset, custo, taxa de tokens ao vivo ou texto personalizado, arraste para reordenar com uma prévia ao vivo e dê a cada item sua própria ferramenta de IA, conta, janela de cota e fonte
+- **Modo Bolha Flutuante** — reduz o widget a uma mini-janela arrastável com prévia ao clicar ou passar o mouse e conteúdo no estilo da bandeja
+- **Widgets nativos do macOS** — veja uso de tokens e custo, tendências, cota restante das ferramentas de IA e horários de reset, mapas de calor de atividade e detalhamentos por ferramenta ou modelo nos layouts Pequeno, Médio e Grande no macOS 14+
+- **Telas de detalhamento** — agrupadas por ferramenta, dispositivo, modelo, sessão, projeto ou limites da conta
+- **Controles de aparência** — troca do tema da interface (inclusive um modo claro), cores por fornecedor de ferramenta, opacidade do vidro, desfoque, modo de janela transparente e fontes personalizadas
+- **Lista de ferramentas personalizável** — oculte, fixe e reordene ferramentas no painel principal sem alterar o que é acompanhado
+- **Atalho global gravável** — mostre ou oculte a janela de qualquer lugar
+- **Discord Rich Presence** — transmita os tokens de hoje, o custo e o cliente principal (opcional)
+
+### Plugins (experimental)
+
+Estenda as páginas do desktop com conteúdo personalizado, adicione páginas e configurações de plugins e exiba conteúdo no Notch, Edge Dock, barra de menus/bandeja do sistema ou bolhas flutuantes. Autores podem criar interfaces próprias e backends Node locais opcionais para fontes de dados e cálculos.
+
+Gerencie os plugins em Configurações → Plugins. Consulte o [guia de uso](https://javis-ai.com/token-monitor/docs/plugins.html?lang=pt-BR), os [plugins da comunidade](https://github.com/Javis603/token-monitor-plugins), o [guia de desenvolvimento](docs/plugins/author-quickstart.md) e a [API de plugins](docs/plugins/README.md). A API é experimental e pode mudar; os plugins podem precisar de atualização. Ative apenas código em que você confia: plugins não são isolados em sandbox, e os backends Node executam com as permissões do seu usuário do sistema operacional.
+
+## Ferramentas suportadas em detalhe
+
+O Token Monitor suporta uso de tokens, verificação de limites da conta e detalhes de sessão separadamente:
+
+| Logo | Ferramenta | Caminho dos dados | Uso de tokens | Limites de ferramentas de IA | Detalhes da sessão |
+|:---:|------|-----------|:---:|:---:|:---:|
+| <img src=".github/assets/tools-icon/claude.png" width="28" alt="Claude Code" /> | Claude Code | `~/.claude/projects/`, `~/.claude/transcripts/` | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/codex.png" width="28" alt="Codex" /> | Codex | `~/.codex/` (`sessions/`, `archived_sessions/`) | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/opencode.png" width="28" alt="OpenCode" /> | OpenCode | `~/.local/share/opencode/` (`opencode*.db`, `storage/message/`) | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/hermes-agent.png" width="28" alt="Hermes Agent" /> | Hermes Agent | `~/.hermes/state.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/openclaw.png" width="28" alt="OpenClaw" /> | OpenClaw | `~/.openclaw/agents/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/cursor.png" width="28" alt="Cursor" /> | Cursor IDE / Cursor CLI / Grok Bot | `~/.config/tokscale/cursor-cache/` (account-level usage export) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/antigravity.png" width="28" alt="Antigravity" /> | Antigravity | `~/.gemini/` (`antigravity/`, `antigravity-ide/`, `antigravity-backup/`, `antigravity-cli/conversations/`) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/gemini-cli.png" width="28" alt="Gemini CLI" /> | Gemini CLI | `~/.gemini/tmp/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/cline.png" width="28" alt="Cline" /> | Cline | VS Code globalStorage tasks (`.../saoudrizwan.claude-dev/tasks/`), `~/.cline/data/sessions/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/amp.png" width="28" alt="Amp" /> | Amp | `~/.local/share/amp/threads/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/droid.png" width="28" alt="Factory Droid" /> | Factory Droid | `~/.factory/sessions/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/kimi.png" width="28" alt="Kimi" /> | Kimi CLI / Kimi Code / Kimi Work | `~/.kimi/sessions/`, `~/.kimi-code/sessions/`, `<platform-app-data>/kimi-desktop/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/qwen.png" width="28" alt="Qwen" /> | Qwen CLI | `~/.qwen/projects/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/xai.png" width="28" alt="Grok Build" /> | Grok Build | `~/.grok/` (`sessions/`, `logs/unified.jsonl`) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/copilot.png" width="28" alt="GitHub Copilot" /> | GitHub Copilot | VS Code `workspaceStorage/*/chatSessions/`, `~/.copilot/` (`otel/`, `data.db`, `session-store.db`) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/pi.png" width="28" alt="Pi" /> | Pi | `~/.pi/agent/sessions/` | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/omp.png" width="28" alt="Oh My Pi" /> | Oh My Pi | `~/.omp/agent/sessions/` | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/senpi.png" width="28" alt="OmO Native" /> | OmO Native | `~/.omo/agent/sessions/`, `~/.senpi/agent/sessions/`, `~/.omo/senpi-task/children/`, `<project>/.omo/senpi-task/children/` | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/goose.png" width="28" alt="Goose" /> | Goose | `~/.local/share/goose/sessions/sessions.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/zed.png" width="28" alt="Zed" /> | Zed | `~/.local/share/zed/threads/threads.db` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/kilo.png" width="28" alt="Kilo" /> | Kilo | `~/.local/share/kilo/kilo.db`; tarefas do globalStorage do VS Code (`.../kilocode.kilo-code/tasks/`) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/commandcode.png" width="28" alt="Command Code" /> | Command Code | `~/.commandcode/projects/**/*.jsonl` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/mimo.png" width="28" alt="MiMo" /> | MiMo Code / MiMo Desktop | `~/.local/share/mimocode/mimocode.db` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/muse.png" width="28" alt="Muse Code" /> | Muse / Muse Code | `~/.local/share/muse/sessions/`; Cookie do muse.ai | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/zcode.png" width="28" alt="ZCode" /> | ZCode / GLM | `~/.zcode/` (`projects/`, `cli/db/db.sqlite`) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/kiro.png" width="28" alt="Kiro" /> | Kiro | `~/.kiro/sessions/cli/`, Kiro IDE globalStorage & `kiro-cli` DB | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/codebuddy.png" width="28" alt="CodeBuddy" /> | CodeBuddy | `~/.codebuddy/projects/` + IDE / VS Code extension logs | ✅ | — | ✅ |
+| <img src=".github/assets/tools-icon/workbuddy.png" width="28" alt="WorkBuddy" /> | WorkBuddy | `~/.workbuddy/projects/`, `~/.workbuddy/workbuddy.db` | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/proma.png" width="28" alt="Proma" /> | Proma | `~/.proma/` (`agent-sessions/`, `sdk-config/sessions/`, `sdk-config/projects/`), `~/.proma-dev/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/catpaw.png" width="28" alt="CatPaw" /> | CatPaw | `<platform-app-data>/` (`catpaw-moon/`, `catpaw-overseas/`, `catpaw-memory-*.db`) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/qoder.png" width="28" alt="Qoder" /> | Qoder | `~/.qoder/projects/**/*.jsonl` (global), `~/.qoder-cn/projects/**/*.jsonl` (CN) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/reasonix.png" width="28" alt="Reasonix" /> | Reasonix | `~/.reasonix/` (`stats/`, `sessions/`, `projects/*/sessions/`) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/deepseek.png" width="28" alt="DeepSeek" /> | DeepSeek / DeepSeek Harness | `~/.dsh/sessions/` (`session.jsonl`, `session.jsonl.zstd`) | ✅ | ✅ | ✅ |
+| <img src=".github/assets/tools-icon/cherrystudio.png" width="28" alt="Cherry Studio" /> | Cherry Studio | `<platform-app-data>/CherryStudio/` (`Data/Agents/.claude/projects/` V2, `.claude/projects/` legado) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/lmstudio.png" width="28" alt="LM Studio" /> | LM Studio | `~/.lmstudio/server-logs/**/*.log` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/unsloth.png" width="28" alt="Unsloth" /> | Unsloth Studio | `~/.unsloth/studio/studio.db` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/devin.png" width="28" alt="Devin" /> | Devin CLI / Devin Desktop | `~/.local/share/devin/cli/sessions.db`, `<platform-app-data>/Devin/User/acp-events/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/fx.png" width="28" alt="fx" /> | fx | `~/.fx/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/minimax.png" width="28" alt="MiniMax" /> | MiniMax / MiniMax Code | `~/.minimax/v2/sessions/` | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/mistral.png" width="28" alt="Mistral" /> | Mistral Vibe | `$VIBE_HOME/logs/session/` (`~/.vibe/logs/session/`); Cookie do Mistral Admin (franquia de API / cota mensal do Vibe e saldo de créditos) | ✅ | ✅ | — |
+| <img src=".github/assets/tools-icon/prime-agent.png" width="28" alt="Prime Agent" /> | Prime Agent | `~/.prime/agent/` (`sessions/`, `session-artifacts/`) | ✅ | — | — |
+| <img src=".github/assets/tools-icon/jcode.png" width="28" alt="Jcode" /> | Jcode | `~/.jcode/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | Cookie do TypeSafe Console (saldo de cobrança e gasto estimado em tokens via dados de uso) | — | ✅ | — |
+| <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | Chave de API do OpenRouter (uso/limite da chave; saldo quando o acesso a créditos é autorizado, documentado para chaves Management) | — | ✅ | — |
+| <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Chave de API do Ark ou AK/SK da Volcengine (cota do Ark Coding Plan e do Agent Plan via API da Volcengine) | — | ✅ | — |
+| <img src=".github/assets/tools-icon/ollama.png" width="28" alt="Ollama" /> | Ollama | Chave de API ou Cookie do Ollama Cloud (uso mensal incluído, cotas de sessão/semanais antigas e saldo de créditos) | — | ✅ | — |
+| <img src=".github/assets/tools-icon/trae.png" width="28" alt="Trae CN" /> | Trae CN | Token de acesso do Trae CN (créditos do Trae CN / SOLO via trae.cn) | — | ✅ | — |
+| <img src=".github/assets/tools-icon/alibaba.png" width="28" alt="Alibaba Cloud" /> | Alibaba Cloud | Cookie do console da Alibaba Cloud (cota do Token Plan do Bailian / Model Studio, Team e Personal) | — | ✅ | — |
+| <img src=".github/assets/tools-icon/stepfun.png" width="28" alt="StepFun" /> | StepFun | Oasis-Token do StepFun (cota do Coding Plan / Token Plan) | — | ✅ | — |
+| <img src=".github/assets/tools-icon/notion.png" width="28" alt="Notion AI" /> | Notion AI | Cotas móvel e mensal do Notion AI para Business/Enterprise; cookie token_v2 manual + ID explícito do workspace | — | ✅ | — |
+| <img src=".github/assets/tools-icon/manus.png" width="28" alt="Manus" /> | Manus | Créditos do Manus (mensais + recarga diária/periódica + saldo); sessão desktop (macOS/Windows) ou sessão web manual (todos os SOs) | — | ✅ | — |
+| <img src=".github/assets/tools-icon/hark.png" width="28" alt="Hark" /> | Hark | Cotas diária e mensal do Hark Pro; sessão desktop no macOS ou cookie de sessão colado | — | ✅ | — |
+| <img src=".github/assets/tools-icon/opendesign.png" width="28" alt="OpenDesign" /> | OpenDesign | Cotas de cinco horas e semanais para o workspace atual; Cookie manual | — | ✅ | — |
+| <img src=".github/assets/tools-icon/thirdparty.gif" width="28" alt="Third-party APIs" /> | APIs de terceiros | Predefinições de conta compatíveis com New API / Sub2API (incluindo forks compatíveis do One API), uma predefinição com chave de API da New API e um endpoint de saldo personalizado | — | ✅ | — |
+
+<details>
+<summary><strong>Notas, endpoints de saldo personalizados e caminhos de dados sobrescritos por variáveis de ambiente</strong></summary>
+
+<br>
+
+- Os caminhos acima são os padrões. O Token Monitor segue as mesmas sobrescritas de ambiente que o Tokscale — `$XDG_DATA_HOME` para as raízes `~/.local/share/` e variáveis por ferramenta como `$CODEX_HOME`, `$GEMINI_CLI_HOME`, `$SENPI_CODING_AGENT_DIR`, `$SENPI_CODING_AGENT_SESSION_DIR`, `$GROK_HOME`, `$HERMES_HOME`, `$GOOSE_PATH_ROOT`, `$KIMI_CODE_HOME`, `$UNSLOTH_STUDIO_HOME`, `$LM_STUDIO_HOME`, `$DSH_HOME`, `$REASONIX_STATE_HOME`, `$REASONIX_HOME` e a família `$CLINE_*`.
+- O Gemini CLI aceita `$GEMINI_CLI_HOME` no host; a descoberta no WSL verifica apenas o caminho Linux padrão `~/.gemini/tmp/`. Novas instalações o rastreiam por padrão; quem já tem uma seleção de ferramentas salva deve ativá-lo em Settings → tools.
+- Os limites de assinatura do Muse Code usam `muse usage --json` do Muse Code 1.4.13+ e o login existente. A ausência de cota e a cobrança por chave de API não fornecem percentuais. Veja as [notas da origem do Muse](docs/providers/muse.md).
+- O Goose contabiliza todo o uso da sessão no dia de criação, inclusive o uso em dias posteriores. Servidores goosed remotos e caminhos de varredura personalizados não são suportados. Veja as [notas da origem do Goose](docs/providers/goose.md).
+- CatPaw vem desativado por padrão; ative-o em Settings → tools. Lê os bancos de dados do assistente nas edições chinesa e internacional no macOS e Windows. Veja [as notas de origem do CatPaw](docs/providers/catpaw.md) para caminhos e limites da verificação.
+- OmO Native contabiliza os registros de sessões locais do OmO Native e do Senpi independente. Uma instalação nova o rastreia. Uma seleção de ferramentas já salva não o ganha na atualização; ative OmO Native em Settings → tools. Veja [as notas de origem do OmO Native](docs/providers/senpi.md). Alguns logs de tarefas filhas entram na contagem de uso, mas ainda não oferecem detalhes de sessão.
+- O acompanhamento do LM Studio cobre atualmente requisições compatíveis com OpenAI `/v1/chat/completions` e `/v1/responses` registradas nos logs do servidor. Conversas iniciadas na interface de chat integrada do LM Studio e requisições nativas `/api/v1/chat` não são incluídas.
+- O Unsloth Studio acompanha o uso de inferência a partir do `studio.db`: os chats do Studio e a sua API local. A inferência local tem custo de API zero; provedores medidos reconhecidos usam as estimativas de preço do Tokscale. Tokens de treinamento não são incluídos. Veja as [notas da origem do Unsloth](docs/providers/unsloth.md).
+- O Devin acompanha as sessões do Devin CLI no `sessions.db` local e as sessões de agente do Devin Desktop nos logs ACP `acp-events`; quando ambos cobrem a mesma sessão, o banco do CLI é a fonte autoritativa. A cobertura do Desktop depende do agente ACP conectado: apenas agentes que gravam eventos `usage_update` localmente são contados, e o agente `devin-cloud` padrão do Devin Desktop mede o uso no servidor, então uma configuração padrão do Desktop não informa tokens do Desktop. Os títulos das sessões e a atribuição de projetos vêm do banco do CLI. Veja as [notas da origem do Devin](docs/providers/devin.md).
+- O Notion AI usa APIs internas, com um cookie `token_v2` colado manualmente e um ID explícito de workspace Business/Enterprise. A validação usa apenas dados de teste; não há uma amostra real de resposta e a autenticação real aguarda aprovação. Não há obtenção automática de cookies nem garantia de API pública. Veja as [notas da origem do Notion](docs/providers/notion.md).
+- O Manus lê sessões desktop no macOS/Windows ou uma sessão web manual em qualquer SO, incluindo Linux. Créditos mensais, recarga e saldo usam o mesmo endpoint interno não documentado, sem garantia de compatibilidade. Veja as [notas da origem do Manus](docs/providers/manus.md).
+- O Hark lê a sessão desktop autenticada no macOS, ou um cookie de sessão colado em qualquer SO. Mostra os pools diário e mensal da conta. Veja as [notas da origem do Hark](docs/providers/hark.md).
+- O MiniMax Code lê o histórico local de sessões gravado pelo CLI em `~/.minimax` ou `MINIMAX_DATA_DIR` / `MAVIS_DATA_DIR` (também em `~/.mavis` e `~/.minimax-<profile>` / `~/.mavis-<profile>`), além das execuções capturadas com `tokscale headless mcode`; um turno encontrado nas duas fontes é contado uma única vez.
+
+- As transcrições do Command Code não contêm contagens reais de tokens nem metadados de modelo por mensagem. O uso de tokens é estimado a partir do texto das transcrições, enquanto a atribuição de modelo e o custo derivado podem refletir o modelo configurado no momento, e não o modelo usado historicamente em cada requisição.
+- O cache do Cursor vem da exportação de uso no nível da conta do Cursor, então cobre o uso do Cursor IDE, do Cursor CLI e do Grok Bot. O Token Monitor detecta automaticamente as contas com login pelo aplicativo desktop do Cursor e também permite adicionar contas manualmente nas Configurações. O cache ressincroniza sozinho quando fica desatualizado, mas sessões recém-concluídas podem levar alguns minutos para chegar ao painel do Cursor, então o uso recente ainda pode aparecer com atraso.
+
+- O mapeamento personalizado associa campos JSON numéricos de um único endpoint GET de saldo; compatibilidade apenas com OpenAI ou Anthropic não é suficiente.
+- Qoder: o grupo Qoder em Configurações → ferramentas monitora as versões internacional e CN de forma independente. Novas instalações monitoram ambas; as escolhas existentes são preservadas. A lista de uso das ferramentas combina as duas, a menos que **Mostrar versões separadamente** esteja ativado. Os transcripts internacionais são lidos de `QODER_CONFIG_DIR/projects` (padrão `~/.qoder/projects`); os do CN, de `TOKEN_MONITOR_QODER_CN_PROJECTS_PATH` e, depois, `QODERCN_CONFIG_DIR/projects` (padrão `~/.qoder-cn/projects`). Apenas as contagens de tokens registradas nos transcripts são contadas: linhas de modelos gerenciados que registram créditos sem tokens ficam de fora, e esses créditos continuam nos Limites de ferramentas de IA. Há relatos de que o Qoder CN CLI 1.1.62 registra contadores futuros com `QODERCN_EXPOSE_TOKEN_USAGE=1`; registros existentes não são preenchidos. Códigos dinâmicos de modelo, como `dfmodel`, aparecem como foram registrados. Versões antigas do Qoder CN que guardavam o uso apenas em SQLite não são mais coletadas; os arquivos de histórico existentes do Token Monitor são mantidos. Veja as [notas da origem do Qoder](docs/providers/qodercn.md).
+</details>
+
+### Suporte a recursos adicionais
+
+| Recurso | Ferramentas/fontes suportadas | Observações |
+|---------|-------------------------|------------|
+| Títulos de sessão | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
+| Uso por prompt/resposta e chamadas de ferramentas | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | Os detalhes são lidos localmente e não são sincronizados. |
+| Uso de contexto/espaço restante | Claude Code, Codex, DeepSeek Harness | O limite de contexto do Claude Code é estimado pelo modelo. |
+| Uso de cache/taxa de acerto do cache da sessão | Fontes com campos de cache, por exemplo: Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | A taxa de acerto aparece quando há dados de uso de cache. |
+| Estimativa de tempo restante do cache | Claude Code | 5 minutos ou 1 hora, conforme o tipo de cache registrado. |
+| Velocidade de saída/taxa de consumo de tokens | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | Saída em `tok/s` e consumo total de tokens em `tok/min`; o tempo pode incluir espera. |
+| Modelo da sessão e esforço de raciocínio | Claude Code, Codex | Exibe apenas o modelo e o esforço de raciocínio explicitamente registrados na sessão. |
+| Contagem de tokens de raciocínio | Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | — |
+| Detecção de início/conclusão de turno | Claude Code, Codex, OpenCode, Cursor, CodeBuddy, WorkBuddy, DeepSeek Harness | Usa sinais de turno registrados pela ferramenta. Para outras ferramentas ou sem sinais válidos, estima como em execução por cerca de 10 minutos após a última atividade. |
+| Estado nativo: em execução/aguardando entrada | Claude Code, Codex | — |
+| Agrupamento de sessões pai e subagentes | Codex, Antigravity, Oh My Pi, ZCode; sessões do T3 Code com vínculos verificáveis à sessão pai | O agrupamento do Claude Code é oferecido pelo T3 Code. |
+| Agrupamento de registros de continuação da mesma conversa | Codex; sessões do T3 Code com vínculos verificados à mesma thread | — |
+| Alternar contas locais | Codex | Alterna entre contas adicionadas ao Token Monitor. |
+| Horários de renovação de cota/contagem regressiva | Fontes que informam horários de renovação de cota, por exemplo: Claude Code, Codex, OpenCode, Cursor, Antigravity | — |
+| Créditos de redefinição de cota disponíveis | Claude Code, Codex | Mostra as redefinições restantes e a expiração; apenas consulta. |
+| Previsão de redefinição de cota | Codex | Previsões opcionais de terceiros do codex-resets.com. |
+
+## Instalação
+
+No macOS, instale pelo [Homebrew Cask](https://formulae.brew.sh/cask/token-monitor) oficial:
+
+```bash
+brew install --cask token-monitor
+```
+
+Ou baixe nas [GitHub Releases](https://github.com/Javis603/token-monitor/releases).
+
+- **macOS (Apple Silicon)** — `.dmg`, assinado e notarizado
+- **macOS (Intel)** — `.dmg` x64, assinado e notarizado
+- **Windows 10/11** — `.exe` de instalação e portátil, [assinado digitalmente](docs/code-signing.md)
+- **Linux x64** — `.AppImage`
+
+As versões empacotadas verificam as GitHub Releases automaticamente. Quando há uma atualização disponível, o app mostra um indicador de atualização; nas plataformas suportadas também é possível instalar pelas Configurações → Geral.
+
+### Primeira execução
+
+O modo local é o padrão: abra o app e ele começa a acompanhar este dispositivo. Nenhum hub, agente ou configuração é necessário.
+
+## Sincronização multidispositivo
+
+Escolha UM backend de sincronização multidispositivo para os seus dispositivos (e para eventuais agentes headless). Em cada dispositivo, abra o widget e escolha um modo em Configurações → Sincronização multidispositivo. O widget contribui automaticamente com o uso deste dispositivo; execute o [agente headless](#agente-headless) apenas em máquinas sem widget. O iCloud Drive é uma opção exclusiva do widget no macOS e não oferece suporte a agentes headless.
+
+#### Opção A — Hospedar o hub a partir do widget (mais fácil, sem CLI)
+
+No widget de uma máquina que fica sempre ligada, abra Configurações → Sincronização multidispositivo e escolha **Hospedar um hub neste dispositivo**. O widget gera um segredo aleatório e lista as URLs de rede local às quais os outros dispositivos podem se conectar (endereços do Tailscale ou do ZeroTier também aparecem aqui). Em todos os outros dispositivos, escolha **Conectar a um hub** e cole a URL e o segredo.
+
+O hub fica ativo enquanto o Token Monitor estiver em execução — sair do aplicativo (não apenas fechar a janela) interrompe o hub para todos os dispositivos conectados.
+
+#### Opção B — Hub Node auto-hospedado (máquina headless sempre ligada)
+
+```bash
+# on the always-on machine
+cp .env.example .env
+# set TOKEN_MONITOR_SECRET to something private, then:
+npm run hub
+```
+
+#### Opção C — Hub no Cloudflare Worker (entre redes, inclusive iPhone)
+
+[![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/Javis603/token-monitor/tree/main/worker)
+
+Implantação com um clique — o Cloudflare vai pedir o `TOKEN_MONITOR_SECRET` durante a configuração. Ou implante manualmente:
+
+```bash
+cd worker
+npm install
+npx wrangler login
+npx wrangler secret put TOKEN_MONITOR_SECRET
+npx wrangler deploy
+```
+
+Cole a URL implantada no widget de cada dispositivo em Configurações → Sincronização multidispositivo. Veja [worker/README.md](worker/README.md) para a receita do widget do iOS e a referência de endpoints, ou [docs/API.md](docs/API.md) para a API HTTP do hub.
+
+#### Opção D — iCloud Drive (macOS, sem servidor Hub)
+
+Em cada Mac com login no mesmo Apple ID, escolha **iCloud Drive** em Configurações → Sincronização multidispositivo. Este é um caminho opcional exclusivo do macOS: o Token Monitor grava um snapshot atômico por dispositivo e um snapshot de assinaturas por escritor em `iCloud Drive/Token Monitor/sync-v1/`, e depois cada Mac agrega localmente os arquivos válidos. Não usa nenhum servidor do Token Monitor, CloudKit ou credenciais; as chaves de API dos provedores, cookies e tokens ficam locais. O iCloud Drive é eventualmente consistente, então outro Mac pode levar um instante para aparecer ou atualizar, e um arquivo ausente ou corrompido nunca limpa a última agregação válida.
+
+### Agente headless
+
+Execute o agente headless em servidores, hosts SSH ou dentro do WSL — em qualquer lugar onde você usa ferramentas de IA sem o widget de desktop. Ele coleta o uso dessa máquina e o envia ao seu hub (Opção A, B ou C). Requer Node.js 22.15+ e git.
+
+```bash
+git clone https://github.com/Javis603/token-monitor.git
+cd token-monitor
+npm ci
+cp .env.example .env              # defina TOKEN_MONITOR_HUB_URL, TOKEN_MONITOR_SECRET e um TOKEN_MONITOR_DEVICE_ID único
+npm run agent                     # execução contínua
+```
+
+Veja [docs/headless-agent.md](docs/headless-agent.md) para executá-lo como serviço, atualizar, desinstalar e solucionar problemas. Para ferramentas com backend SQLite dentro do WSL, siga a [configuração do WSL com SQLite](docs/wsl-sqlite-setup.md).
+
+## Dados do app
+
+O estado do app fica no diretório de dados do usuário do sistema — apague-o junto com o app para desinstalar por completo.
+
+| Plataforma | Caminho |
+|----------|------|
+| macOS | `~/Library/Application Support/Token Monitor/` |
+| Windows | `%APPDATA%/Token Monitor/` |
+| Linux | `~/.config/Token Monitor/` |
+
+## Compilar a partir do código
+
+Para compilar o seu próprio instalador, use Node.js 22.15+ no SO **de destino** (o electron-builder não consegue gerar um `.dmg` do macOS no Windows, nem o contrário).
+
+```bash
+npm install
+npm run dist:mac     # macOS arm64 .dmg           → dist/
+npm run dist:mac:x64 # macOS Intel x64 .dmg       → dist/
+npm run dist:win     # Windows x64 installer .exe → dist/
+npm run dist:linux   # Linux x64 AppImage         → dist/
+npm run pack         # unpacked app dir (no installer), for quick local testing
+```
+
+A saída vai para `dist/`. Windows e Linux usam o script `dist:*` correspondente acima no SO de destino. Empacotar a versão de lançamento do macOS exige uma identidade de assinatura local do tipo Developer ID Application; use `npm start` para desenvolvimento local ou em plataformas sem suporte.
+
+Os scripts de execução e de empacotamento garantem explicitamente o binário fixado do tokscale em cada alvo com um build vendorizado. As demais plataformas de origem mantêm o binário do npm e filtram os clientes que ele não suporta; `npm install`, o lint e os testes não baixam esse binário.
+
+## Como funciona
+
+```text
+Modo A — Local (padrão, sem configuração)
+    widget (Electron) ──▶ tokscale ──▶ ~/.claude, ~/.codex, $HERMES_HOME
+
+Modo B — Sincronização (opcional, multidispositivo)
+    widget do dispositivo A ──▶
+    widget do dispositivo B ──▶  hub  ──▶  widget em qualquer dispositivo
+    agente do dispositivo C ──▶
+```
+
+O widget escolhe entre o modo local e o de sincronização com base em Configurações → Sincronização multidispositivo. O hub em si pode rodar como um processo `npm run hub` separado, como um Cloudflare Worker ou diretamente dentro de um dos widgets (modo Hospedar). Nos modos Cliente do Hub e Hospedar, o hub envia estatísticas agregadas a todos os widgets conectados via Server-Sent Events, então as atualizações de um dispositivo normalmente aparecem nos outros em poucos segundos. O modo iCloud Drive sincroniza os arquivos diretamente; a propagação é eventualmente consistente e pode demorar mais.
+
+## Retenção de dados de sessão
+
+Com **Preservar o uso de sessões excluídas** ativado (Configurações → Coleta), o Token Monitor arquiva localmente o uso diário observado por ferramenta/modelo, sem limite de tempo — de modo que, mesmo depois de uma ferramenta de origem eliminar as próprias sessões, o mapa de calor e as tendências não são afetados.
+
+<details>
+<summary><strong>Avançado: estender a retenção da própria ferramenta de origem</strong></summary>
+
+<br>
+
+O mapa de calor e o payload de sincronização usam uma janela móvel de 370 dias (as observações mais antigas permanecem disponíveis localmente para visualizações futuras). **O Claude Code mantém apenas 30 dias de transcrições por padrão** (`cleanupPeriodDays`); para manter o ano móvel completo antes que o arquivo entre em ação, aumente esse valor em `~/.claude/settings.json` antes que a janela passe:
+
+```json
+{
+  "cleanupPeriodDays": 370
+}
+```
+
+Um valor maior mantém mais dados, ao custo de deixar as transcrições no disco pelo tempo que você definir. A tabela [Session Data Retention](https://github.com/junhoyeo/tokscale#session-data-retention) do tokscale cobre os padrões e os caminhos de configuração das outras ferramentas.
+
+Este arquivo cobre apenas os dias que o Token Monitor já observou; dados excluídos antes de ele começar a acompanhar não podem ser recuperados.
+
+</details>
+
+## Configurações
+
+Há dois lugares para configurar o Token Monitor; o uso no dia a dia precisa apenas do primeiro:
+
+- **Widget (interface gráfica)** — clique no botão `⚙` no canto inferior direito. Seções, na ordem: Geral (idioma, iniciar ao entrar no sistema, atualizações), Principal (módulos da Home e moeda de exibição), Janela (comportamento da janela, layout da barra de menus e da bolha flutuante, modo de bandeja, atalho), Aparência (tema e cores dos fornecedores), Coleta (ferramentas acompanhadas, frequência de coleta, Preservar o uso de sessões excluídas, exportação de dados), Limites de Ferramentas de IA (seleção de provedores, limites e credenciais), Assinaturas (o que você paga por conta) e Sincronização multidispositivo. O botão `⇧` na barra de título alterna o comportamento da janela.
+- **Agente headless e hub** — sem interface; configurados por um arquivo `.env` na raiz do projeto (copie de `.env.example`), com precedência: flag de CLI → variável de ambiente → padrão interno. Veja [docs/configuration.md](docs/configuration.md#headless-agent--hub-env).
+
+Consulte a [referência de configuração](docs/configuration.md) para ver todas as configurações e todas as variáveis de ambiente.
+
+## Privacidade
+
+O Token Monitor processa os registros de uso localmente e não envia analytics nem telemetria ao mantenedor do projeto. O acesso à rede ocorre apenas para recursos documentados ou habilitados pelo usuário. Consulte a [política de privacidade](docs/privacy.md) para ver os dados usados pelas atualizações, pelas integrações de provedores, pelo Discord Rich Presence e pela sincronização multidispositivo opcional.
+
+## Histórico de estrelas
+
+<a href="https://github.com/Javis603/token-monitor/tree/star-history">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Javis603/token-monitor/star-history/star-history-dark.svg" />
+   <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Javis603/token-monitor/star-history/star-history.svg" />
+   <img alt="Star History Chart" src="https://raw.githubusercontent.com/Javis603/token-monitor/star-history/star-history.svg" />
+ </picture>
+</a>
+
+## Contribuindo
+
+Issues e PRs são bem-vindos. Comece pelo [CONTRIBUTING.md](CONTRIBUTING.md); as convenções do projeto, as notas de arquitetura e a referência de comandos ficam em [AGENTS.md](AGENTS.md).
+
+## Agradecimentos
+
+- [tokscale](https://github.com/junhoyeo/tokscale) pela análise de logs e a contabilidade de tokens.
+- [CodexBar](https://github.com/steipete/CodexBar) pela pesquisa sobre Limites de Ferramentas de IA.
+- [Política de assinatura de código](docs/code-signing.md): assinatura de código gratuita fornecida pela [SignPath.io](https://signpath.io/), certificado pela [SignPath Foundation](https://signpath.org/).
+
+## Licença
+
+[MIT](LICENSE) © [@Javis](https://github.com/Javis603)

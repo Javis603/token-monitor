@@ -1,0 +1,40 @@
+{
+  "8f24ac06-1807-4d51-9317-87d2f1a5f394": {
+    "notion_user": {
+      "8f24ac06-1807-4d51-9317-87d2f1a5f394": {
+        "value": {
+          "value": {
+            "id": "8f24ac06-1807-4d51-9317-87d2f1a5f394",
+            "email": "do-not-publish@example.invalid",
+            "name": "Private fixture user"
+          }
+        }
+      }
+    },
+    "space": {
+      "02a340f6-7dda-40a7-8b37-9c8417f8ed03": {
+        "value": {
+          "id": "02a340f6-7dda-40a7-8b37-9c8417f8ed03",
+          "name": "Private free workspace",
+          "subscription_tier": "free"
+        }
+      },
+      "f190126b-0445-43ec-94dd-f069ad1aa064": {
+        "value": {
+          "value": {
+            "id": "f190126b-0445-43ec-94dd-f069ad1aa064",
+            "name": "Private paid workspace",
+            "subscription_tier": "business"
+          }
+        }
+      },
+      "06f78985-cf72-419c-ae99-c380405a093a": {
+        "value": {
+          "id": "06f78985-cf72-419c-ae99-c380405a093a",
+          "name": "Private enterprise workspace",
+          "subscription_tier": "enterprise"
+        }
+      }
+    }
+  }
+}

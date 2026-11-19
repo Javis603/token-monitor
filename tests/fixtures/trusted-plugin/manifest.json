@@ -1,0 +1,49 @@
+{
+  "tmApi": 1,
+  "id": "trusted-fixture",
+  "name": "Platform fixture",
+  "version": "1.0.0",
+  "ui": "ui.mjs",
+  "backend": "backend.cjs",
+  "files": [
+    "ui.mjs",
+    "backend.cjs"
+  ],
+  "views": [
+    {
+      "id": "panel",
+      "title": "Fixture",
+      "surfaces": [
+        "home",
+        "page",
+        "notch",
+        "edgeDock",
+        "tray",
+        "settings"
+      ]
+    },
+    {
+      "id": "content",
+      "title": "Content fixture",
+      "surfaces": [],
+      "targets": [
+        "main.limits.content",
+        "notch.home.content",
+        "notch.summary.content",
+        "edgeDock.provider.content",
+        "edgeDock.stat.content",
+        "edgeDock.rail.stat.content",
+        "notch.limits.content",
+        "notch.sessions.content",
+        "notch.breakdown.content"
+      ],
+      "mode": "replace"
+    }
+  ],
+  "trayMenu": [
+    {
+      "id": "ping",
+      "label": "Fixture callback"
+    }
+  ]
+}

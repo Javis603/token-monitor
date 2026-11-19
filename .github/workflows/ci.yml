@@ -1,0 +1,173 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    # Bound stalled test runs instead of waiting for GitHub's six-hour default.
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # Both supported Node versions on Linux; latest-Node smoke on macOS/Windows to
+        # catch platform-specific bugs (tray on macOS, WSL/paths on Windows).
+        os: [ubuntu-latest]
+        node-version: ['22', '24']
+        include:
+          - os: macos-latest
+            node-version: '24'
+          - os: windows-latest
+            node-version: '24'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: npm
+      - run: npm ci
+      - name: Verify vendored worker shared code is in sync
+        # Drift check is OS-independent; running it once on Linux avoids
+        # false positives from Windows CRLF checkout vs the LF sync writes.
+        if: runner.os == 'Linux'
+        run: |
+          npm run sync:worker
+          git diff --exit-code worker/src/shared \
+            || { echo "::error::worker/src/shared is stale — run 'npm run sync:worker' and commit."; exit 1; }
+      - run: npm run lint
+      - run: npm run typecheck
+      - name: Run tests with coverage
+        id: coverage
+        if: runner.os == 'Linux' && matrix.node-version == '24'
+        run: npm run test:coverage
+      - name: Run tests
+        if: runner.os != 'Linux' || matrix.node-version != '24'
+        run: npm test
+      - name: Upload coverage reports
+        if: ${{ !cancelled() && (steps.coverage.outcome == 'success' || steps.coverage.outcome == 'failure') }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: javascript-coverage
+          path: |
+            coverage/
+            !coverage/tmp/**
+          if-no-files-found: error
+          retention-days: 14
+
+  timezones:
+    # Every GitHub-hosted runner sets its clock to UTC on every OS, so the
+    # os × node matrix above varies two axes and still samples a single UTC
+    # offset. Usage periods are cut at *local* midnight, so an assertion written
+    # against a UTC instant is green there by construction and the first person
+    # to see it red is a contributor running `npm run verify` at home.
+    #
+    # This is a list rather than "UTC plus one other" because each offset failed
+    # a different subset of the suite (#481): +02 and +10 were green while +07
+    # was not, and Kathmandu is here because +05:45 is not a whole hour.
+    runs-on: ubuntu-latest
+    # Allow for seven sequential suite runs while still bounding stalls.
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Run the suite at several UTC offsets
+        # Overlap I/O and real timer waits inside each suite without adding
+        # runners or running multiple timezone suites simultaneously.
+        run: |
+          for tz in Asia/Ho_Chi_Minh Asia/Kathmandu Pacific/Chatham America/Los_Angeles Pacific/Honolulu Pacific/Pago_Pago Pacific/Kiritimati; do
+            echo "::group::TZ=$tz"
+            TZ="$tz" node --test --test-concurrency=8 "tests/**/*.test.js"
+            echo "::endgroup::"
+          done
+
+  mac-widget:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - name: Run macOS Widget Node tests
+        run: >-
+          node --test
+          tests/shared/macWidgetSnapshot.test.js
+          tests/electron/macWidgetBridge.test.js
+          tests/electron/macWidgetDeepLink.test.js
+          tests/electron/macWidgetHistory.test.js
+          tests/electron/macWidgetHistoryStore.test.js
+          tests/electron/macWidgetSnapshotController.test.js
+          tests/electron/macWidgetSnapshotLane.test.js
+          tests/electron/macWidgetLaunchServicesRecovery.test.js
+          tests/electron/macWidgetReloader.test.js
+          tests/electron/macWidgetSigning.test.js
+          tests/electron/macosProvisioning.test.js
+          tests/electron/macWidgetIntegration.test.js
+          tests/electron/macWidgetVerifier.test.js
+      - name: Run native macOS Widget tests
+        run: >-
+          xcodebuild
+          -project native/macos/TokenMonitorWidget.xcodeproj
+          -scheme TokenMonitorWidget
+          -destination 'platform=macOS'
+          test
+          CODE_SIGNING_ALLOWED=NO
+      - name: Build and verify arm64 Widget extension
+        env:
+          TOKEN_MONITOR_WIDGET_ARCH: arm64
+        run: |
+          npm run build:mac-widget
+          test -d build/macos-widget/TokenMonitorWidget.appex
+          test -x build/macos-widget/TokenMonitorWidgetReloader
+          test "$(lipo -archs build/macos-widget/TokenMonitorWidget.appex/Contents/MacOS/TokenMonitorWidget)" = "arm64"
+          test "$(lipo -archs build/macos-widget/TokenMonitorWidgetReloader)" = "arm64"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' build/macos-widget/TokenMonitorWidget.entitlements)" = "group.com.example.tokenmonitor"
+      - name: Package and verify a complete local Widget app
+        env:
+          TOKEN_MONITOR_WIDGET_ENABLED: '1'
+          TOKEN_MONITOR_WIDGET_ARCH: arm64
+          TOKEN_MONITOR_APP_GROUP: group.com.example.tokenmonitor
+          TOKEN_MONITOR_WIDGET_BUNDLE_ID: com.example.tokenmonitor.widget
+          TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING: '1'
+          CSC_FOR_PULL_REQUEST: 'true'
+        run: |
+          npm run pack:mac:widget
+          npm run verify:mac:widget-app
+      - name: Build and verify x64 Widget extension
+        env:
+          TOKEN_MONITOR_WIDGET_ARCH: x64
+        run: |
+          npm run build:mac-widget
+          test -d build/macos-widget/TokenMonitorWidget.appex
+          test -x build/macos-widget/TokenMonitorWidgetReloader
+          test "$(lipo -archs build/macos-widget/TokenMonitorWidget.appex/Contents/MacOS/TokenMonitorWidget)" = "x86_64"
+          test "$(lipo -archs build/macos-widget/TokenMonitorWidgetReloader)" = "x86_64"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :com.apple.security.application-groups:0' build/macos-widget/TokenMonitorWidget.entitlements)" = "group.com.example.tokenmonitor"
+      - name: Package and verify a complete x64 local Widget app
+        env:
+          TOKEN_MONITOR_WIDGET_ENABLED: '1'
+          TOKEN_MONITOR_WIDGET_ARCH: x64
+          TOKEN_MONITOR_APP_GROUP: group.com.example.tokenmonitor
+          TOKEN_MONITOR_WIDGET_BUNDLE_ID: com.example.tokenmonitor.widget
+          TOKEN_MONITOR_LOCAL_DEVELOPMENT_SIGNING: '1'
+          CSC_FOR_PULL_REQUEST: 'true'
+        run: |
+          npm run pack:mac:widget:x64
+          npm run verify:mac:widget-app -- "dist/mac-x64/mac/Token Monitor.app"
+      - name: Check Widget CI diff
+        run: git diff --check

@@ -1,0 +1,565 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+
+const { fetchCursorLimits } = require('../../src/shared/limits/collector');
+
+test('fetchCursorLimits returns notConfigured when no active account', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => null
+  });
+  assert.equal(result.provider, 'cursor');
+  assert.equal(result.status, 'notConfigured');
+  assert.equal(result.windows.length, 0);
+});
+
+test('fetchCursorLimits returns unauthorized when probe says so', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'a1', sessionToken: 't', userId: 'u1' }),
+    probe: async () => ({ ok: false, error: { kind: 'unauthorized', message: 'HTTP 401' } })
+  });
+  assert.equal(result.status, 'unauthorized');
+});
+
+test('fetchCursorLimits exposes the official model pools, Grok Bot, and on-demand spend', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: async () => ({
+      ok: true,
+      usage: {
+        planPercent: 42, autoPercent: 20, apiPercent: 64,
+        planUsedUsd: 8.4, planLimitUsd: 20, onDemandUsedUsd: 0, onDemandLimitUsd: 50,
+        grokBot: {
+          usedPercent: 100,
+          resetsAt: '2026-05-28T00:00:00Z',
+          windowMinutes: 10080,
+          hasAvailableUsage: false,
+          hasNonZeroIncludedLimit: true
+        },
+        billingCycleEnd: '2026-06-01T00:00:00Z', membershipType: 'pro'
+      },
+      user: { email: 'a@b.com', name: 'Alice', sub: 'u1' }
+    })
+  });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.provider, 'cursor');
+  assert.equal(result.source, 'web');
+  assert.deepEqual(result.windows.map((window) => window.label), ['Cursor Models', 'Other Models', 'Grok Bot', 'On-demand spend']);
+  assert.equal(result.windows[0].kind, 'billing');
+  assert.equal(result.windows[0].usedPercent, 20);
+  assert.equal(result.windows[0].resetsAt, '2026-06-01T00:00:00.000Z');
+  assert.equal(result.windows[1].usedPercent, 64);
+  assert.equal(result.windows[2].kind, 'weekly');
+  assert.equal(result.windows[2].usedPercent, 100);
+  assert.equal(result.windows[2].resetsAt, '2026-05-28T00:00:00Z');
+  assert.equal(result.windows[2].windowMinutes, 10080);
+  assert.equal(result.windows[3].metric, 'spend');
+  assert.equal(result.windows[3].currency, 'USD');
+  assert.equal(result.windows[3].used, 0);
+  assert.equal(result.windows[3].limit, 50);
+  assert.equal(result.windows[3].showMeter, false);
+  assert.equal(result.windows[3].remaining, 50);
+  assert.equal(result.windows[3].resetDescription, '');
+});
+
+test('fetchCursorLimits uses Requests for a legacy request-based plan', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: async () => ({
+      ok: true,
+      usage: {
+        planInfo: { isMerged: false },
+        planPercent: 42,
+        autoPercent: 20,
+        apiPercent: 64,
+        requestsUsed: 7,
+        requestsLimit: 10,
+        billingCycleEnd: '2026-06-01T00:00:00Z',
+        membershipType: 'pro'
+      },
+      user: { email: 'a@b.com', sub: 'u1' }
+    })
+  });
+
+  assert.deepEqual(result.windows.map((window) => window.label), ['Requests']);
+  assert.equal(result.windows[0].usedPercent, 70);
+  assert.equal(result.windows[0].used, 7);
+  assert.equal(result.windows[0].limit, 10);
+  assert.equal(result.windows[0].remaining, 3);
+});
+
+test('fetchCursorLimits hides Grok Bot only when no included allowance exists', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: async () => ({
+      ok: true,
+      usage: {
+        autoPercent: 0,
+        apiPercent: 0,
+        grokBot: {
+          usedPercent: 100,
+          hasAvailableUsage: false,
+          hasNonZeroIncludedLimit: false
+        },
+        onDemandUsedUsd: 0,
+        onDemandLimitUsd: 0,
+        membershipType: 'free'
+      },
+      user: { email: 'free@example.com', sub: 'u1' }
+    })
+  });
+
+  assert.deepEqual(result.windows.map((window) => window.label), ['Cursor Models', 'Other Models']);
+});
+
+test('fetchCursorLimits shows uncapped positive spend but hides a zero-dollar non-cap', async () => {
+  const baseAccount = () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' });
+  const positive = await fetchCursorLimits({}, {
+    readActiveAccount: baseAccount,
+    probe: async () => ({
+      ok: true,
+      usage: { autoPercent: 10, apiPercent: 20, onDemandUsedUsd: 3.5, onDemandLimitUsd: 0 },
+      user: { sub: 'u1' }
+    })
+  });
+  const zero = await fetchCursorLimits({}, {
+    readActiveAccount: baseAccount,
+    probe: async () => ({
+      ok: true,
+      usage: { autoPercent: 10, apiPercent: 20, onDemandUsedUsd: 0, onDemandLimitUsd: 0 },
+      user: { sub: 'u1' }
+    })
+  });
+
+  const spend = positive.windows.find((window) => window.metric === 'spend');
+  assert.ok(spend);
+  assert.equal(spend.used, 3.5);
+  assert.equal(spend.limit, null);
+  assert.equal(zero.windows.some((window) => window.metric === 'spend'), false);
+});
+
+test('fetchCursorLimits prefers account identity over the plan for the account label', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: async () => ({
+      ok: true,
+      usage: { planPercent: 10, membershipType: 'pro_student', planInfo: { isMerged: false } },
+      user: { email: 'a@b.com', name: 'Alice', sub: 'u1' }
+    })
+  });
+  assert.equal(result.status, 'ok');
+  assert.equal(result.accountLabel, 'a@b.com');
+});
+
+test('fetchCursorLimits probes every saved account and uses API email labels', async () => {
+  const calls = [];
+  const result = await fetchCursorLimits({}, {
+    listAccounts: () => [
+      { id: 'b', sessionToken: 'tok-b', userId: 'user-b', label: 'work' },
+      { id: 'a', sessionToken: 'tok-a', userId: 'user-a', label: 'personal' }
+    ],
+    probe: async (token) => {
+      calls.push(token);
+      return {
+        ok: true,
+        usage: { planPercent: token === 'tok-b' ? 20 : 40, membershipType: 'pro' },
+        user: { email: `${token}@example.com`, sub: token }
+      };
+    }
+  });
+  assert.deepEqual(calls, ['tok-b', 'tok-a']);
+  assert.deepEqual(result.map((provider) => provider.accountLabel), ['tok-b@example.com', 'tok-a@example.com']);
+  assert.deepEqual(result.map((provider) => provider.accountEmail), ['tok-b@example.com', 'tok-a@example.com']);
+  assert.deepEqual(result.map((provider) => provider.planLabel), ['Pro', 'Pro']);
+  assert.equal(new Set(result.map((provider) => provider.accountKey)).size, 2);
+});
+
+test('fetchCursorLimits keys the same Cursor API subject identically across different local stores', async () => {
+  const probe = async () => ({
+    ok: true,
+    usage: { planPercent: 10, membershipType: 'free' },
+    user: { email: 'same@example.com', sub: 'user_canonical' }
+  });
+  const first = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'anon-local-a', sessionToken: 'token-a', userId: null }),
+    probe
+  });
+  const second = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'anon-local-b', sessionToken: 'token-b', userId: null }),
+    probe
+  });
+
+  assert.equal(first.accountKey, second.accountKey);
+  assert.equal(first.accountEmail, 'same@example.com');
+});
+
+test('fetchCursorLimits keeps prefixed API subjects stable across a failed probe fallback', async () => {
+  const account = { id: 'user_canonical', sessionToken: 'token', userId: 'user_canonical' };
+  const success = await fetchCursorLimits({}, {
+    readActiveAccount: () => account,
+    probe: async () => ({
+      ok: true,
+      usage: { planPercent: 10, membershipType: 'free' },
+      user: { email: 'same@example.com', sub: 'auth0|user_canonical' }
+    })
+  });
+  const unauthorized = await fetchCursorLimits({}, {
+    readActiveAccount: () => account,
+    probe: async () => ({ ok: false, error: { kind: 'unauthorized', message: 'HTTP 401' } })
+  });
+
+  assert.equal(success.accountKey, unauthorized.accountKey);
+});
+
+test('fetchCursorLimits keeps opaque local fallback identities distinct when no canonical user id is available', async () => {
+  const result = await fetchCursorLimits({}, {
+    listAccounts: () => [
+      { id: 'anon-local-a', sessionToken: 'token-a', userId: null },
+      { id: 'anon-local-b', sessionToken: 'token-b', userId: null }
+    ],
+    probe: async () => ({ ok: false, error: { kind: 'unauthorized', message: 'HTTP 401' } })
+  });
+
+  assert.equal(result.length, 2);
+  assert.equal(new Set(result.map((provider) => provider.accountKey)).size, 2);
+});
+
+test('fetchCursorLimits probes only enabled Cursor accounts', async () => {
+  const calls = [];
+  const deps = {
+    listAccounts: () => [
+      { id: 'work', sessionToken: 'tok-work', userId: 'user-work' },
+      { id: 'personal', sessionToken: 'tok-personal', userId: 'user-personal' }
+    ],
+    probe: async (token) => {
+      calls.push(token);
+      return {
+        ok: true,
+        usage: { planPercent: 10, membershipType: 'pro' },
+        user: { email: `${token}@example.com`, sub: token }
+      };
+    }
+  };
+
+  const result = await fetchCursorLimits({ cursorDisabledAccountIds: ['work'] }, deps);
+  assert.deepEqual(calls, ['tok-personal']);
+  assert.equal(result.accountLabel, 'tok-personal@example.com');
+
+  calls.length = 0;
+  const disabled = await fetchCursorLimits({ cursorDisabledAccountIds: ['work', 'personal'] }, deps);
+  assert.equal(disabled.status, 'notConfigured');
+  assert.deepEqual(calls, []);
+});
+
+test('fetchCursorLimits includes team pool when Cursor reports pooled usage', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: async () => ({
+      ok: true,
+      usage: {
+        planPercent: 73.84,
+        planUsedUsd: 73.84,
+        planLimitUsd: 100,
+        planRemainingUsd: 26.16,
+        teamPooledPercent: 45.25,
+        teamPooledUsedUsd: 127251.35,
+        teamPooledLimitUsd: 281220,
+        teamPooledRemainingUsd: 153968.65,
+        billingCycleEnd: '2026-06-01T00:00:00Z',
+        membershipType: 'enterprise',
+        hasTeamPooledUsage: true
+      },
+      user: { email: 'a@b.com', name: 'Alice', sub: 'u1' }
+    })
+  });
+
+  const pool = result.windows.find((window) => window.label === 'Team pool');
+  assert.ok(pool);
+  assert.equal(pool.kind, 'billing');
+  assert.equal(pool.usedPercent, 45.25);
+  assert.equal(pool.used, 127251.35);
+  assert.equal(pool.limit, 281220);
+  assert.equal(pool.remaining, 153968.65);
+});
+
+function unifiedProbe(usage) {
+  return async () => ({
+    ok: true,
+    usage: {
+      planPercent: 37,
+      autoPercent: 12,
+      apiPercent: 50,
+      onDemandUsedUsd: 0,
+      billingCycleEnd: '2026-11-01T00:00:00Z',
+      membershipType: 'premium',
+      grokBot: { usedPercent: 37, resetsAt: '2026-10-20T00:00:00Z', windowMinutes: 10080, hasNonZeroIncludedLimit: true, isUnified: true },
+      planInfo: {
+        isMerged: true,
+        planName: 'Premium',
+        includedUsagePeriod: 'weekly',
+        includedUsageResetsAt: '2026-10-19T00:00:00.000Z',
+        billingCycleEnd: '2026-11-01T00:00:00.000Z'
+      },
+      prepaid: { availableUsd: 14.46 },
+      ...usage
+    },
+    user: { email: 'a@b.com', sub: 'u1' }
+  });
+}
+
+test('fetchCursorLimits shows one weekly included pool and the prepaid balance for unified plans', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: unifiedProbe()
+  });
+  assert.deepEqual(result.windows.map((window) => window.label), ['Included usage', 'Prepaid balance']);
+  assert.equal(result.planLabel, 'Premium');
+  const [included, prepaid] = result.windows;
+  assert.equal(included.kind, 'weekly');
+  assert.equal(included.usedPercent, 37);
+  assert.equal(included.resetsAt, '2026-10-19T00:00:00.000Z');
+  assert.equal(included.windowMinutes, 10080);
+  assert.equal(prepaid.metric, 'credits');
+  assert.equal(prepaid.currency, 'USD');
+  assert.equal(prepaid.remaining, 14.46);
+  assert.equal(prepaid.showMeter, false);
+});
+
+test('fetchCursorLimits hides an empty or missing unified prepaid balance', async () => {
+  for (const prepaid of [{ availableUsd: 0 }, null]) {
+    const result = await fetchCursorLimits({}, {
+      readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+      probe: unifiedProbe({ prepaid })
+    });
+    assert.deepEqual(result.windows.map((window) => window.label), ['Included usage']);
+  }
+});
+
+test('fetchCursorLimits keeps a monthly unified pool on the billing cycle', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: unifiedProbe({ planInfo: { isMerged: true, includedUsagePeriod: 'monthly' }, membershipType: 'unified_ultra' })
+  });
+  assert.equal(result.planLabel, 'Ultra');
+  assert.equal(result.windows[0].kind, 'billing');
+  assert.equal(result.windows[0].resetsAt, '2026-11-01T00:00:00.000Z');
+  assert.equal(result.windows[0].windowMinutes, null);
+});
+
+test('fetchCursorLimits keeps unified pools weekly when the period is missing or unknown', async () => {
+  for (const period of [{}, { includedUsagePeriod: null }, { includedUsagePeriod: 'unknown' }]) {
+    const result = await fetchCursorLimits({}, {
+      readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+      probe: unifiedProbe({ planInfo: {
+        isMerged: true,
+        billingCycleEnd: '2026-11-01T00:00:00.000Z',
+        ...period
+      } })
+    });
+    const included = result.windows[0];
+    assert.equal(included.kind, 'weekly');
+    assert.equal(included.windowMinutes, 10080);
+    assert.equal(included.resetsAt, null, 'a billing reset cannot stand in for the unknown weekly reset');
+  }
+});
+
+test('fetchCursorLimits hides legacy on-demand data only for unified plans', async () => {
+  for (const onDemand of [
+    { onDemandUsedUsd: 2, onDemandLimitUsd: 50 },
+    { onDemandUsedUsd: 0, onDemandLimitUsd: 50 },
+    { onDemandUsedUsd: 2 },
+    { teamOnDemandUsedUsd: 2, teamOnDemandLimitUsd: 50 }
+  ]) {
+    for (const planInfo of [{ isMerged: true, includedUsagePeriod: 'weekly' }, null]) {
+      const result = await fetchCursorLimits({}, {
+        readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+        probe: unifiedProbe({ planInfo, ...onDemand })
+      });
+      assert.deepEqual(result.windows.map((window) => window.label), ['Included usage', 'Prepaid balance']);
+    }
+    const legacy = await fetchCursorLimits({}, {
+      readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+      probe: unifiedProbe({ planInfo: { isMerged: false }, ...onDemand })
+    });
+    assert.equal(legacy.windows.at(-1).label, 'On-demand spend');
+  }
+});
+
+test('fetchCursorLimits keeps the legacy layout when plan info says the plan is not unified', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: unifiedProbe({
+      membershipType: 'pro',
+      grokBot: { usedPercent: 10, resetsAt: '2026-10-20T00:00:00Z', windowMinutes: 10080, hasNonZeroIncludedLimit: true, isUnified: false },
+      planInfo: { isMerged: false, planName: 'Pro', includedUsagePeriod: 'monthly' },
+      prepaid: null
+    })
+  });
+  assert.deepEqual(result.windows.map((window) => window.label), ['Cursor Models', 'Other Models', 'Grok Bot']);
+});
+
+test('fetchCursorLimits keeps a sand-only unified pool weekly with an unknown reset', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: unifiedProbe({ planInfo: null, prepaid: null })
+  });
+  assert.deepEqual(result.windows.map((window) => window.label), ['Included usage']);
+  assert.equal(result.windows[0].kind, 'weekly');
+  assert.equal(result.windows[0].resetsAt, null);
+  assert.equal(result.windows[0].windowMinutes, 10080);
+});
+
+test('fetchCursorLimits lets plan info override the sand unified flag', async () => {
+  const result = await fetchCursorLimits({}, {
+    readActiveAccount: () => ({ id: 'acct-1', sessionToken: 't', userId: 'u1' }),
+    probe: unifiedProbe({
+      membershipType: 'pro',
+      planInfo: { isMerged: false, planName: 'Pro', includedUsagePeriod: null },
+      prepaid: null
+    })
+  });
+  assert.equal(result.windows.find((window) => window.label === 'Grok Bot')?.kind, 'weekly');
+  assert.deepEqual(result.windows.map((window) => window.label), ['Cursor Models', 'Other Models', 'Grok Bot']);
+});
+
+test('Cursor limits retires switched desktop accounts from retained runtime snapshots', async (t) => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  const accounts = [
+    { id: 'user_OLD', userId: 'user_OLD', sessionToken: 'old' },
+    { id: 'user_NEW', userId: 'user_NEW', sessionToken: 'new' }
+  ];
+  let desktop = { state: 'unknown' };
+  let failure = '';
+  const calls = [];
+  const options = { cursorManualAccountIds: [] };
+  const deps = {
+    listAccounts: () => accounts,
+    readCursorDesktopSignIn: () => desktop,
+    probe: async (token) => {
+      calls.push(token);
+      if (failure) return { ok: false, error: { kind: failure } };
+      return {
+        ok: true, user: { sub: token === 'old' ? 'user_OLD' : 'user_NEW', email: `${token}@example.com` },
+        usage: { autoPercent: 20, planInfo: { isMerged: false } }
+      };
+    }
+  };
+  const seed = await fetchCursorLimits(options, deps);
+  const runtime = createLimitsRuntime({ limitProviders: ['cursor'], previousLimits: { providers: seed } }, {
+    autoStart: false, autoRetry: false,
+    probeProvider: async () => [await fetchCursorLimits(options, deps)].flat()
+  });
+  t.after(() => runtime.stop());
+  desktop = { state: 'signed-in', userId: 'user_NEW' };
+  calls.length = 0;
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  let rows = runtime.getSnapshot().providers;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].accountEmail, 'new@example.com');
+  assert.deepEqual(calls, ['new']);
+  assert.equal(JSON.stringify(rows).includes('removed'), false);
+
+  // Transient failures keep the current account and its last good usage.
+  failure = 'unavailable';
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  rows = runtime.getSnapshot().providers;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].windows.length, 1);
+
+  // A definitively rejected automatic credential leaves the quota list too.
+  failure = 'unauthorized';
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  assert.deepEqual(runtime.getSnapshot().providers, []);
+  assert.equal(accounts.length, 2); // No credential/history deletion.
+
+  // Signing in again restores the current account; signing out retires it.
+  failure = '';
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  assert.equal(runtime.getSnapshot().providers.length, 1);
+  desktop = { state: 'signed-out' };
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  assert.deepEqual(runtime.getSnapshot().providers, []);
+
+  // Manually managed accounts keep their reauthentication flow after sign-out.
+  options.cursorManualAccountIds = ['user_OLD'];
+  failure = 'unauthorized';
+  await runtime.refresh({ provider: 'cursor' }, 'credential-change');
+  rows = runtime.getSnapshot().providers;
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].accountKey, seed[0].accountKey);
+  assert.equal(rows[0].status, 'unauthorized');
+});
+
+test('Cursor limits rechecks desktop ownership when an in-flight probe completes', async () => {
+  const account = { id: 'user_CURRENT', userId: 'user_CURRENT', sessionToken: 'fixture' };
+  for (const state of [{ state: 'signed-out' }, { state: 'signed-in', userId: 'user_OTHER' }, { state: 'unknown' }]) {
+    for (const manual of [false, true]) {
+      let desktop = { state: 'signed-in', userId: account.userId };
+      const result = await fetchCursorLimits({ cursorManualAccountIds: manual ? [account.id] : [] }, {
+        listAccounts: () => [account],
+        readCursorDesktopSignIn: () => desktop,
+        probe: async () => {
+          desktop = state;
+          return { ok: true, user: { sub: account.userId }, usage: { planInfo: { isMerged: false }, autoPercent: 20 } };
+        }
+      });
+      const retired = !manual && state.state !== 'unknown';
+      assert.equal(result.removed === true, retired, `${state.state}, manual=${manual}`);
+      if (!retired) assert.equal(result.status, 'ok');
+    }
+  }
+});
+
+test('Cursor limits checks ownership after a slower sibling probe finishes', async () => {
+  for (const desktopAfter of [{ state: 'signed-out' }, { state: 'signed-in', userId: 'user_OTHER' }]) {
+    const accounts = [
+      { id: 'user_AUTO', userId: 'user_AUTO', sessionToken: 'auto' },
+      { id: 'user_MANUAL', userId: 'user_MANUAL', sessionToken: 'manual' }
+    ];
+    let desktop = { state: 'signed-in', userId: 'user_AUTO' };
+    let finishManual;
+    const slowProbe = new Promise(resolve => { finishManual = resolve; });
+    const result = fetchCursorLimits({ cursorManualAccountIds: ['user_MANUAL'] }, {
+      listAccounts: () => accounts,
+      readCursorDesktopSignIn: () => desktop,
+      probe: async token => {
+        if (token === 'manual') await slowProbe;
+        return { ok: true, user: { sub: token === 'auto' ? 'user_AUTO' : 'user_MANUAL' },
+          usage: { planInfo: { isMerged: false }, autoPercent: 20 } };
+      }
+    });
+    // Let the fast account's probe and its completion microtasks finish first.
+    await new Promise(setImmediate);
+    desktop = desktopAfter;
+    finishManual();
+    const rows = await result;
+    assert.equal(rows[0].removed, true, desktopAfter.state);
+    assert.equal(rows[1].status, 'ok');
+  }
+});
+
+for (const preference of ['auto', 'desktop', 'web']) test(`Cursor ${preference} source preference filters requests while retiring excluded observations`, async () => {
+  const accounts = [{ id: 'user_desktop', sessionToken: 'desktop' }, { id: 'user_manual', sessionToken: 'web' }];
+  const calls = [];
+  const rows = await fetchCursorLimits({ cursorSourcePreference: preference, cursorManualAccountIds: ['user_manual'] }, {
+    listAccounts: () => accounts,
+    readCursorDesktopSignIn: () => ({ state: 'unknown' }),
+    probe: async token => { calls.push(token); return { ok: false, error: { kind: 'network', message: 'offline' } }; }
+  });
+  assert.deepEqual(calls, preference === 'auto' ? ['desktop', 'web'] : [preference]);
+  assert.equal(rows.length, 2);
+  assert.equal(rows.filter(row => row.removed).length, preference === 'auto' ? 0 : 1);
+  assert.deepEqual(accounts.map(account => account.sessionToken), ['desktop', 'web']);
+});
+
+test('Cursor source exclusion does not retire a shared identity still collected by the selected lane', async () => {
+  const rows = await fetchCursorLimits({ cursorSourcePreference: 'web', cursorManualAccountIds: ['manual'] }, {
+    listAccounts: () => [{ id: 'desktop', userId: 'user_shared', sessionToken: 'desktop' }, { id: 'manual', userId: 'user_shared', sessionToken: 'web' }],
+    readCursorDesktopSignIn: () => ({ state: 'unknown' }),
+    probe: async token => { assert.equal(token, 'web'); return { ok: false, error: { kind: 'network', message: 'offline' } }; }
+  });
+  assert.equal(rows.removed, undefined);
+  assert.equal(rows.provider, 'cursor');
+  assert.notEqual(rows.status, 'notConfigured');
+});

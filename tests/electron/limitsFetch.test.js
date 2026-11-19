@@ -1,0 +1,147 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const { createElectronLimitsFetch } = require('../../src/electron/limits/fetch');
+const { resetOutboundFetchCache } = require('../../src/shared/outboundFetch');
+
+function recordingNet() {
+  const calls = [];
+  return {
+    calls,
+    net: {
+      fetch: (url, init) => {
+        calls.push({ url, init });
+        return 'net-fetch-result';
+      }
+    }
+  };
+}
+
+test('the Electron transport sends provider requests through net.fetch', async () => {
+  const { calls, net } = recordingNet();
+  const fetchFn = createElectronLimitsFetch({ net, env: {} });
+
+  assert.equal(await fetchFn('https://example.com/usage', { headers: { a: '1' } }), 'net-fetch-result');
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'https://example.com/usage');
+  assert.deepEqual(calls[0].init.headers, { a: '1' });
+});
+
+// net.fetch issues from the default session, so anything other than 'omit'
+// lets that session's cookie jar replace a provider-managed Cookie header —
+// which no amount of re-pasting the credential can undo. It is an invariant of
+// this transport, not a default a caller may relax.
+// The default session also owns an HTTP cache that Node's fetch never had, so
+// a quota poll could be answered from it with a figure the provider has moved
+// past. Both invariants sit after the caller's init for that reason.
+test('the Electron transport never lets a caller re-enable session credentials or caching', async () => {
+  const { calls, net } = recordingNet();
+  const fetchFn = createElectronLimitsFetch({ net, env: {} });
+
+  await fetchFn('https://example.com/usage', { credentials: 'include', cache: 'force-cache' });
+  await fetchFn('https://example.com/usage');
+
+  assert.deepEqual(calls.map((call) => call.init.credentials), ['omit', 'omit']);
+  assert.deepEqual(calls.map((call) => call.init.cache), ['no-store', 'no-store']);
+});
+
+// Every provider's Referer is same-origin or a bare origin today, which the
+// default referrer policy allows; a provider needing a looser one asks for it
+// rather than the transport relaxing the policy for everybody.
+test('the Electron transport leaves the referrer policy to the caller', async () => {
+  const { calls, net } = recordingNet();
+  const fetchFn = createElectronLimitsFetch({ net, env: {} });
+
+  await fetchFn('https://example.com/usage');
+  await fetchFn('https://example.com/usage', { referrerPolicy: 'unsafe-url' });
+
+  assert.deepEqual(calls.map((call) => call.init.referrerPolicy), [undefined, 'unsafe-url']);
+});
+
+// Without this branch the widget would silently drop the env proxy semantics
+// that outboundFetch.js documents — including failing closed on a proxy that
+// is configured but unreachable, which the dead port below stands in for.
+test('an explicitly configured proxy env stays ahead of the system proxy', async () => {
+  for (const env of [{}, { HTTPS_PROXY: '' }, { NO_PROXY: 'example.com' }]) {
+    const { calls, net } = recordingNet();
+    const fetchFn = createElectronLimitsFetch({ net, env });
+    assert.equal(await fetchFn('https://example.com/usage'), 'net-fetch-result');
+    assert.equal(calls.length, 1, `${JSON.stringify(env)} should reach Chromium`);
+  }
+
+  for (const env of [
+    { HTTPS_PROXY: 'http://127.0.0.1:1' },
+    { http_proxy: 'http://127.0.0.1:1' },
+    { ALL_PROXY: 'http://127.0.0.1:1' },
+    { HTTP_PROXY: '"http://127.0.0.1:1"' }
+  ]) {
+    resetOutboundFetchCache();
+    const { calls, net } = recordingNet();
+    const fetchFn = createElectronLimitsFetch({ net, env });
+    await assert.rejects(() => fetchFn('http://example.invalid/usage'));
+    assert.equal(calls.length, 0, `${JSON.stringify(env)} must not fall back to Chromium`);
+  }
+});
+
+// Long-lived callers capture their fetch once (some at module load), so a proxy
+// setting saved later has to reach them through the per-request env lookup.
+test('the transport re-reads its route on every request', async () => {
+  resetOutboundFetchCache();
+  const { calls, net } = recordingNet();
+  let route = { env: {}, deps: {} };
+  const fetchFn = createElectronLimitsFetch({ net, getRoute: () => route });
+
+  assert.equal(await fetchFn('https://example.com/usage'), 'net-fetch-result');
+  route = { env: { https_proxy: 'http://127.0.0.1:1' }, deps: {} };
+  await assert.rejects(() => fetchFn('http://example.invalid/usage'));
+  route = { env: {}, deps: {} };
+  assert.equal(await fetchFn('https://example.com/usage'), 'net-fetch-result');
+  assert.equal(calls.length, 2);
+});
+
+// The account-settings probes decide whether a credential can be saved at all,
+// so a probe left on the global fetch refuses to save an account on exactly the
+// machines this transport exists for.
+test('every widget provider probe takes the runtime transport', () => {
+  const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8') + '\n' + ['opencode', 'mimo', 'thirdparty', 'codex'].map(id => fs.readFileSync(path.join(__dirname, '../../src/electron/providers', id, 'accountService.js'), 'utf8')).join('\n');
+
+  assert.match(main, /function electronLimitsFetch\(\) \{\s*return createElectronLimitsFetch\(\{\s*net: \{ fetch: createProxyReadyFetch\(net\.fetch\.bind\(net\), \(\) => sessionProxy\.ensureReady\(\)\) \},\s*getRoute: networkProxyRoute/);
+  assert.match(main, /function networkProxyRoute\(\) \{\s*return outboundRouteForSettings\(settings \|\| \{\}, process\.env\);/);
+  // MiMo's exchange and the Chromium session follow the same setting, and
+  // every settings save re-applies the session so a failed apply is retried.
+  assert.match(main, /createMimoExchangeFetch\(\{\s*session: \{ resolveProxy: createProxyReadyFetch\([^;]+sessionProxy\.ensureReady\(\)\) \},\s*getRoute: networkProxyRoute/);
+  assert.match(main, /getConfig: \(\) => sessionProxyConfig\(settings \|\| \{\}\)/);
+  // An unsupported bypass entry is refused at save time, like an unusable URL.
+  assert.match(main, /const bypassError = noProxyError\(patch\.noProxy\);\s*if \(bypassError\) throw new Error\(bypassError\);/);
+  assert.match(main, /const proxySettingChanged = [^;]+;\s*void sessionProxy\.apply\(\)/);
+  assert.match(main, /fetch: electronLimitsFetch\(\)/);
+  assert.match(main, /goApi\.fetchGoApi\(apiKey, \{\s*fetch: electronLimitsFetch\(\)/);
+  // Every settings-side validation that can refuse to save a credential.
+  for (const call of [
+    /web\.fetchWeb\([^,]+, electronProviderDeps\(\)\)/,
+    // Every account form's save-time probe (limits:saveCredential).
+    /function credentialProbeDeps\(renewed = \{\}\) \{\s*return electronProviderDeps\(/,
+    // MiMo's save path is hand-wired rather than going through the account
+    // forms, so it has to ask for the probe deps itself: saving a credential
+    // must not write the spend ledger the credential has not earned yet.
+    /fetchMimoLimits\([^;]+credentialProbeDeps\(\)\)/,
+    /fetchThirdPartyAccount\(\{[^}]*\}, electronProviderDeps\(/,
+    /listWorkspaces\(auth, electronProviderDeps\(/
+  ]) {
+    assert.match(main, call);
+  }
+});
+
+test('the auto-detect pill requires a usable ZCode credential, not any install', () => {
+  const account = require('../../src/shared/providers/zai/account');
+  for (const discovery of [{}, { entitled: false }, { kind: 'api-balance' }]) {
+    assert.equal(account.discover({}, { discoverZcodeConnection: () => discovery }), null);
+  }
+  for (const discovery of [{ credential: { token: 'quota' } }, { billing: { credential: { token: 'billing' } } }]) {
+    assert.equal(account.discover({}, { discoverZcodeConnection: () => discovery }), discovery);
+  }
+});

@@ -1,0 +1,721 @@
+'use strict';
+
+// Characterization tests for the per-provider limits wiring that the registry
+// refactor moves into one place. They pin what exists today — the credential
+// key set, the settings keys that scope a provider refresh, the env fallbacks,
+// the renderer projection, the URL allowlist and the renderer's account config
+// — so each extraction commit can prove it changed nothing.
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+const vm = require('node:vm');
+
+const { CREDENTIAL_SETTING_PATHS, credentialSettingsForRenderer } = require('../../src/shared/credentialStore');
+const { LIMIT_PROVIDER_SETTING_KEYS, limitsConfigFromSettings, classifySettingsChange } = require('../../src/electron/runtimeConfig');
+const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
+const { isAllowedVerificationUrl } = require('../../src/shared/providers/copilot/deviceFlow');
+const { isAllowedCodexLoginUrl } = require('../../src/shared/providers/codex/login');
+const { SERVICE_STATUS_PROVIDERS } = require('../../src/electron/serviceStatus');
+const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+const { LIMIT_PROVIDER_REGISTRY, LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
+const {
+  rendererOmittedAccountKeys,
+  accountFieldProjection,
+  accountStatusProjection,
+  finalAccountSettings,
+  limitAccountFormsForRenderer,
+  normalizeAccountField,
+  normalizeAccountPatch
+} = require('../../src/electron/limits/accountSettings');
+
+const ROOT = path.resolve(__dirname, '../..');
+const mainSource = fs.readFileSync(path.join(ROOT, 'src/electron/main.js'), 'utf8');
+const appSource = fs.readFileSync(path.join(ROOT, 'src/electron/renderer/app.js'), 'utf8');
+const indexHtml = fs.readFileSync(path.join(ROOT, 'src/electron/renderer/index.html'), 'utf8');
+
+// Evaluate one top-level declaration out of a classic script file. `from` and
+// `to` are literal markers: the slice runs from `from` to just before `to`.
+// A `const name = <expr>` slice is returned as just the expression.
+function evalTopLevel(source, from, to, sandbox = {}) {
+  const start = source.indexOf(from);
+  assert.notEqual(start, -1, `${from} should exist`);
+  const end = source.indexOf(to, start);
+  assert.notEqual(end, -1, `${to} should follow ${from}`);
+  let code = source.slice(start, end).trim().replace(/;$/, '');
+  code = code.replace(/^(?:const|let|var)\s+[\w$]+\s*=\s*/, 'return ').replace(/^function\s+[\w$]+/, 'return function');
+  return vm.runInNewContext(`(function () { ${code} })()`, sandbox);
+}
+
+test('the limits registry matches the catalog, binds each fetcher and keeps account leaves require-free', () => {
+  assert.deepEqual(LIMIT_PROVIDER_REGISTRY.map(({ id }) => id), LIMIT_PROVIDER_IDS);
+  assert.deepEqual(Object.keys(LIMIT_PROVIDER_FETCHERS), LIMIT_PROVIDER_IDS);
+  for (const { id, fetchLimits, fields } of LIMIT_PROVIDER_REGISTRY) {
+    assert.equal(typeof fetchLimits, 'function', id);
+    assert.equal(typeof LIMIT_PROVIDER_FETCHERS[id], 'function', id);
+    assert.equal(new Set(fields.map(({ key }) => key)).size, fields.length, id);
+    const leaf = fs.readFileSync(path.join(ROOT, 'src', 'shared', 'providers', id, 'account.js'), 'utf8');
+    assert.doesNotMatch(leaf, /\brequire\s*\(/, `${id} account declaration must stay a leaf`);
+  }
+});
+
+test('field keys and credential store paths are unique across the whole registry', () => {
+  const keys = new Map();
+  const storePaths = new Map();
+  for (const { id, fields } of LIMIT_PROVIDER_REGISTRY) {
+    for (const { key, storePath } of fields) {
+      assert.ok(!keys.has(key), `${id}.${key} is already declared by ${keys.get(key)}`);
+      keys.set(key, id);
+      if (!storePath) continue;
+      const pathKey = storePath.join('.');
+      assert.ok(!storePaths.has(pathKey), `${id}.${key} reuses store path ${pathKey} of ${storePaths.get(pathKey)}`);
+      storePaths.set(pathKey, `${id}.${key}`);
+    }
+  }
+});
+
+test('loading the account index or the credential store does not load any provider limits module', () => {
+  const { execFileSync } = require('node:child_process');
+  const loaded = JSON.parse(execFileSync(process.execPath, ['-e', `
+    require(${JSON.stringify(path.join(ROOT, 'src', 'shared', 'credentialStore.js'))});
+    process.stdout.write(JSON.stringify(Object.keys(require.cache)));
+  `], { encoding: 'utf8' }));
+  const limitsModules = loaded.filter((file) => /[\\/]providers[\\/][^\\/]+[\\/]limits\.js$/.test(file));
+  assert.ok(loaded.some((file) => file.endsWith(path.join('limits', 'accounts.js'))), 'credentialStore reads the account index');
+  assert.deepEqual(limitsModules, []);
+});
+
+test('CREDENTIAL_SETTING_PATHS is exactly this set (the store is default-deny)', () => {
+  assert.deepEqual(CREDENTIAL_SETTING_PATHS, {
+    hubHostSecret: ['hub', 'hostSecret'],
+    secret: ['hub', 'clientSecret'],
+    hubProfiles: ['hub', 'profiles'],
+    claudeAccountSlots: ['providers', 'claude', 'accountSlots'],
+    claudeDefaultAccountIdentity: ['providers', 'claude', 'defaultAccountIdentity'],
+    antigravityAccountSlots: ['providers', 'antigravity', 'accountSlots'],
+    antigravityDefaultAccountIdentity: ['providers', 'antigravity', 'defaultAccountIdentity'],
+    minimaxAccountSlots: ['providers', 'minimax', 'accountSlots'],
+    minimaxDefaultAccountIdentity: ['providers', 'minimax', 'defaultAccountIdentity'],
+    workbuddyAccountSlots: ['providers', 'workbuddy', 'accountSlots'],
+    workbuddyDefaultAccountIdentity: ['providers', 'workbuddy', 'defaultAccountIdentity'],
+    claudeWebCookie: ['providers', 'claude', 'webCookie'],
+    opencodeCookie: ['providers', 'opencode', 'cookie'],
+    opencodeProfiles: ['providers', 'opencode', 'profiles'],
+    clineAccountSlots: ['providers', 'cline', 'accountSlots'],
+    clineDefaultAccountIdentity: ['providers', 'cline', 'defaultAccountIdentity'],
+    clineAmbientAccounts: ['providers', 'cline', 'ambientAccounts'],
+    clineApiKey: ['providers', 'cline', 'apiKey'],
+    factoryAccountSlots: ['providers', 'factory', 'accountSlots'],
+    factoryDefaultAccountIdentity: ['providers', 'factory', 'defaultAccountIdentity'],
+    factoryAmbientAccounts: ['providers', 'factory', 'ambientAccounts'],
+    factoryApiKey: ['providers', 'factory', 'apiKey'],
+    kimiAccountSlots: ['providers', 'kimi', 'accountSlots'],
+    kimiDefaultAccountIdentity: ['providers', 'kimi', 'defaultAccountIdentity'],
+    mistralAccountSlots: ['providers', 'mistral', 'accountSlots'],
+    mistralDefaultAccountIdentity: ['providers', 'mistral', 'defaultAccountIdentity'],
+    stepfunAccountSlots: ['providers', 'stepfun', 'accountSlots'],
+    stepfunDefaultAccountIdentity: ['providers', 'stepfun', 'defaultAccountIdentity'],
+    museAccountSlots: ['providers', 'muse', 'accountSlots'],
+    museDefaultAccountIdentity: ['providers', 'muse', 'defaultAccountIdentity'],
+    alibabaAccountSlots: ['providers', 'alibaba', 'accountSlots'],
+    alibabaDefaultAccountIdentity: ['providers', 'alibaba', 'defaultAccountIdentity'],
+    volcengineAccountSlots: ['providers', 'volcengine', 'accountSlots'],
+    volcengineDefaultAccountIdentity: ['providers', 'volcengine', 'defaultAccountIdentity'],
+    kimiApiKey: ['providers', 'kimi', 'apiKey'],
+    kimiWebAccessToken: ['providers', 'kimi', 'webAccessToken'],
+    copilotApiToken: ['providers', 'copilot', 'apiToken'],
+    copilotProfiles: ['providers', 'copilot', 'profiles'],
+    copilotAccountSlots: ['providers', 'copilot', 'accountSlots'],
+    copilotDefaultAccountIdentity: ['providers', 'copilot', 'defaultAccountIdentity'],
+    zedCookie: ['providers', 'zed', 'cookie'],
+    zedAccountSlots: ['providers', 'zed', 'accountSlots'],
+    zedDefaultAccountIdentity: ['providers', 'zed', 'defaultAccountIdentity'],
+    mistralCookie: ['providers', 'mistral', 'cookie'],
+    typesafeCookie: ['providers', 'typesafe', 'cookie'],
+    typesafeAccountSlots: ['providers', 'typesafe', 'accountSlots'],
+    typesafeDefaultAccountIdentity: ['providers', 'typesafe', 'defaultAccountIdentity'],
+    stepfunToken: ['providers', 'stepfun', 'token'],
+    notionCookie: ['providers', 'notion', 'cookie'],
+    notionAccountSlots: ['providers', 'notion', 'accountSlots'],
+    notionDefaultAccountIdentity: ['providers', 'notion', 'defaultAccountIdentity'],
+    opendesignCookie: ['providers', 'opendesign', 'cookie'],
+    opendesignAccountSlots: ['providers', 'opendesign', 'accountSlots'],
+    opendesignDefaultAccountIdentity: ['providers', 'opendesign', 'defaultAccountIdentity'],
+    manusAccountSlots: ['providers', 'manus', 'accountSlots'],
+    manusDefaultAccountIdentity: ['providers', 'manus', 'defaultAccountIdentity'],
+    manusAmbientAccounts: ['providers', 'manus', 'ambientAccounts'],
+    manusSessionToken: ['providers', 'manus', 'sessionToken'],
+    harkAccountSlots: ['providers', 'hark', 'accountSlots'],
+    harkDefaultAccountIdentity: ['providers', 'hark', 'defaultAccountIdentity'],
+    harkAmbientAccounts: ['providers', 'hark', 'ambientAccounts'],
+    harkCookie: ['providers', 'hark', 'cookie'],
+    museWebCookie: ['providers', 'muse', 'webCookie'],
+    commandcodeCookie: ['providers', 'commandcode', 'cookie'],
+    commandcodeAccountSlots: ['providers', 'commandcode', 'accountSlots'],
+    commandcodeDefaultAccountIdentity: ['providers', 'commandcode', 'defaultAccountIdentity'],
+    zaiAccountSlots: ['providers', 'zai', 'accountSlots'],
+    zaiDefaultAccountIdentity: ['providers', 'zai', 'defaultAccountIdentity'],
+    zaiAmbientAccounts: ['providers', 'zai', 'ambientAccounts'],
+    zaiApiKey: ['providers', 'zai', 'apiKey'],
+    zaiTeamApiKey: ['providers', 'zaiTeam', 'apiKey'],
+    zaiTeamOrganizationId: ['providers', 'zaiTeam', 'organizationId'],
+    zaiTeamProjectId: ['providers', 'zaiTeam', 'projectId'],
+    zaiteamAccountSlots: ['providers', 'zaiteam', 'accountSlots'],
+    zaiteamDefaultAccountIdentity: ['providers', 'zaiteam', 'defaultAccountIdentity'],
+    qoderCookie: ['providers', 'qoder', 'cookie'],
+    qoderAccountSlots: ['providers', 'qoder', 'accountSlots'],
+    qoderDefaultAccountIdentity: ['providers', 'qoder', 'defaultAccountIdentity'],
+    devinBearerToken: ['providers', 'devin', 'bearerToken'],
+    devinAccountSlots: ['providers', 'devin', 'accountSlots'],
+    devinDefaultAccountIdentity: ['providers', 'devin', 'defaultAccountIdentity'],
+    deepseekApiKey: ['providers', 'deepseek', 'apiKey'],
+    deepseekWebToken: ['providers', 'deepseek', 'webToken'],
+    deepseekAccountSlots: ['providers', 'deepseek', 'accountSlots'],
+    deepseekDefaultAccountIdentity: ['providers', 'deepseek', 'defaultAccountIdentity'],
+    openrouterProfiles: ['providers', 'openrouter', 'profiles'],
+    openrouterApiKey: ['providers', 'openrouter', 'apiKey'],
+    openrouterAccountSlots: ['providers', 'openrouter', 'accountSlots'],
+    openrouterDefaultAccountIdentity: ['providers', 'openrouter', 'defaultAccountIdentity'],
+    minimaxApiProfiles: ['providers', 'minimax', 'profiles'],
+    minimaxApiKey: ['providers', 'minimax', 'apiKey'],
+    volcengineApiKey: ['providers', 'volcengine', 'apiKey'],
+    volcengineAccessKeyId: ['providers', 'volcengine', 'accessKeyId'],
+    volcengineSecretAccessKey: ['providers', 'volcengine', 'secretAccessKey'],
+    volcengineAgentAccessKeyId: ['providers', 'volcengine', 'agentAccessKeyId'],
+    volcengineAgentSecretAccessKey: ['providers', 'volcengine', 'agentSecretAccessKey'],
+    ollamaApiKey: ['providers', 'ollama', 'apiKey'],
+    ollamaCookie: ['providers', 'ollama', 'cookie'],
+    ollamaAccountSlots: ['providers', 'ollama', 'accountSlots'],
+    ollamaDefaultAccountIdentity: ['providers', 'ollama', 'defaultAccountIdentity'],
+    traeCookie: ['providers', 'trae', 'cookie'],
+    traeAccountSlots: ['providers', 'trae', 'accountSlots'],
+    traeDefaultAccountIdentity: ['providers', 'trae', 'defaultAccountIdentity'],
+    traeAccessToken: ['providers', 'trae', 'accessToken'],
+    traeDeviceId: ['providers', 'trae', 'deviceId'],
+    alibabaCookie: ['providers', 'alibaba', 'cookie'],
+    thirdPartyProfiles: ['providers', 'thirdparty', 'profiles']
+  });
+});
+
+test('every provider credential path lives under providers/<id>', () => {
+  for (const [key, segments] of Object.entries(CREDENTIAL_SETTING_PATHS)) {
+    if (key === 'hubHostSecret' || key === 'secret' || key === 'hubProfiles') continue;
+    assert.equal(segments[0], 'providers', key);
+    assert.equal(segments.length, 3, key);
+  }
+});
+
+test('the renderer receives no credential values except the two hub secrets', () => {
+  const settings = Object.fromEntries(Object.keys(CREDENTIAL_SETTING_PATHS).map((key) => [key, { secret: 'x' }]));
+  const redacted = credentialSettingsForRenderer(settings, { expose: ['hubHostSecret', 'secret'] });
+  for (const key of Object.keys(CREDENTIAL_SETTING_PATHS)) {
+    if (key === 'hubHostSecret' || key === 'secret') assert.deepEqual(redacted[key], { secret: 'x' });
+    else if (rendererOmittedAccountKeys().includes(key)) assert.equal(Object.hasOwn(redacted, key), false, key);
+    else assert.equal(redacted[key], '', key);
+  }
+  // main.js is the only caller; pin that it exposes exactly those two keys.
+  assert.match(mainSource, /credentialSettingsForRenderer\(settings, \{\s*expose: \['hubHostSecret', 'secret'\]\s*\}\)/);
+});
+
+test('LIMIT_PROVIDER_SETTING_KEYS is exactly this set (drives per-provider refresh scopes)', () => {
+  assert.deepEqual(LIMIT_PROVIDER_SETTING_KEYS, {
+    claude: ['claudeSourcePreference', 'claudeWebCookie', 'claudeWebOrganizationId', 'claudeAccountSlots', 'claudeCliFallbackEnabled'],
+    codex: ['codexSourcePreference', 'codexManagedAccounts'],
+    opencode: ['opencodeCookie', 'opencodeProfiles', 'opencodeLocalLimitsEnabled'],
+    cursor: ['cursorSourcePreference', 'cursorDisabledAccountIds'],
+    antigravity: ['antigravityAccountSlots'],
+    cline: ['clineSourcePreference', 'clineApiKey', 'clineAccountSlots'],
+    grok: ['grokSourcePreference'],
+    factory: ['factoryApiKey', 'factoryAccountSlots'],
+    kimi: ['kimiApiKey', 'kimiWebAccessToken', 'kimiAccountSlots'],
+    copilot: ['copilotApiToken', 'copilotEnterpriseHost', 'copilotAccountSlots'],
+    zed: ['zedCookie', 'zedAccountSlots'],
+    commandcode: ['commandcodeCookie', 'commandcodeAccountSlots'],
+    mimo: ['mimoManagedAccounts'],
+    zai: ['zaiApiKey', 'zaiApiRegion', 'zaiAccountSlots'],
+    zaiteam: ['zaiTeamApiKey', 'zaiTeamOrganizationId', 'zaiTeamProjectId', 'zaiteamAccountSlots'],
+    workbuddy: ['workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId', 'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo', 'workbuddyAccountSlots'],
+    qoder: ['qoderCookie', 'qoderSite', 'qoderAccountSlots'],
+    deepseek: ['deepseekApiKey', 'deepseekWebToken', 'deepseekAccountSlots'],
+    devin: ['devinBearerToken', 'devinOrganization', 'devinAccountSlots'],
+    mistral: ['mistralCookie', 'mistralAccountSlots'],
+    typesafe: ['typesafeCookie', 'typesafeAccountSlots'],
+    stepfun: ['stepfunToken', 'stepfunAccountSlots'],
+    notion: ['notionCookie', 'notionWorkspaceId', 'notionAccountSlots'],
+    opendesign: ['opendesignCookie', 'opendesignAccountSlots'],
+    manus: ['manusSourcePreference', 'manusSessionToken', 'manusAccountSlots'],
+    hark: ['harkSourcePreference', 'harkCookie', 'harkAccountSlots'],
+    muse: ['museWebCookie', 'museAccountSlots'],
+    openrouter: ['openrouterApiKey', 'openrouterAccountSlots'],
+    minimax: ['minimaxApiProfiles', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode', 'minimaxAccountSlots'],
+    volcengine: [
+      'volcengineSourcePreference', 'volcengineApiKey', 'volcengineAccessKeyId', 'volcengineSecretAccessKey', 'volcengineRegion',
+      'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'volcengineAccountSlots'
+    ],
+    ollama: ['ollamaSourcePreference', 'ollamaApiKey', 'ollamaCookie', 'ollamaAccountSlots'],
+    trae: ['traeSourcePreference', 'traeCookie', 'traeAccessToken', 'traeDeviceId', 'traeAccountSlots'],
+    alibaba: ['alibabaSourcePreference', 'alibabaCookie', 'alibabaVariant', 'alibabaAccountSlots'],
+    thirdparty: ['thirdPartyProfiles']
+  });
+  for (const provider of Object.keys(LIMIT_PROVIDER_SETTING_KEYS)) {
+    assert.ok(LIMIT_PROVIDER_IDS.includes(provider), `${provider} is a catalog id`);
+  }
+});
+
+test('limitsConfigFromSettings env fallbacks and precedence', () => {
+  const env = {
+    CLAUDE_WEB_COOKIE: 'env-claude',
+    TOKEN_MONITOR_OPENCODE_COOKIE: 'env-opencode',
+    TOKEN_MONITOR_TRAE_ACCESS_TOKEN: 'env-trae-tok',
+    TRAE_ACCESS_TOKEN: 'env-trae-legacy',
+    TOKEN_MONITOR_TRAE_DEVICE_ID: 'env-trae-dev',
+    TOKEN_MONITOR_ZED_COOKIE: 'env-zed-tm',
+    TOKEN_MONITOR_TYPESAFE_COOKIE: 'env-typesafe-tm',
+    TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN: 'env-wb-tok',
+    WORKBUDDY_ACCESS_TOKEN: 'env-wb-legacy',
+    TOKEN_MONITOR_WORKBUDDY_DOMAIN: 'env-wb-domain',
+    TOKEN_MONITOR_OLLAMA_API_KEY: 'env-ollama-key'
+  };
+  const config = limitsConfigFromSettings({}, { env });
+  assert.equal(config.claudeWebCookie, 'env-claude');
+  assert.equal(config.opencodeCookie, 'env-opencode');
+  assert.equal(config.traeAccessToken, 'env-trae-tok');
+  assert.equal(config.traeDeviceId, 'env-trae-dev');
+  assert.equal(config.zedCookie, 'env-zed-tm');
+  assert.equal(config.typesafeCookie, 'env-typesafe-tm');
+  assert.equal(config.workbuddyAccessToken, 'env-wb-tok');
+  assert.equal(config.workbuddyDomain, 'env-wb-domain');
+  assert.equal(config.ollamaApiKey, 'env-ollama-key');
+  // Legacy bare env names fill in when the prefixed one is absent.
+  const legacyOnly = limitsConfigFromSettings({}, {
+    env: { TRAE_ACCESS_TOKEN: 'legacy-trae', ZED_COOKIE: 'legacy-zed', TYPESAFE_COOKIE: 'legacy-typesafe', WORKBUDDY_ACCESS_TOKEN: 'legacy-wb', OLLAMA_API_KEY: 'legacy-ollama' }
+  });
+  assert.equal(legacyOnly.traeAccessToken, 'legacy-trae');
+  assert.equal(legacyOnly.zedCookie, 'legacy-zed');
+  assert.equal(legacyOnly.typesafeCookie, 'legacy-typesafe');
+  assert.equal(legacyOnly.workbuddyAccessToken, 'legacy-wb');
+  assert.equal(legacyOnly.ollamaApiKey, 'legacy-ollama');
+  // The Minimax region reaches the probe through the config layer, so the env
+  // names must be declared on the field — minimaxRegion's own env lane is
+  // shadowed by the configDefault this resolves to.
+  assert.equal(limitsConfigFromSettings({}, { env: {} }).minimaxApiRegion, 'auto');
+  assert.equal(limitsConfigFromSettings({}, { env: { MINIMAX_API_REGION: 'cn' } }).minimaxApiRegion, 'cn');
+  assert.equal(
+    limitsConfigFromSettings({}, { env: { TOKEN_MONITOR_MINIMAX_API_REGION: 'intl' } }).minimaxApiRegion,
+    'intl'
+  );
+  // Settings win over env.
+  const settingsWin = limitsConfigFromSettings(
+    { claudeWebCookie: 'settings-claude', zedCookie: 'settings-zed' },
+    { env }
+  );
+  assert.equal(settingsWin.claudeWebCookie, 'settings-claude');
+  assert.equal(settingsWin.zedCookie, 'settings-zed');
+  // Fields with no env lane read settings only.
+  const noEnv = limitsConfigFromSettings({}, { env });
+  for (const key of ['deepseekApiKey', 'minimaxApiKey', 'copilotApiToken', 'factoryApiKey', 'zaiApiKey', 'kimiApiKey', 'ollamaCookie', 'commandcodeCookie', 'alibabaCookie', 'qoderCookie', 'devinBearerToken']) {
+    assert.equal(noEnv[key], '', key);
+  }
+  // Non-credential defaults.
+  assert.equal(config.zaiApiRegion, 'global');
+  assert.equal(config.qoderSite, 'global');
+  assert.equal(config.limitsEnabled, true);
+  assert.equal(config.limitsRefreshMs, 300000);
+  assert.equal(config.opencodeLocalLimitsEnabled, false);
+  assert.equal(config.opencodeAmbientEnabled, true);
+  assert.equal(config.claudePrepaidBalanceEnabled, true);
+});
+
+test('desktop WorkBuddy ignores env and settings tokens and reads the app session', () => {
+  const config = limitsConfigFromSettings(
+    { workbuddyAccessToken: 'stored', workbuddyDomain: 'stored.cn' },
+    {
+      env: { TOKEN_MONITOR_WORKBUDDY_ACCESS_TOKEN: 'env-tok' },
+      workbuddyDesktopSessionOnly: true,
+      workbuddyDesktopSessionEnabled: true,
+      workbuddyLocalSession: { userId: 'u1', enterpriseId: 'e1', domain: 'session.cn', departmentInfo: 'd', accountType: 'enterprise' }
+    }
+  );
+  assert.equal(config.workbuddyAccessToken, '');
+  assert.equal(config.workbuddyDomain, 'session.cn');
+  assert.equal(config.workbuddyUserId, 'u1');
+  assert.equal(config.workbuddyEnterpriseId, 'e1');
+  assert.equal(config.workbuddyAccountType, 'enterprise');
+});
+
+test('settings:update normalizes provider fields and strips separately managed accounts', () => {
+  const handler = mainSource.slice(
+    mainSource.indexOf("ipcMain.handle('settings:update'"),
+    mainSource.indexOf('ipcMain.handle(', mainSource.indexOf("ipcMain.handle('settings:update'") + 10)
+  );
+  assert.match(handler, /normalizeAccountPatch\(patch, normalizedPatch\)/);
+  assert.match(handler, /\.\.\.finalAccountSettings\(patch, settings\)/);
+
+  const fields = LIMIT_PROVIDER_REGISTRY.flatMap(({ fields }) => fields);
+  const normalizedKeys = fields.filter(({ normalize, persist }) => normalize && persist !== 'never').map(({ key }) => key);
+  assert.deepEqual(normalizedKeys.sort(), [
+    'claudeSourcePreference', 'codexSourcePreference', 'cursorSourcePreference', 'clineSourcePreference', 'grokSourcePreference',
+    'ollamaSourcePreference', 'traeSourcePreference', 'manusSourcePreference', 'harkSourcePreference',
+    'alibabaSourcePreference', 'volcengineSourcePreference',
+    'openrouterApiKey', 'claudeWebCookie', 'claudeWebOrganizationId', 'deepseekApiKey', 'deepseekWebToken', 'minimaxApiKey', 'minimaxApiRegion', 'minimaxBillingMode', 'copilotApiToken', 'copilotEnterpriseHost',
+    'factoryApiKey', 'clineApiKey', 'zaiApiKey', 'zaiApiRegion', 'zaiTeamApiKey',
+    'zaiTeamOrganizationId', 'zaiTeamProjectId', 'volcengineApiKey', 'volcengineAccessKeyId',
+    'volcengineSecretAccessKey', 'volcengineRegion', 'volcengineAgentAccessKeyId',
+    'volcengineAgentSecretAccessKey', 'volcengineAgentRegion', 'qoderCookie', 'qoderSite',
+    'devinBearerToken', 'devinOrganization', 'alibabaCookie', 'alibabaVariant',
+    'traeCookie', 'traeAccessToken', 'traeDeviceId', 'zedCookie', 'typesafeCookie', 'stepfunToken',
+    'mistralCookie', 'commandcodeCookie', 'kimiApiKey', 'kimiWebAccessToken', 'ollamaApiKey', 'ollamaCookie', 'notionCookie', 'notionWorkspaceId', 'manusSessionToken', 'harkCookie', 'museWebCookie', 'opendesignCookie'
+  ].sort());
+  for (const key of normalizedKeys) {
+    const value = key === 'claudeWebCookie' ? 'sessionKey=sk-ant-test'
+      : key === 'notionWorkspaceId' ? ' 11111111222233334444555555555555 ' : ' example ';
+    const patch = { [key]: value };
+    const normalized = { ...patch };
+    normalizeAccountPatch(patch, normalized);
+    assert.deepEqual(normalized[key], normalizeAccountField(key, value), key);
+    if (fields.find((field) => field.key === key).persist !== 'spread') {
+      assert.deepEqual(finalAccountSettings(patch, {})[key], normalized[key], key);
+    }
+  }
+  assert.equal(finalAccountSettings({}, {}).zaiApiRegion, 'global');
+  assert.equal(finalAccountSettings({}, {}).qoderSite, 'global');
+  assert.equal(finalAccountSettings({}, {}).minimaxApiRegion, '');
+  // A stored value the normalizer no longer accepts is re-canonicalized against
+  // persistFallback rather than kept verbatim.
+  assert.equal(finalAccountSettings({}, { minimaxApiRegion: '  CN  ' }).minimaxApiRegion, 'cn');
+  // Kimi's keys are normalized in the patch but have no final literal entry.
+  assert.equal(Object.hasOwn(finalAccountSettings({ kimiApiKey: 'x' }, {}), 'kimiApiKey'), false);
+
+  const managedKeys = [
+    'claudeManagedAccounts', 'codexManagedAccounts', 'antigravityManagedAccounts', 'mimoManagedAccounts',
+    'workbuddyAccessToken', 'workbuddyUserId', 'workbuddyEnterpriseId',
+    'workbuddyLocale', 'workbuddyDomain', 'workbuddyDepartmentInfo',
+    'openrouterProfiles', 'thirdPartyProfiles'
+  ];
+  const managedPatch = Object.fromEntries(managedKeys.map((key) => [key, 'private']));
+  const normalized = { ...managedPatch };
+  normalizeAccountPatch(managedPatch, normalized);
+  for (const key of managedKeys) assert.equal(Object.hasOwn(normalized, key), false, key);
+  for (const key of ['workbuddyEndpoint', 'workbuddyLocalAppEnabled', 'subscriptions', 'subscriptionsOrphaned',
+    'subscriptionsCacheHub', 'subscriptionsShared', 'subscriptionsHub', 'subscriptionsUpdatedAt']) {
+    assert.match(handler, new RegExp(`delete normalizedPatch\\.${key};`), key);
+  }
+});
+
+test('generic settings updates cannot reclassify discovered Cursor accounts as manual', () => {
+  const start = mainSource.indexOf('    const normalizedPatch = { ...patch, currency: normalizedCurrency };');
+  const end = mainSource.indexOf('    normalizeAccountPatch(patch, normalizedPatch);', start);
+  const stored = { cursorManualAccountIds: ['user_MANUAL'] };
+  const patch = { cursorManualAccountIds: ['user_STALE'], cursorDisabledAccountIds: ['user_DISABLED'] };
+  const normalized = vm.runInNewContext(`${mainSource.slice(start, end)}; normalizedPatch`, {
+    patch, normalizedCurrency: 'USD'
+  });
+  const saved = { ...stored, ...normalized };
+  assert.deepEqual(saved.cursorManualAccountIds, ['user_MANUAL']);
+  assert.deepEqual(saved.cursorDisabledAccountIds, ['user_DISABLED']);
+  assert.deepEqual(patch.cursorManualAccountIds, ['user_STALE']);
+});
+
+test('the external URL allowlist admits exactly the provider consoles it should', () => {
+  const isAllowedExternalUrl = evalTopLevel(
+    mainSource,
+    'function isAllowedExternalUrl(',
+    '\nfunction revealWindow(',
+    {
+      URL,
+      settings: { copilotEnterpriseHost: '' },
+      process: { env: {} },
+      isAllowedVerificationUrl,
+      isAllowedCodexLoginUrl,
+      limitProviderUrlAllowed,
+      STATUS_PAGE_HOSTS: evalTopLevel(mainSource, 'const STATUS_PAGE_HOSTS = ', '\nconst diagnosticJournal', { URL, SERVICE_STATUS_PROVIDERS })
+    }
+  );
+  const allowed = [
+    'https://claude.ai/settings',
+    'https://claude.ai/settings/billing',
+    'https://cursor.com/settings',
+    'https://www.cursor.com/settings',
+    'https://cursor.com/',
+    'https://www.cursor.com/',
+    'https://cursor.com/dashboard',
+    'https://www.cursor.com/dashboard',
+    'https://opencode.ai/',
+    'https://www.opencode.ai/auth',
+    'https://openrouter.ai/settings/keys',
+    'https://platform.deepseek.com/api_keys',
+    'https://app.devin.ai/settings/usage',
+    'https://platform.minimaxi.com/',
+    'https://platform.minimax.io/user-center/basic-information/interface-key',
+    'https://app.factory.ai/settings/api-keys',
+    'https://app.cline.bot/dashboard',
+    'https://z.ai/',
+    'https://www.z.ai/billing',
+    'https://bigmodel.cn/',
+    'https://www.volcengine.com/',
+    'https://console.volcengine.com/ark',
+    'https://qoder.com/',
+    'https://www.qoder.com.cn/console',
+    'https://trae.cn/',
+    'https://www.trae.cn/console',
+    'https://commandcode.ai/',
+    'https://dashboard.zed.dev/',
+    'https://console.typesafe.ai/settings/billing',
+    'https://platform.stepfun.com/plan-usage',
+    'https://ollama.com/settings',
+    'https://www.ollama.com/signin',
+    'https://kimi.com/code',
+    'https://www.kimi.com/code/console',
+    'https://bailian.console.aliyun.com/cn-beijing',
+    'https://modelstudio.console.alibabacloud.com/ap-southeast-1',
+    'https://codex-resets.com/',
+    'https://status.claude.com/',
+    'https://status.openai.com/',
+    'https://status.cursor.com/',
+    'https://status.deepseek.com/',
+    'https://www.githubstatus.com/',
+    'https://status.moonshot.cn/',
+    'https://status.minimaxi.com/',
+    'https://status.minimax.io/',
+    'https://status.opencode.ai/',
+    'https://status.zed.dev/',
+    'https://www.devinstatus.com/',
+    'https://status.factory.ai/',
+    'https://github.com/junhoyeo/tokscale',
+    'https://github.com/Javis603/token-monitor/releases',
+    'https://www.npmjs.com/package/@tokscale/cli',
+    'https://javis-ai.com/token-monitor',
+    'https://www.javis-ai.com/token-monitor/'
+  ];
+  for (const url of allowed) assert.equal(isAllowedExternalUrl(url), true, url);
+
+  const cursorOwnerSource = fs.readFileSync(path.join(ROOT, 'src/electron/renderer/limits/providerOwners/cursor.js'), 'utf8');
+  const cursorLoginStart = cursorOwnerSource.indexOf("  document.getElementById('cursorLoginButton').addEventListener");
+  assert.notEqual(cursorLoginStart, -1, 'Cursor owner binds its login button');
+  const cursorLoginEnd = cursorOwnerSource.indexOf('\n  });', cursorLoginStart) + '\n  });'.length;
+  let cursorLogin;
+  const cursorUrls = [];
+  vm.runInNewContext(cursorOwnerSource.slice(cursorLoginStart, cursorLoginEnd), {
+    document: { getElementById: () => ({ addEventListener: (_event, handler) => { cursorLogin = handler; } }) },
+    window: { tokenMonitor: { openExternal: (url) => {
+      assert.equal(isAllowedExternalUrl(url), true, 'the Cursor login button must pass the main-process URL policy');
+      cursorUrls.push(url);
+    } } }
+  });
+  cursorLogin();
+  assert.deepEqual(cursorUrls, ['https://cursor.com']);
+
+  const denied = [
+    'https://claude.ai/',
+    'https://claude.ai/login',
+    'https://cursor.com/other',
+    'https://cursor.com/dashboard-other',
+    'https://cursor.com/dashboard/other',
+    'https://cursor.com.evil.com/dashboard',
+    'http://cursor.com/dashboard',
+    'https://openrouter.ai/',
+    'https://openrouter.ai/settings',
+    'https://platform.deepseek.com/',
+    'https://app.devin.ai/',
+    'https://app.devin.ai/settings',
+    'https://app.factory.ai/',
+    'https://app.cline.bot/',
+    'https://console.typesafe.ai/',
+    'https://console.typesafe.ai/settings',
+    'https://ollama.com/',
+    'https://kimi.com/',
+    'https://bailian.console.aliyun.com/',
+    'https://bailian.console.aliyun.com/us-west-1',
+    'https://status.claude.com/incidents',
+    'https://www.google.com/appsstatus/dashboard',
+    'https://www.google.com/appsstatus/dashboard/other',
+    'https://codex-resets.com/path',
+    'https://github.com/junhoyeo',
+    'https://github.com/Javis603/other-repo',
+    'https://javis-ai.com/',
+    'http://claude.ai/settings',
+    'https://evil-claude.ai/settings',
+    'https://claude.ai.evil.com/settings',
+    'not a url',
+    ''
+  ];
+  for (const url of denied) assert.equal(isAllowedExternalUrl(url), false, url);
+});
+
+test('account projections redact secrets while preserving profile metadata and source labels', () => {
+  assert.match(mainSource, /\.\.\.accountFieldProjection\(settings, process\.env\)/);
+  const projected = accountFieldProjection({
+    claudeWebCookie: 'private',
+    zaiTeamOrganizationId: 'private',
+    opencodeProfiles: { default: { enabled: false, cookie: 'private', apiKey: 'private' } },
+    openrouterProfiles: { default: { apiKey: 'private' } }
+  });
+  assert.equal(projected.claudeWebCookie, 'set');
+  assert.equal(projected.zaiTeamOrganizationId, 'set');
+  assert.deepEqual({ ...projected.opencodeProfiles.default }, { enabled: false, cookie: 'set', apiKey: 'set' });
+  assert.equal(projected.openrouterProfiles, undefined);
+  assert.equal(JSON.stringify(projected).includes('private'), false);
+  const status = accountStatusProjection({ clineApiKey: 'stored' }, { CLINE_API_KEY: 'environment' });
+  assert.equal(status.clineCredentialConfigured, true);
+  assert.equal(status.clineCredentialSource, 'settings');
+});
+
+test('MiniMax profiles keep the legacy configured flag truthful', () => {
+  const profiles = accountStatusProjection({ minimaxApiProfiles: { work: { apiKey: 'saved-secret', billingMode: 'api' } } }, {});
+  assert.equal(profiles.minimaxApiKeyConfigured, true);
+  assert.equal(profiles.minimaxApiKeySource, 'settings');
+  for (const env of [{}, { MINIMAX_CODING_API_KEY: 'env-secret' }]) {
+    const disabled = accountStatusProjection({ minimaxApiProfiles: { work: { apiKey: 'saved-secret', enabled: false } } }, env);
+    assert.equal(disabled.minimaxApiKeyConfigured, false);
+    assert.equal(disabled.minimaxApiKeySource, '');
+  }
+});
+
+test('the renderer receives serializable account forms but no credential declarations', () => {
+  const forms = limitAccountFormsForRenderer();
+  const generated = LIMIT_PROVIDER_IDS.filter((id) => forms.some((form) => form.id === id));
+  assert.deepEqual(forms.map(({ id }) => id), generated, 'forms arrive in catalog order');
+  for (const candidate of forms) {
+    assert.deepEqual(JSON.parse(JSON.stringify(candidate)), candidate);
+    for (const secretShape of ['storePath', 'envFallback', 'resolve', 'rememberProbe']) {
+      assert.equal(JSON.stringify(candidate).includes(secretShape), false, `${candidate.id} ${secretShape}`);
+    }
+    assert.equal(candidate.kind, 'credential');
+  }
+  for (const id of ['kimi', 'volcengine', 'muse', 'mistral', 'stepfun', 'alibaba']) {
+    const form = forms.find(form => form.id === id);
+    assert.equal(form?.accountSlots, true, id);
+    assert.equal(form.kind, 'credential', id);
+    for (const key of ['accountCredentialReady', 'accountCredentialKeys']) {
+      assert.equal(JSON.stringify(form).includes(key), false, `${id} ${key}`);
+    }
+  }
+  const form = forms.find(({ id }) => id === 'typesafe');
+  assert.deepEqual(form.fields, [{
+    key: 'typesafeCookie', input: 'textarea', placeholderKey: 'settings.typesafe.cookiePlaceholder', required: true, secret: true
+  }]);
+  assert.deepEqual(form.status, {
+    configuredKey: 'typesafeCookieConfigured',
+    sourceKey: 'typesafeCookieSource',
+    pendingKey: 'typesafePendingCheckSince'
+  });
+  assert.match(mainSource, /limitAccountForms: limitAccountFormsForRenderer\(\)/);
+  assert.match(indexHtml, /<script src="limits\/accountPanels\.js"><\/script>/);
+  for (const { id } of forms) assert.doesNotMatch(indexHtml, new RegExp(`id="${id}AccountGroup"`), id);
+  assert.match(appSource, /limitAccountPanelsApi\.createCredentialPanel\(form/);
+});
+
+// Every string a generated panel can render, walked from the canonical shape so
+// a key added in a new block, option or message cannot skip a locale.
+function formMessageKeys(form) {
+  const stepKeys = (step) => (Array.isArray(step) ? step : [step]).filter((part) => typeof part === 'string');
+  return [
+    form.titleKey, form.openKey, form.clearKey, form.saveKey, form.emptyKey, form.failedKey,
+    ...form.fields.flatMap((field) => [
+      field.placeholderKey, field.ariaLabelKey, field.labelKey, ...(field.options || []).map((option) => option.labelKey)
+    ]),
+    ...[...form.top, ...form.manual].flatMap((block) => [block.note, ...(block.steps || []).flatMap(stepKeys)]),
+    ...Object.values(form.messages || {})
+  ].filter(Boolean);
+}
+
+test('every account form display key exists in each supported locale', () => {
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  for (const form of limitAccountFormsForRenderer()) {
+    const keys = formMessageKeys(form);
+    assert.ok(keys.length >= 8, `${form.id} should expose its copy`);
+    for (const [locale, messages] of Object.entries(MESSAGES)) {
+      for (const key of keys) {
+        assert.ok(Object.hasOwn(messages, key), `${form.id}: ${key} missing in ${locale}`);
+      }
+    }
+  }
+});
+
+test('declarative account status keys are projected and refreshed from forms', () => {
+  assert.doesNotMatch(appSource, /externalLimitAccountConfig/);
+  assert.match(mainSource, /\.\.\.accountStatusProjection\(settings, process\.env\)/);
+  const projected = accountStatusProjection({}, {});
+  for (const form of limitAccountFormsForRenderer()) {
+    for (const key of [form.status.configuredKey, form.status.sourceKey].filter(Boolean)) {
+      assert.ok(Object.hasOwn(projected, key), `${form.id}.${key} projected`);
+    }
+  }
+  assert.match(appSource, /for \(const form of state\.settings\?\.limitAccountForms \|\| \[\]\)[\s\S]*?renderExternalProviderStatus\(form\.id\)/);
+});
+
+test('every provider with an account panel has its group and status markup in index.html', () => {
+  const nodes = evalTopLevel(appSource, 'const LIMIT_PROVIDER_ACCOUNT_NODES = {', '\nconst TRAY_ICON_VARIANTS');
+  const groupIds = Object.fromEntries(Object.entries(nodes).map(([provider, node]) => [provider, node.group]));
+  // Not every catalog provider has a hand-written panel: grok and kiro
+  // take their credentials from the tool itself, and the account-form providers
+  // get theirs generated. The map is the list of those whose markup is static.
+  assert.deepEqual(
+    LIMIT_PROVIDER_IDS.filter((provider) => !groupIds[provider]).sort(),
+    ['grok', 'kiro', ...limitAccountFormsForRenderer().map(({ id }) => id)].sort()
+  );
+  for (const [provider, id] of Object.entries(groupIds)) {
+    assert.ok(LIMIT_PROVIDER_IDS.includes(provider), `${provider} is a catalog id`);
+    assert.match(indexHtml, new RegExp(`id="${id}"`), `${provider} group exists in index.html`);
+  }
+  for (const [provider, { status }] of Object.entries(nodes)) {
+    assert.match(indexHtml, new RegExp(`id="${status}"`), `${provider} status pill exists in index.html`);
+  }
+});
+
+test('MiniMax implicit region remains env-driven after unrelated saves and reloads', () => {
+  const { initialAccountSettings } = require('../../src/electron/limits/accountSettings');
+  const first = initialAccountSettings({ MINIMAX_API_REGION: 'cn' });
+  const saved = JSON.parse(JSON.stringify({ ...first, ...finalAccountSettings({ language: 'en' }, first) }));
+  assert.equal(saved.minimaxApiRegion, '');
+  const env = { MINIMAX_API_REGION: 'intl' };
+  assert.equal(limitsConfigFromSettings(saved, { env }).minimaxApiRegion, 'intl');
+  assert.equal(accountFieldProjection(saved, env).minimaxApiRegion, 'intl');
+  const explicit = { ...saved, ...finalAccountSettings({ minimaxApiRegion: 'auto' }, saved) };
+  const reloaded = JSON.parse(JSON.stringify(explicit));
+  assert.equal(limitsConfigFromSettings(reloaded, { env }).minimaxApiRegion, 'auto');
+  assert.equal(accountFieldProjection(reloaded, env).minimaxApiRegion, 'auto');
+  const previous = { ...saved, minimaxApiKey: 'test-key', limitProviders: 'minimax' };
+  const next = { ...previous, ...finalAccountSettings({ minimaxApiRegion: 'cn' }, previous) };
+  assert.equal(next.minimaxApiKey, 'test-key');
+  const change = classifySettingsChange(previous, next);
+  assert.deepEqual(change.limitScopes, [{ provider: 'minimax' }]);
+  assert.equal(change.usageStructural, false);
+  const { settingsLimitInvalidationPlan } = require('../../src/electron/deviceRuntimeCoordinator');
+  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax', source: 'api' }, reason: 'settings-change', options: { clear: true } }]);
+});
+
+test('MiniMax key billing choice survives reload and invalidates only its API source', () => {
+  const { initialAccountSettings } = require('../../src/electron/limits/accountSettings');
+  assert.equal(initialAccountSettings({}).minimaxBillingMode, 'token-plan');
+  assert.equal(limitsConfigFromSettings({}, { env: {} }).minimaxBillingMode, 'token-plan');
+  assert.equal(accountFieldProjection({}).minimaxBillingMode, 'token-plan');
+  assert.equal(finalAccountSettings({}, {}).minimaxBillingMode, 'token-plan');
+  assert.equal(normalizeAccountField('minimaxBillingMode', ' API '), 'api');
+  assert.equal(normalizeAccountField('minimaxBillingMode', 'unknown'), 'token-plan');
+  const previous = { ...finalAccountSettings({}, {}), minimaxApiKey: 'existing-key', minimaxBillingMode: 'token-plan', limitProviders: 'minimax' };
+  const next = JSON.parse(JSON.stringify({ ...previous, ...finalAccountSettings({ minimaxBillingMode: 'api' }, previous) }));
+  assert.equal(next.minimaxApiKey, previous.minimaxApiKey);
+  assert.equal(limitsConfigFromSettings(next, { env: {} }).minimaxBillingMode, 'api');
+  assert.equal(accountFieldProjection(next).minimaxBillingMode, 'api');
+  const change = classifySettingsChange(previous, next);
+  assert.deepEqual(change.limitScopes, [{ provider: 'minimax' }]);
+  assert.equal(change.usageStructural, false);
+  const { settingsLimitInvalidationPlan } = require('../../src/electron/deviceRuntimeCoordinator');
+  assert.deepEqual(settingsLimitInvalidationPlan(change), [{ scope: { provider: 'minimax', source: 'api' }, reason: 'settings-change', options: { clear: true } }]);
+});
+
+test('Trae credential source follows the usable credential after a malformed stored value', () => {
+  for (const [key, envKey] of [['traeCookie', 'TRAE_COOKIE'], ['traeAccessToken', 'TRAE_ACCESS_TOKEN']]) {
+    const settings = { [key]: 'invalid\r\ncredential' };
+    const fallback = accountStatusProjection(settings, { [envKey]: 'usable-env-credential' });
+    assert.equal(fallback.traeAccessTokenConfigured, true);
+    assert.equal(fallback.traeAccessTokenSource, 'env');
+    const missing = accountStatusProjection(settings, {});
+    assert.equal(missing.traeAccessTokenConfigured, false);
+    assert.equal(missing.traeAccessTokenSource, '');
+    const saved = accountStatusProjection({ [key]: 'usable-stored-credential' }, { [envKey]: 'usable-env-credential' });
+    assert.equal(saved.traeAccessTokenSource, 'settings');
+  }
+});

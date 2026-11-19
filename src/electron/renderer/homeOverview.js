@@ -1,0 +1,561 @@
+(function exposeHomeOverview(root, factory) {
+  const api = factory();
+  if (root) root.TokenMonitorHomeOverview = api;
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+})(typeof window !== 'undefined' ? window : null, function createHomeOverviewApi() {
+  const balanceDisplay = (typeof require === 'function')
+    ? require('../../shared/limits/balanceDisplay')
+    : (typeof window !== 'undefined' ? window.TokenMonitorLimitBalanceDisplay : null);
+  const windowPriority = new Map([
+    ['session', 0],
+    ['daily', 1],
+    ['weekly', 2],
+    ['billing', 3],
+    ['monthly', 4]
+  ]);
+
+  // Where a window sorts among an account's compact readings: the shortest
+  // cycle first. Antigravity keeps its model-group order. The Notch Panel's
+  // limit columns lead with the same pair Home shows.
+  function compactWindowRank(providerId, window) {
+    if (String(providerId || '').trim().toLowerCase() === 'antigravity') return 0;
+    return windowPriority.get(String(window?.kind || '').trim().toLowerCase()) ?? 10;
+  }
+
+  function finiteNumber(value) {
+    if (
+      value === null
+      || value === undefined
+      || (typeof value === 'string' && value.trim() === '')
+    ) {
+      return null;
+    }
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  function clampPercent(value) {
+    return Math.max(0, Math.min(100, value));
+  }
+
+  function remainingPercent(window) {
+    if (!window || window.showMeter === false) return null;
+    const remaining = finiteNumber(window.remainingPercent);
+    if (remaining != null) return clampPercent(remaining);
+    const used = finiteNumber(window.usedPercent);
+    return used == null ? null : clampPercent(100 - used);
+  }
+
+  function usedPercent(window) {
+    const remaining = remainingPercent(window);
+    return remaining == null ? null : 100 - remaining;
+  }
+
+  function mimoPlanWindow(balance) {
+    if (!balance || balance.planStatus === 'expired') return null;
+    const used = finiteNumber(balance.planUsed);
+    const limit = finiteNumber(balance.planLimit);
+    const percent = finiteNumber(balance.planPercent);
+    if (used == null && limit == null && percent == null) return null;
+    const usedPercent = percent != null
+      ? clampPercent(percent)
+      : (used != null && limit != null && limit > 0 ? clampPercent((used / limit) * 100) : null);
+    return {
+      kind: 'billing',
+      label: 'Token Plan',
+      usedPercent,
+      remainingPercent: usedPercent == null ? null : clampPercent(100 - usedPercent)
+    };
+  }
+
+  // Balance quotas arrive from the collectors as `credits` windows, so the only
+  // thing left to synthesize here is MiMo's Token Plan placeholder.
+  function isPlanWindow(window) {
+    return String(window?.kind || '').trim().toLowerCase() === 'billing'
+      && !balanceDisplay.isCreditsWindow(window);
+  }
+
+  function accountWindows(account) {
+    const providerId = String(account?.providerId || '').trim().toLowerCase();
+    const windows = Array.isArray(account?.windows) ? [...account.windows] : [];
+    if (providerId === 'mimo' && account?.balance?.planStatus === 'expired') {
+      const withoutStalePlan = windows.filter((window) => !isPlanWindow(window));
+      // Keep the plan ahead of the balance, matching the live-plan ordering.
+      withoutStalePlan.unshift({ kind: 'billing', label: 'Token Plan', showMeter: false, planStatus: 'expired' });
+      return withoutStalePlan;
+    }
+    if (providerId === 'mimo' && !windows.some(isPlanWindow)) {
+      const plan = mimoPlanWindow(account.balance);
+      if (plan) windows.unshift(plan);
+    }
+    return windows;
+  }
+
+  function compactAccountWindows(providerId, windows) {
+    if (providerId !== 'ollama') return windows.slice(0, 2);
+    const wallet = windows.find((window) => window.metric === 'credits' && window.showMeter === false);
+    const spend = windows.find((window) => window.metric === 'spend' && window.showMeter === false);
+    if (!wallet) {
+      const selected = windows.filter((window) => window !== spend).slice(0, 2);
+      if (spend) selected.push(spend);
+      return selected.map((window) => ({ ...window, fullWidth: true }));
+    }
+    return [
+      ...windows.filter((window) => window !== wallet && window !== spend).slice(0, 2),
+      { ...wallet, resetDescription: '', detailEntries: [
+        ...(spend?.value ? [[spend.label, spend.value]] : []),
+        ...(wallet.resetDescription ? [{ full: wallet.resetDescription }] : [])
+      ] }
+    ].map((window) => ({ ...window, fullWidth: true }));
+  }
+
+  // `isWindowHidden(providerId, window)` drops the rows the user unchecked on
+  // the provider's usage-item list. It runs after the MiMo plan is synthesized,
+  // so hiding the plan hides the placeholder built from the balance as well.
+  function homeLimitAccounts(accounts, limit = 3, { sort = 'remaining', isWindowHidden = null, orderedAccountProviders = [] } = {}) {
+    const rows = (accounts || [])
+      .map((account, index) => {
+        const providerId = String(account?.providerId || '').trim().toLowerCase();
+        const windows = accountWindows(account)
+          .filter((window) => typeof isWindowHidden !== 'function' || !isWindowHidden(providerId, window))
+          .map((window, windowIndex) => {
+            const credits = balanceDisplay.isCreditsWindow(window);
+            return {
+              kind: String(window.kind || '').trim().toLowerCase(),
+              metric: window.metric || '',
+              label: window.label || window.kind || '',
+              // Credits windows carry money; their meter percentage is derived
+              // here rather than read off the wire.
+              remainingPercent: credits
+                ? balanceDisplay.creditsMeterPercent(account, window, { inferBalance: providerId !== 'ollama' || window.showMeter !== false })
+                : remainingPercent(window),
+              remaining: credits
+                ? balanceDisplay.creditsAmount(account, window)
+                : finiteNumber(window.remaining),
+              currency: credits ? balanceDisplay.creditsCurrency(account, window) : '',
+              resetsAt: window.resetsAt,
+              ...(window.boundaryKind ? { boundaryKind: window.boundaryKind } : {}),
+              resetDescription: window.resetDescription || '',
+              value: window.value || (window.metric === 'spend' && window.showMeter === false && finiteNumber(window.used) !== null
+                ? balanceDisplay.formatMoney(window.used, window.currency) : ''),
+              planStatus: window.planStatus || '',
+              showMeter: window.showMeter !== false,
+              detail: window.detail || '',
+              index: windowIndex
+            };
+          })
+          .filter((window) => window.remainingPercent != null
+            || window.planStatus === 'expired'
+            || window.value
+            || (window.metric === 'credits' && (window.remaining != null || window.detail)))
+          .sort((a, b) => compactWindowRank(providerId, a) - compactWindowRank(providerId, b) || a.index - b.index);
+        const compactWindows = compactAccountWindows(providerId, windows)
+          .map(({ index: _index, ...window }) => window);
+        if (compactWindows.length === 0) return null;
+        return {
+          key: account.key || String(index),
+          providerId: account.providerId || '',
+          iconId: account.iconId || '',
+          name: account.name || '',
+          plan: account.plan || '',
+          color: account.color || '',
+          lowestRemaining: Math.min(...compactWindows.map((window) => window.remainingPercent ?? 100)),
+          windows: compactWindows,
+          index
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => sort === 'configured'
+        ? a.index - b.index
+        : a.lowestRemaining - b.lowestRemaining || a.index - b.index);
+    // Retain the quota sort's provider positions, but fill each slot provider's
+    // positions in input order before applying the card limit.
+    for (const id of orderedAccountProviders) {
+      const positions = rows.flatMap((row, index) => row.providerId === id ? [index] : []);
+      const ordered = positions.map(index => rows[index]).sort((a, b) => a.index - b.index);
+      positions.forEach((position, index) => { rows[position] = ordered[index]; });
+    }
+    return rows.slice(0, Math.max(0, Number(limit) || 0))
+      .map(({ index: _index, ...account }) => account);
+  }
+
+  function homeModelRows(rows, totalTokens, limit = 5) {
+    const visible = (rows || [])
+      .filter((row) => Math.max(0, Number(row?.value || 0)) > 0)
+      .slice(0, Math.max(0, Number(limit) || 0));
+    const suppliedTotal = finiteNumber(totalTokens);
+    const total = suppliedTotal != null && suppliedTotal > 0
+      ? suppliedTotal
+      : visible.reduce((sum, row) => sum + Math.max(0, Number(row?.value || 0)), 0);
+    return visible.map((row) => ({
+      key: row.key || row.name || '',
+      name: row.name || '',
+      value: Math.max(0, Number(row.value || 0)),
+      share: total > 0 ? Math.max(0, Number(row.value || 0)) / total : 0,
+      color: row.color || '',
+      ...(row.modelSource ? { modelSource: row.modelSource } : {})
+    }));
+  }
+
+  function homeToolRows(rows, totalTokens, limit = 5) {
+    const visible = (rows || [])
+      .map((row) => ({
+        key: row?.key || row?.name || '',
+        name: row?.name || '',
+        value: Math.max(0, Number(row?.value || 0)),
+        color: row?.color || ''
+      }))
+      .filter((row) => row.value > 0)
+      .sort((a, b) => b.value - a.value || a.name.localeCompare(b.name))
+      .slice(0, Math.max(0, Number(limit) || 0));
+    const suppliedTotal = finiteNumber(totalTokens);
+    const total = suppliedTotal != null && suppliedTotal > 0
+      ? suppliedTotal
+      : visible.reduce((sum, row) => sum + row.value, 0);
+    return visible.map((row) => ({
+      ...row,
+      share: total > 0 ? row.value / total : 0
+    }));
+  }
+
+  function homeDeviceRows(devices, { localDeviceId = '', period = 'today', limit = 4 } = {}) {
+    const localKey = String(localDeviceId || '').trim();
+    return (devices || [])
+      .map((device, index) => {
+        const key = String(device?.deviceId || '').trim() || String(index);
+        const value = Math.max(0, Number(device?.periods?.[period]?.totalTokens || device?.[period]?.totalTokens || 0));
+        return {
+          key,
+          name: String(device?.displayName || device?.deviceId || device?.hostname || key).trim(),
+          value,
+          platform: device?.platform || '',
+          isLocal: Boolean(localKey && key === localKey),
+          isStale: Boolean(device?.stale),
+          index
+        };
+      })
+      .filter((row) => row.value > 0)
+      .sort((a, b) => b.value - a.value
+        || Number(b.isLocal) - Number(a.isLocal)
+        || Number(a.isStale) - Number(b.isStale)
+        || a.index - b.index)
+      .slice(0, Math.max(0, Number(limit) || 0))
+      .map(({ index: _index, ...row }) => row);
+  }
+
+  function providerEntriesById(providers) {
+    const byId = new Map();
+    for (const provider of providers || []) {
+      const id = String(provider?.provider || '').trim().toLowerCase();
+      if (!id) continue;
+      if (!byId.has(id)) byId.set(id, []);
+      byId.get(id).push(provider);
+    }
+    return byId;
+  }
+
+  function homeLimitAccountsForProviders({
+    providers = [],
+    providerOptions = [],
+    enabledProviderIds = [],
+    hiddenProviderIds = [],
+    colors = {},
+    limit = 3,
+    sort = 'remaining',
+    orderedAccountProviders = [],
+    accountName,
+    accountPlan,
+    accountColor,
+    accountIcon,
+    isWindowHidden = null
+  } = {}) {
+    const enabled = new Set((enabledProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
+    const hidden = new Set((hiddenProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
+    const byId = providerEntriesById(providers);
+    const accounts = [];
+    for (const { id: rawId, label } of providerOptions || []) {
+      const id = String(rawId || '').trim().toLowerCase();
+      if (!id || hidden.has(id) || (enabled.size > 0 && !enabled.has(id))) continue;
+      const providerEntries = byId.get(id) || [];
+      providerEntries.forEach((provider, index) => {
+        accounts.push({
+          key: `${id}:${provider.accountKey || provider.workspaceAccountId || provider.providerAccountId || index}`,
+          providerId: id,
+          name: typeof accountName === 'function' ? accountName(provider, index, providerEntries) : label,
+          plan: typeof accountPlan === 'function' ? accountPlan(provider, index, providerEntries) : '',
+          color: typeof accountColor === 'function'
+            ? accountColor(provider, id, colors[id] || colors.default || '')
+            : (colors[id] || colors.default || ''),
+          iconId: typeof accountIcon === 'function' ? accountIcon(provider, id) : id,
+          windows: provider.windows || [],
+          balance: provider.balance || null
+        });
+      });
+    }
+    return homeLimitAccounts(accounts, limit, { sort, isWindowHidden, orderedAccountProviders });
+  }
+
+  // True when at least one enabled, unhidden limit provider has no entry yet in
+  // `providers` (the composed device record's `limits.providers`). Distinguishes
+  // "nothing is configured" from "configured, but the first probe/usage baseline
+  // has not landed yet" (DeviceState buffers both usage previews and limits until
+  // a complete usage baseline exists, so a provider can stay absent for minutes
+  // after cold start even though it is enabled and will report shortly).
+  function homeLimitsAwaitingFirstData({
+    providers = [],
+    providerOptions = [],
+    enabledProviderIds = [],
+    hiddenProviderIds = []
+  } = {}) {
+    const enabled = new Set((enabledProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
+    const hidden = new Set((hiddenProviderIds || []).map((id) => String(id || '').trim().toLowerCase()).filter(Boolean));
+    const byId = providerEntriesById(providers);
+    return (providerOptions || []).some(({ id: rawId }) => {
+      const id = String(rawId || '').trim().toLowerCase();
+      if (!id || hidden.has(id) || !enabled.has(id)) return false;
+      return !byId.has(id);
+    });
+  }
+
+  function homeTrendSummary(points) {
+    const visible = Array.isArray(points) ? points : [];
+    const peak = Math.max(0, ...visible.map((point) => Math.max(0, Number(point?.tokens || 0))));
+    const dates = visible.length === 0
+      ? []
+      : [
+          visible[0]?.date || '',
+          visible[Math.floor((visible.length - 1) / 2)]?.date || '',
+          visible[visible.length - 1]?.date || ''
+        ];
+    return { peak, dates };
+  }
+
+  function longRangePeakDayTokens({ historySummary, daily } = {}) {
+    const summaryPeak = finiteNumber(historySummary?.peakDayTokens);
+    const dailyPeak = (Array.isArray(daily) ? daily : [])
+      .reduce((peak, row) => Math.max(peak, finiteNumber(row?.tokens) || 0), 0);
+    return Math.max(0, summaryPeak || 0, dailyPeak);
+  }
+
+  function homeActiveDaysPresentation({ requestedWindow = 'all', summary = {}, cells = [], rollingComplete = true } = {}) {
+    const rollingCount = (Array.isArray(cells) ? cells : [])
+      .reduce((count, cell) => count + (Math.max(0, finiteNumber(cell?.tokens) || 0) > 0 ? 1 : 0), 0);
+    const allTimeCount = finiteNumber(summary?.activeDays);
+    if (
+      requestedWindow === 'all'
+      && summary?.activeDaysComplete === true
+      && allTimeCount != null
+    ) {
+      return { window: 'all', count: Math.max(0, Math.round(allTimeCount)) };
+    }
+    return { window: 'year', count: rollingComplete ? rollingCount : null };
+  }
+
+  function homeActivityHeatmapLayout() {
+    return { cell: 9, gap: 3, radius: 2 };
+  }
+
+  function historyHasDays(history) {
+    return Array.isArray(history?.daily) && history.daily.length > 0;
+  }
+
+  // Which history source the home activity/trends module renders. Prefer the
+  // full-year homeHistory (fetched on demand), but fall back to the compact stats
+  // preview while it loads — an empty homeHistory must never shadow real preview
+  // data (#39: a cold-start fetch that raced the collector cached an empty result).
+  function pickHomeHistory(homeHistory, preview) {
+    return historyHasDays(homeHistory) ? homeHistory : (preview || { daily: [] });
+  }
+
+  // The full-year homeHistory is fetched once per session and then frozen, so its today
+  // bucket lags the live headline total as usage accrues within the day (the trends
+  // sparkline avoids this via patchTodayBar). Overwrite today's tokens, cost and unpriced
+  // coverage with the live period totals so the home heatmap/trend agree with the number shown above them
+  // — cost matters because dailyWithHeatIntensity colours cells by cost when any exists,
+  // so an appended today with cost 0 would render as an empty cell. Append a today row
+  // when the frozen snapshot predates today (app opened before midnight). Returns a new
+  // array; the input is never mutated.
+  function patchDailyToday(daily, todayDate, todayTotal, todayCost, todayUnpricedTokens = 0) {
+    const rows = Array.isArray(daily) ? daily.slice() : [];
+    const date = String(todayDate || '').slice(0, 10);
+    if (!date) return rows;
+    const tokens = finiteNumber(todayTotal) || 0;
+    const cost = finiteNumber(todayCost) || 0;
+    const unpricedTokens = finiteNumber(todayUnpricedTokens) || 0;
+    const idx = rows.findIndex((row) => String(row?.date).slice(0, 10) === date);
+    if (idx === -1) {
+      rows.push({ date, tokens, cost, ...(unpricedTokens > 0 ? { unpricedTokens } : {}) });
+      return rows;
+    }
+    rows[idx] = Object.assign({}, rows[idx], { tokens, cost });
+    if (unpricedTokens > 0) rows[idx].unpricedTokens = unpricedTokens;
+    else delete rows[idx].unpricedTokens;
+    return rows;
+  }
+
+  // The standalone Trends page keeps active time and peak aligned with the selected
+  // period. Home uses longRangePeakDayTokens instead, matching its long-range chart;
+  // active days and current streak remain the retained-history values users know.
+  function activityStatsForPeriod({ period, fixedSnapshot, daily, historySummary, todayKey } = {}) {
+    const history = historySummary && typeof historySummary === 'object' ? historySummary : {};
+    if (fixedSnapshot?.status === 'ready') {
+      return {
+        activeDays: finiteNumber(history.activeDays) || 0,
+        currentStreak: finiteNumber(history.currentStreak) || 0,
+        activeTimeMs: finiteNumber(fixedSnapshot.summary?.activeTimeMs) || 0,
+        peakDayTokens: finiteNumber(fixedSnapshot.summary?.peakDayTokens) || 0
+      };
+    }
+    if (period === 'allTime') {
+      return {
+        activeDays: finiteNumber(history.activeDays) || 0,
+        currentStreak: finiteNumber(history.currentStreak) || 0,
+        activeTimeMs: finiteNumber(history.activeTimeMs) || 0,
+        peakDayTokens: finiteNumber(history.peakDayTokens) || 0
+      };
+    }
+    const day = String(todayKey || '').slice(0, 10);
+    const month = day.slice(0, 7);
+    const selected = (Array.isArray(daily) ? daily : []).filter((row) => {
+      const key = String(row?.date || '').slice(0, 10);
+      return period === 'today' ? key === day : key.slice(0, 7) === month;
+    });
+    return {
+      activeDays: finiteNumber(history.activeDays) || 0,
+      currentStreak: finiteNumber(history.currentStreak) || 0,
+      activeTimeMs: selected.reduce((sum, row) => sum + (finiteNumber(row?.activeTimeMs) || 0), 0),
+      peakDayTokens: selected.reduce((peak, row) => Math.max(peak, finiteNumber(row?.tokens) || 0), 0)
+    };
+  }
+
+  // Stable signature of the preview's daily tail. Two previews with the same key
+  // describe the same fetch opportunity, so the full history is fetched at most
+  // once per distinct preview state — a failed/empty fetch (e.g. a transient
+  // /api/history error in hub mode while /api/stats preview has data) can't spin
+  // the render→fetch loop, since loadHomeHistory's finally always re-renders Home.
+  function historyPreviewKey(preview) {
+    const daily = Array.isArray(preview?.daily) ? preview.daily : [];
+    if (daily.length === 0) return '';
+    const last = daily[daily.length - 1] || {};
+    return `${daily.length}:${last.date || ''}:${last.tokens || 0}`;
+  }
+
+  // Identity of the history the held snapshot was fetched for. Mirrors main's
+  // statsHistoryRevision so Home invalidates on exactly the changes the standalone
+  // dashboard does: prefer the real revision, and for an older hub that predates
+  // revisions fall back to the WHOLE preview, not just its daily tail — a tail key
+  // (`length:lastDate:lastTokens`) misses a change to a non-tail day, a cost, an
+  // active-time, or a monthly total, so a backfill of an earlier day would never
+  // reach Home. Empty preview still collapses to '' so a genuinely zero-usage
+  // account is never polled (#39). The revision only moves when the collector
+  // actually produces a different history (carry-forward keeps it stable between
+  // the gated history ticks), so keying refetches on it costs no extra
+  // `tokscale graph` runs.
+  function homeHistorySignature(stats) {
+    const revision = String(stats?.historyRevision || '').trim();
+    if (revision) return revision;
+    return stats?.historyPreview?.daily?.length ? JSON.stringify(stats.historyPreview) : '';
+  }
+
+  // Whether loadHomeHistory should (re)fetch the full history. Home used to freeze
+  // the first non-empty result for the whole renderer session, so a snapshot taken
+  // before midnight kept showing yesterday at its startup value (0 for a day that
+  // had not happened yet) until the app restarted (#177). Refetch whenever the
+  // history signature moves; a failed/empty fetch leaves the recorded signature
+  // untouched, so it still can't spin the render→fetch loop, and a genuinely
+  // zero-usage account with nothing to fetch is still never polled (#39).
+  function shouldFetchHomeHistory({ requested, stats, lastSignature } = {}) {
+    if (!requested) return true;
+    const signature = homeHistorySignature(stats);
+    if (!signature) return false;
+    return signature !== lastSignature;
+  }
+
+  // After a fetch settles, whether loadHomeHistory should schedule a bounded retry.
+  // The signature is recorded before the fetch to keep a failed attempt from
+  // re-firing every render (the #39 spin), which means a transient failure or a
+  // raced empty result would otherwise strand Home on the 30-day preview until the
+  // history genuinely changes or the app restarts — a real gap for an account with
+  // history but no current activity, since its revision never moves. So: if the
+  // fetch produced no days but the live preview says days exist, retry up to a cap.
+  // A genuinely zero-usage account (no preview days) is never retried, so this cannot
+  // reintroduce the render→fetch loop.
+  function shouldRetryHomeHistory({ loadedDays, previewHasDays, retries, maxRetries } = {}) {
+    if (loadedDays) return false;
+    if (!previewHasDays) return false;
+    return Number(retries || 0) < Number(maxRetries || 0);
+  }
+
+  // Keep the result of this request separate from any older full history still used
+  // for display. A rejected request must not look successful merely because the
+  // previous snapshot had days, and a raced empty result must not replace useful
+  // stale data while the live preview proves history still exists.
+  function homeHistoryFetchOutcome({ resolved, history, previewHasDays } = {}) {
+    const loadedDays = Boolean(resolved) && historyHasDays(history);
+    return {
+      loadedDays,
+      accepted: Boolean(resolved) && (loadedDays || !previewHasDays)
+    };
+  }
+
+  function homeActivityWheelRoute(event) {
+    if (event?.shiftKey) return 'activity-horizontal';
+    const deltaX = Math.abs(Number(event?.deltaX || 0));
+    const deltaY = Math.abs(Number(event?.deltaY || 0));
+    return deltaY > deltaX ? 'home-vertical' : 'activity-horizontal';
+  }
+
+  function maxScrollLeft(scrollWidth, clientWidth) {
+    return Math.max(0, Number(scrollWidth || 0) - Number(clientWidth || 0));
+  }
+
+  // Where the activity heatmap should sit: pinned to the newest (right) edge while
+  // the user is following the end, otherwise their saved offset clamped to the
+  // current overflow. Callers re-run this from a ResizeObserver so the measurement
+  // is taken after layout settles, not from a too-early requestAnimationFrame.
+  function homeActivityScrollTarget({ scrollWidth, clientWidth, followEnd, savedLeft } = {}) {
+    const max = maxScrollLeft(scrollWidth, clientWidth);
+    if (followEnd || savedLeft == null) return max;
+    const saved = Number(savedLeft);
+    if (!Number.isFinite(saved)) return max;
+    return Math.max(0, Math.min(max, saved));
+  }
+
+  // Turn an observed scroll position into the state we persist. Returns null when
+  // the heatmap has not overflowed yet (panel hidden or layout not settled), so a
+  // bogus 0 measured too early can never overwrite a real saved/follow-end value.
+  function homeActivityScrollRecord({ scrollLeft, scrollWidth, clientWidth, endThreshold = 2 } = {}) {
+    const max = maxScrollLeft(scrollWidth, clientWidth);
+    if (max <= 0) return null;
+    const left = Math.max(0, Math.min(max, Number(scrollLeft || 0)));
+    return { scrollLeft: left, followEnd: left >= max - endThreshold };
+  }
+
+  return {
+    compactWindowRank,
+    homeLimitAccounts,
+    homeLimitAccountsForProviders,
+    homeLimitsAwaitingFirstData,
+    homeModelRows,
+    longRangePeakDayTokens,
+    homeToolRows,
+    homeDeviceRows,
+    homeTrendSummary,
+    activityStatsForPeriod,
+    pickHomeHistory,
+    patchDailyToday,
+    historyPreviewKey,
+    historyHasDays,
+    homeHistorySignature,
+    shouldFetchHomeHistory,
+    shouldRetryHomeHistory,
+    homeHistoryFetchOutcome,
+    homeActivityHeatmapLayout,
+    homeActivityWheelRoute,
+    homeActivityScrollTarget,
+    homeActivityScrollRecord,
+    homeActiveDaysPresentation,
+    remainingPercent,
+    usedPercent
+  };
+});

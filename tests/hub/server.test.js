@@ -1,0 +1,909 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const test = require('node:test');
+const os = require('node:os');
+const path = require('node:path');
+const fs = require('node:fs');
+const http = require('node:http');
+
+const { createHub, resolveBindHost } = require('../../src/hub/server');
+const { MAX_JSON_BODY_BYTES } = require('../../src/shared/http');
+const { codexAccountKey } = require('../../src/shared/providers/codex/auth');
+
+function waitFor(predicate, timeoutMs = 1000) {
+  return new Promise((resolve, reject) => {
+    const deadline = performance.now() + timeoutMs;
+    const check = () => {
+      if (predicate()) return resolve();
+      if (performance.now() >= deadline) return reject(new Error('timed out waiting for SSE event'));
+      setTimeout(check, 10);
+    };
+    check();
+  });
+}
+
+function openSse(url, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const request = http.get(url, { headers }, (response) => {
+      const events = [];
+      let buffer = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => {
+        buffer += chunk;
+        let index;
+        while ((index = buffer.indexOf('\n\n')) !== -1) {
+          const frame = buffer.slice(0, index);
+          buffer = buffer.slice(index + 2);
+          if (frame.startsWith(':')) continue;
+          const event = frame.match(/^event:\s*(.+)$/m)?.[1];
+          const data = frame.match(/^data:\s*(.+)$/m)?.[1];
+          if (event && data) events.push({ event, data: JSON.parse(data) });
+        }
+      });
+      resolve({ events, close: () => request.destroy() });
+    });
+    request.on('error', reject);
+  });
+}
+
+function tempDataFile() {
+  return path.join(os.tmpdir(), `tm-hub-test-${process.pid}-${Math.random().toString(16).slice(2)}.json`);
+}
+
+function utcTodayAt(time) {
+  return `${new Date().toISOString().slice(0, 10)}T${time}Z`;
+}
+
+test('resolveBindHost keeps the requested host when a secret is set', () => {
+  assert.equal(resolveBindHost('0.0.0.0', 's3cret'), '0.0.0.0');
+  assert.equal(resolveBindHost('192.168.1.10', 's3cret'), '192.168.1.10');
+});
+
+test('resolveBindHost forces localhost when no secret and a non-loopback host is requested', () => {
+  assert.equal(resolveBindHost('0.0.0.0', ''), '127.0.0.1');
+  assert.equal(resolveBindHost('192.168.1.10', ''), '127.0.0.1');
+  assert.equal(resolveBindHost('', ''), '127.0.0.1');
+});
+
+test('resolveBindHost leaves an already-loopback host unchanged without a secret', () => {
+  assert.equal(resolveBindHost('127.0.0.1', ''), '127.0.0.1');
+  assert.equal(resolveBindHost('localhost', ''), 'localhost');
+  assert.equal(resolveBindHost('::1', ''), '::1');
+});
+
+test('a hub without a secret binds to localhost only even when asked to bind every interface', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '0.0.0.0', secret: '', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    assert.equal(hub.bindHost, '127.0.0.1');
+    assert.equal(hub.server.address().address, '127.0.0.1');
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('a configured secret is accepted from headers, not from the query string', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const base = `http://127.0.0.1:${port}/api/stats`;
+    assert.equal((await fetch(`${base}?secret=shh`)).status, 401);
+    assert.equal((await fetch(base)).status, 401);
+    assert.equal((await fetch(base, { headers: { authorization: 'Bearer shh' } })).status, 200);
+    assert.equal((await fetch(base, { headers: { authorization: 'bearer shh' } })).status, 200);
+    assert.equal((await fetch(base, { headers: { authorization: 'Bearer  shh  ' } })).status, 200);
+    assert.equal((await fetch(base, { headers: { 'x-token-monitor-secret': 'shh' } })).status, 200);
+    assert.equal((await fetch(base, { headers: { 'X-Token-Monitor-Secret': '  shh  ' } })).status, 200);
+    assert.equal((await fetch(base, { headers: { authorization: 'Bearer nope' } })).status, 401);
+    assert.equal((await fetch(base, { headers: { authorization: 'Bearer sh' } })).status, 401);
+    assert.equal((await fetch(`${base}?secret=shh`, { headers: { authorization: 'Bearer nope' } })).status, 401);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('ingest, devices, and history share the same header gate', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const origin = `http://127.0.0.1:${port}`;
+    const ingestBody = JSON.stringify({ deviceId: 'dev-a', today: { totalTokens: 3 } });
+    const post = (url, headers = {}) => fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...headers },
+      body: ingestBody
+    });
+
+    assert.equal((await fetch(`${origin}/api/health`)).status, 200);
+    assert.equal((await post(`${origin}/api/ingest`)).status, 401);
+    assert.equal((await post(`${origin}/api/ingest?secret=shh`)).status, 401);
+    assert.equal((await post(`${origin}/api/ingest`, { authorization: 'Bearer nope' })).status, 401);
+    const accepted = await post(`${origin}/api/ingest`, { authorization: 'Bearer shh' });
+    assert.equal(accepted.status, 200);
+    assert.equal((await accepted.json()).deviceId, 'dev-a');
+
+    const viaHeader = await post(`${origin}/api/ingest`, { 'x-token-monitor-secret': 'shh' });
+    assert.equal(viaHeader.status, 200);
+
+    assert.equal((await fetch(`${origin}/api/devices`)).status, 401);
+    assert.equal((await fetch(`${origin}/api/devices?secret=shh`)).status, 401);
+    const devices = await fetch(`${origin}/api/devices`, { headers: { authorization: 'Bearer shh' } });
+    assert.equal(devices.status, 200);
+    assert.equal((await devices.json()).devices[0].deviceId, 'dev-a');
+
+    assert.equal((await fetch(`${origin}/api/history`)).status, 401);
+    assert.equal((await fetch(`${origin}/api/history`, { headers: { authorization: 'Bearer shh' } })).status, 200);
+    assert.equal((await fetch(`${origin}/api/subscriptions`)).status, 401);
+    assert.equal((await fetch(`${origin}/api/subscriptions`, { headers: { authorization: 'Bearer shh' } })).status, 200);
+    assert.equal((await fetch(`${origin}/api/stats`, { headers: { authorization: 'Bearer shh' } })).status, 200);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('health exposes the Node Hub build identity without authentication', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/api/health`);
+    const health = await response.json();
+    assert.equal(response.status, 200);
+    assert.equal(health.runtime, 'node-hub');
+    assert.equal(health.hubBuild.runtime, 'node-hub');
+    assert.match(health.hubBuild.coreBuildId, /^sha256:[a-f0-9]{64}$/);
+    assert.match(health.hubBuild.runtimeBuildId, /^sha256:[a-f0-9]{64}$/);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('ingest inserts a device and is visible in getStats', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', dataFile, logger: { error() {} } });
+  try {
+    const record = hub.ingest({ deviceId: 'dev-a', today: { totalTokens: 5, costUsd: 0.1 } });
+    assert.equal(record.deviceId, 'dev-a');
+    assert.equal(hub.getStats().devices.length, 1);
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('ingest never persists conversation text from an untrusted sender', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', dataFile, logger: { error() {} } });
+  try {
+    hub.ingest({
+      deviceId: 'dev-private',
+      today: { totalTokens: 5, sessions: {
+        'codex:review': {
+          client: 'codex', sessionId: 'review', totalTokens: 5,
+          title: 'Private title', preview: 'Private preview', first_user_message: 'Private prompt',
+          sessionKind: 'background-review'
+        }
+      } }
+    });
+
+    const session = hub.getDevices()[0].periods.today.sessions['codex:review'];
+    assert.equal(session.sessionKind, 'background-review');
+    assert.equal(session.title, '');
+    assert.doesNotMatch(fs.readFileSync(dataFile, 'utf8'), /Private title|Private preview|Private prompt/);
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('getStats exposes the effective staleness threshold', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', staleAfterMs: 123456, dataFile, logger: { error() {} } });
+  try {
+    assert.equal(hub.getStats().staleAfterMs, 123456);
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('Hub keeps same-email Codex Personal and Team workspaces distinct across devices', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', staleAfterMs: 0, dataFile, logger: { error() {} } });
+  const email = 'member@example.com';
+  const personalKey = codexAccountKey(email, 'workspace-personal');
+  const teamKey = codexAccountKey(email, 'workspace-team');
+  const provider = (accountKey, remainingPercent, updatedAt) => ({
+    provider: 'codex',
+    accountKey,
+    accountEmail: email,
+    status: 'ok',
+    source: 'rpc',
+    sourceDetail: 'managed',
+    updatedAt,
+    windows: [{ kind: 'weekly', usedPercent: 100 - remainingPercent, remainingPercent }]
+  });
+  try {
+    hub.ingest({
+      deviceId: 'macbook',
+      limits: {
+        updatedAt: '2026-07-24T10:01:00.000Z',
+        providers: [
+          provider(personalKey, 18, '2026-07-24T10:00:00.000Z'),
+          provider(teamKey, 72, '2026-07-24T10:01:00.000Z')
+        ]
+      }
+    });
+    hub.ingest({
+      deviceId: 'desktop',
+      limits: {
+        updatedAt: '2026-07-24T10:05:00.000Z',
+        providers: [
+          provider(personalKey, 48, '2026-07-24T10:04:00.000Z'),
+          provider(teamKey, 82, '2026-07-24T10:05:00.000Z')
+        ]
+      }
+    });
+
+    const codexProviders = hub.getStats().limits.providers.filter((entry) => entry.provider === 'codex');
+    assert.equal(codexProviders.length, 2);
+    assert.deepEqual(
+      new Set(codexProviders.map((entry) => entry.accountKey)),
+      new Set([personalKey, teamKey])
+    );
+    assert.equal(
+      codexProviders.find((entry) => entry.accountKey === personalKey).windows[0].remainingPercent,
+      48
+    );
+    assert.equal(
+      codexProviders.find((entry) => entry.accountKey === teamKey).windows[0].remainingPercent,
+      82
+    );
+    assert.ok(codexProviders.every((entry) => entry.sourceDeviceId === 'desktop'));
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('ingest without a deviceId throws', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', dataFile, logger: { error() {} } });
+  try {
+    assert.throws(() => hub.ingest({ today: { totalTokens: 1 } }), /deviceId/);
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('onStats fires on ingest and on deleteDevice, and unsubscribe stops it', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', dataFile, logger: { error() {} } });
+  try {
+    let calls = 0;
+    let lastDeviceCount = -1;
+    const unsub = hub.onStats((stats) => { calls += 1; lastDeviceCount = stats.devices.length; });
+    hub.ingest({ deviceId: 'dev-a', today: { totalTokens: 5 } });
+    assert.equal(calls, 1);
+    assert.equal(lastDeviceCount, 1);
+    hub.deleteDevice('dev-a');
+    assert.equal(calls, 2);
+    assert.equal(lastDeviceCount, 0);
+    unsub();
+    hub.ingest({ deviceId: 'dev-b', today: { totalTokens: 1 } });
+    assert.equal(calls, 2);
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('a subscription write is announced on the stats stream, carrying the new version', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', dataFile, logger: { error() {} } });
+  try {
+    const record = { id: 'sub_1', provider: 'codex', planName: 'Plus', amountMinor: 9000, currency: 'HKD', startDate: '2026-05-31' };
+    // A hub nobody has written to reports an empty version rather than omitting
+    // the field, so a device holding nothing compares equal and asks for nothing.
+    assert.equal(hub.getStats().subscriptionsUpdatedAt, '');
+
+    const seen = [];
+    hub.onStats((stats, reason) => seen.push({ reason, version: stats.subscriptionsUpdatedAt }));
+    const written = hub.setSubscriptions([record], '');
+
+    // Without the broadcast the other devices only find out on their next poll,
+    // which is five minutes apart while the stream is up.
+    assert.deepEqual(seen, [{ reason: 'subscriptions', version: written.updatedAt }]);
+    assert.equal(hub.getStats().subscriptionsUpdatedAt, written.updatedAt);
+
+    // The records themselves stay off the stats frame: the version is all a
+    // device needs to tell its copy has been overtaken.
+    assert.equal('subscriptions' in hub.getStats(), false);
+
+    // A refused write moves nothing, so there is nothing to announce.
+    assert.throws(() => hub.setSubscriptions([], 'not-the-version'));
+    assert.equal(seen.length, 1);
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('oversized ingest returns 413 without storing the device', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', dataFile, logger: { error() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/api/ingest`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceId: 'oversized', padding: '🚀'.repeat(Math.ceil((MAX_JSON_BODY_BYTES + 1) / 4)) })
+    });
+
+    assert.equal(response.status, 413);
+    assert.equal(response.headers.get('connection'), 'close');
+    assert.deepEqual(await response.json(), {
+      error: 'payload_too_large',
+      message: 'Request body too large'
+    });
+    assert.equal(hub.getStats().devices.length, 0);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('ingest accepts payloads above the legacy 256 KiB limit', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: '', dataFile, logger: { error() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/api/ingest`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ deviceId: 'larger', padding: 'x'.repeat(300 * 1024) })
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(hub.getStats().devices.length, 1);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('the hub stores one shared subscription list, not one per device', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const call = (method, body) => fetch(`http://127.0.0.1:${port}/api/subscriptions`, {
+      method,
+      headers: { 'content-type': 'application/json', authorization: 'Bearer shh' },
+      ...(body ? { body: JSON.stringify(body) } : {})
+    });
+
+    // A hub nobody has written to reports an empty updatedAt, which is what lets
+    // the very first write through the staleness check.
+    const empty = await (await call('GET')).json();
+    assert.deepEqual(empty.subscriptions, []);
+    assert.equal(empty.updatedAt, '');
+
+    const record = { id: 'sub_1', provider: 'codex', planName: 'Plus', amountMinor: 9000, currency: 'HKD', startDate: '2026-05-31' };
+    const written = await (await call('PUT', { subscriptions: [record], baseUpdatedAt: '' })).json();
+    assert.equal(written.subscriptions.length, 1);
+    assert.equal(written.subscriptions[0].id, 'sub_1');
+    assert.notEqual(written.updatedAt, '');
+
+    // Every device reads the same list back — it belongs to the account, not to
+    // whichever machine happened to record it.
+    const read = await (await call('GET')).json();
+    assert.deepEqual(read.subscriptions, written.subscriptions);
+
+    // A device writing from a stale copy would erase records added elsewhere
+    // since it last looked, and they exist nowhere else.
+    const stale = await call('PUT', { subscriptions: [], baseUpdatedAt: '' });
+    assert.equal(stale.status, 409);
+    const conflict = await stale.json();
+    assert.equal(conflict.error, 'stale_write');
+    assert.equal(conflict.subscriptions.length, 1);
+    assert.deepEqual((await (await call('GET')).json()).subscriptions, written.subscriptions);
+
+    // Writing from the copy it just read through does go in, including a delete.
+    const cleared = await (await call('PUT', { subscriptions: [], baseUpdatedAt: written.updatedAt })).json();
+    assert.deepEqual(cleared.subscriptions, []);
+
+    // Malformed records are discarded rather than stored: this arrives over the
+    // network from another device.
+    const junk = await (await call('PUT', { subscriptions: [{ provider: '' }, 'nope', record], baseUpdatedAt: cleared.updatedAt })).json();
+    assert.equal(junk.subscriptions.length, 1);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('the shared subscription list survives a hub restart and needs the secret', async () => {
+  const dataFile = tempDataFile();
+  const record = { id: 'sub_1', provider: 'claude', planName: 'Pro', amountMinor: 14600, currency: 'HKD', startDate: '2026-07-19' };
+  const first = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await first.start();
+  try {
+    first.setSubscriptions([record], '');
+  } finally {
+    await first.stop();
+  }
+
+  const second = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await second.start();
+  try {
+    assert.equal(second.getSubscriptions().subscriptions[0].id, 'sub_1');
+    const { port } = second.server.address();
+    // Money the user recorded by hand is behind the same gate as account identity.
+    const unauthorized = await fetch(`http://127.0.0.1:${port}/api/subscriptions`);
+    assert.equal(unauthorized.status, 401);
+    const stats = await (await fetch(`http://127.0.0.1:${port}/api/stats`, { headers: { authorization: 'Bearer shh' } })).json();
+    // The version rides along, so a device can tell its copy has been overtaken
+    // without asking. What the user pays does not.
+    assert.equal(stats.subscriptionsUpdatedAt, second.getSubscriptions().updatedAt);
+    assert.equal('subscriptions' in stats, false);
+    assert.doesNotMatch(JSON.stringify(stats), /amountMinor|planName|sub_1/);
+  } finally {
+    await second.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('a malformed subscription write is refused instead of emptying the ledger', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const put = (body) => fetch(`http://127.0.0.1:${port}/api/subscriptions`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer shh' },
+      body: JSON.stringify(body)
+    });
+    const record = { id: 'sub_1', provider: 'codex', planName: 'Plus', amountMinor: 9000, currency: 'HKD', startDate: '2026-05-31' };
+    const written = await (await put({ subscriptions: [record], baseUpdatedAt: '' })).json();
+
+    // A non-array normalizes to [] and would store as a perfectly successful
+    // replacement, wiping records that exist nowhere else.
+    for (const bad of [undefined, null, 'oops', 42, { 0: record }]) {
+      const response = await put({ subscriptions: bad, baseUpdatedAt: written.updatedAt });
+      assert.equal(response.status, 400, `subscriptions: ${JSON.stringify(bad)} should be refused`);
+    }
+    assert.equal(hub.getSubscriptions().subscriptions.length, 1);
+
+    // An intentional clear still goes through.
+    assert.equal((await (await put({ subscriptions: [], baseUpdatedAt: written.updatedAt })).json()).subscriptions.length, 0);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('the hub advertises PUT so a browser preflight does not block the write', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    // The endpoint existing is not enough: a browser-origin client is stopped at
+    // the preflight if the method is not advertised.
+    const preflight = await fetch(`http://127.0.0.1:${port}/api/subscriptions`, { method: 'OPTIONS' });
+    assert.match(preflight.headers.get('access-control-allow-methods') || '', /\bPUT\b/);
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('back-to-back writes each get their own concurrency token', () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  try {
+    const record = (id) => ({ id, provider: 'codex', startDate: '2026-05-31' });
+    const first = hub.setSubscriptions([record('a')], '');
+    const second = hub.setSubscriptions([record('a'), record('b')], first.updatedAt);
+    // Same millisecond is entirely possible here; if the token repeated, a third
+    // write holding `first` would sail through and drop record b.
+    assert.ok(second.updatedAt > first.updatedAt);
+    assert.throws(() => hub.setSubscriptions([], first.updatedAt), /stale_write/);
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('a subscription write that cannot reach disk does not take effect in memory', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  try {
+    const record = (id) => ({ id, provider: 'codex', startDate: '2026-05-31', currency: 'USD' });
+    const written = hub.setSubscriptions([record('a')], '');
+
+    // A directory where the temp file belongs makes the atomic write fail. If
+    // memory moved anyway, this process would serve a record the file does not
+    // have and a restart would silently revert it.
+    fs.mkdirSync(`${dataFile}.tmp`, { recursive: true });
+    try {
+      assert.throws(() => hub.setSubscriptions([record('a'), record('b')], written.updatedAt));
+    } finally {
+      fs.rmSync(`${dataFile}.tmp`, { recursive: true, force: true });
+    }
+    assert.deepEqual(hub.getSubscriptions().subscriptions.map((entry) => entry.id), ['a']);
+    assert.equal(hub.getSubscriptions().updatedAt, written.updatedAt);
+    // And the file still agrees, so a restart lands on the same list.
+    assert.deepEqual(JSON.parse(fs.readFileSync(dataFile, 'utf8')).subscriptions.subscriptions.map((e) => e.id), ['a']);
+  } finally {
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('a currency the app carries no rate for is refused, not rewritten', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {}, warn() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const put = (body) => fetch(`http://127.0.0.1:${port}/api/subscriptions`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer shh' },
+      body: JSON.stringify(body)
+    });
+    // Coercing ZAR to USD reports an amount the user never entered, and the
+    // endpoint documents this as validation.
+    const refused = await put({
+      subscriptions: [{ id: 'a', provider: 'codex', startDate: '2026-05-31', amountMinor: 10000, currency: 'ZAR' }],
+      baseUpdatedAt: ''
+    });
+    assert.equal(refused.status, 400);
+    assert.match((await refused.json()).message, /ZAR/);
+    assert.deepEqual(hub.getSubscriptions().subscriptions, []);
+
+    for (const code of ['USD', 'AUD', 'BRL', 'CAD', 'CHF', 'CNY', 'EUR', 'GBP', 'HKD', 'INR', 'JPY', 'KRW', 'SGD', 'TWD']) {
+      const ok = await put({
+        subscriptions: [{ id: 'a', provider: 'codex', startDate: '2026-05-31', currency: code }],
+        baseUpdatedAt: hub.getSubscriptions().updatedAt
+      });
+      assert.equal(ok.status, 200, `${code} should be accepted`);
+    }
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('official senders can request a minimal ingest acknowledgement while legacy responses stay intact', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({ port: 0, host: '127.0.0.1', secret: 'shh', dataFile, logger: { error() {} } });
+  await hub.start();
+  try {
+    const { port } = hub.server.address();
+    const sampleAt = utcTodayAt('10:00:00.000');
+    const sessions = Object.fromEntries(Array.from({ length: 80 }, (_, index) => [
+      `session-${index}`,
+      { totalTokens: index + 1, costUsd: 0.01, model: 'gpt-test', lastUsedAt: sampleAt }
+    ]));
+    const payload = { deviceId: 'dev-a', updatedAt: sampleAt, today: { totalTokens: 3240, sessions } };
+    const post = (extraHeaders = {}) => fetch(`http://127.0.0.1:${port}/api/ingest`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer shh', ...extraHeaders },
+      body: JSON.stringify(payload)
+    });
+
+    const minimal = await post({ 'x-token-monitor-response': 'minimal' });
+    assert.deepEqual(await minimal.json(), { ok: true, deviceId: 'dev-a' });
+
+    const legacy = await post({ 'accept-encoding': 'gzip' });
+    assert.equal(legacy.headers.get('content-encoding'), 'gzip');
+    const legacyBody = await legacy.json();
+    assert.equal(legacyBody.ok, true);
+    assert.equal(legacyBody.stats.devices[0].deviceId, 'dev-a');
+  } finally {
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('the stats stream coalesces bursts and negotiates timestamp-only freshness events', async (t) => {
+  // Lease observations must be in the past regardless of the runner's wall clock.
+  // Only Date is mocked; SSE timers and monotonic wait deadlines remain real.
+  t.mock.timers.enable({ apis: ['Date'], now: Date.UTC(2026, 9, 28, 12) });
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: 'shh',
+    broadcastDelayMs: 200,
+    dataFile,
+    logger: { error() {} }
+  });
+  await hub.start();
+  let modern;
+  let legacy;
+  try {
+    const initialAt = utcTodayAt('10:00:00.000');
+    const refreshedAt = utcTodayAt('10:01:00.000');
+    const changedAt = utcTodayAt('10:02:00.000');
+    // Live observations must be in the past even when CI runs before 10:00 UTC.
+    const activityAt = new Date(Date.now() - 2000).toISOString();
+    const renewedActivityAt = new Date(Date.now() - 1000).toISOString();
+    const base = {
+      deviceId: 'dev-a',
+      updatedAt: initialAt,
+      today: { totalTokens: 1, sessions: { a: { client: 'codex', sessionId: 'a', totalTokens: 1, lastUsedAt: initialAt, liveActivity: { state: 'waiting', observedAt: activityAt } } } },
+      clientHealth: {
+        version: 1,
+        clients: { codex: { source: { checkedCount: 1, detectedCount: 1 }, collection: { state: 'direct' }, data: { liveTokens: 1 } } },
+        observedAt: initialAt
+      }
+    };
+    hub.ingest(base);
+    const { port } = hub.server.address();
+    const streamUrl = `http://127.0.0.1:${port}/api/stats/stream`;
+    modern = await openSse(streamUrl, { authorization: 'Bearer shh', 'x-token-monitor-stream': '3' });
+    legacy = await openSse(streamUrl, { authorization: 'Bearer shh', 'x-token-monitor-stream': '2' });
+    await waitFor(() => modern.events.length === 1 && legacy.events.length === 1);
+    assert.equal(modern.events[0].event, 'snapshot');
+    assert.equal(legacy.events[0].event, 'snapshot');
+    modern.events.length = 0;
+    legacy.events.length = 0;
+
+    hub.ingest({ ...base, updatedAt: refreshedAt, clientHealth: { ...base.clientHealth, observedAt: refreshedAt } });
+    await waitFor(() => modern.events.length === 1 && legacy.events.length === 1);
+    assert.equal(modern.events[0].event, 'freshness');
+    assert.equal(modern.events[0].data.stats.devices[0].updatedAt, refreshedAt);
+    assert.equal(modern.events[0].data.stats.devices[0].clientHealthObservedAt, refreshedAt);
+    assert.equal(legacy.events[0].event, 'stats');
+    assert.equal(legacy.events[0].data.stats.devices[0].updatedAt, refreshedAt);
+    modern.events.length = 0;
+    legacy.events.length = 0;
+
+    // A session-only lease renewal must not resend accounting detail.
+    hub.ingest({ ...base, today: { ...base.today, sessions: { a: {
+      ...base.today.sessions.a, liveActivity: { state: 'waiting', observedAt: renewedActivityAt }
+    } } } });
+    await waitFor(() => modern.events.length === 1 && legacy.events.length === 1);
+    assert.equal(modern.events[0].event, 'freshness');
+    assert.equal(Object.values(modern.events[0].data.stats.sessionActivityObservedAt.today)[0], renewedActivityAt);
+    assert.equal(Object.values(modern.events[0].data.stats.devices[0].sessionActivityObservedAt.today)[0], renewedActivityAt);
+    assert.equal(legacy.events[0].event, 'stats');
+    assert.equal(Object.values(legacy.events[0].data.stats.periods.today.sessions)[0].liveActivity.observedAt, renewedActivityAt);
+    modern.events.length = 0;
+    legacy.events.length = 0;
+
+    hub.ingest({ ...base, updatedAt: changedAt, today: { ...base.today, totalTokens: 2 } });
+    await waitFor(() => modern.events.length === 1 && legacy.events.length === 1);
+    assert.equal(modern.events[0].event, 'stats');
+    assert.equal(legacy.events[0].event, 'stats');
+    assert.equal(modern.events[0].data.stats.periods.today.totalTokens, 2);
+    modern.events.length = 0;
+    legacy.events.length = 0;
+
+    for (let totalTokens = 3; totalTokens <= 12; totalTokens += 1) {
+      hub.ingest({
+        ...base,
+        updatedAt: utcTodayAt(`10:02:${String(totalTokens).padStart(2, '0')}.000`),
+        today: { ...base.today, totalTokens }
+      });
+    }
+    await waitFor(() => modern.events.length === 1 && legacy.events.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    assert.equal(modern.events.length, 1);
+    assert.equal(legacy.events.length, 1);
+    assert.equal(modern.events[0].data.stats.periods.today.totalTokens, 12);
+  } finally {
+    modern?.close();
+    legacy?.close();
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('SSE fan-out serializes the stats payload once for every subscriber', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: 'shh',
+    broadcastDelayMs: 20,
+    dataFile,
+    logger: { error() {} }
+  });
+  await hub.start();
+  const clients = [];
+  const original = JSON.stringify;
+  const ingestPayloads = [];
+  try {
+    const initialAt = utcTodayAt('10:00:00.000');
+    const changedAt = utcTodayAt('10:03:00.000');
+    const base = {
+      deviceId: 'dev-a',
+      updatedAt: initialAt,
+      today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } }
+    };
+    hub.ingest(base);
+    const { port } = hub.server.address();
+    const streamUrl = `http://127.0.0.1:${port}/api/stats/stream`;
+    for (let index = 0; index < 3; index += 1) {
+      clients.push(await openSse(streamUrl, { authorization: 'Bearer shh' }));
+    }
+    await waitFor(() => clients.every((client) => client.events.length === 1));
+    for (const client of clients) client.events.length = 0;
+
+    JSON.stringify = (value, replacer, space) => {
+      if (value && value.type === 'stats' && value.reason === 'ingest') ingestPayloads.push(value);
+      return original(value, replacer, space);
+    };
+    hub.ingest({
+      ...base,
+      updatedAt: changedAt,
+      today: { ...base.today, totalTokens: 4 }
+    });
+    await waitFor(() => clients.every((client) => client.events.length === 1));
+    assert.equal(ingestPayloads.length, 1);
+    assert.equal(clients[0].events[0].data.stats.periods.today.totalTokens, 4);
+    assert.equal(clients[2].events[0].data.stats.periods.today.totalTokens, 4);
+  } finally {
+    JSON.stringify = original;
+    for (const client of clients) client.close();
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+function spyTypedStringify() {
+  const original = JSON.stringify;
+  const typed = [];
+  JSON.stringify = (value, replacer, space) => {
+    if (value && typeof value === 'object' && value.type) {
+      typed.push({ type: value.type, reason: value.reason });
+    }
+    return original(value, replacer, space);
+  };
+  return {
+    typed,
+    restore() { JSON.stringify = original; }
+  };
+}
+
+test('SSE subscribers receive identical frames and delete/subscription writes stay full stats', async () => {
+  const dataFile = tempDataFile();
+  const hub = createHub({
+    port: 0,
+    host: '127.0.0.1',
+    secret: 'shh',
+    broadcastDelayMs: 20,
+    dataFile,
+    logger: { error() {} }
+  });
+  await hub.start();
+  let modernA;
+  let modernB;
+  let legacy;
+  try {
+    const initialAt = utcTodayAt('10:00:00.000');
+    const refreshedAt = utcTodayAt('10:01:00.000');
+    const base = {
+      deviceId: 'dev-a',
+      updatedAt: initialAt,
+      today: { totalTokens: 1, sessions: { a: { totalTokens: 1, lastUsedAt: initialAt } } }
+    };
+    hub.ingest(base);
+    const { port } = hub.server.address();
+    const streamUrl = `http://127.0.0.1:${port}/api/stats/stream`;
+    modernA = await openSse(streamUrl, { authorization: 'Bearer shh', 'x-token-monitor-stream': '3' });
+    modernB = await openSse(streamUrl, { authorization: 'Bearer shh', 'x-token-monitor-stream': '3' });
+    legacy = await openSse(streamUrl, { authorization: 'Bearer shh' });
+    await waitFor(() => modernA.events.length === 1 && modernB.events.length === 1 && legacy.events.length === 1);
+    assert.deepEqual(modernA.events[0].data.stats.periods, modernB.events[0].data.stats.periods);
+    assert.deepEqual(modernA.events[0].data.stats.periods, legacy.events[0].data.stats.periods);
+    for (const client of [modernA, modernB, legacy]) client.events.length = 0;
+
+    hub.ingest({ ...base, updatedAt: refreshedAt });
+    await waitFor(() => modernA.events.length === 1 && modernB.events.length === 1 && legacy.events.length === 1);
+    assert.equal(modernA.events[0].event, 'freshness');
+    assert.equal(modernB.events[0].event, 'freshness');
+    assert.deepEqual(modernA.events[0].data, modernB.events[0].data);
+    assert.equal(legacy.events[0].event, 'stats');
+    for (const client of [modernA, modernB, legacy]) client.events.length = 0;
+
+    const deleteSpy = spyTypedStringify();
+    try {
+      hub.deleteDevice('dev-a');
+      await waitFor(() => modernA.events.length === 1 && modernB.events.length === 1 && legacy.events.length === 1);
+      assert.deepEqual(deleteSpy.typed.filter((entry) => entry.reason === 'delete'), [
+        { type: 'stats', reason: 'delete' }
+      ]);
+    } finally {
+      deleteSpy.restore();
+    }
+    assert.equal(modernA.events[0].event, 'stats');
+    assert.equal(modernB.events[0].event, 'stats');
+    assert.equal(legacy.events[0].event, 'stats');
+    assert.equal(modernA.events[0].data.reason, 'delete');
+    assert.deepEqual(modernA.events[0].data.stats.devices, []);
+    assert.deepEqual(modernA.events[0].data, modernB.events[0].data);
+    assert.deepEqual(modernA.events[0].data.stats.devices, legacy.events[0].data.stats.devices);
+    for (const client of [modernA, modernB, legacy]) client.events.length = 0;
+
+    const record = { id: 'sub_1', provider: 'codex', planName: 'Plus', amountMinor: 9000, currency: 'HKD', startDate: '2026-05-31' };
+    const subSpy = spyTypedStringify();
+    let written;
+    try {
+      written = hub.setSubscriptions([record], '');
+      await waitFor(() => modernA.events.length === 1 && modernB.events.length === 1 && legacy.events.length === 1);
+      assert.deepEqual(subSpy.typed.filter((entry) => entry.reason === 'subscriptions'), [
+        { type: 'stats', reason: 'subscriptions' }
+      ]);
+    } finally {
+      subSpy.restore();
+    }
+    assert.equal(modernA.events[0].event, 'stats');
+    assert.equal(legacy.events[0].event, 'stats');
+    assert.equal(modernA.events[0].data.reason, 'subscriptions');
+    assert.equal(modernA.events[0].data.stats.subscriptionsUpdatedAt, written.updatedAt);
+    assert.equal('subscriptions' in modernA.events[0].data.stats, false);
+    assert.deepEqual(modernA.events[0].data, modernB.events[0].data);
+  } finally {
+    modernA?.close();
+    modernB?.close();
+    legacy?.close();
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});
+
+test('SSE skips empty fan-out and isolates a throwing response from later clients', async () => {
+  const { EventEmitter } = require('node:events');
+  const dataFile = tempDataFile();
+  const hub = createHub({ dataFile, logger: { error() {} } });
+  const responses = [];
+  const spy = spyTypedStringify();
+  try {
+    hub.ingest({ deviceId: 'dev-a', today: { totalTokens: 1 } });
+    hub.deleteDevice('missing');
+    assert.deepEqual(spy.typed, []);
+
+    for (const freshnessEvents of [true, true, false]) {
+      const res = new EventEmitter();
+      res.frames = [];
+      res.writeHead = () => {};
+      res.write = (frame) => { res.frames.push(frame); return true; };
+      res.end = () => res.emit('close');
+      responses.push(res);
+      hub.server.emit('request', {
+        method: 'GET', url: '/api/stats/stream',
+        headers: freshnessEvents ? { 'x-token-monitor-stream': '3' } : {}
+      }, res);
+      assert.equal(res.frames.length, 1);
+      res.frames.length = 0;
+    }
+    let failedWrites = 0;
+    responses[0].write = () => { failedWrites += 1; throw new Error('closed response'); };
+    for (let count = 1; count <= 2; count += 1) {
+      hub.deleteDevice('missing');
+      assert.equal(failedWrites, 1);
+      for (const res of responses.slice(1)) {
+        assert.equal(res.frames.length, count);
+        assert.match(res.frames[count - 1], /^event: stats\n/);
+      }
+      assert.equal(responses[1].frames[count - 1], responses[2].frames[count - 1]);
+    }
+  } finally {
+    spy.restore();
+    for (const res of responses) res.emit('close');
+    await hub.stop();
+    fs.rmSync(dataFile, { force: true });
+  }
+});

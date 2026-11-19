@@ -1,0 +1,477 @@
+'use strict';
+
+const { createHash } = require('node:crypto');
+const { statsPatch } = require('./hubDelta');
+const { UPLOAD_HEADER, UPLOAD_VERSION } = require('./uploadDelta');
+
+const { MAX_JSON_BODY_BYTES } = require('./http');
+const { syncLimits } = require('./limits/core');
+const { stripSessionTextFromDeviceRecord } = require('./usage');
+const { isReasonixSyntheticSession } = require('./providers/reasonix/sessionGuard');
+
+const SYNC_PAYLOAD_MARGIN_BYTES = 16 * 1024;
+const SYNC_PAYLOAD_BUDGET_BYTES = MAX_JSON_BODY_BYTES - SYNC_PAYLOAD_MARGIN_BYTES;
+// Hubs deployed before the 2 MiB ceiling still enforce 1 MiB. A rejected
+// upload retries within the budget those Hubs accept.
+const LEGACY_SYNC_PAYLOAD_BUDGET_BYTES = 1024 * 1024 - SYNC_PAYLOAD_MARGIN_BYTES;
+const SYNC_HISTORY_COMPONENT_DAYS = 30;
+
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function dayKeyAddDays(key, delta) {
+  const ms = Date.parse(`${String(key || '').slice(0, 10)}T00:00:00Z`);
+  if (!Number.isFinite(ms)) return '';
+  return new Date(ms + delta * 86400000).toISOString().slice(0, 10);
+}
+
+function stripTokenComponents(value) {
+  if (!value || typeof value !== 'object') return value;
+  const rest = { ...value };
+  delete rest.cacheReadTokens;
+  delete rest.cacheWriteTokens;
+  delete rest.outputTokens;
+  delete rest.unclassifiedTokens;
+  delete rest.tokenComponentsAvailable;
+  return rest;
+}
+
+function historyForSync(history, periodWindows) {
+  if (!history || typeof history !== 'object' || !Array.isArray(history.daily)) return history;
+  const latestDailyKey = history.daily.reduce((latest, row) => {
+    const key = String(row?.date || '').slice(0, 10);
+    return key > latest ? key : latest;
+  }, '');
+  const todayKey = String(periodWindows?.today?.key || latestDailyKey).slice(0, 10);
+  const componentStart = dayKeyAddDays(todayKey, -(SYNC_HISTORY_COMPONENT_DAYS - 1));
+  if (!componentStart) return history;
+  return {
+    ...history,
+    daily: history.daily.map((row) => {
+      const date = String(row?.date || '').slice(0, 10);
+      if (date >= componentStart && date <= todayKey) return row;
+      const stripped = stripTokenComponents(row);
+      stripped.perClient = Object.fromEntries(Object.entries(row?.perClient || {})
+        .map(([key, value]) => [key, stripTokenComponents(value)]));
+      stripped.perModel = Object.fromEntries(Object.entries(row?.perModel || {})
+        .map(([key, value]) => [key, stripTokenComponents(value)]));
+      return stripped;
+    })
+  };
+}
+
+function historyWithoutTokenComponents(history) {
+  if (!history || typeof history !== 'object' || !Array.isArray(history.daily)) return history;
+  return {
+    ...history,
+    daily: history.daily.map((row) => {
+      const stripped = stripTokenComponents(row);
+      stripped.perClient = Object.fromEntries(Object.entries(row?.perClient || {})
+        .map(([key, value]) => [key, stripTokenComponents(value)]));
+      stripped.perModel = Object.fromEntries(Object.entries(row?.perModel || {})
+        .map(([key, value]) => [key, stripTokenComponents(value)]));
+      return stripped;
+    })
+  };
+}
+
+function projectEntries(period) {
+  return period?.projects && typeof period.projects === 'object'
+    ? Object.keys(period.projects).length
+    : 0;
+}
+
+function jsonBytes(value) {
+  return Buffer.byteLength(JSON.stringify(value), 'utf8');
+}
+
+function sessionTimestamp(session) {
+  const value = session?.lastUsedAt || session?.startedAt;
+  const timestamp = value ? Date.parse(value) : 0;
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function recentSessionEntries(sessions) {
+  return Object.entries(sessions || {}).sort(([aKey, a], [bKey, b]) => {
+    const timeDiff = sessionTimestamp(b) - sessionTimestamp(a);
+    if (timeDiff) return timeDiff;
+    const tokenDiff = Number(b?.totalTokens || 0) - Number(a?.totalTokens || 0);
+    return tokenDiff || aKey.localeCompare(bKey);
+  });
+}
+
+function setSessionOmission(payload, periodName, omitted) {
+  const next = { ...(payload.sessionDetailsOmitted || {}) };
+  if (omitted > 0) next[periodName] = omitted;
+  else delete next[periodName];
+  if (Object.keys(next).length > 0) payload.sessionDetailsOmitted = next;
+  else delete payload.sessionDetailsOmitted;
+}
+
+function setPeriodProjectOmission(payload, periodName, omitted) {
+  const next = { ...(payload.periodProjectsOmitted || {}) };
+  if (omitted > 0) next[periodName] = omitted;
+  else delete next[periodName];
+  if (Object.keys(next).length > 0) payload.periodProjectsOmitted = next;
+  else delete payload.periodProjectsOmitted;
+}
+
+function fitRecentSessionEntries(payload, periodName, entries, maxBytes) {
+  const period = payload[periodName];
+  let low = 0;
+  let high = entries.length;
+  while (low < high) {
+    const count = Math.ceil((low + high) / 2);
+    period.sessions = Object.fromEntries(entries.slice(0, count));
+    setSessionOmission(payload, periodName, entries.length - count);
+    if (jsonBytes(payload) <= maxBytes) low = count;
+    else high = count - 1;
+  }
+  period.sessions = Object.fromEntries(entries.slice(0, low));
+  setSessionOmission(payload, periodName, entries.length - low);
+}
+
+function fitPeriodSessions(payload, summary, periodName, maxBytes) {
+  const period = payload?.[periodName];
+  const entries = recentSessionEntries(period?.sessions);
+  if (!period || entries.length === 0) return;
+
+  // Once session detail becomes partial, carry the authoritative project rollup
+  // instead of asking the hub to rebuild an incomplete one from the retained rows.
+  if (summary.projectsEnabled !== false && summary?.[periodName]?.projects && typeof summary[periodName].projects === 'object') {
+    period.projects = summary[periodName].projects;
+  }
+
+  fitRecentSessionEntries(payload, periodName, entries, maxBytes);
+  if (jsonBytes(payload) > maxBytes && projectEntries(period) > 0) {
+    const omittedProjects = projectEntries(period);
+    delete period.projects;
+    setPeriodProjectOmission(payload, periodName, omittedProjects);
+    fitRecentSessionEntries(payload, periodName, entries, maxBytes);
+  }
+}
+
+function sessionsWithoutProjectMetadata(sessions) {
+  if (!sessions || typeof sessions !== 'object') return sessions;
+  const sanitized = Object.create(null);
+  for (const [key, session] of Object.entries(sessions)) {
+    if (!session || typeof session !== 'object') {
+      sanitized[key] = session;
+      continue;
+    }
+    sanitized[key] = { ...session };
+    delete sanitized[key].projectId;
+    delete sanitized[key].project_id;
+    delete sanitized[key].projectLabel;
+    delete sanitized[key].project_label;
+  }
+  return sanitized;
+}
+
+function sessionsWithoutReasonix(sessions) {
+  if (!sessions || typeof sessions !== 'object') return sessions;
+  const sanitized = {};
+  let removed = false;
+  for (const [key, session] of Object.entries(sessions)) {
+    if (isReasonixSyntheticSession(session, key)) {
+      removed = true;
+      continue;
+    }
+    sanitized[key] = session;
+  }
+  return removed ? sanitized : sessions;
+}
+
+function buildSyncPayload(summary, {
+  omitHistory = false,
+  omitDailyTotals = false,
+  omitAllTimeProjects = false,
+  omitHistoryTokenComponents = false,
+  omitModelThroughput = false,
+  syncSessionTitles = false,
+  sessionTitleSyncGeneration
+} = {}) {
+  if (!summary || typeof summary !== 'object') return summary;
+  // allTime session detail is never uploaded. Exclude it before the sanitizer
+  // can clone discarded text or evaluate session/title accessors.
+  const withoutAllTimeSessions = (period) => {
+    if (!period || typeof period !== 'object') return period;
+    return Object.fromEntries(Object.keys(period).filter((key) => key !== 'sessions')
+      .map((key) => [key, period[key]]));
+  };
+  const source = { ...summary, limits: syncLimits(summary.limits) };
+  if (omitHistory) delete source.history;
+  if (hasOwn(source, 'allTime')) source.allTime = withoutAllTimeSessions(source.allTime);
+  if (source.periods && typeof source.periods === 'object' && hasOwn(source.periods, 'allTime')) {
+    source.periods = { ...source.periods, allTime: withoutAllTimeSessions(source.periods.allTime) };
+  }
+  const payload = stripSessionTextFromDeviceRecord(source, {
+    preserveSessionTitles: syncSessionTitles === true
+  });
+  delete payload.sessionTitleSyncGeneration;
+  if (syncSessionTitles === true && Number.isSafeInteger(sessionTitleSyncGeneration) && sessionTitleSyncGeneration > 0) {
+    payload.sessionTitleSyncGeneration = sessionTitleSyncGeneration;
+  }
+  if (!omitHistory && summary.history && typeof summary.history === 'object') {
+    payload.history = historyForSync(summary.history, summary.periodWindows);
+    if (omitHistoryTokenComponents) {
+      payload.history = historyWithoutTokenComponents(payload.history);
+    }
+  }
+  // Reasonix native sessions are a local-only view. They contain provider
+  // metadata and project labels that are intentionally not part of the device
+  // wire contract, and uploading them would also make local paths/preview text
+  // a hub concern. Tokscale remains the only aggregate/session authority.
+  delete payload.nativeSessions;
+  delete payload.nativeProjects;
+  const projectsEnabled = summary.projectsEnabled !== false;
+  delete payload.allTimeProjectsOmitted;
+  delete payload.allTimeProjectsIncomplete;
+  delete payload.sessionDetailsOmitted;
+  delete payload.periodProjectsOmitted;
+  delete payload.codexLocalSessionKeys;
+  if (Array.isArray(payload.history?.dailyTotals)) {
+    payload.history = { ...payload.history };
+    delete payload.history.dailyTotalsOmitted;
+  }
+
+  for (const periodName of ['today', 'month']) {
+    const period = payload[periodName];
+    if (!period || typeof period !== 'object') continue;
+    payload[periodName] = { ...period };
+    delete payload[periodName].projects;
+    if (hasOwn(payload[periodName], 'sessions')) {
+      payload[periodName].sessions = sessionsWithoutReasonix(payload[periodName].sessions);
+      if (!projectsEnabled) payload[periodName].sessions = sessionsWithoutProjectMetadata(payload[periodName].sessions);
+    }
+  }
+
+  if (payload.allTime && typeof payload.allTime === 'object') {
+    if (!projectsEnabled) delete payload.allTime.projects;
+    if (omitAllTimeProjects && hasOwn(payload.allTime, 'projects')) {
+      delete payload.allTime.projects;
+      payload.allTimeProjectsOmitted = true;
+    }
+  }
+  if (omitModelThroughput) {
+    for (const period of ['today', 'month', 'allTime']) {
+      if (payload[period]) delete payload[period].modelThroughput;
+    }
+  }
+  if (omitDailyTotals) omitHistoryDailyTotals(payload);
+  return payload;
+}
+
+function omitHistoryDailyTotals(payload) {
+  if (!Array.isArray(payload?.history?.dailyTotals)) return false;
+  const omitted = payload.history.dailyTotals.length;
+  payload.history = {
+    ...payload.history,
+    summary: { ...(payload.history.summary || {}), activeDaysComplete: false },
+    dailyTotalsOmitted: omitted
+  };
+  delete payload.history.dailyTotals;
+  return true;
+}
+
+function serializeSyncPayload(summary, options = {}) {
+  const maxBytes = Number.isFinite(options.maxBytes) ? options.maxBytes : SYNC_PAYLOAD_BUDGET_BYTES;
+  const buildOptions = {
+    ...options,
+    omitAllTimeProjects: options.omitAllTimeProjects === true,
+    omitHistoryTokenComponents: options.omitHistoryTokenComponents === true
+  };
+  let payload = buildSyncPayload(summary, buildOptions);
+  if (!payload || typeof payload !== 'object') {
+    const body = JSON.stringify(payload);
+    return { payload, body, bytes: body ? Buffer.byteLength(body, 'utf8') : 0 };
+  }
+  let body = JSON.stringify(payload);
+  if (Buffer.byteLength(body, 'utf8') > maxBytes && Array.isArray(payload.history?.dailyTotals)) {
+    // The additive calendar must not evict detail that fit before it existed.
+    // Keep this option across later rebuilds if legacy reductions are also needed.
+    buildOptions.omitDailyTotals = true;
+    payload = buildSyncPayload(summary, buildOptions);
+    body = JSON.stringify(payload);
+  }
+  if (Buffer.byteLength(body, 'utf8') > maxBytes
+    && ['today', 'month', 'allTime'].some((period) => payload[period]?.modelThroughput)) {
+    // Optional live attribution must never evict aggregate usage or session detail.
+    // Omit the whole map so readers re-baseline rather than infer missing keys as zero.
+    buildOptions.omitModelThroughput = true;
+    payload = buildSyncPayload(summary, buildOptions);
+    body = JSON.stringify(payload);
+  }
+  if (Buffer.byteLength(body, 'utf8') > maxBytes && payload.history && typeof payload.history === 'object') {
+    // Component detail is additive. Never let it evict an existing project/session
+    // payload or turn a previously uploadable History V1 record into a 413.
+    buildOptions.omitHistoryTokenComponents = true;
+    payload = buildSyncPayload(summary, buildOptions);
+    body = JSON.stringify(payload);
+  }
+  if (
+    !buildOptions.omitAllTimeProjects
+    && Buffer.byteLength(body, 'utf8') > maxBytes
+    && projectEntries(payload?.allTime) > 0
+  ) {
+    buildOptions.omitAllTimeProjects = true;
+    payload = buildSyncPayload(summary, buildOptions);
+    body = JSON.stringify(payload);
+  }
+  if (Buffer.byteLength(body, 'utf8') > maxBytes) {
+    // Month detail is the first collection to grow large enough to threaten the
+    // ingest limit. Keep today's most useful live detail for as long as possible.
+    for (const periodName of ['month', 'today']) {
+      fitPeriodSessions(payload, summary, periodName, maxBytes);
+      body = JSON.stringify(payload);
+      if (Buffer.byteLength(body, 'utf8') <= maxBytes) break;
+    }
+  }
+  return { payload, body, bytes: Buffer.byteLength(body, 'utf8') };
+}
+
+function syncPayload(summary, options = {}) {
+  return serializeSyncPayload(summary, options).payload;
+}
+
+async function postSyncPayload(fetchFn, url, { headers = {}, summary, logger, syncSessionTitles = false, sessionTitleSyncGeneration, acknowledgedHistoryKey } = {}) {
+  const syncOptions = { syncSessionTitles, sessionTitleSyncGeneration };
+  if (acknowledgedHistoryKey && summary?.history !== undefined
+    && historyKey(historyForSync(summary.history, summary.periodWindows)) === acknowledgedHistoryKey) {
+    // Omit before cloning and sizing: the freed budget belongs to live detail.
+    syncOptions.omitHistory = true;
+  }
+  let serialized = serializeSyncPayload(summary, syncOptions);
+  if (serialized.payload?.allTimeProjectsOmitted === true && typeof logger === 'function') {
+    logger(`all-time project breakdown omitted; payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
+  }
+  if (serialized.payload?.sessionDetailsOmitted && typeof logger === 'function') {
+    const omitted = Object.entries(serialized.payload.sessionDetailsOmitted)
+      .map(([period, count]) => `${period}: ${count}`)
+      .join(', ');
+    logger(`session detail omitted for sync (${omitted}); payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
+  }
+  if (serialized.payload?.periodProjectsOmitted && typeof logger === 'function') {
+    const omitted = Object.entries(serialized.payload.periodProjectsOmitted)
+      .map(([period, count]) => `${period}: ${count}`)
+      .join(', ');
+    logger(`project detail omitted for sync (${omitted}); payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
+  }
+  if (serialized.payload?.history?.dailyTotalsOmitted > 0 && typeof logger === 'function') {
+    logger(`all-time daily history omitted from sync (${serialized.payload.history.dailyTotalsOmitted} days); payload reduced to ${serialized.bytes} bytes (budget ${SYNC_PAYLOAD_BUDGET_BYTES})`);
+  }
+  let response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
+  const retrySerialized = response.status === 413
+    ? serializeSyncPayload(summary, {
+        ...syncOptions,
+        maxBytes: LEGACY_SYNC_PAYLOAD_BUDGET_BYTES,
+        omitHistoryTokenComponents: true,
+        omitAllTimeProjects: true,
+        omitModelThroughput: true
+      })
+    : null;
+  const canRetryReduced = response.status === 413
+    && retrySerialized?.body !== serialized.body;
+  if (canRetryReduced) {
+    try { await response.arrayBuffer(); } catch (_) { /* best-effort drain before retry */ }
+    serialized = retrySerialized;
+    if (typeof logger === 'function') {
+      logger('hub rejected the payload; retrying once within the legacy 1 MiB budget without model timing detail, additive History components or all-time projects');
+    }
+    response = await fetchFn(url, { method: 'POST', headers, body: serialized.body });
+  }
+  return { response, payload: serialized.payload, retried: canRetryReduced };
+}
+
+const HISTORY_RECONCILE_MS = 15 * 60 * 1000;
+
+function historyKey(history) {
+  return createHash('sha256').update(JSON.stringify(history)).digest('hex');
+}
+
+// Producers serialize sends through the widget scheduler or agent ordered sink.
+// Keep one acknowledged wire baseline; older Hubs use History omission instead.
+function createSyncPayloadUploader({ now = Date.now } = {}) {
+  let identity = null;
+  let acknowledged = null;
+  let deltaBaseline = null;
+  let generation = 0;
+
+  function resetHistory({ preserveDelta = false } = {}) {
+    acknowledged = null;
+    if (!preserveDelta) deltaBaseline = null;
+    generation += 1;
+  }
+
+  async function upload(fetchFn, url, options = {}) {
+    const headers = new Headers(options.headers);
+    // Private destination equality, not a stored password verifier or wire ID.
+    const binding = [url, options.summary?.deviceId || options.summary?.id,
+      headers.get('authorization'), headers.get('x-token-monitor-secret')];
+    if (!identity || binding.some((value, index) => value !== identity[index])) {
+      resetHistory();
+      identity = binding;
+    }
+    const requestGeneration = ++generation;
+    const startedAt = now();
+    const baseline = acknowledged && startedAt >= acknowledged.at
+      && startedAt - acknowledged.at < HISTORY_RECONCILE_MS
+      ? acknowledged.key : undefined;
+    try {
+      const send = async (target, request) => {
+        const fullHeaders = new Headers(request.headers);
+        fullHeaders.set(UPLOAD_HEADER, UPLOAD_VERSION);
+        if (deltaBaseline) {
+          const body = JSON.stringify({ deviceId: options.summary.deviceId || options.summary.id,
+            baseRevision: deltaBaseline.revision, patch: statsPatch(deltaBaseline.payload, JSON.parse(request.body)) });
+          if (Buffer.byteLength(body) < Buffer.byteLength(request.body)) {
+            const response = await fetchFn(`${target}/delta`, { ...request, headers: Object.fromEntries(fullHeaders), body });
+            if (![400, 404, 405, 409, 413].includes(response.status)) return response;
+            // A lost ACK, evicted baseline or downgraded Hub needs exactly one
+            // current full snapshot. Never replay a queue of obsolete patches.
+            try { await response.arrayBuffer(); } catch (_) { /* drain before recovery */ }
+            deltaBaseline = null;
+          }
+        }
+        return fetchFn(target, { ...request, headers: Object.fromEntries(fullHeaders) });
+      };
+      const result = await postSyncPayload(send, url, { ...options,
+        acknowledgedHistoryKey: deltaBaseline ? undefined : baseline });
+      // Read a clone so existing callers still consume the legacy/minimal ACK.
+      const ack = result.response.ok ? await result.response.clone().json().catch(() => null) : null;
+      if (requestGeneration === generation) {
+        if (!ack?.ok || ack.deviceId !== (options.summary?.deviceId || options.summary?.id)) {
+          acknowledged = null;
+          deltaBaseline = null;
+        } else {
+          deltaBaseline = ack.upload?.version === 1 && typeof ack.upload.revision === 'string'
+            && ack.upload.revision.length > 0 && ack.upload.revision.length <= 128
+            ? { revision: ack.upload.revision, payload: JSON.parse(JSON.stringify(result.payload)) } : null;
+          if (hasOwn(result.payload, 'history')) {
+            // A 413 retry may have sent reduced history. Remember exactly what
+            // was accepted, so omitted detail can be restored on a later upload.
+            acknowledged = { key: historyKey(result.payload.history), at: startedAt };
+          }
+        }
+      }
+      return result;
+    } catch (error) {
+      if (requestGeneration === generation) { acknowledged = null; deltaBaseline = null; }
+      throw error;
+    }
+  }
+
+  upload.resetHistory = resetHistory;
+  return upload;
+}
+
+module.exports = {
+  LEGACY_SYNC_PAYLOAD_BUDGET_BYTES,
+  SYNC_PAYLOAD_BUDGET_BYTES,
+  buildSyncPayload,
+  createSyncPayloadUploader,
+  postSyncPayload,
+  serializeSyncPayload,
+  syncPayload
+};

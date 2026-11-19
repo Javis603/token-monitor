@@ -1,0 +1,801 @@
+'use strict';
+
+const fs = require('node:fs');
+const { createPromptCacheState, applyPromptCacheEntry } = require('../../sessionPromptCache');
+const { claudeSessionRoots } = require('./paths');
+const { readDesktopSessionTitles } = require('./desktopSessionTitles');
+const { envValue } = require('../../limits/providerHelpers');
+const { findSessionFiles } = require('../../sessionFiles');
+const { readT3SessionMeta } = require('../../t3SessionMetadata');
+const { normalizeSessionContext, shouldReadSessionContext } = require('../../sessionContext');
+const { normalizeReasoningEffort } = require('../../sessionLive');
+
+const TITLE_MAX_CODE_POINTS = 96;
+const TITLE_READ_CHUNK_BYTES = 256 * 1024;
+const MAX_METADATA_LINE_BYTES = 64 * 1024;
+// The turn boundary needs two fields, and on a real transcript they sit at
+// opposite ends of a record: whether a `user` record is a genuine prompt is
+// decided by the head (its content blocks), while `stop_reason` trails the
+// assistant text. Oversized records are read from those two bounded fragments
+// instead of being parsed whole — a pasted screenshot makes a real user record
+// of 1.9 MB, and the title scanner deliberately drops anything past
+// `MAX_METADATA_LINE_BYTES`, which used to drop the boundary riding the same pass.
+const LONG_LINE_HEAD_BYTES = 64 * 1024;
+const LONG_LINE_TAIL_BYTES = 8 * 1024;
+const titleCache = new Map();
+// Provenance of the winning title in the shared catalog-title ledger.
+const DESKTOP_TITLE_SOURCE = 'claude-desktop';
+const T3_TITLE_SOURCE = 't3';
+const MODEL_VERSION_END = '(?:$|[-@:\\[])';
+const CLAUDE_NATIVE_ONE_MILLION_MODEL = new RegExp(
+  `^claude-(?:opus-(?:5${MODEL_VERSION_END}|4-(?:7|8)${MODEL_VERSION_END})`
+  + `|sonnet-5${MODEL_VERSION_END}`
+  + `|fable-5(?:[.-]1)?${MODEL_VERSION_END}`
+  + `|mythos-(?:5(?:[.-]1)?${MODEL_VERSION_END}|preview${MODEL_VERSION_END}))`
+);
+const CLAUDE_PROVIDER_SONNET_FIVE_MODEL = new RegExp(
+  `^(?:(?:global|us|eu|apac|au|jp)\\.)?anthropic\\.claude-sonnet-5${MODEL_VERSION_END}`
+);
+
+function claudeContextWindow(model) {
+  const value = String(model || '').toLowerCase();
+  if (!value) return 0;
+  // Claude Code treats an explicit [1m] model option as extended context even
+  // for a custom provider spelling. The suffix is normally stripped before the
+  // request reaches the provider, but preserve the exact answer when a bridge
+  // records it in the response model.
+  if (value.includes('[1m]')) return 1_000_000;
+  // The bare Anthropic API ids below have a native 1M window. Provider
+  // spellings stay excluded except for Claude Code's recognized Sonnet 5 ids;
+  // other provider models use 200K unless launch configuration selected
+  // extended context, which the response model usually cannot prove after
+  // Claude Code strips the suffix.
+  if (CLAUDE_NATIVE_ONE_MILLION_MODEL.test(value)
+    || CLAUDE_PROVIDER_SONNET_FIVE_MODEL.test(value)) return 1_000_000;
+  // Claude Code's default assumption for standard and unrecognized model ids is
+  // 200K. Keep a best-effort gauge for third-party bridges (for example a
+  // DeepSeek model) instead of dropping the reading solely because its model id
+  // is not a Claude family.
+  return 200_000;
+}
+
+function reportedTokenCount(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  const number = Number(value);
+  return Number.isInteger(number) && number >= 0 ? number : null;
+}
+
+function tokenCount(value) {
+  return reportedTokenCount(value) ?? 0;
+}
+
+function clearContextUsage(state) {
+  state.contextObserved = true;
+  state.contextTokens = 0;
+  state.contextWindow = 0;
+}
+
+function currentContextUsage(usage) {
+  if (!usage || typeof usage !== 'object') return null;
+  // Claude Code rolls the top-level counters up across every message iteration
+  // in one request. Each iteration carries the context again, so that total is
+  // cost/accounting data rather than the context held after the response. The
+  // final serving iteration is the request's current state. A server-side
+  // fallback labels the terminal iteration `fallback_message` instead of
+  // `message`; the preceding `message` is the primary attempt that declined.
+  // Some real records also zero the rollup while retaining the only usable
+  // reading here.
+  if (Array.isArray(usage.iterations)) {
+    for (let index = usage.iterations.length - 1; index >= 0; index -= 1) {
+      const iteration = usage.iterations[index];
+      if (iteration?.type === 'message' || iteration?.type === 'fallback_message') return iteration;
+    }
+  }
+  return usage;
+}
+
+function applyContextUsage(state, model, usage) {
+  const measurement = currentContextUsage(usage);
+  if (!measurement) return;
+  const inputTokens = reportedTokenCount(measurement.input_tokens);
+  // `input_tokens` is required by Claude's usage shape. Treat a record without
+  // it as incomplete rather than replacing the last valid reading with zero.
+  if (inputTokens === null) return;
+  const optionalTokenCount = (key) => {
+    if (!Object.prototype.hasOwnProperty.call(measurement, key)) return 0;
+    return reportedTokenCount(measurement[key]);
+  };
+  const cacheCreationTokens = optionalTokenCount('cache_creation_input_tokens');
+  const cacheReadTokens = optionalTokenCount('cache_read_input_tokens');
+  // Cache counters are optional, but a counter that is present and malformed
+  // makes the whole measurement incomplete. Preserve the last valid reading.
+  if (cacheCreationTokens === null || cacheReadTokens === null) return;
+  const total = inputTokens + cacheCreationTokens + cacheReadTokens;
+  // A present `usage` object does not guarantee a measurement. Claude writes
+  // its own turns as assistant records too, with every counter zeroed: the
+  // session-limit notice, an API error, and the "No response requested."
+  // acknowledgement. Accepting one as a reading blanks a gauge whose window
+  // still holds the previous turn, so treat zero occupancy as unreported.
+  if (total === 0) return;
+  state.contextObserved = true;
+  // Match Claude Code's status-line `used_percentage`: it is the current API
+  // input occupancy and deliberately excludes this response's output_tokens.
+  state.contextTokens = total;
+  state.contextWindow = claudeContextWindow(model);
+}
+
+// Return the complete message-level `usage` object once it has been written.
+// `usage` is the last field of `message`, so a tail that stops inside it is a
+// record still being appended. Reading it then would publish a partial
+// occupancy, because a cache counter the writer has not reached yet is
+// indistinguishable from the optional one a complete response may legitimately
+// omit. Counting brace depth from the opening brace proves closure on the
+// bytes alone, so a complete final record is still read when the writer never
+// emitted its trailing newline.
+function closedUsageObject(text) {
+  const header = /"usage"\s*:\s*\{/.exec(text);
+  if (!header) return '';
+  const start = header.index + header[0].length - 1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === '{') depth += 1;
+    else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return text.slice(start, index + 1);
+    }
+  }
+  return '';
+}
+
+function contextUsageFromFragments(head, tail) {
+  // Tool inputs are arbitrary JSON and may contain their own `model` and
+  // `usage` fields. Claude writes the message-level usage after content, so
+  // the final occurrence is the delimiter for the response measurement.
+  const usageAt = tail.lastIndexOf('"usage"');
+  if (usageAt < 0) return null;
+  const usageText = tail.slice(usageAt);
+  // A record still being written has not closed its usage object yet, so the
+  // counters that are present measure only part of the next request.
+  const usageJson = closedUsageObject(usageText);
+  if (!usageJson) return null;
+  let usage;
+  try {
+    usage = JSON.parse(usageJson);
+  } catch (_) {
+    return null;
+  }
+  const contentAt = head.indexOf('"content"');
+  const headModelAt = head.indexOf('"model"');
+  let model = '';
+  // Trust a model in the head only when it precedes top-level message content.
+  // Otherwise a huge content value could contain an unrelated nested field.
+  if (headModelAt >= 0 && (contentAt < 0 || headModelAt < contentAt)) {
+    model = /"model"\s*:\s*"([^"]+)"/.exec(head.slice(headModelAt))?.[1] || '';
+  }
+  if (!model) {
+    // In Claude Code's usual ordering the top-level model follows content and
+    // is the last model field before usage. This also avoids a nested model in
+    // an earlier content block winning over the assistant message's model.
+    const matches = [...tail.slice(0, usageAt).matchAll(/"model"\s*:\s*"([^"]+)"/g)];
+    model = matches.length ? matches[matches.length - 1][1] : '';
+  }
+  return {
+    model,
+    usage
+  };
+}
+
+function cleanTitle(value) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim();
+  const chars = Array.from(text);
+  return chars.length <= TITLE_MAX_CODE_POINTS
+    ? text
+    : `${chars.slice(0, TITLE_MAX_CODE_POINTS - 1).join('')}…`;
+}
+
+// Whether a `user` record is something the user actually asked, as opposed to
+// the plumbing that shares the same type. Almost every user record is a
+// tool_result being handed back to the model (14070 of 16393 on one real
+// machine), and the client also writes meta and compaction bookkeeping there.
+// Only a real prompt starts a new turn, so only it may retire the previous
+// completion — treating a tool_result as one would mark every working session
+// as finished, which is the same mistake `tool_use` guards against.
+function isUserPrompt(entry) {
+  if (entry?.isMeta === true || entry?.isCompactSummary === true) return false;
+  const content = entry?.message?.content;
+  if (typeof content === 'string') return content.trim().length > 0;
+  if (!Array.isArray(content)) return false;
+  let asked = false;
+  for (const block of content) {
+    const type = block?.type;
+    if (type === 'tool_result') return false;
+    if (type === 'text' || type === 'image') asked = true;
+  }
+  return asked;
+}
+
+function applyLatestModel(state, entry) {
+  if (entry.isSidechain === true || entry.isApiErrorMessage === true) return;
+  const model = entry.message?.model;
+  if (typeof model === 'string' && model.trim() && model !== '<synthetic>') state.latestModel = model;
+}
+
+function applyReasoningEffort(state, entry) {
+  if (entry.isSidechain === true || entry.isApiErrorMessage === true) return;
+  // A non-null per-turn override describes this response more specifically
+  // than the session setting. Older clients may record neither field.
+  const hasConfiguration = Object.hasOwn(entry, 'effort') || entry.perTurnEffort != null;
+  const stopReason = entry.message?.stop_reason;
+  if (!hasConfiguration && !(typeof stopReason === 'string' && stopReason)) return;
+  state.reasoningEffort = normalizeReasoningEffort(entry.perTurnEffort ?? entry.effort);
+}
+
+function assistantMetadataFromTail(tail) {
+  // Keep a message-level stop reason when available: complete JSON can still
+  // describe a streamed response whose missing configuration supplies no clear.
+  for (const match of tail.matchAll(/"(?:model|stop_reason|usage)"\s*:/g)) {
+    try { return JSON.parse('{"message":{' + tail.slice(match.index)); } catch (_) { /* Not a complete message suffix. */ }
+  }
+  // Prove a candidate belongs to the root by parsing its complete suffix.
+  // Nested tool inputs leave unmatched enclosing braces and are rejected.
+  // This uses the existing 8 KiB fragment, never the unbounded message body.
+  for (const match of tail.matchAll(/"(?:effort|perTurnEffort|isSidechain|isApiErrorMessage|uuid|timestamp|sessionId)"\s*:/g)) {
+    try { return JSON.parse('{' + tail.slice(match.index)); } catch (_) { /* Nested or incomplete suffix. */ }
+  }
+  return null;
+}
+
+function applyMetadataLine(state, line) {
+  if (!line.length) return;
+  try {
+    const entry = JSON.parse(line.toString('utf8'));
+    applyPromptCacheEntry(state.promptCacheState, entry, 'claude');
+    if (entry?.type === 'custom-title') {
+      const candidate = cleanTitle(entry.customTitle);
+      if (candidate) state.customTitle = candidate;
+    } else if (entry?.type === 'ai-title') {
+      const candidate = cleanTitle(entry.aiTitle);
+      if (candidate) state.aiTitle = candidate;
+    } else if (entry?.type === 'assistant') {
+      applyLatestModel(state, entry);
+      applyReasoningEffort(state, entry);
+      // Claude stamps every assistant record with why it stopped. `tool_use`
+      // means it paused to run tools and is still mid-turn; anything else
+      // (`end_turn`, `stop_sequence`, `max_tokens`) means nothing further is
+      // being generated. Titles and this boundary ride one pass, so the turn
+      // state costs no extra read.
+      const stopReason = entry.message?.stop_reason;
+      if (typeof stopReason === 'string' && stopReason) {
+        state.stopReason = stopReason;
+        // Only a record that states why it stopped retires the prompt it
+        // answered. A null or missing reason is a streamed or aborted record
+        // whose turn state is unknown, and the oversized path already reads it
+        // that way; clearing the flag regardless would report the same record
+        // as finished at normal size and active past the head budget.
+        state.userSinceStop = false;
+      }
+      applyContextUsage(state, entry.message?.model, entry.message?.usage);
+    } else if (entry?.subtype === 'compact_boundary' || entry?.isCompactSummary === true) {
+      // Claude Code clears current_usage after compaction until the next API
+      // response. State the same absence so an old pre-compact gauge cannot
+      // survive while the compacted conversation is waiting for that response.
+      clearContextUsage(state);
+    } else if (isUserPrompt(entry)) {
+      // A prompt accepted after the last completion means that completion no
+      // longer describes the current turn: the old `end_turn` would otherwise
+      // latch, and the session would read as finished while the new turn is
+      // still being generated. The next assistant record restores the reading.
+      state.userSinceStop = true;
+      if (entry.type === 'user' && entry.isSidechain !== true) state.reasoningEffort = null;
+    }
+  } catch (_) { /* skip partial or unrelated lines */ }
+}
+
+function consumeMetadataBytes(state, chunk) {
+  const bytes = state.trailing.length > 0
+    ? Buffer.concat([state.trailing, chunk])
+    : chunk;
+  let lineStart = 0;
+  for (let index = 0; index < bytes.length; index += 1) {
+    if (bytes[index] !== 0x0a) continue;
+    if (state.droppingLongLine) {
+      // The bytes between the last cut and this newline belong to the record
+      // that is ending, so they are folded into the tail before it is read.
+      // Without this the scan saw only the stale tail, and a record closes
+      // with the field that matters: a 300 KiB assistant record puts its
+      // `stop_reason` in the next read chunk, so the previous reading
+      // survived and the row kept a turn state the transcript had replaced.
+      keepLongLineTail(state, bytes.subarray(lineStart, index));
+      applyLongLineFragments(state, true);
+      state.droppingLongLine = false;
+    } else {
+      let lineEnd = index;
+      if (lineEnd > lineStart && bytes[lineEnd - 1] === 0x0d) lineEnd -= 1;
+      applyMetadataLine(state, bytes.subarray(lineStart, lineEnd));
+    }
+    lineStart = index + 1;
+  }
+
+  const remainder = bytes.subarray(lineStart);
+  if (state.droppingLongLine) {
+    // Keep the tail as the record continues, so its last bytes are available
+    // when the newline finally arrives.
+    keepLongLineTail(state, remainder);
+  } else if (remainder.length > MAX_METADATA_LINE_BYTES) {
+    // Transcript messages can be arbitrarily large, and the title records this
+    // scanner was built for are tiny. Bound retained memory by holding only a
+    // head and a tail of the oversized record instead of the whole thing, and
+    // resume at the next newline.
+    state.longLineHead = Buffer.from(remainder.subarray(0, LONG_LINE_HEAD_BYTES));
+    state.longLineTail = Buffer.from(remainder.subarray(-LONG_LINE_TAIL_BYTES));
+    state.trailing = Buffer.alloc(0);
+    state.droppingLongLine = true;
+  } else {
+    state.trailing = Buffer.from(remainder);
+  }
+}
+
+function scanRange(fd, start, length, state, fsApi) {
+  let position = start;
+  let remaining = length;
+  while (remaining > 0) {
+    const buffer = Buffer.alloc(Math.min(TITLE_READ_CHUNK_BYTES, remaining));
+    const bytesRead = fsApi.readSync(fd, buffer, 0, buffer.length, position);
+    if (bytesRead <= 0) break;
+    consumeMetadataBytes(state, buffer.subarray(0, bytesRead));
+    position += bytesRead;
+    remaining -= bytesRead;
+  }
+  // A complete final JSONL record is valid even when the writer omitted its
+  // newline. Keep the bytes as trailing state too, so a partial concurrent
+  // write can still be completed on the next append-only scan.
+  if (state.droppingLongLine) {
+    // EOF is not necessarily the end of the record: a transcript being written
+    // right now stops mid-record, and the next tick reads only the bytes that
+    // were appended. The boundary is evaluated for whatever the fragments show
+    // so far, but they are kept and the record stays open, because the suffix
+    // that arrives later carries no head and could never be identified as an
+    // assistant record again. Consuming them here lost the stop_reason for
+    // good, and the previous turn's reading survived.
+    const head = state.longLineHead;
+    const tail = state.longLineTail;
+    applyLongLineFragments(state);
+    state.longLineHead = head || Buffer.alloc(0);
+    state.longLineTail = tail || Buffer.alloc(0);
+  } else if (state.trailing.length > 0) {
+    applyMetadataLine(state, state.trailing);
+  }
+}
+
+function statIdentity(stat) {
+  return `${String(stat.dev ?? '')}:${String(stat.ino ?? '')}`;
+}
+
+function emptyIndex() {
+  return {
+    customTitle: '',
+    aiTitle: '',
+    stopReason: '',
+    userSinceStop: false,
+    trailing: Buffer.alloc(0),
+    droppingLongLine: false,
+    longLineHead: Buffer.alloc(0),
+    longLineTail: Buffer.alloc(0),
+    promptCacheState: createPromptCacheState(),
+    contextObserved: false,
+    contextTokens: 0,
+    contextWindow: 0
+  };
+}
+
+// Accumulate the tail of an oversized record: the last bytes written are the
+// ones the next newline will close, so only the newest window is worth keeping.
+function keepLongLineTail(state, remainder) {
+  if (!remainder.length) return;
+  const previous = state.longLineTail || Buffer.alloc(0);
+  const combined = previous.length > 0 ? Buffer.concat([previous, remainder]) : remainder;
+  state.longLineTail = combined.length > LONG_LINE_TAIL_BYTES
+    ? Buffer.from(combined.subarray(combined.length - LONG_LINE_TAIL_BYTES))
+    : Buffer.from(combined);
+}
+
+// Which record an oversized line is cannot be read from the head alone. Claude
+// writes a record's `message` before its root `type`, so an oversized `content`
+// pushes `"type":"assistant"` past the head budget and leaves the root
+// discriminator in the tail. The message-level `role` is the reliable in-head
+// signal, because `message` precedes its own `content` and the first `"role"`
+// is therefore the message's own rather than text quoted inside it. The root
+// discriminator stays as a fallback for a record whose message carries no role,
+// accepted from either retained fragment.
+function oversizedRecordKind(head, tail) {
+  const role = /"role"\s*:\s*"(user|assistant)"/.exec(head);
+  if (role) return role[1];
+  if (/"type"\s*:\s*"assistant"/.test(head) || /"type"\s*:\s*"assistant"/.test(tail)) return 'assistant';
+  if (/"type"\s*:\s*"user"/.test(head) || /"type"\s*:\s*"user"/.test(tail)) return 'user';
+  return '';
+}
+
+// The boundary inside a record too large to parse. The fragments are partial
+// JSON by construction, so the fields are matched on the raw text: a user
+// record is a real prompt when its content opens with text or an image rather
+// than a tool_result, and an assistant record reports the stop_reason it ends
+// with. Anything else leaves the state untouched, exactly as a full parse of an
+// unrelated record would.
+function applyLongLineFragments(state, lineTerminated = false) {
+  const head = (state.longLineHead || Buffer.alloc(0)).toString('utf8');
+  const tail = (state.longLineTail || Buffer.alloc(0)).toString('utf8');
+  state.longLineHead = Buffer.alloc(0);
+  state.longLineTail = Buffer.alloc(0);
+  const kind = oversizedRecordKind(head, tail);
+  if (kind === 'assistant') {
+    // Effort only uses terminated JSONL records on this bounded path. Keep
+    // prior effort at EOF rather than scanning discarded content for closure.
+    const metadata = lineTerminated ? assistantMetadataFromTail(tail) : null;
+    // The flags can precede message content in the head or follow it in the
+    // root suffix. Never let a sidechain or synthetic error replace main effort.
+    const messageAt = head.indexOf('"message"');
+    let prefix = {};
+    if (messageAt >= 0) {
+      try { prefix = JSON.parse(head.slice(0, messageAt).replace(/,\s*$/, '') + '}'); } catch (_) { /* Incomplete prefix. */ }
+    }
+    // A complete root prefix can carry configuration even when the tail has
+    // no metadata. Missing configuration still supplies no clear on its own.
+    if (lineTerminated) {
+      let responseModel = metadata?.message?.model;
+      const contentAt = head.indexOf('"content"');
+      if (!responseModel && contentAt >= 0) {
+        // Parse only the closed message prefix, excluding arbitrary tool content.
+        try { responseModel = JSON.parse(head.slice(0, contentAt).replace(/,\s*$/, '') + '}}').message?.model; } catch (_) { /* Incomplete prefix. */ }
+      }
+      applyLatestModel(state, { ...prefix, ...metadata, message: { model: responseModel } });
+      applyReasoningEffort(state, { ...prefix, ...metadata });
+    }
+    // The usage reading is taken before the stop_reason guard below, matching
+    // the ordinary path, which applies usage whether or not stop_reason states
+    // anything. Claude persists `stop_reason: null` on some assistant records
+    // while still writing valid counters, and the quoted-value match below
+    // cannot see an unquoted null, so guarding first skipped a real reading on
+    // an oversized record that the same response would have updated at normal
+    // size. It cannot apply a half-written record instead: `stop_reason`
+    // precedes `usage` in `message`, so a tail carrying usage has already
+    // written the statement, and a record still being written yields no usage.
+    const contextUsage = contextUsageFromFragments(head, tail);
+    if (contextUsage) {
+      applyContextUsage(state, contextUsage.model, contextUsage.usage);
+      // Response metadata can trail large content. Use the existing bounded
+      // fragments, never a second file read or a parse of the content itself.
+      const fragments = `${head}\n${tail}`;
+      const timestamp = /"timestamp"\s*:\s*"([^"]+)"/.exec(tail)?.[1]
+        || /"timestamp"\s*:\s*"([^"]+)"/.exec(head)?.[1];
+      const id = /"id"\s*:\s*"([^"]+)"/.exec(head)?.[1];
+      applyPromptCacheEntry(state.promptCacheState, {
+        timestamp, type: 'assistant',
+        isSidechain: /"isSidechain"\s*:\s*true/.test(fragments),
+        isApiErrorMessage: /"isApiErrorMessage"\s*:\s*true/.test(fragments),
+        message: { id, usage: contextUsage.usage }
+      }, 'claude');
+    }
+    // stop_reason is the last occurrence, and it trails the assistant text.
+    const matches = [...tail.matchAll(/"stop_reason"\s*:\s*"([^"]*)"/g)];
+    const reason = matches.length ? matches[matches.length - 1][1] : '';
+    // A record still being written has no reason yet, and that absence is not
+    // the same as a finished turn: clearing the flag here would retire the
+    // prompt that started this record and let the previous completion show
+    // through again while the model is mid-answer. Only a stated reason is a
+    // reading.
+    if (!reason) return;
+    state.stopReason = reason;
+    state.userSinceStop = false;
+    return;
+  }
+  if (kind !== 'user') return;
+  // The bookkeeping flags also trail `message` on disk, so they can land in the
+  // tail of an oversized record. Both fragments are searched for the same
+  // reason the record type is: the field order puts them after the content.
+  const flags = `${head}\n${tail}`;
+  if (/"isMeta"\s*:\s*true/.test(flags)) return;
+  if (/"isCompactSummary"\s*:\s*true/.test(flags)) {
+    clearContextUsage(state);
+    state.promptCacheState.observation = null;
+    state.promptCacheState.previousMessage = '';
+    return;
+  }
+  // This has to agree with what isUserPrompt() accepts, or the same record is a
+  // prompt when it fits in one line and not one when it does not. That function
+  // takes a plain string content as a real prompt, so this path does too; the
+  // array form is still decided by its leading block, where a tool_result hands
+  // work back to the model and is not a prompt while text or an image is.
+  const contentAt = head.indexOf('"content"');
+  if (contentAt < 0) return;
+  const after = head.slice(contentAt);
+  // A string value is either blank (which the full parser also rejects) or a
+  // prompt. The capture stops at the first quote, so a value still being
+  // written is matched on the bytes that have arrived.
+  const asString = /^"content"\s*:\s*"([^"]*)/.exec(after);
+  if (asString) {
+    if (asString[1].trim().length > 0) {
+      state.userSinceStop = true;
+      if (lineTerminated && !/"isSidechain"\s*:\s*true/.test(flags)) state.reasoningEffort = null;
+    }
+    return;
+  }
+  if (/"type"\s*:\s*"tool_result"/.test(after.slice(0, 400))) return;
+  if (/"type"\s*:\s*"(text|image)"/.test(after.slice(0, 400))) {
+    state.userSinceStop = true;
+    if (lineTerminated && !/"isSidechain"\s*:\s*true/.test(flags)) state.reasoningEffort = null;
+  }
+}
+
+function readSessionTitle(filePath, deps = {}) {
+  const file = String(filePath || '');
+  if (!file) return '';
+  const cache = deps.cache || titleCache;
+  const fsApi = deps.fs || fs;
+  const cached = cache.get(file);
+  let fd;
+  try {
+    const stat = fsApi.statSync(file);
+    const identity = statIdentity(stat);
+    if (
+      cached
+      && cached.identity === identity
+      && cached.size === stat.size
+      && cached.mtimeMs === stat.mtimeMs
+    ) return cached.title;
+
+    const appendOnly = cached
+      && cached.identity === identity
+      && Number.isFinite(cached.size)
+      && stat.size > cached.size;
+    const index = appendOnly
+      ? {
+        customTitle: cached.customTitle || '',
+        aiTitle: cached.aiTitle || '',
+        stopReason: cached.stopReason || '',
+        userSinceStop: cached.userSinceStop === true,
+        ...(Object.hasOwn(cached, 'latestModel') ? { latestModel: cached.latestModel } : {}),
+        ...(Object.hasOwn(cached, 'reasoningEffort') ? { reasoningEffort: cached.reasoningEffort } : {}),
+        trailing: Buffer.isBuffer(cached.trailing) ? Buffer.from(cached.trailing) : Buffer.alloc(0),
+        droppingLongLine: cached.droppingLongLine === true,
+        // Carried across the append resume: a scan that stopped mid-record has
+        // to finish reading that record's boundary from the fragments it kept.
+        longLineHead: Buffer.isBuffer(cached.longLineHead) ? Buffer.from(cached.longLineHead) : Buffer.alloc(0),
+        longLineTail: Buffer.isBuffer(cached.longLineTail) ? Buffer.from(cached.longLineTail) : Buffer.alloc(0),
+        promptCacheState: { ...cached.promptCacheState },
+        contextObserved: cached.contextObserved === true,
+        contextTokens: tokenCount(cached.contextTokens),
+        contextWindow: tokenCount(cached.contextWindow)
+      }
+      : emptyIndex();
+    const start = appendOnly ? cached.size : 0;
+
+    fd = fsApi.openSync(file, 'r');
+    scanRange(fd, start, stat.size - start, index, fsApi);
+    const title = index.customTitle || index.aiTitle;
+    cache.set(file, {
+      ...index,
+      identity,
+      size: stat.size,
+      mtimeMs: stat.mtimeMs,
+      title
+    });
+    return title;
+  } catch (_) {
+    return cached?.title || '';
+  } finally {
+    if (fd !== undefined) {
+      try { fsApi.closeSync(fd); } catch (_) {}
+    }
+  }
+}
+
+/**
+ * The session's own account of whether a turn is still in progress. Claude
+ * writes `stop_reason` on every assistant record, so the newest one is the
+ * answer: `tool_use` means it is mid-turn running tools, anything else means
+ * nothing further is being generated. Shares the title scan and its cache, so
+ * asking for both costs one pass over the file.
+ */
+function readSessionTurnEnded(filePath, deps = {}) {
+  const file = String(filePath || '');
+  if (!file) return undefined;
+  const cache = deps.cache || titleCache;
+  // Reading the title first populates or refreshes the shared index; an
+  // unchanged file short-circuits both through the same size+mtime check.
+  readSessionTitle(file, deps);
+  const cached = cache.get(file);
+  // No index means nothing was read from this transcript, so there is no
+  // evidence either way and the caller must stay on its time window.
+  if (!cached) return undefined;
+  const stopReason = String(cached?.stopReason || '');
+  // A completion is only the current turn while nothing newer has been asked of
+  // the session. `tool_use` never counts: the client paused to run tools.
+  if (stopReason === '') return undefined;
+  return stopReason !== 'tool_use' && cached?.userSinceStop !== true;
+}
+
+function readSessionContext(filePath, deps = {}) {
+  const file = String(filePath || '');
+  if (!file) return undefined;
+  const cache = deps.cache || titleCache;
+  readSessionTitle(file, deps);
+  const cached = cache.get(file);
+  if (!cached?.contextObserved) return undefined;
+  return normalizeSessionContext(cached) || { contextTokens: 0, contextWindow: 0 };
+}
+
+function readSessionPromptCache(filePath, deps = {}) {
+  readSessionTitle(filePath, deps);
+  return (deps.cache || titleCache).get(String(filePath || ''))?.promptCacheState?.observation;
+}
+
+function resolveSessionMetadata(sessionIds, context) {
+  const { deps, home, metadata } = context;
+  const result = new Map();
+  const roots = claudeSessionRoots({
+    homeDir: home,
+    env: deps.env,
+    useEnvRoots: !deps.scopedHome
+  });
+  const invalidatedSessionIds = new Set();
+  const t3Metadata = readT3SessionMeta(sessionIds, {
+    ...(deps.claudeMetadataDeps || {}),
+    driver: 'claudeAgent',
+    cleanTitle,
+    homeDir: home,
+    env: deps.env,
+    useEnvRoot: !deps.scopedHome,
+    invalidatedSessionIds
+  });
+  // Keep a confirmed removal across watch ticks that cannot read the store.
+  // A fresh usable title can revive it; a miss cannot revive the frozen anchor.
+  for (const sessionId of sessionIds) {
+    if (!t3Metadata.has(sessionId) && deps.t3Titles?.[`claude:${sessionId}`] === null) invalidatedSessionIds.add(sessionId);
+  }
+  // Provenance is independent of transcript availability. Remove only a T3
+  // override confirmed unusable by V2 before reading native fallback metadata.
+  for (const sessionId of invalidatedSessionIds) {
+    const key = `claude:${sessionId}`;
+    // Fresh watch scans have no cached override, but their anchor may still
+    // carry it. Keep the deletion evidence local to this collection.
+    deps.invalidatedTitleKeys?.add(key);
+    const cached = metadata.get(key);
+    if (!cached?.t3Title) continue;
+    const invalidated = { ...cached, titleOnly: true, invalidatedTitle: cached.t3Title };
+    delete invalidated.title;
+    delete invalidated.t3Title;
+    metadata.set(key, invalidated);
+  }
+  // Read only when some transcript carries no title record of its own.
+  let desktopTitles;
+  const desktopTitle = (sessionId) => {
+    // Like CLAUDE_CONFIG_DIR, a scoped home never inherits the host's LocalAppData.
+    // A worker's copied env is case-sensitive even on Windows.
+    const localAppData = deps.scopedHome ? '' : String(envValue(deps.env || process.env, 'LOCALAPPDATA') || '').trim();
+    desktopTitles ||= readDesktopSessionTitles(home, sessionIds, localAppData);
+    const title = cleanTitle(desktopTitles.titles.get(sessionId));
+    if (desktopTitles.titles.has(sessionId) || !desktopTitles.unavailableSessionIds.has(sessionId)) return title;
+    const key = `claude:${sessionId}`;
+    const cached = metadata.get(key);
+    // An unavailable store cannot remove the last known Desktop title. The
+    // ledger also covers a fresh process with no in-memory reader cache.
+    return cleanTitle(cached?.catalogTitleSource === DESKTOP_TITLE_SOURCE ? cached.catalogTitle
+      : deps.catalogTitleSources?.[key] === DESKTOP_TITLE_SOURCE ? deps.t3Titles?.[key] : '');
+  };
+  const applyFile = (sessionId, filePath) => {
+    const cached = metadata.get(`claude:${sessionId}`);
+    let nativeMetadata = cached;
+    if (cached?.t3Title) {
+      nativeMetadata = { ...cached };
+      delete nativeMetadata.title;
+      delete nativeMetadata.t3Title;
+      if (cached.titleFallback) nativeMetadata.title = cached.titleFallback;
+    }
+    const meta = context.fileSessionMetadata(
+      sessionId,
+      filePath,
+      nativeMetadata
+    );
+    // A transcript supersedes any cached title-only catalog result. Titles are
+    // re-derived below, so a Desktop fallback that has since gone away clears.
+    delete meta.titleOnly;
+    delete meta.title;
+    delete meta.catalogTitle;
+    delete meta.catalogTitleSource;
+    const transcriptTitle = readSessionTitle(filePath, deps.claudeMetadataDeps);
+    const fallbackTitle = transcriptTitle ? '' : desktopTitle(sessionId);
+    const title = transcriptTitle || fallbackTitle;
+    // A Desktop title rides the catalog-title ledger. Once it is gone with
+    // nothing in its place, record the removal so anchored month/all-time rows
+    // drop that title instead of keeping it until the next full scan.
+    const key = `claude:${sessionId}`;
+    if (!title && !t3Metadata.has(sessionId) && deps.t3Titles?.[key]
+      && deps.catalogTitleSources?.[key] === DESKTOP_TITLE_SOURCE) {
+      invalidatedSessionIds.add(sessionId);
+      deps.invalidatedTitleKeys?.add(key);
+      // A later metadata pass in this collection must not replay the old
+      // anchor if an unrelated Desktop file is still unreadable.
+      meta.catalogTitle = null;
+      meta.catalogTitleSource = DESKTOP_TITLE_SOURCE;
+    }
+    // The turn boundary rides the same scan and its cache, so asking for it
+    // costs no second pass. Reported for every session rather than only a recent
+    // one: it is what stops a session reading as running, and gating it on the
+    // time window would keep a finished session green for that whole window.
+    //
+    // Emitted in all three states, not just the truthy one. A transcript that
+    // shows a new prompt has `false`, which is evidence of an active turn and
+    // has to reach the merge to clear a `true` from an earlier tick; omitting it
+    // left the stale completion in place and the row read Finished while the
+    // model was generating. `undefined` is reserved for "no evidence".
+    const index = (deps.claudeMetadataDeps?.cache || titleCache).get(filePath);
+    const turnEnded = index?.stopReason
+      ? index.stopReason !== 'tool_use' && index.userSinceStop !== true : undefined;
+    const sessionContext = shouldReadSessionContext(meta.lastUsedAt, context.now) && index?.contextObserved
+      ? normalizeSessionContext(index) || { contextTokens: 0, contextWindow: 0 } : undefined;
+    result.set(sessionId, {
+      ...meta,
+      ...(index && Object.hasOwn(index, 'latestModel') ? { latestModel: index.latestModel } : {}),
+      ...(index && Object.hasOwn(index, 'reasoningEffort') ? { reasoningEffort: index.reasoningEffort } : {}),
+      ...(index?.promptCacheState?.observation === undefined ? {}
+        : { promptCache: index.promptCacheState.observation }),
+      ...(title ? { title } : {}),
+      ...(fallbackTitle ? { catalogTitle: fallbackTitle, catalogTitleSource: DESKTOP_TITLE_SOURCE } : {}),
+      ...(turnEnded === undefined ? {} : { turnEnded }),
+      ...(sessionContext || {})
+    });
+  };
+  const projectFiles = findSessionFiles(roots.projects, sessionIds);
+  for (const [sessionId, filePath] of projectFiles) applyFile(sessionId, filePath);
+  const missingIds = new Set([...sessionIds].filter((sessionId) => !projectFiles.has(sessionId)));
+  const transcriptFiles = findSessionFiles(roots.transcripts, missingIds);
+  for (const [sessionId, filePath] of transcriptFiles) applyFile(sessionId, filePath);
+  // T3's sidebar title may have changed independently of the transcript's
+  // custom/AI title. Native sessions without a usable T3 title keep their own.
+  for (const sessionId of sessionIds) {
+    const cached = metadata.get(`claude:${sessionId}`);
+    // A failed lookup may reuse an explicit override, never an unlabelled title.
+    // A Desktop fallback shares the ledger but is no T3 override.
+    const t3Title = t3Metadata.get(sessionId)?.title || cached?.t3Title
+      || (!invalidatedSessionIds.has(sessionId)
+        && deps.catalogTitleSources?.[`claude:${sessionId}`] !== DESKTOP_TITLE_SOURCE
+        && deps.t3Titles?.[`claude:${sessionId}`]);
+    if (!t3Title) continue;
+    const transcriptMeta = result.get(sessionId);
+    result.set(sessionId, {
+      ...(transcriptMeta || cached || {}),
+      title: t3Title,
+      t3Title,
+      // Replace Desktop provenance, so a later T3 read miss still reuses it.
+      ...(transcriptMeta?.catalogTitleSource === DESKTOP_TITLE_SOURCE
+        || deps.catalogTitleSources?.[`claude:${sessionId}`] === DESKTOP_TITLE_SOURCE
+        ? { catalogTitleSource: T3_TITLE_SOURCE } : {}),
+      ...(transcriptMeta?.title ? { titleFallback: transcriptMeta.title } : {}),
+      ...(!transcriptMeta ? { titleOnly: true } : {})
+    });
+  }
+  return result;
+}
+
+module.exports = {
+  TITLE_MAX_CODE_POINTS,
+  TITLE_READ_CHUNK_BYTES,
+  claudeContextWindow,
+  cleanTitle,
+  readSessionContext,
+  readSessionPromptCache,
+  readSessionTitle,
+  readSessionTurnEnded,
+  resolveSessionMetadata
+};

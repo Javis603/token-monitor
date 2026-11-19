@@ -1,0 +1,78 @@
+/* tokens.css: Token Monitor's fixed dark palette */
+:root {
+  color-scheme: dark;
+
+  /* shared / non-color */
+  --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --r-sm: 10px;
+  --r-md: 12px;
+  --r-lg: 14px;
+  --maxw: min(1040px, calc(100% - 80px));
+  --navw: min(1120px, calc(100% - 48px));
+  --accent-grad: linear-gradient(90deg, var(--accent-from), var(--accent-to));
+  --bg-solid: #14171c;
+  --stage-bg: #07080b;
+  --stage-mid: #11141b;
+  --stage-border: rgba(255,255,255,0.13);
+  --stage-red: rgba(255,95,86,0.18);
+  --stage-blue: rgba(92,125,255,0.30);
+  --hero-text: #ffffff;
+  --hero-muted: rgba(255,255,255,0.68);
+  --hero-soft: rgba(255,255,255,0.52);
+  --hero-eyebrow: rgba(255,255,255,0.62);
+  --hero-fade-from: rgba(7,8,11,0);
+  --hero-primary-bg: #ffffff;
+  --hero-primary-fg: #0b0c10;
+  --hero-secondary-bg: rgba(255,255,255,0.08);
+  --hero-secondary-border: rgba(255,255,255,0.16);
+  --hero-secondary-fg: #ffffff;
+  --nav-bg: rgba(7,8,11,0.72);
+  --nav-border: rgba(255,255,255,0.08);
+  --nav-text: #f4f8ff;
+  --nav-muted: rgba(244,248,255,0.72);
+  --nav-control-bg: rgba(255,255,255,0.08);
+  --nav-control-border: rgba(255,255,255,0.14);
+  --nav-control-hover: rgba(255,255,255,0.14);
+  --widget-bg: rgba(40,44,52,0.42);
+  --widget-bg-strong: rgba(40,44,52,0.5);
+  --widget-border: rgba(232,238,244,0.24);
+  --widget-muted: #bac2cd;
+  --widget-text: #f3fbf7;
+  --widget-shadow: 0 34px 90px rgba(0,0,0,0.52), inset 0 1px 0 rgba(255,255,255,0.13);
+
+  /* DARK palette (default + no-preference) */
+  --bg: #14171c;
+  --chrome: #14171c;
+  --bg-glow: radial-gradient(circle at 82% -10%, rgba(42,51,64,0.9), transparent 60%);
+  --surface: rgba(255,255,255,0.05);
+  --surface-2: rgba(255,255,255,0.08);
+  --surface-border: rgba(255,255,255,0.10);
+  --text: #eaf2ff;
+  --text-strong: #f4f8ff;
+  --muted: #9aa7b8;
+  --accent: #5b9dff;
+  --accent-from: #22d3ee;
+  --accent-to: #5b9dff;
+  --link: #7fb0ff;
+  --warn: #f59e0b;
+  --warn-text: #fbbf24;
+  --danger: #ef4444;
+  --success: #34d399;
+  --meter-track: rgba(255,255,255,0.12);
+  --shadow: 0 14px 34px rgba(0,0,0,0.22);
+  --accent-ink: #07111f;
+  --btn-primary-bg: #ffffff;
+  --btn-primary-fg: #14171c;
+  --btn-secondary-bg: transparent;
+  --btn-secondary-border: rgba(255,255,255,0.25);
+  --btn-secondary-fg: #eaf2ff;
+  --on-strong: #14171c; /* text on an ink/light pill (solid; never a gradient) */
+}
+
+@media (max-width: 680px) {
+  :root {
+    --maxw: min(980px, calc(100% - 32px));
+    --navw: min(1080px, calc(100% - 20px));
+  }
+}

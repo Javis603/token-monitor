@@ -1,0 +1,87 @@
+/* base.css: reset, typography, layout primitives, motion */
+* { box-sizing: border-box; }
+html {
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+  overflow-x: clip;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  overflow-x: hidden;
+  overflow-x: clip;
+  color: var(--text);
+  background: var(--bg-glow), var(--bg);
+  background-attachment: fixed;
+  font-family: var(--sans);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; }
+img { max-width: 100%; display: block; }
+h1, h2, h3, p { margin-top: 0; }
+
+.shell { width: var(--maxw); margin-inline: auto; }
+.section { padding: clamp(3.25rem, 6vw, 5.5rem) 0; }
+
+.eyebrow {
+  margin: 0 0 0.9rem;
+  color: var(--link);
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0 0 1.25rem;
+  font-size: 4.9rem;
+  line-height: 0.95;
+  letter-spacing: 0;
+  color: var(--text-strong);
+}
+h2 {
+  margin: 0 0 1rem;
+  font-size: 2.65rem;
+  line-height: 1.08;
+  letter-spacing: 0;
+  color: var(--text-strong);
+}
+h3 { margin: 0 0 0.5rem; font-size: 1.15rem; letter-spacing: 0; }
+h1, h2, h3 { text-wrap: balance; }
+.lede, .tour-item-text { text-wrap: pretty; }
+
+.section-head { max-width: 720px; margin-bottom: 2.5rem; }
+.lede { max-width: 640px; color: var(--muted); font-size: 1.08rem; }
+.num { font-family: var(--mono); font-weight: 800; letter-spacing: 0; }
+
+.skip-link {
+  position: absolute; left: 1rem; top: -4rem; z-index: 20;
+  background: var(--text-strong); color: var(--on-strong);
+  padding: 0.75rem 1rem; border-radius: 999px;
+}
+.skip-link:focus { top: 1rem; }
+
+/* reveal-on-scroll */
+.reveal { opacity: 1; transform: none; }
+.js .reveal { opacity: .96; transform: translateY(10px); transition: opacity .6s ease, transform .6s ease; }
+.js .reveal.is-visible { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation-duration: 1ms !important; transition-duration: 1ms !important; }
+  .reveal, .js .reveal { opacity: 1; transform: none; }
+}
+
+@media (max-width: 900px) {
+  h1 { font-size: 3.85rem; }
+  h2 { font-size: 2.25rem; }
+}
+
+@media (max-width: 560px) {
+  h1 { font-size: 2.85rem; line-height: 1; }
+  h2 { font-size: 1.9rem; }
+  .lede { font-size: 1rem; }
+}

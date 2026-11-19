@@ -1,0 +1,310 @@
+'use strict';
+const assert = require('node:assert/strict');
+const test = require('node:test');
+const { fetchMuseWebLimits, normalizeMuseWebCookieHeader, parseMuseWebSubscription } = require('../../src/shared/providers/muse/webLimits');
+const { LIMIT_PROVIDER_FETCHERS } = require('../../src/shared/limits/registry');
+const { aggregateLimits } = require('../../src/shared/limits/core');
+const { actionID, free, paid, chunks, immutableChunks, fixtureFetch } = require('../fixtures/museWeb');
+const options = { museWebCookie: 'hatch_sess=fixture' };
+
+test('Muse web shares the existing limits provider and accepts full Cookie headers only', async () => {
+  assert.equal((await LIMIT_PROVIDER_FETCHERS.muse(options, { probe: true, fetch: fixtureFetch() })).status, 'ok');
+  assert.equal(LIMIT_PROVIDER_FETCHERS.museai, undefined);
+  assert.equal(normalizeMuseWebCookieHeader('Cookie: hatch_sess=fixture; other=value'), 'hatch_sess=fixture; other=value');
+  for (const value of ['bare-token', 'curl https://muse.ai', 'a=b\r\nx=y', '=value', 'a=b; broken']) assert.equal(normalizeMuseWebCookieHeader(value), '');
+  const row = await fetchMuseWebLimits({}, { env: {}, fetch: () => assert.fail('no credential') });
+  assert.equal(row.status, 'notConfigured');
+});
+
+test('Free, Power and Maximum expose only known weekly usage, reset and additional money balance', async () => {
+  for (const action of [free, paid, paid.replace('Maximum', 'Power')]) {
+    const row = await fetchMuseWebLimits(options, { env: {}, fetch: fixtureFetch({ action }) });
+    assert.equal(row.status, 'ok');
+    assert.equal(row.accountKey, '');
+    assert.equal(row.windows[0].kind, 'weekly');
+    assert.equal(row.windows[0].windowMinutes, 10080);
+    assert.equal(row.windows[0].resetsAt, new Date(1790634838000).toISOString());
+    assert.equal(row.windows[0].used, null);
+    assert.equal(row.windows[0].limit, null);
+    assert.equal(row.windows[0].remaining, null);
+    assert.equal(row.windows[0].usedPercent, action === free ? 28 : 3);
+    if (action === free) assert.equal(row.windows.length, 1);
+    else {
+      assert.equal(row.planLabel, action.includes('Power') ? 'Power' : 'Maximum');
+      assert.equal(row.windows[0].resetDescription, '2.8B tokens left');
+      assert.equal(row.windows[1].remaining, 60);
+      assert.equal(row.windows[1].currency, 'USD');
+      assert.equal(row.windows[1].metric, 'credits');
+      assert.equal(row.windows[1].usedPercent, null);
+      assert.equal(row.windows[1].showMeter, false);
+    }
+  }
+  for (const text of ['1:{"success":false}', free.replace('"percentUsed":28', '"percentUsed":null'), free.replace('1790634838', '"invalid"')]) assert.throws(() => parseMuseWebSubscription(text));
+});
+
+test('discovery keeps cookies off chunks, caches success and rediscovers a stale action once', async () => {
+  for (const stored of [null, '40aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa']) {
+    const state = new Map(stored ? [['muse:web:actionID', stored]] : []);
+    const calls = [];
+    const deps = { env: {}, providerRuntimeState: state, fetch: fixtureFetch({ onRequest: (path, init) => {
+      calls.push([path, init.method]);
+      if (path.startsWith('/_next/')) assert.equal(init.headers.Cookie, undefined);
+      else assert.equal(init.headers.Cookie, options.museWebCookie);
+      assert.equal(init.redirect, 'manual');
+      assert.equal(init.credentials, 'omit');
+      if (init.method === 'POST') {
+        assert.equal(init.headers['Sec-Fetch-Site'], 'same-origin');
+        assert.deepEqual(JSON.parse(init.body), [{ includeAgreement: true }]);
+      }
+    } }) };
+    assert.equal((await fetchMuseWebLimits(options, deps)).status, 'ok');
+    assert.equal(state.get('muse:web:actionID'), actionID);
+    assert.equal(calls.filter(([, method]) => method === 'POST').length, stored ? 2 : 1);
+    calls.length = 0;
+    assert.equal((await fetchMuseWebLimits(options, deps)).status, 'ok');
+    assert.deepEqual(calls, [['/', 'POST']]);
+  }
+});
+
+test('discovery accepts the immutable chunk layout muse.ai serves today', async () => {
+  const row = await fetchMuseWebLimits(options, { env: {}, fetch: fixtureFetch({ chunks: immutableChunks }) });
+  assert.equal(row.status, 'ok');
+  assert.equal(row.windows[0].usedPercent, 28);
+});
+
+test('stale actions answered with 400, 404 or 409 rediscover once and cache the new id', async () => {
+  for (const status of [400, 404, 409]) {
+    const state = new Map([['muse:web:actionID', 'stale']]);
+    let posts = 0;
+    const row = await fetchMuseWebLimits(options, { providerRuntimeState: state, fetch: async (url, init) => {
+      const path = new URL(url).pathname;
+      if (init.method === 'POST') {
+        posts++;
+        return init.headers['Next-Action'] === 'stale' ? new Response('stale action', { status }) : new Response(free);
+      }
+      return new Response(chunks[path] || '');
+    } });
+    assert.equal(row.status, 'ok', String(status));
+    assert.equal(posts, 2);
+    assert.equal(state.get('muse:web:actionID'), actionID);
+  }
+});
+
+test('transient action failures keep the cached id for the next refresh', async () => {
+  const state = new Map([['muse:web:actionID', actionID]]);
+  const row = await fetchMuseWebLimits(options, { providerRuntimeState: state, fetch: async () => new Response('', { status: 500 }) });
+  assert.equal(row.status, 'unavailable');
+  assert.equal(state.get('muse:web:actionID'), actionID);
+});
+
+test('HTTP errors, auth redirects, malformed responses and timeouts cannot become healthy zero usage', async () => {
+  for (const [status, expected] of [[401, 'unauthorized'], [403, 'unauthorized'], [429, 'sourceRateLimited'], [500, 'unavailable']]) {
+    const row = await fetchMuseWebLimits(options, { fetch: async () => new Response('', { status }) });
+    assert.equal(row.status, expected);
+    assert.deepEqual(row.windows, []);
+  }
+  for (const [status, headers] of [[307, { Location: 'https://auth.muse.ai/login' }], [403, { 'cf-mitigated': 'challenge' }]]) {
+    const row = await fetchMuseWebLimits(options, { fetch: async () => new Response('', { status, headers }) });
+    assert.equal(row.status, status === 307 ? 'unauthorized' : 'unavailable');
+  }
+  const state = new Map();
+  assert.equal((await fetchMuseWebLimits(options, { providerRuntimeState: state, fetch: fixtureFetch({ action: '1:{"success":false}' }) })).status, 'unavailable');
+  assert.equal(state.size, 0);
+  const timed = await fetchMuseWebLimits(options, { museWebFetchTimeoutMs: 10, fetch: () => new Promise(() => {}) });
+  assert.equal(timed.status, 'unavailable');
+});
+
+test('the native Node transport is injected and cancellation stops discovery before more requests', async () => {
+  const controller = new AbortController();
+  let requests = 0;
+  const row = await fetchMuseWebLimits(options, {
+    signal: controller.signal,
+    fetch: () => assert.fail('must use the injected Node transport'),
+    museWebFetch: fixtureFetch({ onRequest: () => { requests++; controller.abort(); } })
+  });
+  assert.equal(row.status, 'unavailable');
+  assert.equal(requests, 1);
+});
+
+test('action discovery is bounded and a second stale action is not cached', async () => {
+  let requests = 0;
+  const result = await fetchMuseWebLimits(options, { fetch: async (_url) => {
+    requests++;
+    return new Response(new URL(_url).pathname === '/'
+      ? Array.from({ length: 120 }, (_, i) => `<script src="/_next/static/chunks/${i}.js"></script>`).join('') : '');
+  } });
+  assert.equal(result.status, 'unavailable');
+  assert.equal(requests, 97);
+  const state = new Map([['muse:web:actionID', 'old']]);
+  const row = await fetchMuseWebLimits(options, { providerRuntimeState: state, fetch: fixtureFetch({ action: 'Server action not found.', actionStatus: 404 }) });
+  assert.equal(row.status, 'unavailable');
+  assert.equal(state.size, 0);
+});
+
+test('anonymous Meta Muse web rows select one reading across synced devices', async () => {
+  const row = await fetchMuseWebLimits(options, { fetch: fixtureFetch() });
+  const summary = aggregateLimits([
+    { deviceId: 'a', limits: { providers: [row] } },
+    { deviceId: 'b', limits: { providers: [row] } }
+  ]);
+  assert.equal(summary.providers.length, 1);
+  assert.equal(summary.providers[0].sourceDeviceId, 'b');
+});
+
+test('negative Muse usage is unavailable rather than a full allowance', async () => {
+  const action = free.replace('"percentUsed":28', '"percentUsed":-1');
+  const state = new Map();
+  const row = await fetchMuseWebLimits(options, { providerRuntimeState: state, fetch: fixtureFetch({ action }) });
+  assert.equal(row.status, 'unavailable');
+  assert.deepEqual(row.windows, []);
+  assert.equal(state.size, 0);
+});
+
+test('Muse discovery skips an unrelated failed chunk and reaches valid later batches', async () => {
+  const { chunks } = require('../fixtures/museWeb');
+  for (const failure of ['http404', 'network']) {
+    const paths = ['gone', ...Array.from({ length: 7 }, (_, i) => `other${i}`), 'app', 'loader'];
+    const requests = [];
+    const fetch = async (url, init) => {
+      const path = new URL(url).pathname;
+      requests.push(path);
+      if (init.method === 'POST') return new Response(free);
+      if (path === '/') return new Response(paths.map((name) => `<script src="/_next/static/chunks/${name}.js"></script>`).join(''));
+      assert.equal(init.headers.Cookie, undefined);
+      if (path.endsWith('/gone.js')) {
+        if (failure === 'network') throw new Error('fixture network failure');
+        return new Response('', { status: 404 });
+      }
+      return new Response(chunks[path] || '');
+    };
+    const row = await fetchMuseWebLimits(options, { fetch });
+    assert.equal(row.status, 'ok', failure);
+    assert.equal(row.windows[0].usedPercent, 28);
+    assert.ok(requests.includes('/_next/static/chunks/settings.js'));
+  }
+});
+
+test('skipping failed chunks never swallows Muse discovery cancellation', async () => {
+  const controller = new AbortController();
+  let requests = 0;
+  const row = await fetchMuseWebLimits(options, { signal: controller.signal, fetch: async () => {
+    requests++;
+    if (requests === 1) return new Response('<script src="/_next/static/chunks/app.js"></script>');
+    controller.abort();
+    throw new Error('cancelled chunk fixture');
+  } });
+  assert.equal(row.status, 'unavailable');
+  assert.equal(requests, 2);
+});
+
+for (const cliFails of [false, true]) test(`Muse first/last saved slot transitions retire superseded Web quota and preserve CLI, cliFails=${cliFails}`, async () => {
+  const { createLimitsRuntime } = require('../../src/shared/limits/runtime');
+  let slots = [];
+  let failed = false;
+  let environmentOffline = false;
+  let cliCalls = 0;
+  const identities = new Map();
+  const runtime = createLimitsRuntime({ limitProviders: ['muse'] }, {
+    autoStart: false, autoRetry: false,
+    resolveConfigSnapshot: (_scope, config) => ({ ...config, museAccountSlots: slots }),
+    providerFetchers: { muse: LIMIT_PROVIDER_FETCHERS.muse },
+    onAccountSlotResolved: (_provider, id, identity) => identities.set(id, identity.accountKey),
+    env: { PATH: '/fixture', TOKEN_MONITOR_MUSE_WEB_COOKIE: 'hatch_sess=environment' },
+    platform: 'linux', existsSync: path => path === '/fixture/muse',
+    execFile: (_cmd, _args, _opts, callback) => {
+      cliCalls++;
+      queueMicrotask(() => callback(failed ? new Error('fixture offline') : null,
+        JSON.stringify({ schemaVersion: 1, allowance: { window: { usedPercent: 17 } } }), ''));
+      return { stdin: { end() {} } };
+    },
+    museWebFetch: (url, init) => fixtureFetch({
+      actionStatus: environmentOffline && init.headers.Cookie === 'hatch_sess=environment' ? 503 : 200
+    })(url, init)
+  });
+  try {
+    await runtime.refresh({ provider: 'muse' }, 'settings-change');
+    const initial = runtime.getSnapshot().providers;
+    assert.equal(initial.length, 2);
+    assert.equal(initial.find(row => row.source === 'web').accountKey, '');
+    slots = [{ id: 'saved', enabled: true, values: { museWebCookie: 'hatch_sess=saved' } }];
+    failed = cliFails;
+    environmentOffline = true;
+    await runtime.refresh({ provider: 'muse' }, 'settings-change');
+    const entering = runtime.getSnapshot().providers.filter(row => row.source === 'web');
+    assert.equal(entering.length, 2);
+    const anonymous = entering.find(row => !row.accountKey);
+    assert.equal(anonymous?.status, 'unavailable');
+    assert.equal(anonymous?.windows[0]?.usedPercent, 28);
+    assert.equal(entering.find(row => row.accountKey)?.status, 'ok');
+    environmentOffline = false;
+    await runtime.refresh({ provider: 'muse' }, 'settings-change');
+    const rows = runtime.getSnapshot().providers;
+    const web = rows.filter(row => row.source === 'web');
+    assert.equal(web.length, 2, 'only the environment and saved Web credentials remain');
+    assert.ok(web.every(row => row.accountKey && row.status === 'ok'));
+    assert.equal(new Set(web.map(row => row.accountKey)).size, 2);
+    const cli = rows.filter(row => row.source === 'cli');
+    assert.equal(cli.length, 1);
+    assert.equal(cli[0].windows[0].usedPercent, 17);
+    assert.equal(cli[0].status, cliFails ? 'unavailable' : 'ok');
+    assert.equal(cliCalls, 3);
+    await runtime.refresh({ provider: 'muse', accountKey: web[0].accountKey });
+    assert.equal(cliCalls, 3, 'scoped Web refresh does not invoke CLI');
+    assert.equal(runtime.getSnapshot().providers.length, 3);
+    // Removing the final saved account returns the remaining environment
+    // credential to the legacy anonymous lane; its old keyed row must leave.
+    assert.ok(identities.get('saved'));
+    runtime.clear({ provider: 'muse', accountKey: identities.get('saved') });
+    slots = [];
+    environmentOffline = true;
+    await runtime.refresh({ provider: 'muse' }, 'settings-change');
+    const leaving = runtime.getSnapshot().providers.filter(row => row.source === 'web');
+    assert.equal(leaving.length, 1);
+    assert.equal(leaving[0].accountKey, identities.get('environment'));
+    assert.equal(leaving[0].status, 'unavailable');
+    assert.equal(leaving[0].windows[0]?.usedPercent, 28);
+    const beforeScoped = cliCalls;
+    await runtime.refresh({ provider: 'muse', accountKey: identities.get('environment') }, 'settings-change');
+    assert.equal(cliCalls, beforeScoped, 'a retained keyed Web refresh must stay off the CLI lane');
+    const retained = runtime.getSnapshot().providers.find(row => row.accountKey === identities.get('environment'));
+    assert.equal(retained.source, 'web');
+    assert.equal(retained.windows[0]?.usedPercent, 28);
+    environmentOffline = false;
+    await runtime.refresh({ provider: 'muse' }, 'settings-change');
+    const remaining = runtime.getSnapshot().providers;
+    assert.equal(remaining.filter(row => row.source === 'web').length, 1, 'removing the last slot must not duplicate the environment reading');
+    assert.equal(remaining.find(row => row.source === 'web').accountKey, '');
+    assert.equal(remaining.find(row => row.source === 'web').status, 'ok');
+    assert.equal(remaining.find(row => row.source === 'cli').windows[0].usedPercent, 17);
+    assert.equal(remaining.find(row => row.source === 'cli').status, cliFails ? 'unavailable' : 'ok');
+  } finally { runtime.stop(); }
+});
+
+test('Muse scoped or aborted slot snapshots cannot retire the anonymous Web lane', async () => {
+  const { fetchAccountSlotSnapshot } = require('../../src/shared/providers/muse/limits');
+  const previousLimits = { providers: [{ provider: 'muse', source: 'web', status: 'ok', windows: [] }] };
+  const slotOptions = { museAccountSlots: [{ id: 'saved' }], previousLimits };
+  const row = { provider: 'muse', source: 'web', accountKey: 'saved-key', status: 'ok', windows: [] };
+  const scoped = await fetchAccountSlotSnapshot({ ...slotOptions, limitRefreshScope: { provider: 'muse', accountKey: 'saved-key' } }, {}, async () => [row]);
+  assert.deepEqual(scoped, [row]);
+  const controller = new AbortController();
+  const aborted = await fetchAccountSlotSnapshot(slotOptions, { env: {}, existsSync: () => false, signal: controller.signal }, async () => {
+    controller.abort();
+    return [row];
+  });
+  assert.equal(aborted.some(item => item.removed && item.source === 'web'), false);
+});
+
+test('Muse leaving slot mode does not retire keyed Web rows on scoped or aborted snapshots', async () => {
+  const { fetchAccountSlotSnapshot } = require('../../src/shared/providers/muse/limits');
+  const previousLimits = { providers: [{ provider: 'muse', source: 'web', accountKey: 'environment-key', status: 'ok', windows: [] }] };
+  const rows = [{ provider: 'muse', source: 'web', status: 'ok', windows: [] }];
+  const scoped = await fetchAccountSlotSnapshot({ previousLimits, limitRefreshScope: { provider: 'muse', accountKey: 'environment-key' } }, {}, async () => [...rows]);
+  assert.deepEqual(scoped, rows);
+  const controller = new AbortController();
+  const aborted = await fetchAccountSlotSnapshot({ previousLimits }, { signal: controller.signal }, async () => {
+    controller.abort();
+    return [...rows];
+  });
+  assert.deepEqual(aborted, rows);
+});

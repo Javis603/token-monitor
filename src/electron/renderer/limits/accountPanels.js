@@ -1,0 +1,296 @@
+'use strict';
+
+// A form descriptor is a renderer-safe snapshot from main, never an account
+// declaration. The panel is DOM and a busy guard only: saving, clearing and the
+// message line belong to the caller, which saves through limits:saveCredential
+// and draws the message from state so a stats re-render cannot wipe it.
+//
+// Layout comes from the form's block lists: `top` sits beside the actions and
+// stays visible once the account is linked (a region select), `manual` is the
+// paste panel that hides when linked. A block is a note, a numbered step list,
+// or one of the form's fields.
+
+function controlId(field) {
+  return `${field.key}Input`;
+}
+
+function fieldValue(document, key) {
+  return document.getElementById(`${key}Input`)?.value || '';
+}
+
+// A value that follows a select: `{ byField, values }` picks by the select's
+// current value and falls back to its first entry.
+function byFieldValue(document, spec, settings) {
+  const current = fieldValue(document, spec.byField) || settings?.[spec.byField];
+  return spec.values[current] ?? Object.values(spec.values)[0];
+}
+
+// The page Open lands on. `byField` follows a select before its change is
+// saved; `byStatus` follows the provider's last successful poll (MiniMax's
+// region), with `default` until there is one. A form with both uses statusUrls
+// only when the select has no explicit URL (for example Auto).
+function resolveOpenUrl(form, { document, provider, settings }) {
+  const { openUrl } = form;
+  if (openUrl.url) return openUrl.url;
+  let url;
+  if (openUrl.byField) {
+    const selected = openUrl.urls[fieldValue(document, openUrl.byField) || settings?.[openUrl.byField]];
+    url = selected || openUrl.statusUrls?.[provider?.[openUrl.byStatus]] || openUrl.default;
+  } else url = openUrl.urls[provider?.[openUrl.byStatus]] || openUrl.default;
+  return openUrl.pathByField ? new URL(byFieldValue(document, openUrl.pathByField, settings), url).href : url;
+}
+
+// Selects and plain-text settings mirror what is stored; secrets never do.
+// Dependent hints and conditional notes then follow the current values.
+function syncCredentialFields(form, { document, settings }) {
+  if (form.credentialChoice) {
+    const choice = document.getElementById(controlId(form.credentialChoice));
+    const configured = form.credentialChoice.fields.find((key) => settings?.[form.fields.find((field) => field.key === key).configuredKey]) || '';
+    // A stats/settings redraw must not reset a type the user is drafting.
+    // A changed effective credential (save, clear, or another window) may.
+    if (choice && choice.dataset.configuredCredential !== configured) {
+      choice.value = configured || form.credentialChoice.fields[0];
+      choice.dataset.configuredCredential = configured;
+    }
+  }
+  for (const field of form.fields) {
+    const control = document.getElementById(controlId(field));
+    if (!control) continue;
+    if (field.input === 'select') {
+      if (form.multipleAccounts && field.key === 'claudeWebOrganizationId') continue;
+      const stored = settings?.[field.key];
+      control.value = [...(control.options || field.options)].some((option) => option.value === stored) ? stored : field.options[0].value;
+    } else if (field.prefill && !control.value && document.activeElement !== control) {
+      control.value = settings?.[field.key] || '';
+    }
+  }
+  refreshFieldDependents(form, { document });
+}
+
+function refreshFieldDependents(form, { document }) {
+  for (const hint of document.querySelectorAll?.(`[data-credential-form="${form.id}"][data-by-field]`) || []) {
+    const spec = JSON.parse(hint.dataset.byField);
+    if (hint.dataset.dependent === 'note' || hint.dataset.dependent === 'credential') {
+      hint.classList.toggle('hidden', !spec.values.includes(fieldValue(document, spec.field)));
+      if (hint.dataset.dependent === 'credential' && hint.dataset.credentialField) {
+        const control = document.getElementById(`${hint.dataset.credentialField}Input`);
+        if (control) {
+          control.disabled = hint.classList.contains('hidden');
+          if (control.disabled) control.value = '';
+        }
+      }
+    } else {
+      hint.textContent = byFieldValue(document, spec);
+    }
+  }
+}
+
+function createCredentialPanel(form, { document, translate, onToggle, onOpen, onClear, onSave, onFieldChange, onFieldError }) {
+  const { id } = form;
+  const element = (tag, elementId, className = '') => {
+    const node = document.createElement(tag);
+    if (elementId) node.id = `${id}${elementId}`;
+    if (className) node.className = className;
+    return node;
+  };
+  const localized = (node, key) => {
+    node.dataset.i18n = key;
+    node.textContent = translate(key);
+    return node;
+  };
+  const dependent = (node, kind, spec) => {
+    node.dataset.credentialForm = id;
+    node.dataset.dependent = kind;
+    node.dataset.byField = JSON.stringify(spec);
+    return node;
+  };
+
+  const group = element('div', 'AccountGroup', 'settings-group cursor-account-group');
+  const toggle = element('button', 'SettingsToggle', 'settings-group-header cursor-settings-toggle');
+  toggle.type = 'button';
+  toggle.setAttribute('aria-expanded', 'false');
+  toggle.setAttribute('aria-controls', `${id}SettingsDetails`);
+  const summary = element('span', '', 'cursor-settings-summary');
+  const status = element('span', 'AccountStatus', 'cursor-status-pill');
+  status.textContent = translate(form.emptyKey);
+  const disclosure = element('span', '', 'cursor-disclosure-icon');
+  disclosure.setAttribute('aria-hidden', 'true');
+  summary.append(status, disclosure);
+  toggle.append(localized(document.createElement('span'), form.titleKey), summary);
+  const details = element('div', 'SettingsDetails', 'cursor-settings-details hidden');
+  const actions = element('div', '', 'settings-actions');
+  const open = localized(element('button', 'OpenBrowser'), form.openKey);
+  const clear = localized(element('button', 'LogoutButton', 'hidden'), form.clearKey);
+  actions.append(open, clear);
+
+  const stepPart = (part) => {
+    if (typeof part === 'string') return localized(document.createElement('span'), part);
+    if (part.text) return document.createTextNode(part.text);
+    const code = document.createElement('code');
+    if (typeof part.code === 'string') code.textContent = part.code;
+    else dependent(code, 'code', part.code);
+    return code;
+  };
+  const inputs = new Map();
+  const independentSettingSaves = new Map();
+  const control = (field) => {
+    const input = document.createElement(field.input === 'select' || field.input === 'textarea' ? field.input : 'input');
+    inputs.set(field, input);
+    input.id = controlId(field);
+    input.className = 'credential-input';
+    if (field.input === 'select') {
+      if (field.key === 'claudeWebOrganizationId') input.disabled = true;
+      for (const option of field.options) {
+        const node = localized(document.createElement('option'), option.labelKey);
+        node.value = option.value;
+        input.append(node);
+      }
+      input.addEventListener('change', () => {
+        refreshFieldDependents(form, { document });
+        if (field.submitWithCredential === false) {
+          const value = input.value;
+          const previous = independentSettingSaves.get(field.key);
+          const pending = (previous || Promise.resolve()).catch(() => {}).then(() => onFieldChange?.(form, field, value));
+          independentSettingSaves.set(field.key, pending);
+          const settled = () => {
+            if (independentSettingSaves.get(field.key) === pending) independentSettingSaves.delete(field.key);
+          };
+          pending.then(settled, (error) => {
+            settled();
+            onFieldError?.(form, error);
+          });
+        } else onFieldChange?.(form, field, input.value);
+      });
+      return input;
+    }
+    if (field.input === 'textarea') input.rows = 3;
+    else input.type = field.input;
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    if (field.placeholderKey) {
+      input.dataset.i18nPlaceholder = field.placeholderKey;
+      input.placeholder = translate(field.placeholderKey);
+    } else if (field.placeholder) {
+      input.placeholder = field.placeholder;
+    }
+    if (field.ariaLabelKey) {
+      input.dataset.i18nAriaLabel = field.ariaLabelKey;
+      input.setAttribute('aria-label', translate(field.ariaLabelKey));
+    }
+    return input;
+  };
+  const blockContent = (spec) => {
+    if (spec.note) {
+      const note = localized(element('p', '', 'settings-note'), spec.note);
+      if (spec.when) dependent(note, 'note', spec.when);
+      return note;
+    }
+    if (spec.steps) {
+      const notes = element('p', '', 'settings-note');
+      for (const [index, step] of spec.steps.entries()) {
+        if (index) notes.append(document.createElement('br'));
+        const number = document.createElement('strong');
+        number.textContent = `${index + 1}.`;
+        notes.append(number);
+        for (const part of Array.isArray(step) ? step : [step]) notes.append(' ', stepPart(part));
+      }
+      return notes;
+    }
+    const field = form.fields.find((candidate) => candidate.key === spec.field);
+    const input = control(field);
+    if (!field.labelKey) return input;
+    const row = element('div', '', 'settings-row');
+    if (field.key === 'claudeWebOrganizationId') {
+      row.id = 'claudeWebOrganizationRow';
+      row.classList.add('hidden');
+    }
+    const label = localized(document.createElement('label'), field.labelKey);
+    label.setAttribute('for', input.id);
+    row.append(label, input);
+    return row;
+  };
+  const block = (spec) => {
+    const node = blockContent(spec);
+    if (spec.whenCredential) {
+      dependent(node, 'credential', { field: form.credentialChoice.key, values: [spec.whenCredential] });
+      const hidden = spec.whenCredential !== form.credentialChoice.fields[0];
+      node.classList.toggle('hidden', hidden);
+      if (spec.field) {
+        node.dataset.credentialField = spec.field;
+        inputs.get(form.fields.find((field) => field.key === spec.field)).disabled = hidden;
+      }
+    }
+    return node;
+  };
+
+  const manual = element('div', 'ManualPanel', 'credential-manual-panel');
+  if (form.credentialChoice) {
+    const row = element('div', '', 'settings-row');
+    const select = document.createElement('select');
+    select.id = controlId(form.credentialChoice);
+    const label = localized(document.createElement('label'), form.credentialChoice.labelKey);
+    label.setAttribute('for', select.id);
+    for (const key of form.credentialChoice.fields) {
+      const field = form.fields.find((field) => field.key === key);
+      const option = localized(document.createElement('option'), field.labelKey || field.ariaLabelKey);
+      option.value = key;
+      select.append(option);
+    }
+    select.value = form.credentialChoice.fields[0];
+    select.addEventListener('change', () => refreshFieldDependents(form, { document }));
+    row.append(label, select);
+    manual.append(row);
+  }
+  manual.append(...form.manual.map(block));
+  const submitActions = element('div', '', 'settings-actions');
+  const submit = localized(element('button', 'CredentialSubmit'), form.saveKey);
+  submitActions.append(submit);
+  manual.append(submitActions);
+  const error = element('div', 'ErrorMessage', 'settings-note error hidden');
+  error.setAttribute('role', 'alert');
+  const accountList = form.multipleAccounts ? element('div', 'WebAccountList', 'managed-account-list') : null;
+  details.append(actions, ...(accountList ? [accountList] : []), ...form.top.map(block), manual, error);
+  group.append(toggle, details);
+
+  toggle.addEventListener('click', () => onToggle(form));
+  open.addEventListener('click', () => onOpen(form));
+  clear.addEventListener('click', () => onClear(form));
+  let saving = false;
+  submit.addEventListener('click', async () => {
+    if (saving) return;
+    saving = true;
+    const choice = form.credentialChoice && document.getElementById(controlId(form.credentialChoice));
+    if (choice) choice.disabled = true;
+    submit.disabled = true;
+    submit.textContent = translate('settings.common.checking');
+    try {
+      // These settings save independently; wait for their writes so the key
+      // probe sees the selected region without persisting an implicit default.
+      try {
+        // A change queued while submission waits must finish too. Settled
+        // failures leave the queue so a later submission can retry normally.
+        while (independentSettingSaves.size) await Promise.all(independentSettingSaves.values());
+      } catch (_) {
+        return;
+      }
+      const values = Object.fromEntries([...inputs]
+        .filter(([field]) => field.submitWithCredential !== false)
+        .filter(([field]) => !form.credentialChoice?.fields.includes(field.key)
+          || field.key === fieldValue(document, form.credentialChoice.key))
+        .map(([field, input]) => [field.key, input.value]));
+      await onSave(form, values, () => {
+        for (const [field, input] of inputs) if (field.secret) input.value = '';
+      });
+    } finally {
+      saving = false;
+      if (choice) choice.disabled = false;
+      submit.disabled = false;
+      submit.textContent = translate(form.saveKey);
+    }
+  });
+  return group;
+}
+
+const api = { createCredentialPanel, refreshFieldDependents, resolveOpenUrl, syncCredentialFields };
+if (typeof module !== 'undefined') module.exports = api;
+if (typeof window !== 'undefined') window.TokenMonitorLimitAccountPanels = api;

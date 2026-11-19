@@ -1,0 +1,461 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+
+const {
+  CredentialStore,
+  credentialSettingsForRenderer,
+  hasCredentialSettings,
+  persistSettingsAndCredentials,
+  readRegularFileNoFollow,
+  stripCredentialSettings,
+  writePrivateJsonAtomic
+} = require('../../src/shared/credentialStore');
+
+function tempDataDir(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-credentials-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+test('stores credential settings in a versioned provider document', (t) => {
+  const dataDir = tempDataDir(t);
+  const store = new CredentialStore(dataDir);
+  store.replaceSettingsCredentials({
+    hubHostSecret: 'host-secret',
+    secret: 'client-secret',
+    claudeWebCookie: 'sessionKey=claude-secret',
+    deepseekApiKey: 'deepseek-key',
+    kimiWebAccessToken: 'kimi-web-token',
+    opencodeProfiles: { work: { cookie: 'auth=secret', enabled: true } },
+    openrouterProfiles: { personal: { apiKey: 'sk-or-secret', enabled: true } },
+    thirdPartyProfiles: {
+      relay: {
+        adapter: 'newapi-account',
+        baseUrl: 'https://api.example.com',
+        accessToken: 'system-access',
+        userId: '42',
+        enabled: true
+      }
+    },
+    zaiTeamOrganizationId: 'organization-id',
+    traeAccessToken: 'trae-token',
+    traeDeviceId: 'trae-device',
+    devinBearerToken: 'devin-token',
+    qoderCookie: ''
+  });
+
+  const document = JSON.parse(fs.readFileSync(path.join(dataDir, 'credentials.json'), 'utf8'));
+  assert.equal(document.version, 1);
+  assert.equal(document.credentials.hub.hostSecret, 'host-secret');
+  assert.equal(document.credentials.hub.clientSecret, 'client-secret');
+  assert.equal(document.credentials.providers.claude.webCookie, 'sessionKey=claude-secret');
+  assert.equal(document.credentials.providers.deepseek.apiKey, 'deepseek-key');
+  assert.equal(document.credentials.providers.kimi.webAccessToken, 'kimi-web-token');
+  assert.equal(document.credentials.providers.opencode.profiles.work.cookie, 'auth=secret');
+  assert.equal(document.credentials.providers.openrouter.profiles.personal.apiKey, 'sk-or-secret');
+  assert.equal(document.credentials.providers.thirdparty.profiles.relay.accessToken, 'system-access');
+  assert.equal(document.credentials.providers.thirdparty.profiles.relay.userId, '42');
+  assert.equal(document.credentials.providers.thirdparty.profiles.relay.baseUrl, 'https://api.example.com');
+  assert.equal(document.credentials.providers.zaiTeam.organizationId, 'organization-id');
+  assert.equal(document.credentials.providers.trae.accessToken, 'trae-token');
+  assert.equal(document.credentials.providers.trae.deviceId, 'trae-device');
+  assert.equal(document.credentials.providers.devin.bearerToken, 'devin-token');
+  assert.equal(document.credentials.providers.qoder, undefined);
+  assert.equal(document.migrations.settings, 1);
+
+  assert.deepEqual(store.settingsCredentials(), {
+    hubHostSecret: 'host-secret',
+    secret: 'client-secret',
+    claudeWebCookie: 'sessionKey=claude-secret',
+    opencodeProfiles: { work: { cookie: 'auth=secret', enabled: true } },
+    openrouterProfiles: { personal: { apiKey: 'sk-or-secret', enabled: true } },
+    thirdPartyProfiles: {
+      relay: {
+        adapter: 'newapi-account',
+        baseUrl: 'https://api.example.com',
+        accessToken: 'system-access',
+        userId: '42',
+        enabled: true
+      }
+    },
+    deepseekApiKey: 'deepseek-key',
+    kimiWebAccessToken: 'kimi-web-token',
+    zaiTeamOrganizationId: 'organization-id',
+    traeAccessToken: 'trae-token',
+    traeDeviceId: 'trae-device',
+    devinBearerToken: 'devin-token'
+  });
+});
+
+test('removes credential fields from settings without mutating runtime state', () => {
+  const settings = {
+    language: 'auto',
+    deepseekApiKey: 'secret',
+    opencodeProfiles: { a: { cookie: 'secret' } },
+    openrouterProfiles: { b: { apiKey: 'secret' } },
+    thirdPartyProfiles: {
+      c: { adapter: 'newapi-token', baseUrl: 'https://api.example.com', apiKey: 'secret' }
+    }
+  };
+  const clean = stripCredentialSettings(settings);
+  assert.deepEqual(clean, { language: 'auto' });
+  assert.equal(settings.deepseekApiKey, 'secret');
+  assert.equal(settings.opencodeProfiles.a.cookie, 'secret');
+  assert.equal(settings.openrouterProfiles.b.apiKey, 'secret');
+  assert.equal(settings.thirdPartyProfiles.c.apiKey, 'secret');
+  assert.equal(hasCredentialSettings(settings), true);
+  assert.equal(hasCredentialSettings(clean), false);
+});
+
+test('renderer redaction defaults new credential fields to hidden with explicit exceptions', () => {
+  const settings = {
+    hubHostSecret: 'host-secret',
+    secret: 'client-secret',
+    claudeWebCookie: 'sessionKey=claude-secret',
+    deepseekApiKey: 'provider-secret',
+    opencodeProfiles: { work: { cookie: 'auth=secret' } },
+    openrouterProfiles: { personal: { apiKey: 'sk-or-secret' } },
+    thirdPartyProfiles: {
+      relay: { adapter: 'newapi-token', baseUrl: 'https://api.example.com', apiKey: 'sk-newapi-secret' }
+    }
+  };
+  const redacted = credentialSettingsForRenderer(settings, { expose: ['hubHostSecret', 'secret'] });
+  assert.equal(redacted.hubHostSecret, 'host-secret');
+  assert.equal(redacted.secret, 'client-secret');
+  assert.equal(redacted.claudeWebCookie, '');
+  assert.equal(redacted.deepseekApiKey, '');
+  assert.equal(redacted.opencodeProfiles, '');
+  assert.equal(redacted.openrouterProfiles, undefined);
+  assert.equal(redacted.openrouterApiKey, '');
+  assert.equal(redacted.thirdPartyProfiles, '');
+  assert.equal(redacted.kimiApiKey, '');
+  assert.equal(redacted.kimiWebAccessToken, '');
+});
+
+test('migrates legacy settings once and keeps an existing credential authoritative', (t) => {
+  const store = new CredentialStore(tempDataDir(t));
+  store.writeDocument({
+    version: 1,
+    credentials: { providers: { deepseek: { apiKey: 'current-key' } } },
+    migrations: {}
+  });
+
+  const first = store.migrateLegacySettings({ deepseekApiKey: 'legacy-key', kimiApiKey: 'legacy-kimi' });
+  assert.equal(first.migrated, true);
+  assert.equal(store.settingsCredentials().deepseekApiKey, 'current-key');
+  assert.equal(store.settingsCredentials().kimiApiKey, 'legacy-kimi');
+
+  const second = store.migrateLegacySettings({ kimiApiKey: 'stale-kimi' });
+  assert.equal(second.migrated, false);
+  assert.equal(store.settingsCredentials().kimiApiKey, 'legacy-kimi');
+});
+
+test('clearing a runtime credential removes it without resurrecting legacy data', (t) => {
+  const store = new CredentialStore(tempDataDir(t));
+  store.migrateLegacySettings({ kimiApiKey: 'legacy-kimi' });
+  store.replaceSettingsCredentials({ kimiApiKey: '' });
+  assert.equal(store.settingsCredentials().kimiApiKey, undefined);
+  assert.equal(store.migrateLegacySettings({ kimiApiKey: 'legacy-kimi' }).migrated, false);
+  assert.equal(store.settingsCredentials().kimiApiKey, undefined);
+});
+
+test('writes private JSON atomically with owner-only permissions', (t) => {
+  const dataDir = tempDataDir(t);
+  const filePath = path.join(dataDir, 'private.json');
+  const fsApi = Object.create(fs);
+  const syncedKinds = [];
+  fsApi.fsyncSync = (descriptor) => {
+    syncedKinds.push(fs.fstatSync(descriptor).isDirectory() ? 'directory' : 'file');
+    return fs.fsyncSync(descriptor);
+  };
+  writePrivateJsonAtomic(filePath, { ok: true }, { fs: fsApi });
+  assert.deepEqual(JSON.parse(fs.readFileSync(filePath, 'utf8')), { ok: true });
+  assert.equal(fs.readdirSync(dataDir).some((name) => name.endsWith('.tmp')), false);
+  assert.ok(syncedKinds.includes('file'));
+  if (process.platform !== 'win32') {
+    assert.equal(fs.statSync(filePath).mode & 0o777, 0o600);
+    assert.ok(syncedKinds.includes('directory'));
+  }
+});
+
+test('reads private files through a validated descriptor', (t) => {
+  const dataDir = tempDataDir(t);
+  const filePath = path.join(dataDir, 'credentials.json');
+  fs.writeFileSync(filePath, JSON.stringify({ version: 1, credentials: {}, migrations: {} }), 'utf8');
+  const fsApi = Object.create(fs);
+  let readTarget = null;
+  fsApi.readFileSync = (target, ...args) => {
+    readTarget = target;
+    return fs.readFileSync(target, ...args);
+  };
+  assert.match(readRegularFileNoFollow(filePath, { fs: fsApi, description: 'Credential store' }), /"version":1/);
+  assert.equal(typeof readTarget, 'number');
+});
+
+test('rejects private files larger than the configured read limit', (t) => {
+  const dataDir = tempDataDir(t);
+  const filePath = path.join(dataDir, 'oversized.json');
+  fs.writeFileSync(filePath, 'x'.repeat(33), 'utf8');
+  const fsApi = Object.create(fs);
+  let readCalls = 0;
+  fsApi.readFileSync = (...args) => {
+    readCalls += 1;
+    return fs.readFileSync(...args);
+  };
+
+  assert.throws(() => readRegularFileNoFollow(filePath, {
+    fs: fsApi,
+    description: 'Private file',
+    maxBytes: 32
+  }), /exceeds 32 bytes/);
+  assert.equal(readCalls, 0);
+});
+
+test('keeps bounded private reads bounded when the file grows after fstat', (t) => {
+  const dataDir = tempDataDir(t);
+  const filePath = path.join(dataDir, 'growing.json');
+  fs.writeFileSync(filePath, 'small', 'utf8');
+  const fsApi = Object.create(fs);
+  fsApi.fstatSync = (descriptor) => {
+    const stat = fs.fstatSync(descriptor);
+    fs.appendFileSync(filePath, 'x'.repeat(64), 'utf8');
+    return stat;
+  };
+
+  assert.throws(() => readRegularFileNoFollow(filePath, {
+    fs: fsApi,
+    description: 'Private file',
+    maxBytes: 16
+  }), /exceeds 16 bytes/);
+});
+
+test('bounded private reads continue after a short descriptor read', (t) => {
+  const dataDir = tempDataDir(t);
+  const filePath = path.join(dataDir, 'short-read.json');
+  fs.writeFileSync(filePath, 'complete', 'utf8');
+  const fsApi = Object.create(fs);
+  fsApi.readSync = (descriptor, buffer, offset, length, position) => (
+    fs.readSync(descriptor, buffer, offset, Math.min(length, 2), position)
+  );
+
+  assert.equal(readRegularFileNoFollow(filePath, {
+    fs: fsApi,
+    description: 'Private file',
+    maxBytes: 16
+  }), 'complete');
+});
+
+test('does not overwrite a corrupt credential store', (t) => {
+  const dataDir = tempDataDir(t);
+  const filePath = path.join(dataDir, 'credentials.json');
+  fs.writeFileSync(filePath, '{broken', 'utf8');
+  const store = new CredentialStore(dataDir);
+  assert.throws(() => store.replaceSettingsCredentials({ kimiApiKey: 'new-key' }), SyntaxError);
+  assert.equal(fs.readFileSync(filePath, 'utf8'), '{broken');
+});
+
+test('unsupported credential versions remain intact when a save is attempted', async (t) => {
+  for (const version of [0, 2]) {
+    await t.test(`version ${version}`, (t) => {
+      const dataDir = tempDataDir(t);
+      const store = new CredentialStore(dataDir);
+      const original = `${JSON.stringify({ version, credentials: { providers: { kimi: { apiKey: 'existing' } } }, migrations: {} })}\n`;
+      fs.writeFileSync(store.filePath, original);
+
+      assert.throws(() => store.replaceSettingsCredentials({ kimiApiKey: 'replacement' }), /Unsupported credential store version/);
+      assert.equal(fs.readFileSync(store.filePath, 'utf8'), original);
+      assert.deepEqual(fs.readdirSync(dataDir), ['credentials.json']);
+    });
+  }
+});
+
+test('refuses to follow a credential-store symlink', { skip: process.platform === 'win32' }, (t) => {
+  const dataDir = tempDataDir(t);
+  const target = path.join(dataDir, 'target.json');
+  const filePath = path.join(dataDir, 'credentials.json');
+  fs.writeFileSync(target, JSON.stringify({ version: 1, credentials: {}, migrations: {} }), 'utf8');
+  fs.symlinkSync(target, filePath);
+  const store = new CredentialStore(dataDir);
+  assert.throws(() => store.readDocument(), /regular file/);
+});
+
+test('credential fsync failures preserve the previous document and never write preferences', async (t) => {
+  for (const boundary of ['file', 'directory']) {
+    await t.test(boundary, { skip: boundary === 'directory' && process.platform === 'win32' }, (t) => {
+      const dataDir = tempDataDir(t);
+      const settingsPath = path.join(dataDir, 'settings.json');
+      const store = new CredentialStore(dataDir);
+      const previousSettings = { language: 'en', kimiApiKey: 'old-key' };
+      store.replaceSettingsCredentials(previousSettings);
+      const previousDocument = store.readDocument();
+      previousDocument.credentials.hub = { syncTitleCleanup: { pending: { secret: 'cleanup-secret' } } };
+      store.writeDocument(previousDocument);
+      writePrivateJsonAtomic(settingsPath, stripCredentialSettings(previousSettings));
+
+      const failure = Object.assign(new Error(`${boundary} fsync failed`), { code: 'EIO' });
+      const fsApi = Object.create(fs);
+      let injected = false;
+      fsApi.fsyncSync = (descriptor) => {
+        if (!injected && fs.fstatSync(descriptor).isDirectory() === (boundary === 'directory')) {
+          injected = true;
+          throw failure;
+        }
+        return fs.fsyncSync(descriptor);
+      };
+      let settingsWrites = 0;
+      assert.throws(() => persistSettingsAndCredentials({
+        store: new CredentialStore(dataDir, { fs: fsApi }),
+        settingsPath,
+        settings: { language: 'zh-TW', kimiApiKey: 'new-key' },
+        previousSettings,
+        writeSettings() { settingsWrites += 1; }
+      }), (error) => error === failure);
+
+      assert.equal(injected, true);
+      assert.equal(failure.atomicWriteCommitted, boundary === 'directory' ? true : undefined);
+      assert.equal(settingsWrites, 0);
+      assert.deepEqual(new CredentialStore(dataDir).readDocument(), previousDocument);
+      assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), { language: 'en' });
+      assert.equal(fs.readdirSync(dataDir).some((name) => name.endsWith('.tmp')), false);
+    });
+  }
+});
+
+test('rolls back a credential clear when the settings write fails after commit', (t) => {
+  const dataDir = tempDataDir(t);
+  const settingsPath = path.join(dataDir, 'settings.json');
+  const store = new CredentialStore(dataDir);
+  const previousSettings = { language: 'en', kimiApiKey: 'old-key' };
+  store.replaceSettingsCredentials(previousSettings);
+  writePrivateJsonAtomic(settingsPath, stripCredentialSettings(previousSettings));
+
+  let firstSettingsWrite = true;
+  const writeSettings = (target, value) => {
+    writePrivateJsonAtomic(target, value);
+    if (firstSettingsWrite) {
+      firstSettingsWrite = false;
+      const error = new Error('settings write failed after rename');
+      error.atomicWriteCommitted = true;
+      throw error;
+    }
+  };
+
+  assert.throws(() => persistSettingsAndCredentials({
+    store,
+    settingsPath,
+    settings: { language: 'zh-TW', kimiApiKey: '' },
+    previousSettings,
+    writeSettings
+  }), /settings write failed after rename/);
+  assert.equal(store.settingsCredentials().kimiApiKey, 'old-key');
+  assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), { language: 'en' });
+});
+
+test('reports rollback failures without losing the original save error or skipping the other rollback', async (t) => {
+  for (const scenario of [
+    { name: 'credential rollback fails', failCredentials: true, failSettings: false },
+    { name: 'settings rollback fails', failCredentials: false, failSettings: true },
+    { name: 'both rollbacks fail', failCredentials: true, failSettings: true }
+  ]) {
+    await t.test(scenario.name, (t) => {
+      const dataDir = tempDataDir(t);
+      const settingsPath = path.join(dataDir, 'settings.json');
+      const store = new CredentialStore(dataDir);
+      const previousSettings = { language: 'en', kimiApiKey: 'old-key' };
+      store.replaceSettingsCredentials(previousSettings);
+      writePrivateJsonAtomic(settingsPath, stripCredentialSettings(previousSettings));
+
+      const saveError = Object.assign(new Error('settings write failed after rename'), {
+        code: 'EIO', atomicWriteCommitted: true
+      });
+      const credentialRollbackError = new Error('credential rollback failed');
+      const settingsRollbackError = new Error('settings rollback failed');
+      const writeDocument = store.writeDocument.bind(store);
+      let credentialWrites = 0;
+      t.mock.method(store, 'writeDocument', (document) => {
+        credentialWrites += 1;
+        if (credentialWrites === 2 && scenario.failCredentials) throw credentialRollbackError;
+        return writeDocument(document);
+      });
+      let settingsWrites = 0;
+      const writeSettings = (target, value) => {
+        settingsWrites += 1;
+        if (settingsWrites === 2 && scenario.failSettings) throw settingsRollbackError;
+        writePrivateJsonAtomic(target, value);
+        if (settingsWrites === 1) throw saveError;
+      };
+
+      assert.throws(() => persistSettingsAndCredentials({
+        store,
+        settingsPath,
+        settings: { language: 'zh-TW', kimiApiKey: 'new-key' },
+        previousSettings,
+        writeSettings
+      }), (error) => {
+        assert.notEqual(error, saveError);
+        assert.equal(error.cause, saveError);
+        assert.ok(error.message.includes(saveError.message));
+        assert.equal(error.message.includes(credentialRollbackError.message), scenario.failCredentials);
+        assert.equal(error.message.includes(settingsRollbackError.message), scenario.failSettings);
+        return true;
+      });
+      assert.equal(credentialWrites, 2);
+      assert.equal(settingsWrites, 2);
+      assert.equal(store.settingsCredentials().kimiApiKey, scenario.failCredentials ? 'new-key' : 'old-key');
+      assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, 'utf8')), {
+        language: scenario.failSettings ? 'zh-TW' : 'en'
+      });
+    });
+  }
+});
+
+test('stores, migrates, and removes MiMo account cookies in the unified store', (t) => {
+  const store = new CredentialStore(tempDataDir(t));
+  const migration = store.migrateLegacyMimoCredentials([
+    { id: 'account-1', cookieHeader: 'serviceToken=legacy' }
+  ]);
+  assert.deepEqual(migration.migratedIds, ['account-1']);
+  assert.equal(store.readMimoCredential('account-1'), 'serviceToken=legacy');
+
+  assert.equal(store.writeMimoCredential('account-2', 'serviceToken=current'), true);
+  assert.equal(store.readMimoCredential('account-2'), 'serviceToken=current');
+  assert.equal(store.removeMimoCredential('account-1'), true);
+  assert.equal(store.readMimoCredential('account-1'), '');
+  assert.equal(store.writeMimoCredential('__proto__', 'serviceToken=unsafe'), false);
+});
+
+test('stores and removes Antigravity OAuth credentials without exposing them as settings', (t) => {
+  const store = new CredentialStore(tempDataDir(t));
+  const credentials = {
+    accessToken: 'access-secret',
+    refreshToken: 'refresh-secret',
+    expiresAt: 12345,
+    clientId: 'client-id',
+    clientSecret: 'client-secret'
+  };
+  assert.equal(store.writeAntigravityCredential('account-1', credentials), true);
+  assert.deepEqual(store.readAntigravityCredential('account-1'), credentials);
+  assert.equal(store.settingsCredentials().antigravityManagedAccounts, undefined);
+  assert.equal(store.removeAntigravityCredential('account-1'), true);
+  assert.equal(store.readAntigravityCredential('account-1'), null);
+  assert.equal(store.writeAntigravityCredential('__proto__', credentials), false);
+});
+
+test('stores Zed dashboard Cookie as a fixed credential and redacts it for renderer settings', (t) => {
+  const store = new CredentialStore(tempDataDir(t));
+  store.replaceSettingsCredentials({ zedCookie: 'zed.session=secret; c15t=challenge' });
+  assert.equal(store.settingsCredentials().zedCookie, 'zed.session=secret; c15t=challenge');
+  assert.equal(credentialSettingsForRenderer({ zedCookie: 'secret' }).zedCookie, '');
+});
+
+test('stores TypeSafe Console Cookie outside settings and redacts it for the renderer', (t) => {
+  const store = new CredentialStore(tempDataDir(t));
+  store.replaceSettingsCredentials({ typesafeCookie: 'session=secret' });
+  assert.equal(store.settingsCredentials().typesafeCookie, 'session=secret');
+  assert.equal(credentialSettingsForRenderer({ typesafeCookie: 'session=secret' }).typesafeCookie, '');
+});

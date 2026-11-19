@@ -1,0 +1,3266 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+function readAccountOwnersAndMain() {
+  const owners = ['codex', 'antigravity', 'mimo', 'cursor', 'opencode', 'thirdparty'];
+  return owners.map(id => fs.readFileSync(path.join(__dirname, '../../src/electron/providers', id, 'accountService.js'), 'utf8')).join('\n')
+    + '\n' + fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+}
+
+const vm = require('node:vm');
+
+const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
+
+function readRendererFile(name) {
+  return fs.readFileSync(path.join(rendererDir, name), 'utf8');
+}
+
+function readRendererOwner(id) {
+  return readRendererFile(`limits/providerOwners/${id}.js`);
+}
+
+function cssRule(source, selector) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = source.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
+  assert.ok(match, `${selector} rule should exist`);
+  return match[1];
+}
+
+function cssRulesForSelector(source, selector) {
+  const rules = [];
+  for (const match of source.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const selectors = match[1].split(',').map(candidate => candidate.trim());
+    if (selectors.includes(selector)) rules.push(match[2]);
+  }
+  assert.ok(rules.length > 0, `${selector} rule should exist`);
+  return rules;
+}
+
+function declaration(rule, property) {
+  const escaped = property.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = rule.match(new RegExp(`${escaped}\\s*:\\s*([^;]+);`));
+  return match?.[1].trim() || '';
+}
+
+function functionBody(source, name, nextName) {
+  const asyncStart = source.indexOf(`async function ${name}(`);
+  const start = asyncStart === -1 ? source.indexOf(`function ${name}(`) : asyncStart;
+  assert.notEqual(start, -1, `${name} function should exist`);
+  if (source.includes('createCodexAccountService') || source.includes('function create(host)')) {
+    // Owners have a different declaration order from their former main wiring.
+    // Match this fixture's declaration indentation rather than its old neighbour.
+    const declarationStart = source.lastIndexOf('\n', start) + 1;
+    const indent = source.slice(declarationStart, start);
+    const end = source.indexOf('\n' + indent + '}', start);
+    assert.notEqual(end, -1, `${name} function should close`);
+    return source.slice(start, end + indent.length + 2);
+  }
+  let end = source.indexOf(`function ${nextName}(`, start);
+  if (end === -1) {
+    const indent = source.slice(source.lastIndexOf('\n', start) + 1, start);
+    end = source.indexOf('\n' + indent + '}', start);
+    assert.notEqual(end, -1, `${name} function should close`);
+    return source.slice(start, end + indent.length + 2);
+  }
+  assert.notEqual(end, -1, `${nextName} function should follow ${name}`);
+  return source.slice(start, end);
+}
+
+// The Limits rows are built by the shared view: the page and the Edge Dock card
+// both render from it, so a guard that slices a builder out of the page reads
+// the view for the ones that moved there.
+function viewBody(name, nextName = '') {
+  const source = readRendererFile('limits/windowsView.js');
+  // Without a follower, slice to the factory's own closing brace — some of these
+  // are the last function before `return {`.
+  return nextName
+    ? functionBody(source, name, nextName)
+    : functionBody(`${source}\nfunction __endOfView__() {`, name, '__endOfView__');
+}
+
+function functionBodyBeforeMarker(source, name, marker) {
+  const start = source.indexOf(`function ${name}(`);
+  assert.notEqual(start, -1, `${name} function should exist`);
+  const end = source.indexOf(marker, start);
+  assert.notEqual(end, -1, `${marker} marker should follow ${name}`);
+  return source.slice(start, end);
+}
+
+function runMainFunction(source, name, nextName, expression, context = {}) {
+  const body = functionBody(source, name, nextName);
+  return vm.runInNewContext(`${body}\n${expression}`, { require: id => { assert.equal(id, './plugins/limits'); return require('../../src/electron/plugins/limits'); }, ...context });
+}
+
+function runRendererFunctions(source, names, expression, context = {}) {
+  const snippets = names.map((name) => {
+    const start = source.indexOf(`function ${name}(`);
+    assert.notEqual(start, -1, `${name} function should exist`);
+    let depth = 0;
+    let end = -1;
+    for (let i = start; i < source.length; i += 1) {
+      const char = source[i];
+      if (char === '{') depth += 1;
+      if (char === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          end = i + 1;
+          break;
+        }
+      }
+    }
+    assert.notEqual(end, -1, `${name} function should close`);
+    return source.slice(start, end);
+  }).join('\n');
+  return vm.runInNewContext(`${snippets}\n${expression}`, context);
+}
+
+test('Cursor account status stays inline with the linked-account summary', () => {
+  const html = readRendererFile('index.html');
+  const toggle = html.match(/<button id="cursorSettingsToggle"[\s\S]*?<\/button>/)?.[0] || '';
+  assert.match(
+    toggle,
+    /<span data-i18n="settings\.cursor\.title"[\s\S]*?<\/span>\s*<span class="cursor-settings-summary">[\s\S]*?<span id="cursorAccountStatus"[\s\S]*?<\/span>\s*<span class="cursor-disclosure-icon"/,
+    'status pill and disclosure icon should stay on the title row'
+  );
+  assert.match(
+    toggle,
+    /<span class="cursor-disclosure-icon" aria-hidden="true"><\/span>/,
+    'CSS chevron should not render on top of a text arrow'
+  );
+
+  const css = readRendererFile('styles.css');
+  const toggleRule = cssRule(css, '.cursor-settings-toggle');
+  assert.equal(declaration(toggleRule, 'flex-wrap'), '');
+
+  const summaryRule = cssRule(css, '.settings-group-header .cursor-settings-summary');
+  assert.equal(declaration(summaryRule, 'max-width'), '58%');
+
+  const pillRule = cssRule(css, '.cursor-status-pill');
+  assert.equal(declaration(pillRule, 'white-space'), 'nowrap');
+  assert.equal(declaration(pillRule, 'overflow-wrap'), '');
+
+  const iconRule = cssRule(css, '.cursor-disclosure-icon');
+  assert.equal(declaration(iconRule, 'display'), 'inline-grid');
+  assert.equal(declaration(iconRule, 'place-items'), 'center');
+  assert.equal(declaration(iconRule, 'height'), '12px');
+  assert.equal(declaration(iconRule, 'transform-origin'), 'center');
+  assert.equal(declaration(iconRule, 'transform'), '');
+
+  const expandedRule = cssRule(css, '.cursor-account-group.expanded .cursor-disclosure-icon');
+  assert.equal(declaration(expandedRule, 'transform'), 'rotate(180deg)');
+});
+
+test('Hub secret input stays masked and exposes an accessible paste button', () => {
+  const html = readRendererFile('index.html');
+  const secretFieldMatch = html.match(/<div class="settings-field hub-secret-field">[\s\S]*?<\/div>\s*<div/);
+  const secretField = secretFieldMatch?.[0]?.replace(/<div$/, '') || '';
+  const secretLabel = secretField.match(/<label for="secretInput" data-i18n="settings\.sync\.secret">Secret<\/label>/)?.[0] || '';
+  const secretRow = secretField.match(/<div class="hub-secret-row">[\s\S]*?<\/div>/)?.[0] || '';
+  // Outer container must carry settings-field so it inherits font-size 11px
+  assert.match(secretField, /<div class="settings-field hub-secret-field">[\s\S]*?<label for="secretInput" data-i18n="settings\.sync\.secret">Secret<\/label>[\s\S]*?<div class="hub-secret-row">/);
+  assert.match(secretLabel, /<label for="secretInput" data-i18n="settings\.sync\.secret">Secret<\/label>/);
+  assert.doesNotMatch(secretLabel, /secretPasteButton/);
+  assert.match(secretRow, /<input id="secretInput" type="password"[\s\S]*data-i18n-placeholder="settings\.sync\.secretPlaceholder"/);
+  assert.match(secretRow, /<button id="secretPasteButton" type="button" class="icon-button" aria-label="Paste secret" data-i18n-aria-label="settings\.sync\.pasteSecret">/);
+
+  const css = readRendererFile('styles.css');
+  // No standalone .hub-secret-field layout rule — settings-field handles it
+  assert.doesNotMatch(css, /\.hub-secret-field\s*\{/);
+
+  const sharedInputRule = cssRulesForSelector(css, '.settings-panel input').find(rule => (
+    declaration(rule, 'width') === '100%'
+      && declaration(rule, 'min-width') === '0'
+      && declaration(rule, 'padding') === '7px 8px'
+      && declaration(rule, 'border') === '1px solid var(--line)'
+      && declaration(rule, 'border-radius') === '6px'
+      && declaration(rule, 'background') === 'rgba(var(--sunken-rgb), 0.48)'
+  ));
+  assert.ok(sharedInputRule, 'settings inputs should use the shared control styling');
+  assert.equal(declaration(sharedInputRule, 'width'), '100%');
+  assert.equal(declaration(sharedInputRule, 'min-width'), '0');
+  assert.equal(declaration(sharedInputRule, 'padding'), '7px 8px');
+  assert.equal(declaration(sharedInputRule, 'border'), '1px solid var(--line)');
+  assert.equal(declaration(sharedInputRule, 'border-radius'), '6px');
+  assert.equal(declaration(sharedInputRule, 'background'), 'rgba(var(--sunken-rgb), 0.48)');
+
+  const secretRowRule = cssRule(css, '.settings-panel .hub-secret-row input');
+  assert.equal(declaration(secretRowRule, 'flex'), '1 1 0');
+  assert.equal(declaration(secretRowRule, 'width'), '0');
+  assert.equal(declaration(secretRowRule, 'min-width'), '0');
+  assert.equal(declaration(secretRowRule, 'padding'), '');
+  assert.equal(declaration(secretRowRule, 'font-size'), '');
+
+  const app = readRendererFile('app.js');
+  const start = app.indexOf("els.secretPasteButton?.addEventListener('click', async () => {");
+  const end = app.indexOf("els.limitsRefreshInput.addEventListener('change', async () => {", start);
+  assert.notEqual(start, -1, 'secret paste handler should exist');
+  assert.notEqual(end, -1, 'secret paste handler should end before limits refresh handler');
+  const pasteBody = app.slice(start, end);
+  assert.match(pasteBody, /const text = await navigator\.clipboard\.readText\(\);/);
+  assert.match(pasteBody, /els\.secretInput\.value = text\.trim\(\);/);
+  assert.match(pasteBody, /markHubDraftDirty\('secret'\);/);
+});
+
+test('Cursor account header uses the shared linked-account summary', () => {
+  const body = functionBody(readRendererOwner('cursor'), 'renderCursorStatus', 'refreshCursorStatus');
+  assert.match(body, /t\('settings\.cursor\.connected', \{ linked: accounts\.filter\(account => sourceSelected\(account\) && account\.enabled && !account\.expired && !account\.error\)\.length, total: accounts\.length \}\)/);
+  assert.match(body, /setCursorStatusText\(statusEl, summary\);/);
+  assert.doesNotMatch(body, /status\.email|billingCycleEnd|billingResets|selectedAccountId/);
+});
+
+test('Cursor settings use the shared multi-account rows and inline add flow', () => {
+  const html = readRendererFile('index.html');
+  const details = html.match(/<div id="cursorSettingsDetails"[\s\S]*?<div id="cursorErrorMessage" class="settings-note error hidden" role="alert"><\/div>/)?.[0] || '';
+  assert.match(details, /id="cursorAddAccountButton" class="opencode-add-summary"[^>]*aria-expanded="false"[^>]*aria-controls="cursorManualDetails"/);
+  assert.match(details, /<svg class="add-icon"/);
+  assert.doesNotMatch(details, /cursorRefreshButton|>Refresh<|>重新整理</);
+  assert.match(details, /id="cursorAccountList" class="managed-account-list"/);
+  assert.match(details, /id="cursorAgentActiveNote" class="settings-note hidden" data-i18n="settings\.cursor\.agentActive"/);
+  assert.match(details, /<div id="cursorManualPanel" class="opencode-add-form">/);
+  assert.match(details, /<div id="cursorManualDetails" class="opencode-add-details accordion-animated-container hidden">/);
+  assert.doesNotMatch(details.split('id="cursorManualDetails"')[0], /settings\.cursor\.accountsNote/);
+  assert.match(details, /id="cursorManualDetails"[^>]*>\s*<div[^>]*>\s*<p[^>]*data-i18n="settings\.cursor\.accountsNote"/);
+  assert.match(details, /data-i18n="settings\.cursor\.addManual">Add account<\/span>/);
+  assert.match(details, /using “Open Cursor dashboard”, then sign in/);
+  assert.match(details, /<code>cursor\.com<\/code>/);
+  assert.doesNotMatch(details, /cursorCookiePageButton/);
+  assert.match(details, /data-i18n="settings\.cursor\.cookiePage"[^>]*>[^<]*grok\.com\/dashboard/);
+  assert.match(details, /data-i18n="settings\.cursor\.cookieMissing"/);
+  assert.doesNotMatch(details, /cursor\.com\/dashboard\/settings/);
+  assert.doesNotMatch(details, /Tokscale|Add an account manually/);
+  assert.doesNotMatch(details, /<details|<summary|cursorDetectButton|cursorManualLabel|accountLabel/);
+
+  const body = functionBody(readRendererOwner('cursor'), 'renderCursorStatus', 'refreshCursorStatus');
+  assert.match(body, /TokenMonitorLegacyAccountList\.create/);
+  assert.match(body, /enabled: \(account, value\) => window\.tokenMonitor\.cursor\.setAccountEnabled\(account\.id, value\)/);
+  assert.match(body, /remove: account => window\.tokenMonitor\.cursor\.logout\(account\.id\)/);
+  assert.match(body, /canPause: !managementBlocked, removable: account\.removable === true && !managementBlocked/);
+  const common = readRendererFile('limits/legacyAccountList.js');
+  assert.match(common, /setEnabled: Boolean\(options\.enabled\) && account\?\.canPause !== false/);
+  assert.match(common, /remove: Boolean\(options\.remove\) && account\?\.removable !== false/);
+  assert.match(common, /list\.update\(accounts, readings/);
+  assert.doesNotMatch(body, /cursor-account-row|radio|selectedAccountId|selectAccount/);
+
+  const setup = readRendererOwner('cursor');
+  const navigationStart = setup.indexOf("  document.getElementById('cursorLoginButton').addEventListener");
+  const navigationEnd = setup.indexOf('  const cursorManualSubmit =', navigationStart);
+  const handlers = new Map();
+  const openedUrls = [];
+  vm.runInNewContext(setup.slice(navigationStart, navigationEnd), {
+    document: { getElementById: (id) => ({ addEventListener: (_event, handler) => handlers.set(id, handler) }) },
+    window: { tokenMonitor: { openExternal: (url) => openedUrls.push(url) } }
+  });
+  handlers.get('cursorLoginButton')();
+  assert.deepEqual(openedUrls, ['https://cursor.com']);
+  assert.doesNotMatch(setup, /openExternal\('https:\/\/cursor\.com\/dashboard\/settings'\)/);
+  assert.match(setup, /cursorAddAccountButton\?\.addEventListener\('click'/);
+  assert.match(setup, /getElementById\('cursorManualDetails'\)\?\.classList\.toggle\('hidden', !next\)/);
+  assert.match(setup, /const expanding = !state\.cursorAccountExpanded;[\s\S]*?setCursorAccountExpanded\(expanding\);[\s\S]*?if \(expanding && !state\.cursorAccount\.busy\) void refreshCursorStatus\(\{ discover: true \}\);/);
+  assert.doesNotMatch(setup, /cursorRefreshButton|refreshCursorAccounts|cursor\.refresh\(/);
+
+  const css = readRendererFile('styles.css');
+  assert.equal(declaration(cssRule(css, '#cursorManualDetails'), 'margin-top'), '0');
+});
+
+test('Cursor removal is available only for accounts added manually in Token Monitor', () => {
+  const main = readAccountOwnersAndMain();
+  assert.match(main, /cursorManualAccountIds: \[\]/);
+  assert.match(main, /removable: manual\.has\(account\.id\)/);
+  assert.match(main, /setCursorManualAccountIds\(normalizeCursorAccountIds\(\[/);
+  assert.match(main, /Only manually added Cursor accounts can be removed/);
+  assert.match(main, /async function loginManual[\s\S]*?if \(isExternalAgentActive\(\)\)/);
+  assert.match(main, /async function logout[\s\S]*?if \(isExternalAgentActive\(\)\)/);
+  const body = functionBody(readRendererOwner('cursor'), 'renderCursorStatus', 'refreshCursorStatus');
+  assert.match(body, /addButton\.disabled = managementBlocked/);
+  assert.match(body, /cursorAgentActiveNote'[\s\S]*?toggle\('hidden', !managementBlocked\)/);
+});
+
+test('Cursor account discovery runs automatically without a separate refresh action', () => {
+  const main = readAccountOwnersAndMain();
+  const statusBody = functionBodyBeforeMarker(main, 'cursorStatusValue', '// Plugin hosts load');
+  assert.match(statusBody, /if \(discover && !managementBlocked\) \{/);
+  assert.match(statusBody, /await auth\.runCursorDiscover\(\)/);
+  assert.doesNotMatch(statusBody, /runCursorSync/);
+  assert.match(statusBody, /managementBlocked/);
+  // Desktop-detected accounts follow the desktop sign-in; manual accounts are never hidden.
+  assert.match(statusBody, /const desktop = auth\.readCursorDesktopSignIn\(\)/);
+  assert.match(statusBody, /if \(!manual\.has\(account\.id\) && !isCursorDetectedAccountCurrent\(\{/);
+  assert.match(statusBody, /unauthorized: expired/);
+  assert.match(statusBody, /listedAccounts\.filter\(Boolean\)/);
+  assert.match(main, /options\?\.discover !== true/);
+  assert.doesNotMatch(main, /ipcMain\.handle\('cursor:refresh'/);
+
+  const preload = readRendererFile('../preload.js');
+  assert.doesNotMatch(preload, /cursor:refresh/);
+});
+
+test('OpenCode account panel provides multi-profile management', () => {
+  const html = readRendererFile('index.html');
+  const details = html.match(/<div id="opencodeSettingsDetails"[\s\S]*?<div id="opencodeErrorMessage" class="settings-note error hidden" role="alert"><\/div>/)?.[0] || '';
+  assert.match(details, /<div id="opencodeProfileList" class="opencode-profile-list"><\/div>/);
+  assert.match(details, /<div id="opencodeAddForm" class="opencode-add-form">/);
+  assert.match(details, /<button id="opencodeAddToggle" class="opencode-add-summary" type="button" aria-expanded="false" aria-controls="opencodeAddDetails">/);
+  assert.match(details, /<div id="opencodeAddDetails" class="opencode-add-details accordion-animated-container hidden">/);
+  assert.doesNotMatch(details.split('id="opencodeAddDetails"')[0], /settings\.opencode\.accountsNote/);
+  assert.match(details, /id="opencodeAddDetails"[^>]*>\s*<div[^>]*>\s*<p[^>]*data-i18n="settings\.opencode\.accountsNote"/);
+  // The browser button serves both credential types, so it lives above the
+  // selector rather than inside either block; the renderer relabels it.
+  assert.match(details, /<button id="opencodeOpenBrowser" data-i18n="settings\.opencode\.openBrowserKeys">/);
+  const cookieBlock = details.match(/<div id="opencodeCookieFields"[\s\S]*?<\/textarea>/)?.[0] || '';
+  assert.doesNotMatch(cookieBlock, /opencodeOpenBrowser/);
+  assert.match(details, /<span data-i18n="settings\.opencode\.addProfile"/);
+  assert.match(details, /<input id="opencodeProfileName" type="text"[\s\S]*data-i18n-placeholder="settings\.opencode\.profileNamePlaceholder"/);
+  // Credential type is a labelled select like the other provider forms use, and
+  // API key is first so it is the default. Each type owns its own input.
+  assert.match(details, /<select id="opencodeCredentialKind">\s*<option value="api"/);
+  assert.match(details, /<option value="cookie" data-i18n="settings\.opencode\.kindCookie">/);
+  assert.match(details, /<input id="opencodeApiKeyInput" type="password"[\s\S]*data-i18n-placeholder="settings\.opencode\.apiKeyPlaceholder"/);
+  assert.match(details, /<textarea id="opencodeCookieInput"[\s\S]*data-i18n-placeholder="settings\.opencode\.cookiePlaceholder"/);
+  // Neither credential field is named by the nearest `<label for>` — that one
+  // points at the credential-type select — so each carries its own accessible
+  // name, translated by the same pass that translates the placeholders.
+  assert.match(details, /<input id="opencodeApiKeyInput"[^>]*data-i18n-aria-label="settings\.opencode\.kindApi"/);
+  assert.match(details, /<textarea id="opencodeCookieInput"[^>]*data-i18n-aria-label="settings\.opencode\.kindCookie"/);
+  // The cookie steps live inside the block that hides, so API mode never shows
+  // DevTools instructions.
+  assert.match(details, /<div id="opencodeCookieFields" class="opencode-credential-fields hidden">/);
+  assert.match(details, /<div class="settings-actions">\s*<button id="opencodeCookieSubmit" data-i18n="settings\.opencode\.saveProfile">/);
+  assert.match(details, /<div id="opencodeErrorMessage" class="settings-note error hidden" role="alert"><\/div>/);
+
+  const app = readRendererOwner('opencode');
+  assert.match(app, /function renderOpenCodeProfiles\(\)/);
+  assert.match(app, /function updateOpenCodeProfilesStatus\(\)/);
+  // The account rows are the shared view's; OpenCode's own choice — a legacy
+  // profile name in accountLabel replaces the plan text rather than repeating
+  // it as an account identity — is one entry in the view's policy table.
+  assert.equal(typeof require('../../src/electron/renderer/providers/opencode/windows')({}).rowPolicy, 'function');
+  assert.match(app, /function setOpencodeCookieExpanded\(/);
+
+  const setupBody = functionBody(app, 'setup');
+  assert.match(setupBody, /document\.getElementById\('opencodeAddToggle'\)/);
+  assert.match(app, /getElementById\('opencodeAddDetails'\)\?\.classList\.toggle\('hidden'/);
+  assert.match(setupBody, /document\.getElementById\('opencodeOpenBrowser'\)\?\.addEventListener\('click'/);
+  assert.match(setupBody, /window\.tokenMonitor\.openExternal\('https:\/\/opencode\.ai\/console'\)/);
+  // The add form asks before binding: main refuses a name that already holds a
+  // different credential, and the form offers the confirmation rather than
+  // retrying with merge on its own.
+  assert.match(setupBody, /window\.tokenMonitor\.opencode\.saveProfile\(\s*name,\s*cookie,\s*opencodeCredentialKind,\s*\{ merge \}\s*\)/);
+  assert.match(setupBody, /await submit\(false\);/);
+  assert.match(setupBody, /if \(result\.nameTaken && addMergeOffer\)/);
+  assert.match(setupBody, /confirmOpenCodeMerge = \(\) => accountProfileSaves\.run\('opencode', addMergeButton, \(\) => submit\(true\)\);/);
+  // `submit` closes over the name and credential captured when Save was pressed,
+  // so any edit afterwards has to withdraw the offer: the backend still demands
+  // `merge`, but the click it receives would otherwise be consent to a proposal
+  // that is no longer on screen. Withdrawing has to outlast the round trip too,
+  // since the reply that offers the button arrives after the edit — hence the
+  // revision captured before the await and checked in every branch after it.
+  assert.match(setupBody, /const at = addMergeOffer\?\.revision\(\);/);
+  assert.match(setupBody, /const stale = addMergeOffer \? addMergeOffer\.stale\(at\) : false;/);
+  assert.match(setupBody, /if \(stale\) return;/);
+  // A success takes down its own offer and nothing else. Two saves can overlap
+  // and the newer one can answer first, so clearing unconditionally let an older
+  // success wipe a confirmation the user was looking at and that was still live.
+  assert.match(setupBody, /if \(!stale\) \{\s*input\.value = '';\s*nameInput\.value = '';\s*addMergeOffer\?\.withdraw\(\);\s*\}/);
+  assert.match(setupBody, /addMergeOffer\.offer\(at, name, t\('settings\.opencode\.mergeInto', \{ name \}\)\)/);
+  assert.match(setupBody, /const clearOpenCodeMergeOffer = \(\) => addMergeOffer\?\.withdraw\(\);/);
+  assert.match(setupBody, /for \(const id of \['opencodeProfileName', 'opencodeApiKeyInput', 'opencodeCookieInput'\]\)/);
+  assert.match(setupBody, /addEventListener\('input', clearOpenCodeMergeOffer\)/);
+  // Switching credential type already clears the hidden field; it clears this too.
+  assert.match(setupBody, /clearOpenCodeMergeOffer\(\);\s*\};/);
+  assert.match(setupBody, /kindSelect\?\.addEventListener\('change', applyOpenCodeCredentialKind\)/);
+  // The account name is required, not defaulted. Saving one credential keeps the
+  // other under that name and the collector reads that as "same account", so a
+  // blank name silently becoming 'default' could bind one account's key to
+  // another account's cookie. Scoped to this handler: the other provider forms
+  // still default a blank name, and they have no such merge semantics.
+  const opencodeSubmit = setupBody.slice(
+    setupBody.indexOf("document.getElementById('opencodeCookieSubmit')"),
+    setupBody.length
+  );
+  assert.ok(opencodeSubmit, 'opencode submit handler should be present');
+  assert.match(opencodeSubmit, /const name = \(nameInput\.value \|\| ''\)\.trim\(\);/);
+  assert.doesNotMatch(opencodeSubmit, /\|\| 'default'/);
+  assert.match(opencodeSubmit, /settings\.opencode\.nameRequired/);
+  assert.match(setupBody, /renderOpenCodeProfiles\(\)/);
+  assert.match(setupBody, /updateOpenCodeProfilesStatus\(\)/);
+});
+
+test('OpenCode multi-account rows separate profile identity from plan label', () => {
+  const app = readRendererFile('app.js');
+  const owner = require('../../src/electron/renderer/providers/opencode/windows')({});
+  const titleBody = owner.opencodeAccountTitle.toString();
+
+  assert.match(titleBody, /provider\?\.accountName/);
+  assert.match(titleBody, /legacyName !== 'Go' && legacyName !== 'Zen'/);
+  // One place decides this now: the view's policy table, applied by the group
+  // builder the page and the Edge Dock card both call.
+  assert.equal(owner.rowPolicy({}, '', { grouped: true }).options.showIcon, false);
+  assert.equal(owner.rowPolicy({}, '', { grouped: false }).options.showIcon, undefined);
+  assert.doesNotMatch(app, /legacyProfileLabel/);
+  // The plan/account fallback is the shared view's limitProviderPlan.
+  const { createLimitWindowsView } = require('../../src/electron/renderer/limits/windowsView');
+  const view = createLimitWindowsView({ presentation: require('../../src/electron/renderer/limits/providerPresentation') });
+  assert.equal(view.limitProviderPlan({ provider: 'opencode', status: 'ok', planLabel: 'Zen', accountLabel: 'Go' }), 'Zen');
+  assert.equal(view.limitProviderPlan({ provider: 'opencode', status: 'ok', planLabel: '', accountLabel: 'Go' }), 'Go');
+  assert.doesNotMatch(app, /renderLimitProviderRow\('opencode', provider\.accountLabel/);
+});
+
+test('OpenCode disabled profiles still count in the account summary', () => {
+  const app = readRendererOwner('opencode');
+  const renderBody = functionBody(app, 'renderOpenCodeProfiles', 'updateOpenCodeProfilesStatus');
+  // The auto-detected credential counts too: it is the account the limits card
+  // is reading, so excluding it reports "not set up" next to live quota.
+  assert.match(renderBody, /state\.opencodeProfileCount = entries\.length \+ \(hasAmbientKey \? 1 : 0\);/);
+  assert.match(renderBody, /\{ profiles, hasEnvVar, hasAmbientKey, ambientEnabled = true \}/);
+  // Switching the auto-detected account off is a device preference, not a stored
+  // credential, so its row keeps rendering with the box clear rather than
+  // vanishing along with the only control that could switch it back on.
+  assert.match(renderBody, /ambientToggle\.checked = ambientEnabled;/);
+  assert.match(renderBody, /setAmbientEnabled\(ambientToggle\.checked\)/);
+  assert.match(renderBody, /item\.append\(ambientToggle, nameBox, rightBox\)/);
+  assert.match(renderBody, /const empty = entries\.length === 0 && !hasEnvVar && !hasAmbientKey/);
+  // Credential composition stays visible after the fact, because two kinds under
+  // one name is a user assertion that changes identity and fallback behaviour,
+  // and each is removable so undoing it does not cost the one being kept.
+  assert.match(renderBody, /\['ambient', profile\.usesAmbientKey, ambientLabel\]/);
+  assert.match(renderBody, /profile\.ambientStale/);
+  assert.match(renderBody, /\['api', profile\.hasApiKey/);
+  assert.match(renderBody, /\['cookie', profile\.hasCookie/);
+  // Per-credential actions live in an expanded section, not inline beside the
+  // account's own controls, and only appear once there is more than one. The
+  // summary line is itself the control that expands it.
+  assert.match(renderBody, /const multiCredential = credentials\.length > 1;/);
+  assert.match(renderBody, /opencodeCredentialRow\(name, kind, label\)/);
+  assert.match(renderBody, /detail\.classList\.toggle\('is-open', open\)/);
+  // Naming the auto-detected credential is what lets it join an account, and a
+  // name that already exists is a binding, so it waits for the confirmation
+  // instead of merging on a blur that happened to land on that name.
+  assert.match(renderBody, /saveProfile\(name, '', 'ambient', \{ merge \}\)/);
+  assert.match(renderBody, /await applyNaming\(name, false\)/);
+  assert.match(renderBody, /opencodeMergeOffer\(mergeBtn, \(name\) => applyNaming\(name, true\)\)/);
+  assert.match(renderBody, /opencodeMergeOffer\(mergeBtn, \(next\) => applyRename\(next, true\)\)/);
+  // A confirmation has to confirm what is on screen, so editing the name
+  // withdraws the pending offer instead of leaving a button that would commit
+  // the account name the user has already moved on from. Every path goes through
+  // the one helper: the rule reached four call sites by copy, and each copy is
+  // another place an in-flight reply can put a withdrawn offer back on screen.
+  // Nothing else may reveal a merge button, which is what makes that exhaustive.
+  assert.equal((app.match(/opencodeMergeOffer\(/g) || []).length, 5);
+  assert.equal((app.match(/mergeBtn\.classList\.remove\('hidden'\)/g) || []).length, 0);
+  // Three inline name fields (the auto-detected row, an account rename, a
+  // credential move); the add form withdraws through its own named helper.
+  assert.equal((app.match(/nameInput\.addEventListener\('input', \(\) => offer\.withdraw\(\)\);/g) || []).length, 3);
+  assert.equal((app.match(/const at = offer\.revision\(\);/g) || []).length, 3);
+  assert.doesNotMatch(renderBody, /pendingName|pendingMergeName|pendingTarget/);
+  // Its status element cannot be produced by sanitizing any account name.
+  assert.match(renderBody, /infoSpan\.id = 'opencodeAmbientInfo'/);
+  // Merging is confirmed with a button the user chooses, not a repeated keypress.
+  assert.match(renderBody, /settings\.opencode\.mergeInto/);
+  assert.doesNotMatch(renderBody, /mergeConfirm/);
+
+  const credentialRow = functionBody(app, 'opencodeCredentialRow', 'updateOpenCodeProfilesStatus');
+  // Renaming a credential moves it to another account: to a fresh name it splits
+  // off, onto an existing one it binds — the same operation either way.
+  assert.match(credentialRow, /api\.moveCredential\(accountName, kind, target, \{ merge \}\)/);
+  assert.match(credentialRow, /api\.removeCredential\(accountName, kind\)/);
+  assert.match(credentialRow, /opencodeMergeOffer\(mergeBtn, \(target\) => finishMove\(target, true\)\)/);
+  assert.match(credentialRow, /nameInput\.addEventListener\('input', \(\) => offer\.withdraw\(\)\);/);
+  assert.match(credentialRow, /if \(offer\.stale\(at\)\) return;/);
+  assert.doesNotMatch(credentialRow, /pendingTarget/);
+  // Unbinding is not undoable from here, so it confirms like deleting an account.
+  assert.match(credentialRow, /if \(!confirming\)/);
+  assert.match(renderBody, /api\.setProfileEnabled\(name, toggle\.checked\)\.then\(\(\) => \{/);
+  assert.match(renderBody, /updateOpenCodeProfilesStatus\(\);/);
+  assert.doesNotMatch(renderBody, /if \(toggle\.checked\) updateOpenCodeProfilesStatus\(\)/);
+
+  const statusBody = functionBody(app, 'updateOpenCodeProfilesStatus') + functionBody(app, 'renderOpenCodeProfilesStatusSummary');
+  assert.match(statusBody, /const configuredProfileCount = state\.opencodeProfileCount \|\| 0;/);
+  // The auto-detected account arrives in its own field, so both halves of the
+  // summary have to include it or a zero-config machine reports "0/0" beside
+  // live quota.
+  assert.match(statusBody, /if \(status\.ambient\) entries\.push\(\['opencodeAmbientInfo', status\.ambient\]\)/);
+  assert.match(statusBody, /renderOpenCodeProfilesStatusSummary\(profiles, status\.ambient\)/);
+  assert.match(statusBody, /const statuses = \[\.\.\.Object\.values\(profiles\), \.\.\.\(ambient \? \[ambient\] : \[\]\)\];/);
+  assert.match(statusBody, /Math\.max\(statuses\.length, configuredProfileCount\)/);
+  assert.match(statusBody, /t\('settings\.opencode\.connected', \{ linked: linkedCount, total: totalCount \}\)/);
+});
+
+test('OpenCode profile deletion clears the legacy default cookie when it owns the profile', () => {
+  const main = readAccountOwnersAndMain();
+  const handler = main.slice(
+    main.indexOf('async function deleteProfile('),
+    main.indexOf('async function renameProfile(')
+  );
+  assert.ok(handler, 'opencode:deleteProfile handler should exist');
+  assert.match(handler, /const deletedProfile = opencodeProfiles\.readProfile\(profiles, name\);/);
+  assert.match(handler, /if \(deletedProfile\?\.cookie && getOpencodeCookie\(\) === deletedProfile\.cookie\) \{/);
+  assert.match(handler, /setOpencodeCookie\(''\);/);
+});
+
+test('OpenCode profile enable toggles refresh only the affected limits lane', () => {
+  const main = readAccountOwnersAndMain();
+  const handler = main.slice(
+    main.indexOf('async function setProfileEnabled('),
+    main.indexOf('module.exports = { createOpencodeAccountService')
+  );
+  assert.ok(handler, 'opencode:setProfileEnabled handler should exist');
+  // Read through the module's own-property lookup. A bare `profiles[name]`
+  // resolves an inherited key, so an account named `__proto__` passed the
+  // "not found" guard and then wrote `enabled` onto a shared prototype.
+  assert.match(handler, /const profile = opencodeProfiles\.readProfile\(profiles, name\);/);
+  assert.match(handler, /profile\.enabled = Boolean\(enabled\);/);
+  assert.match(handler, /saveSettings\(\{ throwOnError: true \}\);/);
+  assert.match(handler, /opencodeStatusCache = \{ value: null, at: 0 \};/);
+  assert.match(handler, /queueLimitInvalidation\(\{ provider: 'opencode', accountName: name \}, 'profile-state'/);
+  assert.match(handler, /clear: !enabled/);
+  assert.match(handler, /refresh: Boolean\(enabled\)/);
+  assert.doesNotMatch(handler, /startMode\(\)/);
+});
+
+test('Codex account panel supports per-account enable toggles without showing timestamps', () => {
+  const app = readRendererOwner('codex');
+  const body = functionBody(app, 'renderCodexAccounts', 'refreshCodexAccounts');
+  assert.doesNotMatch(body, /t\('settings\.codex\.accountMany'/);
+  assert.match(body, /TokenMonitorLegacyAccountList\.create/);
+  assert.match(body, /enabled: \(account, value\) => window\.tokenMonitor\.codex\.setAccountEnabled\(account\.id, value\)/);
+  assert.match(body, /remove: account => window\.tokenMonitor\.codex\.removeAccount\(account\.id\)/);
+  assert.match(body, /changed: result => \{ if \(result\.accounts\) state\.settings\.codexManagedAccounts = result\.accounts;/);
+  assert.match(body, /refresh: refreshCodexAccounts, busy: \(\) => state\.codexSignInBusy/);
+  assert.match(body, /accountList\.update\(accounts\.map/);
+  assert.match(body, /planLabel: accountLabel/);
+  assert.doesNotMatch(body, /formatTime\(account\.updatedAt\)|refreshStats/);
+  const common = readRendererFile('limits/legacyAccountList.js');
+  assert.match(common, /enabled: account\.enabled !== false/);
+  assert.match(common, /await options\.changed\(result\);\s*await options\.refresh\(\);/);
+  const panel = readRendererFile('limits/accountSlotsPanel.js');
+  assert.match(panel, /let confirmingRemove = false/);
+  assert.match(panel, /if \(!confirmingRemove\)/);
+  assert.match(panel, /return run\('remove', id\)/);
+
+  const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
+  assert.match(preload, /setAccountEnabled: \(id, enabled\) => ipcRenderer\.invoke\('codex:setAccountEnabled', id, enabled\)/);
+
+  const main = readAccountOwnersAndMain();
+  assert.match(main, /ipcMain\.handle\('codex:setAccountEnabled'/);
+  assert.match(main, /setCodexManagedAccountEnabled\(id, enabled\)/);
+});
+
+test('Codex account email masking is an opt-in display-only setting', () => {
+  const app = readRendererFile('app.js');
+  const html = readRendererFile('index.html');
+  const main = readAccountOwnersAndMain();
+
+  assert.match(html, /<input id="maskLimitAccountEmailsInput" type="checkbox" \/>/);
+  assert.match(html, /data-i18n="settings\.limits\.maskAccountEmails"/);
+
+  const defaults = functionBody(main, 'defaultSettings', 'normalizeCollectionMode');
+  assert.match(defaults, /maskLimitAccountEmails:\s*false/);
+
+  const updateHandler = main.slice(
+    main.indexOf("ipcMain.handle('settings:update'"),
+    main.indexOf("ipcMain.handle('settings:openConfig'")
+  );
+  assert.match(updateHandler, /maskLimitAccountEmails:\s*parseBoolean\(patch\.maskLimitAccountEmails \?\? settings\.maskLimitAccountEmails, false\)/);
+  const settingsUpdate = updateHandler.slice(0, updateHandler.indexOf("ipcMain.handle('claude:accounts'"));
+  assert.doesNotMatch(settingsUpdate, /accountEmail|accountKey|syncLimits|publicLimits/);
+
+  const settingsBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
+  assert.match(settingsBody, /els\.maskLimitAccountEmailsInput\.checked = Boolean\(state\.settings\.maskLimitAccountEmails\);/);
+
+  assert.match(app, /maskLimitAccountEmailsInput: document\.getElementById\('maskLimitAccountEmailsInput'\)/);
+  assert.match(app, /els\.maskLimitAccountEmailsInput\.addEventListener\('change'/);
+  assert.match(app, /saveSettings\(\{ maskLimitAccountEmails: els\.maskLimitAccountEmailsInput\.checked \}\)/);
+  assert.match(app, /renderLimits\(\);/);
+
+  // Title rendering for every provider lives in limitAccountTitles.test.js.
+});
+
+test('Codex system account switching is exposed from limits account rows', () => {
+  const app = readRendererFile('app.js');
+  const accountControl = fs.readFileSync(path.join(rendererDir, '..', 'providers', 'codex', 'accountControl.js'), 'utf8');
+  const renderHead = viewBody('renderLimitProviderHead');
+  assert.doesNotMatch(renderHead, /showActiveAccount/);
+  // The account control and the active-account/live derivation are the host's,
+  // injected as `accountControl` and `codexAccounts`; the view never reads them
+  // off the renderer's own state.
+  assert.match(renderHead, /accountControl\.render\(\{/);
+  // The ✓ tracks state.codexActiveAccount only (the account THIS device's Codex
+  // is signed into). It must NOT re-derive "live" from the row being rendered:
+  // in sync mode that row can be a remote device's record for a different account.
+  const codexWindowOwner = require('../../src/electron/renderer/providers/codex/windows')({});
+  const controlOptions = codexWindowOwner.accountControlOptions.toString();
+  assert.match(controlOptions, /options\.showActiveBadge && codexAccounts\.matchesActive\(provider\)/);
+  assert.doesNotMatch(renderHead, /!state\.codexActiveAccount && liveCodexAccount/);
+  assert.doesNotMatch(renderHead, /const liveCodexAccount =/);
+  assert.match(controlOptions, /codexAccounts\.switchTarget\(provider\)/);
+  assert.doesNotMatch(renderHead, /limit-account-switch-zone|limit-account-active-zone/);
+  assert.doesNotMatch(renderHead, /refreshStats\(\{ force: true \}/);
+  assert.doesNotMatch(renderHead, /titleButton\.className = 'limit-account-title-button'/);
+
+  const control = functionBodyBeforeMarker(
+    accountControl,
+    'createCodexAccountControl',
+    '\n  return { createCodexAccountControl };'
+  );
+  assert.match(control, /zone\.className = 'limit-account-active-zone'/);
+  assert.match(control, /popover\.className = 'limit-account-active-popover'/);
+  assert.match(control, /badge\.textContent = '\\u2713';/);
+  assert.match(control, /zone\.className = 'limit-account-switch-zone'/);
+  assert.match(control, /popover\.className = 'limit-account-switch-popover'/);
+  assert.match(control, /button\.className = 'limit-account-switch-button'/);
+  assert.match(control, /zone\.addEventListener\('pointerenter', markOpened\)/);
+  assert.match(control, /zone\.addEventListener\('focusin', markOpened\)/);
+  assert.match(control, /zone\.addEventListener\('pointerleave', release\)/);
+  assert.match(control, /zone\.addEventListener\('focusout', release\)/);
+  assert.match(control, /controlState\.switchingAccountId/);
+  assert.match(control, /controlState\.errorAccountId/);
+  assert.match(control, /controlState\.renderPending/);
+
+  // Codex's own choices — the switch affordance on every row, the ✓ only when
+  // grouped — are the view's policy, so the card gets them without asking.
+  assert.equal(codexWindowOwner.rowPolicy({}, '', { grouped: false }).options.allowSystemSwitch, true);
+  assert.deepEqual(codexWindowOwner.rowPolicy({}, '', { grouped: true }).options, { accountTitle: true, allowSystemSwitch: true, showActiveBadge: true, showIcon: false });
+  assert.doesNotMatch(app, /renderCodexAccountGroup/);
+
+  const css = fs.readFileSync(path.join(rendererDir, 'styles.css'), 'utf8');
+  assert.match(css, /\.limit-account-switch-zone/);
+  assert.match(css, /\.limit-live-badge\s*\{[^}]*display: inline-flex;/s);
+  assert.match(css, /\.limit-live-badge\s*\{[^}]*width: 14px;/s);
+  assert.match(css, /\.limit-live-badge\s*\{[^}]*margin-left: -6px;/s);
+  assert.match(css, /html\.is-windows \.limit-live-badge\s*\{[^}]*font-size: 8px;/s);
+  assert.doesNotMatch(css, /\.limit-live-badge::before/);
+  assert.match(css, /\.limit-account-active-zone/);
+  assert.match(css, /\.limit-account-active-popover/);
+  assert.match(css, /\.limit-account-active-zone:hover \.limit-account-active-popover/);
+  assert.match(css, /\.limit-account-active-zone:focus-visible \.limit-account-active-popover/);
+  assert.match(css, /\.limit-account-active-zone:hover \.limit-name-title/);
+  assert.match(css, /\.limit-account-active-zone:focus-visible \.limit-name-title/);
+  assert.match(css, /\.limit-account-active-popover\s*\{[^}]*left: calc\(100% \+ 2px\)/s);
+  assert.doesNotMatch(css, /\.limit-account-active-popover\s*\{[^}]*cursor: pointer/s);
+  assert.match(css, /\.limit-account-switch-popover/);
+  assert.match(css, /\.limit-account-switch-zone:hover \.limit-account-switch-popover/);
+  assert.match(css, /\.limit-account-switch-zone:focus-within \.limit-account-switch-popover/);
+  assert.match(css, /\.limit-account-switch-zone:hover \.limit-name-title/);
+  assert.match(css, /\.limit-account-switch-zone:focus-within \.limit-name-title/);
+  assert.match(css, /text-shadow: 0 0 10px rgba\(var\(--accent-rgb\), 0\.16\)/);
+  assert.match(css, /top: 50%/);
+  assert.match(cssRule(css, '.limit-account-switch-popover'), /left: calc\(100% \+ 8px\)/);
+  assert.match(css, /\.limit-account-switch-zone::after\s*\{[^}]*width: 10px;/s);
+  assert.doesNotMatch(css, /\.limit-account-switch-zone\.has-opened \.limit-account-switch-popover\s*\{[^}]*transition: none;/s);
+  assert.match(css, /\.limit-account-switch-button\s*\{[^}]*rgba\(var\(--glass-rgb\), 0\.52\)/s);
+  assert.match(css, /\.limit-account-switch-button\s*\{[^}]*border: 1px solid rgba\(var\(--line-rgb\), 0\.18\)/s);
+  assert.match(css, /\.limit-account-switch-button/);
+  assert.doesNotMatch(cssRule(css, '.limit-account-switch-popover'), /left: calc\(100% \+ 6px\)/);
+  assert.doesNotMatch(css, /background: rgba\(24, 28, 32, 0\.9\)/);
+  assert.doesNotMatch(css, /\.limit-account-switch-popover\s*\{[^}]*border:/s);
+  assert.doesNotMatch(css, /\.limit-account-title-button\s*\{/);
+
+  const i18n = fs.readFileSync(path.join(rendererDir, 'i18n.js'), 'utf8');
+  assert.match(i18n, /'limits\.codex\.switchAccount': 'Switch'/);
+  assert.match(i18n, /'limits\.codex\.activeAccountHint': 'Local'/);
+  assert.match(i18n, /'limits\.codex\.switchAccount': '切換帳號'/);
+  assert.match(i18n, /'limits\.codex\.activeAccountHint': '本機'/);
+  assert.match(i18n, /'limits\.codex\.switchAccount': '切换账号'/);
+  assert.match(i18n, /'limits\.codex\.activeAccountHint': '本机'/);
+
+  const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
+  assert.match(preload, /switchSystemAccount: \(id\) => ipcRenderer\.invoke\('codex:switchSystemAccount', id\)/);
+  assert.match(preload, /ipcRenderer\.on\('codex:activeAccount', handler\)/);
+  assert.match(preload, /refreshAccountLimits: \(id\) => ipcRenderer\.invoke\('codex:refreshAccountLimits', id\)/);
+
+  const main = readAccountOwnersAndMain();
+  assert.match(main, /ipcMain\.handle\('codex:switchSystemAccount'/);
+  assert.match(main, /ipcMain\.handle\('codex:switchSystemAccount',[\s\S]*?switchCodexSystemAccount\(id\)/);
+  assert.match(main, /ipcMain\.handle\('codex:refreshAccountLimits'/);
+  assert.match(main, /refreshCodexManagedAccountLimits\(id\)/);
+  assert.match(accountControl, /createCodexAccountControl/);
+  assert.match(readRendererFile('index.html'), /<script src="\.\.\/providers\/codex\/accountControl\.js"><\/script>/);
+  assert.match(readRendererFile(path.join('edgeDock', 'index.html')), /<script src="\.\.\/\.\.\/providers\/codex\/accountControl\.js"><\/script>/);
+  assert.match(app, /const CODEX_PENDING_ACTIVE_GRACE_MS = 30000;/);
+  assert.match(app, /codexPendingActiveAccount: null/);
+  assert.match(app, /codexPendingActiveAccountUntil: 0/);
+  assert.match(app, /codexPendingActiveAccountTimer: null/);
+  assert.match(app, /function codexAccountsShareIdentity\(left, right\)/);
+  assert.match(app, /function clearCodexPendingActiveAccount\(\)/);
+  assert.match(app, /function scheduleCodexPendingActiveAccountExpiry\(\)/);
+  assert.match(app, /function setCodexPendingActiveAccount\(account\)/);
+  assert.match(app, /function applyCodexActiveAccountFromStats\(\)/);
+  const pendingExpiryBody = functionBody(app, 'scheduleCodexPendingActiveAccountExpiry', 'setCodexPendingActiveAccount');
+  assert.match(pendingExpiryBody, /setTimeout\(\(\) =>/);
+  assert.match(pendingExpiryBody, /applyCodexActiveAccountFromStats\(\);/);
+  assert.match(pendingExpiryBody, /renderLimits\(\);/);
+  assert.match(pendingExpiryBody, /maybeUpdateBarsIcon\(\);/);
+  const pendingSetBody = functionBody(app, 'setCodexPendingActiveAccount', 'applyCodexActiveAccountFromStats');
+  assert.match(pendingSetBody, /state\.codexPendingActiveAccountUntil = Date\.now\(\) \+ CODEX_PENDING_ACTIVE_GRACE_MS;/);
+  assert.match(pendingSetBody, /scheduleCodexPendingActiveAccountExpiry\(\);/);
+  const activeStatsBody = functionBody(app, 'applyCodexActiveAccountFromStats', 'clearCodexResetForecastRetryTimer');
+  assert.match(activeStatsBody, /Date\.now\(\) < state\.codexPendingActiveAccountUntil/);
+  assert.match(activeStatsBody, /state\.codexActiveAccount = pendingAccount;/);
+  assert.match(activeStatsBody, /clearCodexPendingActiveAccount\(\);/);
+  assert.match(activeStatsBody, /state\.codexActiveAccount = activeAccount;/);
+  assert.match(app, /applyCodexOptimisticActiveAccount\(result\.activeAccount\);/);
+  assert.match(app, /window\.tokenMonitor\.codex\.onActiveAccount\?\.\(\(account\) => \{/);
+  assert.doesNotMatch(app, /window\.tokenMonitor\.codex\.refreshAccountLimits\(accountId\)\.then/);
+  assert.match(control, /\.limit-account-switch-zone:hover/);
+  assert.match(control, /\.limit-account-active-zone:focus-within/);
+  const switchBody = functionBody(main, 'performCodexSystemAccountSwitch', 'switchCodexSystemAccount');
+  assert.match(switchBody, /const previousAccounts = normalizeCodexManagedAccounts\(getCodexManagedAccounts\(\)\)/);
+  assert.match(switchBody, /liveAuthSnapshot = await snapshotCodexAuthFile\(liveAuthPath\)/);
+  assert.match(switchBody, /preservedLiveAccount = await preserveLiveCodexAuthAsManagedAccount/);
+  assert.match(switchBody, /codexAuthMaterialForWorkspace\(targetMaterial, account\.workspaceAccountId\)/);
+  assert.doesNotMatch(switchBody, /workspaceIsFedramp|codexIsFedramp/);
+  assert.match(switchBody, /writeCodexAuthFile\(liveAuthPath, selectedMaterial\.data\)/);
+  assert.match(switchBody, /restart: false/);
+  assert.match(switchBody, /setCodexManagedAccounts\(previousAccounts\);/);
+  assert.match(switchBody, /restoreCodexAuthFileSnapshot\(liveAuthSnapshot\)/);
+  assert.match(switchBody, /preservedLiveAccount\?\.rollback\?\.\(\)/);
+  const preserveBody = functionBody(main, 'preserveLiveCodexAuthAsManagedAccount', 'codexLoginErrorMessage');
+  assert.match(preserveBody, /const authSnapshot = await snapshotCodexAuthFile/);
+  assert.match(preserveBody, /persist: false/);
+  assert.match(preserveBody, /rollback: \(\) => restoreCodexAuthFileSnapshot/);
+  const findExistingBody = functionBody(main, 'findExistingCodexAccount', 'codexAccountId');
+  assert.match(findExistingBody, /codexManagedAccountMatchesIdentity\(account, identity\)/);
+  assert.match(main, /codexManagedAccountMatchesIdentity/);
+  const hydrateAccountsBody = functionBody(main, 'hydrateCodexManagedAccounts', 'codexAccountsForRenderer');
+  assert.match(hydrateAccountsBody, /readRegularFileNoFollow\(account\.authPath/);
+  assert.match(hydrateAccountsBody, /upgradeCodexManagedAccountIdentity\(account, codexAuthIdentity\(auth\)\)/);
+  const ensureSettingsBody = functionBody(main, 'ensureSettingsLoaded', 'updateRendererViewState');
+  assert.match(ensureSettingsBody, /hydrateCodexManagedAccounts\(persistedCodexAccounts\)/);
+  assert.match(ensureSettingsBody, /saveSettings\(\)/);
+  const refreshBody = functionBody(main, 'refreshCodexManagedAccountLimits', 'migrateLimitProviders');
+  assert.match(refreshBody, /getLimitsRuntime\(\)\.refreshLimits\(\{/);
+  assert.match(refreshBody, /provider: 'codex'/);
+  assert.match(refreshBody, /accountId: account\.id/);
+  assert.match(refreshBody, /accountKey: account\.accountKey \|\| ''/);
+  assert.match(refreshBody, /result\?\.snapshot \|\| getLimitsRuntime\(\)\.getSnapshot\(\)\?\.limits/);
+  assert.doesNotMatch(refreshBody, /codexManagedAccountsForCollector\(\)/);
+  assert.doesNotMatch(refreshBody, /collectLimitsOnce/);
+  const switchGuard = functionBody(main, 'switchCodexSystemAccount', 'switchCodexAccountFromEdgeDock');
+  const switchLane = functionBody(main, 'switchSystemAccount', 'normalizeCodexManagedAccounts');
+  assert.match(switchLane, /if \(systemSwitchInFlight\)/);
+  assert.match(switchLane, /await performCodexSystemAccountSwitch\(id\)/);
+  assert.match(switchGuard, /refreshCodexManagedAccountLimits\(id, 'system-account-switch'\)/);
+  assert.match(switchGuard, /pushCodexActiveAccountToRenderer\(result\.activeAccount\);/);
+  assert.match(switchGuard, /codexPresentationPendingAccountId = codexPresentationActiveAccountId;/);
+  assert.match(switchLane, /finally \{/);
+  const dockSwitch = functionBody(main, 'switchCodexAccountFromEdgeDock', 'refreshCodexManagedAccountLimits');
+  assert.match(dockSwitch, /await switchCodexSystemAccount\(accountId\)/);
+  assert.doesNotMatch(dockSwitch, /refreshCodexManagedAccountLimits/);
+  assert.doesNotMatch(dockSwitch, /await refreshCodexManagedAccountLimits/);
+  const renderLimits = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+  // The page no longer picks row options: Codex's switch affordance rides in the
+  // view's policy, so it reaches the Edge Dock card too.
+  assert.doesNotMatch(renderLimits, /rowOptions/);
+  assert.match(renderLimits, /nodes\.push\(renderLimitProviderSolo\(id, label, provider, color\)\)/);
+  assert.match(renderLimits, /if \(codexAccountControl\.deferRender\(els\.limitsPanel\)\) return;/);
+  assert.doesNotMatch(renderLimits, /codexSwitchPopoverRenderPending/);
+});
+
+test('DeepSeek uses the generic form and MiniMax keys use the shared account shell', () => {
+  const html = readRendererFile('index.html');
+  const css = readRendererFile('styles.css');
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const forms = limitAccountFormsForRenderer();
+  const expectedFields = {
+    deepseek: [['deepseekApiKey', 'password'], ['deepseekWebToken', 'password']]
+  };
+  for (const id of ['deepseek']) {
+    assert.doesNotMatch(html, new RegExp(`id="${id}(AccountGroup|ManualPanel|ApiKeyInput)"`), id);
+    assert.doesNotMatch(css, new RegExp(`#${id}ManualPanel`), id);
+    const form = forms.find((candidate) => candidate.id === id);
+    assert.equal(form.kind, 'credential', id);
+    assert.deepEqual(form.fields.map(({ key, input }) => [key, input]), expectedFields[id], id);
+    assert.deepEqual(form.manual[0], { note: `settings.${id}.note` }, id);
+    assert.deepEqual(form.status, {
+      configuredKey: `${id}ApiKeyConfigured`,
+      sourceKey: `${id}ApiKeySource`,
+      pendingKey: `${id}PendingCheckSince`
+    }, id);
+    for (const key of ['titleKey', 'openKey', 'clearKey', 'saveKey', 'emptyKey', 'failedKey']) {
+      assert.match(form[key], new RegExp(`^settings\\.${id}\\.`), `${id} ${key}`);
+    }
+    assert.match(
+      form.fields.find(({ key }) => key === `${id}ApiKey`).placeholderKey,
+      new RegExp(`^settings\\.${id}\\.`),
+      id
+    );
+  }
+  assert.deepEqual(forms.find(({ id }) => id === 'deepseek').openUrl, { url: 'https://platform.deepseek.com/api_keys' });
+
+  const app = readRendererFile('app.js');
+  assert.equal(forms.some(({ id }) => id === 'minimax'), false);
+
+  // The region never becomes a credential: no store path, so it stays in
+  // settings.json only after a selection; an implicit default stays empty.
+  const { initialAccountSettings } = require('../../src/electron/limits/accountSettings');
+  assert.equal(initialAccountSettings({}).minimaxApiRegion, '');
+  assert.equal(initialAccountSettings({ MINIMAX_API_REGION: 'cn' }).minimaxApiRegion, '');
+  assert.equal(initialAccountSettings({ TOKEN_MONITOR_MINIMAX_API_REGION: 'intl' }).minimaxApiRegion, '');
+  assert.equal(initialAccountSettings({ MINIMAX_API_HOST: 'api.minimax.io' }).minimaxApiRegion, '');
+  assert.match(app, /limitAccountPanelsApi\.resolveOpenUrl\(form, \{\s*document,\s*provider: externalProviderForAccount\(form\.id\)/);
+  assert.doesNotMatch(app, /minimaxPlatformUrl|form\.id === 'minimax'/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  for (const host of ['platform.minimax.io', 'platform.minimaxi.com']) {
+    assert.equal(limitProviderUrlAllowed(host, '/user-center/payment/token-plan'), true, host);
+  }
+  assert.doesNotMatch(app, /render(Deepseek|Minimax)Status|set(Deepseek|Minimax)AccountExpanded|(deepseek|minimax)AccountLinked/);
+});
+
+test('API key account entries share styling and Copilot uses the folded token entry', () => {
+  const app = readRendererFile('app.js');
+  const css = readRendererFile('styles.css');
+
+  const animationBody = functionBodyBeforeMarker(app, 'initSettingsAnimationWrappers', '\ninitSettingsAnimationWrappers();');
+
+  // Membership, not a contiguous run. This used to assert a literal match on the
+  // list's tail, so a panel inserted anywhere else passed it by construction — cline
+  // did, and shipped with no wrapper while the stylesheet rules naming its inner
+  // element sat there matching nothing. The rule asserted here is the one with a
+  // mechanical justification: a bare panel has no `accordion-animated-container`
+  // anywhere in its own markup, so if it is not listed here it never animates at
+  // all. An `opencode-add-form` panel is a per-panel choice and stays out of this
+  // assertion — cursor is wrapped (its button and details animate as one unit) while
+  // copilot and mimo declare their own container, which the assertions below pin.
+  const html = readRendererFile('index.html');
+  const barePanels = [...html.matchAll(/<div id="([a-zA-Z]+ManualPanel)"([^>]*)>/g)]
+    .filter(([, , attributes]) => !/opencode-add-form/.test(attributes))
+    .map(([, id]) => id);
+  assert.ok(!barePanels.includes('kimiManualPanel'), 'Kimi now uses its generated slot editor');
+  for (const id of barePanels) {
+    assert.ok(
+      animationBody.includes(`'#${id}'`),
+      `${id} is a plain panel and must be animated by initSettingsAnimationWrappers`
+    );
+  }
+  // Generated panels share one class, so the wrapper list names it once.
+  assert.ok(animationBody.includes("'.credential-manual-panel'"));
+  assert.doesNotMatch(animationBody, /'#mimoManualPanel'/);
+  assert.doesNotMatch(animationBody, /'#copilotManualPanel'/);
+
+  // Each provider's error line starts hidden. Hiding itself is the stylesheet's
+  // one blanket rule, so what is worth asserting here is that every provider has
+  // such a line and that none of them ship visible.
+  for (const provider of ['volcengine', 'kimi']) {
+    assert.doesNotMatch(html, new RegExp(`id="${provider}AccountGroup"`), provider);
+  }
+  assert.match(css, /#kimiManualPanel,\n#copilotManualPanel,\n\.credential-manual-panel,\n#mimoManualPanel,\n#volcengineManualPanel\s*\{\n\s*min-width: 0;/);
+  assert.match(css, /#kimiManualPanel > \.accordion-animation-inner,\n\.credential-manual-panel > \.accordion-animation-inner,\n#mimoManualPanel > \.accordion-animation-inner,\n#volcengineManualPanel > \.accordion-animation-inner\s*\{\n\s*display: grid;/);
+  assert.doesNotMatch(css, /#copilotManualPanel > \.accordion-animation-inner/);
+  {
+    // Every generated control carries .credential-input wherever it is placed,
+    // so a region select above the paste panel is styled like the inputs in it.
+    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes(".credential-input,") && match[2].includes("font-size: 0.75rem;"));
+    assert.ok(rule, 'shared credential input style should exist');
+    for (const selector of [".credential-input", "#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", "#mimoManualPanel input", "#mimoManualPanel textarea", "#volcengineManualPanel input"]) {
+      assert.ok(rule[1].split(',').map((value) => value.trim()).includes(selector), selector);
+    }
+  }
+  {
+    const rule = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].find((match) => match[1].includes(".credential-input:not(select)") && match[2].includes("font-family: monospace;"));
+    assert.ok(rule, 'shared credential input style should exist');
+    for (const selector of [".credential-input:not(select)", "#kimiManualPanel input", "#kimiManualPanel textarea", "#copilotManualDetails input", "#mimoManualPanel input", "#mimoManualPanel textarea", "#volcengineManualPanel input"]) {
+      assert.ok(rule[1].split(',').map((value) => value.trim()).includes(selector), selector);
+    }
+  }
+
+  assert.match(css, /\.thirdparty-field :is\(input, select, \.select-control-trigger\)\s*\{[\s\S]*?font-size: 0\.75rem;/);
+});
+
+test('Copilot uses the shared slot form with a provider-owned login action', () => {
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(form => form.id === 'copilot');
+  assert.equal(form.accountSlots, true);
+  assert.equal(form.loginAction.labelKey, 'settings.copilot.signIn');
+  assert.deepEqual(form.fields.map(field => field.key), ['copilotApiToken', 'copilotEnterpriseHost']);
+});
+
+test('Volcengine uses the common slot editor for Coding, Ark and Agent credentials', () => {
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(form => form.id === 'volcengine');
+  assert.equal(form.accountSlots, true);
+  assert.equal(form.kind, 'credential');
+  assert.equal(form.credentialChoice, undefined, 'complementary lanes must not clear each other');
+  assert.deepEqual(form.fields.map(field => field.key), [
+    'volcengineAccessKeyId', 'volcengineApiKey', 'volcengineSecretAccessKey', 'volcengineRegion',
+    'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion'
+  ]);
+  assert.equal(form.fields.find(field => field.key === 'volcengineApiKey').labelKey, 'settings.limits.sources.apiKey');
+  assert.doesNotMatch(readRendererFile('index.html'), /id="volcengineAccountGroup"/);
+  assert.doesNotMatch(readRendererFile('app.js'), /volcengineCredentialsSubmit|volcengineAgentClearButton/);
+});
+
+test('Z.ai, Qoder, Trae and Ollama panels are generated from their declared forms', () => {
+  const html = readRendererFile('index.html');
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const forms = Object.fromEntries(limitAccountFormsForRenderer().map((form) => [form.id, form]));
+  for (const id of ['zai', 'qoder', 'trae', 'ollama']) assert.doesNotMatch(html, new RegExp(`id="${id}AccountGroup"`), id);
+
+  // Z.ai: the region select sits above the paste panel and saves on change.
+  assert.deepEqual(forms.zai.top, [{ field: 'zaiApiRegion' }]);
+  const zaiRegion = forms.zai.fields.find(({ key }) => key === 'zaiApiRegion');
+  assert.deepEqual(zaiRegion.options.map(({ value }) => value), ['global', 'bigmodel-cn']);
+  assert.equal(zaiRegion.saveOnChange, true);
+  assert.equal(zaiRegion.secret, false, 'Clear keeps the region');
+  assert.deepEqual(forms.zai.openUrl.urls, {
+    global: 'https://z.ai/manage-apikey/coding-plan/personal/my-plan',
+    'bigmodel-cn': 'https://bigmodel.cn/coding-plan/personal/usage'
+  });
+
+  // Qoder: the site select changes both the step hint and the landing page.
+  const qoderStep = forms.qoder.manual.find((block) => block.steps).steps[0];
+  assert.deepEqual(qoderStep, ['settings.qoder.step1Before', {
+    code: { byField: 'qoderSite', values: { global: 'qoder.com/account/usage', cn: 'qoder.com.cn/account/usage' } }
+  }, 'settings.qoder.step1After']);
+  assert.deepEqual(forms.qoder.openUrl.urls, { global: 'https://qoder.com/account/usage', cn: 'https://qoder.com.cn/account/usage' });
+  assert.doesNotMatch(JSON.stringify(forms.qoder), /settings\.qoder\.note/);
+
+  // Trae defaults to the browser Cookie lane; legacy token/device inputs stay available.
+  assert.deepEqual(forms.trae.credentialChoice.fields, ['traeCookie', 'traeAccessToken']);
+  assert.equal(forms.trae.fields[0].input, 'textarea');
+  assert.equal(forms.trae.fields[1].placeholder, 'Cloud-IDE-Token');
+  assert.equal(forms.trae.fields[2].required, false);
+  assert.deepEqual(forms.trae.manual[0].steps, ['settings.trae.step1', 'settings.trae.cookieStep2', 'settings.trae.cookieStep3', 'settings.trae.step4']);
+  assert.deepEqual(forms.trae.manual.slice(-3), [
+    { field: 'traeAccessToken', whenCredential: 'traeAccessToken' },
+    { field: 'traeDeviceId', whenCredential: 'traeAccessToken' },
+    { note: 'settings.trae.deviceIdNote', whenCredential: 'traeAccessToken' }
+  ]);
+  assert.equal(forms.trae.messages.required, 'settings.trae.missingAuthorization');
+
+
+  // Ollama chooses one draft lane; API key is the fresh-install default.
+  assert.deepEqual(forms.ollama.credentialChoice.fields, ['ollamaApiKey', 'ollamaCookie']);
+  assert.deepEqual(forms.ollama.manual[0], { note: 'settings.ollama.apiKeyNote', whenCredential: 'ollamaApiKey' });
+  assert.equal(forms.ollama.manual.find((block) => block.steps).whenCredential, 'ollamaCookie');
+  assert.deepEqual(forms.ollama.fields.map(({ key, input }) => [key, input]), [['ollamaApiKey', 'password'], ['ollamaCookie', 'textarea']]);
+  assert.equal(forms.ollama.fields[0].required, false);
+  assert.equal(forms.ollama.fields[1].required, false);
+  assert.equal(forms.ollama.messages.rejected, 'settings.ollama.validationInvalid');
+  assert.equal(forms.ollama.messages.required, 'settings.ollama.required');
+  assert.match(readRendererFile('i18n.js'), /'settings\.ollama\.cookiePlaceholder': 'wos-session=\.\.\.'/);
+
+  const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
+  const main = readAccountOwnersAndMain();
+  assert.doesNotMatch(preload + main, /ollama:validateCookie|claude:saveCookie/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  for (const form of Object.values(forms)) {
+    for (const url of form.openUrl.url ? [form.openUrl.url] : [...Object.values(form.openUrl.urls), form.openUrl.default]) {
+      const parsed = new URL(url);
+      assert.equal(limitProviderUrlAllowed(parsed.hostname, parsed.pathname), true, `${form.id} ${url}`);
+    }
+  }
+});
+
+test('Zed account panel follows the manual browser Cookie flow without exposing credentials', () => {
+  const html = readRendererFile('index.html');
+  assert.doesNotMatch(html, /id="zedAccountGroup"/);
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'zed');
+  assert.equal(form.kind, 'credential');
+  assert.deepEqual(form.fields.map(({ key, input }) => [key, input]), [['zedCookie', 'textarea']]);
+  assert.deepEqual(form.openUrl, { url: 'https://dashboard.zed.dev/' });
+  assert.deepEqual(form.manual[0].steps, [1, 2, 3, 4].map((step) => `settings.zed.step${step}`));
+  assert.doesNotMatch(JSON.stringify(form), /zedUserId|zedAccessToken|zedServerUrl|cloud.zed.dev/);
+
+  const app = readRendererFile('app.js');
+  assert.equal(require('../../src/shared/providers/zed/account').sources[0].kind, 'web');
+  assert.match(app, /limitAccountPanelsApi\.createCredentialPanel\(form/);
+  assert.match(app, /window\.tokenMonitor\.limits\.saveCredential\(id, values\)/);
+  assert.doesNotMatch(app, /window\.tokenMonitor\.zed|zedUserId|zedAccessToken|zedServerUrl/);
+
+  const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
+  assert.doesNotMatch(preload, /zed:addAccount|zed:accounts|zed:cancelLogin/);
+  const main = readAccountOwnersAndMain();
+  const settingsForRenderer = functionBody(main, 'settingsForRenderer', 'pushSettingsToRenderer');
+  assert.match(settingsForRenderer, /\.\.\.accountFieldProjection\(settings, process\.env\)/);
+  assert.match(settingsForRenderer, /\.\.\.accountStatusProjection\(settings, process\.env\)/);
+  const { accountFieldProjection, accountStatusProjection } = require('../../src/electron/limits/accountSettings');
+  assert.equal(accountFieldProjection({ zedCookie: 'private' }).zedCookie, 'set');
+  assert.equal(accountStatusProjection({ zedCookie: 'private' }, {}).zedCookieConfigured, true);
+  assert.doesNotMatch(settingsForRenderer, /zedCookie:\s*settings\?\.zedCookie,/);
+  assert.doesNotMatch(main, /runZedOAuthLogin|readZedCredential|ipcMain\.handle\('zed:addAccount'/);
+
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  assert.equal(limitProviderUrlAllowed('dashboard.zed.dev', '/'), true);
+  const panel = readRendererFile('limits/accountPanels.js');
+  assert.match(panel, /element\('div', 'ErrorMessage', 'settings-note error hidden'\)/);
+  assert.match(readRendererFile('styles.css'), /\.credential-input,/);
+
+  const i18n = readRendererFile('i18n.js');
+  assert.doesNotMatch(i18n, /settings\.limits\.connection\.zed/);
+  for (const key of [
+    'settings.zed.title',
+    'settings.zed.openBrowser',
+    'settings.zed.step1',
+    'settings.zed.saveCookie',
+    'settings.zed.statusInvalid'
+  ]) {
+    assert.equal(i18n.split(`'${key}':`).length - 1, 6, `${key} should exist in all bundled locales`);
+  }
+});
+
+test('Command Code generic account panel saves a cookie and opens the allowlisted usage page', () => {
+  const html = readRendererFile('index.html');
+  assert.doesNotMatch(html, /id="commandcodeAccountGroup"/);
+  const { limitAccountFormsForRenderer, accountFieldProjection, accountStatusProjection } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'commandcode');
+  assert.deepEqual(form.fields.map(({ key, input }) => [key, input]), [['commandcodeCookie', 'textarea']]);
+  assert.deepEqual(form.openUrl, { url: 'https://commandcode.ai/settings/usage' });
+  assert.deepEqual(form.manual[0].steps, [1, 2, 3, 4].map((step) => `settings.commandcode.step${step}`));
+  const panel = readRendererFile('limits/accountPanels.js');
+  assert.match(panel, /await onSave\(form, values, \(\) => \{/);
+  assert.match(panel, /onClear\(form\)/);
+  const app = readRendererFile('app.js');
+  assert.match(app, /window\.tokenMonitor\.limits\.saveCredential\(id, values\)/);
+  assert.match(app, /window\.tokenMonitor\.limits\.clearCredential\(id\)/);
+  // Saving selects the provider in main, in the same write as the credential.
+  assert.match(fs.readFileSync(path.join(rendererDir, '..', 'limits', 'credentialCommands.js'), 'utf8'),
+    /limitProviders: providerSelectionIncluding\(getSettings\(\)\.limitProviders, entry\.id\),\n\s*limitsEnabled: true/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  assert.equal(limitProviderUrlAllowed('commandcode.ai', '/settings/usage'), true);
+  assert.equal(limitProviderUrlAllowed('www.commandcode.ai', '/settings/usage'), true);
+  assert.equal(accountFieldProjection({ commandcodeCookie: 'private' }).commandcodeCookie, 'set');
+  assert.equal(accountStatusProjection({ commandcodeCookie: 'private' }, {}).commandcodeCookieConfigured, true);
+});
+
+test('Kimi slot editor keeps the API primary and Web token complementary', () => {
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(form => form.id === 'kimi');
+  assert.equal(form.accountSlots, true);
+  assert.equal(form.credentialChoice, undefined);
+  assert.deepEqual(form.fields.map(field => field.key), ['kimiApiKey', 'kimiWebAccessToken']);
+  assert.equal(form.openUrl.url, 'https://www.kimi.com/code/console');
+  assert.match(JSON.stringify(form.manual), /settings.kimi.step2/);
+  assert.match(JSON.stringify(form.manual), /settings.kimi.step3/);
+  assert.doesNotMatch(readRendererFile('index.html'), /id="kimiAccountGroup"/);
+  assert.doesNotMatch(readRendererFile('app.js'), /kimiApiKeySubmit|kimiWebAccessTokenSubmit/);
+
+  const main = readAccountOwnersAndMain();
+  const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
+  assert.match(allowlist, /limitProviderUrlAllowed\(parsed\.hostname, parsed\.pathname\)/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  for (const host of ['kimi.com', 'www.kimi.com']) {
+    assert.equal(limitProviderUrlAllowed(host, '/code/console'), true);
+    assert.equal(limitProviderUrlAllowed(host, '/'), false);
+  }
+  for (const host of ['ollama.com', 'www.ollama.com']) {
+    assert.equal(limitProviderUrlAllowed(host, '/settings'), true);
+    assert.equal(limitProviderUrlAllowed(host, '/settings/keys'), true);
+    assert.equal(limitProviderUrlAllowed(host, '/settings/keys/untrusted'), false);
+    assert.equal(limitProviderUrlAllowed(host, '/'), false);
+  }
+});
+
+test('Claude Web account panel stores a redacted cookie and opens only the usage page', async () => {
+  const html = readRendererFile('index.html');
+  assert.doesNotMatch(html, /id="claudeAccountGroup"/);
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'claude');
+  assert.deepEqual(form.manual, [
+    { note: 'settings.claude.note' },
+    { steps: [1, 2, 3, 4].map((step) => `settings.claude.step${step}`) },
+    { field: 'claudeWebCookie' }
+  ]);
+  assert.deepEqual(form.fields.map(({ key, input, placeholderKey }) => [key, input, placeholderKey]), [
+    ['claudeWebCookie', 'textarea', 'settings.claude.cookiePlaceholder'],
+    ['claudeWebOrganizationId', 'select', undefined]
+  ]);
+  assert.deepEqual(form.top, [{ field: 'claudeWebOrganizationId' }]);
+  assert.deepEqual(form.openUrl, { url: 'https://claude.ai/settings/usage' });
+  assert.deepEqual(form.messages, {
+    required: 'settings.claude.cookieRequired',
+    invalidFormat: 'settings.claude.cookieInvalidFormat',
+    rejected: 'settings.claude.cookieRejected'
+  });
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  for (const locale of ['en', 'zh-TW', 'zh-CN', 'ko', 'ja', 'pt-BR']) {
+    for (const key of ['organization', 'organizationChoose', 'organizationRequired', 'organizationSelect', 'organizationUnavailable', 'organizationLoadFailed']) {
+      assert.ok(MESSAGES[locale][`settings.claude.${key}`], `${locale} ${key}`);
+    }
+  }
+  assert.equal(MESSAGES.en['settings.claude.title'], 'Claude Account');
+  assert.match(MESSAGES.en['settings.claude.note'], /collected alongside the automatically detected Claude Code OAuth or CLI account/);
+  assert.match(MESSAGES.en['settings.claude.step2'], /Application\/Storage[\s\S]*Cookies[\s\S]*https:\/\/claude\.ai/);
+  assert.match(MESSAGES.en['settings.claude.step3'], /Copy the sessionKey value/);
+  assert.equal(MESSAGES.en['settings.claude.cookiePlaceholder'], 'sessionKey=...');
+  // A generated panel is inserted before the next catalog provider's group, so
+  // Claude still leads the list ahead of Codex.
+  const { LIMIT_PROVIDER_IDS } = require('../../src/shared/limits/providers');
+  assert.ok(LIMIT_PROVIDER_IDS.indexOf('claude') < LIMIT_PROVIDER_IDS.indexOf('codex'));
+
+  const css = readRendererFile('styles.css');
+  // The panel collapses through the shared accordion rather than disappearing:
+  // `.accordion-animated-container` carries `display: grid !important`, so a
+  // `.hidden { display: none }` rule would never take effect. What the panel
+  // needs is the wrapper, which initSettingsAnimationWrappers gives the class.
+  const panelRules = cssRulesForSelector(css, '.credential-manual-panel');
+  assert.ok(panelRules.some(rule => declaration(rule, 'min-width') === '0'));
+  const innerRules = cssRulesForSelector(css, '.credential-manual-panel > .accordion-animation-inner');
+  assert.ok(innerRules.some(rule => (
+    declaration(rule, 'display') === 'grid'
+      && declaration(rule, 'gap') === '8px'
+  )));
+  assert.ok(cssRulesForSelector(css, '.credential-input').some(rule => (
+    declaration(rule, 'width') === '100%'
+      && declaration(rule, 'font-size') === '0.75rem'
+  )));
+  assert.ok(cssRulesForSelector(css, '.credential-input:not(select)').some(rule => declaration(rule, 'font-family') === 'monospace'));
+  const textareaControlRules = cssRulesForSelector(css, '.settings-panel textarea');
+  assert.ok(textareaControlRules.some(rule => (
+    declaration(rule, 'height') === '54px'
+      && declaration(rule, 'min-height') === '54px'
+      && declaration(rule, 'resize') === 'vertical'
+  )));
+  assert.ok(textareaControlRules.some(rule => (
+    declaration(rule, 'background') === 'rgba(var(--sunken-rgb), 0.48)'
+      && declaration(rule, 'color') === 'var(--text)'
+      && declaration(rule, 'border') === '1px solid var(--line)'
+  )));
+  const textareaFocusRules = cssRulesForSelector(css, '.settings-panel textarea:focus');
+  assert.ok(textareaFocusRules.some(rule => (
+    declaration(rule, 'border-color') === 'rgba(115, 189, 245, 0.72)'
+  )));
+  const collapsedRules = cssRulesForSelector(css, '.accordion-animated-container.hidden');
+  assert.ok(collapsedRules.some(rule => (
+    declaration(rule, 'grid-template-rows') === '0fr'
+      && declaration(rule, 'pointer-events') === 'none'
+  )));
+  const collapsedInnerRules = cssRulesForSelector(
+    css,
+    '.accordion-animated-container.hidden > .accordion-animation-inner'
+  );
+  assert.ok(collapsedInnerRules.some(rule => declaration(rule, 'opacity') === '0'));
+
+  const app = readRendererFile('app.js');
+  const statusBody = functionBody(app, 'renderExternalProviderStatus', 'renderOpenCodeProfiles');
+  assert.match(statusBody, /manualPanel\.classList\.toggle\('hidden', linked && !limitAccountForm\(providerName\)\?\.accountSlots\)/);
+  assert.match(statusBody, /logoutBtn\.classList\.toggle\('hidden', !canClearConfiguredCredential\)/);
+
+  // The cookie is checked in main before it can replace a working one: a paste
+  // that is not one sk-ant- sessionKey (a multi-line paste included) is refused
+  // as a format error.
+  const { normalizeAccountField, accountFieldProjection, accountStatusProjection } = require('../../src/electron/limits/accountSettings');
+  assert.throws(() => normalizeAccountField('claudeWebCookie', 'sessionKey=abc'), /sk-ant-/);
+  assert.throws(() => normalizeAccountField('claudeWebCookie', 'sk-ant-sid01-a\nsk-ant-sid01-b'), /sk-ant-/);
+  // Storing the rotated key is covered in credentialCommands.test.js.
+  const main = readAccountOwnersAndMain();
+  assert.match(functionBody(main, 'credentialProbeDeps', 'electronLimitsDeps'),
+    /onClaudeWebCookieRenewed: \(\{ cookie \}\) => \{\s*renewed\.claudeWebCookie = cookie;/);
+  assert.doesNotMatch(main, /claudeWebCookieMutationRevision|ipcMain\.handle\('claude:saveCookie'/);
+
+  const rendererSettings = functionBody(main, 'settingsForRenderer', 'pushSettingsToRenderer');
+  assert.match(rendererSettings, /\.\.\.accountFieldProjection\(settings, process\.env\)/);
+  assert.match(rendererSettings, /\.\.\.accountStatusProjection\(settings, process\.env\)/);
+  assert.equal(accountFieldProjection({ claudeWebCookie: 'private' }).claudeWebCookie, 'set');
+  const claudeStatus = accountStatusProjection({ claudeWebCookie: 'private' }, {});
+  assert.equal(claudeStatus.claudeWebCookieConfigured, true);
+  assert.equal(claudeStatus.claudeWebCookieSource, 'settings');
+  const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
+  assert.match(allowlist, /limitProviderUrlAllowed\(parsed\.hostname, parsed\.pathname\)/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  assert.equal(limitProviderUrlAllowed('claude.ai', '/settings/usage'), true);
+  assert.equal(limitProviderUrlAllowed('claude.ai', '/'), false);
+});
+
+test('DeepSeek key changes invalidate stale provider status before re-checking', () => {
+  const app = readRendererFile('app.js');
+  // Its pills and groups are generated from the form id, so the hand-kept id
+  // map no longer names it.
+  assert.doesNotMatch(app, /deepseek: 'deepseek(AccountGroup|ApiKeyStatus)'/);
+  assert.match(app, /deepseekPendingCheckSince: 0/);
+
+  const saveBody = functionBody(app, 'saveAccountCredential', 'refreshLimitAccount');
+  assert.match(saveBody, /saveCredential\(id, values\)[\s\S]*markExternalProviderCheckPending\(id, result\.checkedSince\);[\s\S]*renderExternalProviderStatus\(id\);[\s\S]*await refreshStats\(\);/);
+  const clearBody = functionBody(app, 'clearAccountCredential', 'commitAccountCredential');
+  assert.match(clearBody, /clearCredential\(id\)\);[\s\S]*clearExternalProviderCheckPending\(id\);[\s\S]*clearExternalProviderPendingStatus\(id\);[\s\S]*renderExternalProviderStatus\(id\);/);
+  assert.match(functionBody(app, 'setupLimitAccountPanels', 'limitProviderAccountGroup'), /onClear: \(\{ id \}\) => clearAccountCredential\(id\)/);
+
+  const configLookup = /const config = limitAccountForm\(providerName\)\?\.status;/;
+  const pendingBody = functionBody(app, 'markExternalProviderCheckPending', 'clearExternalProviderCheckPending');
+  assert.match(pendingBody, configLookup);
+  assert.match(pendingBody, /state\[config\.pendingKey\] = checkedSince;/);
+  assert.match(pendingBody, /clearExternalProviderPendingStatus\(providerName\);/);
+
+  const providerBody = functionBody(app, 'externalProviderForAccount', 'externalProviderAccountLinked');
+  assert.match(providerBody, configLookup);
+  assert.match(providerBody, /Date\.parse\(provider\.updatedAt \|\| ''\)/);
+  assert.match(providerBody, /updatedAt < pendingSince/);
+  assert.match(providerBody, /state\[config\.pendingKey\] = 0;/);
+
+  const settleBody = functionBody(app, 'scheduleExternalProviderCheckSettle', 'markExternalProviderCheckPending');
+  assert.match(settleBody, /externalProviderCheckSettled\.add\(providerName\)/);
+  assert.doesNotMatch(settleBody, /clearExternalProviderCheckPending\(providerName\)/, 'the save cutoff must survive the settle timeout');
+  const renderBody = functionBody(app, 'renderExternalProviderStatus', 'renderOpenCodeProfiles');
+  assert.match(renderBody, /const settled = externalProviderCheckSettled\.has\(providerName\)/);
+  assert.match(renderBody, /pending = enabled &&[^;]*!settled/);
+  assert.match(renderBody, /settled && configured && enabled \? \{ status: 'noSyncedData' \}/);
+  const linkedBody = functionBody(app, 'externalProviderAccountLinked', 'markExternalProviderCheckPending');
+  assert.match(linkedBody, /state\.settings\?\.\[config\.configuredKey\]/);
+  assert.match(linkedBody, /provider\?\.status === 'ok'/);
+
+  const pendingStatusBody = functionBody(app, 'clearExternalProviderPendingStatus', 'apiKeyAccountStatusText');
+  assert.match(pendingStatusBody, /state\.stats\.limits\.providers = state\.stats\.limits\.providers\.filter/);
+  assert.match(pendingStatusBody, /provider\.provider !== providerName/);
+});
+
+test('disabled credential providers settle account status instead of checking forever', () => {
+  const app = readRendererFile('app.js');
+  const toggleBody = functionBody(app, 'onLimitProviderToggle', 'onLimitProviderMove');
+  const clearBody = functionBody(app, 'clearDisabledLimitProviderPendingChecks', 'externalProviderForAccount');
+  const externalRenderBody = functionBody(app, 'renderExternalProviderStatus', 'renderOpenCodeProfiles');
+
+  assert.match(toggleBody, /clearDisabledLimitProviderPendingChecks\(new Set\(checked\)\)/);
+  assert.doesNotMatch(app, /function renderCopilotStatus|function renderCopilotAccounts|clearCopilotPendingCheck/);
+  assert.match(clearBody, /\(state\.settings\?\.limitAccountForms \|\| \[\]\)\.map\(\(form\) => form\.id\)/);
+  assert.match(clearBody, /clearExternalProviderCheckPending\(providerName\)/);
+  assert.match(externalRenderBody, /const enabled = limitProviderEnabled\(providerName\);/);
+  assert.match(externalRenderBody, /const pending = enabled &&/);
+  assert.match(externalRenderBody, /apiKeyAccountStatusText\(providerName, statusProvider, configured, source, enabled\)/);
+});
+
+test('MiMo account panel matches the manual Cookie provider layout', () => {
+  const html = readRendererFile('index.html');
+  const app = readRendererOwner('mimo');
+  const css = readRendererFile('styles.css');
+  const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
+  const main = readAccountOwnersAndMain();
+  const details = html.match(/<div id="mimoSettingsDetails"[\s\S]*?<div id="mimoAccountErrorMessage"/)?.[0] || '';
+
+  assert.match(details, /id="mimoCookieInput"/);
+  assert.doesNotMatch(details, /id="mimoAccountNameInput"/);
+  assert.match(details, /id="mimoOpenConsoleButton"/);
+  assert.match(details, /id="mimoAddToggle"[\s\S]*aria-controls="mimoAddDetails"/);
+  assert.match(details, /id="mimoAddDetails" class="opencode-add-details accordion-animated-container hidden"/);
+  assert.match(details, /id="mimoSaveAccountButton"/);
+  assert.match(details, /id="mimoManualPanel"/);
+  // The membership is read from the machine's own MiMo Desktop session and is
+  // not sold on the developer platform, so the panel offers no paste for it —
+  // the console entry above is the only manual one this provider has.
+  assert.doesNotMatch(details, /mimoMembershipCookieInput|mimoSaveMembershipCookieButton|mimoClearMembershipCookieButton/);
+  assert.doesNotMatch(app, /mimoMembershipCookie|saveMembershipCookie/);
+  assert.match(details, /<strong>1\.<\/strong>[\s\S]*<strong>4\.<\/strong>/);
+  assert.match(details, /data-i18n="settings\.mimo\.step3Before">In Network, select<\/span> <code>balance<\/code>/);
+  assert.match(details, /data-i18n="settings\.mimo\.step4">Paste it below, then click Save account\.<\/span>/);
+  assert.doesNotMatch(details, /Only the cookies required for balance/);
+  assert.match(details, /placeholder="Cookie: \.\.\."/);
+  assert.match(details, /data-i18n-aria-label="settings\.mimo\.cookieLabel" aria-label="Cookie header"/);
+  assert.ok(details.indexOf('mimoAddToggle') < details.indexOf('mimoOpenConsoleButton'));
+  assert.ok(details.indexOf('mimoOpenConsoleButton') < details.indexOf('mimoCookieInput'));
+  assert.ok(details.indexOf('mimoCookieInput') < details.indexOf('mimoSaveAccountButton'));
+  assert.match(css, /#mimoManualPanel textarea,[\s\S]*font-size: 0\.75rem/);
+  assert.match(css, /\.credential-input:not\(select\),[\s\S]*#mimoManualPanel textarea,[\s\S]*font-family: monospace/);
+  assert.match(css, /\.managed-account-list:empty \{ display: none; \}/);
+  assert.match(app, /getElementById\('mimoManualPanel'\)\?\.classList\.toggle\('expanded', next\)/);
+  assert.doesNotMatch(app, /settings\.mimo\.empty/);
+  assert.match(app, /window\.tokenMonitor\.mimo\.openConsole\(\)/);
+  assert.match(app, /window\.tokenMonitor\.mimo\.addAccount\(draft\)/);
+  assert.match(app, /saveButton\.textContent = t\('settings\.mimo\.checking'\)/);
+  assert.match(app, /result\?\.errorCode === 'invalidCookie'/);
+  assert.match(app, /function setMimoAddExpanded\(expanded\)/);
+  assert.match(app, /setMimoAddExpanded\(false\)/);
+  assert.match(preload, /addAccount: \(cookieHeader\) => ipcRenderer\.invoke\('mimo:addAccount', cookieHeader\)/);
+  assert.match(preload, /openConsole: \(\) => ipcRenderer\.invoke\('mimo:openConsole'\)/);
+  assert.match(main, /ipcMain\.handle\('mimo:openConsole'/);
+  assert.match(main, /ipcMain\.handle\('mimo:addAccount', \(_event, cookieHeader\) => addMimoManagedAccount\(cookieHeader\)\)/);
+  assert.doesNotMatch(main, /saveMimoMembershipCookie|mimoMembershipCookie/);
+  // Limits rows mask through the shared resolver; the settings list stays readable.
+  assert.match(readRendererFile('limits/windowsView.js'), /maskEmail: limitAccountEmailsMasked\(\)/);
+  assert.match(app, /function mimoSettingsAccountTitle\(account, index\) \{[\s\S]*account\?\.accountEmail[\s\S]*`Account \$\{index \+ 1\}`/);
+  assert.match(app, /accountName: mimoSettingsAccountTitle\(account, index\)/);
+  const addBody = functionBody(main, 'addMimoManagedAccount', 'removeMimoManagedAccount');
+  assert.match(addBody, /limitRefreshScope: \{ provider: 'mimo', accountKey: result\.account\.accountKey \}/);
+  assert.ok(addBody.indexOf('fetchMimoLimits') < addBody.indexOf('setMimoManagedAccounts('), 'validation must happen before persistence');
+  assert.match(addBody, /result\.account\.accountEmail = String\(validation\.accountEmail/);
+  assert.doesNotMatch(main, /new BrowserWindow\([\s\S]{0,300}Sign in to MiMo/);
+  assert.doesNotMatch(main, /MIMO_SESSION_PARTITION|mimoLoginWindow|configureMimoLoginWindow/);
+});
+
+test('DeepSeek account copy says browser and external URL is allowlisted', () => {
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'deepseek');
+  assert.equal(form.openKey, 'settings.deepseek.openBrowser');
+
+  const i18n = readRendererFile('i18n.js');
+  assert.match(i18n, /'settings\.deepseek\.openBrowser': 'Open DeepSeek API keys in browser'/);
+  assert.match(i18n, /'settings\.deepseek\.openBrowser': '在瀏覽器開啟 DeepSeek API 金鑰'/);
+  assert.match(i18n, /'settings\.deepseek\.openBrowser': '在浏览器打开 DeepSeek API 密钥'/);
+
+  const main = readAccountOwnersAndMain();
+  const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
+  assert.match(allowlist, /limitProviderUrlAllowed\(parsed\.hostname, parsed\.pathname\)/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  assert.equal(limitProviderUrlAllowed('platform.deepseek.com', '/api_keys'), true);
+  assert.equal(limitProviderUrlAllowed('platform.deepseek.com', '/'), false);
+  assert.deepEqual(form.openUrl, { url: 'https://platform.deepseek.com/api_keys' });
+});
+
+test('Devin account panel uses the shared status label and opens the allowlisted usage page', () => {
+  assert.doesNotMatch(readRendererFile('index.html'), /id="devinAccountGroup"/);
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'devin');
+  assert.equal(form.openKey, 'settings.devin.openBrowser');
+  assert.deepEqual(form.openUrl, { url: 'https://app.devin.ai/settings/usage' });
+  assert.deepEqual(form.messages, { required: 'settings.devin.credentialsRequired' });
+  assert.deepEqual(form.fields.map(({ key, required }) => [key, required]), [['devinBearerToken', true], ['devinOrganization', true]]);
+  assert.equal(JSON.stringify(form).includes('settings.devin.note'), false);
+
+  const i18n = readRendererFile('i18n.js');
+  assert.match(i18n, /'settings\.devin\.statusNotSet': 'Not configured'/);
+  assert.match(i18n, /'settings\.devin\.statusNotSet': '尚未設定'/);
+  for (const key of ['settings.devin.statusNotSet', 'settings.devin.credentialsRequired']) {
+    assert.equal(i18n.split(`'${key}':`).length - 1, 6, `${key} should exist in all bundled locales`);
+  }
+
+
+  const main = readAccountOwnersAndMain();
+  const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
+  assert.match(allowlist, /limitProviderUrlAllowed\(parsed\.hostname, parsed\.pathname\)/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  assert.equal(limitProviderUrlAllowed('app.devin.ai', '/settings/usage'), true);
+  assert.equal(limitProviderUrlAllowed('app.devin.ai', '/settings'), false);
+});
+
+test('Z.ai global and BigModel CN browser links are allowlisted', () => {
+  const main = readAccountOwnersAndMain();
+  const allowlist = functionBody(main, 'isAllowedExternalUrl', 'revealWindow');
+  assert.match(allowlist, /limitProviderUrlAllowed\(parsed\.hostname, parsed\.pathname\)/);
+  const { limitProviderUrlAllowed } = require('../../src/shared/limits/accounts');
+  for (const host of ['z.ai', 'www.z.ai', 'bigmodel.cn', 'www.bigmodel.cn']) {
+    assert.equal(limitProviderUrlAllowed(host, '/'), true);
+  }
+});
+
+test('Factory account form keeps its setup copy and validates before saving', () => {
+  const { limitAccountFormsForRenderer, accountStatusProjection, normalizeAccountField } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'factory');
+  assert.deepEqual(form.fields.map(({ key, input }) => [key, input]), [['factoryApiKey', 'password']]);
+  assert.deepEqual(form.manual, [{ note: 'settings.factory.note' }, { field: 'factoryApiKey' }]);
+  assert.deepEqual(form.openUrl, { url: 'https://app.factory.ai/settings/api-keys' });
+  assert.equal(form.messages.rejected, 'settings.factory.validationInvalid');
+  assert.doesNotMatch(readRendererFile('index.html'), /id="factoryAccountGroup"/);
+  const app = readRendererFile('app.js');
+  const save = functionBody(app, 'saveAccountCredential', 'refreshLimitAccount');
+  assert.match(save, /messages\.rejected \|\| 'settings\.common\.credentialRejected'/);
+  const main = readAccountOwnersAndMain();
+  const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
+  assert.match(preload, /saveCredential: \(providerId, values\) => ipcRenderer\.invoke\('limits:saveCredential', providerId, values\)/);
+  assert.match(preload, /clearCredential: \(providerId\) => ipcRenderer\.invoke\('limits:clearCredential', providerId\)/);
+  assert.match(main, /ipcMain\.handle\('limits:saveCredential', \(_event, providerId, values\) => .*credentialCommands\.saveCredential\(providerId, values\)\)/);
+  assert.match(main, /ipcMain\.handle\('limits:clearCredential', \(_event, providerId\) => credentialCommands\.clearCredential\(providerId\)\)/);
+  assert.doesNotMatch(main + preload, /limits:validateCredential|validateLimitCredential/);
+  assert.equal(normalizeAccountField('factoryApiKey', ' " fk-live " '), 'fk-live');
+  const projected = accountStatusProjection({ factoryApiKey: '' }, { FACTORY_API_KEY: 'auto-detected-key' });
+  assert.equal(projected.factoryCredentialConfigured, true);
+  assert.equal(projected.factoryCredentialSource, 'env');
+});
+
+test('Factory API key validation keeps its translated rejection message', () => {
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'factory');
+  // Throttled and unreachable checks now save and say so through the shared
+  // copy, so the rejection is the only outcome with Factory-specific guidance.
+  assert.deepEqual({ ...form.messages }, { rejected: 'settings.factory.validationInvalid' });
+
+  const i18n = readRendererFile('i18n.js');
+  assert.equal(i18n.match(/'settings\.factory\.validationInvalid':/g)?.length, 6);
+  assert.doesNotMatch(i18n, /settings\.factory\.validation(RateLimited|Unavailable)/);
+});
+
+test('Factory identifies environment and Droid .env credentials separately', () => {
+  const main = readAccountOwnersAndMain();
+  const settingsBody = functionBody(main, 'settingsForRenderer', 'systemDarkTrayUi');
+  assert.match(settingsBody, /\.\.\.accountStatusProjection\(settings, process\.env\)/);
+  const { accountStatusProjection } = require('../../src/electron/limits/accountSettings');
+  const projected = accountStatusProjection({}, { FACTORY_API_KEY: 'env-key' });
+  assert.equal(projected.factoryCredentialSource, 'env');
+
+  const app = readRendererFile('app.js');
+  const labels = runRendererFunctions(
+    app,
+    ['apiKeyAccountStatusText'],
+    "[apiKeyAccountStatusText('factory', { status: 'ok' }, true, 'env'), apiKeyAccountStatusText('factory', { status: 'ok' }, true, 'droid-env')]",
+    {
+      limitProviderPresentationApi: { apiKeyAccountStatus: () => 'linked' },
+      t: key => key
+    }
+  );
+  assert.deepEqual(Array.from(labels), ['settings.factory.statusEnv', 'settings.factory.statusDroidEnv']);
+
+  const i18n = readRendererFile('i18n.js');
+  assert.equal((i18n.match(/'settings\.factory\.statusDroidEnv'/g) || []).length, 6);
+});
+
+test('Cline account form keeps sign-in precedence, accessible input, and allowlisted setup URL', () => {
+  const html = readRendererFile('index.html');
+  assert.doesNotMatch(html, /id="clineAccountGroup"/);
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'cline');
+  assert.deepEqual(form.fields.map(({ key, input, ariaLabelKey }) => [key, input, ariaLabelKey]), [
+    ['clineApiKey', 'password', 'settings.cline.apiKeyLabel']
+  ]);
+  assert.deepEqual(form.manual, [{ note: 'settings.cline.note' }, { field: 'clineApiKey' }]);
+  assert.deepEqual(form.openUrl, { url: 'https://app.cline.bot/dashboard/account' });
+  assert.equal(form.messages.rejected, 'settings.cline.validationInvalid');
+  const panel = readRendererFile('limits/accountPanels.js');
+  assert.match(panel, /input\.setAttribute\('aria-label', translate\(field\.ariaLabelKey\)\)/);
+  const main = readAccountOwnersAndMain();
+  // The panel's one outbound link has to survive the same allowlist as every other
+  // provider console, which is what no assertion was checking when Cline shipped and
+  // the button silently did nothing. Asserted by running the predicate rather than by
+  // reading the list it lives in: the mechanism was never in doubt, only the entry.
+  const allowed = runMainFunction(
+    main,
+    'isAllowedExternalUrl',
+    'revealWindow',
+    `[
+      isAllowedExternalUrl('https://app.cline.bot/dashboard/account'),
+      isAllowedExternalUrl('https://app.cline.bot/'),
+      isAllowedExternalUrl('https://app.cline.bot.evil.example/dashboard/account'),
+      isAllowedExternalUrl('http://app.cline.bot/dashboard/account')
+    ]`,
+    {
+      // A fresh vm context has the language builtins but not the runtime's `URL`,
+      // which the predicate parses with; without it every URL would look forbidden.
+      URL,
+      settings: {},
+      process: { env: {} },
+      isAllowedVerificationUrl: () => false,
+      isAllowedCodexLoginUrl: () => false,
+      limitProviderUrlAllowed: require('../../src/shared/limits/accounts').limitProviderUrlAllowed,
+      STATUS_PAGE_HOSTS: new Set()
+    }
+  );
+  assert.deepEqual(Array.from(allowed), [true, false, false, false]);
+  // The normalizer cleans the pasted value only; reading the environment is the
+  // resolver's job, so an empty field never falls back to an env key on save.
+  const { currentAccountField, normalizeAccountField } = require('../../src/electron/limits/accountSettings');
+  assert.equal(normalizeAccountField('clineApiKey', ' " sk-live " '), 'sk-live');
+  assert.equal(currentAccountField('clineApiKey', { clineApiKey: '' }, { CLINE_API_KEY: 'auto-detected-key' }), 'auto-detected-key');
+});
+
+test('Cline API key validation keeps its rejection copy in every locale', () => {
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(({ id }) => id === 'cline');
+  assert.deepEqual({ ...form.messages }, { rejected: 'settings.cline.validationInvalid' });
+
+  // Every cline string the UI can render exists in all bundled locales — the same
+  // completeness Antigravity copy is held to, derived here from the source of truth
+  // rather than hand-listed so a key added later cannot skip a locale.
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  const clineKeys = Object.keys(MESSAGES.en).filter((key) => key.startsWith('settings.cline.'));
+  assert.ok(clineKeys.includes('settings.cline.validationInvalid'), `expected the Cline copy, found ${clineKeys.length} keys`);
+  for (const [locale, messages] of Object.entries(MESSAGES)) {
+    const missing = clineKeys.filter((key) => typeof messages[key] !== 'string');
+    assert.deepEqual(missing, [], `${locale} is missing Cline copy`);
+  }
+});
+
+test('Cline names the credential lane that went bad, not always the key field', () => {
+  // One `unauthorized` status covers two lanes here, and this row is where a stale
+  // sign-in and a rejected key have to read differently: Cline owns recovery for the
+  // discovered sign-in, so it is not an API key problem. The last assertion is the
+  // control — zai also surfaces an auto-discovered login on a key
+  // panel and keeps the single statusInvalid string, which is what this branch
+  // deliberately does not change for every other provider.
+  const app = readRendererFile('app.js');
+  const labels = runRendererFunctions(
+    app,
+    ['apiKeyAccountStatusText'],
+    `[
+      apiKeyAccountStatusText('cline', { status: 'unauthorized' }, true, 'cline-signin'),
+      apiKeyAccountStatusText('cline', { status: 'unauthorized' }, true, 'settings'),
+      apiKeyAccountStatusText('cline', { status: 'unauthorized' }, true, 'env'),
+      apiKeyAccountStatusText('zai', { status: 'unauthorized' }, true, 'zcode-auto')
+    ]`,
+    {
+      limitProviderPresentationApi: { apiKeyAccountStatus: () => 'invalid' },
+      t: key => key
+    }
+  );
+  assert.deepEqual(Array.from(labels), [
+    'settings.cline.statusSigninInvalid',
+    'settings.cline.statusInvalid',
+    'settings.cline.statusInvalid',
+    'settings.zai.statusInvalid'
+  ]);
+
+  // The same lane split on the way in: a working sign-in reads as the discovered
+  // credential it is, the way Zed's linked session does, rather than as a stored key.
+  const linked = runRendererFunctions(
+    app,
+    ['apiKeyAccountStatusText'],
+    `[
+      apiKeyAccountStatusText('cline', { status: 'ok' }, true, 'cline-signin'),
+      apiKeyAccountStatusText('cline', { status: 'ok' }, true, 'settings'),
+      apiKeyAccountStatusText('zai', { status: 'ok' }, true, 'zcode-auto')
+    ]`,
+    {
+      limitProviderPresentationApi: { apiKeyAccountStatus: () => 'linked' },
+      t: key => key
+    }
+  );
+  assert.deepEqual(Array.from(linked), [
+    'settings.cline.statusSignin',
+    'settings.cline.statusSet',
+    'settings.zai.statusLinked'
+  ]);
+
+  const { MESSAGES } = require('../../src/electron/renderer/i18n');
+  assert.deepEqual(Object.fromEntries(Object.entries(MESSAGES).map(([locale, messages]) => [
+    locale,
+    messages['settings.cline.statusSigninInvalid']
+  ])), {
+    en: 'Open Cline',
+    'zh-TW': '開啟 Cline',
+    'zh-CN': '打开 Cline',
+    ko: 'Cline 열기',
+    ja: 'Cline を開く',
+    'pt-BR': 'Abrir o Cline',
+    es: 'Abrir Cline'
+  });
+  assert.deepEqual(Object.fromEntries(Object.entries(MESSAGES).map(([locale, messages]) => [
+    locale,
+    messages['settings.cline.statusSignin']
+  ])), {
+    en: 'Connected',
+    'zh-TW': '已連線',
+    'zh-CN': '已连接',
+    ko: '연결됨',
+    ja: '接続済み',
+    'pt-BR': 'Conectado',
+    es: 'Conectada'
+  });
+});
+
+test('Factory keeps a saved-key Clear action available after validation fails', () => {
+  const app = readRendererFile('app.js');
+  const elements = new Map();
+  for (const suffix of ['AccountStatus', 'OpenBrowser', 'LogoutButton', 'RefreshButton', 'ManualPanel', 'ErrorMessage']) {
+    const classes = new Set(['hidden']);
+    elements.set(`factory${suffix}`, {
+      classList: {
+        add: (...names) => names.forEach(name => classes.add(name)),
+        remove: (...names) => names.forEach(name => classes.delete(name)),
+        toggle: (name, force) => {
+          if (force) classes.add(name);
+          else classes.delete(name);
+        },
+        contains: name => classes.has(name)
+      },
+      textContent: ''
+    });
+  }
+
+  const settings = {
+    factoryCredentialConfigured: true,
+    factoryCredentialSource: 'settings'
+  };
+  let status = 'unauthorized';
+  const render = () => runRendererFunctions(
+    app,
+    ['renderExternalProviderStatus'],
+    "renderExternalProviderStatus('factory')",
+    {
+      limitAccountPanelsApi: { syncCredentialFields() {} },
+      limitAccountForm: () => ({ status: {
+        configuredKey: 'factoryCredentialConfigured',
+        sourceKey: 'factoryCredentialSource',
+        pendingKey: 'factoryPendingCheckSince'
+      } }),
+      state: { settings, factoryPendingCheckSince: 0, accountPanelMessages: {} },
+      document: { getElementById: id => elements.get(id) || null },
+      externalProviderForAccount: () => ({ provider: 'factory', status }),
+      externalProviderAccountLinked: () => false,
+      externalProviderCheckSettled: new Set(),
+      limitProviderEnabled: () => true,
+      setCursorStatusText: () => {},
+      apiKeyAccountStatusText: () => '',
+      t: key => key,
+      renderSettingsSummaries: () => {},
+      setExternalAccountExpanded: () => {},
+      renderVolcengineAgentOverrideState: () => {}
+    }
+  );
+
+  for (status of ['unauthorized', 'unavailable']) {
+    render();
+    assert.equal(elements.get('factoryLogoutButton').classList.contains('hidden'), false, `${status} saved key should remain clearable`);
+  }
+
+  for (const source of ['env', 'droid-env']) {
+    settings.factoryCredentialSource = source;
+    render();
+    assert.equal(elements.get('factoryLogoutButton').classList.contains('hidden'), true, `${source} credentials must not expose Clear`);
+  }
+});
+
+test('an account message survives the stats re-renders until its own condition retires it', () => {
+  const app = readRendererFile('app.js');
+  const elements = new Map();
+  for (const suffix of ['AccountStatus', 'OpenBrowser', 'LogoutButton', 'RefreshButton', 'ManualPanel', 'ErrorMessage']) {
+    const classes = new Set(suffix === 'ErrorMessage' ? ['settings-note', 'error', 'hidden'] : []);
+    elements.set(`deepseek${suffix}`, {
+      classList: {
+        add: (...names) => names.forEach(name => classes.add(name)),
+        remove: (...names) => names.forEach(name => classes.delete(name)),
+        toggle: (name, force) => (force ? classes.add(name) : classes.delete(name)),
+        contains: name => classes.has(name)
+      },
+      textContent: ''
+    });
+  }
+  const state = {
+    settings: { deepseekApiKeyConfigured: true, deepseekApiKeySource: 'settings' },
+    deepseekPendingCheckSince: 0,
+    accountPanelMessages: {}
+  };
+  let provider = null;
+  const render = () => runRendererFunctions(app, ['renderExternalProviderStatus'], "renderExternalProviderStatus('deepseek')", {
+    externalLimitAccountConfig: {},
+    limitAccountForm: () => ({ status: { configuredKey: 'deepseekApiKeyConfigured', sourceKey: 'deepseekApiKeySource', pendingKey: 'deepseekPendingCheckSince' } }),
+    limitAccountPanelsApi: { syncCredentialFields: () => {} },
+    state,
+    document: { getElementById: id => elements.get(id) || null },
+    externalProviderForAccount: () => provider,
+    externalProviderAccountLinked: () => false,
+    externalProviderCheckSettled: new Set(),
+    limitProviderEnabled: () => true,
+    setCursorStatusText: () => {},
+    apiKeyAccountStatusText: () => '',
+    t: (key, params) => (params ? `${key}:${JSON.stringify(params)}` : key),
+    renderSettingsSummaries: () => {},
+    setExternalAccountExpanded: () => {},
+    renderVolcengineAgentOverrideState: () => {}
+  });
+  const line = elements.get('deepseekErrorMessage');
+
+  // A rejection stays on screen through any number of stats pushes.
+  state.accountPanelMessages.deepseek = { key: 'settings.common.credentialRejected', params: { provider: 'DeepSeek' } };
+  for (let push = 0; push < 3; push += 1) render();
+  assert.equal(line.textContent, 'settings.common.credentialRejected:{"provider":"DeepSeek"}');
+  assert.equal(line.classList.contains('hidden'), false);
+  assert.equal(line.classList.contains('error'), true);
+
+  // "Saved, not yet confirmed" reads as a notice and retires with the first
+  // record that answers for the saved key, because the pill then does.
+  state.accountPanelMessages.deepseek = { key: 'settings.common.credentialSavedUnconfirmed', tone: 'notice', untilChecked: true };
+  render();
+  assert.equal(line.classList.contains('error'), false);
+  assert.equal(line.classList.contains('hidden'), false);
+  provider = { provider: 'deepseek', status: 'ok' };
+  render();
+  assert.equal(line.classList.contains('hidden'), true);
+  assert.equal(line.textContent, '');
+  assert.equal(state.accountPanelMessages.deepseek, undefined);
+});
+
+test('account credentials persist through the settings:update body, not a second write path', () => {
+  const main = readAccountOwnersAndMain();
+  const patchStart = main.indexOf('function applySettingsPatch(');
+  assert.ok(patchStart >= 0);
+  const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), patchStart);
+  assert.match(updateHandler, /applySettingsPatch\(patch, \(refresh\) => \{ dotsVisibilityApplied = refresh; \}\)/);
+  assert.match(updateHandler, /await dotsVisibilityApplied;/);
+  assert.match(main, /createCredentialCommands\(\{\s*allowRetainedFixedCredentials: true,\s*getSettings: \(\) => settings,\s*applySettingsPatch: applyCredentialSettingsPatch,\s*probeDeps: credentialProbeDeps\s*\}\)/);
+  const credentialPatch = functionBody(main, 'applyCredentialSettingsPatch', 'applySettingsPatch');
+  assert.match(credentialPatch, /applySettingsPatch\(patch, undefined, \{/);
+  assert.match(credentialPatch, /ensureLimitProvider: provider/);
+  assert.match(credentialPatch, /await Promise\.all\(refreshes\)/);
+  const body = main.slice(patchStart, main.indexOf("ipcMain.handle('appearance:preview'"));
+  assert.match(body, /credentialCommands\.noteSettingsPatch\(patch\);/);
+  assert.match(body, /normalizeAccountPatch\(patch, normalizedPatch\)/);
+  assert.match(body, /return settingsForRenderer\(\);\n {2}\}\n\s*$/);
+  const probe = functionBody(main, 'credentialProbeDeps', 'electronLimitsDeps');
+  assert.match(probe, /providerRuntimeState: new Map\(\)/);
+  assert.match(probe, /probe: true/);
+  // A renewal is captured for the save to store, never persisted from the probe.
+  assert.match(probe, /onClaudeWebCookieRenewed: \(\{ cookie \}\) => \{\s*renewed\.claudeWebCookie = cookie;\s*return true;\s*\}/);
+  assert.doesNotMatch(probe, /persistClaudeWebCookieRenewal|resolveConfigSnapshot|onThirdParty/);
+});
+
+test('opencode status env account avoids saved profile names', () => {
+  const main = readAccountOwnersAndMain();
+  const handler = main.slice(
+    main.indexOf('async function status('),
+    main.indexOf('async function getProfiles(')
+  );
+  assert.ok(handler, 'opencode:status handler should exist');
+  assert.match(handler, /hasOwnProperty\.call\(profiles, envKey\)/);
+  assert.doesNotMatch(handler, /hasOwnProperty\.call\(result, envKey\)/);
+});
+
+test('settingsForRenderer strips provider cookies before they reach the renderer', () => {
+  const main = readAccountOwnersAndMain();
+  const credentialStore = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'credentialStore.js'), 'utf8');
+  const body = main.slice(
+    main.indexOf('function settingsForRenderer'),
+    main.indexOf('function pushSettingsToRenderer')
+  );
+  assert.ok(body, 'settingsForRenderer should exist');
+  assert.match(body, /credentialSettingsForRenderer\(settings, \{\s*expose: \['hubHostSecret', 'secret'\]\s*\}\)/);
+  assert.match(body, /\.\.\.accountFieldProjection\(settings, process\.env\)/);
+  assert.match(body, /rendererOmittedAccountKeys\(\)/);
+  const { accountFieldProjection, rendererOmittedAccountKeys } = require('../../src/electron/limits/accountSettings');
+  const fields = accountFieldProjection({ opencodeCookie: 'private', opencodeProfiles: { default: { cookie: 'private', apiKey: 'private' } } });
+  assert.equal(fields.opencodeCookie, 'set');
+  assert.deepEqual({ ...fields.opencodeProfiles.default }, { enabled: true, cookie: 'set', apiKey: 'set' });
+  for (const key of ['workbuddyAccessToken', 'workbuddyDepartmentInfo']) {
+    assert.ok(rendererOmittedAccountKeys().includes(key));
+  }
+  assert.doesNotMatch(body, /workbuddyLocalApp/);
+  assert.doesNotMatch(main, /workbuddySession|workbuddyBrowserSession/);
+  assert.doesNotMatch(body, /workbuddyBrowserSessionEnabled: settings\?\.workbuddyBrowserSessionEnabled/);
+  // That redactor must name the fields it forwards. A spread of the stored
+  // profile hands any field added later to the renderer verbatim, which is how
+  // the API key would have leaked when profiles gained one.
+  const accountSettingsSource = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'limits', 'accountSettings.js'), 'utf8');
+  const opencodeRedactor = accountSettingsSource.slice(
+    accountSettingsSource.indexOf('function redactOpencodeProfilesForRenderer'),
+    accountSettingsSource.indexOf('function redactOpenRouterProfilesForRenderer')
+  );
+  assert.doesNotMatch(opencodeRedactor, /\.\.\.profile/);
+  assert.match(opencodeRedactor, /cookie: profile\?\.cookie \? 'set' : ''/);
+  assert.match(opencodeRedactor, /apiKey: profile\?\.apiKey \? 'set' : ''/);
+  const { CREDENTIAL_SETTING_PATHS } = require('../../src/shared/credentialStore');
+  assert.deepEqual(CREDENTIAL_SETTING_PATHS.kimiWebAccessToken, ['providers', 'kimi', 'webAccessToken']);
+  const { accountStatusProjection } = require('../../src/electron/limits/accountSettings');
+  assert.equal(accountStatusProjection({ kimiWebAccessToken: 'private' }, {}).kimiWebAccessTokenConfigured, true);
+  const mimoRendererShape = main.slice(
+    main.indexOf('function mimoAccountsForRenderer'),
+    main.indexOf('function mimoManagedAccountsForCollector')
+  );
+  assert.match(mimoRendererShape, /id, accountKey, accountEmail, accountLabel, addedAt, updatedAt, enabled/);
+  assert.doesNotMatch(mimoRendererShape, /cookieHeader/);
+  assert.match(credentialStore, /fsApi\.openSync\(temporary, 'wx', 0o600\)/);
+  assert.match(credentialStore, /fsApi\.fchmodSync\(descriptor, 0o600\)/);
+  assert.match(credentialStore, /fsApi\.openSync\(directory, constants\.O_RDONLY\)/);
+  assert.match(main, /getCredentialStore\(\)\.writeMimoCredential\(id, cookieHeader\)/);
+  assert.match(main, /cookieHeader: readMimoCredential\(account\.id\)/);
+  assert.match(main, /migrateLegacyMimoCredentialFiles\(merged\.mimoManagedAccounts\)/);
+  assert.match(main, /if \(!removeMimoCredential\(accountId\)\) return \{ ok: false, error: 'Could not remove stored credential' \};/);
+  assert.match(main, /delete result\.account\.cookieHeader/);
+});
+
+test('WorkBuddy settings retain automatic detection alongside managed regional account login', () => {
+  const html = readRendererFile('index.html');
+  assert.match(html, /id="workbuddyAccountGroup"/);
+  assert.match(html, /id="workbuddyAddCnAccountButton"/);
+  assert.match(html, /id="workbuddyAddAiAccountButton"/);
+  assert.match(html, /id="workbuddyAccountStatus"/);
+  const app = readRendererOwner('workbuddy');
+  assert.ok(require('../../src/shared/providers/workbuddy/account').sources.some(source => source.kind === 'desktop'));
+  assert.match(app, /renderWorkbuddyStatus/);
+  assert.match(app, /window\.tokenMonitor\.workbuddy/);
+  assert.doesNotMatch(html, /workbuddy(?:AccessToken|RefreshToken|Privacy|OptIn)/);
+  const preload = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'preload.js'), 'utf8');
+  assert.match(preload, /addAccount: \(realm\) => ipcRenderer\.invoke\('workbuddy:addAccount', realm\)/);
+});
+
+test('WorkBuddy auth is resolved only when its enabled local provider is active', () => {
+  const main = readAccountOwnersAndMain();
+  const limitsConfig = functionBody(main, 'electronLimitsConfig', 'defaultLimitProviders');
+  assert.match(limitsConfig, /settings\?\.limitsEnabled !== false/);
+  assert.match(limitsConfig, /parseLimitProviders\(settings\?\.limitProviders\)\.includes\('workbuddy'\)/);
+  assert.match(limitsConfig, /const workbuddyDesktopSessionSupported = isSupportedWorkbuddyLocalAppPlatform\(\)/);
+  assert.match(limitsConfig, /const workbuddyDesktopSessionEnabled = workbuddyEnabled && workbuddyDesktopSessionSupported/);
+  assert.match(limitsConfig, /workbuddyDesktopSessionSupported,/);
+  assert.match(limitsConfig, /workbuddyDesktopSessionEnabled,/);
+  assert.match(limitsConfig, /workbuddyLocalSession: workbuddyDesktopSessionEnabled \? electronWorkbuddyLocalAuth\.getSessionInfo\(\) : \{\}/);
+  assert.doesNotMatch(limitsConfig, /settings\?\.workbuddyLocalAppEnabled/);
+});
+
+test('legacy credential cleanup retries independently from the migration marker', () => {
+  const main = readAccountOwnersAndMain();
+  const body = functionBody(main, 'loadCredentialSettings', 'migrateLegacyMimoCredentialFiles');
+  assert.match(body, /store\.migrateLegacySettings\(saved\);/);
+  assert.match(body, /if \(hasCredentialSettings\(saved\)\) \{/);
+  assert.match(body, /writePrivateJsonAtomic\(settingsPath, stripCredentialSettings\(saved\)\)/);
+  assert.doesNotMatch(body, /migration\.migrated/);
+});
+
+test('legacy MiMo migration rejects symlinks and retries cleanup after a partial failure', () => {
+  const main = readAccountOwnersAndMain();
+  const body = functionBody(main, 'migrateLegacyMimoCredentialFiles', 'readSettings');
+  assert.match(body, /readRegularFileNoFollow\(legacyMimoCredentialPath\(account\.id\)/);
+  assert.match(body, /getCredentialStore\(\)\.migrateLegacyMimoCredentials\(entries\);/);
+  assert.match(body, /if \(!readMimoCredential\(entry\.id\)\) continue;/);
+  assert.doesNotMatch(body, /migratedIds/);
+});
+
+test('credential storage failures preserve the file and surface one actionable error', () => {
+  const main = readAccountOwnersAndMain();
+  const reporter = functionBody(main, 'reportCredentialStorageError', 'loadCredentialSettings');
+  assert.match(reporter, /credentialStorageErrorShown \|\| !app\.isReady\(\)/);
+  assert.match(reporter, /dialog\.showErrorBox\(/);
+  assert.match(reporter, /save was stopped and previous data was restored where possible/);
+  const saveBody = functionBody(main, 'saveSettings', 'loginItemEnabledHere');
+  assert.match(saveBody, /persistSettingsAndCredentials\(/);
+  assert.match(saveBody, /settings = previousSettings;/);
+  assert.match(saveBody, /reportCredentialStorageError\('could not persist settings', error\)/);
+  assert.match(saveBody, /if \(options\.throwOnError\) throw error;/);
+
+  const settingsHandler = main.slice(
+    main.indexOf("ipcMain.handle('settings:update'"),
+    main.indexOf("ipcMain.handle('appearance:preview'")
+  );
+  assert.match(settingsHandler, /saveSettings\(\{ throwOnError: true \}\);/);
+
+  const renderer = readRendererFile('app.js');
+  const rendererSave = functionBody(renderer, 'saveSettings', 'renderHomeIfVisible');
+  assert.match(rendererSave, /state\.settings = await window\.tokenMonitor\.getSettings\(\)/);
+  assert.match(rendererSave, /throw error;/);
+});
+
+test('successful settings saves invalidate the exported tray menu', () => {
+  const main = readAccountOwnersAndMain();
+  const saveBody = functionBody(main, 'saveSettings', 'loginItemEnabledHere');
+  const successPath = saveBody.slice(0, saveBody.indexOf('} catch (error)'));
+  const failurePath = saveBody.slice(saveBody.indexOf('} catch (error)'));
+
+  assert.match(
+    successPath,
+    /persistedSettingsSnapshot = cloneSettingsSnapshot\(settings\);\s*refreshTrayContextMenu\(\);\s*return true;/
+  );
+  assert.doesNotMatch(failurePath, /refreshTrayContextMenu\(\)/);
+});
+
+test('main settings normalize the Z.ai API region', () => {
+  const main = readAccountOwnersAndMain();
+  const defaults = main.slice(main.indexOf('function defaultSettings'), main.indexOf('function defaultLimitProviders'));
+  assert.match(defaults, /\.\.\.initialAccountSettings\(process\.env\)/);
+  const { initialAccountSettings, normalizeAccountField, normalizeAccountPatch } = require('../../src/electron/limits/accountSettings');
+  assert.equal(initialAccountSettings({ Z_AI_API_HOST: 'bigmodel.cn' }).zaiApiRegion, 'bigmodel-cn');
+
+  const handler = main.slice(
+    main.indexOf("ipcMain.handle('settings:update'"),
+    main.indexOf("ipcMain.handle('customPricing:list'")
+  );
+  assert.match(handler, /normalizeAccountPatch\(patch, normalizedPatch\)/);
+  const patch = { zaiApiRegion: 'bigmodel-cn' };
+  const normalized = { ...patch };
+  normalizeAccountPatch(patch, normalized);
+  assert.equal(normalized.zaiApiRegion, normalizeAccountField('zaiApiRegion', patch.zaiApiRegion));
+});
+
+test('main settings migration preserves explicit AI limit provider selections', () => {
+  const main = readAccountOwnersAndMain();
+  const context = {
+    parseLimitProviders(value) {
+      const known = new Set(['claude', 'codex', 'cursor', 'antigravity', 'opencode']);
+      return String(value || '').split(',').map((item) => item.trim().toLowerCase()).filter((item, index, list) => (
+        known.has(item) && list.indexOf(item) === index
+      ));
+    },
+    defaultLimitProviders() {
+      return 'claude,codex,cursor,antigravity,opencode';
+    }
+  };
+
+  assert.equal(
+    runMainFunction(main, 'migrateLimitProviders', 'migrateLimitProviderOrder', "migrateLimitProviders('claude,codex')", context),
+    'claude,codex'
+  );
+  assert.equal(
+    runMainFunction(main, 'migrateLimitProviders', 'migrateLimitProviderOrder', "migrateLimitProviders('claude,codex,cursor,antigravity')", context),
+    'claude,codex,cursor,antigravity'
+  );
+});
+
+test('active Codex account labels are always shown for multi-account limits rows', () => {
+  const main = readAccountOwnersAndMain();
+  const app = readRendererFile('app.js');
+  const html = fs.readFileSync(path.join(rendererDir, 'index.html'), 'utf8');
+  const i18n = fs.readFileSync(path.join(rendererDir, 'i18n.js'), 'utf8');
+  const defaultSettingsBody = functionBody(main, 'defaultSettings', 'ensureSettingsLoaded');
+  const readSettingsBody = functionBody(main, 'readSettings', 'saveSettings');
+
+  assert.doesNotMatch(defaultSettingsBody, /showActiveAccount/);
+  assert.doesNotMatch(readSettingsBody, /showActiveAccount/);
+  assert.doesNotMatch(main, /showActiveAccount: parseBoolean/);
+  assert.doesNotMatch(app, /showActiveAccountInput/);
+  assert.doesNotMatch(app, /showActiveAccount/);
+  assert.doesNotMatch(html, /showActiveAccountInput/);
+  assert.doesNotMatch(i18n, /settings\.limits\.showActiveAccount/);
+});
+
+test('collection cadence setting is exposed in the Collection panel', () => {
+  const html = readRendererFile('index.html');
+  const i18n = readRendererFile('i18n.js');
+  const controls = html.match(/<div class="settings-subgroup settings-collection-cadence"[\s\S]*?<select id="collectionCadenceInput"[\s\S]*?<\/select>[\s\S]*?<\/div>/)?.[0] || '';
+  assert.match(controls, /data-i18n="settings\.collection\.cadence"/);
+  assert.match(controls, /value="live"/);
+  assert.match(controls, /value="smart"[\s\S]*data-i18n="settings\.collection\.mode\.smart"/);
+  assert.match(i18n, /"settings\.collection\.mode\.smartDesc": "Collect after agent activity, with hourly reconciliation\."/);
+  assert.match(controls, /<option value="300000"/);
+  assert.match(controls, /<option value="900000"/);
+  assert.match(controls, /<option value="1800000"/);
+  for (const mode of ['live', 'smart', 'interval']) assert.ok(controls.includes(`data-select-description="settings.collection.mode.${mode}Desc"`));
+  assert.doesNotMatch(controls, /id="collectionCadenceNote"/);
+  assert.doesNotMatch(controls, /<option value="3600000"/);
+  assert.doesNotMatch(controls, /id="collectionModeInput"/);
+  assert.doesNotMatch(controls, /id="collectionIntervalInput"/);
+
+  const app = readRendererFile('app.js');
+  const syncBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
+  assert.match(syncBody, /collectionCadenceInput/);
+  assert.doesNotMatch(syncBody, /collectionCadenceNote/);
+
+  const listenerSlice = app.slice(
+    app.indexOf("els.collectionCadenceInput?.addEventListener('change'"),
+    app.indexOf("els.wslScanInput?.addEventListener('change'")
+  );
+  assert.match(listenerSlice, /saveSettings\(\{[\s\S]*collectionMode:/);
+  assert.match(listenerSlice, /collectionIntervalMs:/);
+  assert.match(listenerSlice, /value === 'smart'/);
+  assert.match(listenerSlice, /600000/);
+});
+
+test('sync upload interval setting is exposed in the Multi-device Sync panel', () => {
+  const html = readRendererFile('index.html');
+  const controls = html.match(/<label id="syncUploadIntervalRow" class="sync-upload-interval-row[^"]*"[\s\S]*?<select id="syncUploadIntervalInput"[\s\S]*?<\/select>[\s\S]*?<\/label>/)?.[0] || '';
+  assert.ok(html.indexOf('id="syncUploadIntervalRow"') > html.indexOf('id="saveSettingsButton"'));
+  assert.ok(html.indexOf('id="syncUploadIntervalRow"') < html.indexOf('id="syncDevicePanel"'));
+  assert.match(controls, /data-i18n="settings\.sync\.uploadInterval"/);
+  assert.match(controls, /<option value="0"[\s\S]*data-i18n="settings\.sync\.uploadInterval\.live"/);
+  assert.match(controls, /<option value="600000"[\s\S]*data-i18n="settings\.sync\.uploadInterval\.10m"/);
+  assert.match(controls, /<option value="1200000"[\s\S]*data-i18n="settings\.sync\.uploadInterval\.20m"/);
+  assert.match(controls, /<option value="1800000"[\s\S]*data-i18n="settings\.sync\.uploadInterval\.30m"/);
+
+  const app = readRendererFile('app.js');
+  const syncBody = functionBody(app, 'syncSettingsForm', 'enabledClientSet');
+  assert.match(syncBody, /syncUploadIntervalInput/);
+  assert.match(syncBody, /state\.settings\.syncUploadIntervalMs/);
+  assert.match(syncBody, /Array\.from\(els\.syncUploadIntervalInput\.options/);
+  assert.doesNotMatch(syncBody, /const allowed = \[0, 600000, 1200000, 1800000\]/);
+  const listenerStart = app.indexOf("els.syncUploadIntervalInput?.addEventListener('change'");
+  const listenerEnd = app.indexOf("els.collectionCadenceInput?.addEventListener('change'", listenerStart);
+  assert.notEqual(listenerStart, -1, 'sync upload interval listener should exist');
+  assert.notEqual(listenerEnd, -1, 'collection cadence listener should follow sync upload listener');
+  assert.match(app.slice(listenerStart, listenerEnd), /saveSettings\(\{\s*syncUploadIntervalMs:/);
+});
+
+// Run the shipped event wiring against controls that model a settings push:
+// an auto-saved interval updates persisted state while the Hub fields keep
+// their local drafts until the explicit Hub Save commits them.
+function fakeHubControl(value = '') {
+  const listeners = new Map();
+  const attributes = new Map();
+  return {
+    value,
+    disabled: false,
+    contains() { return false; },
+    focus() { this.focused = true; },
+    addEventListener(type, listener) {
+      const current = listeners.get(type) || [];
+      current.push(listener);
+      listeners.set(type, current);
+    },
+    setAttribute(name, value) {
+      attributes.set(name, String(value));
+    },
+    removeAttribute(name) {
+      attributes.delete(name);
+    },
+    getAttribute(name) {
+      return attributes.get(name) ?? null;
+    },
+    async dispatch(type) {
+      for (const listener of listeners.get(type) || []) await listener({ target: this });
+    }
+  };
+}
+
+function loadHubSettingsWiring(els, context) {
+  for (const id of ['syncConnectionEditor', 'syncConnectionIdentity', 'syncConnectionEndpoint', 'syncConnectionEdit', 'syncConnectionCancel', 'syncConnectionSaveError', 'syncDeviceSettings', 'syncUploadIntervalRow']) {
+    els[id] ||= fakeHubControl();
+  }
+  const app = readRendererFile('app.js');
+  const modeStart = app.indexOf('function syncHubModeUi()');
+  const modeEnd = app.indexOf('function renderHubStatus()', modeStart);
+  const draftStart = app.indexOf('const HUB_DRAFT_FIELDS = [');
+  const draftEnd = app.indexOf('function syncSettingsForm()', draftStart);
+  const saveStart = app.indexOf("els.saveSettingsButton.addEventListener('click'");
+  const saveEnd = app.indexOf("els.hubModeOptions.addEventListener('change'", saveStart);
+  const intervalStart = app.indexOf('for (const input of els.showLimitUsedInputs || [])', saveEnd);
+  const intervalEnd = app.indexOf("els.collectionCadenceInput?.addEventListener('change'", intervalStart);
+  assert.notEqual(modeStart, -1, 'Hub mode UI sync should exist');
+  assert.notEqual(modeEnd, -1, 'Hub mode UI sync should precede Hub status rendering');
+  assert.notEqual(draftStart, -1, 'Hub draft tracking should exist');
+  assert.notEqual(draftEnd, -1, 'Hub draft tracking should precede settings sync');
+  assert.notEqual(saveStart, -1, 'Hub Save handler should exist');
+  assert.notEqual(saveEnd, -1, 'Hub mode handler should follow Hub Save');
+  assert.notEqual(intervalStart, -1, 'limits display wiring should precede sync upload wiring');
+  assert.notEqual(intervalEnd, -1, 'collection cadence wiring should follow sync upload wiring');
+  const vmContext = {
+    els,
+    syncContentForm: null,
+    SYNC_MODE_DESCRIPTIONS: { local: 'local', client: 'client', host: 'host', icloud: 'icloud' },
+    syncModeSelect: { sync() {} },
+    document: { activeElement: null },
+    preserveSettingsPanelScroll: callback => callback(),
+    isSettingsSurfaceVisible: () => true,
+    setHoverMarqueeText: (element, value) => { element.textContent = value; },
+    t: key => key,
+    syncDevicePanelApi: require('../../src/electron/renderer/syncDevicePanel'),
+    ...context,
+    renderHubStatus: () => {},
+    renderSyncPanel: () => {},
+    renderHubBuildStatus: () => {}
+  };
+  vm.runInNewContext(
+    `${app.slice(modeStart, modeEnd)}\n${app.slice(draftStart, draftEnd)}\n${app.slice(saveStart, saveEnd)}\n${app.slice(intervalStart, intervalEnd)}`,
+    vmContext
+  );
+  return vmContext;
+}
+
+test('Hub Save disables for clean and reverted drafts', async () => {
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'client',
+      hubUrl: 'https://saved.example',
+      secret: 'saved-secret',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  const patches = [];
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      patches.push({ ...patch });
+      Object.assign(state.settings, patch);
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubDraftFields();
+
+  assert.equal(els.saveSettingsButton.disabled, true);
+  els.hubUrlInput.value = '  https://saved.example  ';
+  await els.hubUrlInput.dispatch('input');
+  assert.equal(els.saveSettingsButton.disabled, true);
+
+  els.hubUrlInput.value = 'https://draft.example';
+  await els.hubUrlInput.dispatch('input');
+  assert.equal(els.saveSettingsButton.disabled, false);
+
+  els.hubUrlInput.value = 'https://saved.example';
+  await els.hubUrlInput.dispatch('input');
+  assert.equal(els.saveSettingsButton.disabled, true);
+  await els.saveSettingsButton.dispatch('click');
+  assert.deepEqual(patches, []);
+
+  state.settings.hubUrl = 'https://pushed.example';
+  vmContext.syncHubDraftFields();
+  assert.equal(els.hubUrlInput.value, 'https://saved.example');
+  assert.equal(els.saveSettingsButton.disabled, false);
+  vmContext.cancelClientConnectionEdit();
+  assert.equal(els.hubUrlInput.value, 'https://pushed.example');
+  assert.equal(els.syncConnectionEditor.hidden, true);
+});
+
+test('Hub Save exposes busy state and ignores repeated clicks', async () => {
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'client',
+      hubUrl: 'https://saved.example',
+      secret: 'saved-secret',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  const patches = [];
+  let releaseSave;
+  let resolveSaveStarted;
+  const saveGate = new Promise((resolve) => { releaseSave = resolve; });
+  const saveStarted = new Promise((resolve) => { resolveSaveStarted = resolve; });
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      patches.push({ ...patch });
+      resolveSaveStarted();
+      await saveGate;
+      Object.assign(state.settings, patch);
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubDraftFields();
+
+  els.hubUrlInput.value = 'https://draft.example';
+  await els.hubUrlInput.dispatch('input');
+  const savePromise = els.saveSettingsButton.dispatch('click');
+  await saveStarted;
+
+  assert.equal(els.saveSettingsButton.disabled, true);
+  assert.equal(els.saveSettingsButton.getAttribute('aria-busy'), 'true');
+  await els.saveSettingsButton.dispatch('click');
+  assert.deepEqual(patches, [{
+    hubUrl: 'https://draft.example',
+    secret: 'saved-secret',
+    deviceId: 'saved-device'
+  }]);
+
+  releaseSave();
+  await savePromise;
+  assert.equal(els.saveSettingsButton.disabled, true);
+  assert.equal(els.saveSettingsButton.getAttribute('aria-busy'), null);
+});
+
+test('Hub Save re-enables a failed draft after clearing busy state', async () => {
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'client',
+      hubUrl: 'https://saved.example',
+      secret: 'saved-secret',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async () => { throw new Error('save failed'); },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubDraftFields();
+
+  els.hubUrlInput.value = 'https://draft.example';
+  await els.hubUrlInput.dispatch('input');
+  await els.saveSettingsButton.dispatch('click');
+  assert.equal(els.syncConnectionSaveError.hidden, false);
+  assert.equal(els.syncConnectionSaveError.textContent, 'settings.sync.saveFailed');
+
+  assert.equal(els.saveSettingsButton.disabled, false);
+  assert.equal(els.saveSettingsButton.getAttribute('aria-busy'), null);
+  assert.equal(els.hubUrlInput.value, 'https://draft.example');
+});
+
+test('Hub Save compares Host Hub ports with main-process normalization', async () => {
+  const classList = { toggle() {} };
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubModeOptions: { querySelectorAll: () => [] },
+    hubClientFields: { classList },
+    hubHostFields: { classList },
+    hubPortInput: fakeHubControl(),
+    hubSecretInput: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl('saved-device'),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'host',
+      hubHostPort: 17321,
+      hubHostSecret: 'host-secret',
+      hubUrl: '',
+      secret: '',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async () => {},
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubDraftFields();
+
+  assert.equal(els.saveSettingsButton.disabled, true);
+  els.hubPortInput.value = '017321';
+  await els.hubPortInput.dispatch('input');
+  assert.equal(els.saveSettingsButton.disabled, true);
+
+  els.hubPortInput.value = '17321.9';
+  await els.hubPortInput.dispatch('input');
+  assert.equal(els.saveSettingsButton.disabled, true);
+
+  state.settings.hubHostPort = 18000;
+  vmContext.syncHubDraftFields();
+  assert.equal(els.hubPortInput.value, '18000');
+
+  els.hubPortInput.value = '70000';
+  await els.hubPortInput.dispatch('input');
+  assert.equal(els.saveSettingsButton.disabled, true);
+
+  els.hubPortInput.value = '17321.9';
+  await els.hubPortInput.dispatch('input');
+  assert.equal(els.saveSettingsButton.disabled, false);
+});
+
+test('Host Hub invalid ports preserve the persisted port when another field saves', async () => {
+  const classList = { toggle() {} };
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubModeOptions: { querySelectorAll: () => [] },
+    hubClientFields: { classList },
+    hubHostFields: { classList },
+    hubPortInput: fakeHubControl(),
+    hubSecretInput: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'host',
+      hubHostPort: 18000,
+      hubHostSecret: 'host-secret',
+      hubUrl: '',
+      secret: '',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  const patches = [];
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      patches.push({ ...patch });
+      Object.assign(state.settings, patch);
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubDraftFields();
+
+  els.hubPortInput.value = '70000';
+  await els.hubPortInput.dispatch('input');
+  assert.equal(els.saveSettingsButton.disabled, true);
+
+  els.deviceIdInput.value = 'draft-device';
+  await els.deviceIdInput.dispatch('input');
+  assert.equal(els.saveSettingsButton.disabled, false);
+  await els.saveSettingsButton.dispatch('click');
+
+  assert.deepEqual(patches, [{
+    deviceId: 'draft-device',
+    hubHostPort: 18000
+  }]);
+  assert.equal(els.hubPortInput.value, '18000');
+
+  els.hubPortInput.value = '17321.9';
+  await els.hubPortInput.dispatch('input');
+  assert.equal(els.saveSettingsButton.disabled, false);
+  await els.saveSettingsButton.dispatch('click');
+  assert.equal(patches[1].hubHostPort, 17321);
+  assert.equal(els.hubPortInput.value, '17321');
+});
+
+test('changing sync upload frequency auto-saves without replacing Hub drafts', async () => {
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'client',
+      hubUrl: 'https://saved.example',
+      secret: 'saved-secret',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  const patches = [];
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      patches.push({ ...patch });
+      Object.assign(state.settings, patch);
+      vmContext.syncHubDraftFields();
+      els.syncUploadIntervalInput.value = String(state.settings.syncUploadIntervalMs);
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubDraftFields();
+
+  els.hubUrlInput.value = 'https://draft.example';
+  els.secretInput.value = 'draft-secret';
+  els.deviceIdInput.value = 'draft-device';
+  await els.hubUrlInput.dispatch('input');
+  await els.secretInput.dispatch('input');
+  await els.deviceIdInput.dispatch('input');
+  els.syncUploadIntervalInput.value = '1200000';
+
+  await els.syncUploadIntervalInput.dispatch('change');
+  assert.equal(els.hubUrlInput.value, 'https://draft.example');
+  assert.equal(els.secretInput.value, 'draft-secret');
+  assert.equal(els.deviceIdInput.value, 'draft-device');
+  assert.deepEqual(patches, [{ syncUploadIntervalMs: 1200000 }]);
+
+  await els.saveSettingsButton.dispatch('click');
+  assert.deepEqual(patches, [{
+    syncUploadIntervalMs: 1200000
+  }, {
+    hubUrl: 'https://draft.example',
+    secret: 'draft-secret',
+    deviceId: 'draft-device'
+  }]);
+  assert.equal(els.hubUrlInput.value, 'https://draft.example');
+  assert.equal(els.secretInput.value, 'draft-secret');
+  assert.equal(els.deviceIdInput.value, 'draft-device');
+});
+
+test('Hub Save keeps edits made while persistence is in flight', async () => {
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'client',
+      hubUrl: 'https://saved.example',
+      secret: 'saved-secret',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  const patches = [];
+  let releaseSave;
+  let resolveSaveStarted;
+  const saveGate = new Promise((resolve) => { releaseSave = resolve; });
+  const saveStarted = new Promise((resolve) => { resolveSaveStarted = resolve; });
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      patches.push({ ...patch });
+      resolveSaveStarted();
+      await saveGate;
+      Object.assign(state.settings, patch);
+      vmContext.syncHubDraftFields();
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubDraftFields();
+
+  els.hubUrlInput.value = 'https://draft-a.example';
+  els.secretInput.value = 'draft-secret';
+  els.deviceIdInput.value = 'draft-device';
+  await els.hubUrlInput.dispatch('input');
+  await els.secretInput.dispatch('input');
+  await els.deviceIdInput.dispatch('input');
+
+  const savePromise = els.saveSettingsButton.dispatch('click');
+  await saveStarted;
+  els.hubUrlInput.value = 'https://draft-b.example';
+  await els.hubUrlInput.dispatch('input');
+  releaseSave();
+  await savePromise;
+
+  assert.deepEqual(patches, [{
+    hubUrl: 'https://draft-a.example',
+    secret: 'draft-secret',
+    deviceId: 'draft-device'
+  }]);
+  assert.equal(els.hubUrlInput.value, 'https://draft-b.example');
+  assert.equal(els.secretInput.value, 'draft-secret');
+  assert.equal(els.deviceIdInput.value, 'draft-device');
+  vmContext.syncHubDraftFields();
+  assert.equal(els.hubUrlInput.value, 'https://draft-b.example');
+});
+
+test('Hub Save keeps an in-flight edit even when it returns to the persisted value', async () => {
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'client',
+      hubUrl: 'https://saved.example',
+      secret: 'saved-secret',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  let releaseSave;
+  let resolveSaveStarted;
+  const saveGate = new Promise((resolve) => { releaseSave = resolve; });
+  const saveStarted = new Promise((resolve) => { resolveSaveStarted = resolve; });
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      resolveSaveStarted();
+      await saveGate;
+      Object.assign(state.settings, patch);
+      vmContext.syncHubDraftFields();
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubDraftFields();
+
+  els.hubUrlInput.value = 'https://draft.example';
+  await els.hubUrlInput.dispatch('input');
+
+  const savePromise = els.saveSettingsButton.dispatch('click');
+  await saveStarted;
+  els.hubUrlInput.value = 'https://saved.example';
+  await els.hubUrlInput.dispatch('input');
+  releaseSave();
+  await savePromise;
+
+  assert.equal(els.hubUrlInput.value, 'https://saved.example');
+  vmContext.syncHubDraftFields();
+  assert.equal(els.hubUrlInput.value, 'https://saved.example');
+});
+
+test('Host Hub port draft survives settings rehydration and saves with Hub fields', async () => {
+  const classList = { toggle() {} };
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubModeOptions: { querySelectorAll: () => [] },
+    hubClientFields: { classList },
+    hubHostFields: { classList },
+    hubPortInput: fakeHubControl(),
+    hubSecretInput: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'host',
+      hubHostPort: 17321,
+      hubHostSecret: 'host-secret',
+      hubUrl: '',
+      secret: '',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  const patches = [];
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      patches.push({ ...patch });
+      Object.assign(state.settings, patch);
+      vmContext.syncHubModeUi();
+      vmContext.syncHubDraftFields();
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubModeUi();
+  vmContext.syncHubDraftFields();
+
+  els.hubPortInput.value = '18000';
+  await els.hubPortInput.dispatch('input');
+  // Model the same renderer rehydration that follows any settings push.
+  vmContext.syncHubModeUi();
+  vmContext.syncHubDraftFields();
+  assert.equal(els.hubPortInput.value, '18000');
+
+  await els.saveSettingsButton.dispatch('click');
+  assert.deepEqual(patches, [{
+    deviceId: 'saved-device',
+    hubHostPort: 18000
+  }]);
+  assert.equal(els.hubPortInput.value, '18000');
+});
+
+test('Host Hub port draft survives leaving and returning to Host mode', async () => {
+  const classList = { toggle() {} };
+  const els = {
+    saveSettingsButton: fakeHubControl(),
+    hubModeOptions: { querySelectorAll: () => [] },
+    hubClientFields: { classList },
+    hubHostFields: { classList },
+    hubPortInput: fakeHubControl(),
+    hubSecretInput: fakeHubControl(),
+    hubUrlInput: fakeHubControl(),
+    secretInput: fakeHubControl(),
+    deviceIdInput: fakeHubControl(),
+    syncUploadIntervalInput: fakeHubControl('0'),
+    showLimitUsedInputs: []
+  };
+  const state = {
+    settings: {
+      hubMode: 'host',
+      hubHostPort: 17321,
+      hubHostSecret: 'host-secret',
+      hubUrl: '',
+      secret: '',
+      deviceId: 'saved-device',
+      syncUploadIntervalMs: 0
+    }
+  };
+  const patches = [];
+  let vmContext;
+  vmContext = loadHubSettingsWiring(els, {
+    state,
+    saveSettings: async (patch) => {
+      patches.push({ ...patch });
+      Object.assign(state.settings, patch);
+      vmContext.syncHubModeUi();
+      vmContext.syncHubDraftFields();
+    },
+    refreshHubInfo: async () => {},
+    refreshHubBuildStatus: async () => {},
+    refreshStats: async () => {}
+  });
+  vmContext.syncHubModeUi();
+  vmContext.syncHubDraftFields();
+
+  els.hubPortInput.value = '18000';
+  await els.hubPortInput.dispatch('input');
+  assert.equal(els.saveSettingsButton.disabled, false);
+
+  // Model the settings pushes emitted by switching away from Host and back.
+  state.settings.hubMode = 'client';
+  vmContext.syncHubModeUi();
+  vmContext.syncHubDraftFields();
+  assert.equal(els.hubPortInput.value, '18000');
+  assert.equal(els.saveSettingsButton.disabled, true);
+
+  state.settings.hubMode = 'host';
+  vmContext.syncHubModeUi();
+  vmContext.syncHubDraftFields();
+  assert.equal(els.hubPortInput.value, '18000');
+  assert.equal(els.saveSettingsButton.disabled, false);
+
+  await els.saveSettingsButton.dispatch('click');
+  assert.deepEqual(patches, [{
+    deviceId: 'saved-device',
+    hubHostPort: 18000
+  }]);
+  assert.equal(els.hubPortInput.value, '18000');
+  assert.equal(els.saveSettingsButton.disabled, true);
+});
+
+test('remote Hub build status is wired as a separate localized sync hint', () => {
+  const html = readRendererFile('index.html');
+  const app = readRendererFile('app.js');
+  const i18n = readRendererFile('i18n.js');
+  const preload = fs.readFileSync(path.join(rendererDir, '..', 'preload.js'), 'utf8');
+  const main = readAccountOwnersAndMain();
+  const clientFields = html.slice(html.indexOf('<div id="hubClientFields"'), html.indexOf('<div id="hubHostFields"'));
+
+  assert.match(clientFields, /id="hubBuildStatus"[\s\S]*role="status"[\s\S]*hidden/);
+  assert.doesNotMatch(clientFields, /id="syncClientStatus"/);
+  assert.ok(html.indexOf('hubBuildPresentation.js') < html.indexOf('app.js'));
+  assert.match(app, /getHubBuildStatus/);
+  assert.match(app, /function renderHubBuildStatus\(\)/);
+  assert.doesNotMatch(app, /await refreshHubBuildStatus\(\)/);
+  assert.equal([...app.matchAll(/void refreshHubBuildStatus\(\)/g)].length, 6);
+  const refreshBody = functionBody(app, 'refreshHubBuildStatus', 'syncPeriodTabs');
+  assert.match(refreshBody, /const request = \+\+hubBuildStatusRequest/);
+  assert.equal([...refreshBody.matchAll(/request !== hubBuildStatusRequest/g)].length, 2);
+  assert.match(app, /HUB_BUILD_STATUS_REFRESH_TTL_MS = 5 \* 60 \* 1000/);
+  assert.match(app, /handleWindowVisibilityChange[\s\S]*hubBuildStatusRefreshDue\(\)[\s\S]*void refreshHubBuildStatus\(\)/);
+  assert.match(preload, /getHubBuildStatus: \(\) => ipcRenderer\.invoke\('hub:getBuildStatus'\)/);
+  assert.match(main, /ipcMain\.handle\('hub:getBuildStatus'/);
+  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.current':/g)].length, 6);
+  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.updateAvailable':/g)].length, 6);
+  assert.equal([...i18n.matchAll(/'settings\.sync\.hubBuild\.legacy':/g)].length, 0);
+});
+
+test('main settings normalize collection cadence and replace only usage when it changes', () => {
+  const main = readAccountOwnersAndMain();
+  const collector = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'shared', 'collector.js'), 'utf8');
+  assert.match(main, /function normalizeCollectionMode/);
+  assert.match(main, /function normalizeCollectionIntervalMs/);
+  assert.match(main, /COLLECTION_MODE_VALUES = new Set\(\[[^\]]*'smart'/);
+  assert.match(main, /SMART_COLLECTION_INTERVAL_MS = 10 \* 60 \* 1000/);
+  // Smart's fixed cadence must not enter the persisted-interval allowlist, or a
+  // smart-mode value survives a switch back to live and changes its backstop.
+  assert.doesNotMatch(main, /COLLECTION_INTERVAL_OPTIONS = \[[^\]]*10 \* 60 \* 1000/);
+
+  const defaults = main.slice(main.indexOf('function defaultSettings'), main.indexOf('function defaultLimitProviders'));
+  assert.match(defaults, /collectionMode: 'live'/);
+  assert.match(defaults, /collectionIntervalMs: 5 \* 60 \* 1000/);
+
+  const usageConfig = functionBody(main, 'electronUsageConfig', 'electronLimitsConfig');
+  assert.match(usageConfig, /intervalMs: collectorIntervalMs\(\)/);
+  assert.match(usageConfig, /watchEnabled: collectorWatchEnabled\(\)/);
+  assert.match(usageConfig, /watchTriggersCollection: collectorWatchTriggersCollection\(\)/);
+  assert.match(usageConfig, /intervalRequiresActivity: collectorIntervalRequiresActivity\(\)/);
+
+  // Every mode watches with native events on every platform, so the widget must
+  // state no preference at all: the moment it passes one it can drift from the
+  // headless agent, which passes none. The shared resolver owns the default and
+  // the TOKEN_MONITOR_WATCH_POLLING override, and degrades to polling itself
+  // when the kernel refuses watch descriptors. Behaviour is covered in
+  // tests/shared/collectorLoadGuards.test.js.
+  assert.doesNotMatch(usageConfig, /^\s*watchUsePolling:/m);
+  assert.doesNotMatch(main, /function collectorWatchUsePolling/);
+  assert.match(collector, /const watchUsePolling = resolveWatchUsePolling\(options\.watchUsePolling\)/);
+  assert.match(collector, /function resolveWatchUsePolling[\s\S]*?TOKEN_MONITOR_WATCH_POLLING/);
+  assert.match(main, /function collectorIntervalRequiresActivity[\s\S]*?=== 'smart'/);
+
+  const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), main.indexOf("ipcMain.handle('appearance:preview'"));
+  assert.match(updateHandler, /const previousRuntimeSettings = JSON\.parse\(JSON\.stringify\(settings\)\);/);
+  assert.match(updateHandler, /normalizedPatch\.collectionMode = normalizeCollectionMode/);
+  assert.match(updateHandler, /normalizedPatch\.collectionIntervalMs = normalizeCollectionIntervalMs/);
+  assert.match(updateHandler, /collectionMode: normalizeCollectionMode/);
+  assert.match(updateHandler, /collectionIntervalMs: normalizeCollectionIntervalMs/);
+  assert.match(updateHandler, /if \(runtimeChange\.usageStructural\) \{\s*reconfigureUsageRuntimeForMode\(\);\s*\}/);
+});
+
+test('main settings normalize sync upload intervals and restart only the device runtime when it changes', () => {
+  const main = readAccountOwnersAndMain();
+  const envExample = fs.readFileSync(path.join(__dirname, '..', '..', '.env.example'), 'utf8');
+  assert.match(main, /createSyncUploadScheduler/);
+  assert.match(main, /normalizeSyncUploadIntervalMs/);
+  assert.match(envExample, /TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS=0/);
+  assert.match(envExample, /600000 \(10 min\).*1200000 \(20 min\).*1800000 \(30 min\)/);
+
+  const defaults = main.slice(main.indexOf('function defaultSettings'), main.indexOf('function defaultLimitProviders'));
+  assert.match(defaults, /syncUploadIntervalMs: normalizeSyncUploadIntervalMs\(process\.env\.TOKEN_MONITOR_SYNC_UPLOAD_INTERVAL_MS\)/);
+
+  const readSettingsBody = functionBody(main, 'readSettings', 'saveSettings');
+  assert.match(readSettingsBody, /merged\.syncUploadIntervalMs = normalizeSyncUploadIntervalMs\(merged\.syncUploadIntervalMs\);/);
+
+  const syncCollector = main.slice(main.indexOf('function startSyncCollector'), main.indexOf('// Host mode'));
+  assert.match(syncCollector, /createSyncUploadScheduler\(\{/);
+  assert.match(syncCollector, /intervalMs: syncUploadIntervalMs\(\)/);
+  assert.match(syncCollector, /const visibleSummary = \{[\s\S]*\.\.\.summary,[\s\S]*syncUploadIntervalMs: syncUploadIntervalMs\(\)[\s\S]*\};/);
+  assert.match(syncCollector, /transformUsage: usageTransform\.transform/);
+  assert.match(syncCollector, /await syncUploadScheduler\.enqueue\(visibleSummary, revision\)/);
+
+  const hostCollector = main.slice(main.indexOf('function startHostCollector'), main.indexOf('function stopHostStats'));
+  assert.doesNotMatch(hostCollector, /createSyncUploadScheduler|syncUploadScheduler/);
+  assert.match(hostCollector, /embeddedHub\.hub\.ingest\(payload\)/);
+
+  const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), main.indexOf("ipcMain.handle('appearance:preview'"));
+  assert.match(updateHandler, /normalizedPatch\.syncUploadIntervalMs = normalizeSyncUploadIntervalMs/);
+  assert.match(updateHandler, /syncUploadIntervalMs: normalizeSyncUploadIntervalMs/);
+  assert.match(updateHandler, /else if \(runtimeChange\.sinkStructural\) \{[\s\S]*?restartDeviceRuntimeForMode\(\);[\s\S]*?\} else \{/);
+});
+
+test('main collectors share one live GUI limit credential resolver in every widget mode', () => {
+  const main = readAccountOwnersAndMain();
+  const runtimeConfig = fs.readFileSync(path.join(__dirname, '..', '..', 'src', 'electron', 'runtimeConfig.js'), 'utf8');
+  const collectors = [
+    functionBodyBeforeMarker(main, 'startSyncCollector', '// Host mode'),
+    functionBody(main, 'startHostCollector', 'stopHostStats'),
+    functionBody(main, 'startLocalCollector', 'scheduleStreamRetry')
+  ];
+  for (const collector of collectors) {
+    assert.match(collector, /limitsOptions: electronLimitsConfig\(\)/);
+    assert.match(collector, /limitsDeps: electronLimitsDeps\(\)/);
+  }
+  const limitsDeps = functionBody(main, 'electronLimitsDeps', 'normalizeCodexManagedAccounts');
+  assert.match(limitsDeps, /fetch: electronLimitsFetch\(\)/);
+  assert.match(limitsDeps, /resolveConfigSnapshot: \(\) => electronLimitsConfig\(\)/);
+  assert.match(limitsDeps, /onClaudeWebCookieRenewed: persistClaudeWebCookieRenewal/);
+  const renewalPersistence = functionBody(
+    main,
+    'persistClaudeWebCookieRenewal',
+    'credentialProbeDeps'
+  );
+  assert.match(renewalPersistence, /claudeAccountService\(\)\.renew/);
+  const claudeOwner = fs.readFileSync(path.join(rendererDir, '../providers/claude/managedAccounts.js'), 'utf8');
+  assert.match(claudeOwner, /getSettings\(\)\.claudeWebCookie === renewed\) return true/);
+  assert.match(claudeOwner, /saveSettings\(\{ throwOnError: true \}\)/);
+  assert.doesNotMatch(renewalPersistence, /queueLimitInvalidation|classifySettingsChange/);
+  assert.match(runtimeConfig, /\.\.\.limitsAccountConfig\(settings, context\)/);
+  const { limitsConfigFromSettings } = require('../../src/electron/runtimeConfig');
+  const config = limitsConfigFromSettings({ zedCookie: 'stored' }, { env: { TOKEN_MONITOR_ZED_COOKIE: 'env' } });
+  assert.equal(config.zedCookie, 'stored');
+  assert.equal(limitsConfigFromSettings({}, { env: { TOKEN_MONITOR_ZED_COOKIE: 'env' } }).zedCookie, 'env');
+  assert.doesNotMatch(runtimeConfig, /TOKEN_MONITOR_ZED_USER_ID|TOKEN_MONITOR_ZED_ACCESS_TOKEN|zedManagedAccounts/);
+  assert.doesNotMatch(main, /zedManagedAccountsForCollector/);
+});
+
+test('WorkBuddy Electron fetch adapter forwards parsed response JSON', () => {
+  const main = readAccountOwnersAndMain();
+  assert.match(main, /createWorkbuddyLocalAuth\(\{\s*fetch: electronLimitsFetch\(\)/);
+  const limitsDeps = functionBody(main, 'electronLimitsDeps', 'normalizeCodexManagedAccounts');
+  assert.match(limitsDeps, /json: \(\) => result\.json\(\)/);
+  assert.doesNotMatch(limitsDeps, /result\.body/);
+});
+
+test('main settings migrateLimitProviders normalizes without expanding old defaults', () => {
+  const main = readAccountOwnersAndMain();
+  const body = functionBody(main, 'migrateLimitProviders', 'migrateLimitProviderOrder');
+  assert.match(body, /desktopProviderPreference\(value, parseLimitProviders\)/);
+  assert.doesNotMatch(body, /preMimoDefault|legacyDefault.*return defaultLimitProviders/);
+});
+
+test('Home limits groups multiple MiMo accounts like Codex', () => {
+  const app = readRendererFile('app.js');
+  const groupBody = viewBody('renderLimitProviderGroup');
+  const frameBody = viewBody('renderLimitProviderGroupFrame', 'renderLimitProviderGroup');
+  const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+  // accountGroup marks the synthetic header provider, so a subscription card on
+  // it summarises the group instead of adopting one member's record — and
+  // groupAccounts is the set that summary is drawn from, since the header stands
+  // for its own rows and not for every account the provider has. The count
+  // phrase is the catalog's own, keyed by provider id.
+  assert.match(
+    frameBody,
+    /const groupProvider = \{\s*provider: providerId,\s*status: 'ok',\s*windows: \[\],\s*accountGroup: true,\s*groupAccounts: providers\s*\};/
+  );
+  assert.match(frameBody, /count \? limitGroupCountText\(providerId, count\) : ''/);
+  assert.match(groupBody, /renderLimitProviderGroupFrame\(\s*providerId, label, providers, color, \{ count: providers\.length, markId \}/);
+  assert.match(viewBody('limitGroupCountText', 'renderLimitProviderGroup'), /settings\.\$\{providerId\}\.nAccounts/);
+
+  // The page's dispatch is by account count with no provider branch left.
+  assert.match(renderLimitsBody, /if \(Array\.isArray\(visibleProviders\) && visibleProviders\.length > 1\) \{/);
+  assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
+  assert.doesNotMatch(app, /renderMimoAccountGroup/);
+});
+
+test('Limits groups multiple Cursor accounts with separate identity and plan rows', () => {
+  const app = readRendererFile('app.js');
+  const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+  const owner = require('../../src/electron/renderer/providers/cursor/windows')({});
+  assert.deepEqual(owner.rowPolicy({}, '', { grouped: true }).options, { accountTitle: true, showIcon: false });
+  assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
+  assert.doesNotMatch(app, /renderCursorAccountGroup/);
+});
+
+test('Limits groups the Volcengine Coding and Agent plans as rows of one card', () => {
+  const app = readRendererFile('app.js');
+  const renderLimitsBody = functionBody(app, 'renderLimits', 'serviceStatusLabel');
+  const view = readRendererFile('limits/windowsView.js');
+  // Keep account identity separate from the plan so repeated plan names are usable.
+  const owner = require('../../src/electron/renderer/providers/volcengine/windows')({});
+  assert.deepEqual(owner.rowPolicy({ status: 'ok', accountLabel: 'Agent Plan' }, '', { grouped: true }).options, { planText: 'Agent Plan' });
+  assert.equal(owner.rowPolicy({ status: 'unauthorized' }, '', { grouped: true }).options.planText, undefined);
+  assert.equal(owner.groupCountKey, 'settings.volcengine.nPlans');
+  assert.match(renderLimitsBody, /nodes\.push\(renderLimitProviderGroup\(id, label, visibleProviders, color\)\);/);
+  assert.doesNotMatch(app, /renderVolcengineAccountGroup/);
+  assert.equal(typeof owner.accountTitle, 'function');
+  assert.match(view, /windowOwners\[String\(id \|\| ''\)\.trim\(\)\.toLowerCase\(\)\]\?\.accountTitle/);
+});
+
+// Re-saving with the Agent fields empty deliberately preserves the stored
+// override, so without a dedicated control the only way back to the main account
+// is the provider logout, which also clears the Coding Plan credentials.
+test('Volcengine override fields are secret while region fields remain editable in the slot form', () => {
+  const { limitAccountFormsForRenderer } = require('../../src/electron/limits/accountSettings');
+  const form = limitAccountFormsForRenderer().find(form => form.id === 'volcengine');
+  for (const key of ['volcengineAccessKeyId', 'volcengineApiKey', 'volcengineSecretAccessKey',
+    'volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey']) {
+    assert.equal(form.fields.find(field => field.key === key).secret, true, key);
+  }
+  for (const key of ['volcengineRegion', 'volcengineAgentRegion']) {
+    assert.equal(form.fields.find(field => field.key === key).secret, false, key);
+  }
+});
+
+test('a zero-config OpenCode machine is not reported as unconfigured', () => {
+  // The whole point of the API path is that Go quota needs no setup. If the
+  // panel derives its state only from stored profiles, that machine shows live
+  // quota on the limits card and "not set up" in settings at the same time.
+  const main = readAccountOwnersAndMain();
+
+  const gate = main.slice(
+    main.indexOf('function opencodeAmbientKeyActive'),
+    main.indexOf('async function probeOpenCodeApiKey')
+  );
+  assert.ok(gate, 'ambient gate should exist');
+  // It must mirror the collector's selection: the ambient key is its own
+  // account whenever it exists, and is hidden only once a saved account carries
+  // that same key — the point at which the user has said they are one account.
+  assert.match(gate, /goApi\.readGoApiKey\(env\)/);
+  // One predicate, shared with the collector. Two copies of "who owns the
+  // auto-detected key" drift into a panel offering a row the collector is not
+  // scanning; its behaviour is covered in tests/shared/opencodeProfiles.test.js.
+  assert.match(gate, /!opencodeProfiles\.ambientKeyClaimed\(profiles, ambientKey, ambientIdentity\)/);
+
+  const status = main.slice(
+    main.indexOf('async function status('),
+    main.indexOf('async function getProfiles(')
+  );
+  assert.ok(status, 'status handler should exist');
+  assert.match(status, /opencodeAmbientKeyActive\(profiles\)/);
+  // Account names are user-chosen, so any sentinel key inside `profiles` is one
+  // a user can type; the synthetic entry rides in its own field instead.
+  assert.match(status, /const value = \{\s*profiles: result,\s*ambient,/);
+  assert.doesNotMatch(status, /result\[[^\]]*[Aa]mbient/);
+  // A profile that only names the ambient key stores no credential of its own,
+  // so a `cookie || apiKey` filter drops it and its row never leaves the
+  // placeholder while the collector is reading live quota from that same key.
+  // Both the filter and the probe resolve the key the way the collector does.
+  assert.match(status, /const profileKey = \(p\) => p\.apiKey \|\| opencodeProfiles\.ambientKeyFor\(p, ambientKey, ambientIdentity\);/);
+  // A reference whose pin no longer matches keeps its row and says so, rather
+  // than being filtered out and leaving the row on its placeholder forever.
+  assert.match(status, /const needsRebind = \(p\) => Boolean\(p\.useAmbientKey\) && !profileKey\(p\) && !p\.cookie;/);
+  assert.match(status, /\.filter\(\(\[, p\]\) => \(p\.cookie \|\| profileKey\(p\) \|\| needsRebind\(p\)\) && p\.enabled\)/);
+  assert.match(status, /needsRebind: true/);
+  // Provider-wide, like every ownership change: this row has no account name for
+  // a scoped refresh to address.
+  const ambientToggle = main.slice(
+    main.indexOf('async function setAmbientEnabled('),
+    main.indexOf('module.exports = { createOpencodeAccountService')
+  );
+  assert.ok(ambientToggle, 'setAmbientEnabled handler should exist');
+  assert.match(ambientToggle, /queueLimitInvalidation\(\{ provider: 'opencode' \}, 'ambient-toggle', \{ clear: true \}\)/);
+  // Clearing the provider without a refresh behind it wipes every OpenCode
+  // account and rebuilds none: switching off the detected key would read as
+  // switching off the provider.
+  assert.doesNotMatch(ambientToggle, /refresh: false/);
+  assert.match(status, /const apiKey = profileKey\(profile\);/);
+  assert.doesNotMatch(status, /probeOpenCodeApiKey\(profile\.apiKey\)/);
+
+  const profilesHandler = main.slice(
+    main.indexOf('async function getProfiles('),
+    main.indexOf('async function saveProfile(')
+  );
+  // hasEnvVar keeps meaning "environment cookie". Folding the ambient key into
+  // it would make a later reader assume an env var that is not set.
+  assert.match(profilesHandler, /const hasEnvVar = Boolean\(env\.TOKEN_MONITOR_OPENCODE_COOKIE\);/);
+  // Which credential kinds an account holds crosses to the renderer; none of
+  // their values do.
+  assert.match(profilesHandler, /hasApiKey: Boolean\(p\.apiKey\)/);
+  assert.match(profilesHandler, /hasCookie: Boolean\(p\.cookie\)/);
+  assert.match(profilesHandler, /usesAmbientKey: Boolean\(p\.useAmbientKey\)/);
+  // Held but not resolving is its own state: on an account that also has a
+  // cookie, nothing else in the panel would reveal it.
+  assert.match(profilesHandler, /ambientStale: Boolean\(p\.useAmbientKey\)/);
+});
+
+test('OpenCode credentials are named, merged and removed one at a time', () => {
+  const main = readAccountOwnersAndMain();
+
+  const save = main.slice(
+    main.indexOf('async function saveProfile('),
+    main.indexOf('async function setProfileEnabled(')
+  );
+  assert.ok(save, 'saveProfile handler should exist');
+  // Naming the auto-detected credential stores a reference, never the key, so a
+  // key rotated inside OpenCode is still read live instead of going stale.
+  assert.match(save, /\['api', 'cookie', 'ambient'\]\.includes\(kind\)/);
+  // Bound to the account signed in at the time: the API returns no workspace id,
+  // so a key that later changes cannot be told apart from a different account's.
+  assert.match(save, /ambientKeyIdentity: goApi\.goApiIdentity\(ambientKey\)/);
+  assert.doesNotMatch(save, /useAmbientKey: true, apiKey/);
+
+  // Every operation that could bind or destroy a credential goes through the
+  // shared profile algebra, so the rule is one testable function rather than
+  // four handlers that have to agree. Its behaviour is covered for real in
+  // tests/shared/opencodeProfiles.test.js; what matters here is that no handler
+  // reaches around it.
+  const handlers = main.slice(
+    main.indexOf('async function saveProfile('),
+    main.indexOf('module.exports = { createOpencodeAccountService')
+  );
+  for (const call of [
+    /opencodeProfiles\.saveCredential\(\s*getOpencodeProfiles\(\) \|\| \{\},\s*name,\s*credential,\s*\{ merge: options\.merge === true \}/,
+    /opencodeProfiles\.removeCredential\(getOpencodeProfiles\(\) \|\| \{\}, name, kind\)/,
+    /opencodeProfiles\.moveCredential\(/,
+    /opencodeProfiles\.renameProfile\(/
+  ]) assert.match(handlers, call);
+  // The rule is not re-implemented alongside the module that owns it.
+  assert.doesNotMatch(handlers, /options\.merge !== true/);
+  assert.doesNotMatch(handlers, /api: 'apiKey', cookie: 'cookie', ambient: 'useAmbientKey'/);
+});
+
+test('OpenCode local fallback uses the standard settings card without a nested disclosure', () => {
+  const app = readRendererFile('app.js');
+  const html = readRendererFile('index.html');
+  assert.match(app, /opencode:\s*\[\{\s*key: 'opencodeLocalLimitsEnabled'/);
+  assert.match(app, /if \(settingsList\) optionsInner\.append\(settingsList\)/);
+  assert.doesNotMatch(app + html, /opencodeLocalFallback/);
+});
+
+test('an expanded OpenCode account animates and its merge button gets its own row', () => {
+  const app = readRendererOwner('opencode');
+  const css = readRendererFile('styles.css');
+
+  // The shared accordion squeezes one inner wrapper; rows placed directly on
+  // the container leave it with nothing to shrink.
+  assert.match(app, /credentialList\.className = 'opencode-credential-list accordion-animated-container hidden';/);
+  assert.match(app, /credentialInner\.className = 'accordion-animation-inner';/);
+  assert.match(app, /credentialInner\.append\(opencodeCredentialRow\(name, kind, label\)\)/);
+  assert.match(app, /credentialList\.append\(credentialInner\)/);
+  // That container stays in the grid while collapsed, so a row gap would pad
+  // every multi-credential account by its full height with nothing shown.
+  assert.match(css, /\.opencode-profile-item \{[^}]*gap: 0 8px;/);
+
+  // The merge label carries the target account name and never fits beside the
+  // input or in the cell next to the rename button.
+  assert.match(app, /row\.append\(labelSpan, nameInput, actions, mergeBtn\);/);
+  assert.match(css, /#opencodeProfileList \.opencode-profile-item \.profile-name-box \{\s*grid-template-areas:\s*"name rename \."\s*"merge merge merge"\s*"detail detail detail";/);
+  // Scoped to OpenCode: the other profile lists share this grid and have no
+  // merge button, so they keep the two-row template.
+  assert.match(css, /\.opencode-profile-item \.profile-name-box \{[^}]*grid-template-areas:\s*"name rename \."\s*"detail detail detail";/);
+
+  // The summary line runs at 9px; the group-header chevron size reads as an
+  // oversized arrow beside it.
+  assert.match(css, /\.opencode-profile-item \.profile-detail \.cursor-disclosure-icon \{\s*width: 9px;/);
+});
+
+// The merge confirmation rule, run rather than pattern-matched. Hiding the
+// button on an edit is not enough on its own: the reply that offers it arrives
+// after an await, so an edit made while the request is in flight is overtaken
+// by that reply and the button comes back describing the proposal the user has
+// already left. Loaded through `vm` like the other renderer controllers, so the
+// assertions are about behaviour and not about the source that produces it.
+function loadOpencodeMergeOffer() {
+  const app = readRendererOwner('opencode');
+  const start = app.indexOf('function opencodeMergeOffer(');
+  assert.notEqual(start, -1, 'opencodeMergeOffer should exist');
+  const end = app.indexOf('\nfunction ', start + 1);
+  assert.notEqual(end, -1, 'opencodeMergeOffer should be followed by another function');
+  const context = { module: { exports: null } };
+  vm.runInNewContext(`${app.slice(start, end)}\nmodule.exports = opencodeMergeOffer;`, context);
+  return context.module.exports;
+}
+
+function fakeMergeButton() {
+  const clicks = [];
+  const button = {
+    textContent: '',
+    visible: false,
+    classList: {
+      add: (name) => { if (name === 'hidden') button.visible = false; },
+      remove: (name) => { if (name === 'hidden') button.visible = true; }
+    },
+    addEventListener: (type, listener) => { if (type === 'click') clicks.push(listener); },
+    click: () => clicks.forEach((listener) => listener())
+  };
+  return button;
+}
+
+// One save, no interference: the offer appears and confirming it names exactly
+// what was proposed.
+test('a merge offer confirms the proposal it was made for', async () => {
+  const opencodeMergeOffer = loadOpencodeMergeOffer();
+  const button = fakeMergeButton();
+  const confirmed = [];
+  const offer = opencodeMergeOffer(button, (name) => confirmed.push(name));
+
+  let release;
+  const reply = new Promise((resolve) => { release = resolve; });
+  const save = (async () => {
+    const at = offer.revision();
+    await reply;
+    offer.offer(at, 'work', 'merge into work');
+  })();
+
+  assert.equal(button.visible, false);
+  release();
+  await save;
+  assert.equal(button.visible, true);
+  assert.equal(button.textContent, 'merge into work');
+  button.click();
+  assert.deepEqual(confirmed, ['work']);
+});
+
+test('an edit made while the save is in flight cancels the offer its reply carries', async () => {
+  const opencodeMergeOffer = loadOpencodeMergeOffer();
+  const button = fakeMergeButton();
+  const confirmed = [];
+  const offer = opencodeMergeOffer(button, (name) => confirmed.push(name));
+
+  let release;
+  const reply = new Promise((resolve) => { release = resolve; });
+  const save = (async () => {
+    const at = offer.revision();
+    await reply;
+    // The proposal this reply answers is no longer the one on screen.
+    assert.equal(offer.stale(at), true);
+    offer.offer(at, 'work', 'merge into work');
+  })();
+
+  offer.withdraw();
+  release();
+  await save;
+
+  assert.equal(button.visible, false, 'a superseded reply must not put the button back');
+  button.click();
+  assert.deepEqual(confirmed, [], 'a hidden offer has nothing to confirm');
+});
+
+// Two saves can overlap and the newer one can answer first, so an older reply
+// has to keep its hands off a proposal that is not its own.
+test('an older successful reply leaves a newer offer standing', async () => {
+  const opencodeMergeOffer = loadOpencodeMergeOffer();
+  const button = fakeMergeButton();
+  const confirmed = [];
+  const offer = opencodeMergeOffer(button, (name) => confirmed.push(name));
+
+  let releaseOld;
+  const oldReply = new Promise((resolve) => { releaseOld = resolve; });
+  const oldSave = (async () => {
+    const at = offer.revision();
+    await oldReply;
+    // Succeeded, but for the proposal the user has already replaced.
+    if (!offer.stale(at)) offer.withdraw();
+  })();
+
+  // The user edits and saves again; that request answers first.
+  offer.withdraw();
+  const newer = offer.revision();
+  offer.offer(newer, 'javis', 'merge into javis');
+  assert.equal(button.visible, true);
+
+  releaseOld();
+  await oldSave;
+
+  assert.equal(button.visible, true, 'an older success must not clear a newer offer');
+  button.click();
+  assert.deepEqual(confirmed, ['javis']);
+});
+
+// Escape, or a blur onto nothing, cancels the request that is already out. The
+// reply still arrives, and it must not put the cancelled proposal back.
+test('cancelling an in-flight proposal keeps its reply from resurrecting it', async () => {
+  const opencodeMergeOffer = loadOpencodeMergeOffer();
+  const button = fakeMergeButton();
+  const confirmed = [];
+  const offer = opencodeMergeOffer(button, (name) => confirmed.push(name));
+
+  let release;
+  const reply = new Promise((resolve) => { release = resolve; });
+  const save = (async () => {
+    const at = offer.revision();
+    await reply;
+    offer.offer(at, 'work', 'merge into work');
+  })();
+
+  offer.withdraw();
+  release();
+  await save;
+
+  assert.equal(button.visible, false, 'a cancelled proposal must not come back');
+  button.click();
+  assert.deepEqual(confirmed, []);
+});
+
+// One way down, so a cancel path cannot quietly opt out of invalidating the
+// reply that is still in flight.
+test('the merge offer has no way to hide without invalidating in-flight replies', () => {
+  const app = readRendererFile('app.js');
+  assert.doesNotMatch(app, /offer\.hide\(\)|addMergeOffer\?\.hide\(\)/);
+  assert.doesNotMatch(app, /hide: \(\) =>/);
+});
+
+test('a withdrawn offer stays withdrawn until a new proposal is made', async () => {
+  const opencodeMergeOffer = loadOpencodeMergeOffer();
+  const button = fakeMergeButton();
+  const confirmed = [];
+  const offer = opencodeMergeOffer(button, (name) => confirmed.push(name));
+
+  const first = offer.revision();
+  offer.withdraw();
+  offer.offer(first, 'work', 'merge into work');
+  assert.equal(button.visible, false);
+
+  // The next save captures the revision the withdrawal left behind, so the
+  // user's new proposal is offered normally.
+  const second = offer.revision();
+  offer.offer(second, 'personal', 'merge into personal');
+  assert.equal(button.visible, true);
+  button.click();
+  assert.deepEqual(confirmed, ['personal']);
+});
+
+// Account names are arbitrary user strings, so the id a row is found by has to
+// distinguish every name a user may pick. Sanitizing to a safe character set is
+// not injective: `a b` and `a_b` both became `a_b`, and whichever row rendered
+// first collected the other's status.
+function loadOpencodeRowId() {
+  const app = readRendererOwner('opencode');
+  const start = app.indexOf('function opencodeRowId(');
+  assert.notEqual(start, -1, 'opencodeRowId should exist');
+  const end = app.indexOf('\n}', start) + 2;
+  const context = { module: { exports: null }, encodeURIComponent };
+  vm.runInNewContext(`${app.slice(start, end)}\nmodule.exports = opencodeRowId;`, context);
+  return context.module.exports;
+}
+
+test('two account names a user may pick never share a row id', () => {
+  const opencodeRowId = loadOpencodeRowId();
+  const names = ['a b', 'a_b', 'a/b', 'a%b', 'a.b', 'work', 'work ', 'wörk', '__proto__', 'a+b'];
+  const ids = names.map((name) => opencodeRowId('opencode-info-', name));
+  assert.equal(new Set(ids).size, names.length, `collision among ${JSON.stringify(ids)}`);
+  // An id may not contain whitespace.
+  for (const id of ids) assert.doesNotMatch(id, /\s/, id);
+});
+
+test('the row id is a pure function of the name, shared by both call sites', () => {
+  const app = readRendererOwner('opencode');
+  // Rendering and the later status lookup derive it independently, so a shared
+  // mutable table could drift between them; nothing may build one by hand.
+  assert.doesNotMatch(app, /'opencode-info-' \+ name/);
+  assert.doesNotMatch(app, /'opencode-credentials-' \+ name/);
+  assert.equal((app.match(/opencodeRowId\('opencode-info-', name\)/g) || []).length, 2);
+  assert.equal((app.match(/opencodeRowId\('opencode-credentials-', name\)/g) || []).length, 1);
+});
+
+test('a ZCode-discovered GLM login reads as connected, not API-key configured', () => {
+  const app = readRendererFile('app.js');
+  const statusBody = functionBody(app, 'apiKeyAccountStatusText', 'setExternalAccountExpanded');
+  // The linked pill picks the OAuth-style key only for a zcode-auto source;
+  // pasted and env keys keep their existing API-key pills.
+  assert.match(statusBody, /providerName === 'zai' && source === 'zcode-auto'[\s\S]*\? 'settings\.zai\.statusLinked'/);
+  assert.match(statusBody, /providerName === 'factory' && source === 'droid-env'/);
+  assert.match(statusBody, /source === 'env' \? `settings\.\$\{providerName\}\.statusEnv` : `settings\.\$\{providerName\}\.statusSet`/);
+
+  const i18n = readRendererFile('i18n.js');
+  // All bundled locales carry the key; translate() falls back to the raw key, so a
+  // missing entry would surface as literal text on the pill.
+  assert.equal((i18n.match(/'settings\.zai\.statusLinked'/g) || []).length, 6);
+  assert.ok(/'settings\.zai\.statusLinked': 'Connected'/.test(i18n));
+});
+
+test('MiMo main projects the detected Desktop account without raw credentials', () => {
+  const main = readAccountOwnersAndMain();
+  assert.match(main, /withDetectedMimoAccount\(accounts, mimoDetectedAccount\(\)\)/);
+  assert.match(main, /const accountKey = detectedMimoAccountKey\(\)/);
+  assert.doesNotMatch(functionBody(main, 'mimoDetectedAccount', 'mimoAccountsForRenderer'), /cookieHeader|userId/);
+});
+
+test('MiMo refreshes its detected account when the settings section is expanded again', async () => {
+  const app = readRendererOwner('mimo');
+  const refresh = functionBody(app, 'refreshMimoAccounts', 'setCursorStatusText');
+  let detected = [{ id: 'desktop-a', removable: false }];
+  let rendered = 0;
+  const state = { settings: { mimoManagedAccounts: [] } };
+  const context = {
+    state,
+    window: { tokenMonitor: { mimo: { accounts: async () => detected } } },
+    renderMimoStatus: () => { rendered += 1; }
+  };
+  const refreshAccounts = vm.runInNewContext(`${refresh}\nrefreshMimoAccounts`, context);
+
+  await refreshAccounts();
+  assert.equal(state.settings.mimoManagedAccounts[0].id, 'desktop-a');
+  detected = [{ id: 'desktop-b', removable: false }];
+  await refreshAccounts();
+  assert.equal(state.settings.mimoManagedAccounts[0].id, 'desktop-b');
+  detected = [];
+  await refreshAccounts();
+  assert.equal(state.settings.mimoManagedAccounts.length, 0);
+  assert.equal(rendered, 3);
+  assert.match(app, /if \(expanding\) void refreshMimoAccounts\(\)/);
+});
+
+test('MiMo settings passes rejected accounts and detected-account permissions to the shared list', () => {
+  const { create } = require('../../src/electron/renderer/limits/providerOwners/mimo');
+  const { accountStatus } = require('../../src/electron/renderer/limits/accountSlotsPanel');
+  const { readingFor } = require('../../src/electron/renderer/limits/legacyAccountList');
+  const accounts = [
+    { id: 'a', accountKey: 'a', accountEmail: 'a@example.com', enabled: true },
+    { id: 'b', accountKey: 'b', accountEmail: 'b@example.com', enabled: true },
+    { id: 'desktop', accountKey: 'desktop', removable: false, enabled: true }
+  ];
+  let providers = accounts.map(account => ({ provider: 'mimo', accountKey: account.accountKey, status: 'unauthorized' }));
+  let rows, readings, options;
+  const node = { classList: { add() {}, toggle() {} } };
+  const owner = create({ initial: {}, getSettings: () => ({ mimoManagedAccounts: accounts }),
+    document: { getElementById: () => node }, isSettingsSurfaceVisible: () => true,
+    accountShellApi: { render() {} }, renderSettingsSummaries() {}, t: key => key,
+    localProviderStatuses: () => providers,
+    window: { tokenMonitor: {}, TokenMonitorLegacyAccountList: { create(config) {
+      options = config;
+      return { update(next, nextReadings) { rows = next; readings = nextReadings; },
+        summary: () => ({ total: rows.length, linked: 0 }) };
+    } } }
+  });
+  owner.renderMimoStatus();
+  assert.equal(rows.length, 3);
+  assert.deepEqual(rows.map(row => accountStatus(row, readingFor(row, readings))), ['invalid', 'invalid', 'invalid']);
+  assert.equal(rows[2].accountName, 'settings.mimo.desktopAccount');
+  assert.equal(rows[2].canPause, false);
+  assert.equal(rows[2].removable, false);
+  assert.equal(typeof options.enabled, 'function');
+  assert.equal(typeof options.remove, 'function');
+  providers = [{ provider: 'mimo', accountKey: 'a', status: 'ok' }];
+  owner.renderMimoStatus();
+  assert.equal(accountStatus(rows[0], readingFor(rows[0], readings)), 'connected');
+});
+
+test('Alibaba CLI readings keep saved Cookie setup reachable while web readings stay linked', () => {
+  const app = readRendererFile('app.js');
+  for (const source of ['cli', 'web']) {
+    const elements = new Map();
+    for (const suffix of ['AccountStatus', 'OpenBrowser', 'LogoutButton', 'RefreshButton', 'ManualPanel', 'ErrorMessage']) {
+      const classes = new Set();
+      elements.set(`alibaba${suffix}`, { textContent: '', classList: {
+        add: name => classes.add(name), remove: name => classes.delete(name),
+        toggle: (name, force) => force ? classes.add(name) : classes.delete(name),
+        contains: name => classes.has(name)
+      } });
+    }
+    runRendererFunctions(app, ['renderExternalProviderStatus'], "renderExternalProviderStatus('alibaba')", {
+      externalLimitAccountConfig: {},
+      limitAccountForm: () => ({ status: { configuredKey: 'alibabaCookieConfigured', sourceKey: 'alibabaCookieSource', pendingKey: 'alibabaPendingCheckSince' } }),
+      limitAccountPanelsApi: { syncCredentialFields() {} },
+      state: { settings: { alibabaCookieConfigured: true, alibabaCookieSource: 'settings' }, accountPanelMessages: {} },
+      document: { getElementById: id => elements.get(id) || null },
+      externalProviderForAccount: () => ({ provider: 'alibaba', source, status: 'ok' }),
+      externalProviderAccountLinked: () => true,
+      externalProviderCheckSettled: new Set(), limitProviderEnabled: () => true,
+      setCursorStatusText() {}, apiKeyAccountStatusText: () => '', t: key => key,
+      renderSettingsSummaries() {}, setExternalAccountExpanded() {}
+    });
+    assert.equal(elements.get('alibabaManualPanel').classList.contains('hidden'), source === 'web');
+    assert.equal(elements.get('alibabaOpenBrowser').classList.contains('hidden'), source === 'web');
+    assert.equal(elements.get('alibabaLogoutButton').classList.contains('hidden'), false);
+  }
+});

@@ -1,0 +1,206 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const test = require('node:test');
+
+const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
+
+function read(name) {
+  return fs.readFileSync(path.join(rendererDir, name), 'utf8');
+}
+
+test('Alibaba plan variants get different Notch and Dock quota keys', () => {
+  const { providerKey } = require('../../src/electron/renderer/limits/resetMotion');
+  const team = { provider: 'alibaba', accountKey: 'same-uid', region: 'cn' };
+  const personal = { ...team, region: 'cn-personal' };
+  assert.notEqual(providerKey(team), providerKey(personal));
+  assert.equal([team, personal].find(row => providerKey(row) === providerKey(personal)), personal);
+});
+
+test('period tabs use one sliding selection indicator', () => {
+  const html = read('index.html');
+  const css = read('styles.css');
+  const app = read('app.js');
+
+  assert.match(html, /<nav class="tabs"[\s\S]*?<span class="tab-indicator" aria-hidden="true"><\/span>[\s\S]*?data-period="today"[\s\S]*?data-period="month"[\s\S]*?data-period="allTime"/);
+  assert.match(css, /\.tab-indicator\s*\{[^}]*transform:\s*translate3d\(calc\(var\(--period-index\)/s);
+  assert.match(css, /\.tab-indicator\s*\{[^}]*transition:\s*transform 220ms cubic-bezier\(0\.22, 1, 0\.36, 1\)/s);
+  assert.match(app, /style\.setProperty\('--period-index', String\(activeIndex\)\)/);
+  assert.match(app, /tab\.setAttribute\('aria-pressed', String\(active\)\)/);
+});
+
+test('data bars animate on the compositor instead of changing layout width', () => {
+  const css = read('styles.css');
+  const app = read('app.js');
+  const applyBarScale = app.slice(
+    app.indexOf('function applyBarScale('),
+    app.indexOf('function rowWidth(', app.indexOf('function applyBarScale('))
+  );
+
+  assert.match(css, /\.bar-fill\s*\{[^}]*transform:\s*scaleX\(var\(--bar-scale, 0\)\)/s);
+  assert.match(css, /\.limit-meter-fill\s*\{[^}]*transform:\s*scaleX\(var\(--bar-scale, 0\)\)/s);
+  assert.doesNotMatch(css, /(?:\.bar-fill|\.limit-meter-fill)\s*\{[^}]*transition:\s*width/s);
+  assert.match(app, /applyBarScale\(fill, width \/ 100\)/);
+  // The limit meter moved to the shared Limits view with the rest of the rows.
+  assert.match(read('limits/windowsView.js'), /applyBarScale\(fill, safePercent \/ 100\)/);
+  assert.match(app, /state\.animateBarsFromZero[\s\S]*?animateBarBetween\(fill, 0, safeScale, 0, 420\)/s);
+  assert.match(applyBarScale, /animateBarBetween\(fill, 0, safeScale, 0, 420\)/);
+});
+
+test('cached Limits bars replay their entrance motion when the view is revisited', () => {
+  const app = read('app.js');
+  const animateCachedLimitBarsFromZero = app.slice(
+    app.indexOf('function animateCachedLimitBarsFromZero('),
+    app.indexOf('function rowWidth(', app.indexOf('function animateCachedLimitBarsFromZero('))
+  );
+  const renderLimits = app.slice(
+    app.indexOf('function renderLimits('),
+    app.indexOf('function serviceStatusLabel(', app.indexOf('function renderLimits('))
+  );
+
+  assert.match(animateCachedLimitBarsFromZero, /if \(!state\.animateBarsFromZero \|\| prefersReducedMotion\(\)\) return;/);
+  assert.match(animateCachedLimitBarsFromZero, /querySelectorAll\('\.limit-meter-fill'\)/);
+  assert.match(animateCachedLimitBarsFromZero, /fill\.style\.getPropertyValue\('--bar-scale'\)/);
+  assert.match(animateCachedLimitBarsFromZero, /animateBarBetween\(fill, 0, targetScale, 0, 420\)/);
+  assert.match(
+    renderLimits,
+    /state\.limitPanelRenderSignature === renderSignature[\s\S]*?animateCachedLimitBarsFromZero\(\);\s*return;/
+  );
+});
+
+test('period changes preserve row identity, animate rank changes, and count from the previous total', () => {
+  const app = read('app.js');
+  const handler = app.slice(
+    app.indexOf("for (const tab of document.querySelectorAll('.tab'))"),
+    app.indexOf("els.breakdown.addEventListener('click'", app.indexOf("for (const tab of document.querySelectorAll('.tab'))"))
+  );
+
+  assert.match(handler, /const snapshot = captureBreakdownMotion\(\)/);
+  assert.match(handler, /animateBreakdownFrom\(snapshot, \{ duration: periodBreakdownMotionDuration\(\), synchronized: true \}\)/);
+  assert.doesNotMatch(handler, /animateBreakdownFrom\(snapshot, \{ duration: periodBreakdownMotionDuration\(\) \}\)/,
+    'every period switch path synchronizes the breakdown');
+  assert.doesNotMatch(handler, /state\.currentTotal = 0/);
+  assert.match(app, /barScale: trackWidth > 0 \? Math\.max\(0, Math\.min\(1, fillWidth \/ trackWidth\)\) : 0/);
+  assert.match(app, /previous\.top - row\.getBoundingClientRect\(\)\.top/);
+  assert.match(app, /animateBarBetween\(fill, previous\.barScale, targetScale, 0, duration\)/);
+  assert.match(app, /animateBarBetween\(fill, 0, targetScale, delay, Math\.max\(1, duration - delay\)\)/);
+  assert.match(app, /function animateRowNumber\(el, from, to, duration = 420, capturedRoll = null, \{ synchronized = false \} = \{\}\)/);
+  assert.match(app, /animateRowNumber\(valueEl, previous\?\.value \?\? 0, value,\s*duration, previous\?\.rollSnapshot, \{ synchronized \}\)/);
+  assert.match(app, /const delay = synchronized \? 0 : Math\.min\(enteringIndex, 6\) \* 18;/);
+  assert.match(app, /rollSnapshot: motionRows\.has\(row\) \? tokenNumberAnimationApi\.capture\(valueEl\) : null/);
+  assert.match(app, /value: Number\(valueEl\?\.dataset\.motionValue/);
+});
+
+test('live row updates count and resize bars together without slowing the headline', () => {
+  const app = read('app.js');
+  const renderRows = app.slice(app.indexOf('function renderRows('), app.indexOf('function deviceLabel('));
+
+  assert.match(renderRows, /const rowsChanged =[\s\S]*?const liveMotionSnapshot = rowsChanged && !fromSearch && !state\.periodMotionActive && !state\.animateBarsFromZero[\s\S]*?captureBreakdownMotion\(\)/);
+  assert.ok(renderRows.indexOf('captureBreakdownMotion()') < renderRows.indexOf('if (structureChanged)'));
+  assert.match(app, /if \(liveMotionSnapshot\) animateBreakdownFrom\(liveMotionSnapshot, \{ duration: 600 \}\)/);
+  assert.match(app, /const animationFrom = numberAnimHandle \? numberAnimValue : state\.currentTotal/);
+  assert.match(app, /animateTotalNumber\(els\.totalTokens, animationFrom, nextTotal, state\.periodMotionActive \? 800 : 1000,\s*\{ synchronized: state\.periodMotionActive \}\)/);
+  assert.match(app, /if \(!breakdownNumberMotionVisibleOnly \|\| !previous \|\| previous\.value !== value \|\| rowNumberAnimations\.has\(valueEl\)\)/);
+});
+
+test('unrelated rerenders do not truncate an in-flight headline count', () => {
+  const app = read('app.js');
+  const renderTotal = app.slice(
+    app.indexOf('const totalChanged = nextTotal !== state.currentTotal'),
+    app.indexOf('state.currentTotal = nextTotal', app.indexOf('const totalChanged = nextTotal !== state.currentTotal'))
+  );
+
+  assert.match(app, /let numberAnimTarget = null;\s*let numberAnimValue = 0;/);
+  assert.match(app, /function headlineNumberIsAnimatingTo\(value\) \{\s*return Boolean\(numberAnimHandle\) && numberAnimTarget === value;\s*\}/);
+  assert.match(app, /numberAnimTarget = to;\s*numberAnimValue = rolling \? to : from;/);
+  assert.match(app, /numberAnimValue = from \+ delta \* easeOutQuart\(progress\)/);
+  assert.match(renderTotal, /else if \(!headlineNumberIsAnimatingTo\(nextTotal\)\) \{\s*cancelNumberAnimation\(\)/);
+  assert.doesNotMatch(renderTotal, /else \{\s*cancelNumberAnimation\(\)/);
+});
+
+test('row motion preserves matching targets and continues changed targets from the visual state', () => {
+  const app = read('app.js');
+  const animateRowNumber = app.slice(
+    app.indexOf('function animateRowNumber('),
+    app.indexOf('function animateBreakdownFrom(', app.indexOf('function animateRowNumber('))
+  );
+  const animateBarBetween = app.slice(
+    app.indexOf('function animateBarBetween('),
+    app.indexOf('function captureTrendBarMotion(', app.indexOf('function animateBarBetween('))
+  );
+
+  assert.match(app, /const rowNumberAnimations = new Map\(\);\s*const rowBarAnimations = new Map\(\);/);
+  assert.match(animateRowNumber, /if \(previous\?\.target === to && !prefersReducedMotion\(\)\) return;/);
+  assert.match(animateRowNumber, /const startValue = Number\.isFinite\(previous\?\.value\) \? previous\.value : from;/);
+  assert.match(animateRowNumber, /const motion = \{ handle: 0, target: to, value: startValue \}/);
+  assert.match(animateBarBetween, /const previousIsActive = previous\?\.animation\.pending \|\| previous\?\.animation\.playState === 'running';/);
+  assert.match(animateBarBetween, /if \(previousIsActive && Math\.abs\(previous\.target - toScale\) < 0\.001\) return;/);
+  assert.ok(
+    animateBarBetween.indexOf('for (const animation of fill.getAnimations()) animation.cancel()')
+      < animateBarBetween.indexOf('if (Math.abs(toScale - fromScale) < 0.001) return'),
+    'a stale bar tween must be cancelled even when the new target already matches the visual scale'
+  );
+  assert.match(animateBarBetween, /animation\.onfinish = forget;\s*animation\.oncancel = forget;\s*rowBarAnimations\.set\(fill, motion\);/);
+});
+
+test('view changes render immediately without a page crossfade', () => {
+  const css = read('styles.css');
+  const app = read('app.js');
+
+  assert.doesNotMatch(app, /startViewTransition|renderViewChange|animateFallbackViewPanel/);
+  assert.doesNotMatch(css, /view-transition-name|::view-transition|motion-view-(?:in|out)/);
+  assert.match(app, /function renderBreakdownChange\(breakdown, options = \{\}\)/);
+  assert.match(app, /state\.animateBarsFromZero = true;[\s\S]*?let renderSucceeded = false;[\s\S]*?render\(\);[\s\S]*?renderSucceeded = true;[\s\S]*?state\.animateBarsFromZero = false;[\s\S]*?if \(!renderSucceeded\) state\.animateChartsOnRender = false;/);
+  assert.match(app, /else renderBreakdownChange\(id\)/);
+  assert.match(app, /renderBreakdownChange\(viewId, \{ fromHome: true \}\)/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.bar-fill,[\s\S]*?\.tab-indicator[\s\S]*?transition:\s*none/s);
+});
+
+test('headline counting respects reduced-motion preferences', () => {
+  const app = read('app.js');
+  const animateNumber = app.slice(
+    app.indexOf('function animateNumber('),
+    app.indexOf('const rowNumberAnimations', app.indexOf('function animateNumber('))
+  );
+
+  assert.match(animateNumber, /if \(prefersReducedMotion\(\)\) \{[\s\S]*?el\.textContent = formatNumber\(to\);[\s\S]*?onDone\(\);[\s\S]*?return;/);
+});
+
+test('Trends bars grow from the baseline and preserve matching period heights', () => {
+  const app = read('app.js');
+  const css = read('styles.css');
+
+  assert.match(app, /function captureTrendBarMotion\(\)[\s\S]*?\.spark-bar\[data-motion-key\][\s\S]*?getBoundingClientRect\(\)\.height/);
+  assert.match(app, /bar\.dataset\.motionKey = String\(finalPoints\[index\]\?\.\[labelKey\] \|\| index\)/);
+  assert.match(app, /const fromScale = fromZero \|\| !previous[\s\S]*?previous\.height \/ targetHeight/);
+  assert.match(app, /transform: `scaleY\(\$\{fromScale\}\)`[\s\S]*?transform: 'scaleY\(1\)'[\s\S]*?duration: 420/);
+  assert.match(css, /\.trends-spark \.spark-bar\s*\{[^}]*transform-box:\s*fill-box;[^}]*transform-origin:\s*bottom center;/s);
+});
+
+test('Home history visuals reveal left to right only when entering the view', () => {
+  const app = read('app.js');
+
+  assert.match(app, /state\.animateChartsOnRender = true/);
+  assert.match(app, /\.heat-base-layer \.heat/);
+  assert.match(app, /const HOME_HISTORY_MOTION_MS = 920/);
+  assert.match(app, /const HOME_HEATMAP_MOTION_MS = 640/);
+  assert.match(app, /const HOME_HEAT_CELL_MOTION_MS = 240/);
+  assert.match(app, /const viewport = activityScroll\?\.getBoundingClientRect\(\)/);
+  assert.match(app, /rect\.right > viewport\.left && rect\.left < viewport\.right/);
+  assert.match(app, /const firstVisibleColumn = visibleCells\.length \? visibleCells\[0\]\.column : 0/);
+  assert.match(app, /const heatColumnDelay = \(HOME_HEATMAP_MOTION_MS - HOME_HEAT_CELL_MOTION_MS\) \/ Math\.max\(1, lastVisibleColumn - firstVisibleColumn\)/);
+  assert.match(app, /delay: \(column - firstVisibleColumn\) \* heatColumnDelay/);
+  assert.match(app, /duration: HOME_HEAT_CELL_MOTION_MS/);
+  assert.match(app, /duration: HOME_HEAT_CELL_MOTION_MS,[\s\S]*?easing: 'cubic-bezier\(0\.22, 1, 0\.36, 1\)'/);
+  assert.match(app, /strokeDasharray: `\$\{length\} \$\{length\}`[\s\S]*?strokeDashoffset: length[\s\S]*?strokeDashoffset: 0/);
+  assert.equal((app.match(/duration: HOME_HISTORY_MOTION_MS/g) || []).length, 2);
+  assert.match(app, /clipPath: 'inset\(0 100% 0 0\)'[\s\S]*?clipPath: 'inset\(0 0 0 0\)'/);
+  assert.match(app, /if \(prefersReducedMotion\(\)\) return/);
+  assert.match(app, /new ResizeObserver\(applySettledLayout\)/);
+  assert.match(
+    app,
+    /setupHomeActivityScroller\(scroller, reveal\)/
+  );
+});

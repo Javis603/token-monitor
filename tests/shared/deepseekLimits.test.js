@@ -1,0 +1,301 @@
+'use strict';
+
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const test = require('node:test');
+
+const { deepseekToken, parseLimitProviders, selectFundedRow, fetchDeepSeekLimits } = require('../../src/shared/limits/collector');
+const { aggregateLimits } = require('../../src/shared/limits/core');
+
+function memStoreDeps(initial = {}) {
+  const box = { value: JSON.parse(JSON.stringify(initial)) };
+  return {
+    readJson: () => JSON.parse(JSON.stringify(box.value)),
+    writeJsonAtomic: (_p, v) => { box.value = JSON.parse(JSON.stringify(v)); }
+  };
+}
+
+function balanceResponse(infos) {
+  return { ok: true, status: 200, json: async () => ({ is_available: true, balance_infos: infos }) };
+}
+
+test('deepseekToken reads DEEPSEEK_API_KEY then DEEPSEEK_KEY, stripping quotes', () => {
+  assert.equal(deepseekToken({ DEEPSEEK_API_KEY: '  "sk-abc"  ' }), 'sk-abc');
+  assert.equal(deepseekToken({ DEEPSEEK_KEY: 'sk-def' }), 'sk-def');
+  assert.equal(deepseekToken({}), '');
+});
+
+test('parseLimitProviders includes DeepSeek in the default provider set', () => {
+  assert.ok(parseLimitProviders().includes('deepseek'));
+});
+
+test('selectFundedRow prefers the largest funded row, tie -> USD', () => {
+  const rows = [
+    { currency: 'CNY', total_balance: '4.61', topped_up_balance: '4.61' },
+    { currency: 'USD', total_balance: '0.00', topped_up_balance: '0.00' }
+  ];
+  const sel = selectFundedRow(rows);
+  assert.equal(sel.currency, 'CNY');
+  assert.equal(sel.amount, 4.61);
+  assert.equal(sel.paid, 4.61);
+});
+
+test('selectFundedRow falls back to USD then first when nothing is funded', () => {
+  const sel = selectFundedRow([
+    { currency: 'CNY', total_balance: '0', topped_up_balance: '0' },
+    { currency: 'USD', total_balance: '0', topped_up_balance: '0' }
+  ]);
+  assert.equal(sel.currency, 'USD');
+  assert.equal(sel.amount, 0);
+});
+
+test('fetchDeepSeekLimits returns notConfigured when no key', async () => {
+  const r = await fetchDeepSeekLimits({}, { env: {} });
+  assert.equal(r.provider, 'deepseek');
+  assert.equal(r.status, 'notConfigured');
+  assert.equal(r.source, 'api');
+  assert.equal(r.balance, null);
+});
+
+test('fetchDeepSeekLimits returns ok with balance + spend, never leaks the key', async () => {
+  const io = memStoreDeps();
+  const t0 = new Date(2026, 5, 7, 8, 0, 0).getTime();
+  const t1 = new Date(2026, 5, 7, 9, 0, 0).getTime();
+  const env = { DEEPSEEK_API_KEY: 'sk-secret-123' };
+  const deepseekStorePath = '/tmp/ds.json';
+
+  await fetchDeepSeekLimits({}, {
+    env, deepseekStorePath, now: () => t0,
+    fetch: async () => balanceResponse([{ currency: 'CNY', total_balance: '10.00', topped_up_balance: '10.00' }]),
+    ...io
+  });
+  const r = await fetchDeepSeekLimits({}, {
+    env, deepseekStorePath, now: () => t1,
+    fetch: async () => balanceResponse([{ currency: 'CNY', total_balance: '7.00', topped_up_balance: '7.00' }]),
+    ...io
+  });
+
+  assert.equal(r.status, 'ok');
+  assert.equal(r.balance.currency, 'CNY');
+  assert.equal(r.balance.amount, 7);
+  assert.equal(r.balance.todaySpend, 3);
+  assert.equal(r.balance.weekSpend, 3);
+  assert.equal(r.balance.allTimeSpend, 3);
+  assert.equal(r.balance.trackingSince, new Date(t0).toISOString());
+  assert.match(r.accountKey, /^sha256:/);
+  assert.ok(!JSON.stringify(r).includes('sk-secret-123'));
+});
+
+test('fetchDeepSeekLimits migrates the legacy default store into the versioned path', async () => {
+  const sharedDir = path.join('shared', 'deepseek');
+  const versionedPath = path.join(sharedDir, 'deepseek-balance-v2.json');
+  const legacyPath = path.join(sharedDir, 'deepseek-balance.json');
+  const files = { [legacyPath]: {} };
+  const reads = [];
+  const writes = [];
+  const r = await fetchDeepSeekLimits({}, {
+    env: {
+      DEEPSEEK_API_KEY: 'sk-migrate',
+      TOKEN_MONITOR_SHARED_DIR: sharedDir
+    },
+    now: () => new Date(2026, 5, 7, 8, 0, 0).getTime(),
+    fetch: async () => balanceResponse([
+      { currency: 'CNY', total_balance: '4.61', topped_up_balance: '4.61' }
+    ]),
+    readJson: (filePath, fallback) => {
+      reads.push(filePath);
+      return Object.hasOwn(files, filePath)
+        ? JSON.parse(JSON.stringify(files[filePath]))
+        : fallback;
+    },
+    writeJsonAtomic: (filePath, value) => {
+      files[filePath] = JSON.parse(JSON.stringify(value));
+      writes.push(filePath);
+    }
+  });
+
+  assert.equal(r.status, 'ok');
+  assert.deepEqual(reads, [versionedPath, legacyPath]);
+  assert.deepEqual(writes, [versionedPath]);
+  assert.deepEqual(files[legacyPath], {});
+});
+
+test('fetchDeepSeekLimits prefers the widget settings API key over env fallback', async () => {
+  let authorization = '';
+  const r = await fetchDeepSeekLimits(
+    { deepseekApiKey: " 'sk-settings' " },
+    {
+      env: { DEEPSEEK_API_KEY: 'sk-env' },
+      deepseekStorePath: '/tmp/ds-settings.json',
+      fetch: async (_url, init) => {
+        authorization = init.headers.Authorization;
+        return balanceResponse([{ currency: 'USD', total_balance: '2.50', topped_up_balance: '2.50' }]);
+      },
+      ...memStoreDeps()
+    }
+  );
+
+  assert.equal(r.status, 'ok');
+  assert.equal(authorization, 'Bearer sk-settings');
+  assert.ok(!JSON.stringify(r).includes('sk-settings'));
+});
+
+test('fetchDeepSeekLimits maps HTTP 401 to unauthorized', async () => {
+  const r = await fetchDeepSeekLimits({}, {
+    env: { DEEPSEEK_API_KEY: 'sk-x' },
+    deepseekStorePath: '/tmp/ds2.json',
+    fetch: async () => ({ ok: false, status: 401, json: async () => ({}) }),
+    ...memStoreDeps()
+  });
+  assert.equal(r.status, 'unauthorized');
+});
+
+test('a failed DeepSeek read stays on its account, apart from another device\'s account', async () => {
+  const read = (key, response) => fetchDeepSeekLimits({}, {
+    env: { DEEPSEEK_API_KEY: key },
+    deepseekStorePath: `/tmp/ds-${key}.json`,
+    fetch: async () => response,
+    ...memStoreDeps()
+  });
+  const ok = await read('sk-a', balanceResponse([{ currency: 'USD', total_balance: '5.00', topped_up_balance: '5.00' }]));
+  const rejected = await read('sk-b', { ok: false, status: 401, json: async () => ({}) });
+  const sameKeyFailure = await read('sk-a', { ok: false, status: 500, json: async () => ({}) });
+  assert.equal(rejected.status, 'unauthorized');
+  assert.match(rejected.accountKey, /^sha256:/);
+  assert.notEqual(rejected.accountKey, ok.accountKey);
+  assert.equal(sameKeyFailure.accountKey, ok.accountKey);
+
+  const devices = [{ deviceId: 'a', limits: { providers: [ok] } }, { deviceId: 'b', limits: { providers: [rejected] } }];
+  const rows = aggregateLimits(devices, 0, Date.now()).providers;
+  assert.deepEqual(rows.map((row) => [row.accountKey, row.status]).sort(),
+    [[ok.accountKey, 'ok'], [rejected.accountKey, 'unauthorized']].sort());
+  assert.equal(rows.some((row) => JSON.stringify(row).includes('sk-')), false);
+});
+
+test('fetchDeepSeekLimits keeps HTTP 403 as unavailable', async () => {
+  const r = await fetchDeepSeekLimits({}, {
+    env: { DEEPSEEK_API_KEY: 'sk-x' },
+    deepseekStorePath: '/tmp/ds-403.json',
+    fetch: async () => ({ ok: false, status: 403, json: async () => ({}) }),
+    ...memStoreDeps()
+  });
+  assert.equal(r.status, 'unavailable');
+});
+
+test('fetchDeepSeekLimits maps unexpected body shape to unavailable', async () => {
+  const r = await fetchDeepSeekLimits({}, {
+    env: { DEEPSEEK_API_KEY: 'sk-x' },
+    deepseekStorePath: '/tmp/ds3.json',
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({ nope: true }) }),
+    ...memStoreDeps()
+  });
+  assert.equal(r.status, 'unavailable');
+});
+
+test('fetchDeepSeekLimits exposes the balance as a credits window', async () => {
+  const provider = await fetchDeepSeekLimits({}, {
+    env: { DEEPSEEK_API_KEY: 'sk-secret-123' },
+    deepseekStorePath: '/tmp/ds-credits-window.json',
+    now: () => new Date(2026, 6, 26, 8, 0, 0).getTime(),
+    fetch: async () => balanceResponse([
+      { currency: 'CNY', total_balance: '4.00', topped_up_balance: '4.00' }
+    ]),
+    ...memStoreDeps()
+  });
+
+  assert.equal(provider.status, 'ok');
+  assert.equal(provider.windows.length, 1);
+  const [window] = provider.windows;
+  assert.equal(window.kind, 'billing');
+  assert.equal(window.metric, 'credits');
+  assert.equal(window.label, 'Balance');
+  assert.equal(window.remaining, 4);
+  assert.equal(window.currency, 'CNY');
+  assert.equal(window.showMeter, true);
+  // The derived percentage is display-only and must never reach the wire.
+  assert.equal(window.usedPercent, null);
+  assert.equal(window.remainingPercent, null);
+  // The balance block is untouched.
+  assert.equal(provider.balance.amount, 4);
+  assert.equal(provider.balance.currency, 'CNY');
+});
+
+// fetchJson's abort timer has to outlive the body read. A head-then-stall response is
+// otherwise bounded only by the outer probe deadline, two orders of magnitude later.
+test('fetchDeepSeekLimits bounds a body that stalls after the headers', { timeout: 5000 }, async () => {
+  const r = await fetchDeepSeekLimits({}, {
+    env: { DEEPSEEK_API_KEY: 'sk-test' },
+    now: () => Date.parse('2026-06-25T00:00:00.000Z'),
+    fetchTimeoutMs: 10,
+    fetch: async (_url, init) => ({
+      ok: true,
+      status: 200,
+      json: () => new Promise((_resolve, reject) => {
+        init.signal.addEventListener('abort', () => {
+          const error = new Error('aborted');
+          error.name = 'AbortError';
+          reject(error);
+        }, { once: true });
+      })
+    })
+  });
+  assert.equal(r.status, 'unavailable');
+});
+
+test('console Search is optional, retries failures and expires at month changes', async () => {
+  let now = new Date(2026, 6, 31, 23, 50).getTime();
+  let calls = 0;
+  let consoleRow = {
+    series: [
+      { model: 'tool-search', buckets: [{ cost: '1' }] },
+      { model: 'tool-search', buckets: [{ cost: 2 }] },
+      { model: 'tool-fetch', buckets: [{ cost: 0.02 }] },
+      { model: 'deepseek-chat', buckets: [{ cost: 9 }] }
+    ]
+  };
+  const options = { deepseekWebToken: 'Authorization: Bearer console-token' };
+  const deps = {
+    env: { DEEPSEEK_API_KEY: 'sk-balance' },
+    now: () => now, providerRuntimeState: new Map(), ...memStoreDeps(),
+    fetch: async (url, init) => {
+      if (new URL(url).hostname !== 'platform.deepseek.com') return balanceResponse([{ currency: 'CNY', total_balance: '10', topped_up_balance: '10' }]);
+      assert.equal(init.headers.Authorization, 'Bearer console-token');
+      const query = new URL(String(url)).searchParams;
+      calls += 1;
+      return { ok: true, json: async () => ({
+        code: 0, data: { biz_code: calls === 1 ? 1 : 0, biz_data: {
+          start: +query.get('start'), end: +query.get('end'),
+          data: [{ currency: 'CNY', ...consoleRow }]
+        } }
+      }) };
+    }
+  };
+  const failed = await fetchDeepSeekLimits(options, deps);
+  assert.equal(failed.balance.amount, 10);
+  assert.equal(failed.balance.searchSpend, undefined);
+  const provider = await fetchDeepSeekLimits(options, deps);
+  assert.equal(provider.balance.searchSpend, 3);
+  assert.equal(provider.balance.fetchSpend, 0.02);
+  assert.equal(provider.balance.monthSpend, 0);
+  await fetchDeepSeekLimits(options, deps);
+  assert.equal(calls, 2);
+  // A new month bypasses the cached total; an empty `series` falls back to `function_series`.
+  now += 20 * 60_000;
+  consoleRow = { series: [], function_series: [{ model: 'server-tool-search', buckets: [{ cost: 0.4 }] }] };
+  assert.equal((await fetchDeepSeekLimits(options, deps)).balance.searchSpend, 0.4);
+});
+
+test('console month query starts at local midnight in a non-hour offset', async (t) => {
+  const previous = process.env.TZ;
+  t.after(() => { if (previous === undefined) delete process.env.TZ; else process.env.TZ = previous; });
+  process.env.TZ = 'Asia/Kolkata';
+  let query;
+  await fetchDeepSeekLimits({ deepseekApiKey: 'sk-balance', deepseekWebToken: 'console-token' }, {
+    env: {}, now: () => Date.parse('2026-11-01T00:15:00+05:30'), ...memStoreDeps(),
+    fetch: async (url) => {
+      if (new URL(url).hostname === 'platform.deepseek.com') query = new URL(url).searchParams;
+      return balanceResponse([{ currency: 'CNY', total_balance: '10', topped_up_balance: '10' }]);
+    }
+  });
+  assert.equal(Number(query.get('start')), Date.parse('2026-11-01T00:00:00+05:30') / 1000);
+});
