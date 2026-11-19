@@ -97,13 +97,14 @@ function iconKindFor(rowData, breakdown) {
 
 const LIMIT_PROVIDER_ACCOUNT_NODES = {
   codex: { group: 'codexAccountGroup', status: 'codexAccountStatus' },
-  opencode: { group: 'opencodeCookieGroup', status: 'opencodeCookieStatus', localSummary: true },
-  cursor: { group: 'cursorAccountGroup', status: 'cursorAccountStatus', localSummary: true },
-  antigravity: { group: 'antigravityAccountGroup', status: 'antigravityAccountStatus', localSummary: true },
+  opencode: { group: 'opencodeCookieGroup', status: 'opencodeCookieStatus' },
+  cursor: { group: 'cursorAccountGroup', status: 'cursorAccountStatus' },
+  antigravity: { group: 'antigravityAccountGroup', status: 'antigravityAccountStatus' },
   mimo: { group: 'mimoAccountGroup', status: 'mimoAccountStatus' },
-  workbuddy: { group: 'workbuddyAccountGroup', status: 'workbuddyAccountStatus', localSummary: true },
+  workbuddy: { group: 'workbuddyAccountGroup', status: 'workbuddyAccountStatus' },
+  // The only header still summarising this device; the others count every device's accounts.
   minimax: { group: 'minimaxAccountGroup', status: 'minimaxStatus', localSummary: true },
-  thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus', localSummary: true }
+  thirdparty: { group: 'thirdpartyAccountGroup', status: 'thirdpartyStatus' }
 };
 const TRAY_ICON_VARIANTS = [
   { id: 'claude-brand', label: 'Claude', after: 'claude' },
@@ -12994,7 +12995,7 @@ function renderLimitProviderCheckboxesNow() {
       accountStatus.classList.toggle('hidden', !isEnabled);
       // Provider-owned login summaries describe this device. Keep a local
       // failure visible even if a different device can still supply quota.
-      if (localId && (id === 'claude' || LIMIT_PROVIDER_ACCOUNT_NODES[id]?.localSummary) && remoteProviders.has(id)) {
+      if (localId && LIMIT_PROVIDER_ACCOUNT_NODES[id]?.localSummary && remoteProviders.has(id)) {
         const scope = t('settings.sync.panel.thisDevice');
         accountStatus.dataset.localScope = scope;
         accountStatus.setAttribute('aria-description', scope);
@@ -15777,15 +15778,11 @@ function renderStatsUpdate() {
   render();
   if (!isSettingsSurfaceVisible()) return;
   preserveSettingsPanelScroll(() => {
-    renderCodexAccounts();
-    renderMimoStatus();
-    renderWorkbuddyStatus();
+    refreshAccountOwnerReadings();
     renderSettingsSummaries();
     renderLimitProviderCheckboxes();
     renderToolPreferences();
     renderWslPanel();
-    updateMinimaxApiKeysStatus();
-    updateThirdPartyProfilesStatus();
     renderExternalProviderStatus('volcengine');
     renderExternalProviderStatus('kimi');
     for (const form of state.settings?.limitAccountForms || []) {
@@ -17432,7 +17429,7 @@ function renderExternalProviderStatus(providerName) {
   }
   if (!retained && statusEl && limitAccountForm(providerName)?.accountSlots && !limitAccountForm(providerName)?.accountSlotOwner) {
     const summary = accountSlotPanels.get(providerName)?.summary();
-    setCursorStatusText(statusEl, summary?.total ? t('settings.opencode.connected', summary) : t(limitAccountForm(providerName).emptyKey));
+    setCursorStatusText(statusEl, summary?.total ? t('settings.slots.connectedCount', summary) : t(limitAccountForm(providerName).emptyKey));
     return;
   }
   if (!config || !statusEl || !openBtn || !logoutBtn || !manualPanel || !errorEl) return;
@@ -17471,7 +17468,7 @@ function renderExternalProviderStatus(providerName) {
     : apiKeyAccountStatusText(providerName, statusProvider, configured, source, enabled);
   if (cliAccount && !pending) statusText = `CLI · ${statusText}`;
   setCursorStatusText(statusEl, providerName === 'claude' && !pending
-    ? claudeAccountStatusText(statusText, enabled) : statusText);
+    ? claudeAccountStatusText(statusText) : statusText);
   // A local ZCode install keeps the Z.ai row honest when unchecked: the
   // auto-discovered plans still exist, so the pill shows auto-detect instead
   // of the final "disabled" state the generic seven-state map lands on.
@@ -17551,12 +17548,10 @@ function renderOpenCodeProfiles(...args) { return legacyAccountOwners.opencode.r
 
 
 
-function updateMinimaxApiKeysStatus(...args) { return legacyAccountOwners.minimax.updateMinimaxApiKeysStatus(...args); }
 
 
 
 
-function updateThirdPartyProfilesStatus(...args) { return legacyAccountOwners.thirdparty.updateThirdPartyProfilesStatus(...args); }
 
 
 
@@ -17568,6 +17563,14 @@ function renderMinimaxApiKeys(...args) { return legacyAccountOwners.minimax.rend
 function renderThirdPartyProfiles(...args) { return legacyAccountOwners.thirdparty.renderThirdPartyProfiles(...args); }
 
 function renderCursorStatus(...args) { return legacyAccountOwners.cursor.renderCursorStatus(...args); }
+
+// Every quota push reaches every account owner through one interface, so no
+// owner's rows or header can keep the status they had before a refresh
+// answered. Claude is the exception: its rows are derived from the readings,
+// so renderExternalProviderStatus('claude') rebuilds them with its header.
+function refreshAccountOwnerReadings() {
+  for (const owner of Object.values(legacyAccountOwners)) owner.refreshReadings?.();
+}
 
 
 

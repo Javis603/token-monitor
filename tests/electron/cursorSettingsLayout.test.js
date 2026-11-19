@@ -207,8 +207,10 @@ test('Hub secret input stays masked and exposes an accessible paste button', () 
 
 test('Cursor account header uses the shared linked-account summary', () => {
   const body = functionBody(readRendererOwner('cursor'), 'renderCursorStatus', 'refreshCursorStatus');
-  assert.match(body, /t\('settings\.cursor\.connected', \{ linked: accounts\.filter\(account => sourceSelected\(account\) && account\.enabled && !account\.expired && !account\.error\)\.length, total: accounts\.length \}\)/);
-  assert.match(body, /setCursorStatusText\(statusEl, summary\);/);
+  // The common list writes the count from its own rows; a failed or pending
+  // status check keeps its own message instead.
+  assert.match(body, /status: \{ element: \(\) => document\.getElementById\('cursorAccountStatus'\), empty: \(\) => t\('settings\.cursor\.notLoggedIn'\),\s*active: \(\) => !state\.cursorAccount\.error && Boolean\(state\.cursorAccount\.status\) \}/);
+  assert.doesNotMatch(body, /accountList\.summary\(\)/);
   assert.doesNotMatch(body, /status\.email|billingCycleEnd|billingResets|selectedAccountId/);
 });
 
@@ -415,7 +417,7 @@ test('OpenCode disabled profiles still count in the account summary', () => {
   // The auto-detected credential counts too: it is the account the limits card
   // is reading, so excluding it reports "not set up" next to live quota.
   assert.match(renderBody, /state\.opencodeProfileCount = entries\.length \+ \(hasAmbientKey \? 1 : 0\);/);
-  assert.match(renderBody, /\{ profiles, hasEnvVar, hasAmbientKey, ambientEnabled = true \}/);
+  assert.match(renderBody, /\{ profiles, hasEnvVar, environmentAccountKey = '', hasAmbientKey, ambientEnabled = true \}/);
   // Switching the auto-detected account off is a device preference, not a stored
   // credential, so its row keeps rendering with the box clear rather than
   // vanishing along with the only control that could switch it back on.
@@ -477,16 +479,11 @@ test('OpenCode disabled profiles still count in the account summary', () => {
   assert.match(renderBody, /updateOpenCodeProfilesStatus\(\);/);
   assert.doesNotMatch(renderBody, /if \(toggle\.checked\) updateOpenCodeProfilesStatus\(\)/);
 
-  const statusBody = functionBody(app, 'updateOpenCodeProfilesStatus') + functionBody(app, 'renderOpenCodeProfilesStatusSummary');
-  assert.match(statusBody, /const configuredProfileCount = state\.opencodeProfileCount \|\| 0;/);
-  // The auto-detected account arrives in its own field, so both halves of the
-  // summary have to include it or a zero-config machine reports "0/0" beside
-  // live quota.
-  assert.match(statusBody, /if \(status\.ambient\) entries\.push\(\['opencodeAmbientInfo', status\.ambient\]\)/);
-  assert.match(statusBody, /renderOpenCodeProfilesStatusSummary\(profiles, status\.ambient\)/);
-  assert.match(statusBody, /const statuses = \[\.\.\.Object\.values\(profiles\), \.\.\.\(ambient \? \[ambient\] : \[\]\)\];/);
-  assert.match(statusBody, /Math\.max\(statuses\.length, configuredProfileCount\)/);
-  assert.match(statusBody, /t\('settings\.opencode\.connected', \{ linked: linkedCount, total: totalCount \}\)/);
+  // The header counts the common list's rows, and that list carries the
+  // auto-detected key and paused profiles, so neither drops out of the total.
+  assert.match(renderBody, /\.\.\.\(hasAmbientKey \? \[\{ id: 'ambient:', source: 'ambient'/);
+  assert.match(renderBody, /enabled: profile\.enabled \}\)\)/);
+  assert.match(renderBody, /status: \{\s*element: \(\) => document\.getElementById\('opencodeCookieStatus'\),\s*empty: \(\) => t\('settings\.opencode\.statusNotSet'\),/);
 });
 
 test('OpenCode profile deletion clears the legacy default cookie when it owns the profile', () => {

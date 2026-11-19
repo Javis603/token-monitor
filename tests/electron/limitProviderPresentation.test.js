@@ -7,7 +7,6 @@ const test = require('node:test');
 const { rendererStyles } = require('../helpers/rendererStyles');
 const vm = require('node:vm');
 const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
-const accountShellApi = require('../../src/electron/renderer/limits/accountShell');
 const compactTokenApi = require('../../src/shared/compactTokens');
 const { matchProviderAccount, needsRebinding, normalizeSubscriptions } = require('../../src/shared/subscriptionDisplay');
 const { aggregateLimits } = require('../../src/shared/limits/core');
@@ -590,8 +589,11 @@ test('named API profile rows hide global disablement while the group preserves c
   assert.match(updater, /const providerEnabled = limitProviderEnabled\(providerId\)/);
   assert.match(updater, /statusText\(byName\.get\(name\), \{\s*providerEnabled,\s*profileEnabled: profile\?\.enabled !== false\s*\}\)/);
   assert.match(updater, /statusText\(byName\.get\('environment'\), \{ providerEnabled \}\)/);
-  assert.match(updater, /!providerEnabled\s*\? t\(`settings\.\$\{providerId\}\.nAccounts`, \{ count: total \}\)/);
-  assert.match(updater, /: t\(`settings\.\$\{providerId\}\.connected`, \{ linked, total \}\)/);
+  // The group header belongs to the common list, which keeps the configured
+  // count, rather than "0 connected", while the provider is switched off.
+  assert.doesNotMatch(updater, /Status`\)/);
+  assert.match(app, /!limitProviderEnabled\(providerId\) \? t\(`settings\.\$\{providerId\}\.nAccounts`, \{ count: summary\.total \}\)/);
+  assert.match(app, /: t\('settings\.slots\.connectedCount', summary\) \}/);
 });
 
 test('named API profile toggles keep the saved account after rejected persistence', async () => {
@@ -1967,7 +1969,7 @@ test('settings provider status waits for stats and refreshes when stats arrive',
   assert.match(statsPush, /applyCodexActiveAccountFromStats\(\);/);
   assert.match(statsPush, /statsRenderScheduler\.request\(\);/);
   assert.match(statsRender, /renderLimitProviderCheckboxes\(\);/);
-  assert.match(statsRender, /renderCodexAccounts\(\);/);
+  assert.match(statsRender, /refreshAccountOwnerReadings\(\);/);
   // Account cards read state.stats, so every path that refreshes stats must
   // re-render them. Grok is automatic and belongs only to the generic provider
   // list, so it must not retain a separate account-card renderer.
@@ -2191,6 +2193,10 @@ test('AI Tool Limits owns every live account group and its status pill', () => {
     assert.match(html, new RegExp(`id="${groupId}"`));
     assert.match(html, new RegExp(`id="${statusId}"[^>]*class="cursor-status-pill`));
   }
+  // Headers that count every device's accounts must not be described as this
+  // device's; only MiniMax still summarises the local reading.
+  assert.deepEqual([...accountNodes.matchAll(/(\w+): \{[^}]*localSummary: true/g)].map(match => match[1]), ['minimax']);
+  assert.doesNotMatch(app, /id === 'claude' \|\| LIMIT_PROVIDER_ACCOUNT_NODES\[id\]\?\.localSummary/);
   assert.match(html, /id="accountsSettingsDetails" class="hidden" aria-hidden="true"/);
   assert.doesNotMatch(html, /data-settings-section="accounts"/);
   // Account-form providers have no static markup: their group and pill resolve
@@ -2516,22 +2522,8 @@ test('overlapping failures preserve the latest toggle, then fall back to a newer
 test('empty OpenCode profiles retain the shared list and refresh a localized summary', () => {
   const app = readRendererFile('limits/providerOwners/opencode.js');
   const renderProfiles = functionBody(app, 'renderOpenCodeProfiles', 'updateOpenCodeProfilesStatus');
-  const renderSummary = functionBody(app, 'renderOpenCodeProfilesStatusSummary', 'thirdPartyProfileStatusText');
-  const totalEl = { textContent: 'Not configured', setAttribute(name, value) { this[name] = value; } };
-  const context = {
-    document: {
-      getElementById(id) {
-        return id === 'opencodeCookieStatus' ? totalEl : null;
-      }
-    },
-    state: { opencodeProfileCount: 0 },
-    accountShellApi,
-    t: (key, params) => params ? `${key}:${params.linked}/${params.total}` : `localized:${key}`
-  };
-
-  runViewFixture(`${renderSummary}\nrenderOpenCodeProfilesStatusSummary({});`, context);
-
-  assert.equal(totalEl.textContent, 'localized:settings.opencode.statusNotSet');
+  // The common list writes the header, including its localized empty state.
+  assert.match(renderProfiles, /empty: \(\) => t\('settings\.opencode\.statusNotSet'\)/);
   assert.match(renderProfiles, /state\.opencodeProfileCount = entries\.length \+ \(hasAmbientKey \? 1 : 0\);/);
   assert.match(renderProfiles, /accountList\.update\([\s\S]*updateOpenCodeProfilesStatus\(\);/);
   assert.doesNotMatch(renderProfiles, /if \(entries\.length === 0[\s\S]*?return;/);

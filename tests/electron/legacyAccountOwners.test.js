@@ -214,7 +214,7 @@ test('OpenCode owner forwards explicit profile and ambient DTO identities to the
     status: async () => ({ profiles: {} }) };
   const owner = create({ initial: {}, getSettings: () => ({}), document: {
     getElementById: id => id === 'opencodeProfileList' ? list : null, createElement: node },
-    window: { tokenMonitor: { opencode: api }, TokenMonitorLegacyAccountList: { create: () => ({ update(rows) { saved = rows; } }) } },
+    window: { tokenMonitor: { opencode: api }, TokenMonitorLegacyAccountList: { create: () => ({ update(rows) { saved = rows; }, summary: () => ({ total: saved?.length || 0, linked: 0 }) }) } },
     isSettingsSurfaceVisible: () => true, renderAccountShellError() {},
     accountProfileRequests: { begin: () => () => true }, accountProfileStatuses: { retire() {}, begin: () => () => true },
     t: key => key, encodeURIComponent, renderSettingsSummaries() {}, localProviderStatuses: () => [] });
