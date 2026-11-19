@@ -4954,12 +4954,22 @@ function setLimitProbes(probes, local = settingsLocalLimits) {
   // Settings account rows without a reading say "Checking" while a probe for
   // them runs, so a probe starting or finishing repaints its provider's rows.
   if (isSettingsSurfaceVisible()) {
-    const changed = new Set([...previous, ...limitProbes].map(probe => probe?.provider));
+    const changed = new Set();
+    const collectChanges = (before, after, sourceChanged = false) => {
+      const previousByProvider = Map.groupBy(before, row => row?.provider);
+      const nextByProvider = Map.groupBy(after, row => row?.provider);
+      for (const id of new Set([...previousByProvider.keys(), ...nextByProvider.keys()])) {
+        if (sourceChanged || JSON.stringify(previousByProvider.get(id)) !== JSON.stringify(nextByProvider.get(id))) {
+          changed.add(id);
+        }
+      }
+    };
+    collectChanges(previous, limitProbes);
     if (previousLocal?.revision !== local?.revision) {
-      for (const row of previousLocal?.limits.providers || []) changed.add(row.provider);
-      for (const row of local?.limits.providers || []) changed.add(row.provider);
+      collectChanges(previousLocal?.limits.providers || [], local?.limits.providers || [],
+        previousLocal?.deviceId !== local?.deviceId);
     }
-    preserveSettingsPanelScroll(() => {
+    if (changed.size) preserveSettingsPanelScroll(() => {
       for (const [id, panel] of accountSlotPanels) {
         if (!changed.has(id)) continue;
         panel.update(accountSlotLists[id] || [], localProviderStatuses(id), limitAccountContext(id));
