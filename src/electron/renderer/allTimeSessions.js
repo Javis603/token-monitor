@@ -82,8 +82,96 @@
     return { attach, ensure, invalidate, loaded };
   }
 
+  function attachPeriodDetails(stats, details) {
+    const periods = { ...stats.periods };
+    const nativeSessions = { ...stats.nativeSessions };
+    const nativeProjects = { ...stats.nativeProjects };
+    for (const [period, detail] of Object.entries(details)) {
+      if (!periods[period]) continue;
+      const { nativeSessions: sessions, nativeProjects: projects, ...accounting } = detail;
+      periods[period] = { ...periods[period], ...accounting };
+      if (sessions) nativeSessions[period] = sessions;
+      if (projects) nativeProjects[period] = projects;
+    }
+    return { ...stats, periods, nativeSessions, nativeProjects };
+  }
+
+  function applyPeriodDetailPatch(details, patch) {
+    if (!patch.length) return details;
+    const next = { ...details };
+    for (const [period, field, replacements] of patch) {
+      next[period] = { ...next[period], [field]: { ...next[period][field], ...replacements } };
+    }
+    return next;
+  }
+
+  function createPeriodDetailsLoader({ current, fetchDetails, onLoaded, onError }) {
+    let active = null;
+    let cached = null;
+    let pending = false;
+    let epoch = 0;
+
+    function matches(target, request = active) {
+      return Boolean(target?.snapshot && request && request.epoch === epoch
+        && target.scope === request.scope && target.snapshot.id === request.snapshot.id
+        && sameSource(target.snapshot, request.snapshot));
+    }
+
+    function ensure() {
+      const target = current();
+      if (!target || pending || matches(target)) return;
+      const known = cached?.scope === target.scope && sameSource(cached.snapshot, target.snapshot) ? cached : null;
+      const request = { ...target, epoch, details: null, failed: false };
+      active = request;
+      pending = true;
+      Promise.resolve()
+        .then(() => fetchDetails(request.snapshot, request.scope, known?.revision))
+        .then((reply) => {
+          if (!matches(current(), request)) {
+            active = null;
+            return;
+          }
+          request.details = reply?.details;
+          if (known && reply?.baseRevision === known.revision) {
+            request.details = applyPeriodDetailPatch(known.details, reply.patch);
+          }
+          request.failed = !request.details;
+          if (request.details) cached = { ...request, revision: reply.revision };
+          onLoaded();
+        }, (error) => {
+          if (!matches(current(), request)) {
+            active = null;
+            return;
+          }
+          request.failed = true;
+          onError(error);
+          onLoaded();
+        })
+        .finally(() => {
+          pending = false;
+          ensure();
+        });
+    }
+
+    return {
+      ensure,
+      invalidate() {
+        epoch += 1;
+        cached = null;
+      },
+      ready() { return matches(current()) && Boolean(active.details); },
+      failed() { return matches(current()) && active.failed; },
+      attach(stats) {
+        const target = current();
+        return target && matches({ ...target, snapshot: stats?.snapshot }) && active.details
+          ? attachPeriodDetails(stats, active.details) : stats;
+      }
+    };
+  }
+
   return {
     createAllTimeSessionsLoader,
+    createPeriodDetailsLoader,
     withAllTimeSessions
   };
 });

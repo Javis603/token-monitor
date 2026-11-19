@@ -5610,12 +5610,16 @@ function toggleDetailSort() {
   if (state.openSession && state.openSession.detail) renderSessionDetail({ detail: state.openSession.detail });
 }
 
-function closeSessionDetail() {
+function clearSessionDetail() {
   state.openSession = null;
   els.sessionDetail.classList.add('hidden');
   rendererDom.clear(els.sessionDetail);
   els.sessionDetailHead.classList.add('hidden');
   rendererDom.clear(els.sessionDetailHead);
+}
+
+function closeSessionDetail() {
+  clearSessionDetail();
   render();
 }
 
@@ -7168,6 +7172,7 @@ function stopHomeSessionRepaint() {
 
 function scheduleHomeSessionRepaint(rows) {
   stopHomeSessionRepaint();
+  if (state.stats?.detailOnDemand && !periodDetails.ready()) return;
   rows ||= window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
   if (!rows.length) return;
   const now = Date.now();
@@ -7922,6 +7927,15 @@ function renderHome() {
     if (id === 'device') return renderHomeDeviceModule();
     if (id === 'model') return renderHomeModelModule(period);
     if (id === 'session') {
+      if (state.stats.detailOnDemand && !periodDetails.ready()) {
+        periodDetails.ensure();
+        const current = els.homePanel.querySelector('.home-module-session');
+        if (current && renderedHomeDetailSource === state.stats.snapshot?.source) return current;
+        const { module, body } = homeModuleShell('session', t('home.sessions'), 'session');
+        body.textContent = t(periodDetails.failed() ? 'sessions.incomplete' : 'plugins.view.loading');
+        return module;
+      }
+      renderedHomeDetailSource = state.stats.snapshot?.source;
       sessionRows = window.TokenMonitorEdgeDockPresentation.recentSessionRows(state.stats, homeModulePreferencesApi.homeModuleCount(state.settings, 'session'), { ...sessionPresentationOptions(), includeRunningBeyondCap: true });
       return renderHomeSessionModule(sessionRows);
     }
@@ -7932,7 +7946,7 @@ function renderHome() {
     const next = nodes[index];
     if (next.dataset.pluginRef) continue;
     const current = [...els.homePanel.children].find(node => node.classList.contains(`home-module-${moduleIds[index]}`));
-    nodes[index] = rendererDom.reconcile(current, next);
+    if (current !== next) nodes[index] = rendererDom.reconcile(current, next);
   }
   // Reconcile siblings without detaching retained plugin controls. Collector
   // pushes must not discard focused drafts or cancel captured drawing gestures.
@@ -7987,6 +8001,18 @@ function setRendererSettings(next) {
     // when re-enabled, even if no new usage snapshot has arrived.
     allTimeSessions.invalidate();
     allTimeSessions.ensure();
+    if (state.stats?.detailOnDemand) {
+      periodDetails.invalidate();
+      renderedHomeDetailSource = undefined;
+      renderedPeriodDetailView = '';
+      if (next.sessionTitlesEnabled === false) {
+        els.homePanel.querySelector('.home-module-session')?.remove();
+        if (state.breakdown === 'session') {
+          els.breakdown.replaceChildren();
+          if (state.openSession?.kind === 'session-group') closeSessionDetail();
+        }
+      }
+    }
   }
   if (titlesChanged) refreshSessionDetailHeading();
 }
@@ -8042,6 +8068,12 @@ function renderAppContent({ fromSearch = false } = {}) {
   }
   if (!state.stats) return;
   allTimeSessions.ensure();
+  syncPeriodDetailSource();
+  periodDetails.ensure();
+  if (periodDetails.ready() && state.stats !== statsWithPeriodDetails) {
+    state.stats = sessionStatsForDisplay(periodDetails.attach(state.stats));
+    statsWithPeriodDetails = state.stats;
+  }
   stopHomeSessionRepaint();
   stopSessionStatusRepaint();
   els.toolDetailFooter.classList.add('hidden');
@@ -8068,7 +8100,11 @@ function renderAppContent({ fromSearch = false } = {}) {
     state.fixedPeriodSnapshot = null;
   }
   if (state.openSession && state.breakdown !== 'session') { state.openSession = null; els.sessionDetail.classList.add('hidden'); rendererDom.clear(els.sessionDetail); els.sessionDetailHead.classList.add('hidden'); rendererDom.clear(els.sessionDetailHead); }
-  if (state.openSession) { els.sessionDetail.classList.remove('hidden'); els.sessionDetailHead.classList.remove('hidden'); } else { els.sessionDetail.classList.add('hidden'); els.sessionDetailHead.classList.add('hidden'); }
+  const awaitingGroupPeriod = state.stats.detailOnDemand && state.openSession?.kind === 'session-group'
+    && state.openSession.period !== state.period;
+  const showSessionDetail = Boolean(state.openSession) && !awaitingGroupPeriod;
+  els.sessionDetail.classList.toggle('hidden', !showSessionDetail);
+  els.sessionDetailHead.classList.toggle('hidden', !showSessionDetail);
   const period = state.stats.periods?.[state.period] || { totalTokens: 0, costUsd: 0, clients: {} };
   const { fixedUnavailable, detailUnavailable } = periodContentAvailability();
   if (fixedUnavailable || detailUnavailable) {
@@ -8126,6 +8162,39 @@ function renderAppContent({ fromSearch = false } = {}) {
   if (state.breakdown !== 'home') { hideHomeActivityTooltip(); hideHomeTrendTooltip(); }
   if (state.breakdown !== 'trends') hideTrendTooltip();
   if (state.breakdown === 'status') ensureServiceStatusTicker(); else stopServiceStatusTicker();
+  // Keep the Settings summaries live even when the underlying list is idle.
+  if (state.stats.detailOnDemand && isSettingsPanelOpen()
+    && (state.breakdown === 'session' || state.breakdown === 'project')) {
+    signalContentReady();
+    return;
+  }
+  const detailTarget = currentPeriodDetailTarget();
+  const detailView = detailTarget && detailTarget.scope !== 'home'
+    ? JSON.stringify([state.breakdown, detailTarget.scope, detailTarget.snapshot.source]) : '';
+  if (detailView && !periodDetails.ready()) {
+    const retainedListVisible = renderedPeriodDetailView === detailView && !els.breakdown.classList.contains('hidden');
+    if ((!state.openSession || awaitingGroupPeriod) && !retainedListVisible) {
+      els.sessionDetail.classList.add('hidden');
+      els.sessionDetailHead.classList.add('hidden');
+      els.sessionToolFilter.classList.add('hidden');
+      els.homePanel.classList.add('hidden');
+      els.limitsPanel.classList.add('hidden');
+      els.serviceStatusPanel?.classList.add('hidden');
+      els.trendsPanel.classList.add('hidden');
+      els.breakdown.classList.remove('hidden');
+      const hint = document.createElement('p');
+      hint.className = 'breakdown-incomplete-hint';
+      hint.setAttribute('role', 'status');
+      hint.textContent = t(periodDetails.failed() ? 'sessions.incomplete' : 'plugins.view.loading');
+      els.breakdown.replaceChildren(hint);
+      renderedPeriodDetailView = '';
+      state.rowSignature = '';
+      renderSessionPager(null);
+    }
+    signalContentReady();
+    return;
+  }
+  renderedPeriodDetailView = detailView;
   if (state.breakdown === 'home') {
     els.breakdown.classList.add('hidden');
     els.serviceStatusPanel?.classList.add('hidden');
@@ -8167,6 +8236,7 @@ function renderAppContent({ fromSearch = false } = {}) {
       const latest = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
       if (!latest) { closeSessionDetail(); return; }
       state.openSession.summary = latest;
+      state.openSession.period = state.period;
       // Update group readings while retaining the controls being read.
       renderSessionGroupDetail(state.openSession);
     }
@@ -14454,12 +14524,10 @@ for (const tab of document.querySelectorAll('.tab')) {
     syncPeriodTabs();
     if (state.openSession && fixedPeriodRangesApi.supportsBreakdown(state.period, 'session')) {
       if (state.openSession.kind === 'session-group') {
-        const period = state.stats?.periods?.[state.period];
-        const summary = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
-        if (summary) {
-          state.openSession = { kind: 'session-group', period: state.period, summary };
-        } else {
-          state.openSession = null;
+        if (!state.stats?.detailOnDemand || !currentPeriodDetailTarget()) {
+          const period = state.stats?.periods?.[state.period];
+          const summary = sessionRowsForPeriod(period).find((row) => row.key === state.openSession.summary.key);
+          state.openSession = summary ? { kind: 'session-group', period: state.period, summary } : null;
         }
       } else {
         openSessionDetail({ ...state.openSession, returnTo: null });
@@ -14542,6 +14610,7 @@ document.addEventListener('keydown', (event) => {
 
 els.breakdown.addEventListener('scroll', settleOffscreenBreakdownNumbers, { passive: true });
 els.breakdown.addEventListener('click', (event) => {
+  if (state.stats?.detailOnDemand && currentPeriodDetailTarget() && !periodDetails.ready()) return;
   if (state.breakdown !== 'session') return;
   const rowEl = event.target.closest('.row');
   if (!rowEl) return;
@@ -14604,6 +14673,7 @@ els.settingsButton.addEventListener('click', (event) => {
   }
   els.shell.classList.toggle('settings-open', settingsOpen);
   syncPluginLimitsDemand();
+  if (!settingsOpen && state.stats?.detailOnDemand) statsRenderScheduler.request();
   if (!settingsOpen && event.detail > 0) els.settingsButton.blur();
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
@@ -15817,6 +15887,34 @@ const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({
   },
   onError: (error) => console.log(`[stats] all-time sessions failed: ${error?.message || error}`)
 });
+let statsWithPeriodDetails;
+let periodDetailSource;
+function syncPeriodDetailSource() {
+  const source = state.stats.snapshot?.source;
+  if (periodDetailSource !== undefined && periodDetailSource !== source && state.openSession) clearSessionDetail();
+  periodDetailSource = source;
+}
+let renderedPeriodDetailView = '';
+let renderedHomeDetailSource;
+function currentPeriodDetailTarget() {
+  const stats = state.stats;
+  if (!stats?.detailOnDemand || !stats.snapshot || visibleStatsSurface() !== 'main' || isSettingsPanelOpen()) return null;
+  if (state.breakdown === 'home') return homeModuleIds().includes('session') ? { scope: 'home', snapshot: stats.snapshot } : null;
+  if ((state.breakdown === 'session' || state.breakdown === 'project')
+    && ['today', 'month', 'allTime'].includes(state.period)) {
+    return { scope: state.period, snapshot: stats.snapshot };
+  }
+  return null;
+}
+const periodDetails = allTimeSessionsApi.createPeriodDetailsLoader({
+  current: currentPeriodDetailTarget,
+  fetchDetails: (snapshot, scope, knownRevision) => window.tokenMonitor.getPeriodDetails(snapshot, scope, knownRevision),
+  onLoaded() {
+    statsWithPeriodDetails = null;
+    statsRenderScheduler.request();
+  },
+  onError: (error) => console.log(`[stats] period detail failed: ${error?.message || error}`)
+});
 function handleWindowVisibilityChange() {
   syncPluginLimitsDemand();
   syncPluginTrayDemand();
@@ -15875,6 +15973,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     }
     if (payload.data?.mode) state.mode = payload.data.mode;
     if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
+    if (payload.data.stats.detailOnDemand && payload.data?.reason === 'presentation') periodDetails.invalidate();
     allTimeSessions.invalidate();
     state.stats = sessionStatsForDisplay(allTimeSessions.attach(payload.data.stats));
     observeLiveTokenRate(state.stats);

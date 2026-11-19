@@ -341,3 +341,111 @@ test('main answers the archived count from the local record, not a composed snap
   assert.match(fs.readFileSync(path.join(electronDir, 'renderer', 'app.js'), 'utf8'), /clearSessionUsageArchive\(\);[\s\S]{0,300}archivedSessionCountCleared\(\);\s*await refreshStats\(\);/);
   assert.match(main, /sessionUsageArchiveStore\.clear\(\);[\s\S]{0,120}localArchivedSessionCount\.archiveCleared\(\);\s*return \{ ok: true \};/);
 });
+
+test('period detail is demand-only and rejects a late reply from another snapshot or view', async () => {
+  const { createPeriodDetailsLoader } = require('../../src/electron/renderer/allTimeSessions');
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const requests = [];
+  let target;
+  let renders = 0;
+  const loader = createPeriodDetailsLoader({
+    current: () => target,
+    fetchDetails: (snapshot, scope) => new Promise(resolve => requests.push({ snapshot, scope, resolve })),
+    onLoaded: () => { renders += 1; }
+  });
+  loader.ensure();
+  await settle();
+  assert.equal(requests.length, 0, 'overview has no detail demand');
+
+  target = { scope: 'home', snapshot: { id: 1, source: 1 } };
+  loader.ensure();
+  loader.ensure();
+  await settle();
+  assert.equal(requests.length, 1);
+
+  target = { scope: 'month', snapshot: { id: 2, source: 2 } };
+  requests[0].resolve({ today: { sessions: { stale: {} } } });
+  await settle();
+  assert.equal(renders, 0);
+  assert.deepEqual(requests[1].snapshot, target.snapshot);
+  assert.equal(requests[1].scope, 'month');
+  requests[1].resolve({ revision: 2, details: { month: { sessions: { current: {} }, nativeSessions: { native: {} } } } });
+  await settle();
+
+  const stats = { snapshot: target.snapshot, periods: { month: { totalTokens: 42 }, today: { totalTokens: 9 } } };
+  const attached = loader.attach(stats);
+  assert.equal(renders, 1);
+  assert.deepEqual(attached.periods.month, { totalTokens: 42, sessions: { current: {} } });
+  assert.equal(attached.periods.today, stats.periods.today);
+  assert.deepEqual(attached.nativeSessions.month, { native: {} });
+  assert.equal(stats.periods.month.sessions, undefined);
+
+  target = null;
+  loader.ensure();
+  assert.equal(loader.attach(stats), stats);
+  assert.equal(requests.length, 2);
+});
+
+test('period details carry forward an unchanged reply for a newer snapshot and forget it on invalidation', async () => {
+  const { createPeriodDetailsLoader } = require('../../src/electron/renderer/allTimeSessions');
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  let snapshot = { id: 1, source: 1 };
+  const details = { month: { sessions: { a: { totalTokens: 42 } } } };
+  const requests = [];
+  const loader = createPeriodDetailsLoader({
+    current: () => ({ snapshot, scope: 'month' }),
+    async fetchDetails(_snapshot, _scope, revision) {
+      requests.push(revision);
+      if (_snapshot.id === 3 && revision === 7) {
+        return { revision: 8, baseRevision: 7, patch: [['month', 'sessions', { a: { totalTokens: 43 } }]] };
+      }
+      return revision === 7 ? { revision: 7, baseRevision: 7, patch: [] } : { revision: 7, details };
+    },
+    onLoaded() {}
+  });
+  loader.ensure();
+  await settle();
+  snapshot = { id: 2, source: 1 };
+  loader.ensure();
+  await settle();
+  const stats = { snapshot, periods: { month: { totalTokens: 100 } } };
+  assert.equal(loader.attach(stats).periods.month.sessions, details.month.sessions);
+  assert.equal(loader.attach(stats).periods.month.totalTokens, 100);
+  snapshot = { id: 3, source: 1 };
+  loader.ensure();
+  await settle();
+  assert.equal(loader.attach({ ...stats, snapshot }).periods.month.sessions.a.totalTokens, 43);
+  assert.equal(details.month.sessions.a.totalTokens, 42, 'the original detail remains immutable');
+  loader.invalidate();
+  loader.ensure();
+  await settle();
+  snapshot = { id: 4, source: 2 };
+  loader.ensure();
+  await settle();
+  assert.deepEqual(requests, [undefined, 7, 7, undefined, undefined]);
+});
+
+test('period detail retries the same snapshot after the user closes Settings during a pending pull', async () => {
+  const { createPeriodDetailsLoader } = require('../../src/electron/renderer/allTimeSessions');
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  const target = { snapshot: { id: 1, source: 1 }, scope: 'month' };
+  let visible = true;
+  const requests = [];
+  const loader = createPeriodDetailsLoader({
+    current: () => visible ? target : null,
+    fetchDetails: () => new Promise(resolve => requests.push(resolve)),
+    onLoaded() {}
+  });
+  loader.ensure();
+  await settle();
+  visible = false;
+  requests[0]({ revision: 1, details: {} });
+  await settle();
+  visible = true;
+  loader.ensure();
+  await settle();
+  assert.equal(requests.length, 2);
+  requests[1]({ revision: 2, details: {} });
+  await settle();
+  assert.equal(loader.ready(), true);
+});

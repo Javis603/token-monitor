@@ -71,7 +71,7 @@ function fixture() {
     limitsHistoryController: null,
     migrateCodexAdditionalLimits() {},
     rendererSnapshots: { stamp: (_, stats) => stats },
-    rendererStats: (stats) => stats,
+    rendererStatsSummary: (stats) => stats,
     scheduleMacWidgetSnapshot() {},
     pluginRuntime: null,
     updateTrayDisplay() {},

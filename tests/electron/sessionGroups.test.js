@@ -46,7 +46,8 @@ test('period switches keep the same group and return to Sessions when that group
   vm.runInNewContext(source.slice(start, end), { state, document: { querySelectorAll: () => [tab] },
     fixedPeriodRangesApi: { slotForSelection: value => value, normalizeMonthMode: () => 'month', supportsBreakdown: () => true },
     captureBreakdownMotion: noop, setPeriod: value => { state.period = value; return true; }, syncPeriodTabs: noop,
-    setPeriodMenuOpen: noop, sessionRowsForPeriod: rowsForPeriod, render: () => { renders += 1; },
+    setPeriodMenuOpen: noop, currentPeriodDetailTarget: () => ({ scope: state.period }),
+    sessionRowsForPeriod: rowsForPeriod, render: () => { renders += 1; },
     periodBreakdownMotionDuration: () => 800, animateBreakdownFrom: noop });
   activate({ stopPropagation: noop });
   assert.equal(state.openSession.summary.key, 'session-group:cursor-grok-bot');
@@ -57,11 +58,21 @@ test('period switches keep the same group and return to Sessions when that group
   assert.equal(state.period, 'allTime');
   assert.equal(state.openSession, null, 'the remaining Codex group does not replace a missing Grok group');
   assert.equal(renders, 2);
+
+  state.period = 'today';
+  state.stats = { detailOnDemand: true, periods: { today: period(20), month: {} } };
+  state.openSession = { kind: 'session-group', period: 'today',
+    summary: rowsForPeriod(period(20)).find(row => row.sessionGroup === 'cursor-grok-bot') };
+  tab.dataset = { period: 'month', periodSlot: 'month' };
+  activate({ stopPropagation: noop });
+  assert.equal(state.period, 'month');
+  assert.equal(state.openSession.summary.key, 'session-group:cursor-grok-bot',
+    'the group stays selected until the new period detail arrives');
 });
 
 test('stats repaint refreshes the open group by identity and retires a removed group', () => {
   const key = 'session-group:cursor-grok-bot';
-  const state = { openSession: { kind: 'session-group', summary: rowsForPeriod(period(20)).find(row => row.sessionGroup === 'cursor-grok-bot') } };
+  const state = { period: 'month', openSession: { kind: 'session-group', period: 'today', summary: rowsForPeriod(period(20)).find(row => row.sessionGroup === 'cursor-grok-bot') } };
   let rendered;
   let closed = false;
   const start = source.indexOf("    if (state.openSession.kind === 'session-group') {");
@@ -72,6 +83,7 @@ test('stats repaint refreshes the open group by identity and retires a removed g
   repaint(state, period(80), rowsForPeriod, close, () => false, request => { rendered = request; });
   assert.equal(rendered.summary.key, key);
   assert.equal(rendered.summary.value, 80);
+  assert.equal(rendered.period, 'month');
   repaint(state, period(100), rowsForPeriod, close, () => true, request => { rendered = request; });
   assert.equal(rendered.summary.value, 100, 'hover no longer postpones group updates');
   assert.equal(state.openSession.summary.value, 100);
@@ -164,4 +176,36 @@ test('conflicting absent parents split a shared native identity into stable inde
   const dock = require('../../src/electron/renderer/edgeDock/presentation').recentSessionRows({ periods: { month: { sessions } } }, 100);
   assert.equal(new Set(dock.map(row => row.key)).size, 2, 'Dock expansion keys also remain distinct');
   assert.equal(dock.reduce((sum, row) => sum + row.totalTokens, 0), 100);
+});
+
+test('adopting another snapshot source clears the open session detail', () => {
+  const start = source.indexOf('let periodDetailSource;');
+  const end = source.indexOf('let renderedPeriodDetailView', start);
+  const state = { stats: { snapshot: { source: 1 } }, openSession: { kind: 'session-group' } };
+  const sync = Function('state', 'clearSessionDetail',
+    source.slice(start, end) + '\nreturn syncPeriodDetailSource;')(state, () => { state.openSession = null; });
+  sync();
+  assert.ok(state.openSession);
+  state.stats = { snapshot: { source: 1, id: 2 } };
+  sync();
+  assert.ok(state.openSession, 'a new snapshot of the same source preserves the detail');
+  state.stats = { snapshot: { source: 2, id: 3 } };
+  sync();
+  assert.equal(state.openSession, null);
+});
+
+test('a group waiting for another period keeps its old heading and rows hidden', () => {
+  const start = source.indexOf('  const awaitingGroupPeriod =');
+  const end = source.indexOf('  const period =', start);
+  const group = { kind: 'session-group', period: 'month' };
+  const state = { stats: { detailOnDemand: true }, openSession: group, period: 'today' };
+  const calls = [];
+  const element = () => ({ classList: { toggle: (name, hidden) => calls.push([name, hidden]) } });
+  const visibility = Function('state', 'els', source.slice(start, end));
+  const els = { sessionDetail: element(), sessionDetailHead: element() };
+  visibility(state, els);
+  assert.deepEqual(calls.splice(0), [['hidden', true], ['hidden', true]]);
+  state.period = 'month';
+  visibility(state, els);
+  assert.deepEqual(calls, [['hidden', false], ['hidden', false]]);
 });

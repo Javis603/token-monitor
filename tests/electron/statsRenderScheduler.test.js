@@ -277,7 +277,7 @@ test('stats-derived Settings rows refresh behind an open panel', () => {
   assert.doesNotMatch(archiveBody, /isSettingsSurfaceVisible|isSettingsPanelOpen/);
   assert.match(renderBody, /renderSessionUsageArchiveStatus\(\);/);
   assert.match(app, /function render\(\{ fromSearch = false \} = \{\}\) \{\n {2}renderAppContent\(\{ fromSearch \}\);/);
-  assert.doesNotMatch(renderBody, /isSettingsSurfaceVisible|isSettingsPanelOpen/);
+  assert.doesNotMatch(renderBody.slice(0, renderBody.indexOf('renderSessionUsageArchiveStatus();')), /isSettingsSurfaceVisible|isSettingsPanelOpen/);
   assert.doesNotMatch(surfaceBody, /isSettingsPanelOpen/);
 });
 
@@ -523,4 +523,20 @@ test('all stats refreshes use visibility-aware rendering', () => {
   assert.match(refreshStats, /getStats\(options\)[\s\S]*statsRenderScheduler\.request\(\);/);
   assert.equal([...refreshStats.matchAll(/setStatus\(statusTextFor/g)].length, 1);
   assert.match(statsRender, /refreshAccountOwnerReadings\(\);/);
+});
+
+test('a detail loading state reuses retained rows only if the list is visible', () => {
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const start = app.indexOf('    const retainedListVisible =');
+  const end = app.indexOf(' {', app.indexOf('    if (', start));
+  const loading = Function('state', 'els', 'awaitingGroupPeriod', 'renderedPeriodDetailView', 'detailView',
+    app.slice(start, end).replace('    if (', '    return ('));
+  const visible = hidden => ({ breakdown: { classList: { contains: () => hidden } } });
+  const state = { openSession: null };
+  assert.equal(loading(state, visible(true), false, 'month', 'month'), true, 'Back or Week hid the list');
+  assert.equal(loading(state, visible(false), false, 'month', 'month'), false, 'live refresh keeps visible rows');
+  assert.equal(loading(state, visible(false), false, 'today', 'month'), true, 'another period has its own rows');
+  const placeholder = app.slice(app.indexOf('      const hint =', start), app.indexOf('      renderSessionPager(null)', start));
+  assert.match(placeholder, /els\.breakdown\.replaceChildren\(hint\);\s*renderedPeriodDetailView = ''/);
+  assert.equal(loading(state, visible(false), false, '', 'month'), true, 'a visible hint can update on failure');
 });
