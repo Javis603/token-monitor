@@ -2711,7 +2711,7 @@ button.tool-preference-main:focus-visible {
   gap: 4px;
   min-width: 0;
 }
-/* Eye and pin stay out of the way until the row is hovered or focused; a tool
+/* Eye and pin stay out of the way until hover or visible focus; a tool
    that is hidden or pinned keeps its icon so the state reads at a glance. The
    slots stay reserved so the status beside them never shifts. Untracked tools
    never reach the main list, so the two controls have nothing to say there. */
@@ -2723,8 +2723,8 @@ button.tool-preference-main:focus-visible {
   opacity: 0;
   transition: opacity 120ms ease;
 }
-.tool-preference-row:is(:hover, :focus-within) .tool-visibility-button,
-.tool-preference-row:is(:hover, :focus-within) .tool-pin-button {
+.tool-preference-row:is(:hover, :has(:focus-visible)) .tool-visibility-button,
+.tool-preference-row:is(:hover, :has(:focus-visible)) .tool-pin-button {
   opacity: 1;
 }
 .tool-preference-row.is-untracked .tool-visibility-button,
@@ -9651,7 +9651,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .slot-name-line .slot-name { min-width: 0; }
 .slot-name-line.is-editing .slot-name { flex: 1; }
 .slot-rename-button { opacity: 0; display: inline-flex; align-items: center; justify-content: center; flex: 0 0 24px; width: 24px; height: 24px; margin-block: -4px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); cursor: pointer; }
-.slot-row:is(:hover, :focus-within) .slot-rename-button { opacity: 1; }
+.slot-row:is(:hover, :focus-visible, :has(:focus-visible)) .slot-rename-button { opacity: 1; }
 .slot-rename-button::before { content: ''; width: 12px; height: 12px; background: currentColor; mask: url("icons/actions/pencil-line.svg") center / contain no-repeat; }
 .slot-rename-button:hover { color: var(--text); background: rgba(var(--overlay-rgb), .06); }
 .slot-rename-button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -9718,13 +9718,13 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 /* Account rows share the settings-list drag transforms and six-dot grip. */
 .slot-row { position: relative; transform: translateY(calc(var(--drag-y, 0px) + var(--drag-shift, 0px))); transition: transform 170ms cubic-bezier(0.22, 1, 0.36, 1), opacity 120ms ease; }
 .slot-drag-handle { grid-row: 1; grid-column: 1; justify-self: center; width: 14px; opacity: 0; }
-.slot-row:is(:hover, :focus-within, .dragging) .slot-drag-handle { opacity: 1; }
+.slot-row:is(:hover, :focus-visible, :has(:focus-visible), .dragging) .slot-drag-handle { opacity: 1; }
 .slot-row[data-slot-draggable="false"] .slot-drag-handle { visibility: hidden; }
 .slot-source-icon { grid-row: 1; grid-column: 1; display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; box-sizing: border-box; border-radius: 6px; background: rgba(var(--overlay-rgb), .045); box-shadow: inset 0 0 0 1px var(--line); color: var(--muted); pointer-events: none; }
 .slot-source-icon:not([data-kind]) { visibility: hidden; }
 .slot-source-icon::before { content: ''; }
 .slot-source-icon.is-live { color: var(--accent); background: rgba(var(--accent-rgb), .08); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .22); }
-.slot-row[data-slot-draggable="true"]:is(:hover, :focus-within, .dragging) .slot-source-icon { visibility: hidden; }
+.slot-row[data-slot-draggable="true"]:is(:hover, :focus-visible, :has(:focus-visible), .dragging) .slot-source-icon { visibility: hidden; }
 .slot-row.dragging { z-index: 2; background: rgba(var(--panel-rgb), .96); box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), .62); cursor: grabbing; transition: none; will-change: transform; }
 .slot-row.dragging .slot-drag-handle { cursor: grabbing; }
 .slot-list.drag-active .slot-row:not(.dragging) { opacity: .78; }
