@@ -37,8 +37,8 @@ function cloneValue(value, seen = new Map()) {
   return copy;
 }
 
-function sanitizeUsagePeriods(value) {
-  const next = cloneValue(value || {});
+function sanitizeUsagePeriods(value, ownsSummary) {
+  const next = ownsSummary && value ? value : cloneValue(value || {});
   const periods = next?.periods && typeof next.periods === 'object' ? next.periods : next;
   for (const periodName of ['today', 'month', 'allTime']) {
     const period = periods?.[periodName];
@@ -57,13 +57,11 @@ function normalizedEnvelope(value) {
   return envelope;
 }
 
-// The usage part is copied once on the way in and never mutated afterwards:
-// every update builds a new part, and everything handed out is a copy. That is
-// what lets a carried field be shared with the previous part by reference. A
-// carried period in particular needs no second sanitize, because it was
-// filtered when it arrived.
-function mergeUsagePart(previous, incoming) {
-  const next = sanitizeUsagePeriods(incoming || {});
+// Take ownership of a freshly deserialized worker summary. Other producers
+// may retain their input, so copy it before sanitizing. After sanitation, the
+// parts are immutable and carried fields can be shared across usage parts.
+function mergeUsagePart(previous, incoming, ownsSummary) {
+  const next = sanitizeUsagePeriods(incoming, ownsSummary);
   delete next.limits;
   if (!previous) return next;
 
@@ -140,7 +138,7 @@ function createDeviceState(options = {}) {
   function updateUsage(summary, reason = 'usage', meta = {}) {
     if (!accepts(meta)) return null;
     const cold = meta.preview === true && !hasCompleteUsageBaseline;
-    const next = mergeUsagePart(cold ? coldUsagePart : usagePart, summary);
+    const next = mergeUsagePart(cold ? coldUsagePart : usagePart, summary, meta.ownsSummary === true);
     if (hasOwn(next, 'month') && hasOwn(next, 'allTime')) {
       hasCompleteUsageBaseline = true;
     }

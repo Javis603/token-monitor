@@ -193,7 +193,7 @@ The seven-day chart takes its newest bar from live Today accounting and past day
 
 Manual device removal requires a known remote device marked stale in main's latest fetched stats; internal identity cleanup is separate. iCloud rechecks the current file before tombstoning. Hub deletion remains unconditional, so the main-process eligibility check and deletion are not atomic.
 
-**Publication and activity.** `statsPublisher.js` owns whole-tree publication; `deviceState.js` owns immutable accounting parts.
+**Publication and activity.** `statsPublisher.js` owns whole-tree publication; `deviceState.js` owns immutable accounting parts. The usage host transfers ownership of each deserialized worker summary to device state. Device state copies inputs from in-process producers and gives consumers independent snapshots.
 
 - Client mode batches local/Hub updates into one publication per second, favors Hub reasons, and flushes before connection-status delivery so a delayed event cannot undo a disconnect. Settings receives the local quota snapshot with probe state, including before the first usage snapshot and while sync publication is pending.
 - Hub stream liveness follows received bytes, including heartbeat comments and partial snapshots. After 90 seconds without bytes, the widget disconnects and retries for a complete snapshot; opening a connection has a separate 15-second deadline. Local publications must not postpone the renderer's periodic REST reconciliation; while the stream is connected, that reconciliation downloads only when stream data is older than its interval.
