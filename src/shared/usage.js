@@ -720,7 +720,9 @@ function emptySession(client, id) {
 
 const sessionsWithLiveSource = new WeakSet();
 
-function mergeSession(target, source) {
+// `now` judges live-activity observations, which a future peer clock must not
+// set; it defaults to the wall clock.
+function mergeSession(target, source, now) {
   mergeSessionModelComponents(target, source);
   const sourceTokens = Math.max(0, Math.round(asNumber(source.totalTokens)));
   target.totalTokens += sourceTokens;
@@ -812,7 +814,7 @@ function mergeSession(target, source) {
   // token or transcript write. An explicit unknown reading clears old evidence.
   if (isSessionActivityClient(source.client)) {
     const reading = normalizeLiveActivity(source.liveActivity);
-    if (reading && canReplaceLiveActivity(target.liveActivity, reading)) {
+    if (reading && canReplaceLiveActivity(target.liveActivity, reading, now)) {
       target.liveActivity = reading;
     }
   }
@@ -849,12 +851,12 @@ function mergeSession(target, source) {
   return target;
 }
 
-function addSession(period, session) {
+function addSession(period, session, now) {
   if (!session?.client || !session?.sessionId || isReasonixSyntheticSession(session)) return;
   const key = sessionKey(session.client, session.sessionId);
   if (isReasonixSyntheticSession(session, key)) return;
   if (!period.sessions[key]) period.sessions[key] = emptySession(session.client, session.sessionId);
-  mergeSession(period.sessions[key], session);
+  mergeSession(period.sessions[key], session, now);
 }
 
 function sessionFromRow(row) {
@@ -1039,6 +1041,8 @@ function normalizePeriod(input, options = {}) {
     return period;
   }
   const projectsEnabled = options.projectsEnabled !== false;
+  // The clock live activity is judged against; the wall clock unless given.
+  const now = options.nowMs;
   period.totalTokens = Math.max(0, Math.round(asNumber(input.totalTokens ?? input.total_tokens ?? 0)));
   const componentCapability = input.capabilities?.tokenComponents;
   const hasLegacyComponentShape = [
@@ -1184,13 +1188,13 @@ function normalizePeriod(input, options = {}) {
   reconcileCursorAutoGlobalModels(period, input);
   if (input.sessions && typeof input.sessions === 'object') {
     for (const [key, value] of Object.entries(input.sessions)) {
-      const session = normalizeSession(sessionWithActivity(input, key, value), key);
+      const session = normalizeSession(sessionWithActivity(input, key, value, now), key);
       if (!session) continue;
       if (!projectsEnabled) {
         session.projectId = '';
         session.projectLabel = '';
       }
-      addSession(period, session);
+      addSession(period, session, now);
     }
   }
   period.projects = projectsEnabled
@@ -1409,7 +1413,11 @@ function normalizeRecordHistoryFields(record, nowIso = new Date().toISOString())
   return fields;
 }
 
-function normalizeDeviceRecord(record) {
+// `options.normalizePeriod` lets a caller that sees the same period object in
+// several records reuse its normalization. It must return what normalizePeriod
+// would, and whatever it returns is read, never mutated.
+function normalizeDeviceRecord(record, options = {}) {
+  const normalizeRecordPeriod = options.normalizePeriod || normalizePeriod;
   const nowIso = new Date().toISOString();
   const historyFields = normalizeRecordHistoryFields(record, nowIso);
   const normalized = {
@@ -1457,7 +1465,7 @@ function normalizeDeviceRecord(record) {
     normalized.allTimeTokensUnavailable = true;
   }
   for (const periodName of PERIODS) {
-    normalized.periods[periodName] = normalizePeriod(record[periodName] || record.periods?.[periodName], {
+    normalized.periods[periodName] = normalizeRecordPeriod(record[periodName] || record.periods?.[periodName], {
       projectsEnabled: normalized.projectsEnabled !== false
     });
   }
