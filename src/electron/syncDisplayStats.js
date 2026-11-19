@@ -174,7 +174,8 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     ? normalizedLocalSummary(localDevice)
     : withoutAllTimeSessions(normalizedHubRecord(record)));
   const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, options.nowMs, {
-    normalizeRecord: options.allTimeSessions === false ? summarize : normalize
+    normalizeRecord: options.allTimeSessions === false ? summarize : normalize,
+    copyNormalizedMonthSessions: true
   });
 
   aggregate.devices = aggregate.devices.map((device) => {
@@ -261,7 +262,9 @@ function composeLocalSyncSummary(hubStats, localDevice, options = {}) {
 // to its completion when that is asked for.
 function composeLocalOnlySummary(localDevice, finish, options = {}) {
   const nowMs = options.nowMs ?? Date.now();
-  const compose = (normalizeRecord) => finish(aggregateDevices([localDevice], 0, nowMs, { normalizeRecord }));
+  const compose = (normalizeRecord) => finish(aggregateDevices([localDevice], 0, nowMs, {
+    normalizeRecord, copyNormalizedMonthSessions: true
+  }));
   const summary = compose(normalizedLocalSummary);
   completions.set(summary, { compose: () => compose(normalizedLocalRecord), complete: null });
   return summary;

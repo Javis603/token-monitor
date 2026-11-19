@@ -129,6 +129,23 @@ test('summaries a worker-hosted runtime already transformed are not transformed 
   assert.equal(records.at(-1).record.transformedHere, true);
 });
 
+test('worker-owned usage is sanitized on intake and outgoing records stay isolated', () => {
+  const { records, runtime, usageOptions } = harness();
+  const summary = structuredClone({
+    today: { sessions: { 'reasonix:private': { client: 'reasonix' } } },
+    month: { totalTokens: 20 },
+    allTime: { totalTokens: 30 }
+  });
+  usageOptions.onUpdate(summary, 'watch', { transformed: true, ownsSummary: true });
+
+  assert.deepEqual(summary.today.sessions, {}, 'sanitation uses the deserialized graph');
+  assert.deepEqual(records[0].record.today.sessions, {});
+  records[0].record.month.totalTokens = 99;
+  assert.equal(runtime.getSnapshot().month.totalTokens, 20);
+  usageOptions.onUpdate({ today: { totalTokens: 10 } }, 'watch');
+  assert.equal(records[1].record.month.totalTokens, 20);
+});
+
 test('progressive cold-start previews wait for the first complete usage record', () => {
   const { records, usageOptions } = harness({ progressive: true });
   usageOptions.onPreview({ updatedAt: 'preview-time', today: { totalTokens: 2 } });
