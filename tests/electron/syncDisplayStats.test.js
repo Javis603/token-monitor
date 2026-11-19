@@ -456,6 +456,63 @@ test('a completion matches normalizing the whole record', () => {
   }
 });
 
+test('local month rows preserve rounding and stay independent of the cached device rows', () => {
+  const at = '2026-07-16T10:00:00.000Z';
+  const period = usagePeriod('codex', at, 10);
+  const row = Object.values(period.sessions)[0];
+  row.costUsd = 0.123456789;
+  row.models = { 'gpt-5': 10 };
+  row.modelCosts = { 'gpt-5': row.costUsd };
+  row.promptCache = { observedAt: at, ttlSeconds: 300 };
+  period.sessions.activity = {
+    ...row,
+    sessionId: 'activity',
+    liveActivity: { state: 'running', observedAt: at }
+  };
+  const record = device('local', 10, { month: period });
+  const nowMs = Date.parse(at);
+  const expected = aggregateDevices([record], 0, nowMs).periods.month;
+  const first = composeLocalOnlySummary(record, stats => stats, { nowMs });
+
+  assert.deepEqual(first.periods.month, expected);
+  const firstRow = Object.values(first.periods.month.sessions).find(session => session.sessionId === row.sessionId);
+  firstRow.models['gpt-5'] = 99;
+  firstRow.modelCosts['gpt-5'] = 99;
+  firstRow.promptCache.ttlSeconds = 99;
+  assert.deepEqual(composeLocalOnlySummary(record, stats => stats, { nowMs }).periods.month, expected);
+});
+
+test('Hub month rows preserve overlap accounting and stay independent of cached device rows', () => {
+  const at = '2026-07-16T10:00:00.000Z';
+  const later = '2026-07-16T10:01:00.000Z';
+  const nowMs = Date.parse(later);
+  const remoteMonth = usagePeriod('codex', at, 10);
+  const remoteRow = Object.values(remoteMonth.sessions)[0];
+  Object.assign(remoteRow, { archived: true, costUsd: 0.123456789, models: { 'gpt-5': 10 } });
+  remoteMonth.sessions.unique = {
+    ...remoteRow, sessionId: 'remote-only',
+    promptCache: { observedAt: at, ttlSeconds: 300 }
+  };
+  const localMonth = usagePeriod('codex', later, 15);
+  Object.assign(Object.values(localMonth.sessions)[0], {
+    costUsd: 0.123456789, models: { 'gpt-5': 15 }, liveActivity: { state: 'running', observedAt: later }
+  });
+  const remote = device('remote', 10, { month: remoteMonth });
+  const local = device('local', 15, { month: localMonth });
+  const hub = { devices: [remote], staleAfterMs: 0 };
+  const expected = aggregateDevices([remote, local], 0, nowMs).periods.month;
+  const first = composeLocalSyncSummary(hub, local, { nowMs });
+
+  assert.deepEqual(first.periods.month, expected);
+  const shared = Object.values(first.periods.month.sessions).find(session => session.sessionId === remoteRow.sessionId);
+  assert.equal(shared.totalTokens, 25);
+  assert.equal(shared.archived, undefined);
+  const unique = Object.values(first.periods.month.sessions).find(session => session.sessionId === 'remote-only');
+  unique.models['gpt-5'] = 99;
+  unique.promptCache.ttlSeconds = 99;
+  assert.deepEqual(composeLocalSyncSummary(hub, local, { nowMs }).periods.month, expected);
+});
+
 test('local mode publishes a summary that completes to the full aggregate', () => {
   const nowMs = Date.parse('2026-07-16T10:05:00.000Z');
   const period = (client, totalTokens) => usagePeriod(client, '2026-07-16T10:00:00.000Z', totalTokens);
