@@ -3528,16 +3528,17 @@ function sessionPresentationOptions() {
   };
 }
 
-function rawSessionRowsForPeriod(period) {
-  return sessionRowsApi.sessionRowsForPeriod(period, sessionPresentationOptions());
+function rawSessionRowsForPeriod(period, options = sessionPresentationOptions()) {
+  return sessionRowsApi.sessionRowsForPeriod(period, options);
 }
 
+const sessionRowLabelCache = {};
+
 function sessionRowsForPeriod(period) {
-  const rows = rawSessionRowsForPeriod(period);
-  if (rows.length > 0) {
-    rows.sort((a, b) => b.sortTime - a.sortTime || b.value - a.value || b.cost - a.cost || a.name.localeCompare(b.name));
-    return sessionRowsApi.groupSessionRows(rows, sessionPresentationOptions());
-  }
+  const options = sessionPresentationOptions();
+  if (state.breakdown === 'session') options.rowLabelCache = sessionRowLabelCache;
+  const rows = rawSessionRowsForPeriod(period, options);
+  if (rows.length > 0) return sessionRowsApi.groupSessionRows(rows, options);
   if (Number(period?.totalTokens || 0) === 0) return [];
   return modelRowsForPeriod(period);
 }

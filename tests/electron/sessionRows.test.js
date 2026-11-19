@@ -20,6 +20,29 @@ const {
   sessionRowsForPeriod
 } = require('../../src/electron/renderer/sessionRows');
 
+test('reuses unchanged row labels across snapshots while the activity state and labels stay current', () => {
+  const rowLabelCache = {};
+  const lastUsedAt = '2026-10-10T00:00:00Z';
+  const session = { client: 'codex', sessionId: 'model-mix', totalTokens: 100,
+    latestModel: 'gpt-5', models: { 'gpt-5': 60, 'gpt-5-mini': 40 }, lastUsedAt };
+  const rows = (source, now, latestModelLabel = 'Latest') => sessionRowsForPeriod({
+    sessions: { 'codex:model-mix': structuredClone(source) }
+  }, { rowLabelCache, now: new Date(now), latestModelLabel });
+  const [first] = rows(session, lastUsedAt);
+  const [later] = rows(session, '2026-10-10T00:11:00Z');
+
+  assert.equal(first.activityState, 'running');
+  assert.equal(later.activityState, 'idle');
+  assert.equal(first.modelTooltipEntries, later.modelTooltipEntries);
+  const [translated] = rows(session, lastUsedAt, 'Last used');
+  assert.deepEqual(translated.modelTooltipEntries[0], { full: 'Last used: gpt-5' });
+  const [updated] = rows({ ...session, totalTokens: 140, models: { ...session.models, 'gpt-5': 100 } }, lastUsedAt);
+  assert.equal(updated.value, 140);
+  assert.notEqual(updated.modelTooltipEntries, first.modelTooltipEntries);
+  sessionRowsForPeriod({}, { rowLabelCache });
+  assert.equal(rowLabelCache.entries.size, 0);
+});
+
 test('archived usage joins only matching active native state while retaining its token and cost values', () => {
   const now = new Date('2026-10-10T00:00:00Z');
   const key = 'claude:resumed';
