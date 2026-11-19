@@ -287,6 +287,7 @@ const {
 const { createSyncPayloadUploader, syncPayload } = require('../shared/syncPayload');
 const postSyncPayload = createSyncPayloadUploader();
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
+const { createLocalArchivedSessionCounter } = require('./localArchivedSessionCount');
 const { MIMO_PLATFORM_CONSOLE_URL } = require('../shared/providers/mimo/limits');
 
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
@@ -625,6 +626,7 @@ function defaultSettings() {
     heatmapMetric: 'cost',
     modelRankingMetric: 'tokens',
     homeActiveDaysWindow: 'all',
+    showExactHomeTrendTokens: false,
     // How a live session's context gauge reads. That direction is a choice the
     // gauge cannot make on its own, so it is stated here rather than assumed:
     // `used` is what the Sessions view and this app's own readouts show, while
@@ -1963,6 +1965,7 @@ function readSettings() {
     merged.heatmapMetric = normalizeHeatmapMetric(merged.heatmapMetric);
     merged.modelRankingMetric = normalizeRankingMetric(merged.modelRankingMetric);
     merged.homeActiveDaysWindow = normalizeHomeActiveDaysWindow(merged.homeActiveDaysWindow);
+    merged.showExactHomeTrendTokens = parseBoolean(merged.showExactHomeTrendTokens, false);
     merged.sessionTitlesEnabled = parseBoolean(merged.sessionTitlesEnabled, true);
     merged.sessionContextMetric = normalizeSessionContextMetric(merged.sessionContextMetric);
     merged.reduceMotion = motionPreferenceApi.normalize(merged.reduceMotion);
@@ -2171,8 +2174,9 @@ function removedTrackedClients(previousClients, nextClients) {
   return Array.from(previous).filter((client) => !next.has(client));
 }
 
-function localArchiveSourceDevice() {
+function localDeviceRecord({ forClientArchive = false } = {}) {
   return selectLocalDeviceRecord({
+    forClientArchive,
     deviceId: settings?.deviceId || defaultDeviceId(),
     externalAgentActive: isExternalAgentActive(),
     hubMode: settings?.hubMode,
@@ -2183,6 +2187,18 @@ function localArchiveSourceDevice() {
   });
 }
 
+function assertClientArchiveCaptureReady(nextClients, sessionUsageArchiveEnabled) {
+  const deviceId = settings?.deviceId || defaultDeviceId();
+  if (mode !== 'sync' || lastCollectedDevice?.deviceId === deviceId
+    || !sessionUsageArchiveEnabled
+    || (isExternalAgentActive() && settings?.hubMode !== 'icloud')
+    || !removedTrackedClients(settings?.clients, nextClients).length) return;
+
+  // A Hub snapshot can arrive before the first full collection. Its aggregate
+  // has no lifetime session IDs to reconcile against the SQLite archive.
+  if (localDeviceRecord()) throw new Error('tracking-scan-pending');
+}
+
 function updateArchivedClientUsage(previousClients, nextClients) {
   const removedClients = removedTrackedClients(previousClients, nextClients);
   let archive = pruneArchivedClientUsage(settings.archivedClientUsage, nextClients);
@@ -2190,7 +2206,9 @@ function updateArchivedClientUsage(previousClients, nextClients) {
     // Before this run's first complete record, localDevice may be a first-scan
     // preview whose unscanned windows would archive as zero. Only the seed, or
     // nothing, stands for the client then.
-    const source = mode === 'local' && !lastCollectedDevice ? anchorSeedDevice : localArchiveSourceDevice();
+    const source = mode === 'local' && !lastCollectedDevice
+      ? anchorSeedDevice
+      : localDeviceRecord({ forClientArchive: settings.sessionUsageArchiveEnabled !== false });
     archive = captureArchivedClientUsage(archive, source, removedClients);
   }
   settings.archivedClientUsage = archive;
@@ -2401,6 +2419,8 @@ let sseRetryTimer = null;
 let streamConnected = false;
 let streamFailure = null;
 let lastCollectedDevice = null;
+// Before the first scan, the cold-start seed already carries the replayed archive.
+const localArchivedSessionCount = createLocalArchivedSessionCounter(() => lastCollectedDevice || anchorSeedDevice);
 let latestHubStats = null;
 let latestHubStatsReceivedAt = null;
 // Matches the renderer's connected-stream fallback interval.
@@ -2644,7 +2664,7 @@ const diagnosticSnapshotBuilder = createDiagnosticSnapshotBuilder({
   getLatestHubStatsIdentity: () => latestHubStatsIdentity,
   getHubModeGeneration: () => hubModeGeneration,
   getCurrentHubStatsIdentity: (hubMode) => currentHubStatsIdentity(hubMode),
-  getLocalRecord: localArchiveSourceDevice,
+  getLocalRecord: localDeviceRecord,
   getTokscaleStatus,
   getConfiguration: () => diagnosticConfigurationFromSettings(settings || {}, {
     usage: {
@@ -7413,6 +7433,7 @@ app.whenReady().then(() => {
       sessionUsageArchiveStore.clear();
       clearDailyHistoryArchive();
       usageTransform.reset();
+      localArchivedSessionCount.archiveCleared();
       return { ok: true };
     } catch (error) {
       return { ok: false, error: error.message };
@@ -7625,7 +7646,11 @@ app.whenReady().then(() => {
     delete normalizedPatch.subscriptionsShared;
     delete normalizedPatch.subscriptionsHub;
     delete normalizedPatch.subscriptionsUpdatedAt;
-    if (patch.clients !== undefined) normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
+    const sessionUsageArchiveEnabled = parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true);
+    if (patch.clients !== undefined) {
+      normalizedPatch.clients = clientsCsvForSetting(patch.clients, '');
+      assertClientArchiveCaptureReady(normalizedPatch.clients, sessionUsageArchiveEnabled);
+    }
     if (patch.customScanPaths !== undefined) {
       const limitError = customScanPathLimitError(patch.customScanPaths);
       if (limitError) throw new Error(limitError);
@@ -7769,6 +7794,7 @@ app.whenReady().then(() => {
       hiddenHomeModules: patch.hiddenHomeModules !== undefined ? normalizeHiddenHomeModules(patch.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST) : normalizeHiddenHomeModules(settings.hiddenHomeModules, DEFAULT_HOME_MODULE_LIST),
       homeModuleCounts: normalizeHomeModuleCounts(patch.homeModuleCounts, settings.homeModuleCounts),
       showHomeLimitBars: parseBoolean(patch.showHomeLimitBars ?? settings.showHomeLimitBars, false),
+      showExactHomeTrendTokens: parseBoolean(patch.showExactHomeTrendTokens ?? settings.showExactHomeTrendTokens, false),
       homeLimitDisplayMode: normalizeHomeLimitDisplayMode(patch.homeLimitDisplayMode ?? settings.homeLimitDisplayMode),
       showHomeLimitProviderNames: parseBoolean(patch.showHomeLimitProviderNames ?? settings.showHomeLimitProviderNames, false),
       homeLimitProviderOrder: patch.homeLimitProviderOrder !== undefined ? migrateHomeLimitProviderOrder(patch.homeLimitProviderOrder) : (settings.homeLimitProviderOrder || ''),
@@ -7783,7 +7809,7 @@ app.whenReady().then(() => {
       projectsEnabled: parseBoolean(patch.projectsEnabled ?? settings.projectsEnabled, true),
       projectBreakdownMode: normalizeProjectBreakdownMode(patch.projectBreakdownMode ?? settings.projectBreakdownMode),
       historyIntervalMs: normalizeHistoryIntervalMs(patch.historyIntervalMs ?? settings.historyIntervalMs),
-      sessionUsageArchiveEnabled: parseBoolean(patch.sessionUsageArchiveEnabled ?? settings.sessionUsageArchiveEnabled, true),
+      sessionUsageArchiveEnabled,
       wslScanEnabled: parseBoolean(patch.wslScanEnabled ?? settings.wslScanEnabled, false),
       collectionMode: normalizeCollectionMode(patch.collectionMode ?? settings.collectionMode),
       collectionIntervalMs: normalizeCollectionIntervalMs(patch.collectionIntervalMs ?? settings.collectionIntervalMs),
@@ -8144,6 +8170,13 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle('stats:allTimeSessions', (_event, snapshotId) => rendererAllTimeSessions(rendererSnapshots.get(snapshotId)));
+  // While a headless agent owns host or sync collection, this app's record stops
+  // updating and the agent applies its own archive, so there is no count to show.
+  ipcMain.handle('stats:archivedSessionCount', () => (
+    settings?.hubMode !== 'icloud' && !canRefreshUsageRuntime(mode, isExternalAgentActive)
+      ? null
+      : localArchivedSessionCount()
+  ));
   ipcMain.handle('export:now', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],

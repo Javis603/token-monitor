@@ -278,14 +278,15 @@ test('third-party profile rows keep metadata on line two and rename on line one'
   const app = read('src/electron/renderer/app.js');
 
   assert.match(html, /id="thirdpartyProfileList" class="opencode-profile-list thirdparty-profile-list"/);
-  const { rows } = await thirdPartyRows({ work: { canonicalAccountKey: 'saved', baseUrl: 'https://quota.example.com', adapter: 'newapi-account' } });
+  const { rows } = await thirdPartyRows({ work: { canonicalAccountKey: 'saved', baseUrl: 'https://quota.example.com', adapter: 'newapi-account', enabled: false } });
   const copy = rows[0].querySelector('.slot-copy');
   const nameLine = rows[0].querySelector('.slot-name-line');
   const rename = rows[0].querySelector('.slot-rename-button');
   const detail = rows[0].querySelector('.slot-detail');
   assert.equal(rename.parentElement, nameLine);
   assert.deepEqual(copy.children.slice(0, 2), [nameLine, detail]);
-  assert.match(detail.textContent, /quota\.example\.com/);
+  assert.equal(detail.textContent, 'New API · Account · quota.example.com');
+  assert.equal(rows[0].querySelector('.slot-status').textContent, 'Paused');
   assert.match(styles, /grid-template-columns: minmax\(0, max-content\) auto minmax\(0, 1fr\);/);
   assert.match(styles, /grid-template-areas:\s*"name rename \."\s*"detail detail detail";/);
   assert.match(styles, /\.opencode-profile-item \.profile-name \{[\s\S]*?grid-area: name;/);

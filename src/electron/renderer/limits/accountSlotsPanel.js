@@ -356,11 +356,16 @@
         placeEditor();
         const revision = editorRevision;
         const prefix = `${form.id}SlotDraft`;
-        const keys = new Map(form.fields.map(field => [field.key, `${prefix}${field.key}`]));
+        // New Volcengine accounts use one credential set per slot. Existing
+        // slots can still replace credentials saved for a separate Agent Plan.
+        const hideAgentFields = !slot && form.id === 'volcengine';
+        const fields = hideAgentFields ? form.fields.filter(field => !field.key.startsWith('volcengineAgent')) : form.fields;
+        const keys = new Map(fields.map(field => [field.key, `${prefix}${field.key}`]));
         const remap = value => typeof value === 'string' ? (keys.get(value) || (value === form.credentialChoice?.key ? `${prefix}${value}` : value))
           : Array.isArray(value) ? value.map(remap)
             : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, val]) => [key, remap(val)])) : value;
-        const draftForm = remap(form);
+        const manual = hideAgentFields ? form.manual.filter(block => !block.field || keys.has(block.field)) : form.manual;
+        const draftForm = remap({ ...form, fields, manual });
         draftForm.id = prefix;
         draftForm.fields.forEach(field => { field.submitWithCredential = true; });
         const title = localized(make('strong'), `settings.slots.${slot ? 'replaceTitle' : 'addTitle'}`, { provider: label });
@@ -378,7 +383,7 @@
           const result = await run(slot && !asNew ? 'replace' : 'add', ...(slot && !asNew ? [slot.id, original] : [original, name.value]));
           if (!result || revision !== editorRevision) return;
           choices.replaceChildren();
-          const credentialInput = [...keys.keys()].filter(key => form.fields.find(field => field.key === key)?.secret)
+          const credentialInput = fields.filter(field => field.secret).map(field => field.key)
             .map(key => document.getElementById(`${keys.get(key)}Input`)).find(input => input && !input.closest('.hidden'));
           if (result.saved) credentialInput?.removeAttribute('aria-invalid');
           else if (['required', 'invalidFormat', 'unauthorized'].includes(result.status)) {
@@ -461,7 +466,7 @@
         }
 
         editorPanel.querySelector('.credential-manual-panel').querySelector('.settings-actions').append(slotButton('cancel', () => preserveScroll(closeEditor)));
-        for (const field of form.fields.filter(field => !field.secret)) {
+        for (const field of fields.filter(field => !field.secret)) {
           const input = editorPanel.querySelector(`#${prefix}${field.key}Input`);
           if (input && slot?.formValues && Object.hasOwn(slot.formValues, field.key)) input.value = slot.formValues[field.key];
         }
@@ -720,6 +725,7 @@
       if (!members.length) {
         item.deviceNote?.remove(); item.deviceNote = null;
         item.deviceList?.classList.add('hidden'); item.devicesExpanded = false;
+        if (item.deviceList) item.deviceList.inert = true;
         item.el.classList.remove('slot-devices-expanded');
         item.status.setAttribute('aria-hidden', 'false');
         return;
@@ -749,16 +755,18 @@
       if (multiple) {
         item.deviceNote.setAttribute('aria-expanded', String(expanded));
         item.deviceNote.setAttribute('aria-label', `${tr(expanded ? 'hideDevices' : 'showDevices')}: ${members.map(deviceName).join(', ')}`);
-        const hint = make('span', 'slot-device-hint', tr(expanded ? 'hideDevices' : 'showDevices'));
-        item.deviceNote.append(hint);
       }
       if (!item.deviceList && multiple) {
-        item.deviceList = make('div', 'slot-device-list hidden');
+        item.deviceList = make('div', 'slot-device-list accordion-animated-container hidden');
+        item.deviceList.inert = true;
         item.deviceList.id = `slot-devices-${form.id}-${encodeURIComponent(slot.id)}`;
+        item.deviceListInner = make('div', 'accordion-animation-inner');
+        item.deviceList.append(item.deviceListInner);
         item.el.append(item.deviceList); item.deviceRows = new Map();
       }
       if (!item.deviceList) return;
       item.deviceList.classList.toggle('hidden', !expanded);
+      item.deviceList.inert = !expanded;
       if (multiple) item.deviceNote.setAttribute('aria-controls', item.deviceList.id);
       if (!expanded) return;
       for (const [id, row] of item.deviceRows) if (!members.some(member => member.deviceId === id)) { row.element.remove(); item.deviceRows.delete(id); }
@@ -770,7 +778,7 @@
           const fix = slotButton('replaceTitle', () => openEditor(item.slot));
           fix.className = 'slot-device-fix plugin-inline-action';
           element.append(name, state, note, fix);
-          row = { element, name, state, note, fix }; item.deviceRows.set(member.deviceId, row); item.deviceList.append(element);
+          row = { element, name, state, note, fix }; item.deviceRows.set(member.deviceId, row); item.deviceListInner.append(element);
         }
         row.name.replaceChildren(deviceToken(member));
         const memberStatus = member.local ? status : accountStatus({ enabled: true }, member.reading);

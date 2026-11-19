@@ -192,7 +192,9 @@ test('the renderer attaches the pulled list to every stats it adopts and pulls f
   assert.doesNotMatch(app, /state\.stats = (payload\.data\.stats|nextStats);/);
   assert.match(app, /function render\([^)]*\) \{\s*renderAppContent\(/);
   assert.match(app, /function renderAppContent\([^)]*\) \{[\s\S]*?if \(!state\.stats\) return;\s*allTimeSessions\.ensure\(\);/);
-  assert.match(app, /allTimeSessions\.ensure\(\);\s*renderSessionUsageArchiveStatus\(\);/, 'Settings pulls for the archived count');
+  const neededBody = app.slice(app.indexOf('function allTimeSessionsNeeded()'), app.indexOf('const allTimeSessions ='));
+  assert.doesNotMatch(neededBody, /isSettingsPanelOpen|isSettingsSurfaceVisible/, 'an open Settings panel does not pull the list');
+  assert.doesNotMatch(app, /allTimeSessions\.ensure\(\);\s*renderSessionUsageArchiveStatus\(\);/);
 });
 
 test('a title-bearing pull that lands after titles are hidden is projected using the current policy', async () => {
@@ -243,4 +245,99 @@ test('re-enabling re-pulls a titleless list for the same snapshot', async () => 
   calls[1].resolve({ 'codex:s': { title: 'Recovered title', totalTokens: 9 } });
   await settle();
   assert.equal(loaded[1].periods.allTime.sessions['codex:s'].title, 'Recovered title');
+});
+
+// Settings shows only a count of this machine's archived sessions. Pulling the
+// whole all-time list for it on every push while the panel was open cloned
+// megabytes per push and stalled scrolling there, so main counts it instead.
+function archivedCountHarness({ visible = true } = {}) {
+  const rendererDir = path.join(__dirname, '..', '..', 'src', 'electron', 'renderer');
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const source = app.slice(app.indexOf('const archivedSessionCountState ='), app.indexOf('const HUB_DRAFT_FIELDS'));
+  const requests = [];
+  const env = {
+    state: { settings: {}, stats: { snapshot: { id: 1, source: 0 } } },
+    els: { sessionUsageArchiveStatus: { textContent: '' } },
+    visible,
+    t: (key, values) => (values ? `${key}:${values.count}` : key),
+    console: { log() {} },
+    window: { tokenMonitor: { getArchivedSessionCount: () => new Promise((resolve, reject) => requests.push({ id: env.state.stats.snapshot.id, resolve, reject })) } }
+  };
+  const api = Function('env', `const { state, els, t, console, window } = env;
+    const isSettingsSurfaceVisible = () => env.visible;
+    ${source}; return { renderSessionUsageArchiveStatus, archivedSessionCountCleared };`)(env);
+  return { ...api, env, requests };
+}
+
+test('Settings asks main for the archived count once per snapshot', async () => {
+  const h = archivedCountHarness();
+  h.renderSessionUsageArchiveStatus();
+  h.renderSessionUsageArchiveStatus();
+  await settle();
+  assert.deepEqual(h.requests.map(r => r.id), [1], 'one request per snapshot, not per render');
+  assert.equal(h.env.els.sessionUsageArchiveStatus.textContent, '');
+
+  h.env.state.stats = { snapshot: { id: 2, source: 0 } };
+  h.renderSessionUsageArchiveStatus();
+  await settle();
+  assert.equal(h.requests.length, 1, 'a newer snapshot waits for the request in flight');
+  h.requests[0].resolve(3);
+  await settle();
+  assert.equal(h.env.els.sessionUsageArchiveStatus.textContent, 'settings.collection.sessionArchiveActiveCount:3');
+  assert.deepEqual(h.requests.map(r => r.id), [1, 2], 'then asks again for the snapshot now shown');
+
+  h.requests[1].reject(new Error('gone'));
+  await settle();
+  h.renderSessionUsageArchiveStatus();
+  await settle();
+  assert.equal(h.requests.length, 2, 'a failed count waits for the next stats');
+  assert.equal(h.env.els.sessionUsageArchiveStatus.textContent, 'settings.collection.sessionArchiveActiveCount:3');
+
+  h.env.state.stats = { snapshot: { id: 3, source: 0 } };
+  h.renderSessionUsageArchiveStatus();
+  await settle();
+  h.requests[2].resolve(0);
+  await settle();
+  assert.equal(h.env.els.sessionUsageArchiveStatus.textContent, 'settings.collection.sessionArchiveEmpty');
+
+  h.env.state.stats = { snapshot: { id: 4, source: 0 } };
+  h.renderSessionUsageArchiveStatus();
+  await settle();
+  h.requests[3].resolve(null);
+  await settle();
+  assert.equal(h.env.els.sessionUsageArchiveStatus.textContent, '', 'no local count blanks the previous one');
+});
+
+test('a successful Clear shows zero and drops a count asked for before it', async () => {
+  const h = archivedCountHarness();
+  h.renderSessionUsageArchiveStatus();
+  await settle();
+  h.requests[0].resolve(5);
+  await settle();
+  h.env.state.stats = { snapshot: { id: 2, source: 0 } };
+  h.renderSessionUsageArchiveStatus();
+  await settle();
+  h.archivedSessionCountCleared();
+  assert.equal(h.env.els.sessionUsageArchiveStatus.textContent, 'settings.collection.sessionArchiveEmpty');
+  h.requests[1].resolve(5);
+  await settle();
+  assert.equal(h.env.els.sessionUsageArchiveStatus.textContent, 'settings.collection.sessionArchiveEmpty', 'the pre-clear count is dropped');
+});
+
+test('a hidden Settings panel does not ask for the archived count', async () => {
+  const h = archivedCountHarness({ visible: false });
+  h.renderSessionUsageArchiveStatus();
+  await settle();
+  assert.equal(h.requests.length, 0);
+});
+
+test('main answers the archived count from the local record, not a composed snapshot', () => {
+  const electronDir = path.join(__dirname, '..', '..', 'src', 'electron');
+  const main = fs.readFileSync(path.join(electronDir, 'main.js'), 'utf8');
+  const preload = fs.readFileSync(path.join(electronDir, 'preload.js'), 'utf8');
+  assert.match(preload, /getArchivedSessionCount: \(\) => ipcRenderer\.invoke\('stats:archivedSessionCount'\)/);
+  assert.match(main, /createLocalArchivedSessionCounter\(\(\) => lastCollectedDevice \|\| anchorSeedDevice\)/);
+  assert.match(main, /ipcMain\.handle\('stats:archivedSessionCount', \(\) => \(\s*settings\?\.hubMode !== 'icloud' && !canRefreshUsageRuntime\(mode, isExternalAgentActive\)\s*\? null\s*: localArchivedSessionCount\(\)\s*\)\)/);
+  assert.match(fs.readFileSync(path.join(electronDir, 'renderer', 'app.js'), 'utf8'), /clearSessionUsageArchive\(\);[\s\S]{0,300}archivedSessionCountCleared\(\);\s*await refreshStats\(\);/);
+  assert.match(main, /sessionUsageArchiveStore\.clear\(\);[\s\S]{0,120}localArchivedSessionCount\.archiveCleared\(\);\s*return \{ ok: true \};/);
 });

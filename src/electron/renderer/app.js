@@ -5582,6 +5582,14 @@ function closeSessionDetail() {
   render();
 }
 
+// The back chevron shared by every Session Details heading.
+function sessionDetailBackArrow() {
+  const arrow = document.createElement('span');
+  arrow.className = 'detail-back-arrow';
+  arrow.setAttribute('aria-hidden', 'true');
+  return arrow;
+}
+
 function sessionDetailBack() {
   const returnTo = state.openSession?.returnTo;
   if (returnTo?.kind === 'session-group') {
@@ -5743,17 +5751,18 @@ function sessionDetailBackButton() {
   if (state.openSession) state.openSession.headingSignature = JSON.stringify([title, backLabel]);
   back.type = 'button';
   back.className = title ? 'detail-back detail-back-titled' : 'detail-back';
-  if (!title) back.textContent = `‹ ${backLabel}`;
+  if (!title) {
+    const label = document.createElement('span');
+    label.textContent = backLabel;
+    back.append(sessionDetailBackArrow(), label);
+  }
   back.setAttribute('aria-label', title
     ? t('sessions.backToWithTitle', { title, destination: backLabel })
     : t('sessions.backTo', { destination: backLabel }));
   back.addEventListener('click', sessionDetailBack);
 
   if (title) {
-    const arrow = document.createElement('span');
-    arrow.className = 'detail-back-arrow';
-    arrow.textContent = '‹';
-    arrow.setAttribute('aria-hidden', 'true');
+    const arrow = sessionDetailBackArrow();
     const heading = document.createElement('span');
     heading.className = 'detail-heading';
     heading.textContent = title;
@@ -5841,10 +5850,7 @@ function renderSessionGroupDetail(request) {
     title: label, destination: t('sessions') || 'Sessions'
   }));
   back.addEventListener('click', closeSessionDetail);
-  const arrow = document.createElement('span');
-  arrow.className = 'detail-back-arrow';
-  arrow.textContent = '‹';
-  arrow.setAttribute('aria-hidden', 'true');
+  const arrow = sessionDetailBackArrow();
   const heading = document.createElement('span');
   heading.className = 'detail-heading';
   heading.textContent = label;
@@ -5903,7 +5909,7 @@ function detailNote(text) {
 function exchangeNode(row, max, expanded = false) {
   const wrap = document.createElement('div');
   wrap.className = 'detail-exchange';
-  wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev">▸</span>'
+  wrap.innerHTML = '<div class="detail-ex-head"><span class="detail-chev" aria-hidden="true"></span>'
     + '<div class="detail-ex-label"><span class="detail-ex-title"></span><span class="detail-ex-sub"></span></div>'
     + '<div class="detail-ex-metrics"><span class="detail-ex-value"></span><span class="detail-ex-cost"></span></div></div>'
     + '<div class="bar"><div class="bar-fill"></div></div>'
@@ -5937,7 +5943,6 @@ function exchangeNode(row, max, expanded = false) {
   const setExpanded = (open) => {
     turnsEl.classList.toggle('hidden', !open);
     wrap.classList.toggle('expanded', open);
-    wrap.querySelector('.detail-chev').textContent = open ? '▾' : '▸';
   };
   setExpanded(expanded);
   wrap.querySelector('.detail-ex-head').addEventListener('click', () => {
@@ -7551,6 +7556,14 @@ function bindHomeTrendTooltip(chart, model, points) {
   const tooltip = homeActivityTooltipEl('home-trend-tooltip');
   tooltip.setAttribute('aria-live', 'polite');
   tooltip.setAttribute('aria-atomic', 'true');
+  const count = tooltip.querySelector('[data-home-activity-tooltip-count]');
+  count.setAttribute('aria-hidden', 'true');
+  let exactCount = tooltip.querySelector('.token-number-reading');
+  if (!exactCount) {
+    exactCount = document.createElement('span');
+    exactCount.className = 'token-number-reading';
+    tooltip.querySelector('.home-activity-tooltip-row').insertBefore(exactCount, count);
+  }
   const date = tooltip.querySelector('[data-home-activity-tooltip-date]');
   let cost = tooltip.querySelector('.home-trend-tooltip-cost');
   if (!cost) {
@@ -7583,14 +7596,16 @@ function bindHomeTrendTooltip(chart, model, points) {
     crosshair.style.left = left;
     marker.style.left = left;
     marker.style.top = `${point.y / model.height * 100}%`;
-    tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatNumber(daily.tokens);
+    const exactTokens = formatNumber(daily.tokens);
+    count.textContent = state.settings?.showExactHomeTrendTokens === true ? exactTokens : formatCompact(daily.tokens);
+    exactCount.textContent = exactTokens;
     date.textContent = daily.date;
     const hasCost = daily.cost != null && Number.isFinite(Number(daily.cost));
     cost.textContent = hasCost || Number(daily.unpricedTokens) > 0
       ? usageAttributionRowsApi.compactUsageCostLabel(daily.cost, daily.unpricedTokens,
         (amount) => currencyApi.formatCurrencyFromUsd(amount, currentCurrency())) : '';
     cost.hidden = !cost.textContent;
-    homeModule.setAttribute('aria-label', `${t('home.activity')} · ${t('home.trend')} · ${formatNumber(daily.tokens)} tokens${cost.textContent ? ` · ${cost.textContent}` : ''} · ${daily.date}`);
+    homeModule.setAttribute('aria-label', `${t('home.activity')} · ${t('home.trend')} · ${exactTokens} tokens${cost.textContent ? ` · ${cost.textContent}` : ''} · ${daily.date}`);
     chart.setAttribute('data-active', 'true');
     tooltip.dataset.visible = 'true';
     tooltip.setAttribute('aria-hidden', 'false');
@@ -9947,13 +9962,49 @@ function applyInitialBreakdownPreference() {
   if (next !== state.breakdown) setBreakdown(next);
 }
 
+// This machine's archived sessions, counted in main from the local record. It is
+// asked again for each new snapshot while Settings shows it, one request at a
+// time; a failed count waits for the next stats. A successful Clear shows zero
+// at once and drops any count asked for before it.
+const archivedSessionCountState = { requestedId: null, value: null, pending: false, clears: 0 };
+function requestArchivedSessionCount() {
+  const snapshot = state.stats?.snapshot;
+  const current = archivedSessionCountState;
+  if (!snapshot || current.pending || current.requestedId === snapshot.id || !isSettingsSurfaceVisible()) return;
+  current.requestedId = snapshot.id;
+  current.pending = true;
+  const clears = current.clears;
+  Promise.resolve()
+    .then(() => window.tokenMonitor.getArchivedSessionCount())
+    .then((count) => {
+      if (clears !== current.clears) return;
+      current.value = Number.isFinite(count) ? count : null;
+      renderSessionUsageArchiveStatus();
+    }, (error) => console.log(`[stats] archived session count failed: ${error?.message || error}`))
+    .finally(() => {
+      current.pending = false;
+      requestArchivedSessionCount();
+    });
+}
+
+function archivedSessionCountCleared() {
+  archivedSessionCountState.clears += 1;
+  archivedSessionCountState.value = 0;
+  renderSessionUsageArchiveStatus();
+}
+
 function renderSessionUsageArchiveStatus() {
   if (!els.sessionUsageArchiveStatus) return;
   if (state.settings?.sessionUsageArchiveEnabled === false) {
     els.sessionUsageArchiveStatus.textContent = t('settings.collection.sessionArchivePaused');
     return;
   }
-  const count = sessionRowsApi.archivedSessionCount(state.stats);
+  requestArchivedSessionCount();
+  const count = archivedSessionCountState.value;
+  if (count === null) {
+    els.sessionUsageArchiveStatus.textContent = '';
+    return;
+  }
   els.sessionUsageArchiveStatus.textContent = count > 0
     ? t('settings.collection.sessionArchiveActiveCount', { count })
     : t('settings.collection.sessionArchiveEmpty');
@@ -10302,7 +10353,6 @@ function syncSettingsForm() {
   if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled === true;
   if (els.sessionUsageArchiveInput) els.sessionUsageArchiveInput.checked = state.settings.sessionUsageArchiveEnabled !== false;
   renderAutomaticAppUpdateControl();
-  allTimeSessions.ensure();
   renderSessionUsageArchiveStatus();
   const exportAutoOn = Boolean(state.settings.exportAutoEnabled);
   const exportDir = state.settings.exportDir || '';
@@ -10523,7 +10573,7 @@ function preferenceRows(kind) {
           ? '.home-module-preference-row[data-home-module]'
           : kind === 'homeLimitProvider'
             ? '.home-limit-provider-row[data-home-limit-provider]'
-            : '.limit-provider-row[data-provider]';
+            : ':scope > .limit-provider-row[data-provider]';
   return Array.from(list?.querySelectorAll(selector) || []);
 }
 
@@ -10532,10 +10582,12 @@ function applyPreferenceOrder(kind, order) {
   if (!list) return;
   const attr = preferenceItemAttribute(kind);
   const rowsById = new Map(preferenceRows(kind).map((row) => [row.dataset[attr], row]));
+  // Grouped lists keep their ordered rows above the collapsed group.
+  const tail = list.querySelector(':scope > .settings-list-group-toggle, :scope > .settings-list-group');
   for (const id of order || []) {
     const row = rowsById.get(id);
     if (!row) continue;
-    list.appendChild(row);
+    list.insertBefore(row, tail);
     const companionId = kind === 'view'
       ? ({ home: 'homeSettingsContainer', limits: 'limitsViewSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', session: 'sessionSettingsContainer', status: 'serviceProvidersContainer' })[id]
       : kind === 'homeModule'
@@ -10709,7 +10761,8 @@ const limitProviderRowDrag = rowDragControllerApi.createRowDragController({
   dragSort: verticalDragSortApi,
   getList: () => els.limitProviderCheckboxes,
   getScrollPanel: () => els.settingsPanel,
-  rowSelector: '.limit-provider-row[data-provider]',
+  // Direct children only: disabled providers sit in their own group below.
+  rowSelector: ':scope > .limit-provider-row[data-provider]',
   idKey: 'provider',
   dragExcluded: LIMIT_PROVIDER_DRAG_EXCLUDED,
   getExpanded: () => state.limitProviderSettingsExpanded,
@@ -10717,7 +10770,7 @@ const limitProviderRowDrag = rowDragControllerApi.createRowDragController({
   applyOrder: (order) => applyPreferenceOrder('provider', order),
   preserveScroll: preserveSettingsPanelScroll,
   mirrorOrder: (order) => {
-    const value = limitProviderOrderApi.preserveAbsentPluginOrder(state.settings?.limitProviderOrder, order, desktopLimitProviders()).join(',');
+    const value = limitProviderOrderWithEnabled(order);
     state.settings = { ...state.settings, limitProviderOrder: value };
     return value;
   },
@@ -11253,6 +11306,34 @@ function renderHomeActivitySettings() {
   }
   daysRow.append(daysLabel, daysOptions);
   frag.append(daysRow);
+
+  const trendTokensRow = document.createElement('div');
+  trendTokensRow.className = 'home-activity-settings';
+  const trendTokensLabel = document.createElement('span');
+  trendTokensLabel.textContent = t('settings.home.trendTokens');
+  const trendTokensOptions = document.createElement('div');
+  trendTokensOptions.className = 'inline-options';
+  trendTokensOptions.setAttribute('role', 'radiogroup');
+  trendTokensOptions.setAttribute('aria-label', trendTokensLabel.textContent);
+  const showExactTokens = state.settings?.showExactHomeTrendTokens === true;
+  for (const mode of ['compact', 'exact']) {
+    const option = document.createElement('label');
+    option.className = 'inline-option';
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'homeTrendTokens';
+    input.value = mode;
+    input.checked = showExactTokens === (mode === 'exact');
+    input.addEventListener('change', () => {
+      if (input.checked) void saveSettings({ showExactHomeTrendTokens: mode === 'exact' }).then(renderHomeIfVisible);
+    });
+    const text = document.createElement('span');
+    text.textContent = t(`settings.home.trendTokens.${mode}`);
+    option.append(input, text);
+    trendTokensOptions.append(option);
+  }
+  trendTokensRow.append(trendTokensLabel, trendTokensOptions);
+  frag.append(trendTokensRow);
 
   return frag;
 }
@@ -12279,7 +12360,10 @@ const clientPreferenceRowDrag = rowDragControllerApi.createRowDragController({
   applyOrder: (order) => applyPreferenceOrder('client', order),
   preserveScroll: preserveSettingsPanelScroll,
   mirrorOrder: (order, id) => {
-    const patch = qoderDisplayApi.orderCommit(order, KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients, id);
+    // The drag sees only the tracked group; write it back into the full order.
+    const full = toolPreferenceRows().clients.map(client => client.id);
+    const merged = settingsListFilterApi.mergeSubsetOrder(full, order);
+    const patch = qoderDisplayApi.orderCommit(merged, KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients, id);
     state.settings = { ...state.settings, ...patch };
     return patch;
   },
@@ -12317,6 +12401,164 @@ function toolPreferenceRows() {
   return { clients, matched: new Set(matches.map(({ id }) => id)) };
 }
 
+// Leads a tracked-tool or limit-provider row, always in the text colour. A tool
+// without a mark keeps the same footprint with its initial, so names still
+// line up.
+function settingsListIcon(id, label, iconSet, extraClass = '') {
+  const icon = document.createElement('span');
+  icon.setAttribute('aria-hidden', 'true');
+  if (iconSet.has(id)) {
+    icon.className = `settings-list-icon ink-icon row-icon-${id}${extraClass ? ` ${extraClass}` : ''}`;
+  } else {
+    icon.className = 'settings-list-icon settings-list-icon-fallback';
+    icon.textContent = String(label || id).trim().charAt(0).toUpperCase();
+  }
+  return icon;
+}
+
+function settingsListRendered(list, rowSelector, rowCount, empty) {
+  return list.querySelectorAll(rowSelector).length === rowCount
+    && Boolean(list.querySelector(':scope > .settings-list-empty')) === empty;
+}
+
+// Enabled rows go straight into the list, in front of `before`, so the drag
+// controller and keyboard order — which only look at the list's own rows —
+// cover exactly the group that can be reordered. The rest wait in a collapsed
+// group underneath. While a filter is on, or when one side is empty, headings
+// would only add noise, so the rest are shown flat.
+function renderSettingsListGroups(list, { id, enabledCount, disabled, filtering, iconSet, iconClass = '', labels, expandedKey }) {
+  const rows = document.createElement('div');
+  rows.className = 'settings-list-group-rows';
+  if (!disabled.length) return { before: null, rows };
+  const host = document.createElement('div');
+  host.id = id;
+  host.className = 'accordion-animated-container settings-list-group';
+  const inner = document.createElement('div');
+  inner.className = 'accordion-animation-inner';
+  inner.append(rows);
+  host.append(inner);
+  if (filtering || !enabledCount) {
+    list.append(host);
+    return { before: host, rows };
+  }
+  const heading = document.createElement('p');
+  heading.className = 'settings-list-group-label';
+  heading.textContent = t(labels.enabled, { count: enabledCount });
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.id = `${id}Toggle`;
+  toggle.className = 'settings-list-group-toggle';
+  toggle.setAttribute('aria-controls', id);
+  const title = document.createElement('span');
+  title.className = 'settings-list-group-label';
+  title.textContent = t(labels.disabled, { count: disabled.length });
+  const icons = document.createElement('span');
+  icons.className = 'settings-list-group-icons';
+  icons.setAttribute('aria-hidden', 'true');
+  for (const item of disabled.slice(0, 5)) {
+    const chip = document.createElement('span');
+    chip.className = 'settings-list-group-icon';
+    chip.append(settingsListIcon(item.id, item.label, iconSet, iconClass));
+    icons.append(chip);
+  }
+  const action = document.createElement('span');
+  action.className = 'settings-list-group-action';
+  const chevron = document.createElement('span');
+  chevron.className = 'cursor-disclosure-icon';
+  chevron.setAttribute('aria-hidden', 'true');
+  toggle.append(title, icons, action, chevron);
+  const apply = (expanded) => {
+    state[expandedKey] = expanded;
+    toggle.setAttribute('aria-expanded', String(expanded));
+    toggle.classList.toggle('expanded', expanded);
+    action.textContent = t(expanded ? 'settings.list.group.collapse' : 'settings.list.group.showAll');
+    host.classList.toggle('hidden', !expanded);
+    host.inert = !expanded;
+  };
+  apply(state[expandedKey] === true);
+  toggle.addEventListener('click', () => apply(host.classList.contains('hidden')));
+  list.append(heading, toggle, host);
+  return { before: toggle, rows };
+}
+
+// Restores focus after a repaint. A switch just turned off lands in the
+// collapsed, inert group, so focus goes to that group's toggle instead of
+// falling back to the document.
+function restoreSettingsListFocus(focusedId) {
+  if (!focusedId || document.activeElement !== document.body) return;
+  const target = document.getElementById(focusedId);
+  const group = target?.closest('.settings-list-group');
+  const toggle = group?.inert ? document.getElementById(`${group.id}Toggle`) : null;
+  (toggle || target)?.focus({ preventScroll: true });
+  // The toggle can sit below the fold of a long list. Reveal it after the
+  // repaint's scroll preservation, by id since a later repaint may replace it,
+  // and as an interaction so a pending restore does not scroll it away again.
+  if (toggle && typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => setTimeout(() => {
+      const current = document.getElementById(toggle.id);
+      if (!current || document.activeElement !== current) return;
+      settingsScrollInteractionRevision += 1;
+      current.scrollIntoView({ block: 'nearest' });
+    }, 0));
+  }
+}
+
+// Switching a row on or off moves it between the groups. The toggle records
+// what it expects, and the repaint that shows it slides the rows into place
+// instead of letting them jump.
+function takeSettingsListMotion(kind, isEnabled) {
+  const motion = state.settingsListMotion;
+  if (motion?.kind !== kind || isEnabled(motion.id) !== motion.enabled) return false;
+  state.settingsListMotion = null;
+  return !prefersReducedMotion();
+}
+
+function settingsRowVisible(row) {
+  return !row.classList.contains('is-filtered-out') && !row.closest('.accordion-animated-container.hidden');
+}
+
+function captureSettingsRowMotion(list, selector, key) {
+  const base = list.getBoundingClientRect().top;
+  const tops = new Map();
+  for (const row of list.querySelectorAll(selector)) {
+    if (!settingsRowVisible(row)) continue;
+    tops.set(row.dataset[key], { top: row.getBoundingClientRect().top - base, grouped: Boolean(row.closest('.settings-list-group')) });
+  }
+  return tops;
+}
+
+function playSettingsRowMotion(list, selector, key, before) {
+  if (!before) return;
+  const base = list.getBoundingClientRect().top;
+  const timing = { duration: 220, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' };
+  for (const row of list.querySelectorAll(selector)) {
+    if (!settingsRowVisible(row)) continue;
+    const from = before.get(row.dataset[key]);
+    // A row crossing into the group would slide in from above its clipping
+    // wrapper and stay hidden until it got there, so it fades in instead.
+    const entering = !from || (!from.grouped && Boolean(row.closest('.settings-list-group')));
+    const offset = entering ? 0 : from.top - (row.getBoundingClientRect().top - base);
+    // `translate`, not `transform`: the drag controller owns the transform.
+    if (entering) row.animate([{ opacity: 0 }, { opacity: 1 }], timing);
+    else if (Math.abs(offset) > 0.5) row.animate([{ translate: `0 ${offset}px` }, { translate: '0 0' }], timing);
+  }
+}
+
+// The tracked selection including writes still in flight, so a repaint during
+// a toggle keeps each row in the group its switch shows.
+function pendingTrackedClients() {
+  return Object.assign({}, state.settings, ...pendingSettingsPatches).clients;
+}
+
+// Whether a tracked-tools row belongs to the tracked group. Qoder's single row
+// counts when either edition is tracked.
+function clientRowTracked(id) {
+  const clients = pendingTrackedClients();
+  if (id !== 'qoder') return String(clients || '').split(',').map(s => s.trim().toLowerCase()).includes(id);
+  const tracking = qoderDisplayApi.trackingState(clients);
+  return tracking.checked || tracking.mixed;
+}
+
 function renderSettingsListEmptyState(list) {
   const empty = document.createElement('p');
   empty.className = 'settings-note settings-list-empty';
@@ -12330,7 +12572,9 @@ function toolPreferenceRenderSignature() {
   const device = localDevice();
   return JSON.stringify({
     settings: [
-      [...enabledClientSet()].sort(),
+      // The rows group by the selection including in-flight writes, so a write
+      // that fails and is dropped must invalidate them too.
+      String(pendingTrackedClients() || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean).sort(),
       state.settings?.hiddenClients || '',
       state.settings?.separateQoderClients === true,
       state.settings?.pinnedClients || '',
@@ -12358,18 +12602,20 @@ function renderToolPreferencesNow() {
   const detailSignature = JSON.stringify([
     localClientHealth(),
     localDevice(),
-    state.settings?.currencyRatesEffective || null
+    state.settings?.currencyRatesEffective || null,
+    // The open panel's actions read the saved selection, which can land after
+    // the rows already repainted from the pending one.
+    state.settings?.clients || ''
   ]);
   const sourceSignature = clientSourcesPanelKey(state.clientHealthExpanded);
   const { clients, matched } = toolPreferenceRows();
   // Every client keeps a row; a query with no match adds the no-matches note on
   // top of them, so the short-circuit compares against what this query is
   // expected to have produced.
-  const expectedRowCount = clients.length + (matched.size ? 0 : 1);
   if (
     state.toolPreferenceRenderSignature
     && state.toolPreferenceRenderSignature === renderSignature
-    && els.clientDisplayList.children.length === expectedRowCount
+    && settingsListRendered(els.clientDisplayList, '.tool-preference-row[data-client]', clients.length, !matched.size)
   ) {
     if (state.toolPreferenceDetailSignature !== detailSignature) {
       state.toolPreferenceDetailSignature = detailSignature;
@@ -12386,9 +12632,11 @@ function renderToolPreferencesNow() {
   state.toolPreferenceRenderSignature = renderSignature;
   state.toolPreferenceDetailSignature = detailSignature;
   state.toolPreferenceSourceSignature = sourceSignature;
-  const previousRows = Array.from(els.clientDisplayList.children);
+  const previousChildren = Array.from(els.clientDisplayList.children);
   const focusedId = document.activeElement?.id || '';
-  const enabled = enabledClientSet();
+  // One selection for the whole repaint, including writes still in flight:
+  // grouping, switches and the attention check must agree with the signature.
+  const enabled = new Set(String(pendingTrackedClients() || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean));
   const hidden = hiddenClientSet();
   const pinned = pinnedClientSet();
   const clientStatus = localClientStatus();
@@ -12399,8 +12647,24 @@ function renderToolPreferencesNow() {
   const hasHiddenClients = hidden.size > 0;
   if (els.resetClientDisplayOrderButton) els.resetClientDisplayOrderButton.disabled = !hasCustomOrder && !hasPinnedClients;
   if (els.showAllClientsButton) els.showAllClientsButton.disabled = !hasHiddenClients;
+  const qoderTrackingState = qoderDisplayApi.trackingState(pendingTrackedClients());
+  const isTracked = clientRowTracked;
+  const motion = takeSettingsListMotion('client', isTracked)
+    ? captureSettingsRowMotion(els.clientDisplayList, '.tool-preference-row[data-client]', 'client')
+    : null;
+  const untrackedClients = clients.filter(({ id }) => !isTracked(id));
+  const groups = renderSettingsListGroups(els.clientDisplayList, {
+    id: 'clientDisplayUntrackedGroup',
+    enabledCount: clients.length - untrackedClients.length,
+    disabled: untrackedClients,
+    filtering,
+    iconSet: clientsWithIcon,
+    labels: { enabled: 'settings.tools.group.tracked', disabled: 'settings.tools.group.untracked' },
+    expandedKey: 'clientDisplayUntrackedExpanded'
+  });
   for (const { id, label } of clients) {
-    const qoderTracking = id === 'qoder' ? qoderDisplayApi.trackingState(Object.assign({}, state.settings, ...pendingSettingsPatches).clients) : null;
+    const qoderTracking = id === 'qoder' ? qoderTrackingState : null;
+    const tracked = isTracked(id);
     const row = document.createElement('div');
     row.className = 'tool-preference-row';
     row.dataset.client = id;
@@ -12408,14 +12672,16 @@ function renderToolPreferencesNow() {
     const isPinned = id === 'qoder' ? qoderDisplayApi.IDS.some(member => pinned.has(member)) : pinned.has(id);
     row.classList.toggle('is-hidden', isHidden);
     row.classList.toggle('is-pinned', isPinned);
+    row.classList.toggle('is-untracked', !tracked);
     row.classList.toggle('is-filtered-out', !matched.has(id));
-    const labelGroup = document.createElement('div');
+    const labelGroup = document.createElement('span');
     labelGroup.className = 'tool-preference-label';
-    const name = document.createElement('div');
+    const name = document.createElement('span');
     name.className = 'tool-preference-name';
     name.textContent = label;
-    labelGroup.append(name);
-    if (id === 'qoder' ? qoderTracking.checked || qoderTracking.mixed : enabled.has(id)) {
+    labelGroup.append(settingsListIcon(id, label, clientsWithIcon), name);
+    let statusTag = null;
+    if (tracked) {
       // A tracked client with no reported status yet (first collect still running)
       // reads as "waiting for data" rather than a bare blank.
       //
@@ -12432,32 +12698,43 @@ function renderToolPreferencesNow() {
           ? { key: qoderTracking.mixed ? 'settings.tools.qoder.partial' : 'settings.tools.qoder.all', tone: 'ok' }
           : clientStatusPresentationApi.clientStatusTag(id, clientStatus[id] || 'waiting');
       if (tagInfo) {
-        const tag = document.createElement('span');
-        tag.className = `tool-status-tag tool-status-tag-${tagInfo.tone}`;
-        tag.textContent = t(tagInfo.key);
-        labelGroup.append(tag);
+        statusTag = document.createElement('span');
+        statusTag.className = `tool-status-tag tool-status-tag-${tagInfo.tone}`;
+        // A healthy client is a dot: the group heading already says it is
+        // tracked. Every other state keeps its words.
+        if (tagInfo.tone === 'ok' && tagInfo.key !== 'settings.tools.qoder.partial') {
+          statusTag.classList.add('is-dot');
+          statusTag.setAttribute('role', 'img');
+          statusTag.setAttribute('aria-label', t(tagInfo.key));
+        } else {
+          statusTag.textContent = t(tagInfo.key);
+        }
       }
     }
     const track = document.createElement('label');
     track.className = 'tool-preference-toggle';
     const trackInput = document.createElement('input');
     trackInput.type = 'checkbox';
+    trackInput.className = 'settings-switch';
     trackInput.id = id === 'qoder' ? 'toolTrackGroup-qoder' : `toolTrackEnabled-${id}`;
     trackInput.dataset.client = id;
     trackInput.dataset.preference = id === 'qoder' ? 'track-group' : 'track';
-    trackInput.checked = id === 'qoder' ? qoderTracking.checked : enabled.has(id);
+    trackInput.checked = id === 'qoder' ? qoderTracking.checked : tracked;
     trackInput.indeterminate = id === 'qoder' && qoderTracking.mixed;
     trackInput.setAttribute('aria-label', t('settings.tools.trackClient', { name: label }));
+    trackInput.addEventListener('change', () => { state.settingsListMotion = { kind: 'client', id, enabled: trackInput.checked }; });
     trackInput.addEventListener('change', id === 'qoder' ? () => onQoderTrackingToggle(trackInput.checked) : onToolTrackingToggle);
-    // The drag handle is gone, so the checkbox carries the keyboard reorder
+    // The drag handle is gone, so the switch carries the keyboard reorder
     // shortcuts. A checkbox has no native arrow-key behaviour, so the existing
-    // key bindings transfer unchanged.
-    trackInput.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown Home End');
+    // key bindings transfer unchanged. Only the tracked group is ordered.
     // Arrow/Home/End reordering derives the next order from settings rather than
     // from the DOM, so a filter cannot corrupt it — but it would move the row
     // through positions the query has hidden, with nothing on screen to show
     // for it. Off while filtering, like the drag.
-    if (!filtering) trackInput.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, 'client', id));
+    if (!filtering && tracked) {
+      trackInput.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown Home End');
+      trackInput.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, 'client', id));
+    }
     track.append(trackInput);
     const visibility = document.createElement('button');
     visibility.type = 'button';
@@ -12477,16 +12754,26 @@ function renderToolPreferencesNow() {
     pin.setAttribute('aria-pressed', String(isPinned));
     pin.append(pinIcon());
     pin.addEventListener('click', () => id === 'qoder' ? onQoderPreferenceToggle('pinnedClients') : onClientPinnedToggle(id));
+    // Status sits against the switch, as on the limits list; the eye and pin
+    // appear to its left on hover.
     const actions = document.createElement('div');
     actions.className = 'tool-preference-actions';
     actions.append(visibility, pin);
+    if (statusTag) actions.append(statusTag);
+    actions.append(track);
+    // Same lead column as the limits list: the chevron, or an empty slot, keeps
+    // every icon and name aligned.
+    const disclosure = document.createElement('span');
+    disclosure.className = 'tool-preference-chevron';
+    disclosure.setAttribute('aria-hidden', 'true');
     // Tracked tools use the health snapshot; untracked tools get an on-demand
     // source view so every row keeps the same disclosure affordance.
     const detail = clientHealthDetailFor(id);
+    let main;
     if (detail) {
       const expanded = state.clientHealthExpanded === id;
       row.classList.toggle('expanded', expanded);
-      const main = document.createElement('button');
+      main = document.createElement('button');
       main.type = 'button';
       main.id = `toolHealthDisclosure-${id}`;
       main.className = 'tool-preference-main';
@@ -12494,8 +12781,7 @@ function renderToolPreferencesNow() {
       main.setAttribute('aria-expanded', String(expanded));
       const disclosureIcon = document.createElement('span');
       disclosureIcon.className = 'cursor-disclosure-icon';
-      disclosureIcon.setAttribute('aria-hidden', 'true');
-      main.append(disclosureIcon);
+      disclosure.append(disclosureIcon);
       const panel = document.createElement('div');
       panel.id = `toolHealthPanel-${id}`;
       panel.className = `accordion-animated-container${expanded ? '' : ' hidden'}`;
@@ -12508,26 +12794,28 @@ function renderToolPreferencesNow() {
         const open = state.clientHealthExpanded !== id;
         setClientHealthExpanded(open ? id : '', { refreshPlaceholder: open });
       });
-      // Last of the row's controls, where the eye and the pin already are —
-      // the label stays plain text, exactly as it reads without this feature.
-      actions.append(main);
       row.classList.add('has-health');
-      row.append(track, labelGroup, actions, panel);
+      main.append(disclosure, labelGroup);
+      row.append(main, actions, panel);
     } else {
-      row.append(track, labelGroup, actions);
+      main = document.createElement('div');
+      main.className = 'tool-preference-main';
+      main.append(disclosure, labelGroup);
+      row.append(main, actions);
     }
     // Reordering is suppressed while a filter is on: the drop commits the order
-    // it reads off the list, and a filtered list is only part of it.
-    if (!filtering) row.addEventListener('pointerdown', (event) => clientPreferenceRowDrag.startRowDrag(event, id));
-    els.clientDisplayList.appendChild(row);
+    // it reads off the list, and a filtered list is only part of it. Untracked
+    // tools wait in their own group and have no order to change.
+    if (!filtering && tracked) row.addEventListener('pointerdown', (event) => clientPreferenceRowDrag.startRowDrag(event, id));
+    if (tracked) els.clientDisplayList.insertBefore(row, groups.before);
+    else groups.rows.append(row);
   }
   if (!matched.size) renderSettingsListEmptyState(els.clientDisplayList);
   // Appended first and only then swapped out: replacing the list wholesale
   // would destroy the row under the pointer on every stats tick.
-  for (const row of previousRows) row.remove();
-  if (focusedId && document.activeElement === document.body) {
-    document.getElementById(focusedId)?.focus({ preventScroll: true });
-  }
+  for (const child of previousChildren) child.remove();
+  restoreSettingsListFocus(focusedId);
+  playSettingsRowMotion(els.clientDisplayList, '.tool-preference-row[data-client]', 'client', motion);
 }
 
 function connectLimitProviderCheckboxName(checkbox, nameNode, providerId) {
@@ -12584,14 +12872,14 @@ function renderLimitProviderCheckboxesNow() {
   const { providers, matched } = limitProviderRows();
   // Same reasoning as the tracked-tools list: every provider keeps a row, and no
   // matches leaves the no-matches note on top of them.
-  const expectedRowCount = providers.length + (matched.size ? 0 : 1);
   if (
     state.limitProviderRenderSignature === renderSignature
-    && els.limitProviderCheckboxes.children.length === expectedRowCount
+    && settingsListRendered(els.limitProviderCheckboxes, '.limit-provider-row[data-provider]', providers.length, !matched.size)
   ) {
     return;
   }
-  const previousRows = Array.from(els.limitProviderCheckboxes.children);
+  const previousChildren = Array.from(els.limitProviderCheckboxes.children);
+  const previousRows = Array.from(els.limitProviderCheckboxes.querySelectorAll('.limit-provider-row[data-provider]'));
   const focusedId = document.activeElement?.id || '';
   const reusableSettingInputs = new Map();
   for (const row of previousRows) {
@@ -12610,6 +12898,20 @@ function renderLimitProviderCheckboxesNow() {
   }
   const enabled = enabledLimitProviderSet();
   const filtering = Boolean(limitProviderQuery());
+  const motion = takeSettingsListMotion('provider', id => enabled.has(id))
+    ? captureSettingsRowMotion(els.limitProviderCheckboxes, '.limit-provider-row[data-provider]', 'provider')
+    : null;
+  const disabledProviders = providers.filter(({ id }) => !enabled.has(id));
+  const groups = renderSettingsListGroups(els.limitProviderCheckboxes, {
+    id: 'limitProviderDisabledGroup',
+    enabledCount: providers.length - disabledProviders.length,
+    disabled: disabledProviders.map(({ id, label, settingsLabel }) => ({ id, label: settingsLabel || label })),
+    filtering,
+    iconSet: limitMarksWithIcon,
+    iconClass: 'limit-icon',
+    labels: { enabled: 'settings.limits.group.enabled', disabled: 'settings.limits.group.disabled' },
+    expandedKey: 'limitProviderDisabledExpanded'
+  });
   const localId = state.settings?.deviceId;
   const remoteProviders = new Set((state.stats?.limits?.providers || [])
     .filter(row => row.accountKey && row.sourceDeviceId && row.sourceDeviceId !== localId).map(row => row.provider));
@@ -12624,19 +12926,23 @@ function renderLimitProviderCheckboxesNow() {
     row.className = `limit-provider-row${isEnabled ? '' : ' is-disabled'}${matched.has(id) ? '' : ' is-filtered-out'}`;
     row.dataset.provider = id;
     const wrap = document.createElement('label');
-    wrap.className = 'client-checkbox limit-provider-toggle';
+    wrap.className = 'limit-provider-toggle';
     const cb = document.createElement('input');
     cb.type = 'checkbox';
+    cb.className = 'settings-switch';
     cb.id = `limitProviderEnabled-${id}`;
     cb.dataset.provider = id;
     cb.checked = isEnabled;
+    cb.addEventListener('change', () => { state.settingsListMotion = { kind: 'provider', id, enabled: cb.checked }; });
     cb.addEventListener('change', onLimitProviderToggle);
-    // The drag handle is gone, so the checkbox carries the keyboard reorder
+    // The drag handle is gone, so the switch carries the keyboard reorder
     // shortcuts. A checkbox has no native arrow-key behaviour, so the existing
-    // key bindings transfer unchanged.
-    cb.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown Home End');
+    // key bindings transfer unchanged. Only the enabled group is ordered.
     // Off while filtering, for the reason given on the tracked-tools list.
-    if (!filtering) cb.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, 'provider', id));
+    if (!filtering && isEnabled) {
+      cb.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown Home End');
+      cb.addEventListener('keydown', (event) => onPreferenceOrderKeydown(event, 'provider', id));
+    }
     const copy = document.createElement('span');
     copy.className = 'limit-provider-copy';
     const nameLine = document.createElement('span');
@@ -12645,17 +12951,19 @@ function renderLimitProviderCheckboxesNow() {
     text.className = 'limit-provider-name';
     text.textContent = settingsLabel || label;
     connectLimitProviderCheckboxName(cb, text, id);
-    nameLine.append(text);
-    const tags = document.createElement('span');
-    tags.className = 'limit-provider-tags';
+    nameLine.append(settingsListIcon(id, settingsLabel || label, limitMarksWithIcon, 'limit-icon'), text);
+    // Status reads on the right, beside the switch: a dot when healthy, then
+    // whatever summary the provider owns.
+    const actions = document.createElement('span');
+    actions.className = 'limit-provider-actions';
     const provenance = limitProviderProvenance(provider);
     const sources = limitProviderPresentationApi.connectionSources(id, state.settings?.limitConnectionSources || []);
     const accountGroup = limitProviderAccountGroup(id);
     const pluginModule = state.pluginCatalog?.limits?.modules?.find(module => module.id === id);
-    const tagInfos = pluginModule ? limitProviderPresentationApi.limitProviderSettingsTags(provider, provenance)
-      : [...limitProviderPresentationApi.limitProviderSettingsTags(provider, provenance).filter(tag => tag.kind === 'status'),
-        limitProviderPresentationApi.connectionTag(id, state.settings?.limitConnectionSources || [])].filter(Boolean);
-    if (pluginModule) tagInfos.push(...limitProviderPresentationApi.pluginLimitCapabilityTags(pluginModule));
+    const tagInfos = pluginModule
+      ? limitProviderPresentationApi.limitProviderSettingsTags(provider, provenance).filter(tag => tag.kind !== 'capability')
+      : limitProviderPresentationApi.limitProviderSettingsTags(provider, provenance).filter(tag => tag.kind === 'status');
+    if (pluginModule) tagInfos.push(...limitProviderPresentationApi.pluginLimitCapabilityTags(pluginModule).filter(tag => tag.kind === 'custom'));
     const detected = provider.status === 'ok' && !provider.stale;
     if (detected) {
       const statusTag = limitProviderPresentationApi.limitProviderStatusLabel(provider);
@@ -12663,7 +12971,7 @@ function renderLimitProviderCheckboxesNow() {
       dot.className = 'limit-provider-status-dot';
       dot.setAttribute('aria-label', translatedLimitProviderTag(statusTag));
       dot.setAttribute('role', 'img');
-      nameLine.append(dot);
+      actions.append(dot);
     }
     for (const tagInfo of tagInfos) {
       if ((pluginModule || detected || !isEnabled) && tagInfo.kind === 'status') continue;
@@ -12673,15 +12981,14 @@ function renderLimitProviderCheckboxesNow() {
       const tag = document.createElement('span');
       tag.className = `limit-provider-tag limit-provider-tag-${tagInfo.kind}`;
       if (tagInfo.tone) tag.classList.add(`limit-provider-tag-${tagInfo.tone}`);
-      tag.textContent = tagInfo.kind === 'custom' ? tagInfo.label
-        : tagInfo.parts ? tagInfo.parts.map(translatedLimitCapabilityTag).join('/')
-          : translatedLimitProviderTag(tagInfo);
-      tags.append(tag);
+      tag.textContent = tagInfo.kind === 'custom' ? tagInfo.label : translatedLimitProviderTag(tagInfo);
+      actions.append(tag);
     }
-    copy.append(nameLine, tags);
+    // One status phrase beside the switch: a state that needs action speaks for
+    // the row, and the account summary waits in the expanded options.
+    row.classList.toggle('has-status-tag', Boolean(actions.querySelector('.limit-provider-tag-status')));
+    copy.append(nameLine);
     wrap.append(cb);
-    const actions = document.createElement('span');
-    actions.className = 'limit-provider-actions';
     const accountStatus = limitProviderAccountStatus(id);
     if (accountStatus) {
       accountStatus.classList.toggle('hidden', !isEnabled);
@@ -12694,12 +13001,6 @@ function renderLimitProviderCheckboxesNow() {
       } else if (accountStatus.dataset?.localScope) {
         delete accountStatus.dataset.localScope;
         accountStatus.removeAttribute('aria-description');
-      }
-      if (!isEnabled) {
-        const disabledStatus = document.createElement('span');
-        disabledStatus.className = 'cursor-status-pill';
-        disabledStatus.textContent = t('settings.limits.status.disabled');
-        actions.append(disabledStatus);
       }
     }
     if (pluginModule) {
@@ -12716,7 +13017,7 @@ function renderLimitProviderCheckboxesNow() {
     }
     // Multi-account providers use this space for their account summary. Their
     // automatic collection support stays with the capability tags on the left.
-    if (!accountGroup && sources.some(source => ['cli', 'desktop', 'oauth', 'file'].includes(source.kind))) {
+    if (isEnabled && !accountGroup && sources.some(source => ['cli', 'desktop', 'oauth', 'file'].includes(source.kind))) {
       const mode = document.createElement('span');
       mode.className = 'cursor-status-pill limit-provider-mode-pill';
       const preference = state.settings?.[`${id}SourcePreference`];
@@ -12730,7 +13031,11 @@ function renderLimitProviderCheckboxesNow() {
     let optionsContainer = null;
     let optionsInner = null;
     let main = null;
-    let disclosureIcon = null;
+    // A fixed lead column, empty when there is nothing to expand, keeps every
+    // icon and name on the same line.
+    const disclosure = document.createElement('span');
+    disclosure.className = 'limit-provider-chevron';
+    disclosure.setAttribute('aria-hidden', 'true');
     if (hasOptions) {
       const expanded = state.limitProviderSettingsExpanded === id;
       row.classList.toggle('expanded', expanded);
@@ -12740,10 +13045,9 @@ function renderLimitProviderCheckboxesNow() {
       main.className = 'limit-provider-main';
       main.setAttribute('aria-description', t('settings.limits.providerOptions', { provider: settingsLabel || label }));
       main.setAttribute('aria-expanded', String(expanded));
-      disclosureIcon = document.createElement('span');
+      const disclosureIcon = document.createElement('span');
       disclosureIcon.className = 'cursor-disclosure-icon';
-      disclosureIcon.setAttribute('aria-hidden', 'true');
-      actions.append(disclosureIcon);
+      disclosure.append(disclosureIcon);
       optionsContainer = document.createElement('div');
       optionsContainer.id = `limitProviderOptions-${id}`;
       optionsContainer.className = `accordion-animated-container${expanded ? '' : ' hidden'}`;
@@ -12765,23 +13069,25 @@ function renderLimitProviderCheckboxesNow() {
       };
       main.addEventListener('click', toggleOptions);
     }
-    if (main) {
-      main.append(copy, actions);
-      row.append(wrap, main);
-    } else {
-      row.append(wrap, copy, actions);
+    if (!main) {
+      main = document.createElement('span');
+      main.className = 'limit-provider-main';
     }
+    main.append(disclosure, copy, actions);
+    row.append(main, wrap);
     // Reordering is suppressed while a filter is on: the drop commits the order
-    // it reads off the list, and a filtered list is only part of it.
-    if (!filtering) row.addEventListener('pointerdown', (event) => limitProviderRowDrag.startRowDrag(event, id));
+    // it reads off the list, and a filtered list is only part of it. Disabled
+    // providers wait in their own group and have no order to change.
+    if (!filtering && isEnabled) row.addEventListener('pointerdown', (event) => limitProviderRowDrag.startRowDrag(event, id));
     // Kept inside the row rather than as a sibling: reordering moves only
     // `.limit-provider-row` nodes, so a sibling panel would be stranded when the
     // list is dragged.
     if (optionsContainer) row.append(optionsContainer);
-    els.limitProviderCheckboxes.appendChild(row);
+    if (isEnabled) els.limitProviderCheckboxes.insertBefore(row, groups.before);
+    else groups.rows.append(row);
     // `moveBefore()` preserves focus and edit state while reparenting. Its
     // destination must already be connected, so the row is mounted first.
-    moveLimitProviderLiveNode(actions, accountStatus, disclosureIcon);
+    moveLimitProviderLiveNode(actions, accountStatus);
     moveLimitProviderLiveNode(optionsInner, accountGroup);
     prioritizeLimitProviderAccounts(accountGroup);
     if (!pluginModule && !accountGroup && !limitAccountForm(id)
@@ -12811,10 +13117,9 @@ function renderLimitProviderCheckboxesNow() {
     }
   }
   if (!matched.size) renderSettingsListEmptyState(els.limitProviderCheckboxes);
-  for (const row of previousRows) row.remove();
-  if (focusedId && document.activeElement === document.body) {
-    document.getElementById(focusedId)?.focus({ preventScroll: true });
-  }
+  for (const child of previousChildren) child.remove();
+  restoreSettingsListFocus(focusedId);
+  playSettingsRowMotion(els.limitProviderCheckboxes, '.limit-provider-row[data-provider]', 'provider', motion);
   state.limitProviderRenderSignature = renderSignature;
   pluginLimitSettings?.reconcile();
 }
@@ -13417,16 +13722,33 @@ async function onLimitProviderToggle() {
   }
 }
 
+// The saved order covers every provider; only the enabled group is reordered
+// on screen. See `mergeSubsetOrder`.
+function limitProviderOrderWithEnabled(order) {
+  const full = limitProviderOrderApi.normalizeLimitProviderOrder(state.settings?.limitProviderOrder, desktopLimitProviders());
+  const merged = settingsListFilterApi.mergeSubsetOrder(full, order);
+  return limitProviderOrderApi.preserveAbsentPluginOrder(state.settings?.limitProviderOrder, merged, desktopLimitProviders()).join(',');
+}
+
+function enabledLimitProviderOrder() {
+  const enabled = enabledLimitProviderSet();
+  return limitProviderOrderApi.normalizeLimitProviderOrder(state.settings?.limitProviderOrder, desktopLimitProviders())
+    .filter(id => enabled.has(id));
+}
+
 async function onLimitProviderMove(providerId, direction) {
-  const next = limitProviderOrderApi.moveLimitProvider(state.settings?.limitProviderOrder, desktopLimitProviders(), providerId, direction);
-  await saveSettings({ limitProviderOrder: limitProviderOrderApi.preserveAbsentPluginOrder(state.settings?.limitProviderOrder, next.split(','), desktopLimitProviders()).join(',') });
+  const from = enabledLimitProviderOrder().indexOf(providerId);
+  if (from >= 0) await onLimitProviderReorder(providerId, from + (direction === 'up' ? -1 : 1));
 }
 
 async function onLimitProviderReorder(providerId, targetIndex) {
-  const current = limitProviderOrderApi.normalizeLimitProviderOrder(state.settings?.limitProviderOrder, desktopLimitProviders()).join(',');
-  const next = limitProviderOrderApi.reorderLimitProvider(state.settings?.limitProviderOrder, desktopLimitProviders(), providerId, targetIndex);
-  if (next === current) return;
-  await saveSettings({ limitProviderOrder: limitProviderOrderApi.preserveAbsentPluginOrder(state.settings?.limitProviderOrder, next.split(','), desktopLimitProviders()).join(',') });
+  const order = enabledLimitProviderOrder();
+  const from = order.indexOf(providerId);
+  const to = Math.max(0, Math.min(order.length - 1, Number(targetIndex) || 0));
+  if (from < 0 || from === to) return;
+  order.splice(from, 1);
+  order.splice(to, 0, providerId);
+  await saveSettings({ limitProviderOrder: limitProviderOrderWithEnabled(order) });
 }
 
 async function onViewDisplayMove(viewId, direction) {
@@ -13558,16 +13880,18 @@ function onPreferenceOrderKeydown(event, kind, id) {
     event.preventDefault();
     const ordered = clientDisplayPreferencesApi.orderedClients(KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients).map(client => client.id);
     const order = qoderDisplayApi.displayPreference(ordered.join(','), false).split(',');
-    const from = order.indexOf(id);
-    let target = event.key === 'Home' ? 0 : event.key === 'End' ? order.length - 1 : from + (event.key === 'ArrowUp' ? -1 : 1);
-    const pinned = qoderDisplayApi.displayPreference([...pinnedClientSet()].join(','), false).split(',').filter(Boolean);
+    // Only the tracked group is ordered on screen; see `mergeSubsetOrder`.
+    const tracked = order.filter(clientRowTracked);
+    const from = tracked.indexOf(id);
+    let target = event.key === 'Home' ? 0 : event.key === 'End' ? tracked.length - 1 : from + (event.key === 'ArrowUp' ? -1 : 1);
+    const pinned = qoderDisplayApi.displayPreference([...pinnedClientSet()].join(','), false).split(',').filter(client => tracked.includes(client));
     if (!clientDisplayPreferencesApi.hasCustomDisplayOrder(state.settings?.clientDisplayOrder) && pinned.includes(id)) {
       target = Math.max(0, Math.min(pinned.length - 1, target));
     }
-    if (from < 0 || target < 0 || target >= order.length || target === from) return;
-    order.splice(from, 1);
-    order.splice(target, 0, id);
-    const patch = qoderDisplayApi.orderCommit(order, KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients, id);
+    if (from < 0 || target < 0 || target >= tracked.length || target === from) return;
+    tracked.splice(from, 1);
+    tracked.splice(target, 0, id);
+    const patch = qoderDisplayApi.orderCommit(settingsListFilterApi.mergeSubsetOrder(order, tracked), KNOWN_CLIENTS, state.settings?.clientDisplayOrder, state.settings?.pinnedClients, id);
     void saveSettings(patch);
     return;
   }
@@ -13659,11 +13983,16 @@ async function saveSettings(patch, syncContentBase) {
     setSyncContentEditError(patch, error);
     console.error('Could not persist settings:', error);
     try { state.settings = await window.tokenMonitor.getSettings(); } catch (_) {}
+    const trackingScanPending = String(error?.message || '').includes('tracking-scan-pending');
+    if (trackingScanPending) state.toolPreferenceRenderSignature = '';
     applyEffectiveCurrencyRates();
     preserveSettingsPanelScroll(syncSettingsForm);
     if (isSettingsSurfaceVisible()) render(); else statsRenderScheduler.request();
     restartTimer();
     maybeUpdateBarsIcon();
+    if (trackingScanPending) {
+      window.alert(t('settings.tools.trackingScanPending'));
+    }
     throw error;
   }
   pendingSettingsPatches.delete(patch);
@@ -13787,14 +14116,16 @@ const pluginLimitSettings = pluginViewHost ? window.TokenMonitorPluginLimitSetti
   getView: module => state.pluginCatalog?.plugins?.find(plugin => plugin.id === module.pluginId && plugin.status === 'active')?.views?.find(view => view.id === module.settingsView && view.surfaces.includes('settings')),
   isVisible: (module, container) => container.isConnected && isSettingsSurfaceVisible()
     && state.settingsSections?.limits && state.limitProviderSettingsExpanded === module.id
-    && !container.closest('.is-filtered-out')
+    && !container.closest('.is-filtered-out, .settings-list-group.hidden')
 }) : null;
 if (pluginLimitSettings) {
   new MutationObserver(records => {
     if (records.some(({ target }) => target === els.shell || target === els.settingsPanel
       || target === document.getElementById('limitsSettingsDetails')
-      || (target.parentElement === els.limitProviderCheckboxes && target.classList.contains('limit-provider-row'))
-      || (target.parentElement?.parentElement === els.limitProviderCheckboxes && target.classList.contains('accordion-animated-container')))) pluginLimitSettings.reconcile();
+      // Rows sit in the list or, when disabled, in its collapsible group.
+      || target.id === 'limitProviderDisabledGroup'
+      || (els.limitProviderCheckboxes.contains(target) && (target.classList.contains('limit-provider-row')
+        || (target.classList.contains('accordion-animated-container') && target.parentElement?.classList.contains('limit-provider-row')))))) pluginLimitSettings.reconcile();
   }).observe(els.shell, { subtree: true, attributes: true, attributeFilter: ['class'] });
 }
 pluginContent = pluginViewHost ? window.TokenMonitorPluginContent.create({ document,
@@ -14602,6 +14933,7 @@ els.clearSessionUsageArchiveButton?.addEventListener('click', async () => {
         : 'settings.collection.sessionArchiveFailed'));
       return;
     }
+    archivedSessionCountCleared();
     await refreshStats();
   } finally {
     els.clearSessionUsageArchiveButton.disabled = false;
@@ -15467,11 +15799,11 @@ const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler(
   isHidden: isRendererWindowHidden,
   render: renderStatsUpdate
 });
-// Pulled once up front, then only while something on screen reads it: the
-// archived count in Settings, or TOTAL sessions/projects. Bot identity arrives
-// in a compact snapshot projection and does not need a full history pull.
+// Pulled once up front, then only while TOTAL sessions/projects show it.
+// Settings' archived count is counted in main (requestArchivedSessionCount), and
+// bot identity arrives in a compact snapshot projection; neither needs the list.
 function allTimeSessionsNeeded() {
-  if (!allTimeSessions.loaded() || isSettingsPanelOpen()) return true;
+  if (!allTimeSessions.loaded()) return true;
   return state.period === 'allTime' && (state.breakdown === 'session' || state.breakdown === 'project');
 }
 const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({

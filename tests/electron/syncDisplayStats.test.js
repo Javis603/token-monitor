@@ -14,6 +14,8 @@ const {
   composeLocalSyncStats,
   composeLocalSyncSummary
 } = require('../../src/electron/syncDisplayStats');
+const { createStatsStreamReceiver, prepareSseFanout } = require('../../src/shared/hubProtocol');
+const { parseSseBlock } = require('../../src/electron/sseEventReader');
 
 function device(deviceId, totalTokens, extra = {}) {
   return {
@@ -503,4 +505,110 @@ test('main publishes summaries and exports their completions', () => {
   assert.match(main, /writeExportTo\(settings\.exportDir, completeLocalSyncStats\(payload\.data\.stats\)\.periods/);
   assert.match(main, /writeExportTo\(result\.filePaths\[0\], completeLocalSyncStats\(stats\)\.periods\)/);
   assert.equal((main.match(/writeExportTo\(/g) || []).length, 3, 'the definition and the two exports above');
+});
+
+test('Hub events that re-send a device keep its unchanged periods normalized', () => {
+  const at = (seconds) => new Date(Date.parse('2026-07-16T00:00:00.000Z') + seconds * 1000).toISOString();
+  const record = (deviceId, totalTokens, receivedAt) => device(deviceId, totalTokens, {
+    receivedAt, updatedAt: receivedAt,
+    month: usagePeriod('codex', receivedAt, totalTokens)
+  });
+  const remote = record('remote', 50, at(0));
+  const first = aggregateDevices([record('local', 10, at(1)), remote], 0, Date.parse(at(2)));
+  let sessionWalks = 0;
+  const remoteMonth = first.devices[1].periods.month;
+  remoteMonth.sessions = new Proxy(remoteMonth.sessions, {
+    ownKeys(target) { sessionWalks += 1; return Reflect.ownKeys(target); }
+  });
+  const stream = createStatsStreamReceiver();
+  const receive = (frame) => {
+    const { event, data } = parseSseBlock(frame.replace(/\n+$/, ''));
+    return stream.receive(event, data);
+  };
+  // main.js keeps the delta base private by copying each device per event.
+  const display = (stats) => ({ ...stats, devices: stats.devices.map((entry) => ({ ...entry })) });
+  const firstFrames = prepareSseFanout({ reason: 'ingest', stats: first, hasDeltaClients: true, revision: 1 });
+  let cache = display(stream.receive('stats', { stats: first, revision: 1 }));
+  composeLocalSyncSummary(cache, record('local', 10, at(1)), { nowMs: Date.parse(at(2)) });
+  assert.ok(sessionWalks > 0);
+
+  // This machine's upload comes back as a delta; the Hub re-sends the other
+  // device too, for its ageMs.
+  const second = aggregateDevices([record('local', 20, at(5)), remote], 0, Date.parse(at(6)));
+  const secondFrames = prepareSseFanout({ reason: 'ingest', stats: second, hasDeltaClients: true,
+    previousStats: first, revision: 2, lastContentKey: firstFrames.contentKey });
+  assert.match(secondFrames.delta, /\/devices\/1\/ageMs/);
+  const previousRemote = cache.devices[1];
+  cache = display(receive(secondFrames.delta));
+  assert.notEqual(cache.devices[1], previousRemote);
+  sessionWalks = 0;
+  const afterDelta = composeLocalSyncSummary(cache, record('local', 20, at(5)), { nowMs: Date.parse(at(6)) });
+  assert.equal(sessionWalks, 0, 'the delta left the remote period, so its normalization is reused');
+  assert.equal(afterDelta.periods.month.totalTokens, 70);
+
+  // An unchanged snapshot arrives as a freshness event, which re-stamps devices.
+  const third = aggregateDevices([record('local', 20, at(5)), remote], 0, Date.parse(at(9)));
+  const thirdFrames = prepareSseFanout({ reason: 'ingest', stats: third, hasDeltaClients: true,
+    previousStats: second, revision: 3, lastContentKey: secondFrames.contentKey });
+  assert.match(thirdFrames.delta, /^event: freshness/);
+  cache = display(receive(thirdFrames.delta));
+  composeLocalSyncSummary(cache, record('local', 20, at(5)), { nowMs: Date.parse(at(9)) });
+  assert.equal(sessionWalks, 0, 'a freshness event keeps the remote period too');
+
+  // New remote usage replaces its period, which is normalized again.
+  const fourth = aggregateDevices([record('local', 20, at(5)), record('remote', 80, at(10))], 0, Date.parse(at(11)));
+  const fourthFrames = prepareSseFanout({ reason: 'ingest', stats: fourth, hasDeltaClients: true,
+    previousStats: third, revision: 4, lastContentKey: thirdFrames.contentKey });
+  cache = display(receive(fourthFrames.delta));
+  const afterRemoteUsage = composeLocalSyncSummary(cache, record('local', 20, at(5)), { nowMs: Date.parse(at(11)) });
+  assert.equal(afterRemoteUsage.periods.month.totalTokens, 100);
+});
+
+test('a cached Hub period follows the clock that judges a peer activity observation', () => {
+  const realNow = Date.now;
+  let clock = Date.parse('2026-07-16T00:00:10.000Z');
+  Date.now = () => clock;
+  try {
+    const period = usagePeriod('codex', '2026-07-16T00:00:00.000Z', 50);
+    const key = Object.keys(period.sessions)[0];
+    // The peer's clock runs a few seconds ahead of this machine's.
+    period.sessions[key].liveActivity = { state: 'running', observedAt: '2026-07-16T00:00:13.000Z' };
+    const hubStats = { devices: [device('remote', 50, { month: period })] };
+    // Both the aggregate and the remote device's own period carry the session.
+    const activity = () => {
+      const composed = composeLocalSyncSummary(hubStats, device('local', 10), { nowMs: clock });
+      const [aggregate, remote] = [composed, composed.devices.find((entry) => entry.deviceId === 'remote')]
+        .map((source) => Object.values(source.periods.month.sessions));
+      assert.equal(aggregate.length, 1);
+      assert.deepEqual(remote.map((session) => session.liveActivity || null), [aggregate[0].liveActivity || null]);
+      return aggregate[0].liveActivity || null;
+    };
+
+    assert.equal(activity(), null, 'a future observation is not evidence yet');
+    clock = Date.parse('2026-07-16T00:00:14.000Z');
+    assert.deepEqual(activity(), { state: 'running', observedAt: '2026-07-16T00:00:13.000Z' });
+    // A clock corrected backwards puts the observation in the future again.
+    clock = Date.parse('2026-07-16T00:00:11.000Z');
+    assert.equal(activity(), null);
+
+    // The clock moves while a fill reads it. Each period is normalized at one
+    // sample, so the cache matches a fresh normalization at that time.
+    const remotePeriodActivity = (stats, nowMs) => Object.values(composeLocalSyncSummary(stats, device('local', 10), { nowMs })
+      .devices.find((entry) => entry.deviceId === 'remote').periods.month.sessions)[0].liveActivity || null;
+    const fillWhileClockMoves = (sampled, during) => {
+      const stats = { devices: [device('remote', 50, { today: undefined, allTime: undefined, month: structuredClone(period) })] };
+      let reads = 0;
+      Date.now = () => (reads++ === 0 ? Date.parse(sampled) : Date.parse(during));
+      composeLocalSyncSummary(stats, device('local', 10), { nowMs: Date.parse(sampled) });
+      return stats;
+    };
+    const setBack = fillWhileClockMoves('2026-07-16T00:00:14.000Z', '2026-07-16T00:00:11.000Z');
+    Date.now = () => Date.parse('2026-07-16T00:00:15.000Z');
+    assert.deepEqual(remotePeriodActivity(setBack, Date.now()), { state: 'running', observedAt: '2026-07-16T00:00:13.000Z' });
+    const movedOn = fillWhileClockMoves('2026-07-16T00:00:12.999Z', '2026-07-16T00:00:13.000Z');
+    Date.now = () => Date.parse('2026-07-16T00:00:12.999Z');
+    assert.equal(remotePeriodActivity(movedOn, Date.now()), null);
+  } finally {
+    Date.now = realNow;
+  }
 });

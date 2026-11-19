@@ -84,6 +84,8 @@ function normalizeManagedAccounts(value, options = {}) {
       id,
       accountKey: trimmed(entry?.accountKey) || identity,
       accountEmail,
+      // Google profile name. Older logins stored it in `accountLabel`.
+      accountName: trimmed(entry?.accountName),
       accountLabel: trimmed(entry?.accountLabel),
       enabled: entry?.enabled !== false,
       addedAt: trimmed(entry?.addedAt),

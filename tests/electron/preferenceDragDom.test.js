@@ -146,12 +146,15 @@ test('tool preference controls place compact actions beside the note without dup
   const css = readRendererFile('styles.css');
   assert.match(cssRule(css, '.settings-note-row'), /grid-template-columns:\s*minmax\(0,\s*1fr\) auto/);
   assert.match(cssRule(css, '.settings-note-row'), /align-items:\s*center/);
-  // The track checkbox gets its own leading cell; visibility and pin stay on the right.
-  assert.match(cssRule(css, '.tool-preference-row'), /grid-template-columns:\s*22px minmax\(0,\s*1fr\) repeat\(2,\s*22px\)/);
+  // The name area leads; visibility, pin, status and the track switch sit on
+  // the right, with the status against the switch.
+  assert.match(cssRule(css, '.tool-preference-row'), /grid-template-columns:\s*minmax\(0,\s*1fr\) auto/);
+  // Other preference lists keep their grid cells; only this row flexes.
   assert.match(cssRule(css, '.tool-preference-actions'), /display:\s*contents/);
-  assert.match(body, /actions\.append\(visibility, pin\);/);
-  assert.match(body, /row\.append\(track, labelGroup, actions(?:, panel)?\);/);
-  assert.doesNotMatch(body, /actions\.append\(track/);
+  assert.match(cssRule(css, '.tool-preference-row > .tool-preference-actions'), /display:\s*flex/);
+  assert.match(body, /actions\.append\(visibility, pin\);\n\s*if \(statusTag\) actions\.append\(statusTag\);\n\s*actions\.append\(track\);/);
+  assert.match(body, /row\.append\(main, actions(?:, panel)?\);/);
+  assert.match(body, /main\.append\(disclosure, labelGroup\);/);
   assert.doesNotMatch(css, /\.tool-preference-head/);
   assert.doesNotMatch(css, /\.tool-preference-legend-/);
 });
@@ -192,7 +195,7 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   assert.match(defer, /return preserveSettingsPanelScroll\(renderToolPreferencesNow\);/);
 
   const signature = functionBody(app, 'toolPreferenceRenderSignature', 'renderToolPreferencesNow');
-  assert.match(signature, /\[\.\.\.enabledClientSet\(\)\]\.sort\(\)/);
+  assert.match(signature, /String\(pendingTrackedClients\(\) \|\| ''\)\.split\(','\)[^\n]*\.sort\(\)/);
   assert.match(signature, /state\.settings\?\.customScanPaths/);
   assert.doesNotMatch(signature, /trackedClients/);
   assert.match(signature, /healthRows: KNOWN_CLIENTS\.map/);
@@ -222,7 +225,7 @@ test('the tool list skips unchanged row renders and refreshes only open health d
   assert.match(body, /visibility\.id = `toolVisibility-\$\{id\}`/);
   assert.match(body, /pin\.id = `toolPin-\$\{id\}`/);
   assert.match(body, /const focusedId = document\.activeElement\?\.id \|\| ''/);
-  assert.match(body, /document\.getElementById\(focusedId\)\?\.focus/);
+  assert.match(body, /restoreSettingsListFocus\(focusedId\);/);
   assert.match(body, /return;/);
   assert.doesNotMatch(body, /replaceChildren/);
   assert.match(
@@ -267,7 +270,8 @@ test('a press on the tool row own controls never arms a drag', () => {
   // The pin/order decision is made once, by the shared module, and travels from
   // the mirror to the save; onPreferenceOrderCommit would compare against the
   // value the mirror just wrote and drop it.
-  assert.match(wiring, /qoderDisplayApi\.orderCommit\(order, KNOWN_CLIENTS, state\.settings\?\.clientDisplayOrder, state\.settings\?\.pinnedClients, id\)/);
+  assert.match(wiring, /const merged = settingsListFilterApi\.mergeSubsetOrder\(full, order\);/);
+  assert.match(wiring, /qoderDisplayApi\.orderCommit\(merged, KNOWN_CLIENTS, state\.settings\?\.clientDisplayOrder, state\.settings\?\.pinnedClients, id\)/);
   assert.match(wiring, /persistOrder: \(_order, _id, patch\) => void saveSettings\(patch\)/);
   assert.doesNotMatch(wiring, /onPreferenceOrderCommit\(/);
 });
@@ -642,7 +646,7 @@ test('session archive retention has its own setting separate from Trends', () =>
   assert.match(html, /id="clearSessionUsageArchiveButton" class="session-archive-clear"/);
   assert.match(app, /sessionUsageArchiveEnabled:\s*els\.sessionUsageArchiveInput\.checked/);
   assert.doesNotMatch(app, /sessionUsageArchiveCount/);
-  assert.match(app, /sessionRowsApi\.archivedSessionCount\(state\.stats\)/);
+  assert.match(app, /window\.tokenMonitor\.getArchivedSessionCount\(\)/);
   assert.match(app, /sessionUsageArchiveEnabled === false[\s\S]{0,160}sessionArchivePaused/);
   assert.match(css, /\.session-archive-clear\s*\{[\s\S]*?width:\s*auto;[\s\S]*?font-size:\s*0\.625rem;/);
   assert.match(main, /sessionUsageArchiveEnabled:\s*parseBoolean\(process\.env\.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED,\s*true\)/);
@@ -785,8 +789,11 @@ test('client keyboard moves keep pinned groups inside the pinned block', () => {
   const app = readRendererFile('app.js');
   const saves = [];
   const state = { settings: { pinnedClients: 'codex,claude', clientDisplayOrder: '' } };
+  let tracked = new Set(['codex', 'claude', 'qoder']);
   const context = vm.createContext({
     state, KNOWN_CLIENTS: ['codex','claude','qoder','qodercn'].map(id => ({ id })),
+    settingsListFilterApi: require('../../src/electron/renderer/settingsListFilter'),
+    clientRowTracked: id => tracked.has(id),
     clientDisplayPreferencesApi: require('../../src/electron/renderer/clientDisplayPreferences'),
     qoderDisplayApi: require('../../src/electron/renderer/qoderDisplay'),
     pinnedClientSet: () => new Set(state.settings.pinnedClients.split(',')),
@@ -804,4 +811,11 @@ test('client keyboard moves keep pinned groups inside the pinned block', () => {
   state.settings.clientDisplayOrder = 'codex,claude,qoder,qodercn';
   move('codex', 'End');
   assert.deepEqual(saves.pop(), { clientDisplayOrder: 'claude,qoder,qodercn,codex', pinnedClients: '' });
+  // Untracked tools sit in their own group: keys skip them, they keep their
+  // slot, and their own rows cannot be moved.
+  tracked = new Set(['codex', 'qoder']);
+  move('codex', 'ArrowDown');
+  assert.deepEqual(saves.pop(), { clientDisplayOrder: 'qoder,qodercn,claude,codex', pinnedClients: '' });
+  move('claude', 'ArrowUp');
+  assert.equal(saves.length, 0);
 });

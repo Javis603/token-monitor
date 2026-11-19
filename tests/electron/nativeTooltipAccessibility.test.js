@@ -45,14 +45,17 @@ class Element {
 }
 const document = { createElement: () => new Element(), createTextNode: text => Object.assign(new Element(), { textContent: text }) };
 
-test('icon-only tool health disclosures keep an action and client in their name', () => {
+test('tool health disclosures keep an action and client in their name', () => {
   const render = section(app, 'renderToolPreferencesNow', 'connectLimitProviderCheckboxName');
-  const start = render.indexOf("const main = document.createElement('button');");
+  const start = render.indexOf("      main = document.createElement('button');");
   const end = render.indexOf("const panel = document.createElement('div');", start);
-  const button = vm.runInNewContext(`${render.slice(start, end)}\nmain;`, { document, id: 'codex', label: 'Codex', expanded: false, t });
+  const disclosure = new Element();
+  const button = vm.runInNewContext(`let main;\n${render.slice(start, end)}\nmain;`, { document, disclosure, id: 'codex', label: 'Codex', expanded: false, t });
   assert.equal(button.getAttribute('aria-label'), t('settings.tools.health.open', { name: 'Codex' }));
-  assert.equal(button.children[0].getAttribute('aria-hidden'), 'true');
+  assert.equal(disclosure.children[0].className, 'cursor-disclosure-icon');
   assert.equal(button.getAttribute('title'), null);
+  // The chevron column is decorative; the button's name says what it opens.
+  assert.match(render, /disclosure\.className = 'tool-preference-chevron';\n\s*disclosure\.setAttribute\('aria-hidden', 'true'\);/);
 });
 
 test('the OpenCode detected-account checkbox has a localized name and description', async () => {

@@ -2228,15 +2228,15 @@ test('provider rerenders preserve live account nodes and focused controls', () =
   assert.deepEqual(connectedParent.children, [focusedInput, disclosureIcon]);
   assert.doesNotMatch(renderSettings, /replaceChildren|restoreLimitProviderAccountGroups/);
   assert.ok(
-    renderSettings.indexOf('els.limitProviderCheckboxes.appendChild(row);')
+    renderSettings.indexOf('else groups.rows.append(row);')
       < renderSettings.indexOf('moveLimitProviderLiveNode(optionsInner, accountGroup);')
   );
   assert.ok(
     renderSettings.indexOf('moveLimitProviderLiveNode(optionsInner, accountGroup);')
-      < renderSettings.indexOf('for (const row of previousRows) row.remove();')
+      < renderSettings.indexOf('for (const child of previousChildren) child.remove();')
   );
   assert.match(renderSettings, /accountGroup\.classList\.add\('limit-provider-account-group'\)/);
-  assert.match(renderSettings, /document\.getElementById\(focusedId\)\?\.focus\(\{ preventScroll: true \}\)/);
+  assert.match(renderSettings, /restoreSettingsListFocus\(focusedId\);/);
   assert.doesNotMatch(app, /function restoreLimitProviderAccountGroups/);
 });
 
@@ -2725,7 +2725,10 @@ test('successful providers use a green dot while preserving source and account l
   assert.match(renderSettings, /dot\.className = 'limit-provider-status-dot'/);
   assert.match(renderSettings, /if \(\(pluginModule \|\| detected \|\| !isEnabled\) && tagInfo\.kind === 'status'\) continue/);
   assert.match(renderSettings, /tag\.className = `limit-provider-tag limit-provider-tag-\$\{tagInfo\.kind\}`/);
-  assert.match(renderSettings, /moveLimitProviderLiveNode\(actions, accountStatus, disclosureIcon\)/);
+  // The dot and every status sit on the right, beside the switch.
+  assert.match(renderSettings, /actions\.append\(dot\)/);
+  assert.match(renderSettings, /actions\.append\(tag\)/);
+  assert.match(renderSettings, /moveLimitProviderLiveNode\(actions, accountStatus\)/);
   assert.match(css, /\.limit-provider-status-dot\s*\{[\s\S]*?background: var\(--success\)/);
 });
 
@@ -2737,10 +2740,10 @@ test('account and automatic provider panels reuse the original account summary g
 
   assert.match(renderSettings, /main\.className = 'limit-provider-main'/);
   assert.match(renderSettings, /disclosureIcon\.className = 'cursor-disclosure-icon'/);
-  assert.match(renderSettings, /actions\.append\(disclosureIcon\)/);
-  assert.match(renderSettings, /moveLimitProviderLiveNode\(actions, accountStatus, disclosureIcon\)/);
+  assert.match(renderSettings, /disclosure\.append\(disclosureIcon\)/);
+  assert.match(renderSettings, /moveLimitProviderLiveNode\(actions, accountStatus\)/);
   assert.match(renderSettings, /accountGroup && provider\.status === 'notConfigured'/);
-  assert.match(renderSettings, /main\.append\(copy, actions\)/);
+  assert.match(renderSettings, /main\.append\(disclosure, copy, actions\)/);
   assert.doesNotMatch(renderSettings, /limit-provider-disclosure/);
   assert.doesNotMatch(renderSettings, /view-subgroup-toggle|view-subgroup-icon/);
   assert.equal((i18n.match(/'settings\.limits\.connection\.title':/g) || []).length, 6);
@@ -2748,13 +2751,13 @@ test('account and automatic provider panels reuse the original account summary g
   assert.equal((i18n.match(/'settings\.limits\.connection\.antigravity':/g) || []).length, 6);
   assert.equal((i18n.match(/'settings\.limits\.connection\.grok':/g) || []).length, 6);
   assert.equal((i18n.match(/'settings\.limits\.connection\.kiro':/g) || []).length, 6);
-  assert.match(css, /\.limit-provider-main\s*\{[\s\S]*?display: flex;[\s\S]*?justify-content: space-between/);
-  assert.match(css, /\.limit-provider-actions\s*\{[^}]*flex: 0 0 auto;[^}]*max-width: 58%;[^}]*gap: 4px/);
+  assert.match(css, /\.limit-provider-main\s*\{[\s\S]*?display: flex;/);
+  assert.match(css, /\.limit-provider-actions\s*\{[^}]*max-width: 58%;[^}]*gap: 5px/);
   assert.doesNotMatch(css, /\.limit-provider-actions > \.cursor-status-pill\s*\{[^}]*overflow-wrap: anywhere/);
-  assert.match(css, /\.limit-provider-row\.expanded > \.limit-provider-main \.cursor-disclosure-icon/);
+  assert.match(css, /\.limit-provider-row\.expanded \.limit-provider-chevron \.cursor-disclosure-icon/);
 });
 
-test('disabled providers use checkbox state instead of a redundant status tag', () => {
+test('disabled providers use switch state instead of a redundant status tag', () => {
   const app = readRendererFile('app.js');
   const css = readRendererFile('styles.css');
   const renderSettings = functionBody(app, 'renderLimitProviderCheckboxes', 'limitProviderAccountGroup');
@@ -2764,7 +2767,7 @@ test('disabled providers use checkbox state instead of a redundant status tag', 
   assert.match(renderSettings, /row\.className = `limit-provider-row\$\{isEnabled \? '' : ' is-disabled'\}/);
   assert.match(renderSettings, /if \(\(pluginModule \|\| detected \|\| !isEnabled\) && tagInfo\.kind === 'status'\) continue/);
   assert.match(css, /\.limit-provider-row\.is-disabled \.limit-provider-main\s*\{[^}]*color: var\(--muted\)/);
-  assert.match(css, /\.limit-provider-row\.is-disabled \.limit-provider-tag\s*\{[^}]*color: var\(--muted\)/);
+  assert.doesNotMatch(renderSettings, /settings\.limits\.status\.disabled/);
 });
 
 test('provider checkboxes are named by their visible provider name', () => {
