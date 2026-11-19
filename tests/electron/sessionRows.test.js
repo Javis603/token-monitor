@@ -36,9 +36,14 @@ test('reuses unchanged row labels across snapshots while the activity state and 
   assert.equal(first.modelTooltipEntries, later.modelTooltipEntries);
   const [translated] = rows(session, lastUsedAt, 'Last used');
   assert.deepEqual(translated.modelTooltipEntries[0], { full: 'Last used: gpt-5' });
-  const [updated] = rows({ ...session, totalTokens: 140, models: { ...session.models, 'gpt-5': 100 } }, lastUsedAt);
-  assert.equal(updated.value, 140);
-  assert.notEqual(updated.modelTooltipEntries, first.modelTooltipEntries);
+  const usage = { ...session, totalTokens: 140 };
+  const [updated] = rows(usage, lastUsedAt, 'Last used');
+  assert.deepEqual(updated.modelTooltipEntries.at(-1), ['Unclassified', '40', '29%']);
+  const [attributed] = rows({ ...usage, models: { ...session.models, 'gpt-5': 100 } }, lastUsedAt, 'Last used');
+  assert.deepEqual(attributed.modelTooltipEntries.slice(1), [
+    ['gpt-5', '100', '71%'],
+    ['gpt-5-mini', '40', '29%']
+  ]);
   sessionRowsForPeriod({}, { rowLabelCache });
   assert.equal(rowLabelCache.entries.size, 0);
 });
