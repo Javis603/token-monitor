@@ -10,6 +10,7 @@
  * The owner retains login/cancellation and editor generations across repaints.
  */ function create(host) {
  let accountList;
+ let profileLoadFailed = false;
  // Host exposes named capabilities, never the application state object.
  const { document, window, setAccountGroupExpanded, isSettingsSurfaceVisible, renderAccountShellError, accountProfileRequests, accountProfileStatuses, t, renderSettingsSummaries, setAccountShellError, accountShellApi, encodeURIComponent, accountProfileSaves } = host;
  const state = {opencodeProfileCount: host.initial.opencodeProfileCount};
@@ -343,7 +344,11 @@ function renderOpenCodeProfiles() {
         },
         changed: () => {}, refresh: renderOpenCodeProfiles,
         readings: () => host.localProviderStatuses('opencode'),
-        status: { element: () => document.getElementById('opencodeCookieStatus'), empty: () => t('settings.opencode.statusNotSet') }
+        status: {
+          element: () => document.getElementById('opencodeCookieStatus'),
+          empty: () => t('settings.opencode.statusNotSet'),
+          active: () => !profileLoadFailed
+        }
       });
     }
     const empty = entries.length === 0 && !hasEnvVar && !hasAmbientKey;
@@ -354,6 +359,7 @@ function renderOpenCodeProfiles() {
       notice.textContent = t('settings.opencode.emptyList');
       listEl.append(notice);
     }
+    profileLoadFailed = false;
     accountList.update([
       ...(hasAmbientKey ? [{ id: 'ambient:', source: 'ambient', accountKey: ambientAccountKey, accountName: t('settings.opencode.ambientName'), enabled: ambientEnabled, removable: false }] : []),
       ...entries.map(([name, profile]) => ({ id: `profile:${name}`, profileName: name, accountKey: profile.accountKey, accountKeyAliases: profile.accountKeyAliases, accountName: name, enabled: profile.enabled })),
@@ -362,6 +368,7 @@ function renderOpenCodeProfiles() {
     updateOpenCodeProfilesStatus();
   }).catch(() => {
     if (!isCurrent() || !isSettingsSurfaceVisible()) return;
+    profileLoadFailed = true;
     accountShellApi.render({
       status: document.getElementById('opencodeCookieStatus'),
       statusText: t('settings.opencode.connectFailed')

@@ -483,7 +483,7 @@ test('OpenCode disabled profiles still count in the account summary', () => {
   // auto-detected key and paused profiles, so neither drops out of the total.
   assert.match(renderBody, /\.\.\.\(hasAmbientKey \? \[\{ id: 'ambient:', source: 'ambient'/);
   assert.match(renderBody, /enabled: profile\.enabled \}\)\)/);
-  assert.match(renderBody, /status: \{ element: \(\) => document\.getElementById\('opencodeCookieStatus'\), empty: \(\) => t\('settings\.opencode\.statusNotSet'\) \}/);
+  assert.match(renderBody, /status: \{\s*element: \(\) => document\.getElementById\('opencodeCookieStatus'\),\s*empty: \(\) => t\('settings\.opencode\.statusNotSet'\),/);
 });
 
 test('OpenCode profile deletion clears the legacy default cookie when it owns the profile', () => {

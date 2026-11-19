@@ -84,6 +84,29 @@ test('OpenCode counts an account configured only through the environment cookie'
   assert.equal(h.document.root.querySelector('.slot-row').dataset.slotId, 'environment');
 });
 
+test('OpenCode keeps a profile load error through quota pushes until profiles reload', async () => {
+  let loadFailed = false;
+  const records = [{ provider: 'opencode', sourceDeviceId: 'peer', accountKey: 'remote', status: 'unavailable' }];
+  const h = harness('opencode', { getProfiles: async () => {
+    if (loadFailed) throw new Error('profile read failed');
+    return { profiles: {} };
+  } }, { records, localDeviceId: 'local' });
+  await h.render();
+  assert.equal(headerStatus.opencode(h), '0/1');
+
+  loadFailed = true;
+  await h.render();
+  assert.equal(headerStatus.opencode(h), 'settings.opencode.connectFailed');
+  records[0] = { ...records[0], status: 'ok' };
+  h.owner.refreshReadings();
+  assert.equal(headerStatus.opencode(h), 'settings.opencode.connectFailed');
+  assert.match(h.document.root.querySelector('.slot-status').className, /slot-connected/);
+
+  loadFailed = false;
+  await h.render();
+  assert.equal(headerStatus.opencode(h), '1/1');
+});
+
 // Claude's rows are derived from the readings themselves, so it is rebuilt with
 // its header by renderExternalProviderStatus('claude') rather than this hook.
 const refreshedWithStatus = new Set(['claude']);
