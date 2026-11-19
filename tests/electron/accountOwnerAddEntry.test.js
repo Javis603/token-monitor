@@ -8,7 +8,7 @@ const legacyList = require('../../src/electron/renderer/limits/legacyAccountList
 const accountShellApi = require('../../src/electron/renderer/limits/accountShell');
 const renderer = path.resolve(__dirname, '../../src/electron/renderer');
 const flush = () => new Promise(resolve => setImmediate(resolve));
-function harness(provider, overrides = {}, context = {}) {
+function harness(provider, overrides = {}, context = {}, localReadings = []) {
   const document = createDocument();
   const source = fs.readFileSync(path.join(renderer, `limits/providerOwners/${provider}.js`), 'utf8');
   const nodes = {};
@@ -37,7 +37,7 @@ function harness(provider, overrides = {}, context = {}) {
     getSettings: () => settings, getAccountContext: () => ({ settings, ...context }), preserveScroll: fn => fn(),
     t: (key, params) => key === 'settings.slots.add' ? `＋ Add ${params.provider} account` : key === 'settings.slots.connectedCount' ? `${params.linked}/${params.total}` : key,
     window: { TokenMonitorLegacyAccountList: legacyList, tokenMonitor: { [provider]: api } },
-    isSettingsSurfaceVisible: () => true, localProviderStatuses: () => [], limitProviderEnabled: () => true,
+    isSettingsSurfaceVisible: () => true, localProviderStatuses: () => localReadings, limitProviderEnabled: () => true,
     accountShellApi, setCursorStatusText(element, text) { element.textContent = text; }, setCursorCheckboxesEnabled() {}, setSettingsSectionExpanded() {}, accountShellErrors: {},
     accountProfileRequests: { begin: () => () => true }, accountProfileStatuses: { begin: () => () => true, retire() {} },
     accountProfileSaves: accountShellApi.createBusyGuard(),
@@ -108,6 +108,25 @@ for (const provider of Object.keys(headerStatus).filter(provider => !refreshedWi
     assert.match(h.document.root.querySelector('.slot-status').className, /slot-connected/);
   });
 }
+
+test('WorkBuddy quota pushes prefer a canonical reading over a stale fallback', async () => {
+  const fallback = { provider: 'workbuddy', accountKey: 'fallback', status: 'unavailable' };
+  const readings = [fallback];
+  const h = harness('workbuddy', {}, {}, readings);
+  h.settings.workbuddyManagedAccounts = [{ id: 'saved', accountKey: fallback.accountKey }];
+  await h.render();
+  assert.equal(headerStatus.workbuddy(h), '0/1');
+
+  readings.push({ provider: 'workbuddy', accountKey: 'canonical', accountKeyAliases: ['fallback'], status: 'ok' });
+  h.owner.refreshReadings();
+  assert.equal(headerStatus.workbuddy(h), '1/1');
+  assert.match(h.document.root.querySelector('.slot-status').className, /slot-connected/);
+
+  readings.splice(0, readings.length, { ...fallback, status: 'ok' },
+    { provider: 'workbuddy', accountKey: 'canonical', status: 'unavailable' });
+  h.owner.refreshReadings();
+  assert.equal(headerStatus.workbuddy(h), '1/1');
+});
 
 for (const provider of ['codex', 'claude', 'cursor', 'antigravity', 'mimo', 'workbuddy', 'minimax', 'opencode', 'thirdparty']) {
   test(`${provider}: the first account uses the visible common add footer and provider display label`, async () => {

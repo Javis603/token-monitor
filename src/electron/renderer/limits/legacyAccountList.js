@@ -32,7 +32,7 @@
    */
   function create(options) {
     let accounts = /** @type {any[]} */ ([]);
-    let readings = /** @type {any[]} */ ([]);
+    let savedAccounts = /** @type {any[]} */ ([]);
     const { provider, bridge } = options;
     /** @type {ReturnType<typeof mountEditor>} */
     let sharedEditor;
@@ -102,12 +102,26 @@
       if (element.textContent !== text) element.textContent = text;
       if (element.getAttribute?.('aria-label') !== text) element.setAttribute('aria-label', text);
     };
-    /** Refresh status without replacing provider-owned account controls. @param {any[]} nextReadings */
-    const updateReadings = nextReadings => {
-      readings = nextReadings;
+    /** Refresh status without replacing provider-owned account controls. @param {any[]} readings */
+    const updateReadings = readings => {
       sharedEditor?.sync();
       const context = options.getContext();
-      list.update(accounts, readings, { ...context, presentation: context.settings?.limitAccountPresentation?.[provider] || {} });
+      const presentation = context.settings?.limitAccountPresentation?.[provider] || {};
+      accounts = savedAccounts.map(account => {
+        const reading = readingFor(account, readings);
+        // Only an explicit alias from the quota authority can resolve a
+        // credential key to its workspace. A shared name/email proves nothing.
+        const accountKey = reading?.accountKeyAliases?.includes(account.accountKey)
+          ? reading.accountKey : account.accountKey;
+        const aliases = reading ? [...new Set([...(account.accountKeyAliases || []),
+          account.accountKey, ...(reading.accountKeyAliases || [])].filter(key => key && key !== accountKey))] : account.accountKeyAliases;
+        const labelKey = [accountKey, ...(aliases || [])].find(key => Object.hasOwn(presentation.labels || {}, key));
+        const label = labelKey ? presentation.labels[labelKey] : account.label || '';
+        return { ...account, accountKey, accountKeyAliases: aliases,
+          accountEmail: account.accountEmail || account.email, enabled: account.enabled !== false,
+          fingerprint: account.id, label, accountName: account.accountName || account.accountLabel || (account.email || account.accountEmail ? '' : account.id) };
+      });
+      list.update(accounts, readings, { ...context, presentation });
       renderStatus();
     };
     return {
@@ -117,26 +131,8 @@
       refreshReadings() { if (options.readings) updateReadings(options.readings()); },
       /** @param {any[]} next @param {any[]} nextReadings */
       update(next, nextReadings) {
-        readings = nextReadings;
-        sharedEditor?.sync();
-        const context = options.getContext();
-        const presentation = context.settings?.limitAccountPresentation?.[provider] || {};
-        accounts = next.map(account => {
-          const reading = readingFor(account, readings);
-          // Only an explicit alias from the quota authority can resolve a
-          // credential key to its workspace. A shared name/email proves nothing.
-          const accountKey = reading?.accountKeyAliases?.includes(account.accountKey)
-            ? reading.accountKey : account.accountKey;
-          const aliases = reading ? [...new Set([...(account.accountKeyAliases || []),
-            account.accountKey, ...(reading.accountKeyAliases || [])].filter(key => key && key !== accountKey))] : account.accountKeyAliases;
-          const labelKey = [accountKey, ...(aliases || [])].find(key => Object.hasOwn(presentation.labels || {}, key));
-          const label = labelKey ? presentation.labels[labelKey] : account.label || '';
-          return { ...account, accountKey, accountKeyAliases: aliases,
-            accountEmail: account.accountEmail || account.email, enabled: account.enabled !== false,
-            fingerprint: account.id, label, accountName: account.accountName || account.accountLabel || (account.email || account.accountEmail ? '' : account.id) };
-        });
-        list.update(accounts, readings, { ...context, presentation: context.settings?.limitAccountPresentation?.[provider] || {} });
-        renderStatus();
+        savedAccounts = next;
+        updateReadings(nextReadings);
       }
     };
   }
