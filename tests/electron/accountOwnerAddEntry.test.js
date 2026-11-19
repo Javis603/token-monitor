@@ -13,7 +13,7 @@ function harness(provider, overrides = {}, context = {}) {
   const source = fs.readFileSync(path.join(renderer, `limits/providerOwners/${provider}.js`), 'utf8');
   const nodes = {};
   const ids = new Set([...source.matchAll(/getElementById\('([^']+)'\)/g)].map(match => match[1]));
-  ids.add(`${provider}ProfileList`);
+  ids.add(`${provider}ProfileList`); ids.add(`${provider}Status`);
   for (const id of ids) {
     const node = document.createElement('div'); node.id = id; node.options = []; nodes[id] = node;
     node.before = child => node.parentElement.insertBefore(child, node);
@@ -35,10 +35,10 @@ function harness(provider, overrides = {}, context = {}) {
   const host = {
     document, providerLabel: `Display ${provider}`, initial: { cursorAccount: { status: { accounts: [] }, busy: false }, codexWorkspaceChoices: [] },
     getSettings: () => settings, getAccountContext: () => ({ settings, ...context }), preserveScroll: fn => fn(),
-    t: (key, params) => key === 'settings.slots.add' ? `＋ Add ${params.provider} account` : key === 'settings.opencode.connected' ? `${params.linked}/${params.total}` : key,
+    t: (key, params) => key === 'settings.slots.add' ? `＋ Add ${params.provider} account` : key === 'settings.slots.connectedCount' ? `${params.linked}/${params.total}` : key,
     window: { TokenMonitorLegacyAccountList: legacyList, tokenMonitor: { [provider]: api } },
     isSettingsSurfaceVisible: () => true, localProviderStatuses: () => [], limitProviderEnabled: () => true,
-    accountShellApi, setCursorStatusText() {}, setCursorCheckboxesEnabled() {}, setSettingsSectionExpanded() {}, accountShellErrors: {},
+    accountShellApi, setCursorStatusText(element, text) { element.textContent = text; }, setCursorCheckboxesEnabled() {}, setSettingsSectionExpanded() {}, accountShellErrors: {},
     accountProfileRequests: { begin: () => () => true }, accountProfileStatuses: { begin: () => () => true, retire() {} },
     accountProfileSaves: accountShellApi.createBusyGuard(),
     renderAccountShellError() {}, renderSettingsSummaries() {}, renderSubscriptionSettings() {}, setAccountShellError() {},
@@ -53,12 +53,61 @@ function harness(provider, overrides = {}, context = {}) {
     async render() { await owner[render](); await flush(); },
     add: () => document.root.querySelector('.slot-add') };
 }
-test('Codex settings summary counts connected remote accounts without a local login', async () => {
-  const records = [{ provider: 'codex', sourceDeviceId: 'peer', accountKey: 'remote-codex', status: 'ok' }];
-  const h = harness('codex', {}, { records, localDeviceId: 'local' });
+// The header counts the rows the list shows, so an account read on another
+// device is counted, and is connected only when its own reading is healthy.
+const headerStatus = {
+  codex: h => h.nodes.codexAccountStatus.textContent,
+  claude: h => h.owner.claudeAccountStatusText('fallback'),
+  cursor: h => h.nodes.cursorAccountStatus.textContent,
+  antigravity: h => h.nodes.antigravityAccountStatus.textContent,
+  mimo: h => h.nodes.mimoAccountStatus.textContent,
+  workbuddy: h => h.nodes.workbuddyAccountStatus.textContent,
+  opencode: h => h.nodes.opencodeCookieStatus.textContent,
+  thirdparty: h => h.nodes.thirdpartyStatus.textContent
+};
+for (const [provider, read] of Object.entries(headerStatus)) {
+  test(`${provider}: the account header counts connected accounts from other devices`, async () => {
+    const records = [
+      { provider, sourceDeviceId: 'peer', accountKey: `remote-${provider}`, status: 'ok' },
+      { provider, sourceDeviceId: 'peer', accountKey: `failing-${provider}`, status: 'unavailable' }
+    ];
+    const h = harness(provider, {}, { records, localDeviceId: 'local' });
+    await h.render();
+    assert.equal(read(h), '1/2');
+  });
+}
+
+test('OpenCode counts an account configured only through the environment cookie', async () => {
+  const h = harness('opencode', { getProfiles: async () => ({ profiles: {}, hasEnvVar: true, environmentAccountKey: 'env-key' }) });
   await h.render();
-  assert.equal(h.nodes.codexAccountStatus.textContent, '1/1');
+  assert.equal(headerStatus.opencode(h), '0/1');
+  assert.equal(h.document.root.querySelector('.slot-row').dataset.slotId, 'environment');
 });
+
+// Claude's rows are derived from the readings themselves, so it is rebuilt with
+// its header by renderExternalProviderStatus('claude') rather than this hook.
+const refreshedWithStatus = new Set(['claude']);
+test('every account owner takes quota pushes through refreshReadings', () => {
+  const owners = fs.readdirSync(path.join(renderer, 'limits/providerOwners')).map(file => path.basename(file, '.js'));
+  assert.ok(owners.length >= 9);
+  for (const provider of owners) {
+    const owner = harness(provider).owner;
+    assert.equal(typeof owner.refreshReadings === 'function', !refreshedWithStatus.has(provider), provider);
+  }
+});
+
+for (const provider of Object.keys(headerStatus).filter(provider => !refreshedWithStatus.has(provider))) {
+  test(`${provider}: a quota push updates the rows and header without a settings push`, async () => {
+    const records = [{ provider, sourceDeviceId: 'peer', accountKey: `remote-${provider}`, status: 'unavailable' }];
+    const h = harness(provider, {}, { records, localDeviceId: 'local' });
+    await h.render();
+    assert.equal(headerStatus[provider](h), '0/1');
+    records[0] = { ...records[0], status: 'ok' };
+    h.owner.refreshReadings();
+    assert.equal(headerStatus[provider](h), '1/1');
+    assert.match(h.document.root.querySelector('.slot-status').className, /slot-connected/);
+  });
+}
 
 for (const provider of ['codex', 'claude', 'cursor', 'antigravity', 'mimo', 'workbuddy', 'minimax', 'opencode', 'thirdparty']) {
   test(`${provider}: the first account uses the visible common add footer and provider display label`, async () => {

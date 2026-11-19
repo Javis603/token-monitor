@@ -28,7 +28,7 @@ function renderOpenCodeProfiles() {
 
   const isCurrent = accountProfileRequests.begin('opencode');
   api.getProfiles().then(result => {
-    const { profiles, hasEnvVar, hasAmbientKey, ambientEnabled = true } = result;
+    const { profiles, hasEnvVar, environmentAccountKey = '', hasAmbientKey, ambientEnabled = true } = result;
     const { ambientAccountKey } = result;
     if (!isCurrent() || !isSettingsSurfaceVisible() || document.getElementById('opencodeProfileList') !== listEl) return;
     accountProfileStatuses.retire('opencode');
@@ -341,7 +341,9 @@ function renderOpenCodeProfiles() {
           listEl.classList.remove('hidden');
           for (const row of listEl.children) row.classList.toggle('hidden', row.dataset.ownerId !== account.id);
         },
-        changed: () => {}, refresh: renderOpenCodeProfiles
+        changed: () => {}, refresh: renderOpenCodeProfiles,
+        readings: () => host.localProviderStatuses('opencode'),
+        status: { element: () => document.getElementById('opencodeCookieStatus'), empty: () => t('settings.opencode.statusNotSet') }
       });
     }
     const empty = entries.length === 0 && !hasEnvVar && !hasAmbientKey;
@@ -354,7 +356,8 @@ function renderOpenCodeProfiles() {
     }
     accountList.update([
       ...(hasAmbientKey ? [{ id: 'ambient:', source: 'ambient', accountKey: ambientAccountKey, accountName: t('settings.opencode.ambientName'), enabled: ambientEnabled, removable: false }] : []),
-      ...entries.map(([name, profile]) => ({ id: `profile:${name}`, profileName: name, accountKey: profile.accountKey, accountKeyAliases: profile.accountKeyAliases, accountName: name, enabled: profile.enabled }))
+      ...entries.map(([name, profile]) => ({ id: `profile:${name}`, profileName: name, accountKey: profile.accountKey, accountKeyAliases: profile.accountKeyAliases, accountName: name, enabled: profile.enabled })),
+      ...(environmentAccountKey ? [{ id: 'environment', source: 'environment', accountKey: environmentAccountKey, enabled: true, canPause: false, removable: false }] : [])
     ], host.localProviderStatuses('opencode'));
     updateOpenCodeProfilesStatus();
   }).catch(() => {
@@ -544,24 +547,8 @@ async function updateOpenCodeProfilesStatus() {
     }
   }
 
-  renderOpenCodeProfilesStatusSummary(profiles, status.ambient);
 }
 
-function renderOpenCodeProfilesStatusSummary(profiles, ambient = null) {
-  const totalEl = document.getElementById('opencodeCookieStatus');
-  if (totalEl) {
-    const statuses = [...Object.values(profiles), ...(ambient ? [ambient] : [])];
-    const linkedCount = statuses.filter(s => s.linked).length;
-    const configuredProfileCount = state.opencodeProfileCount || 0;
-    const totalCount = Math.max(statuses.length, configuredProfileCount);
-    accountShellApi.render({
-      status: totalEl,
-      statusText: totalCount > 0
-        ? t('settings.opencode.connected', { linked: linkedCount, total: totalCount })
-        : t('settings.opencode.statusNotSet')
-    });
-  }
-}
 function setOpenCodeAddExpanded(expanded) {
   const next = Boolean(expanded);
   document.getElementById('opencodeAddToggle')?.setAttribute('aria-expanded', String(next));
@@ -697,5 +684,5 @@ function setup() {
 
 
 }
- return { state, setOpencodeCookieExpanded, renderOpenCodeProfiles, opencodeSaveErrorText, opencodeMergeOffer, opencodeRowId, opencodeCredentialRow, updateOpenCodeProfilesStatus, renderOpenCodeProfilesStatusSummary, setup };
+ return { state, setOpencodeCookieExpanded, renderOpenCodeProfiles, opencodeSaveErrorText, opencodeMergeOffer, opencodeRowId, opencodeCredentialRow, updateOpenCodeProfilesStatus, refreshReadings: () => accountList?.refreshReadings(), setup };
 });

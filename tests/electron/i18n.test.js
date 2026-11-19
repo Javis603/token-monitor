@@ -384,7 +384,7 @@ test('AI limit capability labels stay compact in Chinese', () => {
   assert.equal(translate('zh-TW', 'settings.limits.capability.oauthAppCli'), 'OAuth/App/CLI');
   assert.equal(translate('zh-TW', 'settings.limits.capability.manualLogin'), '手動登入');
   assert.equal(translate('zh-TW', 'settings.limits.status.openApp'), '請開啟 App 或 CLI');
-  assert.equal(translate('zh-TW', 'settings.limits.status.linked'), '已連結');
+  assert.equal(translate('zh-TW', 'settings.limits.status.linked'), '已連線');
   assert.equal(translate('zh-TW', 'settings.limits.device.local'), '本機');
   assert.equal(translate('zh-TW', 'settings.limits.device.from', { device: 'work-mac' }), '來自 work-mac');
   assert.equal(translate('zh-TW', 'settings.limits.device.localAndSynced', { count: 2 }), '本機 + 2 同步');

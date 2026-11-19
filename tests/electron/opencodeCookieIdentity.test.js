@@ -35,6 +35,15 @@ async function reading(cookie, workspaceId, apiKey) {
     async () => ({ status: workspaceId ? 'ok' : 'unavailable', workspaceId, windows: [], balanceUsd: 1 }),
     Date.now(), new Date().toISOString(), { apiKey, deps: { env: {} }, collectGoApi: async () => ({ status: 'ok', windows: [] }) });
 }
+test('the legacy environment cookie is listed under the collector key unless an enabled profile holds it', async () => {
+  const cookie = 'private-env-session';
+  const service = profiles => createOpencodeAccountService({ env: { TOKEN_MONITOR_OPENCODE_COOKIE: cookie }, getOpencodeProfiles: () => profiles,
+    getOpencodeAmbientEnabled: () => true, goApi: { ...goApi, readGoApiKey: () => '' } });
+  assert.equal((await service({}).getProfiles()).environmentAccountKey, cookieKey(cookie));
+  assert.equal((await service({ Work: { cookie, enabled: true } }).getProfiles()).environmentAccountKey, '');
+  assert.equal((await service({ Work: { cookie, enabled: false } }).getProfiles()).environmentAccountKey, cookieKey(cookie));
+  assert.doesNotMatch(JSON.stringify(await service({}).getProfiles()), /private-env-session/);
+});
 test('cookie-only unknown workspace exposes the existing fallback key with rename/order enabled and no secrets', async () => {
   const cookie = '__Host-console_session=private-session-one';
   const account = await dto(cookie);

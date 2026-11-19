@@ -90,37 +90,44 @@ for (const fromCancel of [true, false]) {
   });
 }
 
-test('Claude card counts healthy identities instead of letting one linked account hide failures', () => {
+test('Claude card counts its rows so one linked account cannot hide failures', () => {
+  const document = require('./accountOwnerDom.fixture.cjs').createDocument();
+  const container = document.createElement('div'); container.id = 'claudeWebAccountList'; document.root.append(container);
   const state = { settings: { claudeManagedAccounts: [
     { id: 'a', accountKey: 'a', enabled: true },
     { id: 'b', accountKey: 'b', enabled: true },
     { id: 'c', accountKey: 'c', enabled: false },
     { id: 'unchecked', enabled: true }
   ] } };
+  let providerEnabled = true;
   let providers = [
-    { accountKey: 'a', source: 'web', status: 'ok' },
-    { accountKey: 'b', source: 'web', status: 'unauthorized' },
-    { accountKey: 'c', source: 'web', status: 'ok' },
-    { accountKey: 'a', source: 'oauth', status: 'ok' }
+    { provider: 'claude', accountKey: 'a', source: 'web', status: 'ok' },
+    { provider: 'claude', accountKey: 'b', source: 'web', status: 'unauthorized' },
+    { provider: 'claude', accountKey: 'c', source: 'web', status: 'ok' },
+    { provider: 'claude', accountKey: 'a', source: 'oauth', status: 'ok' }
   ];
-  const context = claudeOwner.create({ initial: {}, getSettings: () => state.settings, accountShellApi, localProviderStatuses: () => providers,
-    getAccountContext: () => ({ settings: state.settings }), window: { TokenMonitorLegacyAccountList: legacyList },
-    t: (key, params) => key === 'settings.opencode.connected' ? `${params.linked}/${params.total}` : key });
-  assert.equal(context.claudeAccountStatusText('fallback', true), '1/4');
-  assert.equal(context.claudeAccountStatusText('fallback', false), '0/4');
-  providers.push({ accountKey: 'local', source: 'oauth', status: 'ok' });
-  assert.equal(context.claudeAccountStatusText('fallback', true), '2/5');
+  const context = claudeOwner.create({ document, initial: {}, getSettings: () => state.settings, accountShellApi, localProviderStatuses: () => providers,
+    getAccountContext: () => ({ settings: state.settings, providerEnabled }), preserveScroll: fn => fn(), window: { TokenMonitorLegacyAccountList: legacyList, tokenMonitor: {} },
+    t: (key, params) => key === 'settings.slots.connectedCount' ? `${params.linked}/${params.total}` : key });
+  const status = () => { context.renderClaudeWebAccounts(); return context.claudeAccountStatusText('fallback'); };
+  // The rejected login, the paused one and the unchecked one all stay in the total.
+  assert.equal(status(), '1/4');
+  providerEnabled = false;
+  assert.equal(status(), '0/4');
+  providerEnabled = true;
+  providers.push({ provider: 'claude', accountKey: 'local', source: 'oauth', status: 'ok' });
+  assert.equal(status(), '2/5');
   state.settings = { claudeManagedAccounts: [], claudeWebLegacyCookieConfigured: true };
-  providers = [{ accountKey: 'legacy', source: 'web', status: 'ok' }];
-  assert.equal(context.claudeAccountStatusText('fallback', true), '1/1');
+  providers = [{ provider: 'claude', accountKey: 'legacy', source: 'web', status: 'ok' }];
+  assert.equal(status(), '1/1');
   state.settings = { claudeManagedAccounts: [{ id: 'managed', accountKey: 'same', enabled: true }],
     claudeWebLegacyCookieConfigured: true, claudeWebLegacyAccount: { accountKey: 'same' } };
-  providers = [{ accountKey: 'same', source: 'web', status: 'ok' }];
-  assert.equal(context.claudeAccountStatusText('fallback', true), '1/1');
+  providers = [{ provider: 'claude', accountKey: 'same', source: 'web', status: 'ok' }];
   assert.equal(context.claudeWebSettingsAccounts(providers).length, 2, 'both credential management entries remain reachable');
+  assert.equal(status(), '2/2', 'and both are counted, as both are listed');
   state.settings = {};
   providers = [];
-  assert.equal(context.claudeAccountStatusText('fallback', true), 'fallback');
+  assert.equal(status(), 'fallback');
 });
 
 test('a busy Claude save never reports a credential rejection or clears the draft', async () => {

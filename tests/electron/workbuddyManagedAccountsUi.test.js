@@ -81,6 +81,7 @@ test('visible Settings follows quota pushes and defers hidden updates without po
   h.state.settings.deviceId = 'local';
   h.state.stats = { limits: { providers: [] }, devices: [] };
   for (const name of ['renderConnectionStatus', 'render', 'renderCodexAccounts', 'renderMimoStatus',
+
     'renderSettingsSummaries', 'renderLimitProviderCheckboxes', 'renderToolPreferences', 'renderWslPanel',
     'updateOpenRouterProfilesStatus', 'updateMinimaxApiKeysStatus', 'updateThirdPartyProfilesStatus', 'renderExternalProviderStatus',
     'renderCopilotStatus', 'signalContentReady']) h.context[name] = () => {};
@@ -88,6 +89,7 @@ test('visible Settings follows quota pushes and defers hidden updates without po
   h.context.visibleStatsSurface = () => hidden ? null : 'main';
   h.context.isSettingsSurfaceVisible = () => settingsVisible;
   h.context.preserveSettingsPanelScroll = callback => callback();
+  h.context.refreshAccountOwnerReadings = () => h.context.refreshReadings();
   const localStart = app.indexOf('function localDeviceLimitsProviders()');
   vm.runInContext(app.slice(localStart, app.indexOf('function localProviderStatuses(', localStart)), h.context);
   const providerStart = app.indexOf('function localProviderStatuses(');

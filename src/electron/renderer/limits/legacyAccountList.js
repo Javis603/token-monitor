@@ -28,7 +28,7 @@
     return candidates.length === 1 ? candidates[0] : undefined;
   }
   /**
-   * @param {{document: Document, provider: string, label?: string, add?: Function, container: HTMLElement, t: Function, bridge: any, getContext: Function, preserveScroll: Function, refresh: Function, changed: Function, enabled?: Function, remove?: Function, edit?: Function, sourceLabel?: Function, busy?: Function, editor?: {nodes: string[], submit?: string, visibility?: string, replaceVisibility?: string, allowBusyCancel?: boolean, isOpen?: Function, retryAvailable?: Function, cancel?: Function}, actions?: Function, statusReading?: Function, secondaryText?: Function, detailText?: Function, blocked?: Function}} options
+   * @param {{document: Document, provider: string, label?: string, add?: Function, container: HTMLElement, t: Function, bridge: any, getContext: Function, preserveScroll: Function, refresh: Function, changed: Function, enabled?: Function, remove?: Function, edit?: Function, sourceLabel?: Function, busy?: Function, editor?: {nodes: string[], submit?: string, visibility?: string, replaceVisibility?: string, allowBusyCancel?: boolean, isOpen?: Function, retryAvailable?: Function, cancel?: Function}, actions?: Function, statusReading?: Function, secondaryText?: Function, detailText?: Function, blocked?: Function, readings?: () => any[], status?: {element: () => HTMLElement | null, empty?: () => string, text?: (summary: {total: number, linked: number}) => string, active?: () => boolean}}} options
    */
   function create(options) {
     let accounts = /** @type {any[]} */ ([]);
@@ -89,15 +89,32 @@
     options.container.replaceChildren(list.element);
     if (options.editor) sharedEditor = mountEditor({ ...options, editor: options.editor }, list.element);
 
+    // The header is derived from the rows this list draws, so the two cannot
+    // disagree: other devices' accounts count, and only a healthy row is connected.
+    const renderStatus = () => {
+      const status = options.status;
+      if (!status || status.active?.() === false) return;
+      const element = status.element();
+      if (!element) return;
+      const summary = list.summary();
+      const text = status.text ? status.text(summary)
+        : summary.total ? options.t('settings.slots.connectedCount', summary) : status.empty?.() || '';
+      if (element.textContent !== text) element.textContent = text;
+      if (element.getAttribute?.('aria-label') !== text) element.setAttribute('aria-label', text);
+    };
+    /** Refresh status without replacing provider-owned account controls. @param {any[]} nextReadings */
+    const updateReadings = nextReadings => {
+      readings = nextReadings;
+      sharedEditor?.sync();
+      const context = options.getContext();
+      list.update(accounts, readings, { ...context, presentation: context.settings?.limitAccountPresentation?.[provider] || {} });
+      renderStatus();
+    };
     return {
       summary: list.summary,
-      /** Refresh status without replacing provider-owned account controls. @param {any[]} nextReadings */
-      updateReadings(nextReadings) {
-        readings = nextReadings;
-        sharedEditor?.sync();
-        const context = options.getContext();
-        list.update(accounts, readings, { ...context, presentation: context.settings?.limitAccountPresentation?.[provider] || {} });
-      },
+      updateReadings,
+      /** Re-read this list's quota rows, as every quota push must. */
+      refreshReadings() { if (options.readings) updateReadings(options.readings()); },
       /** @param {any[]} next @param {any[]} nextReadings */
       update(next, nextReadings) {
         readings = nextReadings;
@@ -119,6 +136,7 @@
             fingerprint: account.id, label, accountName: account.accountName || account.accountLabel || (account.email || account.accountEmail ? '' : account.id) };
         });
         list.update(accounts, readings, { ...context, presentation: context.settings?.limitAccountPresentation?.[provider] || {} });
+        renderStatus();
       }
     };
   }

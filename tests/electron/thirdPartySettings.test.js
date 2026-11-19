@@ -319,9 +319,9 @@ test('third-party status settles after refresh and pushed stats', () => {
   );
 
   assert.match(refreshStats, /statsRenderScheduler\.request\(\);/);
-  assert.match(statsRender, /updateThirdPartyProfilesStatus\(\);/);
+  assert.match(statsRender, /refreshAccountOwnerReadings\(\);/);
   assert.match(statsPush, /statsRenderScheduler\.request\(\);/);
-  assert.match(app, /function updateThirdPartyProfilesStatus/);
+  assert.match(read('src/electron/renderer/limits/providerOwners/thirdparty.js'), /refreshReadings: updateThirdPartyProfilesStatus/);
   assert.match(app, /function thirdPartyProfileStatusText/);
   assert.match(app, /settings\.thirdparty\.unlimited/);
 });

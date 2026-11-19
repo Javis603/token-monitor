@@ -287,6 +287,7 @@ test('a stats update repaints main and the visible Settings overlay', () => {
     'renderCodexAccounts',
     'renderMimoStatus',
     'renderWorkbuddyStatus',
+    'refreshAccountOwnerReadings',
     'renderSettingsSummaries',
     'renderLimitProviderCheckboxes',
     'renderToolPreferences',
@@ -320,7 +321,8 @@ test('a stats update repaints main and the visible Settings overlay', () => {
   assert.deepEqual(calls.slice(0, 2), ['connection:main', 'main']);
   assert.equal(calls.filter(call => call === 'settings-scroll-batch').length, 1);
   assert.ok(calls.indexOf('renderSettingsSummaries') > calls.indexOf('main'));
-  assert.ok(calls.indexOf('renderMimoStatus') > calls.indexOf('main'));
+  // A list that repaints only on settings pushes keeps its pre-refresh status.
+  assert.ok(calls.indexOf('refreshAccountOwnerReadings') > calls.indexOf('main'));
   assert.equal(calls.at(-1), 'ready');
 });
 
@@ -520,5 +522,5 @@ test('all stats refreshes use visibility-aware rendering', () => {
 
   assert.match(refreshStats, /getStats\(options\)[\s\S]*statsRenderScheduler\.request\(\);/);
   assert.equal([...refreshStats.matchAll(/setStatus\(statusTextFor/g)].length, 1);
-  assert.match(statsRender, /renderMimoStatus\(\);/);
+  assert.match(statsRender, /refreshAccountOwnerReadings\(\);/);
 });
