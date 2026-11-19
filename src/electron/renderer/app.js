@@ -7551,6 +7551,14 @@ function bindHomeTrendTooltip(chart, model, points) {
   const tooltip = homeActivityTooltipEl('home-trend-tooltip');
   tooltip.setAttribute('aria-live', 'polite');
   tooltip.setAttribute('aria-atomic', 'true');
+  const count = tooltip.querySelector('[data-home-activity-tooltip-count]');
+  count.setAttribute('aria-hidden', 'true');
+  let exactCount = tooltip.querySelector('.token-number-reading');
+  if (!exactCount) {
+    exactCount = document.createElement('span');
+    exactCount.className = 'token-number-reading';
+    tooltip.querySelector('.home-activity-tooltip-row').insertBefore(exactCount, count);
+  }
   const date = tooltip.querySelector('[data-home-activity-tooltip-date]');
   let cost = tooltip.querySelector('.home-trend-tooltip-cost');
   if (!cost) {
@@ -7583,14 +7591,16 @@ function bindHomeTrendTooltip(chart, model, points) {
     crosshair.style.left = left;
     marker.style.left = left;
     marker.style.top = `${point.y / model.height * 100}%`;
-    tooltip.querySelector('[data-home-activity-tooltip-count]').textContent = formatNumber(daily.tokens);
+    const exactTokens = formatNumber(daily.tokens);
+    count.textContent = state.settings?.showExactHomeTrendTokens === true ? exactTokens : formatCompact(daily.tokens);
+    exactCount.textContent = exactTokens;
     date.textContent = daily.date;
     const hasCost = daily.cost != null && Number.isFinite(Number(daily.cost));
     cost.textContent = hasCost || Number(daily.unpricedTokens) > 0
       ? usageAttributionRowsApi.compactUsageCostLabel(daily.cost, daily.unpricedTokens,
         (amount) => currencyApi.formatCurrencyFromUsd(amount, currentCurrency())) : '';
     cost.hidden = !cost.textContent;
-    homeModule.setAttribute('aria-label', `${t('home.activity')} · ${t('home.trend')} · ${formatNumber(daily.tokens)} tokens${cost.textContent ? ` · ${cost.textContent}` : ''} · ${daily.date}`);
+    homeModule.setAttribute('aria-label', `${t('home.activity')} · ${t('home.trend')} · ${exactTokens} tokens${cost.textContent ? ` · ${cost.textContent}` : ''} · ${daily.date}`);
     chart.setAttribute('data-active', 'true');
     tooltip.dataset.visible = 'true';
     tooltip.setAttribute('aria-hidden', 'false');
@@ -11253,6 +11263,34 @@ function renderHomeActivitySettings() {
   }
   daysRow.append(daysLabel, daysOptions);
   frag.append(daysRow);
+
+  const trendTokensRow = document.createElement('div');
+  trendTokensRow.className = 'home-activity-settings';
+  const trendTokensLabel = document.createElement('span');
+  trendTokensLabel.textContent = t('settings.home.trendTokens');
+  const trendTokensOptions = document.createElement('div');
+  trendTokensOptions.className = 'inline-options';
+  trendTokensOptions.setAttribute('role', 'radiogroup');
+  trendTokensOptions.setAttribute('aria-label', trendTokensLabel.textContent);
+  const showExactTokens = state.settings?.showExactHomeTrendTokens === true;
+  for (const mode of ['compact', 'exact']) {
+    const option = document.createElement('label');
+    option.className = 'inline-option';
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'homeTrendTokens';
+    input.value = mode;
+    input.checked = showExactTokens === (mode === 'exact');
+    input.addEventListener('change', () => {
+      if (input.checked) void saveSettings({ showExactHomeTrendTokens: mode === 'exact' }).then(renderHomeIfVisible);
+    });
+    const text = document.createElement('span');
+    text.textContent = t(`settings.home.trendTokens.${mode}`);
+    option.append(input, text);
+    trendTokensOptions.append(option);
+  }
+  trendTokensRow.append(trendTokensLabel, trendTokensOptions);
+  frag.append(trendTokensRow);
 
   return frag;
 }
