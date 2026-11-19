@@ -504,3 +504,27 @@ test('main publishes summaries and exports their completions', () => {
   assert.match(main, /writeExportTo\(result\.filePaths\[0\], completeLocalSyncStats\(stats\)\.periods\)/);
   assert.equal((main.match(/writeExportTo\(/g) || []).length, 3, 'the definition and the two exports above');
 });
+
+test('local ticks reuse the normalization of an unchanged Hub device', () => {
+  const nowMs = Date.parse('2026-07-16T00:01:00.000Z');
+  let sessionWalks = 0;
+  const sessions = new Proxy(usagePeriod('codex', '2026-07-16T00:00:30.000Z', 50).sessions, {
+    ownKeys(target) { sessionWalks += 1; return Reflect.ownKeys(target); }
+  });
+  const remote = device('remote', 50, { month: { totalTokens: 50, clients: { codex: 50 }, sessions } });
+  const hubStats = { devices: [remote] };
+
+  const first = composeLocalSyncSummary(hubStats, device('local', 10), { nowMs });
+  const walksAfterFirst = sessionWalks;
+  const second = composeLocalSyncSummary(hubStats, device('local', 20), { nowMs });
+
+  assert.ok(walksAfterFirst > 0);
+  assert.equal(sessionWalks, walksAfterFirst, 'the second tick reads the Hub device from its cached normalization');
+  assert.equal(first.periods.month.totalTokens, 60);
+  assert.equal(second.periods.month.totalTokens, 70);
+  assert.equal(Object.keys(second.periods.month.sessions).length, 1);
+
+  // The Hub replaces a record it reports again; the replacement is normalized.
+  const replaced = composeLocalSyncSummary({ devices: [device('remote', 80)] }, device('local', 20), { nowMs });
+  assert.equal(replaced.periods.month.totalTokens, 100);
+});

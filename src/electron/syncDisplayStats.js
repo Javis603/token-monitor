@@ -98,6 +98,20 @@ function normalizedLocalRecord(localDevice) {
   return normalized;
 }
 
+// A Hub device record is replaced, never edited, when the Hub reports it again
+// (a delta copies every container it touches), so its normalization holds until
+// then. Local ticks re-compose against the same Hub copy, often every second.
+const normalizedHubRecords = new WeakMap();
+
+function normalizedHubRecord(record) {
+  let normalized = normalizedHubRecords.get(record);
+  if (!normalized) {
+    normalized = normalizeDeviceRecord(record);
+    normalizedHubRecords.set(record, normalized);
+  }
+  return normalized;
+}
+
 const summaryRecords = new WeakMap();
 
 function withoutAllTimeSessions(record) {
@@ -123,10 +137,10 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     .concat(localDevice);
   const hubStaleAfterMs = nonNegativeNumber(hubStats?.staleAfterMs);
   const hasHubStaleAfterMs = hubStaleAfterMs !== null;
-  const normalize = (record) => (record === localDevice ? normalizedLocalRecord(localDevice) : normalizeDeviceRecord(record));
+  const normalize = (record) => (record === localDevice ? normalizedLocalRecord(localDevice) : normalizedHubRecord(record));
   const summarize = (record) => (record === localDevice
     ? normalizedLocalSummary(localDevice)
-    : withoutAllTimeSessions(normalizeDeviceRecord(record)));
+    : withoutAllTimeSessions(normalizedHubRecord(record)));
   const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, options.nowMs, {
     normalizeRecord: options.allTimeSessions === false ? summarize : normalize
   });
