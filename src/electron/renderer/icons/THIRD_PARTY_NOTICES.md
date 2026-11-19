@@ -14,6 +14,10 @@ Sources:
   - actions/pause.svg: pause
   - actions/play.svg: play
     (key, pause and play copied from upstream commit `f8feea7a02ea461c9f2a4b4d851512aae6ec933f`)
+  - actions/eye.svg: eye
+  - actions/eye-off.svg: eye-off
+  - actions/pin.svg: pin
+    (eye, eye-off and pin copied from upstream commit `149eba0aea48178a5ab1efe2c701de1da94f4be8`)
   - actions/trash.svg: trash
   - actions/download.svg: download
   - actions/rotate-cw.svg: rotate-cw

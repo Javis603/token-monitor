@@ -2783,15 +2783,28 @@ button.tool-preference-main:focus-visible {
   background: rgba(var(--accent-rgb), 0.06);
   color: var(--accent);
 }
-.tool-visibility-button svg,
-.tool-pin-button svg {
+.tool-visibility-button::before,
+.tool-pin-button::before {
+  content: "";
   width: 13px;
   height: 13px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 2;
-  stroke-linecap: round;
-  stroke-linejoin: round;
+  background: currentColor;
+  mask: center / contain no-repeat;
+}
+.tool-visibility-button::before {
+  mask-image: url("icons/actions/eye.svg");
+}
+.tool-visibility-button.is-hidden::before {
+  mask-image: url("icons/actions/eye-off.svg");
+}
+.tool-pin-button::before {
+  mask-image: url("icons/actions/pin.svg");
+}
+@media (forced-colors: active) {
+  .tool-visibility-button::before,
+  .tool-pin-button::before {
+    background: ButtonText;
+  }
 }
 .settings-panel .limit-provider-list {
   grid-template-columns: 1fr;
