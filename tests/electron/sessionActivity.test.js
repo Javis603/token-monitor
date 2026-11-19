@@ -164,10 +164,12 @@ test('stats reads adopt the published snapshot used by subsequent activity patch
     const pulled = await f.get(null, {});
     assert.notEqual(pulled.snapshot.id, first.id, mode);
     assert.equal(pulled.snapshot.id, f.pushes.at(-1).data.stats.snapshot.id, 'other consumers see the adopted read');
+    const before = f.details(pulled);
+    assert.equal(f.state(before), 'running', mode);
     f.context.publishLocalSessionActivity(f.patch('waiting'));
     const event = f.pushes.at(-1).data;
     assert.equal(event.snapshot.id, pulled.snapshot.id, mode);
-    assert.equal(f.state(projection.applyActivityPatch(f.details(pulled), event.patch)), 'waiting', mode);
+    assert.equal(f.state(projection.applyActivityPatch(before, event.patch)), 'waiting', mode);
     assert.equal(f.context.rendererSnapshots.get(pulled.snapshot.id), f.context.latestStats);
   }
 });
