@@ -9962,13 +9962,49 @@ function applyInitialBreakdownPreference() {
   if (next !== state.breakdown) setBreakdown(next);
 }
 
+// This machine's archived sessions, counted in main from the local record. It is
+// asked again for each new snapshot while Settings shows it, one request at a
+// time; a failed count waits for the next stats. A successful Clear shows zero
+// at once and drops any count asked for before it.
+const archivedSessionCountState = { requestedId: null, value: null, pending: false, clears: 0 };
+function requestArchivedSessionCount() {
+  const snapshot = state.stats?.snapshot;
+  const current = archivedSessionCountState;
+  if (!snapshot || current.pending || current.requestedId === snapshot.id || !isSettingsSurfaceVisible()) return;
+  current.requestedId = snapshot.id;
+  current.pending = true;
+  const clears = current.clears;
+  Promise.resolve()
+    .then(() => window.tokenMonitor.getArchivedSessionCount())
+    .then((count) => {
+      if (clears !== current.clears) return;
+      current.value = Number.isFinite(count) ? count : null;
+      renderSessionUsageArchiveStatus();
+    }, (error) => console.log(`[stats] archived session count failed: ${error?.message || error}`))
+    .finally(() => {
+      current.pending = false;
+      requestArchivedSessionCount();
+    });
+}
+
+function archivedSessionCountCleared() {
+  archivedSessionCountState.clears += 1;
+  archivedSessionCountState.value = 0;
+  renderSessionUsageArchiveStatus();
+}
+
 function renderSessionUsageArchiveStatus() {
   if (!els.sessionUsageArchiveStatus) return;
   if (state.settings?.sessionUsageArchiveEnabled === false) {
     els.sessionUsageArchiveStatus.textContent = t('settings.collection.sessionArchivePaused');
     return;
   }
-  const count = sessionRowsApi.archivedSessionCount(state.stats);
+  requestArchivedSessionCount();
+  const count = archivedSessionCountState.value;
+  if (count === null) {
+    els.sessionUsageArchiveStatus.textContent = '';
+    return;
+  }
   els.sessionUsageArchiveStatus.textContent = count > 0
     ? t('settings.collection.sessionArchiveActiveCount', { count })
     : t('settings.collection.sessionArchiveEmpty');
@@ -10317,7 +10353,6 @@ function syncSettingsForm() {
   if (els.wslScanInput) els.wslScanInput.checked = state.settings.wslScanEnabled === true;
   if (els.sessionUsageArchiveInput) els.sessionUsageArchiveInput.checked = state.settings.sessionUsageArchiveEnabled !== false;
   renderAutomaticAppUpdateControl();
-  allTimeSessions.ensure();
   renderSessionUsageArchiveStatus();
   const exportAutoOn = Boolean(state.settings.exportAutoEnabled);
   const exportDir = state.settings.exportDir || '';
@@ -14898,6 +14933,7 @@ els.clearSessionUsageArchiveButton?.addEventListener('click', async () => {
         : 'settings.collection.sessionArchiveFailed'));
       return;
     }
+    archivedSessionCountCleared();
     await refreshStats();
   } finally {
     els.clearSessionUsageArchiveButton.disabled = false;
@@ -15763,11 +15799,11 @@ const statsRenderScheduler = statsRenderSchedulerApi.createStatsRenderScheduler(
   isHidden: isRendererWindowHidden,
   render: renderStatsUpdate
 });
-// Pulled once up front, then only while something on screen reads it: the
-// archived count in Settings, or TOTAL sessions/projects. Bot identity arrives
-// in a compact snapshot projection and does not need a full history pull.
+// Pulled once up front, then only while TOTAL sessions/projects show it.
+// Settings' archived count is counted in main (requestArchivedSessionCount), and
+// bot identity arrives in a compact snapshot projection; neither needs the list.
 function allTimeSessionsNeeded() {
-  if (!allTimeSessions.loaded() || isSettingsPanelOpen()) return true;
+  if (!allTimeSessions.loaded()) return true;
   return state.period === 'allTime' && (state.breakdown === 'session' || state.breakdown === 'project');
 }
 const allTimeSessions = allTimeSessionsApi.createAllTimeSessionsLoader({

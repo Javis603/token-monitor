@@ -646,7 +646,7 @@ test('session archive retention has its own setting separate from Trends', () =>
   assert.match(html, /id="clearSessionUsageArchiveButton" class="session-archive-clear"/);
   assert.match(app, /sessionUsageArchiveEnabled:\s*els\.sessionUsageArchiveInput\.checked/);
   assert.doesNotMatch(app, /sessionUsageArchiveCount/);
-  assert.match(app, /sessionRowsApi\.archivedSessionCount\(state\.stats\)/);
+  assert.match(app, /window\.tokenMonitor\.getArchivedSessionCount\(\)/);
   assert.match(app, /sessionUsageArchiveEnabled === false[\s\S]{0,160}sessionArchivePaused/);
   assert.match(css, /\.session-archive-clear\s*\{[\s\S]*?width:\s*auto;[\s\S]*?font-size:\s*0\.625rem;/);
   assert.match(main, /sessionUsageArchiveEnabled:\s*parseBoolean\(process\.env\.TOKEN_MONITOR_SESSION_USAGE_ARCHIVE_ENABLED,\s*true\)/);
