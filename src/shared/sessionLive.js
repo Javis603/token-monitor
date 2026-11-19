@@ -68,11 +68,12 @@
 
   // Local activity overlays leave the accounting session map untouched. Resolve
   // one row at the presentation/normalization boundary; wire rows stay ordinary.
-  function sessionWithActivity(period, key, session = period?.sessions?.[key]) {
+  // `now` is optional; canReplaceLiveActivity() reads the clock only when needed.
+  function sessionWithActivity(period, key, session = period?.sessions?.[key], now) {
     if (!session || isArchivedSession(session)) return session;
     const observation = normalizeLiveActivity(period?.sessionActivity?.[key]);
     if (!observation || !providers.isSessionActivityClient(session.client)
-      || !canReplaceLiveActivity(session.liveActivity, observation)) return session;
+      || !canReplaceLiveActivity(session.liveActivity, observation, now)) return session;
     return { ...session, liveActivity: observation };
   }
 

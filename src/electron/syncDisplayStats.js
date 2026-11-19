@@ -98,18 +98,50 @@ function normalizedLocalRecord(localDevice) {
   return normalized;
 }
 
-// A Hub device record is replaced, never edited, when the Hub reports it again
-// (a delta copies every container it touches), so its normalization holds until
-// then. Local ticks re-compose against the same Hub copy, often every second.
-const normalizedHubRecords = new WeakMap();
+// The Hub re-sends every device on each event, if only for its new ageMs, so a
+// Hub device record is a new object every time. Its periods are not: a delta
+// copies only the containers it touches and a freshness event keeps the periods
+// it does not re-stamp. Normalizing the periods is most of normalizing a record,
+// so it is cached by the Hub's period object for as long as the Hub keeps it.
+const normalizedHubPeriods = new WeakMap();
+
+// Normalization judges live-activity observations against a clock: one from a
+// peer clock that is ahead counts only once it is no longer in the future. A
+// period normalized at one sample therefore matches any clock between that
+// sample and the earliest observation it found in the future.
+function futureActivityAt(period, nowMs) {
+  let earliest = Infinity;
+  const consider = (observation) => {
+    const at = Date.parse(String(observation?.observedAt || ''));
+    if (at > nowMs && at < earliest) earliest = at;
+  };
+  for (const session of Object.values(period.sessions || {})) consider(session?.liveActivity);
+  for (const observation of Object.values(period.sessionActivity || {})) consider(observation);
+  return earliest;
+}
+
+function normalizedHubPeriod(period, options) {
+  if (!period || typeof period !== 'object') return normalizePeriod(period, options);
+  const projects = options.projectsEnabled !== false ? 'withProjects' : 'withoutProjects';
+  let cached = normalizedHubPeriods.get(period);
+  if (!cached) {
+    cached = {};
+    normalizedHubPeriods.set(period, cached);
+  }
+  const nowMs = Date.now();
+  const entry = cached[projects];
+  if (!entry || nowMs < entry.filledAt || nowMs >= entry.refreshAt) {
+    cached[projects] = {
+      normalized: normalizePeriod(period, { ...options, nowMs }),
+      filledAt: nowMs,
+      refreshAt: futureActivityAt(period, nowMs)
+    };
+  }
+  return cached[projects].normalized;
+}
 
 function normalizedHubRecord(record) {
-  let normalized = normalizedHubRecords.get(record);
-  if (!normalized) {
-    normalized = normalizeDeviceRecord(record);
-    normalizedHubRecords.set(record, normalized);
-  }
-  return normalized;
+  return normalizeDeviceRecord(record, { normalizePeriod: normalizedHubPeriod });
 }
 
 const summaryRecords = new WeakMap();
