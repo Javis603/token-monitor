@@ -2312,16 +2312,12 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 }
 .tool-preference-list.drag-active .tool-preference-row:not(.dragging) { opacity: 0.78; }
 .view-preference-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) repeat(2, 22px);
+  display: flex;
   align-items: center;
-  column-gap: 5px;
-  margin: 0 -2px;
-  padding: 1px 2px;
-  border-radius: 6px;
   min-width: 0;
-  flex-wrap: nowrap;
-  transition: background 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+  height: 28px;
+  border-radius: 7px;
+  color: var(--muted);
 }
 .tool-preference-name {
   flex: 1 1 auto;
@@ -2399,21 +2395,9 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   color: var(--orange);
 }
 .tool-preference-row.is-hidden .tool-preference-name,
-.view-preference-row.is-hidden .tool-preference-name,
 .home-module-preference-row.is-hidden .tool-preference-name,
 .home-limit-provider-row.is-hidden .tool-preference-name {
   opacity: 0.58;
-}
-.view-preference-row.is-disabled .tool-preference-name,
-.view-preference-row.is-disabled .tool-visibility-button,
-.view-preference-row.is-disabled .view-subgroup-toggle,
-.view-preference-row.is-disabled .preference-order-handle {
-  opacity: 0.42;
-}
-.view-preference-row.is-disabled .tool-visibility-button:hover,
-.view-preference-row.is-disabled .view-subgroup-toggle:hover,
-.view-preference-row.is-disabled .preference-order-handle:hover:not(:disabled) {
-  opacity: 0.72;
 }
 /* The detail panel is a child of the row, not a sibling: the whole row is the
    drag surface, and a sibling would be left behind when the row moves. Vertical
@@ -7560,9 +7544,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .detail-session-id-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; user-select: text; }
 .detail-session-id-copy { flex-shrink: 0; padding: 0 2px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; opacity: 0.72; }
 .detail-session-id-copy:hover, .detail-session-id-copy:focus-visible { color: var(--text); opacity: 1; }
-.view-preference-row.has-subgroup {
-  grid-template-columns: minmax(0, 1fr) repeat(3, 22px);
-}
 .view-subgroup-toggle {
   display: inline-grid;
   place-items: center;
@@ -7636,9 +7617,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   min-width: 0;
   transition: background 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
 }
-.home-module-preference-row:has(.view-subgroup-toggle) {
-  grid-template-columns: minmax(0, 1fr) repeat(3, 22px);
-}
 .settings-panel .home-module-count-setting > input[type="number"],
 .settings-panel .home-limit-account-count-setting > input[type="number"] {
   height: 20px;
@@ -7680,6 +7658,269 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   gap: 8px;
 }
 .status-provider-row.is-hidden .tool-preference-name { opacity: 0.45; }
+
+/* Main Screen pairs the view switcher's own items (in its order, hidden views
+   in a group below) with the selected view's settings beside them. The nav
+   items reuse the switcher menu's current-item tint so the two read as the
+   same list. */
+.main-view-layout {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  min-width: 0;
+}
+.main-view-nav,
+.main-view-list,
+.main-view-hidden-group {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.main-view-hidden-group { margin-top: 6px; }
+.main-view-hidden-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 2px 2px 8px;
+  color: var(--muted);
+  font-size: 0.5625rem;
+}
+.main-view-hidden-label::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: rgba(var(--line-rgb), 0.14);
+}
+.main-view-nav-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 6px 0 0 8px;
+}
+.main-view-hint {
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.5625rem;
+  line-height: 1.3;
+  opacity: 0.8;
+}
+.main-view-nav-footer .tool-header-action { width: 22px; height: 22px; font-size: 14px; }
+.main-view-tab {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 2px 0 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.main-view-tab .view-switcher-icon { width: 13px; height: 13px; }
+.main-view-tab .tool-preference-name { color: inherit; font-weight: 400; }
+.main-view-tab:focus-visible { outline: none; }
+.view-preference-row:has(.main-view-tab:focus-visible) { box-shadow: inset 0 0 0 1px rgba(var(--accent-rgb), 0.72); }
+.view-preference-row:hover { background: rgba(var(--overlay-rgb), 0.05); color: var(--text); }
+.view-preference-row.is-current { background: rgba(var(--accent-rgb), 0.12); color: var(--accent); }
+.view-preference-row.is-hidden:not(.is-current) { box-shadow: inset 0 0 0 1px rgba(var(--line-rgb), 0.16); }
+.view-preference-row.is-hidden .tool-preference-name,
+.view-preference-row.is-disabled .tool-preference-name { opacity: 0.72; }
+.view-preference-row.is-current .tool-preference-name { opacity: 1; }
+.view-preference-row .preference-order-handle {
+  flex: 0 0 18px;
+  width: 18px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.main-view-add {
+  position: relative;
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.main-view-add::before,
+.main-view-add::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 9px;
+  height: 1.5px;
+  border-radius: 1px;
+  background: currentColor;
+  transform: translate(-50%, -50%);
+}
+.main-view-add::after { transform: translate(-50%, -50%) rotate(90deg); }
+.main-view-add:hover,
+.main-view-add:focus-visible { border-color: var(--line-strong); background: rgba(var(--overlay-rgb), var(--control-alpha)); color: var(--text); }
+.main-view-add:focus-visible { outline: 1px solid rgba(var(--accent-rgb), 0.5); outline-offset: 1px; }
+.main-view-inspector {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  padding: 10px 10px 6px;
+  border: 1px solid rgba(var(--line-rgb), 0.13);
+  border-radius: 10px;
+  background: rgba(var(--overlay-rgb), 0.035);
+}
+.main-view-header {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  margin-bottom: 4px;
+}
+.main-view-badge {
+  display: grid;
+  place-items: center;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  border-radius: 8px;
+  background: rgba(var(--accent-rgb), 0.12);
+  color: var(--accent);
+}
+.main-view-badge .view-switcher-icon { width: 14px; height: 14px; }
+.main-view-heading { display: grid; gap: 1px; min-width: 0; }
+.main-view-heading strong { overflow: hidden; color: var(--text); font-size: 0.8125rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.main-view-subtitle { color: var(--muted); font-size: 0.5625rem; }
+.settings-panel .main-view-visibility { min-height: 32px; }
+.settings-panel .main-view-inspector > .settings-nested-list {
+  margin: 0;
+  padding: 0;
+  border-left: 0;
+  border-top: 1px solid rgba(var(--line-rgb), 0.1);
+}
+/* The inspector column is narrow; a long provider name must ellipsize rather
+   than widen the list past the card. */
+.main-view-inspector .settings-nested-list { grid-template-columns: minmax(0, 1fr); }
+.main-view-inspector .status-provider-row .tool-preference-actions { flex: 0 0 auto; }
+.settings-panel .main-view-inspector .settings-nested-list .settings-nested-list {
+  margin: 0 0 4px;
+  padding: 0 0 0 8px;
+}
+.settings-panel .main-view-inspector .home-settings-header { margin: 6px 0 0; min-height: 22px; }
+.main-view-caption { color: var(--muted); font-size: 0.5625rem; }
+.settings-panel .main-view-inspector .home-settings-header .tool-header-action { width: 22px; height: 22px; font-size: 14px; }
+.settings-panel .main-view-inspector .home-module-preference-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 36px;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid rgba(var(--line-rgb), 0.08);
+  border-radius: 0;
+}
+.settings-panel .main-view-inspector .home-settings-header + .home-module-preference-row { border-top: 0; }
+.home-module-disclosure,
+.home-module-static {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: center;
+  justify-items: start;
+  column-gap: 5px;
+  min-width: 0;
+  min-height: 34px;
+  padding: 2px 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+.home-module-disclosure { cursor: pointer; }
+.home-module-disclosure:focus-visible { outline: 1px solid rgba(var(--accent-rgb), 0.72); outline-offset: 1px; }
+.home-module-disclosure .tool-preference-name,
+.home-module-static .tool-preference-name { grid-column: 1; grid-row: 1; max-width: 100%; }
+.main-view-inspector .home-module-meta {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.5625rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-module-disclosure::after {
+  content: "";
+  grid-column: 2;
+  grid-row: 1;
+  width: 9px;
+  height: 9px;
+  background: var(--muted);
+  -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  transform: rotate(-90deg);
+  transition: transform 160ms ease;
+}
+.home-module-disclosure.is-expanded::after { transform: none; }
+.home-module-preference-row .tool-preference-actions { display: flex; align-items: center; gap: 4px; }
+.home-module-preference-row .preference-order-handle {
+  width: 18px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+:is(.view-preference-row, .home-module-preference-row):is(:hover, :has(:focus-visible), .dragging) .preference-order-handle { opacity: 1; }
+.main-view-link {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.6875rem;
+  text-align: left;
+  cursor: pointer;
+}
+.main-view-link-title { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.main-view-link-meta { color: var(--muted); font-size: 0.625rem; font-variant-numeric: tabular-nums; }
+.main-view-link::after {
+  content: "";
+  flex: 0 0 9px;
+  width: 9px;
+  height: 9px;
+  background: var(--muted);
+  -webkit-mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  mask: url("icons/actions/chevron-down.svg") center / contain no-repeat;
+  transform: rotate(-90deg);
+}
+.main-view-link:hover,
+.main-view-link:focus-visible { color: var(--accent); }
+.main-view-link:focus-visible { outline: 1px solid rgba(var(--accent-rgb), 0.72); outline-offset: 1px; }
+.main-view-subpage { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+.main-view-inspector .main-view-back { justify-self: start; margin: -4px 0 6px -6px; }
+.main-view-subpage-title { margin: 0 0 4px; color: var(--text); font-size: 0.75rem; font-weight: 600; }
+.settings-panel .main-view-subpage > .settings-nested-list { margin: 0; padding: 0; border-left: 0; }
+/* Range, currency and ranking apply to every view, so they sit under the
+   views as one titled group. */
+.main-numbers-group {
+  display: grid;
+  gap: 2px;
+  margin-top: 10px;
+  padding: 10px 10px 4px;
+  border: 1px solid rgba(var(--line-rgb), 0.1);
+  border-radius: 10px;
+  background: rgba(var(--sunken-rgb), 0.28);
+}
+.main-numbers-title { margin-bottom: 4px; color: var(--muted); font-size: 0.625rem; }
 
 /* Main Screen starts pointer reordering from the six-dot handles, while the
    rows use the same transform choreography as Collection and AI Tool Limits. */
@@ -7728,7 +7969,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .home-settings-list.drag-active > .home-module-preference-row:not(.dragging),
 .home-limit-provider-list.drag-active > .home-limit-provider-row:not(.dragging),
 .status-provider-list.drag-active > .status-provider-row:not(.dragging) { opacity: 0.78; }
-#viewDisplayList.is-reordering > .accordion-animated-container,
 .home-settings-list.is-reordering > .accordion-animated-container { transition: none; }
 .service-status-empty {
   padding: 12px 0;

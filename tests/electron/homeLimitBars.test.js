@@ -377,7 +377,8 @@ test('Home display mode persists separately from low-limit highlighting and is t
   assert.match(main, /homeLimitDisplayMode: 'text'/);
   assert.match(main, /merged\.homeLimitDisplayMode = normalizeHomeLimitDisplayMode\(merged\.homeLimitDisplayMode\)/);
   assert.match(main, /homeLimitDisplayMode: normalizeHomeLimitDisplayMode\(patch\.homeLimitDisplayMode \?\? settings\.homeLimitDisplayMode\)/);
-  assert.match(app, /saveSettings\(\{ homeLimitDisplayMode: displayInput\.value \}\)/);
+  assert.match(app, /input\.name = 'homeLimitDisplayMode'/);
+  assert.match(app, /if \(input\.checked\) void saveSettings\(\{ homeLimitDisplayMode: mode \}\)/);
   assert.equal(preferences.normalizeHomeLimitDisplayMode('bars'), 'bars');
   assert.equal(preferences.normalizeHomeLimitDisplayMode('invalid'), 'text');
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
@@ -480,7 +481,7 @@ test('Home account display count defaults to three and is configurable', () => {
   assert.match(main, /merged\.homeLimitAccountCount = normalizeHomeLimitAccountCount\(merged\.homeLimitAccountCount\)/);
   assert.match(main, /homeLimitAccountCount: normalizeHomeLimitAccountCount\(patch\.homeLimitAccountCount \?\? settings\.homeLimitAccountCount\)/);
   assert.match(app, /limit: state\.settings\?\.homeLimitAccountCount \?\? 3/);
-  const renderSettings = app.slice(app.indexOf('function renderHomeLimitProviderList'), app.indexOf('function renderHomeSettingsList'));
+  const renderSettings = app.slice(app.indexOf('function renderHomeLimitSettings'), app.indexOf('function renderHomeLimitProviderList'));
   assert.match(renderSettings, /countInput\.type = 'number'/);
   assert.match(renderSettings, /countInput\.min = '1'/);
   assert.match(renderSettings, /countInput\.max = '12'/);

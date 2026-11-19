@@ -452,7 +452,6 @@ test('applyTranslations updates accessible names without native tooltips', () =>
 test('service status provider preference labels exist in Chinese', () => {
   assert.equal(translate('zh-TW', 'serviceStatus.providersNote'), '選擇 Status 頁顯示哪些服務、以及順序。');
   assert.equal(translate('zh-TW', 'serviceStatus.allHidden'), '已隱藏所有服務');
-  assert.equal(translate('zh-TW', 'serviceStatus.configureProviders', { name: '狀態' }), '設定 狀態 服務');
 });
 
 test('the affected-component count is localized', () => {
