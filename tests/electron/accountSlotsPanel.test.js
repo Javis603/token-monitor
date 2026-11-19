@@ -100,6 +100,29 @@ test('slot names and status respect labels, native identity, fingerprint, pause 
   assert.equal(accountStatus({ enabled: true }, { status: 'ok', stale: true }), 'stale');
   assert.equal(accountStatus({ enabled: true }, { status: 'ok' }), 'connected');
 });
+test('an account without a reading says Checking only while a probe for it runs', () => {
+  assert.equal(accountStatus({ enabled: true }, undefined), 'unavailable');
+  assert.equal(accountStatus({ enabled: true }, undefined, true, true), 'checking');
+  assert.equal(accountStatus({ enabled: true }, { status: 'unavailable' }, true, true), 'unavailable', 'a reading is the answer, even mid-probe');
+  assert.equal(accountStatus({ enabled: false }, undefined, true, true), 'paused');
+  const h = harness();
+  const status = id => h.row(id).querySelector('.slot-status');
+  const readings = [{ accountKey: 'ka', status: 'unauthorized', updatedAt: new Date().toISOString() }];
+  const paint = probes => h.panel.update(h.slots, readings, { probes });
+  assert.match(status('default').className, /slot-unavailable/);
+  paint([{ provider: 'qoder', account: { field: 'accountKey', value: 'default' } }]);
+  assert.match(status('default').className, /slot-checking/);
+  assert.equal(status('default').textContent, 'Checking…');
+  assert.match(status('a').className, /slot-invalid/, 'another account keeps its own answer');
+  assert.deepEqual(h.panel.summary(), { total: 3, linked: 0 }, 'a check in progress is not connected');
+  paint([{ provider: 'qoder', account: null }]);
+  assert.match(status('default').className, /slot-checking/, 'a provider-wide probe answers for every account');
+  paint([{ provider: 'other', account: null }]);
+  assert.match(status('default').className, /slot-unavailable/, "another provider's probe does not");
+  paint([]);
+  assert.match(status('default').className, /slot-unavailable/, 'a probe that returned nothing leaves the failure');
+});
+
 test('explicit collection sources change row status without waiting for newer quota', () => {
   const h = harness(t, 'cline');
   const slots = [
@@ -479,7 +502,7 @@ function rendererSlotContext(stats) {
   const source = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
   const state = { stats, settings: { deviceId: 'local', limitAccountForms: limitAccountFormsForRenderer() } };
   const calls = [];
-  const context = { state, limitProviderEnabled: () => true, localDeviceLimitsProviders: () => null, limitAccountForm: id => state.settings.limitAccountForms.find(form => form.id === id), render() {},
+  const context = { state, limitProbes: [], limitProviderEnabled: () => true, localDeviceLimitsProviders: () => null, limitAccountForm: id => state.settings.limitAccountForms.find(form => form.id === id), render() {},
     preserveSettingsPanelScroll: callback => callback(), renderExternalProviderStatus() {},
     localProviderStatuses: id => (stats.limits?.providers || []).filter(row => row.provider === id),
     window: { tokenMonitor: { limits: { accountSlots: { list: async id => { calls.push(id); return { ok: true, accounts: [{ accountKey: 'z' }] }; } } } } } };
@@ -498,6 +521,33 @@ test('slot panel readings retain legacy aggregate fallback without devices', asy
   await context.refreshAccountSlotPanels();
   assert.ok(seen.length >= 2);
   assert.deepEqual(seen[0][1], rows); assert.deepEqual(seen.at(-1)[1], rows);
+});
+
+test('a probe starting or finishing repaints only its provider account rows in visible Settings', () => {
+  const fs = require('node:fs'); const vm = require('node:vm');
+  const source = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
+  const calls = [];
+  let visible = true;
+  const panel = id => ({ update: (_slots, _readings, context) => calls.push(`${id}:${context.probes.length}`) });
+  const owner = id => ({ refreshReadings: () => calls.push(id) });
+  const context = vm.createContext({ limitProbes: [], settingsLocalLimits: null, limitWindowsView: { syncLimitRefreshButtons() {} },
+    isSettingsSurfaceVisible: () => visible, preserveSettingsPanelScroll: callback => callback(),
+    accountSlotPanels: new Map([['qoder', panel('qoder')], ['deepseek', panel('deepseek')]]), accountSlotLists: {},
+    automaticAccountPanels: new Map([['grok', { controller: { update: rows => calls.push(rows[0].status) } }]]),
+    strictLocalProviderStatuses: id => [{ provider: id, status: 'ok' }],
+    localProviderStatuses: () => [], legacyAccountOwners: { antigravity: owner('antigravity'), codex: owner('codex'), claude: {} },
+    renderExternalProviderStatus: id => calls.push(`external:${id}`) });
+  context.limitAccountContext = () => ({ probes: context.limitProbes });
+  vm.runInContext(source.slice(source.indexOf('function setLimitProbes('), source.indexOf('let limitProbesPushed')), context);
+  const step = probes => { calls.length = 0; context.setLimitProbes(probes); return [...calls]; };
+  assert.deepEqual(step([{ provider: 'antigravity', account: null }]), ['antigravity']);
+  assert.deepEqual(step([{ provider: 'qoder', account: null }]), ['qoder:1', 'external:qoder', 'antigravity'], 'the finished probe repaints too');
+  assert.deepEqual(step([{ provider: 'claude', account: null }]), ['qoder:1', 'external:qoder', 'external:claude']);
+  calls.length = 0;
+  context.setLimitProbes([], { revision: 1, limits: { providers: [{ provider: 'grok' }] } });
+  assert.deepEqual(calls, ['ok', 'external:claude'], 'local readings reach automatic rows immediately');
+  visible = false;
+  assert.deepEqual(step([]), [], 'hidden Settings reads the probes on its next paint');
 });
 
 test('loading unchanged slot metadata does not repaint the account panels', async () => {

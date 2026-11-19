@@ -52,7 +52,9 @@
     if (identities.some(identity => identity && String(identity).toLowerCase() === String(value).toLowerCase())) return '';
     return presentationApi.limitProviderPlanDisplayLabel(row, value);
   }
-  function accountStatus(slot, reading, providerEnabled = true) {
+  // `probing` says a refresh that will answer for this account is in flight.
+  // Without a reading, that is a check still running, not a failed one.
+  function accountStatus(slot, reading, providerEnabled = true, probing = false) {
     if (!slot.enabled) return 'paused';
     if (!providerEnabled) return 'disabled';
     if (slot.sourceSelected === false) return 'notCollected';
@@ -61,7 +63,8 @@
     if (reading?.status === 'rateLimited') return 'limited';
     if (reading?.status === 'sourceRateLimited') return 'usageApiLimited';
     if (reading?.stale) return 'stale';
-    return reading?.status === 'ok' ? 'connected' : 'unavailable';
+    if (!reading) return probing ? 'checking' : 'unavailable';
+    return reading.status === 'ok' ? 'connected' : 'unavailable';
   }
   // Shared keys lead regardless of ownership; unknown local slots then remote
   // readings retain their stored/aggregate order.
@@ -208,6 +211,8 @@
     let localDeviceId = '';
     let settings;
     let providerEnabled = true;
+    // Limits probes in flight, from the host's context like the readings.
+    let probes = [];
     const deviceIcons = typeof module !== 'undefined' ? require('../deviceIcons') : window.TokenMonitorDeviceIcons;
     const deviceLabels = typeof module !== 'undefined' ? require('../deviceBreakdown') : window.TokenMonitorDeviceBreakdown;
     let operationLane = Promise.resolve();
@@ -257,7 +262,8 @@
       const preference = settings?.[`${form.id}SourcePreference`];
       const omitted = preference && preference !== 'auto' && slot.collectionSources && !slot.collectionSources.includes(preference);
       return accountStatus(omitted ? { ...slot, sourceSelected: false } : slot, statusReading(slot, reading),
-        slot.source === 'remote' || providerEnabled);
+        slot.source === 'remote' || providerEnabled,
+        probes.some(probe => scope.probeCoversRow(probe, { ...slot, provider: form.id, region: form.id === 'alibaba' ? alibabaVariant(slot) : slot.region })));
     }
     const run = (operation, ...args) => {
       const slot = activeAccounts().find(slot => slot.id === args[0]);
@@ -924,6 +930,7 @@
       slots = nextSlots; readings = nextReadings; settings = context.settings;
       providerEnabled = context.providerEnabled !== false;
       remoteReadings = context.records || []; devices = context.devices || []; localDeviceId = context.localDeviceId || ''; presentation = context.presentation || {};
+      probes = context.probes || [];
       preserveScroll(render);
     }, summary() {
       const accounts = activeAccounts();

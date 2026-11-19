@@ -10,7 +10,7 @@ const app = fs.readFileSync(path.resolve(__dirname, '../../src/electron/renderer
 function rows(state) {
   const source = app.slice(app.indexOf('function strictLocalProviderStatuses('), app.indexOf('function localProviderStatuses('));
   return vm.runInNewContext(source + "\nstrictLocalProviderStatuses('grok')", {
-    state, localDeviceLimitsProviders: () => identity.localDeviceLimitsProviders(state.stats, state.settings?.deviceId || '')
+    state, settingsLocalDeviceLimitsProviders: () => identity.localDeviceLimitsProviders(state.stats, state.settings?.deviceId || '')
   });
 }
 test('automatic account wiring uses local device observations and excludes Hub aggregate-only identities', () => {

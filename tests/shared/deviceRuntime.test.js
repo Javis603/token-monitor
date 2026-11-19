@@ -63,8 +63,10 @@ test('usage publishes immediately without waiting for limits and late limits emi
 });
 
 test('limits arriving before first usage are buffered without fabricating a zero record', () => {
-  const { limitsDeps, records, usageOptions } = harness();
+  const updates = [];
+  const { limitsDeps, records, usageOptions } = harness({ limitsDeps: { onUpdate: limits => updates.push(limits) } });
   limitsDeps.onUpdate({ updatedAt: 'limits-time', refreshMs: 300000, providers: [] });
+  assert.equal(updates[0].updatedAt, 'limits-time', 'local limits observers do not need a usage baseline');
   assert.equal(records.length, 0);
   usageOptions.onUpdate({ updatedAt: 'usage-time', today: { totalTokens: 7 } }, 'startup');
   assert.equal(records.length, 1);
@@ -76,6 +78,19 @@ test('initial limits seed composes with the first usage record', () => {
   const { records, usageOptions } = harness({ initialLimits });
   usageOptions.onUpdate({ updatedAt: 'usage-time', today: { totalTokens: 4 } }, 'startup');
   assert.equal(records[0].record.limits.updatedAt, 'seed-time');
+});
+
+test('a throwing limits observer cannot block record delivery', () => {
+  const failure = new Error('observer failed');
+  const errors = [];
+  const { limitsDeps, records, usageOptions } = harness({
+    limitsDeps: { onUpdate() { throw failure; } },
+    onError: (...args) => errors.push(args)
+  });
+  usageOptions.onUpdate({ today: { totalTokens: 1 } });
+  limitsDeps.onUpdate({ providers: [{ provider: 'grok', status: 'ok' }] });
+  assert.equal(records.at(-1).record.limits.providers[0].status, 'ok');
+  assert.deepEqual(errors, [[failure, 'limits-observer']]);
 });
 
 test('usage transforms run only for usage events, not limits-only publishes', () => {

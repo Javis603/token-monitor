@@ -32,6 +32,7 @@ function settingsHarness(api = {}, providers = []) {
   const refreshes = [];
   const context = vm.createContext({
     state,
+    settingsLocalLimits: null,
     window: { TokenMonitorLegacyAccountList: require('../../src/electron/renderer/limits/legacyAccountList'), tokenMonitor: { workbuddy: api, limits: { accountSlots: { presentation: async () => ({ ok: true }) } } } },
     document,
     accountIdentityApi, accountShellApi,

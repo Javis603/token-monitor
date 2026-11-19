@@ -129,6 +129,11 @@ function createDeviceRuntime(options = {}, deps = {}) {
     ...(deps.limitsDeps || {}),
     onUpdate(summary) {
       if (!active) return;
+      try {
+        deps.limitsDeps?.onUpdate?.(summary);
+      } catch (error) {
+        try { options.onError?.(error, 'limits-observer'); } catch (_) {}
+      }
       deviceState.updateLimits(summary, 'limits', { epoch });
     },
     onEvent(event) {
