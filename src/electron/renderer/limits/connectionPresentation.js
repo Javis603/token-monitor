@@ -105,5 +105,5 @@
     panel.append(card);
     return panel;
   }
-  return { createConnectionCard, sourceForReading };
+  return { createConnectionCard, isFresh, sourceForReading };
 });

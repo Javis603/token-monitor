@@ -892,10 +892,13 @@
         item.el.classList.toggle('slot-paused', !slot.enabled);
         item.status.className = sharesStatus ? 'slot-status' : `slot-status slot-${status}`;
         const lane = rowSource(slot, reading);
-        if (lane) item.sourceIcon.dataset.kind = lane.kind;
+        const iconKind = slot.sourceIconKind || lane?.kind;
+        if (iconKind) item.sourceIcon.dataset.kind = iconKind;
         else delete item.sourceIcon.dataset.kind;
-        item.sourceIcon.classList.toggle('is-live', Boolean(lane) && status === 'connected');
-        if (lane && status === 'connected' && slot.source !== 'remote') liveIds.add(lane.id);
+        const liveLane = lane && lane.kind === iconKind && status === 'connected'
+          && connection.isFresh(reading ?? slot.observation) ? lane : null;
+        item.sourceIcon.classList.toggle('is-live', Boolean(liveLane));
+        if (liveLane && slot.source !== 'remote') liveIds.add(liveLane.id);
         const statusText = statusLabel(status, slot, reading);
         item.status.textContent = sharesStatus ? '' : status === 'connected' ? source || statusText : statusText;
         if (sharesStatus) item.status.removeAttribute('aria-label');

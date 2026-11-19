@@ -8,6 +8,49 @@ const vm = require('node:vm');
 const claudeOwner = require('../../src/electron/renderer/limits/providerOwners/claude');
 const accountShellApi = require('../../src/electron/renderer/limits/accountShell');
 const legacyList = require('../../src/electron/renderer/limits/legacyAccountList');
+const { liveSourceIds } = require('../../src/electron/renderer/limits/accountSlotsPanel');
+const { createConnectionCard } = require('../../src/electron/renderer/limits/connectionPresentation');
+const { connectionSources } = require('../../src/electron/renderer/limits/providerPresentation');
+
+test('Claude Web login health does not light the quota source without a fresh Web reading', () => {
+  const document = require('./accountOwnerDom.fixture.cjs').createDocument();
+  const list = document.createElement('div');
+  list.id = 'claudeWebAccountList';
+  document.root.append(list);
+  const settings = {
+    claudeManagedAccounts: [{ id: 'saved', accountKey: 'shared', enabled: true }],
+    claudeWebLoginStatuses: { saved: 'ok' }
+  };
+  let readings = [];
+  const owner = claudeOwner.create({ document, getSettings: () => settings,
+    accountShellApi, getAccountContext: () => ({ settings }), preserveScroll: fn => fn(),
+    window: { TokenMonitorLegacyAccountList: legacyList, tokenMonitor: {} },
+    localProviderStatuses: () => readings, t: key => key });
+  const web = { provider: 'claude', accountKey: 'shared', source: 'web', status: 'ok' };
+  const oauth = { ...web, source: 'oauth' };
+  try {
+    for (const [quota, expected] of [
+      [[oauth], ['oauth']],
+      [[], []],
+      [[{ ...web, stale: true }], []],
+      [[web], ['web']]
+    ]) {
+      readings = quota;
+      owner.renderClaudeWebAccounts();
+      const row = [...list.walk()].find(node => node.dataset.slotId === 'saved');
+      const icon = row.querySelector('.slot-source-icon');
+      assert.equal(row.querySelector('.slot-status').classList.contains('slot-connected'), true);
+      assert.equal(icon.dataset.kind, 'web');
+      const card = createConnectionCard({ document, t: key => key, sources: connectionSources('claude'),
+        readings, liveSourceIds: liveSourceIds('claude') });
+      const highlighted = [...card.walk()].filter(node => node.classList.contains('is-live'));
+      assert.deepEqual(highlighted.map(node => node.dataset.kind), expected);
+      assert.equal(icon.classList.contains('is-live'), expected.includes('web'));
+    }
+  } finally {
+    list.remove();
+  }
+});
 
 
 test('Claude Web rows retain controls and removal confirmation across quota and login-status updates', async (suite) => {

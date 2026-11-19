@@ -163,7 +163,7 @@ function renderClaudeWebAccounts() {
     });
   }
   // Saved rows hold a Web session; the reading they match may be the same account's OAuth quota.
-  accountList.update([...accounts.map(account => ({ ...account, sourceId: 'web', canPause: account.id !== 'legacy',
+  accountList.update([...accounts.map(account => ({ ...account, sourceIconKind: 'web', canPause: account.id !== 'legacy',
     removable: !(account.id === 'legacy' && state.settings?.claudeWebLegacyCookieSource === 'env') })), ...automatic], providers.filter(row => row.accountKey));
 
 }
