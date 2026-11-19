@@ -72,6 +72,25 @@ function harness(translateMessage = t, providerId = 'qoder', loginAction, maskEm
   const click = (node, text) => buttons(node).find(n => n.textContent === text).click();
   return { panel, slots, service, slotSettings, document, calls, ipc, defaultPanel, row, update, click, set verdict(v) { verdict = v; } };
 }
+test('Volcengine adds one credential set and keeps the existing credential editor', async () => {
+  const h = harness(t, 'volcengine');
+  const prefix = 'volcengineSlotDraft';
+  const input = key => h.document.getElementById(`${prefix}${key}Input`);
+  const agentKeys = ['volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion'];
+  h.panel.openEditor();
+  assert.ok(input('volcengineRegion'));
+  for (const key of agentKeys) assert.ok(!input(key), key);
+  input('volcengineAccessKeyId').value = 'AKLT-fixture';
+  input('volcengineSecretAccessKey').value = 'fixture-secret';
+  await h.document.getElementById(`${prefix}CredentialSubmit`).click();
+  assert.equal(h.calls[0][0], 'add');
+  for (const key of agentKeys) assert.equal(Object.hasOwn(h.calls[0][2], key), false);
+
+  h.panel.openEditor(h.slots.find(slot => slot.id === 'a'));
+  for (const key of agentKeys) assert.ok(input(key), key);
+  assert.ok(h.document.getElementById('volcengineAgentAccessKeyIdInput'));
+});
+
 test('slot names and status respect labels, native identity, fingerprint, pause and stale', () => {
   assert.equal(accountName({ label: 'Work', fingerprint: 'abc' }, { accountEmail: 'x@y' }, t), 'Work');
   assert.equal(accountName({ fingerprint: 'abc' }, { accountEmail: 'x@y' }, t), 'x@y');
