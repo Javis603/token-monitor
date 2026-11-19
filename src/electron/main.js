@@ -287,6 +287,7 @@ const {
 const { createSyncPayloadUploader, syncPayload } = require('../shared/syncPayload');
 const postSyncPayload = createSyncPayloadUploader();
 const { mergedLocalAllTimeSessions } = require('../shared/localSessions');
+const { createLocalArchivedSessionCounter } = require('./localArchivedSessionCount');
 const { MIMO_PLATFORM_CONSOLE_URL } = require('../shared/providers/mimo/limits');
 
 const { deviceHistoryRevision, historyPreview, historyRevision } = require('../shared/history');
@@ -2418,6 +2419,8 @@ let sseRetryTimer = null;
 let streamConnected = false;
 let streamFailure = null;
 let lastCollectedDevice = null;
+// Before the first scan, the cold-start seed already carries the replayed archive.
+const localArchivedSessionCount = createLocalArchivedSessionCounter(() => lastCollectedDevice || anchorSeedDevice);
 let latestHubStats = null;
 let latestHubStatsReceivedAt = null;
 // Matches the renderer's connected-stream fallback interval.
@@ -7430,6 +7433,7 @@ app.whenReady().then(() => {
       sessionUsageArchiveStore.clear();
       clearDailyHistoryArchive();
       usageTransform.reset();
+      localArchivedSessionCount.archiveCleared();
       return { ok: true };
     } catch (error) {
       return { ok: false, error: error.message };
@@ -8166,6 +8170,13 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle('stats:allTimeSessions', (_event, snapshotId) => rendererAllTimeSessions(rendererSnapshots.get(snapshotId)));
+  // While a headless agent owns host or sync collection, this app's record stops
+  // updating and the agent applies its own archive, so there is no count to show.
+  ipcMain.handle('stats:archivedSessionCount', () => (
+    settings?.hubMode !== 'icloud' && !canRefreshUsageRuntime(mode, isExternalAgentActive)
+      ? null
+      : localArchivedSessionCount()
+  ));
   ipcMain.handle('export:now', async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openDirectory', 'createDirectory'],

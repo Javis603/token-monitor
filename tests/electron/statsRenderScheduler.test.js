@@ -269,11 +269,11 @@ test('stats-derived Settings rows refresh behind an open panel', () => {
     app.indexOf('function isSettingsSurfaceVisible()')
   );
 
-  // The archived session count is Settings content derived from state.stats, and
-  // the only thing that redraws it is the main render. It goes stale for as long
-  // as anything stops render() from running while the panel is open, which is how
-  // it used to need a close and reopen to catch up.
-  assert.match(archiveBody, /sessionRowsApi\.archivedSessionCount\(state\.stats\)/);
+  // The archived session count is Settings content counted for the snapshot in
+  // state.stats, and the only thing that asks for it is the main render. It goes
+  // stale for as long as anything stops render() from running while the panel is
+  // open, which is how it used to need a close and reopen to catch up.
+  assert.match(archiveBody, /requestArchivedSessionCount\(\);/);
   assert.doesNotMatch(archiveBody, /isSettingsSurfaceVisible|isSettingsPanelOpen/);
   assert.match(renderBody, /renderSessionUsageArchiveStatus\(\);/);
   assert.match(app, /function render\(\{ fromSearch = false \} = \{\}\) \{\n {2}renderAppContent\(\{ fromSearch \}\);/);
