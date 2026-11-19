@@ -594,17 +594,25 @@ test('startup and settings pushes load slot lists with no mounted Settings panel
   assert.match(push, /refreshAccountSlotPanels\(\)/);
 });
 
-test('slot freshness honors Hub threshold upload interval floor and registry opt-ins', () => {
+test('device quota freshness covers saved slots and provider-owned sources', () => {
   const fs = require('node:fs'); const vm = require('node:vm');
   const source = fs.readFileSync(require.resolve('../../src/electron/main.js'), 'utf8');
   const context = { settings: { deviceId: 'local' }, lastCollectedDevice: null, mode: 'local', localDevice: null,
-    attachLocalPresentationNativeViews() {}, isProviderStale, LIMIT_PROVIDER_REGISTRY: [...LIMIT_PROVIDER_REGISTRY, { id: 'future', accountSlots: true }] };
+    attachLocalPresentationNativeViews() {}, isProviderStale };
   vm.createContext(context);
-  vm.runInContext(source.match(/const ACCOUNT_SLOT_PROVIDER_IDS = .*;/)[0], context);
   vm.runInContext(source.slice(source.indexOf('function injectLocalDeviceStatus('), source.indexOf('function macWidgetConfiguration(')), context);
-  for (const [age, interval, expected] of [[5, 0, false], [15, 0, true], [35, 20 * 60000, false], [45, 20 * 60000, true]]) {
-    const stats = { staleAfterMs: 10 * 60000, devices: [{ deviceId: 'local', syncUploadIntervalMs: interval, limits: { refreshMs: 60000, providers: ['qoder', 'future'].map(provider => ({ provider, status: 'ok', updatedAt: new Date(Date.now() - age * 60000).toISOString() })) } }] };
-    assert.deepEqual(Array.from(context.injectLocalDeviceStatus(stats).devices[0].limits.providers, row => row.stale), [expected, expected]);
+  for (const [age, interval, offline, expected] of [
+    [5, 0, false, false], [15, 0, false, true], [35, 20 * 60000, false, false],
+    [45, 20 * 60000, false, true], [0, 0, true, true]
+  ]) {
+    const stats = { staleAfterMs: 10 * 60000, devices: [{
+      deviceId: 'local', stale: offline, syncUploadIntervalMs: interval,
+      limits: { refreshMs: 60000, providers: ['qoder', 'codex', 'cursor'].map(provider => ({
+        provider, status: 'ok', updatedAt: new Date(Date.now() - age * 60000).toISOString()
+      })) }
+    }] };
+    assert.deepEqual(Array.from(context.injectLocalDeviceStatus(stats).devices[0].limits.providers, row => row.stale),
+      [expected, expected, expected]);
   }
   const body = source.slice(source.indexOf('function injectLocalDeviceStatus('), source.indexOf('function macWidgetConfiguration('));
   assert.doesNotMatch(body, /require\(/);
@@ -1692,9 +1700,11 @@ test('panels publish the lanes of connected local rows for the connection card',
     assert.deepEqual(changes, ['manus']);
     h.panel.update(slots, [ok('a'), ok('b'), ok('c')], {});
     assert.deepEqual(changes, ['manus'], 'an unchanged set does not notify');
+    h.panel.update(slots, [{ ...ok('a'), sourceDeviceId: 'other' }], { localDeviceId: 'local' });
+    assert.deepEqual([...liveSourceIds('manus')], [], 'a matching account key does not make an explicitly remote reading local');
+    assert.deepEqual(changes, ['manus', 'manus']);
     h.panel.update(slots, [{ ...ok('a'), status: 'unauthorized' }], {});
     assert.deepEqual([...liveSourceIds('manus')], []);
-    assert.deepEqual(changes, ['manus', 'manus']);
     h.panel.update(slots, [ok('a')], {});
     const notified = changes.length;
     h.panel.element.remove();

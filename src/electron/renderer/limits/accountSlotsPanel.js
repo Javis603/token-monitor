@@ -895,10 +895,13 @@
         const iconKind = slot.sourceIconKind || lane?.kind;
         if (iconKind) item.sourceIcon.dataset.kind = iconKind;
         else delete item.sourceIcon.dataset.kind;
+        const quota = reading ?? slot.observation;
         const liveLane = lane && lane.kind === iconKind && status === 'connected'
-          && connection.isFresh(reading ?? slot.observation) ? lane : null;
+          && connection.isFresh(quota) ? lane : null;
         item.sourceIcon.classList.toggle('is-live', Boolean(liveLane));
-        if (liveLane && slot.source !== 'remote') liveIds.add(liveLane.id);
+        if (liveLane && slot.source !== 'remote' && (!quota.sourceDeviceId || quota.sourceDeviceId === localDeviceId)) {
+          liveIds.add(liveLane.id);
+        }
         const statusText = statusLabel(status, slot, reading);
         item.status.textContent = sharesStatus ? '' : status === 'connected' ? source || statusText : statusText;
         if (sharesStatus) item.status.removeAttribute('aria-label');

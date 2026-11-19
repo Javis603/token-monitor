@@ -4159,10 +4159,11 @@ function injectLocalDeviceStatus(stats) {
     const activity = localActivityPatch(lastCollectedDevice);
     if (activity) stats = projectLocalActivity(stats, activity);
   }
-  // Per-device rows remain authoritative for account disclosures, including
-  // failures hidden by a healthy aggregate. Share the aggregate freshness rule.
-  for (const device of stats.devices) if (device.limits) device.limits = { ...device.limits, providers: device.limits.providers.map(row => !ACCOUNT_SLOT_PROVIDER_IDS.has(row.provider) ? row : ({
-    ...row, stale: isProviderStale(row, device.limits, device, stats.staleAfterMs, Date.now())
+  // Account disclosures and connection sources use per-device quota rows.
+  // Apply the aggregate freshness rule to those rows for every provider.
+  const now = Date.now();
+  for (const device of stats.devices) if (device.limits) device.limits = { ...device.limits, providers: device.limits.providers.map(row => ({
+    ...row, stale: isProviderStale(row, device.limits, device, stats.staleAfterMs, now)
   })) };
   if (mode !== 'local') snapshotLocalDevices.set(stats, { localDevice: lastCollectedDevice });
   return stats;
