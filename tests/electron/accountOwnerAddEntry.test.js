@@ -21,6 +21,11 @@ function harness(provider, overrides = {}, context = {}, localReadings = []) {
     if (/Details$/.test(id)) node.classList.add('hidden');
     document.root.append(node);
   }
+  if (provider === 'minimax') {
+    const html = fs.readFileSync(path.join(renderer, 'index.html'), 'utf8');
+    assert.match(html, /id="minimaxAddDetails"[^>]*>\s*<div class="settings-actions">\s*<button id="minimaxOpenBrowser"/);
+    nodes.minimaxAddDetails.append(nodes.minimaxOpenBrowser);
+  }
   const originalCreate = document.createElement;
   document.createElement = tag => { const node = originalCreate(tag); node.appendChild = child => { node.append(child); return child; }; node.before = child => node.parentElement.insertBefore(child, node); return node; };
   const originalQuery = document.querySelectorAll;
@@ -401,7 +406,7 @@ test('Cursor initial discovery failure keeps the shared manual-login footer reac
   assert.equal(h.add().disabled, true, 'a known external-agent gate still blocks management on error');
 });
 
-for (const removeLast of [false, true]) test(`MiniMax billing remains reachable with a collapsed editor, removeLast=${removeLast}`, async () => {
+for (const removeLast of [false, true]) test(`MiniMax billing is in the Add account form, removeLast=${removeLast}`, async () => {
   let keys = removeLast ? [{ id: 'last', accountKey: 'wallet', billingMode: 'api', apiRegion: 'cn' }] : [];
   const h = harness('minimax', { getKeys: async () => keys, removeKey: async () => { keys = []; return { ok: true }; } });
   const opened = [];
@@ -415,10 +420,12 @@ for (const removeLast of [false, true]) test(`MiniMax billing remains reachable 
     assert.equal(h.document.root.querySelector('.slot-row'), undefined);
   }
   const browser = h.nodes.minimaxOpenBrowser;
-  assert.equal(h.document.root.querySelector('.legacy-editor-reveal').inert, true);
-  // The fixture permits synthetic clicks on hidden/inert nodes: check the
-  // actual owner/list DOM ancestry before invoking the real event handler.
-  assert.equal(Boolean(browser.closest('.hidden')), false, 'billing must be visible without opening Add');
+  const editor = h.document.root.querySelector('.legacy-editor-reveal');
+  assert.ok(browser.closest('.legacy-editor-reveal') === editor);
+  assert.equal(editor.inert, true);
+  assert.ok(browser.closest('.hidden'));
+  await h.add().click();
+  assert.equal(Boolean(browser.closest('.hidden')), false);
   for (let node = browser; node; node = node.parentElement) assert.notEqual(node.inert, true, 'billing must not be inert');
   for (const [billingMode, apiRegion, expected] of [
     ['token-plan', 'cn', 'https://platform.minimaxi.com/user-center/payment/token-plan'],
@@ -431,7 +438,7 @@ for (const removeLast of [false, true]) test(`MiniMax billing remains reachable 
     assert.equal(opened.at(-1), expected);
   }
   await h.add().click();
-  assert.equal(h.nodes.minimaxAddDetails.classList.contains('hidden'), false, 'add form remains available');
+  assert.equal(editor.inert, true);
 });
 
 for (const masked of [false, true]) test(`Codex titles retain emails and custom names separately from plans (masked=${masked})`, async () => {
