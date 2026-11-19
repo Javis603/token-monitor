@@ -69,7 +69,38 @@ html.native-high-contrast .dash-cards { border-color: var(--line-strong); }
 
 .dash-controls { flex: none; }
 .dash-control-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-.dash-range-group { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+.dash-range-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px 4px;
+  flex-wrap: wrap;
+}
+.dash-range-group { display: flex; align-items: center; gap: 4px; }
+.dash-custom-range-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.dash-date-input {
+  background: rgba(var(--overlay-rgb), 0.06);
+  border: 1px solid rgba(var(--overlay-rgb), 0.12);
+  border-radius: 6px;
+  color: inherit;
+  font-family: inherit;
+  font-size: 11px;
+  padding: 3px 6px;
+  outline: none;
+  color-scheme: dark light;
+}
+.dash-date-input:focus {
+  border-color: var(--accent);
+}
+.dash-date-sep {
+  opacity: 0.6;
+  font-size: 12px;
+  user-select: none;
+}
 .range-btn {
   background: none; border: 1px solid transparent; color: inherit; opacity: 0.65; cursor: pointer;
   font-size: 12px; padding: 3px 10px; border-radius: 6px; font-family: inherit; transition: 0.2s;

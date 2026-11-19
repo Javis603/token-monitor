@@ -26,6 +26,9 @@ const els = {
   trendsPane: document.getElementById('trendsPane'),
   activityPane: document.getElementById('activityPane'),
   rangeSelect: document.getElementById('rangeSelect'),
+  dashCustomRangeBar: document.getElementById('dashCustomRangeBar'),
+  dashCustomStart: document.getElementById('dashCustomStart'),
+  dashCustomEnd: document.getElementById('dashCustomEnd'),
   chart: document.getElementById('dashChart'),
   legend: document.getElementById('dashLegend'),
   heatmap: document.getElementById('dashHeatmap'),
@@ -37,12 +40,12 @@ const els = {
   heatmapMetricBtns: Array.from(document.querySelectorAll('[data-control="heatmapMetric"] .seg-btn'))
 };
 
-const RANGES = ['7', '30', '90', '365', 'all'];
+const RANGES = ['7', '30', '90', '365', 'all', 'custom'];
 const state = {
   tab: 'activity', range: '30', stackBy: 'client', mode: 'bars', flat: false,
   locale: 'en', currency: 'USD', compactTokenUnits: 'western', history: null, chartModel: null,
   chartKind: 'bars', motion: 'none', reduceMotion: 'system',
-  heatmapMetric: 'cost'
+  heatmapMetric: 'cost', customStart: '', customEnd: ''
 };
 let nativeMaterialState = glassRenderingApi?.normalizeNativeMaterialState?.() || { type: 'transparent', reducedTransparency: false, highContrast: false };
 let nativeMaterialRevision = 0;
@@ -212,6 +215,9 @@ function effectiveCompactTokenUnits() {
 
 function applyTranslations() {
   document.querySelectorAll('[data-i18n]').forEach((node) => { node.textContent = t(node.getAttribute('data-i18n')); });
+  document.querySelectorAll('[data-i18n-aria-label]').forEach((node) => {
+    node.setAttribute('aria-label', t(node.getAttribute('data-i18n-aria-label')));
+  });
   document.documentElement.lang = state.locale;
 }
 
@@ -299,12 +305,177 @@ function chartSize() {
   return { w: Math.max(320, els.chart.clientWidth || 800), h: Math.max(200, els.chart.clientHeight || 360) };
 }
 
+function normalizeDashDateKey(value) {
+  const key = String(value || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(key)) return '';
+  const parsed = new Date(`${key}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== key) return '';
+  return key;
+}
+
+function dashDateKeyBefore(key) {
+  const normalized = normalizeDashDateKey(key);
+  if (!normalized) return '';
+  const previous = new Date(Date.parse(`${normalized}T00:00:00Z`) - 86400000);
+  if (Number.isNaN(previous.getTime())) return '';
+  return normalizeDashDateKey(previous.toISOString().slice(0, 10));
+}
+
+function syncCustomRangeInputs() {
+  if (!els.dashCustomRangeBar) return;
+  const isCustom = state.range === 'custom';
+  els.dashCustomRangeBar.classList.toggle('hidden', !isCustom);
+  if (!isCustom) return;
+  const daily = state.history?.daily || [];
+  const today = todayKey();
+  const startInput = normalizeDashDateKey(els.dashCustomStart?.value);
+  const endInput = normalizeDashDateKey(els.dashCustomEnd?.value);
+  const startState = normalizeDashDateKey(state.customStart);
+  const endState = normalizeDashDateKey(state.customEnd);
+  // Without History there is nothing to default to yet: pinning today's date
+  // now would hide the history's own first and last day once it arrives.
+  if (!state.history && !startState && !endState && !startInput && !endInput) return;
+  const defaultStart = daily[0]?.date ? String(daily[0].date).slice(0, 10) : today;
+  const defaultEnd = daily.length ? String(daily[daily.length - 1].date).slice(0, 10) : today;
+  const start = startState || startInput || defaultStart;
+  const end = endState || endInput || defaultEnd;
+  if (els.dashCustomStart && !els.dashCustomStart.value) els.dashCustomStart.value = start;
+  if (els.dashCustomEnd && !els.dashCustomEnd.value) els.dashCustomEnd.value = end;
+  state.customStart = normalizeDashDateKey(els.dashCustomStart?.value) || start;
+  state.customEnd = normalizeDashDateKey(els.dashCustomEnd?.value) || end;
+}
+
+function getEffectiveRange() {
+  if (state.range !== 'custom') return null;
+  const today = todayKey();
+  let start = normalizeDashDateKey(els.dashCustomStart?.value) || normalizeDashDateKey(state.customStart) || today;
+  let end = normalizeDashDateKey(els.dashCustomEnd?.value) || normalizeDashDateKey(state.customEnd) || today;
+  if (start > end) {
+    const temp = start;
+    start = end;
+    end = temp;
+    if (els.dashCustomStart) els.dashCustomStart.value = start;
+    if (els.dashCustomEnd) els.dashCustomEnd.value = end;
+  }
+  state.customStart = start;
+  state.customEnd = end;
+  return { start, end };
+}
+
+function getFilteredDaily() {
+  const allDaily = state.history?.daily || [];
+  if (state.range === 'custom') {
+    const r = getEffectiveRange();
+    if (!r) return allDaily;
+    return allDaily.filter((d) => {
+      const date = String(d.date || '').slice(0, 10);
+      return date >= r.start && date <= r.end;
+    });
+  }
+  return charts.clampDaily(allDaily, state.range === 'all' ? 0 : Number(state.range));
+}
+
+function onDashCustomDateChange() {
+  const today = todayKey();
+  let start = normalizeDashDateKey(els.dashCustomStart?.value) || normalizeDashDateKey(state.customStart) || today;
+  let end = normalizeDashDateKey(els.dashCustomEnd?.value) || normalizeDashDateKey(state.customEnd) || today;
+  if (start > end) {
+    const temp = start;
+    start = end;
+    end = temp;
+  }
+  if (els.dashCustomStart) els.dashCustomStart.value = start;
+  if (els.dashCustomEnd) els.dashCustomEnd.value = end;
+  state.customStart = start;
+  state.customEnd = end;
+  state.motion = 'update';
+  render();
+  void window.tokenMonitor.updateSettings({ customPeriodStart: start, customPeriodEnd: end });
+}
+
+let dashCustomInputsWired = false;
+function wireCustomRangeInputs() {
+  if (dashCustomInputsWired) return;
+  dashCustomInputsWired = true;
+  if (els.dashCustomStart) els.dashCustomStart.addEventListener('change', onDashCustomDateChange);
+  if (els.dashCustomEnd) els.dashCustomEnd.addEventListener('change', onDashCustomDateChange);
+}
+
+function summaryForDaily(daily, endDate = todayKey()) {
+  let totalTokens = 0;
+  let totalCost = 0;
+  let unpricedTokens = 0;
+  let activeTimeMs = 0;
+  let messages = 0;
+  let peakDayTokens = 0;
+  const activeDaysSet = new Set();
+  const modelCounts = {};
+
+  for (const d of daily) {
+    const tokens = Number(d.tokens || 0);
+    const cost = Number(d.cost || 0);
+    totalTokens += tokens;
+    totalCost += cost;
+    unpricedTokens += Number(d.unpricedTokens || 0);
+    activeTimeMs += Number(d.activeTimeMs || 0);
+    if (tokens > 0) {
+      const date = String(d.date || '').slice(0, 10);
+      if (date) activeDaysSet.add(date);
+      if (tokens > peakDayTokens) peakDayTokens = tokens;
+    }
+    if (d.perClient) {
+      for (const client of Object.values(d.perClient)) {
+        messages += Number(client?.messages || 0);
+      }
+    }
+    if (d.perModel) {
+      for (const [model, val] of Object.entries(d.perModel)) {
+        const mTokens = Number(val?.tokens || 0);
+        modelCounts[model] = (modelCounts[model] || 0) + mTokens;
+      }
+    }
+  }
+
+  // History omits days without usage, so the streak has to walk the calendar
+  // instead of the rows: a day missing from the history ends the run.
+  let currentStreak = 0;
+  let cursor = normalizeDashDateKey(endDate);
+  while (cursor && activeDaysSet.has(cursor)) {
+    currentStreak++;
+    cursor = dashDateKeyBefore(cursor);
+  }
+
+  let favoriteModel = '';
+  let favTokens = 0;
+  for (const [m, count] of Object.entries(modelCounts)) {
+    if (count > favTokens) {
+      favTokens = count;
+      favoriteModel = m;
+    }
+  }
+
+  return {
+    totalTokens,
+    totalCost,
+    unpricedTokens,
+    activeDays: activeDaysSet.size,
+    currentStreak,
+    activeTimeMs,
+    peakDayTokens,
+    favoriteModel,
+    messages
+  };
+}
+
 function populateRangeSelect() {
+  wireCustomRangeInputs();
   els.rangeSelect.innerHTML = RANGES.map((r) => `<button class="range-btn${r === state.range ? ' active' : ''}" data-val="${r}">${t(`dashboard.range.${r}`)}</button>`).join('');
+  syncCustomRangeInputs();
   els.rangeSelect.querySelectorAll('.range-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       if (state.range === e.target.dataset.val) return;
       state.range = e.target.dataset.val;
+      syncCustomRangeInputs();
       state.motion = 'update';
       els.rangeSelect.querySelectorAll('.range-btn').forEach(b => b.classList.toggle('active', b === e.target));
       render();
@@ -355,7 +526,7 @@ function renderLegend(model) {
 function renderTrends() {
   const previousKind = state.chartKind;
   const previousGeometry = captureGeometry(els.chart, '.bar-stack[data-motion-key]');
-  const daily = charts.clampDaily(state.history?.daily || [], state.range === 'all' ? 0 : Number(state.range));
+  const daily = getFilteredDaily();
   if (daily.length === 0) { els.chart.innerHTML = ''; els.legend.innerHTML = ''; state.chartModel = null; return; }
   const pad = { padTop: 10, padRight: 14, padBottom: 24, padLeft: 52 };
   
@@ -392,7 +563,7 @@ function renderBreakdown() {
   const elsBreakdown = document.getElementById('dashBreakdown');
   if (!elsBreakdown) return;
   const previousBars = captureGeometry(elsBreakdown, '.dash-bd-bar-fill[data-motion-key]');
-  const daily = state.history?.daily || [];
+  const daily = getFilteredDaily();
   if (daily.length === 0) { elsBreakdown.innerHTML = ''; return; }
   
   const clientTotals = {};
@@ -490,19 +661,31 @@ function balanceStatCards() {
 }
 
 function renderActivity() {
-  const daily = charts.computeHeatmapIntensities(state.history?.daily || []);
-  const end = todayKey();
-  // Start at the 1st of the month 11 months back → exactly 12 distinct months (Jul→Jun),
-  // like GitHub/codex, so there's no duplicate leading month label.
+  const filtered = getFilteredDaily();
+  const heatmapRows = state.range === 'custom' ? filtered : (state.history?.daily || []);
+  const daily = charts.computeHeatmapIntensities(heatmapRows);
+  let end = todayKey();
   const now = new Date(`${end}T00:00:00Z`);
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)).toISOString().slice(0, 10);
+  let start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 11, 1)).toISOString().slice(0, 10);
+  if (state.range === 'custom') {
+    const r = getEffectiveRange();
+    if (r) {
+      // The heatmap grid holds at most a year of days, and its date math breaks past year 9999.
+      end = r.end > '9999-12-24' ? '9999-12-24' : r.end;
+      start = r.start > end ? end : r.start;
+      if (daysBetween(start, end) > 366) {
+        const endUtc = new Date(`${end}T00:00:00Z`);
+        endUtc.setUTCDate(endUtc.getUTCDate() - 365);
+        start = endUtc.toISOString().slice(0, 10);
+      }
+    }
+  }
   const intensityKey = state.heatmapMetric === 'cost' ? 'costIntensity' : 'tokenIntensity';
   const gap = 4;
   let heat = charts.contribHeatmap(daily, { cell: 14, gap, startDate: start, endDate: end, intensityKey });
   const avail = els.heatmap.clientWidth || 0;
   if (heat.weeks > 0 && avail > 0) {
-    // Size cells to the available width, capped so a wide window doesn't stretch them edge-to-edge.
-    const cell = Math.max(9, Math.min(22, (avail - heat.weeks * gap) / heat.weeks)); // fractional → fills exactly
+    const cell = Math.max(9, Math.min(22, (avail - heat.weeks * gap) / heat.weeks));
     heat = charts.contribHeatmap(daily, { cell, gap, startDate: start, endDate: end, intensityKey });
   }
   const hideHeatmapForEntry = !prefersReducedMotion()
@@ -511,8 +694,10 @@ function renderActivity() {
     ? charts.heatmapSvg(heat, { monthLabel: (m) => monthLabel(m.label), initialHidden: hideHeatmapForEntry })
     : '';
   animateHeatmapEntry();
-  state.dayMap = new Map((state.history?.daily || []).map((d) => [String(d.date).slice(0, 10), { tokens: Number(d.tokens || 0), cost: Number(d.cost || 0), unpricedTokens: Number(d.unpricedTokens || 0) }]));
-  const cards = charts.statsCards(state.history?.summary || {});
+  state.dayMap = new Map((daily || []).map((d) => [String(d.date).slice(0, 10), { tokens: Number(d.tokens || 0), cost: Number(d.cost || 0), unpricedTokens: Number(d.unpricedTokens || 0) }]));
+  const streakEnd = state.range === 'custom' ? (getEffectiveRange()?.end || todayKey()) : todayKey();
+  const summary = state.range === 'all' ? (state.history?.summary || summaryForDaily(filtered, streakEnd)) : summaryForDaily(filtered, streakEnd);
+  const cards = charts.statsCards(summary);
   const LABELS = {
     totalTokens: 'dashboard.stat.totalTokens', totalCost: 'dashboard.stat.totalCost',
     activeDays: 'trends.activeDays', currentStreak: 'trends.currentStreak',
@@ -521,11 +706,11 @@ function renderActivity() {
   };
   els.cards.innerHTML = charts.statsCardsHtml(cards, {
     label: (k) => t(LABELS[k] || k),
-    format: (c) => (c.kind === 'cost' ? formatCostCompact(c.value, state.history?.summary?.unpricedTokens)
+    format: (c) => (c.kind === 'cost' ? formatCostCompact(c.value, summary?.unpricedTokens)
       : c.kind === 'duration' ? formatDurationCompact(c.value)
         : c.kind === 'model' ? (c.value || '—') : formatCompact(c.value))
   });
-  const missing = Number(state.history?.summary?.unpricedTokens || 0);
+  const missing = Number(summary?.unpricedTokens || 0);
   const costValue = els.cards.querySelector('[data-stat="totalCost"] .dash-card-v');
   if (costValue && missing > 0) {
     const info = document.createElement('span');
@@ -648,6 +833,7 @@ async function refresh() {
   try {
     state.motion = state.history ? 'update' : 'entry';
     state.history = await window.tokenMonitor.getDashboardHistory();
+    syncCustomRangeInputs();
     render();
   } catch (error) {
     state.motion = 'none';
@@ -690,6 +876,8 @@ async function boot() {
   }
   state.flat = settings.dashboardFlat === true;
   state.heatmapMetric = settings.heatmapMetric || 'cost';
+  state.customStart = normalizeDashDateKey(settings.customPeriodStart);
+  state.customEnd = normalizeDashDateKey(settings.customPeriodEnd);
   applyAppearance(settings);
   applyTranslations();
   populateRangeSelect();
@@ -742,6 +930,21 @@ window.tokenMonitor.onSettingsPush?.((next) => {
   if (state.heatmapMetric !== nextMetric) {
     state.heatmapMetric = nextMetric;
     needsRender = true;
+  }
+  if ('customPeriodStart' in next || 'customPeriodEnd' in next) {
+    const nextStart = normalizeDashDateKey(next.customPeriodStart);
+    const nextEnd = normalizeDashDateKey(next.customPeriodEnd);
+    if (nextStart !== state.customStart || nextEnd !== state.customEnd) {
+      state.customStart = nextStart;
+      state.customEnd = nextEnd;
+      if (els.dashCustomStart && document.activeElement !== els.dashCustomStart) {
+        els.dashCustomStart.value = nextStart;
+      }
+      if (els.dashCustomEnd && document.activeElement !== els.dashCustomEnd) {
+        els.dashCustomEnd.value = nextEnd;
+      }
+      needsRender = true;
+    }
   }
   if (needsRender) render();
 });
