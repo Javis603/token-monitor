@@ -171,6 +171,25 @@ test('every usage structural setting maps to an effective fingerprint change', (
   }
 });
 
+test('daily history archive follows history, not the session archive', () => {
+  const context = {
+    intervalMs: 10 * 60 * 1000,
+    historyIntervalMs: 15 * 60 * 1000,
+    watchEnabled: true
+  };
+  const sessionArchiveOff = usageConfigFromSettings({ sessionUsageArchiveEnabled: false }, context);
+  assert.equal(sessionArchiveOff.historyEnabled, true);
+  assert.equal(sessionArchiveOff.dailyHistoryArchiveEnabled, true,
+    'disabling retained session usage must not stop the daily calendar');
+
+  const historyOff = usageConfigFromSettings({ historyEnabled: false, sessionUsageArchiveEnabled: true }, context);
+  assert.equal(historyOff.dailyHistoryArchiveEnabled, false,
+    'the daily calendar follows the history switch');
+
+  const bothOn = usageConfigFromSettings({ historyEnabled: true, sessionUsageArchiveEnabled: true }, context);
+  assert.equal(bothOn.dailyHistoryArchiveEnabled, true);
+});
+
 test('diagnostic configuration projects effective normalized values without credentials', () => {
   const configuration = diagnosticConfigurationFromSettings({
     allTimeSince: '2026-02-30',
