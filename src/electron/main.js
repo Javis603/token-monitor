@@ -1161,10 +1161,9 @@ function electronLimitsDeps() {
     resolveWorkbuddyManagedCredential: (account, options) => workbuddyAccountService().resolveCredential(account, options),
     onThirdPartyCredentialsRenewed: persistThirdPartyCredentialsRenewal,
     onThirdPartyAccountKeyResolved: persistThirdPartyAccountKey,
+    onUpdate: updateSettingsLocalLimits,
     onEvent: (event) => {
-      if (event?.type === 'probe-start' || event?.type === 'probe-finish') {
-        publishLimitProbes(event.probes, { finished: event.type === 'probe-finish' });
-      }
+      if (event?.type === 'probe-start' || event?.type === 'probe-finish') publishLimitProbes(event.probes);
     }
   };
 }
@@ -1191,27 +1190,38 @@ async function refreshLimitProvider(providerId, account) {
 // The limits probes running right now, for the quota rows' refresh buttons to
 // show a background refresh as well as one the user started.
 let limitProbes = [];
-function publishLimitProbes(probes, { finished = false } = {}) {
-  if (settings?.hubMode === 'client') {
-    if (finished && syncStatsPublication.hasPendingLocal()) {
-      // A completed probe's record is already in the batch. Let Settings
-      // receive it before removing the probe that keeps the row Checking.
-      pendingClientLimitProbes = probes;
-      return;
-    }
-    if (pendingClientLimitProbes !== null) {
-      // A fresh probe list supersedes the deferred one, but must still follow
-      // the pending readings before it can remove those completed probes.
-      pendingClientLimitProbes = null;
-      syncStatsPublication.flush();
-    }
-  }
-  limitProbes = Array.isArray(probes) ? probes : [];
-  edgeDockController?.setLimitProbes(limitProbes);
+let settingsLocalLimits = null;
+let settingsLimitsRevision = 0;
+let settingsLimitsPushQueued = false;
+function updateSettingsLocalLimits(limits) {
+  settingsLocalLimits = { deviceId: settings.deviceId, limits, revision: ++settingsLimitsRevision };
+  if (settingsLimitsPushQueued) return;
+  settingsLimitsPushQueued = true;
+  // Limit rows commit before probe-finish. Send the result and the final probe
+  // list together. Changes without a lifecycle event still reach Settings.
+  queueMicrotask(() => {
+    if (settingsLimitsPushQueued) pushSettingsLimitState();
+  });
+}
+function settingsLimitState() {
+  return { probes: limitProbes, local: settingsLocalLimits };
+}
+function pushSettingsLimitState() {
+  settingsLimitsPushQueued = false;
   if (!mainWindow || mainWindow.isDestroyed()) return;
   try {
-    mainWindow.webContents.send('limits:probes', limitProbes);
+    mainWindow.webContents.send('limits:probes', settingsLimitState());
   } catch (_) {}
+}
+function publishLimitProbes(probes) {
+  limitProbes = Array.isArray(probes) ? probes : [];
+  edgeDockController?.setLimitProbes(limitProbes);
+  pushSettingsLimitState();
+}
+function clearSettingsLimitState() {
+  if (!settingsLocalLimits && !limitProbes.length) return;
+  settingsLocalLimits = null;
+  publishLimitProbes([]);
 }
 
 
@@ -3778,9 +3788,8 @@ function stopSyncCollector(options = {}) {
   usageRuntimeReconciler.setActiveKey(null);
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
-  pendingClientLimitProbes = null;
   // A stopped runtime's probes finish unobserved.
-  if (limitProbes.length) publishLimitProbes([]);
+  clearSettingsLimitState();
 }
 
 async function stopIcloudRuntime() {
@@ -3975,7 +3984,6 @@ async function startIcloudCollector() {
 // Well inside the 3–5 s update promise: a watch tick already waits out its own
 // debounce and scan before it gets here.
 const SYNC_STATS_PUBLISH_WINDOW_MS = 1000;
-let pendingClientLimitProbes = null;
 const syncStatsPublication = createStatsPublicationBatcher({
   windowMs: SYNC_STATS_PUBLISH_WINDOW_MS,
   publish: publishSyncDisplayStats
@@ -3994,11 +4002,6 @@ function publishSyncDisplayStats({ reason, at, generation, widgetProducerOwner }
   if (!displayStats) return;
   updateDiscordRpcDisplay(displayStats);
   sendPush({ event: 'stats', data: { type: 'stats', reason, stats: displayStats, at } }, { widgetProducerOwner });
-  if (pendingClientLimitProbes !== null) {
-    const probes = pendingClientLimitProbes;
-    pendingClientLimitProbes = null;
-    publishLimitProbes(probes);
-  }
 }
 
 function startSyncCollector() {
@@ -4650,7 +4653,7 @@ function stopLocalCollector(options = {}) {
   if (deviceRuntimeHandle) { try { deviceRuntimeHandle.stop(options); } catch (_) {} }
   deviceRuntimeHandle = null;
   // A stopped runtime's probes finish unobserved.
-  if (limitProbes.length) publishLimitProbes([]);
+  clearSettingsLimitState();
   localDevice = null;
   localStats = null;
   anchorSeedDevice = null;
@@ -8375,7 +8378,7 @@ app.whenReady().then(() => {
   // the refresh scheduled by the credential settings write above. A quota row's
   // own refresh button also names its account, which narrows the probe to that
   // account where the provider supports it.
-  ipcMain.handle('limits:probes', () => limitProbes);
+  ipcMain.handle('limits:probes', settingsLimitState);
   ipcMain.handle('limits:refresh', (_event, providerId, account) => refreshLimitProvider(providerId, account));
   ipcMain.handle('opencode:saveCookie', (_event, ...args) => opencodeAccountService().saveCookie(...args));
   ipcMain.handle('cursor:setAccountEnabled', (_event, ...args) => cursorAccountService().setAccountEnabled(...args));

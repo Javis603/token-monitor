@@ -4854,6 +4854,7 @@ document.addEventListener('keydown', event => {
 
 // Probes the limits runtime is running right now, whoever started them.
 let limitProbes = [];
+let settingsLocalLimits = null;
 
 const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsView({
   document,
@@ -4945,13 +4946,19 @@ const limitWindowsView = window.TokenMonitorLimitWindowsView.createLimitWindowsV
   }
 });
 
-function setLimitProbes(probes) {
+function setLimitProbes(probes, local = settingsLocalLimits) {
   const previous = limitProbes;
+  const previousLocal = settingsLocalLimits;
   limitProbes = Array.isArray(probes) ? probes : [];
+  settingsLocalLimits = local;
   // Settings account rows without a reading say "Checking" while a probe for
   // them runs, so a probe starting or finishing repaints its provider's rows.
   if (isSettingsSurfaceVisible()) {
     const changed = new Set([...previous, ...limitProbes].map(probe => probe?.provider));
+    if (previousLocal?.revision !== local?.revision) {
+      for (const row of previousLocal?.limits.providers || []) changed.add(row.provider);
+      for (const row of local?.limits.providers || []) changed.add(row.provider);
+    }
     preserveSettingsPanelScroll(() => {
       for (const [id, panel] of accountSlotPanels) {
         if (changed.has(id)) panel.update(accountSlotLists[id] || [], localProviderStatuses(id), limitAccountContext(id));
@@ -4963,13 +4970,13 @@ function setLimitProbes(probes) {
   limitWindowsView.syncLimitRefreshButtons();
 }
 let limitProbesPushed = false;
-window.tokenMonitor?.limits?.onProbes?.((probes) => {
+window.tokenMonitor?.limits?.onProbes?.(({ probes, local }) => {
   limitProbesPushed = true;
-  setLimitProbes(probes);
+  setLimitProbes(probes, local);
 });
 // The probes already running when this page loaded; a push that arrived first is newer.
-void window.tokenMonitor?.limits?.probes?.().then((probes) => {
-  if (!limitProbesPushed) setLimitProbes(probes);
+void window.tokenMonitor?.limits?.probes?.().then(({ probes, local }) => {
+  if (!limitProbesPushed) setLimitProbes(probes, local);
 }, () => {});
 
 const {
@@ -17216,6 +17223,18 @@ function localDeviceLimitsProviders() {
   );
 }
 
+// Settings can paint a just-completed local probe before the usage/Hub
+// snapshot catches up. Keep the per-device presentation once it has caught up.
+function settingsLocalDeviceLimitsProviders() {
+  const deviceId = state.settings?.deviceId || '';
+  const published = state.stats?.devices?.find(device => device.deviceId === deviceId)?.limits;
+  if (settingsLocalLimits?.deviceId === deviceId
+      && (!published?.updatedAt || settingsLocalLimits.limits.updatedAt > published.updatedAt)) {
+    return accountIdentityApi.localDeviceLimitsProviders({ devices: [settingsLocalLimits] }, deviceId);
+  }
+  return localDeviceLimitsProviders();
+}
+
 function localProviderStatus(name) {
   const localProviders = localDeviceLimitsProviders();
   if (localProviders !== null) {
@@ -17228,7 +17247,7 @@ function localProviderStatus(name) {
 function strictLocalProviderStatuses(name) {
   const localDeviceId = state.settings?.deviceId || '';
   if (!localDeviceId && Array.isArray(state.stats?.devices)) return [];
-  const local = localDeviceLimitsProviders();
+  const local = settingsLocalDeviceLimitsProviders();
   const providers = local !== null ? local
     : state.mode !== 'sync' && (!state.settings?.hubMode || state.settings.hubMode === 'local')
       ? state.stats?.limits?.providers || [] : [];
@@ -17237,7 +17256,7 @@ function strictLocalProviderStatuses(name) {
 }
 
 function localProviderStatuses(name) {
-  const localProviders = localDeviceLimitsProviders();
+  const localProviders = settingsLocalDeviceLimitsProviders();
   const providers = localProviders !== null
     ? localProviders
     : (state.stats?.limits?.providers || []);

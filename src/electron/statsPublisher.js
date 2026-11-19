@@ -74,7 +74,7 @@ function createStatsPublicationBatcher(options = {}) {
     take();
   }
 
-  return { request, flush, cancel, hasPendingLocal: () => local !== null };
+  return { request, flush, cancel };
 }
 
 function withoutSessionDetail(period) {

@@ -530,7 +530,7 @@ test('a probe starting or finishing repaints only its provider account rows in v
   let visible = true;
   const panel = id => ({ update: (_slots, _readings, context) => calls.push(`${id}:${context.probes.length}`) });
   const owner = id => ({ refreshReadings: () => calls.push(id) });
-  const context = vm.createContext({ limitProbes: [], limitWindowsView: { syncLimitRefreshButtons() {} },
+  const context = vm.createContext({ limitProbes: [], settingsLocalLimits: null, limitWindowsView: { syncLimitRefreshButtons() {} },
     isSettingsSurfaceVisible: () => visible, preserveSettingsPanelScroll: callback => callback(),
     accountSlotPanels: new Map([['qoder', panel('qoder')], ['deepseek', panel('deepseek')]]), accountSlotLists: {},
     localProviderStatuses: () => [], legacyAccountOwners: { antigravity: owner('antigravity'), codex: owner('codex'), claude: {} },

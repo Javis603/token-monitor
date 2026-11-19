@@ -364,63 +364,61 @@ test('runtime replacement without a mode change invalidates the dock manual sour
   limits.resolve();
 });
 
-test('Client publishes quota results before retiring completed account probes', () => {
+test('Settings gets completed local quotas before Host, iCloud, or cold Client stats', () => {
   const { accountStatus } = require('../../src/electron/renderer/limits/accountSlotsPanel');
-  const trace = [];
-  const timers = [];
-  let reading;
-  let active = [];
-  const recordStatus = () => trace.push(accountStatus({ enabled: true }, reading, true, active.length > 0));
-  const context = {
-    hubModeGeneration: 1,
-    settings: { hubMode: 'client' },
-    hubModeRequestIsCurrent: () => true,
-    latestHubStats: {},
-    lastCollectedDevice: {},
-    composeLocalSyncSummary: (_hub, local) => local,
-    updateDiscordRpcDisplay() {},
-    edgeDockController: null,
-    mainWindow: { isDestroyed: () => false, webContents: { send: (_channel, probes) => { active = probes; recordStatus(); } } },
-    sendPush: ({ data }) => { reading = data.stats.reading; recordStatus(); },
-    createStatsPublicationBatcher: (options) => createStatsPublicationBatcher({
-      ...options,
-      setTimeout: (callback) => { timers.push(callback); return timers.length; },
-      clearTimeout() {}
-    })
-  };
-  vm.createContext(context);
-  vm.runInContext(main.slice(main.indexOf('let limitProbes = [];'), main.indexOf('let copilotLoginController')), context);
-  vm.runInContext(main.slice(main.indexOf('const SYNC_STATS_PUBLISH_WINDOW_MS ='), main.indexOf('function startSyncCollector(')), context);
-  const probe = { provider: 'antigravity', account: null };
-  context.publishLimitProbes([probe]);
-  context.lastCollectedDevice = { reading: { status: 'ok' } };
-  context.requestSyncDisplayStats({ reason: 'local', generation: 1 });
-  context.publishLimitProbes([], { finished: true });
-  assert.deepEqual(trace, ['checking'], 'the pending batch stays batched and the account stays checking');
-  timers[0]();
-  assert.deepEqual(trace, ['checking', 'connected', 'connected']);
+  const accountIdentityApi = require('../../src/electron/renderer/accountIdentity');
+  const app = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
+  const scope = { provider: 'antigravity', account: null };
+  const oldLimits = { updatedAt: '2026-11-19T10:00:00.000Z', providers: [] };
+  const reading = { provider: 'antigravity', status: 'ok' };
+  const result = { updatedAt: '2026-11-19T10:01:00.000Z', providers: [reading] };
 
-  reading = undefined;
-  context.lastCollectedDevice = {};
-  context.publishLimitProbes([probe]);
-  context.requestSyncDisplayStats({ reason: 'local', generation: 1 });
-  context.publishLimitProbes([], { finished: true });
-  assert.equal(trace.at(-1), 'checking');
-  timers[1]();
-  assert.deepEqual(trace.slice(-3), ['checking', 'checking', 'unavailable']);
+  for (const hubMode of ['host', 'icloud', 'client']) {
+    const trace = [];
+    const publishedLimits = hubMode === 'icloud' ? { providers: [] } : oldLimits;
+    const previousStats = hubMode === 'client' ? null : { devices: [{ deviceId: 'here', limits: publishedLimits }] };
+    const state = { settings: { deviceId: 'here' }, stats: previousStats };
+    const renderer = vm.createContext({
+      state, accountIdentityApi, settingsLocalLimits: null, limitProbes: [],
+      localDeviceLimitsProviders: () => accountIdentityApi.localDeviceLimitsProviders(state.stats, 'here'),
+      isSettingsSurfaceVisible: () => true, preserveSettingsPanelScroll: paint => paint(),
+      limitWindowsView: { syncLimitRefreshButtons() {} },
+      accountSlotPanels: new Map(), legacyAccountOwners: {
+        antigravity: { refreshReadings() {
+          trace.push(accountStatus({ enabled: true }, renderer.localProviderStatuses('antigravity')[0],
+            true, renderer.limitProbes.some(probe => probe.provider === 'antigravity')));
+        } }
+      }
+    });
+    vm.runInContext(app.slice(app.indexOf('function settingsLocalDeviceLimitsProviders('), app.indexOf('function renderWorkbuddyStatus(')), renderer);
+    vm.runInContext(app.slice(app.indexOf('function setLimitProbes('), app.indexOf('let limitProbesPushed')), renderer);
+    const microtasks = [];
+    const mainContext = vm.createContext({
+      settings: { deviceId: 'here', hubMode }, edgeDockController: null,
+      mainWindow: { isDestroyed: () => false, webContents: { send(_channel, { probes, local }) {
+        renderer.setLimitProbes(probes, local);
+      } } },
+      queueMicrotask: (callback) => microtasks.push(callback)
+    });
+    vm.runInContext(main.slice(main.indexOf('let limitProbes = [];'), main.indexOf('let copilotLoginController')), mainContext);
+    mainContext.publishLimitProbes([scope]);
+    mainContext.updateSettingsLocalLimits(result);
+    mainContext.publishLimitProbes([]);
+    microtasks.shift()();
+    assert.deepEqual(trace, ['checking', 'connected'], hubMode);
+    assert.deepEqual(renderer.localProviderStatuses('antigravity'), [reading], hubMode);
+    assert.equal(state.stats, previousStats, 'the usage/sync snapshot has not arrived');
 
-  context.publishLimitProbes([probe]);
-  context.lastCollectedDevice = { reading: { status: 'ok' } };
-  context.requestSyncDisplayStats({ reason: 'local', generation: 1 });
-  context.publishLimitProbes([], { finished: true });
-  context.publishLimitProbes([{ provider: 'cursor', account: null }]);
-  assert.deepEqual(trace.slice(-3), ['checking', 'connected', 'connected'], 'a later probe start cannot overtake the batch');
-
-  reading = undefined;
-  context.settings.hubMode = 'local';
-  context.publishLimitProbes([probe]);
-  context.publishLimitProbes([], { finished: true });
-  assert.deepEqual(trace.slice(-2), ['checking', 'unavailable'], 'a mode without the Client batch retires the probe immediately');
+    state.stats = { devices: [{ deviceId: 'here', limits: { ...result, providers: [{ ...reading, stale: true }] } }] };
+    assert.equal(renderer.localProviderStatuses('antigravity')[0].stale, true, 'return to published presentation once it catches up');
+    mainContext.clearSettingsLimitState();
+    state.stats = previousStats;
+    mainContext.publishLimitProbes([scope]);
+    mainContext.updateSettingsLocalLimits({ ...result, providers: [] });
+    mainContext.publishLimitProbes([]);
+    microtasks.shift()();
+    assert.deepEqual(trace.slice(-2), ['checking', 'unavailable'], 'a finished check with no reading remains unavailable');
+  }
 });
 
 for (const entry of ['App', 'Edge Dock']) {
