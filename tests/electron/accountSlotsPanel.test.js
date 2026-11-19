@@ -533,14 +533,19 @@ test('a probe starting or finishing repaints only its provider account rows in v
   const context = vm.createContext({ limitProbes: [], settingsLocalLimits: null, limitWindowsView: { syncLimitRefreshButtons() {} },
     isSettingsSurfaceVisible: () => visible, preserveSettingsPanelScroll: callback => callback(),
     accountSlotPanels: new Map([['qoder', panel('qoder')], ['deepseek', panel('deepseek')]]), accountSlotLists: {},
+    automaticAccountPanels: new Map([['grok', { controller: { update: rows => calls.push(rows[0].status) } }]]),
+    strictLocalProviderStatuses: id => [{ provider: id, status: 'ok' }],
     localProviderStatuses: () => [], legacyAccountOwners: { antigravity: owner('antigravity'), codex: owner('codex'), claude: {} },
     renderExternalProviderStatus: id => calls.push(`external:${id}`) });
   context.limitAccountContext = () => ({ probes: context.limitProbes });
   vm.runInContext(source.slice(source.indexOf('function setLimitProbes('), source.indexOf('let limitProbesPushed')), context);
   const step = probes => { calls.length = 0; context.setLimitProbes(probes); return [...calls]; };
   assert.deepEqual(step([{ provider: 'antigravity', account: null }]), ['antigravity']);
-  assert.deepEqual(step([{ provider: 'qoder', account: null }]), ['qoder:1', 'antigravity'], 'the finished probe repaints too');
-  assert.deepEqual(step([{ provider: 'claude', account: null }]), ['qoder:1', 'external:claude']);
+  assert.deepEqual(step([{ provider: 'qoder', account: null }]), ['qoder:1', 'external:qoder', 'antigravity'], 'the finished probe repaints too');
+  assert.deepEqual(step([{ provider: 'claude', account: null }]), ['qoder:1', 'external:qoder', 'external:claude']);
+  calls.length = 0;
+  context.setLimitProbes([], { revision: 1, limits: { providers: [{ provider: 'grok' }] } });
+  assert.deepEqual(calls, ['ok', 'external:claude'], 'local readings reach automatic rows immediately');
   visible = false;
   assert.deepEqual(step([]), [], 'hidden Settings reads the probes on its next paint');
 });

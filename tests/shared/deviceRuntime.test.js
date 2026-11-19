@@ -80,6 +80,19 @@ test('initial limits seed composes with the first usage record', () => {
   assert.equal(records[0].record.limits.updatedAt, 'seed-time');
 });
 
+test('a throwing limits observer cannot block record delivery', () => {
+  const failure = new Error('observer failed');
+  const errors = [];
+  const { limitsDeps, records, usageOptions } = harness({
+    limitsDeps: { onUpdate() { throw failure; } },
+    onError: (...args) => errors.push(args)
+  });
+  usageOptions.onUpdate({ today: { totalTokens: 1 } });
+  limitsDeps.onUpdate({ providers: [{ provider: 'grok', status: 'ok' }] });
+  assert.equal(records.at(-1).record.limits.providers[0].status, 'ok');
+  assert.deepEqual(errors, [[failure, 'limits-observer']]);
+});
+
 test('usage transforms run only for usage events, not limits-only publishes', () => {
   const transformed = [];
   const { limitsDeps, records, usageOptions } = harness({

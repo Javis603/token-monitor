@@ -383,7 +383,7 @@ test('Settings gets completed local quotas before Host, iCloud, or cold Client s
       localDeviceLimitsProviders: () => accountIdentityApi.localDeviceLimitsProviders(state.stats, 'here'),
       isSettingsSurfaceVisible: () => true, preserveSettingsPanelScroll: paint => paint(),
       limitWindowsView: { syncLimitRefreshButtons() {} },
-      accountSlotPanels: new Map(), legacyAccountOwners: {
+      accountSlotPanels: new Map(), automaticAccountPanels: new Map(), legacyAccountOwners: {
         antigravity: { refreshReadings() {
           trace.push(accountStatus({ enabled: true }, renderer.localProviderStatuses('antigravity')[0],
             true, renderer.limitProbes.some(probe => probe.provider === 'antigravity')));

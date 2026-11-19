@@ -4961,7 +4961,12 @@ function setLimitProbes(probes, local = settingsLocalLimits) {
     }
     preserveSettingsPanelScroll(() => {
       for (const [id, panel] of accountSlotPanels) {
-        if (changed.has(id)) panel.update(accountSlotLists[id] || [], localProviderStatuses(id), limitAccountContext(id));
+        if (!changed.has(id)) continue;
+        panel.update(accountSlotLists[id] || [], localProviderStatuses(id), limitAccountContext(id));
+        renderExternalProviderStatus(id);
+      }
+      for (const [id, panel] of automaticAccountPanels) {
+        if (changed.has(id)) panel.controller.update(strictLocalProviderStatuses(id));
       }
       for (const [id, owner] of Object.entries(legacyAccountOwners || {})) if (changed.has(id)) owner.refreshReadings?.();
       if (changed.has('claude')) renderExternalProviderStatus('claude');
