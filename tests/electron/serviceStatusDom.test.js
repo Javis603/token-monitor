@@ -116,8 +116,7 @@ test('the 狀態 view row is expandable and renders a nested provider sub-list',
   // extra grid column or its drag handle wraps to a new line.
   assert.match(app, /has-subgroup/);
   assert.match(css, /\.view-preference-row\.has-subgroup/);
-  // The "show all" header uses the same CSS outline eye as the other lists,
-  // not the filled visibilityIcon SVG (which renders as a solid blob here).
+  // The "show all" header uses the same header icon as the other lists.
   assert.match(app, /tool-header-eye/);
 });
 

@@ -5,7 +5,7 @@
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorQoderCollectionSettings = api;
 })(typeof window !== 'undefined' ? window : null, function createQoderCollectionSettings() {
-  function create({ document, t, editions, clients, separate, hidden, pinned, visibilityIcon, pinIcon, onTrack, onSeparate, onVisibility, onPin, formatTime }) {
+  function create({ document, t, editions, clients, separate, hidden, pinned, onTrack, onSeparate, onVisibility, onPin, formatTime }) {
     const container = document.createElement('div');
     container.className = 'qoder-collection-settings';
     const tracked = new Set(String(clients || '').split(','));
@@ -44,7 +44,7 @@
       const track = toggle(`toolTrackEnabled-${id}`, label, tracked.has(id), checked => onTrack(id, checked));
       const actions = document.createElement('div');
       actions.className = 'qoder-edition-controls';
-      const action = (kind, selected, icon, onClick) => {
+      const action = (kind, selected, onClick) => {
         const button = document.createElement('button');
         button.type = 'button';
         button.id = `qoderEdition${kind === 'visibility' ? 'Visibility' : 'Pin'}-${id}`;
@@ -53,11 +53,10 @@
           ? selected ? 'settings.tools.showClient' : 'settings.tools.hideClient'
           : selected ? 'settings.tools.unpinClient' : 'settings.tools.pinClient', { name: `Qoder ${name}` }));
         button.setAttribute('aria-pressed', String(kind === 'visibility' ? !selected : selected));
-        button.append(icon);
         button.addEventListener('click', () => onClick(id));
         return button;
       };
-      actions.append(action('visibility', hidden.has(id), visibilityIcon(hidden.has(id)), onVisibility), action('pin', pinned.has(id), pinIcon(), onPin));
+      actions.append(action('visibility', hidden.has(id), onVisibility), action('pin', pinned.has(id), onPin));
       line.append(track, actions);
       const editionRow = document.createElement('div');
       editionRow.className = 'qoder-edition';

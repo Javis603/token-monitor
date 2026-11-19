@@ -10551,35 +10551,6 @@ function pinnedClientSet() {
   return new Set(clientDisplayPreferencesApi.normalizePinnedClients(state.settings?.pinnedClients, KNOWN_CLIENTS).split(',').filter(Boolean));
 }
 
-function visibilityIcon(hidden) {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('aria-hidden', 'true');
-  const paths = [
-    'M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z',
-    'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z'
-  ];
-  if (hidden) paths.push('M4 4l16 16');
-  for (const d of paths) {
-    const path = document.createElementNS(ns, 'path');
-    path.setAttribute('d', d);
-    svg.appendChild(path);
-  }
-  return svg;
-}
-
-function pinIcon() {
-  const ns = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', '0 0 24 24');
-  svg.setAttribute('aria-hidden', 'true');
-  const path = document.createElementNS(ns, 'path');
-  path.setAttribute('d', 'M14 3l7 7-3 1-4 4 .5 3-2 2-3-5-5-3 2-2 3 .5 4-4 1-3Z');
-  svg.appendChild(path);
-  return svg;
-}
-
 function preferenceListForKind(kind) {
   if (kind === 'client') return els.clientDisplayList;
   if (kind === 'view') return els.viewDisplayList;
@@ -10857,7 +10828,6 @@ function renderViewPreferences() {
     visibility.setAttribute('aria-label', t(isEffectivelyHidden ? 'settings.views.showView' : 'settings.views.hideView', { name: label }));
     visibility.setAttribute('aria-pressed', String(!isEffectivelyHidden));
     visibility.disabled = !isEffectivelyHidden && visibleCount <= 1;
-    visibility.append(visibilityIcon(isEffectivelyHidden));
     visibility.addEventListener('click', () => {
       if (id === 'trends') return onTrendVisibilityToggle();
       if (id === 'project') return onProjectVisibilityToggle();
@@ -11139,7 +11109,6 @@ function renderHomeLimitProviderList() {
     visibility.className = `tool-visibility-button${isHidden ? ' is-hidden' : ''}`;
     visibility.setAttribute('aria-label', t(isHidden ? 'settings.home.showProvider' : 'settings.home.hideProvider', { name: settingsLabel || label }));
     visibility.setAttribute('aria-pressed', String(!isHidden));
-    visibility.append(visibilityIcon(isHidden));
     visibility.addEventListener('click', () => onHomeLimitProviderVisibilityToggle(id));
     const handle = createPreferenceOrderHandle({ kind: 'homeLimitProvider', id, label: settingsLabel || label, count: providers.length });
     const actions = document.createElement('div');
@@ -11262,7 +11231,6 @@ function renderHomeSettingsList() {
     visibility.className = `tool-visibility-button${isHidden ? ' is-hidden' : ''}`;
     visibility.setAttribute('aria-label', t(isHidden ? 'settings.home.showModule' : 'settings.home.hideModule', { name: label }));
     visibility.setAttribute('aria-pressed', String(!isHidden));
-    visibility.append(visibilityIcon(isHidden));
     visibility.addEventListener('click', () => onHomeModuleVisibilityToggle(id));
     const handle = createPreferenceOrderHandle({ kind: 'homeModule', id, label, count: modules.length });
     actions.append(visibility, handle);
@@ -11625,7 +11593,6 @@ function renderServiceProviderList() {
     visibility.dataset.statusProvider = id;
     visibility.setAttribute('aria-label', t(isHidden ? 'serviceStatus.showProvider' : 'serviceStatus.hideProvider', { name: label }));
     visibility.setAttribute('aria-pressed', String(!isHidden));
-    visibility.append(visibilityIcon(isHidden));
     visibility.addEventListener('click', () => onServiceProviderVisibilityToggle(id));
     const handle = createPreferenceOrderHandle({ kind: 'statusProvider', id, label, count: providers.length });
     const actions = document.createElement('div');
@@ -11965,7 +11932,6 @@ function qoderCollectionControls(group) {
     document, t, editions: group.editions, clients: current.clients,
     separate: current.separateQoderClients === true,
     hidden: hiddenClientSet(), pinned: pinnedClientSet(),
-    visibilityIcon, pinIcon,
     onTrack: async (id, checked) => {
       const clients = Object.assign({}, state.settings, ...pendingSettingsPatches).clients;
       const selected = new Set(String(clients || '').split(',').filter(Boolean));
@@ -12780,7 +12746,6 @@ function renderToolPreferencesNow() {
     visibility.dataset.client = id;
     visibility.setAttribute('aria-label', t(isHidden ? 'settings.tools.showClient' : 'settings.tools.hideClient', { name: label }));
     visibility.setAttribute('aria-pressed', String(!isHidden));
-    visibility.append(visibilityIcon(isHidden));
     visibility.addEventListener('click', () => id === 'qoder' ? onQoderPreferenceToggle('hiddenClients') : onClientVisibilityToggle(id));
     const pin = document.createElement('button');
     pin.type = 'button';
@@ -12789,7 +12754,6 @@ function renderToolPreferencesNow() {
     pin.dataset.client = id;
     pin.setAttribute('aria-label', t(isPinned ? 'settings.tools.unpinClient' : 'settings.tools.pinClient', { name: label }));
     pin.setAttribute('aria-pressed', String(isPinned));
-    pin.append(pinIcon());
     pin.addEventListener('click', () => id === 'qoder' ? onQoderPreferenceToggle('pinnedClients') : onClientPinnedToggle(id));
     // Status sits against the switch, as on the limits list; the eye and pin
     // appear to its left on hover.
