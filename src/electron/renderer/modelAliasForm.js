@@ -126,7 +126,10 @@
         row.remove();
         el('AddSourceButton').focus();
       });
-      row.append(field, remove);
+      const actions = document.createElement('div');
+      actions.className = 'settings-actions';
+      actions.append(remove);
+      row.append(field, actions);
       extraSources.push(source);
       el('MoreSources').append(row);
       source.picker.populate('');

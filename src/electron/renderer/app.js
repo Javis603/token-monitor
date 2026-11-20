@@ -17623,6 +17623,7 @@ function setupModelAliasesUI() {
     trigger: document.getElementById('modelAliasGroupingHelpButton'),
     popover: document.getElementById('modelAliasGroupingHelp'),
     document,
+    maxWidth: 240,
     align: 'center',
     preferAbove: true
   });
@@ -17747,6 +17748,7 @@ function setupCustomPricingUI() {
     trigger: document.getElementById('customPricingHelpButton'),
     popover: document.getElementById('customPricingHelp'),
     document,
+    maxWidth: 240,
     align: 'center',
     preferAbove: true
   });

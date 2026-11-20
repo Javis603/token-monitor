@@ -8278,7 +8278,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .model-alias-form .model-alias-form { margin-top: 0; }
 .model-alias-source { display: flex; align-items: end; gap: 8px; }
 .model-alias-source .model-alias-field { flex: 1; }
-.model-alias-source button { flex: 0 0 auto; }
+.model-alias-source > .settings-actions { flex: 0 0 auto; }
 
 
 
@@ -8323,7 +8323,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .cursor-account-group .custom-pricing-advanced[open] > summary .cursor-disclosure-icon { transform: rotate(180deg); }
 .custom-pricing-advanced-body { display: grid; gap: 8px; padding-top: 8px; }
 .custom-pricing-list-heading { margin-bottom: 6px; }
-.custom-pricing-help-content { display: grid; gap: 6px; margin-top: 6px; }
+.settings-help-popover.model-settings-help { padding: 8px 10px; }
+.custom-pricing-help-content { display: grid; gap: 4px; margin-top: 4px; }
 
 .custom-pricing-approx {
   color: var(--muted);

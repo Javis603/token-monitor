@@ -50,7 +50,7 @@ function fixture(save, initial = {}) {
   const manual = (suffix, id) => { select(suffix, null); get(`${suffix}Input`).value = id; };
   const extra = (index = 0) => {
     const row = get('MoreSources').children[index];
-    return { label: row.children[0].children[0], select: row.children[0].children[1], input: row.children[0].children[2], remove: row.children[1] };
+    return { label: row.children[0].children[0], select: row.children[0].children[1], input: row.children[0].children[2], remove: row.children[1].children[0] };
   };
   return { form, get, select, manual, extra, aliases: () => aliases,
     updateModels: (ids) => { modelIds = ids; form.syncSettings(); },

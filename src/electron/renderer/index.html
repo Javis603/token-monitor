@@ -748,7 +748,7 @@
                       <label class="inline-option"><input type="radio" name="modelAliasGrouping" value="prefix" id="modelAliasGroupingPrefix" /><span data-i18n="settings.modelAliases.groupingPrefix">Strip prefixes</span></label>
                     </div>
                   </div>
-                  <div id="modelAliasGroupingHelp" class="settings-help-popover model-alias-example" popover="auto" role="tooltip" data-i18n="settings.modelAliases.groupingDesc">Merge duplicates only handles a model reported under two spellings at once. Strip prefixes removes the provider name before the / in every model name, for example anthropic/claude-opus-5 → claude-opus-5.</div>
+                  <div id="modelAliasGroupingHelp" class="settings-help-popover model-settings-help model-alias-example" popover="auto" role="tooltip" data-i18n="settings.modelAliases.groupingDesc">Merge duplicates only handles a model reported under two spellings at once. Strip prefixes removes the provider name before the / in every model name, for example anthropic/claude-opus-5 → claude-opus-5.</div>
                   <p class="settings-note model-alias-note" data-i18n="settings.modelAliases.note">Show different names for the same model as one row.</p>
                   <div class="slot-panel slot-list model-settings-list-panel">
                     <div id="modelAliasesList" class="managed-account-list model-settings-list"></div>
@@ -796,7 +796,7 @@
                     <span class="settings-note" data-i18n="settings.customPricing.rateUnits">Rates · USD / 1M tokens</span>
                     <button id="customPricingHelpButton" class="settings-help-trigger" type="button" data-i18n-aria-label="settings.customPricing.help" aria-label="Pricing guide"><span aria-hidden="true">i</span></button>
                   </div>
-                  <div id="customPricingHelp" class="settings-help-popover" popover="auto" role="tooltip">
+                  <div id="customPricingHelp" class="settings-help-popover model-settings-help" popover="auto" role="tooltip">
                     <strong data-i18n="settings.customPricing.help">Pricing guide</strong>
                     <div class="custom-pricing-help-content">
                       <p class="settings-note" data-i18n="settings.customPricing.note">Override a model's price (USD per 1M tokens) when its auto-detected price is wrong. Applies to all providers of that model.</p>
