@@ -9,9 +9,10 @@ function collapseKey(row, key) {
 /** @param {any[]} rows @param {boolean} multiAccount @param {(row: any) => boolean} configured */
 function suppressCandidates(rows, multiAccount, configured) {
   if (multiAccount) return [];
-  const portable = rows.filter(row => row.accountKeyPortable && configured(row));
+  const portable = rows.filter(row => row.accountKeyPortable && row.status === 'ok' && configured(row));
   // A cookie-only or legacy reading can be another sighting of an identified
-  // account on the same site. Keep the fallback when it is the only fresh reading.
+  // account on the same site. Keep the fallback when no successful portable
+  // reading of comparable freshness can replace it.
   return rows.filter(row => !row.accountKeyPortable && portable.some(account =>
     (!row.region || row.region === account.region) && (!account.stale || row.stale)));
 }

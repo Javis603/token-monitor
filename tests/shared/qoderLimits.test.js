@@ -435,3 +435,29 @@ test('synced Qoder quotas group by site and stable user ID while preserving cook
   assert.deepEqual(keys([a, b], workerCore), [a.accountKey, b.accountKey].sort());
   assert.deepEqual(keys([cookieOnly, a], workerCore), [a.accountKey]);
 });
+
+for (const [hub, core] of [
+  ['Node Hub', require('../../src/shared/limits/core')],
+  ['Worker', require('../../worker/src/shared/limits/core')]
+]) {
+  test(`${hub} keeps healthy Qoder fallback visible beside a fresh unavailable account`, () => {
+    const now = Date.parse('2026-11-20T10:00:00Z');
+    const base = {
+      provider: 'qoder', source: 'web', region: 'global',
+      updatedAt: new Date(now - 60000).toISOString(), windows: []
+    };
+    const portable = { ...base, accountKey: 'portable', accountKeyPortable: true, status: 'unavailable' };
+    const fallback = { ...base, accountKey: 'cookie', status: 'ok' };
+    const rows = (account) => core.aggregateLimits([account, fallback].map((row, i) => ({
+      deviceId: String(i), limits: core.syncLimits({ providers: [row] })
+    })), 0, now).providers.map(({ accountKey, status, stale }) => ({ accountKey, status, stale }));
+
+    assert.deepEqual(rows(portable), [
+      { accountKey: 'cookie', status: 'ok', stale: false },
+      { accountKey: 'portable', status: 'unavailable', stale: false }
+    ]);
+    assert.deepEqual(rows({ ...portable, status: 'ok' }), [
+      { accountKey: 'portable', status: 'ok', stale: false }
+    ]);
+  });
+}
