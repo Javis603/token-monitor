@@ -4585,7 +4585,7 @@ function sendPush(payload, options = {}) {
     limitsHistoryController?.refresh();
     migrateCodexAdditionalLimits(visibleStats);
     if (wantsRenderer) {
-      const copy = rendererSnapshots.stamp(latestStats, rendererStats(visibleStats));
+      const copy = rendererSnapshots.stamp(latestStats, rendererStats(visibleStats), visibleStats);
       const allowDelta = options.deferToRenderer !== true
         && payload.data.reason !== 'read'
         && payload.data.reason !== 'presentation';
@@ -5878,7 +5878,7 @@ function sendStatsPresentationToRenderer(options = {}) {
   if (!latestStats || !mainWindow || mainWindow.isDestroyed()) return false;
   if (options.force !== true && !mainWindowStatsPushWanted()) return false;
   const visibleStats = electronPresentationStats(latestStats);
-  const copy = rendererSnapshots.stamp(latestStats, rendererStats(visibleStats));
+  const copy = rendererSnapshots.stamp(latestStats, rendererStats(visibleStats), visibleStats);
   try {
     mainWindow.webContents.send('stats:push', {
       event: 'stats',
@@ -7514,23 +7514,6 @@ function focusedAppWindow() {
   return BrowserWindow.getFocusedWindow();
 }
 
-let idleTimeZeroChecks = 0;
-let idleTimeZeroLogged = false;
-let idleTimeScreenLocked = false;
-
-function noteIdleTimeZero(locked = idleTimeScreenLocked) {
-  // An active user in another app also reports 0. Only zeros observed while
-  // the screen is locked prove the platform is not advancing idle time.
-  if (process.platform !== 'linux' || idleTimeZeroLogged || !locked) return;
-  idleTimeZeroChecks += 1;
-  if (idleTimeZeroChecks < 3) return;
-  idleTimeZeroLogged = true;
-  // Some Wayland/XWayland sessions report 0 forever. That silently disables
-  // every idle collection; say so once instead of letting the optimization
-  // look enabled while it never runs.
-  console.warn('[idle-heap] powerMonitor.getSystemIdleTime() has stayed 0 on three consecutive idle checks while the screen was locked; idle heap collection will not run on this Linux session');
-}
-
 function appIsIdleForHeapCollection() {
   if (quitRequested || focusedAppWindow() !== null) return false;
   // A full collection pauses main for tens of milliseconds. Require a short
@@ -7538,13 +7521,7 @@ function appIsIdleForHeapCollection() {
   // of a hover, drag or animation the user is watching.
   try {
     if (typeof powerMonitor.getSystemIdleTime !== 'function') return true;
-    const idleSeconds = powerMonitor.getSystemIdleTime();
-    if (idleSeconds <= 0) {
-      noteIdleTimeZero();
-      return false;
-    }
-    idleTimeZeroChecks = 0;
-    return idleSeconds >= 5;
+    return powerMonitor.getSystemIdleTime() >= 5;
   } catch (_) {
     return true;
   }
@@ -7552,16 +7529,8 @@ function appIsIdleForHeapCollection() {
 
 app.whenReady().then(() => {
   ensureSettingsLoaded();
-  powerMonitor.on('lock-screen', () => {
-    idleTimeScreenLocked = true;
-    idleTimeZeroChecks = 0;
-    notchController?.setLocked(true);
-  });
-  powerMonitor.on('unlock-screen', () => {
-    idleTimeScreenLocked = false;
-    idleTimeZeroChecks = 0;
-    notchController?.setLocked(false);
-  });
+  powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
+  powerMonitor.on('unlock-screen', () => notchController?.setLocked(false));
   void sessionProxy.apply();
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose
@@ -8419,6 +8388,20 @@ app.whenReady().then(() => {
     return true;
   });
   ipcMain.handle('stats:get', async (event, options) => {
+    if (options?.deltaResync === true) {
+      if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return null;
+      // Recover the last published base without contacting the Hub. The
+      // fingerprint identifies the renderer's lane, even for local overlays.
+      const snapshot = lastRendererStatsFingerprint?.snapshot;
+      if (!snapshot || snapshot.source !== hubModeGeneration) return null;
+      const stats = rendererSnapshots.get(snapshot.id);
+      if (!stats) return null;
+      const visibleStats = electronPresentationStats(stats);
+      const copy = rendererSnapshots.stamp(stats, rendererStats(visibleStats), visibleStats);
+      lastRendererStatsFingerprint = fingerprintStats(copy);
+      return copy;
+    }
+
     const revision = statsPushRevision;
     const fetched = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
     // A push from the same source/generation supersedes its pending read. A
@@ -8433,7 +8416,8 @@ app.whenReady().then(() => {
     // The stream normally carries the stamp, but it is precisely when the stream
     // is down that this read is the only thing still arriving from the hub.
     maybeAdoptSharedSubscriptionRevision(stats);
-    const copy = rendererSnapshots.stamp(stats, rendererStats(electronPresentationStats(stats)));
+    const visibleStats = electronPresentationStats(stats);
+    const copy = rendererSnapshots.stamp(stats, rendererStats(visibleStats), visibleStats);
     if (event?.sender && mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents) {
       const fingerprint = fingerprintStats(copy);
       if (fingerprint) lastRendererStatsFingerprint = fingerprint;

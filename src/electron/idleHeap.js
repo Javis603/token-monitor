@@ -113,7 +113,7 @@ function createIdleHeapCollector(options = {}) {
         }
       }
       if (stopped) return collected;
-      if (collectRenderers) {
+      if (collectRenderers && (!collectMain || isIdle())) {
         try {
           await collectRenderers();
         } catch (_) {

@@ -8334,6 +8334,7 @@ async function refreshStats(options = {}) {
   }
   try {
     const nextStats = await window.tokenMonitor.getStats(options);
+    if (options.deltaResync === true && !nextStats) return;
     observeLiveTokenRate(nextStats);
     allTimeSessions.invalidate();
     state.stats = sessionStatsForDisplay(allTimeSessions.attach(nextStats));
@@ -15871,7 +15872,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
         // one full tree instead of applying a delta to an unrelated state.
         if (!state.statsDeltaResyncPending) {
           state.statsDeltaResyncPending = true;
-          void refreshStats().catch(() => {}).finally(() => { state.statsDeltaResyncPending = false; });
+          void refreshStats({ deltaResync: true }).catch(() => {}).finally(() => { state.statsDeltaResyncPending = false; });
         }
         return;
       }

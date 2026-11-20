@@ -214,3 +214,16 @@ test('a successful main collection resets the consecutive failure count', async 
   assert.equal(mainRuns, 4);
   assert.equal(logs.length, 0);
 });
+
+test('input during an in-flight main collection prevents renderer collection', async () => {
+  let idle = true;
+  let rendererRuns = 0;
+  const collector = createIdleHeapCollector({
+    isIdle: () => idle,
+    getHeap: () => ({ heapTotal: 256 * 1024 * 1024, heapUsed: 32 * 1024 * 1024 }),
+    collect: async () => { idle = false; },
+    collectRenderers: async () => { rendererRuns += 1; }
+  });
+  assert.equal(await collector.run(), true);
+  assert.equal(rendererRuns, 0);
+});
