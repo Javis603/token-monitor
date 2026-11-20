@@ -395,6 +395,7 @@ const nativeGlassTintSettings = [['macGlassTint', 'liquid-glass'], ['macClearGla
 let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
 let nativeMaterialRevision = 0;
 let appearancePreview = {};
+const appearanceColorPicker = window.TokenMonitorAppearanceColorPicker.create({ document, window, t });
 // Writes still in flight. Main applies the native material before it broadcasts
 // the saved settings, so a material push landing in between must not repaint
 // the appearance controls from the settings that write is replacing.
@@ -414,10 +415,10 @@ Object.assign(els, {
   sessionSearchClear: document.getElementById('sessionSearchClear'),
   sessionSearchStatus: document.getElementById('sessionSearchStatus'),
   glassInputNote: document.getElementById('glassInputNote'),
+  blurInputNote: document.getElementById('blurInputNote'),
   backgroundImageOpacityRow: document.getElementById('backgroundImageOpacityRow'),
   backgroundImageOpacityInput: document.getElementById('backgroundImageOpacityInput'),
   resetBackgroundImageOpacityButton: document.getElementById('resetBackgroundImageOpacityButton'),
-  blurInputNote: document.getElementById('blurInputNote'),
   fixedPeriodMessage: document.getElementById('fixedPeriodMessage'),
   toolDetailFooter: document.getElementById('toolDetailFooter'),
   toolDetailFooterTokens: document.getElementById('toolDetailFooterTokens'),
@@ -620,6 +621,9 @@ Object.assign(els, {
   applyThemeCodeButton: document.getElementById('applyThemeCodeButton'),
   copyThemeCodeButton: document.getElementById('copyThemeCodeButton'),
   themeCodeStatus: document.getElementById('themeCodeStatus'),
+  appearanceLegacyGroup: document.getElementById('appearanceLegacyGroup'),
+  appearanceLegacyToggle: document.getElementById('appearanceLegacyToggle'),
+  appearanceLegacyDetails: document.getElementById('appearanceLegacyDetails'),
   themeAdvancedGroup: document.getElementById('themeAdvancedGroup'),
   themeAdvancedToggle: document.getElementById('themeAdvancedToggle'),
   themeAdvancedDetails: document.getElementById('themeAdvancedDetails'),
@@ -814,6 +818,8 @@ let displaySettings = null;
 
 function applySettingsSectionDom(id, open) {
   if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
+  if (id === 'appearance' && !open) appearanceColorPicker.close();
+  if (id === 'window' && !open) stopWindowShortcutRecording();
   const toggle = document.querySelector(`[data-settings-section="${id}"]`);
   const details = document.getElementById(`${id}SettingsDetails`);
   const group = toggle?.closest('.settings-collapsible-group');
@@ -6310,6 +6316,7 @@ function openViewFromTray(viewId) {
   resetSettingsListSearch();
   syncModeSelect?.close();
   syncContentForm?.closeHelp();
+  appearanceColorPicker.close();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
   syncPluginLimitsDemand();
@@ -8772,7 +8779,7 @@ function renderThemePresetChips() {
     const label = document.createElement('span');
     label.textContent = t(`settings.appearance.preset.${preset.id}`);
     chip.append(dot, label);
-    chip.addEventListener('click', () => selectThemePreset(preset.id));
+    chip.addEventListener('click', () => queueAppearanceColorChange(() => selectThemePreset(preset.id)));
     els.themePresetChips.appendChild(chip);
   }
   // Skins from active plugins sit beside the built-in presets; applying one
@@ -8799,59 +8806,64 @@ function renderThemePresetChips() {
   }
 }
 
-function renderThemeColorGrid() {
-  if (!els.themeColorGrid) return;
-  els.themeColorGrid.innerHTML = '';
-  for (const key of themePresetsApi.INTERFACE_COLOR_KEYS) {
-    const row = document.createElement('label');
-    row.className = 'color-picker-row';
-    const name = document.createElement('span');
-    name.className = 'color-picker-name';
-    name.textContent = t(`settings.appearance.color.${key}`);
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.className = 'color-picker-input';
-    input.value = resolvedThemeColor(key);
-    input.dataset.themeKey = key;
-    input.addEventListener('input', () => previewThemeColor(key, input.value));
-    input.addEventListener('change', () => saveThemeColor(key, input.value));
-    const reset = document.createElement('button');
-    reset.type = 'button';
-    reset.className = 'reset-appearance-button reset-inline';
-    reset.textContent = '↺';
-    reset.setAttribute('aria-label', t('settings.appearance.resetColor'));
-    reset.addEventListener('click', () => resetThemeColor(key));
-    row.append(name, input, reset);
-    els.themeColorGrid.appendChild(row);
+function renderAppearanceColorRows(container, keys, { rowClass, nameClass, resetLabel, nameFor, colorFor, preview, save, reset }) {
+  if (!container) return;
+  const existing = new Map([...container.children].map(row => [row.dataset.colorKey, row]));
+  for (const key of keys) {
+    let row = existing.get(key);
+    if (!row) {
+      row = document.createElement('div');
+      row.className = rowClass;
+      row.dataset.colorKey = key;
+      const name = document.createElement('span');
+      name.className = nameClass;
+      const swatch = document.createElement('button');
+      swatch.type = 'button';
+      swatch.className = 'color-picker-swatch';
+      swatch.setAttribute('aria-haspopup', 'dialog');
+      swatch.setAttribute('aria-controls', 'appearanceColorPicker');
+      swatch.setAttribute('aria-expanded', 'false');
+      swatch.addEventListener('click', event => appearanceColorPicker.open({
+        button: swatch, name: name.textContent, preview: value => preview(key, value), save: value => save(key, value)
+      }, event.detail === 0));
+      const resetButton = document.createElement('button');
+      resetButton.type = 'button';
+      resetButton.className = 'reset-appearance-button reset-inline';
+      resetButton.textContent = '↺';
+      resetButton.addEventListener('click', () => queueAppearanceColorChange(() => reset(key)));
+      row.append(name, swatch, resetButton);
+      container.appendChild(row);
+    }
+    const [name, swatch, resetButton] = row.children;
+    const label = nameFor(key);
+    name.textContent = label;
+    swatch.setAttribute('aria-label', label);
+    resetButton.setAttribute('aria-label', t(resetLabel));
+    appearanceColorPicker.setSwatch(swatch, colorFor(key));
   }
 }
 
+function renderThemeColorGrid() {
+  renderAppearanceColorRows(els.themeColorGrid, ['bg', 'text', 'muted', 'accent', 'chart'], {
+    rowClass: 'color-picker-row', nameClass: 'color-picker-name', resetLabel: 'settings.appearance.resetColor',
+    nameFor: key => t(`settings.appearance.color.${key}`), colorFor: resolvedThemeColor,
+    preview: previewThemeColor, save: saveThemeColor, reset: resetThemeColor
+  });
+}
+
 function renderVendorColorList() {
-  if (!els.vendorColorList) return;
-  const overrides = themePresetsApi.normalizeOverrides(state.settings?.vendorColors, Object.keys(BRAND_VENDOR_COLORS));
-  els.vendorColorList.innerHTML = '';
-  for (const id of themePresetsApi.orderedVendorIds(BRAND_VENDOR_COLORS)) {
-    const row = document.createElement('label');
-    row.className = 'vendor-color-row';
-    const name = document.createElement('span');
-    name.className = 'vendor-color-name';
-    name.textContent = id === 'default' ? t('settings.appearance.vendorDefault') : themePresetsApi.vendorLabel(id);
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.className = 'color-picker-input';
-    input.value = overrides[id] || BRAND_VENDOR_COLORS[id];
-    input.dataset.vendorId = id;
-    input.addEventListener('input', () => previewVendorColor(id, input.value));
-    input.addEventListener('change', () => saveVendorColor(id, input.value));
-    const reset = document.createElement('button');
-    reset.type = 'button';
-    reset.className = 'reset-appearance-button reset-inline';
-    reset.textContent = '↺';
-    reset.setAttribute('aria-label', t('settings.appearance.resetBrand'));
-    reset.addEventListener('click', () => resetVendorColor(id));
-    row.append(name, input, reset);
-    els.vendorColorList.appendChild(row);
-  }
+  const overrides = currentVendorOverrides();
+  renderAppearanceColorRows(els.vendorColorList, themePresetsApi.orderedVendorIds(BRAND_VENDOR_COLORS), {
+    rowClass: 'vendor-color-row', nameClass: 'vendor-color-name', resetLabel: 'settings.appearance.resetBrand',
+    nameFor: id => id === 'default' ? t('settings.appearance.vendorDefault') : themePresetsApi.vendorLabel(id),
+    colorFor: id => overrides[id] || BRAND_VENDOR_COLORS[id],
+    preview: previewVendorColor, save: saveVendorColor, reset: resetVendorColor
+  });
+}
+
+function queueAppearanceColorChange(write) {
+  appearanceColorPicker.close();
+  return appearanceColorPicker.enqueue(write);
 }
 
 function currentThemeOverrides() {
@@ -8936,7 +8948,7 @@ async function applyThemeCodeFromInput() {
     return;
   }
   els.themeCodeInput.value = parsed.code;
-  await commitThemeColors(parsed.colors);
+  await queueAppearanceColorChange(() => commitThemeColors(parsed.colors));
   if (themeCodeFeedbackIsCurrent(generation, parsed.code)) {
     showThemeCodeStatus('settings.appearance.themeCodeApplied', 'success');
   }
@@ -14252,7 +14264,7 @@ pluginSettingsPanel = pluginApi && window.TokenMonitorPluginSettings
     onOpenExternal: (url) => window.tokenMonitor.openExternal(url),
     onCopyText: (text) => window.tokenMonitor.copyText(text),
     setDetailTooltip: limitWindowsView.setDetailTooltip,
-    onApplySkin: (skin) => applyPluginSkin(skin),
+    onApplySkin: (skin) => queueAppearanceColorChange(() => applyPluginSkin(skin)),
     onPlaced: () => renderSettingsSummaries(),
     getEnabled: () => state.settings.pluginsEnabled !== false,
     onSetEnabled: async (enabled) => {
@@ -14305,10 +14317,16 @@ async function applyAppearancePluginSkin(skin, chip) {
   if (container.getAttribute('aria-busy') === 'true') return;
   container.querySelector('.plugin-action-error')?.remove();
   for (const control of container.querySelectorAll('button')) control.removeAttribute('aria-describedby');
-  const skinKey = JSON.stringify(skin), settingsRevision = state.settingsPushRevision;
+  const skinKey = JSON.stringify(skin);
+  let settingsRevision;
   const restoreFocus = document.activeElement === chip;
   container.setAttribute('aria-busy', 'true');
-  try { await applyPluginSkin(skin); }
+  try {
+    await queueAppearanceColorChange(() => {
+      settingsRevision = state.settingsPushRevision;
+      return applyPluginSkin(skin);
+    });
+  }
   catch (error) {
     // saveSettings refreshes the form before rethrowing. Reattach to the same
     // skin after that refresh, but discard failures from superseded settings.
@@ -14604,6 +14622,7 @@ els.settingsButton.addEventListener('click', (event) => {
   } else {
     syncModeSelect?.close();
     syncContentForm?.closeHelp();
+    appearanceColorPicker.close();
     resetSettingsListSearch();
     stopWindowShortcutRecording();
   }
@@ -15029,8 +15048,8 @@ els.zoomInput.addEventListener('input', applyAppearanceFromControls);
 els.chooseBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(); });
 els.clearBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(true); });
 void loadBackgroundImage();
-els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}, true));
-els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
+els.resetThemeColorsButton?.addEventListener('click', () => queueAppearanceColorChange(() => commitThemeColors({}, true)));
+els.resetVendorColorsButton?.addEventListener('click', () => queueAppearanceColorChange(() => commitVendorColors({})));
 els.textSizeInput?.addEventListener('change', async () => {
   await saveSettings({ textSize: fontSettingsApi.normalizeTextSize(els.textSizeInput.value) });
 });
@@ -15069,8 +15088,12 @@ function setupSettingsAccordion(group, toggle, details, onExpandedChange) {
 
 setupSettingsAccordion(els.appUpdateNotes, els.appUpdateNotesToggle, els.appUpdateNotesDetails);
 setupSettingsAccordion(els.advancedSettingsGroup, els.advancedSettingsToggle, els.advancedSettingsDetails);
-setupSettingsAccordion(els.themeAdvancedGroup, els.themeAdvancedToggle, els.themeAdvancedDetails);
-setupSettingsAccordion(els.themeVendorGroup, els.themeVendorToggle, els.themeVendorDetails);
+function closeAppearanceColorPickerOnCollapse(expanded) {
+  if (!expanded) appearanceColorPicker.close();
+}
+setupSettingsAccordion(els.themeAdvancedGroup, els.themeAdvancedToggle, els.themeAdvancedDetails, closeAppearanceColorPickerOnCollapse);
+setupSettingsAccordion(els.themeVendorGroup, els.themeVendorToggle, els.themeVendorDetails, closeAppearanceColorPickerOnCollapse);
+setupSettingsAccordion(els.appearanceLegacyGroup, els.appearanceLegacyToggle, els.appearanceLegacyDetails);
 setupSettingsAccordion(els.edgeDockMoreOptionsGroup, els.edgeDockMoreOptionsToggle, els.edgeDockMoreOptionsDetails);
 setupSettingsAccordion(els.notchMoreOptionsGroup, els.notchMoreOptionsToggle, els.notchMoreOptionsDetails);
 for (const input of els.systemGlassInputs || []) {
@@ -17914,7 +17937,8 @@ const displaySettingsPreview = window.TokenMonitorDisplaySettingsPreview.create(
 displaySettings = window.TokenMonitorDisplaySettings.create({
   document, root: document.getElementById('windowSettingsDetails').querySelector('.settings-section-details-inner'),
   scrollPanel: els.settingsPanel, t, platform: () => state.appInfo?.platform, settings: () => state.settings,
-  preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction
+  preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction,
+  stopWindowShortcutRecording
 });
 let legacyAccountOwners;
 function createLegacyAccountOwners() {
