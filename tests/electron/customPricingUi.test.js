@@ -79,7 +79,7 @@ test('advanced pricing starts closed, keeps hidden prefilled prices, and opens s
   f.get('AddButton').click();
   assert.equal(f.get('Advanced').open, false);
   const lookup = f.select('a');
-  f.requests[0].resolve({ ok: true, result: { pricing: { inputCostPerToken: 1e-6, cacheCreationInputTokenCost: 3e-6 } } });
+  f.requests[0].resolve({ ok: true, result: { resolution: { submissionSafe: true }, pricing: { inputCostPerToken: 1e-6, cacheCreationInputTokenCost: 3e-6 } } });
   await lookup;
   assert.equal(f.get('Advanced').open, false, 'new entries stay closed after prefill');
   assert.equal(f.get('AdvancedSummary').textContent, 'settings.customPricing.advancedConfigured');
@@ -122,7 +122,7 @@ test('delayed prefill preserves edited fields and does not carry the previous mo
   assert.equal(f.get('CacheWrite1h').value, '');
   f.enter('Input', 99);
   f.enter('CacheWrite', '');
-  f.requests[0].resolve({ ok: true, result: { pricing: { inputCostPerToken: 1e-6, outputCostPerToken: 2e-6, cacheCreationInputTokenCost: 3e-6 } } });
+  f.requests[0].resolve({ ok: true, result: { resolution: { submissionSafe: true }, pricing: { inputCostPerToken: 1e-6, outputCostPerToken: 2e-6, cacheCreationInputTokenCost: 3e-6 } } });
   await lookup;
   assert.equal(f.get('Input').value, '99');
   assert.equal(f.get('Output').value, 2);
@@ -136,16 +136,16 @@ test('an older lookup and a lookup from a closed form cannot replace the current
   f.get('AddButton').click();
   const first = f.select('a');
   const second = f.select('b');
-  f.requests[1].resolve({ ok: true, result: { pricing: { outputCostPerToken: 2e-6 } } });
+  f.requests[1].resolve({ ok: true, result: { resolution: { submissionSafe: true }, pricing: { outputCostPerToken: 2e-6 } } });
   await second;
-  f.requests[0].resolve({ ok: true, result: { pricing: { outputCostPerToken: 8e-6 } } });
+  f.requests[0].resolve({ ok: true, result: { resolution: { submissionSafe: true }, pricing: { outputCostPerToken: 8e-6 } } });
   await first;
   assert.equal(f.get('Output').value, 2);
   const pending = f.select('a');
   f.get('CancelButton').click();
   f.get('AddButton').click();
   f.enter('Output', 4);
-  f.requests[2].resolve({ ok: true, result: { pricing: { outputCostPerToken: 9e-6 } } });
+  f.requests[2].resolve({ ok: true, result: { resolution: { submissionSafe: true }, pricing: { outputCostPerToken: 9e-6 } } });
   await pending;
   assert.equal(f.get('Output').value, '4');
 });
