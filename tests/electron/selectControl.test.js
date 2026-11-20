@@ -156,6 +156,16 @@ test('select popup retains its height cap when more viewport space is available'
   assert.equal(result.maxHeight, 320);
 });
 
+test('a centered help popup prefers the space above and stays inside the window', () => {
+  const viewport = { width: 340, height: 600 };
+  const rect = { left: 150, right: 170, top: 220, bottom: 240, width: 20 };
+  const options = { width: 240, height: 100, align: 'center', preferAbove: true };
+  assert.deepEqual(popupPosition(rect, viewport, options),
+    { left: 40, top: 116, width: 240, maxHeight: 208, opensAbove: true });
+  assert.deepEqual(popupPosition({ ...rect, left: 20, right: 40, top: 60, bottom: 80 }, viewport, options),
+    { left: 8, top: 84, width: 240, maxHeight: 320, opensAbove: false });
+});
+
 test('enhancement preserves source interface and links accessible name and description', () => {
   const f = harness();
   assert.equal(f.select.hidden, true);

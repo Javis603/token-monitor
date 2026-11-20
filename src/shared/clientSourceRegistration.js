@@ -103,6 +103,8 @@ const SOURCE_MARKERS = [
   { marker: '.qoder/projects', client: 'qoder' },
   { marker: '.qoder-cn/projects', client: 'qodercn' },
   { marker: '.jcode/sessions', client: 'jcode' },
+  { marker: '.junie/sessions', client: 'junie', hostCheckId: 'junie-sessions' },
+  { marker: '.opencodereview/sessions', client: 'opencodereview', hostCheckId: 'opencodereview-sessions' },
   ...CLAUDE_DESKTOP_SOURCES
 ];
 

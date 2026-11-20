@@ -30,7 +30,7 @@
 
 ## O que é o Token Monitor?
 
-Um app de desktop que mostra o uso de tokens ao vivo e os Limites de Ferramentas de IA em 54+ ferramentas de programação com IA — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio e muitas outras — com sincronização multidispositivo em tempo real, tendências de uso histórico e detalhamentos por ferramenta, dispositivo, modelo, sessão ou projeto. Ele aparece onde você estiver olhando: a janela principal, o notch do MacBook, a barra de menus ou a bandeja do sistema, a borda da tela, uma bolha flutuante e widgets nativos do macOS.
+Um app de desktop que mostra o uso de tokens ao vivo e os Limites de Ferramentas de IA em 56+ ferramentas de programação com IA — Claude Code, Codex, Cursor, GitHub Copilot, Cherry Studio e muitas outras — com sincronização multidispositivo em tempo real, tendências de uso histórico e detalhamentos por ferramenta, dispositivo, modelo, sessão ou projeto. Ele aparece onde você estiver olhando: a janela principal, o notch do MacBook, a barra de menus ou a bandeja do sistema, a borda da tela, uma bolha flutuante e widgets nativos do macOS.
 
 ## Ferramentas suportadas
 
@@ -79,6 +79,8 @@ Uso de tokens, limites de ferramentas de IA e detalhes de sessão das ferramenta
     <img src=".github/assets/tools-icon/mistral.png" width="40" alt="Mistral Vibe" title="Mistral Vibe" />
     <img src=".github/assets/tools-icon/prime-agent.png" width="40" alt="Prime Agent" title="Prime Agent" />
     <img src=".github/assets/tools-icon/jcode.png" width="40" alt="Jcode" title="Jcode" />
+    <img src=".github/assets/tools-icon/junie.png" width="40" alt="Junie" title="Junie" />
+    <img src=".github/assets/tools-icon/opencodereview.png" width="40" alt="OpenCodeReview" title="OpenCodeReview" />
     <img src=".github/assets/tools-icon/typesafe.png" width="40" alt="TypeSafe" title="TypeSafe" />
     <img src=".github/assets/tools-icon/openrouter.png" width="40" alt="OpenRouter" title="OpenRouter" />
     <img src=".github/assets/tools-icon/volcengine.png" width="40" alt="Volcengine" title="Volcengine" />
@@ -160,7 +162,7 @@ Abra o app para começar a acompanhar o uso local deste dispositivo, sem configu
 
 ### Acompanhamento de uso
 
-- **Rastreamento de tokens ao vivo** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode e 42+ ferramentas de IA, com a interface atualizando poucos segundos após cada turno (lista completa na tabela acima)
+- **Rastreamento de tokens ao vivo** — Claude Code, Codex, Cursor, GitHub Copilot, Antigravity, OpenCode e 44+ ferramentas de IA, com a interface atualizando poucos segundos após cada turno (lista completa na tabela acima)
 - **Taxa de tokens ao vivo** — uma leitura opcional da velocidade de geração em `tok/s` ou do consumo total em `tok/min`
 - **Detalhes por sessão** — abra uma sessão para ver os tokens por prompt, expansível até a divisão exata de tokens de cada resposta e as ferramentas usadas (lido sob demanda de transcrições ou bancos locais, nunca sincronizado)
 - **Estatísticas de acerto de cache** — clique em qualquer ferramenta ou modelo para expandir um detalhamento completo dos tokens de entrada (acerto no cache vs. fora do cache), tokens de saída e as porcentagens de acerto
@@ -257,6 +259,8 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 | <img src=".github/assets/tools-icon/mistral.png" width="28" alt="Mistral" /> | Mistral Vibe | `$VIBE_HOME/logs/session/` (`~/.vibe/logs/session/`); Cookie do Mistral Admin (franquia de API / cota mensal do Vibe e saldo de créditos) | ✅ | ✅ | — |
 | <img src=".github/assets/tools-icon/prime-agent.png" width="28" alt="Prime Agent" /> | Prime Agent | `~/.prime/agent/` (`sessions/`, `session-artifacts/`) | ✅ | — | — |
 | <img src=".github/assets/tools-icon/jcode.png" width="28" alt="Jcode" /> | Jcode | `~/.jcode/sessions/` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/junie.png" width="28" alt="Junie" /> | Junie | `~/.junie/sessions/**/events.jsonl` | ✅ | — | — |
+| <img src=".github/assets/tools-icon/opencodereview.png" width="28" alt="OpenCodeReview" /> | OpenCodeReview | `~/.opencodereview/sessions/**/*.jsonl` | ✅ | — | — |
 | <img src=".github/assets/tools-icon/typesafe.png" width="28" alt="TypeSafe" /> | TypeSafe | Cookie do TypeSafe Console (saldo de cobrança e gasto estimado em tokens via dados de uso) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/openrouter.png" width="28" alt="OpenRouter" /> | OpenRouter | Chave de API do OpenRouter (uso/limite da chave; saldo quando o acesso a créditos é autorizado, documentado para chaves Management) | — | ✅ | — |
 | <img src=".github/assets/tools-icon/volcengine.png" width="28" alt="Volcengine" /> | Volcengine | Chave de API do Ark ou AK/SK da Volcengine (cota do Ark Coding Plan e do Agent Plan via API da Volcengine) | — | ✅ | — |

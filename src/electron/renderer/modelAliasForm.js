@@ -2,16 +2,66 @@
 
 (function exposeModelAliasForm(root, factory) {
   const aliases = typeof module === 'object' && module.exports ? require('./modelAliases') : root.TokenMonitorModelAliases;
-  const api = factory(aliases);
+  const menus = typeof module === 'object' && module.exports ? require('./actionMenu') : root.TokenMonitorActionMenu;
+  const accountShell = typeof module === 'object' && module.exports ? require('./limits/accountShell') : root.TokenMonitorAccountShell;
+  const api = factory(aliases, menus, accountShell);
   if (typeof module === 'object' && module.exports) module.exports = api;
   if (root) root.TokenMonitorModelAliasForm = api;
-})(typeof window !== 'undefined' ? window : null, function createModelAliasFormApi(aliasesApi) {
+})(typeof window !== 'undefined' ? window : null, function createModelAliasFormApi(aliasesApi, menus, accountShell) {
+  function createModelSettingsMenu(document, { label, editLabel, removeLabel, edit, remove, disabled = false }) {
+    function button(text, click, className) {
+      const control = document.createElement('button');
+      control.type = 'button';
+      control.className = className || '';
+      control.textContent = text;
+      control.disabled = disabled;
+      control.addEventListener('click', click);
+      return control;
+    }
+    const menu = menus.create(document, label, button);
+    const action = (text, kind, run, className) => {
+      const item = button(text, () => {
+        if (menu.popover.matches(':popover-open')) menu.close();
+        return run();
+      }, className);
+      item.setAttribute('data-slot-action', kind);
+      return item;
+    };
+    menu.appendItems(action(editLabel, 'rename', edit), action(removeLabel, 'remove', remove, 'menu-destructive'));
+    return menu.element;
+  }
+
+  function createModelEditorDisclosure(form, addButton) {
+    const editButtons = new Map();
+    let editingModel;
+    return {
+      setOpen(open, model) {
+        const previousEditButton = editButtons.get(editingModel);
+        previousEditButton?.setAttribute('aria-expanded', 'false');
+        editingModel = open ? model : undefined;
+        addButton.setAttribute('aria-expanded', String(open && model === undefined));
+        editButtons.get(editingModel)?.setAttribute('aria-expanded', 'true');
+        accountShell.setDisclosureBody(previousEditButton ?? addButton, form, open);
+      },
+      resetRows() { editButtons.clear(); },
+      trackRow(model, button) {
+        editButtons.set(model, button);
+        button.setAttribute('aria-controls', form.id);
+        button.setAttribute('aria-expanded', String(model === editingModel));
+      }
+    };
+  }
+
   function createModelAliasForm({ document, t, getAliases, getBase, getGrouping, getModelIds = () => [], saveAliases }) {
     const el = (suffix) => document.getElementById(`modelAliases${suffix}`);
+    const form = el('Form');
+    const addButton = el('AddButton');
+    const disclosure = createModelEditorDisclosure(form, addButton);
     let editingAlias;
     let displayed;
     let editSnapshot;
     let busy = false;
+    let renderedRowsKey;
     let sourceId = 0;
     const extraSources = [];
     const choices = () => aliasesApi.modelAliasChoices(getModelIds(), getAliases());
@@ -63,10 +113,8 @@
         if (manual || select.value !== '__manual__') input.value = draft;
       }
       select.addEventListener('blur', () => refresh(true));
-      return {
-        value, populate, select, input, refresh,
-        focus: () => (select.value === '__manual__' ? input : select).focus()
-      };
+      const activeControl = () => select.value === '__manual__' ? input : select;
+      return { value, populate, select, input, refresh, activeControl };
     }
     const aliasPicker = picker(el('AliasSelect'), el('AliasInput'), 'settings.modelAliases.alias', el('AliasLabel'));
     const canonicalPicker = picker(el('CanonicalSelect'), el('CanonicalInput'), 'settings.modelAliases.canonical', el('CanonicalLabel'));
@@ -100,11 +148,14 @@
         row.remove();
         el('AddSourceButton').focus();
       });
-      row.append(field, remove);
+      const actions = document.createElement('div');
+      actions.className = 'settings-actions';
+      actions.append(remove);
+      row.append(field, actions);
       extraSources.push(source);
       el('MoreSources').append(row);
       source.picker.populate('');
-      source.picker.focus();
+      source.picker.activeControl().focus();
     }
     const error = (key) => {
       el('Error').textContent = key ? t(key) : '';
@@ -113,7 +164,7 @@
     const close = () => {
       editingAlias = undefined;
       editSnapshot = null;
-      el('Form').classList.add('hidden');
+      disclosure.setOpen(false);
       error('');
     };
     const open = (alias = '', canonical = '', snapshot = displayed) => {
@@ -124,9 +175,12 @@
       el('MoreSources').replaceChildren();
       aliasPicker.populate(alias);
       canonicalPicker.populate(canonical);
-      el('Form').classList.remove('hidden');
+      const titleKey = editingAlias ? 'settings.modelAliases.edit' : 'settings.modelAliases.add';
+      el('FormTitle').setAttribute('data-i18n', titleKey);
+      el('FormTitle').textContent = t(titleKey);
+      disclosure.setOpen(true, editingAlias);
       error('');
-      aliasPicker.focus();
+      accountShell.focusDisclosureControl(form, aliasPicker.activeControl());
     };
     async function persist(next, base) {
       if (busy) return;
@@ -154,7 +208,7 @@
         source.remove.textContent = t('settings.modelAliases.remove');
         source.picker.input.placeholder = el('AliasInput').placeholder;
       }
-      if (!busy && !el('Form').classList.contains('hidden')) {
+      if (!busy && !form.classList.contains('hidden')) {
         for (const field of allPickers()) field.refresh();
       }
       // Pair the displayed collection and its revision once. A later status
@@ -168,34 +222,50 @@
       el('Status').textContent = entries.length
         ? t('settings.modelAliases.count', { count: entries.length })
         : t(`settings.modelAliases.grouping${grouping === 'prefix' ? 'Prefix' : grouping === 'duplicates' ? 'Duplicates' : 'Off'}`);
+      const editLabel = t('settings.common.edit');
+      const editDescription = t('settings.modelAliases.edit');
+      const removeLabel = t('settings.modelAliases.remove');
+      const rowsKey = JSON.stringify([entries, busy, snapshot.base?.identity, snapshot.base?.revisions?.modelAliases,
+        editLabel, editDescription, removeLabel, t('settings.collection.modelActions')]);
+      if (rowsKey === renderedRowsKey) return;
+      renderedRowsKey = rowsKey;
       el('List').replaceChildren();
+      disclosure.resetRows();
       for (const [alias, canonical] of entries) {
         const row = document.createElement('div');
         row.className = 'managed-account-row custom-pricing-row';
         const edit = document.createElement('button');
         edit.type = 'button';
         edit.className = 'managed-account-main custom-pricing-edit';
-        edit.setAttribute('aria-description', t('settings.modelAliases.edit'));
+        edit.setAttribute('aria-description', editDescription);
         edit.disabled = busy;
+        disclosure.trackRow(alias, edit);
         const name = document.createElement('div');
         name.className = 'managed-account-email';
         name.textContent = alias;
         const target = document.createElement('div');
         target.className = 'managed-account-meta';
         target.textContent = `→ ${canonical}`;
+        const openEditor = () => open(alias, canonical, snapshot);
         edit.append(name, target);
-        edit.addEventListener('click', () => open(alias, canonical, snapshot));
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'managed-account-remove custom-pricing-remove';
-        remove.textContent = t('settings.modelAliases.remove');
-        remove.disabled = busy;
-        remove.addEventListener('click', () => persist(Object.fromEntries(entries.filter(([key]) => key !== alias)), snapshot.base));
-        row.append(edit, remove);
+        edit.addEventListener('click', openEditor);
+        const menu = createModelSettingsMenu(document, {
+          label: t('settings.collection.modelActions', { model: alias }),
+          editLabel,
+          removeLabel,
+          edit: openEditor,
+          remove: () => persist(Object.fromEntries(entries.filter(([key]) => key !== alias)), snapshot.base),
+          disabled: busy
+        });
+        row.append(edit, menu);
         el('List').append(row);
       }
     }
-    el('AddButton').addEventListener('click', () => open());
+    addButton.addEventListener('click', () => {
+      if (busy) return;
+      if (!editingAlias && !form.classList.contains('hidden')) close();
+      else open();
+    });
     el('AddSourceButton').addEventListener('click', addSource);
     el('CancelButton').addEventListener('click', () => { if (!busy) close(); });
     el('SaveButton').addEventListener('click', async () => {
@@ -209,5 +279,5 @@
     render();
     return { syncSettings: render };
   }
-  return { createModelAliasForm };
+  return { createModelAliasForm, createModelSettingsMenu, createModelEditorDisclosure };
 });

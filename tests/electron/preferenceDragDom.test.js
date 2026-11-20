@@ -488,7 +488,7 @@ test('main section holds views; appearance is its own section; window holds beha
   );
   assert.notEqual(main, '', 'main section should exist');
   assert.ok(main.indexOf('settings-main-screen-group') >= 0, 'main screen group should be first-class');
-  assert.doesNotMatch(main, /settings-appearance-group/, 'appearance moved out of main');
+  assert.doesNotMatch(main, /settings-appearance-type/, 'appearance moved out of main');
   assert.match(main, /id="viewDisplayList"/);
   assert.match(main, /id="currencyInput"/);
   assert.doesNotMatch(main, /id="historyEnabledInput"/);
@@ -515,14 +515,28 @@ test('main section holds views; appearance is its own section; window holds beha
   assert.match(appearance, /id="themeVendorToggle"[^>]*aria-controls="themeVendorDetails"/);
   assert.match(appearance, /id="themeVendorDetails" class="cursor-settings-details hidden" inert/);
 
-  const vendorGroupIndex = appearance.indexOf('id="themeVendorGroup"');
-  assert.ok(vendorGroupIndex > appearance.indexOf('id="themeAdvancedGroup"'), 'vendor colours should follow advanced customization');
-  const advancedGroup = appearance.slice(appearance.indexOf('id="themeAdvancedGroup"'), vendorGroupIndex);
-  const vendorGroup = appearance.slice(vendorGroupIndex);
-  assert.match(advancedGroup, /id="themeColorGrid"/);
-  assert.doesNotMatch(advancedGroup, /id="vendorColorList"/);
-  assert.match(vendorGroup, /id="resetVendorColorsButton"/);
+  const groupOrder = ['settings-theme-group', 'settings-appearance-material', 'settings-appearance-type',
+    'settings-appearance-usage', 'settings-appearance-motion',
+    'settings-appearance-vendors', 'appearanceLegacyGroup'];
+  let previousGroup = -1;
+  for (const name of groupOrder) {
+    const index = appearance.indexOf(name);
+    assert.ok(index > previousGroup, `${name} should follow the previous group`);
+    previousGroup = index;
+  }
+  const palette = appearance.slice(appearance.indexOf('id="themeAdvancedDetails"'), appearance.indexOf('settings-appearance-material'));
+  assert.match(palette, /id="themeColorGrid"/);
+  assert.match(palette, /id="themeCodeInput"/);
+  const vendorGroup = appearance.slice(appearance.indexOf('id="themeVendorGroup"'), previousGroup);
+  assert.match(vendorGroup, /id="themeVendorDetails"[\s\S]*id="resetVendorColorsButton"/);
   assert.match(vendorGroup, /id="vendorColorList"/);
+  const legacy = appearance.slice(previousGroup);
+  assert.match(legacy, /id="appearanceLegacyToggle"[^>]*aria-controls="appearanceLegacyDetails"/);
+  assert.match(legacy, /id="appearanceLegacyDetails" class="cursor-settings-details hidden" inert/);
+  for (const id of ['swapSettingsRefreshInput', 'liveDotInput', 'toolIconsInput', 'titleIconInput']) {
+    assert.ok(legacy.includes(`id="${id}"`));
+    assert.ok(!appearance.slice(0, previousGroup).includes(`id="${id}"`));
+  }
 
   const windowSection = html.slice(
     html.indexOf('<div id="windowSettingsDetails"'),
@@ -537,6 +551,7 @@ test('main section holds views; appearance is its own section; window holds beha
   const windowGroup = windowSection.match(/<div class="settings-subgroup settings-window-group">[\s\S]*?<div class="settings-subgroup settings-presence-group">/)?.[0] || '';
   assert.match(windowGroup, /id="windowBehaviorInput"/);
   assert.match(windowGroup, /id="windowToggleShortcutValue"/);
+  assert.doesNotMatch(windowGroup, /id="windowToggleShortcutNote"[^>]*data-i18n=/, 'shortcut feedback is translated by its state renderer');
   assert.doesNotMatch(windowGroup, /settings\.display\.windowTitle/);
   assert.doesNotMatch(windowGroup, /<div class="settings-group-header"><span data-i18n="settings\.display\.windowTitle">/);
   assert.doesNotMatch(windowGroup, /id="floatingBubbleInput"/);
@@ -699,8 +714,8 @@ test('settings accordions share accessible collapsed-state handling', () => {
   assert.match(setup, /group\.classList\.toggle\('expanded', open\)/);
   assert.match(app, /setupSettingsAccordion\(els\.appUpdateNotes, els\.appUpdateNotesToggle, els\.appUpdateNotesDetails\)/);
   assert.match(app, /setupSettingsAccordion\(els\.advancedSettingsGroup, els\.advancedSettingsToggle, els\.advancedSettingsDetails\)/);
-  assert.match(app, /setupSettingsAccordion\(els\.themeAdvancedGroup, els\.themeAdvancedToggle, els\.themeAdvancedDetails\)/);
-  assert.match(app, /setupSettingsAccordion\(els\.themeVendorGroup, els\.themeVendorToggle, els\.themeVendorDetails\)/);
+  assert.match(app, /setupSettingsAccordion\(els\.themeAdvancedGroup, els\.themeAdvancedToggle, els\.themeAdvancedDetails, closeAppearanceColorPickerOnCollapse\)/);
+  assert.match(app, /setupSettingsAccordion\(els\.themeVendorGroup, els\.themeVendorToggle, els\.themeVendorDetails, closeAppearanceColorPickerOnCollapse\)/);
 });
 
 test('Trends has a master toggle separate from main-screen visibility', () => {
@@ -767,8 +782,9 @@ test('general section owns app-level preferences before startup and updates', ()
     html.indexOf('<div id="generalSettingsDetails"'),
     html.indexOf('<div class="settings-group settings-collapsible-group settings-main-group"')
   );
-  assert.match(generalSection, /settings-language-group/);
-  assert.ok(generalSection.indexOf('settings-language-group') < generalSection.indexOf('id="startupGroup"'));
+  assert.match(generalSection, /settings-general-preferences/);
+  assert.ok(generalSection.indexOf('id="languageInput"') < generalSection.indexOf('id="startupGroup"'));
+  assert.ok(generalSection.indexOf('id="startupGroup"') < generalSection.indexOf('settings.appUpdate.title'));
   assert.match(generalSection, /id="languageInput"/);
   assert.doesNotMatch(generalSection, /settings\.language\.title/);
   assert.doesNotMatch(generalSection, /id="currencyInput"/);
@@ -787,7 +803,7 @@ test('sync section icon uses a local sync asset instead of a hand-drawn refresh 
 
 test('startup setting stays visible when login items are unsupported', () => {
   const html = readRendererFile('index.html');
-  const startupGroup = html.match(/<div id="startupGroup"[\s\S]*?id="startupNote"[\s\S]*?<\/label>/)?.[0] || '';
+  const startupGroup = html.match(/<label id="startupGroup"[\s\S]*?id="startupNote"[\s\S]*?<\/label>/)?.[0] || '';
   assert.match(startupGroup, /id="startAtLoginInput"/);
 
   const app = readRendererFile('app.js');
@@ -795,8 +811,6 @@ test('startup setting stays visible when login items are unsupported', () => {
   assert.doesNotMatch(syncBody, /startupGroup\?\.[\s\S]*classList\.toggle\(['"]hidden['"]/);
   assert.match(syncBody, /startAtLoginInput[\s\S]*\.disabled\s*=\s*!state\.appInfo\?\.loginItemSupported/);
 
-  const summaryBody = functionBody(app, 'settingsSectionSummary', 'renderSettingsSummaries');
-  assert.match(summaryBody, /settings\.summary\.unavailable/);
 });
 
 test('expanded settings sections keep content full width', () => {

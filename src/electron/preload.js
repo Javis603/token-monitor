@@ -121,6 +121,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
     return () => ipcRenderer.removeListener('view:open', listener);
   },
   getAppInfo: () => ipcRenderer.invoke('app:getInfo'),
+  getRepositoryStars: () => ipcRenderer.invoke('app:repositoryStars'),
   generateDiagnosticReport: () => ipcRenderer.invoke('diagnostics:generate'),
   copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
   clientSources: (clientId) => ipcRenderer.invoke('usage:clientSources', clientId),

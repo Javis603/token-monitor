@@ -341,6 +341,7 @@ const state = { period: normalizeInitialViewValue(initialViewState.period, viewP
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.icloudStatus = null;
+state.repositoryStars = null;
 state.zedAccountExpanded = false;
 state.zedPendingCheckSince = 0;
 state.toolDetailMode = 'tokens';
@@ -395,6 +396,7 @@ const nativeGlassTintSettings = [['macGlassTint', 'liquid-glass'], ['macClearGla
 let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
 let nativeMaterialRevision = 0;
 let appearancePreview = {};
+const appearanceColorPicker = window.TokenMonitorAppearanceColorPicker.create({ document, window, t });
 // Writes still in flight. Main applies the native material before it broadcasts
 // the saved settings, so a material push landing in between must not repaint
 // the appearance controls from the settings that write is replacing.
@@ -414,10 +416,10 @@ Object.assign(els, {
   sessionSearchClear: document.getElementById('sessionSearchClear'),
   sessionSearchStatus: document.getElementById('sessionSearchStatus'),
   glassInputNote: document.getElementById('glassInputNote'),
+  blurInputNote: document.getElementById('blurInputNote'),
   backgroundImageOpacityRow: document.getElementById('backgroundImageOpacityRow'),
   backgroundImageOpacityInput: document.getElementById('backgroundImageOpacityInput'),
   resetBackgroundImageOpacityButton: document.getElementById('resetBackgroundImageOpacityButton'),
-  blurInputNote: document.getElementById('blurInputNote'),
   fixedPeriodMessage: document.getElementById('fixedPeriodMessage'),
   toolDetailFooter: document.getElementById('toolDetailFooter'),
   toolDetailFooterTokens: document.getElementById('toolDetailFooterTokens'),
@@ -557,6 +559,8 @@ Object.assign(els, {
   tokscaleBundledBuildRow: document.getElementById('tokscaleBundledBuildRow'),
   openTokscaleLinkButton: document.getElementById('openTokscaleLinkButton'),
   aboutVersion: document.getElementById('aboutVersion'),
+  aboutStarCount: document.getElementById('aboutStarCount'),
+  aboutStarCountValue: document.getElementById('aboutStarCountValue'),
   openRepositoryButton: document.getElementById('openRepositoryButton'),
   openWebsiteButton: document.getElementById('openWebsiteButton'),
   reportIssueButton: document.getElementById('reportIssueButton'),
@@ -569,6 +573,7 @@ Object.assign(els, {
   appUpdatePopoverBody: document.getElementById('appUpdatePopoverBody'),
   appUpdatePopoverDismiss: document.getElementById('appUpdatePopoverDismiss'),
   appUpdateInstalled: document.getElementById('appUpdateInstalled'),
+  appUpdateCheckedAt: document.getElementById('appUpdateCheckedAt'),
   automaticAppUpdatesRow: document.getElementById('automaticAppUpdatesRow'),
   automaticAppUpdatesInput: document.getElementById('automaticAppUpdatesInput'),
   automaticAppUpdatesNote: document.getElementById('automaticAppUpdatesNote'),
@@ -620,6 +625,9 @@ Object.assign(els, {
   applyThemeCodeButton: document.getElementById('applyThemeCodeButton'),
   copyThemeCodeButton: document.getElementById('copyThemeCodeButton'),
   themeCodeStatus: document.getElementById('themeCodeStatus'),
+  appearanceLegacyGroup: document.getElementById('appearanceLegacyGroup'),
+  appearanceLegacyToggle: document.getElementById('appearanceLegacyToggle'),
+  appearanceLegacyDetails: document.getElementById('appearanceLegacyDetails'),
   themeAdvancedGroup: document.getElementById('themeAdvancedGroup'),
   themeAdvancedToggle: document.getElementById('themeAdvancedToggle'),
   themeAdvancedDetails: document.getElementById('themeAdvancedDetails'),
@@ -808,12 +816,15 @@ function applySettingsTranslations() {
   setThirdPartyAdapterFields();
   setSubscriptionFormMode();
   diagnosticsPanel?.render();
+  renderAboutStars();
 }
 
 let displaySettings = null;
 
 function applySettingsSectionDom(id, open) {
   if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
+  if (id === 'appearance' && !open) appearanceColorPicker.close();
+  if (id === 'window' && !open) stopWindowShortcutRecording();
   const toggle = document.querySelector(`[data-settings-section="${id}"]`);
   const details = document.getElementById(`${id}SettingsDetails`);
   const group = toggle?.closest('.settings-collapsible-group');
@@ -836,6 +847,7 @@ function setSettingsSectionExpanded(section, expanded) {
   state.settingsSections[id] = next;
   applySettingsSectionDom(id, next);
   if (id === 'sync' && next) void syncContentForm?.refresh();
+  if (id === 'general' && next) void refreshAboutStars();
   if (id === 'plugins' && next) void pluginSettingsPanel?.refresh().then(renderSettingsSummaries);
 }
 
@@ -990,12 +1002,18 @@ function settingsSectionSummary(section) {
     return appearanceSummary();
   }
   if (section === 'general') {
-    const startup = state.appInfo?.loginItemSupported
-      ? (state.settings.startAtLogin ? t('settings.summary.on') : t('settings.summary.off'))
-      : t('settings.summary.unavailable');
-    return t('settings.summary.general', {
-      startup
-    });
+    // What is in effect, so the collapsed row answers "is it on?" without opening.
+    const autoUpdate = appUpdatePresentationApi.automaticAppUpdateControlState({
+      preferenceEnabled: state.settings.automaticAppUpdates,
+      updateState: state.appUpdate
+    }).checked;
+    const active = [
+      state.appInfo?.loginItemSupported && state.settings.startAtLogin ? t('settings.startup.startAtLogin') : '',
+      autoUpdate ? t('settings.summary.autoUpdate') : '',
+      String(state.settings.proxyUrl || '').trim() ? t('settings.summary.proxy') : ''
+    ].filter(Boolean);
+    if (active.length) return active.join(' · ');
+    return state.appInfo?.version ? `v${state.appInfo.version}` : '';
   }
   return '';
 }
@@ -1770,6 +1788,8 @@ function renderSettingsAppUpdateRow() {
   if (!s) {
     els.appUpdateInstalled.textContent = '—';
     els.appUpdateLatest.textContent = t('settings.common.notChecked');
+    els.appUpdateLatest.classList.remove('is-available');
+    els.appUpdateCheckedAt.textContent = '';
     els.appUpdateCheckButton.disabled = false;
     els.appUpdateCheckButton.textContent = t('settings.appUpdate.check');
     els.appUpdateViewReleaseButton.classList.add('hidden');
@@ -1781,12 +1801,23 @@ function renderSettingsAppUpdateRow() {
   els.appUpdateInstalled.textContent = `v${s.currentVersion}`;
   const presentation = appUpdatePresentationApi.appUpdateStatusPresentation(s);
   const displayVersion = presentation.displayVersion;
+  const available = Boolean(displayVersion && (s.hasUpdate || s.downloaded));
+  els.appUpdateLatest.classList.toggle('is-available', available);
+  els.appUpdateCheckedAt.textContent = s.lastCheckedAt && !s.lastError
+    ? t('settings.appUpdate.lastChecked', { age: compactAge(s.lastCheckedAt) })
+    : '';
   if (displayVersion) {
     const status = presentation.latestStatusKey ? t(presentation.latestStatusKey) : '';
-    els.appUpdateLatest.textContent = status
-      ? t('settings.appUpdate.latestWithStatus', { version: displayVersion, status })
-      : `v${displayVersion}`;
+    // Beside the installed version, "up to date" needs no second version number.
+    els.appUpdateLatest.textContent = presentation.latestStatusKey === 'settings.appUpdate.upToDateShort'
+      ? status
+      : status
+        ? t('settings.appUpdate.latestWithStatus', { version: displayVersion, status })
+        : available
+          ? t('settings.appUpdate.availableShort', { version: displayVersion })
+          : `${t('settings.appUpdate.latest')} v${displayVersion}`;
     const actionMode = appUpdatePresentationApi.appUpdateActionMode(s);
+    els.appUpdateViewReleaseButton.classList.toggle('app-update-primary', actionMode === 'download' || actionMode === 'install');
     els.appUpdateViewReleaseButton.classList.toggle('hidden', !actionMode);
     els.appUpdateViewReleaseButton.disabled = Boolean(s.installBusy);
     els.appUpdateViewReleaseButton.textContent = actionMode === 'install'
@@ -1909,6 +1940,136 @@ function renderAutomaticAppUpdateControl() {
   }
 }
 
+// The About card's GitHub button shows the repository's star count beside its
+// label. Main caches the number, so this asks each time General opens and keeps
+// the button label-only until a count arrives. The first time the button is
+// actually on screen after launch, it breathes and the count rolls up, once.
+let aboutStarsRequest = null;
+let aboutStarsIntroPlayed = false;
+let aboutStarsIntroObserver = null;
+function formatAboutStars(stars) {
+  const locale = currentLocale();
+  return stars < 10_000
+    ? new Intl.NumberFormat(locale).format(stars)
+    : new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }).format(stars);
+}
+function renderAboutStarOdometer(text) {
+  const reel = document.createElement('span');
+  reel.className = 'about-star-odometer';
+  reel.setAttribute('aria-hidden', 'true');
+  const columns = [];
+  for (const char of text) {
+    if (!/\d/.test(char)) {
+      reel.append(char);
+      continue;
+    }
+    const column = document.createElement('span');
+    column.className = 'about-star-odometer-digit';
+    for (let digit = 0; digit <= 9; digit += 1) {
+      const cell = document.createElement('span');
+      cell.textContent = String(digit);
+      column.append(cell);
+    }
+    reel.append(column);
+    columns.push([column, Number(char)]);
+  }
+  const label = document.createElement('span');
+  label.className = 'about-star-odometer-text';
+  label.textContent = text;
+  els.aboutStarCountValue.replaceChildren(reel, label);
+  // The columns rest at fractional offsets (n × 1.2em), and text under such a
+  // transform rounds to a different device pixel per digit, so once the last
+  // column stops the reel is swapped for the plain number.
+  const last = columns.at(-1)?.[0];
+  const settle = (event) => {
+    if (event.target !== last || event.propertyName !== 'transform') return;
+    last.removeEventListener('transitionend', settle);
+    last.removeEventListener('transitioncancel', settle);
+    if (els.aboutStarCountValue.contains(reel)) els.aboutStarCountValue.textContent = text;
+  };
+  last?.addEventListener('transitionend', settle);
+  last?.addEventListener('transitioncancel', settle);
+  // Two frames, so every column is laid out at 0 before it slides.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    columns.forEach(([column, digit], index) => {
+      column.style.transitionDelay = `${index * 90}ms`;
+      column.style.transform = `translateY(calc(${-digit} * 1.2em))`;
+    });
+  }));
+}
+function renderAboutStars({ roll = false } = {}) {
+  const stars = state.repositoryStars;
+  const known = Number.isSafeInteger(stars) && stars >= 0;
+  els.aboutStarCount.hidden = !known;
+  const text = known ? formatAboutStars(stars) : '';
+  if (!roll && els.aboutStarCountValue.dataset.value === text) return;
+  els.aboutStarCountValue.dataset.value = text;
+  if (roll && known) renderAboutStarOdometer(text);
+  else els.aboutStarCountValue.textContent = text;
+}
+function playAboutStarsIntro() {
+  aboutStarsIntroPlayed = true;
+  if (prefersReducedMotion()) return;
+  const button = els.openRepositoryButton;
+  const settle = (event) => {
+    if (event.target !== button || event.animationName !== 'about-star-breathe') return;
+    button.classList.remove('is-arriving');
+    button.removeEventListener('animationend', settle);
+  };
+  button.addEventListener('animationend', settle);
+  button.classList.add('is-arriving');
+  renderAboutStars({ roll: true });
+}
+// The About card sits below the fold when General opens, so the intro waits
+// until the button scrolls into view rather than playing unseen.
+function scheduleAboutStarsIntro() {
+  if (aboutStarsIntroPlayed || aboutStarsIntroObserver || typeof IntersectionObserver !== 'function') return;
+  aboutStarsIntroObserver = new IntersectionObserver((entries) => {
+    // isIntersecting is also true for a partly clipped button on the first report.
+    if (!entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 1)) return;
+    aboutStarsIntroObserver.disconnect();
+    aboutStarsIntroObserver = null;
+    playAboutStarsIntro();
+  }, { threshold: 1 });
+  aboutStarsIntroObserver.observe(els.openRepositoryButton);
+}
+function refreshAboutStars() {
+  aboutStarsRequest ||= Promise.resolve(window.tokenMonitor.getRepositoryStars?.())
+    .then((stars) => {
+      if (Number.isSafeInteger(stars)) state.repositoryStars = stars;
+    }, () => {})
+    .finally(() => {
+      aboutStarsRequest = null;
+      renderAboutStars();
+      // Only a real count is worth an intro; a failed lookup leaves it for a retry.
+      if (Number.isSafeInteger(state.repositoryStars)) scheduleAboutStarsIntro();
+    });
+  return aboutStarsRequest;
+}
+// Feedback for the click that opens the repository: the star pops and, with
+// motion allowed, throws a ring of sparks.
+function celebrateAboutStar() {
+  const button = els.openRepositoryButton;
+  button.classList.remove('is-popping');
+  void button.offsetWidth;
+  button.classList.add('is-popping');
+  setTimeout(() => button.classList.remove('is-popping'), 600);
+  if (prefersReducedMotion() || els.aboutStarCount.hidden) return;
+  const icon = els.aboutStarCount.querySelector('.about-settings-star-icon').getBoundingClientRect();
+  const box = button.getBoundingClientRect();
+  for (let index = 0; index < 8; index += 1) {
+    const spark = document.createElement('span');
+    const angle = (Math.PI * 2 * index) / 8;
+    const distance = 14 + (index % 3) * 3;
+    spark.className = 'about-settings-star-spark';
+    spark.style.left = `${icon.left - box.left + icon.width / 2 - 2}px`;
+    spark.style.top = `${icon.top - box.top + icon.height / 2 - 2}px`;
+    spark.style.setProperty('--spark-x', `${Math.cos(angle) * distance}px`);
+    spark.style.setProperty('--spark-y', `${Math.sin(angle) * distance}px`);
+    spark.addEventListener('animationend', () => spark.remove(), { once: true });
+    button.append(spark);
+  }
+}
 function compactAge(value) {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) return '';
@@ -6295,6 +6456,9 @@ function openSettingsPanel(section) {
   resetMainViewSettings();
   syncSettingsForm();
   ensureServiceStatusTicker();
+  // General stays expanded across closes, so its expand hook alone would leave
+  // the count unrefreshed; main's cache decides whether this goes to GitHub.
+  if (state.settingsSections?.general) void refreshAboutStars();
   if (section === 'notch') {
     setSettingsSectionExpanded('window', true);
     displaySettings?.open('notch');
@@ -6310,6 +6474,7 @@ function openViewFromTray(viewId) {
   resetSettingsListSearch();
   syncModeSelect?.close();
   syncContentForm?.closeHelp();
+  appearanceColorPicker.close();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
   syncPluginLimitsDemand();
@@ -8772,7 +8937,7 @@ function renderThemePresetChips() {
     const label = document.createElement('span');
     label.textContent = t(`settings.appearance.preset.${preset.id}`);
     chip.append(dot, label);
-    chip.addEventListener('click', () => selectThemePreset(preset.id));
+    chip.addEventListener('click', () => queueAppearanceColorChange(() => selectThemePreset(preset.id)));
     els.themePresetChips.appendChild(chip);
   }
   // Skins from active plugins sit beside the built-in presets; applying one
@@ -8799,59 +8964,64 @@ function renderThemePresetChips() {
   }
 }
 
-function renderThemeColorGrid() {
-  if (!els.themeColorGrid) return;
-  els.themeColorGrid.innerHTML = '';
-  for (const key of themePresetsApi.INTERFACE_COLOR_KEYS) {
-    const row = document.createElement('label');
-    row.className = 'color-picker-row';
-    const name = document.createElement('span');
-    name.className = 'color-picker-name';
-    name.textContent = t(`settings.appearance.color.${key}`);
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.className = 'color-picker-input';
-    input.value = resolvedThemeColor(key);
-    input.dataset.themeKey = key;
-    input.addEventListener('input', () => previewThemeColor(key, input.value));
-    input.addEventListener('change', () => saveThemeColor(key, input.value));
-    const reset = document.createElement('button');
-    reset.type = 'button';
-    reset.className = 'reset-appearance-button reset-inline';
-    reset.textContent = '↺';
-    reset.setAttribute('aria-label', t('settings.appearance.resetColor'));
-    reset.addEventListener('click', () => resetThemeColor(key));
-    row.append(name, input, reset);
-    els.themeColorGrid.appendChild(row);
+function renderAppearanceColorRows(container, keys, { rowClass, nameClass, resetLabel, nameFor, colorFor, preview, save, reset }) {
+  if (!container) return;
+  const existing = new Map([...container.children].map(row => [row.dataset.colorKey, row]));
+  for (const key of keys) {
+    let row = existing.get(key);
+    if (!row) {
+      row = document.createElement('div');
+      row.className = rowClass;
+      row.dataset.colorKey = key;
+      const name = document.createElement('span');
+      name.className = nameClass;
+      const swatch = document.createElement('button');
+      swatch.type = 'button';
+      swatch.className = 'color-picker-swatch';
+      swatch.setAttribute('aria-haspopup', 'dialog');
+      swatch.setAttribute('aria-controls', 'appearanceColorPicker');
+      swatch.setAttribute('aria-expanded', 'false');
+      swatch.addEventListener('click', event => appearanceColorPicker.open({
+        button: swatch, name: name.textContent, preview: value => preview(key, value), save: value => save(key, value)
+      }, event.detail === 0));
+      const resetButton = document.createElement('button');
+      resetButton.type = 'button';
+      resetButton.className = 'reset-appearance-button reset-inline';
+      resetButton.textContent = '↺';
+      resetButton.addEventListener('click', () => queueAppearanceColorChange(() => reset(key)));
+      row.append(name, swatch, resetButton);
+      container.appendChild(row);
+    }
+    const [name, swatch, resetButton] = row.children;
+    const label = nameFor(key);
+    name.textContent = label;
+    swatch.setAttribute('aria-label', label);
+    resetButton.setAttribute('aria-label', t(resetLabel));
+    appearanceColorPicker.setSwatch(swatch, colorFor(key));
   }
 }
 
+function renderThemeColorGrid() {
+  renderAppearanceColorRows(els.themeColorGrid, ['bg', 'text', 'muted', 'accent', 'chart'], {
+    rowClass: 'color-picker-row', nameClass: 'color-picker-name', resetLabel: 'settings.appearance.resetColor',
+    nameFor: key => t(`settings.appearance.color.${key}`), colorFor: resolvedThemeColor,
+    preview: previewThemeColor, save: saveThemeColor, reset: resetThemeColor
+  });
+}
+
 function renderVendorColorList() {
-  if (!els.vendorColorList) return;
-  const overrides = themePresetsApi.normalizeOverrides(state.settings?.vendorColors, Object.keys(BRAND_VENDOR_COLORS));
-  els.vendorColorList.innerHTML = '';
-  for (const id of themePresetsApi.orderedVendorIds(BRAND_VENDOR_COLORS)) {
-    const row = document.createElement('label');
-    row.className = 'vendor-color-row';
-    const name = document.createElement('span');
-    name.className = 'vendor-color-name';
-    name.textContent = id === 'default' ? t('settings.appearance.vendorDefault') : themePresetsApi.vendorLabel(id);
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.className = 'color-picker-input';
-    input.value = overrides[id] || BRAND_VENDOR_COLORS[id];
-    input.dataset.vendorId = id;
-    input.addEventListener('input', () => previewVendorColor(id, input.value));
-    input.addEventListener('change', () => saveVendorColor(id, input.value));
-    const reset = document.createElement('button');
-    reset.type = 'button';
-    reset.className = 'reset-appearance-button reset-inline';
-    reset.textContent = '↺';
-    reset.setAttribute('aria-label', t('settings.appearance.resetBrand'));
-    reset.addEventListener('click', () => resetVendorColor(id));
-    row.append(name, input, reset);
-    els.vendorColorList.appendChild(row);
-  }
+  const overrides = currentVendorOverrides();
+  renderAppearanceColorRows(els.vendorColorList, themePresetsApi.orderedVendorIds(BRAND_VENDOR_COLORS), {
+    rowClass: 'vendor-color-row', nameClass: 'vendor-color-name', resetLabel: 'settings.appearance.resetBrand',
+    nameFor: id => id === 'default' ? t('settings.appearance.vendorDefault') : themePresetsApi.vendorLabel(id),
+    colorFor: id => overrides[id] || BRAND_VENDOR_COLORS[id],
+    preview: previewVendorColor, save: saveVendorColor, reset: resetVendorColor
+  });
+}
+
+function queueAppearanceColorChange(write) {
+  appearanceColorPicker.close();
+  return appearanceColorPicker.enqueue(write);
 }
 
 function currentThemeOverrides() {
@@ -8936,7 +9106,7 @@ async function applyThemeCodeFromInput() {
     return;
   }
   els.themeCodeInput.value = parsed.code;
-  await commitThemeColors(parsed.colors);
+  await queueAppearanceColorChange(() => commitThemeColors(parsed.colors));
   if (themeCodeFeedbackIsCurrent(generation, parsed.code)) {
     showThemeCodeStatus('settings.appearance.themeCodeApplied', 'success');
   }
@@ -14252,7 +14422,7 @@ pluginSettingsPanel = pluginApi && window.TokenMonitorPluginSettings
     onOpenExternal: (url) => window.tokenMonitor.openExternal(url),
     onCopyText: (text) => window.tokenMonitor.copyText(text),
     setDetailTooltip: limitWindowsView.setDetailTooltip,
-    onApplySkin: (skin) => applyPluginSkin(skin),
+    onApplySkin: (skin) => queueAppearanceColorChange(() => applyPluginSkin(skin)),
     onPlaced: () => renderSettingsSummaries(),
     getEnabled: () => state.settings.pluginsEnabled !== false,
     onSetEnabled: async (enabled) => {
@@ -14305,10 +14475,16 @@ async function applyAppearancePluginSkin(skin, chip) {
   if (container.getAttribute('aria-busy') === 'true') return;
   container.querySelector('.plugin-action-error')?.remove();
   for (const control of container.querySelectorAll('button')) control.removeAttribute('aria-describedby');
-  const skinKey = JSON.stringify(skin), settingsRevision = state.settingsPushRevision;
+  const skinKey = JSON.stringify(skin);
+  let settingsRevision;
   const restoreFocus = document.activeElement === chip;
   container.setAttribute('aria-busy', 'true');
-  try { await applyPluginSkin(skin); }
+  try {
+    await queueAppearanceColorChange(() => {
+      settingsRevision = state.settingsPushRevision;
+      return applyPluginSkin(skin);
+    });
+  }
   catch (error) {
     // saveSettings refreshes the form before rethrowing. Reattach to the same
     // skin after that refresh, but discard failures from superseded settings.
@@ -14604,6 +14780,7 @@ els.settingsButton.addEventListener('click', (event) => {
   } else {
     syncModeSelect?.close();
     syncContentForm?.closeHelp();
+    appearanceColorPicker.close();
     resetSettingsListSearch();
     stopWindowShortcutRecording();
   }
@@ -14613,6 +14790,7 @@ els.settingsButton.addEventListener('click', (event) => {
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
   ensureServiceStatusTicker();
+  if (settingsOpen && state.settingsSections?.general) void refreshAboutStars();
 });
 els.saveSettingsButton.addEventListener('click', async () => {
   if (hubSaveBusy || !hubDraftHasChanges()) return;
@@ -15029,8 +15207,8 @@ els.zoomInput.addEventListener('input', applyAppearanceFromControls);
 els.chooseBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(); });
 els.clearBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(true); });
 void loadBackgroundImage();
-els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}, true));
-els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
+els.resetThemeColorsButton?.addEventListener('click', () => queueAppearanceColorChange(() => commitThemeColors({}, true)));
+els.resetVendorColorsButton?.addEventListener('click', () => queueAppearanceColorChange(() => commitVendorColors({})));
 els.textSizeInput?.addEventListener('change', async () => {
   await saveSettings({ textSize: fontSettingsApi.normalizeTextSize(els.textSizeInput.value) });
 });
@@ -15069,8 +15247,12 @@ function setupSettingsAccordion(group, toggle, details, onExpandedChange) {
 
 setupSettingsAccordion(els.appUpdateNotes, els.appUpdateNotesToggle, els.appUpdateNotesDetails);
 setupSettingsAccordion(els.advancedSettingsGroup, els.advancedSettingsToggle, els.advancedSettingsDetails);
-setupSettingsAccordion(els.themeAdvancedGroup, els.themeAdvancedToggle, els.themeAdvancedDetails);
-setupSettingsAccordion(els.themeVendorGroup, els.themeVendorToggle, els.themeVendorDetails);
+function closeAppearanceColorPickerOnCollapse(expanded) {
+  if (!expanded) appearanceColorPicker.close();
+}
+setupSettingsAccordion(els.themeAdvancedGroup, els.themeAdvancedToggle, els.themeAdvancedDetails, closeAppearanceColorPickerOnCollapse);
+setupSettingsAccordion(els.themeVendorGroup, els.themeVendorToggle, els.themeVendorDetails, closeAppearanceColorPickerOnCollapse);
+setupSettingsAccordion(els.appearanceLegacyGroup, els.appearanceLegacyToggle, els.appearanceLegacyDetails);
 setupSettingsAccordion(els.edgeDockMoreOptionsGroup, els.edgeDockMoreOptionsToggle, els.edgeDockMoreOptionsDetails);
 setupSettingsAccordion(els.notchMoreOptionsGroup, els.notchMoreOptionsToggle, els.notchMoreOptionsDetails);
 for (const input of els.systemGlassInputs || []) {
@@ -15533,7 +15715,10 @@ els.resetZoomButton.addEventListener('click', async () => {
 });
 els.openConfigButton.addEventListener('click', () => window.tokenMonitor.openUserData());
 els.openTokscaleLinkButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.('https://github.com/junhoyeo/tokscale'));
-els.openRepositoryButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_REPOSITORY_URL));
+els.openRepositoryButton?.addEventListener('click', () => {
+  celebrateAboutStar();
+  window.tokenMonitor.openExternal?.(TOKEN_MONITOR_REPOSITORY_URL);
+});
 els.openWebsiteButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_WEBSITE_URL));
 els.reportIssueButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_ISSUES_URL));
 els.refreshButton.addEventListener('click', () => {
@@ -17615,6 +17800,13 @@ function setupModelAliasesUI() {
   if (!toggle) return;
   toggle.addEventListener('click', () => setAccountGroupExpanded('modelAliases', !state.modelAliasesExpanded, 'modelAliasesExpanded'));
   setAccountGroupExpanded('modelAliases', false, 'modelAliasesExpanded');
+  window.TokenMonitorHelpPopover.createHelpPopover({
+    trigger: document.getElementById('modelAliasGroupingHelpButton'),
+    popover: document.getElementById('modelAliasGroupingHelp'),
+    document,
+    align: 'center',
+    preferAbove: true
+  });
   modelAliasForm = window.TokenMonitorModelAliasForm.createModelAliasForm({
     document, t: (key, params) => t(key === 'settings.modelAliases.saveError' && modelAliasSaveConflict ? 'settings.sync.content.conflict' : key, params),
     getAliases: () => state.settings?.modelAliases || {},
@@ -17643,21 +17835,24 @@ function setupModelAliasesUI() {
   }
 }
 
+let customPricingRowsKey;
+let customPricingDisclosure;
+
 function customPricingMeta(ov) {
   const parts = [];
-  if (typeof ov.cacheReadPerM === 'number') parts.push(`${t('settings.customPricing.cacheRead')} $${ov.cacheReadPerM}`);
-  if (typeof ov.inputPerM === 'number') parts.push(`${t('settings.customPricing.input')} $${ov.inputPerM}`);
+  if (typeof ov.inputPerM === 'number') parts.push(`${t('settings.customPricing.summaryInput')} $${ov.inputPerM}`);
   if (typeof ov.outputPerM === 'number') parts.push(`${t('settings.customPricing.output')} $${ov.outputPerM}`);
+  if (typeof ov.cacheReadPerM === 'number') parts.push(`${t('settings.customPricing.summaryCacheRead')} $${ov.cacheReadPerM}`);
   if (typeof ov.cacheWritePerM === 'number') parts.push(`${t('settings.customPricing.cacheWrite')} $${ov.cacheWritePerM}`);
   if (typeof ov.cacheWrite1hPerM === 'number') parts.push(`${t('settings.customPricing.cacheWrite1h')} $${ov.cacheWrite1hPerM}`);
-  return parts.length ? `${parts.join(' · ')} / 1M` : '';
+  return parts.join(' · ');
 }
 
 function renderCustomPricing() {
   if (!isSettingsSurfaceVisible()) return;
   const listEl = document.getElementById('customPricingList');
   const statusEl = document.getElementById('customPricingStatus');
-  if (!listEl) return;
+  if (!listEl || !customPricingDisclosure) return;
   const overrides = state.settings?.customModelPricing || [];
   const pricingBase = syncContentForm?.base();
   if (statusEl) {
@@ -17665,39 +17860,52 @@ function renderCustomPricing() {
       ? t('settings.customPricing.count', { count: overrides.length })
       : t('settings.customPricing.none');
   }
+  const editLabel = t('settings.common.edit');
+  const removeLabel = t('settings.customPricing.remove');
+  const emptyLabel = t('settings.customPricing.empty');
+  const rows = overrides.map(override => ({ override, meta: customPricingMeta(override) }));
+  const rowsKey = JSON.stringify([rows, pricingBase?.identity, pricingBase?.revisions?.customPricing,
+    editLabel, removeLabel, emptyLabel, t('settings.collection.modelActions')]);
+  if (rowsKey === customPricingRowsKey) return;
+  customPricingRowsKey = rowsKey;
   listEl.replaceChildren();
+  customPricingDisclosure.resetRows();
   if (overrides.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'settings-note';
-    empty.textContent = t('settings.customPricing.empty');
+    empty.textContent = emptyLabel;
     listEl.append(empty);
     return;
   }
-  for (const ov of overrides) {
+  for (const { override: ov, meta: summary } of rows) {
     const row = document.createElement('div');
     row.className = 'managed-account-row custom-pricing-row';
     const main = document.createElement('button');
     main.type = 'button';
     main.className = 'managed-account-main custom-pricing-edit';
-    main.setAttribute('aria-description', t('settings.customPricing.edit'));
-    main.addEventListener('click', () => { if (openCustomPricingForm) openCustomPricingForm(ov); });
+    main.setAttribute('aria-description', editLabel);
+    customPricingDisclosure.trackRow(ov.modelId, main);
+    const openEditor = () => openCustomPricingForm?.(ov);
+    main.addEventListener('click', openEditor);
     const name = document.createElement('div');
     name.className = 'managed-account-email';
     name.textContent = ov.modelId;
     const meta = document.createElement('div');
     meta.className = 'managed-account-meta';
-    meta.textContent = customPricingMeta(ov);
+    meta.textContent = summary;
     main.append(name, meta);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'managed-account-remove custom-pricing-remove';
-    remove.textContent = t('settings.customPricing.remove');
-    remove.addEventListener('click', async () => {
-      const next = customPricingFormApi.removeOverride(overrides, ov.modelId);
-      try { await saveSettings({ customModelPricing: next }, pricingBase); } catch (_) { return; }
-      renderCustomPricing();
+    const menu = window.TokenMonitorModelAliasForm.createModelSettingsMenu(document, {
+      label: t('settings.collection.modelActions', { model: ov.modelId }),
+      editLabel,
+      removeLabel,
+      edit: openEditor,
+      remove: async () => {
+        const next = customPricingFormApi.removeOverride(overrides, ov.modelId);
+        try { await saveSettings({ customModelPricing: next }, pricingBase); } catch (_) { return; }
+        renderCustomPricing();
+      }
     });
-    row.append(main, remove);
+    row.append(main, menu);
     listEl.append(row);
   }
 }
@@ -17710,6 +17918,7 @@ function setupCustomPricingUI() {
 
   const form = document.getElementById('customPricingForm');
   const addButton = document.getElementById('customPricingAddButton');
+  customPricingDisclosure = window.TokenMonitorModelAliasForm.createModelEditorDisclosure(form, addButton);
   const select = document.getElementById('customPricingModelSelect');
   const manualInput = document.getElementById('customPricingModelInput');
   const inputEl = document.getElementById('customPricingInput');
@@ -17719,7 +17928,13 @@ function setupCustomPricingUI() {
   const cacheWrite1hEl = document.getElementById('customPricingCacheWrite1h');
   const advanced = document.getElementById('customPricingAdvanced');
   const advancedSummary = document.getElementById('customPricingAdvancedSummary');
-  const help = document.getElementById('customPricingHelp');
+  const help = window.TokenMonitorHelpPopover.createHelpPopover({
+    trigger: document.getElementById('customPricingHelpButton'),
+    popover: document.getElementById('customPricingHelp'),
+    document,
+    align: 'center',
+    preferAbove: true
+  });
   const rateFields = [
     [inputEl, 'inputPerM'], [outputEl, 'outputPerM'], [cacheReadEl, 'cacheReadPerM'],
     [cacheWriteEl, 'cacheWritePerM'], [cacheWrite1hEl, 'cacheWrite1hPerM']
@@ -17741,7 +17956,7 @@ function setupCustomPricingUI() {
     lookupRevision += 1;
     editedFields.clear();
     advanced.open = false;
-    if (help.matches(':popover-open')) help.hidePopover();
+    help.close();
     for (const [el] of rateFields) el.value = '';
     updateAdvancedSummary();
     manualInput.value = ''; manualInput.classList.add('hidden');
@@ -17772,12 +17987,13 @@ function setupCustomPricingUI() {
   };
 
   const closeForm = () => {
-    form.classList.add('hidden');
-    addButton.classList.remove('hidden');
-    resetForm();
+    // Keep the fields in place while the form collapses.
+    lookupRevision += 1;
+    help.close();
+    customPricingDisclosure.setOpen(false);
   };
   openCustomPricingForm = (prefill) => {
-    pricingEdit = { base: syncContentForm?.base(), entries: structuredClone(state.settings?.customModelPricing || []) };
+    pricingEdit = { adding: !prefill, base: syncContentForm?.base(), entries: structuredClone(state.settings?.customModelPricing || []) };
     resetForm();
     populateModels();
     if (prefill && prefill.modelId) {
@@ -17794,12 +18010,22 @@ function setupCustomPricingUI() {
         updateApproximation(el);
       }
       advanced.open = cacheWriteEl.value !== '' || cacheWrite1hEl.value !== '';
+    } else {
+      select.value = '';
     }
-    form.classList.remove('hidden');
-    addButton.classList.add('hidden');
+    const title = document.getElementById('customPricingFormTitle');
+    const titleKey = prefill ? 'settings.customPricing.edit' : 'settings.customPricing.add';
+    title.setAttribute('data-i18n', titleKey);
+    title.textContent = t(titleKey);
+    customPricingDisclosure.setOpen(true, prefill?.modelId);
+    accountShellApi.focusDisclosureControl(form, select.value === '__manual__' ? manualInput : select);
   };
 
-  addButton.addEventListener('click', () => openCustomPricingForm());
+  addButton.addEventListener('click', () => {
+    if (saveButton.disabled) return;
+    if (pricingEdit?.adding && !form.classList.contains('hidden')) closeForm();
+    else openCustomPricingForm();
+  });
   cancelButton.addEventListener('click', closeForm);
 
   select.addEventListener('change', async () => {
@@ -17933,7 +18159,8 @@ const displaySettingsPreview = window.TokenMonitorDisplaySettingsPreview.create(
 displaySettings = window.TokenMonitorDisplaySettings.create({
   document, root: document.getElementById('windowSettingsDetails').querySelector('.settings-section-details-inner'),
   scrollPanel: els.settingsPanel, t, platform: () => state.appInfo?.platform, settings: () => state.settings,
-  preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction
+  preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction,
+  stopWindowShortcutRecording
 });
 let legacyAccountOwners;
 function createLegacyAccountOwners() {
