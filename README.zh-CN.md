@@ -303,7 +303,7 @@ Token Monitor 对 Token 用量、账户额度和 session 明细分别支持：
 |---------|-------------------------|------------|
 | 会话标题 | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
 | 每次提示／回复的用量与工具调用 | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | 明细仅在本地读取，不会同步。 |
-| 上下文用量／剩余空间 | Claude Code, Codex, DeepSeek Harness | Claude Code 的上下文上限根据模型估算。 |
+| 上下文用量／剩余空间 | Claude Code, Codex, DeepSeek Harness, Grok Build, WorkBuddy, CatPaw | Claude Code 的上下文上限根据模型估算。 |
 | 缓存用量／会话缓存命中率 | 提供缓存字段的来源，例如 Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | 有缓存用量数据时才显示命中率。 |
 | 缓存剩余时间估算 | Claude Code | 根据记录中的缓存层级估算为 5 分钟或 1 小时。 |
 | 输出速度／Token 消耗速率 | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | `tok/s` 为输出速度，`tok/min` 为总 Token 消耗速率；计时可能包含等待。 |

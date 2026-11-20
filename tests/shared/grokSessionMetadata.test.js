@@ -333,3 +333,76 @@ test('projects are withheld when the collector has them switched off', () => {
   assert.equal(meta.projectId, undefined);
   assert.equal(meta.projectLabel, undefined);
 });
+
+test('reads a recent Grok context from signals when the summary has no window', () => {
+  const home = makeHome();
+  const now = Date.now();
+  const recent = new Date(now - 60_000).toISOString();
+  const id = writeSession(home, 'workspace', 'signals-session', {
+    info: { id: 'signals-session' },
+    last_active_at: recent
+  });
+  const dir = path.join(home, '.grok', 'sessions', 'workspace', id);
+  fs.writeFileSync(path.join(dir, 'signals.json'), JSON.stringify({
+    contextTokensUsed: 7_374,
+    contextWindowTokens: 256_000
+  }));
+
+  const row = { client: 'grok', sessionId: id, lastUsedAt: recent };
+  applySessionMetadata({ today: { sessions: { [`grok:${id}`]: row } } }, home, { now, scopedHome: true });
+  assert.equal(row.contextTokens, 7_374);
+  assert.equal(row.contextWindow, 256_000);
+  fs.writeFileSync(path.join(dir, 'updates.jsonl'), JSON.stringify({
+    method: 'session/update',
+    params: { sessionId: id, _meta: { totalTokens: 8_000 } }
+  }) + '\n');
+  const withTranscript = grok.resolveSessionMetadata(new Set([id]), context(home, { now })).get(id);
+  assert.equal(withTranscript.contextTokens, 8_000);
+  assert.equal(withTranscript.contextWindow, 256_000);
+
+  const stale = grok.resolveSessionMetadata(new Set([id]), context(home, { now: now + 30 * 60_000 })).get(id);
+  assert.equal(stale.contextTokens, undefined);
+});
+
+test('Grok reads post-compaction usage until a newer transcript reading arrives', () => {
+  const home = makeHome();
+  const now = Date.now();
+  const id = writeSession(home, 'workspace', 'compact-session', {
+    info: { id: 'compact-session' },
+    last_active_at: new Date(now).toISOString(),
+    context_window: 512_000
+  });
+  const dir = path.join(home, '.grok', 'sessions', 'workspace', id);
+  const file = path.join(dir, 'updates.jsonl');
+  const read = () => grok.resolveSessionMetadata(new Set([id]), context(home, { now })).get(id);
+  const append = (method, update, meta = {}) => {
+    fs.appendFileSync(file, JSON.stringify({
+      method,
+      params: { sessionId: id, update, _meta: meta }
+    }) + '\n');
+  };
+  const chunk = { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'test' } };
+  append('session/update', chunk, { totalTokens: 460_231 });
+  fs.writeFileSync(path.join(dir, 'signals.json'), JSON.stringify({
+    contextTokensUsed: 460_231,
+    contextWindowTokens: 512_000
+  }));
+  assert.equal(read().contextTokens, 460_231);
+
+  append('_x.ai/session/update', {
+    sessionUpdate: 'auto_compact_completed',
+    tokens_before: 460_231,
+    tokens_after: 21_502
+  });
+  assert.equal(read().contextTokens, 21_502);
+  assert.equal(read().contextWindow, 512_000);
+
+  append('session/update', chunk, { totalTokens: 22_000 });
+  assert.equal(read().contextTokens, 22_000);
+
+  append('_x.ai/session/update', { sessionUpdate: 'auto_compact_completed', tokens_after: 0 });
+  const row = { client: 'grok', sessionId: id, contextTokens: 22_000, contextWindow: 512_000 };
+  applySessionMetadata({ today: { sessions: { [`grok:${id}`]: row } } }, home, { now, scopedHome: true });
+  assert.equal(row.contextTokens, 0);
+  assert.equal(row.contextWindow, 0);
+});

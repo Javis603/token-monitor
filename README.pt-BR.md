@@ -302,7 +302,7 @@ O Token Monitor suporta uso de tokens, verificação de limites da conta e detal
 |---------|-------------------------|------------|
 | Títulos de sessão | Claude Code, Codex, OpenCode, Cursor, Antigravity, Cline CLI, Factory Droid, Kimi CLI, Grok Build, Pi, Oh My Pi, OmO Native, MiMo, ZCode, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness, Cherry Studio, Devin CLI, fx, MiniMax Code | — |
 | Uso por prompt/resposta e chamadas de ferramentas | Claude Code, Codex, OpenCode, Pi, Oh My Pi, OmO Native, CodeBuddy, WorkBuddy, Reasonix, DeepSeek Harness | Os detalhes são lidos localmente e não são sincronizados. |
-| Uso de contexto/espaço restante | Claude Code, Codex, DeepSeek Harness | O limite de contexto do Claude Code é estimado pelo modelo. |
+| Uso de contexto/espaço restante | Claude Code, Codex, DeepSeek Harness, Grok Build, WorkBuddy, CatPaw | O limite de contexto do Claude Code é estimado pelo modelo. |
 | Uso de cache/taxa de acerto do cache da sessão | Fontes com campos de cache, por exemplo: Claude Code, Codex, OpenCode, Cursor, Kimi, Pi, Oh My Pi, OmO Native, DeepSeek Harness | A taxa de acerto aparece quando há dados de uso de cache. |
 | Estimativa de tempo restante do cache | Claude Code | 5 minutos ou 1 hora, conforme o tipo de cache registrado. |
 | Velocidade de saída/taxa de consumo de tokens | Claude Code, Codex, OpenCode, Antigravity, Kimi, GitHub Copilot, Pi, Oh My Pi, OmO Native, Kilo CLI, MiMo Code/MiMo Desktop, Muse Code, ZCode CLI, Kiro, DeepSeek Harness, Devin CLI | Saída em `tok/s` e consumo total de tokens em `tok/min`; o tempo pode incluir espera. |
