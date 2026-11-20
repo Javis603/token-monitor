@@ -123,7 +123,7 @@ test('alias edit buttons keep distinct alias and target names with a localized a
     const [trigger, menu] = rows[index].children[1].children;
     assert.equal(trigger['aria-label'], i18n.translate('zh-TW', 'settings.collection.modelActions', { model }));
     assert.equal(menu.children[0].role, 'menuitem');
-    assert.equal(menu.children[0].textContent, i18n.translate('zh-TW', 'settings.customPricing.edit'));
+    assert.equal(menu.children[0].textContent, i18n.translate('zh-TW', 'settings.common.edit'));
   }
   assert.deepEqual(buttons.map(button => button.children.slice(0, 2).map(child => child.textContent).join(' ')), [
     'first → model-a', 'second → model-b'
