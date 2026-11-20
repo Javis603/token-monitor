@@ -1125,6 +1125,29 @@ span.settings-note.settings-item-desc {
 .app-update-settings > .app-update-notes {
   margin-top: 4px;
 }
+/* Installed version, its status and the action share one row; the buttons drop
+   below the version when a locale's labels do not fit beside it. */
+.app-update-installed {
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.app-update-status-pill.is-available {
+  border-color: rgba(var(--accent-rgb), 0.45);
+  background: rgba(var(--accent-rgb), 0.1);
+  color: var(--accent);
+}
+.settings-actions.app-update-actions {
+  flex: 0 1 auto;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-left: auto;
+}
+.settings-actions button.app-update-primary {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--accent);
+}
 .advanced-config-row {
   display: flex;
   min-width: 0;
@@ -1521,21 +1544,19 @@ span.settings-note.settings-item-desc {
   outline: 1px solid rgba(115, 189, 245, 0.72);
   outline-offset: 3px;
 }
+/* The shared chevron, leading the label: it points at the label while closed
+   and down once the notes are open. */
 .app-update-notes-disclosure {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
+  transform: rotate(-90deg);
 }
 .app-update-notes-disclosure::before {
-  width: 0;
-  height: 0;
-  border: 0;
-  border-top: 3px solid transparent;
-  border-bottom: 3px solid transparent;
-  border-left: 5px solid currentColor;
-  transform: none;
+  width: 10px;
+  height: 10px;
 }
 .app-update-notes.expanded .app-update-notes-disclosure {
-  transform: rotate(90deg);
+  transform: none;
 }
 .app-update-notes-details { min-width: 0; }
 .app-update-notes-content {
@@ -1567,6 +1588,233 @@ span.settings-note.settings-item-desc {
   font-size: inherit;
 }
 .inline-link:hover { color: var(--text); }
+/* Outranks the flat first-subgroup reset, which would strip a card's top edge. */
+.settings-section-details-inner > .settings-page-card:first-child {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+.about-settings-identity {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+.about-settings-icon {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+}
+.about-settings-name {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+.about-settings-name strong {
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+#aboutVersion {
+  color: var(--muted);
+  font-size: 0.59375rem;
+  font-variant-numeric: tabular-nums;
+}
+/* The card's one prominent action. A static two-tone edge (drawn by ::before so
+   it stays a hairline over the translucent card) carries a comet of light round
+   the button while hovered, and ::after sweeps a sheen across it. */
+@property --about-star-orbit {
+  syntax: '<angle>';
+  inherits: false;
+  initial-value: 0deg;
+}
+.settings-panel button.about-settings-star {
+  --about-star-gold-rgb: 241, 217, 115;
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px 0 10px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 9px;
+  background: linear-gradient(180deg, rgba(var(--accent-rgb), 0.14), rgba(var(--accent-rgb), 0.04));
+  box-shadow: 0 6px 16px -10px rgba(var(--accent-rgb), 0.6);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  transition: box-shadow 250ms ease, transform 150ms ease;
+}
+.settings-panel button.about-settings-star::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  padding: 1px;
+  border-radius: inherit;
+  background:
+    conic-gradient(from var(--about-star-orbit), transparent 0 62%, rgba(255, 255, 255, 0.95) 74%, rgba(var(--about-star-gold-rgb), 0.9) 80%, transparent 90%),
+    linear-gradient(120deg, rgba(var(--accent-rgb), 0.8), rgba(var(--about-star-gold-rgb), 0.6) 45%, rgba(var(--accent-rgb), 0.2));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+  animation: about-star-orbit 2.6s linear infinite paused;
+  pointer-events: none;
+}
+.settings-panel button.about-settings-star::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(105deg, transparent 35%, rgba(255, 255, 255, 0.14) 50%, transparent 65%);
+  transform: translateX(-120%);
+  pointer-events: none;
+}
+.settings-panel button.about-settings-star:hover { box-shadow: 0 6px 20px -8px rgba(var(--accent-rgb), 0.75); }
+.settings-panel button.about-settings-star:hover::before { animation-play-state: running; }
+.settings-panel button.about-settings-star:hover::after {
+  transform: translateX(120%);
+  transition: transform 800ms ease;
+}
+.settings-panel button.about-settings-star:active { transform: scale(0.985); }
+.settings-panel button.about-settings-star:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Played once per launch, the first time the card is shown: two slow breaths
+   and one sheen, then still. */
+.settings-panel button.about-settings-star.is-arriving { animation: about-star-breathe 2.4s ease-in-out 2; }
+.settings-panel button.about-settings-star.is-arriving::after { animation: about-star-sweep 1.2s 400ms ease; }
+@keyframes about-star-orbit { to { --about-star-orbit: 360deg; } }
+@keyframes about-star-breathe {
+  50% { box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.14), 0 0 22px -2px rgba(var(--accent-rgb), 0.55); }
+}
+@keyframes about-star-sweep {
+  from { transform: translateX(-120%); }
+  to { transform: translateX(120%); }
+}
+.about-settings-star-label {
+  display: inline-flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  color: var(--accent);
+}
+.about-settings-github-mark {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  background: currentColor;
+  -webkit-mask: url("icons/brands/github.svg") center / contain no-repeat;
+  mask: url("icons/brands/github.svg") center / contain no-repeat;
+}
+/* The count sits in a soft chip rather than behind a divider. It uses the
+   display font, like the total, because a monospaced comma takes a whole cell
+   and splits the number. */
+.about-settings-star-count {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: rgba(var(--overlay-rgb), 0.07);
+  font-family: var(--display-font, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.about-settings-star-icon {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  fill: transparent;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  transform-origin: 50% 55%;
+  transition: transform 350ms cubic-bezier(0.34, 1.56, 0.64, 1), color 200ms ease, fill 200ms ease;
+}
+.settings-panel button.about-settings-star:hover .about-settings-star-icon {
+  color: rgb(var(--about-star-gold-rgb));
+  fill: rgb(var(--about-star-gold-rgb));
+  transform: rotate(72deg) scale(1.15);
+}
+.settings-panel button.about-settings-star.is-popping .about-settings-star-icon {
+  color: rgb(var(--about-star-gold-rgb));
+  fill: rgb(var(--about-star-gold-rgb));
+  animation: about-star-pop 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+@keyframes about-star-pop { 40% { transform: scale(1.6) rotate(-14deg); } }
+.about-settings-star-spark {
+  position: absolute;
+  z-index: 1;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgb(var(--about-star-gold-rgb));
+  pointer-events: none;
+  animation: about-star-spark 650ms ease-out forwards;
+}
+@keyframes about-star-spark { to { opacity: 0; transform: translate(var(--spark-x), var(--spark-y)) scale(0.3); } }
+/* Odometer: each digit is a column of 0–9 that slides to its value. The plain
+   number beside it is what assistive technology reads. */
+.about-settings-star-value { display: inline-flex; }
+.about-star-odometer {
+  display: inline-flex;
+  height: 1.2em;
+  overflow: hidden;
+  line-height: 1.2em;
+}
+.about-star-odometer-digit {
+  display: inline-flex;
+  flex-direction: column;
+  transition: transform 1.2s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.about-star-odometer-digit > span { height: 1.2em; }
+.about-star-odometer-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+:root[data-reduce-motion="on"] .settings-panel button.about-settings-star,
+:root[data-reduce-motion="on"] .settings-panel button.about-settings-star::before,
+:root[data-reduce-motion="on"] .settings-panel button.about-settings-star::after,
+:root[data-reduce-motion="on"] .about-settings-star-icon { animation: none !important; transition: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-reduce-motion="off"]) .settings-panel button.about-settings-star,
+  :root:not([data-reduce-motion="off"]) .settings-panel button.about-settings-star::before,
+  :root:not([data-reduce-motion="off"]) .settings-panel button.about-settings-star::after,
+  :root:not([data-reduce-motion="off"]) .about-settings-star-icon { animation: none !important; transition: none !important; }
+}
+.about-settings-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.about-settings-link::before {
+  content: "";
+  flex: 0 0 auto;
+  width: 11px;
+  height: 11px;
+  background: currentColor;
+  -webkit-mask: var(--about-link-icon) center / contain no-repeat;
+  mask: var(--about-link-icon) center / contain no-repeat;
+}
+.about-settings-link-website { --about-link-icon: url("icons/sources/globe.svg"); }
+.about-settings-link-issue { --about-link-icon: url("icons/actions/bug.svg"); }
+.about-settings-link-diagnostics { --about-link-icon: url("icons/actions/stethoscope.svg"); }
 .about-settings-links {
   display: flex;
   flex-wrap: wrap;

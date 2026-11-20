@@ -119,8 +119,12 @@ test('Notch Settings command reaches the renderer through the registered preload
   assert.equal(ipcRenderer.listenerCount('settings:open'), 1);
 
   const sent = [];
+  let forcedPresentations = 0;
   const mainContext = {
     focusExistingWindow: () => sent.push('focus'),
+    sendStatsPresentationToRenderer: (options = {}) => {
+      if (options.force === true) forcedPresentations += 1;
+    },
     sendMainWindowEvent: (channel, section) => {
       sent.push([channel, section]);
       ipcRenderer.emit(channel, {}, section);
@@ -129,9 +133,11 @@ test('Notch Settings command reaches the renderer through the registered preload
   vm.runInNewContext(functionSource(read('main.js'), 'openSettingsFromTray', 'openViewFromTray'), mainContext);
   notchMenu({}, { onOpenSettings: mainContext.openSettingsFromTray }).submenu.at(-1).click();
   assert.deepEqual(sent, ['focus', ['settings:open', 'notch']]);
+  assert.equal(forcedPresentations, 1, 'the tray action sends a current presentation before the settings event');
   assert.deepEqual(events, ['sync', ['window', true], ['display', 'notch']]);
 
   events.length = 0;
   mainContext.openSettingsFromTray();
+  assert.equal(forcedPresentations, 2);
   assert.deepEqual(events, ['sync']);
 });

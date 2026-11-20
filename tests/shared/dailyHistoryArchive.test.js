@@ -547,6 +547,47 @@ function dayObservation(archive, date) {
   return Object.values(archive.liveDays[date].observations)[0];
 }
 
+test('a non-writing live retention updates the in-memory maximum without reading or writing the archive', () => {
+  const date = '2026-08-18';
+  let reads = 0;
+  let writes = 0;
+  const options = {
+    todayKey: date,
+    timeZone: 'UTC',
+    pricingRevision: 'rev',
+    writeEnabled: false,
+    readJson: () => { reads += 1; return {}; },
+    writeJsonAtomic: () => { writes += 1; }
+  };
+  const first = retainLiveDailyHistory(livePeriod(100, 2), options);
+  assert.equal(reads, 1, 'the first tick populates the in-memory maximum from the archive');
+  assert.equal(writes, 0, 'a non-writing tick does not write the archive');
+  assert.equal(dayObservation(first.calendars.UTC, date).tokens, 100);
+
+  const liveDays = first.calendars.UTC.liveDays;
+  reads = 0;
+  const lower = retainLiveDailyHistory(livePeriod(80, 1), { ...options, liveDays });
+  assert.equal(reads, 0, 'once the live days are known a non-writing tick does not read the archive');
+  assert.equal(writes, 0, 'a non-writing tick does not write the archive');
+  assert.equal(dayObservation(lower.calendars.UTC, date).tokens, 100, 'a lower later reading cannot lower the live maximum');
+
+  const higher = retainLiveDailyHistory(livePeriod(140, 2.8), { ...options, liveDays });
+  assert.equal(dayObservation(higher.calendars.UTC, date).tokens, 140, 'a higher reading advances the maximum');
+
+  let archive = normalizeDailyHistoryArchive({ liveDays });
+  const written = retainLiveDailyHistory(livePeriod(140, 2.8), {
+    ...options,
+    liveDays,
+    writeEnabled: true,
+    readJson: () => archive,
+    writeJsonAtomic: (_file, value) => { archive = value; }
+  });
+  assert.deepEqual(written.calendars.UTC.liveDays, higher.calendars.UTC.liveDays, 'the pure path matches the writing path');
+
+  const noZone = retainLiveDailyHistory(livePeriod(100, 2), { ...options, timeZone: undefined });
+  assert.equal(dayObservation(noZone, date).tokens, 100);
+});
+
 async function withArchiveFile(content, callback) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'token-monitor-archive-'));
   const archivePath = path.join(directory, 'daily-history-archive.json');

@@ -31,7 +31,7 @@ const port = parentPort || {
 // process would otherwise keep holding every descriptor it watches.
 if (!parentPort) process.on('disconnect', () => process.exit(0));
 
-const { openWatch } = require('./collector');
+const { openWatch } = require('./watchPolicy');
 
 // Latest-wins rather than a queue. A teardown can run for seconds, and a user
 // flipping several settings in that window must not make the worker replay

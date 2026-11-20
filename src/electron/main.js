@@ -6,7 +6,11 @@ const os = require('node:os');
 const path = require('node:path');
 const { contentSecurityPolicyForRequest } = require('./contentSecurityPolicy');
 const { initializeHubProfiles, hubProfilesForRenderer, prepareHubProfilePatch } = require('./hubProfiles');
-const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences } = require('electron');
+const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences, webContents } = require('electron');
+// The renderer's 8 MiB semi-space keeps the long-lived widget lean.
+const RENDERER_JS_FLAGS = '--max-semi-space-size=8 --expose-gc';
+const existingJsFlags = app.commandLine.getSwitchValue('js-flags').trim();
+app.commandLine.appendSwitch('js-flags', existingJsFlags ? `${existingJsFlags} ${RENDERER_JS_FLAGS}` : RENDERER_JS_FLAGS);
 
 // All of the app's pages are the same local bundle, and every window Chromium
 // gives its own renderer costs a process baseline plus a compositor for what is
@@ -16,6 +20,7 @@ const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, glob
 app.commandLine.appendSwitch('process-per-site');
 
 const { createRetainedWindow, captureRetainedWindowState, restoreRetainedWindowState } = require('./retainedWindow');
+const { createIdleHeapCollector } = require('./idleHeap');
 const { autoUpdater } = require('electron-updater');
 const { defaultDeviceId, generateHubSecret, lanIpv4Addresses, loadDotEnv, pidFilePath, readJson, sharedDataDir } = require('../shared/config');
 const { CredentialStore, credentialSettingsForRenderer, hasCredentialSettings, persistSettingsAndCredentials, stripCredentialSettings, writePrivateJsonAtomic } = require('../shared/credentialStore');
@@ -27,6 +32,7 @@ const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/tray
 const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
 const tokenNumberAnimationApi = require('./tokenNumberAnimation');
+const { createRepositoryStars } = require('./repositoryStars');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./providers/claude/webFetch');
@@ -361,6 +367,8 @@ const {
   createStatsPublicationBatcher,
   rendererStats
 } = require('./statsPublisher');
+const { rendererNeedsStatsWhileHidden } = require('./statsPushPolicy');
+const { buildStatsDelta, fingerprintStats } = require('../shared/statsDelta');
 const { withoutSessionTitleStats, withoutSessionTitles } = require('./sessionTitleDisplay');
 const { createSseBlockReader, parseSseBlock } = require('./sseEventReader');
 const { createSyncUploadScheduler, normalizeSyncUploadIntervalMs } = require('./syncUploadScheduler');
@@ -1533,9 +1541,96 @@ function syncPluginWindowVisibility(win) {
   sendMainWindowVisibility(win);
 }
 
+let mainWindowVisibilitySyncedAt = 0;
+let mainWindowShowSyncTimer = null;
+
+function scheduleMainWindowShowSync(scheduledAt = Date.now()) {
+  if (mainWindowShowSyncTimer) clearTimeout(mainWindowShowSyncTimer);
+  mainWindowShowSyncTimer = setTimeout(() => {
+    mainWindowShowSyncTimer = null;
+    if (quitRequested || !mainWindow || mainWindow.isDestroyed()) return;
+    // The native show event already delivered the current snapshot.
+    if (mainWindowVisibilitySyncedAt >= scheduledAt) return;
+    if (!mainWindow.isVisible() || mainWindow.isMinimized()) return;
+    sendMainWindowVisibility(mainWindow);
+  }, 100);
+  mainWindowShowSyncTimer.unref?.();
+}
+
 function sendMainWindowVisibility(win = mainWindow) {
   if (!win || win !== mainWindow || win.isDestroyed() || win.webContents.isDestroyed()) return;
-  win.webContents.send('window:visibility', win.isVisible() && !win.isMinimized());
+  const visible = win.isVisible() && !win.isMinimized();
+  if (visible) mainWindowVisibilitySyncedAt = Date.now();
+  if (visible) {
+    // A hidden window may have skipped full pushes; hand it the current
+    // snapshot before the visibility event so its first visible frame is fresh.
+    sendStatsPresentationToRenderer();
+  } else {
+    // macOS can emit 'show' before isVisible() flips, which would leave the
+    // renderer believing it is still hidden. Recheck on the next turn: a window
+    // that really revealed gets the current snapshot and a true visibility
+    // event; one that is still hidden or was hidden again does nothing.
+    const timer = setTimeout(() => {
+      if (quitRequested || win.isDestroyed() || win.webContents.isDestroyed()) return;
+      if (!win.isVisible() || win.isMinimized()) return;
+      // Re-enter so the sync timestamp is recorded and the show-path helper
+      // does not send the same snapshot again.
+      sendMainWindowVisibility(win);
+    }, 50);
+    timer.unref?.();
+  }
+  win.webContents.send('window:visibility', visible);
+}
+
+// Every local page shares one renderer process, but a split process or a
+// DevTools window must not be collected twice. `gc` comes from the js-flags
+// switch; a page that did not load it simply reports false.
+const IDLE_RENDERER_GC_TIMEOUT_MS = 5000;
+function windowShowsRendererContent(win) {
+  if (!win || win.isDestroyed() || !win.isVisible() || win.isMinimized()) return false;
+  try {
+    // Edge-dock and history cards are shown once and then faded to opacity 0
+    // instead of hidden, so isVisible() alone would keep the renderer pass off
+    // forever after a card was opened. Only content the user can see blocks it.
+    if (typeof win.getOpacity === 'function') return win.getOpacity() > 0;
+  } catch (_) {
+    // If opacity cannot be read, assume the window is showing content.
+    return true;
+  }
+  return true;
+}
+
+function collectIdleRendererHeaps() {
+  // The renderer pass is for hidden surfaces. A full collection can pause a
+  // window showing content for tens of milliseconds, so leave those windows
+  // (dashboard, dock, history cards at opacity > 0, retained BaseWindow hosts)
+  // to Chromium.
+  for (const win of BaseWindow.getAllWindows()) {
+    if (windowShowsRendererContent(win)) return Promise.resolve();
+  }
+  const seen = new Set();
+  const jobs = [];
+  for (const contents of webContents.getAllWebContents()) {
+    if (!contents || contents.isDestroyed()) continue;
+    // executeJavaScript on a loading page is queued until did-stop-loading;
+    // a window revealed in that gap would collect while visible. A later idle
+    // pass picks the renderer up once it has finished loading.
+    if (typeof contents.isLoading === 'function' && contents.isLoading()) continue;
+    let key = null;
+    try { key = contents.getOSProcessId(); } catch (_) {}
+    if (key === null) key = `contents:${contents.id}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    jobs.push(new Promise((resolve) => {
+      const timer = setTimeout(resolve, IDLE_RENDERER_GC_TIMEOUT_MS);
+      timer.unref?.();
+      contents.executeJavaScript('typeof gc === "function" ? gc() : false', true).then(
+        () => { clearTimeout(timer); resolve(); },
+        () => { clearTimeout(timer); resolve(); }
+      );
+    }));
+  }
+  return Promise.all(jobs);
 }
 
 function stopFloatingBubbleAutoCollapseTimer() {
@@ -2269,10 +2364,14 @@ function createElectronUsageRuntime(options) {
     ...(options.onPreview ? { onPreview: releaseOnWorkerDelivery(options.onPreview) } : {})
   }, {
     agentPidPath: AGENT_PID_PATH,
-    transformSettings: usageTransformSettings(settings)
+    transformSettings: usageTransformSettings(settings),
+    // A young generation includes three semi-spaces worth of capacity.
+    workerResourceLimits: { maxYoungGenerationSizeMb: 24 }
   });
   return latestUsageHost;
 }
+
+let macDockIconApplied = false;
 
 function applyMacActivationPolicy(state = {}) {
   if (process.platform !== 'darwin') return;
@@ -2286,8 +2385,18 @@ function applyMacActivationPolicy(state = {}) {
     try { app.setActivationPolicy(mode); } catch (_) {}
   }
   if (!app.dock) return;
-  if (mode === 'accessory') app.dock.hide();
-  else app.dock.show();
+  if (mode === 'accessory') {
+    app.dock.hide();
+    return;
+  }
+  app.dock.show();
+  // The 1024px app icon is only decoded when a Dock tile can show it. Doing
+  // this unconditionally at startup cost about 32 MB of CGImage in accessory
+  // mode, where the Dock is hidden and nothing reads the artwork.
+  if (!macDockIconApplied) {
+    app.dock.setIcon(APP_ICON_PATH);
+    macDockIconApplied = true;
+  }
 }
 
 function applyMacSpaceBehavior(trayMode = Boolean(settings?.trayMode)) {
@@ -2456,6 +2565,7 @@ let latestHubStatsIdentity = null;
 let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
+let latestStatsSource = null;
 let limitsHistoryStore = null;
 let limitsHistoryController = null;
 
@@ -2530,6 +2640,9 @@ function getLimitsHistoryController() {
 }
 let statsPushSource = null;
 let statsPushRevision = 0;
+// The renderer's current session rows, as hashes. A fingerprint keeps the base
+// for a delta without retaining a second full stats tree in main.
+let lastRendererStatsFingerprint = null;
 let macWidgetSnapshotController = null;
 let macWidgetDemand = null;
 let macWidgetPublicationReady = false;
@@ -4428,17 +4541,35 @@ function publishLocalSessionActivity(patch) {
 // push that lands mid-load is already covered by the refreshStats() the renderer
 // runs on init, so deferring every one of them would only queue a listener per
 // frame against a slow load and then replay a burst of superseded stats.
+function rendererHiddenStatsNeeded() {
+  return rendererNeedsStatsWhileHidden({
+    trayContent: settings?.trayContent,
+    showTrayIcon: settings?.showTrayIcon !== false,
+    floatingBubbleEnabled: settings?.floatingBubbleEnabled === true,
+    floatingBubbleCollapsed: floatingBubbleState.collapsed === true
+  });
+}
+
+function mainWindowStatsPushWanted() {
+  if (!mainWindow || mainWindow.isDestroyed()) return false;
+  if (mainWindow.isVisible() && !mainWindow.isMinimized()) return true;
+  return rendererHiddenStatsNeeded();
+}
+
 function sendPush(payload, options = {}) {
   const previousHistoryRevision = statsHistoryRevision(latestStats);
+  const wantsRenderer = options.deferToRenderer === true || mainWindowStatsPushWanted();
   let rendererPayload = payload;
+  let rendererFingerprint = null;
   if (payload?.data?.stats) {
     payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
+    latestStatsSource = { generation: hubModeGeneration, identity: currentHubStatsIdentity() };
     // Client local batches overlay usage on the cached Hub snapshot; they do
     // not supersede an in-flight read of fresh remote stats.
     if (!(settings?.hubMode === 'client' && payload.data.reason === 'local')) {
       statsPushRevision += 1;
-      statsPushSource = { generation: hubModeGeneration, identity: currentHubStatsIdentity() };
+      statsPushSource = latestStatsSource;
     }
     edgeDockManualStats = null;
     getSyncContentRuntime().notifyStats(latestStats);
@@ -4447,10 +4578,23 @@ function sendPush(payload, options = {}) {
     getLimitsHistoryStore().record(currentHubStatsIdentity(), visibleStats.limits);
     limitsHistoryController?.refresh();
     migrateCodexAdditionalLimits(visibleStats);
-    rendererPayload = {
-      ...payload,
-      data: { ...payload.data, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
-    };
+    if (wantsRenderer) {
+      const copy = rendererSnapshots.stamp(latestStats, rendererStats(visibleStats), visibleStats);
+      const allowDelta = options.deferToRenderer !== true
+        && payload.data.reason !== 'read'
+        && payload.data.reason !== 'presentation';
+      const built = allowDelta
+        ? buildStatsDelta(lastRendererStatsFingerprint, copy)
+        : { delta: null, fingerprint: fingerprintStats(copy) };
+      rendererFingerprint = built.fingerprint;
+      if (built.delta) {
+        const data = { ...payload.data };
+        delete data.stats;
+        rendererPayload = { ...payload, data: { ...data, statsDelta: built.delta } };
+      } else {
+        rendererPayload = { ...payload, data: { ...payload.data, stats: copy } };
+      }
+    }
     scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
     pluginRuntime?.publishStats(visibleStats, latestStats);
     updateEdgeDockCells(visibleStats);
@@ -4468,8 +4612,18 @@ function sendPush(payload, options = {}) {
     // walk the numbers backwards until the next push.
     const deferred = payload?.data?.stats;
     sendMainWindowEvent('stats:push', rendererPayload, () => !deferred || latestStats === deferred);
+    if (rendererFingerprint) lastRendererStatsFingerprint = rendererFingerprint;
   } else if (mainWindow && !mainWindow.isDestroyed()) {
-    try { mainWindow.webContents.send('stats:push', rendererPayload); } catch (_) {}
+    // Status and activity patches stay small and keep the hidden window's
+    // connection/activity state current. A full snapshot is the expensive one.
+    if (!payload?.data?.stats || wantsRenderer) {
+      try {
+        mainWindow.webContents.send('stats:push', rendererPayload);
+        if (rendererFingerprint) lastRendererStatsFingerprint = rendererFingerprint;
+      } catch (_) {
+        lastRendererStatsFingerprint = null;
+      }
+    }
   }
   if (payload?.data?.stats) {
     const nextHistoryRevision = statsHistoryRevision(payload.data.stats);
@@ -4889,7 +5043,9 @@ function showPopover(clickPoint = null) {
   const target = popoverBounds(tray, current.width, current.height, { clickPoint });
   mainWindow.setBounds(target);
   suppressNextBlurHide = true;
+  const showSyncAt = Date.now();
   mainWindow.show();
+  scheduleMainWindowShowSync(showSyncAt);
   // The focus event itself may not fire a blur; the suppress flag covers the
   // case where macOS fires blur immediately after show because the click that
   // opened us still has the menu bar as the focused element.
@@ -4927,7 +5083,9 @@ function focusExistingWindow() {
     applyMacSpaceBehavior(false);
     if (floatingBubbleState.collapsed) expandFloatingBubble();
     else {
+      const showSyncAt = Date.now();
       mainWindow.show();
+      scheduleMainWindowShowSync(showSyncAt);
       restoreWindowMaximized(mainWindow, settings);
     }
   }
@@ -5710,6 +5868,25 @@ function syncDockSurfaces(rendererSettings) {
   syncPluginQuotaSurfaceDemand();
 }
 
+function sendStatsPresentationToRenderer(options = {}) {
+  if (!latestStats || !mainWindow || mainWindow.isDestroyed()) return false;
+  if (options.force !== true && !mainWindowStatsPushWanted()) return false;
+  const visibleStats = electronPresentationStats(latestStats);
+  const copy = rendererSnapshots.stamp(latestStats, rendererStats(visibleStats), visibleStats);
+  try {
+    mainWindow.webContents.send('stats:push', {
+      event: 'stats',
+      data: { type: 'stats', reason: 'presentation', mode, stats: copy }
+    });
+    const fingerprint = fingerprintStats(copy);
+    if (fingerprint) lastRendererStatsFingerprint = fingerprint;
+    return true;
+  } catch (_) {
+    lastRendererStatsFingerprint = null;
+    return false;
+  }
+}
+
 function refreshLimitStatsPresentation() {
   if (!latestStats) return;
   const visibleStats = electronPresentationStats(latestStats);
@@ -5717,14 +5894,7 @@ function refreshLimitStatsPresentation() {
   scheduleMacWidgetSnapshot(visibleStats, captureMacWidgetProducerOwner());
   repaintDockSurfaces();
   updateTrayDisplay();
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    try {
-      mainWindow.webContents.send('stats:push', {
-        event: 'stats',
-        data: { type: 'stats', reason: 'presentation', mode, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
-      });
-    } catch (_) {}
-  }
+  sendStatsPresentationToRenderer();
 }
 
 function sendMimoAccountsPush() {
@@ -5813,6 +5983,11 @@ function setTrayContentFromMenu(value) {
   settings.trayContent = next;
   saveSettings();
   updateTrayDisplay();
+  const hidden = !mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMinimized();
+  // A generated tray icon is composed from the renderer's last stats. When the
+  // window is hidden, deliver the current snapshot before the settings push so
+  // the first icon is not rendered from a stale reading.
+  if (hidden && rendererHiddenStatsNeeded()) sendStatsPresentationToRenderer({ force: true });
   pushSettingsToRenderer();
 }
 
@@ -5869,6 +6044,9 @@ function setWindowPresentationFromMenu(value) {
 
 function openSettingsFromTray(section) {
   focusExistingWindow();
+  // The tray action can render before the reveal sync's snapshot lands; send
+  // the current presentation first so the first paint is not stale.
+  sendStatsPresentationToRenderer({ force: true });
   sendMainWindowEvent('settings:open', section === 'notch' ? 'notch' : undefined);
 }
 
@@ -5876,6 +6054,8 @@ function openViewFromTray(viewId) {
   const normalized = String(viewId || '').trim().toLowerCase();
   if (!TRAY_OPEN_VIEW_IDS.has(normalized)) return;
   focusExistingWindow();
+  // Same first-paint protection as openSettingsFromTray.
+  sendStatsPresentationToRenderer({ force: true });
   sendMainWindowEvent('view:open', normalized);
 }
 
@@ -6264,6 +6444,7 @@ function disposePluginRuntime() {
 }
 
 let quitRequested = false;
+let idleHeapCollector = null;
 let quitInProgress = false;
 // Owned by the update-install guard below and by nothing else: electron-updater
 // restarts the process itself, so the exit has to stand down or the install
@@ -6953,7 +7134,9 @@ function isAllowedExternalUrl(value) {
 
 function revealWindow(target = mainWindow, options = {}) {
   const inactive = options.inactive === true || (target === mainWindow && floatingBubbleState.collapsed);
+  const showSyncAt = Date.now();
   showWindow(target, inactive);
+  if (target === mainWindow) scheduleMainWindowShowSync(showSyncAt);
 }
 
 function loadWindowFile(target, options = {}) {
@@ -7119,6 +7302,7 @@ function createWindow(boundsOverride, options = {}) {
   win.on('minimize', () => syncPluginWindowVisibility(win));
   win.on('restore', () => syncPluginWindowVisibility(win));
   if (!options.previousWindow) win.webContents.on('did-finish-load', () => {
+    if (win === mainWindow) lastRendererStatsFingerprint = null;
     sendFloatingBubbleState();
     // Only report a window that is already on screen. A window still awaiting its
     // reveal reports isVisible() === false. loadWindowFile waits for renderer
@@ -7314,8 +7498,30 @@ async function getDashboardHistory(options = {}) {
 // accepts before 'ready'.
 registerPluginScheme(protocol);
 
+function focusedAppWindow() {
+  try {
+    if (typeof BaseWindow.getFocusedWindow === 'function') {
+      const focused = BaseWindow.getFocusedWindow();
+      if (focused) return focused;
+    }
+  } catch (_) {}
+  return BrowserWindow.getFocusedWindow();
+}
+
+function appIsIdleForHeapCollection() {
+  if (quitRequested || focusedAppWindow() !== null) return false;
+  // A full collection pauses main for tens of milliseconds. Require a short
+  // break in system input as well as app focus, so it cannot land in the middle
+  // of a hover, drag or animation the user is watching.
+  try {
+    if (typeof powerMonitor.getSystemIdleTime !== 'function') return true;
+    return powerMonitor.getSystemIdleTime() >= 5;
+  } catch (_) {
+    return true;
+  }
+}
+
 app.whenReady().then(() => {
-  if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
   ensureSettingsLoaded();
   powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
   powerMonitor.on('unlock-screen', () => notchController?.setLocked(false));
@@ -7359,6 +7565,11 @@ app.whenReady().then(() => {
   });
   applyMacActivationPolicy();
   createWindow();
+  idleHeapCollector = createIdleHeapCollector({
+    isIdle: appIsIdleForHeapCollection,
+    collectRenderers: collectIdleRendererHeaps
+  });
+  idleHeapCollector.start();
   syncLoginItemSettingFromOs();
   configureWindowToggleShortcut();
   // The retired in-app npm updater kept upstream tokscale builds here; the
@@ -8170,7 +8381,17 @@ app.whenReady().then(() => {
     updateTrayDisplay();
     return true;
   });
-  ipcMain.handle('stats:get', async (_event, options) => {
+  ipcMain.handle('stats:get', async (event, options) => {
+    if (options?.deltaResync === true) {
+      if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return null;
+      if (latestStatsSource?.generation !== hubModeGeneration
+        || latestStatsSource.identity !== currentHubStatsIdentity()) return null;
+      // Send the full snapshot on the same channel as subsequent deltas.
+      // An invoke reply can arrive after a newer push and roll the view back.
+      sendStatsPresentationToRenderer({ force: true });
+      return null;
+    }
+
     const revision = statsPushRevision;
     const fetched = await (options?.force === true && options?.feedback === true ? refreshManualStats() : fetchStats(options));
     // A push from the same source/generation supersedes its pending read. A
@@ -8185,7 +8406,13 @@ app.whenReady().then(() => {
     // The stream normally carries the stamp, but it is precisely when the stream
     // is down that this read is the only thing still arriving from the hub.
     maybeAdoptSharedSubscriptionRevision(stats);
-    return rendererSnapshots.stamp(stats, rendererStats(electronPresentationStats(stats)));
+    const visibleStats = electronPresentationStats(stats);
+    const copy = rendererSnapshots.stamp(stats, rendererStats(visibleStats), visibleStats);
+    if (event?.sender && mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents) {
+      const fingerprint = fingerprintStats(copy);
+      if (fingerprint) lastRendererStatsFingerprint = fingerprint;
+    }
+    return copy;
   });
   ipcMain.handle('devices:delete', async (_event, deviceId) => {
     try {
@@ -8248,6 +8475,11 @@ app.whenReady().then(() => {
   ipcMain.handle('appearance:getNativeMaterial', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     return getNativeMaterialState(win);
+  });
+  let repositoryStars = null;
+  ipcMain.handle('app:repositoryStars', () => {
+    repositoryStars ||= createRepositoryStars({ userAgent: `token-monitor/${app.getVersion()}` });
+    return repositoryStars.get();
   });
   ipcMain.handle('app:getInfo', () => ({
     notchCapabilities: notchController?.getCapabilities() || null,
@@ -8647,6 +8879,7 @@ app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(
 // only loop.
 const rendererCrashReloadAt = new Map();
 app.on('render-process-gone', (_event, contents, details) => {
+  if (mainWindow && contents === mainWindow.webContents) lastRendererStatsFingerprint = null;
   if (quitRequested || details.reason === 'clean-exit') return;
   if (!contents || contents.isDestroyed()) return;
   const reloadAt = rendererCrashReloadAt.get(contents.id) || 0;
@@ -8664,6 +8897,7 @@ app.on('render-process-gone', (_event, contents, details) => {
 // taking the quit over would cancel an OS-initiated logout or restart on macOS.
 app.on('before-quit', () => {
   quitRequested = true;
+  idleHeapCollector?.stop();
   limitsHistoryController?.dispose();
   limitsHistoryStore?.closeSync();
   // An updater can abort this quit; subsequent reads need an open store.

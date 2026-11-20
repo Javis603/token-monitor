@@ -69,6 +69,8 @@ test('saving the title preference immediately republishes Today and Home data fr
   const projectionEnd = source.indexOf('\nconst allTimeSessionsCache', projectionStart);
   const refreshStart = source.indexOf('function refreshLimitStatsPresentation(');
   const refreshEnd = source.indexOf('\nfunction sendMimoAccountsPush(', refreshStart);
+  const presentationPushStart = source.indexOf('function sendStatsPresentationToRenderer(');
+  const presentationPushEnd = source.indexOf('\nfunction refreshLimitStatsPresentation(', presentationPushStart);
   const updateStart = source.indexOf('    pushSettingsToRenderer();\n    if (settings.sessionTitlesEnabled');
   const updateEnd = source.indexOf('    return settingsForRenderer();', updateStart);
   assert.ok(projectionStart >= 0 && projectionEnd > projectionStart);
@@ -86,12 +88,15 @@ test('saving the title preference immediately republishes Today and Home data fr
     migrateCodexAdditionalLimits: noop, scheduleMacWidgetSnapshot: noop, captureMacWidgetProducerOwner: noop, pluginRuntime: null,
     repaintDockSurfaces: noop, updateTrayDisplay: noop,
     rendererSnapshots: { stamp: (_raw, value) => value }, rendererStats: value => value,
+    fingerprintStats: () => null,
+    lastRendererStatsFingerprint: null,
+    mainWindowStatsPushWanted: () => true,
     pushSettingsToRenderer() { events.push('settings'); },
     mainWindow: { isDestroyed: () => false, webContents: { send(_channel, payload) {
       events.push('stats'); adopted = payload.data.stats;
     } } }
   };
-  vm.runInNewContext(`${source.slice(projectionStart, projectionEnd)}\n${source.slice(refreshStart, refreshEnd)}\nfunction saveDisplayPreference() {${source.slice(updateStart, updateEnd)}}`, context);
+  vm.runInNewContext(`${source.slice(projectionStart, projectionEnd)}\n${source.slice(presentationPushStart, presentationPushEnd)}\n${source.slice(refreshStart, refreshEnd)}\nfunction saveDisplayPreference() {${source.slice(updateStart, updateEnd)}}`, context);
   for (const enabled of [false, true]) {
     context.previousSettingsState = { sessionTitlesEnabled: !enabled };
     context.settings = { sessionTitlesEnabled: enabled };

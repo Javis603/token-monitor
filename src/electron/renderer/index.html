@@ -46,7 +46,8 @@
             <span class="settings-section-meta"><span id="generalSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
           </button>
           <div id="generalSettingsDetails" class="settings-section-details hidden">
-            <div class="settings-subgroup settings-language-group">
+            <div class="settings-subgroup settings-page-card settings-general-preferences">
+              <div class="settings-group-header"><span data-i18n="settings.general.preferences">Preferences</span></div>
               <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.language.label">Interface language</span></span>
                 <select id="languageInput">
                   <option value="auto" data-i18n="settings.language.auto">Auto (system)</option>
@@ -59,10 +60,7 @@
                   <option value="es" data-i18n="settings.language.spanish">Español</option>
                 </select>
               </label>
-            </div>
-            <div id="startupGroup" class="settings-group settings-subgroup">
-              <div class="settings-group-header"><span data-i18n="settings.startup.title">Startup</span></div>
-              <label class="checkbox-label settings-item">
+              <label id="startupGroup" class="checkbox-label settings-item">
                 <span class="settings-item-text">
                   <span class="settings-item-title" data-i18n="settings.startup.startAtLogin">Start at login</span>
                 </span>
@@ -70,8 +68,21 @@
                 <span id="startupNote" class="settings-note settings-item-desc" data-i18n="settings.startup.available">Available in packaged builds.</span>
               </label>
             </div>
-            <div class="settings-subgroup maintenance-section app-update-settings">
+            <div class="settings-subgroup settings-page-card maintenance-section app-update-settings">
               <div class="settings-group-header maintenance-header"><span data-i18n="settings.appUpdate.title">App Updates</span><span data-i18n="settings.appUpdate.source">GitHub releases</span></div>
+              <div class="settings-item app-update-version-row">
+                <span class="settings-item-text">
+                  <span class="settings-item-heading app-update-version-heading">
+                    <strong id="appUpdateInstalled" class="app-update-installed">—</strong>
+                    <span id="appUpdateLatest" class="cursor-status-pill app-update-status-pill" data-i18n="settings.common.notChecked">Not checked</span>
+                  </span>
+                  <span id="appUpdateCheckedAt" class="settings-item-desc"></span>
+                </span>
+                <span class="settings-actions app-update-actions">
+                  <button id="appUpdateCheckButton" type="button" data-i18n="settings.appUpdate.check">Check for updates</button>
+                  <button id="appUpdateViewReleaseButton" type="button" class="hidden" data-i18n="settings.appUpdate.viewRelease">View release</button>
+                </span>
+              </div>
               <label id="automaticAppUpdatesRow" class="checkbox-label settings-item">
                 <span class="settings-item-text">
                   <span class="settings-item-title" data-i18n="settings.appUpdate.automatic">Download updates automatically</span>
@@ -79,14 +90,6 @@
                 <input id="automaticAppUpdatesInput" type="checkbox" aria-describedby="automaticAppUpdatesNote" />
                 <span id="automaticAppUpdatesNote" class="settings-note settings-item-desc" data-i18n="settings.appUpdate.automaticDescription">Download new versions in the background. You'll be prompted to restart when ready.</span>
               </label>
-              <div class="maintenance-version-grid app-update-version-grid">
-                <div class="maintenance-version-item"><span data-i18n="settings.appUpdate.installed">Installed</span><strong id="appUpdateInstalled">—</strong></div>
-                <div class="maintenance-version-item"><span data-i18n="settings.appUpdate.latest">Latest</span><strong id="appUpdateLatest" data-i18n="settings.common.notChecked">Not checked</strong></div>
-              </div>
-              <div class="settings-actions maintenance-actions">
-                <button id="appUpdateCheckButton" type="button" data-i18n="settings.appUpdate.check">Check for updates</button>
-                <button id="appUpdateViewReleaseButton" type="button" class="hidden" data-i18n="settings.appUpdate.viewRelease">View release</button>
-              </div>
               <div id="appUpdateNotes" class="app-update-notes hidden">
                 <button id="appUpdateNotesToggle" class="app-update-notes-toggle" type="button" aria-expanded="false" aria-controls="appUpdateNotesDetails">
                   <span class="settings-section-disclosure app-update-notes-disclosure" aria-hidden="true"></span>
@@ -100,7 +103,7 @@
               </div>
               <div id="appUpdateMessage" class="tokscale-message"></div>
             </div>
-            <div class="settings-subgroup">
+            <div class="settings-subgroup settings-page-card">
               <div class="settings-group-header"><span data-i18n="settings.integrations.title">Integrations</span></div>
               <label class="checkbox-label settings-item">
                 <span class="settings-item-text">
@@ -110,16 +113,23 @@
                 <span id="discordRpcDescription" class="settings-item-desc" data-i18n="settings.integrations.discordDescription">Show today's tokens, cost, and most-used AI tool in your Discord activity.</span>
               </label>
             </div>
-            <div id="advancedSettingsGroup" class="settings-subgroup advanced-settings">
+            <div id="advancedSettingsGroup" class="settings-subgroup settings-page-card advanced-settings">
               <button id="advancedSettingsToggle" class="settings-group-header advanced-settings-toggle" type="button" aria-expanded="false" aria-controls="advancedSettingsDetails">
                 <span data-i18n="settings.advanced.title">Advanced</span>
                 <span class="advanced-settings-meta">
-                  <span id="advancedSettingsSummary" class="settings-subgroup-summary" data-i18n="settings.advanced.summary">Maintenance &amp; config</span>
+                  <span id="advancedSettingsSummary" class="settings-subgroup-summary" data-i18n="settings.advanced.summary">Proxy &amp; config</span>
                   <span class="settings-section-disclosure" aria-hidden="true"></span>
                 </span>
               </button>
               <div id="advancedSettingsDetails" class="advanced-settings-details hidden" inert>
                 <div class="advanced-settings-body">
+                  <div id="networkProxyGroup" class="settings-group advanced-settings-block maintenance-panel">
+                    <div class="settings-group-header maintenance-header"><span data-i18n="settings.proxy.title">Network proxy</span><span id="networkProxySource"></span></div>
+                    <label><span data-i18n="settings.proxy.url">Proxy URL</span><input id="proxyUrlInput" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:7890" aria-describedby="networkProxyNote" /></label>
+                    <label><span data-i18n="settings.proxy.noProxy">Bypass proxy for</span><input id="noProxyInput" type="text" spellcheck="false" autocomplete="off" placeholder="example.com, .internal.net, 10.0.0.1:8080" data-i18n-placeholder="settings.proxy.noProxyPlaceholder" /></label>
+                    <p id="networkProxyNote" class="settings-note" data-i18n="settings.proxy.note">Used only for Token Monitor's own limit and account requests; sign-ins in your browser or a CLI are not affected. While set, it replaces HTTP(S)_PROXY and NO_PROXY for these requests, so list any hosts to bypass here; local addresses always stay direct. Leave empty to use the environment or system proxy.</p>
+                    <div id="proxyUrlError" class="hub-status error" role="alert" hidden></div>
+                  </div>
                   <div id="tokscaleGroup" class="settings-group advanced-settings-block maintenance-panel">
                     <div class="settings-group-header maintenance-header"><span>Tokscale</span><span data-i18n="settings.tokscale.source">Bundled CLI dependency</span></div>
                     <div class="maintenance-version-grid tokscale-version-grid">
@@ -127,13 +137,6 @@
                       <div id="tokscaleBundledBuildRow" class="maintenance-version-item hidden"><span data-i18n="settings.tokscale.bundledBuild">Bundled build</span><strong id="tokscaleBundledBuild"></strong></div>
                     </div>
                     <p class="settings-note"><span data-i18n="settings.tokscale.noteBefore">Token Monitor uses tokscale (MIT, open-source) to read token data.</span> <button id="openTokscaleLinkButton" type="button" class="inline-link" data-i18n="settings.tokscale.learnMore">Learn more</button></p>
-                  </div>
-                  <div id="networkProxyGroup" class="settings-group advanced-settings-block maintenance-panel">
-                    <div class="settings-group-header maintenance-header"><span data-i18n="settings.proxy.title">Network proxy</span><span id="networkProxySource"></span></div>
-                    <label><span data-i18n="settings.proxy.url">Proxy URL</span><input id="proxyUrlInput" type="text" spellcheck="false" autocomplete="off" placeholder="http://127.0.0.1:7890" aria-describedby="networkProxyNote" /></label>
-                    <label><span data-i18n="settings.proxy.noProxy">Bypass proxy for</span><input id="noProxyInput" type="text" spellcheck="false" autocomplete="off" placeholder="example.com, .internal.net, 10.0.0.1:8080" data-i18n-placeholder="settings.proxy.noProxyPlaceholder" /></label>
-                    <p id="networkProxyNote" class="settings-note" data-i18n="settings.proxy.note">Used only for Token Monitor's own limit and account requests; sign-ins in your browser or a CLI are not affected. While set, it replaces HTTP(S)_PROXY and NO_PROXY for these requests, so list any hosts to bypass here; local addresses always stay direct. Leave empty to use the environment or system proxy.</p>
-                    <div id="proxyUrlError" class="hub-status error" role="alert" hidden></div>
                   </div>
                   <div class="settings-group advanced-settings-block advanced-config-row">
                     <p class="settings-note"><span data-i18n="settings.advanced.note">Additional options are available in</span> <code>settings.json</code>.</p>
@@ -144,14 +147,26 @@
                 </div>
               </div>
             </div>
-            <div class="settings-subgroup about-settings">
-              <div class="settings-group-header"><span data-i18n="settings.about.title">About Token Monitor</span><span id="aboutVersion">—</span></div>
-              <p class="settings-note" data-i18n="settings.about.description">Open-source AI tool token usage monitor, licensed under MIT.</p>
+            <div class="settings-subgroup settings-page-card about-settings" role="group" aria-labelledby="aboutTitle">
+              <div class="about-settings-identity">
+                <img class="about-settings-icon" src="icons/app-icon.png" alt="" width="36" height="36" decoding="async" />
+                <span class="about-settings-name">
+                  <strong id="aboutTitle">Token Monitor</strong>
+                  <span id="aboutVersion">—</span>
+                </span>
+              </div>
+              <p class="settings-note" data-i18n="settings.about.description">One live dashboard for every AI coding tool, synced across every machine.</p>
+              <button id="openRepositoryButton" type="button" class="about-settings-star">
+                <span class="about-settings-star-label"><span class="about-settings-github-mark" aria-hidden="true"></span><span data-i18n="settings.about.star">Star on GitHub</span></span>
+                <span id="aboutStarCount" class="about-settings-star-count" hidden>
+                  <svg class="about-settings-star-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M11.525 2.295a.53.53 0 0 1 .95 0l2.31 4.679a2.123 2.123 0 0 0 1.595 1.16l5.166.756a.53.53 0 0 1 .294.904l-3.736 3.638a2.123 2.123 0 0 0-.611 1.878l.882 5.14a.53.53 0 0 1-.771.56l-4.618-2.428a2.122 2.122 0 0 0-1.973 0L6.396 21.01a.53.53 0 0 1-.77-.56l.881-5.139a2.122 2.122 0 0 0-.611-1.879L2.16 9.795a.53.53 0 0 1 .294-.906l5.165-.755a2.122 2.122 0 0 0 1.597-1.16z"/></svg>
+                  <span id="aboutStarCountValue" class="about-settings-star-value"></span>
+                </span>
+              </button>
               <div class="about-settings-links">
-                <button id="openRepositoryButton" type="button" class="inline-link" data-i18n="settings.about.repository">GitHub</button>
-                <button id="openWebsiteButton" type="button" class="inline-link" data-i18n="settings.about.website">Website</button>
-                <button id="reportIssueButton" type="button" class="inline-link" data-i18n="settings.about.reportIssue">Report an issue</button>
-                <button id="diagnosticToggleButton" type="button" class="inline-link" data-i18n="settings.about.diagnostics.toggle" aria-expanded="false" aria-controls="diagnosticDetails">Diagnostics</button>
+                <button id="openWebsiteButton" type="button" class="inline-link about-settings-link about-settings-link-website" data-i18n="settings.about.website">Website</button>
+                <button id="reportIssueButton" type="button" class="inline-link about-settings-link about-settings-link-issue" data-i18n="settings.about.reportIssue">Report an issue</button>
+                <button id="diagnosticToggleButton" type="button" class="inline-link about-settings-link about-settings-link-diagnostics" data-i18n="settings.about.diagnostics.toggle" aria-expanded="false" aria-controls="diagnosticDetails">Diagnostics</button>
               </div>
               <div id="diagnosticDetails" class="about-settings-diagnostics accordion-animated-container hidden" aria-hidden="true" inert>
                 <div class="accordion-animation-inner about-settings-diagnostics-inner">
@@ -1803,6 +1818,7 @@
     <script src="breakdownRenderPolicy.js"></script>
     <script src="statsRenderScheduler.js"></script>
     <script src="allTimeSessions.js"></script>
+    <script src="../../shared/statsDelta.js"></script>
     <script src="hubBuildPresentation.js"></script>
     <script src="../../shared/deviceKind.js"></script>
     <script src="selectControl.js"></script>

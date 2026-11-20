@@ -341,6 +341,7 @@ const state = { period: normalizeInitialViewValue(initialViewState.period, viewP
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.icloudStatus = null;
+state.repositoryStars = null;
 state.zedAccountExpanded = false;
 state.zedPendingCheckSince = 0;
 state.toolDetailMode = 'tokens';
@@ -558,6 +559,8 @@ Object.assign(els, {
   tokscaleBundledBuildRow: document.getElementById('tokscaleBundledBuildRow'),
   openTokscaleLinkButton: document.getElementById('openTokscaleLinkButton'),
   aboutVersion: document.getElementById('aboutVersion'),
+  aboutStarCount: document.getElementById('aboutStarCount'),
+  aboutStarCountValue: document.getElementById('aboutStarCountValue'),
   openRepositoryButton: document.getElementById('openRepositoryButton'),
   openWebsiteButton: document.getElementById('openWebsiteButton'),
   reportIssueButton: document.getElementById('reportIssueButton'),
@@ -570,6 +573,7 @@ Object.assign(els, {
   appUpdatePopoverBody: document.getElementById('appUpdatePopoverBody'),
   appUpdatePopoverDismiss: document.getElementById('appUpdatePopoverDismiss'),
   appUpdateInstalled: document.getElementById('appUpdateInstalled'),
+  appUpdateCheckedAt: document.getElementById('appUpdateCheckedAt'),
   automaticAppUpdatesRow: document.getElementById('automaticAppUpdatesRow'),
   automaticAppUpdatesInput: document.getElementById('automaticAppUpdatesInput'),
   automaticAppUpdatesNote: document.getElementById('automaticAppUpdatesNote'),
@@ -812,6 +816,7 @@ function applySettingsTranslations() {
   setThirdPartyAdapterFields();
   setSubscriptionFormMode();
   diagnosticsPanel?.render();
+  renderAboutStars();
 }
 
 let displaySettings = null;
@@ -842,6 +847,7 @@ function setSettingsSectionExpanded(section, expanded) {
   state.settingsSections[id] = next;
   applySettingsSectionDom(id, next);
   if (id === 'sync' && next) void syncContentForm?.refresh();
+  if (id === 'general' && next) void refreshAboutStars();
   if (id === 'plugins' && next) void pluginSettingsPanel?.refresh().then(renderSettingsSummaries);
 }
 
@@ -996,12 +1002,18 @@ function settingsSectionSummary(section) {
     return appearanceSummary();
   }
   if (section === 'general') {
-    const startup = state.appInfo?.loginItemSupported
-      ? (state.settings.startAtLogin ? t('settings.summary.on') : t('settings.summary.off'))
-      : t('settings.summary.unavailable');
-    return t('settings.summary.general', {
-      startup
-    });
+    // What is in effect, so the collapsed row answers "is it on?" without opening.
+    const autoUpdate = appUpdatePresentationApi.automaticAppUpdateControlState({
+      preferenceEnabled: state.settings.automaticAppUpdates,
+      updateState: state.appUpdate
+    }).checked;
+    const active = [
+      state.appInfo?.loginItemSupported && state.settings.startAtLogin ? t('settings.startup.startAtLogin') : '',
+      autoUpdate ? t('settings.summary.autoUpdate') : '',
+      String(state.settings.proxyUrl || '').trim() ? t('settings.summary.proxy') : ''
+    ].filter(Boolean);
+    if (active.length) return active.join(' · ');
+    return state.appInfo?.version ? `v${state.appInfo.version}` : '';
   }
   return '';
 }
@@ -1776,6 +1788,8 @@ function renderSettingsAppUpdateRow() {
   if (!s) {
     els.appUpdateInstalled.textContent = '—';
     els.appUpdateLatest.textContent = t('settings.common.notChecked');
+    els.appUpdateLatest.classList.remove('is-available');
+    els.appUpdateCheckedAt.textContent = '';
     els.appUpdateCheckButton.disabled = false;
     els.appUpdateCheckButton.textContent = t('settings.appUpdate.check');
     els.appUpdateViewReleaseButton.classList.add('hidden');
@@ -1787,12 +1801,23 @@ function renderSettingsAppUpdateRow() {
   els.appUpdateInstalled.textContent = `v${s.currentVersion}`;
   const presentation = appUpdatePresentationApi.appUpdateStatusPresentation(s);
   const displayVersion = presentation.displayVersion;
+  const available = Boolean(displayVersion && (s.hasUpdate || s.downloaded));
+  els.appUpdateLatest.classList.toggle('is-available', available);
+  els.appUpdateCheckedAt.textContent = s.lastCheckedAt && !s.lastError
+    ? t('settings.appUpdate.lastChecked', { age: compactAge(s.lastCheckedAt) })
+    : '';
   if (displayVersion) {
     const status = presentation.latestStatusKey ? t(presentation.latestStatusKey) : '';
-    els.appUpdateLatest.textContent = status
-      ? t('settings.appUpdate.latestWithStatus', { version: displayVersion, status })
-      : `v${displayVersion}`;
+    // Beside the installed version, "up to date" needs no second version number.
+    els.appUpdateLatest.textContent = presentation.latestStatusKey === 'settings.appUpdate.upToDateShort'
+      ? status
+      : status
+        ? t('settings.appUpdate.latestWithStatus', { version: displayVersion, status })
+        : available
+          ? t('settings.appUpdate.availableShort', { version: displayVersion })
+          : `${t('settings.appUpdate.latest')} v${displayVersion}`;
     const actionMode = appUpdatePresentationApi.appUpdateActionMode(s);
+    els.appUpdateViewReleaseButton.classList.toggle('app-update-primary', actionMode === 'download' || actionMode === 'install');
     els.appUpdateViewReleaseButton.classList.toggle('hidden', !actionMode);
     els.appUpdateViewReleaseButton.disabled = Boolean(s.installBusy);
     els.appUpdateViewReleaseButton.textContent = actionMode === 'install'
@@ -1915,6 +1940,136 @@ function renderAutomaticAppUpdateControl() {
   }
 }
 
+// The About card's GitHub button shows the repository's star count beside its
+// label. Main caches the number, so this asks each time General opens and keeps
+// the button label-only until a count arrives. The first time the button is
+// actually on screen after launch, it breathes and the count rolls up, once.
+let aboutStarsRequest = null;
+let aboutStarsIntroPlayed = false;
+let aboutStarsIntroObserver = null;
+function formatAboutStars(stars) {
+  const locale = currentLocale();
+  return stars < 10_000
+    ? new Intl.NumberFormat(locale).format(stars)
+    : new Intl.NumberFormat(locale, { notation: 'compact', maximumFractionDigits: 1 }).format(stars);
+}
+function renderAboutStarOdometer(text) {
+  const reel = document.createElement('span');
+  reel.className = 'about-star-odometer';
+  reel.setAttribute('aria-hidden', 'true');
+  const columns = [];
+  for (const char of text) {
+    if (!/\d/.test(char)) {
+      reel.append(char);
+      continue;
+    }
+    const column = document.createElement('span');
+    column.className = 'about-star-odometer-digit';
+    for (let digit = 0; digit <= 9; digit += 1) {
+      const cell = document.createElement('span');
+      cell.textContent = String(digit);
+      column.append(cell);
+    }
+    reel.append(column);
+    columns.push([column, Number(char)]);
+  }
+  const label = document.createElement('span');
+  label.className = 'about-star-odometer-text';
+  label.textContent = text;
+  els.aboutStarCountValue.replaceChildren(reel, label);
+  // The columns rest at fractional offsets (n × 1.2em), and text under such a
+  // transform rounds to a different device pixel per digit, so once the last
+  // column stops the reel is swapped for the plain number.
+  const last = columns.at(-1)?.[0];
+  const settle = (event) => {
+    if (event.target !== last || event.propertyName !== 'transform') return;
+    last.removeEventListener('transitionend', settle);
+    last.removeEventListener('transitioncancel', settle);
+    if (els.aboutStarCountValue.contains(reel)) els.aboutStarCountValue.textContent = text;
+  };
+  last?.addEventListener('transitionend', settle);
+  last?.addEventListener('transitioncancel', settle);
+  // Two frames, so every column is laid out at 0 before it slides.
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    columns.forEach(([column, digit], index) => {
+      column.style.transitionDelay = `${index * 90}ms`;
+      column.style.transform = `translateY(calc(${-digit} * 1.2em))`;
+    });
+  }));
+}
+function renderAboutStars({ roll = false } = {}) {
+  const stars = state.repositoryStars;
+  const known = Number.isSafeInteger(stars) && stars >= 0;
+  els.aboutStarCount.hidden = !known;
+  const text = known ? formatAboutStars(stars) : '';
+  if (!roll && els.aboutStarCountValue.dataset.value === text) return;
+  els.aboutStarCountValue.dataset.value = text;
+  if (roll && known) renderAboutStarOdometer(text);
+  else els.aboutStarCountValue.textContent = text;
+}
+function playAboutStarsIntro() {
+  aboutStarsIntroPlayed = true;
+  if (prefersReducedMotion()) return;
+  const button = els.openRepositoryButton;
+  const settle = (event) => {
+    if (event.target !== button || event.animationName !== 'about-star-breathe') return;
+    button.classList.remove('is-arriving');
+    button.removeEventListener('animationend', settle);
+  };
+  button.addEventListener('animationend', settle);
+  button.classList.add('is-arriving');
+  renderAboutStars({ roll: true });
+}
+// The About card sits below the fold when General opens, so the intro waits
+// until the button scrolls into view rather than playing unseen.
+function scheduleAboutStarsIntro() {
+  if (aboutStarsIntroPlayed || aboutStarsIntroObserver || typeof IntersectionObserver !== 'function') return;
+  aboutStarsIntroObserver = new IntersectionObserver((entries) => {
+    // isIntersecting is also true for a partly clipped button on the first report.
+    if (!entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 1)) return;
+    aboutStarsIntroObserver.disconnect();
+    aboutStarsIntroObserver = null;
+    playAboutStarsIntro();
+  }, { threshold: 1 });
+  aboutStarsIntroObserver.observe(els.openRepositoryButton);
+}
+function refreshAboutStars() {
+  aboutStarsRequest ||= Promise.resolve(window.tokenMonitor.getRepositoryStars?.())
+    .then((stars) => {
+      if (Number.isSafeInteger(stars)) state.repositoryStars = stars;
+    }, () => {})
+    .finally(() => {
+      aboutStarsRequest = null;
+      renderAboutStars();
+      // Only a real count is worth an intro; a failed lookup leaves it for a retry.
+      if (Number.isSafeInteger(state.repositoryStars)) scheduleAboutStarsIntro();
+    });
+  return aboutStarsRequest;
+}
+// Feedback for the click that opens the repository: the star pops and, with
+// motion allowed, throws a ring of sparks.
+function celebrateAboutStar() {
+  const button = els.openRepositoryButton;
+  button.classList.remove('is-popping');
+  void button.offsetWidth;
+  button.classList.add('is-popping');
+  setTimeout(() => button.classList.remove('is-popping'), 600);
+  if (prefersReducedMotion() || els.aboutStarCount.hidden) return;
+  const icon = els.aboutStarCount.querySelector('.about-settings-star-icon').getBoundingClientRect();
+  const box = button.getBoundingClientRect();
+  for (let index = 0; index < 8; index += 1) {
+    const spark = document.createElement('span');
+    const angle = (Math.PI * 2 * index) / 8;
+    const distance = 14 + (index % 3) * 3;
+    spark.className = 'about-settings-star-spark';
+    spark.style.left = `${icon.left - box.left + icon.width / 2 - 2}px`;
+    spark.style.top = `${icon.top - box.top + icon.height / 2 - 2}px`;
+    spark.style.setProperty('--spark-x', `${Math.cos(angle) * distance}px`);
+    spark.style.setProperty('--spark-y', `${Math.sin(angle) * distance}px`);
+    spark.addEventListener('animationend', () => spark.remove(), { once: true });
+    button.append(spark);
+  }
+}
 function compactAge(value) {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) return '';
@@ -6301,6 +6456,9 @@ function openSettingsPanel(section) {
   resetMainViewSettings();
   syncSettingsForm();
   ensureServiceStatusTicker();
+  // General stays expanded across closes, so its expand hook alone would leave
+  // the count unrefreshed; main's cache decides whether this goes to GitHub.
+  if (state.settingsSections?.general) void refreshAboutStars();
   if (section === 'notch') {
     setSettingsSectionExpanded('window', true);
     displaySettings?.open('notch');
@@ -14632,6 +14790,7 @@ els.settingsButton.addEventListener('click', (event) => {
   els.shell.style.transform = 'translateZ(0)';
   requestAnimationFrame(() => { els.shell.style.transform = ''; });
   ensureServiceStatusTicker();
+  if (settingsOpen && state.settingsSections?.general) void refreshAboutStars();
 });
 els.saveSettingsButton.addEventListener('click', async () => {
   if (hubSaveBusy || !hubDraftHasChanges()) return;
@@ -15556,7 +15715,10 @@ els.resetZoomButton.addEventListener('click', async () => {
 });
 els.openConfigButton.addEventListener('click', () => window.tokenMonitor.openUserData());
 els.openTokscaleLinkButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.('https://github.com/junhoyeo/tokscale'));
-els.openRepositoryButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_REPOSITORY_URL));
+els.openRepositoryButton?.addEventListener('click', () => {
+  celebrateAboutStar();
+  window.tokenMonitor.openExternal?.(TOKEN_MONITOR_REPOSITORY_URL);
+});
 els.openWebsiteButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_WEBSITE_URL));
 els.reportIssueButton?.addEventListener('click', () => window.tokenMonitor.openExternal?.(TOKEN_MONITOR_ISSUES_URL));
 els.refreshButton.addEventListener('click', () => {
@@ -15878,12 +16040,33 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     return;
   }
   const wasStreamConnected = state.streamConnected;
+  let incomingStats = null;
   if (payload.event === 'status') {
     state.streamConnected = Boolean(payload.data?.connected);
     if (payload.data?.mode) state.mode = payload.data.mode;
     if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
     state.streamFailure = state.streamConnected ? null : (payload.data?.reason ? { reason: payload.data.reason, detail: payload.data.detail ?? null } : state.streamFailure);
-  } else if (payload.data?.stats) {
+  } else {
+    if (payload.data?.stats) {
+      incomingStats = payload.data.stats;
+      state.statsDeltaResyncPending = null;
+    } else if (payload.data?.statsDelta) {
+      incomingStats = window.TokenMonitorStatsDelta?.applyStatsDelta(state.stats, payload.data.statsDelta) || null;
+      if (!incomingStats) {
+        // Recover on the stats push channel, where a full snapshot arrives
+        // before any delta based on it. The invoke reply carries no stats.
+        if (!state.statsDeltaResyncPending) {
+          const request = window.tokenMonitor.getStats({ deltaResync: true }).catch(() => {});
+          state.statsDeltaResyncPending = request;
+          void request.finally(() => {
+            if (state.statsDeltaResyncPending === request) state.statsDeltaResyncPending = null;
+          });
+        }
+        return;
+      }
+    } else {
+      return;
+    }
     // Local overlays and adopted reads update data independently of the
     // Hub SSE transport. Preserve its current Offline/error state until a
     // real stream status or remote stats event proves the connection changed.
@@ -15894,7 +16077,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     if (payload.data?.mode) state.mode = payload.data.mode;
     if (payload.data?.icloud) state.icloudStatus = payload.data.icloud;
     allTimeSessions.invalidate();
-    state.stats = sessionStatsForDisplay(allTimeSessions.attach(payload.data.stats));
+    state.stats = sessionStatsForDisplay(allTimeSessions.attach(incomingStats));
     observeLiveTokenRate(state.stats);
     observeDisplayLiveTokenRates(state.stats);
     applyCodexActiveAccountFromStats();
@@ -15902,8 +16085,6 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     // AGENTS.md collector notes), so only the final push can retire the
     // "just turned trends on" loading state without a flash back to empty.
     if (payload.data?.reason !== 'progress') state.trendsActivating = false;
-  } else {
-    return;
   }
   if (payload.event === 'status') {
     if (isRendererWindowHidden()) statsRenderScheduler.request();
@@ -15913,7 +16094,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     void refreshHubBuildStatus();
     void syncContentForm?.refresh();
   }
-  if (payload.data?.stats) {
+  if (incomingStats) {
     if (fixedPeriodRangesApi.isDerived(state.period)) {
       // Keep the currently rendered range stable while a new History revision is
       // fetched; repaint once with the coherent snapshot instead of flashing an
