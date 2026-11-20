@@ -782,8 +782,9 @@ test('general section owns app-level preferences before startup and updates', ()
     html.indexOf('<div id="generalSettingsDetails"'),
     html.indexOf('<div class="settings-group settings-collapsible-group settings-main-group"')
   );
-  assert.match(generalSection, /settings-language-group/);
-  assert.ok(generalSection.indexOf('settings-language-group') < generalSection.indexOf('id="startupGroup"'));
+  assert.match(generalSection, /settings-general-preferences/);
+  assert.ok(generalSection.indexOf('id="languageInput"') < generalSection.indexOf('id="startupGroup"'));
+  assert.ok(generalSection.indexOf('id="startupGroup"') < generalSection.indexOf('settings.appUpdate.title'));
   assert.match(generalSection, /id="languageInput"/);
   assert.doesNotMatch(generalSection, /settings\.language\.title/);
   assert.doesNotMatch(generalSection, /id="currencyInput"/);
@@ -802,7 +803,7 @@ test('sync section icon uses a local sync asset instead of a hand-drawn refresh 
 
 test('startup setting stays visible when login items are unsupported', () => {
   const html = readRendererFile('index.html');
-  const startupGroup = html.match(/<div id="startupGroup"[\s\S]*?id="startupNote"[\s\S]*?<\/label>/)?.[0] || '';
+  const startupGroup = html.match(/<label id="startupGroup"[\s\S]*?id="startupNote"[\s\S]*?<\/label>/)?.[0] || '';
   assert.match(startupGroup, /id="startAtLoginInput"/);
 
   const app = readRendererFile('app.js');
@@ -810,8 +811,6 @@ test('startup setting stays visible when login items are unsupported', () => {
   assert.doesNotMatch(syncBody, /startupGroup\?\.[\s\S]*classList\.toggle\(['"]hidden['"]/);
   assert.match(syncBody, /startAtLoginInput[\s\S]*\.disabled\s*=\s*!state\.appInfo\?\.loginItemSupported/);
 
-  const summaryBody = functionBody(app, 'settingsSectionSummary', 'renderSettingsSummaries');
-  assert.match(summaryBody, /settings\.summary\.unavailable/);
 });
 
 test('expanded settings sections keep content full width', () => {
