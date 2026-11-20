@@ -9,30 +9,30 @@ const UPDATES_TAIL_BUDGETS = [64 * 1024, 1024 * 1024];
 
 /** @typedef {{ contextTokens: number, contextWindow: number }} SessionContext */
 
-/** @type {Map<string, { stamp: string, contextTokens: number }>} */
+/** @type {Map<string, { stamp: string, contextTokens: number | null }>} */
 const updatesContextCache = new Map();
 
 /**
  * `updates.jsonl` grows to tens of megabytes; inspect only bounded trailing slices.
  *
  * @param {string} updatesPath
- * @param {Map<string, { stamp: string, contextTokens: number }>} [cache]
- * @returns {number}
+ * @param {Map<string, { stamp: string, contextTokens: number | null }>} [cache]
+ * @returns {number | null}
  */
 function readGrokUpdatesTokens(updatesPath, cache = updatesContextCache) {
   let stat;
   try {
     stat = fs.statSync(updatesPath);
   } catch (_) {
-    return 0;
+    return null;
   }
-  if (!stat.size) return 0;
+  if (!stat.size) return null;
   const stamp = `${stat.size}:${stat.mtimeMs}:${stat.ino ?? ''}`;
   const cached = cache.get(updatesPath);
   if (cached?.stamp === stamp) return cached.contextTokens;
 
   let fd;
-  let tokens = 0;
+  let tokens = null;
   try {
     fd = fs.openSync(updatesPath, 'r');
     const fileSize = fs.fstatSync(fd).size;
@@ -58,13 +58,19 @@ function readGrokUpdatesTokens(updatesPath, cache = updatesContextCache) {
         /** @type {any} */
         let parsed;
         try { parsed = JSON.parse(line); } catch (_) { continue; }
+        const update = parsed?.params?.update;
+        const compacted = update?.sessionUpdate === 'auto_compact_completed' ? update.tokens_after : null;
+        if (Number.isSafeInteger(compacted) && compacted >= 0) {
+          tokens = compacted;
+          break;
+        }
         const total = parsed?.params?._meta?.totalTokens;
-        if (typeof total === 'number' && Number.isFinite(total) && total > 0) {
-          tokens = Math.round(total);
+        if (Number.isSafeInteger(total) && total > 0) {
+          tokens = total;
           break;
         }
       }
-      if (tokens > 0 || start === 0) break;
+      if (tokens !== null || start === 0) break;
     }
     if (fileSize === stat.size) {
       if (cache.size >= 512 && !cache.has(updatesPath)) {
@@ -75,7 +81,7 @@ function readGrokUpdatesTokens(updatesPath, cache = updatesContextCache) {
     }
     return tokens;
   } catch (_) {
-    return 0;
+    return null;
   } finally {
     if (fd !== undefined) {
       try { fs.closeSync(fd); } catch (_) {}
@@ -90,16 +96,30 @@ function readGrokUpdatesTokens(updatesPath, cache = updatesContextCache) {
  * @returns {SessionContext | null}
  */
 function readGrokSessionContext(sessionDir, contextWindowValue, deps = {}) {
-  const probe = normalizeSessionContext({ contextTokens: 1, contextWindow: contextWindowValue });
-  if (!probe) return null;
-  const contextTokens = readGrokUpdatesTokens(
+  const transcriptTokens = readGrokUpdatesTokens(
     path.join(sessionDir, 'updates.jsonl'),
     deps.grokUpdatesCache
   );
-  return normalizeSessionContext({
-    contextTokens,
-    contextWindow: probe.contextWindow
+  // A completed compaction can report zero. An earlier signals snapshot must
+  // not revive the previous reading in that case.
+  if (transcriptTokens === 0) return { contextTokens: 0, contextWindow: 0 };
+  const transcriptContext = normalizeSessionContext({
+    contextTokens: transcriptTokens,
+    contextWindow: contextWindowValue
   });
+  if (transcriptContext) return transcriptContext;
+
+  // Signals can lag the transcript across compaction. Use them to supply a
+  // missing window, or fall back to the snapshot pair when there is no sample.
+  try {
+    const signals = JSON.parse(fs.readFileSync(path.join(sessionDir, 'signals.json'), 'utf8'));
+    return normalizeSessionContext({
+      contextTokens: transcriptTokens ?? signals?.contextTokensUsed,
+      contextWindow: signals?.contextWindowTokens
+    });
+  } catch (_) {
+    return null;
+  }
 }
 
 module.exports = { readGrokSessionContext };
