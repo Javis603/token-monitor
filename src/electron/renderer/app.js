@@ -337,7 +337,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) || (allowed === viewBreakdownValues && pluginPlacementsApi.isHomeToken(raw)) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, trendsActivating: false, mainSettingsView: 'home', homeLimitProvidersOpen: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.icloudStatus = null;
@@ -388,8 +388,6 @@ state.sessionSearchOpen = false;
 state.sessionSearchQuery = '';
 state.sessionRowsCache = null;
 let directBreakdownOverride = null;
-state.projectSettingsExpanded = false;
-state.sessionSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', tokenNumberAnimation: 'roll', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
@@ -429,8 +427,7 @@ Object.assign(els, {
   projectBreakdownFooterModels: document.getElementById('projectBreakdownFooterModels'),
   monthPeriodMenu: document.getElementById('monthPeriodMenu'),
   monthPeriodTab: document.getElementById('monthPeriodTab'),
-  periodMonthModeInput: document.getElementById('periodMonthModeInput'),
-  modelRankingMetricInputs: Array.from(document.querySelectorAll('input[name="modelRankingMetric"]'))
+  periodMonthModeInput: document.getElementById('periodMonthModeInput')
 });
 Object.assign(els, {
   appTitleMark: document.querySelector('.app-title-mark'),
@@ -604,6 +601,9 @@ Object.assign(els, {
   resetViewDisplayOrderButton: document.getElementById('resetViewDisplayOrderButton'),
   showAllViewsButton: document.getElementById('showAllViewsButton'),
   viewDisplayList: document.getElementById('viewDisplayList'),
+  hiddenViewGroup: document.getElementById('hiddenViewGroup'),
+  hiddenViewList: document.getElementById('hiddenViewList'),
+  mainViewInspector: document.getElementById('mainViewInspector'),
   syncSettingsSummary: document.getElementById('syncSettingsSummary'),
   toolsSettingsSummary: document.getElementById('toolsSettingsSummary'),
   limitsSettingsSummary: document.getElementById('limitsSettingsSummary'),
@@ -6247,11 +6247,12 @@ function openHomeSettings() {
   els.shell.classList.add('settings-open');
   els.shell.style.transform = 'translateZ(0)';
   setSettingsSectionExpanded('main', true);
-  state.homeSettingsExpanded = true;
+  state.mainSettingsView = 'home';
+  state.homeLimitProvidersOpen = false;
   syncSettingsForm();
   ensureServiceStatusTicker();
   requestAnimationFrame(() => {
-    document.getElementById('homeSettingsContainer')?.scrollIntoView({ block: 'nearest' });
+    els.mainViewInspector?.scrollIntoView({ block: 'nearest' });
   });
 }
 
@@ -6262,11 +6263,12 @@ function openTrendSettings() {
   els.shell.classList.add('settings-open');
   els.shell.style.transform = 'translateZ(0)';
   setSettingsSectionExpanded('main', true);
-  state.trendSettingsExpanded = true;
+  state.mainSettingsView = 'trends';
+  state.homeLimitProvidersOpen = false;
   syncSettingsForm();
   ensureServiceStatusTicker();
   requestAnimationFrame(() => {
-    document.getElementById('trendSettingsContainer')?.scrollIntoView({ block: 'nearest' });
+    els.mainViewInspector?.scrollIntoView({ block: 'nearest' });
   });
 }
 
@@ -6280,6 +6282,11 @@ function resetSettingsListSearch() {
   if (els.limitProviderSearchInput) els.limitProviderSearchInput.value = '';
 }
 
+function resetMainViewSettings() {
+  state.mainSettingsView = 'home';
+  state.homeLimitProvidersOpen = false;
+}
+
 function openSettingsPanel(section) {
   if (!els.settingsPanel) return;
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
@@ -6287,6 +6294,7 @@ function openSettingsPanel(section) {
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   syncPluginLimitsDemand();
+  resetMainViewSettings();
   syncSettingsForm();
   ensureServiceStatusTicker();
   if (section === 'notch') {
@@ -10360,8 +10368,6 @@ function syncSettingsForm() {
     els.periodMonthModeInput.value = fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
   }
   if (els.currencyInput) els.currencyInput.value = currentCurrency();
-  const modelRankingMetric = usageAttributionRowsApi.normalizeRankingMetric(state.settings?.modelRankingMetric);
-  for (const input of els.modelRankingMetricInputs || []) input.checked = input.value === modelRankingMetric;
   syncCurrencyRateControls();
   syncNetworkProxyControls();
   syncHubDraftFields();
@@ -10527,6 +10533,7 @@ function disabledViewIds() {
   const ids = [];
   if (state.settings?.historyEnabled === false) ids.push('trends');
   if (state.settings?.projectsEnabled === false) ids.push('project');
+  if (!limitViewAvailable()) ids.push('limits');
   return ids;
 }
 
@@ -10596,11 +10603,7 @@ function applyPreferenceOrder(kind, order) {
     const row = rowsById.get(id);
     if (!row) continue;
     list.insertBefore(row, tail);
-    const companionId = kind === 'view'
-      ? ({ home: 'homeSettingsContainer', limits: 'limitsViewSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', session: 'sessionSettingsContainer', status: 'serviceProvidersContainer' })[id]
-      : kind === 'homeModule'
-        ? HOME_MODULE_SUBGROUPS[id]?.[1]
-        : '';
+    const companionId = kind === 'homeModule' ? HOME_MODULE_SUBGROUPS[id]?.[1] : '';
     const companion = companionId ? document.getElementById(companionId) : null;
     if (companion) list.appendChild(companion);
   }
@@ -10628,15 +10631,6 @@ function createPreferenceOrderHandle({ kind, id, label, count }) {
   return handle;
 }
 
-const VIEW_PREFERENCE_SUBGROUPS = {
-  limits: ['limitsViewSettingsExpanded', 'limitsViewSettingsContainer'],
-  home: ['homeSettingsExpanded', 'homeSettingsContainer'],
-  trends: ['trendSettingsExpanded', 'trendSettingsContainer'],
-  project: ['projectSettingsExpanded', 'projectSettingsContainer'],
-  session: ['sessionSettingsExpanded', 'sessionSettingsContainer'],
-  status: ['serviceProvidersExpanded', 'serviceProvidersContainer']
-};
-
 const HOME_MODULE_SUBGROUPS = {
   limits: ['homeLimitSettingsExpanded', 'homeLimitProviderContainer'],
   trends: ['homeActivitySettingsExpanded', 'homeActivitySettingsContainer'],
@@ -10660,10 +10654,14 @@ function setPreferenceSubgroupsExpanded(definitions, rowSelector, value) {
     const open = expanded.has(id);
     state[stateKey] = open;
     const row = Array.from(document.querySelectorAll(rowSelector)).find((candidate) => candidate.dataset[dataKey] === id);
-    const toggle = row?.querySelector('.view-subgroup-toggle');
+    const toggle = row?.querySelector('.view-subgroup-toggle, .home-module-disclosure');
     toggle?.classList.toggle('is-expanded', open);
     toggle?.setAttribute('aria-expanded', String(open));
-    document.getElementById(containerId)?.classList.toggle('hidden', !open);
+    const container = document.getElementById(containerId);
+    if (container) {
+      container.inert = !open;
+      container.classList.toggle('hidden', !open);
+    }
   }
 }
 
@@ -10672,10 +10670,6 @@ function togglePreferenceSubgroup(definitions, rowSelector, id) {
   if (expanded.has(id)) expanded.delete(id);
   else expanded.add(id);
   setPreferenceSubgroupsExpanded(definitions, rowSelector, Array.from(expanded).join(','));
-}
-
-function setViewPreferenceExpanded(value) {
-  setPreferenceSubgroupsExpanded(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', value);
 }
 
 function setHomeModulePreferenceExpanded(value) {
@@ -10704,6 +10698,11 @@ function createMainPreferenceRowDrag({ kind, rowSelector, idKey, settingKey, get
       // Inactive plugin placements are absent from the rendered Home rows.
       // Refill only visible slots so a drag cannot silently remove a placement.
       let merged = order;
+      // Hidden views are not rendered in the ordered list but keep their slots.
+      if (kind === 'view') {
+        const { order: savedOrder, shown } = shownViewDisplayOrder();
+        merged = settingsListFilterApi.mergeSubsetOrder(savedOrder, order.filter((id) => shown.includes(id)));
+      }
       if (kind === 'homeModule') {
         const visible = new Set(order);
         let index = 0;
@@ -10723,9 +10722,7 @@ const viewPreferenceRowDrag = createMainPreferenceRowDrag({
   kind: 'view',
   rowSelector: '.view-preference-row[data-view]',
   idKey: 'view',
-  settingKey: 'viewDisplayOrder',
-  getExpanded: () => expandedPreferenceSubgroups(VIEW_PREFERENCE_SUBGROUPS),
-  setExpanded: setViewPreferenceExpanded
+  settingKey: 'viewDisplayOrder'
 });
 
 const homeModulePreferenceRowDrag = createMainPreferenceRowDrag({
@@ -10788,216 +10785,178 @@ const limitProviderRowDrag = rowDragControllerApi.createRowDragController({
   requestRender: () => renderLimitProviderCheckboxes()
 });
 
+// Main Screen settings are a master-detail pair. The nav lists the views in
+// switcher order, with views kept out of the switcher in their own group below;
+// the inspector beside it holds the selected view's settings. The selection is
+// UI state for this visit: opening the panel starts on Home.
+const MAIN_VIEW_SETTINGS = {
+  home: renderHomeSettingsList,
+  limits: renderLimitsViewSettingsList,
+  model: renderModelViewSettingsList,
+  project: renderProjectSettingsList,
+  session: renderSessionSettingsList,
+  trends: renderTrendSettingsList,
+  status: renderServiceProviderList
+};
+
+function onMainViewVisibilityToggle(id) {
+  if (id === 'trends') return onTrendVisibilityToggle();
+  if (id === 'project') return onProjectVisibilityToggle();
+  return onViewVisibilityToggle(id);
+}
+
+function selectMainSettingsView(id) {
+  if (state.mainSettingsView !== id || state.homeLimitProvidersOpen) {
+    state.mainSettingsView = id;
+    state.homeLimitProvidersOpen = false;
+    renderViewPreferences();
+  }
+  els.settingsPanel?.querySelector(`.main-view-tab[data-view="${id}"]`)?.focus({ preventScroll: true });
+}
+
+function createMainViewRow(view, { selected, disabled, orderable, count }) {
+  const id = view.id;
+  const label = viewLabel(view);
+  const row = document.createElement('div');
+  row.className = 'view-preference-row';
+  row.dataset.view = id;
+  row.classList.toggle('is-current', selected);
+  row.classList.toggle('is-hidden', !orderable);
+  row.classList.toggle('is-disabled', disabled);
+  const tab = document.createElement('button');
+  tab.type = 'button';
+  tab.className = 'main-view-tab';
+  tab.dataset.view = id;
+  tab.setAttribute('aria-controls', 'mainViewInspector');
+  if (selected) tab.setAttribute('aria-current', 'true');
+  const name = document.createElement('span');
+  name.className = 'tool-preference-name';
+  name.textContent = label;
+  tab.append(viewSwitcherIcon(id), name);
+  tab.addEventListener('click', () => selectMainSettingsView(id));
+  row.append(tab);
+  if (orderable) {
+    row.append(createPreferenceOrderHandle({ kind: 'view', id, label, count }));
+    row.addEventListener('pointerdown', (event) => viewPreferenceRowDrag.startRowDrag(event, id));
+  } else if (id !== 'limits' || !disabled) {
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'main-view-add';
+    add.setAttribute('aria-label', t('settings.views.showView', { name: label }));
+    add.addEventListener('click', () => void onMainViewVisibilityToggle(id));
+    row.append(add);
+  }
+  return row;
+}
+
 function renderViewPreferences() {
   if (!els.viewDisplayList) return;
   // Every list under Main Screen shares this render path. A settings or stats
   // repaint during a drag is held until the controller lands or aborts.
   if (deferMainPreferenceRender()) return;
   const hidden = hiddenViewSet();
-  const orderValue = effectiveViewDisplayOrderValue();
-  const views = viewDisplayPreferencesApi.orderedViews(VIEW_DISPLAY_OPTIONS, orderValue);
-  const hasCustomOrder = viewDisplayPreferencesApi.hasCustomViewDisplayOrder(state.settings?.viewDisplayOrder);
-  const hasHiddenViews = hidden.size > 0;
-  if (els.resetViewDisplayOrderButton) els.resetViewDisplayOrderButton.disabled = !hasCustomOrder;
-  if (els.showAllViewsButton) els.showAllViewsButton.disabled = !hasHiddenViews;
-  els.viewDisplayList.replaceChildren();
   const disabled = new Set(disabledViewIds());
-  const visibleCount = viewDisplayPreferencesApi.visibleViewCount({
-    views,
-    hiddenValue: state.settings?.hiddenViews,
-    disabledIds: [...disabled]
+  const views = viewDisplayPreferencesApi.orderedViews(VIEW_DISPLAY_OPTIONS, effectiveViewDisplayOrderValue());
+  const hasCustomOrder = viewDisplayPreferencesApi.hasCustomViewDisplayOrder(state.settings?.viewDisplayOrder);
+  if (els.resetViewDisplayOrderButton) els.resetViewDisplayOrderButton.disabled = !hasCustomOrder;
+  if (els.showAllViewsButton) els.showAllViewsButton.disabled = hidden.size === 0;
+  const shownIds = new Set(shownViewDisplayOrder().shown);
+  if (!views.some(({ id }) => id === state.mainSettingsView)) state.mainSettingsView = 'home';
+  const shown = views.filter(({ id }) => shownIds.has(id));
+  const off = views.filter(({ id }) => !shownIds.has(id));
+  const row = (view, orderable) => createMainViewRow(view, {
+    selected: view.id === state.mainSettingsView,
+    disabled: disabled.has(view.id),
+    orderable,
+    count: shown.length
   });
-  for (const view of views) {
-    const id = view.id;
-    const label = viewLabel(view);
-    const isHidden = hidden.has(id);
-    const isDisabled = disabled.has(id);
-    const isEffectivelyHidden = isHidden || isDisabled;
-    const row = document.createElement('div');
-    row.className = 'view-preference-row';
-    row.dataset.view = id;
-    row.classList.toggle('is-hidden', isEffectivelyHidden);
-    row.classList.toggle('is-disabled', isDisabled);
-    const name = document.createElement('div');
-    name.className = 'tool-preference-name';
-    name.textContent = label;
-    const visibility = document.createElement('button');
-    visibility.type = 'button';
-    visibility.className = `tool-visibility-button${isEffectivelyHidden ? ' is-hidden' : ''}`;
-    visibility.dataset.view = id;
-    visibility.setAttribute('aria-label', t(isEffectivelyHidden ? 'settings.views.showView' : 'settings.views.hideView', { name: label }));
-    visibility.setAttribute('aria-pressed', String(!isEffectivelyHidden));
-    visibility.disabled = !isEffectivelyHidden && visibleCount <= 1;
-    visibility.addEventListener('click', () => {
-      if (id === 'trends') return onTrendVisibilityToggle();
-      if (id === 'project') return onProjectVisibilityToggle();
-      return onViewVisibilityToggle(id);
-    });
-    const handle = createPreferenceOrderHandle({ kind: 'view', id, label, count: views.length });
-    const actions = document.createElement('div');
-    actions.className = 'tool-preference-actions';
-    actions.append(visibility, handle);
-    row.append(name, actions);
-    row.addEventListener('pointerdown', (event) => viewPreferenceRowDrag.startRowDrag(event, id));
-    els.viewDisplayList.appendChild(row);
-    if (id === 'limits') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.limitsViewSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('settings.views.configureLimits', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.limitsViewSettingsExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, visibility);
-
-      const listContainer = document.createElement('div');
-      listContainer.id = 'limitsViewSettingsContainer';
-      listContainer.className = `accordion-animated-container${state.limitsViewSettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderLimitsViewSettingsList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
-    if (id === 'home') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.homeSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('settings.views.configureHome', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.homeSettingsExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, visibility);
-
-      const listContainer = document.createElement('div');
-      listContainer.id = 'homeSettingsContainer';
-      listContainer.className = `accordion-animated-container${state.homeSettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderHomeSettingsList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
-    if (id === 'trends') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.trendSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('settings.views.configureTrend', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.trendSettingsExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, visibility);
-      
-      const listContainer = document.createElement('div');
-      listContainer.id = 'trendSettingsContainer';
-      listContainer.className = `accordion-animated-container${state.trendSettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderTrendSettingsList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
-    if (id === 'project') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.projectSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('settings.views.configureProject', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.projectSettingsExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, visibility);
-
-      const listContainer = document.createElement('div');
-      listContainer.id = 'projectSettingsContainer';
-      listContainer.className = `accordion-animated-container${state.projectSettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderProjectSettingsList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
-    if (id === 'session') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.sessionSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('settings.views.configureSession', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.sessionSettingsExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, visibility);
-
-      const listContainer = document.createElement('div');
-      listContainer.id = 'sessionSettingsContainer';
-      listContainer.className = `accordion-animated-container${state.sessionSettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderSessionSettingsList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
-    if (id === 'status') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.serviceProvidersExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('serviceStatus.configureProviders', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.serviceProvidersExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, actions.firstChild);
-      
-      const listContainer = document.createElement('div');
-      listContainer.id = 'serviceProvidersContainer';
-      listContainer.className = `accordion-animated-container${state.serviceProvidersExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderServiceProviderList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
+  // Only the switcher's own views reorder; the saved order still covers the
+  // hidden ones, so a view shown again returns to its slot.
+  const focusedView = document.activeElement?.matches('[data-preference-order-handle="view"]')
+    ? document.activeElement.closest('.view-preference-row')?.dataset.view : null;
+  els.viewDisplayList.replaceChildren(...shown.map((view) => row(view, true)));
+  els.hiddenViewList?.replaceChildren(...off.map((view) => row(view, false)));
+  if (els.hiddenViewGroup) els.hiddenViewGroup.hidden = off.length === 0;
+  const selected = views.find(({ id }) => id === state.mainSettingsView);
+  const selectedOff = !shownIds.has(selected.id);
+  renderMainViewInspector(selected, { off: selectedOff, lastVisible: !selectedOff && shown.length === 1,
+    unavailable: selected.id === 'limits' && disabled.has(selected.id) });
+  if (focusedView && document.activeElement === document.body) {
+    els.viewDisplayList.querySelector(`[data-view="${focusedView}"] .preference-order-handle`)?.focus({ preventScroll: true });
   }
 }
 
-function renderHomeLimitProviderList() {
-  const wrap = document.createElement('div');
-  wrap.id = 'homeLimitProviderList';
-  wrap.className = 'settings-nested-list home-limit-provider-list';
-  const hidden = hiddenHomeLimitProviderSet();
+function renderMainViewInspector(view, { off, lastVisible, unavailable }) {
+  const inspector = els.mainViewInspector;
+  if (!inspector) return;
+  inspector.classList.toggle('is-subpage', view.id === 'home' && Boolean(state.homeLimitProvidersOpen));
+  if (view.id === 'home' && state.homeLimitProvidersOpen) {
+    inspector.removeAttribute('aria-labelledby');
+    inspector.replaceChildren(renderHomeLimitProviderList());
+    return;
+  }
+  const header = document.createElement('div');
+  header.className = 'main-view-header';
+  const badge = document.createElement('span');
+  badge.className = 'main-view-badge';
+  badge.append(viewSwitcherIcon(view.id));
+  const heading = document.createElement('div');
+  heading.className = 'main-view-heading';
+  const title = document.createElement('strong');
+  title.id = 'mainViewInspectorTitle';
+  title.textContent = viewLabel(view);
+  heading.append(title);
+  if (off) {
+    const subtitle = document.createElement('span');
+    subtitle.className = 'main-view-subtitle';
+    subtitle.textContent = t('settings.views.hiddenGroup');
+    heading.append(subtitle);
+  }
+  header.append(badge, heading);
+  const visibility = document.createElement('label');
+  visibility.className = 'checkbox-label main-view-visibility';
+  const visibilityText = document.createElement('span');
+  visibilityText.className = 'settings-item-title';
+  visibilityText.textContent = t('settings.views.showInSwitcher');
+  const visibilityInput = document.createElement('input');
+  visibilityInput.type = 'checkbox';
+  visibilityInput.checked = !off;
+  visibilityInput.disabled = lastVisible || unavailable;
+  visibilityInput.addEventListener('change', () => void onMainViewVisibilityToggle(view.id));
+  visibility.append(visibilityText, visibilityInput);
+  inspector.setAttribute('aria-labelledby', title.id);
+  inspector.replaceChildren(header, visibility);
+  const settings = MAIN_VIEW_SETTINGS[view.id];
+  if (settings) inspector.append(settings());
+}
+
+function homeLimitProviders() {
   const enabled = enabledLimitProviderSet();
-  const providers = limitProviderOrderApi
+  return limitProviderOrderApi
     .orderedLimitProviders(desktopLimitProviders(), homeLimitProviderOrderValue())
     .filter(({ id }) => enabled.has(id));
-  const hasCustomOrder = Boolean(state.settings?.homeLimitProviderOrder);
-  const displayLabel = document.createElement('label');
-  displayLabel.className = 'settings-item';
+}
+
+function setHomeLimitProvidersOpen(open) {
+  state.homeLimitProvidersOpen = open;
+  renderViewPreferences();
+  const target = open ? '.main-view-back' : '.home-limit-providers-link';
+  els.mainViewInspector?.querySelector(target)?.focus();
+}
+
+// The Home limits module's own options. Its provider list is long enough to
+// get a page of its own inside the inspector, reached from the last row.
+function renderHomeLimitSettings() {
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-nested-list home-limit-settings';
+  const displayRow = document.createElement('label');
+  displayRow.className = 'settings-item home-limit-display-setting';
   const displayText = document.createElement('span');
   displayText.className = 'settings-item-text';
   const displayTitle = document.createElement('span');
   displayTitle.className = 'settings-item-title';
   displayTitle.textContent = t('settings.home.limitDisplayMode');
+  displayText.append(displayTitle);
   const displayInput = document.createElement('select');
   for (const mode of ['text', 'bars']) {
     const option = document.createElement('option');
@@ -11007,8 +10966,7 @@ function renderHomeLimitProviderList() {
   }
   displayInput.value = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
   displayInput.addEventListener('change', () => void saveSettings({ homeLimitDisplayMode: displayInput.value }));
-  displayText.append(displayTitle);
-  displayLabel.append(displayText, displayInput);
+  displayRow.append(displayText, displayInput);
   const statusLabel = document.createElement('label');
   statusLabel.className = 'checkbox-label home-limit-status-setting';
   const statusInput = document.createElement('input');
@@ -11065,6 +11023,43 @@ function renderHomeLimitProviderList() {
     renderHomeIfVisible();
   });
   countLabel.append(countText, countInput);
+  const providers = homeLimitProviders();
+  const hidden = hiddenHomeLimitProviderSet();
+  const link = document.createElement('button');
+  link.type = 'button';
+  link.className = 'main-view-link home-limit-providers-link';
+  const linkTitle = document.createElement('span');
+  linkTitle.className = 'main-view-link-title';
+  linkTitle.textContent = t('settings.home.limitProviders');
+  const linkMeta = document.createElement('span');
+  linkMeta.className = 'main-view-link-meta';
+  linkMeta.textContent = String(providers.filter(({ id }) => !hidden.has(id)).length);
+  link.append(linkTitle, linkMeta);
+  link.addEventListener('click', () => setHomeLimitProvidersOpen(true));
+  wrap.append(displayRow, statusLabel, providerNamesLabel, countLabel, link);
+  return wrap;
+}
+
+function renderHomeLimitProviderList() {
+  const page = document.createElement('div');
+  page.className = 'main-view-subpage';
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'display-settings-back main-view-back';
+  back.textContent = t('views.home');
+  back.addEventListener('click', () => setHomeLimitProvidersOpen(false));
+  const title = document.createElement('strong');
+  title.className = 'main-view-subpage-title';
+  title.textContent = t('settings.home.limitProviders');
+  const wrap = document.createElement('div');
+  wrap.id = 'homeLimitProviderList';
+  wrap.className = 'settings-nested-list home-limit-provider-list';
+  const hidden = hiddenHomeLimitProviderSet();
+  const enabled = enabledLimitProviderSet();
+  const providers = limitProviderOrderApi
+    .orderedLimitProviders(desktopLimitProviders(), homeLimitProviderOrderValue())
+    .filter(({ id }) => enabled.has(id));
+  const hasCustomOrder = Boolean(state.settings?.homeLimitProviderOrder);
   const header = document.createElement('div');
   header.className = 'settings-note-row home-limit-provider-header';
   const note = document.createElement('p');
@@ -11091,7 +11086,7 @@ function renderHomeLimitProviderList() {
   showAll.addEventListener('click', () => void showAllHomeLimitProviders());
   headerActions.append(reset, showAll);
   header.append(note, headerActions);
-  wrap.append(displayLabel, statusLabel, providerNamesLabel, countLabel, header);
+  wrap.append(header);
   for (const { id, label, settingsLabel } of providers) {
     const isHidden = hidden.has(id);
     const row = document.createElement('div');
@@ -11118,7 +11113,8 @@ function renderHomeLimitProviderList() {
     row.addEventListener('pointerdown', (event) => homeLimitProviderRowDrag.startRowDrag(event, id));
     wrap.append(row);
   }
-  return wrap;
+  page.append(back, title, wrap);
+  return page;
 }
 
 function renderHomeModuleCountSettings(id) {
@@ -11163,6 +11159,15 @@ function renderHomeModuleCountSettings(id) {
   return wrap;
 }
 
+function homeModuleSummary(id) {
+  if (id === 'limits') {
+    return t(`settings.home.limitDisplayMode.${homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode)}`);
+  }
+  if (id === 'trends') return t((state.settings?.heatmapMetric || 'cost') === 'tokens' ? 'dashboard.heatmap.tokens' : 'dashboard.heatmap.cost');
+  if (HOME_MODULE_SUBGROUPS[id]) return t('settings.home.itemCountValue', { n: homeModulePreferencesApi.homeModuleCount(state.settings, id) });
+  return '';
+}
+
 function renderHomeSettingsList() {
   const wrap = document.createElement('div');
   wrap.id = 'homeSettingsList';
@@ -11173,11 +11178,9 @@ function renderHomeSettingsList() {
     .filter((id) => !homeModulePreferencesApi.isPluginModuleId(id)).join(',') !== homeModulePreferencesApi.DEFAULT_HOME_MODULE_ORDER;
   const header = document.createElement('div');
   header.className = 'settings-note-row home-settings-header';
-  const note = document.createElement('p');
-  note.className = 'settings-note home-settings-note';
-  note.textContent = t('settings.views.homeSettingsNote');
-  const headerActions = document.createElement('div');
-  headerActions.className = 'tool-header-actions';
+  const caption = document.createElement('span');
+  caption.className = 'main-view-caption';
+  caption.textContent = t('settings.home.modules');
   const reset = document.createElement('button');
   reset.type = 'button';
   reset.className = 'tool-header-action';
@@ -11188,63 +11191,69 @@ function renderHomeSettingsList() {
   const showAll = document.createElement('button');
   showAll.type = 'button';
   showAll.className = 'tool-header-action';
-  const showAllEye = document.createElement('span');
-  showAllEye.className = 'tool-header-eye';
-  showAllEye.setAttribute('aria-hidden', 'true');
-  showAll.append(showAllEye);
   showAll.setAttribute('aria-label', t('settings.views.showAll'));
   showAll.disabled = hidden.size === 0;
+  const eye = document.createElement('span');
+  eye.className = 'tool-header-eye';
+  eye.setAttribute('aria-hidden', 'true');
+  showAll.append(eye);
   showAll.addEventListener('click', () => void showAllHomeModules());
-  headerActions.append(reset, showAll);
-  header.append(note, headerActions);
+  const actions = document.createElement('div');
+  actions.className = 'tool-header-actions';
+  actions.append(reset, showAll);
+  header.append(caption, actions);
   wrap.append(header);
   for (const moduleOption of modules) {
     const id = moduleOption.id;
     const label = moduleOption.label || t(moduleOption.labelKey);
     const isHidden = hidden.has(id);
+    const subgroup = HOME_MODULE_SUBGROUPS[id];
     const row = document.createElement('div');
     row.className = 'home-module-preference-row';
     row.dataset.homeModule = id;
     row.classList.toggle('is-hidden', isHidden);
-    const name = document.createElement('div');
+    const main = document.createElement(subgroup ? 'button' : 'div');
+    main.className = subgroup ? 'home-module-disclosure' : 'home-module-static';
+    const name = document.createElement('span');
     name.className = 'tool-preference-name';
     name.textContent = label;
+    main.append(name);
+    const summary = homeModuleSummary(id);
+    if (summary) {
+      const meta = document.createElement('span');
+      meta.className = 'home-module-meta';
+      meta.textContent = summary;
+      main.append(meta);
+    }
+    if (subgroup) {
+      const expanded = Boolean(state[subgroup[0]]);
+      main.type = 'button';
+      main.classList.toggle('is-expanded', expanded);
+      main.setAttribute('aria-expanded', String(expanded));
+      main.setAttribute('aria-controls', subgroup[1]);
+      main.addEventListener('click', () => togglePreferenceSubgroup(HOME_MODULE_SUBGROUPS, '.home-module-preference-row', id));
+    }
+    const handle = createPreferenceOrderHandle({ kind: 'homeModule', id, label, count: modules.length });
+    const visibility = document.createElement('input');
+    visibility.type = 'checkbox';
+    visibility.className = 'settings-switch';
+    visibility.checked = !isHidden;
+    visibility.setAttribute('aria-label', t('settings.home.showModule', { name: label }));
+    visibility.addEventListener('change', () => void onHomeModuleVisibilityToggle(id));
     const actions = document.createElement('div');
     actions.className = 'tool-preference-actions';
-    if (HOME_MODULE_SUBGROUPS[id]) {
-      const configure = document.createElement('button');
-      configure.type = 'button';
-      const expanded = state[HOME_MODULE_SUBGROUPS[id][0]];
-      configure.className = `view-subgroup-toggle${expanded ? ' is-expanded' : ''}`;
-      configure.setAttribute('aria-label', t(id === 'limits' ? 'settings.home.configureLimits'
-        : id === 'trends' ? 'settings.home.configureActivity' : 'settings.home.configureModule', { name: label }));
-      configure.setAttribute('aria-expanded', String(Boolean(expanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      configure.append(toggleIcon);
-      configure.addEventListener('click', () => togglePreferenceSubgroup(HOME_MODULE_SUBGROUPS, '.home-module-preference-row', id));
-      actions.append(configure);
-    }
-    const visibility = document.createElement('button');
-    visibility.type = 'button';
-    visibility.className = `tool-visibility-button${isHidden ? ' is-hidden' : ''}`;
-    visibility.setAttribute('aria-label', t(isHidden ? 'settings.home.showModule' : 'settings.home.hideModule', { name: label }));
-    visibility.setAttribute('aria-pressed', String(!isHidden));
-    visibility.addEventListener('click', () => onHomeModuleVisibilityToggle(id));
-    const handle = createPreferenceOrderHandle({ kind: 'homeModule', id, label, count: modules.length });
-    actions.append(visibility, handle);
-    row.append(name, actions);
+    actions.append(handle, visibility);
+    row.append(main, actions);
     row.addEventListener('pointerdown', (event) => homeModulePreferenceRowDrag.startRowDrag(event, id));
     wrap.append(row);
-    const subgroup = HOME_MODULE_SUBGROUPS[id];
     if (subgroup) {
       const listContainer = document.createElement('div');
       listContainer.id = subgroup[1];
       listContainer.className = `accordion-animated-container${state[subgroup[0]] ? '' : ' hidden'}`;
+      listContainer.inert = !state[subgroup[0]];
       const inner = document.createElement('div');
       inner.className = 'accordion-animation-inner';
-      inner.appendChild(id === 'limits' ? renderHomeLimitProviderList()
+      inner.appendChild(id === 'limits' ? renderHomeLimitSettings()
         : id === 'trends' ? renderHomeActivitySettings() : renderHomeModuleCountSettings(id));
       listContainer.appendChild(inner);
       wrap.append(listContainer);
@@ -11369,6 +11378,43 @@ function renderLimitsViewSettingsList() {
   });
   row.append(text, input);
   wrap.appendChild(row);
+  return wrap;
+}
+
+function renderModelViewSettingsList() {
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-nested-list';
+  const row = document.createElement('div');
+  row.className = 'settings-item';
+  const label = document.createElement('span');
+  label.id = 'modelRankingMetricLabel';
+  label.className = 'settings-item-text settings-item-title';
+  label.textContent = t('settings.modelRanking.label');
+  const options = document.createElement('div');
+  options.className = 'inline-options';
+  options.setAttribute('role', 'radiogroup');
+  options.setAttribute('aria-labelledby', label.id);
+  const metric = usageAttributionRowsApi.normalizeRankingMetric(state.settings?.modelRankingMetric);
+  for (const value of ['tokens', 'cost']) {
+    const option = document.createElement('label');
+    option.className = 'inline-option';
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'modelRankingMetric';
+    input.value = value;
+    input.checked = value === metric;
+    input.addEventListener('change', async () => {
+      if (!input.checked) return;
+      await saveSettings({ modelRankingMetric: value });
+      render();
+    });
+    const text = document.createElement('span');
+    text.textContent = t(`settings.modelRanking.${value}`);
+    option.append(input, text);
+    options.append(option);
+  }
+  row.append(label, options);
+  wrap.append(row);
   return wrap;
 }
 
@@ -13718,8 +13764,13 @@ async function onLimitProviderToggle() {
     // collection work.
   } finally {
     if (state.pendingLimitProviderSelection?.revision === revision) {
+      const wasLimitsAvailable = limitViewAvailable();
       state.pendingLimitProviderSelection = null;
       renderLimitProviderCheckboxes();
+      if (wasLimitsAvailable !== limitViewAvailable()) {
+        renderViewPreferences();
+        renderSettingsSummaries();
+      }
     }
   }
 }
@@ -13753,17 +13804,33 @@ async function onLimitProviderReorder(providerId, targetIndex) {
   await saveSettings({ limitProviderOrder: limitProviderOrderWithEnabled(order) });
 }
 
+// Settings reorder only the views in the switcher; hidden ones keep their slots.
+function shownViewDisplayOrder() {
+  const orderValue = effectiveViewDisplayOrderValue();
+  const order = viewDisplayPreferencesApi.normalizeViewDisplayOrder(orderValue, VIEW_DISPLAY_OPTIONS);
+  const disabled = new Set(disabledViewIds());
+  const shown = viewDisplayPreferencesApi.visibleViewOrder({
+    views: VIEW_DISPLAY_OPTIONS,
+    orderValue,
+    hiddenValue: state.settings?.hiddenViews,
+    availableIds: order.filter((id) => !disabled.has(id))
+  });
+  return { order, shown };
+}
+
 async function onViewDisplayMove(viewId, direction) {
-  const next = viewDisplayPreferencesApi.moveViewDisplayOrder(effectiveViewDisplayOrderValue(), VIEW_DISPLAY_OPTIONS, viewId, direction);
-  await saveSettings({ viewDisplayOrder: next });
+  const { shown } = shownViewDisplayOrder();
+  await onViewDisplayReorder(viewId, shown.indexOf(viewId) + (direction === 'up' ? -1 : 1));
 }
 
 async function onViewDisplayReorder(viewId, targetIndex) {
-  const orderValue = effectiveViewDisplayOrderValue();
-  const current = viewDisplayPreferencesApi.normalizeViewDisplayOrder(orderValue, VIEW_DISPLAY_OPTIONS).join(',');
-  const next = viewDisplayPreferencesApi.reorderViewDisplayOrder(orderValue, VIEW_DISPLAY_OPTIONS, viewId, targetIndex);
-  if (next === current) return;
-  await saveSettings({ viewDisplayOrder: next });
+  const { order, shown } = shownViewDisplayOrder();
+  const from = shown.indexOf(viewId);
+  const target = Math.max(0, Math.min(shown.length - 1, targetIndex));
+  if (from < 0 || target === from) return;
+  shown.splice(from, 1);
+  shown.splice(target, 0, viewId);
+  await saveSettings({ viewDisplayOrder: settingsListFilterApi.mergeSubsetOrder(order, shown).join(',') });
 }
 
 async function onHomeModuleVisibilityToggle(moduleId) {
@@ -14595,6 +14662,7 @@ els.settingsButton.addEventListener('click', (event) => {
   // caught up when it opens, because its renderers idle while it is closed.
   if (settingsOpen) {
     hideHomeTrendTooltip();
+    resetMainViewSettings();
     syncSettingsForm();
   } else {
     syncModeSelect?.close();
@@ -14759,14 +14827,6 @@ els.languageInput?.addEventListener('change', async () => {
 els.currencyInput?.addEventListener('change', async () => {
   await saveSettings({ currency: els.currencyInput.value });
 });
-
-for (const input of els.modelRankingMetricInputs || []) {
-  input.addEventListener('change', async () => {
-    if (!input.checked) return;
-    await saveSettings({ modelRankingMetric: usageAttributionRowsApi.normalizeRankingMetric(input.value) });
-    render();
-  });
-}
 
 els.currencyRateModeAuto?.addEventListener('change', async () => {
   if (!els.currencyRateModeAuto.checked) return;

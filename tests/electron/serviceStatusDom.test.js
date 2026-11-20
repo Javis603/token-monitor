@@ -105,18 +105,13 @@ test('statusProvider drag kind is wired into the preference helpers', () => {
   assert.match(html, /<script src="serviceStatusProviderPreferences\.js"><\/script>/);
 });
 
-test('the 狀態 view row is expandable and renders a nested provider sub-list', () => {
+test('the 狀態 view settings render the provider sub-list', () => {
   const app = readRendererFile('app.js');
-  const css = readRendererFile('styles.css');
-  assert.match(app, /serviceProvidersExpanded/);
+  assert.match(app, /status: renderServiceProviderList/);
   assert.match(app, /id = 'serviceProviderList'|id: 'serviceProviderList'|'serviceProviderList'/);
   assert.match(app, /status-provider-row/);
   assert.match(app, /function renderServiceProviderList/);
-  // The chevron adds a third trailing control, so the status row needs an
-  // extra grid column or its drag handle wraps to a new line.
-  assert.match(app, /has-subgroup/);
-  assert.match(css, /\.view-preference-row\.has-subgroup/);
-  // The "show all" header uses the same header icon as the other lists.
+  // The show-all button uses the same header icon as the other lists.
   assert.match(app, /tool-header-eye/);
 });
 
@@ -256,7 +251,9 @@ test('Home limit provider settings expand with the shared accordion transition',
   assert.match(renderHomeSettingsList, /accordion-animation-inner/);
   assert.match(renderHomeSettingsList, /togglePreferenceSubgroup\(HOME_MODULE_SUBGROUPS, '\.home-module-preference-row', id\)/);
   const sharedExpansion = functionBody(app, 'setPreferenceSubgroupsExpanded', 'togglePreferenceSubgroup');
-  assert.match(sharedExpansion, /document\.getElementById\(containerId\)\?\.classList\.toggle\('hidden', !open\)/);
+  assert.match(sharedExpansion, /container\.classList\.toggle\('hidden', !open\)/);
+  assert.match(sharedExpansion, /container\.inert = !open/);
+  assert.match(renderHomeSettingsList, /listContainer\.inert = !state\[subgroup\[0\]\]/);
   assert.doesNotMatch(renderHomeSettingsList, /if \(id === 'limits' && state\.homeLimitSettingsExpanded\) wrap\.append\(renderHomeLimitProviderList\(\)\)/);
   assert.match(css, /\.tool-preference-list,\s*\.settings-nested-list,\s*\.cursor-settings-details-inner/);
   assert.match(css, /\.tool-preference-list > \* \+ \*,\s*\.settings-nested-list > \* \+ \*/);
@@ -357,9 +354,8 @@ test('Home-launched secondary views expose an accessible return action', () => {
 
 test('Projects view separates visibility from metadata collection', () => {
   const app = readRendererFile('app.js');
-  assert.match(app, /state\.projectSettingsExpanded = false/);
   assert.match(app, /projectsEnabled === false\) ids\.push\('project'\)/);
-  assert.match(app, /projectSettingsContainer/);
+  assert.match(app, /project: renderProjectSettingsList/);
   assert.match(app, /function renderProjectSettingsList/);
   assert.match(app, /settings\.views\.enableProjects/);
   assert.match(app, /function setProjectsEnabled/);

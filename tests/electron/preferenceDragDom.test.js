@@ -286,7 +286,7 @@ test('all four Main Screen lists use the shared controller from their handles', 
   assert.match(wiring, /persistOrder:[\s\S]*?saveSettings\(\{ \[settingKey\]: value \}\)/);
 
   for (const [controller, renderer, id] of [
-    ['viewPreferenceRowDrag', 'renderViewPreferences', 'view'],
+    ['viewPreferenceRowDrag', 'createMainViewRow', 'view'],
     ['homeModulePreferenceRowDrag', 'renderHomeSettingsList', 'homeModule'],
     ['homeLimitProviderRowDrag', 'renderHomeLimitProviderList', 'homeLimitProvider'],
     ['statusProviderRowDrag', 'renderServiceProviderList', 'statusProvider']
@@ -298,6 +298,9 @@ test('all four Main Screen lists use the shared controller from their handles', 
     assert.match(body, new RegExp(`createPreferenceOrderHandle\\(\\{ kind: '${id}'`));
   }
 
+  // Hidden views are not rendered in the ordered list; the drop keeps their slots.
+  assert.match(wiring, /if \(kind === 'view'\) \{[\s\S]*?settingsListFilterApi\.mergeSubsetOrder\(/);
+
   assert.match(app, /const MAIN_PREFERENCE_DRAG_EXCLUDED = 'button:not\(\.preference-order-handle\), input, select, textarea, a, label, \.accordion-animated-container';/);
   assert.match(app, /if \(deferMainPreferenceRender\(\)\) return;/);
 });
@@ -305,37 +308,123 @@ test('all four Main Screen lists use the shared controller from their handles', 
 test('Main Screen drag keeps expandable rows and their panels together', () => {
   const app = readRendererFile('app.js');
   const apply = functionBody(app, 'applyPreferenceOrder', 'createPreferenceOrderHandle');
-  assert.match(apply, /home: 'homeSettingsContainer'/);
-  assert.match(apply, /status: 'serviceProvidersContainer'/);
+  assert.doesNotMatch(apply, /homeSettingsContainer/, 'views no longer carry panels in the nav');
   assert.match(apply, /HOME_MODULE_SUBGROUPS\[id\]\?\.\[1\]/);
   assert.match(apply, /if \(companion\) list\.appendChild\(companion\)/);
 
   const expand = functionBody(app, 'setPreferenceSubgroupsExpanded', 'togglePreferenceSubgroup');
   assert.match(expand, /state\[stateKey\] = open/);
   assert.match(expand, /classList\.toggle\('hidden', !open\)/);
-  assert.match(app, /getExpanded: \(\) => expandedPreferenceSubgroups\(VIEW_PREFERENCE_SUBGROUPS\)/);
   assert.match(app, /getExpanded: \(\) => expandedPreferenceSubgroups\(HOME_MODULE_SUBGROUPS\)/);
 });
 
-test('view preferences place compact actions beside the note without duplicate headers', () => {
+test('Main Screen pairs the switcher views with the selected view settings', () => {
   const html = readRendererFile('index.html');
-  const group = html.match(/<div class="settings-subgroup settings-main-screen-group">[\s\S]*?<div id="viewDisplayList"/)?.[0] || '';
+  const group = html.match(/<div class="settings-subgroup settings-main-screen-group">[\s\S]*?<div class="settings-subgroup main-numbers-group">/)?.[0] || '';
   assert.match(html, /<div class="settings-group settings-collapsible-group settings-main-group"/);
-  assert.match(group, /<div class="settings-note-row">/);
-  assert.match(group, /<p class="settings-note" data-i18n="settings\.views\.note">[\s\S]*?<div class="tool-header-actions">/);
-  assert.match(group, /<div class="tool-header-actions">/);
+  assert.match(group, /<nav class="main-view-nav"[^>]*>\s*<div id="viewDisplayList" class="main-view-list"><\/div>/);
+  assert.match(group, /<div id="hiddenViewGroup" class="main-view-hidden-group" hidden>[\s\S]*?<div id="hiddenViewList" class="main-view-list"><\/div>/);
   assert.match(group, /id="resetViewDisplayOrderButton"/);
+  assert.match(group, /<div id="mainViewInspector" class="main-view-inspector"><\/div>/);
   assert.match(group, /id="showAllViewsButton"/);
-  assert.doesNotMatch(group, /settings-views-header/);
-  assert.doesNotMatch(group, /settings\.views\.title/);
-  assert.doesNotMatch(group, /viewsSettingsSummary/);
-  assert.doesNotMatch(group, /class="view-preference-head"/);
 
-  const body = functionBody(readRendererFile('app.js'), 'renderViewPreferences', 'renderToolPreferences');
-  assert.match(body, /view-preference-row/);
-  assert.match(body, /settings\.views\.hideView/);
-  assert.match(body, /settings\.views\.showView/);
-  assert.match(body, /createPreferenceOrderHandle\(\{ kind: 'view'/);
+  const app = readRendererFile('app.js');
+  const render = functionBody(app, 'renderViewPreferences', 'renderMainViewInspector');
+  // Only the switcher's own views are ordered; hidden and disabled ones sit below.
+  assert.match(render, /const shownIds = new Set\(shownViewDisplayOrder\(\).shown\)/);
+  assert.match(render, /els\.viewDisplayList\.replaceChildren\(\.\.\.shown\.map\(\(view\) => row\(view, true\)\)\)/);
+  assert.match(render, /els\.hiddenViewList\?\.replaceChildren\(\.\.\.off\.map\(\(view\) => row\(view, false\)\)\)/);
+  assert.match(render, /if \(!views\.some\(\(\{ id \}\) => id === state\.mainSettingsView\)\) state\.mainSettingsView = 'home'/);
+  const row = functionBody(app, 'createMainViewRow', 'renderViewPreferences');
+  assert.match(row, /tab\.setAttribute\('aria-controls', 'mainViewInspector'\)/);
+  assert.match(row, /if \(selected\) tab\.setAttribute\('aria-current', 'true'\)/);
+  assert.match(row, /createPreferenceOrderHandle\(\{ kind: 'view'/);
+  assert.match(row, /settings\.views\.showView/);
+  const inspector = functionBody(app, 'renderMainViewInspector', 'homeLimitProviders');
+  assert.match(inspector, /settings\.views\.showInSwitcher/);
+  // The last visible view cannot be switched off.
+  assert.match(inspector, /visibilityInput\.disabled = lastVisible \|\| unavailable/);
+  assert.match(inspector, /const settings = MAIN_VIEW_SETTINGS\[view\.id\]/);
+  // Each visit starts on Home.
+  assert.match(functionBody(app, 'openSettingsPanel', 'openViewFromTray'), /resetMainViewSettings\(\)/);
+  assert.match(functionBody(app, 'resetMainViewSettings', 'openSettingsPanel'), /state\.mainSettingsView = 'home';/);
+});
+
+test('unavailable Limits does not let the last visible view be hidden', () => {
+  const app = readRendererFile('app.js');
+  const disabled = functionBody(app, 'disabledViewIds', 'hiddenHomeModuleSet');
+  const render = functionBody(app, 'renderViewPreferences', 'renderMainViewInspector');
+  const order = app.slice(app.indexOf('function shownViewDisplayOrder('), app.indexOf('async function onViewDisplayMove('));
+  const shown = [];
+  const hidden = [];
+  const inspectors = [];
+  const context = {
+    VIEW_DISPLAY_OPTIONS: ['home', 'limits', 'status'].map((id) => ({ id })),
+    viewDisplayPreferencesApi: require('../../src/electron/renderer/viewDisplayPreferences'),
+    state: { mainSettingsView: 'home', settings: { hiddenViews: 'status' } },
+    document: { activeElement: null },
+    els: {
+      viewDisplayList: { replaceChildren: (...rows) => shown.push(rows) },
+      hiddenViewList: { replaceChildren: (...rows) => hidden.push(rows) }
+    },
+    deferMainPreferenceRender: () => false,
+    effectiveViewDisplayOrderValue: () => 'home,limits,status',
+    hiddenViewSet: () => new Set(['status']),
+    limitViewAvailable: () => false,
+    createMainViewRow: ({ id }) => id,
+    renderMainViewInspector: ({ id }, flags) => inspectors.push([id, flags.lastVisible, flags.unavailable])
+  };
+  vm.runInNewContext(`${disabled}\n${order}\n${render}\nrenderViewPreferences(); state.mainSettingsView = 'limits'; renderViewPreferences();`, context);
+  assert.deepEqual(shown.at(-1), ['home']);
+  assert.deepEqual(hidden.at(-1), ['limits', 'status']);
+  assert.deepEqual(inspectors, [['home', true, false], ['limits', false, true]]);
+  assert.equal(context.state.settings.hiddenViews, 'status');
+  context.state.settings.hiddenViews = 'home,status';
+  context.state.mainSettingsView = 'home';
+  vm.runInNewContext('renderViewPreferences();', context);
+  assert.deepEqual(shown.at(-1), ['home'], 'the runtime fallback stays in the shown list');
+  assert.deepEqual(inspectors.at(-1), ['home', true, false]);
+  assert.equal(context.state.settings.hiddenViews, 'home,status', 'fallback does not rewrite preferences');
+});
+
+test('keyboard reordering moves a view among the shown views and keeps hidden slots', async () => {
+  const app = readRendererFile('app.js');
+  const source = app.slice(app.indexOf('// Settings reorder only the views in the switcher'), app.indexOf('async function onHomeModuleVisibilityToggle('));
+  const saves = [];
+  const context = {
+    VIEW_DISPLAY_OPTIONS: ['home', 'limits', 'tool', 'status', 'model'].map((id) => ({ id })),
+    viewDisplayPreferencesApi: require('../../src/electron/renderer/viewDisplayPreferences'),
+    settingsListFilterApi: require('../../src/electron/renderer/settingsListFilter'),
+    effectiveViewDisplayOrderValue: () => saves.at(-1)?.viewDisplayOrder || 'home,limits,tool,status,model',
+    state: { settings: { hiddenViews: 'status' } },
+    disabledViewIds: () => [],
+    saveSettings: async (patch) => { saves.push(patch); }
+  };
+  vm.runInNewContext(`${source}\nthis.move = onViewDisplayMove; this.reorder = onViewDisplayReorder;`, context);
+  await context.move('model', 'up');
+  assert.equal(saves.at(-1).viewDisplayOrder, 'home,limits,model,status,tool', 'model swaps with tool, status stays in its slot');
+  await context.reorder('home', Number.MAX_SAFE_INTEGER);
+  assert.equal(saves.at(-1).viewDisplayOrder, 'limits,model,tool,status,home');
+  const count = saves.length;
+  await context.move('limits', 'up');
+  await context.reorder('status', 0);
+  assert.equal(saves.length, count, 'a move to the same slot or of a hidden view writes nothing');
+});
+
+test('a view that becomes unavailable during a drag keeps its saved slot', () => {
+  const app = readRendererFile('app.js');
+  const source = app.slice(app.indexOf('function createMainPreferenceRowDrag('), app.indexOf('const viewPreferenceRowDrag ='));
+  const context = {
+    rowDragControllerApi: { createRowDragController: (options) => options },
+    verticalDragSortApi: {},
+    MAIN_PREFERENCE_DRAG_EXCLUDED: '',
+    preserveSettingsPanelScroll: () => {},
+    shownViewDisplayOrder: () => ({ order: ['home', 'limits', 'tool'], shown: ['home', 'tool'] }),
+    settingsListFilterApi: require('../../src/electron/renderer/settingsListFilter'),
+    state: { settings: {} }
+  };
+  assert.equal(vm.runInNewContext(`${source}\ncreateMainPreferenceRowDrag({ kind: 'view', settingKey: 'viewDisplayOrder' }).mirrorOrder(['tool', 'home', 'limits']);`, context),
+    'tool,limits,home');
 });
 
 test('settings page uses collapsible icon sections with summaries', () => {
@@ -618,10 +707,9 @@ test('Trends has a master toggle separate from main-screen visibility', () => {
   const app = readRendererFile('app.js');
   const css = readRendererFile('styles.css');
   assert.match(app, /id === 'trends'/);
-  assert.match(app, /trendSettingsExpanded/);
+  assert.match(app, /trends: renderTrendSettingsList/);
   assert.match(app, /function renderTrendSettingsList/);
   assert.match(app, /id = 'trendSettingsList'|id: 'trendSettingsList'|'trendSettingsList'/);
-  assert.match(app, /settings\.views\.configureTrend/);
   assert.match(app, /settings\.views\.enableTrend/);
   assert.match(app, /function setTrendEnabled/);
   assert.match(app, /historyEnabled:\s*enabled/);
@@ -750,12 +838,9 @@ test('the session context gauge has its own setting, separate from AI Tool Limit
   const gaugeBody = functionBody(app, 'updateRowContext', 'updateRowLive');
   assert.doesNotMatch(gaugeBody, /showLimitUsed/);
   assert.match(gaugeBody, /sessionContextMetric/);
-  // Sessions owns a Main-screen subgroup, following the project/trends pattern.
-  assert.match(app, /session: \['sessionSettingsExpanded', 'sessionSettingsContainer'\]/);
-  assert.match(app, /inner\.appendChild\(renderSessionSettingsList\(\)\)/);
-  assert.match(app, /id = 'sessionSettingsContainer'/);
+  // Sessions owns its Main-screen settings, following the project/trends pattern.
+  assert.match(app, /session: renderSessionSettingsList/);
   assert.match(app, /name = 'sessionContextMetric'/);
-  assert.match(app, /settings\.views\.configureSession/);
   // The row must be a plain .settings-item. `.home-activity-settings` carries
   // its own indent rule for the Home modules list, so reusing it inside the
   // nested list paints a second line beside the list's own.
