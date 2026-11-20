@@ -33,7 +33,8 @@ const {
   deriveClientHealth,
   deriveClientStatus,
   mergeClientActivityDays,
-  visibleDiagnosticRoots
+  visibleDiagnosticRoots,
+  watchIgnoreMatcher
 } = require('../../src/shared/collector');
 const { KNOWN_CLIENTS } = require('../../src/shared/clientTracking');
 const { createSelfSyncThrottle } = require('../../src/shared/selfSyncThrottle');
@@ -1184,4 +1185,25 @@ test('older devices can still upload retired Qoder CN database health checks', (
     checks: [{ id: 'qodercn-db', exists: true }, { id: 'qodercn-projects', exists: false }] };
   const health = normalizeClientHealth({ clients: { qodercn: { ...core(), source } } });
   assert.deepEqual(health.clients.qodercn.source.checks, source.checks);
+});
+
+test('Junie and OpenCodeReview source checks and watches follow their separate session trees', (t) => {
+  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-review-sources-'));
+  t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
+  const options = { homeDir, env: { XDG_DATA_HOME: path.join(homeDir, 'xdg') } };
+  const clients = 'junie,opencodereview';
+  const junie = path.join(homeDir, '.junie', 'sessions');
+  const review = path.join(homeDir, '.opencodereview', 'sessions');
+  fs.mkdirSync(path.join(junie, 'session'), { recursive: true });
+  fs.mkdirSync(path.join(review, 'nested', 'session'), { recursive: true });
+  assert.deepEqual(clientWatchCandidates(clients, options), { junie: [junie], opencodereview: [review] });
+  assert.deepEqual(clientSourceChecks(clients, options), {
+    junie: [{ id: 'junie-sessions', exists: true }],
+    opencodereview: [{ id: 'opencodereview-sessions', exists: true }]
+  });
+  const ignored = watchIgnoreMatcher(clients, options);
+  assert.equal(ignored(path.join(junie, 'session', 'events.jsonl')), false);
+  assert.equal(ignored(path.join(junie, 'session', 'other.jsonl')), true);
+  assert.equal(ignored(path.join(review, 'nested', 'session', 'run.jsonl')), false);
+  assert.equal(ignored(path.join(review, 'nested', 'session', 'config.json')), true);
 });
