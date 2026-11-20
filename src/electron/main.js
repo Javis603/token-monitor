@@ -27,6 +27,7 @@ const { createDefaultTrayLayout, normalizeTrayLayout } = require('../shared/tray
 const fontSettingsApi = require('../shared/fontSettings');
 const motionPreferenceApi = require('./motionPreference');
 const tokenNumberAnimationApi = require('./tokenNumberAnimation');
+const { createRepositoryStars } = require('./repositoryStars');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
 const { createClaudeWebFetch } = require('./providers/claude/webFetch');
@@ -8248,6 +8249,11 @@ app.whenReady().then(() => {
   ipcMain.handle('appearance:getNativeMaterial', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     return getNativeMaterialState(win);
+  });
+  let repositoryStars = null;
+  ipcMain.handle('app:repositoryStars', () => {
+    repositoryStars ||= createRepositoryStars({ userAgent: `token-monitor/${app.getVersion()}` });
+    return repositoryStars.get();
   });
   ipcMain.handle('app:getInfo', () => ({
     notchCapabilities: notchController?.getCapabilities() || null,
