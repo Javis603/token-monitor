@@ -427,8 +427,7 @@ Object.assign(els, {
   projectBreakdownFooterModels: document.getElementById('projectBreakdownFooterModels'),
   monthPeriodMenu: document.getElementById('monthPeriodMenu'),
   monthPeriodTab: document.getElementById('monthPeriodTab'),
-  periodMonthModeInput: document.getElementById('periodMonthModeInput'),
-  modelRankingMetricInputs: Array.from(document.querySelectorAll('input[name="modelRankingMetric"]'))
+  periodMonthModeInput: document.getElementById('periodMonthModeInput')
 });
 Object.assign(els, {
   appTitleMark: document.querySelector('.app-title-mark'),
@@ -10369,8 +10368,6 @@ function syncSettingsForm() {
     els.periodMonthModeInput.value = fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
   }
   if (els.currencyInput) els.currencyInput.value = currentCurrency();
-  const modelRankingMetric = usageAttributionRowsApi.normalizeRankingMetric(state.settings?.modelRankingMetric);
-  for (const input of els.modelRankingMetricInputs || []) input.checked = input.value === modelRankingMetric;
   syncCurrencyRateControls();
   syncNetworkProxyControls();
   syncHubDraftFields();
@@ -10795,6 +10792,7 @@ const limitProviderRowDrag = rowDragControllerApi.createRowDragController({
 const MAIN_VIEW_SETTINGS = {
   home: renderHomeSettingsList,
   limits: renderLimitsViewSettingsList,
+  model: renderModelViewSettingsList,
   project: renderProjectSettingsList,
   session: renderSessionSettingsList,
   trends: renderTrendSettingsList,
@@ -10951,37 +10949,24 @@ function setHomeLimitProvidersOpen(open) {
 function renderHomeLimitSettings() {
   const wrap = document.createElement('div');
   wrap.className = 'settings-nested-list home-limit-settings';
-  const displayRow = document.createElement('div');
+  const displayRow = document.createElement('label');
   displayRow.className = 'settings-item home-limit-display-setting';
   const displayText = document.createElement('span');
-  displayText.id = 'homeLimitDisplayModeLabel';
   displayText.className = 'settings-item-text';
   const displayTitle = document.createElement('span');
   displayTitle.className = 'settings-item-title';
   displayTitle.textContent = t('settings.home.limitDisplayMode');
   displayText.append(displayTitle);
-  const displayOptions = document.createElement('div');
-  displayOptions.className = 'inline-options';
-  displayOptions.setAttribute('role', 'radiogroup');
-  displayOptions.setAttribute('aria-labelledby', displayText.id);
-  const displayMode = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  const displayInput = document.createElement('select');
   for (const mode of ['text', 'bars']) {
-    const option = document.createElement('label');
-    option.className = 'inline-option';
-    const input = document.createElement('input');
-    input.type = 'radio';
-    input.name = 'homeLimitDisplayMode';
-    input.value = mode;
-    input.checked = displayMode === mode;
-    input.addEventListener('change', () => {
-      if (input.checked) void saveSettings({ homeLimitDisplayMode: mode });
-    });
-    const text = document.createElement('span');
-    text.textContent = t(`settings.home.limitDisplayMode.${mode}`);
-    option.append(input, text);
-    displayOptions.append(option);
+    const option = document.createElement('option');
+    option.value = mode;
+    option.textContent = t(`settings.home.limitDisplayMode.${mode}`);
+    displayInput.append(option);
   }
-  displayRow.append(displayText, displayOptions);
+  displayInput.value = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
+  displayInput.addEventListener('change', () => void saveSettings({ homeLimitDisplayMode: displayInput.value }));
+  displayRow.append(displayText, displayInput);
   const statusLabel = document.createElement('label');
   statusLabel.className = 'checkbox-label home-limit-status-setting';
   const statusInput = document.createElement('input');
@@ -11393,6 +11378,43 @@ function renderLimitsViewSettingsList() {
   });
   row.append(text, input);
   wrap.appendChild(row);
+  return wrap;
+}
+
+function renderModelViewSettingsList() {
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-nested-list';
+  const row = document.createElement('div');
+  row.className = 'settings-item';
+  const label = document.createElement('span');
+  label.id = 'modelRankingMetricLabel';
+  label.className = 'settings-item-text settings-item-title';
+  label.textContent = t('settings.modelRanking.label');
+  const options = document.createElement('div');
+  options.className = 'inline-options';
+  options.setAttribute('role', 'radiogroup');
+  options.setAttribute('aria-labelledby', label.id);
+  const metric = usageAttributionRowsApi.normalizeRankingMetric(state.settings?.modelRankingMetric);
+  for (const value of ['tokens', 'cost']) {
+    const option = document.createElement('label');
+    option.className = 'inline-option';
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'modelRankingMetric';
+    input.value = value;
+    input.checked = value === metric;
+    input.addEventListener('change', async () => {
+      if (!input.checked) return;
+      await saveSettings({ modelRankingMetric: value });
+      render();
+    });
+    const text = document.createElement('span');
+    text.textContent = t(`settings.modelRanking.${value}`);
+    option.append(input, text);
+    options.append(option);
+  }
+  row.append(label, options);
+  wrap.append(row);
   return wrap;
 }
 
@@ -14805,14 +14827,6 @@ els.languageInput?.addEventListener('change', async () => {
 els.currencyInput?.addEventListener('change', async () => {
   await saveSettings({ currency: els.currencyInput.value });
 });
-
-for (const input of els.modelRankingMetricInputs || []) {
-  input.addEventListener('change', async () => {
-    if (!input.checked) return;
-    await saveSettings({ modelRankingMetric: usageAttributionRowsApi.normalizeRankingMetric(input.value) });
-    render();
-  });
-}
 
 els.currencyRateModeAuto?.addEventListener('change', async () => {
   if (!els.currencyRateModeAuto.checked) return;

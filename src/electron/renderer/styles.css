@@ -2069,12 +2069,6 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
 .currency-rate-row { display: grid; gap: 4px; min-width: 0; }
 /* The rate row is a sub-setting of the Currency row: keep them as one unseparated pair. */
 .settings-subgroup > .settings-item + .currency-rate-row { margin-top: 0; }
-/* The pair ends there: the next setting rejoins the grouped list with its hairline,
-   instead of floating off on the generic 8px subgroup margin. */
-.settings-subgroup > .currency-rate-row + .settings-item {
-  margin-top: 0;
-  border-top: 1px solid rgba(var(--line-rgb), 0.06);
-}
 .currency-rate-manual-field { display: flex; align-items: center; gap: 8px; min-width: 0; padding-bottom: 2px; }
 .currency-rate-prefix { flex: 0 0 auto; color: var(--muted); font-size: 0.6875rem; }
 .settings-panel .currency-rate-manual-field input { flex: 1 1 0; width: 0; min-width: 0; font-size: 0.6875rem; }
@@ -3142,6 +3136,7 @@ p.settings-list-group-label { padding: 2px 0 0; }
   margin: 0;
 }
 .limit-provider-usage-items,
+.main-numbers-group,
 .settings-panel .limit-provider-options-inner > .limit-provider-settings-list {
   min-width: 0;
   margin: 0;
@@ -3173,7 +3168,8 @@ p.settings-list-group-label { padding: 2px 0 0; }
   align-items: center;
   gap: 6px;
 }
-.limit-provider-usage-items-title {
+.limit-provider-usage-items-title,
+.main-numbers-title {
   color: var(--muted);
   font-size: 0.625rem;
 }
@@ -7827,7 +7823,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .home-module-disclosure,
 .home-module-static {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: 9px minmax(0, 1fr);
   align-content: center;
   justify-items: start;
   column-gap: 5px;
@@ -7844,9 +7840,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .home-module-disclosure { cursor: pointer; }
 .home-module-disclosure:focus-visible { outline: 1px solid rgba(var(--accent-rgb), 0.72); outline-offset: 1px; }
 .home-module-disclosure .tool-preference-name,
-.home-module-static .tool-preference-name { grid-column: 1; grid-row: 1; max-width: 100%; }
+.home-module-static .tool-preference-name { grid-column: 2; grid-row: 1; max-width: 100%; }
 .main-view-inspector .home-module-meta {
-  grid-column: 1 / -1;
+  grid-column: 2;
   grid-row: 2;
   max-width: 100%;
   overflow: hidden;
@@ -7857,8 +7853,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 }
 .home-module-disclosure::after {
   content: "";
-  grid-column: 2;
+  grid-column: 1;
   grid-row: 1;
+  align-self: center;
   width: 9px;
   height: 9px;
   background: var(--muted);
@@ -7881,8 +7878,10 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   gap: 6px;
   min-width: 0;
   min-height: 28px;
-  padding: 0;
+  margin-inline: -4px;
+  padding: 0 4px;
   border: 0;
+  border-radius: 6px;
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -7903,24 +7902,23 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   transform: rotate(-90deg);
 }
 .main-view-link:hover,
-.main-view-link:focus-visible { color: var(--accent); }
+.main-view-link:focus-visible {
+  background: rgba(var(--overlay-rgb), 0.05);
+  color: var(--accent);
+}
+.main-view-link:is(:hover, :focus-visible)::after { background: currentColor; }
 :is(.main-view-link, .main-view-back):focus-visible { outline: 1px solid rgba(var(--accent-rgb), 0.72); outline-offset: 1px; }
 .main-view-subpage { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; }
 .main-view-inspector .main-view-back { justify-self: start; margin: -4px 0 6px -6px; }
 .main-view-subpage-title { margin: 0 0 4px; color: var(--text); font-size: 0.75rem; font-weight: 600; }
 .settings-panel .main-view-subpage > .settings-nested-list { margin: 0; padding: 0; border-left: 0; }
-/* Range, currency and ranking apply to every view, so they sit under the
+/* Range and currency apply across views, so they sit under the
    views as one titled group. */
 .main-numbers-group {
-  display: grid;
-  gap: 2px;
-  margin-top: 10px;
-  padding: 10px 10px 4px;
-  border: 1px solid rgba(var(--line-rgb), 0.1);
-  border-radius: 10px;
-  background: rgba(var(--sunken-rgb), 0.28);
+  margin-block: 10px;
 }
-.main-numbers-title { margin-bottom: 4px; color: var(--muted); font-size: 0.625rem; }
+.settings-section-details-inner > .main-numbers-group:last-child { padding-bottom: 8px; }
+.main-numbers-title + .settings-item { margin-top: 4px; }
 
 /* Main Screen starts pointer reordering from the six-dot handles, while the
    rows use the same transform choreography as Collection and AI Tool Limits. */

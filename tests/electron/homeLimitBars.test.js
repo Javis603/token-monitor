@@ -377,8 +377,9 @@ test('Home display mode persists separately from low-limit highlighting and is t
   assert.match(main, /homeLimitDisplayMode: 'text'/);
   assert.match(main, /merged\.homeLimitDisplayMode = normalizeHomeLimitDisplayMode\(merged\.homeLimitDisplayMode\)/);
   assert.match(main, /homeLimitDisplayMode: normalizeHomeLimitDisplayMode\(patch\.homeLimitDisplayMode \?\? settings\.homeLimitDisplayMode\)/);
-  assert.match(app, /input\.name = 'homeLimitDisplayMode'/);
-  assert.match(app, /if \(input\.checked\) void saveSettings\(\{ homeLimitDisplayMode: mode \}\)/);
+  assert.match(app, /const displayInput = document\.createElement\('select'\)/);
+  assert.match(app, /displayInput\.value = homeModulePreferencesApi\.normalizeHomeLimitDisplayMode\(state\.settings\?\.homeLimitDisplayMode\)/);
+  assert.match(app, /displayInput\.addEventListener\('change', \(\) => void saveSettings\(\{ homeLimitDisplayMode: displayInput\.value \}\)\)/);
   assert.equal(preferences.normalizeHomeLimitDisplayMode('bars'), 'bars');
   assert.equal(preferences.normalizeHomeLimitDisplayMode('invalid'), 'text');
   const { MESSAGES } = require('../../src/electron/renderer/i18n');
