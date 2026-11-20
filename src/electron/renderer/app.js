@@ -17655,6 +17655,7 @@ function setupModelAliasesUI() {
 }
 
 let customPricingRowsKey;
+let customPricingDisclosure;
 
 function customPricingMeta(ov) {
   const parts = [];
@@ -17670,7 +17671,7 @@ function renderCustomPricing() {
   if (!isSettingsSurfaceVisible()) return;
   const listEl = document.getElementById('customPricingList');
   const statusEl = document.getElementById('customPricingStatus');
-  if (!listEl) return;
+  if (!listEl || !customPricingDisclosure) return;
   const overrides = state.settings?.customModelPricing || [];
   const pricingBase = syncContentForm?.base();
   if (statusEl) {
@@ -17687,6 +17688,7 @@ function renderCustomPricing() {
   if (rowsKey === customPricingRowsKey) return;
   customPricingRowsKey = rowsKey;
   listEl.replaceChildren();
+  customPricingDisclosure.resetRows();
   if (overrides.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'settings-note';
@@ -17701,6 +17703,7 @@ function renderCustomPricing() {
     main.type = 'button';
     main.className = 'managed-account-main custom-pricing-edit';
     main.setAttribute('aria-description', editLabel);
+    customPricingDisclosure.trackRow(ov.modelId, main);
     const openEditor = () => openCustomPricingForm?.(ov);
     main.addEventListener('click', openEditor);
     const name = document.createElement('div');
@@ -17734,6 +17737,7 @@ function setupCustomPricingUI() {
 
   const form = document.getElementById('customPricingForm');
   const addButton = document.getElementById('customPricingAddButton');
+  customPricingDisclosure = window.TokenMonitorModelAliasForm.createModelEditorDisclosure(form, addButton);
   const select = document.getElementById('customPricingModelSelect');
   const manualInput = document.getElementById('customPricingModelInput');
   const inputEl = document.getElementById('customPricingInput');
@@ -17805,8 +17809,7 @@ function setupCustomPricingUI() {
     // Keep the fields in place while the form collapses.
     lookupRevision += 1;
     help.close();
-    accountShellApi.setDisclosureBody(addButton, form, false);
-    addButton.setAttribute('aria-expanded', 'false');
+    customPricingDisclosure.setOpen(false);
   };
   openCustomPricingForm = (prefill) => {
     pricingEdit = { adding: !prefill, base: syncContentForm?.base(), entries: structuredClone(state.settings?.customModelPricing || []) };
@@ -17833,8 +17836,7 @@ function setupCustomPricingUI() {
     const titleKey = prefill ? 'settings.customPricing.edit' : 'settings.customPricing.add';
     title.setAttribute('data-i18n', titleKey);
     title.textContent = t(titleKey);
-    accountShellApi.setDisclosureBody(addButton, form, true);
-    addButton.setAttribute('aria-expanded', 'true');
+    customPricingDisclosure.setOpen(true, prefill?.modelId);
     accountShellApi.focusDisclosureControl(form, select.value === '__manual__' ? manualInput : select);
   };
 

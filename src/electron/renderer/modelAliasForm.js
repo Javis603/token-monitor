@@ -31,10 +31,31 @@
     return menu.element;
   }
 
+  function createModelEditorDisclosure(form, addButton) {
+    const editButtons = new Map();
+    let editingModel;
+    return {
+      setOpen(open, model) {
+        editButtons.get(editingModel)?.setAttribute('aria-expanded', 'false');
+        editingModel = open ? model : undefined;
+        accountShell.setDisclosureBody(addButton, form, open);
+        addButton.setAttribute('aria-expanded', String(open && model === undefined));
+        editButtons.get(editingModel)?.setAttribute('aria-expanded', 'true');
+      },
+      resetRows() { editButtons.clear(); },
+      trackRow(model, button) {
+        editButtons.set(model, button);
+        button.setAttribute('aria-controls', form.id);
+        button.setAttribute('aria-expanded', String(model === editingModel));
+      }
+    };
+  }
+
   function createModelAliasForm({ document, t, getAliases, getBase, getGrouping, getModelIds = () => [], saveAliases }) {
     const el = (suffix) => document.getElementById(`modelAliases${suffix}`);
     const form = el('Form');
     const addButton = el('AddButton');
+    const disclosure = createModelEditorDisclosure(form, addButton);
     let editingAlias;
     let displayed;
     let editSnapshot;
@@ -142,8 +163,7 @@
     const close = () => {
       editingAlias = undefined;
       editSnapshot = null;
-      accountShell.setDisclosureBody(addButton, form, false);
-      addButton.setAttribute('aria-expanded', 'false');
+      disclosure.setOpen(false);
       error('');
     };
     const open = (alias = '', canonical = '', snapshot = displayed) => {
@@ -157,8 +177,7 @@
       const titleKey = editingAlias ? 'settings.modelAliases.edit' : 'settings.modelAliases.add';
       el('FormTitle').setAttribute('data-i18n', titleKey);
       el('FormTitle').textContent = t(titleKey);
-      accountShell.setDisclosureBody(addButton, form, true);
-      addButton.setAttribute('aria-expanded', 'true');
+      disclosure.setOpen(true, editingAlias);
       error('');
       accountShell.focusDisclosureControl(form, aliasPicker.activeControl());
     };
@@ -210,6 +229,7 @@
       if (rowsKey === renderedRowsKey) return;
       renderedRowsKey = rowsKey;
       el('List').replaceChildren();
+      disclosure.resetRows();
       for (const [alias, canonical] of entries) {
         const row = document.createElement('div');
         row.className = 'managed-account-row custom-pricing-row';
@@ -218,6 +238,7 @@
         edit.className = 'managed-account-main custom-pricing-edit';
         edit.setAttribute('aria-description', editDescription);
         edit.disabled = busy;
+        disclosure.trackRow(alias, edit);
         const name = document.createElement('div');
         name.className = 'managed-account-email';
         name.textContent = alias;
@@ -257,5 +278,5 @@
     render();
     return { syncSettings: render };
   }
-  return { createModelAliasForm, createModelSettingsMenu };
+  return { createModelAliasForm, createModelSettingsMenu, createModelEditorDisclosure };
 });

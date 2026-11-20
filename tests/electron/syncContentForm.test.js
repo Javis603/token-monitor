@@ -390,12 +390,12 @@ test('pricing editor pins its whole collection and revision until the user close
   const writes = [];
   const context = { document, state, structuredClone, accountShellApi, customPricingFormApi: pricingApi,
     t: key => key, formatCost: value => String(value), setAccountGroupExpanded() {}, renderCustomPricing() {},
-    window: { tokenMonitor: {}, TokenMonitorSyncContentForm: api, TokenMonitorHelpPopover: helpApi },
+    window: { tokenMonitor: {}, TokenMonitorModelAliasForm: aliasApi, TokenMonitorSyncContentForm: api, TokenMonitorHelpPopover: helpApi },
     syncContentForm: { base: () => api.snapshotBase(current) },
     saveSettings: async (patch, base) => { writes.push(api.decorateSettingsPatch(patch, current, base)); throw Error('CAS 409 conflict'); }
   };
   vm.createContext(context);
-  vm.runInContext(`let openCustomPricingForm = null; ${functionSource('setupCustomPricingUI', 'setupCursorAccountUI')} setupCustomPricingUI(); openCustomPricingForm();`, context);
+  vm.runInContext(`let openCustomPricingForm = null, customPricingDisclosure; ${functionSource('setupCustomPricingUI', 'setupCursorAccountUI')} setupCustomPricingUI(); openCustomPricingForm();`, context);
   document.getElementById('customPricingModelSelect').value = '__manual__';
   document.getElementById('customPricingModelInput').value = 'new-model';
   document.getElementById('customPricingInput').value = '2';

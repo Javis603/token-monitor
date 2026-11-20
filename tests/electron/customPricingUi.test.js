@@ -89,9 +89,13 @@ test('pricing editor saves, reopens and removes both cache-write rates', async (
   assert.equal(f.get('List').children[0], row, 'an unrelated settings update preserves the open row menu');
   edit.click();
   assert.equal(menu.popoverOpen, false);
-  assert.equal(f.get('AddButton')['aria-expanded'], 'true');
+  assert.equal(row.children[0]['aria-expanded'], 'true');
+  assert.equal(f.get('AddButton')['aria-expanded'], 'false');
   assert.equal(f.get('CacheWrite1h').value, 6);
   assert.equal(f.get('Advanced').open, true);
+  f.get('AddButton').click();
+  assert.equal(row.children[0]['aria-expanded'], 'false');
+  assert.equal(f.get('AddButton')['aria-expanded'], 'true');
   await remove.click();
   assert.deepEqual(f.state.settings.customModelPricing, []);
 });
