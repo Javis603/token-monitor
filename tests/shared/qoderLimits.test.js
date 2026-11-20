@@ -420,12 +420,20 @@ test('synced Qoder quotas group by site and stable user ID while preserving cook
   assert.deepEqual(keys([a, b]), [a.accountKey, b.accountKey].sort());
   assert.deepEqual(keys([a, aRelogin]), [a.accountKey]);
   assert.deepEqual(keys([a, aCn]), [a.accountKey, aCn.accountKey].sort());
-  assert.equal(keys([cookieOnly, otherCookie]).length, 1);
-  assert.deepEqual(keys([cookieOnly, a]), [a.accountKey]);
-  assert.deepEqual(keys([{ ...a, updatedAt: new Date(now - 3600000).toISOString() }, cookieOnly]), [cookieOnly.accountKey]);
+  const separateFallbacks = [cookieOnly.accountKey, otherCookie.accountKey].sort();
+  assert.deepEqual(keys([
+    { ...cookieOnly, accountName: 'Work' }, { ...otherCookie, accountName: 'Personal' }
+  ]), separateFallbacks);
+  assert.deepEqual(keys([
+    { ...cookieOnly, accountName: 'Work' }, { ...otherCookie, accountName: 'Work' }
+  ]), separateFallbacks);
+  assert.deepEqual(keys([cookieOnly, otherCookie]), separateFallbacks);
+  assert.deepEqual(keys([cookieOnly, a]), [cookieOnly.accountKey, a.accountKey].sort());
+  assert.deepEqual(keys([{ ...a, updatedAt: new Date(now - 3600000).toISOString() }, cookieOnly]),
+    [a.accountKey, cookieOnly.accountKey].sort());
 
   const { accountKeyPortable: _portable, ...legacyA } = aRelogin;
-  assert.equal(keys([legacyA, cookieOnly]).length, 1);
+  assert.deepEqual(keys([legacyA, cookieOnly]), [legacyA.accountKey, cookieOnly.accountKey].sort());
   assert.deepEqual(keys([a, legacyA, b]), [a.accountKey, b.accountKey].sort());
   assert.equal(syncLimits({ providers: [a] }).providers[0].accountKeyPortable, true);
   assert.equal(Object.hasOwn(syncLimits({ providers: [cookieOnly] }).providers[0], 'accountKeyPortable'), false);
@@ -433,20 +441,46 @@ test('synced Qoder quotas group by site and stable user ID while preserving cook
 
   const workerCore = require('../../worker/src/shared/limits/core');
   assert.deepEqual(keys([a, b], workerCore), [a.accountKey, b.accountKey].sort());
-  assert.deepEqual(keys([cookieOnly, a], workerCore), [a.accountKey]);
+  assert.deepEqual(keys([cookieOnly, a], workerCore), [a.accountKey, cookieOnly.accountKey].sort());
+  assert.deepEqual(keys([cookieOnly, otherCookie], workerCore), separateFallbacks);
 });
 
 for (const [hub, core] of [
   ['Node Hub', require('../../src/shared/limits/core')],
   ['Worker', require('../../worker/src/shared/limits/core')]
 ]) {
+  test(`${hub} keeps unrelated Qoder readings and only hides a uniquely matched cookie alias`, () => {
+    const { hashKey } = require('../../src/shared/hashKey');
+    const now = Date.parse('2026-11-20T10:00:00Z');
+    const base = { provider: 'qoder', source: 'web', region: 'global', status: 'ok',
+      updatedAt: new Date(now).toISOString(), windows: [] };
+    const fallback = { ...base, accountKey: 'cookie' };
+    const portable = { ...base, accountKey: 'portable', accountKeyPortable: true, accountKeyAliases: ['cookie'] };
+    const keys = (rows) => core.aggregateLimits(rows.map((row, i) => ({
+      deviceId: String(i), limits: core.syncLimits({ providers: [row] })
+    })), 0, now).providers.map(row => row.accountKey).sort();
+
+    assert.deepEqual(keys([fallback, fallback]), ['cookie']);
+    assert.deepEqual(keys([fallback, { ...fallback, region: 'cn' }]), ['cookie', 'cookie']);
+    assert.deepEqual(keys([fallback, portable]), ['portable']);
+    assert.deepEqual(keys([fallback, { ...portable, region: 'cn' }]), ['cookie', 'portable']);
+    assert.deepEqual(keys([fallback, portable, { ...portable, accountKey: 'another' }]),
+      ['another', 'cookie', 'portable']);
+
+    const provisional = hashKey('qoder', 'account-slot', 'default');
+    const unresolved = { ...fallback, accountKey: provisional };
+    assert.deepEqual(keys([unresolved, unresolved]), [provisional, provisional]);
+    assert.deepEqual(keys([unresolved, { ...portable, accountKeyAliases: [provisional] }]),
+      [provisional, 'portable'].sort());
+  });
+
   test(`${hub} keeps healthy Qoder fallback visible beside a fresh unavailable account`, () => {
     const now = Date.parse('2026-11-20T10:00:00Z');
     const base = {
       provider: 'qoder', source: 'web', region: 'global',
       updatedAt: new Date(now - 60000).toISOString(), windows: []
     };
-    const portable = { ...base, accountKey: 'portable', accountKeyPortable: true, status: 'unavailable' };
+    const portable = { ...base, accountKey: 'portable', accountKeyPortable: true, accountKeyAliases: ['cookie'], status: 'unavailable' };
     const fallback = { ...base, accountKey: 'cookie', status: 'ok' };
     const rows = (account) => core.aggregateLimits([account, fallback].map((row, i) => ({
       deviceId: String(i), limits: core.syncLimits({ providers: [row] })

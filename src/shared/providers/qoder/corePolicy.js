@@ -1,20 +1,37 @@
 // @ts-check
 'use strict';
 
+// Migration may publish this same provisional key for unrelated local slots.
+const DEFAULT_SLOT_KEY = 'sha256:c325fbf2f2b9a182e7edbdf6f2163efde2b6b8c460a7c93bcc607c8cf31a5b52';
+
+/** @param {any} row @param {string} key */
+function aggregateKey(row, key) {
+  const siteKey = `${key}:site:${row.region || ''}`;
+  return row.accountKey === DEFAULT_SLOT_KEY ? `${siteKey}:device:${row.sourceDeviceId}` : siteKey;
+}
+
+/** @param {any} row */
+function preserveStaleAccount(row) {
+  return Boolean(row.accountKey && row.status !== 'notConfigured' && row.status !== 'disabled');
+}
+
 /** @param {any} row @param {string} key */
 function collapseKey(row, key) {
-  return row.accountKeyPortable && row.status !== 'notConfigured' && row.status !== 'disabled' ? key : '';
+  return preserveStaleAccount(row) ? key : '';
 }
 
 /** @param {any[]} rows @param {boolean} multiAccount @param {(row: any) => boolean} configured */
 function suppressCandidates(rows, multiAccount, configured) {
   if (multiAccount) return [];
-  const portable = rows.filter(row => row.accountKeyPortable && row.status === 'ok' && configured(row));
-  // A cookie-only or legacy reading can be another sighting of an identified
-  // account on the same site. Keep the fallback when no successful portable
-  // reading of comparable freshness can replace it.
-  return rows.filter(row => !row.accountKeyPortable && portable.some(account =>
-    (!row.region || row.region === account.region) && (!account.stale || row.stale)));
+  const portable = rows.filter(row => row.accountKeyPortable && configured(row));
+  return rows.filter(row => {
+    if (row.accountKeyPortable || !row.accountKey || row.accountKey === DEFAULT_SLOT_KEY) return false;
+    const matches = portable.filter(account => row.region === account.region
+      && account.accountKeyAliases?.includes(row.accountKey));
+    // A shared site or display name is insufficient to identify an account.
+    return matches.length === 1 && matches[0].status === 'ok'
+      && (!matches[0].stale || row.stale);
+  });
 }
 
 /** @param {any} winner @param {any} loser */
@@ -25,4 +42,4 @@ function carryObservation(winner, loser) {
     : winner;
 }
 
-module.exports = { collapseKey, suppressCandidates, carryObservation };
+module.exports = { aggregateKey, collapseKey, preserveStaleAccount, suppressCandidates, carryObservation };
