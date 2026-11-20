@@ -17679,7 +17679,7 @@ function renderCustomPricing() {
       ? t('settings.customPricing.count', { count: overrides.length })
       : t('settings.customPricing.none');
   }
-  const editLabel = t('settings.customPricing.edit');
+  const editLabel = t('settings.common.edit');
   const removeLabel = t('settings.customPricing.remove');
   const emptyLabel = t('settings.customPricing.empty');
   const rows = overrides.map(override => ({ override, meta: customPricingMeta(override) }));

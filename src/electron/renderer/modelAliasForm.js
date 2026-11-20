@@ -222,7 +222,7 @@
       el('Status').textContent = entries.length
         ? t('settings.modelAliases.count', { count: entries.length })
         : t(`settings.modelAliases.grouping${grouping === 'prefix' ? 'Prefix' : grouping === 'duplicates' ? 'Duplicates' : 'Off'}`);
-      const editLabel = t('settings.customPricing.edit');
+      const editLabel = t('settings.common.edit');
       const editDescription = t('settings.modelAliases.edit');
       const removeLabel = t('settings.modelAliases.remove');
       const rowsKey = JSON.stringify([entries, busy, snapshot.base?.identity, snapshot.base?.revisions?.modelAliases,

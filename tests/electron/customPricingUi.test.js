@@ -82,7 +82,7 @@ test('pricing editor saves, reopens and removes both cache-write rates', async (
   assert.match(row.children[0].children[1].textContent, /summaryInput.*\$3.*output.*\$15.*summaryCacheRead.*\$0.3.*cacheWrite1h.*\$6/);
   const [, menu] = row.children[1].children;
   const [edit, remove] = menu.children;
-  assert.equal(edit.textContent, 'settings.customPricing.edit');
+  assert.equal(edit.textContent, 'settings.common.edit');
   menu.popoverOpen = true;
   f.state.settings.customModelPricing = structuredClone(f.state.settings.customModelPricing);
   f.render();
