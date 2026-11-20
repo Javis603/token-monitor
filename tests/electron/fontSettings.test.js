@@ -113,6 +113,26 @@ test('follow interface resolves against each renderer effective default', () => 
   );
 });
 
+test('Chinese locales use the same sans-serif default across renderers and preserve explicit fonts', () => {
+  for (const [locale, font] of [['zh-CN', 'Microsoft YaHei UI'], ['zh-TW', 'Microsoft JhengHei UI']]) {
+    const main = fontSettings.resolveEffectiveFontSettings({}, { locale });
+    const dashboard = fontSettings.resolveEffectiveFontSettings(
+      { displayFontFamily: fontSettings.DEFAULT_DISPLAY_FONT },
+      { locale, interfaceDefault: fontSettings.DEFAULT_DASHBOARD_INTERFACE_FONT }
+    );
+    assert.match(main.interfaceFont, new RegExp(font));
+    assert.match(main.interfaceFont, /, sans-serif$/);
+    assert.deepEqual(dashboard, main);
+    assert.deepEqual(fontSettings.resolveEffectiveFontSettings({
+      interfaceFontFamily: fontSettings.FONT_PRESETS.mono,
+      displayFontFamily: 'Example Display'
+    }, { locale }), {
+      interfaceFont: fontSettings.FONT_PRESETS.mono,
+      displayFont: 'Example Display'
+    });
+  }
+});
+
 test('font controls and zoom share a visible Appearance group', () => {
   const html = readProjectFile('src', 'electron', 'renderer', 'index.html');
   const start = html.indexOf('settings-subgroup settings-appearance-type');
@@ -151,7 +171,7 @@ test('font settings wiring keeps renderer defaults concrete and technical monosp
 
   assert.match(main, /interfaceFontFamily/);
   assert.match(main, /displayFontFamily/);
-  assert.match(app, /resolveEffectiveFontSettings\(source\)/);
+  assert.match(app, /resolveEffectiveFontSettings\(source, \{ locale \}\)/);
   assert.match(dashboard, /resolveEffectiveFontSettings\(settings, \{/);
   assert.doesNotMatch(`${app}\n${dashboard}`, /setProperty\('--display-font', 'var\(--ui-font\)'/);
   assert.match(styles, /font-family: var\(--ui-font,/);

@@ -8680,7 +8680,8 @@ function applyControlLayout(swapSettingsAndRefresh) {
 function applyFontSettings(settings) {
   const source = { ...(state.settings || {}), ...(settings || {}) };
   const root = document.documentElement.style;
-  const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(source);
+  const locale = i18n.resolveLocale(source.locale || source.language, preferredLanguages());
+  const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(source, { locale });
   document.documentElement.dataset.textSize = fontSettingsApi.normalizeTextSize(source.textSize);
   root.setProperty('--ui-text-scale', String(fontSettingsApi.textScaleForSize(source.textSize)));
   root.setProperty('--ui-font', interfaceFont);
@@ -9570,7 +9571,7 @@ function fontPreviewForControls(role) {
   const resolved = fontSettingsApi.resolveEffectiveFontSettings({
     interfaceFontFamily: fontFamilyFromControls('interface'),
     displayFontFamily: fontFamilyFromControls('display')
-  });
+  }, { locale: currentLocale() });
   return role === 'display' ? resolved.displayFont : resolved.interfaceFont;
 }
 

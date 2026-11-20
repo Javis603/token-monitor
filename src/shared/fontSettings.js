@@ -9,6 +9,8 @@
   const DEFAULT_DASHBOARD_INTERFACE_FONT = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
   const DEFAULT_DISPLAY_FONT = '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif';
   const SYSTEM_UI_FONT = 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  const SIMPLIFIED_CHINESE_FONT = '"Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", sans-serif';
+  const TRADITIONAL_CHINESE_FONT = '"Microsoft JhengHei UI", "PingFang TC", "Noto Sans CJK TC", sans-serif';
   const FONT_PRESETS = Object.freeze({
     app: '',
     system: SYSTEM_UI_FONT,
@@ -40,9 +42,15 @@
 
   function resolveEffectiveFontSettings(settings = {}, options = {}) {
     const source = settings && typeof settings === 'object' ? settings : {};
-    const interfaceDefault = normalizeFontFamily(options.interfaceDefault) || DEFAULT_INTERFACE_FONT;
+    const chineseDefault = options.locale === 'zh-CN' ? SIMPLIFIED_CHINESE_FONT
+      : options.locale === 'zh-TW' ? TRADITIONAL_CHINESE_FONT
+      : '';
+    const interfaceDefault = chineseDefault || normalizeFontFamily(options.interfaceDefault) || DEFAULT_INTERFACE_FONT;
     const interfaceFont = normalizeFontFamily(source.interfaceFontFamily) || interfaceDefault;
-    const displayFont = normalizeFontFamily(source.displayFontFamily) || interfaceFont;
+    const displayPreference = normalizeFontFamily(source.displayFontFamily);
+    const displayFont = displayPreference === DEFAULT_DISPLAY_FONT
+      ? chineseDefault || displayPreference
+      : displayPreference || interfaceFont;
     return { interfaceFont, displayFont };
   }
 

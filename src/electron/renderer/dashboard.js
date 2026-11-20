@@ -232,7 +232,8 @@ function applyAppearance(settings) {
 function applyFontSettings(settings) {
   const root = document.documentElement.style;
   const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(settings, {
-    interfaceDefault: fontSettingsApi.DEFAULT_DASHBOARD_INTERFACE_FONT
+    interfaceDefault: fontSettingsApi.DEFAULT_DASHBOARD_INTERFACE_FONT,
+    locale: state.locale
   });
   root.setProperty('--ui-font', interfaceFont);
   root.setProperty('--display-font', displayFont);
@@ -708,19 +709,18 @@ window.tokenMonitor.onSettingsPush?.((next) => {
     state.flat = next.dashboardFlat === true;
     els.body.classList.toggle('flat', state.flat);
   }
-  // applyAppearance applies the motion preference itself; remember the old one
-  // so a changed preference still repaints below.
-  const previousReduceMotion = state.reduceMotion;
-  applyAppearance(state.settings);
-  applyFontSettings(next);
   let needsRender = false;
-  const nextLocale = i18n.resolveLocale(next.locale || next.language, navigator.languages);
+  const nextLocale = i18n.resolveLocale(state.settings.locale || state.settings.language, navigator.languages);
   if (state.locale !== nextLocale) {
     state.locale = nextLocale;
     applyTranslations();
     populateRangeSelect();
     needsRender = true;
   }
+  // applyAppearance applies the motion preference itself; remember the old one
+  // so a changed preference still repaints below.
+  const previousReduceMotion = state.reduceMotion;
+  applyAppearance(state.settings);
   const nextCompactTokenUnits = compactTokenApi.normalizeCompactTokenUnits(next.compactTokenUnits);
   if (state.compactTokenUnits !== nextCompactTokenUnits) {
     state.compactTokenUnits = nextCompactTokenUnits;
