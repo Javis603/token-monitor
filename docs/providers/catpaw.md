@@ -13,7 +13,7 @@ read_when:
 
 `catpaw` is one opt-in tracked client, marked `forkOnly` and off by default. It covers the domestic and overseas CatPaw assistant apps — the domestic product was renamed 妙手 while its package name and data directories keep the CatPaw spelling — on macOS and Windows. The edition is derived from the data root; no client field carries it, and model numbers must not be used to infer it.
 
-The internal id stays `catpaw` and the display label is `CatPaw`. There is no limits provider, no credential flow and no network model refresh: Token Monitor discovers roots, watches files and reports health, while the tokscale fork's `token_monitor::catpaw` module performs every read. CatPawAI IDE is out of scope until a current build persists local token records; IDE id spaces do not translate to the assistant's.
+The internal id stays `catpaw` and the display label is `CatPaw`. There is no limits provider, no credential flow and no network model refresh: Token Monitor discovers roots, watches files and reports health, while the tokscale fork's `token_monitor::catpaw` module performs token accounting and `providers/catpaw/sessionContext.js` reads live context occupancy. CatPawAI IDE is out of scope until a current build persists local token records; IDE id spaces do not translate to the assistant's.
 
 ## Data sources
 
@@ -28,7 +28,7 @@ Discovery accepts only immediate `catpaw-memory-<scope>.db` files whose scope is
 
 Each assistant message stores usage at `payload.extra.contextInfo.usage`: `promptTokens`, `completionTokens`, `cacheReadTokens`, `cacheWriteTokens` and `totalTokens`. The four buckets are disjoint and additive. A row is accepted when their sum equals the row's `usage.totalTokens` or the sibling `contextInfo.totalUsageTokens` — older builds stored the first without the cache-read part, so the anchor is chosen per row, and only nonnegative integral JS-safe numbers anchor. Rows with missing or explicit JSON-null usage are skipped; malformed non-null usage fails the whole source read. Reasoning and one-hour cache-write tokens are not independently persisted and stay zero; nothing is inferred from a residual or a duration. Timestamps use `created_at_ms` with `updated_at_ms` as fallback, and the outer date filter applies as usual.
 
-Messages are rewritten per conversation, not appended: a read takes a complete snapshot, deduplicates by message identity, and a successful read reflects deletions. A row whose created and updated timestamps are both absent or out of range is stored at the epoch and falls outside any `--since` window. Project or workspace attribution, session titles and context occupancy are not provided.
+Messages are rewritten per conversation, not appended: a read takes a complete snapshot, deduplicates by message identity, and a successful read reflects deletions. A row whose created and updated timestamps are both absent or out of range is stored at the epoch and falls outside any `--since` window. For sessions that pass `shouldReadSessionContext()`, `providers/catpaw/sessionContext.js` scans the newest 20 assistant rows in `ui_sdk_messages` for the first valid `extra.contextInfo` (`promptTokens + cacheReadTokens + cacheWriteTokens` against `contextWindowTokens`). Project or workspace attribution and session titles are not provided.
 
 ## Source precedence
 

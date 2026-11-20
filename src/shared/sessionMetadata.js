@@ -10,6 +10,7 @@ const { normalizeSessionContext } = require('./sessionContext');
 const { normalizeReasoningEffort, isSessionReasoningEffortClient } = require('./sessionLive');
 const claudeSessionMetadata = require('./providers/claude/sessionMetadata');
 const antigravitySessionMetadata = require('./providers/antigravity/sessionMetadata');
+const catpawSessionMetadata = require('./providers/catpaw/sessionMetadata');
 const codebuddySession = require('./providers/codebuddy/sessionMetadata');
 const codexSession = require('./providers/codex/sessionMetadata');
 const cursorSessionMetadata = require('./providers/cursor/sessionMetadata');
@@ -257,6 +258,7 @@ function fileSessionMetadata(sessionId, filePath, context, existing = {}) {
 // existing one-shot id-timestamp fallback.
 const SESSION_METADATA_RESOLVERS = new Map([
   ['antigravity', { resolve: antigravitySessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
+  ['catpaw', { resolve: catpawSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['claude', { resolve: claudeSessionMetadata.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['codebuddy', { resolve: codebuddySession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
   ['codex', { resolve: codexSession.resolveSessionMetadata, retryAfterTimestampFallback: true }],
