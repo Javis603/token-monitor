@@ -170,27 +170,7 @@
 }
 .session-status-quota.is-stale { opacity: 0.56; }
 
-.session-status-cost {
-  display: inline-flex;
-  margin-left: auto;
-  flex: 0 0 auto;
-  align-items: baseline;
-  gap: 3px;
-  color: var(--text);
-  font-variant-numeric: tabular-nums;
-  font-weight: 600;
-  line-height: 1.2;
-  white-space: nowrap;
-}
-.session-status-cost-label {
-  color: var(--muted);
-  font-size: 0.5625rem;
-  font-weight: 400;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-/* Narrow windows drop the least important chips first; the model and cost stay. */
+/* Narrow windows drop the least important chips first; the model stays. */
 @container (max-width: 440px) {
   .session-status-project,
   .session-status-calls { display: none; }

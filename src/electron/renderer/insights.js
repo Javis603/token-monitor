@@ -42,7 +42,6 @@
       models: 'Models',
       limits: 'Limits',
       currentSession: 'Current session',
-      sessionShort: 'session',
       stale: 'stale',
       reset: 'resets',
       now: 'now',
@@ -77,7 +76,6 @@
       models: '模型',
       limits: '额度',
       currentSession: '当前会话',
-      sessionShort: '会话',
       stale: '快照',
       reset: '重置',
       now: '刚刚',
@@ -404,11 +402,7 @@
     refs.calls = chip('calls');
     metrics.append(refs.context.wrap, refs.cache.wrap, refs.quota.wrap, refs.calls.wrap);
 
-    refs.cost = element('span', 'session-status-cost');
-    refs.costLabel = element('span', 'session-status-cost-label');
-    refs.costValue = element('span', 'session-status-cost-value');
-    refs.cost.append(refs.costLabel, refs.costValue);
-    status.append(refs.dot, identity, refs.project, metrics, refs.cost);
+    status.append(refs.dot, identity, refs.project, metrics);
 
     const anchor = panel.querySelector('.total-cost-row') || document.getElementById('cost') || panel.lastElementChild;
     if (anchor) anchor.insertAdjacentElement('afterend', status);
@@ -571,10 +565,6 @@
       refs.quota.wrap.hidden = true;
     }
 
-    refs.costLabel.textContent = c.sessionShort;
-    refs.costValue.textContent = money(row.costUsd || 0);
-    refs.cost.setAttribute('aria-description', c.cost);
-
     const last = timeValue(row.lastUsedAt);
     const titleParts = [row.title, row.projectLabel, last ? `${c.updated} ${agoText(Date.now() - last)}` : ''].filter(Boolean);
     status.setAttribute('aria-description', titleParts.join(' · '));
@@ -583,8 +573,7 @@
       topModel(row),
       context ? `${c.ctx} ${context.usedPercent}%` : '',
       cached != null ? `${c.cache} ${cached}%` : '',
-      messages > 0 ? `${exactFormatter().format(messages)} ${c.calls}` : '',
-      money(row.costUsd || 0)
+      messages > 0 ? `${exactFormatter().format(messages)} ${c.calls}` : ''
     ].filter(Boolean).join(', '));
     markSessionEntering(row);
 
