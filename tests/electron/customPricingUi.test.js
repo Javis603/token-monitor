@@ -20,7 +20,7 @@ function fixture(options = {}) {
     const classes = new Set();
     const listeners = {};
     return {
-      tagName, value: '', textContent: '', children: [], disabled: false, open: false, popoverOpen: false,
+      tagName, ownerDocument: document, value: '', textContent: '', children: [], disabled: false, open: false, popoverOpen: false,
       get options() { return this.children; },
       classList: {
         add: key => classes.add(key), remove: key => classes.delete(key), contains: key => classes.has(key),
@@ -31,7 +31,7 @@ function fixture(options = {}) {
       setAttribute(key, value) { this[key] = value; },
       hasAttribute(key) { return Object.hasOwn(this, key); },
       contains(other) { return this === other || this.children.some(child => child.contains(other)); },
-      focus() {},
+      focus() { document.activeElement = this; },
       closest() { return null; },
       matches(selector) { return selector === ':popover-open' && this.popoverOpen; },
       showPopover() { this.popoverOpen = true; },
@@ -65,7 +65,7 @@ function fixture(options = {}) {
   const get = suffix => document.getElementById('customPricing' + suffix);
   const enter = (suffix, value) => { get(suffix).value = String(value); get(suffix).dispatchEvent({ type: 'input' }); };
   const select = id => { get('ModelSelect').value = id; return get('ModelSelect').dispatchEvent({ type: 'change' }); };
-  return { state, get, enter, select, requests, render: context.renderCustomPricing };
+  return { state, get, enter, select, requests, render: context.renderCustomPricing, focused: () => document.activeElement };
 }
 
 test('pricing editor saves, reopens and removes both cache-write rates', async () => {
@@ -98,6 +98,28 @@ test('pricing editor saves, reopens and removes both cache-write rates', async (
   assert.equal(f.get('AddButton')['aria-expanded'], 'true');
   await remove.click();
   assert.deepEqual(f.state.settings.customModelPricing, []);
+});
+
+test('canceling price edits returns focus to the row or falls back to Add if the row disappears', () => {
+  const f = fixture();
+  f.state.settings.customModelPricing = [{ modelId: 'a', inputPerM: 3 }];
+  f.render();
+  const rowButton = f.get('List').children[0].children[0];
+  const cancel = f.get('CancelButton');
+  f.get('Form').append(cancel);
+
+  rowButton.click();
+  cancel.focus();
+  cancel.click();
+  assert.equal(f.focused(), rowButton);
+  assert.equal(rowButton['aria-expanded'], 'false');
+
+  rowButton.click();
+  f.state.settings.customModelPricing = [];
+  f.render();
+  cancel.focus();
+  cancel.click();
+  assert.equal(f.focused(), f.get('AddButton'));
 });
 
 test('advanced pricing starts closed, keeps hidden prefilled prices, and opens saved zero rates', async () => {

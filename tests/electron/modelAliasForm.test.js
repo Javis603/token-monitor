@@ -15,7 +15,7 @@ function documentFixture() {
   function node(tagName = 'div') {
     const classes = new Set();
     const listeners = {};
-    return { tagName, value: '', textContent: '', children: [], disabled: false,
+    return { tagName, ownerDocument: document, value: '', textContent: '', children: [], disabled: false,
       classList: { add: (key) => classes.add(key), remove: (key) => classes.delete(key), contains: (key) => classes.has(key), toggle: (key, active) => active ? classes.add(key) : classes.delete(key) },
       append(...children) { for (const child of children) child.parent = this; this.children.push(...children); }, replaceChildren(...children) { this.children = children; },
       remove() { this.parent.children.splice(this.parent.children.indexOf(this), 1); },
@@ -53,6 +53,7 @@ function fixture(save, initial = {}) {
     return { label: row.children[0].children[0], select: row.children[0].children[1], input: row.children[0].children[2], remove: row.children[1].children[0] };
   };
   return { form, get, select, manual, extra, aliases: () => aliases,
+    focused: () => document.activeElement,
     updateModels: (ids) => { modelIds = ids; form.syncSettings(); },
     updateLocale: next => { locale = next; form.syncSettings(); } };
 }
@@ -86,6 +87,24 @@ test('alias editor adds, edits and removes a persisted mapping', async () => {
   const [, menu] = f.get('List').children[0].children[1].children;
   await menu.children[1].click();
   assert.deepEqual(f.aliases(), {});
+});
+
+test('canceling alias edits returns focus to the row or the Add button', () => {
+  const f = fixture(null, { aliases: { first: 'model-a' } });
+  const rowButton = f.get('List').children[0].children[0];
+  const cancel = f.get('CancelButton');
+  f.get('Form').append(cancel);
+
+  rowButton.click();
+  cancel.focus();
+  cancel.click();
+  assert.equal(f.focused(), rowButton);
+  assert.equal(rowButton['aria-expanded'], 'false');
+
+  f.get('AddButton').click();
+  cancel.focus();
+  cancel.click();
+  assert.equal(f.focused(), f.get('AddButton'));
 });
 
 test('alias edit buttons keep distinct alias and target names with a localized action description', () => {

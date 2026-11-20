@@ -36,11 +36,12 @@
     let editingModel;
     return {
       setOpen(open, model) {
-        editButtons.get(editingModel)?.setAttribute('aria-expanded', 'false');
+        const previousEditButton = editButtons.get(editingModel);
+        previousEditButton?.setAttribute('aria-expanded', 'false');
         editingModel = open ? model : undefined;
-        accountShell.setDisclosureBody(addButton, form, open);
         addButton.setAttribute('aria-expanded', String(open && model === undefined));
         editButtons.get(editingModel)?.setAttribute('aria-expanded', 'true');
+        accountShell.setDisclosureBody(previousEditButton ?? addButton, form, open);
       },
       resetRows() { editButtons.clear(); },
       trackRow(model, button) {
