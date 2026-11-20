@@ -13,7 +13,7 @@ const { readJson, sharedDataDir } = require('./config');
 const { appVersion } = require('./appVersion');
 const { normalizeClientsCsv } = require('./clientTracking');
 const { FORK_ONLY_CLIENT_IDS } = require('./clientCatalog');
-const { canonicalWatchPath, cherryStudioTranscriptRoots, clientSourceRoots } = require('./clientSources');
+const { canonicalWatchPath, cherryStudioTranscriptRoots, clientSourceRoots, copilotExporterWatch } = require('./clientSources');
 const { clientDiagnosticRoots, clientSourceChecks, visibleDiagnosticRoots } = require('./clientSourceObservations');
 const {
   CLIENT_HEALTH_VERSION,
@@ -2095,10 +2095,10 @@ function startCollector(options) {
   // watcher on a change; otherwise idle title lookups re-trigger collection
   // until the next full scan.
   let watchedCodexHomes = '';
-  const customCodexHomesKey = () => (trackedClients.has('codex')
-    ? JSON.stringify((normalizeCustomScanPaths(sourceOptions.customScanPaths, { platform: sourceOptions.platform || process.platform }).codex || [])
-      .map((dir) => path.resolve(canonicalWatchPath(dir))).filter(isCodexHome))
-    : '');
+  const customCodexHomes = () => (trackedClients.has('codex')
+    ? (normalizeCustomScanPaths(sourceOptions.customScanPaths, { platform: sourceOptions.platform || process.platform }).codex || [])
+      .map((dir) => path.resolve(canonicalWatchPath(dir))).filter(isCodexHome)
+    : []);
   // Sticky: once the kernel has refused us watch descriptors, every later
   // rebuild (a client gaining or losing a data directory) stays on polling for
   // the rest of the process. Retrying native events on each rebuild would just
@@ -2619,7 +2619,7 @@ function startCollector(options) {
       }
       // A newly written Senpi header can expose a different project's child
       // tree during an anchored Today tick, before the fallback interval.
-      if (!anchored || trackedClients.has('senpi') || customCodexHomesKey() !== watchedCodexHomes) setupWatchers();
+      if (!anchored || trackedClients.has('senpi') || JSON.stringify(customCodexHomes()) !== watchedCodexHomes) setupWatchers();
       if (Number.isFinite(tickOptions.activityRevision)) {
         collectedActivityRevision = Math.max(collectedActivityRevision, tickOptions.activityRevision);
         initialCollectionComplete = true;
@@ -2932,9 +2932,11 @@ function startCollector(options) {
 
   function setupWatchers() {
     if (!watchEnabled || watchIntervalFallback) return;
-    const watchOptions = trackedClients.has('senpi')
-      ? { ...sourceOptions, senpiSources: senpiWatchSources(sourceOptions) }
-      : sourceOptions;
+    const watchOptions = {
+      ...sourceOptions,
+      codexHomes: customCodexHomes(),
+      ...(trackedClients.has('senpi') ? { senpiSources: senpiWatchSources(sourceOptions) } : {})
+    };
     // Canonicalise before anything derives from these roots, so the paths handed
     // to chokidar and the paths clientsForWatchPath matches against are the same
     // strings. Resolving only one of the two would silently break attribution.
@@ -2946,19 +2948,21 @@ function startCollector(options) {
       Object.entries(watchRoots)
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
     );
+    const copilotExporter = rootsByClient.copilot ? copilotExporterWatch(os.homedir()) : null;
+    const attributionOptions = { ...watchOptions, copilotExporter };
     // Watch targets and attribution prefixes are the same list everywhere except
     // a custom Copilot exporter, whose parent must be watched without becoming a
     // copilot prefix. Canonicalised through the same function so both still
     // compare equal to the paths chokidar reports.
     const attributionRootsByClient = Object.fromEntries(
-      Object.entries(watchAttributionRootsForClients(clients, watchRoots, watchOptions))
+      Object.entries(watchAttributionRootsForClients(clients, watchRoots, attributionOptions))
         .map(([client, dirs]) => [client, dirs.map(canonicalWatchPath)])
     );
     // The shared watcher keeps the union of overlapping sources. An event
     // retained for one client must not collect or self-sync another client
     // whose own source policy rejects it.
     const attributionIgnores = Object.fromEntries(Object.keys(rootsByClient)
-      .map(client => [client, watchIgnoreMatcher(client, watchOptions)]));
+      .map(client => [client, watchIgnoreMatcher(client, attributionOptions)]));
     // A subset of the same roots, matched separately so a write to a client's
     // parse-local data cannot pass for a write to its self-sync source.
     const sourceSyncRootsByClient = Object.fromEntries(
@@ -2974,9 +2978,12 @@ function startCollector(options) {
       target: path.resolve(canonicalWatchPath(source.dir), path.relative(source.dir, source.target)),
       ...(source.runtimeFile ? { runtimeFile: path.resolve(canonicalWatchPath(source.dir), path.relative(source.dir, source.runtimeFile)) } : {}) }));
     const dirs = [...new Set([...usageDirs, ...activitySources.map((source) => source.dir)])];
-    watchedCodexHomes = customCodexHomesKey();
+    watchedCodexHomes = JSON.stringify(watchOptions.codexHomes);
     const directoryKey = JSON.stringify([dirs, activitySources, watchOptions.senpiSources, watchedCodexHomes]);
     if (directoryKey === watchedDirectoryKey) return;
+    // Initial adds are suppressed, so remember an existing exporter name
+    // before the first event arrives. It may be an unlink.
+    copilotExporter?.rememberExistingAlias();
     closeWatchers();
     if (dirs.length === 0) {
       watchedDirectoryKey = directoryKey;
@@ -2993,7 +3000,7 @@ function startCollector(options) {
       // the collector cannot re-trigger itself. See
       // SELF_WATCHED_SQLITE_SIDECAR_CLIENTS for the measured per-client evidence.
       if (isSelfWatchSqliteSidecarEvent(filePath, rootsByClient)) return;
-      const eventClients = clientsForWatchPath(filePath, attributionRootsByClient, attributionIgnores);
+      const eventClients = clientsForWatchPath(filePath, attributionRootsByClient, attributionIgnores, copilotExporter);
       const activityClients = activityClientsForPath(filePath, activitySources);
       if (activityClients.length || eventClients.some(isSessionActivityClient)) {
         activityScheduler?.request();
@@ -3017,7 +3024,7 @@ function startCollector(options) {
           filePath,
           typeof reasonixNativeSessionCache.sessionRoots === 'function'
             ? reasonixNativeSessionCache.sessionRoots()
-            : reasonixNativeSessionWatchRoots()
+            : reasonixNativeSessionWatchRoots(watchOptions)
         )
       ) {
         reasonixNativeSessionCache.invalidate(filePath);
@@ -3052,6 +3059,8 @@ function startCollector(options) {
           cursorDesktopRoots: sourceSyncRootsByClient.cursor || [],
           homeDir: sourceOptions.homeDir,
           env: sourceOptions.env,
+          cwdDir: sourceOptions.cwdDir,
+          codexHomes: watchOptions.codexHomes,
           senpiSources: watchOptions.senpiSources,
           usePolling,
           pollingEntryLimit: watchPollingEntryLimit

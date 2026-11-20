@@ -135,7 +135,7 @@ function watchClientRootsForClients(clientsCsv, options = {}) {
     }
   }
   if (enabled.has('reasonix')) {
-    const nativeRoots = reasonixNativeSessionWatchRoots();
+    const nativeRoots = reasonixNativeSessionWatchRoots(options);
     const existingNativeRoots = nativeRoots.filter(dirExists);
     if (existingNativeRoots.length > 0) {
       rootsByClient.reasonix = [...new Set([...(rootsByClient.reasonix || []), ...existingNativeRoots])];
@@ -167,7 +167,7 @@ function watchAttributionRootsForClients(clientsCsv, watchRoots = null, options 
     const sources = options.senpiSources || senpiWatchSources(options);
     attributed.senpi = [...sources.targets.map(target => target.path), ...(normalizeCustomScanPaths(options.customScanPaths, options).senpi || [])];
   }
-  const exporter = copilotExporterWatch(os.homedir());
+  const exporter = options.copilotExporter ?? copilotExporterWatch(os.homedir());
   if (exporter && rootsByClient.copilot) {
     const exporterDir = path.resolve(exporter.dir);
     const ownedByOtherSource = new Set(
@@ -198,7 +198,7 @@ function watchAttributionRootsForClients(clientsCsv, watchRoots = null, options 
   return attributed;
 }
 
-function clientsForWatchPath(filePath, rootsByClient, ignoreByClient = null) {
+function clientsForWatchPath(filePath, rootsByClient, ignoreByClient = null, copilotExporter = null) {
   if (!filePath) return [];
   const resolved = path.resolve(filePath);
   const matched = [];
@@ -206,7 +206,8 @@ function clientsForWatchPath(filePath, rootsByClient, ignoreByClient = null) {
     if (ignoreByClient?.[client]?.(resolved)) continue;
     if (roots.some((root) => {
       const resolvedRoot = path.resolve(root);
-      return resolved === resolvedRoot || resolved.startsWith(descendantPrefix(resolvedRoot));
+      return resolved === resolvedRoot || resolved.startsWith(descendantPrefix(resolvedRoot))
+        || (client === 'copilot' && resolvedRoot === copilotExporter?.canonicalFile && copilotExporter.matches(resolved));
     })) matched.push(client);
   }
   return matched;
@@ -335,7 +336,11 @@ const pruneDependencyTrees = (parts) => parts.some((part) => CUSTOM_ROOT_PRUNED_
 // directory alone can belong to a parent of several homes or to another tool.
 function isCodexHome(dir) {
   return [dir, path.join(dir, 'sqlite')].some((catalogDir) => {
-    try { return fs.readdirSync(catalogDir).some((name) => /^state_\d+\.sqlite$/.test(name)); } catch (_) { return false; }
+    try {
+      return fs.readdirSync(catalogDir).some((name) =>
+        /^state_\d+\.sqlite$/.test(name)
+        && fs.statSync(path.join(catalogDir, name), { throwIfNoEntry: false })?.isFile());
+    } catch (_) { return false; }
   });
 }
 const pruneCodexHome = (parts) => !CODEX_HOME_TRANSCRIPT_DIRS.has(parts[0]) || pruneDependencyTrees(parts);
@@ -561,8 +566,8 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // is what gets watched. The parent is an arbitrary user-chosen directory and
   // can be $HOME — everything in it except that one file is pruned, and
   // watchAttributionRootsForClients keeps it from becoming a copilot prefix.
-  const exporter = copilotExporterWatch(os.homedir());
-  if (candidates.copilot && exporter) bound('copilot', [exporter.dir], (_parts, resolved) => resolved !== exporter.canonicalFile);
+  const exporter = options.copilotExporter ?? copilotExporterWatch(os.homedir());
+  if (candidates.copilot && exporter) bound('copilot', [exporter.dir], (_parts, resolved) => !exporter.matches(resolved));
 
   const cursorEnabled = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).includes('cursor');
   // Cursor owns this source; Tokscale only reads its credentials/titles and
@@ -593,7 +598,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   const reasonixEnabled = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).includes('reasonix');
   bound(
     'reasonix',
-    reasonixEnabled ? reasonixNativeSessionWatchRoots().filter(dirExists) : [],
+    reasonixEnabled ? reasonixNativeSessionWatchRoots(options).filter(dirExists) : [],
     (_parts, resolved) => {
       if (isReasonixNativeSessionSidecar(resolved)) return false;
       try {
@@ -717,7 +722,7 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   }
   // A path stays watched while any policy on its root keeps it, so a root
   // named by two clients keeps the union of their contracts.
-  const codexHomes = new Set(recursive
+  const codexHomes = new Set(options.codexHomes ?? recursive
     .filter(({ client, custom, root }) => client === 'codex' && custom && isCodexHome(root))
     .map(({ root }) => root));
   const codexCustomPolicy = (root) => {
@@ -910,6 +915,8 @@ function openWatch(chokidar, config = {}) {
     cursorDesktopRoots: config.cursorDesktopRoots,
     homeDir: config.homeDir,
     env: config.env,
+    cwdDir: config.cwdDir,
+    codexHomes: config.codexHomes,
     senpiSources: config.senpiSources
   }), config.usageDirs || config.dirs || [], config.activitySources || []);
   const limit = Number.isInteger(config.pollingEntryLimit) && config.pollingEntryLimit >= 0
