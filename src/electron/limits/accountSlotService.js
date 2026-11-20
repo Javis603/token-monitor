@@ -96,17 +96,12 @@ function createAccountSlotService({ getSettings, write, onChanged, onPresentatio
     return { primary, rows };
   }
   function dto(entry) {
-    const slotSources = entry.sourceSelection?.slotSources;
     return accountRows(entry).rows.map(({ id, label, enabled, accountKey, accountKeyAliases = [], values, fingerprint, source, sourceName, accountName, accountEmail, createdAt, updatedAt, credentialFor }) => {
     const key = accountKey || hashKey(entry.id, 'account-slot', source ? 'default' : `slot:${id}`);
     const formValues = Object.fromEntries(accountForm(entry).fields.filter(field => !field.secret).map(field => [field.key, values[field.key]]));
     if (entry.id === 'alibaba' && source === 'environment') formValues.alibabaVariant = accountVariant(entry, { values, source });
-    const collectionSources = slotSources && (source === 'discovered'
-      ? [slotSources.discovered].filter(Boolean)
-      : Object.entries(slotSources.credentials).filter(([field]) => values[field]).map(([, lane]) => lane));
     return { id, label, enabled, accountKey: key, accountKeyAliases, ...(source ? { source } : {}),
       ...(credentialFor ? { credentialFor } : {}),
-      ...(collectionSources?.length ? { collectionSources } : {}),
       ...(accountName ? { accountName } : {}),
       ...(source === 'discovered' ? { sourceName, accountName, accountEmail } : {}),
       ...(entry.accountSlotOwner ? { capabilities: { rename: true, move: true, remove: true, pause: true, edit: true }, accountEmail: values?.accountEmail || '' } : {}),

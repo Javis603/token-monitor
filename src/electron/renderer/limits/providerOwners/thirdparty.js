@@ -119,7 +119,6 @@ function thirdPartyProfileStatusText(provider, options = {}) {
 function updateNamedApiProfilesStatus({
   providerId,
   profileSettingsKey,
-  profileCountStateKey,
   statusText
 }) {
   const providerEnabled = limitProviderEnabled(providerId);
@@ -140,18 +139,6 @@ function updateNamedApiProfilesStatus({
     `[data-managed-profile-provider="${providerId}"][data-managed-profile-environment]`
   );
   if (envInfo) envInfo.textContent = statusText(byName.get('environment'), { providerEnabled });
-  const statusEl = document.getElementById(`${providerId}Status`);
-  if (!statusEl) return;
-  const total = state[profileCountStateKey] || 0;
-  const linked = providers.filter((provider) => provider.status === 'ok').length;
-  accountShellApi.render({
-    status: statusEl,
-    statusText: total === 0
-      ? t(`settings.${providerId}.statusNotSet`)
-      : !providerEnabled
-        ? t(`settings.${providerId}.nAccounts`, { count: total })
-        : t(`settings.${providerId}.connected`, { linked, total })
-  });
 }
 
 function updateThirdPartyProfilesStatus() {
@@ -159,7 +146,6 @@ function updateThirdPartyProfilesStatus() {
   updateNamedApiProfilesStatus({
     providerId: 'thirdparty',
     profileSettingsKey: 'thirdPartyProfiles',
-    profileCountStateKey: 'thirdPartyProfileCount',
     statusText: thirdPartyProfileStatusText
   });
 }
@@ -225,6 +211,12 @@ function renderNamedApiProfiles(config) {
       detailText: account => account.source === 'environment' ? '' : detailForProfile(account),
       enabled: (account, value) => api.setProfileEnabled(account.id, value),
       remove: account => api.deleteProfile(account.id), changed: () => {}, refresh: rerender,
+      readings: () => localProviderStatuses(providerId),
+      // Global disablement keeps the configured count instead of reporting 0 connected.
+      status: { element: () => document.getElementById(`${providerId}Status`), text: summary => summary.total === 0
+        ? t(`settings.${providerId}.statusNotSet`)
+        : !limitProviderEnabled(providerId) ? t(`settings.${providerId}.nAccounts`, { count: summary.total })
+          : t('settings.slots.connectedCount', summary) },
       edit: account => {
         const profile = account;
         resetThirdPartyDraft();
@@ -397,5 +389,5 @@ function setup() {
 
 
 }
- return { state, setThirdPartyAccountExpanded, selectedThirdPartyAdapter, updateThirdPartyHttpWarning, setThirdPartyAdapterFields, thirdPartyProfileStatusText, updateNamedApiProfilesStatus, updateThirdPartyProfilesStatus, thirdPartyProfileErrorText, renderNamedApiProfiles, renderThirdPartyProfiles, setup };
+ return { state, setThirdPartyAccountExpanded, selectedThirdPartyAdapter, updateThirdPartyHttpWarning, setThirdPartyAdapterFields, thirdPartyProfileStatusText, updateNamedApiProfilesStatus, updateThirdPartyProfilesStatus, refreshReadings: updateThirdPartyProfilesStatus, thirdPartyProfileErrorText, renderNamedApiProfiles, renderThirdPartyProfiles, setup };
 });

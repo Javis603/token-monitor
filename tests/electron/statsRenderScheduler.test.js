@@ -247,7 +247,7 @@ test('leaving Settings no longer needs a catch-up repaint', () => {
   // The main surface keeps rendering behind the overlay, so neither exit path
   // may repaint merely because Settings happened to be open.
   assert.doesNotMatch(settingsToggle, /render\(\)/);
-  assert.match(settingsToggle, /if \(settingsOpen\) \{\s+hideHomeTrendTooltip\(\);\s+syncSettingsForm\(\);\s+\} else \{/);
+  assert.match(settingsToggle, /if \(settingsOpen\) \{\s+hideHomeTrendTooltip\(\);\s+resetMainViewSettings\(\);\s+syncSettingsForm\(\);\s+\} else \{/);
   assert.doesNotMatch(trayView, /settingsWasOpen/);
   // Tray navigation to the view already on screen still repaints, because it
   // clears the open session and nothing else redraws that.
@@ -269,11 +269,11 @@ test('stats-derived Settings rows refresh behind an open panel', () => {
     app.indexOf('function isSettingsSurfaceVisible()')
   );
 
-  // The archived session count is Settings content derived from state.stats, and
-  // the only thing that redraws it is the main render. It goes stale for as long
-  // as anything stops render() from running while the panel is open, which is how
-  // it used to need a close and reopen to catch up.
-  assert.match(archiveBody, /sessionRowsApi\.archivedSessionCount\(state\.stats\)/);
+  // The archived session count is Settings content counted for the snapshot in
+  // state.stats, and the only thing that asks for it is the main render. It goes
+  // stale for as long as anything stops render() from running while the panel is
+  // open, which is how it used to need a close and reopen to catch up.
+  assert.match(archiveBody, /requestArchivedSessionCount\(\);/);
   assert.doesNotMatch(archiveBody, /isSettingsSurfaceVisible|isSettingsPanelOpen/);
   assert.match(renderBody, /renderSessionUsageArchiveStatus\(\);/);
   assert.match(app, /function render\(\{ fromSearch = false \} = \{\}\) \{\n {2}renderAppContent\(\{ fromSearch \}\);/);
@@ -287,6 +287,7 @@ test('a stats update repaints main and the visible Settings overlay', () => {
     'renderCodexAccounts',
     'renderMimoStatus',
     'renderWorkbuddyStatus',
+    'refreshAccountOwnerReadings',
     'renderSettingsSummaries',
     'renderLimitProviderCheckboxes',
     'renderToolPreferences',
@@ -320,7 +321,8 @@ test('a stats update repaints main and the visible Settings overlay', () => {
   assert.deepEqual(calls.slice(0, 2), ['connection:main', 'main']);
   assert.equal(calls.filter(call => call === 'settings-scroll-batch').length, 1);
   assert.ok(calls.indexOf('renderSettingsSummaries') > calls.indexOf('main'));
-  assert.ok(calls.indexOf('renderMimoStatus') > calls.indexOf('main'));
+  // A list that repaints only on settings pushes keeps its pre-refresh status.
+  assert.ok(calls.indexOf('refreshAccountOwnerReadings') > calls.indexOf('main'));
   assert.equal(calls.at(-1), 'ready');
 });
 
@@ -520,5 +522,5 @@ test('all stats refreshes use visibility-aware rendering', () => {
 
   assert.match(refreshStats, /getStats\(options\)[\s\S]*statsRenderScheduler\.request\(\);/);
   assert.equal([...refreshStats.matchAll(/setStatus\(statusTextFor/g)].length, 1);
-  assert.match(statsRender, /renderMimoStatus\(\);/);
+  assert.match(statsRender, /refreshAccountOwnerReadings\(\);/);
 });

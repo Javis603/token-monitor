@@ -8,6 +8,49 @@ const vm = require('node:vm');
 const claudeOwner = require('../../src/electron/renderer/limits/providerOwners/claude');
 const accountShellApi = require('../../src/electron/renderer/limits/accountShell');
 const legacyList = require('../../src/electron/renderer/limits/legacyAccountList');
+const { liveSourceIds } = require('../../src/electron/renderer/limits/accountSlotsPanel');
+const { createConnectionCard } = require('../../src/electron/renderer/limits/connectionPresentation');
+const { connectionSources } = require('../../src/electron/renderer/limits/providerPresentation');
+
+test('Claude Web login health does not light the quota source without a fresh Web reading', () => {
+  const document = require('./accountOwnerDom.fixture.cjs').createDocument();
+  const list = document.createElement('div');
+  list.id = 'claudeWebAccountList';
+  document.root.append(list);
+  const settings = {
+    claudeManagedAccounts: [{ id: 'saved', accountKey: 'shared', enabled: true }],
+    claudeWebLoginStatuses: { saved: 'ok' }
+  };
+  let readings = [];
+  const owner = claudeOwner.create({ document, getSettings: () => settings,
+    accountShellApi, getAccountContext: () => ({ settings }), preserveScroll: fn => fn(),
+    window: { TokenMonitorLegacyAccountList: legacyList, tokenMonitor: {} },
+    localProviderStatuses: () => readings, t: key => key });
+  const web = { provider: 'claude', accountKey: 'shared', source: 'web', status: 'ok' };
+  const oauth = { ...web, source: 'oauth' };
+  try {
+    for (const [quota, expected] of [
+      [[oauth], ['oauth']],
+      [[], []],
+      [[{ ...web, stale: true }], []],
+      [[web], ['web']]
+    ]) {
+      readings = quota;
+      owner.renderClaudeWebAccounts();
+      const row = [...list.walk()].find(node => node.dataset.slotId === 'saved');
+      const icon = row.querySelector('.slot-source-icon');
+      assert.equal(row.querySelector('.slot-status').classList.contains('slot-connected'), true);
+      assert.equal(icon.dataset.kind, 'web');
+      const card = createConnectionCard({ document, t: key => key, sources: connectionSources('claude'),
+        readings, liveSourceIds: liveSourceIds('claude') });
+      const highlighted = [...card.walk()].filter(node => node.classList.contains('is-live'));
+      assert.deepEqual(highlighted.map(node => node.dataset.kind), expected);
+      assert.equal(icon.classList.contains('is-live'), expected.includes('web'));
+    }
+  } finally {
+    list.remove();
+  }
+});
 
 
 test('Claude Web rows retain controls and removal confirmation across quota and login-status updates', async (suite) => {
@@ -90,37 +133,44 @@ for (const fromCancel of [true, false]) {
   });
 }
 
-test('Claude card counts healthy identities instead of letting one linked account hide failures', () => {
+test('Claude card counts its rows so one linked account cannot hide failures', () => {
+  const document = require('./accountOwnerDom.fixture.cjs').createDocument();
+  const container = document.createElement('div'); container.id = 'claudeWebAccountList'; document.root.append(container);
   const state = { settings: { claudeManagedAccounts: [
     { id: 'a', accountKey: 'a', enabled: true },
     { id: 'b', accountKey: 'b', enabled: true },
     { id: 'c', accountKey: 'c', enabled: false },
     { id: 'unchecked', enabled: true }
   ] } };
+  let providerEnabled = true;
   let providers = [
-    { accountKey: 'a', source: 'web', status: 'ok' },
-    { accountKey: 'b', source: 'web', status: 'unauthorized' },
-    { accountKey: 'c', source: 'web', status: 'ok' },
-    { accountKey: 'a', source: 'oauth', status: 'ok' }
+    { provider: 'claude', accountKey: 'a', source: 'web', status: 'ok' },
+    { provider: 'claude', accountKey: 'b', source: 'web', status: 'unauthorized' },
+    { provider: 'claude', accountKey: 'c', source: 'web', status: 'ok' },
+    { provider: 'claude', accountKey: 'a', source: 'oauth', status: 'ok' }
   ];
-  const context = claudeOwner.create({ initial: {}, getSettings: () => state.settings, accountShellApi, localProviderStatuses: () => providers,
-    getAccountContext: () => ({ settings: state.settings }), window: { TokenMonitorLegacyAccountList: legacyList },
-    t: (key, params) => key === 'settings.opencode.connected' ? `${params.linked}/${params.total}` : key });
-  assert.equal(context.claudeAccountStatusText('fallback', true), '1/4');
-  assert.equal(context.claudeAccountStatusText('fallback', false), '0/4');
-  providers.push({ accountKey: 'local', source: 'oauth', status: 'ok' });
-  assert.equal(context.claudeAccountStatusText('fallback', true), '2/5');
+  const context = claudeOwner.create({ document, initial: {}, getSettings: () => state.settings, accountShellApi, localProviderStatuses: () => providers,
+    getAccountContext: () => ({ settings: state.settings, providerEnabled }), preserveScroll: fn => fn(), window: { TokenMonitorLegacyAccountList: legacyList, tokenMonitor: {} },
+    t: (key, params) => key === 'settings.slots.connectedCount' ? `${params.linked}/${params.total}` : key });
+  const status = () => { context.renderClaudeWebAccounts(); return context.claudeAccountStatusText('fallback'); };
+  // The rejected login, the paused one and the unchecked one all stay in the total.
+  assert.equal(status(), '1/4');
+  providerEnabled = false;
+  assert.equal(status(), '0/4');
+  providerEnabled = true;
+  providers.push({ provider: 'claude', accountKey: 'local', source: 'oauth', status: 'ok' });
+  assert.equal(status(), '2/5');
   state.settings = { claudeManagedAccounts: [], claudeWebLegacyCookieConfigured: true };
-  providers = [{ accountKey: 'legacy', source: 'web', status: 'ok' }];
-  assert.equal(context.claudeAccountStatusText('fallback', true), '1/1');
+  providers = [{ provider: 'claude', accountKey: 'legacy', source: 'web', status: 'ok' }];
+  assert.equal(status(), '1/1');
   state.settings = { claudeManagedAccounts: [{ id: 'managed', accountKey: 'same', enabled: true }],
     claudeWebLegacyCookieConfigured: true, claudeWebLegacyAccount: { accountKey: 'same' } };
-  providers = [{ accountKey: 'same', source: 'web', status: 'ok' }];
-  assert.equal(context.claudeAccountStatusText('fallback', true), '1/1');
+  providers = [{ provider: 'claude', accountKey: 'same', source: 'web', status: 'ok' }];
   assert.equal(context.claudeWebSettingsAccounts(providers).length, 2, 'both credential management entries remain reachable');
+  assert.equal(status(), '2/2', 'and both are counted, as both are listed');
   state.settings = {};
   providers = [];
-  assert.equal(context.claudeAccountStatusText('fallback', true), 'fallback');
+  assert.equal(status(), 'fallback');
 });
 
 test('a busy Claude save never reports a credential rejection or clears the draft', async () => {

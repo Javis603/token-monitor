@@ -69,15 +69,13 @@ function renderCodexAccounts() {
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
     enabled: (account, value) => window.tokenMonitor.codex.setAccountEnabled(account.id, value),
     remove: account => window.tokenMonitor.codex.removeAccount(account.id),
-    changed: result => { if (result.accounts) state.settings.codexManagedAccounts = result.accounts; }, refresh: refreshCodexAccounts, busy: () => state.codexSignInBusy
+    changed: result => { if (result.accounts) state.settings.codexManagedAccounts = result.accounts; }, refresh: refreshCodexAccounts, busy: () => state.codexSignInBusy,
+    readings: () => host.localProviderStatuses('codex'),
+    status: { element: () => document.getElementById('codexAccountStatus'), empty: () => t('settings.codex.notConfigured') }
   });
   // Codex accountLabel is a plan type, not a user-chosen account name.
   accountList.update(accounts.map(({ accountLabel, ...account }) => ({ ...account, planLabel: accountLabel })), host.localProviderStatuses('codex'));
-  const summary = accountList.summary();
-  accountShellApi.render({
-    status: statusEl, error: errorEl, errorText: state.codexAccountError,
-    statusText: summary.total ? t('settings.opencode.connected', summary) : t('settings.codex.notConfigured')
-  });
+  accountShellApi.render({ error: errorEl, errorText: state.codexAccountError });
   renderSettingsSummaries();
 }
 
@@ -248,5 +246,5 @@ function setup() {
 
 
 }
- return { state, setCodexAccountExpanded, renderCodexLoginStatus, renderCodexAccounts, refreshCodexAccounts, nextCodexSignInFlowId, isCurrentCodexSignInFlow, startCodexLogin, setup };
+ return { state, setCodexAccountExpanded, renderCodexLoginStatus, renderCodexAccounts, refreshReadings: () => accountList?.refreshReadings(), refreshCodexAccounts, nextCodexSignInFlowId, isCurrentCodexSignInFlow, startCodexLogin, setup };
 });

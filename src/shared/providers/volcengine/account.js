@@ -7,7 +7,6 @@ const normalizeVolcengineRegion = (value) => String(value || '').trim().toLowerC
 
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'volcengine',
-  sourceSelection: { sources: ['api', 'cli'] },
   accountSlots: true,
   accountCredentialKeys: ['volcengineAccessKeyId', 'volcengineApiKey'],
   accountCredentialReady: (values, key) => key !== 'volcengineAccessKeyId'

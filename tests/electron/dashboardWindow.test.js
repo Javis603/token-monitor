@@ -422,7 +422,7 @@ test('heatmap metric preserves the legacy cost default and normalizes settings',
 test('Home configures heatmap color in Settings while keeping token tooltips', () => {
   const app = read('src', 'electron', 'renderer', 'app.js');
   const css = read('src', 'electron', 'renderer', 'styles.css');
-  assert.match(app, /settings\.home\.configureActivity/);
+  assert.match(app, /: id === 'trends' \? renderHomeActivitySettings\(\)/);
   assert.match(app, /function renderHomeActivitySettings/);
   assert.match(app, /saveSettings\(\{ heatmapMetric: metric \}\)/);
   assert.match(app, /data-home-activity-tooltip-count[^\n]*formatCompact\(Number\(cell\.dataset\.t/);

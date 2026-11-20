@@ -258,7 +258,8 @@ function migrateOwnerSlots(store, stored, settings, entry, document, mark, now) 
   const timestamp = new Date(now()).toISOString();
   const imports = sources.map(({ metadata, credential }) => ({
     id: /^[A-Za-z0-9_-]{1,64}$/.test(metadata.id) ? metadata.id : hashKey(provider, 'legacy-owner', metadata.id).slice(7),
-    label: migratedOpenRouterLabel(String(metadata.accountLabel || '')), enabled: metadata.enabled !== false, values: {},
+    // Legacy owner metadata had no rename; its `accountLabel` is provider-reported.
+    label: '', enabled: metadata.enabled !== false, values: {},
     accountKey: metadata.accountKey || '', accountKeyAliases: metadata.accountKeyAliases || [], serverIdentity: Boolean(metadata.accountKey),
     createdAt: metadata.addedAt || timestamp, updatedAt: metadata.updatedAt || timestamp,
     owner: { metadata, credential }

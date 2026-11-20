@@ -3598,3 +3598,31 @@ test('Mistral renders both monthly allowances and an unmetered wallet, with inde
     }
   }
 });
+
+test('rail quota rings preserve the selected vendor color against either glass tint', () => {
+  const source = fs.readFileSync(path.join(root, 'src/electron/renderer/edgeDock/dock.js'), 'utf8');
+  const colors = source.slice(source.indexOf('function parseColor('), source.indexOf('function providerLabel('));
+  const renderCell = balancedCall(source, 'function providerCellNode(cell) {');
+  for (const [glass, selected] of [['21 21 21', '#060a19'], ['245 245 245', '#fafafa']]) {
+    const cell = vm.runInNewContext(`${colors}\n${renderCell}\nproviderCellNode({ provider: 'opencode', remainingPercent: 97 });`, {
+      document: { documentElement: {} },
+      getComputedStyle: () => ({ getPropertyValue: () => glass }),
+      state: {},
+      clientColors: { opencode: selected },
+      presentation: { displayPercent: value => value, waitingSessionSummary: () => ({ count: 0 }) },
+      runningSessionSummary: () => ({ count: 0 }),
+      el: tag => new FakeElement(tag),
+      appearance: () => ({}),
+      markRoll: () => {},
+      displaySeverity: () => 'ok',
+      markNode: () => new FakeElement('span'),
+      ringNode: (_percent, color) => {
+        const ring = new FakeElement('span');
+        ring.style.setProperty('--ring-color', color);
+        return ring;
+      },
+      providerLabel: id => id
+    });
+    assert.equal(cell.children[0].style['--ring-color'], selected);
+  }
+});

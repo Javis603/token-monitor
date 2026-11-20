@@ -247,9 +247,15 @@ function createOpencodeAccountService(deps) {
             && !opencodeProfiles.ambientKeyFor(p, ambientKey, ambientIdentity)
         };
       }
+      // The collector reads the legacy environment cookie as its own account
+      // unless an enabled profile already holds it, so the list shows it the same way.
+      const envCookie = env.TOKEN_MONITOR_OPENCODE_COOKIE || '';
+      const environmentAccountKey = envCookie && !Object.values(profiles).some(p => p.enabled && p.cookie === envCookie)
+        ? openCodeCookieAccountKey(envCookie) : '';
       return {
         profiles: safe,
         hasEnvVar,
+        environmentAccountKey,
         hasAmbientKey,
         ambientAccountKey: hasAmbientKey ? hashKey('opencode', ambientIdentity) : '',
         ambientEnabled: getOpencodeAmbientEnabled() !== false

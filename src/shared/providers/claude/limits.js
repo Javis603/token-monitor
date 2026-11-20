@@ -1,5 +1,4 @@
 'use strict';
-const { selectedSource } = require('../../limits/sourceSelection');
 const { mergedOwnerAccounts } = require('../../limits/ownerAccountSlots');
 
 // Claude limits provider: OAuth and Web session credentials, the CLI fallback,
@@ -1378,7 +1377,7 @@ async function fetchClaudeAccountsLimits(options = {}, deps = {}) {
   if (!scopeField && !scopeId && !web.length && !options.previousLimits?.providers?.some((row) => row.provider === 'claude')) {
     // This lane is the OAuth/CLI one, so a cold-start failure belongs to it.
     return fetchClaudeLimits({ ...options, claudeWebCookie: '' }, deps).catch((error) => {
-      deps.noteLimitFailure?.(error, { source: selectedSource('claude', options, deps) === 'cli' ? 'cli' : 'oauth' });
+      deps.noteLimitFailure?.(error, { source: 'oauth' });
       throw error;
     });
   }
@@ -1449,12 +1448,11 @@ async function fetchClaudeAccountsLimits(options = {}, deps = {}) {
     }
   } catch (error) {
     if (deps.signal?.aborted) throw abortError(deps.signal);
-    deps.noteLimitFailure?.(error, { source: selectedSource('claude', options, deps) === 'cli' ? 'cli' : 'oauth' });
+    deps.noteLimitFailure?.(error, { source: 'oauth' });
     local = { provider: 'claude', status: error?.status || 'unavailable', windows: [] };
     rows.push(local);
   }
-  // A missing selected source does not prove the account itself was removed.
-  const localIdentityMissing = local?.status === 'notConfigured' && selectedSource('claude', options, deps) === 'auto';
+  const localIdentityMissing = local?.status === 'notConfigured';
   const represented = new Set(rows.map((row) => row.accountKey).filter(Boolean));
   for (const previous of options.previousLimits?.providers || []) {
     if (scopeField || scopeId) break;
@@ -1491,56 +1489,11 @@ async function fetchClaudeAccountsLimits(options = {}, deps = {}) {
   }), ...removals];
 }
 
-// Explicit CLI readings need a fresh server profile, not the Auto fallback's
-// cached identity: CLI may be signed into a different account/config root.
-async function fetchSelectedClaudeCliLimits(options, deps, nowMs) {
-  if (options.claudeCliFallbackEnabled === false) {
-    throw errorWithStatus('unavailable', 'Claude CLI collection is disabled');
-  }
-  const readIdentity = async () => {
-    const clean = stripAnsiCodes(await runClaudeAuthStatus(deps)).trim();
-    const start = clean.indexOf('{');
-    const end = clean.lastIndexOf('}');
-    const status = start >= 0 && end >= start ? JSON.parse(clean.slice(start, end + 1)) : null;
-    if (status?.loggedIn !== true || status.authMethod !== 'claude.ai'
-      || typeof status.email !== 'string' || !status.email.trim()
-      || typeof status.orgId !== 'string' || !status.orgId.trim()) {
-      throw claudeIdentityUnavailable('Claude CLI did not report a subscription account identity');
-    }
-    return { email: status.email.trim().toLowerCase(), orgId: status.orgId.trim() };
-  };
-  const before = await readIdentity();
-  let credentials = await readClaudeCredentials(deps).catch(limitStage('credentials'));
-  // Deliberately bypass the identity cache and do not request OAuth quota.
-  let profile;
-  try {
-    profile = await callClaudeProfile(credentials.accessToken, deps);
-  } catch (error) {
-    if (error?.status !== 'unauthorized') throw error;
-    credentials = await refreshClaudeCredentials(credentials, deps, options);
-    profile = await callClaudeProfile(credentials.accessToken, deps);
-  }
-  const identity = claudeOauthAccountIdentity(profile);
-  const organizationId = String(profile?.organization?.uuid || profile?.organization?.id || profile?.organization_uuid || '').trim();
-  const matches = status => status.email === identity.accountEmail && status.orgId === organizationId;
-  if (!matches(before)) throw claudeIdentityUnavailable('Claude CLI account does not match the verified OAuth profile');
-  const text = await runClaudeUsageCli(deps);
-  if (!matches(await readIdentity())) throw claudeIdentityUnavailable('Claude CLI account changed during usage collection');
-  const provider = mapClaudeCliUsageToProvider(text, { updatedAt: nowIso(nowMs), now: new Date(nowMs) });
-  if (provider.accountEmail && provider.accountEmail.toLowerCase() !== identity.accountEmail) {
-    throw claudeIdentityUnavailable('Claude CLI usage account does not match the verified OAuth profile');
-  }
-  return { ...provider, ...identity };
-}
-
 async function fetchClaudeLimits(options = {}, deps = {}) {
   const nowMs = (deps.now || Date.now)();
   const platform = deps.platform || process.platform;
   const webCookie = claudeWebCookie(deps.env || process.env, options);
   if (webCookie) return fetchClaudeWebLimits(webCookie, deps, options);
-  const source = selectedSource('claude', options, deps);
-  if (source === 'cli') return fetchSelectedClaudeCliLimits(options, deps, nowMs);
-  if (source === 'oauth') options = { ...options, claudeCliFallbackEnabled: false };
   let oauthIdentity = null;
   try {
     let credentials = await readClaudeCredentials(deps).catch(limitStage('credentials'));

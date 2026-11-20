@@ -88,7 +88,10 @@ function createAntigravityAccountService(deps) {
         id: existing?.id || `antigravity-${crypto.randomUUID()}`,
         accountKey: antigravityOAuth.accountKey(identity.email),
         accountEmail: identity.email,
-        accountLabel: existing?.accountLabel || identity.name || '',
+        // The Google profile name is an identity, not a rename; the email
+        // stays the account's display name unless the user renames it.
+        accountName: identity.name || existing?.accountName || '',
+        accountLabel: '',
         enabled: true,
         addedAt: existing?.addedAt || now,
         updatedAt: now

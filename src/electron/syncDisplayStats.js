@@ -98,6 +98,52 @@ function normalizedLocalRecord(localDevice) {
   return normalized;
 }
 
+// The Hub re-sends every device on each event, if only for its new ageMs, so a
+// Hub device record is a new object every time. Its periods are not: a delta
+// copies only the containers it touches and a freshness event keeps the periods
+// it does not re-stamp. Normalizing the periods is most of normalizing a record,
+// so it is cached by the Hub's period object for as long as the Hub keeps it.
+const normalizedHubPeriods = new WeakMap();
+
+// Normalization judges live-activity observations against a clock: one from a
+// peer clock that is ahead counts only once it is no longer in the future. A
+// period normalized at one sample therefore matches any clock between that
+// sample and the earliest observation it found in the future.
+function futureActivityAt(period, nowMs) {
+  let earliest = Infinity;
+  const consider = (observation) => {
+    const at = Date.parse(String(observation?.observedAt || ''));
+    if (at > nowMs && at < earliest) earliest = at;
+  };
+  for (const session of Object.values(period.sessions || {})) consider(session?.liveActivity);
+  for (const observation of Object.values(period.sessionActivity || {})) consider(observation);
+  return earliest;
+}
+
+function normalizedHubPeriod(period, options) {
+  if (!period || typeof period !== 'object') return normalizePeriod(period, options);
+  const projects = options.projectsEnabled !== false ? 'withProjects' : 'withoutProjects';
+  let cached = normalizedHubPeriods.get(period);
+  if (!cached) {
+    cached = {};
+    normalizedHubPeriods.set(period, cached);
+  }
+  const nowMs = Date.now();
+  const entry = cached[projects];
+  if (!entry || nowMs < entry.filledAt || nowMs >= entry.refreshAt) {
+    cached[projects] = {
+      normalized: normalizePeriod(period, { ...options, nowMs }),
+      filledAt: nowMs,
+      refreshAt: futureActivityAt(period, nowMs)
+    };
+  }
+  return cached[projects].normalized;
+}
+
+function normalizedHubRecord(record) {
+  return normalizeDeviceRecord(record, { normalizePeriod: normalizedHubPeriod });
+}
+
 const summaryRecords = new WeakMap();
 
 function withoutAllTimeSessions(record) {
@@ -123,12 +169,13 @@ function composeLocalSyncStats(hubStats, localDevice, options = {}) {
     .concat(localDevice);
   const hubStaleAfterMs = nonNegativeNumber(hubStats?.staleAfterMs);
   const hasHubStaleAfterMs = hubStaleAfterMs !== null;
-  const normalize = (record) => (record === localDevice ? normalizedLocalRecord(localDevice) : normalizeDeviceRecord(record));
+  const normalize = (record) => (record === localDevice ? normalizedLocalRecord(localDevice) : normalizedHubRecord(record));
   const summarize = (record) => (record === localDevice
     ? normalizedLocalSummary(localDevice)
-    : withoutAllTimeSessions(normalizeDeviceRecord(record)));
+    : withoutAllTimeSessions(normalizedHubRecord(record)));
   const aggregate = aggregateDevices(devices, hubStaleAfterMs ?? 0, options.nowMs, {
-    normalizeRecord: options.allTimeSessions === false ? summarize : normalize
+    normalizeRecord: options.allTimeSessions === false ? summarize : normalize,
+    copyNormalizedMonthSessions: true
   });
 
   aggregate.devices = aggregate.devices.map((device) => {
@@ -215,7 +262,9 @@ function composeLocalSyncSummary(hubStats, localDevice, options = {}) {
 // to its completion when that is asked for.
 function composeLocalOnlySummary(localDevice, finish, options = {}) {
   const nowMs = options.nowMs ?? Date.now();
-  const compose = (normalizeRecord) => finish(aggregateDevices([localDevice], 0, nowMs, { normalizeRecord }));
+  const compose = (normalizeRecord) => finish(aggregateDevices([localDevice], 0, nowMs, {
+    normalizeRecord, copyNormalizedMonthSessions: true
+  }));
   const summary = compose(normalizedLocalSummary);
   completions.set(summary, { compose: () => compose(normalizedLocalRecord), complete: null });
   return summary;

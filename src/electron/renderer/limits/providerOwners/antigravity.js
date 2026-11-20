@@ -28,12 +28,7 @@ function renderAntigravityStatus() {
   const cancelButton = document.getElementById('antigravityCancelLoginButton');
   if (!statusEl || !listEl || !errorEl || !addButton || !cancelButton) return;
   const accounts = state.settings?.antigravityManagedAccounts || [];
-  const enabledCount = accounts.filter((account) => account.enabled !== false).length;
   accountShellApi.render({
-    status: statusEl,
-    statusText: accounts.length === 0
-      ? t('settings.antigravity.notConfigured')
-      : t('settings.antigravity.connected', { linked: enabledCount, total: accounts.length }),
     error: errorEl,
     errorText: state.antigravityAccountError,
     progress: statusMessage,
@@ -53,7 +48,9 @@ function renderAntigravityStatus() {
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
     enabled: (account, value) => window.tokenMonitor.antigravity.setAccountEnabled(account.id, value),
     remove: account => window.tokenMonitor.antigravity.removeAccount(account.id),
-    changed: result => { if (result.accounts) state.settings.antigravityManagedAccounts = result.accounts; }, refresh: renderAntigravityStatus, busy: () => state.antigravitySignInBusy
+    changed: result => { if (result.accounts) state.settings.antigravityManagedAccounts = result.accounts; }, refresh: renderAntigravityStatus, busy: () => state.antigravitySignInBusy,
+    readings: () => host.localProviderStatuses('antigravity'),
+    status: { element: () => document.getElementById('antigravityAccountStatus'), empty: () => t('settings.antigravity.notConfigured') }
   });
   accountList.update(accounts, host.localProviderStatuses('antigravity'));
   renderSettingsSummaries();
@@ -121,5 +118,5 @@ function setup() {
 
 
 }
- return { state, setAntigravityAccountExpanded, renderAntigravityStatus, startAntigravityLogin, setup };
+ return { state, setAntigravityAccountExpanded, renderAntigravityStatus, refreshReadings: () => accountList?.refreshReadings(), startAntigravityLogin, setup };
 });

@@ -4,11 +4,10 @@
 // Cline limits account wiring. Leaf module: no requires.
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'cline',
-  sourceSelection: { sources: ['api', 'local'], slotSources: { credentials: { clineApiKey: 'api' }, discovered: 'local' } },
   accountSlots: true,
   sources: [
     { id: 'api', kind: 'apiKey', relation: 'alternative', products: ['cline'], labelKey: 'settings.limits.sources.apiKey', descriptionKey: 'settings.cline.note' },
-    { id: 'local', kind: 'file', relation: 'alternative', products: ['cline'], labelKey: 'settings.limits.sources.file', descriptionKey: 'settings.limits.sources.fileDescription' }
+    { id: 'oauth', kind: 'file', relation: 'alternative', products: ['cline'], labelKey: 'settings.limits.sources.file', descriptionKey: 'settings.limits.sources.fileDescription' }
   ],
   fetch: 'fetchClineLimits',
   fields: [

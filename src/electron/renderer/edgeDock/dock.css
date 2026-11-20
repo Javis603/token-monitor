@@ -723,11 +723,16 @@ html.edge-dock-reduced-motion .edge-dock-refresh[data-state="busy"] .edge-dock-r
   color: inherit;
 }
 .edge-dock-session-context-meter {
+  flex: 0 0 16px;
   width: 16px;
   height: 3px;
   overflow: hidden;
   border-radius: 2px;
   background: rgba(var(--overlay-rgb), 0.18);
+}
+.edge-dock-session-context-value {
+  min-width: 3ch;
+  text-align: right;
 }
 .edge-dock-session-context-fill {
   display: block;

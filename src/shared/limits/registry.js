@@ -75,11 +75,6 @@ function bindDeclaration(decl) {
     field.kind === 'managed' || (field.kind === 'profiles' && field.key !== accountSlotKey(decl))))) {
     throw new Error(`limits registry: invalid accountSlots declaration for ${decl.id}`);
   }
-  if (decl.sourceSelection && (decl.sourceSelection.sources.length < 2
-    || new Set(decl.sourceSelection.sources).size !== decl.sourceSelection.sources.length
-    || decl.sourceSelection.sources.some(id => !decl.sources.some(source => source.id === id && source.relation === 'alternative')))) {
-    throw new Error(`limits registry: invalid source selection for ${decl.id}`);
-  }
   if (decl.accountCredentialKeys && (!Array.isArray(decl.accountCredentialKeys)
     || !decl.accountCredentialKeys.length || new Set(decl.accountCredentialKeys).size !== decl.accountCredentialKeys.length
     || decl.accountCredentialKeys.some(key => !decl.fields.some(field => field.key === key && field.kind === 'credential')))) {

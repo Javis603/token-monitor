@@ -305,7 +305,7 @@ test('profile list isolates providers and ignores stale failures and hidden resp
 test('Cursor retires a failed manual login message when status is refreshed', async () => {
   const document = require('./accountOwnerDom.fixture.cjs').createDocument();
   const errors = document.createElement('div'); errors.textContent = '';
-  const statusPill = { textContent: '', title: '' };
+  const statusPill = { textContent: '', title: '', getAttribute(name) { return this[name]; }, setAttribute(name, value) { this[name] = value; } };
   const accountList = { children: [], replaceChildren() { this.children = []; }, append(node) { this.children.push(node); } };
   const manualInput = { value: 'bad session' };
   const manualSubmit = { addEventListener(type, handler) { if (type === 'click') this.click = handler; } };
@@ -357,7 +357,7 @@ test('Cursor retires a failed manual login message when status is refreshed', as
   assert.equal(errors.textContent, '');
   statusRequest.resolve({ accounts: [{ id: 'manual', email: 'user@example.com', enabled: true }], linkedCount: 1 });
   await refresh;
-  assert.equal(statusPill.textContent, 'settings.cursor.connected');
+  assert.equal(statusPill.textContent, 'settings.slots.connectedCount');
   assert.equal(errors.textContent, '');
   assert.equal(errors.classList.contains('hidden'), true);
 });
@@ -365,7 +365,6 @@ test('Cursor retires a failed manual login message when status is refreshed', as
 test('OpenCode status ignores an older probe after a newer status resolves', async () => {
   const requests = [];
   const info = { textContent: '' };
-  const summaries = [];
   const context = {
     accountProfileStatuses: accountShellApi.createRequestGuard(),
     isSettingsSurfaceVisible: () => true,
@@ -376,13 +375,10 @@ test('OpenCode status ignores an older probe after a newer status resolves', asy
     } } } },
     opencodeRowId: (prefix, name) => `${prefix}${name}`,
     document: { getElementById: (id) => id === 'opencode-info-main' ? info : null },
-    t: (key) => key,
-    renderOpenCodeProfilesStatusSummary: (profiles) => summaries.push(profiles)
+    t: (key) => key
   };
   const owner = require('../../src/electron/renderer/limits/providerOwners/opencode').create({
-    ...context, encodeURIComponent, initial: {}, getSettings: () => ({}), accountShellApi: {
-      render: value => summaries.push(value)
-    }, document: { getElementById: id => id === 'opencodeCookieStatus' ? {} : id.startsWith('opencode-info-') ? info : null }
+    ...context, encodeURIComponent, initial: {}, getSettings: () => ({}), accountShellApi: { render() {} }, document: { getElementById: id => id === 'opencodeCookieStatus' ? {} : id.startsWith('opencode-info-') ? info : null }
   });
   const older = owner.updateOpenCodeProfilesStatus();
   const newer = owner.updateOpenCodeProfilesStatus();
@@ -392,5 +388,4 @@ test('OpenCode status ignores an older probe after a newer status resolves', asy
   requests[0].resolve({ profiles: { main: { disabled: true } } });
   await older;
   assert.equal(info.textContent, 'settings.opencode.statusExpired');
-  assert.equal(summaries.length, 1);
 });

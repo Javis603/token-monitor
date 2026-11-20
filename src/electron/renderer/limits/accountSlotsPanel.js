@@ -8,10 +8,11 @@
   const presentationApi = typeof module !== 'undefined' ? require('./providerPresentation') : root.TokenMonitorLimitProviderPresentation;
   const windowLabels = typeof module !== 'undefined' ? require('../../../shared/limits/windowLabels') : root.TokenMonitorLimitWindowLabels;
   const scope = typeof module !== 'undefined' ? require('../../../shared/limits/accountScope') : root.TokenMonitorLimitAccountScope;
-  const api = factory(menus, dragController, dragSort, identity, presentationApi, windowLabels, scope);
+  const connection = typeof module !== 'undefined' ? require('./connectionPresentation') : root.TokenMonitorConnectionPresentation;
+  const api = factory(menus, dragController, dragSort, identity, presentationApi, windowLabels, scope, connection);
   if (typeof module !== 'undefined') module.exports = api;
   if (root) root.TokenMonitorAccountSlotsPanel = api;
-})(typeof window !== 'undefined' ? window : null, function accountSlotsPanelApi(menus, dragController, dragSort, accountIdentity, presentationApi, windowLabels, scope) {
+})(typeof window !== 'undefined' ? window : null, function accountSlotsPanelApi(menus, dragController, dragSort, accountIdentity, presentationApi, windowLabels, scope, connection) {
   // One precedence rule for local panels, remote panels and reading overlays.
   // An explicit blank overrides an old credential-slot label after a clear.
   function presentationLabel(slot, accountKey, presentation = {}) {
@@ -52,16 +53,18 @@
     if (identities.some(identity => identity && String(identity).toLowerCase() === String(value).toLowerCase())) return '';
     return presentationApi.limitProviderPlanDisplayLabel(row, value);
   }
-  function accountStatus(slot, reading, providerEnabled = true) {
+  // `probing` says a refresh that will answer for this account is in flight.
+  // Without a reading, that is a check still running, not a failed one.
+  function accountStatus(slot, reading, providerEnabled = true, probing = false) {
     if (!slot.enabled) return 'paused';
     if (!providerEnabled) return 'disabled';
-    if (slot.sourceSelected === false) return 'notCollected';
     if (reading?.status === 'disabled') return 'disabled';
     if (reading?.status === 'unauthorized') return 'invalid';
     if (reading?.status === 'rateLimited') return 'limited';
     if (reading?.status === 'sourceRateLimited') return 'usageApiLimited';
     if (reading?.stale) return 'stale';
-    return reading?.status === 'ok' ? 'connected' : 'unavailable';
+    if (!reading) return probing ? 'checking' : 'unavailable';
+    return reading.status === 'ok' ? 'connected' : 'unavailable';
   }
   // Shared keys lead regardless of ownership; unknown local slots then remote
   // readings retain their stored/aggregate order.
@@ -208,6 +211,8 @@
     let localDeviceId = '';
     let settings;
     let providerEnabled = true;
+    // Limits probes in flight, from the host's context like the readings.
+    let probes = [];
     const deviceIcons = typeof module !== 'undefined' ? require('../deviceIcons') : window.TokenMonitorDeviceIcons;
     const deviceLabels = typeof module !== 'undefined' ? require('../deviceBreakdown') : window.TokenMonitorDeviceBreakdown;
     let operationLane = Promise.resolve();
@@ -254,10 +259,9 @@
       .map(slot => selectionKey(form.id, slot)).filter(Boolean))];
     const permissions = slot => slot?.credentialFor ? { ...capabilities(slot), rename: false, move: false } : capabilities(slot);
     function rowStatus(slot, reading) {
-      const preference = settings?.[`${form.id}SourcePreference`];
-      const omitted = preference && preference !== 'auto' && slot.collectionSources && !slot.collectionSources.includes(preference);
-      return accountStatus(omitted ? { ...slot, sourceSelected: false } : slot, statusReading(slot, reading),
-        slot.source === 'remote' || providerEnabled);
+      return accountStatus(slot, statusReading(slot, reading),
+        slot.source === 'remote' || providerEnabled,
+        probes.some(probe => scope.probeCoversRow(probe, { ...slot, provider: form.id, region: form.id === 'alibaba' ? alibabaVariant(slot) : slot.region })));
     }
     const run = (operation, ...args) => {
       const slot = activeAccounts().find(slot => slot.id === args[0]);
@@ -356,11 +360,16 @@
         placeEditor();
         const revision = editorRevision;
         const prefix = `${form.id}SlotDraft`;
-        const keys = new Map(form.fields.map(field => [field.key, `${prefix}${field.key}`]));
+        // New Volcengine accounts use one credential set per slot. Existing
+        // slots can still replace credentials saved for a separate Agent Plan.
+        const hideAgentFields = !slot && form.id === 'volcengine';
+        const fields = hideAgentFields ? form.fields.filter(field => !field.key.startsWith('volcengineAgent')) : form.fields;
+        const keys = new Map(fields.map(field => [field.key, `${prefix}${field.key}`]));
         const remap = value => typeof value === 'string' ? (keys.get(value) || (value === form.credentialChoice?.key ? `${prefix}${value}` : value))
           : Array.isArray(value) ? value.map(remap)
             : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, val]) => [key, remap(val)])) : value;
-        const draftForm = remap(form);
+        const manual = hideAgentFields ? form.manual.filter(block => !block.field || keys.has(block.field)) : form.manual;
+        const draftForm = remap({ ...form, fields, manual });
         draftForm.id = prefix;
         draftForm.fields.forEach(field => { field.submitWithCredential = true; });
         const title = localized(make('strong'), `settings.slots.${slot ? 'replaceTitle' : 'addTitle'}`, { provider: label });
@@ -378,7 +387,7 @@
           const result = await run(slot && !asNew ? 'replace' : 'add', ...(slot && !asNew ? [slot.id, original] : [original, name.value]));
           if (!result || revision !== editorRevision) return;
           choices.replaceChildren();
-          const credentialInput = [...keys.keys()].filter(key => form.fields.find(field => field.key === key)?.secret)
+          const credentialInput = fields.filter(field => field.secret).map(field => field.key)
             .map(key => document.getElementById(`${keys.get(key)}Input`)).find(input => input && !input.closest('.hidden'));
           if (result.saved) credentialInput?.removeAttribute('aria-invalid');
           else if (['required', 'invalidFormat', 'unauthorized'].includes(result.status)) {
@@ -461,7 +470,7 @@
         }
 
         editorPanel.querySelector('.credential-manual-panel').querySelector('.settings-actions').append(slotButton('cancel', () => preserveScroll(closeEditor)));
-        for (const field of form.fields.filter(field => !field.secret)) {
+        for (const field of fields.filter(field => !field.secret)) {
           const input = editorPanel.querySelector(`#${prefix}${field.key}Input`);
           if (input && slot?.formValues && Object.hasOwn(slot.formValues, field.key)) input.value = slot.formValues[field.key];
         }
@@ -473,6 +482,23 @@
         editorPanel.querySelector(`#${prefix}LogoutButton`).classList.add('hidden');
       });
     }
+    // The declared source a row reads through: an owner-supplied `sourceId`,
+    // then the reading's provenance, then, for a detected login, the one
+    // declared non-manual source. A pasted credential can be either kind (Trae's
+    // IDE token), and a paired credential shares its detected row's reading,
+    // so neither is guessed.
+    function rowSource(slot, reading) {
+      const declared = settings?.limitConnectionSources
+        ? presentationApi.connectionSources(form.id, settings.limitConnectionSources) : presentationApi.connectionSources(form.id);
+      const byId = slot.sourceId && declared.find(source => source.id === slot.sourceId);
+      if (byId) return byId;
+      if (slot.credentialFor) return null;
+      const read = connection.sourceForReading(declared, reading);
+      if (read || declared.length === 1) return read || declared[0];
+      if (slot.source !== 'discovered') return null;
+      const fits = declared.filter(source => !['apiKey', 'web'].includes(source.kind));
+      return fits.length === 1 ? fits[0] : null;
+    }
     function rowFor({ id, source }) {
       if (rows.has(id)) return rows.get(id);
       const el = make('div', 'slot-row');
@@ -480,6 +506,9 @@
       el.dataset.slotId = id;
       const grip = make('span', 'preference-order-handle slot-drag-handle');
       grip.setAttribute('aria-hidden', 'true');
+      // Shares the grip's cell; the grip replaces it while the row is grabbable.
+      const sourceIcon = make('span', 'slot-source-icon');
+      sourceIcon.setAttribute('aria-hidden', 'true');
       const copy = make('div', 'slot-copy');
       const name = make('div', 'slot-name');
       const status = make('span', 'slot-status');
@@ -487,14 +516,14 @@
       const nameLine = make('div', 'slot-name-line');
       nameLine.append(name);
       copy.append(nameLine);
-      el.append(grip, copy, status, actions);
+      el.append(grip, sourceIcon, copy, status, actions);
       el.addEventListener('pointerdown', event => {
         if ((presentationPending > 0 || operationsPending > 0) || editorOwner !== undefined
           || isBusy() || permissions(item.slot).move === false || [...rows.values()].some(row => row.editing || row.actions.querySelector('.plugin-menu').matches(':popover-open'))) return;
         rowDrag.startRowDrag(event, id);
       });
       // Each row owns its rename session, so one row cannot invalidate another's.
-      const item = { el, name, status, actions, editing: false, renameRevision: 0, slot: null };
+      const item = { el, name, status, sourceIcon, actions, editing: false, renameRevision: 0, slot: null };
       const rename = () => {
         if (item.editing || isBusy() || permissions(item.slot).rename === false) return;
         item.editing = true;
@@ -823,6 +852,7 @@
         if (!peersByName.has(name)) peersByName.set(name, []);
         peersByName.get(name).push(account);
       }
+      const liveIds = new Set();
       displayed.forEach((account, index) => {
         const { slot, reading, status } = account;
         const item = rowFor(slot);
@@ -833,13 +863,14 @@
           renderAccountName(document, item.name, name);
         }
         const primaryStatus = statuses.get(slot.credentialFor);
-        const sharesStatus = primaryStatus && primaryStatus !== 'notCollected'
-          && !['notCollected', 'paused', 'disabled'].includes(status);
-        const source = !slot.source && (slot.credentialFor || (slot.collectionSources && status === 'notCollected')) ? tr('savedSource')
+        const sharesStatus = primaryStatus && !['paused', 'disabled'].includes(status);
+        const source = !slot.source && slot.credentialFor ? tr('savedSource')
           : sourceText(slot, reading) || slot.sourceName || presentationApi.limitProviderSourceLabel(reading) || '';
         const secondary = secondaryText(slot);
-        const provenance = secondary && secondary !== source ? secondary : !source
-          ? (slot.source === 'environment' ? t('settings.limits.sources.env') : !slot.source && !customEditor ? tr('savedSource') : '') : '';
+        // A pasted credential is the default origin and needs no label; only
+        // environment rows (and paired saved credentials above) say where they came from.
+        const provenance = secondary && secondary !== source ? secondary : !source && slot.source === 'environment'
+          ? t('settings.limits.sources.env') : '';
         const detail = [...(!slot.credentialFor ? [maskEmail(accountPlan(form.id, slot, reading))] : []),
           status !== 'connected' || sharesStatus ? source : '', provenance, detailText(slot)]
           .filter((value, index, all) => value && all.indexOf(value) === index).join(' · ');
@@ -860,6 +891,17 @@
         item.name.parentElement.classList.toggle('is-editing', item.editing);
         item.el.classList.toggle('slot-paused', !slot.enabled);
         item.status.className = sharesStatus ? 'slot-status' : `slot-status slot-${status}`;
+        const lane = rowSource(slot, reading);
+        const iconKind = slot.sourceIconKind || lane?.kind;
+        if (iconKind) item.sourceIcon.dataset.kind = iconKind;
+        else delete item.sourceIcon.dataset.kind;
+        const quota = reading ?? slot.observation;
+        const liveLane = lane && lane.kind === iconKind && status === 'connected'
+          && connection.isFresh(quota) ? lane : null;
+        item.sourceIcon.classList.toggle('is-live', Boolean(liveLane));
+        if (liveLane && slot.source !== 'remote' && (!quota.sourceDeviceId || quota.sourceDeviceId === localDeviceId)) {
+          liveIds.add(liveLane.id);
+        }
         const statusText = statusLabel(status, slot, reading);
         item.status.textContent = sharesStatus ? '' : status === 'connected' ? source || statusText : statusText;
         if (sharesStatus) item.status.removeAttribute('aria-label');
@@ -913,19 +955,49 @@
         item.el.dataset.slotDraggable = String(permission.move !== false && !isBusy());
         item.positionMenu();
       });
+      publishLiveSources(form.id, root, liveIds);
       placeEditor();
     }
     return { element: root, update(nextSlots, nextReadings, context = {}) {
       slots = nextSlots; readings = nextReadings; settings = context.settings;
       providerEnabled = context.providerEnabled !== false;
       remoteReadings = context.records || []; devices = context.devices || []; localDeviceId = context.localDeviceId || ''; presentation = context.presentation || {};
+      probes = context.probes || [];
       preserveScroll(render);
     }, summary() {
       const accounts = activeAccounts();
       const linked = new Set(accounts.filter(slot => rowStatus(slot, accountReading(slot)) === 'connected')
         .map(slot => slot.credentialFor || slot.id)).size;
       return { total: accounts.filter(slot => !slot.credentialFor).length, linked };
-    }, openEditor, activeEditorUrl: () => editorToggle.expanded ? editorOpenUrl?.() : undefined };
+    }, openEditor };
   }
-  return { presentationLabel, accountName, accountStatus, slotOwner, applyAccountOrder, createPanel, createEditorToggle };
+  // Rows know their lane even when readings cannot tell lanes apart (Cursor
+  // reads desktop and manual accounts through one Web API). The connection
+  // card unions these with its own reading-based attribution.
+  const liveSourcesByProvider = new Map();
+  const liveListeners = new Set();
+  // Compared against what listeners last heard: pruning a replaced panel while
+  // computing "before" would otherwise swallow the lanes it took with it.
+  const lastPublished = new Map();
+  function publishLiveSources(providerId, panelRoot, ids) {
+    const panels = liveSourcesByProvider.get(providerId) || new Map();
+    panels.set(panelRoot, ids);
+    liveSourcesByProvider.set(providerId, panels);
+    const after = [...liveSourceIds(providerId)].sort().join(',');
+    if (after === (lastPublished.get(providerId) ?? '')) return;
+    lastPublished.set(providerId, after);
+    for (const listener of liveListeners) listener(providerId);
+  }
+  // A replaced panel leaves the document; its last rows must not keep a lane lit.
+  function liveSourceIds(providerId) {
+    const panels = liveSourcesByProvider.get(providerId);
+    if (!panels) return new Set();
+    for (const panelRoot of panels.keys()) if (panelRoot.isConnected === false) panels.delete(panelRoot);
+    return new Set([...panels.values()].flatMap(ids => [...ids]));
+  }
+  function onLiveSourcesChange(listener) {
+    liveListeners.add(listener);
+    return () => liveListeners.delete(listener);
+  }
+  return { presentationLabel, accountName, accountStatus, slotOwner, applyAccountOrder, createPanel, createEditorToggle, liveSourceIds, onLiveSourcesChange };
 });

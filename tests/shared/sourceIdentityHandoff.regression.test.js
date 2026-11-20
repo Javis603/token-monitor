@@ -5,28 +5,6 @@ const path = require('node:path');
 function load(file) {
   return require(path.resolve(__dirname, '../../src/shared', file));
 }
-test('Claude CLI refreshes expired stored profile token once without OAuth quota', async () => {
-  const { fetchClaudeLimits } = load('providers/claude/limits.js');
-  const calls = [];
-  const profile = { account: { uuid: 'account', email: 'owner@example.com' }, organization: { uuid: 'org' } };
-  const deps = { env: {}, platform: 'linux', claudeCredentialPath: '/fake/credentials',
-    stat: async () => ({ mtimeMs: 1 }),
-    readFile: async () => JSON.stringify({ accessToken: 'expired', refreshToken: 'refresh', expiresAt: 1 }),
-    writeFile: async () => {}, mkdir: async () => {}, rename: async () => {},
-    fetch: async (url, options) => {
-      calls.push(url.includes('/profile') ? options.headers.authorization : 'refresh');
-      assert.equal(url.includes('/usage'), false);
-      if (url.includes('/profile')) return options.headers.authorization === 'Bearer expired'
-        ? { ok: false, status: 401 } : { ok: true, json: async () => profile };
-      return { ok: true, json: async () => ({ access_token: 'fresh', expires_in: 3600 }) };
-    },
-    runClaudeAuthStatus: async () => { calls.push('auth'); return JSON.stringify({ loggedIn: true, authMethod: 'claude.ai', email: 'owner@example.com', orgId: 'org' }); },
-    runClaudeUsageCli: async () => { calls.push('cli'); return 'Current session\n90% left\nCurrent week\n80% left'; }
-  };
-  const row = await fetchClaudeLimits({ claudeSourcePreference: 'cli' }, deps);
-  assert.equal(row.source, 'cli');
-  assert.deepEqual(calls, ['auth', 'Bearer expired', 'refresh', 'Bearer fresh', 'cli', 'auth']);
-});
 test('Codex retention rejects different keyed workspaces but retains missing-key compatibility', () => {
   const policy = load('providers/codex/corePolicy.js').createRetentionPolicy({ normalizeLimitsSummary: x => x, timestampMs: Date.parse });
   const previous = { providers: [{ provider: 'codex', accountKey: 'A', accountEmail: 'same@example.com', status: 'ok', updatedAt: '2026-11-17T00:00:00Z', windows: [{ usedPercent: 20 }] }] };

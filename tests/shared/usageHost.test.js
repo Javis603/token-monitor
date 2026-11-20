@@ -157,8 +157,8 @@ test('worker reports reach the owner, and summaries are marked as already transf
   worker.reply({ type: 'log', message: 'hello' });
 
   assert.deepEqual(events.map(([kind]) => kind), ['preview', 'update', 'diagnostic', 'error', 'log']);
-  assert.deepEqual(events[0].slice(1), [{ n: 1 }, 'progress', { transformed: true }]);
-  assert.deepEqual(events[1].slice(1), [{ n: 2 }, 'watch', { transformed: true }]);
+  assert.deepEqual(events[0].slice(1), [{ n: 1 }, 'progress', { transformed: true, ownsSummary: true }]);
+  assert.deepEqual(events[1].slice(1), [{ n: 2 }, 'watch', { transformed: true, ownsSummary: true }]);
   assert.ok(events[3][1] instanceof Error);
   assert.equal(events[3][1].message, 'scan failed');
   assert.equal(events[3][2], 'watch');
@@ -414,7 +414,7 @@ test('round trip through a real worker thread: transform, archive capture and st
 
   const updates = events.filter(([kind]) => kind === 'update');
   assert.equal(updates.length, 2);
-  assert.deepEqual(updates[1][3], { transformed: true });
+  assert.deepEqual(updates[1][3], { transformed: true, ownsSummary: true });
   assert.equal(updates[1][1].allTime.sessions['codex:c1'].totalTokens, 120);
   assert.equal(events.filter(([kind]) => kind === 'preview').length, 1);
   assert.deepEqual(events.find(([kind]) => kind === 'log'), ['log', 'tick preview']);

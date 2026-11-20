@@ -49,12 +49,12 @@ function renderMimoStatus() {
     getContext: host.getAccountContext, preserveScroll: host.preserveScroll,
     enabled: (account, value) => window.tokenMonitor.mimo.setAccountEnabled(account.id, value),
     remove: account => window.tokenMonitor.mimo.removeAccount(account.id),
-    changed: result => { if (result.accounts) state.settings.mimoManagedAccounts = result.accounts; }, refresh: refreshMimoAccounts, busy: () => document.getElementById('mimoSaveAccountButton')?.disabled === true
+    changed: result => { if (result.accounts) state.settings.mimoManagedAccounts = result.accounts; }, refresh: refreshMimoAccounts, busy: () => document.getElementById('mimoSaveAccountButton')?.disabled === true,
+    readings: () => host.localProviderStatuses('mimo'),
+    status: { element: () => document.getElementById('mimoAccountStatus'), empty: () => t('settings.mimo.notConfigured') }
   });
   accountList.update(accounts.map((account, index) => ({ ...account, canPause: account.removable !== false, accountName: mimoSettingsAccountTitle(account, index) })), host.localProviderStatuses('mimo'));
-  const summary = accountList.summary();
-  const statusText = summary.total ? t('settings.mimo.connected', summary) : t('settings.mimo.notConfigured');
-  accountShellApi.render({ status: statusEl, statusText, error: errorEl, errorText: state.mimoAccountError });
+  accountShellApi.render({ error: errorEl, errorText: state.mimoAccountError });
   emptyEl.classList.add('hidden');
   renderSettingsSummaries();
 }
@@ -145,5 +145,5 @@ function setup() {
 
 
 }
- return { state, setMimoAccountExpanded, refreshMimoAccounts, mimoSettingsAccountTitle, renderMimoStatus, setup };
+ return { state, setMimoAccountExpanded, refreshReadings: () => accountList?.refreshReadings(), refreshMimoAccounts, mimoSettingsAccountTitle, renderMimoStatus, setup };
 });

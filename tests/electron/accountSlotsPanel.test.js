@@ -72,6 +72,25 @@ function harness(translateMessage = t, providerId = 'qoder', loginAction, maskEm
   const click = (node, text) => buttons(node).find(n => n.textContent === text).click();
   return { panel, slots, service, slotSettings, document, calls, ipc, defaultPanel, row, update, click, set verdict(v) { verdict = v; } };
 }
+test('Volcengine adds one credential set and keeps the existing credential editor', async () => {
+  const h = harness(t, 'volcengine');
+  const prefix = 'volcengineSlotDraft';
+  const input = key => h.document.getElementById(`${prefix}${key}Input`);
+  const agentKeys = ['volcengineAgentAccessKeyId', 'volcengineAgentSecretAccessKey', 'volcengineAgentRegion'];
+  h.panel.openEditor();
+  assert.ok(input('volcengineRegion'));
+  for (const key of agentKeys) assert.ok(!input(key), key);
+  input('volcengineAccessKeyId').value = 'AKLT-fixture';
+  input('volcengineSecretAccessKey').value = 'fixture-secret';
+  await h.document.getElementById(`${prefix}CredentialSubmit`).click();
+  assert.equal(h.calls[0][0], 'add');
+  for (const key of agentKeys) assert.equal(Object.hasOwn(h.calls[0][2], key), false);
+
+  h.panel.openEditor(h.slots.find(slot => slot.id === 'a'));
+  for (const key of agentKeys) assert.ok(input(key), key);
+  assert.ok(h.document.getElementById('volcengineAgentAccessKeyIdInput'));
+});
+
 test('slot names and status respect labels, native identity, fingerprint, pause and stale', () => {
   assert.equal(accountName({ label: 'Work', fingerprint: 'abc' }, { accountEmail: 'x@y' }, t), 'Work');
   assert.equal(accountName({ fingerprint: 'abc' }, { accountEmail: 'x@y' }, t), 'x@y');
@@ -81,7 +100,30 @@ test('slot names and status respect labels, native identity, fingerprint, pause 
   assert.equal(accountStatus({ enabled: true }, { status: 'ok', stale: true }), 'stale');
   assert.equal(accountStatus({ enabled: true }, { status: 'ok' }), 'connected');
 });
-test('explicit collection sources change row status without waiting for newer quota', () => {
+test('an account without a reading says Checking only while a probe for it runs', () => {
+  assert.equal(accountStatus({ enabled: true }, undefined), 'unavailable');
+  assert.equal(accountStatus({ enabled: true }, undefined, true, true), 'checking');
+  assert.equal(accountStatus({ enabled: true }, { status: 'unavailable' }, true, true), 'unavailable', 'a reading is the answer, even mid-probe');
+  assert.equal(accountStatus({ enabled: false }, undefined, true, true), 'paused');
+  const h = harness();
+  const status = id => h.row(id).querySelector('.slot-status');
+  const readings = [{ accountKey: 'ka', status: 'unauthorized', updatedAt: new Date().toISOString() }];
+  const paint = probes => h.panel.update(h.slots, readings, { probes });
+  assert.match(status('default').className, /slot-unavailable/);
+  paint([{ provider: 'qoder', account: { field: 'accountKey', value: 'default' } }]);
+  assert.match(status('default').className, /slot-checking/);
+  assert.equal(status('default').textContent, 'Checking…');
+  assert.match(status('a').className, /slot-invalid/, 'another account keeps its own answer');
+  assert.deepEqual(h.panel.summary(), { total: 3, linked: 0 }, 'a check in progress is not connected');
+  paint([{ provider: 'qoder', account: null }]);
+  assert.match(status('default').className, /slot-checking/, 'a provider-wide probe answers for every account');
+  paint([{ provider: 'other', account: null }]);
+  assert.match(status('default').className, /slot-unavailable/, "another provider's probe does not");
+  paint([]);
+  assert.match(status('default').className, /slot-unavailable/, 'a probe that returned nothing leaves the failure');
+});
+
+test('stale source preferences and collection lanes never mark an account as not collected', () => {
   const h = harness(t, 'cline');
   const slots = [
     { id: 'detected', accountKey: 'local-key', source: 'discovered', collectionSources: ['local'], enabled: true },
@@ -90,11 +132,8 @@ test('explicit collection sources change row status without waiting for newer qu
   const readings = slots.map(slot => ({ provider: 'cline', accountKey: slot.accountKey, status: 'ok' }));
   const status = id => h.row(id).querySelector('.slot-status').textContent;
   h.panel.update(slots, readings, { settings: { clineSourcePreference: 'local' } });
-  assert.equal(status('saved'), 'Not collected');
-  assert.equal(status('detected'), 'Connected');
-  h.panel.update(slots, readings, { settings: { clineSourcePreference: 'api' } });
-  assert.equal(status('detected'), 'Not collected');
   assert.equal(status('saved'), 'Connected');
+  assert.equal(status('detected'), 'Connected');
 });
 test('a paired saved credential keeps its own replace and remove controls under one identity', async () => {
   const h = harness(t, 'cline');
@@ -397,7 +436,7 @@ test('slot CSS uses defined theme tokens for light and dark surfaces and status'
   const slots = css.slice(css.indexOf('/* Local account slots'));
   const declared = new Set([...css.matchAll(/(--[\w-]+):/g)].map(match => match[1]));
   assert.match(slots, /\.slot-list \{[^}]*overflow: clip;/);
-  assert.match(slots, /grid-template-columns: 14px minmax\(0, 1fr\) minmax\(0, max-content\) 28px/);
+  assert.match(slots, /grid-template-columns: 20px minmax\(0, 1fr\) minmax\(0, max-content\) 28px/);
   assert.match(slots, /\.slot-status \{ min-width: 0; max-width: 150px; overflow: hidden; text-overflow: ellipsis;/);
   assert.match(slots, /\.slot-name \{[^}]*text-wrap: balance;/);
   assert.match(slots, /\.slot-status \{[^}]*text-align: right;/);
@@ -460,7 +499,7 @@ function rendererSlotContext(stats) {
   const source = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
   const state = { stats, settings: { deviceId: 'local', limitAccountForms: limitAccountFormsForRenderer() } };
   const calls = [];
-  const context = { state, limitProviderEnabled: () => true, localDeviceLimitsProviders: () => null, limitAccountForm: id => state.settings.limitAccountForms.find(form => form.id === id), render() {},
+  const context = { state, limitProbes: [], limitProviderEnabled: () => true, localDeviceLimitsProviders: () => null, limitAccountForm: id => state.settings.limitAccountForms.find(form => form.id === id), render() {},
     preserveSettingsPanelScroll: callback => callback(), renderExternalProviderStatus() {},
     localProviderStatuses: id => (stats.limits?.providers || []).filter(row => row.provider === id),
     window: { tokenMonitor: { limits: { accountSlots: { list: async id => { calls.push(id); return { ok: true, accounts: [{ accountKey: 'z' }] }; } } } } } };
@@ -479,6 +518,48 @@ test('slot panel readings retain legacy aggregate fallback without devices', asy
   await context.refreshAccountSlotPanels();
   assert.ok(seen.length >= 2);
   assert.deepEqual(seen[0][1], rows); assert.deepEqual(seen.at(-1)[1], rows);
+});
+
+test('a probe starting or finishing repaints only its provider account rows in visible Settings', () => {
+  const fs = require('node:fs'); const vm = require('node:vm');
+  const source = fs.readFileSync(require.resolve('../../src/electron/renderer/app.js'), 'utf8');
+  const calls = [];
+  let visible = true;
+  const panel = id => ({ update: (_slots, _readings, context) => calls.push(`${id}:${context.probes.length}`) });
+  const owner = id => ({ refreshReadings: () => calls.push(id) });
+  const context = vm.createContext({ limitProbes: [], settingsLocalLimits: null, limitWindowsView: { syncLimitRefreshButtons() {} },
+    isSettingsSurfaceVisible: () => visible, preserveSettingsPanelScroll: callback => callback(),
+    accountSlotPanels: new Map([['qoder', panel('qoder')], ['deepseek', panel('deepseek')]]), accountSlotLists: {},
+    automaticAccountPanels: new Map([['grok', { controller: { update: rows => calls.push(rows[0].status) } }]]),
+    strictLocalProviderStatuses: id => [{ provider: id, status: 'ok' }],
+    localProviderStatuses: () => [], legacyAccountOwners: { antigravity: owner('antigravity'), codex: owner('codex'), claude: {} },
+    renderExternalProviderStatus: id => calls.push(`external:${id}`) });
+  context.limitAccountContext = () => ({ probes: context.limitProbes });
+  vm.runInContext(source.slice(source.indexOf('function setLimitProbes('), source.indexOf('let limitProbesPushed')), context);
+  const step = probes => { calls.length = 0; context.setLimitProbes(probes); return [...calls]; };
+  assert.deepEqual(step([{ provider: 'antigravity', account: null }]), ['antigravity']);
+  assert.deepEqual(step([{ provider: 'qoder', account: null }]), ['qoder:1', 'external:qoder', 'antigravity'], 'the finished probe repaints too');
+  assert.deepEqual(step([{ provider: 'claude', account: null }]), ['qoder:1', 'external:qoder', 'external:claude']);
+  calls.length = 0;
+  context.setLimitProbes([], { revision: 1, limits: { providers: [{ provider: 'grok' }] } });
+  assert.deepEqual(calls, ['ok', 'external:claude'], 'local readings reach automatic rows immediately');
+  const providers = ['antigravity', 'qoder', 'deepseek', 'codex', 'claude', 'cursor', 'workbuddy', 'grok'];
+  for (const id of ['cursor', 'workbuddy']) context.legacyAccountOwners[id] = owner(id);
+  const readings = providers.map(provider => ({ provider, status: 'ok' }));
+  const snapshot = (revision, providers) => ({ revision, limits: { providers } });
+  context.setLimitProbes([], snapshot(2, readings));
+  calls.length = 0;
+  const next = readings.map(row => ({ ...row, status: row.provider === 'antigravity' ? 'unavailable' : row.status }));
+  context.setLimitProbes([], snapshot(3, next));
+  assert.deepEqual(calls, ['antigravity'], 'a full snapshot with one changed provider repaints one panel');
+  calls.length = 0;
+  context.setLimitProbes([], snapshot(4, next.filter(row => row.provider !== 'codex')));
+  assert.deepEqual(calls, ['codex'], 'removing a reading repaints its panel');
+  const active = [{ provider: 'qoder', account: null }];
+  step(active);
+  assert.deepEqual(step(active.map(probe => ({ ...probe }))), [], 'an unchanged active probe needs no repaint');
+  visible = false;
+  assert.deepEqual(step([]), [], 'hidden Settings reads the probes on its next paint');
 });
 
 test('loading unchanged slot metadata does not repaint the account panels', async () => {
@@ -513,17 +594,25 @@ test('startup and settings pushes load slot lists with no mounted Settings panel
   assert.match(push, /refreshAccountSlotPanels\(\)/);
 });
 
-test('slot freshness honors Hub threshold upload interval floor and registry opt-ins', () => {
+test('device quota freshness covers saved slots and provider-owned sources', () => {
   const fs = require('node:fs'); const vm = require('node:vm');
   const source = fs.readFileSync(require.resolve('../../src/electron/main.js'), 'utf8');
   const context = { settings: { deviceId: 'local' }, lastCollectedDevice: null, mode: 'local', localDevice: null,
-    attachLocalPresentationNativeViews() {}, isProviderStale, LIMIT_PROVIDER_REGISTRY: [...LIMIT_PROVIDER_REGISTRY, { id: 'future', accountSlots: true }] };
+    attachLocalPresentationNativeViews() {}, isProviderStale };
   vm.createContext(context);
-  vm.runInContext(source.match(/const ACCOUNT_SLOT_PROVIDER_IDS = .*;/)[0], context);
   vm.runInContext(source.slice(source.indexOf('function injectLocalDeviceStatus('), source.indexOf('function macWidgetConfiguration(')), context);
-  for (const [age, interval, expected] of [[5, 0, false], [15, 0, true], [35, 20 * 60000, false], [45, 20 * 60000, true]]) {
-    const stats = { staleAfterMs: 10 * 60000, devices: [{ deviceId: 'local', syncUploadIntervalMs: interval, limits: { refreshMs: 60000, providers: ['qoder', 'future'].map(provider => ({ provider, status: 'ok', updatedAt: new Date(Date.now() - age * 60000).toISOString() })) } }] };
-    assert.deepEqual(Array.from(context.injectLocalDeviceStatus(stats).devices[0].limits.providers, row => row.stale), [expected, expected]);
+  for (const [age, interval, offline, expected] of [
+    [5, 0, false, false], [15, 0, false, true], [35, 20 * 60000, false, false],
+    [45, 20 * 60000, false, true], [0, 0, true, true]
+  ]) {
+    const stats = { staleAfterMs: 10 * 60000, devices: [{
+      deviceId: 'local', stale: offline, syncUploadIntervalMs: interval,
+      limits: { refreshMs: 60000, providers: ['qoder', 'codex', 'cursor'].map(provider => ({
+        provider, status: 'ok', updatedAt: new Date(Date.now() - age * 60000).toISOString()
+      })) }
+    }] };
+    assert.deepEqual(Array.from(context.injectLocalDeviceStatus(stats).devices[0].limits.providers, row => row.stale),
+      [expected, expected, expected]);
   }
   const body = source.slice(source.indexOf('function injectLocalDeviceStatus('), source.indexOf('function macWidgetConfiguration('));
   assert.doesNotMatch(body, /require\(/);
@@ -1502,10 +1591,6 @@ test('Alibaba environment DTO respects a stored variant override without changin
   assert.equal(account.fingerprint, accountValuesFingerprint(defaultAccountValues(limitProviderEntry('alibaba'), settings, env)).slice(7, 19));
 });
 
-test('source-excluded accounts do not inherit a connected retained reading', () => {
-  assert.equal(accountStatus({ enabled: true, sourceSelected: false }, { status: 'ok' }), 'notCollected');
-});
-
 test('Command Code displays its plan independently of the account title and updates it in place', () => {
   const h = harness(t, 'commandcode');
   const slot = { id: 'account', accountKey: 'key', fingerprint: 'abc123', enabled: true };
@@ -1535,8 +1620,9 @@ test('account plan details honor provider plan policies and do not repeat identi
     // The policy belongs to the reading provider; the generic panel consumes its metadata.
     const slot = { id: 'account', accountKey: 'key', enabled: true, fingerprint: '123' };
     h.panel.update([slot], [{ provider, accountKey: 'key', status: 'ok', ...metadata }], {});
-    const detail = h.row('account').querySelector('.slot-detail').textContent;
-    assert.equal(detail, [expected, t('settings.slots.savedSource')].filter(Boolean).join(' · '), provider);
+    const detail = h.row('account').querySelector('.slot-detail')?.textContent || '';
+    // A pasted credential is the default origin, so no provenance is appended.
+    assert.equal(detail, expected, provider);
   }
 });
 
@@ -1551,9 +1637,11 @@ test('healthy account shows its source with accessible status; failures keep exp
   assert.equal(status.attributes['aria-label'], 'Connected · Web');
   assert.equal(status.classList.contains('slot-connected'), true);
   assert.equal(row.querySelector('.slot-detail').textContent, 'Pro');
+  const icon = row.querySelector('.slot-source-icon');
+  assert.equal(icon.dataset.kind, 'web');
+  assert.equal(icon.classList.contains('is-live'), true);
   for (const [account, reading, expected] of [
     [{ ...slot, enabled: false }, quota, 'paused'],
-    [{ ...slot, sourceSelected: false }, quota, 'notCollected'],
     [slot, { ...quota, status: 'unauthorized' }, 'invalid'],
     [slot, { ...quota, stale: true }, 'stale']
   ]) {
@@ -1562,9 +1650,70 @@ test('healthy account shows its source with accessible status; failures keep exp
     assert.equal(status.classList.contains(`slot-${expected}`), true);
     assert.notEqual(status.textContent, 'Web');
     assert.equal(row.querySelector('.slot-detail').textContent, 'Pro · Web');
+    assert.equal(icon.dataset.kind, 'web', 'the source icon still names the lane');
+    assert.equal(icon.classList.contains('is-live'), false, `${expected} is not a live reading`);
   }
 });
 
+
+test('row source icons guess only a detected login, never a pasted or paired credential', () => {
+  const kinds = (provider, slots, readings = []) => {
+    const h = harness(t, provider);
+    h.panel.update(slots, readings, {});
+    return slots.map(slot => h.row(slot.id).querySelector('.slot-source-icon').dataset.kind || null);
+  };
+  // Cline: a detected sign-in is the local file lane. A pasted credential could
+  // be either kind (Trae's IDE token), so it waits for provenance.
+  assert.deepEqual(kinds('cline', [
+    { id: 'detected', accountKey: 'a', source: 'discovered', enabled: true },
+    { id: 'saved', accountKey: 'b', enabled: true },
+    { id: 'peer', accountKey: 'c', source: 'remote', enabled: true }
+  ]), ['file', null, null]);
+  assert.deepEqual(kinds('trae', [{ id: 'saved', accountKey: 'k', enabled: true }]), [null]);
+  // A paired key shares the detected row's reading, which proves nothing about the key.
+  assert.deepEqual(kinds('cline', [
+    { id: 'detected', accountKey: 'shared', source: 'discovered', enabled: true },
+    { id: 'paired', accountKey: 'shared', credentialFor: 'detected', enabled: true }
+  ], [{ provider: 'cline', accountKey: 'shared', status: 'ok', source: 'oauth' }]), ['file', null]);
+  // Ollama has two manual lanes, so only provenance can name a saved row's lane.
+  assert.deepEqual(kinds('ollama', [{ id: 'saved', accountKey: 'k', enabled: true }]), [null]);
+  assert.deepEqual(kinds('ollama', [{ id: 'saved', accountKey: 'k', enabled: true }], [{ provider: 'ollama', accountKey: 'k', status: 'ok', source: 'web' }]), ['web']);
+  // An owner-supplied lane wins over provenance and origin (Cursor reads both lanes through Web).
+  assert.deepEqual(kinds('cline', [{ id: 'detected', accountKey: 'd', source: 'discovered', sourceId: 'api', enabled: true }], [{ provider: 'cline', accountKey: 'd', status: 'ok', source: 'local' }]), ['apiKey']);
+});
+
+test('panels publish the lanes of connected local rows for the connection card', () => {
+  const { liveSourceIds, onLiveSourcesChange } = require('../../src/electron/renderer/limits/accountSlotsPanel');
+  const changes = [];
+  const stop = onLiveSourcesChange(id => changes.push(id));
+  try {
+    const h = harness(t, 'manus');
+    const slots = [
+      { id: 'detected', accountKey: 'a', source: 'discovered', enabled: true },
+      { id: 'saved', accountKey: 'b', enabled: false },
+      { id: 'peer', accountKey: 'c', source: 'remote', enabled: true }
+    ];
+    const ok = key => ({ provider: 'manus', accountKey: key, status: 'ok', source: 'web' });
+    h.panel.update(slots, [ok('a'), ok('b'), ok('c')], {});
+    // A paused saved key and another device's row do not count as this device reading.
+    assert.deepEqual([...liveSourceIds('manus')], ['web']);
+    assert.deepEqual(changes, ['manus']);
+    h.panel.update(slots, [ok('a'), ok('b'), ok('c')], {});
+    assert.deepEqual(changes, ['manus'], 'an unchanged set does not notify');
+    h.panel.update(slots, [{ ...ok('a'), sourceDeviceId: 'other' }], { localDeviceId: 'local' });
+    assert.deepEqual([...liveSourceIds('manus')], [], 'a matching account key does not make an explicitly remote reading local');
+    assert.deepEqual(changes, ['manus', 'manus']);
+    h.panel.update(slots, [{ ...ok('a'), status: 'unauthorized' }], {});
+    assert.deepEqual([...liveSourceIds('manus')], []);
+    h.panel.update(slots, [ok('a')], {});
+    const notified = changes.length;
+    h.panel.element.remove();
+    assert.deepEqual([...liveSourceIds('manus')], [], 'a detached panel no longer counts');
+    // Its replacement reads nothing yet; the card must still hear that the lane went away.
+    harness(t, 'manus').panel.update(slots, [], {});
+    assert.equal(changes.length, notified + 1);
+  } finally { stop(); }
+});
 
 test('connection failures do not suggest credential replacement; rejected credentials retain one recovery action', () => {
   const h = harness();

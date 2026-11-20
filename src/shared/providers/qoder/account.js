@@ -5,7 +5,7 @@
 module.exports = /** @satisfies {import('../../limits/accounts').AccountDeclaration} */ ({
   id: 'qoder',
   sources: [
-    { id: 'web', kind: 'web', relation: 'single', products: ['qoder'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription', getUrlFromForm: true }
+    { id: 'web', kind: 'web', relation: 'single', products: ['qoder'], labelKey: 'settings.limits.sources.web', descriptionKey: 'settings.limits.sources.webDescription' }
   ],
   accountSlots: true,
   serverAccountKey: 'isQoderServerAccountKey',

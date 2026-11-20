@@ -7,13 +7,12 @@ const { canonicalCursorUserId } = require('../../src/shared/providers/cursor/aut
 const { fetchCursorLimits } = require('../../src/shared/providers/cursor/limits');
 const { hashKey } = require('../../src/shared/hashKey');
 
-function createService(accounts, result, { disabled = [], manual = accounts.map(account => account.id), desktop = { state: 'unknown' }, external = false, sourcePreference = 'auto', probeCalls = [] } = {}) {
+function createService(accounts, result, { disabled = [], manual = accounts.map(account => account.id), desktop = { state: 'unknown' }, external = false, probeCalls = [] } = {}) {
   const forbidden = () => assert.fail('status must not mutate credentials, settings or Tokscale state');
   return createCursorAccountService({
     isExternalAgentActive: () => external,
     getCursorDisabledAccountIds: () => disabled,
     getCursorManualAccountIds: () => manual,
-    getCursorSourcePreference: () => typeof sourcePreference === 'function' ? sourcePreference() : sourcePreference,
     setCursorDisabledAccountIds: forbidden,
     setCursorManualAccountIds: forbidden,
     saveSettings: forbidden,
@@ -58,7 +57,7 @@ for (const fixture of [
     assert.equal(status.accounts[0].expired, fixture.result.error?.kind === 'unauthorized');
     assert.doesNotMatch(JSON.stringify(status), /private-session-token|sessionToken|userId/);
     assert.deepEqual(Object.keys(status.accounts[0]).sort(), [
-      'accountKey', 'email', 'enabled', 'error', 'expired', 'id', 'label', 'membershipType', 'removable', 'source', 'sourceSelected'
+      'accountKey', 'email', 'enabled', 'error', 'expired', 'id', 'label', 'membershipType', 'removable', 'source'
     ]);
   });
 }
@@ -119,35 +118,11 @@ test('Cursor external authority blocks discovery and mutation while status expos
   assert.equal((await service.logout(account.id)).code, 'EXTERNAL_AGENT_ACTIVE');
 });
 
-test('Cursor status retains excluded source accounts without counting them as connected', async () => {
-  const accounts = [{ id: 'user_desktop', sessionToken: 'desktop' }, { id: 'user_manual', sessionToken: 'web' }];
-  const status = await createService(accounts, success(null), { manual: ['user_manual'], sourcePreference: 'desktop' }).status();
-  assert.equal(status.accounts.length, 2);
-  assert.equal(status.linkedCount, 1);
-  assert.deepEqual(status.accounts.map(account => [account.source, account.sourceSelected]), [['desktop', true], ['web', false]]);
-});
-
-for (const sourcePreference of ['auto', 'desktop', 'web']) test(`Cursor status probes only the ${sourcePreference} selected sources`, async () => {
+test('Cursor status probes and counts desktop and manual accounts together', async () => {
   const accounts = [{ id: 'user_desktop', sessionToken: 'desktop' }, { id: 'user_manual', sessionToken: 'web' }];
   const probeCalls = [];
-  const status = await createService(accounts, success(null), { manual: ['user_manual'], sourcePreference, probeCalls }).status();
-  assert.deepEqual(probeCalls, sourcePreference === 'auto' ? ['desktop', 'web'] : [sourcePreference]);
-  assert.equal(status.accounts.length, 2);
-});
-
-test('Cursor source selection preserves verified public metadata without probing excluded credentials', async () => {
-  const accounts = [{ id: 'opaque', sessionToken: 'private-session-token', label: 'My account' }];
-  const probeCalls = [];
-  let preference = 'auto';
-  const service = createService(accounts, success('auth0|user_verified'), { manual: ['opaque'], sourcePreference: () => preference, probeCalls });
-  const before = await service.status();
-  preference = 'desktop';
-  const after = await service.status();
-  assert.deepEqual(probeCalls, ['private-session-token']);
-  assert.equal(after.accounts[0].accountKey, before.accounts[0].accountKey);
-  assert.equal(after.accounts[0].email, before.accounts[0].email);
-  assert.equal(after.accounts[0].label, before.accounts[0].label);
-  assert.equal(after.accounts[0].sourceSelected, false);
-  assert.equal(after.linkedCount, 0);
-  assert.doesNotMatch(JSON.stringify(after), /private-session-token|sessionToken|userId/);
+  const status = await createService(accounts, success(null), { manual: ['user_manual'], probeCalls }).status();
+  assert.deepEqual(probeCalls, ['desktop', 'web']);
+  assert.deepEqual(status.accounts.map(account => account.source), ['desktop', 'web']);
+  assert.equal(status.linkedCount, 2);
 });

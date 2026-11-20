@@ -8,18 +8,23 @@ const legacyList = require('../../src/electron/renderer/limits/legacyAccountList
 const accountShellApi = require('../../src/electron/renderer/limits/accountShell');
 const renderer = path.resolve(__dirname, '../../src/electron/renderer');
 const flush = () => new Promise(resolve => setImmediate(resolve));
-function harness(provider, overrides = {}, context = {}) {
+function harness(provider, overrides = {}, context = {}, localReadings = []) {
   const document = createDocument();
   const source = fs.readFileSync(path.join(renderer, `limits/providerOwners/${provider}.js`), 'utf8');
   const nodes = {};
   const ids = new Set([...source.matchAll(/getElementById\('([^']+)'\)/g)].map(match => match[1]));
-  ids.add(`${provider}ProfileList`);
+  ids.add(`${provider}ProfileList`); ids.add(`${provider}Status`);
   for (const id of ids) {
     const node = document.createElement('div'); node.id = id; node.options = []; nodes[id] = node;
     node.before = child => node.parentElement.insertBefore(child, node);
     node.appendChild = child => { node.append(child); return child; };
     if (/Details$/.test(id)) node.classList.add('hidden');
     document.root.append(node);
+  }
+  if (provider === 'minimax') {
+    const html = fs.readFileSync(path.join(renderer, 'index.html'), 'utf8');
+    assert.match(html, /id="minimaxAddDetails"[^>]*>\s*<div class="settings-actions">\s*<button id="minimaxOpenBrowser"/);
+    nodes.minimaxAddDetails.append(nodes.minimaxOpenBrowser);
   }
   const originalCreate = document.createElement;
   document.createElement = tag => { const node = originalCreate(tag); node.appendChild = child => { node.append(child); return child; }; node.before = child => node.parentElement.insertBefore(child, node); return node; };
@@ -35,10 +40,10 @@ function harness(provider, overrides = {}, context = {}) {
   const host = {
     document, providerLabel: `Display ${provider}`, initial: { cursorAccount: { status: { accounts: [] }, busy: false }, codexWorkspaceChoices: [] },
     getSettings: () => settings, getAccountContext: () => ({ settings, ...context }), preserveScroll: fn => fn(),
-    t: (key, params) => key === 'settings.slots.add' ? `＋ Add ${params.provider} account` : key === 'settings.opencode.connected' ? `${params.linked}/${params.total}` : key,
+    t: (key, params) => key === 'settings.slots.add' ? `＋ Add ${params.provider} account` : key === 'settings.slots.connectedCount' ? `${params.linked}/${params.total}` : key,
     window: { TokenMonitorLegacyAccountList: legacyList, tokenMonitor: { [provider]: api } },
-    isSettingsSurfaceVisible: () => true, localProviderStatuses: () => [], limitProviderEnabled: () => true,
-    accountShellApi, setCursorStatusText() {}, setCursorCheckboxesEnabled() {}, setSettingsSectionExpanded() {}, accountShellErrors: {},
+    isSettingsSurfaceVisible: () => true, localProviderStatuses: () => localReadings, limitProviderEnabled: () => true,
+    accountShellApi, setCursorStatusText(element, text) { element.textContent = text; }, setCursorCheckboxesEnabled() {}, setSettingsSectionExpanded() {}, accountShellErrors: {},
     accountProfileRequests: { begin: () => () => true }, accountProfileStatuses: { begin: () => () => true, retire() {} },
     accountProfileSaves: accountShellApi.createBusyGuard(),
     renderAccountShellError() {}, renderSettingsSummaries() {}, renderSubscriptionSettings() {}, setAccountShellError() {},
@@ -53,11 +58,102 @@ function harness(provider, overrides = {}, context = {}) {
     async render() { await owner[render](); await flush(); },
     add: () => document.root.querySelector('.slot-add') };
 }
-test('Codex settings summary counts connected remote accounts without a local login', async () => {
-  const records = [{ provider: 'codex', sourceDeviceId: 'peer', accountKey: 'remote-codex', status: 'ok' }];
-  const h = harness('codex', {}, { records, localDeviceId: 'local' });
+// The header counts the rows the list shows, so an account read on another
+// device is counted, and is connected only when its own reading is healthy.
+const headerStatus = {
+  codex: h => h.nodes.codexAccountStatus.textContent,
+  claude: h => h.owner.claudeAccountStatusText('fallback'),
+  cursor: h => h.nodes.cursorAccountStatus.textContent,
+  antigravity: h => h.nodes.antigravityAccountStatus.textContent,
+  mimo: h => h.nodes.mimoAccountStatus.textContent,
+  workbuddy: h => h.nodes.workbuddyAccountStatus.textContent,
+  opencode: h => h.nodes.opencodeCookieStatus.textContent,
+  thirdparty: h => h.nodes.thirdpartyStatus.textContent
+};
+for (const [provider, read] of Object.entries(headerStatus)) {
+  test(`${provider}: the account header counts connected accounts from other devices`, async () => {
+    const records = [
+      { provider, sourceDeviceId: 'peer', accountKey: `remote-${provider}`, status: 'ok' },
+      { provider, sourceDeviceId: 'peer', accountKey: `failing-${provider}`, status: 'unavailable' }
+    ];
+    const h = harness(provider, {}, { records, localDeviceId: 'local' });
+    await h.render();
+    assert.equal(read(h), '1/2');
+  });
+}
+
+test('OpenCode counts an account configured only through the environment cookie', async () => {
+  const h = harness('opencode', { getProfiles: async () => ({ profiles: {}, hasEnvVar: true, environmentAccountKey: 'env-key' }) });
   await h.render();
-  assert.equal(h.nodes.codexAccountStatus.textContent, '1/1');
+  assert.equal(headerStatus.opencode(h), '0/1');
+  assert.equal(h.document.root.querySelector('.slot-row').dataset.slotId, 'environment');
+});
+
+test('OpenCode keeps a profile load error through quota pushes until profiles reload', async () => {
+  let loadFailed = false;
+  const records = [{ provider: 'opencode', sourceDeviceId: 'peer', accountKey: 'remote', status: 'unavailable' }];
+  const h = harness('opencode', { getProfiles: async () => {
+    if (loadFailed) throw new Error('profile read failed');
+    return { profiles: {} };
+  } }, { records, localDeviceId: 'local' });
+  await h.render();
+  assert.equal(headerStatus.opencode(h), '0/1');
+
+  loadFailed = true;
+  await h.render();
+  assert.equal(headerStatus.opencode(h), 'settings.opencode.connectFailed');
+  records[0] = { ...records[0], status: 'ok' };
+  h.owner.refreshReadings();
+  assert.equal(headerStatus.opencode(h), 'settings.opencode.connectFailed');
+  assert.match(h.document.root.querySelector('.slot-status').className, /slot-connected/);
+
+  loadFailed = false;
+  await h.render();
+  assert.equal(headerStatus.opencode(h), '1/1');
+});
+
+// Claude's rows are derived from the readings themselves, so it is rebuilt with
+// its header by renderExternalProviderStatus('claude') rather than this hook.
+const refreshedWithStatus = new Set(['claude']);
+test('every account owner takes quota pushes through refreshReadings', () => {
+  const owners = fs.readdirSync(path.join(renderer, 'limits/providerOwners')).map(file => path.basename(file, '.js'));
+  assert.ok(owners.length >= 9);
+  for (const provider of owners) {
+    const owner = harness(provider).owner;
+    assert.equal(typeof owner.refreshReadings === 'function', !refreshedWithStatus.has(provider), provider);
+  }
+});
+
+for (const provider of Object.keys(headerStatus).filter(provider => !refreshedWithStatus.has(provider))) {
+  test(`${provider}: a quota push updates the rows and header without a settings push`, async () => {
+    const records = [{ provider, sourceDeviceId: 'peer', accountKey: `remote-${provider}`, status: 'unavailable' }];
+    const h = harness(provider, {}, { records, localDeviceId: 'local' });
+    await h.render();
+    assert.equal(headerStatus[provider](h), '0/1');
+    records[0] = { ...records[0], status: 'ok' };
+    h.owner.refreshReadings();
+    assert.equal(headerStatus[provider](h), '1/1');
+    assert.match(h.document.root.querySelector('.slot-status').className, /slot-connected/);
+  });
+}
+
+test('WorkBuddy quota pushes prefer a canonical reading over a stale fallback', async () => {
+  const fallback = { provider: 'workbuddy', accountKey: 'fallback', status: 'unavailable' };
+  const readings = [fallback];
+  const h = harness('workbuddy', {}, {}, readings);
+  h.settings.workbuddyManagedAccounts = [{ id: 'saved', accountKey: fallback.accountKey }];
+  await h.render();
+  assert.equal(headerStatus.workbuddy(h), '0/1');
+
+  readings.push({ provider: 'workbuddy', accountKey: 'canonical', accountKeyAliases: ['fallback'], status: 'ok' });
+  h.owner.refreshReadings();
+  assert.equal(headerStatus.workbuddy(h), '1/1');
+  assert.match(h.document.root.querySelector('.slot-status').className, /slot-connected/);
+
+  readings.splice(0, readings.length, { ...fallback, status: 'ok' },
+    { provider: 'workbuddy', accountKey: 'canonical', status: 'unavailable' });
+  h.owner.refreshReadings();
+  assert.equal(headerStatus.workbuddy(h), '1/1');
 });
 
 for (const provider of ['codex', 'claude', 'cursor', 'antigravity', 'mimo', 'workbuddy', 'minimax', 'opencode', 'thirdparty']) {
@@ -310,7 +406,7 @@ test('Cursor initial discovery failure keeps the shared manual-login footer reac
   assert.equal(h.add().disabled, true, 'a known external-agent gate still blocks management on error');
 });
 
-for (const removeLast of [false, true]) test(`MiniMax billing remains reachable with a collapsed editor, removeLast=${removeLast}`, async () => {
+for (const removeLast of [false, true]) test(`MiniMax billing is in the Add account form, removeLast=${removeLast}`, async () => {
   let keys = removeLast ? [{ id: 'last', accountKey: 'wallet', billingMode: 'api', apiRegion: 'cn' }] : [];
   const h = harness('minimax', { getKeys: async () => keys, removeKey: async () => { keys = []; return { ok: true }; } });
   const opened = [];
@@ -324,10 +420,12 @@ for (const removeLast of [false, true]) test(`MiniMax billing remains reachable 
     assert.equal(h.document.root.querySelector('.slot-row'), undefined);
   }
   const browser = h.nodes.minimaxOpenBrowser;
-  assert.equal(h.document.root.querySelector('.legacy-editor-reveal').inert, true);
-  // The fixture permits synthetic clicks on hidden/inert nodes: check the
-  // actual owner/list DOM ancestry before invoking the real event handler.
-  assert.equal(Boolean(browser.closest('.hidden')), false, 'billing must be visible without opening Add');
+  const editor = h.document.root.querySelector('.legacy-editor-reveal');
+  assert.ok(browser.closest('.legacy-editor-reveal') === editor);
+  assert.equal(editor.inert, true);
+  assert.ok(browser.closest('.hidden'));
+  await h.add().click();
+  assert.equal(Boolean(browser.closest('.hidden')), false);
   for (let node = browser; node; node = node.parentElement) assert.notEqual(node.inert, true, 'billing must not be inert');
   for (const [billingMode, apiRegion, expected] of [
     ['token-plan', 'cn', 'https://platform.minimaxi.com/user-center/payment/token-plan'],
@@ -340,7 +438,7 @@ for (const removeLast of [false, true]) test(`MiniMax billing remains reachable 
     assert.equal(opened.at(-1), expected);
   }
   await h.add().click();
-  assert.equal(h.nodes.minimaxAddDetails.classList.contains('hidden'), false, 'add form remains available');
+  assert.equal(editor.inert, true);
 });
 
 for (const masked of [false, true]) test(`Codex titles retain emails and custom names separately from plans (masked=${masked})`, async () => {
