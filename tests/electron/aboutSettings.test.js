@@ -266,9 +266,11 @@ test('the intro plays once, when the star button first comes into view, unless m
   const app = read('app.js');
   const body = app.slice(app.indexOf('let aboutStarsRequest = null;'), app.indexOf('// Feedback for the click that opens the repository'));
   const element = () => ({
-    children: [], style: {}, attributes: {}, className: '', textContent: '',
+    children: [], style: {}, attributes: {}, className: '', textContent: '', listeners: {},
     append(...items) { this.children.push(...items); },
-    setAttribute(name, value) { this.attributes[name] = value; }
+    setAttribute(name, value) { this.attributes[name] = value; },
+    addEventListener(type, listener) { this.listeners[type] = listener; },
+    removeEventListener(type) { delete this.listeners[type]; }
   });
   function harness({ reduced, replies = [3760] }) {
     const added = [];
@@ -281,7 +283,7 @@ test('the intro plays once, when the star button first comes into view, unless m
     }
     const els = {
       aboutStarCount: { hidden: true },
-      aboutStarCountValue: { dataset: {}, textContent: '', replaceChildren(...items) { this.children = items; } },
+      aboutStarCountValue: { dataset: {}, textContent: '', replaceChildren(...items) { this.children = items; }, contains(item) { return this.children?.includes(item); } },
       openRepositoryButton: { classList: { add: (name) => added.push(name) }, addEventListener() {} }
     };
     const context = {
@@ -319,6 +321,13 @@ test('the intro plays once, when the star button first comes into view, unless m
   assert.equal(label.textContent, '3,760', 'assistive technology reads the plain number');
   const digits = reel.children.filter((child) => typeof child !== 'string');
   assert.deepEqual(digits.map((column) => column.style.transform), ['translateY(calc(-3 * 1.2em))', 'translateY(calc(-7 * 1.2em))', 'translateY(calc(-6 * 1.2em))', 'translateY(calc(0 * 1.2em))']);
+  const lastColumn = digits.at(-1);
+  digits[0].listeners.transitionend?.({ target: digits[0], propertyName: 'transform' });
+  lastColumn.listeners.transitionend({ target: lastColumn, propertyName: 'opacity' });
+  assert.equal(motion.els.aboutStarCountValue.children[0], reel, 'the reel stays until the last column stops');
+  lastColumn.listeners.transitionend({ target: lastColumn, propertyName: 'transform' });
+  assert.equal(motion.els.aboutStarCountValue.textContent, '3,760', 'the stopped reel becomes plain text, free of fractional transforms');
+  motion.els.aboutStarCountValue.children = [];
   await motion.refresh();
   assert.equal(motion.observers.length, 1, 'the intro is spent for this launch');
 
@@ -372,4 +381,11 @@ test('changing the interface language reformats the star count without another l
   const apply = app.slice(app.indexOf('function applySettingsTranslations('), app.indexOf('let displaySettings = null;'));
   assert.match(apply, /renderAboutStars\(\);/);
   assert.doesNotMatch(apply, /refreshAboutStars/);
+});
+
+test('the star count uses the display font so its comma does not split the number', () => {
+  const css = read('styles.css');
+  const start = css.indexOf('.about-settings-star-count {');
+  const rule = css.slice(start, css.indexOf('}', start));
+  assert.match(rule, /font-family: var\(--display-font,/);
 });

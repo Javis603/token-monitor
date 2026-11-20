@@ -1716,7 +1716,9 @@ span.settings-note.settings-item-desc {
   -webkit-mask: url("icons/brands/github.svg") center / contain no-repeat;
   mask: url("icons/brands/github.svg") center / contain no-repeat;
 }
-/* The count sits in a soft chip rather than behind a divider. */
+/* The count sits in a soft chip rather than behind a divider. It uses the
+   display font, like the total, because a monospaced comma takes a whole cell
+   and splits the number. */
 .about-settings-star-count {
   display: inline-flex;
   flex: 0 0 auto;
@@ -1726,6 +1728,8 @@ span.settings-note.settings-item-desc {
   padding: 0 8px;
   border-radius: 6px;
   background: rgba(var(--overlay-rgb), 0.07);
+  font-family: var(--display-font, -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif);
+  font-size: 0.75rem;
   font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
