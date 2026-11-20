@@ -7,7 +7,7 @@
 // once the objects die because nothing is asking for the space, so the main
 // process keeps hundreds of megabytes committed after the numbers on screen
 // have long settled. The usage worker does the same after a publish; main has
-// no such boundary, so it checks on a slow idle timer instead.
+// no such boundary, so it checks on a 30-second idle timer instead.
 //
 // A full collection blocks the main thread for tens of milliseconds. That is
 // why it only runs when no app window has focus, and why a collection that
@@ -20,10 +20,8 @@
 
 const MIN_HEAP_TOTAL_BYTES = 64 * 1024 * 1024;
 const RETAINED_HEADROOM_BYTES = 32 * 1024 * 1024;
-const DEFAULT_INTERVAL_MS = 2 * 60 * 1000;
-// The first complete collection usually finishes well inside a minute. Check
-// once then, so the startup high-water is returned before the steady-state
-// cadence rather than lingering for five minutes.
+const DEFAULT_INTERVAL_MS = 30 * 1000;
+// Keep a one-shot startup check at one minute alongside the recurring timer.
 const DEFAULT_INITIAL_DELAY_MS = 60 * 1000;
 // A hung inspector session would otherwise leave `running` true forever and
 // stop every later pass. Main collection is cheap; ten seconds is already far

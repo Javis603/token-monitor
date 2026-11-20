@@ -149,7 +149,7 @@ test('a failed collection is retried on the next pass', async () => {
   assert.equal(await harness.collector.run(), true);
 });
 
-test('start installs an early check and the steady interval, and stop clears both', async () => {
+test('start installs the one-shot check and recurring interval, and stop clears both', async () => {
   const intervalTimer = { unrefCalled: false, unref() { this.unrefCalled = true; } };
   const initialTimer = { unrefCalled: false, unref() { this.unrefCalled = true; } };
   let installedInterval = null;
@@ -168,12 +168,12 @@ test('start installs an early check and the steady interval, and stop clears bot
   collector.start();
   collector.start();
   assert.equal(installedInitial.ms, 60 * 1000);
-  assert.equal(installedInterval.ms, 2 * 60 * 1000);
+  assert.equal(installedInterval.ms, 30 * 1000);
   assert.equal(initialTimer.unrefCalled, true);
   assert.equal(intervalTimer.unrefCalled, true);
   installedInitial.fn();
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(rendererRuns, 1, 'the first check does not wait for the interval');
+  assert.equal(rendererRuns, 1, 'the one-shot timer runs a check');
   collector.stop();
   assert.equal(clearedInterval, intervalTimer);
   assert.equal(await collector.run(), false, 'a stopped collector does not run');
@@ -191,7 +191,7 @@ test('start installs an early check and the steady interval, and stop clears bot
   });
   beforeFire.start();
   beforeFire.stop();
-  assert.equal(clearedPendingInitial, pendingInitial, 'stop clears a still-pending first check');
+  assert.equal(clearedPendingInitial, pendingInitial, 'stop clears a still-pending one-shot check');
 });
 
 
