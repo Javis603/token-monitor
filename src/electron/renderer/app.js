@@ -8334,7 +8334,6 @@ async function refreshStats(options = {}) {
   }
   try {
     const nextStats = await window.tokenMonitor.getStats(options);
-    if (options.deltaResync === true && !nextStats) return;
     observeLiveTokenRate(nextStats);
     allTimeSessions.invalidate();
     state.stats = sessionStatsForDisplay(allTimeSessions.attach(nextStats));
@@ -15865,14 +15864,18 @@ window.tokenMonitor.onStatsPush?.((payload) => {
   } else {
     if (payload.data?.stats) {
       incomingStats = payload.data.stats;
+      state.statsDeltaResyncPending = null;
     } else if (payload.data?.statsDelta) {
       incomingStats = window.TokenMonitorStatsDelta?.applyStatsDelta(state.stats, payload.data.statsDelta) || null;
       if (!incomingStats) {
-        // The base snapshot is gone (reload, Hub switch or a lost push). Fetch
-        // one full tree instead of applying a delta to an unrelated state.
+        // Recover on the stats push channel, where a full snapshot arrives
+        // before any delta based on it. The invoke reply carries no stats.
         if (!state.statsDeltaResyncPending) {
-          state.statsDeltaResyncPending = true;
-          void refreshStats({ deltaResync: true }).catch(() => {}).finally(() => { state.statsDeltaResyncPending = false; });
+          const request = window.tokenMonitor.getStats({ deltaResync: true }).catch(() => {});
+          state.statsDeltaResyncPending = request;
+          void request.finally(() => {
+            if (state.statsDeltaResyncPending === request) state.statsDeltaResyncPending = null;
+          });
         }
         return;
       }

@@ -2564,6 +2564,7 @@ let latestHubStatsIdentity = null;
 let hubModeGeneration = 0;
 let tray = null;
 let latestStats = null;
+let latestStatsSource = null;
 let limitsHistoryStore = null;
 let limitsHistoryController = null;
 
@@ -4562,11 +4563,12 @@ function sendPush(payload, options = {}) {
   if (payload?.data?.stats) {
     payload.data.stats = injectLocalDeviceStatus(payload.data.stats);
     latestStats = payload.data.stats;
+    latestStatsSource = { generation: hubModeGeneration, identity: currentHubStatsIdentity() };
     // Client local batches overlay usage on the cached Hub snapshot; they do
     // not supersede an in-flight read of fresh remote stats.
     if (!(settings?.hubMode === 'client' && payload.data.reason === 'local')) {
       statsPushRevision += 1;
-      statsPushSource = { generation: hubModeGeneration, identity: currentHubStatsIdentity() };
+      statsPushSource = latestStatsSource;
     }
     edgeDockManualStats = null;
     getSyncContentRuntime().notifyStats(latestStats);
@@ -8381,21 +8383,12 @@ app.whenReady().then(() => {
   ipcMain.handle('stats:get', async (event, options) => {
     if (options?.deltaResync === true) {
       if (!mainWindow || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents) return null;
-      // Recover the last published base without contacting the Hub. The
-      // fingerprint identifies the renderer's lane, even for local overlays.
-      const snapshot = lastRendererStatsFingerprint?.snapshot;
-      if (!snapshot || snapshot.source !== hubModeGeneration) return null;
-      const stats = rendererSnapshots.get(snapshot.id);
-      if (!stats) {
-        // The base was evicted. Send the next publication in full so recovery
-        // can finish without a Hub request or a retained copy of the snapshot.
-        lastRendererStatsFingerprint = null;
-        return null;
-      }
-      const visibleStats = electronPresentationStats(stats);
-      const copy = rendererSnapshots.stamp(stats, rendererStats(visibleStats), visibleStats);
-      lastRendererStatsFingerprint = fingerprintStats(copy);
-      return copy;
+      if (latestStatsSource?.generation !== hubModeGeneration
+        || latestStatsSource.identity !== currentHubStatsIdentity()) return null;
+      // Send the full snapshot on the same channel as subsequent deltas.
+      // An invoke reply can arrive after a newer push and roll the view back.
+      sendStatsPresentationToRenderer({ force: true });
+      return null;
     }
 
     const revision = statsPushRevision;
