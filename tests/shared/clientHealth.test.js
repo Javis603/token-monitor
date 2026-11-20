@@ -1188,7 +1188,7 @@ test('older devices can still upload retired Qoder CN database health checks', (
 });
 
 test('Junie and OpenCodeReview source checks and watches follow their separate session trees', (t) => {
-  const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tm-review-sources-'));
+  const homeDir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'tm-review-sources-')));
   t.after(() => fs.rmSync(homeDir, { recursive: true, force: true }));
   const options = { homeDir, env: { XDG_DATA_HOME: path.join(homeDir, 'xdg') } };
   const clients = 'junie,opencodereview';
