@@ -78,6 +78,10 @@
         {
           "from": "build/windows-dock/TokenMonitor.DockBackdrop.exe",
           "to": "windows-dock/TokenMonitor.DockBackdrop.exe"
+        },
+        {
+          "from": "build/windows-dock/TokenMonitor.WindowInput.dll",
+          "to": "windows-dock/TokenMonitor.WindowInput.dll"
         }
       ],
       "target": [
