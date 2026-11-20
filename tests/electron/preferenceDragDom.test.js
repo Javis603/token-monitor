@@ -488,7 +488,7 @@ test('main section holds views; appearance is its own section; window holds beha
   );
   assert.notEqual(main, '', 'main section should exist');
   assert.ok(main.indexOf('settings-main-screen-group') >= 0, 'main screen group should be first-class');
-  assert.doesNotMatch(main, /settings-appearance-group/, 'appearance moved out of main');
+  assert.doesNotMatch(main, /settings-appearance-type/, 'appearance moved out of main');
   assert.match(main, /id="viewDisplayList"/);
   assert.match(main, /id="currencyInput"/);
   assert.doesNotMatch(main, /id="historyEnabledInput"/);
@@ -515,14 +515,28 @@ test('main section holds views; appearance is its own section; window holds beha
   assert.match(appearance, /id="themeVendorToggle"[^>]*aria-controls="themeVendorDetails"/);
   assert.match(appearance, /id="themeVendorDetails" class="cursor-settings-details hidden" inert/);
 
-  const vendorGroupIndex = appearance.indexOf('id="themeVendorGroup"');
-  assert.ok(vendorGroupIndex > appearance.indexOf('id="themeAdvancedGroup"'), 'vendor colours should follow advanced customization');
-  const advancedGroup = appearance.slice(appearance.indexOf('id="themeAdvancedGroup"'), vendorGroupIndex);
-  const vendorGroup = appearance.slice(vendorGroupIndex);
-  assert.match(advancedGroup, /id="themeColorGrid"/);
-  assert.doesNotMatch(advancedGroup, /id="vendorColorList"/);
-  assert.match(vendorGroup, /id="resetVendorColorsButton"/);
+  const groupOrder = ['settings-theme-group', 'settings-appearance-material', 'settings-appearance-type',
+    'settings-appearance-usage', 'settings-appearance-motion',
+    'settings-appearance-vendors', 'appearanceLegacyGroup'];
+  let previousGroup = -1;
+  for (const name of groupOrder) {
+    const index = appearance.indexOf(name);
+    assert.ok(index > previousGroup, `${name} should follow the previous group`);
+    previousGroup = index;
+  }
+  const palette = appearance.slice(appearance.indexOf('id="themeAdvancedDetails"'), appearance.indexOf('settings-appearance-material'));
+  assert.match(palette, /id="themeColorGrid"/);
+  assert.match(palette, /id="themeCodeInput"/);
+  const vendorGroup = appearance.slice(appearance.indexOf('id="themeVendorGroup"'), previousGroup);
+  assert.match(vendorGroup, /id="themeVendorDetails"[\s\S]*id="resetVendorColorsButton"/);
   assert.match(vendorGroup, /id="vendorColorList"/);
+  const legacy = appearance.slice(previousGroup);
+  assert.match(legacy, /id="appearanceLegacyToggle"[^>]*aria-controls="appearanceLegacyDetails"/);
+  assert.match(legacy, /id="appearanceLegacyDetails" class="cursor-settings-details hidden" inert/);
+  for (const id of ['swapSettingsRefreshInput', 'liveDotInput', 'toolIconsInput', 'titleIconInput']) {
+    assert.ok(legacy.includes(`id="${id}"`));
+    assert.ok(!appearance.slice(0, previousGroup).includes(`id="${id}"`));
+  }
 
   const windowSection = html.slice(
     html.indexOf('<div id="windowSettingsDetails"'),
@@ -699,8 +713,8 @@ test('settings accordions share accessible collapsed-state handling', () => {
   assert.match(setup, /group\.classList\.toggle\('expanded', open\)/);
   assert.match(app, /setupSettingsAccordion\(els\.appUpdateNotes, els\.appUpdateNotesToggle, els\.appUpdateNotesDetails\)/);
   assert.match(app, /setupSettingsAccordion\(els\.advancedSettingsGroup, els\.advancedSettingsToggle, els\.advancedSettingsDetails\)/);
-  assert.match(app, /setupSettingsAccordion\(els\.themeAdvancedGroup, els\.themeAdvancedToggle, els\.themeAdvancedDetails\)/);
-  assert.match(app, /setupSettingsAccordion\(els\.themeVendorGroup, els\.themeVendorToggle, els\.themeVendorDetails\)/);
+  assert.match(app, /setupSettingsAccordion\(els\.themeAdvancedGroup, els\.themeAdvancedToggle, els\.themeAdvancedDetails, closeAppearanceColorPickerOnCollapse\)/);
+  assert.match(app, /setupSettingsAccordion\(els\.themeVendorGroup, els\.themeVendorToggle, els\.themeVendorDetails, closeAppearanceColorPickerOnCollapse\)/);
 });
 
 test('Trends has a master toggle separate from main-screen visibility', () => {
