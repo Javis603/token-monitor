@@ -17654,6 +17654,8 @@ function setupModelAliasesUI() {
   }
 }
 
+let customPricingRowsKey;
+
 function customPricingMeta(ov) {
   const parts = [];
   if (typeof ov.inputPerM === 'number') parts.push(`${t('settings.customPricing.summaryInput')} $${ov.inputPerM}`);
@@ -17676,21 +17678,29 @@ function renderCustomPricing() {
       ? t('settings.customPricing.count', { count: overrides.length })
       : t('settings.customPricing.none');
   }
+  const editLabel = t('settings.customPricing.edit');
+  const removeLabel = t('settings.customPricing.remove');
+  const emptyLabel = t('settings.customPricing.empty');
+  const rows = overrides.map(override => ({ override, meta: customPricingMeta(override) }));
+  const rowsKey = JSON.stringify([rows, pricingBase?.identity, pricingBase?.revisions?.customPricing,
+    editLabel, removeLabel, emptyLabel, t('settings.collection.modelActions')]);
+  if (rowsKey === customPricingRowsKey) return;
+  customPricingRowsKey = rowsKey;
   listEl.replaceChildren();
   if (overrides.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'settings-note';
-    empty.textContent = t('settings.customPricing.empty');
+    empty.textContent = emptyLabel;
     listEl.append(empty);
     return;
   }
-  for (const ov of overrides) {
+  for (const { override: ov, meta: summary } of rows) {
     const row = document.createElement('div');
     row.className = 'managed-account-row custom-pricing-row';
     const main = document.createElement('button');
     main.type = 'button';
     main.className = 'managed-account-main custom-pricing-edit';
-    main.setAttribute('aria-description', t('settings.customPricing.edit'));
+    main.setAttribute('aria-description', editLabel);
     const openEditor = () => openCustomPricingForm?.(ov);
     main.addEventListener('click', openEditor);
     const name = document.createElement('div');
@@ -17698,12 +17708,12 @@ function renderCustomPricing() {
     name.textContent = ov.modelId;
     const meta = document.createElement('div');
     meta.className = 'managed-account-meta';
-    meta.textContent = customPricingMeta(ov);
+    meta.textContent = summary;
     main.append(name, meta);
     const menu = window.TokenMonitorModelAliasForm.createModelSettingsMenu(document, {
       label: t('settings.collection.modelActions', { model: ov.modelId }),
-      editLabel: t('settings.customPricing.edit'),
-      removeLabel: t('settings.customPricing.remove'),
+      editLabel,
+      removeLabel,
       edit: openEditor,
       remove: async () => {
         const next = customPricingFormApi.removeOverride(overrides, ov.modelId);
@@ -17820,7 +17830,9 @@ function setupCustomPricingUI() {
       select.value = '';
     }
     const title = document.getElementById('customPricingFormTitle');
-    if (title) title.textContent = t(prefill ? 'settings.customPricing.edit' : 'settings.customPricing.add');
+    const titleKey = prefill ? 'settings.customPricing.edit' : 'settings.customPricing.add';
+    title.setAttribute('data-i18n', titleKey);
+    title.textContent = t(titleKey);
     accountShellApi.setDisclosureBody(addButton, form, true);
     addButton.setAttribute('aria-expanded', String(pricingEdit.adding));
     accountShellApi.focusDisclosureControl(form, select.value === '__manual__' ? manualInput : select);

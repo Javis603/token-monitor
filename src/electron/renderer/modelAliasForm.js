@@ -39,6 +39,7 @@
     let displayed;
     let editSnapshot;
     let busy = false;
+    let renderedRowsKey;
     let sourceId = 0;
     const extraSources = [];
     const choices = () => aliasesApi.modelAliasChoices(getModelIds(), getAliases());
@@ -150,7 +151,9 @@
       el('MoreSources').replaceChildren();
       aliasPicker.populate(alias);
       canonicalPicker.populate(canonical);
-      el('FormTitle').textContent = t(editingAlias ? 'settings.modelAliases.edit' : 'settings.modelAliases.add');
+      const titleKey = editingAlias ? 'settings.modelAliases.edit' : 'settings.modelAliases.add';
+      el('FormTitle').setAttribute('data-i18n', titleKey);
+      el('FormTitle').textContent = t(titleKey);
       accountShell.setDisclosureBody(addButton, form, true);
       addButton.setAttribute('aria-expanded', String(!editingAlias));
       error('');
@@ -196,6 +199,13 @@
       el('Status').textContent = entries.length
         ? t('settings.modelAliases.count', { count: entries.length })
         : t(`settings.modelAliases.grouping${grouping === 'prefix' ? 'Prefix' : grouping === 'duplicates' ? 'Duplicates' : 'Off'}`);
+      const editLabel = t('settings.customPricing.edit');
+      const editDescription = t('settings.modelAliases.edit');
+      const removeLabel = t('settings.modelAliases.remove');
+      const rowsKey = JSON.stringify([entries, busy, snapshot.base?.identity, snapshot.base?.revisions?.modelAliases,
+        editLabel, editDescription, removeLabel, t('settings.collection.modelActions')]);
+      if (rowsKey === renderedRowsKey) return;
+      renderedRowsKey = rowsKey;
       el('List').replaceChildren();
       for (const [alias, canonical] of entries) {
         const row = document.createElement('div');
@@ -203,7 +213,7 @@
         const edit = document.createElement('button');
         edit.type = 'button';
         edit.className = 'managed-account-main custom-pricing-edit';
-        edit.setAttribute('aria-description', t('settings.modelAliases.edit'));
+        edit.setAttribute('aria-description', editDescription);
         edit.disabled = busy;
         const name = document.createElement('div');
         name.className = 'managed-account-email';
@@ -216,8 +226,8 @@
         edit.addEventListener('click', openEditor);
         const menu = createModelSettingsMenu(document, {
           label: t('settings.collection.modelActions', { model: alias }),
-          editLabel: t('settings.customPricing.edit'),
-          removeLabel: t('settings.modelAliases.remove'),
+          editLabel,
+          removeLabel,
           edit: openEditor,
           remove: () => persist(Object.fromEntries(entries.filter(([key]) => key !== alias)), snapshot.base),
           disabled: busy

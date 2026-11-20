@@ -12,7 +12,7 @@ const helpApi = require('../../src/electron/renderer/helpPopover');
 const { normalizeCustomPricingSetting } = require('../../src/shared/tokscaleCustomPricing');
 
 const appSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
-const pricingSource = appSource.slice(appSource.indexOf('function customPricingMeta('), appSource.indexOf('function setupCursorAccountUI('));
+const pricingSource = appSource.slice(appSource.indexOf('let customPricingRowsKey'), appSource.indexOf('function setupCursorAccountUI('));
 
 function fixture(options = {}) {
   const nodes = new Map();
@@ -65,7 +65,7 @@ function fixture(options = {}) {
   const get = suffix => document.getElementById('customPricing' + suffix);
   const enter = (suffix, value) => { get(suffix).value = String(value); get(suffix).dispatchEvent({ type: 'input' }); };
   const select = id => { get('ModelSelect').value = id; return get('ModelSelect').dispatchEvent({ type: 'change' }); };
-  return { state, get, enter, select, requests };
+  return { state, get, enter, select, requests, render: context.renderCustomPricing };
 }
 
 test('pricing editor saves, reopens and removes both cache-write rates', async () => {
@@ -84,6 +84,9 @@ test('pricing editor saves, reopens and removes both cache-write rates', async (
   const [edit, remove] = menu.children;
   assert.equal(edit.textContent, 'settings.customPricing.edit');
   menu.popoverOpen = true;
+  f.state.settings.customModelPricing = structuredClone(f.state.settings.customModelPricing);
+  f.render();
+  assert.equal(f.get('List').children[0], row, 'an unrelated settings update preserves the open row menu');
   edit.click();
   assert.equal(menu.popoverOpen, false);
   assert.equal(f.get('CacheWrite1h').value, 6);

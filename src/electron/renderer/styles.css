@@ -3355,6 +3355,7 @@ p.settings-list-group-label { padding: 2px 0 0; }
 .settings-appearance-section-group .settings-section-details-inner > .settings-subgroup:last-child {
   margin-bottom: 10px;
 }
+.settings-model-controls > .cursor-account-group:not(.expanded) + .cursor-account-group { margin-top: 0; }
 .settings-model-controls .cursor-settings-toggle { min-height: 30px; }
 .settings-export-block > .export-auto-details:not(.hidden) + .export-manual-row {
   border-top: 1px solid var(--line);

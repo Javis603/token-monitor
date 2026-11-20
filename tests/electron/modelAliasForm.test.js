@@ -69,6 +69,8 @@ test('alias editor adds, edits and removes a persisted mapping', async () => {
   const row = f.get('List').children[0];
   assert.equal(row.children[0].children[0].textContent, 'anthropic/claude-opus-5');
   assert.equal(row.children[0].children[1].textContent, '→ claude-opus-5');
+  f.form.syncSettings();
+  assert.equal(f.get('List').children[0], row, 'an unrelated settings update preserves the row menu');
   f.get('AddButton').click();
   assert.equal(f.get('AddButton')['aria-expanded'], 'true');
   f.get('AddButton').click();
