@@ -1158,9 +1158,13 @@ async function collectUsageOnce(options) {
         const missingTargets = targetClients.length > 1
           ? targetClients.filter((client) => !Object.prototype.hasOwnProperty.call(freshPartitions, client))
           : [];
+        // If every target is missing, a targeted retry would repeat the same
+        // scan without resolving whether the entire union was incomplete.
+        const allTargetsMissing = missingTargets.length > 0 && missingTargets.length === targetClients.length;
         let hasUnsafeTargetedResult = (
           periodHasUsage(unattributed)
           || attributedClients.some((client) => !targetClientSet.has(client))
+          || allTargetsMissing
           || missingTargets.some((client) => periodHasUsage(anchor.todayPartitions[client]))
         );
 
