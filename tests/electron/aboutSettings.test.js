@@ -388,4 +388,7 @@ test('the star count uses the display font so its comma does not split the numbe
   const start = css.indexOf('.about-settings-star-count {');
   const rule = css.slice(start, css.indexOf('}', start));
   assert.match(rule, /font-family: var\(--display-font,/);
+  // Regular weight at the button's own size, so the digits match the star's outline.
+  assert.match(rule, /font-weight: 400;/);
+  assert.doesNotMatch(rule, /font-size/);
 });
