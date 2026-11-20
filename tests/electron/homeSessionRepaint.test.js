@@ -11,7 +11,7 @@ for (const focus of ['module', 'heading']) test(`Home sessions repaint once at s
   const app = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
   const source = app.slice(app.indexOf('function stopHomeSessionRepaint()'), app.indexOf('function renderHomeSessionModule('));
   assert.match(app, /if \(moduleIds\.includes\('session'\)\) scheduleHomeSessionRepaint\(sessionRows\);/);
-  assert.match(app, /allTimeSessions\.ensure\(\);\s*stopHomeSessionRepaint\(\);/);
+  assert.match(app, /allTimeSessions\.ensure\(\);\s*syncPeriodDetailSource\(\);\s*periodDetails\.ensure\(\);[\s\S]*?stopHomeSessionRepaint\(\);/);
 
   let now = 1_000_000;
   let nextTimerId = 0;

@@ -1,5 +1,7 @@
 'use strict';
 
+const { isDeepStrictEqual } = require('node:util');
+
 // A published stats snapshot is read by every surface the main process feeds —
 // renderer, tray, edge dock, Widget — and each of them asks for the presentation
 // projection of the same object. The projection walks every session, so it runs
@@ -115,6 +117,81 @@ function rendererStats(stats) {
   return result;
 }
 
+// The widget's overview push carries totals and breakdown counters. Views can
+// pull detail from the same captured snapshot when they need the lists.
+function rendererStatsSummary(stats) {
+  const summary = rendererStats(stats);
+  if (!summary?.periods) return summary;
+  const { nativeSessions, nativeProjects, ...overview } = summary;
+  return {
+    ...overview,
+    detailOnDemand: true,
+    periods: Object.fromEntries(Object.entries(summary.periods)
+      .map(([key, period]) => [key, withoutSessionDetail(period)]))
+  };
+}
+
+function rendererPeriodDetails(stats, scope) {
+  if (!stats?.periods) return null;
+  const keys = scope === 'home' ? ['today', 'month']
+    : ['today', 'month', 'allTime'].includes(scope) ? [scope] : [];
+  if (!keys.length) return null;
+  const details = {};
+  for (const key of keys) {
+    const { sessions, projects } = stats.periods[key] || {};
+    details[key] = {
+      ...(key !== 'allTime' && sessions ? { sessions } : {}),
+      ...(scope !== 'home' && projects ? { projects } : {}),
+      nativeSessions: stats.nativeSessions?.[key],
+      ...(scope !== 'home' ? { nativeProjects: stats.nativeProjects?.[key] } : {})
+    };
+  }
+  return details;
+}
+
+// Detail maps are presentation records with an observable enumeration order
+// (for example, tied session ranks). Fall back to a full reply when that order
+// changes. Compare only on demand and send replacements for changed rows.
+function periodDetailPatch(previous, current) {
+  const patch = [];
+  for (const [period, record] of Object.entries(current)) {
+    const before = previous[period];
+    if (!before || !isDeepStrictEqual(Object.keys(before), Object.keys(record))) return null;
+    for (const [field, map] of Object.entries(record)) {
+      const oldMap = before[field];
+      if (map === oldMap) continue;
+      if (!map || !oldMap) return null;
+      const keys = Object.keys(map);
+      if (!isDeepStrictEqual(keys, Object.keys(oldMap))) return null;
+      const changed = keys.filter(key => !isDeepStrictEqual(map[key], oldMap[key]));
+      if (changed.length) patch.push([period, field, Object.fromEntries(changed.map(key => [key, map[key]]))]);
+    }
+  }
+  return patch;
+}
+
+function createPeriodDetailPublication() {
+  let previous;
+  let revision = 0;
+
+  return (source, scope, details, knownRevision) => {
+    if (!details) return null;
+    if (previous && previous.revision === knownRevision && previous.source === source && previous.scope === scope) {
+      const patch = periodDetailPatch(previous.details, details);
+      if (patch) {
+        if (patch.length) {
+          revision += 1;
+          previous = { source, scope, revision, details };
+        }
+        return { revision, baseRevision: knownRevision, patch };
+      }
+    }
+    revision += 1;
+    previous = { source, scope, revision, details };
+    return { revision, details };
+  };
+}
+
 // A detail the renderer pulls has to belong to the stats it is showing, not to
 // whatever main published since. Every snapshot handed to the renderer is
 // stamped with an id it can pull by, and with the source generation it came
@@ -160,10 +237,12 @@ function createRendererSnapshots(options = {}) {
       if (!stats || typeof stats !== 'object' || !copy || typeof copy !== 'object') return copy;
       return { ...copy, snapshot: { ...register(stats) } };
     },
-    get(id) {
-      return byId.get(id) || null;
+    get(id, expectedSource) {
+      const stats = byId.get(id);
+      if (!stats || (expectedSource !== undefined && tags.get(stats)?.source !== expectedSource)) return null;
+      return stats;
     }
   };
 }
 
-module.exports = { createRendererSnapshots, createStatsPresentationCache, createStatsPublicationBatcher, rendererStats };
+module.exports = { createRendererSnapshots, createStatsPresentationCache, createStatsPublicationBatcher, rendererStats, rendererStatsSummary, rendererPeriodDetails, createPeriodDetailPublication };

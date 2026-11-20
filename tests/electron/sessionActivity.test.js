@@ -116,7 +116,7 @@ function mainActivityHarness(hubMode, externalAgent = false) {
     console, Date, settings: { hubMode }, mode: 'sync', hubModeGeneration: 1,
     lastCollectedDevice: local, localDevice: null, localStats: null, latestStats: null, statsPushSource: null,
     statsPushRevision: 0, lastExportAt: 0, edgeDockManualStats: null, deviceRuntimeHandle: {},
-    ...projection, ...syncDisplay, rendererStats: publisher.rendererStats,
+    ...projection, ...syncDisplay, rendererStatsSummary: publisher.rendererStatsSummary,
     rendererSnapshots: publisher.createRendererSnapshots({ source: () => context.currentHubStatsIdentity() }),
     snapshotLocalDevices: new WeakMap(), presentationCache: publisher.createStatsPresentationCache(),
     isExternalAgentActive: () => externalAgent,
@@ -146,8 +146,14 @@ function mainActivityHarness(hubMode, externalAgent = false) {
   const patch = state => ({ observations: [{ client: 'claude', sessionId: 'live',
     liveActivity: { state, observedAt: new Date(clock).toISOString() } }],
     nativeSessions: { today: {}, month: {}, allTime: {} } });
+  const details = stats => ({
+    ...stats,
+    periods: { ...stats.periods, month: {
+      ...stats.periods.month, ...publisher.rendererPeriodDetails(context.rendererSnapshots.get(stats.snapshot.id), 'month').month
+    } }
+  });
   const state = stats => require('../../src/shared/sessionLive').sessionWithActivity(stats.periods.month, 'claude:live').liveActivity.state;
-  return { context, get, aggregate, pushes, patch, state, local };
+  return { context, get, aggregate, pushes, patch, state, local, details };
 }
 
 test('stats reads adopt the published snapshot used by subsequent activity patches', async () => {
@@ -158,10 +164,12 @@ test('stats reads adopt the published snapshot used by subsequent activity patch
     const pulled = await f.get(null, {});
     assert.notEqual(pulled.snapshot.id, first.id, mode);
     assert.equal(pulled.snapshot.id, f.pushes.at(-1).data.stats.snapshot.id, 'other consumers see the adopted read');
+    const before = f.details(pulled);
+    assert.equal(f.state(before), 'running', mode);
     f.context.publishLocalSessionActivity(f.patch('waiting'));
     const event = f.pushes.at(-1).data;
     assert.equal(event.snapshot.id, pulled.snapshot.id, mode);
-    assert.equal(f.state(projection.applyActivityPatch(pulled, event.patch)), 'waiting', mode);
+    assert.equal(f.state(projection.applyActivityPatch(before, event.patch)), 'waiting', mode);
     assert.equal(f.context.rendererSnapshots.get(pulled.snapshot.id), f.context.latestStats);
   }
 });
@@ -174,7 +182,7 @@ test('full aggregates and reads preserve local waiting and unknown clears withou
       f.context.publishLocalSessionActivity(f.patch(state));
       f.context.sendPush({ event: 'stats', data: { stats: f.aggregate() } });
       assert.equal(f.state(f.context.latestStats), state, mode);
-      assert.equal(f.state(await f.get(null, {})), state, mode);
+      assert.equal(f.state(f.details(await f.get(null, {}))), state, mode);
       assert.equal(f.context.latestStats.periods.month.totalTokens, 100);
       assert.equal(f.local.month.sessions['claude:live'].liveActivity.state, 'running', 'source record stays immutable');
     }

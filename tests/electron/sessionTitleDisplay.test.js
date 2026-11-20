@@ -6,7 +6,7 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const { withoutSessionTitles, withoutSessionTitleStats } = require('../../src/electron/sessionTitleDisplay');
-const { createStatsPresentationCache } = require('../../src/electron/statsPublisher');
+const { createStatsPresentationCache, rendererStatsSummary, rendererPeriodDetails } = require('../../src/electron/statsPublisher');
 const modelAliases = require('../../src/electron/modelAliasPresentation');
 const deviceSources = require('../../src/electron/sessionDeviceSources');
 const { classifySettingsChange, usageConfigFromSettings } = require('../../src/electron/runtimeConfig');
@@ -85,7 +85,7 @@ test('saving the title preference immediately republishes Today and Home data fr
     projectLimitStatsForDisplay: value => value,
     migrateCodexAdditionalLimits: noop, scheduleMacWidgetSnapshot: noop, captureMacWidgetProducerOwner: noop, pluginRuntime: null,
     repaintDockSurfaces: noop, updateTrayDisplay: noop,
-    rendererSnapshots: { stamp: (_raw, value) => value }, rendererStats: value => value,
+    rendererSnapshots: { stamp: (_raw, value) => value }, rendererStatsSummary,
     pushSettingsToRenderer() { events.push('settings'); },
     mainWindow: { isDestroyed: () => false, webContents: { send(_channel, payload) {
       events.push('stats'); adopted = payload.data.stats;
@@ -96,7 +96,9 @@ test('saving the title preference immediately republishes Today and Home data fr
     context.previousSettingsState = { sessionTitlesEnabled: !enabled };
     context.settings = { sessionTitlesEnabled: enabled };
     context.saveDisplayPreference();
-    assert.equal(adopted.periods.today.sessions['codex:s'].title, enabled ? 'Private title' : undefined,
+    assert.equal(Object.hasOwn(adopted.periods.today, 'sessions'), false);
+    const detail = rendererPeriodDetails(context.electronPresentationStats(original), 'today');
+    assert.equal(detail.today.sessions['codex:s'].title, enabled ? 'Private title' : undefined,
       'Today and Home receive the restored title without another collection tick');
     assert.deepEqual(events.splice(0), ['settings', 'stats']);
     assert.equal(original.periods.today.sessions['codex:s'].title, 'Private title');

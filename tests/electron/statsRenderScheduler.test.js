@@ -277,7 +277,7 @@ test('stats-derived Settings rows refresh behind an open panel', () => {
   assert.doesNotMatch(archiveBody, /isSettingsSurfaceVisible|isSettingsPanelOpen/);
   assert.match(renderBody, /renderSessionUsageArchiveStatus\(\);/);
   assert.match(app, /function render\(\{ fromSearch = false \} = \{\}\) \{\n {2}renderAppContent\(\{ fromSearch \}\);/);
-  assert.doesNotMatch(renderBody, /isSettingsSurfaceVisible|isSettingsPanelOpen/);
+  assert.doesNotMatch(renderBody.slice(0, renderBody.indexOf('renderSessionUsageArchiveStatus();')), /isSettingsSurfaceVisible|isSettingsPanelOpen/);
   assert.doesNotMatch(surfaceBody, /isSettingsPanelOpen/);
 });
 
@@ -523,4 +523,83 @@ test('all stats refreshes use visibility-aware rendering', () => {
   assert.match(refreshStats, /getStats\(options\)[\s\S]*statsRenderScheduler\.request\(\);/);
   assert.equal([...refreshStats.matchAll(/setStatus\(statusTextFor/g)].length, 1);
   assert.match(statsRender, /refreshAccountOwnerReadings\(\);/);
+});
+
+test('a detail loading state reuses retained rows only if the list is visible', () => {
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const start = app.indexOf('    const retainedListVisible =');
+  const end = app.indexOf(' {', app.indexOf('    if (', start));
+  const loading = Function('state', 'els', 'awaitingGroupPeriod', 'renderedPeriodDetailView', 'detailView',
+    app.slice(start, end).replace('    if (', '    return ('));
+  const visible = hidden => ({ breakdown: { classList: { contains: () => hidden } } });
+  const state = { openSession: null };
+  assert.equal(loading(state, visible(true), false, 'month', 'month'), true, 'Back or Week hid the list');
+  assert.equal(loading(state, visible(false), false, 'month', 'month'), false, 'live refresh keeps visible rows');
+  assert.equal(loading(state, visible(false), false, 'today', 'month'), true, 'another period has its own rows');
+  const placeholder = app.slice(app.indexOf('      const hint =', start), app.indexOf('      renderSessionPager(null)', start));
+  assert.match(placeholder, /els\.breakdown\.replaceChildren\(hint\);\s*renderedPeriodDetailView = ''/);
+  assert.equal(loading(state, visible(false), false, '', 'month'), true, 'a visible hint can update on failure');
+});
+
+test('retained period details show one failure notice and Home retry does not navigate', () => {
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const start = app.indexOf('function createPeriodDetailHint(');
+  const end = app.indexOf('const periodDetails =', start);
+  let failed = false;
+  let retries = 0;
+  let paints = 0;
+  const navigations = [];
+  const row = {};
+  const nodes = [row];
+  const container = {
+    querySelector() { return nodes.find(node => node.classes?.has('period-detail-failure')); },
+    prepend(node) {
+      nodes.unshift(node);
+      node.remove = () => nodes.splice(nodes.indexOf(node), 1);
+    }
+  };
+  const document = { createElement() {
+    const classes = new Set();
+    const children = [];
+    return { classes, children, classList: { add: key => classes.add(key) },
+      setAttribute() {}, append: (...elements) => children.push(...elements),
+      closest: () => null,
+      addEventListener: (type, handler) => { children[type] = handler; } };
+  } };
+  const update = Function('document', 't', 'periodDetails', 'statsRenderScheduler',
+    app.slice(start, end) + '\nreturn updatePeriodDetailFailure;')(document, key => key, {
+      failed: () => failed, retry() { retries += 1; failed = false; }
+    }, { request() { paints += 1; } });
+  update(container);
+  assert.deepEqual(nodes, [row]);
+  failed = true;
+  update(container);
+  update(container);
+  assert.equal(nodes.length, 2);
+  assert.equal(nodes[1], row);
+  assert.equal(nodes[0].children[0].textContent, 'sessions.detailRefreshFailed');
+  const homeStart = app.indexOf('function homeModuleShell(');
+  const homeEnd = app.indexOf('\n}', homeStart) + 2;
+  const homeModule = Function('document', 'VIEW_ICON_CLASSES', 'renderBreakdownChange',
+    app.slice(homeStart, homeEnd) + '\nreturn homeModuleShell;')(document, {}, view => navigations.push(view));
+  const { module, body } = homeModule('session', 'Sessions', 'session');
+  const notice = nodes[0];
+  body.append(notice);
+  const retry = notice.children.at(-1);
+  const click = (target, ancestors) => {
+    let stopped = false;
+    const event = { target, stopPropagation() { stopped = true; } };
+    for (const node of [target, ...ancestors]) {
+      node.children.click?.(event);
+      if (stopped) break;
+    }
+  };
+  click(retry, [notice, body, module]);
+  assert.deepEqual(navigations, [], 'retry must keep Home selected');
+  click(body, [module]);
+  assert.deepEqual(navigations, ['session'], 'ordinary card clicks still open Sessions');
+  assert.equal(retries, 1);
+  assert.equal(paints, 1);
+  update(container);
+  assert.deepEqual(nodes, [row]);
 });

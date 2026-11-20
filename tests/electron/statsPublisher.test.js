@@ -184,14 +184,14 @@ test('the all-time session list stays out of the renderer copy in every mode', (
   assert.equal(rendererStats(null), null);
 });
 
-test('every stats payload sent to the renderer goes through rendererStats and names its snapshot', () => {
+test('every stats payload sent to the renderer uses an overview and names its snapshot', () => {
   const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
   assert.equal(
-    (main.match(/stats: rendererSnapshots\.stamp\(latestStats, rendererStats\(visibleStats\)\)/g) || []).length,
+    (main.match(/stats: rendererSnapshots\.stamp\(latestStats, rendererStatsSummary\(visibleStats\)\)/g) || []).length,
     2,
     'stats push and presentation refresh'
   );
-  assert.match(main, /ipcMain\.handle\('stats:get'[\s\S]*?return rendererSnapshots\.stamp\(stats, rendererStats\(electronPresentationStats\(stats\)\)\);/);
+  assert.match(main, /ipcMain\.handle\('stats:get'[\s\S]*?return rendererSnapshots\.stamp\(stats, rendererStatsSummary\(electronPresentationStats\(stats\)\)\);/);
   assert.doesNotMatch(main, /stats: visibleStats\b/);
   assert.match(
     main,
@@ -229,6 +229,8 @@ test('a snapshot stays addressable after newer ones are published', () => {
   const second = { periods: {} };
   assert.deepEqual(snapshots.stamp(second, {}).snapshot, { id: 2, source: 4 });
   assert.equal(snapshots.get(1), first);
+  assert.equal(snapshots.get(1, 3), first);
+  assert.equal(snapshots.get(1, 4), null);
   assert.equal(snapshots.get(2), second);
 
   snapshots.stamp({ periods: {} }, {});
@@ -242,4 +244,49 @@ test('a snapshot stays addressable after newer ones are published', () => {
   assert.deepEqual(snapshots.stamp(first, {}).snapshot, { id: 1, source: 3 });
   assert.equal(snapshots.get(1), first);
   assert.equal(snapshots.get(2), null, 'the re-stamped snapshot counts as recent');
+});
+
+test('the widget overview keeps counters while session and project detail stays in the requested scope', () => {
+  const { rendererStatsSummary, rendererPeriodDetails } = require('../../src/electron/statsPublisher');
+  const stats = syncModeStats();
+  stats.periods.month = { totalTokens: 10, sessions: {}, projects: { local: { totalTokens: 10 } } };
+  stats.nativeSessions = { month: { native: {} } };
+  const summary = rendererStatsSummary(stats);
+  assert.equal(summary.detailOnDemand, true);
+  for (const [name, period] of Object.entries(summary.periods)) {
+    assert.equal(period.totalTokens, stats.periods[name].totalTokens);
+    assert.equal(Object.hasOwn(period, 'sessions'), false);
+    assert.equal(Object.hasOwn(period, 'projects'), false);
+  }
+  assert.equal(Object.hasOwn(summary, 'nativeSessions'), false);
+  const home = rendererPeriodDetails(stats, 'home');
+  assert.deepEqual(Object.keys(home), ['today', 'month']);
+  assert.equal(home.month.sessions, stats.periods.month.sessions);
+  assert.equal(Object.hasOwn(home.month, 'projects'), false);
+  const month = rendererPeriodDetails(stats, 'month');
+  assert.equal(month.month.projects, stats.periods.month.projects);
+  assert.equal(month.month.nativeSessions, stats.nativeSessions.month);
+  assert.equal(Object.hasOwn(rendererPeriodDetails(stats, 'allTime').allTime, 'sessions'), false);
+  assert.equal(rendererPeriodDetails(stats, '__proto__'), null);
+});
+
+test('period detail replies omit the payload only for the matching content, scope and source', () => {
+  const { createPeriodDetailPublication } = require('../../src/electron/statsPublisher');
+  const publish = createPeriodDetailPublication();
+  const details = { month: { sessions: { a: { tokens: 4 }, b: { tokens: 1 } } } };
+  const first = publish(1, 'month', details);
+  assert.equal(first.details, details);
+  assert.deepEqual(publish(1, 'month', structuredClone(details), first.revision),
+    { revision: first.revision, baseRevision: first.revision, patch: [] });
+  const changed = { month: { sessions: { a: { tokens: 5 }, b: { tokens: 1 } } } };
+  const delta = publish(1, 'month', changed, first.revision);
+  assert.deepEqual(delta.patch, [['month', 'sessions', { a: { tokens: 5 } }]]);
+  assert.equal(delta.baseRevision, first.revision);
+  const reordered = { month: { sessions: { b: { tokens: 1 }, a: { tokens: 4 } } } };
+  const differentOrder = publish(1, 'month', reordered, delta.revision);
+  assert.equal(differentOrder.details, reordered);
+  assert.notEqual(differentOrder.revision, first.revision);
+  const differentSource = publish(2, 'month', reordered, differentOrder.revision);
+  assert.equal(differentSource.details, reordered);
+  assert.equal(publish(2, 'home', reordered, differentSource.revision).details, reordered);
 });

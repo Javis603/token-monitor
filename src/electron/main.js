@@ -359,7 +359,9 @@ const {
   createRendererSnapshots,
   createStatsPresentationCache,
   createStatsPublicationBatcher,
-  rendererStats
+  rendererStatsSummary,
+  rendererPeriodDetails,
+  createPeriodDetailPublication
 } = require('./statsPublisher');
 const { withoutSessionTitleStats, withoutSessionTitles } = require('./sessionTitleDisplay');
 const { createSseBlockReader, parseSseBlock } = require('./sseEventReader');
@@ -2571,11 +2573,12 @@ function electronPresentationStats(stats) {
 
 const allTimeSessionsCache = createStatsPresentationCache();
 const rendererSnapshots = createRendererSnapshots({ source: () => hubModeGeneration });
+const publishPeriodDetail = createPeriodDetailPublication();
 // The local record each Hub snapshot was shown with, captured where the
 // snapshot was built. The collector replaces the live one between publishes.
 const snapshotLocalDevices = new WeakMap();
 
-// The renderer's all-time session list, which rendererStats() keeps out of every
+// The renderer's all-time session list, which rendererStatsSummary() keeps out of every
 // push, for the snapshot the renderer is showing. A Hub aggregate carries no
 // all-time session detail (syncPayload drops it from uploads, #118), so a Hub
 // snapshot rebuilds the list: the Hub's cross-device month sessions, then this
@@ -4449,7 +4452,7 @@ function sendPush(payload, options = {}) {
     migrateCodexAdditionalLimits(visibleStats);
     rendererPayload = {
       ...payload,
-      data: { ...payload.data, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
+      data: { ...payload.data, stats: rendererSnapshots.stamp(latestStats, rendererStatsSummary(visibleStats)) }
     };
     scheduleMacWidgetSnapshot(visibleStats, options.widgetProducerOwner);
     pluginRuntime?.publishStats(visibleStats, latestStats);
@@ -5721,7 +5724,7 @@ function refreshLimitStatsPresentation() {
     try {
       mainWindow.webContents.send('stats:push', {
         event: 'stats',
-        data: { type: 'stats', reason: 'presentation', mode, stats: rendererSnapshots.stamp(latestStats, rendererStats(visibleStats)) }
+        data: { type: 'stats', reason: 'presentation', mode, stats: rendererSnapshots.stamp(latestStats, rendererStatsSummary(visibleStats)) }
       });
     } catch (_) {}
   }
@@ -8185,7 +8188,7 @@ app.whenReady().then(() => {
     // The stream normally carries the stamp, but it is precisely when the stream
     // is down that this read is the only thing still arriving from the hub.
     maybeAdoptSharedSubscriptionRevision(stats);
-    return rendererSnapshots.stamp(stats, rendererStats(electronPresentationStats(stats)));
+    return rendererSnapshots.stamp(stats, rendererStatsSummary(electronPresentationStats(stats)));
   });
   ipcMain.handle('devices:delete', async (_event, deviceId) => {
     try {
@@ -8196,6 +8199,14 @@ app.whenReady().then(() => {
     }
   });
   ipcMain.handle('stats:allTimeSessions', (_event, snapshotId) => rendererAllTimeSessions(rendererSnapshots.get(snapshotId)));
+  ipcMain.handle('stats:periodDetails', (event, snapshot, scope, knownRevision) => {
+    const contents = mainWindow?.webContents;
+    if (!contents || event.sender !== contents || event.senderFrame !== contents.mainFrame
+      || snapshot?.source !== hubModeGeneration) return null;
+    const stats = rendererSnapshots.get(snapshot.id, snapshot.source);
+    return stats ? publishPeriodDetail(snapshot.source, scope,
+      rendererPeriodDetails(electronPresentationStats(stats), scope), knownRevision) : null;
+  });
   // While a headless agent owns host or sync collection, this app's record stops
   // updating and the agent applies its own archive, so there is no count to show.
   ipcMain.handle('stats:archivedSessionCount', () => (
