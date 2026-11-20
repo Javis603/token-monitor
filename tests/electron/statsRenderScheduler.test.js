@@ -540,3 +540,45 @@ test('a detail loading state reuses retained rows only if the list is visible', 
   assert.match(placeholder, /els\.breakdown\.replaceChildren\(hint\);\s*renderedPeriodDetailView = ''/);
   assert.equal(loading(state, visible(false), false, '', 'month'), true, 'a visible hint can update on failure');
 });
+
+test('retained period details show one failure notice and the retry button starts a repaint', () => {
+  const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
+  const start = app.indexOf('function createPeriodDetailHint(');
+  const end = app.indexOf('const periodDetails =', start);
+  let failed = false;
+  let retries = 0;
+  let paints = 0;
+  const row = {};
+  const nodes = [row];
+  const container = {
+    querySelector() { return nodes.find(node => node.classes?.has('period-detail-failure')); },
+    prepend(node) {
+      nodes.unshift(node);
+      node.remove = () => nodes.splice(nodes.indexOf(node), 1);
+    }
+  };
+  const document = { createElement() {
+    const classes = new Set();
+    const children = [];
+    return { classes, children, classList: { add: key => classes.add(key) },
+      setAttribute() {}, append: (...elements) => children.push(...elements),
+      addEventListener: (type, handler) => { assert.equal(type, 'click'); children.click = handler; } };
+  } };
+  const update = Function('document', 't', 'periodDetails', 'statsRenderScheduler',
+    app.slice(start, end) + '\nreturn updatePeriodDetailFailure;')(document, key => key, {
+      failed: () => failed, retry() { retries += 1; failed = false; }
+    }, { request() { paints += 1; } });
+  update(container);
+  assert.deepEqual(nodes, [row]);
+  failed = true;
+  update(container);
+  update(container);
+  assert.equal(nodes.length, 2);
+  assert.equal(nodes[1], row);
+  assert.equal(nodes[0].children[0].textContent, 'sessions.detailRefreshFailed');
+  nodes[0].children.at(-1).children.click();
+  assert.equal(retries, 1);
+  assert.equal(paints, 1);
+  update(container);
+  assert.deepEqual(nodes, [row]);
+});

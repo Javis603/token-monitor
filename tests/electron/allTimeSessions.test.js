@@ -449,3 +449,34 @@ test('period detail retries the same snapshot after the user closes Settings dur
   await settle();
   assert.equal(loader.ready(), true);
 });
+
+test('failed detail requests retry once on demand for the same snapshot', async () => {
+  const { createPeriodDetailsLoader } = require('../../src/electron/renderer/allTimeSessions');
+  const settle = () => new Promise(resolve => setImmediate(resolve));
+  for (const rejects of [false, true]) {
+    const target = { snapshot: { id: 1, source: 1 }, scope: 'month' };
+    let attempts = 0;
+    const loader = createPeriodDetailsLoader({
+      current: () => target,
+      async fetchDetails() {
+        if (++attempts === 1) {
+          if (rejects) throw new Error('IPC offline');
+          return null;
+        }
+        return { revision: 1, details: { month: { sessions: {} } } };
+      },
+      onLoaded() {}, onError() {}
+    });
+    loader.ensure();
+    await settle();
+    assert.equal(loader.failed(), true);
+    loader.ensure();
+    await settle();
+    assert.equal(attempts, 1);
+    loader.retry();
+    loader.retry();
+    await settle();
+    assert.equal(attempts, 2);
+    assert.equal(loader.ready(), true);
+  }
+});

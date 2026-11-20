@@ -159,6 +159,11 @@
         epoch += 1;
         cached = null;
       },
+      retry() {
+        if (!matches(current()) || !active.failed) return;
+        active = null;
+        ensure();
+      },
       ready() { return matches(current()) && Boolean(active.details); },
       failed() { return matches(current()) && active.failed; },
       attach(stats) {

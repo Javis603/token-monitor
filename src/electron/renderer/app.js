@@ -7930,9 +7930,12 @@ function renderHome() {
       if (state.stats.detailOnDemand && !periodDetails.ready()) {
         periodDetails.ensure();
         const current = els.homePanel.querySelector('.home-module-session');
-        if (current && renderedHomeDetailSource === state.stats.snapshot?.source) return current;
+        if (current && renderedHomeDetailSource === state.stats.snapshot?.source) {
+          updatePeriodDetailFailure(current.querySelector('.home-module-body'));
+          return current;
+        }
         const { module, body } = homeModuleShell('session', t('home.sessions'), 'session');
-        body.textContent = t(periodDetails.failed() ? 'sessions.incomplete' : 'plugins.view.loading');
+        body.append(createPeriodDetailHint(periodDetails.failed()));
         return module;
       }
       renderedHomeDetailSource = state.stats.snapshot?.source;
@@ -8073,6 +8076,8 @@ function renderAppContent({ fromSearch = false } = {}) {
   if (periodDetails.ready() && state.stats !== statsWithPeriodDetails) {
     state.stats = sessionStatsForDisplay(periodDetails.attach(state.stats));
     statsWithPeriodDetails = state.stats;
+    updatePeriodDetailFailure(els.breakdown);
+    updatePeriodDetailFailure(els.sessionDetail);
   }
   stopHomeSessionRepaint();
   stopSessionStatusRepaint();
@@ -8182,14 +8187,13 @@ function renderAppContent({ fromSearch = false } = {}) {
       els.serviceStatusPanel?.classList.add('hidden');
       els.trendsPanel.classList.add('hidden');
       els.breakdown.classList.remove('hidden');
-      const hint = document.createElement('p');
-      hint.className = 'breakdown-incomplete-hint';
-      hint.setAttribute('role', 'status');
-      hint.textContent = t(periodDetails.failed() ? 'sessions.incomplete' : 'plugins.view.loading');
+      const hint = createPeriodDetailHint(periodDetails.failed());
       els.breakdown.replaceChildren(hint);
       renderedPeriodDetailView = '';
       state.rowSignature = '';
       renderSessionPager(null);
+    } else if (retainedListVisible || state.openSession) {
+      updatePeriodDetailFailure(state.openSession ? els.sessionDetail : els.breakdown);
     }
     signalContentReady();
     return;
@@ -15906,6 +15910,37 @@ function currentPeriodDetailTarget() {
   }
   return null;
 }
+function createPeriodDetailHint(failed) {
+  const hint = document.createElement('p');
+  hint.className = 'breakdown-incomplete-hint';
+  const message = document.createElement('span');
+  message.setAttribute('role', 'status');
+  message.textContent = t(failed ? 'sessions.detailRefreshFailed' : 'plugins.view.loading');
+  hint.append(message);
+  if (failed) {
+    hint.classList.add('period-detail-failure');
+    const retry = document.createElement('button');
+    retry.type = 'button';
+    retry.textContent = t('sessions.detailRetry');
+    retry.addEventListener('click', () => {
+      periodDetails.retry();
+      statsRenderScheduler.request();
+    });
+    hint.append(' ', retry);
+  }
+  return hint;
+}
+
+function updatePeriodDetailFailure(container) {
+  if (!container) return;
+  const hint = container.querySelector(':scope > .period-detail-failure');
+  if (periodDetails.failed()) {
+    if (!hint) container.prepend(createPeriodDetailHint(true));
+  } else {
+    hint?.remove();
+  }
+}
+
 const periodDetails = allTimeSessionsApi.createPeriodDetailsLoader({
   current: currentPeriodDetailTarget,
   fetchDetails: (snapshot, scope, knownRevision) => window.tokenMonitor.getPeriodDetails(snapshot, scope, knownRevision),
