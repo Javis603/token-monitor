@@ -394,3 +394,44 @@ test('fetchQoderLimits falls back to the cookie id, then to the cookie hash', as
   assert.equal(bare.accountKey, hashKey('qoder', 'qoder_session_cookie=only-session'));
   assert.equal(Object.hasOwn(bare, 'accountKeyAliases'), false);
 });
+
+test('synced Qoder quotas group by site and stable user ID while preserving cookie-only fallback', async () => {
+  const { aggregateLimits, publicLimits, syncLimits } = require('../../src/shared/limits/core');
+  const now = Date.parse('2026-11-20T10:00:00Z');
+  const probe = (userId, session, site = 'global') => fetchQoderLimits({
+    qoderCookie: `qoder_session_cookie=${session}`, qoderSite: site
+  }, {
+    env: {}, now: () => now,
+    fetch: async (url) => {
+      if (url.includes('/organization-shared-usages/')) return new Response(null, { status: 404 });
+      if (url.endsWith('/userplan')) return Response.json({});
+      return Response.json({ user_id: userId, total_quota: quota(25, 100, 75) });
+    }
+  });
+  const [a, b, aRelogin, aCn, cookieOnly, otherCookie] = await Promise.all([
+    probe('a', 'one'), probe('b', 'two'), probe('a', 'three'), probe('a', 'four', 'cn'),
+    probe(undefined, 'five'), probe(undefined, 'six')
+  ]);
+  const keys = (rows, core = { aggregateLimits, syncLimits }) =>
+    core.aggregateLimits(rows.map((row, i) => ({
+      deviceId: String(i), limits: core.syncLimits({ providers: [row] })
+    })), 0, now).providers.map(row => row.accountKey).sort();
+
+  assert.deepEqual(keys([a, b]), [a.accountKey, b.accountKey].sort());
+  assert.deepEqual(keys([a, aRelogin]), [a.accountKey]);
+  assert.deepEqual(keys([a, aCn]), [a.accountKey, aCn.accountKey].sort());
+  assert.equal(keys([cookieOnly, otherCookie]).length, 1);
+  assert.deepEqual(keys([cookieOnly, a]), [a.accountKey]);
+  assert.deepEqual(keys([{ ...a, updatedAt: new Date(now - 3600000).toISOString() }, cookieOnly]), [cookieOnly.accountKey]);
+
+  const { accountKeyPortable: _portable, ...legacyA } = aRelogin;
+  assert.equal(keys([legacyA, cookieOnly]).length, 1);
+  assert.deepEqual(keys([a, legacyA, b]), [a.accountKey, b.accountKey].sort());
+  assert.equal(syncLimits({ providers: [a] }).providers[0].accountKeyPortable, true);
+  assert.equal(Object.hasOwn(syncLimits({ providers: [cookieOnly] }).providers[0], 'accountKeyPortable'), false);
+  assert.equal(Object.hasOwn(publicLimits({ providers: [a] }).providers[0], 'accountKeyPortable'), false);
+
+  const workerCore = require('../../worker/src/shared/limits/core');
+  assert.deepEqual(keys([a, b], workerCore), [a.accountKey, b.accountKey].sort());
+  assert.deepEqual(keys([cookieOnly, a], workerCore), [a.accountKey]);
+});

@@ -514,6 +514,7 @@ function normalizeLimitProvider(input) {
     provider,
     ...(adapterId ? { adapterId } : {}),
     accountKey,
+    ...(provider === 'qoder' && accountKey && input.accountKeyPortable === true ? { accountKeyPortable: true } : {}),
     ...(relatedAccountKey ? { relatedAccountKey } : {}),
     ...(provider === 'opencode' && input.webAccountKey
       ? { webAccountKey: String(input.webAccountKey) }
@@ -758,6 +759,7 @@ function publicLimits(limits) {
     refreshMs: normalized.refreshMs,
     providers: normalized.providers.map(({
       accountKey,
+      accountKeyPortable,
       relatedAccountKey,
       webAccountKey,
       accountKeyAliases,

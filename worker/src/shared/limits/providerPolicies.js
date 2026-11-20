@@ -25,6 +25,7 @@ const providerPolicies = Object.freeze({
   muse: require('../providers/muse/corePolicy'),
   opencode: require('../providers/opencode/corePolicy'),
   opendesign: require('../providers/opendesign/corePolicy'),
+  qoder: require('../providers/qoder/corePolicy'),
   workbuddy: require('../providers/workbuddy/corePolicy')
 });
 module.exports = { providerPolicies };
