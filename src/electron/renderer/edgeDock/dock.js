@@ -269,9 +269,7 @@ function luminance(rgb) {
   return 0.2126 * r + 0.7152 * g + 0.0722 * b;
 }
 
-// Brand marks such as Cursor's are near-black (or near-white), which vanish as
-// a ring on a surface of the same tone. Keep the brand colour whenever it reads
-// against the current glass tint and fall back to the text colour otherwise.
+// Keep chart accents readable against the current glass tint.
 function readableColor(color) {
   const rgb = parseColor(color);
   const surface = parseColor(`rgb(${getComputedStyle(document.documentElement).getPropertyValue('--glass-rgb')})`);
@@ -295,13 +293,6 @@ function limitProviderColor(id) {
   if (module) return pluginViewsApi.presentationColor(module.presentation, clientColors);
   if (id === 'factory') return clientColors.droid;
   return clientColors[id] || clientColors.default;
-}
-
-// The same colour corrected for contrast against the current glass tint. Only
-// the rail uses it: a near-black brand mark vanishes as a ring, while a meter
-// on the card is a filled bar the page paints in the raw brand colour.
-function providerColor(id) {
-  return readableColor(limitProviderColor(id));
 }
 
 function providerLabel(id) {
@@ -801,7 +792,7 @@ function providerCellNode(cell) {
   const waiting = presentation.waitingSessionSummary(cell.sessions).count;
   if (running > 0) node.dataset.running = 'yes';
   if (waiting > 0) node.dataset.waiting = 'yes';
-  const color = providerColor(cell.provider);
+  const color = limitProviderColor(cell.provider);
   const shown = presentation.displayPercent(cell.remainingPercent, appearance().showLimitUsed === true);
   const value = el('span', 'edge-dock-value');
   const hasCreditsAmount = Boolean(cell.credits) && cell.credits.amount !== null && cell.credits.amount !== undefined;
@@ -939,10 +930,7 @@ function runningMarksNode(cell, now = Date.now()) {
   if (!clients.length) return null;
   const row = el('span', 'edge-dock-cell-marks');
   for (const client of clients.slice(0, CELL_MARK_LIMIT)) {
-    // Brand colour, corrected for contrast like every other mark the dock
-    // draws: the client id is what the mark is looked up by, and the rail
-    // already reserves colour for severity, so these stay marks and not meters.
-    row.append(markNode(client, readableColor(clientColors[client] || clientColors.default)));
+    row.append(markNode(client, clientColors[client] || clientColors.default));
   }
   const rest = clientCount - Math.min(clients.length, CELL_MARK_LIMIT);
   if (rest > 0) row.append(el('span', 'edge-dock-cell-more', `+${rest}`));
