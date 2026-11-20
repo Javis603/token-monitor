@@ -6,6 +6,12 @@ const { tokscaleConfigDir } = require('./tokscaleConfig');
 
 const CATALOG_FILES = ['pricing-litellm.json', 'pricing-openrouter.json', 'pricing-models-dev.json'];
 const FRESH_MS = 60 * 60 * 1000;
+// Catalogs are large (tens of MB together). Parse one once per file identity
+// instead of re-reading and re-parsing it on every check; a timestamp prefix
+// alone cannot prove the file is complete, and a truncated catalog must not be
+// reported fresh for up to an hour. A replacement changes the stat identity
+// and is parsed again.
+const catalogFreshness = new Map();
 
 function catalogPaths(options = {}) {
   return CATALOG_FILES.map(name => path.join(tokscaleConfigDir(options), 'cache', name));
@@ -25,10 +31,28 @@ function catalogRevision(options = {}) {
 function catalogsFresh(options, now) {
   return catalogPaths(options).every(file => {
     try {
-      const value = JSON.parse(fs.readFileSync(file, 'utf8'));
-      return value.data && Number.isFinite(value.timestamp)
-        && value.timestamp * 1000 <= now && now - value.timestamp * 1000 < FRESH_MS;
-    } catch (_) { return false; }
+      const stat = fs.statSync(file);
+      const key = [stat.size, stat.mtimeMs, stat.ctimeMs].join(':');
+      const cached = catalogFreshness.get(file);
+      let timestamp;
+      if (cached?.key === key) {
+        timestamp = cached.timestamp;
+      } else {
+        const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+        if (!value?.data || !Number.isFinite(value.timestamp)) {
+          catalogFreshness.delete(file);
+          return false;
+        }
+        timestamp = value.timestamp;
+        catalogFreshness.set(file, { key, timestamp });
+      }
+      return timestamp * 1000 <= now && now - timestamp * 1000 < FRESH_MS;
+    } catch (_) {
+      // A missing or unreadable file cannot stay cached: the next check must
+      // see a replacement that appears between calls.
+      catalogFreshness.delete(file);
+      return false;
+    }
   });
 }
 
@@ -78,4 +102,4 @@ function createPricingCatalogRefresher(options, timers = {}) {
   };
 }
 
-module.exports = { catalogRevision, createPricingCatalogRefresher };
+module.exports = { catalogRevision, catalogsFresh, createPricingCatalogRefresher };

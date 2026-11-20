@@ -12,6 +12,10 @@ const { normalizeReasoningEffort } = require('../../sessionLive');
 
 const TITLE_MAX_CODE_POINTS = 96;
 const TITLE_READ_CHUNK_BYTES = 256 * 1024;
+// The title scanner runs on every live session and every full scan, so a fresh
+// chunk buffer per read was pure churn: the retained trailing fragments are
+// copies. Reads are synchronous, so one buffer cannot be observed mid-read.
+const TITLE_READ_BUFFER = Buffer.alloc(TITLE_READ_CHUNK_BYTES);
 const MAX_METADATA_LINE_BYTES = 64 * 1024;
 // The turn boundary needs two fields, and on a real transcript they sit at
 // opposite ends of a record: whether a `user` record is a genuine prompt is
@@ -350,10 +354,10 @@ function scanRange(fd, start, length, state, fsApi) {
   let position = start;
   let remaining = length;
   while (remaining > 0) {
-    const buffer = Buffer.alloc(Math.min(TITLE_READ_CHUNK_BYTES, remaining));
-    const bytesRead = fsApi.readSync(fd, buffer, 0, buffer.length, position);
+    const chunkLength = Math.min(TITLE_READ_CHUNK_BYTES, remaining);
+    const bytesRead = fsApi.readSync(fd, TITLE_READ_BUFFER, 0, chunkLength, position);
     if (bytesRead <= 0) break;
-    consumeMetadataBytes(state, buffer.subarray(0, bytesRead));
+    consumeMetadataBytes(state, TITLE_READ_BUFFER.subarray(0, bytesRead));
     position += bytesRead;
     remaining -= bytesRead;
   }

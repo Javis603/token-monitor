@@ -81,6 +81,7 @@ function createUsageHostCoordinator(deps = {}) {
   // `host` carries what the worker needs that is not a collector option:
   //   transformSettings   the settings the usage transform reads
   //   agentPidPath        the headless agent's PID file
+  //   workerResourceLimits   V8 limits for this worker isolate
   // A function-valued dailyHistoryArchiveWriteEnabled is taken to mean "write
   // unless the headless agent owns the archive" and is rebuilt in the worker
   // from agentPidPath, which is the only rule any caller passes.
@@ -248,7 +249,7 @@ function createUsageHostCoordinator(deps = {}) {
       }
       let spawned;
       try {
-        spawned = new WorkerClass(workerPath, { workerData });
+        spawned = new WorkerClass(workerPath, { workerData, resourceLimits: host.workerResourceLimits });
       } catch (error) {
         fallBack(error);
         resolveExit();

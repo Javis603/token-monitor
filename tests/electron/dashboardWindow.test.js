@@ -47,7 +47,7 @@ function dashboardWindowFixture(platform = 'win32') {
     static fromWebContents(sender) { return windows.find(win => win.webContents === sender); }
   }
   const context = vm.createContext({
-    dashboardWindow: null, dashboardWindowReady: false,
+    dashboardWindow: null, dashboardWindowReady: false, mainWindow: null, lastRendererStatsFingerprint: null,
     BrowserWindow: Window, process: { platform }, path, __dirname: rootDir,
     appWindowIcon: () => ({}), applyWindowsChrome() {}, suppressLinuxSystemContextMenu() {}, syncWindowsBackdrop() {},
     nativeBlurEnabled: () => false, attachNativeMaterialVisibility() {},

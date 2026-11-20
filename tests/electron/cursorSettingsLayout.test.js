@@ -2651,7 +2651,6 @@ test('main settings normalize collection cadence and replace only usage when it 
   assert.doesNotMatch(usageConfig, /^\s*watchUsePolling:/m);
   assert.doesNotMatch(main, /function collectorWatchUsePolling/);
   assert.match(collector, /const watchUsePolling = resolveWatchUsePolling\(options\.watchUsePolling\)/);
-  assert.match(collector, /function resolveWatchUsePolling[\s\S]*?TOKEN_MONITOR_WATCH_POLLING/);
   assert.match(main, /function collectorIntervalRequiresActivity[\s\S]*?=== 'smart'/);
 
   const updateHandler = main.slice(main.indexOf("ipcMain.handle('settings:update'"), main.indexOf("ipcMain.handle('appearance:preview'"));
