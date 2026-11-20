@@ -1977,6 +1977,18 @@ function renderAboutStarOdometer(text) {
   label.className = 'about-star-odometer-text';
   label.textContent = text;
   els.aboutStarCountValue.replaceChildren(reel, label);
+  // The columns rest at fractional offsets (n × 1.2em), and text under such a
+  // transform rounds to a different device pixel per digit, so once the last
+  // column stops the reel is swapped for the plain number.
+  const last = columns.at(-1)?.[0];
+  const settle = (event) => {
+    if (event.target !== last || event.propertyName !== 'transform') return;
+    last.removeEventListener('transitionend', settle);
+    last.removeEventListener('transitioncancel', settle);
+    if (els.aboutStarCountValue.contains(reel)) els.aboutStarCountValue.textContent = text;
+  };
+  last?.addEventListener('transitionend', settle);
+  last?.addEventListener('transitioncancel', settle);
   // Two frames, so every column is laid out at 0 before it slides.
   requestAnimationFrame(() => requestAnimationFrame(() => {
     columns.forEach(([column, digit], index) => {
