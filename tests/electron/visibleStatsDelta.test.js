@@ -64,8 +64,24 @@ test('a dropped delta recovers from the published base without reading the offli
   const next = buildStatsDelta(context.lastRendererStatsFingerprint, stamp(4));
   assert.equal(applyStatsDelta(recovered, next.delta).periods.today.sessions['claude:s1'].total, 4);
 
+  // Other full snapshot reads can evict the renderer's last sent base
+  // without advancing its fingerprint.
+  context.lastRendererStatsFingerprint = next.fingerprint;
+  stamp(5);
+  stamp(6);
+  stamp(7);
+  assert.equal(snapshots.get(next.fingerprint.snapshot.id), null);
+  assert.equal(await getStats({ sender }, { deltaResync: true }), null);
+
+  const fresh = stamp(8);
+  const publication = buildStatsDelta(context.lastRendererStatsFingerprint, fresh);
+  assert.equal(publication.delta, null, 'the next publication must send a full snapshot');
+  assert.equal(fresh.periods.today.sessions['claude:s1'].total, 8);
+
+  context.lastRendererStatsFingerprint = publication.fingerprint;
   context.hubModeGeneration += 1;
   assert.equal(await getStats({ sender }, { deltaResync: true }), null);
+  assert.equal(context.lastRendererStatsFingerprint, publication.fingerprint);
 });
 
 test('a missed alias presentation does not match the next delta base', () => {

@@ -8395,7 +8395,12 @@ app.whenReady().then(() => {
       const snapshot = lastRendererStatsFingerprint?.snapshot;
       if (!snapshot || snapshot.source !== hubModeGeneration) return null;
       const stats = rendererSnapshots.get(snapshot.id);
-      if (!stats) return null;
+      if (!stats) {
+        // The base was evicted. Send the next publication in full so recovery
+        // can finish without a Hub request or a retained copy of the snapshot.
+        lastRendererStatsFingerprint = null;
+        return null;
+      }
       const visibleStats = electronPresentationStats(stats);
       const copy = rendererSnapshots.stamp(stats, rendererStats(visibleStats), visibleStats);
       lastRendererStatsFingerprint = fingerprintStats(copy);
