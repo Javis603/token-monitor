@@ -816,6 +816,7 @@ function applySettingsTranslations() {
   setThirdPartyAdapterFields();
   setSubscriptionFormMode();
   diagnosticsPanel?.render();
+  renderAboutStars();
 }
 
 let displaySettings = null;
@@ -2012,7 +2013,8 @@ function playAboutStarsIntro() {
 function scheduleAboutStarsIntro() {
   if (aboutStarsIntroPlayed || aboutStarsIntroObserver || typeof IntersectionObserver !== 'function') return;
   aboutStarsIntroObserver = new IntersectionObserver((entries) => {
-    if (!entries.some((entry) => entry.isIntersecting)) return;
+    // isIntersecting is also true for a partly clipped button on the first report.
+    if (!entries.some((entry) => entry.isIntersecting && entry.intersectionRatio >= 1)) return;
     aboutStarsIntroObserver.disconnect();
     aboutStarsIntroObserver = null;
     playAboutStarsIntro();

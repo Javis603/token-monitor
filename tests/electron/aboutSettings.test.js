@@ -277,7 +277,7 @@ test('the intro plays once, when the star button first comes into view, unless m
       constructor(callback) { this.callback = callback; this.disconnected = false; observers.push(this); }
       observe(target) { this.target = target; }
       disconnect() { this.disconnected = true; }
-      fire(isIntersecting) { this.callback([{ isIntersecting }]); }
+      fire(isIntersecting, intersectionRatio = isIntersecting ? 1 : 0) { this.callback([{ isIntersecting, intersectionRatio }]); }
     }
     const els = {
       aboutStarCount: { hidden: true },
@@ -308,7 +308,9 @@ test('the intro plays once, when the star button first comes into view, unless m
   assert.deepEqual(motion.added, [], 'nothing plays while the button is off screen');
   assert.equal(motion.observers.length, 1);
   motion.observers[0].fire(false);
-  assert.deepEqual(motion.added, []);
+  motion.observers[0].fire(true, 0.4);
+  assert.deepEqual(motion.added, [], 'a partly visible button does not spend the intro');
+  assert.equal(motion.observers[0].disconnected, false);
   motion.observers[0].fire(true);
   assert.deepEqual(motion.added, ['is-arriving']);
   assert.equal(motion.observers[0].disconnected, true);
@@ -363,4 +365,11 @@ test('About describes the app with the README tagline in every locale that has a
     assert.equal(translate(locale, 'settings.about.description'), tagline, locale);
   }
   assert.match(read('index.html'), new RegExp(`data-i18n="settings\\.about\\.description">${translate('en', 'settings.about.description')}</p>`));
+});
+
+test('changing the interface language reformats the star count without another lookup', () => {
+  const app = read('app.js');
+  const apply = app.slice(app.indexOf('function applySettingsTranslations('), app.indexOf('let displaySettings = null;'));
+  assert.match(apply, /renderAboutStars\(\);/);
+  assert.doesNotMatch(apply, /refreshAboutStars/);
 });
