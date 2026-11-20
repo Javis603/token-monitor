@@ -1179,7 +1179,7 @@ async function collectUsageOnce(options) {
             signal: options.signal
           });
           throwIfAborted(options.signal);
-          hasUnsafeTargetedResult = periodHasUsage(extractScanBundle(missingTodayJson).period);
+          hasUnsafeTargetedResult = periodHasUsage(extractScanBundle(missingTodayJson, { partitions: false }).period);
         }
 
         if (targetRequested && hasUnsafeTargetedResult) {
