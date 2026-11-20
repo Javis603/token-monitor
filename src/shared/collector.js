@@ -2163,6 +2163,8 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   // Tokscale reads only direct children of each MiMo root, so log/* and every
   // other recursive subtree is pruned before chokidar descends into it.
   bound('mimo', candidates.mimo || [], directChildOnly((name) => MIMO_DB_WATCH_PATTERN.test(name)));
+  bound('junie', sourceRoots('junie', 'junie-sessions'), recursiveSourceFiles(name => name === 'events.jsonl'));
+  bound('opencodereview', sourceRoots('opencodereview', 'opencodereview-sessions'), recursiveSourceFiles(name => name.endsWith('.jsonl')));
   bound('goose', candidates.goose || [], directChildOnly((name) => GOOSE_DB_WATCH_PATTERN.test(name)));
   bound('cherrystudio', withBasename('cherrystudio', 'Data'), directChildOnly((name) => CHERRY_STUDIO_DB_WATCH_PATTERN.test(name)));
   bound('catpaw', candidates.catpaw || [], directChildOnly((name) => catpawDatabaseName(name.replace(/-(?:wal|shm)$/, ''))));

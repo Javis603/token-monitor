@@ -336,6 +336,7 @@ function normalizeClientName(value) {
   // Tokscale's id for MiniMax Code. The bare vendor name stays a model vendor
   // and limits provider, so only the product spellings map here.
   if (raw === 'mcode' || /^minimax[\s_-]*code$/.test(raw)) return 'mcode';
+  if (/^open[\s_-]*code[\s_-]*review$/.test(raw)) return 'opencodereview';
   if (raw.includes('opencode')) return 'opencode';
   if (raw.includes('openclaw') || raw.includes('clawd') || raw.includes('moltbot') || raw.includes('moldbot')) return 'openclaw';
   const slug = raw.replace(/[^a-z0-9_-]+/g, '-');

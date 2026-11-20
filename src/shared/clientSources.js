@@ -239,6 +239,8 @@ function clientSourceRoots(clientsCsv, options = {}) {
     add('prime-agent', ['prime-agent-sessions', sessions], ['prime-agent-artifacts', artifacts]);
   }
   const xdgHome = xdgDataHome(tokscaleHome, env);
+  add('junie', ...simpleHostSourceRoots('junie', tokscaleHome));
+  add('opencodereview', ...simpleHostSourceRoots('opencodereview', tokscaleHome));
   const gooseFiles = enabled.has('goose')
     ? gooseSessionFiles({ homeDir: home, platform, env, windowsFolders: options.windowsFolders }) : [];
   add('goose', ...gooseFiles.map((file) => ['goose-db', path.dirname(file), file]));
