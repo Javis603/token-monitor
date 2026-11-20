@@ -17619,6 +17619,13 @@ function setupModelAliasesUI() {
   if (!toggle) return;
   toggle.addEventListener('click', () => setAccountGroupExpanded('modelAliases', !state.modelAliasesExpanded, 'modelAliasesExpanded'));
   setAccountGroupExpanded('modelAliases', false, 'modelAliasesExpanded');
+  window.TokenMonitorHelpPopover.createHelpPopover({
+    trigger: document.getElementById('modelAliasGroupingHelpButton'),
+    popover: document.getElementById('modelAliasGroupingHelp'),
+    document,
+    align: 'center',
+    preferAbove: true
+  });
   modelAliasForm = window.TokenMonitorModelAliasForm.createModelAliasForm({
     document, t: (key, params) => t(key === 'settings.modelAliases.saveError' && modelAliasSaveConflict ? 'settings.sync.content.conflict' : key, params),
     getAliases: () => state.settings?.modelAliases || {},
@@ -17649,12 +17656,12 @@ function setupModelAliasesUI() {
 
 function customPricingMeta(ov) {
   const parts = [];
-  if (typeof ov.cacheReadPerM === 'number') parts.push(`${t('settings.customPricing.cacheRead')} $${ov.cacheReadPerM}`);
-  if (typeof ov.inputPerM === 'number') parts.push(`${t('settings.customPricing.input')} $${ov.inputPerM}`);
+  if (typeof ov.inputPerM === 'number') parts.push(`${t('settings.customPricing.summaryInput')} $${ov.inputPerM}`);
   if (typeof ov.outputPerM === 'number') parts.push(`${t('settings.customPricing.output')} $${ov.outputPerM}`);
+  if (typeof ov.cacheReadPerM === 'number') parts.push(`${t('settings.customPricing.summaryCacheRead')} $${ov.cacheReadPerM}`);
   if (typeof ov.cacheWritePerM === 'number') parts.push(`${t('settings.customPricing.cacheWrite')} $${ov.cacheWritePerM}`);
   if (typeof ov.cacheWrite1hPerM === 'number') parts.push(`${t('settings.customPricing.cacheWrite1h')} $${ov.cacheWrite1hPerM}`);
-  return parts.length ? `${parts.join(' · ')} / 1M` : '';
+  return parts.join(' · ');
 }
 
 function renderCustomPricing() {
@@ -17684,7 +17691,8 @@ function renderCustomPricing() {
     main.type = 'button';
     main.className = 'managed-account-main custom-pricing-edit';
     main.setAttribute('aria-description', t('settings.customPricing.edit'));
-    main.addEventListener('click', () => { if (openCustomPricingForm) openCustomPricingForm(ov); });
+    const openEditor = () => openCustomPricingForm?.(ov);
+    main.addEventListener('click', openEditor);
     const name = document.createElement('div');
     name.className = 'managed-account-email';
     name.textContent = ov.modelId;
@@ -17692,16 +17700,18 @@ function renderCustomPricing() {
     meta.className = 'managed-account-meta';
     meta.textContent = customPricingMeta(ov);
     main.append(name, meta);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'managed-account-remove custom-pricing-remove';
-    remove.textContent = t('settings.customPricing.remove');
-    remove.addEventListener('click', async () => {
-      const next = customPricingFormApi.removeOverride(overrides, ov.modelId);
-      try { await saveSettings({ customModelPricing: next }, pricingBase); } catch (_) { return; }
-      renderCustomPricing();
+    const menu = window.TokenMonitorModelAliasForm.createModelSettingsMenu(document, {
+      label: t('settings.collection.modelActions', { model: ov.modelId }),
+      editLabel: t('settings.customPricing.edit'),
+      removeLabel: t('settings.customPricing.remove'),
+      edit: openEditor,
+      remove: async () => {
+        const next = customPricingFormApi.removeOverride(overrides, ov.modelId);
+        try { await saveSettings({ customModelPricing: next }, pricingBase); } catch (_) { return; }
+        renderCustomPricing();
+      }
     });
-    row.append(main, remove);
+    row.append(main, menu);
     listEl.append(row);
   }
 }
@@ -17723,7 +17733,13 @@ function setupCustomPricingUI() {
   const cacheWrite1hEl = document.getElementById('customPricingCacheWrite1h');
   const advanced = document.getElementById('customPricingAdvanced');
   const advancedSummary = document.getElementById('customPricingAdvancedSummary');
-  const help = document.getElementById('customPricingHelp');
+  const help = window.TokenMonitorHelpPopover.createHelpPopover({
+    trigger: document.getElementById('customPricingHelpButton'),
+    popover: document.getElementById('customPricingHelp'),
+    document,
+    align: 'center',
+    preferAbove: true
+  });
   const rateFields = [
     [inputEl, 'inputPerM'], [outputEl, 'outputPerM'], [cacheReadEl, 'cacheReadPerM'],
     [cacheWriteEl, 'cacheWritePerM'], [cacheWrite1hEl, 'cacheWrite1hPerM']
@@ -17745,7 +17761,7 @@ function setupCustomPricingUI() {
     lookupRevision += 1;
     editedFields.clear();
     advanced.open = false;
-    if (help.matches(':popover-open')) help.hidePopover();
+    help.close();
     for (const [el] of rateFields) el.value = '';
     updateAdvancedSummary();
     manualInput.value = ''; manualInput.classList.add('hidden');
@@ -17776,12 +17792,14 @@ function setupCustomPricingUI() {
   };
 
   const closeForm = () => {
-    form.classList.add('hidden');
-    addButton.classList.remove('hidden');
-    resetForm();
+    // Keep the fields in place while the form collapses.
+    lookupRevision += 1;
+    help.close();
+    accountShellApi.setDisclosureBody(addButton, form, false);
+    addButton.setAttribute('aria-expanded', 'false');
   };
   openCustomPricingForm = (prefill) => {
-    pricingEdit = { base: syncContentForm?.base(), entries: structuredClone(state.settings?.customModelPricing || []) };
+    pricingEdit = { adding: !prefill, base: syncContentForm?.base(), entries: structuredClone(state.settings?.customModelPricing || []) };
     resetForm();
     populateModels();
     if (prefill && prefill.modelId) {
@@ -17798,12 +17816,21 @@ function setupCustomPricingUI() {
         updateApproximation(el);
       }
       advanced.open = cacheWriteEl.value !== '' || cacheWrite1hEl.value !== '';
+    } else {
+      select.value = '';
     }
-    form.classList.remove('hidden');
-    addButton.classList.add('hidden');
+    const title = document.getElementById('customPricingFormTitle');
+    if (title) title.textContent = t(prefill ? 'settings.customPricing.edit' : 'settings.customPricing.add');
+    accountShellApi.setDisclosureBody(addButton, form, true);
+    addButton.setAttribute('aria-expanded', String(pricingEdit.adding));
+    accountShellApi.focusDisclosureControl(form, select.value === '__manual__' ? manualInput : select);
   };
 
-  addButton.addEventListener('click', () => openCustomPricingForm());
+  addButton.addEventListener('click', () => {
+    if (saveButton.disabled) return;
+    if (pricingEdit?.adding && !form.classList.contains('hidden')) closeForm();
+    else openCustomPricingForm();
+  });
   cancelButton.addEventListener('click', closeForm);
 
   select.addEventListener('change', async () => {

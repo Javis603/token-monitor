@@ -6,6 +6,9 @@ const path = require('node:path');
 const test = require('node:test');
 const vm = require('node:vm');
 const customPricingFormApi = require('../../src/electron/renderer/customPricingForm');
+const modelAliasFormApi = require('../../src/electron/renderer/modelAliasForm');
+const accountShellApi = require('../../src/electron/renderer/limits/accountShell');
+const helpApi = require('../../src/electron/renderer/helpPopover');
 const { normalizeCustomPricingSetting } = require('../../src/shared/tokscaleCustomPricing');
 
 const appSource = fs.readFileSync(path.join(__dirname, '../../src/electron/renderer/app.js'), 'utf8');
@@ -13,11 +16,11 @@ const pricingSource = appSource.slice(appSource.indexOf('function customPricingM
 
 function fixture(options = {}) {
   const nodes = new Map();
-  function node() {
+  function node(tagName = 'div') {
     const classes = new Set();
     const listeners = {};
     return {
-      value: '', textContent: '', children: [], disabled: false, open: false, popoverOpen: false,
+      tagName, value: '', textContent: '', children: [], disabled: false, open: false, popoverOpen: false,
       get options() { return this.children; },
       classList: {
         add: key => classes.add(key), remove: key => classes.delete(key), contains: key => classes.has(key),
@@ -25,8 +28,13 @@ function fixture(options = {}) {
       },
       append(...children) { this.children.push(...children); },
       replaceChildren(...children) { this.children = children; },
-      setAttribute() {},
+      setAttribute(key, value) { this[key] = value; },
+      hasAttribute(key) { return Object.hasOwn(this, key); },
+      contains(other) { return this === other || this.children.some(child => child.contains(other)); },
+      focus() {},
+      closest() { return null; },
       matches(selector) { return selector === ':popover-open' && this.popoverOpen; },
+      showPopover() { this.popoverOpen = true; },
       hidePopover() { this.popoverOpen = false; },
       addEventListener(event, handler) { listeners[event] = handler; },
       dispatchEvent(event) { return listeners[event.type]?.(event); },
@@ -40,13 +48,18 @@ function fixture(options = {}) {
   const state = { settings: { customModelPricing: [] }, stats: { modelAliasSourceIds: ['a', 'b'] } };
   const requests = [];
   const context = {
-    state, document, customPricingFormApi, structuredClone, syncContentForm: null, Event: class { constructor(type) { this.type = type; } },
+    state, document, customPricingFormApi, accountShellApi, structuredClone, syncContentForm: null, Event: class { constructor(type) { this.type = type; } },
     t: key => key, formatCost: String, isSettingsSurfaceVisible: () => true, setAccountGroupExpanded() {},
     saveSettings: async patch => {
       await options.save?.(patch);
       state.settings.customModelPricing = normalizeCustomPricingSetting(patch.customModelPricing);
     },
-    window: { TokenMonitorSyncContentForm: require('../../src/electron/renderer/syncContentForm'), tokenMonitor: { lookupModelPricing: id => new Promise(resolve => requests.push({ id, resolve })) } }
+    window: {
+      TokenMonitorModelAliasForm: modelAliasFormApi,
+      TokenMonitorSyncContentForm: require('../../src/electron/renderer/syncContentForm'),
+      TokenMonitorHelpPopover: helpApi,
+      tokenMonitor: { lookupModelPricing: id => new Promise(resolve => requests.push({ id, resolve })) }
+    }
   };
   vm.runInNewContext(`let openCustomPricingForm; ${pricingSource}; setupCustomPricingUI();`, context);
   const get = suffix => document.getElementById('customPricing' + suffix);
@@ -66,11 +79,16 @@ test('pricing editor saves, reopens and removes both cache-write rates', async (
     modelId: 'manual-model', inputPerM: 3, outputPerM: 15, cacheReadPerM: 0.3, cacheWritePerM: 3.75, cacheWrite1hPerM: 6
   }]);
   const row = f.get('List').children[0];
-  assert.match(row.children[0].children[1].textContent, /cacheWrite1h.*\$6/);
-  row.children[0].click();
+  assert.match(row.children[0].children[1].textContent, /summaryInput.*\$3.*output.*\$15.*summaryCacheRead.*\$0.3.*cacheWrite1h.*\$6/);
+  const [, menu] = row.children[1].children;
+  const [edit, remove] = menu.children;
+  assert.equal(edit.textContent, 'settings.customPricing.edit');
+  menu.popoverOpen = true;
+  edit.click();
+  assert.equal(menu.popoverOpen, false);
   assert.equal(f.get('CacheWrite1h').value, 6);
   assert.equal(f.get('Advanced').open, true);
-  await row.children[1].click();
+  await remove.click();
   assert.deepEqual(f.state.settings.customModelPricing, []);
 });
 
@@ -103,13 +121,19 @@ test('advanced pricing starts closed, keeps hidden prefilled prices, and opens s
   assert.equal(f.get('Advanced').open, false, 'base-only saved prices stay closed');
 });
 
-test('closing the editor dismisses its pricing guide and leaves no overlay on the next form', () => {
+test('the pricing guide opens from the list and Add toggles the new price editor', () => {
   const f = fixture();
+  f.get('HelpButton').dispatchEvent({ type: 'pointerenter' });
+  assert.equal(f.get('Help').popoverOpen, true);
   f.get('AddButton').click();
-  f.get('Help').popoverOpen = true;
-  f.get('CancelButton').click();
   assert.equal(f.get('Help').popoverOpen, false);
+  assert.equal(f.get('Form').inert, false);
+  assert.equal(f.get('AddButton')['aria-expanded'], 'true');
   f.get('AddButton').click();
+  assert.equal(f.get('Form').inert, true);
+  assert.equal(f.get('AddButton')['aria-expanded'], 'false');
+  f.get('AddButton').click();
+  assert.equal(f.get('Form').inert, false);
   assert.equal(f.get('Help').popoverOpen, false);
   assert.equal(f.get('Advanced').open, false);
 });
