@@ -551,6 +551,7 @@ test('main section holds views; appearance is its own section; window holds beha
   const windowGroup = windowSection.match(/<div class="settings-subgroup settings-window-group">[\s\S]*?<div class="settings-subgroup settings-presence-group">/)?.[0] || '';
   assert.match(windowGroup, /id="windowBehaviorInput"/);
   assert.match(windowGroup, /id="windowToggleShortcutValue"/);
+  assert.doesNotMatch(windowGroup, /id="windowToggleShortcutNote"[^>]*data-i18n=/, 'shortcut feedback is translated by its state renderer');
   assert.doesNotMatch(windowGroup, /settings\.display\.windowTitle/);
   assert.doesNotMatch(windowGroup, /<div class="settings-group-header"><span data-i18n="settings\.display\.windowTitle">/);
   assert.doesNotMatch(windowGroup, /id="floatingBubbleInput"/);
