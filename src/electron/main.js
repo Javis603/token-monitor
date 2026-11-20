@@ -7,19 +7,8 @@ const path = require('node:path');
 const { contentSecurityPolicyForRequest } = require('./contentSecurityPolicy');
 const { initializeHubProfiles, hubProfilesForRenderer, prepareHubProfilePatch } = require('./hubProfiles');
 const { app, BaseWindow, BrowserWindow, WebContentsView, clipboard, dialog, globalShortcut, ipcMain, nativeImage, nativeTheme, net, Notification, powerMonitor, protocol, screen, session, shell, systemPreferences, webContents } = require('electron');
-const v8 = require('node:v8');
-
-// V8 sizes the young generation for throughput, not for a background widget:
-// Electron starts with a 32 MiB semi-space. Renderers receive an 8 MiB cap via
-// js-flags, and the usage worker inherits the same cap when V8 creates that
-// isolate later. The main isolate already exists when this module runs, so V8
-// has configured its heap; setFlagsFromString cannot shrink its young
-// generation and this must not claim otherwise. `--expose-gc` lets the idle
-// collector ask a renderer to return its own committed heap; page scripts
-// already run arbitrary local and plugin code.
-const YOUNG_GENERATION_FLAG = '--max-semi-space-size=8';
-const RENDERER_JS_FLAGS = `${YOUNG_GENERATION_FLAG} --expose-gc`;
-v8.setFlagsFromString(YOUNG_GENERATION_FLAG);
+// The renderer's 8 MiB semi-space keeps the long-lived widget lean.
+const RENDERER_JS_FLAGS = '--max-semi-space-size=8 --expose-gc';
 const existingJsFlags = app.commandLine.getSwitchValue('js-flags').trim();
 app.commandLine.appendSwitch('js-flags', existingJsFlags ? `${existingJsFlags} ${RENDERER_JS_FLAGS}` : RENDERER_JS_FLAGS);
 
@@ -2374,7 +2363,9 @@ function createElectronUsageRuntime(options) {
     ...(options.onPreview ? { onPreview: releaseOnWorkerDelivery(options.onPreview) } : {})
   }, {
     agentPidPath: AGENT_PID_PATH,
-    transformSettings: usageTransformSettings(settings)
+    transformSettings: usageTransformSettings(settings),
+    // A young generation includes three semi-spaces worth of capacity.
+    workerResourceLimits: { maxYoungGenerationSizeMb: 24 }
   });
   return latestUsageHost;
 }
