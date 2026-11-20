@@ -111,8 +111,6 @@ test('the 狀態 view settings render the provider sub-list', () => {
   assert.match(app, /id = 'serviceProviderList'|id: 'serviceProviderList'|'serviceProviderList'/);
   assert.match(app, /status-provider-row/);
   assert.match(app, /function renderServiceProviderList/);
-  // The show-all button uses the same header icon as the other lists.
-  assert.match(app, /tool-header-eye/);
 });
 
 test('view drag query does not select the nested status-provider rows', () => {
@@ -223,7 +221,7 @@ test('Home limit provider settings stay compact and list only enabled providers'
   const i18n = readRendererFile('i18n.js');
   const homeLimitRows = functionBody(app, 'homeLimitRows', 'homeLimitWindowLabel');
   const renderHomeLimitProviderList = functionBody(app, 'renderHomeLimitProviderList', 'renderHomeSettingsList');
-  const resetHomeLimitProviderOrder = functionBody(app, 'resetHomeLimitProviderOrder', 'showAllHomeLimitProviders');
+  const resetHomeLimitProviderOrder = functionBody(app, 'resetHomeLimitProviderOrder', 'resetServiceProviderOrder');
   assert.match(homeLimitRows, /const hasConfiguredOrder = Boolean\(state\.settings\?\.homeLimitProviderOrder\)/);
   assert.doesNotMatch(homeLimitRows, /normalizeLimitProviderOrder\(state\.settings\?\.limitProviderOrder, LIMIT_PROVIDERS\)\.join\(','\) !== DEFAULT_LIMIT_PROVIDER_ORDER/);
   assert.match(homeLimitRows, /sort: hasConfiguredOrder \? 'configured' : 'remaining'/);

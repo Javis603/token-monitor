@@ -2178,21 +2178,6 @@ button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); o
   opacity: 0.34;
   cursor: default;
 }
-.tool-header-eye {
-  width: 13px;
-  height: 8px;
-  border: 1.5px solid currentColor;
-  border-radius: 999px / 80%;
-}
-.tool-header-eye::after {
-  display: block;
-  width: 3px;
-  height: 3px;
-  margin: 1px auto 0;
-  border-radius: 50%;
-  background: currentColor;
-  content: "";
-}
 /* Filter field for the two long settings lists (tracked tools, limit
    providers). Sits outside the list container on purpose: both lists are
    rebuilt wholesale on every stats tick, so a field inside one would lose its

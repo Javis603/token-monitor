@@ -595,11 +595,9 @@ Object.assign(els, {
   compactTokenUnitsInput: document.getElementById('compactTokenUnitsInput'),
   swapSettingsRefreshInput: document.getElementById('swapSettingsRefreshInput'),
   resetClientDisplayOrderButton: document.getElementById('resetClientDisplayOrderButton'),
-  showAllClientsButton: document.getElementById('showAllClientsButton'),
   clientDisplaySearchInput: document.getElementById('clientDisplaySearchInput'),
   limitProviderSearchInput: document.getElementById('limitProviderSearchInput'),
   resetViewDisplayOrderButton: document.getElementById('resetViewDisplayOrderButton'),
-  showAllViewsButton: document.getElementById('showAllViewsButton'),
   viewDisplayList: document.getElementById('viewDisplayList'),
   hiddenViewGroup: document.getElementById('hiddenViewGroup'),
   hiddenViewList: document.getElementById('hiddenViewList'),
@@ -10854,12 +10852,10 @@ function renderViewPreferences() {
   // Every list under Main Screen shares this render path. A settings or stats
   // repaint during a drag is held until the controller lands or aborts.
   if (deferMainPreferenceRender()) return;
-  const hidden = hiddenViewSet();
   const disabled = new Set(disabledViewIds());
   const views = viewDisplayPreferencesApi.orderedViews(VIEW_DISPLAY_OPTIONS, effectiveViewDisplayOrderValue());
   const hasCustomOrder = viewDisplayPreferencesApi.hasCustomViewDisplayOrder(state.settings?.viewDisplayOrder);
   if (els.resetViewDisplayOrderButton) els.resetViewDisplayOrderButton.disabled = !hasCustomOrder;
-  if (els.showAllViewsButton) els.showAllViewsButton.disabled = hidden.size === 0;
   const shownIds = new Set(shownViewDisplayOrder().shown);
   if (!views.some(({ id }) => id === state.mainSettingsView)) state.mainSettingsView = 'home';
   const shown = views.filter(({ id }) => shownIds.has(id));
@@ -11074,17 +11070,7 @@ function renderHomeLimitProviderList() {
   reset.setAttribute('aria-label', t('settings.views.resetOrder'));
   reset.disabled = !hasCustomOrder;
   reset.addEventListener('click', () => void resetHomeLimitProviderOrder());
-  const showAll = document.createElement('button');
-  showAll.type = 'button';
-  showAll.className = 'tool-header-action';
-  const showAllEye = document.createElement('span');
-  showAllEye.className = 'tool-header-eye';
-  showAllEye.setAttribute('aria-hidden', 'true');
-  showAll.append(showAllEye);
-  showAll.setAttribute('aria-label', t('settings.views.showAll'));
-  showAll.disabled = providers.every(({ id }) => !hidden.has(id));
-  showAll.addEventListener('click', () => void showAllHomeLimitProviders());
-  headerActions.append(reset, showAll);
+  headerActions.append(reset);
   header.append(note, headerActions);
   wrap.append(header);
   for (const { id, label, settingsLabel } of providers) {
@@ -11188,20 +11174,7 @@ function renderHomeSettingsList() {
   reset.setAttribute('aria-label', t('settings.views.resetOrder'));
   reset.disabled = !hasCustomOrder;
   reset.addEventListener('click', () => void resetHomeModuleOrder());
-  const showAll = document.createElement('button');
-  showAll.type = 'button';
-  showAll.className = 'tool-header-action';
-  showAll.setAttribute('aria-label', t('settings.views.showAll'));
-  showAll.disabled = hidden.size === 0;
-  const eye = document.createElement('span');
-  eye.className = 'tool-header-eye';
-  eye.setAttribute('aria-hidden', 'true');
-  showAll.append(eye);
-  showAll.addEventListener('click', () => void showAllHomeModules());
-  const actions = document.createElement('div');
-  actions.className = 'tool-header-actions';
-  actions.append(reset, showAll);
-  header.append(caption, actions);
+  header.append(caption, reset);
   wrap.append(header);
   for (const moduleOption of modules) {
     const id = moduleOption.id;
@@ -11593,17 +11566,7 @@ function renderServiceProviderList() {
   reset.setAttribute('aria-label', t('settings.views.resetOrder'));
   reset.disabled = !hasCustomOrder;
   reset.addEventListener('click', () => void resetServiceProviderOrder());
-  const showAll = document.createElement('button');
-  showAll.type = 'button';
-  showAll.className = 'tool-header-action';
-  const showAllEye = document.createElement('span');
-  showAllEye.className = 'tool-header-eye';
-  showAllEye.setAttribute('aria-hidden', 'true');
-  showAll.append(showAllEye);
-  showAll.setAttribute('aria-label', t('settings.views.showAll'));
-  showAll.disabled = hidden.size === 0;
-  showAll.addEventListener('click', () => void showAllServiceProviders());
-  headerActions.append(reset, showAll);
+  headerActions.append(reset);
   header.append(note, headerActions);
   wrap.append(header);
   const SERVICE_STATUS_REFRESH_OPTIONS = [0, 60000, 120000, 300000, 900000, 1800000];
@@ -12693,9 +12656,7 @@ function renderToolPreferencesNow() {
   const filtering = Boolean(toolPreferenceQuery());
   const hasCustomOrder = clientDisplayPreferencesApi.hasCustomDisplayOrder(state.settings?.clientDisplayOrder);
   const hasPinnedClients = pinned.size > 0;
-  const hasHiddenClients = hidden.size > 0;
   if (els.resetClientDisplayOrderButton) els.resetClientDisplayOrderButton.disabled = !hasCustomOrder && !hasPinnedClients;
-  if (els.showAllClientsButton) els.showAllClientsButton.disabled = !hasHiddenClients;
   const qoderTrackingState = qoderDisplayApi.trackingState(pendingTrackedClients());
   const isTracked = clientRowTracked;
   const motion = takeSettingsListMotion('client', isTracked)
@@ -13863,11 +13824,6 @@ async function resetHomeModuleOrder() {
   renderHomeIfVisible();
 }
 
-async function showAllHomeModules() {
-  await saveSettings({ hiddenHomeModules: '' });
-  renderHomeIfVisible();
-}
-
 function hiddenServiceProviderSet() {
   return new Set(serviceStatusProviderPreferencesApi.normalizeHidden(state.settings?.hiddenServiceProviders, SERVICE_PROVIDER_OPTIONS).split(',').filter(Boolean));
 }
@@ -13920,19 +13876,8 @@ async function resetHomeLimitProviderOrder() {
   renderHomeIfVisible();
 }
 
-async function showAllHomeLimitProviders() {
-  await saveSettings({ hiddenHomeLimitProviders: '' });
-  renderHomeIfVisible();
-}
-
 async function resetServiceProviderOrder() {
   await saveSettings({ serviceProviderDisplayOrder: '' });
-}
-
-async function showAllServiceProviders() {
-  const showing = hiddenServiceProviderSet().size > 0;
-  await saveSettings({ hiddenServiceProviders: '' });
-  if (showing) await refreshServiceStatus({ force: true });
 }
 
 async function onPreferenceReorder(kind, id, targetIndex) {
@@ -13984,16 +13929,8 @@ async function resetClientDisplayOrder() {
   await saveSettings({ clientDisplayOrder: '', pinnedClients: '' });
 }
 
-async function showAllClients() {
-  await saveSettings({ hiddenClients: '' });
-}
-
 async function resetViewDisplayOrder() {
   await saveSettings({ viewDisplayOrder: '' });
-}
-
-async function showAllViews() {
-  await saveSettings({ hiddenViews: '' });
 }
 
 function preserveSettingsPanelScroll(callback) {
@@ -15030,7 +14967,6 @@ els.exportNowButton?.addEventListener('click', async () => {
   }
 });
 els.resetClientDisplayOrderButton?.addEventListener('click', resetClientDisplayOrder);
-els.showAllClientsButton?.addEventListener('click', showAllClients);
 
 // Escape clears the field rather than closing the settings panel: while a
 // filter is on, that is what the key is expected to undo.
@@ -15061,7 +14997,6 @@ bindSettingsListSearch(els.limitProviderSearchInput, (value) => {
   renderLimitProviderCheckboxes();
 });
 els.resetViewDisplayOrderButton?.addEventListener('click', resetViewDisplayOrder);
-els.showAllViewsButton?.addEventListener('click', showAllViews);
 els.resetGlassButton.addEventListener('click', async () => {
   els.glassInput.value = String(defaultAppearance.glassOpacity);
   applyAppearanceFromControls();

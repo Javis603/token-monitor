@@ -326,7 +326,7 @@ test('Main Screen pairs the switcher views with the selected view settings', () 
   assert.match(group, /<div id="hiddenViewGroup" class="main-view-hidden-group" hidden>[\s\S]*?<div id="hiddenViewList" class="main-view-list"><\/div>/);
   assert.match(group, /id="resetViewDisplayOrderButton"/);
   assert.match(group, /<div id="mainViewInspector" class="main-view-inspector"><\/div>/);
-  assert.match(group, /id="showAllViewsButton"/);
+  assert.doesNotMatch(group, /id="showAllViewsButton"/);
 
   const app = readRendererFile('app.js');
   const render = functionBody(app, 'renderViewPreferences', 'renderMainViewInspector');
