@@ -15922,7 +15922,8 @@ function createPeriodDetailHint(failed) {
     const retry = document.createElement('button');
     retry.type = 'button';
     retry.textContent = t('sessions.detailRetry');
-    retry.addEventListener('click', () => {
+    retry.addEventListener('click', (event) => {
+      event.stopPropagation();
       periodDetails.retry();
       statsRenderScheduler.request();
     });

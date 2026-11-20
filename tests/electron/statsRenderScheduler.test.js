@@ -541,13 +541,14 @@ test('a detail loading state reuses retained rows only if the list is visible', 
   assert.equal(loading(state, visible(false), false, '', 'month'), true, 'a visible hint can update on failure');
 });
 
-test('retained period details show one failure notice and the retry button starts a repaint', () => {
+test('retained period details show one failure notice and Home retry does not navigate', () => {
   const app = fs.readFileSync(path.join(rendererDir, 'app.js'), 'utf8');
   const start = app.indexOf('function createPeriodDetailHint(');
   const end = app.indexOf('const periodDetails =', start);
   let failed = false;
   let retries = 0;
   let paints = 0;
+  const navigations = [];
   const row = {};
   const nodes = [row];
   const container = {
@@ -562,7 +563,8 @@ test('retained period details show one failure notice and the retry button start
     const children = [];
     return { classes, children, classList: { add: key => classes.add(key) },
       setAttribute() {}, append: (...elements) => children.push(...elements),
-      addEventListener: (type, handler) => { assert.equal(type, 'click'); children.click = handler; } };
+      closest: () => null,
+      addEventListener: (type, handler) => { children[type] = handler; } };
   } };
   const update = Function('document', 't', 'periodDetails', 'statsRenderScheduler',
     app.slice(start, end) + '\nreturn updatePeriodDetailFailure;')(document, key => key, {
@@ -576,7 +578,26 @@ test('retained period details show one failure notice and the retry button start
   assert.equal(nodes.length, 2);
   assert.equal(nodes[1], row);
   assert.equal(nodes[0].children[0].textContent, 'sessions.detailRefreshFailed');
-  nodes[0].children.at(-1).children.click();
+  const homeStart = app.indexOf('function homeModuleShell(');
+  const homeEnd = app.indexOf('\n}', homeStart) + 2;
+  const homeModule = Function('document', 'VIEW_ICON_CLASSES', 'renderBreakdownChange',
+    app.slice(homeStart, homeEnd) + '\nreturn homeModuleShell;')(document, {}, view => navigations.push(view));
+  const { module, body } = homeModule('session', 'Sessions', 'session');
+  const notice = nodes[0];
+  body.append(notice);
+  const retry = notice.children.at(-1);
+  const click = (target, ancestors) => {
+    let stopped = false;
+    const event = { target, stopPropagation() { stopped = true; } };
+    for (const node of [target, ...ancestors]) {
+      node.children.click?.(event);
+      if (stopped) break;
+    }
+  };
+  click(retry, [notice, body, module]);
+  assert.deepEqual(navigations, [], 'retry must keep Home selected');
+  click(body, [module]);
+  assert.deepEqual(navigations, ['session'], 'ordinary card clicks still open Sessions');
   assert.equal(retries, 1);
   assert.equal(paints, 1);
   update(container);
