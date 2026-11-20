@@ -917,7 +917,7 @@
       'settings.views.resetOrder': 'Reset order',
       'settings.views.showAll': 'Show all',
       'settings.views.showInSwitcher': 'Show in view switcher',
-      'settings.views.hiddenGroup': 'Hidden',
+      'settings.views.hiddenGroup': 'Not shown',
       'settings.views.dragHint': 'Drag to reorder',
       'settings.home.modules': 'Home modules',
       'settings.home.itemCountValue': '{n} items',
