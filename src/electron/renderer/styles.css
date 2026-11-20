@@ -706,10 +706,6 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 }
 .settings-panel .checkbox-label.is-disabled .settings-item-title { color: var(--muted); }
 .settings-group { display: grid; min-width: 0; gap: 8px; }
-.settings-collection-cadence {
-  grid-template-columns: minmax(0, 1fr);
-}
-.session-archive-settings { display: grid; gap: 6px; }
 .session-archive-settings .session-archive-toggle { color: var(--text); }
 .session-archive-footer {
   display: flex;
@@ -741,12 +737,6 @@ body.is-windows.floating-bubble-collapsed-right .floating-bubble-tab {
 .session-archive-clear:disabled { opacity: 0.38; cursor: default; }
 .settings-wsl-block { display: grid; gap: 6px; min-width: 0; }
 .wsl-panel { display: grid; gap: 4px; margin-top: 4px; }
-.settings-export-block { display: grid; gap: 8px; min-width: 0; }
-/* Give the section description room under the header so the two small-text lines don't merge. */
-.settings-export-block > .settings-note { margin: 2px 0 4px; }
-/* The group after Data export is a .settings-group (no subgroup divider), so add the
-   standard subgroup top-rule to it — closes the Data export section off from 自訂模型單價. */
-.settings-export-block + .settings-group { padding-top: 9px; border-top: 1px solid rgba(var(--line-rgb), 0.075); }
 .export-auto-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
 .export-auto-head .export-auto-toggle { flex: 1 1 auto; min-width: 0; }
 .export-status-pill { flex: 0 0 auto; }
@@ -1861,13 +1851,15 @@ span.settings-note.settings-item-desc {
 .settings-panel .sync-content-body .checkbox-label > input[type="checkbox"]::before { content: none; }
 .sync-content-dialog,
 .settings-help-popover { width: min(340px, calc(100vw - 32px)); max-height: calc(100vh - 32px); box-sizing: border-box; overflow-y: auto; padding: 16px; color: var(--text); font-size: 0.6875rem; line-height: 1.5; -webkit-app-region: no-drag; }
-.sync-title-heading { display: flex; align-items: center; gap: 3px; }
-.settings-panel .sync-title-heading > label { display: inline; margin: 0; color: inherit; font-size: inherit; }
+.settings-help-heading { display: flex; align-items: center; gap: 3px; }
+.settings-panel .settings-help-heading > label { display: inline; margin: 0; color: inherit; font-size: inherit; }
 button.settings-help-trigger { position: relative; display: inline-grid; place-items: center; flex: 0 0 18px; width: 18px; height: 18px; margin: -2px 0; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font: inherit; font-size: 8px; line-height: 1; cursor: pointer; pointer-events: auto; -webkit-app-region: no-drag; }
 button.settings-help-trigger::before { content: ''; position: absolute; width: 11px; height: 11px; border: 1px solid currentColor; border-radius: 50%; opacity: 0.6; }
 button.settings-help-trigger:hover { background: transparent; color: var(--text); }
 button.settings-help-trigger:hover::before { opacity: 1; }
 button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.settings-model-controls .settings-help-trigger { font-size: 7px; }
+.settings-model-controls .settings-help-trigger::before { box-sizing: border-box; width: 10px; height: 10px; }
 .settings-help-popover { position: fixed; inset: auto; margin: 0; width: min(280px, calc(100vw - 16px)); padding: 12px; font-size: 0.625rem; line-height: 1.6; }
 .settings-help-popover > strong { display: block; font-size: 0.75rem; font-weight: 600; line-height: 1.4; }
 .settings-help-popover dl { margin: 12px 0 0; }
@@ -3351,6 +3343,7 @@ p.settings-list-group-label { padding: 2px 0 0; }
   border-top: 1px solid rgba(var(--line-rgb), .06);
 }
 .settings-appearance-type .settings-font-custom-row { grid-column: 1 / -1; }
+.settings-section-details-inner > .settings-page-card,
 .settings-appearance-section-group .settings-section-details-inner > .settings-subgroup {
   padding: 8px 10px;
   border: 1px solid var(--line);
@@ -3360,8 +3353,15 @@ p.settings-list-group-label { padding: 2px 0 0; }
 .settings-appearance-section-group .settings-section-details-inner > .settings-subgroup:first-child {
   margin-top: 6px;
 }
+.settings-section-details-inner > .settings-page-card:last-child,
 .settings-appearance-section-group .settings-section-details-inner > .settings-subgroup:last-child {
   margin-bottom: 10px;
+}
+.settings-model-controls > .cursor-account-group:not(.expanded) + .cursor-account-group { margin-top: 0; }
+.settings-model-controls .cursor-settings-toggle { min-height: 30px; }
+.settings-export-block > .export-auto-details:not(.hidden) + .export-manual-row {
+  border-top: 1px solid var(--line);
+  padding-top: 5px;
 }
 .settings-appearance-vendors > .theme-color-accordion { border-top: 0; padding-top: 0; }
 .color-picker-name, .vendor-color-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -8280,7 +8280,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .model-alias-form .model-alias-form { margin-top: 0; }
 .model-alias-source { display: flex; align-items: end; gap: 8px; }
 .model-alias-source .model-alias-field { flex: 1; }
-.model-alias-source button { flex: 0 0 auto; }
+.model-alias-source > .settings-actions { flex: 0 0 auto; }
 
 
 
@@ -8296,7 +8296,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   box-sizing: border-box;
 }
 
-.custom-pricing-rate-wide { grid-column: 1 / -1; }
 .custom-pricing-rate-heading { margin: 0; color: var(--muted); font-size: 0.625rem; line-height: 1.45; }
 
 .custom-pricing-advanced { min-width: 0; }
@@ -8325,43 +8324,8 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .cursor-account-group .custom-pricing-advanced > summary .cursor-disclosure-icon { transform: rotate(0deg); }
 .cursor-account-group .custom-pricing-advanced[open] > summary .cursor-disclosure-icon { transform: rotate(180deg); }
 .custom-pricing-advanced-body { display: grid; gap: 8px; padding-top: 8px; }
-.custom-pricing-help-row { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
-.custom-pricing-help-row > .settings-note { flex: 1 1 200px; }
-.custom-pricing-help-button {
-  flex: 0 0 auto;
-  padding: 0;
-  border: 0;
-  border-radius: 3px;
-  background: transparent;
-  color: var(--blue);
-  font-size: 0.625rem;
-  line-height: 1.45;
-  cursor: pointer;
-}
-.custom-pricing-help-button:hover { text-decoration: underline; }
-.custom-pricing-help-button:focus-visible,
-.custom-pricing-help button:focus-visible { outline: 1px solid rgba(115, 189, 245, 0.72); outline-offset: 3px; }
-.custom-pricing-help {
-  --popup-surface-alpha: 1;
-  position: fixed;
-  inset: auto;
-  position-area: top span-left;
-  position-try-fallbacks: flip-block, flip-inline;
-  width: min(300px, calc(100vw - 32px));
-  max-height: calc(100vh - 32px);
-  box-sizing: border-box;
-  margin: 8px 0;
-  padding: 12px;
-  overflow: auto;
-  border: 1px solid rgba(var(--line-rgb), 0.22);
-  border-radius: 10px;
-  background: rgb(var(--glass-rgb));
-  color: var(--text);
-  font-size: 0.625rem;
-}
-.custom-pricing-help:popover-open { display: grid; gap: 10px; }
-.custom-pricing-help::backdrop { background: transparent; }
-.custom-pricing-help-header { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.custom-pricing-list-heading { margin-bottom: 6px; }
+.custom-pricing-help-content { display: grid; gap: 6px; margin-top: 6px; }
 
 .custom-pricing-approx {
   color: var(--muted);
@@ -8401,14 +8365,32 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   font-variant-numeric: tabular-nums;
 }
 
-.custom-pricing-row .custom-pricing-remove {
-  width: auto;
-  height: 24px;
-  padding: 0 8px;
-  font-size: 0.625rem;
-  line-height: 24px;
-  opacity: 0.72;
+.model-settings-list {
+  gap: 0;
 }
+.model-settings-list > .custom-pricing-row {
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.model-settings-list-panel:has(> .slot-add:not(.hidden)) .custom-pricing-row:last-child {
+  border-bottom: 1px solid var(--line);
+}
+.model-settings-list > .custom-pricing-row + .custom-pricing-row {
+  border-top: 1px solid var(--line);
+}
+.model-settings-list-panel > .slot-add::before { content: '+ '; }
+.model-settings-list-panel .managed-account-list > .settings-note { padding: 7px 8px; }
+.model-settings-list .custom-pricing-edit > :is(.managed-account-email, .managed-account-meta) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.model-settings-actions { justify-content: flex-end; }
+.model-settings-editor {
+  padding: 7px 0 8px;
+}
+.model-settings-editor-title { margin: 0; color: var(--text); font-size: .6875rem; }
+.model-alias-note { margin-bottom: 6px; }
 
 .opencode-profile-list {
   margin-bottom: 4px;
