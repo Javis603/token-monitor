@@ -11,7 +11,7 @@
   // Pair an accessible info button with a popover containing caller-owned text.
   // The caller may close it on semantic changes (e.g. a different sync server).
   function createHelpPopover({ trigger, popover, document = trigger.ownerDocument,
-    window = document.defaultView, maxWidth = 280, align = 'end', closeDelay = 150 }) {
+    window = document.defaultView, maxWidth = 280, align = 'end', preferAbove = false, closeDelay = 150 }) {
     const listeners = [];
     let closeTimer = null;
     let observer = null;
@@ -45,7 +45,7 @@
       popover.style.maxHeight = '';
       const result = positionApi.popupPosition(trigger.getBoundingClientRect(),
         { width: window.innerWidth, height: window.innerHeight },
-        { width, height: popover.scrollHeight + popover.offsetHeight - popover.clientHeight, align, heightLimit: window.innerHeight });
+        { width, height: popover.scrollHeight + popover.offsetHeight - popover.clientHeight, align, preferAbove, heightLimit: window.innerHeight });
       Object.assign(popover.style, { left: `${result.left}px`, top: `${result.top}px`, maxHeight: `${result.maxHeight}px` });
     }
 

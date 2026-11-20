@@ -65,6 +65,39 @@ const DSH_MODEL_CONTRACT_CASES = Object.freeze([
 // Monitor normalization are both exercised by this release gate.
 const TOKEN_CONTRACT_CASES = Object.freeze([
   {
+    client: 'junie',
+    expectedRow: { model: 'gpt-5', input: 100, output: 50, cacheRead: 20, cacheWrite: 10, reasoning: 5 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 185, clientTokens: 185, clientOutputTokens: 55 },
+    expectedSession: { id: 'junie-contract', totalTokens: 185, outputTokens: 55, reasoningTokens: 5 },
+    writeFixture(home) {
+      const dir = path.join(home, '.junie', 'sessions', 'junie-contract');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'events.jsonl'), JSON.stringify({
+        timestampMs: 1791619201000,
+        event: { agentEvent: { kind: 'LlmResponseMetadataEvent', modelUsage: [{
+          model: 'gpt-5', inputTokens: 100, outputTokens: 50, cacheInputTokens: 20, cacheCreateTokens: 10, reasoningTokens: 5, time: 50
+        }] } }
+      }) + '\n');
+    }
+  },
+  {
+    client: 'opencodereview',
+    expectedRow: { model: 'gpt-4o', input: 100, output: 50, cacheRead: 20, cacheWrite: 10, reasoning: 0 },
+    hasExplicitTotal: false,
+    expectedPeriod: { totalTokens: 180, clientTokens: 180, clientOutputTokens: 50 },
+    expectedSession: { id: 'review-contract', totalTokens: 180, outputTokens: 50, reasoningTokens: 0 },
+    writeFixture(home) {
+      const dir = path.join(home, '.opencodereview', 'sessions', 'project');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'review-contract.jsonl'), JSON.stringify({
+        type: 'llm_response', sessionId: 'review-contract', model: 'gpt-4o',
+        timestamp: '2026-10-10T08:00:01Z', duration_ms: 50,
+        usage: { prompt_tokens: 100, completion_tokens: 50, cache_read_tokens: 20, cache_write_tokens: 10 }
+      }) + '\n');
+    }
+  },
+  {
     client: 'gemini',
     // 20 input - 5 cached + 4 tool = 19; thoughts stay out of output.
     expectedRow: { model: 'gemini-3.1-pro-preview', input: 19, output: 2, cacheRead: 5, cacheWrite: 0, reasoning: 3 },

@@ -113,37 +113,33 @@ test('follow interface resolves against each renderer effective default', () => 
   );
 });
 
-test('font controls live inside Appearance advanced customization', () => {
+test('font controls and zoom share a visible Appearance group', () => {
   const html = readProjectFile('src', 'electron', 'renderer', 'index.html');
-  const advancedStart = html.indexOf('id="themeAdvancedDetails"');
-  const colorGrid = html.indexOf('id="themeColorGrid"');
-  const vendorGroup = html.indexOf('id="themeVendorGroup"', advancedStart);
-  assert.ok(advancedStart >= 0);
-  assert.ok(colorGrid > advancedStart);
-  assert.ok(vendorGroup > colorGrid);
-  const advanced = html.slice(advancedStart, vendorGroup);
-  assert.ok(advanced.indexOf('id="themeColorGrid"') < advanced.indexOf('class="settings-font-controls"'));
-  assert.doesNotMatch(advanced, /data-i18n="settings\.appearance\.fonts"/);
-  assert.match(advanced, /id="textSizeInput" aria-labelledby="textSizeLabel" aria-describedby="textSizeNote"/);
-  assert.match(advanced, /<span id="textSizeLabel"[^>]*>Text size<\/span>/);
-  assert.ok(advanced.indexOf('id="textSizeInput"') < advanced.indexOf('id="interfaceFontPreset"'));
-  assert.match(advanced, /id="interfaceFontPreset"/);
-  assert.match(advanced, /value="app" data-i18n="settings\.appearance\.fontPresetApp"/);
-  assert.match(advanced, /value="system" data-i18n="settings\.appearance\.fontPresetSystem"/);
-  assert.doesNotMatch(advanced, /fontPresetSans/);
-  assert.match(advanced, /id="interfaceFontInput"/);
-  assert.match(advanced, /id="interfaceFontPreview"/);
-  assert.match(advanced, /id="displayFontPreset"/);
-  assert.match(advanced, /value="follow" data-i18n="settings\.appearance\.fontPresetFollow"/);
-  assert.match(advanced, /id="displayFontInput"/);
-  assert.match(advanced, /id="displayFontPreview"/);
-  assert.match(advanced, /id="interfaceFontCustomRow"/);
-  assert.match(advanced, /id="displayFontCustomRow"/);
-  assert.match(advanced, /data-i18n="settings\.appearance\.fontDisplay">Display font<\/label>/);
+  const start = html.indexOf('settings-subgroup settings-appearance-type');
+  const end = html.indexOf('settings-subgroup settings-appearance-usage', start);
+  assert.ok(start >= 0 && end > start);
+  const typography = html.slice(start, end);
+  assert.match(typography, /id="zoomInput"/);
+  assert.match(typography, /id="textSizeInput" aria-labelledby="textSizeLabel" aria-describedby="textSizeNote"/);
+  assert.match(typography, /<span id="textSizeLabel"[^>]*>Text size<\/span>/);
+  assert.ok(typography.indexOf('id="textSizeInput"') < typography.indexOf('id="interfaceFontPreset"'));
+  assert.match(typography, /id="interfaceFontPreset"/);
+  assert.match(typography, /value="app" data-i18n="settings\.appearance\.fontPresetApp"/);
+  assert.match(typography, /value="system" data-i18n="settings\.appearance\.fontPresetSystem"/);
+  assert.doesNotMatch(typography, /fontPresetSans/);
+  assert.match(typography, /id="interfaceFontInput"/);
+  assert.match(typography, /id="interfaceFontPreview"/);
+  assert.match(typography, /id="displayFontPreset"/);
+  assert.match(typography, /value="follow" data-i18n="settings\.appearance\.fontPresetFollow"/);
+  assert.match(typography, /id="displayFontInput"/);
+  assert.match(typography, /id="displayFontPreview"/);
+  assert.match(typography, /id="interfaceFontCustomRow"/);
+  assert.match(typography, /id="displayFontCustomRow"/);
+  assert.match(typography, /data-i18n="settings\.appearance\.fontDisplay">Display font<\/label>/);
   for (const preset of ['App', 'System', 'Mono', 'Follow', 'Custom']) {
-    assert.ok(advanced.includes(`data-select-description="settings.appearance.fontPreset${preset}Desc"`));
+    assert.ok(typography.includes(`data-select-description="settings.appearance.fontPreset${preset}Desc"`));
   }
-  assert.doesNotMatch(advanced, /fontSettingsNote/);
+  assert.doesNotMatch(typography, /fontSettingsNote/);
 });
 
 test('font settings wiring keeps renderer defaults concrete and technical monospace roles intact', () => {

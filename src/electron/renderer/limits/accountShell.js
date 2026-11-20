@@ -30,6 +30,23 @@
     details.classList.toggle('hidden', !open);
   }
 
+  function focusDisclosureControl(details, control) {
+    control.focus({ preventScroll: true });
+    const document = details.ownerDocument;
+    const focused = document?.activeElement;
+    document?.defaultView?.requestAnimationFrame(() => {
+      const animations = details.getAnimations();
+      void Promise.allSettled(animations.map(animation => animation.finished)).then(() => {
+        if (details.inert || document.activeElement !== focused || !details.contains(focused)) return;
+        const panel = details.closest('.settings-panel')?.getBoundingClientRect();
+        const field = focused.getBoundingClientRect();
+        if (panel && (field.top < panel.top || field.bottom > panel.bottom)) {
+          focused.scrollIntoView({ block: 'nearest' });
+        }
+      });
+    });
+  }
+
   function setExpanded({ toggle, details, group, expanded, onChange }) {
     if (!toggle || !details) return;
     const open = Boolean(expanded);
@@ -70,5 +87,5 @@
     };
   }
 
-  return { render, setDisclosureBody, setExpanded, createBusyGuard, createRequestGuard };
+  return { render, setDisclosureBody, focusDisclosureControl, setExpanded, createBusyGuard, createRequestGuard };
 });

@@ -184,6 +184,23 @@
           </button>
           <div id="mainSettingsDetails" class="settings-section-details hidden">
             <div class="settings-subgroup settings-main-screen-group">
+              <div class="main-view-layout">
+                <nav class="main-view-nav" aria-label="Main screen views" data-i18n-aria-label="settings.views.title">
+                  <div id="viewDisplayList" class="main-view-list"></div>
+                  <div id="hiddenViewGroup" class="main-view-hidden-group" hidden>
+                    <div class="main-view-hidden-label" data-i18n="settings.views.hiddenGroup">Hidden</div>
+                    <div id="hiddenViewList" class="main-view-list"></div>
+                  </div>
+                  <div class="main-view-nav-footer">
+                    <span class="main-view-hint" data-i18n="settings.views.dragHint">Drag to reorder</span>
+                    <button id="resetViewDisplayOrderButton" class="tool-header-action" type="button" aria-label="Reset order" data-i18n-aria-label="settings.views.resetOrder"><span aria-hidden="true">↺</span></button>
+                  </div>
+                </nav>
+                <div id="mainViewInspector" class="main-view-inspector"></div>
+              </div>
+            </div>
+            <div class="settings-subgroup main-numbers-group">
+              <div class="main-numbers-title" data-i18n="settings.main.statsCurrency">Stats &amp; currency</div>
               <label class="settings-item period-default-setting">
                 <span class="settings-item-text">
                   <span class="settings-item-title" data-i18n="periodRange.settingsTitle">Default usage range</span>
@@ -196,14 +213,6 @@
                 </select>
                 <span class="settings-note settings-item-desc" data-i18n="periodRange.settingsNote">Choose the default usage range shown on Home. On Home, click the selected period at the top again to open the menu and switch quickly.</span>
               </label>
-              <div class="settings-note-row">
-                <p class="settings-note" data-i18n="settings.views.note">Choose which main views appear and the order of the mode button.</p>
-                <div class="tool-header-actions">
-                  <button id="resetViewDisplayOrderButton" class="tool-header-action" type="button" aria-label="Reset order" data-i18n-aria-label="settings.views.resetOrder"><span aria-hidden="true">↺</span></button>
-                  <button id="showAllViewsButton" class="tool-header-action" type="button" aria-label="Show all" data-i18n-aria-label="settings.views.showAll"><span class="tool-header-eye" aria-hidden="true"></span></button>
-                </div>
-              </div>
-              <div id="viewDisplayList" class="tool-preference-list"></div>
               <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.currency.label">Currency</span></span>
                 <select id="currencyInput">
                   <option value="USD" data-i18n="settings.currency.usd">USD - US Dollar</option>
@@ -234,13 +243,6 @@
                 <div id="currencyRateManualField" class="currency-rate-manual-field hidden">
                   <span class="currency-rate-prefix">1 USD =</span>
                   <input id="currencyRateOverrideInput" type="number" step="0.0001" min="0" />
-                </div>
-              </div>
-              <div class="settings-item">
-                <span id="modelRankingMetricLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.modelRanking.label">Model ranking</span></span>
-                <div class="inline-options" role="radiogroup" aria-labelledby="modelRankingMetricLabel">
-                  <label class="inline-option"><input type="radio" name="modelRankingMetric" value="tokens" id="modelRankingMetricTokens" /><span data-i18n="settings.modelRanking.tokens">Tokens</span></label>
-                  <label class="inline-option"><input type="radio" name="modelRankingMetric" value="cost" id="modelRankingMetricCost" /><span data-i18n="settings.modelRanking.cost">Cost</span></label>
                 </div>
               </div>
             </div>
@@ -277,7 +279,7 @@
                   <button id="windowToggleShortcutValue" class="shortcut-value" type="button" aria-live="polite">Off</button>
                   <button id="windowToggleShortcutClearButton" type="button" data-i18n="settings.shortcut.clear">Clear</button>
                 </div>
-                <p id="windowToggleShortcutNote" class="settings-note settings-item-desc" data-i18n="settings.display.windowShortcutNote">Record a global shortcut to show or hide the window.</p>
+                <p id="windowToggleShortcutNote" class="settings-note settings-item-desc">Record a global shortcut to show or hide the window.</p>
               </div>
             </div>
             <div class="settings-subgroup settings-presence-group">
@@ -479,21 +481,45 @@
             <span class="settings-section-meta"><span id="appearanceSettingsSummary" class="settings-section-summary"></span><span class="settings-section-disclosure" aria-hidden="true"></span></span>
           </button>
           <div id="appearanceSettingsDetails" class="settings-section-details hidden">
-            <div class="settings-subgroup settings-appearance-group">
+            <div class="settings-subgroup settings-theme-group">
+              <div class="settings-note-row">
+                <div class="settings-group-header"><span data-i18n="settings.appearance.themeTitle">Interface Theme</span></div>
+                <div class="tool-header-actions">
+                  <button id="resetThemeColorsButton" class="tool-header-action" type="button" aria-label="Reset all" data-i18n-aria-label="settings.appearance.resetAll"><span aria-hidden="true">↺</span></button>
+                </div>
+              </div>
+              <div id="themePresetChips" class="theme-preset-chips"></div>
+              <div id="themeAdvancedGroup" class="settings-group cursor-account-group theme-color-accordion">
+                <button id="themeAdvancedToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="themeAdvancedDetails">
+                  <span data-i18n="settings.appearance.customizeTheme">Custom colors and theme code</span>
+                  <span class="cursor-settings-summary">
+                    <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                  </span>
+                </button>
+                <div id="themeAdvancedDetails" class="cursor-settings-details hidden" inert>
+                  <div id="themeColorGrid" class="color-picker-grid"></div>
+                  <div class="settings-field theme-code-field">
+                    <label for="themeCodeInput" data-i18n="settings.appearance.themeCodeLabel">Theme Code</label>
+                    <div class="hub-secret-row">
+                      <input id="themeCodeInput" class="theme-code-input" type="text" maxlength="64" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="TM1-..." data-i18n-placeholder="settings.appearance.themeCodePlaceholder" />
+                      <button id="copyThemeCodeButton" class="icon-button" type="button" aria-label="Copy theme code" data-i18n-aria-label="settings.appearance.themeCodeCopy">⧉</button>
+                      <button id="applyThemeCodeButton" class="icon-button" type="button" aria-label="Paste and apply" data-i18n-aria-label="settings.appearance.themeCodeApply">⎘</button>
+                    </div>
+                    <p class="settings-note" data-i18n="settings.appearance.themeCodeNote">Shares interface colours only. Vendor colours and appearance preferences stay local.</p>
+                    <p id="themeCodeStatus" class="theme-code-status" aria-live="polite"></p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="settings-subgroup settings-appearance-material">
+              <div class="settings-group-header"><span data-i18n="settings.appearance.group.material">Background &amp; glass</span></div>
               <div class="settings-item"><span class="settings-item-text"><span id="windowGlassEffectLabel" class="settings-item-title" data-i18n="settings.appearance.systemGlass">Glass Backdrop</span></span><div class="inline-options" role="radiogroup" aria-labelledby="windowGlassEffectLabel"><label class="inline-option"><input type="radio" name="systemGlassOption" value="system" /><span data-i18n="settings.appearance.glassEffectSystem">System</span></label><label class="inline-option"><input type="radio" name="systemGlassOption" value="off" /><span data-i18n="settings.appearance.glassEffectTransparent">Transparent</span></label></div></div>
               <label id="windowsBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.windowsBackdrop">Windows Glass Style</span></span><select id="windowsBackdropInput"><option value="acrylic" data-i18n="settings.appearance.windowsBackdropAcrylic">Acrylic</option><option value="accent" data-i18n="settings.appearance.windowsBackdropAccent" data-select-description="settings.appearance.windowsBackdropNote">Accent Blur (experimental)</option><option value="mica" data-i18n="settings.appearance.windowsBackdropMica" data-select-description="settings.appearance.windowsBackdropMicaNote">Mica</option><option value="mica-alt" data-i18n="settings.appearance.windowsBackdropMicaAlt" data-select-description="settings.appearance.windowsBackdropMicaNote">Mica Alt</option></select><span id="windowsBackdropNote" class="settings-note settings-item-desc hidden" role="status"></span></label>
               <label id="macBackdropRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.macBackdrop">macOS Glass Style</span></span><select id="macBackdropInput"><option value="vibrancy" data-i18n="settings.appearance.macBackdropVibrancy">Frosted Glass</option><option value="liquid-glass" data-i18n="settings.appearance.macBackdropLiquidGlass">Liquid Glass (Regular)</option><option value="liquid-glass-clear" data-i18n="settings.appearance.macBackdropLiquidGlassClear">Liquid Glass (Clear)</option></select></label>
-              <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.tokenNumberAnimation">Token number animation</span></span><select id="tokenNumberAnimationInput"><option value="roll" data-i18n="settings.appearance.tokenNumberAnimation.roll">Digit roll</option><option value="count" data-i18n="settings.appearance.tokenNumberAnimation.count">Count up</option></select></label>
-              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTotalTokens">Show compact token total</span></span><input id="showCompactTotalTokensInput" type="checkbox" /></label>
-              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveTokenRate">Show live token rate</span></span><input id="showLiveTokenRateInput" type="checkbox" aria-describedby="showLiveTokenRateNote" /><span id="showLiveTokenRateNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.liveTokenRateNote">Show the latest generation speed in the footer. Click it to switch between tok/s and TPM.</span></label>
-              <label id="liveTokenRateScopeRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveTokenRateScope">Live rate scope</span></span><select id="liveTokenRateScopeInput"><option value="all" data-i18n="settings.appearance.liveTokenRateScopeAll">All devices</option><option value="device" data-i18n="settings.appearance.liveTokenRateScopeDevice">This device</option></select></label>
-              <label id="compactTokenUnitsRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTokenUnits">Compact token units</span></span><select id="compactTokenUnitsInput"><option value="western" data-i18n="settings.appearance.compactTokenUnitsWestern">International (K/M/B)</option><option value="localized" data-i18n="settings.appearance.compactTokenUnitsLocalized">East Asian (萬/億)</option></select></label>
-              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.swapSettingsRefresh">Swap Settings and Refresh buttons</span></span><input id="swapSettingsRefreshInput" type="checkbox" /></label>
               <div id="glassOpacityRow" class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="glassSliderLabel" class="settings-item-title" data-i18n="settings.appearance.glass">Glass</span><button id="resetGlassButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset glass" data-i18n-aria-label="settings.appearance.resetGlass">↺</button></span><span id="glassInputNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.nativeManaged">Managed by macOS</span></span><input id="glassInput" type="range" min="0" max="100" step="1" aria-labelledby="glassSliderLabel" aria-describedby="glassInputNote" /><span class="slider-value" aria-hidden="true"></span></div>
               <div id="macGlassTintRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="macGlassTintLabel" class="settings-item-title" data-i18n="settings.appearance.nativeTint">Backdrop tint</span><button id="macGlassTintReset" type="button" class="reset-appearance-button reset-inline" aria-label="Reset tint" data-i18n-aria-label="settings.appearance.resetTint">↺</button></span><span id="macGlassTintNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.nativeTintNote">Saved separately for each glass style</span></span><input id="macGlassTintInput" type="range" min="0" max="100" step="1" aria-labelledby="macGlassTintLabel" aria-describedby="macGlassTintNote" /><span class="slider-value" aria-hidden="true"></span></div>
               <div id="macClearGlassTintRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="macClearGlassTintLabel" class="settings-item-title" data-i18n="settings.appearance.nativeTint">Backdrop tint</span><button id="macClearGlassTintReset" type="button" class="reset-appearance-button reset-inline" aria-label="Reset tint" data-i18n-aria-label="settings.appearance.resetTint">↺</button></span><span id="macClearGlassTintNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.nativeTintNote">Saved separately for each glass style</span></span><input id="macClearGlassTintInput" type="range" min="0" max="100" step="1" aria-labelledby="macClearGlassTintLabel" aria-describedby="macClearGlassTintNote" /><span class="slider-value" aria-hidden="true"></span></div>
               <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="depthSliderLabel" class="settings-item-title" data-i18n="settings.appearance.depth">Depth</span><button id="resetDepthButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset depth" data-i18n-aria-label="settings.appearance.resetDepth">↺</button></span><span id="blurInputNote" class="settings-note settings-item-desc hidden" data-i18n="settings.appearance.nativeBlurManaged">Blur is managed by macOS</span></span><input id="blurInput" type="range" min="0" max="100" step="1" aria-labelledby="depthSliderLabel" aria-describedby="blurInputNote" /><span class="slider-value" aria-hidden="true"></span></div>
-              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="zoomSliderLabel" class="settings-item-title" data-i18n="settings.appearance.zoom">Zoom</span><button id="resetZoomButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset zoom" data-i18n-aria-label="settings.appearance.resetZoom">↺</button></span></span><input id="zoomInput" type="range" min="70" max="160" step="5" aria-labelledby="zoomSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
               <div class="settings-item background-image-setting">
                 <span class="settings-item-text">
                   <span class="settings-item-title" data-i18n="settings.appearance.backgroundImage">Background image</span>
@@ -505,6 +531,62 @@
                 </div>
               </div>
               <div id="backgroundImageOpacityRow" class="settings-item settings-slider-item hidden"><span class="settings-item-text"><span class="slider-label"><span id="backgroundImageOpacityLabel" class="settings-item-title" data-i18n="settings.appearance.backgroundImageOpacity">Image opacity</span><button id="resetBackgroundImageOpacityButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset image opacity" data-i18n-aria-label="settings.appearance.resetBackgroundImageOpacity">↺</button></span></span><input id="backgroundImageOpacityInput" type="range" min="0" max="100" step="1" aria-labelledby="backgroundImageOpacityLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+            </div>
+            <div class="settings-subgroup settings-appearance-type">
+              <div class="settings-group-header"><span data-i18n="settings.appearance.group.type">Text &amp; zoom</span></div>
+              <div class="settings-item"><span class="settings-item-text"><span id="textSizeLabel" class="settings-item-title" data-i18n="settings.appearance.textSize">Text size</span></span><select id="textSizeInput" aria-labelledby="textSizeLabel" aria-describedby="textSizeNote"><option value="standard" data-i18n="settings.appearance.textSizeStandard">Standard</option><option value="larger" data-i18n="settings.appearance.textSizeLarger">Larger</option><option value="largest" data-i18n="settings.appearance.textSizeLargest">Largest</option></select><span id="textSizeNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.textSizeNote">Adjust labels and data text. Token total and icons keep their size.</span></div>
+              <div class="settings-item settings-slider-item"><span class="settings-item-text"><span class="slider-label"><span id="zoomSliderLabel" class="settings-item-title" data-i18n="settings.appearance.zoom">Zoom</span><button id="resetZoomButton" type="button" class="reset-appearance-button reset-inline" aria-label="Reset zoom" data-i18n-aria-label="settings.appearance.resetZoom">↺</button></span></span><input id="zoomInput" type="range" min="70" max="160" step="5" aria-labelledby="zoomSliderLabel" /><span class="slider-value" aria-hidden="true"></span></div>
+              <div class="settings-font-field">
+                <label class="settings-item-title" for="interfaceFontPreset" data-i18n="settings.appearance.fontInterface">Interface font</label>
+                <span class="settings-font-input-row">
+                  <select id="interfaceFontPreset">
+                    <option value="app" data-i18n="settings.appearance.fontPresetApp" data-select-description="settings.appearance.fontPresetAppDesc">App default</option>
+                    <option value="system" data-i18n="settings.appearance.fontPresetSystem" data-select-description="settings.appearance.fontPresetSystemDesc">System UI</option>
+                    <option value="mono" data-i18n="settings.appearance.fontPresetMono" data-select-description="settings.appearance.fontPresetMonoDesc">Monospace</option>
+                    <option value="custom" data-i18n="settings.appearance.fontPresetCustom" data-select-description="settings.appearance.fontPresetCustomDesc">Custom…</option>
+                  </select>
+                  <button id="resetInterfaceFontButton" class="reset-appearance-button reset-inline" type="button" aria-label="Reset interface font" data-i18n-aria-label="settings.appearance.resetInterfaceFont">↺</button>
+                </span>
+                <div id="interfaceFontCustomRow" class="settings-font-custom-row hidden">
+                  <label for="interfaceFontInput" data-i18n="settings.appearance.fontCustomLabel">Custom font family</label>
+                  <input id="interfaceFontInput" type="text" maxlength="160" autocomplete="off" spellcheck="false" placeholder="Enter a font family" data-i18n-placeholder="settings.appearance.fontPlaceholder" />
+                  <div class="settings-font-preview">
+                    <span class="settings-font-preview-label" data-i18n="settings.appearance.fontPreview">Preview</span>
+                    <span id="interfaceFontPreview" class="settings-font-preview-sample">Aa 中文 0123</span>
+                  </div>
+                </div>
+              </div>
+              <div class="settings-font-field">
+                <label class="settings-item-title" for="displayFontPreset" data-i18n="settings.appearance.fontDisplay">Display font</label>
+                <span class="settings-font-input-row">
+                  <select id="displayFontPreset">
+                    <option value="follow" data-i18n="settings.appearance.fontPresetFollow" data-select-description="settings.appearance.fontPresetFollowDesc">Follow interface</option>
+                    <option value="app" data-i18n="settings.appearance.fontPresetApp" data-select-description="settings.appearance.fontPresetAppDesc">App default</option>
+                    <option value="system" data-i18n="settings.appearance.fontPresetSystem" data-select-description="settings.appearance.fontPresetSystemDesc">System UI</option>
+                    <option value="mono" data-i18n="settings.appearance.fontPresetMono" data-select-description="settings.appearance.fontPresetMonoDesc">Monospace</option>
+                    <option value="custom" data-i18n="settings.appearance.fontPresetCustom" data-select-description="settings.appearance.fontPresetCustomDesc">Custom…</option>
+                  </select>
+                  <button id="resetDisplayFontButton" class="reset-appearance-button reset-inline" type="button" aria-label="Reset display font" data-i18n-aria-label="settings.appearance.resetDisplayFont">↺</button>
+                </span>
+                <div id="displayFontCustomRow" class="settings-font-custom-row hidden">
+                  <label for="displayFontInput" data-i18n="settings.appearance.fontCustomLabel">Custom font family</label>
+                  <input id="displayFontInput" type="text" maxlength="160" autocomplete="off" spellcheck="false" placeholder="Enter a font family" data-i18n-placeholder="settings.appearance.fontPlaceholder" />
+                  <div class="settings-font-preview">
+                    <span class="settings-font-preview-label" data-i18n="settings.appearance.fontPreview">Preview</span>
+                    <span id="displayFontPreview" class="settings-font-preview-sample">Aa 中文 0123</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="settings-subgroup settings-appearance-usage">
+              <div class="settings-group-header"><span data-i18n="settings.appearance.group.usage">Usage display</span></div>
+              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTotalTokens">Show compact token total</span></span><input id="showCompactTotalTokensInput" type="checkbox" /></label>
+              <label id="compactTokenUnitsRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.compactTokenUnits">Compact token units</span></span><select id="compactTokenUnitsInput"><option value="western" data-i18n="settings.appearance.compactTokenUnitsWestern">International (K/M/B)</option><option value="localized" data-i18n="settings.appearance.compactTokenUnitsLocalized">East Asian (萬/億)</option></select></label>
+              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveTokenRate">Show live token rate</span></span><input id="showLiveTokenRateInput" type="checkbox" aria-describedby="showLiveTokenRateNote" /><span id="showLiveTokenRateNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.liveTokenRateNote">Show the latest generation speed in the footer. Click it to switch between tok/s and TPM.</span></label>
+              <label id="liveTokenRateScopeRow" class="settings-item hidden"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveTokenRateScope">Live rate scope</span></span><select id="liveTokenRateScopeInput"><option value="all" data-i18n="settings.appearance.liveTokenRateScopeAll">All devices</option><option value="device" data-i18n="settings.appearance.liveTokenRateScopeDevice">This device</option></select></label>
+            </div>
+            <div class="settings-subgroup settings-appearance-motion">
+              <div class="settings-group-header"><span data-i18n="settings.appearance.group.motion">Motion</span></div>
               <div class="settings-item">
                 <span class="settings-item-text">
                   <span class="settings-item-title" data-i18n="settings.appearance.reduceMotion">Reduce Motion</span>
@@ -516,99 +598,37 @@
                 </div>
                 <span class="settings-note settings-item-desc" data-i18n="settings.appearance.reduceMotionNote">Reduce animations, or follow the system setting.</span>
               </div>
+              <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.tokenNumberAnimation">Token number animation</span></span><select id="tokenNumberAnimationInput"><option value="roll" data-i18n="settings.appearance.tokenNumberAnimation.roll">Digit roll</option><option value="count" data-i18n="settings.appearance.tokenNumberAnimation.count">Count up</option></select></label>
             </div>
-            <div class="settings-subgroup settings-theme-group">
-              <div class="settings-note-row">
-                <div class="settings-group-header"><span data-i18n="settings.appearance.themeTitle">Interface Theme</span></div>
-                <div class="tool-header-actions">
-                  <button id="resetThemeColorsButton" class="tool-header-action" type="button" aria-label="Reset all" data-i18n-aria-label="settings.appearance.resetAll"><span aria-hidden="true">↺</span></button>
-                </div>
-              </div>
-              <div id="themePresetChips" class="theme-preset-chips"></div>
-              <div class="settings-field theme-code-field">
-                <label for="themeCodeInput" data-i18n="settings.appearance.themeCodeLabel">Theme Code</label>
-                <div class="hub-secret-row">
-                  <input id="themeCodeInput" class="theme-code-input" type="text" maxlength="64" autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="TM1-..." data-i18n-placeholder="settings.appearance.themeCodePlaceholder" />
-                  <button id="copyThemeCodeButton" class="icon-button" type="button" aria-label="Copy theme code" data-i18n-aria-label="settings.appearance.themeCodeCopy">⧉</button>
-                  <button id="applyThemeCodeButton" class="icon-button" type="button" aria-label="Paste and apply" data-i18n-aria-label="settings.appearance.themeCodeApply">⎘</button>
-                </div>
-                <p class="settings-note" data-i18n="settings.appearance.themeCodeNote">Shares interface colours only. Vendor colours and appearance preferences stay local.</p>
-                <p id="themeCodeStatus" class="theme-code-status" aria-live="polite"></p>
-              </div>
-              <div id="themeAdvancedGroup" class="settings-group cursor-account-group theme-color-accordion">
-                <button id="themeAdvancedToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="themeAdvancedDetails">
-                  <span data-i18n="settings.appearance.advanced">Advanced customization</span>
+            <div class="settings-subgroup settings-appearance-vendors">
+              <div id="themeVendorGroup" class="settings-group cursor-account-group theme-color-accordion settings-vendor-color-group">
+                <button id="themeVendorToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="themeVendorDetails">
+                  <span data-i18n="settings.appearance.vendorTitle">Vendor Colors</span>
                   <span class="cursor-settings-summary">
                     <span class="cursor-disclosure-icon" aria-hidden="true"></span>
                   </span>
                 </button>
-                <div id="themeAdvancedDetails" class="cursor-settings-details hidden" inert>
-                  <div id="themeColorGrid" class="color-picker-grid"></div>
-                  <div class="settings-font-controls">
-                    <div class="settings-item"><span class="settings-item-text"><span id="textSizeLabel" class="settings-item-title" data-i18n="settings.appearance.textSize">Text size</span></span><select id="textSizeInput" aria-labelledby="textSizeLabel" aria-describedby="textSizeNote"><option value="standard" data-i18n="settings.appearance.textSizeStandard">Standard</option><option value="larger" data-i18n="settings.appearance.textSizeLarger">Larger</option><option value="largest" data-i18n="settings.appearance.textSizeLargest">Largest</option></select><span id="textSizeNote" class="settings-note settings-item-desc" data-i18n="settings.appearance.textSizeNote">Adjust labels and data text. Token total and icons keep their size.</span></div>
-                    <div class="settings-font-field">
-                      <label class="settings-item-title" for="interfaceFontPreset" data-i18n="settings.appearance.fontInterface">Interface font</label>
-                      <span class="settings-font-input-row">
-                        <select id="interfaceFontPreset">
-                          <option value="app" data-i18n="settings.appearance.fontPresetApp" data-select-description="settings.appearance.fontPresetAppDesc">App default</option>
-                          <option value="system" data-i18n="settings.appearance.fontPresetSystem" data-select-description="settings.appearance.fontPresetSystemDesc">System UI</option>
-                          <option value="mono" data-i18n="settings.appearance.fontPresetMono" data-select-description="settings.appearance.fontPresetMonoDesc">Monospace</option>
-                          <option value="custom" data-i18n="settings.appearance.fontPresetCustom" data-select-description="settings.appearance.fontPresetCustomDesc">Custom…</option>
-                        </select>
-                        <button id="resetInterfaceFontButton" class="reset-appearance-button reset-inline" type="button" aria-label="Reset interface font" data-i18n-aria-label="settings.appearance.resetInterfaceFont">↺</button>
-                      </span>
-                      <div id="interfaceFontCustomRow" class="settings-font-custom-row hidden">
-                        <label for="interfaceFontInput" data-i18n="settings.appearance.fontCustomLabel">Custom font family</label>
-                        <input id="interfaceFontInput" type="text" maxlength="160" autocomplete="off" spellcheck="false" placeholder="Enter a font family" data-i18n-placeholder="settings.appearance.fontPlaceholder" />
-                        <div class="settings-font-preview">
-                          <span class="settings-font-preview-label" data-i18n="settings.appearance.fontPreview">Preview</span>
-                          <span id="interfaceFontPreview" class="settings-font-preview-sample">Aa 中文 0123</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div class="settings-font-field">
-                      <label class="settings-item-title" for="displayFontPreset" data-i18n="settings.appearance.fontDisplay">Display font</label>
-                      <span class="settings-font-input-row">
-                        <select id="displayFontPreset">
-                          <option value="follow" data-i18n="settings.appearance.fontPresetFollow" data-select-description="settings.appearance.fontPresetFollowDesc">Follow interface</option>
-                          <option value="app" data-i18n="settings.appearance.fontPresetApp" data-select-description="settings.appearance.fontPresetAppDesc">App default</option>
-                          <option value="system" data-i18n="settings.appearance.fontPresetSystem" data-select-description="settings.appearance.fontPresetSystemDesc">System UI</option>
-                          <option value="mono" data-i18n="settings.appearance.fontPresetMono" data-select-description="settings.appearance.fontPresetMonoDesc">Monospace</option>
-                          <option value="custom" data-i18n="settings.appearance.fontPresetCustom" data-select-description="settings.appearance.fontPresetCustomDesc">Custom…</option>
-                        </select>
-                        <button id="resetDisplayFontButton" class="reset-appearance-button reset-inline" type="button" aria-label="Reset display font" data-i18n-aria-label="settings.appearance.resetDisplayFont">↺</button>
-                      </span>
-                      <div id="displayFontCustomRow" class="settings-font-custom-row hidden">
-                        <label for="displayFontInput" data-i18n="settings.appearance.fontCustomLabel">Custom font family</label>
-                        <input id="displayFontInput" type="text" maxlength="160" autocomplete="off" spellcheck="false" placeholder="Enter a font family" data-i18n-placeholder="settings.appearance.fontPlaceholder" />
-                        <div class="settings-font-preview">
-                          <span class="settings-font-preview-label" data-i18n="settings.appearance.fontPreview">Preview</span>
-                          <span id="displayFontPreview" class="settings-font-preview-sample">Aa 中文 0123</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveIndicator">Live Indicator</span></span><input id="liveDotInput" type="checkbox" /></label>
-                  <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.toolIcons">Tool Icons</span></span><input id="toolIconsInput" type="checkbox" /></label>
-                  <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.titleIcon">Use Title Icon</span></span><input id="titleIconInput" type="checkbox" /></label>
-                </div>
-              </div>
-              <div id="themeVendorGroup" class="settings-group cursor-account-group theme-color-accordion settings-vendor-color-group">
-                <div class="settings-note-row">
-                  <button id="themeVendorToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="themeVendorDetails">
-                    <span data-i18n="settings.appearance.vendorTitle">Vendor Colors</span>
-                    <span class="cursor-settings-summary">
-                      <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                    </span>
-                  </button>
-                  <div class="tool-header-actions">
-                    <button id="resetVendorColorsButton" class="tool-header-action" type="button" aria-label="Reset to brand" data-i18n-aria-label="settings.appearance.resetBrand"><span aria-hidden="true">↺</span></button>
-                  </div>
-                </div>
                 <div id="themeVendorDetails" class="cursor-settings-details hidden" inert>
-                  <p class="settings-note" data-i18n="settings.appearance.vendorNote">Override the chart and list colour for each tool. Reset returns it to the brand colour.</p>
+                  <div class="settings-note-row">
+                    <p class="settings-note" data-i18n="settings.appearance.vendorNote">Override the chart and list colour for each tool. Reset returns it to the brand colour.</p>
+                    <div class="tool-header-actions">
+                      <button id="resetVendorColorsButton" class="tool-header-action" type="button" aria-label="Reset to brand" data-i18n-aria-label="settings.appearance.resetBrand"><span aria-hidden="true">↺</span></button>
+                    </div>
+                  </div>
                   <div id="vendorColorList" class="vendor-color-list"></div>
                 </div>
+              </div>
+            </div>
+            <div id="appearanceLegacyGroup" class="settings-subgroup cursor-account-group">
+              <button id="appearanceLegacyToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="appearanceLegacyDetails">
+                <span data-i18n="settings.advanced.title">Advanced</span>
+                <span class="cursor-settings-summary"><span class="cursor-disclosure-icon" aria-hidden="true"></span></span>
+              </button>
+              <div id="appearanceLegacyDetails" class="cursor-settings-details hidden" inert>
+                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.swapSettingsRefresh">Swap Settings and Refresh buttons</span></span><input id="swapSettingsRefreshInput" type="checkbox" /></label>
+                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.liveIndicator">Live Indicator</span></span><input id="liveDotInput" type="checkbox" /></label>
+                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.toolIcons">Tool Icons</span></span><input id="toolIconsInput" type="checkbox" /></label>
+                <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.appearance.titleIcon">Use Title Icon</span></span><input id="titleIconInput" type="checkbox" /></label>
               </div>
             </div>
           </div>
@@ -625,7 +645,6 @@
                 <p class="settings-note" data-i18n="settings.tools.note">Track controls collection. Show controls the main Tools list. Drag a row to reorder.</p>
                 <div class="tool-header-actions">
                   <button id="resetClientDisplayOrderButton" class="tool-header-action" type="button" aria-label="Reset order" data-i18n-aria-label="settings.tools.resetOrder"><span aria-hidden="true">↺</span></button>
-                  <button id="showAllClientsButton" class="tool-header-action" type="button" aria-label="Show all" data-i18n-aria-label="settings.tools.showAll"><span class="tool-header-eye" aria-hidden="true"></span></button>
                 </div>
               </div>
               <div class="settings-list-search">
@@ -633,7 +652,8 @@
               </div>
               <div id="clientDisplayList" class="tool-preference-list"></div>
             </div>
-            <div class="settings-subgroup settings-collection-cadence">
+            <div class="settings-subgroup session-archive-settings settings-page-card">
+              <div class="settings-group-header"><span data-i18n="settings.collection.captureAndRetention">Collection and retention</span></div>
               <label class="settings-item">
                 <span class="settings-item-text">
                   <span class="settings-item-title" data-i18n="settings.collection.cadence">Collection frequency</span>
@@ -646,9 +666,16 @@
                   <option value="1800000" data-i18n="settings.collection.interval.30m" data-select-description="settings.collection.mode.intervalDesc">Every 30 minutes</option>
                 </select>
               </label>
-            </div>
-            <div class="settings-subgroup session-archive-settings">
-              <div class="settings-group-header"><span data-i18n="settings.collection.sessionArchiveTitle">Session history</span></div>
+              <div id="wslScanRow" class="settings-wsl-block hidden">
+                <label class="checkbox-label wsl-scan-toggle settings-item">
+                  <span class="settings-item-text">
+                    <span class="settings-item-title" data-i18n="settings.collection.wslScan">Scan tools inside WSL</span>
+                  </span>
+                  <input id="wslScanInput" type="checkbox" />
+                  <span class="settings-note settings-item-desc" data-i18n="settings.collection.wslScanDesc">Scans only running WSL distributions and may increase WSL memory use.</span>
+                </label>
+                <div id="wslPanel" class="wsl-panel"></div>
+              </div>
               <label class="checkbox-label session-archive-toggle settings-item">
                 <span class="settings-item-text">
                   <span class="settings-item-title" data-i18n="settings.collection.sessionArchiveToggle">Preserve deleted session usage</span>
@@ -661,19 +688,8 @@
                 <button id="clearSessionUsageArchiveButton" class="session-archive-clear" type="button" data-i18n="settings.collection.sessionArchiveClear">Clear retained data</button>
               </div>
             </div>
-            <div id="wslScanRow" class="settings-wsl-block hidden">
-              <label class="checkbox-label wsl-scan-toggle settings-item">
-                <span class="settings-item-text">
-                  <span class="settings-item-title" data-i18n="settings.collection.wslScan">Scan tools inside WSL</span>
-                </span>
-                <input id="wslScanInput" type="checkbox" />
-                <span class="settings-note settings-item-desc" data-i18n="settings.collection.wslScanDesc">Scans only running WSL distributions and may increase WSL memory use.</span>
-              </label>
-              <div id="wslPanel" class="wsl-panel"></div>
-            </div>
-            <div class="settings-subgroup settings-export-block">
+            <div class="settings-subgroup settings-export-block settings-page-card">
               <div class="settings-group-header"><span data-i18n="settings.export.title">Data export</span></div>
-              <p class="settings-note" data-i18n="settings.export.desc">Export your usage as CSV + JSON for spreadsheets, Obsidian, Grafana, or scripts.</p>
               <div class="export-auto-head">
                 <label class="checkbox-label export-auto-toggle settings-item">
                   <span class="settings-item-text">
@@ -704,125 +720,141 @@
                 </label>
               </div>
               <div class="export-manual-row">
-                <span class="settings-note export-manual-note" data-i18n="settings.export.manualDesc">Or export once to a folder you pick:</span>
+                <span class="settings-note export-manual-note">CSV / JSON</span>
                 <div class="settings-actions">
                   <button id="exportNowButton" type="button" data-i18n="settings.export.manualNow">Manual export…</button>
                 </div>
               </div>
             </div>
-            <div id="modelAliasesAccountGroup" class="settings-group cursor-account-group">
-              <button id="modelAliasesSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="modelAliasesSettingsDetails">
-                <span data-i18n="settings.modelAliases.title">Model aliases</span>
-                <span class="cursor-settings-summary">
-                  <span id="modelAliasesStatus" class="cursor-status-pill"></span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="modelAliasesSettingsDetails" class="cursor-settings-details hidden">
-                <p class="settings-note" data-i18n="settings.modelAliases.note">Show different names for the same model as one row.</p>
-                <div class="settings-item">
-                  <span id="modelAliasesGroupingLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.modelAliases.grouping">Automatic grouping</span></span>
-                  <div class="inline-options" role="radiogroup" aria-labelledby="modelAliasesGroupingLabel">
-                    <label class="inline-option"><input type="radio" name="modelAliasGrouping" value="off" id="modelAliasGroupingOff" /><span data-i18n="settings.modelAliases.groupingOff">Off</span></label>
-                    <label class="inline-option"><input type="radio" name="modelAliasGrouping" value="duplicates" id="modelAliasGroupingDuplicates" /><span data-i18n="settings.modelAliases.groupingDuplicates">Merge duplicates</span></label>
-                    <label class="inline-option"><input type="radio" name="modelAliasGrouping" value="prefix" id="modelAliasGroupingPrefix" /><span data-i18n="settings.modelAliases.groupingPrefix">Strip prefixes</span></label>
+            <div class="settings-subgroup settings-model-controls settings-page-card">
+              <div class="settings-group-header"><span data-i18n="settings.collection.modelsAndPricing">Models and pricing</span></div>
+              <div id="modelAliasesAccountGroup" class="settings-group cursor-account-group">
+                <button id="modelAliasesSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="modelAliasesSettingsDetails">
+                  <span data-i18n="settings.modelAliases.title">Model aliases</span>
+                  <span class="cursor-settings-summary">
+                    <span id="modelAliasesStatus" class="cursor-status-pill"></span>
+                    <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                  </span>
+                </button>
+                <div id="modelAliasesSettingsDetails" class="cursor-settings-details hidden">
+                  <div class="settings-item">
+                    <span class="settings-help-heading settings-item-text">
+                      <span id="modelAliasesGroupingLabel" data-i18n="settings.modelAliases.grouping">Automatic grouping</span>
+                      <button id="modelAliasGroupingHelpButton" class="settings-help-trigger" type="button" data-i18n-aria-label="settings.modelAliases.groupingHelp" aria-label="Automatic grouping help"><span aria-hidden="true">i</span></button>
+                    </span>
+                    <div class="inline-options" role="radiogroup" aria-labelledby="modelAliasesGroupingLabel">
+                      <label class="inline-option"><input type="radio" name="modelAliasGrouping" value="off" id="modelAliasGroupingOff" /><span data-i18n="settings.modelAliases.groupingOff">Off</span></label>
+                      <label class="inline-option"><input type="radio" name="modelAliasGrouping" value="duplicates" id="modelAliasGroupingDuplicates" /><span data-i18n="settings.modelAliases.groupingDuplicates">Merge duplicates</span></label>
+                      <label class="inline-option"><input type="radio" name="modelAliasGrouping" value="prefix" id="modelAliasGroupingPrefix" /><span data-i18n="settings.modelAliases.groupingPrefix">Strip prefixes</span></label>
+                    </div>
                   </div>
-                  <span class="settings-item-desc model-alias-example" data-i18n="settings.modelAliases.groupingDesc">Merge duplicates only handles a model reported under two spellings at once. Strip prefixes removes the provider name before the / in every model name, for example anthropic/claude-opus-5 → claude-opus-5.</span>
-                </div>
-                <div id="modelAliasesList" class="managed-account-list"></div>
-                <div class="settings-actions">
-                  <button id="modelAliasesAddButton" type="button" data-i18n="settings.modelAliases.add">Add alias</button>
-                </div>
-                <div id="modelAliasesForm" class="model-alias-form hidden">
-                  <div class="model-alias-field">
-                    <label id="modelAliasesAliasLabel" for="modelAliasesAliasSelect" data-i18n="settings.modelAliases.alias">Alias (reported model ID)</label>
-                    <select id="modelAliasesAliasSelect"></select>
-                    <input id="modelAliasesAliasInput" class="hidden" type="text" maxlength="256" placeholder="anthropic/claude-opus-5" spellcheck="false" />
+                  <div id="modelAliasGroupingHelp" class="settings-help-popover model-alias-example" popover="auto" role="tooltip" data-i18n="settings.modelAliases.groupingDesc">Merge duplicates only handles a model reported under two spellings at once. Strip prefixes removes the provider name before the / in every model name, for example anthropic/claude-opus-5 → claude-opus-5.</div>
+                  <p class="settings-note model-alias-note" data-i18n="settings.modelAliases.note">Show different names for the same model as one row.</p>
+                  <div class="slot-panel slot-list model-settings-list-panel">
+                    <div id="modelAliasesList" class="managed-account-list model-settings-list"></div>
+                    <button id="modelAliasesAddButton" class="slot-add" type="button" aria-expanded="false" aria-controls="modelAliasesForm" data-i18n="settings.modelAliases.add">Add alias</button>
                   </div>
-                  <div id="modelAliasesMoreSources" class="model-alias-form"></div>
-                  <div class="settings-actions">
-                    <button id="modelAliasesAddSourceButton" type="button" data-i18n="settings.modelAliases.addSource">Add another alias</button>
-                  </div>
-                  <div class="model-alias-field">
-                    <label id="modelAliasesCanonicalLabel" for="modelAliasesCanonicalSelect" data-i18n="settings.modelAliases.canonical">Group as (model ID)</label>
-                    <select id="modelAliasesCanonicalSelect"></select>
-                    <input id="modelAliasesCanonicalInput" class="hidden" type="text" maxlength="256" placeholder="claude-opus-5" spellcheck="false" />
-                  </div>
-                  <p class="settings-note" data-i18n="settings.modelAliases.multipleNote">All aliases above will point to this model ID.</p>
-                  <div class="settings-actions">
-                    <button id="modelAliasesSaveButton" type="button" data-i18n="settings.modelAliases.save">Save</button>
-                    <button id="modelAliasesCancelButton" type="button" data-i18n="settings.modelAliases.cancel">Cancel</button>
-                  </div>
-                </div>
-                <p id="modelAliasesError" class="settings-note error hidden" role="alert"></p>
-              </div>
-            </div>
-            <div id="customPricingAccountGroup" class="settings-group cursor-account-group">
-              <button id="customPricingSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="customPricingSettingsDetails">
-                <span data-i18n="settings.customPricing.title">Custom model pricing</span>
-                <span class="cursor-settings-summary">
-                  <span id="customPricingStatus" class="cursor-status-pill"></span>
-                  <span class="cursor-disclosure-icon" aria-hidden="true"></span>
-                </span>
-              </button>
-              <div id="customPricingSettingsDetails" class="cursor-settings-details hidden">
-                <p class="settings-note" data-i18n="settings.customPricing.note">Override a model's price (USD per 1M tokens) when its auto-detected price is wrong. Applies to all providers of that model.</p>
-                <div id="customPricingList" class="managed-account-list"></div>
-                <p id="customPricingSyncError" class="settings-note error hidden" role="alert"></p>
-                <div class="settings-actions">
-                  <button id="customPricingAddButton" type="button" data-i18n="settings.customPricing.add">Add override</button>
-                </div>
-                <div id="customPricingForm" class="custom-pricing-form hidden">
-                  <label><span data-i18n="settings.customPricing.model">Model</span>
-                    <select id="customPricingModelSelect"></select>
-                    <input id="customPricingModelInput" class="hidden" type="text" />
-                  </label>
-                  <p id="customPricingRateUnits" class="custom-pricing-rate-heading" data-i18n="settings.customPricing.rateUnits">Rates · USD / 1M tokens</p>
-                  <div class="custom-pricing-rates">
-                    <label><span data-i18n="settings.customPricing.cacheRead">Input (cache hit)</span>
-                      <input id="customPricingCacheRead" type="number" min="0" step="any" /><span id="customPricingCacheReadApprox" class="custom-pricing-approx"></span>
-                    </label>
-                    <label><span data-i18n="settings.customPricing.input">Input (cache miss)</span>
-                      <input id="customPricingInput" type="number" min="0" step="any" /><span id="customPricingInputApprox" class="custom-pricing-approx"></span>
-                    </label>
-                    <label class="custom-pricing-rate-wide"><span data-i18n="settings.customPricing.output">Output</span>
-                      <input id="customPricingOutput" type="number" min="0" step="any" /><span id="customPricingOutputApprox" class="custom-pricing-approx"></span>
-                    </label>
-                  </div>
-                  <details id="customPricingAdvanced" class="custom-pricing-advanced">
-                    <summary><span data-i18n="settings.customPricing.advanced">Cache-write pricing</span><span class="custom-pricing-advanced-meta"><span id="customPricingAdvancedSummary" class="settings-note"></span><span class="cursor-disclosure-icon" aria-hidden="true"></span></span></summary>
-                    <div class="custom-pricing-advanced-body">
-                      <div class="custom-pricing-rates">
-                        <label><span data-i18n="settings.customPricing.cacheWrite">Cache write</span>
-                          <input id="customPricingCacheWrite" type="number" min="0" step="any" /><span id="customPricingCacheWriteApprox" class="custom-pricing-approx"></span>
-                        </label>
-                        <div>
-                          <label><span data-i18n="settings.customPricing.cacheWrite1h">Cache write (1 hour)</span>
-                            <input id="customPricingCacheWrite1h" type="number" min="0" step="any" /><span id="customPricingCacheWrite1hApprox" class="custom-pricing-approx"></span>
-                          </label>
-                          <span id="customPricingWriteNote" class="settings-note" data-i18n="settings.customPricing.writeNote">Leave blank to use the regular cache-write price.</span>
+                  <div id="modelAliasesForm" class="accordion-animated-container hidden" inert>
+                    <div class="accordion-animation-inner">
+                      <div class="model-alias-form model-settings-editor">
+                        <h3 id="modelAliasesFormTitle" class="model-settings-editor-title"></h3>
+                        <div class="model-alias-field">
+                          <label id="modelAliasesAliasLabel" for="modelAliasesAliasSelect" data-i18n="settings.modelAliases.alias">Alias (reported model ID)</label>
+                          <select id="modelAliasesAliasSelect"></select>
+                          <input id="modelAliasesAliasInput" class="hidden" type="text" maxlength="256" placeholder="anthropic/claude-opus-5" spellcheck="false" />
+                        </div>
+                        <div id="modelAliasesMoreSources" class="model-alias-form"></div>
+                        <div class="settings-actions">
+                          <button id="modelAliasesAddSourceButton" type="button" data-i18n="settings.modelAliases.addSource">Add another alias</button>
+                        </div>
+                        <div class="model-alias-field">
+                          <label id="modelAliasesCanonicalLabel" for="modelAliasesCanonicalSelect" data-i18n="settings.modelAliases.canonical">Group as (model ID)</label>
+                          <select id="modelAliasesCanonicalSelect"></select>
+                          <input id="modelAliasesCanonicalInput" class="hidden" type="text" maxlength="256" placeholder="claude-opus-5" spellcheck="false" />
+                        </div>
+                        <p class="settings-note" data-i18n="settings.modelAliases.multipleNote">All aliases above will point to this model ID.</p>
+                        <div class="settings-actions model-settings-actions">
+                          <button id="modelAliasesSaveButton" type="button" data-i18n="settings.modelAliases.save">Save</button>
+                          <button id="modelAliasesCancelButton" type="button" data-i18n="settings.modelAliases.cancel">Cancel</button>
                         </div>
                       </div>
                     </div>
-                  </details>
-                  <div class="custom-pricing-help-row">
-                    <p id="customPricingCoverageNote" class="settings-note" data-i18n="settings.customPricing.coverageNote">If the supplied rates cannot price the usage, the original cost is kept.</p>
-                    <button id="customPricingHelpButton" class="custom-pricing-help-button" type="button" popovertarget="customPricingHelp" data-i18n="settings.customPricing.help">Pricing guide</button>
                   </div>
-                  <div id="customPricingHelp" class="custom-pricing-help" popover="auto" role="dialog" aria-labelledby="customPricingHelpTitle">
-                    <div class="custom-pricing-help-header">
-                      <strong id="customPricingHelpTitle" data-i18n="settings.customPricing.help">Pricing guide</strong>
-                      <button type="button" class="app-update-popover-close" popovertarget="customPricingHelp" popovertargetaction="hide" data-i18n-aria-label="settings.appUpdate.close" aria-label="Close" autofocus>×</button>
+                  <p id="modelAliasesError" class="settings-note error hidden" role="alert"></p>
+                </div>
+              </div>
+              <div id="customPricingAccountGroup" class="settings-group cursor-account-group">
+                <button id="customPricingSettingsToggle" class="settings-group-header cursor-settings-toggle" type="button" aria-expanded="false" aria-controls="customPricingSettingsDetails">
+                  <span data-i18n="settings.customPricing.title">Custom model pricing</span>
+                  <span class="cursor-settings-summary">
+                    <span id="customPricingStatus" class="cursor-status-pill"></span>
+                    <span class="cursor-disclosure-icon" aria-hidden="true"></span>
+                  </span>
+                </button>
+                <div id="customPricingSettingsDetails" class="cursor-settings-details hidden">
+                  <div class="settings-help-heading custom-pricing-list-heading">
+                    <span class="settings-note" data-i18n="settings.customPricing.rateUnits">Rates · USD / 1M tokens</span>
+                    <button id="customPricingHelpButton" class="settings-help-trigger" type="button" data-i18n-aria-label="settings.customPricing.help" aria-label="Pricing guide"><span aria-hidden="true">i</span></button>
+                  </div>
+                  <div id="customPricingHelp" class="settings-help-popover" popover="auto" role="tooltip">
+                    <strong data-i18n="settings.customPricing.help">Pricing guide</strong>
+                    <div class="custom-pricing-help-content">
+                      <p class="settings-note" data-i18n="settings.customPricing.note">Override a model's price (USD per 1M tokens) when its auto-detected price is wrong. Applies to all providers of that model.</p>
+                      <p class="settings-note" data-i18n="settings.customPricing.partialNote">Unused rates can be left blank. Custom pricing applies only when the rates cover every used token type.</p>
+                      <p class="settings-note" data-i18n="settings.customPricing.freeNote">For a free model, set both input and output to 0 and leave other prices blank or 0.</p>
+                      <p class="settings-note" data-i18n="settings.customPricing.cacheNote">Cache-write rates are only needed for providers that bill cache writes separately. If the 1-hour rate differs, enter it manually.</p>
                     </div>
-                    <p class="settings-note" data-i18n="settings.customPricing.partialNote">Unused rates can be left blank. Custom pricing applies only when the rates cover every used token type.</p>
-                    <p id="customPricingFreeNote" class="settings-note" data-i18n="settings.customPricing.freeNote">For a free model, set both input and output to 0 and leave other prices blank or 0.</p>
-                    <p class="settings-note" data-i18n="settings.customPricing.cacheNote">Cache-write rates are only needed for providers that bill cache writes separately. If the 1-hour rate differs, enter it manually.</p>
                   </div>
-                  <p id="customPricingHint" class="settings-note"></p>
-                  <div id="customPricingError" class="settings-note error hidden" role="alert"></div>
-                  <div class="settings-actions">
-                    <button id="customPricingSaveButton" type="button" data-i18n="settings.customPricing.save">Save</button>
-                    <button id="customPricingCancelButton" type="button" data-i18n="settings.customPricing.cancel">Cancel</button>
+                  <div class="slot-panel slot-list model-settings-list-panel">
+                    <div id="customPricingList" class="managed-account-list model-settings-list"></div>
+                    <button id="customPricingAddButton" class="slot-add" type="button" aria-expanded="false" aria-controls="customPricingForm" data-i18n="settings.customPricing.add">Add override</button>
+                  </div>
+                  <p id="customPricingSyncError" class="settings-note error hidden" role="alert"></p>
+                  <div id="customPricingForm" class="accordion-animated-container hidden" inert>
+                    <div class="accordion-animation-inner">
+                      <div class="custom-pricing-form model-settings-editor">
+                        <h3 id="customPricingFormTitle" class="model-settings-editor-title"></h3>
+                        <label><span data-i18n="settings.customPricing.model">Model</span>
+                          <select id="customPricingModelSelect"></select>
+                          <input id="customPricingModelInput" class="hidden" type="text" />
+                        </label>
+                        <p id="customPricingRateUnits" class="custom-pricing-rate-heading" data-i18n="settings.customPricing.rateUnits">Rates · USD / 1M tokens</p>
+                        <div class="custom-pricing-rates">
+                          <label><span data-i18n="settings.customPricing.input">Input (cache miss)</span>
+                            <input id="customPricingInput" type="number" min="0" step="any" /><span id="customPricingInputApprox" class="custom-pricing-approx"></span>
+                          </label>
+                          <label><span data-i18n="settings.customPricing.output">Output</span>
+                            <input id="customPricingOutput" type="number" min="0" step="any" /><span id="customPricingOutputApprox" class="custom-pricing-approx"></span>
+                          </label>
+                          <label><span data-i18n="settings.customPricing.cacheRead">Input (cache hit)</span>
+                            <input id="customPricingCacheRead" type="number" min="0" step="any" /><span id="customPricingCacheReadApprox" class="custom-pricing-approx"></span>
+                          </label>
+                        </div>
+                        <details id="customPricingAdvanced" class="custom-pricing-advanced">
+                          <summary><span data-i18n="settings.customPricing.advanced">Cache-write pricing</span><span class="custom-pricing-advanced-meta"><span id="customPricingAdvancedSummary" class="settings-note"></span><span class="cursor-disclosure-icon" aria-hidden="true"></span></span></summary>
+                          <div class="custom-pricing-advanced-body">
+                            <div class="custom-pricing-rates">
+                              <label><span data-i18n="settings.customPricing.cacheWrite">Cache write</span>
+                                <input id="customPricingCacheWrite" type="number" min="0" step="any" /><span id="customPricingCacheWriteApprox" class="custom-pricing-approx"></span>
+                              </label>
+                              <div>
+                                <label><span data-i18n="settings.customPricing.cacheWrite1h">Cache write (1 hour)</span>
+                                  <input id="customPricingCacheWrite1h" type="number" min="0" step="any" /><span id="customPricingCacheWrite1hApprox" class="custom-pricing-approx"></span>
+                                </label>
+                                <span id="customPricingWriteNote" class="settings-note" data-i18n="settings.customPricing.writeNote">Leave blank to use the regular cache-write price.</span>
+                              </div>
+                            </div>
+                          </div>
+                        </details>
+                        <p id="customPricingCoverageNote" class="settings-note" data-i18n="settings.customPricing.coverageNote">If the supplied rates cannot price the usage, the original cost is kept.</p>
+                        <p id="customPricingHint" class="settings-note"></p>
+                        <div id="customPricingError" class="settings-note error hidden" role="alert"></div>
+                        <div class="settings-actions model-settings-actions">
+                          <button id="customPricingSaveButton" type="button" data-i18n="settings.customPricing.save">Save</button>
+                          <button id="customPricingCancelButton" type="button" data-i18n="settings.customPricing.cancel">Cancel</button>
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -841,23 +873,29 @@
               <input id="limitProviderSearchInput" class="settings-list-search-input" type="search" autocomplete="off" spellcheck="false" placeholder="Search providers" data-i18n-placeholder="settings.limits.search" aria-label="Search providers" data-i18n-aria-label="settings.limits.search" aria-controls="limitProviderCheckboxes" />
             </div>
             <div id="limitProviderCheckboxes" class="client-checkboxes limit-provider-list"></div>
-            <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.refresh">Refresh</span></span>
-              <select id="limitsRefreshInput">
-                <option value="adaptive" data-i18n="settings.limits.refreshAdaptive" data-select-description="settings.limits.refreshAdaptiveNote">Adaptive</option>
-                <option value="60000">1 min</option>
-                <option value="120000">2 min</option>
-                <option value="300000">5 min</option>
-                <option value="900000">15 min</option>
-                <option value="1800000">30 min</option>
-              </select>
-            </label>
-            <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.showSource">Show Source</span></span><input id="showLimitSourceInput" type="checkbox" /></label>
-            <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.maskAccountEmails">Mask account emails</span></span><input id="maskLimitAccountEmailsInput" type="checkbox" /></label>
-            <div class="settings-item">
-              <span id="showLimitUsedLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.barsShow">Bars show</span></span>
-              <div class="inline-options" role="radiogroup" aria-labelledby="showLimitUsedLabel">
-                <label class="inline-option"><input type="radio" name="showLimitUsed" value="remaining" id="showLimitUsedRemaining" /><span data-i18n="settings.limits.barsRemaining">Remaining</span></label>
-                <label class="inline-option"><input type="radio" name="showLimitUsed" value="used" id="showLimitUsedUsed" /><span data-i18n="settings.limits.barsUsed">Used</span></label>
+            <div class="settings-subgroup settings-page-card">
+              <div class="settings-group-header"><span data-i18n="settings.limits.refreshGroup">Updates</span></div>
+              <label class="settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.refresh">Refresh</span></span>
+                <select id="limitsRefreshInput">
+                  <option value="adaptive" data-i18n="settings.limits.refreshAdaptive" data-select-description="settings.limits.refreshAdaptiveNote">Adaptive</option>
+                  <option value="60000">1 min</option>
+                  <option value="120000">2 min</option>
+                  <option value="300000">5 min</option>
+                  <option value="900000">15 min</option>
+                  <option value="1800000">30 min</option>
+                </select>
+              </label>
+            </div>
+            <div class="settings-subgroup settings-page-card">
+              <div class="settings-group-header"><span data-i18n="settings.limits.displayGroup">Display</span></div>
+              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.showSource">Show Source</span></span><input id="showLimitSourceInput" type="checkbox" /></label>
+              <label class="checkbox-label settings-item"><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.maskAccountEmails">Mask account emails</span></span><input id="maskLimitAccountEmailsInput" type="checkbox" /></label>
+              <div class="settings-item">
+                <span id="showLimitUsedLabel" class="settings-item-text"><span class="settings-item-title" data-i18n="settings.limits.barsShow">Bars show</span></span>
+                <div class="inline-options" role="radiogroup" aria-labelledby="showLimitUsedLabel">
+                  <label class="inline-option"><input type="radio" name="showLimitUsed" value="remaining" id="showLimitUsedRemaining" /><span data-i18n="settings.limits.barsRemaining">Remaining</span></label>
+                  <label class="inline-option"><input type="radio" name="showLimitUsed" value="used" id="showLimitUsedUsed" /><span data-i18n="settings.limits.barsUsed">Used</span></label>
+                </div>
               </div>
             </div>
           </div>
@@ -1489,7 +1527,7 @@
                     <label id="syncContentHostRow" class="settings-item checkbox-label sync-content-option" hidden><span class="settings-item-text"><span class="settings-item-title" data-i18n="settings.sync.content.hostPermission">Allow devices to sync session titles</span><span class="settings-item-desc" data-i18n="settings.sync.content.hostNote">Controls what this hub accepts. Each device chooses separately whether to send titles.</span></span><input id="syncContentHostPermission" type="checkbox" /></label>
                     <div class="settings-item checkbox-label sync-content-option">
                       <div class="settings-item-text">
-                        <span class="sync-title-heading"><label for="syncContentsessionTitles" class="settings-item-title" data-i18n="settings.sync.content.sessionTitles">Session titles</label><button id="syncContentTitleHelp" class="settings-help-trigger" type="button" aria-describedby="syncContentTitleHelpPopover" aria-expanded="false" aria-controls="syncContentTitleHelpPopover" data-i18n-aria-label="settings.sync.content.helpLabel" aria-label="How to enable title sync"><span aria-hidden="true">i</span></button></span>
+                        <span class="settings-help-heading"><label for="syncContentsessionTitles" class="settings-item-title" data-i18n="settings.sync.content.sessionTitles">Session titles</label><button id="syncContentTitleHelp" class="settings-help-trigger" type="button" aria-describedby="syncContentTitleHelpPopover" aria-expanded="false" aria-controls="syncContentTitleHelpPopover" data-i18n-aria-label="settings.sync.content.helpLabel" aria-label="How to enable title sync"><span aria-hidden="true">i</span></button></span>
                         <span id="syncContentTitleNote" class="settings-item-desc" data-i18n="settings.sync.content.titleNote">Let other devices display session titles.</span>
                         <span id="syncContentTitleUnavailable" class="settings-item-desc sync-title-unavailable" hidden><span data-i18n="settings.sync.content.titleUnavailable">Title sync is not enabled on the server.</span></span>
                       </div>
@@ -1768,6 +1806,7 @@
     <script src="hubBuildPresentation.js"></script>
     <script src="../../shared/deviceKind.js"></script>
     <script src="selectControl.js"></script>
+    <script src="appearanceColorPicker.js"></script>
     <script src="actionMenu.js"></script>
     <script src="limits/accountSlotsPanel.js"></script>
     <script src="appSelects.js"></script>

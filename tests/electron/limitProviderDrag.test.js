@@ -260,7 +260,7 @@ test('the four Main Screen lists keep the drag handle as an affordance', () => {
   assert.match(app, /function createPreferenceOrderHandle\(\{ kind, id, label, count \}\)/);
   const handleCalls = app.match(/createPreferenceOrderHandle\(\{/g) || [];
   assert.equal(handleCalls.length, 5, 'one definition plus four remaining call sites');
-  const handleBody = app.slice(app.indexOf('function createPreferenceOrderHandle('), app.indexOf('const VIEW_PREFERENCE_SUBGROUPS'));
+  const handleBody = app.slice(app.indexOf('function createPreferenceOrderHandle('), app.indexOf('const HOME_MODULE_SUBGROUPS'));
   assert.doesNotMatch(handleBody, /pointerdown/);
   assert.match(handleBody, /aria-keyshortcuts/);
 });
@@ -294,7 +294,7 @@ test('the drop mirrors the new order locally before anything can repaint', () =>
   // onPreferenceOrderCommit compares against the value just mirrored, so it
   // would treat the write as a no-op.
   const app = readRendererFile('app.js');
-  const wiring = app.slice(app.indexOf('const limitProviderRowDrag = '), app.indexOf('function renderViewPreferences('));
+  const wiring = app.slice(app.indexOf('const limitProviderRowDrag = '), app.indexOf('const MAIN_VIEW_SETTINGS = '));
   // The controller hands over ids; the comma-joined setting is this list's own
   // storage format and stays in the wiring.
   let config;
@@ -418,7 +418,7 @@ test('the drop preserves settings scroll across the DOM reorder and deferred rep
 
   // The limits list supplies the settings panel guard.
   const app = readRendererFile('app.js');
-  const wiring = app.slice(app.indexOf('const limitProviderRowDrag = '), app.indexOf('function renderViewPreferences('));
+  const wiring = app.slice(app.indexOf('const limitProviderRowDrag = '), app.indexOf('const MAIN_VIEW_SETTINGS = '));
   assert.match(wiring, /preserveScroll: preserveSettingsPanelScroll,/);
   assert.match(wiring, /applyOrder: \(order\) => applyPreferenceOrder\('provider', order\),/);
   assert.match(wiring, /requestRender: \(\) => renderLimitProviderCheckboxes\(\)/);

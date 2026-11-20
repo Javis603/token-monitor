@@ -1887,7 +1887,7 @@ test('active Codex account labels are always shown for multi-account limits rows
 test('collection cadence setting is exposed in the Collection panel', () => {
   const html = readRendererFile('index.html');
   const i18n = readRendererFile('i18n.js');
-  const controls = html.match(/<div class="settings-subgroup settings-collection-cadence"[\s\S]*?<select id="collectionCadenceInput"[\s\S]*?<\/select>[\s\S]*?<\/div>/)?.[0] || '';
+  const controls = html.match(/<div class="settings-subgroup session-archive-settings settings-page-card"[\s\S]*?<select id="collectionCadenceInput"[\s\S]*?<\/select>[\s\S]*?<\/div>/)?.[0] || '';
   assert.match(controls, /data-i18n="settings\.collection\.cadence"/);
   assert.match(controls, /value="live"/);
   assert.match(controls, /value="smart"[\s\S]*data-i18n="settings\.collection\.mode\.smart"/);

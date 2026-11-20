@@ -194,7 +194,7 @@ test('Home sessions respect a smaller count while retaining an active session be
 
 test('all supported locales translate the Home count controls and active-session explanation', () => {
   for (const { value: locale } of i18n.LANGUAGE_OPTIONS.filter(option => option.value !== 'auto')) {
-    for (const key of ['settings.home.itemCount', 'settings.home.configureModule', 'settings.home.sessionCountNote']) {
+    for (const key of ['settings.home.itemCount', 'settings.home.itemCountValue', 'settings.home.sessionCountNote']) {
       assert.notEqual(i18n.translate(locale, key, { name: 'Models' }), key);
     }
   }

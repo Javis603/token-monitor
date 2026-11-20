@@ -337,7 +337,7 @@ function normalizeInitialViewValue(value, allowed, fallback) {
   return allowed.has(raw) || (allowed === viewBreakdownValues && pluginPlacementsApi.isHomeToken(raw)) ? raw : fallback;
 }
 
-const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, serviceProvidersExpanded: false, trendSettingsExpanded: false, trendsActivating: false, homeSettingsExpanded: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
+const state = { period: normalizeInitialViewValue(initialViewState.period, viewPeriodValues, 'today'), appUpdate: null, breakdown: normalizeInitialViewValue(initialViewState.breakdown, viewBreakdownValues, 'home'), viewSwitcherOpen: false, viewSwitcherHasOpened: false, limitDetailTooltipHasOpened: false, settings: null, windowVisible: new URLSearchParams(window.location.search).get('windowHidden') !== '1', stats: null, homeHistory: null, homeHistoryBusy: false, homeHistoryRequested: false, homeHistorySignature: '', homeHistoryRetries: 0, homeHistoryRetryTimer: null, homeActivityScrollLeft: null, homeActivityFollowEnd: true, homeActivityResizeObserver: null, serviceStatus: null, serviceStatusBusy: false, trendsActivating: false, mainSettingsView: 'home', homeLimitProvidersOpen: false, homeLimitSettingsExpanded: false, limitProviderSettingsExpanded: '', clientHealthExpanded: '', clientSources: clientSourceCacheApi.createClientSourceCache(), clientSourcesKey: '', clientSourcesRequest: 0, subscriptionEditingId: '', subscriptionTopUps: [], subscriptionFormBase: null, subscriptionEditorTransitionId: 0, serviceStatusTicker: null, refreshTimer: null, refreshBusy: false, refreshFeedbackTimer: null, currentTotal: 0, rowSignature: '', streamConnected: false, streamFailure: null, mode: 'idle', appInfo: null, systemDarkUi: false, tokscaleStatus: null, hubInfo: null, hubBuildStatus: null, cursorAccount: { status: null, error: '' }, cursorAccountExpanded: false, codexAccountExpanded: false, codexAccountError: '', codexSignInBusy: false, codexSignInFlowId: '', codexLoginUrl: '', codexLoginStatus: '', codexLoginOutput: '', codexWorkspaceChoices: [], codexWorkspaceId: '', codexActiveAccount: null, codexPendingActiveAccount: null, codexPendingActiveAccountUntil: 0, codexPendingActiveAccountTimer: null, customPricingExpanded: false, claudeAccountExpanded: false, claudePendingCheckSince: 0, opencodeProfileCount: 0, opencodeCookieExpanded: false, thirdPartyProfileCount: 0, thirdPartyAccountExpanded: false, deepseekAccountExpanded: false, deepseekPendingCheckSince: 0, minimaxAccountExpanded: false, factoryAccountExpanded: false, factoryPendingCheckSince: 0, clineAccountExpanded: false, clinePendingCheckSince: 0, zaiAccountExpanded: false, zaiPendingCheckSince: 0, zaiteamAccountExpanded: false, zaiteamPendingCheckSince: 0, volcengineAccountExpanded: false, volcenginePendingCheckSince: 0, qoderAccountExpanded: false, qoderPendingCheckSince: 0, kimiAccountExpanded: false, kimiPendingCheckSince: 0, ollamaAccountExpanded: false, ollamaPendingCheckSince: 0, mimoAccountExpanded: false, mimoAccountError: '', antigravityAccountExpanded: false, antigravityAccountError: '', antigravitySignInBusy: false, workbuddyAccountExpanded: false, workbuddyAccountError: '', workbuddySignInBusy: false, workbuddyCancelBusy: false, workbuddyMutationBusy: false, workbuddyLoginAttempt: 0, workbuddyLoginStatusKey: '', workbuddyAccountsRevision: 0, floatingBubble: initialFloatingBubble, suppressInitialNumberAnimation: window.__TOKEN_MONITOR_SUPPRESS_INITIAL_NUMBER_ANIMATION__ === true, openSession: null, detailSort: 'time', recordingWindowShortcut: false, windowShortcutInvalid: false, toolSearchQuery: '', limitProviderSearchQuery: '', accountPanelMessages: {} };
 state.devinAccountExpanded = false;
 state.devinPendingCheckSince = 0;
 state.icloudStatus = null;
@@ -388,8 +388,6 @@ state.sessionSearchOpen = false;
 state.sessionSearchQuery = '';
 state.sessionRowsCache = null;
 let directBreakdownOverride = null;
-state.projectSettingsExpanded = false;
-state.sessionSettingsExpanded = false;
 state.homeActivitySettingsExpanded = false;
 state.settingsSections = Object.fromEntries(SETTINGS_SECTION_IDS.map((id) => [id, false]));
 const defaultAppearance = { glassOpacity: 68, glassBlur: 32, backgroundImageOpacity: 28, zoomFactor: 1, systemGlass: true, windowsBackdrop: 'acrylic', macBackdrop: 'vibrancy', reduceMotion: 'system', tokenNumberAnimation: 'roll', showLiveDot: true, showToolIcons: true, titleIconOnly: true, showCompactTotalTokens: false, showLiveTokenRate: false, liveTokenRateScope: 'all', compactTokenUnits: 'western', settingsInTitlebar: false };
@@ -397,6 +395,7 @@ const nativeGlassTintSettings = [['macGlassTint', 'liquid-glass'], ['macClearGla
 let nativeMaterialState = glassRenderingApi.normalizeNativeMaterialState();
 let nativeMaterialRevision = 0;
 let appearancePreview = {};
+const appearanceColorPicker = window.TokenMonitorAppearanceColorPicker.create({ document, window, t });
 // Writes still in flight. Main applies the native material before it broadcasts
 // the saved settings, so a material push landing in between must not repaint
 // the appearance controls from the settings that write is replacing.
@@ -416,10 +415,10 @@ Object.assign(els, {
   sessionSearchClear: document.getElementById('sessionSearchClear'),
   sessionSearchStatus: document.getElementById('sessionSearchStatus'),
   glassInputNote: document.getElementById('glassInputNote'),
+  blurInputNote: document.getElementById('blurInputNote'),
   backgroundImageOpacityRow: document.getElementById('backgroundImageOpacityRow'),
   backgroundImageOpacityInput: document.getElementById('backgroundImageOpacityInput'),
   resetBackgroundImageOpacityButton: document.getElementById('resetBackgroundImageOpacityButton'),
-  blurInputNote: document.getElementById('blurInputNote'),
   fixedPeriodMessage: document.getElementById('fixedPeriodMessage'),
   toolDetailFooter: document.getElementById('toolDetailFooter'),
   toolDetailFooterTokens: document.getElementById('toolDetailFooterTokens'),
@@ -429,8 +428,7 @@ Object.assign(els, {
   projectBreakdownFooterModels: document.getElementById('projectBreakdownFooterModels'),
   monthPeriodMenu: document.getElementById('monthPeriodMenu'),
   monthPeriodTab: document.getElementById('monthPeriodTab'),
-  periodMonthModeInput: document.getElementById('periodMonthModeInput'),
-  modelRankingMetricInputs: Array.from(document.querySelectorAll('input[name="modelRankingMetric"]'))
+  periodMonthModeInput: document.getElementById('periodMonthModeInput')
 });
 Object.assign(els, {
   appTitleMark: document.querySelector('.app-title-mark'),
@@ -598,12 +596,13 @@ Object.assign(els, {
   compactTokenUnitsInput: document.getElementById('compactTokenUnitsInput'),
   swapSettingsRefreshInput: document.getElementById('swapSettingsRefreshInput'),
   resetClientDisplayOrderButton: document.getElementById('resetClientDisplayOrderButton'),
-  showAllClientsButton: document.getElementById('showAllClientsButton'),
   clientDisplaySearchInput: document.getElementById('clientDisplaySearchInput'),
   limitProviderSearchInput: document.getElementById('limitProviderSearchInput'),
   resetViewDisplayOrderButton: document.getElementById('resetViewDisplayOrderButton'),
-  showAllViewsButton: document.getElementById('showAllViewsButton'),
   viewDisplayList: document.getElementById('viewDisplayList'),
+  hiddenViewGroup: document.getElementById('hiddenViewGroup'),
+  hiddenViewList: document.getElementById('hiddenViewList'),
+  mainViewInspector: document.getElementById('mainViewInspector'),
   syncSettingsSummary: document.getElementById('syncSettingsSummary'),
   toolsSettingsSummary: document.getElementById('toolsSettingsSummary'),
   limitsSettingsSummary: document.getElementById('limitsSettingsSummary'),
@@ -622,6 +621,9 @@ Object.assign(els, {
   applyThemeCodeButton: document.getElementById('applyThemeCodeButton'),
   copyThemeCodeButton: document.getElementById('copyThemeCodeButton'),
   themeCodeStatus: document.getElementById('themeCodeStatus'),
+  appearanceLegacyGroup: document.getElementById('appearanceLegacyGroup'),
+  appearanceLegacyToggle: document.getElementById('appearanceLegacyToggle'),
+  appearanceLegacyDetails: document.getElementById('appearanceLegacyDetails'),
   themeAdvancedGroup: document.getElementById('themeAdvancedGroup'),
   themeAdvancedToggle: document.getElementById('themeAdvancedToggle'),
   themeAdvancedDetails: document.getElementById('themeAdvancedDetails'),
@@ -816,6 +818,8 @@ let displaySettings = null;
 
 function applySettingsSectionDom(id, open) {
   if (id === 'sync' && !open) { syncModeSelect?.close(); syncContentForm?.closeHelp(); }
+  if (id === 'appearance' && !open) appearanceColorPicker.close();
+  if (id === 'window' && !open) stopWindowShortcutRecording();
   const toggle = document.querySelector(`[data-settings-section="${id}"]`);
   const details = document.getElementById(`${id}SettingsDetails`);
   const group = toggle?.closest('.settings-collapsible-group');
@@ -6247,11 +6251,12 @@ function openHomeSettings() {
   els.shell.classList.add('settings-open');
   els.shell.style.transform = 'translateZ(0)';
   setSettingsSectionExpanded('main', true);
-  state.homeSettingsExpanded = true;
+  state.mainSettingsView = 'home';
+  state.homeLimitProvidersOpen = false;
   syncSettingsForm();
   ensureServiceStatusTicker();
   requestAnimationFrame(() => {
-    document.getElementById('homeSettingsContainer')?.scrollIntoView({ block: 'nearest' });
+    els.mainViewInspector?.scrollIntoView({ block: 'nearest' });
   });
 }
 
@@ -6262,11 +6267,12 @@ function openTrendSettings() {
   els.shell.classList.add('settings-open');
   els.shell.style.transform = 'translateZ(0)';
   setSettingsSectionExpanded('main', true);
-  state.trendSettingsExpanded = true;
+  state.mainSettingsView = 'trends';
+  state.homeLimitProvidersOpen = false;
   syncSettingsForm();
   ensureServiceStatusTicker();
   requestAnimationFrame(() => {
-    document.getElementById('trendSettingsContainer')?.scrollIntoView({ block: 'nearest' });
+    els.mainViewInspector?.scrollIntoView({ block: 'nearest' });
   });
 }
 
@@ -6280,6 +6286,11 @@ function resetSettingsListSearch() {
   if (els.limitProviderSearchInput) els.limitProviderSearchInput.value = '';
 }
 
+function resetMainViewSettings() {
+  state.mainSettingsView = 'home';
+  state.homeLimitProvidersOpen = false;
+}
+
 function openSettingsPanel(section) {
   if (!els.settingsPanel) return;
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
@@ -6287,6 +6298,7 @@ function openSettingsPanel(section) {
   els.settingsPanel.classList.remove('hidden');
   els.shell.classList.add('settings-open');
   syncPluginLimitsDemand();
+  resetMainViewSettings();
   syncSettingsForm();
   ensureServiceStatusTicker();
   if (section === 'notch') {
@@ -6304,6 +6316,7 @@ function openViewFromTray(viewId) {
   resetSettingsListSearch();
   syncModeSelect?.close();
   syncContentForm?.closeHelp();
+  appearanceColorPicker.close();
   els.settingsPanel?.classList.add('hidden');
   els.shell.classList.remove('settings-open');
   syncPluginLimitsDemand();
@@ -8766,7 +8779,7 @@ function renderThemePresetChips() {
     const label = document.createElement('span');
     label.textContent = t(`settings.appearance.preset.${preset.id}`);
     chip.append(dot, label);
-    chip.addEventListener('click', () => selectThemePreset(preset.id));
+    chip.addEventListener('click', () => queueAppearanceColorChange(() => selectThemePreset(preset.id)));
     els.themePresetChips.appendChild(chip);
   }
   // Skins from active plugins sit beside the built-in presets; applying one
@@ -8793,59 +8806,64 @@ function renderThemePresetChips() {
   }
 }
 
-function renderThemeColorGrid() {
-  if (!els.themeColorGrid) return;
-  els.themeColorGrid.innerHTML = '';
-  for (const key of themePresetsApi.INTERFACE_COLOR_KEYS) {
-    const row = document.createElement('label');
-    row.className = 'color-picker-row';
-    const name = document.createElement('span');
-    name.className = 'color-picker-name';
-    name.textContent = t(`settings.appearance.color.${key}`);
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.className = 'color-picker-input';
-    input.value = resolvedThemeColor(key);
-    input.dataset.themeKey = key;
-    input.addEventListener('input', () => previewThemeColor(key, input.value));
-    input.addEventListener('change', () => saveThemeColor(key, input.value));
-    const reset = document.createElement('button');
-    reset.type = 'button';
-    reset.className = 'reset-appearance-button reset-inline';
-    reset.textContent = '↺';
-    reset.setAttribute('aria-label', t('settings.appearance.resetColor'));
-    reset.addEventListener('click', () => resetThemeColor(key));
-    row.append(name, input, reset);
-    els.themeColorGrid.appendChild(row);
+function renderAppearanceColorRows(container, keys, { rowClass, nameClass, resetLabel, nameFor, colorFor, preview, save, reset }) {
+  if (!container) return;
+  const existing = new Map([...container.children].map(row => [row.dataset.colorKey, row]));
+  for (const key of keys) {
+    let row = existing.get(key);
+    if (!row) {
+      row = document.createElement('div');
+      row.className = rowClass;
+      row.dataset.colorKey = key;
+      const name = document.createElement('span');
+      name.className = nameClass;
+      const swatch = document.createElement('button');
+      swatch.type = 'button';
+      swatch.className = 'color-picker-swatch';
+      swatch.setAttribute('aria-haspopup', 'dialog');
+      swatch.setAttribute('aria-controls', 'appearanceColorPicker');
+      swatch.setAttribute('aria-expanded', 'false');
+      swatch.addEventListener('click', event => appearanceColorPicker.open({
+        button: swatch, name: name.textContent, preview: value => preview(key, value), save: value => save(key, value)
+      }, event.detail === 0));
+      const resetButton = document.createElement('button');
+      resetButton.type = 'button';
+      resetButton.className = 'reset-appearance-button reset-inline';
+      resetButton.textContent = '↺';
+      resetButton.addEventListener('click', () => queueAppearanceColorChange(() => reset(key)));
+      row.append(name, swatch, resetButton);
+      container.appendChild(row);
+    }
+    const [name, swatch, resetButton] = row.children;
+    const label = nameFor(key);
+    name.textContent = label;
+    swatch.setAttribute('aria-label', label);
+    resetButton.setAttribute('aria-label', t(resetLabel));
+    appearanceColorPicker.setSwatch(swatch, colorFor(key));
   }
 }
 
+function renderThemeColorGrid() {
+  renderAppearanceColorRows(els.themeColorGrid, ['bg', 'text', 'muted', 'accent', 'chart'], {
+    rowClass: 'color-picker-row', nameClass: 'color-picker-name', resetLabel: 'settings.appearance.resetColor',
+    nameFor: key => t(`settings.appearance.color.${key}`), colorFor: resolvedThemeColor,
+    preview: previewThemeColor, save: saveThemeColor, reset: resetThemeColor
+  });
+}
+
 function renderVendorColorList() {
-  if (!els.vendorColorList) return;
-  const overrides = themePresetsApi.normalizeOverrides(state.settings?.vendorColors, Object.keys(BRAND_VENDOR_COLORS));
-  els.vendorColorList.innerHTML = '';
-  for (const id of themePresetsApi.orderedVendorIds(BRAND_VENDOR_COLORS)) {
-    const row = document.createElement('label');
-    row.className = 'vendor-color-row';
-    const name = document.createElement('span');
-    name.className = 'vendor-color-name';
-    name.textContent = id === 'default' ? t('settings.appearance.vendorDefault') : themePresetsApi.vendorLabel(id);
-    const input = document.createElement('input');
-    input.type = 'color';
-    input.className = 'color-picker-input';
-    input.value = overrides[id] || BRAND_VENDOR_COLORS[id];
-    input.dataset.vendorId = id;
-    input.addEventListener('input', () => previewVendorColor(id, input.value));
-    input.addEventListener('change', () => saveVendorColor(id, input.value));
-    const reset = document.createElement('button');
-    reset.type = 'button';
-    reset.className = 'reset-appearance-button reset-inline';
-    reset.textContent = '↺';
-    reset.setAttribute('aria-label', t('settings.appearance.resetBrand'));
-    reset.addEventListener('click', () => resetVendorColor(id));
-    row.append(name, input, reset);
-    els.vendorColorList.appendChild(row);
-  }
+  const overrides = currentVendorOverrides();
+  renderAppearanceColorRows(els.vendorColorList, themePresetsApi.orderedVendorIds(BRAND_VENDOR_COLORS), {
+    rowClass: 'vendor-color-row', nameClass: 'vendor-color-name', resetLabel: 'settings.appearance.resetBrand',
+    nameFor: id => id === 'default' ? t('settings.appearance.vendorDefault') : themePresetsApi.vendorLabel(id),
+    colorFor: id => overrides[id] || BRAND_VENDOR_COLORS[id],
+    preview: previewVendorColor, save: saveVendorColor, reset: resetVendorColor
+  });
+}
+
+function queueAppearanceColorChange(write) {
+  appearanceColorPicker.close();
+  return appearanceColorPicker.enqueue(write);
 }
 
 function currentThemeOverrides() {
@@ -8930,7 +8948,7 @@ async function applyThemeCodeFromInput() {
     return;
   }
   els.themeCodeInput.value = parsed.code;
-  await commitThemeColors(parsed.colors);
+  await queueAppearanceColorChange(() => commitThemeColors(parsed.colors));
   if (themeCodeFeedbackIsCurrent(generation, parsed.code)) {
     showThemeCodeStatus('settings.appearance.themeCodeApplied', 'success');
   }
@@ -10360,8 +10378,6 @@ function syncSettingsForm() {
     els.periodMonthModeInput.value = fixedPeriodRangesApi.normalizeMonthMode(state.settings?.periodMonthMode);
   }
   if (els.currencyInput) els.currencyInput.value = currentCurrency();
-  const modelRankingMetric = usageAttributionRowsApi.normalizeRankingMetric(state.settings?.modelRankingMetric);
-  for (const input of els.modelRankingMetricInputs || []) input.checked = input.value === modelRankingMetric;
   syncCurrencyRateControls();
   syncNetworkProxyControls();
   syncHubDraftFields();
@@ -10527,6 +10543,7 @@ function disabledViewIds() {
   const ids = [];
   if (state.settings?.historyEnabled === false) ids.push('trends');
   if (state.settings?.projectsEnabled === false) ids.push('project');
+  if (!limitViewAvailable()) ids.push('limits');
   return ids;
 }
 
@@ -10596,11 +10613,7 @@ function applyPreferenceOrder(kind, order) {
     const row = rowsById.get(id);
     if (!row) continue;
     list.insertBefore(row, tail);
-    const companionId = kind === 'view'
-      ? ({ home: 'homeSettingsContainer', limits: 'limitsViewSettingsContainer', trends: 'trendSettingsContainer', project: 'projectSettingsContainer', session: 'sessionSettingsContainer', status: 'serviceProvidersContainer' })[id]
-      : kind === 'homeModule'
-        ? HOME_MODULE_SUBGROUPS[id]?.[1]
-        : '';
+    const companionId = kind === 'homeModule' ? HOME_MODULE_SUBGROUPS[id]?.[1] : '';
     const companion = companionId ? document.getElementById(companionId) : null;
     if (companion) list.appendChild(companion);
   }
@@ -10628,15 +10641,6 @@ function createPreferenceOrderHandle({ kind, id, label, count }) {
   return handle;
 }
 
-const VIEW_PREFERENCE_SUBGROUPS = {
-  limits: ['limitsViewSettingsExpanded', 'limitsViewSettingsContainer'],
-  home: ['homeSettingsExpanded', 'homeSettingsContainer'],
-  trends: ['trendSettingsExpanded', 'trendSettingsContainer'],
-  project: ['projectSettingsExpanded', 'projectSettingsContainer'],
-  session: ['sessionSettingsExpanded', 'sessionSettingsContainer'],
-  status: ['serviceProvidersExpanded', 'serviceProvidersContainer']
-};
-
 const HOME_MODULE_SUBGROUPS = {
   limits: ['homeLimitSettingsExpanded', 'homeLimitProviderContainer'],
   trends: ['homeActivitySettingsExpanded', 'homeActivitySettingsContainer'],
@@ -10660,10 +10664,14 @@ function setPreferenceSubgroupsExpanded(definitions, rowSelector, value) {
     const open = expanded.has(id);
     state[stateKey] = open;
     const row = Array.from(document.querySelectorAll(rowSelector)).find((candidate) => candidate.dataset[dataKey] === id);
-    const toggle = row?.querySelector('.view-subgroup-toggle');
+    const toggle = row?.querySelector('.view-subgroup-toggle, .home-module-disclosure');
     toggle?.classList.toggle('is-expanded', open);
     toggle?.setAttribute('aria-expanded', String(open));
-    document.getElementById(containerId)?.classList.toggle('hidden', !open);
+    const container = document.getElementById(containerId);
+    if (container) {
+      container.inert = !open;
+      container.classList.toggle('hidden', !open);
+    }
   }
 }
 
@@ -10672,10 +10680,6 @@ function togglePreferenceSubgroup(definitions, rowSelector, id) {
   if (expanded.has(id)) expanded.delete(id);
   else expanded.add(id);
   setPreferenceSubgroupsExpanded(definitions, rowSelector, Array.from(expanded).join(','));
-}
-
-function setViewPreferenceExpanded(value) {
-  setPreferenceSubgroupsExpanded(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', value);
 }
 
 function setHomeModulePreferenceExpanded(value) {
@@ -10704,6 +10708,11 @@ function createMainPreferenceRowDrag({ kind, rowSelector, idKey, settingKey, get
       // Inactive plugin placements are absent from the rendered Home rows.
       // Refill only visible slots so a drag cannot silently remove a placement.
       let merged = order;
+      // Hidden views are not rendered in the ordered list but keep their slots.
+      if (kind === 'view') {
+        const { order: savedOrder, shown } = shownViewDisplayOrder();
+        merged = settingsListFilterApi.mergeSubsetOrder(savedOrder, order.filter((id) => shown.includes(id)));
+      }
       if (kind === 'homeModule') {
         const visible = new Set(order);
         let index = 0;
@@ -10723,9 +10732,7 @@ const viewPreferenceRowDrag = createMainPreferenceRowDrag({
   kind: 'view',
   rowSelector: '.view-preference-row[data-view]',
   idKey: 'view',
-  settingKey: 'viewDisplayOrder',
-  getExpanded: () => expandedPreferenceSubgroups(VIEW_PREFERENCE_SUBGROUPS),
-  setExpanded: setViewPreferenceExpanded
+  settingKey: 'viewDisplayOrder'
 });
 
 const homeModulePreferenceRowDrag = createMainPreferenceRowDrag({
@@ -10788,216 +10795,176 @@ const limitProviderRowDrag = rowDragControllerApi.createRowDragController({
   requestRender: () => renderLimitProviderCheckboxes()
 });
 
+// Main Screen settings are a master-detail pair. The nav lists the views in
+// switcher order, with views kept out of the switcher in their own group below;
+// the inspector beside it holds the selected view's settings. The selection is
+// UI state for this visit: opening the panel starts on Home.
+const MAIN_VIEW_SETTINGS = {
+  home: renderHomeSettingsList,
+  limits: renderLimitsViewSettingsList,
+  model: renderModelViewSettingsList,
+  project: renderProjectSettingsList,
+  session: renderSessionSettingsList,
+  trends: renderTrendSettingsList,
+  status: renderServiceProviderList
+};
+
+function onMainViewVisibilityToggle(id) {
+  if (id === 'trends') return onTrendVisibilityToggle();
+  if (id === 'project') return onProjectVisibilityToggle();
+  return onViewVisibilityToggle(id);
+}
+
+function selectMainSettingsView(id) {
+  if (state.mainSettingsView !== id || state.homeLimitProvidersOpen) {
+    state.mainSettingsView = id;
+    state.homeLimitProvidersOpen = false;
+    renderViewPreferences();
+  }
+  els.settingsPanel?.querySelector(`.main-view-tab[data-view="${id}"]`)?.focus({ preventScroll: true });
+}
+
+function createMainViewRow(view, { selected, disabled, orderable, count }) {
+  const id = view.id;
+  const label = viewLabel(view);
+  const row = document.createElement('div');
+  row.className = 'view-preference-row';
+  row.dataset.view = id;
+  row.classList.toggle('is-current', selected);
+  row.classList.toggle('is-hidden', !orderable);
+  row.classList.toggle('is-disabled', disabled);
+  const tab = document.createElement('button');
+  tab.type = 'button';
+  tab.className = 'main-view-tab';
+  tab.dataset.view = id;
+  tab.setAttribute('aria-controls', 'mainViewInspector');
+  if (selected) tab.setAttribute('aria-current', 'true');
+  const name = document.createElement('span');
+  name.className = 'tool-preference-name';
+  name.textContent = label;
+  tab.append(viewSwitcherIcon(id), name);
+  tab.addEventListener('click', () => selectMainSettingsView(id));
+  row.append(tab);
+  if (orderable) {
+    row.append(createPreferenceOrderHandle({ kind: 'view', id, label, count }));
+    row.addEventListener('pointerdown', (event) => viewPreferenceRowDrag.startRowDrag(event, id));
+  } else if (id !== 'limits' || !disabled) {
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'main-view-add';
+    add.setAttribute('aria-label', t('settings.views.showView', { name: label }));
+    add.addEventListener('click', () => void onMainViewVisibilityToggle(id));
+    row.append(add);
+  }
+  return row;
+}
+
 function renderViewPreferences() {
   if (!els.viewDisplayList) return;
   // Every list under Main Screen shares this render path. A settings or stats
   // repaint during a drag is held until the controller lands or aborts.
   if (deferMainPreferenceRender()) return;
-  const hidden = hiddenViewSet();
-  const orderValue = effectiveViewDisplayOrderValue();
-  const views = viewDisplayPreferencesApi.orderedViews(VIEW_DISPLAY_OPTIONS, orderValue);
-  const hasCustomOrder = viewDisplayPreferencesApi.hasCustomViewDisplayOrder(state.settings?.viewDisplayOrder);
-  const hasHiddenViews = hidden.size > 0;
-  if (els.resetViewDisplayOrderButton) els.resetViewDisplayOrderButton.disabled = !hasCustomOrder;
-  if (els.showAllViewsButton) els.showAllViewsButton.disabled = !hasHiddenViews;
-  els.viewDisplayList.replaceChildren();
   const disabled = new Set(disabledViewIds());
-  const visibleCount = viewDisplayPreferencesApi.visibleViewCount({
-    views,
-    hiddenValue: state.settings?.hiddenViews,
-    disabledIds: [...disabled]
+  const views = viewDisplayPreferencesApi.orderedViews(VIEW_DISPLAY_OPTIONS, effectiveViewDisplayOrderValue());
+  const hasCustomOrder = viewDisplayPreferencesApi.hasCustomViewDisplayOrder(state.settings?.viewDisplayOrder);
+  if (els.resetViewDisplayOrderButton) els.resetViewDisplayOrderButton.disabled = !hasCustomOrder;
+  const shownIds = new Set(shownViewDisplayOrder().shown);
+  if (!views.some(({ id }) => id === state.mainSettingsView)) state.mainSettingsView = 'home';
+  const shown = views.filter(({ id }) => shownIds.has(id));
+  const off = views.filter(({ id }) => !shownIds.has(id));
+  const row = (view, orderable) => createMainViewRow(view, {
+    selected: view.id === state.mainSettingsView,
+    disabled: disabled.has(view.id),
+    orderable,
+    count: shown.length
   });
-  for (const view of views) {
-    const id = view.id;
-    const label = viewLabel(view);
-    const isHidden = hidden.has(id);
-    const isDisabled = disabled.has(id);
-    const isEffectivelyHidden = isHidden || isDisabled;
-    const row = document.createElement('div');
-    row.className = 'view-preference-row';
-    row.dataset.view = id;
-    row.classList.toggle('is-hidden', isEffectivelyHidden);
-    row.classList.toggle('is-disabled', isDisabled);
-    const name = document.createElement('div');
-    name.className = 'tool-preference-name';
-    name.textContent = label;
-    const visibility = document.createElement('button');
-    visibility.type = 'button';
-    visibility.className = `tool-visibility-button${isEffectivelyHidden ? ' is-hidden' : ''}`;
-    visibility.dataset.view = id;
-    visibility.setAttribute('aria-label', t(isEffectivelyHidden ? 'settings.views.showView' : 'settings.views.hideView', { name: label }));
-    visibility.setAttribute('aria-pressed', String(!isEffectivelyHidden));
-    visibility.disabled = !isEffectivelyHidden && visibleCount <= 1;
-    visibility.addEventListener('click', () => {
-      if (id === 'trends') return onTrendVisibilityToggle();
-      if (id === 'project') return onProjectVisibilityToggle();
-      return onViewVisibilityToggle(id);
-    });
-    const handle = createPreferenceOrderHandle({ kind: 'view', id, label, count: views.length });
-    const actions = document.createElement('div');
-    actions.className = 'tool-preference-actions';
-    actions.append(visibility, handle);
-    row.append(name, actions);
-    row.addEventListener('pointerdown', (event) => viewPreferenceRowDrag.startRowDrag(event, id));
-    els.viewDisplayList.appendChild(row);
-    if (id === 'limits') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.limitsViewSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('settings.views.configureLimits', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.limitsViewSettingsExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, visibility);
-
-      const listContainer = document.createElement('div');
-      listContainer.id = 'limitsViewSettingsContainer';
-      listContainer.className = `accordion-animated-container${state.limitsViewSettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderLimitsViewSettingsList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
-    if (id === 'home') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.homeSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('settings.views.configureHome', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.homeSettingsExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, visibility);
-
-      const listContainer = document.createElement('div');
-      listContainer.id = 'homeSettingsContainer';
-      listContainer.className = `accordion-animated-container${state.homeSettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderHomeSettingsList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
-    if (id === 'trends') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.trendSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('settings.views.configureTrend', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.trendSettingsExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, visibility);
-      
-      const listContainer = document.createElement('div');
-      listContainer.id = 'trendSettingsContainer';
-      listContainer.className = `accordion-animated-container${state.trendSettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderTrendSettingsList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
-    if (id === 'project') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.projectSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('settings.views.configureProject', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.projectSettingsExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, visibility);
-
-      const listContainer = document.createElement('div');
-      listContainer.id = 'projectSettingsContainer';
-      listContainer.className = `accordion-animated-container${state.projectSettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderProjectSettingsList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
-    if (id === 'session') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.sessionSettingsExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('settings.views.configureSession', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.sessionSettingsExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, visibility);
-
-      const listContainer = document.createElement('div');
-      listContainer.id = 'sessionSettingsContainer';
-      listContainer.className = `accordion-animated-container${state.sessionSettingsExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderSessionSettingsList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
-    if (id === 'status') {
-      row.classList.add('has-subgroup');
-      const toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = `view-subgroup-toggle${state.serviceProvidersExpanded ? ' is-expanded' : ''}`;
-      toggle.setAttribute('aria-label', t('serviceStatus.configureProviders', { name: label }));
-      toggle.setAttribute('aria-expanded', String(Boolean(state.serviceProvidersExpanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      toggle.append(toggleIcon);
-      toggle.addEventListener('click', () => togglePreferenceSubgroup(VIEW_PREFERENCE_SUBGROUPS, '.view-preference-row', id));
-      actions.insertBefore(toggle, actions.firstChild);
-      
-      const listContainer = document.createElement('div');
-      listContainer.id = 'serviceProvidersContainer';
-      listContainer.className = `accordion-animated-container${state.serviceProvidersExpanded ? '' : ' hidden'}`;
-      const inner = document.createElement('div');
-      inner.className = 'accordion-animation-inner';
-      inner.appendChild(renderServiceProviderList());
-      listContainer.appendChild(inner);
-      els.viewDisplayList.appendChild(listContainer);
-    }
+  // Only the switcher's own views reorder; the saved order still covers the
+  // hidden ones, so a view shown again returns to its slot.
+  const focusedView = document.activeElement?.matches('[data-preference-order-handle="view"]')
+    ? document.activeElement.closest('.view-preference-row')?.dataset.view : null;
+  els.viewDisplayList.replaceChildren(...shown.map((view) => row(view, true)));
+  els.hiddenViewList?.replaceChildren(...off.map((view) => row(view, false)));
+  if (els.hiddenViewGroup) els.hiddenViewGroup.hidden = off.length === 0;
+  const selected = views.find(({ id }) => id === state.mainSettingsView);
+  const selectedOff = !shownIds.has(selected.id);
+  renderMainViewInspector(selected, { off: selectedOff, lastVisible: !selectedOff && shown.length === 1,
+    unavailable: selected.id === 'limits' && disabled.has(selected.id) });
+  if (focusedView && document.activeElement === document.body) {
+    els.viewDisplayList.querySelector(`[data-view="${focusedView}"] .preference-order-handle`)?.focus({ preventScroll: true });
   }
 }
 
-function renderHomeLimitProviderList() {
-  const wrap = document.createElement('div');
-  wrap.id = 'homeLimitProviderList';
-  wrap.className = 'settings-nested-list home-limit-provider-list';
-  const hidden = hiddenHomeLimitProviderSet();
+function renderMainViewInspector(view, { off, lastVisible, unavailable }) {
+  const inspector = els.mainViewInspector;
+  if (!inspector) return;
+  inspector.classList.toggle('is-subpage', view.id === 'home' && Boolean(state.homeLimitProvidersOpen));
+  if (view.id === 'home' && state.homeLimitProvidersOpen) {
+    inspector.removeAttribute('aria-labelledby');
+    inspector.replaceChildren(renderHomeLimitProviderList());
+    return;
+  }
+  const header = document.createElement('div');
+  header.className = 'main-view-header';
+  const badge = document.createElement('span');
+  badge.className = 'main-view-badge';
+  badge.append(viewSwitcherIcon(view.id));
+  const heading = document.createElement('div');
+  heading.className = 'main-view-heading';
+  const title = document.createElement('strong');
+  title.id = 'mainViewInspectorTitle';
+  title.textContent = viewLabel(view);
+  heading.append(title);
+  if (off) {
+    const subtitle = document.createElement('span');
+    subtitle.className = 'main-view-subtitle';
+    subtitle.textContent = t('settings.views.hiddenGroup');
+    heading.append(subtitle);
+  }
+  header.append(badge, heading);
+  const visibility = document.createElement('label');
+  visibility.className = 'checkbox-label main-view-visibility';
+  const visibilityText = document.createElement('span');
+  visibilityText.className = 'settings-item-title';
+  visibilityText.textContent = t('settings.views.showInSwitcher');
+  const visibilityInput = document.createElement('input');
+  visibilityInput.type = 'checkbox';
+  visibilityInput.checked = !off;
+  visibilityInput.disabled = lastVisible || unavailable;
+  visibilityInput.addEventListener('change', () => void onMainViewVisibilityToggle(view.id));
+  visibility.append(visibilityText, visibilityInput);
+  inspector.setAttribute('aria-labelledby', title.id);
+  inspector.replaceChildren(header, visibility);
+  const settings = MAIN_VIEW_SETTINGS[view.id];
+  if (settings) inspector.append(settings());
+}
+
+function homeLimitProviders() {
   const enabled = enabledLimitProviderSet();
-  const providers = limitProviderOrderApi
+  return limitProviderOrderApi
     .orderedLimitProviders(desktopLimitProviders(), homeLimitProviderOrderValue())
     .filter(({ id }) => enabled.has(id));
-  const hasCustomOrder = Boolean(state.settings?.homeLimitProviderOrder);
-  const displayLabel = document.createElement('label');
-  displayLabel.className = 'settings-item';
+}
+
+function setHomeLimitProvidersOpen(open) {
+  state.homeLimitProvidersOpen = open;
+  renderViewPreferences();
+  const target = open ? '.main-view-back' : '.home-limit-providers-link';
+  els.mainViewInspector?.querySelector(target)?.focus();
+}
+
+// The Home limits module's own options. Its provider list is long enough to
+// get a page of its own inside the inspector, reached from the last row.
+function renderHomeLimitSettings() {
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-nested-list home-limit-settings';
+  const displayRow = document.createElement('label');
+  displayRow.className = 'settings-item home-limit-display-setting';
   const displayText = document.createElement('span');
   displayText.className = 'settings-item-text';
   const displayTitle = document.createElement('span');
   displayTitle.className = 'settings-item-title';
   displayTitle.textContent = t('settings.home.limitDisplayMode');
+  displayText.append(displayTitle);
   const displayInput = document.createElement('select');
   for (const mode of ['text', 'bars']) {
     const option = document.createElement('option');
@@ -11007,8 +10974,7 @@ function renderHomeLimitProviderList() {
   }
   displayInput.value = homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode);
   displayInput.addEventListener('change', () => void saveSettings({ homeLimitDisplayMode: displayInput.value }));
-  displayText.append(displayTitle);
-  displayLabel.append(displayText, displayInput);
+  displayRow.append(displayText, displayInput);
   const statusLabel = document.createElement('label');
   statusLabel.className = 'checkbox-label home-limit-status-setting';
   const statusInput = document.createElement('input');
@@ -11065,6 +11031,43 @@ function renderHomeLimitProviderList() {
     renderHomeIfVisible();
   });
   countLabel.append(countText, countInput);
+  const providers = homeLimitProviders();
+  const hidden = hiddenHomeLimitProviderSet();
+  const link = document.createElement('button');
+  link.type = 'button';
+  link.className = 'main-view-link home-limit-providers-link';
+  const linkTitle = document.createElement('span');
+  linkTitle.className = 'main-view-link-title';
+  linkTitle.textContent = t('settings.home.limitProviders');
+  const linkMeta = document.createElement('span');
+  linkMeta.className = 'main-view-link-meta';
+  linkMeta.textContent = String(providers.filter(({ id }) => !hidden.has(id)).length);
+  link.append(linkTitle, linkMeta);
+  link.addEventListener('click', () => setHomeLimitProvidersOpen(true));
+  wrap.append(displayRow, statusLabel, providerNamesLabel, countLabel, link);
+  return wrap;
+}
+
+function renderHomeLimitProviderList() {
+  const page = document.createElement('div');
+  page.className = 'main-view-subpage';
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'display-settings-back main-view-back';
+  back.textContent = t('views.home');
+  back.addEventListener('click', () => setHomeLimitProvidersOpen(false));
+  const title = document.createElement('strong');
+  title.className = 'main-view-subpage-title';
+  title.textContent = t('settings.home.limitProviders');
+  const wrap = document.createElement('div');
+  wrap.id = 'homeLimitProviderList';
+  wrap.className = 'settings-nested-list home-limit-provider-list';
+  const hidden = hiddenHomeLimitProviderSet();
+  const enabled = enabledLimitProviderSet();
+  const providers = limitProviderOrderApi
+    .orderedLimitProviders(desktopLimitProviders(), homeLimitProviderOrderValue())
+    .filter(({ id }) => enabled.has(id));
+  const hasCustomOrder = Boolean(state.settings?.homeLimitProviderOrder);
   const header = document.createElement('div');
   header.className = 'settings-note-row home-limit-provider-header';
   const note = document.createElement('p');
@@ -11079,19 +11082,9 @@ function renderHomeLimitProviderList() {
   reset.setAttribute('aria-label', t('settings.views.resetOrder'));
   reset.disabled = !hasCustomOrder;
   reset.addEventListener('click', () => void resetHomeLimitProviderOrder());
-  const showAll = document.createElement('button');
-  showAll.type = 'button';
-  showAll.className = 'tool-header-action';
-  const showAllEye = document.createElement('span');
-  showAllEye.className = 'tool-header-eye';
-  showAllEye.setAttribute('aria-hidden', 'true');
-  showAll.append(showAllEye);
-  showAll.setAttribute('aria-label', t('settings.views.showAll'));
-  showAll.disabled = providers.every(({ id }) => !hidden.has(id));
-  showAll.addEventListener('click', () => void showAllHomeLimitProviders());
-  headerActions.append(reset, showAll);
+  headerActions.append(reset);
   header.append(note, headerActions);
-  wrap.append(displayLabel, statusLabel, providerNamesLabel, countLabel, header);
+  wrap.append(header);
   for (const { id, label, settingsLabel } of providers) {
     const isHidden = hidden.has(id);
     const row = document.createElement('div');
@@ -11118,7 +11111,8 @@ function renderHomeLimitProviderList() {
     row.addEventListener('pointerdown', (event) => homeLimitProviderRowDrag.startRowDrag(event, id));
     wrap.append(row);
   }
-  return wrap;
+  page.append(back, title, wrap);
+  return page;
 }
 
 function renderHomeModuleCountSettings(id) {
@@ -11163,6 +11157,15 @@ function renderHomeModuleCountSettings(id) {
   return wrap;
 }
 
+function homeModuleSummary(id) {
+  if (id === 'limits') {
+    return t(`settings.home.limitDisplayMode.${homeModulePreferencesApi.normalizeHomeLimitDisplayMode(state.settings?.homeLimitDisplayMode)}`);
+  }
+  if (id === 'trends') return t((state.settings?.heatmapMetric || 'cost') === 'tokens' ? 'dashboard.heatmap.tokens' : 'dashboard.heatmap.cost');
+  if (HOME_MODULE_SUBGROUPS[id]) return t('settings.home.itemCountValue', { n: homeModulePreferencesApi.homeModuleCount(state.settings, id) });
+  return '';
+}
+
 function renderHomeSettingsList() {
   const wrap = document.createElement('div');
   wrap.id = 'homeSettingsList';
@@ -11173,11 +11176,9 @@ function renderHomeSettingsList() {
     .filter((id) => !homeModulePreferencesApi.isPluginModuleId(id)).join(',') !== homeModulePreferencesApi.DEFAULT_HOME_MODULE_ORDER;
   const header = document.createElement('div');
   header.className = 'settings-note-row home-settings-header';
-  const note = document.createElement('p');
-  note.className = 'settings-note home-settings-note';
-  note.textContent = t('settings.views.homeSettingsNote');
-  const headerActions = document.createElement('div');
-  headerActions.className = 'tool-header-actions';
+  const caption = document.createElement('span');
+  caption.className = 'main-view-caption';
+  caption.textContent = t('settings.home.modules');
   const reset = document.createElement('button');
   reset.type = 'button';
   reset.className = 'tool-header-action';
@@ -11185,66 +11186,59 @@ function renderHomeSettingsList() {
   reset.setAttribute('aria-label', t('settings.views.resetOrder'));
   reset.disabled = !hasCustomOrder;
   reset.addEventListener('click', () => void resetHomeModuleOrder());
-  const showAll = document.createElement('button');
-  showAll.type = 'button';
-  showAll.className = 'tool-header-action';
-  const showAllEye = document.createElement('span');
-  showAllEye.className = 'tool-header-eye';
-  showAllEye.setAttribute('aria-hidden', 'true');
-  showAll.append(showAllEye);
-  showAll.setAttribute('aria-label', t('settings.views.showAll'));
-  showAll.disabled = hidden.size === 0;
-  showAll.addEventListener('click', () => void showAllHomeModules());
-  headerActions.append(reset, showAll);
-  header.append(note, headerActions);
+  header.append(caption, reset);
   wrap.append(header);
   for (const moduleOption of modules) {
     const id = moduleOption.id;
     const label = moduleOption.label || t(moduleOption.labelKey);
     const isHidden = hidden.has(id);
+    const subgroup = HOME_MODULE_SUBGROUPS[id];
     const row = document.createElement('div');
     row.className = 'home-module-preference-row';
     row.dataset.homeModule = id;
     row.classList.toggle('is-hidden', isHidden);
-    const name = document.createElement('div');
+    const main = document.createElement(subgroup ? 'button' : 'div');
+    main.className = subgroup ? 'home-module-disclosure' : 'home-module-static';
+    const name = document.createElement('span');
     name.className = 'tool-preference-name';
     name.textContent = label;
+    main.append(name);
+    const summary = homeModuleSummary(id);
+    if (summary) {
+      const meta = document.createElement('span');
+      meta.className = 'home-module-meta';
+      meta.textContent = summary;
+      main.append(meta);
+    }
+    if (subgroup) {
+      const expanded = Boolean(state[subgroup[0]]);
+      main.type = 'button';
+      main.classList.toggle('is-expanded', expanded);
+      main.setAttribute('aria-expanded', String(expanded));
+      main.setAttribute('aria-controls', subgroup[1]);
+      main.addEventListener('click', () => togglePreferenceSubgroup(HOME_MODULE_SUBGROUPS, '.home-module-preference-row', id));
+    }
+    const handle = createPreferenceOrderHandle({ kind: 'homeModule', id, label, count: modules.length });
+    const visibility = document.createElement('input');
+    visibility.type = 'checkbox';
+    visibility.className = 'settings-switch';
+    visibility.checked = !isHidden;
+    visibility.setAttribute('aria-label', t('settings.home.showModule', { name: label }));
+    visibility.addEventListener('change', () => void onHomeModuleVisibilityToggle(id));
     const actions = document.createElement('div');
     actions.className = 'tool-preference-actions';
-    if (HOME_MODULE_SUBGROUPS[id]) {
-      const configure = document.createElement('button');
-      configure.type = 'button';
-      const expanded = state[HOME_MODULE_SUBGROUPS[id][0]];
-      configure.className = `view-subgroup-toggle${expanded ? ' is-expanded' : ''}`;
-      configure.setAttribute('aria-label', t(id === 'limits' ? 'settings.home.configureLimits'
-        : id === 'trends' ? 'settings.home.configureActivity' : 'settings.home.configureModule', { name: label }));
-      configure.setAttribute('aria-expanded', String(Boolean(expanded)));
-      const toggleIcon = document.createElement('span');
-      toggleIcon.className = 'view-subgroup-icon';
-      toggleIcon.setAttribute('aria-hidden', 'true');
-      configure.append(toggleIcon);
-      configure.addEventListener('click', () => togglePreferenceSubgroup(HOME_MODULE_SUBGROUPS, '.home-module-preference-row', id));
-      actions.append(configure);
-    }
-    const visibility = document.createElement('button');
-    visibility.type = 'button';
-    visibility.className = `tool-visibility-button${isHidden ? ' is-hidden' : ''}`;
-    visibility.setAttribute('aria-label', t(isHidden ? 'settings.home.showModule' : 'settings.home.hideModule', { name: label }));
-    visibility.setAttribute('aria-pressed', String(!isHidden));
-    visibility.addEventListener('click', () => onHomeModuleVisibilityToggle(id));
-    const handle = createPreferenceOrderHandle({ kind: 'homeModule', id, label, count: modules.length });
-    actions.append(visibility, handle);
-    row.append(name, actions);
+    actions.append(handle, visibility);
+    row.append(main, actions);
     row.addEventListener('pointerdown', (event) => homeModulePreferenceRowDrag.startRowDrag(event, id));
     wrap.append(row);
-    const subgroup = HOME_MODULE_SUBGROUPS[id];
     if (subgroup) {
       const listContainer = document.createElement('div');
       listContainer.id = subgroup[1];
       listContainer.className = `accordion-animated-container${state[subgroup[0]] ? '' : ' hidden'}`;
+      listContainer.inert = !state[subgroup[0]];
       const inner = document.createElement('div');
       inner.className = 'accordion-animation-inner';
-      inner.appendChild(id === 'limits' ? renderHomeLimitProviderList()
+      inner.appendChild(id === 'limits' ? renderHomeLimitSettings()
         : id === 'trends' ? renderHomeActivitySettings() : renderHomeModuleCountSettings(id));
       listContainer.appendChild(inner);
       wrap.append(listContainer);
@@ -11369,6 +11363,43 @@ function renderLimitsViewSettingsList() {
   });
   row.append(text, input);
   wrap.appendChild(row);
+  return wrap;
+}
+
+function renderModelViewSettingsList() {
+  const wrap = document.createElement('div');
+  wrap.className = 'settings-nested-list';
+  const row = document.createElement('div');
+  row.className = 'settings-item';
+  const label = document.createElement('span');
+  label.id = 'modelRankingMetricLabel';
+  label.className = 'settings-item-text settings-item-title';
+  label.textContent = t('settings.modelRanking.label');
+  const options = document.createElement('div');
+  options.className = 'inline-options';
+  options.setAttribute('role', 'radiogroup');
+  options.setAttribute('aria-labelledby', label.id);
+  const metric = usageAttributionRowsApi.normalizeRankingMetric(state.settings?.modelRankingMetric);
+  for (const value of ['tokens', 'cost']) {
+    const option = document.createElement('label');
+    option.className = 'inline-option';
+    const input = document.createElement('input');
+    input.type = 'radio';
+    input.name = 'modelRankingMetric';
+    input.value = value;
+    input.checked = value === metric;
+    input.addEventListener('change', async () => {
+      if (!input.checked) return;
+      await saveSettings({ modelRankingMetric: value });
+      render();
+    });
+    const text = document.createElement('span');
+    text.textContent = t(`settings.modelRanking.${value}`);
+    option.append(input, text);
+    options.append(option);
+  }
+  row.append(label, options);
+  wrap.append(row);
   return wrap;
 }
 
@@ -11547,17 +11578,7 @@ function renderServiceProviderList() {
   reset.setAttribute('aria-label', t('settings.views.resetOrder'));
   reset.disabled = !hasCustomOrder;
   reset.addEventListener('click', () => void resetServiceProviderOrder());
-  const showAll = document.createElement('button');
-  showAll.type = 'button';
-  showAll.className = 'tool-header-action';
-  const showAllEye = document.createElement('span');
-  showAllEye.className = 'tool-header-eye';
-  showAllEye.setAttribute('aria-hidden', 'true');
-  showAll.append(showAllEye);
-  showAll.setAttribute('aria-label', t('settings.views.showAll'));
-  showAll.disabled = hidden.size === 0;
-  showAll.addEventListener('click', () => void showAllServiceProviders());
-  headerActions.append(reset, showAll);
+  headerActions.append(reset);
   header.append(note, headerActions);
   wrap.append(header);
   const SERVICE_STATUS_REFRESH_OPTIONS = [0, 60000, 120000, 300000, 900000, 1800000];
@@ -12647,9 +12668,7 @@ function renderToolPreferencesNow() {
   const filtering = Boolean(toolPreferenceQuery());
   const hasCustomOrder = clientDisplayPreferencesApi.hasCustomDisplayOrder(state.settings?.clientDisplayOrder);
   const hasPinnedClients = pinned.size > 0;
-  const hasHiddenClients = hidden.size > 0;
   if (els.resetClientDisplayOrderButton) els.resetClientDisplayOrderButton.disabled = !hasCustomOrder && !hasPinnedClients;
-  if (els.showAllClientsButton) els.showAllClientsButton.disabled = !hasHiddenClients;
   const qoderTrackingState = qoderDisplayApi.trackingState(pendingTrackedClients());
   const isTracked = clientRowTracked;
   const motion = takeSettingsListMotion('client', isTracked)
@@ -13718,8 +13737,13 @@ async function onLimitProviderToggle() {
     // collection work.
   } finally {
     if (state.pendingLimitProviderSelection?.revision === revision) {
+      const wasLimitsAvailable = limitViewAvailable();
       state.pendingLimitProviderSelection = null;
       renderLimitProviderCheckboxes();
+      if (wasLimitsAvailable !== limitViewAvailable()) {
+        renderViewPreferences();
+        renderSettingsSummaries();
+      }
     }
   }
 }
@@ -13753,17 +13777,33 @@ async function onLimitProviderReorder(providerId, targetIndex) {
   await saveSettings({ limitProviderOrder: limitProviderOrderWithEnabled(order) });
 }
 
+// Settings reorder only the views in the switcher; hidden ones keep their slots.
+function shownViewDisplayOrder() {
+  const orderValue = effectiveViewDisplayOrderValue();
+  const order = viewDisplayPreferencesApi.normalizeViewDisplayOrder(orderValue, VIEW_DISPLAY_OPTIONS);
+  const disabled = new Set(disabledViewIds());
+  const shown = viewDisplayPreferencesApi.visibleViewOrder({
+    views: VIEW_DISPLAY_OPTIONS,
+    orderValue,
+    hiddenValue: state.settings?.hiddenViews,
+    availableIds: order.filter((id) => !disabled.has(id))
+  });
+  return { order, shown };
+}
+
 async function onViewDisplayMove(viewId, direction) {
-  const next = viewDisplayPreferencesApi.moveViewDisplayOrder(effectiveViewDisplayOrderValue(), VIEW_DISPLAY_OPTIONS, viewId, direction);
-  await saveSettings({ viewDisplayOrder: next });
+  const { shown } = shownViewDisplayOrder();
+  await onViewDisplayReorder(viewId, shown.indexOf(viewId) + (direction === 'up' ? -1 : 1));
 }
 
 async function onViewDisplayReorder(viewId, targetIndex) {
-  const orderValue = effectiveViewDisplayOrderValue();
-  const current = viewDisplayPreferencesApi.normalizeViewDisplayOrder(orderValue, VIEW_DISPLAY_OPTIONS).join(',');
-  const next = viewDisplayPreferencesApi.reorderViewDisplayOrder(orderValue, VIEW_DISPLAY_OPTIONS, viewId, targetIndex);
-  if (next === current) return;
-  await saveSettings({ viewDisplayOrder: next });
+  const { order, shown } = shownViewDisplayOrder();
+  const from = shown.indexOf(viewId);
+  const target = Math.max(0, Math.min(shown.length - 1, targetIndex));
+  if (from < 0 || target === from) return;
+  shown.splice(from, 1);
+  shown.splice(target, 0, viewId);
+  await saveSettings({ viewDisplayOrder: settingsListFilterApi.mergeSubsetOrder(order, shown).join(',') });
 }
 
 async function onHomeModuleVisibilityToggle(moduleId) {
@@ -13793,11 +13833,6 @@ async function resetHomeModuleOrder() {
   const pluginModules = homeModulePreferencesApi.normalizeHomeModuleOrder(state.settings?.homeModuleOrder, HOME_MODULE_OPTIONS)
     .filter((id) => homeModulePreferencesApi.isPluginModuleId(id));
   await saveSettings({ homeModuleOrder: [homeModulePreferencesApi.DEFAULT_HOME_MODULE_ORDER, ...pluginModules].join(',') });
-  renderHomeIfVisible();
-}
-
-async function showAllHomeModules() {
-  await saveSettings({ hiddenHomeModules: '' });
   renderHomeIfVisible();
 }
 
@@ -13853,19 +13888,8 @@ async function resetHomeLimitProviderOrder() {
   renderHomeIfVisible();
 }
 
-async function showAllHomeLimitProviders() {
-  await saveSettings({ hiddenHomeLimitProviders: '' });
-  renderHomeIfVisible();
-}
-
 async function resetServiceProviderOrder() {
   await saveSettings({ serviceProviderDisplayOrder: '' });
-}
-
-async function showAllServiceProviders() {
-  const showing = hiddenServiceProviderSet().size > 0;
-  await saveSettings({ hiddenServiceProviders: '' });
-  if (showing) await refreshServiceStatus({ force: true });
 }
 
 async function onPreferenceReorder(kind, id, targetIndex) {
@@ -13917,16 +13941,8 @@ async function resetClientDisplayOrder() {
   await saveSettings({ clientDisplayOrder: '', pinnedClients: '' });
 }
 
-async function showAllClients() {
-  await saveSettings({ hiddenClients: '' });
-}
-
 async function resetViewDisplayOrder() {
   await saveSettings({ viewDisplayOrder: '' });
-}
-
-async function showAllViews() {
-  await saveSettings({ hiddenViews: '' });
 }
 
 function preserveSettingsPanelScroll(callback) {
@@ -14248,7 +14264,7 @@ pluginSettingsPanel = pluginApi && window.TokenMonitorPluginSettings
     onOpenExternal: (url) => window.tokenMonitor.openExternal(url),
     onCopyText: (text) => window.tokenMonitor.copyText(text),
     setDetailTooltip: limitWindowsView.setDetailTooltip,
-    onApplySkin: (skin) => applyPluginSkin(skin),
+    onApplySkin: (skin) => queueAppearanceColorChange(() => applyPluginSkin(skin)),
     onPlaced: () => renderSettingsSummaries(),
     getEnabled: () => state.settings.pluginsEnabled !== false,
     onSetEnabled: async (enabled) => {
@@ -14301,10 +14317,16 @@ async function applyAppearancePluginSkin(skin, chip) {
   if (container.getAttribute('aria-busy') === 'true') return;
   container.querySelector('.plugin-action-error')?.remove();
   for (const control of container.querySelectorAll('button')) control.removeAttribute('aria-describedby');
-  const skinKey = JSON.stringify(skin), settingsRevision = state.settingsPushRevision;
+  const skinKey = JSON.stringify(skin);
+  let settingsRevision;
   const restoreFocus = document.activeElement === chip;
   container.setAttribute('aria-busy', 'true');
-  try { await applyPluginSkin(skin); }
+  try {
+    await queueAppearanceColorChange(() => {
+      settingsRevision = state.settingsPushRevision;
+      return applyPluginSkin(skin);
+    });
+  }
   catch (error) {
     // saveSettings refreshes the form before rethrowing. Reattach to the same
     // skin after that refresh, but discard failures from superseded settings.
@@ -14595,10 +14617,12 @@ els.settingsButton.addEventListener('click', (event) => {
   // caught up when it opens, because its renderers idle while it is closed.
   if (settingsOpen) {
     hideHomeTrendTooltip();
+    resetMainViewSettings();
     syncSettingsForm();
   } else {
     syncModeSelect?.close();
     syncContentForm?.closeHelp();
+    appearanceColorPicker.close();
     resetSettingsListSearch();
     stopWindowShortcutRecording();
   }
@@ -14759,14 +14783,6 @@ els.languageInput?.addEventListener('change', async () => {
 els.currencyInput?.addEventListener('change', async () => {
   await saveSettings({ currency: els.currencyInput.value });
 });
-
-for (const input of els.modelRankingMetricInputs || []) {
-  input.addEventListener('change', async () => {
-    if (!input.checked) return;
-    await saveSettings({ modelRankingMetric: usageAttributionRowsApi.normalizeRankingMetric(input.value) });
-    render();
-  });
-}
 
 els.currencyRateModeAuto?.addEventListener('change', async () => {
   if (!els.currencyRateModeAuto.checked) return;
@@ -14970,7 +14986,6 @@ els.exportNowButton?.addEventListener('click', async () => {
   }
 });
 els.resetClientDisplayOrderButton?.addEventListener('click', resetClientDisplayOrder);
-els.showAllClientsButton?.addEventListener('click', showAllClients);
 
 // Escape clears the field rather than closing the settings panel: while a
 // filter is on, that is what the key is expected to undo.
@@ -15001,7 +15016,6 @@ bindSettingsListSearch(els.limitProviderSearchInput, (value) => {
   renderLimitProviderCheckboxes();
 });
 els.resetViewDisplayOrderButton?.addEventListener('click', resetViewDisplayOrder);
-els.showAllViewsButton?.addEventListener('click', showAllViews);
 els.resetGlassButton.addEventListener('click', async () => {
   els.glassInput.value = String(defaultAppearance.glassOpacity);
   applyAppearanceFromControls();
@@ -15034,8 +15048,8 @@ els.zoomInput.addEventListener('input', applyAppearanceFromControls);
 els.chooseBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(); });
 els.clearBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(true); });
 void loadBackgroundImage();
-els.resetThemeColorsButton?.addEventListener('click', () => commitThemeColors({}, true));
-els.resetVendorColorsButton?.addEventListener('click', () => commitVendorColors({}));
+els.resetThemeColorsButton?.addEventListener('click', () => queueAppearanceColorChange(() => commitThemeColors({}, true)));
+els.resetVendorColorsButton?.addEventListener('click', () => queueAppearanceColorChange(() => commitVendorColors({})));
 els.textSizeInput?.addEventListener('change', async () => {
   await saveSettings({ textSize: fontSettingsApi.normalizeTextSize(els.textSizeInput.value) });
 });
@@ -15074,8 +15088,12 @@ function setupSettingsAccordion(group, toggle, details, onExpandedChange) {
 
 setupSettingsAccordion(els.appUpdateNotes, els.appUpdateNotesToggle, els.appUpdateNotesDetails);
 setupSettingsAccordion(els.advancedSettingsGroup, els.advancedSettingsToggle, els.advancedSettingsDetails);
-setupSettingsAccordion(els.themeAdvancedGroup, els.themeAdvancedToggle, els.themeAdvancedDetails);
-setupSettingsAccordion(els.themeVendorGroup, els.themeVendorToggle, els.themeVendorDetails);
+function closeAppearanceColorPickerOnCollapse(expanded) {
+  if (!expanded) appearanceColorPicker.close();
+}
+setupSettingsAccordion(els.themeAdvancedGroup, els.themeAdvancedToggle, els.themeAdvancedDetails, closeAppearanceColorPickerOnCollapse);
+setupSettingsAccordion(els.themeVendorGroup, els.themeVendorToggle, els.themeVendorDetails, closeAppearanceColorPickerOnCollapse);
+setupSettingsAccordion(els.appearanceLegacyGroup, els.appearanceLegacyToggle, els.appearanceLegacyDetails);
 setupSettingsAccordion(els.edgeDockMoreOptionsGroup, els.edgeDockMoreOptionsToggle, els.edgeDockMoreOptionsDetails);
 setupSettingsAccordion(els.notchMoreOptionsGroup, els.notchMoreOptionsToggle, els.notchMoreOptionsDetails);
 for (const input of els.systemGlassInputs || []) {
@@ -17601,6 +17619,13 @@ function setupModelAliasesUI() {
   if (!toggle) return;
   toggle.addEventListener('click', () => setAccountGroupExpanded('modelAliases', !state.modelAliasesExpanded, 'modelAliasesExpanded'));
   setAccountGroupExpanded('modelAliases', false, 'modelAliasesExpanded');
+  window.TokenMonitorHelpPopover.createHelpPopover({
+    trigger: document.getElementById('modelAliasGroupingHelpButton'),
+    popover: document.getElementById('modelAliasGroupingHelp'),
+    document,
+    align: 'center',
+    preferAbove: true
+  });
   modelAliasForm = window.TokenMonitorModelAliasForm.createModelAliasForm({
     document, t: (key, params) => t(key === 'settings.modelAliases.saveError' && modelAliasSaveConflict ? 'settings.sync.content.conflict' : key, params),
     getAliases: () => state.settings?.modelAliases || {},
@@ -17629,21 +17654,24 @@ function setupModelAliasesUI() {
   }
 }
 
+let customPricingRowsKey;
+let customPricingDisclosure;
+
 function customPricingMeta(ov) {
   const parts = [];
-  if (typeof ov.cacheReadPerM === 'number') parts.push(`${t('settings.customPricing.cacheRead')} $${ov.cacheReadPerM}`);
-  if (typeof ov.inputPerM === 'number') parts.push(`${t('settings.customPricing.input')} $${ov.inputPerM}`);
+  if (typeof ov.inputPerM === 'number') parts.push(`${t('settings.customPricing.summaryInput')} $${ov.inputPerM}`);
   if (typeof ov.outputPerM === 'number') parts.push(`${t('settings.customPricing.output')} $${ov.outputPerM}`);
+  if (typeof ov.cacheReadPerM === 'number') parts.push(`${t('settings.customPricing.summaryCacheRead')} $${ov.cacheReadPerM}`);
   if (typeof ov.cacheWritePerM === 'number') parts.push(`${t('settings.customPricing.cacheWrite')} $${ov.cacheWritePerM}`);
   if (typeof ov.cacheWrite1hPerM === 'number') parts.push(`${t('settings.customPricing.cacheWrite1h')} $${ov.cacheWrite1hPerM}`);
-  return parts.length ? `${parts.join(' · ')} / 1M` : '';
+  return parts.join(' · ');
 }
 
 function renderCustomPricing() {
   if (!isSettingsSurfaceVisible()) return;
   const listEl = document.getElementById('customPricingList');
   const statusEl = document.getElementById('customPricingStatus');
-  if (!listEl) return;
+  if (!listEl || !customPricingDisclosure) return;
   const overrides = state.settings?.customModelPricing || [];
   const pricingBase = syncContentForm?.base();
   if (statusEl) {
@@ -17651,39 +17679,52 @@ function renderCustomPricing() {
       ? t('settings.customPricing.count', { count: overrides.length })
       : t('settings.customPricing.none');
   }
+  const editLabel = t('settings.common.edit');
+  const removeLabel = t('settings.customPricing.remove');
+  const emptyLabel = t('settings.customPricing.empty');
+  const rows = overrides.map(override => ({ override, meta: customPricingMeta(override) }));
+  const rowsKey = JSON.stringify([rows, pricingBase?.identity, pricingBase?.revisions?.customPricing,
+    editLabel, removeLabel, emptyLabel, t('settings.collection.modelActions')]);
+  if (rowsKey === customPricingRowsKey) return;
+  customPricingRowsKey = rowsKey;
   listEl.replaceChildren();
+  customPricingDisclosure.resetRows();
   if (overrides.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'settings-note';
-    empty.textContent = t('settings.customPricing.empty');
+    empty.textContent = emptyLabel;
     listEl.append(empty);
     return;
   }
-  for (const ov of overrides) {
+  for (const { override: ov, meta: summary } of rows) {
     const row = document.createElement('div');
     row.className = 'managed-account-row custom-pricing-row';
     const main = document.createElement('button');
     main.type = 'button';
     main.className = 'managed-account-main custom-pricing-edit';
-    main.setAttribute('aria-description', t('settings.customPricing.edit'));
-    main.addEventListener('click', () => { if (openCustomPricingForm) openCustomPricingForm(ov); });
+    main.setAttribute('aria-description', editLabel);
+    customPricingDisclosure.trackRow(ov.modelId, main);
+    const openEditor = () => openCustomPricingForm?.(ov);
+    main.addEventListener('click', openEditor);
     const name = document.createElement('div');
     name.className = 'managed-account-email';
     name.textContent = ov.modelId;
     const meta = document.createElement('div');
     meta.className = 'managed-account-meta';
-    meta.textContent = customPricingMeta(ov);
+    meta.textContent = summary;
     main.append(name, meta);
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.className = 'managed-account-remove custom-pricing-remove';
-    remove.textContent = t('settings.customPricing.remove');
-    remove.addEventListener('click', async () => {
-      const next = customPricingFormApi.removeOverride(overrides, ov.modelId);
-      try { await saveSettings({ customModelPricing: next }, pricingBase); } catch (_) { return; }
-      renderCustomPricing();
+    const menu = window.TokenMonitorModelAliasForm.createModelSettingsMenu(document, {
+      label: t('settings.collection.modelActions', { model: ov.modelId }),
+      editLabel,
+      removeLabel,
+      edit: openEditor,
+      remove: async () => {
+        const next = customPricingFormApi.removeOverride(overrides, ov.modelId);
+        try { await saveSettings({ customModelPricing: next }, pricingBase); } catch (_) { return; }
+        renderCustomPricing();
+      }
     });
-    row.append(main, remove);
+    row.append(main, menu);
     listEl.append(row);
   }
 }
@@ -17696,6 +17737,7 @@ function setupCustomPricingUI() {
 
   const form = document.getElementById('customPricingForm');
   const addButton = document.getElementById('customPricingAddButton');
+  customPricingDisclosure = window.TokenMonitorModelAliasForm.createModelEditorDisclosure(form, addButton);
   const select = document.getElementById('customPricingModelSelect');
   const manualInput = document.getElementById('customPricingModelInput');
   const inputEl = document.getElementById('customPricingInput');
@@ -17705,7 +17747,13 @@ function setupCustomPricingUI() {
   const cacheWrite1hEl = document.getElementById('customPricingCacheWrite1h');
   const advanced = document.getElementById('customPricingAdvanced');
   const advancedSummary = document.getElementById('customPricingAdvancedSummary');
-  const help = document.getElementById('customPricingHelp');
+  const help = window.TokenMonitorHelpPopover.createHelpPopover({
+    trigger: document.getElementById('customPricingHelpButton'),
+    popover: document.getElementById('customPricingHelp'),
+    document,
+    align: 'center',
+    preferAbove: true
+  });
   const rateFields = [
     [inputEl, 'inputPerM'], [outputEl, 'outputPerM'], [cacheReadEl, 'cacheReadPerM'],
     [cacheWriteEl, 'cacheWritePerM'], [cacheWrite1hEl, 'cacheWrite1hPerM']
@@ -17727,7 +17775,7 @@ function setupCustomPricingUI() {
     lookupRevision += 1;
     editedFields.clear();
     advanced.open = false;
-    if (help.matches(':popover-open')) help.hidePopover();
+    help.close();
     for (const [el] of rateFields) el.value = '';
     updateAdvancedSummary();
     manualInput.value = ''; manualInput.classList.add('hidden');
@@ -17758,12 +17806,13 @@ function setupCustomPricingUI() {
   };
 
   const closeForm = () => {
-    form.classList.add('hidden');
-    addButton.classList.remove('hidden');
-    resetForm();
+    // Keep the fields in place while the form collapses.
+    lookupRevision += 1;
+    help.close();
+    customPricingDisclosure.setOpen(false);
   };
   openCustomPricingForm = (prefill) => {
-    pricingEdit = { base: syncContentForm?.base(), entries: structuredClone(state.settings?.customModelPricing || []) };
+    pricingEdit = { adding: !prefill, base: syncContentForm?.base(), entries: structuredClone(state.settings?.customModelPricing || []) };
     resetForm();
     populateModels();
     if (prefill && prefill.modelId) {
@@ -17780,12 +17829,22 @@ function setupCustomPricingUI() {
         updateApproximation(el);
       }
       advanced.open = cacheWriteEl.value !== '' || cacheWrite1hEl.value !== '';
+    } else {
+      select.value = '';
     }
-    form.classList.remove('hidden');
-    addButton.classList.add('hidden');
+    const title = document.getElementById('customPricingFormTitle');
+    const titleKey = prefill ? 'settings.customPricing.edit' : 'settings.customPricing.add';
+    title.setAttribute('data-i18n', titleKey);
+    title.textContent = t(titleKey);
+    customPricingDisclosure.setOpen(true, prefill?.modelId);
+    accountShellApi.focusDisclosureControl(form, select.value === '__manual__' ? manualInput : select);
   };
 
-  addButton.addEventListener('click', () => openCustomPricingForm());
+  addButton.addEventListener('click', () => {
+    if (saveButton.disabled) return;
+    if (pricingEdit?.adding && !form.classList.contains('hidden')) closeForm();
+    else openCustomPricingForm();
+  });
   cancelButton.addEventListener('click', closeForm);
 
   select.addEventListener('change', async () => {
@@ -17919,7 +17978,8 @@ const displaySettingsPreview = window.TokenMonitorDisplaySettingsPreview.create(
 displaySettings = window.TokenMonitorDisplaySettings.create({
   document, root: document.getElementById('windowSettingsDetails').querySelector('.settings-section-details-inner'),
   scrollPanel: els.settingsPanel, t, platform: () => state.appInfo?.platform, settings: () => state.settings,
-  preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction
+  preview: displaySettingsPreview.show, cancelScroll: cancelSettingsScrollAnchorOnInteraction,
+  stopWindowShortcutRecording
 });
 let legacyAccountOwners;
 function createLegacyAccountOwners() {
