@@ -1858,6 +1858,8 @@ button.settings-help-trigger::before { content: ''; position: absolute; width: 1
 button.settings-help-trigger:hover { background: transparent; color: var(--text); }
 button.settings-help-trigger:hover::before { opacity: 1; }
 button.settings-help-trigger:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.settings-model-controls .settings-help-trigger { font-size: 7px; }
+.settings-model-controls .settings-help-trigger::before { box-sizing: border-box; width: 10px; height: 10px; }
 .settings-help-popover { position: fixed; inset: auto; margin: 0; width: min(280px, calc(100vw - 16px)); padding: 12px; font-size: 0.625rem; line-height: 1.6; }
 .settings-help-popover > strong { display: block; font-size: 0.75rem; font-weight: 600; line-height: 1.4; }
 .settings-help-popover dl { margin: 12px 0 0; }
@@ -8323,8 +8325,7 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 .cursor-account-group .custom-pricing-advanced[open] > summary .cursor-disclosure-icon { transform: rotate(180deg); }
 .custom-pricing-advanced-body { display: grid; gap: 8px; padding-top: 8px; }
 .custom-pricing-list-heading { margin-bottom: 6px; }
-.settings-help-popover.model-settings-help { padding: 8px 10px; }
-.custom-pricing-help-content { display: grid; gap: 4px; margin-top: 4px; }
+.custom-pricing-help-content { display: grid; gap: 6px; margin-top: 6px; }
 
 .custom-pricing-approx {
   color: var(--muted);
