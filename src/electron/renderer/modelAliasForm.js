@@ -158,7 +158,7 @@
       el('FormTitle').setAttribute('data-i18n', titleKey);
       el('FormTitle').textContent = t(titleKey);
       accountShell.setDisclosureBody(addButton, form, true);
-      addButton.setAttribute('aria-expanded', String(!editingAlias));
+      addButton.setAttribute('aria-expanded', 'true');
       error('');
       accountShell.focusDisclosureControl(form, aliasPicker.activeControl());
     };

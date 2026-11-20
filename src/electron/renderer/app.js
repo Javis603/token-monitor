@@ -17834,7 +17834,7 @@ function setupCustomPricingUI() {
     title.setAttribute('data-i18n', titleKey);
     title.textContent = t(titleKey);
     accountShellApi.setDisclosureBody(addButton, form, true);
-    addButton.setAttribute('aria-expanded', String(pricingEdit.adding));
+    addButton.setAttribute('aria-expanded', 'true');
     accountShellApi.focusDisclosureControl(form, select.value === '__manual__' ? manualInput : select);
   };
 

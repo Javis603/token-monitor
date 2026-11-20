@@ -77,6 +77,7 @@ test('alias editor adds, edits and removes a persisted mapping', async () => {
   assert.equal(f.get('Form').inert, true);
   assert.equal(f.get('AddButton')['aria-expanded'], 'false');
   row.children[0].click();
+  assert.equal(f.get('AddButton')['aria-expanded'], 'true');
   f.manual('Canonical', 'opus');
   await f.get('SaveButton').click();
   assert.deepEqual(f.aliases(), { 'anthropic/claude-opus-5': 'opus' });
