@@ -263,6 +263,9 @@ test('probe caches Cursor identity while refreshing legacy request usage', async
 
   calls.length = 0;
   now = 60 * 60_000;
+  await probe('different-token', deps);
+  assert.equal(deps.providerRuntimeState.get('cursor-user-info').size, 1);
+  calls.length = 0;
   await probe('tok', deps);
   assert.ok(calls.some(call => call.path === '/api/auth/me'));
 

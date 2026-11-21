@@ -13,6 +13,7 @@ const PLAN_INFO_URL = 'https://cursor.com/api/dashboard/get-plan-info';
 const PREPAID_BILLING_URL = 'https://cursor.com/api/dashboard/get-user-prepaid-billing';
 const CURRENT_PERIOD_USAGE_URL = 'https://api2.cursor.sh/aiserver.v1.DashboardService/GetCurrentPeriodUsage';
 const SAND_TIMEOUT_MS = 5000;
+const USER_INFO_CACHE_KEY = 'cursor-user-info';
 const USER_INFO_TTL_MS = 60 * 60_000;
 
 const DEFAULT_HEADERS = {
@@ -337,11 +338,21 @@ function requestJson(url, sessionToken, {
 async function probe(sessionToken, opts = {}) {
   if (!sessionToken) return { ok: false, error: { kind: 'unauthorized', message: 'no session token' } };
   const configuredTimeoutMs = Number.isFinite(opts.timeoutMs) ? opts.timeoutMs : 15000;
-  const cache = opts.providerRuntimeState;
-  const cacheKey = cache && `cursor-user-info:${hashKey(sessionToken)}`;
+  const state = opts.providerRuntimeState;
+  let cache = state?.get(USER_INFO_CACHE_KEY);
+  if (state && !cache) {
+    cache = new Map();
+    state.set(USER_INFO_CACHE_KEY, cache);
+  }
+  const cacheKey = cache && hashKey(sessionToken);
   const nowMs = () => Number((opts.now || Date.now)());
-  const cached = cache?.get(cacheKey);
-  const cachedUser = cached && cached.expiresAt > nowMs() ? cached.user : null;
+  if (cache) {
+    const now = nowMs();
+    for (const [key, entry] of cache) {
+      if (entry.expiresAt <= now) cache.delete(key);
+    }
+  }
+  const cachedUser = cache?.get(cacheKey)?.user;
   // Grok Bot and plan info are best effort: neither may fail the account row.
   const grokBotResultPromise = dashboardRpc(SAND_USAGE_URL, sessionToken, opts, configuredTimeoutMs);
   const planInfoResultPromise = dashboardRpc(PLAN_INFO_URL, sessionToken, opts, configuredTimeoutMs);
