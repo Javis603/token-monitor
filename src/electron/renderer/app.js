@@ -515,6 +515,11 @@ Object.assign(els, {
   hubPortInput: document.getElementById('hubPortInput'),
   hubSecretInput: document.getElementById('hubSecretInput'),
   hubSecretCopyButton: document.getElementById('hubSecretCopyButton'),
+  hubPairingDialog: document.getElementById('hubPairingDialog'),
+  hubPairingAddress: document.getElementById('hubPairingAddress'),
+  hubPairingQr: document.getElementById('hubPairingQr'),
+  hubPairingHelp: document.getElementById('hubPairingHelp'),
+  hubPairingError: document.getElementById('hubPairingError'),
   hubSecretRegenButton: document.getElementById('hubSecretRegenButton'),
   secretPasteButton: document.getElementById('secretPasteButton'),
   hubStatusRow: document.getElementById('hubStatusRow'),
@@ -6476,6 +6481,7 @@ function openViewFromTray(viewId) {
   syncContentForm?.closeHelp();
   appearanceColorPicker.close();
   els.settingsPanel?.classList.add('hidden');
+  els.hubPairingDialog?.close();
   els.shell.classList.remove('settings-open');
   syncPluginLimitsDemand();
   state.openSession = null;
@@ -9721,6 +9727,7 @@ function renderHubStatus() {
   renderIcloudStatus();
   if (!els.hubStatusRow || !els.hubAddressList) return;
   const info = state.hubInfo;
+  if (!info?.listening || info.error || state.settings.hubMode !== 'host') els.hubPairingDialog?.close();
   const port = Number(state.settings.hubHostPort || 17321);
   if (!info) {
     els.hubStatusRow.textContent = t('settings.sync.starting');
@@ -10078,9 +10085,47 @@ function renderHubAddresses(addresses, port) {
     copy.textContent = '⧉';
     copy.addEventListener('click', () => copyToClipboard(url, copy));
     row.append(code, ifaceLabel, copy);
+    const [network, subnet] = addr.address.split('.').map(Number);
+    const supported = network === 10 || (network === 192 && subnet === 168)
+      || (network === 172 && subnet >= 16 && subnet <= 31)
+      || (network === 100 && subnet >= 64 && subnet <= 127);
+    if (supported && els.hubSecretInput?.value && els.hubPairingDialog) {
+      const pair = document.createElement('button');
+      pair.type = 'button';
+      pair.className = 'hub-pairing-button';
+      pair.textContent = t('settings.sync.pairPhone');
+      pair.setAttribute('aria-label', t('settings.sync.pairPhoneAt', { url }));
+      pair.addEventListener('click', () => showHubPairingQr(url, pair));
+      row.append(pair);
+    }
     els.hubAddressList.appendChild(row);
   }
 }
+
+async function showHubPairingQr(url, trigger) {
+  const { hubPairingDialog: dialog, hubPairingAddress: address, hubPairingQr: canvas,
+    hubPairingHelp: help, hubPairingError: error } = els;
+  try {
+    const { drawHubPairingQr } = await import('./hubPairingQr.mjs');
+    if (!trigger.isConnected || dialog.open || !isSettingsSurfaceVisible()) return;
+    address.textContent = url;
+    drawHubPairingQr(canvas, url, els.hubSecretInput.value);
+    canvas.hidden = help.hidden = false;
+    error.hidden = true;
+  } catch (_) {
+    if (!trigger.isConnected || dialog.open || !isSettingsSurfaceVisible()) return;
+    address.textContent = url;
+    canvas.hidden = help.hidden = true;
+    error.hidden = false;
+  }
+  dialog.showModal();
+}
+
+els.hubPairingDialog?.addEventListener('close', () => {
+  if (els.hubPairingDialog.open) return;
+  els.hubPairingQr.width = 0;
+  els.hubPairingAddress.textContent = '';
+});
 
 async function copyToClipboard(text, button) {
   try {
@@ -14721,6 +14766,7 @@ initFooterActionDisclosure();
 els.settingsButton.addEventListener('click', (event) => {
   if (state.viewSwitcherOpen) setViewSwitcherOpen(false);
   els.settingsPanel.classList.toggle('hidden');
+  if (!isSettingsPanelOpen()) els.hubPairingDialog?.close();
   const settingsOpen = isSettingsPanelOpen();
   // Settings is an overlay over a surface that keeps rendering behind it, so
   // closing it needs no catch-up repaint. Only the panel's own DOM has to be
@@ -14931,6 +14977,7 @@ els.hubSecretCopyButton?.addEventListener('click', () => {
 els.hubSecretRegenButton?.addEventListener('click', async () => {
   if (!window.tokenMonitor.regenerateHubSecret) return;
   const info = await window.tokenMonitor.regenerateHubSecret();
+  els.hubPairingDialog?.close();
   state.hubInfo = info;
   state.settings = { ...state.settings, hubHostSecret: info.secret };
   els.hubSecretInput.value = info.secret;
@@ -15884,6 +15931,7 @@ window.tokenMonitor.onHubPush?.((payload) => {
   // value back into state + input — otherwise the Shared Secret field stays
   // blank and other devices can't pair until the user clicks Regenerate.
   if (payload.info.secret && payload.info.secret !== state.settings?.hubHostSecret) {
+    els.hubPairingDialog?.close();
     state.settings = { ...state.settings, hubHostSecret: payload.info.secret };
     if (settingsVisible && els.hubSecretInput && state.settings.hubMode === 'host') {
       els.hubSecretInput.value = payload.info.secret;

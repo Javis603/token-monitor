@@ -2081,6 +2081,8 @@ span.settings-note.settings-item-desc {
 }
 .hub-address-iface { color: var(--muted); font-size: 0.59375rem; flex: 0 0 auto; }
 .hub-address-row .icon-button { width: 26px; height: 26px; flex: 0 0 auto; font-size: 12px; }
+.hub-address-row .hub-pairing-button { flex: 0 0 auto; min-height: 26px; padding: 3px 7px; font-size: 0.625rem; }
+.hub-pairing-dialog canvas { display: block; width: min(240px, 100%); height: auto; margin: 0 auto; image-rendering: pixelated; }
 .settings-note.hub-warning { color: var(--orange); }
 .sync-content-body { display: grid; min-width: 0; gap: 10px; }
 .sync-content-options { min-width: 0; }
