@@ -1498,6 +1498,16 @@
                 </label>
                 <div id="hubStatusRow" class="hub-status"></div>
                 <div id="hubAddressList" class="hub-address-list"></div>
+                <dialog id="hubPairingDialog" class="sync-content-dialog hub-pairing-dialog" aria-labelledby="hubPairingTitle">
+                  <strong id="hubPairingTitle" data-i18n="settings.sync.pairPhone">Pair phone</strong>
+                  <p id="hubPairingAddress"></p>
+                  <canvas id="hubPairingQr" role="img" aria-label="Hub pairing QR" data-i18n-aria-label="settings.sync.pairingQr"></canvas>
+                  <p id="hubPairingHelp" data-i18n="settings.sync.pairingHelp">Open Token Monitor on Android and tap Scan pairing QR. Keep this code private. It contains your shared secret.</p>
+                  <p id="hubPairingError" role="alert" data-i18n="settings.sync.pairingError" hidden>Could not show the QR. Use the address and shared secret to connect.</p>
+                  <form method="dialog" class="settings-actions">
+                    <button autofocus data-i18n="settings.appUpdate.close">Close</button>
+                  </form>
+                </dialog>
                 <p class="settings-note" data-i18n="settings.sync.hostNote">Other devices connect using one of the URLs above with the shared secret. For cross-network use, run Tailscale or ZeroTier on both sides - the virtual IP works the same.</p>
                 <p class="settings-note hub-warning" data-i18n="settings.sync.hostWarning">The hub runs while Token Monitor is running. Quitting (not just closing the window) stops the hub for all connected devices.</p>
               </div>

@@ -352,6 +352,11 @@ In the widget on one always-on machine, open Settings → Multi-device Sync and 
 
 The hub runs while Token Monitor is running — quitting (not just closing the window) stops it for all connected devices.
 
+For an Android companion that supports pairing QR codes, choose **Pair phone**
+next to the address your phone can reach. Scan the code in the companion and
+confirm the address. The QR contains the Hub's shared secret. Keep it private
+and close it when you finish pairing.
+
 #### Option B — Self-hosted Node hub (always-on headless machine)
 
 ```bash

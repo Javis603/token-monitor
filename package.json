@@ -169,6 +169,7 @@
     "image-size": "^2.0.4",
     "koffi": "^3.3.5",
     "markdown-it": "^15.0.3",
+    "qrcode-generator": "2.0.4",
     "semver": "^7.8.5",
     "tokscale": "^4.23.0",
     "undici": "^7.30.2"
