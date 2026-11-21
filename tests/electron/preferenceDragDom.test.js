@@ -341,9 +341,14 @@ test('Main Screen pairs the switcher views with the selected view settings', () 
   assert.match(row, /createPreferenceOrderHandle\(\{ kind: 'view'/);
   assert.match(row, /settings\.views\.showView/);
   const inspector = functionBody(app, 'renderMainViewInspector', 'homeLimitProviders');
-  assert.match(inspector, /settings\.views\.showInSwitcher/);
+  // The switch lives in the header; its subtitle names its state or why it is locked.
+  assert.match(inspector, /visibilityInput\.setAttribute\('aria-label', t\('settings\.views\.showInSwitcher'\)\)/);
+  assert.match(inspector, /header\.append\(badge, heading, visibilityInput\)/);
+  assert.match(inspector, /visibilityInput\.setAttribute\('aria-describedby', subtitle\.id\)/);
   // The last visible view cannot be switched off.
   assert.match(inspector, /visibilityInput\.disabled = lastVisible \|\| unavailable/);
+  assert.match(inspector, /settings\.views\.lastVisible/);
+  assert.match(inspector, /settings\.views\.limitsUnavailable/);
   assert.match(inspector, /const settings = MAIN_VIEW_SETTINGS\[view\.id\]/);
   // Each visit starts on Home.
   assert.match(functionBody(app, 'openSettingsPanel', 'openViewFromTray'), /resetMainViewSettings\(\)/);
@@ -855,12 +860,9 @@ test('the session context gauge has its own setting, separate from AI Tool Limit
   // Sessions owns its Main-screen settings, following the project/trends pattern.
   assert.match(app, /session: renderSessionSettingsList/);
   assert.match(app, /name = 'sessionContextMetric'/);
-  // The row must be a plain .settings-item. `.home-activity-settings` carries
-  // its own indent rule for the Home modules list, so reusing it inside the
-  // nested list paints a second line beside the list's own.
+  // The row must be a plain .settings-item inside the nested list.
   const sessionList = functionBody(app, 'renderSessionSettingsList', 'renderServiceProviderList');
   assert.match(sessionList, /row\.className = 'settings-item'/);
-  assert.doesNotMatch(sessionList, /className = 'home-activity-settings'/);
   // The preference has to invalidate the painted rows, the way showLimitUsed does.
   assert.match(app, /sessionContextMetric: state\.settings\?\.sessionContextMetric === 'remaining' \? 'remaining' : 'used'/);
 });

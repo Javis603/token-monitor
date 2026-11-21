@@ -230,7 +230,7 @@ function applyAppearance(payload) {
   }
   const vendors = themePresetsApi.mergeVendorColors(BRAND_VENDOR_COLORS, appearance.vendorColors);
   window.TokenMonitorUsageCharts.applyVendorColors(vendors);
-  const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(appearance);
+  const { interfaceFont, displayFont } = fontSettingsApi.resolveEffectiveFontSettings(appearance, appearance.fontContext);
   style.setProperty('--ui-font', interfaceFont);
   style.setProperty('--display-font', displayFont);
 
@@ -244,7 +244,7 @@ function applyAppearance(payload) {
   if (reduceMotion) settleDockMotions();
   pluginHost?.refreshMotion();
 
-  state.locale = i18n.resolveLocale(appearance.language, navigator.languages);
+  state.locale = appearance.fontContext?.locale || i18n.resolveLocale(appearance.language, navigator.languages);
   docEl.lang = state.locale;
   if (appearance.currencyRatesEffective) currencyApi.configureRates(appearance.currencyRatesEffective);
 }

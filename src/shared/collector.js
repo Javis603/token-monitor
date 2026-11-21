@@ -1187,25 +1187,36 @@ async function collectUsageOnce(options) {
         freshPartitions = bundle.byClient;
         const unattributed = freshPartitions[UNATTRIBUTED_USAGE_CLIENT];
         const attributedClients = Object.keys(freshPartitions).filter((client) => client !== UNATTRIBUTED_USAGE_CLIENT);
-        const hasMissingTargetPartition = (
-          targetClients.length > 1
-          && targetClients.some((client) => !Object.prototype.hasOwnProperty.call(freshPartitions, client))
-        );
-        const hasUnsafeTargetedResult = (
+        const missingTargets = targetClients.length > 1
+          ? targetClients.filter((client) => !Object.prototype.hasOwnProperty.call(freshPartitions, client))
+          : [];
+        // If every target is missing, a targeted retry would repeat the same
+        // scan without resolving whether the entire union was incomplete.
+        const allTargetsMissing = missingTargets.length > 0 && missingTargets.length === targetClients.length;
+        let hasUnsafeTargetedResult = (
           periodHasUsage(unattributed)
           || attributedClients.some((client) => !targetClientSet.has(client))
-          || hasMissingTargetPartition
+          || allTargetsMissing
+          || missingTargets.some((client) => periodHasUsage(anchor.todayPartitions[client]))
         );
 
-        // A unioned watch scan can hide cross-attribution inside its own target
-        // set, and a missing partition cannot distinguish deletion from an
-        // incomplete or polluted union. Rebuild one authoritative full snapshot
-        // rather than trying to repair a partial result client by client.
+        // A union can hide cross-attribution, even for a client with no earlier
+        // usage today. Verify that previously empty, omitted targets still
+        // return no usage before accepting the union.
+        if (!hasUnsafeTargetedResult && missingTargets.length > 0) {
+          const missingTodayJson = await runTokscaleFn({
+            clients: missingTargets.join(','),
+            flags: ['--today'],
+            commandTimeoutMs,
+            signal: options.signal
+          });
+          throwIfAborted(options.signal);
+          hasUnsafeTargetedResult = periodHasUsage(extractScanBundle(missingTodayJson, { partitions: false }).period);
+        }
+
         if (targetRequested && hasUnsafeTargetedResult) {
-          // Every attributed row from a targeted scan must normalize back into
-          // the requested set. An unattributed row or an unexpected client would
-          // otherwise clear the target while partially overwriting an unrelated
-          // anchor partition. Rebuild the complete today snapshot instead.
+          // Rebuild all Today partitions when attribution is unsafe or the
+          // union omitted usage. Merging a retry into the union could double count.
           const fullTodayJson = await runTokscaleFn({ clients: normalizedClients, flags: ['--today'], commandTimeoutMs, signal: options.signal });
           throwIfAborted(options.signal);
           freshPartitions = extractScanBundle(fullTodayJson).byClient;
@@ -3052,7 +3063,7 @@ function startCollector(options) {
       log('No watchable client data directories found; relying on fallback interval only.');
       return;
     }
-    function handleWatchEvent(event, filePath) {
+    function handleWatchEvent(event, filePath, unlinkedExporter) {
       // The quit path leaves the watcher open (see stop), so events can still
       // arrive after the collector is done with them.
       if (stopped) return;
@@ -3060,7 +3071,7 @@ function startCollector(options) {
       // the collector cannot re-trigger itself. See
       // SELF_WATCHED_SQLITE_SIDECAR_CLIENTS for the measured per-client evidence.
       if (isSelfWatchSqliteSidecarEvent(filePath, rootsByClient)) return;
-      const eventClients = clientsForWatchPath(filePath, attributionRootsByClient, attributionIgnores, copilotExporter);
+      const eventClients = clientsForWatchPath(filePath, attributionRootsByClient, attributionIgnores, copilotExporter, unlinkedExporter);
       const activityClients = activityClientsForPath(filePath, activitySources);
       if (activityClients.length || eventClients.some(isSessionActivityClient)) {
         activityScheduler?.request();

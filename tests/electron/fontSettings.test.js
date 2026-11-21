@@ -113,6 +113,61 @@ test('follow interface resolves against each renderer effective default', () => 
   );
 });
 
+test('Windows Simplified Chinese adds Han fallback only to app font defaults', () => {
+  const options = { platform: 'win32', locale: 'zh-CN' };
+  const prefix = '"Token Monitor Noto Sans SC", "Token Monitor YaHei UI", ';
+  assert.deepEqual(fontSettings.resolveEffectiveFontSettings({
+    displayFontFamily: fontSettings.DEFAULT_DISPLAY_FONT
+  }, options), {
+    interfaceFont: prefix + fontSettings.DEFAULT_INTERFACE_FONT,
+    displayFont: prefix + fontSettings.DEFAULT_DISPLAY_FONT
+  });
+  assert.deepEqual(fontSettings.resolveEffectiveFontSettings({}, options), {
+    interfaceFont: prefix + fontSettings.DEFAULT_INTERFACE_FONT,
+    displayFont: prefix + fontSettings.DEFAULT_INTERFACE_FONT
+  });
+  assert.deepEqual(fontSettings.resolveEffectiveFontSettings({
+    interfaceFontFamily: 'Consolas', displayFontFamily: ''
+  }, options), { interfaceFont: 'Consolas', displayFont: 'Consolas' });
+  assert.equal(fontSettings.resolveEffectiveFontSettings({
+    displayFontFamily: 'Custom Display'
+  }, options).displayFont, 'Custom Display');
+  for (const other of [
+    { platform: 'win32', locale: 'en' },
+    { platform: 'darwin', locale: 'zh-TW' },
+    { platform: 'darwin', locale: 'zh-CN' },
+    { platform: 'linux', locale: 'zh-CN' }
+  ]) {
+    assert.deepEqual(fontSettings.resolveEffectiveFontSettings({}, other),
+      fontSettings.resolveEffectiveFontSettings());
+  }
+});
+
+test('Windows Traditional Chinese preserves the first preferred regional glyph variant', () => {
+  for (const [preferredLanguages, variant] of [
+    [['en-HK', 'zh-Hant-HK', 'zh-TW'], 'HK'],
+    [['zh-Hans-HK', 'zh-TW', 'zh-HK'], 'TC'],
+    [['zh-Hant', 'ZH-hk'], 'HK'],
+    [['en-HK', 'zh-Hant'], 'TC'],
+    [undefined, 'TC']
+  ]) {
+    const options = { platform: 'win32', locale: 'zh-TW', preferredLanguages };
+    const prefix = `"Token Monitor Noto Sans ${variant}", "Token Monitor JhengHei UI", `;
+    assert.deepEqual(fontSettings.resolveEffectiveFontSettings({
+      displayFontFamily: fontSettings.DEFAULT_DISPLAY_FONT
+    }, options), {
+      interfaceFont: prefix + fontSettings.DEFAULT_INTERFACE_FONT,
+      displayFont: prefix + fontSettings.DEFAULT_DISPLAY_FONT
+    });
+    assert.deepEqual(fontSettings.resolveEffectiveFontSettings({
+      interfaceFontFamily: fontSettings.SYSTEM_UI_FONT, displayFontFamily: ''
+    }, options), {
+      interfaceFont: fontSettings.SYSTEM_UI_FONT,
+      displayFont: fontSettings.SYSTEM_UI_FONT
+    });
+  }
+});
+
 test('font controls and zoom share a visible Appearance group', () => {
   const html = readProjectFile('src', 'electron', 'renderer', 'index.html');
   const start = html.indexOf('settings-subgroup settings-appearance-type');
@@ -151,7 +206,7 @@ test('font settings wiring keeps renderer defaults concrete and technical monosp
 
   assert.match(main, /interfaceFontFamily/);
   assert.match(main, /displayFontFamily/);
-  assert.match(app, /resolveEffectiveFontSettings\(source\)/);
+  assert.match(app, /resolveMainWindowFonts\(source\)/);
   assert.match(dashboard, /resolveEffectiveFontSettings\(settings, \{/);
   assert.doesNotMatch(`${app}\n${dashboard}`, /setProperty\('--display-font', 'var\(--ui-font\)'/);
   assert.match(styles, /font-family: var\(--ui-font,/);

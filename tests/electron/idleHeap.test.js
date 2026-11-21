@@ -1,10 +1,43 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
+const vm = require('node:vm');
 const { collectWithTimeout, createIdleHeapCollector, MIN_HEAP_TOTAL_BYTES } = require('../../src/electron/idleHeap');
 
 const MiB = 1024 * 1024;
+
+const main = fs.readFileSync(path.join(__dirname, '../../src/electron/main.js'), 'utf8');
+const gateStart = main.indexOf('function appIsIdleForHeapCollection(');
+const gateEnd = main.indexOf('\n}', gateStart) + 2;
+const gateSource = main.slice(gateStart, gateEnd);
+
+function appIsIdle(overrides = {}) {
+  return vm.runInNewContext(`${gateSource}\nappIsIdleForHeapCollection();`, {
+    quitRequested: false,
+    focusedAppWindow: () => null,
+    powerMonitor: { getSystemIdleTime: () => 0 },
+    ...overrides
+  });
+}
+
+test('the app defers heap collection when quitting', () => {
+  assert.equal(appIsIdle({ quitRequested: true }), false);
+});
+
+test('the app defers heap collection while a window is focused', () => {
+  assert.equal(appIsIdle({ focusedAppWindow: () => ({}) }), false);
+});
+
+test('the unfocused app allows heap collection after recent system input', () => {
+  assert.equal(appIsIdle(), true);
+});
+
+test('the unfocused app allows heap collection when powerMonitor is missing', () => {
+  assert.equal(appIsIdle({ powerMonitor: undefined }), true);
+});
 
 function collectorFor(initial, options = {}) {
   let heap = initial;
@@ -116,7 +149,7 @@ test('a failed collection is retried on the next pass', async () => {
   assert.equal(await harness.collector.run(), true);
 });
 
-test('start installs an early check and the steady interval, and stop clears both', async () => {
+test('start installs the one-shot check and recurring interval, and stop clears both', async () => {
   const intervalTimer = { unrefCalled: false, unref() { this.unrefCalled = true; } };
   const initialTimer = { unrefCalled: false, unref() { this.unrefCalled = true; } };
   let installedInterval = null;
@@ -135,12 +168,12 @@ test('start installs an early check and the steady interval, and stop clears bot
   collector.start();
   collector.start();
   assert.equal(installedInitial.ms, 60 * 1000);
-  assert.equal(installedInterval.ms, 2 * 60 * 1000);
+  assert.equal(installedInterval.ms, 30 * 1000);
   assert.equal(initialTimer.unrefCalled, true);
   assert.equal(intervalTimer.unrefCalled, true);
   installedInitial.fn();
   await new Promise(resolve => setImmediate(resolve));
-  assert.equal(rendererRuns, 1, 'the first check does not wait for the interval');
+  assert.equal(rendererRuns, 1, 'the one-shot timer runs a check');
   collector.stop();
   assert.equal(clearedInterval, intervalTimer);
   assert.equal(await collector.run(), false, 'a stopped collector does not run');
@@ -158,7 +191,7 @@ test('start installs an early check and the steady interval, and stop clears bot
   });
   beforeFire.start();
   beforeFire.stop();
-  assert.equal(clearedPendingInitial, pendingInitial, 'stop clears a still-pending first check');
+  assert.equal(clearedPendingInitial, pendingInitial, 'stop clears a still-pending one-shot check');
 });
 
 
@@ -215,7 +248,7 @@ test('a successful main collection resets the consecutive failure count', async 
   assert.equal(logs.length, 0);
 });
 
-test('input during an in-flight main collection prevents renderer collection', async () => {
+test('a window gaining focus during main collection prevents renderer collection', async () => {
   let idle = true;
   let rendererRuns = 0;
   const collector = createIdleHeapCollector({

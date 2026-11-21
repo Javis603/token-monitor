@@ -4,7 +4,7 @@ const { parseRef } = require('../../shared/plugins/placements');
 
 // Visible application windows hosting trusted author modules through the same
 // renderer adapter as the main window. Native window ownership stays here.
-function createPluginPages({ BrowserWindow, ipcMain, manager, getSettings, getLocale,
+function createPluginPages({ BrowserWindow, ipcMain, manager, getSettings, getLocale, getFontContext,
   onDemand = refs => manager.setSurfaceDemand('page', refs) }) {
   const windows = new Map();
   let disposed = false;
@@ -16,9 +16,10 @@ function createPluginPages({ BrowserWindow, ipcMain, manager, getSettings, getLo
   }
   function metadata(record) {
     const plugin = catalog(record.id);
+    const locale = getLocale();
     return { id: record.id, ref: record.ref, name: plugin?.name || record.id, status: plugin?.status || 'missing',
       description: plugin?.description || '', views: (plugin?.views || []).filter(view => view.surfaces.includes('page')),
-      locale: getLocale(), themeColors: getSettings()?.themeColors || {},
+      locale, fontContext: getFontContext?.(locale), themeColors: getSettings()?.themeColors || {},
       appearance: Object.fromEntries(['interfaceFontFamily', 'displayFontFamily', 'textSize', 'reduceMotion', 'tokenNumberAnimation'].map(key => [key, getSettings()?.[key]])) };
   }
   function visible(record) { return !record.win.isDestroyed() && record.win.isVisible() && !record.win.isMinimized(); }

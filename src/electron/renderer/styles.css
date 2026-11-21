@@ -1,3 +1,54 @@
+/* These local faces are limited to Han ideographs so the existing CSS stack
+   still supplies Latin text, numbers, and punctuation. */
+@font-face {
+  font-family: "Token Monitor Noto Sans SC";
+  src: local("Noto Sans SC"), local("Noto-Sans-SC");
+  font-weight: 100 900;
+  unicode-range: U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+20000-2FFFF, U+30000-323AF;
+}
+
+@font-face {
+  font-family: "Token Monitor YaHei UI";
+  src: local("Microsoft YaHei UI"), local("MicrosoftYaHeiUI");
+  font-weight: 400;
+  unicode-range: U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+20000-2FFFF, U+30000-323AF;
+}
+
+@font-face {
+  font-family: "Token Monitor YaHei UI";
+  src: local("Microsoft YaHei UI Bold"), local("MicrosoftYaHeiUI-Bold");
+  font-weight: 700;
+  unicode-range: U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+20000-2FFFF, U+30000-323AF;
+}
+
+@font-face {
+  font-family: "Token Monitor Noto Sans HK";
+  src: local("Noto Sans HK"), local("Noto-Sans-HK");
+  font-weight: 100 900;
+  unicode-range: U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+20000-2FFFF, U+30000-323AF;
+}
+
+@font-face {
+  font-family: "Token Monitor Noto Sans TC";
+  src: local("Noto Sans TC"), local("Noto-Sans-TC");
+  font-weight: 100 900;
+  unicode-range: U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+20000-2FFFF, U+30000-323AF;
+}
+
+@font-face {
+  font-family: "Token Monitor JhengHei UI";
+  src: local("Microsoft JhengHei UI"), local("MicrosoftJhengHeiUIRegular");
+  font-weight: 400;
+  unicode-range: U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+20000-2FFFF, U+30000-323AF;
+}
+
+@font-face {
+  font-family: "Token Monitor JhengHei UI";
+  src: local("Microsoft JhengHei UI Bold"), local("MicrosoftJhengHeiUIBold");
+  font-weight: 700;
+  unicode-range: U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+20000-2FFFF, U+30000-323AF;
+}
+
 :root {
   color-scheme: dark;
   --ui-text-scale: 1;
@@ -7944,18 +7995,6 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   padding: 2px 8px;
   line-height: 15px;
 }
-.home-activity-settings {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 2px 0 4px 14px;
-  padding: 2px 0 2px 8px;
-  border-left: 1px solid rgba(var(--line-rgb), 0.14);
-  color: var(--text);
-  font-size: 0.6875rem;
-}
 .home-limit-provider-header { margin-bottom: 1px; }
 .home-limit-provider-names-copy {
   display: grid;
@@ -8114,10 +8153,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
   color: var(--accent);
 }
 .main-view-badge .view-switcher-icon { width: 14px; height: 14px; }
-.main-view-heading { display: grid; gap: 1px; min-width: 0; }
+.main-view-heading { display: grid; flex: 1 1 auto; gap: 1px; min-width: 0; }
 .main-view-heading strong { overflow: hidden; color: var(--text); font-size: 0.8125rem; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .main-view-subtitle { color: var(--muted); font-size: 0.5625rem; }
-.settings-panel .main-view-visibility { min-height: 32px; }
 .settings-panel .main-view-inspector > .settings-nested-list {
   margin: 0;
   padding: 0;
@@ -8127,6 +8165,9 @@ html.native-liquid-glass .view-switcher-menu-item { border-radius: 9px; }
 /* The inspector column is narrow; a long provider name must ellipsize rather
    than widen the list past the card. */
 .main-view-inspector .settings-nested-list { grid-template-columns: minmax(0, 1fr); }
+/* The column is too narrow for the row-wide 58% cap; a long choice such as
+   "Last 12 months" would truncate even after wrapping below its title. */
+.settings-panel .main-view-inspector .settings-nested-list > .settings-item > .select-control-trigger { max-width: 100%; }
 .main-view-inspector .status-provider-row .tool-preference-actions { flex: 0 0 auto; }
 .settings-panel .main-view-inspector .settings-nested-list .settings-nested-list {
   margin: 0 0 4px;

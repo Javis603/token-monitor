@@ -14,6 +14,8 @@ const {
   createWatcherHost,
   inProcessRequested
 } = require('../../src/shared/watcherHost');
+const { copilotExporterWatch } = require('../../src/shared/clientSources');
+const { clientsForWatchPath, watchAttributionRootsForClients, watchIgnoreMatcher } = require('../../src/shared/watchPolicy');
 
 const WATCH_HOST_ENV = 'TOKEN_MONITOR_WATCH_IN_PROCESS';
 
@@ -447,6 +449,60 @@ test('a real worker delivers events and stops watching the old roots after a rec
     fs.rmSync(rootB, { recursive: true, force: true });
   }
 });
+
+for (const inProcess of [false, true]) {
+  test(`a Copilot exporter discovered at startup keeps unlink attribution (${inProcess ? 'in-process' : 'child'})`, async (t) => {
+    const home = tmpTree('.claude/projects/repo');
+    const projects = path.join(home, '.claude', 'projects');
+    const dir = path.join(projects, 'repo');
+    const file = path.join(dir, 'export.jsonl');
+    const sibling = path.join(dir, 'other.jsonl');
+    const configured = path.join(dir, 'EXPORT.JSONL');
+    const previous = process.env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+    process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = configured;
+    t.after(() => {
+      if (previous === undefined) delete process.env.COPILOT_OTEL_FILE_EXPORTER_PATH;
+      else process.env.COPILOT_OTEL_FILE_EXPORTER_PATH = previous;
+      fs.rmSync(home, { recursive: true, force: true });
+    });
+
+    const clients = 'claude,copilot';
+    const exporter = copilotExporterWatch(home);
+    const options = { homeDir: home, env: {}, copilotExporter: exporter };
+    const roots = watchAttributionRootsForClients(clients, { claude: [projects], copilot: [dir] }, options);
+    const ignores = Object.fromEntries(clients.split(',').map(client => [client, watchIgnoreMatcher(client, options)]));
+    // The collector seeds its independent matcher before the file exists.
+    exporter.rememberExistingAlias();
+    fs.writeFileSync(file, 'export');
+    fs.writeFileSync(sibling, 'transcript');
+    const isAlias = fs.existsSync(configured);
+
+    let ready = false;
+    const seen = [];
+    const host = createWatcherHost({ clients, dirs: [projects, dir], homeDir: home, env: {} }, {
+      onReady: () => { ready = true; },
+      onEvent(event, filePath, exporterFile) {
+        seen.push({ event, filePath, clients: clientsForWatchPath(filePath, roots, ignores, exporter, exporterFile) });
+      }
+    }, { inProcess, coordinator: createWatcherCoordinator() });
+    try {
+      assert.equal(host.kind, inProcess ? 'in-process' : 'worker');
+      assert.ok(await until(() => ready), 'watcher never reported ready');
+      assert.deepEqual(seen, [], 'initial discovery must suppress add events');
+      fs.unlinkSync(file);
+      fs.unlinkSync(sibling);
+      assert.ok(await until(() => seen.length >= 2), 'watcher did not deliver both unlinks');
+      assert.deepEqual(seen.find(entry => entry.filePath === file), {
+        event: 'unlink', filePath: file, clients: isAlias ? ['claude', 'copilot'] : ['claude']
+      });
+      assert.deepEqual(seen.find(entry => entry.filePath === sibling), {
+        event: 'unlink', filePath: sibling, clients: ['claude']
+      });
+    } finally {
+      host.close();
+    }
+  });
+}
 
 test('a reconfigure issued before the first watcher is ready still lands', async () => {
   const rootA = tmpTree();
