@@ -143,6 +143,18 @@ test('a tray window that is never shown still hibernates after the quiet period'
   assert.equal(run.context.mainWindow, null);
 });
 
+test('a background-only recreation arms hibernation for the replacement', () => {
+  const run = fixture();
+  run.original.hide();
+  run.fire(HIBERNATE_MS);
+  assert.equal(run.context.mainWindow, null);
+  run.context.createWindow(undefined, { popoverReveal: { requested: false } });
+  assert.equal(run.context.mainWindow.isVisible(), false);
+  assert.equal(run.timer(HIBERNATE_MS)?.unrefed, true);
+  run.fire(HIBERNATE_MS);
+  assert.equal(run.context.mainWindow, null);
+});
+
 test('hibernate rechecks eligibility and retains the renderer for live tray artwork', () => {
   for (const change of [
     run => { run.original.visible = true; },
