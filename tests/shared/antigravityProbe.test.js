@@ -161,6 +161,58 @@ test('desktop daemon discovery matches the live process and only uses its declar
   assert.deepEqual(probe._endpointCandidates(infos[0], [9000]), []);
 });
 
+for (const platform of ['darwin', 'win32']) {
+  test(`desktop RPC retries the same socket and sends credentials after verification (${platform})`, async (t) => {
+    const http = require('node:http');
+    const { once } = require('node:events');
+    const pid = process.pid;
+    let checks = 0;
+    let peer;
+    let connections = 0;
+    let received = 0;
+    let token;
+    const server = http.createServer((req, res) => {
+      token = req.headers['x-codeium-csrf-token'];
+      req.resume();
+      res.end('{"verified":true}');
+    });
+    t.after(() => new Promise((resolve) => server.close(resolve)));
+    server.on('connection', (socket) => {
+      peer = socket;
+      connections++;
+      socket.on('data', (chunk) => { received += chunk.length; });
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const port = server.address().port;
+    const result = await probe.callLs({
+      scheme: 'http', port, desktopPid: pid, csrfToken: 'fixture-token',
+      method: 'Heartbeat', timeoutMs: 3000
+    }, {
+      platform,
+      spawn(command, args) {
+        assert.equal(received, 0);
+        checks++;
+        if (platform === 'win32') {
+          assert.equal(command, 'powershell');
+          assert.match(args.at(-1), new RegExp(`-OwningProcess ${pid} .*-LocalPort ${port} `));
+          if (checks === 1) return fakeSpawn('')();
+          assert.match(args.at(-1), new RegExp(`-RemotePort ${peer.remotePort} `));
+          return fakeSpawn(`${pid}\r\n`)();
+        }
+        assert.equal(command, 'lsof');
+        assert.ok(args.includes(String(pid)));
+        if (checks === 1) return fakeSpawn('', { exitCode: 1 })();
+        return fakeSpawn(`n127.0.0.1:${port}->127.0.0.1:${peer.remotePort}\n`)();
+      }
+    });
+    assert.deepEqual(result, { verified: true });
+    assert.equal(token, 'fixture-token');
+    assert.equal(checks, 2);
+    assert.equal(connections, 1);
+  });
+}
+
 test('desktop RPC sends no bytes when the connected peer does not belong to the descriptor PID', async (t) => {
   const net = require('node:net');
   const { once } = require('node:events');
