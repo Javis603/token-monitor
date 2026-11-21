@@ -154,6 +154,28 @@ test('a dragged side rail turns into a bar when it reaches the top or bottom edg
   }
 });
 
+test('a bar too narrow for its cells shrinks them inside its own outline', () => {
+  const narrow = { x: 0, y: 0, width: 420, height: 693 };
+  const rail = edgeDockRailBounds({ workArea: narrow, side: 'top', offset: 0.5, cellKinds: kinds(12) });
+  const last = rail.cells.lefts[11] + rail.cells.widths[11];
+  // The 40px reading floor yields before the run is allowed to leave the bar.
+  assert.ok(rail.cells.widths.every((w) => w > 0 && w <= 40));
+  assert.ok(last <= rail.width + 0.5, 'cells stay inside the bar');
+  assert.ok(rail.width <= narrow.width, 'bar stays inside the work area');
+});
+
+test('a side rail released near a horizontal edge becomes a bar there', () => {
+  const drop = (y) => edgeDockPlacementForDrop({
+    workArea, pointer: { x: 640, y }, metrics: EDGE_DOCK_METRICS, grabOffsetX: 30, grabOffsetY: 30,
+    cellKinds: kinds(6), currentSide: 'right', final: true
+  });
+  assert.equal(drop(40).side, 'top');
+  assert.equal(drop(40).floatingY, null);
+  assert.equal(drop(workArea.height - 40).side, 'bottom');
+  // The middle of the screen still leaves it a rail.
+  assert.equal(drop(300).side, 'right');
+});
+
 test('every cell count keeps the bar on screen', () => {
   for (const count of [1, 2, 3, 6, 8, 12, 14]) {
     const rail = edgeDockRailBounds({ workArea, side: 'bottom', offset: 0.5, cellKinds: kinds(count) });

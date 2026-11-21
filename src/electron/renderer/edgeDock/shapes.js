@@ -133,7 +133,9 @@
         const top = tt;
         return [
           ['M', tip - tn, top],
-          ['L', tip, 0],
+          // One pixel inside the window, like the side rail's tip: a point on the
+          // very edge loses its antialiasing to the window clip.
+          ['L', tip, 1],
           ['L', tip + tn, top],
           ['L', tw - tr, top],
           ['C', tw - tk, top, tw, top + tk, tw, top + tr],
@@ -153,7 +155,7 @@
         ['L', tw, ch - tr],
         ['C', tw, ch - tk, tw - tk, ch, tw - tr, ch],
         ['L', tip + tn, ch],
-        ['L', tip, ch + tt],
+        ['L', tip, ch + tt - 1],
         ['L', tip - tn, ch],
         ['L', tr, ch],
         ['C', tk, ch, 0, ch - tk, 0, ch - tr],

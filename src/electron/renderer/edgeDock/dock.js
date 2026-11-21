@@ -1344,9 +1344,14 @@ function renderRail(payload) {
     if (layout?.horizontal) {
       node.style.left = `${layout.lefts[index]}px`;
       node.style.width = `${layout.widths[index]}px`;
+      // A retained node must not keep the axis it was last placed on.
+      node.style.top = '';
+      node.style.height = '';
     } else if (layout) {
       node.style.top = `${layout.tops[index]}px`;
       node.style.height = `${layout.heights[index]}px`;
+      node.style.left = '';
+      node.style.width = '';
     }
     node.classList.toggle('is-focused', payload.focusCellId === cell.id);
     if (cell.kind !== 'plugin' && pluginContent?.hasTarget(`edgeDock.rail.${cell.kind}.content`)) {
