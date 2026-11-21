@@ -37,6 +37,7 @@
   // quota rather than a configured tool keep `label`, as the tray detail does.
   // `portableAccountKey: true` keeps configured accounts separate across devices.
   // Omit it for device-local credential identities that collapse by provider.
+  // Mixed identities need an explicit credential fallback before suggesting a manual link.
   const LIMIT_PROVIDER_CATALOG = Object.freeze([
     { id: 'claude', portableAccountKey: true, label: 'Claude', settingsLabel: 'Claude Code' },
     { id: 'codex', portableAccountKey: true, label: 'Codex' },
@@ -47,17 +48,17 @@
     { id: 'cline', portableAccountKey: true, label: 'Cline' },
     { id: 'factory', portableAccountKey: true, label: 'Factory Droid' },
     { id: 'kimi', label: 'Kimi' },
-    { id: 'grok', label: 'Grok' },
-    { id: 'copilot', label: 'GitHub Copilot' },
+    { id: 'grok', mixedAccountIdentity: true, label: 'Grok' },
+    { id: 'copilot', mixedAccountIdentity: true, label: 'GitHub Copilot' },
     { id: 'zed', label: 'Zed' },
-    { id: 'commandcode', label: 'Command Code' },
+    { id: 'commandcode', mixedAccountIdentity: true, label: 'Command Code' },
     { id: 'mimo', portableAccountKey: true, label: 'Xiaomi MiMo' },
     { id: 'muse', label: 'Muse' },
     { id: 'zai', label: 'GLM', settingsLabel: 'Z.ai / GLM' },
     // The organization and project identify the same quota pool after API key rotation.
     { id: 'zaiteam', portableAccountKey: true, label: 'GLM Team' },
     { id: 'kiro', label: 'Kiro' },
-    { id: 'workbuddy', label: 'WorkBuddy' },
+    { id: 'workbuddy', mixedAccountIdentity: true, label: 'WorkBuddy' },
     { id: 'qoder', label: 'Qoder' },
     { id: 'deepseek', portableAccountKey: true, label: 'DeepSeek' },
     { id: 'devin', label: 'Devin' },

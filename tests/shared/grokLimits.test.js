@@ -1031,6 +1031,7 @@ for (const source of ['rpc', 'web']) {
     const other = await identityReading(oidcToken({ ...claims, sub: 'user-b' }), source);
     assert.equal(first.status, 'ok');
     assert.equal(first.source, source);
+    assert.equal(first.accountKeyPortable, true);
     assert.equal(rotated.accountKey, first.accountKey);
     assert.notEqual(other.accountKey, first.accountKey);
   });
@@ -1045,6 +1046,7 @@ for (const source of ['rpc', 'web']) {
     for (const token of tokens) {
       const row = await identityReading(token, source);
       assert.equal(row.accountKey, hashKey('grok', token));
+      assert.equal(row.accountKeyPortable, false);
     }
   });
 

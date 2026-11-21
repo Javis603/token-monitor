@@ -379,6 +379,7 @@ async function fetchDevinLimits(options = {}, deps = {}) {
         return normalizeLimitProvider({
           provider: 'devin',
           accountKey,
+          accountQuotaScope: hashKey('devin-organization', organization),
           accountLabel: planName,
           planLabel: planName,
           accountName: usage.organization,

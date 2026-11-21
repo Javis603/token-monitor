@@ -229,6 +229,7 @@ function mapCopilotUsageToProvider(usage, meta = {}) {
   return normalizeLimitProvider({
     provider: 'copilot',
     accountKey: meta.accountKey || '',
+    accountKeyPortable: meta.accountKeyPortable,
     accountLabel: meta.accountLabel || displayPlanLabel(usage.copilotPlan),
     accountName: meta.accountName || '',
     accountEmail: meta.accountEmail || '',
@@ -442,8 +443,12 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
         fingerprint, accountKey: copilotAccountKey(accountSeed, enterpriseHost), accountName: login
       });
     }
+    const credentialKey = copilotAccountKey(token, enterpriseHost);
+    const accountKey = options.accountKey || (accountSeed ? copilotAccountKey(accountSeed, enterpriseHost) : remembered?.accountKey) || credentialKey;
+    const verified = accountKey !== credentialKey || Boolean(accountSeed || options.accountName || remembered?.accountName);
     return mapCopilotUsageToProvider(usage, {
-      accountKey: options.accountKey || (accountSeed ? copilotAccountKey(accountSeed, enterpriseHost) : remembered?.accountKey) || copilotAccountKey(token, enterpriseHost),
+      accountKey,
+      ...(verified || normalizedEnterpriseHost(enterpriseHost) === COPILOT_DEFAULT_HOST ? { accountKeyPortable: verified } : {}),
       accountLabel: displayPlanLabel(usage.copilotPlan),
       accountName: login || options.accountName || remembered?.accountName,
       accountEmail: '',

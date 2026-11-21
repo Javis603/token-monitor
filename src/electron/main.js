@@ -3469,10 +3469,16 @@ function getAccountPresentationSync() {
     },
     request: requestSyncContent,
     apply: (value, identity) => {
+      const changed = JSON.stringify(settings.limitAccountPresentation) !== JSON.stringify(value);
       settings = { ...settings, limitAccountPresentation: value, limitAccountPresentationCacheIdentity: identity };
       saveSettings({ throwOnError: true });
       pushSettingsToRenderer();
       void accountSlotService?.adoptSharedLabels(value);
+      if (changed && settings.hubMode === 'client' && currentHubStatsCache()) {
+        requestSyncDisplayStats({
+          reason: 'sync-settings', generation: hubModeGeneration, widgetProducerOwner: captureMacWidgetProducerOwner()
+        });
+      }
     }
   });
 }
@@ -4334,7 +4340,9 @@ function requestSyncDisplayStats(request) {
 
 function publishSyncDisplayStats({ reason, at, generation, widgetProducerOwner }) {
   if (!hubModeRequestIsCurrent(generation, 'client')) return;
-  const displayStats = composeLocalSyncSummary(latestHubStats, lastCollectedDevice);
+  const displayStats = composeLocalSyncSummary(latestHubStats, lastCollectedDevice, {
+    limitAccountPresentation: settings.limitAccountPresentation
+  });
   if (!displayStats) return;
   updateDiscordRpcDisplay(displayStats);
   sendPush({ event: 'stats', data: { type: 'stats', reason, stats: displayStats, at } }, { widgetProducerOwner });
@@ -7101,7 +7109,9 @@ async function fetchStats(options = {}) {
   if (options?.streamCache === true && streamConnected) {
     const cached = currentHubStatsCache();
     if (cached && Date.now() - Date.parse(latestHubStatsReceivedAt) < HUB_STREAM_CACHE_FRESH_MS) {
-      return injectLocalDeviceStatus(composeLocalSyncSummary(cached, lastCollectedDevice));
+      return injectLocalDeviceStatus(composeLocalSyncSummary(cached, lastCollectedDevice, {
+        limitAccountPresentation: settings.limitAccountPresentation
+      }));
     }
   }
   const url = `${hubUrl.replace(/\/$/, '')}/api/stats`;
@@ -7125,7 +7135,9 @@ async function fetchStats(options = {}) {
     });
   }
   setLatestHubStatsCache(stats, 'client', requestGeneration, requestHubIdentity);
-  return injectLocalDeviceStatus(composeLocalSyncSummary(stats, lastCollectedDevice));
+  return injectLocalDeviceStatus(composeLocalSyncSummary(stats, lastCollectedDevice, {
+    limitAccountPresentation: settings.limitAccountPresentation
+  }));
 }
 
 function managedPricingSidecarPath() {

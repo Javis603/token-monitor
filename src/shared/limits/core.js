@@ -12,6 +12,7 @@ const { openCodeWindowKey, groupOpenCodeCandidates, mergeOpenCodeProviderCompone
 
 const DEFAULT_LIMITS_REFRESH_MS = 5 * 60 * 1000;
 const PORTABLE_ACCOUNT_PROVIDERS = new Set(LIMIT_PROVIDER_CATALOG.filter(provider => provider.portableAccountKey).map(provider => provider.id));
+const MIXED_ACCOUNT_IDENTITY_PROVIDERS = new Set(LIMIT_PROVIDER_CATALOG.filter(provider => provider.mixedAccountIdentity).map(provider => provider.id));
 const VALID_PROVIDERS = new Set(LIMIT_PROVIDER_IDS);
 const VALID_STATUSES = new Set(['ok', 'disabled', 'notConfigured', 'unauthorized', 'rateLimited', 'sourceRateLimited', 'unavailable', 'error']);
 const VALID_SOURCES = new Set(['oauth', 'cli', 'web', 'rpc', 'local', 'api']);
@@ -512,7 +513,9 @@ function normalizeLimitProvider(input) {
     provider,
     ...(adapterId ? { adapterId } : {}),
     accountKey,
-    ...(provider === 'qoder' && accountKey && input.accountKeyPortable === true ? { accountKeyPortable: true } : {}),
+    ...(accountKey && typeof input.accountKeyPortable === 'boolean' ? { accountKeyPortable: input.accountKeyPortable } : {}),
+    ...(provider === 'devin' && accountKey && typeof input.accountQuotaScope === 'string'
+      && /^sha256:[a-f0-9]{64}$/.test(input.accountQuotaScope) ? { accountQuotaScope: input.accountQuotaScope } : {}),
     ...(relatedAccountKey ? { relatedAccountKey } : {}),
     ...(provider === 'opencode' && input.webAccountKey
       ? { webAccountKey: String(input.webAccountKey) }
@@ -631,7 +634,9 @@ function pickBetterProvider(current, candidate, multiAccount = false) {
   // In multi-account mode a balance and its credits window belong only to
   // their exact account, in both aggregation passes.
   if (multiAccount && winner.accountKey !== loser.accountKey) return winner;
-  const balanced = carryProviderBalance(winner, loser);
+  const identity = winner.accountKey && winner.accountKey === loser.accountKey
+    && loser.accountKeyPortable && !winner.accountKeyPortable ? { ...winner, accountKeyPortable: true } : winner;
+  const balanced = carryProviderBalance(identity, loser);
   return providerPolicies[winner.provider]?.carryObservation?.(balanced, loser, normalizeAccountKeyAliases) || balanced;
 }
 
@@ -771,13 +776,15 @@ function linkableAccount(row) {
   return isConfiguredProvider(row) && row.sourceDeviceId
     && /^sha256:[a-f0-9]{64}$/.test(row.accountKey) && !row.accountKeyPortable
     && !row.accountEmail && !row.relatedAccountKey
+    && (!MIXED_ACCOUNT_IDENTITY_PROVIDERS.has(row.provider) || row.accountKeyPortable === false)
+    && (row.provider !== 'devin' || row.accountQuotaScope)
     && (!PORTABLE_ACCOUNT_PROVIDERS.has(row.provider) || PORTABLE_CREDENTIAL_PROVIDERS.has(row.provider))
     && providerPolicies[row.provider]?.canLinkAccount?.(row) !== false;
 }
 
 function linkScope(row) {
   const products = [...new Set(row.windows.map(window => window.productId).filter(Boolean))].sort();
-  return JSON.stringify([row.region, row.source, row.adapterId || '', row.workspaceKind, products]);
+  return JSON.stringify([row.region, row.source, row.adapterId || '', row.workspaceKind, products, row.accountQuotaScope || '']);
 }
 
 // Confirmed links affect the selected reading only. Raw device observations
@@ -799,7 +806,7 @@ function withLimitAccountLinks(stats, document) {
     hidden.add(winner === a ? b : a);
   }
   return {
-    ...stats, limitAccountLinks, ...(limitAccountLinkCandidates ? { limitAccountLinkCandidates } : {}),
+    ...stats, limitAccountLinks, limitAccountLinkCandidates: limitAccountLinkCandidates || [],
     limits: { ...limits, providers: hidden.size ? providers.filter(row => !hidden.has(row)) : providers }
   };
 }
@@ -812,6 +819,7 @@ function publicLimits(limits) {
     providers: normalized.providers.map(({
       accountKey,
       accountKeyPortable,
+      accountQuotaScope,
       relatedAccountKey,
       webAccountKey,
       accountKeyAliases,
