@@ -48,6 +48,8 @@ Hub update checks use `src/shared/hubBuildRegistry.json`, which hashes the porta
 
 Only app, agent and packaging entry points run `ensure:tokscale`; install, Hub, lint, test and verify never download the binary. `scripts/vendor/tokscale.json` pins its provenance. Its `override`/`upstream` mode does not bypass either verification gate, and its presentation describes the declared bundle, not verification of the selected executable.
 
+A parser fix reaches the widget only after its fork build is published and the vendor manifest pins the exact commit, release assets and platform SHA-256 hashes. Keep `override` while downstream capabilities require it; an unavailable release is a delivery blocker, never a reason to bypass hashes. Parser-only corrections must also advance that client's Tokscale cache version so unchanged sources reparse.
+
 ## Collector pipeline
 
 `src/shared/collector.js` owns tokscale scans and binary resolution. `clientSources.js` owns canonical host roots; `clientSourceObservations.js` derives checks and diagnostics from them, and the collector applies watch policy. Source attribution, ignore policy and exporter paths must share those roots, including through symlinks and Windows path aliases.
@@ -64,6 +66,7 @@ Only app, agent and packaging entry points run `ensure:tokscale`; install, Hub, 
 - **Separate retention.** [Codex Dots usage](providers/codex.md#dots-local-execution) merges after native/WSL scans, outside native delta anchors and scan partitions. Its ledger owns retention; generic archives must not duplicate it. Visibility changes refresh the projection without restarting observation.
 - **Shared metadata reads.** Context, turn state, prompt-cache and waiting observations reuse provider-owned session indexes rather than independent transcript readers. Preserve accounting identity across append scans so repeated records do not restart cache estimates. In anchored propagation, omitted `promptCache` preserves the observation and explicit `null` clears it. Provider rules live in [Claude](providers/claude.md#usage-and-session-metadata) and [Codex](providers/codex.md#session-metadata-and-context).
 - **Catalog edits are not activity.** Title/project refreshes preserve transcript activity, context, cache, period-native attribution and token/cost baselines. Keep provenance in local metadata caches and anchors, never published rows. Confirmed removals clear only the matching override and restore native fallback; unreadable/missing stores do not prove deletion. Persist metadata-only changes without advancing `fullScanAt`, independently of usage anchors, so renames/removals survive restart and later read misses. Watch refresh covers today's sessions, including retained partitions; older-only sessions wait for a full scan. See [Antigravity](providers/antigravity.md#session-titles-and-project-resolution) and the provider title-precedence rules.
+- **Native Kimi response timing.** Tokscale supplies the old request interval or matching native step timing through its existing performance block. The collector does not open another wire reader or add step usage to totals. Duration and timed output describe the same calls; missing timing remains unknown. See [Kimi](providers/kimi.md).
 
 ### Watching
 

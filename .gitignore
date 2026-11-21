@@ -1,5 +1,6 @@
 node_modules/
 coverage/
+.local/
 data/
 build/
 dist/
