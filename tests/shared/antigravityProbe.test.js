@@ -157,8 +157,33 @@ test('desktop daemon discovery matches the live process and only uses its declar
     spawn: fakeSpawn(`123 ${command}\n456 ${command}\n789 ${command}`)
   });
   assert.deepEqual(infos.map(({ pid }) => pid), [123]);
-  assert.deepEqual(probe._endpointCandidates(infos[0], [4242, 9000]), [{ scheme: 'http', port: 4242, csrfToken }]);
+  assert.deepEqual(probe._endpointCandidates(infos[0], [4242, 9000]), [{ scheme: 'http', port: 4242, csrfToken, desktopPid: 123 }]);
   assert.deepEqual(probe._endpointCandidates(infos[0], [9000]), []);
+});
+
+test('desktop RPC sends no bytes when the connected peer does not belong to the descriptor PID', async (t) => {
+  const net = require('node:net');
+  const { once } = require('node:events');
+  let received = 0;
+  let closePeer;
+  const closed = new Promise((resolve) => { closePeer = resolve; });
+  const server = net.createServer((socket) => {
+    socket.on('data', (chunk) => { received += chunk.length; });
+    socket.once('close', closePeer);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  await assert.rejects(probe.callLs({
+    scheme: 'http',
+    port: server.address().port,
+    desktopPid: 2147483647,
+    csrfToken: 'fixture-token',
+    method: 'Heartbeat',
+    timeoutMs: 3000
+  }));
+  await closed;
+  assert.equal(received, 0);
 });
 
 test('desktop daemon port discovery requires an exact TCP IPv4 loopback listener', async () => {
