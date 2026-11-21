@@ -13,6 +13,7 @@ const {
   zaiQuotaUrl,
   zaiSubscriptionUrl,
   parseZaiUsage,
+  dedupeZaiWindows,
   fetchZaiLimits
 } = require('../../src/shared/providers/zai/limits');
 
@@ -439,6 +440,44 @@ test('fetchZaiLimits treats an entitled plan with empty buckets as unavailable',
   assert.equal(provider.status, 'unavailable');
   assert.equal(provider.source, 'oauth');
   assert.deepEqual(provider.windows, []);
+});
+
+test('fetchZaiLimits collapses identical windows answered by both lanes', async () => {
+  // Regression: the console-key lane and the ZCode mirror lane can both answer
+  // quota for the same plan. When BigModel only returns the 5-hour bucket to
+  // each of them, the merged row used to read "Session 9% / Session 9%".
+  const consoleKey = ['zai', 'token'].join('-'); // fixture value, not a credential
+  const quota = {
+    ok: true,
+    status: 200,
+    json: async () => ({ data: { limits: [{ type: 'CREDIT_LIMIT', unit: 3, number: 5, percentage: 10 }] } })
+  };
+  const provider = await fetchZaiLimits(
+    { zaiApiKey: consoleKey },
+    {
+      env: {},
+      now: () => Date.parse('2026-09-05T12:00:00Z'),
+      ...zcodeLaneDeps(async (url) => {
+        if (!String(url).includes('/quota/limit')) throw new Error('unexpected url ' + url);
+        return quota;
+      }, 'coding-plan')
+    }
+  );
+  assert.equal(provider.status, 'ok');
+  assert.deepEqual(
+    provider.windows.map((window) => [window.kind, window.usedPercent]),
+    [['session', 10]]
+  );
+  // Distinct buckets share no identity fields with the collapsed pair and the
+  // helper leaves them in their original order.
+  assert.deepEqual(
+    dedupeZaiWindows([
+      { kind: 'session', label: 'Session', resetsAt: 'a', usedPercent: 10 },
+      { kind: 'session', label: 'Session', resetsAt: 'a', usedPercent: 10 },
+      { kind: 'weekly', label: 'Weekly', resetsAt: 'b', usedPercent: 20 }
+    ]).map((window) => window.kind),
+    ['session', 'weekly']
+  );
 });
 
 test('fetchZaiLimits treats a mirror key without a subscription as unavailable', async () => {
