@@ -191,6 +191,40 @@ test('last 7 days is available immediately from V1 daily history', () => {
   assert.equal(result.period.models.opus, 30);
 });
 
+test('billing cycle starts on the configured day and clamps to short months', () => {
+  const cycle = (todayKey, cycleStartDay) => ranges.rangeForSelection('cycle', { todayKey, cycleStartDay });
+  assert.deepEqual(cycle('2026-08-12', 15), { start: '2026-07-15', end: '2026-08-12' });
+  assert.deepEqual(cycle('2026-08-15', 15), { start: '2026-08-15', end: '2026-08-15' });
+  assert.deepEqual(cycle('2026-08-12', 1), { start: '2026-08-01', end: '2026-08-12' });
+  assert.deepEqual(cycle('2026-01-10', 20), { start: '2025-12-20', end: '2026-01-10' });
+  assert.deepEqual(cycle('2026-02-28', 31), { start: '2026-02-28', end: '2026-02-28' });
+  assert.deepEqual(cycle('2026-03-05', 31), { start: '2026-02-28', end: '2026-03-05' });
+  assert.deepEqual(cycle('2026-04-30', 31), { start: '2026-04-30', end: '2026-04-30' });
+  assert.deepEqual(cycle('2026-05-30', 31), { start: '2026-04-30', end: '2026-05-30' });
+  assert.deepEqual(cycle('2026-08-12', 'bad'), { start: '2026-08-01', end: '2026-08-12' });
+  assert.equal(ranges.normalizeCycleStartDay(0), 1);
+  assert.equal(ranges.normalizeCycleStartDay(32), 1);
+  assert.equal(ranges.normalizeCycleStartDay('9'), 9);
+  assert.equal(ranges.normalizeCycleStartDay(31.5), 1);
+  assert.equal(ranges.normalizeCycleStartDay('15.5'), 1);
+  assert.equal(ranges.slotForSelection('cycle'), 'month');
+  assert.equal(ranges.displayLabel('cycle'), 'CYCLE');
+  assert.equal(ranges.isDerived('cycle'), true);
+});
+
+test('billing cycle totals only the days inside the current cycle', () => {
+  const result = ranges.fixedPeriodSnapshot('cycle', {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-08-12',
+    cycleStartDay: 10,
+    daily: [day('2026-08-09', 100), day('2026-08-10', 20), day('2026-08-11', 30)]
+  });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.period.totalTokens, 50);
+  assert.equal(result.period.costUsd, 0.5);
+});
+
 test('live today replaces a lagging V1 history row without double counting', () => {
   const result = ranges.fixedPeriodSnapshot('week', {
     historyAvailable: true,
@@ -614,6 +648,21 @@ test('ready snapshots are reused only for the same fixed selection', () => {
 
   assert.equal(ranges.readySnapshotForSelection(snapshot, 'week'), snapshot);
   assert.equal(ranges.readySnapshotForSelection(snapshot, 'last30'), null);
+});
+
+test('a ready Billing cycle snapshot is not reused after the start day changes', () => {
+  const snapshot = ranges.fixedPeriodSnapshot('cycle', {
+    historyAvailable: true,
+    historyEnabled: true,
+    todayKey: '2026-08-12',
+    cycleStartDay: 10,
+    daily: [day('2026-08-12', 10)]
+  });
+
+  assert.equal(snapshot.cycleStartDay, 10);
+  assert.equal(ranges.readySnapshotForSelection(snapshot, 'cycle', { cycleStartDay: 10 }), snapshot);
+  assert.equal(ranges.readySnapshotForSelection(snapshot, 'cycle', { cycleStartDay: 5 }), null);
+  assert.deepEqual(ranges.devicesForReadySnapshot({ ...snapshot, devices: [{ deviceId: 'mac', period: {} }] }, 'cycle', { cycleStartDay: 5 }), []);
 });
 
 test('device rows come from the same ready presentation snapshot as the headline', () => {
