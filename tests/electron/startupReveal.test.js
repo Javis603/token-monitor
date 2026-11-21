@@ -124,12 +124,12 @@ test('early appearance does not consume a plugin-dependent initial Limits prefer
   assert.equal(context.state.breakdown, 'limits');
 });
 
-function initialAppearance({ nativeHidden, windowVisible, search = '' }) {
+function initialAppearance({ nativeHidden, windowVisible, search = '', stats = {} }) {
   let applied = 0;
   let signaled = 0;
   const frames = [];
   const context = vm.createContext({
-    state: { windowVisible },
+    state: { windowVisible, stats },
     document: { hidden: nativeHidden },
     isRendererWindowHidden: () => nativeHidden || !windowVisible,
     applyVisibleSettingsAppearance: () => { applied += 1; },
@@ -138,16 +138,20 @@ function initialAppearance({ nativeHidden, windowVisible, search = '' }) {
     requestAnimationFrame: callback => { frames.push(callback); }
   });
   const init = app.slice(app.indexOf('async function init()'));
+  const helper = app.slice(app.indexOf('let hibernateRevealPending'), app.indexOf('async function init()'));
   const early = init.slice(init.indexOf('// Local appearance'), init.indexOf('try { await pluginApi?.list();'));
-  vm.runInContext(`let initialSettingsApplied = false;\n${early}`, context);
-  return { applied: () => applied, signaled: () => signaled, frames };
+  vm.runInContext(`let initialSettingsApplied = false;\n${helper}\n${early}`, context);
+  return { applied: () => applied, signaled: () => signaled, frames, context };
 }
 
-test('a hibernated tray window signals appearance while hidden without waiting for frames', () => {
-  const run = initialAppearance({ nativeHidden: false, windowVisible: false, search: '?windowHidden=1&hibernateReveal=1' });
+test('a hibernated tray window waits for a real stats snapshot before signaling appearance', () => {
+  const run = initialAppearance({ nativeHidden: false, windowVisible: false, search: '?windowHidden=1&hibernateReveal=1', stats: null });
   assert.equal(run.applied(), 1);
-  assert.equal(run.signaled(), 1);
+  assert.equal(run.signaled(), 0);
   assert.equal(run.frames.length, 0);
+  run.context.state.stats = { periods: {} };
+  vm.runInContext('signalHibernateRevealIfReady()', run.context);
+  assert.equal(run.signaled(), 1);
 });
 
 test('an initially hidden retained startup view prepares appearance without waiting for hidden-page frames', () => {

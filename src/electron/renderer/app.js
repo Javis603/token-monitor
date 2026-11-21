@@ -8510,6 +8510,7 @@ async function refreshStats(options = {}) {
     allTimeSessions.invalidate();
     state.stats = sessionStatsForDisplay(allTimeSessions.attach(nextStats));
     observeDisplayLiveTokenRates(nextStats);
+    if (typeof signalHibernateRevealIfReady === 'function') signalHibernateRevealIfReady();
     if (options.forceHistory === true) {
       // A manual history rescan is an explicit retry boundary. Let Home request the
       // corresponding full payload even when its revision is unchanged, and restore
@@ -14582,6 +14583,14 @@ if (pluginBridge) {
   pluginBridge.onChanged(() => void refreshPluginCatalog());
 }
 
+let hibernateRevealPending = false;
+
+function signalHibernateRevealIfReady() {
+  if (!hibernateRevealPending || !initialSettingsApplied || !state.stats) return;
+  hibernateRevealPending = false;
+  window.tokenMonitor.signalAppearanceReady?.();
+}
+
 async function init() {
   // Subscribe before querying: a native appearance/accessibility change can
   // arrive while the initial state round trip is in flight.
@@ -14639,13 +14648,18 @@ async function init() {
   applyVisibleSettingsAppearance();
   initialSettingsApplied = true;
   const hibernateReveal = new URLSearchParams(window.location.search).get('hibernateReveal') === '1';
-  if (state.windowVisible || hibernateReveal) {
+  if (hibernateReveal) {
+    // Do not reveal the recreated popover on the static zero defaults. Wait for
+    // the first real stats snapshot; the main process still falls back after
+    // its short wake timeout if stats do not arrive.
+    hibernateRevealPending = true;
+    signalHibernateRevealIfReady();
+  } else if (state.windowVisible) {
     const signalAppearanceReady = () => window.tokenMonitor.signalAppearanceReady?.();
     // A retained WebContentsView can be document.hidden until its native host
     // shows. Prepare it now, without waiting on animation frames that pause while
-    // hidden. The hibernate query also bypasses frames because the hidden
-    // BrowserWindow was constructed with painting deferred until show.
-    if (document.hidden || hibernateReveal) signalAppearanceReady();
+    // hidden.
+    if (document.hidden) signalAppearanceReady();
     else requestAnimationFrame(() => requestAnimationFrame(signalAppearanceReady));
   }
   try { await pluginApi?.list(); } catch (_) {}
@@ -16156,6 +16170,7 @@ window.tokenMonitor.onStatsPush?.((payload) => {
     state.stats = sessionStatsForDisplay(allTimeSessions.attach(incomingStats));
     observeLiveTokenRate(state.stats);
     observeDisplayLiveTokenRates(state.stats);
+    if (typeof signalHibernateRevealIfReady === 'function') signalHibernateRevealIfReady();
     applyCodexActiveAccountFromStats();
     // Progressive mid-tick pushes never carry a fresh history scan (see
     // AGENTS.md collector notes), so only the final push can retire the

@@ -1476,6 +1476,7 @@ let mainWindowChrome = { collapsedFloatingBubble: false };
 let mainWindowReplacementEpoch = 0;
 let mainWindowReplacementTask = Promise.resolve();
 const MAIN_WINDOW_HIBERNATE_MS = 10 * 60 * 1000;
+const MAIN_WINDOW_HIBERNATE_RETRY_MS = 60 * 1000;
 const MAIN_WINDOW_WAKE_FALLBACK_MS = 800;
 let mainWindowHibernateTimer = null;
 let mainWindowHibernated = false;
@@ -1491,18 +1492,31 @@ function scheduleMainWindowHibernate(win) {
   // that host has different ownership and teardown semantics from BrowserWindow.
   if (win !== mainWindow || mainWindowHibernateTimer || !settings?.trayMode || quitRequested
     || (process.platform !== 'darwin' && process.platform !== 'linux')) return;
-  mainWindowHibernateTimer = setTimeout(() => {
+  const attempt = () => {
     mainWindowHibernateTimer = null;
     if (win !== mainWindow || win.isDestroyed() || win.isVisible() || quitRequested || !settings?.trayMode) return;
-    if (rendererHiddenStatsNeeded()) return;
+    if (rendererHiddenStatsNeeded()) {
+      // A generated tray icon can turn itself off later; keep one bounded retry
+      // instead of dropping the only hibernation attempt.
+      mainWindowHibernateTimer = setTimeout(attempt, MAIN_WINDOW_HIBERNATE_RETRY_MS);
+      mainWindowHibernateTimer.unref();
+      return;
+    }
     if (BaseWindow.getAllWindows().some(other => other !== win
       && !edgeDockController?.owns(other) && !notchController?.owns(other)
-      && !limitsHistoryController?.isIdleWindow(other))) return;
+      && !limitsHistoryController?.isIdleWindow(other))) {
+      // A dashboard or plugin window can close later; retry so hibernation is
+      // not permanently lost without another show/hide cycle.
+      mainWindowHibernateTimer = setTimeout(attempt, MAIN_WINDOW_HIBERNATE_RETRY_MS);
+      mainWindowHibernateTimer.unref();
+      return;
+    }
     mainWindowHibernated = true;
     mainWindow = null;
     lastRendererStatsFingerprint = null;
     win.destroy();
-  }, MAIN_WINDOW_HIBERNATE_MS);
+  };
+  mainWindowHibernateTimer = setTimeout(attempt, MAIN_WINDOW_HIBERNATE_MS);
   mainWindowHibernateTimer.unref();
 }
 
@@ -5291,7 +5305,17 @@ function currentSystemDarkTrayUi() {
 function pushSystemUiThemeToRenderer(dark) {
   const value = typeof dark === 'boolean' ? dark : currentSystemDarkTrayUi();
   currentSystemDarkUi = value;
-  if (!mainWindow || mainWindow.isDestroyed()) return;
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    if (mainWindowHibernated) {
+      // The renderer is the only source of re-inked provider tray icons. Drop
+      // the cached bitmaps so the next tray paint cannot keep the previous
+      // theme's ink; the default icon stands in until the window wakes.
+      for (const id of Object.keys(providerTrayIcons)) delete providerTrayIcons[id];
+      defaultTrayIcon = null;
+      updateTrayDisplay();
+    }
+    return;
+  }
   try { mainWindow.webContents.send('theme:systemUi', { dark: value }); } catch (_) {}
 }
 
@@ -8874,6 +8898,12 @@ app.whenReady().then(() => {
   ipcMain.on('dashboard:minimize', (event) => { BrowserWindow.fromWebContents(event.sender)?.minimize(); });
   ipcMain.on('dashboard:close', (event) => { BrowserWindow.fromWebContents(event.sender)?.close(); });
   app.on('activate', () => {
+    // A parked history window is not owned by the dock or notch, so the normal
+    // activation filter would return 'none' and never reach the wake path.
+    if (mainWindowHibernated) {
+      focusExistingWindow();
+      return;
+    }
     const action = activateWindowAction({
       mainWindow,
       windows: BaseWindow.getAllWindows(),
@@ -8881,7 +8911,6 @@ app.whenReady().then(() => {
     });
     if (action === 'focusWindow') focusExistingWindow();
     else if (action === 'createWindow') {
-      if (mainWindowHibernated) return focusExistingWindow();
       // The window this builds is about to be on screen, so the policy is resolved
       // for a visible window exactly as focusExistingWindow() does. Without it this
       // was the one path reaching applyMacSpaceBehavior() with a process type

@@ -61,6 +61,7 @@ function fixture(platform = 'linux') {
     floatingBubbleState: { collapsed: false }, mainWindowChrome: {}, rendererViewState: { breakdown: 'limits' },
     tray: {}, recentPopoverBlur: null, suppressNextBlurHide: false,
     pluginWindowActions: { hide: win => win.hide() }, popoverToggleAction, trayToggleAction, windowToggleShortcutAction,
+    activateWindowAction: () => 'none',
     rendererHiddenStatsNeeded: () => false, popoverBounds: (_tray, width, height, { clickPoint }) => ({ width, height, x: clickPoint?.x }),
     restoredBounds: () => ({ width: 420, height: 660 }),
     clampZoom: value => value, applyZoomFactor() {}, ensureSettingsLoaded() {}, skipTaskbarForSettings: () => true,
@@ -86,6 +87,7 @@ function fixture(platform = 'linux') {
     section('function showPopover(', 'function currentWindowToggleShortcutStatus('),
     section('function handleWindowToggleShortcut(', 'function trayMenuLocale('),
     section('function loadWindowFile(', 'function handleZoomShortcut('),
+    section("app.on('activate'", 'startPluginRuntime();'),
     section("app.on('window-all-closed'", '// Every window shares')
   ].join('\n'), context);
   context.createWindow();
@@ -103,6 +105,7 @@ function fixture(platform = 'linux') {
 }
 
 const HIBERNATE_MS = 600_000;
+const RETRY_MS = 60_000;
 
 test('explicit popover hide and show manage the timer without native visibility events', () => {
   const run = fixture('darwin');
@@ -146,6 +149,48 @@ test('hibernate rechecks eligibility and retains the renderer for live tray artw
   const win = fixture('win32');
   win.original.hide();
   assert.equal(win.timer(HIBERNATE_MS), undefined);
+});
+
+test('a temporary dependent window re-arms hibernation and releases it when closed', () => {
+  const run = fixture();
+  const blocker = { kind: 'dashboard' };
+  run.windows.add(blocker);
+  run.original.hide();
+  run.fire(HIBERNATE_MS);
+  assert.equal(run.original.isDestroyed(), false);
+  assert.ok(run.timer(RETRY_MS));
+  run.windows.delete(blocker);
+  run.fire(RETRY_MS);
+  assert.equal(run.original.isDestroyed(), true);
+  assert.equal(run.context.mainWindow, null);
+});
+
+test('activate wakes a hibernated window before the remaining-window filter', () => {
+  const run = fixture();
+  run.original.hide();
+  run.fire(HIBERNATE_MS);
+  assert.equal(run.context.mainWindow, null);
+  run.context.app.emit('activate');
+  assert.ok(run.context.mainWindow && !run.context.mainWindow.isDestroyed());
+  assert.equal(run.context.mainWindow.query.hibernateReveal, '1');
+});
+
+test('theme changes invalidate cached provider tray icons while hibernated', () => {
+  const updates = [];
+  const context = vm.createContext({
+    mainWindow: null,
+    mainWindowHibernated: true,
+    currentSystemDarkUi: null,
+    currentSystemDarkTrayUi: () => true,
+    providerTrayIcons: { bars: { image: 1 }, custom: { image: 2 } },
+    defaultTrayIcon: { image: 3 },
+    updateTrayDisplay: () => updates.push('update')
+  });
+  const fn = main.slice(main.indexOf('function pushSystemUiThemeToRenderer'), main.indexOf('// Windows cannot answer'));
+  vm.runInContext(`${fn}\npushSystemUiThemeToRenderer(true);`, context);
+  assert.deepEqual(Object.keys(context.providerTrayIcons), []);
+  assert.equal(context.defaultTrayIcon, null);
+  assert.deepEqual(updates, ['update']);
 });
 
 test('hibernate destroys just the hidden main window and keeps Linux running with or without other surfaces', () => {
