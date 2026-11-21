@@ -870,7 +870,6 @@ module.exports = {
   aggregateLimits,
   withLimitAccountLinks,
   hiddenLinkedLimitReadings,
-  limitAccountLinkScope: linkScope,
   isProviderStale,
   mergeCodexTransientWindows,
   normalizeLimitProvider,

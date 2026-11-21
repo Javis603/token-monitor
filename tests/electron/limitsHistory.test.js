@@ -148,6 +148,39 @@ test('paired quota readings both keep recording history under their original key
   assert.deepEqual(result.windows[0].points.map(point => point.at), [nowMs - 60_000, nowMs - 1000]);
 });
 
+test('remote paired history retains a balance carried from another device', async t => {
+  const { aggregateDevices } = require('../../src/shared/usage');
+  const { hashKey } = require('../../src/shared/hashKey');
+  const { withLimitAccountLinks } = require('../../src/shared/limits/core');
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'quota-pair-balance-history-'));
+  const nowMs = at(3, 12);
+  const store = createLimitsHistoryStore(path.join(directory, 'history.sqlite'), { now: () => nowMs });
+  t.after(async () => { await store.close(); fs.rmSync(directory, { recursive: true, force: true }); });
+  const keys = ['first', 'second'].map(key => hashKey('devin', key));
+  const row = (accountKey, offset, extra = {}) => ({
+    provider: 'devin', source: 'web', status: 'ok', accountKey,
+    accountQuotaScope: hashKey('devin-organization', 'fixture'),
+    updatedAt: new Date(nowMs - offset).toISOString(),
+    windows: [{ kind: 'weekly', usedPercent: 30 }],
+    ...extra
+  });
+  const devices = [
+    row(keys[0], 1000),
+    row(keys[0], 60_000, { balance: { amount: 123, currency: 'USD' } }),
+    row(keys[1], 0)
+  ].map((reading, index) => ({ deviceId: `device-${index}`, limits: { providers: [reading] } }));
+  const limitAccountPresentation = { devin: { labels: Object.fromEntries(keys.map(key => [key, 'Work'])) } };
+  const stats = aggregateDevices(devices, 0, nowMs, { limitAccountPresentation });
+  const hidden = stats.limits.providers.find(reading => reading.accountKey === keys[0]);
+  assert.equal(hidden.balance.amount, 123);
+  const pair = { provider: 'devin', scope: stats.limits.linkCandidates[0].scope, keys };
+  const remote = JSON.parse(JSON.stringify(withLimitAccountLinks({ ...stats, staleAfterMs: 0 }, { value: [pair] })));
+  assert.deepEqual(remote.limits.providers.map(reading => reading.accountKey), [keys[1]]);
+  await store.record('hub', remote.limits, remote);
+  const result = await store.query('hub', hidden);
+  assert.deepEqual(result.windows.find(window => window.balance).points.map(point => point.value), [123]);
+});
+
 test('SQLite stores one unchanged value across hours with only hourly coverage records', t => {
   const fixture = databaseFixture(t);
   const raw = [];
