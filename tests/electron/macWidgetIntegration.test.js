@@ -861,7 +861,7 @@ test('Widget build provenance fields are injected into the extension Info.plist'
   }
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_KIND = com\.tokenmonitor\.dashboard;/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_GIT_REVISION = unknown;/);
-  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 47;/);
+  assert.match(widgetBuildSource, /const WIDGET_UI_VERSION = 48;/);
   assert.match(widgetBuildSource, /const WIDGET_SCHEMA_VERSION = 10;/);
   assert.match(widgetDevSource, /fs\.rmSync\(extension, \{ recursive: true, force: true \}\)/);
   assert.match(widgetDevSource, /`TOKEN_MONITOR_MARKETING_VERSION=\$\{targetMarketingVersion\}`/);
@@ -1050,6 +1050,12 @@ test('Widget layout uses system margins without retaining the superseded scaffol
   assert.match(widgetInfo, /<key>TMWidgetSchemaVersion<\/key>\s*<string>\$\(TOKEN_MONITOR_WIDGET_SCHEMA_VERSION\)<\/string>/);
   assert.match(widgetProject, /TOKEN_MONITOR_WIDGET_KIND = com\.tokenmonitor\.dashboard;/);
 })
+
+test('Widget families inherit the host color scheme and allow WidgetKit to replace the background', () => {
+  assert.doesNotMatch(widgetSource, /\.environment\(\\\.colorScheme,|\.preferredColorScheme\(/);
+  assert.match(widgetSource, /\.containerBackground\(for: \.widget\)/);
+  assert.doesNotMatch(widgetSource, /\.containerBackgroundRemovable\(false\)/);
+});
 
 test('registered Widget families stay fixed to their purpose-built sizes', () => {
   assert.match(widgetSource, /TokenMonitorSummaryWidget[\s\S]*\.supportedFamilies\(\[\.systemSmall\]\)/);

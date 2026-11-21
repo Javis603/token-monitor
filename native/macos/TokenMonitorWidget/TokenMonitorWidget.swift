@@ -20,8 +20,6 @@ struct TokenMonitorWidget: Widget {
             provider: DashboardWidgetTimelineProvider()
         ) { entry in
             TokenMonitorWidgetView(entry: entry)
-                .containerBackground(for: .widget) { WidgetBackground() }
-                .environment(\.colorScheme, .dark)
         }
         .configurationDisplayName("Token Monitor Dashboard")
         .description("Usage, quota, breakdown, and activity in one dashboard.")
@@ -33,8 +31,6 @@ struct TokenMonitorSummaryWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: TokenMonitorWidgetConfiguration.summaryKind, intent: UsageSummaryWidgetIntent.self, provider: SummaryWidgetTimelineProvider()) { entry in
             TokenMonitorWidgetView(entry: entry)
-                .containerBackground(for: .widget) { WidgetBackground() }
-                .environment(\.colorScheme, .dark)
         }
         .configurationDisplayName("Token Monitor Summary")
         .description("Tokens, cost, and a compact trend.")
@@ -46,8 +42,6 @@ struct TokenMonitorActivityWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: TokenMonitorWidgetConfiguration.activityKind, provider: FixedWidgetTimelineProvider(page: .activity)) { entry in
             TokenMonitorWidgetView(entry: entry)
-                .containerBackground(for: .widget) { WidgetBackground() }
-                .environment(\.colorScheme, .dark)
         }
         .configurationDisplayName("Token Monitor Activity")
         .description("Your recent activity heatmap.")
@@ -59,8 +53,6 @@ struct TokenMonitorBreakdownWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: TokenMonitorWidgetConfiguration.breakdownKind, intent: BreakdownWidgetIntent.self, provider: BreakdownWidgetTimelineProvider()) { entry in
             TokenMonitorWidgetView(entry: entry)
-                .containerBackground(for: .widget) { WidgetBackground() }
-                .environment(\.colorScheme, .dark)
         }
         .configurationDisplayName("Token Monitor Breakdown")
         .description("Compare tools or models for one period.")
@@ -72,8 +64,6 @@ struct TokenMonitorQuotaWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: TokenMonitorWidgetConfiguration.quotaKind, intent: QuotaWidgetIntent.self, provider: QuotaWidgetTimelineProvider()) { entry in
             TokenMonitorWidgetView(entry: entry)
-                .containerBackground(for: .widget) { WidgetBackground() }
-                .environment(\.colorScheme, .dark)
         }
         .configurationDisplayName("Token Monitor Quota")
         .description("Subscription windows and reset times.")
@@ -83,18 +73,15 @@ struct TokenMonitorQuotaWidget: Widget {
 
 struct WidgetBackground: View {
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.widgetRenderingMode) private var renderingMode
 
     var body: some View {
-        ZStack {
-            Color(red: 0.035, green: 0.043, blue: 0.055)
-            LinearGradient(
-                colors: [
-                    Color.white.opacity(colorScheme == .dark ? 0.025 : 0.02),
-                    WidgetDesignTokens.accent.opacity(colorScheme == .dark ? 0.13 : 0.1)
-                ],
-                startPoint: .topTrailing,
-                endPoint: .bottomLeading
-            )
+        if renderingMode == .fullColor {
+            if colorScheme == .dark {
+                Color(red: 11 / 255, green: 12 / 255, blue: 14 / 255)
+            } else {
+                Color(red: 246 / 255, green: 247 / 255, blue: 249 / 255)
+            }
         }
     }
 }
@@ -117,6 +104,7 @@ struct TokenMonitorWidgetView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .containerBackground(for: .widget) { WidgetBackground() }
     }
 
     @ViewBuilder

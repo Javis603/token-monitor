@@ -2,6 +2,8 @@ import SwiftUI
 import WidgetKit
 
 struct ActivityHeatmap: View {
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.widgetRenderingMode) private var renderingMode
     let layout: WidgetHeatmapLayout
     let family: WidgetFamilyScope?
     let selectedDate: String?
@@ -50,12 +52,13 @@ struct ActivityHeatmap: View {
     }
 
     private func activityColor(_ intensity: Int) -> Color {
-        switch max(0, min(4, intensity)) {
-        case 0: .white.opacity(0.03)
-        case 1: Color(red: 90 / 255, green: 170 / 255, blue: 1).opacity(0.18)
-        case 2: Color(red: 120 / 255, green: 190 / 255, blue: 1).opacity(0.45)
-        case 3: Color(red: 150 / 255, green: 210 / 255, blue: 1).opacity(0.8)
-        default: Color(red: 180 / 255, green: 230 / 255, blue: 1)
+        let ink = renderingMode == .fullColor ? WidgetDesignTokens.chartBlue(for: colorScheme) : Color.white
+        switch intensity {
+        case ...0: return .primary.opacity(0.12)
+        case 1: return ink.opacity(0.32)
+        case 2: return ink.opacity(0.54)
+        case 3: return ink.opacity(0.76)
+        default: return ink
         }
     }
 }
@@ -74,6 +77,7 @@ private struct ActivityHeatmapCell: View {
     var body: some View {
         RoundedRectangle(cornerRadius: cornerRadius)
             .fill(cell.isFuture ? Color.clear : color)
+            .widgetAccentable(cell.intensity > 0)
             .frame(width: width, height: height)
             .overlay {
                 if isSelected {
