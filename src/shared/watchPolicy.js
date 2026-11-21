@@ -198,11 +198,17 @@ function watchAttributionRootsForClients(clientsCsv, watchRoots = null, options 
   return attributed;
 }
 
-function clientsForWatchPath(filePath, rootsByClient, ignoreByClient = null, copilotExporter = null) {
+function clientsForWatchPath(filePath, rootsByClient, ignoreByClient = null, copilotExporter = null, unlinkedExporter) {
   if (!filePath) return [];
   const resolved = path.resolve(filePath);
   const matched = [];
   for (const [client, roots] of Object.entries(rootsByClient || {})) {
+    // The watcher may be the only matcher that saw this alias on disk.
+    if (client === 'copilot' && unlinkedExporter && unlinkedExporter === copilotExporter?.canonicalFile
+      && roots.includes(unlinkedExporter)) {
+      matched.push(client);
+      continue;
+    }
     if (ignoreByClient?.[client]?.(resolved)) continue;
     if (roots.some((root) => {
       const resolvedRoot = path.resolve(root);
@@ -454,6 +460,12 @@ function watchPolicyEntries(clientsCsv, options = {}) {
 
   const sourceRoots = (client, ...ids) => (rootsByClient[client] || [])
     .filter((root) => ids.includes(root.id)).map((root) => root.dir);
+  // Watch the parent for late creation of COPILOT_OTEL_FILE_EXPORTER_PATH.
+  // Check it before other policies can accept an overlapping path, so even
+  // discovery with ignoreInitial can record the alias for a later unlink.
+  const exporter = options.copilotExporter ?? copilotExporterWatch(os.homedir());
+  if (candidates.copilot && exporter) bound('copilot', [exporter.dir], (_parts, resolved) => !exporter.matches(resolved));
+
   // Claude's parser and source fingerprint also read same-stem agent metadata.
   bound('claude', sourceRoots('claude', 'claude-projects', 'claude-transcripts'),
     recursiveSourceFiles((name) => name.endsWith('.jsonl') || name.endsWith('.meta.json')));
@@ -561,14 +573,6 @@ function watchPolicyEntries(clientsCsv, options = {}) {
   });
   bound('copilot', sourceRoots('copilot', 'vscode-empty-window-sessions'),
     (parts) => parts.length !== 1 || !parts[0].endsWith('.jsonl'));
-  // Tokscale ingests exactly the file COPILOT_OTEL_FILE_EXPORTER_PATH names
-  // (`path.is_file()`, no glob), but that file need not exist yet, so its parent
-  // is what gets watched. The parent is an arbitrary user-chosen directory and
-  // can be $HOME — everything in it except that one file is pruned, and
-  // watchAttributionRootsForClients keeps it from becoming a copilot prefix.
-  const exporter = options.copilotExporter ?? copilotExporterWatch(os.homedir());
-  if (candidates.copilot && exporter) bound('copilot', [exporter.dir], (_parts, resolved) => !exporter.matches(resolved));
-
   const cursorEnabled = String(clientsCsv || '').split(',').map((value) => value.trim().toLowerCase()).includes('cursor');
   // Cursor owns this source; Tokscale only reads its credentials/titles and
   // writes a separate usage cache. Never descend into extension storage, and
@@ -909,7 +913,9 @@ const WATCH_REFUSAL_CODES = new Set([WATCH_POLLING_LIMIT_CODE, WATCH_POLLING_UNA
 // in-process fallback alike. The bound lives here rather than in the collector
 // because the host can switch to polling on its own (a watch process that never
 // confirmed its exit), and a check the host can route around bounds nothing.
-function openWatch(chokidar, config = {}) {
+function openWatch(chokidar, config = {}, onEvent) {
+  const copilotEnabled = String(config.clients || '').split(',').some(client => client.trim().toLowerCase() === 'copilot');
+  const copilotExporter = copilotEnabled ? copilotExporterWatch(os.homedir()) : null;
   const ignored = activityWatchIgnored(watchIgnoreMatcher(config.clients, {
     customScanPaths: config.customScanPaths,
     cursorDesktopRoots: config.cursorDesktopRoots,
@@ -917,7 +923,8 @@ function openWatch(chokidar, config = {}) {
     env: config.env,
     cwdDir: config.cwdDir,
     codexHomes: config.codexHomes,
-    senpiSources: config.senpiSources
+    senpiSources: config.senpiSources,
+    copilotExporter
   }), config.usageDirs || config.dirs || [], config.activitySources || []);
   const limit = Number.isInteger(config.pollingEntryLimit) && config.pollingEntryLimit >= 0
     ? config.pollingEntryLimit
@@ -939,7 +946,15 @@ function openWatch(chokidar, config = {}) {
     error.code = WATCH_POLLING_LIMIT_CODE;
     throw error;
   }
-  return chokidar.watch(config.dirs, watcherOptions(usePolling, ignored));
+  const watcher = chokidar.watch(config.dirs, watcherOptions(usePolling, ignored));
+  if (onEvent) watcher.on('all', (event, filePath) => {
+    // Reuse the matcher that saw initial discovery. Keep the reported path so
+    // the collector can still apply every other client's own source policy.
+    const unlinkedExporter = event === 'unlink' && copilotExporter?.matches(path.resolve(filePath))
+      ? copilotExporter.canonicalFile : undefined;
+    onEvent(event, filePath, unlinkedExporter);
+  });
+  return watcher;
 }
 
 function watcherOptions(usePolling, ignored) {

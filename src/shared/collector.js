@@ -3003,7 +3003,7 @@ function startCollector(options) {
       log('No watchable client data directories found; relying on fallback interval only.');
       return;
     }
-    function handleWatchEvent(event, filePath) {
+    function handleWatchEvent(event, filePath, unlinkedExporter) {
       // The quit path leaves the watcher open (see stop), so events can still
       // arrive after the collector is done with them.
       if (stopped) return;
@@ -3011,7 +3011,7 @@ function startCollector(options) {
       // the collector cannot re-trigger itself. See
       // SELF_WATCHED_SQLITE_SIDECAR_CLIENTS for the measured per-client evidence.
       if (isSelfWatchSqliteSidecarEvent(filePath, rootsByClient)) return;
-      const eventClients = clientsForWatchPath(filePath, attributionRootsByClient, attributionIgnores, copilotExporter);
+      const eventClients = clientsForWatchPath(filePath, attributionRootsByClient, attributionIgnores, copilotExporter, unlinkedExporter);
       const activityClients = activityClientsForPath(filePath, activitySources);
       if (activityClients.length || eventClients.some(isSessionActivityClient)) {
         activityScheduler?.request();
