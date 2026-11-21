@@ -122,3 +122,14 @@ test('preview resolves custom and inherited fonts exactly like the live renderer
     }
   }
 });
+
+test('Windows Edge Dock preview uses the same regional App Default fonts as the live dock', () => {
+  const { DEFAULT_INTERFACE_FONT, resolveEffectiveFontSettings } = require('../../src/shared/fontSettings');
+  const settings = {
+    language: 'zh-TW',
+    fontContext: { platform: 'win32', locale: 'zh-TW', preferredLanguages: ['zh-Hant-HK'] }
+  };
+  const { appearance } = buildDisplayPreview(settings, 'edgeDock', 'open', 'win32').payload;
+  assert.equal(resolveEffectiveFontSettings(appearance, appearance.fontContext).interfaceFont,
+    '"Token Monitor Noto Sans HK", "Token Monitor JhengHei UI", ' + DEFAULT_INTERFACE_FONT);
+});

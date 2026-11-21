@@ -8678,11 +8678,7 @@ function applyControlLayout(swapSettingsAndRefresh) {
 }
 
 function resolveMainWindowFonts(settings) {
-  return fontSettingsApi.resolveEffectiveFontSettings(settings, {
-    platform: state.appInfo?.platform,
-    locale: currentLocale(),
-    preferredLanguages: state.appInfo?.preferredSystemLanguages ?? preferredLanguages()
-  });
+  return fontSettingsApi.resolveEffectiveFontSettings(settings, state.settings?.fontContext);
 }
 
 function applyFontSettings(settings) {
