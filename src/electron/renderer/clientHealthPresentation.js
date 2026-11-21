@@ -64,6 +64,9 @@
         for (const [id, tokens] of Object.entries(values?.clients || {})) {
           if (tokens > 0) clients.add(id);
         }
+        for (const [id, cost] of Object.entries(values?.clientCosts || {})) {
+          if (cost > 0) clients.add(id);
+        }
       }
     }
     return clients;
