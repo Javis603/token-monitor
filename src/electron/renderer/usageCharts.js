@@ -202,16 +202,24 @@
       }
       base = [...groups.keys()].sort((a, b) => b - a).map((idx) => {
         const ds = groups.get(idx); // days inherit the global sort, so earliest..latest
-        const values = ds.map((d) => d.value);
+        // A zero-usage day belongs to the bucket's calendar span but is not a
+        // price point: counting its zero would drag every bucket's low to the
+        // baseline and make open/close (and so up/down) meaningless. Buckets
+        // whose every day is zero still get a flat zero candle, so a quiet
+        // stretch stays visible on the timeline instead of collapsing the axis.
+        const active = ds.filter((d) => d.value > 0);
+        const values = (active.length ? active : ds).map((d) => d.value);
+        const open = values[0];
+        const close = values[values.length - 1];
         return {
           key: ds[0].date,
           endKey: ds[ds.length - 1].date,
           days: ds.length,
-          open: ds[0].value,
-          close: ds[ds.length - 1].value,
+          open,
+          close,
           high: Math.max(...values),
           low: Math.min(...values),
-          up: ds[ds.length - 1].value >= ds[0].value
+          up: close >= open
         };
       });
     }
@@ -231,6 +239,7 @@
       return {
         key: c.key, endKey: c.endKey, days: c.days,
         open: c.open, high: c.high, low: c.low, close: c.close, up: c.up,
+        flat: c.high === 0 && c.low === 0,
         x, width: bodyW, wickX: x + bodyW / 2,
         yHigh: yOf(c.high), yLow: yOf(c.low),
         bodyY, bodyHeight: Math.max(1, yOf(bottom) - bodyY)
@@ -489,6 +498,36 @@
     return Number.isFinite(num) && num > 0 ? arr.slice(-num) : arr;
   }
 
+  // History only stores days that saw usage, so a trend read straight out of it
+  // silently drops every zero-usage day and a "last 30 days" slice can actually
+  // span months. Rebuild the window from local calendar dates instead: every day
+  // in the window becomes a point, and a day without a row becomes an explicit
+  // zero. `days: 0` keeps the whole recorded run, still ending today so the quiet
+  // days after the last usage stay visible. Callers mark those zero points so a
+  // flat day is not simply absent from the chart.
+  function dailyWindow(daily, options) {
+    const o = Object.assign({ days: 0, todayKey: localDayKey() }, options || {});
+    const rows = (Array.isArray(daily) ? daily : [])
+      .map((row) => ({ row, key: String(row?.date || '').slice(0, 10) }))
+      .filter(({ key }) => /^\d{4}-\d{2}-\d{2}$/.test(key))
+      .sort((a, b) => a.key.localeCompare(b.key));
+    if (!rows.length) return [];
+    const today = /^\d{4}-\d{2}-\d{2}$/.test(String(o.todayKey))
+      ? String(o.todayKey).slice(0, 10)
+      : localDayKey();
+    // A device in a timezone ahead of ours can record a "today" later than ours;
+    // anchor on the later date so those rows are not cut off.
+    const end = rows[rows.length - 1].key > today ? rows[rows.length - 1].key : today;
+    const count = Math.max(0, Math.floor(n(o.days)));
+    const start = count > 0 ? addDaysUTC(end, -(count - 1)) : rows[0].key;
+    const byDate = new Map(rows.map(({ row, key }) => [key, row]));
+    const points = [];
+    for (let key = start; key <= end; key = addDaysUTC(key, 1)) {
+      points.push(byDate.get(key) || { date: key, tokens: 0, cost: 0 });
+    }
+    return points;
+  }
+
   function svgRound(v) {
     return Math.round(v * 100) / 100;
   }
@@ -586,9 +625,11 @@
       const cls = c.up ? 'candle-up' : 'candle-down';
       const bodyHeight = Math.max(1, c.bodyHeight);
       const bodyMid = c.bodyY + bodyHeight / 2;
-      const wick = `<line class="candle-wick candle-wick-high ${cls}" x1="${svgRound(c.wickX)}" y1="${svgRound(bodyMid)}" x2="${svgRound(c.wickX)}" y2="${svgRound(c.yHigh)}"></line>`
+      // A bucket with no recorded usage keeps its slot on the axis and its hover
+      // target, but draws no mark: a zero-height candle would read as real data.
+      const wick = c.flat ? '' : `<line class="candle-wick candle-wick-high ${cls}" x1="${svgRound(c.wickX)}" y1="${svgRound(bodyMid)}" x2="${svgRound(c.wickX)}" y2="${svgRound(c.yHigh)}"></line>`
         + `<line class="candle-wick candle-wick-low ${cls}" x1="${svgRound(c.wickX)}" y1="${svgRound(bodyMid)}" x2="${svgRound(c.wickX)}" y2="${svgRound(c.yLow)}"></line>`;
-      const body = `<rect class="candle-body ${cls}" x="${svgRound(c.x)}" y="${svgRound(c.bodyY)}" width="${svgRound(c.width)}" height="${svgRound(bodyHeight)}" rx="1"></rect>`;
+      const body = c.flat ? '' : `<rect class="candle-body ${cls}" x="${svgRound(c.x)}" y="${svgRound(c.bodyY)}" width="${svgRound(c.width)}" height="${svgRound(bodyHeight)}" rx="1"></rect>`;
       const tip = o.titleOf(c);
       const title = tip ? `<desc>${escapeXml(tip)}</desc>` : '';
       const hover = `<rect data-i="${i}" x="${svgRound(c.x)}" y="${svgRound(p.y)}" width="${svgRound(c.width)}" height="${svgRound(p.h)}" class="bar-hover">${title}</rect>`;
@@ -695,7 +736,7 @@
     localDayKey, weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
     areaLineChart, areaLineSvg,
     selectPreviewSeries, patchTodayBar, sparklineSvg,
-    applyVendorColors, modelColors, clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,
+    applyVendorColors, modelColors, clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily, dailyWindow,
     barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths
   };
 });
