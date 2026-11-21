@@ -168,7 +168,15 @@
         cum += height;
         segments.push({ key: k, value, x, width: barWidth, y: o.padTop + innerH - cum, height });
       }
-      return { label: e[o.labelKey], index: i, x, width: barWidth, total: totals[i], segments };
+      return {
+        label: e[o.labelKey],
+        index: i,
+        x,
+        width: barWidth,
+        total: totals[i],
+        segments,
+        hasRecord: e.hasRecord !== false && (e.hasRecord === true || totals[i] > 0)
+      };
     });
 
     return { width: o.width, height: o.height, plot: { x: o.padLeft, y: o.padTop, w: innerW, h: innerH }, maxTotal, keys, bars };
@@ -186,13 +194,21 @@
       options || {}
     );
     const days = (Array.isArray(daily) ? daily : [])
-      .map((d) => ({ date: String(d.date).slice(0, 10), value: n(d[o.metric]) }))
+      .map((d) => ({
+        date: String(d.date).slice(0, 10),
+        value: n(d[o.metric]),
+        hasRecord: d.hasRecord !== false && (d.hasRecord === true || n(d[o.metric]) > 0)
+      }))
       .sort((a, b) => a.date.localeCompare(b.date));
     const bucketDays = Math.max(1, Math.round(o.bucketDays));
 
     let base = [];
+    let maxBucketIdx = 0;
     if (days.length) {
       const lastDate = days[days.length - 1].date;
+      const firstDate = days[0].date;
+      maxBucketIdx = Math.floor(daysBetweenKeys(firstDate, lastDate) / bucketDays);
+
       const groups = new Map(); // bucket index counted back from the latest day (0 = newest)
       for (const d of days) {
         const idx = Math.floor(daysBetweenKeys(d.date, lastDate) / bucketDays);
@@ -202,29 +218,34 @@
       }
       base = [...groups.keys()].sort((a, b) => b - a).map((idx) => {
         const ds = groups.get(idx); // days inherit the global sort, so earliest..latest
-        const values = ds.map((d) => d.value);
+        const recorded = ds.filter((d) => d.hasRecord);
+        if (!recorded.length) return null;
+        const values = recorded.map((d) => d.value);
         return {
+          idx,
           key: ds[0].date,
           endKey: ds[ds.length - 1].date,
-          days: ds.length,
-          open: ds[0].value,
-          close: ds[ds.length - 1].value,
+          days: recorded.length,
+          open: recorded[0].value,
+          close: recorded[recorded.length - 1].value,
           high: Math.max(...values),
           low: Math.min(...values),
-          up: ds[ds.length - 1].value >= ds[0].value
+          up: recorded[recorded.length - 1].value >= recorded[0].value
         };
-      });
+      }).filter(Boolean);
     }
 
     const maxVal = Math.max(1, ...base.map((c) => c.high));
     const innerW = o.width - o.padLeft - o.padRight;
     const innerH = o.height - o.padTop - o.padBottom;
-    const slot = base.length ? innerW / base.length : innerW;
+    const totalSlots = Math.max(1, maxBucketIdx + 1);
+    const slot = totalSlots ? innerW / totalSlots : innerW;
     const bodyW = slot * (1 - o.gap);
     const yOf = (v) => o.padTop + innerH - innerH * v / maxVal;
 
-    const candles = base.map((c, i) => {
-      const x = o.padLeft + i * slot + (slot - bodyW) / 2;
+    const candles = base.map((c) => {
+      const slotPos = maxBucketIdx - c.idx;
+      const x = o.padLeft + slotPos * slot + (slot - bodyW) / 2;
       const top = Math.max(c.open, c.close);
       const bottom = Math.min(c.open, c.close);
       const bodyY = yOf(top);
@@ -489,6 +510,55 @@
     return Number.isFinite(num) && num > 0 ? arr.slice(-num) : arr;
   }
 
+  function calendarDailyRange(daily, range, options = {}) {
+    const arr = Array.isArray(daily) ? daily : [];
+    if (!arr.length) return [];
+
+    const dayMap = new Map();
+    let minDate = null;
+    let maxDate = null;
+    for (const d of arr) {
+      if (!d || !d.date) continue;
+      const key = String(d.date).slice(0, 10);
+      dayMap.set(key, d);
+      if (!minDate || key < minDate) minDate = key;
+      if (!maxDate || key > maxDate) maxDate = key;
+    }
+
+    if (!minDate || !maxDate) return [];
+
+    const num = Number(range);
+    let startDate;
+    let endDate;
+
+    if (Number.isFinite(num) && num > 0) {
+      const today = options.endDate ? String(options.endDate).slice(0, 10) : localDayKey();
+      endDate = maxDate > today ? maxDate : today;
+      startDate = addDaysUTC(endDate, -(Math.round(num) - 1));
+    } else {
+      startDate = options.startDate ? String(options.startDate).slice(0, 10) : minDate;
+      endDate = options.endDate ? String(options.endDate).slice(0, 10) : maxDate;
+    }
+
+    const result = [];
+    for (let key = startDate; key <= endDate; key = addDaysUTC(key, 1)) {
+      const existing = dayMap.get(key);
+      if (existing) {
+        result.push({ ...existing, date: key, hasRecord: true });
+      } else {
+        result.push({
+          date: key,
+          tokens: 0,
+          cost: 0,
+          perClient: {},
+          perModel: {},
+          hasRecord: false
+        });
+      }
+    }
+    return result;
+  }
+
   function svgRound(v) {
     return Math.round(v * 100) / 100;
   }
@@ -695,7 +765,7 @@
     localDayKey, weekStartKey, dailyBarsChart, candleChart, computeHeatmapIntensities, contribHeatmap, rollingYearHeatmap, statsCards, sparklinePreview,
     areaLineChart, areaLineSvg,
     selectPreviewSeries, patchTodayBar, sparklineSvg,
-    applyVendorColors, modelColors, clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,
+    applyVendorColors, modelColors, clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily, calendarDailyRange,
     barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths
   };
 });

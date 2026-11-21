@@ -356,7 +356,7 @@ function renderLegend(model) {
 function renderTrends() {
   const previousKind = state.chartKind;
   const previousGeometry = captureGeometry(els.chart, '.bar-stack[data-motion-key]');
-  const daily = charts.clampDaily(state.history?.daily || [], state.range === 'all' ? 0 : Number(state.range));
+  const daily = charts.calendarDailyRange(state.history?.daily || [], state.range);
   if (daily.length === 0) { els.chart.innerHTML = ''; els.legend.innerHTML = ''; state.chartModel = null; return; }
   const pad = { padTop: 10, padRight: 14, padBottom: 24, padLeft: 52 };
   
@@ -605,6 +605,11 @@ function positionTooltip(ev) {
 }
 
 function showBarTooltip(bar, ev) {
+  if (bar.hasRecord === false) {
+    els.tooltip.innerHTML = `<div class="tt-head">${shortDate(bar.label)} · ${t('dashboard.trends.noRecord')}</div>`;
+    positionTooltip(ev);
+    return;
+  }
   const segs = (bar.segments || []).filter((s) => s.value > 0).sort((a, b) => b.value - a.value);
   const rows = segs.map((s) =>
     `<div class="tt-row"><span class="tt-dot" data-c="${colorFor(s.key)}"></span><span class="tt-name">${s.key}</span><span class="tt-val">${formatCompact(s.value)}</span></div>`

@@ -7,7 +7,7 @@ const test = require('node:test');
 
 const charts = require('../../src/electron/renderer/usageCharts');
 const {
-  clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily,
+  clientColors, fallbackModelColors, modelVendorFor, modelColor, clampDaily, calendarDailyRange,
   dailyBarsChart, candleChart, contribHeatmap, statsCards,
   barsChartSvg, candleChartSvg, heatmapSvg, statsCardsHtml, statCardColumnWidths
 } = charts;
@@ -115,6 +115,107 @@ test('clampDaily keeps the last N days, or all for falsy/all', () => {
   assert.equal(clampDaily(daily, 'all').length, 40);
   assert.equal(clampDaily(daily, 0).length, 40);
   assert.deepEqual(clampDaily(daily, 7).map((d) => d.date).slice(0, 1), ['d33']);
+});
+
+test('calendarDailyRange produces continuous calendar days and fills missing days without records', () => {
+  const raw = [
+    { date: '2026-06-01', tokens: 100, cost: 0.05, perClient: { claude: { tokens: 100 } } },
+    { date: '2026-06-05', tokens: 250, cost: 0.12, perClient: { codex: { tokens: 250 } } }
+  ];
+
+  // 7 days ending 2026-06-07: 2026-06-01 .. 2026-06-07 (7 consecutive days)
+  const days7 = calendarDailyRange(raw, 7, { endDate: '2026-06-07' });
+  assert.equal(days7.length, 7);
+  assert.equal(days7[0].date, '2026-06-01');
+  assert.equal(days7[0].tokens, 100);
+  assert.equal(days7[0].hasRecord, true);
+  assert.equal(days7[1].date, '2026-06-02');
+  assert.equal(days7[1].tokens, 0);
+  assert.equal(days7[1].hasRecord, false);
+  assert.equal(days7[4].date, '2026-06-05');
+  assert.equal(days7[4].tokens, 250);
+  assert.equal(days7[4].hasRecord, true);
+  assert.equal(days7[6].date, '2026-06-07');
+  assert.equal(days7[6].tokens, 0);
+  assert.equal(days7[6].hasRecord, false);
+
+  // 30 days ending 2026-06-07: exactly 30 days
+  const days30 = calendarDailyRange(raw, 30, { endDate: '2026-06-07' });
+  assert.equal(days30.length, 30);
+  assert.equal(days30[0].date, '2026-05-09');
+  assert.equal(days30[29].date, '2026-06-07');
+
+  // 'all': spans minDate to maxDate continuously
+  const daysAll = calendarDailyRange(raw, 'all');
+  assert.equal(daysAll.length, 5);
+  assert.deepEqual(daysAll.map((d) => d.date), [
+    '2026-06-01', '2026-06-02', '2026-06-03', '2026-06-04', '2026-06-05'
+  ]);
+  assert.deepEqual(daysAll.map((d) => d.hasRecord), [true, false, false, false, true]);
+
+  // Empty or invalid input
+  assert.deepEqual(calendarDailyRange([], 30), []);
+  assert.deepEqual(calendarDailyRange(null, 30), []);
+});
+
+test('candleChart with sparse calendar days preserves K-line gaps and does not drag low to 0', () => {
+  // 14 days total:
+  // Bucket 1 (older, days 0..6: 2026-06-01..2026-06-07): active day with 150 tokens on 06-02, others unrecorded
+  // Bucket 0 (newer, days 7..13: 2026-06-08..2026-06-14): ALL days unrecorded (gap)
+  const days = [
+    { date: '2026-06-01', tokens: 0, hasRecord: false },
+    { date: '2026-06-02', tokens: 150, hasRecord: true },
+    { date: '2026-06-03', tokens: 0, hasRecord: false },
+    { date: '2026-06-04', tokens: 0, hasRecord: false },
+    { date: '2026-06-05', tokens: 0, hasRecord: false },
+    { date: '2026-06-06', tokens: 0, hasRecord: false },
+    { date: '2026-06-07', tokens: 0, hasRecord: false },
+    // Bucket 0: all unrecorded
+    { date: '2026-06-08', tokens: 0, hasRecord: false },
+    { date: '2026-06-09', tokens: 0, hasRecord: false },
+    { date: '2026-06-10', tokens: 0, hasRecord: false },
+    { date: '2026-06-11', tokens: 0, hasRecord: false },
+    { date: '2026-06-12', tokens: 0, hasRecord: false },
+    { date: '2026-06-13', tokens: 0, hasRecord: false },
+    { date: '2026-06-14', tokens: 0, hasRecord: false }
+  ];
+
+  const model = candleChart(days, { width: 200, height: 100, padTop: 0, padRight: 0, padBottom: 0, padLeft: 0, gap: 0, bucketDays: 7, metric: 'tokens' });
+  
+  // Bucket 0 was empty, so only 1 candle exists (bucket 1); bucket 0 is an empty gap
+  assert.equal(model.candles.length, 1);
+  const candle = model.candles[0];
+  assert.equal(candle.open, 150);
+  assert.equal(candle.close, 150);
+  assert.equal(candle.high, 150);
+  // Crucial requirement: low must NOT be pulled down to 0 by the 6 empty days in the bucket
+  assert.equal(candle.low, 150);
+  // Candle occupies the older slot (x = 0), leaving slot 1 (x = 100) empty as a gap
+  assert.equal(candle.x, 0);
+  assert.equal(candle.width, 100);
+});
+
+test('dailyBarsChart marks hasRecord: false on empty days and barsChartSvg retains hover target', () => {
+  const model = dailyBarsChart(
+    [
+      { date: '2026-06-01', tokens: 100, hasRecord: true, perClient: { claude: { tokens: 100 } } },
+      { date: '2026-06-02', tokens: 0, hasRecord: false, perClient: {} }
+    ],
+    { width: 200, height: 100, padTop: 0, padRight: 0, padBottom: 0, padLeft: 0, gap: 0, stackBy: 'client', metric: 'tokens' }
+  );
+  assert.equal(model.bars.length, 2);
+  assert.equal(model.bars[0].hasRecord, true);
+  assert.equal(model.bars[0].total, 100);
+  assert.equal(model.bars[0].segments.length, 1);
+
+  assert.equal(model.bars[1].hasRecord, false);
+  assert.equal(model.bars[1].total, 0);
+  assert.equal(model.bars[1].segments.length, 0);
+
+  const svg = barsChartSvg(model, { colorFor: () => '#fff' });
+  // The empty day has no colored bar rects, but retains its hover rect so user can inspect it
+  assert.match(svg, /data-i="1"/);
+  assert.match(svg, /class="bar-hover"/);
 });
 
 test('barsChartSvg renders one rect per segment with colorFor fill and a per-bar description', () => {
