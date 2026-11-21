@@ -54,6 +54,7 @@ function createPluginRuntime({
   persistPluginStates,
   persistManagementSettings,
   getLocale,
+  getFontContext,
   getContext,
   getAppSettings = () => ({}),
   businessAdapters = {},
@@ -240,7 +241,7 @@ function createPluginRuntime({
   };
   const demand = createSurfaceDemand((surface, refs) => manager.setSurfaceDemand(surface, refs));
   const detachedPageOwner = Symbol('detached-pages');
-  pages = createPluginPages({ BrowserWindow, ipcMain, manager, getSettings, getLocale,
+  pages = createPluginPages({ BrowserWindow, ipcMain, manager, getSettings, getLocale, getFontContext,
     onDemand: refs => demand.set(detachedPageOwner, 'page', refs) });
 
   // Each window that draws plugin views registers which refs it shows on
