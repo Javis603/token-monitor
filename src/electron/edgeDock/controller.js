@@ -856,7 +856,7 @@ function createEdgeDockController(deps) {
     const side = layout()?.side || placement().side;
     const currentDisplay = display();
     const displayKey = `${currentDisplay?.id ?? ''}:${currentDisplay?.scaleFactor ?? ''}`;
-    const key = `${displayKey}:${side}:${surface === 'rail' ? railMorphProgress() : ''}:${width}x${height}:${bounds.tailY ?? ''}:${bounds.cardY ?? ''}:${bounds.cardHeight ?? ''}:${bounds.contentY ?? ''}:${bounds.contentHeight ?? ''}:${surface === 'peek' ? `${peekMode}${peekMode === 'handle' ? `:${handleSize().width}x${handleSize().length}` : ''}` : ''}`;
+    const key = `${displayKey}:${side}:${surface === 'rail' ? railMorphProgress() : ''}:${width}x${height}:${bounds.tailY ?? ''}:${bounds.tailX ?? ''}:${bounds.cardY ?? ''}:${bounds.cardHeight ?? ''}:${bounds.contentY ?? ''}:${bounds.contentHeight ?? ''}:${surface === 'peek' ? `${peekMode}${peekMode === 'handle' ? `:${handleSize().width}x${handleSize().length}` : ''}` : ''}`;
     if (shapes[surface]?.key === key) return;
     const built = commandsFor(surface, bounds, side);
     const closed = Array.isArray(built) ? built : built.closed;
@@ -1174,7 +1174,7 @@ function createEdgeDockController(deps) {
 
   function paintBubble(frame, target = frame) {
     bubbleFrame = frame;
-    placeSurface('bubble', { ...cardCanvasBounds(frame, target), tailY: frame.tailY });
+    placeSurface('bubble', { ...cardCanvasBounds(frame, target), tailY: frame.tailY, tailX: frame.tailX });
     syncBubblePointer();
   }
 
@@ -1194,7 +1194,7 @@ function createEdgeDockController(deps) {
     const current = layout();
     if (!alive(bubble) || !current?.bubble || bubbleHeight <= 0 || !railVisible) return;
     const target = current.bubble;
-    const keys = ['x', 'y', 'width', 'height', 'tailY'];
+    const keys = ['x', 'y', 'width', 'height', 'tailY', 'tailX'];
     if (bubbleMotion && keys.every(key => bubbleMotion.to[key] === target[key])) return;
     // Retarget from the painted frame, never from the previous destination.
     // Only switches animate; live data/size updates on the same card stay direct.
@@ -1343,7 +1343,8 @@ function createEdgeDockController(deps) {
     next.displayId = normalizeEdgeDockDisplayId(targetDisplay?.id);
     const previous = placement();
     const from = railMorphProgress();
-    const changedMode = (next.floatingX === null) !== (previous.floatingX === null);
+    const floatingOn = (placed) => (isHorizontalEdgeDockSide(placed.side) ? placed.floatingY : placed.floatingX) !== null;
+    const changedMode = floatingOn(next) !== floatingOn(previous);
     const changedSide = next.side !== previous.side || next.displayId !== previous.displayId || changedMode;
     placementOverride = next;
     if (changedMode) animateRailPlacement(from, windows.rail.getBounds().x);

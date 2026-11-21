@@ -219,10 +219,6 @@ function naturalHeight(kind, metrics, compact) {
   return compact ? metrics.minCellHeight : metrics.cellHeight;
 }
 
-// One axis of cells, in the rail's own coordinates: how big each cell is and
-// where it starts. Cells keep their full size when everything fits and step
-// down to the compact density otherwise; past that the rail is clipped by the
-// work area rather than shrunk again.
 function isHorizontalEdgeDockSide(side) {
   const normalized = normalizeEdgeDockSide(side);
   return normalized === 'top' || normalized === 'bottom';
@@ -247,6 +243,9 @@ function edgeDockHorizontalPad(floatingY, metrics = EDGE_DOCK_METRICS) {
     : metrics.shoulder;
 }
 
+// One axis of cells, in the rail's own coordinates: how big each cell is and
+// where it starts. Cells keep their full size when everything fits, step down to
+// the compact density next, and only then shrink below it to stay inside the bar.
 function cellRun(kinds, sizeFor, extent, metrics, endPad = metrics.shoulder, fit = false) {
   const chrome = endPad * 2 + metrics.padding * 2;
   const gapTotal = Math.max(0, kinds.length - 1) * metrics.cellGap;
@@ -260,7 +259,19 @@ function cellRun(kinds, sizeFor, extent, metrics, endPad = metrics.shoulder, fit
   const used = measure(compact) - gapTotal;
   if (fit && room > 0 && used > room) {
     const scale = room / used;
-    sizes = sizes.map((size) => Math.max(40, Math.round(size * scale)));
+    // 40px is the point below which a cell stops being readable, not a promise
+    // the bar can keep: on a display too narrow for that many cells the run still
+    // has to end inside the outline that wraps it, so the floor yields first.
+    const floor = Math.min(40, Math.floor(room / kinds.length));
+    sizes = sizes.map((size) => Math.max(floor, Math.round(size * scale)));
+    // Rounding up can leave the run a pixel or two over; shave the longest cells.
+    let total = sizes.reduce((sum, size) => sum + size, 0);
+    while (total > room) {
+      const longest = sizes.indexOf(Math.max(...sizes));
+      if (sizes[longest] <= floor) break;
+      sizes[longest] -= 1;
+      total -= 1;
+    }
   }
   const offsets = [];
   let cursor = endPad + metrics.padding;
@@ -268,7 +279,10 @@ function cellRun(kinds, sizeFor, extent, metrics, endPad = metrics.shoulder, fit
     offsets.push(cursor);
     cursor += size + metrics.cellGap;
   }
-  return { kinds, sizes, offsets, compact, length: chrome + measure(compact) };
+  // The outline follows what is actually drawn, so a fitted run cannot leave the
+  // bar wider than its own cells.
+  const drawn = sizes.reduce((sum, size) => sum + size, 0);
+  return { kinds, sizes, offsets, compact, length: chrome + drawn + gapTotal };
 }
 
 function edgeDockCellLayout(workArea, cellKinds, metrics = EDGE_DOCK_METRICS) {
@@ -517,10 +531,12 @@ function edgeDockBubbleBounds({ railBounds, cellIndex, height, workArea, side, m
     const gap = Math.max(0, Number(metrics.bubbleGap) || 0);
     const x = Math.round(Math.max(workArea.x + margin,
       Math.min(workArea.x + workArea.width - cardWidth - margin, center - cardWidth / 2)));
+    // The window runs a tail past the card at each end of the gap, so the budget
+    // has to pay for both or the card's far edge leaves the work area.
     const space = edgeSide === 'top'
-      ? workArea.y + workArea.height - margin - (railBounds.y + railBounds.height + gap) - tail
-      : (railBounds.y - gap) - (workArea.y + margin) - tail;
-    const cardHeight = Math.max(60, Math.min(Math.round(Number(height) || 0), Math.max(60, space)));
+      ? workArea.y + workArea.height - margin - (railBounds.y + railBounds.height + gap) - tail * 2
+      : (railBounds.y - gap) - (workArea.y + margin) - tail * 2;
+    const cardHeight = Math.max(24, Math.min(Math.round(Number(height) || 0), space));
     // The bubble window is expanded outward by the tail so the visible card keeps
     // the same gap from the bar as a side rail's card does.
     const y = edgeSide === 'top'
@@ -601,7 +617,11 @@ function edgeDockPlacementForDrop({ workArea, pointer, metrics = EDGE_DOCK_METRI
       floatingY: Math.max(0, Math.min(1, travelY > 0 ? (topEdge - workArea.y) / travelY : 0.5))
     };
   }
-  if (toTop <= edgeSnap || toBottom <= edgeSnap) {
+  // A side rail dropped near the top or bottom edge turns into a bar there. It
+  // uses the same band as a bar that is already horizontal, so the gesture does
+  // not need to touch the very edge; a side edge still wins, checked above.
+  const band = final ? glueBand : edgeSnap;
+  if (toTop <= band || toBottom <= band) {
     return {
       side: toTop <= toBottom ? 'top' : 'bottom',
       offset: rowOffset(shoulder),
@@ -618,7 +638,9 @@ function edgeDockPlacementForDrop({ workArea, pointer, metrics = EDGE_DOCK_METRI
   const travel = Math.max(0, workArea.height - length - metrics.screenMargin * 2);
   const top = pointer.y - (Number(grabOffsetY) || 0);
   const offset = travel > 0 ? (top - minY) / travel : EDGE_DOCK_DEFAULT_OFFSET;
-  const left = pointer.x - grabOffsetX;
+  // A grab point measured along a bar means nothing for a 64px rail, so a drag
+  // that changes orientation re-centres on the rail instead of subtracting it.
+  const left = pointer.x - (horizontalNow ? metrics.railWidth / 2 : grabOffsetX);
   const right = workArea.x + workArea.width - metrics.railWidth;
   const snap = 24;
   const snapped = left <= workArea.x + snap || left >= right - snap;

@@ -15757,7 +15757,8 @@ function syncDockControls() {
   els.edgeDockInput.checked = enabled;
   els.edgeDockOptions?.classList.toggle('hidden', !enabled);
   const side = ['left', 'top', 'bottom'].includes(state.settings?.edgeDockSide) ? state.settings.edgeDockSide : 'right';
-  const floating = Number.isFinite(state.settings?.edgeDockFloatingX);
+  const floating = Number.isFinite(state.settings?.edgeDockFloatingX)
+    || Number.isFinite(state.settings?.edgeDockFloatingY);
   for (const input of els.edgeDockSideInputs || []) input.checked = !floating && input.value === side;
   const modes = (els.edgeDockModeInputs || []).map((input) => input.value);
   const mode = modes.includes(state.settings?.edgeDockMode) ? state.settings.edgeDockMode : 'autoHide';
