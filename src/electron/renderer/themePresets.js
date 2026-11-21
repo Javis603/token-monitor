@@ -41,7 +41,7 @@
   // The light palette also switches surfaces and native controls in themeCssVarEntries().
   const THEME_PRESETS = [
     { id: 'default', colors: { ...DEFAULT_THEME } },
-    { id: 'obsidian', colors: { accent: '#e6e8ec', chart: DEFAULT_THEME.chart, bg: '#0b0c0e', text: '#eceef2', muted: '#8f949c' } },
+    { id: 'obsidian', colors: { accent: '#e6e8ec', chart: DEFAULT_THEME.chart, bg: '#0b0c0e', text: '#eceef2', muted: '#c1c5ca' } },
     { id: 'porcelain', colors: { accent: '#2563eb', chart: DEFAULT_THEME.chart, bg: '#f6f7f9', text: '#1c1f26', muted: '#5b626d' } }
   ];
 

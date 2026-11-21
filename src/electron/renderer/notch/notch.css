@@ -240,7 +240,7 @@ html:not(.notch-black) .is-notch-attached .notch-panel :is(.notch-week-dates .is
 .notch-week-names { margin-top: 9px; text-align: center; font: 500 10.5px/1 var(--notch-display); color: var(--notch-faint); }
 .notch-week-dates { margin-top: 7px; text-align: center; font: 500 11.5px/18px var(--notch-display); color: var(--notch-dim); }
 .notch-week-names .is-today { color: var(--notch-ink); }
-.notch-week-dates .is-today { justify-self: center; width: 22px; border-radius: 9px; background: var(--notch-ink); color: #000; font-weight: 700; }
+.notch-week-dates .is-today { justify-self: center; width: 22px; border-radius: 9px; background: var(--notch-ink); color: contrast-color(var(--notch-ink)); font-weight: 700; }
 .notch-week-foot { margin-top: auto; display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
 .notch-week-summary { display: flex; align-items: baseline; gap: 5px; min-width: 0; font-size: 11.5px; line-height: 12px; white-space: nowrap; }
 .notch-week-info { align-self: center; }

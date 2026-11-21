@@ -922,9 +922,6 @@ span.settings-note.settings-item-desc {
 .settings-collapsible-group.expanded {
   background: rgba(var(--panel-rgb), 0.55);
 }
-html.native-liquid-glass .settings-collapsible-group {
-  background-color: rgba(var(--glass-rgb), 0.88);
-}
 .settings-section-toggle {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, auto);
@@ -4309,14 +4306,6 @@ html.is-windows .settings-panel select option {
   overflow: hidden auto;
   padding-right: 2px;
   scrollbar-width: none;
-}
-/* Keep the native rim visible while small labels remain legible even when
-   white or black desktop content moves behind the list. */
-html.native-liquid-glass .home-panel {
-  background-color: rgba(var(--glass-rgb), 0.88);
-  border-radius: 8px;
-  margin-inline: -6px;
-  padding: 8px;
 }
 .home-panel::-webkit-scrollbar { width: 0; height: 0; }
 .home-module {
