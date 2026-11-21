@@ -268,6 +268,7 @@ test('Devin subscriptions follow the organization when a login shares multiple o
   const sub = subscription({ provider: 'devin', binding: bindingFromAccount(alpha) });
 
   assert.equal(matchProviderAccount(sub, [beta, rotatedAlpha]), rotatedAlpha);
+  assert.equal(matchProviderAccount(sub, [beta]), null);
 });
 
 // The self-healing case: qoder hashes the cookie, so re-pasting an expired one
