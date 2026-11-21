@@ -112,6 +112,72 @@ for (const runtime of ['Node', 'Worker']) {
     assert.deepEqual((await (await client.send(endpoint)).json()).value, value);
   });
 
+  test(`${runtime}: confirmed fallback pairs share one quota and can be split across providers`, async (t) => {
+    const client = await fixture(t, runtime);
+    const { changeLimitAccountLink } = require('../../src/electron/limits/limitAccountLinks');
+    const endpoint = '/api/sync/settings/limitAccountLinks';
+    const namesEndpoint = '/api/sync/settings/limitAccountPresentation';
+    const providers = ['qoder', 'kimi', 'zaiteam'];
+    const keys = ['a', 'b'].map(letter => 'sha256:' + letter.repeat(64));
+    const names = work => Object.fromEntries(providers.map(provider => [provider,
+      { labels: { [keys[0]]: 'Work', [keys[1]]: work }, order: [] }
+    ]));
+    const read = async () => (await client.send('/api/stats')).json();
+    const upload = (index, qoder = {}) => client.send('/api/ingest', 'POST', {
+      deviceId: 'device-' + index,
+      limits: { providers: providers.map(provider => ({
+        provider, region: provider === 'qoder' ? 'global' : '', accountKey: keys[index], source: 'web', status: 'ok',
+        updatedAt: new Date(Date.now() - (1 - index) * 60_000).toISOString(),
+        windows: [{ kind: 'billing', metric: 'credits', remaining: 50 + index }],
+        ...(provider === 'qoder' ? qoder : {})
+      })) }
+    });
+    const counts = stats => providers.map(provider => stats.limits.providers.filter(row => row.provider === provider).length);
+    for (const index of [0, 1]) assert.equal((await upload(index)).status, 200);
+    assert.deepEqual(counts(await read()), [2, 1, 2], 'unnamed Kimi uses existing provider fallback');
+    assert.equal((await client.send(namesEndpoint, 'PUT', { baseRevision: 0, value: names('Personal') })).status, 200);
+    const differentNames = await read();
+    assert.deepEqual(counts(differentNames), [2, 2, 2]);
+    assert.deepEqual([...new Set(differentNames.limitAccountLinkCandidates.map(row => row.provider))].sort(), ['kimi', 'qoder']);
+    const pairs = ['qoder', 'kimi'].map(provider => ({
+      provider, scope: differentNames.limitAccountLinkCandidates.find(row => row.provider === provider).scope, keys
+    }));
+    const write = payload => client.send(endpoint, 'PUT', payload);
+    const change = (stats, pair, operation = 'link', presentation = names('work')) =>
+      changeLimitAccountLink(stats, { operation, revision: stats.syncSettingsRevisions.limitAccountLinks, pair }, presentation, write);
+    assert.deepEqual(await change(differentNames, pairs[0], 'link', names('Personal')), { ok: false });
+    assert.equal((await client.send(endpoint, 'PUT', { baseRevision: 0, value: pairs }, false)).status, 401);
+    assert.equal((await write({ baseRevision: 0, value: [pairs[0], pairs[0]] })).status, 400);
+    assert.equal((await client.send(namesEndpoint, 'PUT', { baseRevision: 1, value: names('work') })).status, 200);
+    const matchingNames = await read();
+    assert.deepEqual(counts(matchingNames), [2, 2, 2], 'name match alone leaves both rows visible');
+    assert.deepEqual(await change(matchingNames, { ...pairs[1], provider: 'zaiteam' }), { ok: false });
+    assert.deepEqual(await change(matchingNames, { ...pairs[0], scope: pairs[1].scope }), { ok: false });
+    assert.deepEqual(await change(matchingNames, pairs[0]), { ok: true });
+    assert.deepEqual(await change(matchingNames, pairs[1]), { ok: false }, 'stale revision cannot overwrite another pair');
+    assert.deepEqual(await change(await read(), pairs[1]), { ok: true });
+    await client.restart(false);
+    const linked = await read();
+    assert.deepEqual(counts(linked), [1, 1, 2]);
+    assert.deepEqual(linked.limits.providers.filter(row => row.provider !== 'zaiteam')
+      .map(row => row.windows[0].remaining), [51, 51], 'pick the better reading without summing the two');
+    assert.equal(linked.devices.flatMap(device => device.limits.providers).length, 6);
+    assert.deepEqual(linked.limitAccountLinks, pairs);
+    if (runtime === 'Worker') {
+      const publicStats = await (await client.send('/api/public/stats', 'GET', undefined, false)).json();
+      assert.deepEqual(counts(publicStats), [2, 1, 2]);
+      assert.doesNotMatch(JSON.stringify(publicStats), /limitAccountLink|sha256:|Personal|Work/);
+    }
+    assert.equal((await upload(0, { accountKeyPortable: true })).status, 200);
+    const proved = await read();
+    assert.deepEqual(counts(proved), [2, 1, 2], 'verified Qoder identity overrides a manual fallback link');
+    assert.deepEqual(await change(proved, pairs[0], 'split', {}), { ok: true });
+    assert.deepEqual(await change(await read(), pairs[1], 'split', {}), { ok: true });
+    const split = await read();
+    assert.deepEqual(counts(split), [2, 2, 2]);
+    assert.deepEqual(split.limitAccountLinks, []);
+  });
+
   test(`${runtime}: capability, settings and policy share authentication and default off`, async (t) => {
     const client = await fixture(t, runtime);
     assert.deepEqual(await (await client.send('/api/sync/content')).json(), {
@@ -131,7 +197,7 @@ for (const runtime of ['Node', 'Worker']) {
       });
     }
     const privateStats = await (await client.send('/api/stats')).json();
-    assert.deepEqual(privateStats.syncSettingsRevisions, { modelAliases: 0, customPricing: 0, limitAccountPresentation: 0 });
+    assert.deepEqual(privateStats.syncSettingsRevisions, { modelAliases: 0, customPricing: 0, limitAccountPresentation: 0, limitAccountLinks: 0 });
     if (runtime === 'Node') assert.equal((await client.send('/api/public/stats', 'GET', undefined, false)).status, 401);
   });
 
@@ -262,7 +328,7 @@ for (const runtime of ['Node', 'Worker']) {
     assert.equal((await client.send('/api/sync/settings/credentials', 'PUT', { baseRevision: 0, value: {} })).status, 404);
     await client.restart(false);
     assert.deepEqual(await (await client.send(pathPrices)).json(), empty);
-    assert.deepEqual((await (await client.send('/api/stats')).json()).syncSettingsRevisions, { modelAliases: 1, customPricing: 2, limitAccountPresentation: 0 });
+    assert.deepEqual((await (await client.send('/api/stats')).json()).syncSettingsRevisions, { modelAliases: 1, customPricing: 2, limitAccountPresentation: 0, limitAccountLinks: 0 });
     if (runtime === 'Worker') {
       assert.ok(client.state.gates > 5, 'compound operations use the DO gate');
       assert.equal(client.state.resets, 0, 'normal validation and CAS conflicts must not reset the DO');

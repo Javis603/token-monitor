@@ -2054,7 +2054,7 @@ function aggregateDevices(devices, staleAfterMs, nowMs = Date.now(), options = {
         periodName === 'month' && options.copyNormalizedMonthSessions === true);
     }
   }
-  aggregate.limits = aggregateLimits(aggregate.devices, staleAfterMs, now);
+  aggregate.limits = aggregateLimits(aggregate.devices, staleAfterMs, now, options.limitAccountPresentation, options.limitAccountLinks);
   if (Object.keys(sessionDetailsOmitted).length > 0) aggregate.sessionDetailsOmitted = sessionDetailsOmitted;
   if (Object.keys(periodProjectsOmitted).length > 0) aggregate.periodProjectsOmitted = periodProjectsOmitted;
   aggregate.devices.sort((a, b) => a.deviceId.localeCompare(b.deviceId));

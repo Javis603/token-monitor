@@ -7,7 +7,7 @@
  * aggregateKey?: (row: any, key: string, configured: boolean) => string,
  * collapseKey?: (row: any, key: string) => string,
  * freshnessKey?: (row: any) => string, snapshotRank?: (count: number) => number,
- * preserveAccount?: boolean, isPlaceholder?: (row: any) => boolean,
+ * preserveAccount?: boolean, canLinkAccount?: (row: any) => boolean, isPlaceholder?: (row: any) => boolean,
  * preserveStaleAccount?: (row: any) => boolean,
  * carryObservation?: (winner: any, loser: any, normalizeAliases: (values: unknown, key: string) => string[]) => any,
  * suppressCandidates?: (rows: any[], multiAccount: boolean, configured: (row: any) => boolean) => any[]}} ProviderPolicy */
