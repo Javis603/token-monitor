@@ -446,6 +446,7 @@ const {
   normalizeEdgeDockCustomScale,
   normalizeEdgeDockDisplayId,
   normalizeEdgeDockFloatingX,
+  normalizeEdgeDockFloatingY,
   normalizeEdgeDockMode,
   normalizeEdgeDockOffset,
   normalizeEdgeDockSide,
@@ -686,6 +687,7 @@ function defaultSettings() {
     edgeDockCustomScale: 1,
     edgeDockSide: 'right',
     edgeDockFloatingX: null,
+    edgeDockFloatingY: null,
     edgeDockOffset: null,
     edgeDockDisplayId: null,
     edgeDockItems: null,
@@ -2166,6 +2168,7 @@ function readSettings() {
     merged.edgeDockRunningIndicatorEnabled = parseBoolean(merged.edgeDockRunningIndicatorEnabled, true);
     merged.edgeDockSide = normalizeEdgeDockSide(merged.edgeDockSide);
     merged.edgeDockFloatingX = normalizeEdgeDockFloatingX(merged.edgeDockFloatingX);
+    merged.edgeDockFloatingY = normalizeEdgeDockFloatingY(merged.edgeDockFloatingY);
     merged.edgeDockOffset = normalizeEdgeDockOffset(merged.edgeDockOffset);
     merged.edgeDockDisplayId = normalizeEdgeDockDisplayId(merged.edgeDockDisplayId);
     merged.edgeDockMode = normalizeEdgeDockMode(merged.edgeDockMode);
@@ -5827,9 +5830,10 @@ function ensureEdgeDockController() {
     },
     // The same setting the widget's rate readout toggles, so both stay in step.
     onToggleRateMode: toggleDockRateMode,
-    onPlacementChange: ({ side, offset, displayId, floatingX }) => {
+    onPlacementChange: ({ side, offset, displayId, floatingX, floatingY }) => {
       settings.edgeDockSide = normalizeEdgeDockSide(side);
       settings.edgeDockFloatingX = normalizeEdgeDockFloatingX(floatingX);
+      settings.edgeDockFloatingY = normalizeEdgeDockFloatingY(floatingY);
       settings.edgeDockOffset = normalizeEdgeDockOffset(offset);
       settings.edgeDockDisplayId = normalizeEdgeDockDisplayId(displayId);
       saveSettings();
@@ -6007,6 +6011,7 @@ function setEdgeDockFromMenu(patch = {}) {
   if (patch.edgeDockSide !== undefined) {
     settings.edgeDockSide = normalizeEdgeDockSide(patch.edgeDockSide);
     settings.edgeDockFloatingX = null;
+    settings.edgeDockFloatingY = null;
   }
   saveSettings();
   // Also re-syncs the dock itself (pushSettingsToRenderer → syncEdgeDock).
@@ -7990,6 +7995,7 @@ app.whenReady().then(() => {
       edgeDockRunningIndicatorEnabled: parseBoolean(patch.edgeDockRunningIndicatorEnabled ?? settings.edgeDockRunningIndicatorEnabled, true),
       edgeDockSide: normalizeEdgeDockSide(patch.edgeDockSide ?? settings.edgeDockSide),
       edgeDockFloatingX: patch.edgeDockSide !== undefined ? null : normalizeEdgeDockFloatingX(settings.edgeDockFloatingX),
+      edgeDockFloatingY: patch.edgeDockSide !== undefined ? null : normalizeEdgeDockFloatingY(settings.edgeDockFloatingY),
       edgeDockOffset: normalizeEdgeDockOffset(patch.edgeDockOffset ?? settings.edgeDockOffset),
       edgeDockDisplayId: normalizeEdgeDockDisplayId(patch.edgeDockDisplayId ?? settings.edgeDockDisplayId),
       edgeDockMode: normalizeEdgeDockMode(patch.edgeDockMode ?? settings.edgeDockMode),

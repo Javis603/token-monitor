@@ -196,7 +196,10 @@
     container.addEventListener('keydown', event => { if (event.key === 'Escape' && active && !event.defaultPrevented) { event.stopPropagation(); close(); } });
     function sync() {
       container.dataset.platform = platform() || 'unknown';
-      container.dataset.edgeSide = settings()?.edgeDockSide === 'left' ? 'left' : 'right';
+      // The overview thumbnail follows the chosen edge, so a top or bottom bar is
+      // not previewed as a side rail the user did not pick.
+      const dockSide = settings()?.edgeDockSide;
+      container.dataset.edgeSide = ['left', 'top', 'bottom'].includes(dockSide) ? dockSide : 'right';
       if (active && !available(active)) close();
       for (const [id, entry] of entries) {
         entry.row.hidden = entry.tab.hidden = !available(id);
