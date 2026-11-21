@@ -250,6 +250,12 @@ test('named Copilot profiles keep the provenance of their actual key when GitHub
   assert.equal(aggregate(fallbacks).linkCandidates?.length ?? 0, 2);
   assert.deepEqual(fallbacks.map(row => row.accountKeyPortable), [false, false]);
 
+  const previousTokenKey = copilotAccountKey('previous-fixture-token');
+  const unknown = await collect({ ...profiles[0], accountKey: previousTokenKey });
+  assert.equal(unknown.accountKey, previousTokenKey);
+  assert.equal(unknown.accountKeyPortable, undefined);
+  assert.equal(aggregate([unknown]).linkCandidates, undefined);
+
   const verifiedKey = copilotAccountKey('octocat');
   const verified = await collect({ ...profiles[0], accountKey: verifiedKey });
   assert.equal(verified.accountKey, verifiedKey);

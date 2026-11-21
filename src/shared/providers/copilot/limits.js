@@ -445,10 +445,16 @@ async function fetchCopilotAccountLimits(options = {}, deps = {}) {
     }
     const credentialKey = copilotAccountKey(token, enterpriseHost);
     const accountKey = options.accountKey || (accountSeed ? copilotAccountKey(accountSeed, enterpriseHost) : remembered?.accountKey) || credentialKey;
-    const verified = accountKey !== credentialKey;
+    // A legacy profile can retain an earlier token hash. Verify the selected
+    // key against a GitHub identity, including the login saved with a profile.
+    const credentialFallback = accountKey === credentialKey;
+    const identitySeeds = [login, identity.id == null ? '' : String(identity.id), options.accountName];
+    const verified = !credentialFallback && (accountKey === remembered?.accountKey
+      || identitySeeds.some(seed => seed && accountKey === copilotAccountKey(seed, enterpriseHost)));
+    const pairableFallback = credentialFallback && normalizedEnterpriseHost(enterpriseHost) === COPILOT_DEFAULT_HOST;
     return mapCopilotUsageToProvider(usage, {
       accountKey,
-      ...(verified || normalizedEnterpriseHost(enterpriseHost) === COPILOT_DEFAULT_HOST ? { accountKeyPortable: verified } : {}),
+      ...(verified || pairableFallback ? { accountKeyPortable: verified } : {}),
       accountLabel: displayPlanLabel(usage.copilotPlan),
       accountName: login || options.accountName || remembered?.accountName,
       accountEmail: '',
