@@ -8,7 +8,7 @@ const { afterVisiblePaint, captureWindowViewState, restoreWindowViewState } = re
 
 const REVEAL_FALLBACK_MS = 1000;
 
-function createRetainedWindow({ BaseWindow, WebContentsView }, options, previous, { beforeReveal } = {}) {
+function createRetainedWindow({ BaseWindow, WebContentsView }, options, previous, { beforeReveal, afterReveal } = {}) {
   const { webPreferences = {}, ...windowOptions } = options;
   const win = new BaseWindow(windowOptions);
   let entry = entries.get(previous);
@@ -47,29 +47,55 @@ function createRetainedWindow({ BaseWindow, WebContentsView }, options, previous
   // retired the previous host.
   let revealEpoch = 0;
   let hidden = true;
+  let settled = false;
+  const refreshSurface = () => {
+    if (entry.owner !== win || win.isDestroyed()) return;
+    resize();
+    view.webContents.invalidate?.();
+    afterReveal?.(win);
+  };
   win.on('hide', () => {
     hidden = true;
+    settled = false;
     if (entry.owner !== win) return;
     revealEpoch++;
     win.setOpacity(0);
   });
   win.on('show', () => {
-    if (!hidden || entry.owner !== win) return;
+    if (entry.owner !== win || win.isDestroyed()) return;
+    if (!hidden) {
+      if (settled && win.isVisible() && !win.isMinimized?.()) refreshSurface();
+      return;
+    }
     hidden = false;
+    settled = false;
     const epoch = ++revealEpoch;
     let timer = null;
-    let settled = false;
     const reveal = () => {
-      clearTimeout(timer);
-      if (settled || epoch !== revealEpoch || entry.owner !== win || win.isDestroyed()) return;
-      settled = true;
-      beforeReveal?.(win);
-      win.setOpacity(1);
+      if (epoch !== revealEpoch || entry.owner !== win || win.isDestroyed()) return;
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        beforeReveal?.(win);
+        win.setOpacity(1);
+        refreshSurface();
+        return;
+      }
+      // If the fallback timer revealed before afterVisiblePaint() finished,
+      // re-sync the surface and backdrop once the page actually paints.
+      refreshSurface();
     };
     win.setOpacity(0);
     timer = setTimeout(reveal, REVEAL_FALLBACK_MS);
     view.webContents.executeJavaScript(`(${afterVisiblePaint.toString()})()`).then(reveal, reveal);
   });
+  for (const event of ['restore', 'maximize', 'unmaximize']) {
+    win.on(event, () => {
+      if (entry.owner !== win || win.isDestroyed() || hidden || !settled) return;
+      if (!win.isVisible() || win.isMinimized?.()) return;
+      refreshSurface();
+    });
+  }
   win.once('closed', () => {
     entries.delete(win);
     if (entry.owner === win && !view.webContents.isDestroyed()) view.webContents.close();

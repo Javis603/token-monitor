@@ -7191,6 +7191,32 @@ function loadWindowFile(target, options = {}) {
   });
 }
 
+function refreshRetainedWindowsBackdrop(target = mainWindow) {
+  if (process.platform !== 'win32') return false;
+  if (!target || target.isDestroyed?.()) return false;
+  if (typeof target.isVisible === 'function' && !target.isVisible()) return false;
+  if (typeof target.isMinimized === 'function' && target.isMinimized()) return false;
+  const refreshed = refreshWindowsBackdrop(target);
+  target.webContents?.invalidate?.();
+  return refreshed;
+}
+
+function attachWindowsBackdropRecovery() {
+  const refreshVisibleWindows = () => {
+    refreshRetainedWindowsBackdrop(mainWindow);
+    refreshRetainedWindowsBackdrop(dashboardWindow);
+  };
+  powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
+  powerMonitor.on('unlock-screen', () => {
+    notchController?.setLocked(false);
+    refreshVisibleWindows();
+  });
+  powerMonitor.on('resume', refreshVisibleWindows);
+  for (const event of ['display-added', 'display-removed', 'display-metrics-changed']) {
+    screen.on(event, refreshVisibleWindows);
+  }
+}
+
 function createWindow(boundsOverride, options = {}) {
   ensureSettingsLoaded();
   const collapsedFloatingBubble = options.collapsedFloatingBubble === true;
@@ -7229,7 +7255,8 @@ function createWindow(boundsOverride, options = {}) {
   };
   const win = process.platform === 'win32'
     ? createRetainedWindow({ BaseWindow, WebContentsView }, windowOptions, options.previousWindow, {
-      beforeReveal: refreshWindowsBackdrop
+      beforeReveal: refreshWindowsBackdrop,
+      afterReveal: refreshRetainedWindowsBackdrop
     })
     : new BrowserWindow(windowOptions);
   mainWindow = win;
@@ -7405,7 +7432,8 @@ function replaceMainWindow(bounds, options = {}) {
       }
     }
     handoffWindow(old, next, {
-      focus: options.focus === true || (options.focus !== false && wasFocused)
+      focus: options.focus === true || (options.focus !== false && wasFocused),
+      afterHandoff: process.platform === 'win32' ? refreshRetainedWindowsBackdrop : undefined
     });
     if (process.platform === 'win32') await restoreRetainedWindowState(next, !options.collapsedFloatingBubble);
   }).catch(error => {
@@ -7528,8 +7556,7 @@ function appIsIdleForHeapCollection() {
 
 app.whenReady().then(() => {
   ensureSettingsLoaded();
-  powerMonitor.on('lock-screen', () => notchController?.setLocked(true));
-  powerMonitor.on('unlock-screen', () => notchController?.setLocked(false));
+  attachWindowsBackdropRecovery();
   void sessionProxy.apply();
   // Switching the OS between light and dark repaints the taskbar underneath an
   // icon we have already handed to the shell, so the renderer has to recompose
