@@ -1,4 +1,5 @@
 import AppKit
+import SwiftUI
 import XCTest
 
 final class WidgetSnapshotDecodingTests: XCTestCase {
@@ -695,6 +696,24 @@ final class WidgetSnapshotDecodingTests: XCTestCase {
 
         XCTAssertEqual(reloadCount, 1)
         XCTAssertFalse(RefreshWidgetIntent.openAppWhenRun)
+    }
+
+    func testWidgetInstancesCanPinOppositeAppearancesOrFollowTheSystem() {
+        let first = UsageSummaryWidgetIntent()
+        let second = UsageSummaryWidgetIntent()
+        first.appearance = .light
+        second.appearance = .dark
+
+        for system in [ColorScheme.dark, .light] {
+            XCTAssertEqual(first.appearance.colorScheme(for: system), .light)
+            XCTAssertEqual(second.appearance.colorScheme(for: system), .dark)
+        }
+
+        first.appearance = .automatic
+        for system in [ColorScheme.light, .dark, .light] {
+            XCTAssertEqual(first.appearance.colorScheme(for: system), system)
+            XCTAssertEqual(second.appearance.colorScheme(for: system), .dark)
+        }
     }
 
     func testWidgetFamilyScopeMapsSupportedFamiliesOnly() {

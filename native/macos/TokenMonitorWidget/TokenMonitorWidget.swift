@@ -40,7 +40,7 @@ struct TokenMonitorSummaryWidget: Widget {
 
 struct TokenMonitorActivityWidget: Widget {
     var body: some WidgetConfiguration {
-        StaticConfiguration(kind: TokenMonitorWidgetConfiguration.activityKind, provider: FixedWidgetTimelineProvider(page: .activity)) { entry in
+        AppIntentConfiguration(kind: TokenMonitorWidgetConfiguration.activityKind, intent: ActivityWidgetIntent.self, provider: ActivityWidgetTimelineProvider()) { entry in
             TokenMonitorWidgetView(entry: entry)
         }
         .configurationDisplayName("Token Monitor Activity")
@@ -71,26 +71,14 @@ struct TokenMonitorQuotaWidget: Widget {
     }
 }
 
-struct WidgetBackground: View {
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.widgetRenderingMode) private var renderingMode
-
-    var body: some View {
-        if renderingMode == .fullColor {
-            if colorScheme == .dark {
-                Color(red: 11 / 255, green: 12 / 255, blue: 14 / 255)
-            } else {
-                Color(red: 246 / 255, green: 247 / 255, blue: 249 / 255)
-            }
-        }
-    }
-}
-
 struct TokenMonitorWidgetView: View {
     @Environment(\.widgetFamily) private var family
+    @Environment(\.colorScheme) private var systemColorScheme
+    @Environment(\.widgetRenderingMode) private var renderingMode
     let entry: TokenMonitorEntry
 
     var body: some View {
+        let scheme = entry.appearance.colorScheme(for: systemColorScheme)
         Group {
             if let snapshot = entry.snapshot {
                 content(snapshot)
@@ -104,7 +92,12 @@ struct TokenMonitorWidgetView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .containerBackground(for: .widget) { WidgetBackground() }
+        .environment(\.colorScheme, scheme)
+        .containerBackground(for: .widget) {
+            if renderingMode == .fullColor {
+                WidgetDesignTokens.background(for: scheme)
+            }
+        }
     }
 
     @ViewBuilder

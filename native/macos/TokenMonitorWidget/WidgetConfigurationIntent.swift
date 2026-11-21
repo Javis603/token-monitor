@@ -1,5 +1,6 @@
 import AppIntents
 import Foundation
+import SwiftUI
 import WidgetKit
 
 enum WidgetPage: String, CaseIterable {
@@ -49,12 +50,43 @@ enum WidgetQuotaMode: String, AppEnum, CaseIterable {
     ]
 }
 
+enum WidgetAppearance: String, AppEnum, CaseIterable {
+    case automatic
+    case light
+    case dark
+
+    static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Appearance")
+    static let caseDisplayRepresentations: [WidgetAppearance: DisplayRepresentation] = [
+        .automatic: DisplayRepresentation(title: "Automatic"),
+        .light: DisplayRepresentation(title: "Light"),
+        .dark: DisplayRepresentation(title: "Dark")
+    ]
+
+    func colorScheme(for system: ColorScheme) -> ColorScheme {
+        switch self {
+        case .automatic: system
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
+
+struct ActivityWidgetIntent: WidgetConfigurationIntent {
+    static let title: LocalizedStringResource = "Activity"
+
+    @Parameter(title: "Appearance", default: .automatic)
+    var appearance: WidgetAppearance
+}
+
 struct UsageSummaryWidgetIntent: WidgetConfigurationIntent {
     static let title: LocalizedStringResource = "Usage Summary"
     static let description = IntentDescription("Choose the usage period shown by this widget.")
 
     @Parameter(title: "Period", default: .day)
     var period: WidgetPeriod
+
+    @Parameter(title: "Appearance", default: .automatic)
+    var appearance: WidgetAppearance
 }
 
 struct BreakdownWidgetIntent: WidgetConfigurationIntent {
@@ -66,6 +98,9 @@ struct BreakdownWidgetIntent: WidgetConfigurationIntent {
 
     @Parameter(title: "Period", default: .day)
     var period: WidgetPeriod
+
+    @Parameter(title: "Appearance", default: .automatic)
+    var appearance: WidgetAppearance
 }
 
 struct DashboardWidgetIntent: WidgetConfigurationIntent {
@@ -86,6 +121,9 @@ struct DashboardWidgetIntent: WidgetConfigurationIntent {
 
     @Parameter(title: "Quota 2")
     var secondaryQuota: WidgetSecondaryQuotaSelection?
+
+    @Parameter(title: "Appearance", default: .automatic)
+    var appearance: WidgetAppearance
 }
 
 struct QuotaWidgetIntent: WidgetConfigurationIntent {
@@ -100,6 +138,9 @@ struct QuotaWidgetIntent: WidgetConfigurationIntent {
 
     @Parameter(title: "Quota 2")
     var secondaryQuota: WidgetSecondaryQuotaSelection?
+
+    @Parameter(title: "Appearance", default: .automatic)
+    var appearance: WidgetAppearance
 }
 
 enum WidgetQuotaSelectionID {

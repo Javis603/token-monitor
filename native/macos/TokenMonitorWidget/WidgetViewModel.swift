@@ -27,6 +27,12 @@ enum WidgetDesignTokens {
     static let dividerOpacity = 0.14
     static let accent = Color.accentColor
 
+    static func background(for scheme: ColorScheme) -> Color {
+        scheme == .dark
+            ? Color(red: 11 / 255, green: 12 / 255, blue: 14 / 255)
+            : Color(red: 246 / 255, green: 247 / 255, blue: 249 / 255)
+    }
+
     static func chartBlue(for scheme: ColorScheme) -> Color {
         scheme == .dark
             ? Color(red: 115 / 255, green: 189 / 255, blue: 245 / 255)
