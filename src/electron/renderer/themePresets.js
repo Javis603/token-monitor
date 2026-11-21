@@ -45,9 +45,16 @@
     { id: 'porcelain', colors: { accent: '#2563eb', chart: DEFAULT_THEME.chart, bg: '#f6f7f9', text: '#1c1f26', muted: '#5b626d' } }
   ];
 
-  function liquidGlassThemeColors(dark) {
-    const id = dark ? 'obsidian' : 'porcelain';
-    return THEME_PRESETS.find(preset => preset.id === id).colors;
+  function themePaletteKey(settings, glassScheme) {
+    if (!glassScheme || settings?.macGlassFollowSystem === false) return 'themeColors';
+    return glassScheme === 'dark' ? 'macGlassDarkColors' : 'macGlassLightColors';
+  }
+
+  function themePalette(settings, key) {
+    if (key === 'themeColors') return settings?.themeColors;
+    const id = key === 'macGlassDarkColors' ? 'obsidian' : 'porcelain';
+    const base = THEME_PRESETS.find(preset => preset.id === id).colors;
+    return { ...base, ...normalizeOverrides(settings?.[key], INTERFACE_COLOR_KEYS) };
   }
 
   // Surface RGBs used when the background is light, so overlays/borders read as
@@ -226,7 +233,8 @@
     THEME_VAR_MAP,
     DEFAULT_THEME,
     THEME_PRESETS,
-    liquidGlassThemeColors,
+    themePaletteKey,
+    themePalette,
     VENDOR_ORDER,
     VENDOR_LABELS,
     isValidHex,

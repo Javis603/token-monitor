@@ -2,7 +2,7 @@
 
 const os = require('node:os');
 const path = require('node:path');
-const { liquidGlassThemeColors } = require('../renderer/themePresets');
+const { themePaletteKey, themePalette } = require('../renderer/themePresets');
 const { CARD_MOVE_MS, CARD_SPRING, advanceCardFrame } = require('../cardSpring');
 const { createCardMotionDriver } = require('../cardMotion');
 const { cardCanvasBounds, createCardPointerRouting } = require('../cardCanvas');
@@ -572,7 +572,10 @@ function createEdgeDockController(deps) {
     const shapedGlass = nativeMaterial[surface] === true && glasses[surface] !== null
       && (surface !== 'peek' || peekMode === 'refresh');
     const base = { surface, side, platform, osRelease: os.release(), appearance, glass: nativeMaterial[surface] === true, liquidGlass: shapedGlass, shape: shapes[surface], zoom: surface === 'bubble' ? bubbleScale() : dockScale() };
-    if (shapedGlass) base.appearance = { ...appearance, themeColors: liquidGlassThemeColors(liquidGlass()?.dark !== false) };
+    if (shapedGlass) {
+      const key = themePaletteKey(appearance, liquidGlass()?.dark === false ? 'light' : 'dark');
+      base.appearance = { ...appearance, themeColors: themePalette(appearance, key) };
+    }
     if (surface === 'rail') {
       return {
         ...base,

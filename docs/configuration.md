@@ -26,7 +26,7 @@ Click the `⚙` button in the bottom-right corner of the widget to open the sett
 
 Currency selection is independent of the interface language. Currency menus keep USD first, followed by the other currency codes in alphabetical order. Subscription and top-up forms require whole amounts for JPY and KRW. Amounts entered in the other supported currencies are rounded to two decimal places when saved.
 
-On macOS, Liquid Glass uses Porcelain in light appearance and Obsidian in dark appearance, including when macOS switches automatically. The selected interface theme applies to surfaces using other materials.
+Under **Appearance → Interface Theme**, **Match Liquid Glass to macOS** starts with Porcelain in light mode and Obsidian in dark mode. Customize a color or apply a theme code to edit the current mode. Each mode remembers its own colors. Turn the switch off to use your saved manual theme. Surfaces with other materials use the manual theme.
 
 On supported macOS versions, Clear keeps its sharp glass appearance when focus changes and uses a dark tint to reduce the pale wash and keep text legible. Tinted Regular glass also keeps its tint consistent between focused windows and nonactivating Dock/Notch panels; untinted Regular retains its existing appearance. Glass opacity, depth, and native tint sliders preview on the floating surfaces while dragging, using each surface's selected glass style; values are saved on release.
 

@@ -22,6 +22,8 @@ const {
   hexToRgbTriplet,
   isLightHex,
   themeCssVarEntries,
+  themePaletteKey,
+  themePalette,
   mergeVendorColors,
   orderedVendorIds,
   vendorLabel
@@ -41,6 +43,22 @@ test('interface palette includes chart colour independently from semantic colour
   }
   // bg default must equal the --glass-rgb default (48, 52, 56).
   assert.equal(hexToRgbTriplet(DEFAULT_THEME.bg), '48, 52, 56');
+});
+
+test('Liquid Glass keeps independent per-scheme overrides and restores manual colors', () => {
+  const settings = {
+    themeColors: { bg: '#304050' }, macGlassDarkColors: { chart: '#907080' },
+    macGlassLightColors: { muted: '#123456' }
+  };
+  const palette = scheme => themePalette(settings, themePaletteKey(settings, scheme));
+  const preset = id => THEME_PRESETS.find(p => p.id === id).colors;
+  assert.deepEqual(palette('light'), { ...preset('porcelain'), muted: '#123456' });
+  assert.deepEqual(palette('dark'), { ...preset('obsidian'), chart: '#907080' });
+  assert.deepEqual(palette(undefined), settings.themeColors);
+  settings.macGlassFollowSystem = false;
+  for (const scheme of ['dark', 'light']) assert.deepEqual(palette(scheme), settings.themeColors);
+  settings.macGlassFollowSystem = true;
+  assert.equal(palette('dark').chart, '#907080');
 });
 
 test('semantic success states stay independent from the custom accent', () => {

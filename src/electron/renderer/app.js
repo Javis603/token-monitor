@@ -619,7 +619,9 @@ Object.assign(els, {
   chooseBackgroundImageButton: document.getElementById('chooseBackgroundImageButton'),
   clearBackgroundImageButton: document.getElementById('clearBackgroundImageButton'),
   subscriptionsSettingsSummary: document.getElementById('subscriptionsSettingsSummary'),
-  liquidGlassThemeNote: document.getElementById('liquidGlassThemeNote'),
+  macGlassThemeRow: document.getElementById('macGlassThemeRow'),
+  macGlassFollowSystemInput: document.getElementById('macGlassFollowSystemInput'),
+  macGlassEditingNote: document.getElementById('macGlassEditingNote'),
   themePresetChips: document.getElementById('themePresetChips'),
   themeColorGrid: document.getElementById('themeColorGrid'),
   themeCodeInput: document.getElementById('themeCodeInput'),
@@ -8711,7 +8713,7 @@ function applyAppearanceSettings(settings) {
   document.documentElement.classList.toggle('system-glass-disabled', systemGlassDisabled);
   const nativeMaterial = glassRenderingApi.usesNativeMaterial(nativeMaterialState);
   const nativeTint = nativeMaterialState.type === 'liquid-glass';
-  els.liquidGlassThemeNote?.classList.toggle('hidden', !nativeMaterialState.liquidGlassSupported);
+  els.macGlassThemeRow?.classList.toggle('hidden', !nativeMaterialState.liquidGlassSupported);
   els.glassOpacityRow?.classList.toggle('hidden', nativeTint);
   for (const [key, mode] of nativeGlassTintSettings) {
     const active = nativeTint && macGlass.backdropMode === mode;
@@ -8749,7 +8751,22 @@ function applyAppearanceSettings(settings) {
   applyFontSettings(settings);
   // Only full settings objects carry themeColors; glass/zoom preview patches
   // omit it, so we must not wipe theme overrides mid-slider-drag.
-  if (settings && 'themeColors' in settings) applyThemeColors(settings.themeColors);
+  if (settings && 'themeColors' in settings) {
+    const key = themePresetsApi.themePaletteKey(settings, nativeMaterialState.colorScheme);
+    const changed = key !== activeThemeKey;
+    if (changed) {
+      appearanceColorPicker.close();
+      // A picker write may still be queued for the previous palette.
+      els.themeColorGrid?.replaceChildren();
+      activeThemeKey = key;
+    }
+    applyThemeColors(themePresetsApi.themePalette(settings, key));
+    if (changed) {
+      invalidateThemeCodeFeedback();
+      buildAppearanceColorControls(true);
+      renderSettingsSummaries();
+    }
+  }
   els.liveDot.style.display = (settings?.showLiveDot !== false) ? '' : 'none';
   renderLiveTokenRate();
   els.shell.classList.toggle('desktop-mode', settings?.windowBehavior === 'desktop');
@@ -8863,13 +8880,14 @@ async function changeBackgroundImage(clear = false) {
 const themePresetsApi = window.TokenMonitorThemePresets;
 let themeCodeFeedbackGeneration = 0;
 let appliedThemeOverrides = {};
+let activeThemeKey = 'themeColors';
 // Snapshot of the canonical brand colours, taken before any override is
 // applied. clientColors is mutated in place (other modules hold the same
 // reference), so this is the source of truth for "reset to brand".
 const BRAND_VENDOR_COLORS = vendorPresentationApi.vendorColors();
 
 function appearanceSummary() {
-  const theme = themePresetsApi.normalizeOverrides(state.settings?.themeColors, themePresetsApi.INTERFACE_COLOR_KEYS);
+  const theme = themePresetsApi.themePalette(state.settings, activeThemeKey);
   const vendor = themePresetsApi.normalizeOverrides(state.settings?.vendorColors, Object.keys(BRAND_VENDOR_COLORS));
   const presetId = matchingThemePresetId(theme);
   const presetLabel = presetId ? t(`settings.appearance.preset.${presetId}`) : t('settings.appearance.custom');
@@ -8891,7 +8909,6 @@ function matchingThemePresetId(overrides) {
 }
 
 function applyThemeColors(overrides) {
-  overrides = nativeMaterialState.themeColors ?? overrides;
   appliedThemeOverrides = themePresetsApi.normalizeOverrides(overrides, themePresetsApi.INTERFACE_COLOR_KEYS);
   const root = document.documentElement.style;
   for (const { name, value } of themePresetsApi.themeCssVarEntries(appliedThemeOverrides)) {
@@ -8911,12 +8928,20 @@ function resolvedThemeColor(key) {
   return appliedThemeOverrides[key] || themePresetsApi.DEFAULT_THEME[key];
 }
 
-function buildAppearanceColorControls() {
-  renderThemePresetChips();
+function buildAppearanceColorControls(paletteChanged = false) {
+  const automatic = activeThemeKey !== 'themeColors';
+  if (els.macGlassFollowSystemInput) els.macGlassFollowSystemInput.checked = state.settings?.macGlassFollowSystem !== false;
+  els.themePresetChips?.classList.toggle('hidden', automatic);
+  if (els.macGlassEditingNote) {
+    els.macGlassEditingNote.classList.toggle('hidden', !automatic);
+    const preset = activeThemeKey === 'macGlassDarkColors' ? 'obsidian' : 'porcelain';
+    els.macGlassEditingNote.textContent = automatic ? t('settings.appearance.editingGlassTheme', { theme: t(`settings.appearance.preset.${preset}`) }) : '';
+  }
+  if (!automatic) renderThemePresetChips();
   renderThemeColorGrid();
   renderVendorColorList();
-  if (els.themeCodeInput && document.activeElement !== els.themeCodeInput) {
-    const code = themePresetsApi.encodeThemeCode(state.settings?.themeColors);
+  if (els.themeCodeInput && (paletteChanged || document.activeElement !== els.themeCodeInput)) {
+    const code = themePresetsApi.encodeThemeCode(themePresetsApi.themePalette(state.settings, activeThemeKey));
     if (els.themeCodeInput.value !== code) {
       els.themeCodeInput.value = code;
       invalidateThemeCodeFeedback();
@@ -9005,11 +9030,14 @@ function renderAppearanceColorRows(container, keys, { rowClass, nameClass, reset
 }
 
 function renderThemeColorGrid() {
-  const saved = themePresetsApi.mergeThemeColors(state.settings?.themeColors);
+  const slot = activeThemeKey;
+  const saved = themePresetsApi.mergeThemeColors(themePresetsApi.themePalette(state.settings, slot));
   renderAppearanceColorRows(els.themeColorGrid, ['bg', 'text', 'muted', 'accent', 'chart'], {
     rowClass: 'color-picker-row', nameClass: 'color-picker-name', resetLabel: 'settings.appearance.resetColor',
     nameFor: key => t(`settings.appearance.color.${key}`), colorFor: key => saved[key],
-    preview: previewThemeColor, save: saveThemeColor, reset: resetThemeColor
+    preview: (key, value) => previewThemeColor(slot, key, value),
+    save: (key, value) => saveThemeColor(slot, key, value),
+    reset: key => resetThemeColor(slot, key)
   });
 }
 
@@ -9028,32 +9056,32 @@ function queueAppearanceColorChange(write) {
   return appearanceColorPicker.enqueue(write);
 }
 
-function currentThemeOverrides() {
-  return themePresetsApi.normalizeOverrides(state.settings?.themeColors, themePresetsApi.INTERFACE_COLOR_KEYS);
+function currentThemeOverrides(slot) {
+  return themePresetsApi.normalizeOverrides(state.settings?.[slot], themePresetsApi.INTERFACE_COLOR_KEYS);
 }
 
 function currentVendorOverrides() {
   return themePresetsApi.normalizeOverrides(state.settings?.vendorColors, Object.keys(BRAND_VENDOR_COLORS));
 }
 
-function previewThemeColor(key, value) {
+function previewThemeColor(slot, key, value) {
   if (!themePresetsApi.isValidHex(value)) return;
-  const next = { ...currentThemeOverrides(), [key]: themePresetsApi.normalizeHex(value) };
-  appearancePreview = { ...appearancePreview, themeColors: next };
-  applyThemeColors(next);
+  const next = { ...currentThemeOverrides(slot), [key]: themePresetsApi.normalizeHex(value) };
+  appearancePreview = { ...appearancePreview, [slot]: next };
+  applyThemeColors(themePresetsApi.themePalette({ ...state.settings, [slot]: next }, slot));
   window.tokenMonitor.previewAppearance?.(appearancePreview).catch?.(() => {});
 }
 
-async function saveThemeColor(key, value) {
+async function saveThemeColor(slot, key, value) {
   if (!themePresetsApi.isValidHex(value)) return;
-  const next = { ...currentThemeOverrides(), [key]: themePresetsApi.normalizeHex(value) };
-  await commitThemeColors(next);
+  const next = { ...currentThemeOverrides(slot), [key]: themePresetsApi.normalizeHex(value) };
+  await commitThemeColors(next, false, slot);
 }
 
-async function resetThemeColor(key) {
-  const next = { ...currentThemeOverrides() };
+async function resetThemeColor(slot, key) {
+  const next = { ...currentThemeOverrides(slot) };
   delete next[key];
-  await commitThemeColors(next);
+  await commitThemeColors(next, false, slot);
 }
 
 async function selectThemePreset(presetId) {
@@ -9068,12 +9096,12 @@ async function selectThemePreset(presetId) {
   await commitThemeColors(next, true);
 }
 
-async function commitThemeColors(overrides, resetPluginStyle = false) {
-  state.settings.themeColors = overrides;
-  applyThemeColors(overrides);
+async function commitThemeColors(overrides, resetPluginStyle = false, slot = 'themeColors') {
+  state.settings[slot] = overrides;
+  applyThemeColors(themePresetsApi.themePalette(state.settings, activeThemeKey));
   buildAppearanceColorControls();
   renderSettingsSummaries();
-  await saveSettings({ themeColors: overrides, ...(resetPluginStyle ? { pluginSkinRef: null } : {}) });
+  await saveSettings({ [slot]: overrides, ...(resetPluginStyle && slot === 'themeColors' ? { pluginSkinRef: null } : {}) });
 }
 
 function showThemeCodeStatus(key, type = '') {
@@ -9110,7 +9138,8 @@ async function applyThemeCodeFromInput() {
     return;
   }
   els.themeCodeInput.value = parsed.code;
-  await queueAppearanceColorChange(() => commitThemeColors(parsed.colors));
+  const slot = activeThemeKey;
+  await queueAppearanceColorChange(() => commitThemeColors(parsed.colors, false, slot));
   if (themeCodeFeedbackIsCurrent(generation, parsed.code)) {
     showThemeCodeStatus('settings.appearance.themeCodeApplied', 'success');
   }
@@ -9135,7 +9164,7 @@ async function pasteAndApplyThemeCode() {
 
 async function copyCurrentThemeCode() {
   const generation = invalidateThemeCodeFeedback();
-  const code = themePresetsApi.encodeThemeCode(state.settings?.themeColors);
+  const code = themePresetsApi.encodeThemeCode(themePresetsApi.themePalette(state.settings, activeThemeKey));
   els.themeCodeInput.value = code;
   const copied = await copyToClipboard(code);
   if (!themeCodeFeedbackIsCurrent(generation, code)) return;
@@ -15159,7 +15188,14 @@ els.zoomInput.addEventListener('input', applyAppearanceFromControls);
 els.chooseBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(); });
 els.clearBackgroundImageButton?.addEventListener('click', () => { void changeBackgroundImage(true); });
 void loadBackgroundImage();
-els.resetThemeColorsButton?.addEventListener('click', () => queueAppearanceColorChange(() => commitThemeColors({}, true)));
+els.resetThemeColorsButton?.addEventListener('click', () => {
+  const slot = activeThemeKey;
+  return queueAppearanceColorChange(() => commitThemeColors({}, true, slot));
+});
+els.macGlassFollowSystemInput?.addEventListener('change', event => {
+  const macGlassFollowSystem = event.currentTarget.checked;
+  void queueAppearanceColorChange(() => saveSettings({ macGlassFollowSystem }));
+});
 els.resetVendorColorsButton?.addEventListener('click', () => queueAppearanceColorChange(() => commitVendorColors({})));
 els.textSizeInput?.addEventListener('change', async () => {
   await saveSettings({ textSize: fontSettingsApi.normalizeTextSize(els.textSizeInput.value) });

@@ -20,7 +20,8 @@
     const settings = payload.appearance || {};
     glass.applyNativeMaterialClasses(material);
     const root = document.documentElement.style;
-    const colors = material.themeColors ?? payload.colors;
+    const themes = window.TokenMonitorThemePresets;
+    const colors = themes.themePalette(settings, themes.themePaletteKey(settings, material.colorScheme));
     for (const { name, value } of window.TokenMonitorThemePresets.themeCssVarEntries({ ...colors, ...(payload.color ? { accent: payload.color } : {}) })) {
       if (value === null) root.removeProperty(name);
       else root.setProperty(name, value);

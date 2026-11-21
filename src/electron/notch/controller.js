@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { NOTCH_METRICS, notchPeekBounds, notchCanvasBounds, notchGeometry, notchBounds, notchCommands, translateCommands, interpolateCommands, rectContains } = require('./geometry');
 const { toSvgPath, toPolygons } = require('../renderer/edgeDock/shapes');
-const { liquidGlassThemeColors } = require('../renderer/themePresets');
+const { themePaletteKey, themePalette } = require('../renderer/themePresets');
 const { notchGlassGeometry } = require('../renderer/notch/renderer');
 const { readMacNotchScreens } = require('./screen');
 const { notchBlurBounds } = require('./blur');
@@ -295,7 +295,8 @@ function createNotchController({ BrowserWindow, ipcMain, screen, getSettings,
     onWebSurfaceChanged();
     const win = windows[surface];
     if (!alive(win) || !ready[surface] || !current) return;
-    const themeColors = glass[surface] ? liquidGlassThemeColors(glassOptions(surface, current).dark) : appearance.themeColors;
+    const scheme = glass[surface] && (glassOptions(surface, current).dark ? 'dark' : 'light');
+    const themeColors = themePalette(appearance, themePaletteKey(appearance, scheme));
     const base = { surface, notch: true, shape: shapes[surface], platform, osRelease: os.release(),
       appearance: { ...appearance, themeColors,
         zoomFactor: zoom(), notchWarnColors: settings().notchWarnColors === true,
