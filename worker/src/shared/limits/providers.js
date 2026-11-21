@@ -54,7 +54,8 @@
     { id: 'mimo', portableAccountKey: true, label: 'Xiaomi MiMo' },
     { id: 'muse', label: 'Muse' },
     { id: 'zai', label: 'GLM', settingsLabel: 'Z.ai / GLM' },
-    { id: 'zaiteam', label: 'GLM Team' },
+    // The organization and project identify the same quota pool after API key rotation.
+    { id: 'zaiteam', portableAccountKey: true, label: 'GLM Team' },
     { id: 'kiro', label: 'Kiro' },
     { id: 'workbuddy', label: 'WorkBuddy' },
     { id: 'qoder', label: 'Qoder' },
