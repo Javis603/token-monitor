@@ -3,6 +3,9 @@
 const { abortError } = require('../../probeDeadline');
 
 const { spawn } = require('node:child_process');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
 const https = require('node:https');
 const http = require('node:http');
 const { appVersion } = require('../../appVersion');
@@ -167,7 +170,41 @@ function commandForMatching(command) {
   return command.replace(/^"([^"]+)"(?=\s|$)/, '$1').toLowerCase();
 }
 
-function parseProcessLine(line) {
+function isDesktopHubCommand(command) {
+  return /(?:^|\s)--read_host_bridge_token_from_stdin(?:\s|$)/.test(command)
+    && extractFlag('--app_data_dir', command) === 'antigravity';
+}
+
+async function readDesktopHubs(homeDir) {
+  const directory = path.join(homeDir, '.gemini', 'antigravity', 'daemon');
+  const hubs = new Map();
+  let entries;
+  try {
+    entries = await fs.readdir(directory, { withFileTypes: true });
+  } catch {
+    return hubs;
+  }
+  for (const entry of entries) {
+    const port = Number(/^hub_(\d+)\.json$/.exec(entry.name)?.[1]);
+    if (!entry.isFile() || !(port > 0 && port < 65536)) continue;
+    const file = path.join(directory, entry.name);
+    try {
+      const stat = await fs.lstat(file);
+      if (!stat.isFile() || stat.size > 4096) continue;
+      const { pid, httpPort, csrfToken } = JSON.parse(await fs.readFile(file, 'utf8'));
+      if (!Number.isSafeInteger(pid) || pid <= 0 || httpPort !== port
+          || typeof csrfToken !== 'string' || !/^[a-f0-9-]{32,}$/i.test(csrfToken)) continue;
+      if (!hubs.has(pid) || stat.mtimeMs > hubs.get(pid).modifiedAt) {
+        hubs.set(pid, { httpPort, csrfToken, modifiedAt: stat.mtimeMs });
+      }
+    } catch {
+      // The service can replace or remove its descriptor during discovery.
+    }
+  }
+  return hubs;
+}
+
+function parseProcessLine(line, desktopHubs) {
   const trimmed = String(line || '').trim();
   if (!trimmed) return null;
   const split = trimmed.indexOf(' ');
@@ -180,18 +217,21 @@ function parseProcessLine(line) {
   const kind = antigravityProcessKind(lower);
   if (!kind) return null;
   const csrfToken = extractFlag('--csrf_token', command);
+  const desktopHub = !csrfToken && kind === 'app' && isDesktopHubCommand(lower)
+    ? desktopHubs?.get(pid)
+    : null;
   const isHubMode = isHubModeCommand(command);
   const hubPort = extractPortFlag('--hub-port', command);
-  // Desktop app/IDE language servers authenticate local requests with
-  // `--csrf_token`; tokenless matches are skipped so a later valid process can
-  // still be used. The CLI language server exposes no token flag and needs none,
+  // Desktop app/IDE language servers require a credential; newer desktop
+  // builds supply it in their hub descriptor. The CLI generally needs none,
   // EXCEPT when running in hub mode (--hub flag), which acts as a network-facing
   // RPC service and requires CSRF protection like app/IDE.
-  if ((kind !== 'cli' || isHubMode) && !csrfToken) return null;
+  if ((kind !== 'cli' || isHubMode) && !csrfToken && !desktopHub) return null;
   return {
     pid,
     kind,
-    csrfToken: csrfToken || '',
+    csrfToken: csrfToken || desktopHub?.csrfToken || '',
+    ...(desktopHub ? { desktopRpcPort: desktopHub.httpPort } : {}),
     extensionPort: extractPortFlag('--extension_server_port', command),
     extensionCsrfToken: extractFlag('--extension_server_csrf_token', command),
     hubPort: hubPort,
@@ -236,13 +276,13 @@ function runProcessText(cmd, args, { timeoutMs = 10000, deps = {} } = {}) {
   });
 }
 
-function processInfosFromText(stdout) {
+function processInfosFromText(stdout, desktopHubs) {
   const infos = [];
   let sawTokenlessCsrfClient = false;
   for (const line of String(stdout || '').split(/\r?\n/)) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const info = parseProcessLine(trimmed);
+    const info = parseProcessLine(trimmed, desktopHubs);
     if (info) {
       infos.push(info);
       continue;
@@ -260,8 +300,11 @@ function processInfosFromText(stdout) {
   return { infos: sortProcessInfos(infos), sawTokenlessCsrfClient };
 }
 
-function requireDetectedProcessInfos(stdout) {
-  const { infos, sawTokenlessCsrfClient } = processInfosFromText(stdout);
+async function requireDetectedProcessInfos(stdout, deps) {
+  const desktopHubs = stdout.includes('--read_host_bridge_token_from_stdin')
+    ? await readDesktopHubs(deps.homeDir || os.homedir())
+    : undefined;
+  const { infos, sawTokenlessCsrfClient } = processInfosFromText(stdout, desktopHubs);
   if (infos.length > 0) return infos;
   if (sawTokenlessCsrfClient) throw errorWithStatus('unavailable', 'Antigravity LS missing --csrf_token');
   throw errorWithStatus('notConfigured', 'Antigravity language server not running');
@@ -272,7 +315,7 @@ async function detectProcessInfosPosix(deps = {}) {
     deps,
     timeoutMs: Math.min(8000, Number(deps.timeoutMs) || 8000)
   });
-  return requireDetectedProcessInfos(stdout);
+  return requireDetectedProcessInfos(stdout, deps);
 }
 
 async function detectProcessInfosWin32(deps = {}) {
@@ -284,7 +327,7 @@ async function detectProcessInfosWin32(deps = {}) {
     deps,
     timeoutMs: Math.min(10000, Number(deps.timeoutMs) || 10000)
   });
-  return requireDetectedProcessInfos(stdout);
+  return requireDetectedProcessInfos(stdout, deps);
 }
 
 async function detectProcessInfos(deps = {}) {
@@ -301,7 +344,8 @@ async function detectProcessInfo(deps = {}) {
 async function listeningPortsPosix(pid, deps = {}) {
   let stdout;
   try {
-    stdout = await runProcessText('lsof', ['-nP', '-iTCP', '-sTCP:LISTEN', '-a', '-p', String(pid)], {
+    const sockets = deps.ipv4LoopbackOnly ? '-i4TCP' : '-iTCP';
+    stdout = await runProcessText('lsof', ['-nP', sockets, '-sTCP:LISTEN', '-a', '-p', String(pid)], {
       deps,
       timeoutMs: Math.min(6000, Number(deps.timeoutMs) || 6000)
     });
@@ -309,7 +353,7 @@ async function listeningPortsPosix(pid, deps = {}) {
     throw errorWithStatus('unavailable', `lsof failed: ${err.message}`);
   }
   const ports = new Set();
-  const re = /:(\d+)\s+\(LISTEN\)/g;
+  const re = deps.ipv4LoopbackOnly ? /\s127\.0\.0\.1:(\d+)\s+\(LISTEN\)/g : /:(\d+)\s+\(LISTEN\)/g;
   let match;
   while ((match = re.exec(stdout)) !== null) {
     const n = Number(match[1]);
@@ -320,7 +364,8 @@ async function listeningPortsPosix(pid, deps = {}) {
 }
 
 async function listeningPortsWin32(pid, deps = {}) {
-  const script = `Get-NetTCPConnection -OwningProcess ${pid} -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort`;
+  const loopbackFilter = deps.ipv4LoopbackOnly ? " | Where-Object LocalAddress -eq '127.0.0.1'" : '';
+  const script = `Get-NetTCPConnection -OwningProcess ${pid} -State Listen -ErrorAction SilentlyContinue${loopbackFilter} | Select-Object -ExpandProperty LocalPort`;
   const stdout = await runProcessText('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
     deps,
     timeoutMs: Math.min(6000, Number(deps.timeoutMs) || 6000)
@@ -549,6 +594,11 @@ function collapsePools(models) {
 }
 
 function endpointCandidates(processInfo, listenPorts) {
+  if (processInfo.desktopRpcPort) {
+    const port = processInfo.desktopRpcPort;
+    // Require the port to still belong to the matching process before sending its token.
+    return listenPorts.includes(port) ? [{ scheme: 'http', port, csrfToken: processInfo.csrfToken }] : [];
+  }
   const candidates = [];
   // Try explicit hub port first if available (most authoritative and fastest).
   if (processInfo.hubPort) {
@@ -838,7 +888,7 @@ async function probe(deps = {}) {
           const discovery = (async () => {
             try {
               const ports = await promiseBeforeDeadline(
-                (timeoutMs) => listPorts(info.pid, { ...runtimeDeps, timeoutMs }),
+                (timeoutMs) => listPorts(info.pid, { ...runtimeDeps, timeoutMs, ipv4LoopbackOnly: Boolean(info.desktopRpcPort) }),
                 discoveryBudgetMs,
                 DEFAULT_RPC_TIMEOUT_MS,
                 signal

@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const probe = require('../../src/shared/providers/antigravity/probe');
@@ -138,6 +141,40 @@ function fakeSpawn(stdout, { exitCode = 0, stderr = '' } = {}) {
     return child;
   };
 }
+
+test('desktop daemon discovery matches the live process and only uses its declared HTTP listener', async (t) => {
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'antigravity-daemon-'));
+  t.after(() => fs.rm(homeDir, { recursive: true, force: true }));
+  const dir = path.join(homeDir, '.gemini', 'antigravity', 'daemon');
+  await fs.mkdir(dir, { recursive: true });
+  const csrfToken = 'ea1dbb2a-65a8-4766-a155-8e70f032f4ac';
+  await fs.writeFile(path.join(dir, 'hub_4242.json'), JSON.stringify({ pid: 123, httpPort: 4242, csrfToken }));
+  await fs.writeFile(path.join(dir, 'hub_4243.json'), JSON.stringify({ pid: 456, httpPort: 4244, csrfToken }));
+  const command = '/Applications/Antigravity.app/Contents/Resources/bin/language_server --app_data_dir antigravity --read_host_bridge_token_from_stdin';
+  const infos = await probe.detectProcessInfos({
+    platform: 'darwin',
+    homeDir,
+    spawn: fakeSpawn(`123 ${command}\n456 ${command}\n789 ${command}`)
+  });
+  assert.deepEqual(infos.map(({ pid }) => pid), [123]);
+  assert.deepEqual(probe._endpointCandidates(infos[0], [4242, 9000]), [{ scheme: 'http', port: 4242, csrfToken }]);
+  assert.deepEqual(probe._endpointCandidates(infos[0], [9000]), []);
+});
+
+test('desktop daemon port discovery requires an exact TCP IPv4 loopback listener', async () => {
+  const stdout = [
+    'server 123 user 3u IPv6 TCP [::1]:4242 (LISTEN)',
+    'server 123 user 4u IPv4 TCP 192.0.2.1:4242 (LISTEN)',
+    'server 123 user 5u IPv4 TCP 127.0.0.1:4321 (LISTEN)',
+    'server 123 user 6u IPv4 TCP 127.0.0.1:4300->127.0.0.1:4242 (ESTABLISHED)'
+  ].join('\n');
+  const ports = await probe.listeningPorts(123, {
+    platform: 'darwin',
+    ipv4LoopbackOnly: true,
+    spawn: fakeSpawn(stdout)
+  });
+  assert.deepEqual(ports, [4321]);
+});
 
 test('detectProcessInfo (posix) returns the highest-priority Antigravity source', async () => {
   const stdout = [
