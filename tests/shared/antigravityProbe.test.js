@@ -1,6 +1,9 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs/promises');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
 const probe = require('../../src/shared/providers/antigravity/probe');
@@ -138,6 +141,117 @@ function fakeSpawn(stdout, { exitCode = 0, stderr = '' } = {}) {
     return child;
   };
 }
+
+test('desktop daemon discovery matches the live process and only uses its declared HTTP listener', async (t) => {
+  const homeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'antigravity-daemon-'));
+  t.after(() => fs.rm(homeDir, { recursive: true, force: true }));
+  const dir = path.join(homeDir, '.gemini', 'antigravity', 'daemon');
+  await fs.mkdir(dir, { recursive: true });
+  const csrfToken = 'ea1dbb2a-65a8-4766-a155-8e70f032f4ac';
+  await fs.writeFile(path.join(dir, 'hub_4242.json'), JSON.stringify({ pid: 123, httpPort: 4242, csrfToken }));
+  await fs.writeFile(path.join(dir, 'hub_4243.json'), JSON.stringify({ pid: 456, httpPort: 4244, csrfToken }));
+  const command = '/Applications/Antigravity.app/Contents/Resources/bin/language_server --app_data_dir antigravity --read_host_bridge_token_from_stdin';
+  const infos = await probe.detectProcessInfos({
+    platform: 'darwin',
+    homeDir,
+    spawn: fakeSpawn(`123 ${command}\n456 ${command}\n789 ${command}`)
+  });
+  assert.deepEqual(infos.map(({ pid }) => pid), [123]);
+  assert.deepEqual(probe._endpointCandidates(infos[0], [4242, 9000]), [{ scheme: 'http', port: 4242, csrfToken, desktopPid: 123 }]);
+  assert.deepEqual(probe._endpointCandidates(infos[0], [9000]), []);
+});
+
+for (const platform of ['darwin', 'win32']) {
+  test(`desktop RPC retries the same socket and sends credentials after verification (${platform})`, async (t) => {
+    const http = require('node:http');
+    const { once } = require('node:events');
+    const pid = process.pid;
+    let checks = 0;
+    let peer;
+    let connections = 0;
+    let received = 0;
+    let token;
+    const server = http.createServer((req, res) => {
+      token = req.headers['x-codeium-csrf-token'];
+      req.resume();
+      res.end('{"verified":true}');
+    });
+    t.after(() => new Promise((resolve) => server.close(resolve)));
+    server.on('connection', (socket) => {
+      peer = socket;
+      connections++;
+      socket.on('data', (chunk) => { received += chunk.length; });
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const port = server.address().port;
+    const result = await probe.callLs({
+      scheme: 'http', port, desktopPid: pid, csrfToken: 'fixture-token',
+      method: 'Heartbeat', timeoutMs: 3000
+    }, {
+      platform,
+      spawn(command, args) {
+        assert.equal(received, 0);
+        checks++;
+        if (platform === 'win32') {
+          assert.equal(command, 'powershell');
+          assert.match(args.at(-1), new RegExp(`-OwningProcess ${pid} .*-LocalPort ${port} `));
+          if (checks === 1) return fakeSpawn('')();
+          assert.match(args.at(-1), new RegExp(`-RemotePort ${peer.remotePort} `));
+          return fakeSpawn(`${pid}\r\n`)();
+        }
+        assert.equal(command, 'lsof');
+        assert.ok(args.includes(String(pid)));
+        if (checks === 1) return fakeSpawn('', { exitCode: 1 })();
+        return fakeSpawn(`n127.0.0.1:${port}->127.0.0.1:${peer.remotePort}\n`)();
+      }
+    });
+    assert.deepEqual(result, { verified: true });
+    assert.equal(token, 'fixture-token');
+    assert.equal(checks, 2);
+    assert.equal(connections, 1);
+  });
+}
+
+test('desktop RPC sends no bytes when the connected peer does not belong to the descriptor PID', async (t) => {
+  const net = require('node:net');
+  const { once } = require('node:events');
+  let received = 0;
+  let closePeer;
+  const closed = new Promise((resolve) => { closePeer = resolve; });
+  const server = net.createServer((socket) => {
+    socket.on('data', (chunk) => { received += chunk.length; });
+    socket.once('close', closePeer);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  await assert.rejects(probe.callLs({
+    scheme: 'http',
+    port: server.address().port,
+    desktopPid: 2147483647,
+    csrfToken: 'fixture-token',
+    method: 'Heartbeat',
+    timeoutMs: 3000
+  }));
+  await closed;
+  assert.equal(received, 0);
+});
+
+test('desktop daemon port discovery requires an exact TCP IPv4 loopback listener', async () => {
+  const stdout = [
+    'server 123 user 3u IPv6 TCP [::1]:4242 (LISTEN)',
+    'server 123 user 4u IPv4 TCP 192.0.2.1:4242 (LISTEN)',
+    'server 123 user 5u IPv4 TCP 127.0.0.1:4321 (LISTEN)',
+    'server 123 user 6u IPv4 TCP 127.0.0.1:4300->127.0.0.1:4242 (ESTABLISHED)'
+  ].join('\n');
+  const ports = await probe.listeningPorts(123, {
+    platform: 'darwin',
+    ipv4LoopbackOnly: true,
+    spawn: fakeSpawn(stdout)
+  });
+  assert.deepEqual(ports, [4321]);
+});
 
 test('detectProcessInfo (posix) returns the highest-priority Antigravity source', async () => {
   const stdout = [
