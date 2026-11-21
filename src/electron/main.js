@@ -35,6 +35,7 @@ const tokenNumberAnimationApi = require('./tokenNumberAnimation');
 const { createRepositoryStars } = require('./repositoryStars');
 const { clearBackgroundImage, getBackgroundImage, importBackgroundImage } = require('./backgroundImage');
 const { createClientSourceIpcHandlers } = require('./clientSourceIpc');
+const { detectWslClientsAsync } = require('../shared/wslUsage');
 const { createClaudeWebFetch } = require('./providers/claude/webFetch');
 const { createMimoExchangeFetch } = require('./providers/mimo/exchangeFetch');
 
@@ -8522,14 +8523,15 @@ app.whenReady().then(() => {
   // paths stay local by design — they carry the user's home directory and never
   // go on the wire — so the renderer asks the main process for them instead.
   //
-  // Probe only the client whose detail panel is open. The renderer caches the
-  // result for the current health snapshot, or for the current device/client
-  // pair when the tool is not tracked, avoiding eager filesystem work.
+  // Probe a single client's roots when its detail panel is open, or return
+  // only client ids with an existing root when the Collection section is
+  // expanded. The renderer caches both to avoid eager filesystem work.
   const clientSourceIpcHandlers = createClientSourceIpcHandlers({
     knownClients: KNOWN_CLIENTS,
     trackedClients: () => trackedClientSet(clientsCsvForSetting(settings?.clients)),
     visibleDiagnosticRoots: (clients) => visibleDiagnosticRoots(clients, { customScanPaths: settings?.customScanPaths }),
     clientDiagnosticRoots: (clients) => clientDiagnosticRoots(clients, { customScanPaths: settings?.customScanPaths }),
+    detectWslClients: (clients) => (settings?.wslScanEnabled === true ? detectWslClientsAsync({ clients }) : []),
     showItemInFolder: (target) => shell.showItemInFolder(target),
     openPath: (target) => shell.openPath(target),
     revealClientSyncLock: () => {
@@ -8546,6 +8548,7 @@ app.whenReady().then(() => {
     onRescanError: (error) => console.log(`[usage-runtime] rescan failed: ${error.message}`)
   });
   ipcMain.handle('usage:clientSources', (_event, clientId) => clientSourceIpcHandlers.clientSources(clientId));
+  ipcMain.handle('usage:untrackedClientsWithData', () => clientSourceIpcHandlers.untrackedClientsWithData());
   ipcMain.handle('usage:pickCustomScanPath', async (_event, clientId) => {
     const client = String(clientId || '').trim().toLowerCase();
     if (!CUSTOM_SCAN_CLIENT_IDS.includes(client)) return { ok: false, error: 'unsupported-client' };

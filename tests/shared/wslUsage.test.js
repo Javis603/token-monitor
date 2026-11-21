@@ -9,6 +9,7 @@ const {
   emptyWslBundle,
   wslUsageHomes,
   homeHasData,
+  detectWslClientsAsync,
   collectWslUsage
 } = require('../../src/shared/wslUsage');
 
@@ -518,4 +519,32 @@ test('collectWslUsage logs and skips a home that throws, keeps others', async ()
   assert.equal(bundle.today.totalTokens, 7); // Ubuntu counted, Debian skipped
   assert.equal(logs.length, 1);
   assert.match(logs[0], /Debian/);
+});
+
+test('detectWslClientsAsync probes requested clients asynchronously in a single pass', async () => {
+  assert.deepEqual(await detectWslClientsAsync({ platform: 'darwin' }), []);
+  const order = [];
+  const checkedPaths = [];
+  const probe = detectWslClientsAsync({
+    platform: 'win32',
+    clients: ['hermes', 'codex'],
+    exec: async (cmd) => {
+      if (cmd === 'wsl.exe') await new Promise((resolve) => setTimeout(resolve, 40));
+      return cmd === 'reg' ? 'Lxss' : 'Ubuntu\n';
+    },
+    readdir: async () => ['alice'],
+    exists: async (target) => {
+      checkedPaths.push(target);
+      return target === '\\\\wsl$\\Ubuntu\\home\\alice\\.hermes';
+    }
+  }).then((result) => {
+    order.push('probe');
+    return result;
+  });
+  await new Promise((resolve) => setTimeout(() => { order.push('timer'); resolve(); }, 10));
+  const detected = await probe;
+  assert.deepEqual(order, ['timer', 'probe']);
+  assert.deepEqual(detected, ['hermes']);
+  assert.equal(checkedPaths.filter((p) => p.endsWith('\\.hermes')).length, 1);
+  assert.equal(checkedPaths.some((p) => p.includes('\\.claude\\')), false);
 });

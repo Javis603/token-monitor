@@ -6161,3 +6161,61 @@ test('the compact picker and tray retain a weekly-only MiMo quota', () => {
 
   assert.equal(limitWindowLabel('mimo', { kind: 'weekly' }), 'Weekly');
 });
+
+test('providerReadingDeviceIds groups live local, per-device and aggregate reading origins per provider', () => {
+  const byProvider = presentation.providerReadingDeviceIds(
+    [
+      { provider: 'cursor', status: 'ok' },
+      { provider: 'qoder', status: 'ok' },
+      { provider: 'kimi', status: 'ok', stale: true },
+      { provider: 'openrouter', status: 'notConfigured' }
+    ],
+    [
+      {
+        deviceId: 'mac-local',
+        limits: { providers: [{ provider: 'antigravity', status: 'ok' }] }
+      },
+      {
+        deviceId: 'linux-box',
+        limits: {
+          providers: [
+            { provider: 'antigravity', status: 'ok' },
+            { provider: 'qoder', status: 'ok' },
+            { provider: 'kimi', status: 'error' }
+          ]
+        }
+      },
+      {
+        deviceId: 'win-desk',
+        limits: {
+          providers: [
+            { provider: 'qoder', status: 'ok' },
+            { provider: 'kimi', status: 'ok', stale: true }
+          ]
+        }
+      }
+    ],
+    [
+      { provider: 'qoder', status: 'ok', sourceDeviceId: 'linux-box' },
+      { provider: 'qoder', status: 'ok', sourceDeviceId: 'cloud-node' },
+      { provider: 'kimi', status: 'ok', sourceDeviceId: 'win-desk' },
+      { provider: 'openrouter', status: 'ok', stale: true, sourceDeviceId: 'cloud-node' }
+    ],
+    'mac-local'
+  );
+
+  assert.deepEqual(byProvider.get('cursor'), ['mac-local']);
+  assert.deepEqual(byProvider.get('antigravity'), ['linux-box']);
+  assert.deepEqual(byProvider.get('qoder'), ['mac-local', 'linux-box', 'win-desk', 'cloud-node']);
+  assert.equal(byProvider.get('kimi'), undefined);
+  assert.equal(byProvider.get('openrouter'), undefined);
+
+  const localOnly = presentation.providerReadingDeviceIds(
+    [{ provider: 'cursor', status: 'ok' }],
+    [{ deviceId: 'other', limits: { providers: [{ provider: 'antigravity', status: 'ok' }] } }],
+    [],
+    ''
+  );
+  assert.deepEqual(localOnly.get('cursor'), ['__local__']);
+  assert.equal(localOnly.get('antigravity'), undefined);
+});

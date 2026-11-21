@@ -125,6 +125,7 @@ contextBridge.exposeInMainWorld('tokenMonitor', {
   generateDiagnosticReport: () => ipcRenderer.invoke('diagnostics:generate'),
   copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
   clientSources: (clientId) => ipcRenderer.invoke('usage:clientSources', clientId),
+  untrackedClientsWithData: () => ipcRenderer.invoke('usage:untrackedClientsWithData'),
   pickCustomScanPath: (clientId) => ipcRenderer.invoke('usage:pickCustomScanPath', clientId),
   revealClientSource: (clientId) => ipcRenderer.invoke('usage:revealClientSource', clientId),
   revealClientSyncLock: (clientId) => ipcRenderer.invoke('usage:revealClientSyncLock', clientId),
