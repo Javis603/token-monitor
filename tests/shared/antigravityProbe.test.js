@@ -413,19 +413,6 @@ test('callLs falls back to statusFromHttpCode when a non-200 body does not menti
   }
 });
 
-test('_modelsFromConfigs filters blacklist and entries without quotaInfo', () => {
-  const configs = [
-    { label: 'Gemini 3 Pro (High)',  modelOrAlias: { model: 'MODEL_GEMINI_3_PRO_HIGH' },  quotaInfo: { remainingFraction: 0.7, resetTime: '2026-06-03T03:00:00Z' } },
-    { label: 'Blacklisted',          modelOrAlias: { model: 'MODEL_PLACEHOLDER_M9' },     quotaInfo: { remainingFraction: 1.0, resetTime: '2026-06-03T03:00:00Z' } },
-    { label: 'Missing quota',        modelOrAlias: { model: 'MODEL_NO_QUOTA' } },
-    { label: 'GPT-OSS 120B (Medium)', modelOrAlias: { model: 'MODEL_OPENAI_GPT_OSS_120B_MEDIUM' }, quotaInfo: { remainingFraction: 0.9, resetTime: null } }
-  ];
-  const out = probe._modelsFromConfigs(configs);
-  assert.equal(out.length, 2);
-  assert.equal(out[0].modelId, 'MODEL_GEMINI_3_PRO_HIGH');
-  assert.equal(out[1].modelId, 'MODEL_OPENAI_GPT_OSS_120B_MEDIUM');
-});
-
 test('_collapsePools maps Gemini Pro / Gemini Flash / Claude pools by lowest remainingFraction', () => {
   const models = [
     { label: 'Gemini 3 Pro (High)',   modelId: 'X', remainingFraction: 0.8, resetTime: '2026-06-03T03:00:00Z' },
@@ -612,7 +599,7 @@ test('parent cancellation during optional grouped identity lookup rejects the pr
   await assert.rejects(pending, /grouped lookup cancelled/);
 });
 
-test('probe checks every endpoint for grouped quota before accepting a legacy response', async () => {
+test('probe tries the next endpoint when a grouped response is unusable', async () => {
   const calls = [];
   const result = await probe.probe({
     detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
@@ -631,15 +618,7 @@ test('probe checks every endpoint for grouped quota before accepting a legacy re
       if (scheme === 'http' && method === 'GetUserStatus') {
         return { userStatus: { email: 'rich@example.com', planStatus: { planInfo: { planName: 'Pro' } } } };
       }
-      return {
-        userStatus: {
-          cascadeModelConfigData: {
-            clientModelConfigs: [
-              { label: 'Gemini 3 Pro', modelOrAlias: { model: 'MA' }, quotaInfo: { remainingFraction: 0.9 } }
-            ]
-          }
-        }
-      };
+      return {};
     }
   });
 
@@ -665,7 +644,11 @@ test('probe follows app, CLI, then IDE source priority and stops after success',
     listeningPorts: async (pid) => [pid],
     callLs: async ({ port, method }) => {
       calls.push(`${port}:${method}`);
-      if (port === 10) throw probe._errorWithStatus('unavailable', 'app unavailable');
+      if (port === 10 && method === 'RetrieveUserQuotaSummary') {
+        return { groups: [{ displayName: 'Gemini Models', buckets: [
+          { window: 'weekly', remainingFraction: 0.5, disabled: true }
+        ] }] };
+      }
       if (port === 20 && method === 'RetrieveUserQuotaSummary') {
         return {
           groups: [{
@@ -682,43 +665,11 @@ test('probe follows app, CLI, then IDE source priority and stops after success',
   assert.equal(result.accountEmail, 'cli@example.com');
   assert.ok(calls.some((call) => call.startsWith('10:')));
   assert.ok(calls.some((call) => call.startsWith('20:')));
+  assert.ok(!calls.includes('10:GetUserStatus'));
   assert.ok(calls.every((call) => !call.startsWith('30:')));
 });
 
-test('probe accepts a valid app legacy response before lower-priority grouped sources', async () => {
-  const calledPorts = [];
-  const result = await probe.probe({
-    detectProcessInfos: async () => [
-      { pid: 20, kind: 'cli', csrfToken: '' },
-      { pid: 10, kind: 'app', csrfToken: 'app' }
-    ],
-    listeningPorts: async (pid) => [pid],
-    callLs: async ({ port, method }) => {
-      calledPorts.push(port);
-      if (port === 10 && method === 'RetrieveUserQuotaSummary') return { groups: [] };
-      if (port === 10 && method === 'GetUserStatus') {
-        return {
-          userStatus: {
-            email: 'app@example.com',
-            cascadeModelConfigData: {
-              clientModelConfigs: [
-                { label: 'Gemini 3 Pro', modelOrAlias: { model: 'APP' }, quotaInfo: { remainingFraction: 0.5 } }
-              ]
-            }
-          }
-        };
-      }
-      throw new Error('lower-priority CLI should not be called');
-    }
-  });
-
-  assert.equal(result.sourceDetail, 'app');
-  assert.equal(result.accountEmail, 'app@example.com');
-  assert.deepEqual(result.pools.map((pool) => pool.name), ['Gemini Pro']);
-  assert.ok(calledPorts.every((port) => port === 10));
-});
-
-test('probe exhausts grouped quota across same-source processes before legacy fallback', async () => {
+test('probe tries grouped quota across same-source processes', async () => {
   const calls = [];
   const result = await probe.probe({
     detectProcessInfos: async () => [
@@ -866,91 +817,21 @@ test('probe selects a reachable endpoint before requesting quota', async () => {
   assert.equal(result.accountEmail, 'resolved@example.com');
 });
 
-test('probe returns plan + 3 pools when GetUserStatus succeeds', async () => {
-  const result = await probe.probe({
-    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
-    listeningPorts: async () => [54733],
-    callLs: async ({ method }) => {
-      assert.equal(method, 'GetUserStatus');
-      return {
-        userStatus: {
-          planStatus: { planInfo: { planName: 'Pro' } },
-          cascadeModelConfigData: {
-            clientModelConfigs: [
-              { label: 'Gemini 3 Pro (High)',   modelOrAlias: { model: 'MA' }, quotaInfo: { remainingFraction: 0.5, resetTime: '2026-06-03T02:00:00Z' } },
-              { label: 'Gemini 3 Flash',        modelOrAlias: { model: 'MB' }, quotaInfo: { remainingFraction: 0.9, resetTime: '2026-06-03T01:00:00Z' } },
-              { label: 'Claude Opus',           modelOrAlias: { model: 'MC' }, quotaInfo: { remainingFraction: 0.7, resetTime: '2026-06-03T04:00:00Z' } }
-            ]
-          }
-        }
-      };
-    }
-  });
-  assert.equal(result.accountPlan, 'Pro');
-  assert.deepEqual(result.pools.map((p) => p.name), ['Gemini Pro', 'Gemini Flash', 'Claude']);
-});
-
 test('probe prefers userTier name and richer planInfo display fields', async () => {
-  const withUserTier = await probe.probe({
-    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
-    listeningPorts: async () => [54733],
-    callLs: async () => ({
-      userStatus: {
-        userTier: { name: 'Google AI Ultra' },
-        planStatus: { planInfo: { planDisplayName: 'Google AI Pro', planName: 'Pro' } },
-        cascadeModelConfigData: {
-          clientModelConfigs: [
-            { label: 'Gemini 3 Pro', modelOrAlias: { model: 'MA' }, quotaInfo: { remainingFraction: 0.5, resetTime: null } }
-          ]
+  const planStatus = { planInfo: { planDisplayName: 'Google AI Pro', planName: 'Pro' } };
+  for (const [userTier, expectedPlan] of [[{ name: 'Google AI Ultra' }, 'Google AI Ultra'], [undefined, 'Google AI Pro']]) {
+    const result = await probe.probe({
+      detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
+      listeningPorts: async () => [54733],
+      callLs: async ({ method }) => {
+        if (method === 'RetrieveUserQuotaSummary') {
+          return { groups: [{ displayName: 'Gemini Models', buckets: [{ window: 'weekly', remainingFraction: 0.5 }] }] };
         }
+        return method === 'GetUserStatus' ? { userStatus: { userTier, planStatus } } : {};
       }
-    })
-  });
-  assert.equal(withUserTier.accountPlan, 'Google AI Ultra');
-
-  const withPlanInfoDisplay = await probe.probe({
-    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
-    listeningPorts: async () => [54733],
-    callLs: async () => ({
-      userStatus: {
-        planStatus: { planInfo: { planDisplayName: 'Google AI Pro', planName: 'Pro' } },
-        cascadeModelConfigData: {
-          clientModelConfigs: [
-            { label: 'Gemini 3 Pro', modelOrAlias: { model: 'MA' }, quotaInfo: { remainingFraction: 0.5, resetTime: null } }
-          ]
-        }
-      }
-    })
-  });
-  assert.equal(withPlanInfoDisplay.accountPlan, 'Google AI Pro');
-});
-
-test('probe falls back to GetCommandModelConfigs when GetUserStatus has no userStatus', async () => {
-  const methods = [];
-  const result = await probe.probe({
-    detectProcessInfo: async () => ({ pid: 1, csrfToken: 'csrf', extensionPort: null }),
-    listeningPorts: async () => [54733],
-    callLs: async ({ method }) => {
-      methods.push(method);
-      if (method === 'GetUserStatus') return { code: 7 };
-      if (method === 'GetUnleashData') return { ok: true };
-      return {
-        clientModelConfigs: [
-          { label: 'Claude Sonnet', modelOrAlias: { model: 'MX' }, quotaInfo: { remainingFraction: 0.3, resetTime: '2026-06-03T05:00:00Z' } }
-        ]
-      };
-    }
-  });
-  assert.deepEqual(methods, [
-    'GetUnleashData',
-    'RetrieveUserQuotaSummary',
-    'RetrieveUserQuotaSummary',
-    'GetUserStatus',
-    'GetUserStatus',
-    'GetCommandModelConfigs'
-  ]);
-  assert.equal(result.accountPlan, null);
-  assert.deepEqual(result.pools.map((p) => p.name), ['Claude']);
+    });
+    assert.equal(result.accountPlan, expectedPlan);
+  }
 });
 
 test('probe rethrows the last error when every endpoint fails', async () => {

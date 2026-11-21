@@ -12,6 +12,7 @@ const https = require('node:https');
 const http = require('node:http');
 const { appVersion } = require('../../appVersion');
 const { errorWithStatus } = require('../../limits/providerHelpers');
+const { quotaGroupRank } = require('./corePolicy');
 
 const DEFAULT_PROBE_TIMEOUT_MS = 8000;
 const DEFAULT_RPC_TIMEOUT_MS = 12000;
@@ -502,20 +503,6 @@ function callLs({
   });
 }
 
-// Copied verbatim from openusage/codexbar: placeholder / internal model IDs that
-// must be ignored when reading clientModelConfigs.
-const CC_MODEL_BLACKLIST = new Set([
-  'MODEL_CHAT_20706',
-  'MODEL_CHAT_23310',
-  'MODEL_GOOGLE_GEMINI_2_5_FLASH',
-  'MODEL_GOOGLE_GEMINI_2_5_FLASH_THINKING',
-  'MODEL_GOOGLE_GEMINI_2_5_FLASH_LITE',
-  'MODEL_GOOGLE_GEMINI_2_5_PRO',
-  'MODEL_PLACEHOLDER_M19',
-  'MODEL_PLACEHOLDER_M9',
-  'MODEL_PLACEHOLDER_M12'
-]);
-
 function poolForModel(label, modelId) {
   const lc = `${label || ''} ${modelId || ''}`.toLowerCase();
   if (lc.includes('argon')) return 'Gemini 4 Argon';
@@ -544,11 +531,18 @@ function quotaRemainingFraction(bucket) {
 }
 
 function quotaGroupName(displayName) {
-  const name = String(displayName || '').trim();
+  const name = typeof displayName === 'string' ? displayName.trim() : '';
   const lower = name.toLowerCase();
   if (/^gemini(?:\s+models)?$/.test(lower)) return 'Gemini';
-  if (lower.includes('claude') || lower.includes('gpt')) return 'Claude/GPT';
-  return name || 'Quota';
+  if (/^claude\s*(?:and|&|\/)\s*gpt(?:\s+models)?$/.test(lower)) return 'Claude/GPT';
+  if (lower === 'gemini 4 argon') return 'Gemini 4 Argon';
+  // Hubs clear labels longer than 32 characters. Reserve the suffix
+  // before shortening so both windows still have a valid shared group name.
+  const maxNameLength = 32 - ' 5-hour'.length;
+  const clean = name.replace(/[^a-z0-9\s+._/-]/gi, '').replace(/\s+/g, ' ').trim();
+  return clean.length > maxNameLength
+    ? `${clean.slice(0, maxNameLength - 3).trimEnd()}...`
+    : clean || 'Quota';
 }
 
 function quotaBucketKind(bucket) {
@@ -570,51 +564,30 @@ function quotaBucketKind(bucket) {
 function quotaSummaryWindows(payload) {
   const summary = payload?.response || payload?.summary || payload;
   const groups = Array.isArray(summary?.groups) ? summary.groups : [];
+  const namedGroups = groups
+    .map((group) => ({ name: quotaGroupName(group?.displayName), buckets: group?.buckets }))
+    .sort((a, b) => quotaGroupRank(a.name) - quotaGroupRank(b.name));
   const windows = [];
-  for (const group of groups) {
-    const groupName = quotaGroupName(group?.displayName);
-    for (const bucket of Array.isArray(group?.buckets) ? group.buckets : []) {
+  for (const { name, buckets } of namedGroups) {
+    const session = [];
+    const weekly = [];
+    for (const bucket of Array.isArray(buckets) ? buckets : []) {
       const kind = quotaBucketKind(bucket);
       if (!kind) continue;
       const remainingFraction = quotaRemainingFraction(bucket);
       const disabled = bucket?.disabled === true;
-      windows.push({
+      (kind === 'session' ? session : weekly).push({
         kind,
-        name: `${groupName} ${kind === 'session' ? '5-hour' : 'weekly'}`,
+        name: `${name} ${kind === 'session' ? '5-hour' : 'weekly'}`,
         remainingFraction: disabled ? null : remainingFraction,
         resetTime: parseResetTime(bucket?.resetTime),
         resetDescription: typeof bucket?.description === 'string' ? bucket.description : '',
         showMeter: !disabled && remainingFraction !== null
       });
     }
+    windows.push(...session, ...weekly);
   }
-  const groupRank = (name) => {
-    const lower = name.toLowerCase();
-    if (lower.includes('argon')) return 1;
-    if (lower.startsWith('gemini ')) return 0;
-    if (lower.startsWith('claude/gpt ')) return 2;
-    return 3;
-  };
-  const kindRank = (kind) => kind === 'session' ? 0 : 1;
-  return windows.sort((a, b) => groupRank(a.name) - groupRank(b.name) || kindRank(a.kind) - kindRank(b.kind));
-}
-
-function modelsFromConfigs(configs) {
-  return (Array.isArray(configs) ? configs : [])
-    .map((cfg) => {
-      const modelId = cfg?.modelOrAlias?.model;
-      if (!modelId || CC_MODEL_BLACKLIST.has(modelId)) return null;
-      const quota = cfg?.quotaInfo;
-      if (!quota || typeof quota.remainingFraction !== 'number') return null;
-      const label = (typeof cfg?.label === 'string' && cfg.label.trim()) || modelId;
-      return {
-        label,
-        modelId,
-        remainingFraction: quota.remainingFraction,
-        resetTime: parseResetTime(quota.resetTime)
-      };
-    })
-    .filter(Boolean);
+  return windows;
 }
 
 function collapsePools(models) {
@@ -819,60 +792,6 @@ async function groupedQuotaFromCandidates(candidates, call, {
   return { snapshot: null, lastError };
 }
 
-async function legacyQuotaFromCandidates(candidates, call, { probeDeadlineMs, signal }) {
-  let lastError = errorWithStatus('unavailable', 'no endpoint candidates');
-  const userStatusDeadlineMs = Date.now() + Math.max(1, Math.floor(remainingMs(probeDeadlineMs) / 2));
-  for (const candidate of candidates) {
-    try {
-      const data = await callBeforeDeadline(call, {
-        ...candidate,
-        method: 'GetUserStatus',
-        body: { metadata: PROBE_METADATA },
-        signal
-      }, userStatusDeadlineMs);
-      if (data?.userStatus) {
-        const configs = data.userStatus.cascadeModelConfigData?.clientModelConfigs;
-        const accountPlan =
-          firstTrimmedString(data.userStatus.userTier?.name)
-          || preferredPlanInfoName(data.userStatus.planStatus?.planInfo)
-          || null;
-        const accountEmail = data.userStatus.email?.trim?.() || null;
-        const models = modelsFromConfigs(configs);
-        if (models.length > 0) {
-          throwIfAborted(signal);
-          return { snapshot: { accountPlan, accountEmail, pools: collapsePools(models) }, lastError };
-        }
-      }
-      lastError = errorWithStatus('unavailable', 'empty user status');
-    } catch (err) {
-      throwIfAborted(signal);
-      lastError = err;
-      if (remainingMs(userStatusDeadlineMs) <= 0) break;
-    }
-  }
-  for (const candidate of candidates) {
-    try {
-      const fallback = await callBeforeDeadline(call, {
-        ...candidate,
-        method: 'GetCommandModelConfigs',
-        body: { metadata: PROBE_METADATA },
-        signal
-      }, probeDeadlineMs);
-      const models = modelsFromConfigs(fallback?.clientModelConfigs);
-      if (models.length > 0) {
-        throwIfAborted(signal);
-        return { snapshot: { accountPlan: null, accountEmail: null, pools: collapsePools(models) }, lastError };
-      }
-      lastError = errorWithStatus('unavailable', 'empty model configs');
-    } catch (err) {
-      throwIfAborted(signal);
-      lastError = err;
-      if (remainingMs(probeDeadlineMs) <= 0) break;
-    }
-  }
-  return { snapshot: null, lastError };
-}
-
 function normalizeProcessInfos(infos) {
   return sortProcessInfos((Array.isArray(infos) ? infos : [infos])
     .filter(Boolean)
@@ -911,7 +830,7 @@ async function probe(deps = {}) {
 
     // Probe scheduling contract:
     // - source priority is independent of ps/PID order;
-    // - same-source processes run concurrently, with grouped quota before legacy;
+    // - same-source processes try grouped quota concurrently;
     // - each endpoint is preflighted at most once;
     // - a reachable explicit hub starts quota without awaiting discovery;
     // - preflight failure lowers priority but never drops a quota candidate; and
@@ -965,7 +884,6 @@ async function probe(deps = {}) {
               resolved = { candidates: discovered, lastError: error };
             }
             return {
-              info,
               candidates: dedupeCandidates([...resolved.candidates, ...failedHub]),
               error: resolved.lastError || discoveryError
             };
@@ -990,7 +908,6 @@ async function probe(deps = {}) {
             // await discovery only if those quota calls fail.
             if (resolvedHub.lastError === null) {
               return {
-                info,
                 candidates: resolvedHub.candidates,
                 fallbackCandidates: resolveDiscoveredCandidates,
                 error: null
@@ -1003,18 +920,17 @@ async function probe(deps = {}) {
 
           return resolveDiscoveredCandidates();
         } catch (error) {
-          return { info, candidates: [], error };
+          return { candidates: [], error };
         }
       });
 
       const groupedTasks = candidateStates.map(async (state) => {
         const entry = await state;
         if (entry.candidates.length === 0) {
-          return { ...entry, snapshot: null, lastError: entry.error };
+          return { snapshot: null, lastError: entry.error };
         }
 
-        let candidates = entry.candidates;
-        let grouped = await groupedQuotaFromCandidates(candidates, call, {
+        let grouped = await groupedQuotaFromCandidates(entry.candidates, call, {
           summaryDeadlineMs: halfDeadlineMs(),
           probeDeadlineMs,
           signal
@@ -1030,7 +946,6 @@ async function probe(deps = {}) {
           }
           groupedError = fallback.error || groupedError;
           if (fallback.candidates.length > 0) {
-            candidates = dedupeCandidates([...candidates, ...fallback.candidates]);
             grouped = await groupedQuotaFromCandidates(fallback.candidates, call, {
               summaryDeadlineMs: halfDeadlineMs(),
               probeDeadlineMs,
@@ -1040,35 +955,15 @@ async function probe(deps = {}) {
           }
         }
 
-        return {
-          info: entry.info,
-          candidates,
-          snapshot: grouped.snapshot,
-          lastError: groupedError
-        };
+        return { snapshot: grouped.snapshot, lastError: groupedError };
       });
       // Kind ordering is semantic; PID ordering within one kind is only stable
       // enumeration. A valid grouped snapshot can therefore finish the kind
-      // immediately, while every grouped task must fail before legacy begins.
+      // immediately. Try the next source kind once every grouped task fails.
       const groupedOutcome = await firstSnapshotOrAll(groupedTasks);
       throwIfAborted(signal);
       if (groupedOutcome.snapshot) return { ...groupedOutcome.snapshot, sourceDetail: kind };
-      const groupedResults = groupedOutcome.results;
-      for (const result of groupedResults) lastError = result.lastError || lastError;
-
-      const candidatesByProcess = groupedResults.filter((entry) => entry.candidates.length > 0);
-      if (candidatesByProcess.length === 0) continue;
-
-      const legacyResults = await Promise.all(candidatesByProcess.map((entry) => (
-        legacyQuotaFromCandidates(entry.candidates, call, {
-          probeDeadlineMs,
-          signal
-        })
-      )));
-      throwIfAborted(signal);
-      const legacy = legacyResults.find((result) => result.snapshot);
-      if (legacy?.snapshot) return { ...legacy.snapshot, sourceDetail: kind };
-      for (const result of legacyResults) lastError = result.lastError || lastError;
+      for (const result of groupedOutcome.results) lastError = result.lastError || lastError;
     }
     throw lastError;
   } finally {
@@ -1090,7 +985,6 @@ module.exports = {
   _sortProcessInfos: sortProcessInfos,
   _extractFlag: extractFlag,
   _errorWithStatus: errorWithStatus,
-  _modelsFromConfigs: modelsFromConfigs,
   _collapsePools: collapsePools,
   _poolForModel: poolForModel,
   _quotaSummaryWindows: quotaSummaryWindows,
