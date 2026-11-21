@@ -4898,60 +4898,74 @@ function desktopLimitProviders() {
 }
 const accountSlotPanels = new Map();
 const automaticAccountPanels = new Map();
-let accountLinkPanel;
+const accountLinkPanels = new Map();
 const accountSlotLists = {};
 let accountSlotListPending = false;
 function limitAccountContext(providerId) {
   const devices = state.stats?.devices || [];
   const records = state.stats?.limits?.providers || [];
-  const links = state.stats?.limitAccountLinks?.filter(pair => pair.provider === providerId) || [];
-  // Limit cards show one observation per confirmed pair. Settings still owns
-  // both entries and must keep the other device's account available to rename.
-  const linkedRecords = links.flatMap(({ scope, keys }) => keys.flatMap(accountKey => {
-    const candidate = state.stats.limitAccountLinkCandidates?.find(row =>
-      row.provider === providerId && row.scope === scope && row.accountKey === accountKey);
-    if (!candidate || records.some(row => row.provider === providerId && row.region === candidate.region
-      && row.accountKey === accountKey)) return [];
-    const device = devices.find(row => row.deviceId === candidate?.deviceId);
-    const row = device?.limits?.providers?.find(row => row.provider === providerId && row.region === candidate.region && row.accountKey === accountKey);
-    return row ? [{ ...row, sourceDeviceId: device.deviceId }] : [];
-  }));
-  return { settings: state.settings, records: linkedRecords.length ? [...records, ...linkedRecords] : records,
+  // Settings uses the individual readings even when Limits shows one row.
+  // In particular, a remote fallback must be renameable before it has a name.
+  const candidateRecords = (state.stats?.limitAccountLinkCandidates || []).flatMap(candidate => {
+    if (candidate.provider !== providerId) return [];
+    const matches = row => row.provider === providerId && row.region === candidate.region
+      && row.accountKey === candidate.accountKey;
+    if (records.some(matches)) return [];
+    const device = devices.find(row => row.deviceId === candidate.deviceId);
+    const row = device?.limits?.providers?.find(matches);
+    return row ? [{ ...row, sourceDeviceId: device.deviceId, stale: Boolean(row.stale || device.stale) }] : [];
+  });
+  return { settings: state.settings, records: candidateRecords.length ? [...records, ...candidateRecords] : records,
     devices, localDeviceId: state.settings?.deviceId, probes: limitProbes,
     providerEnabled: limitProviderEnabled(providerId), presentation: state.settings?.limitAccountPresentation?.[providerId] };
 }
-function mountAccountLinkPanel() {
-  if (!accountLinkPanel) {
-    accountLinkPanel = window.TokenMonitorAccountLinkPanel.createAccountLinkPanel({
-      document, t,
-      providerLabel: id => LIMIT_PROVIDERS.find(provider => provider.id === id)?.label || id,
-      save: async input => {
-        const result = await window.tokenMonitor.limits.limitAccountLink(input);
-        await refreshStats();
-        return result;
-      },
-      rename: async (row, name) => {
-        const result = await window.tokenMonitor.limits.accountSlots.presentation(row.provider, row.labelKey, 'rename', name);
-        if (result?.ok) await refreshStats();
-        return result;
-      }
+function renderProviderAccountLinks() {
+  const stats = state.stats;
+  const links = stats?.limitAccountLinks || [];
+  const candidates = stats?.limitAccountLinkCandidates || [];
+  const providers = new Set([...links, ...candidates].map(row => row.provider));
+  for (const [id, panel] of accountLinkPanels) {
+    if (providers.has(id)) continue;
+    panel.element.remove();
+    accountLinkPanels.delete(id);
+  }
+  const devices = (stats?.devices || []).map(device => ({
+    deviceId: device.deviceId,
+    name: device.deviceId === state.settings?.deviceId
+      ? t('settings.sync.panel.thisDevice') : deviceBreakdownApi.deviceLabel(device)
+  }));
+  for (const id of providers) {
+    const options = document.getElementById(`limitProviderOptions-${id}`)
+      ?.querySelector(':scope > .limit-provider-options-inner');
+    if (!options) continue;
+    let panel = accountLinkPanels.get(id);
+    if (!panel) {
+      panel = window.TokenMonitorAccountLinkPanel.createAccountLinkPanel({
+        document, t, provider: id,
+        label: LIMIT_PROVIDERS.find(provider => provider.id === id)?.label || id,
+        save: async input => {
+          const result = await window.tokenMonitor.limits.limitAccountLink(input);
+          await refreshStats();
+          return result;
+        }
+      });
+      accountLinkPanels.set(id, panel);
+    }
+    panel.update({
+      revision: stats.syncSettingsRevisions?.limitAccountLinks,
+      links: links.filter(pair => pair.provider === id),
+      candidates: candidates.filter(row => row.provider === id),
+      labels: state.settings?.limitAccountPresentation?.[id]?.labels || {},
+      language: currentLocale(), devices
     });
-    document.getElementById('limitAccountLinksMount').append(accountLinkPanel.element);
+    const parent = options.querySelector('.slot-panel') || options;
+    if (panel.element.isConnected) moveLimitProviderLiveNode(parent, panel.element, parent === options ? options.firstChild : null);
+    else if (parent === options) parent.prepend(panel.element);
+    else parent.append(panel.element);
   }
 }
 
 function renderAccountSlotPanels() {
-  if (accountLinkPanel) {
-    const stats = state.stats;
-    accountLinkPanel.update({
-      revision: stats?.syncSettingsRevisions?.limitAccountLinks,
-      links: stats?.limitAccountLinks || [],
-      candidates: stats?.limitAccountLinkCandidates || [],
-      presentation: state.settings?.limitAccountPresentation || {},
-      language: currentLocale(),
-      devices: (stats?.devices || []).map(({ deviceId, hostname }) => ({ deviceId, hostname }))
-    });
-  }
   for (const [id, panel] of accountSlotPanels) {
     panel.update(accountSlotLists[id] || [], localProviderStatuses(id),
       limitAccountContext(id));
@@ -13137,7 +13151,6 @@ function disabledLimitReadingDevices(providers) {
 }
 
 function renderLimitProviderCheckboxesNow() {
-  mountAccountLinkPanel();
   renderAccountSlotPanels();
   refreshAccountSlotPanels();
   for (const [id, panel] of automaticAccountPanels) panel.controller.update(strictLocalProviderStatuses(id));
@@ -13152,6 +13165,7 @@ function renderLimitProviderCheckboxesNow() {
     state.limitProviderRenderSignature === renderSignature
     && settingsListRendered(els.limitProviderCheckboxes, '.limit-provider-row[data-provider]', providers.length, !matched.size)
   ) {
+    renderProviderAccountLinks();
     return;
   }
   const previousChildren = Array.from(els.limitProviderCheckboxes.children);
@@ -13413,6 +13427,7 @@ function renderLimitProviderCheckboxesNow() {
   }
   if (!matched.size) renderSettingsListEmptyState(els.limitProviderCheckboxes);
   for (const child of previousChildren) child.remove();
+  renderProviderAccountLinks();
   restoreSettingsListFocus(focusedId);
   playSettingsRowMotion(els.limitProviderCheckboxes, '.limit-provider-row[data-provider]', 'provider', motion);
   state.limitProviderRenderSignature = renderSignature;
