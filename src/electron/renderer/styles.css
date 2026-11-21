@@ -4781,17 +4781,18 @@ html.is-windows .settings-panel select option {
    colour while hovered, and status colour still wins. With vendor colours on
    these resolve to the colours already shown. No transition: a refresh
    rebuilds the rows, and a fade would replay on every push. */
-.home-limit-track .limit-meter.home-limit-meter-mono {
+.home-limit-track {
+  transition: --home-limit-bar 200ms ease, --home-limit-tail 200ms ease;
+}
+.home-limit-meter {
   transition: background-color 200ms ease;
 }
-.home-limit-track .limit-meter.home-limit-meter-mono .limit-meter-fill {
-  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1), filter 140ms ease, background-color 200ms ease;
+.home-limit-account:hover .home-limit-meter {
+  background: color-mix(in srgb, var(--home-vendor-color) 16%, transparent);
 }
-.home-limit-account:hover .limit-meter.home-limit-meter-mono {
-  background: color-mix(in srgb, var(--home-vendor-color) 16%, transparent) !important;
-}
-.home-limit-account:hover .home-limit-window:not(.is-low) .limit-meter.home-limit-meter-mono .limit-meter-fill {
-  background: var(--home-vendor-color) !important;
+.home-limit-account:hover .home-limit-window:not(.is-low) .home-limit-track {
+  --home-limit-bar: var(--home-vendor-color);
+  --home-limit-tail: var(--home-vendor-color);
 }
 .home-share-scope:hover .home-share-bar > span[data-share-index] {
   background: var(--home-vendor-color) !important;
@@ -4891,14 +4892,14 @@ html.is-windows .settings-panel select option {
 }
 
 :root[data-reduce-motion="on"] .home-share-scope [data-share-index],
-:root[data-reduce-motion="on"] .home-limit-track .limit-meter.home-limit-meter-mono,
-:root[data-reduce-motion="on"] .home-limit-track .limit-meter.home-limit-meter-mono .limit-meter-fill {
+:root[data-reduce-motion="on"] .home-limit-track,
+:root[data-reduce-motion="on"] .home-limit-meter {
   transition: none;
 }
 @media (prefers-reduced-motion: reduce) {
   :root:not([data-reduce-motion="off"]) .home-share-scope [data-share-index],
-  :root:not([data-reduce-motion="off"]) .home-limit-track .limit-meter.home-limit-meter-mono,
-  :root:not([data-reduce-motion="off"]) .home-limit-track .limit-meter.home-limit-meter-mono .limit-meter-fill {
+  :root:not([data-reduce-motion="off"]) .home-limit-track,
+  :root:not([data-reduce-motion="off"]) .home-limit-meter {
     transition: none;
   }
 }
@@ -5211,48 +5212,120 @@ html.is-windows .settings-panel select option {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Registered so one animation of the fill moves the bar and its lit tail,
+   and a hover can fade the bar colour in. */
+@property --home-limit-fill {
+  syntax: '<percentage>';
+  inherits: true;
+  initial-value: 0%;
+}
+@property --home-limit-bar {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: transparent;
+}
+@property --home-limit-tail {
+  syntax: '<color>';
+  inherits: true;
+  initial-value: transparent;
+}
+/* Monochrome Home: one neutral ink for every meter, brightening to a lit
+   tail; status recolours the fill (nearly out) and the reading. Vendor
+   colours set the bar inline. */
 .home-limit-track {
+  --home-limit-bar: var(--text);
+  --home-limit-tail: light-dark(var(--text), #fff);
+  --home-limit-glow: light-dark(color-mix(in srgb, var(--home-limit-bar) 25%, transparent),
+    color-mix(in srgb, var(--home-limit-bar) 55%, transparent));
   position: relative;
   grid-column: 4;
   min-width: 0;
+  height: 4px;
 }
-/* One bar weight across Home: the same 6px as the split bars below. */
-.home-limit-track .limit-meter,
-.home-limit-track .limit-meter-fill {
-  height: 6px;
-  border-radius: 3px;
+.home-limit-window.is-low .home-limit-track {
+  --home-limit-bar: var(--yellow);
+  --home-limit-tail: var(--yellow);
 }
-/* Monochrome Home: one neutral ink for every meter; status recolours the
-   fill (nearly out) and the reading (exhausted, nearly out). */
-.home-limit-track .limit-meter.home-limit-meter-mono {
-  background: rgba(var(--overlay-rgb), 0.1) !important;
+.home-limit-meter {
+  position: absolute;
+  inset: 0;
+  border-radius: 2px;
+  background: rgba(var(--overlay-rgb), 0.085);
+  box-shadow: inset 0 1px 0 light-dark(rgba(0, 0, 0, 0.05), rgba(0, 0, 0, 0.45));
 }
-.home-limit-track .limit-meter.home-limit-meter-mono .limit-meter-fill {
-  background: rgba(var(--overlay-rgb), 0.72) !important;
-  opacity: 1 !important;
+/* Where an even pace through the window would leave the meter now: a notch
+   cut through the groove and fill, so it reads on any glass behind it. */
+.home-limit-track.has-pace .home-limit-meter {
+  mask-image: linear-gradient(90deg, #000 calc(var(--home-limit-pace) - 1px), transparent 0,
+    transparent calc(var(--home-limit-pace) + 1px), #000 0);
 }
-.home-limit-window.is-low .limit-meter.home-limit-meter-mono .limit-meter-fill {
-  background: var(--yellow) !important;
+.home-limit-ghost,
+.home-limit-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 2px;
 }
+.home-limit-ghost {
+  width: 0;
+  background: color-mix(in srgb, var(--home-limit-tail) 50%, transparent);
+  opacity: 0;
+}
+.home-limit-fill {
+  width: var(--home-limit-fill);
+  overflow: hidden;
+  /* Solid enough to read its full length on glass; only the last 18px
+     brightens into the lit tail. */
+  background: linear-gradient(90deg, color-mix(in srgb, var(--home-limit-bar) 72%, transparent) calc(100% - 18px),
+    var(--home-limit-bar) calc(100% - 3px), var(--home-limit-tail));
+}
+/* The refill sheen; parked off the bar until a reset runs it across. */
+.home-limit-fill::before {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, light-dark(rgba(255, 255, 255, 0.7), rgba(255, 255, 255, 0.55)), transparent) no-repeat;
+  background-position: -100% 0;
+  background-size: 30% 100%;
+  content: '';
+}
+/* The lit tail sits outside the masked groove so its glow is not clipped. */
+.home-limit-tip {
+  position: absolute;
+  top: 0;
+  right: calc(100% - var(--home-limit-fill));
+  width: min(14px, var(--home-limit-fill));
+  height: 100%;
+  border-radius: 2px;
+  pointer-events: none;
+  box-shadow: 5px 0 9px -2px var(--home-limit-glow);
+}
+.home-limit-tip::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: 6px 0 14px 1px var(--home-limit-glow);
+  content: '';
+  opacity: 0;
+}
+/* A window close to running out keeps its tail lit; nothing else glows. */
+.home-limit-window:is(.is-low, .is-critical) .home-limit-tip::after { opacity: 1; }
 /* Mixed toward the text colour so amber reads on light panels as well as dark. */
 .home-limit-window.is-low > .home-list-value,
 .home-limit-window.is-low .home-limit-window-value .home-list-value {
   color: color-mix(in srgb, var(--yellow) 62%, var(--text));
 }
-/* Where an even pace through the window would leave the meter now. The ring in
-   the panel colour keeps it legible where it crosses the fill. */
+/* The notch's tick, above the groove. */
 .home-limit-pace {
   position: absolute;
-  top: 50%;
+  top: -4px;
   left: var(--home-limit-pace, 0%);
-  width: 1.5px;
-  height: 12px;
-  margin-left: -0.75px;
+  width: 1px;
+  height: 3px;
+  margin-left: -0.5px;
   border-radius: 1px;
-  background: rgba(var(--overlay-rgb), 0.78);
-  box-shadow: 0 0 0 1px rgba(var(--panel-rgb), 0.55);
+  background: var(--readable-muted);
   pointer-events: none;
-  transform: translateY(-50%);
 }
 .home-limit-window > .home-list-value,
 .home-limit-window-value {
@@ -5269,7 +5342,7 @@ html.is-windows .settings-panel select option {
   align-items: center;
   gap: 6px;
 }
-.home-limit-window.is-untouched .limit-meter {
+.home-limit-window.is-untouched .home-limit-track {
   opacity: 0.45;
 }
 .home-limit-window.is-untouched > .home-list-value {

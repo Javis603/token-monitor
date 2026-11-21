@@ -101,7 +101,7 @@ function fixture(t, mode = 'replace', selector = '.home-module-tool > .home-modu
       const control = document.createElement('input'); control.value = ref + ' draft'; node.append(control);
       standalone.set(ref, { node, control });
     } }, homeSessionRenderPending: false,
-    sessionTooltipShouldHoldRender: () => false, hideHomeActivityTooltip() {}, updateHomeActivity() {},
+    sessionTooltipShouldHoldRender: () => false, hideHomeActivityTooltip() {}, updateHomeActivity() {}, homeLimitMotion: { capture() {}, animate() {} },
     rendererDom: require('../../src/electron/renderer/domReconcile').create({ nodesFor: node => composition.nodesFor(node) }),
     homeModuleIds: () => modules, loadHomeHistory() {},
     homeModulePreferencesApi: { homeModuleCount: () => 5, isPluginModuleId: placements.isHomeToken },

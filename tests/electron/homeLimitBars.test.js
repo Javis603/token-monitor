@@ -228,7 +228,8 @@ function renderHomeWindows(windows, settings = {}, plan = '', providerId = '', l
     homeLimitRows: () => [{ name: providerId || 'Claude', providerId, plan, color: '#d97757', windows, ...rowExtra }],
     applyHomeListMark() {},
     iconKindFor: () => 'claude',
-    formatHomeLimitWindowValue: () => 'value',
+    formatHomeLimitWindowValue: (window, showUsed) => window.percentReading
+      ? `${limitFillPercent(window.remainingPercent, window.usedPercent, showUsed)}%` : 'value',
     isCreditsWindow: (window) => window.metric === 'credits',
     limitFillPercent,
     optionalFiniteNumber: (value) => value == null || !Number.isFinite(Number(value)) ? null : Number(value),
@@ -370,11 +371,15 @@ test('Home low-limit highlighting is opt-in with vendor colours and in monochrom
       assert.equal(metric.classList.contains('is-exhausted'), showHomeLimitBars && critical);
       assert.equal(metric.classList.contains('is-low'), showHomeLimitBars && low);
       assert.equal(value.style['--home-limit-accent'], undefined, 'monochrome never tints a reading with the vendor colour');
-      assert.ok(track.children[0].classList.contains('home-limit-meter-mono'));
+      assert.equal(track.style['--home-limit-bar'], undefined, 'monochrome meters take the neutral ink');
+      assert.equal(metric.classList.contains('is-critical'), false, 'monochrome keeps red for an exhausted reading');
     }
   }
   const vendor = renderHomeWindow({ remainingPercent: 40 }, { homeLimitDisplayMode: 'rows', homeVendorColors: true });
-  assert.ok(!homeRowParts(vendor).track.children[0].classList.contains('home-limit-meter-mono'));
+  assert.equal(homeRowParts(vendor).track.style['--home-limit-bar'], '#d97757');
+  assert.equal(homeRowParts(vendor).track.style['--home-limit-tail'], '#d97757');
+  const vendorCritical = renderHomeWindow({ remainingPercent: 19 }, { homeLimitDisplayMode: 'rows', homeVendorColors: true, showHomeLimitBars: true });
+  assert.ok(vendorCritical.classList.contains('is-critical'), 'a critical vendor-coloured window keeps its tail lit');
 });
 
 test('Home rows put each window on one row of label, reset, meter and reading; text and bars keep the classic layouts', () => {
@@ -392,11 +397,13 @@ test('Home rows put each window on one row of label, reset, meter and reading; t
   const metric = renderHomeWindow(window, { homeLimitDisplayMode: 'rows' });
   assert.deepEqual(metric.children.map((child) => child.className), ['home-limit-window-label', 'home-limit-reset', 'home-limit-track', 'home-list-value'],
     'the reset sits beside the name');
-  const meter = metric.children[2].children[0];
-  assert.equal(meter.children[0].style['--bar-scale'], '0.88');
-  assert.equal(meter.children[0].style.background, '#d97757');
-  assert.equal(meter.attributes['aria-hidden'], 'true');
-  assert.equal(metric.children[2].children.length, 1, 'no pace tick without a window length');
+  const track = metric.children[2];
+  assert.equal(track.style['--home-limit-fill'], '88%');
+  assert.equal(track.attributes['data-limit-fill'], '88');
+  assert.deepEqual(track.children.map((child) => child.className), ['home-limit-meter', 'home-limit-tip']);
+  assert.deepEqual(track.children[0].children.map((child) => child.className), ['home-limit-ghost', 'home-limit-fill']);
+  assert.equal(track.children[0].attributes['aria-hidden'], 'true');
+  assert.equal(track.classList.contains('has-pace'), false, 'no pace notch without a window length');
   assert.equal(metric.children[1].textContent, '4h 0m', 'the reset is a countdown');
   assert.equal(metric.children[1].attributes['aria-label'], 'Reset 4h', 'the full boundary stays the accessible name');
   assert.equal(metric.legend, null, 'Home never adds a standing pace caption');
@@ -422,9 +429,11 @@ test('Home bars mark where an even pace through the window would be', () => {
     [true, '80%', 'home.limitPace.used']
   ]) {
     const metric = renderHomeWindows([fiveHour], { homeLimitDisplayMode: 'rows', showLimitUsed }, '', '', 'en', nowMs)[0];
-    const tick = homeRowParts(metric).track.children[1];
+    const { track } = homeRowParts(metric);
+    assert.ok(track.classList.contains('has-pace'));
+    assert.equal(track.style['--home-limit-pace'], position, 'the notch is cut where an even pace would be');
+    const tick = track.children[2];
     assert.equal(tick.className, 'home-limit-pace');
-    assert.equal(tick.style['--home-limit-pace'], position);
     assert.equal(tick.attributes['aria-hidden'], 'true');
     assert.equal(homeRowParts(metric).track.attributes['aria-description'], translate('en', key), 'the bar describes the tick to assistive tech');
     assert.equal(metric.legend, null, 'no standing caption under the card');
@@ -439,7 +448,7 @@ test('Home bars mark where an even pace through the window would be', () => {
   ]) {
     const metric = renderHomeWindows([window], settings, '', '', 'en', nowMs)[0];
     const { track } = homeRowParts(metric);
-    assert.ok(!track || track.children.length === 1, 'no tick without a meter, a rolling length, or for fixed amounts');
+    assert.ok(!track || !track.classList.contains('has-pace'), 'no notch without a meter, a rolling length, or for fixed amounts');
     assert.equal(metric.legend, null);
   }
 });
@@ -485,14 +494,14 @@ test('Home dims untouched windows and names a second window of the same period',
 
 test('Home meters flip percentage usage but retain remaining money and fixed values', () => {
   for (const [window, expected] of [
-    [{ remainingPercent: 88 }, '0.12'],
-    [{ remainingPercent: 40, metric: 'credits', remaining: 4 }, '0.4'],
-    [{ remainingPercent: 40, value: '$4' }, '0.4'],
-    [{ remainingPercent: 0 }, '1'],
-    [{ remainingPercent: 100 }, '0']
+    [{ remainingPercent: 88 }, '12%'],
+    [{ remainingPercent: 40, metric: 'credits', remaining: 4 }, '40%'],
+    [{ remainingPercent: 40, value: '$4' }, '40%'],
+    [{ remainingPercent: 0 }, '100%'],
+    [{ remainingPercent: 100 }, '0%']
   ]) {
     const metric = renderHomeWindow(window, { homeLimitDisplayMode: 'rows', showLimitUsed: true });
-    assert.equal(homeRowParts(metric).track.children[0].children[0].style['--bar-scale'], expected);
+    assert.equal(homeRowParts(metric).track.style['--home-limit-fill'], expected);
   }
 });
 
@@ -507,7 +516,7 @@ test('Home bars do not invent percentages for unknown, unlimited or non-meter wi
     assert.equal(homeRowParts(renderHomeWindow(window, { homeLimitDisplayMode: 'rows' })).track, null);
   }
   const empty = renderHomeWindow({ remainingPercent: 0 }, { homeLimitDisplayMode: 'rows' });
-  assert.equal(homeRowParts(empty).track.children[0].children[0].style['--bar-scale'], '0');
+  assert.equal(homeRowParts(empty).track.style['--home-limit-fill'], '0%');
 });
 
 test('Home display mode persists separately from low-limit highlighting and is translated', () => {
@@ -558,7 +567,7 @@ test('Home highlights only low and critical remaining limits', () => {
   const app = read('src/electron/renderer/app.js');
   const css = read('src/electron/renderer/styles.css');
 
-  // The meter is built by the shared Limits view, which the edge dock uses too.
+  // The classic bars keep the shared Limits meter, which the edge dock uses too.
   const view = read('src/electron/renderer/limits/windowsView.js');
   assert.match(view, /function limitMeterNode\(color, percent, tone = 1\)/);
   assert.match(view, /const meter = limitMeterNode\(color, fillPercent, tone\)/);
@@ -568,7 +577,7 @@ test('Home highlights only low and critical remaining limits', () => {
   assert.match(app, /value\.classList\.add\('home-limit-value-critical'\)/);
   assert.match(app, /clamped < 50/);
   assert.match(app, /value\.classList\.add\('home-limit-value-low'\)/);
-  assert.doesNotMatch(app, /'home-limit-meter'/);
+  assert.match(css, /\.home-limit-window\.is-low \.home-limit-track\s*\{[^}]*var\(--yellow\)/s);
   assert.match(css, /\.home-limit-value-low\s*\{[^}]*--home-limit-accent/s);
   assert.match(css, /\.home-limit-value-critical\s*\{[^}]*color:\s*var\(--red\)/s);
   assert.doesNotMatch(css, /\.home-limit-value-critical\s*\{[^}]*display:\s*inline-flex/s);
@@ -694,4 +703,22 @@ test('Home keeps Cursor period labels localized in Spanish and Portuguese', () =
       assert.equal(window.label, 'Included usage');
     }
   }
+});
+
+test('Home rows carry the identity and readings their change motion needs', () => {
+  const [percent, state, money] = renderHomeWindows([
+    { kind: 'weekly', remainingPercent: 42, resetsAt: '2026-10-07T00:00:00Z', percentReading: true },
+    { kind: 'session', remainingPercent: 42 },
+    { kind: 'billing', metric: 'credits', remaining: 4, remainingPercent: 40, percentReading: true }
+  ], { homeLimitDisplayMode: 'rows', showLimitUsed: true }, '', 'claude');
+  assert.equal(percent.attributes['data-limit-motion-key'], 'undefined\0claude\0Weekly');
+  assert.equal(percent.attributes['data-limit-remaining-percent'], '42');
+  assert.equal(percent.attributes['data-limit-reset-at'], '2026-10-07T00:00:00Z');
+  const { value } = homeRowParts(percent);
+  assert.equal(value.attributes['data-limit-motion-value'], '58', 'the reading follows used mode');
+  assert.equal(value.attributes['data-limit-motion-text'], '58%');
+  assert.equal(homeRowParts(state).value.attributes['data-limit-motion-value'], undefined, 'a non-percentage reading stays put');
+  assert.equal(homeRowParts(money).value.attributes['data-limit-motion-value'], undefined, 'amounts stay put');
+  const classic = renderHomeWindows([{ kind: 'weekly', remainingPercent: 42, percentReading: true }], { homeLimitDisplayMode: 'bars' })[0];
+  assert.equal(classic.attributes['data-limit-motion-key'], undefined, 'the classic layouts stay static');
 });

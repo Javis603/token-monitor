@@ -151,6 +151,14 @@ const limitResetAnimator = window.TokenMonitorLimitResetAnimator.createLimitRese
   cancelAnimationFrame: (handle) => cancelAnimationFrame(handle),
   performance
 });
+const homeLimitMotion = window.TokenMonitorHomeLimitMotion.createHomeLimitMotion({
+  motion: limitResetMotionApi,
+  resetEasing: window.TokenMonitorLimitResetAnimator.EASING,
+  numbers: tokenNumberAnimationApi,
+  numberMode: () => tokenNumberAnimationApi.normalize(state.settings?.tokenNumberAnimation),
+  prefersReducedMotion: () => prefersReducedMotion(),
+  formatPercent: (value) => formatPercent(value)
+});
 const appUpdatePresentationApi = window.TokenMonitorAppUpdatePresentation;
 const accountIdentityApi = window.TokenMonitorAccountIdentity;
 const clientStatusPresentationApi = window.TokenMonitorClientStatusPresentation;
@@ -2213,6 +2221,7 @@ function settleMotionAnimations() {
   updateTotalCompact(state.currentTotal);
   settleRowNumberAnimations();
   limitResetAnimator.settle(els.limitsPanel);
+  homeLimitMotion.settle();
   for (const animation of document.getAnimations?.() || []) {
     try { animation.finish(); } catch (_) { animation.cancel(); }
   }
@@ -7271,6 +7280,10 @@ function renderHomeLimitModule() {
       label.className = 'home-limit-window-label';
       label.textContent = homeLimitWindowLabel(window, row.providerId, row.windows);
       metric.append(label);
+      // Identifies the window across refreshes so a change can animate; the
+      // label is already unique within its account.
+      metric.setAttribute('data-limit-motion-key', `${row.key}\0${row.name}\0${label.textContent}`);
+      if (window.resetsAt) metric.setAttribute('data-limit-reset-at', String(window.resetsAt));
       // The reset sits beside the name it belongs to.
       const reset = homeLimitResetText(window, nowMs);
       if (reset.text) {
@@ -7285,6 +7298,13 @@ function renderHomeLimitModule() {
       value.textContent = window.value || formatHomeLimitWindowValue(window, showUsed);
       const remainingPercent = optionalFiniteNumber(window.remainingPercent);
       const fixedValue = Boolean(window.value) || isCreditsWindow(window);
+      if (remainingPercent != null) metric.setAttribute('data-limit-remaining-percent', String(remainingPercent));
+      const readingPercent = fixedValue ? null : limitFillPercent(window.remainingPercent, window.usedPercent, showUsed);
+      // Only a plain percentage reading rolls; plan states and amounts stay put.
+      if (readingPercent != null && value.textContent === formatPercent(readingPercent)) {
+        value.setAttribute('data-limit-motion-value', String(readingPercent));
+        value.setAttribute('data-limit-motion-text', value.textContent);
+      }
       if (highlightLow && remainingPercent != null) {
         const clamped = Math.max(0, Math.min(100, remainingPercent));
         if (!vendorColors) {
@@ -7298,6 +7318,7 @@ function renderHomeLimitModule() {
           }
         } else if (clamped < 20) {
           value.classList.add('home-limit-value-critical');
+          metric.classList.add('is-critical');
           if (clamped === 0) metric.classList.add('is-exhausted');
         } else if (clamped < 50) {
           value.classList.add('home-limit-value-low');
@@ -7317,23 +7338,39 @@ function renderHomeLimitModule() {
       // labels follow the global used/remaining display preference.
       const meterPercent = window.showMeter !== false ? remainingPercent : null;
       if (meterPercent != null) {
+        // A groove whose fill brightens toward a lit tail. The ghost is the
+        // just-used chunk while it drains (limits/homeMotion.js).
         const track = document.createElement('div');
         track.className = 'home-limit-track';
         const percentUsed = showUsed && !fixedValue;
-        const fillPercent = limitFillPercent(meterPercent, null, percentUsed);
-        const tone = window.kind === 'session' || window.kind === 'daily' ? 0.95 : 0.68;
-        const meter = limitWindowsView.limitMeterNode(row.color, fillPercent, tone);
+        const fillPercent = Math.max(0, Math.min(100, limitFillPercent(meterPercent, null, percentUsed)));
+        track.setAttribute('data-limit-fill', String(fillPercent));
+        track.style.setProperty('--home-limit-fill', `${fillPercent}%`);
+        if (vendorColors) {
+          track.style.setProperty('--home-limit-bar', row.color);
+          track.style.setProperty('--home-limit-tail', row.color);
+        }
+        const meter = document.createElement('div');
+        meter.className = 'home-limit-meter';
         meter.setAttribute('aria-hidden', 'true');
-        if (!vendorColors) meter.classList.add('home-limit-meter-mono');
-        track.append(meter);
-        // The tick marks where an even pace through the window would be now;
+        const ghost = document.createElement('span');
+        ghost.className = 'home-limit-ghost';
+        const fill = document.createElement('span');
+        fill.className = 'home-limit-fill';
+        meter.append(ghost, fill);
+        const tip = document.createElement('span');
+        tip.className = 'home-limit-tip';
+        tip.setAttribute('aria-hidden', 'true');
+        track.append(meter, tip);
+        // The notch marks where an even pace through the window would be now;
         // a fill short of it (or past it, in used mode) is running fast.
         const pace = fixedValue ? null : homeOverviewApi.limitWindowPaceRemainingPercent(window, nowMs);
         if (pace != null) {
           const pacePercent = percentUsed ? 100 - pace : pace;
+          track.classList.add('has-pace');
+          track.style.setProperty('--home-limit-pace', `${pacePercent}%`);
           const tick = document.createElement('span');
           tick.className = 'home-limit-pace';
-          tick.style.setProperty('--home-limit-pace', `${pacePercent}%`);
           tick.setAttribute('aria-hidden', 'true');
           track.append(tick);
           // No standing caption: it read as clutter under every card.
@@ -8427,6 +8464,7 @@ function renderHome() {
     return;
   }
   let sessionRows;
+  const limitMotion = homeLimitMotion.capture(els.homePanel);
   const nodes = moduleIds.map((id) => {
     if (id === 'limits') return renderHomeLimitModule();
     if (id === 'tool') return renderHomeToolModule(period);
@@ -8461,6 +8499,8 @@ function renderHome() {
   for (const child of [...els.homePanel.children]) {
     if (!ordered.includes(child)) child.remove();
   }
+  // Attached now, so meters and readings can measure and animate.
+  homeLimitMotion.animate(els.homePanel, limitMotion);
   if (moduleIds.includes('session')) scheduleHomeSessionRepaint(sessionRows);
   updateHomeActivity();
 }

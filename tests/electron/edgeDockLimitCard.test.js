@@ -984,6 +984,7 @@ test('Home rows, text and bars use the plan text rendered by Limits account rows
           homeModulePreferencesApi: require('../../src/electron/renderer/homeModulePreferences'),
           homeOverviewApi: require('../../src/electron/renderer/homeOverview'),
           formatHomeLimitWindowValue: () => '40% left',
+          formatPercent: (value) => `${value}%`,
           isCreditsWindow: balanceDisplay.isCreditsWindow,
           limitFillPercent: limitDisplayMode.limitFillPercent,
           optionalFiniteNumber: Number,
@@ -995,7 +996,8 @@ test('Home rows, text and bars use the plan text rendered by Limits account rows
         for (const row of body.children) {
           const plan = row.find('home-limit-plan');
           if (plan) assert.equal(plan.attributes['aria-label'], plan.textContent);
-          assert.equal(Boolean(row.find('limit-meter')), homeLimitDisplayMode !== 'text');
+          // The rows layout draws its own meter; the classic bars keep the shared one.
+          assert.equal(Boolean(row.find('home-limit-meter') || row.find('limit-meter')), homeLimitDisplayMode !== 'text');
         }
       }
     }
@@ -1289,11 +1291,11 @@ test('Home renders Ollama included quota before balance on separate rows with th
   assert.ok(readings[1].find('home-limit-reading-wide'), 'the wallet amount spans the meter column');
   assert.equal(readings[1].find('home-limit-window-label').textContent, 'Credit balance');
   assert.equal(readings[1].find('home-list-value').textContent, '$18.25');
-  assert.equal(readings[1].find('limit-meter'), null);
+  assert.equal(readings[1].find('home-limit-meter'), null);
   assert.equal(readings[1].find('limit-detail-tooltip').text, 'Monthly credits used $7.50');
   assert.equal(readings[1].find('limit-detail-tooltip-trigger').tabIndex, 0);
   assert.equal(readings[0].find('home-list-value').textContent, '$52.50');
-  assert.ok(readings[0].find('limit-meter'));
+  assert.ok(readings[0].find('home-limit-meter'));
 });
 
 test('Ollama refill tooltips expose complete accessible names on cards and Home', () => {
